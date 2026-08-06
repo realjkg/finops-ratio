@@ -101,10 +101,18 @@ key.**
 
 ### FinIO — the agent-to-agent (A2A) interchange
 
-`/finio` is the agent-to-agent FinOps interchange layer: a way for the Ratio agent
+FinIO is the agent-to-agent FinOps interchange layer: a way for the Ratio agent
 to exchange cost-and-value data with another company's agent over plain HTTP/REST.
 It is **not a new protocol** — it is FOCUS-shaped JSON moved through a small
 handshake, behind the same typed client seam as `/hello` and the agent.
+
+Two front-end routes: **`/finio`** is the public overview (what it is, what
+crosses the wire, what v1 deliberately is not), and **`/finio/demo`** is the live
+exchange — mock/live toggle, FOCUS version picker, and the returned rows. The
+overview is served from the app rather than a marketing site on purpose: FinIO
+needs server-side routes, which static site builders cannot run on any plan, so
+hosting the explainer here keeps `/finio/demo` a real route instead of an iframe
+and keeps the design tokens shared.
 
 The exchange is two synchronous steps:
 

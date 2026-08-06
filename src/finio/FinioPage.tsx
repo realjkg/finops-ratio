@@ -298,10 +298,15 @@ export function FinioPage() {
           </div>
         )}
 
-        {/* Back link */}
-        <a href="/" className="mt-8 block text-center text-xs text-dim hover:text-sub">
-          ← back to Ratio
-        </a>
+        {/* Back links */}
+        <div className="mt-8 flex justify-center gap-6 text-xs text-dim">
+          <a href="/finio" className="hover:text-sub">
+            ← what FinIO is
+          </a>
+          <a href="/" className="hover:text-sub">
+            back to Ratio
+          </a>
+        </div>
       </div>
     </div>
   );
