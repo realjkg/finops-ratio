@@ -1,37 +1,41 @@
-// FinIO seam — mirrors src/hello/HelloClient.ts. Defines the wire schema
-// (FOCUS v1.1 subset + x_Ratio* value extensions) and the FinioClient
-// interface both mock and live implementations satisfy.
+// FinIO seam — the agent-to-agent (A2A) FinOps interchange layer.
 //
-// FOCUS column names follow the v1.1 spec (focus.finops.org). x_Ratio* columns
-// are FOCUS-legal vendor extensions (see §3.2 of the spec).
+// FinIO is not a new protocol: it is FOCUS-shaped JSON exchanged over plain
+// HTTP/REST through a two-step handshake, wrapped in the same typed client seam
+// the repo uses for /hello, the agent, tokenomics, and the cost-ingest slice.
+//
+// Schema authority: this file deliberately does NOT define its own FOCUS types.
+// Ratio's canonical cost schema lives in src/costsource (FOCUS v1.0-v1.4, v1.4
+// canonical, per the FOCUS Ingest Mapping rule in .obvious/obvious.md). FinIO
+// speaks that same schema on the wire so a row that arrives over A2A is
+// structurally identical to a row that arrives through the ingest doors — one
+// internal model, two transports.
+//
+// x_Ratio* columns are FOCUS-legal vendor extensions (FOCUS spec §3.2) and carry
+// the value denominator FOCUS does not model (R4).
 
-export type FocusVersion = '1.1';
+import type { RatioFocusExtensions, RawSourceRow } from '@/costsource/focusRows';
+import type { FocusVersion } from '@/costsource/focusVersions';
 
-/** Representative FOCUS v1.1 row — mandatory cost/currency/period columns
- *  plus Ratio value-extension columns. Not all 100+ FOCUS columns; v1 subset. */
-export interface FocusRow {
-  // --- FOCUS mandatory / core ---
-  BilledCost: number;         // Decimal, non-null, denominated in BillingCurrency
-  EffectiveCost: number;      // Amortised cost (= BilledCost in v1 — no commitments)
-  BillingCurrency: string;    // e.g. 'USD'
-  BillingPeriodStart: string; // ISO 8601
-  BillingPeriodEnd: string;   // ISO 8601
-  ChargePeriodStart: string;  // ISO 8601
-  ChargePeriodEnd: string;    // ISO 8601
-  ServiceName: string;        // e.g. 'Claude Sonnet 4'
-  ServiceCategory: string;    // e.g. 'AI and Machine Learning'
-  ProviderName: string;       // e.g. 'anthropic' (v1.3 renames → ServiceProviderName)
-  ChargeDescription: string;
+export type { FocusVersion };
 
-  // --- Ratio value extensions (FOCUS-legal x_ columns) ---
-  x_RatioWorkloadId: string;
-  x_RatioValueRatio: number;       // value.value_ratio
-  x_RatioTotalValue: number;       // value.total_value, in BillingCurrency
-  x_RatioDemandShape: string;      // DemandShape enum value
-  x_RatioGovernanceGates: number;  // 0–4 governance gates passed
-}
+/**
+ * A FinIO wire row: the FOCUS core columns the negotiated version guarantees,
+ * plus any additive columns that version introduced, plus Ratio's value
+ * extensions. Assignable from `CanonicalFocusRow`, so canonical v1.4 rows drop
+ * straight onto the wire without a shim.
+ */
+export type FocusRow = RawSourceRow & RatioFocusExtensions;
+
+/** Source id stamped into `x_RatioSourceId` on every row FinIO emits. */
+export const FINIO_SOURCE_ID = 'finio-a2a';
+
+/** FinIO operations a peer can advertise in `accepts`. */
+export const FINIO_OPERATIONS = ['finio.export'] as const;
+export type FinioOperation = (typeof FINIO_OPERATIONS)[number];
 
 export interface FinioExport {
+  /** The version the rows are actually shaped to — the negotiated version. */
   focusVersion: FocusVersion;
   generatedAt: string; // ISO 8601
   rows: FocusRow[];
@@ -46,9 +50,10 @@ export interface HandshakeRequest {
 
 export interface HandshakeResult {
   sessionId: string;
-  accepts: string[];      // operations the peer will honour
+  accepts: FinioOperation[]; // operations the peer will honour
+  /** The version the responder agreed to emit — may be lower than canonical. */
   focusVersion: FocusVersion;
-  expiresAt: string;      // ISO 8601
+  expiresAt: string; // ISO 8601
 }
 
 export interface FinioClient {
@@ -56,9 +61,3 @@ export interface FinioClient {
   handshake(req: HandshakeRequest): Promise<HandshakeResult>;
   export(sessionId: string): Promise<FinioExport>;
 }
-
-/** Shared bearer token for the demo handshake. Both the LiveFinioClient and
- *  the /api/a2a/handshake route import this constant — keeping the trust
- *  boundary visible without standing up real auth infrastructure. */
-export const FINIO_DEMO_TOKEN = 'ratio-a2a-v1';
-

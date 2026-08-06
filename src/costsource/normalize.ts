@@ -17,16 +17,27 @@ import { governanceGatesPassed } from '@/lib/derive';
 import { computeBudgetStatus, type BudgetStatus } from '@/lib/budgetStatus';
 import type { FocusVersion } from './focusVersions';
 import { columnsAddedAfter } from './focusVersions';
-import type { CanonicalCostRow, CanonicalFocusRow, RawSourceRow } from './focusRows';
+import type {
+  CanonicalFocusRow,
+  RatioFocusExtensions,
+  RawSourceRow,
+} from './focusRows';
 import { upgradeToCanonicalCost } from './focusRows';
 import { resolveWorkloadId } from './seed';
 
-/** Stage 2: attach the Ratio value denominator to a canonical cost row. */
-export function attachRatioValue(
-  cost: CanonicalCostRow,
+/**
+ * Stage 2: attach the Ratio value denominator to a cost row.
+ *
+ * Generic over the cost shape so the same denominator logic serves both the
+ * canonical v1.4 rows the ingest seam produces AND the version-pinned rows the
+ * FinIO A2A seam emits for a peer that speaks an older FOCUS version. The only
+ * column it needs is `ResourceId`, which carries the Ratio workload identity.
+ */
+export function attachRatioValue<T extends { ResourceId: string }>(
+  cost: T,
   sourceId: string,
   sourceVersion: FocusVersion,
-): CanonicalFocusRow {
+): T & RatioFocusExtensions {
   const workloadId = resolveWorkloadId(cost.ResourceId);
   const workload = workloadId ? WORKLOADS.find((w) => w.id === workloadId) : undefined;
 

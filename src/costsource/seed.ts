@@ -10,7 +10,7 @@
 
 import { WORKLOADS, DEMO_NOW } from '@/data/workloads';
 import { findModel } from '@/data/models';
-import { currentBillingPeriod } from '@/finio/mapWorkloadToFocus';
+import { currentBillingPeriod } from '@/lib/billingPeriod';
 import type { Workload } from '@/types';
 import type { CostSourceDescriptor, CostFinding } from './CostSourceClient';
 import type { FocusVersion } from './focusVersions';

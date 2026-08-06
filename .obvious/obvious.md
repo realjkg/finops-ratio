@@ -8,7 +8,7 @@ See `.obvious/codebase-map.md`.
 
 ## Repo Guidance
 
-- This repo is `realjkg/token-sensei`, a Next.js/React app for Ratio, an AI-native FinOps platform.
+- This repo is `realjkg/finops-ratio` (originally `token-sensei`), a Next.js/React app for Ratio, an AI-native FinOps platform.
 - Use npm, not pnpm/yarn/bun, because `package-lock.json` is present and `npm install` was verified.
 - Do not run the full `typecheck` script in this sandbox; it exists as `npm run typecheck` (`tsc --noEmit`) and CI can run it.
 - No backend, auth, database, Docker service, or required secret is needed for local development.
@@ -172,12 +172,12 @@ Target product direction promoted from the *UI Design Direction* snapshot (ephem
 ## Local Verification
 
 <!-- local-verification-summary:v1 -->
-- **Typecheck command:** not_discovered — script exists as `npm run typecheck`, but was intentionally not run in this sandbox per setup instructions
+- **Typecheck command:** `npm run typecheck` (`tsc --noEmit`) — verified clean; also enforced in CI
 - **Lint command:** `npm run lint`
-- **Test command:** not_discovered — no test runner or test script is configured in `package.json`
+- **Test command:** `npm test` (`vitest run`) — vitest is configured in `vitest.config.ts` with the `@/` alias mirrored from tsconfig
 - **Scoped typecheck:** not_supported
 - **Scoped lint:** `npx eslint <path>`
-- **Scoped test:** not_supported
+- **Scoped test:** `npx vitest run <path>`
 - **Full-repo check safe:** yes
 - **Scoped alternatives discovered:** yes
 <!-- /local-verification-summary -->
@@ -186,7 +186,7 @@ Target product direction promoted from the *UI Design Direction* snapshot (ephem
 
 1. Install dependencies with `npm install`.
 2. Start the dev server with `npm run dev` — it serves on `http://localhost:3000/` (Next.js default port).
-3. Run `npm run lint` before committing.
+3. Run `npm run lint`, `npm run typecheck`, and `npm test` before committing.
 4. Run `npm run build` when validating bundling or production readiness.
 
 ### Scoped Workflow
