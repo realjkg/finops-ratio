@@ -63,6 +63,32 @@ export default function Connectors() {
             </div>
           </div>
 
+          {/* Peer interchange. Deliberately NOT presented as a third ingest
+              door — the two-doors tenet stands. FinIO is an exchange path over
+              the same internal model: the rows it puts on the wire are built by
+              the same code as the rows the doors bring in. */}
+          <div className="mb-8">
+            <a
+              href="/finio/demo"
+              className="flex items-center justify-between rounded-card border border-edge bg-slab p-4 transition-colors hover:border-value/40 hover:bg-raised/40"
+            >
+              <div>
+                <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-sub">
+                  Peer interchange · agent-to-agent
+                </div>
+                <div className="font-mono text-sm font-bold text-txt">FinIO — /finio/demo</div>
+                <p className="mt-1.5 text-[12px] text-sub">
+                  Exchange FOCUS-shaped cost and value with another company&apos;s agent over
+                  HTTP/REST. Standard FOCUS columns carry cost;{' '}
+                  <span className="font-mono text-value">x_Ratio*</span> extensions carry the
+                  value denominator. Not an ingest door — the same internal model, exchanged
+                  rather than imported.
+                </p>
+              </div>
+              <span className="ml-4 shrink-0 font-mono text-xs text-dim">→</span>
+            </a>
+          </div>
+
           {/* Active / connected adapters */}
           {connected.length > 0 && (
             <section className="mb-8">

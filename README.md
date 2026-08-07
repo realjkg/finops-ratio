@@ -99,6 +99,65 @@ data — every cost cited with its value ratio (spec §7.1). Setting
 system prompt rebuilt from current workload state. **The app runs fully without a
 key.**
 
+### FinIO — the agent-to-agent (A2A) interchange
+
+FinIO is the agent-to-agent FinOps interchange layer: a way for the Ratio agent
+to exchange cost-and-value data with another company's agent over plain HTTP/REST.
+It is **not a new protocol** — it is FOCUS-shaped JSON moved through a small
+handshake, behind the same typed client seam as `/hello` and the agent.
+
+Two front-end routes: **`/finio`** is the public overview (what it is, what
+crosses the wire, what v1 deliberately is not), and **`/finio/demo`** is the live
+exchange — mock/live toggle, FOCUS version picker, and the returned rows. The
+overview is served from the app rather than a marketing site on purpose: FinIO
+needs server-side routes, which static site builders cannot run on any plan, so
+hosting the explainer here keeps `/finio/demo` a real route instead of an iframe
+and keeps the design tokens shared.
+
+The exchange is two synchronous steps:
+
+| Step | Route | Purpose |
+|---|---|---|
+| 1 | `POST /api/v1/a2a/handshake` | Authenticate the peer, negotiate a FOCUS version, mint a short-lived session. |
+| 2 | `GET /api/v1/finio/export` | Return FOCUS rows shaped to the version that session agreed to. |
+
+Both routes are composed with `withGateway` (method guard, payload limit,
+per-tenant rate limit, structured logging, `{error:{code,message}}` envelope) and
+sit under the `/v1/` prefix the API-First rule requires. The unversioned
+`/api/a2a/handshake` and `/api/finio/export` paths remain as deprecated aliases.
+
+**One schema, two transports.** FinIO does not define its own FOCUS types. Rows
+are built by the same code as the cost-ingest doors (`src/costsource/`), so a row
+that arrives over A2A is structurally identical to one that arrives through
+`/ingest/focus` — full FOCUS v1.0 core columns, additive columns up to the
+negotiated version, and the `x_Ratio*` value extensions that carry the
+denominator FOCUS does not model (R4).
+
+**Version negotiation is real, not decorative.** The responder honours any
+version in the canonical v1.0–v1.4 range and emits rows shaped to whichever one
+was agreed — the negotiated version is signed into the session token, so the
+export cannot quietly ignore it. A version outside that range returns `409`
+naming both sides.
+
+**Trust boundary.** `FINIO_PEER_TOKEN` gates the handshake; when it is unset the
+handshake does not enforce a peer token, so the offline demo runs with zero
+config. A successful handshake returns a session id signed with
+`FINIO_SESSION_SECRET` (random per process when unset) that carries its own
+expiry — no server-side session map, so it works across instances. Sessions
+travel in `X-FinIO-Session`, peer tokens in `X-FinIO-Peer-Token`; `Authorization`
+is left to the gateway's per-tenant credential so two differently-scoped secrets
+never collide on one header.
+
+**Mock and live differ only in transport.** `MockFinioClient` runs the same
+exchange rules as the route — same negotiation, same session expiry, same 400 /
+401 / 409 messages — and both build rows from the same function. A test asserts
+the two row sets are deep-equal.
+
+**Out of scope for v1:** real auth infrastructure (OAuth, mTLS, key rotation),
+persistence, multi-party fan-out, async/webhook push, full FOCUS column coverage,
+and a genuinely external counterpart — live mode calls this app's own routes,
+proving the transport path rather than a partner integration.
+
 ## Deferred to later waves
 
 These need live services or secrets and are out of Phase 1 scope:

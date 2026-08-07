@@ -1,43 +1,80 @@
-// Self-validating session tokens for the FinIO demo.
-// Instead of a server-side Map (which breaks when Next.js routes run in
-// separate VM contexts), the sessionId embeds its own expiry and a short HMAC
-// signature. The export route can verify authenticity without shared state.
+// Self-validating session tokens for the FinIO A2A exchange. SERVER-SIDE ONLY.
 //
-// Format: "<expiresAtMs>.<hmac16hex>"  — intentionally readable for the demo.
+// A server-side Map would break the moment the app runs on more than one
+// instance (or across Next.js route contexts), so the sessionId carries its own
+// state and is verified by signature instead of by lookup.
+//
+// Format: "<expiresAtMs>-<focusVersion>-<hmac>"
+//
+// The delimiter is '-', not '.', because the FOCUS version is itself dotted
+// ("1.4") and a dot-delimited token splits into four fields, not three — every
+// session would read as malformed. None of the three fields can contain a
+// hyphen: the expiry is digits, the version is digits and dots, the signature is
+// hex.
+//
+// The negotiated FOCUS version is part of the signed payload, not just the
+// handshake response. Without that, the export route had no way to know what
+// version the peer agreed to and always emitted its own default — the handshake
+// negotiated a version that the export then ignored. Binding it to the token
+// also means a peer cannot re-point an issued session at a different version.
 
 import { createHmac } from 'crypto';
+import { FOCUS_VERSIONS, type FocusVersion } from '@/costsource/focusVersions';
+import { secretsMatch, sessionSecret, type FinioEnv } from './config';
 
 const SESSION_TTL_MS = 5 * 60_000; // 5 minutes
-// Demo-only secret. Real systems use an env-var secret rotated regularly.
-const DEMO_HMAC_SECRET = 'ratio-finio-demo-v1';
 
-function sign(payload: string): string {
-  return createHmac('sha256', DEMO_HMAC_SECRET)
-    .update(payload)
-    .digest('hex')
-    .slice(0, 16);
+function sign(payload: string, env?: FinioEnv): string {
+  return createHmac('sha256', sessionSecret(env)).update(payload).digest('hex').slice(0, 32);
 }
 
-/** Mint a new self-validating sessionId and its ISO expiry. */
-export function createSession(): { sessionId: string; expiresAt: string } {
-  const expiresAt = Date.now() + SESSION_TTL_MS;
-  const payload = String(expiresAt);
-  const sessionId = `${payload}.${sign(payload)}`;
-  return { sessionId, expiresAt: new Date(expiresAt).toISOString() };
+export interface FinioSession {
+  sessionId: string;
+  expiresAt: string; // ISO 8601
+  focusVersion: FocusVersion;
 }
+
+/** Field separator — see the format note above; must not occur inside a field. */
+const SEP = '-';
+
+/** Mint a session bound to the negotiated FOCUS version. */
+export function createSession(focusVersion: FocusVersion, env?: FinioEnv): FinioSession {
+  const expiresAtMs = Date.now() + SESSION_TTL_MS;
+  const payload = `${expiresAtMs}${SEP}${focusVersion}`;
+  return {
+    sessionId: `${payload}${SEP}${sign(payload, env)}`,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+    focusVersion,
+  };
+}
+
+export type SessionCheck =
+  | { ok: true; focusVersion: FocusVersion }
+  | { ok: false; reason: 'malformed' | 'bad_signature' | 'expired' };
 
 /**
- * Returns true if the sessionId has a valid signature and has not expired.
- * No shared state required — the token is self-contained.
+ * Verify a sessionId's signature and expiry, recovering the version it was
+ * issued for. No shared state required — the token is self-contained.
  */
-export function validateSession(sessionId: string): boolean {
-  const dot = sessionId.lastIndexOf('.');
-  if (dot === -1) return false;
-  const payload = sessionId.slice(0, dot);
-  const sig = sessionId.slice(dot + 1);
-  if (sig !== sign(payload)) return false;
-  const expiresAt = parseInt(payload, 10);
-  if (isNaN(expiresAt) || Date.now() > expiresAt) return false;
-  return true;
-}
+export function validateSession(sessionId: string, env?: FinioEnv): SessionCheck {
+  const parts = sessionId.split(SEP);
+  if (parts.length !== 3) return { ok: false, reason: 'malformed' };
 
+  const [expiresRaw, versionRaw, signature] = parts;
+  if (!FOCUS_VERSIONS.includes(versionRaw as FocusVersion)) {
+    return { ok: false, reason: 'malformed' };
+  }
+  if (!/^\d+$/.test(expiresRaw)) return { ok: false, reason: 'malformed' };
+  const expiresAtMs = Number.parseInt(expiresRaw, 10);
+  if (!Number.isFinite(expiresAtMs)) return { ok: false, reason: 'malformed' };
+
+  // Signature before expiry: an attacker learns nothing about our clock from an
+  // unsigned token, and the comparison is constant-time.
+  const expected = sign(`${expiresRaw}${SEP}${versionRaw}`, env);
+  if (signature.length !== expected.length || !secretsMatch(signature, expected)) {
+    return { ok: false, reason: 'bad_signature' };
+  }
+  if (Date.now() > expiresAtMs) return { ok: false, reason: 'expired' };
+
+  return { ok: true, focusVersion: versionRaw as FocusVersion };
+}

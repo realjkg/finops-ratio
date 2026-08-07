@@ -13,6 +13,9 @@ dist
 dist-ssr
 *.local
 
+# TypeScript incremental build cache (emitted by `npm run typecheck`)
+*.tsbuildinfo
+
 # Next.js
 .next
 out
