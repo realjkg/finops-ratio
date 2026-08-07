@@ -69,7 +69,7 @@ export class LiveFinioClient implements FinioClient {
   async export(sessionId: string): Promise<FinioExport> {
     let res: Response;
     try {
-      res = await fetch(`${EXPORT_URL}?sessionId=${encodeURIComponent(sessionId)}`, {
+      res = await fetch(EXPORT_URL, {
         headers: { 'X-FinIO-Session': sessionId },
       });
     } catch (err) {
