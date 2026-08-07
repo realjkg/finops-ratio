@@ -69,12 +69,38 @@ export function checkPeerToken(
 }
 
 // Per-process fallback signing key. Regenerated on every boot, so sessions do
-// not survive a restart — correct for a stateless demo, and far better than a
-// constant checked into git. Set FINIO_SESSION_SECRET to pin it across a
-// multi-instance deployment.
+// not survive a restart — correct for a single-process demo, and far better than
+// a constant checked into git.
+//
+// It is NOT correct on serverless or any multi-instance host. There, the
+// handshake and the export can land on different instances, each holding its own
+// random key, and the export rejects a session the handshake just minted — an
+// intermittent 401 that looks like a bug in the exchange rather than a missing
+// env var. Set FINIO_SESSION_SECRET anywhere requests are not guaranteed to hit
+// one process.
 const EPHEMERAL_SESSION_SECRET = randomBytes(32).toString('hex');
+
+// Warn once rather than on every request, so the log is a signal not a flood.
+let warnedAboutEphemeralSecret = false;
 
 /** The key used to sign and verify session tokens. */
 export function sessionSecret(env: FinioEnv = process.env): string {
-  return env.FINIO_SESSION_SECRET?.trim() || EPHEMERAL_SESSION_SECRET;
+  const configured = env.FINIO_SESSION_SECRET?.trim();
+  if (configured) return configured;
+
+  if (!warnedAboutEphemeralSecret && env.NODE_ENV === 'production') {
+    warnedAboutEphemeralSecret = true;
+    console.warn(
+      JSON.stringify({
+        tag: 'finio',
+        level: 'warn',
+        message:
+          'FINIO_SESSION_SECRET is not set; signing sessions with a per-process key. ' +
+          'On serverless or multi-instance hosts this causes intermittent 401s on ' +
+          '/api/v1/finio/export, because the export may run on a different instance ' +
+          'than the handshake that minted the session.',
+      }),
+    );
+  }
+  return EPHEMERAL_SESSION_SECRET;
 }

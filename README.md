@@ -158,6 +158,42 @@ persistence, multi-party fan-out, async/webhook push, full FOCUS column coverage
 and a genuinely external counterpart — live mode calls this app's own routes,
 proving the transport path rather than a partner integration.
 
+### Hosting FinIO alongside a static marketing site
+
+FinIO needs server-side routes, so a static site builder (Webflow, Framer,
+Squarespace) cannot run it on **any** plan tier — static hosting has nowhere to
+execute `/api/v1/a2a/handshake`. The standard split is to keep the marketing site
+where it is and put this app on a subdomain:
+
+| Host | Serves |
+|---|---|
+| Marketing site (apex + `www`) | Static pages, unchanged |
+| This app (e.g. `demo.<domain>`) | `/finio`, `/finio/demo`, and the API routes |
+
+The subdomain is a DNS record pointing away from the marketing host, so it needs
+no plan change there — the marketing site links out to it like any other URL.
+
+**Required env for a serverless deploy:**
+
+```bash
+FINIO_SESSION_SECRET=<a long random string>   # see below — not optional here
+```
+
+`FINIO_SESSION_SECRET` is the one variable a serverless deployment genuinely
+needs. Without it each instance signs sessions with its own per-process key, so a
+handshake served by one instance mints a session the export rejects on another —
+an intermittent `401` that reads like a broken exchange rather than a missing
+config value. The app logs a warning on first use when it is unset in production.
+
+Everything else stays optional. Leave `FINIO_PEER_TOKEN` unset for a public demo
+so visitors can complete the handshake without a credential; set it to gate the
+exchange to known peers.
+
+One caveat for a public demo: the gateway's rate limit is per tenant, and
+unauthenticated callers all share the `anonymous` bucket. That is fine for a demo
+and wrong for anything load-bearing — real peers should carry their own API key
+so they get their own bucket.
+
 ## Deferred to later waves
 
 These need live services or secrets and are out of Phase 1 scope:
