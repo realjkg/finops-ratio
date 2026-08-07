@@ -16,7 +16,10 @@ import { ChatQuickPrompts } from './ChatQuickPrompts';
 
 const PANEL_ID = 'ai-chat-panel';
 
-export function ChatPanel() {
+// `showLauncher` controls the floating bottom-right launcher. Inside the shared
+// AppShell the launcher lives in the top bar, so it is rendered with
+// showLauncher={false}; the legacy /mission surface keeps the floating launcher.
+export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = {}) {
   const aiMessages = useStore((s) => s.aiMessages);
   const aiThinking = useStore((s) => s.aiThinking);
   const aiMode = useStore((s) => s.aiMode);
@@ -43,7 +46,7 @@ export function ChatPanel() {
 
   return (
     <>
-      {!aiPanelOpen && (
+      {showLauncher && !aiPanelOpen && (
         <button
           type="button"
           onClick={toggleAIPanel}

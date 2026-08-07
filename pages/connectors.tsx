@@ -3,7 +3,6 @@
 // connection status, and honest affordances. No new backend, no new deps.
 // Controlled-egress paths (live PointFive broker) carry the reserved warm accent.
 
-import { NavBar } from '@/components/layout/NavBar';
 import { ConnectorCard } from '@/connectors/ConnectorCard';
 import { COST_SOURCES } from '@/costsource/seed';
 
@@ -13,8 +12,7 @@ const available = COST_SOURCES.filter((s) => !s.configured);
 
 export default function Connectors() {
   return (
-    <div className="flex h-screen flex-col bg-void font-body text-txt">
-      <NavBar active="connectors" />
+    <div className="flex h-full flex-col bg-void font-body text-txt">
       <main className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-5xl">
           {/* Page header */}

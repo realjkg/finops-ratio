@@ -16,21 +16,11 @@ import { BUDGET_PROFILES } from '@/data/budgets';
 import { ALERTS } from '@/data/alerts';
 import { MODEL_REGISTRY } from '@/data/models';
 import { allGatesPassed } from '@/lib/derive';
-import { createAgentClient } from '@/agent';
 import { buildAIContext, createAIClient } from '@/ai';
 import type { AIMessage } from '@/ai';
 
 export type SecondaryMode = 'value' | 'cost' | 'unit';
 export type DetailTab = 'budget' | 'models' | 'governance' | 'demand' | 'unit' | 'alerts';
-export type ChatRole = 'user' | 'agent' | 'system';
-
-export interface ChatMessage {
-  id: string;
-  role: ChatRole;
-  text: string;
-  timestamp: string;
-  workloadsReferenced?: string[];
-}
 
 // Wave3b AI chat slice. Distinct from the Phase 1 agent slice above: multi-turn
 // history, server-proxied via the AIClient seam (no key in the browser).
@@ -70,8 +60,6 @@ const GATE_KEY: Record<GovernanceGateId, GateKey> = {
   scale: 'scale_authorized',
 };
 
-const agent = createAgentClient();
-
 // NEXT_PUBLIC_AI_MODE is a routing flag (mock | live), NOT a credential. Live
 // mode proxies /api/ai/chat; the LLM key stays server-side. Default is mock so
 // the app runs fully offline with no keys.
@@ -97,10 +85,6 @@ interface AppState {
   secondaryMode: SecondaryMode;
   filters: Filters;
 
-  messages: ChatMessage[];
-  agentThinking: boolean;
-  agentMode: 'mock' | 'live';
-
   aiMessages: AIChatMessage[];
   aiThinking: boolean;
   aiMode: 'mock' | 'live';
@@ -120,8 +104,6 @@ interface AppState {
   ) => void;
   acknowledgeAlert: (alertId: string) => void;
 
-  sendMessage: (query: string) => Promise<void>;
-
   sendAIMessage: (content: string) => Promise<void>;
   toggleAIPanel: () => void;
 }
@@ -137,17 +119,6 @@ export const useStore = create<AppState>((set, get) => ({
   activeTab: 'budget',
   secondaryMode: 'value',
   filters: { team: 'all', provider: 'all', environment: 'all' },
-
-  messages: [
-    {
-      id: nextMessageId(),
-      role: 'system',
-      text: 'Ratio agent online. I govern value ratios, not just cost. Ask me anything about your AI spend.',
-      timestamp: DEMO_NOW.toISOString(),
-    },
-  ],
-  agentThinking: false,
-  agentMode: agent.mode,
 
   aiMessages: [
     {
@@ -224,49 +195,6 @@ export const useStore = create<AppState>((set, get) => ({
         a.id === alertId ? { ...a, acknowledged: true, acknowledged_by: 'k.user' } : a,
       ),
     })),
-
-  sendMessage: async (query) => {
-    const trimmed = query.trim();
-    if (!trimmed) return;
-    const { workloads, budgets, alerts, models, selectedId, now } = get();
-
-    const userMessage: ChatMessage = {
-      id: nextMessageId(),
-      role: 'user',
-      text: trimmed,
-      timestamp: new Date().toISOString(),
-    };
-    set((state) => ({ messages: [...state.messages, userMessage], agentThinking: true }));
-
-    try {
-      const reply = await agent.ask(trimmed, {
-        workloads,
-        budgets,
-        alerts,
-        models,
-        focusWorkloadId: selectedId,
-        now,
-      });
-      const agentMessage: ChatMessage = {
-        id: nextMessageId(),
-        role: 'agent',
-        text: reply.text,
-        timestamp: new Date().toISOString(),
-        workloadsReferenced: reply.workloadsReferenced,
-      };
-      set((state) => ({ messages: [...state.messages, agentMessage], agentThinking: false }));
-    } catch (error) {
-      // Never swallow the failure — surface it in the chat so the user knows.
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      const errorMessage: ChatMessage = {
-        id: nextMessageId(),
-        role: 'system',
-        text: `Agent error: ${message}`,
-        timestamp: new Date().toISOString(),
-      };
-      set((state) => ({ messages: [...state.messages, errorMessage], agentThinking: false }));
-    }
-  },
 
   sendAIMessage: async (content) => {
     const trimmed = content.trim();

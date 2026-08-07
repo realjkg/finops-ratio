@@ -4,7 +4,6 @@
 // existing governance data, and enforcement rules. No new backend, no new deps.
 
 import { useStore } from '@/store/useStore';
-import { NavBar } from '@/components/layout/NavBar';
 import { GATE_DEFS, deriveGateStatus } from '@/frameworks/governanceModel';
 import { WorkloadGateRow } from '@/frameworks/WorkloadGateRow';
 
@@ -16,8 +15,7 @@ export default function Frameworks() {
   const blockedAlwaysOn = workloads.filter((w) => deriveGateStatus(w).alwaysOnConflict).length;
 
   return (
-    <div className="flex h-screen flex-col bg-void font-body text-txt">
-      <NavBar active="frameworks" />
+    <div className="flex h-full flex-col bg-void font-body text-txt">
       <main className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-5xl">
           {/* Page header */}

@@ -1,9 +1,8 @@
 // Overview route — the executive Initiative Dashboard demoted from home
-// (Wave 4 Slice 1). Content is unchanged; served at /overview.
-// Wave 4 Slice 2: portfolio spend-to-value graph added as a secondary section
-// above the executive surface.
+// (Wave 4 Slice 1). Served at /overview inside the shared AppShell, which owns
+// the top bar + agent launcher. Wave 4 Slice 2: portfolio spend-to-value graph
+// added as a secondary section above the executive surface.
 import { useMemo } from 'react';
-import { NavBar } from '@/components/layout/NavBar';
 import { MissionSurface } from '@/executive/MissionSurface';
 import { SpendToValueGraph } from '@/findings/SpendToValueGraph';
 import { useStore } from '@/store/useStore';
@@ -14,8 +13,7 @@ export default function Overview() {
   const graphWorkloads = useMemo(() => workloads, [workloads]);
 
   return (
-    <div className="flex h-screen flex-col">
-      <NavBar active="overview" />
+    <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-auto">
         {/* Portfolio — spend-to-value scatter (secondary, above the dashboard) */}
         <section className="border-b border-edge bg-deep px-6 py-5">
@@ -28,10 +26,10 @@ export default function Overview() {
           <SpendToValueGraph workloads={graphWorkloads} size="large" />
         </section>
 
-        {/* MissionSurface owns its own header + theme; rendered below the graph. */}
-        <MissionSurface />
+        {/* Embedded: the shell owns the top bar + ChatPanel, so MissionSurface
+            renders only the dashboard body (no standalone header, no second chat). */}
+        <MissionSurface embedded />
       </div>
     </div>
   );
 }
-

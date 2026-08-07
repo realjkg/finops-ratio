@@ -14,7 +14,6 @@ import { useMemo, useState } from 'react';
 import { useStore } from '@/store/useStore';
 import { buildFindings, type FindingView } from './findingsModel';
 import { ValueRatioMeter } from './ValueRatioMeter';
-import { NavBar } from '@/components/layout/NavBar';
 import { SpendToValueGraph } from './SpendToValueGraph';
 import { formatUSD, formatRatio } from '@/lib/format';
 import { TOKEN_HEX } from '@/lib/scales';
@@ -163,9 +162,7 @@ export function FindingsPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-void font-body text-txt">
-      <NavBar active="findings" />
-
+    <div className="flex h-full flex-col bg-void font-body text-txt">
       {/* Page header */}
       <header className="shrink-0 border-b border-edge bg-deep px-6 py-4">
         <div className="flex items-baseline justify-between">
