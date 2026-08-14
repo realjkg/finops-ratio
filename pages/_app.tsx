@@ -7,10 +7,13 @@ import { AppShell } from '@/components/layout/AppShell';
 import { NAV_ITEMS } from '@/components/layout/NavBar';
 
 // The six north-star objects share one AppShell (nav + agent launcher + chat).
-// Legacy/demo routes (/mission, /finio, /hello, /tokenomics, /prediction,
-// /costsource) stay reachable by URL but render bare — they are not part of the
-// six-object IA and carry no shared nav.
-const SHELL_ROUTES = new Set<string>(NAV_ITEMS.map((item) => item.href));
+// /demo also uses the shell so a self-service visitor gets the same navigation
+// and real Ratio AI launcher while trying the product. Other legacy/demo routes
+// (/mission, /finio, /hello, /tokenomics, /prediction, /costsource) remain bare.
+const SHELL_ROUTES = new Set<string>([
+  ...NAV_ITEMS.map((item) => item.href),
+  '/demo',
+]);
 
 export default function RatioApp({ Component, pageProps }: AppProps) {
   const router = useRouter();
@@ -25,4 +28,3 @@ export default function RatioApp({ Component, pageProps }: AppProps) {
     </PersonaProvider>
   );
 }
-
