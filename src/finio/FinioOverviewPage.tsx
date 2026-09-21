@@ -14,6 +14,7 @@
 // The FOCUS column list is read from the schema itself rather than retyped, so
 // the page cannot drift out of sync with what the exchange actually sends.
 
+import Link from 'next/link';
 import { COLUMNS_BY_VERSION } from '@/costsource/focusVersions';
 import { SUPPORTED_FOCUS_VERSIONS } from './exchange';
 
@@ -66,13 +67,13 @@ function Prose({ children }: { children: React.ReactNode }) {
 /** The single warm-accent CTA. Reserved role — do not reuse this style. */
 function PrimaryCta({ children }: { children: React.ReactNode }) {
   return (
-    <a
+    <Link
       href={DEMO_HREF}
       className="inline-flex items-center gap-2 rounded-card bg-shape px-5 py-2.5 text-sm font-semibold text-void transition-opacity hover:opacity-90"
     >
       {children}
       <span aria-hidden="true">→</span>
-    </a>
+    </Link>
   );
 }
 
@@ -260,9 +261,9 @@ export function FinioOverviewPage() {
         </Section>
 
         <footer className="border-t border-edge pt-8">
-          <a href="/" className="font-mono text-xs text-dim hover:text-sub">
+          <Link href="/" className="font-mono text-xs text-dim hover:text-sub">
             ← back to Ratio
-          </a>
+          </Link>
         </footer>
       </div>
     </div>

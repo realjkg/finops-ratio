@@ -8,6 +8,7 @@
 // through to the rows, and picking one it does not shows the 409 — identically
 // in mock and live mode, which is the seam's whole claim.
 import { useState, useCallback } from 'react';
+import Link from 'next/link';
 import { createFinioClient, validateFocusRows, SUPPORTED_FOCUS_VERSIONS } from './index';
 import type { FinioExport, FocusRow, FocusVersion, HandshakeResult } from './index';
 
@@ -300,12 +301,12 @@ export function FinioPage() {
 
         {/* Back links */}
         <div className="mt-8 flex justify-center gap-6 text-xs text-dim">
-          <a href="/finio" className="hover:text-sub">
+          <Link href="/finio" className="hover:text-sub">
             ← what FinIO is
-          </a>
-          <a href="/" className="hover:text-sub">
+          </Link>
+          <Link href="/" className="hover:text-sub">
             back to Ratio
-          </a>
+          </Link>
         </div>
       </div>
     </div>

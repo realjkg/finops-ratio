@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { TOKEN_HEX } from '@/lib/scales';
+import { withBasePath } from '@/lib/basePath';
 import type { ReportFormat } from './reportFilename';
 
 const OPTIONS: { format: ReportFormat; label: string }[] = [
@@ -25,7 +26,7 @@ function filenameFromDisposition(header: string | null): string | null {
 }
 
 async function downloadReport(format: ReportFormat): Promise<void> {
-  const res = await fetch(`/api/report/snapshot?format=${format}`);
+  const res = await fetch(withBasePath(`/api/report/snapshot?format=${format}`));
   if (!res.ok) throw new Error(`Snapshot failed: ${res.status}`);
 
   const blob = await res.blob();

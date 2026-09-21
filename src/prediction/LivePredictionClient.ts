@@ -8,9 +8,10 @@ import type {
   PredictionClient,
   ProposedChange,
 } from './PredictionClient';
+import { withBasePath } from '@/lib/basePath';
 
-const PREDICT_URL = '/api/prediction/predict';
-const ACCURACY_URL = '/api/prediction/accuracy';
+const PREDICT_URL = withBasePath('/api/prediction/predict');
+const ACCURACY_URL = withBasePath('/api/prediction/accuracy');
 
 export class LivePredictionClient implements PredictionClient {
   readonly mode = 'live' as const;

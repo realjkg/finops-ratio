@@ -1,5 +1,6 @@
 // Standalone /hello route — demonstrates the HelloClient seam with a mock/live
 // toggle. Isolated from the main 3-panel Ratio app; does not touch the store.
+import Link from 'next/link';
 import { useState, useCallback } from 'react';
 import { createHelloClient } from './index';
 import type { HelloMessage } from './index';
@@ -115,9 +116,9 @@ export function HelloPage() {
       </div>
 
       {/* Back link */}
-      <a href="/" className="mt-6 text-xs text-dim hover:text-sub">
+      <Link href="/" className="mt-6 text-xs text-dim hover:text-sub">
         ← back to Ratio
-      </a>
+      </Link>
     </div>
   );
 }

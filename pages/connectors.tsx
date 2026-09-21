@@ -3,6 +3,7 @@
 // connection status, and honest affordances. No new backend, no new deps.
 // Controlled-egress paths (live PointFive broker) carry the reserved warm accent.
 
+import Link from 'next/link';
 import { ConnectorCard } from '@/connectors/ConnectorCard';
 import { COST_SOURCES } from '@/costsource/seed';
 
@@ -66,7 +67,7 @@ export default function Connectors() {
               the same internal model: the rows it puts on the wire are built by
               the same code as the rows the doors bring in. */}
           <div className="mb-8">
-            <a
+            <Link
               href="/finio/demo"
               className="flex items-center justify-between rounded-card border border-edge bg-slab p-4 transition-colors hover:border-value/40 hover:bg-raised/40"
             >
@@ -84,7 +85,7 @@ export default function Connectors() {
                 </p>
               </div>
               <span className="ml-4 shrink-0 font-mono text-xs text-dim">→</span>
-            </a>
+            </Link>
           </div>
 
           {/* Active / connected adapters */}
