@@ -5,7 +5,7 @@
 function configuredBasePath(): string {
   const raw = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
   if (!raw || raw === '/') return '';
-  return `/${raw.replace(/^\\/+|\\/+$/g, '')}`;
+  return `/${raw.replace(/^\/+|\/+$/g, '')}`;
 }
 
 export function withBasePath(path: string): string {
