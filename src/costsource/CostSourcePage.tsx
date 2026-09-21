@@ -5,6 +5,7 @@
 // into a Ratio workload that displays value ratio, forecast, and gates — the
 // numerator/denominator composition. Isolated from the main app; no store.
 import { useState, useCallback, useEffect } from 'react';
+import Link from 'next/link';
 import { createCostSourceClient, composeRatioView } from './index';
 import type {
   CostSourceDescriptor,
@@ -18,6 +19,7 @@ import { FOCUS_VERSIONS } from './index';
 import { rawRowsForVersion } from './seed';
 import { formatUSD, formatRatio, formatPct } from '@/lib/format';
 import { ratioColor } from '@/lib/scales';
+import { withBasePath } from '@/lib/basePath';
 
 type LoadState =
   | { status: 'idle' }
@@ -258,9 +260,9 @@ export function CostSourcePage() {
           <IngestFromFilePanel sourceId={sourceId} />
         )}
 
-        <a href="/" className="mt-8 block text-center text-xs text-dim hover:text-sub">
+        <Link href="/" className="mt-8 block text-center text-xs text-dim hover:text-sub">
           ← back to Ratio
-        </a>
+        </Link>
       </div>
     </div>
   );
@@ -290,7 +292,7 @@ function IngestFromFilePanel({ sourceId }: { sourceId: string }) {
     setState({ status: 'loading' });
     const rows = rawRowsForVersion(version);
     try {
-      const res = await fetch('/api/costsource/ingest', {
+      const res = await fetch(withBasePath('/api/costsource/ingest'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourceId, version, rows }),

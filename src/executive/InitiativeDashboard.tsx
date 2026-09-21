@@ -3,6 +3,7 @@
 // Initiative Cards. It reads the same engine numbers as the technical Mission
 // Board; only the lens (vocabulary + visual hierarchy) differs. A "Technical
 // view →" toggle in the header lets CTOs / FinOps opt into the dark surface.
+import Link from 'next/link';
 import { useMemo } from 'react';
 import { useStore } from '@/store/useStore';
 import { useLanguage } from '@/lib/languageMap';
@@ -85,9 +86,9 @@ export function InitiativeDashboard({ embedded = false }: { embedded?: boolean }
         {/* Nav is owned by the AppShell when embedded; only the standalone
             /mission surface needs an explicit way back to the home screen. */}
         {!embedded && (
-          <a href="/" className="block text-center text-xs text-exec-muted hover:text-exec-text">
+          <Link href="/" className="block text-center text-xs text-exec-muted hover:text-exec-text">
             ← back to Ratio
-          </a>
+          </Link>
         )}
       </div>
     </div>

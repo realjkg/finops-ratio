@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import Link from 'next/link';
 import { MissionSurface } from '@/executive/MissionSurface';
 import { SpendToValueGraph } from '@/findings/SpendToValueGraph';
 import { formatRatio, formatUSD } from '@/lib/format';
@@ -177,12 +178,12 @@ function DemoStep({
       <p className="font-mono text-[10px] text-dim">{number}</p>
       <h3 className="mt-3 text-sm font-semibold text-txt">{title}</h3>
       <p className="mt-2 text-xs leading-5 text-sub">{body}</p>
-      <a
+      <Link
         href={href}
         className="mt-4 inline-flex rounded border border-edge bg-raised px-3 py-1.5 font-mono text-[11px] font-bold text-txt transition-colors hover:border-dim"
       >
         {cta}
-      </a>
+      </Link>
     </div>
   );
 }

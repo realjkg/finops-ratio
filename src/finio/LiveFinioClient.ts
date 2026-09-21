@@ -17,9 +17,10 @@
 // identically to the message MockFinioClient throws for the same refusal.
 
 import type { FinioClient, FinioExport, HandshakeRequest, HandshakeResult } from './FinioClient';
+import { withBasePath } from '@/lib/basePath';
 
-const HANDSHAKE_URL = '/api/v1/a2a/handshake';
-const EXPORT_URL = '/api/v1/finio/export';
+const HANDSHAKE_URL = withBasePath('/api/v1/a2a/handshake');
+const EXPORT_URL = withBasePath('/api/v1/finio/export');
 
 /**
  * Optional peer token for deployments that enforce one. This is a routing

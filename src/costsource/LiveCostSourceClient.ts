@@ -13,6 +13,7 @@ import type {
   SourceHealth,
   CostWindow,
 } from './CostSourceClient';
+import { withBasePath } from '@/lib/basePath';
 
 async function getJson<T>(url: string, label: string): Promise<T> {
   let res: Response;
@@ -31,7 +32,7 @@ export class LiveCostSourceClient implements CostSourceClient {
   readonly mode = 'live' as const;
 
   async listSources(): Promise<CostSourceDescriptor[]> {
-    return getJson<CostSourceDescriptor[]>('/api/costsource/sources', 'CostSource listSources');
+    return getJson<CostSourceDescriptor[]>(withBasePath('/api/costsource/sources'), 'CostSource listSources');
   }
 
   async fetchCostRows(sourceId: string, window: CostWindow): Promise<CostRowsResult> {
@@ -41,7 +42,7 @@ export class LiveCostSourceClient implements CostSourceClient {
       end: window.end,
     });
     return getJson<CostRowsResult>(
-      `/api/costsource/rows?${params.toString()}`,
+      withBasePath(`/api/costsource/rows?${params.toString()}`),
       'CostSource fetchCostRows',
     );
   }
@@ -49,7 +50,7 @@ export class LiveCostSourceClient implements CostSourceClient {
   async fetchFindings(sourceId: string): Promise<CostFinding[]> {
     const params = new URLSearchParams({ sourceId });
     return getJson<CostFinding[]>(
-      `/api/costsource/findings?${params.toString()}`,
+      withBasePath(`/api/costsource/findings?${params.toString()}`),
       'CostSource fetchFindings',
     );
   }
@@ -57,7 +58,7 @@ export class LiveCostSourceClient implements CostSourceClient {
   async healthCheck(sourceId: string): Promise<SourceHealth> {
     const params = new URLSearchParams({ sourceId });
     return getJson<SourceHealth>(
-      `/api/costsource/health?${params.toString()}`,
+      withBasePath(`/api/costsource/health?${params.toString()}`),
       'CostSource healthCheck',
     );
   }

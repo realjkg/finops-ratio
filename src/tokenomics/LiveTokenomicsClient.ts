@@ -2,8 +2,9 @@
 // LiveFinioClient error handling: throws a typed Error on network failure and
 // non-2xx so callers always see a message, never a raw fetch rejection.
 import type { TokenomicsClient, TokenomicsReport } from './TokenomicsClient';
+import { withBasePath } from '@/lib/basePath';
 
-const TOKENOMICS_URL = '/api/tokenomics';
+const TOKENOMICS_URL = withBasePath('/api/tokenomics');
 
 export class LiveTokenomicsClient implements TokenomicsClient {
   readonly mode = 'live' as const;

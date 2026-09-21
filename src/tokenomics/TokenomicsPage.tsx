@@ -1,6 +1,7 @@
 // Standalone /tokenomics route — demonstrates the three tokenomics integrity
 // metrics with a mock/live toggle. Isolated from the main Ratio app; does not
 // touch the store. Presentation matches the FinioPage pattern.
+import Link from 'next/link';
 import { useState, useCallback } from 'react';
 import { createTokenomicsClient } from './index';
 import type { TokenomicsReport } from './index';
@@ -351,9 +352,9 @@ export function TokenomicsPage() {
         )}
 
         {/* Back link */}
-        <a href="/" className="mt-8 block text-center text-xs text-dim hover:text-sub">
+        <Link href="/" className="mt-8 block text-center text-xs text-dim hover:text-sub">
           ← back to Ratio
-        </a>
+        </Link>
       </div>
     </div>
   );

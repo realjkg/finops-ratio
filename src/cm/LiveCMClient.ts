@@ -10,8 +10,9 @@ import type {
   CMStatusResult,
   CMAttachInput,
 } from './CMClient';
+import { withBasePath } from '@/lib/basePath';
 
-const CM_URL = '/api/v1/cm/change';
+const CM_URL = withBasePath('/api/v1/cm/change');
 
 export class LiveCMClient implements CMClient {
   readonly mode = 'live' as const;

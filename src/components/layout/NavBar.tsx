@@ -4,6 +4,8 @@
 // the AI/agent launcher (purple token) lives on the right of this same bar so a
 // single agent affordance sits identically on every in-scope screen.
 
+import Link from 'next/link';
+
 export const NAV_ITEMS = [
   { key: 'findings',   label: 'Findings',   href: '/' },
   { key: 'overview',   label: 'Overview',   href: '/overview' },
@@ -48,7 +50,7 @@ export function NavBar({
       {NAV_ITEMS.map((item) => {
         const isActive = item.key === active;
         return (
-          <a
+          <Link
             key={item.key}
             href={item.href}
             className={`rounded px-2.5 py-1 font-mono text-xs transition-colors ${
@@ -59,7 +61,7 @@ export function NavBar({
             aria-current={isActive ? 'page' : undefined}
           >
             {item.label}
-          </a>
+          </Link>
         );
       })}
 

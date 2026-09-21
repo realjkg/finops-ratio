@@ -4,6 +4,7 @@
 // Board↔detail transitions use AnimatePresence (fade+lift) so the switch is
 // perceivable and focus is managed per WCAG 2.4.3 — closing the detail returns
 // focus to the card that triggered the drill-in.
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useStore } from '@/store/useStore';
@@ -93,9 +94,9 @@ export function MissionBoard() {
                 </div>
               </main>
 
-              <a href="/" className="block text-center text-xs text-dim hover:text-sub">
+              <Link href="/" className="block text-center text-xs text-dim hover:text-sub">
                 ← back to Ratio
-              </a>
+              </Link>
             </div>
           </div>
         </motion.div>

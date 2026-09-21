@@ -2,8 +2,9 @@
 // LiveAgentClient error handling: throws a typed Error so callers see a message,
 // never a raw fetch rejection or silent undefined.
 import type { HelloClient, HelloMessage } from './HelloClient';
+import { withBasePath } from '@/lib/basePath';
 
-const HELLO_URL = '/api/hello';
+const HELLO_URL = withBasePath('/api/hello');
 
 export class LiveHelloClient implements HelloClient {
   readonly mode = 'live' as const;

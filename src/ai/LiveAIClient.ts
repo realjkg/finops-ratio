@@ -3,8 +3,9 @@
 // a typed Error on network failure and on non-2xx, never a raw fetch rejection.
 
 import type { AIClient, AIContext, AIMessage, AIResponse } from './AIClient';
+import { withBasePath } from '@/lib/basePath';
 
-const CHAT_URL = '/api/v1/ai/chat';
+const CHAT_URL = withBasePath('/api/v1/ai/chat');
 
 export class LiveAIClient implements AIClient {
   readonly mode = 'live' as const;

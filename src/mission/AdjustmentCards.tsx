@@ -14,6 +14,7 @@ import type { ChangePrediction, ChangeType, ProposedChange } from '@/prediction'
 import { formatRatio, formatUSD } from '@/lib/format';
 import { TOKEN_HEX } from '@/lib/scales';
 import { SHAPE_LABEL } from '@/lib/demandShape';
+import { withBasePath } from '@/lib/basePath';
 import {
   routeAdjustment,
   adjustmentDisplayState,
@@ -79,7 +80,7 @@ function describeChange(change: ProposedChange): string {
 
 /** PredictionClient wiring — calls the PR G API route (mock, offline-capable). */
 async function fetchPrediction(change: ProposedChange): Promise<ChangePrediction> {
-  const res = await fetch('/api/prediction/predict', {
+  const res = await fetch(withBasePath('/api/prediction/predict'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(change),

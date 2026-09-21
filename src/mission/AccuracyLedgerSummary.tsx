@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AccuracyReport, PredictionSourceId } from '@/prediction';
 import { formatSignedPct } from '@/lib/format';
 import { TOKEN_HEX } from '@/lib/scales';
+import { withBasePath } from '@/lib/basePath';
 
 type LoadState =
   | { status: 'loading' }
@@ -14,7 +15,7 @@ type LoadState =
   | { status: 'ready'; report: AccuracyReport };
 
 async function fetchAccuracy(): Promise<AccuracyReport> {
-  const res = await fetch('/api/prediction/accuracy');
+  const res = await fetch(withBasePath('/api/prediction/accuracy'));
   if (!res.ok) {
     throw new Error(`Accuracy ledger unavailable (HTTP ${res.status})`);
   }
