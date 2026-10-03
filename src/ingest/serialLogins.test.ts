@@ -66,18 +66,34 @@ describe('dangerous logins only in serial DB test files', () => {
     expect(violations).toEqual([]);
   });
 
-  it('detector self-test', () => {
+  it('detector self-test: every bypass shape is flagged', () => {
     const bad = [
       "await createLogin(db, ['ratio_worker'], ['BYPASSRLS']);",
       "await createLogin(db, ['ratio_worker'], attrs);",
+      "import { createLogin as mk } from '../testing/db';",
+      "await helpers.createLogin(db, ['ratio_worker']);",
+      'const f = createLogin;',
       'await db.pool.query(`CREATE ROLE ${su} NOLOGIN SUPERUSER`);',
       "await db.pool.query('ALTER ROLE x CREATEDB');",
+      "await db.pool.query('ALTER ROLE ' + n + ' BYPASSRLS');",
+      'await db.pool.query(`ALTER ROLE ${n} ${attrVar}`);',
+      "await c.query('CREATE USER ' + n + ' SUPERUSER');",
+      'await c.query(`ALTER USER ${n} WITH ${attr}`);',
+      'await db.pool.query(`GRANT ${su} TO ${login.name}`);',
+      "await db.pool.query('GRANT pg_read_all_data TO ' + n);",
+      "await db.pool.query(`DO $$ BEGIN EXECUTE format('ALTER ROLE %I ' || 'BYPASS' || 'RLS', 'x'); END $$`);",
+      "const stmt = 'ALTER ROLE x SUPERUSER';",
     ];
-    for (const code of bad) expect(violationsIn('x.db.test.ts', code, true), code).toHaveLength(1);
+    for (const code of bad) expect(violationsIn('x.db.test.ts', code, true).length, code).toBeGreaterThan(0);
     const ok = [
       "await createLogin(db, ['ratio_worker']);",
       "await createLogin(db, ['ratio_reader'], ['NOINHERIT']);",
+      "import { createLogin, seedTenantSource } from '../testing/db';",
       'await db.pool.query(`CREATE ROLE ${r} LOGIN NOSUPERUSER IN ROLE ratio_reader`);',
+      'await db.pool.query(`CREATE ROLE ${login} LOGIN IN ROLE ratio_reader`);',
+      "await db.pool.query(`ALTER ROLE ${login} IN DATABASE %I SET search_path = public`);",
+      'await db.pool.query(`GRANT SELECT ON ratio.cost_facts TO ratio_reader`);',
+      'await db.pool.query(`GRANT ratio_worker TO ${l.name}`);',
       "const s = 'refuses a BYPASSRLS login';",
     ];
     for (const code of ok) expect(violationsIn('x.db.test.ts', code, true), code).toEqual([]);
