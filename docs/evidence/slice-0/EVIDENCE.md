@@ -1536,3 +1536,90 @@ unchanged.
 
 The Slice 1 compat merge was not part of this round's gate list and was not
 run.
+
+# Round 17: challenger round-16 Lows
+
+**Branch.** #52 (round 16) was merged into main at 8ab78e7, which has the
+same tree as 234bab3. Round 17 is on `slice/00-r17-predefined-roles`, created
+from `origin/main` in the r16 worktree. The two commits first made on the
+finished r16 branch were cherry-picked over (afa0fb2, cc76136), and the
+uncommitted changes were carried over as a patch. Local commits only;
+nothing pushed.
+
+**Cluster.** Every DB run used a private PostgreSQL 16.14 cluster: initdb as
+postgres into `/tmp/r17pg`, 127.0.0.1:55540, TCP only. It was stopped and
+deleted at the end. Raw logs: `scratchpad/r18/`.
+
+**Nothing regenerated.** No change touches the foundation manifest (`ratio`
+objects and grants) or the PUBLIC system baseline.
+
+## R17.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| afa0fb2 | test(ingest): failing tests for round 17 (owner database grants explicitly allowed; more refused predefined roles over any edge; quoted identifiers case-sensitive …) | tests (red) |
+| cc76136 | fix(ingest): refuse more reachable predefined roles for ratio-role members; PostgreSQL identifier rules in the PUBLIC-revoke classifier | fix |
+| e9caf6b | test(ingest): failing tests for round 17 identifier identity (quoted names read from masked text; non-ASCII folding) | tests (red, found by a surviving mutant) |
+| 25d53e7 | fix(ingest): read quoted identifiers from the original SQL and compare names part by part under PostgreSQL folding rules | fix |
+| (this) | docs(evidence): Slice 0 round 17 | docs |
+
+## R17.2 Red
+
+**At afa0fb2:**
+- `memberPrivileges.db.test.ts`: **36 failed / 42 passed**. All 36 new
+  predefined-role cases failed: 4 roles × 3 parents × default, SET-only and
+  transitive SET-only edges.
+  - Owner members, and worker/reader members over SET-only edges: the check
+    reported nothing.
+  - Worker/reader members over a default edge: the check reported only the
+    `holds relation:…` lines, not the reachable role.
+- The generated owner × database "allowed" test passed on arrival. It
+  replaces a skip, and mutations O1 and O2 show it can fail.
+- `migrationFiles.test.ts`: **9 failed**, every quoted-case contract case.
+
+**At e9caf6b: 3 failed / 59 passed.**
+- `"ratio.t1"` vs `ratio_t1` and `"a b"` vs `a_b` were classified expand.
+- Unquoted `ratio.É` vs `ratio."É"` (the same object in PostgreSQL) was
+  classified contract.
+
+The dotted-name contract cases added in the same commit already passed.
+
+## R17.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+O1 owner database CREATE no longer allowed                   KILLED  2 (incl. the generated allowed test)
+O2 owner side gets no non-ratio allowance                    KILLED  78
+P1 pg_read_all_data not refused                              KILLED  9
+P2 pg_write_all_data not refused                             KILLED  9
+P3 pg_signal_backend not refused                             KILLED  9
+P4 pg_create_subscription not refused                        KILLED  9
+P5 refused roles checked for worker/reader members only      KILLED  13
+P6 refused roles: INHERIT edges only (first hop)             KILLED  26
+Q1 quoted parts folded too                                   KILLED  10
+Q2 unquoted parts not folded                                 KILLED  6
+Q3 classifier on upper-cased masked text                     KILLED  5
+Q4 quotes stripped, case kept                                KILLED  8
+Q5 quoted identifiers read from the masked text              KILLED  3
+Q6 Unicode (not ASCII-only) folding of unquoted parts        KILLED  1
+```
+
+**Two notes on these runs:**
+- O1–P6 were first run on the r16 branch, then re-run on this branch after
+  the cherry-pick, with the same results.
+- **Q4 survived the first implementation.** It was then a string-level fold
+  in which a quoted part that was not a simple lower-case name kept its
+  quotes. Investigating the mutant exposed the masked-text defect: the
+  classifier read names from the masked SQL. That led to the red tests in
+  e9caf6b and the part-based fix in 25d53e7. The table shows the mutants
+  re-targeted at the final code (Q1–Q6), all killed.
+
+## R17.4 Verification (worktree r16, branch slice/00-r17-predefined-roles at 25d53e7 + docs; private cluster)
+
+| Command | Result |
+|---|---|
+| `npm ci` (fresh worktree) / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npm test` | 1857/1857 |
+| `npm run test:db` **×10** (RATIO_PG_DUMP/RATIO_PSQL = PG16 client tools) | **10/10 exit 0**: 317/317 parallel + 2/2 serial each |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json and next-env.d.ts restored; no AGENTS.md or CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| private cluster before deletion | `pg_db_role_setting` 0; `pg_parameter_acl` 0; only the three NOLOGIN ratio roles besides postgres; no members of a ratio role; no scratch databases. Then stopped, `/tmp/r17pg` deleted, port 55540 closed |
