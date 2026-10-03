@@ -350,7 +350,7 @@ const newCreated = (): CreatedObjects => ({ schemas: new Set(), relations: new S
  * quoted, so `ratio.T1`, `RATIO.t1` and `"ratio"."t1"` are one object, while
  * `ratio."T1"` and `"ratio.t1"` are others. Malformed input never matches.
  */
-function canonIdent(x: string): string {
+export function canonIdent(x: string): string {
   const parts: string[] = [];
   let i = 0;
   const t = x.trim();

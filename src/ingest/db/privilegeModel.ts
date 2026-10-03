@@ -361,7 +361,8 @@ async function roleViolations(client: ClientBase): Promise<string[]> {
   // (CREATEROLE / CREATEDB too for worker/reader members) is the attribute
   // itself; the predefined roles in REFUSED_PREDEFINED_ROLES act outside (or
   // across) the per-object ACLs (round 16: server files/programs; round 17:
-  // pg_read/write_all_data, pg_signal_backend, pg_create_subscription).
+  // pg_read/write_all_data, pg_signal_backend, pg_create_subscription;
+  // round 18: pg_monitor, pg_read_all_stats, pg_read_all_settings).
   const reach = await client.query<{
     member: string;
     parent: string;
@@ -420,6 +421,13 @@ export const REFUSED_PREDEFINED_ROLES: Readonly<Record<string, string>> = {
   pg_write_all_data: 'INSERT, UPDATE and DELETE on every table',
   pg_signal_backend: 'cancels or terminates other sessions',
   pg_create_subscription: 'creates logical-replication subscriptions',
+  // round 18: monitoring roles. Checked HERE by name, not left to the
+  // system-ACL scan: pg_read_all_settings has no pg_catalog ACL footprint, and
+  // what the others expose (pg_stat_activity.query of every session) is not
+  // an ACL either.
+  pg_monitor: "reads every session's statements and every setting",
+  pg_read_all_stats: "reads every session's statement text (pg_stat_activity.query)",
+  pg_read_all_settings: 'reads every setting, including superuser-only ones',
 };
 
 /**
