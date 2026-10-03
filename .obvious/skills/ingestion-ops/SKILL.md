@@ -126,7 +126,14 @@ column, code, message — never the cell value); `validationErrorCount` is the
 true total. Raw bytes: evidence bucket, key `<RATIO_EVIDENCE_S3_PREFIX>/<evidence_key>`
 (`evidence/<tenant>/<source>/<sha256>`); verify with `sha256sum`.
 Quarantined is terminal: fix the data at the provider and let a new export
-(new bytes) flow in; identical bytes are never re-validated (known gap).
+(new bytes) flow in; identical bytes with a DATA defect are never
+re-validated. Exception: a `RECONCILIATION_VARIANCE` quarantine records the
+controls it was judged against (`RECONCILIATION_VARIANCE [controls:<key>]: …`);
+if the provider corrects only the manifest control totals, the next sync
+re-reconciles the same data in a new batch and publishes it (the quarantined
+batch stays as it was).
+An artifact replaced between listing and read (S3 412 on the ETag-pinned GET,
+`SOURCE_CHANGED`) is retried after re-listing the period.
 
 ## 5. Replay / rollback
 
@@ -139,7 +146,10 @@ npm run -s worker -- replay --tenant <uuid> --source aws-focus --batch <newer-ba
 npm run -s worker -- replay --tenant <uuid> --source aws-focus --period 2026-07
 ```
 Pinned periods are skipped by `sync` and `backfill` (`skipped_pinned`) until a
-`replay --period`. Quarantined and staged batches cannot be replayed.
+`replay --period`; `replay --batch` pins even when the batch is already current.
+`replay --period` of a period the source does not list fails `PERIOD_NOT_FOUND`.
+A replay whose run was taken over before it finished fails `LEASE_LOST` (exit 1).
+Quarantined and staged batches cannot be replayed.
 Code rollback needs no database action (no schema change in Slice 1).
 
 ## 6. Doctor (read-only)

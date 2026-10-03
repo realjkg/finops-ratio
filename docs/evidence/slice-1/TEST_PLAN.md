@@ -219,3 +219,11 @@ and per file in the serial phase; wiring guarded by backstopWiring.test.ts.
 Spawned test children: tracked and killed in afterAll; cli.spawnCleanup.test.ts
 runs a failing fixture in a nested vitest and requires its child gone.
 
+PR #54 findings: `sources/s3/S3FocusExportSource.test.ts` (fake S3 client:
+streamed bounded manifest read without ContentLength; IfMatch-pinned GET,
+SOURCE_CHANGED), `s3Source.db.test.ts` X6 (SeaweedFS If-Match race through
+the pipeline), `worker/reviewFindings.db.test.ts` (re-list on change,
+PERIOD_NOT_FOUND, control-quarantine recovery, replay pin of the current
+batch, replay LEASE_LOST after a takeover). Spawn cleanup also covers an
+interrupted nested run (process group + env-marker reaping).
+

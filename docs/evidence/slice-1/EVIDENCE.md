@@ -102,7 +102,13 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 83 | 4ddc714 | test: backstop evasion (snapshot diff, ratio-role attributes/memberships), backstop wiring, spawned-child cleanup (red; tsc red at this commit) | tests |
 | 84 | e882980 | fix: backstop snapshot diff + ratio-role checks, serial afterAll backstop | impl |
 | 85 | e145094 | fix: tracked test children killed in afterAll; try/finally in demo 5+6 | impl |
-| 86 | (final) | docs: evidence for this round (§24) | docs |
+| 86 | c6c59c9 | docs: evidence for the round-16 merge / backstop round (§24) | docs |
+| 87 | e51ddc9 | test: spawn-cleanup fixture cannot leak a child (pid first, 120 s self-exit, detached group + env-marker reaping; interrupted-run case) | tests |
+| 88 | 1052a5d | test: PR #54 review findings H1, H2, M1-M4 (red: fast 2, DB 5 + X6) | tests |
+| 89 | 4398628 | test: M4 test lets the taken-over run's lease lapse before the second replay (still red on the old code) | tests |
+| 90 | bee19bf | fix: bounded streamed manifest read (H1); IfMatch-pinned artifact GET, SOURCE_CHANGED (H2) | impl |
+| 91 | 2f47fac | fix: re-list on SOURCE_CHANGED (H2), PERIOD_NOT_FOUND (M1), control-quarantine recovery (M2), replay pin + LEASE_LOST (M3, M4); ingestion-ops skill updated in the evidence commit | impl |
+| 92 | (final) | docs: evidence for this round (§25), skill notes | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -1670,6 +1676,96 @@ After the mutation runs: 0 `zz_*` or `ratio_test_*` roles left, and
 
 **Manual end-to-end** (built CLI at e145094, private cluster, database
 `ratio_s1_e2e_47662843`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 25. Spawn-fixture orphan; PR #54 Copilot findings (H1, H2, M1-M4)
+
+All DB runs used the private cluster (127.0.0.1:55600), which was stopped
+and deleted afterwards.
+
+### Fixture orphan (challenger)
+
+The orphan (pid 27601, `node -e setInterval(...)`, ppid 1, empty pid
+directory) came from the red run of `cli.spawnCleanup`. `trackChild` did not
+exist yet, so the fixture threw after `spawn()` and before writing the pid.
+
+Fix (`e51ddc9`):
+- The fixture writes the pid immediately after `spawn()`.
+- The fixture's child exits by itself after 120 s.
+- The parent runs the nested vitest detached (its own process group). Then,
+  whatever happened, it SIGKILLs that group and every process whose `/proc`
+  environment carries the run's `RATIO_ORPHAN_MARKER`.
+- New case: only the nested vitest **main** process is SIGKILLed mid-test.
+  No afterAll runs, and its worker and the child are orphaned; nothing with
+  the marker may remain afterwards. A zombie awaiting init counts as dead.
+
+Mutation M-reap (no group or marker reaping): the interrupted case fails,
+and the orphaned worker and child were found running (ppid 1 → worker →
+child). I killed them by hand (`mut-reap.txt`).
+
+### Copilot findings: verification, fix and tests
+
+| Finding | Verified? | Fix | Test (red first) | Mutation(s) killed |
+|---|---|---|---|---|
+| **H1** manifest limit checked after `transformToByteArray()` buffered everything | real | body streamed; read aborted and stream destroyed once more than 16 MiB has arrived; ContentLength only an early hint | `S3FocusExportSource.test.ts`, fake S3 client: no ContentLength, 64 MiB lazily produced body. Must refuse MANIFEST_INVALID after producing at most 16 MiB + 2 chunks, with the stream destroyed; a normal manifest still reads | H1a: buffer then check (64 MiB produced); H1b: trust ContentLength only |
+| **H2** artifact GET ignores the listed ETag | real: a replaced object was captured against the old manifest and controls | `IfMatch = ref.version`. 412 → `SOURCE_CHANGED` (retryable); the per-period retry re-lists that period | fake client: the GET carries IfMatch and a replaced object fails SOURCE_CHANGED. Pipeline (`reviewFindings.db.test.ts`, fake that enforces versions): re-listed, NEW bytes published. **SeaweedFS honours If-Match** (probe: matching → 200, stale → 412 PreconditionFailed). X6 runs the same race through the real store | H2a: no IfMatch (fake and X6 both fail); H2b: no re-list |
+| **M1** `replay --period` with an empty listing succeeds | real | `PERIOD_NOT_FOUND` for every requested period the source does not list | run `failed`, `errorCode` PERIOD_NOT_FOUND, period result and run row | M1 |
+| **M2** a control-only correction leaves the quarantine forever | real: quarantined batches are terminal and immutable, and batches are unique on the data fingerprint | see below; **no schema change** | wrong control → quarantined; same wrong control → BATCH_QUARANTINED with no new batch; corrected control → published (`reconciled`); re-run → unchanged, 2 batches. A data-defect quarantine stays BATCH_QUARANTINED whatever the controls | M2a: no re-reconcile; M2b: control key not recorded (duplicate batch); M2c: data defects also re-reconciled |
+| **M3** `replay --batch` on the current batch does not pin | real | `refreshCheckpoint(..., pinned: true)` before `already_current` | pinned entry, and a later sync is `skipped_pinned` with the published batch unchanged | M3 |
+| **M4** replay ignores `finishRun() == false` | real | `LEASE_LOST`, as in runSync | pool wrapper takes the run over (new lease token) just before replay's finishing UPDATE: LEASE_LOST for both the republish and the already-current outcome | M4 |
+
+All mutation results are in `mutations25.txt`.
+
+**Evidence still binds what was published (H2).** `capture` hashes the bytes
+it actually read and stores them content-addressed. The batch's artifact
+rows and fingerprint come from those hashes. X6 and the fake-source test
+check that the published artifact's sha256, and a re-hash of the evidence
+object, equal the NEW bytes.
+
+### M2 design (no Slice 0 change)
+
+- Batches stay keyed on their data (`artifact_set_fingerprint` = sha256 of
+  the artifact hashes), so unchanged and republish logic is untouched.
+- A quarantine caused by the controls (`RECONCILIATION_VARIANCE`) records the
+  control key it was judged against, first in the reason:
+  `RECONCILIATION_VARIANCE [controls:<16 hex>]: …`. Every other cause is a
+  data defect.
+- When the same data is listed again with a different control key, it is
+  re-reconciled in a new batch keyed on `sha256(data fingerprint, control
+  key)`. The new batch is re-loaded from evidence, reconciled and published,
+  or quarantined again.
+- That key is looked up first, so the same controls again, published or
+  quarantined, never create a third batch.
+- Quarantined batches are never modified, as Slice 0's lifecycle requires,
+  and the uniqueness and immutability rules are unchanged.
+- An older control quarantine recorded without a key may be re-reconciled
+  once.
+- The ingestion-ops skill documents the behaviour.
+
+### Gates at 2f47fac (skill update in the docs commit)
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 11.8–14.8) | **3/3**, 2021 passed each; 0 failures in redactCap, redactLinear and cli.worker |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 27 files / 415 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (3 files fail at collection, 395 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| `ps` after the gates | no fixture child (`setTimeout(() => process.exit(0), 120000)`), no `spawnFixture` vitest, no redaction child, no stray vitest from this checkout |
+
+**Manual end-to-end** (built CLI at 2f47fac, private cluster, database
+`ratio_s1_e2e_979fb62d`):
 - migrate status went 3 -> 0 -> 0.
 - sync published and reconciled; the second sync reported `skipped_unchanged`.
 - Reader totals equal the control totals (55 / `30.8272954899`,
