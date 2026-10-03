@@ -32,6 +32,27 @@ export async function fetchChangeSet(github, repo, pr) {
 }
 
 /**
+ * Attach git file modes (from the head commit's recursive tree) to the changed
+ * files, so symlinks (mode 120000) are restricted. A truncated tree or an API
+ * error leaves modes unknown, which the classifier treats as restricted.
+ */
+export async function attachModes(github, repo, headSha, changeSet) {
+  let data;
+  try {
+    ({ data } = await github.rest.git.getTree({ ...repo, tree_sha: headSha, recursive: 'true' }));
+  } catch {
+    return { ...changeSet, treeStatus: 'unavailable' };
+  }
+  if (data.truncated) return { ...changeSet, treeStatus: 'truncated' };
+  const modes = new Map((data.tree ?? []).map((t) => [t.path, t.mode]));
+  return {
+    ...changeSet,
+    treeStatus: 'ok',
+    files: changeSet.files.map((f) => (modes.has(f.path) ? { ...f, mode: modes.get(f.path) } : f)),
+  };
+}
+
+/**
  * What GITHUB_TOKEN can see about main's protection: the branch `protected`
  * flag, plus required status checks from the branch RULES API (rulesets).
  */
@@ -120,7 +141,7 @@ const prIdentity = (pr) => ({
 export async function runClassify({ github, context, core }) {
   const repo = context.repo;
   const pr = context.payload.pull_request;
-  const changeSet = await fetchChangeSet(github, repo, pr);
+  const changeSet = await attachModes(github, repo, pr.head.sha, await fetchChangeSet(github, repo, pr));
   const result = classify(changeSet);
   core.info(JSON.stringify(result, null, 2));
 
@@ -186,7 +207,7 @@ async function unresolvedThreadCount(github, repo, number) {
 export async function gatherState(github, repo, number) {
   const { data: pr } = await github.rest.pulls.get({ ...repo, pull_number: number });
   const headSha = pr.head.sha;
-  const changeSet = await fetchChangeSet(github, repo, pr);
+  const changeSet = await attachModes(github, repo, headSha, await fetchChangeSet(github, repo, pr));
   const fresh = classify(changeSet);
   const checkRuns = await github.paginate(github.rest.checks.listForRef, { ...repo, ref: headSha, filter: 'latest', per_page: 100 });
   // CI via the Actions jobs API: newest pull_request run of ci.yml for this
@@ -196,8 +217,11 @@ export async function gatherState(github, repo, number) {
   });
   const pathBySuite = new Map(runs.map((r) => [r.check_suite_id, r.path]));
   const ciPath = DEFAULT_CONFIG.ciCheck.workflowPath;
+  // Only runs triggered for THIS PR against main count: another PR (or another
+  // base) can share the head SHA and must not supply this PR's CI result.
   const ciRun = runs
     .filter((r) => r.path === ciPath && r.event === 'pull_request')
+    .filter((r) => (r.pull_requests ?? []).some((x) => x.number === number && x.base?.ref === DEFAULT_CONFIG.baseBranch))
     .reduce((best, r) => (!best || r.id > best.id ? r : best), null);
   let ciJobs = null;
   if (ciRun) {
@@ -299,17 +323,24 @@ async function candidatePrNumbers(github, context) {
 }
 
 /**
- * Job: list the PR numbers this event should evaluate (matrix input), oldest
- * updated first, capped at MAX_TARGETS so the matrix never exceeds 256 legs.
+ * Job: list the PR numbers this event should evaluate (matrix input), newest
+ * updated first. Above MAX_TARGETS (the matrix caps at 256 legs) the window
+ * rotates by sweep slot: offset = (minute-of-day / 30) * MAX_TARGETS modulo the
+ * count, wrapping around, so successive sweeps eventually cover every PR.
  */
-export async function runTargets({ github, context, core }) {
+export async function runTargets({ github, context, core, now = new Date() }) {
   const prs = await candidatePrs(github, context);
   const ts = (x) => (x.updated_at ? Date.parse(x.updated_at) : 0);
-  const sorted = [...prs].sort((a, b) => ts(a) - ts(b));
+  const sorted = [...prs].sort((a, b) => ts(b) - ts(a));
   let nums = [...new Set(sorted.map((x) => x.number))];
   if (nums.length > MAX_TARGETS) {
-    core.warning(`${nums.length} PRs to evaluate; capped at ${MAX_TARGETS} (oldest updated first). The rest are picked up by later sweeps.`);
-    nums = nums.slice(0, MAX_TARGETS);
+    const d = new Date(now);
+    const slot = Math.floor((d.getUTCHours() * 60 + d.getUTCMinutes()) / 30);
+    const offset = (slot * MAX_TARGETS) % nums.length;
+    const window = [];
+    for (let i = 0; i < MAX_TARGETS; i++) window.push(nums[(offset + i) % nums.length]);
+    core.warning(`${nums.length} PRs to evaluate; capped at ${MAX_TARGETS} (newest updated first, rotating window starting at offset ${offset}). The rest are covered by later sweeps.`);
+    nums = window;
   }
   core.setOutput('prs', JSON.stringify(nums));
   core.info(`PRs to evaluate: ${JSON.stringify(nums)}`);

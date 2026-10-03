@@ -33,17 +33,18 @@ markup):
 
 Also restricted regardless of path:
 
-- Symlinks: a git diff showing mode `120000`, or a file object whose `mode`
-  is `120000`. The PR files API does not expose file modes. There, a symlink
-  shows up as a one-line patch containing its target, which content rules see.
-  A `docs/x.md` symlink to `../.env` would still look like Markdown, so CLI and
-  diff-based runs are stricter than API runs.
+- Symlinks: a git diff showing mode `120000`, or a file whose mode is
+  `120000`. In Actions, modes come from the head commit's recursive git tree
+  (`git.getTree(head.sha, recursive)`). If that tree is truncated or
+  unavailable, modes are unknown and the PR is restricted (`tree-truncated` /
+  `tree-unavailable`).
 - Any file without a patch that is not a removal, including pure renames.
-- Agent instruction and policy files, matched case-insensitively:
-  - `agents.md`, `claude.md`, `gemini.md`, `copilot-instructions.md` and
-    `skill.md` in any directory;
-  - `.obvious/**`, `.claude/**`, `.cursor/**`, `.cursorrules` and
-    `.github/copilot*`.
+- Agent instruction and policy files:
+  - `agents.md`, `claude.md`, `gemini.md`, `copilot-instructions.md`,
+    `skill.md` and `conventions.md` in any directory, matched
+    case-insensitively;
+  - `.obvious/**`, `.claude/**`, `.cursor/**`, `.cursorrules`, `.windsurf/**`
+    and `.github/copilot*`.
 
 Low allow-list: `docs/**/*.{md,png,svg}` (images only when GitHub serves a
 patch, so in practice Markdown), `*.md`, `src/components/**/*.{ts,tsx,js,jsx,css}`
@@ -61,7 +62,9 @@ Auto-merge (squash, pinned to the evaluated head SHA) is enabled only when
 - Not a draft; base is `main`.
 - CI, verified through the Actions jobs API:
   - The newest `pull_request` run of `.github/workflows/ci.yml` for the head
-    SHA is found.
+    SHA whose `pull_requests` include THIS PR with base `main` is found. Runs
+    for another PR or base that share the head SHA are ignored. With no such
+    run, the PR is not eligible.
   - Its jobs in the latest attempt (`filter=latest`, matching `run_attempt`)
     are listed. The job named exactly `Lint · Typecheck · Test · Build` must
     have concluded `success`, and its check run must be on the head SHA.
@@ -108,8 +111,11 @@ auto-mergeable.
   - `targets`: contents and pull-requests read.
   - `merge-eligibility`: contents and pull-requests write (auto-merge, and the
     squash fallback); checks, statuses and actions read.
-  - GitHub matrices cap at 256 legs, so `targets` caps the list at 200 PRs,
-    oldest updated first, and warns. The rest are evaluated by later sweeps.
+  - GitHub matrices cap at 256 legs, so `targets` caps the list at 200 PRs and
+    warns. PRs are sorted newest updated first. Each sweep evaluates a window of
+    200 that rotates by sweep slot: offset = (minute-of-day / 30) × 200, modulo
+    the PR count, wrapping around. Successive sweeps therefore cover every open
+    PR.
 - **Some settings can't be read with GITHUB_TOKEN.** It cannot read classic
   branch protection details. The report shows the branch `protected` flag and
   any ruleset required checks (`GET /rules/branches/main`).

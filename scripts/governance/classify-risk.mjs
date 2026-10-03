@@ -193,6 +193,8 @@ export function classify(input, rules = loadRules()) {
 
   if (files.length === 0) add('', 'unclassified', 'empty-change-set');
   if (input?.truncated) add('', 'unclassified', 'file-list-truncated');
+  // File modes (symlinks) come from the git tree in Actions; unknown ⇒ fail closed.
+  if (input?.treeStatus && input.treeStatus !== 'ok') add('', 'unclassified', `tree-${input.treeStatus}`);
 
   for (const f of files) {
     const candidatePaths = [f.path, f.previousPath].filter((p) => typeof p === 'string' && p.length > 0);
