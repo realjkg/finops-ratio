@@ -78,11 +78,13 @@ function fakeGithub(opts = {}) {
         createLabel: rec('issues.createLabel', {}),
         addLabels: rec('issues.addLabels', opts.addLabelsError ? err('Resource not accessible by integration', 403) : {}),
         removeLabel: rec('issues.removeLabel', {}),
+        listEvents: rec('issues.listEvents', opts.events ?? []),
       },
       repos: {
         getBranch: rec('repos.getBranch', opts.branchError ? err('x', 403) : { protected: true }),
         getBranchRules: rec('repos.getBranchRules', opts.rulesError ? err('x', 404) : (opts.rules ?? [])),
         createCommitStatus: rec('repos.createCommitStatus', {}),
+        getCollaboratorPermissionLevel: rec('repos.getCollaboratorPermissionLevel', (p) => (opts.roles ?? {})[p.username] ?? { permission: 'write', role_name: 'write' }),
         getCombinedStatusForRef: rec('repos.getCombinedStatusForRef', { statuses: opts.statuses ?? [] }),
       },
       checks: {
@@ -93,6 +95,7 @@ function fakeGithub(opts = {}) {
         ])),
       },
       git: {
+        getCommit: rec('git.getCommit', { committer: { date: opts.headCommittedAt ?? '2026-10-01T10:00:00Z' } }),
         getTree: rec('git.getTree', opts.treeError ? err('tree boom', 500) : {
           truncated: Boolean(opts.treeTruncated),
           tree: opts.tree ?? files.map((f) => ({ path: f.filename, mode: '100644', type: 'blob' })),
@@ -587,6 +590,96 @@ describe('P3: symlinks via the git tree API', () => {
   it('regular file modes keep a README-only PR low', async () => {
     const { github, pr } = fakeGithub({ labels: [] });
     expect((await runClassify({ github, core: fakeCore(), context: prCtx(pr) })).risk).toBe('low');
+  });
+});
+
+const eligStatus = (github) => github.calls.filter((c) => c.name === 'repos.createCommitStatus' && c.params.context === 'Governance · merge eligibility');
+
+describe('C1: eligibility commit status', () => {
+  const restrictedFiles = [{ filename: 'package.json', status: 'modified', patch: '+x', changes: 1 }];
+  const ex = (login, at) => ({ event: 'labeled', label: { name: 'exception:approved' }, actor: { login }, created_at: at });
+
+  it('eligible low PR ⇒ success status on the evaluated head', async () => {
+    const { github, pr } = fakeGithub();
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    const [st] = eligStatus(github);
+    expect(st.params).toMatchObject({ sha: HEAD, state: 'success' });
+  });
+  it('native auto-merge on a low PR whose review is missing ⇒ failure status (and auto-merge disabled)', async () => {
+    const { github, pr } = fakeGithub({ autoMerge: { merge_method: 'squash' }, reviews: [] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    const [st] = eligStatus(github);
+    expect(st.params).toMatchObject({ sha: HEAD, state: 'failure' });
+    expect(st.params.description).toMatch(/review/);
+    expect(st.params.description.length).toBeLessThanOrEqual(140);
+    expect(gql(github, 'disablePullRequestAutoMerge')).toHaveLength(1);
+  });
+  it('exception label added by a write-only user ⇒ failure', async () => {
+    const { github, pr } = fakeGithub({
+      files: restrictedFiles, labels: ['risk:restricted', 'restricted:dependencies', 'exception:approved'],
+      events: [ex('dev', '2026-10-01T11:00:00Z')], roles: { dev: { permission: 'write', role_name: 'write' } },
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+  });
+  it('exception label added by an admin after the head commit ⇒ success, and auto-merge is NOT enabled', async () => {
+    const { github, pr } = fakeGithub({
+      files: restrictedFiles, labels: ['risk:restricted', 'restricted:dependencies', 'exception:approved'],
+      events: [ex('boss', '2026-10-01T11:00:00Z')], roles: { boss: { permission: 'admin', role_name: 'admin' } },
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params).toMatchObject({ sha: HEAD, state: 'success' });
+    expect(eligStatus(github)[0].params.description).toMatch(/exception/i);
+    expect(gql(github, 'enablePullRequestAutoMerge')).toHaveLength(0);
+    expect(rows[0].eligible).toBe(false);
+    expect(github.calls.find((c) => c.name === 'repos.getCollaboratorPermissionLevel').params.username).toBe('boss');
+  });
+  it('exception label added before the latest push ⇒ failure', async () => {
+    const { github, pr } = fakeGithub({
+      files: restrictedFiles, labels: ['risk:restricted', 'restricted:dependencies', 'exception:approved'],
+      events: [ex('boss', '2026-10-01T09:00:00Z')], roles: { boss: { permission: 'admin', role_name: 'admin' } },
+      headCommittedAt: '2026-10-01T10:00:00Z',
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+  });
+  it('admin exception but Copilot review missing ⇒ failure', async () => {
+    const { github, pr } = fakeGithub({
+      files: restrictedFiles, labels: ['risk:restricted', 'restricted:dependencies', 'exception:approved'], reviews: [],
+      events: [ex('boss', '2026-10-01T11:00:00Z')], roles: { boss: { permission: 'admin', role_name: 'admin' } },
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+  });
+  it('C3: head moved ⇒ auto-merge disabled, pending status on the NEW head, then deferred', async () => {
+    const { github, pr } = fakeGithub({ headMovesAfterFirstGet: true, autoMerge: { merge_method: 'squash' } });
+    const core = fakeCore();
+    const rows = await runEligibility({ github, core, context: prCtx(pr) });
+    expect(rows[0].action).toMatch(/head moved/i);
+    expect(gql(github, 'disablePullRequestAutoMerge')).toHaveLength(1);
+    expect(gql(github, 'enablePullRequestAutoMerge')).toHaveLength(0);
+    const st = eligStatus(github);
+    expect(st).toHaveLength(1);
+    expect(st[0].params).toMatchObject({ sha: MOVED, state: 'pending' });
+    expect(core.failed).toBeNull();
+  });
+  it('evaluation error ⇒ failure status on the head (best effort)', async () => {
+    const { github, pr } = fakeGithub({ checksError: true });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params).toMatchObject({ sha: HEAD, state: 'failure' });
+  });
+});
+
+describe('C1: classify invalidates exception approval on push', () => {
+  it('synchronize removes exception:approved', async () => {
+    const { github, pr } = fakeGithub({ labels: ['risk:low', 'exception:approved'] });
+    await runClassify({ github, core: fakeCore(), context: prCtx(pr, 'synchronize') });
+    expect(github.calls.filter((c) => c.name === 'issues.removeLabel').map((c) => c.params.name)).toContain('exception:approved');
+  });
+  it('other events leave it in place', async () => {
+    const { github, pr } = fakeGithub({ labels: ['risk:low', 'exception:approved'] });
+    await runClassify({ github, core: fakeCore(), context: prCtx(pr, 'labeled') });
+    expect(github.calls.filter((c) => c.name === 'issues.removeLabel').map((c) => c.params.name)).not.toContain('exception:approved');
   });
 });
 

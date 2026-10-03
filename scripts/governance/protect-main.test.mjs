@@ -4,7 +4,7 @@ import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildRequests } from './protect-main.mjs';
+import { buildRequests, applyRequests } from './protect-main.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.join(here, 'protect-main.mjs');
@@ -28,6 +28,9 @@ describe('buildRequests', () => {
         // Posted as a commit status by the classify job; any app accepted (see README:
         // eligibility re-classifies itself, so a spoofed status cannot make a PR eligible).
         { context: 'Governance · risk classification' },
+        // C1: posted by the eligibility job; success only when eligible (or an
+        // admin/maintain exception is valid), so native auto-merge cannot bypass the gate.
+        { context: 'Governance · merge eligibility' },
       ],
     });
     expect(p.body.required_pull_request_reviews).toMatchObject({ required_approving_review_count: 0 });
@@ -51,6 +54,42 @@ describe('buildRequests', () => {
 
   it('rejects a malformed repo slug', () => {
     expect(() => buildRequests({ repo: 'nope', branch: 'main' })).toThrow(/owner\/name/);
+  });
+});
+
+describe('C4: applyRequests', () => {
+  const reqs = buildRequests({ repo: 'o/r', branch: 'main' });
+  const fakeFetch = (statuses) => {
+    const seen = [];
+    const fn = async (url, init) => {
+      seen.push({ url, method: init.method });
+      const status = statuses[seen.length - 1] ?? 200;
+      return { ok: status < 300, status, statusText: 'x', json: async () => ({ message: `m${status}` }) };
+    };
+    return { fn, seen };
+  };
+  it('applies protection first, then the repo PATCH', async () => {
+    const f = fakeFetch([200, 200]);
+    const out = await applyRequests(reqs, { fetchImpl: f.fn, token: 't', api: 'https://api.test' });
+    expect(out.failed).toBe(false);
+    expect(f.seen.map((x) => x.method)).toEqual(['PUT', 'PATCH']);
+    expect(f.seen[0].url).toBe('https://api.test/repos/o/r/branches/main/protection');
+  });
+  it('stops at the first failure: protection 403 ⇒ PATCH never sent, failed', async () => {
+    const f = fakeFetch([403, 200]);
+    const out = await applyRequests(reqs, { fetchImpl: f.fn, token: 't', api: 'https://api.test' });
+    expect(out.failed).toBe(true);
+    expect(f.seen).toHaveLength(1);
+    expect(out.results).toEqual([expect.objectContaining({ method: 'PUT', status: 403, ok: false, message: 'm403' })]);
+  });
+  it('a failing PATCH is reported as failed', async () => {
+    const f = fakeFetch([200, 422]);
+    const out = await applyRequests(reqs, { fetchImpl: f.fn, token: 't', api: 'https://api.test' });
+    expect(out.failed).toBe(true);
+    expect(f.seen).toHaveLength(2);
+  });
+  it('buildRequests orders PUT protection before PATCH repo', () => {
+    expect(reqs.map((r) => r.method)).toEqual(['PUT', 'PATCH']);
   });
 });
 

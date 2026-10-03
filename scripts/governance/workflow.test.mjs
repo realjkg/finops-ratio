@@ -54,6 +54,12 @@ describe('governance.yml', () => {
     expect(code).toMatch(/actions: read/);
   });
 
+  it('C1: eligibility job can post its status and read label events', () => {
+    const elig = code.slice(code.indexOf('  merge-eligibility:'));
+    expect(elig).toMatch(/statuses: write/);
+    expect(elig).toMatch(/issues: read/);
+  });
+
   it('does not interpolate event data into scripts', () => {
     const lines = code.split('\n');
     const blocks = [];

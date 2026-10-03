@@ -30,6 +30,15 @@ describe('buildReport', () => {
     expect(md).toContain('abc1234');
   });
 
+  it('C1: restricted report explains the exception queue', () => {
+    const md = buildReport(restricted, {});
+    expect(md).toContain('exception:approved');
+    expect(md).toMatch(/admin or maintain/i);
+    expect(md).toMatch(/any push removes/i);
+    expect(md).toMatch(/approver merges/i);
+    expect(md).toMatch(/never enables auto-merge for restricted/i);
+  });
+
   it('retention/deployment add the owner-only escalation note', () => {
     expect(buildReport(restricted, {})).toMatch(/owner/i);
     const migOnly = { ...restricted, classes: ['migrations'], reasons: [restricted.reasons[0]] };

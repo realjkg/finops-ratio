@@ -2,7 +2,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import { URL } from 'node:url';
-import { decideEligibility, latestCheckRuns, DEFAULT_CONFIG, CI_CHECK_NAME } from './eligibility.mjs';
+import {
+  decideEligibility, decideMergeStatus, evaluateExceptionApproval, latestCheckRuns,
+  DEFAULT_CONFIG, CI_CHECK_NAME, ELIGIBILITY_CONTEXT, EXCEPTION_LABEL,
+} from './eligibility.mjs';
 
 const HEAD = 'a'.repeat(40);
 const OLD = 'c'.repeat(40);
@@ -253,14 +256,14 @@ describe('decideEligibility', () => {
     expect(decideEligibility(state({ reviews: [] })).eligible).toBe(false);
   });
 
-  it('only the latest run of a re-run non-CI check counts (CI is decided by job ids, never deduped)', () => {
+  it('C2: check runs are never collapsed — two suites of the same workflow, one failing, one newer success ⇒ ineligible', () => {
     const s = state();
-    const other = { name: 'Other check', appId: 1, workflowPath: '.github/workflows/other.yml' };
+    const other = { name: 'Other check', appId: 15368, workflowPath: '.github/workflows/other.yml' };
     s.checkRuns.push({ id: 10, ...other, status: 'completed', conclusion: 'failure' });
     s.checkRuns.push({ id: 11, ...other, status: 'completed', conclusion: 'success' });
-    expect(decideEligibility(s).eligible).toBe(true);
-    s.checkRuns.push({ id: 12, ...other, status: 'completed', conclusion: 'failure' });
-    expect(decideEligibility(s).eligible).toBe(false);
+    const d = decideEligibility(s);
+    expect(d.eligible).toBe(false);
+    expect(why(d)).toMatch(/Other check.*failure/);
   });
 
   it('failing or pending legacy commit status blocks', () => {
@@ -282,6 +285,106 @@ describe('decideEligibility', () => {
   it('collects every blocking reason, not just the first', () => {
     const d = decideEligibility(state({ pr: { draft: true, baseRef: 'dev', labels: [] }, unresolvedThreads: 1 }));
     expect(d.reasons.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('C1: own eligibility status', () => {
+  it('a previous failure of our own eligibility status on the head does not block re-evaluation', () => {
+    const s = state({ statuses: [{ context: ELIGIBILITY_CONTEXT, state: 'failure' }, { context: 'Governance · risk classification', state: 'success' }] });
+    expect(decideEligibility(s)).toEqual({ eligible: true, reasons: [] });
+  });
+});
+
+describe('C1: evaluateExceptionApproval', () => {
+  const COMMIT = '2026-10-01T10:00:00Z';
+  const labeled = (login, at, event = 'labeled', name = EXCEPTION_LABEL) => ({ event, label: { name }, actor: { login }, created_at: at });
+  const base = {
+    labels: ['risk:restricted', EXCEPTION_LABEL],
+    events: [labeled('boss', '2026-10-01T11:00:00Z')],
+    roles: { boss: { permission: 'admin', role_name: 'admin' } },
+    headCommittedAt: COMMIT,
+  };
+  it('admin added after the head commit ⇒ approved', () => {
+    expect(evaluateExceptionApproval(base)).toMatchObject({ approved: true, approver: 'boss' });
+  });
+  it('maintain role ⇒ approved', () => {
+    expect(evaluateExceptionApproval({ ...base, roles: { boss: { permission: 'write', role_name: 'maintain' } } }).approved).toBe(true);
+  });
+  it('write-only user ⇒ not approved', () => {
+    const r = evaluateExceptionApproval({ ...base, roles: { boss: { permission: 'write', role_name: 'write' } } });
+    expect(r.approved).toBe(false);
+    expect(r.reason).toMatch(/admin|maintain/);
+  });
+  it('unknown permission ⇒ not approved', () => {
+    expect(evaluateExceptionApproval({ ...base, roles: {} }).approved).toBe(false);
+  });
+  it('label added before the latest push ⇒ not approved', () => {
+    const r = evaluateExceptionApproval({ ...base, events: [labeled('boss', '2026-10-01T09:00:00Z')] });
+    expect(r.approved).toBe(false);
+    expect(r.reason).toMatch(/before/);
+  });
+  it('latest event for the label is an unlabel (re-added label missing from events) ⇒ not approved', () => {
+    const r = evaluateExceptionApproval({ ...base, events: [labeled('boss', '2026-10-01T11:00:00Z'), labeled('boss', '2026-10-01T12:00:00Z', 'unlabeled')] });
+    expect(r.approved).toBe(false);
+  });
+  it('the LATEST add counts: admin added, removed, re-added by a writer ⇒ not approved', () => {
+    const r = evaluateExceptionApproval({
+      ...base,
+      events: [labeled('boss', '2026-10-01T11:00:00Z'), labeled('boss', '2026-10-01T11:30:00Z', 'unlabeled'), labeled('dev', '2026-10-01T12:00:00Z')],
+      roles: { boss: { permission: 'admin', role_name: 'admin' }, dev: { permission: 'write', role_name: 'write' } },
+    });
+    expect(r.approved).toBe(false);
+  });
+  it('label not present ⇒ not approved', () => {
+    expect(evaluateExceptionApproval({ ...base, labels: ['risk:restricted'] }).approved).toBe(false);
+  });
+  it('missing head commit time ⇒ not approved', () => {
+    expect(evaluateExceptionApproval({ ...base, headCommittedAt: undefined }).approved).toBe(false);
+  });
+  it('events for other labels are ignored', () => {
+    const r = evaluateExceptionApproval({ ...base, events: [...base.events, labeled('dev', '2026-10-01T13:00:00Z', 'labeled', 'bug')] });
+    expect(r.approved).toBe(true);
+  });
+});
+
+describe('C1: decideMergeStatus', () => {
+  const restrictedState = (exception) => state({
+    pr: { labels: ['risk:restricted', 'restricted:migrations', EXCEPTION_LABEL] },
+    freshRisk: 'restricted',
+    exception,
+  });
+  it('low and eligible ⇒ success (mode low)', () => {
+    expect(decideMergeStatus(state())).toMatchObject({ state: 'success', mode: 'low' });
+  });
+  it('low but review missing ⇒ failure, description is the top reason (≤140 chars)', () => {
+    const r = decideMergeStatus(state({ reviews: [] }));
+    expect(r.state).toBe('failure');
+    expect(r.description).toMatch(/review/);
+    expect(r.description.length).toBeLessThanOrEqual(140);
+  });
+  it('restricted without approval ⇒ failure', () => {
+    expect(decideMergeStatus(restrictedState({ approved: false, reason: 'label added by @dev (write), not admin/maintain' })))
+      .toMatchObject({ state: 'failure', description: expect.stringMatching(/admin\/maintain/) });
+    expect(decideMergeStatus(restrictedState(undefined)).state).toBe('failure');
+  });
+  it('restricted with approval and all other conditions ⇒ success (mode exception)', () => {
+    expect(decideMergeStatus(restrictedState({ approved: true, approver: 'boss' })))
+      .toMatchObject({ state: 'success', mode: 'exception', description: expect.stringMatching(/boss/) });
+  });
+  it('approval never overrides a non-risk condition (fork, missing review, threads, shared head, draft, base, CI)', () => {
+    const ok = { approved: true, approver: 'boss' };
+    for (const o of [
+      { pr: { headRepo: 'mallory/r' } }, { reviews: [] }, { unresolvedThreads: 1 }, { sharedHeadWith: [6] },
+      { pr: { draft: true } }, { pr: { baseRef: 'dev' } }, { ciJobs: null },
+    ]) {
+      const s = restrictedState(ok);
+      const merged = { ...s, ...o, pr: { ...s.pr, ...(o.pr || {}) } };
+      expect(decideMergeStatus(merged).state, JSON.stringify(o)).toBe('failure');
+    }
+  });
+  it('long reasons are truncated to 140 chars', () => {
+    const r = decideMergeStatus(state({ statuses: [{ context: 'x'.repeat(300), state: 'failure' }] }));
+    expect(r.description.length).toBeLessThanOrEqual(140);
   });
 });
 
