@@ -23,6 +23,8 @@ import {
   quarantineBatch,
   readCheckpoint,
   refreshCheckpoint,
+  recordRejectedListing,
+  type RejectedListing,
   stageBatch,
   type CheckpointEntry,
 } from './publish';
@@ -221,7 +223,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
           const result = await withRetry(
             async () => {
               try {
-                return await processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow });
+                return await processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow, rejected: prev?.rejected });
               } catch (e) {
                 if (e instanceof IngestError && e.code === 'SOURCE_CHANGED') {
                   const fresh = (await source.listPeriods({ from: period, to: period }, { signal: runAbort.signal })).find((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod) === period);
@@ -296,6 +298,8 @@ interface PeriodCtx {
   signal: AbortSignal;
   clean: (s: string) => string;
   sourceRow: SourceRow;
+  /** The period's checkpointed capture-time rejection, if any (challenger L3). */
+  rejected?: RejectedListing;
 }
 
 /** The one quarantine cause that depends on the CONTROLS rather than the data. */
@@ -342,6 +346,13 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   if (set.artifacts.length > limits.maxArtifactsPerSet || set.artifacts.some((a) => a.byteSize > limits.maxArtifactBytes) || total > limits.maxBatchBytes) {
     return { billingPeriod: period, outcome: 'failed', code: 'ARTIFACT_SET_TOO_LARGE', message: 'artifact set exceeds the configured size limits' };
   }
+  // This exact listing already overran the limits at capture (its sizes were
+  // under-reported) and the limits are no higher: fail fast, download nothing
+  // (challenger L3). Raised limits or a changed listing are tried again.
+  const rejected = ctx.rejected;
+  if (rejected && rejected.listing === set.listingFingerprint && limits.maxArtifactBytes <= rejected.maxArtifactBytes && limits.maxBatchBytes <= rejected.maxBatchBytes) {
+    return { billingPeriod: period, outcome: 'failed', code: rejected.code, message: 'this unchanged listing already exceeded the configured size limits when captured; not downloaded again' };
+  }
 
   // Raw evidence first.
   // The listed sizes are only the source's claim: the batch cap is enforced on
@@ -367,10 +378,16 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
         signal: ctx.signal,
       });
     } catch (e) {
-      if (e instanceof IngestError && e.code === 'ARTIFACT_TOO_LARGE' && cap < limits.maxArtifactBytes) {
-        throw new IngestError('ARTIFACT_SET_TOO_LARGE', 'the captured artifact set exceeds the configured batch byte limit (listed sizes were lower)');
-      }
-      throw e;
+      if (!(e instanceof IngestError && e.code === 'ARTIFACT_TOO_LARGE')) throw e;
+      const err = cap < limits.maxArtifactBytes ? new IngestError('ARTIFACT_SET_TOO_LARGE', 'the captured artifact set exceeds the configured batch byte limit (listed sizes were lower)') : e;
+      // Checkpointed by listing fingerprint and limits, so an unchanged listing is not downloaded again (challenger L3).
+      await recordRejectedListing(ctx.pool, lease, period, {
+        listing: set.listingFingerprint,
+        code: err.code as RejectedListing['code'],
+        maxArtifactBytes: limits.maxArtifactBytes,
+        maxBatchBytes: limits.maxBatchBytes,
+      });
+      throw err;
     }
     capturedBytes += c.byteSize;
     captured.push(c);

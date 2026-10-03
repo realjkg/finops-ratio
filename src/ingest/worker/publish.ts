@@ -32,6 +32,15 @@ export interface CheckpointEntry {
   listing: string | null;
   batchId: string;
   pinned: boolean;
+  /** A listing rejected at capture time (sizes under-reported), with the limits it was rejected under (challenger L3). */
+  rejected?: RejectedListing;
+}
+
+export interface RejectedListing {
+  listing: string;
+  code: 'ARTIFACT_SET_TOO_LARGE' | 'ARTIFACT_TOO_LARGE';
+  maxArtifactBytes: number;
+  maxBatchBytes: number;
 }
 
 /** Reads a checkpoint entry; tolerates the legacy plain-string shape. */
@@ -53,7 +62,7 @@ export async function readCheckpoint(c: PoolClient, sourceId: string): Promise<R
   return out;
 }
 
-async function writeCheckpoint(c: PoolClient, lease: Lease, period: string, entry: CheckpointEntry): Promise<void> {
+async function writeCheckpoint(c: PoolClient, lease: Lease, period: string, entry: CheckpointEntry | (Partial<CheckpointEntry> & { rejected: RejectedListing })): Promise<void> {
   await c.query(
     `INSERT INTO ratio.source_checkpoints (tenant_id, source_id, last_run_id, periods, updated_at)
      VALUES ($1, $2, $3, jsonb_build_object($4::text, $5::jsonb), clock_timestamp())
@@ -280,5 +289,19 @@ export async function refreshCheckpoint(pool: Pool, lease: Lease, period: string
     await assertLease(c, lease, 'UPDATE');
     const prev = (await readCheckpoint(c, lease.sourceId))[period] ?? null;
     await writeCheckpoint(c, lease, period, make(prev));
+  });
+}
+
+/**
+ * Remembers that this exact listing was rejected at capture time under these
+ * limits, keeping whatever else the period's entry holds (its published
+ * batch, its pin). The next run fails it fast without downloading anything;
+ * any publication of the period writes a fresh entry without it.
+ */
+export async function recordRejectedListing(pool: Pool, lease: Lease, period: string, rejected: RejectedListing): Promise<void> {
+  await workerTransaction(pool, lease.tenantId, async (c) => {
+    await assertLease(c, lease, 'UPDATE');
+    const prev = (await readCheckpoint(c, lease.sourceId))[period] ?? {};
+    await writeCheckpoint(c, lease, period, { ...prev, rejected });
   });
 }
