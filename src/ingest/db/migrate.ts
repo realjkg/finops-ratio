@@ -86,6 +86,13 @@ async function ledgerExists(client: ClientBase): Promise<boolean> {
   return r.rows[0].e;
 }
 
+/** Foundation manifests by version, from the loaded migration files (round 14). */
+function manifestsOf(files: MigrationFile[]): Record<string, readonly string[]> {
+  const out: Record<string, readonly string[]> = {};
+  for (const f of files) if (f.manifest) out[f.version] = f.manifest;
+  return out;
+}
+
 /** Throws if the applied ledger and the files on disk disagree. */
 function verifyApplied(files: MigrationFile[], applied: LedgerRow[]): void {
   const byVersion = new Map(files.map((f) => [f.version, f]));
@@ -217,7 +224,7 @@ export async function migrateUp(client: ClientBase, opts: MigrateUpOptions = {})
         );
         // Catalog, not text, and LAST before COMMIT: nothing the migration
         // installed can run after it (see settle()).
-        await assertReviewedPrivileges(client, `migration ${f.version}_${f.name}`);
+        await assertReviewedPrivileges(client, `migration ${f.version}_${f.name}`, { manifests: manifestsOf(files) });
       });
       done.push(f.version);
       log('migrate.applied', { version: f.version, name: f.name, phase: f.phase });
@@ -251,7 +258,7 @@ export async function migrateDown(client: ClientBase, opts: MigrateDownOptions):
         await client.query(f.downSql!);
         await settle(client);
         await client.query('DELETE FROM public.schema_migrations WHERE version = $1', [f.version]);
-        await assertReviewedPrivileges(client, `down migration ${f.version}_${f.name}`);
+        await assertReviewedPrivileges(client, `down migration ${f.version}_${f.name}`, { manifests: manifestsOf(files) });
       });
       reverted.push(f.version);
       log('migrate.reverted', { version: f.version, name: f.name });
@@ -293,7 +300,7 @@ export async function migrationStatus(client: ClientBase, opts: { dir?: string }
   try {
     await client.query(`SELECT pg_catalog.set_config('search_path', 'pg_catalog, pg_temp', true)`);
     applied = (await ledgerExists(client)) ? await readLedger(client) : [];
-    privilegeProblems = await privilegeModelViolations(client);
+    privilegeProblems = await privilegeModelViolations(client, { manifests: manifestsOf(files) });
   } finally {
     await client.query('ROLLBACK').catch(() => undefined);
   }

@@ -9,6 +9,16 @@
 import type { ClientBase } from 'pg';
 import { MigrationError } from './migrationFiles';
 import { FOUNDATION_0001 } from './foundationManifest';
+import { loadManifests } from './migrationFiles';
+import { SYSTEM_SCHEMAS as SYSTEM_SCHEMA_NAMES, systemBaselineViolations, type SystemBaseline } from './systemBaseline';
+
+/** Inputs of the check that depend on the migrations directory / server (round 14). */
+export interface CheckOptions {
+  /** Foundation manifests by migration version (default: the shipped migrations directory). */
+  manifests?: Record<string, readonly string[]>;
+  /** PUBLIC system-schema baseline (default: the generated PostgreSQL 16 baseline). */
+  systemBaseline?: SystemBaseline;
+}
 
 export type CheckedRole = 'ratio_reader' | 'ratio_worker';
 export const RATIO_ROLES = ['ratio_owner', 'ratio_worker', 'ratio_reader'] as const;
@@ -385,7 +395,7 @@ async function systemAclViolations(client: ClientBase): Promise<string[]> {
              WHERE NOT r.rolsuper
                AND EXISTS (SELECT 1 FROM ratio x WHERE r.oid = x.oid OR pg_catalog.pg_has_role(r.oid, x.oid, 'MEMBER'))
           ),
-          sys AS (SELECT oid, nspname, nspacl FROM pg_catalog.pg_namespace WHERE nspname IN ('pg_catalog', 'information_schema')),
+          sys AS (SELECT oid, nspname, nspacl FROM pg_catalog.pg_namespace WHERE nspname = ANY ($2::text[])),
           entries AS (
             SELECT a.grantee, a.privilege_type || ' on schema ' || s.nspname AS what
               FROM sys s CROSS JOIN LATERAL pg_catalog.aclexplode(s.nspacl) a
@@ -402,7 +412,7 @@ async function systemAclViolations(client: ClientBase): Promise<string[]> {
               FROM pg_catalog.pg_proc p JOIN sys s ON s.oid = p.pronamespace CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) a
           )
      SELECT ch.rolname AS role, e.what FROM entries e JOIN checked ch ON ch.oid = e.grantee ORDER BY 1, 2`,
-    [RATIO_ROLES],
+    [RATIO_ROLES, SYSTEM_SCHEMA_NAMES],
   );
   return rows.rows.map((r) => `${r.role} holds explicit ${r.what} (system-schema ACL entries for ratio roles and their members are never reviewed)`);
 }
@@ -480,9 +490,9 @@ export const REVIEWED_POLICY_SHAPES: readonly string[] = [
   ...new Set(FOUNDATION_0001.filter((e) => e.startsWith('policy:') && !e.startsWith('policy:ratio.tenants:')).map(policyShape)),
 ];
 
-/** True when a rendered policy entry is reviewed (exact 0001 entry or reviewed shape). */
-function isReviewedPolicy(entry: string): boolean {
-  return FOUNDATION_0001.includes(entry) || REVIEWED_POLICY_SHAPES.includes(policyShape(entry));
+/** True when a rendered policy entry is reviewed (exact entry of the active manifest or of 0001, or a reviewed shape). */
+function isReviewedPolicy(entry: string, active: ReadonlySet<string>): boolean {
+  return active.has(entry) || FOUNDATION_0001.includes(entry) || REVIEWED_POLICY_SHAPES.includes(policyShape(entry));
 }
 
 /**
@@ -492,7 +502,7 @@ function isReviewedPolicy(entry: string): boolean {
  * partition of, a ratio table (or the reverse) — inheritance/partitioning
  * would route rows around the parent's policies (round 12, L1).
  */
-async function tableViolations(client: ClientBase): Promise<string[]> {
+async function tableViolations(client: ClientBase, active: ReadonlySet<string>): Promise<string[]> {
   const problems: string[] = [];
   const tables = await client.query<{ t: string; rls: boolean; force: boolean; persistence: string }>(
     `SELECT 'ratio.' || c.relname AS t, c.relrowsecurity AS rls, c.relforcerowsecurity AS force, c.relpersistence::text AS persistence
@@ -503,7 +513,7 @@ async function tableViolations(client: ClientBase): Promise<string[]> {
   for (const t of tables.rows) {
     if (!t.rls || !t.force) problems.push(`table ${t.t} must have row-level security enabled and forced`);
     if (t.persistence !== 'p') problems.push(`table ${t.t} must be a permanent (logged) table`);
-    if (!policies.some((e) => e.startsWith(`policy:${t.t}:`) && isReviewedPolicy(e))) problems.push(`table ${t.t} has no reviewed policy`);
+    if (!policies.some((e) => e.startsWith(`policy:${t.t}:`) && isReviewedPolicy(e, active))) problems.push(`table ${t.t} has no reviewed policy`);
   }
   const inherits = await client.query<{ child: string; parent: string }>(
     `SELECT cn.nspname || '.' || c.relname AS child, pn.nspname || '.' || p.relname AS parent
@@ -525,9 +535,9 @@ async function tableViolations(client: ClientBase): Promise<string[]> {
  * expressions run for every candidate row and may call functions, and they
  * can deny service; none is reviewed.
  */
-async function policyViolations(client: ClientBase): Promise<string[]> {
+async function policyViolations(client: ClientBase, active: ReadonlySet<string>): Promise<string[]> {
   return (await policyEntries(client))
-    .filter((e) => !isReviewedPolicy(e))
+    .filter((e) => !isReviewedPolicy(e, active))
     .sort()
     .map((e) => `${e} is not a reviewed policy`);
 }
@@ -620,23 +630,41 @@ export async function foundationSnapshot(client: ClientBase): Promise<string[]> 
 const FOUNDATION_ORDER = ['schema', 'table', 'trigger', 'policy', 'function', 'view', 'privilege', 'constraint', 'index', 'column'];
 
 /** Missing or altered 0001 objects, when (and only when) the ledger says 0001 is applied. */
-async function foundationViolations(client: ClientBase): Promise<string[]> {
+/**
+ * The expected foundation for the applied migration state (round 14): the
+ * manifest of the HIGHEST applied version that ships one. A migration that
+ * changes the reviewed foundation ships its own manifest; one that does not
+ * leaves the previous manifest in force (so an unreviewed change fails). Null
+ * when no applied version has a manifest (before 0001, or after its down).
+ */
+async function activeManifest(
+  client: ClientBase,
+  manifests: Record<string, readonly string[]>,
+): Promise<{ version: string; entries: readonly string[] } | null> {
   const ledger = (await client.query<{ e: boolean }>(`SELECT pg_catalog.to_regclass('public.schema_migrations') IS NOT NULL AS e`)).rows[0].e;
-  if (!ledger) return [];
-  const applied = (await client.query<{ e: boolean }>(`SELECT EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '0001') AS e`)).rows[0].e;
-  if (!applied) return [];
+  if (!ledger) return null;
+  const applied = (await client.query<{ version: string }>(`SELECT version FROM public.schema_migrations ORDER BY version DESC`)).rows;
+  for (const { version } of applied) if (manifests[version]) return { version, entries: manifests[version] };
+  return null;
+}
+
+/** Missing or altered foundation objects relative to the active manifest. */
+async function foundationViolations(client: ClientBase, active: { version: string; entries: readonly string[] } | null): Promise<string[]> {
+  if (!active) return [];
   const present = new Set(await foundationSnapshot(client));
   // Most significant first, so a truncated error message still names the root cause
   // (e.g. the schema, not 128 of its columns).
   const rank = (e: string) => FOUNDATION_ORDER.indexOf(e.slice(0, e.indexOf(':')));
-  return FOUNDATION_0001.filter((e) => !present.has(e))
+  return active.entries
+    .filter((e) => !present.has(e))
     .sort((x, y) => rank(x) - rank(y) || (x < y ? -1 : 1))
-    .map((e) => `required 0001 object missing or altered: ${e}`);
+    .map((e) => `required ${active.version} object missing or altered: ${e}`);
 }
 
 /** Every deviation from the reviewed model, one human-readable line each (empty when compliant). */
-export async function privilegeModelViolations(client: ClientBase): Promise<string[]> {
+export async function privilegeModelViolations(client: ClientBase, opts: CheckOptions = {}): Promise<string[]> {
   await pinSearchPath(client);
+  const manifests = opts.manifests ?? loadManifests();
   const problems: string[] = [];
   const eff = await effectivePrivileges(client);
   for (const role of ['ratio_reader', 'ratio_worker'] as const) {
@@ -665,17 +693,20 @@ export async function privilegeModelViolations(client: ClientBase): Promise<stri
   for (const { fn } of pub.rows) problems.push(`PUBLIC holds EXECUTE on ${fn}`);
   problems.push(...(await hookViolations(client)));
   problems.push(...(await settingViolations(client)));
-  problems.push(...(await foundationViolations(client)));
-  problems.push(...(await policyViolations(client)));
-  problems.push(...(await tableViolations(client)));
+  const active = await activeManifest(client, manifests);
+  const activeSet = new Set(active ? active.entries : FOUNDATION_0001);
+  problems.push(...(await foundationViolations(client, active)));
+  problems.push(...(await policyViolations(client, activeSet)));
+  problems.push(...(await tableViolations(client, activeSet)));
   problems.push(...(await systemAclViolations(client)));
+  problems.push(...(await systemBaselineViolations(client, opts.systemBaseline)));
   problems.push(...(await roleViolations(client)));
   return problems;
 }
 
 /** Throws PRIVILEGE_MODEL_VIOLATION when the catalog deviates from the reviewed model. */
-export async function assertReviewedPrivileges(client: ClientBase, context = 'catalog'): Promise<void> {
-  const problems = await privilegeModelViolations(client);
+export async function assertReviewedPrivileges(client: ClientBase, context = 'catalog', opts: CheckOptions = {}): Promise<void> {
+  const problems = await privilegeModelViolations(client, opts);
   if (problems.length) {
     const shown = problems.slice(0, 20).join('; ');
     const more = problems.length > 20 ? `; ... and ${problems.length - 20} more` : '';

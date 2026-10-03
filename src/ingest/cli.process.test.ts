@@ -20,6 +20,8 @@ beforeAll(() => {
     cwd: ROOT,
     stdio: 'pipe',
   });
+  // Same as `npm run worker:build`: the migrations (and their manifests) ship next to the runner.
+  fs.cpSync(path.join(ROOT, 'src', 'ingest', 'db', 'migrations'), path.join(OUT, 'ingest', 'db', 'migrations'), { recursive: true });
 }, 180_000);
 afterAll(() => {
   fs.rmSync(OUT, { recursive: true, force: true });
@@ -27,7 +29,7 @@ afterAll(() => {
 
 function runCli(env: Record<string, string>) {
   return spawnSync(process.execPath, [CLI, 'migrate'], {
-    env: { PATH: process.env.PATH ?? '', RATIO_MIGRATE_DATABASE_URL: URL, ...env } as NodeJS.ProcessEnv,
+    env: { PATH: process.env.PATH ?? '', RATIO_MIGRATE_DATABASE_URL: URL, ...env } as unknown as NodeJS.ProcessEnv,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     timeout: 60_000,

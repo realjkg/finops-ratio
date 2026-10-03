@@ -10,6 +10,7 @@
 //
 // Connection: RATIO_MIGRATE_DATABASE_URL (a login that is ratio_owner or a
 // member of it). The URL and its credentials are never logged.
+import fs from 'fs';
 import { Client } from 'pg';
 import { MigrationError } from './db/migrationFiles';
 import { assertDownAllowed, migrateDown, migrateUp, migrationStatus } from './db/migrate';
@@ -266,12 +267,57 @@ export async function main(argv: string[], env: Env, io: CliIO): Promise<number>
   }
 }
 
+/**
+ * Writes all of `text` to `fd` synchronously, retrying on EAGAIN (stdio pipes
+ * may be non-blocking). Used on the fatal path, where process.exit() follows
+ * immediately and an asynchronous stream write could be lost (round 14).
+ */
+export function writeAllSync(fd: number, text: string): void {
+  const buf = Buffer.from(text, 'utf8');
+  let off = 0;
+  while (off < buf.length) {
+    try {
+      off += fs.writeSync(fd, buf, off, buf.length - off);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EAGAIN') throw e;
+    }
+  }
+}
+
+/**
+ * TEST-ONLY crash hook (round 14): RATIO_TEST_CRASH=uncaught|rejection makes
+ * the CLI crash on the next tick, so the process-level handler can be tested
+ * end to end through a real pipe. Honoured only when RATIO_ENV is `test` and
+ * NODE_ENV is not production — never in staging, production or when unset.
+ * RATIO_TEST_CRASH_PAD adds that many characters to the error message.
+ */
+export function testCrashHook(env: Env): (() => void) | null {
+  const kind = env.RATIO_TEST_CRASH;
+  if (kind !== 'uncaught' && kind !== 'rejection') return null;
+  if ((env.RATIO_ENV ?? '').trim().toLowerCase() !== 'test') return null;
+  if ((env.NODE_ENV ?? '').trim().toLowerCase() === 'production') return null;
+  const pad = Math.min(Number.parseInt(env.RATIO_TEST_CRASH_PAD ?? '0', 10) || 0, 16_000_000);
+  return () => {
+    const err = new Error(`test crash (${env.RATIO_MIGRATE_DATABASE_URL ?? ''}) ${'x'.repeat(pad)}`);
+    if (kind === 'uncaught') setImmediate(() => {
+      throw err;
+    });
+    else void Promise.reject(err);
+  };
+}
+
 if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
-  installProcessHandlers(process, process.env, { err: (l) => process.stderr.write(l + '\n') }, (code) => process.exit(code));
-  void main(process.argv.slice(2), process.env, {
-    out: (l) => process.stdout.write(l + '\n'),
-    err: (l) => process.stderr.write(l + '\n'),
-  }).then((code) => {
-    process.exitCode = code;
-  });
+  // Fatal path: synchronous write to fd 2, then exit (no lost line on a pipe).
+  installProcessHandlers(process, process.env, { err: (l) => writeAllSync(2, l + '\n') }, (code) => process.exit(code));
+  const crash = testCrashHook(process.env);
+  if (crash) {
+    crash(); // test-only: crash instead of running the command (deterministic)
+  } else {
+    void main(process.argv.slice(2), process.env, {
+      out: (l) => process.stdout.write(l + '\n'),
+      err: (l) => process.stderr.write(l + '\n'),
+    }).then((code) => {
+      process.exitCode = code;
+    });
+  }
 }
