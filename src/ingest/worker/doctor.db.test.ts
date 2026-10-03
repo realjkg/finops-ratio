@@ -58,7 +58,8 @@ describe('doctor', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-doctor-'));
     try {
       for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
-      fs.writeFileSync(path.join(dir, '9999_future.up.sql'), '-- ratio:phase expand\nSELECT 1;\n');
+      // Never applied: it only has to be a valid pending expand migration (amended 0001 allow-list).
+      fs.writeFileSync(path.join(dir, '9999_future.up.sql'), '-- ratio:phase expand\nCREATE TABLE public.ratio_doctor_future_probe (id integer);\n');
       const r = await runDoctor({ workerUrl: t.login.url, migrateUrl: t.db.url, tenantIds: [], maxStalenessHours: 48, migrationsDir: dir });
       expect(r.pass).toBe(false);
       expect(byName(r.checks, 'migration_version')).toMatchObject({ status: 'fail', data: expect.objectContaining({ problems: ['PENDING'] }) });

@@ -216,13 +216,14 @@ describe('sync: reconciliation', () => {
     expect((await batchesOf(t.db.pool, s.tenantId, s.sourceId))[0]).toMatchObject({ status: 'published', reconciliation: 'reconciled', control_rows: '2', control_total: '2.5' });
   });
 
-  it('W8 no control ⇒ unverified and published; incomplete agreeing control ⇒ unverified', async () => {
+  // Amended 0001 (orchestrator round 2): `reconciled` ⇔ at least one control and every present control matches.
+  it('W8 no control ⇒ unverified and published; a partial (row-count only) agreeing control ⇒ reconciled', async () => {
     const s = await seedTenantSource(t.db.pool);
     await sync(s, new FakeFocusSource([period(P, [['r/a.csv.gz', csvGz(rowsOf(P, 2))]]), period(P2, [['r/b.csv.gz', csvGz(rowsOf(P2, 2))]], { rowCount: 2 })]));
     const b = await batchesOf(t.db.pool, s.tenantId, s.sourceId);
     expect(b.map((x) => [x.period, x.status, x.reconciliation])).toEqual([
       [P, 'published', 'unverified'],
-      [P2, 'published', 'unverified'],
+      [P2, 'published', 'reconciled'],
     ]);
   });
 
@@ -256,6 +257,28 @@ describe('sync: reconciliation', () => {
       expect(await checkpointOf(t.db.pool, s.tenantId, s.sourceId)).toEqual(cpBefore);
     });
   }
+
+  it('W7b a per-artifact count for only some artifacts that disagrees ⇒ quarantined (no set-level control to store, so reconciliation stays unverified)', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const r = await sync(
+      s,
+      new FakeFocusSource([period(P, [['r/a.csv.gz', csvGz(rowsOf(P, 2))], ['r/b.csv.gz', csvGz(rowsOf(P, 1, '1.25', 'b'))]], { artifactRowCounts: { 'r/a.csv.gz': 5 } })]),
+    );
+    expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code: 'RECONCILIATION_VARIANCE' });
+    const b = (await batchesOf(t.db.pool, s.tenantId, s.sourceId))[0];
+    expect(b).toMatchObject({ status: 'quarantined', reconciliation: 'unverified', control_rows: null });
+    expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({});
+  });
+
+  it('W7c per-artifact counts covering every artifact become the set-level control row count', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const r = await sync(
+      s,
+      new FakeFocusSource([period(P, [['r/a.csv.gz', csvGz(rowsOf(P, 2))], ['r/b.csv.gz', csvGz(rowsOf(P, 1, '1.25', 'b'))]], { artifactRowCounts: { 'r/a.csv.gz': 2, 'r/b.csv.gz': 1 } })]),
+    );
+    expect(r.periods[0]).toMatchObject({ outcome: 'published', reconciliation: 'reconciled' });
+    expect((await batchesOf(t.db.pool, s.tenantId, s.sourceId))[0]).toMatchObject({ control_rows: '3', reconciliation: 'reconciled' });
+  });
 
   it('W15 same bytes but a disagreeing control ⇒ failed visibly, publication untouched', async () => {
     const s = await seedTenantSource(t.db.pool);
