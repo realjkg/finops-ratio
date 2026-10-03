@@ -162,31 +162,125 @@ proving the transport path rather than a partner integration.
 
 These need live services or secrets and are out of Phase 1 scope:
 
-- Live Claude wiring is built but inactive until `NEXT_PUBLIC_ANTHROPIC_API_KEY` is set
+- The live LLM path is built but inactive until `AI_PROVIDER` is set (see *AI providers* below)
 - The standalone REST API engine + webhooks (spec §14, acceptance items 9–10)
 - Slack/email report delivery (§9)
 - Auth + team scoping (§11 Sprint 3+)
 
-## Cloud cost connectors (ship dark)
+## Cost connectors — on-prem, private cloud, public cloud
 
-Native cost-source connectors for the public clouds and private infrastructure
-are wired into the cost-ingest seam (`src/costsource/`) and **ship dark**: each
-is config-gated behind a feature flag and is registered as `configured: false`
-(no network calls) until its flag and credentials are set. Like the PointFive
-live adapter, only the adapter (auth/fetch) is source-specific — every connector
-reuses the existing FOCUS v1.0–v1.4 → v1.4 normalization shim.
+Native cost-source connectors are wired into the cost-ingest seam
+(`src/costsource/`) and are **live, credential-driven**: each connector goes live
+as soon as its environment variables are set on the server — no feature flag, no
+code change. Until then it reads as **available** and makes no network calls. Its
+`COSTSOURCE_*_LIVE` flag is a kill-switch: set it to `false` to keep a configured
+connector off (`true` makes a missing variable show as *incomplete* rather than
+*available*). Only the transport (auth + fetch) is source-specific; every
+connector reuses the FOCUS v1.0–v1.4 → v1.4 normalization shim and Ratio's value
+denominator.
 
-| Connector | Source id | Coverage | Feature flag | Required env |
+| Connector | Source id | Coverage | Required env | Optional env |
 |---|---|---|---|---|
-| Azure Cost Management | `azure-cost-management` | public_cloud | `COSTSOURCE_AZURE_LIVE` | `AZURE_FOCUS_EXPORT_URL`, `AZURE_FOCUS_SAS` |
-| AWS Data Exports | `aws-data-exports` | public_cloud | `COSTSOURCE_AWS_LIVE` | `AWS_FOCUS_EXPORT_BUCKET`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| GCP BigQuery FOCUS export | `gcp-bigquery-focus` | public_cloud | `COSTSOURCE_GCP_LIVE` | `GCP_FOCUS_BQ_DATASET`, `GCP_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS` |
-| Kubernetes (OpenCost / Kubecost) | `kubernetes` | private_cloud | `COSTSOURCE_KUBERNETES_LIVE` | `KUBERNETES_FOCUS_ENDPOINT` (+ optional `KUBERNETES_FOCUS_TOKEN`) |
-| Nutanix Cloud Manager | `nutanix` | on_prem | `COSTSOURCE_NUTANIX_LIVE` | `NUTANIX_ENDPOINT`, `NUTANIX_API_KEY` |
+| Azure Cost Management | `azure-cost-management` | public_cloud | `AZURE_FOCUS_EXPORT_URL`, `AZURE_FOCUS_SAS` | — |
+| AWS Data Exports | `aws-data-exports` | public_cloud | `AWS_FOCUS_EXPORT_BUCKET`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | `AWS_SESSION_TOKEN`, `AWS_FOCUS_EXPORT_PREFIX`, `AWS_S3_ENDPOINT` |
+| GCP BigQuery FOCUS export | `gcp-bigquery-focus` | public_cloud | `GCP_FOCUS_BQ_DATASET`, `GCP_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS` | — |
+| Kubernetes (OpenCost / Kubecost) | `kubernetes` | private_cloud | `KUBERNETES_FOCUS_ENDPOINT` | `KUBERNETES_FOCUS_TOKEN` |
+| Nutanix Cloud Manager | `nutanix` | on_prem | `NUTANIX_ENDPOINT`, `NUTANIX_API_KEY` | — |
 
-The live FOCUS-export transport is a thin, clearly-marked seam: until a concrete
-transport is injected, a configured connector reports an honest "not wired" state
-rather than fabricating data.
+How each one reads its data (`src/costsource/transports/`, web-standard APIs only
+— no cloud SDKs, runs on Node 20+ and edge runtimes):
+
+- **Azure** — lists the export container with the SAS (needs `r` + `l`), picks
+  the latest run for each requested month and reads ONLY the blobs its
+  `manifest.json` lists (no manifest, or a listed blob missing → error).
+  `AZURE_FOCUS_EXPORT_URL` must name the container (+ optional path); a
+  single-blob URL is rejected because one file cannot be verified as complete.
+- **AWS** — `ListObjectsV2` + `GetObject` signed with SigV4 (verified against the
+  AWS reference vectors); for each billing period in the window it reads ONLY
+  the `dataFiles` of the `metadata/BILLING_PERIOD=YYYY-MM/…-Manifest.json`
+  manifest (no manifest, or a listed file missing → error). `AWS_S3_ENDPOINT` points the same reader at an **S3-compatible store
+  (MinIO, Ceph RGW, StorageGRID)** for on-prem / private-cloud exports.
+- **GCP** — service-account JWT → OAuth token → parameterized BigQuery query over
+  the window. `GOOGLE_APPLICATION_CREDENTIALS` may be a file path, inline JSON,
+  or base64 JSON (for hosts without a filesystem).
+- **Kubernetes / Nutanix** — HTTPS GET of the connector's FOCUS export endpoint.
+
+Exports may be CSV, JSON, or NDJSON, optionally gzip-compressed. Parquet is
+rejected with a clear message (configure the export as CSV). The endpoint URLs
+may embed `{start}` / `{end}` placeholders for server-side window filtering.
+
+**The location variable is the anchor.** Hosts often inject generic cloud
+credentials (AWS keys on Lambda, Google ADC on GKE). A connector is only
+*incomplete* once its location (export URL, bucket, dataset, endpoint) is set;
+before that it is simply *available*.
+
+**Real billing data is never served anonymously (deny by default).**
+`GET /api/costsource/rows`, `/findings` and `/health` serve only the two
+offline sandbox sources (`pointfive-sandbox`, `focus-file-sandbox`) without a
+token. Every other source id — live connectors, PointFive live, and unknown ids —
+requires `Authorization: Bearer <RATIO_API_TOKEN>` (compared in constant time)
+and is refused outright when no token is configured; unknown ids answer 404 only
+after authentication. The token must be at least 32 characters with at least 10
+distinct characters: a weaker configured `RATIO_API_TOKEN` refuses live cost data
+with 503 (sandbox sources are unaffected; the AI chat / change-management gateway
+still accepts it but logs a one-time warning). Failed authentications — on rows, findings,
+health, `/api/costsource/sources` and `/api/v1/connectors` alike — share one
+count per client IP; after 1,000 in a minute that client's further failed
+attempts get 429, while a request with the valid token always passes. The client
+IP is the socket address; `X-Forwarded-For` is ignored unless `RATIO_TRUSTED_PROXY_HOPS=N`
+(integer ≥ 1) declares N trusted proxies, in which case the Nth entry from the
+right is used (a one-time warning is logged when a multi-hop `X-Forwarded-For`
+arrives without it). The limiter is **per process** — each serverless instance counts
+separately — so a shared store is a deployment-brief item. `GET
+/api/costsource/sources` and `GET /api/v1/connectors` show live connector
+status only to authenticated callers; anonymous callers see the neutral
+registry. The offline demo is unchanged.
+
+**Fail loudly, never partially.** A connector either returns the complete data
+for the window or errors: too many export files, a truncated listing, a missing
+billing month in a multi-month window, an exhausted BigQuery page cap, or an
+invalid row is an explicit error naming the artifact and row. Rows must carry
+`BilledCost`, `ChargePeriodStart` and a known ISO-4217 `BillingCurrency`; dates
+are strict ISO-8601 (no offset means UTC); numbers are plain decimals. Each row
+keeps its own currency — mixed currencies are never summed. Window bounds must
+be `YYYY-MM-DD` (00:00Z) or `YYYY-MM-DDTHH:MM[:SS[.fff]]` with optional `Z` /
+`±hh:mm` (none = UTC) and start < end; anything else is a 400. A manifest larger
+than 1 MiB or an export object larger than 512 MiB (counted while streaming) is
+an `export too large` error. Upstream
+error bodies are never returned to API callers — only label + HTTP status; the
+body is logged server-side, redacted and truncated.
+
+**Automation.** `GET /api/v1/connectors` returns every connector's
+server-resolved state and the env names that connect it; add `?probe=true`
+(requires `Authorization: Bearer <RATIO_API_TOKEN>`) to health-check every
+configured connector in parallel — suitable for a deploy pipeline or uptime
+monitor. The `/connectors` page shows the same state; its **Test connection**
+button probes sandbox sources only — the browser never holds an API token, so
+live connectors are probed through the authenticated API.
+
+PointFive (live) is the one exception: it routes through PointFive's broker (a
+controlled-egress path), so it stays explicitly opt-in behind
+`COSTSOURCE_POINTFIVE_LIVE`.
+
+## AI providers — any API, any open-weight model
+
+The agent's LLM is chosen server-side by `AI_PROVIDER`; keys never reach the
+browser. Claude and OpenAI use their SDKs; every other provider speaks the
+OpenAI-compatible chat-completions format through one adapter, so the agent is
+not tied to any vendor.
+
+| `AI_PROVIDER` | Reaches | Env |
+|---|---|---|
+| `mock` (default) | Offline, data-grounded mock | — |
+| `claude` | Anthropic | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` |
+| `openai` | OpenAI | `OPENAI_API_KEY`, `OPENAI_MODEL` |
+| `mistral` | Mistral La Plateforme | `MISTRAL_API_KEY`, optional `MISTRAL_MODEL` (default `mistral-large-latest`), `MISTRAL_BASE_URL` |
+| `qwen` | Alibaba Cloud Model Studio (DashScope, compatible mode) | `QWEN_API_KEY` or `DASHSCOPE_API_KEY`, optional `QWEN_MODEL` (default `qwen-plus`), `QWEN_BASE_URL` |
+| `openllm` (aliases `ollama`, `vllm`, `tgi`, `lmstudio`, `llama.cpp`, `open-weight`) | Any self-hosted open-weight model — Llama, Mistral/Mixtral, Qwen, DeepSeek, Gemma, Phi… | `OPENLLM_BASE_URL`, `OPENLLM_MODEL`, optional `OPENLLM_API_KEY` |
+
+Any other hosted OpenAI-compatible service works through `openllm` by pointing
+`OPENLLM_BASE_URL` at it. Selecting any live provider turns gateway auth on
+(`RATIO_API_TOKEN`), so a paid model endpoint is never exposed unauthenticated.
 
 Durable design rules live in `.obvious/obvious.md` (Design Guidance) and the
 routine skills under `.obvious/skills/`. The full v1 design specification is

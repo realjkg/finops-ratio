@@ -1,20 +1,21 @@
-// Tests for CloudConnectorAdapter — the shared FOCUS-export adapter for the
-// cloud-connectors MVP (cloud trio + Kubernetes + Nutanix), all shipping DARK.
+// Tests for CloudConnectorAdapter — the shared FOCUS-export adapter behind every
+// config-driven connector (cloud trio + Kubernetes + Nutanix).
 //
 // Coverage:
-//   1. Flag-OFF inert path — dark health, throwing fetchCostRows, and provably
-//      ZERO network: the transport factory is never called
-//   2. Unconfigured health (flag ON, creds missing) — honest not-authed state
+//   1. Not-configured path (available, and kill-switched) — honest health,
+//      throwing fetchCostRows, and provably ZERO network: the transport
+//      factory is never called
+//   2. Partially configured health — honest about what is missing
 //   3. FOCUS v1.0 → v1.4 normalization via the reused shim (configured path),
 //      with the correct backfilledColumns and Ratio value attached (R4)
 //   4. Configured health — reachable via a mocked transport; honest failure
 //      when the transport throws
-//   5. Default (unwired) transport on the configured path throws "not wired"
-//      rather than fabricating data
+//   5. Default transport is the spec's LIVE transport — exercised end to end
+//      with a stubbed global fetch, so no request leaves the process
 //
-// The transport is always injected — no real network call in tests or CI.
+// No real network call in tests or CI.
 
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { CloudConnectorAdapter, type FocusExportTransport } from './CloudConnectorAdapter';
 import {
   AZURE_CONNECTOR_SPEC,
@@ -78,10 +79,10 @@ const SPECS: ConnectorSpec[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// 1. Flag-OFF inert path — dark, and provably no network
+// 1. Not configured — honest, and provably no network
 // ---------------------------------------------------------------------------
 
-describe.each(SPECS)('CloudConnectorAdapter [$id] — flag OFF (ships dark)', (spec) => {
+describe.each(SPECS)('CloudConnectorAdapter [$id] — not configured (available)', (spec) => {
   it('healthCheck is not reachable / not authed and makes no network call', async () => {
     const transportFactory = vi.fn(() => makeMockTransport());
     const health = await new CloudConnectorAdapter(spec, { env: {}, transportFactory }).healthCheck();
@@ -89,7 +90,18 @@ describe.each(SPECS)('CloudConnectorAdapter [$id] — flag OFF (ships dark)', (s
     expect(health.reachable).toBe(false);
     expect(health.authed).toBe(false);
     expect(health.canonicalVersion).toBe('1.4');
-    expect(health.detail).toMatch(/ships dark/i);
+    expect(health.detail).toMatch(/ready to connect/i);
+    expect(transportFactory).not.toHaveBeenCalled();
+  });
+
+  it('kill-switch keeps a fully configured connector off the network', async () => {
+    const transportFactory = vi.fn(() => makeMockTransport());
+    const adapter = new CloudConnectorAdapter(spec, {
+      env: { ...CONFIGURED_ENV[spec.id], [spec.flagEnv]: 'false' },
+      transportFactory,
+    });
+    expect((await adapter.healthCheck()).detail).toMatch(/disabled/i);
+    await expect(adapter.fetchCostRows(WINDOW)).rejects.toThrow(/not configured \(disabled\)/i);
     expect(transportFactory).not.toHaveBeenCalled();
   });
 
@@ -100,16 +112,17 @@ describe.each(SPECS)('CloudConnectorAdapter [$id] — flag OFF (ships dark)', (s
     expect(transportFactory).not.toHaveBeenCalled();
   });
 
-  it('describe() marks the source dark for listSources', () => {
+  it('describe() marks the source available for listSources', () => {
     const descriptor = new CloudConnectorAdapter(spec, { env: {} }).describe();
     expect(descriptor.id).toBe(spec.id);
     expect(descriptor.configured).toBe(false);
+    expect(descriptor.connection).toBe('available');
     expect(descriptor.capabilities).toContain('costRows');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. Unconfigured (flag ON, creds missing)
+// 2. Partially configured
 // ---------------------------------------------------------------------------
 
 describe('CloudConnectorAdapter — flag ON but unconfigured', () => {
@@ -122,7 +135,7 @@ describe('CloudConnectorAdapter — flag ON but unconfigured', () => {
     const health = await adapter.healthCheck();
     expect(health.reachable).toBe(false);
     expect(health.authed).toBe(false);
-    expect(health.detail).toMatch(/credentials missing/i);
+    expect(health.detail).toMatch(/still missing AZURE_FOCUS_EXPORT_URL, AZURE_FOCUS_SAS/);
     expect(transportFactory).not.toHaveBeenCalled();
   });
 });
@@ -198,24 +211,51 @@ describe('CloudConnectorAdapter — healthCheck (configured)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Default (unwired) transport — loud, never fabricates data
+// 5. Default transport is the live one (stubbed fetch — nothing leaves the process)
 // ---------------------------------------------------------------------------
 
-describe('CloudConnectorAdapter — configured but unwired transport (MVP seam)', () => {
-  it('fetchCostRows surfaces a clear "not wired" error instead of inventing rows', async () => {
-    const adapter = new CloudConnectorAdapter(AZURE_CONNECTOR_SPEC, {
-      env: CONFIGURED_ENV[AZURE_SOURCE_ID],
-    });
-    await expect(adapter.fetchCostRows(WINDOW)).rejects.toThrow(/not wired/i);
+const FOCUS_CSV = [
+  'BilledCost,EffectiveCost,BillingCurrency,ChargePeriodStart,ChargePeriodEnd,ProviderName,ServiceName,ResourceId',
+  '120.5,110,USD,2026-06-03T00:00:00Z,2026-06-04T00:00:00Z,Microsoft,Azure OpenAI,arn:ratio:workload/wl-001',
+  '9.99,9.99,USD,2026-05-30T00:00:00Z,2026-05-31T00:00:00Z,Microsoft,Storage,/subs/x/storage',
+].join('\n');
+
+describe('CloudConnectorAdapter — default live transport', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it('healthCheck degrades honestly when the default transport is unwired', async () => {
-    const adapter = new CloudConnectorAdapter(AZURE_CONNECTOR_SPEC, {
-      env: CONFIGURED_ENV[AZURE_SOURCE_ID],
+  it('fetches the configured endpoint with its credential and normalizes the export', async () => {
+    const fetchMock = vi.fn(async () => new Response(FOCUS_CSV, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new CloudConnectorAdapter(KUBERNETES_CONNECTOR_SPEC, {
+      env: {
+        KUBERNETES_FOCUS_ENDPOINT: 'https://opencost.example/focus?from={start}',
+        KUBERNETES_FOCUS_TOKEN: 'k8s-token',
+      },
     });
-    const health = await adapter.healthCheck();
+    const result = await adapter.fetchCostRows(WINDOW);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`https://opencost.example/focus?from=${encodeURIComponent(WINDOW.start)}`);
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer k8s-token');
+
+    // Only the in-window row survives; it is upgraded to v1.4 and valued (R4).
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].BilledCost).toBe(120.5);
+    expect(result.rows[0].ListCost).toBe(120.5); // backfilled by the shim
+    expect(result.rows[0].x_RatioWorkloadId).toBe('wl-001');
+    expect(result.backfilledColumns).toEqual(columnsAddedAfter('1.0'));
+  });
+
+  it('reports an honest health failure when the live source rejects the credential', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('denied', { status: 403 })));
+    const health = await new CloudConnectorAdapter(NUTANIX_CONNECTOR_SPEC, {
+      env: CONFIGURED_ENV[NUTANIX_CONNECTOR_SPEC.id],
+    }).healthCheck();
     expect(health.reachable).toBe(false);
-    expect(health.detail).toMatch(/health check failed/i);
+    expect(health.detail).toMatch(/health check failed: .*403/);
   });
 });
-

@@ -44,10 +44,10 @@ export class MockCostSourceClient implements CostSourceClient {
     if (sourceId === POINTFIVE_LIVE_SOURCE_ID) {
       return new PointFiveLiveAdapter().fetchCostRows(window);
     }
-    // Cloud-connectors MVP sources dispatch to the shared FOCUS-export adapter.
-    // Default build: flag OFF → the adapter throws an honest "not configured"
-    // error and makes no network call; configured but unwired throws "not wired"
-    // rather than silently serving seed data.
+    // Config-driven connectors dispatch to the shared FOCUS-export adapter,
+    // which goes live through the connector's transport once its env is set.
+    // Not configured → an honest "not configured" error and no network call; a
+    // live failure is thrown, never papered over with seed data.
     const connectorSpec = findConnectorSpec(sourceId);
     if (connectorSpec) {
       return new CloudConnectorAdapter(connectorSpec).fetchCostRows(window);

@@ -42,40 +42,52 @@ const PROVIDER_NAME: Record<string, string> = {
   custom: 'custom',
 };
 
-export const COST_SOURCES: CostSourceDescriptor[] = [
-  {
-    id: 'pointfive-sandbox',
-    name: 'PointFive (sandbox)',
-    kind: 'pointfive',
-    focusVersion: '1.0',
-    coverage: 'public_cloud',
-    capabilities: ['costRows', 'findings'],
-    configured: true,
-    note: 'Offline seed mirroring PointFive Opportunities/Anomalies + FOCUS export (documented v1.0).',
-  },
-  {
-    id: 'focus-file-sandbox',
-    name: 'FOCUS file (private-cloud sandbox)',
-    kind: 'focus_file',
-    focusVersion: '1.2',
-    coverage: 'private_cloud',
-    capabilities: ['costRows'],
-    configured: true,
-    note: 'Offline seed standing in for an on-prem / private-cloud FOCUS export; the live adapter is PR F.',
-  },
-  // Live PointFive adapter (PR E). Its descriptor is computed from the feature
-  // flag + OAuth env so `configured` honestly reflects whether the dark adapter
-  // has been switched on. Default build: flag OFF → configured:false (ships dark).
-  pointFiveLiveDescriptor(resolvePointFiveStatus(process.env)),
-  // Cloud-connectors MVP: public cloud (Azure / AWS / GCP), Kubernetes, Nutanix.
-  // Each descriptor is computed from its feature flag + credential env via the
-  // generic resolver, so `configured` honestly reflects whether the dark
-  // connector has been switched on. Default build: every flag OFF → configured:
-  // false (all ship dark, no network calls).
-  ...FOCUS_EXPORT_CONNECTOR_SPECS.map((spec) =>
-    connectorDescriptor(spec, resolveConnectorStatus(spec, process.env)),
-  ),
-];
+/**
+ * The source registry resolved against an env record. Server code uses
+ * `COST_SOURCES` (process.env); a client render that must match its server
+ * prerender uses `sourcesForEnv({})`, since hosts inject env (AWS keys on
+ * Lambda, Google ADC on GKE) the browser never sees.
+ */
+export function sourcesForEnv(env: Record<string, string | undefined>): CostSourceDescriptor[] {
+  return [
+    {
+      id: 'pointfive-sandbox',
+      name: 'PointFive (sandbox)',
+      kind: 'pointfive',
+      focusVersion: '1.0',
+      coverage: 'public_cloud',
+      capabilities: ['costRows', 'findings'],
+      configured: true,
+      note: 'Offline seed mirroring PointFive Opportunities/Anomalies + FOCUS export (documented v1.0).',
+    },
+    {
+      id: 'focus-file-sandbox',
+      name: 'FOCUS file (private-cloud sandbox)',
+      kind: 'focus_file',
+      focusVersion: '1.2',
+      coverage: 'private_cloud',
+      capabilities: ['costRows'],
+      configured: true,
+      note: 'Offline seed standing in for an on-prem / private-cloud FOCUS export; the live adapter is PR F.',
+    },
+    // Live PointFive adapter (PR E). Its descriptor is computed from the feature
+    // flag + OAuth env so `configured` honestly reflects whether the dark adapter
+    // has been switched on. Default build: flag OFF → configured:false (ships dark).
+    pointFiveLiveDescriptor(resolvePointFiveStatus(env)),
+    // Config-driven connectors: public cloud (Azure / AWS / GCP), Kubernetes,
+    // and Nutanix. Their specs are static (no spec reads process.env at module
+    // init), so each descriptor is computed ONLY from the supplied env via the
+    // generic resolver, so `configured` honestly reflects whether
+    // the connector is live. No env set → `available` (no network calls); the
+    // server resolves real status, which /api/costsource/sources reports.
+    ...FOCUS_EXPORT_CONNECTOR_SPECS.map((spec) =>
+      connectorDescriptor(spec, resolveConnectorStatus(spec, env)),
+    ),
+  ];
+}
+
+export const COST_SOURCES: CostSourceDescriptor[] = sourcesForEnv(process.env);
+
 
 export function findSource(id: string): CostSourceDescriptor | undefined {
   return COST_SOURCES.find((s) => s.id === id);

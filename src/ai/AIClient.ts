@@ -8,8 +8,10 @@
 //
 // Security: API keys are NEVER client-side. The MockAIClient and LiveAIClient
 // are safe to import in the browser. Only the server-side adapters
-// (ClaudeAdapter, OpenAIAdapter, OpenLLMAdapter) touch keys, and they live
-// exclusively inside pages/api/ai/chat.ts.
+// (ClaudeAdapter, OpenAIAdapter, OpenAICompatibleAdapter) touch keys, and they
+// live exclusively inside pages/api/v1/ai/chat.ts.
+
+import type { AIProvider } from './providers';
 
 /** OpenAI-style role taxonomy for conversation turns. */
 export type AIRole = 'user' | 'assistant' | 'system';
@@ -80,7 +82,7 @@ export interface AIResponse {
   /** IDs from AIContext.initiatives that the response explicitly references. */
   initiativesReferenced: string[];
   /** Which provider produced this response — surfaced in the panel badge. */
-  provider: 'claude' | 'openai' | 'openllm' | 'mock';
+  provider: AIProvider;
 }
 
 /** The AIClient seam interface. The store calls this; adapters live server-side. */
