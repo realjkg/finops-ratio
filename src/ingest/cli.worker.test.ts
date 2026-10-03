@@ -179,7 +179,6 @@ describe('process-level crash handler (single implementation: cli.ts installProc
 // exit 1, promptly — the handler must never block on redaction.
 describe('crash handler in a spawned process with a > 2 MB message', () => {
   const ROOT = path.resolve(__dirname, '..', '..');
-  const TSX = path.join(ROOT, 'node_modules', '.bin', 'tsx');
   const CHILD = path.join(__dirname, 'testing', 'crashChild.ts');
   const secret = 'pw"q\\b%22x';
   const forms = [secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1), JSON.stringify(encodeURIComponent(secret)).slice(1, -1), 'S3-secret-key-crash-test'];
@@ -193,14 +192,21 @@ describe('crash handler in a spawned process with a > 2 MB message', () => {
   });
   const spawnChild = (extra: Record<string, string>) => {
     const started = Date.now();
-    const r = spawnSync(TSX, [CHILD], { env: childEnv(extra), timeout: 20_000, killSignal: 'SIGKILL', encoding: 'utf8', maxBuffer: 64 << 20 });
+    // node --import tsx (not the tsx wrapper, which spawns a grandchild without fd 3).
+    const r = spawnSync(process.execPath, ['--import', 'tsx', CHILD], {
+      cwd: ROOT,
+      env: childEnv(extra),
+      timeout: 20_000,
+      killSignal: 'SIGKILL',
+      encoding: 'utf8',
+      maxBuffer: 64 << 20,
+      stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+    });
     return { ...r, wallMs: Date.now() - started };
   };
 
   for (const mode of ['throw', 'reject'] as const) {
-    it(`${mode === 'throw' ? 'uncaughtException' : 'unhandledRejection'}: one redacted line, exit 1, handler within 2 s of start-up`, () => {
-      const baseline = spawnChild({ RATIO_CRASH_MODE: 'baseline' });
-      expect(baseline.status, baseline.stderr).toBe(0);
+    it(`${mode === 'throw' ? 'uncaughtException' : 'unhandledRejection'}: one bounded, redacted line, exit 1; the handler itself takes < 2 s`, () => {
       const r = spawnChild({ RATIO_CRASH_MODE: mode, RATIO_CRASH_BYTES: String(2_100_000) });
       expect(r.signal, `killed after ${r.wallMs} ms`).toBeNull();
       expect(r.status).toBe(1);
@@ -209,8 +215,15 @@ describe('crash handler in a spawned process with a > 2 MB message', () => {
       expect(lines).toHaveLength(1);
       expect(() => JSON.parse(lines[0])).not.toThrow();
       for (const f of forms) expect(lines[0], f).not.toContain(f);
-      // The crash handling itself (beyond the child's start-up) stays within budget.
-      expect(r.wallMs - baseline.wallMs).toBeLessThan(2_000);
+      // Deterministic bound: every string is capped before redaction, so the
+      // line (message + detail, each <= MAX_REDACTED_LENGTH) stays small.
+      expect(lines[0].length).toBeLessThan(16_384);
+      // Timing measured inside the child, from raising the crash to writing the
+      // line (no spawn / start-up noise): the redaction work is milliseconds.
+      const timing = String((r.output as Array<string | null>)[3] ?? '').trim();
+      expect(timing, 'the child reports its handler time on fd 3').not.toBe('');
+      const { handlerMs } = JSON.parse(timing) as { handlerMs: number };
+      expect(handlerMs).toBeLessThan(2_000);
     }, 60_000);
   }
 });
