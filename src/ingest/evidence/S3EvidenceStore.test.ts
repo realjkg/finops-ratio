@@ -363,3 +363,61 @@ describe('S3EvidenceStore: a 409 ConditionalRequestConflict on the conditional c
   }
 });
 
+describe('S3EvidenceStore.put meters the upload body (PR #54 seventh review M2)', () => {
+  const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
+  const big = crypto.randomBytes(300_000); // several 64 KiB read chunks
+  const withFile = async <T>(fn: (file: string) => Promise<T>): Promise<T> => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-ev-'));
+    try {
+      const file = path.join(dir, 'f');
+      fs.writeFileSync(file, big);
+      return await fn(file);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  function client(mode: 'read' | 'stall', seen: { input?: Record<string, unknown>; got: number }): S3Client {
+    return {
+      async send(cmd: unknown) {
+        if (cmd instanceof HeadObjectCommand) throw Object.assign(new Error('NotFound'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } });
+        if (cmd instanceof PutObjectCommand) {
+          seen.input = cmd.input as unknown as Record<string, unknown>;
+          const body = cmd.input.Body as Readable;
+          for await (const c of body) {
+            seen.got += (c as Buffer).length;
+            if (mode === 'stall') {
+              await new Promise<never>((_, reject) => {
+                body.once('close', () => reject(Object.assign(new Error('Request aborted'), { name: 'AbortError' })));
+                body.once('error', reject);
+              });
+            }
+          }
+          return {};
+        }
+        throw new Error('unexpected command');
+      },
+    } as unknown as S3Client;
+  }
+
+  it('onProgress is called as the SDK consumes the body; every byte arrives; ContentLength and IfNoneMatch unchanged', async () => {
+    const seen = { got: 0 } as { input?: Record<string, unknown>; got: number };
+    let progress = 0;
+    const r = await withFile((file) =>
+      new S3EvidenceStore({ client: client('read', seen), bucket: 'ev' }).put('evidence/k', file, { sha256: sha(big), byteSize: big.length }, { onProgress: () => void progress++, stallMs: 5_000 }),
+    );
+    expect(r).toBe('stored');
+    expect(seen.got).toBe(big.length);
+    expect(progress).toBeGreaterThanOrEqual(3);
+    expect(seen.input).toMatchObject({ ContentLength: big.length, IfNoneMatch: '*' });
+  });
+
+  it('a consumer that stops reading: EVIDENCE_STALLED after stallMs', async () => {
+    const seen = { got: 0 } as { input?: Record<string, unknown>; got: number };
+    const started = Date.now();
+    await expect(
+      withFile((file) => new S3EvidenceStore({ client: client('stall', seen), bucket: 'ev' }).put('evidence/k', file, { sha256: sha(big), byteSize: big.length }, { stallMs: 300 })),
+    ).rejects.toMatchObject({ code: 'EVIDENCE_STALLED' });
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+});
+

@@ -45,3 +45,13 @@ describe('parseFocusTimestamp keeps years 1-99', () => {
     if (!w.ok) expect(w.errors.map((e) => e.code)).toContain('CHARGE_PERIOD_INVERTED');
   });
 });
+
+describe('UTC offsets: hour 14 only as ±14:00 (PR #54 seventh review M1)', () => {
+  it('+14:00 and -14:00 are accepted; +13:59 and -12:45 too', () => {
+    for (const z of ['+14:00', '-14:00', '+1400', '+13:59', '-12:45']) expect(parseFocusTimestamp(`2026-07-01T00:00:00${z}`), z).not.toBeNull();
+  });
+  it('+14:01, +14:59, -14:30 and +1430 are rejected', () => {
+    for (const z of ['+14:01', '+14:59', '-14:30', '+1430']) expect(parseFocusTimestamp(`2026-07-01T00:00:00${z}`), z).toBeNull();
+  });
+});
+

@@ -291,3 +291,25 @@ describe('S3FocusExportSource, PR #54 fourth review M2: the manifest GET is pinn
   });
 });
 
+describe('S3FocusExportSource reports listing progress (PR #54 seventh review M5)', () => {
+  it('progress is called after every completed page and after every manifest read', async () => {
+    const v1 = Buffer.from('version one');
+    const objects = new Map<string, FakeObject>([
+      [MANIFEST_KEY, { etag: '"m1"', size: 0, body: () => Readable.from([manifestFor([DATA_KEY])]) }],
+      [DATA_KEY, { etag: '"d1"', size: v1.length, body: () => Readable.from([v1]) }],
+    ]);
+    const events: string[] = [];
+    const inner = fakeClient(objects, []);
+    const client = {
+      async send(cmd: unknown, o?: unknown) {
+        events.push(cmd instanceof ListObjectsV2Command ? 'list' : cmd instanceof GetObjectCommand ? 'get' : 'other');
+        return (inner.send as (c: unknown, x?: unknown) => Promise<unknown>)(cmd, o);
+      },
+    } as unknown as S3Client;
+    const [l] = await new S3FocusExportSource({ client, location: LOC }).listPeriods(undefined, { progress: () => events.push('progress') });
+    expect(l.ok).toBe(true);
+    // metadata folder page, period metadata page, period data page, manifest GET: each followed by progress
+    expect(events).toEqual(['list', 'progress', 'list', 'progress', 'list', 'progress', 'get', 'progress']);
+  });
+});
+

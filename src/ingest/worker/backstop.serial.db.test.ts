@@ -10,7 +10,8 @@ import crypto from 'crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
 import { requireTestDatabaseUrl } from '../db/testing/requireTestDatabaseUrl';
-import { assertNoDangerousTestRoles, backstopProblems, dangerousRoles, dangerousTestRoles, ratioRoleProblems } from '../testing/dangerousLoginBackstop';
+import { BACKSTOP_REFUSED_PREDEFINED, assertNoDangerousTestRoles, backstopProblems, dangerousRoles, dangerousTestRoles, ratioRoleProblems } from '../testing/dangerousLoginBackstop';
+import { REFUSED_PREDEFINED_ROLES } from '../db/privilegeModel';
 
 let admin: Client;
 const created: string[] = [];
@@ -116,5 +117,42 @@ describe('runtime backstop: snapshot diff and the ratio roles themselves (serial
     }
     expect(await ratioRoleProblems(admin)).toEqual([]);
   });
+});
+
+// PR #54 seventh review M3: the backstop recognises exactly Slice 0's
+// REFUSED_PREDEFINED_ROLES (read-only), not only the server-file roles.
+const EXPECTED_REFUSED_PREDEFINED = [
+  'pg_read_server_files',
+  'pg_write_server_files',
+  'pg_execute_server_program',
+  'pg_read_all_data',
+  'pg_write_all_data',
+  'pg_signal_backend',
+  'pg_create_subscription',
+  'pg_monitor',
+  'pg_read_all_stats',
+  'pg_read_all_settings',
+  'pg_stat_scan_tables',
+] as const;
+
+describe('runtime backstop: every Slice 0 refused predefined role (serial self-test)', () => {
+  it("the backstop's predefined-role set is exactly Slice 0's REFUSED_PREDEFINED_ROLES (drift test)", () => {
+    expect([...BACKSTOP_REFUSED_PREDEFINED].sort()).toEqual(Object.keys(REFUSED_PREDEFINED_ROLES).sort());
+    expect([...BACKSTOP_REFUSED_PREDEFINED].sort()).toEqual([...EXPECTED_REFUSED_PREDEFINED].sort());
+  });
+
+  for (const role of EXPECTED_REFUSED_PREDEFINED) {
+    it(`a login of this process that is a member of ${role} is reported (pid check and snapshot diff); dropping it clears it`, async () => {
+      const snapshot = await dangerousRoles(admin);
+      const r = name('login');
+      await admin.query(`CREATE ROLE ${r} LOGIN IN ROLE ${role}`);
+      created.push(r);
+      expect(await dangerousTestRoles(admin, process.pid)).toEqual([r]);
+      expect((await backstopProblems(admin, snapshot, process.pid)).join('\n')).toMatch(new RegExp(`new dangerous role.*${r}`));
+      await admin.query(`DROP ROLE ${r}`);
+      expect(await dangerousTestRoles(admin, process.pid)).toEqual([]);
+      expect(await backstopProblems(admin, snapshot, process.pid)).toEqual([]);
+    });
+  }
 });
 
