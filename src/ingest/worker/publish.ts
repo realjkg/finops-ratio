@@ -34,6 +34,8 @@ export interface CheckpointEntry {
   pinned: boolean;
   /** A listing rejected at capture time (sizes under-reported), with the limits it was rejected under (challenger L3). */
   rejected?: RejectedListing;
+  /** The run that last wrote this entry's progress (publication, refresh, pin) — not a rejection memo. */
+  writtenBy?: string;
 }
 
 export interface RejectedListing {
@@ -41,6 +43,8 @@ export interface RejectedListing {
   code: 'ARTIFACT_SET_TOO_LARGE' | 'ARTIFACT_TOO_LARGE';
   maxArtifactBytes: number;
   maxBatchBytes: number;
+  /** The run that recorded the memo. */
+  runId?: string;
 }
 
 /** Reads a checkpoint entry; tolerates the legacy plain-string shape. */
@@ -62,13 +66,22 @@ export async function readCheckpoint(c: PoolClient, sourceId: string): Promise<R
   return out;
 }
 
-async function writeCheckpoint(c: PoolClient, lease: Lease, period: string, entry: CheckpointEntry | (Partial<CheckpointEntry> & { rejected: RejectedListing })): Promise<void> {
+async function writeCheckpoint(
+  c: PoolClient,
+  lease: Lease,
+  period: string,
+  entry: CheckpointEntry | (Partial<CheckpointEntry> & { rejected: RejectedListing }),
+  opts: { memo?: boolean } = {},
+): Promise<void> {
+  // Progress writes are stamped with the run; a rejection memo keeps the entry's previous stamp,
+  // so an abandoned run's memo-only checkpoint write can be told from real progress (round-2 L3).
+  const stored = opts.memo ? entry : { ...entry, writtenBy: lease.runId };
   await c.query(
     `INSERT INTO ratio.source_checkpoints (tenant_id, source_id, last_run_id, periods, updated_at)
      VALUES ($1, $2, $3, jsonb_build_object($4::text, $5::jsonb), clock_timestamp())
      ON CONFLICT (tenant_id, source_id) DO UPDATE
        SET periods = ratio.source_checkpoints.periods || EXCLUDED.periods, last_run_id = EXCLUDED.last_run_id, updated_at = EXCLUDED.updated_at`,
-    [lease.tenantId, lease.sourceId, lease.runId, period, JSON.stringify(entry)],
+    [lease.tenantId, lease.sourceId, lease.runId, period, JSON.stringify(stored)],
   );
 }
 
@@ -302,6 +315,6 @@ export async function recordRejectedListing(pool: Pool, lease: Lease, period: st
   await workerTransaction(pool, lease.tenantId, async (c) => {
     await assertLease(c, lease, 'UPDATE');
     const prev = (await readCheckpoint(c, lease.sourceId))[period] ?? {};
-    await writeCheckpoint(c, lease, period, { ...prev, rejected });
+    await writeCheckpoint(c, lease, period, { ...prev, rejected: { ...rejected, runId: lease.runId } }, { memo: true });
   });
 }

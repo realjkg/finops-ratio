@@ -63,16 +63,27 @@ export async function deleteStagedBatches(c: PoolClient, sourceId: string): Prom
  * it wrote it last. null when it committed nothing. Lets operators tell a run
  * whose work stands (LEASE_EXPIRED_AFTER_COMMIT) from one that did nothing.
  */
-async function committedWorkOf(c: PoolClient, sourceId: string, runId: string): Promise<string | null> {
+async function committedWorkOf(c: PoolClient, sourceId: string, runId: string): Promise<{ data: true; text: string } | { data: false; memoOnly: boolean }> {
   const r = await c.query(
     `SELECT (SELECT count(*) FROM ratio.ingest_batches WHERE source_id = $1 AND run_id = $2 AND status <> 'staged')::int AS batches,
             (SELECT count(*) FROM ratio.period_publications WHERE source_id = $1 AND published_by_run_id = $2)::int AS publications,
-            EXISTS (SELECT 1 FROM ratio.source_checkpoints WHERE source_id = $1 AND last_run_id = $2) AS checkpoint`,
-    [sourceId, runId],
+            EXISTS (SELECT 1 FROM ratio.source_checkpoints WHERE source_id = $1 AND last_run_id = $2) AS checkpoint,
+            (SELECT count(*) FROM ratio.source_checkpoints k, jsonb_each(k.periods) e
+              WHERE k.source_id = $1 AND jsonb_typeof(e.value) = 'object' AND e.value->>'writtenBy' = $3)::int AS progress,
+            (SELECT count(*) FROM ratio.source_checkpoints k, jsonb_each(k.periods) e
+              WHERE k.source_id = $1 AND jsonb_typeof(e.value) = 'object' AND e.value->'rejected'->>'runId' = $3)::int AS memos`,
+    [sourceId, runId, runId],
   );
-  const { batches, publications, checkpoint } = r.rows[0] as { batches: number; publications: number; checkpoint: boolean };
-  if (!batches && !publications && !checkpoint) return null;
-  return `${batches} ${batches === 1 ? 'batch' : 'batches'} published/superseded/quarantined, ${publications} ${publications === 1 ? 'publication' : 'publications'}, checkpoint ${checkpoint ? 'written' : 'not written'}`;
+  const { batches, publications, checkpoint, progress, memos } = r.rows[0] as { batches: number; publications: number; checkpoint: boolean; progress: number; memos: number };
+  // A checkpoint write is data unless every write this run made was a rejection memo (round-2 L3);
+  // an unstamped (older) write counts as data.
+  const checkpointData = progress > 0 || (checkpoint && memos === 0);
+  if (!batches && !publications && !checkpointData) return { data: false, memoOnly: checkpoint && memos > 0 };
+  const memoNote = memos > 0 ? ` and ${memos} rejection ${memos === 1 ? 'memo' : 'memos'}` : '';
+  return {
+    data: true,
+    text: `${batches} ${batches === 1 ? 'batch' : 'batches'} published/superseded/quarantined, ${publications} ${publications === 1 ? 'publication' : 'publications'}, checkpoint ${checkpoint ? `written${memoNote}` : 'not written'}`,
+  };
 }
 
 /**
@@ -117,9 +128,11 @@ async function acquireRunTx(
       await c.query(
         `UPDATE ratio.sync_runs SET status = 'abandoned', finished_at = clock_timestamp(), error_code = $2, error_detail = $3
          WHERE id = $1 AND status = 'running'`,
-        committed
-          ? [r.id, 'LEASE_EXPIRED_AFTER_COMMIT', `lease expired after the run committed work (${committed}); that work stands; run abandoned by a later acquisition`]
-          : [r.id, 'LEASE_EXPIRED', 'lease expired without completion; run abandoned by a later acquisition'],
+        committed.data
+          ? [r.id, 'LEASE_EXPIRED_AFTER_COMMIT', `lease expired after the run committed work (${committed.text}); that work stands; run abandoned by a later acquisition`]
+          : committed.memoOnly
+            ? [r.id, 'LEASE_EXPIRED', 'lease expired without committing data; checkpoint written (rejection memo only); run abandoned by a later acquisition']
+            : [r.id, 'LEASE_EXPIRED', 'lease expired without completion; run abandoned by a later acquisition'],
       );
       abandoned.push(r.id);
     }
