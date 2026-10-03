@@ -1,9 +1,10 @@
-// XLSX export (Ratio v2 Wave 2b). SheetJS workbook with the eight user-approved
+// XLSX export (Ratio v2 Wave 2b). ExcelJS workbook with the eight user-approved
 // columns, sourced from the shared report view-model. Auto-fit column widths so
 // a board reviewer never has to widen a column by hand. Server-only: imported
-// exclusively by the /api/report/snapshot route.
+// exclusively by the /api/report/snapshot route. Write-only: nothing here parses
+// external spreadsheet input.
 
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { buildReportModel, type ReportRow } from './reportModel';
 
 // Exact, user-approved column order. Exported so tests assert the header row.
@@ -34,26 +35,30 @@ function toRecord(row: ReportRow): ReportRecord {
 }
 
 // Width = widest cell (header included) + small padding, in character units.
-function autoWidths(records: ReportRecord[]): XLSX.ColInfo[] {
+function autoWidths(records: ReportRecord[]): number[] {
   return REPORT_COLUMNS.map((col) => {
     const widest = records.reduce(
       (max, rec) => Math.max(max, String(rec[col]).length),
       col.length,
     );
-    return { wch: widest + 2 };
+    return widest + 2;
   });
 }
 
-export function buildReportWorkbook(now: Date = new Date()): Buffer {
+export async function buildReportWorkbook(now: Date = new Date()): Promise<Buffer> {
   const { rows } = buildReportModel(now);
   const records = rows.map(toRecord);
+  const widths = autoWidths(records);
 
-  const sheet = XLSX.utils.json_to_sheet(records, { header: [...REPORT_COLUMNS] });
-  sheet['!cols'] = autoWidths(records);
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet('Initiatives');
+  // Assigning `columns` writes the header row (row 1) from each `header`.
+  sheet.columns = REPORT_COLUMNS.map((col, i) => ({
+    header: col,
+    key: col,
+    width: widths[i],
+  }));
+  sheet.addRows(records);
 
-  const book = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(book, sheet, 'Initiatives');
-
-  return XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  return Buffer.from(await book.xlsx.writeBuffer());
 }
-
