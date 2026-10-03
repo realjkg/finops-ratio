@@ -44,6 +44,15 @@ export function logUpstreamError(label: string, status: number, body: string): v
   );
 }
 
+/** Parse a JSON body with a FIXED error: a runtime JSON error would quote upstream content. */
+export async function readJsonBody<T>(res: { json(): Promise<unknown> }, label: string): Promise<T> {
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new Error(`${label} returned a non-JSON response`);
+  }
+}
+
 /**
  * fetch with a timeout and a typed, secret-free error on non-2xx. The thrown
  * message is label + status + a fixed reason — the upstream body (which can
@@ -238,8 +247,9 @@ function toNumber(v: unknown, column: string): number {
   return n;
 }
 
-function toIsoDate(v: unknown): string {
-  if (v === null || v === undefined || v === '') return '';
+/** Blank date cells are ''; anything present must parse, or the row is invalid. */
+function toIsoDate(v: unknown, column: string): string {
+  if (isBlank(v)) return '';
   // BigQuery returns TIMESTAMP as epoch seconds (possibly fractional) strings.
   if (typeof v === 'number' || (typeof v === 'string' && /^\d+(\.\d+)?(E\d+)?$/i.test(v))) {
     const n = Number(v);
@@ -247,7 +257,8 @@ function toIsoDate(v: unknown): string {
     return new Date(ms).toISOString();
   }
   const d = new Date(String(v).replace(' UTC', 'Z'));
-  return Number.isNaN(d.getTime()) ? String(v) : d.toISOString();
+  if (Number.isNaN(d.getTime())) throw new Error(`${column} is not a valid date`);
+  return d.toISOString();
 }
 
 function toStringValue(v: unknown): string {
@@ -274,7 +285,7 @@ export function coerceFocusRecord(rec: Record<string, unknown>): RawSourceRow {
   for (const [key, value] of Object.entries(rec)) {
     if (!KNOWN_COLUMNS.has(key)) continue;
     if (NUMERIC_COLUMNS.has(key)) out[key] = toNumber(value, key);
-    else if (DATE_COLUMNS.has(key)) out[key] = toIsoDate(value);
+    else if (DATE_COLUMNS.has(key)) out[key] = toIsoDate(value, key);
     else if (NULLABLE_COLUMNS.has(key)) out[key] = value === '' || value == null ? null : toStringValue(value);
     else out[key] = toStringValue(value);
   }
@@ -290,10 +301,14 @@ export function coerceFocusRecord(rec: Record<string, unknown>): RawSourceRow {
   return out as unknown as RawSourceRow;
 }
 
-/** True when a row's charge period starts inside the half-open window. */
+/**
+ * True when a row's charge period starts inside the half-open window. A row it
+ * cannot place is never kept or dropped silently: it throws. (Coerced rows are
+ * already validated, so this only fires for rows that bypassed coercion.)
+ */
 export function inWindow(row: RawSourceRow, window: CostWindow): boolean {
   const t = Date.parse(row.ChargePeriodStart);
-  if (Number.isNaN(t)) return true; // unparseable — keep rather than silently drop cost
+  if (Number.isNaN(t)) throw new Error('ChargePeriodStart is not a valid date');
   return t >= Date.parse(window.start) && t < Date.parse(window.end);
 }
 

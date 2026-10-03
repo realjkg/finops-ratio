@@ -10,7 +10,7 @@
 // the dataset. Only rows inside the requested window are queried.
 
 import type { FocusExportTransport } from '../CloudConnectorAdapter';
-import { fetchChecked, rowsFromRecords, type FetchLike } from './focusExport';
+import { fetchChecked, readJsonBody, rowsFromRecords, type FetchLike } from './focusExport';
 
 export interface GcpBigQueryTransportOptions {
   dataset: string;
@@ -152,15 +152,6 @@ export function bqRowsToRecords(res: BqQueryResponse): Record<string, unknown>[]
   });
 }
 
-/** Parse a JSON body with a fixed error: a runtime JSON error would quote upstream content. */
-async function readJson<T>(res: Response, label: string): Promise<T> {
-  try {
-    return (await res.json()) as T;
-  } catch {
-    throw new Error(`${label} returned a non-JSON response`);
-  }
-}
-
 /** ISO 8601 → BigQuery canonical TIMESTAMP literal. */
 function bqTimestamp(iso: string): string {
   return new Date(iso).toISOString().replace('T', ' ').replace('Z', '+00');
@@ -189,7 +180,7 @@ export function createGcpBigQueryTransport(opts: GcpBigQueryTransportOptions): F
       },
       'Google OAuth token endpoint',
     );
-    const body = await readJson<{ access_token?: string; expires_in?: number }>(res, 'Google OAuth token endpoint');
+    const body = await readJsonBody<{ access_token?: string; expires_in?: number }>(res, 'Google OAuth token endpoint');
     if (!body.access_token) throw new Error('Google OAuth token endpoint returned no access_token');
     cached = { token: body.access_token, expiresAt: now() + (body.expires_in ?? 3600) * 1000 };
     return cached.token;
@@ -207,7 +198,7 @@ export function createGcpBigQueryTransport(opts: GcpBigQueryTransportOptions): F
       LABEL,
       60_000,
     );
-    return readJson<T>(res, LABEL);
+    return readJsonBody<T>(res, LABEL);
   }
 
   return {

@@ -16,6 +16,7 @@ import type { CostWindow } from './CostSourceClient';
 import type { RawSourceRow } from './focusRows';
 import type { PointFiveCredentials } from './pointfiveConfig';
 import type { PointFiveOAuthClient } from './PointFiveOAuthClient';
+import { logUpstreamError, readJsonBody, statusReason } from './transports/focusExport';
 
 /** PointFive DeepWaste Opportunity (savings finding). */
 export interface PointFiveOpportunity {
@@ -128,10 +129,14 @@ export class SsePointFiveMcpClient implements PointFiveMcpClient {
         params: { name: tool, arguments: args },
       }),
     });
+    const label = `PointFive MCP tool '${tool}'`;
     if (!res.ok) {
-      throw new Error(`PointFive MCP tool '${tool}' returned ${res.status}: ${await res.text()}`);
+      // Status + fixed reason only; the body is logged server-side, redacted.
+      const text = await res.text().catch(() => '');
+      if (text) logUpstreamError(label, res.status, text);
+      throw new Error(`${label} returned ${res.status} (${statusReason(res.status)})`);
     }
-    const payload = (await res.json()) as { result?: { structuredContent?: T } };
+    const payload = await readJsonBody<{ result?: { structuredContent?: T } }>(res, label);
     const content = payload.result?.structuredContent;
     if (content === undefined) {
       throw new Error(`PointFive MCP tool '${tool}' returned no structured content`);
