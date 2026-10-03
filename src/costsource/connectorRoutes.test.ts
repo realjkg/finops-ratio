@@ -293,3 +293,62 @@ describe('H3 — /api/costsource/health is deny-by-default for non-sandbox sourc
     expect(res.statusCode).toBe(200);
   });
 });
+
+describe('Upstream error bodies never reach API callers', () => {
+  const MARKER = 'UPSTREAM-BODY-MARKER';
+  const upstream401 = () => new Response(`${MARKER} denied for Bearer s3cr3t`, { status: 401 });
+
+  function silenceWarn() {
+    return vi.spyOn(console, 'warn').mockImplementation(() => {});
+  }
+
+  it('rows: a failing live connector returns an error without the upstream body', async () => {
+    const warn = silenceWarn();
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
+    process.env.RATIO_API_TOKEN = 'right';
+    vi.stubGlobal('fetch', vi.fn(async () => upstream401()));
+    const res = await callRows({ authorization: 'Bearer right' });
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(res.body)).not.toContain(MARKER);
+    expect(JSON.stringify(res.body)).toContain('401');
+    warn.mockRestore();
+  });
+
+  it('rows: a malformed upstream export body is not echoed in the parse error', async () => {
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
+    process.env.RATIO_API_TOKEN = 'right';
+    // Short line so the runtime's JSON error snippet would include all of it.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(`{"BilledCost":1}\n{"a": LEAKED}\n`)));
+    const res = await callRows({ authorization: 'Bearer right' });
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(res.body)).not.toContain('LEAKED');
+  });
+
+  it('health: the probe detail carries status only, never the upstream body', async () => {
+    const warn = silenceWarn();
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
+    process.env.RATIO_API_TOKEN = 'right';
+    vi.stubGlobal('fetch', vi.fn(async () => upstream401()));
+    const { default: handler } = await import('../../pages/api/costsource/health');
+    const res = makeRes();
+    await handler(makeReq({ sourceId: 'kubernetes' }, { authorization: 'Bearer right' }), res as unknown as NextApiResponse);
+    expect(JSON.stringify(res.body)).toContain('401');
+    expect(JSON.stringify(res.body)).not.toContain(MARKER);
+    expect(JSON.stringify(res.body)).not.toContain('s3cr3t');
+    warn.mockRestore();
+  });
+
+  it('probe: /api/v1/connectors?probe=true health never carries the upstream body', async () => {
+    const warn = silenceWarn();
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
+    process.env.RATIO_API_TOKEN = 'right';
+    vi.stubGlobal('fetch', vi.fn(async () => upstream401()));
+    const { default: handler } = await import('../../pages/api/v1/connectors/index');
+    const res = makeRes();
+    await handler(makeReq({ probe: 'true' }, { authorization: 'Bearer right' }), res as unknown as NextApiResponse);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.stringify(res.body)).toContain('401');
+    expect(JSON.stringify(res.body)).not.toContain(MARKER);
+    warn.mockRestore();
+  });
+});
