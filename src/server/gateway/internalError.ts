@@ -14,12 +14,41 @@ import { redactErrorText } from '@/costsource/transports/redact';
 /** The ONLY message a caller ever sees for an unhandled error. */
 export const INTERNAL_ERROR_MESSAGE = 'Internal error';
 
+/** Logged instead of a request target that is not a plain path. */
+export const NON_PATH_TARGET = '[non-path request target]';
+/** Targets longer than this are not parsed at all. */
+const MAX_TARGET_CHARS = 8_192;
+/** A logged pathname is cut to this many characters. */
+const MAX_LOGGED_PATH_CHARS = 512;
+
+// Origin-form (`/…`, incl. `//host` and `/\host`, which a URL parser reads as
+// an authority), a leading backslash (`\\host\…`), or an http(s) absolute-form
+// target with `//` or `\\`. Everything else — authority-form (CONNECT
+// host:443), other / opaque schemes, encoded-slash tricks — is not a path.
+const PATH_LIKE = /^(?:[/\\]|https?:[/\\]{2})/i;
+// A pathname that still looks like it carries an authority / credentials.
+const CREDENTIAL_SHAPED = /@|%40|%2f%2f|%5c%5c/i;
+
 /**
- * The request pathname only. Query strings can carry session ids, OAuth
- * tokens or SAS signatures, so they are never written to a log.
+ * The request PATHNAME only — the single function every log line uses for a
+ * request target. Node keeps the raw request-target in req.url, including
+ * absolute-form `http://user:secret@host/p?x=1`, so splitting on `?` is not
+ * enough: the target is parsed against a fixed base and only `.pathname` is
+ * kept (no userinfo, host, query or fragment). Anything that is not a plain
+ * path becomes a fixed placeholder; it never throws.
  */
 export function pathOnly(url: string | undefined): string {
-  return (url ?? '').split('?')[0];
+  if (typeof url !== 'string' || url.length === 0) return '';
+  if (url === '*') return '*'; // asterisk-form (OPTIONS *)
+  if (url.length > MAX_TARGET_CHARS || !PATH_LIKE.test(url)) return NON_PATH_TARGET;
+  let pathname: string;
+  try {
+    pathname = new URL(url, 'http://localhost').pathname;
+  } catch {
+    return NON_PATH_TARGET;
+  }
+  if (CREDENTIAL_SHAPED.test(pathname)) return NON_PATH_TARGET;
+  return pathname.length > MAX_LOGGED_PATH_CHARS ? `${pathname.slice(0, MAX_LOGGED_PATH_CHARS)}…` : pathname;
 }
 
 export interface InternalErrorContext {
