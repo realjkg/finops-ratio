@@ -156,7 +156,7 @@ describe('worker CLI (real Postgres + S3)', () => {
     expect(String(run.rows[0].stats)).not.toContain(secret);
   });
 
-  it('K5 doctor --json exits 0 when healthy and 1 when not; replay-fixtures --json runs all scenarios and cleans up', async () => {
+  it('K5 doctor --json exits 0 when healthy and 1 when not; replay-fixtures --json runs all scenarios in a fresh, retained, synthetic-labelled tenant', async () => {
     const { s } = await seededExport();
     expect((await cli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], env())).code).toBe(0);
     const ok = await cli(['doctor', '--json', '--tenant', s.tenantId], env());
@@ -166,26 +166,41 @@ describe('worker CLI (real Postgres + S3)', () => {
     expect(bad.code).toBe(1);
     expect(bad.record.pass).toBe(false);
 
+    // Orchestrator decision: no purge/delete path this cycle. Each invocation uses a
+    // fresh fixture tenant whose data is left in place and recorded in the evidence.
     const fx = await createTestBucket('fx');
     buckets.push(fx);
-    const r = await cli(['replay-fixtures', '--json'], env({ RATIO_ENV: 'test', RATIO_REPLAY_FIXTURES_BUCKET: fx.name }));
-    const res = r.record.results as { tenantId: string; scenarios: Array<{ name: string; pass: boolean; detail?: unknown }>; cleanup: { pass: boolean } };
-    expect(res.scenarios.map((x) => [x.name, x.pass])).toEqual([
-      ['clean_load', true],
-      ['idempotent_rerun', true],
-      ['restatement_supersession', true],
-      ['reconciliation_variance_rejection', true],
-      ['crash_mid_load_recovery', true],
-      ['zombie_fencing', true],
-    ]);
-    expect(res.cleanup.pass).toBe(true);
-    expect(r.code).toBe(0);
-    expect(r.record.pass).toBe(true);
-    for (const table of ['tenants', 'sources', 'sync_runs', 'ingest_batches', 'ingest_artifacts', 'ingest_validation_errors', 'cost_facts', 'period_publications', 'source_checkpoints']) {
-      const col = table === 'tenants' ? 'id' : 'tenant_id';
-      const n = await t.db.pool.query(`SELECT count(*)::int AS n FROM ratio.${table} WHERE ${col} = $1`, [res.tenantId]);
-      expect(n.rows[0].n, table).toBe(0);
+    const tenants: string[] = [];
+    for (let run = 0; run < 2; run++) {
+      const r = await cli(['replay-fixtures', '--json'], env({ RATIO_ENV: 'test', RATIO_REPLAY_FIXTURES_BUCKET: fx.name }));
+      const res = r.record.results as {
+        tenantId: string;
+        tenantSlug: string;
+        scenarios: Array<{ name: string; pass: boolean; detail?: unknown }>;
+        retained: { tenantId: string; sourcePrefix: string; note: string };
+      };
+      expect(res.scenarios.map((x) => [x.name, x.pass])).toEqual([
+        ['clean_load', true],
+        ['idempotent_rerun', true],
+        ['restatement_supersession', true],
+        ['reconciliation_variance_rejection', true],
+        ['crash_mid_load_recovery', true],
+        ['zombie_fencing', true],
+      ]);
+      expect(r.code).toBe(0);
+      expect(r.record.pass).toBe(true);
+      expect(res.tenantSlug).toMatch(/^fixture-\d{14}-[0-9a-f]{8}$/);
+      expect(res.retained.tenantId).toBe(res.tenantId);
+      const tenant = await t.db.pool.query(`SELECT slug FROM ratio.tenants WHERE id = $1`, [res.tenantId]);
+      expect(tenant.rows).toEqual([{ slug: res.tenantSlug }]);
+      const srcs = await t.db.pool.query(`SELECT display_name FROM ratio.sources WHERE tenant_id = $1`, [res.tenantId]);
+      expect(srcs.rows.length).toBe(3);
+      for (const x of srcs.rows) expect(x.display_name).toMatch(/SYNTHETIC/);
+      const facts = await t.db.pool.query(`SELECT count(*)::int AS n FROM ratio.cost_facts WHERE tenant_id = $1`, [res.tenantId]);
+      expect(facts.rows[0].n).toBeGreaterThan(0);
+      expect((await fx.keys(`${res.retained.sourcePrefix}/`)).length).toBeGreaterThan(0);
+      tenants.push(res.tenantId);
     }
-    expect(await fx.keys(`ratio-replay-fixtures/${res.tenantId}/`)).toEqual([]);
+    expect(new Set(tenants).size).toBe(2);
   });
 });
