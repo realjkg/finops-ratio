@@ -160,6 +160,53 @@ describe('facts, artifacts and validation errors of a non-staged batch are immut
     });
   });
 
+  it('worker may UPDATE ingest_artifacts.row_count only (column grant) and only while the batch is staged', async () => {
+    const a = seed.a;
+    await withRole(db.pool, 'ratio_worker', a.tenantId, async (c) => {
+      expect(await attempt(c, `UPDATE ratio.ingest_artifacts SET row_count = 42 WHERE batch_id = $1`, [a.batchStaged])).toMatchObject({
+        ok: true,
+        rowCount: 1,
+      });
+      const back = await c.query(`SELECT row_count FROM ratio.ingest_artifacts WHERE batch_id = $1`, [a.batchStaged]);
+      expect(back.rows[0].row_count).toBe('42');
+      for (const batch of [a.batchPublished, a.batchQuarantined, a.batchSuperseded]) {
+        expect(await attempt(c, `UPDATE ratio.ingest_artifacts SET row_count = 43 WHERE batch_id = $1`, [batch]), batch).toMatchObject({
+          ok: false,
+          code: 'RT001',
+        });
+      }
+      for (const set of [
+        `byte_size = 1`,
+        `artifact_name = 'x.csv'`,
+        `sha256 = sha256`,
+        `evidence_key = evidence_key`,
+        `batch_id = batch_id`,
+        `tenant_id = tenant_id`,
+        `source_id = source_id`,
+        `row_count = 1, byte_size = 1`,
+      ]) {
+        expect(await attempt(c, `UPDATE ratio.ingest_artifacts SET ${set} WHERE batch_id = $1`, [a.batchStaged]), set).toMatchObject({
+          ok: false,
+          code: '42501',
+        });
+      }
+    });
+    const priv = await db.pool.query(
+      `SELECT column_name FROM information_schema.column_privileges
+       WHERE table_schema = 'ratio' AND table_name = 'ingest_artifacts' AND grantee = 'ratio_worker' AND privilege_type = 'UPDATE' ORDER BY 1`,
+    );
+    expect(priv.rows).toEqual([{ column_name: 'row_count' }]);
+    const reader = await db.pool.query(
+      `SELECT count(*)::int AS n FROM information_schema.column_privileges
+       WHERE table_schema = 'ratio' AND table_name = 'ingest_artifacts' AND grantee = 'ratio_reader'`,
+    );
+    expect(reader.rows[0].n).toBe(0);
+    await withRole(db.pool, 'ratio_reader', a.tenantId, async (c) => {
+      expect(await attempt(c, `UPDATE ratio.ingest_artifacts SET row_count = 1`)).toMatchObject({ ok: false, code: '42501' });
+      expect(await attempt(c, `SELECT row_count FROM ratio.ingest_artifacts`)).toMatchObject({ ok: false, code: '42501' });
+    });
+  });
+
   it('TRUNCATE of fact, evidence, batch and publication tables is refused even for the superuser', async () => {
     for (const t of ['cost_facts', 'ingest_artifacts', 'ingest_validation_errors', 'ingest_batches', 'period_publications']) {
       await superTxn(async (c) => {
