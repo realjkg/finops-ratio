@@ -402,6 +402,54 @@ async function hookViolations(client: ClientBase): Promise<string[]> {
 
 const b = (x: unknown) => (x === true ? 'true' : 'false');
 
+/** Every policy on a table in schema ratio, rendered as a manifest line. */
+async function policyEntries(client: ClientBase): Promise<string[]> {
+  const policies = await client.query<{ t: string; name: string; cmd: string; permissive: boolean; roles: string; using: string; chk: string }>(
+    `SELECT 'ratio.' || c.relname AS t, p.polname AS name, p.polcmd::text AS cmd, p.polpermissive AS permissive,
+            (SELECT pg_catalog.string_agg(CASE WHEN r = 0 THEN 'public' ELSE pg_catalog.pg_get_userbyid(r) END, ',' ORDER BY 1)
+               FROM pg_catalog.unnest(p.polroles) AS r) AS roles,
+            coalesce(pg_catalog.md5(pg_catalog.pg_get_expr(p.polqual, p.polrelid)), '') AS using,
+            coalesce(pg_catalog.md5(pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid)), '') AS chk
+       FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_class c ON c.oid = p.polrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'ratio'`,
+  );
+  return policies.rows.map(
+    (p) => `policy:${p.t}:${p.name}:cmd=${p.cmd}:permissive=${b(p.permissive)}:roles=${p.roles}:using=${p.using}:check=${p.chk}`,
+  );
+}
+
+/** `policy:<schema>.<table>:<rest>` → `policy:<rest>` (the shape, independent of the table). */
+const policyShape = (entry: string) => entry.replace(/^policy:[^:]+:/, 'policy:');
+
+/**
+ * Reviewed policy SHAPES (name, command, permissive, roles, USING / WITH CHECK
+ * hashes — not the table): exactly the 0001 tenant_isolation policies, i.e.
+ * `tenant_id = ratio.current_tenant_id()` (and `id = …` for tenants) for all
+ * commands, to PUBLIC, permissive. A later migration's new ratio table may use
+ * that reviewed shape; any other policy must be added to this list in a
+ * reviewed change (round 11).
+ */
+export const REVIEWED_POLICY_SHAPES: readonly string[] = [
+  ...new Set(FOUNDATION_0001.filter((e) => e.startsWith('policy:')).map(policyShape)),
+];
+
+/**
+ * Any policy on a ratio table that is neither a 0001 manifest entry nor of a
+ * reviewed shape is refused — whether or not 0001 is in the ledger
+ * (round 11, M1). Permissive policies are ORed, so an extra one widens access
+ * (e.g. USING (true)). Decision: RESTRICTIVE ones are refused too — their
+ * expressions run for every candidate row and may call functions, and they
+ * can deny service; none is reviewed.
+ */
+async function policyViolations(client: ClientBase): Promise<string[]> {
+  const manifest = new Set(FOUNDATION_0001);
+  const shapes = new Set(REVIEWED_POLICY_SHAPES);
+  return (await policyEntries(client))
+    .filter((e) => !manifest.has(e) && !shapes.has(policyShape(e)))
+    .sort()
+    .map((e) => `${e} is not a reviewed policy`);
+}
+
 /**
  * The reviewed 0001 foundation as it is in the catalog, one normalized string
  * per object (round 10). Compared with FOUNDATION_0001 (generated from a fresh
@@ -419,12 +467,15 @@ export async function foundationSnapshot(client: ClientBase): Promise<string[]> 
     ...(await q(`SELECT 'schema:' || n.nspname || ':owner=' || pg_catalog.pg_get_userbyid(n.nspowner) AS e
                    FROM pg_catalog.pg_namespace n WHERE n.nspname = 'ratio'`)),
   );
-  const tables = await client.query<{ t: string; owner: string; rls: boolean; force: boolean }>(
-    `SELECT 'ratio.' || c.relname AS t, pg_catalog.pg_get_userbyid(c.relowner) AS owner, c.relrowsecurity AS rls, c.relforcerowsecurity AS force
+  const tables = await client.query<{ t: string; owner: string; rls: boolean; force: boolean; persistence: string; replident: string }>(
+    `SELECT 'ratio.' || c.relname AS t, pg_catalog.pg_get_userbyid(c.relowner) AS owner, c.relrowsecurity AS rls, c.relforcerowsecurity AS force,
+            c.relpersistence::text AS persistence, c.relreplident::text AS replident
        FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'ratio' AND c.relkind IN ('r', 'p')`,
   );
-  for (const t of tables.rows) entries.push(`table:${t.t}:owner=${t.owner}:rls=${b(t.rls)}:force=${b(t.force)}`);
+  for (const t of tables.rows) {
+    entries.push(`table:${t.t}:owner=${t.owner}:rls=${b(t.rls)}:force=${b(t.force)}:persistence=${t.persistence}:replident=${t.replident}`);
+  }
   const columns = await client.query<{ t: string; col: string; typ: string; nn: boolean; def: string }>(
     `SELECT 'ratio.' || c.relname AS t, a.attname AS col, pg_catalog.format_type(a.atttypid, a.atttypmod) AS typ, a.attnotnull AS nn,
             coalesce(pg_catalog.md5(pg_catalog.pg_get_expr(d.adbin, d.adrelid)), '') AS def
@@ -434,18 +485,7 @@ export async function foundationSnapshot(client: ClientBase): Promise<string[]> 
       WHERE n.nspname = 'ratio' AND c.relkind IN ('r', 'p', 'v') AND a.attnum > 0 AND NOT a.attisdropped`,
   );
   for (const r of columns.rows) entries.push(`column:${r.t}:${r.col}:${r.typ}:notnull=${b(r.nn)}:default=${r.def}`);
-  const policies = await client.query<{ t: string; name: string; cmd: string; permissive: boolean; roles: string; using: string; chk: string }>(
-    `SELECT 'ratio.' || c.relname AS t, p.polname AS name, p.polcmd::text AS cmd, p.polpermissive AS permissive,
-            (SELECT pg_catalog.string_agg(CASE WHEN r = 0 THEN 'public' ELSE pg_catalog.pg_get_userbyid(r) END, ',' ORDER BY 1)
-               FROM pg_catalog.unnest(p.polroles) AS r) AS roles,
-            coalesce(pg_catalog.md5(pg_catalog.pg_get_expr(p.polqual, p.polrelid)), '') AS using,
-            coalesce(pg_catalog.md5(pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid)), '') AS chk
-       FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_class c ON c.oid = p.polrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'ratio'`,
-  );
-  for (const p of policies.rows) {
-    entries.push(`policy:${p.t}:${p.name}:cmd=${p.cmd}:permissive=${b(p.permissive)}:roles=${p.roles}:using=${p.using}:check=${p.chk}`);
-  }
+  entries.push(...(await policyEntries(client)));
   const triggers = await client.query<{ t: string; name: string; fn: string; enabled: string; type: number; deferrable: boolean; initdeferred: boolean }>(
     `SELECT 'ratio.' || c.relname AS t, tg.tgname AS name, fn.nspname || '.' || p.proname || '()' AS fn, tg.tgenabled::text AS enabled,
             tg.tgtype::int AS type, tg.tgdeferrable AS deferrable, tg.tginitdeferred AS initdeferred
@@ -544,6 +584,7 @@ export async function privilegeModelViolations(client: ClientBase): Promise<stri
   problems.push(...(await hookViolations(client)));
   problems.push(...(await settingViolations(client)));
   problems.push(...(await foundationViolations(client)));
+  problems.push(...(await policyViolations(client)));
   problems.push(...(await roleViolations(client)));
   return problems;
 }
