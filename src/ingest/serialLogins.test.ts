@@ -17,7 +17,9 @@
 //       concatenations and templates, dynamic parts as placeholders) and
 //       every standalone literal:
 //         - CREATE/ALTER ROLE/USER with a dangerous attribute, or with a
-//           dynamic part after the role name (an attribute could hide there);
+//           dynamic part after the role name (an attribute could hide there),
+//           or an IN ROLE / IN GROUP / ROLE / ADMIN / USER clause naming
+//           anything but ratio_worker/ratio_reader;
 //         - GRANT <role> TO <login> of anything but ratio_worker/ratio_reader;
 //         - DO blocks that touch roles/users.
 import { describe, expect, it } from 'vitest';
@@ -61,6 +63,11 @@ function sqlProblems(raw: string): string[] {
     const rest = m[2];
     if (DANGEROUS.test(rest) || DANGEROUS_WORD.test(m[1])) out.push('role DDL with a dangerous attribute');
     else if (rest.includes(HOLE)) out.push('role DDL with a dynamic part after the role name');
+    // Copilot M2: membership clauses (IN ROLE / IN GROUP / ROLE / ADMIN / USER) may only name ratio_worker / ratio_reader.
+    for (const t of rest.matchAll(/\b(?:IN\s+ROLE|IN\s+GROUP|ADMIN|ROLE|USER)\s+([^\s,;]+(?:\s*,\s*[^\s,;]+)*)/g)) {
+      const targets = t[1].split(',').map((x) => x.trim().replace(/^"|"$/g, ''));
+      if (!targets.every((r) => r === 'RATIO_WORKER' || r === 'RATIO_READER')) out.push('role DDL granting membership in a role other than ratio_worker/ratio_reader');
+    }
   }
   for (const m of text.matchAll(/\bGRANT\s+([^;]*?)\s+TO\s+/g)) {
     const what = m[1];
