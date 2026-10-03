@@ -106,12 +106,17 @@ export class S3EvidenceStore implements EvidenceStore {
       await this.verifyExisting(key, info.sha256, opts);
       return 'exists';
     }
+    // The body stream is ours to close: when the SDK never reads it (a PutObject that fails or is
+    // aborted), it would otherwise open the file after capture() deleted it and emit an
+    // unhandled ENOENT. Destroyed (with a listener) whatever happens.
+    const body = fs.createReadStream(filePath);
+    body.on('error', () => undefined);
     try {
       await this.client.send(
         new PutObjectCommand({
           Bucket: this.bucket,
           Key: this.k(key),
-          Body: fs.createReadStream(filePath),
+          Body: body,
           ContentLength: info.byteSize,
           ContentType: 'application/octet-stream',
           Metadata: { [SHA_META]: info.sha256 },
@@ -121,6 +126,8 @@ export class S3EvidenceStore implements EvidenceStore {
     } catch (e) {
       if (signal?.aborted) throw signal.reason;
       throw evidenceError('storing an evidence object', e);
+    } finally {
+      body.destroy();
     }
     return 'stored';
   }
