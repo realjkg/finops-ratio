@@ -1,0 +1,116 @@
+// Static guarantees of .github/workflows/governance.yml (text-level; the YAML
+// itself is parse-validated separately in verification).
+import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import { URL } from 'node:url';
+
+const wf = fs.readFileSync(new URL('../../.github/workflows/governance.yml', import.meta.url), 'utf8');
+const code = wf.split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n');
+
+describe('governance.yml', () => {
+  it('pins every action to a full commit SHA', () => {
+    const uses = [...code.matchAll(/^\s*(?:-\s*)?uses:\s*(\S+)/gm)].map((m) => m[1]);
+    expect(uses.length).toBeGreaterThan(0);
+    for (const u of uses) expect(u, u).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
+  });
+
+  it('L1: the header does not claim workflow_dispatch runs base-branch scripts', () => {
+    expect(wf).not.toMatch(/The workflow definition and the scripts it\s*\n?#?\s*runs always come from the BASE branch/);
+    expect(wf).toMatch(/workflow_dispatch runs the dispatched ref/);
+    // Checkout comments must not claim every trigger resolves to the base branch.
+    expect(wf).not.toMatch(/every trigger here resolves github\.sha on the base/);
+    expect(wf).toMatch(/workflow_dispatch checks out the\s*\n\s*#\s*dispatched ref/);
+  });
+
+  it('only uses base-context triggers (no PR-head-controlled workflow)', () => {
+    expect(code).toMatch(/^\s{2}pull_request_target:/m);
+    expect(code).not.toMatch(/^\s{2}pull_request:/m);
+    expect(code).not.toMatch(/^\s{2}pull_request_review:/m);
+    expect(code).not.toMatch(/^\s{2}pull_request_review_comment:/m);
+  });
+
+  it('never checks out or references the PR head', () => {
+    expect(code).not.toMatch(/head\.(sha|ref)|head_ref|refs\/pull/);
+    expect(code).not.toMatch(/^\s+ref:/m);
+  });
+
+  it('defaults to no permissions and does not persist checkout credentials', () => {
+    expect(code).toMatch(/^permissions: \{\}$/m);
+    expect((code.match(/persist-credentials: false/g) ?? []).length).toBe((code.match(/actions\/checkout@/g) ?? []).length);
+  });
+
+  it('job names match the required checks used by eligibility and branch protection', () => {
+    expect(code).toContain('name: Governance · risk classification');
+    expect(code).toContain('name: Governance · merge eligibility');
+    expect(code).toContain('name: Governance · eligibility targets');
+  });
+
+  it('L3: eligibility runs per PR in its own concurrency group; no shared sweep group', () => {
+    expect(code).not.toMatch(/sweep/);
+    expect(code).toMatch(/group: governance-pr-\$\{\{ matrix\.pr \}\}/);
+    expect(code).toMatch(/matrix:\s*\n\s+pr: \$\{\{ fromJSON\(needs\.targets\.outputs\.prs\) \}\}/);
+    expect(code).toMatch(/fail-fast: false/);
+  });
+
+  it('M1/R1: issue_comment (created, edited, deleted) triggers evaluation; classification stays PR-only', () => {
+    expect(code).toMatch(/^\s{2}issue_comment:\s*\n\s+types: \[created, edited, deleted\]/m);
+    expect(code).toMatch(/if: github\.event_name == 'pull_request_target'/);
+  });
+
+  it('R2: targets and merge-eligibility only run for exception-command comments by OWNER/MEMBER/COLLABORATOR', () => {
+    const cond = "github.event_name != 'issue_comment' || (github.event.issue.pull_request && (contains(github.event.comment.body, '/exception-') || contains(github.event.changes.body.from, '/exception-')) && contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), github.event.comment.author_association))";
+    const job = (name) => code.slice(code.indexOf(`  ${name}:`), code.indexOf('steps:', code.indexOf(`  ${name}:`)));
+    const ifLine = (name) => (job(name).match(/^ {4}if: (.*)$/m) ?? [])[1];
+    // The condition must be AND-ed into each job's `if`, not merely present.
+    expect(ifLine('targets')).toBe(`\${{ always() && (${cond}) }}`);
+    expect(ifLine('merge-eligibility')).toBe(
+      `\${{ always() && needs.targets.result == 'success' && needs.targets.outputs.prs != '[]' && (${cond}) }}`,
+    );
+  });
+
+  it('Q2: a separate revocations job handles edited/deleted comment events with no per-PR concurrency', () => {
+    const start = code.indexOf('  revocations:');
+    expect(start).toBeGreaterThan(-1);
+    const end = code.indexOf('\n  merge-eligibility:', start) > -1 && code.indexOf('\n  merge-eligibility:', start) > start
+      ? code.indexOf('\n  merge-eligibility:', start) : code.length;
+    const job = code.slice(start, end);
+    expect(job).toMatch(/^ {4}if: \$\{\{ github\.event_name == 'issue_comment' && \(github\.event\.action == 'edited' \|\| github\.event\.action == 'deleted'\) && github\.event\.issue\.pull_request && \(contains\(github\.event\.comment\.body, '\/exception-'\) \|\| contains\(github\.event\.changes\.body\.from, '\/exception-'\)\) \}\}$/m);
+    expect(job).not.toMatch(/governance-pr-/);
+    expect(job).toMatch(/group: governance-revocation-\$\{\{ github\.event\.comment\.id \}\}/);
+    expect(job).toMatch(/statuses: write/);
+    expect(job).toMatch(/runRevocations/);
+    expect(job).not.toMatch(/needs:/);
+  });
+
+  it('L2/N4: workflow_run listens to CI only (Copilot is picked up by the sweep)', () => {
+    expect(code).toMatch(/workflows: \[CI\]/);
+    expect(code).not.toMatch(/Running Copilot Code Review/);
+    expect(code).toMatch(/schedule:/);
+  });
+
+  it('M1: eligibility can resolve check runs to workflow paths (actions: read)', () => {
+    expect(code).toMatch(/actions: read/);
+  });
+
+  it('C1: eligibility job can post its status and read label events', () => {
+    const elig = code.slice(code.indexOf('  merge-eligibility:'));
+    expect(elig).toMatch(/statuses: write/);
+    expect(elig).toMatch(/issues: read/);
+  });
+
+  it('does not interpolate event data into scripts', () => {
+    const lines = code.split('\n');
+    const blocks = [];
+    lines.forEach((l, i) => {
+      if (!/script: \|\s*$/.test(l)) return;
+      const indent = l.search(/\S/);
+      for (let j = i + 1; j < lines.length; j++) {
+        const t = lines[j];
+        if (t.trim() && t.search(/\S/) <= indent) break;
+        blocks.push(t);
+      }
+    });
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.join('\n')).not.toMatch(/\$\{\{/);
+  });
+});

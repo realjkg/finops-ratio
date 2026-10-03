@@ -50,3 +50,21 @@ export function timeAgo(iso: string, now: Date = new Date()): string {
   return `${days}d ago`;
 }
 
+
+/**
+ * Format an amount in its own ISO-4217 currency (never assumes USD). Falls back
+ * to `<amount> <CODE>` for a code Intl does not know.
+ */
+export function formatMoney(value: number, currency: string): string {
+  const digits = Math.abs(value) >= 100 ? 0 : 2;
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    }).format(value);
+  } catch {
+    return `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${currency}`;
+  }
+}

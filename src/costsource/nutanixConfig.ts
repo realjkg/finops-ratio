@@ -3,8 +3,9 @@
 // Nutanix Cloud Manager (NCM) produces cost-governance / showback data for
 // on-prem and private-cloud infrastructure. Once exported in FOCUS form it flows
 // through Ratio's version shim like any other source — only the endpoint + API
-// credential is connector-specific. SHIPS DARK: `COSTSOURCE_NUTANIX_LIVE` is OFF
-// by default and the connector only goes live once endpoint + credential exist.
+// credential is connector-specific. CREDENTIAL-DRIVEN: live once endpoint + API
+// key exist; `COSTSOURCE_NUTANIX_LIVE=false` forces it off. The key is sent in
+// Nutanix's `X-ntnx-api-key` header.
 
 import type { CostSourceDescriptor } from './CostSourceClient';
 import {
@@ -13,13 +14,14 @@ import {
   type ConnectorSpec,
   type ConnectorStatus,
 } from './connectorConfig';
+import { createHttpFocusTransport } from './transports/httpFocusTransport';
 
 type EnvRecord = Record<string, string | undefined>;
 
 /** Canonical source id across the seam. */
 export const NUTANIX_SOURCE_ID = 'nutanix';
 
-/** Feature-flag env var. OFF unless explicitly truthy. */
+/** Kill-switch env var. Unset = auto (live once configured); `false` = off. */
 export const NUTANIX_LIVE_FLAG_ENV = 'COSTSOURCE_NUTANIX_LIVE';
 
 export const NUTANIX_CONNECTOR_SPEC: ConnectorSpec = {
@@ -35,6 +37,13 @@ export const NUTANIX_CONNECTOR_SPEC: ConnectorSpec = {
     apiKey: 'NUTANIX_API_KEY',
   },
   liveSummary: 'Nutanix Cloud Manager cost governance export normalized to FOCUS',
+  transport: (c) =>
+    createHttpFocusTransport({
+      endpoint: c.endpoint,
+      token: c.apiKey,
+      authHeader: 'X-ntnx-api-key',
+      label: 'Nutanix Cloud Manager',
+    }),
 };
 
 export function resolveNutanixStatus(env: EnvRecord): ConnectorStatus {

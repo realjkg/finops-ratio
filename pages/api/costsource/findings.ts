@@ -1,13 +1,20 @@
 // GET /api/costsource/findings?sourceId= — waste/opportunity findings.
-// Delegates to the mock client seam. Pure over seed data — no external calls.
+// Delegates to the client seam. Sandbox sources answer from offline seed data;
+// any other source (e.g. live PointFive) uses server credentials, so it gets
+// the same deny-by-default gate as /api/costsource/rows: a valid
+// `Authorization: Bearer <RATIO_API_TOKEN>` is required (refused outright when
+// no token is configured), checked BEFORE any lookup or upstream call.
 //
 // Errors:
 //   400 — missing sourceId
-//   404 — unknown source
+//   401 — non-sandbox source without a valid Bearer token
+//   429 — too many failed authentications from this client IP (per minute)
+//   404 — unknown source (only after auth)
 //   405 — non-GET method
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createCostSourceClient } from '@/costsource';
 import type { CostFinding } from '@/costsource';
+import { gateSourceAccess } from '@/server/gateway/liveDataAuth';
 
 function firstQueryValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -28,6 +35,8 @@ export default async function handler(
     res.status(400).json({ error: 'sourceId query param is required' });
     return;
   }
+
+  if (!gateSourceAccess(req, res, sourceId)) return;
 
   const client = createCostSourceClient('mock');
   try {

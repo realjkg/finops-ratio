@@ -15,12 +15,32 @@ import type {
 } from './CostSourceClient';
 import { withBasePath } from '@/lib/basePath';
 
+/** User-readable message for a live-data request refused for lack of API auth. */
+export const LIVE_DATA_AUTH_MESSAGE = 'Live connector data requires authenticated API access';
+
+/**
+ * Typed error for a 401 from the live-data routes. The browser client carries
+ * no API token (by design — tokens are never embedded in or forwarded from the
+ * browser), so live connector data is only reachable through the authenticated
+ * API; sandbox sources keep working anonymously.
+ */
+export class LiveDataAuthError extends Error {
+  readonly status = 401;
+  constructor() {
+    super(LIVE_DATA_AUTH_MESSAGE);
+    this.name = 'LiveDataAuthError';
+  }
+}
+
 async function getJson<T>(url: string, label: string): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url);
   } catch (err) {
     throw new Error(`${label} unreachable: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (res.status === 401) {
+    throw new LiveDataAuthError();
   }
   if (!res.ok) {
     throw new Error(`${label} error ${res.status}: ${await res.text()}`);

@@ -5,7 +5,11 @@
 // Offline/CI-safety invariant: with NO token configured AND the offline-safe
 // mock provider (the default), auth is NOT enforced — the demo and CI stay green
 // with zero env. Enforcement turns on only when a token is configured OR a live
-// provider (claude | openai | openllm) is selected.
+// AI provider (anything but mock, aliases included — see src/ai/providers.ts) or
+// live change-management provider is selected.
+
+import { createHash, timingSafeEqual } from 'crypto';
+import { LIVE_AI_PROVIDERS, normalizeAIProvider } from '@/ai/providers';
 
 export interface GatewayAuthConfig {
   /** Whether a Bearer token is required for this request. */
@@ -26,13 +30,12 @@ export interface GatewayEnv {
   CM_PROVIDER?: string;
 }
 
-const LIVE_AI_PROVIDERS = new Set(['claude', 'openai', 'openllm']);
 const LIVE_CM_PROVIDERS = new Set(['jira', 'servicenow']);
 
 /** Decide whether to enforce Bearer auth from the server environment. */
 export function resolveGatewayAuth(env: GatewayEnv): GatewayAuthConfig {
   const token = env.RATIO_API_TOKEN?.trim() || null;
-  const aiProvider = (env.AI_PROVIDER ?? '').toLowerCase();
+  const aiProvider = normalizeAIProvider(env.AI_PROVIDER);
   const cmProvider = (env.CM_PROVIDER ?? '').toLowerCase();
   const liveProvider =
     LIVE_AI_PROVIDERS.has(aiProvider) || LIVE_CM_PROVIDERS.has(cmProvider);
@@ -55,6 +58,26 @@ export function tenantId(token: string): string {
     hash = (hash * 33) ^ token.charCodeAt(i);
   }
   return `tnt_${(hash >>> 0).toString(36)}`;
+}
+
+/**
+ * Constant-time token comparison (server-only). A plain `!==` leaks the length
+ * of the matching prefix through timing; comparing fixed-width SHA-256 digests
+ * with timingSafeEqual costs the same wherever the strings diverge. Aligned
+ * with `secretsMatch` in src/finio/config.ts.
+ */
+export function tokensMatch(presented: string, expected: string): boolean {
+  const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest();
+  return timingSafeEqual(digest(presented), digest(expected));
+}
+
+/** Minimum strength for a token that may unlock live cost data. */
+export const MIN_TOKEN_LENGTH = 32;
+export const MIN_TOKEN_DISTINCT_CHARS = 10;
+
+/** True when the token is >= 32 characters with >= 10 distinct characters. */
+export function isStrongToken(token: string): boolean {
+  return token.length >= MIN_TOKEN_LENGTH && new Set(token).size >= MIN_TOKEN_DISTINCT_CHARS;
 }
 
 /** Validate the request's Bearer token against the configured token. */
@@ -82,7 +105,7 @@ export function checkAuth(
       message: 'Missing Authorization: Bearer <token> header',
     };
   }
-  if (presented !== config.token) {
+  if (!tokensMatch(presented, config.token)) {
     return { ok: false, code: 'unauthorized', message: 'Invalid API token' };
   }
   return { ok: true, tenant: tenantId(presented) };
