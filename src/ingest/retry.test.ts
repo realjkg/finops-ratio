@@ -136,10 +136,11 @@ describe('withRetry with an abort signal', () => {
     expect(attempts).toBe(1);
   });
 
-  it('a signal already aborted when an attempt fails is not retried', async () => {
+  it('a signal already aborted when an attempt fails is not retried, and no retry is recorded', async () => {
     const ac = new AbortController();
     const reason = new Error('deadline');
     let attempts = 0;
+    let retries = 0;
     await expect(
       withRetry(
         async () => {
@@ -147,10 +148,11 @@ describe('withRetry with an abort signal', () => {
           ac.abort(reason);
           throw transient();
         },
-        { maxAttempts: 5, baseMs: 1, maxMs: 1, sleep: async () => undefined, signal: ac.signal },
+        { maxAttempts: 5, baseMs: 1, maxMs: 1, sleep: async () => undefined, onRetry: () => void retries++, signal: ac.signal },
       ),
     ).rejects.toBe(reason);
     expect(attempts).toBe(1);
+    expect(retries).toBe(0); // the run's stats/retry log never shows a retry that cannot happen
   });
 });
 
