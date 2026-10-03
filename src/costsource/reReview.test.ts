@@ -162,7 +162,7 @@ describe('M2 valid tokens are never throttled; weak tokens refuse live data', ()
     ] as const) {
       const res = await hit(await handlerOf(path), req(q, auth));
       expect(res.statusCode).toBe(503);
-      expect(res.body).toEqual({ error: 'RATIO_API_TOKEN must be at least 32 characters to serve live cost data' });
+      expect(res.body).toEqual({ error: 'RATIO_API_TOKEN is too weak to serve live cost data (≥32 chars, ≥10 distinct)' });
     }
     expect(fetchMock).not.toHaveBeenCalled();
     expect((await hit(await handlerOf(ROWS), req({ sourceId: 'pointfive-sandbox', ...JUNE }))).statusCode).toBe(200);
@@ -182,9 +182,10 @@ describe('M2 valid tokens are never throttled; weak tokens refuse live data', ()
     process.env.RATIO_API_TOKEN = TOKEN;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const health = await handlerOf(HEALTH);
-    await hit(health, req({ sourceId: 'kubernetes' }, { 'x-forwarded-for': '1.2.3.4' }));
-    await hit(health, req({ sourceId: 'kubernetes' }, { 'x-forwarded-for': '5.6.7.8' }));
-    await hit(await handlerOf(SOURCES), req({}, { 'x-forwarded-for': '5.6.7.8', authorization: 'Bearer nope' }));
+    // Multi-hop X-Forwarded-For (a proxy chain); a single hop is what Next adds itself.
+    await hit(health, req({ sourceId: 'kubernetes' }, { 'x-forwarded-for': '1.2.3.4, 10.0.0.1' }));
+    await hit(health, req({ sourceId: 'kubernetes' }, { 'x-forwarded-for': '5.6.7.8, 10.0.0.1' }));
+    await hit(await handlerOf(SOURCES), req({}, { 'x-forwarded-for': '5.6.7.8, 10.0.0.1', authorization: 'Bearer nope' }));
     const calls = warn.mock.calls.filter((c) => String(c[0]).includes('RATIO_TRUSTED_PROXY_HOPS'));
     expect(calls).toHaveLength(1);
   });
