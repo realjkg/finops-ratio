@@ -4,8 +4,10 @@ Branch: `slice/00-postgres-foundation` (from `origin/slice/00a-ci-deps` @ ec6890
 Concern: durable schema + migration path. Nothing reads or writes cost data yet;
 no worker logic, no sources, no HTTP surface.
 
-Ephemeral per repo rule (`.obvious/obvious.md`: design specs are point-in-time
-artifacts) — not committed.
+Committed under `docs/evidence/slice-0/` as the slice's design evidence. Sections
+§1–§8 describe the CURRENT state of the branch (updated in round 6); §9–§15
+record each review round's decisions as they were made — where a later round
+changed something, the earlier text says so.
 
 ## 1. Components and placement
 
@@ -14,11 +16,12 @@ All new code is server-only and lives under `src/ingest/**`:
 | Path | Purpose |
 |---|---|
 | `src/ingest/db/migrations/0001_ratio_schema.up.sql` / `.down.sql` | schema `ratio`, roles, RLS, view |
-| `src/ingest/db/migrationFiles.ts` | discover/validate migration files, sha256 checksums, reject transaction-control statements. No `pg` import. |
-| `src/ingest/db/migrate.ts` | runner (`pg` only): advisory lock, `schema_migrations`, checksum/order checks, one txn per migration, `down N` |
+| `src/ingest/db/migrationFiles.ts` | discover/validate migration files, sha256 checksums (up and down), phase header, transaction-control refusal, the lexical expand allow-list / always-forbidden classifier and its reasoned markers. No `pg` import. |
+| `src/ingest/db/migrate.ts` | runner (`pg` only): advisory lock, `schema_migrations`, checksum/order checks, one txn per migration, `down N`, read-only status |
+| `src/ingest/db/privilegeModel.ts` | the reviewed privilege/hook/role model and the catalog check the runner runs as the last statement of every migration transaction (and status runs read-only) |
 | `src/ingest/db/tenant.ts` | `withTenantTransaction(pool, tenantId, fn)` — the only sanctioned way app code sets tenant (`set_config('ratio.tenant_id', $1, true)`, bound parameter, uuid-validated) |
 | `src/ingest/db/testing/*` | DB test harness (per-file database), synthetic fixtures, `requireTestDatabaseUrl` guard. Excluded from the worker build. |
-| `src/ingest/cli.ts` | worker CLI entry; Slice 0 only has `migrate up|down N|status` |
+| `src/ingest/cli.ts` | worker CLI entry; Slice 0 only has `migrate [--allow-contract \| --down N \| --status [--json]]`; every output line goes through `jsonLineRedactor` (redaction before serialization, §15) |
 | `tsconfig.worker.json` → `dist-worker/` | CommonJS production build of `src/ingest` (gitignored). Migrations SQL copied next to the compiled runner. |
 | `vitest.db.config.ts` | runs only `*.db.test.ts`; throws at config load if `RATIO_TEST_DATABASE_URL` unset ⇒ `npm run test:db` exits non-zero (fails, never skips) |
 
@@ -32,7 +35,8 @@ added in this slice (not needed). No other dependency.
 ## 2. Migration runner
 
 - Bookkeeping table `public.schema_migrations(version text pk, name text, checksum
-  text (sha256 hex of the .up.sql bytes), applied_at timestamptz default now())`.
+  text (sha256 hex of the .up.sql bytes), down_checksum text null (sha256 of the
+  .down.sql bytes), applied_at timestamptz default now())`.
   Lives outside schema `ratio` so dropping `ratio` (down) never loses the
   migration ledger.
 - Session-level `pg_advisory_lock(<constant bigint>)` taken BEFORE the ledger is
@@ -42,7 +46,8 @@ added in this slice (not needed). No other dependency.
   serialize (relevant for parallel test DBs and for role creation, see §4).
 - Integrity checks before applying anything (refuse ⇒ throw `MigrationError`
   with a code, nothing applied):
-  - `CHECKSUM_MISMATCH` — an applied migration's file bytes changed;
+  - `CHECKSUM_MISMATCH` — an applied migration's up file bytes changed, or its
+    down file changed, appeared or disappeared;
   - `MISSING_FILE` — an applied version has no file on disk;
   - `OUT_OF_ORDER` — a pending version is lower than the highest applied;
   - file-level: bad filename, duplicate version, `.down.sql` without `.up.sql`,
@@ -50,13 +55,20 @@ added in this slice (not needed). No other dependency.
     TRANSACTION`/`SAVEPOINT`/`RELEASE`/`END`/`ABORT`/`PREPARE TRANSACTION`) at
     statement level outside dollar-quoted bodies, comments and string literals
     (`TRANSACTION_CONTROL`) — these would break the one-txn-per-migration rule.
-- Each migration: `BEGIN; <up sql>; RESET ROLE; INSERT schema_migrations; COMMIT`.
-  Any error ⇒ `ROLLBACK`, no ledger row, no partial objects, runner stops.
-  (`RESET ROLE` because 0001 does `SET LOCAL ROLE ratio_owner`.)
-- `down N`: newest-first, each `BEGIN; <down sql>; RESET ROLE; DELETE ledger row;
-  COMMIT`, same lock. Refused (`DOWN_NOT_ALLOWED`) unless
-  `RATIO_ALLOW_DOWN_MIGRATIONS=1` AND `NODE_ENV !== 'production'`. Refused
+- Each migration (current, round 5): `BEGIN; <up sql>; RESET ROLE; SET LOCAL
+  search_path = pg_catalog, pg_temp; SET CONSTRAINTS ALL IMMEDIATE; INSERT
+  schema_migrations; <catalog privilege check>; COMMIT`. Any error or check
+  violation ⇒ `ROLLBACK`, no ledger row, no partial objects, runner stops.
+  (`RESET ROLE` because 0001 does `SET LOCAL ROLE ratio_owner`; the catalog
+  check is the last statement so nothing the migration installed can run after
+  it — see §13/§14.)
+- `down N`: newest-first, each `BEGIN; <down sql>; RESET ROLE; SET LOCAL
+  search_path …; SET CONSTRAINTS ALL IMMEDIATE; DELETE ledger row; <catalog
+  check>; COMMIT`, same lock. Refused (`DOWN_NOT_ALLOWED`) when `NODE_ENV` or
+  `RATIO_ENV` is production, unless `RATIO_ENV` (trimmed, lower-cased) is
+  development/test/ci, and unless `RATIO_ALLOW_DOWN_MIGRATIONS=1`. Refused
   (`NO_DOWN`) if a target has no `.down.sql`. Checksum checks also run first.
+  What down drops and keeps: §8.
 - Checksums are over raw bytes; `.gitattributes` pins `*.sql` to LF so a
   Windows checkout cannot silently change a checksum.
 
@@ -67,15 +79,16 @@ schema — tested by catalog scan). Timestamps: `timestamptz` only (tested).
 Every tenant-owned table: `tenant_id uuid not null`; every FK is composite and
 includes `tenant_id` (tested generically by catalog scan of `pg_constraint`).
 
-| Table | Key points |
+| Table | Key points (current 0001) |
 |---|---|
 | `tenants(id uuid pk, slug text unique not null check ^[a-z0-9][a-z0-9-]{0,62}$, created_at)` | tenant registry; RLS on `id` |
-| `sources` | pk(tenant_id,id); unique(tenant_id,source_key); kind ∈ {focus_file,fake}; coverage ∈ {public_cloud,private_cloud,on_prem}; `declared_focus_version` null or `1.0`–`1.4`; `config jsonb not null default '{}'` CHECK object AND NOT `ratio.jsonb_has_secret_like_key(config)`; NO secrets column; FK(tenant_id)→tenants |
-| `sync_runs` | pk(tenant_id,id); unique(tenant_id,source_id,id); FK(tenant_id,source_id)→sources; run_kind ∈ {scheduled,backfill,replay}; `period_from/period_to date` (first-of-month, both-or-neither, from ≤ to) — chosen over `daterange[]` for simpler constraints; status ∈ {running,succeeded,failed,abandoned}; running ⇒ lease_token+lease_expires_at not null and finished_at null; terminal ⇒ finished_at not null; `attempt int ≥ 1`; `error_detail` ≤ 4000 chars (redaction is the writer's job, Slice 1); partial unique index: one `running` run per (tenant, source) |
-| `ingest_batches` | pk(tenant_id,id); unique(tenant_id,source_id,id), unique(tenant_id,source_id,billing_period,id) (FK targets); FK(tenant_id,source_id,run_id)→sync_runs(tenant_id,source_id,id) so a batch's run is the same source's run; billing_period day = 1; fingerprint `^[0-9a-f]{64}$`; status ∈ {staged,published,superseded,rejected}; reconciliation ∈ {reconciled,unverified,variance} not null default unverified; counts ≥ 0; published ⇒ published_at; superseded ⇒ superseded_at; rejected ⇒ rejection_reason; published/superseded ⇒ reconciliation ≠ variance; unique(tenant_id,source_id,billing_period,artifact_set_fingerprint); partial unique: ≤1 `published` batch per (tenant,source,period) |
-| `ingest_artifacts` | pk(tenant_id,batch_id,artifact_name); unique(tenant_id,batch_id,fingerprint) (two byte-identical files in one set are refused — Slice 1 must reject such a set with a reason); FK(tenant_id,batch_id)→ingest_batches; byte_size/row_count ≥ 0 |
-| `cost_facts` | pk(tenant_id,batch_id,artifact_fingerprint,row_ordinal) (row identity = artifact+ordinal, never content hash); FK(tenant_id,source_id,billing_period,batch_id)→ingest_batches(…) so a fact's source/period always equal its batch's; FK(tenant_id,batch_id,artifact_fingerprint)→ingest_artifacts(tenant_id,batch_id,fingerprint); `billed_cost numeric not null`; `billing_currency ~ ^[A-Z]{3}$`; charge_period_start/end timestamptz not null, end ≥ start; row_ordinal ≥ 0; `extra_columns jsonb` object |
-| `period_publications` | pk(tenant_id,source_id,billing_period) — THE pointer; FK(tenant_id,source_id,billing_period,batch_id)→ingest_batches(…) so the pointer can only name a batch of the same source+period; FK(tenant_id,source_id,published_by_run_id)→sync_runs; unique(tenant_id,batch_id) |
+| `sources` | pk(tenant_id,id); unique(tenant_id,source_key); `source_key ~ ^[a-z0-9][a-z0-9_-]{0,62}$`; kind ∈ {focus_file,fake}; display_name 1–200 chars; coverage ∈ {public_cloud,private_cloud,on_prem}; `declared_focus_version` null or `1.0`–`1.4`; `config jsonb not null default '{}'` CHECK object AND NOT `ratio.jsonb_has_secret_like_key(config)` AND NOT `ratio.jsonb_has_secret_like_value(config)`; NO secrets column; FK(tenant_id)→tenants |
+| `sync_runs` | pk(tenant_id,id); unique(tenant_id,source_id,id); FK(tenant_id,source_id)→sources; run_kind ∈ {scheduled,backfill,replay}; `period_from/period_to date` (first-of-month, both-or-neither, from ≤ to) — chosen over `daterange[]` for simpler constraints; status ∈ {running,succeeded,failed,abandoned}; running ⇒ lease_token+lease_expires_at not null and finished_at null; terminal ⇒ finished_at not null; `attempt int ≥ 1`; `error_code ~ ^[A-Z][A-Z0-9_]{0,63}$`; `error_detail` ≤ 4000 chars AND NOT `text_looks_secret` (the writer must redact; Slice 1); `stats jsonb` object with no secret-like keys or values; partial unique index: one `running` run per (tenant, source) |
+| `ingest_batches` | pk(tenant_id,id); unique(tenant_id,source_id,id), unique(tenant_id,source_id,billing_period,id) (FK targets); FK(tenant_id,source_id,run_id)→sync_runs(tenant_id,source_id,id); billing_period day = 1; `artifact_set_fingerprint ~ ^[0-9a-f]{64}$`; status ∈ {staged,published,superseded,quarantined}; `row_count`/`control_row_count`/`validation_error_count` ≥ 0; `control_billed_total` and `loaded_billed_total` finite (`abs(x) < 'Infinity'`, rejects NaN/±Infinity); reconciliation ∈ {reconciled,unverified,variance} default unverified; published ⇒ published_at; superseded ⇒ superseded_at; quarantined ⇒ `quarantine_reason` (≤ 2000 chars AND NOT `text_looks_secret`); published/superseded ⇒ reconciliation ≠ variance; reconciled ⇒ ≥1 control and every present control equals the loaded value; variance ⇒ a control exists; published/superseded ⇒ (`unverified` ⇔ no control); unique(tenant_id,source_id,billing_period,artifact_set_fingerprint); partial unique: ≤1 `published` batch per (tenant,source,period); lifecycle + immutability triggers (§11) |
+| `ingest_artifacts` | pk(tenant_id,batch_id,artifact_name); unique(tenant_id,batch_id,sha256) (two byte-identical files in one set are refused); FK(tenant_id,source_id,batch_id)→ingest_batches(tenant_id,source_id,id); `artifact_name` 1–1024 chars, no `?`/`#`, NOT `text_looks_secret`; `sha256 ~ ^[0-9a-f]{64}$`; byte_size/row_count ≥ 0; `evidence_key = 'evidence/' ‖ tenant_id ‖ '/' ‖ source_id ‖ '/' ‖ sha256` (CHECK) |
+| `ingest_validation_errors` | pk(tenant_id,batch_id,error_ordinal); `error_ordinal` 1..1000 (DB-enforced per-batch cap; the total is `ingest_batches.validation_error_count`); FK(tenant_id,batch_id,artifact_sha256)→ingest_artifacts(tenant_id,batch_id,sha256); row_ordinal ≥ 0 or null; column_name ≤ 256; `code ~ ^[A-Z][A-Z0-9_]{0,63}$`; `message` ≤ 1000 chars AND NOT `text_looks_secret` |
+| `cost_facts` | pk(tenant_id,batch_id,artifact_sha256,row_ordinal) (row identity = artifact+ordinal, never content hash); FK(tenant_id,source_id,billing_period,batch_id)→ingest_batches(…) so a fact's source/period always equal its batch's; FK(tenant_id,batch_id,artifact_sha256)→ingest_artifacts(tenant_id,batch_id,sha256); `billed_cost numeric not null`; billed/effective/list/contracted cost and usage/pricing quantity finite (`abs(x) < 'Infinity'`); `billing_currency ~ ^[A-Z]{3}$`; charge_period_start/end timestamptz not null, end ≥ start; `row_ordinal bigint ≥ 0`; `extra_columns jsonb` object (not secret-checked: provider columns) |
+| `period_publications` | pk(tenant_id,source_id,billing_period) — THE pointer; FK(tenant_id,source_id,billing_period,batch_id)→ingest_batches(…) so the pointer can only name a batch of the same source+period; FK(tenant_id,source_id,published_by_run_id)→sync_runs; unique(tenant_id,batch_id); the deferred `publication_consistency` trigger (RT003) makes the pointer name exactly the one `published` batch at every COMMIT |
 | `source_checkpoints` | pk(tenant_id,source_id); FK→sources; FK(tenant_id,source_id,last_run_id)→sync_runs; `periods jsonb` object |
 | view `cost_facts_published` | **Corrected (round 2):** definer-rights view `WITH (security_barrier = true)` — NOT `security_invoker` (BOUNDARY v2 D4, §10) — owned by `ratio_owner`; cost_facts ⋈ period_publications on (tenant, source, period, batch) ⋈ ingest_batches `status = 'published'`, plus `WHERE tenant_id = ratio.current_tenant_id()` |
 
@@ -110,8 +123,12 @@ Helper functions (schema `ratio`; all except `current_tenant_id` carry `SET sear
 - `ratio_owner`, `ratio_worker`, `ratio_reader`, created idempotently in a DO
   block (`IF NOT EXISTS … CREATE ROLE … NOLOGIN`, with `duplicate_object` /
   `unique_violation` caught so concurrent migrations of different databases in
-  one cluster cannot race). Then a guard: if any of the three has `rolsuper` or
-  `rolbypassrls`, the migration RAISEs (fails closed rather than ALTERing roles).
+  one cluster cannot race). Then a guard (RT010): if any of the three is
+  SUPERUSER, BYPASSRLS or REPLICATION, if worker/reader have CREATEROLE or
+  CREATEDB, or if any of them is a member of any role, the migration RAISEs
+  (fails closed rather than ALTERing roles). Since round 5 the runner's catalog
+  check re-verifies these invariants (and pins role identity) after every
+  migration.
   Roles are cluster-global; LOGIN/password are granted by deployment
   (`ALTER ROLE ratio_worker LOGIN PASSWORD …` or a login role `GRANT ratio_worker
   TO app_login`), not by migrations.
@@ -130,8 +147,10 @@ Helper functions (schema `ratio`; all except `current_tenant_id` carry `SET sear
   - `ratio_worker`: USAGE on schema; SELECT on tenants, sources; SELECT/INSERT/
     UPDATE on sync_runs, source_checkpoints, period_publications;
     SELECT/INSERT/UPDATE/DELETE on ingest_batches; SELECT/INSERT/DELETE on
-    ingest_artifacts, cost_facts (facts are immutable — no UPDATE); SELECT on
-    the view. No DDL, not owner (cannot disable RLS).
+    ingest_artifacts, ingest_validation_errors, cost_facts (facts are immutable
+    — no UPDATE); SELECT on the view. No DDL, not owner (cannot disable RLS).
+    The exact effective set is `REVIEWED_PRIVILEGES.ratio_worker` in
+    `privilegeModel.ts` (tested equal to what 0001 grants).
   - `ratio_reader`: **SUPERSEDED by §10 (D4)** — USAGE on the schema and
     SELECT on `cost_facts_published` ONLY; no base-table grant, no
     restrictive reader policy (the security_invoker design described in the
@@ -164,11 +183,12 @@ does not bundle `pg`. `tsc --noEmit` (root tsconfig) type-checks `src/ingest`.
 | View bypassing RLS (definer rights) | owner `ratio_owner` is non-super/non-BYPASSRLS and bound by FORCE RLS; explicit tenant predicate in the view (round 2: corrected — the view is NOT security_invoker) | view isolation + real-login tests; mutation M1 |
 | Reader sees staged/superseded/quarantined rows | reader has no base-table grant (42501); view joins `status = 'published'` and the pointer | reader matrix; mutations M3, M8 |
 | Reader/worker escalation (DDL, disable RLS) | not owner, no CREATE on schema | DDL refused test |
-| Secrets persisted in config | no secrets column; CHECK rejects secret-like keys recursively | key matrix |
+| Secrets persisted in config / free text | no secrets column; CHECKs reject secret-like keys AND values recursively (config, stats) and secret-looking free text (error_detail, quarantine_reason, validation messages, artifact names) | key/value matrices |
 | Float money corruption | numeric only; `pg` returns numeric as string | precision round-trip + catalog scan |
 | Concurrent migrators corrupt schema | advisory lock + per-migration txn | concurrent runner test |
 | Edited migration silently diverges | sha256 checksum ledger | tamper test |
-| Migration leaking connection string | CLI never logs URLs; logs structured JSON with error message/code only | n/a (reviewed) |
+| Migration leaking connection string | CLI redacts every string BEFORE JSON serialization (raw, URL-decoded, URL-encoded and JSON-escaped forms of the URL, user and password), then a backstop pass over the serialized line (round 6) | `cli.test.ts`, `cli.db.test.ts` (real pg error carrying the password); mutations H1–H5 |
+| A migration widens a role's privileges, adds a SECURITY DEFINER function, or installs a hook that runs after the check (rounds 4–5) | runner catalog check as the last statement before COMMIT (privilegeModel.ts): reviewed privilege allow-list for reader/worker, SECURITY DEFINER allow-list, no PUBLIC EXECUTE in ratio/public, reviewed triggers only, no rules/event triggers, no ledger policies, pinned role identity | `privileges.db.test.ts`; mutation tables R4/R5 |
 | SQL injection via tenant id | bound parameter + uuid validation | unit test |
 | **Credential holder selects another tenant** (round 2, M5) | NONE at the DB layer: the tenant is a user-settable GUC; any holder of a worker/reader credential can `set_config('ratio.tenant_id', <any uuid>, true)`. RLS/tenant isolation defends against application bugs (missing/wrong tenant), NOT against credential holders. The alternative — per-tenant DB roles/credentials — is an owner decision | characterization test `documented trust boundary…` |
 | Published data rewritten after publication (round 2, H2) | staged-only child trigger (RT001), TRUNCATE refused, batch lifecycle trigger (RT002), deferred pointer consistency (RT003), reconciliation CHECKs | `immutability.db.test.ts`; mutations M8–M11, M16–M18, M21 |
@@ -179,8 +199,9 @@ does not bundle `pg`. `tsc --noEmit` (root tsconfig) type-checks `src/ingest`.
 | `ratio_owner` holds CREATEROLE (round 3, L3) | Allowed by the role guard (worker/reader may not) because a deployment may run first-time role creation as the owner. Risk: an owner login could create a new role and grant it ratio_worker/ratio_reader, or create login roles. Mitigation: owner credentials are migration-only (not used by the app/worker); deployment should grant CREATEROLE only for the first migration and revoke it after (owner decision) | documented |
 | Triggers bypassed | only by the table owner (`ALTER TABLE … DISABLE TRIGGER`, refused by the migration linter) or a superuser (`session_replication_role = replica`, also linter-refused); worker/reader cannot | deny tests |
 
-Out of scope here: worker startup role check (Slice 1), error redaction
-(Slice 1), any network surface (none exists).
+Out of scope here: worker startup role check (Slice 1), redaction of
+`error_detail` by the worker before it is written (Slice 1; the DB CHECK only
+refuses secret-looking text), any network surface (none exists).
 
 ## 7. Failure cases
 
@@ -192,24 +213,41 @@ Out of scope here: worker startup role check (Slice 1), error redaction
 - Lock holder hangs: other runners wait indefinitely (no lock timeout in v1 —
   gap; operator can `pg_terminate_backend`).
 - Checksum/missing/out-of-order: refuse before touching anything.
-- Role pre-exists with SUPERUSER/BYPASSRLS/REPLICATION, worker/reader with CREATEROLE/CREATEDB, or any ratio role is a member of any role: 0001 raises RT010, rolled back.
+- Role pre-exists with SUPERUSER/BYPASSRLS/REPLICATION, worker/reader with CREATEROLE/CREATEDB, or any ratio role is a member of any role: 0001 raises RT010, rolled back. (The catalog check re-verifies these after every later migration.)
+- A migration's catalog effect deviates from the reviewed model: `PRIVILEGE_MODEL_VIOLATION`, that migration rolled back; `migrate --status` reports drift made outside the runner (exit 3).
 - Migrating login lacks membership in ratio_owner: `SET ROLE` fails, rolled back.
 - `test:db` without `RATIO_TEST_DATABASE_URL`: config throws ⇒ non-zero exit.
 
-Known gaps carried forward (updated round 2 — value secret checks and the
-pointer/published consistency trigger now exist): no `lock_timeout` on the
-migration lock; dynamic `import()` with non-literal specifiers is not detectable
-by the boundary test.
+Known gaps carried forward: no `lock_timeout` on the migration lock; dynamic
+`import()` with non-literal specifiers is not detectable by the boundary test.
+(Value secret checks and the RT003 pointer/published consistency trigger exist
+since round 2.)
 
 ## 8. Rollback plan
 
 - Code: branch is unmerged; revert = do not merge / `git revert` the commits.
   App behaviour does not depend on any of it.
-- Database (non-prod): `RATIO_ENV=test RATIO_ALLOW_DOWN_MIGRATIONS=1 RATIO_MIGRATE_DATABASE_URL=… npm run db:migrate -- --down 1`
-  ⇒ `DROP SCHEMA ratio CASCADE` + ledger row removed. Roles are left in place
-  (cluster-global, may be shared by other databases); to remove them on a
-  dedicated cluster: `DROP ROLE ratio_reader, ratio_worker, ratio_owner` after
-  checking no other database references them.
+- Database (non-prod): `RATIO_ENV=test RATIO_ALLOW_DOWN_MIGRATIONS=1 RATIO_MIGRATE_DATABASE_URL=… npm run db:migrate -- --down 1`.
+  Exactly what 0001's down does:
+  - **Drops** (`DROP SCHEMA ratio CASCADE`): schema `ratio` and everything in
+    it — all nine tables and their rows (all ingested data, evidence metadata,
+    validation errors, runs, checkpoints), the view, the helper and trigger
+    functions, triggers, RLS policies, indexes and constraints, and every
+    privilege granted on those objects (grants die with their objects).
+  - **Removes** (runner, same transaction): the `0001` row of
+    `public.schema_migrations`.
+  - **Keeps, deliberately:** the roles `ratio_owner`, `ratio_worker`,
+    `ratio_reader` — with their attributes, their memberships and any LOGIN
+    roles / passwords the deployment attached. Roles are cluster-global: other
+    databases in the same cluster may use them, and `DROP ROLE` would fail (or
+    break those databases) while anything there references them. A later `up`
+    reuses them and its role guard re-checks them (RT010).
+  - **Keeps:** the ledger table `public.schema_migrations` itself (it lives
+    outside `ratio` precisely so it survives a down), and anything the
+    deployment created outside schema `ratio`.
+  To remove the roles on a dedicated cluster, after confirming no database
+  references them: `DROP ROLE ratio_reader, ratio_worker, ratio_owner` (and
+  drop or reassign the deployment's LOGIN members first).
 - Production: down is refused by design (NODE_ENV/RATIO_ENV=production; since round 2 also any RATIO_ENV other than development/test/ci). Production
   rollback of 0001 drops all ingested data and is a data-retention decision for
   the owner (flagged in EVIDENCE.md).
@@ -223,12 +261,13 @@ by the boundary test.
    migration is refused (`CONTRACT_NOT_ALLOWED`, nothing applied — checked
    before the first migration of the run) unless `allowContract: true` /
    CLI `--allow-contract`. Fail-closed hardening (delegated decision): an
-   `expand` migration whose code (outside comments/strings/dollar bodies)
-   contains `DROP …`, `TRUNCATE`, `DELETE FROM`, `… RENAME …` or
-   `ALTER COLUMN … TYPE` is rejected at load (`EXPAND_NOT_ADDITIVE`). This is a
-   lexical heuristic, not a proof of backward compatibility (gap: e.g.
-   `CREATE OR REPLACE FUNCTION` changing semantics, `SET NOT NULL`). 0001 is
-   `expand` (creates only new objects). Down files carry no phase.
+   `expand` migration is checked lexically at load (`EXPAND_NOT_ADDITIVE`).
+   *As first written* this was a deny-list (`DROP`, `TRUNCATE`, `DELETE FROM`,
+   `RENAME`, `ALTER COLUMN … TYPE`); since round 2 it is an allow-list of
+   additive forms plus reasoned markers (§11, §12, §13), and since round 4 the
+   runner's catalog check backs it. Still lexical, not a proof of backward
+   compatibility. 0001 is `expand` (creates only new objects). Down files carry
+   no phase.
 2. **Down is dev/test only.** Refused (`DOWN_NOT_ALLOWED`) when
    `RATIO_ENV=production` OR `NODE_ENV=production`, and also unless
    `RATIO_ALLOW_DOWN_MIGRATIONS=1` (explicit opt-in even in dev). Auto-rollback
@@ -237,12 +276,16 @@ by the boundary test.
 3. **Machine-readable status.** `npm run db:migrate -- --status --json`
    (CLI: `migrate --status --json`) prints exactly one JSON document on stdout:
    `{ expectedVersion, currentVersion, matches, applied:[{version,name,checksum,
-   appliedAt,fileChecksum,checksumMatches}], pending:[{version,name,phase,checksum}],
-   unknownApplied:[versions in DB but not in code], problems:[codes] }`.
-   Read-only (no lock, does not create the ledger). Exit 0 iff matches (every
-   code migration applied, all checksums equal, no unknown applied versions);
-   exit 3 on mismatch; exit 1 on error (connection etc.). Without `--json` the
-   same object is logged as one structured line.
+   downChecksum,appliedAt,fileChecksum,fileDownChecksum,checksumMatches}],
+   pending:[{version,name,phase,checksum}], unknownApplied:[versions in DB but
+   not in code], privilegeProblems:[catalog-check lines], problems:[codes] }`
+   (`downChecksum`/`fileDownChecksum` since round 2, `privilegeProblems` and the
+   `PRIVILEGE_MODEL_VIOLATION` problem since round 5). Read-only (no lock, does
+   not create the ledger; runs in a READ ONLY transaction). Exit 0 iff matches
+   (every code migration applied, all checksums equal, no unknown applied
+   versions, no privilege-model violation); exit 3 on mismatch; exit 1 on error
+   (connection etc.). Without `--json` the same object is logged as one
+   structured line.
 
 CLI surface therefore becomes flag-based: `migrate` (apply pending),
 `migrate --allow-contract`, `migrate --down N`, `migrate --status [--json]`.
@@ -307,7 +350,7 @@ recreated (that is the intended behaviour of the checksum ledger).
     DELETE of a quarantined batch's rows is NOT allowed (D7: evidence and error
     detail of a quarantined revision are retained; no deletion code this cycle).
     Not-found parent ⇒ the trigger lets the composite FK / RLS reject the row
-    with its own error.
+    with its own error. *(Superseded in round 3: a not-found parent is RT001.)*
   - `refuse_truncate` BEFORE TRUNCATE on facts, artifacts, validation errors,
     batches, publications (RT001).
   - `batch_lifecycle` BEFORE INSERT/UPDATE/DELETE on `ingest_batches` (RT002):
@@ -337,8 +380,11 @@ recreated (that is the intended behaviour of the checksum ledger).
   so concurrent test databases never observe the dangerous state.
 - **M3 classifier** — `expand` is an allow-list; FORBIDDEN list applies in every
   phase. DO blocks need `-- ratio:allow-do <reason>` on the line directly above
-  (0001's role DO block carries one). The body of a marked DO block is not
-  inspected — the marker is a reviewed escape hatch. `REVOKE … FROM PUBLIC` is
+  (0001's role DO block carries one; since round 4 anywhere in the comment block
+  directly above). The body of a marked DO block is not
+  inspected — the marker is a reviewed escape hatch. *(Superseded in round 3:
+  DO and function bodies, and the string literals in them, are scanned for
+  forbidden statements.)* `REVOKE … FROM PUBLIC` is
   expand because releases never rely on PUBLIC privileges (GRANT TO PUBLIC is
   forbidden). Lexical: the classifier does not parse SQL fully.
 - **M4** `abs(x) < 'Infinity'` (false for NaN in Postgres numeric ordering).
@@ -347,7 +393,8 @@ recreated (that is the intended behaviour of the checksum ledger).
   CHECKSUM_MISMATCH. **L2** down only for RATIO_ENV ∈ {development,test,ci}
   (trimmed, case-insensitive) and NODE_ENV ≠ production and the flag.
   **L3** §3. **L4** §4. **L5** CLI redacts the URL, userinfo, and any
-  `password=` value (URL query, keyword DSN, quoted). **L6** fast test forbids
+  `password=` value (URL query, keyword DSN, quoted). *(Round 6: redaction now
+  happens before serialization, §15.)* **L6** fast test forbids
   session-level tenant settings under `src/ingest`.
 - **Orchestrator additions:** `GRANT UPDATE (row_count) ON ratio.ingest_artifacts
   TO ratio_worker` (column-level; trigger still staged-only); no purge/delete
@@ -473,3 +520,27 @@ recreated (that is the intended behaviour of the checksum ledger).
   migrations are reviewed and contract needs `--allow-contract`. Trigger
   function bodies of the reviewed triggers are pinned by name and owner, not
   by body hash.
+
+## 15. Round 6 — Copilot review of 453377e (High + 3 doc Lows)
+
+- **High — redaction after `JSON.stringify`.** The CLI serialized each line
+  and only then redacted it, so JSON escaping could hide a secret: a password
+  `ab"cd` (or `ab%22cd` in the URL) inside a pg error left as `ab\"cd`
+  (reproduced end-to-end: the password doubles as the missing database name, so
+  the server's `database "<pw>" does not exist` carries it). Now:
+  - `secretForms()` derives, for every configured secret (URL, user ≥ 3 chars,
+    password, `pass*` query/keyword values), the raw, URL-decoded and
+    URL-encoded forms and the JSON-escaped form of each;
+  - `redactDeep()` deep-copies the value to be printed, redacting every string
+    and object key, walking arrays, Errors (message, code, cause) and `toJSON`
+    results; cycles become `[circular]`;
+  - `jsonLineRedactor()` = `redactDeep` → `JSON.stringify` → the string
+    redactor again over the serialized line (backstop; catches e.g. a numeric
+    value equal to a secret). It is the only way the CLI produces output:
+    every log/error line and `status --json`. (Evidence records belong to
+    Slice 1's CLI, which is not on this branch.)
+- **Doc Lows:** §3 schema table now matches 0001 (`quarantined` /
+  `quarantine_reason`, `sha256` / `artifact_sha256`, finite-value and
+  secret-value CHECKs, `ingest_validation_errors`); the stale "pointer not
+  enforced" gap is removed from EVIDENCE (RT003 exists and is tested); §8 and
+  EVIDENCE §7 state exactly what down drops and keeps, and why.

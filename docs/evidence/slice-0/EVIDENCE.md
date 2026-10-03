@@ -1,8 +1,10 @@
 # Slice 0 — operational evidence
 
 Branch `slice/00-postgres-foundation`, created from `origin/slice/00a-ci-deps`
-@ `ec68902`. Upstream tracking removed (`git branch --unset-upstream`). Local
-commits only: nothing pushed, no PR, nothing merged.
+@ `ec68902`. Sections 1–10 are the round-1 record (point in time); each later
+round is appended below it. Since then the orchestrator has pushed the branch,
+merged `origin/main` into it (453377e) and opened the PR; implementers commit
+locally only. Where a round-1 statement is no longer true it is marked here.
 
 Raw outputs referenced below are files next to this one in
 `scratchpad/slice0/` (`red-*.txt`, `v-*.txt`, `mutations.txt`).
@@ -100,7 +102,7 @@ the untouched base). It is not part of this branch and was not modified.
 | `grep -rlE 'pg-protocol\|ratio\.tenant_id\|schema_migrations' .next --include=*.js` | none — `pg` and ingestion code are not in the Next bundles |
 | CI (`.github/workflows/ci.yml`) | edited, YAML parses; NOT executed (no push). Note: the workflow triggers only on push/PR to `main`, so a PR based on `slice/00a-ci-deps` will not run it until retargeted |
 
-## 5. Complete test list (all passing in the verification run)
+## 5. Complete test list (round-1 snapshot; current totals are in the latest round's verification table)
 
 Fast suite (`npm test`, no DB) — 34 tests:
 - `src/ingest/cli.test.ts`: unknown command exits 2; rejects unknown flags; --down requires a positive integer; missing RATIO_MIGRATE_DATABASE_URL exits 1; down is refused before connecting when not allowed; connection errors never echo the database URL or password
@@ -132,10 +134,22 @@ used anywhere. Nothing here demonstrates real-source ingestion.
 - Code: nothing merged; drop the branch or `git revert` 3b43292/311b92f. No
   existing app behaviour depends on it.
 - DB (dev/test only): `RATIO_MIGRATE_DATABASE_URL=<owner url> RATIO_ALLOW_DOWN_MIGRATIONS=1 npm run db:migrate -- --down 1`
-  → `DROP SCHEMA ratio CASCADE` + ledger row removed (verified above). Refused
-  when NODE_ENV or RATIO_ENV is production. Roles stay (cluster-global); remove
-  manually on a dedicated cluster with `DROP ROLE ratio_reader, ratio_worker, ratio_owner`
-  after confirming no other database uses them.
+  (plus `RATIO_ENV=development|test|ci`, required since round 2). Refused when
+  NODE_ENV or RATIO_ENV is production. Exactly what it does (DESIGN §8):
+  - drops schema `ratio` with CASCADE — every table and row in it (all
+    ingested data), the view, functions, triggers, policies, indexes, and the
+    grants on those objects;
+  - deletes the `0001` row from `public.schema_migrations` (same transaction,
+    followed by the catalog privilege check);
+  - does NOT drop the roles `ratio_owner` / `ratio_worker` / `ratio_reader`
+    (nor their memberships, attributes or the deployment's LOGIN roles): roles
+    are cluster-global and may be used by other databases in the cluster, so a
+    per-database down must not remove them; a later `up` reuses them and
+    re-checks them (RT010);
+  - does NOT drop the ledger table `public.schema_migrations` (kept outside
+    `ratio` so the history survives).
+  Remove the roles manually on a dedicated cluster with `DROP ROLE ratio_reader,
+  ratio_worker, ratio_owner` after confirming no other database uses them.
 - Pipeline: status gate `npm run db:migrate -- --status --json` (exit 0 match,
   3 mismatch). With expand-only migrations the previous release runs on the
   newer schema, so application rollback never requires a DB rollback.
@@ -168,7 +182,8 @@ used anywhere. Nothing here demonstrates real-source ingestion.
 
 ## 9. Known gaps
 
-- CI workflow not executed (no push); triggers only on `main`.
+- CI workflow not executed by the implementer (round 1: no push; the PR now
+  exists, so see its checks).
 - Migration lock has no timeout (a hung holder blocks others; operator uses
   `pg_terminate_backend`).
 - Process-kill during a migration is not simulated; relies on Postgres
@@ -177,14 +192,13 @@ used anywhere. Nothing here demonstrates real-source ingestion.
   claim was wrong. The guard IS testable by making the dangerous change and running
   the 0001 body inside one transaction that is rolled back (other sessions never
   see the change); `roles.db.test.ts` does exactly that (M1/M2).
-- Expand-additivity check is lexical (e.g. `SET NOT NULL`, `CREATE OR REPLACE
-  FUNCTION` semantics changes are not detected).
+- Expand-additivity check is lexical (e.g. semantics changes inside a marked
+  function are not detected); since round 4 the runner's catalog check backs it
+  for privileges, SECURITY DEFINER, hooks and role identity.
 - (Round 2) Secret guard now inspects keys AND string values (config, stats)
   and free-text columns; still deliberately broad (false positives such as
   `partition_key`), still blind to homoglyph keys and to secrets that match none
   of the patterns. `cost_facts.extra_columns` is not checked (provider columns).
-- `period_publications` does not itself enforce that the pointed batch is
-  `published` (the view filters on it; Slice 1 publish txn must keep them in sync).
 - Import-boundary test cannot see non-literal dynamic imports.
 - `sources.kind` is still `('focus_file','fake')`; BOUNDARY v2 D2's
   `S3FocusExportSource` may need an expand migration in Slice 1.
@@ -337,7 +351,7 @@ No mutation survived. Raw: `scratchpad/slice0/r2/mutations.txt`.
 - Triggers can be disabled by the table owner or a superuser
   (`DISABLE TRIGGER`, `session_replication_role`); the migration linter refuses
   both in migrations, but a human with those credentials is not constrained.
-- The classifier is lexical; the body of a `ratio:allow-do` DO block is not inspected.
+- The classifier is lexical; the body of a `ratio:allow-do` DO block is not inspected. *(Superseded in round 3: bodies and their string literals are scanned for forbidden statements; round 4 added the catalog check.)*
 - Per-row FOR SHARE in the child trigger: throughput at 200k rows unmeasured (Slice 1).
 - One leftover empty test database of unknown origin in the shared cluster (R2.3).
 
@@ -612,3 +626,67 @@ The check pins search_path itself, so that line only protects the ledger read.
 | L2 role rename | fixed in the catalog (robust option), see DESIGN §14 |
 | L3 sequence branch | tested (kills P8) |
 | L4 database / parameter / FDW / server / large objects | fixed + tested; types/languages documented as not enumerated |
+
+---
+
+# Round 6 — Copilot review of 453377e (1 High, 3 doc Lows)
+
+Base: 453377e (orchestrator merge of origin/main). Local commits only (not
+pushed). 0001 unchanged. Raw logs: `scratchpad/r7/`.
+
+## R6.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| b020e05 | test(ingest): failing tests — CLI redaction must happen before JSON serialization (Copilot High) | tests (red) |
+| 6e8baee | fix(ingest): CLI redacts every string before JSON serialization, all secret forms, backstop pass after (Copilot High) | fix |
+| 590d196 | fix(ingest): redactDeep follows toJSON; tests kill the escaped-forms and backstop mutations | fix + tests |
+| (this) | docs(evidence): Slice 0 round 6 | docs |
+
+## R6.2 Red (at b020e05)
+
+- `cli.test.ts`: 4 failed / 7 passed (new exports absent).
+- `cli.db.test.ts` (round-6 test): **leak reproduced** against the real server:
+  `"ab\"cd" as "ab\\\"cd": expected '{"ts":…' not to contain 'ab\"cd'` — the
+  JSON-escaped password was printed by `migrate`.
+
+## R6.3 Mutation table (cli.ts; each restored with `git checkout`, tree clean after)
+
+```
+H1 revert to post-serialization redaction (old: no deep walk, no escaped forms)  KILLED  fast 4 failed, db 1 failed (real pg error leak)
+H2 deep walk removed (post-serialization only, escaped forms kept)               KILLED  fast 2 failed
+H3 JSON-escaped forms removed (deep walk kept)                                   KILLED  fast 1 failed (double-escaped nested JSON)
+H4 redactDeep leaves strings unredacted                                          KILLED  fast 2 failed
+H5 backstop pass removed                                                         KILLED  fast 1 failed (numeric value equal to the secret)
+H6 toJSON handling removed                                                       SURVIVED (by design: the backstop redacts the
+                                                                                 escaped forms of what toJSON returns)
+```
+H3 and H5 survived the first table (6e8baee); the tests that kill them were
+added in 590d196, together with the `toJSON` handling.
+
+## R6.4 Verification (main checkout at the docs commit)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1089/1089 (includes the suites merged from origin/main in 453377e) |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 146/146 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep over `src`, `pages` | 0 |
+
+## R6.5 Docs corrected in this round
+
+- DESIGN §3 schema table matches 0001: `quarantined`/`quarantine_reason`,
+  `sha256`/`artifact_sha256`, `ingest_validation_errors`, the finite-value
+  (`abs(x) < 'Infinity'`) and secret-value CHECKs.
+- DESIGN header, §1, §2 (ledger columns, transaction order, down conditions),
+  §4 (role guard, worker grants), §6 (secrets, redaction, catalog check rows),
+  §7, §8 (down: drops/keeps/why), §9 (classifier history, status fields), §11
+  (superseded notes); new §15.
+- EVIDENCE: header (branch now pushed/PR by the orchestrator), §5 marked as a
+  round-1 snapshot, §7 down drops/keeps/why, §9 stale "pointer not enforced"
+  gap removed (RT003 `publication_consistency` exists and is tested since
+  round 2), stale classifier gap marked superseded.
+- TEST_PLAN: test names that no longer exist (first-plan names) replaced by the
+  real ones; round-6 section.

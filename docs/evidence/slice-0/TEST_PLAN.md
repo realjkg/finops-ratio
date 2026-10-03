@@ -17,7 +17,7 @@ All fixtures are synthetic (fixed UUIDs, invented amounts such as `10.10`,
 | checksum tamper refused | D | same | `refuses to run when an applied migration's checksum changed` |
 | two concurrent runners → one applies, other waits then no-ops | D | same | `two concurrent runners: exactly one applies, the other waits on the lock then no-ops` |
 | down migration returns DB to empty state | D | same | `down 1 returns the database to its pre-migration catalog state, and up re-applies (up/down/up)` |
-| `--down N` non-prod only | F+D | `src/ingest/db/migrate.test.ts`, `migrate.db.test.ts` | `assertDownAllowed refuses without RATIO_ALLOW_DOWN_MIGRATIONS=1`, `assertDownAllowed refuses in production even with the flag`, `down is refused without the allow flag and in production; schema untouched` |
+| `--down N` non-prod only | F+D | `src/ingest/db/migrate.test.ts`, `migrate.db.test.ts` | `refuses without RATIO_ALLOW_DOWN_MIGRATIONS=1`, `refuses when NODE_ENV=production even with the flag and a dev RATIO_ENV`, `down is refused without the allow flag and in production; schema untouched` |
 | each migration in own txn | D | `migrate.db.test.ts` | `a failing migration is rolled back completely and stops the run` |
 | (added) missing applied file refused | D | same | `refuses when an applied migration's file is missing` |
 | (added) out-of-order refused | D | same | `refuses an out-of-order pending migration` |
@@ -38,8 +38,8 @@ All fixtures are synthetic (fixed UUIDs, invented amounts such as `10.10`,
 | view respects RLS | D | same | `cost_facts_published shows only the caller tenant's currently published batch` |
 | (added) worker least privilege | D | same | `worker cannot write tenants/sources, update facts, run DDL, disable RLS or become owner` |
 | (added) tenant helper | F+D | `src/ingest/db/tenant.test.ts`, `tenancy.db.test.ts` | `rejects non-uuid tenant ids before touching the database`, `sets the tenant with a bound, transaction-local set_config and commits`, `rolls back and releases on error`, `withTenantTransaction scopes the tenant to one transaction (integration)` |
-| ratio_reader cannot write anything | D | `src/ingest/db/reader.db.test.ts` | `reader cannot INSERT, UPDATE, DELETE or TRUNCATE any table or the view` |
-| (added) reader reads only what it is granted | D | same | `reader can read the view, batches, runs and sources of its own tenant only`, `reader has no access to tenants, artifacts or checkpoints`, `reader querying raw cost_facts sees only the published batch` |
+| ratio_reader cannot write anything | D | `src/ingest/db/reader.db.test.ts` | `reader cannot write through the view or run DDL`, `reader gets permission denied on every base table, including SELECT * FROM ratio.cost_facts` (the first plan's per-table write matrix was folded into these under D4) |
+| (added) reader reads only what it is granted | D | same | superseded by D4 before any test was committed — see the BOUNDARY v2 table (`reader holds exactly one privilege: SELECT on cost_facts_published`, …) |
 | secret-looking keys rejected | D | `src/ingest/db/schema.db.test.ts` | `sources.config rejects secret-looking keys at any depth`, `sources.config accepts non-secret config`, `sources.config must be a JSON object`, `updating sources.config to add a secret key is rejected` |
 | numeric precision | D | same | `numeric money round-trips exactly (0.1 + 0.2 = 0.3, 60-digit values, negatives)` |
 | RLS enabled+forced, composite FKs, numeric, timestamptz | D | same | `every ratio table has RLS enabled and forced`, `every tenant-owned table has tenant_id uuid not null`, `every foreign key is composite and includes tenant_id`, `money columns are unconstrained numeric and no float types exist`, `all timestamp columns are timestamptz`, `view is security_invoker and all objects are owned by ratio_owner` (superseded: now `view runs with definer rights of ratio_owner (not security_invoker)…`, see BOUNDARY v2) |
@@ -48,8 +48,8 @@ All fixtures are synthetic (fixed UUIDs, invented amounts such as `10.10`,
 | import boundary | F | `src/ingest/importBoundary.test.ts` | `no file under pages/ or src/ (outside src/ingest) imports src/ingest or pg`, `detector flags every import form of src/ingest and pg (self-test)`, `detector ignores unrelated imports (self-test)` |
 | DB harness (isolated DB per file) | D | `src/ingest/db/testing/harness.db.test.ts` | `creates a uniquely named database and drops it`, `migrate option leaves the database fully migrated`, `two test databases are isolated from each other` |
 | test:db fails (not skips) without URL | F + evidence | `src/ingest/db/testing/requireTestDatabaseUrl.test.ts` + recorded `npm run test:db` with env unset | `throws when RATIO_TEST_DATABASE_URL is unset`, `throws when it is blank`, `returns the URL when set` |
-| (added) CLI | F | `src/ingest/cli.test.ts` | `unknown command exits 2`, `migrate down requires a positive integer`, `missing RATIO_MIGRATE_DATABASE_URL exits 1`, `down is refused before connecting when not allowed`, `connection errors never echo the database URL or password` |
-| (added) CLI end-to-end | D | `src/ingest/cli.db.test.ts` | `status, up, status, down via the CLI entry` |
+| (added) CLI | F | `src/ingest/cli.test.ts` | `unknown command exits 2`, `rejects unknown flags`, `--down requires a positive integer`, `missing RATIO_MIGRATE_DATABASE_URL exits 1`, `down is refused before connecting when not allowed`, `connection errors never echo the database URL or password` |
+| (added) CLI end-to-end | D | `src/ingest/cli.db.test.ts` | `--status --json reports pending and exits 3 before migrating`, `--status --json reports a match and exits 0 after migrating`, `down via the CLI requires the explicit allow flag and reverts the schema` |
 
 Brief categories "idempotency / authorization / bad input / worker crash /
 recovery" in Slice 0 terms: idempotency = re-run no-op; authorization = roles,
@@ -68,13 +68,13 @@ simulated — see EVIDENCE gaps); recovery = up/down/up and re-run after failure
 | Requirement | Suite | File | Test name(s) |
 |---|---|---|---|
 | unmarked migration refused | F | `migrationFiles.test.ts` | `rejects an up migration without a ratio:phase header`, `rejects an invalid or duplicated phase header` |
-| expand must be additive (hardening) | F | same | `rejects an expand migration containing destructive statements`, `allows destructive statements in a contract migration` |
+| expand must be additive (hardening) | F | same | `rejects an expand migration containing destructive statements`, `allows the additive vocabulary in expand and destructive statements in a contract migration` |
 | 0001 is expand | F | same | `the shipped migrations directory loads cleanly and 0001 is expand` |
 | contract refused without flag | D | `migrate.db.test.ts` | `a pending contract migration is refused without allowContract and applied with it` |
 | unmarked refused at run time | D | same | `an unmarked migration is refused and nothing is applied` |
-| down refused when RATIO_ENV/NODE_ENV=production | F+D | `migrate.test.ts`, `migrate.db.test.ts` | `assertDownAllowed refuses when RATIO_ENV=production`, `assertDownAllowed refuses when NODE_ENV=production`, `down is refused without the allow flag and in production; schema untouched` |
+| down refused when RATIO_ENV/NODE_ENV=production | F+D | `migrate.test.ts`, `migrate.db.test.ts` | `refuses unless RATIO_ENV is development, test or ci (allow-list, trimmed, case-insensitive)`, `refuses when NODE_ENV=production even with the flag and a dev RATIO_ENV`, `down is refused without the allow flag and in production; schema untouched` |
 | status --json, non-zero on mismatch | D | `cli.db.test.ts` | `--status --json reports pending and exits 3 before migrating`, `--status --json reports a match and exits 0 after migrating`, `--status --json exits 3 on checksum drift or unknown applied versions`, `status --json prints exactly one JSON document` |
-| CLI flags | F | `cli.test.ts` | `--down requires a positive integer`, `rejects unknown flags`, `down is refused before connecting when RATIO_ENV=production` |
+| CLI flags | F | `cli.test.ts` | `--down requires a positive integer`, `rejects unknown flags`, `down is refused before connecting when not allowed` |
 
 ## BOUNDARY v2 revisions (before the test commit)
 
@@ -179,10 +179,19 @@ transactions that are always rolled back (cluster-global catalogs).
 | L1 | `a migration that installs public.=/<> operators and puts public first on the search_path still has its grant detected` |
 | L2 | `GRANT to ratio_reader, rename it away and create an impostor ratio_reader: refused`, `rename without an impostor (members keep the old role): refused`, `a LOGIN member of ratio_reader holding an extra privilege is refused; a plain LOGIN member passes`, `a NOLOGIN member of a ratio role is refused`, `a non-ratio role holding any privilege on ratio objects is refused`, `ratio role attributes and memberships are pinned` |
 | L3 | `L3: a sequence privilege beyond the reviewed set is refused` |
-| L4 | `L4: GRANT CREATE ON DATABASE built inside a DO block is refused`, `L4: GRANT SET ON PARAMETER is refused (…rolled-back transaction…)`, `L4: USAGE on a foreign-data wrapper or foreign server is refused`, `L4: a large-object privilege is refused` |
-| survivors (298142a) | `a reviewed trigger whose function is no longer owned by ratio_owner is refused`, `status (no runner SET LOCAL) still detects drift under a hostile session search_path with public operators`, `assertReviewedPrivileges pins its own search_path (…)`, `a ratio role made a member of a role that grants nothing is still refused` |
+| L4 | `L4: GRANT CREATE ON DATABASE built inside a DO block is refused`, `L4: GRANT SET ON PARAMETER is refused (cluster-global: probed in a rolled-back transaction, never via a committing migration)`, `L4: USAGE on a foreign-data wrapper or foreign server is refused`, `L4: a large-object privilege is refused` |
+| survivors (298142a) | `a reviewed trigger whose function is no longer owned by ratio_owner is refused`, `status (no runner SET LOCAL) still detects drift under a hostile session search_path with public operators`, `assertReviewedPrivileges pins its own search_path (a caller-side hostile search_path cannot blind it)`, `a ratio role made a member of a role that grants nothing is still refused` |
 
 Test changes in the fix commit (1234da0), each recorded in its message:
 - The trigger-count control now expects 11. 0001 has 11 user triggers; the red commit miscounted 12.
 - The L1 test now grants TRUNCATE. The worker already holds SELECT on cost_facts, so the red version proved nothing.
 - The parameter test now runs in a rolled-back transaction, because a red-phase run committed a cluster-global grant (see EVIDENCE R5.2).
+
+## Round 6 — Copilot review of 453377e (tests committed red in b020e05, before the fix)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| High: redaction ran after JSON.stringify | `cli.test.ts` | `a message carrying the decoded password is redacted in every serialized form` (quotes, backslashes, newline, tab, unicode, U+2028, control char, a JSON document as password), `literal %22 / %5C in the URL password: both the encoded and the decoded (and escaped) forms are redacted`, `redactDeep walks objects, arrays, Error messages and causes without mutating the input`, `the post-serialization pass alone is not what is relied on: escaped forms are also caught by the backstop`; added after the first mutation table (590d196, see EVIDENCE R6): `objects with toJSON are serialized through the redactor too`, `backstop: a non-string value whose serialized text equals the secret is still redacted` |
+| High, end-to-end through a real pg error | `cli.db.test.ts` | `round 6 (Copilot High): a password with JSON metacharacters inside a real pg error is never printed, in any form` (the password is also the missing database name, so the server error carries it; `migrate` and `migrate --status --json`) |
+
+Docs-only Lows (schema table, stale gap, rollback wording) have no tests; see DESIGN §3/§8/§15.
