@@ -352,3 +352,44 @@ describe('Upstream error bodies never reach API callers', () => {
     warn.mockRestore();
   });
 });
+
+describe('/api/costsource/findings is deny-by-default for non-sandbox sources', () => {
+  async function findings(sourceId: string, headers: Record<string, string> = {}) {
+    const { default: handler } = await import('../../pages/api/costsource/findings');
+    const res = makeRes();
+    await handler(makeReq({ sourceId }, headers), res as unknown as NextApiResponse);
+    return res;
+  }
+
+  it('refuses anonymous findings from configured pointfive-live and makes no upstream call', async () => {
+    configurePointFiveLive();
+    const fetchMock = vi.fn(async () => Response.json({ access_token: 't', expires_in: 3600 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await findings('pointfive-live');
+    expect(res.statusCode).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses pointfive-live findings with a wrong token', async () => {
+    configurePointFiveLive();
+    process.env.RATIO_API_TOKEN = 'right';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await findings('pointfive-live', { authorization: 'Bearer wrong' });
+    expect(res.statusCode).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('answers 401 for an unknown id anonymously, 404 after auth', async () => {
+    expect((await findings('no-such-source')).statusCode).toBe(401);
+    process.env.RATIO_API_TOKEN = 'right';
+    expect((await findings('no-such-source', { authorization: 'Bearer right' })).statusCode).toBe(404);
+  });
+
+  it('still serves sandbox findings anonymously', async () => {
+    const res = await findings('pointfive-sandbox');
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect((await findings('focus-file-sandbox')).statusCode).toBe(200);
+  });
+});
