@@ -291,7 +291,8 @@ describe('round 16 H2: privileges held through a SECOND role (inherit or SET ROL
 describe('round 17 (challenger L2): more predefined roles are refused when reachable by a member, over ANY edge', () => {
   for (const pre of ['pg_read_all_data', 'pg_write_all_data', 'pg_signal_backend', 'pg_create_subscription']) {
     for (const parent of ['ratio_worker', 'ratio_reader', 'ratio_owner'] as const) {
-      for (const edge of ['default', 'SET only', 'transitive SET only'] as const) {
+      // ADMIN only (Copilot on #53, C1): with ADMIN OPTION a member can grant the role to itself, so it is assumable too.
+      for (const edge of ['default', 'SET only', 'ADMIN only', 'transitive SET only'] as const) {
         it(`${pre}: a LOGIN member of ${parent} that can assume it (${edge} edge) is refused`, async () => {
           await inTxn(async (c, n) => {
             const app = n('app');
@@ -299,6 +300,7 @@ describe('round 17 (challenger L2): more predefined roles are refused when reach
             expect(await problems(c)).not.toMatch(new RegExp(`role ${app} .*can assume`));
             if (edge === 'default') await c.query(`GRANT ${pre} TO ${app}`);
             else if (edge === 'SET only') await c.query(`GRANT ${pre} TO ${app} WITH INHERIT FALSE, SET TRUE`);
+            else if (edge === 'ADMIN only') await c.query(`GRANT ${pre} TO ${app} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
             else {
               const mid = n('mid');
               await c.query(`CREATE ROLE ${mid} NOLOGIN`);
@@ -332,7 +334,8 @@ describe('round 18: monitoring predefined roles are refused when reachable by a 
   // pg_read_all_settings and depends on PostgreSQL's catalog grants.
   for (const pre of ['pg_monitor', 'pg_read_all_stats', 'pg_read_all_settings']) {
     for (const parent of ['ratio_worker', 'ratio_reader', 'ratio_owner'] as const) {
-      for (const edge of ['default', 'SET only', 'transitive SET only'] as const) {
+      // ADMIN only (Copilot on #53, C1): with ADMIN OPTION a member can grant the role to itself, so it is assumable too.
+      for (const edge of ['default', 'SET only', 'ADMIN only', 'transitive SET only'] as const) {
         it(`${pre}: a LOGIN member of ${parent} that can assume it (${edge} edge) is refused`, async () => {
           await inTxn(async (c, n) => {
             const app = n('app');
@@ -340,6 +343,7 @@ describe('round 18: monitoring predefined roles are refused when reachable by a 
             expect(await problems(c)).not.toMatch(new RegExp(`${app}`));
             if (edge === 'default') await c.query(`GRANT ${pre} TO ${app}`);
             else if (edge === 'SET only') await c.query(`GRANT ${pre} TO ${app} WITH INHERIT FALSE, SET TRUE`);
+            else if (edge === 'ADMIN only') await c.query(`GRANT ${pre} TO ${app} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
             else {
               const mid = n('mid');
               await c.query(`CREATE ROLE ${mid} NOLOGIN`);

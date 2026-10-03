@@ -567,3 +567,46 @@ describe('round 18: canonIdent output (doubled quotes)', () => {
     expect(findNonExpandStatement(create + 'REVOKE ALL ON ratio."ab" FROM PUBLIC;\n')).not.toBeNull();
   });
 });
+
+describe('round 18 (Copilot on #53, C2): whitespace and comments around a qualification dot', () => {
+  const t = (create: string, revoke: string) => EXPAND + create + '\n' + revoke + '\n';
+  it('the repro: `ratio. t` is ratio.t, never the unqualified name `ratio` (both directions)', () => {
+    expect(findNonExpandStatement(t('CREATE TABLE ratio. t (x int);', 'REVOKE ALL ON ratio FROM PUBLIC;'))).not.toBeNull();
+    expect(findNonExpandStatement(t('CREATE TABLE ratio (x int);', 'REVOKE ALL ON ratio. t FROM PUBLIC;'))).not.toBeNull();
+    expect(findNonExpandStatement(t('CREATE TABLE ratio. t (x int);', 'REVOKE ALL ON ratio.t FROM PUBLIC;'))).toBeNull();
+  });
+
+  const spellings = ['ratio.t', 'ratio . t', 'ratio. t', 'ratio .t', 'ratio./*c*/t', 'ratio/*c*/ . /*d*/t', 'ratio.\n  t', '"ratio" . "t"', '"ratio"./* c */"t"', 'RATIO . T'];
+  for (const create of spellings) {
+    it(`CREATE TABLE ${JSON.stringify(create)} matches every other spelling of ratio.t, and not ratio`, () => {
+      for (const revoke of spellings) {
+        expect(findNonExpandStatement(t(`CREATE TABLE ${create} (x int);`, `REVOKE ALL ON ${revoke} FROM PUBLIC;`)), revoke).toBeNull();
+      }
+      expect(findNonExpandStatement(t(`CREATE TABLE ${create} (x int);`, 'REVOKE ALL ON ratio FROM PUBLIC;'))).not.toBeNull();
+      expect(findNonExpandStatement(t(`CREATE TABLE ${create} (x int);`, 'REVOKE ALL ON t FROM PUBLIC;'))).not.toBeNull();
+    });
+  }
+
+  it('canonical equality across spacing styles; a trailing or doubled dot is malformed and matches nothing', () => {
+    for (const x of ['ratio . t', 'ratio. t', 'ratio .t', '"ratio" . "t"', 'RATIO . T', '"ratio" .t']) expect(canonIdent(x), x).toBe('"ratio"."t"');
+    for (const bad of ['ratio.', 'ratio. ', '.t', 'ratio..t', 'ratio t', '"ratio" "t"', '"ratio".']) {
+      expect(canonIdent(bad), bad).not.toBe(canonIdent('ratio'));
+      expect(canonIdent(bad), bad).not.toBe(canonIdent('ratio.t'));
+      expect(canonIdent(bad), bad).not.toBe(canonIdent('t'));
+    }
+    // a CREATE whose name ends in a dot records nothing (fails closed)
+    expect(findNonExpandStatement(t('CREATE TABLE ratio. (x int);', 'REVOKE ALL ON ratio FROM PUBLIC;'))).not.toBeNull();
+  });
+
+  it('schemas, types and routines too, including a space before the argument list', () => {
+    expect(findNonExpandStatement(t('CREATE TYPE ratio . e AS ENUM (\'a\');', 'REVOKE USAGE ON TYPE ratio.e FROM PUBLIC;'))).toBeNull();
+    expect(findNonExpandStatement(t('CREATE TYPE ratio . e AS ENUM (\'a\');', 'REVOKE USAGE ON TYPE ratio FROM PUBLIC;'))).not.toBeNull();
+    const fn = "-- ratio:allow-function helper\nCREATE FUNCTION ratio . f (x int) RETURNS int LANGUAGE sql AS 'select 1';";
+    expect(findNonExpandStatement(t(fn, 'REVOKE EXECUTE ON FUNCTION ratio.f(int) FROM PUBLIC;'))).toBeNull();
+    expect(findNonExpandStatement(t(fn, 'REVOKE EXECUTE ON FUNCTION "ratio" . "f" (int) FROM PUBLIC;'))).toBeNull();
+    expect(findNonExpandStatement(t(fn, 'REVOKE EXECUTE ON FUNCTION ratio(int) FROM PUBLIC;'))).not.toBeNull();
+    const typed = "-- ratio:allow-function helper\nCREATE FUNCTION ratio.g(x ratio . e) RETURNS int LANGUAGE sql AS 'select 1';";
+    expect(findNonExpandStatement(t(typed, 'REVOKE EXECUTE ON FUNCTION ratio.g(ratio.e) FROM PUBLIC;'))).toBeNull();
+    expect(findNonExpandStatement(t('CREATE SCHEMA "s" ;', 'REVOKE ALL ON SCHEMA s FROM PUBLIC;'))).toBeNull();
+  });
+});
