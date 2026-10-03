@@ -14,6 +14,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { reportFilename, type ReportFormat } from '@/executive/reportFilename';
 import { renderReportPdf } from '@/executive/reportPdf';
 import { buildReportWorkbook } from '@/executive/reportXlsx';
+import { withInternalErrorGuard } from '@/server/gateway/internalError';
 
 const CONTENT_TYPE: Record<ReportFormat, string> = {
   pdf: 'application/pdf',
@@ -27,7 +28,7 @@ function parseFormat(raw: NextApiRequest['query'][string]): ReportFormat | null 
   return null;
 }
 
-export default async function handler(
+async function handler(
   req: NextApiRequest,
   res: NextApiResponse,
 ): Promise<void> {
@@ -55,3 +56,4 @@ export default async function handler(
   res.status(200).send(body);
 }
 
+export default withInternalErrorGuard(handler);

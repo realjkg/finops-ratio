@@ -25,7 +25,12 @@ import { findSource } from '@/costsource/seed';
 import type { CostRowsResult } from '@/costsource';
 import type { FocusVersion } from '@/costsource';
 import { FOCUS_VERSIONS } from '@/costsource';
-import { validateFocusRecords } from '@/costsource/transports/focusExport';
+import {
+  assertValidWindow,
+  INVALID_WINDOW_MESSAGE,
+  validateFocusRecords,
+} from '@/costsource/transports/focusExport';
+import { withInternalErrorGuard } from '@/server/gateway/internalError';
 
 function currentMonth(): { start: string; end: string } {
   const now = new Date();
@@ -34,7 +39,7 @@ function currentMonth(): { start: string; end: string } {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-export default async function handler(
+async function handler(
   req: NextApiRequest,
   res: NextApiResponse<CostRowsResult | { error: string }>,
 ): Promise<void> {
@@ -65,7 +70,8 @@ export default async function handler(
   const src = findSource(sourceId);
   if (!src || src.kind !== 'focus_file') {
     res.status(422).json({
-      error: `'${sourceId}' is not a focus_file source. Use /api/costsource/rows for other sources.`,
+      // Fixed: never echo the caller's sourceId.
+      error: 'sourceId is not a focus_file source. Use /api/costsource/rows for other sources.',
     });
     return;
   }
@@ -79,12 +85,20 @@ export default async function handler(
     typeof (windowRaw as Record<string, unknown>).end === 'string'
       ? (windowRaw as { start: string; end: string })
       : currentMonth();
+  try {
+    assertValidWindow(window);
+  } catch {
+    res.status(400).json({ error: INVALID_WINDOW_MESSAGE });
+    return;
+  }
 
   let validated;
   try {
     // Tags and x_* extension columns are preserved for direct ingest.
     validated = validateFocusRecords(rows as Record<string, unknown>[], sourceId, { keepExtensions: true });
   } catch (err) {
+    // `<known sourceId>: invalid FOCUS row N: <known column> <fixed reason>` —
+    // composed only of server-known tokens; cell values are never quoted.
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     return;
   }
@@ -93,3 +107,4 @@ export default async function handler(
   res.status(200).json(result);
 }
 
+export default withInternalErrorGuard(handler);

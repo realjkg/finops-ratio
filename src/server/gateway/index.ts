@@ -1,5 +1,12 @@
 // API gateway public surface (Wave3b). Compose any /api route with withGateway.
 export { withGateway, sendError } from './withGateway';
+export {
+  INTERNAL_ERROR_MESSAGE,
+  logInternalError,
+  sendInternalError,
+  withInternalErrorGuard,
+  logClientErrorDetail,
+} from './internalError';
 export type {
   GatewayContext,
   GatewayHandler,

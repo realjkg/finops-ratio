@@ -11,9 +11,8 @@
 // Middleware order: method → size → auth → rate-limit → validate → dispatch.
 
 import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
-import { randomUUID } from 'crypto';
 import { checkAuth, isStrongToken, resolveGatewayAuth, type GatewayEnv } from './auth';
-import { redactErrorText } from '@/costsource/transports/redact';
+import { INTERNAL_ERROR_MESSAGE, logInternalError } from './internalError';
 import {
   SlidingWindowRateLimiter,
   type RateLimitResult,
@@ -61,8 +60,7 @@ export interface GatewayErrorBody {
   error: { code: string; message: string; requestId?: string };
 }
 
-/** The ONLY message a caller ever sees for an unhandled handler error. */
-export const INTERNAL_ERROR_MESSAGE = 'Internal error';
+export { INTERNAL_ERROR_MESSAGE };
 
 export function sendError(
   res: NextApiResponse,
@@ -200,19 +198,7 @@ export function withGateway(
       // echoed input). The message itself goes only to the server log,
       // redacted (Bearer tokens, URL query strings / SAS, AWS key ids), under
       // the same requestId so an operator can find it.
-      const requestId = randomUUID();
-      console.error(
-        JSON.stringify({
-          tag: 'gateway',
-          event: 'unhandled_error',
-          requestId,
-          method: req.method ?? 'UNKNOWN',
-          path: req.url ?? '',
-          tenant,
-          status: 500,
-          error: redactErrorText(err),
-        }),
-      );
+      const requestId = logInternalError(err, { method: req.method, path: req.url, tenant });
       if (!res.headersSent) {
         res.setHeader('X-Request-Id', requestId);
         res.status(500).json({

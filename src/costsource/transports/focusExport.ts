@@ -452,13 +452,15 @@ export interface ParsedWindow {
  * window (filtering, month selection, query parameters, URL expansion) uses
  * these parsed instants — never Date.parse on the raw strings.
  */
+/** Fixed (never echoes the values) — safe to return to a caller as-is. */
+export const INVALID_WINDOW_MESSAGE =
+  'invalid cost window: start and end must be ISO-8601 (YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS[.fff]][Z|±hh:mm]) with start < end';
+
 export function parseWindow(window: CostWindow): ParsedWindow {
   const startMs = parseIsoUtc(window?.start, { window: true });
   const endMs = parseIsoUtc(window?.end, { window: true });
   if (startMs === null || endMs === null || !(startMs < endMs)) {
-    throw new Error(
-      'invalid cost window: start and end must be ISO-8601 (YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS[.fff]][Z|±hh:mm]) with start < end',
-    );
+    throw new Error(INVALID_WINDOW_MESSAGE);
   }
   return { startMs, endMs };
 }

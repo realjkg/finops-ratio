@@ -38,7 +38,7 @@ const ENV_KEYS = [
 ];
 
 let saved: Record<string, string | undefined>;
-let errSpy: ReturnType<typeof vi.spyOn>;
+let errSpy: { mock: { calls: unknown[][] } };
 beforeEach(() => {
   saved = {};
   for (const k of ENV_KEYS) {
@@ -123,7 +123,7 @@ const TOKENOMICS = tokenomicsHandler;
 const JUNE = { start: '2026-06-01T00:00:00Z', end: '2026-07-01T00:00:00Z' };
 
 function errorLog(): string {
-  return errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+  return errSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
 }
 
 function expectGeneric500(res: TestRes) {

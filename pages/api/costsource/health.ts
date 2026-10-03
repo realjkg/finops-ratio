@@ -15,12 +15,14 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { createCostSourceClient } from '@/costsource';
 import type { SourceHealth } from '@/costsource';
 import { gateSourceAccess } from '@/server/gateway/liveDataAuth';
+import { logClientErrorDetail, withInternalErrorGuard } from '@/server/gateway/internalError';
+import { classifyUnknownSource } from '@/server/costsourceRouteErrors';
 
 function firstQueryValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-export default async function handler(
+async function handler(
   req: NextApiRequest,
   res: NextApiResponse<SourceHealth | { error: string }>,
 ): Promise<void> {
@@ -42,8 +44,13 @@ export default async function handler(
   try {
     res.status(200).json(await client.healthCheck(sourceId));
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(message.includes('Unknown') ? 404 : 500).json({ error: message });
+    // Fixed 404 (never echoes the id); anything else is the guard's generic 500.
+    const known = classifyUnknownSource(err);
+    if (!known) throw err;
+    logClientErrorDetail(known.status, err, { method: req.method, path: req.url });
+    res.status(known.status).json({ error: known.message });
   }
 }
+
+export default withInternalErrorGuard(handler);
 
