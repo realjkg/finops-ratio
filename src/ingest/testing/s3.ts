@@ -97,6 +97,7 @@ export async function listKeys(client: S3Client, bucket: string, prefix: string)
   do {
     const r = await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
     for (const c of r.Contents ?? []) if (c.Key) out.push(c.Key);
+    if (r.IsTruncated && !r.NextContinuationToken) throw new Error(`listing ${prefix} claims more results but has no continuation token`);
     token = r.IsTruncated ? r.NextContinuationToken : undefined;
   } while (token);
   return out.sort();

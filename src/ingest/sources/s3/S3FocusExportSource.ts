@@ -6,7 +6,7 @@ import type { Readable } from 'stream';
 import { GetObjectCommand, ListObjectsV2Command, type S3Client } from '@aws-sdk/client-s3';
 import { IngestError } from '../../errors';
 import { isTransientError } from '../../retry';
-import type { ArtifactRef, FocusSource, ListOptions, PeriodListing, PeriodRange } from '../types';
+import type { ArtifactRef, FocusSource, ListOptions, PeriodListing, PeriodRange, OpenOptions } from '../types';
 import {
   dataPrefix,
   isManifestKey,
@@ -60,6 +60,11 @@ export class S3FocusExportSource implements FocusSource {
       );
       for (const c of r.Contents ?? []) if (c.Key) keys.set(c.Key, { size: Number(c.Size ?? 0), etag: String(c.ETag ?? '') });
       for (const p of r.CommonPrefixes ?? []) if (p.Prefix) prefixes.push(p.Prefix);
+      // A page that claims more results without saying where they are is a broken
+      // listing, never a complete one (review H1, third round).
+      if (r.IsTruncated && !r.NextContinuationToken) {
+        throw new IngestError('SOURCE_LISTING_INVALID', `listing ${prefix} claims more results but has no continuation token`);
+      }
       token = r.IsTruncated ? r.NextContinuationToken : undefined;
     } while (token);
     return { keys, prefixes };
@@ -106,6 +111,7 @@ export class S3FocusExportSource implements FocusSource {
         .sort();
     } catch (e) {
       throwIfAborted(signal);
+      if (e instanceof IngestError) throw e;
       throw sourceError('SOURCE_LIST_FAILED', 'listing the export metadata folder', e);
     }
     const out: PeriodListing[] = [];
@@ -121,6 +127,7 @@ export class S3FocusExportSource implements FocusSource {
       data = (await this.list(dataPrefix(this.location, billingPeriod), undefined, signal)).keys;
     } catch (e) {
       throwIfAborted(signal);
+      if (e instanceof IngestError) throw e;
       throw sourceError('SOURCE_LIST_FAILED', `listing period ${billingPeriod}`, e);
     }
     if (metaKeys.length === 0) return { ok: false, billingPeriod, code: 'MANIFEST_MISSING', message: `no manifest for ${billingPeriod}` };
@@ -139,6 +146,12 @@ export class S3FocusExportSource implements FocusSource {
     const manifest = { name: manifestKey.slice(periodMetadataPrefix(this.location, billingPeriod).length), bytes };
     const parsed = parseManifest(bytes, { location: this.location, billingPeriod, listing: data });
     if (!parsed.ok) return { ok: false, billingPeriod, code: parsed.code, message: parsed.message, manifest };
+    // Every read is conditional on the listed version (If-Match): an artifact the listing
+    // gives no ETag for cannot be pinned, so the period is refused (review M1, third round).
+    const unversioned = parsed.artifacts.find((a) => !a.version);
+    if (unversioned) {
+      return { ok: false, billingPeriod, code: 'SOURCE_LISTING_INVALID', message: `artifact ${unversioned.name} has no ETag in the listing; it cannot be read conditionally`, manifest };
+    }
     return {
       ok: true,
       set: {
@@ -159,11 +172,16 @@ export class S3FocusExportSource implements FocusSource {
    * that do not belong to the listed manifest. (Whatever is captured is hashed
    * from the bytes actually read, so the evidence sha256 always binds them.)
    */
-  async openArtifact(ref: ArtifactRef): Promise<Readable> {
+  async openArtifact(ref: ArtifactRef, opts: OpenOptions = {}): Promise<Readable> {
+    const signal = opts.signal;
+    if (!ref.version) throw new IngestError('SOURCE_LISTING_INVALID', `artifact ${ref.name} has no listed version; refusing an unconditional read`);
+    throwIfAborted(signal);
     try {
-      const r = await this.client.send(new GetObjectCommand({ Bucket: this.location.bucket, Key: ref.key, ...(ref.version ? { IfMatch: ref.version } : {}) }));
+      // The run's abort signal tears the request down at MAX_RUN_SECONDS (review M3, third round).
+      const r = await this.client.send(new GetObjectCommand({ Bucket: this.location.bucket, Key: ref.key, IfMatch: ref.version }), { abortSignal: signal });
       return r.Body as Readable;
     } catch (e) {
+      throwIfAborted(signal);
       if (isPreconditionFailed(e)) {
         throw new IngestError('SOURCE_CHANGED', `artifact ${ref.name} changed since it was listed (ETag mismatch)`, { retryable: true, cause: e });
       }

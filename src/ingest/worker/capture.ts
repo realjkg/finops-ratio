@@ -54,8 +54,10 @@ export async function captureArtifact(opts: {
     });
     let body;
     try {
-      body = await withDeadline(opts.source.openArtifact(opts.ref), opts.stallMs, 'SOURCE_STALLED', `opening artifact ${opts.ref.name}`);
+      // The run's abort signal reaches the source request (review M3, third round).
+      body = await withDeadline(opts.source.openArtifact(opts.ref, { signal: opts.signal }), opts.stallMs, 'SOURCE_STALLED', `opening artifact ${opts.ref.name}`, opts.signal);
     } catch (e) {
+      if (opts.signal?.aborted) throw opts.signal.reason;
       if (e instanceof IngestError) throw e;
       throw new IngestError('SOURCE_READ_FAILED', `reading artifact ${opts.ref.name} failed`, { retryable: isTransientError(e), cause: e });
     }

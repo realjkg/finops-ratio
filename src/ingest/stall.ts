@@ -55,15 +55,26 @@ export function idleWatchdog(ms: number, code: string, what: string, onData?: (b
   };
 }
 
-/** Rejects with `code` if `p` does not settle within `ms`. */
-export async function withDeadline<T>(p: Promise<T>, ms: number, code: string, what: string): Promise<T> {
+/**
+ * Rejects with `code` if `p` does not settle within `ms` — or with the
+ * signal's reason (e.g. MAX_RUN_EXCEEDED) as soon as `signal` aborts, so an
+ * aborted run is never reported as a stall.
+ */
+export async function withDeadline<T>(p: Promise<T>, ms: number, code: string, what: string, signal?: AbortSignal): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new IngestError(code, `${what} did not respond within ${Math.round(ms / 1000)} s`, { retryable: true })), ms);
+    if (signal) {
+      onAbort = () => reject(signal.reason);
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
   });
   try {
     return await Promise.race([p, deadline]);
   } finally {
     clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
   }
 }

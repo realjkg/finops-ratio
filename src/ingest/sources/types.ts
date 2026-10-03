@@ -56,12 +56,18 @@ export interface ListOptions {
   signal?: AbortSignal;
 }
 
+/** Options for opening one object: the run's abort signal reaches the request. */
+export interface OpenOptions {
+  /** Aborts the open (the in-flight request is torn down); it then rejects with the signal's reason. */
+  signal?: AbortSignal;
+}
+
 export interface FocusSource {
   readonly kind: 'focus_file' | 'fake';
   /** Artifact sets per billing period, sorted by period. Throws only on whole-listing failures. */
   listPeriods(range?: PeriodRange, opts?: ListOptions): Promise<PeriodListing[]>;
-  /** Raw bytes of one artifact (streamed). */
-  openArtifact(ref: ArtifactRef): Promise<Readable>;
+  /** Raw bytes of one artifact (streamed). Refuses a ref without a version. */
+  openArtifact(ref: ArtifactRef, opts?: OpenOptions): Promise<Readable>;
 }
 
 export const PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])-01$/;

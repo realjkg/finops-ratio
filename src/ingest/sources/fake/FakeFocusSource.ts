@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { Readable } from 'stream';
 import { IngestError } from '../../errors';
 import { testSwitchesPermitted } from '../../config';
-import type { ArtifactRef, ArtifactSetControl, FocusSource, ListOptions, PeriodListing, PeriodRange } from '../types';
+import type { ArtifactRef, ArtifactSetControl, FocusSource, ListOptions, OpenOptions, PeriodListing, PeriodRange } from '../types';
 import { listingFingerprint, periodInRange } from '../s3/layout';
 
 export interface FakePeriod {
@@ -68,7 +68,8 @@ export class FakeFocusSource implements FocusSource {
       });
   }
 
-  async openArtifact(ref: ArtifactRef): Promise<Readable> {
+  async openArtifact(ref: ArtifactRef, opts?: OpenOptions): Promise<Readable> {
+    if (opts?.signal?.aborted) throw opts.signal.reason;
     this.opened.push(ref.name);
     const call = (this.calls.get(ref.name) ?? 0) + 1;
     this.calls.set(ref.name, call);
