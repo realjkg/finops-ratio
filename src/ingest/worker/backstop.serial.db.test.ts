@@ -10,7 +10,7 @@ import crypto from 'crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from 'pg';
 import { requireTestDatabaseUrl } from '../db/testing/requireTestDatabaseUrl';
-import { assertNoDangerousTestRoles, dangerousTestRoles } from '../testing/dangerousLoginBackstop';
+import { assertNoDangerousTestRoles, backstopProblems, dangerousRoles, dangerousTestRoles, ratioRoleProblems } from '../testing/dangerousLoginBackstop';
 
 let admin: Client;
 const created: string[] = [];
@@ -66,3 +66,55 @@ describe('runtime backstop against dangerous test logins (serial self-test)', ()
     await admin.query(`DROP ROLE ${other}`);
   });
 });
+
+// Evasion (challenger Low 1): a dangerous role need not carry the ratio_test_
+// prefix or this pid, and the ratio roles themselves can be made dangerous.
+describe('runtime backstop: snapshot diff and the ratio roles themselves (serial self-test)', () => {
+  it('a dangerous role with ANY name created after the snapshot is reported', async () => {
+    const snapshot = await dangerousRoles(admin);
+    expect(await backstopProblems(admin, snapshot, process.pid)).toEqual([]);
+    const r = `zz_evasive_${crypto.randomBytes(4).toString('hex')}`;
+    await admin.query(`CREATE ROLE ${r} LOGIN BYPASSRLS`);
+    created.push(r);
+    expect((await backstopProblems(admin, snapshot, process.pid)).join('\n')).toMatch(new RegExp(`new dangerous role.*${r}`));
+    await admin.query(`DROP ROLE ${r}`);
+    expect(await backstopProblems(admin, snapshot, process.pid)).toEqual([]);
+  });
+
+  it('a plain login made a member of a server-file role after the snapshot is reported', async () => {
+    const snapshot = await dangerousRoles(admin);
+    const r = `zz_evasive_${crypto.randomBytes(4).toString('hex')}`;
+    await admin.query(`CREATE ROLE ${r} LOGIN IN ROLE pg_read_server_files`);
+    created.push(r);
+    expect((await backstopProblems(admin, snapshot, process.pid)).join('\n')).toContain(r);
+    await admin.query(`DROP ROLE ${r}`);
+  });
+
+  for (const attr of ['BYPASSRLS', 'CREATEDB', 'CREATEROLE', 'REPLICATION', 'SUPERUSER', 'LOGIN']) {
+    it(`ALTER ROLE ratio_worker ${attr} is reported (any attribute on a ratio role)`, async () => {
+      const snapshot = await dangerousRoles(admin);
+      await admin.query(`ALTER ROLE ratio_worker ${attr}`);
+      try {
+        expect((await ratioRoleProblems(admin)).join('\n')).toMatch(/ratio_worker/);
+        expect((await backstopProblems(admin, snapshot, process.pid)).length).toBeGreaterThan(0);
+      } finally {
+        await admin.query(`ALTER ROLE ratio_worker NO${attr}`);
+      }
+      expect(await ratioRoleProblems(admin)).toEqual([]);
+    });
+  }
+
+  it('a ratio role made a member of another role is reported (no reviewed membership of the ratio roles)', async () => {
+    const other = `zz_other_${crypto.randomBytes(4).toString('hex')}`;
+    await admin.query(`CREATE ROLE ${other} NOLOGIN`);
+    created.push(other);
+    await admin.query(`GRANT ${other} TO ratio_reader`);
+    try {
+      expect((await ratioRoleProblems(admin)).join('\n')).toMatch(new RegExp(`ratio_reader.*member of ${other}`));
+    } finally {
+      await admin.query(`REVOKE ${other} FROM ratio_reader`);
+    }
+    expect(await ratioRoleProblems(admin)).toEqual([]);
+  });
+});
+
