@@ -352,7 +352,8 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   // This exact listing already overran the limits at capture (its sizes were
   // under-reported) and the limits are no higher: fail fast, download nothing
   // (challenger L3). Raised limits or a changed listing are tried again.
-  const rejected = ctx.rejected;
+  // replay --period is the operator's explicit re-ingest: it always downloads again (round-2 L1).
+  const rejected = ctx.mode === 'replay_period' ? undefined : ctx.rejected;
   if (rejected && rejected.listing === set.listingFingerprint && limits.maxArtifactBytes <= rejected.maxArtifactBytes && limits.maxBatchBytes <= rejected.maxBatchBytes) {
     return { billingPeriod: period, outcome: 'failed', code: rejected.code, message: 'this unchanged listing already exceeded the configured size limits when captured; not downloaded again' };
   }
