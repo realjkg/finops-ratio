@@ -9,7 +9,7 @@ import { createTestDatabase, type TestDatabase } from './testing/harness';
 import { DEFAULT_MIGRATIONS_DIR, loadMigrations } from './migrationFiles';
 import { migrateDown, migrateUp } from './migrate';
 
-const ALLOW_DOWN = { RATIO_ALLOW_DOWN_MIGRATIONS: '1', NODE_ENV: 'test' };
+const ALLOW_DOWN = { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'test' };
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -47,7 +47,7 @@ function emptyDir(): string {
 }
 
 async function ledger(c: Client) {
-  const r = await c.query(`SELECT version, name, checksum, applied_at FROM public.schema_migrations ORDER BY version`);
+  const r = await c.query(`SELECT version, name, checksum, down_checksum, applied_at FROM public.schema_migrations ORDER BY version`);
   return r.rows;
 }
 
@@ -105,7 +105,10 @@ describe('migration runner (real Postgres)', () => {
     expect(res.applied[0]).toBe('0001');
 
     const rows = await ledger(c);
-    expect(rows.map((r) => [r.version, r.name, r.checksum])).toEqual(files.map((f) => [f.version, f.name, f.checksum]));
+    expect(rows.map((r) => [r.version, r.name, r.checksum, r.down_checksum])).toEqual(
+      files.map((f) => [f.version, f.name, f.checksum, f.downChecksum]),
+    );
+    expect(rows[0].down_checksum).toMatch(/^[0-9a-f]{64}$/);
     const tables = await c.query(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'ratio' AND table_type = 'BASE TABLE' ORDER BY 1`,
     );
@@ -141,6 +144,23 @@ describe('migration runner (real Postgres)', () => {
     expect(await relExists(c, 'public.tamper_probe')).toBe(false);
   });
 
+  it("refuses when an applied migration's down file changed or disappeared", async () => {
+    for (const mutate of ['edit', 'remove'] as const) {
+      const db = await freshDb();
+      const c = await connect(db);
+      const dir = copyMigrations();
+      await migrateUp(c, { dir });
+      const before = await ledger(c);
+      const downFile = path.join(dir, fs.readdirSync(dir).find((f) => f.startsWith('0001_') && f.endsWith('.down.sql'))!);
+      if (mutate === 'edit') fs.appendFileSync(downFile, '\n-- tampered down after apply\n');
+      else fs.rmSync(downFile);
+      fs.writeFileSync(path.join(dir, '0002_probe.up.sql'), '-- ratio:phase expand\nCREATE TABLE public.down_tamper_probe(x int);\n');
+      await expect(migrateUp(c, { dir }), mutate).rejects.toMatchObject({ code: 'CHECKSUM_MISMATCH' });
+      expect(await ledger(c)).toEqual(before);
+      expect(await relExists(c, 'public.down_tamper_probe')).toBe(false);
+    }
+  });
+
   it("refuses when an applied migration's file is missing", async () => {
     const db = await freshDb();
     const c = await connect(db);
@@ -167,10 +187,11 @@ describe('migration runner (real Postgres)', () => {
     const db = await freshDb();
     const c = await connect(db);
     const dir = copyMigrations({
-      '0002_broken.up.sql': '-- ratio:phase expand\nCREATE TABLE public.half_done(x int);\nINSERT INTO public.half_done VALUES (1);\nSELECT 1/0;\n',
+      // contract: INSERT/SELECT are outside the expand allow-list.
+      '0002_broken.up.sql': '-- ratio:phase contract\nCREATE TABLE public.half_done(x int);\nINSERT INTO public.half_done VALUES (1);\nSELECT 1/0;\n',
       '0003_after.up.sql': '-- ratio:phase expand\nCREATE TABLE public.after_broken(x int);\n',
     });
-    await expect(migrateUp(c, { dir })).rejects.toThrow(/division by zero/);
+    await expect(migrateUp(c, { dir, allowContract: true })).rejects.toThrow(/division by zero/);
     expect((await ledger(c)).map((r) => r.version)).toEqual(['0001']);
     expect(await relExists(c, 'public.half_done')).toBe(false);
     expect(await relExists(c, 'public.after_broken')).toBe(false);
@@ -269,8 +290,10 @@ describe('migration runner (real Postgres)', () => {
     await migrateUp(c);
     for (const env of [
       {},
-      { RATIO_ALLOW_DOWN_MIGRATIONS: '1', NODE_ENV: 'production' },
+      { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'test', NODE_ENV: 'production' },
       { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'production' },
+      { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'staging' },
+      { RATIO_ALLOW_DOWN_MIGRATIONS: '1' },
     ]) {
       await expect(migrateDown(c, { steps: 1, env })).rejects.toMatchObject({ code: 'DOWN_NOT_ALLOWED' });
     }

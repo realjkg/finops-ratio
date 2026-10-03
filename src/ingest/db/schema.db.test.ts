@@ -1,6 +1,6 @@
 // Schema shape, roles and constraint invariants of migration 0001.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { attempt, createTestDatabase, type TestDatabase } from './testing/harness';
+import { attempt, createTestDatabase, withRole, type TestDatabase } from './testing/harness';
 import { TENANT_TABLES, artifactSha, evidenceKey, fp, seedTwoTenants, type Seeded } from './testing/fixtures';
 
 let db: TestDatabase;
@@ -268,6 +268,15 @@ describe('sources.config secret guard', () => {
       { nested: { deep: { accessToken: 'x' } } },
       { list: [{ ok: 1 }, { storage_key: 'x' }] },
       { list: [[{ secret: 'x' }]] },
+      // widened vocabulary (challenger L3)
+      { pass: 'hunter2' },
+      { pw: 'x' },
+      { bearer: 'eyJ' },
+      { cert: '-----BEGIN' },
+      { client_certificate: 'x' },
+      { dsn: 'x' },
+      { conn: 'x' },
+      { connection_string: 'x' },
     ];
     for (const cfg of bad) {
       const r = await insertSource(JSON.stringify(cfg));
@@ -296,6 +305,112 @@ describe('sources.config secret guard', () => {
       seed.a.tenantId,
     ]);
     expect(r).toMatchObject({ ok: false, code: '23514' });
+  });
+});
+
+describe('secret-looking values are rejected wherever free text or JSON is stored (L3)', () => {
+  const SECRET_VALUES = [
+    'https://bucket.s3.amazonaws.com/x?X-Amz-Signature=abc&X-Amz-Credential=AKIAABCDEFGHIJKLMNOP',
+    'postgres://admin:hunter2@db/prod',
+    'https://x.blob.core.windows.net/c?sv=2020&SIG=abc',
+    'see signature=deadbeef',
+    'key id AKIAABCDEFGHIJKLMNOP',
+    'temp ASIAABCDEFGHIJKLMNOP',
+    'Authorization: Bearer abc.def',
+    'authorization: bearer abc',
+  ];
+
+  it('sources.config rejects secret values under innocuous keys (challenger repro)', async () => {
+    for (const v of SECRET_VALUES) {
+      for (const cfg of [{ endpoint: v }, { nested: { list: ['ok', v] } }]) {
+        const r = await tryAsSuper(`UPDATE ratio.sources SET config = $2::jsonb WHERE tenant_id = $1`, [seed.a.tenantId, JSON.stringify(cfg)]);
+        expect(r, JSON.stringify(cfg)).toMatchObject({ ok: false, code: '23514' });
+      }
+    }
+    // Ordinary URLs and paths are fine.
+    const ok = await tryAsSuper(`UPDATE ratio.sources SET config = $2::jsonb WHERE tenant_id = $1`, [
+      seed.a.tenantId,
+      JSON.stringify({ endpoint: 'https://s3.us-east-1.amazonaws.com', root: '/data/focus', email_contact: 'ops@example.com' }),
+    ]);
+    expect(ok).toMatchObject({ ok: true, rowCount: 1 });
+  });
+
+  it('error_detail, quarantine_reason, validation messages and artifact names reject secret values (challenger repro)', async () => {
+    const a = seed.a;
+    for (const v of SECRET_VALUES) {
+      const cases: Array<[string, unknown[]]> = [
+        [`UPDATE ratio.sync_runs SET error_detail = $2 WHERE tenant_id = $1`, [a.tenantId, `connect failed: ${v}`]],
+        [`UPDATE ratio.ingest_batches SET status = 'quarantined', quarantine_reason = $2 WHERE id = $1`, [a.batchStaged, `bad: ${v}`]],
+        [
+          `INSERT INTO ratio.ingest_validation_errors (tenant_id, batch_id, error_ordinal, artifact_sha256, code, message)
+           VALUES ($1, $2, 7, $3, 'X', $4)`,
+          [a.tenantId, a.batchStaged, artifactSha(a.slug, a.batchStaged), `token ${v}`],
+        ],
+        [`UPDATE ratio.ingest_artifacts SET artifact_name = $2 WHERE batch_id = $1`, [a.batchStaged, `s3/a.csv;${v.replace(/[?#]/g, ';')}`]],
+      ];
+      for (const [sql, params] of cases) {
+        const r = await tryAsSuper(sql, params);
+        expect(r, `${sql} <- ${v}`).toMatchObject({ ok: false, code: '23514' });
+      }
+    }
+  });
+
+  it('sync_runs.stats rejects secret-looking keys and values', async () => {
+    for (const stats of [{ token: 'abc' }, { nested: { apiKey: 'x' } }, { last_url: 'https://u:p@host/x' }, { note: 'sig=abc' }]) {
+      const r = await tryAsSuper(`UPDATE ratio.sync_runs SET stats = $2::jsonb WHERE tenant_id = $1`, [seed.a.tenantId, JSON.stringify(stats)]);
+      expect(r, JSON.stringify(stats)).toMatchObject({ ok: false, code: '23514' });
+    }
+    const ok = await tryAsSuper(`UPDATE ratio.sync_runs SET stats = $2::jsonb WHERE tenant_id = $1`, [
+      seed.a.tenantId,
+      JSON.stringify({ rows: 10, retries: 1, periods: ['2026-08-01'] }),
+    ]);
+    expect(ok).toMatchObject({ ok: true });
+  });
+
+  it('the worker (not only the superuser) gets the same rejection — it can execute the guard functions', async () => {
+    await withRole(db.pool, 'ratio_worker', seed.a.tenantId, async (c) => {
+      expect(await attempt(c, `UPDATE ratio.sync_runs SET error_detail = 'Bearer abc' WHERE id = $1`, [seed.a.runNew])).toMatchObject({
+        ok: false,
+        code: '23514',
+      });
+      expect(await attempt(c, `UPDATE ratio.sync_runs SET error_detail = 'timeout after 30s' WHERE id = $1`, [seed.a.runNew])).toMatchObject({
+        ok: true,
+        rowCount: 1,
+      });
+    });
+  });
+});
+
+describe('function privileges (L4)', () => {
+  it('PUBLIC can execute no function in schema ratio; reader only current_tenant_id', async () => {
+    const pub = await q(
+      `SELECT p.oid::regprocedure::text AS fn FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'ratio' AND (p.proacl IS NULL OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) x WHERE x.grantee = 0))`,
+    );
+    expect(pub).toEqual([]);
+    const reader = await q(
+      `SELECT p.oid::regprocedure::text AS fn FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'ratio' AND has_function_privilege('ratio_reader', p.oid, 'EXECUTE') ORDER BY 1`,
+    );
+    expect(reader).toEqual([{ fn: 'ratio.current_tenant_id()' }]);
+    const worker = await q(
+      `SELECT p.oid::regprocedure::text AS fn FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'ratio' AND p.prorettype <> 'trigger'::regtype AND NOT has_function_privilege('ratio_worker', p.oid, 'EXECUTE')`,
+    );
+    expect(worker).toEqual([]);
+    // Trigger functions are not callable directly by anyone but the owner.
+    const trig = await q(
+      `SELECT p.oid::regprocedure::text AS fn FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'ratio' AND p.prorettype = 'trigger'::regtype
+         AND (has_function_privilege('ratio_worker', p.oid, 'EXECUTE') OR has_function_privilege('ratio_reader', p.oid, 'EXECUTE'))`,
+    );
+    expect(trig).toEqual([]);
+  });
+
+  it('reader cannot call the secret-guard helpers', async () => {
+    await withRole(db.pool, 'ratio_reader', seed.a.tenantId, async (c) => {
+      expect(await attempt(c, `SELECT ratio.jsonb_has_secret_like_key('{"a":1}')`)).toMatchObject({ ok: false, code: '42501' });
+    });
   });
 });
 
@@ -351,38 +466,49 @@ describe('constraint invariants', () => {
   });
 
   it('a quarantined batch must carry a reason; status rejected no longer exists', async () => {
+    // Exercised on the staged batch: staged -> quarantined is a legal transition,
+    // so these reach the CHECK constraints (non-staged batches are frozen, see immutability tests).
     expect(
-      await tryAsSuper(`UPDATE ratio.ingest_batches SET quarantine_reason = NULL WHERE id = $1`, [seed.a.batchQuarantined]),
+      await tryAsSuper(`UPDATE ratio.ingest_batches SET status = 'quarantined', quarantine_reason = NULL WHERE id = $1`, [seed.a.batchStaged]),
     ).toMatchObject({ ok: false, code: '23514' });
     expect(
       await tryAsSuper(`UPDATE ratio.ingest_batches SET status = 'rejected', quarantine_reason = 'x' WHERE id = $1`, [seed.a.batchStaged]),
     ).toMatchObject({ ok: false, code: '23514' });
     expect(
-      await tryAsSuper(`UPDATE ratio.ingest_batches SET validation_error_count = -1 WHERE id = $1`, [seed.a.batchQuarantined]),
+      await tryAsSuper(`UPDATE ratio.ingest_batches SET validation_error_count = -1 WHERE id = $1`, [seed.a.batchStaged]),
     ).toMatchObject({ ok: false, code: '23514' });
+    expect(
+      await tryAsSuper(
+        `UPDATE ratio.ingest_batches SET status = 'quarantined', quarantine_reason = 'MISSING_COLUMN', validation_error_count = 3 WHERE id = $1`,
+        [seed.a.batchStaged],
+      ),
+    ).toMatchObject({ ok: true, rowCount: 1 });
   });
 
   it('validation errors are capped at 1000 stored rows per batch and need a known artifact', async () => {
     const a = seed.a;
-    const ins = (ordinal: number, sha: string) =>
-      tryAsSuper(
-        `INSERT INTO ratio.ingest_validation_errors (tenant_id, batch_id, error_ordinal, artifact_sha256, code, message)
-         VALUES ($1, $2, $3, $4, 'MISSING_COLUMN', 'BilledCost column missing')`,
-        [a.tenantId, a.batchQuarantined, ordinal, sha],
-      );
-    const sha = artifactSha(a.slug, a.batchQuarantined);
-    expect(await ins(1000, sha)).toMatchObject({ ok: true });
-    expect(await ins(1001, sha)).toMatchObject({ ok: false, code: '23514' });
-    expect(await ins(0, sha)).toMatchObject({ ok: false, code: '23514' });
-    expect(await ins(1, sha)).toMatchObject({ ok: false, code: '23505' });
-    expect(await ins(3, fp('unknown-artifact'))).toMatchObject({ ok: false, code: '23503' });
-    expect(
-      await tryAsSuper(
-        `INSERT INTO ratio.ingest_validation_errors (tenant_id, batch_id, error_ordinal, artifact_sha256, code, message)
-         VALUES ($1, $2, 4, $3, 'lower case', 'x')`,
-        [a.tenantId, a.batchQuarantined, sha],
-      ),
-    ).toMatchObject({ ok: false, code: '23514' });
+    const sha = artifactSha(a.slug, a.batchStaged);
+    const c = await db.pool.connect();
+    try {
+      await c.query('BEGIN');
+      const ins = (ordinal: number, artifact: string, code = 'MISSING_COLUMN') =>
+        attempt(
+          c,
+          `INSERT INTO ratio.ingest_validation_errors (tenant_id, batch_id, error_ordinal, artifact_sha256, code, message)
+           VALUES ($1, $2, $3, $4, $5, 'BilledCost column missing')`,
+          [a.tenantId, a.batchStaged, ordinal, artifact, code],
+        );
+      expect(await ins(1000, sha)).toMatchObject({ ok: true });
+      expect(await ins(1, sha)).toMatchObject({ ok: true });
+      expect(await ins(1001, sha)).toMatchObject({ ok: false, code: '23514' });
+      expect(await ins(0, sha)).toMatchObject({ ok: false, code: '23514' });
+      expect(await ins(1, sha)).toMatchObject({ ok: false, code: '23505' });
+      expect(await ins(3, fp('unknown-artifact'))).toMatchObject({ ok: false, code: '23503' });
+      expect(await ins(4, sha, 'lower case')).toMatchObject({ ok: false, code: '23514' });
+    } finally {
+      await c.query('ROLLBACK');
+      c.release();
+    }
   });
 
   it('artifacts store a hex sha256 and the content-addressed evidence key only', async () => {
@@ -407,9 +533,10 @@ describe('constraint invariants', () => {
   });
 
   it('a variance batch cannot be published', async () => {
-    const r = await tryAsSuper(`UPDATE ratio.ingest_batches SET reconciliation = 'variance' WHERE id = $1`, [
-      seed.a.batchPublished,
-    ]);
+    const r = await tryAsSuper(
+      `UPDATE ratio.ingest_batches SET control_row_count = 99, reconciliation = 'variance', status = 'published', published_at = now() WHERE id = $1`,
+      [seed.a.batchStaged],
+    );
     expect(r).toMatchObject({ ok: false, code: '23514' });
   });
 });

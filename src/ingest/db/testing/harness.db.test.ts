@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Client } from 'pg';
-import { createTestDatabase } from './harness';
+import { createTestDatabase, waitForNoBackends } from './harness';
 import { requireTestDatabaseUrl } from './requireTestDatabaseUrl';
 import { loadMigrations, DEFAULT_MIGRATIONS_DIR } from '../migrationFiles';
 
@@ -55,6 +55,42 @@ describe('DB test harness', () => {
     } finally {
       await one.close();
       await two.close();
+    }
+  });
+
+  it('close() drops the database even with a checked-out, never-released client and no unhandled error (H1)', async () => {
+    // The flake: DROP DATABASE ... WITH (FORCE) terminated a backend whose pg
+    // client had no 'error' listener -> unhandled 57P01. Reproduce the worst
+    // case deterministically: a pool client that is still checked out.
+    const db = await createTestDatabase({ migrate: false });
+    const leaked = await db.pool.connect();
+    await leaked.query('SELECT 1');
+    const started = Date.now();
+    await db.close();
+    expect(Date.now() - started).toBeLessThan(20_000);
+    expect(await databaseExists(db.name)).toBe(false);
+    // The leaked client observed the termination as a handled error, not a crash.
+    await expect(leaked.query('SELECT 1')).rejects.toBeTruthy();
+  });
+
+  it('waitForNoBackends waits for connections to go away and reports a timeout', async () => {
+    const db = await createTestDatabase({ migrate: false });
+    try {
+      const c = new Client({ connectionString: db.url });
+      c.on('error', () => undefined);
+      await c.connect();
+      expect(await waitForNoBackends(db.name, 300)).toBe(false);
+      const startedAt = Date.now();
+      const ending = (async () => {
+        await new Promise((r) => setTimeout(r, 250));
+        await c.end(); // the client disconnects only after 250 ms
+      })();
+      const ok = await waitForNoBackends(db.name, 10_000);
+      expect(ok).toBe(true);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(240);
+      await ending;
+    } finally {
+      await db.close();
     }
   });
 });
