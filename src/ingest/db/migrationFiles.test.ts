@@ -350,7 +350,9 @@ describe('loadMigrations', () => {
       '-- ratio:allow-function maintenance\nCREATE PROCEDURE ratio.p() LANGUAGE sql AS $$ SELECT 1 $$;\n' +
       '-- ratio:allow-view projection\nCREATE VIEW public.v AS SELECT 1;\n' +
       '-- ratio:allow-view snapshot\nCREATE MATERIALIZED VIEW ratio.mv AS SELECT 1 AS x;\n' +
-      'REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;\n';
+      // round 16 M1: a PUBLIC revoke is expand only on objects this file created
+      // (was `ALL FUNCTIONS IN SCHEMA public`, which also hits pre-existing functions: now contract).
+      'REVOKE EXECUTE ON FUNCTION public.f(), f2() FROM PUBLIC;\nREVOKE EXECUTE ON PROCEDURE ratio.p() FROM PUBLIC;\n';
     expect(findForbiddenStatement(ok)).toBeNull();
     expect(findNonExpandStatement(ok)).toBeNull();
     expect(loadMigrations(tmpDir({ '0002_a.up.sql': ok }))[0].phase).toBe('expand');
@@ -428,5 +430,80 @@ describe('findTransactionControl', () => {
       'PREPARE q AS SELECT $1::int;',
     ];
     for (const sql of ok) expect(findTransactionControl(sql), sql).toBeNull();
+  });
+});
+
+describe('round 16 M1: a REVOKE … FROM PUBLIC is expand only for objects created earlier in the same file', () => {
+  const contract = [
+    // the reported case: can stop the previous release's logins from reconnecting
+    'REVOKE CONNECT ON DATABASE ratio_prod FROM PUBLIC;',
+    'REVOKE TEMPORARY ON DATABASE ratio_prod FROM PUBLIC;',
+    // pre-existing ratio objects (0001's), not created in this file
+    'REVOKE ALL ON SCHEMA ratio FROM PUBLIC;',
+    'REVOKE SELECT ON ratio.cost_facts_published FROM PUBLIC;',
+    'REVOKE SELECT ON TABLE ratio.cost_facts FROM PUBLIC;',
+    'REVOKE EXECUTE ON FUNCTION ratio.current_tenant_id() FROM PUBLIC;',
+    'REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA ratio FROM PUBLIC;',
+    // system objects
+    'REVOKE EXECUTE ON FUNCTION pg_catalog.now() FROM PUBLIC;',
+    'REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;',
+    'REVOKE USAGE ON SCHEMA public FROM PUBLIC;',
+    'REVOKE USAGE ON LANGUAGE plpgsql FROM PUBLIC;',
+    'REVOKE USAGE ON TYPE public.money_kind FROM PUBLIC;',
+    'REVOKE SET ON PARAMETER work_mem FROM PUBLIC;',
+    'REVOKE SELECT ON LARGE OBJECT 4242 FROM PUBLIC;',
+  ];
+  for (const stmt of contract) {
+    it(`is contract: ${stmt}`, () => {
+      expect(findNonExpandStatement(EXPAND + stmt)).toBe(stmt.slice(0, -1).toUpperCase());
+      expect(codeOf(() => loadMigrations(tmpDir({ '0002_a.up.sql': EXPAND + stmt })))).toBe('EXPAND_NOT_ADDITIVE');
+      expect(loadMigrations(tmpDir({ '0002_a.up.sql': CONTRACT + stmt }))[0].phase).toBe('contract');
+    });
+  }
+
+  it('a revoke that names a created object AND a pre-existing one is contract', () => {
+    const sql = EXPAND + 'CREATE TABLE ratio.t1 (x int);\nREVOKE ALL ON ratio.t1, ratio.cost_facts FROM PUBLIC;\n';
+    expect(findNonExpandStatement(sql)).toBe('REVOKE ALL ON RATIO.T1, RATIO.COST_FACTS FROM PUBLIC');
+  });
+
+  it('a revoke BEFORE the object is created, or on an object created with IF NOT EXISTS / OR REPLACE, is contract', () => {
+    expect(findNonExpandStatement(EXPAND + 'REVOKE ALL ON SCHEMA s FROM PUBLIC;\nCREATE SCHEMA s;\n')).toBe('REVOKE ALL ON SCHEMA S FROM PUBLIC');
+    expect(findNonExpandStatement(EXPAND + 'CREATE SCHEMA IF NOT EXISTS s;\nREVOKE ALL ON SCHEMA s FROM PUBLIC;\n')).toBe(
+      'REVOKE ALL ON SCHEMA S FROM PUBLIC',
+    );
+    expect(findNonExpandStatement(EXPAND + 'CREATE TABLE IF NOT EXISTS ratio.t1 (x int);\nREVOKE ALL ON ratio.t1 FROM PUBLIC;\n')).toBe(
+      'REVOKE ALL ON RATIO.T1 FROM PUBLIC',
+    );
+  });
+
+  it('a function revoke must match the created signature (an overload that pre-exists is contract)', () => {
+    const created = EXPAND + "-- ratio:allow-function helper\nCREATE FUNCTION ratio.add_one(x int) RETURNS int LANGUAGE sql AS 'select x + 1';\n";
+    expect(findNonExpandStatement(created + 'REVOKE EXECUTE ON FUNCTION ratio.add_one(int) FROM PUBLIC;\n')).toBeNull();
+    expect(findNonExpandStatement(created + 'REVOKE EXECUTE ON FUNCTION ratio.add_one(text) FROM PUBLIC;\n')).toBe(
+      'REVOKE EXECUTE ON FUNCTION RATIO.ADD_ONE(TEXT) FROM PUBLIC',
+    );
+  });
+
+  it('revokes on objects created earlier in the same file stay expand (schema, ALL … IN SCHEMA of a new schema, table, column, view, sequence, type, function)', () => {
+    const sql =
+      EXPAND +
+      'CREATE SCHEMA s;\nREVOKE ALL ON SCHEMA s FROM PUBLIC;\n' +
+      'CREATE TABLE s.t (a int, b text);\nREVOKE ALL ON s.t FROM PUBLIC;\nREVOKE SELECT (a) ON TABLE s.t FROM PUBLIC;\n' +
+      'CREATE SEQUENCE s.q;\nREVOKE ALL ON SEQUENCE s.q FROM PUBLIC;\n' +
+      'CREATE TYPE s.e AS ENUM (\'x\');\nREVOKE USAGE ON TYPE s.e FROM PUBLIC;\n' +
+      "-- ratio:allow-function helper\nCREATE FUNCTION s.f(a int, OUT b int, VARIADIC c text[]) LANGUAGE sql AS 'select 1';\n" +
+      'REVOKE EXECUTE ON FUNCTION s.f(int, text[]) FROM PUBLIC;\n' +
+      '-- ratio:allow-view projection\nCREATE VIEW s.v AS SELECT a FROM s.t;\nREVOKE ALL ON s.v FROM PUBLIC;\n' +
+      'REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA s FROM PUBLIC;\nREVOKE ALL ON ALL TABLES IN SCHEMA s FROM PUBLIC CASCADE;\n';
+    expect(findNonExpandStatement(sql)).toBeNull();
+    expect(loadMigrations(tmpDir({ '0002_a.up.sql': sql }))[0].phase).toBe('expand');
+  });
+
+  it('0001 is unchanged and still expand-safe (its revokes are on its own new schema and functions)', () => {
+    const up = fs.readFileSync(path.join(DEFAULT_MIGRATIONS_DIR, '0001_ratio_schema.up.sql'), 'utf8');
+    expect(up).toMatch(/^REVOKE ALL ON SCHEMA ratio FROM PUBLIC;$/m);
+    expect(up).toMatch(/^REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA ratio FROM PUBLIC;$/m);
+    expect(findNonExpandStatement(up)).toBeNull();
+    expect(loadMigrations(DEFAULT_MIGRATIONS_DIR)[0].phase).toBe('expand');
   });
 });
