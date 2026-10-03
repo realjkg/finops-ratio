@@ -27,7 +27,8 @@ export class MemoryEvidenceStore implements EvidenceStore {
     return this.store(key, bytes);
   }
 
-  async open(key: string): Promise<Readable> {
+  async open(key: string, opts: { signal?: AbortSignal } = {}): Promise<Readable> {
+    if (opts.signal?.aborted) throw opts.signal.reason;
     const b = this.objects.get(key);
     if (!b) throw new IngestError('EVIDENCE_MISSING', 'evidence object not found');
     const size = 64 * 1024;

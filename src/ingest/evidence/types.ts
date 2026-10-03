@@ -8,7 +8,8 @@ export interface EvidenceStore {
   put(key: string, filePath: string, info: { sha256: string; byteSize: number }): Promise<'stored' | 'exists'>;
   /** Stores small in-memory bytes (manifests) under `key`; idempotent like put. */
   putBytes(key: string, bytes: Buffer): Promise<'stored' | 'exists'>;
-  open(key: string): Promise<Readable>;
+  /** Streams an evidence object. The signal (the run's) tears the request down; it then rejects with its reason. */
+  open(key: string, opts?: { signal?: AbortSignal }): Promise<Readable>;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

@@ -152,8 +152,10 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
 
   let raw: Readable;
   try {
-    raw = await withDeadline(ctx.evidence.open(art.evidenceKey), ctx.stallMs, 'EVIDENCE_STALLED', 'opening the evidence copy');
+    // The run's abort signal reaches the evidence request (review M5, third round).
+    raw = await withDeadline(ctx.evidence.open(art.evidenceKey, { signal: ctx.signal }), ctx.stallMs, 'EVIDENCE_STALLED', 'opening the evidence copy', ctx.signal);
   } catch (e) {
+    if (ctx.signal?.aborted) throw ctx.signal.reason;
     if (e instanceof IngestError) throw e;
     throw new IngestError('EVIDENCE_STORE_FAILED', 'reading the evidence copy failed', { retryable: isTransientError(e), cause: e });
   }

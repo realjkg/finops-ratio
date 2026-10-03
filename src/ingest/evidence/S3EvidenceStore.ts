@@ -79,11 +79,15 @@ export class S3EvidenceStore implements EvidenceStore {
     return 'stored';
   }
 
-  async open(key: string): Promise<Readable> {
+  async open(key: string, opts: { signal?: AbortSignal } = {}): Promise<Readable> {
+    const signal = opts.signal;
+    if (signal?.aborted) throw signal.reason;
     try {
-      const r = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.k(key) }));
+      // The run's abort signal tears the request down at MAX_RUN_SECONDS (review M5, third round).
+      const r = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.k(key) }), { abortSignal: signal });
       return r.Body as Readable;
     } catch (e) {
+      if (signal?.aborted) throw signal.reason;
       throw evidenceError('reading an evidence object', e);
     }
   }
