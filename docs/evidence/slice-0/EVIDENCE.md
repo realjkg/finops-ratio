@@ -1623,3 +1623,90 @@ Q6 Unicode (not ASCII-only) folding of unquoted parts        KILLED  1
 | `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json and next-env.d.ts restored; no AGENTS.md or CLAUDE.md |
 | skip/only/todo/it.fails grep | 0 |
 | private cluster before deletion | `pg_db_role_setting` 0; `pg_parameter_acl` 0; only the three NOLOGIN ratio roles besides postgres; no members of a ratio role; no scratch databases. Then stopped, `/tmp/r17pg` deleted, port 55540 closed |
+
+# Round 18: monitoring roles; Copilot on #53 (C1 ADMIN-only edge, C2 dots in names)
+
+**Branch.** Round 18 was started on `slice/00-r17-predefined-roles`. After the
+owner merged #53, it moved to `slice/00-r18-stats-roles-identifiers`, created
+from `origin/main` (5d46099, same tree as 0af62f2). The three commits already
+made were cherry-picked, and the uncommitted C2 fix was applied as a patch.
+Local commits only; nothing pushed.
+
+**Cluster.** Every DB run used a private PostgreSQL 16.14 cluster: initdb as
+postgres into `/tmp/r18pg`, 127.0.0.1:55541, TCP only. It was stopped and
+deleted at the end. Raw logs: `scratchpad/r19/`.
+
+**Nothing regenerated.** No change touches the foundation manifest or the
+PUBLIC system baseline.
+
+## R18.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 9dcdf16 | test(ingest): failing tests for round 18 (pg_monitor / pg_read_all_stats / pg_read_all_settings …; canonIdent doubled quotes) | tests (red) |
+| 0ec7d23 | fix(ingest): refuse pg_monitor, pg_read_all_stats and pg_read_all_settings …; export canonIdent | fix |
+| 14affa2 | test(ingest): failing tests for Copilot on #53 (ADMIN-only edge …; whitespace/comments around qualification dots) | tests (C1 guard, C2 red) |
+| ef4b3f0 | fix(ingest): accept whitespace and comments around qualification dots …; a dangling dot is malformed | fix (C2) |
+| 7bbbbc1 | test(ingest): a dangling-dot name never records a shorter prefix of its last part | tests (from surviving mutants D3/D8) |
+| 4aefcb7 | test(ingest): sweep for names that stop early … red: a quoted name containing a line break | tests (red) |
+| f730317 | fix(ingest): REVOKE patterns cross line breaks inside quoted identifiers | fix |
+| (this) | docs(evidence): Slice 0 round 18 | docs |
+
+## R18.2 Red
+
+**Monitoring roles: 27 failed out of 27 new** (at that point, three edge
+kinds).
+- `pg_read_all_settings` was not reported at all (9 cases).
+- `pg_monitor` and `pg_read_all_stats` were reported only as system-ACL
+  entries `via` the role (18 cases), never as a reachable refused role.
+
+**canonIdent unit test: 1 failed** (not exported). The classifier
+doubled-quote test passed on arrival.
+
+**C1 (ADMIN-only edge): 21 cases, all passed on arrival.** Production
+already follows every edge. The cases guard against a regression, and
+mutation A1 kills them.
+
+**C2: 13 failed / 64 passed.**
+- The repro: `ratio. t` was recorded as `ratio`.
+- Spaced and commented spellings of `ratio.t` did not match each other.
+- `canonIdent('"ratio" . "t"')` was malformed.
+
+**Sweep: 1 failed / 87 passed.** A quoted name containing a line break was
+not recognised in a REVOKE, because `.` does not match a line break.
+
+## R18.3 Mutations
+
+```
+R1 pg_monitor not refused                                          KILLED  12
+R2 pg_read_all_stats not refused                                   KILLED  12
+R3 pg_read_all_settings not refused                                KILLED  12
+S1 system-ACL scan stripped for the monitoring roles               SURVIVED, as intended: 36/36 still refused by the explicit check
+S2 system-ACL scan removed entirely                                SURVIVED, as intended: 36/36 still refused by the explicit check
+A1 closure ignores admin_option-only edges (refused-role reach)    KILLED  21
+D1 dangling-dot lookahead removed from NAME                        KILLED  1
+D2 NAME without spaces around dots                                 KILLED  12
+D3 NAME unquoted part may backtrack                                KILLED  1 (survived first; guard added in 7bbbbc1)
+D4 canonIdent accepts a trailing dot (round-17 behaviour)          KILLED  1
+D5 canonIdent does not skip whitespace around dots                 KILLED  13
+D6 canonIdent accepts two parts without a dot                      KILLED  1
+D7 argument types: dots not joined                                 KILLED  1
+D8 NAME quoted part may backtrack                                  KILLED  1 (guard added in 7bbbbc1)
+L1 REVOKE pattern uses `.` (stops at a line break)                 KILLED  1
+C1 doubled quote kept doubled in canonIdent                        KILLED  1
+```
+
+R1–R3, S1, S2 and C1 were re-run on the new branch after the cherry-pick
+(the counts shown include the ADMIN-only cases). Each mutant was restored
+with `git checkout`; the tree was clean afterwards.
+
+## R18.4 Verification (worktree r16, branch slice/00-r18-stats-roles-identifiers at f730317 + docs; private cluster)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npm test` | 1883/1883 |
+| `npm run test:db` **×10** (RATIO_PG_DUMP/RATIO_PSQL = PG16 client tools) | **10/10 exit 0**: 365/365 parallel + 2/2 serial each |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json and next-env.d.ts restored; no AGENTS.md or CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| private cluster before deletion | `pg_db_role_setting` 0; `pg_parameter_acl` 0; only the three NOLOGIN ratio roles besides postgres; no non-`pg_` role is a member of any role. The only two edges into the listed predefined roles are PostgreSQL's built-in `pg_monitor` → `pg_read_all_settings` / `pg_read_all_stats`. No scratch databases. Then stopped, `/tmp/r18pg` deleted, port 55541 closed |
