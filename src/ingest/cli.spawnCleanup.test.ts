@@ -19,14 +19,34 @@ import { describe, expect, it } from 'vitest';
 const ROOT = path.resolve(__dirname, '..', '..');
 const FIXTURE_CONFIG = path.join(__dirname, 'testing', 'spawnFixture', 'vitest.config.ts');
 
-/** Running (a SIGKILLed orphan may linger briefly as a zombie until init reaps it: that counts as dead). */
-function alive(pid: number): boolean {
+/** /proc/<pid>/stat fields after the command name: [state, ppid, pgrp, ...]; null when the process is gone. */
+function statFields(pid: number): string[] | null {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'latin1');
-    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ');
   } catch {
-    return false;
+    return null;
   }
+}
+
+/**
+ * Running. Gone, a zombie ('Z': exited, never reaped — e.g. an orphan under a
+ * PID 1 that does not reap) and dead ('X') all count as dead.
+ */
+function alive(pid: number): boolean {
+  const f = statFields(pid);
+  return f !== null && f[0] !== 'Z' && f[0] !== 'X';
+}
+
+/** Live members of a process group (Linux /proc). */
+function pidsInGroup(pgid: number): number[] {
+  const out: number[] = [];
+  for (const d of fs.readdirSync('/proc')) {
+    if (!/^\d+$/.test(d) || Number(d) === process.pid) continue;
+    const f = statFields(Number(d));
+    if (f && Number(f[2]) === pgid && alive(Number(d))) out.push(Number(d));
+  }
+  return out;
 }
 
 /** Pids of live processes whose environment carries RATIO_ORPHAN_MARKER=<marker> (Linux /proc). */
@@ -44,24 +64,39 @@ export function pidsWithMarker(marker: string): number[] {
   return out;
 }
 
-/** Kills the nested run's process group and every process with the marker; returns what was still alive. */
-export function reap(groupLeader: number | undefined, marker: string): number[] {
-  if (groupLeader) {
-    try {
-      process.kill(-groupLeader, 'SIGKILL');
-    } catch {
-      // group already gone
+/**
+ * Kills the nested run's process group and every process with the marker, then
+ * CONFIRMS they are dead (gone or zombie): SIGKILL is asynchronous — right
+ * after kill() returns the target can still show as running until the kernel
+ * schedules its exit (CI #54, run 37157034669). Re-kills and polls until
+ * nothing is left or `timeoutMs` passes; returns what is still alive (empty on
+ * success).
+ */
+export async function reap(groupLeader: number | undefined, marker: string, timeoutMs = 5_000): Promise<number[]> {
+  const deadline = Date.now() + timeoutMs;
+  const killed = new Set<number>();
+  for (;;) {
+    if (groupLeader) {
+      try {
+        process.kill(-groupLeader, 'SIGKILL');
+      } catch {
+        // group already gone
+      }
+      for (const pid of pidsInGroup(groupLeader)) killed.add(pid);
     }
-  }
-  const strays = pidsWithMarker(marker);
-  for (const pid of strays) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // already gone
+    for (const pid of pidsWithMarker(marker)) {
+      killed.add(pid);
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // already gone
+      }
     }
+    const living = [...killed].filter(alive);
+    if (living.length === 0 && pidsWithMarker(marker).length === 0) return [];
+    if (Date.now() >= deadline) return living;
+    await new Promise((r) => setTimeout(r, 20));
   }
-  return strays;
 }
 
 interface FixtureRun {
@@ -71,6 +106,8 @@ interface FixtureRun {
   pid: number;
   marker: string;
   aliveBeforeReap: boolean;
+  /** What reap() could not confirm dead within its bound (must be empty). */
+  leftAfterReap: number[];
 }
 
 /**
@@ -109,28 +146,32 @@ async function runFixture(extraEnv: Record<string, string>, timeoutMs: number): 
       });
     });
     const pid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, 'utf8')) : 0;
-    return { status, signal, output, pid, marker, aliveBeforeReap: pid > 0 && alive(pid) };
+    const aliveBeforeReap = pid > 0 && alive(pid);
+    const leftAfterReap = await reap(child.pid, marker);
+    return { status, signal, output, pid, marker, aliveBeforeReap, leftAfterReap };
   } finally {
-    reap(child.pid, marker);
+    await reap(child.pid, marker); // also on any error above
   }
 }
 
 describe('spawned test children are killed when the file ends (even after a failed assertion)', () => {
   it('the fixture fails mid-way, and its running child is gone afterwards (by the helper, before any reaping)', async () => {
-    const { status, output, pid, marker, aliveBeforeReap } = await runFixture({}, 60_000);
+    const { status, output, pid, marker, aliveBeforeReap, leftAfterReap } = await runFixture({}, 60_000);
     // The fixture's assertion failed (that is the scenario) ...
     expect(status, output).not.toBe(0);
     expect(output).toMatch(/the assertion that fails mid-way/);
     expect(pid).toBeGreaterThan(0);
     // ... yet its child did not outlive the file: the helper's afterAll killed it.
     expect(aliveBeforeReap, `child ${pid} outlived the failed test file`).toBe(false);
+    expect(leftAfterReap).toEqual([]);
     expect(pidsWithMarker(marker)).toEqual([]);
   }, 90_000);
 
   it('an INTERRUPTED nested run (killed before any afterAll) leaves nothing behind', async () => {
-    const { signal, pid, marker } = await runFixture({ RATIO_ORPHAN_HANG: '1' }, 15_000);
+    const { signal, pid, marker, leftAfterReap } = await runFixture({ RATIO_ORPHAN_HANG: '1' }, 15_000);
     expect(signal).toBe('SIGKILL'); // the nested run was interrupted
     expect(pid, 'the fixture wrote its child pid before hanging').toBeGreaterThan(0);
+    expect(leftAfterReap, 'reap() confirmed every process dead').toEqual([]);
     expect(alive(pid)).toBe(false);
     expect(pidsWithMarker(marker)).toEqual([]);
   }, 90_000);
