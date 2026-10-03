@@ -199,3 +199,41 @@ describe('S3EvidenceStore HEAD-metadata fast path (challenger round 3 L2)', () =
   });
 });
 
+describe('S3EvidenceStore.put never leaves its file stream behind', () => {
+  // capture() deletes the temp file right after put() returns: a body stream
+  // the SDK never consumed (a PutObject that fails, or a fake that ignores the
+  // body) would open the deleted file later and emit an UNHANDLED ENOENT.
+  for (const [what, outcome] of [
+    ['a PutObject that fails before reading the body', 'reject'],
+    ['a PutObject that returns without reading the body', 'resolve'],
+  ] as const) {
+    it(`${what}: the body stream is destroyed when put() settles`, async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-ev-'));
+      let body: fs.ReadStream | undefined;
+      try {
+        const file = path.join(dir, 'f');
+        fs.writeFileSync(file, 'abc');
+        const client = {
+          async send(cmd: unknown) {
+            if (cmd instanceof HeadObjectCommand) throw Object.assign(new Error('NotFound'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } });
+            if (cmd instanceof PutObjectCommand) {
+              body = cmd.input.Body as fs.ReadStream;
+              if (outcome === 'reject') throw Object.assign(new Error('AccessDenied'), { name: 'AccessDenied', $metadata: { httpStatusCode: 403 } });
+              return {};
+            }
+            throw new Error('unexpected command');
+          },
+        } as unknown as S3Client;
+        const p = new S3EvidenceStore({ client, bucket: 'ev' }).put('evidence/k', file, { sha256: 'x', byteSize: 3 });
+        if (outcome === 'reject') await expect(p).rejects.toMatchObject({ code: 'EVIDENCE_STORE_FAILED' });
+        else await p;
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true }); // exactly what capture() does next
+      }
+      expect(body).toBeDefined();
+      expect(body!.destroyed).toBe(true);
+      await new Promise((r) => setTimeout(r, 50)); // an unhandled ENOENT would surface here and fail the run
+    });
+  }
+});
+
