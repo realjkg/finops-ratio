@@ -237,3 +237,71 @@ describe('S3EvidenceStore.put never leaves its file stream behind', () => {
   }
 });
 
+describe('S3EvidenceStore creates objects conditionally (If-None-Match: *) — sixth review High', () => {
+  const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
+  const good = Buffer.from('the real evidence bytes');
+  /** HEAD says absent; between HEAD and PUT another writer creates the key with `winner`. */
+  function racing(winner: Buffer | null, seen: Array<{ cmd: string; ifNoneMatch?: string }>): S3Client {
+    let created: Buffer | null = null;
+    return {
+      async send(cmd: unknown) {
+        if (cmd instanceof HeadObjectCommand) {
+          seen.push({ cmd: 'head' });
+          created = winner; // the competitor writes right after our HEAD
+          throw Object.assign(new Error('NotFound'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } });
+        }
+        if (cmd instanceof PutObjectCommand) {
+          seen.push({ cmd: 'put', ifNoneMatch: cmd.input.IfNoneMatch });
+          if (cmd.input.IfNoneMatch === '*' && created) {
+            throw Object.assign(new Error('At least one of the pre-conditions you specified did not hold'), { name: 'PreconditionFailed', $metadata: { httpStatusCode: 412 } });
+          }
+          return {};
+        }
+        if (cmd instanceof GetObjectCommand) {
+          seen.push({ cmd: 'get' });
+          return { Body: Readable.from([created ?? Buffer.alloc(0)]), ContentLength: created?.length ?? 0 };
+        }
+        throw new Error('unexpected command');
+      },
+    } as unknown as S3Client;
+  }
+  const withFile = async <T>(fn: (file: string) => Promise<T>): Promise<T> => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-ev-'));
+    try {
+      const file = path.join(dir, 'f');
+      fs.writeFileSync(file, good);
+      return await fn(file);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('no race: every PUT (artifact and manifest) is a conditional create', async () => {
+    const seen: Array<{ cmd: string; ifNoneMatch?: string }> = [];
+    expect(await withFile((file) => new S3EvidenceStore({ client: racing(null, seen), bucket: 'ev' }).put('evidence/k', file, { sha256: sha(good), byteSize: good.length }))).toBe('stored');
+    expect(await new S3EvidenceStore({ client: racing(null, seen), bucket: 'ev' }).putBytes('evidence/k', good)).toBe('stored');
+    expect(seen.filter((x) => x.cmd === 'put').map((x) => x.ifNoneMatch)).toEqual(['*', '*']);
+  });
+
+  for (const [what, op] of [
+    ['artifact (put)', 'put'],
+    ['manifest (putBytes)', 'putBytes'],
+  ] as const) {
+    it(`${what}: a competitor creates the same genuine bytes between HEAD and PUT => 412, verified, 'exists'`, async () => {
+      const seen: Array<{ cmd: string; ifNoneMatch?: string }> = [];
+      const store = new S3EvidenceStore({ client: racing(good, seen), bucket: 'ev' });
+      const r = op === 'put' ? await withFile((file) => store.put('evidence/k', file, { sha256: sha(good), byteSize: good.length })) : await store.putBytes('evidence/k', good);
+      expect(r).toBe('exists');
+      expect(seen.map((x) => x.cmd)).toEqual(['head', 'put', 'get']);
+    });
+
+    it(`${what}: a competitor creates DIFFERENT bytes between HEAD and PUT => EVIDENCE_INTEGRITY_MISMATCH, nothing overwritten`, async () => {
+      const seen: Array<{ cmd: string; ifNoneMatch?: string }> = [];
+      const store = new S3EvidenceStore({ client: racing(Buffer.from('the FAKE evidence bytes'), seen), bucket: 'ev' });
+      const p = op === 'put' ? withFile((file) => store.put('evidence/k', file, { sha256: sha(good), byteSize: good.length })) : store.putBytes('evidence/k', good);
+      await expect(p).rejects.toMatchObject({ code: 'EVIDENCE_INTEGRITY_MISMATCH' });
+      expect(seen.filter((x) => x.cmd === 'put')).toEqual([{ cmd: 'put', ifNoneMatch: '*' }]);
+    });
+  }
+});
+

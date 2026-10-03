@@ -17,6 +17,8 @@ describe('loadWorkerConfig', () => {
     expect(c.artifactDigest).toBeNull();
     expect(c.sourceS3.region).toBe('us-east-1');
     expect(c.doctorFirstPublishGraceHours).toBe(48); // challenger L2: covers AWS's up-to-24 h first export
+    expect(c.settings.limits.maxChunkBytes).toBe(32 * 1024 * 1024); // sixth review: byte budget for a pending fact chunk
+    expect(loadWorkerConfig({ ...base, RATIO_MAX_CHUNK_BYTES: String(8 * 1024 * 1024) }).settings.limits.maxChunkBytes).toBe(8 * 1024 * 1024);
     expect(loadWorkerConfig({ ...base, RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS: '0' }).doctorFirstPublishGraceHours).toBe(0);
     expect(loadWorkerConfig({ ...base, RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS: '72' }).doctorFirstPublishGraceHours).toBe(72);
   });
@@ -35,6 +37,9 @@ describe('loadWorkerConfig', () => {
       ['RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS', '-1'],
       ['RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS', '1.5'],
       ['RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS', String(24 * 366 + 1)],
+      ['RATIO_MAX_CHUNK_BYTES', String(1024 * 1024 - 1)],
+      ['RATIO_MAX_CHUNK_BYTES', String(1024 * 1024 * 1024 + 1)],
+      ['RATIO_MAX_CHUNK_BYTES', '32MB'],
     ]) {
       expect(() => loadWorkerConfig({ ...base, [k]: v }), `${k}=${v}`).toThrow(expect.objectContaining({ code: 'CONFIG_INVALID' }));
     }

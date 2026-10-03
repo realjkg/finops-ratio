@@ -5,7 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GetObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { S3FocusExportSource } from './S3FocusExportSource';
 import { S3EvidenceStore } from '../../evidence/S3EvidenceStore';
 import { runSync } from '../../worker/pipeline';
@@ -375,6 +375,34 @@ describe('S3 source → evidence → published facts', () => {
       expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'EVIDENCE_INTEGRITY_MISMATCH' });
     } finally {
       await bucket.destroy();
+    }
+  });
+
+  it('X9 (sixth review High) another writer creates the evidence key between our HEAD and PUT: SeaweedFS answers 412 to If-None-Match: *; genuine bytes => exists, different bytes => EVIDENCE_INTEGRITY_MISMATCH; the winner is never overwritten', async () => {
+    for (const [what, competitor] of [
+      ['genuine', null],
+      ['different', Buffer.from('a competitor wrote these bytes!')],
+    ] as const) {
+      const genuine = Buffer.from('the genuine evidence bytes here');
+      const key = evidenceBucket.at(`evidence/race/${crypto.randomBytes(6).toString('hex')}/${sha(genuine)}`);
+      const racy = {
+        async send(cmd: unknown, opts?: unknown) {
+          const r = (evidenceBucket.client.send as (c: unknown, o?: unknown) => Promise<unknown>)(cmd, opts);
+          if (cmd instanceof HeadObjectCommand) {
+            try {
+              return await r;
+            } finally {
+              await evidenceBucket.put(key, competitor ?? genuine); // the competitor wins the race
+            }
+          }
+          return r;
+        },
+      } as unknown as S3Client;
+      const store = new S3EvidenceStore({ client: racy, bucket: evidenceBucket.name });
+      const p = store.putBytes(key, genuine);
+      if (what === 'genuine') expect(await p, what).toBe('exists');
+      else await expect(p, what).rejects.toMatchObject({ code: 'EVIDENCE_INTEGRITY_MISMATCH' });
+      expect((await evidenceBucket.get(key)).equals(competitor ?? genuine), what).toBe(true);
     }
   });
 });
