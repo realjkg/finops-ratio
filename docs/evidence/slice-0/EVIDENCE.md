@@ -1184,3 +1184,99 @@ H3 RLS FORCE not required for ratio tables           KILLED  RLS ENABLED but not
 | skip/only/todo/it.fails grep | 0 |
 | cluster state | `pg_db_role_setting` rows 0; `pg_parameter_acl` rows 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no `ratio_manifest_*` database; no system-schema ACL entry for a ratio role in the `postgres` database |
 | Slice 1 compat: scratch worktree `slice/01` 909ec1a + 0bf387e (removed) | merge clean (no conflict); tsc 0, lint 0, fast 1924/1924, test:db 340/340 ×2 |
+
+---
+
+# Round 14 — Copilot on c016ffb (1 High, 2 Medium)
+
+Base: c016ffb (on origin). Local commits only (not pushed). 0001 unchanged.
+The 0001 manifest moved from a TS constant to
+`0001_ratio_schema.manifest.json`; it has the same 306 entries. Raw logs:
+`scratchpad/r15/`.
+
+## R14.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 4fbf6fd | test(ingest): failing tests for round 14 (PUBLIC system-schema baseline, crash-line flush, versioned manifests) | tests (red) |
+| 756cb93 | test(ingest): type the spawned CLI env as NodeJS.ProcessEnv (tsc only; no behaviour change) | test typing |
+| a2dc70d | fix(ingest): PUBLIC system-schema baseline, synchronous crash line, per-version foundation manifests (round 14) | fix + generated baseline + manifest file + script |
+| (this) | docs(evidence): Slice 0 round 14 | docs |
+
+## R14.2 Red (at 4fbf6fd)
+
+**DB tests** (`foundation.db.test.ts` + `privileges.db.test.ts`): **10
+failed / 102 passed (112)**.
+- The system baseline module was missing, so the four PUBLIC grant tests,
+  the pg_toast tests and the version test all failed.
+- The loader rejected `*.manifest.json` (`BAD_FILENAME`).
+- `0001_ratio_schema.manifest.json` was absent.
+
+**Fast** (`cli.process.test.ts`): **2 failed / 1 passed**. No crash hook
+existed, so the built CLI ran the command instead of crashing. The refusal
+test passed on arrival.
+
+**Test-side fixes in the fix commit.** The compiled test CLI needs the
+migrations copied next to it, as `worker:build` does, because the manifests
+are now loaded from there. The env cast became `as unknown as ProcessEnv`.
+
+**One defect found while making it green.** The crash hook first ran
+alongside the command, so a fast `ECONNREFUSED` line raced the crash line.
+With the hook active, the CLI now crashes instead of running the command.
+
+## R14.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+B1 system baseline check not called                         KILLED  5
+B2 major-version check removed                              KILLED  version test
+B3 pg_toast not a system schema                             KILLED  both pg_toast tests
+B4 relation ACLs not compared for PUBLIC                    KILLED  drift + pg_authid
+B5 column ACLs not compared for PUBLIC                      KILLED  drift + rolpassword column
+B6 function ACLs not compared for PUBLIC                    KILLED  pg_read_file
+M1 active manifest is always 0001 (later manifests ignored) KILLED  0002 positive + "does more" test
+M2 active manifest = highest in the dir (ignores ledger)    KILLED  positive controls + 0002 tests
+C1 fatal line via async process.stderr.write                KILLED  both crash tests (the >2 MB line is lost)
+C2 crash hook honoured outside RATIO_ENV=test               KILLED  refusal test
+```
+
+## R14.4 Verification (main checkout at a2dc70d + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1812/1812 (includes cli.process.test.ts) |
+| `npm run test:db` **×10** consecutive (PG16 client tools pinned) | **10/10 exit 0, 227/227 each** (`run10-*.txt`) |
+| `npm run test:db` against the official **`postgres:16` docker image** (16.15, Debian build, as CI uses) | **227/227**: manifest and system baseline also match that build (`docker-pg16.txt`; container removed) |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` (migrations + manifest copied) / CLI smoke migrate → status → down → migrate → status on a scratch DB | 0 / all 0 (scratch DB dropped) |
+| `npm run build` | 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` 0; `pg_parameter_acl` 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no scratch databases; no system-schema ACL entry for a ratio role in `postgres` |
+
+## R14.5 Slice 1 compat (local slice/01 0e80eff ⊇ origin; scratch worktree, removed)
+
+**Merge.** One conflict, in `src/ingest/cli.ts`, in the main-module block
+plus the new helpers. It was resolved as follows:
+- kept `writeAllSync` and `testCrashHook`;
+- kept Slice 1's io object;
+- the single `installProcessHandlers` is Slice 1's extended version, which
+  also redacts worker secrets, now with the synchronous fd-2 fatal writer;
+- the crash hook is gated the same way.
+
+**Results:** tsc 0, lint 0, test:db 352/352 ×2. Fast tests: **1925/1927**.
+
+**The two failures are `cli.process.test.ts` crash tests**, which time out
+after 60 s. The cause is in Slice 1's merged crash handler. It runs every line
+through Slice 1's worker redactor (`jsonLineRedactorFor`) after Slice 0's.
+Measured on the merged build:
+- 0 pad: 0.2 s;
+- 20 KB message: 0.9 s;
+- 200 KB message: **77 s**.
+
+The output is truncated to ~4 KB. A 4 KB line fits a pipe buffer, so the
+flush race cannot happen there. But the test's ">2 MB line" assertion does
+not hold on the merge, and a crash handler that blocks for minutes on a large
+error message is a Slice 1 issue: **flag for the Slice 1 owner**. Options
+there: cap the message length before redaction (as Slice 1 already caps the
+output), or fix the super-linear redaction. Then adapt the size assertion.
+Slice 0's own tree is unaffected.

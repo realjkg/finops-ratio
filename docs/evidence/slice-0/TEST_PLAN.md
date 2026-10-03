@@ -275,3 +275,11 @@ All in `foundation.db.test.ts`.
 | H1 policy change | `privileges.db.test.ts`, `cli.db.test.ts` | round-8/9 assertions that matched `key=value` now match `<key> for role …` |
 | H2 | `privileges.db.test.ts` (rolled back) | `positive control: a clean migrated database has no system-schema findings`, `GRANT SELECT ON pg_catalog.pg_authid TO ratio_reader`, `a column grant on pg_authid(rolpassword)`, `GRANT EXECUTE ON FUNCTION pg_read_file(text) TO ratio_worker`, `GRANT EXECUTE ON FUNCTION lo_import(text) TO ratio_owner`, `an explicit schema grant on information_schema`, `a grant to a LOGIN member of ratio_reader` |
 | challenger L1 | `foundation.db.test.ts` | `a new ratio table with RLS ENABLED but not FORCED (and the reviewed policy) is refused` (green on arrival; kills mutant H3) |
+
+## Round 14 — PUBLIC system baseline, crash-line flush, versioned manifests (tests committed red in 4fbf6fd)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| High | `privileges.db.test.ts` (rolled back) | `drift: a fresh migrated database has exactly the stored PUBLIC system-schema baseline (pg_catalog, information_schema, pg_toast)`, `positive control: a clean migrated database has no PUBLIC system-schema finding`, `a dynamically built GRANT SELECT ON pg_catalog.pg_authid TO PUBLIC`, `a column grant to PUBLIC`, `EXECUTE on pg_read_file to PUBLIC`, `USAGE on pg_toast to PUBLIC`, `pg_toast is a system schema for the ratio-role rule too`, `fails closed with a clear message when the baseline was generated for another PostgreSQL major version` |
+| M1 | `cli.process.test.ts` (fast; builds the CLI) | `uncaught: exactly one redacted JSON line arrives on stderr and the exit code is 1 (large payload)`, `rejection: …`, `the crash hook is refused outside RATIO_ENV=test (staging, production, unset): no process.* line` |
+| M2 | `foundation.db.test.ts` | `the shipped migrations directory carries the 0001 manifest file, equal to FOUNDATION_0001`, `0001 → 0002 (alters a 0001 column default) with a 0002 manifest: both steps pass, and status is clean`, `the same 0002 without a manifest is refused (the 0001 manifest still applies)`, `a 0002 whose SQL does more than its reviewed manifest is refused` |
