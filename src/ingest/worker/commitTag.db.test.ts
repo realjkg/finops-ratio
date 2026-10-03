@@ -12,8 +12,8 @@ import { FakeFocusSource, type FakePeriod } from '../sources/fake/FakeFocusSourc
 import { MemoryEvidenceStore } from '../evidence/MemoryEvidenceStore';
 import { runSync, type RunSyncOptions } from './pipeline';
 import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup';
-import { checkpointOf, publishedAs, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
-import { csvGz, rowsOf } from '../testing/focusCsv';
+import { batchesOf, checkpointOf, publishedAs, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
+import { csvGz, focusRow, rowsOf } from '../testing/focusCsv';
 
 let t: WorkerTestDb;
 beforeAll(async () => {
@@ -132,4 +132,40 @@ describe('COMMIT answered with ROLLBACK is a failure, never a success', () => {
     const runs = await runsOf(t.db.pool, s.tenantId, s.sourceId);
     expect(runs.map((x) => x.status)).toEqual(['running']);
   });
+
+  // The quarantine transaction (validation errors, fact deletion, staged -> quarantined):
+  // a caught error after each of its state-changing statements. After an earlier
+  // statement the NEXT statement already fails (25P02, transaction aborted); after
+  // the last one only the COMMIT reply tells — both must fail the run visibly.
+  for (const [name, after, code] of [
+    ['validation errors inserted', /INSERT INTO ratio\.ingest_validation_errors/, 'DB_25P02'],
+    ['staged facts deleted', /DELETE FROM ratio\.cost_facts WHERE batch_id = \$1/, 'DB_25P02'],
+    ['batch marked quarantined (last statement before COMMIT)', /UPDATE ratio\.ingest_batches SET status = 'quarantined'/, 'COMMIT_ROLLED_BACK'],
+  ] as Array<[string, RegExp, string]>) {
+    it(`quarantine path (${name}): the run fails, the batch stays staged, nothing is recorded or published`, async () => {
+      const s = await seedTenantSource(t.db.pool);
+      const evidence = new MemoryEvidenceStore();
+      const source = new FakeFocusSource([period('r1/a.csv.gz', csvGz(rowsOf(P, 1, '4.00')))]);
+      expect((await sync(t.pool, s, source, evidence)).status).toBe('succeeded');
+      const before = await visibleState(s);
+
+      source.setPeriods([period('r2/a.csv.gz', csvGz([focusRow(P, { BilledCost: 'oops' })]))]);
+      const w = swallowingPool(t.pool, after);
+      const r = await sync(w.pool, s, source, evidence);
+      expect(w.injected()).toBeGreaterThan(0);
+      expect(r.status).toBe('failed');
+      expect(r.periods[0]).toMatchObject({ billingPeriod: P, outcome: 'failed', code });
+      const after2 = await visibleState(s);
+      expect(after2.view).toEqual(before.view);
+      expect(after2.totals).toEqual(before.totals);
+      expect(after2.pubs).toEqual(before.pubs);
+      expect(after2.checkpoint).toEqual(before.checkpoint);
+      expect(after2.batches.slice(0, before.batches.length)).toEqual(before.batches);
+      expect((await batchesOf(t.db.pool, s.tenantId, s.sourceId)).map((b) => b.status)).toEqual(['published', 'staged']);
+      const errs = await t.db.pool.query(`SELECT count(*)::int AS n FROM ratio.ingest_validation_errors WHERE tenant_id = $1`, [s.tenantId]);
+      expect(errs.rows[0].n).toBe(0);
+      const runs = await runsOf(t.db.pool, s.tenantId, s.sourceId);
+      expect(runs.find((x) => x.id === r.runId)).toMatchObject({ status: 'failed', error_code: code });
+    });
+  }
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_REDACTED_LENGTH, jsonLineRedactorFor, redact, secretsFromEnv } from './redact';
+import { MAX_REDACTED_LENGTH, jsonLineRedactorFor, redact, scrubLiterals, secretForms, secretsFromEnv } from './redact';
 
 describe('redact', () => {
   const cases: Array<[string, string, RegExp]> = [
@@ -123,5 +123,45 @@ describe('jsonLineRedactorFor (redact before serialize)', () => {
     const value = { rows: Array.from({ length: 500 }, (_, i) => `row-${i}-${'x'.repeat(20)}`) };
     expect(JSON.parse(line(value))).toEqual(value);
   });
+});
+
+// Overlapping DISTINCT secrets: a single leftmost alternation consumes the
+// first match and leaves the rest of the overlapping one behind
+// ('admin;x' + 'x;secret;pw' on 'admin;x;secret;pw' -> '[redacted];secret;pw').
+// Every character covered by ANY occurrence of ANY secret must be redacted.
+describe('overlapping secrets (all three entry points)', () => {
+  const CASES: Array<{ name: string; secrets: string[]; text: string }> = [
+    { name: 'two overlapping', secrets: ['admin;x', 'x;secret;pw'], text: 'login admin;x;secret;pw done' },
+    { name: 'two overlapping, other order', secrets: ['x;secret;pw', 'admin;x'], text: 'admin;x;secret;pw' },
+    { name: 'three-way overlap', secrets: ['one;two', 'two;three;four', 'four;five'], text: 'k=one;two;three;four;five end' },
+    { name: 'secret that is a substring of another', secrets: ['topsecret99', 'secret'], text: 'topsecret99 and secret and xsecretx' },
+    { name: 'self-overlapping occurrences', secrets: ['abab'], text: 'zz ababab zz' },
+  ];
+  /** Every substring of >= 3 characters of every secret (none occurs in '[redacted]' or the surrounding text). */
+  const remainders = (secrets: string[]) => {
+    const out = new Set<string>();
+    for (const sec of secrets) for (let i = 0; i + 3 <= sec.length; i++) out.add(sec.slice(i, i + 3));
+    return [...out];
+  };
+  const noRemainder = (label: string, out: string, secrets: string[]) => {
+    for (const r of remainders(secrets)) expect(out.includes(r), `${label}: ${JSON.stringify(r)} survives in ${JSON.stringify(out)}`).toBe(false);
+  };
+
+  for (const c of CASES) {
+    it(`${c.name}: redact leaves no remainder of any secret`, () => {
+      noRemainder('redact', redact(c.text, secretForms(c.secrets)), c.secrets);
+    });
+    it(`${c.name}: scrubLiterals leaves no remainder of any secret`, () => {
+      noRemainder('scrubLiterals', scrubLiterals(c.text, secretForms(c.secrets)), c.secrets);
+    });
+    it(`${c.name}: jsonLineRedactorFor leaves no remainder of any secret (values, keys, Errors)`, () => {
+      const env: Record<string, string> = {};
+      c.secrets.forEach((sec, i) => (env[`RATIO_TEST_${i}_SECRET`] = sec));
+      const line = jsonLineRedactorFor(env)({ message: c.text, [c.text]: [c.text], err: new Error(c.text) });
+      noRemainder('jsonLineRedactorFor', line, c.secrets);
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      noRemainder('jsonLineRedactorFor (parsed)', JSON.stringify(Object.keys(parsed)) + JSON.stringify(Object.values(parsed)), c.secrets);
+    });
+  }
 });
 

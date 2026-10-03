@@ -9,6 +9,7 @@
 //   flaky): a string AT the cap, of every scheme-repeat shape, redacts in
 //   < 25 ms; so does a 2 MB string (the cap bounds the work).
 import { describe, expect, it } from 'vitest';
+import * as redactModule from './redact';
 import { capForRedaction, MAX_REDACT_INPUT_CHARS, MAX_REDACTED_LENGTH, redact, secretsFromEnv, TRUNCATED_MARKER } from './redact';
 
 const SECRET = 'pw"q\\b%22x';
@@ -94,3 +95,38 @@ describe('per-string cost (median of 9 runs)', () => {
     });
   }
 });
+
+// The URL query rule itself must be linear WITHOUT the cap (the cap would hide
+// a quadratic rule: R6). Applied directly to uncapped input: a median budget at
+// 16 KB, and a size-scaling check — 4x the input must cost well under 16x
+// (linear ~4x, quadratic ~16x); the ratio of medians is load-independent.
+describe('URL query rule is linear on its own (uncapped)', () => {
+  const applyQueryRule = (text: string): string => {
+    const rule = (redactModule as { QUERY_RULE?: readonly [RegExp, string | ((m: string, ...g: string[]) => string)] }).QUERY_RULE;
+    if (!rule) throw new Error('redact.ts must export QUERY_RULE (the URL query rule applied by redact)');
+    const [re, rep] = rule;
+    return typeof rep === 'string' ? text.replace(re, rep) : text.replace(re, rep);
+  };
+  const aScheme = (n: number) => 'a://'.repeat(n / 4);
+
+  it('still redacts a query (sanity)', () => {
+    expect(applyQueryRule('see https://h/p?sig=abc&x=1 now')).toBe('see https://h/p?[redacted] now');
+    expect(applyQueryRule('see https://h/p now')).toBe('see https://h/p now');
+  });
+
+  it("'a://' repeated, 16 KB, uncapped: median < 25 ms", () => {
+    const text = aScheme(16_384);
+    expect(medianMs(() => applyQueryRule(text), 7)).toBeLessThan(25);
+  });
+
+  it("'a://' repeated: time(64 KB) / time(16 KB) < 8 (linear ~4, quadratic ~16)", () => {
+    const small = aScheme(16_384);
+    const large = aScheme(65_536);
+    // Repeat to get measurable times on a fast (linear) rule.
+    const reps = 20;
+    const tSmall = medianMs(() => { for (let i = 0; i < reps; i++) applyQueryRule(small); }, 7);
+    const tLarge = medianMs(() => { for (let i = 0; i < reps; i++) applyQueryRule(large); }, 7);
+    expect(tLarge / tSmall).toBeLessThan(8);
+  });
+});
+
