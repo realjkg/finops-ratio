@@ -23,7 +23,7 @@ function configurePointFiveLive() {
   process.env.POINTFIVE_OAUTH_TOKEN_URL = 'https://auth.pointfive.example/token';
 }
 const CSV =
-  'BilledCost,ChargePeriodStart,ServiceName,ResourceId\n42,2026-06-02T00:00:00Z,VMware vSphere,arn:ratio:workload/wl-001\n';
+  'BilledCost,BillingCurrency,ChargePeriodStart,ServiceName,ResourceId\n42,USD,2026-06-02T00:00:00Z,VMware vSphere,arn:ratio:workload/wl-001\n';
 const QUERY = { sourceId: 'focus-endpoint', start: '2026-06-01T00:00:00Z', end: '2026-07-01T00:00:00Z' };
 
 let saved: Record<string, string | undefined>;
@@ -114,19 +114,21 @@ describe('/api/costsource/rows — live-data auth gate', () => {
   });
 
   it('returns 409 (not configured) for an available connector, with no network', async () => {
+    // Deny-by-default (H1): the 409 is only reachable after live-data auth.
+    process.env.RATIO_API_TOKEN = 'right';
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const res = await callRows();
+    const res = await callRows({ authorization: 'Bearer right' });
     expect(res.statusCode).toBe(409);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
 describe('/api/v1/connectors', () => {
-  async function callRegistry(query: Record<string, string> = {}) {
+  async function callRegistry(query: Record<string, string> = {}, headers: Record<string, string> = {}) {
     const { default: handler } = await import('../../pages/api/v1/connectors/index');
     const res = makeRes();
-    await handler(makeReq(query), res as unknown as NextApiResponse);
+    await handler(makeReq(query, headers), res as unknown as NextApiResponse);
     return res as ReturnType<typeof makeRes> & {
       body: {
         connectors: Array<{ id: string; connection?: string; setup?: { requiredEnv: string[] } }>;
@@ -147,9 +149,11 @@ describe('/api/v1/connectors', () => {
 
   it('probes only configured connectors and reports their live health', async () => {
     process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    // H2: a probe invokes connectors with server credentials — token required.
+    process.env.RATIO_API_TOKEN = 'right';
     const fetchMock = vi.fn(async () => new Response(CSV));
     vi.stubGlobal('fetch', fetchMock);
-    const res = await callRegistry({ probe: 'true' });
+    const res = await callRegistry({ probe: 'true' }, { authorization: 'Bearer right' });
     expect(res.statusCode).toBe(200);
     expect(res.body.summary.connected).toBe(1);
     expect(res.body.health).toEqual([expect.objectContaining({ sourceId: 'focus-endpoint', reachable: true })]);

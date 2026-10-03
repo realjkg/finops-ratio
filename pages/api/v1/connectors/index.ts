@@ -9,12 +9,15 @@
 //
 // Behind the API gateway (method guard, per-tenant rate limit, Bearer auth when
 // RATIO_API_TOKEN is set or a live AI provider is selected) under /v1/ per the
-// API-First rule.
+// API-First rule. `probe=true` invokes connectors with SERVER credentials, so it
+// additionally requires a configured RATIO_API_TOKEN and a matching Bearer token
+// regardless of gateway enforcement; otherwise 401 and no connector is invoked.
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createCostSourceClient } from '@/costsource';
 import type { CostSourceDescriptor, SourceHealth } from '@/costsource';
-import { withGateway } from '@/server/gateway';
+import { sendError, withGateway } from '@/server/gateway';
+import { requireLiveDataAuth } from '@/server/gateway/liveDataAuth';
 
 export interface ConnectorRegistryResponse {
   connectors: CostSourceDescriptor[];
@@ -33,6 +36,16 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void> {
+  const probe = String(req.query.probe ?? '').toLowerCase();
+  const wantsProbe = probe === 'true' || probe === '1';
+  if (wantsProbe) {
+    const auth = requireLiveDataAuth(req.headers.authorization);
+    if (!auth.ok) {
+      sendError(res, 401, auth.code, auth.message);
+      return;
+    }
+  }
+
   const client = createCostSourceClient('mock');
   const connectors = await client.listSources();
   const summary = { connected: 0, available: 0, incomplete: 0, disabled: 0 };
@@ -42,8 +55,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void>
 
   const body: ConnectorRegistryResponse = { connectors, summary };
 
-  const probe = String(req.query.probe ?? '').toLowerCase();
-  if (probe === 'true' || probe === '1') {
+  if (wantsProbe) {
     const live = connectors.filter((c) => c.connection === 'connected');
     body.health = await Promise.all(
       live.map((c) =>

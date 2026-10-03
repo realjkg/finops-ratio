@@ -1,7 +1,9 @@
 // Connectors — Wave 4 Slice 4. Real object over the existing CostSourceClient seam.
 // Lists all registered cost-source adapters with identity, FOCUS version mapping,
-// server-resolved connection status, the env that connects each one, and a live
-// "Test connection" probe. Controlled-egress paths (live PointFive broker) carry
+// server-resolved connection status, the env that connects each one, and a
+// "Test connection" probe for the offline sandbox sources only (live connectors
+// are probed via the authenticated GET /api/v1/connectors?probe=true; the
+// browser never holds an API token). Controlled-egress paths (live PointFive broker) carry
 // the reserved warm accent.
 //
 // Connection status depends on SERVER env, which the browser cannot see, so the

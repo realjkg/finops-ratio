@@ -1,13 +1,19 @@
 // GET /api/costsource/health?sourceId= — adapter reachability / auth probe.
-// Delegates to the mock client seam. Pure over seed data — no external calls.
+// Delegates to the client seam. Sandbox sources answer from offline seed data;
+// any other source runs a credentialed probe, so it gets the same deny-by-default
+// gate as /api/costsource/rows: a valid `Authorization: Bearer <RATIO_API_TOKEN>`
+// is required (refused outright when no token is configured), checked BEFORE any
+// lookup or transport call.
 //
 // Errors:
 //   400 — missing sourceId
-//   404 — unknown source
+//   401 — non-sandbox source without a valid Bearer token
+//   404 — unknown source (only after auth)
 //   405 — non-GET method
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createCostSourceClient } from '@/costsource';
 import type { SourceHealth } from '@/costsource';
+import { authorizeSourceAccess } from '@/server/gateway/liveDataAuth';
 
 function firstQueryValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -26,6 +32,12 @@ export default async function handler(
   const sourceId = firstQueryValue(req.query.sourceId);
   if (!sourceId) {
     res.status(400).json({ error: 'sourceId query param is required' });
+    return;
+  }
+
+  const auth = authorizeSourceAccess(sourceId, req.headers.authorization);
+  if (!auth.ok) {
+    res.status(401).json({ error: auth.message });
     return;
   }
 

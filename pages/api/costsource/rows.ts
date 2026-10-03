@@ -3,20 +3,22 @@
 // configured connector (cloud / Kubernetes / Nutanix / FOCUS endpoint) fetches
 // its REAL export.
 //
-// Real billing data is never served anonymously: rows from a live connector
-// require `Authorization: Bearer <RATIO_API_TOKEN>`, and with no token
-// configured they are refused outright (same secure default as the gateway).
+// Deny by default: only the offline sandbox sources are served anonymously.
+// Every other source id (live connectors, PointFive, unknown ids) requires
+// `Authorization: Bearer <RATIO_API_TOKEN>`; with no token configured it is
+// refused outright. Unknown ids answer 404 only AFTER auth, so anonymous
+// callers cannot discover which live sources exist.
 //
 // Errors:
 //   400 — missing sourceId / window
-//   401 — live connector without a valid Bearer token
+//   401 — non-sandbox source without a valid Bearer token
 //   404 — unknown source
 //   409 — source not configured (live credentials required)
 //   405 — non-GET method
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createCostSourceClient, findConnectorSpec, resolveConnectorStatus } from '@/costsource';
+import { createCostSourceClient } from '@/costsource';
 import type { CostRowsResult } from '@/costsource';
-import { checkAuth, resolveGatewayAuth } from '@/server/gateway';
+import { authorizeSourceAccess } from '@/server/gateway/liveDataAuth';
 
 function statusForError(message: string): number {
   if (message.includes('Unknown')) return 404;
@@ -47,14 +49,10 @@ export default async function handler(
     return;
   }
 
-  const spec = findConnectorSpec(sourceId);
-  if (spec && resolveConnectorStatus(spec, process.env).state === 'configured') {
-    const { token } = resolveGatewayAuth(process.env);
-    const auth = checkAuth(req.headers.authorization, { enforce: true, token });
-    if (!auth.ok) {
-      res.status(401).json({ error: auth.message });
-      return;
-    }
+  const auth = authorizeSourceAccess(sourceId, req.headers.authorization);
+  if (!auth.ok) {
+    res.status(401).json({ error: auth.message });
+    return;
   }
 
   const client = createCostSourceClient('mock');

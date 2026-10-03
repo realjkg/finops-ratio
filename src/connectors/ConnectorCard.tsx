@@ -1,12 +1,15 @@
 // ConnectorCard — renders a single cost-source adapter.
 // Shows source identity, FOCUS version → canonical mapping, connection state,
-// the env contract that connects it, and a live "Test connection" action that
-// runs the server-side health probe. Env var NAMES only — never values.
+// the env contract that connects it, and a "Test connection" action. The browser
+// carries no API token, so it only probes OFFLINE sandbox sources; live
+// connectors are probed through the authenticated API
+// (GET /api/v1/connectors?probe=true). Env var NAMES only — never values.
 // Controlled-egress paths (live PointFive OAuth 2.1 → MCP SSE broker) carry
 // the reserved warm accent (#ffc44d / shape token).
 
 import { useState } from 'react';
 import type { CostSourceDescriptor, SourceHealth } from '@/costsource/CostSourceClient';
+import { isOfflineSandboxSource } from '@/server/gateway/liveDataAuth';
 
 // Only the live PointFive adapter is a controlled-egress path: it routes through
 // PointFive's broker under OAuth 2.1. The sandbox mock is offline seed data.
@@ -79,7 +82,9 @@ export function ConnectorCard({ source, onTest }: ConnectorCardProps) {
       ? { borderColor: 'rgba(255,196,77,0.2)' }
       : {};
 
-  const canTest = Boolean(onTest) && state === 'connected';
+  const isSandbox = isOfflineSandboxSource(source.id);
+  const canTest = Boolean(onTest) && state === 'connected' && isSandbox;
+  const liveProbeViaApi = state === 'connected' && !isSandbox;
 
   async function test() {
     if (!onTest) return;
@@ -189,7 +194,15 @@ export function ConnectorCard({ source, onTest }: ConnectorCardProps) {
         </p>
       )}
 
-      {/* Action — live health probe for connected connectors */}
+      {/* Live connectors are probed server-side behind the API token only. */}
+      {liveProbeViaApi && (
+        <p className="font-mono text-[10px] leading-relaxed text-dim">
+          Live probe runs via the authenticated API:{' '}
+          <code className="text-sub">GET /api/v1/connectors?probe=true</code>
+        </p>
+      )}
+
+      {/* Action — health probe for connected sandbox sources */}
       <div className="mt-auto flex justify-end pt-1">
         <button
           type="button"
@@ -197,7 +210,9 @@ export function ConnectorCard({ source, onTest }: ConnectorCardProps) {
           onClick={test}
           title={
             canTest
-              ? 'Run a live reachability + auth probe against this source'
+              ? 'Run a reachability probe against this sandbox source'
+              : liveProbeViaApi
+              ? 'Live connectors are probed via the authenticated API (GET /api/v1/connectors?probe=true)'
               : state === 'disabled'
               ? `Disabled by ${source.setup?.flagEnv ?? 'its kill-switch'}`
               : 'Configure this connector to test it'
