@@ -1109,7 +1109,7 @@ describe('PR #49 Copilot M: suite lookups are limited to governance-named Action
     expect(suiteLookups(github).map((c) => c.params.check_suite_id)).toEqual([GOV_SUITE]);
   });
   it('memoised within a sweep: the same suite and head listing are fetched once across evaluations', async () => {
-    const { github, pr } = fakeGithub({
+    const { github } = fakeGithub({
       checkRuns: [...base, ...gov(GOV_SUITE)],
       workflowRuns: (p) => (p.check_suite_id === GOV_SUITE ? [govRun(GOV_SUITE)] : p.check_suite_id !== undefined ? [] : p.event === 'pull_request_target' ? [] : [CI_RUN]),
     });
