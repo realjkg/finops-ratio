@@ -49,6 +49,13 @@ export interface RunSyncOptions {
 
 const SOURCE_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 
+/** 'YYYY-MM-01' of the following month. */
+function nextPeriod(p: string): string {
+  const y = Number(p.slice(0, 4));
+  const m = Number(p.slice(5, 7));
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+}
+
 function setFingerprint(shas: string[]): string {
   return crypto.createHash('sha256').update([...shas].sort().join('\n')).digest('hex');
 }
@@ -160,6 +167,18 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
 
       const checkpoint = await workerTransaction(opts.pool, lease.tenantId, (c) => readCheckpoint(c, lease.sourceId));
 
+      // replay --period names exactly one period: if the source does not list it,
+      // that is a failure, never a silent "nothing to do" success.
+      if (opts.mode === 'replay_period' && opts.range) {
+        const listed = new Set(listings.map((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod)));
+        for (let p = opts.range.from; p <= opts.range.to; p = nextPeriod(p)) {
+          if (!listed.has(p)) {
+            periods.push({ billingPeriod: p, outcome: 'failed', code: 'PERIOD_NOT_FOUND', message: `the source lists no period ${p}` });
+            log('period.failed', { runId: lease.runId, period: p, code: 'PERIOD_NOT_FOUND' });
+          }
+        }
+      }
+
       for (const listing of listings) {
         const period = listing.ok ? listing.set.billingPeriod : listing.billingPeriod;
         const manifest = listing.ok ? listing.set.manifest : listing.manifest;
@@ -193,8 +212,25 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
           continue;
         }
         try {
+          // An artifact replaced between listing and read (SOURCE_CHANGED, e.g. an
+          // S3 If-Match 412) makes the retry RE-LIST the period, so the batch is
+          // always built from one consistent listing (manifest + data versions).
+          let set = listing.set;
           const result = await withRetry(
-            () => processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set: listing.set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow }),
+            async () => {
+              try {
+                return await processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow });
+              } catch (e) {
+                if (e instanceof IngestError && e.code === 'SOURCE_CHANGED') {
+                  const fresh = (await source.listPeriods({ from: period, to: period })).find((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod) === period);
+                  if (!fresh) throw new IngestError('PERIOD_NOT_FOUND', `period ${period} is no longer listed by the source`);
+                  if (!fresh.ok) throw new IngestError(fresh.code, clean(fresh.message));
+                  set = fresh.set;
+                  log('period.relisted', { runId: lease.runId, period });
+                }
+                throw e;
+              }
+            },
             { ...retryOpts, onRetry: onRetry(period) },
           );
           periods.push(result);
@@ -255,6 +291,34 @@ interface PeriodCtx {
   sourceRow: SourceRow;
 }
 
+/** The one quarantine cause that depends on the CONTROLS rather than the data. */
+const CONTROL_QUARANTINE_CODE = 'RECONCILIATION_VARIANCE';
+
+/** Stable key of a set's effective controls ('none' without controls); 16 hex chars of sha256. */
+function controlKey(control: ArtifactSetControlLike | undefined): string {
+  if (!control) return 'none';
+  const per = control.artifactRowCounts ? Object.keys(control.artifactRowCounts).sort().map((k) => [k, control.artifactRowCounts![k]]) : null;
+  const canonical = JSON.stringify({ rowCount: control.rowCount ?? null, billedTotal: control.billedTotal ?? null, artifactRowCounts: per });
+  return crypto.createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+}
+
+/**
+ * For a control-mismatch quarantine, the control key it was judged against;
+ * '' for one recorded before keys were stored (never equal to a current key,
+ * so it may be re-reconciled once); null for any other (data-defect) cause.
+ */
+function controlQuarantineKey(reason: string | null): string | null {
+  if (!reason || !reason.startsWith(CONTROL_QUARANTINE_CODE)) return null;
+  const m = /^RECONCILIATION_VARIANCE \[controls:([0-9a-f]{16}|none)\]/.exec(reason);
+  return m ? m[1] : '';
+}
+
+interface ArtifactSetControlLike {
+  rowCount?: number;
+  billedTotal?: string;
+  artifactRowCounts?: Record<string, number>;
+}
+
 function quarantineReason(code: string, detail: string, codes?: Map<string, number>): string {
   const summary = codes && codes.size ? ` (${[...codes.entries()].map(([c, n]) => `${c} x${n}`).join(', ')})` : '';
   return `${code}: ${detail}${summary}`;
@@ -292,17 +356,36 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
     ctx.progress();
     await ctx.maybeHeartbeat();
   }
-  const fingerprint = setFingerprint(captured.map((c) => c.sha256));
+  const dataFingerprint = setFingerprint(captured.map((c) => c.sha256));
+  const findBatch = (fp: string) =>
+    workerTransaction(ctx.pool, lease.tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT id::text, status, row_count::text AS row_count, loaded_billed_total::text AS total, reconciliation, quarantine_reason
+         FROM ratio.ingest_batches WHERE source_id = $1 AND billing_period = $2 AND artifact_set_fingerprint = $3`,
+        [lease.sourceId, period, fp],
+      );
+      return r.rows[0] as { id: string; status: string; row_count: string; total: string; reconciliation: string; quarantine_reason: string | null } | undefined;
+    });
 
-  // Existing batch for exactly this artifact set?
-  const existing = await workerTransaction(ctx.pool, lease.tenantId, async (c) => {
-    const r = await c.query(
-      `SELECT id::text, status, row_count::text AS row_count, loaded_billed_total::text AS total, reconciliation
-       FROM ratio.ingest_batches WHERE source_id = $1 AND billing_period = $2 AND artifact_set_fingerprint = $3`,
-      [lease.sourceId, period, fingerprint],
-    );
-    return r.rows[0] as { id: string; status: string; row_count: string; total: string; reconciliation: string } | undefined;
-  });
+  // Existing batch for exactly this artifact set? A batch is keyed on its DATA
+  // (the artifact hashes). Exception (review M2): when this data was
+  // quarantined only because its CONTROLS did not match, and the listing now
+  // carries different controls, the same data is re-reconciled in a new batch
+  // keyed on (data, controls) — quarantined batches are terminal and immutable,
+  // so this is the only way back without a schema change. A data-defect
+  // quarantine stays: other controls cannot fix bad data.
+  const currentControls = controlKey(control);
+  let fingerprint = dataFingerprint;
+  let existing = await findBatch(dataFingerprint);
+  if (existing?.status === 'quarantined') {
+    const quarantinedControls = controlQuarantineKey(existing.quarantine_reason);
+    if (quarantinedControls !== null && quarantinedControls !== currentControls) {
+      const quarantinedBatchId = existing.id;
+      fingerprint = crypto.createHash('sha256').update(`${dataFingerprint}\ncontrols:${currentControls}`).digest('hex');
+      existing = await findBatch(fingerprint);
+      ctx.log('period.rereconcile', { runId: lease.runId, period, quarantinedBatchId });
+    }
+  }
   const entry = (batchId: string) => (): CheckpointEntry => ({ fingerprint, listing: set.listingFingerprint, batchId, pinned: false });
 
   if (existing?.status === 'published') {
@@ -340,10 +423,13 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
 
   const state = newLoadState();
   const quarantine = async (code: string, detail: string, extra: { reconciliation?: 'variance'; rowCount?: string; billedTotal?: string } = {}): Promise<PeriodResult> => {
+    // A control-mismatch quarantine records WHICH controls it was judged against
+    // (first in the reason, so no truncation can drop it): see the M2 lookup above.
+    const label = code === CONTROL_QUARANTINE_CODE ? `${code} [controls:${currentControls}]` : code;
     await quarantineBatch(
       ctx.pool,
       lease,
-      { batchId, billingPeriod: period, reason: ctx.clean(quarantineReason(code, detail, state.errorCodes)), errors: state.errors, errorCount: state.errorCount, perArtifactRows: state.perArtifactRows, ...extra },
+      { batchId, billingPeriod: period, reason: ctx.clean(quarantineReason(label, detail, state.errorCodes)), errors: state.errors, errorCount: state.errorCount, perArtifactRows: state.perArtifactRows, ...extra },
       ctx.hooks,
     );
     ctx.log('batch.quarantined', { runId: lease.runId, period, batchId, code, errors: state.errorCount });

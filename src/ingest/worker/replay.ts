@@ -8,7 +8,7 @@ import { redact } from '../redact';
 import { resolveSettings, type WorkerSettings } from '../config';
 import { workerTransaction } from './tx';
 import { acquireRun, finishRun, loadSource } from './lease';
-import { publishBatch } from './publish';
+import { publishBatch, refreshCheckpoint, type CheckpointEntry } from './publish';
 import { canonicalTenant, type WorkerHooks } from './types';
 import type { LogFn } from './pipeline';
 
@@ -67,23 +67,20 @@ export async function replayBatch(opts: {
       const r = await c.query(`SELECT batch_id::text FROM ratio.period_publications WHERE source_id = $1 AND billing_period = $2`, [lease.sourceId, target.period]);
       return (r.rows[0]?.batch_id as string | undefined) ?? null;
     });
+    // Either way the operator's choice is PINNED (review M3): a scheduled sync
+    // must not replace the batch the operator named, current or not.
+    const pin = (prev: Partial<CheckpointEntry> | null): CheckpointEntry => ({ fingerprint: target.fingerprint, listing: prev?.listing ?? null, batchId, pinned: true });
     let outcome: ReplayBatchResult['outcome'];
     if (current === batchId) {
+      await refreshCheckpoint(opts.pool, lease, target.period, pin);
       outcome = 'already_current';
     } else {
-      await publishBatch(
-        opts.pool,
-        lease,
-        {
-          batchId,
-          billingPeriod: target.period,
-          checkpoint: (prev) => ({ fingerprint: target.fingerprint, listing: prev?.listing ?? null, batchId, pinned: true }),
-        },
-        opts.hooks ?? {},
-      );
+      await publishBatch(opts.pool, lease, { batchId, billingPeriod: target.period, checkpoint: pin }, opts.hooks ?? {});
       outcome = 'republished';
     }
-    await finishRun(opts.pool, lease, { status: 'succeeded', stats: { replayBatch: batchId, billingPeriod: target.period, outcome } });
+    // A run taken over before it could finish is LEASE_LOST, exactly as in runSync (review M4).
+    const finished = await finishRun(opts.pool, lease, { status: 'succeeded', stats: { replayBatch: batchId, billingPeriod: target.period, outcome } });
+    if (!finished) throw new IngestError('LEASE_LOST', 'run was taken over before it could finish');
     log('replay.done', { runId: lease.runId, period: target.period, batchId, outcome });
     return { runId: lease.runId, billingPeriod: target.period, batchId, outcome };
   } catch (e) {
