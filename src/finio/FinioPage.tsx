@@ -11,13 +11,22 @@ import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { createFinioClient, validateFocusRows, SUPPORTED_FOCUS_VERSIONS } from './index';
 import type { FinioExport, FocusRow, FocusVersion, HandshakeResult } from './index';
+import { FinioPeerAuthError } from './LiveFinioClient';
 
 type LoadState =
   | { status: 'idle' }
   | { status: 'handshaking' }
   | { status: 'exporting'; handshake: HandshakeResult }
   | { status: 'success'; handshake: HandshakeResult; data: FinioExport; conformant: boolean }
-  | { status: 'error'; message: string };
+  | { status: 'error'; title: string; message: string };
+
+/** Heading + message for a failed exchange; peer-auth refusal gets its own copy. */
+export function finioErrorView(err: unknown): { title: string; message: string } {
+  if (err instanceof FinioPeerAuthError) {
+    return { title: 'Peer authentication required', message: err.message };
+  }
+  return { title: 'Exchange failed', message: err instanceof Error ? err.message : String(err) };
+}
 
 /** An unsupported version, kept in the picker so the 409 path is demonstrable. */
 const UNSUPPORTED_VERSION = '2.0' as FocusVersion;
@@ -101,10 +110,7 @@ export function FinioPage() {
       const conformant = validateFocusRows(data.rows).ok;
       setLoadState({ status: 'success', handshake, data, conformant });
     } catch (err) {
-      setLoadState({
-        status: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
+      setLoadState({ status: 'error', ...finioErrorView(err) });
     }
   }, [clientMode, requestedVersion]);
 
@@ -220,7 +226,7 @@ export function FinioPage() {
         {/* Error */}
         {loadState.status === 'error' && (
           <div className="rounded-card border border-cost/40 bg-cost/10 p-4">
-            <p className="text-sm font-medium text-cost">Exchange failed</p>
+            <p className="text-sm font-medium text-cost">{loadState.title}</p>
             <p className="mt-1 text-xs text-sub">{loadState.message}</p>
           </div>
         )}

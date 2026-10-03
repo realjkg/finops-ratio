@@ -182,7 +182,7 @@ export function FinioOverviewPage() {
               v{SUPPORTED_FOCUS_VERSIONS[0]}–v
               {SUPPORTED_FOCUS_VERSIONS[SUPPORTED_FOCUS_VERSIONS.length - 1]}
             </span>{' '}
-            range is refused, naming both sides.
+            range is refused with the supported range.
           </p>
         </Section>
 

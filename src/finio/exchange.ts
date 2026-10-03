@@ -20,6 +20,8 @@ export interface FinioFailure {
   status: number;
   code: string;
   message: string;
+  /** For a version mismatch: the versions this responder supports. */
+  supported?: readonly string[];
 }
 
 /** The error text a caller sees, identical in mock and live mode. */
@@ -29,6 +31,9 @@ export function failureMessage(operation: 'handshake' | 'export', failure: Finio
 
 /** Versions this responder can shape rows to — the full canonical range. */
 export const SUPPORTED_FOCUS_VERSIONS: readonly FocusVersion[] = FOCUS_VERSIONS;
+
+export const FOCUS_VERSION_UNSUPPORTED_MESSAGE =
+  `focusVersion not supported; responder supports ${SUPPORTED_FOCUS_VERSIONS[0]}–${SUPPORTED_FOCUS_VERSIONS[SUPPORTED_FOCUS_VERSIONS.length - 1]}`;
 
 export type Negotiation =
   | { ok: true; version: FocusVersion }
@@ -40,7 +45,9 @@ export type Negotiation =
  * The responder honours any version in the canonical v1.0-v1.4 range rather than
  * the single pinned '1.1' the original draft allowed. Pinning would have refused
  * peers speaking the version this repo itself calls canonical (v1.4).
- * Out-of-range requests get a 409 naming both sides, per the spec.
+ * Out-of-range requests get a 409 with a FIXED message and the supported list
+ * as structured data — the requested value is never echoed (it is caller
+ * input).
  */
 export function negotiateFocusVersion(requested: unknown): Negotiation {
   if (typeof requested !== 'string' || !SUPPORTED_FOCUS_VERSIONS.includes(requested as FocusVersion)) {
@@ -49,9 +56,8 @@ export function negotiateFocusVersion(requested: unknown): Negotiation {
       failure: {
         status: 409,
         code: 'focus_version_mismatch',
-        message:
-          `focusVersion mismatch: requested '${String(requested)}', ` +
-          `responder supports '${SUPPORTED_FOCUS_VERSIONS.join(', ')}'`,
+        message: FOCUS_VERSION_UNSUPPORTED_MESSAGE,
+        supported: [...SUPPORTED_FOCUS_VERSIONS],
       },
     };
   }

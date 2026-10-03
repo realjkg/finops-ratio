@@ -7,8 +7,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createPredictionClient } from '@/prediction';
 import type { AccuracyReport } from '@/prediction';
+import { withInternalErrorGuard } from '@/server/gateway/internalError';
 
-export default async function handler(
+async function handler(
   req: NextApiRequest,
   res: NextApiResponse<AccuracyReport | { error: string }>,
 ): Promise<void> {
@@ -22,3 +23,4 @@ export default async function handler(
   res.status(200).json(await client.getAccuracyReport());
 }
 
+export default withInternalErrorGuard(handler);

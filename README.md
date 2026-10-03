@@ -137,7 +137,8 @@ denominator FOCUS does not model (R4).
 version in the canonical v1.0–v1.4 range and emits rows shaped to whichever one
 was agreed — the negotiated version is signed into the session token, so the
 export cannot quietly ignore it. A version outside that range returns `409`
-naming both sides.
+with the supported range (`supported: ["1.0", …, "1.4"]`); the requested
+value is never echoed.
 
 **Trust boundary.** `FINIO_PEER_TOKEN` gates the handshake; when it is unset the
 handshake does not enforce a peer token, so the offline demo runs with zero
@@ -146,7 +147,15 @@ config. A successful handshake returns a session id signed with
 expiry — no server-side session map, so it works across instances. Sessions
 travel in `X-FinIO-Session`, peer tokens in `X-FinIO-Peer-Token`; `Authorization`
 is left to the gateway's per-tenant credential so two differently-scoped secrets
-never collide on one header.
+never collide on one header. The browser never holds the peer token (no
+`NEXT_PUBLIC_` copy exists — it would be compiled into the client bundle), so
+with `FINIO_PEER_TOKEN` set the `/finio/demo` page's live mode shows "peer
+authentication required" and peer agents call the API with `X-FinIO-Peer-Token`.
+In a gateway-authenticated deployment — `RATIO_API_TOKEN` set, or a live AI /
+CM provider selected — the gateway's own `401` (missing `Authorization:
+Bearer`) comes first, so the page shows a generic exchange failure rather than
+the peer-auth guidance; call the API with both the Bearer token and
+`X-FinIO-Peer-Token`.
 
 **Mock and live differ only in transport.** `MockFinioClient` runs the same
 exchange rules as the route — same negotiation, same session expiry, same 400 /

@@ -307,10 +307,17 @@ describe('Upstream error bodies never reach API callers', () => {
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
     process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     vi.stubGlobal('fetch', vi.fn(async () => upstream401()));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = await callRows({ authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
-    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.statusCode).toBe(500);
+    // Generic to the caller; the status-only detail is in the server log.
+    expect((res.body as { error: string }).error).toBe('Internal error');
     expect(JSON.stringify(res.body)).not.toContain(MARKER);
-    expect(JSON.stringify(res.body)).toContain('401');
+    expect(JSON.stringify(res.body)).not.toContain('returned 401');
+    const log = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(log).toContain('returned 401');
+    expect(log).not.toContain(MARKER);
+    errSpy.mockRestore();
     warn.mockRestore();
   });
 
@@ -319,9 +326,12 @@ describe('Upstream error bodies never reach API callers', () => {
     process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     // Short line so the runtime's JSON error snippet would include all of it.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(`{"BilledCost":1}\n{"a": LEAKED}\n`)));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = await callRows({ authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
     expect(JSON.stringify(res.body)).not.toContain('LEAKED');
+    expect(errSpy.mock.calls.map((c) => String(c[0])).join('\n')).not.toContain('LEAKED');
+    errSpy.mockRestore();
   });
 
   it('health: the probe detail carries status only, never the upstream body', async () => {
