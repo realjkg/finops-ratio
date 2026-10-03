@@ -221,10 +221,24 @@ describe('query / fragment redacted to the end of the line', () => {
     expect(redactUpstreamText(`https://x.test/p?sig=${S}\r\nnext`, 2000)).toBe('https://x.test/p?[REDACTED]\r\nnext');
   });
 
-  it('a second line after a JSON-escaped \\n is untouched', () => {
-    const out = redactUpstreamText(String.raw`{"m":"GET https://x.test/p?sig=${S} tail\nnext line stays"}`, 2000);
-    expect(out).toBe(String.raw`{"m":"GET https://x.test/p?[REDACTED]\nnext line stays"}`);
-    expect(redactUpstreamText(String.raw`https://x.test/p?a=${S}\r\nb`, 2000)).toBe(String.raw`https://x.test/p?[REDACTED]\r\nb`);
+  it('a JSON-escaped \\n is NOT a line end — the rest of the text is redacted (accepted)', () => {
+    // Round 12: in a text/plain body a backslash + n / r is forgeable
+    // (`?dir=C:\new\data&code=SECRET`), so only a REAL CR / LF ends the line.
+    // A JSON body's escaped "\n" is therefore over-redacted — accepted.
+    const out = redactUpstreamText(String.raw`{"m":"GET https://x.test/p?sig=${S} tail\nnext line"}`, 2000);
+    expect(out).toBe('{"m":"GET https://x.test/p?[REDACTED]');
+    expect(redactUpstreamText(String.raw`https://x.test/p?a=${S}\r\nb`, 2000)).toBe('https://x.test/p?[REDACTED]');
+  });
+
+  it.each([
+    ['C:\\reports (backslash + r)', String.raw`GET https://x.test/f?dir=C:\reports\q3&code=${S}`],
+    ['C:\\new (backslash + n)', String.raw`GET https://x.test/f?dir=C:\new\data&code=${S}`],
+    ['odd backslash run + n', String.raw`GET https://x.test/f?a=1\\\nb&code=${S}`],
+    ['literal \\n in a text/plain body', String.raw`GET https://x.test/f?x=1\nsig=${S}`],
+  ])('a backslash + n / r cannot forge a line end in plain text: %s', (_l, input) => {
+    const out = redactUpstreamText(input, 2000);
+    expect(out).not.toContain(S);
+    expect(out).toBe('GET https://x.test/f?[REDACTED]');
   });
 
   it('an escaped backslash before n (C:\\\\new) is NOT a line end — keeps redacting', () => {
