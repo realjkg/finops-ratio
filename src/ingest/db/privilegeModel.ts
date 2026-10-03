@@ -423,15 +423,56 @@ const policyShape = (entry: string) => entry.replace(/^policy:[^:]+:/, 'policy:'
 
 /**
  * Reviewed policy SHAPES (name, command, permissive, roles, USING / WITH CHECK
- * hashes — not the table): exactly the 0001 tenant_isolation policies, i.e.
- * `tenant_id = ratio.current_tenant_id()` (and `id = …` for tenants) for all
- * commands, to PUBLIC, permissive. A later migration's new ratio table may use
- * that reviewed shape; any other policy must be added to this list in a
- * reviewed change (round 11).
+ * hashes — not the table): exactly the 0001 tenant_isolation policy on
+ * `tenant_id = ratio.current_tenant_id()` for all commands, to PUBLIC,
+ * permissive. A later migration's new ratio table may use that reviewed shape;
+ * any other policy must be added to this list in a reviewed change (round 11).
+ * The tenants table's `id = ratio.current_tenant_id()` policy is NOT a reusable
+ * shape (round 12, L4): on another table `id` is not the tenant, so it is
+ * allowed only as its exact 0001 manifest entry on ratio.tenants. The
+ * tenant_id shape needs no column check: the expression cannot be created
+ * unless the table has a uuid-comparable tenant_id column.
  */
 export const REVIEWED_POLICY_SHAPES: readonly string[] = [
-  ...new Set(FOUNDATION_0001.filter((e) => e.startsWith('policy:')).map(policyShape)),
+  ...new Set(FOUNDATION_0001.filter((e) => e.startsWith('policy:') && !e.startsWith('policy:ratio.tenants:')).map(policyShape)),
 ];
+
+/** True when a rendered policy entry is reviewed (exact 0001 entry or reviewed shape). */
+function isReviewedPolicy(entry: string): boolean {
+  return FOUNDATION_0001.includes(entry) || REVIEWED_POLICY_SHAPES.includes(policyShape(entry));
+}
+
+/**
+ * Every table in schema ratio — 0001's and any a later migration adds — must
+ * have RLS enabled AND forced, be permanent (not UNLOGGED/TEMP), and carry at
+ * least one reviewed policy; and no relation may inherit from, or be a
+ * partition of, a ratio table (or the reverse) — inheritance/partitioning
+ * would route rows around the parent's policies (round 12, L1).
+ */
+async function tableViolations(client: ClientBase): Promise<string[]> {
+  const problems: string[] = [];
+  const tables = await client.query<{ t: string; rls: boolean; force: boolean; persistence: string }>(
+    `SELECT 'ratio.' || c.relname AS t, c.relrowsecurity AS rls, c.relforcerowsecurity AS force, c.relpersistence::text AS persistence
+       FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'ratio' AND c.relkind IN ('r', 'p') ORDER BY 1`,
+  );
+  const policies = await policyEntries(client);
+  for (const t of tables.rows) {
+    if (!t.rls || !t.force) problems.push(`table ${t.t} must have row-level security enabled and forced`);
+    if (t.persistence !== 'p') problems.push(`table ${t.t} must be a permanent (logged) table`);
+    if (!policies.some((e) => e.startsWith(`policy:${t.t}:`) && isReviewedPolicy(e))) problems.push(`table ${t.t} has no reviewed policy`);
+  }
+  const inherits = await client.query<{ child: string; parent: string }>(
+    `SELECT cn.nspname || '.' || c.relname AS child, pn.nspname || '.' || p.relname AS parent
+       FROM pg_catalog.pg_inherits i
+       JOIN pg_catalog.pg_class c ON c.oid = i.inhrelid JOIN pg_catalog.pg_namespace cn ON cn.oid = c.relnamespace
+       JOIN pg_catalog.pg_class p ON p.oid = i.inhparent JOIN pg_catalog.pg_namespace pn ON pn.oid = p.relnamespace
+      WHERE c.relkind IN ('r', 'p', 'f') AND (cn.nspname = 'ratio' OR pn.nspname = 'ratio')
+      ORDER BY 1, 2`,
+  );
+  for (const r of inherits.rows) problems.push(`${r.child} inherits from or is a partition of ${r.parent}`);
+  return problems;
+}
 
 /**
  * Any policy on a ratio table that is neither a 0001 manifest entry nor of a
@@ -442,10 +483,8 @@ export const REVIEWED_POLICY_SHAPES: readonly string[] = [
  * can deny service; none is reviewed.
  */
 async function policyViolations(client: ClientBase): Promise<string[]> {
-  const manifest = new Set(FOUNDATION_0001);
-  const shapes = new Set(REVIEWED_POLICY_SHAPES);
   return (await policyEntries(client))
-    .filter((e) => !manifest.has(e) && !shapes.has(policyShape(e)))
+    .filter((e) => !isReviewedPolicy(e))
     .sort()
     .map((e) => `${e} is not a reviewed policy`);
 }
@@ -585,6 +624,7 @@ export async function privilegeModelViolations(client: ClientBase): Promise<stri
   problems.push(...(await settingViolations(client)));
   problems.push(...(await foundationViolations(client)));
   problems.push(...(await policyViolations(client)));
+  problems.push(...(await tableViolations(client)));
   problems.push(...(await roleViolations(client)));
   return problems;
 }
