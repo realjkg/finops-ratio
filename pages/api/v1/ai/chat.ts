@@ -55,6 +55,22 @@ interface AIAdapter {
   call(systemPrompt: string, messages: AIMessage[]): Promise<string>;
 }
 
+/**
+ * SDK errors embed the provider's response body in their message. Log it
+ * server-side (redacted) and rethrow `<provider> error <status> (<reason>)`
+ * so no provider text reaches the caller through the gateway 500.
+ */
+function providerError(provider: string, err: unknown): Error {
+  const status = (err as { status?: unknown } | null)?.status;
+  const code = typeof status === 'number' ? status : 0;
+  logUpstreamError(provider, code, err instanceof Error ? err.message : String(err));
+  return new Error(
+    typeof status === 'number'
+      ? `${provider} error ${status} (${statusReason(status)})`
+      : `${provider} error unavailable`,
+  );
+}
+
 class ClaudeAdapter implements AIAdapter {
   readonly provider = 'claude' as const;
   private readonly client: Anthropic;
@@ -67,6 +83,14 @@ class ClaudeAdapter implements AIAdapter {
   }
 
   async call(systemPrompt: string, messages: AIMessage[]): Promise<string> {
+    try {
+      return await this.callUnsafe(systemPrompt, messages);
+    } catch (err) {
+      throw providerError(this.provider, err);
+    }
+  }
+
+  private async callUnsafe(systemPrompt: string, messages: AIMessage[]): Promise<string> {
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: MAX_TOKENS,
@@ -93,6 +117,14 @@ class OpenAIAdapter implements AIAdapter {
   }
 
   async call(systemPrompt: string, messages: AIMessage[]): Promise<string> {
+    try {
+      return await this.callUnsafe(systemPrompt, messages);
+    } catch (err) {
+      throw providerError(this.provider, err);
+    }
+  }
+
+  private async callUnsafe(systemPrompt: string, messages: AIMessage[]): Promise<string> {
     const completion = await this.client.chat.completions.create({
       model: this.model,
       max_tokens: MAX_TOKENS,
