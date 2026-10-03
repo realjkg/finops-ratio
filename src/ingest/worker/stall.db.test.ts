@@ -270,5 +270,27 @@ describe('slow but progressing runs survive (challenger M-3)', () => {
       await t.db.pool.query(`DROP FUNCTION public.s1_slow_insert()`);
     }
   });
-});
 
+  it('L-c: a run past its maximum duration aborts itself (MAX_RUN_EXCEEDED) while still streaming, checkpoint untouched', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const bytes = csvGz(rowsOf(P, 3, '2.00'));
+    class TricklingSource extends FakeFocusSource {
+      async openArtifact(ref: ArtifactRef): Promise<Readable> {
+        this.opened.push(ref.name);
+        return trickle(bytes, 14, 700);
+      }
+    }
+    const start = Date.now();
+    const { value: r } = await bounded(
+      sync(s, new TricklingSource([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes }] }]), {
+        settings: { leaseTtlSeconds: 5, stallTimeoutSeconds: 3, maxRunSeconds: 2, maxAttempts: 3 } as RunSyncOptions['settings'],
+      }),
+    );
+    expect(Date.now() - start).toBeLessThan(5000);
+    expect(r.status).toBe('failed');
+    expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'MAX_RUN_EXCEEDED' });
+    expect((await runsOf(t.db.pool, s.tenantId, s.sourceId))[0]).toMatchObject({ status: 'failed', error_code: 'MAX_RUN_EXCEEDED', attempt: 1 });
+    expect(await checkpointOf(t.db.pool, s.tenantId, s.sourceId)).toBeNull();
+    expect((await sync(s, new FakeFocusSource([period()]))).status).toBe('succeeded');
+  });
+});

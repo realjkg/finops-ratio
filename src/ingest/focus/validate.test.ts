@@ -63,6 +63,15 @@ describe('indexHeader', () => {
     if (!r.ok) expect(r.errors).toContainEqual(expect.objectContaining({ code: 'INVALID_CHARACTER' }));
   });
 
+  it('rejects C1 controls and U+2028/U+2029 in header names (they become JSON keys) (L-e)', () => {
+    for (const bad of ['Bad\u0085Name', 'Bad\u009fName', 'Line\u2028Sep', 'Para\u2029Sep']) {
+      const r = indexHeader([...FOCUS_HEADER, bad]);
+      expect(r.ok, JSON.stringify(bad)).toBe(false);
+      if (!r.ok) expect(r.errors).toContainEqual(expect.objectContaining({ code: 'INVALID_CHARACTER' }));
+    }
+    expect(indexHeader([...FOCUS_HEADER, 'x_Ünïcødé_Column']).ok).toBe(true);
+  });
+
   it('rejects duplicate column names', () => {
     const r = indexHeader([...FOCUS_HEADER, 'BilledCost']);
     expect(r.ok).toBe(false);

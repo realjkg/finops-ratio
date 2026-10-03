@@ -8,6 +8,7 @@ import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup
 import { batchesOf, expireLeases, publishedAs, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
 import { csvGz, rowsOf } from '../testing/focusCsv';
 import { SimulatedCrash } from './types';
+import { createWorkerPool } from './db';
 import type { ArtifactRef } from '../sources/types';
 import type { Readable } from 'stream';
 
@@ -233,5 +234,41 @@ describe('leases and concurrency', () => {
     expect((run.stats as { retries?: unknown[] }).retries ?? []).toEqual([]);
     expect(src.openCalls).toBe(1);
   });
-});
 
+  it('L-b worker sessions carry lock/idle/statement timeouts; a takeover blocked by a held row lock fails LOCK_TIMEOUT within its bound', async () => {
+    const shown = await t.pool.query(`SELECT current_setting('lock_timeout') AS l, current_setting('idle_in_transaction_session_timeout') AS i, current_setting('statement_timeout') AS st`);
+    expect(shown.rows[0]).toEqual({ l: '30s', i: '5min', st: '30min' });
+
+    const s = await seedTenantSource(t.db.pool);
+    await t.db.pool.query(
+      `INSERT INTO ratio.sync_runs (tenant_id, id, source_id, run_kind, status, lease_token, lease_expires_at, heartbeat_at)
+       VALUES ($1, gen_random_uuid(), $2, 'scheduled', 'running', gen_random_uuid(), clock_timestamp() - interval '1 minute', now())`,
+      [s.tenantId, s.sourceId],
+    );
+    const holder = await t.db.pool.connect();
+    const pool = createWorkerPool(t.login.url, { max: 2, lockTimeoutMs: 1000 });
+    try {
+      await holder.query('BEGIN');
+      await holder.query(`SELECT 1 FROM ratio.sync_runs WHERE tenant_id = $1 FOR UPDATE`, [s.tenantId]); // a stuck run's row lock
+      const start = Date.now();
+      let timer: NodeJS.Timeout | undefined;
+      const outcome = await Promise.race([
+        runSync({ pool, tenantId: s.tenantId, sourceKey: s.sourceKey, source: new FakeFocusSource([period('r/a.csv.gz', csvGz(rowsOf(P, 1)))]), evidence: new MemoryEvidenceStore(), mode: 'sync', hooks: noSleep }).then(
+          () => 'resolved',
+          (e: { code?: string }) => e.code ?? 'error',
+        ),
+        new Promise<string>((r) => (timer = setTimeout(() => r('still blocked after 10 s'), 10_000))),
+      ]);
+      clearTimeout(timer);
+      expect(outcome).toBe('LOCK_TIMEOUT');
+      expect(Date.now() - start).toBeLessThan(10_000);
+      await holder.query('ROLLBACK');
+    } finally {
+      holder.release();
+      await pool.end();
+    }
+    expect((await runsOf(t.db.pool, s.tenantId, s.sourceId)).map((r) => r.status)).toEqual(['running']);
+    const after = await sync(s, new FakeFocusSource([period('r/a.csv.gz', csvGz(rowsOf(P, 1)))]));
+    expect(after.status).toBe('succeeded');
+  });
+});

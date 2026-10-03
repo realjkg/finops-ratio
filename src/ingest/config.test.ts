@@ -124,4 +124,17 @@ describe('loadWorkerConfig', () => {
     expect(loadWorkerConfig({ ...base, NODE_ENV: 'test', RATIO_ENV: 'test', RATIO_TEST_PAUSE_AFTER_ROWS: '5' }).testPauseAfterRows).toBe(5);
     expect(() => assertFakeSourceAllowed({ NODE_ENV: 'test', RATIO_ENV: 'test', RATIO_ALLOW_FAKE_SOURCE: '1' })).not.toThrow();
   });
+
+  it('L-b: worker DB session timeouts have defaults and bounds', () => {
+    const c = loadWorkerConfig(base);
+    expect(c.db).toEqual({ lockTimeoutMs: 30_000, idleInTransactionTimeoutMs: 300_000, statementTimeoutMs: 1_800_000 });
+    expect(loadWorkerConfig({ ...base, RATIO_DB_LOCK_TIMEOUT_MS: '5000' }).db.lockTimeoutMs).toBe(5000);
+    for (const [k, v] of [
+      ['RATIO_DB_LOCK_TIMEOUT_MS', '0'],
+      ['RATIO_DB_IDLE_IN_TX_TIMEOUT_MS', '999'],
+      ['RATIO_DB_STATEMENT_TIMEOUT_MS', '0'],
+    ]) {
+      expect(() => loadWorkerConfig({ ...base, [k]: v }), `${k}=${v}`).toThrow(expect.objectContaining({ code: 'CONFIG_INVALID' }));
+    }
+  });
 });
