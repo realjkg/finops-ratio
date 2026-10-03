@@ -183,6 +183,13 @@ describe('input cap', () => {
     }
   });
 
+  it('only the first 16 KB is redacted / emitted, even with an unlimited maxChars', () => {
+    const out = redactUpstreamText('word '.repeat(40_000), Number.POSITIVE_INFINITY);
+    expect(out.length).toBeLessThanOrEqual(16_384 + ' …[TRUNCATED]'.length);
+    expect(out.endsWith(' …[TRUNCATED]')).toBe(true);
+    expect(redactUpstreamText('short body', Number.POSITIVE_INFINITY)).toBe('short body');
+  });
+
   it('output is still truncated to maxChars', () => {
     expect(redactUpstreamText('y'.repeat(100_000), 300).length).toBeLessThanOrEqual(300);
   });
