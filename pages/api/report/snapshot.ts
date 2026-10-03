@@ -2,7 +2,7 @@
 //
 // On-demand reporting export for the executive surface. Renders a point-in-time
 // Initiative Cost Report as either a PDF (@react-pdf/renderer) or an XLSX
-// workbook (SheetJS), both auto-timestamped from a single UTC instant so a
+// workbook (ExcelJS), both auto-timestamped from a single UTC instant so a
 // paired download is unambiguous. Pure over the bundled seed — no persistence,
 // no external calls. The PDF/XLSX renderers are server-only (imported here, in
 // pages/api) so the heavy deps never reach the client bundle.
@@ -47,7 +47,7 @@ export default async function handler(
   const now = new Date();
   const filename = reportFilename(format, now);
   const body =
-    format === 'pdf' ? await renderReportPdf(now) : buildReportWorkbook(now);
+    format === 'pdf' ? await renderReportPdf(now) : await buildReportWorkbook(now);
 
   res.setHeader('Content-Type', CONTENT_TYPE[format]);
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

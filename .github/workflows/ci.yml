@@ -28,10 +28,10 @@ jobs:
 
       # cache: 'npm' stores ~/.npm between runs.
       # On a cache hit, npm ci reads from local archive rather than the network.
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
