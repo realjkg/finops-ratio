@@ -220,16 +220,17 @@ offline sandbox sources (`pointfive-sandbox`, `focus-file-sandbox`) without a
 token. Every other source id — live connectors, PointFive live, and unknown ids —
 requires `Authorization: Bearer <RATIO_API_TOKEN>` (compared in constant time)
 and is refused outright when no token is configured; unknown ids answer 404 only
-after authentication. The token must be at least 32 characters: a shorter
-configured `RATIO_API_TOKEN` refuses live cost data with 503 (sandbox sources and
-the AI chat gateway are unaffected). Failed authentications — on rows, findings,
+after authentication. The token must be at least 32 characters with at least 10
+distinct characters: a weaker configured `RATIO_API_TOKEN` refuses live cost data
+with 503 (sandbox sources are unaffected; the AI chat / change-management gateway
+still accepts it but logs a one-time warning). Failed authentications — on rows, findings,
 health, `/api/costsource/sources` and `/api/v1/connectors` alike — share one
 count per client IP; after 1,000 in a minute that client's further failed
 attempts get 429, while a request with the valid token always passes. The client
 IP is the socket address; `X-Forwarded-For` is ignored unless `RATIO_TRUSTED_PROXY_HOPS=N`
 (integer ≥ 1) declares N trusted proxies, in which case the Nth entry from the
-right is used (a one-time warning is logged when `X-Forwarded-For` arrives
-without it). The limiter is **per process** — each serverless instance counts
+right is used (a one-time warning is logged when a multi-hop `X-Forwarded-For`
+arrives without it). The limiter is **per process** — each serverless instance counts
 separately — so a shared store is a deployment-brief item. `GET
 /api/costsource/sources` and `GET /api/v1/connectors` show live connector
 status only to authenticated callers; anonymous callers see the neutral

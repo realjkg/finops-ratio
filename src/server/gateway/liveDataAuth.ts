@@ -11,7 +11,8 @@
 // allowlist lives in @/costsource/sandboxSources.
 //
 // Token strength is the real control: a configured RATIO_API_TOKEN shorter
-// than MIN_LIVE_TOKEN_LENGTH refuses live data outright (503).
+// than 32 characters or with fewer than 10 distinct characters refuses live
+// data outright (503).
 //
 // Failed attempts — and ONLY failed attempts — are counted per client IP with
 // the standard-tier sliding window, through ONE shared accounting used by every
@@ -27,16 +28,14 @@
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { isOfflineSandboxSource, OFFLINE_SANDBOX_SOURCE_IDS } from '@/costsource/sandboxSources';
-import { checkAuth, type AuthOutcome } from './auth';
+import { checkAuth, isStrongToken, type AuthOutcome } from './auth';
 import { SlidingWindowRateLimiter, STANDARD_TIER_LIMIT, WINDOW_MS } from './rateLimit';
 
 export { isOfflineSandboxSource, OFFLINE_SANDBOX_SOURCE_IDS };
 
 type LiveDataEnv = Record<string, string | undefined>;
 
-/** Minimum RATIO_API_TOKEN length for serving live cost data. */
-export const MIN_LIVE_TOKEN_LENGTH = 32;
-export const WEAK_TOKEN_MESSAGE = 'RATIO_API_TOKEN must be at least 32 characters to serve live cost data';
+export const WEAK_TOKEN_MESSAGE = 'RATIO_API_TOKEN is too weak to serve live cost data (≥32 chars, ≥10 distinct)';
 export const THROTTLED_MESSAGE = 'Too many failed authentication attempts';
 
 /**
@@ -97,16 +96,22 @@ export function clientIp(req: NextApiRequest, env: LiveDataEnv = process.env): s
 
 let warnedUntrustedXff = false;
 
-/** One-time operator hint: XFF is arriving but is (correctly) being ignored. */
+/**
+ * One-time operator hint: a proxy CHAIN is forwarding (X-Forwarded-For has
+ * more than one hop) but is (correctly) being ignored. A single hop is what
+ * Next / the platform adds itself, so it does not warn.
+ */
 function warnUntrustedXff(req: NextApiRequest, env: LiveDataEnv): void {
   if (warnedUntrustedXff || trustedHops(env) !== null) return;
-  if (!req.headers?.['x-forwarded-for']) return;
+  const header = req.headers?.['x-forwarded-for'];
+  const value = Array.isArray(header) ? header.join(',') : header;
+  if (!value || value.split(',').filter((e) => e.trim()).length <= 1) return;
   warnedUntrustedXff = true;
   console.warn(
     JSON.stringify({
       tag: 'live-data-auth',
       warning:
-        'X-Forwarded-For received but RATIO_TRUSTED_PROXY_HOPS is unset: failed-auth limiting keys on the socket address. ' +
+        'Multi-hop X-Forwarded-For received but RATIO_TRUSTED_PROXY_HOPS is unset: failed-auth limiting keys on the socket address. ' +
         'Set RATIO_TRUSTED_PROXY_HOPS=N if the app runs behind N trusted proxies.',
     }),
   );
@@ -140,7 +145,7 @@ export function evaluateLiveDataAuth(
 ): LiveAuthResult {
   warnUntrustedXff(req, env);
   const configured = env.RATIO_API_TOKEN?.trim();
-  if (configured && configured.length < MIN_LIVE_TOKEN_LENGTH) return { kind: 'weak-token' };
+  if (configured && !isStrongToken(configured)) return { kind: 'weak-token' };
 
   const header = req.headers?.authorization;
   const present = Array.isArray(header) ? header.length > 0 : Boolean(header);

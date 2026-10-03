@@ -111,7 +111,7 @@ describe('1. redactor: short-token leak cases', () => {
 // ---------------------------------------------------------------------------
 describe('2. proxy warning only for multi-hop X-Forwarded-For', () => {
   const TOKEN = 'live-token-0123456789abcdef-0123456789';
-  const warnings = (warn: ReturnType<typeof vi.spyOn>) =>
+  const warnings = (warn: { mock: { calls: unknown[][] } }) =>
     warn.mock.calls.filter((c) => String(c[0]).includes('RATIO_TRUSTED_PROXY_HOPS'));
 
   it('a single hop (Next adds one itself) does not warn', async () => {

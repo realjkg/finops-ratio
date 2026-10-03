@@ -71,6 +71,15 @@ export function tokensMatch(presented: string, expected: string): boolean {
   return timingSafeEqual(digest(presented), digest(expected));
 }
 
+/** Minimum strength for a token that may unlock live cost data. */
+export const MIN_TOKEN_LENGTH = 32;
+export const MIN_TOKEN_DISTINCT_CHARS = 10;
+
+/** True when the token is >= 32 characters with >= 10 distinct characters. */
+export function isStrongToken(token: string): boolean {
+  return token.length >= MIN_TOKEN_LENGTH && new Set(token).size >= MIN_TOKEN_DISTINCT_CHARS;
+}
+
 /** Validate the request's Bearer token against the configured token. */
 export function checkAuth(
   authHeader: string | string[] | undefined,
