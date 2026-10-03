@@ -46,6 +46,12 @@ const INPUTS: Record<string, string> = {
   'query with escaped-quote runs': `'https://x/p?' + '\\\\"a'.repeat(${SIZE} / 3)`,
   'URL then long path, query at the end': `'https://x/' + 'p/'.repeat(${SIZE} / 2) + '?q=1'`,
   '? and # repeated after a URL': `'https://x/p' + '?#'.repeat(${SIZE} / 2)`,
+  // Round 9: password-with-slash extension + backslash authority shapes.
+  'host:port URLs repeated in one run (extension)': `'http://a:b/'.repeat(${SIZE} / 11)`,
+  'colon authority then a long @-run': `'http://a:b/' + 'x@'.repeat(${SIZE} / 2)`,
+  'colon authorities, @ only at the very end': `'http://a:1/'.repeat(${SIZE} / 11) + '@h'`,
+  'backslash run in the authority': `'http://' + '\\\\'.repeat(${SIZE})`,
+  'double-escaped scheme repeated': `'http:\\\\\\\\\\\\/\\\\\\\\\\\\/'.repeat(${SIZE} / 13)`,
 };
 
 function runInChild(fn: 'applyRedactionRules' | 'redactUpstreamText' | 'redactErrorText', expr: string) {

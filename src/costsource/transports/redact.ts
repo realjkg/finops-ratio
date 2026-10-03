@@ -150,10 +150,11 @@ function redactPem(text: string): string {
  * through; a query matcher that stopped at quotes left `?foo="SECRET"`).
  *
  * A token starts at `scheme://` (any scheme, any case), at its JSON-escaped
- * form `scheme:\/\/`, or at a scheme-relative `//` that follows the start of
- * the text, whitespace, a quote, a bracket, `=` or `,`.
+ * form `scheme:\/\/` or double-escaped form `scheme:\\\/\\\/`, or at a
+ * scheme-relative `//` that follows the start of the text, whitespace, a
+ * quote, a bracket, `=` or `,`.
  */
-const URL_START = /([a-z][a-z0-9+.-]{0,31}:)?(\/\/|\\\/\\\/)/gi;
+const URL_START = /([a-z][a-z0-9+.-]{0,31}:)?(\/\/|\\\/\\\/|\\\\\\\/\\\\\\\/)/gi;
 const SCHEME_RELATIVE_AFTER = /[\s"'`(=,<>[{]/;
 const WS = /\s/;
 const QUOTES = '"\'`';
@@ -171,27 +172,56 @@ function nextUrlStart(text: string, from: number): { start: number; authStart: n
 }
 
 /**
- * (a) Userinfo: everything between `://` and the LAST `@` before the first
- * `/ ? # \` or whitespace is replaced, however long. The scan resumes at the
- * authority end, so a URL nested in a path is handled too.
+ * (a) Userinfo: everything between `://` and the LAST `@` before the authority
+ * end is replaced, however long. The authority ends at `/ ? #`, whitespace, or
+ * a JSON-escaped `\/` — NOT at a lone `\` or `\\` (Windows / NTLM
+ * `DOMAIN\user:password@proxy` credentials contain one).
+ *
+ * A literal `/ ? #` inside a password (`user:pa/ss@host`) ends the authority
+ * early; so when the authority contains `:` and no `@`, the userinfo is
+ * extended to the last `@` before whitespace or a quote in the same token.
+ * That over-redacts `host:port/path/bob@corp` (accepted) but never crosses
+ * whitespace / a quote. The run end and its last `@` are cached and only move
+ * forward, so the scan stays linear.
  */
 function redactUrlUserinfo(text: string): string {
   let out = '';
   let pos = 0;
   let from = 0;
+  let runEnd = -1; // end (exclusive) of the cached whitespace/quote-free run
+  let runLastAt = -1; // last '@' in that run
   for (let u = nextUrlStart(text, from); u; u = nextUrlStart(text, from)) {
     let i = u.authStart;
     let lastAt = -1;
+    let sawColon = false;
     for (; i < text.length; i += 1) {
       const c = text[i];
-      if (c === '/' || c === '?' || c === '#' || c === '\\' || WS.test(c)) break;
+      if (c === '/' || c === '?' || c === '#' || WS.test(c) || (c === '\\' && text[i + 1] === '/')) break;
       if (c === '@') lastAt = i;
+      else if (c === ':') sawColon = true;
+    }
+    let resumeAt = Math.max(i, u.authStart);
+    if (lastAt === -1 && sawColon && i < text.length && !WS.test(text[i])) {
+      if (u.authStart >= runEnd) {
+        let j = u.authStart;
+        runLastAt = -1;
+        for (; j < text.length; j += 1) {
+          const c = text[j];
+          if (WS.test(c) || QUOTES.includes(c)) break;
+          if (c === '@') runLastAt = j;
+        }
+        runEnd = j;
+      }
+      if (runLastAt > i) {
+        lastAt = runLastAt;
+        resumeAt = runLastAt; // everything before it is redacted
+      }
     }
     if (lastAt !== -1) {
       out += text.slice(pos, u.authStart) + '[REDACTED]';
       pos = lastAt; // keep the '@'
     }
-    from = Math.max(i, u.authStart);
+    from = resumeAt;
   }
   return out + text.slice(pos);
 }
