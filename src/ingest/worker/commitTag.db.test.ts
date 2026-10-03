@@ -89,7 +89,14 @@ describe('COMMIT answered with ROLLBACK is a failure, never a success', () => {
     expect(w.injected()).toBeGreaterThan(0);
     expect(r.status).toBe('failed');
     expect(r.periods[0]).toMatchObject({ billingPeriod: P, outcome: 'failed', code: 'COMMIT_ROLLED_BACK' });
-    expect(await visibleState(s)).toEqual(before);
+    const after = await visibleState(s);
+    expect(after.view).toEqual(before.view);
+    expect(after.totals).toEqual(before.totals);
+    expect(after.pubs).toEqual(before.pubs);
+    expect(after.checkpoint).toEqual(before.checkpoint);
+    // Pre-existing batches unchanged; the new one exists only as staged (as after any failed publish, P1).
+    expect(after.batches.slice(0, before.batches.length)).toEqual(before.batches);
+    expect(after.batches.slice(before.batches.length).map((b) => JSON.parse(b).status)).toEqual(['staged']);
     const runs = await runsOf(t.db.pool, s.tenantId, s.sourceId);
     expect(runs.find((x) => x.id === r.runId)).toMatchObject({ status: 'failed', error_code: 'COMMIT_ROLLED_BACK' });
     // A later clean run publishes normally.
