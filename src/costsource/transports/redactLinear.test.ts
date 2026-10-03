@@ -38,6 +38,14 @@ const INPUTS: Record<string, string> = {
   'mixed-case env key runs': `'Ab_'.repeat(${SIZE} / 3) + 'Password'`,
   'backtick open repeated': "'TOKEN=`'.repeat(" + SIZE + " / 7)",
   'Bearer repeated': `'Bearer '.repeat(${SIZE} / 7)`,
+  // URL scan (round 8) shapes.
+  'URL with long userinfo full of @': `'https://' + 'a@'.repeat(${SIZE} / 2) + '/p'`,
+  'scheme-relative // repeated': `'//a@'.repeat(${SIZE} / 4)`,
+  'JSON-escaped scheme repeated': `'http:\\\\/\\\\/'.repeat(${SIZE} / 9)`,
+  'query with unterminated quotes repeated': `'https://x/p?"'.repeat(${SIZE} / 13)`,
+  'query with escaped-quote runs': `'https://x/p?' + '\\\\"a'.repeat(${SIZE} / 3)`,
+  'URL then long path, query at the end': `'https://x/' + 'p/'.repeat(${SIZE} / 2) + '?q=1'`,
+  '? and # repeated after a URL': `'https://x/p' + '?#'.repeat(${SIZE} / 2)`,
 };
 
 function runInChild(fn: 'applyRedactionRules' | 'redactUpstreamText' | 'redactErrorText', expr: string) {
