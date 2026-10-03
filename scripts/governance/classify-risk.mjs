@@ -172,6 +172,24 @@ export function symlinkPathsInDiff(text) {
   return [...out];
 }
 
+const REGULAR_MODES = new Set(['100644', '100755']);
+
+/** Paths a git diff gives a non-regular mode (gitlink 160000, symlink 120000, ...). */
+export function unusualModePathsInDiff(text) {
+  const out = new Set();
+  let current = null;
+  for (const line of String(text).split('\n')) {
+    const git = /^diff --git a\/(.*) b\/(.*)$/.exec(line);
+    if (git) {
+      current = git[2];
+      continue;
+    }
+    const m = /^(?:new file mode|new mode) (\d+)$/.exec(line);
+    if (current && m && !REGULAR_MODES.has(m[1])) out.add(current);
+  }
+  return [...out];
+}
+
 /**
  * Classify a change set.
  * @param {{ files: Array<{ path: string, previousPath?: string, patch?: string,
@@ -182,6 +200,7 @@ export function classify(input, rules = loadRules()) {
   const fromDiff = input?.diff ? parseUnifiedDiff(input.diff) : {};
   const binary = new Set(input?.diff ? binaryPathsInDiff(input.diff) : []);
   const symlinks = new Set(input?.diff ? symlinkPathsInDiff(input.diff) : []);
+  const unusual = new Set(input?.diff ? unusualModePathsInDiff(input.diff) : []);
   const reasons = [];
   const seen = new Set();
   const add = (path, cls, rule) => {
@@ -205,6 +224,12 @@ export function classify(input, rules = loadRules()) {
     let hit = false;
     if (String(f.mode ?? '') === '120000' || symlinks.has(f.path)) {
       add(f.path, 'unclassified', 'symlink');
+      hit = true;
+    }
+    // Only regular files (100644/100755) may be low: gitlinks (160000),
+    // symlinks (120000) and anything else are restricted.
+    if ((f.mode !== undefined && !REGULAR_MODES.has(String(f.mode))) || unusual.has(f.path)) {
+      add(f.path, 'unclassified', 'unusual-mode');
       hit = true;
     }
     for (const rule of rules.restricted) {

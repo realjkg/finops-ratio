@@ -66,7 +66,8 @@ export function outsiderReason(pr, config = DEFAULT_CONFIG) {
  *                      appId?: number, workflowPath?: string }>,
  *   statuses?: Array<{ context: string, state: string }>,
  *   reviews?: Array<{ login: string, userType: string, commitId: string, state: string }>,
- *   ciJobs: Array<{ id: number, name: string, status: string, conclusion: string|null }> | null,
+ *   ciJobs: Array<{ id: number|null, name: string, status: string, conclusion: string|null, runId?: number }> | null,
+ *   sharedHeadWith: number[] | null,
  *   unresolvedThreads: number | null,
  * }} state
  * @returns {{ eligible: boolean, reasons: string[] }}
@@ -99,13 +100,21 @@ export function decideEligibility(state, config = DEFAULT_CONFIG) {
   if (!Array.isArray(jobs)) {
     reasons.push(`No ${ci.workflowPath} pull_request run found for the head SHA; CI "${ci.name}" is unverified.`);
   } else {
-    const job = jobs.find((j) => j.name === ci.name);
-    if (!job) {
+    // ciJobs is the union over EVERY qualifying run (each on its latest
+    // attempt). Every CI-named job must have succeeded; a qualifying run with no
+    // CI job is represented by a placeholder with status "missing".
+    const ciNamed = jobs.filter((j) => j.name === ci.name);
+    if (!ciNamed.length) {
       reasons.push(`Job "${ci.name}" not found in the latest attempt of ${ci.workflowPath}.`);
-    } else if (job.status !== 'completed' || job.conclusion !== 'success') {
-      reasons.push(`CI job "${ci.name}" (${ci.workflowPath}, id ${job.id}) is ${job.status}/${job.conclusion}.`);
-    } else if (!ciRuns.some((r) => r.id === job.id)) {
-      reasons.push(`CI job "${ci.name}" (id ${job.id}) has no check run on the head SHA.`);
+    }
+    for (const job of ciNamed) {
+      if (job.status === 'missing') {
+        reasons.push(`Job "${ci.name}" not found in the latest attempt of ${ci.workflowPath} run ${job.runId}.`);
+      } else if (job.status !== 'completed' || job.conclusion !== 'success') {
+        reasons.push(`CI job "${ci.name}" (${ci.workflowPath}, id ${job.id}) is ${job.status}/${job.conclusion}.`);
+      } else if (!ciRuns.some((r) => r.id === job.id)) {
+        reasons.push(`CI job "${ci.name}" (id ${job.id}) has no check run on the head SHA.`);
+      }
     }
     const jobIds = new Set(jobs.map((j) => j.id));
     for (const r of ciRuns) {
@@ -114,6 +123,12 @@ export function decideEligibility(state, config = DEFAULT_CONFIG) {
       }
     }
   }
+
+  // Another open PR with the same head SHA can trigger CI runs that list this
+  // PR too; refuse to decide for a shared head.
+  const shared = state?.sharedHeadWith;
+  if (!Array.isArray(shared)) reasons.push('Whether another open PR shares the head SHA is unknown.');
+  else for (const n of shared) reasons.push(`head SHA shared with PR #${n}`);
 
   // Every other check run (including any same-named impostor) must succeed.
   for (const r of runs) {

@@ -33,8 +33,9 @@ markup):
 
 Also restricted regardless of path:
 
-- Symlinks: a git diff showing mode `120000`, or a file whose mode is
-  `120000`. In Actions, modes come from the head commit's recursive git tree
+- Files that are not regular files: any git mode other than `100644` or
+  `100755` (rule `unusual-mode`; covers gitlinks `160000` and symlinks
+  `120000`, which also get rule `symlink`). In Actions, modes come from the head commit's recursive git tree
   (`git.getTree(head.sha, recursive)`). If that tree is truncated or
   unavailable, modes are unknown and the PR is restricted (`tree-truncated` /
   `tree-unavailable`).
@@ -47,7 +48,8 @@ Also restricted regardless of path:
     and `.github/copilot*`.
 
 Low allow-list: `docs/**/*.{md,png,svg}` (images only when GitHub serves a
-patch, so in practice Markdown), `*.md`, `src/components/**/*.{ts,tsx,js,jsx,css}`
+patch, so in practice Markdown), `*.md` outside any dot-directory (Markdown in
+`.continue/`, `.roo/`, `.kiro/`, `.junie/`, ... fails closed), `src/components/**/*.{ts,tsx,js,jsx,css}`
 and `*.test.*` outside `pages/` and `src/pages/`. Everything under `pages/` and
 `src/pages/` is restricted (`routes`): Next.js builds any file there, including
 `*.test.ts`, into a production route.
@@ -62,9 +64,12 @@ Auto-merge (squash, pinned to the evaluated head SHA) is enabled only when
 - Not a draft; base is `main`.
 - CI, verified through the Actions jobs API:
   - The newest `pull_request` run of `.github/workflows/ci.yml` for the head
-    SHA whose `pull_requests` include THIS PR with base `main` is found. Runs
-    for another PR or base that share the head SHA are ignored. With no such
-    run, the PR is not eligible.
+    SHA whose `pull_requests` include THIS PR with base `main` are found. All
+    of them are checked, not just the newest, and each must have a successful
+    CI job on its latest attempt. Runs for another PR or base are ignored.
+    With no qualifying run, the PR is not eligible.
+  - If any other open PR has the same head SHA, the PR is not eligible
+    ("head SHA shared with PR #n").
   - Its jobs in the latest attempt (`filter=latest`, matching `run_attempt`)
     are listed. The job named exactly `Lint · Typecheck · Test · Build` must
     have concluded `success`, and its check run must be on the head SHA.

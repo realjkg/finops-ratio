@@ -217,21 +217,33 @@ export async function gatherState(github, repo, number) {
   });
   const pathBySuite = new Map(runs.map((r) => [r.check_suite_id, r.path]));
   const ciPath = DEFAULT_CONFIG.ciCheck.workflowPath;
-  // Only runs triggered for THIS PR against main count: another PR (or another
-  // base) can share the head SHA and must not supply this PR's CI result.
-  const ciRun = runs
+  // Only runs listing THIS PR against main count, and EVERY such run must have
+  // a successful CI job on its latest attempt: a run triggered by another PR
+  // (e.g. into another base) can list this PR too and must not hide a failure.
+  const ciRunsForPr = runs
     .filter((r) => r.path === ciPath && r.event === 'pull_request')
-    .filter((r) => (r.pull_requests ?? []).some((x) => x.number === number && x.base?.ref === DEFAULT_CONFIG.baseBranch))
-    .reduce((best, r) => (!best || r.id > best.id ? r : best), null);
+    .filter((r) => (r.pull_requests ?? []).some((x) => x.number === number && x.base?.ref === DEFAULT_CONFIG.baseBranch));
   let ciJobs = null;
-  if (ciRun) {
-    const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-      ...repo, run_id: ciRun.id, filter: 'latest', per_page: 100,
-    });
-    ciJobs = jobs
-      .filter((j) => j.run_attempt === undefined || ciRun.run_attempt === undefined || j.run_attempt === ciRun.run_attempt)
-      .map((j) => ({ id: j.id, name: j.name, status: j.status, conclusion: j.conclusion }));
+  if (ciRunsForPr.length) {
+    ciJobs = [];
+    for (const run of ciRunsForPr) {
+      const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+        ...repo, run_id: run.id, filter: 'latest', per_page: 100,
+      });
+      const latest = jobs
+        .filter((j) => j.run_attempt === undefined || run.run_attempt === undefined || j.run_attempt === run.run_attempt)
+        .map((j) => ({ id: j.id, name: j.name, status: j.status, conclusion: j.conclusion, runId: run.id }));
+      if (!latest.some((j) => j.name === DEFAULT_CONFIG.ciCheck.name)) {
+        latest.push({ id: null, name: DEFAULT_CONFIG.ciCheck.name, status: 'missing', conclusion: null, runId: run.id });
+      }
+      ciJobs.push(...latest);
+    }
   }
+  // Other open PRs sharing this head SHA (unknown on API error → fail closed).
+  const sharedHeadWith = await github
+    .paginate(github.rest.pulls.list, { ...repo, state: 'open', per_page: 100 })
+    .then((open) => open.filter((x) => x.number !== number && x.head?.sha === headSha).map((x) => x.number))
+    .catch(() => null);
   const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ ...repo, ref: headSha, per_page: 100 });
   const reviews = await github.paginate(github.rest.pulls.listReviews, { ...repo, pull_number: number, per_page: 100 });
   // Unknown (API error) → null → decideEligibility fails closed.
@@ -265,6 +277,7 @@ export async function gatherState(github, repo, number) {
       })),
       statuses: (combined.statuses ?? []).map((s) => ({ context: s.context, state: s.state })),
       ciJobs,
+      sharedHeadWith,
       reviews: reviews.map((r) => ({ login: r.user?.login, userType: r.user?.type, commitId: r.commit_id, state: r.state })),
       unresolvedThreads,
     },
