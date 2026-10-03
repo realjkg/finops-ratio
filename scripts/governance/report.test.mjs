@@ -38,6 +38,8 @@ describe('buildReport', () => {
     expect(md).toMatch(/admin or maintain/i);
     expect(md).toMatch(/new head needs a new approval/i);
     expect(md).toMatch(/link.*challenger review evidence/i);
+    expect(md).toMatch(/first line/i);
+    expect(md).toMatch(/revocation is permanent/i);
     expect(md).toMatch(/never enables auto-merge for restricted/i);
     expect(md).not.toContain('exception:approved');
   });

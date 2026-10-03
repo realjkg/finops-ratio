@@ -86,6 +86,7 @@ function fakeGithub(opts = {}) {
         createCommitStatus: rec('repos.createCommitStatus', {}),
         getCollaboratorPermissionLevel: rec('repos.getCollaboratorPermissionLevel', (p) => (opts.roles ?? {})[p.username] ?? { permission: 'write', role_name: 'write' }),
         getCombinedStatusForRef: rec('repos.getCombinedStatusForRef', { statuses: opts.statuses ?? [] }),
+        listCommitStatusesForRef: rec('repos.listCommitStatusesForRef', (p) => (opts.statusesBySha ?? {})[p.ref] ?? []),
       },
       checks: {
         listForRef: rec('checks.listForRef', opts.checksError ? err('boom', 500) : (opts.checkRuns ?? [
@@ -697,6 +698,80 @@ describe('C1/M1: eligibility commit status and SHA-bound exception approvals', (
   });
 });
 
+const revokedStatus = (github) => github.calls.filter((c) => c.name === 'repos.createCommitStatus' && c.params.context === 'Governance · exception revoked');
+
+describe('R1: sticky revocation', () => {
+  const restrictedFiles = [{ filename: 'package.json', status: 'modified', patch: '+x', changes: 1 }];
+  const restrictedLabels = ['risk:restricted', 'restricted:dependencies'];
+  const ADMIN = { boss: { permission: 'admin', role_name: 'admin' }, dev: { permission: 'write', role_name: 'write' } };
+  const cmt = (id, login, body, edited = false) => ({
+    id, body, user: { login, type: 'User' },
+    created_at: '2026-10-01T11:00:00Z', updated_at: edited ? '2026-10-01T11:05:00Z' : '2026-10-01T11:00:00Z',
+  });
+  const approve = cmt(10, 'boss', `/exception-approve ${HEAD}`);
+  const commentCtx = (pr, action, comment, changes) => ({
+    repo: REPO, payload: { action, issue: { number: pr.number, pull_request: { url: 'x' } }, comment, ...(changes ? { changes } : {}) },
+  });
+
+  it('delete-revoke: the deleted admin revoke (event payload) still revokes; sticky status posted on the head', async () => {
+    const { github, pr } = fakeGithub({ files: restrictedFiles, labels: restrictedLabels, roles: ADMIN, comments: [approve] });
+    const deleted = { id: 77, body: `/exception-revoke ${HEAD}`, user: { login: 'boss', type: 'User' } };
+    await runEligibility({ github, core: fakeCore(), context: commentCtx(pr, 'deleted', deleted), numbers: [5] });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+    const [st] = revokedStatus(github);
+    expect(st.params).toMatchObject({ sha: HEAD, state: 'failure' });
+    expect(st.params.description).toBe('exception revoked by @boss in comment 77');
+  });
+  it('edit-revoke: an admin revoke edited into something else still revokes (old body from the event)', async () => {
+    const edited = cmt(78, 'boss', 'hi there', true);
+    const { github, pr } = fakeGithub({ files: restrictedFiles, labels: restrictedLabels, roles: ADMIN, comments: [approve, edited] });
+    await runEligibility({ github, core: fakeCore(), context: commentCtx(pr, 'edited', edited, { body: { from: `/exception-revoke ${HEAD}` } }), numbers: [5] });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+    expect(revokedStatus(github)[0].params).toMatchObject({ sha: HEAD, state: 'failure' });
+  });
+  it('edited admin approve ⇒ revoked + sticky status posted', async () => {
+    const { github, pr } = fakeGithub({ files: restrictedFiles, labels: restrictedLabels, roles: ADMIN, comments: [cmt(10, 'boss', `/exception-approve ${HEAD}`, true)] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+    expect(revokedStatus(github)[0].params).toMatchObject({ sha: HEAD, state: 'failure', description: 'exception revoked by @boss in comment 10' });
+  });
+  it('a later deletion of the revoke comment cannot revive the approval (sticky status from the Actions app)', async () => {
+    const { github, pr } = fakeGithub({
+      files: restrictedFiles, labels: restrictedLabels, roles: ADMIN, comments: [approve],
+      statusesBySha: { [HEAD]: [{ context: 'Governance · exception revoked', state: 'failure', description: 'exception revoked by @boss in comment 11', creator: { login: 'github-actions[bot]', type: 'Bot' } }] },
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+    expect(eligStatus(github)[0].params.description).toMatch(/permanently/);
+    expect(revokedStatus(github)).toHaveLength(0); // already recorded; no duplicate
+  });
+  it('a revocation status from a non-Actions source is ignored (no writer DoS)', async () => {
+    const { github, pr } = fakeGithub({
+      files: restrictedFiles, labels: restrictedLabels, roles: ADMIN, comments: [approve],
+      statusesBySha: { [HEAD]: [{ context: 'Governance · exception revoked', state: 'failure', description: 'x', creator: { login: 'mallory', type: 'User' } }] },
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('success');
+  });
+  it('a revoke naming an older SHA posts the sticky status on THAT SHA', async () => {
+    const { github, pr } = fakeGithub({ files: restrictedFiles, labels: restrictedLabels, roles: ADMIN, comments: [approve, cmt(11, 'boss', `/exception-revoke ${MOVED}`)] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('success');
+    expect(revokedStatus(github).map((c) => c.params.sha)).toEqual([MOVED]);
+  });
+  it('R3: approval with an evidence link on line 2 ⇒ success', async () => {
+    const { github, pr } = fakeGithub({ files: restrictedFiles, labels: restrictedLabels, roles: ADMIN, comments: [cmt(10, 'boss', `/exception-approve ${HEAD}\nChallenger evidence: https://example.test/pr/45#review`)] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('success');
+  });
+  it('R4: low-risk PRs never fetch comments', async () => {
+    const { github, pr } = fakeGithub();
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(names(github.calls)).not.toContain('issues.listComments');
+    expect(names(github.calls)).not.toContain('repos.listCommitStatusesForRef');
+  });
+});
+
 describe('M1: label mechanism removed', () => {
   it('classify on synchronize does not touch an exception:approved label', async () => {
     const { github, pr } = fakeGithub({ labels: ['risk:low', 'exception:approved'] });
@@ -747,7 +822,9 @@ describe('runTargets', () => {
   it('issue_comment on a PR → that PR (approval comments are evaluated immediately)', async () => {
     const { github } = fakeGithub();
     const core = fakeCore();
-    expect(await runTargets({ github, core, context: { repo: REPO, payload: { issue: { number: 5, pull_request: { url: 'x' } }, comment: { id: 1 } } } })).toEqual([5]);
+    // #42 is not in the open-PR list (only #5 is), so a sweep fallback would not produce [42].
+    expect(await runTargets({ github, core, context: { repo: REPO, payload: { issue: { number: 42, pull_request: { url: 'x' } }, comment: { id: 1 } } } })).toEqual([42]);
+    expect(names(github.calls)).not.toContain('pulls.list');
   });
   it('issue_comment on a plain issue → nothing', async () => {
     const { github } = fakeGithub();

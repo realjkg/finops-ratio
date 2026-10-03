@@ -44,9 +44,16 @@ describe('governance.yml', () => {
     expect(code).toMatch(/fail-fast: false/);
   });
 
-  it('M1: issue_comment (created) triggers evaluation; classification stays PR-only', () => {
-    expect(code).toMatch(/^\s{2}issue_comment:\s*\n\s+types: \[created\]/m);
+  it('M1/R1: issue_comment (created, edited, deleted) triggers evaluation; classification stays PR-only', () => {
+    expect(code).toMatch(/^\s{2}issue_comment:\s*\n\s+types: \[created, edited, deleted\]/m);
     expect(code).toMatch(/if: github\.event_name == 'pull_request_target'/);
+  });
+
+  it('R2: targets and merge-eligibility only run for exception-command comments by OWNER/MEMBER/COLLABORATOR', () => {
+    const cond = "github.event_name != 'issue_comment' || (github.event.issue.pull_request && (startsWith(github.event.comment.body, '/exception-') || startsWith(github.event.changes.body.from, '/exception-')) && contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), github.event.comment.author_association))";
+    const job = (name) => code.slice(code.indexOf(`  ${name}:`), code.indexOf('steps:', code.indexOf(`  ${name}:`)));
+    expect(job('targets')).toContain(cond);
+    expect(job('merge-eligibility')).toContain(cond);
   });
 
   it('L2/N4: workflow_run listens to CI only (Copilot is picked up by the sweep)', () => {

@@ -336,13 +336,48 @@ describe('M1: evaluateExceptionApproval (SHA-bound approval comments)', () => {
   it('edited comments (updated_at ≠ created_at) are ignored', () => {
     expect(ev([c('boss', `/exception-approve ${HEAD}`, { edited: true })]).approved).toBe(false);
   });
-  it('revoke for that SHA by admin/maintain revokes; latest by id wins', () => {
+  it('R1: a valid revoke for the head is sticky — a later re-approve for the same SHA does not restore it', () => {
     expect(ev([c('boss', `/exception-approve ${HEAD}`, { id: 10 }), c('keeper', `/exception-revoke ${HEAD}`, { id: 11 })]).approved).toBe(false);
-    expect(ev([
+    const r = ev([
       c('boss', `/exception-approve ${HEAD}`, { id: 10 }), c('boss', `/exception-revoke ${HEAD}`, { id: 11 }), c('boss', `/exception-approve ${HEAD}`, { id: 12 }),
-    ]).approved).toBe(true);
-    // Order of the array does not matter, ids do.
+    ]);
+    expect(r.approved).toBe(false);
+    expect(r.revocations).toEqual([{ sha: HEAD, login: 'boss', commentId: 11, why: 'revoke' }]);
     expect(ev([c('boss', `/exception-revoke ${HEAD}`, { id: 11 }), c('boss', `/exception-approve ${HEAD}`, { id: 10 })]).approved).toBe(false);
+  });
+  it('R1: revokes naming ANY SHA are reported for sticky recording', () => {
+    const r = ev([c('boss', `/exception-approve ${HEAD}`, { id: 10 }), c('keeper', `/exception-revoke ${OTHER}`, { id: 11 })]);
+    expect(r.approved).toBe(true);
+    expect(r.revocations).toEqual([{ sha: OTHER, login: 'keeper', commentId: 11, why: 'revoke' }]);
+  });
+  it('R1: an EDITED admin/maintain command naming the head counts as a revoke', () => {
+    const r = ev([c('boss', `/exception-approve ${HEAD}`, { id: 20, edited: true })]);
+    expect(r.approved).toBe(false);
+    expect(r.revocations).toEqual([{ sha: HEAD, login: 'boss', commentId: 20, why: 'edited' }]);
+  });
+  it('R1: an edited command by a write-only user is just ignored', () => {
+    const r = ev([c('boss', `/exception-approve ${HEAD}`, { id: 10 }), c('dev', `/exception-approve ${HEAD}`, { id: 21, edited: true })]);
+    expect(r.approved).toBe(true);
+    expect(r.revocations).toEqual([]);
+  });
+  it('R1: a sticky revocation status on the head permanently refuses approval', () => {
+    const r = evaluateExceptionApproval({ comments: [c('boss', `/exception-approve ${HEAD}`)], roles, headSha: HEAD, revokedStatuses: [{ description: 'exception revoked by @boss in comment 11' }] });
+    expect(r.approved).toBe(false);
+    expect(r.reason).toMatch(/permanently/);
+  });
+  it('R1: an edited/deleted command from the triggering event (old body) counts as a revoke', () => {
+    const eventComment = { id: 77, body: `/exception-revoke ${HEAD}`, user: { login: 'boss', type: 'User' } };
+    const r = evaluateExceptionApproval({ comments: [c('boss', `/exception-approve ${HEAD}`, { id: 10 })], roles, headSha: HEAD, eventComment });
+    expect(r.approved).toBe(false);
+    expect(r.revocations).toContainEqual({ sha: HEAD, login: 'boss', commentId: 77, why: 'edited-or-deleted' });
+    // ...but not when the original author is a write-only user or a bot.
+    expect(evaluateExceptionApproval({ comments: [c('boss', `/exception-approve ${HEAD}`, { id: 10 })], roles, headSha: HEAD, eventComment: { ...eventComment, user: { login: 'dev', type: 'User' } } }).approved).toBe(true);
+  });
+  it('R3: only the FIRST line is the command; later lines are free text (evidence link)', () => {
+    expect(ev([c('boss', `/exception-approve ${HEAD}\nEvidence: https://example.test/pr/45#challenger`)]).approved).toBe(true);
+    expect(ev([c('boss', `/exception-approve ${HEAD}\r\nchallenger review: see PR body`)]).approved).toBe(true);
+    expect(ev([c('boss', `/exception-approve ${HEAD} https://example.test/evidence\nmore`)]).approved).toBe(false);
+    expect(ev([c('boss', `LGTM\n/exception-approve ${HEAD}`)]).approved).toBe(false);
   });
   it('a revoke by a write-only user or for another SHA does not revoke', () => {
     expect(ev([c('boss', `/exception-approve ${HEAD}`, { id: 10 }), c('dev', `/exception-revoke ${HEAD}`, { id: 11 })]).approved).toBe(true);
