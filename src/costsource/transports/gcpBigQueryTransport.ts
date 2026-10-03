@@ -71,7 +71,13 @@ export async function loadServiceAccount(raw: string): Promise<ServiceAccountKey
     };
     json = await fs.readFile(value, 'utf8');
   }
-  const key = JSON.parse(json) as Partial<ServiceAccountKey>;
+  let key: Partial<ServiceAccountKey>;
+  try {
+    key = JSON.parse(json) as Partial<ServiceAccountKey>;
+  } catch {
+    // Fixed message: a runtime JSON error would quote key material.
+    throw new Error('GOOGLE_APPLICATION_CREDENTIALS is not valid service-account JSON');
+  }
   if (!key.client_email || !key.private_key) {
     throw new Error('GOOGLE_APPLICATION_CREDENTIALS is not a service-account key (client_email / private_key missing)');
   }
@@ -146,6 +152,15 @@ export function bqRowsToRecords(res: BqQueryResponse): Record<string, unknown>[]
   });
 }
 
+/** Parse a JSON body with a fixed error: a runtime JSON error would quote upstream content. */
+async function readJson<T>(res: Response, label: string): Promise<T> {
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new Error(`${label} returned a non-JSON response`);
+  }
+}
+
 /** ISO 8601 → BigQuery canonical TIMESTAMP literal. */
 function bqTimestamp(iso: string): string {
   return new Date(iso).toISOString().replace('T', ' ').replace('Z', '+00');
@@ -174,7 +189,7 @@ export function createGcpBigQueryTransport(opts: GcpBigQueryTransportOptions): F
       },
       'Google OAuth token endpoint',
     );
-    const body = (await res.json()) as { access_token?: string; expires_in?: number };
+    const body = await readJson<{ access_token?: string; expires_in?: number }>(res, 'Google OAuth token endpoint');
     if (!body.access_token) throw new Error('Google OAuth token endpoint returned no access_token');
     cached = { token: body.access_token, expiresAt: now() + (body.expires_in ?? 3600) * 1000 };
     return cached.token;
@@ -192,7 +207,7 @@ export function createGcpBigQueryTransport(opts: GcpBigQueryTransportOptions): F
       LABEL,
       60_000,
     );
-    return (await res.json()) as T;
+    return readJson<T>(res, LABEL);
   }
 
   return {

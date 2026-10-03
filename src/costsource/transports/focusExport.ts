@@ -13,6 +13,7 @@
 import type { CostWindow } from '../CostSourceClient';
 import type { RawSourceRow } from '../focusRows';
 import { COLUMNS_BY_VERSION } from '../focusVersions';
+import { redactUpstreamText } from './redact';
 
 // --- fetch ------------------------------------------------------------------
 
@@ -21,7 +22,33 @@ export type FetchLike = typeof fetch;
 /** Default per-request timeout for connector calls. A health probe must never hang. */
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
-/** fetch with a timeout and a typed, secret-free error on non-2xx. */
+/** Fixed, body-free reason for an upstream HTTP status. */
+export function statusReason(status: number): string {
+  if (status === 400) return 'bad request';
+  if (status === 401) return 'unauthorized';
+  if (status === 403) return 'forbidden';
+  if (status === 404) return 'not found';
+  if (status === 408) return 'timeout';
+  if (status === 429) return 'rate limited';
+  if (status >= 500) return 'upstream error';
+  return 'request failed';
+}
+
+/**
+ * Logs an upstream error body server-side ONLY (structured JSON, redacted,
+ * truncated). Never part of an error that reaches an API caller.
+ */
+export function logUpstreamError(label: string, status: number, body: string): void {
+  console.warn(
+    JSON.stringify({ tag: 'connector-upstream-error', label, status, body: redactUpstreamText(body) }),
+  );
+}
+
+/**
+ * fetch with a timeout and a typed, secret-free error on non-2xx. The thrown
+ * message is label + status + a fixed reason — the upstream body (which can
+ * echo credentials, presigned URLs, or tenant data) is only logged server-side.
+ */
 export async function fetchChecked(
   fetchImpl: FetchLike,
   url: string,
@@ -36,9 +63,9 @@ export async function fetchChecked(
     throw new Error(`${label} unreachable: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (!res.ok) {
-    // Body is truncated: provider error bodies can be large XML/HTML pages.
-    const body = (await res.text().catch(() => '')).slice(0, 300);
-    throw new Error(`${label} returned ${res.status}${body ? `: ${body}` : ''}`);
+    const body = await res.text().catch(() => '');
+    if (body) logUpstreamError(label, res.status, body);
+    throw new Error(`${label} returned ${res.status} (${statusReason(res.status)})`);
   }
   return res;
 }
@@ -143,12 +170,20 @@ export function parseExportText(text: string): Record<string, unknown>[] {
         return [parsed as Record<string, unknown>];
       }
     } catch {
-      // Not a single JSON document — NDJSON (one object per line).
+      // Not a single JSON document — NDJSON (one object per line). A bad line
+      // throws a FIXED message: runtime JSON errors quote the input, which is
+      // upstream content and must not reach API callers.
       if (trimmed.startsWith('{')) {
         return trimmed
           .split(/\r?\n/)
           .filter((line) => line.trim())
-          .map((line) => JSON.parse(line) as Record<string, unknown>);
+          .map((line, i) => {
+            try {
+              return JSON.parse(line) as Record<string, unknown>;
+            } catch {
+              throw new Error(`export is not valid NDJSON (line ${i + 1})`);
+            }
+          });
       }
     }
   }

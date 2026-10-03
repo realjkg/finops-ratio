@@ -161,7 +161,10 @@ describe('HTTP FOCUS transport', () => {
       label: 'K8s',
       fetch: fakeFetch(() => new Response('nope', { status: 401 })),
     });
-    await expect(t.ping()).rejects.toThrow(/K8s returned 401: nope/);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // Status + fixed reason only; the upstream body is logged server-side, never thrown.
+    await expect(t.ping()).rejects.toThrow(/^K8s returned 401 \(unauthorized\)$/);
+    warn.mockRestore();
   });
 });
 
@@ -315,7 +318,13 @@ describe('AWS S3 transport', () => {
       secretAccessKey: 'b',
       fetch: fakeFetch(() => new Response('<Error><Code>AccessDenied</Code></Error>', { status: 403 })),
     });
-    await expect(t.ping()).rejects.toThrow(/403: <Error><Code>AccessDenied/);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // Status + fixed reason only; the upstream XML body is logged server-side, never thrown.
+    const err = await t.ping().catch((e: unknown) => e);
+    expect((err as Error).message).toBe('S3 FOCUS export returned 403 (forbidden)');
+    expect((err as Error).message).not.toContain('AccessDenied');
+    expect(String(warn.mock.calls[0][0])).toContain('AccessDenied');
+    warn.mockRestore();
   });
 });
 
