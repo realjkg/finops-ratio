@@ -967,3 +967,62 @@ puts in `beforeAll`. None came from the catalog check. On the same base
 (3541d6b without this change) a full run passed 295/295. `s3Source.db.test.ts`
 alone passed on the merge 2/2, and two later full runs on the merge passed
 310/310. These are transient object-store errors.
+
+---
+
+# Round 11 — challenger on 0b041c5 (0 High / 1 Medium) + Lows L1–L3
+
+Base: 0b041c5. Local commits only (not pushed). **0001 edited in place**
+(L1). It has never been deployed. Dev databases migrated with the old bytes
+report CHECKSUM_MISMATCH by design. The down file is unchanged. Raw logs:
+`scratchpad/r12/`.
+
+## R11.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 4907dc7 | test(ingest): failing tests for round 11 (extra policies on ratio tables; pg_dump round trip; policy roles; replica identity) | tests (red) |
+| 60a6dc5 | fix(ingest): refuse unreviewed policies on ratio tables; dump-stable 0001 CHECK; pin persistence and replica identity (round 11) | fix + regenerated manifest |
+| (this) | docs(evidence): Slice 0 round 11 | docs |
+
+## R11.2 Red (at 4907dc7)
+
+`foundation.db.test.ts`: **8 failed / 15 passed (23)**.
+- Four policy attacks were APPLIED: the split-keyword repro, FOR SELECT,
+  TO ratio_worker, AS RESTRICTIVE, and the extra policy on a new table.
+- The no-ledger case reported nothing, and status said `matches: true`.
+- The pg_dump round trip changed exactly one entry:
+  `ingest_artifacts_artifact_name_check`.
+- REPLICA IDENTITY FULL was applied, and the table entries lacked
+  persistence/replident.
+- The `ALTER POLICY … TO ratio_owner` test passed on arrival, as intended:
+  roles were already in the entry, and the test exists to kill the roles
+  mutant.
+
+## R11.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+P1 policyViolations not called                          KILLED  5 tests
+P2 reviewed-shape allowance removed (manifest only)     KILLED  new-table positive + the round-4 legitimate-migration positive
+P3 manifest allowance removed (shapes only)             SURVIVED: by design, every 0001 policy IS of a reviewed
+                                                        shape (the shapes are derived from them)
+P4 RESTRICTIVE policies allowed                         KILLED
+P5 policy roles not rendered                            KILLED  TO ratio_worker variant, ALTER POLICY … TO ratio_owner
+P6 relpersistence not rendered (manifest regenerated)   KILLED  entry-shape test only (UNLOGGED cannot be set on a
+                                                        0001 table because of its FKs)
+P7 relreplident not rendered (manifest regenerated)     KILLED  REPLICA IDENTITY FULL
+L1 0001 back to BETWEEN (manifest regenerated)          KILLED  pg_dump round trip
+```
+
+## R11.4 Verification (main checkout at 60a6dc5 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1809/1809 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 194/194 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` rows 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no `ratio_manifest_*` database |
+| Slice 1 compat: scratch worktree `slice/01` 770e333 + 60a6dc5 (removed) | merge clean (no conflict); tsc 0, lint 0, fast 1924/1924, test:db 319/319 ×2 (S3 test-bucket fix on Slice 1: no object-store errors) |

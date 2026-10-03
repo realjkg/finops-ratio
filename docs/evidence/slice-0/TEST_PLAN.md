@@ -245,3 +245,14 @@ databases) unless noted.
 | indexes | `a partial unique index (one published batch per period) dropped` |
 | columns | `a 0001 column type changed` |
 | schema | `DROP SCHEMA ratio CASCADE as a migration is refused`, `DROP SCHEMA ratio CASCADE made outside the runner: status reports it (problem PRIVILEGE_MODEL_VIOLATION)`; `cli.db.test.ts`: `round 10: after 0001 is applied, DROP SCHEMA ratio CASCADE makes --status exit 3 (required foundation missing)` |
+
+## Round 11 — extra policies, dump round trip (tests committed red in 4907dc7, before the fix)
+
+All in `foundation.db.test.ts`.
+
+| Finding | Test name(s) |
+|---|---|
+| M1 | `challenger repro: split-keyword CREATE POLICY open_all … USING (true) is refused; nothing committed`, `FOR SELECT, TO ratio_worker and AS RESTRICTIVE variants are refused too (decision: no unreviewed policy at all)`, `a non-standard policy on a NEW table added by a later migration is refused; the reviewed tenant_isolation shape is allowed`, `extra policies are refused even when 0001 is not in the ledger (schema present)`, `--status (migrationStatus) reports an extra policy made outside the runner` |
+| L1 | `dump a migrated database, restore it into a fresh one: the foundation still matches and the check passes` |
+| L2 | `ALTER POLICY … TO ratio_owner (split keyword) is refused` (green on arrival; kills the roles mutant) |
+| L3 | `REPLICA IDENTITY FULL on a 0001 table is refused`, `table entries pin relpersistence and relreplident` |

@@ -672,3 +672,41 @@ CASCADE` after apply left `--status` at `matches: true`.
 - `convalidated` is pinned explicitly although `pg_get_constraintdef` already
   prints `NOT VALID` for an unvalidated constraint (so the definition hash
   catches it too; see the mutation table).
+
+## 20. Round 11 — challenger M1 + Lows on 0b041c5
+
+- **M1 — extra policies.** Policies were the only object kind where extras
+  still passed (the linter matched literal text only; `'CREATE ' || 'POLICY
+  open_all ON ratio.cost_facts USING (true)'` in a DO block was applied, and
+  because permissive policies are ORed, a worker with tenant B then saw
+  tenant A's rows). Now any policy on a table in schema `ratio` must be either
+  a `FOUNDATION_0001` entry or of a reviewed SHAPE (`REVIEWED_POLICY_SHAPES`:
+  the 0001 `tenant_isolation` policies without the table name — command,
+  permissive, roles, USING / WITH CHECK hashes), so a later migration's new
+  ratio table may use the reviewed tenant policy and nothing else. The rule
+  applies whether or not 0001 is in the ledger (if the schema exists), in
+  every migration's check and in `--status`. **Decision: RESTRICTIVE policies
+  are refused too** — their expressions run for every candidate row and may
+  call functions (a leak channel), and they can deny service; none is
+  reviewed. A new policy shape is a reviewed code change to
+  `REVIEWED_POLICY_SHAPES`.
+- **L1 — dump stability.** `pg_dump` → restore rewrote
+  `length(artifact_name) BETWEEN 1 AND 1024` (combined with further ANDs), so
+  the definition hash failed closed after a restore. 0001 (never deployed;
+  edited in place, dev databases report CHECKSUM_MISMATCH by design, down file
+  unchanged) now writes `length(…) >= 1 AND length(…) <= 1024`. A DB test
+  dumps a migrated database with `pg_dump` and restores it with `psql` into a
+  fresh database: the manifest still matches and the check passes. That test
+  showed no other 0001 construct changes on a round trip (the remaining
+  single-BETWEEN CHECKs survive it). It needs PostgreSQL 16 client tools
+  (`pg_dump`/`psql`, or `RATIO_PG_DUMP` / `RATIO_PSQL`) and is never skipped;
+  CI's ubuntu-latest image ships them.
+- **L2.** A policy role change (`ALTER POLICY … TO ratio_owner`, split
+  keyword) is refused (roles are part of the policy entry).
+- **L3.** Table entries pin `relpersistence` and `relreplident` (`REPLICA
+  IDENTITY FULL` is refused; UNLOGGED cannot be set on any 0001 table because
+  of their FKs, so persistence is pinned for completeness). Column defaults
+  of columns added later are NOT inspected — decision: a default is evaluated
+  in the inserting session under that session's own tenant, and the RLS
+  WITH CHECK still decides what may be written; a default cannot read another
+  tenant's rows through RLS.
