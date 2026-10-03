@@ -37,7 +37,23 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 18 | 1cc3406 | fix(build): keep src/ingest out of the Tailwind content scan | build fix |
 | 19 | 8e3019b | docs: ingestion-ops skill + Slice 1 design/test plan/evidence | docs |
 | 20 | 614e1c6 | merge origin/slice/00-postgres-foundation (round 3) — no Slice 1 code change needed | merge |
-| 21 | (final) | docs: evidence refreshed for the round-3 merge | docs |
+| 21 | 83305f3 | docs: evidence refreshed for the round-3 merge | docs |
+| 22 | cd87483 | test: failing tests for challenger round 1 (M-1, M-2, L1–L3) | tests (red, `r2-red-*.txt`) |
+| 23 | da7101c | test: L2 test-defect fix (field name clashed with a private member; tsc only) | test fix |
+| 24 | 079eb0b | fix: M-2 — Postgres-rejected values quarantined, never leaked | impl |
+| 25 | 1bb100f | fix: L2 — recordRetry fenced on an unexpired lease | impl |
+| 26 | 8193b0d | fix: L3 — test-only switches refused in staging/production | impl |
+| 27 | f594ed3 | fix: M-1 — stall watchdogs, S3 timeouts, progress-gated heartbeat, max run duration | impl |
+| 28 | 20b79fc | docs: L11 skill wording + new settings; package.json description literal restored | docs |
+| 29 | (final) | docs: design/test plan/evidence for challenger round 1 | docs |
+
+Challenger round 1 red evidence (at cd87483): fast — `Tests 8 failed | 31
+passed (39)` (validator year-0/control chars, stall/L3 config, S3 timeouts;
+the S3 test reported "still hanging after 4 s"); DB — `Tests 12 failed | 51
+passed (63)`: 3 new W9 cases, M2-backstop, M2-generic, K6, L2, and all five
+M1 stall tests (each "run still in progress after 12000 ms" / lease still
+renewed). L1 passed already (the code was correct); it is proven by mutation
+(§6).
 
 Honest notes on order:
 - Commit 3 was written after the implementation existed in the working tree
@@ -89,17 +105,17 @@ Slice 0 tests passed.
    vitest reports as "skipped" tests inside failed files (run still exit 1).
    They now fail at collection (no skipped count at all).
 
-## 4. Verification (HEAD 614e1c6 = round-3 merge, worktree, no local modifications)
+## 4. Verification (HEAD 20b79fc + docs, after challenger round 1; worktree, no local modifications)
 
 | Command | Result |
 |---|---|
 | `npm ci` | exit 0. `npm audit --omit=dev`: **0 vulnerabilities** (dev-tree advisories pre-existing) |
 | `npm run lint` | exit 0 |
 | `rm -rf .next && npx tsc --noEmit` | exit 0 |
-| `npm test` | exit 0 — 38 files / 417 tests passed (Slice 1 fast files: 9 files / 97 tests) |
-| `RATIO_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres RATIO_TEST_S3_ENDPOINT=http://127.0.0.1:18333 npm run test:db` ×3 | exit 0 each: 20 files / **211 passed, 0 failed, 0 skipped, 0 todo** each run (25.4 s, 28.1 s, 28.0 s). Slice 1 DB files: 12 files / 106 tests. No Slice 1 assertion needed changing for round 3 (none expects 42501 for a cross-tenant child-row insert; tenant-escape tests go through NOT_FOUND / RLS-filtered paths) |
+| `npm test` | exit 0 — 39 files / 424 tests passed (Slice 1 fast files: 10 files / 104 tests) |
+| `RATIO_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres RATIO_TEST_S3_ENDPOINT=http://127.0.0.1:18333 npm run test:db` ×3 | exit 0 each: 21 files / **224 passed, 0 failed, 0 skipped, 0 todo** each run (36.1 s, 31.6 s, 31.3 s). Slice 1 DB files: 13 files / 119 tests. No Slice 1 assertion needed changing for round 3 (none expects 42501 for a cross-tenant child-row insert; tenant-escape tests go through NOT_FOUND / RLS-filtered paths) |
 | `npm run test:db` with `RATIO_TEST_DATABASE_URL` unset | exit 1: "RATIO_TEST_DATABASE_URL is not set … refusing to run" |
-| `npm run test:db` with `RATIO_TEST_S3_ENDPOINT` unset | exit 1: 3 S3 files FAIL at collection ("RATIO_TEST_S3_ENDPOINT is not set"), 194 passed, nothing skipped |
+| `npm run test:db` with `RATIO_TEST_S3_ENDPOINT` unset | exit 1: 3 S3 files FAIL at collection ("RATIO_TEST_S3_ENDPOINT is not set"), 206 passed, nothing skipped |
 | `grep -rnE '\.(skip\|only\|todo\|fails)\b\|skipIf\|runIf' src/ingest` | no matches |
 | `npm run worker:build` | exit 0; `dist-worker/ingest/build-info.json` carries the git SHA; built CLI used for §5 |
 | `npm run build` | exit 0 (after commit 1cc3406 — before it, Tailwind's JIT scanned `src/ingest` and emitted an invalid class from a regex literal). Then `git checkout tsconfig.json next-env.d.ts`; no AGENTS.md/CLAUDE.md generated |
@@ -115,6 +131,7 @@ machine, 3 runs each:
 - before the merge (local temp grant, no staged-only triggers): 7 660 / 8 004 / 7 825 ms
 - after the round-2 merge (per-row staged-only trigger with `FOR SHARE` on the batch): 9 465 / 11 505 / 10 712 ms
 - after the round-3 merge (HEAD 614e1c6): 9 851 / 9 930 / 10 286 ms
+- after challenger round 1 (watchdog + progress-gated heartbeat): 9 339 / 9 690 / 10 013 ms (no measurable cost from the watchdog); SIGKILL demo 0.92 / 0.94 / 1.05 s
 
 ≈ +2–3.7 s per 200k rows (≈ 10–18 µs per row, +25–45 % of the whole load
 including parse, gzip and evidence I/O). Acceptable for this slice; a
@@ -123,10 +140,10 @@ Slice 0 design choice, noted for the owner.
 
 ## 5. Manual end-to-end (built CLI, merged code, `v-e2e.txt`)
 
-Run on HEAD 614e1c6 (round 3; identical results on 1cc3406 before it).
-Script `e2e.sh` (scratch, not committed): scratch DB `ratio_s1_e2e_d7121dca`,
+Run on HEAD 20b79fc (after challenger round 1; identical results on 614e1c6 and 1cc3406 before it).
+Script `e2e.sh` (scratch, not committed): scratch DB `ratio_s1_e2e_5bb326cc`,
 worker login `IN ROLE ratio_worker`, reader login `IN ROLE ratio_reader`,
-bucket `s1-e2e-d7121dca` seeded with `fixtures/focus-1.0-synthetic/base/**`,
+bucket `s1-e2e-5bb326cc` seeded with `fixtures/focus-1.0-synthetic/base/**`,
 tenant provisioned as in SKILL §2, source credentials from the AWS SDK default
 chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env).
 
@@ -140,7 +157,7 @@ chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env).
 | batches | both `published/reconciled`, control = loaded exactly |
 | evidence re-hash (3 objects) | all `OK` (sha256 of the stored object = `ingest_artifacts.sha256`) |
 | `worker doctor --json --tenant …` | exit 0, all checks pass |
-| `RATIO_ENV=test worker replay-fixtures --json` | exit 0, 6/6 scenarios pass, tenant `fixture-20261003055540-a5cacb01` retained |
+| `RATIO_ENV=test worker replay-fixtures --json` | exit 0, 6/6 scenarios pass, tenant `fixture-20261003063706-107fd8cc` retained |
 | fixture tenant footprint | 341 fact rows (~409 kB), 8 batches, 8 runs, 38 objects / 75 458 bytes |
 | cleanup (scratch only) | bucket deleted, database and logins dropped |
 
@@ -158,6 +175,23 @@ byte-identically (`cmp`).
 | M5 no per-chunk lease check | **survived at first** (a takeover's staged-batch deletion also stopped the zombie) → added P6 (commit 939be07); now P6 fails |
 | M6 live lease not refused | 2 tests fail (lease/crash files) |
 | (heartbeat) background heartbeat not stopped on exit | L6 times out |
+
+### Challenger round 1 mutation proofs (`mutations2.txt`)
+
+| Mutation | Result |
+|---|---|
+| R1-M1a heartbeat renews without progress gating | 2 fail (M1-heartbeat, M1-maxrun) |
+| R1-M1b no idle watchdog on the source stream | 1 fails (M1-stream) |
+| R1-M1c no deadline on opening the source | 1 fails (M1-open) |
+| R1-M1d evidence watchdog disabled (timeout 1e9 ms) | 1 fails (M1-evidence). A first attempt that only unpiped the watchdog survived because the unpiped watchdog still fired — the mutation, not the test, was wrong |
+| R1-M1e S3 request timeout only warns | 1 fails (S3-timeout) |
+| R1-M2a no year floor | 1 fails (W9 year 0000) |
+| R1-M2b no control-character check in cells | 2 fail (W9 NUL mapped / extra) |
+| R1-M2c no class-22 backstop | 1 fails (M2-backstop) |
+| R1-M2d raw pg messages persisted | 2 fail (M2-generic, K6) |
+| R1-L1 staged cleanup across every source of the tenant | 1 fails (L1) |
+| R1-L2 retry recorded on an expired lease | 1 fails (L2) |
+| R1-L3 RATIO_ENV ignored by test switches | 1 fails (L3) |
 
 ## 7. Owner acceptance demonstration ↔ tests (`src/ingest/demo.db.test.ts`, committed fixture, real S3, real LOGIN roles)
 
@@ -196,6 +230,8 @@ byte-identically (`cmp`).
   - passed: requires both halves of a static S3 credential pair
   - passed: enforces RATIO_ARTIFACT_DIGEST format
   - passed: config errors never echo secret values
+  - passed: stall watchdog and maximum run duration have defaults and bounds (M-1)
+  - passed: L3: test-only switches refuse to activate when RATIO_ENV is staging or production, even with NODE_ENV=test
 
 - `src/ingest/dependencyBoundary.test.ts`
   - passed: no file under pages/ or src/ (outside src/ingest) imports @aws-sdk/* or csv-parse
@@ -222,6 +258,7 @@ byte-identically (`cmp`).
   - passed: accepts ISO 8601 forms and normalizes offset-less values to UTC
   - passed: rejects malformed and impossible timestamps
   - passed: reports every missing required column
+  - passed: rejects control characters in header names (M-2)
   - passed: rejects duplicate column names
   - passed: maps a valid FOCUS 1.0 row; money stays the exact source string
   - passed: maps FOCUS 0.5 UsageQuantity/UsageUnit when ConsumedQuantity is absent
@@ -237,6 +274,8 @@ byte-identically (`cmp`).
   - passed: rejects ChargePeriodEnd before start without echoing the cell value
   - passed: rejects lower-case currency without echoing the cell value
   - passed: rejects empty currency without echoing the cell value
+  - passed: rejects year 0000 timestamps (Postgres cannot store them) (M-2)
+  - passed: rejects NUL and other C0 control characters in any cell; allows TAB, CR and LF (M-2)
   - passed: accepts BillingPeriodStart expressed with an equivalent offset
   - passed: rejects a row with the wrong number of cells
 
@@ -267,6 +306,10 @@ byte-identically (`cmp`).
   - passed: never retries permanent errors
   - passed: rejects a non-positive maxAttempts
 
+- `src/ingest/s3client.test.ts`
+  - passed: config exposes request/connect timeouts with defaults and bounds
+  - passed: a request to a server that never answers fails within the configured timeout
+
 - `src/ingest/sources/s3/layout.test.ts`
   - passed: derives metadata and data prefixes
   - passed: parses BILLING_PERIOD=YYYY-MM prefixes and filters by range
@@ -291,7 +334,7 @@ byte-identically (`cmp`).
   - passed: listing fingerprint is order-independent and changes with etag, size or manifest bytes
   - passed: classifies artifact formats
 
-(97 tests)
+(104 tests)
 
 ### DB suite (npm run test:db, final run 3)
 
@@ -301,6 +344,7 @@ byte-identically (`cmp`).
   - passed: K3 a fake source is refused by the CLI outside NODE_ENV=test + RATIO_ALLOW_FAKE_SOURCE=1
   - passed: K4 exit 4 while another run holds a live lease; S3 failures exit 1 with secrets redacted everywhere
   - passed: K5 doctor --json exits 0 when healthy and 1 when not; replay-fixtures --json runs all scenarios in a fresh, retained, synthetic-labelled tenant
+  - passed: K6 (M-2) rejected values never appear in the CLI evidence record, logs, error_detail or stats
 
 - `src/ingest/demo.db.test.ts`
   - passed: demo 1: fixture ingested; original bytes stored with hash (re-hashing the evidence object)
@@ -347,6 +391,8 @@ byte-identically (`cmp`).
   - passed: L3 acquiring after expiry marks the dead run abandoned (LEASE_EXPIRED) and deletes its staged batches
   - passed: L5 a background heartbeat keeps a long-running run's lease alive
   - passed: L6 a crashed (simulated dead) run stops heartbeating, so its lease expires
+  - passed: L1 (challenger) acquiring source X never deletes source Y's staged batch in the same tenant
+  - passed: L2 (challenger) a zombie whose lease expired cannot record a retry (attempt and retries unchanged)
 
 - `src/ingest/worker/publish.db.test.ts`
   - passed: publish steps are the documented, complete sequence
@@ -375,6 +421,13 @@ byte-identically (`cmp`).
   - passed: R4 replay failure injected at "upsert_publication" changes nothing
   - passed: R4 replay failure injected at "advance_checkpoint" changes nothing
   - passed: R4 replay failure injected at "commit" changes nothing
+
+- `src/ingest/worker/stall.db.test.ts`
+  - passed: M1-stream: a source stream that never emits fails SOURCE_STALLED in bounded time; next sync succeeds
+  - passed: M1-open: a source open that never resolves fails SOURCE_STALLED in bounded time; next sync succeeds
+  - passed: M1-evidence: an evidence read that never emits fails EVIDENCE_STALLED in bounded time; nothing published
+  - passed: M1-heartbeat: a run that makes no progress stops renewing its lease, so another worker can take over
+  - passed: M1-maxrun: renewal also stops after the maximum run duration, even while progressing
 
 - `src/ingest/worker/streaming.db.test.ts`
   - passed: S1 200,000 rows load in bounded chunks while the evidence stream is still being read
@@ -410,6 +463,9 @@ byte-identically (`cmp`).
   - passed: W9 row of another billing period ⇒ quarantined (PERIOD_MISMATCH); prior publication, view and checkpoint untouched; no facts kept
   - passed: W9 inverted charge period ⇒ quarantined (CHARGE_PERIOD_INVERTED); prior publication, view and checkpoint untouched; no facts kept
   - passed: W9 bad currency ⇒ quarantined (INVALID_CURRENCY); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 year 0000 timestamp ⇒ quarantined (UNPARSEABLE_TIMESTAMP); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 NUL in a mapped column ⇒ quarantined (INVALID_CHARACTER); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 NUL in an extra column ⇒ quarantined (INVALID_CHARACTER); prior publication, view and checkpoint untouched; no facts kept
   - passed: W9 inconsistent column count ⇒ quarantined (CSV_PARSE_ERROR); prior publication, view and checkpoint untouched; no facts kept
   - passed: W9 invalid gzip ⇒ quarantined (INVALID_GZIP); prior publication, view and checkpoint untouched; no facts kept
   - passed: W9 parquet artifact ⇒ quarantined (UNSUPPORTED_FORMAT); prior publication, view and checkpoint untouched; no facts kept
@@ -420,12 +476,14 @@ byte-identically (`cmp`).
   - passed: W9 byte-identical duplicate artifacts ⇒ quarantined (DUPLICATE_ARTIFACT); prior publication, view and checkpoint untouched; no facts kept
   - passed: W10 oversize artifact (by listing) ⇒ failed before download; nothing captured; checkpoint not advanced
   - passed: W11 validation errors: 1000 stored, true total counted; quarantine show returns them inspectably
+  - passed: M2-backstop: a class-22 rejection by Postgres quarantines the batch with a code-only error; the value is never persisted
+  - passed: M2-generic: any other database error fails the period with a code and generic text only (no raw pg message anywhere)
 
 - `src/ingest/worker/tenantEscape.db.test.ts`
   - passed: T1 B source keys, batch ids and quarantine reports are NOT_FOUND for tenant A; A syncs never change B
   - passed: T2 malformed or missing tenant ids are refused before any query
 
-(106 tests)
+(119 tests)
 
 Slice 0 suites (unchanged by Slice 1, all passing in the same runs): see
 `docs/evidence/slice-0/`.
@@ -464,7 +522,11 @@ reverting the Slice 1 commits needs no DB action; ingested rows stay in
 - Evidence objects and replay-fixtures tenants are never deleted (no deletion
   path this cycle).
 - `doctor` needs the owner URL (read-only txn) or a ledger grant for its
-  migration check.
+  migration check (delegated decision (b), DESIGN §15).
+- A stalled attempt costs up to `RATIO_STALL_TIMEOUT_SECONDS` and is retried
+  within the retry budget.
+- The S3 request timeout covers time-to-response only; body streaming is
+  guarded by the stall watchdog.
 - `quarantine show` exposes validation messages but never cell values; an
   operator needs the evidence object to see the bad value.
 - The test kill hook and fake source ship in the build but are refused

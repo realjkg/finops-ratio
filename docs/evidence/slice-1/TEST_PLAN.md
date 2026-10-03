@@ -126,3 +126,22 @@ shipped schema W16.
 `*` = added after the first red commit (each in its own test commit before
 the matching fix, or driven by the amended Slice 0 schema / a mutation check);
 see EVIDENCE.md §1.
+
+## F. Challenger round 1 additions (red at cd87483, green after the fixes)
+
+| ID | File | Test |
+|---|---|---|
+| M1-stream | `worker/stall.db.test.ts` | source stream that never emits ⇒ `SOURCE_STALLED` within 12 s (bounded race), run failed, checkpoint null, next sync succeeds |
+| M1-open | 〃 | source open that never resolves ⇒ same |
+| M1-evidence | 〃 | evidence read that never emits ⇒ `EVIDENCE_STALLED`, nothing published, next sync succeeds |
+| M1-heartbeat | 〃 | a run hung without progress stops renewing; lease expires (bounded poll); another sync takes over; the hung run gets `LEASE_LOST` |
+| M1-maxrun | 〃 | renewal stops past the maximum run duration even with a long stall limit |
+| S3-timeout | `s3client.test.ts` | config defaults/bounds for S3 timeouts; a server that accepts but never answers ⇒ `SOURCE_LIST_FAILED` in < 4 s |
+| CFG-stall / L3 | `config.test.ts` | stall/max-run defaults and bounds; test-only switches refused when `RATIO_ENV` is staging/production even with `NODE_ENV=test` |
+| V-year0 / V-ctrl | `focus/validate.test.ts` | year 0000 rejected; NUL/C0 controls rejected in cells and header names, TAB/CR/LF allowed, values not echoed |
+| W9 +3 | `worker/sync.db.test.ts` | year-0000 timestamp, NUL in a mapped column, NUL in an extra column ⇒ quarantined; the cell value is absent from error_detail, stats, quarantine reason, validation messages and the run result |
+| M2-backstop | 〃 | a Postgres class-22 rejection (test trigger) ⇒ quarantined `DB_REJECTED_VALUE`, code-only message, value never persisted |
+| M2-generic | 〃 | any other DB error ⇒ period failed `DB_<state>` with generic text only |
+| K6 | `cliWorker.db.test.ts` | year-0000 and a Postgres-rejected value via the CLI: the value and pg text are absent from stdout/stderr, error_detail and stats |
+| L1 | `worker/lease.db.test.ts` | acquiring source X keeps source Y's staged facts; Y then publishes |
+| L2 | 〃 | an expired zombie cannot record a retry (attempt 1, no retries) |

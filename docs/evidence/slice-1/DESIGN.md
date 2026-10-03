@@ -407,3 +407,54 @@ written to these rules so the later merge is clean:
   under a folder of a shared bucket (added because the local SeaweedFS allows
   only ~2 buckets with data; also useful for shared evidence buckets). The DB
   `evidence_key` is unchanged (`evidence/<tenant>/<source>/<sha256>`).
+
+## 15. Challenger round 1 (on 83305f3) — changes and delegated decisions
+
+**M-1 stalled source held the lease forever.** Fixed in f594ed3:
+- S3 client: `connectionTimeout` (`RATIO_S3_CONNECT_TIMEOUT_MS`, 10 000) and a
+  time-to-response `requestTimeout` (`RATIO_S3_REQUEST_TIMEOUT_MS`, 60 000)
+  with `throwOnRequestTimeout` (without it the SDK only logs a warning). The
+  SDK clears these once response headers arrive, so body streaming is covered
+  by the watchdog below (a 5 GiB download is not cut off by a 60 s limit).
+- Idle watchdog (`RATIO_STALL_TIMEOUT_SECONDS`, 120; 1..3600) between the
+  source stream and the capture file, and between the evidence stream and the
+  parser (slow downstream inserts `touch()` it), plus a deadline on opening
+  either. Expiry ⇒ `SOURCE_STALLED` / `EVIDENCE_STALLED` (retryable within
+  the bounded retry budget), period failed, checkpoint not advanced, run
+  finished `failed`, source free for the next sync.
+- The background heartbeat renews only while the run progresses (bytes read,
+  rows inserted, artifacts captured, periods finished) and never after
+  `RATIO_MAX_RUN_SECONDS` (21 600; ≥ 60). A run hung anywhere else (e.g. a
+  hook or a DB call) therefore loses its lease; another worker can take over
+  and the hung run's later writes are fenced (`LEASE_LOST`).
+
+**M-2 values JS accepted but Postgres rejected.** Fixed in 079eb0b:
+- validator: years < 1 ⇒ `UNPARSEABLE_TIMESTAMP`; any cell or header name
+  with a C0 control character other than TAB/CR/LF (incl. NUL) ⇒
+  `INVALID_CHARACTER`.
+- backstop: a class-22 (data exception) error from a fact insert quarantines
+  the batch with `DB_REJECTED_VALUE` and a code-only message (SQLSTATE and
+  record range).
+- `messageOf()` reduces every database error to `database error (SQLSTATE
+  xxxxx)`; raw pg text (which can quote a cell value) is never persisted to
+  periods[].message, `sync_runs.error_detail`, stats, the CLI evidence record,
+  logs or doctor output.
+
+**Lows.** L1: test proving acquisition only cleans the acquiring source's
+staged batches (mutation-proven). L2: `recordRetry` also requires an
+unexpired lease. L3: the pause hook and the fake source are refused when
+`RATIO_ENV` is `staging` or `production`, even with `NODE_ENV=test`. L11:
+skill wording; package.json description literal restored.
+
+**Delegated decisions recorded (orchestrator, round 1):**
+- (a) Keep all evidence objects and replay-fixtures tenants this cycle;
+  retention windows are an owner decision before production and go into the
+  Slice 2 deployment brief.
+- (b) `doctor` keeps the owner URL inside a READ ONLY transaction as an
+  interim local/ephemeral measure; a least-privilege `SELECT` on
+  `public.schema_migrations` for the worker login is queued for the
+  deployment brief.
+- (c) The CI change (job-scoped SeaweedFS) stays and must be green on the
+  first PR run.
+- (d) The per-row staged-only trigger stays; revisit once a real export's size
+  is known (measured cost: EVIDENCE §4).
