@@ -746,9 +746,12 @@ describe('R1: sticky revocation', () => {
     expect(revokedStatus(github)).toHaveLength(0); // already recorded; no duplicate
   });
   it('a revocation status from a non-Actions source is ignored (no writer DoS)', async () => {
+    const forged = { context: 'Governance · exception revoked', state: 'failure', description: 'x', creator: { login: 'mallory', type: 'User' } };
     const { github, pr } = fakeGithub({
       files: restrictedFiles, labels: restrictedLabels, roles: ADMIN, comments: [approve],
-      statusesBySha: { [HEAD]: [{ context: 'Governance · exception revoked', state: 'failure', description: 'x', creator: { login: 'mallory', type: 'User' } }] },
+      statusesBySha: { [HEAD]: [forged] },
+      // Realistic: the combined status for the head also lists the forged status.
+      statuses: [{ context: forged.context, state: forged.state }],
     });
     await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
     expect(eligStatus(github)[0].params.state).toBe('success');

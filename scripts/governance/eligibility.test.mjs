@@ -293,6 +293,10 @@ describe('C1: own eligibility status', () => {
     const s = state({ statuses: [{ context: ELIGIBILITY_CONTEXT, state: 'failure' }, { context: 'Governance · risk classification', state: 'success' }] });
     expect(decideEligibility(s)).toEqual({ eligible: true, reasons: [] });
   });
+  it('R1: the "Governance · exception revoked" context is not a generic status gate (handled by the exception logic, Actions app only)', () => {
+    const s = state({ statuses: [{ context: 'Governance · exception revoked', state: 'failure' }] });
+    expect(decideEligibility(s)).toEqual({ eligible: true, reasons: [] });
+  });
 });
 
 describe('M1: evaluateExceptionApproval (SHA-bound approval comments)', () => {
