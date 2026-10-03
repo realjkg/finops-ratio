@@ -6,6 +6,7 @@ import { Client } from 'pg';
 import { migrationStatus } from '../db/migrate';
 import { DEFAULT_MIGRATIONS_DIR } from '../db/migrationFiles';
 import { redact } from '../redact';
+import { messageOf } from '../errors';
 import { createWorkerPool, inspectRole, roleProblems } from './db';
 import { canonicalTenant } from './types';
 
@@ -28,8 +29,7 @@ export interface DoctorOptions {
 
 function errText(e: unknown, secrets: readonly string[]): string {
   const code = (e as { code?: string })?.code;
-  const msg = e instanceof Error ? e.message : String(e);
-  return redact(`${code ? code + ': ' : ''}${msg}`, secrets).slice(0, 500);
+  return redact(`${code ? code + ': ' : ''}${messageOf(e)}`, secrets).slice(0, 500);
 }
 
 async function migrationCheck(opts: DoctorOptions, secrets: readonly string[]): Promise<DoctorCheck> {

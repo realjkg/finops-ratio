@@ -27,7 +27,7 @@ export function parseFocusTimestamp(s: string): ParsedTimestamp | null {
   const h = Number(hs);
   const mi = Number(mis);
   const sec = Number(ss);
-  if (mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo) || h > 23 || mi > 59 || sec > 59) return null;
+  if (y < 1 || mo < 1 || mo > 12 || d < 1 || d > daysInMonth(y, mo) || h > 23 || mi > 59 || sec > 59) return null;
   let offsetMin = 0;
   let zoneOut = 'Z';
   if (zone !== 'Z') {

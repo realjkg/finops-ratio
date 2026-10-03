@@ -200,7 +200,26 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
     if (!pending.length) return;
     const rows = pending;
     pending = [];
-    await insertChunk(ctx, art.sha256, rows);
+    try {
+      await insertChunk(ctx, art.sha256, rows);
+    } catch (e) {
+      const code = (e as { code?: unknown })?.code;
+      if (!(e instanceof IngestError) && typeof code === 'string' && /^22[0-9A-Z]{3}$/.test(code)) {
+        // Backstop: Postgres rejected a value the validator accepted (data exception,
+        // class 22). Quarantine with a code-only message — pg's text may quote the value.
+        const first = rows[0].ordinal;
+        const last = rows[rows.length - 1].ordinal;
+        addError(state, {
+          artifactSha256: art.sha256,
+          rowOrdinal: first,
+          column: null,
+          code: 'DB_REJECTED_VALUE',
+          message: `the database rejected a value in data records ${first}-${last} (SQLSTATE ${code})`,
+        });
+        return;
+      }
+      throw e;
+    }
     state.rowsInserted += rows.length;
     await ctx.maybeHeartbeat();
     if (ctx.hooks.afterChunk) {

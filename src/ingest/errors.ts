@@ -26,7 +26,15 @@ export function errorCodeOf(e: unknown): string {
   return 'INTERNAL_ERROR';
 }
 
+/**
+ * Text that may be persisted or printed for an error. Database errors are
+ * reduced to their SQLSTATE: Postgres messages can quote the offending value
+ * (a cell of the provider's file), so raw pg text is never stored or logged.
+ */
 export function messageOf(e: unknown): string {
+  if (e instanceof IngestError) return e.message;
+  const code = errorCodeOf(e);
+  if (code.startsWith('DB_')) return `database error (SQLSTATE ${code.slice(3)})`;
   if (e instanceof Error) return e.message;
   return String(e);
 }

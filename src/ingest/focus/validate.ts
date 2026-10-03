@@ -65,11 +65,24 @@ export interface FactRow {
 
 const MAX_COLUMN_NAME = 256;
 
+/** True when the text contains a C0 control character other than TAB, LF or CR (incl. NUL, which Postgres text/jsonb reject). */
+export function hasForbiddenControl(v: string): boolean {
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i);
+    if (c < 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) return true;
+  }
+  return false;
+}
+
 export function indexHeader(header: string[]): { ok: true; index: HeaderIndex } | { ok: false; errors: FieldError[] } {
   const errors: FieldError[] = [];
   const pos = new Map<string, number>();
   header.forEach((raw, i) => {
     const name = raw;
+    if (hasForbiddenControl(name)) {
+      errors.push({ column: null, code: 'INVALID_CHARACTER', message: `header column ${i + 1} contains a control character` });
+      return;
+    }
     if (name.length === 0 || name.length > MAX_COLUMN_NAME) {
       errors.push({ column: null, code: 'INVALID_COLUMN_NAME', message: `header column ${i + 1} has an empty or over-long name` });
       return;
@@ -108,6 +121,9 @@ export function validateRow(
     return { ok: false, errors: [{ column: null, code: 'COLUMN_COUNT_MISMATCH', message: `row has ${values.length} cells, header has ${index.columns.length}` }] };
   }
   const errors: FieldError[] = [];
+  index.columns.forEach((col, i) => {
+    if (hasForbiddenControl(values[i])) errors.push({ column: col, code: 'INVALID_CHARACTER', message: 'value contains a control character (only TAB, CR and LF are allowed)' });
+  });
 
   const billed = cell(values, index, 'BilledCost')!;
   if (billed === '') errors.push({ column: 'BilledCost', code: 'MISSING_VALUE', message: 'required value is empty' });
