@@ -359,8 +359,9 @@ async function roleViolations(client: ClientBase): Promise<string[]> {
   // Roles a member must not be able to reach by membership (round 16 H2): an
   // INHERIT / SET / ADMIN path to a SUPERUSER, BYPASSRLS or REPLICATION role
   // (CREATEROLE / CREATEDB too for worker/reader members) is the attribute
-  // itself; the server-file predefined roles read/write files or run programs
-  // as the server's OS user, outside every ACL.
+  // itself; the predefined roles in REFUSED_PREDEFINED_ROLES act outside (or
+  // across) the per-object ACLs (round 16: server files/programs; round 17:
+  // pg_read/write_all_data, pg_signal_backend, pg_create_subscription).
   const reach = await client.query<{
     member: string;
     parent: string;
@@ -397,16 +398,29 @@ async function roleViolations(client: ClientBase): Promise<string[]> {
     if (m.parent !== 'ratio_owner' && m.rolcreaterole) bad.push('CREATEROLE');
     if (m.parent !== 'ratio_owner' && m.rolcreatedb) bad.push('CREATEDB');
     for (const attr of bad) problems.push(`role ${m.member} (member of ${m.parent}) can assume ${m.target}, which is ${attr}`);
-    if (SERVER_FILE_ROLES.includes(m.target)) {
-      problems.push(`role ${m.member} (member of ${m.parent}) can assume ${m.target} (server file / program access is never reviewed)`);
-    }
+    const why = REFUSED_PREDEFINED_ROLES[m.target];
+    if (why) problems.push(`role ${m.member} (member of ${m.parent}) can assume ${m.target} (${why}; never reviewed)`);
   }
   problems.push(...(await memberPrivilegeViolations(client)));
   return problems;
 }
 
-/** Predefined roles whose powers are outside every ACL (server files, server programs). */
-export const SERVER_FILE_ROLES: readonly string[] = ['pg_read_server_files', 'pg_write_server_files', 'pg_execute_server_program'];
+/**
+ * Predefined roles no member of a ratio role — owner side included — may be
+ * able to assume, over ANY membership edge (INHERIT, SET or ADMIN,
+ * transitively). Their powers are outside the per-object ACLs this check
+ * enumerates, or bypass them wholesale (round 16: server files/programs;
+ * round 17: data-wide read/write, signalling other sessions, subscriptions).
+ */
+export const REFUSED_PREDEFINED_ROLES: Readonly<Record<string, string>> = {
+  pg_read_server_files: 'reads server files',
+  pg_write_server_files: 'writes server files',
+  pg_execute_server_program: 'runs programs on the server',
+  pg_read_all_data: 'SELECT on every table, view and sequence',
+  pg_write_all_data: 'INSERT, UPDATE and DELETE on every table',
+  pg_signal_backend: 'cancels or terminates other sessions',
+  pg_create_subscription: 'creates logical-replication subscriptions',
+};
 
 /**
  * What a member of ratio_owner (the migrator login) — and ratio_owner itself —

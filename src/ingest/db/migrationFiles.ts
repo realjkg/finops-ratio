@@ -194,6 +194,8 @@ export const stripNonCode = maskNonCode;
 interface Statement {
   /** upper-cased code with whitespace collapsed */
   norm: string;
+  /** the same code with its ORIGINAL case (for identifiers: quoted ones are case-sensitive, round 17) */
+  text: string;
   /** offset of the statement's first code character in the original SQL */
   start: number;
 }
@@ -204,10 +206,11 @@ function splitStatements(sql: string): Statement[] {
   let begin = 0;
   const push = (from: number, to: number) => {
     const raw = masked.slice(from, to);
-    const norm = raw.trim().replace(/\s+/g, ' ').toUpperCase();
+    const text = raw.trim().replace(/\s+/g, ' ');
+    const norm = text.toUpperCase();
     if (!norm) return;
     const lead = raw.length - raw.replace(/^\s+/, '').length;
-    result.push({ norm, start: from + lead });
+    result.push({ norm, text, start: from + lead });
   };
   for (let i = 0; i < masked.length; i++) {
     if (masked[i] === ';') {
@@ -297,7 +300,7 @@ const READ_ONLY_GUARD_FUNCTIONS = /^SELECT PG_CATALOG\.(PG_HAS_ROLE|HAS_[A-Z_]+_
 
 /**
  * Objects created EARLIER in the same migration file (round 16 M1), by
- * normalized (upper-case, unquoted) name. `IF NOT EXISTS` / `OR REPLACE`
+ * canonical name (canonIdent: PostgreSQL rules, round 17). `IF NOT EXISTS` / `OR REPLACE`
  * creations may name a pre-existing object and are not recorded.
  * Functions/procedures are recorded with their candidate signatures.
  */
@@ -309,42 +312,57 @@ interface CreatedObjects {
 }
 
 const newCreated = (): CreatedObjects => ({ schemas: new Set(), relations: new Set(), types: new Set(), routines: new Map() });
-const objName = (x: string) => unquote(x.trim());
+/**
+ * Canonical spelling of a (possibly qualified) identifier or type name under
+ * PostgreSQL's rules (round 17): unquoted parts fold to lower case (ASCII
+ * only, as PostgreSQL does), quoted parts keep their exact case (`""` is a
+ * quote). `ratio.T1`, `RATIO.t1` and `"ratio"."t1"` are the same object;
+ * `ratio."T1"` is a different one.
+ */
+function canonIdent(x: string): string {
+  return x.trim().replace(/"((?:[^"]|"")*)"|[^"]+/g, (m: string, q: string | undefined) => {
+    if (q === undefined) return m.replace(/[A-Z]+/g, (c) => c.toLowerCase());
+    const v = q.replace(/""/g, '"');
+    return /^[a-z_][a-z0-9_$]*$/.test(v) ? v : `"${v.replace(/"/g, '""')}"`;
+  });
+}
+const objName = canonIdent;
 
 /** IN-argument type spellings of a CREATE FUNCTION/PROCEDURE argument list (with or without parameter names). */
 function routineArgs(list: string): string[][] {
   const out: string[][] = [];
   for (let arg of splitTopLevel(list)) {
-    arg = arg.replace(/\s+(DEFAULT\b|=).*$/, '').trim();
-    const mode = /^(IN|OUT|INOUT|VARIADIC)\s+/.exec(arg);
+    arg = arg.replace(/\s+(DEFAULT\b|=).*$/i, '').trim();
+    const mode = /^(IN|OUT|INOUT|VARIADIC)\s+/i.exec(arg);
     if (mode) {
-      if (mode[1] === 'OUT') continue; // not part of the signature
+      if (mode[1].toUpperCase() === 'OUT') continue; // not part of the signature
       arg = arg.slice(mode[0].length);
     }
-    const words = unquote(arg).split(' ');
+    const words = canonIdent(arg).split(' ');
     // `name type…` or just `type…`: accept both readings
     out.push([words.join(' '), words.slice(1).join(' ')].filter(Boolean));
   }
   return out;
 }
 
+/** `u`: the statement with its original case (Statement.text). */
 function recordCreated(u: string, created: CreatedObjects): void {
-  if (/^CREATE SCHEMA (?!IF NOT EXISTS )/.test(u)) {
-    const m = /^CREATE SCHEMA (\S+)/.exec(u);
-    if (m && m[1] !== 'AUTHORIZATION') created.schemas.add(objName(m[1]));
+  if (/^CREATE SCHEMA (?!IF NOT EXISTS )/i.test(u)) {
+    const m = /^CREATE SCHEMA (\S+)/i.exec(u);
+    if (m && m[1].toUpperCase() !== 'AUTHORIZATION') created.schemas.add(objName(m[1]));
     return;
   }
-  const rel = /^CREATE (?:(?:GLOBAL |LOCAL )?(?:TEMP|TEMPORARY|UNLOGGED) )?(?:TABLE|SEQUENCE|(?:RECURSIVE |MATERIALIZED )?VIEW) (?!IF NOT EXISTS )([^ (]+)/.exec(u);
+  const rel = /^CREATE (?:(?:GLOBAL |LOCAL )?(?:TEMP|TEMPORARY|UNLOGGED) )?(?:TABLE|SEQUENCE|(?:RECURSIVE |MATERIALIZED )?VIEW) (?!IF NOT EXISTS )([^ (]+)/i.exec(u);
   if (rel) {
     created.relations.add(objName(rel[1]));
     return;
   }
-  const typ = /^CREATE (?:TYPE|DOMAIN) ([^ (]+)/.exec(u);
+  const typ = /^CREATE (?:TYPE|DOMAIN) ([^ (]+)/i.exec(u);
   if (typ) {
     created.types.add(objName(typ[1]));
     return;
   }
-  const fn = /^CREATE (?:FUNCTION|PROCEDURE) ([^ (]+) ?\(/.exec(u);
+  const fn = /^CREATE (?:FUNCTION|PROCEDURE) ([^ (]+) ?\(/i.exec(u);
   if (fn) {
     const open = u.indexOf('(', fn[0].length - 1);
     const group = parenGroup(u, open);
@@ -361,7 +379,7 @@ function isCreatedRoutine(spec: string, created: CreatedObjects): boolean {
   if (!m) return false;
   const overloads = created.routines.get(objName(m[1]));
   if (!overloads) return false;
-  const args = m[2].trim() === '' ? [] : splitTopLevel(m[2]).map((a) => unquote(a).replace(/^(IN|VARIADIC) /, ''));
+  const args = m[2].trim() === '' ? [] : splitTopLevel(m[2]).map((a) => canonIdent(a.replace(/^(IN|VARIADIC) /i, '')));
   return overloads.some((o) => o.length === args.length && o.every((accepted, i) => accepted.includes(args[i])));
 }
 
@@ -374,19 +392,19 @@ function isCreatedRoutine(spec: string, created: CreatedObjects): boolean {
  * it is contract.
  */
 function isRevokeOnCreated(u: string, created: CreatedObjects): boolean {
-  const m = /^REVOKE (?:GRANT OPTION FOR )?(.+?) ON (.+) FROM PUBLIC(?: CASCADE| RESTRICT)?$/.exec(u);
+  const m = /^REVOKE (?:GRANT OPTION FOR )?(.+?) ON (.+) FROM PUBLIC(?: CASCADE| RESTRICT)?$/i.exec(u);
   if (!m) return false;
   const target = m[2];
-  const all = /^ALL (?:TABLES|SEQUENCES|FUNCTIONS|PROCEDURES|ROUTINES) IN SCHEMA (.+)$/.exec(target);
+  const all = /^ALL (?:TABLES|SEQUENCES|FUNCTIONS|PROCEDURES|ROUTINES) IN SCHEMA (.+)$/i.exec(target);
   if (all) return splitTopLevel(all[1]).every((x) => created.schemas.has(objName(x)));
-  const schema = /^SCHEMA (.+)$/.exec(target);
+  const schema = /^SCHEMA (.+)$/i.exec(target);
   if (schema) return splitTopLevel(schema[1]).every((x) => created.schemas.has(objName(x)));
-  const routine = /^(?:FUNCTION|PROCEDURE|ROUTINE) (.+)$/.exec(target);
+  const routine = /^(?:FUNCTION|PROCEDURE|ROUTINE) (.+)$/i.exec(target);
   if (routine) return splitTopLevel(routine[1]).every((x) => isCreatedRoutine(x, created));
-  const type = /^(?:TYPE|DOMAIN) (.+)$/.exec(target);
+  const type = /^(?:TYPE|DOMAIN) (.+)$/i.exec(target);
   if (type) return splitTopLevel(type[1]).every((x) => created.types.has(objName(x)));
-  if (/^(DATABASE|LANGUAGE|PARAMETER|LARGE OBJECT|FOREIGN|TABLESPACE|ALL )/.test(target)) return false;
-  const rel = /^(?:TABLE |SEQUENCE )?(.+)$/.exec(target)!;
+  if (/^(DATABASE|LANGUAGE|PARAMETER|LARGE OBJECT|FOREIGN|TABLESPACE|ALL )/i.test(target)) return false;
+  const rel = /^(?:TABLE |SEQUENCE )?(.+)$/i.exec(target)!;
   return splitTopLevel(rel[1]).every((x) => /^[^ ()]+$/.test(x.trim()) && created.relations.has(objName(x)));
 }
 
@@ -418,7 +436,7 @@ function isExpandStatement(stmt: Statement, sql: string, created: CreatedObjects
   // Revoking from PUBLIC is expand only on objects this file created (round 16
   // M1; before, every PUBLIC revoke counted as narrowing — but the running
   // release may rely on PUBLIC defaults such as CONNECT on the database).
-  if (isRevokeOnCreated(u, created)) return true;
+  if (isRevokeOnCreated(stmt.text, created)) return true;
   if (READ_ONLY_GUARD_FUNCTIONS.test(u) && !/ FROM /.test(u)) return true;
   if (/^DO( LANGUAGE \S+)? \$/.test(u) || u === 'DO') return hasMarker(sql, stmt.start, 'do');
   return false;
@@ -432,7 +450,7 @@ export function findNonExpandStatement(sql: string): string | null {
   const created = newCreated();
   for (const stmt of splitStatements(sql)) {
     if (!isExpandStatement(stmt, sql, created)) return stmt.norm;
-    recordCreated(stmt.norm, created);
+    recordCreated(stmt.text, created);
   }
   return null;
 }
