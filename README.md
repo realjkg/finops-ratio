@@ -137,7 +137,8 @@ denominator FOCUS does not model (R4).
 version in the canonical v1.0–v1.4 range and emits rows shaped to whichever one
 was agreed — the negotiated version is signed into the session token, so the
 export cannot quietly ignore it. A version outside that range returns `409`
-naming both sides.
+with the supported range (`supported: ["1.0", …, "1.4"]`); the requested
+value is never echoed.
 
 **Trust boundary.** `FINIO_PEER_TOKEN` gates the handshake; when it is unset the
 handshake does not enforce a peer token, so the offline demo runs with zero
