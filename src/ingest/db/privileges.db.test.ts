@@ -740,6 +740,24 @@ describe('round 8 L1: per-database / per-role setting defaults (pg_db_role_setti
     expect(await settingRows(c)).toBe(before);
   });
 
+  it('a security-relevant default for ANY role in this database (not only ratio roles) is refused (rolled back)', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    const before = await settingRows(c);
+    const other = `ratio_probe_other_${Math.random().toString(16).slice(2, 10)}`;
+    await c.query('BEGIN');
+    try {
+      await c.query(`CREATE ROLE ${other} NOLOGIN`);
+      await c.query(`DO $$ BEGIN EXECUTE format('ALTER ROLE ${other} IN DATABASE %I SET row_security = off', current_database()); END $$`);
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(new RegExp(`setting row_security=off for role ${other} in database`));
+    } finally {
+      await c.query('ROLLBACK');
+    }
+    expect(await settingRows(c)).toBe(before);
+  });
+
   it('a benign per-database default (statement_timeout) is not flagged', async () => {
     const { assertReviewedPrivileges } = await model();
     const db = await createTestDatabase({ migrate: true });
