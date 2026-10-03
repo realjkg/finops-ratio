@@ -43,7 +43,7 @@ const EXIT_BUSY = 4;
 const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH']);
 
 function exitCodeFor(code: string): number {
-  if (code === 'ALREADY_RUNNING') return EXIT_BUSY;
+  if (code === 'ALREADY_RUNNING' || code === 'LOCK_TIMEOUT') return EXIT_BUSY;
   if (USAGE_CODES.has(code)) return EXIT_USAGE;
   return EXIT_FAIL;
 }
@@ -193,7 +193,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
   }
 
   if (!cfg.databaseUrl) return fail(new IngestError('CONFIG_INVALID', 'RATIO_DATABASE_URL is not set'));
-  const pool: Pool = createWorkerPool(cfg.databaseUrl, { max: 4 });
+  const pool: Pool = createWorkerPool(cfg.databaseUrl, { max: 4, ...cfg.db });
   const clients: S3Client[] = [];
   const s3 = (which: 'source' | 'evidence') => {
     const c = makeS3Client(which === 'source' ? cfg.sourceS3 : cfg.evidenceS3);

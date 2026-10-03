@@ -61,7 +61,17 @@ export interface S3Settings {
   connectTimeoutMs: number;
 }
 
+/** Session timeouts applied to every worker/doctor database connection (L-b). */
+export interface DbSessionSettings {
+  lockTimeoutMs: number;
+  idleInTransactionTimeoutMs: number;
+  statementTimeoutMs: number;
+}
+
+export const DEFAULT_DB_SESSION: DbSessionSettings = { lockTimeoutMs: 30_000, idleInTransactionTimeoutMs: 300_000, statementTimeoutMs: 1_800_000 };
+
 export interface WorkerConfig {
+  db: DbSessionSettings;
   env: RatioEnv;
   nodeEnv: string | undefined;
   databaseUrl: string | undefined;
@@ -170,6 +180,11 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
   if (retryMaxMs < retryBaseMs) fail('RATIO_RETRY_MAX_MS must be >= RATIO_RETRY_BASE_MS');
 
   return {
+    db: {
+      lockTimeoutMs: int(env, 'RATIO_DB_LOCK_TIMEOUT_MS', DEFAULT_DB_SESSION.lockTimeoutMs, 1, 3_600_000),
+      idleInTransactionTimeoutMs: int(env, 'RATIO_DB_IDLE_IN_TX_TIMEOUT_MS', DEFAULT_DB_SESSION.idleInTransactionTimeoutMs, 1000, 86_400_000),
+      statementTimeoutMs: int(env, 'RATIO_DB_STATEMENT_TIMEOUT_MS', DEFAULT_DB_SESSION.statementTimeoutMs, 1, 86_400_000),
+    },
     env: ratioEnv,
     nodeEnv: env.NODE_ENV,
     databaseUrl: env.RATIO_DATABASE_URL || undefined,

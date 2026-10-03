@@ -67,6 +67,21 @@ export async function acquireRun(
   sourceKey: string,
   opts: { kind: RunKind; ttlSeconds: number; periodFrom?: string; periodTo?: string; stats?: Record<string, unknown> },
 ): Promise<{ lease: Lease; source: SourceRow; abandoned: string[]; discardedBatches: number }> {
+  try {
+    return await acquireRunTx(pool, tenantId, sourceKey, opts);
+  } catch (e) {
+    // lock_timeout while waiting for another (possibly stuck) run's lock: fail visibly, change nothing.
+    if ((e as { code?: unknown })?.code === '55P03') throw new IngestError('LOCK_TIMEOUT', 'timed out waiting for a lock held by another run on this source', { cause: e });
+    throw e;
+  }
+}
+
+async function acquireRunTx(
+  pool: Pool,
+  tenantId: string,
+  sourceKey: string,
+  opts: { kind: RunKind; ttlSeconds: number; periodFrom?: string; periodTo?: string; stats?: Record<string, unknown> },
+): Promise<{ lease: Lease; source: SourceRow; abandoned: string[]; discardedBatches: number }> {
   return withTenantTransaction(pool, tenantId, async (c) => {
     const source = await loadSource(c, sourceKey);
     if (!source.enabled) throw new IngestError('SOURCE_DISABLED', 'source is disabled');

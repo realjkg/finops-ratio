@@ -3,9 +3,22 @@
 // never able to become one, never the schema owner, and a ratio_worker member.
 import { Pool } from 'pg';
 import { IngestError } from '../errors';
+import { DEFAULT_DB_SESSION } from '../config';
 
-export function createWorkerPool(url: string, opts: { max?: number; readOnly?: boolean; applicationName?: string } = {}): Pool {
-  const options = ['-c timezone=UTC', ...(opts.readOnly ? ['-c default_transaction_read_only=on'] : [])].join(' ');
+export function createWorkerPool(
+  url: string,
+  opts: { max?: number; readOnly?: boolean; applicationName?: string; lockTimeoutMs?: number; idleInTransactionTimeoutMs?: number; statementTimeoutMs?: number } = {},
+): Pool {
+  // Session timeouts (L-b): a lock held by a stuck run, an abandoned open
+  // transaction, or a runaway statement can never block a worker indefinitely.
+  const int = (v: number | undefined, d: number) => (Number.isSafeInteger(v) && (v as number) > 0 ? (v as number) : d);
+  const options = [
+    '-c timezone=UTC',
+    `-c lock_timeout=${int(opts.lockTimeoutMs, DEFAULT_DB_SESSION.lockTimeoutMs)}`,
+    `-c idle_in_transaction_session_timeout=${int(opts.idleInTransactionTimeoutMs, DEFAULT_DB_SESSION.idleInTransactionTimeoutMs)}`,
+    `-c statement_timeout=${int(opts.statementTimeoutMs, DEFAULT_DB_SESSION.statementTimeoutMs)}`,
+    ...(opts.readOnly ? ['-c default_transaction_read_only=on'] : []),
+  ].join(' ');
   const pool = new Pool({
     connectionString: url,
     max: opts.max ?? 4,
