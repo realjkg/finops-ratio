@@ -96,4 +96,32 @@ describe('loadWorkerConfig', () => {
       expect(String((e as Error).message)).not.toContain('topsecretpw');
     }
   });
+
+  it('stall watchdog and maximum run duration have defaults and bounds (M-1)', () => {
+    const c = loadWorkerConfig(base);
+    expect(c.settings.stallTimeoutSeconds).toBe(120);
+    expect(c.settings.maxRunSeconds).toBe(6 * 3600);
+    expect(loadWorkerConfig({ ...base, RATIO_STALL_TIMEOUT_SECONDS: '30', RATIO_MAX_RUN_SECONDS: '600' }).settings).toMatchObject({ stallTimeoutSeconds: 30, maxRunSeconds: 600 });
+    for (const [k, v] of [
+      ['RATIO_STALL_TIMEOUT_SECONDS', '0'],
+      ['RATIO_STALL_TIMEOUT_SECONDS', '3601'],
+      ['RATIO_MAX_RUN_SECONDS', '59'],
+    ]) {
+      expect(() => loadWorkerConfig({ ...base, [k]: v }), `${k}=${v}`).toThrow(expect.objectContaining({ code: 'CONFIG_INVALID' }));
+    }
+  });
+
+  it('L3: test-only switches refuse to activate when RATIO_ENV is staging or production, even with NODE_ENV=test', () => {
+    for (const ratioEnv of ['staging', 'production']) {
+      expect(() => loadWorkerConfig({ ...base, NODE_ENV: 'test', RATIO_ENV: ratioEnv, RATIO_TEST_PAUSE_AFTER_ROWS: '5' }), ratioEnv).toThrow(
+        expect.objectContaining({ code: 'TEST_HOOK_NOT_ALLOWED' }),
+      );
+      expect(loadWorkerConfig({ ...base, NODE_ENV: 'test', RATIO_ENV: ratioEnv, RATIO_ALLOW_FAKE_SOURCE: '1' }).allowFakeSource, ratioEnv).toBe(false);
+      expect(() => assertFakeSourceAllowed({ NODE_ENV: 'test', RATIO_ENV: ratioEnv, RATIO_ALLOW_FAKE_SOURCE: '1' }), ratioEnv).toThrow(
+        expect.objectContaining({ code: 'FAKE_SOURCE_NOT_ALLOWED' }),
+      );
+    }
+    expect(loadWorkerConfig({ ...base, NODE_ENV: 'test', RATIO_ENV: 'test', RATIO_TEST_PAUSE_AFTER_ROWS: '5' }).testPauseAfterRows).toBe(5);
+    expect(() => assertFakeSourceAllowed({ NODE_ENV: 'test', RATIO_ENV: 'test', RATIO_ALLOW_FAKE_SOURCE: '1' })).not.toThrow();
+  });
 });

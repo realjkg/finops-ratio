@@ -296,7 +296,7 @@ describe('sync: reconciliation', () => {
 describe('sync: bad input ⇒ quarantined, nothing published', () => {
   const header = [...FOCUS_HEADER];
   const without = (col: string) => header.filter((h) => h !== col);
-  type Case = { name: string; artifacts: () => Array<[string, Buffer]>; code: string; rowLevel: boolean; limits?: Record<string, number> };
+  type Case = { name: string; artifacts: () => Array<[string, Buffer]>; code: string; rowLevel: boolean; limits?: Record<string, number>; leak?: string };
   const cases: Case[] = [
     ...['BilledCost', 'BillingCurrency', 'ChargePeriodStart', 'ChargePeriodEnd', 'BillingPeriodStart'].map((col) => ({
       name: `missing column ${col}`,
@@ -311,6 +311,10 @@ describe('sync: bad input ⇒ quarantined, nothing published', () => {
     { name: 'row of another billing period', artifacts: () => [['r/a.csv.gz', csvGz([focusRow(P), focusRow(P, { BillingPeriodStart: '2026-06-01T00:00:00Z' })])]], code: 'PERIOD_MISMATCH', rowLevel: true },
     { name: 'inverted charge period', artifacts: () => [['r/a.csv.gz', csvGz([focusRow(P, { ChargePeriodStart: '2026-07-05T00:00:00Z', ChargePeriodEnd: '2026-07-04T00:00:00Z' })])]], code: 'CHARGE_PERIOD_INVERTED', rowLevel: true },
     { name: 'bad currency', artifacts: () => [['r/a.csv.gz', csvGz([focusRow(P, { BillingCurrency: 'US$' })])]], code: 'INVALID_CURRENCY', rowLevel: true },
+    // Challenger M-2: values JS used to accept that Postgres rejects.
+    { name: 'year 0000 timestamp', artifacts: () => [['r/a.csv.gz', csvGz([focusRow(P, { ChargePeriodStart: '0000-07-02T00:00:00Z' })])]], code: 'UNPARSEABLE_TIMESTAMP', rowLevel: true, leak: '0000-07-02' },
+    { name: 'NUL in a mapped column', artifacts: () => [['r/a.csv.gz', csvGz([focusRow(P, { ResourceId: 'leakmarker-res\u0000x' })])]], code: 'INVALID_CHARACTER', rowLevel: true, leak: 'leakmarker-res' },
+    { name: 'NUL in an extra column', artifacts: () => [['r/a.csv.gz', csvGz([focusRow(P, { Tags: '{"k":"leakmarker-tag\u0000"}' })])]], code: 'INVALID_CHARACTER', rowLevel: true, leak: 'leakmarker-tag' },
     { name: 'inconsistent column count', artifacts: () => [['r/a.csv.gz', gz(toCsv([focusRow(P)]) + '1.00,short\n')]], code: 'CSV_PARSE_ERROR', rowLevel: true },
     { name: 'invalid gzip', artifacts: () => [['r/a.csv.gz', Buffer.from('this is not gzip at all')]], code: 'INVALID_GZIP', rowLevel: true },
     { name: 'parquet artifact', artifacts: () => [['r/a.snappy.parquet', Buffer.from('PAR1....PAR1')]], code: 'UNSUPPORTED_FORMAT', rowLevel: true },
@@ -360,6 +364,17 @@ describe('sync: bad input ⇒ quarantined, nothing published', () => {
       expect(await checkpointOf(t.db.pool, s.tenantId, s.sourceId)).toEqual(cpBefore);
       const run = (await runsOf(t.db.pool, s.tenantId, s.sourceId)).at(-1)!;
       expect(run.status).toBe('failed');
+      if (c.leak) {
+        const persisted = await t.db.pool.query(
+          `SELECT coalesce(string_agg(x, ' '), '') AS t FROM (
+             SELECT error_detail || ' ' || stats::text AS x FROM ratio.sync_runs WHERE tenant_id = $1
+             UNION ALL SELECT quarantine_reason FROM ratio.ingest_batches WHERE tenant_id = $1
+             UNION ALL SELECT message FROM ratio.ingest_validation_errors WHERE tenant_id = $1) q`,
+          [s.tenantId],
+        );
+        expect(persisted.rows[0].t).not.toContain(c.leak);
+        expect(JSON.stringify(r)).not.toContain(c.leak);
+      }
 
       // Deterministic: the same bad set again is not re-processed into a second batch.
       const again = await sync(s, source, c.limits ? { settings: { limits: c.limits } } : {});
@@ -397,3 +412,62 @@ describe('sync: bad input ⇒ quarantined, nothing published', () => {
     expect(JSON.stringify(report)).not.toContain('"bad"');
   });
 });
+
+describe('Postgres-rejected values never leak and never strand a batch (M-2)', () => {
+  // Superuser-installed test triggers make Postgres itself reject marked rows, so
+  // these cover values the validator does not catch. Message text includes the value.
+  beforeAll(async () => {
+    await t.db.pool.query(`
+      CREATE FUNCTION public.s1_poison() RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF NEW.resource_id LIKE 'poison22-%' THEN RAISE EXCEPTION 'value % is out of range', NEW.resource_id USING ERRCODE = '22003'; END IF;
+        IF NEW.resource_id LIKE 'poisonxx-%' THEN RAISE EXCEPTION 'value % is not allowed here', NEW.resource_id USING ERRCODE = 'P0001'; END IF;
+        RETURN NEW;
+      END $fn$`);
+    await t.db.pool.query(`CREATE TRIGGER s1_poison BEFORE INSERT ON ratio.cost_facts FOR EACH ROW EXECUTE FUNCTION public.s1_poison()`);
+  });
+
+  async function persistedText(tenantId: string): Promise<string> {
+    const r = await t.db.pool.query(
+      `SELECT coalesce(string_agg(x, ' '), '') AS t FROM (
+         SELECT coalesce(error_detail, '') || ' ' || stats::text AS x FROM ratio.sync_runs WHERE tenant_id = $1
+         UNION ALL SELECT coalesce(quarantine_reason, '') FROM ratio.ingest_batches WHERE tenant_id = $1
+         UNION ALL SELECT message FROM ratio.ingest_validation_errors WHERE tenant_id = $1) q`,
+      [tenantId],
+    );
+    return r.rows[0].t;
+  }
+
+  it('M2-backstop: a class-22 rejection by Postgres quarantines the batch with a code-only error; the value is never persisted', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const source = new FakeFocusSource([period(P, [['r0/good.csv.gz', csvGz(rowsOf(P, 1, '7.77'))]])]);
+    await sync(s, source);
+    const before = await publishedTotals(t.db.pool, s.tenantId, s.sourceId);
+    source.setPeriods([period(P, [['r1/a.csv.gz', csvGz([...rowsOf(P, 2), focusRow(P, { ResourceId: 'poison22-SECRETVALUE' })])]])]);
+    const r = await sync(s, source);
+    expect(r.status).toBe('failed');
+    expect(r.periods[0]).toMatchObject({ outcome: 'quarantined' });
+    const b = await batchesOf(t.db.pool, s.tenantId, s.sourceId);
+    expect(b.map((x) => x.status)).toEqual(['published', 'quarantined']);
+    const errs = await t.db.pool.query(`SELECT code, message FROM ratio.ingest_validation_errors WHERE batch_id = $1`, [b[1].id]);
+    expect(errs.rows).toEqual([expect.objectContaining({ code: 'DB_REJECTED_VALUE' })]);
+    expect(errs.rows[0].message).toMatch(/SQLSTATE 22003/);
+    expect(await persistedText(s.tenantId)).not.toContain('SECRETVALUE');
+    expect(JSON.stringify(r)).not.toContain('SECRETVALUE');
+    expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual(before);
+  });
+
+  it('M2-generic: any other database error fails the period with a code and generic text only (no raw pg message anywhere)', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const r = await sync(s, new FakeFocusSource([period(P, [['r/a.csv.gz', csvGz([focusRow(P, { ResourceId: 'poisonxx-SECRETVALUE' })])]])]));
+    expect(r.status).toBe('failed');
+    expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'DB_P0001' });
+    expect(r.periods[0].message).toMatch(/SQLSTATE P0001/);
+    expect(JSON.stringify(r)).not.toContain('SECRETVALUE');
+    expect(JSON.stringify(r)).not.toContain('not allowed here');
+    const persisted = await persistedText(s.tenantId);
+    expect(persisted).not.toContain('SECRETVALUE');
+    expect(persisted).not.toContain('not allowed here');
+  });
+});
+

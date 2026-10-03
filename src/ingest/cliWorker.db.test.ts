@@ -12,6 +12,7 @@ import { createTestBucket, requireTestS3Endpoint, testS3Env, TEST_S3_SECRET_ACCE
 // Fail the whole file at collection time (not "skipped" tests) when no S3 endpoint is configured.
 requireTestS3Endpoint();
 import { cli } from './testing/cli';
+import { csvGz, focusRow } from './testing/focusCsv';
 
 let t: WorkerTestDb;
 let evidence: TestBucket;
@@ -206,4 +207,36 @@ describe('worker CLI (real Postgres + S3)', () => {
     }
     expect(new Set(tenants).size).toBe(2);
   });
+
+  it('K6 (M-2) rejected values never appear in the CLI evidence record, logs, error_detail or stats', async () => {
+    await t.db.pool.query(`
+      CREATE FUNCTION public.s1_cli_poison() RETURNS trigger LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF NEW.resource_id LIKE 'clipoison-%' THEN RAISE EXCEPTION 'value % is not allowed here', NEW.resource_id USING ERRCODE = 'P0001'; END IF;
+        RETURN NEW;
+      END $fn$`);
+    await t.db.pool.query(`CREATE TRIGGER s1_cli_poison BEFORE INSERT ON ratio.cost_facts FOR EACH ROW EXECUTE FUNCTION public.s1_cli_poison()`);
+    for (const [label, row] of [
+      ['year-0000', focusRow('2026-07-01', { ChargePeriodStart: '0000-07-02T00:00:00Z', ResourceId: 'yearzero-CELLVALUE' })],
+      ['pg-rejected', focusRow('2026-07-01', { ResourceId: 'clipoison-CELLVALUE' })],
+    ] as const) {
+      const bucket = await createTestBucket('k6');
+      buckets.push(bucket);
+      const root = bucket.at('exp/focus-export');
+      const dataKey = `${root}/data/BILLING_PERIOD=2026-07/run-1/focus-export-00001.csv.gz`;
+      await bucket.put(dataKey, csvGz([row]));
+      await bucket.put(`${root}/metadata/BILLING_PERIOD=2026-07/focus-export-Manifest.json`, JSON.stringify({ dataFiles: [dataKey] }));
+      const s = await seedTenantSource(t.db.pool, { config: { layout: 'aws-data-exports', bucket: bucket.name, prefix: bucket.at('exp'), exportName: 'focus-export' } });
+      const r = await cli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], env());
+      expect(r.code, label).toBe(1);
+      const printed = r.out.concat(r.err).join('\n');
+      expect(printed, label).not.toContain('CELLVALUE');
+      expect(printed, label).not.toContain('0000-07-02');
+      expect(printed, label).not.toContain('not allowed here');
+      const run = await t.db.pool.query(`SELECT coalesce(error_detail, '') || stats::text AS t FROM ratio.sync_runs WHERE tenant_id = $1`, [s.tenantId]);
+      expect(run.rows[0].t, label).not.toContain('CELLVALUE');
+      expect(run.rows[0].t, label).not.toContain('not allowed here');
+    }
+  });
 });
+

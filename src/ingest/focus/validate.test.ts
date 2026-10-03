@@ -39,7 +39,7 @@ describe('parseFocusTimestamp', () => {
     expect(parseFocusTimestamp('2026-07-01')?.iso).toBe('2026-07-01T00:00:00Z');
   });
   it('rejects malformed and impossible timestamps', () => {
-    for (const s of ['', 'yesterday', '2026-13-01T00:00:00Z', '2026-02-30T00:00:00Z', '2026-07-01T24:00:00Z', '2026-07-01T00:60:00Z', '07/01/2026', '2026-7-1', '2026-07-01T00:00:00+25:00']) {
+    for (const s of ['', 'yesterday', '0000-07-02T00:00:00Z', '0000-01-01', '2026-13-01T00:00:00Z', '2026-02-30T00:00:00Z', '2026-07-01T24:00:00Z', '2026-07-01T00:60:00Z', '07/01/2026', '2026-7-1', '2026-07-01T00:00:00+25:00']) {
       expect(parseFocusTimestamp(s), s).toBeNull();
     }
   });
@@ -57,6 +57,12 @@ describe('indexHeader', () => {
     expect(none.ok).toBe(false);
     if (!none.ok) expect(none.errors.map((e) => e.column).sort()).toEqual([...REQUIRED_COLUMNS].sort());
   });
+  it('rejects control characters in header names (M-2)', () => {
+    const r = indexHeader([...FOCUS_HEADER, 'Bad\u0000Name']);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors).toContainEqual(expect.objectContaining({ code: 'INVALID_CHARACTER' }));
+  });
+
   it('rejects duplicate column names', () => {
     const r = indexHeader([...FOCUS_HEADER, 'BilledCost']);
     expect(r.ok).toBe(false);
@@ -116,6 +122,30 @@ describe('validateRow', () => {
       }
     });
   }
+
+  it('rejects year 0000 timestamps (Postgres cannot store them) (M-2)', () => {
+    const r = validateRow(values(focusRow(P, { ChargePeriodStart: '0000-07-02T00:00:00Z' })), index, P);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors).toContainEqual(expect.objectContaining({ column: 'ChargePeriodStart', code: 'UNPARSEABLE_TIMESTAMP' }));
+  });
+
+  it('rejects NUL and other C0 control characters in any cell; allows TAB, CR and LF (M-2)', () => {
+    for (const [col, v] of [
+      ['ResourceId', 'res\u0000x'],
+      ['Tags', '{"a":"\u0000"}'],
+      ['ServiceName', 'svc\u0007'],
+      ['ChargeCategory', 'Us\u001fage'],
+    ]) {
+      const r = validateRow(values(focusRow(P, { [col]: v })), index, P);
+      expect(r.ok, col).toBe(false);
+      if (!r.ok) {
+        expect(r.errors).toContainEqual(expect.objectContaining({ column: col, code: 'INVALID_CHARACTER' }));
+        for (const e of r.errors) expect(e.message).not.toContain(v);
+      }
+    }
+    const ok = validateRow(values(focusRow(P, { ResourceId: 'multi\tline\r\nvalue' })), index, P);
+    expect(ok.ok).toBe(true);
+  });
 
   it('accepts BillingPeriodStart expressed with an equivalent offset', () => {
     const r = validateRow(values(focusRow(P, { BillingPeriodStart: '2026-07-01T00:00:00+00:00' })), index, P);

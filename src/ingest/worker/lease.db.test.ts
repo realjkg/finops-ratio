@@ -8,6 +8,8 @@ import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup
 import { batchesOf, expireLeases, publishedAs, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
 import { csvGz, rowsOf } from '../testing/focusCsv';
 import { SimulatedCrash } from './types';
+import type { ArtifactRef } from '../sources/types';
+import type { Readable } from 'stream';
 
 let t: WorkerTestDb;
 beforeAll(async () => {
@@ -178,4 +180,58 @@ describe('leases and concurrency', () => {
     const recovered = await sync(s, new FakeFocusSource([period('r/a.csv.gz', csvGz(rowsOf(P, 3)))]));
     expect(recovered.status).toBe('succeeded');
   });
+
+  it('L1 (challenger) acquiring source X never deletes source Y\'s staged batch in the same tenant', async () => {
+    const x = await seedTenantSource(t.db.pool, { sourceKey: 'src-x' });
+    const y = await seedTenantSource(t.db.pool, { tenantId: x.tenantId, sourceKey: 'src-y' });
+    const g = gate();
+    let reached!: () => void;
+    const yPaused = new Promise<void>((r) => (reached = r));
+    let chunks = 0;
+    const runY = sync(y, new FakeFocusSource([period('y/a.csv.gz', csvGz(rowsOf(P, 4, '3.00', 'y')))]), {
+      settings: { limits: { insertChunkRows: 2 } },
+      hooks: {
+        afterChunk: async () => {
+          chunks++;
+          if (chunks === 1) {
+            reached();
+            await g.released;
+          }
+        },
+      },
+    });
+    await yPaused;
+    const yStaged = await batchesOf(t.db.pool, y.tenantId, y.sourceId);
+    expect(yStaged.map((b) => b.status)).toEqual(['staged']);
+    const rx = await sync(x, new FakeFocusSource([period('x/a.csv.gz', csvGz(rowsOf(P, 1, '1.00', 'x')))]));
+    expect(rx.status).toBe('succeeded');
+    const stillThere = await t.db.pool.query(`SELECT count(*)::int AS n FROM ratio.cost_facts WHERE batch_id = $1`, [yStaged[0].id]);
+    expect(stillThere.rows[0].n).toBe(2);
+    g.release();
+    expect((await runY).status).toBe('succeeded');
+    expect(await publishedTotals(t.db.pool, y.tenantId, y.sourceId)).toEqual({ [P]: { rows: 4, total: '12.00' } });
+    expect(await publishedTotals(t.db.pool, x.tenantId, x.sourceId)).toEqual({ [P]: { rows: 1, total: '1.00' } });
+  });
+
+  it('L2 (challenger) a zombie whose lease expired cannot record a retry (attempt and retries unchanged)', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    class ExpiringFailingSource extends FakeFocusSource {
+      calls = 0;
+      async openArtifact(ref: ArtifactRef): Promise<Readable> {
+        this.calls++;
+        if (this.calls === 1) {
+          await expireLeases(t.db.pool, s.tenantId, s.sourceId);
+          throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+        }
+        return super.openArtifact(ref);
+      }
+    }
+    const src = new ExpiringFailingSource([period('r/a.csv.gz', csvGz(rowsOf(P, 1)))]);
+    await expect(sync(s, src, { settings: { maxAttempts: 3 } })).rejects.toMatchObject({ code: 'LEASE_LOST' });
+    const run = (await runsOf(t.db.pool, s.tenantId, s.sourceId))[0];
+    expect(run.attempt).toBe(1);
+    expect((run.stats as { retries?: unknown[] }).retries ?? []).toEqual([]);
+    expect(src.calls).toBe(1);
+  });
 });
+
