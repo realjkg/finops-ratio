@@ -115,6 +115,30 @@ describe('M2: control-mismatch quarantines recover when the controls are correct
     expect((await batchesOf(t.db.pool, s.tenantId, s.sourceId))).toHaveLength(2);
   });
 
+  it('an UN-KEYED RECONCILIATION_VARIANCE quarantine (no [controls:...] recorded) stays quarantined (challenger Low 1)', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    // Plant a control quarantine of this exact data whose reason carries no control key.
+    const run = crypto.randomUUID();
+    const batch = crypto.randomUUID();
+    const dataFingerprint = sha(Buffer.from(sha(DATA))); // setFingerprint over the single artifact hash
+    await t.db.pool.query(
+      `INSERT INTO ratio.sync_runs (tenant_id, id, source_id, run_kind, status, started_at, finished_at)
+       VALUES ($1, $2, $3, 'scheduled', 'failed', now(), now())`,
+      [s.tenantId, run, s.sourceId],
+    );
+    await t.db.pool.query(
+      `INSERT INTO ratio.ingest_batches (tenant_id, id, source_id, run_id, billing_period, artifact_set_fingerprint, status, is_provisional, control_row_count)
+       VALUES ($1, $2, $3, $4, $5, $6, 'staged', false, 99)`,
+      [s.tenantId, batch, s.sourceId, run, P, dataFingerprint],
+    );
+    await t.db.pool.query(`UPDATE ratio.ingest_batches SET status = 'quarantined', quarantine_reason = 'RECONCILIATION_VARIANCE: row count 3 != control 99' WHERE id = $1`, [batch]);
+
+    const source = new FakeFocusSource([period('r/a.csv.gz', DATA, { rowCount: 3, billedTotal: '3.00' })]);
+    const r = await sync(s, source);
+    expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'BATCH_QUARANTINED', batchId: batch });
+    expect((await batchesOf(t.db.pool, s.tenantId, s.sourceId)).map((b) => b.status)).toEqual(['quarantined']);
+  });
+
   it('a DATA-defect quarantine stays quarantined whatever the controls say', async () => {
     const s = await seedTenantSource(t.db.pool);
     const BAD = csvGz([focusRow(P, { BilledCost: 'oops' })]);
