@@ -112,6 +112,38 @@ describe('M3: opening a source artifact is abort-aware', () => {
   });
 });
 
+describe('M3/M5: the open deadline itself is abort-aware (a transport that ignores the signal)', () => {
+  const never = () => new Promise<never>(() => undefined);
+  class DeafOpen extends FakeFocusSource {
+    async openArtifact(): Promise<Readable> {
+      return never();
+    }
+  }
+  class DeafEvidenceOpen extends MemoryEvidenceStore {
+    async open(): Promise<Readable> {
+      return never();
+    }
+  }
+  const settings = { maxRunSeconds: 1, stallTimeoutSeconds: 6 } as RunSyncOptions['settings'];
+  const set = [{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P, 2)) }] }];
+
+  it('source: an open that ignores the signal still fails MAX_RUN_EXCEEDED at the deadline (not SOURCE_STALLED)', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const started = Date.now();
+    const r = await sync(s, new DeafOpen(set), { settings });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'MAX_RUN_EXCEEDED' });
+  });
+
+  it('evidence: an open that ignores the signal still fails MAX_RUN_EXCEEDED at the deadline (not EVIDENCE_STALLED)', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const started = Date.now();
+    const r = await runSync({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourceKey, source: new FakeFocusSource(set), evidence: new DeafEvidenceOpen(), mode: 'sync', settings, hooks: noSleep });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'MAX_RUN_EXCEEDED' });
+  });
+});
+
 describe('M5: opening an evidence object is abort-aware', () => {
   class HangingEvidenceOpen extends MemoryEvidenceStore {
     sawSignal = false;
