@@ -89,6 +89,10 @@ describe('query and fragment', () => {
   it('JSON-escaped: an @ after an escaped slash is path, not userinfo (host kept)', () => {
     const out = redactUpstreamText(String.raw`{"u":"https:\/\/host.example\/users\/bob@corp.example"}`, 500);
     expect(out).toContain(String.raw`https:\/\/host.example\/users\/bob@corp.example`);
+    // A raw backslash is a path separator (as URL parsers treat it), so an @
+    // after it is path too.
+    const win = redactUpstreamText(String.raw`https://host.example\users\bob@corp.example`, 500);
+    expect(win).toBe(String.raw`https://host.example\users\bob@corp.example`);
   });
 
   it('keeps scheme, host and path; replaces the whole query', () => {
