@@ -219,3 +219,41 @@ describe('FinIO handshake peer-auth with an unreadable body', () => {
   });
 });
 
+// --- Round 7: a 200 whose body is not valid JSON ------------------------------
+// A proxy / captive portal can answer 200 with HTML, or the JSON can be cut
+// off; V8's JSON.parse errors quote the malformed text. Every client must throw
+// the fixed "<label> returned an invalid response" — never body text.
+
+const OK_MARKER = 'OK-BODY-MARKER';
+
+describe.each(CASES)('%s — 200 with an invalid body', (label, call) => {
+  it.each([
+    ['HTML page', () => new Response(`<!DOCTYPE html><html><body>${OK_MARKER} captive portal</body></html>`, { status: 200 })],
+    ['truncated JSON', () => new Response(`{"rows":[{"a":"${OK_MARKER}`, { status: 200 })],
+    ['JSON with a bad token', () => new Response(`{"a": ${OK_MARKER}}`, { status: 200 })],
+    [
+      'erroring body stream',
+      () =>
+        new Response(
+          new ReadableStream({
+            start(c) {
+              c.error(new Error(`${OK_MARKER} stream reset`));
+            },
+          }),
+          { status: 200 },
+        ),
+    ],
+  ] as const)('%s → fixed "<label> returned an invalid response"', async (_k, make) => {
+    vi.stubGlobal('fetch', vi.fn(async () => make()));
+    const err = (await call().then(
+      () => {
+        throw new Error('expected a rejection');
+      },
+      (e: unknown) => e,
+    )) as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe(`${label} returned an invalid response`);
+    expect(err.message).not.toContain(OK_MARKER);
+  });
+});
+
