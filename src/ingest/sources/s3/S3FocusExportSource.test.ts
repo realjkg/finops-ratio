@@ -156,5 +156,24 @@ describe('S3FocusExportSource listing is abortable (Copilot M3)', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(sends).toBe(n);
   });
-});
 
+  it('a transport that does not honour the abort signal: the abort check BETWEEN pages still stops the listing (no request after the abort)', async () => {
+    let sends = 0;
+    let sendsAfterAbort = 0;
+    const ac = new AbortController();
+    const client = {
+      async send() {
+        sends++;
+        if (ac.signal.aborted) sendsAfterAbort++;
+        await new Promise((r) => setTimeout(r, 5)); // completes regardless of the signal
+        // Bounded so that a missing check fails the assertions instead of hanging the test.
+        return { CommonPrefixes: [], Contents: [], IsTruncated: sends < 400, NextContinuationToken: `t${sends}` };
+      },
+    } as unknown as S3Client;
+    const src = new S3FocusExportSource({ client, location: LOC });
+    setTimeout(() => ac.abort(new Error('deadline')), 100);
+    await expect(src.listPeriods(undefined, { signal: ac.signal })).rejects.toThrow('deadline');
+    expect(sends).toBeGreaterThan(2);
+    expect(sendsAfterAbort).toBe(0);
+  });
+});
