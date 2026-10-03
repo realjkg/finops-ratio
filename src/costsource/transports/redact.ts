@@ -9,8 +9,9 @@
 // a credential-shaped value (>= 16 token chars, >= 8 with a digit, or base64
 // user:pass — prose is left alone), GitHub tokens, sk- / sk-proj- keys, AWS
 // secret access keys, access / refresh / id / session / private tokens, access
-// keys, client secrets, API keys, passwords, secrets and tokens in JSON and
-// k=v form, bare token=, bare SAS parameters, and AWS access key ids (AKIA… /
+// keys, client secrets, API keys, passwords (password / passwd / pwd),
+// secrets, tokens and X-FinIO-Session values in JSON and k=v form — also with
+// an env-style prefix (RATIO_API_TOKEN=, SERVICENOW_PASSWORD=), bare token=, bare SAS parameters, and AWS access key ids (AKIA… /
 // ASIA…). Redaction runs BEFORE truncation, so a
 // cut can never leave a partial secret that no longer matches.
 
@@ -24,7 +25,12 @@ const SAS_RE = new RegExp(`\\b(${SAS_PARAMS.join('|')})=[^&\\s"'<>]*`, 'gi');
 // Credential-bearing field names, matched in JSON ("key": "value") and k=v forms.
 const SECRET_KEYS =
   'aws[_-]?secret[_-]?access[_-]?key|access_token|refresh_token|id_token|session_token|private_token|' +
-  'access_key|client_secret|api[_-]?key|password|secret|token';
+  'access_key|client_secret|api[_-]?key|password|passwd|pwd|secret|token|x-finio-session';
+
+// A key may carry an env-style prefix: RATIO_API_TOKEN, JIRA_API_TOKEN,
+// FINIO_PEER_TOKEN, SERVICENOW_PASSWORD, DB_PWD … (`\b` alone cannot match
+// after `_`, which is a word character).
+const KEY_PREFIX = '(?:[A-Za-z0-9_]*_)?';
 
 /** `user:pass` encoded as base64 (Basic credentials). */
 function isBasicCredential(v: string): boolean {
@@ -49,8 +55,11 @@ function credentialShaped(scheme: string, v: string): boolean {
 }
 
 const FREE_TEXT_AUTH_RE = /\b(Bearer|Basic)\s+(["']?)([A-Za-z0-9._~+/=-]+)\2/gi;
-const JSON_SECRET_RE = new RegExp(`("(?:${SECRET_KEYS})"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`, 'gi');
-const KV_SECRET_RE = new RegExp(`\\b((?:${SECRET_KEYS})\\s*[=:]\\s*)(?!\\[REDACTED)[^\\s&;,"'<>]+`, 'gi');
+const JSON_SECRET_RE = new RegExp(`("${KEY_PREFIX}(?:${SECRET_KEYS})"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`, 'gi');
+const KV_SECRET_RE = new RegExp(
+  `\\b(${KEY_PREFIX}(?:${SECRET_KEYS})\\s*[=:]\\s*)(?!\\[REDACTED)[^\\s&;,"'<>]+`,
+  'gi',
+);
 
 /**
  * Patterns, applied in order (most specific first). Each replaces the secret
