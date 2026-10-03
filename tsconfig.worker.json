@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "types": ["node"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "rootDir": "src",
+    "outDir": "dist-worker",
+    "sourceMap": true,
+    "declaration": false,
+    "noEmit": false,
+    "incremental": false
+  },
+  "include": ["src/ingest/**/*.ts"],
+  "exclude": ["src/ingest/**/*.test.ts", "src/ingest/**/testing/**"]
+}

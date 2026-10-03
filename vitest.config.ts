@@ -12,7 +12,8 @@ export default defineConfig({
     environment: 'node',
     // Never scan Next.js build output (a prior build may have emitted compiled
     // route files that would otherwise be mistaken for test suites).
-    exclude: ['**/node_modules/**', '**/.next/**', '**/dist/**'],
+    // *.db.test.ts need Postgres and run only via `npm run test:db`.
+    exclude: ['**/node_modules/**', '**/.next/**', '**/.claude/**', '**/dist/**', '**/dist-worker/**', '**/*.db.test.ts'],
   },
   resolve: {
     alias: {

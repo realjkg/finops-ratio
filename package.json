@@ -9,7 +9,11 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:db": "vitest run --config vitest.db.config.ts && vitest run --config vitest.db.serial.config.ts",
+    "worker:build": "node -e \"require('fs').rmSync('dist-worker',{recursive:true,force:true})\" && tsc -p tsconfig.worker.json && node -e \"require('fs').cpSync('src/ingest/db/migrations','dist-worker/ingest/db/migrations',{recursive:true})\"",
+    "worker": "node dist-worker/ingest/cli.js",
+    "db:migrate": "npm run -s worker:build && node dist-worker/ingest/cli.js migrate"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
@@ -21,6 +25,7 @@
     "lottie-react": "^2.4.1",
     "next": "^16.3.6",
     "openai": "^6.45.0",
+    "pg": "^8.23.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.5"
@@ -29,6 +34,7 @@
     "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@typescript-eslint/eslint-plugin": "^8.62.1",

@@ -1,0 +1,3 @@
+# Migration checksums are over raw bytes: pin line endings so a checkout
+# on another OS cannot change an applied checksum.
+src/ingest/db/migrations/*.sql text eol=lf
