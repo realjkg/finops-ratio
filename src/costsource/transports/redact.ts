@@ -173,9 +173,11 @@ function nextUrlStart(text: string, from: number): { start: number; authStart: n
 
 /**
  * (a) Userinfo: everything between `://` and the LAST `@` before the authority
- * end is replaced, however long. The authority ends at `/ ? #` or whitespace
- * (a JSON-escaped `\/` ends it at its `/`) — NOT at a backslash: Windows /
- * NTLM `DOMAIN\user:password@proxy` credentials contain one.
+ * end is replaced, however long. The authority ends at `/ ? #`, whitespace or
+ * a quote (double, single or backtick — so a host-only URL in one JSON field
+ * never runs into the next field; an escaped `\"` ends it at its quote). A
+ * JSON-escaped `\/` ends it at its `/`. It does NOT end at a backslash:
+ * Windows / NTLM `DOMAIN\user:password@proxy` credentials contain one.
  *
  * A literal `/ ? #` inside a password (`user:pa/ss@host`) ends the authority
  * early; so when the authority contains `:` and no `@`, the userinfo is
@@ -193,15 +195,22 @@ function redactUrlUserinfo(text: string): string {
   for (let u = nextUrlStart(text, from); u; u = nextUrlStart(text, from)) {
     let i = u.authStart;
     let lastAt = -1;
-    let sawColon = false;
+    let colons = 0;
     for (; i < text.length; i += 1) {
       const c = text[i];
-      if (c === '/' || c === '?' || c === '#' || WS.test(c)) break;
+      if (c === '/' || c === '?' || c === '#' || WS.test(c) || QUOTES.includes(c)) break;
       if (c === '@') lastAt = i;
-      else if (c === ':') sawColon = true;
+      else if (c === ':') colons += 1;
     }
-    let resumeAt = Math.max(i, u.authStart);
-    if (lastAt === -1 && sawColon && i < text.length && !WS.test(text[i])) {
+    // Resume the start search right after this `//`: a URL glued to this
+    // authority (`https://a.example,http://u:p@b`) has its `//` at or after
+    // `i`, so it is never skipped — and the next authority starts past `i`,
+    // so nothing is scanned twice (linear).
+    let resumeAt = u.authStart;
+    // A `:` right before a `//` is the scheme of a URL glued to this one
+    // (`https://a.example,http://…`), not a password separator.
+    const gluedScheme = text[i - 1] === ':' && text.startsWith('//', i) ? 1 : 0;
+    if (lastAt === -1 && colons > gluedScheme && i < text.length && !WS.test(text[i])) {
       if (u.authStart >= runEnd) {
         let j = u.authStart;
         runLastAt = -1;
