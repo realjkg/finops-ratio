@@ -1,4 +1,6 @@
-// Ratio ingestion worker CLI. Slice 0 provides only the `migrate` command.
+// Ratio ingestion worker CLI. `migrate` (Slice 0) plus the worker commands
+// (Slice 1, implemented in workerCli.ts): sync, backfill, replay,
+// quarantine show, doctor, replay-fixtures.
 //
 //   migrate                     apply pending migrations (expand only)
 //   migrate --allow-contract    also apply pending contract migrations
@@ -13,6 +15,7 @@
 import { Client } from 'pg';
 import { MigrationError } from './db/migrationFiles';
 import { assertDownAllowed, migrateDown, migrateUp, migrationStatus } from './db/migrate';
+import { isWorkerCommand, recordMigrateEvidence, workerMain } from './workerCli';
 
 export interface CliIO {
   out(line: string): void;
@@ -72,6 +75,16 @@ function redactor(url: string | undefined): (s: string) => string {
 }
 
 export async function main(argv: string[], env: Env, io: CliIO): Promise<number> {
+  if (isWorkerCommand(argv[0])) return workerMain(argv, env, io);
+  const started = new Date();
+  const code = await migrateMain(argv, env, io);
+  // Evidence record for migrate goes only to RATIO_EVIDENCE_FILE, so the Slice 0
+  // stdout/stderr contract of `migrate` stays unchanged.
+  if (argv[0] === 'migrate') recordMigrateEvidence(argv.slice(1), env, started, code);
+  return code;
+}
+
+async function migrateMain(argv: string[], env: Env, io: CliIO): Promise<number> {
   const redact = redactor(env.RATIO_MIGRATE_DATABASE_URL);
   const emit = (level: 'info' | 'error', event: string, fields: Record<string, unknown> = {}) => {
     const line = redact(JSON.stringify({ ts: new Date().toISOString(), level, event, ...fields }));
