@@ -3,7 +3,10 @@
 // The workflow checks this file out from the BASE commit (never the PR head),
 // so a PR cannot change the code that classifies it.
 import { classify } from './classify-risk.mjs';
-import { decideEligibility, outsiderReason, DEFAULT_CONFIG } from './eligibility.mjs';
+import {
+  decideEligibility, decideMergeStatus, evaluateExceptionApproval, outsiderReason,
+  DEFAULT_CONFIG, ELIGIBILITY_CONTEXT, EXCEPTION_LABEL,
+} from './eligibility.mjs';
 import { REPORT_MARKER, buildReport, desiredLabels, labelChanges } from './report.mjs';
 
 const MAX_LISTED_FILES = 3000; // GitHub's hard cap for pulls.listFiles
@@ -157,6 +160,18 @@ export async function runClassify({ github, context, core }) {
     }
   }
 
+  // Any push invalidates an exception approval: drop the label (the eligibility
+  // job also rejects approvals older than the head commit).
+  const labelNames = (pr.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
+  if (context.payload.action === 'synchronize' && labelNames.includes(EXCEPTION_LABEL)) {
+    try {
+      await github.rest.issues.removeLabel({ ...repo, issue_number: pr.number, name: EXCEPTION_LABEL });
+      core.info(`${EXCEPTION_LABEL} removed (new push)`);
+    } catch (e) {
+      if (e.status !== 404) core.setFailed(`Could not remove ${EXCEPTION_LABEL} on #${pr.number}: ${e.message}`);
+    }
+  }
+
   const protection = await mainProtection(github, repo);
   const outsider = outsiderReason(prIdentity(pr));
   const report = buildReport(result, { headSha: pr.head.sha, mainProtection: protection, outsider });
@@ -249,12 +264,35 @@ export async function gatherState(github, repo, number) {
   // Unknown (API error) → null → decideEligibility fails closed.
   const unresolvedThreads = await unresolvedThreadCount(github, repo, number).catch(() => null);
 
+  // Exception approval (restricted PRs): label timeline, approver permission,
+  // head commit time. Any API failure ⇒ not approved (fail closed).
+  const labelNames = (pr.labels ?? []).map((l) => l.name);
+  let exception;
+  if (labelNames.includes(EXCEPTION_LABEL)) {
+    try {
+      const events = await github.paginate(github.rest.issues.listEvents, { ...repo, issue_number: number, per_page: 100 });
+      const logins = [...new Set(events
+        .filter((e) => e.event === 'labeled' && e.label?.name === EXCEPTION_LABEL && e.actor?.login)
+        .map((e) => e.actor.login))];
+      const roles = {};
+      for (const username of logins) {
+        const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ ...repo, username });
+        roles[username] = { permission: data.permission, role_name: data.role_name };
+      }
+      const { data: commit } = await github.rest.git.getCommit({ ...repo, commit_sha: headSha });
+      exception = evaluateExceptionApproval({ labels: labelNames, events, roles, headCommittedAt: commit.committer?.date });
+    } catch (e) {
+      exception = { approved: false, reason: `Could not verify ${EXCEPTION_LABEL} (${e.status ? `HTTP ${e.status}` : e.message}).` };
+    }
+  }
+
   // The head must not have moved while we were gathering.
   const { data: again } = await github.rest.pulls.get({ ...repo, pull_number: number });
   const moved = again.head.sha !== headSha;
 
   return {
     raw: pr,
+    latest: again,
     fresh,
     moved,
     state: {
@@ -278,6 +316,7 @@ export async function gatherState(github, repo, number) {
       statuses: (combined.statuses ?? []).map((s) => ({ context: s.context, state: s.state })),
       ciJobs,
       sharedHeadWith,
+      exception,
       reviews: reviews.map((r) => ({ login: r.user?.login, userType: r.user?.type, commitId: r.commit_id, state: r.state })),
       unresolvedThreads,
     },
@@ -317,6 +356,17 @@ export async function applyDecision(github, repo, raw, decision) {
 }
 
 export const MAX_TARGETS = 200; // GitHub matrices cap at 256 legs
+
+/** The required eligibility status on a head SHA. */
+export async function postEligibilityStatus(github, repo, sha, state, description) {
+  await github.rest.repos.createCommitStatus({
+    ...repo,
+    sha,
+    state,
+    context: ELIGIBILITY_CONTEXT,
+    description: String(description).slice(0, 140),
+  });
+}
 
 async function candidatePrs(github, context) {
   const repo = context.repo;
@@ -368,15 +418,27 @@ export async function runEligibility({ github, context, core, numbers }) {
   let errors = 0;
   for (const number of targets) {
     try {
-      const { raw, fresh, moved, state } = await gatherState(github, repo, number);
+      const { raw, latest, fresh, moved, state } = await gatherState(github, repo, number);
       if (moved) {
-        rows.push({ number, risk: fresh.risk, eligible: false, action: 'head moved during evaluation; deferred to the next event (auto-merge not enabled)', reasons: [] });
+        // Apply an ineligible decision first (never leave auto-merge armed on a
+        // head we did not evaluate), mark the new head pending, then defer.
+        let action = await applyDecision(github, repo, latest, { eligible: false, reasons: [] });
+        await postEligibilityStatus(github, repo, latest.head.sha, 'pending', 'Head moved during evaluation; re-evaluation pending.');
+        action = `head moved during evaluation; ${action}; pending status on ${latest.head.sha.slice(0, 7)}; deferred to the next event`;
+        rows.push({ number, risk: fresh.risk, eligible: false, action, reasons: [] });
         continue;
       }
       const decision = decideEligibility(state);
+      const status = decideMergeStatus(state);
+      // Auto-merge is only ever ENABLED for eligible low-risk PRs; an approved
+      // exception yields a success status, and the approver merges.
       const action = await applyDecision(github, repo, raw, decision);
       if (action.startsWith('CONFIGURATION GAP')) core.warning(`#${number}: ${action}`);
-      rows.push({ number, risk: fresh.risk, eligible: decision.eligible, action, reasons: decision.reasons });
+      await postEligibilityStatus(github, repo, state.pr.headSha, status.state, status.description);
+      rows.push({
+        number, risk: fresh.risk, eligible: decision.eligible,
+        action: `${action}; status ${status.state} (${status.mode})`, reasons: decision.reasons,
+      });
     } catch (e) {
       errors++;
       let action = `error: ${e.message}`;
@@ -384,8 +446,9 @@ export async function runEligibility({ github, context, core, numbers }) {
       try {
         const { data: raw } = await github.rest.pulls.get({ ...repo, pull_number: number });
         action += `; ${await applyDecision(github, repo, raw, { eligible: false, reasons: [] })}`;
+        await postEligibilityStatus(github, repo, raw.head.sha, 'failure', 'Eligibility evaluation error; see the Governance job summary.');
       } catch (e2) {
-        action += `; could not disable auto-merge: ${e2.message}`;
+        action += `; could not disable auto-merge / post failure status: ${e2.message}`;
       }
       rows.push({ number, risk: '?', eligible: false, action, reasons: [] });
     }

@@ -72,6 +72,12 @@ export function buildReport(result, ctx = {}) {
   lines.push('- [ ] Operational evidence complete (exact commands, results, fixture provenance, known gaps).');
   lines.push('- [ ] Rollback verified in test (procedure + result linked).');
   lines.push('- [ ] Merge decision logged with reasoning in the PR body.');
+  lines.push('', '#### Exception queue', '');
+  lines.push('This PR can only merge through the exception path. The required status `Governance · merge eligibility` stays `failure` until all of the following hold:');
+  lines.push('- A user with **admin or maintain** permission adds the label `exception:approved` after the evidence above is in place.');
+  lines.push('- Every non-risk gate passes: genuine CI on every run, a Copilot review on the head, zero unresolved threads, a same-repo PR, no shared head, not a draft, base `main`.');
+  lines.push('');
+  lines.push('Any push removes the approval, and a new approval is needed for the new head. The workflow never enables auto-merge for restricted PRs; the approver merges.');
   const ownerOnly = result.classes.filter((c) => OWNER_ONLY_CLASSES.has(c));
   if (ownerOnly.length) {
     lines.push('', `> **Owner checkpoint:** classes ${ownerOnly.map((c) => `\`${c}\``).join(', ')} may carry production-deploy or data-retention/deletion impact, which is NOT delegable to the orchestrator. Confirm there is no such impact or escalate to the owner.`);

@@ -77,14 +77,56 @@ Auto-merge (squash, pinned to the evaluated head SHA) is enabled only when
     ids (an Actions job id is its check run id). Anything else with the name
     is a spoof and blocks.
   - Commit statuses never satisfy CI.
-- Every other check run succeeded (CI-named runs are never deduplicated). Every
-  commit status is `success`. Nothing is excluded by name: the governance jobs
-  run on base-context events, so their check runs are not on the PR head SHA.
+- Every check run returned for the head SHA succeeded. No run is collapsed by
+  name, in any suite (the API's `filter=latest` already returns the latest run
+  per suite). No check run is excluded by name: the governance jobs run on
+  base-context events, so their check runs are not on the PR head SHA.
+- Every commit status is `success`, except our own `Governance · merge
+  eligibility` status, which is an output of this decision and is ignored.
 - A submitted review by `copilot-pull-request-reviewer[bot]` (type `Bot`) on
   the exact head SHA. The repository does not re-request review on push, so
   **a fresh Copilot review on the new head is required after each push**.
 - Zero unresolved review threads.
 - The head SHA did not move during evaluation.
+
+## Required eligibility status and the exception queue
+
+The eligibility job posts the commit status `Governance · merge eligibility` on
+the head SHA it evaluated. Branch protection requires this status
+(`protect-main.mjs`), so a writer who enables GitHub's native auto-merge by
+hand still cannot merge past the gate.
+
+| State | When |
+| --- | --- |
+| `success` | An eligible low-risk PR (all of the above), or a restricted PR with a valid exception approval (below). |
+| `failure` | Otherwise. The description is the top blocking reason (≤140 characters). An evaluation error also posts `failure`. |
+| `pending` | The head moved during evaluation. The job turns auto-merge off and posts `pending` on the new head, then defers. |
+
+Our own previous eligibility status is ignored when evaluating, because it is
+an output, not an input.
+
+**Exception queue (restricted PRs).** A restricted PR can only merge when all
+of the following hold:
+
+- It carries the label `exception:approved`.
+- The most recent labeled/unlabeled event for that label (from the issue events
+  timeline) is a "labeled" by a user whose repository role is **admin or
+  maintain** (checked with `getCollaboratorPermissionLevel`).
+- That event is later than the head commit's committer date.
+- Every non-risk condition holds: genuine CI on every qualifying run, a Copilot
+  review on the head, zero unresolved threads, a same-repo PR by an
+  OWNER/MEMBER/COLLABORATOR, no other open PR with the same head, not a draft,
+  base `main`.
+
+Any push invalidates the approval: the classify job removes the label on
+`synchronize`, and an approval older than the head commit is rejected. The
+workflow never enables auto-merge for restricted PRs; the approver merges.
+
+Residual risk: committer dates are set by the author, but removing the label on
+push is the primary invalidation. Like the classification status, the
+eligibility status can be posted by any workflow with `statuses: write`. A
+writer could add such a workflow in a PR, which would itself be restricted, so
+only rulesets with required workflows close this completely.
 
 The required status `Governance · risk classification` is a commit status
 posted by the classify job, accepted from any app. That is safe because it is
@@ -125,7 +167,9 @@ auto-mergeable.
   branch protection details. The report shows the branch `protected` flag and
   any ruleset required checks (`GET /rules/branches/main`).
 - **Some settings need an admin.** Branch protection and "Allow auto-merge"
-  need an admin to run `protect-main.mjs`. If auto-merge is not allowed, the
+  need an admin to run `protect-main.mjs`. It applies branch protection first
+  and only then allows auto-merge, stops at the first failed request, and exits
+  non-zero. If auto-merge is not allowed, the
   eligibility summary reports a CONFIGURATION GAP and emits a warning
   annotation; the job stays green.
 - **Assumption: an Actions job id equals its check run id.** This holds on

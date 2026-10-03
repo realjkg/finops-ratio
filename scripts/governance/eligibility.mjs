@@ -4,6 +4,12 @@
 // the reasons are written to the job summary.
 
 export const CI_CHECK_NAME = 'Lint · Typecheck · Test · Build';
+/** Commit status posted by the eligibility job; required by branch protection. */
+export const ELIGIBILITY_CONTEXT = 'Governance · merge eligibility';
+/** Label an admin/maintainer adds to approve a restricted PR (exception path). */
+export const EXCEPTION_LABEL = 'exception:approved';
+const APPROVER_ROLES = new Set(['admin', 'maintain']);
+const STATUS_DESCRIPTION_MAX = 140;
 export const GITHUB_ACTIONS_APP_ID = 15368;
 
 export const DEFAULT_CONFIG = Object.freeze({
@@ -73,17 +79,28 @@ export function outsiderReason(pr, config = DEFAULT_CONFIG) {
  * @returns {{ eligible: boolean, reasons: string[] }}
  */
 export function decideEligibility(state, config = DEFAULT_CONFIG) {
-  const reasons = [];
+  const tagged = collectReasons(state, config);
+  return { eligible: tagged.length === 0, reasons: tagged.map((r) => r.text) };
+}
+
+/**
+ * All blocking reasons, each tagged `risk: true` when it is about the risk
+ * classification (the only kind an approved exception may override).
+ */
+function collectReasons(state, config) {
+  const tagged = [];
+  const reasons = { push: (text) => tagged.push({ risk: false, text }) };
+  const riskReason = (text) => tagged.push({ risk: true, text });
   const pr = state?.pr ?? {};
   const labels = new Set(pr.labels ?? []);
 
   const outsider = outsiderReason(pr, config);
   if (outsider) reasons.push(`Never auto-merge eligible: ${outsider}`);
 
-  if (!labels.has('risk:low')) reasons.push('PR is not labelled risk:low.');
-  if (labels.has('risk:restricted')) reasons.push('PR carries risk:restricted.');
+  if (!labels.has('risk:low')) riskReason('PR is not labelled risk:low.');
+  if (labels.has('risk:restricted')) riskReason('PR carries risk:restricted.');
   if (state?.freshRisk !== 'low') {
-    reasons.push(`Fresh classification of the current file list is "${state?.freshRisk ?? 'unknown'}", not low.`);
+    riskReason(`Fresh classification of the current file list is "${state?.freshRisk ?? 'unknown'}", not low.`);
   }
   if (pr.draft !== false) reasons.push('PR is a draft (or draft state unknown).');
   if (pr.baseRef !== config.baseBranch) {
@@ -92,9 +109,10 @@ export function decideEligibility(state, config = DEFAULT_CONFIG) {
 
   const ci = config.ciCheck;
   const all = state?.checkRuns ?? [];
-  // CI-named runs are never deduplicated: an impostor must not mask a failure.
+  // Check runs are never collapsed: listForRef(filter=latest) already returns
+  // the latest run per suite, and any non-success (in any suite) blocks.
   const ciRuns = all.filter((r) => r.name === ci.name);
-  const runs = [...ciRuns, ...latestCheckRuns(all.filter((r) => r.name !== ci.name))];
+  const runs = all;
 
   const jobs = state?.ciJobs;
   if (!Array.isArray(jobs)) {
@@ -137,6 +155,8 @@ export function decideEligibility(state, config = DEFAULT_CONFIG) {
     else if (r.conclusion !== 'success') reasons.push(`Check "${label} concluded ${r.conclusion}.`);
   }
   for (const s of state?.statuses ?? []) {
+    // Our own eligibility status is an OUTPUT of this decision, not an input.
+    if (s.context === ELIGIBILITY_CONTEXT) continue;
     if (s.state !== 'success') reasons.push(`Commit status "${s.context}" is ${s.state}.`);
   }
 
@@ -153,5 +173,63 @@ export function decideEligibility(state, config = DEFAULT_CONFIG) {
   if (typeof t !== 'number' || !Number.isFinite(t)) reasons.push('Unresolved review thread count is unknown.');
   else if (t > 0) reasons.push(`${t} unresolved review thread(s).`);
 
-  return { eligible: reasons.length === 0, reasons };
+  return tagged;
+}
+
+const roleOf = (r) => (r ? (APPROVER_ROLES.has(r.role_name) ? r.role_name : r.permission === 'admin' ? 'admin' : r.role_name ?? r.permission) : undefined);
+
+/**
+ * Exception approval for a restricted PR. Valid only when the label is present,
+ * the LATEST labeled/unlabeled event for it is a "labeled" by an actor with
+ * admin or maintain permission, and that event is later than the head commit
+ * (any push invalidates it; the classify job also removes the label on push).
+ * @param {{ labels: string[], events: Array<{ event: string, label?: { name: string },
+ *           actor?: { login: string }, created_at: string }>,
+ *           roles: Record<string, { permission?: string, role_name?: string }>,
+ *           headCommittedAt?: string }} input
+ */
+export function evaluateExceptionApproval({ labels, events, roles, headCommittedAt }) {
+  if (!(labels ?? []).includes(EXCEPTION_LABEL)) return { approved: false, reason: `No ${EXCEPTION_LABEL} label.` };
+  const mine = (events ?? [])
+    .filter((e) => (e.event === 'labeled' || e.event === 'unlabeled') && e.label?.name === EXCEPTION_LABEL)
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  const last = mine[mine.length - 1];
+  if (!last || last.event !== 'labeled') {
+    return { approved: false, reason: `${EXCEPTION_LABEL}: no current "labeled" event found.` };
+  }
+  const login = last.actor?.login;
+  const role = roleOf(roles?.[login]);
+  if (!APPROVER_ROLES.has(role)) {
+    return { approved: false, reason: `${EXCEPTION_LABEL} added by @${login ?? 'unknown'} (${role ?? 'unknown'} permission), not admin or maintain.` };
+  }
+  const headAt = Date.parse(headCommittedAt ?? '');
+  if (!Number.isFinite(headAt)) return { approved: false, reason: `${EXCEPTION_LABEL}: head commit time unknown.` };
+  if (!(Date.parse(last.created_at) > headAt)) {
+    return { approved: false, reason: `${EXCEPTION_LABEL} was added before the latest push; re-approval required.` };
+  }
+  return { approved: true, approver: login, reason: `Exception approved by @${login} (${role}).` };
+}
+
+/**
+ * The value of the required `Governance · merge eligibility` status.
+ * success: eligible low PR, or restricted PR with a valid exception approval
+ * and every non-risk condition met. failure otherwise, with the top reason.
+ */
+export function decideMergeStatus(state, config = DEFAULT_CONFIG) {
+  const tagged = collectReasons(state, config);
+  const clip = (t) => (t.length > STATUS_DESCRIPTION_MAX ? `${t.slice(0, STATUS_DESCRIPTION_MAX - 1)}…` : t);
+  if (!tagged.length) return { state: 'success', mode: 'low', description: 'Eligible: risk:low and every gate passed.', reasons: [] };
+  const nonRisk = tagged.filter((r) => !r.risk);
+  const exception = state?.exception;
+  if (!nonRisk.length && exception?.approved) {
+    return {
+      state: 'success',
+      mode: 'exception',
+      description: clip(`Restricted; exception approved by @${exception.approver}; all non-risk gates passed. Approver merges.`),
+      reasons: tagged.map((r) => r.text),
+    };
+  }
+  const labelled = (state?.pr?.labels ?? []).includes(EXCEPTION_LABEL);
+  const top = nonRisk[0]?.text ?? (labelled && exception?.reason ? exception.reason : tagged[0].text);
+  return { state: 'failure', mode: 'blocked', description: clip(top), reasons: tagged.map((r) => r.text) };
 }
