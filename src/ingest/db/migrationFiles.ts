@@ -200,17 +200,44 @@ interface Statement {
   start: number;
 }
 
+/**
+ * The statement with its original case and, inside quoted identifiers, its
+ * ORIGINAL characters (the mask turns non-identifier characters there into
+ * `_`, so `"ratio.t1"` would read as `"ratio_t1"`). Whitespace outside quoted
+ * identifiers is collapsed to single spaces (round 17).
+ */
+function statementText(sql: string, masked: string, from: number, to: number): string {
+  let out = '';
+  let quoted = false;
+  let space = false;
+  for (let i = from; i < to; i++) {
+    const m = masked[i];
+    if (quoted && m !== '"') {
+      out += sql[i];
+      continue;
+    }
+    if (m === '"') quoted = !quoted;
+    else if (/\s/.test(m)) {
+      space = true;
+      continue;
+    }
+    if (space && out) out += ' ';
+    space = false;
+    out += m;
+  }
+  return out;
+}
+
 function splitStatements(sql: string): Statement[] {
   const masked = maskNonCode(sql);
   const result: Statement[] = [];
   let begin = 0;
   const push = (from: number, to: number) => {
     const raw = masked.slice(from, to);
-    const text = raw.trim().replace(/\s+/g, ' ');
-    const norm = text.toUpperCase();
+    const norm = raw.trim().replace(/\s+/g, ' ').toUpperCase();
     if (!norm) return;
     const lead = raw.length - raw.replace(/^\s+/, '').length;
-    result.push({ norm, text, start: from + lead });
+    result.push({ norm, text: statementText(sql, masked, from, to), start: from + lead });
   };
   for (let i = 0; i < masked.length; i++) {
     if (masked[i] === ';') {
@@ -243,10 +270,12 @@ function splitTopLevel(text: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let cur = '';
+  let quoted = false; // inside a quoted identifier (Statement.text keeps their original characters)
   for (const ch of text) {
-    if (ch === '(') depth++;
-    if (ch === ')') depth--;
-    if (ch === ',' && depth === 0) {
+    if (ch === '"') quoted = !quoted;
+    if (!quoted && ch === '(') depth++;
+    if (!quoted && ch === ')') depth--;
+    if (!quoted && ch === ',' && depth === 0) {
       parts.push(cur.trim());
       cur = '';
     } else cur += ch;
@@ -313,19 +342,63 @@ interface CreatedObjects {
 
 const newCreated = (): CreatedObjects => ({ schemas: new Set(), relations: new Set(), types: new Set(), routines: new Map() });
 /**
- * Canonical spelling of a (possibly qualified) identifier or type name under
- * PostgreSQL's rules (round 17): unquoted parts fold to lower case (ASCII
- * only, as PostgreSQL does), quoted parts keep their exact case (`""` is a
- * quote). `ratio.T1`, `RATIO.t1` and `"ratio"."t1"` are the same object;
- * `ratio."T1"` is a different one.
+ * Canonical form of a (possibly qualified) identifier under PostgreSQL's rules
+ * (round 17): the name is split into its dot-separated parts; an unquoted part
+ * folds ASCII letters to lower case (PostgreSQL folds only ASCII in multibyte
+ * encodings: unquoted `É` is `"É"`), a quoted part is taken verbatim (`""` is
+ * a quote, a dot inside quotes is part of the name). Every part is rendered
+ * quoted, so `ratio.T1`, `RATIO.t1` and `"ratio"."t1"` are one object, while
+ * `ratio."T1"` and `"ratio.t1"` are others. Malformed input never matches.
  */
 function canonIdent(x: string): string {
-  return x.trim().replace(/"((?:[^"]|"")*)"|[^"]+/g, (m: string, q: string | undefined) => {
-    if (q === undefined) return m.replace(/[A-Z]+/g, (c) => c.toLowerCase());
-    const v = q.replace(/""/g, '"');
-    return /^[a-z_][a-z0-9_$]*$/.test(v) ? v : `"${v.replace(/"/g, '""')}"`;
-  });
+  const parts: string[] = [];
+  let i = 0;
+  const t = x.trim();
+  while (i < t.length) {
+    let part = '';
+    if (t[i] === '"') {
+      i++;
+      for (;;) {
+        if (i >= t.length) return `\u0000${t}`; // unterminated
+        if (t[i] === '"' && t[i + 1] === '"') {
+          part += '"';
+          i += 2;
+        } else if (t[i] === '"') {
+          i++;
+          break;
+        } else part += t[i++];
+      }
+    } else {
+      while (i < t.length && t[i] !== '.' && t[i] !== '"') part += t[i++];
+      part = part.trim().replace(/[A-Z]+/g, (c) => c.toLowerCase());
+    }
+    parts.push(`"${part.replace(/"/g, '""')}"`);
+    if (i < t.length) {
+      if (t[i] !== '.') return `\u0000${t}`;
+      i++;
+    }
+  }
+  return parts.join('.');
 }
+
+/** Space-separated words outside quoted identifiers, each canonical (argument type spellings). */
+function canonWords(x: string): string[] {
+  const words: string[] = [];
+  let cur = '';
+  let quoted = false;
+  for (const ch of x.trim()) {
+    if (ch === '"') quoted = !quoted;
+    if (ch === ' ' && !quoted) {
+      if (cur) words.push(canonIdent(cur));
+      cur = '';
+    } else cur += ch;
+  }
+  if (cur) words.push(canonIdent(cur));
+  return words;
+}
+
+/** A (possibly qualified, possibly quoted) name: quoted parts may contain anything. */
+const NAME = '((?:"(?:[^"]|"")*"|[^\\s("])+)';
 const objName = canonIdent;
 
 /** IN-argument type spellings of a CREATE FUNCTION/PROCEDURE argument list (with or without parameter names). */
@@ -338,7 +411,7 @@ function routineArgs(list: string): string[][] {
       if (mode[1].toUpperCase() === 'OUT') continue; // not part of the signature
       arg = arg.slice(mode[0].length);
     }
-    const words = canonIdent(arg).split(' ');
+    const words = canonWords(arg);
     // `name type…` or just `type…`: accept both readings
     out.push([words.join(' '), words.slice(1).join(' ')].filter(Boolean));
   }
@@ -348,21 +421,21 @@ function routineArgs(list: string): string[][] {
 /** `u`: the statement with its original case (Statement.text). */
 function recordCreated(u: string, created: CreatedObjects): void {
   if (/^CREATE SCHEMA (?!IF NOT EXISTS )/i.test(u)) {
-    const m = /^CREATE SCHEMA (\S+)/i.exec(u);
+    const m = new RegExp(`^CREATE SCHEMA ${NAME}`, 'i').exec(u);
     if (m && m[1].toUpperCase() !== 'AUTHORIZATION') created.schemas.add(objName(m[1]));
     return;
   }
-  const rel = /^CREATE (?:(?:GLOBAL |LOCAL )?(?:TEMP|TEMPORARY|UNLOGGED) )?(?:TABLE|SEQUENCE|(?:RECURSIVE |MATERIALIZED )?VIEW) (?!IF NOT EXISTS )([^ (]+)/i.exec(u);
+  const rel = new RegExp(`^CREATE (?:(?:GLOBAL |LOCAL )?(?:TEMP|TEMPORARY|UNLOGGED) )?(?:TABLE|SEQUENCE|(?:RECURSIVE |MATERIALIZED )?VIEW) (?!IF NOT EXISTS )${NAME}`, 'i').exec(u);
   if (rel) {
     created.relations.add(objName(rel[1]));
     return;
   }
-  const typ = /^CREATE (?:TYPE|DOMAIN) ([^ (]+)/i.exec(u);
+  const typ = new RegExp(`^CREATE (?:TYPE|DOMAIN) ${NAME}`, 'i').exec(u);
   if (typ) {
     created.types.add(objName(typ[1]));
     return;
   }
-  const fn = /^CREATE (?:FUNCTION|PROCEDURE) ([^ (]+) ?\(/i.exec(u);
+  const fn = new RegExp(`^CREATE (?:FUNCTION|PROCEDURE) ${NAME} ?\\(`, 'i').exec(u);
   if (fn) {
     const open = u.indexOf('(', fn[0].length - 1);
     const group = parenGroup(u, open);
@@ -375,11 +448,11 @@ function recordCreated(u: string, created: CreatedObjects): void {
 
 /** True when `spec` (e.g. `F(INT, TEXT[])`) names a routine created earlier with exactly that signature. */
 function isCreatedRoutine(spec: string, created: CreatedObjects): boolean {
-  const m = /^([^ (]+) ?\((.*)\)$/.exec(spec.trim());
+  const m = new RegExp(`^${NAME} ?\\((.*)\\)$`).exec(spec.trim());
   if (!m) return false;
   const overloads = created.routines.get(objName(m[1]));
   if (!overloads) return false;
-  const args = m[2].trim() === '' ? [] : splitTopLevel(m[2]).map((a) => canonIdent(a.replace(/^(IN|VARIADIC) /i, '')));
+  const args = m[2].trim() === '' ? [] : splitTopLevel(m[2]).map((a) => canonWords(a.replace(/^(IN|VARIADIC) /i, '')).join(' '));
   return overloads.some((o) => o.length === args.length && o.every((accepted, i) => accepted.includes(args[i])));
 }
 
@@ -405,7 +478,7 @@ function isRevokeOnCreated(u: string, created: CreatedObjects): boolean {
   if (type) return splitTopLevel(type[1]).every((x) => created.types.has(objName(x)));
   if (/^(DATABASE|LANGUAGE|PARAMETER|LARGE OBJECT|FOREIGN|TABLESPACE|ALL )/i.test(target)) return false;
   const rel = /^(?:TABLE |SEQUENCE )?(.+)$/i.exec(target)!;
-  return splitTopLevel(rel[1]).every((x) => /^[^ ()]+$/.test(x.trim()) && created.relations.has(objName(x)));
+  return splitTopLevel(rel[1]).every((x) => new RegExp(`^${NAME}$`).test(x.trim()) && created.relations.has(objName(x)));
 }
 
 function isExpandStatement(stmt: Statement, sql: string, created: CreatedObjects): boolean {
@@ -474,7 +547,10 @@ const TENANT_PREDICATES = new Set(['(TENANT_ID=RATIO.CURRENT_TENANT_ID())', '(ID
 function parenGroup(u: string, open: number): string | null {
   if (u[open] !== '(') return null;
   let depth = 0;
+  let quoted = false;
   for (let i = open; i < u.length; i++) {
+    if (u[i] === '"') quoted = !quoted;
+    if (quoted) continue;
     if (u[i] === '(') depth++;
     if (u[i] === ')' && --depth === 0) return u.slice(open, i + 1);
   }
