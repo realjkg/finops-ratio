@@ -157,6 +157,32 @@ describe('ingest CLI (real Postgres)', () => {
     }
   });
 
+  it('round 8 L1: --status exits 3 when the database or ratio_worker (IN DATABASE) carries a security-relevant setting default', async () => {
+    for (const stmt of [
+      `ALTER DATABASE %I SET session_replication_role = replica`,
+      `ALTER ROLE ratio_worker IN DATABASE %I SET search_path = public, pg_catalog`,
+    ]) {
+      const db = await freshDb();
+      const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
+      expect((await run(['migrate'], env)).code).toBe(0);
+      // Scoped to this disposable database: its pg_db_role_setting rows go with DROP DATABASE.
+      await db.pool.query(`DO $$ BEGIN EXECUTE format('${stmt.replace(/'/g, "''")}', current_database()); END $$`);
+      const r = await run(['migrate', '--status', '--json'], env);
+      expect(r.code, stmt).toBe(3);
+      const doc = onlyJson(r.out) as StatusDoc & { privilegeProblems?: string[] };
+      expect(doc.problems).toContain('PRIVILEGE_MODEL_VIOLATION');
+      expect(doc.privilegeProblems?.join('\n')).toMatch(/setting (session_replication_role|search_path)=/);
+    }
+  });
+
+  it('round 8 L1: a benign ALTER DATABASE … SET statement_timeout keeps --status at exit 0', async () => {
+    const db = await freshDb();
+    const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
+    expect((await run(['migrate'], env)).code).toBe(0);
+    await db.pool.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET statement_timeout = ''5min''', current_database()); END $$`);
+    expect((await run(['migrate', '--status', '--json'], env)).code).toBe(0);
+  });
+
   it('status --json prints exactly one JSON document; plain status logs one line', async () => {
     const db = await freshDb();
     const env = { RATIO_MIGRATE_DATABASE_URL: db.url };

@@ -673,3 +673,102 @@ describe('round 7 High C: a ratio role with LOGIN is drift (rolled-back transact
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Round 8 (challenger approval of 7c5b6e2, Lows folded in)
+// ---------------------------------------------------------------------------
+
+async function settingRows(c: Client): Promise<number> {
+  return (await c.query(`SELECT count(*)::int AS n FROM pg_catalog.pg_db_role_setting`)).rows[0].n;
+}
+
+describe('round 8 L1: per-database / per-role setting defaults (pg_db_role_setting) are part of the reviewed model', () => {
+  it('a migration that sets session_replication_role for the database is refused; nothing committed', async () => {
+    const c = await expectRunnerRefuses(
+      "DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET session_replication_role = replica', current_database()); END $$;\n",
+      /setting session_replication_role=replica .*database/,
+      { contract: true },
+    );
+    expect(
+      (await c.query(`SELECT count(*)::int AS n FROM pg_db_role_setting WHERE setdatabase = (SELECT oid FROM pg_database WHERE datname = current_database())`)).rows[0].n,
+    ).toBe(0);
+  });
+
+  it('a migration that sets anything on ratio_worker IN DATABASE is refused; nothing committed', async () => {
+    await expectRunnerRefuses(
+      "DO $$ BEGIN EXECUTE format('ALTER ROLE ratio_worker IN DATABASE %I SET statement_timeout = 0', current_database()); END $$;\n",
+      /setting statement_timeout=0 for role ratio_worker/,
+      { contract: true },
+    );
+  });
+
+  it('ALTER ROLE ratio_worker SET … (all databases, cluster-global) is refused — probed in a rolled-back transaction', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    const before = await settingRows(c);
+    await c.query('BEGIN');
+    try {
+      await c.query('ALTER ROLE ratio_worker SET row_security = off');
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(/setting row_security=off for role ratio_worker/);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+    expect(await settingRows(c)).toBe(before);
+  });
+
+  it('ALTER ROLE ALL SET session_replication_role and a LOGIN member of ratio_reader with search_path are refused (rolled back)', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    const before = await settingRows(c);
+    const login = `ratio_probe_login_${Math.random().toString(16).slice(2, 10)}`;
+    for (const stmts of [
+      ['ALTER ROLE ALL SET session_replication_role = replica'],
+      [`CREATE ROLE ${login} LOGIN IN ROLE ratio_reader`, `ALTER ROLE ${login} SET search_path = public, pg_catalog`],
+    ]) {
+      await c.query('BEGIN');
+      try {
+        for (const q of stmts) await c.query(q);
+        await expect(assertReviewedPrivileges(c), stmts.join('; ')).rejects.toThrow(/setting (session_replication_role|search_path)=/);
+      } finally {
+        await c.query('ROLLBACK');
+      }
+    }
+    expect(await settingRows(c)).toBe(before);
+  });
+
+  it('a benign per-database default (statement_timeout) is not flagged', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    await c.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET statement_timeout = ''5min''', current_database()); END $$`);
+    await assertReviewedPrivileges(c);
+  });
+});
+
+describe('round 8 L2 (S5): the runner resets a used caller connection before taking the lock', () => {
+  it('a caller client with a hostile session search_path does not affect the first pending migration', async () => {
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    await db.pool.query(
+      'CREATE SCHEMA attacker;' +
+        "CREATE FUNCTION attacker.name_eq_false(name, name) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select false';" +
+        'CREATE OPERATOR attacker.= (LEFTARG = name, RIGHTARG = name, FUNCTION = attacker.name_eq_false);' +
+        "CREATE FUNCTION attacker.current_setting(text) RETURNS text LANGUAGE sql AS 'select ''attacker''::text';",
+    );
+    const c = await connect(db);
+    await c.query('SET search_path = attacker, pg_catalog');
+    await c.query('SET row_security = off');
+    const dir = migrationsWith({
+      '0002_probe.up.sql':
+        EXPAND +
+        "CREATE TABLE ratio.session_probe AS SELECT current_setting('search_path') AS sp, current_setting('row_security') AS rs, ('a'::name = 'a'::name) AS eq;\n",
+    });
+    expect(await migrateUp(c, { dir })).toEqual({ applied: ['0002'] });
+    expect((await db.pool.query(`SELECT sp, rs, eq FROM ratio.session_probe`)).rows[0]).toEqual({ sp: 'pg_catalog, pg_temp', rs: 'on', eq: true });
+  });
+});

@@ -198,6 +198,32 @@ describe('ingest CLI (no database)', () => {
       }
     });
 
+    it('round 8 L2 (S11): a reason whose toJSON throws (carrying the DSN) still yields one fixed JSON line and exit 1, never a throw', () => {
+      const install = (cli as unknown as { installProcessHandlers: (p: EventEmitter, env: Record<string, string>, io: { err: (l: string) => void }, exit: (code: number) => void) => void })
+        .installProcessHandlers;
+      const url = urlFor('ab"cd');
+      const proc = new EventEmitter();
+      const err: string[] = [];
+      const codes: number[] = [];
+      install(proc, { RATIO_MIGRATE_DATABASE_URL: url }, { err: (l) => err.push(l) }, (code) => codes.push(code));
+      const evil = {
+        toJSON() {
+          throw new Error(`cannot serialize ${url}`);
+        },
+      };
+      expect(() => proc.emit('uncaughtException', evil)).not.toThrow();
+      expect(codes).toEqual([1]);
+      expect(err).toHaveLength(1);
+      expect(JSON.parse(err[0])).toEqual({ error: 'output redacted' });
+      expect(err[0]).not.toContain('ratio_user');
+    });
+
+    it('round 8 L3: Buffers and typed arrays are printed as "[binary]", never as their bytes', () => {
+      const pw = 'ab"cd';
+      const line = jsonLineRedactor(urlFor(pw))({ buf: Buffer.from(`x ${pw} y`), arr: new Uint8Array([1, 2, 3]), ab: new ArrayBuffer(4) });
+      expect(JSON.parse(line)).toEqual({ buf: '[binary]', arr: '[binary]', ab: '[binary]' });
+    });
+
     it('uncaughtException / unhandledRejection handlers print one redacted JSON line and exit 1', () => {
       const install = (cli as unknown as { installProcessHandlers?: (p: EventEmitter, env: Record<string, string>, io: { err: (l: string) => void }, exit: (code: number) => void) => void })
         .installProcessHandlers;
