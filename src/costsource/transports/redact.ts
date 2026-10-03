@@ -2,10 +2,13 @@
 // diagnostics. Upstream bodies are NEVER put in errors that reach API callers;
 // this only shapes what the server log keeps.
 //
-// Strips: URL query strings (presigned / SAS URLs carry credentials there),
-// `Bearer <token>`, Azure SAS parameters (sig= / sv= / se= ...) appearing
-// outside a URL, and AWS access key ids (AKIA… / ASIA…). Redaction runs BEFORE
-// truncation, so a cut can never leave a partial secret that no longer matches.
+// Strips: PEM blocks, URL userinfo and query strings (presigned / SAS URLs
+// carry credentials there), Azure AccountKey= / SharedAccessSignature=, AWS
+// X-Amz-Signature / -Credential / -Security-Token, JWTs, Bearer (quoted or
+// bare) and Basic credentials, access/refresh/id tokens, client secrets, API
+// keys, passwords and secrets in JSON and k=v form, bare SAS parameters, and
+// AWS access key ids (AKIA… / ASIA…). Redaction runs BEFORE truncation, so a
+// cut can never leave a partial secret that no longer matches.
 
 /** Max characters of a redacted upstream body kept in the server log. */
 export const MAX_LOGGED_BODY_CHARS = 300;
@@ -14,16 +17,47 @@ export const MAX_LOGGED_BODY_CHARS = 300;
 const SAS_PARAMS = ['sig', 'sv', 'se', 'st', 'sp', 'sr', 'spr', 'srt', 'ss', 'si', 'sdd', 'skoid', 'sktid', 'skt', 'ske', 'sks', 'skv'];
 const SAS_RE = new RegExp(`\\b(${SAS_PARAMS.join('|')})=[^&\\s"'<>]*`, 'gi');
 
+// Credential-bearing field names, matched in JSON ("key": "value") and k=v forms.
+const SECRET_KEYS = 'access_token|refresh_token|id_token|client_secret|api[_-]?key|password|secret';
+const JSON_SECRET_RE = new RegExp(`("(?:${SECRET_KEYS})"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`, 'gi');
+const KV_SECRET_RE = new RegExp(`\\b((?:${SECRET_KEYS})\\s*[=:]\\s*)(?!\\[REDACTED)[^\\s&;,"'<>]+`, 'gi');
+
+/**
+ * Patterns, applied in order (most specific first). Each replaces the secret
+ * part with a `[REDACTED…]` marker and keeps enough context to stay useful.
+ */
+const RULES: Array<[RegExp, string]> = [
+  // PEM blocks (private keys, certificates).
+  [/-----BEGIN [A-Z0-9 ]+-----[\s\S]*?-----END [A-Z0-9 ]+-----/g, '[REDACTED_PEM]'],
+  // URL userinfo: scheme://user:pass@host → scheme://[REDACTED]@host.
+  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@"'<>]+@/gi, '$1[REDACTED]@'],
+  // URL query strings → keep scheme/host/path only.
+  [/(\bhttps?:\/\/[^\s"'<>?#]*)\?[^\s"'<>#]*/gi, '$1?[REDACTED]'],
+  // Azure storage connection-string secrets.
+  [/\b(AccountKey|SharedAccessSignature)=[^;\s"'<>]+/gi, '$1=[REDACTED]'],
+  // AWS SigV4 query / header credentials.
+  [/\b(X-Amz-(?:Signature|Credential|Security-Token))(\s*[=:]\s*)[^\s&;,"'<>]+/gi, '$1$2[REDACTED]'],
+  // Bearer tokens, quoted or bare.
+  [/\bBearer\s+"[^"]*"/gi, 'Bearer [REDACTED]'],
+  [/\bBearer\s+'[^']*'/gi, 'Bearer [REDACTED]'],
+  [/\bBearer\s+(?!\[REDACTED)[^\s"'<>,;]+/gi, 'Bearer [REDACTED]'],
+  // JWTs anywhere.
+  [/\beyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[REDACTED_JWT]'],
+  // Basic auth credentials.
+  [/\bBasic\s+[A-Za-z0-9+/=._-]{6,}/g, 'Basic [REDACTED]'],
+  // JSON "secret_key": "value".
+  [JSON_SECRET_RE, '$1"[REDACTED]"'],
+  // k=v / k: v secret fields.
+  [KV_SECRET_RE, '$1[REDACTED]'],
+  // Bare SAS parameters.
+  [SAS_RE, '$1=[REDACTED]'],
+  // AWS access key ids.
+  [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[REDACTED_AWS_KEY_ID]'],
+];
+
 export function redactUpstreamText(text: string, maxChars = MAX_LOGGED_BODY_CHARS): string {
-  const redacted = text
-    // URL query strings → keep scheme/host/path only.
-    .replace(/(\bhttps?:\/\/[^\s"'<>?#]*)\?[^\s"'<>#]*/gi, '$1?[REDACTED]')
-    // Bearer tokens.
-    .replace(/\bBearer\s+[^\s"'<>,;]+/gi, 'Bearer [REDACTED]')
-    // Bare SAS parameters.
-    .replace(SAS_RE, '$1=[REDACTED]')
-    // AWS access key ids.
-    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[REDACTED_AWS_KEY_ID]');
+  let redacted = text;
+  for (const [re, replacement] of RULES) redacted = redacted.replace(re, replacement);
   return redacted.slice(0, maxChars);
 }
 
