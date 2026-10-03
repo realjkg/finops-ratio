@@ -678,8 +678,20 @@ describe('round 7 High C: a ratio role with LOGIN is drift (rolled-back transact
 // Round 8 (challenger approval of 7c5b6e2, Lows folded in)
 // ---------------------------------------------------------------------------
 
+/**
+ * pg_db_role_setting rows that THIS test could leak: all-databases rows
+ * (setdatabase = 0, e.g. ALTER ROLE … SET) and rows of this test's database.
+ * The catalog is cluster-wide and other test files commit (then drop) rows
+ * scoped to their own disposable databases in parallel, so counting the whole
+ * catalog raced (challenger round 12, H1: 1 failure in 25 runs).
+ */
 async function settingRows(c: Client): Promise<number> {
-  return (await c.query(`SELECT count(*)::int AS n FROM pg_catalog.pg_db_role_setting`)).rows[0].n;
+  return (
+    await c.query(
+      `SELECT count(*)::int AS n FROM pg_catalog.pg_db_role_setting
+        WHERE setdatabase = 0 OR setdatabase = (SELECT oid FROM pg_catalog.pg_database WHERE datname = pg_catalog.current_database())`,
+    )
+  ).rows[0].n;
 }
 
 describe('round 8 L1: per-database / per-role setting defaults (pg_db_role_setting) are part of the reviewed model', () => {
