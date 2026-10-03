@@ -163,3 +163,26 @@ markers, so the fixture now carries `ratio:allow-function` / `ratio:allow-view`
 markers (a policy change mandated by M1; the control still asserts the same
 additive vocabulary loads as expand, and the new round-4 test asserts the
 unmarked forms are refused).
+
+## Round 5 — challenger round 4 (tests committed red in c62d794, before the fix)
+
+All in `privileges.db.test.ts` unless noted. Role and parameter probes run in
+transactions that are always rolled back (cluster-global catalogs).
+
+| Finding | Test name(s) |
+|---|---|
+| M1 (a) | `(a) expand: an AFTER INSERT trigger on public.schema_migrations granting the reader cost_facts is refused; nothing committed`, `(a, isolated) the ledger row is written BEFORE the check, …` |
+| M1 (b) | `(b) expand: a deferred constraint trigger on the ledger, function in another schema, is refused; nothing committed` |
+| M1 (c) | `(c) contract: a deferred constraint trigger on a helper table, queued by an INSERT, is refused; nothing committed`, `(c, isolated) the deferred trigger fires BEFORE the check (SET CONSTRAINTS ALL IMMEDIATE), so its GRANT is seen` |
+| M1 hooks | `an event trigger is refused`, `a rule is refused (on a helper table, and on the ledger)`, `a policy (or RLS) on the ledger is refused`, `a trigger on a ratio table that is not on the reviewed list is refused, …`, `positive control: the 0001 triggers are exactly the reviewed list` |
+| M1 status | `cli.db.test.ts`: `round 5: --status --json runs the catalog privilege check and exits 3 on privilege drift` |
+| L1 | `a migration that installs public.=/<> operators and puts public first on the search_path still has its grant detected` |
+| L2 | `GRANT to ratio_reader, rename it away and create an impostor ratio_reader: refused`, `rename without an impostor (members keep the old role): refused`, `a LOGIN member of ratio_reader holding an extra privilege is refused; a plain LOGIN member passes`, `a NOLOGIN member of a ratio role is refused`, `a non-ratio role holding any privilege on ratio objects is refused`, `ratio role attributes and memberships are pinned` |
+| L3 | `L3: a sequence privilege beyond the reviewed set is refused` |
+| L4 | `L4: GRANT CREATE ON DATABASE built inside a DO block is refused`, `L4: GRANT SET ON PARAMETER is refused (…rolled-back transaction…)`, `L4: USAGE on a foreign-data wrapper or foreign server is refused`, `L4: a large-object privilege is refused` |
+| survivors (298142a) | `a reviewed trigger whose function is no longer owned by ratio_owner is refused`, `status (no runner SET LOCAL) still detects drift under a hostile session search_path with public operators`, `assertReviewedPrivileges pins its own search_path (…)`, `a ratio role made a member of a role that grants nothing is still refused` |
+
+Test changes in the fix commit (1234da0), each recorded in its message:
+- The trigger-count control now expects 11. 0001 has 11 user triggers; the red commit miscounted 12.
+- The L1 test now grants TRUNCATE. The worker already holds SELECT on cost_facts, so the red version proved nothing.
+- The parameter test now runs in a rolled-back transaction, because a red-phase run committed a cluster-global grant (see EVIDENCE R5.2).

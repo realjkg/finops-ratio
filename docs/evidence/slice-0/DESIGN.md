@@ -430,3 +430,46 @@ recreated (that is the intended behaviour of the checksum ledger).
   moved to its own schema the ratio roles cannot use. Flagged for the owner.
 - **M2** test only: the delete twin (and artifact-UPDATE twin) of the
   insert-path race test, which kills "remove the OLD-path FOR SHARE".
+
+## 14. Round 5 — challenger round 4 (M1, L1–L4; 0001 NOT changed)
+
+- **M1 — nothing a migration installs runs after the check.** Transaction
+  order, up and down: migration SQL → `RESET ROLE`, `SET LOCAL search_path =
+  pg_catalog, pg_temp`, `SET CONSTRAINTS ALL IMMEDIATE` (queued deferred
+  constraint triggers fire now) → ledger INSERT/DELETE (any ledger trigger
+  fires now) → `assertReviewedPrivileges` as the LAST statement → COMMIT. The
+  check also refuses: any user trigger (including constraint triggers) that is
+  not on `REVIEWED_TRIGGERS` (0001's 11) or whose function is not a
+  `ratio_owner` function in schema `ratio`; any rule other than view `_RETURN`
+  rules outside the system schemas; any event trigger; RLS or any policy on
+  `public.schema_migrations`. A later migration that adds a trigger updates
+  `REVIEWED_TRIGGERS` in the same change.
+- **Status:** `migrate --status` runs the check in a READ ONLY transaction:
+  `privilegeProblems` in the JSON, problem `PRIVILEGE_MODEL_VIOLATION`, exit 3.
+- **L1:** the check pins `search_path = pg_catalog, pg_temp` itself
+  (transaction-local, via `pg_catalog.set_config`) before its queries, in
+  addition to the runner's `SET LOCAL`; status runs inside a transaction for
+  that reason.
+- **L2 (robust option, not a lexical rename ban):** role identity is checked in
+  the catalog. While schema `ratio` exists the three ratio roles must exist.
+  They must keep their safe attributes and be members of no role. Members of a
+  ratio role must be LOGIN roles. Every other role (not superuser, not
+  predefined `pg_*`, not a member of `ratio_owner`) may hold on schema `ratio`
+  and its objects only what its `ratio_reader`/`ratio_worker` memberships are
+  reviewed for. That check is what catches a renamed role that keeps its
+  grants and members, and LOGIN members with extra grants. Roles are checked by
+  OID, so test logins dropped concurrently cannot make the check error.
+  Consequence (fails closed): a cluster role in `pg_read_all_data` (or any role
+  with privileges on ratio objects) refuses migrations.
+- **L4:** database CREATE/TEMPORARY/CONNECT are now checked; CONNECT and
+  TEMPORARY are the reviewed PUBLIC defaults. Also checked: `GRANT … ON
+  PARAMETER` (`pg_parameter_acl`, cluster-global), FDW and foreign-server
+  USAGE, and large-object ACLs and ownership. Types and languages are not
+  enumerated: every type has PUBLIC USAGE by default and that is harmless.
+  Language USAGE only matters with CREATE on a schema, which is checked, and
+  untrusted languages cannot be granted. `lo_compat_privileges` is not checked.
+- Remaining by design: code a migration runs *during* its own SQL (e.g. COPY
+  TO PROGRAM as superuser, dblink) can have effects outside the transaction;
+  migrations are reviewed and contract needs `--allow-contract`. Trigger
+  function bodies of the reviewed triggers are pinned by name and owner, not
+  by body hash.
