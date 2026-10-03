@@ -140,6 +140,23 @@ describe('ingest CLI (no database)', () => {
       // A value that is already JSON text (e.g. a nested serialized document) still loses the secret.
       const line = jsonLineRedactor(urlFor(pw))({ doc: JSON.stringify({ p: pw }) });
       for (const f of forms(pw)) expect(line).not.toContain(f);
+      // ... including the double-escaped form the outer serialization would make of it.
+      expect(line).not.toContain(JSON.stringify(JSON.stringify(pw).slice(1, -1)).slice(1, -1));
+      expect(line).not.toContain('def');
+    });
+
+    it('objects with toJSON are serialized through the redactor too', () => {
+      const pw = 'abc"def';
+      const line = jsonLineRedactor(urlFor(pw))({ wrapped: { toJSON: () => `via toJSON ${pw}` }, when: new Date(0) });
+      for (const f of forms(pw)) expect(line).not.toContain(f);
+      expect(line).toContain('via toJSON [redacted]');
+      expect(line).toContain('1970-01-01T00:00:00.000Z');
+    });
+
+    it('backstop: a non-string value whose serialized text equals the secret is still redacted', () => {
+      const pw = '90817263';
+      const line = jsonLineRedactor(urlFor(pw))({ pid: 90817263 });
+      expect(line).not.toContain(pw);
     });
   });
 });

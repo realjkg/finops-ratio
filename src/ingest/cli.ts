@@ -127,6 +127,8 @@ export function redactDeep(value: unknown, redact: (s: string) => string, seen: 
   seen.add(value);
   if (Array.isArray(value)) return value.map((v) => redactDeep(v, redact, seen));
   if (value instanceof Date) return value.toISOString();
+  const toJSON = (value as { toJSON?: unknown }).toJSON;
+  if (typeof toJSON === 'function') return redactDeep((toJSON as () => unknown).call(value), redact, seen);
   if (value instanceof Error) {
     const e = value as Error & { code?: unknown; cause?: unknown };
     const out: Record<string, unknown> = { name: e.name, message: redact(e.message) };
