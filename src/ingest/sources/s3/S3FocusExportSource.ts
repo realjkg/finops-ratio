@@ -76,9 +76,18 @@ export class S3FocusExportSource implements FocusSource {
    * arrived — ContentLength is only an early hint, never trusted (it may be
    * missing on a chunked response, or wrong).
    */
-  private async getBytes(key: string, limit: number, signal: AbortSignal | undefined): Promise<Buffer> {
+  private async getBytes(key: string, limit: number, signal: AbortSignal | undefined, ifMatch: string): Promise<Buffer> {
     throwIfAborted(signal);
-    const r = await this.client.send(new GetObjectCommand({ Bucket: this.location.bucket, Key: key }), { abortSignal: signal });
+    let r;
+    try {
+      // Pinned to the listed ETag: a manifest replaced since the listing is SOURCE_CHANGED,
+      // never new controls read against an older data listing (review M2, fourth round).
+      r = await this.client.send(new GetObjectCommand({ Bucket: this.location.bucket, Key: key, IfMatch: ifMatch }), { abortSignal: signal });
+    } catch (e) {
+      throwIfAborted(signal);
+      if (isPreconditionFailed(e)) throw new IngestError('SOURCE_CHANGED', 'the manifest changed since it was listed (ETag mismatch)', { retryable: true, cause: e });
+      throw e;
+    }
     const body = r.Body as Readable;
     const tooLarge = () => new IngestError('MANIFEST_INVALID', 'manifest is too large');
     if (r.ContentLength !== undefined && Number(r.ContentLength) > limit) {
@@ -121,9 +130,11 @@ export class S3FocusExportSource implements FocusSource {
 
   private async listPeriod(billingPeriod: string, signal: AbortSignal | undefined): Promise<PeriodListing> {
     let metaKeys: string[];
+    let meta: Map<string, ListingEntry>;
     let data: Map<string, ListingEntry>;
     try {
-      metaKeys = [...(await this.list(periodMetadataPrefix(this.location, billingPeriod), undefined, signal)).keys.keys()].filter(isManifestKey).sort();
+      meta = (await this.list(periodMetadataPrefix(this.location, billingPeriod), undefined, signal)).keys;
+      metaKeys = [...meta.keys()].filter(isManifestKey).sort();
       data = (await this.list(dataPrefix(this.location, billingPeriod), undefined, signal)).keys;
     } catch (e) {
       throwIfAborted(signal);
@@ -135,12 +146,17 @@ export class S3FocusExportSource implements FocusSource {
       return { ok: false, billingPeriod, code: 'MANIFEST_AMBIGUOUS', message: `${metaKeys.length} manifests for ${billingPeriod}; refusing to guess which is current` };
     }
     const manifestKey = metaKeys[0];
+    const manifestEtag = meta.get(manifestKey)?.etag ?? '';
+    if (!manifestEtag) {
+      return { ok: false, billingPeriod, code: 'SOURCE_LISTING_INVALID', message: `the manifest for ${billingPeriod} has no ETag in the listing; it cannot be read conditionally` };
+    }
     let bytes: Buffer;
     try {
-      bytes = await this.getBytes(manifestKey, MAX_MANIFEST_BYTES, signal);
+      bytes = await this.getBytes(manifestKey, MAX_MANIFEST_BYTES, signal, manifestEtag);
     } catch (e) {
       throwIfAborted(signal);
       if (e instanceof IngestError && e.code === 'MANIFEST_INVALID') return { ok: false, billingPeriod, code: e.code, message: e.message };
+      if (e instanceof IngestError) throw e;
       throw sourceError('SOURCE_READ_FAILED', `reading the manifest for ${billingPeriod}`, e);
     }
     const manifest = { name: manifestKey.slice(periodMetadataPrefix(this.location, billingPeriod).length), bytes };
