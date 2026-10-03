@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import { Client } from 'pg';
 import { createTestDatabase, type TestDatabase } from './testing/harness';
 import { DEFAULT_MIGRATIONS_DIR } from './migrationFiles';
@@ -198,5 +199,130 @@ describe('round 10: removing or weakening the reviewed foundation is refused (co
     expect(st.matches).toBe(false);
     expect(st.problems).toContain('PRIVILEGE_MODEL_VIOLATION');
     expect(st.privilegeProblems.join('\n')).toMatch(/required 0001 object missing or altered: schema:ratio:owner=ratio_owner/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 11 (challenger M1 + Lows on 0b041c5)
+// ---------------------------------------------------------------------------
+
+/** A committed migration (contract) that the runner must refuse for an unreviewed policy. */
+async function expectPolicyRefusal(sql: string, expectMessage: RegExp, extra: Record<string, string> = {}): Promise<Client> {
+  const db = await freshDb(false);
+  const c = await connect(db);
+  const dir = migrationsWith({ ...extra, '0003_attack.up.sql': CONTRACT + sql });
+  const err = await migrateUp(c, { dir, allowContract: true }).then(
+    () => null,
+    (e: Error & { code?: string }) => e,
+  );
+  expect(err, 'runner must refuse').not.toBeNull();
+  expect(err!.code).toBe('PRIVILEGE_MODEL_VIOLATION');
+  expect(err!.message).toMatch(expectMessage);
+  return c;
+}
+
+describe('round 11 M1: extra policies on ratio tables are refused (policies are ORed: an extra permissive one widens access)', () => {
+  it('challenger repro: split-keyword CREATE POLICY open_all … USING (true) is refused; nothing committed', async () => {
+    const c = await expectPolicyRefusal(
+      "DO $$ BEGIN EXECUTE 'CREATE ' || 'POLICY open_all ON ratio.cost_facts USING (true)'; END $$;\n",
+      /policy:ratio\.cost_facts:open_all:.* is not a reviewed policy/,
+    );
+    expect((await c.query(`SELECT count(*)::int AS n FROM pg_policy WHERE polname = 'open_all'`)).rows[0].n).toBe(0);
+  });
+
+  it('FOR SELECT, TO ratio_worker and AS RESTRICTIVE variants are refused too (decision: no unreviewed policy at all)', async () => {
+    for (const [stmt, re] of [
+      ["'CREATE ' || 'POLICY open_select ON ratio.cost_facts FOR SELECT USING (true)'", /policy:ratio\.cost_facts:open_select:cmd=r:/],
+      ["'CREATE ' || 'POLICY open_worker ON ratio.ingest_batches TO ratio_worker USING (true)'", /policy:ratio\.ingest_batches:open_worker:.*roles=ratio_worker:/],
+      ["'CREATE ' || 'POLICY narrow ON ratio.cost_facts AS RESTRICTIVE USING (true)'", /policy:ratio\.cost_facts:narrow:cmd=\*:permissive=false:/],
+    ] as const) {
+      await expectPolicyRefusal(`DO $$ BEGIN EXECUTE ${stmt}; END $$;\n`, re);
+    }
+  });
+
+  it('a non-standard policy on a NEW table added by a later migration is refused; the reviewed tenant_isolation shape is allowed', async () => {
+    const newTable =
+      '-- ratio:phase expand\nSET LOCAL ROLE ratio_owner;\nCREATE TABLE ratio.notes (tenant_id uuid NOT NULL, body text);\n' +
+      'ALTER TABLE ratio.notes ENABLE ROW LEVEL SECURITY;\nALTER TABLE ratio.notes FORCE ROW LEVEL SECURITY;\n' +
+      'CREATE POLICY tenant_isolation ON ratio.notes USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id());\n';
+    // positive: the reviewed shape on a new table applies
+    const db = await freshDb(false);
+    const c = await connect(db);
+    expect(await migrateUp(c, { dir: migrationsWith({ '0002_notes.up.sql': newTable }) })).toEqual({ applied: ['0001', '0002'] });
+    // negative: an extra, non-standard policy on that new table
+    await expectPolicyRefusal(
+      "DO $$ BEGIN EXECUTE 'CREATE ' || 'POLICY notes_all ON ratio.notes USING (true)'; END $$;\n",
+      /policy:ratio\.notes:notes_all:.* is not a reviewed policy/,
+      { '0002_notes.up.sql': newTable },
+    );
+  });
+
+  it('extra policies are refused even when 0001 is not in the ledger (schema present)', async () => {
+    const { privilegeModelViolations } = await model();
+    const db = await freshDb(true);
+    const c = await connect(db);
+    await c.query('BEGIN');
+    try {
+      await c.query(`DELETE FROM public.schema_migrations WHERE version = '0001'`);
+      await c.query(`DO $$ BEGIN EXECUTE 'CREATE ' || 'POLICY open_all ON ratio.cost_facts USING (true)'; END $$`);
+      expect((await privilegeModelViolations(c)).join('\n')).toMatch(/policy:ratio\.cost_facts:open_all:.* is not a reviewed policy/);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+
+  it('--status (migrationStatus) reports an extra policy made outside the runner', async () => {
+    const db = await freshDb(true);
+    await db.pool.query(`DO $$ BEGIN EXECUTE 'CREATE ' || 'POLICY open_all ON ratio.cost_facts USING (true)'; END $$`);
+    const c = await connect(db);
+    const st = await migrationStatus(c);
+    expect(st.matches).toBe(false);
+    expect(st.privilegeProblems.join('\n')).toMatch(/policy:ratio\.cost_facts:open_all:.* is not a reviewed policy/);
+  });
+});
+
+describe('round 11 L2/L3: policy roles and table persistence / replica identity are pinned', () => {
+  it('ALTER POLICY … TO ratio_owner (split keyword) is refused', async () => {
+    await expectFoundationRefusal(
+      "DO $$ BEGIN EXECUTE 'ALTER ' || 'POLICY tenant_isolation ON ratio.sources TO ratio_owner'; END $$;\n",
+      /policy:ratio\.sources:tenant_isolation:.*roles=public/,
+    );
+  });
+
+  it('REPLICA IDENTITY FULL on a 0001 table is refused', async () => {
+    await expectFoundationRefusal('ALTER TABLE ratio.cost_facts REPLICA IDENTITY FULL;\n', /table:ratio\.cost_facts:.*replident=d/);
+  });
+
+  it('table entries pin relpersistence and relreplident', async () => {
+    const { FOUNDATION_0001 } = await foundation();
+    const tables = FOUNDATION_0001.filter((e) => e.startsWith('table:'));
+    expect(tables).toHaveLength(9);
+    for (const t of tables) expect(t).toMatch(/:persistence=p:replident=d$/);
+  });
+});
+
+describe('round 11 L1: a pg_dump → restore round trip keeps the manifest', () => {
+  it('dump a migrated database, restore it into a fresh one: the foundation still matches and the check passes', async () => {
+    const { FOUNDATION_0001, foundationSnapshot } = await foundation();
+    const { assertReviewedPrivileges } = await model();
+    const pgDump = process.env.RATIO_PG_DUMP ?? 'pg_dump';
+    const psqlBin = process.env.RATIO_PSQL ?? 'psql';
+    // Never skipped: the client tools must exist and be PostgreSQL 16 (CI: ubuntu-latest ships 16).
+    expect(execFileSync(pgDump, ['--version'], { encoding: 'utf8' })).toMatch(/\(PostgreSQL\) 16\./);
+    const src = await freshDb(true);
+    const dst = await freshDb(false);
+    const dumpFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-dump-')), 'ratio.sql');
+    cleanups.push(async () => fs.rmSync(path.dirname(dumpFile), { recursive: true, force: true }));
+    execFileSync(pgDump, ['--format=plain', '--file', dumpFile, src.url]);
+    execFileSync(psqlBin, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', '-f', dumpFile, dst.url], { stdio: 'pipe' });
+    const c = await connect(dst);
+    await c.query('BEGIN READ ONLY');
+    try {
+      const snap = await foundationSnapshot(c);
+      expect(FOUNDATION_0001.filter((e) => !snap.includes(e))).toEqual([]);
+      await assertReviewedPrivileges(c);
+    } finally {
+      await c.query('ROLLBACK');
+    }
   });
 });
