@@ -119,14 +119,21 @@ describe('URL query rule is linear on its own (uncapped)', () => {
     expect(medianMs(() => applyQueryRule(text), 7)).toBeLessThan(25);
   });
 
-  it("'a://' repeated: time(64 KB) / time(16 KB) < 8 (linear ~4, quadratic ~16)", () => {
+  it("'a://' repeated: time(48 KB) / time(16 KB) < 6 (linear ~3, quadratic ~9)", () => {
     const small = aScheme(16_384);
-    const large = aScheme(65_536);
-    // Repeat to get measurable times on a fast (linear) rule.
-    const reps = 20;
-    const tSmall = medianMs(() => { for (let i = 0; i < reps; i++) applyQueryRule(small); }, 7);
-    const tLarge = medianMs(() => { for (let i = 0; i < reps; i++) applyQueryRule(large); }, 7);
-    expect(tLarge / tSmall).toBeLessThan(8);
+    const large = aScheme(49_152);
+    // Enough repetitions for >= ~5 ms per sample on a linear rule; a single
+    // repetition when the rule is slow (a quadratic rule then fails quickly).
+    const t0 = performance.now();
+    applyQueryRule(small);
+    const single = Math.max(performance.now() - t0, 0.01);
+    const reps = Math.min(200, Math.max(1, Math.ceil(5 / single)));
+    const many = (text: string) => () => {
+      for (let i = 0; i < reps; i++) applyQueryRule(text);
+    };
+    const tSmall = medianMs(many(small), 7);
+    const tLarge = medianMs(many(large), 7);
+    expect(tLarge / tSmall).toBeLessThan(6);
   });
 });
 
