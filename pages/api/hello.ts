@@ -3,8 +3,9 @@
 // the real network path end-to-end.
 import type { NextApiRequest, NextApiResponse } from 'next';
 import type { HelloMessage } from '@/hello/HelloClient';
+import { withInternalErrorGuard } from '@/server/gateway/internalError';
 
-export default function handler(
+function handler(
   _req: NextApiRequest,
   res: NextApiResponse<HelloMessage>,
 ): void {
@@ -15,3 +16,4 @@ export default function handler(
   });
 }
 
+export default withInternalErrorGuard(handler);

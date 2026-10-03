@@ -3,6 +3,7 @@
 // non-2xx so callers always see a message, never a raw fetch rejection.
 import type { TokenomicsClient, TokenomicsReport } from './TokenomicsClient';
 import { withBasePath } from '@/lib/basePath';
+import { describeHttpError, readJsonResponse } from '@/lib/httpError';
 
 const TOKENOMICS_URL = withBasePath('/api/tokenomics');
 
@@ -21,11 +22,9 @@ export class LiveTokenomicsClient implements TokenomicsClient {
       );
     }
     if (!res.ok) {
-      throw new Error(
-        `Tokenomics API error ${res.status}: ${await res.text()}`,
-      );
+      throw new Error(await describeHttpError('Tokenomics API', res));
     }
-    return (await res.json()) as TokenomicsReport;
+    return readJsonResponse<TokenomicsReport>(res, 'Tokenomics API');
   }
 }
 

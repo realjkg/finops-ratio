@@ -21,21 +21,16 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createCostSourceClient } from '@/costsource';
 import type { CostRowsResult } from '@/costsource';
-import { assertValidWindow } from '@/costsource/transports/focusExport';
+import { assertValidWindow, INVALID_WINDOW_MESSAGE } from '@/costsource/transports/focusExport';
 import { gateSourceAccess } from '@/server/gateway/liveDataAuth';
-
-function statusForError(message: string): number {
-  if (message.includes('Unknown')) return 404;
-  if (message.includes('not configured')) return 409;
-  if (message.includes('does not provide')) return 422;
-  return 500;
-}
+import { logClientErrorDetail, withInternalErrorGuard } from '@/server/gateway/internalError';
+import { classifyCostRowsError } from '@/server/costsourceRouteErrors';
 
 function firstQueryValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-export default async function handler(
+async function handler(
   req: NextApiRequest,
   res: NextApiResponse<CostRowsResult | { error: string }>,
 ): Promise<void> {
@@ -55,8 +50,8 @@ export default async function handler(
 
   try {
     assertValidWindow({ start, end });
-  } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  } catch {
+    res.status(400).json({ error: INVALID_WINDOW_MESSAGE });
     return;
   }
 
@@ -66,8 +61,14 @@ export default async function handler(
   try {
     res.status(200).json(await client.fetchCostRows(sourceId, { start, end }));
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(statusForError(message)).json({ error: message });
+    // Known refusals → fixed 404 / 409 / 422 (detail to the log, never the
+    // caller's id); anything else is the guard's generic 500.
+    const known = classifyCostRowsError(err);
+    if (!known) throw err;
+    logClientErrorDetail(known.status, err, { method: req.method, path: req.url });
+    res.status(known.status).json({ error: known.message });
   }
 }
+
+export default withInternalErrorGuard(handler);
 

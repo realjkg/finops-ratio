@@ -176,13 +176,16 @@ describe('negotiateFocusVersion', () => {
     }
   });
 
-  it('refuses an out-of-range version with a 409 naming both sides', () => {
-    const result = negotiateFocusVersion('2.0');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.failure.status).toBe(409);
-    expect(result.failure.message).toContain("requested '2.0'");
-    expect(result.failure.message).toContain(SUPPORTED_FOCUS_VERSIONS.join(', '));
+  it('refuses an out-of-range version with a fixed 409 that names the supported range only', () => {
+    for (const requested of ['2.0', '<img src=x onerror=EVIL>', 'x'.repeat(500)]) {
+      const result = negotiateFocusVersion(requested);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.failure.status).toBe(409);
+      expect(result.failure.message).toBe('focusVersion not supported; responder supports 1.0–1.4');
+      expect(result.failure.message).not.toContain(requested);
+      expect(result.failure.supported).toEqual([...SUPPORTED_FOCUS_VERSIONS]);
+    }
   });
 
   it('refuses a non-string version rather than coercing it', () => {
@@ -350,7 +353,11 @@ describe('MockFinioClient', () => {
     const client = createFinioClient('mock');
     await expect(
       client.handshake({ ...request, focusVersion: '2.0' as never }),
-    ).rejects.toThrow(/FinIO handshake error 409: focusVersion mismatch/);
+    ).rejects.toThrow('FinIO handshake error 409: focusVersion not supported; responder supports 1.0–1.4');
+    const err = await client
+      .handshake({ ...request, focusVersion: 'EVIL-9.9' as never })
+      .catch((e: unknown) => e as Error);
+    expect((err as Error).message).not.toContain('EVIL');
   });
 
   it('refuses a malformed handshake with a 400', async () => {
