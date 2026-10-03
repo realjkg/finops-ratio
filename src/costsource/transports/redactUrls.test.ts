@@ -1,9 +1,8 @@
 // URL redaction (round 8): one linear forward scan per scheme://… token.
 //   (a) userinfo — everything between `://` and the LAST `@` before the first
 //       `/ ? # \` or whitespace — is replaced, however long it is;
-//   (b) a query (and a fragment) is replaced up to whitespace / the end of the
-//       token; quoted ("…", '…', `…`, \"…\") parts belong to it, spaces inside
-//       quotes included.
+//   (b) a query (and a fragment) is replaced to the end of the LINE (since
+//       round 11 — no quote / escape parsing: every such parser had a bypass).
 // Over-redacting the rest of a line is acceptable; leaking is not.
 
 import { describe, expect, it, vi } from 'vitest';
@@ -82,7 +81,9 @@ describe('query and fragment', () => {
   });
 
   it('a fragment is replaced even when its key is not a credential name', () => {
-    expect(redactUpstreamText(`https://app.test/cb#code=${S}&x=1 done`, 500)).toBe('https://app.test/cb#[REDACTED] done');
+    // ` done` is redacted too: since round 11 a fragment runs to the end of
+    // the line (accepted over-redaction — no quote / escape parsing to bypass).
+    expect(redactUpstreamText(`https://app.test/cb#code=${S}&x=1 done`, 500)).toBe('https://app.test/cb#[REDACTED]');
     expect(redactUpstreamText(`https://app.test/cb#${S}`, 500)).toBe('https://app.test/cb#[REDACTED]');
   });
 
@@ -98,7 +99,9 @@ describe('query and fragment', () => {
 
   it('keeps scheme, host and path; replaces the whole query', () => {
     const out = redactUpstreamText(`GET https://acct.blob.core.windows.net/c/x.csv?sv=2024&sig="${S} z"&se=2030 failed`, 1000);
-    expect(out).toBe('GET https://acct.blob.core.windows.net/c/x.csv?[REDACTED] failed');
+    // ` failed` is redacted too: since round 11 a query runs to the end of the
+    // line (accepted over-redaction — no quote / escape parsing to bypass).
+    expect(out).toBe('GET https://acct.blob.core.windows.net/c/x.csv?[REDACTED]');
   });
 
   it('a URL without query / fragment is unchanged', () => {
@@ -187,6 +190,47 @@ describe('scheme-relative // only after a delimiter', () => {
 
   it('after whitespace / quote / = it is', () => {
     expect(redactUpstreamText(`x=//u:${S}@h/p`, 500)).toBe('x=//[REDACTED]@h/p');
+  });
+});
+
+// --- Round 11: a query / fragment runs to the end of the LINE ----------------
+// No quote / escape parsing inside a query any more (each parser had a hole):
+// from `?` or `#` the rest of the line is redacted — up to a real \n / \r, an
+// unescaped JSON-escaped \n / \r, or the end of the text.
+
+describe('query / fragment redacted to the end of the line', () => {
+  it.each([
+    ["Copilot's shape (escaped quote inside an escaped-quoted value)", String.raw`https://x.test/p?foo=\"a\\\"b ${S} c\" tail`],
+    ['nested escaped quotes, depth 3', String.raw`https://x.test/p?q=\"a \\\"b \\\\\\\"c ${S}\\\\\\\" d\\\" e\"`],
+    ['unbalanced quotes', `https://x.test/p?a="x' b ${S} \` c`],
+    ['a lone "', `https://x.test/p?a=" ${S}`],
+    ['quote closed early, secret after a space', `https://x.test/p?a="x" ${S}`],
+    ['single quote closed early', `https://x.test/p?a='x' y ${S}`],
+    ['fragment with spaces', `https://app.test/cb#state=1 ${S}`],
+    ['query then a second URL on the same line', `https://a.test/p?x=1 https://b.test/q?t=${S}`],
+    ['query then a second URL with userinfo', `https://a.test/p?x=1 see http://u:${S}@b.test/`],
+  ])('%s', (_l, input) => {
+    const out = redactUpstreamText(input, 2000);
+    expect(out).not.toContain(S);
+    expect(out).toMatch(/[?#]\[REDACTED\]$/);
+  });
+
+  it('a second line after a real newline is untouched', () => {
+    const out = redactUpstreamText(`GET https://x.test/p?sig=${S} tail\nnext line stays`, 2000);
+    expect(out).toBe('GET https://x.test/p?[REDACTED]\nnext line stays');
+    expect(redactUpstreamText(`https://x.test/p?sig=${S}\r\nnext`, 2000)).toBe('https://x.test/p?[REDACTED]\r\nnext');
+  });
+
+  it('a second line after a JSON-escaped \\n is untouched', () => {
+    const out = redactUpstreamText(String.raw`{"m":"GET https://x.test/p?sig=${S} tail\nnext line stays"}`, 2000);
+    expect(out).toBe(String.raw`{"m":"GET https://x.test/p?[REDACTED]\nnext line stays"}`);
+    expect(redactUpstreamText(String.raw`https://x.test/p?a=${S}\r\nb`, 2000)).toBe(String.raw`https://x.test/p?[REDACTED]\r\nb`);
+  });
+
+  it('an escaped backslash before n (C:\\\\new) is NOT a line end — keeps redacting', () => {
+    const out = redactUpstreamText(String.raw`https://x.test/p?path=C:\\new\\${S} tail`, 2000);
+    expect(out).not.toContain(S);
+    expect(out).toBe('https://x.test/p?[REDACTED]');
   });
 });
 
