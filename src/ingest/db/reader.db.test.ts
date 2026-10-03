@@ -56,23 +56,23 @@ describe('ratio_reader', () => {
     expect(checked).toBe(2 * TENANT_TABLES.length * 5);
   });
 
+  // SET ROLE escalation is probed from a real LOGIN member in tenancy.db.test.ts
+  // (the superuser test session would always be allowed to SET ROLE).
   it('reader cannot write through the view or run DDL', async () => {
     await withRole(db.pool, 'ratio_reader', seed.a.tenantId, async (c) => {
-      for (const sql of [
-        `INSERT INTO ratio.cost_facts_published DEFAULT VALUES`,
-        `UPDATE ratio.cost_facts_published SET billed_cost = 0`,
-        `DELETE FROM ratio.cost_facts_published`,
-        `TRUNCATE ratio.cost_facts_published`,
-        'CREATE TABLE ratio.evil (x int)',
-        'CREATE VIEW ratio.evil_v AS SELECT 1',
-        'ALTER VIEW ratio.cost_facts_published SET (security_invoker = true)',
-        'SET ROLE ratio_worker',
-        'SET ROLE ratio_owner',
-      ]) {
-        const r = await attempt(c, sql);
-        expect(r.ok, sql).toBe(false);
-        // Writes to a join view are refused by privilege or by non-updatability; either way nothing is written.
-        if (!r.ok) expect(['42501', '55000', '42809'], `${sql} -> ${r.code} ${r.message}`).toContain(r.code);
+      // Exact codes: the join view is not auto-updatable (55000 / 42809), and the
+      // reader holds no write privilege on it either (asserted via has_table_privilege above).
+      const cases: Array<[string, string]> = [
+        [`INSERT INTO ratio.cost_facts_published DEFAULT VALUES`, '55000'],
+        [`UPDATE ratio.cost_facts_published SET billed_cost = 0`, '55000'],
+        [`DELETE FROM ratio.cost_facts_published`, '55000'],
+        [`TRUNCATE ratio.cost_facts_published`, '42809'],
+        ['CREATE TABLE ratio.evil (x int)', '42501'],
+        ['CREATE VIEW ratio.evil_v AS SELECT 1', '42501'],
+        ['ALTER VIEW ratio.cost_facts_published SET (security_invoker = true)', '42501'],
+      ];
+      for (const [sql, code] of cases) {
+        expect(await attempt(c, sql), sql).toMatchObject({ ok: false, code });
       }
     });
     const n = await db.pool.query(`SELECT count(*)::int AS n FROM ratio.cost_facts WHERE tenant_id = $1`, [seed.a.tenantId]);

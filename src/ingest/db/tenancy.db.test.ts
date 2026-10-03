@@ -1,7 +1,7 @@
 // Tenant isolation for ratio_worker: RLS on every table, composite FKs,
 // transaction-local tenant setting, and the published-facts view.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Pool } from 'pg';
+import { Client, Pool } from 'pg';
 import { attempt, createTestDatabase, withRole, type TestDatabase } from './testing/harness';
 import { TENANT_TABLES, artifactSha, fp, seedTwoTenants, type Seeded } from './testing/fixtures';
 import { withTenantTransaction } from './tenant';
@@ -43,7 +43,7 @@ function tenantBInserts(s: Seeded): Array<{ table: string; sql: string; params: 
     {
       table: 'ingest_artifacts',
       sql: `INSERT INTO ratio.ingest_artifacts (tenant_id, source_id, batch_id, artifact_name, sha256, byte_size, row_count, evidence_key)
-            VALUES ($1, $2, $3, 'part-9.csv.gz', $4, 1, 0, 'evidence/' || $1 || '/' || $2 || '/' || $4)`,
+            VALUES ($1::uuid, $2::uuid, $3, 'part-9.csv.gz', $4::text, 1, 0, 'evidence/' || $1::text || '/' || $2::text || '/' || $4::text)`,
       params: [b.tenantId, b.sourceId, b.batchStaged, fp('b-part-9')],
     },
     {
@@ -321,7 +321,6 @@ describe('ratio_worker tenant isolation', () => {
       [`ALTER TABLE ratio.cost_facts DISABLE ROW LEVEL SECURITY`, []],
       [`ALTER TABLE ratio.cost_facts NO FORCE ROW LEVEL SECURITY`, []],
       [`DROP POLICY tenant_isolation ON ratio.cost_facts`, []],
-      [`SET ROLE ratio_owner`, []],
       [`CREATE OR REPLACE FUNCTION ratio.current_tenant_id() RETURNS uuid LANGUAGE sql AS 'SELECT NULL::uuid'`, []],
     ];
     await withRole(db.pool, 'ratio_worker', seed.a.tenantId, async (c) => {
@@ -331,6 +330,40 @@ describe('ratio_worker tenant isolation', () => {
         if (!r.ok) expect(r.code, `${sql} -> ${r.message}`).toBe('42501');
       }
     });
+  });
+
+  it('a real LOGIN member of ratio_worker / ratio_reader cannot become ratio_owner and is bound by RLS', async () => {
+    // The other tests switch roles with SET LOCAL ROLE from the superuser test
+    // connection; SET ROLE permission is checked against the *session* user, so
+    // escalation must be probed from a genuine login that is only a member.
+    for (const member of ['ratio_worker', 'ratio_reader'] as const) {
+      const login = `ratio_test_login_${process.pid}_${Math.random().toString(36).slice(2, 10)}`;
+      await db.pool.query(`CREATE ROLE ${login} LOGIN IN ROLE ${member}`);
+      const url = new URL(db.url);
+      url.username = login;
+      const c = new Client({ connectionString: url.toString() });
+      try {
+        await c.connect();
+        const who = await c.query(`SELECT current_user AS u, session_user AS s`);
+        expect(who.rows[0]).toEqual({ u: login, s: login });
+        for (const target of ['ratio_owner', member === 'ratio_reader' ? 'ratio_worker' : 'ratio_reader', 'postgres']) {
+          await expect(c.query(`SET ROLE ${target}`), `${member} -> ${target}`).rejects.toMatchObject({ code: '42501' });
+        }
+        await c.query('BEGIN');
+        await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [seed.a.tenantId]);
+        const v = await c.query(`SELECT count(*)::int AS n, count(DISTINCT tenant_id)::int AS t FROM ratio.cost_facts_published`);
+        expect(v.rows[0]).toEqual({ n: seed.a.publishedRows, t: 1 });
+        await c.query('COMMIT');
+        const none = await c.query(`SELECT count(*)::int AS n FROM ratio.cost_facts_published`);
+        expect(none.rows[0].n).toBe(0);
+        if (member === 'ratio_reader') {
+          await expect(c.query('SELECT 1 FROM ratio.cost_facts LIMIT 1')).rejects.toMatchObject({ code: '42501' });
+        }
+      } finally {
+        await c.end().catch(() => undefined);
+        await db.pool.query(`DROP ROLE IF EXISTS ${login}`);
+      }
+    }
   });
 
   it('withTenantTransaction scopes the tenant to one transaction (integration)', async () => {

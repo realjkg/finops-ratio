@@ -85,6 +85,7 @@ const EXPECTED_TABLES = [
   'cost_facts',
   'ingest_artifacts',
   'ingest_batches',
+  'ingest_validation_errors',
   'period_publications',
   'source_checkpoints',
   'sources',
