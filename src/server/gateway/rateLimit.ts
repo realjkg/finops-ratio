@@ -22,6 +22,7 @@ export const WINDOW_MS = 60_000;
 
 export class SlidingWindowRateLimiter {
   private readonly hits = new Map<string, number[]>();
+  private lastPrune = Number.NEGATIVE_INFINITY;
 
   constructor(
     private readonly limit: number = STANDARD_TIER_LIMIT,
@@ -30,8 +31,27 @@ export class SlidingWindowRateLimiter {
     private readonly now: () => number = () => Date.now(),
   ) {}
 
+  /**
+   * Drop every key whose hits are all older than the window, at most once per
+   * window — keeps the map bounded by the keys active in the last window.
+   */
+  private prune(now: number): void {
+    if (now - this.lastPrune < this.windowMs) return;
+    this.lastPrune = now;
+    const windowStart = now - this.windowMs;
+    for (const [key, hits] of this.hits) {
+      if (!hits.some((t) => t > windowStart)) this.hits.delete(key);
+    }
+  }
+
+  /** Number of tracked keys (tests / diagnostics). */
+  size(): number {
+    return this.hits.size;
+  }
+
   take(key: string): RateLimitResult {
     const now = this.now();
+    this.prune(now);
     const windowStart = now - this.windowMs;
     const recent = (this.hits.get(key) ?? []).filter((t) => t > windowStart);
 
@@ -65,6 +85,7 @@ export class SlidingWindowRateLimiter {
    */
   peek(key: string): RateLimitResult {
     const now = this.now();
+    this.prune(now);
     const recent = (this.hits.get(key) ?? []).filter((t) => t > now - this.windowMs);
     const blocked = recent.length >= this.limit;
     const resetMs = recent.length > 0 ? recent[0] + this.windowMs : now + this.windowMs;
