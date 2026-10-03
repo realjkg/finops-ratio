@@ -80,6 +80,11 @@ describe('jsonLineRedactorFor (redact before serialize)', () => {
     expect(() => JSON.parse(text)).not.toThrow();
     for (const f of forms(secret)) expect(text, f).not.toContain(f);
     expect(text).toContain('[redacted]');
+    // Errors are serialized (redacted), not silently dropped to {}.
+    const parsed = JSON.parse(text);
+    expect(parsed.err).toMatchObject({ name: 'Error', code: '3D000' });
+    expect(parsed.err.message).toContain('[redacted]');
+    expect(parsed.err.cause.message).toContain('[redacted]');
   });
 
   it('the serialized-text backstop never truncates long output', () => {
