@@ -104,9 +104,27 @@ const CATEGORIES: Array<{ cat: string; setup?: (c: Client, n: (p: string) => str
 describe('round 16 H1: every privilege category is scanned for every (transitive) member of a ratio role', () => {
   for (const k of CATEGORIES) {
     for (const parent of ['ratio_worker', 'ratio_reader', 'ratio_owner'] as const) {
-      // Owner decision: the migrator may hold CREATE on the database (CREATE
-      // SCHEMA needs it) — see the positive control below.
-      if (k.cat === 'database' && parent === 'ratio_owner') continue;
+      if (k.cat === 'database' && parent === 'ratio_owner') {
+        // Owner decision (round 16): the migrator may hold CREATE, CONNECT and
+        // TEMPORARY on the database (CREATE SCHEMA needs CREATE) — an explicit
+        // ALLOWED case rather than a skipped one (round 17, challenger L1).
+        it('database: CREATE, CONNECT and TEMPORARY granted to a LOGIN member of ratio_owner are allowed (owner decision)', async () => {
+          await inTxn(async (c, n) => {
+            const login = n('m');
+            await c.query(`CREATE ROLE ${login} LOGIN IN ROLE ratio_owner`);
+            await c.query(
+              `DO $$ BEGIN EXECUTE format('GRANT CREATE, CONNECT, TEMPORARY ON DATABASE %I TO ${login}', current_database()); END $$`,
+            );
+            const held = await c.query(
+              `SELECT p FROM unnest(ARRAY['CREATE','CONNECT','TEMPORARY']) p WHERE has_database_privilege($1, current_database(), p)`,
+              [login],
+            );
+            expect(held.rows.map((r) => r.p).sort()).toEqual(['CONNECT', 'CREATE', 'TEMPORARY']);
+            expect((await privilegeModelViolations(c)).filter((x) => x.includes(login))).toEqual([]);
+          });
+        });
+        continue;
+      }
       it(`${k.cat}: a direct grant to a LOGIN member of ${parent} is refused`, async () => {
         await inTxn(async (c, n) => {
           const login = n('m');
@@ -268,4 +286,74 @@ describe('round 16 H2: privileges held through a SECOND role (inherit or SET ROL
       });
     }
   });
+});
+
+describe('round 17 (challenger L2): more predefined roles are refused when reachable by a member, over ANY edge', () => {
+  for (const pre of ['pg_read_all_data', 'pg_write_all_data', 'pg_signal_backend', 'pg_create_subscription']) {
+    for (const parent of ['ratio_worker', 'ratio_reader', 'ratio_owner'] as const) {
+      // ADMIN only (Copilot on #53, C1): with ADMIN OPTION a member can grant the role to itself, so it is assumable too.
+      for (const edge of ['default', 'SET only', 'ADMIN only', 'transitive SET only'] as const) {
+        it(`${pre}: a LOGIN member of ${parent} that can assume it (${edge} edge) is refused`, async () => {
+          await inTxn(async (c, n) => {
+            const app = n('app');
+            await c.query(`CREATE ROLE ${app} LOGIN IN ROLE ${parent}`);
+            expect(await problems(c)).not.toMatch(new RegExp(`role ${app} .*can assume`));
+            if (edge === 'default') await c.query(`GRANT ${pre} TO ${app}`);
+            else if (edge === 'SET only') await c.query(`GRANT ${pre} TO ${app} WITH INHERIT FALSE, SET TRUE`);
+            else if (edge === 'ADMIN only') await c.query(`GRANT ${pre} TO ${app} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
+            else {
+              const mid = n('mid');
+              await c.query(`CREATE ROLE ${mid} NOLOGIN`);
+              await c.query(`GRANT ${pre} TO ${mid} WITH INHERIT FALSE, SET TRUE`);
+              await c.query(`GRANT ${mid} TO ${app} WITH INHERIT FALSE, SET TRUE`);
+            }
+            expect(await problems(c)).toMatch(new RegExp(`role ${app} \\(member of ${parent}\\) can assume ${pre}\\b`));
+          });
+        });
+      }
+    }
+  }
+
+  it('the round-16 server-file roles stay refused over a SET-only edge, for an owner member too', async () => {
+    for (const pre of ['pg_read_server_files', 'pg_write_server_files', 'pg_execute_server_program']) {
+      await inTxn(async (c, n) => {
+        const app = n('app');
+        await c.query(`CREATE ROLE ${app} LOGIN IN ROLE ratio_owner`);
+        await c.query(`GRANT ${pre} TO ${app} WITH INHERIT FALSE, SET TRUE`);
+        expect(await problems(c)).toMatch(new RegExp(`role ${app} \\(member of ratio_owner\\) can assume ${pre}\\b`));
+      });
+    }
+  });
+});
+
+describe('round 18: monitoring predefined roles are refused when reachable by a member, over ANY edge (explicit check, not the system-ACL footprint)', () => {
+  // pg_read_all_stats shows every session's pg_stat_activity.query (other
+  // tenants' statements and parameters); pg_read_all_settings every setting;
+  // pg_monitor includes both. Only pg_monitor / pg_read_all_stats carry
+  // pg_catalog ACL entries, so the system-ACL scan alone would miss
+  // pg_read_all_settings and depends on PostgreSQL's catalog grants.
+  for (const pre of ['pg_monitor', 'pg_read_all_stats', 'pg_read_all_settings', 'pg_stat_scan_tables']) {
+    for (const parent of ['ratio_worker', 'ratio_reader', 'ratio_owner'] as const) {
+      // ADMIN only (Copilot on #53, C1): with ADMIN OPTION a member can grant the role to itself, so it is assumable too.
+      for (const edge of ['default', 'SET only', 'ADMIN only', 'transitive SET only'] as const) {
+        it(`${pre}: a LOGIN member of ${parent} that can assume it (${edge} edge) is refused`, async () => {
+          await inTxn(async (c, n) => {
+            const app = n('app');
+            await c.query(`CREATE ROLE ${app} LOGIN IN ROLE ${parent}`);
+            expect(await problems(c)).not.toMatch(new RegExp(`${app}`));
+            if (edge === 'default') await c.query(`GRANT ${pre} TO ${app}`);
+            else if (edge === 'SET only') await c.query(`GRANT ${pre} TO ${app} WITH INHERIT FALSE, SET TRUE`);
+            else if (edge === 'ADMIN only') await c.query(`GRANT ${pre} TO ${app} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
+            else {
+              const mid = n('mid');
+              await c.query(`CREATE ROLE ${mid} NOLOGIN`);
+              await c.query(`GRANT ${pre} TO ${mid} WITH INHERIT FALSE, SET TRUE`);
+              await c.query(`GRANT ${mid} TO ${app} WITH INHERIT FALSE, SET TRUE`);
+            }
+            expect(await problems(c)).toMatch(new RegExp(`role ${app} \\(member of ${parent}\\) can assume ${pre}\\b`));
+          });
+        });
+      }
+    }
+  }
 });

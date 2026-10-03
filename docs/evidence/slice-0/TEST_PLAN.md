@@ -303,3 +303,30 @@ All in `foundation.db.test.ts`.
 | L2 | `testing/fixtures.test.ts` (fast) | `a COMMIT answered with ROLLBACK makes the seed throw (nothing was written)`, positive control |
 | L3 | `testing/vitestConfigs.test.ts` (fast) | `the known serial files exist and every *.serial.db.test.ts runs in the serial phase only`, `npm run test:db runs the parallel phase, then the serial phase` |
 | Spawn timeouts | `cli.process.test.ts` | the three existing tests, now with an explicit 60 s timeout (assertions unchanged) |
+
+## Round 17 — challenger round-16 Lows (tests committed red in e91567d)
+
+| Item | File | Test name(s) |
+|---|---|---|
+| L1 owner × database allowed | `memberPrivileges.db.test.ts` | `database: CREATE, CONNECT and TEMPORARY granted to a LOGIN member of ratio_owner are allowed (owner decision)` (replaces the skipped case; it passes on arrival, and mutations O1 and O2 show it can fail) |
+| L2 more predefined roles | `memberPrivileges.db.test.ts` | `<pg_read_all_data / pg_write_all_data / pg_signal_backend / pg_create_subscription>: a LOGIN member of <ratio_worker / ratio_reader / ratio_owner> that can assume it (<default / SET only / transitive SET only> edge) is refused` (36), `the round-16 server-file roles stay refused over a SET-only edge, for an owner member too` |
+| L3 quoted identifiers | `migrationFiles.test.ts` | `contract: …` (9 cases: `"t1"` vs `"T1"`, both directions; `"T1"` vs unquoted `T1`; unquoted `T1` vs `"T1"`; schema, type and function in both directions), `expand: …` (6 cases: same quoted case; quoted lower-case vs unquoted, both directions; schema; function with argument types) |
+| L3 follow-up (surviving mutant) | `migrationFiles.test.ts` (red in e9caf6b) | `contract:` `"ratio.t1"` vs `ratio.t1` and vice versa, `"ratio.t1"` vs `ratio_t1`, `"a b"` vs `a_b`; `expand:` `"ratio.t1"` vs `"ratio.t1"`, unquoted `ratio.É` vs `ratio."É"` |
+
+## Round 18: monitoring roles; Copilot on #53 (red commits 9dcdf16, 14affa2, 4aefcb7)
+
+| Item | File | Test name(s) |
+|---|---|---|
+| Monitoring roles | `memberPrivileges.db.test.ts` | `<pg_monitor / pg_read_all_stats / pg_read_all_settings>: a LOGIN member of <ratio_worker / ratio_reader / ratio_owner> that can assume it (<default / SET only / ADMIN only / transitive SET only> edge) is refused` (36) |
+| C1: ADMIN-only edge | `memberPrivileges.db.test.ts` | the round-17 and round-18 matrices, `(ADMIN only edge)`: 21 cases (7 roles × 3 parents) |
+| C2: dots in names | `migrationFiles.test.ts` | `the repro: ratio. t is ratio.t, never the unqualified name ratio (both directions)`, `CREATE TABLE <10 spellings> matches every other spelling of ratio.t, and not ratio`, `canonical equality across spacing styles; a trailing or doubled dot is malformed and matches nothing` (with the no-backtracking guards), `schemas, types and routines too, including a space before the argument list` |
+| Sweep | `migrationFiles.test.ts` | `round 18 sweep: names never stop early …` (11 cases) |
+| canonIdent | `migrationFiles.test.ts` | `renders every part quoted; a doubled quote inside a quoted part stays one escaped quote`, `the classifier uses it: …` |
+
+## Round 18 follow-up: challenger Lows (red commit 96532e0)
+
+| Item | File | Test name(s) |
+|---|---|---|
+| L1 | DESIGN §27 | deployment note: monitoring uses a separate login that is not a member of any ratio role (docs only) |
+| L2 | `migrationFiles.test.ts` (fast) | `'ratio.', '.t', '""' and friends are malformed (marker prefix), not some other canonical name` |
+| L3 | `memberPrivileges.db.test.ts` | `pg_stat_scan_tables: a LOGIN member of <ratio_worker / ratio_reader / ratio_owner> that can assume it (<default / SET only / ADMIN only / transitive SET only> edge) is refused` (12) |
