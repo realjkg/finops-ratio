@@ -16,11 +16,12 @@
 //       transactions), for every call (all string pieces of all arguments,
 //       concatenations and templates, dynamic parts as placeholders) and
 //       every standalone literal:
-//         - CREATE/ALTER ROLE/USER with a dangerous attribute, or with a
+//         - CREATE/ALTER ROLE/USER and CREATE GROUP with a dangerous attribute, or with a
 //           dynamic part after the role name (an attribute could hide there),
 //           or an IN ROLE / IN GROUP / ROLE / ADMIN / USER clause naming
 //           anything but ratio_worker/ratio_reader;
-//         - GRANT <role> TO <login> of anything but ratio_worker/ratio_reader;
+//         - GRANT <role> TO <login>, or ALTER GROUP <role> ADD USER, of
+//           anything but ratio_worker/ratio_reader;
 //         - DO blocks that touch roles/users.
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
@@ -33,7 +34,7 @@ const ATTRS = 'SUPERUSER|BYPASSRLS|REPLICATION|CREATEROLE|CREATEDB';
 const DANGEROUS = new RegExp(`(?<!NO)\\b(?:${ATTRS})\\b`);
 const DANGEROUS_WORD = new RegExp(`^(?:${ATTRS})$`);
 const HOLE = '\u0000';
-const PREFILTER = /createLogin|ROLE|USER|GRANT/i;
+const PREFILTER = /createLogin|ROLE|USER|GROUP|GRANT/i;
 
 function walk(dir: string, acc: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -59,7 +60,8 @@ function pieces(n: ts.Expression): string {
 function sqlProblems(raw: string): string[] {
   const text = raw.toUpperCase();
   const out: string[] = [];
-  for (const m of text.matchAll(/\b(?:CREATE|ALTER)\s+(?:ROLE|USER)\s+(\S+)([^;]*)/g)) {
+  // CREATE GROUP is CREATE ROLE (NOLOGIN by default) and takes the same attributes and clauses (challenger L4).
+  for (const m of text.matchAll(/\b(?:CREATE\s+(?:ROLE|USER|GROUP)|ALTER\s+(?:ROLE|USER))\s+(\S+)([^;]*)/g)) {
     const rest = m[2];
     if (DANGEROUS.test(rest) || DANGEROUS_WORD.test(m[1])) out.push('role DDL with a dangerous attribute');
     else if (rest.includes(HOLE)) out.push('role DDL with a dynamic part after the role name');
@@ -68,6 +70,11 @@ function sqlProblems(raw: string): string[] {
       const targets = t[1].split(',').map((x) => x.trim().replace(/^"|"$/g, ''));
       if (!targets.every((r) => r === 'RATIO_WORKER' || r === 'RATIO_READER')) out.push('role DDL granting membership in a role other than ratio_worker/ratio_reader');
     }
+  }
+  // ALTER GROUP g ADD USER x makes x a member of g: only ratio_worker/ratio_reader (challenger L4).
+  for (const m of text.matchAll(/\bALTER\s+GROUP\s+(\S+)\s+ADD\s+USER\b/g)) {
+    const group = m[1].replace(/^"|"$/g, '');
+    if (group !== 'RATIO_WORKER' && group !== 'RATIO_READER') out.push('ALTER GROUP adding members to a role other than ratio_worker/ratio_reader');
   }
   for (const m of text.matchAll(/\bGRANT\s+([^;]*?)\s+TO\s+/g)) {
     const what = m[1];
