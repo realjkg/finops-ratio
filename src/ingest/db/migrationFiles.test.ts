@@ -613,3 +613,27 @@ describe('round 18 (Copilot on #53, C2): whitespace and comments around a qualif
     expect(findNonExpandStatement(t('CREATE SCHEMA "s" ;', 'REVOKE ALL ON SCHEMA s FROM PUBLIC;'))).toBeNull();
   });
 });
+
+describe('round 18 sweep: names never stop early (before "(", at line breaks, inside quotes)', () => {
+  const t = (create: string, revoke: string) => EXPAND + create + '\n' + revoke + '\n';
+  const cases: Array<[string, string, boolean]> = [
+    ['CREATE TABLE ratio.t(x int);', 'REVOKE ALL ON ratio.t FROM PUBLIC;', true],
+    ['CREATE TABLE ratio.t(x int);', 'REVOKE ALL ON ratio FROM PUBLIC;', false],
+    ['CREATE TABLE ratio\n.\nt\n(x int);', 'REVOKE ALL ON ratio.t FROM PUBLIC;', true],
+    ['CREATE TABLE ratio."a(b,c" (x int);', 'REVOKE ALL ON ratio."a(b,c" FROM PUBLIC;', true],
+    ['CREATE TABLE ratio."a(b,c" (x int);', 'REVOKE ALL ON ratio.a FROM PUBLIC;', false],
+    ['CREATE TABLE ratio."two\nlines" (x int);', 'REVOKE ALL ON ratio."two\nlines" FROM PUBLIC;', true],
+    ['CREATE TABLE ratio."two\nlines" (x int);', 'REVOKE ALL ON ratio.two FROM PUBLIC;', false],
+    ['CREATE SEQUENCE ratio . q;', 'REVOKE ALL ON SEQUENCE ratio.q FROM PUBLIC;', true],
+    ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.f\n(x int) RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio.f (int) FROM PUBLIC;', true],
+    ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.\"f(\"(x int) RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio."f("(int) FROM PUBLIC;', true],
+    ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.\"f(\"(x int) RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio.f(int) FROM PUBLIC;', false],
+  ];
+  for (const [create, revoke, expand] of cases) {
+    it(`${expand ? 'expand' : 'contract'}: ${JSON.stringify(create.split('\n').slice(-3).join('\n'))} then ${JSON.stringify(revoke)}`, () => {
+      const r = findNonExpandStatement(t(create, revoke));
+      if (expand) expect(r).toBeNull();
+      else expect(r).not.toBeNull();
+    });
+  }
+});
