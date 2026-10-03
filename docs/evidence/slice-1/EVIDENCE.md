@@ -161,7 +161,11 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 142 | b9f9505 | test: sixth review — conditional create, chunk byte budget, run-wide retry counter (red) | tests |
 | 143 | 70c6af5 | fix: conditional evidence create, chunk byte budget, run-wide retry counter | impl |
 | 144 | 1c6f244 | test: exact chunk split (kills B1b) | tests |
-| 145 | (final) | docs: evidence for this round (§33) | docs |
+| 145 | 886c234 | docs: evidence for §33 | docs |
+| 146 | dfeff7a | merge origin/main (2066adc: Slice 0 rounds 17-19, #53 #55 #56); `src/ingest/db` identical to origin/main | merge |
+| 147 | 6c35fbc | test: every Slice 0 refused predefined role over every edge kind (red: 32) | tests (serial) |
+| 148 | db62ab8 | fix: worker refuses Slice 0's full REFUSED_PREDEFINED_ROLES over the closure (H1 completed) | impl |
+| 149 | (final) | docs: evidence for this round (§34) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -2200,7 +2204,7 @@ comparison in the scratchpad (`my-h1-1af19e8.diff`).
   them, and verify they are gone in `afterAll`.
 - `src/ingest/db` is unchanged.
 
-**H1 is still incomplete: BLOCKED.** The agent's check hard-codes the 5
+**H1 is still incomplete: BLOCKED.** (Unblocked and completed in §34.) The agent's check hard-codes the 5
 attributes plus the 3 server-file roles. Slice 0's full
 `REFUSED_PREDEFINED_ROLES` (pg_read/write_all_data, pg_signal_backend,
 pg_create_subscription, the pg_monitor family, pg_stat_scan_tables) exists
@@ -2243,6 +2247,74 @@ Mutation logs: `mutations36.txt` (CI, Lows, M1–M3 and S1) and
 
 **Manual end-to-end** (built CLI at 1c6f244, private cluster, database
 `ratio_s1_e2e_93e36f4b`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 34. origin/main merged (Slice 0 rounds 17-19); H1 completed on Slice 0's REFUSED_PREDEFINED_ROLES
+
+**Merge (`dfeff7a`):**
+- `origin/main` 2066adc (#53, #55, #56) is merged, with no conflicts and no
+  rebase.
+- `git diff origin/main HEAD -- src/ingest/db` is **empty**: Slice 0 is
+  byte-for-byte origin/main's.
+- History is kept as it was, and the Copilot agent's 6412756 is untouched.
+- The local refs `wip/copilot-r5-paused` and `backup/slice01-before-r5-split`
+  were deleted after the merge was verified.
+
+**H1 completion:**
+- **Test** (`6c35fbc`, serial file, logins and helper roles dropped and
+  verified gone):
+  - for each of the 11 roles in Slice 0's `REFUSED_PREDEFINED_ROLES`
+    (server-file roles, pg_read_all_data, pg_write_all_data,
+    pg_signal_backend, pg_create_subscription, pg_monitor, pg_read_all_stats,
+    pg_read_all_settings, pg_stat_scan_tables), a ratio_worker login that
+    reaches it over an **INHERIT**, **SET-only**, **ADMIN-only** or
+    **transitive** (login → plain role → predefined role) edge must be
+    refused, `UNSAFE_DB_ROLE`, naming the role;
+  - the expected roles are written out in the test, and a drift test pins
+    them to `Object.keys(REFUSED_PREDEFINED_ROLES)`;
+  - red against 6412756: 32 failed (8 roles × 4 edges).
+- **Fix** (`db62ab8`):
+  - the worker's capability scan matches `rolname = ANY($1)` with
+    `Object.keys(REFUSED_PREDEFINED_ROLES)`, imported read-only from Slice 0;
+  - it covers the same full closure (every `pg_auth_members` edge) and keeps
+    the 5 attributes;
+  - the duplicated server-file list in `worker/db.ts` is removed.
+
+| Mutation (`mutations39.txt`, `mutations39b.txt`) | Result |
+|---|---|
+| P1 worker drops one role from Slice 0's list (pg_signal_backend) | 4 failed (that role over each edge) |
+| P2 one role removed from Slice 0's list itself (temporary, pg_monitor) | 5 failed (drift test + 4 edges) |
+| P3 predefined roles never matched (`$1` still bound) | 50 failed |
+| P4 inherit edges only | 42 failed |
+| P5 direct grants only (no transitive walk) | 12 failed |
+
+A first version of P3 dropped the `$1` reference altogether, so every query
+failed on an unbound parameter. That killed it for the wrong reason, and it
+was rewritten in the valid form above.
+
+### Gates at db62ab8
+
+| Check | Result |
+|---|---|
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 7.1–10.4) | **3/3**, 92 files / 2110 passed each, 0 unhandled errors |
+| spawnCleanup ×20 under parallel load | **20/20** (load 9.9) |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 32 files / 563 passed; serial 4 files / 92 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 521 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at db62ab8, private cluster, database
+`ratio_s1_e2e_8f0d2c44`):
 - migrate status went 3 -> 0 -> 0.
 - sync published and reconciled; the second sync reported `skipped_unchanged`.
 - Reader totals equal the control totals (55 / `30.8272954899`,

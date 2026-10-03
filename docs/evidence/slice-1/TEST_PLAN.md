@@ -316,3 +316,7 @@ Round 33:
 - `reviewFindings6.db.test.ts`: the chunk byte budget; the run-wide retry
   counter.
 
+Round 34: `auth.serial.db.test.ts` checks every role in Slice 0's
+REFUSED_PREDEFINED_ROLES over INHERIT, SET-only, ADMIN-only and transitive
+edges, plus a drift test that pins the test's role list to Slice 0's.
+
