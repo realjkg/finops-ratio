@@ -127,7 +127,7 @@ export async function recordRetry(pool: Pool, lease: Lease, entry: Record<string
     const r = await c.query(
       `UPDATE ratio.sync_runs SET attempt = attempt + 1,
          stats = jsonb_set(stats, '{retries}', coalesce(stats->'retries', '[]'::jsonb) || jsonb_build_array($3::jsonb))
-       WHERE id = $1 AND lease_token = $2 AND status = 'running'`,
+       WHERE id = $1 AND lease_token = $2 AND status = 'running' AND lease_expires_at > clock_timestamp()`,
       [lease.runId, lease.token, JSON.stringify(entry)],
     );
     if (r.rowCount !== 1) throw new IngestError('LEASE_LOST', 'this run no longer holds its lease (expired or taken over)');
