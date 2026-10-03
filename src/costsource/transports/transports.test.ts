@@ -60,6 +60,7 @@ describe('FOCUS export parsing', () => {
   it('coerces types, keeps only FOCUS columns, and fills the v1.0 core', () => {
     const row = coerceFocusRecord({
       BilledCost: '12.5',
+      BillingCurrency: 'EUR',
       ChargePeriodStart: '2026-06-01 00:00:00 UTC',
       CommitmentDiscountStatus: '',
       x_Vendor: 'dropped',
@@ -69,23 +70,24 @@ describe('FOCUS export parsing', () => {
     expect(row?.EffectiveCost).toBe(12.5); // defaults to BilledCost
     expect(row?.ChargePeriodStart).toBe('2026-06-01T00:00:00.000Z');
     expect(row?.CommitmentDiscountStatus).toBeNull();
-    expect(row?.BillingCurrency).toBe('USD');
+    expect(row?.BillingCurrency).toBe('EUR'); // carried through, never assumed
     expect(row?.ResourceId).toBe('');
     expect(row).not.toHaveProperty('x_Vendor');
   });
 
   it('converts BigQuery epoch-second timestamps', () => {
-    const row = coerceFocusRecord({ BilledCost: 1, ChargePeriodStart: '1.7807616E9' });
+    const row = coerceFocusRecord({ BilledCost: 1, BillingCurrency: 'USD', ChargePeriodStart: '1.7807616E9' });
     expect(row?.ChargePeriodStart).toBe(new Date(1.7807616e9 * 1000).toISOString());
   });
 
-  it('drops rows without a cost or charge period rather than inventing them', () => {
-    expect(coerceFocusRecord({ ChargePeriodStart: '2026-06-01' })).toBeNull();
-    expect(coerceFocusRecord({ BilledCost: 1 })).toBeNull();
+  it('rejects rows without a cost, charge period, or currency rather than inventing or dropping them', () => {
+    expect(() => coerceFocusRecord({ ChargePeriodStart: '2026-06-01', BillingCurrency: 'USD' })).toThrow(/BilledCost/);
+    expect(() => coerceFocusRecord({ BilledCost: 1, BillingCurrency: 'USD' })).toThrow(/ChargePeriodStart/);
+    expect(() => coerceFocusRecord({ BilledCost: 1, ChargePeriodStart: '2026-06-01' })).toThrow(/BillingCurrency/);
   });
 
   it('filters rows to the requested window', () => {
-    const rows = rowsFromExportText(CSV, WINDOW);
+    const rows = rowsFromExportText(CSV, WINDOW, 'export.csv');
     expect(rows).toHaveLength(1);
     expect(rows[0].BilledCost).toBe(10.5);
   });
@@ -143,7 +145,7 @@ describe('HTTP FOCUS transport', () => {
   });
 
   it('reads gzip-compressed JSON bodies', async () => {
-    const body = await gzip(JSON.stringify({ data: [{ BilledCost: 4, ChargePeriodStart: '2026-06-05' }] }));
+    const body = await gzip(JSON.stringify({ data: [{ BilledCost: 4, BillingCurrency: 'USD', ChargePeriodStart: '2026-06-05' }] }));
     const t = createHttpFocusTransport({
       endpoint: 'https://opencost/focus',
       label: 'K8s',
@@ -346,7 +348,9 @@ describe('GCP BigQuery transport', () => {
 
   it('exchanges a signed JWT for a token, runs a parameterized query, and pages results', async () => {
     const sa = await serviceAccountJson();
-    const schema = { fields: [{ name: 'BilledCost' }, { name: 'ChargePeriodStart' }, { name: 'ServiceName' }] };
+    const schema = {
+      fields: [{ name: 'BilledCost' }, { name: 'BillingCurrency' }, { name: 'ChargePeriodStart' }, { name: 'ServiceName' }],
+    };
     const fetch = fakeFetch(async (url, init) => {
       if (url === 'https://oauth2.googleapis.com/token') {
         const form = new URLSearchParams(String(init.body));
@@ -365,7 +369,7 @@ describe('GCP BigQuery transport', () => {
           jobComplete: true,
           jobReference: { jobId: 'job1', location: 'US' },
           schema,
-          rows: [{ f: [{ v: '5.5' }, { v: '1780790400' }, { v: 'Vertex AI' }] }],
+          rows: [{ f: [{ v: '5.5' }, { v: 'USD' }, { v: '1780790400' }, { v: 'Vertex AI' }] }],
           pageToken: 'p2',
         });
       }
@@ -375,7 +379,7 @@ describe('GCP BigQuery transport', () => {
       expect(url).toContain('/queries/job1?');
       expect(url).toContain('location=US');
       expect(url).toContain('pageToken=p2');
-      return Response.json({ jobComplete: true, rows: [{ f: [{ v: '1.25' }, { v: '1780876800' }, { v: 'GKE' }] }] });
+      return Response.json({ jobComplete: true, rows: [{ f: [{ v: '1.25' }, { v: 'USD' }, { v: '1780876800' }, { v: 'GKE' }] }] });
     });
 
     const t = createGcpBigQueryTransport({ dataset: 'billing.focus_view', projectId: 'ratio-prod', credentials: sa, fetch });

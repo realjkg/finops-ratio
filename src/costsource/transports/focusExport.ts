@@ -184,16 +184,23 @@ const NULLABLE_COLUMNS = new Set([
 
 const KNOWN_COLUMNS = new Set(Object.values(COLUMNS_BY_VERSION).flat());
 
-/** Columns a row must carry for its cost to be meaningful; others default safely. */
-const REQUIRED_COLUMNS = ['BilledCost', 'ChargePeriodStart'] as const;
+/**
+ * Columns a row must carry for its cost to be meaningful. A row missing any of
+ * them is INVALID: the fetch fails loudly rather than dropping the row (a
+ * dropped row is silently missing cost) or inventing a value (e.g. assuming USD).
+ */
+const REQUIRED_COLUMNS = ['BilledCost', 'ChargePeriodStart', 'BillingCurrency'] as const;
 
-function toNumber(v: unknown): number {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
-  if (typeof v === 'string' && v.trim() !== '') {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
+function isBlank(v: unknown): boolean {
+  return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+}
+
+/** Absent / empty numeric cells are 0; anything present must parse as a finite number. */
+function toNumber(v: unknown, column: string): number {
+  if (isBlank(v)) return 0;
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v.trim()) : Number.NaN;
+  if (!Number.isFinite(n)) throw new Error(`${column} is not a number`);
+  return n;
 }
 
 function toIsoDate(v: unknown): string {
@@ -215,20 +222,23 @@ function toStringValue(v: unknown): string {
 
 /**
  * A loose record from an export → a `RawSourceRow`. Only FOCUS columns are kept
- * (provider-specific `x_*` columns are dropped — Ratio adds its own). Columns a
- * real export leaves null (e.g. ResourceId on a tax line) become '' / 0 rather
- * than undefined, so the canonical upgrade never sees a hole. Returns null for a
- * record missing the columns that make a cost row meaningful.
+ * (provider-specific `x_*` columns are dropped — Ratio adds its own). Optional
+ * columns a real export leaves null (e.g. ResourceId on a tax line) become '' /
+ * 0 rather than undefined, so the canonical upgrade never sees a hole.
+ *
+ * THROWS (with the reason) for an invalid record: a missing required column
+ * (BilledCost / ChargePeriodStart / BillingCurrency) or an unparseable number.
+ * `rowsFromRecords` adds the artifact name and row number.
  */
-export function coerceFocusRecord(rec: Record<string, unknown>): RawSourceRow | null {
+export function coerceFocusRecord(rec: Record<string, unknown>): RawSourceRow {
   for (const col of REQUIRED_COLUMNS) {
-    if (rec[col] === undefined || rec[col] === null || rec[col] === '') return null;
+    if (isBlank(rec[col])) throw new Error(`missing required column ${col}`);
   }
 
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(rec)) {
     if (!KNOWN_COLUMNS.has(key)) continue;
-    if (NUMERIC_COLUMNS.has(key)) out[key] = toNumber(value);
+    if (NUMERIC_COLUMNS.has(key)) out[key] = toNumber(value, key);
     else if (DATE_COLUMNS.has(key)) out[key] = toIsoDate(value);
     else if (NULLABLE_COLUMNS.has(key)) out[key] = value === '' || value == null ? null : toStringValue(value);
     else out[key] = toStringValue(value);
@@ -239,8 +249,9 @@ export function coerceFocusRecord(rec: Record<string, unknown>): RawSourceRow | 
   for (const col of COLUMNS_BY_VERSION['1.0']) {
     if (out[col] === undefined) out[col] = NUMERIC_COLUMNS.has(col) ? 0 : '';
   }
-  if (!out.EffectiveCost) out.EffectiveCost = out.BilledCost;
-  if (!out.BillingCurrency) out.BillingCurrency = 'USD';
+  // EffectiveCost defaults to BilledCost ONLY when the source omitted it — a
+  // present 0 (fully discounted / credited usage) is a real value and is kept.
+  if (isBlank(rec.EffectiveCost)) out.EffectiveCost = out.BilledCost;
   return out as unknown as RawSourceRow;
 }
 
@@ -251,11 +262,30 @@ export function inWindow(row: RawSourceRow, window: CostWindow): boolean {
   return t >= Date.parse(window.start) && t < Date.parse(window.end);
 }
 
-/** Export text → coerced, window-filtered FOCUS rows. */
-export function rowsFromExportText(text: string, window: CostWindow): RawSourceRow[] {
-  return parseExportText(text)
-    .map(coerceFocusRecord)
-    .filter((r): r is RawSourceRow => r !== null && inWindow(r, window));
+/**
+ * Loose records → coerced, window-filtered FOCUS rows. Every record is validated
+ * first: an invalid one throws naming `artifact` and its 1-based row number — it
+ * is never dropped. Rows outside the window are filtered (selection, not loss).
+ */
+export function rowsFromRecords(
+  records: Record<string, unknown>[],
+  window: CostWindow,
+  artifact: string,
+): RawSourceRow[] {
+  const rows = records.map((rec, i) => {
+    try {
+      return coerceFocusRecord(rec);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`${artifact}: invalid FOCUS row ${i + 1}: ${reason}`);
+    }
+  });
+  return rows.filter((r) => inWindow(r, window));
+}
+
+/** Export text → coerced, window-filtered FOCUS rows (throws on any invalid row). */
+export function rowsFromExportText(text: string, window: CostWindow, artifact: string): RawSourceRow[] {
+  return rowsFromRecords(parseExportText(text), window, artifact);
 }
 
 // --- object selection (bucket / container listings) ----------------------------
@@ -273,20 +303,58 @@ function dirOf(key: string): string {
   return i === -1 ? '' : key.slice(0, i);
 }
 
-/** Tokens a provider puts in the path of the month a window starts in. */
-function monthTokens(window: CostWindow): string[] {
-  const d = new Date(window.start);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+interface BillingMonth {
+  y: number;
+  m: number; // 0-based
+}
+
+/** Every billing month (UTC) intersecting the half-open window [start, end). */
+function monthsInWindow(window: CostWindow): BillingMonth[] {
+  const start = new Date(window.start);
+  const endMs = Date.parse(window.end);
+  const months: BillingMonth[] = [];
+  let y = start.getUTCFullYear();
+  let m = start.getUTCMonth();
+  do {
+    months.push({ y, m });
+    m += 1;
+    if (m === 12) {
+      m = 0;
+      y += 1;
+    }
+  } while (Date.UTC(y, m, 1) < endMs);
+  return months;
+}
+
+function monthLabel(month: BillingMonth): string {
+  return `${month.y}-${String(month.m + 1).padStart(2, '0')}`;
+}
+
+/** Tokens a provider puts in the path of a billing month. */
+function monthTokens(month: BillingMonth): string[] {
+  const y = month.y;
+  const m = String(month.m + 1).padStart(2, '0');
   // AWS: BILLING_PERIOD=2026-10 · Azure: 20261001-20261031 · generic: 2026-10 / 202610
   return [`${y}-${m}`, `${y}${m}01`, `${y}${m}`];
+}
+
+/** Every file in the most recently written directory of a non-empty pool. */
+function latestRun(pool: ExportObject[]): ExportObject[] {
+  const latest = pool.reduce((a, b) => (Date.parse(b.lastModified) > Date.parse(a.lastModified) ? b : a));
+  const dir = dirOf(latest.key);
+  return pool.filter((o) => dirOf(o.key) === dir);
 }
 
 /**
  * Pick the export files to read from a listing. Cloud FOCUS exports land as one
  * directory per run (with manifests alongside); re-runs overwrite a period in a
- * NEW directory. So: keep data files, prefer the ones whose path names the
- * window's month, then take every file in the most recently written directory.
+ * NEW directory. So: keep data files and, for EACH billing month the window
+ * intersects, take every file in that month's most recently written run
+ * directory; the result is the union.
+ *
+ * A window inside one month keeps the original rule (no file names the month →
+ * latest run overall). A window spanning several months throws naming any month
+ * that has no export, rather than silently returning fewer months.
  */
 export function selectExportObjects(objects: ExportObject[], window: CostWindow): ExportObject[] {
   const data = objects.filter(
@@ -294,17 +362,50 @@ export function selectExportObjects(objects: ExportObject[], window: CostWindow)
   );
   if (data.length === 0) return [];
 
-  const tokens = monthTokens(window);
-  const forMonth = data.filter((o) => tokens.some((t) => o.key.includes(t)));
-  const pool = forMonth.length > 0 ? forMonth : data;
+  const byKey = (a: ExportObject, b: ExportObject) => a.key.localeCompare(b.key);
+  const forMonth = (month: BillingMonth) => {
+    const tokens = monthTokens(month);
+    return data.filter((o) => tokens.some((t) => o.key.includes(t)));
+  };
 
-  const latest = pool.reduce((a, b) => (Date.parse(b.lastModified) > Date.parse(a.lastModified) ? b : a));
-  const dir = dirOf(latest.key);
-  return pool.filter((o) => dirOf(o.key) === dir).sort((a, b) => a.key.localeCompare(b.key));
+  const months = monthsInWindow(window);
+  if (months.length === 1) {
+    const pool = forMonth(months[0]);
+    return latestRun(pool.length > 0 ? pool : data).sort(byKey);
+  }
+
+  const picked = new Map<string, ExportObject>();
+  for (const month of months) {
+    const pool = forMonth(month);
+    if (pool.length === 0) {
+      throw new Error(
+        `no FOCUS export found for billing month ${monthLabel(month)} in the requested window — refusing to return partial data`,
+      );
+    }
+    for (const o of latestRun(pool)) picked.set(o.key, o);
+  }
+  return [...picked.values()].sort(byKey);
 }
 
 /** Upper bound on export files read per fetch — protects the route from a runaway listing. */
 export const MAX_EXPORT_FILES = 50;
+
+/** Throws when a selection exceeds MAX_EXPORT_FILES — a partial export is never read. */
+export function assertExportFileCap(count: number, label: string): void {
+  if (count > MAX_EXPORT_FILES) {
+    throw new Error(
+      `${label}: selected export has ${count} files, exceeding the cap of ${MAX_EXPORT_FILES} — refusing to return partial data`,
+    );
+  }
+}
+
+/** Error for a listing loop that hit its page cap while more pages remain. */
+export function listingTruncatedError(label: string, maxPages: number): Error {
+  return new Error(
+    `${label}: listing still has more pages after ${maxPages} pages — refusing to proceed with a partial listing`,
+  );
+}
+
 
 /** Tiny XML helper: every `<tag>…</tag>` value inside `xml` (no nesting needed). */
 export function xmlValues(xml: string, tag: string): string[] {

@@ -12,9 +12,10 @@
 import type { FocusExportTransport } from '../CloudConnectorAdapter';
 import type { RawSourceRow } from '../focusRows';
 import {
-  MAX_EXPORT_FILES,
+  assertExportFileCap,
   decodeExportBytes,
   fetchChecked,
+  listingTruncatedError,
   rowsFromExportText,
   selectExportObjects,
   xmlValues,
@@ -85,9 +86,14 @@ export function createAwsS3Transport(opts: AwsS3TransportOptions): FocusExportTr
     return fetchChecked(fetchImpl, url, { headers }, LABEL);
   }
 
-  async function list(maxPages = 20): Promise<ExportObject[]> {
+  /**
+   * Lists the prefix. A full listing (fetchExportRows) THROWS if pages remain
+   * after `maxPages`; only ping's 1-page reachability probe may stop early.
+   */
+  async function list(maxPages = 20, allowPartial = false): Promise<ExportObject[]> {
     const all: ExportObject[] = [];
     let token = '';
+    let more = false;
     for (let page = 0; page < maxPages; page += 1) {
       const params = new URLSearchParams({ 'list-type': '2' });
       if (loc.prefix) params.set('prefix', loc.prefix);
@@ -96,9 +102,11 @@ export function createAwsS3Transport(opts: AwsS3TransportOptions): FocusExportTr
       const res = await signedGet(`${loc.base}?${params.toString()}`);
       const { objects, continuationToken } = parseS3Listing(await res.text());
       all.push(...objects);
-      if (!continuationToken) break;
+      more = Boolean(continuationToken);
+      if (!more) break;
       token = continuationToken;
     }
+    if (more && !allowPartial) throw listingTruncatedError(LABEL, maxPages);
     return all;
   }
 
@@ -109,18 +117,17 @@ export function createAwsS3Transport(opts: AwsS3TransportOptions): FocusExportTr
 
   return {
     async ping() {
-      await list(1);
+      await list(1, true);
       return true;
     },
     async fetchExportRows(window) {
-      const keys = selectExportObjects(await list(), window)
-        .slice(0, MAX_EXPORT_FILES)
-        .map((o) => o.key);
+      const keys = selectExportObjects(await list(), window).map((o) => o.key);
       if (keys.length === 0) {
         throw new Error(`${LABEL}: no CSV/JSON export files found under s3 prefix '${loc.prefix}'`);
       }
+      assertExportFileCap(keys.length, LABEL);
       const rows: RawSourceRow[] = [];
-      for (const key of keys) rows.push(...rowsFromExportText(await readObject(key), window));
+      for (const key of keys) rows.push(...rowsFromExportText(await readObject(key), window, `${LABEL} ${key}`));
       return rows;
     },
   };

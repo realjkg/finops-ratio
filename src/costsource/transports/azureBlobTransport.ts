@@ -12,9 +12,10 @@
 import type { FocusExportTransport } from '../CloudConnectorAdapter';
 import type { RawSourceRow } from '../focusRows';
 import {
-  MAX_EXPORT_FILES,
+  assertExportFileCap,
   decodeExportBytes,
   fetchChecked,
+  listingTruncatedError,
   rowsFromExportText,
   selectExportObjects,
   xmlValues,
@@ -74,9 +75,14 @@ export function createAzureBlobTransport(opts: AzureBlobTransportOptions): Focus
   const blobUrl = (name: string) =>
     `${loc.origin}/${loc.container}/${name.split('/').map(encodeURIComponent).join('/')}?${sas}`;
 
-  async function list(maxPages = 20): Promise<ExportObject[]> {
+  /**
+   * Lists the container prefix. A full listing (fetchExportRows) THROWS if pages
+   * remain after `maxPages`; only ping's 1-page reachability probe may stop early.
+   */
+  async function list(maxPages = 20, allowPartial = false): Promise<ExportObject[]> {
     const all: ExportObject[] = [];
     let marker = '';
+    let more = false;
     for (let page = 0; page < maxPages; page += 1) {
       const params = new URLSearchParams({ restype: 'container', comp: 'list' });
       if (loc.prefix) params.set('prefix', loc.prefix);
@@ -89,9 +95,11 @@ export function createAzureBlobTransport(opts: AzureBlobTransportOptions): Focus
       );
       const { objects, nextMarker } = parseAzureListing(await res.text());
       all.push(...objects);
-      if (!nextMarker) break;
+      more = Boolean(nextMarker);
+      if (!more) break;
       marker = nextMarker;
     }
+    if (more && !allowPartial) throw listingTruncatedError(LABEL, maxPages);
     return all;
   }
 
@@ -105,21 +113,20 @@ export function createAzureBlobTransport(opts: AzureBlobTransportOptions): Focus
       if (loc.directBlob) {
         await fetchChecked(fetchImpl, blobUrl(loc.prefix), { method: 'HEAD', headers }, LABEL);
       } else {
-        await list(1);
+        await list(1, true);
       }
       return true;
     },
     async fetchExportRows(window) {
       const names = loc.directBlob
         ? [loc.prefix]
-        : selectExportObjects(await list(), window)
-            .slice(0, MAX_EXPORT_FILES)
-            .map((o) => o.key);
+        : selectExportObjects(await list(), window).map((o) => o.key);
       if (names.length === 0) {
         throw new Error(`${LABEL}: no CSV/JSON export files found under ${loc.container}/${loc.prefix}`);
       }
+      assertExportFileCap(names.length, LABEL);
       const rows: RawSourceRow[] = [];
-      for (const name of names) rows.push(...rowsFromExportText(await readBlob(name), window));
+      for (const name of names) rows.push(...rowsFromExportText(await readBlob(name), window, `${LABEL} ${name}`));
       return rows;
     },
   };

@@ -68,7 +68,7 @@ export function createHttpFocusTransport(opts: HttpFocusTransportOptions): Focus
     async fetchExportRows(window) {
       const res = await get(window);
       const text = await decodeExportBytes(new Uint8Array(await res.arrayBuffer()), opts.label);
-      return rowsFromExportText(text, window);
+      return rowsFromExportText(text, window, opts.label);
     },
   };
 }

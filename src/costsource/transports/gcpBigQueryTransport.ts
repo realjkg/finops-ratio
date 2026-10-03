@@ -10,8 +10,7 @@
 // the dataset. Only rows inside the requested window are queried.
 
 import type { FocusExportTransport } from '../CloudConnectorAdapter';
-import type { RawSourceRow } from '../focusRows';
-import { coerceFocusRecord, fetchChecked, inWindow, type FetchLike } from './focusExport';
+import { fetchChecked, rowsFromRecords, type FetchLike } from './focusExport';
 
 export interface GcpBigQueryTransportOptions {
   dataset: string;
@@ -220,13 +219,21 @@ export function createGcpBigQueryTransport(opts: GcpBigQueryTransportOptions): F
         }),
       });
 
+      // Every fetched response is processed. If the result is still incomplete
+      // (job running or more pages) after MAX_PAGES responses, THROW — a subset
+      // is never returned as if it were the whole window.
       const records: Record<string, unknown>[] = [];
       let schema = res.schema;
-      for (let page = 0; page < MAX_PAGES; page += 1) {
+      for (let fetched = 1; ; fetched += 1) {
         if (res.jobComplete !== false) records.push(...bqRowsToRecords({ ...res, schema: res.schema ?? schema }));
         schema = res.schema ?? schema;
         const done = res.jobComplete !== false && !res.pageToken;
         if (done) break;
+        if (fetched >= MAX_PAGES) {
+          throw new Error(
+            `${LABEL}: query results still incomplete after ${MAX_PAGES} pages — refusing to return partial data`,
+          );
+        }
         const job = res.jobReference;
         if (!job) throw new Error(`${LABEL}: query did not complete and returned no job reference`);
         const params = new URLSearchParams({ timeoutMs: '30000', maxResults: '10000' });
@@ -237,9 +244,7 @@ export function createGcpBigQueryTransport(opts: GcpBigQueryTransportOptions): F
         );
       }
 
-      return records
-        .map(coerceFocusRecord)
-        .filter((r): r is RawSourceRow => r !== null && inWindow(r, window));
+      return rowsFromRecords(records, window, `${LABEL} ${table.project}.${table.dataset}.${table.table}`);
     },
   };
 }
