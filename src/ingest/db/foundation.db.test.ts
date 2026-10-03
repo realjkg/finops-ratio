@@ -326,3 +326,88 @@ describe('round 11 L1: a pg_dump → restore round trip keeps the manifest', () 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 12 (challenger Lows on 8079351)
+// ---------------------------------------------------------------------------
+
+const NOTES_TABLE =
+  '-- ratio:phase expand\nSET LOCAL ROLE ratio_owner;\nCREATE TABLE ratio.notes (tenant_id uuid NOT NULL, body text);\n' +
+  'ALTER TABLE ratio.notes ENABLE ROW LEVEL SECURITY;\nALTER TABLE ratio.notes FORCE ROW LEVEL SECURITY;\n' +
+  'CREATE POLICY tenant_isolation ON ratio.notes USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id());\n';
+
+describe('round 12 L1: every ratio table has RLS enabled + forced, a reviewed policy, and no inheritance / partitioning', () => {
+  it('a new ratio table with RLS disabled (and no grants at all) is refused', async () => {
+    await expectPolicyRefusal(
+      'SET LOCAL ROLE ratio_owner;\nCREATE TABLE ratio.plain (tenant_id uuid NOT NULL, x int);\n',
+      /table ratio\.plain must have row-level security enabled and forced/,
+    );
+  });
+
+  it('a new ratio table with RLS forced but no reviewed policy is refused', async () => {
+    await expectPolicyRefusal(
+      'SET LOCAL ROLE ratio_owner;\nCREATE TABLE ratio.plain (tenant_id uuid NOT NULL, x int);\n' +
+        'ALTER TABLE ratio.plain ENABLE ROW LEVEL SECURITY;\nALTER TABLE ratio.plain FORCE ROW LEVEL SECURITY;\n',
+      /table ratio\.plain has no reviewed policy/,
+    );
+  });
+
+  it('an INHERITS (ratio.cost_facts) child — even outside schema ratio — is refused', async () => {
+    await expectPolicyRefusal('CREATE TABLE public.facts_child () INHERITS (ratio.cost_facts);\n', /public\.facts_child inherits from or is a partition of ratio\.cost_facts/);
+  });
+
+  it('a partition of a (new, otherwise compliant) partitioned ratio table is refused', async () => {
+    await expectPolicyRefusal(
+      'SET LOCAL ROLE ratio_owner;\nCREATE TABLE ratio.parted (tenant_id uuid NOT NULL, k int) PARTITION BY RANGE (k);\n' +
+        'ALTER TABLE ratio.parted ENABLE ROW LEVEL SECURITY;\nALTER TABLE ratio.parted FORCE ROW LEVEL SECURITY;\n' +
+        "DO $$ BEGIN EXECUTE 'CREATE ' || 'POLICY tenant_isolation ON ratio.parted USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id())'; END $$;\n" +
+        'RESET ROLE;\nCREATE TABLE public.parted_1 PARTITION OF ratio.parted FOR VALUES FROM (0) TO (10);\n',
+      /public\.parted_1 inherits from or is a partition of ratio\.parted/,
+    );
+  });
+
+  it('ALTER TABLE … SET UNLOGGED on a new ratio table is refused (0001 tables cannot be UNLOGGED: their FKs forbid it)', async () => {
+    await expectPolicyRefusal('ALTER TABLE ratio.notes SET UNLOGGED;\n', /table ratio\.notes must be a permanent \(logged\) table/, {
+      '0002_notes.up.sql': NOTES_TABLE,
+    });
+  });
+});
+
+describe('round 12 L2/L4: reviewed policy shapes are exact (kills the surviving shape mutants)', () => {
+  const onNotes = (policySql: string) =>
+    "DO $$ BEGIN EXECUTE 'CREATE ' || " + `'${policySql.replace(/'/g, "''")}'` + '; END $$;\n';
+
+  it('G3: a tenant_isolation policy with USING (true) on a new table is refused', async () => {
+    await expectPolicyRefusal(
+      "DO $$ BEGIN EXECUTE 'DROP ' || 'POLICY tenant_isolation ON ratio.notes'; END $$;\n" +
+        onNotes('POLICY tenant_isolation ON ratio.notes USING (true) WITH CHECK (tenant_id = ratio.current_tenant_id())'),
+      /policy:ratio\.notes:tenant_isolation:.* is not a reviewed policy/,
+      { '0002_notes.up.sql': NOTES_TABLE },
+    );
+  });
+
+  it('G2: the reviewed predicate but TO ratio_reader only is refused', async () => {
+    await expectPolicyRefusal(
+      onNotes('POLICY tenant_isolation_r ON ratio.notes TO ratio_reader USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id())'),
+      /policy:ratio\.notes:tenant_isolation_r:.*roles=ratio_reader:.* is not a reviewed policy/,
+      { '0002_notes.up.sql': NOTES_TABLE },
+    );
+  });
+
+  it('G4: the reviewed predicate under a different policy name is refused', async () => {
+    await expectPolicyRefusal(
+      onNotes('POLICY tenant_scope ON ratio.notes USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id())'),
+      /policy:ratio\.notes:tenant_scope:.* is not a reviewed policy/,
+      { '0002_notes.up.sql': NOTES_TABLE },
+    );
+  });
+
+  it('L4: the tenants-table shape (id = current_tenant_id()) is not reusable on another table', async () => {
+    await expectPolicyRefusal(
+      'SET LOCAL ROLE ratio_owner;\nCREATE TABLE ratio.things (id uuid NOT NULL, x int);\n' +
+        'ALTER TABLE ratio.things ENABLE ROW LEVEL SECURITY;\nALTER TABLE ratio.things FORCE ROW LEVEL SECURITY;\n' +
+        "DO $$ BEGIN EXECUTE 'CREATE ' || 'POLICY tenant_isolation ON ratio.things USING (id = ratio.current_tenant_id()) WITH CHECK (id = ratio.current_tenant_id())'; END $$;\n",
+      /policy:ratio\.things:tenant_isolation:.* is not a reviewed policy/,
+    );
+  });
+});

@@ -584,10 +584,10 @@ describe('round 7 High A: session-scoped settings a migration plants do not surv
       '0002_hostile.up.sql': HOSTILE_0002,
       '0003_probe.up.sql':
         EXPAND +
-        "CREATE TABLE ratio.session_probe AS SELECT current_setting('search_path') AS sp, current_setting('row_security') AS rs, ('a'::name = 'a'::name) AS eq, current_user::text AS cu;\n",
+        "CREATE TABLE public.session_probe AS SELECT current_setting('search_path') AS sp, current_setting('row_security') AS rs, ('a'::name = 'a'::name) AS eq, current_user::text AS cu;\n",
     });
     expect(await migrateUp(c, { dir, allowContract: true })).toEqual({ applied: ['0001', '0002', '0003'] });
-    const probe = (await db.pool.query(`SELECT sp, rs, eq, cu FROM ratio.session_probe`)).rows[0];
+    const probe = (await db.pool.query(`SELECT sp, rs, eq, cu FROM public.session_probe`)).rows[0];
     expect(probe).toEqual({ sp: 'pg_catalog, pg_temp', rs: 'on', eq: true, cu: 'postgres' });
     // ... and the runner leaves the caller's connection pinned, not hostile.
     expect((await c.query(`SELECT pg_catalog.current_setting('search_path') AS sp, pg_catalog.current_setting('row_security') AS rs`)).rows[0]).toEqual({
@@ -807,10 +807,10 @@ describe('round 8 L2 (S5): the runner resets a used caller connection before tak
     const dir = migrationsWith({
       '0002_probe.up.sql':
         EXPAND +
-        "CREATE TABLE ratio.session_probe AS SELECT current_setting('search_path') AS sp, current_setting('row_security') AS rs, ('a'::name = 'a'::name) AS eq;\n",
+        "CREATE TABLE public.session_probe AS SELECT current_setting('search_path') AS sp, current_setting('row_security') AS rs, ('a'::name = 'a'::name) AS eq;\n",
     });
     expect(await migrateUp(c, { dir })).toEqual({ applied: ['0002'] });
-    expect((await db.pool.query(`SELECT sp, rs, eq FROM ratio.session_probe`)).rows[0]).toEqual({ sp: 'pg_catalog, pg_temp', rs: 'on', eq: true });
+    expect((await db.pool.query(`SELECT sp, rs, eq FROM public.session_probe`)).rows[0]).toEqual({ sp: 'pg_catalog, pg_temp', rs: 'on', eq: true });
   });
 });
 
