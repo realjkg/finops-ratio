@@ -62,7 +62,7 @@ export interface Spawned {
 export function spawnCli(argv: string[], env: Record<string, string>): Spawned {
   const child = spawn(process.execPath, ['--import', 'tsx', CLI_SOURCE, ...argv], {
     cwd: REPO_ROOT,
-    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...env },
+    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...env } as unknown as NodeJS.ProcessEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const stderr: string[] = [];

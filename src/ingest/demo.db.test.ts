@@ -46,13 +46,26 @@ afterAll(async () => {
 const CONTROL = committedControlTotals();
 const expected = (variant: 'base' | 'restatement') =>
   Object.fromEntries(Object.entries(CONTROL[variant]).map(([p, v]) => [p, { rows: v.rowCount, total: v.billedTotal }]));
-const env = (extra: Record<string, string> = {}) => ({ RATIO_DATABASE_URL: worker.url, ...testS3Env(evidence.name), ...extra });
+const env = (extra: Record<string, string> = {}) => ({ RATIO_DATABASE_URL: worker.url, ...testS3Env(evidence), ...extra });
+/**
+ * Seeds the COMMITTED data files (byte-for-byte) under the scope's root. The
+ * manifests list bucket-relative keys, so they are regenerated for the root
+ * prefix (identical otherwise — syntheticFocus.test.ts proves committed
+ * manifests equal the generator's).
+ */
+async function seedCommitted(bucket: TestBucket, variant: 'base' | 'restatement'): Promise<void> {
+  await bucket.putUnderRoot(committedObjects(variant).filter((o) => o.key.endsWith('.csv.gz')));
+  const manifests = generateSyntheticExport({ variant, prefix: bucket.at(FIXTURE_LOCATION.prefix) }).objects.filter((o) => o.key.endsWith('Manifest.json'));
+  await bucket.putAll(manifests);
+}
+/** Source location of the committed fixture once uploaded under the scope's root. */
+const fixtureLocation = (bucket: TestBucket) => ({ bucket: bucket.name, prefix: bucket.at(FIXTURE_LOCATION.prefix), exportName: FIXTURE_LOCATION.exportName });
 
 async function fixtureSource(): Promise<{ s: SeededSource; bucket: TestBucket }> {
   const bucket = await createTestBucket('demo');
   buckets.push(bucket);
-  await bucket.putAll(committedObjects('base'));
-  const s = await seedTenantSource(db.pool, { config: { layout: 'aws-data-exports', bucket: bucket.name, ...FIXTURE_LOCATION } });
+  await seedCommitted(bucket, 'base');
+  const s = await seedTenantSource(db.pool, { config: { layout: 'aws-data-exports', ...fixtureLocation(bucket) } });
   return { s, bucket };
 }
 
@@ -86,7 +99,7 @@ describe('owner acceptance demonstration (synthetic fixture)', () => {
     const committedData = committedObjects('base').filter((o) => o.key.endsWith('.csv.gz'));
     expect(arts.rows).toHaveLength(committedData.length);
     for (const a of arts.rows) {
-      const stored = await evidence.get(a.evidence_key);
+      const stored = await evidence.get(evidence.at(a.evidence_key));
       expect(sha(stored)).toBe(a.sha256);
       expect(a.evidence_key).toBe(`evidence/${s.tenantId}/${s.sourceId}/${a.sha256}`);
       expect(stored.length).toBe(a.size);
@@ -108,8 +121,8 @@ describe('owner acceptance demonstration (synthetic fixture)', () => {
       pool: workerPool,
       tenantId: s.tenantId,
       sourceKey: s.sourceKey,
-      source: new S3FocusExportSource({ client: bucket.client, location: { bucket: bucket.name, ...FIXTURE_LOCATION } }),
-      evidence: new S3EvidenceStore({ client: evidence.client, bucket: evidence.name }),
+      source: new S3FocusExportSource({ client: bucket.client, location: fixtureLocation(bucket) }),
+      evidence: new S3EvidenceStore({ client: evidence.client, bucket: evidence.name, prefix: evidence.root }),
       mode: 'sync',
       settings: { limits: { insertChunkRows: 10 } },
       hooks: {
@@ -139,7 +152,7 @@ describe('owner acceptance demonstration (synthetic fixture)', () => {
       ['2026-07-01', 'published', 'reconciled'],
       ['2026-08-01', 'published', 'reconciled'],
     ]);
-    await bucket.putAll(generateSyntheticExport({ variant: 'corrupt' }).objects);
+    await bucket.putAll(generateSyntheticExport({ variant: 'corrupt', prefix: bucket.at(FIXTURE_LOCATION.prefix) }).objects);
     const bad = await sync(s);
     expect(bad.code).toBe(1);
     const q = (await batchesOf(db.pool, s.tenantId, s.sourceId)).find((b) => b.status === 'quarantined')!;
@@ -180,7 +193,7 @@ describe('owner acceptance demonstration (synthetic fixture)', () => {
     expect((await sync(s)).code).toBe(0);
     const baseView = await readerView(s.tenantId);
     const cpBefore = await checkpointOf(db.pool, s.tenantId, s.sourceId);
-    await bucket.putAll(committedObjects('restatement'));
+    await seedCommitted(bucket, 'restatement');
 
     const child = spawnCli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], {
       ...env(),
@@ -227,7 +240,7 @@ describe('owner acceptance demonstration (synthetic fixture)', () => {
   it('demo 7: the app (ratio_reader) reads the latest accepted revision; staged and quarantined data are inaccessible', async () => {
     const { s, bucket } = await fixtureSource();
     expect((await sync(s)).code).toBe(0);
-    await bucket.putAll(committedObjects('restatement'));
+    await seedCommitted(bucket, 'restatement');
     expect((await sync(s)).code).toBe(0);
     const latest = await readerView(s.tenantId);
     const totalRestated = Object.values(CONTROL.restatement).reduce((a, x) => a + x.rowCount, 0);
@@ -235,7 +248,7 @@ describe('owner acceptance demonstration (synthetic fixture)', () => {
     const published = (await batchesOf(db.pool, s.tenantId, s.sourceId)).filter((b) => b.status === 'published').map((b) => b.id).sort();
     expect(latest.batches).toEqual(published);
 
-    await bucket.putAll(generateSyntheticExport({ variant: 'corrupt' }).objects);
+    await bucket.putAll(generateSyntheticExport({ variant: 'corrupt', prefix: bucket.at(FIXTURE_LOCATION.prefix) }).objects);
     expect((await sync(s)).code).toBe(1);
     expect(await readerView(s.tenantId)).toEqual(latest);
 
@@ -281,7 +294,7 @@ describe('owner acceptance demonstration (synthetic fixture)', () => {
     }
 
     // The CLI for tenant B cannot reach tenant A's source (a different source key only A has).
-    const onlyA = await seedTenantSource(db.pool, { tenantId: a.tenantId, sourceKey: 'only-in-a', config: { layout: 'aws-data-exports', bucket: 'unused-bucket', ...FIXTURE_LOCATION } });
+    const onlyA = await seedTenantSource(db.pool, { tenantId: a.tenantId, sourceKey: 'only-in-a', config: { layout: 'aws-data-exports', bucket: 'unused-bucket', prefix: FIXTURE_LOCATION.prefix, exportName: FIXTURE_LOCATION.exportName } });
     const crossCli = await cli(['sync', '--tenant', b.tenantId, '--source', onlyA.sourceKey], env());
     expect(crossCli.code).toBe(1);
     expect(crossCli.out.concat(crossCli.err).join('\n')).toContain('SOURCE_NOT_FOUND');

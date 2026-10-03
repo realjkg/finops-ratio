@@ -8,22 +8,26 @@ import { COMMITTED_VARIANTS, FIXTURE_LOCATION, generateSyntheticExport, type Fix
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const FIXTURE_DIR = path.join(REPO_ROOT, 'fixtures', 'focus-1.0-synthetic');
 
-/** Exact decimal sum with BigInt (test-side ground truth, no floats). */
+/**
+ * Exact decimal sum with BigInt (test-side ground truth, no floats), printed
+ * with exactly 10 decimal places — the scale every fixture amount carries, and
+ * therefore the scale Postgres' sum(numeric) prints.
+ */
 function decimalSum(values: string[]): string {
-  const SCALE = 20;
-  let acc = 0n;
+  const SCALE = 10;
+  let acc = BigInt(0);
   for (const v of values) {
     const m = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(v);
     if (!m) throw new Error(`not a plain decimal: ${v}`);
+    if ((m[3] ?? '').length > SCALE) throw new Error(`more than ${SCALE} decimals: ${v}`);
     const frac = (m[3] ?? '').padEnd(SCALE, '0');
     const n = BigInt((m[2] || '0') + frac);
     acc += m[1] === '-' ? -n : n;
   }
-  const neg = acc < 0n;
+  const neg = acc < BigInt(0);
   const s = (neg ? -acc : acc).toString().padStart(SCALE + 1, '0');
   const int = s.slice(0, -SCALE);
-  const frac = s.slice(-SCALE).replace(/0+$/, '');
-  return (neg ? '-' : '') + int + (frac ? '.' + frac : '');
+  return (neg ? '-' : '') + int + '.' + s.slice(-SCALE);
 }
 
 function rowsOf(exp: ReturnType<typeof generateSyntheticExport>, period: string): Array<Record<string, string>> {

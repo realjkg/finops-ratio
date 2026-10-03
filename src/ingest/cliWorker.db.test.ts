@@ -27,14 +27,20 @@ afterAll(async () => {
 });
 
 function env(extra: Record<string, string> = {}): Record<string, string> {
-  return { RATIO_DATABASE_URL: t.login.url, RATIO_MIGRATE_DATABASE_URL: t.db.url, ...testS3Env(evidence.name), ...extra };
+  return { RATIO_DATABASE_URL: t.login.url, RATIO_MIGRATE_DATABASE_URL: t.db.url, ...testS3Env(evidence), ...extra };
 }
+
+/** Synthetic export objects placed under this scope's root in the shared test bucket. */
+const fixtureObjects = (bucket: TestBucket, variant: 'base' | 'restatement' | 'corrupt') =>
+  generateSyntheticExport({ variant, prefix: bucket.at(FIXTURE_LOCATION.prefix) }).objects;
 
 async function seededExport(variant: 'base' = 'base'): Promise<{ s: SeededSource; bucket: TestBucket }> {
   const bucket = await createTestBucket('src');
   buckets.push(bucket);
-  await bucket.putAll(generateSyntheticExport({ variant }).objects);
-  const s = await seedTenantSource(t.db.pool, { config: { layout: 'aws-data-exports', bucket: bucket.name, ...FIXTURE_LOCATION } });
+  await bucket.putAll(fixtureObjects(bucket, variant));
+  const s = await seedTenantSource(t.db.pool, {
+    config: { layout: 'aws-data-exports', bucket: bucket.name, prefix: bucket.at(FIXTURE_LOCATION.prefix), exportName: FIXTURE_LOCATION.exportName },
+  });
   return { s, bucket };
 }
 
@@ -86,7 +92,7 @@ describe('worker CLI (real Postgres + S3)', () => {
     expect(bf.code).toBe(0);
     expect((bf.record.results as { periods: unknown[] }).periods).toEqual([expect.objectContaining({ billingPeriod: '2026-07-01', outcome: 'unchanged' })]);
 
-    await bucket.putAll(generateSyntheticExport({ variant: 'restatement' }).objects);
+    await bucket.putAll(fixtureObjects(bucket, 'restatement'));
     expect((await cli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], env())).code).toBe(0);
     expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual(totalsOf('restatement'));
     const jul = (await batchesOf(t.db.pool, s.tenantId, s.sourceId)).filter((b) => b.period === '2026-07-01');
@@ -101,7 +107,7 @@ describe('worker CLI (real Postgres + S3)', () => {
     expect(re.code).toBe(0);
     expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual(totalsOf('restatement'));
 
-    await bucket.putAll(generateSyntheticExport({ variant: 'corrupt' }).objects);
+    await bucket.putAll(fixtureObjects(bucket, 'corrupt'));
     const bad = await cli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], env());
     expect(bad.code).toBe(1);
     expect(bad.record.pass).toBe(false);
@@ -180,6 +186,6 @@ describe('worker CLI (real Postgres + S3)', () => {
       const n = await t.db.pool.query(`SELECT count(*)::int AS n FROM ratio.${table} WHERE ${col} = $1`, [res.tenantId]);
       expect(n.rows[0].n, table).toBe(0);
     }
-    expect(await fx.keys()).toEqual([]);
+    expect(await fx.keys(`ratio-replay-fixtures/${res.tenantId}/`)).toEqual([]);
   });
 });

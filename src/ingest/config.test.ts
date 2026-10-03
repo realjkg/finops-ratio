@@ -77,9 +77,9 @@ describe('loadWorkerConfig', () => {
 
   it('requires both halves of a static S3 credential pair', () => {
     expect(() => loadWorkerConfig({ ...base, RATIO_SOURCE_S3_ACCESS_KEY_ID: 'AKIAEXAMPLE' })).toThrow(expect.objectContaining({ code: 'CONFIG_INVALID' }));
-    const c = loadWorkerConfig({ ...base, RATIO_EVIDENCE_S3_ACCESS_KEY_ID: 'a', RATIO_EVIDENCE_S3_SECRET_ACCESS_KEY: 'b', RATIO_EVIDENCE_S3_BUCKET: 'ev' });
+    const c = loadWorkerConfig({ ...base, RATIO_EVIDENCE_S3_ACCESS_KEY_ID: 'a', RATIO_EVIDENCE_S3_SECRET_ACCESS_KEY: 'b', RATIO_EVIDENCE_S3_BUCKET: 'ev-bucket' });
     expect(c.evidenceS3.credentials).toEqual({ accessKeyId: 'a', secretAccessKey: 'b' });
-    expect(c.evidenceS3.bucket).toBe('ev');
+    expect(c.evidenceS3.bucket).toBe('ev-bucket');
   });
 
   it('enforces RATIO_ARTIFACT_DIGEST format', () => {
