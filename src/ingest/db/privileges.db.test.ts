@@ -758,6 +758,17 @@ describe('round 8 L1: per-database / per-role setting defaults (pg_db_role_setti
     expect(await settingRows(c)).toBe(before);
   });
 
+  it('a setting row scoped to ANOTHER database does not count here (shared catalog; no cross-database interference)', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const here = await createTestDatabase({ migrate: true });
+    cleanups.push(() => here.close());
+    const other = await createTestDatabase({ migrate: false });
+    cleanups.push(() => other.close()); // DROP DATABASE removes its pg_db_role_setting rows
+    await other.pool.query(`DO $$ BEGIN EXECUTE format('ALTER ROLE ratio_worker IN DATABASE %I SET search_path = public, pg_catalog', current_database()); END $$`);
+    const c = await connect(here);
+    await assertReviewedPrivileges(c);
+  });
+
   it('a benign per-database default (statement_timeout) is not flagged', async () => {
     const { assertReviewedPrivileges } = await model();
     const db = await createTestDatabase({ migrate: true });
