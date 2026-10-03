@@ -2,6 +2,8 @@
 // Written before the implementation; every restricted class, the fail-closed
 // default, the self-protection rule and the low-risk allow-list are covered.
 import { describe, it, expect } from 'vitest';
+import process from 'node:process';
+import { URL } from 'node:url';
 import { classify, globToRegExp, parseUnifiedDiff, loadRules } from './classify-risk.mjs';
 
 const paths = (...p) => ({ files: p.map((path) => ({ path })) });

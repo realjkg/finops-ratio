@@ -125,6 +125,20 @@ describe('decideEligibility', () => {
     expect(decideEligibility(state({ statuses: [{ context: 'ci/x', state: 'success' }] })).eligible).toBe(true);
   });
 
+  it('a required check may be satisfied by a successful commit status of the same name', () => {
+    const s = state({ statuses: [{ context: 'Governance · risk classification', state: 'success' }] });
+    s.checkRuns = s.checkRuns.filter((c) => c.name !== 'Governance · risk classification');
+    expect(decideEligibility(s)).toEqual({ eligible: true, reasons: [] });
+    s.statuses = [{ context: 'Governance · risk classification', state: 'pending' }];
+    expect(decideEligibility(s).eligible).toBe(false);
+  });
+
+  it('the reviewer check cannot be satisfied by a commit status (anyone with write can post one)', () => {
+    const s = state({ statuses: [{ context: 'copilot-pull-request-reviewer', state: 'success' }] });
+    s.checkRuns = s.checkRuns.filter((c) => c.name !== 'copilot-pull-request-reviewer');
+    expect(decideEligibility(s).eligible).toBe(false);
+  });
+
   it('unresolved review threads block', () => {
     const d = decideEligibility(state({ unresolvedThreads: 2 }));
     expect(d.eligible).toBe(false);

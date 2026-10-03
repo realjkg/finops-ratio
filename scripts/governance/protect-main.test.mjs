@@ -1,5 +1,6 @@
 // Branch-protection payload builder + CLI safety (never calls GitHub in tests).
 import { describe, it, expect } from 'vitest';
+import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
