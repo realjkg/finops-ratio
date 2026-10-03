@@ -65,6 +65,15 @@ export interface FactRow {
 
 const MAX_COLUMN_NAME = 256;
 
+/** C1 controls and U+2028/U+2029 are refused in header names: they become JSON keys in extra_columns. */
+function hasHeaderOnlyForbidden(v: string): boolean {
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i);
+    if ((c >= 0x80 && c <= 0x9f) || c === 0x2028 || c === 0x2029) return true;
+  }
+  return false;
+}
+
 /** True when the text contains a C0 control character other than TAB, LF or CR (incl. NUL, which Postgres text/jsonb reject). */
 export function hasForbiddenControl(v: string): boolean {
   for (let i = 0; i < v.length; i++) {
@@ -79,7 +88,7 @@ export function indexHeader(header: string[]): { ok: true; index: HeaderIndex } 
   const pos = new Map<string, number>();
   header.forEach((raw, i) => {
     const name = raw;
-    if (hasForbiddenControl(name)) {
+    if (hasForbiddenControl(name) || hasHeaderOnlyForbidden(name)) {
       errors.push({ column: null, code: 'INVALID_CHARACTER', message: `header column ${i + 1} contains a control character` });
       return;
     }
