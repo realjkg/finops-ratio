@@ -104,6 +104,9 @@ const CATEGORIES: Array<{ cat: string; setup?: (c: Client, n: (p: string) => str
 describe('round 16 H1: every privilege category is scanned for every (transitive) member of a ratio role', () => {
   for (const k of CATEGORIES) {
     for (const parent of ['ratio_worker', 'ratio_reader', 'ratio_owner'] as const) {
+      // Owner decision: the migrator may hold CREATE on the database (CREATE
+      // SCHEMA needs it) — see the positive control below.
+      if (k.cat === 'database' && parent === 'ratio_owner') continue;
       it(`${k.cat}: a direct grant to a LOGIN member of ${parent} is refused`, async () => {
         await inTxn(async (c, n) => {
           const login = n('m');

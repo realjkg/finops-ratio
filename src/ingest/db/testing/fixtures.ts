@@ -175,7 +175,14 @@ async function seedOne(pool: Pool, t: ReturnType<typeof ids>): Promise<TenantFix
       t.tenantId,
       t.batchPublished,
     ]);
-    await client.query('COMMIT');
+    // A swallowed error aborts the transaction and COMMIT then answers ROLLBACK
+    // (round 16 L2): never hand tests a fixture whose rows were not written.
+    const commit = await client.query('COMMIT');
+    if (commit.command !== 'COMMIT') {
+      throw Object.assign(new Error(`seed transaction was rolled back (COMMIT answered ${commit.command ?? 'nothing'})`), {
+        code: 'TRANSACTION_ROLLED_BACK',
+      });
+    }
     const fixture: TenantFixture & { costs?: unknown } = { ...t, publishedTotal: total.rows[0].s };
     delete fixture.costs;
     return fixture;

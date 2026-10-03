@@ -295,7 +295,102 @@ const EXPAND_ALTER_TABLE_ACTIONS: RegExp[] = [
 
 const READ_ONLY_GUARD_FUNCTIONS = /^SELECT PG_CATALOG\.(PG_HAS_ROLE|HAS_[A-Z_]+_PRIVILEGE|CURRENT_SETTING|VERSION) ?\(/;
 
-function isExpandStatement(stmt: Statement, sql: string): boolean {
+/**
+ * Objects created EARLIER in the same migration file (round 16 M1), by
+ * normalized (upper-case, unquoted) name. `IF NOT EXISTS` / `OR REPLACE`
+ * creations may name a pre-existing object and are not recorded.
+ * Functions/procedures are recorded with their candidate signatures.
+ */
+interface CreatedObjects {
+  schemas: Set<string>;
+  relations: Set<string>; // tables, views, materialized views, sequences
+  types: Set<string>; // types, domains
+  routines: Map<string, string[][][]>; // name -> overloads -> IN arguments -> accepted type spellings
+}
+
+const newCreated = (): CreatedObjects => ({ schemas: new Set(), relations: new Set(), types: new Set(), routines: new Map() });
+const objName = (x: string) => unquote(x.trim());
+
+/** IN-argument type spellings of a CREATE FUNCTION/PROCEDURE argument list (with or without parameter names). */
+function routineArgs(list: string): string[][] {
+  const out: string[][] = [];
+  for (let arg of splitTopLevel(list)) {
+    arg = arg.replace(/\s+(DEFAULT\b|=).*$/, '').trim();
+    const mode = /^(IN|OUT|INOUT|VARIADIC)\s+/.exec(arg);
+    if (mode) {
+      if (mode[1] === 'OUT') continue; // not part of the signature
+      arg = arg.slice(mode[0].length);
+    }
+    const words = unquote(arg).split(' ');
+    // `name type…` or just `type…`: accept both readings
+    out.push([words.join(' '), words.slice(1).join(' ')].filter(Boolean));
+  }
+  return out;
+}
+
+function recordCreated(u: string, created: CreatedObjects): void {
+  if (/^CREATE SCHEMA (?!IF NOT EXISTS )/.test(u)) {
+    const m = /^CREATE SCHEMA (\S+)/.exec(u);
+    if (m && m[1] !== 'AUTHORIZATION') created.schemas.add(objName(m[1]));
+    return;
+  }
+  const rel = /^CREATE (?:(?:GLOBAL |LOCAL )?(?:TEMP|TEMPORARY|UNLOGGED) )?(?:TABLE|SEQUENCE|(?:RECURSIVE |MATERIALIZED )?VIEW) (?!IF NOT EXISTS )([^ (]+)/.exec(u);
+  if (rel) {
+    created.relations.add(objName(rel[1]));
+    return;
+  }
+  const typ = /^CREATE (?:TYPE|DOMAIN) ([^ (]+)/.exec(u);
+  if (typ) {
+    created.types.add(objName(typ[1]));
+    return;
+  }
+  const fn = /^CREATE (?:FUNCTION|PROCEDURE) ([^ (]+) ?\(/.exec(u);
+  if (fn) {
+    const open = u.indexOf('(', fn[0].length - 1);
+    const group = parenGroup(u, open);
+    if (group === null) return;
+    const list = created.routines.get(objName(fn[1])) ?? [];
+    list.push(routineArgs(group.slice(1, -1)));
+    created.routines.set(objName(fn[1]), list);
+  }
+}
+
+/** True when `spec` (e.g. `F(INT, TEXT[])`) names a routine created earlier with exactly that signature. */
+function isCreatedRoutine(spec: string, created: CreatedObjects): boolean {
+  const m = /^([^ (]+) ?\((.*)\)$/.exec(spec.trim());
+  if (!m) return false;
+  const overloads = created.routines.get(objName(m[1]));
+  if (!overloads) return false;
+  const args = m[2].trim() === '' ? [] : splitTopLevel(m[2]).map((a) => unquote(a).replace(/^(IN|VARIADIC) /, ''));
+  return overloads.some((o) => o.length === args.length && o.every((accepted, i) => accepted.includes(args[i])));
+}
+
+/**
+ * `REVOKE … ON <objects> FROM PUBLIC` is expand only when EVERY object it
+ * names was created earlier in this same file (round 16 M1): a new object has
+ * no users yet. On a pre-existing object (the database, a ratio object of an
+ * earlier migration, a system object) it can break the release that is still
+ * running — e.g. REVOKE CONNECT ON DATABASE stops its logins reconnecting — so
+ * it is contract.
+ */
+function isRevokeOnCreated(u: string, created: CreatedObjects): boolean {
+  const m = /^REVOKE (?:GRANT OPTION FOR )?(.+?) ON (.+) FROM PUBLIC(?: CASCADE| RESTRICT)?$/.exec(u);
+  if (!m) return false;
+  const target = m[2];
+  const all = /^ALL (?:TABLES|SEQUENCES|FUNCTIONS|PROCEDURES|ROUTINES) IN SCHEMA (.+)$/.exec(target);
+  if (all) return splitTopLevel(all[1]).every((x) => created.schemas.has(objName(x)));
+  const schema = /^SCHEMA (.+)$/.exec(target);
+  if (schema) return splitTopLevel(schema[1]).every((x) => created.schemas.has(objName(x)));
+  const routine = /^(?:FUNCTION|PROCEDURE|ROUTINE) (.+)$/.exec(target);
+  if (routine) return splitTopLevel(routine[1]).every((x) => isCreatedRoutine(x, created));
+  const type = /^(?:TYPE|DOMAIN) (.+)$/.exec(target);
+  if (type) return splitTopLevel(type[1]).every((x) => created.types.has(objName(x)));
+  if (/^(DATABASE|LANGUAGE|PARAMETER|LARGE OBJECT|FOREIGN|TABLESPACE|ALL )/.test(target)) return false;
+  const rel = /^(?:TABLE |SEQUENCE )?(.+)$/.exec(target)!;
+  return splitTopLevel(rel[1]).every((x) => /^[^ ()]+$/.test(x.trim()) && created.relations.has(objName(x)));
+}
+
+function isExpandStatement(stmt: Statement, sql: string, created: CreatedObjects): boolean {
   const u = stmt.norm;
   // Functions, procedures and views in ANY schema can change what a role can
   // read (a new function is EXECUTE-able by PUBLIC by default) and need a
@@ -320,10 +415,10 @@ function isExpandStatement(stmt: Statement, sql: string): boolean {
     const grantees = splitTopLevel(grant[3].replace(/ WITH GRANT OPTION$/, '').replace(/ GRANTED BY .+$/, ''));
     return grantees.length > 0 && grantees.every((g) => /^[A-Z_][A-Z0-9_]*$/.test(g) && g !== 'PUBLIC');
   }
-  // Revoking from PUBLIC only narrows: releases never rely on PUBLIC privileges
-  // (GRANT ... TO PUBLIC is always forbidden; every privilege a release uses is
-  // granted to a named ratio role).
-  if (/^REVOKE .+ ON .+ FROM PUBLIC( CASCADE| RESTRICT)?$/.test(u)) return true;
+  // Revoking from PUBLIC is expand only on objects this file created (round 16
+  // M1; before, every PUBLIC revoke counted as narrowing — but the running
+  // release may rely on PUBLIC defaults such as CONNECT on the database).
+  if (isRevokeOnCreated(u, created)) return true;
   if (READ_ONLY_GUARD_FUNCTIONS.test(u) && !/ FROM /.test(u)) return true;
   if (/^DO( LANGUAGE \S+)? \$/.test(u) || u === 'DO') return hasMarker(sql, stmt.start, 'do');
   return false;
@@ -334,7 +429,11 @@ function isExpandStatement(stmt: Statement, sql: string): boolean {
  * the additive forms (see EXPAND_* above), or null when every statement is.
  */
 export function findNonExpandStatement(sql: string): string | null {
-  for (const stmt of splitStatements(sql)) if (!isExpandStatement(stmt, sql)) return stmt.norm;
+  const created = newCreated();
+  for (const stmt of splitStatements(sql)) {
+    if (!isExpandStatement(stmt, sql, created)) return stmt.norm;
+    recordCreated(stmt.norm, created);
+  }
   return null;
 }
 
