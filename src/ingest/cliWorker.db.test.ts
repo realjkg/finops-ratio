@@ -216,27 +216,41 @@ describe('worker CLI (real Postgres + S3)', () => {
         RETURN NEW;
       END $fn$`);
     await t.db.pool.query(`CREATE TRIGGER s1_cli_poison BEFORE INSERT ON ratio.cost_facts FOR EACH ROW EXECUTE FUNCTION public.s1_cli_poison()`);
-    for (const [label, row] of [
-      ['year-0000', focusRow('2026-07-01', { ChargePeriodStart: '0000-07-02T00:00:00Z', ResourceId: 'yearzero-CELLVALUE' })],
-      ['pg-rejected', focusRow('2026-07-01', { ResourceId: 'clipoison-CELLVALUE' })],
-    ] as const) {
-      const bucket = await createTestBucket('k6');
-      buckets.push(bucket);
-      const root = bucket.at('exp/focus-export');
-      const dataKey = `${root}/data/BILLING_PERIOD=2026-07/run-1/focus-export-00001.csv.gz`;
-      await bucket.put(dataKey, csvGz([row]));
-      await bucket.put(`${root}/metadata/BILLING_PERIOD=2026-07/focus-export-Manifest.json`, JSON.stringify({ dataFiles: [dataKey] }));
-      const s = await seedTenantSource(t.db.pool, { config: { layout: 'aws-data-exports', bucket: bucket.name, prefix: bucket.at('exp'), exportName: 'focus-export' } });
-      const r = await cli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], env());
-      expect(r.code, label).toBe(1);
-      const printed = r.out.concat(r.err).join('\n');
-      expect(printed, label).not.toContain('CELLVALUE');
-      expect(printed, label).not.toContain('0000-07-02');
-      expect(printed, label).not.toContain('not allowed here');
-      const run = await t.db.pool.query(`SELECT coalesce(error_detail, '') || stats::text AS t FROM ratio.sync_runs WHERE tenant_id = $1`, [s.tenantId]);
-      expect(run.rows[0].t, label).not.toContain('CELLVALUE');
-      expect(run.rows[0].t, label).not.toContain('not allowed here');
+    try {
+      for (const [label, row] of [
+        ['year-0000', focusRow('2026-07-01', { ChargePeriodStart: '0000-07-02T00:00:00Z', ResourceId: 'yearzero-CELLVALUE' })],
+        ['pg-rejected', focusRow('2026-07-01', { ResourceId: 'clipoison-CELLVALUE' })],
+      ] as const) {
+        const bucket = await createTestBucket('k6');
+        buckets.push(bucket);
+        const root = bucket.at('exp/focus-export');
+        const dataKey = `${root}/data/BILLING_PERIOD=2026-07/run-1/focus-export-00001.csv.gz`;
+        await bucket.put(dataKey, csvGz([row]));
+        await bucket.put(`${root}/metadata/BILLING_PERIOD=2026-07/focus-export-Manifest.json`, JSON.stringify({ dataFiles: [dataKey] }));
+        const s = await seedTenantSource(t.db.pool, { config: { layout: 'aws-data-exports', bucket: bucket.name, prefix: bucket.at('exp'), exportName: 'focus-export' } });
+        const r = await cli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], env());
+        expect(r.code, label).toBe(1);
+        const printed = r.out.concat(r.err).join('\n');
+        expect(printed, label).not.toContain('CELLVALUE');
+        expect(printed, label).not.toContain('0000-07-02');
+        expect(printed, label).not.toContain('not allowed here');
+        const run = await t.db.pool.query(`SELECT coalesce(error_detail, '') || stats::text AS t FROM ratio.sync_runs WHERE tenant_id = $1`, [s.tenantId]);
+        expect(run.rows[0].t, label).not.toContain('CELLVALUE');
+        expect(run.rows[0].t, label).not.toContain('not allowed here');
+      }
+      // The runner's catalog check sees the test-only trigger ...
+      const during = await cli(['migrate', '--status', '--json'], env());
+      expect(during.code).toBe(3);
+      expect(JSON.parse(during.out[0]).problems).toContain('PRIVILEGE_MODEL_VIOLATION');
+    } finally {
+      await t.db.pool.query(`DROP TRIGGER IF EXISTS s1_cli_poison ON ratio.cost_facts`);
+      await t.db.pool.query(`DROP FUNCTION IF EXISTS public.s1_cli_poison()`);
     }
+    // ... and once it is gone, migrate status and doctor are clean again (no order dependence).
+    const after = await cli(['migrate', '--status', '--json'], env());
+    expect(after.code).toBe(0);
+    const doc = await cli(['doctor', '--json'], env());
+    expect((doc.record.results as { checks: Array<{ name: string; status: string }> }).checks).toContainEqual(expect.objectContaining({ name: 'migration_version', status: 'pass' }));
   });
 });
 

@@ -427,6 +427,24 @@ describe('Postgres-rejected values never leak and never strand a batch (M-2)', (
     await t.db.pool.query(`CREATE TRIGGER s1_poison BEFORE INSERT ON ratio.cost_facts FOR EACH ROW EXECUTE FUNCTION public.s1_poison()`);
   });
 
+  // The runner's catalog check (Slice 0 round 4) rejects any non-reviewed trigger:
+  // while this test-only trigger exists, status must say so; once dropped, the
+  // database must be back to a clean, matching state (no order dependence).
+  afterAll(async () => {
+    const c = await t.db.pool.connect();
+    try {
+      const during = await migrationStatus(c);
+      expect(during.problems).toContain('PRIVILEGE_MODEL_VIOLATION');
+      await c.query(`DROP TRIGGER s1_poison ON ratio.cost_facts`);
+      await c.query(`DROP FUNCTION public.s1_poison()`);
+      const after = await migrationStatus(c);
+      expect(after.problems).toEqual([]);
+      expect(after.matches).toBe(true);
+    } finally {
+      c.release();
+    }
+  });
+
   async function persistedText(tenantId: string): Promise<string> {
     const r = await t.db.pool.query(
       `SELECT coalesce(string_agg(x, ' '), '') AS t FROM (
