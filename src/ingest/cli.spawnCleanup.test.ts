@@ -135,3 +135,25 @@ describe('spawned test children are killed when the file ends (even after a fail
     expect(pidsWithMarker(marker)).toEqual([]);
   }, 90_000);
 });
+
+describe('reap() returns only once every reaped process has actually exited (CI #54, run 37157034669)', () => {
+  // SIGKILL is asynchronous: right after kill() returns, the target can still
+  // show as running in /proc until the kernel schedules its exit (measured:
+  // 'R' in 197/200 immediate checks idle, 99/200 under load). A check made
+  // right after reaping must not race that.
+  it('a detached group with an orphaned grandchild: dead (gone or zombie) as soon as reap() returns, 20 rounds', async () => {
+    const script =
+      "const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>process.exit(0),120000);setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);setInterval(()=>{},1000)";
+    const late: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      const marker = crypto.randomBytes(8).toString('hex');
+      const mid = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'ignore'], detached: true, env: { ...process.env, RATIO_ORPHAN_MARKER: marker } });
+      const grandchild = await new Promise<number>((resolve) => mid.stdout!.once('data', (d: Buffer) => resolve(Number(d.toString().trim()))));
+      const left = await reap(mid.pid, marker);
+      if (alive(grandchild) || alive(mid.pid!)) late.push(grandchild);
+      expect(left).toEqual([]);
+    }
+    expect(late, 'processes still running right after reap() returned').toEqual([]);
+  }, 60_000);
+});
+
