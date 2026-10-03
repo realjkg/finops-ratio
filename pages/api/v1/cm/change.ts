@@ -55,7 +55,9 @@ interface CMAdapter {
 
 // --- JiraAdapter (ships dark — invoked only when CM_PROVIDER=jira + creds set) ---
 
-class JiraAdapter implements CMAdapter {
+// Exported (with ServiceNowAdapter and createChangeHandler) only so tests can
+// prove each layer of the ticketRef defence holds on its own.
+export class JiraAdapter implements CMAdapter {
   readonly provider = 'jira' as const;
 
   constructor(
@@ -167,7 +169,7 @@ class JiraAdapter implements CMAdapter {
 
 // --- ServiceNowAdapter (ships dark — invoked only when CM_PROVIDER=servicenow + creds set) ---
 
-class ServiceNowAdapter implements CMAdapter {
+export class ServiceNowAdapter implements CMAdapter {
   readonly provider = 'servicenow' as const;
 
   constructor(
@@ -430,13 +432,13 @@ export function validateCMBody(body: unknown): GatewayValidation {
 async function changeHandler(
   req: NextApiRequest,
   res: NextApiResponse,
-  _ctx: GatewayContext,
+  resolve: (env: NodeJS.ProcessEnv) => CMAdapter,
 ): Promise<void> {
   const body = req.body as CMRequestBody;
 
   let adapter: CMAdapter;
   try {
-    adapter = resolveAdapter(process.env);
+    adapter = resolve(process.env);
   } catch (err) {
     if (isAdapterError(err)) {
       sendError(res, err.status, 'provider_misconfigured', err.message);
@@ -491,8 +493,13 @@ async function dispatch(adapter: CMAdapter, body: CMRequestBody, res: NextApiRes
   }
 }
 
-export default withGateway(changeHandler, {
-  methods: ['POST'],
-  validateBody: validateCMBody,
-});
+/** The gateway-wrapped route; `resolve` is injectable for tests only. */
+export function createChangeHandler(resolve: (env: NodeJS.ProcessEnv) => CMAdapter = resolveAdapter) {
+  return withGateway((req, res, _ctx: GatewayContext) => changeHandler(req, res, resolve), {
+    methods: ['POST'],
+    validateBody: validateCMBody,
+  });
+}
+
+export default createChangeHandler();
 
