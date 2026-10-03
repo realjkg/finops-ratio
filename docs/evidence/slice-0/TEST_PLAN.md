@@ -215,3 +215,12 @@ Docs-only Lows (schema table, stale gap, rollback wording) have no tests; see DE
 | L2 S11 | `cli.test.ts` | `round 8 L2 (S11): a reason whose toJSON throws (carrying the DSN) still yields one fixed JSON line and exit 1, never a throw` (green on arrival; kills the mutation) |
 | L2 S5 | `privileges.db.test.ts` | `a caller client with a hostile session search_path does not affect the first pending migration` (green on arrival; kills the mutation) |
 | L3 | `cli.test.ts` | `round 8 L3: Buffers and typed arrays are printed as "[binary]", never as their bytes` |
+
+## Round 9 — challenger Lows (tests committed red in 66cbb31, before the fix)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| L1 per-migration | `privileges.db.test.ts` | `ALTER DATABASE … SET ratio.tenant_id (DO/format, contract) is refused by the per-migration check; nothing committed`, `ALTER ROLE <LOGIN member of ratio_reader> IN DATABASE … SET ratio.tenant_id is refused by the per-migration check; nothing committed`, `matching is case-insensitive and covers any ratio.* key, for ALL roles (rolled back)`, `the threat is real: with a database default tenant, a fresh reader session that never calls set_config sees that tenant (…)` |
+| L1 status | `cli.db.test.ts` | `round 9 L1: --status exits 3 for a ratio.tenant_id default on the database or on a LOGIN member of ratio_reader` |
+| L1 positive control | `reader.db.test.ts` (existing) | `reader sees zero rows with no tenant set, and an error (not data) with a malformed tenant`; also asserted (0 rows) at the start of the "threat is real" test |
+| L2 | `privileges.db.test.ts` | `lo_compat_privileges / session_preload_libraries / local_preload_libraries defaults for this database are refused` |

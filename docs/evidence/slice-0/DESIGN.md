@@ -612,3 +612,19 @@ recreated (that is the intended behaviour of the checksum ledger).
   caller client with a hostile session `search_path` / `row_security`).
 - **L3.** `redactDeep` prints Buffers, typed arrays and ArrayBuffers as
   `"[binary]"`.
+
+## 18. Round 9 — challenger approval of 325b059, Low 1/2 folded in
+
+- **L1 — default tenant through setting defaults.** A contract migration could
+  run `ALTER DATABASE <db> SET ratio.tenant_id = '…'` (built with `format()`
+  in a DO block); every new session — e.g. a reader that never calls
+  `set_config` — then had a tenant and saw that tenant's published rows
+  instead of zero (reproduced in `privileges.db.test.ts`). The same held for
+  `ALTER ROLE <member login> SET ratio.tenant_id`. Fix:
+  `isSecurityRelevantSetting()` treats ANY `ratio.*` custom setting
+  (case-insensitive) as security-relevant, so the round-8 scope rules refuse
+  it for this database (any role), for ALL roles, and for members of ratio
+  roles; anything on a ratio role itself was already refused. Applies in
+  every migration's check and in `--status`.
+- **L2.** `lo_compat_privileges`, `session_preload_libraries` and
+  `local_preload_libraries` join the security-relevant keys.

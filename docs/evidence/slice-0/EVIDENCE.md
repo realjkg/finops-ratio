@@ -821,3 +821,71 @@ L3  binary values not special-cased                      KILLED
 | skip/only/todo/it.fails grep | 0 |
 | cluster state after all runs | `pg_db_role_setting` rows: 0; `ratio_owner/worker/reader` rolcanlogin = false; no `ratio_probe*` roles |
 | Slice 1 compat: scratch worktree `slice/01` 1f41db1 + 933e07f (removed) | same single `cli.ts` main-block conflict as round 7, resolved by keeping Slice 1's block. tsc 0, eslint 0, fast 1206/1206, test:db 289/289 ×2 |
+
+---
+
+# Round 9 — challenger approval of 325b059 (0 High / 0 Medium), Low 1/2 folded in
+
+Base: 325b059. Local commits only (not pushed). 0001 unchanged. Raw logs:
+`scratchpad/r10/`.
+
+## R9.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 66cbb31 | test(ingest): failing tests for round 9 (ratio.* setting defaults = default tenant; more security-relevant keys) | tests (red) |
+| 76f65be | fix(ingest): ratio.* custom setting defaults and three more keys are security-relevant (round 9 L1, L2) | fix (plus one test defect, recorded in its message) |
+| 79afa89 | test(ingest): round-9 attack fixtures pass the setting name as a format() argument | test |
+| (this) | docs(evidence): Slice 0 round 9 | docs |
+
+## R9.2 Red (at 66cbb31)
+
+`privileges.db.test.ts` + `cli.db.test.ts`: **6 failed / 61 passed (67)**.
+
+- Both migrations that set `ratio.tenant_id` defaults were APPLIED: the
+  database-level one and the member-login `IN DATABASE` one.
+- `--status` exited 0 for both.
+- `ALTER ROLE ALL SET "RATIO.Tenant_ID"` was not reported.
+- The threat test **reproduced the escape**. A fresh `ratio_reader` session
+  saw 0 rows before the default and tenant A's published rows after it,
+  without ever calling `set_config`. The check then reported nothing.
+- The three new keys were not reported.
+
+`pg_db_role_setting` was empty and no `ratio_probe*` role existed after the red
+run, and after every later run, including all mutation runs.
+
+## R9.3 Notes
+
+- **Test defect (fixed in 76f65be).** The `*_preload_libraries` case set the
+  default before opening the checking connection, so that new session tried to
+  load the library and failed. It now connects first.
+- **Fast guard collision (79afa89).** `tenantScope.test.ts` ("no file under
+  src/ingest sets ratio.tenant_id at session level") flagged the fixtures'
+  literal `… SET ratio.tenant_id = …` text. The guard is NOT changed. The
+  fixtures now pass the setting name as a `format()` argument, the same form as
+  the challenger's repro. Flagged for the reviewer, since it is a
+  test-text change made to satisfy a lexical guard.
+
+## R9.4 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+R1  ratio.* rule dropped                                   KILLED  5 tests (both per-migration variants, --status, ALL roles, threat test)
+R2  helper match case-sensitive                            SURVIVED: the caller already lower-cases the key
+R2b case-insensitivity removed in caller AND helper        KILLED  ALTER ROLE ALL SET "RATIO.Tenant_ID"
+R3  lo_compat_privileges removed from the list             KILLED
+R4  session_preload_libraries removed                      KILLED
+R5  local_preload_libraries removed                        KILLED
+```
+
+## R9.5 Verification (main checkout at 79afa89 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1095/1095 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 170/170 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` rows: 0; `ratio_probe*` roles: 0 |
+| Slice 1 compat: scratch worktree `slice/01` 1f41db1 + 79afa89 (removed) | same single `cli.ts` main-block conflict, resolved by keeping Slice 1's block; tsc 0, eslint 0, fast 1206/1206, test:db 295/295 ×2 |
