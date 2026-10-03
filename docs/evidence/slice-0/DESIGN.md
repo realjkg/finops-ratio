@@ -824,3 +824,36 @@ CASCADE` after apply left `--status` at `matches: true`.
   - Regenerate everything with `npm run worker:build && node
     scripts/ingest/generate-foundation-manifest.mjs [NNNN …]`, then review the
     diff.
+
+## 24. Round 15 — Copilot on 344de78 (1 High, 1 Medium)
+
+- **High — dangerous attributes on members of ratio roles.** LOGIN members
+  were accepted without looking at their attributes. A `CREATE ROLE app LOGIN
+  BYPASSRLS IN ROLE ratio_worker` inherits the worker's base-table grants and
+  ignores FORCE RLS: with tenant B set it reads tenant A's facts (reproduced
+  with a real login). A SUPERUSER member was missed too.
+  - The check now walks the `pg_auth_members` graph. It does not use
+    `pg_has_role`, which is true for every superuser. The walk covers DIRECT
+    and TRANSITIVE members of the three ratio roles.
+  - **Members of `ratio_worker` / `ratio_reader`** must not be SUPERUSER,
+    BYPASSRLS, REPLICATION, CREATEROLE or CREATEDB.
+  - **Members of `ratio_owner`** (the migrator login) must not be SUPERUSER,
+    BYPASSRLS or REPLICATION. Decision: CREATEROLE and CREATEDB are allowed
+    there, because first-time role creation by the migrator is a deployment
+    decision (see the ratio_owner CREATEROLE row in §6).
+  - Reported by every migration's check and by `--status`. The round-13
+    superuser exclusion remains, but only for attributing system-schema ACL
+    entries.
+- **Test infrastructure.** The real-login test must COMMIT a cluster-global
+  BYPASSRLS login, and while it exists every migration in the cluster is
+  (correctly) refused. It therefore lives in a `*.serial.db.test.ts` file. A
+  second, SERIAL phase of `npm run test:db` (`vitest.db.serial.config.ts`,
+  `fileParallelism: false`) runs it after the parallel phase. That phase also
+  fails when `RATIO_TEST_DATABASE_URL` is unset.
+- **Medium — COMMIT answered with ROLLBACK.** A callback that swallowed a
+  query error leaves the transaction aborted. PostgreSQL then answers COMMIT
+  with the ROLLBACK command tag, and the helper used to report success.
+  `withTenantTransaction` and the migration runner's transaction now check the
+  COMMIT command tag and throw `TRANSACTION_ROLLED_BACK` (a `MigrationError` in
+  the runner). These are the only COMMITs Slice 0 issues. Slice 1's worker
+  transactions are reviewed by its owner.

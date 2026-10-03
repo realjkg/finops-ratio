@@ -1280,3 +1280,142 @@ error message is a Slice 1 issue: **flag for the Slice 1 owner**. Options
 there: cap the message length before redaction (as Slice 1 already caps the
 output), or fix the super-linear redaction. Then adapt the size assertion.
 Slice 0's own tree is unaffected.
+
+# Round 15 — review on 344de78 (1 High, 1 Medium)
+
+Base: 344de78. Local commits only (not pushed). 0001 unchanged; no manifest or
+baseline change. Raw logs: `scratchpad/r16/`.
+
+## R15.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 8dcc585 | test(ingest): failing tests for round 15 (dangerous attributes on ratio-role members; COMMIT answered with ROLLBACK) | tests (red) + serial DB phase |
+| 40a7967 | fix(ingest): refuse dangerous attributes on (transitive) members of ratio roles; COMMIT answered with ROLLBACK is an error (round 15) | fix |
+| (this) | docs(evidence): Slice 0 round 15 | docs |
+
+## R15.2 Red (at 8dcc585)
+
+**Parallel DB phase: 11 failed / 228 passed (239).**
+- Nine member-attribute cases were not refused:
+  - BYPASSRLS, SUPERUSER and CREATEDB members of ratio_worker;
+  - REPLICATION and CREATEROLE members of ratio_reader;
+  - BYPASSRLS, SUPERUSER and REPLICATION members of ratio_owner.
+- The transitive BYPASSRLS member was not refused either.
+- `withTenantTransaction` returned normally after a swallowed `SELECT 1/0`.
+- The runner treated a COMMIT answered with `ROLLBACK` as success.
+- The two positive controls passed on arrival.
+
+**Serial phase: 1 failed (1).** The threat reproduced first: the leak
+assertion passed, because a committed BYPASSRLS LOGIN member of ratio_worker,
+set to tenant B, counted tenant A's `cost_facts` (> 0). Then the catalog
+check returned no problem for it, and the test failed there.
+
+The fast `tenant.test.ts` case (COMMIT tag `ROLLBACK`) was red as well; T1
+below shows it is load-bearing.
+
+## R15.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+R1 member-attribute check removed                 KILLED  9 parallel + the serial leak test
+R2 direct members only (no recursion)             KILLED  transitive test
+R3 owner members held to all five attributes      KILLED  positive control (CREATEROLE/CREATEDB migrator)
+R4 owner members exempt                           KILLED  3 owner tests
+R5 SUPERUSER not checked                          KILLED  2
+R6 BYPASSRLS not checked                          KILLED  3 + serial leak test
+R7 REPLICATION not checked                        KILLED  2
+R8 CREATEROLE not checked (non-owner)             KILLED  1
+R9 CREATEDB not checked (non-owner)               KILLED  1
+T1 tenant COMMIT tag not checked                  KILLED  fast test + DB test
+T2 runner (inTransaction) COMMIT tag not checked  KILLED  runner DB test
+```
+
+## R15.4 Verification (main checkout at 40a7967 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1813/1813 |
+| `npm run test:db` single run | 239/239 parallel + 1/1 serial |
+| `npm run test:db` **×10** consecutive | **7/10 exit 0** (239/239 + 1/1 each). See R15.5 for the other 3 |
+| `npm run test:db` and the serial config alone (URL unset) | exit 1 / exit 1 |
+| `npm run worker:build` | 0 |
+| `npm run build` | 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state afterwards | `pg_db_role_setting` 0; `pg_parameter_acl` 0; probe roles 0; `ratio_test_login*` 0; no non-superuser member of any ratio role; ratio roles NOLOGIN; no scratch databases |
+
+## R15.5 The 3 failed ×10 runs were caused by another agent's tests
+
+Runs 1, 8 and 9 each failed exactly one test (238/239), and each test failed
+in the same way. `createTestDatabase`'s `migrateUp` refused with:
+
+```
+run 1: role ratio_test_login_27461_89344cd86b (member of ratio_worker) must not be BYPASSRLS
+run 8: role ratio_test_login_13636_8660b4be81 (member of ratio_worker) must not be BYPASSRLS
+run 9: role ratio_test_login_16190_f77bc81d18 (member of ratio_worker) must not be BYPASSRLS
+```
+
+**Where the roles come from.** The 10-hex-character names come from Slice 1's
+`src/ingest/testing/db.ts` `createLogin()`, which uses
+`crypto.randomBytes(5)`. Slice 0 has no such file; its only test login uses a
+base-36 name and is a plain member. The Slice 1 agent was running its
+`test:db` on the shared cluster at the same time. Its `auth.db.test.ts`
+creates committed BYPASSRLS LOGIN members of ratio_worker, for example
+"A1 refuses a BYPASSRLS login even if it is a ratio_worker member".
+
+**Why this is not a Slice 0 defect.** Roles and memberships are
+cluster-global. While such a role exists, every database's catalog check
+must refuse it, and that is the threat this round closes. Slice 0's own
+committed dangerous login runs in the new serial phase
+(`*.serial.db.test.ts`, after the parallel phase). It is dropped in
+`finally`, and `afterAll` asserts that it is gone.
+
+**Residual limit.** The serial phase isolates only within one `test:db`
+process. Another process on the same cluster still overlaps for about 1.5 s
+while that role exists.
+
+## R15.6 Slice 1 compat (local slice/01 6a1244b ⊇ origin; scratch worktree, removed)
+
+The Slice 1 agent's worktree has moved on since then (fc71471, not merged
+here).
+
+**Merge.** There were three conflicts:
+- `cli.ts`: resolved as in round 14. The single handler is Slice 1's, with
+  the synchronous fd-2 writer and the crash hook.
+- `vitest.db.config.ts`: kept Slice 1's S3 `globalSetup` and added the
+  serial exclude.
+- `package.json`: took Slice 0's two-phase `test:db` and Slice 1's
+  `worker:build`, which writes build-info.
+
+| Gate | Result |
+|---|---|
+| npm ci / tsc / lint | 0 / 0 / 0 |
+| fast tests | 1976/1979 |
+| test:db run 1 (S3 at :18333, PG16 tools) | 369/370 |
+| test:db run 2 | 369/370 |
+| serial phase | 1/1 |
+
+**Fast-test failures (3), all on Slice 1's side:**
+- 2 are the known round-14 crash-redactor issue. Slice 1 truncates the crash
+  line, so the ">2 MB line" assertions fail (`159`/`160 > 2000000`).
+- 1 is a timing assertion in `cli.worker.test.ts` ("within 2 s", 2160 ms
+  under load). It passed 14/14 when rerun alone.
+
+**test:db failures, both from the same interference as R15.5,** inside
+Slice 1's own parallel run:
+- run 1: a migrateUp refused `ratio_test_login_23152_a26b0193c4` (BYPASSRLS
+  member of ratio_worker);
+- run 2: Slice 1's `doctor.db.test.ts` D1 saw an extra
+  `PRIVILEGE_MODEL_VIOLATION` problem next to `PENDING`.
+
+**Flag for the Slice 1 owner.** On the merge, Slice 1's committed BYPASSRLS
+and SUPERUSER test logins (`auth.db.test.ts`, via `createLogin`) make
+concurrent migrations and `--status`/doctor checks fail on the same cluster,
+correctly. Either:
+- move those tests to `*.serial.db.test.ts`; or
+- create the dangerous logins in a transaction that is rolled back, where no
+  separate connection is needed.
+
+A cluster-wide advisory lock would also work: shared in `createTestDatabase`,
+exclusive around a dangerous login. Separately, D1 should match `PENDING` as
+a member of `problems`, not the whole list.
