@@ -6,6 +6,7 @@
 //   M4  doctor fails a source that has never published a period;
 //   M5  opening an evidence object honours the run's abort signal: at
 //       MAX_RUN_SECONDS the period fails MAX_RUN_EXCEEDED, not EVIDENCE_STALLED.
+import crypto from 'crypto';
 import type { Readable } from 'stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeFocusSource } from '../sources/fake/FakeFocusSource';
@@ -14,7 +15,7 @@ import type { ArtifactRef, PeriodListing, PeriodRange } from '../sources/types';
 import { runSync, type RunSyncOptions } from './pipeline';
 import { runDoctor } from './doctor';
 import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup';
-import { batchesOf, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
+import { batchesOf, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
 import { csvGz, rowsOf } from '../testing/focusCsv';
 import { createTestBucket, requireTestS3Endpoint, testS3Env, type TestBucket } from '../testing/s3';
 
@@ -278,6 +279,51 @@ describe('Gap 3: the retry backoff is abort-aware', () => {
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(source.opened).toEqual(['r/a.csv.gz']); // no second attempt after the abort
     expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'MAX_RUN_EXCEEDED' });
+  });
+});
+
+describe('PR #54 fourth review M3: the fake resolves artifacts by period and name (and version)', () => {
+  it('two periods with the same artifact name and different bytes each publish their own data', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const P8 = '2026-08-01';
+    const source = new FakeFocusSource([
+      { billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P, 2, '1.00')) }] },
+      { billingPeriod: P8, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P8, 3, '2.00')) }] },
+    ]);
+    const r = await sync(s, source);
+    expect(r.status).toBe('succeeded');
+    expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({ [P]: { rows: 2, total: '2.00' }, [P8]: { rows: 3, total: '6.00' } });
+  });
+
+  it('an artifact replaced after the listing is SOURCE_CHANGED for the stale ref (like an S3 If-Match 412)', async () => {
+    const source = new FakeFocusSource([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P, 2)) }] }]);
+    const [l] = await source.listPeriods();
+    if (!l.ok) throw new Error('listing failed');
+    source.setPeriods([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P, 3)) }] }]);
+    await expect(source.openArtifact(l.set.artifacts[0])).rejects.toMatchObject({ code: 'SOURCE_CHANGED', retryable: true });
+  });
+});
+
+describe('PR #54 fourth review M1: pre-seeded evidence of the same size but different bytes', () => {
+  it('memory store: the period fails EVIDENCE_INTEGRITY_MISMATCH and the object is not overwritten', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const bytes = csvGz(rowsOf(P, 2));
+    const key = `evidence/${s.tenantId}/${s.sourceId}/${crypto.createHash('sha256').update(bytes).digest('hex')}`;
+    const evidence = new MemoryEvidenceStore();
+    const forged = Buffer.alloc(bytes.length, 7);
+    evidence.objects.set(key, forged);
+    const r = await runSync({
+      pool: t.pool,
+      tenantId: s.tenantId,
+      sourceKey: s.sourceKey,
+      source: new FakeFocusSource([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes }] }]),
+      evidence,
+      mode: 'sync',
+      hooks: noSleep,
+    });
+    expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'EVIDENCE_INTEGRITY_MISMATCH' });
+    expect(evidence.objects.get(key)!.equals(forged)).toBe(true);
+    expect(await batchesOf(t.db.pool, s.tenantId, s.sourceId)).toEqual([]);
   });
 });
 

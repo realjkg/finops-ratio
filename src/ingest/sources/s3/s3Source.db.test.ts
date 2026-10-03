@@ -5,6 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { GetObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { S3FocusExportSource } from './S3FocusExportSource';
 import { S3EvidenceStore } from '../../evidence/S3EvidenceStore';
 import { runSync } from '../../worker/pipeline';
@@ -249,4 +250,86 @@ describe('S3 source → evidence → published facts', () => {
       await bucket.destroy();
     }
   });
+
+  it('X6b (fourth review M2) a manifest replaced between the metadata listing and its GET: SeaweedFS answers 412 to the If-Match; SOURCE_CHANGED; the run re-lists and binds the new manifest', async () => {
+    const bucket = await createTestBucket('x6b');
+    try {
+      const key = DATA(bucket, '2026-07') + 'a.csv.gz';
+      const manifestKey = META(bucket, '2026-07') + 'focus-export-Manifest.json';
+      const DATA_BYTES = csvGz(rowsOf('2026-07-01', 3, '1.00'));
+      const manifestA = manifest({ dataFiles: [key], 'x-ratio-control': { rowCount: 99 } });
+      const manifestB = manifest({ dataFiles: [key], 'x-ratio-control': { rowCount: 3 } });
+      await bucket.put(key, DATA_BYTES);
+      await bucket.put(manifestKey, manifestA);
+      let replaced = false;
+      const manifestGets: Array<{ ifMatch?: string; status: number }> = [];
+      const racy = {
+        async send(cmd: unknown, opts?: unknown) {
+          if (cmd instanceof GetObjectCommand && cmd.input.Key === manifestKey) {
+            if (!replaced) {
+              replaced = true;
+              await bucket.put(manifestKey, manifestB); // the provider corrects the controls mid-listing
+            }
+            try {
+              const r = await (bucket.client.send as (c: unknown, o?: unknown) => Promise<unknown>)(cmd, opts);
+              manifestGets.push({ ifMatch: cmd.input.IfMatch, status: 200 });
+              return r;
+            } catch (e) {
+              manifestGets.push({ ifMatch: cmd.input.IfMatch, status: (e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode ?? 0 });
+              throw e;
+            }
+          }
+          return (bucket.client.send as (c: unknown, o?: unknown) => Promise<unknown>)(cmd, opts);
+        },
+      } as unknown as S3Client;
+      const s = await seedTenantSource(t.db.pool, { config: { layout: 'aws-data-exports', ...loc(bucket) } });
+      const r = await runSync({
+        pool: t.pool,
+        tenantId: s.tenantId,
+        sourceKey: s.sourceKey,
+        source: new S3FocusExportSource({ client: racy, location: loc(bucket) }),
+        evidence: new S3EvidenceStore({ client: evidenceBucket.client, bucket: evidenceBucket.name, prefix: evidenceBucket.root }),
+        mode: 'sync',
+        hooks: noSleep,
+      });
+      expect(manifestGets[0].ifMatch).toBeTruthy();
+      expect(manifestGets[0].status).toBe(412);
+      expect(manifestGets.at(-1)!.status).toBe(200);
+      expect(r.status).toBe('succeeded');
+      expect(r.periods[0]).toMatchObject({ outcome: 'published', reconciliation: 'reconciled' });
+      expect(r.manifestEvidence.map((k) => k.split('/').pop())).toEqual([sha(manifestB)]);
+      expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({ '2026-07-01': { rows: 3, total: '3.00' } });
+    } finally {
+      await bucket.destroy();
+    }
+  });
+
+  it('X7 (fourth review M1) evidence pre-seeded with the same size but different bytes: EVIDENCE_INTEGRITY_MISMATCH for an artifact and for a manifest; nothing overwritten', async () => {
+    const bucket = await createTestBucket('x7');
+    try {
+      const key = DATA(bucket, '2026-07') + 'a.csv.gz';
+      const manifestKey = META(bucket, '2026-07') + 'focus-export-Manifest.json';
+      const DATA_BYTES = csvGz(rowsOf('2026-07-01', 2));
+      const MANIFEST = manifest({ dataFiles: [key] });
+      await bucket.put(key, DATA_BYTES);
+      await bucket.put(manifestKey, MANIFEST);
+      const store = new S3EvidenceStore({ client: evidenceBucket.client, bucket: evidenceBucket.name, prefix: evidenceBucket.root });
+      for (const [what, target] of [
+        ['artifact', DATA_BYTES],
+        ['manifest', MANIFEST],
+      ] as const) {
+        const s = await seedTenantSource(t.db.pool, { config: { layout: 'aws-data-exports', ...loc(bucket) } });
+        const evKey = evidenceBucket.at(`evidence/${s.tenantId}/${s.sourceId}/${sha(target)}`);
+        const forged = Buffer.alloc(target.length, 0x41);
+        await evidenceBucket.put(evKey, forged);
+        const r = await runSync({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourceKey, source: new S3FocusExportSource({ client: bucket.client, location: loc(bucket) }), evidence: store, mode: 'sync', hooks: noSleep });
+        expect(r.periods[0], what).toMatchObject({ outcome: 'failed', code: 'EVIDENCE_INTEGRITY_MISMATCH' });
+        expect((await evidenceBucket.get(evKey)).equals(forged), what).toBe(true);
+        expect(await batchesOf(t.db.pool, s.tenantId, s.sourceId), what).toEqual([]);
+      }
+    } finally {
+      await bucket.destroy();
+    }
+  });
 });
+

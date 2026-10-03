@@ -250,3 +250,44 @@ describe('S3FocusExportSource, PR #54 third review (H1, M1, M3)', () => {
   });
 });
 
+describe('S3FocusExportSource, PR #54 fourth review M2: the manifest GET is pinned to its listed ETag', () => {
+  const v1 = Buffer.from('version one');
+  const objects = () =>
+    new Map<string, FakeObject>([
+      [MANIFEST_KEY, { etag: '"m1"', size: 0, body: () => Readable.from([manifestFor([DATA_KEY])]) }],
+      [DATA_KEY, { etag: '"d1"', size: v1.length, body: () => Readable.from([v1]) }],
+    ]);
+
+  it('the manifest GET carries If-Match = the listed ETag', async () => {
+    const calls: Array<{ key: string; ifMatch?: string }> = [];
+    const [l] = await new S3FocusExportSource({ client: fakeClient(objects(), calls), location: LOC }).listPeriods();
+    expect(l.ok).toBe(true);
+    expect(calls.find((c) => c.key === MANIFEST_KEY)).toEqual({ key: MANIFEST_KEY, ifMatch: '"m1"' });
+  });
+
+  it('a manifest replaced between the metadata listing and its GET: SOURCE_CHANGED (retryable), never the new bytes against the old listing', async () => {
+    const objs = objects();
+    const calls: Array<{ key: string; ifMatch?: string }> = [];
+    const inner = fakeClient(objs, calls);
+    const client = {
+      async send(cmd: unknown, opts?: unknown) {
+        if (cmd instanceof GetObjectCommand && cmd.input.Key === MANIFEST_KEY) {
+          // Replaced by the provider just before the GET (a new run with new controls).
+          objs.set(MANIFEST_KEY, { etag: '"m2"', size: 0, body: () => Readable.from([Buffer.from(JSON.stringify({ dataFiles: [DATA_KEY], 'x-ratio-control': { rowCount: 99 } }))]) });
+        }
+        return (inner.send as (c: unknown, o?: unknown) => Promise<unknown>)(cmd, opts);
+      },
+    } as unknown as S3Client;
+    await expect(new S3FocusExportSource({ client, location: LOC }).listPeriods()).rejects.toMatchObject({ code: 'SOURCE_CHANGED', retryable: true });
+  });
+
+  it('a manifest listed without an ETag: the period is SOURCE_LISTING_INVALID, and the manifest is never read unconditionally', async () => {
+    const objs = objects();
+    objs.set(MANIFEST_KEY, { ...objs.get(MANIFEST_KEY)!, etag: '' });
+    const calls: Array<{ key: string; ifMatch?: string }> = [];
+    const [l] = await new S3FocusExportSource({ client: fakeClient(objs, calls), location: LOC }).listPeriods();
+    expect(l).toMatchObject({ ok: false, billingPeriod: P, code: 'SOURCE_LISTING_INVALID' });
+    expect(calls.filter((c) => c.key === MANIFEST_KEY)).toEqual([]);
+  });
+});
+

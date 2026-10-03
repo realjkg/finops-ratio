@@ -1,5 +1,7 @@
 // S3EvidenceStore against a fake S3 client (no network): opening an evidence
 // object honours the run's abort signal (Copilot M5, third review).
+import crypto from 'crypto';
+import { Readable } from 'stream';
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
@@ -77,6 +79,51 @@ describe('S3EvidenceStore uploads are abort-aware', () => {
     await expect(p).rejects.toBe(reason);
     expect(seen.map((s) => s.cmd)).toEqual(['head', 'put']);
     for (const s of seen) expect(s.signal, s.cmd).toBe(ac.signal);
+  });
+});
+
+describe('S3EvidenceStore: an existing object is verified by its sha256, not its size (PR #54 fourth review M1)', () => {
+  const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
+  /** An evidence bucket that already holds `stored` under every key. */
+  function seeded(stored: Buffer, puts: string[]): S3Client {
+    return {
+      async send(cmd: unknown) {
+        if (cmd instanceof HeadObjectCommand) return { ContentLength: stored.length };
+        if (cmd instanceof GetObjectCommand) return { Body: Readable.from([stored]), ContentLength: stored.length };
+        if (cmd instanceof PutObjectCommand) {
+          puts.push(String(cmd.input.Key));
+          return {};
+        }
+        throw new Error('unexpected command');
+      },
+    } as unknown as S3Client;
+  }
+  const good = Buffer.from('the real evidence bytes');
+  const forged = Buffer.from('the FAKE evidence bytes'); // same length, different bytes
+  expect(forged.length).toBe(good.length);
+
+  it('put: same size, same bytes => exists; same size, different bytes => EVIDENCE_INTEGRITY_MISMATCH, nothing overwritten', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-ev-'));
+    try {
+      const file = path.join(dir, 'f');
+      fs.writeFileSync(file, good);
+      const puts: string[] = [];
+      expect(await new S3EvidenceStore({ client: seeded(good, puts), bucket: 'ev' }).put('evidence/k', file, { sha256: sha(good), byteSize: good.length })).toBe('exists');
+      await expect(new S3EvidenceStore({ client: seeded(forged, puts), bucket: 'ev' }).put('evidence/k', file, { sha256: sha(good), byteSize: good.length })).rejects.toMatchObject({
+        code: 'EVIDENCE_INTEGRITY_MISMATCH',
+        retryable: false,
+      });
+      expect(puts).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('putBytes (manifests): the same check', async () => {
+    const puts: string[] = [];
+    expect(await new S3EvidenceStore({ client: seeded(good, puts), bucket: 'ev' }).putBytes('evidence/k', good)).toBe('exists');
+    await expect(new S3EvidenceStore({ client: seeded(forged, puts), bucket: 'ev' }).putBytes('evidence/k', good)).rejects.toMatchObject({ code: 'EVIDENCE_INTEGRITY_MISMATCH' });
+    expect(puts).toEqual([]);
   });
 });
 
