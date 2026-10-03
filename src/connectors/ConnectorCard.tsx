@@ -21,7 +21,6 @@ const KIND_LABEL: Record<string, string> = {
   cloud: 'Cloud FOCUS',
   kubernetes: 'Kubernetes',
   nutanix: 'Nutanix',
-  focus_endpoint: 'FOCUS endpoint',
   mock: 'Mock',
 };
 

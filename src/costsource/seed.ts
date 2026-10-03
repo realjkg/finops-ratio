@@ -18,7 +18,7 @@ import { isAtLeast } from './focusVersions';
 import type { FocusCoreV10, RawSourceRow } from './focusRows';
 import { pointFiveLiveDescriptor, resolvePointFiveStatus } from './pointfiveConfig';
 import { connectorDescriptor, resolveConnectorStatus } from './connectorConfig';
-import { focusExportConnectorSpecsForEnv } from './focusExportConnectors';
+import { FOCUS_EXPORT_CONNECTOR_SPECS } from './focusExportConnectors';
 
 const RESOURCE_PREFIX = 'arn:ratio:workload/';
 
@@ -75,11 +75,12 @@ export function sourcesForEnv(env: Record<string, string | undefined>): CostSour
     // has been switched on. Default build: flag OFF → configured:false (ships dark).
     pointFiveLiveDescriptor(resolvePointFiveStatus(env)),
     // Config-driven connectors: public cloud (Azure / AWS / GCP), Kubernetes,
-    // Nutanix, and the generic FOCUS endpoint. Each descriptor is computed from
-    // its env via the generic resolver, so `configured` honestly reflects whether
+    // and Nutanix. Their specs are static (no spec reads process.env at module
+    // init), so each descriptor is computed ONLY from the supplied env via the
+    // generic resolver, so `configured` honestly reflects whether
     // the connector is live. No env set → `available` (no network calls); the
     // server resolves real status, which /api/costsource/sources reports.
-    ...focusExportConnectorSpecsForEnv(env).map((spec) =>
+    ...FOCUS_EXPORT_CONNECTOR_SPECS.map((spec) =>
       connectorDescriptor(spec, resolveConnectorStatus(spec, env)),
     ),
   ];

@@ -1,7 +1,6 @@
 // Generic HTTPS FOCUS-endpoint transport. Serves every connector whose source
 // exposes its FOCUS export over a plain URL: Kubernetes (OpenCost / Kubecost),
-// Nutanix Cloud Manager, and the generic on-prem / private-cloud endpoint
-// (VMware, OpenStack, a FinOps lakehouse, an internal billing service...).
+// Nutanix Cloud Manager.
 //
 // The endpoint may return CSV, JSON, or NDJSON, optionally gzip-compressed.
 // Window placeholders `{start}` / `{end}` in the URL are substituted (URL-

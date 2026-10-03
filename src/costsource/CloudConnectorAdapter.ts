@@ -1,6 +1,6 @@
 // CloudConnectorAdapter — the shared FOCUS-export adapter. One adapter serves
 // the public-cloud trio (Azure / AWS / GCP), Kubernetes (OpenCost / Kubecost),
-// Nutanix, and the generic FOCUS endpoint, because all of them do the same
+// and Nutanix, because all of them do the same
 // thing: fetch a FOCUS-formatted export from a configured location and hand the
 // rows to the EXISTING version-negotiation shim (`normalizeRows`, reused not
 // reimplemented) up to the v1.4 canonical model. Only auth/fetch is source-

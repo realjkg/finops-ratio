@@ -186,7 +186,6 @@ denominator.
 | GCP BigQuery FOCUS export | `gcp-bigquery-focus` | public_cloud | `GCP_FOCUS_BQ_DATASET`, `GCP_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS` | — |
 | Kubernetes (OpenCost / Kubecost) | `kubernetes` | private_cloud | `KUBERNETES_FOCUS_ENDPOINT` | `KUBERNETES_FOCUS_TOKEN` |
 | Nutanix Cloud Manager | `nutanix` | on_prem | `NUTANIX_ENDPOINT`, `NUTANIX_API_KEY` | — |
-| Generic FOCUS endpoint | `focus-endpoint` | configurable (default on_prem) | `FOCUS_ENDPOINT_URL` | `FOCUS_ENDPOINT_TOKEN`, `FOCUS_ENDPOINT_AUTH_HEADER`, `FOCUS_ENDPOINT_NAME`, `FOCUS_ENDPOINT_COVERAGE`, `FOCUS_ENDPOINT_FOCUS_VERSION` |
 
 How each one reads its data (`src/costsource/transports/`, web-standard APIs only
 — no cloud SDKs, runs on Node 20+ and edge runtimes):
@@ -201,9 +200,7 @@ How each one reads its data (`src/costsource/transports/`, web-standard APIs onl
 - **GCP** — service-account JWT → OAuth token → parameterized BigQuery query over
   the window. `GOOGLE_APPLICATION_CREDENTIALS` may be a file path, inline JSON,
   or base64 JSON (for hosts without a filesystem).
-- **Kubernetes / Nutanix / generic endpoint** — HTTPS GET of a FOCUS export. The
-  generic endpoint is how Ratio reaches any other source (VMware, OpenStack, an
-  internal billing service, a lakehouse API) with no code change.
+- **Kubernetes / Nutanix** — HTTPS GET of the connector's FOCUS export endpoint.
 
 Exports may be CSV, JSON, or NDJSON, optionally gzip-compressed. Parquet is
 rejected with a clear message (configure the export as CSV). The endpoint URLs

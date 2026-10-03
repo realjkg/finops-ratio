@@ -1,5 +1,5 @@
 // Tests for CloudConnectorAdapter — the shared FOCUS-export adapter behind every
-// config-driven connector (cloud trio + Kubernetes + Nutanix + generic endpoint).
+// config-driven connector (cloud trio + Kubernetes + Nutanix).
 //
 // Coverage:
 //   1. Not-configured path (available, and kill-switched) — honest health,
@@ -25,7 +25,6 @@ import {
 } from './cloudConnectorConfig';
 import { KUBERNETES_CONNECTOR_SPEC } from './kubernetesConfig';
 import { NUTANIX_CONNECTOR_SPEC } from './nutanixConfig';
-import { FOCUS_ENDPOINT_CONNECTOR_SPEC } from './focusEndpointConfig';
 import type { ConnectorSpec } from './connectorConfig';
 import { columnsAddedAfter } from './focusVersions';
 import { rawRowsForVersion } from './seed';
@@ -60,10 +59,6 @@ const CONFIGURED_ENV: Record<string, Record<string, string>> = {
     NUTANIX_ENDPOINT: 'https://ncm.example/api/cost',
     NUTANIX_API_KEY: 'ntnx-key',
   },
-  [FOCUS_ENDPOINT_CONNECTOR_SPEC.id]: {
-    FOCUS_ENDPOINT_URL: 'https://billing.internal.example/focus?from={start}',
-    FOCUS_ENDPOINT_TOKEN: 'internal-token',
-  },
 };
 
 /** A fake transport returning seed-derived FOCUS v1.0 export rows. */
@@ -81,7 +76,6 @@ const SPECS: ConnectorSpec[] = [
   GCP_CONNECTOR_SPEC,
   KUBERNETES_CONNECTOR_SPEC,
   NUTANIX_CONNECTOR_SPEC,
-  FOCUS_ENDPOINT_CONNECTOR_SPEC,
 ];
 
 // ---------------------------------------------------------------------------
@@ -235,15 +229,18 @@ describe('CloudConnectorAdapter — default live transport', () => {
     const fetchMock = vi.fn(async () => new Response(FOCUS_CSV, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const adapter = new CloudConnectorAdapter(FOCUS_ENDPOINT_CONNECTOR_SPEC, {
-      env: CONFIGURED_ENV[FOCUS_ENDPOINT_CONNECTOR_SPEC.id],
+    const adapter = new CloudConnectorAdapter(KUBERNETES_CONNECTOR_SPEC, {
+      env: {
+        KUBERNETES_FOCUS_ENDPOINT: 'https://opencost.example/focus?from={start}',
+        KUBERNETES_FOCUS_TOKEN: 'k8s-token',
+      },
     });
     const result = await adapter.fetchCostRows(WINDOW);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe(`https://billing.internal.example/focus?from=${encodeURIComponent(WINDOW.start)}`);
-    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer internal-token');
+    expect(url).toBe(`https://opencost.example/focus?from=${encodeURIComponent(WINDOW.start)}`);
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer k8s-token');
 
     // Only the in-window row survives; it is upgraded to v1.4 and valued (R4).
     expect(result.rows).toHaveLength(1);

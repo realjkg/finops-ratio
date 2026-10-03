@@ -13,7 +13,7 @@ const onTest = async () => {
 };
 
 function sourceById(id: string): CostSourceDescriptor {
-  const src = sourcesForEnv({ FOCUS_ENDPOINT_URL: 'https://billing.internal/focus.csv' }).find((s) => s.id === id);
+  const src = sourcesForEnv({ KUBERNETES_FOCUS_ENDPOINT: 'https://billing.internal/focus.csv' }).find((s) => s.id === id);
   if (!src) throw new Error(`missing ${id}`);
   return src;
 }
@@ -31,7 +31,7 @@ describe('ConnectorCard — Test connection gating (H3)', () => {
   });
 
   it('disables Test connection for a connected live connector and points to the authenticated API', () => {
-    const live = sourceById('focus-endpoint');
+    const live = sourceById('kubernetes');
     expect(live.configured).toBe(true);
     const html = renderToStaticMarkup(<ConnectorCard source={live} onTest={onTest} />);
     expect(testButton(html)).toMatch(/\sdisabled=""/);

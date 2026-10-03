@@ -1,39 +1,58 @@
-// M2 — sourcesForEnv(env) is a pure function of `env`: the generic FOCUS
-// endpoint descriptor must never be built from process.env captured at module
-// init when a caller supplies a different env (e.g. the client render's `{}`).
+// M2 — sourcesForEnv(env) is a pure function of `env`: no connector spec may
+// capture process.env at module init, so a caller that supplies its own env
+// (e.g. the client render's `{}`) never sees server env leak into descriptors.
 
 import { describe, expect, it, vi } from 'vitest';
 
-describe('M2 — sourcesForEnv is pure over the supplied env', () => {
-  const KEYS = ['FOCUS_ENDPOINT_NAME', 'FOCUS_ENDPOINT_COVERAGE', 'FOCUS_ENDPOINT_FOCUS_VERSION'] as const;
+// Every env var any registered source reads (connector anchors, credentials,
+// optional settings, kill-switches, PointFive flag + OAuth).
+const SERVER_ENV: Record<string, string> = {
+  AZURE_FOCUS_EXPORT_URL: 'https://acct.blob.core.windows.net/exports',
+  AZURE_FOCUS_SAS: 'sv=1&sig=x',
+  AWS_FOCUS_EXPORT_BUCKET: 'bucket',
+  AWS_REGION: 'us-east-1',
+  AWS_ACCESS_KEY_ID: 'AKIAEXAMPLE',
+  AWS_SECRET_ACCESS_KEY: 'secret',
+  GCP_FOCUS_BQ_DATASET: 'billing.focus',
+  GCP_PROJECT_ID: 'proj',
+  GOOGLE_APPLICATION_CREDENTIALS: '/secrets/gcp.json',
+  KUBERNETES_FOCUS_ENDPOINT: 'http://opencost/focus',
+  KUBERNETES_FOCUS_TOKEN: 'k8s',
+  NUTANIX_ENDPOINT: 'https://ncm/api',
+  NUTANIX_API_KEY: 'ntnx',
+  COSTSOURCE_POINTFIVE_LIVE: 'true',
+  POINTFIVE_OAUTH_CLIENT_ID: 'id',
+  POINTFIVE_OAUTH_CLIENT_SECRET: 'secret',
+  POINTFIVE_OAUTH_TOKEN_URL: 'https://auth.example/token',
+};
 
-  it('sourcesForEnv({}) never reflects FOCUS_ENDPOINT_* set in process.env', async () => {
-    const saved = KEYS.map((k) => process.env[k]);
-    process.env.FOCUS_ENDPOINT_NAME = 'Leaky VMware';
-    process.env.FOCUS_ENDPOINT_COVERAGE = 'private_cloud';
-    process.env.FOCUS_ENDPOINT_FOCUS_VERSION = '1.3';
-    try {
-      vi.resetModules();
-      const { sourcesForEnv } = await import('./seed');
-      const endpoint = sourcesForEnv({}).find((s) => s.id === 'focus-endpoint');
-      expect(endpoint?.name).toBe('FOCUS endpoint (any on-prem / private / public source)');
-      expect(endpoint?.name).not.toContain('Leaky');
-      expect(endpoint?.coverage).toBe('on_prem');
-      expect(endpoint?.focusVersion).toBe('1.0');
-
-      const fromEnv = sourcesForEnv({
-        FOCUS_ENDPOINT_NAME: 'OpenStack',
-        FOCUS_ENDPOINT_COVERAGE: 'private_cloud',
-        FOCUS_ENDPOINT_FOCUS_VERSION: '1.2',
-      }).find((s) => s.id === 'focus-endpoint');
-      expect(fromEnv?.name).toBe('OpenStack (FOCUS endpoint)');
-      expect(fromEnv?.coverage).toBe('private_cloud');
-      expect(fromEnv?.focusVersion).toBe('1.2');
-    } finally {
-      KEYS.forEach((k, i) => {
-        if (saved[i] === undefined) delete process.env[k];
-        else process.env[k] = saved[i];
-      });
+async function freshSourcesForEnvEmpty(env: Record<string, string>) {
+  const saved: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(env)) {
+    saved[k] = process.env[k];
+    process.env[k] = v;
+  }
+  try {
+    vi.resetModules();
+    const { sourcesForEnv } = await import('./seed');
+    return sourcesForEnv({});
+  } finally {
+    for (const k of Object.keys(env)) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
     }
+  }
+}
+
+describe('M2 — sourcesForEnv is pure over the supplied env', () => {
+  it('sourcesForEnv({}) is identical whether or not process.env is populated at module init', async () => {
+    const clean = await freshSourcesForEnvEmpty({});
+    const polluted = await freshSourcesForEnvEmpty(SERVER_ENV);
+    expect(polluted).toEqual(clean);
+    // And with the server env in process.env, `{}` still reports nothing live.
+    expect(polluted.filter((s) => s.configured).map((s) => s.id).sort()).toEqual([
+      'focus-file-sandbox',
+      'pointfive-sandbox',
+    ]);
   });
 });

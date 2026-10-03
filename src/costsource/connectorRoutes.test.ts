@@ -7,8 +7,8 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 
 const ENV_KEYS = [
   'RATIO_API_TOKEN',
-  'FOCUS_ENDPOINT_URL',
-  'FOCUS_ENDPOINT_TOKEN',
+  'KUBERNETES_FOCUS_ENDPOINT',
+  'KUBERNETES_FOCUS_TOKEN',
   'AI_PROVIDER',
   'COSTSOURCE_POINTFIVE_LIVE',
   'POINTFIVE_OAUTH_CLIENT_ID',
@@ -23,8 +23,8 @@ function configurePointFiveLive() {
   process.env.POINTFIVE_OAUTH_TOKEN_URL = 'https://auth.pointfive.example/token';
 }
 const CSV =
-  'BilledCost,BillingCurrency,ChargePeriodStart,ServiceName,ResourceId\n42,USD,2026-06-02T00:00:00Z,VMware vSphere,arn:ratio:workload/wl-001\n';
-const QUERY = { sourceId: 'focus-endpoint', start: '2026-06-01T00:00:00Z', end: '2026-07-01T00:00:00Z' };
+  'BilledCost,BillingCurrency,ChargePeriodStart,ServiceName,ResourceId\n42,USD,2026-06-02T00:00:00Z,OpenCost namespace,arn:ratio:workload/wl-001\n';
+const QUERY = { sourceId: 'kubernetes', start: '2026-06-01T00:00:00Z', end: '2026-07-01T00:00:00Z' };
 
 let saved: Record<string, string | undefined>;
 beforeEach(() => {
@@ -85,7 +85,7 @@ describe('/api/costsource/rows — live-data auth gate', () => {
   });
 
   it('refuses a live connector when no RATIO_API_TOKEN is configured', async () => {
-    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const res = await callRows();
@@ -95,22 +95,22 @@ describe('/api/costsource/rows — live-data auth gate', () => {
   });
 
   it('refuses a live connector with a wrong token', async () => {
-    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
     process.env.RATIO_API_TOKEN = 'right';
     const res = await callRows({ authorization: 'Bearer wrong' });
     expect(res.statusCode).toBe(401);
   });
 
   it('serves normalized live rows with the right token', async () => {
-    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
-    process.env.FOCUS_ENDPOINT_TOKEN = 'upstream';
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
+    process.env.KUBERNETES_FOCUS_TOKEN = 'upstream';
     process.env.RATIO_API_TOKEN = 'right';
     vi.stubGlobal('fetch', vi.fn(async () => new Response(CSV)));
     const res = await callRows({ authorization: 'Bearer right' });
     expect(res.statusCode).toBe(200);
     const body = res.body as { rows: Array<{ BilledCost: number; ServiceName: string; x_RatioSourceId: string }> };
     expect(body.rows).toHaveLength(1);
-    expect(body.rows[0]).toMatchObject({ BilledCost: 42, ServiceName: 'VMware vSphere', x_RatioSourceId: 'focus-endpoint' });
+    expect(body.rows[0]).toMatchObject({ BilledCost: 42, ServiceName: 'OpenCost namespace', x_RatioSourceId: 'kubernetes' });
   });
 
   it('returns 409 (not configured) for an available connector, with no network', async () => {
@@ -141,14 +141,14 @@ describe('/api/v1/connectors', () => {
   it('lists every connector as available with its env contract in a default build', async () => {
     const res = await callRegistry();
     expect(res.statusCode).toBe(200);
-    expect(res.body.summary).toEqual({ connected: 0, available: 6, incomplete: 0, disabled: 0 });
+    expect(res.body.summary).toEqual({ connected: 0, available: 5, incomplete: 0, disabled: 0 });
     const aws = res.body.connectors.find((c) => c.id === 'aws-data-exports');
     expect(aws?.setup?.requiredEnv).toContain('AWS_FOCUS_EXPORT_BUCKET');
     expect(res.body.health).toBeUndefined();
   });
 
   it('probes only configured connectors and reports their live health', async () => {
-    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
     // H2: a probe invokes connectors with server credentials — token required.
     process.env.RATIO_API_TOKEN = 'right';
     const fetchMock = vi.fn(async () => new Response(CSV));
@@ -156,7 +156,7 @@ describe('/api/v1/connectors', () => {
     const res = await callRegistry({ probe: 'true' }, { authorization: 'Bearer right' });
     expect(res.statusCode).toBe(200);
     expect(res.body.summary.connected).toBe(1);
-    expect(res.body.health).toEqual([expect.objectContaining({ sourceId: 'focus-endpoint', reachable: true })]);
+    expect(res.body.health).toEqual([expect.objectContaining({ sourceId: 'kubernetes', reachable: true })]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -226,7 +226,7 @@ describe('H2 — /api/v1/connectors?probe=true always requires the API token', (
 
   it('refuses an anonymous probe under AI_PROVIDER=mock with no token and invokes no connector', async () => {
     process.env.AI_PROVIDER = 'mock';
-    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
     const fetchMock = vi.fn(async () => new Response(CSV));
     vi.stubGlobal('fetch', fetchMock);
     const res = await registry({ probe: 'true' });
@@ -235,7 +235,7 @@ describe('H2 — /api/v1/connectors?probe=true always requires the API token', (
   });
 
   it('refuses a probe with a wrong token and invokes no connector', async () => {
-    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
     process.env.RATIO_API_TOKEN = 'right';
     const fetchMock = vi.fn(async () => new Response(CSV));
     vi.stubGlobal('fetch', fetchMock);
@@ -260,10 +260,10 @@ describe('H3 — /api/costsource/health is deny-by-default for non-sandbox sourc
   }
 
   it('refuses an anonymous probe of a configured live connector with no transport call', async () => {
-    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
     const fetchMock = vi.fn(async () => new Response(CSV));
     vi.stubGlobal('fetch', fetchMock);
-    const res = await health('focus-endpoint');
+    const res = await health('kubernetes');
     expect(res.statusCode).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -286,10 +286,10 @@ describe('H3 — /api/costsource/health is deny-by-default for non-sandbox sourc
   it('serves sandbox health anonymously and live health with the right token', async () => {
     expect((await health('pointfive-sandbox')).statusCode).toBe(200);
     expect((await health('focus-file-sandbox')).statusCode).toBe(200);
-    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
     process.env.RATIO_API_TOKEN = 'right';
     vi.stubGlobal('fetch', vi.fn(async () => new Response(CSV)));
-    const res = await health('focus-endpoint', { authorization: 'Bearer right' });
+    const res = await health('kubernetes', { authorization: 'Bearer right' });
     expect(res.statusCode).toBe(200);
   });
 });

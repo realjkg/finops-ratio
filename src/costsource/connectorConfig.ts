@@ -1,5 +1,5 @@
 // Generic config-driven connector seam — the shared shape every FOCUS-export
-// connector (public cloud, Kubernetes, Nutanix, generic endpoint) uses.
+// connector (public cloud, Kubernetes, Nutanix) uses.
 //
 // Activation is CREDENTIAL-DRIVEN: a connector goes live as soon as its
 // required env is present, with no separate opt-in. The feature flag is a

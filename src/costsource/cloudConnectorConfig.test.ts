@@ -1,5 +1,5 @@
 // Tests for the config-driven connector resolvers (cloud trio + Kubernetes +
-// Nutanix + generic FOCUS endpoint), all built on the generic
+// Nutanix), all built on the generic
 // `resolveConnectorStatus` helper.
 //
 // Coverage:
@@ -41,12 +41,6 @@ import {
   resolveNutanixStatus,
   nutanixDescriptor,
 } from './nutanixConfig';
-import {
-  FOCUS_ENDPOINT_CONNECTOR_SPEC,
-  FOCUS_ENDPOINT_SOURCE_ID,
-  buildFocusEndpointSpec,
-  resolveFocusEndpointStatus,
-} from './focusEndpointConfig';
 import { FOCUS_EXPORT_CONNECTOR_SPECS, findConnectorSpec } from './focusExportConnectors';
 import { COST_SOURCES } from './seed';
 
@@ -77,9 +71,6 @@ const CONFIGURED_ENV: Record<string, Record<string, string>> = {
     COSTSOURCE_NUTANIX_LIVE: 'true',
     NUTANIX_ENDPOINT: 'https://ncm.example/api/cost',
     NUTANIX_API_KEY: 'ntnx-key',
-  },
-  [FOCUS_ENDPOINT_SOURCE_ID]: {
-    FOCUS_ENDPOINT_URL: 'https://billing.internal.example/focus.csv',
   },
 };
 
@@ -119,7 +110,6 @@ const CASES = [
   { name: 'GCP', spec: GCP_CONNECTOR_SPEC, resolve: resolveGcpStatus },
   { name: 'Kubernetes', spec: KUBERNETES_CONNECTOR_SPEC, resolve: resolveKubernetesStatus },
   { name: 'Nutanix', spec: NUTANIX_CONNECTOR_SPEC, resolve: resolveNutanixStatus },
-  { name: 'FOCUS endpoint', spec: FOCUS_ENDPOINT_CONNECTOR_SPEC, resolve: resolveFocusEndpointStatus },
 ] as const;
 
 /** The configured env minus the kill-switch — activation must not need it. */
@@ -204,26 +194,6 @@ describe('anchor rule', () => {
   });
 });
 
-describe('generic FOCUS endpoint spec', () => {
-  it('defaults to on-prem FOCUS v1.0 and honours descriptive env', () => {
-    expect(buildFocusEndpointSpec({}).coverage).toBe('on_prem');
-    const spec = buildFocusEndpointSpec({
-      FOCUS_ENDPOINT_COVERAGE: 'private_cloud',
-      FOCUS_ENDPOINT_FOCUS_VERSION: '1.2',
-      FOCUS_ENDPOINT_NAME: 'VMware Aria',
-    });
-    expect(spec.coverage).toBe('private_cloud');
-    expect(spec.focusVersion).toBe('1.2');
-    expect(spec.name).toContain('VMware Aria');
-  });
-
-  it('ignores invalid coverage / version values', () => {
-    const spec = buildFocusEndpointSpec({ FOCUS_ENDPOINT_COVERAGE: 'mars', FOCUS_ENDPOINT_FOCUS_VERSION: '9.9' });
-    expect(spec.coverage).toBe('on_prem');
-    expect(spec.focusVersion).toBe('1.0');
-  });
-});
-
 // ---------------------------------------------------------------------------
 // 3. Descriptor honesty
 // ---------------------------------------------------------------------------
@@ -281,15 +251,14 @@ describe('connector descriptors', () => {
 // ---------------------------------------------------------------------------
 
 describe('connector registry', () => {
-  it('exposes all six FOCUS-export connectors and finds them by id', () => {
-    expect(FOCUS_EXPORT_CONNECTOR_SPECS).toHaveLength(6);
+  it('exposes all five FOCUS-export connectors and finds them by id', () => {
+    expect(FOCUS_EXPORT_CONNECTOR_SPECS).toHaveLength(5);
     for (const id of [
       AZURE_SOURCE_ID,
       AWS_SOURCE_ID,
       GCP_SOURCE_ID,
       KUBERNETES_SOURCE_ID,
       NUTANIX_SOURCE_ID,
-      FOCUS_ENDPOINT_SOURCE_ID,
     ]) {
       expect(findConnectorSpec(id)?.id).toBe(id);
     }
@@ -309,7 +278,6 @@ describe('connector registry', () => {
       GCP_SOURCE_ID,
       KUBERNETES_SOURCE_ID,
       NUTANIX_SOURCE_ID,
-      FOCUS_ENDPOINT_SOURCE_ID,
     ]) {
       const descriptor = COST_SOURCES.find((s) => s.id === id);
       expect(descriptor).toBeDefined();
