@@ -295,7 +295,7 @@ export function eventCommentFor(payload, number) {
   return undefined;
 }
 
-export async function gatherState(github, repo, number, { eventComment } = {}) {
+export async function gatherState(github, repo, number, { eventComment, core } = {}) {
   const { data: pr } = await github.rest.pulls.get({ ...repo, pull_number: number });
   const headSha = pr.head.sha;
   const changeSet = await attachModes(github, repo, headSha, await fetchChangeSet(github, repo, pr));
@@ -318,8 +318,9 @@ export async function gatherState(github, repo, number, { eventComment } = {}) {
       const found = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, { ...repo, check_suite_id: suiteId, per_page: 100 });
       const run = found.find((r) => r.check_suite_id === suiteId);
       if (run) suiteMeta.set(suiteId, runMeta(run));
-    } catch {
-      // leave unresolved
+    } catch (e) {
+      // Unresolved ⇒ its check runs stay ordinary checks (fail closed).
+      core?.warning(`Could not resolve check suite ${suiteId} to its workflow run (${e.status ? `HTTP ${e.status}` : e.message}); its check runs are treated as ordinary checks.`);
     }
   }
   const ciPath = DEFAULT_CONFIG.ciCheck.workflowPath;
@@ -544,6 +545,7 @@ export async function runEligibility({ github, context, core, numbers }) {
     try {
       const { raw, latest, fresh, moved, state, headStatuses } = await gatherState(github, repo, number, {
         eventComment: eventCommentFor(context.payload, number),
+        core,
       });
       if (moved) {
         // Apply an ineligible decision first (never leave auto-merge armed on a

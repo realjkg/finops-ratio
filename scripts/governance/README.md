@@ -86,17 +86,26 @@ Auto-merge (squash, pinned to the evaluated head SHA) is enabled only when
   as ours only when all of these hold, and never by name alone:
   - the app is GitHub Actions (15368);
   - the workflow path is `.github/workflows/governance.yml`;
-  - the event is base-context (never `pull_request`);
+  - the event is `pull_request_target`, the only event whose suites attach to
+    a PR head (a `pull_request` or `workflow_dispatch` run executes that ref's
+    own code, so it never counts as ours);
   - the workflow run's head repository is the PR's base repository.
 
   Each check run's suite is resolved to its workflow run, by `check_suite_id`
   where needed. Unresolved suites are ordinary checks.
 
-  Of our runs, `Governance · eligibility targets`, `Governance · merge
-  eligibility (#n)` and `Governance · revocations` are not inputs. The first two
-  are this decision's own jobs; the last only runs on comment events and is
-  skipped otherwise. `Governance · risk classification` remains an input and
-  must be completed and successful. A same-named run from another app,
+  Of our runs:
+  - `Governance · eligibility targets` and `Governance · merge eligibility
+    (#n)` are this decision's own jobs and are never inputs.
+  - `Governance · revocations` only runs on comment events. It is excluded
+    only when it concluded `skipped`; any other state blocks.
+  - `Governance · risk classification` is an input. At least one such run of
+    ours must be present on the head, otherwise the PR is refused. A queued or
+    running one is pending and also refuses. A run that concluded `cancelled`
+    is ignored only when a newer classify run of ours exists, because classify
+    uses `cancel-in-progress`. The newest run must succeed.
+
+  Lookup failures are logged as warnings. A same-named run from another app,
   workflow, event or repository is an ordinary check, so a skipped or failed
   impostor still blocks.
 - Every commit status is `success`, except our own `Governance · merge
@@ -230,6 +239,9 @@ gates on risk; eligibility re-classifies the PR itself.
   auto-merge enabled with `GITHUB_TOKEN`, or by the "already clean" fallback,
   does not trigger `on: push` workflows on `main` (e.g. CI on main). Recommended
   later: a GitHub App installation token for the eligibility job.
+- **`workflow_dispatch` runs the dispatched ref's code.** Only users with
+  write access can dispatch, and dispatch runs never count as this workflow's
+  own check runs.
 - **Before merge, the gate does nothing.** `pull_request_target` runs main's copy
   of the workflow, so the gate starts working only after it is on `main`, and
   it cannot classify its own PR.

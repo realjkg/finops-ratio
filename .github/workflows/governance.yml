@@ -3,11 +3,13 @@
 # Governance track: PR risk classification + merge eligibility.
 #
 # Security model
-# - Runs ONLY on base-context events (pull_request_target, workflow_run,
-#   schedule, workflow_dispatch). The workflow definition and the scripts it
-#   runs always come from the BASE branch; PR code is never checked out or
-#   executed. The PR's file list and patches are read through the API. A PR
-#   that edits this file or scripts/governance/** is itself restricted.
+# - Triggers: pull_request_target, issue_comment, workflow_run and schedule
+#   run the workflow definition and scripts from the BASE/default branch; PR
+#   code is never checked out or executed (the PR's file list and patches are
+#   read through the API). workflow_dispatch runs the dispatched ref's code
+#   (only users with write access can dispatch), so its runs are never treated
+#   as this workflow's own check runs by the eligibility decision. A PR that
+#   edits this file or scripts/governance/** is itself restricted.
 # - Fork PRs are classified (labels + report) but are NEVER auto-merge eligible,
 #   nor are PRs by authors outside OWNER/MEMBER/COLLABORATOR.
 # - `pull_request_review` is deliberately NOT used: it runs the PR head's copy

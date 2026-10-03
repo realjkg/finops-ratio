@@ -46,19 +46,26 @@ export const DEFAULT_CONFIG = Object.freeze({
   }),
   // Our own governance workflow's check runs DO appear on the PR head SHA:
   // pull_request_target job runs attach to it (PR #47). A run is "ours" only if
-  // ALL hold: app = GitHub Actions, workflow path = governance.yml, a
-  // base-context event (never `pull_request`, which would run a PR-modified
-  // copy), and the workflow run's head repository = the PR's base repository.
-  // Of ours, the eligibility/targets jobs (outputs of this decision, possibly
-  // still in progress) and the issue_comment-only revocations job (skipped on
-  // PR events) are not inputs. Our risk classification IS an input: it must be
-  // completed+success. Same-named runs that are not ours stay ordinary checks.
+  // ALL hold: app = GitHub Actions, workflow path = governance.yml, event =
+  // pull_request_target (the only event whose suites attach to a PR head; a
+  // `pull_request` or `workflow_dispatch` run executes the ref's own code),
+  // and the workflow run's head repository = the PR's base repository.
+  // Of ours:
+  //  - eligibility targets / merge eligibility (#n) are this decision's own
+  //    jobs (possibly still in progress): never inputs;
+  //  - revocations is issue_comment-only and is excluded ONLY when skipped;
+  //  - risk classification IS an input and must be present and
+  //    completed+success; a cancelled one is ignored only when a newer own
+  //    classify run exists (cancel-in-progress supersession).
+  // Same-named runs that are not ours stay ordinary checks.
   ownWorkflow: Object.freeze({
     appId: GITHUB_ACTIONS_APP_ID,
     workflowPath: '.github/workflows/governance.yml',
-    events: Object.freeze(['pull_request_target', 'issue_comment', 'workflow_run', 'schedule', 'workflow_dispatch']),
-    nonInputNames: Object.freeze(['Governance · revocations', 'Governance · eligibility targets']),
-    nonInputPrefixes: Object.freeze(['Governance · merge eligibility']),
+    events: Object.freeze(['pull_request_target']),
+    classifyName: 'Governance · risk classification',
+    nonInputNames: Object.freeze(['Governance · eligibility targets']),
+    skippedOnlyNames: Object.freeze(['Governance · revocations']),
+    nonInputPrefixes: Object.freeze(['Governance · merge eligibility (#']),
   }),
   baseBranch: 'main',
   allowedAuthorAssociations: Object.freeze(['OWNER', 'MEMBER', 'COLLABORATOR']),
@@ -75,10 +82,16 @@ export function isOwnGovernanceRun(run, pr, config = DEFAULT_CONFIG) {
 }
 
 /** Our own governance runs that are not inputs to the eligibility decision. */
-function isOwnNonInputRun(run, pr, config) {
+function isOwnNonInputRun(run, pr, config, all) {
   const own = config.ownWorkflow;
-  return isOwnGovernanceRun(run, pr, config)
-    && (own.nonInputNames.includes(run.name) || own.nonInputPrefixes.some((p) => run.name.startsWith(p)));
+  if (!isOwnGovernanceRun(run, pr, config)) return false;
+  if (own.nonInputNames.includes(run.name) || own.nonInputPrefixes.some((p) => run.name.startsWith(p))) return true;
+  if (own.skippedOnlyNames.includes(run.name)) return run.status === 'completed' && run.conclusion === 'skipped';
+  if (run.name === own.classifyName && run.status === 'completed' && run.conclusion === 'cancelled') {
+    // Superseded by a newer classify run of ours (cancel-in-progress).
+    return all.some((o) => o !== run && o.name === own.classifyName && o.id > run.id && isOwnGovernanceRun(o, pr, config));
+  }
+  return false;
 }
 
 const runKey = (r) => `${r.name}\0${r.appId ?? ''}\0${r.workflowPath ?? ''}`;
@@ -155,7 +168,12 @@ function collectReasons(state, config) {
   // Check runs are never collapsed: listForRef(filter=latest) already returns
   // the latest run per suite, and any non-success (in any suite) blocks.
   const ciRuns = all.filter((r) => r.name === ci.name);
-  const runs = all.filter((r) => !isOwnNonInputRun(r, pr, config));
+  const runs = all.filter((r) => !isOwnNonInputRun(r, pr, config, all));
+  // The classification this decision relies on must exist as OUR run on the head.
+  const ownClassify = config.ownWorkflow.classifyName;
+  if (!all.some((r) => r.name === ownClassify && isOwnGovernanceRun(r, pr, config))) {
+    reasons.push(`No "${ownClassify}" check run from ${config.ownWorkflow.workflowPath} (pull_request_target) on the head SHA.`);
+  }
 
   const jobs = state?.ciJobs;
   if (!Array.isArray(jobs)) {
