@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../db/testing/harness';
 import { assertSafeWorkerRole, createWorkerPool } from './db';
 import { createLogin, type Login } from '../testing/db';
+import { REFUSED_PREDEFINED_ROLES } from '../db/privilegeModel';
 
 let db: TestDatabase;
 const logins: Login[] = [];
@@ -146,5 +147,55 @@ describe('worker refuses the member-audit set over the full membership closure (
     await db.pool.query(`GRANT ${r} TO ${l.name}`);
     await expect(check(l.url)).resolves.toBeUndefined();
   });
+});
+
+// H1 completion: Slice 0's full REFUSED_PREDEFINED_ROLES (rounds 16-19), each
+// over every membership edge kind. The roles are listed EXPLICITLY here (not
+// read from the list under test), so dropping one from the list fails a test.
+const EXPECTED_REFUSED_PREDEFINED = [
+  'pg_read_server_files',
+  'pg_write_server_files',
+  'pg_execute_server_program',
+  'pg_read_all_data',
+  'pg_write_all_data',
+  'pg_signal_backend',
+  'pg_create_subscription',
+  'pg_monitor',
+  'pg_read_all_stats',
+  'pg_read_all_settings',
+  'pg_stat_scan_tables',
+] as const;
+
+describe('worker refuses every Slice 0 refused predefined role over every edge kind (serial)', () => {
+  it("the worker's refusal set is exactly Slice 0's REFUSED_PREDEFINED_ROLES (no drift either way)", () => {
+    expect(Object.keys(REFUSED_PREDEFINED_ROLES).sort()).toEqual([...EXPECTED_REFUSED_PREDEFINED].sort());
+  });
+
+  const edges: Array<[string, (role: string, login: string) => Promise<void>]> = [
+    ['an INHERIT edge', (role, login) => db.pool.query(`GRANT ${role} TO ${login}`).then(() => undefined)],
+    ['a SET-only edge', (role, login) => db.pool.query(`GRANT ${role} TO ${login} WITH INHERIT FALSE, SET TRUE`).then(() => undefined)],
+    ['an ADMIN-only edge', (role, login) => db.pool.query(`GRANT ${role} TO ${login} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`).then(() => undefined)],
+    [
+      'a transitive edge (login -> plain role -> predefined role)',
+      async (role, login) => {
+        const mid = `ratio_test_mid_${crypto.randomBytes(4).toString('hex')}`;
+        await db.pool.query(`CREATE ROLE ${mid} NOLOGIN`);
+        extraRoles.push(mid);
+        await db.pool.query(`GRANT ${role} TO ${mid}`);
+        await db.pool.query(`GRANT ${mid} TO ${login} WITH INHERIT FALSE, SET TRUE`);
+      },
+    ],
+  ];
+
+  for (const role of EXPECTED_REFUSED_PREDEFINED) {
+    for (const [edge, grant] of edges) {
+      it(`refuses a ratio_worker login that reaches ${role} over ${edge}`, async () => {
+        const l = await createLogin(db, ['ratio_worker']);
+        logins.push(l);
+        await grant(role, l.name);
+        await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE', message: expect.stringContaining(role) });
+      });
+    }
+  }
 });
 
