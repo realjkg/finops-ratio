@@ -77,10 +77,16 @@ includes `tenant_id` (tested generically by catalog scan of `pg_constraint`).
 | `cost_facts` | pk(tenant_id,batch_id,artifact_fingerprint,row_ordinal) (row identity = artifact+ordinal, never content hash); FK(tenant_id,source_id,billing_period,batch_id)→ingest_batches(…) so a fact's source/period always equal its batch's; FK(tenant_id,batch_id,artifact_fingerprint)→ingest_artifacts(tenant_id,batch_id,fingerprint); `billed_cost numeric not null`; `billing_currency ~ ^[A-Z]{3}$`; charge_period_start/end timestamptz not null, end ≥ start; row_ordinal ≥ 0; `extra_columns jsonb` object |
 | `period_publications` | pk(tenant_id,source_id,billing_period) — THE pointer; FK(tenant_id,source_id,billing_period,batch_id)→ingest_batches(…) so the pointer can only name a batch of the same source+period; FK(tenant_id,source_id,published_by_run_id)→sync_runs; unique(tenant_id,batch_id) |
 | `source_checkpoints` | pk(tenant_id,source_id); FK→sources; FK(tenant_id,source_id,last_run_id)→sync_runs; `periods jsonb` object |
-| view `cost_facts_published` | `WITH (security_invoker = true, security_barrier = true)`; cost_facts ⋈ period_publications on (tenant, source, period, batch) |
+| view `cost_facts_published` | **Corrected (round 2):** definer-rights view `WITH (security_barrier = true)` — NOT `security_invoker` (BOUNDARY v2 D4, §10) — owned by `ratio_owner`; cost_facts ⋈ period_publications on (tenant, source, period, batch) ⋈ ingest_batches `status = 'published'`, plus `WHERE tenant_id = ratio.current_tenant_id()` |
 
-Helper functions (schema `ratio`, `SET search_path = pg_catalog, pg_temp`):
-- `ratio.current_tenant_id()` STABLE: `NULLIF(current_setting('ratio.tenant_id', true), '')::uuid`.
+Helper functions (schema `ratio`; all except `current_tenant_id` carry `SET search_path = pg_catalog, pg_temp`):
+- `ratio.current_tenant_id()` STABLE, **SQL-standard body (round 2, M5)**:
+  `RETURN NULLIF(pg_catalog.current_setting('ratio.tenant_id', true), '')::pg_catalog.uuid`.
+  The body is parsed and bound at CREATE time, so the caller's `search_path`
+  or a temp table named `uuid` cannot change it (the earlier `$$ … ::uuid $$`
+  body could be broken by `CREATE TEMP TABLE uuid` — 42P13, a self-DoS, not a
+  leak). No SET clause, so it is still inlined (EXPLAIN shows it as an index
+  condition).
   The `NULLIF` matters: after any transaction that used `set_config(..., true)`
   the placeholder GUC remains defined with value `''` for the rest of the
   session; `''::uuid` would raise. With `NULLIF` an unset/reset tenant is
@@ -88,9 +94,16 @@ Helper functions (schema `ratio`, `SET search_path = pg_catalog, pg_temp`):
   `invalid input syntax for type uuid` (fails closed; returns no rows).
 - `ratio.jsonb_has_secret_like_key(jsonb)` IMMUTABLE: recursive walk over all
   nested objects/arrays; true if any key matches (case-insensitive substring)
-  `token|secret|key|password|passwd|pwd|sas|sig|credential|auth|private`.
-  Deliberately fail-closed: false positives (e.g. `partition_key`, `design`)
-  are rejected too. Only keys are inspected, not values (gap, §7).
+  `token|secret|key|pass|pw|sas|sig|credential|auth|private|bearer|cert|dsn|conn`
+  (widened in round 2, L3). Deliberately fail-closed: false positives (e.g.
+  `partition_key`, `design`, `connection_timeout`) are rejected too.
+  Homoglyph keys (e.g. Cyrillic `tоken`) are NOT detected — documented limitation.
+- Round 2 (L3): `ratio.text_looks_secret(text)` (URL userinfo `://…@`, `sig=`,
+  `signature=`, `AKIA…`/`ASIA…` key ids, `Bearer `; case-insensitive) and
+  `ratio.jsonb_has_secret_like_value(jsonb)` (every string value at any depth).
+  Applied to `sources.config` (keys + values), `sync_runs.stats` (keys +
+  values), `sync_runs.error_detail`, `ingest_batches.quarantine_reason`,
+  `ingest_validation_errors.message`, `ingest_artifacts.artifact_name`.
 
 ## 4. Roles and tenancy
 
@@ -119,16 +132,14 @@ Helper functions (schema `ratio`, `SET search_path = pg_catalog, pg_temp`):
     SELECT/INSERT/UPDATE/DELETE on ingest_batches; SELECT/INSERT/DELETE on
     ingest_artifacts, cost_facts (facts are immutable — no UPDATE); SELECT on
     the view. No DDL, not owner (cannot disable RLS).
-  - `ratio_reader`: USAGE; SELECT on `cost_facts_published`, `ingest_batches`,
-    `sync_runs`, `sources`. **Deviation:** because the view is
-    `security_invoker`, Postgres checks the invoker's privileges on the base
-    tables, so the reader ALSO needs SELECT on `cost_facts` and
-    `period_publications`. To keep "readers see only published facts" true
-    regardless, `cost_facts` gets an additional RESTRICTIVE SELECT policy
-    `TO ratio_reader` requiring the row's batch to be the currently published
-    one (EXISTS on period_publications). So a reader querying raw
-    `cost_facts` sees exactly what the view shows (own tenant, published
-    only) — tested. No INSERT/UPDATE/DELETE anywhere — tested for every table.
+  - `ratio_reader`: **SUPERSEDED by §10 (D4)** — USAGE on the schema and
+    SELECT on `cost_facts_published` ONLY; no base-table grant, no
+    restrictive reader policy (the security_invoker design described in the
+    first draft was never committed). Function EXECUTE: `current_tenant_id()` only (L4).
+  - Round 2: worker additionally gets `UPDATE (row_count)` on
+    `ingest_artifacts` (column-level only, orchestrator request for Slice 1) and
+    EXECUTE on the guard helpers; `REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA
+    ratio FROM PUBLIC`.
 - App code: `withTenantTransaction` does `BEGIN; SELECT set_config('ratio.tenant_id',
   $1, true)`, uuid validated client-side first, never session-level, never
   interpolated.
@@ -150,8 +161,8 @@ does not bundle `pg`. `tsc --noEmit` (root tsconfig) type-checks `src/ingest`.
 | Forgotten tenant setting leaks all rows | NULL ⇒ policy false (zero rows), insert rejected; transaction-local only | no-tenant + "after previous txn" tests |
 | Cross-tenant reference via FK | all FKs composite incl. tenant_id; catalog scan proves it | A-batch → B-source rejected even as superuser |
 | Mismatched source/period pointer (double count) | FKs carry (source, period); ≤1 published batch per period; one pointer per period | constraint tests |
-| View bypassing RLS (definer rights) | `security_invoker=true`, owner non-super | view isolation test |
-| Reader sees staged/superseded rows via base table | restrictive reader policy on cost_facts | raw cost_facts as reader test |
+| View bypassing RLS (definer rights) | owner `ratio_owner` is non-super/non-BYPASSRLS and bound by FORCE RLS; explicit tenant predicate in the view (round 2: corrected — the view is NOT security_invoker) | view isolation + real-login tests; mutation M1 |
+| Reader sees staged/superseded/quarantined rows | reader has no base-table grant (42501); view joins `status = 'published'` and the pointer | reader matrix; mutations M3, M8 |
 | Reader/worker escalation (DDL, disable RLS) | not owner, no CREATE on schema | DDL refused test |
 | Secrets persisted in config | no secrets column; CHECK rejects secret-like keys recursively | key matrix |
 | Float money corruption | numeric only; `pg` returns numeric as string | precision round-trip + catalog scan |
@@ -159,6 +170,13 @@ does not bundle `pg`. `tsc --noEmit` (root tsconfig) type-checks `src/ingest`.
 | Edited migration silently diverges | sha256 checksum ledger | tamper test |
 | Migration leaking connection string | CLI never logs URLs; logs structured JSON with error message/code only | n/a (reviewed) |
 | SQL injection via tenant id | bound parameter + uuid validation | unit test |
+
+| **Credential holder selects another tenant** (round 2, M5) | NONE at the DB layer: the tenant is a user-settable GUC; any holder of a worker/reader credential can `set_config('ratio.tenant_id', <any uuid>, true)`. RLS/tenant isolation defends against application bugs (missing/wrong tenant), NOT against credential holders. The alternative — per-tenant DB roles/credentials — is an owner decision | characterization test `documented trust boundary…` |
+| Published data rewritten after publication (round 2, H2) | staged-only child trigger (RT001), TRUNCATE refused, batch lifecycle trigger (RT002), deferred pointer consistency (RT003), reconciliation CHECKs | `immutability.db.test.ts`; mutations M8–M11, M16–M18, M21 |
+| Pre-existing dangerous roles (round 2, M1/M2) | 0001 guard RT010: SUPER/BYPASSRLS/REPLICATION, CREATEROLE/CREATEDB on worker/reader, any membership | `roles.db.test.ts`; M13, M19 |
+| Migration smuggles a destructive or isolation-disabling statement (round 2, M3) | expand allow-list; always-forbidden list | `migrationFiles.test.ts` |
+| NaN/Infinity money (round 2, M4) | `abs(x) < 'Infinity'` on every money/quantity/total | NaN/±Infinity test; M12 |
+| Triggers bypassed | only by the table owner (`ALTER TABLE … DISABLE TRIGGER`, refused by the migration linter) or a superuser (`session_replication_role = replica`, also linter-refused); worker/reader cannot | deny tests |
 
 Out of scope here: worker startup role check (Slice 1), error redaction
 (Slice 1), any network surface (none exists).
@@ -173,14 +191,12 @@ Out of scope here: worker startup role check (Slice 1), error redaction
 - Lock holder hangs: other runners wait indefinitely (no lock timeout in v1 —
   gap; operator can `pg_terminate_backend`).
 - Checksum/missing/out-of-order: refuse before touching anything.
-- Role pre-exists with SUPERUSER/BYPASSRLS: migration 0001 raises, rolled back.
+- Role pre-exists with SUPERUSER/BYPASSRLS/REPLICATION, worker/reader with CREATEROLE/CREATEDB, or any ratio role is a member of any role: 0001 raises RT010, rolled back.
 - Migrating login lacks membership in ratio_owner: `SET ROLE` fails, rolled back.
 - `test:db` without `RATIO_TEST_DATABASE_URL`: config throws ⇒ non-zero exit.
 
-Known gaps carried forward: secret check inspects keys only (not values such as
-URLs with `sig=`); `period_publications` does not itself enforce the pointed
-batch has `status='published'` (Slice 1 publish txn does both atomically; a
-deferred constraint trigger could be added later); no `lock_timeout` on the
+Known gaps carried forward (updated round 2 — value secret checks and the
+pointer/published consistency trigger now exist): no `lock_timeout` on the
 migration lock; dynamic `import()` with non-literal specifiers is not detectable
 by the boundary test.
 
@@ -188,12 +204,12 @@ by the boundary test.
 
 - Code: branch is unmerged; revert = do not merge / `git revert` the commits.
   App behaviour does not depend on any of it.
-- Database (non-prod): `RATIO_ALLOW_DOWN_MIGRATIONS=1 RATIO_MIGRATE_DATABASE_URL=… npm run db:migrate -- down 1`
+- Database (non-prod): `RATIO_ENV=test RATIO_ALLOW_DOWN_MIGRATIONS=1 RATIO_MIGRATE_DATABASE_URL=… npm run db:migrate -- --down 1`
   ⇒ `DROP SCHEMA ratio CASCADE` + ledger row removed. Roles are left in place
   (cluster-global, may be shared by other databases); to remove them on a
   dedicated cluster: `DROP ROLE ratio_reader, ratio_worker, ratio_owner` after
   checking no other database references them.
-- Production: down is refused by design (NODE_ENV=production). Production
+- Production: down is refused by design (NODE_ENV/RATIO_ENV=production; since round 2 also any RATIO_ENV other than development/test/ci). Production
   rollback of 0001 drops all ingested data and is a data-retention decision for
   the owner (flagged in EVIDENCE.md).
 
@@ -271,3 +287,70 @@ These OVERRIDE §3/§4 where they conflict.
   `cost_facts.artifact_fingerprint` is renamed `artifact_sha256` for one name
   per concept (FK → ingest_artifacts(tenant_id, batch_id, sha256)).
 - D1–D3, D7 and Slice 2 items are Slice 1/2 work; nothing for them here.
+
+## 11. Round 2 — challenger REQUEST CHANGES (applied; 0001 amended in place)
+
+0001 has never been merged or applied outside dev/test, so it was amended in
+place instead of adding 0002 (orchestrator decision). Any local dev database
+migrated with the earlier 0001 will now fail `CHECKSUM_MISMATCH` and must be
+recreated (that is the intended behaviour of the checksum ledger).
+
+- **H1 harness.** Pool and per-client `'error'` listeners for the whole client
+  life; `close()` bounds `pool.end()` (5 s; it never resolves with a leaked
+  client), waits (≤10 s) for `pg_stat_activity` to show no backend on the DB,
+  then `DROP DATABASE … WITH (FORCE)`.
+- **H2 immutability (DB-enforced, applies to every role incl. superuser).**
+  - `child_of_staged_batch` BEFORE INSERT/UPDATE/DELETE on `cost_facts`,
+    `ingest_artifacts`, `ingest_validation_errors`: `SELECT status … FOR SHARE`
+    of the parent batch; writes allowed only when `staged` (RT001). Decision:
+    DELETE of a quarantined batch's rows is NOT allowed (D7: evidence and error
+    detail of a quarantined revision are retained; no deletion code this cycle).
+    Not-found parent ⇒ the trigger lets the composite FK / RLS reject the row
+    with its own error.
+  - `refuse_truncate` BEFORE TRUNCATE on facts, artifacts, validation errors,
+    batches, publications (RT001).
+  - `batch_lifecycle` BEFORE INSERT/UPDATE/DELETE on `ingest_batches` (RT002):
+    INSERT must be `staged`; DELETE only `staged`; identity columns (tenant, id,
+    source, period, artifact-set fingerprint, created_at) never change; a
+    staged batch may change data and go to `published` or `quarantined`; for a
+    non-staged batch every column except status/published_at/superseded_at is
+    frozen and the only edges are published→superseded and
+    superseded→published; exact no-op updates are allowed. Quarantined is terminal.
+  - `publication_consistency` DEFERRABLE INITIALLY DEFERRED constraint trigger
+    on `period_publications` and `ingest_batches`: at COMMIT, for every touched
+    (tenant, source, period), a pointer exists iff a published batch exists and
+    it names that batch (RT003). Deferred so Slice 1's publish order
+    (supersede prior → publish new → upsert pointer) and replay order
+    (supersede current → re-publish target → repoint) work in one transaction
+    (tested as ratio_worker).
+  - CHECKs: reconciled ⇒ ≥1 control and each present control equals the loaded
+    value; variance ⇒ a control exists; published/superseded ⇒ (`unverified` ⇔
+    no control). Combined with the frozen-columns rule this blocks the
+    variance→unverified→published laundering path.
+  - The view's `status = 'published'` join is kept as defence in depth. It is
+    observable only inside an uncommitted transaction (a pointer temporarily
+    naming a staged batch shows zero rows), which is what the mutation test M8
+    relies on; at COMMIT the deferred trigger makes it redundant.
+- **M1/M2 role guard (RT010)** — see §7. Tested inside rolled-back
+  transactions (`BEGIN; ALTER/GRANT …; <0001>; ROLLBACK`, `lock_timeout` 10 s),
+  so concurrent test databases never observe the dangerous state.
+- **M3 classifier** — `expand` is an allow-list; FORBIDDEN list applies in every
+  phase. DO blocks need `-- ratio:allow-do <reason>` on the line directly above
+  (0001's role DO block carries one). The body of a marked DO block is not
+  inspected — the marker is a reviewed escape hatch. `REVOKE … FROM PUBLIC` is
+  expand because releases never rely on PUBLIC privileges (GRANT TO PUBLIC is
+  forbidden). Lexical: the classifier does not parse SQL fully.
+- **M4** `abs(x) < 'Infinity'` (false for NaN in Postgres numeric ordering).
+- **M5** see §3 + threat-model row "credential holder selects another tenant".
+- **L1** ledger column `down_checksum`; drift/add/remove of a down file ⇒
+  CHECKSUM_MISMATCH. **L2** down only for RATIO_ENV ∈ {development,test,ci}
+  (trimmed, case-insensitive) and NODE_ENV ≠ production and the flag.
+  **L3** §3. **L4** §4. **L5** CLI redacts the URL, userinfo, and any
+  `password=` value (URL query, keyword DSN, quoted). **L6** fast test forbids
+  session-level tenant settings under `src/ingest`.
+- **Orchestrator additions:** `GRANT UPDATE (row_count) ON ratio.ingest_artifacts
+  TO ratio_worker` (column-level; trigger still staged-only); no purge/delete
+  path added.
+- Cost note: the child trigger does one indexed lookup + `FOR SHARE` per row;
+  Slice 1's 200k-row load should measure it (a statement-level trigger with
+  transition tables is the fallback).
