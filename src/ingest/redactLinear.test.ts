@@ -75,3 +75,34 @@ describe('worker redaction is linear on large adversarial inputs (child process,
     }, STARTUP_ALLOWANCE_MS + SIZES.length * 2 * BUDGET_MS + 5_000);
   }
 });
+
+// Absolute budgets for single steps with a large margin (linear: tens of ms;
+// super-linear: seconds to minutes), each in its own child under a hard kill:
+// the uncapped URL query rule, and literal-secret matching with a long
+// self-similar secret (every position starts an occurrence).
+const BUDGET_CHILD = path.join(__dirname, 'testing', 'redactBudgetChild.ts');
+const BUDGET_CASE_NAMES = [
+  'query rule uncapped, 2 MB a://',
+  'scrubLiterals, 4096-char self-similar secret, 2 MB text',
+  'jsonLineRedactorFor, 4096-char self-similar secret, 4000 x 4.5 KB strings',
+];
+
+describe('single-step budgets (child process, hard kill)', () => {
+  for (const name of BUDGET_CASE_NAMES) {
+    it(`${name}: < ${BUDGET_MS} ms, no secret survives`, () => {
+      const started = Date.now();
+      const r = spawnSync(TSX, [BUDGET_CHILD], {
+        env: { ...process.env, RATIO_BUDGET_CASE: name },
+        timeout: STARTUP_ALLOWANCE_MS + BUDGET_MS,
+        killSignal: 'SIGKILL',
+        encoding: 'utf8',
+        maxBuffer: 1 << 20,
+      });
+      expect(r.signal, `${name}: killed after ${Date.now() - started} ms (super-linear step)`).toBeNull();
+      expect(r.status, `${name}: child failed: ${r.stderr}`).toBe(0);
+      const m = JSON.parse(r.stdout.trim()) as { ms: number; leaked: string[] };
+      expect(m.ms).toBeLessThan(BUDGET_MS);
+      expect(m.leaked).toEqual([]);
+    }, STARTUP_ALLOWANCE_MS + BUDGET_MS + 5_000);
+  }
+});

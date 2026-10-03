@@ -136,6 +136,8 @@ describe('overlapping secrets (all three entry points)', () => {
     { name: 'three-way overlap', secrets: ['one;two', 'two;three;four', 'four;five'], text: 'k=one;two;three;four;five end' },
     { name: 'secret that is a substring of another', secrets: ['topsecret99', 'secret'], text: 'topsecret99 and secret and xsecretx' },
     { name: 'self-overlapping occurrences', secrets: ['abab'], text: 'zz ababab zz' },
+    // A non-overlapping scan (indexOf(p, i + p.length)) would leave 'abc' here (mutation S3).
+    { name: 'self-overlapping occurrences, longer period', secrets: ['abcabc'], text: 'zz abcabcabc zz' },
   ];
   /** Every substring of >= 3 characters of every secret (none occurs in '[redacted]' or the surrounding text). */
   const remainders = (secrets: string[]) => {

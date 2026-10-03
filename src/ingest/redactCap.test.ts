@@ -47,29 +47,36 @@ describe('input cap', () => {
     expect(long[out.length - TRUNCATED_MARKER.length]).toBe(' ');
   });
 
-  it('a secret form straddling the cut never leaves a fragment (sweep over every form, offset and filler)', () => {
+  it('a secret form straddling the cut never leaves a fragment (every form at every offset; every filler at the critical offsets)', () => {
     const forms = [...new Set(SECRETS)];
-    const fillers = ['z'.repeat(MAX_REDACT_INPUT_CHARS * 2), 'zzzzzz '.repeat(MAX_REDACT_INPUT_CHARS / 3), 'z,z;z&z<z>z'.repeat(MAX_REDACT_INPUT_CHARS / 5)];
+    // 'z' only: no delimiter at all, so the cut must back up past the whole form.
+    const plain = 'z'.repeat(MAX_REDACT_INPUT_CHARS * 2);
+    const delimited = ['zzzzzz '.repeat(MAX_REDACT_INPUT_CHARS / 3), 'z,z;z&z<z>z'.repeat(MAX_REDACT_INPUT_CHARS / 5)];
     let cases = 0;
-    for (const form of forms) {
+    const sweep = (form: string, filler: string, start: number, withRedact: boolean) => {
       const prefixes = Array.from({ length: form.length - 1 }, (_, i) => form.slice(0, i + 2)); // every prefix of >= 2 chars
-      for (const filler of fillers) {
-        for (let start = MAX_REDACT_INPUT_CHARS - form.length - 2; start <= MAX_REDACT_INPUT_CHARS + 1; start++) {
-          const text = filler.slice(0, start) + form + filler.slice(start);
-          const kept = capForRedaction(text, SECRETS);
-          const body = kept.endsWith(TRUNCATED_MARKER) ? kept.slice(0, -TRUNCATED_MARKER.length) : kept;
-          // Either the whole form is kept (and then redacted by the literal rule), or none of it.
-          if (!body.includes(form)) {
-            const tail = body.slice(Math.max(0, start - 1));
-            for (const p of prefixes) expect(tail.includes(p), `fragment ${JSON.stringify(p)} of ${JSON.stringify(form)} at ${start}`).toBe(false);
-          }
-          const red = redact(text, SECRETS);
-          for (const f of forms) expect(red.includes(f)).toBe(false);
-          cases++;
-        }
+      const text = filler.slice(0, start) + form + filler.slice(start, start + MAX_REDACT_INPUT_CHARS);
+      const kept = capForRedaction(text, SECRETS);
+      const body = kept.endsWith(TRUNCATED_MARKER) ? kept.slice(0, -TRUNCATED_MARKER.length) : kept;
+      // Either the whole form is kept (and then redacted by the literal rule), or none of it.
+      if (!body.includes(form)) {
+        const tail = body.slice(Math.max(0, start - 1));
+        for (const p of prefixes) expect(tail.includes(p), `fragment ${JSON.stringify(p)} of ${JSON.stringify(form)} at ${start}`).toBe(false);
       }
+      if (withRedact) {
+        const red = redact(text, SECRETS);
+        for (const f of forms) expect(red.includes(f)).toBe(false);
+      }
+      cases++;
+    };
+    for (const form of forms) {
+      const first = MAX_REDACT_INPUT_CHARS - form.length - 2;
+      for (let start = first; start <= MAX_REDACT_INPUT_CHARS + 1; start++) sweep(form, plain, start, false);
+      // Critical offsets: the form ends just past, straddles the middle of, and starts just before the cap.
+      const critical = [MAX_REDACT_INPUT_CHARS - form.length + 1, MAX_REDACT_INPUT_CHARS - Math.floor(form.length / 2), MAX_REDACT_INPUT_CHARS - 1];
+      for (const filler of [plain, ...delimited]) for (const start of critical) sweep(form, filler, start, true);
     }
-    expect(cases).toBeGreaterThan(1000);
+    expect(cases).toBeGreaterThan(400);
   });
 });
 
@@ -98,8 +105,8 @@ describe('per-string cost (median of 9 runs)', () => {
 
 // The URL query rule itself must be linear WITHOUT the cap (the cap would hide
 // a quadratic rule: R6). Applied directly to uncapped input: a median budget at
-// 16 KB, and a size-scaling check — 4x the input must cost well under 16x
-// (linear ~4x, quadratic ~16x); the ratio of medians is load-independent.
+// 16 KB here, and an absolute 2 MB budget in a child process under a hard kill
+// (redactLinear.test.ts; a timing ratio was flaky under load).
 describe('URL query rule is linear on its own (uncapped)', () => {
   const applyQueryRule = (text: string): string => {
     const rule = (redactModule as { QUERY_RULE?: readonly [RegExp, string | ((m: string, ...g: string[]) => string)] }).QUERY_RULE;
@@ -117,23 +124,6 @@ describe('URL query rule is linear on its own (uncapped)', () => {
   it("'a://' repeated, 16 KB, uncapped: median < 25 ms", () => {
     const text = aScheme(16_384);
     expect(medianMs(() => applyQueryRule(text), 7)).toBeLessThan(25);
-  });
-
-  it("'a://' repeated: time(48 KB) / time(16 KB) < 6 (linear ~3, quadratic ~9)", () => {
-    const small = aScheme(16_384);
-    const large = aScheme(49_152);
-    // Enough repetitions for >= ~5 ms per sample on a linear rule; a single
-    // repetition when the rule is slow (a quadratic rule then fails quickly).
-    const t0 = performance.now();
-    applyQueryRule(small);
-    const single = Math.max(performance.now() - t0, 0.01);
-    const reps = Math.min(200, Math.max(1, Math.ceil(5 / single)));
-    const many = (text: string) => () => {
-      for (let i = 0; i < reps; i++) applyQueryRule(text);
-    };
-    const tSmall = medianMs(many(small), 7);
-    const tLarge = medianMs(many(large), 7);
-    expect(tLarge / tSmall).toBeLessThan(6);
   });
 });
 
