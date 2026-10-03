@@ -109,17 +109,17 @@ an output, not an input.
 `/exception-approve <sha>` after the independent review evidence is recorded.
 A restricted PR can only merge when both of the following hold:
 
-- There is a PR comment whose trimmed body is exactly
+- There is a PR comment whose **first line** (trimmed) is exactly
   `/exception-approve <40-hex SHA>`, where the SHA is the PR's current head.
-  The comment must be:
+  Later lines are free text: put the link to the challenger review evidence
+  there. The comment must be:
   - by a user with **admin or maintain** permission (checked with
     `getCollaboratorPermissionLevel`, using `role_name` or `permission`);
-  - not edited (`updated_at === created_at`; edited comments are ignored);
+  - never edited (`updated_at === created_at`);
   - not bot-authored.
 
-  All comments are read, across pages. The latest qualifying command by id
-  wins. A later `/exception-revoke <sha>` by an admin/maintain user revokes
-  the approval for that SHA.
+  All comments are read, across pages.
+- No revocation exists for that SHA (see "Sticky revocation" below).
 - Every non-risk condition holds: genuine CI on every qualifying run, a Copilot
   review on the head, zero unresolved threads, a same-repo PR by an
   OWNER/MEMBER/COLLABORATOR, no other open PR with the same head, not a draft,
@@ -127,10 +127,46 @@ A restricted PR can only merge when both of the following hold:
 
 No timestamps are compared. The approval binds to content (the commit SHA),
 so a new head simply has no approval. A force-push back to a previously
-approved SHA is approved again, because it is the same reviewed content. Posting
-a comment triggers an immediate re-evaluation (`issue_comment`). The workflow
-never enables auto-merge for restricted PRs; merge manually once the status is
-green.
+approved SHA is approved again, unless that SHA was revoked, because it is the
+same reviewed content. The workflow never enables auto-merge for restricted
+PRs; merge manually once the status is green.
+
+**Sticky revocation.** Writers can edit or delete other users' comments, so a
+revoke comment alone is not durable. Each of these counts as a revocation of
+the SHA it names, when the command comes from an admin/maintain user:
+
+- a `/exception-revoke <sha>` comment;
+- an approve comment naming the head that has been **edited**;
+- the original body of an admin/maintain command comment that the triggering
+  `issue_comment` event **edited or deleted**. The body is taken from
+  `changes.body.from`, or from the deleted comment.
+
+The first evaluation that sees a revocation posts a `failure` commit status,
+context `Governance · exception revoked`, on that SHA. Its description is
+"exception revoked by @user in comment <id>". Statuses cannot be deleted. From
+then on, approval for that SHA is permanently refused, whatever happens to the
+comments.
+
+Only revocation statuses created by `github-actions[bot]` are honoured, and
+that context is excluded from the generic "every status is success" rule. A
+writer therefore cannot block a PR by forging a revocation status. Any other
+failing status they post still blocks, just as a failing CI run would.
+
+Residual risk: a revoke comment that is edited or deleted before any
+evaluation has run is still caught, through the edited/deleted event's old
+body. It would be lost only if that event's workflow run also failed. The
+30-minute sweep cannot recover a deleted revoke.
+
+**When evaluation runs on comments.** `issue_comment` events (`created`,
+`edited`, `deleted`) re-evaluate the PR immediately. The `targets` and
+`merge-eligibility` jobs only run when:
+
+- the issue is a PR;
+- the comment body, or for an edit its previous body, starts with
+  `/exception-`;
+- the comment author's association is OWNER, MEMBER or COLLABORATOR.
+
+Other comments are ignored. Every other trigger is unaffected.
 
 **Who approves.** The owner has delegated merging restricted code, including
 migrations, deployment and retention-class code, to the orchestrator.

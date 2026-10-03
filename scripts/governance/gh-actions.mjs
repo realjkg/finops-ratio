@@ -5,7 +5,7 @@
 import { classify } from './classify-risk.mjs';
 import {
   decideEligibility, decideMergeStatus, evaluateExceptionApproval, parseExceptionCommand, outsiderReason,
-  DEFAULT_CONFIG, ELIGIBILITY_CONTEXT,
+  DEFAULT_CONFIG, ELIGIBILITY_CONTEXT, REVOKED_CONTEXT, ACTIONS_BOT_LOGIN,
 } from './eligibility.mjs';
 import { REPORT_MARKER, buildReport, desiredLabels, labelChanges } from './report.mjs';
 
@@ -207,7 +207,47 @@ async function unresolvedThreadCount(github, repo, number) {
 }
 
 /** Gather everything decideEligibility needs for one PR. */
-export async function gatherState(github, repo, number) {
+/** Sticky revocation statuses on a SHA, honoured only from the Actions bot. */
+async function actionsRevocations(github, repo, sha) {
+  const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, { ...repo, ref: sha, per_page: 100 });
+  return statuses.filter((st) => st.context === REVOKED_CONTEXT && st.creator?.login === ACTIONS_BOT_LOGIN);
+}
+
+/**
+ * Record each revocation as a sticky failure status on the SHA it names
+ * (once per SHA): statuses cannot be deleted, so the revocation survives the
+ * revoke comment being edited or deleted later.
+ */
+export async function recordRevocations(github, repo, revocations, known = {}) {
+  const done = new Set();
+  for (const r of revocations ?? []) {
+    if (done.has(r.sha)) continue;
+    done.add(r.sha);
+    const existing = known[r.sha] ?? (await actionsRevocations(github, repo, r.sha));
+    if (existing.length) continue;
+    await github.rest.repos.createCommitStatus({
+      ...repo,
+      sha: r.sha,
+      state: 'failure',
+      context: REVOKED_CONTEXT,
+      description: `exception revoked by @${r.login} in comment ${r.commentId}`.slice(0, 140),
+    });
+  }
+}
+
+/**
+ * For an issue_comment edited/deleted event on this PR, the comment's ORIGINAL
+ * body (edited: changes.body.from; deleted: comment.body) — so an admin's
+ * command that is edited away or deleted still counts as a revocation.
+ */
+export function eventCommentFor(payload, number) {
+  if (!payload?.comment || payload?.issue?.number !== number) return undefined;
+  if (payload.action === 'edited') return { id: payload.comment.id, body: payload.changes?.body?.from, user: payload.comment.user };
+  if (payload.action === 'deleted') return { id: payload.comment.id, body: payload.comment.body, user: payload.comment.user };
+  return undefined;
+}
+
+export async function gatherState(github, repo, number, { eventComment } = {}) {
   const { data: pr } = await github.rest.pulls.get({ ...repo, pull_number: number });
   const headSha = pr.head.sha;
   const changeSet = await attachModes(github, repo, headSha, await fetchChangeSet(github, repo, pr));
@@ -252,15 +292,15 @@ export async function gatherState(github, repo, number) {
   // Unknown (API error) → null → decideEligibility fails closed.
   const unresolvedThreads = await unresolvedThreadCount(github, repo, number).catch(() => null);
 
-  // Exception approval (restricted PRs only): SHA-bound approval comments.
-  // Permission is looked up only for authors of well-formed, unedited, non-bot
-  // commands naming this head. Any API failure ⇒ not approved (fail closed).
+  // Exception approval (restricted PRs only): SHA-bound approval comments with
+  // sticky revocation. Permission is looked up only for authors of well-formed
+  // non-bot commands. Any API failure ⇒ not approved (fail closed).
   let exception;
   if (fresh.risk !== 'low') {
     try {
       const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: number, per_page: 100 });
-      const authors = [...new Set(comments
-        .filter((c) => c.user?.type !== 'Bot' && c.updated_at === c.created_at && parseExceptionCommand(c.body)?.sha === headSha.toLowerCase())
+      const authors = [...new Set([...comments, ...(eventComment ? [eventComment] : [])]
+        .filter((c) => c.user?.type !== 'Bot' && parseExceptionCommand(c.body))
         .map((c) => c.user?.login)
         .filter(Boolean))];
       const roles = {};
@@ -268,7 +308,9 @@ export async function gatherState(github, repo, number) {
         const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ ...repo, username });
         roles[username] = { permission: data.permission, role_name: data.role_name };
       }
-      exception = evaluateExceptionApproval({ comments, roles, headSha });
+      const revokedStatuses = await actionsRevocations(github, repo, headSha);
+      exception = evaluateExceptionApproval({ comments, roles, headSha, revokedStatuses, eventComment });
+      await recordRevocations(github, repo, exception.revocations, { [headSha.toLowerCase()]: revokedStatuses });
     } catch (e) {
       exception = { approved: false, reason: `Could not verify exception approvals (${e.status ? `HTTP ${e.status}` : e.message}).` };
     }
@@ -408,7 +450,9 @@ export async function runEligibility({ github, context, core, numbers }) {
   let errors = 0;
   for (const number of targets) {
     try {
-      const { raw, latest, fresh, moved, state } = await gatherState(github, repo, number);
+      const { raw, latest, fresh, moved, state } = await gatherState(github, repo, number, {
+        eventComment: eventCommentFor(context.payload, number),
+      });
       if (moved) {
         // Apply an ineligible decision first (never leave auto-merge armed on a
         // head we did not evaluate), mark the new head pending, then defer.

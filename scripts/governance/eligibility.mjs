@@ -7,6 +7,14 @@ export const CI_CHECK_NAME = 'Lint · Typecheck · Test · Build';
 /** Commit status posted by the eligibility job; required by branch protection. */
 export const ELIGIBILITY_CONTEXT = 'Governance · merge eligibility';
 /**
+ * Sticky revocation marker: a failure status the eligibility job posts on a SHA
+ * once a valid revoke for it is seen. Statuses cannot be deleted, so deleting or
+ * editing the revoke comment later cannot revive the approval. Only statuses
+ * created by the GitHub Actions bot are honoured.
+ */
+export const REVOKED_CONTEXT = 'Governance · exception revoked';
+export const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
+/**
  * Exception path for restricted PRs: an unedited, non-bot PR comment whose
  * trimmed body is exactly `/exception-approve <40-hex head SHA>` (or
  * `/exception-revoke <sha>`) by an admin/maintain user.
@@ -160,7 +168,9 @@ function collectReasons(state, config) {
   }
   for (const s of state?.statuses ?? []) {
     // Our own eligibility status is an OUTPUT of this decision, not an input.
-    if (s.context === ELIGIBILITY_CONTEXT) continue;
+    // The revocation marker is handled by the exception logic (Actions bot only),
+    // so a forged one cannot block a PR through this generic rule either.
+    if (s.context === ELIGIBILITY_CONTEXT || s.context === REVOKED_CONTEXT) continue;
     if (s.state !== 'success') reasons.push(`Commit status "${s.context}" is ${s.state}.`);
   }
 
@@ -182,46 +192,76 @@ function collectReasons(state, config) {
 
 const roleOf = (r) => (r ? (APPROVER_ROLES.has(r.role_name) ? r.role_name : r.permission === 'admin' ? 'admin' : r.role_name ?? r.permission) : undefined);
 
-/** Parse an exception command; null unless the trimmed body matches exactly. */
+/**
+ * Parse an exception command from the FIRST line of a comment (trimmed); null
+ * unless that line matches exactly. Later lines are free text (evidence link).
+ */
 export function parseExceptionCommand(body) {
-  const m = EXCEPTION_COMMAND.exec(String(body ?? '').trim());
+  const first = String(body ?? '').trim().split(/\r?\n/)[0].trim();
+  const m = EXCEPTION_COMMAND.exec(first);
   return m ? { action: m[1], sha: m[2].toLowerCase() } : null;
 }
 
 /**
- * SHA-bound exception approval for a restricted PR. Only comments that
- *   - parse exactly as `/exception-approve <sha>` or `/exception-revoke <sha>`,
- *   - were never edited (updated_at === created_at),
- *   - are not bot-authored,
- *   - come from a user with admin or maintain permission,
- *   - name the PR's CURRENT head SHA,
- * count; the latest such comment (by id) decides. No timestamps are compared:
- * an approval binds to the exact content (commit SHA) it names, so a new head
- * simply has no approval.
+ * SHA-bound exception approval for a restricted PR.
+ *
+ * Commands are read from the first line of non-bot comments by admin/maintain
+ * users (`/exception-approve <sha>` / `/exception-revoke <sha>`).
+ * - Approval: an UNEDITED approve naming the PR's current head SHA.
+ * - Revocations (reported for sticky recording, any SHA they name):
+ *   a revoke command; an EDITED approve naming the head; and the original body
+ *   of a command comment that the triggering event edited or deleted.
+ * - Any revocation for the head, or a sticky revocation status on the head
+ *   (`revokedStatuses`, Actions bot only), refuses approval permanently.
+ * No timestamps are compared: an approval binds to the commit SHA it names.
  * @param {{ comments: Array<{ id: number, body: string, user?: { login: string, type?: string },
  *           created_at?: string, updated_at?: string }>,
  *           roles: Record<string, { permission?: string, role_name?: string }>,
- *           headSha: string }} input
+ *           headSha: string,
+ *           revokedStatuses?: Array<{ description?: string }>,
+ *           eventComment?: { id: number, body: string, user?: { login: string, type?: string } } }} input
  */
-export function evaluateExceptionApproval({ comments, roles, headSha }) {
+export function evaluateExceptionApproval({ comments, roles, headSha, revokedStatuses = [], eventComment }) {
   const head = String(headSha ?? '').toLowerCase();
+  const short = head.slice(0, 7);
   const command = `/exception-approve ${head || '<head-sha>'}`;
-  const decisive = (comments ?? [])
-    .map((c) => ({ c, cmd: parseExceptionCommand(c.body) }))
-    .filter(({ c, cmd }) => cmd
-      && cmd.sha === head
-      && c.updated_at === c.created_at
-      && c.user?.type !== 'Bot'
-      && APPROVER_ROLES.has(roleOf(roles?.[c.user?.login])))
-    .sort((a, b) => a.c.id - b.c.id);
-  const last = decisive[decisive.length - 1];
+  const authorized = (c) => c?.user?.type !== 'Bot' && APPROVER_ROLES.has(roleOf(roles?.[c?.user?.login]));
+
+  const revocations = [];
+  const seen = new Set();
+  const revoke = (sha, login, commentId, why) => {
+    const k = `${sha}\0${commentId}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    revocations.push({ sha, login, commentId, why });
+  };
+  const approvals = [];
+  for (const c of [...(comments ?? [])].sort((a, b) => a.id - b.id)) {
+    const cmd = parseExceptionCommand(c.body);
+    if (!cmd || !authorized(c)) continue;
+    const edited = c.updated_at !== c.created_at;
+    if (cmd.action === 'revoke') revoke(cmd.sha, c.user.login, c.id, 'revoke');
+    else if (edited) {
+      if (cmd.sha === head) revoke(cmd.sha, c.user.login, c.id, 'edited');
+    } else if (cmd.sha === head) approvals.push(c);
+  }
+  if (eventComment && authorized(eventComment)) {
+    const cmd = parseExceptionCommand(eventComment.body);
+    if (cmd) revoke(cmd.sha, eventComment.user.login, eventComment.id, 'edited-or-deleted');
+  }
+
+  if (revokedStatuses.length) {
+    return { approved: false, revocations, reason: `Exception for ${short} permanently revoked (${revokedStatuses[0].description ?? 'revocation status'}).` };
+  }
+  const headRevoke = revocations.find((r) => r.sha === head);
+  if (headRevoke) {
+    return { approved: false, revocations, reason: `Exception for ${short} revoked by @${headRevoke.login} in comment ${headRevoke.commentId}; a new head needs a new approval.` };
+  }
+  const last = approvals[approvals.length - 1];
   if (!last) {
-    return { approved: false, reason: `Restricted: needs \`${command}\` by an admin/maintain user (none found).` };
+    return { approved: false, revocations, reason: `Restricted: needs \`${command}\` by an admin/maintain user (none found).` };
   }
-  if (last.cmd.action === 'revoke') {
-    return { approved: false, reason: `Exception for ${head.slice(0, 7)} revoked by @${last.c.user.login}.` };
-  }
-  return { approved: true, approver: last.c.user.login, commentId: last.c.id, reason: `Exception approved by @${last.c.user.login} for ${head.slice(0, 7)}.` };
+  return { approved: true, approver: last.user.login, commentId: last.id, revocations, reason: `Exception approved by @${last.user.login} for ${short}.` };
 }
 
 /**

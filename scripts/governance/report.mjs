@@ -73,10 +73,10 @@ export function buildReport(result, ctx = {}) {
   const full = /^[0-9a-f]{40}$/i.test(String(ctx.headSha ?? '')) ? String(ctx.headSha).toLowerCase() : '<head-sha>';
   lines.push('', '#### Exception queue', '');
   lines.push('This PR can only merge through the exception path. The required status `Governance · merge eligibility` stays `failure` until both of the following hold:');
-  lines.push(`- A user with **admin or maintain** permission (the orchestrator or owner) posts a PR comment whose whole body is \`/exception-approve ${full}\`, after the independent challenger review evidence is recorded in the PR. The comment should also link that challenger review evidence: the gate does not parse the link, but it is the audit trail.`);
+  lines.push(`- A user with **admin or maintain** permission (the orchestrator or owner) posts a PR comment whose first line is exactly \`/exception-approve ${full}\`, after the independent challenger review evidence is recorded in the PR. Put a link to that challenger review evidence on the following lines: the gate reads only the first line, but the link is the audit trail.`);
   lines.push('- Every non-risk gate passes: genuine CI on every run, a Copilot review on the head, zero unresolved threads, a same-repo PR, no shared head, not a draft, base `main`.');
   lines.push('');
-  lines.push('The approval binds to that exact commit SHA. A new head needs a new approval. Edited comments are ignored, and `/exception-revoke <sha>` revokes an approval. The workflow never enables auto-merge for restricted PRs; merge manually once the status is green.');
+  lines.push('The approval binds to that exact commit SHA. A new head needs a new approval. `/exception-revoke <sha>` revokes an approval, and so does editing or deleting an admin/maintain command comment. Revocation is permanent for that SHA: it is recorded as a `Governance · exception revoked` status, which cannot be deleted. The workflow never enables auto-merge for restricted PRs; merge manually once the status is green.');
   lines.push('', '> The non-delegable human gate is the **production environment** (deploys, production data deletion), not this merge.');
   lines.push('', ...outsider, FRESH_REVIEW_NOTE, ...prot);
   return `${lines.join('\n')}\n`;
