@@ -63,43 +63,98 @@ const safeDecode = (v: string): string => {
   }
 };
 
+/** Raw configured secrets (URL, userinfo, password parameters) found in the connection string. */
+function configuredSecrets(url: string | undefined): string[] {
+  const secrets: string[] = [];
+  if (!url) return secrets;
+  secrets.push(url);
+  try {
+    const u = new URL(url);
+    if (u.password) secrets.push(u.password, safeDecode(u.password));
+    if (u.username && u.username.length >= 3) secrets.push(u.username, safeDecode(u.username));
+    for (const [k, v] of u.searchParams) if (/pass/i.test(k) && v) secrets.push(v, encodeURIComponent(v));
+  } catch {
+    // not a URL (e.g. keyword DSN): handled below
+  }
+  for (const m of url.matchAll(/(?:^|[\s?&;])[a-z_]*pass[a-z_]*\s*=\s*(?:'((?:[^'\\]|\\.)*)'|([^\s&;]+))/gi)) {
+    const v = m[1] ?? m[2];
+    if (v) secrets.push(v, safeDecode(v));
+  }
+  return secrets;
+}
+
+/**
+ * Every form a secret can take in our output: raw, URL-decoded, URL-encoded,
+ * and the JSON-escaped form of each (what JSON.stringify makes of a quote,
+ * backslash, newline or control character inside it).
+ */
+function secretForms(raw: string[]): string[] {
+  const forms = new Set<string>();
+  for (const s of raw) {
+    for (const v of [s, safeDecode(s), encodeURIComponent(s)]) {
+      forms.add(v);
+      forms.add(JSON.stringify(v).slice(1, -1));
+    }
+  }
+  return [...forms].filter((x) => x.length > 0).sort((a, b) => b.length - a.length);
+}
+
 /**
  * Removes the connection string and its credentials from any text we might
  * print: the literal URL, URL userinfo, `password=` in a URL query string or
- * a keyword DSN (quoted or not), and — independent of the configured URL —
- * any `password=<value>` appearing in the text.
+ * a keyword DSN (quoted or not), in raw, URL-decoded, URL-encoded and
+ * JSON-escaped form — and, independent of the configured URL, any
+ * `password=<value>` appearing in the text.
  */
 export function redactor(url: string | undefined): (s: string) => string {
-  const secrets: string[] = [];
-  if (url) {
-    secrets.push(url);
-    try {
-      const u = new URL(url);
-      if (u.password) secrets.push(u.password, safeDecode(u.password));
-      if (u.username && u.username.length >= 3) secrets.push(u.username, safeDecode(u.username));
-      for (const [k, v] of u.searchParams) if (/pass/i.test(k) && v) secrets.push(v, encodeURIComponent(v));
-    } catch {
-      // not a URL (e.g. keyword DSN): handled below
-    }
-    for (const m of url.matchAll(/(?:^|[\s?&;])[a-z_]*pass[a-z_]*\s*=\s*(?:'((?:[^'\\]|\\.)*)'|([^\s&;]+))/gi)) {
-      const v = m[1] ?? m[2];
-      if (v) secrets.push(v, safeDecode(v));
-    }
-  }
-  const unique = [...new Set(secrets.filter((x) => x.length > 0))].sort((a, b) => b.length - a.length);
+  const forms = secretForms(configuredSecrets(url));
   return (s: string) => {
-    let out = unique.reduce((acc, sec) => acc.split(sec).join('[redacted]'), s);
+    let out = forms.reduce((acc, sec) => acc.split(sec).join('[redacted]'), s);
     out = out.replace(/(password\s*=\s*)('(?:[^'\\]|\\.)*'|[^\s&;"]+)/gi, '$1[redacted]');
     return out;
   };
 }
 
+/**
+ * Deep copy of `value` with `redact` applied to every string (and object
+ * key), walking plain objects, arrays and Errors (message, code, cause).
+ * Runs BEFORE serialization so escaping can never hide a secret from it.
+ */
+export function redactDeep(value: unknown, redact: (s: string) => string, seen: WeakSet<object> = new WeakSet()): unknown {
+  if (typeof value === 'string') return redact(value);
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[circular]';
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((v) => redactDeep(v, redact, seen));
+  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Error) {
+    const e = value as Error & { code?: unknown; cause?: unknown };
+    const out: Record<string, unknown> = { name: e.name, message: redact(e.message) };
+    if (e.code !== undefined) out.code = redactDeep(e.code, redact, seen);
+    if (e.cause !== undefined) out.cause = redactDeep(e.cause, redact, seen);
+    return out;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) out[redact(k)] = redactDeep(v, redact, seen);
+  return out;
+}
+
+/**
+ * The ONE way the CLI turns a value into an output line: redact every string
+ * before JSON.stringify, then a final pass over the serialized text as a
+ * backstop (the forms list includes JSON-escaped secrets).
+ */
+export function jsonLineRedactor(url: string | undefined): (value: unknown) => string {
+  const redact = redactor(url);
+  return (value: unknown) => redact(JSON.stringify(redactDeep(value, redact)));
+}
+
 export async function main(argv: string[], env: Env, io: CliIO): Promise<number> {
-  const redact = redactor(env.RATIO_MIGRATE_DATABASE_URL);
+  const line = jsonLineRedactor(env.RATIO_MIGRATE_DATABASE_URL);
   const emit = (level: 'info' | 'error', event: string, fields: Record<string, unknown> = {}) => {
-    const line = redact(JSON.stringify({ ts: new Date().toISOString(), level, event, ...fields }));
-    if (level === 'error') io.err(line);
-    else io.out(line);
+    const text = line({ ts: new Date().toISOString(), level, event, ...fields });
+    if (level === 'error') io.err(text);
+    else io.out(text);
   };
 
   const [command, ...rest] = argv;
@@ -133,7 +188,7 @@ export async function main(argv: string[], env: Env, io: CliIO): Promise<number>
     await client.connect();
     if (args.status) {
       const status = await migrationStatus(client);
-      if (args.json) io.out(redact(JSON.stringify(status)));
+      if (args.json) io.out(line(status));
       else emit('info', 'migrate.status', { ...status });
       return status.matches ? EXIT_OK : EXIT_STATUS_MISMATCH;
     }
