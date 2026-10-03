@@ -6,7 +6,8 @@
 // tampering is reported as EVIDENCE_INTEGRITY, never as a data problem.
 import crypto from 'crypto';
 import zlib from 'zlib';
-import { Transform, type Readable } from 'stream';
+import { Transform, Writable, type Readable } from 'stream';
+import { pipeline as streamPipeline } from 'stream/promises';
 import { parse, type Parser } from 'csv-parse';
 import type { Pool } from 'pg';
 import { IngestError } from '../errors';
@@ -136,9 +137,47 @@ function csvErrorRow(e: unknown, sha: string, recordsSoFar: number): ValidationE
   };
 }
 
+/** Streams and re-hashes an evidence object without parsing it (EVIDENCE_INTEGRITY on mismatch). */
+async function verifyEvidenceOnly(ctx: LoadContext, art: LoadArtifact): Promise<void> {
+  let raw: Readable;
+  try {
+    raw = await withDeadline(ctx.evidence.open(art.evidenceKey, { signal: ctx.signal }), ctx.stallMs, 'EVIDENCE_STALLED', 'opening the evidence copy', ctx.signal);
+  } catch (e) {
+    if (ctx.signal?.aborted) throw ctx.signal.reason;
+    if (e instanceof IngestError) throw e;
+    throw new IngestError('EVIDENCE_STORE_FAILED', 'reading the evidence copy failed', { retryable: isTransientError(e), cause: e });
+  }
+  const hasher = crypto.createHash('sha256');
+  let bytes = 0;
+  const watchdog = idleWatchdog(ctx.stallMs, 'EVIDENCE_STALLED', 'the evidence copy', () => ctx.progress(), ctx.signal);
+  try {
+    await streamPipeline(
+      raw,
+      watchdog.stream,
+      new Writable({
+        write(chunk: Buffer, _enc, cb) {
+          hasher.update(chunk);
+          bytes += chunk.length;
+          cb();
+        },
+      }),
+    );
+  } catch (e) {
+    if (ctx.signal?.aborted) throw ctx.signal.reason;
+    if (e instanceof IngestError) throw e;
+    throw new IngestError('EVIDENCE_STORE_FAILED', 'reading the evidence copy failed', { retryable: isTransientError(e), cause: e });
+  }
+  if (bytes !== art.byteSize || hasher.digest('hex') !== art.sha256) {
+    throw new IngestError('EVIDENCE_INTEGRITY', `evidence object for ${art.name} does not match its recorded sha256/size`);
+  }
+}
+
 /** Loads one artifact from evidence into the staged batch, recording validation errors in `state`. */
 export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: LoadState): Promise<void> {
   if (art.format === 'unsupported') {
+    // Never parsed, but still re-hashed: the load is the authority on every artifact a
+    // new batch references (the capture's HEAD-metadata fast path relies on it).
+    await verifyEvidenceOnly(ctx, art);
     addError(state, {
       artifactSha256: art.sha256,
       rowOrdinal: null,

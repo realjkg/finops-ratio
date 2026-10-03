@@ -124,6 +124,8 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
 
   const periods: PeriodResult[] = [];
   const manifestEvidence: string[] = [];
+  /** Verifying an existing manifest object feeds progress and is under the idle watchdog. */
+  const manifestWatch = { onProgress: progress, stallMs: settings.stallTimeoutSeconds * 1000 };
   let attempts = 1;
   const stats = () =>
     redactDeep({ periods, manifestEvidence, mode: opts.mode, abandonedRuns: abandoned, discardedStagedBatches: discardedBatches }, secrets) as Record<string, unknown>;
@@ -186,7 +188,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         const manifest = listing.ok ? listing.set.manifest : listing.manifest;
         if (manifest) {
           try {
-            manifestEvidence.push(await withRetry(() => captureManifest(opts.evidence, lease.tenantId, lease.sourceId, manifest.bytes, runAbort.signal), { ...retryOpts, onRetry: onRetry(period) }));
+            manifestEvidence.push(await withRetry(() => captureManifest(opts.evidence, lease.tenantId, lease.sourceId, manifest.bytes, runAbort.signal, manifestWatch), { ...retryOpts, onRetry: onRetry(period) }));
           } catch (e) {
             if (e instanceof SimulatedCrash || (e instanceof IngestError && e.code === 'LEASE_LOST')) throw e;
             periods.push({ billingPeriod: period, outcome: 'failed', code: errorCodeOf(e), message: clean(messageOf(e)) });
@@ -228,7 +230,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
                   if (!fresh) throw new IngestError('PERIOD_NOT_FOUND', `period ${period} is no longer listed by the source`);
                   // The re-listed manifest is what the batch will be built from: evidence first (review M1).
                   const freshManifest = fresh.ok ? fresh.set.manifest : fresh.manifest;
-                  if (freshManifest) manifestEvidence.push(await captureManifest(opts.evidence, lease.tenantId, lease.sourceId, freshManifest.bytes, runAbort.signal));
+                  if (freshManifest) manifestEvidence.push(await captureManifest(opts.evidence, lease.tenantId, lease.sourceId, freshManifest.bytes, runAbort.signal, manifestWatch));
                   if (!fresh.ok) throw new IngestError(fresh.code, clean(fresh.message));
                   set = fresh.set;
                   log('period.relisted', { runId: lease.runId, period });

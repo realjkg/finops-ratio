@@ -75,9 +75,9 @@ async function committedWorkOf(c: PoolClient, sourceId: string, runId: string): 
     [sourceId, runId, runId],
   );
   const { batches, publications, checkpoint, progress, memos } = r.rows[0] as { batches: number; publications: number; checkpoint: boolean; progress: number; memos: number };
-  // A checkpoint write is data unless every write this run made was a rejection memo (round-2 L3);
-  // an unstamped (older) write counts as data.
-  const checkpointData = progress > 0 || (checkpoint && memos === 0);
+  // A checkpoint write is data unless every write this run made was a rejection memo (round-2 L3).
+  // Every write is stamped (writtenBy or rejected.runId); Slice 1 never shipped unstamped entries.
+  const checkpointData = progress > 0;
   if (!batches && !publications && !checkpointData) return { data: false, memoOnly: checkpoint && memos > 0 };
   const memoNote = memos > 0 ? ` and ${memos} rejection ${memos === 1 ? 'memo' : 'memos'}` : '';
   return {

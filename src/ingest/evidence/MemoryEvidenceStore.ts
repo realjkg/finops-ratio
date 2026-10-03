@@ -2,7 +2,7 @@
 import fs from 'fs';
 import { Readable } from 'stream';
 import { IngestError } from '../errors';
-import type { EvidenceStore } from './types';
+import type { EvidenceStore, EvidenceWriteOptions } from './types';
 
 export class MemoryEvidenceStore implements EvidenceStore {
   readonly objects = new Map<string, Buffer>();
@@ -21,14 +21,14 @@ export class MemoryEvidenceStore implements EvidenceStore {
     return 'stored';
   }
 
-  async put(key: string, filePath: string, info: { sha256: string; byteSize: number }, opts: { signal?: AbortSignal } = {}): Promise<'stored' | 'exists'> {
+  async put(key: string, filePath: string, info: { sha256: string; byteSize: number }, opts: EvidenceWriteOptions = {}): Promise<'stored' | 'exists'> {
     if (opts.signal?.aborted) throw opts.signal.reason;
     const bytes = await fs.promises.readFile(filePath);
     if (bytes.length !== info.byteSize) throw new IngestError('EVIDENCE_CONFLICT', 'local file size changed during capture');
     return this.store(key, bytes);
   }
 
-  async putBytes(key: string, bytes: Buffer, opts: { signal?: AbortSignal } = {}): Promise<'stored' | 'exists'> {
+  async putBytes(key: string, bytes: Buffer, opts: EvidenceWriteOptions = {}): Promise<'stored' | 'exists'> {
     if (opts.signal?.aborted) throw opts.signal.reason;
     return this.store(key, bytes);
   }

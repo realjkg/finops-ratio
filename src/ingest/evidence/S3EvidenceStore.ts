@@ -3,11 +3,16 @@
 // (fail loudly). No delete code exists here by design (retention, D6).
 import crypto from 'crypto';
 import fs from 'fs';
-import type { Readable } from 'stream';
+import { Writable, type Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { IngestError } from '../errors';
 import { isTransientError } from '../retry';
-import type { EvidenceStore } from './types';
+import { idleWatchdog } from '../stall';
+import type { EvidenceStore, EvidenceWriteOptions } from './types';
+
+/** User metadata carrying the object's sha256 (a claim, not proof: see put()). */
+const SHA_META = 'ratio-sha256';
 
 function evidenceError(what: string, e: unknown): IngestError {
   if (e instanceof IngestError) return e;
@@ -32,11 +37,11 @@ export class S3EvidenceStore implements EvidenceStore {
     return this.prefix + key;
   }
 
-  private async existingSize(key: string, signal: AbortSignal | undefined): Promise<number | null> {
+  private async head(key: string, signal: AbortSignal | undefined): Promise<{ size: number; sha256: string | null } | null> {
     if (signal?.aborted) throw signal.reason;
     try {
       const h = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: this.k(key) }), { abortSignal: signal });
-      return Number(h.ContentLength ?? 0);
+      return { size: Number(h.ContentLength ?? 0), sha256: h.Metadata?.[SHA_META] ?? null };
     } catch (e) {
       if (signal?.aborted) throw signal.reason;
       const status = (e as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
@@ -52,11 +57,27 @@ export class S3EvidenceStore implements EvidenceStore {
    * S3 ETag is not a content hash for multipart uploads); a mismatch fails
    * visibly and nothing is overwritten (review M1, fourth round).
    */
-  private async verifyExisting(key: string, sha256: string, signal: AbortSignal | undefined): Promise<void> {
+  private async verifyExisting(key: string, sha256: string, opts: EvidenceWriteOptions): Promise<void> {
+    const { signal, onProgress, stallMs } = opts;
     const h = crypto.createHash('sha256');
     try {
       const r = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.k(key) }), { abortSignal: signal });
-      for await (const chunk of r.Body as Readable) h.update(chunk as Buffer);
+      // A long re-hash feeds run progress (the lease keeps renewing while bytes flow) and runs
+      // under the same idle watchdog as the load: a source of bytes that goes silent is
+      // EVIDENCE_STALLED, an aborted run ends it with the abort reason (challenger round 3 L1).
+      const sink = new Writable({
+        write(chunk: Buffer, _enc, cb) {
+          h.update(chunk);
+          onProgress?.();
+          cb();
+        },
+      });
+      if (stallMs) {
+        const watchdog = idleWatchdog(stallMs, 'EVIDENCE_STALLED', 'verifying the existing evidence copy', () => onProgress?.(), signal);
+        await pipeline(r.Body as Readable, watchdog.stream, sink);
+      } else {
+        await pipeline(r.Body as Readable, sink);
+      }
     } catch (e) {
       if (signal?.aborted) throw signal.reason;
       throw evidenceError('verifying an existing evidence object', e);
@@ -66,12 +87,23 @@ export class S3EvidenceStore implements EvidenceStore {
     }
   }
 
-  async put(key: string, filePath: string, info: { sha256: string; byteSize: number }, opts: { signal?: AbortSignal } = {}): Promise<'stored' | 'exists'> {
+  /**
+   * Artifact evidence. An existing object is accepted without reading it back
+   * only when HEAD shows the expected size AND the expected ratio-sha256
+   * metadata (challenger round 3 L2). Metadata is a claim, not proof — it can
+   * be copied onto forged bytes — so this fast path is safe only because every
+   * artifact a NEW batch references is re-hashed at load (loadArtifact, all
+   * formats) before anything is staged as published or quarantined; an
+   * unchanged/superseded outcome makes no new claim about the object. Missing
+   * or different metadata: the full re-hash runs.
+   */
+  async put(key: string, filePath: string, info: { sha256: string; byteSize: number }, opts: EvidenceWriteOptions = {}): Promise<'stored' | 'exists'> {
     const signal = opts.signal;
-    const existing = await this.existingSize(key, signal);
+    const existing = await this.head(key, signal);
     if (existing !== null) {
-      if (existing !== info.byteSize) throw new IngestError('EVIDENCE_CONFLICT', 'an evidence object with this key but a different size exists');
-      await this.verifyExisting(key, info.sha256, signal);
+      if (existing.size !== info.byteSize) throw new IngestError('EVIDENCE_CONFLICT', 'an evidence object with this key but a different size exists');
+      if (existing.sha256 === info.sha256) return 'exists';
+      await this.verifyExisting(key, info.sha256, opts);
       return 'exists';
     }
     try {
@@ -82,7 +114,7 @@ export class S3EvidenceStore implements EvidenceStore {
           Body: fs.createReadStream(filePath),
           ContentLength: info.byteSize,
           ContentType: 'application/octet-stream',
-          Metadata: { 'ratio-sha256': info.sha256 },
+          Metadata: { [SHA_META]: info.sha256 },
         }),
         { abortSignal: signal }, // the run's signal tears the upload down
       );
@@ -93,16 +125,24 @@ export class S3EvidenceStore implements EvidenceStore {
     return 'stored';
   }
 
-  async putBytes(key: string, bytes: Buffer, opts: { signal?: AbortSignal } = {}): Promise<'stored' | 'exists'> {
+  /**
+   * Manifest evidence: NEVER the metadata fast path. Manifest evidence is not
+   * re-read at load, so an existing object is always re-hashed here (its
+   * metadata is still written, for operators).
+   */
+  async putBytes(key: string, bytes: Buffer, opts: EvidenceWriteOptions = {}): Promise<'stored' | 'exists'> {
     const signal = opts.signal;
-    const existing = await this.existingSize(key, signal);
+    const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+    const existing = await this.head(key, signal);
     if (existing !== null) {
-      if (existing !== bytes.length) throw new IngestError('EVIDENCE_CONFLICT', 'an evidence object with this key but a different size exists');
-      await this.verifyExisting(key, crypto.createHash('sha256').update(bytes).digest('hex'), signal);
+      if (existing.size !== bytes.length) throw new IngestError('EVIDENCE_CONFLICT', 'an evidence object with this key but a different size exists');
+      await this.verifyExisting(key, sha256, opts);
       return 'exists';
     }
     try {
-      await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: this.k(key), Body: bytes, ContentType: 'application/octet-stream' }), { abortSignal: signal });
+      await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: this.k(key), Body: bytes, ContentType: 'application/octet-stream', Metadata: { [SHA_META]: sha256 } }), {
+        abortSignal: signal,
+      });
     } catch (e) {
       if (signal?.aborted) throw signal.reason;
       throw evidenceError('storing an evidence object', e);

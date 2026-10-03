@@ -72,7 +72,7 @@ export async function captureArtifact(opts: {
     const sha256 = hash.digest('hex');
     const key = evidenceKey(opts.tenantId, opts.sourceId, sha256);
     // The upload carries the run's signal, and an abort ends the wait even if the store ignores it.
-    const stored = await raceAbort(opts.evidence.put(key, file, { sha256, byteSize: size }, { signal: opts.signal }), opts.signal);
+    const stored = await raceAbort(opts.evidence.put(key, file, { sha256, byteSize: size }, { signal: opts.signal, onProgress: opts.progress, stallMs: opts.stallMs }), opts.signal);
     return { ref: opts.ref, sha256, byteSize: size, evidenceKey: key, stored };
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => undefined);
@@ -80,9 +80,16 @@ export async function captureArtifact(opts: {
 }
 
 /** Stores manifest bytes as evidence; returns the key. */
-export async function captureManifest(evidence: EvidenceStore, tenantId: string, sourceId: string, bytes: Buffer, signal?: AbortSignal): Promise<string> {
+export async function captureManifest(
+  evidence: EvidenceStore,
+  tenantId: string,
+  sourceId: string,
+  bytes: Buffer,
+  signal?: AbortSignal,
+  watch: { onProgress?: () => void; stallMs?: number } = {},
+): Promise<string> {
   const sha = crypto.createHash('sha256').update(bytes).digest('hex');
   const key = evidenceKey(tenantId, sourceId, sha);
-  await raceAbort(evidence.putBytes(key, bytes, { signal }), signal);
+  await raceAbort(evidence.putBytes(key, bytes, { signal, ...watch }), signal);
   return key;
 }
