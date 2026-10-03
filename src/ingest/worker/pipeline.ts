@@ -85,6 +85,18 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   const progress = () => {
     lastProgress = Date.now();
   };
+  // Maximum run duration: the run aborts itself (MAX_RUN_EXCEEDED) — streams are
+  // destroyed and no further period starts — instead of streaming on until its
+  // next fenced write.
+  const runAbort = new AbortController();
+  const maxRunTimer = setTimeout(
+    () => runAbort.abort(new IngestError('MAX_RUN_EXCEEDED', `run exceeded the maximum duration of ${settings.maxRunSeconds} s`)),
+    settings.maxRunSeconds * 1000,
+  );
+  maxRunTimer.unref();
+  const checkRun = () => {
+    if (runAbort.signal.aborted) throw runAbort.signal.reason;
+  };
   const mayRenew = () => Date.now() - lastProgress < settings.stallTimeoutSeconds * 1000 && Date.now() - runStart < settings.maxRunSeconds * 1000;
   const beat = setInterval(() => {
     if (!mayRenew()) return;
@@ -98,6 +110,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   beat.unref();
   let lastBeat = Date.now();
   const maybeHeartbeat = async () => {
+    checkRun();
     if (mayRenew() && Date.now() - lastBeat >= (settings.leaseTtlSeconds * 1000) / 3) {
       await heartbeat(opts.pool, lease.tenantId, lease.runId, lease.token, settings.leaseTtlSeconds);
       lastBeat = Date.now();
@@ -114,6 +127,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
     return await runPeriods();
   } finally {
     clearInterval(beat);
+    clearTimeout(maxRunTimer);
   }
 
   async function runPeriods(): Promise<RunResult> {
@@ -158,7 +172,11 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
             continue;
           }
         }
-        if (!listing.ok) {
+        if (runAbort.signal.aborted) {
+        periods.push({ billingPeriod: period, outcome: 'failed', code: 'MAX_RUN_EXCEEDED', message: messageOf(runAbort.signal.reason) });
+        continue;
+      }
+      if (!listing.ok) {
           periods.push({ billingPeriod: period, outcome: 'failed', code: listing.code, message: clean(listing.message) });
           log('period.failed', { runId: lease.runId, period, code: listing.code });
           continue;
@@ -176,7 +194,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         }
         try {
           const result = await withRetry(
-            () => processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set: listing.set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, clean, sourceRow }),
+            () => processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set: listing.set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow }),
             { ...retryOpts, onRetry: onRetry(period) },
           );
           periods.push(result);
@@ -232,6 +250,7 @@ interface PeriodCtx {
   mode: RunMode;
   maybeHeartbeat: () => Promise<void>;
   progress: () => void;
+  signal: AbortSignal;
   clean: (s: string) => string;
   sourceRow: SourceRow;
 }
@@ -267,6 +286,7 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
         maxBytes: limits.maxArtifactBytes,
         stallMs: settings.stallTimeoutSeconds * 1000,
         progress: ctx.progress,
+        signal: ctx.signal,
       }),
     );
     ctx.progress();
@@ -348,6 +368,7 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
         maybeHeartbeat: ctx.maybeHeartbeat,
         stallMs: settings.stallTimeoutSeconds * 1000,
         progress: ctx.progress,
+        signal: ctx.signal,
       },
       { name: c.ref.name, sha256: c.sha256, byteSize: c.byteSize, evidenceKey: c.evidenceKey, format: classifyArtifact(c.ref.name) },
       state,

@@ -12,8 +12,10 @@ export interface IdleWatchdog {
   stop(): void;
 }
 
-export function idleWatchdog(ms: number, code: string, what: string, onData?: (bytes: number) => void): IdleWatchdog {
+export function idleWatchdog(ms: number, code: string, what: string, onData?: (bytes: number) => void, signal?: AbortSignal): IdleWatchdog {
   let timer: NodeJS.Timeout | undefined;
+  // An aborted run (e.g. past its maximum duration) also ends the stream, with the abort reason.
+  const onAbort = () => stream.destroy(signal!.reason instanceof Error ? signal!.reason : new IngestError('RUN_ABORTED', 'run aborted'));
   const fire = () => stream.destroy(new IngestError(code, `${what} produced no data for ${Math.round(ms / 1000)} s`, { retryable: true }));
   const arm = () => {
     if (timer) clearTimeout(timer);
@@ -22,6 +24,7 @@ export function idleWatchdog(ms: number, code: string, what: string, onData?: (b
   const stop = () => {
     if (timer) clearTimeout(timer);
     timer = undefined;
+    signal?.removeEventListener('abort', onAbort);
   };
   const stream = new Transform({
     transform(chunk: Buffer, _enc, cb) {
@@ -39,6 +42,10 @@ export function idleWatchdog(ms: number, code: string, what: string, onData?: (b
     },
   });
   arm();
+  if (signal) {
+    if (signal.aborted) queueMicrotask(onAbort);
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
   return {
     stream,
     touch: () => {

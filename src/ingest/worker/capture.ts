@@ -33,6 +33,8 @@ export async function captureArtifact(opts: {
   stallMs: number;
   /** Called whenever bytes arrive (keeps the lease renewing). */
   progress?: () => void;
+  /** Aborts the capture (e.g. maximum run duration exceeded). */
+  signal?: AbortSignal;
 }): Promise<CapturedArtifact> {
   const dir = await fs.promises.mkdtemp(path.join(opts.tmpDir, 'ratio-capture-'));
   const file = path.join(dir, 'artifact');
@@ -57,7 +59,7 @@ export async function captureArtifact(opts: {
       if (e instanceof IngestError) throw e;
       throw new IngestError('SOURCE_READ_FAILED', `reading artifact ${opts.ref.name} failed`, { retryable: isTransientError(e), cause: e });
     }
-    const watchdog = idleWatchdog(opts.stallMs, 'SOURCE_STALLED', `artifact ${opts.ref.name}`, () => opts.progress?.());
+    const watchdog = idleWatchdog(opts.stallMs, 'SOURCE_STALLED', `artifact ${opts.ref.name}`, () => opts.progress?.(), opts.signal);
     try {
       await pipeline(body, watchdog.stream, meter, fs.createWriteStream(file, { mode: 0o600 }));
     } catch (e) {

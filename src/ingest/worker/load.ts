@@ -64,6 +64,8 @@ export interface LoadContext {
   stallMs: number;
   /** Called whenever bytes or rows advance (keeps the lease renewing). */
   progress: () => void;
+  /** Aborts the parse (e.g. maximum run duration exceeded). */
+  signal?: AbortSignal;
 }
 
 export interface LoadArtifact {
@@ -176,7 +178,7 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
   });
   // Idle watchdog between the evidence stream and the parser. Slow downstream
   // inserts touch() it, so only a source of bytes that goes silent trips it.
-  const watchdog = idleWatchdog(ctx.stallMs, 'EVIDENCE_STALLED', 'the evidence copy', () => ctx.progress());
+  const watchdog = idleWatchdog(ctx.stallMs, 'EVIDENCE_STALLED', 'the evidence copy', () => ctx.progress(), ctx.signal);
   watchdog.stream.on('error', (e) => {
     raw.destroy();
     hashT.destroy(e);
