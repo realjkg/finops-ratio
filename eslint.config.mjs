@@ -9,6 +9,7 @@ export default tseslint.config(
   {
     ignores: [
       'dist/**',
+      'dist-worker/**',
       '.next/**',
       'eslint.config.js',
       '.eslintrc.cjs',   // legacy config file, not linted

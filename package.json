@@ -10,7 +10,10 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:db": "vitest run --config vitest.db.config.ts"
+    "test:db": "vitest run --config vitest.db.config.ts",
+    "worker:build": "node -e \"require('fs').rmSync('dist-worker',{recursive:true,force:true})\" && tsc -p tsconfig.worker.json && node -e \"require('fs').cpSync('src/ingest/db/migrations','dist-worker/ingest/db/migrations',{recursive:true})\"",
+    "worker": "node dist-worker/ingest/cli.js",
+    "db:migrate": "npm run -s worker:build && node dist-worker/ingest/cli.js migrate"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
