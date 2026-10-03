@@ -1,0 +1,176 @@
+// Pure FOCUS header/row validation and mapping onto cost_facts. Money and
+// quantities stay strings. Error messages name the column and the rule and
+// NEVER include the offending cell value (row contents must not leak into
+// logs, run errors or quarantine reports).
+import { isDecimalString } from './decimal';
+import { parseFocusTimestamp } from './timestamp';
+
+export const REQUIRED_COLUMNS = ['BilledCost', 'BillingCurrency', 'ChargePeriodStart', 'ChargePeriodEnd', 'BillingPeriodStart'] as const;
+
+/** FOCUS columns mapped onto dedicated cost_facts columns (everything else → extra_columns). */
+const MAPPED = new Set<string>([
+  ...REQUIRED_COLUMNS,
+  'EffectiveCost',
+  'ListCost',
+  'ContractedCost',
+  'ProviderName',
+  'ServiceName',
+  'ServiceCategory',
+  'ChargeCategory',
+  'ResourceId',
+  'SubAccountId',
+  'BillingAccountId',
+  'ConsumedQuantity',
+  'ConsumedUnit',
+  'UsageQuantity',
+  'UsageUnit',
+  'PricingQuantity',
+  'PricingUnit',
+]);
+
+const OPTIONAL_NUMERIC = ['EffectiveCost', 'ListCost', 'ContractedCost', 'ConsumedQuantity', 'UsageQuantity', 'PricingQuantity'] as const;
+
+export interface FieldError {
+  column: string | null;
+  code: string;
+  message: string;
+}
+
+export interface HeaderIndex {
+  columns: string[];
+  pos: Map<string, number>;
+}
+
+export interface FactRow {
+  chargePeriodStart: string;
+  chargePeriodEnd: string;
+  billedCost: string;
+  effectiveCost: string | null;
+  listCost: string | null;
+  contractedCost: string | null;
+  billingCurrency: string;
+  providerName: string | null;
+  serviceName: string | null;
+  serviceCategory: string | null;
+  chargeCategory: string | null;
+  resourceId: string | null;
+  subAccountId: string | null;
+  billingAccountId: string | null;
+  usageQuantity: string | null;
+  usageUnit: string | null;
+  pricingQuantity: string | null;
+  pricingUnit: string | null;
+  extraColumns: Record<string, string>;
+}
+
+const MAX_COLUMN_NAME = 256;
+
+export function indexHeader(header: string[]): { ok: true; index: HeaderIndex } | { ok: false; errors: FieldError[] } {
+  const errors: FieldError[] = [];
+  const pos = new Map<string, number>();
+  header.forEach((raw, i) => {
+    const name = raw;
+    if (name.length === 0 || name.length > MAX_COLUMN_NAME) {
+      errors.push({ column: null, code: 'INVALID_COLUMN_NAME', message: `header column ${i + 1} has an empty or over-long name` });
+      return;
+    }
+    if (pos.has(name)) {
+      errors.push({ column: name.slice(0, MAX_COLUMN_NAME), code: 'DUPLICATE_COLUMN', message: 'column appears more than once in the header' });
+      return;
+    }
+    pos.set(name, i);
+  });
+  for (const col of REQUIRED_COLUMNS) {
+    if (!pos.has(col)) errors.push({ column: col, code: 'MISSING_REQUIRED_COLUMN', message: 'required FOCUS column is missing from the header' });
+  }
+  if (errors.length) return { ok: false, errors };
+  return { ok: true, index: { columns: header, pos } };
+}
+
+function cell(values: string[], index: HeaderIndex, col: string): string | null {
+  const i = index.pos.get(col);
+  if (i === undefined) return null;
+  return values[i];
+}
+
+function optText(values: string[], index: HeaderIndex, col: string): string | null {
+  const v = cell(values, index, col);
+  return v === null || v === '' ? null : v;
+}
+
+/** Validates one data row of `billingPeriod` ('YYYY-MM-01'). */
+export function validateRow(
+  values: string[],
+  index: HeaderIndex,
+  billingPeriod: string,
+): { ok: true; fact: FactRow } | { ok: false; errors: FieldError[] } {
+  if (values.length !== index.columns.length) {
+    return { ok: false, errors: [{ column: null, code: 'COLUMN_COUNT_MISMATCH', message: `row has ${values.length} cells, header has ${index.columns.length}` }] };
+  }
+  const errors: FieldError[] = [];
+
+  const billed = cell(values, index, 'BilledCost')!;
+  if (billed === '') errors.push({ column: 'BilledCost', code: 'MISSING_VALUE', message: 'required value is empty' });
+  else if (!isDecimalString(billed)) errors.push({ column: 'BilledCost', code: 'UNPARSEABLE_NUMBER', message: 'value is not a finite decimal number' });
+
+  const numeric: Record<string, string | null> = {};
+  for (const col of OPTIONAL_NUMERIC) {
+    const v = optText(values, index, col);
+    if (v !== null && !isDecimalString(v)) errors.push({ column: col, code: 'UNPARSEABLE_NUMBER', message: 'value is not a finite decimal number' });
+    numeric[col] = v;
+  }
+
+  const currency = cell(values, index, 'BillingCurrency')!;
+  if (currency === '') errors.push({ column: 'BillingCurrency', code: 'MISSING_VALUE', message: 'required value is empty' });
+  else if (!/^[A-Z]{3}$/.test(currency)) errors.push({ column: 'BillingCurrency', code: 'INVALID_CURRENCY', message: 'value must be a three-letter ISO 4217 code in capitals' });
+
+  const ts: Record<string, ReturnType<typeof parseFocusTimestamp>> = {};
+  for (const col of ['ChargePeriodStart', 'ChargePeriodEnd', 'BillingPeriodStart'] as const) {
+    const v = cell(values, index, col)!;
+    if (v === '') {
+      errors.push({ column: col, code: 'MISSING_VALUE', message: 'required value is empty' });
+      ts[col] = null;
+      continue;
+    }
+    ts[col] = parseFocusTimestamp(v);
+    if (!ts[col]) errors.push({ column: col, code: 'UNPARSEABLE_TIMESTAMP', message: 'value is not a valid ISO 8601 date-time' });
+  }
+  const periodStartMs = Date.UTC(Number(billingPeriod.slice(0, 4)), Number(billingPeriod.slice(5, 7)) - 1, 1);
+  if (ts.BillingPeriodStart && ts.BillingPeriodStart.epochMs !== periodStartMs) {
+    errors.push({ column: 'BillingPeriodStart', code: 'PERIOD_MISMATCH', message: `row does not belong to billing period ${billingPeriod}` });
+  }
+  if (ts.ChargePeriodStart && ts.ChargePeriodEnd && ts.ChargePeriodEnd.epochMs < ts.ChargePeriodStart.epochMs) {
+    errors.push({ column: 'ChargePeriodEnd', code: 'CHARGE_PERIOD_INVERTED', message: 'ChargePeriodEnd is before ChargePeriodStart' });
+  }
+  if (errors.length) return { ok: false, errors };
+
+  const extraColumns: Record<string, string> = {};
+  index.columns.forEach((col, i) => {
+    if (!MAPPED.has(col) && values[i] !== '') extraColumns[col] = values[i];
+  });
+  const consumed = numeric.ConsumedQuantity ?? numeric.UsageQuantity;
+  return {
+    ok: true,
+    fact: {
+      chargePeriodStart: ts.ChargePeriodStart!.iso,
+      chargePeriodEnd: ts.ChargePeriodEnd!.iso,
+      billedCost: billed,
+      effectiveCost: numeric.EffectiveCost,
+      listCost: numeric.ListCost,
+      contractedCost: numeric.ContractedCost,
+      billingCurrency: currency,
+      providerName: optText(values, index, 'ProviderName'),
+      serviceName: optText(values, index, 'ServiceName'),
+      serviceCategory: optText(values, index, 'ServiceCategory'),
+      chargeCategory: optText(values, index, 'ChargeCategory'),
+      resourceId: optText(values, index, 'ResourceId'),
+      subAccountId: optText(values, index, 'SubAccountId'),
+      billingAccountId: optText(values, index, 'BillingAccountId'),
+      usageQuantity: consumed,
+      usageUnit: optText(values, index, 'ConsumedUnit') ?? optText(values, index, 'UsageUnit'),
+      pricingQuantity: numeric.PricingQuantity,
+      pricingUnit: optText(values, index, 'PricingUnit'),
+      extraColumns,
+    },
+  };
+}
