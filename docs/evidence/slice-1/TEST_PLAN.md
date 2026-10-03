@@ -213,3 +213,9 @@ concatenated/templated DDL, DO blocks and aliased/member createLogin.
 Entry fatal path: the real CLI entry crashed with a preloaded write spy must
 write its line synchronously (kills W9).
 
+Backstop (round 24): snapshot diff of all dangerous roles (any name), the
+ratio roles' own attributes and memberships, per test in the parallel phase
+and per file in the serial phase; wiring guarded by backstopWiring.test.ts.
+Spawned test children: tracked and killed in afterAll; cli.spawnCleanup.test.ts
+runs a failing fixture in a nested vitest and requires its child gone.
+

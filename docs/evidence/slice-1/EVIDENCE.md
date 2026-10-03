@@ -97,7 +97,12 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 78 | 59b3477 | test: redaction budget children run as `node --import tsx` | tests |
 | 79 | 31b33ce | test: the CLI entry's fatal path writes synchronously (preloaded write spy; kills W9) | tests |
 | 80 | 68c8456 | merge origin/main (54458f5, #44 Slice 0 at 289db6a) — clean, no content change | merge |
-| 81 | (final) | docs: evidence for this round (§23) | docs |
+| 81 | 29409ac | docs: evidence for the backstop / entry write path round (§23) | docs |
+| 82 | dabd026 | merge origin/main (8ab78e7, #52 Slice 0 round 16) — one conflict in `cli.process.test.ts` (Slice 0's `SPAWN_TIMEOUT_MS` replaces my 60_000; my reconciliation stays) | merge |
+| 83 | 4ddc714 | test: backstop evasion (snapshot diff, ratio-role attributes/memberships), backstop wiring, spawned-child cleanup (red; tsc red at this commit) | tests |
+| 84 | e882980 | fix: backstop snapshot diff + ratio-role checks, serial afterAll backstop | impl |
+| 85 | e145094 | fix: tracked test children killed in afterAll; try/finally in demo 5+6 | impl |
+| 86 | (final) | docs: evidence for this round (§24) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -1558,6 +1563,113 @@ Nothing under `src/ingest/db/` differs.
 
 **Manual end-to-end** (built CLI at 68c8456, private cluster, database
 `ratio_s1_e2e_0cee60c7`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 24. Slice 0 round 16 (#52) merged; backstop evasion and wiring; spawned-child cleanup
+
+All DB runs used the private cluster (127.0.0.1:55600), which was stopped
+and deleted afterwards.
+
+### Round 16 against Slice 1 (`dabd026`)
+
+Round 16 checks the whole membership closure of ratio-role members for any
+unreviewed privilege category and for a reachable SUPERUSER, BYPASSRLS,
+REPLICATION or server-file role, and its PUBLIC-revoke classifier is
+stricter. The first full run against Slice 1 found **nothing refused**:
+- test:db passed (26 + 4 files);
+- the manual end-to-end passed with its real worker and reader logins:
+  migrate status 3 -> 0 -> 0, doctor exit 0, `migration_version` pass;
+- Slice 1 adds no migration files.
+
+No Slice 0 check was touched.
+
+The one conflict was in `cli.process.test.ts`: Slice 0's `SPAWN_TIMEOUT_MS`
+replaces my explicit 60_000, and my reconciliation (the capped-but-redacted
+line and the writeAllSync > 2 MB flush case) stays, the latter now also with
+`SPAWN_TIMEOUT_MS`. Main still carries Slice 0's original `> 2_000_000`
+assertion, because Slice 1 is not in main yet; this branch's version is the
+reconciled one.
+
+### Backstop evasion (challenger Low 1)
+
+`testing/dangerousLoginBackstop.ts` now reports three things:
+1. **Snapshot diff, regardless of name or pid.** Any role that is dangerous
+   (SUPERUSER, BYPASSRLS, REPLICATION, CREATEROLE, CREATEDB, or one of the
+   server-file roles) or (transitively) a member of one, and was not in the
+   `beforeAll` snapshot.
+2. **This process's `ratio_test_*_<pid>_*` dangerous roles.** This catches one
+   that already existed when the snapshot was taken.
+3. **The ratio roles themselves.** Any attribute (SUPERUSER, BYPASSRLS,
+   REPLICATION, CREATEROLE, CREATEDB, LOGIN) and any membership in another
+   role. 0001 reviews none; checked on a fresh cluster.
+
+**Documented gap:** a role created and dropped within one test is not seen,
+because roles have no event triggers. Mitigations:
+- the static rule flags dangerous DDL and logins in non-serial files;
+- while such a role exists, Slice 0's catalog checks refuse any concurrent
+  file's migration or status, so it shows up as a failing neighbour;
+- tests that need dangerous roles run in the serial phase, alone.
+
+Self-tests (`worker/backstop.serial.db.test.ts`, 17 tests): a dangerous role
+with any name; a plain login in `pg_read_server_files`; each attribute on
+`ratio_worker`; `ratio_reader` granted another role.
+
+### Backstop wiring (challenger Low 2)
+
+- `vitest.db.config.ts` runs the backstop per test and per file.
+- `vitest.db.serial.config.ts` now runs it per file only
+  (`dangerousLoginBackstopSerialSetup.ts`): a serial file must leave nothing
+  behind.
+- `backstopWiring.test.ts` (fast, static) fails if either config stops
+  listing its setup file, or if a setup file does not install the backstop in
+  the right mode.
+
+### Spawned-child cleanup (challenger Low 3)
+
+- `testing/cli.ts` tracks every child spawned through `spawnCli` or
+  `trackChild`.
+- Every importing test file gets an `afterAll` that SIGKILLs whatever is
+  still running and waits for it to exit.
+- demo 5+6 also kills its paused worker in a `finally`.
+- `cli.spawnCleanup.test.ts` runs a fixture (`testing/spawnFixture`) in a
+  nested vitest. The fixture's assertion fails while its child is running;
+  the child's pid must be gone afterwards.
+
+| Mutation (`mutations24.txt`) | Result |
+|---|---|
+| M-snap: snapshot diff removed | 2 fail: any-name role; server-file member |
+| M-ratio: ratio-role check removed from the backstop | 1 fails: `ALTER ROLE ratio_worker LOGIN` (the other attributes are also caught by the snapshot diff) |
+| M-wire: serial config stops listing its setup file | wiring test fails |
+| M-spawn: `afterAll(killTrackedChildren)` removed | spawn-cleanup test fails (child outlived the file) |
+| B2: evasive BYPASSRLS role (no prefix, no pid) created at runtime in `auth.db.test.ts` | file fails: "new dangerous role since the file started: zz_evasive_…" |
+| B3: `ALTER ROLE ratio_reader CREATEDB` at runtime in `auth.db.test.ts` | file fails: the snapshot diff names ratio_reader and the dangerous logins it exposes |
+
+After the mutation runs: 0 `zz_*` or `ratio_test_*` roles left, and
+`ratio_reader` is NOCREATEDB again.
+
+### Gates at e145094
+
+| Check | Result |
+|---|---|
+| `npm ci` / prod audit | exit 0 / 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 8.6–10.9) | **3/3**, 2017 passed each; 0 failures in redactCap, redactLinear and cli.worker |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 26 files / 408 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (3 files fail at collection, 389 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at e145094, private cluster, database
+`ratio_s1_e2e_47662843`):
 - migrate status went 3 -> 0 -> 0.
 - sync published and reconciled; the second sync reported `skipped_unchanged`.
 - Reader totals equal the control totals (55 / `30.8272954899`,
