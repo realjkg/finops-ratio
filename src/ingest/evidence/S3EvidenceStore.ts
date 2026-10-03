@@ -1,6 +1,7 @@
 // Evidence bucket (D6) on any S3-compatible store. Content-addressed keys make
 // re-puts idempotent; an existing object with a different size is a conflict
 // (fail loudly). No delete code exists here by design (retention, D6).
+import crypto from 'crypto';
 import fs from 'fs';
 import type { Readable } from 'stream';
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
@@ -44,11 +45,33 @@ export class S3EvidenceStore implements EvidenceStore {
     }
   }
 
+  /**
+   * An object already stored under `key` is only accepted if its BYTES hash to
+   * `sha256` — never on size alone (a same-size corrupted or pre-seeded object
+   * would otherwise stand in for the evidence). It is streamed and hashed (the
+   * S3 ETag is not a content hash for multipart uploads); a mismatch fails
+   * visibly and nothing is overwritten (review M1, fourth round).
+   */
+  private async verifyExisting(key: string, sha256: string, signal: AbortSignal | undefined): Promise<void> {
+    const h = crypto.createHash('sha256');
+    try {
+      const r = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: this.k(key) }), { abortSignal: signal });
+      for await (const chunk of r.Body as Readable) h.update(chunk as Buffer);
+    } catch (e) {
+      if (signal?.aborted) throw signal.reason;
+      throw evidenceError('verifying an existing evidence object', e);
+    }
+    if (h.digest('hex') !== sha256) {
+      throw new IngestError('EVIDENCE_INTEGRITY_MISMATCH', 'an evidence object with this key exists but its bytes do not match the expected sha256; it was not overwritten');
+    }
+  }
+
   async put(key: string, filePath: string, info: { sha256: string; byteSize: number }, opts: { signal?: AbortSignal } = {}): Promise<'stored' | 'exists'> {
     const signal = opts.signal;
     const existing = await this.existingSize(key, signal);
     if (existing !== null) {
       if (existing !== info.byteSize) throw new IngestError('EVIDENCE_CONFLICT', 'an evidence object with this key but a different size exists');
+      await this.verifyExisting(key, info.sha256, signal);
       return 'exists';
     }
     try {
@@ -75,6 +98,7 @@ export class S3EvidenceStore implements EvidenceStore {
     const existing = await this.existingSize(key, signal);
     if (existing !== null) {
       if (existing !== bytes.length) throw new IngestError('EVIDENCE_CONFLICT', 'an evidence object with this key but a different size exists');
+      await this.verifyExisting(key, crypto.createHash('sha256').update(bytes).digest('hex'), signal);
       return 'exists';
     }
     try {

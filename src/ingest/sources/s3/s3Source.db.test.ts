@@ -137,7 +137,8 @@ describe('S3 source → evidence → published facts', () => {
     }
   });
 
-  it('X4 a tampered evidence object (same size, different bytes) fails EVIDENCE_INTEGRITY and publishes nothing', async () => {
+  it('X4 an evidence object tampered AFTER capture (same size, different bytes) fails EVIDENCE_INTEGRITY at load and publishes nothing', async () => {
+    // (A same-size object already present BEFORE capture is refused earlier, at capture: X7.)
     const bucket = await createTestBucket('x4');
     try {
       const bytes = csvGz(rowsOf('2026-07-01', 3));
@@ -146,13 +147,21 @@ describe('S3 source → evidence → published facts', () => {
       const s = await seedTenantSource(t.db.pool, { config: { layout: 'aws-data-exports', ...loc(bucket) } });
       const forged = Buffer.from(bytes);
       forged[forged.length - 9] ^= 0xff;
-      await evidenceBucket.put(evidenceBucket.at(`evidence/${s.tenantId}/${s.sourceId}/${sha(bytes)}`), forged);
+      const evKey = evidenceBucket.at(`evidence/${s.tenantId}/${s.sourceId}/${sha(bytes)}`);
+      /** Stores the genuine bytes, then the object is tampered with before the load reads it back. */
+      class TamperedAfterPut extends S3EvidenceStore {
+        async put(...args: Parameters<S3EvidenceStore['put']>) {
+          const r = await super.put(...args);
+          await evidenceBucket.put(evKey, forged);
+          return r;
+        }
+      }
       const r = await runSync({
         pool: t.pool,
         tenantId: s.tenantId,
         sourceKey: s.sourceKey,
         source: new S3FocusExportSource({ client: bucket.client, location: loc(bucket) }),
-        evidence: new S3EvidenceStore({ client: evidenceBucket.client, bucket: evidenceBucket.name, prefix: evidenceBucket.root }),
+        evidence: new TamperedAfterPut({ client: evidenceBucket.client, bucket: evidenceBucket.name, prefix: evidenceBucket.root }),
         mode: 'sync',
         hooks: noSleep,
       });

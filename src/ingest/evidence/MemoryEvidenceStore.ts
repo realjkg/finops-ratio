@@ -11,6 +11,10 @@ export class MemoryEvidenceStore implements EvidenceStore {
     const existing = this.objects.get(key);
     if (existing) {
       if (existing.length !== bytes.length) throw new IngestError('EVIDENCE_CONFLICT', 'an evidence object with this key but a different size exists');
+      // Same contract as the S3 store: accepted only if the bytes match, never on size alone.
+      if (!existing.equals(bytes)) {
+        throw new IngestError('EVIDENCE_INTEGRITY_MISMATCH', 'an evidence object with this key exists but its bytes do not match the expected sha256; it was not overwritten');
+      }
       return 'exists';
     }
     this.objects.set(key, Buffer.from(bytes));
