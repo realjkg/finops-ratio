@@ -26,7 +26,7 @@ afterAll(async () => {
   await db.close();
 });
 
-async function check(url: string) {
+async function check(url: string): Promise<void> {
   const pool = createWorkerPool(url, { max: 1 });
   try {
     await assertSafeWorkerRole(pool);
@@ -52,3 +52,72 @@ describe('worker refuses dangerous database roles (serial)', () => {
     await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE' });
   });
 });
+
+// PR #54 fifth Copilot review H1: the same refusals as Slice 0's member audit
+// (attributes SUPERUSER/BYPASSRLS/REPLICATION/CREATEROLE/CREATEDB, and the
+// refused predefined roles), held directly or reachable over ANY membership
+// edge (inherit, SET-only, ADMIN-only, transitive).
+describe('worker refuses the member-audit set over the full membership closure (serial)', () => {
+  const role = async (attrs: string) => {
+    const r = `ratio_test_r_${crypto.randomBytes(4).toString('hex')}`;
+    await db.pool.query(`CREATE ROLE ${r} NOLOGIN ${attrs}`);
+    extraRoles.push(r);
+    return r;
+  };
+  const login = async (attrs: string[] = []) => {
+    const l = await createLogin(db, ['ratio_worker'], attrs);
+    logins.push(l);
+    return l;
+  };
+
+  for (const attr of ['REPLICATION', 'CREATEROLE', 'CREATEDB']) {
+    it(`refuses a ratio_worker login that holds ${attr} itself`, async () => {
+      const l = await login([attr]);
+      await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE', message: expect.stringContaining(attr) });
+    });
+  }
+
+  for (const [edge, grant] of [
+    ['an INHERIT edge', ''],
+    ['a SET-only edge', ' WITH INHERIT FALSE, SET TRUE'],
+    ['an ADMIN-only edge', ' WITH ADMIN TRUE, INHERIT FALSE, SET FALSE'],
+  ] as const) {
+    for (const attr of ['REPLICATION', 'CREATEROLE', 'CREATEDB']) {
+      it(`refuses a login that reaches a ${attr} role over ${edge}`, async () => {
+        const r = await role(attr);
+        const l = await login();
+        await db.pool.query(`GRANT ${r} TO ${l.name}${grant}`);
+        await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE', message: expect.stringContaining(attr) });
+      });
+    }
+  }
+
+  it('refuses a login that reaches a CREATEROLE role transitively (login -> plain role -> CREATEROLE role)', async () => {
+    const top = await role('CREATEROLE');
+    const mid = await role('');
+    await db.pool.query(`GRANT ${top} TO ${mid} WITH INHERIT FALSE, SET TRUE`);
+    const l = await login();
+    await db.pool.query(`GRANT ${mid} TO ${l.name}`);
+    await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE', message: expect.stringContaining('CREATEROLE') });
+  });
+
+  for (const [edge, grant] of [
+    ['an INHERIT edge', ''],
+    ['a SET-only edge', ' WITH INHERIT FALSE, SET TRUE'],
+    ['an ADMIN-only edge', ' WITH ADMIN TRUE, INHERIT FALSE, SET FALSE'],
+  ] as const) {
+    it(`refuses a login that reaches a refused predefined role (pg_read_server_files) over ${edge}`, async () => {
+      const l = await login();
+      await db.pool.query(`GRANT pg_read_server_files TO ${l.name}${grant}`);
+      await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE', message: expect.stringContaining('pg_read_server_files') });
+    });
+  }
+
+  it('still accepts a ratio_worker login that is also a member of a harmless role (no over-refusal)', async () => {
+    const r = await role('');
+    const l = await login();
+    await db.pool.query(`GRANT ${r} TO ${l.name}`);
+    await expect(check(l.url)).resolves.toBeUndefined();
+  });
+});
+

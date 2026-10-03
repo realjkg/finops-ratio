@@ -167,3 +167,22 @@ describe('validateRow', () => {
     if (!r.ok) expect(r.errors[0].code).toBe('COLUMN_COUNT_MISMATCH');
   });
 });
+
+describe('extra columns named like Object internals (PR #54 fifth review M2)', () => {
+  it('__proto__, constructor and prototype are kept in extraColumns (and its JSON) and pollute nothing', () => {
+    const header = [...FOCUS_HEADER, '__proto__', 'constructor', 'prototype'];
+    const row: Record<string, string> = { ...focusRow(P) };
+    const vals = header.map((h) => (h === '__proto__' ? '{"polluted":"yes"}' : h === 'constructor' ? 'ctor-value' : h === 'prototype' ? 'proto-value' : (row[h] ?? '')));
+    const r = validateRow(vals, okIndex(header), P);
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    const json = JSON.parse(JSON.stringify(r.fact.extraColumns)) as Record<string, string>;
+    expect(Object.keys(json)).toEqual(expect.arrayContaining(['__proto__', 'constructor', 'prototype']));
+    expect(json['__proto__']).toBe('{"polluted":"yes"}');
+    expect(json.constructor).toBe('ctor-value');
+    expect(json.prototype).toBe('proto-value');
+    expect(Object.getOwnPropertyNames(r.fact.extraColumns)).toEqual(expect.arrayContaining(['__proto__', 'constructor', 'prototype']));
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted')).toBe(false);
+  });
+});
+

@@ -15,6 +15,8 @@ import { MemoryEvidenceStore } from '../evidence/MemoryEvidenceStore';
 import type { ArtifactRef, PeriodListing, PeriodRange } from '../sources/types';
 import { runSync, type RunSyncOptions } from './pipeline';
 import { runDoctor } from './doctor';
+import { replayBatch } from './replay';
+import { SimulatedCrash } from './types';
 import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup';
 import { batchesOf, expireLeases, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
 import { csvGz, rowsOf } from '../testing/focusCsv';
@@ -322,6 +324,28 @@ describe('round 2 L3: an abandoned run that only recorded a rejection memo', () 
     expect(lost).toMatchObject({ status: 'abandoned', error_code: 'LEASE_EXPIRED_AFTER_COMMIT' });
     expect(lost.error_detail).toMatch(/0 publications/);
     expect(lost.error_detail).toMatch(/checkpoint written and 1 rejection memo/);
+  });
+});
+
+describe('PR #54 fifth review M3: a crash during replay --batch finishes nothing', () => {
+  it('SimulatedCrash in the publish transaction: the replay run stays running (not failed) until its lease expires, then it is abandoned', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const source = new FakeFocusSource([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P, 2, '1.00')) }] }]);
+    await sync(s, source);
+    source.setPeriods([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P, 3, '1.00')) }] }]);
+    await sync(s, source);
+    const [b1] = await batchesOf(t.db.pool, s.tenantId, s.sourceId);
+    const hooks = {
+      beforePublishStep: () => {
+        throw new SimulatedCrash();
+      },
+    };
+    await expect(replayBatch({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourceKey, batchId: b1.id, hooks })).rejects.toBeInstanceOf(SimulatedCrash);
+    const replayRun = () => runsOf(t.db.pool, s.tenantId, s.sourceId).then((rs) => rs.find((r) => r.run_kind === 'replay')!);
+    expect(await replayRun()).toMatchObject({ status: 'running', error_code: null });
+    await expireLeases(t.db.pool, s.tenantId, s.sourceId);
+    await sync(s, new FakeFocusSource([]));
+    expect(await replayRun()).toMatchObject({ status: 'abandoned', error_code: 'LEASE_EXPIRED' });
   });
 });
 
