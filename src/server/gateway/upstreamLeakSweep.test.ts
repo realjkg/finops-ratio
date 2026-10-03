@@ -2,7 +2,8 @@
 // - the Jira / ServiceNow CM adapters (and, in src/ai/chatRoute.test.ts, the
 //   OpenAI-compatible chat adapter) throw status + fixed reason only (body only to the redacted server log),
 //   and JSON parse errors never quote their input;
-// - the gateway's 500 envelope redacts error text (second line of defence);
+// - the gateway's 500 envelope is generic ("Internal error" + requestId); the
+//   thrown message goes only to the structured server log, redacted;
 // - fetchChecked's network-failure wrap is redacted.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,6 +35,7 @@ beforeEach(() => {
   process.env.RATIO_API_TOKEN = 'right';
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'info').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterEach(() => {
   for (const k of ENV_KEYS) {
@@ -77,13 +79,22 @@ function post(body: unknown): NextApiRequest {
   } as unknown as NextApiRequest;
 }
 
+function errorMessage(body: unknown): string {
+  return (body as { error: { message: string } }).error.message;
+}
+
+/** Everything the gateway wrote to the structured error log in this test. */
+function errorLog(): string {
+  return (console.error as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[0])).join('\n');
+}
+
 const CM_CREATE = {
   operation: 'create',
   action: 'rightsize',
   finding: { workloadId: 'wl-1', workloadName: 'Support', recommendedAction: 'rightsize', projectedMonthlyImpact: 10 },
 };
 
-describe('gateway 500 envelope redacts error text', () => {
+describe('gateway 500 envelope is generic; the log is redacted', () => {
   it('strips Bearer tokens and query strings from a thrown message', async () => {
     const throwing: GatewayHandler = () => {
       throw new Error(`boom ${SECRET}`);
@@ -94,13 +105,20 @@ describe('gateway 500 envelope redacts error text', () => {
       limiter: new SlidingWindowRateLimiter(),
       validateBody: () => ({ ok: true }),
     });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = makeRes();
     await handler(post({}), res as unknown as NextApiResponse);
     expect(res.statusCode).toBe(500);
+    // The caller gets the generic envelope only — not even the redacted message.
     const text = JSON.stringify(res.body);
-    expect(text).toContain('boom');
+    expect(text).not.toContain('boom');
     expect(text).not.toContain('leak.tok.SECRET');
     expect(text).not.toContain('SASSECRET');
+    // The server log carries the message, redacted.
+    const logged = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('boom');
+    expect(logged).not.toContain('leak.tok.SECRET');
+    expect(logged).not.toContain('SASSECRET');
   });
 });
 
@@ -115,8 +133,11 @@ describe('CM route — ITSM body never reaches the caller', () => {
     const res = makeRes();
     await handler(post(CM_CREATE), res as unknown as NextApiResponse);
     expect(res.statusCode).toBe(500);
-    expect(JSON.stringify(res.body)).toContain('403');
+    expect(errorMessage(res.body)).toBe('Internal error');
+    expect(JSON.stringify(res.body)).not.toContain('Jira createChange failed');
     expect(JSON.stringify(res.body)).not.toContain(MARKER);
+    expect(errorLog()).toContain('Jira createChange failed (403');
+    expect(errorLog()).not.toContain(MARKER);
   });
 
   it('ServiceNow createChange failure carries status only', async () => {
@@ -129,8 +150,11 @@ describe('CM route — ITSM body never reaches the caller', () => {
     const res = makeRes();
     await handler(post(CM_CREATE), res as unknown as NextApiResponse);
     expect(res.statusCode).toBe(500);
-    expect(JSON.stringify(res.body)).toContain('401');
+    expect(errorMessage(res.body)).toBe('Internal error');
+    expect(JSON.stringify(res.body)).not.toContain('ServiceNow createChange failed');
     expect(JSON.stringify(res.body)).not.toContain(MARKER);
+    expect(errorLog()).toContain('ServiceNow createChange failed (401');
+    expect(errorLog()).not.toContain(MARKER);
   });
 
   it('a non-JSON Jira success body is not quoted in the error', async () => {
@@ -144,6 +168,7 @@ describe('CM route — ITSM body never reaches the caller', () => {
     await handler(post(CM_CREATE), res as unknown as NextApiResponse);
     expect(res.statusCode).toBe(500);
     expect(JSON.stringify(res.body)).not.toContain('LEAKED');
+    expect(errorLog()).not.toContain('LEAKED');
   });
 });
 
