@@ -52,8 +52,12 @@ describe('governance.yml', () => {
   it('R2: targets and merge-eligibility only run for exception-command comments by OWNER/MEMBER/COLLABORATOR', () => {
     const cond = "github.event_name != 'issue_comment' || (github.event.issue.pull_request && (startsWith(github.event.comment.body, '/exception-') || startsWith(github.event.changes.body.from, '/exception-')) && contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), github.event.comment.author_association))";
     const job = (name) => code.slice(code.indexOf(`  ${name}:`), code.indexOf('steps:', code.indexOf(`  ${name}:`)));
-    expect(job('targets')).toContain(cond);
-    expect(job('merge-eligibility')).toContain(cond);
+    const ifLine = (name) => (job(name).match(/^ {4}if: (.*)$/m) ?? [])[1];
+    // The condition must be AND-ed into each job's `if`, not merely present.
+    expect(ifLine('targets')).toBe(`\${{ always() && (${cond}) }}`);
+    expect(ifLine('merge-eligibility')).toBe(
+      `\${{ always() && needs.targets.result == 'success' && needs.targets.outputs.prs != '[]' && (${cond}) }}`,
+    );
   });
 
   it('L2/N4: workflow_run listens to CI only (Copilot is picked up by the sweep)', () => {
