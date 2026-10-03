@@ -4,6 +4,7 @@
 import { Pool } from 'pg';
 import { IngestError } from '../errors';
 import { DEFAULT_DB_SESSION } from '../config';
+import { SERVER_FILE_ROLES } from '../db/privilegeModel';
 
 export function createWorkerPool(
   url: string,
@@ -40,6 +41,48 @@ export interface RoleReport {
   canBecomePrivileged: boolean;
   ownerMember: boolean;
   workerMember: boolean;
+  /**
+   * Refusals found over the FULL membership closure of the session and current
+   * user (every pg_auth_members edge: inherit, SET-only, ADMIN-only,
+   * transitive): a member-audit attribute, or a refused predefined role.
+   */
+  closureProblems: string[];
+}
+
+/** Role attributes the member audit refuses on anything a worker can reach (as Slice 0's member audit). */
+const REFUSED_ATTRIBUTES: ReadonlyArray<readonly [string, string]> = [
+  ['rolsuper', 'SUPERUSER'],
+  ['rolbypassrls', 'BYPASSRLS'],
+  ['rolreplication', 'REPLICATION'],
+  ['rolcreaterole', 'CREATEROLE'],
+  ['rolcreatedb', 'CREATEDB'],
+];
+
+/**
+ * Predefined roles a worker must never reach. Taken from Slice 0
+ * (privilegeModel) — not duplicated here. NOTE: this branch's Slice 0 exports
+ * only SERVER_FILE_ROLES; the full REFUSED_PREDEFINED_ROLES map (rounds 17-19,
+ * origin/main) replaces it once Slice 0 is merged.
+ */
+const REFUSED_PREDEFINED: readonly string[] = SERVER_FILE_ROLES;
+
+async function closureProblems(pool: Pick<Pool, 'query'>): Promise<string[]> {
+  const r = await pool.query(
+    `WITH RECURSIVE me AS (SELECT oid FROM pg_catalog.pg_roles WHERE rolname IN (current_user, session_user)),
+          up(oid) AS (
+            SELECT oid FROM me
+            UNION
+            SELECT m.roleid FROM pg_catalog.pg_auth_members m JOIN up ON m.member = up.oid
+          )
+     SELECT r.rolname::text AS role, r.rolsuper, r.rolbypassrls, r.rolreplication, r.rolcreaterole, r.rolcreatedb
+       FROM up JOIN pg_catalog.pg_roles r ON r.oid = up.oid ORDER BY 1`,
+  );
+  const out: string[] = [];
+  for (const row of r.rows as Array<Record<string, unknown> & { role: string }>) {
+    for (const [col, attr] of REFUSED_ATTRIBUTES) if (row[col]) out.push(`can reach ${row.role}, which is ${attr}`);
+    if (REFUSED_PREDEFINED.includes(row.role)) out.push(`can reach the refused predefined role ${row.role}`);
+  }
+  return out;
 }
 
 export async function inspectRole(pool: Pick<Pool, 'query'>): Promise<RoleReport> {
@@ -62,6 +105,7 @@ export async function inspectRole(pool: Pick<Pool, 'query'>): Promise<RoleReport
     canBecomePrivileged: !!row.privileged,
     ownerMember: !!row.owner_member,
     workerMember: !!row.worker_member,
+    closureProblems: await closureProblems(pool),
   };
 }
 
@@ -72,6 +116,9 @@ export function roleProblems(r: RoleReport): string[] {
   if (r.canBecomePrivileged && !r.superuser && !r.bypassRls) p.push('connected role is a member of a superuser or BYPASSRLS role');
   if (r.ownerMember) p.push('connected role is a member of ratio_owner (could disable RLS)');
   if (!r.workerMember) p.push('connected role is not a member of ratio_worker');
+  // Same refusal set as Slice 0's member audit, over the full closure (review H1, fifth round).
+  // SUPERUSER/BYPASSRLS already have their own messages above.
+  for (const c of r.closureProblems) if (!/which is (SUPERUSER|BYPASSRLS)$/.test(c)) p.push(`connected role ${c}`);
   return p;
 }
 
