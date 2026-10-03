@@ -202,7 +202,7 @@ describe('loadMigrations', () => {
       'ALTER TABLE a ADD CONSTRAINT a_y CHECK (y >= 0) NOT VALID;\nALTER TABLE a VALIDATE CONSTRAINT a_y;\n' +
       'ALTER TABLE a ENABLE ROW LEVEL SECURITY;\nALTER TABLE a FORCE ROW LEVEL SECURITY;\n' +
       'CREATE UNIQUE INDEX a_x ON a (x);\nCREATE SCHEMA s;\nCREATE SEQUENCE s.q;\nCREATE TYPE s.t AS (a int);\n' +
-      'CREATE VIEW v AS SELECT x FROM a;\nCREATE POLICY p ON a USING (true);\n' +
+      'CREATE VIEW v AS SELECT x FROM a;\nCREATE POLICY p ON a USING (tenant_id = ratio.current_tenant_id());\n' +
       'CREATE TRIGGER t BEFORE INSERT ON a FOR EACH ROW EXECUTE FUNCTION f();\n' +
       'CREATE CONSTRAINT TRIGGER ct AFTER INSERT ON a DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION f();\n' +
       'GRANT SELECT ON a TO ratio_reader;\nGRANT USAGE ON SCHEMA s TO ratio_worker, ratio_reader;\n' +
@@ -211,6 +211,75 @@ describe('loadMigrations', () => {
     expect(findNonExpandStatement(additive)).toBeNull();
     expect(findForbiddenStatement(additive)).toBeNull();
     expect(loadMigrations(tmpDir({ '0001_a.up.sql': additive }))[0].phase).toBe('expand');
+  });
+
+  it('round 3: policy, reader-grant, view, DO-body, NOT NULL column and function/trigger bypasses are caught (challenger round 2)', () => {
+    const forbidden: Record<string, string> = {
+      create_policy_true: 'CREATE POLICY open_all ON ratio.cost_facts USING (true) WITH CHECK (true);',
+      create_policy_reader_true: 'CREATE POLICY r ON ratio.cost_facts FOR SELECT TO ratio_reader USING (true);',
+      create_policy_or_true: 'CREATE POLICY p ON ratio.cost_facts USING (tenant_id = ratio.current_tenant_id() OR true);',
+      create_policy_check_open: 'CREATE POLICY p ON ratio.cost_facts USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (true);',
+      create_policy_no_clause: 'CREATE POLICY p ON ratio.cost_facts FOR INSERT;',
+      grant_reader_base: 'GRANT SELECT ON ratio.cost_facts, ratio.ingest_validation_errors TO ratio_reader;',
+      grant_reader_all_tables: 'GRANT SELECT ON ALL TABLES IN SCHEMA ratio TO ratio_reader;',
+      grant_reader_quoted: 'GRANT SELECT ON ratio.cost_facts TO "ratio_reader";',
+      grant_reader_other_fn: 'GRANT EXECUTE ON FUNCTION ratio.text_looks_secret(text) TO ratio_reader;',
+      grant_reader_view_update: 'GRANT UPDATE ON ratio.cost_facts_published TO ratio_reader;',
+      grant_pg_read_all: 'GRANT pg_read_all_data TO ratio_reader;',
+      grant_member_worker: 'GRANT ratio_owner TO ratio_worker;',
+      default_privs_reader: 'ALTER DEFAULT PRIVILEGES IN SCHEMA ratio GRANT SELECT ON TABLES TO ratio_reader;',
+      do_body_no_force: "-- ratio:allow-do harmless\nDO $$ BEGIN EXECUTE 'ALTER TABLE ratio.cost_facts NO FORCE ROW LEVEL SECURITY'; END $$;",
+      do_body_format_disable: "-- ratio:allow-do harmless\nDO $$ BEGIN EXECUTE format('ALTER TABLE %I.%I DISABLE ROW LEVEL SECURITY', 'ratio', 'cost_facts'); END $$;",
+      do_body_direct_policy: '-- ratio:allow-do harmless\nDO $$ BEGIN DROP POLICY tenant_isolation ON ratio.cost_facts; END $$;',
+      do_body_grant_public: "-- ratio:allow-do harmless\nDO $b$ BEGIN EXECUTE 'GRANT SELECT ON ratio.cost_facts TO PUBLIC'; END $b$;",
+      fn_body_bypass:
+        "-- ratio:allow-function harmless\nCREATE FUNCTION ratio.f() RETURNS void LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'ALTER ROLE ratio_worker BYPASSRLS'; END $f$;",
+    };
+    for (const [name, sql] of Object.entries(forbidden)) {
+      expect(findForbiddenStatement(sql), name).not.toBeNull();
+      expect(codeOf(() => loadMigrations(tmpDir({ '0001_a.up.sql': CONTRACT + sql }))), name).toBe('FORBIDDEN_STATEMENT');
+    }
+    const nonExpand: Record<string, string> = {
+      create_leak_view: 'CREATE VIEW ratio.all_facts AS SELECT * FROM ratio.cost_facts;',
+      create_leak_view_quoted: 'CREATE VIEW "ratio"."all_facts" AS SELECT 1;',
+      add_col_not_null: 'ALTER TABLE ratio.cost_facts ADD COLUMN x int NOT NULL;',
+      create_ratio_fn_unmarked: "CREATE FUNCTION ratio.f() RETURNS int LANGUAGE sql AS 'select 1';",
+      create_destructive_trigger_unmarked:
+        'CREATE FUNCTION ratio.f() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN DELETE FROM ratio.cost_facts; RETURN NULL; END $f$;\n' +
+        'CREATE TRIGGER t AFTER INSERT ON ratio.sync_runs FOR EACH STATEMENT EXECUTE FUNCTION ratio.f();',
+      create_trigger_on_ratio_unmarked: 'CREATE TRIGGER t AFTER INSERT ON ratio.sync_runs FOR EACH ROW EXECUTE FUNCTION public.f();',
+      create_constraint_trigger_unmarked:
+        'CREATE CONSTRAINT TRIGGER t AFTER INSERT ON ratio.sync_runs DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.f();',
+      marker_wrong_kind: "-- ratio:allow-view reason\nCREATE FUNCTION ratio.f() RETURNS int LANGUAGE sql AS 'select 1';",
+      marker_without_reason: '-- ratio:allow-view\nCREATE VIEW ratio.v AS SELECT 1;',
+    };
+    for (const [name, sql] of Object.entries(nonExpand)) {
+      expect(findNonExpandStatement(sql), name).not.toBeNull();
+      expect(codeOf(() => loadMigrations(tmpDir({ '0001_a.up.sql': EXPAND + sql }))), name).toBe('EXPAND_NOT_ADDITIVE');
+    }
+    // A ratio view is fine as a contract migration (reviewed explicitly) ...
+    expect(loadMigrations(tmpDir({ '0001_a.up.sql': CONTRACT + 'CREATE VIEW ratio.v AS SELECT 1;' }))[0].phase).toBe('contract');
+  });
+
+  it('round 3: the reasoned markers make ratio views, functions and triggers expand; legitimate forms still pass', () => {
+    const ok =
+      EXPAND +
+      '-- ratio:allow-view the published read path\nCREATE VIEW ratio.v WITH (security_barrier = true) AS SELECT 1;\n' +
+      "-- ratio:allow-function tenant helper\nCREATE FUNCTION ratio.f() RETURNS int LANGUAGE sql AS 'select 1';\n" +
+      '-- ratio:allow-function lifecycle guard\nCREATE TRIGGER t BEFORE INSERT ON ratio.sync_runs FOR EACH ROW EXECUTE FUNCTION ratio.f();\n' +
+      '-- ratio:allow-function deferred check\n\nCREATE CONSTRAINT TRIGGER ct AFTER INSERT ON ratio.sync_runs DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ratio.f();\n' +
+      'CREATE POLICY tenant_isolation ON ratio.t USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id());\n' +
+      'CREATE POLICY tenants_isolation ON ratio.tenants USING (id = ratio.current_tenant_id());\n' +
+      'CREATE POLICY narrow ON ratio.t AS RESTRICTIVE FOR SELECT USING (false);\n' +
+      'GRANT USAGE ON SCHEMA ratio TO ratio_worker, ratio_reader;\n' +
+      'GRANT SELECT ON ratio.cost_facts_published TO ratio_reader;\n' +
+      'GRANT EXECUTE ON FUNCTION ratio.current_tenant_id() TO ratio_worker, ratio_reader;\n' +
+      'GRANT SELECT, INSERT ON ratio.cost_facts TO ratio_worker;\n' +
+      'ALTER TABLE ratio.t ADD COLUMN y int NOT NULL DEFAULT 0;\nALTER TABLE ratio.t ADD COLUMN z int;\n' +
+      "-- ratio:allow-do creates roles\nDO $r$ BEGIN EXECUTE format('CREATE ROLE %I NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE', 'x'); END $r$;\n";
+    expect(findForbiddenStatement(ok)).toBeNull();
+    expect(findNonExpandStatement(ok)).toBeNull();
+    expect(loadMigrations(tmpDir({ '0001_a.up.sql': ok }))[0].phase).toBe('expand');
   });
 
   it('records a checksum for the down file too', () => {
