@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import process from 'node:process';
 import { URL } from 'node:url';
-import { classify, globToRegExp, parseUnifiedDiff, loadRules } from './classify-risk.mjs';
+import { classify, globToRegExp, parseUnifiedDiff, binaryPathsInDiff, loadRules } from './classify-risk.mjs';
 
 const paths = (...p) => ({ files: p.map((path) => ({ path })) });
 const withPatch = (path, ...added) => ({
@@ -200,8 +200,10 @@ describe('low-risk examples', () => {
   it('README-only', () => {
     expect(classify(paths('README.md'))).toEqual({ risk: 'low', classes: [], reasons: [] });
   });
-  it('docs/**', () => {
+  it('docs/** markdown and images (images only when the diff is viewable)', () => {
+    expect(classify(paths('docs/guide/setup.md')).risk).toBe('low');
     expect(classify(paths('docs/architecture/overview.png')).risk).toBe('low');
+    expect(classify(paths('docs/architecture/overview.svg')).risk).toBe('low');
   });
   it('UI component without egress', () => {
     const r = classify(withPatch('src/components/layout/Header.tsx', '<h1>Hello</h1>'));
@@ -210,9 +212,83 @@ describe('low-risk examples', () => {
   it('tests-only change', () => {
     expect(classify(paths('src/lib/persona.test.ts', 'src/lib/basePath.test.ts')).risk).toBe('low');
   });
-  it('skill markdown under .obvious is low (only obvious.md is policy)', () => {
-    expect(classify(paths('.obvious/skills/local-dev/SKILL.md')).risk).toBe('low');
+});
+
+describe('challenger round 1 regressions', () => {
+  // H1: Next builds pages/**/*.test.* into a production route.
+  it('H1: the exact probe pages/api/zzgovprobe.test.ts is restricted:routes', () => {
+    const r = classify(paths('pages/api/zzgovprobe.test.ts'));
+    expect(r.risk).toBe('restricted');
+    expect(r.classes).toContain('routes');
   });
+  for (const p of ['pages/index.tsx', 'pages/x.test.tsx', 'src/pages/a.test.ts', 'src/pages/index.tsx', 'pages/README.md']) {
+    it(`H1: ${p} is restricted:routes`, () => {
+      const r = classify(paths(p));
+      expect(r.risk).toBe('restricted');
+      expect(r.classes).toContain('routes');
+    });
+  }
+  it('H1: the low test allow-list excludes pages/ even without the routes rule', () => {
+    const rules = loadRules();
+    const lowTests = rules.low.find((l) => l.id === 'low.tests');
+    expect(lowTests.matchPath('pages/api/zzgovprobe.test.ts')).toBe(false);
+    expect(lowTests.matchPath('src/pages/a.test.ts')).toBe(false);
+    expect(lowTests.matchPath('src/lib/a.test.ts')).toBe(true);
+  });
+
+  // H2: binary files outside docs/ are restricted; binary diffs are uninspectable.
+  for (const p of ['src/components/logo.png', 'src/components/font.woff2', 'public/x.bin', 'docs/spec.pdf', 'docs/a.zip']) {
+    it(`H2: ${p} is restricted`, () => {
+      expect(classify(paths(p)).risk).toBe('restricted');
+    });
+  }
+  it('H2: a binary file in a git diff is treated as uninspectable (fail closed)', () => {
+    const diff = [
+      'diff --git a/docs/a.png b/docs/a.png',
+      'new file mode 100644',
+      'index 0000000..1111111',
+      'Binary files /dev/null and b/docs/a.png differ',
+      'diff --git a/src/components/X.tsx b/src/components/X.tsx',
+      'index 1..2 100644',
+      'GIT binary patch',
+      'literal 10',
+    ].join('\n');
+    expect(binaryPathsInDiff(diff).sort()).toEqual(['docs/a.png', 'src/components/X.tsx']);
+    const r = classify({ files: [{ path: 'docs/a.png' }, { path: 'src/components/X.tsx' }], diff });
+    expect(r.risk).toBe('restricted');
+    expect(r.reasons).toEqual([
+      { path: 'docs/a.png', class: 'unclassified', rule: 'diff-unavailable' },
+      { path: 'src/components/X.tsx', class: 'unclassified', rule: 'diff-unavailable' },
+    ]);
+  });
+
+  // M3: agent/policy instruction files are restricted.
+  for (const p of ['.obvious/skills/local-dev/SKILL.md', '.obvious/config.yml', '.claude/settings.json', 'CLAUDE.md', 'AGENTS.md', 'src/x/CLAUDE.md', 'docs/skills/foo/SKILL.md']) {
+    it(`M3: ${p} is restricted:policy`, () => {
+      const r = classify(paths(p));
+      expect(r.risk).toBe('restricted');
+      expect(r.classes).toContain('policy');
+    });
+  }
+  it('M3: docs/** is narrowed to md/png/svg', () => {
+    expect(classify(paths('docs/run.sh')).risk).toBe('restricted');
+    expect(classify(paths('docs/data.json')).risk).toBe('restricted');
+  });
+  for (const line of [
+    "navigator.sendBeacon('/x', d)",
+    'const ws = new WebSocket(u)',
+    'const x = new XMLHttpRequest()',
+    'new EventSource(u)',
+    "const m = await import('./x')",
+    "const u = '//cdn.example.net/a.js'",
+    'const u = "//cdn.example.net/a.js"',
+  ]) {
+    it(`M3: egress pattern in src/ → network_egress: ${line}`, () => {
+      const r = classify(withPatch('src/components/W.tsx', line));
+      expect(r.risk).toBe('restricted');
+      expect(r.classes).toContain('network_egress');
+    });
+  }
 });
 
 describe('mixed PR', () => {
@@ -261,7 +337,7 @@ describe('rules file', () => {
     const declared = new Set(rules.restricted.map((r) => r.class));
     for (const c of [
       'migrations', 'auth_tenancy', 'secrets', 'network_egress', 'retention',
-      'deployment', 'financial_semantics', 'dependencies', 'policy',
+      'deployment', 'financial_semantics', 'dependencies', 'policy', 'routes',
     ]) expect(declared.has(c), c).toBe(true);
     for (const r of rules.restricted) {
       expect(typeof r.id).toBe('string');

@@ -37,8 +37,36 @@ describe('buildReport', () => {
   });
 
   it('records when branch protection on main could not be confirmed, without blocking', () => {
-    expect(buildReport(restricted, { mainProtection: { protected: false } })).toMatch(/main is NOT protected/);
+    expect(buildReport(restricted, { mainProtection: { protected: false, rulesRequiredChecks: [] } })).toMatch(/main is NOT protected/);
     expect(buildReport(restricted, { mainProtection: { error: 'HTTP 403' } })).toMatch(/could not be verified.*HTTP 403/);
+  });
+
+  it('M4b: reports required checks from the branch rules API, not the protected flag', () => {
+    const withRules = buildReport(restricted, { mainProtection: { protected: true, rulesRequiredChecks: ['Lint · Typecheck · Test · Build'] } });
+    expect(withRules).toMatch(/ruleset on `main` requires status checks: `Lint · Typecheck · Test · Build`/i);
+    const noRules = buildReport(restricted, { mainProtection: { protected: true, rulesRequiredChecks: [] } });
+    expect(noRules).toMatch(/no ruleset requires status checks on `main`/i);
+    expect(noRules).not.toMatch(/Branch protection on `main`: enabled/);
+    const rulesErr = buildReport(restricted, { mainProtection: { protected: true, rulesError: 'HTTP 404' } });
+    expect(rulesErr).toMatch(/rules for `main` could not be read \(HTTP 404\)/i);
+  });
+
+  it('M4a: both reports say a fresh Copilot review on the new head is required after each push', () => {
+    for (const md of [buildReport(restricted, {}), buildReport(low, {})]) {
+      expect(md).toMatch(/fresh Copilot review on the new head/i);
+      expect(md).toMatch(/after each push/i);
+    }
+  });
+
+  it('M3: the low report says low is heuristic, not proven safe', () => {
+    expect(buildReport(low, {})).toMatch(/heuristically low, not proven safe/i);
+  });
+
+  it('H3: fork/outsider PRs are reported as never auto-merge eligible', () => {
+    const md = buildReport(low, { outsider: 'fork PR (head repo mallory/x)' });
+    expect(md).toMatch(/never eligible for auto-merge/i);
+    expect(md).toContain('mallory/x');
+    expect(buildReport(low, {})).not.toMatch(/never eligible for auto-merge/i);
   });
 
   it('escapes table-breaking characters in paths', () => {

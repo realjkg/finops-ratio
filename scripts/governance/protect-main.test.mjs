@@ -23,7 +23,10 @@ describe('buildRequests', () => {
     expect(p.body.required_status_checks).toEqual({
       strict: true,
       checks: [
-        { context: 'Lint · Typecheck · Test · Build' },
+        // M1: CI must come from the GitHub Actions app (id 15368).
+        { context: 'Lint · Typecheck · Test · Build', app_id: 15368 },
+        // Posted as a commit status by the classify job; any app accepted (see README:
+        // eligibility re-classifies itself, so a spoofed status cannot make a PR eligible).
         { context: 'Governance · risk classification' },
       ],
     });

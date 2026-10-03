@@ -34,6 +34,18 @@ describe('governance.yml', () => {
   it('job names match the required checks used by eligibility and branch protection', () => {
     expect(code).toContain('name: Governance · risk classification');
     expect(code).toContain('name: Governance · merge eligibility');
+    expect(code).toContain('name: Governance · eligibility targets');
+  });
+
+  it('L3: eligibility runs per PR in its own concurrency group; no shared sweep group', () => {
+    expect(code).not.toMatch(/sweep/);
+    expect(code).toMatch(/group: governance-pr-\$\{\{ matrix\.pr \}\}/);
+    expect(code).toMatch(/matrix:\s*\n\s+pr: \$\{\{ fromJSON\(needs\.targets\.outputs\.prs\) \}\}/);
+    expect(code).toMatch(/fail-fast: false/);
+  });
+
+  it('M1: eligibility can resolve check runs to workflow paths (actions: read)', () => {
+    expect(code).toMatch(/actions: read/);
   });
 
   it('does not interpolate event data into scripts', () => {
