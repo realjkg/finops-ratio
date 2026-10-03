@@ -16,21 +16,30 @@ import type {
   FocusVersion,
 } from './index';
 import { FOCUS_VERSIONS } from './index';
+import { LiveDataAuthError } from './LiveCostSourceClient';
 import { rawRowsForVersion } from './seed';
-import { formatUSD, formatRatio, formatPct } from '@/lib/format';
+import { formatUSD, formatMoney, formatRatio, formatPct } from '@/lib/format';
 import { ratioColor } from '@/lib/scales';
 import { withBasePath } from '@/lib/basePath';
 
 type LoadState =
   | { status: 'idle' }
   | { status: 'loading'; phase: string }
-  | { status: 'error'; message: string }
+  | { status: 'error'; title: string; message: string }
   | {
       status: 'success';
       health: SourceHealth;
       rows: CostRowsResult;
       findings: CostFinding[];
     };
+
+/** Heading + message for a failed ingest; a live-data 401 gets its own readable copy. */
+export function ingestErrorView(err: unknown): { title: string; message: string } {
+  if (err instanceof LiveDataAuthError) {
+    return { title: 'Authentication required', message: err.message };
+  }
+  return { title: 'Ingest failed', message: err instanceof Error ? err.message : String(err) };
+}
 
 /** Current-month window as ISO strings (UTC). */
 function currentWindow(): { start: string; end: string } {
@@ -81,10 +90,7 @@ export function CostSourcePage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setLoadState({
-            status: 'error',
-            message: err instanceof Error ? err.message : String(err),
-          });
+          setLoadState({ status: 'error', ...ingestErrorView(err) });
         }
       });
     return () => {
@@ -109,10 +115,7 @@ export function CostSourcePage() {
 
       setLoadState({ status: 'success', health, rows, findings });
     } catch (err) {
-      setLoadState({
-        status: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
+      setLoadState({ status: 'error', ...ingestErrorView(err) });
     }
   }, [clientMode, sourceId]);
 
@@ -236,7 +239,7 @@ export function CostSourcePage() {
         {/* Error */}
         {loadState.status === 'error' && (
           <div className="rounded-card border border-cost/40 bg-cost/10 p-4">
-            <p className="text-sm font-medium text-cost">Ingest failed</p>
+            <p className="text-sm font-medium text-cost">{loadState.title}</p>
             <p className="mt-1 text-xs text-sub">{loadState.message}</p>
           </div>
         )}
@@ -519,7 +522,8 @@ function Th({ children, isExtension = false }: { children: React.ReactNode; isEx
   );
 }
 
-function FocusRowsCard({ rows }: { rows: CanonicalFocusRow[] }) {
+/** Canonical rows table. Each row's cost is shown in that row's own currency. */
+export function FocusRowsCard({ rows }: { rows: CanonicalFocusRow[] }) {
   return (
     <Card title={`Canonical FOCUS v1.4 rows — ${rows.length}`}>
       <div className="overflow-x-auto">
@@ -549,7 +553,8 @@ function FocusRowsCard({ rows }: { rows: CanonicalFocusRow[] }) {
                 </td>
                 <td className="py-2 pr-4 text-xs text-sub">{row.ProviderName}</td>
                 <td className="py-2 pr-4 text-right font-mono text-xs text-cost">
-                  {formatUSD(row.BilledCost)}
+                  {formatMoney(row.BilledCost, row.BillingCurrency)}{' '}
+                  <span className="text-dim">{row.BillingCurrency}</span>
                 </td>
                 <td
                   className="py-2 pr-4 text-right font-mono text-xs font-semibold"

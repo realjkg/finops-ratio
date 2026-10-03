@@ -22,6 +22,7 @@ import type {
   CMStatusResult,
 } from '@/cm/CMClient';
 import { MockCMClient } from '@/cm/MockCMClient';
+import { logUpstreamError, readJsonBody, statusReason } from '@/costsource/transports/redact';
 import {
   withGateway,
   sendError,
@@ -80,9 +81,12 @@ class JiraAdapter implements CMAdapter {
       }),
     });
     if (!res.ok) {
-      throw new Error(`Jira createChange failed (${res.status}): ${await res.text()}`);
+      // Status + fixed reason only; the ITSM body goes to the redacted log.
+      const text = await res.text().catch(() => '');
+      if (text) logUpstreamError('Jira createChange', res.status, text);
+      throw new Error(`Jira createChange failed (${res.status} ${statusReason(res.status)})`);
     }
-    const data = (await res.json()) as { key: string };
+    const data = await readJsonBody<{ key: string }>(res, 'Jira');
     const ticketRef = data.key;
     return {
       provider: 'jira',
@@ -121,9 +125,9 @@ class JiraAdapter implements CMAdapter {
     if (!res.ok) {
       throw new Error(`Jira getStatus failed (${res.status}): ${ticketRef}`);
     }
-    const data = (await res.json()) as {
+    const data = await readJsonBody<{
       fields: { status: { name: string }; updated: string };
-    };
+    }>(res, 'Jira');
     return {
       ticketRef,
       status: data.fields.status.name,
@@ -174,9 +178,12 @@ class ServiceNowAdapter implements CMAdapter {
       }),
     });
     if (!res.ok) {
-      throw new Error(`ServiceNow createChange failed (${res.status}): ${await res.text()}`);
+      // Status + fixed reason only; the ITSM body goes to the redacted log.
+      const text = await res.text().catch(() => '');
+      if (text) logUpstreamError('ServiceNow createChange', res.status, text);
+      throw new Error(`ServiceNow createChange failed (${res.status} ${statusReason(res.status)})`);
     }
-    const data = (await res.json()) as { result: { number: string } };
+    const data = await readJsonBody<{ result: { number: string } }>(res, 'ServiceNow');
     const ticketRef = data.result.number;
     return {
       provider: 'servicenow',
@@ -201,7 +208,7 @@ class ServiceNowAdapter implements CMAdapter {
     if (!res.ok) {
       throw new Error(`ServiceNow lookup failed (${res.status})`);
     }
-    const data = (await res.json()) as { result: Array<{ number: string }> };
+    const data = await readJsonBody<{ result: Array<{ number: string }> }>(res, 'ServiceNow');
     if (data.result.length === 0) {
       throw new Error(`ServiceNow ref not found: ${input.ticketRef}`);
     }
@@ -224,9 +231,9 @@ class ServiceNowAdapter implements CMAdapter {
     if (!res.ok) {
       throw new Error(`ServiceNow getStatus failed (${res.status})`);
     }
-    const data = (await res.json()) as {
+    const data = await readJsonBody<{
       result: Array<{ state: string; sys_updated_on: string }>;
-    };
+    }>(res, 'ServiceNow');
     const record = data.result[0];
     if (!record) throw new Error(`ServiceNow ref not found: ${ticketRef}`);
     return {

@@ -11,7 +11,8 @@
 // Middleware order: method → size → auth → rate-limit → validate → dispatch.
 
 import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
-import { checkAuth, resolveGatewayAuth, type GatewayEnv } from './auth';
+import { checkAuth, isStrongToken, resolveGatewayAuth, type GatewayEnv } from './auth';
+import { redactErrorText } from '@/costsource/transports/redact';
 import {
   SlidingWindowRateLimiter,
   type RateLimitResult,
@@ -70,6 +71,26 @@ export function sendError(
 
 const DEFAULT_MAX_BODY_BYTES = 100_000;
 
+let warnedWeakToken = false;
+
+/**
+ * Gateway routes (AI chat, change management) still accept a weak
+ * RATIO_API_TOKEN — only live cost data refuses it — but the operator is told
+ * once per process.
+ */
+function warnIfWeakToken(env: GatewayEnv): void {
+  const token = env.RATIO_API_TOKEN?.trim();
+  if (warnedWeakToken || !token || isStrongToken(token)) return;
+  warnedWeakToken = true;
+  console.warn(
+    JSON.stringify({
+      tag: 'gateway',
+      warning:
+        'RATIO_API_TOKEN is weak (needs >= 32 chars and >= 10 distinct characters); live cost data is refused until it is rotated.',
+    }),
+  );
+}
+
 // One process-wide limiter shared across every wrapped route (single-instance
 // demo). See rateLimit.ts for the production (shared-store) note.
 const sharedLimiter = new SlidingWindowRateLimiter();
@@ -105,6 +126,7 @@ export function withGateway(
   const env = options.env ?? process.env;
 
   return async (req: NextApiRequest, res: NextApiResponse): Promise<void> => {
+    warnIfWeakToken(env);
     const start = Date.now();
     let tenant = 'anonymous';
     const finish = (status: number) =>
@@ -169,8 +191,10 @@ export function withGateway(
     try {
       await handler(req, res, { tenant });
     } catch (err) {
-      // Never leak a stack trace — only the message in the envelope.
-      const message = err instanceof Error ? err.message : String(err);
+      // Never leak a stack trace — only the message in the envelope, redacted
+      // (Bearer tokens, URL query strings / SAS, AWS key ids) as a second line
+      // of defence against upstream text reaching the caller.
+      const message = redactErrorText(err);
       if (!res.headersSent) sendError(res, 500, 'internal_error', message);
     } finally {
       finish(res.statusCode);

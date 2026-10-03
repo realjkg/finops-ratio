@@ -10,6 +10,10 @@
 // trivially mockable.
 
 import type { PointFiveCredentials } from './pointfiveConfig';
+import { logUpstreamError, readJsonBody, statusReason } from './transports/focusExport';
+import { redactErrorText } from './transports/redact';
+
+const LABEL = 'PointFive OAuth token endpoint';
 
 /** Minimal OAuth 2.1 token response (RFC 6749 §5.1 subset). */
 export interface OAuthTokenResponse {
@@ -78,16 +82,18 @@ export class PointFiveOAuthClient {
         body,
       });
     } catch (err) {
-      throw new Error(
-        `PointFive OAuth token request failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      throw new Error(`PointFive OAuth token request failed: ${redactErrorText(err)}`);
     }
 
     if (!res.ok) {
-      throw new Error(`PointFive OAuth token endpoint returned ${res.status}: ${await res.text()}`);
+      // Status + fixed reason only; the body (may echo client credentials) is
+      // logged server-side, redacted — never thrown to an API caller.
+      const text = await res.text().catch(() => '');
+      if (text) logUpstreamError(LABEL, res.status, text);
+      throw new Error(`${LABEL} returned ${res.status} (${statusReason(res.status)})`);
     }
 
-    const token = (await res.json()) as OAuthTokenResponse;
+    const token = await readJsonBody<OAuthTokenResponse>(res, LABEL);
     this.cached = {
       accessToken: token.access_token,
       expiresAtMs: nowMs + token.expires_in * 1000,

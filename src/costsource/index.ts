@@ -2,6 +2,7 @@
 // Callers only ever see the CostSourceClient interface and createCostSourceClient;
 // concrete implementations are an internal detail.
 import { LiveCostSourceClient } from './LiveCostSourceClient';
+export { LiveDataAuthError, LIVE_DATA_AUTH_MESSAGE } from './LiveCostSourceClient';
 import { MockCostSourceClient } from './MockCostSourceClient';
 import type { CostSourceClient } from './CostSourceClient';
 
@@ -18,6 +19,8 @@ export type {
   SourceCoverage,
   SourceCapability,
   CostWindow,
+  ConnectorConnection,
+  ConnectorSetup,
 } from './CostSourceClient';
 export type {
   CanonicalFocusRow,
@@ -56,10 +59,12 @@ export {
 } from './pointfiveConfig';
 export type { PointFiveStatus, PointFiveCredentials } from './pointfiveConfig';
 
-// Cloud-connectors MVP — config-gated, ships-dark FOCUS-export connectors
-// (public cloud trio + Kubernetes + Nutanix) sharing one adapter and the generic
-// connector-config helper. Like PointFive, only the adapter is source-specific.
+// Config-driven FOCUS-export connectors (public cloud trio + Kubernetes +
+// Nutanix) sharing one adapter, the generic
+// connector-config helper, and the live transports in ./transports/. Each goes
+// live as soon as its env is set. Only the adapter is source-specific.
 export {
+  connectorFlag,
   isConnectorEnabled,
   resolveConnectorStatus,
   connectorStatusNote,
@@ -105,6 +110,10 @@ export {
   nutanixDescriptor,
 } from './nutanixConfig';
 export { FOCUS_EXPORT_CONNECTOR_SPECS, findConnectorSpec } from './focusExportConnectors';
+export { createHttpFocusTransport } from './transports/httpFocusTransport';
+export { createAzureBlobTransport } from './transports/azureBlobTransport';
+export { createAwsS3Transport } from './transports/awsS3Transport';
+export { createGcpBigQueryTransport } from './transports/gcpBigQueryTransport';
 export type {
   PointFiveMcpClient,
   PointFiveMcpClientFactory,

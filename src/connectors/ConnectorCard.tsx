@@ -1,10 +1,15 @@
 // ConnectorCard — renders a single cost-source adapter.
 // Shows source identity, FOCUS version → canonical mapping, connection state,
-// and a disabled affordance (no backing runtime action in mock mode).
+// the env contract that connects it, and a "Test connection" action. The browser
+// carries no API token, so it only probes OFFLINE sandbox sources; live
+// connectors are probed through the authenticated API
+// (GET /api/v1/connectors?probe=true). Env var NAMES only — never values.
 // Controlled-egress paths (live PointFive OAuth 2.1 → MCP SSE broker) carry
 // the reserved warm accent (#ffc44d / shape token).
 
-import type { CostSourceDescriptor } from '@/costsource/CostSourceClient';
+import { useState } from 'react';
+import type { CostSourceDescriptor, SourceHealth } from '@/costsource/CostSourceClient';
+import { isOfflineSandboxSource } from '@/costsource/sandboxSources';
 
 // Only the live PointFive adapter is a controlled-egress path: it routes through
 // PointFive's broker under OAuth 2.1. The sandbox mock is offline seed data.
@@ -30,33 +35,44 @@ const CAPABILITY_LABEL: Record<string, string> = {
   findings: 'Findings',
 };
 
-/** Three honest states: data flowing, configurable-but-off, ships-dark controlled-egress. */
-type ConnState = 'connected' | 'available' | 'dark';
+/** Honest states: data flowing, ready to connect, half set up, switched off, opt-in egress. */
+type ConnState = 'connected' | 'available' | 'incomplete' | 'disabled' | 'dark';
 
 function connState(src: CostSourceDescriptor): ConnState {
   if (src.configured) return 'connected';
+  if (src.connection) return src.connection;
   if (CONTROLLED_EGRESS_IDS.has(src.id)) return 'dark';
   return 'available';
 }
 
 const STATE_COLOR: Record<ConnState, string> = {
   connected: 'var(--value)',
-  available: 'var(--dim)',
+  available: 'var(--unit)',
+  incomplete: 'var(--shape)',
+  disabled: 'var(--dim)',
   dark: 'var(--shape)',
 };
 
 const STATE_LABEL: Record<ConnState, string> = {
   connected: 'Connected',
   available: 'Available',
+  incomplete: 'Incomplete',
+  disabled: 'Disabled',
   dark: 'Dark',
 };
 
-export function ConnectorCard({ source }: { source: CostSourceDescriptor }) {
+export interface ConnectorCardProps {
+  source: CostSourceDescriptor;
+  /** Runs the server-side health probe. Absent → no test action (offline fallback). */
+  onTest?: (sourceId: string) => Promise<SourceHealth>;
+}
+
+export function ConnectorCard({ source, onTest }: ConnectorCardProps) {
   const state = connState(source);
   const isEgress = CONTROLLED_EGRESS_IDS.has(source.id);
-  const caps = source.capabilities
-    .map((c) => CAPABILITY_LABEL[c] ?? c)
-    .join(' · ');
+  const caps = source.capabilities.map((c) => CAPABILITY_LABEL[c] ?? c).join(' · ');
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; detail: string } | null>(null);
 
   const borderStyle: React.CSSProperties =
     state === 'connected'
@@ -64,6 +80,27 @@ export function ConnectorCard({ source }: { source: CostSourceDescriptor }) {
       : isEgress
       ? { borderColor: 'rgba(255,196,77,0.2)' }
       : {};
+
+  const isSandbox = isOfflineSandboxSource(source.id);
+  const canTest = Boolean(onTest) && state === 'connected' && isSandbox;
+  const liveProbeViaApi = state === 'connected' && !isSandbox;
+
+  async function test() {
+    if (!onTest) return;
+    setTesting(true);
+    setResult(null);
+    try {
+      const health = await onTest(source.id);
+      setResult({ ok: health.reachable && health.authed, detail: health.detail });
+    } catch (err) {
+      setResult({ ok: false, detail: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  const missing = source.setup?.missingEnv ?? [];
+  const optional = source.setup?.optionalEnv ?? [];
 
   return (
     <div
@@ -92,10 +129,7 @@ export function ConnectorCard({ source }: { source: CostSourceDescriptor }) {
 
         {/* Status indicator */}
         <div className="flex shrink-0 items-center gap-1.5">
-          <span
-            className="h-1.5 w-1.5 rounded-full"
-            style={{ background: STATE_COLOR[state] }}
-          />
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: STATE_COLOR[state] }} />
           <span
             className="font-mono text-[10px] uppercase tracking-wider"
             style={{ color: STATE_COLOR[state] }}
@@ -126,22 +160,71 @@ export function ConnectorCard({ source }: { source: CostSourceDescriptor }) {
       {/* Descriptor note */}
       <p className="text-[11px] leading-relaxed text-dim">{source.note}</p>
 
-      {/* Action affordance — disabled: no backing runtime action in mock mode */}
+      {/* Env contract — what to set to connect (names only) */}
+      {source.setup && state !== 'connected' && state !== 'disabled' && missing.length > 0 && (
+        <div className="rounded border border-edge bg-deep px-2.5 py-2">
+          <div className="mb-1 font-mono text-[10px] uppercase tracking-wider text-sub">
+            Set to connect
+          </div>
+          <ul className="flex flex-wrap gap-1">
+            {missing.map((name) => (
+              <li key={name}>
+                <code className="rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] text-txt">{name}</code>
+              </li>
+            ))}
+          </ul>
+          {optional.length > 0 && (
+            <div className="mt-1.5 font-mono text-[10px] text-dim">
+              Optional: {optional.join(', ')}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Live probe result */}
+      {result && (
+        <p
+          role="status"
+          className="font-mono text-[11px] leading-relaxed"
+          style={{ color: result.ok ? 'var(--value)' : 'var(--cost)' }}
+        >
+          {result.ok ? '✓ ' : '✕ '}
+          {result.detail}
+        </p>
+      )}
+
+      {/* Live connectors are probed server-side behind the API token only. */}
+      {liveProbeViaApi && (
+        <p className="font-mono text-[10px] leading-relaxed text-dim">
+          Live probe runs via the authenticated API:{' '}
+          <code className="text-sub">GET /api/v1/connectors?probe=true</code>
+        </p>
+      )}
+
+      {/* Action — health probe for connected sandbox sources */}
       <div className="mt-auto flex justify-end pt-1">
         <button
           type="button"
-          disabled
+          disabled={!canTest || testing}
+          onClick={test}
           title={
-            state === 'connected'
-              ? 'Disconnect not wired in mock mode'
-              : 'Set feature flag + credentials to enable'
+            canTest
+              ? 'Run a reachability probe against this sandbox source'
+              : liveProbeViaApi
+              ? 'Live connectors are probed via the authenticated API (GET /api/v1/connectors?probe=true)'
+              : state === 'disabled'
+              ? `Disabled by ${source.setup?.flagEnv ?? 'its kill-switch'}`
+              : 'Configure this connector to test it'
           }
-          className="cursor-not-allowed rounded border border-edge px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-dim"
+          className={
+            canTest
+              ? 'rounded border border-value/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-value hover:bg-value/10 disabled:opacity-60'
+              : 'cursor-not-allowed rounded border border-edge px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-dim'
+          }
         >
-          {state === 'connected' ? 'Disconnect' : 'Enable'}
+          {testing ? 'Testing…' : 'Test connection'}
         </button>
       </div>
     </div>
   );
 }
-

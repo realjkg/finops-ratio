@@ -17,7 +17,7 @@ import { ALERTS } from '@/data/alerts';
 import { MODEL_REGISTRY } from '@/data/models';
 import { allGatesPassed } from '@/lib/derive';
 import { buildAIContext, createAIClient } from '@/ai';
-import type { AIMessage } from '@/ai';
+import type { AIMessage, AIProvider } from '@/ai';
 
 export type SecondaryMode = 'value' | 'cost' | 'unit';
 export type DetailTab = 'budget' | 'models' | 'governance' | 'demand' | 'unit' | 'alerts';
@@ -32,7 +32,7 @@ export interface AIChatMessage {
   content: string;
   timestamp: string;
   initiativesReferenced?: string[];
-  provider?: 'claude' | 'openai' | 'openllm' | 'mock';
+  provider?: AIProvider;
 }
 
 export interface Filters {
