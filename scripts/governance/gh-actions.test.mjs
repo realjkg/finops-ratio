@@ -444,13 +444,61 @@ describe('N2: CI via the Actions jobs API', () => {
     });
     expect((await runEligibility({ github, core: fakeCore(), context: prCtx(pr) }))[0].eligible).toBe(false);
   });
-  it('several ci.yml pull_request runs: the newest run (highest id) is used', async () => {
+  it('L1: several qualifying ci.yml runs: EVERY one is checked (all succeed → eligible)', async () => {
     const { github, pr } = fakeGithub({ workflowRuns: [
       { id: 800, check_suite_id: 1, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, pull_requests: [{ number: 5, base: { ref: 'main' } }] },
       { id: 950, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, pull_requests: [{ number: 5, base: { ref: 'main' } }] },
     ] });
-    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
-    expect(github.calls.find((c) => c.name === 'actions.listJobsForWorkflowRun').params.run_id).toBe(950);
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    const ids = github.calls.filter((c) => c.name === 'actions.listJobsForWorkflowRun').map((c) => c.params.run_id).sort();
+    expect(ids).toEqual([800, 950]);
+    expect(rows[0].eligible).toBe(true);
+  });
+  it('L1 probe: a newer run listing this PR (triggered by a PR into evilbase) passes, the real run fails ⇒ ineligible', async () => {
+    const { github, pr } = fakeGithub({
+      workflowRuns: [
+        { id: 900, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, pull_requests: [{ number: 5, base: { ref: 'main' } }] },
+        { id: 990, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, pull_requests: [{ number: 5, base: { ref: 'main' } }, { number: 6, base: { ref: 'evilbase' } }] },
+      ],
+      ciJobs: (p) => (p.run_id === 900
+        ? [{ id: 3, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'failure', run_attempt: 1 }]
+        : [{ id: 99, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', run_attempt: 1 }]),
+      checkRuns: [
+        { id: 99, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: CI_SUITE } },
+        { id: 7, name: 'copilot-pull-request-reviewer', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: COPILOT_SUITE } },
+      ],
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+    expect(rows[0].reasons.join('\n')).toMatch(/id 3\b/);
+  });
+  it('L1: a qualifying run without the CI job ⇒ ineligible even if another run passed', async () => {
+    const { github, pr } = fakeGithub({
+      workflowRuns: [
+        { id: 900, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, pull_requests: [{ number: 5, base: { ref: 'main' } }] },
+        { id: 901, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, pull_requests: [{ number: 5, base: { ref: 'main' } }] },
+      ],
+      ciJobs: (p) => (p.run_id === 900
+        ? [{ id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', run_attempt: 1 }]
+        : []),
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+    expect(rows[0].reasons.join('\n')).toMatch(/901/);
+  });
+  it('L1: another open PR with the same head SHA ⇒ ineligible ("head SHA shared with PR #n")', async () => {
+    const { github, pr } = fakeGithub();
+    const other = { ...pr, number: 6, base: { ref: 'evilbase', repo: { full_name: 'o/r' } } };
+    github.rest.pulls.list = async (params) => { github.calls.push({ name: 'pulls.list', params }); return { data: [pr, other] }; };
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+    expect(rows[0].reasons).toContain('head SHA shared with PR #6');
+  });
+  it('L1: open PRs with other head SHAs do not block', async () => {
+    const { github, pr } = fakeGithub();
+    const other = { ...pr, number: 6, head: { ...pr.head, sha: MOVED } };
+    github.rest.pulls.list = async () => ({ data: [pr, other] });
+    expect((await runEligibility({ github, core: fakeCore(), context: prCtx(pr) }))[0].eligible).toBe(true);
   });
 });
 
@@ -490,6 +538,20 @@ describe('P1: CI run must belong to this PR (base main)', () => {
     expect(rows[0].eligible).toBe(false);
     expect(rows[0].reasons.join('\n')).toMatch(/id 3\b/);
     expect(gql(github, 'enablePullRequestAutoMerge')).toHaveLength(0);
+  });
+});
+
+describe('L2: unusual git modes', () => {
+  it('challenger probe: docs/evil.md as a gitlink (tree mode 160000) ⇒ restricted unusual-mode', async () => {
+    const files = [{ filename: 'docs/evil.md', status: 'added', patch: '+Subproject commit 0123456789abcdef0123456789abcdef01234567', changes: 1 }];
+    const { github, pr } = fakeGithub({ labels: [], files, tree: [{ path: 'docs/evil.md', mode: '160000', type: 'commit' }] });
+    const r = await runClassify({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(r.risk).toBe('restricted');
+    expect(r.reasons).toContainEqual({ path: 'docs/evil.md', class: 'unclassified', rule: 'unusual-mode' });
+  });
+  it('executable mode 100755 is a regular file', async () => {
+    const { github, pr } = fakeGithub({ labels: [], tree: [{ path: 'README.md', mode: '100755', type: 'blob' }] });
+    expect((await runClassify({ github, core: fakeCore(), context: prCtx(pr) })).risk).toBe('low');
   });
 });
 

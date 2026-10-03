@@ -28,6 +28,7 @@ function state(overrides = {}) {
     ],
     // N2: jobs of the latest attempt of the ci.yml pull_request run for the head SHA.
     ciJobs: [{ id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success' }],
+    sharedHeadWith: [],
     statuses: [],
     reviews: [{ login: 'copilot-pull-request-reviewer[bot]', userType: 'Bot', commitId: HEAD, state: 'COMMENTED' }],
     unresolvedThreads: 0,
@@ -168,6 +169,26 @@ describe('decideEligibility', () => {
     const d = decideEligibility(s);
     expect(d.eligible).toBe(false);
     expect(why(d)).toMatch(/id 3\b/);
+  });
+
+  it('L1: every qualifying run\'s CI job must succeed — one failing CI job among several ⇒ ineligible', () => {
+    const s = state({ ciJobs: [
+      { id: 1, name: CI.name, status: 'completed', conclusion: 'success' },
+      { id: 2, name: CI.name, status: 'completed', conclusion: 'failure' },
+    ] });
+    s.checkRuns.push({ id: 2, ...CI, status: 'completed', conclusion: 'failure' });
+    const d = decideEligibility(s);
+    expect(d.eligible).toBe(false);
+    expect(why(d)).toMatch(/id 2\b/);
+  });
+  it('L1: head SHA shared with another open PR ⇒ ineligible', () => {
+    const d = decideEligibility(state({ sharedHeadWith: [6, 9] }));
+    expect(d.eligible).toBe(false);
+    expect(d.reasons).toContain('head SHA shared with PR #6');
+    expect(d.reasons).toContain('head SHA shared with PR #9');
+  });
+  it('L1: unknown sharing state (null) ⇒ ineligible', () => {
+    expect(decideEligibility(state({ sharedHeadWith: null })).eligible).toBe(false);
   });
 
   it('N2: a CI-named check run whose id is not a ci.yml job is treated as a spoof', () => {

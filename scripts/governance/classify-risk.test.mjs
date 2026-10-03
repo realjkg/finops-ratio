@@ -362,6 +362,35 @@ describe('challenger round 3', () => {
   });
 });
 
+describe('final lows', () => {
+  for (const mode of ['160000', '040000', '100664', '120000']) {
+    it(`L2: tree mode ${mode} ⇒ restricted unusual-mode`, () => {
+      expect(classify({ files: [{ path: 'docs/evil.md', mode }] }).reasons)
+        .toContainEqual({ path: 'docs/evil.md', class: 'unclassified', rule: 'unusual-mode' });
+    });
+  }
+  for (const mode of ['100644', '100755']) {
+    it(`L2: regular mode ${mode} stays low`, () => {
+      expect(classify({ files: [{ path: 'docs/a.md', mode }] }).risk).toBe('low');
+    });
+  }
+  it('L2: a gitlink in a git diff (new file mode 160000) ⇒ restricted unusual-mode', () => {
+    const diff = 'diff --git a/docs/evil.md b/docs/evil.md\nnew file mode 160000\nindex 0000000..0123456\n--- /dev/null\n+++ b/docs/evil.md\n@@ -0,0 +1 @@\n+Subproject commit 0123456789abcdef0123456789abcdef01234567\n';
+    expect(classify({ files: [{ path: 'docs/evil.md' }], diff }).reasons)
+      .toContainEqual({ path: 'docs/evil.md', class: 'unclassified', rule: 'unusual-mode' });
+  });
+  for (const p of ['.continue/rules/x.md', '.roo/rules/x.md', '.kiro/steering/x.md', '.junie/guidelines.md', 'src/components/.hidden/x.md']) {
+    it(`L3: Markdown in a dot-directory fails closed: ${p}`, () => {
+      const r = classify(paths(p));
+      expect(r.risk).toBe('restricted');
+      expect(r.reasons).toContainEqual({ path: p, class: 'unclassified', rule: 'fail-closed-default' });
+    });
+  }
+  it('L3: ordinary Markdown is still low', () => {
+    expect(classify(paths('README.md', 'notes/plan.md')).risk).toBe('low');
+  });
+});
+
 describe('CLI', () => {
   it('prints JSON for positional paths and a diff file', async () => {
     const { spawnSync } = await import('node:child_process');
