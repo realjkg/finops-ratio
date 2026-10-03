@@ -34,6 +34,7 @@ describe('loadWorkerConfig', () => {
       ['RATIO_DOCTOR_MAX_STALENESS_HOURS', '0'],
       ['RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS', '-1'],
       ['RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS', '1.5'],
+      ['RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS', String(24 * 366 + 1)],
     ]) {
       expect(() => loadWorkerConfig({ ...base, [k]: v }), `${k}=${v}`).toThrow(expect.objectContaining({ code: 'CONFIG_INVALID' }));
     }

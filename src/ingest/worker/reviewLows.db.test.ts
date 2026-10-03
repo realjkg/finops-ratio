@@ -289,5 +289,39 @@ describe('round 2 L3: an abandoned run that only recorded a rejection memo', () 
     expect(lost).toMatchObject({ status: 'abandoned', error_code: 'LEASE_EXPIRED_AFTER_COMMIT' });
     expect(lost.error_detail).toMatch(/1 publication/);
   });
+
+  it('a memo AND a progress-only checkpoint write (an unchanged refresh, no publication): LEASE_EXPIRED_AFTER_COMMIT, the memo counted', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const P3 = '2026-09-01';
+    const X = csvGz(rowsOf(P, 2, '1.00', 'x'));
+    expect((await sync(s, new FakeFocusSource([{ billingPeriod: P, artifacts: [{ name: 'r/x.csv.gz', bytes: X }] }]))).status).toBe('succeeded');
+    const A = csvGz(rowsOf(P2, 40, '1.00', 'a'));
+    const B = csvGz(rowsOf(P2, 40, '1.00', 'b'));
+    class UnderReportingP2 extends FakeFocusSource {
+      async listPeriods(range?: PeriodRange): Promise<PeriodListing[]> {
+        return (await super.listPeriods(range)).map((l) =>
+          l.ok && l.set.billingPeriod === P2 ? { ...l, set: { ...l.set, artifacts: l.set.artifacts.map((a) => ({ ...a, byteSize: 1 })) } } : l,
+        );
+      }
+    }
+    const source = new UnderReportingP2([
+      { billingPeriod: P, artifacts: [{ name: 'r/x.csv.gz', bytes: X }] }, // unchanged: refreshed (a progress write), nothing published
+      { billingPeriod: P2, artifacts: [{ name: 'r/a.csv.gz', bytes: A }, { name: 'r/b.csv.gz', bytes: B }] }, // memo
+      { billingPeriod: P3, artifacts: [{ name: 'r/c.csv.gz', bytes: csvGz(rowsOf(P3, 2, '1.00')) }] }, // lease lost here
+    ]);
+    const settings = { limits: { maxBatchBytes: Math.floor((A.length + B.length) * 0.75) } } as RunSyncOptions['settings'];
+    const hooks = {
+      beforePublish: async ({ billingPeriod }: { billingPeriod: string }) => {
+        if (billingPeriod === P3) await expireLeases(t.db.pool, s.tenantId, s.sourceId);
+      },
+    };
+    await expect(sync(s, source, { settings, hooks, mode: 'backfill', range: { from: P, to: P3 } })).rejects.toMatchObject({ code: 'LEASE_LOST' });
+    const lostId = (await runsOf(t.db.pool, s.tenantId, s.sourceId))[1].id;
+    await sync(s, new FakeFocusSource([]));
+    const lost = (await runsOf(t.db.pool, s.tenantId, s.sourceId)).find((r) => r.id === lostId)!;
+    expect(lost).toMatchObject({ status: 'abandoned', error_code: 'LEASE_EXPIRED_AFTER_COMMIT' });
+    expect(lost.error_detail).toMatch(/0 publications/);
+    expect(lost.error_detail).toMatch(/checkpoint written and 1 rejection memo/);
+  });
 });
 
