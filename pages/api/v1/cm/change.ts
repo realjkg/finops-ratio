@@ -22,6 +22,13 @@ import type {
   CMStatusResult,
 } from '@/cm/CMClient';
 import { MockCMClient } from '@/cm/MockCMClient';
+import {
+  INVALID_JIRA_REF_MESSAGE,
+  INVALID_SERVICENOW_REF_MESSAGE,
+  InvalidTicketRefError,
+  isJiraIssueKey,
+  isServiceNowNumber,
+} from '@/cm/ticketRef';
 import { logUpstreamError, readJsonBody, statusReason } from '@/costsource/transports/redact';
 import {
   withGateway,
@@ -35,6 +42,12 @@ import {
 
 interface CMAdapter {
   readonly provider: CMProvider;
+  /**
+   * Grammar check for a caller-supplied ticketRef, run BEFORE any URL is built.
+   * Returns null when valid, else a fixed message that never echoes the input.
+   * Absent for the mock (it builds no request a ref could steer).
+   */
+  invalidRefMessage?(ticketRef: string): string | null;
   createChange(finding: CMFindingInput, action: string): Promise<CMTicketResult>;
   attachReference(input: { provider: CMProvider; ticketRef: string }): Promise<CMReferenceRecord>;
   getStatus(ticketRef: string): Promise<CMStatusResult>;
@@ -57,6 +70,23 @@ class JiraAdapter implements CMAdapter {
 
   private issueUrl(path = ''): string {
     return `${this.baseUrl.replace(/\/$/, '')}/rest/api/2/${path}`;
+  }
+
+  invalidRefMessage(ticketRef: string): string | null {
+    return isJiraIssueKey(ticketRef) ? null : INVALID_JIRA_REF_MESSAGE;
+  }
+
+  /**
+   * The only way a ref enters a Jira URL: grammar-checked, then encoded
+   * (defence in depth — a valid key encodes to itself).
+   */
+  private issuePath(ticketRef: string): string {
+    if (!isJiraIssueKey(ticketRef)) throw new InvalidTicketRefError(INVALID_JIRA_REF_MESSAGE);
+    return `issue/${encodeURIComponent(ticketRef)}`;
+  }
+
+  private browseUrl(ticketRef: string): string {
+    return `${this.baseUrl.replace(/\/$/, '')}/browse/${encodeURIComponent(ticketRef)}`;
   }
 
   async createChange(finding: CMFindingInput, action: string): Promise<CMTicketResult> {
@@ -91,7 +121,7 @@ class JiraAdapter implements CMAdapter {
     return {
       provider: 'jira',
       ticketRef,
-      url: `${this.baseUrl.replace(/\/$/, '')}/browse/${ticketRef}`,
+      url: this.browseUrl(ticketRef),
       status: 'created',
       createdAt: new Date().toISOString(),
     };
@@ -102,28 +132,27 @@ class JiraAdapter implements CMAdapter {
     ticketRef: string;
   }): Promise<CMReferenceRecord> {
     // Validate the ref exists before recording it as the audit trail.
-    const res = await fetch(this.issueUrl(`issue/${input.ticketRef}`), {
+    const res = await fetch(this.issueUrl(this.issuePath(input.ticketRef)), {
       headers: { Authorization: this.authHeader },
     });
     if (!res.ok) {
-      throw new Error(
-        `Jira ref not found or inaccessible: ${input.ticketRef} (${res.status})`,
-      );
+      // Never quote the ref: errors are for logs, not an echo of caller input.
+      throw new Error(`Jira ref not found or inaccessible (${res.status})`);
     }
     return {
       provider: 'jira',
       ticketRef: input.ticketRef,
-      url: `${this.baseUrl.replace(/\/$/, '')}/browse/${input.ticketRef}`,
+      url: this.browseUrl(input.ticketRef),
       createdAt: new Date().toISOString(),
     };
   }
 
   async getStatus(ticketRef: string): Promise<CMStatusResult> {
-    const res = await fetch(this.issueUrl(`issue/${ticketRef}`), {
+    const res = await fetch(this.issueUrl(this.issuePath(ticketRef)), {
       headers: { Authorization: this.authHeader },
     });
     if (!res.ok) {
-      throw new Error(`Jira getStatus failed (${res.status}): ${ticketRef}`);
+      throw new Error(`Jira getStatus failed (${res.status} ${statusReason(res.status)})`);
     }
     const data = await readJsonBody<{
       fields: { status: { name: string }; updated: string };
@@ -150,6 +179,25 @@ class ServiceNowAdapter implements CMAdapter {
 
   private get baseUrl(): string {
     return `https://${this.instance}/api/now`;
+  }
+
+  invalidRefMessage(ticketRef: string): string | null {
+    return isServiceNowNumber(ticketRef) ? null : INVALID_SERVICENOW_REF_MESSAGE;
+  }
+
+  /**
+   * The only way a ref enters a ServiceNow URL: grammar-checked (no encoded-
+   * query operators such as `^OR`), then encoded as defence in depth.
+   */
+  private numberParam(ticketRef: string): string {
+    if (!isServiceNowNumber(ticketRef)) {
+      throw new InvalidTicketRefError(INVALID_SERVICENOW_REF_MESSAGE);
+    }
+    return encodeURIComponent(ticketRef);
+  }
+
+  private recordUrl(ticketRef: string): string {
+    return `https://${this.instance}/nav_to.do?uri=change_request.do?number=${encodeURIComponent(ticketRef)}`;
   }
 
   private get authHeader(): string {
@@ -188,7 +236,7 @@ class ServiceNowAdapter implements CMAdapter {
     return {
       provider: 'servicenow',
       ticketRef,
-      url: `https://${this.instance}/nav_to.do?uri=change_request.do?number=${ticketRef}`,
+      url: this.recordUrl(ticketRef),
       status: 'created',
       createdAt: new Date().toISOString(),
     };
@@ -200,7 +248,7 @@ class ServiceNowAdapter implements CMAdapter {
   }): Promise<CMReferenceRecord> {
     const url =
       `${this.baseUrl}/table/change_request` +
-      `?sysparm_query=number=${encodeURIComponent(input.ticketRef)}` +
+      `?sysparm_query=number=${this.numberParam(input.ticketRef)}` +
       `&sysparm_fields=number,sys_id&sysparm_limit=1`;
     const res = await fetch(url, {
       headers: { Accept: 'application/json', Authorization: this.authHeader },
@@ -210,12 +258,12 @@ class ServiceNowAdapter implements CMAdapter {
     }
     const data = await readJsonBody<{ result: Array<{ number: string }> }>(res, 'ServiceNow');
     if (data.result.length === 0) {
-      throw new Error(`ServiceNow ref not found: ${input.ticketRef}`);
+      throw new Error('ServiceNow ref not found');
     }
     return {
       provider: 'servicenow',
       ticketRef: input.ticketRef,
-      url: `https://${this.instance}/nav_to.do?uri=change_request.do?number=${input.ticketRef}`,
+      url: this.recordUrl(input.ticketRef),
       createdAt: new Date().toISOString(),
     };
   }
@@ -223,7 +271,7 @@ class ServiceNowAdapter implements CMAdapter {
   async getStatus(ticketRef: string): Promise<CMStatusResult> {
     const url =
       `${this.baseUrl}/table/change_request` +
-      `?sysparm_query=number=${encodeURIComponent(ticketRef)}` +
+      `?sysparm_query=number=${this.numberParam(ticketRef)}` +
       `&sysparm_fields=number,state,sys_updated_on&sysparm_limit=1`;
     const res = await fetch(url, {
       headers: { Accept: 'application/json', Authorization: this.authHeader },
@@ -235,7 +283,7 @@ class ServiceNowAdapter implements CMAdapter {
       result: Array<{ state: string; sys_updated_on: string }>;
     }>(res, 'ServiceNow');
     const record = data.result[0];
-    if (!record) throw new Error(`ServiceNow ref not found: ${ticketRef}`);
+    if (!record) throw new Error('ServiceNow ref not found');
     return {
       ticketRef,
       status: record.state,
@@ -376,7 +424,8 @@ export function validateCMBody(body: unknown): GatewayValidation {
 
 // --- Guarded handler ---------------------------------------------------------
 // The gateway owns: 405, 413, 401, 429, 400, 500 envelopes.
-// This handler owns: 422 misconfigured provider and 200 success.
+// This handler owns: 422 misconfigured provider, 400 invalid ticketRef (fixed
+// message, input never echoed) and 200 success.
 
 async function changeHandler(
   req: NextApiRequest,
@@ -396,6 +445,27 @@ async function changeHandler(
     throw err; // unexpected — let the gateway return a 500 envelope.
   }
 
+  // ticketRef grammar gate — BEFORE any adapter builds a URL from it.
+  if (body.operation === 'attach' || body.operation === 'status') {
+    const invalid = adapter.invalidRefMessage?.(body.ticketRef) ?? null;
+    if (invalid) {
+      sendError(res, 400, 'invalid_request', invalid);
+      return;
+    }
+  }
+
+  try {
+    await dispatch(adapter, body, res);
+  } catch (err) {
+    if (err instanceof InvalidTicketRefError) {
+      sendError(res, 400, 'invalid_request', err.message);
+      return;
+    }
+    throw err; // the gateway returns its generic 500 envelope.
+  }
+}
+
+async function dispatch(adapter: CMAdapter, body: CMRequestBody, res: NextApiResponse): Promise<void> {
   switch (body.operation) {
     case 'create': {
       const result = await adapter.createChange(body.finding, body.action);
