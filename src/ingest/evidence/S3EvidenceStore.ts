@@ -68,7 +68,7 @@ export class S3EvidenceStore implements EvidenceStore {
       const sink = new Writable({
         write(chunk: Buffer, _enc, cb) {
           h.update(chunk);
-          onProgress?.();
+          if (!stallMs) onProgress?.(); // with a watchdog, its data callback feeds progress
           cb();
         },
       });
