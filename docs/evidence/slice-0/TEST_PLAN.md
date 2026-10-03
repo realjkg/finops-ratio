@@ -303,3 +303,12 @@ All in `foundation.db.test.ts`.
 | L2 | `testing/fixtures.test.ts` (fast) | `a COMMIT answered with ROLLBACK makes the seed throw (nothing was written)`, positive control |
 | L3 | `testing/vitestConfigs.test.ts` (fast) | `the known serial files exist and every *.serial.db.test.ts runs in the serial phase only`, `npm run test:db runs the parallel phase, then the serial phase` |
 | Spawn timeouts | `cli.process.test.ts` | the three existing tests, now with an explicit 60 s timeout (assertions unchanged) |
+
+## Round 17 — challenger round-16 Lows (tests committed red in e91567d)
+
+| Item | File | Test name(s) |
+|---|---|---|
+| L1 owner × database allowed | `memberPrivileges.db.test.ts` | `database: CREATE, CONNECT and TEMPORARY granted to a LOGIN member of ratio_owner are allowed (owner decision)` (replaces the skipped case; it passes on arrival, and mutations O1 and O2 show it can fail) |
+| L2 more predefined roles | `memberPrivileges.db.test.ts` | `<pg_read_all_data / pg_write_all_data / pg_signal_backend / pg_create_subscription>: a LOGIN member of <ratio_worker / ratio_reader / ratio_owner> that can assume it (<default / SET only / transitive SET only> edge) is refused` (36), `the round-16 server-file roles stay refused over a SET-only edge, for an owner member too` |
+| L3 quoted identifiers | `migrationFiles.test.ts` | `contract: …` (9 cases: `"t1"` vs `"T1"`, both directions; `"T1"` vs unquoted `T1`; unquoted `T1` vs `"T1"`; schema, type and function in both directions), `expand: …` (6 cases: same quoted case; quoted lower-case vs unquoted, both directions; schema; function with argument types) |
+| L3 follow-up (surviving mutant) | `migrationFiles.test.ts` (red in e9caf6b) | `contract:` `"ratio.t1"` vs `ratio.t1` and vice versa, `"ratio.t1"` vs `ratio_t1`, `"a b"` vs `a_b`; `expand:` `"ratio.t1"` vs `"ratio.t1"`, unquoted `ratio.É` vs `ratio."É"` |

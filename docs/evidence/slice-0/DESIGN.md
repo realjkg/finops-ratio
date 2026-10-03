@@ -962,3 +962,79 @@ CASCADE` after apply left `--status` at `matches: true`.
   (initdb into `/tmp/r16pg`, 127.0.0.1:55520, TCP only, no Unix socket). The
   cluster was stopped and deleted afterwards. The shared 55432 cluster was not
   used.
+
+## 26. Round 17 — challenger round-16 Lows
+
+- **Owner × database is now an explicit allowed case.** The per-category test
+  used to skip this case with `continue`. It is now a generated test: an
+  owner member is granted CREATE, CONNECT and TEMPORARY on the database, the
+  test confirms it holds all three, and the check reports nothing for it.
+- **More predefined roles are refused** (`REFUSED_PREDEFINED_ROLES`, which
+  replaces round 16's `SERVER_FILE_ROLES`).
+  - The rule: a member of any ratio role, owner side included, must not be
+    able to assume one of these roles. Any membership path counts: INHERIT,
+    SET or ADMIN, at any depth. A SET-only edge cannot be seen by
+    `has_*_privilege`, so the rule matches the role by name.
+  - The list now has seven roles:
+    - `pg_read_server_files`, `pg_write_server_files`,
+      `pg_execute_server_program` (round 16);
+    - `pg_read_all_data`, `pg_write_all_data`: data-wide access that bypasses
+      per-object ACLs;
+    - `pg_signal_backend`: cancels or terminates other sessions, including
+      the migrator's and the worker's;
+    - `pg_create_subscription`: logical replication into the database.
+  - `pg_read_all_data` for an owner member used to pass. The owner side may
+    hold everything in `ratio`, and the role adds little elsewhere.
+  - The message is `role X (member of P) can assume <role> (<why>; never
+    reviewed)`.
+- **Identifier rules in the PUBLIC-revoke classifier.** Round 16 compared
+  upper-cased names, so `CREATE TABLE ratio."t1"` followed by `REVOKE … ON
+  ratio."T1"` counted as revoking a created object. Names are now compared
+  under PostgreSQL's rules (`canonIdent`):
+  - a name is split into its dot-separated parts;
+  - an **unquoted** part folds ASCII letters to lower case. PostgreSQL folds
+    only ASCII in multibyte encodings, so unquoted `É` is `"É"` (verified on
+    PG16);
+  - a **quoted** part is taken verbatim. `""` is a quote, and a dot inside
+    quotes belongs to the name;
+  - so `ratio.T1`, `RATIO.t1` and `"ratio"."t1"` are one object, while
+    `ratio."T1"` and `"ratio.t1"` are two others;
+  - function argument types are compared word by word, the same way.
+
+  **Second defect, found through a surviving mutant.** The statement text
+  that names were read from was the *masked* SQL. The mask turns
+  non-identifier characters inside quotes into `_`, so `"ratio.t1"` read as
+  `ratio_t1` and matched an unquoted `ratio_t1`.
+  - Fix: names now come from `Statement.text`. It is the original SQL with the
+    original characters inside quoted identifiers, with whitespace collapsed
+    outside quotes, and comments and strings still masked.
+  - `splitTopLevel` and `parenGroup` now ignore commas and parentheses inside
+    quotes.
+  - Every other classifier rule still uses the upper-cased masked form.
+- **Deployment note: the owner's `CREATE` on schema `public`.** The owner side
+  may hold `schema:public:CREATE` (round 16), because the migrator creates the
+  ledger `public.schema_migrations` on its first run. The worker and reader
+  logins resolve unqualified names through the default search_path
+  (`"$user", public`). An owner login could therefore plant a function or
+  operator in `public` that shadows the one such a session meant to call.
+  Slice 0's own SQL is schema-qualified, and the check pins its own
+  search_path, but application queries might not be. Do **one** of the
+  following:
+  1. **Recommended. Drop CREATE on `public` once the ledger exists** (after
+     the first migration):
+     - if the migrator does not own the database: `REVOKE CREATE ON SCHEMA
+       public FROM <migrator>`;
+     - if it does: `REVOKE CREATE ON SCHEMA public FROM pg_database_owner`,
+       or move `public` to a NOLOGIN admin role with `ALTER SCHEMA public
+       OWNER TO …`.
+
+     Later migrations write the ledger, which the migrator owns, and need no
+     CREATE on `public`. The check then simply finds the privilege absent.
+  2. **Pin the search_path on the worker and reader logins at connection
+     time.** Use the connection string's `options=-c
+     search_path=pg_catalog,ratio`, or `SET search_path` as the first
+     statement. Do **not** use `ALTER ROLE … SET search_path`: a
+     search_path default on a member of a ratio role is refused by the
+     catalog check (round 8, `SECURITY_RELEVANT_SETTINGS`). This is
+     deliberate, because a stored default would apply to every session,
+     including hostile ones.
