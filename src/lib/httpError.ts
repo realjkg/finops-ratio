@@ -7,8 +7,10 @@
 //     fixed strings our own routes emit (SAFE_ERROR_MESSAGES), else
 //   - `: <code>` only when its code is EXACTLY one of our own codes
 //     (SAFE_ERROR_CODES), else nothing.
-// src/lib/liveClientErrors.test.ts checks that the server-side message
-// constants are on this list, so the two cannot drift silently.
+// Gateway 405 / 413 texts embed the method / size, so they stay code-only.
+// src/lib/liveClientErrors.test.ts and safeMessagesSync.test.ts check that the
+// fixed server-side messages are on this list (the latter through the real
+// routes), so the two cannot drift silently.
 
 /** Fixed messages our own API routes put in error envelopes. */
 export const SAFE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
@@ -35,7 +37,22 @@ export const SAFE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   '`type` must be one of model_switch, demand_shape, scale, budget',
   'Unknown workload',
   'Unknown model',
-  // Change management.
+  // AI chat: 422 provider_misconfigured (names the missing env var; fixed per
+  // provider, no caller input) and the 400 body contract.
+  'ANTHROPIC_API_KEY is required for AI_PROVIDER=claude',
+  'OPENAI_API_KEY is required for AI_PROVIDER=openai',
+  'MISTRAL_API_KEY is required for AI_PROVIDER=mistral',
+  'QWEN_API_KEY or DASHSCOPE_API_KEY is required for AI_PROVIDER=qwen',
+  'OPENLLM_BASE_URL and OPENLLM_MODEL are required for AI_PROVIDER=openllm',
+  'OPENLLM_BASE_URL is required for AI_PROVIDER=openllm',
+  'OPENLLM_MODEL is required for AI_PROVIDER=openllm',
+  'Body must include non-empty messages[] (max 50) and a context with initiatives (max 100), summary, and asOf',
+  // Report export.
+  "Query param 'format' must be 'pdf' or 'xlsx'",
+  // Change management: 422 provider_misconfigured, 400 body contract, 400 ref.
+  'JIRA_BASE_URL, JIRA_API_TOKEN, and JIRA_PROJECT_KEY are required for CM_PROVIDER=jira',
+  'SERVICENOW_INSTANCE, SERVICENOW_USERNAME, and SERVICENOW_PASSWORD are required for CM_PROVIDER=servicenow',
+  'Body must be one of: { operation:"create", finding, action } | { operation:"attach", provider, ticketRef } | { operation:"status", ticketRef }',
   'ticketRef is not a valid Jira issue key',
   'ticketRef is not a valid ServiceNow record number',
   // FinIO.
