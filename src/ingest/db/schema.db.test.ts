@@ -80,6 +80,36 @@ describe('schema shape', () => {
     }
   });
 
+  it('exactly the expected composite foreign keys exist', async () => {
+    // Guards against an FK being dropped or narrowed (the generic check above
+    // only inspects FKs that exist).
+    const fks = await q(
+      `SELECT con.conrelid::regclass::text || '(' ||
+              (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(con.conkey) WITH ORDINALITY k(attnum, ord)
+                 JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) || ') -> ' ||
+              con.confrelid::regclass::text || '(' ||
+              (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(con.confkey) WITH ORDINALITY k(attnum, ord)
+                 JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) || ')' AS fk
+       FROM pg_constraint con JOIN pg_namespace n ON n.oid = con.connamespace
+       WHERE n.nspname = 'ratio' AND con.contype = 'f' ORDER BY 1`,
+    );
+    expect(fks.map((r) => r.fk as string).sort()).toEqual(
+      [
+        'ratio.sources(tenant_id) -> ratio.tenants(id)',
+        'ratio.sync_runs(tenant_id,source_id) -> ratio.sources(tenant_id,id)',
+        'ratio.ingest_batches(tenant_id,source_id,run_id) -> ratio.sync_runs(tenant_id,source_id,id)',
+        'ratio.ingest_artifacts(tenant_id,source_id,batch_id) -> ratio.ingest_batches(tenant_id,source_id,id)',
+        'ratio.ingest_validation_errors(tenant_id,batch_id,artifact_sha256) -> ratio.ingest_artifacts(tenant_id,batch_id,sha256)',
+        'ratio.cost_facts(tenant_id,source_id,billing_period,batch_id) -> ratio.ingest_batches(tenant_id,source_id,billing_period,id)',
+        'ratio.cost_facts(tenant_id,batch_id,artifact_sha256) -> ratio.ingest_artifacts(tenant_id,batch_id,sha256)',
+        'ratio.period_publications(tenant_id,source_id,billing_period,batch_id) -> ratio.ingest_batches(tenant_id,source_id,billing_period,id)',
+        'ratio.period_publications(tenant_id,source_id,published_by_run_id) -> ratio.sync_runs(tenant_id,source_id,id)',
+        'ratio.source_checkpoints(tenant_id,source_id) -> ratio.sources(tenant_id,id)',
+        'ratio.source_checkpoints(tenant_id,source_id,last_run_id) -> ratio.sync_runs(tenant_id,source_id,id)',
+      ].sort(),
+    );
+  });
+
   it('money columns are unconstrained numeric and no float types exist', async () => {
     const money = [
       ['cost_facts', 'billed_cost'],
