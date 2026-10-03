@@ -19,7 +19,8 @@ export type MigrationErrorCode =
   | 'CONTRACT_NOT_ALLOWED'
   | 'DOWN_NOT_ALLOWED'
   | 'NO_DOWN'
-  | 'INVALID_STEPS';
+  | 'INVALID_STEPS'
+  | 'PRIVILEGE_MODEL_VIOLATION';
 
 export class MigrationError extends Error {
   readonly code: MigrationErrorCode;
@@ -219,17 +220,23 @@ function splitTopLevel(text: string): string[] {
   return parts;
 }
 
-type MarkerKind = 'do' | 'view' | 'function';
+type MarkerKind = 'do' | 'view' | 'function' | 'security-definer';
 
 /**
- * True when the last non-blank line before the statement is
+ * True when the comment block directly above the statement (the consecutive
+ * `--` lines after skipping blank lines) contains
  * `-- ratio:allow-<kind> <reason>` (a reviewer-visible, reasoned escape hatch).
+ * A statement may need two markers (e.g. a SECURITY DEFINER function).
  */
 function hasMarker(sql: string, start: number, kind: MarkerKind): boolean {
   const lines = sql.slice(0, start).split(/\r?\n/);
   lines.pop(); // the (possibly empty) beginning of the statement's own line
   while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
-  return lines.length > 0 && new RegExp(`^\\s*--\\s*ratio:allow-${kind}\\s+\\S`).test(lines[lines.length - 1]);
+  const re = new RegExp(`^\\s*--\\s*ratio:allow-${kind}\\s+\\S`);
+  for (let i = lines.length - 1; i >= 0 && /^\s*--/.test(lines[i]); i--) {
+    if (re.test(lines[i])) return true;
+  }
+  return false;
 }
 
 const IN_RATIO = '"?RATIO"?\\.';
@@ -241,8 +248,6 @@ const EXPAND_SIMPLE: RegExp[] = [
   /^CREATE POLICY /,
   /^CREATE TYPE /,
   /^CREATE SEQUENCE /,
-  /^CREATE VIEW /,
-  /^CREATE FUNCTION /,
   /^CREATE (CONSTRAINT )?TRIGGER /,
   /^COMMENT ON /,
   /^SET LOCAL (ROLE|SEARCH_PATH)\b/,
@@ -260,10 +265,13 @@ const READ_ONLY_GUARD_FUNCTIONS = /^SELECT PG_CATALOG\.(PG_HAS_ROLE|HAS_[A-Z_]+_
 
 function isExpandStatement(stmt: Statement, sql: string): boolean {
   const u = stmt.norm;
-  // Objects in schema ratio that can change what tenants see or what is
-  // enforced need a reasoned marker on the line above (round 3).
-  if (new RegExp(`^CREATE VIEW ${IN_RATIO}`).test(u)) return hasMarker(sql, stmt.start, 'view');
-  if (new RegExp(`^CREATE FUNCTION ${IN_RATIO}`).test(u)) return hasMarker(sql, stmt.start, 'function');
+  // Functions, procedures and views in ANY schema can change what a role can
+  // read (a new function is EXECUTE-able by PUBLIC by default) and need a
+  // reasoned marker (round 3: schema ratio; round 4: every schema). CREATE OR
+  // REPLACE and TEMP views are never expand. The runner's catalog check
+  // (privilegeModel.ts) is the backstop for what a marked object grants.
+  if (/^CREATE (FUNCTION|PROCEDURE) /.test(u)) return hasMarker(sql, stmt.start, 'function');
+  if (/^CREATE (RECURSIVE |MATERIALIZED )?VIEW /.test(u)) return hasMarker(sql, stmt.start, 'view');
   if (new RegExp(`^CREATE (CONSTRAINT )?TRIGGER .* ON (ONLY )?${IN_RATIO}`).test(u)) return hasMarker(sql, stmt.start, 'function');
   if (EXPAND_SIMPLE.some((re) => re.test(u))) return true;
   const alter = /^ALTER TABLE (IF EXISTS )?(ONLY )?\S+ (.+)$/.exec(u);
@@ -377,10 +385,13 @@ export function findForbiddenStatement(sql: string, depth = 0): string | null {
   const bodies: string[] = [];
   const masked = maskNonCode(sql, (b) => bodies.push(b));
   void masked;
-  for (const { norm } of splitStatements(sql)) {
+  for (const { norm, start } of splitStatements(sql)) {
     let u = norm;
     for (let guard = 0; guard < 8 && depth > 0 && PLPGSQL_LEAD.test(u); guard++) u = u.replace(PLPGSQL_LEAD, '');
     if (FORBIDDEN.some((re) => re.test(u))) return u;
+    // SECURITY DEFINER runs with its owner's rights for every caller: only at
+    // top level, and only with its own reasoned marker (never inside a body).
+    if (/\bSECURITY DEFINER\b/.test(u) && (depth > 0 || !hasMarker(sql, start, 'security-definer'))) return u;
     if (isUnsafeGrant(u) || isUnsafePolicy(u)) return u;
     if (/^ALTER DEFAULT PRIVILEGES\b.*\bGRANT\b.*\bTO\b.*\b(PUBLIC|"?RATIO_READER"?)\b/.test(u)) return u;
   }

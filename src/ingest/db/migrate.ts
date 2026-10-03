@@ -2,6 +2,7 @@
 // every migration in its own transaction, checksum-verified ledger.
 import type { ClientBase } from 'pg';
 import { DEFAULT_MIGRATIONS_DIR, MigrationError, loadMigrations, type MigrationFile } from './migrationFiles';
+import { assertReviewedPrivileges } from './privilegeModel';
 
 /** Arbitrary constant; advisory locks are scoped to the current database. */
 export const MIGRATION_LOCK_KEY = '7307215502148461377';
@@ -160,6 +161,8 @@ export async function migrateUp(client: ClientBase, opts: MigrateUpOptions = {})
       await inTransaction(client, async () => {
         await client.query(f.upSql);
         await client.query('RESET ROLE');
+        // Catalog, not text: refuse (and roll back) any privilege beyond the reviewed model.
+        await assertReviewedPrivileges(client, `migration ${f.version}_${f.name}`);
         await client.query(
           'INSERT INTO public.schema_migrations (version, name, checksum, down_checksum) VALUES ($1, $2, $3, $4)',
           [f.version, f.name, f.checksum, f.downChecksum],
@@ -196,6 +199,7 @@ export async function migrateDown(client: ClientBase, opts: MigrateDownOptions):
       await inTransaction(client, async () => {
         await client.query(f.downSql!);
         await client.query('RESET ROLE');
+        await assertReviewedPrivileges(client, `down migration ${f.version}_${f.name}`);
         await client.query('DELETE FROM public.schema_migrations WHERE version = $1', [f.version]);
       });
       reverted.push(f.version);
