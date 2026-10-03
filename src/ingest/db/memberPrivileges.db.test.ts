@@ -323,3 +323,33 @@ describe('round 17 (challenger L2): more predefined roles are refused when reach
     }
   });
 });
+
+describe('round 18: monitoring predefined roles are refused when reachable by a member, over ANY edge (explicit check, not the system-ACL footprint)', () => {
+  // pg_read_all_stats shows every session's pg_stat_activity.query (other
+  // tenants' statements and parameters); pg_read_all_settings every setting;
+  // pg_monitor includes both. Only pg_monitor / pg_read_all_stats carry
+  // pg_catalog ACL entries, so the system-ACL scan alone would miss
+  // pg_read_all_settings and depends on PostgreSQL's catalog grants.
+  for (const pre of ['pg_monitor', 'pg_read_all_stats', 'pg_read_all_settings']) {
+    for (const parent of ['ratio_worker', 'ratio_reader', 'ratio_owner'] as const) {
+      for (const edge of ['default', 'SET only', 'transitive SET only'] as const) {
+        it(`${pre}: a LOGIN member of ${parent} that can assume it (${edge} edge) is refused`, async () => {
+          await inTxn(async (c, n) => {
+            const app = n('app');
+            await c.query(`CREATE ROLE ${app} LOGIN IN ROLE ${parent}`);
+            expect(await problems(c)).not.toMatch(new RegExp(`${app}`));
+            if (edge === 'default') await c.query(`GRANT ${pre} TO ${app}`);
+            else if (edge === 'SET only') await c.query(`GRANT ${pre} TO ${app} WITH INHERIT FALSE, SET TRUE`);
+            else {
+              const mid = n('mid');
+              await c.query(`CREATE ROLE ${mid} NOLOGIN`);
+              await c.query(`GRANT ${pre} TO ${mid} WITH INHERIT FALSE, SET TRUE`);
+              await c.query(`GRANT ${mid} TO ${app} WITH INHERIT FALSE, SET TRUE`);
+            }
+            expect(await problems(c)).toMatch(new RegExp(`role ${app} \\(member of ${parent}\\) can assume ${pre}\\b`));
+          });
+        });
+      }
+    }
+  }
+});

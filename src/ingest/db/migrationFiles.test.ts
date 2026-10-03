@@ -10,6 +10,7 @@ import {
   findNonExpandStatement,
   findTransactionControl,
   loadMigrations,
+  canonIdent,
 } from './migrationFiles';
 
 const tmpDirs: string[] = [];
@@ -548,4 +549,21 @@ describe('round 17 (challenger L3): quoted identifiers are case-sensitive, unquo
       expect(findNonExpandStatement(t(create, revoke))).toBeNull();
     });
   }
+});
+
+describe('round 18: canonIdent output (doubled quotes)', () => {
+  it('renders every part quoted; a doubled quote inside a quoted part stays one escaped quote', () => {
+    expect(canonIdent('ratio."a""b"')).toBe('"ratio"."a""b"');
+    expect(canonIdent('"a"""')).toBe('"a"""');
+    expect(canonIdent('""""')).toBe('""""');
+    expect(canonIdent('"x"".y"')).toBe('"x"".y"'); // the dot is inside the quotes: one part
+    expect(canonIdent('RATIO."T1"')).toBe('"ratio"."T1"');
+  });
+
+  it('the classifier uses it: a doubled-quote name revoked as created is expand, a different escape is contract', () => {
+    const create = EXPAND + 'CREATE TABLE ratio."a""b" (x int);\n';
+    expect(findNonExpandStatement(create + 'REVOKE ALL ON ratio."a""b" FROM PUBLIC;\n')).toBeNull();
+    expect(findNonExpandStatement(create + 'REVOKE ALL ON ratio."a""""b" FROM PUBLIC;\n')).not.toBeNull();
+    expect(findNonExpandStatement(create + 'REVOKE ALL ON ratio."ab" FROM PUBLIC;\n')).not.toBeNull();
+  });
 });
