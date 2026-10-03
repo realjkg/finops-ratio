@@ -552,7 +552,8 @@ async function controlDisagrees(
       const r = await c.query(`SELECT artifact_name, row_count::text AS row_count FROM ratio.ingest_artifacts WHERE batch_id = $1`, [batch.id]);
       return new Map(r.rows.map((x: { artifact_name: string; row_count: string | null }) => [x.artifact_name, x.row_count]));
     });
-    for (const [name, expected] of per) if (stored.get(name) !== String(expected)) return true;
+    // Stored names are redacted (setArtifactRowCounts writes redact(name)): look them up the same way (challenger L2).
+    for (const [name, expected] of per) if (stored.get(redact(name)) !== String(expected)) return true;
   }
   return false;
 }
