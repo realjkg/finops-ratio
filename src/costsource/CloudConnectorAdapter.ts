@@ -24,6 +24,17 @@ import type {
 import { CANONICAL_FOCUS_VERSION } from './focusVersions';
 import type { RawSourceRow } from './focusRows';
 import { normalizeRows } from './normalize';
+import { redactUpstreamText } from './transports/redact';
+
+/**
+ * Second line of defence: transports already keep upstream bodies out of their
+ * errors, but anything that surfaces in health detail or a rethrown error is
+ * redacted (Bearer tokens, URL query strings / SAS, AWS key ids) anyway.
+ */
+const MAX_SURFACED_ERROR_CHARS = 1000;
+function safeErrorText(err: unknown): string {
+  return redactUpstreamText(err instanceof Error ? err.message : String(err), MAX_SURFACED_ERROR_CHARS);
+}
 import {
   connectorDescriptor,
   connectorStatusNote,
@@ -110,14 +121,19 @@ export class CloudConnectorAdapter {
         ...base,
         reachable: false,
         authed: false,
-        detail: `${this.spec.name} health check failed: ${err instanceof Error ? err.message : String(err)}`,
+        detail: `${this.spec.name} health check failed: ${safeErrorText(err)}`,
       };
     }
   }
 
   async fetchCostRows(window: CostWindow): Promise<CostRowsResult> {
     const credentials = this.requireConfigured('fetch cost rows');
-    const exportRows = await this.transportFactory(credentials).fetchExportRows(window);
+    let exportRows: RawSourceRow[];
+    try {
+      exportRows = await this.transportFactory(credentials).fetchExportRows(window);
+    } catch (err) {
+      throw new Error(safeErrorText(err));
+    }
     // Reuse the existing version-negotiation shim: the cloud's FOCUS export is
     // upgraded to the v1.4 canonical model and given Ratio's value context.
     const { rows, backfilledColumns } = normalizeRows(exportRows, this.spec.id, this.spec.focusVersion);
