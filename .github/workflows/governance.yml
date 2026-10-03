@@ -1,0 +1,180 @@
+# .github/workflows/governance.yml
+#
+# Governance track: PR risk classification + merge eligibility.
+#
+# Security model
+# - Runs ONLY on base-context events (pull_request_target, workflow_run,
+#   schedule, workflow_dispatch). The workflow definition and the scripts it
+#   runs always come from the BASE branch; PR code is never checked out or
+#   executed. The PR's file list and patches are read through the API. A PR
+#   that edits this file or scripts/governance/** is itself restricted.
+# - Fork PRs are classified (labels + report) but are NEVER auto-merge eligible,
+#   nor are PRs by authors outside OWNER/MEMBER/COLLABORATOR.
+# - `pull_request_review` is deliberately NOT used: it runs the PR head's copy
+#   of this workflow, so a PR could rewrite its own gate. Review/copilot
+#   completion is picked up by the scheduled sweep (the dynamic Copilot review
+#   workflow is not a named workflow and is not expected to emit workflow_run).
+# - GITHUB_TOKEN only, minimal per-job permissions, actions pinned to SHAs.
+#
+# Classification never fails because a PR is restricted: it labels the PR and
+# writes an exception report (job summary + one upserted PR comment).
+#
+# The eligibility job posts the REQUIRED commit status "Governance · merge
+# eligibility" on the evaluated head: success only for an eligible low-risk PR
+# or a restricted PR with a valid SHA-bound approval comment
+# (`/exception-approve <head sha>` by an admin/maintain user); failure
+# otherwise; pending while deferred. Enabling native auto-merge by hand cannot
+# bypass it. The workflow never enables auto-merge for restricted PRs.
+
+name: Governance
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled, edited]
+  # Base-context like pull_request_target (runs the default-branch workflow):
+  # evaluates a PR as soon as an approval/revoke comment is posted, edited or
+  # deleted (edits/deletions of admin commands count as revocations). The jobs
+  # only run for `/exception-` comments by OWNER/MEMBER/COLLABORATOR.
+  issue_comment:
+    types: [created, edited, deleted]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  classify:
+    name: Governance · risk classification
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: governance-classify-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read        # read base-branch scripts + branch protection flag
+      pull-requests: write  # labels on the PR
+      issues: write         # create labels, upsert the report comment
+      statuses: write       # classification status on the head SHA
+    steps:
+      - name: Checkout governance scripts from the BASE commit (never the PR head)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        # No `ref`: under pull_request_target github.sha is the tip of the base
+        # branch, so the newest reviewed rules classify the PR.
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/governance
+      - name: Classify, label, report
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const mod = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/governance/gh-actions.mjs`).href);
+            await mod.runClassify({ github, context, core });
+
+  targets:
+    name: Governance · eligibility targets
+    needs: [classify]
+    # Runs after classification on PR events, and on its own for the other
+    # triggers (where `classify` is skipped). Emits the PR numbers to evaluate.
+    if: ${{ always() && (github.event_name != 'issue_comment' || (github.event.issue.pull_request && (contains(github.event.comment.body, '/exception-') || contains(github.event.changes.body.from, '/exception-')) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      prs: ${{ steps.list.outputs.prs }}
+    steps:
+      - name: Checkout governance scripts from the base/default branch (never the PR head)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        # No `ref`: every trigger here resolves github.sha on the base/default branch.
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/governance
+      - name: List PRs to evaluate
+        id: list
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const mod = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/governance/gh-actions.mjs`).href);
+            await mod.runTargets({ github, context, core });
+
+  merge-eligibility:
+    # One matrix leg per PR, each in its own per-PR concurrency group, so a
+    # sweep never queues behind (or drops) another PR's evaluation. The newest
+    # pending evaluation of the SAME PR replaces an older pending one, which is
+    # fine: it reads the freshest state. It re-classifies the current file list
+    # itself, so it never trusts a possibly stale label alone.
+    name: Governance · merge eligibility (#${{ matrix.pr }})
+    needs: [targets]
+    if: ${{ always() && needs.targets.result == 'success' && needs.targets.outputs.prs != '[]' && (github.event_name != 'issue_comment' || (github.event.issue.pull_request && (contains(github.event.comment.body, '/exception-') || contains(github.event.changes.body.from, '/exception-')) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        pr: ${{ fromJSON(needs.targets.outputs.prs) }}
+    concurrency:
+      group: governance-pr-${{ matrix.pr }}
+      cancel-in-progress: false
+    permissions:
+      contents: write       # enable/disable auto-merge, squash-merge an already-clean PR
+      pull-requests: write  # auto-merge mutations; read reviews
+      checks: read          # check runs on the head SHA
+      statuses: write       # read statuses; post the required "Governance · merge eligibility" status
+      actions: read         # map check suites to workflow files (CI must be ci.yml)
+      issues: read          # PR comments: /exception-approve <sha> (exception path)
+    steps:
+      - name: Checkout governance scripts from the base/default branch (never the PR head)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        # No `ref`: every trigger here resolves github.sha on the base/default branch.
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/governance
+      - name: Decide and apply auto-merge
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          PR_NUMBER: ${{ matrix.pr }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const mod = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/governance/gh-actions.mjs`).href);
+            const n = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(n) || n <= 0) throw new Error(`bad PR_NUMBER ${process.env.PR_NUMBER}`);
+            await mod.runEligibility({ github, context, core, numbers: [n] });
+
+  revocations:
+    # Records a revocation straight from an edited/deleted comment event, outside
+    # the per-PR eligibility queue (keyed by comment id, never dropped by a newer
+    # evaluation of the same PR): eligibility failure first, then the permanent
+    # "Governance · exception revoked" marker. The author's role is checked in code.
+    name: Governance · revocations
+    if: ${{ github.event_name == 'issue_comment' && (github.event.action == 'edited' || github.event.action == 'deleted') && github.event.issue.pull_request && (contains(github.event.comment.body, '/exception-') || contains(github.event.changes.body.from, '/exception-')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: governance-revocation-${{ github.event.comment.id }}
+      cancel-in-progress: false
+    permissions:
+      contents: read        # base-branch scripts
+      statuses: write       # eligibility failure + revocation marker
+    steps:
+      - name: Checkout governance scripts from the base/default branch (never the PR head)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/governance
+      - name: Record revocation
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const mod = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/governance/gh-actions.mjs`).href);
+            await mod.runRevocations({ github, context, core });

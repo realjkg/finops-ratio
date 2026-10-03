@@ -1,0 +1,45 @@
+{
+  "$comment": "PR risk rules (governance track). Reviewed like code: any change to this file is itself restricted (deployment / self-protection). Globs without a '/' match the file's basename anywhere; globs with a '/' match the full repo-relative path. 'scope' limits a rule to paths matching any of the listed globs. 'added-line-regex' rules only look at lines ADDED by the diff. A path matching no restricted rule is low ONLY if it matches 'low' (and none of that entry's 'except' globs) and its diff was inspectable; everything else is restricted:unclassified (fail-closed). 'low' means HEURISTICALLY low, not proven safe.",
+  "version": 1,
+  "restricted": [
+    { "id": "migrations.paths", "class": "migrations", "kind": "path-glob", "patterns": ["**/migrations/**", "*.sql"] },
+
+    { "id": "auth_tenancy.gateway", "class": "auth_tenancy", "kind": "path-glob", "patterns": ["src/server/gateway/**"] },
+    { "id": "auth_tenancy.name", "class": "auth_tenancy", "kind": "path-regex", "pattern": "auth|tenant|rls|role", "flags": "i", "scope": ["src/**", "pages/api/**"] },
+
+    { "id": "secrets.env-file", "class": "secrets", "kind": "path-glob", "patterns": [".env*"] },
+    { "id": "secrets.aws-access-key", "class": "secrets", "kind": "added-line-regex", "pattern": "\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b" },
+    { "id": "secrets.pem-block", "class": "secrets", "kind": "added-line-regex", "pattern": "-----BEGIN" },
+    { "id": "secrets.password-assignment", "class": "secrets", "kind": "added-line-regex", "pattern": "password\\s*=", "flags": "i" },
+
+    { "id": "network_egress.transports", "class": "network_egress", "kind": "path-glob", "patterns": ["src/costsource/transports/**"] },
+    { "id": "network_egress.fetch-call", "class": "network_egress", "kind": "added-line-regex", "pattern": "\\bfetch\\s*\\(", "scope": ["src/**", "pages/**"] },
+    { "id": "network_egress.browser-and-dynamic", "class": "network_egress", "kind": "added-line-regex", "pattern": "\\b(?:sendBeacon|WebSocket|XMLHttpRequest|EventSource)\\b|\\bimport\\s*\\(|['\"]//", "scope": ["src/**", "pages/**"] },
+    { "id": "network_egress.url-literal", "class": "network_egress", "kind": "added-line-regex", "pattern": "\\b(?:https?|wss?)://[^\\s'\"`)<>]+", "flags": "i", "scope": ["src/**", "pages/**"] },
+
+    { "id": "retention.path", "class": "retention", "kind": "path-regex", "pattern": "retention|purge", "flags": "i" },
+    { "id": "retention.mention", "class": "retention", "kind": "added-line-regex", "pattern": "retention|purge", "flags": "i" },
+    { "id": "retention.delete-from", "class": "retention", "kind": "added-line-regex", "pattern": "\\bDELETE\\s+FROM\\b", "flags": "i" },
+    { "id": "retention.drop", "class": "retention", "kind": "added-line-regex", "pattern": "\\bDROP\\s+(?:TABLE|SCHEMA|DATABASE|INDEX|VIEW|MATERIALIZED|COLUMN|ROLE|POLICY|FUNCTION|TRIGGER|TYPE|SEQUENCE|OWNED|EXTENSION|CONSTRAINT)\\b", "flags": "i" },
+    { "id": "retention.truncate", "class": "retention", "kind": "added-line-regex", "pattern": "\\bTRUNCATE\\s+TABLE\\b", "flags": "i" },
+
+    { "id": "deployment.paths", "class": "deployment", "kind": "path-glob", "patterns": [".github/**", "Dockerfile*", "docker-compose*", "next.config.*", "wrangler*"] },
+    { "id": "deployment.governance-self-protection", "class": "deployment", "kind": "path-glob", "patterns": ["scripts/governance/**"] },
+
+    { "id": "financial_semantics.paths", "class": "financial_semantics", "kind": "path-glob", "patterns": ["src/costsource/**", "src/ingest/**", "src/lib/forecast*", "src/lib/budgetStatus*", "src/findings/recommendationMath*"] },
+    { "id": "financial_semantics.focus-mapping", "class": "financial_semantics", "kind": "path-regex", "pattern": "(?:^|/)[^/]*(?:focus|normaliz|reconcil)[^/]*$", "flags": "i" },
+
+    { "id": "dependencies.manifests", "class": "dependencies", "kind": "path-glob", "patterns": ["package.json", "package-lock.json", "npm-shrinkwrap.json"] },
+
+    { "id": "policy.agent-config-dirs", "class": "policy", "kind": "path-glob", "patterns": [".obvious/**", ".claude/**", ".cursor/**", ".cursorrules", ".windsurf/**", ".github/copilot*"] },
+    { "id": "policy.agent-instructions", "class": "policy", "kind": "path-regex", "pattern": "(?:^|/)(?:agents|claude|gemini|copilot-instructions|skill|conventions)\\.md$", "flags": "i" },
+
+    { "id": "routes.next-pages", "class": "routes", "kind": "path-glob", "patterns": ["pages/**", "src/pages/**"] }
+  ],
+  "low": [
+    { "id": "low.docs", "patterns": ["docs/**/*.{md,png,svg}"] },
+    { "id": "low.markdown", "patterns": ["*.md"], "except": [".*/**", "**/.*/**"] },
+    { "id": "low.ui-components", "patterns": ["src/components/**/*.{ts,tsx,js,jsx,css}"] },
+    { "id": "low.tests", "patterns": ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx", "*.test.mjs", "*.test.cjs"], "except": ["pages/**", "src/pages/**"] }
+  ]
+}
