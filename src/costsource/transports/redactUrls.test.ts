@@ -190,3 +190,54 @@ describe('scheme-relative // only after a delimiter', () => {
   });
 });
 
+// --- Round 10: quotes end the authority -------------------------------------
+
+describe('a quote ends the authority (no running into the next JSON field)', () => {
+  it.each([
+    ['two URLs in JSON', '{"api":"https://api.example.com","proxy":"http://svc:SECRETPROXY@proxy.corp:8080"}', 'https://api.example.com"'],
+    ['host then userinfo URL', '{"a":"https://host","b":"https://user:SECRETPROXY@h2/p"}', 'https://host"'],
+    ['host:443 then a proxy URL', '{"api":"https://api.x.com:443","proxy":"http://svc:SECRETPROXY@proxy:8080"}', 'https://api.x.com:443"'],
+    ['single quotes', "{'api':'https://api.example.com','proxy':'http://svc:SECRETPROXY@proxy.corp'}", "https://api.example.com'"],
+    ['backticks', '`https://api.example.com` and `http://svc:SECRETPROXY@proxy.corp`', 'https://api.example.com`'],
+    [
+      'double-encoded two URLs',
+      String.raw`{\"api\":\"https://api.example.com\",\"proxy\":\"http://svc:SECRETPROXY@proxy.corp:8080\"}`,
+      String.raw`https://api.example.com\"`,
+    ],
+    [
+      'escaped \\" boundary between URLs',
+      String.raw`\"https://a.example\",\"https://u:SECRETPROXY@b.example\"`,
+      String.raw`https://a.example\"`,
+    ],
+    [
+      'double-encoded host:443 then proxy',
+      String.raw`{\"api\":\"https:\/\/api.x.com:443\",\"proxy\":\"http:\/\/svc:SECRETPROXY@proxy:8080\"}`,
+      String.raw`https:\/\/api.x.com:443\"`,
+    ],
+  ])('%s', (_l, input, kept) => {
+    const out = redactUpstreamText(input, 1000);
+    expect(out).not.toContain('SECRETPROXY');
+    expect(out).toContain('[REDACTED]@');
+    expect(out).toContain(kept);
+  });
+
+  it('a host-only URL does not swallow the next field (cross-field over-redaction)', () => {
+    const input = '{"u":"https://host","e":"bob@corp.com"}';
+    expect(redactUpstreamText(input, 500)).toBe(input);
+    const enc = String.raw`{\"u\":\"https://host\",\"e\":\"bob@corp.com\"}`;
+    expect(redactUpstreamText(enc, 500)).toBe(enc);
+  });
+
+  it('URLs joined without a quote / space separator are each scanned', () => {
+    const out = redactUpstreamText('https://a.example,http://u:SECRETPROXY@b.example/x', 500);
+    expect(out).not.toContain('SECRETPROXY');
+    expect(out).toContain('https://a.example,http://[REDACTED]@b.example/x');
+  });
+
+  it('NTLM in JSON-escaped form (\\\\ before the user) is still redacted', () => {
+    const out = redactUpstreamText(String.raw`{"proxy":"http://CORP\\jdoe:SECRETNTLM@proxy:8080","x":"y"}`, 500);
+    expect(out).not.toContain('SECRETNTLM');
+    expect(out).toContain('"x":"y"');
+  });
+});
+
