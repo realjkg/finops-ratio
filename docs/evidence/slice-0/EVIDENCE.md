@@ -889,3 +889,81 @@ R5  local_preload_libraries removed                        KILLED
 | skip/only/todo/it.fails grep | 0 |
 | cluster state | `pg_db_role_setting` rows: 0; `ratio_probe*` roles: 0 |
 | Slice 1 compat: scratch worktree `slice/01` 1f41db1 + 79afa89 (removed) | same single `cli.ts` main-block conflict, resolved by keeping Slice 1's block; tsc 0, eslint 0, fast 1206/1206, test:db 295/295 ×2 |
+
+---
+
+# Round 10 — Copilot on 17f07d7 (2 High): the reviewed foundation must be present
+
+Base: 17f07d7, the orchestrator's merge of origin/main; `git pull --ff-only`
+was already up to date. Local commits only (not pushed). 0001 unchanged. Raw
+logs: `scratchpad/r11/`.
+
+## R10.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| df64a63 | test(ingest): failing tests for round 10 — the reviewed 0001 foundation must be present, not only free of extras | tests (red) |
+| f3f84e1 | fix(ingest): catalog check requires the reviewed 0001 foundation to be present and unaltered (round 10, Copilot Highs) | fix + generated manifest + generator script |
+| (this) | docs(evidence): Slice 0 round 10 | docs |
+
+## R10.2 Red (at df64a63)
+
+`foundation.db.test.ts` + `cli.db.test.ts`: **14 failed / 11 passed (25)**.
+- 11 attacks were APPLIED (`runner must refuse: expected null not to be null`):
+  every DROP TRIGGER, DISABLE / ENABLE REPLICA TRIGGER, NOT DEFERRABLE RT003,
+  NO FORCE / DISABLE RLS, DROP POLICY / USING (true), the no-op guard
+  function, the dropped / NOT VALID FK, the revoked view grant and
+  security_invoker, the dropped partial index, the column type change, and
+  DROP SCHEMA ratio CASCADE.
+- `--status` after an out-of-band DROP SCHEMA exited 0 with `matches: true`.
+- The manifest module was absent.
+- The positive controls passed: pre-migration, clean apply, post-down.
+
+One defect was fixed before the red commit: the first NOT DEFERRABLE fixture
+renamed the constraint trigger and recreated it under the old name. The
+trigger's pg_constraint row kept that name, so the recreate failed with 23505.
+The fixture now drops the trigger and recreates it.
+
+## R10.3 Mutation table (privilegeModel.ts; each restored with `git checkout`, tree clean after)
+
+```
+F0  foundationViolations not called                          KILLED  13 tests
+F1  ledger gating removed (required before 0001 / after down) KILLED  positive controls + 3 CLI status tests
+F2  trigger presence not required                             KILLED  3
+F3  tgenabled not compared                                    KILLED  DISABLE / ENABLE REPLICA
+F4  deferrable / initially-deferred not compared              KILLED  NOT DEFERRABLE RT003
+F5  RLS enabled/forced not compared                           KILLED
+F6  policy presence not required                              KILLED
+F6b policy USING / WITH CHECK hashes not compared             KILLED  USING (true)
+F7  function definition hash not compared                     KILLED  no-op guard function
+F8  constraint presence not required                          KILLED  dropped FK
+F8b convalidated not compared                                 SURVIVED: by design, pg_get_constraintdef prints
+                                                              "NOT VALID", so the definition hash catches it too
+                                                              (the flag is kept as belt and braces)
+F9  required grants not checked                               KILLED  revoked reader grant
+F10 view options not compared                                 KILLED  security_invoker
+F11 index presence not required                               KILLED
+F12 column presence/type not required                         KILLED
+F13 schema entry not required                                 KILLED  both DROP SCHEMA tests
+```
+
+## R10.4 Verification (main checkout at f3f84e1 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1809/1809 (includes the suites merged from origin/main) |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 185/185 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` rows 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no `ratio_manifest_*` scratch database left |
+| Slice 1 compat: scratch worktree `slice/01` 3541d6b (already contains 17f07d7) + f3f84e1 (removed) | merge clean (no conflict); tsc 0, lint 0, fast 1922/1922; test:db 310/310 in runs 1, 5 and 6 |
+
+**Compat note.** Full test:db runs 2–4 on the merge each had 18 failures, all
+in the S3-backed files (cliWorker, demo, s3Source). Every failure came from
+`InternalError 500` returned by the local SeaweedFS (`ratio-s3`) on evidence
+puts in `beforeAll`. None came from the catalog check. On the same base
+(3541d6b without this change) a full run passed 295/295. `s3Source.db.test.ts`
+alone passed on the merge 2/2, and two later full runs on the merge passed
+310/310. These are transient object-store errors.

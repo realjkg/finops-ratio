@@ -224,3 +224,24 @@ Docs-only Lows (schema table, stale gap, rollback wording) have no tests; see DE
 | L1 status | `cli.db.test.ts` | `round 9 L1: --status exits 3 for a ratio.tenant_id default on the database or on a LOGIN member of ratio_reader` |
 | L1 positive control | `reader.db.test.ts` (existing) | `reader sees zero rows with no tenant set, and an error (not data) with a malformed tenant`; also asserted (0 rows) at the start of the "threat is real" test |
 | L2 | `privileges.db.test.ts` | `lo_compat_privileges / session_preload_libraries / local_preload_libraries defaults for this database are refused` |
+
+## Round 10 — required foundation (tests committed red in df64a63, before the fix)
+
+All in `foundation.db.test.ts` (committed contract migrations on disposable
+databases) unless noted.
+
+| Rule | Test name(s) |
+|---|---|
+| manifest = fresh apply | `a fresh 0001 apply produces exactly FOUNDATION_0001 (the stored manifest)` |
+| scope (positive controls) | `positive controls: pre-migration, a clean apply and post-down all pass; status reports no privilege problem` |
+| trigger presence | `DROP TRIGGER for each guard class (RT001 child, RT002 lifecycle, RT003 publication consistency, TRUNCATE refusal)` |
+| trigger enabled | `ALTER TABLE … DISABLE TRIGGER and ENABLE REPLICA TRIGGER (built so the lexical classifier cannot see them)` |
+| RT003 timing | `a constraint trigger made NOT DEFERRABLE (RT003 timing pinned)` |
+| RLS enabled + forced | `NO FORCE ROW LEVEL SECURITY, and DISABLE ROW LEVEL SECURITY` |
+| policies | `DROP POLICY, and a policy rewritten to USING (true)` |
+| function bodies | `CREATE OR REPLACE a guard function into a no-op (owner and trigger unchanged; body pinned)` |
+| constraints | `a dropped composite tenant FK, and one re-added NOT VALID` |
+| view + reader grant | `the published view: reader grant revoked, or switched to security_invoker` |
+| indexes | `a partial unique index (one published batch per period) dropped` |
+| columns | `a 0001 column type changed` |
+| schema | `DROP SCHEMA ratio CASCADE as a migration is refused`, `DROP SCHEMA ratio CASCADE made outside the runner: status reports it (problem PRIVILEGE_MODEL_VIOLATION)`; `cli.db.test.ts`: `round 10: after 0001 is applied, DROP SCHEMA ratio CASCADE makes --status exit 3 (required foundation missing)` |

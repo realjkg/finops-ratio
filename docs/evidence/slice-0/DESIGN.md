@@ -198,6 +198,7 @@ does not bundle `pg`. `tsc --noEmit` (root tsconfig) type-checks `src/ingest`.
 | Migration leaking connection string | CLI redacts every string BEFORE JSON serialization (raw, URL-decoded, URL-encoded and JSON-escaped forms of the URL, user and password), then a backstop pass over the serialized line (round 6) | `cli.test.ts`, `cli.db.test.ts` (real pg error carrying the password); mutations H1–H5 |
 | A migration widens a role's privileges, adds a SECURITY DEFINER function, or installs a hook that runs after the check (rounds 4–5) | runner catalog check as the last statement before COMMIT (privilegeModel.ts): reviewed privilege allow-list for reader/worker, SECURITY DEFINER allow-list, no PUBLIC EXECUTE in ratio/public, reviewed triggers only, no rules/event triggers, no ledger policies, pinned role identity | `privileges.db.test.ts`; mutation tables R4/R5 |
 | A migration plants per-database / per-role setting defaults (`ALTER DATABASE … SET session_replication_role = replica`, `ALTER ROLE ratio_worker [IN DATABASE …] SET …`) that every new session inherits (round 8) | catalog check reads `pg_db_role_setting` rows that apply to this database: any setting on a ratio role, and security-relevant keys for any role here / all roles / ratio members, are refused; `--status` reports them | `privileges.db.test.ts`, `cli.db.test.ts` round 8; mutations S1–S7 |
+| A migration (or drift) REMOVES or weakens the reviewed foundation: drops/disables a guard trigger, un-forces RLS, drops or opens a policy, replaces a guard function, drops/invalidates an FK, revokes the reader's view grant, drops schema `ratio` (round 10) | while the ledger records 0001, every entry of the generated manifest `FOUNDATION_0001` must be present in the catalog (per-migration check and `--status`) | `foundation.db.test.ts`, `cli.db.test.ts` round 10; mutations F0–F13 |
 | SQL injection via tenant id | bound parameter + uuid validation | unit test |
 | **Credential holder selects another tenant** (round 2, M5) | NONE at the DB layer: the tenant is a user-settable GUC; any holder of a worker/reader credential can `set_config('ratio.tenant_id', <any uuid>, true)`. RLS/tenant isolation defends against application bugs (missing/wrong tenant), NOT against credential holders. The alternative — per-tenant DB roles/credentials — is an owner decision | characterization test `documented trust boundary…` |
 | Published data rewritten after publication (round 2, H2) | staged-only child trigger (RT001), TRUNCATE refused, batch lifecycle trigger (RT002), deferred pointer consistency (RT003), reconciliation CHECKs | `immutability.db.test.ts`; mutations M8–M11, M16–M18, M21 |
@@ -528,7 +529,8 @@ recreated (that is the intended behaviour of the checksum ledger).
   TO PROGRAM as superuser, dblink) can have effects outside the transaction;
   migrations are reviewed and contract needs `--allow-contract`. Trigger
   function bodies of the reviewed triggers are pinned by name and owner, not
-  by body hash.
+  by body hash. *(Superseded in round 10: function definitions are pinned by
+  hash in the required-foundation manifest, §19.)*
 
 ## 15. Round 6 — Copilot review of 453377e (High + 3 doc Lows)
 
@@ -628,3 +630,45 @@ recreated (that is the intended behaviour of the checksum ledger).
   every migration's check and in `--status`.
 - **L2.** `lo_compat_privileges`, `session_preload_libraries` and
   `local_preload_libraries` join the security-relevant keys.
+
+## 19. Round 10 — Copilot on 17f07d7: the reviewed foundation must be PRESENT
+
+The catalog check refused extras but never required the reviewed objects:
+`DROP TRIGGER child_of_staged_batch ON ratio.cost_facts` in a contract
+migration produced no extra catalog row and committed, and `DROP SCHEMA ratio
+CASCADE` after apply left `--status` at `matches: true`.
+
+- **Manifest.** `foundationSnapshot()` (privilegeModel.ts) renders every 0001
+  object as one normalized line: the schema owner; each table (owner, RLS
+  enabled AND forced); each column (type, NOT NULL, md5 of the default);
+  each policy (table, name, command, permissive, roles, md5 of USING / WITH
+  CHECK); each trigger (table, function, `tgenabled = 'O'`, `tgtype` =
+  timing/events/level, deferrable, initially deferred — so RT003 stays
+  DEFERRABLE INITIALLY DEFERRED); each function in `ratio` (owner, SECURITY
+  DEFINER flag, md5 of `pg_get_functiondef` — body, `proconfig`, volatility;
+  this pins the trigger and tenant function bodies); the view (owner,
+  reloptions incl. `security_barrier` / `security_invoker`, md5 of the view
+  definition); each constraint (type, `convalidated`, md5 of the definition);
+  each index (md5 of the definition); and the reader/worker ratio-scope
+  grants (e.g. the reader's SELECT on the view). Definitions are hashed from
+  PostgreSQL's own deparse with `search_path = pg_catalog, pg_temp`.
+- **Generated, not hand-written.** `FOUNDATION_0001` (foundationManifest.ts,
+  306 entries) is produced by `scripts/ingest/generate-foundation-manifest.mjs`
+  from a fresh apply of 0001 (run after `npm run worker:build`; the script
+  applies 0001 directly in a scratch database and drops it). A DB test asserts
+  that a fresh apply equals the stored constant, so they cannot drift
+  silently. The hashes are PostgreSQL-16 deparse output (CI and local are 16);
+  a major-version upgrade regenerates the manifest.
+- **Rule.** When (and only when) the ledger records `0001`, every manifest
+  entry must be present; each missing or altered one is reported as
+  `required 0001 object missing or altered: <entry>`, most significant first
+  (schema, table, trigger, policy, function, view, privilege, constraint,
+  index, column), by every migration's check and by `migrate --status`
+  (exit 3). Before 0001 is applied, and after it is reverted, absence is fine.
+  Extra objects added by later migrations are not foundation violations (the
+  privilege/hook/setting rules govern them); a later migration that
+  intentionally changes a 0001 object must regenerate the manifest in the same
+  reviewed change.
+- `convalidated` is pinned explicitly although `pg_get_constraintdef` already
+  prints `NOT VALID` for an unvalidated constraint (so the definition hash
+  catches it too; see the mutation table).
