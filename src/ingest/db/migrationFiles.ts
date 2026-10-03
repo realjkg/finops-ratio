@@ -61,7 +61,7 @@ export function sha256Hex(data: Buffer | string): string {
  * match the original). Quoted identifiers keep their quotes and their
  * identifier characters (anything else becomes `_`), so they stay one token.
  */
-export function maskNonCode(sql: string): string {
+export function maskNonCode(sql: string, onDollarBody?: (body: string) => void): string {
   const out = sql.split('');
   const n = sql.length;
   const blank = (from: number, to: number) => {
@@ -141,6 +141,7 @@ export function maskNonCode(sql: string): string {
         const tag = m[0];
         const end = sql.indexOf(tag, i + tag.length);
         const stop = end === -1 ? n : end + tag.length;
+        if (onDollarBody) onDollarBody(sql.slice(i + tag.length, end === -1 ? n : end));
         // keep a `$ … $` token so the statement still shows a body was here
         blank(i + 1, stop - 1);
         out[i] = '$';
@@ -218,14 +219,20 @@ function splitTopLevel(text: string): string[] {
   return parts;
 }
 
-const ALLOW_DO_RE = /^\s*--\s*ratio:allow-do\s+\S/;
+type MarkerKind = 'do' | 'view' | 'function';
 
-function hasAllowDoMarker(sql: string, start: number): boolean {
+/**
+ * True when the last non-blank line before the statement is
+ * `-- ratio:allow-<kind> <reason>` (a reviewer-visible, reasoned escape hatch).
+ */
+function hasMarker(sql: string, start: number, kind: MarkerKind): boolean {
   const lines = sql.slice(0, start).split(/\r?\n/);
-  lines.pop(); // the (possibly empty) beginning of the DO statement's own line
+  lines.pop(); // the (possibly empty) beginning of the statement's own line
   while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
-  return lines.length > 0 && ALLOW_DO_RE.test(lines[lines.length - 1]);
+  return lines.length > 0 && new RegExp(`^\\s*--\\s*ratio:allow-${kind}\\s+\\S`).test(lines[lines.length - 1]);
 }
+
+const IN_RATIO = '"?RATIO"?\\.';
 
 const EXPAND_SIMPLE: RegExp[] = [
   /^CREATE TABLE /,
@@ -242,6 +249,7 @@ const EXPAND_SIMPLE: RegExp[] = [
 ];
 
 const EXPAND_ALTER_TABLE_ACTIONS: RegExp[] = [
+  // ADD COLUMN ... NOT NULL additionally needs a DEFAULT (checked in isExpandStatement)
   /^ADD COLUMN /,
   /^ADD CONSTRAINT \S+ .* NOT VALID$/,
   /^VALIDATE CONSTRAINT \S+$/,
@@ -252,9 +260,21 @@ const READ_ONLY_GUARD_FUNCTIONS = /^SELECT PG_CATALOG\.(PG_HAS_ROLE|HAS_[A-Z_]+_
 
 function isExpandStatement(stmt: Statement, sql: string): boolean {
   const u = stmt.norm;
+  // Objects in schema ratio that can change what tenants see or what is
+  // enforced need a reasoned marker on the line above (round 3).
+  if (new RegExp(`^CREATE VIEW ${IN_RATIO}`).test(u)) return hasMarker(sql, stmt.start, 'view');
+  if (new RegExp(`^CREATE FUNCTION ${IN_RATIO}`).test(u)) return hasMarker(sql, stmt.start, 'function');
+  if (new RegExp(`^CREATE (CONSTRAINT )?TRIGGER .* ON (ONLY )?${IN_RATIO}`).test(u)) return hasMarker(sql, stmt.start, 'function');
   if (EXPAND_SIMPLE.some((re) => re.test(u))) return true;
   const alter = /^ALTER TABLE (IF EXISTS )?(ONLY )?\S+ (.+)$/.exec(u);
-  if (alter) return splitTopLevel(alter[3]).every((action) => EXPAND_ALTER_TABLE_ACTIONS.some((re) => re.test(action)));
+  if (alter) {
+    return splitTopLevel(alter[3]).every(
+      (action) =>
+        EXPAND_ALTER_TABLE_ACTIONS.some((re) => re.test(action)) &&
+        // NOT NULL without DEFAULT breaks existing rows and older writers
+        !(/^ADD COLUMN /.test(action) && /\bNOT NULL\b/.test(action) && !/\bDEFAULT\b/.test(action)),
+    );
+  }
   const grant = /^GRANT (.+) ON (.+) TO (.+)$/.exec(u);
   if (grant) {
     const grantees = splitTopLevel(grant[3].replace(/ WITH GRANT OPTION$/, '').replace(/ GRANTED BY .+$/, ''));
@@ -265,7 +285,7 @@ function isExpandStatement(stmt: Statement, sql: string): boolean {
   // granted to a named ratio role).
   if (/^REVOKE .+ ON .+ FROM PUBLIC( CASCADE| RESTRICT)?$/.test(u)) return true;
   if (READ_ONLY_GUARD_FUNCTIONS.test(u) && !/ FROM /.test(u)) return true;
-  if (/^DO( LANGUAGE \S+)? \$/.test(u) || u === 'DO') return hasAllowDoMarker(sql, stmt.start);
+  if (/^DO( LANGUAGE \S+)? \$/.test(u) || u === 'DO') return hasMarker(sql, stmt.start, 'do');
   return false;
 }
 
@@ -291,12 +311,88 @@ const FORBIDDEN: RegExp[] = [
  * Statements refused in ANY migration, even a contract one with
  * --allow-contract: they would disable tenant isolation or escalate roles.
  */
-export function findForbiddenStatement(sql: string): string | null {
-  for (const { norm: u } of splitStatements(sql)) {
+const TENANT_PREDICATES = new Set(['(TENANT_ID=RATIO.CURRENT_TENANT_ID())', '(ID=RATIO.CURRENT_TENANT_ID())']);
+
+/** Text of the balanced parenthesised group starting at `open` (inclusive), or null. */
+function parenGroup(u: string, open: number): string | null {
+  if (u[open] !== '(') return null;
+  let depth = 0;
+  for (let i = open; i < u.length; i++) {
+    if (u[i] === '(') depth++;
+    if (u[i] === ')' && --depth === 0) return u.slice(open, i + 1);
+  }
+  return null;
+}
+
+/** A permissive policy must use exactly the tenant predicate in USING and WITH CHECK. */
+function isUnsafePolicy(u: string): boolean {
+  if (!/^CREATE POLICY /.test(u)) return false;
+  if (/ AS RESTRICTIVE\b/.test(u)) return false; // can only narrow access
+  const clauses: string[] = [];
+  for (const kw of [' USING ', ' WITH CHECK ']) {
+    const at = u.indexOf(kw);
+    if (at === -1) continue;
+    const g = parenGroup(u, at + kw.length);
+    if (g === null) return true;
+    clauses.push(g.replace(/\s+/g, ''));
+  }
+  return clauses.length === 0 || clauses.some((c) => !TENANT_PREDICATES.has(c));
+}
+
+const unquote = (x: string) => x.replace(/"/g, '');
+const READER_GRANTS: Array<[RegExp, RegExp]> = [
+  [/^SELECT$/, new RegExp(`^(TABLE )?${IN_RATIO}"?COST_FACTS_PUBLISHED"?$`)],
+  [/^EXECUTE$/, new RegExp(`^FUNCTION ${IN_RATIO}"?CURRENT_TENANT_ID"? ?\\( ?\\)$`)],
+  [/^USAGE$/, /^SCHEMA "?RATIO"?$/],
+];
+
+/** GRANTs that would widen what ratio roles can do beyond the reviewed model. */
+function isUnsafeGrant(u: string): boolean {
+  if (!/^GRANT /.test(u)) return false;
+  const to = u.lastIndexOf(' TO ');
+  if (to === -1) return false;
+  const grantees = splitTopLevel(u.slice(to + 4).replace(/ WITH (GRANT|ADMIN) OPTION.*$/, '').replace(/ GRANTED BY .+$/, '')).map((g) =>
+    unquote(g.replace(/^GROUP /, '')),
+  );
+  if (grantees.includes('PUBLIC')) return true;
+  const toRatioRole = grantees.some((g) => /^RATIO_/.test(g));
+  const on = /^GRANT (.+?) ON (.+)$/.exec(u.slice(0, to));
+  if (!on) return toRatioRole; // role membership granted to a ratio role
+  if (!grantees.includes('RATIO_READER')) return false;
+  const privs = splitTopLevel(on[1]);
+  return !privs.every((p) => READER_GRANTS.some(([pr, obj]) => pr.test(p) && obj.test(on[2].trim())));
+}
+
+const PLPGSQL_LEAD = /^(BEGIN|THEN|ELSE|LOOP|EXECUTE|PERFORM|DECLARE|END IF|END LOOP|ELSIF [^ ]+|IF [^ ]+)\s+/;
+
+/**
+ * Statements refused in ANY migration, even a contract one with
+ * --allow-contract: they would disable tenant isolation, open policies or
+ * widen grants, or escalate roles. Dollar-quoted bodies (DO blocks, function
+ * bodies) are scanned too: their statements and every string literal in them
+ * (EXECUTE / format() arguments). Lexical defence in depth — review is the
+ * primary control.
+ */
+export function findForbiddenStatement(sql: string, depth = 0): string | null {
+  const bodies: string[] = [];
+  const masked = maskNonCode(sql, (b) => bodies.push(b));
+  void masked;
+  for (const { norm } of splitStatements(sql)) {
+    let u = norm;
+    for (let guard = 0; guard < 8 && depth > 0 && PLPGSQL_LEAD.test(u); guard++) u = u.replace(PLPGSQL_LEAD, '');
     if (FORBIDDEN.some((re) => re.test(u))) return u;
-    if (/^GRANT /.test(u)) {
-      const to = u.lastIndexOf(' TO ');
-      if (to !== -1 && /\bPUBLIC\b/.test(u.slice(to + 4))) return u;
+    if (isUnsafeGrant(u) || isUnsafePolicy(u)) return u;
+    if (/^ALTER DEFAULT PRIVILEGES\b.*\bGRANT\b.*\bTO\b.*\b(PUBLIC|"?RATIO_READER"?)\b/.test(u)) return u;
+  }
+  if (depth < 3) {
+    for (const body of bodies) {
+      const inner = findForbiddenStatement(body, depth + 1);
+      if (inner) return inner;
+      for (const m of body.matchAll(/[Ee]?'((?:[^']|'')*)'/g)) {
+        const lit = m[1].replace(/''/g, "'");
+        const hit = findForbiddenStatement(lit, depth + 1);
+        if (hit) return hit;
+      }
     }
   }
   return null;
