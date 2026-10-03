@@ -22,6 +22,11 @@ import {
 
 const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
 
+function isPreconditionFailed(e: unknown): boolean {
+  const x = e as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
+  return x?.$metadata?.httpStatusCode === 412 || x?.name === 'PreconditionFailed';
+}
+
 function sourceError(code: string, what: string, e: unknown): IngestError {
   const status = (e as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
   const name = (e as { name?: string })?.name ?? 'Error';
@@ -53,12 +58,33 @@ export class S3FocusExportSource implements FocusSource {
     return { keys, prefixes };
   }
 
-  private async getBytes(key: string, limit: number): Promise<Buffer> {
-    const r = await this.client.send(new GetObjectCommand({ Bucket: this.location.bucket, Key: key }));
-    if (Number(r.ContentLength ?? 0) > limit) throw new IngestError('MANIFEST_INVALID', 'manifest is too large');
-    const bytes = Buffer.from(await r.Body!.transformToByteArray());
-    if (bytes.length > limit) throw new IngestError('MANIFEST_INVALID', 'manifest is too large');
-    return bytes;
+  /**
+   * Reads at most `limit` bytes of an object. The body is STREAMED and the
+   * read aborted (stream destroyed) as soon as more than `limit` bytes have
+   * arrived — ContentLength is only an early hint, never trusted (it may be
+   * missing on a chunked response, or wrong).
+   */
+  private async getBytes(key: string, limit: number, ifMatch?: string): Promise<Buffer> {
+    const r = await this.client.send(new GetObjectCommand({ Bucket: this.location.bucket, Key: key, ...(ifMatch ? { IfMatch: ifMatch } : {}) }));
+    const body = r.Body as Readable;
+    const tooLarge = () => new IngestError('MANIFEST_INVALID', 'manifest is too large');
+    if (r.ContentLength !== undefined && Number(r.ContentLength) > limit) {
+      body.destroy();
+      throw tooLarge();
+    }
+    const parts: Buffer[] = [];
+    let total = 0;
+    try {
+      for await (const chunk of body) {
+        const b = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+        total += b.length;
+        if (total > limit) throw tooLarge();
+        parts.push(b);
+      }
+    } finally {
+      if (total > limit) body.destroy();
+    }
+    return Buffer.concat(parts, total);
   }
 
   async listPeriods(range?: PeriodRange): Promise<PeriodListing[]> {
@@ -113,11 +139,22 @@ export class S3FocusExportSource implements FocusSource {
     };
   }
 
+  /**
+   * Raw bytes of exactly the object version that was listed: the GET is
+   * conditional on the listed ETag (If-Match). If the object was replaced
+   * since the listing, S3 answers 412 and this fails SOURCE_CHANGED
+   * (retryable): the pipeline re-lists the period instead of capturing bytes
+   * that do not belong to the listed manifest. (Whatever is captured is hashed
+   * from the bytes actually read, so the evidence sha256 always binds them.)
+   */
   async openArtifact(ref: ArtifactRef): Promise<Readable> {
     try {
-      const r = await this.client.send(new GetObjectCommand({ Bucket: this.location.bucket, Key: ref.key }));
+      const r = await this.client.send(new GetObjectCommand({ Bucket: this.location.bucket, Key: ref.key, ...(ref.version ? { IfMatch: ref.version } : {}) }));
       return r.Body as Readable;
     } catch (e) {
+      if (isPreconditionFailed(e)) {
+        throw new IngestError('SOURCE_CHANGED', `artifact ${ref.name} changed since it was listed (ETag mismatch)`, { retryable: true, cause: e });
+      }
       throw sourceError('SOURCE_READ_FAILED', `reading artifact ${ref.name}`, e);
     }
   }
