@@ -149,8 +149,11 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         // An abort (MAX_RUN_SECONDS) ends a backoff at once and is never retried.
         signal: runAbort.signal,
       };
-      const onRetry = (period: string | null) => async ({ attempt, error }: { attempt: number; error: unknown }) => {
-        attempts = attempt;
+      // One run-wide counter for every retry (listing, manifests, periods): the returned
+      // attempts, each retry record and sync_runs.attempt (+1 per retry) agree (sixth review).
+      const onRetry = (period: string | null) => async ({ error }: { attempt: number; error: unknown }) => {
+        attempts += 1;
+        const attempt = attempts;
         const code = errorCodeOf(error);
         log('run.retry', { runId: lease.runId, attempt, code, period });
         await recordRetry(opts.pool, lease, { attempt, code, period, at: new Date().toISOString() });

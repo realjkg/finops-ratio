@@ -16,6 +16,8 @@ export interface WorkerLimits {
   maxBatchBytes: number;
   maxArtifactsPerSet: number;
   insertChunkRows: number;
+  /** Byte budget of one pending fact chunk (estimated from the record's characters): flushes early for large records. */
+  maxChunkBytes: number;
 }
 
 export interface WorkerSettings {
@@ -37,6 +39,7 @@ export const DEFAULT_LIMITS: WorkerLimits = {
   maxBatchBytes: 20 * 1024 ** 3,
   maxArtifactsPerSet: 1000,
   insertChunkRows: 1000,
+  maxChunkBytes: 32 * 1024 * 1024,
 };
 
 export const DEFAULT_SETTINGS: WorkerSettings = {
@@ -211,6 +214,7 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
         maxBatchBytes: int(env, 'RATIO_MAX_BATCH_BYTES', DEFAULT_LIMITS.maxBatchBytes, 1, Number.MAX_SAFE_INTEGER),
         maxArtifactsPerSet: int(env, 'RATIO_MAX_ARTIFACTS_PER_SET', DEFAULT_LIMITS.maxArtifactsPerSet, 1, 100_000),
         insertChunkRows: int(env, 'RATIO_INSERT_CHUNK_ROWS', DEFAULT_LIMITS.insertChunkRows, 1, 5000),
+        maxChunkBytes: int(env, 'RATIO_MAX_CHUNK_BYTES', DEFAULT_LIMITS.maxChunkBytes, 1024 * 1024, 1024 * 1024 * 1024),
       },
     },
     doctorMaxStalenessHours: int(env, 'RATIO_DOCTOR_MAX_STALENESS_HOURS', 48, 1, 24 * 366),

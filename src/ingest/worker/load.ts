@@ -250,11 +250,13 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
   let header: HeaderIndex | null = null;
   let ordinal = 0;
   let pending: Array<{ ordinal: number; fact: FactRow }> = [];
+  let pendingBytes = 0;
   const chunkRows = ctx.limits.insertChunkRows;
   const flush = async () => {
     if (!pending.length) return;
     const rows = pending;
     pending = [];
+    pendingBytes = 0;
     try {
       await insertChunk(ctx, art.sha256, rows);
     } catch (e) {
@@ -310,11 +312,14 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
       if (!v.ok) {
         for (const e of v.errors) addError(state, { artifactSha256: art.sha256, rowOrdinal: ordinal, column: e.column, code: e.code, message: e.message });
         pending = [];
+        pendingBytes = 0;
         continue;
       }
       if (state.errorCount > 0) continue;
       pending.push({ ordinal, fact: v.fact });
-      if (pending.length >= chunkRows) await flush();
+      for (const field of record) pendingBytes += field.length;
+      // Bounded by rows AND bytes: 1000 records of ~1 MiB would otherwise be held at once (sixth review).
+      if (pending.length >= chunkRows || pendingBytes >= ctx.limits.maxChunkBytes) await flush();
     }
   } catch (e) {
     const isParseProblem = (e instanceof IngestError && e.code === 'INVALID_GZIP') || isCsvError(e);

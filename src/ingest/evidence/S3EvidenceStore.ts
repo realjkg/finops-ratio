@@ -11,6 +11,13 @@ import { isTransientError } from '../retry';
 import { idleWatchdog } from '../stall';
 import type { EvidenceStore, EvidenceWriteOptions } from './types';
 
+/** A conditional create lost the race: another writer created the key first. */
+function isCreateConflict(e: unknown): boolean {
+  const x = e as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
+  const status = x?.$metadata?.httpStatusCode;
+  return status === 412 || status === 409 || x?.name === 'PreconditionFailed' || x?.name === 'ConditionalRequestConflict';
+}
+
 /** User metadata carrying the object's sha256 (a claim, not proof: see put()). */
 const SHA_META = 'ratio-sha256';
 
@@ -120,11 +127,18 @@ export class S3EvidenceStore implements EvidenceStore {
           ContentLength: info.byteSize,
           ContentType: 'application/octet-stream',
           Metadata: { [SHA_META]: info.sha256 },
+          // Conditional create: never overwrite an object another writer created after our HEAD.
+          IfNoneMatch: '*',
         }),
         { abortSignal: signal }, // the run's signal tears the upload down
       );
     } catch (e) {
       if (signal?.aborted) throw signal.reason;
+      if (isCreateConflict(e)) {
+        // Lost the race: the winner's bytes must be exactly ours (sixth review High).
+        await this.verifyExisting(key, info.sha256, opts);
+        return 'exists';
+      }
       throw evidenceError('storing an evidence object', e);
     } finally {
       body.destroy();
@@ -147,11 +161,16 @@ export class S3EvidenceStore implements EvidenceStore {
       return 'exists';
     }
     try {
-      await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: this.k(key), Body: bytes, ContentType: 'application/octet-stream', Metadata: { [SHA_META]: sha256 } }), {
-        abortSignal: signal,
-      });
+      await this.client.send(
+        new PutObjectCommand({ Bucket: this.bucket, Key: this.k(key), Body: bytes, ContentType: 'application/octet-stream', Metadata: { [SHA_META]: sha256 }, IfNoneMatch: '*' }),
+        { abortSignal: signal },
+      );
     } catch (e) {
       if (signal?.aborted) throw signal.reason;
+      if (isCreateConflict(e)) {
+        await this.verifyExisting(key, sha256, opts);
+        return 'exists';
+      }
       throw evidenceError('storing an evidence object', e);
     }
     return 'stored';
