@@ -236,22 +236,16 @@ function redactUrlUserinfo(text: string): string {
 }
 
 /**
- * End of the LINE that starts at `j`: the next real `\n` / `\r`, the next
- * JSON-escaped `\n` / `\r` whose backslash is itself unescaped (an odd run
- * of backslashes before the `n` / `r`), or the end of the text. No quote or
- * escape parsing otherwise — every such parser had a bypass (an escaped
- * closing quote, a quote closed early, …). One forward pass: linear.
+ * End of the LINE that starts at `j`: the next REAL `\n` / `\r`, or the end
+ * of the text. A backslash + `n` / `r` is NOT a line end: in a text/plain body
+ * it is forgeable (`?dir=C:\new\data&code=SECRET`), so a JSON body's escaped
+ * `\n` is over-redacted instead (accepted). No quote or escape parsing —
+ * every such parser had a bypass. One forward pass: linear.
  */
 function lineEnd(text: string, j: number): number {
   for (let k = j; k < text.length; k += 1) {
     const c = text[k];
     if (c === '\n' || c === '\r') return k;
-    if (c === '\\') {
-      let r = k;
-      while (r < text.length && text[r] === '\\') r += 1;
-      if ((r - k) % 2 === 1 && (text[r] === 'n' || text[r] === 'r')) return r - 1;
-      k = r - 1; // skip the backslash run
-    }
   }
   return text.length;
 }
