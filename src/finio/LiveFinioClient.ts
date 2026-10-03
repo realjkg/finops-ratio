@@ -9,6 +9,13 @@
 //                          it; the gateway does not enforce it in the zero-config
 //                          demo.
 //   X-FinIO-Peer-Token   — the A2A shared secret identifying the peer agent.
+//                          NEVER sent from here: a browser copy of it would be
+//                          compiled into the client bundle (a NEXT_PUBLIC_
+//                          variable is inlined at build time) and published to
+//                          every visitor. Peer agents call the API directly
+//                          with the header; a deployment that enforces
+//                          FINIO_PEER_TOKEN makes the browser handshake fail
+//                          with a typed FinioPeerAuthError instead.
 //   X-FinIO-Session      — the sessionId minted by the handshake.
 //
 // Error handling mirrors the sibling live clients: a typed Error on transport
@@ -22,19 +29,34 @@ import { withBasePath } from '@/lib/basePath';
 const HANDSHAKE_URL = withBasePath('/api/v1/a2a/handshake');
 const EXPORT_URL = withBasePath('/api/v1/finio/export');
 
+export const FINIO_PEER_AUTH_MESSAGE =
+  'FinIO peer authentication required — use the API with X-FinIO-Peer-Token';
+
 /**
- * Optional peer token for deployments that enforce one. This is a routing
- * credential the operator chooses to expose to the browser, not a server secret:
- * FINIO_PEER_TOKEN (unprefixed) stays server-side and is never read here.
+ * Typed error for the handshake's peer-auth 401 (code `unauthorized_peer`):
+ * this deployment enforces FINIO_PEER_TOKEN, which the browser never holds.
+ * Mirrors LiveDataAuthError so the page can show actionable copy.
  */
-function peerTokenHeader(): Record<string, string> {
-  const token = process.env.NEXT_PUBLIC_FINIO_PEER_TOKEN;
-  return token ? { 'X-FinIO-Peer-Token': token } : {};
+export class FinioPeerAuthError extends Error {
+  readonly status = 401;
+  constructor() {
+    super(FINIO_PEER_AUTH_MESSAGE);
+    this.name = 'FinioPeerAuthError';
+  }
+}
+
+/** The gateway envelope's error code, when the body is one. */
+function errorCode(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body) as { error?: { code?: unknown } };
+    return typeof parsed.error?.code === 'string' ? parsed.error.code : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Pull the human-readable message out of the gateway's error envelope. */
-async function describeFailure(res: Response): Promise<string> {
-  const body = await res.text();
+function describeFailure(body: string): string {
   try {
     const parsed = JSON.parse(body) as { error?: { message?: string } | string };
     if (typeof parsed.error === 'string') return parsed.error;
@@ -53,7 +75,7 @@ export class LiveFinioClient implements FinioClient {
     try {
       res = await fetch(HANDSHAKE_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...peerTokenHeader() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(req),
       });
     } catch (err) {
@@ -62,7 +84,11 @@ export class LiveFinioClient implements FinioClient {
       );
     }
     if (!res.ok) {
-      throw new Error(`FinIO handshake error ${res.status}: ${await describeFailure(res)}`);
+      const body = await res.text();
+      if (res.status === 401 && errorCode(body) === 'unauthorized_peer') {
+        throw new FinioPeerAuthError();
+      }
+      throw new Error(`FinIO handshake error ${res.status}: ${describeFailure(body)}`);
     }
     return (await res.json()) as HandshakeResult;
   }
@@ -79,7 +105,7 @@ export class LiveFinioClient implements FinioClient {
       );
     }
     if (!res.ok) {
-      throw new Error(`FinIO export error ${res.status}: ${await describeFailure(res)}`);
+      throw new Error(`FinIO export error ${res.status}: ${describeFailure(await res.text())}`);
     }
     return (await res.json()) as FinioExport;
   }

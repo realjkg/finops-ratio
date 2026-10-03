@@ -146,7 +146,10 @@ config. A successful handshake returns a session id signed with
 expiry — no server-side session map, so it works across instances. Sessions
 travel in `X-FinIO-Session`, peer tokens in `X-FinIO-Peer-Token`; `Authorization`
 is left to the gateway's per-tenant credential so two differently-scoped secrets
-never collide on one header.
+never collide on one header. The browser never holds the peer token (no
+`NEXT_PUBLIC_` copy exists — it would be compiled into the client bundle), so
+with `FINIO_PEER_TOKEN` set the `/finio/demo` page's live mode shows "peer
+authentication required" and peer agents call the API with `X-FinIO-Peer-Token`.
 
 **Mock and live differ only in transport.** `MockFinioClient` runs the same
 exchange rules as the route — same negotiation, same session expiry, same 400 /
