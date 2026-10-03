@@ -36,6 +36,11 @@ function runCli(env: Record<string, string>) {
   });
 }
 
+// Each case spawns the built CLI (four times for the refusal case). Process
+// start-up alone can exceed vitest's 5 s default on a loaded host, so the
+// timeout is explicit (round 16; same budget as each spawnSync below).
+const SPAWN_TIMEOUT_MS = 60_000;
+
 describe('built CLI crash path (piped stderr)', () => {
   for (const kind of ['uncaught', 'rejection'] as const) {
     it(`${kind}: exactly one redacted JSON line arrives on stderr and the exit code is 1 (large payload)`, () => {
@@ -49,7 +54,7 @@ describe('built CLI crash path (piped stderr)', () => {
       expect(lines[0].length).toBeGreaterThan(2_000_000);
       for (const f of [PASSWORD, encodeURIComponent(PASSWORD), JSON.stringify(PASSWORD).slice(1, -1), 'ratio_user']) expect(lines[0]).not.toContain(f);
       expect(lines[0]).toContain('[redacted]');
-    });
+    }, SPAWN_TIMEOUT_MS);
   }
 
   it('the crash hook is refused outside RATIO_ENV=test (staging, production, unset): no process.* line', () => {
@@ -61,5 +66,5 @@ describe('built CLI crash path (piped stderr)', () => {
       expect(r.status).toBe(1);
       expect(all).not.toContain('SuperSecretPw9');
     }
-  });
+  }, SPAWN_TIMEOUT_MS); // four sequential spawns
 });
