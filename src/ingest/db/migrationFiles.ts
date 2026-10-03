@@ -350,16 +350,23 @@ const newCreated = (): CreatedObjects => ({ schemas: new Set(), relations: new S
  * quoted, so `ratio.T1`, `RATIO.t1` and `"ratio"."t1"` are one object, while
  * `ratio."T1"` and `"ratio.t1"` are others. Malformed input never matches.
  */
-function canonIdent(x: string): string {
+export function canonIdent(x: string): string {
+  const bad = `\u0000${x}`; // malformed: equal to no canonical name
+  const t = x.trim();
   const parts: string[] = [];
   let i = 0;
-  const t = x.trim();
-  while (i < t.length) {
+  const skipSpace = () => {
+    while (i < t.length && /\s/.test(t[i])) i++;
+  };
+  for (;;) {
+    // PostgreSQL accepts whitespace (and comments, masked to spaces upstream)
+    // around a qualification dot: `ratio . t`, `"ratio" . "t"` (Copilot on #53).
+    skipSpace();
     let part = '';
     if (t[i] === '"') {
       i++;
       for (;;) {
-        if (i >= t.length) return `\u0000${t}`; // unterminated
+        if (i >= t.length) return bad; // unterminated
         if (t[i] === '"' && t[i + 1] === '"') {
           part += '"';
           i += 2;
@@ -368,25 +375,30 @@ function canonIdent(x: string): string {
           break;
         } else part += t[i++];
       }
+      if (!part) return bad; // zero-length identifier
     } else {
-      while (i < t.length && t[i] !== '.' && t[i] !== '"') part += t[i++];
-      part = part.trim().replace(/[A-Z]+/g, (c) => c.toLowerCase());
+      while (i < t.length && !/[\s."]/.test(t[i])) part += t[i++];
+      if (!part) return bad; // empty part: leading, trailing or doubled dot
+      part = part.replace(/[A-Z]+/g, (c) => c.toLowerCase());
     }
     parts.push(`"${part.replace(/"/g, '""')}"`);
-    if (i < t.length) {
-      if (t[i] !== '.') return `\u0000${t}`;
-      i++;
-    }
+    skipSpace();
+    if (i >= t.length) return parts.join('.');
+    if (t[i] !== '.') return bad; // two parts without a dot
+    i++;
   }
-  return parts.join('.');
 }
+
+/** Whitespace around qualification dots removed, outside quoted identifiers. */
+const joinDots = (x: string) =>
+  x.replace(/"(?:[^"]|"")*"|[^"]+/g, (seg) => (seg.startsWith('"') ? seg : seg.replace(/\s*\.\s*/g, '.')));
 
 /** Space-separated words outside quoted identifiers, each canonical (argument type spellings). */
 function canonWords(x: string): string[] {
   const words: string[] = [];
   let cur = '';
   let quoted = false;
-  for (const ch of x.trim()) {
+  for (const ch of joinDots(x.trim())) {
     if (ch === '"') quoted = !quoted;
     if (ch === ' ' && !quoted) {
       if (cur) words.push(canonIdent(cur));
@@ -397,8 +409,15 @@ function canonWords(x: string): string[] {
   return words;
 }
 
-/** A (possibly qualified, possibly quoted) name: quoted parts may contain anything. */
-const NAME = '((?:"(?:[^"]|"")*"|[^\\s("])+)';
+/**
+ * A (possibly qualified, possibly quoted) name in Statement.text: parts joined
+ * by dots with optional spaces around them (comments are already spaces).
+ * Each part is matched whole (no backtracking into a shorter part), and a
+ * name followed by a dangling dot does not match at all — e.g. `CREATE TABLE
+ * ratio. (…)` records nothing, so it fails closed (Copilot on #53).
+ */
+const NAME_PART = '(?:"(?:[^"]|"")*"(?!")|[^\\s()".,;]+(?![^\\s()".,;]))';
+const NAME = `(${NAME_PART}(?: ?\\. ?${NAME_PART})*)(?! ?\\.)`;
 const objName = canonIdent;
 
 /** IN-argument type spellings of a CREATE FUNCTION/PROCEDURE argument list (with or without parameter names). */
@@ -448,7 +467,7 @@ function recordCreated(u: string, created: CreatedObjects): void {
 
 /** True when `spec` (e.g. `F(INT, TEXT[])`) names a routine created earlier with exactly that signature. */
 function isCreatedRoutine(spec: string, created: CreatedObjects): boolean {
-  const m = new RegExp(`^${NAME} ?\\((.*)\\)$`).exec(spec.trim());
+  const m = new RegExp(`^${NAME} ?\\(([\\s\\S]*)\\)$`).exec(spec.trim());
   if (!m) return false;
   const overloads = created.routines.get(objName(m[1]));
   if (!overloads) return false;
@@ -465,19 +484,20 @@ function isCreatedRoutine(spec: string, created: CreatedObjects): boolean {
  * it is contract.
  */
 function isRevokeOnCreated(u: string, created: CreatedObjects): boolean {
-  const m = /^REVOKE (?:GRANT OPTION FOR )?(.+?) ON (.+) FROM PUBLIC(?: CASCADE| RESTRICT)?$/i.exec(u);
+  // [\s\S], not `.`: a quoted identifier may contain a line break (round 18 sweep)
+  const m = /^REVOKE (?:GRANT OPTION FOR )?([\s\S]+?) ON ([\s\S]+) FROM PUBLIC(?: CASCADE| RESTRICT)?$/i.exec(u);
   if (!m) return false;
   const target = m[2];
-  const all = /^ALL (?:TABLES|SEQUENCES|FUNCTIONS|PROCEDURES|ROUTINES) IN SCHEMA (.+)$/i.exec(target);
+  const all = /^ALL (?:TABLES|SEQUENCES|FUNCTIONS|PROCEDURES|ROUTINES) IN SCHEMA ([\s\S]+)$/i.exec(target);
   if (all) return splitTopLevel(all[1]).every((x) => created.schemas.has(objName(x)));
-  const schema = /^SCHEMA (.+)$/i.exec(target);
+  const schema = /^SCHEMA ([\s\S]+)$/i.exec(target);
   if (schema) return splitTopLevel(schema[1]).every((x) => created.schemas.has(objName(x)));
-  const routine = /^(?:FUNCTION|PROCEDURE|ROUTINE) (.+)$/i.exec(target);
+  const routine = /^(?:FUNCTION|PROCEDURE|ROUTINE) ([\s\S]+)$/i.exec(target);
   if (routine) return splitTopLevel(routine[1]).every((x) => isCreatedRoutine(x, created));
-  const type = /^(?:TYPE|DOMAIN) (.+)$/i.exec(target);
+  const type = /^(?:TYPE|DOMAIN) ([\s\S]+)$/i.exec(target);
   if (type) return splitTopLevel(type[1]).every((x) => created.types.has(objName(x)));
   if (/^(DATABASE|LANGUAGE|PARAMETER|LARGE OBJECT|FOREIGN|TABLESPACE|ALL )/i.test(target)) return false;
-  const rel = /^(?:TABLE |SEQUENCE )?(.+)$/i.exec(target)!;
+  const rel = /^(?:TABLE |SEQUENCE )?([\s\S]+)$/i.exec(target)!;
   return splitTopLevel(rel[1]).every((x) => new RegExp(`^${NAME}$`).test(x.trim()) && created.relations.has(objName(x)));
 }
 

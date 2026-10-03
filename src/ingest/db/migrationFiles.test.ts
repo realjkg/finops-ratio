@@ -10,6 +10,7 @@ import {
   findNonExpandStatement,
   findTransactionControl,
   loadMigrations,
+  canonIdent,
 } from './migrationFiles';
 
 const tmpDirs: string[] = [];
@@ -546,6 +547,93 @@ describe('round 17 (challenger L3): quoted identifiers are case-sensitive, unquo
   for (const [create, revoke] of expand) {
     it(`expand: ${create.split('\n').pop()} then ${revoke}`, () => {
       expect(findNonExpandStatement(t(create, revoke))).toBeNull();
+    });
+  }
+});
+
+describe('round 18: canonIdent output (doubled quotes)', () => {
+  it('renders every part quoted; a doubled quote inside a quoted part stays one escaped quote', () => {
+    expect(canonIdent('ratio."a""b"')).toBe('"ratio"."a""b"');
+    expect(canonIdent('"a"""')).toBe('"a"""');
+    expect(canonIdent('""""')).toBe('""""');
+    expect(canonIdent('"x"".y"')).toBe('"x"".y"'); // the dot is inside the quotes: one part
+    expect(canonIdent('RATIO."T1"')).toBe('"ratio"."T1"');
+  });
+
+  it('the classifier uses it: a doubled-quote name revoked as created is expand, a different escape is contract', () => {
+    const create = EXPAND + 'CREATE TABLE ratio."a""b" (x int);\n';
+    expect(findNonExpandStatement(create + 'REVOKE ALL ON ratio."a""b" FROM PUBLIC;\n')).toBeNull();
+    expect(findNonExpandStatement(create + 'REVOKE ALL ON ratio."a""""b" FROM PUBLIC;\n')).not.toBeNull();
+    expect(findNonExpandStatement(create + 'REVOKE ALL ON ratio."ab" FROM PUBLIC;\n')).not.toBeNull();
+  });
+});
+
+describe('round 18 (Copilot on #53, C2): whitespace and comments around a qualification dot', () => {
+  const t = (create: string, revoke: string) => EXPAND + create + '\n' + revoke + '\n';
+  it('the repro: `ratio. t` is ratio.t, never the unqualified name `ratio` (both directions)', () => {
+    expect(findNonExpandStatement(t('CREATE TABLE ratio. t (x int);', 'REVOKE ALL ON ratio FROM PUBLIC;'))).not.toBeNull();
+    expect(findNonExpandStatement(t('CREATE TABLE ratio (x int);', 'REVOKE ALL ON ratio. t FROM PUBLIC;'))).not.toBeNull();
+    expect(findNonExpandStatement(t('CREATE TABLE ratio. t (x int);', 'REVOKE ALL ON ratio.t FROM PUBLIC;'))).toBeNull();
+  });
+
+  const spellings = ['ratio.t', 'ratio . t', 'ratio. t', 'ratio .t', 'ratio./*c*/t', 'ratio/*c*/ . /*d*/t', 'ratio.\n  t', '"ratio" . "t"', '"ratio"./* c */"t"', 'RATIO . T'];
+  for (const create of spellings) {
+    it(`CREATE TABLE ${JSON.stringify(create)} matches every other spelling of ratio.t, and not ratio`, () => {
+      for (const revoke of spellings) {
+        expect(findNonExpandStatement(t(`CREATE TABLE ${create} (x int);`, `REVOKE ALL ON ${revoke} FROM PUBLIC;`)), revoke).toBeNull();
+      }
+      expect(findNonExpandStatement(t(`CREATE TABLE ${create} (x int);`, 'REVOKE ALL ON ratio FROM PUBLIC;'))).not.toBeNull();
+      expect(findNonExpandStatement(t(`CREATE TABLE ${create} (x int);`, 'REVOKE ALL ON t FROM PUBLIC;'))).not.toBeNull();
+    });
+  }
+
+  it('canonical equality across spacing styles; a trailing or doubled dot is malformed and matches nothing', () => {
+    for (const x of ['ratio . t', 'ratio. t', 'ratio .t', '"ratio" . "t"', 'RATIO . T', '"ratio" .t']) expect(canonIdent(x), x).toBe('"ratio"."t"');
+    for (const bad of ['ratio.', 'ratio. ', '.t', 'ratio..t', 'ratio t', '"ratio" "t"', '"ratio".']) {
+      expect(canonIdent(bad), bad).not.toBe(canonIdent('ratio'));
+      expect(canonIdent(bad), bad).not.toBe(canonIdent('ratio.t'));
+      expect(canonIdent(bad), bad).not.toBe(canonIdent('t'));
+    }
+    // a CREATE whose name ends in a dot records nothing (fails closed)
+    expect(findNonExpandStatement(t('CREATE TABLE ratio. (x int);', 'REVOKE ALL ON ratio FROM PUBLIC;'))).not.toBeNull();
+    // ... and not a shorter prefix of its last part either (no backtracking into a part)
+    expect(findNonExpandStatement(t('CREATE TABLE ratio. (x int);', 'REVOKE ALL ON rati FROM PUBLIC;'))).not.toBeNull();
+    expect(findNonExpandStatement(t('CREATE TABLE "a""b". (x int);', 'REVOKE ALL ON "a" FROM PUBLIC;'))).not.toBeNull();
+  });
+
+  it('schemas, types and routines too, including a space before the argument list', () => {
+    expect(findNonExpandStatement(t('CREATE TYPE ratio . e AS ENUM (\'a\');', 'REVOKE USAGE ON TYPE ratio.e FROM PUBLIC;'))).toBeNull();
+    expect(findNonExpandStatement(t('CREATE TYPE ratio . e AS ENUM (\'a\');', 'REVOKE USAGE ON TYPE ratio FROM PUBLIC;'))).not.toBeNull();
+    const fn = "-- ratio:allow-function helper\nCREATE FUNCTION ratio . f (x int) RETURNS int LANGUAGE sql AS 'select 1';";
+    expect(findNonExpandStatement(t(fn, 'REVOKE EXECUTE ON FUNCTION ratio.f(int) FROM PUBLIC;'))).toBeNull();
+    expect(findNonExpandStatement(t(fn, 'REVOKE EXECUTE ON FUNCTION "ratio" . "f" (int) FROM PUBLIC;'))).toBeNull();
+    expect(findNonExpandStatement(t(fn, 'REVOKE EXECUTE ON FUNCTION ratio(int) FROM PUBLIC;'))).not.toBeNull();
+    const typed = "-- ratio:allow-function helper\nCREATE FUNCTION ratio.g(x ratio . e) RETURNS int LANGUAGE sql AS 'select 1';";
+    expect(findNonExpandStatement(t(typed, 'REVOKE EXECUTE ON FUNCTION ratio.g(ratio.e) FROM PUBLIC;'))).toBeNull();
+    expect(findNonExpandStatement(t('CREATE SCHEMA "s" ;', 'REVOKE ALL ON SCHEMA s FROM PUBLIC;'))).toBeNull();
+  });
+});
+
+describe('round 18 sweep: names never stop early (before "(", at line breaks, inside quotes)', () => {
+  const t = (create: string, revoke: string) => EXPAND + create + '\n' + revoke + '\n';
+  const cases: Array<[string, string, boolean]> = [
+    ['CREATE TABLE ratio.t(x int);', 'REVOKE ALL ON ratio.t FROM PUBLIC;', true],
+    ['CREATE TABLE ratio.t(x int);', 'REVOKE ALL ON ratio FROM PUBLIC;', false],
+    ['CREATE TABLE ratio\n.\nt\n(x int);', 'REVOKE ALL ON ratio.t FROM PUBLIC;', true],
+    ['CREATE TABLE ratio."a(b,c" (x int);', 'REVOKE ALL ON ratio."a(b,c" FROM PUBLIC;', true],
+    ['CREATE TABLE ratio."a(b,c" (x int);', 'REVOKE ALL ON ratio.a FROM PUBLIC;', false],
+    ['CREATE TABLE ratio."two\nlines" (x int);', 'REVOKE ALL ON ratio."two\nlines" FROM PUBLIC;', true],
+    ['CREATE TABLE ratio."two\nlines" (x int);', 'REVOKE ALL ON ratio.two FROM PUBLIC;', false],
+    ['CREATE SEQUENCE ratio . q;', 'REVOKE ALL ON SEQUENCE ratio.q FROM PUBLIC;', true],
+    ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.f\n(x int) RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio.f (int) FROM PUBLIC;', true],
+    ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.\"f(\"(x int) RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio."f("(int) FROM PUBLIC;', true],
+    ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.\"f(\"(x int) RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio.f(int) FROM PUBLIC;', false],
+  ];
+  for (const [create, revoke, expand] of cases) {
+    it(`${expand ? 'expand' : 'contract'}: ${JSON.stringify(create.split('\n').slice(-3).join('\n'))} then ${JSON.stringify(revoke)}`, () => {
+      const r = findNonExpandStatement(t(create, revoke));
+      if (expand) expect(r).toBeNull();
+      else expect(r).not.toBeNull();
     });
   }
 });

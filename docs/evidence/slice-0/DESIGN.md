@@ -1038,3 +1038,51 @@ CASCADE` after apply left `--status` at `matches: true`.
      catalog check (round 8, `SECURITY_RELEVANT_SETTINGS`). This is
      deliberate, because a stored default would apply to every session,
      including hostile ones.
+
+## 27. Round 18: monitoring roles; Copilot on #53 (ADMIN-only edge, dots in names)
+
+- **Monitoring roles are now refused by name.** `pg_monitor`,
+  `pg_read_all_stats` and `pg_read_all_settings` are in
+  `REFUSED_PREDEFINED_ROLES`. `pg_read_all_stats` shows every session's
+  `pg_stat_activity.query`, which includes other tenants' statements and
+  parameters. `pg_read_all_settings` shows every setting. `pg_monitor`
+  includes both.
+  - **Before this round,** a member that could assume `pg_monitor` or
+    `pg_read_all_stats` was caught only indirectly. Those roles carry a few
+    `pg_catalog` ACL entries, so the member showed up as `holds explicit …
+    (via pg_monitor)`. `pg_read_all_settings` has no such entry and was not
+    caught at all.
+  - **Now** detection no longer depends on PostgreSQL's catalog grants.
+    Mutations S1 and S2 show it: with the system-ACL scan stripped for these
+    roles (S1), or removed entirely (S2), all 36 cases are still refused.
+- **ADMIN-only edge (Copilot C1).** An edge with `ADMIN TRUE, INHERIT FALSE,
+  SET FALSE` is assumable: the member can grant the role to itself. The
+  refused-role closure already followed every edge. The round-17 and round-18
+  matrices now include ADMIN only as a fourth edge kind, next to default, SET
+  only and transitive SET only. Mutation A1, where the closure ignores
+  ADMIN-only edges, is killed by 21 cases.
+- **Whitespace and comments around a qualification dot (Copilot C2).**
+  PostgreSQL accepts `ratio . t`, `ratio./*c*/t` and `"ratio" . "t"` as the
+  same name. Round 17's `NAME` stopped at the space, so `CREATE TABLE ratio. t`
+  recorded the unqualified name `ratio`. A later `REVOKE … ON ratio FROM
+  PUBLIC` was then wrongly classified as expand.
+  - `NAME` now matches whole parts joined by dots, with optional spaces
+    around each dot (comments are masked to spaces upstream). It never
+    backtracks into a shorter part (mutants D3 and D8 found the need for
+    that guard).
+  - A name followed by a dangling dot does not match at all: `CREATE TABLE
+    ratio. (…)` records nothing, so it fails closed.
+  - `canonIdent` skips whitespace around dots. It returns a malformed marker,
+    which equals no canonical name, for:
+    - an empty part (a leading, trailing or doubled dot);
+    - two parts without a dot between them;
+    - a zero-length quoted part.
+  - Argument types have the spaces around their dots removed before they are
+    split into words.
+- **Sweep for names that stop early.** It checked a name directly before
+  `(`, line breaks between parts, and commas, parentheses or line breaks
+  inside quoted names. One defect: the REVOKE patterns used `.`, which does
+  not cross a line break kept inside a quoted identifier. They now use
+  `[\s\S]`. The tsconfig target has no `s` flag.
+- **`canonIdent` is exported** so its output can be unit-tested, including
+  doubled quotes.
