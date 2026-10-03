@@ -233,6 +233,7 @@ function quarantineReason(code: string, detail: string, codes?: Map<string, numb
 async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   const { set, lease, settings } = ctx;
   const period = set.billingPeriod;
+  const control = effectiveControl(set);
   const limits = settings.limits;
 
   // Size gate from the listing (nothing downloaded yet).
@@ -263,14 +264,14 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   const entry = (batchId: string) => (): CheckpointEntry => ({ fingerprint, listing: set.listingFingerprint, batchId, pinned: false });
 
   if (existing?.status === 'published') {
-    if (set.control && (await controlDisagrees(ctx.pool, set.control, existing.row_count, existing.total))) {
+    if (control && (await controlDisagrees(ctx.pool, control, existing.row_count, existing.total))) {
       return { billingPeriod: period, outcome: 'failed', code: 'CONTROL_VARIANCE_ON_UNCHANGED', batchId: existing.id, message: 'artifacts are unchanged but the control totals no longer match the published batch' };
     }
     await refreshCheckpoint(ctx.pool, lease, period, entry(existing.id));
     return { billingPeriod: period, outcome: 'unchanged', batchId: existing.id, artifactSetFingerprint: fingerprint, rowCount: existing.row_count, billedTotal: existing.total };
   }
   if (existing?.status === 'superseded') {
-    if (set.control && (await controlDisagrees(ctx.pool, set.control, existing.row_count, existing.total))) {
+    if (control && (await controlDisagrees(ctx.pool, control, existing.row_count, existing.total))) {
       return { billingPeriod: period, outcome: 'failed', code: 'CONTROL_VARIANCE_ON_UNCHANGED', batchId: existing.id, message: 'artifacts match a retained batch but the control totals do not' };
     }
     await publishBatch(ctx.pool, lease, { batchId: existing.id, billingPeriod: period, checkpoint: entry(existing.id) }, ctx.hooks);
@@ -290,7 +291,7 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
     batchId,
     billingPeriod: period,
     fingerprint,
-    control: set.control,
+    control,
     artifacts: [...unique.values()].map((c) => ({ name: c.ref.name, sha256: c.sha256, byteSize: c.byteSize, evidenceKey: c.evidenceKey })),
   });
   ctx.log('batch.staged', { runId: lease.runId, period, batchId, artifacts: unique.size });
@@ -335,9 +336,14 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
     addError(state, { artifactSha256: [...unique.keys()][0], rowOrdinal: null, column: 'BillingCurrency', code: 'MIXED_BILLING_CURRENCY', message: `${agg.currencies} billing currencies in one batch` });
     return quarantine('MIXED_BILLING_CURRENCY', 'a batch must have a single billing currency', { rowCount: agg.rowCount, billedTotal: agg.billedTotal });
   }
-  const verdict = await reconcile(ctx.pool, set.control, agg, state.perArtifactRows);
+  const verdict = await reconcile(ctx.pool, control, agg, state.perArtifactRows);
   if (verdict.variance) {
-    return quarantine('RECONCILIATION_VARIANCE', verdict.detail, { reconciliation: 'variance', rowCount: agg.rowCount, billedTotal: agg.billedTotal });
+    // A stored `variance` needs a set-level control (schema); partial per-artifact controls quarantine without one.
+    return quarantine('RECONCILIATION_VARIANCE', verdict.detail, {
+      ...(hasSetControl(control) ? { reconciliation: 'variance' as const } : {}),
+      rowCount: agg.rowCount,
+      billedTotal: agg.billedTotal,
+    });
   }
   await finalizeStaged(ctx.pool, lease, { batchId, rowCount: agg.rowCount, billedTotal: agg.billedTotal, reconciliation: verdict.reconciliation, perArtifactRows: state.perArtifactRows });
 
@@ -346,6 +352,23 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   ctx.log('batch.published', { runId: lease.runId, period, batchId, rows: agg.rowCount, reconciliation: verdict.reconciliation });
   return { billingPeriod: period, outcome: 'published', batchId, artifactSetFingerprint: fingerprint, rowCount: agg.rowCount, billedTotal: agg.billedTotal, reconciliation: verdict.reconciliation };
 }
+
+/**
+ * Control as stored on the batch: per-artifact counts that cover EVERY artifact
+ * of the set also define the set-level control row count (their sum).
+ */
+function effectiveControl(set: PeriodArtifactSet): PeriodArtifactSet['control'] {
+  const c = set.control;
+  if (!c) return undefined;
+  const out = { ...c };
+  const per = c.artifactRowCounts;
+  if (out.rowCount === undefined && per && set.artifacts.length > 0 && set.artifacts.every((a) => Object.prototype.hasOwnProperty.call(per, a.name))) {
+    out.rowCount = set.artifacts.reduce((sum, a) => sum + per[a.name], 0);
+  }
+  return out;
+}
+
+const hasSetControl = (c: PeriodArtifactSet['control']) => !!c && (c.rowCount !== undefined || c.billedTotal !== undefined);
 
 async function controlDisagrees(pool: Pool, control: NonNullable<PeriodArtifactSet['control']>, rowCount: string, total: string): Promise<boolean> {
   if (control.rowCount !== undefined && String(control.rowCount) !== rowCount) return true;
@@ -368,6 +391,7 @@ async function reconcile(
     if (got !== expected) problems.push(`artifact rows ${got ?? 'missing'} vs control ${expected}`);
   }
   if (problems.length) return { variance: true, reconciliation: 'unverified', detail: problems.join('; ') };
-  const complete = control.rowCount !== undefined && control.billedTotal !== undefined;
-  return { variance: false, reconciliation: complete ? 'reconciled' : 'unverified', detail: complete ? 'control totals match' : 'partial control matched' };
+  // reconciled ⇔ at least one set-level control and every present control matches (amended 0001 CHECK).
+  const any = control.rowCount !== undefined || control.billedTotal !== undefined;
+  return { variance: false, reconciliation: any ? 'reconciled' : 'unverified', detail: any ? 'control totals match' : 'no set-level control' };
 }
