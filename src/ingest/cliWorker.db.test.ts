@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { generateSyntheticExport, FIXTURE_LOCATION } from './fixtures/syntheticFocus';
 import { workerTestDb, type WorkerTestDb } from './testing/workerSetup';
 import { batchesOf, publishedTotals, seedTenantSource, type SeededSource } from './testing/db';
@@ -26,7 +27,10 @@ afterAll(async () => {
 });
 
 const buckets: TestBucket[] = [];
+/** Test scratch written by replay-fixtures outside any scope root (the command itself retains it by design). */
+const fixturePrefixes: Array<{ bucket: TestBucket; prefix: string }> = [];
 afterAll(async () => {
+  for (const { bucket, prefix } of fixturePrefixes) for (const k of await bucket.keys(`${prefix}/`)) await bucket.client.send(new DeleteObjectCommand({ Bucket: bucket.name, Key: k }));
   for (const b of buckets) await b.destroy();
 });
 
@@ -183,6 +187,7 @@ describe('worker CLI (real Postgres + S3)', () => {
         scenarios: Array<{ name: string; pass: boolean; detail?: unknown }>;
         retained: { tenantId: string; sourcePrefix: string; note: string };
       };
+      if (res?.retained?.sourcePrefix) fixturePrefixes.push({ bucket: fx, prefix: res.retained.sourcePrefix });
       expect(res.scenarios.map((x) => [x.name, x.pass])).toEqual([
         ['clean_load', true],
         ['idempotent_rerun', true],

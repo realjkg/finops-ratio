@@ -1,10 +1,14 @@
 // Test-only S3 helpers for the real S3-compatible store (SeaweedFS locally).
 // Tests that need S3 FAIL (never skip) when RATIO_TEST_S3_ENDPOINT is unset.
 //
-// The local SeaweedFS (`server -s3`, default config) has 20 volume slots and
-// grows 7 per bucket, so only ~2 buckets can hold data at once. The DB suite
-// therefore creates ONE bucket per run (s3GlobalSetup.ts) and every test works
-// under its own unique key prefix (`root`) inside it, deleted afterwards.
+// The local SeaweedFS (`server -s3`, default config) has a small number of
+// volume slots (derived from free disk) and grows 7 per bucket on first write;
+// a deleted bucket's volumes are not reclaimed immediately, so creating a new
+// bucket per run fails with `InternalError` (500) when runs follow each other
+// closely. The DB suite therefore uses ONE long-lived bucket (TEST_S3_BUCKET,
+// created once, never deleted); each run gets a unique key prefix
+// (s3GlobalSetup.ts) and every test works under its own unique key prefix
+// (`root`) inside that, deleted afterwards.
 import crypto from 'crypto';
 import { inject } from 'vitest';
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -12,6 +16,7 @@ import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectC
 declare module 'vitest' {
   export interface ProvidedContext {
     ratioTestS3Bucket: string;
+    ratioTestS3RunPrefix: string;
   }
 }
 
@@ -29,6 +34,9 @@ export function requireTestS3Endpoint(env: Record<string, string | undefined> = 
 /** Throwaway credentials: the local SeaweedFS default config accepts any key pair. */
 export const TEST_S3_ACCESS_KEY_ID = 'ratio-test-access';
 export const TEST_S3_SECRET_ACCESS_KEY = 'ratio-test-secret-value';
+
+/** The one long-lived bucket the DB suite works in (objects are per-run, per-scope prefixes). */
+export const TEST_S3_BUCKET = 'ratio-s1-test';
 
 export function testS3Client(endpoint: string = requireTestS3Endpoint()): S3Client {
   return new S3Client({
@@ -97,7 +105,9 @@ export async function listKeys(client: S3Client, bucket: string, prefix: string)
 export async function createTestBucket(label = 'b'): Promise<TestBucket> {
   const name = sharedBucket();
   const client = testS3Client();
-  const root = `s1-${label}-${crypto.randomBytes(6).toString('hex')}`;
+  const runPrefix = inject('ratioTestS3RunPrefix');
+  if (!runPrefix) throw new Error('the test run prefix was not provided (s3GlobalSetup did not run with RATIO_TEST_S3_ENDPOINT)');
+  const root = `${runPrefix}/s1-${label}-${crypto.randomBytes(6).toString('hex')}`;
   const put = async (key: string, body: Buffer | string) => {
     await client.send(new PutObjectCommand({ Bucket: name, Key: key, Body: typeof body === 'string' ? Buffer.from(body) : body }));
   };
