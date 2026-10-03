@@ -31,7 +31,8 @@
 
     { "id": "dependencies.manifests", "class": "dependencies", "kind": "path-glob", "patterns": ["package.json", "package-lock.json", "npm-shrinkwrap.json"] },
 
-    { "id": "policy.agent-instructions", "class": "policy", "kind": "path-glob", "patterns": [".obvious/**", ".claude/**", "CLAUDE.md", "AGENTS.md", "SKILL.md"] },
+    { "id": "policy.agent-config-dirs", "class": "policy", "kind": "path-glob", "patterns": [".obvious/**", ".claude/**", ".cursor/**", ".cursorrules", ".github/copilot*"] },
+    { "id": "policy.agent-instructions", "class": "policy", "kind": "path-regex", "pattern": "(?:^|/)(?:agents|claude|gemini|copilot-instructions|skill)\\.md$", "flags": "i" },
 
     { "id": "routes.next-pages", "class": "routes", "kind": "path-glob", "patterns": ["pages/**", "src/pages/**"] }
   ],

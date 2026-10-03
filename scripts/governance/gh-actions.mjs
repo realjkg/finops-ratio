@@ -22,10 +22,10 @@ export async function fetchChangeSet(github, repo, pr) {
     previousPath: f.previous_filename,
     patch: f.patch,
     // GitHub omits `patch` for large files and for anything it deems binary —
-    // including a source file with a NUL byte (changes: 0). Content rules
-    // cannot see those, so they are uninspectable unless the change is a pure
-    // removal or a pure rename. Fail closed.
-    patchUnavailable: f.patch === undefined && !(f.status === 'removed' || (f.status === 'renamed' && f.changes === 0)),
+    // including a source file with a NUL byte (changes: 0), renamed or not.
+    // Content rules cannot see those, so anything but a removal is
+    // uninspectable. Pure renames are restricted too (fail closed).
+    patchUnavailable: f.patch === undefined && f.status !== 'removed',
   }));
   const truncated = raw.length >= MAX_LISTED_FILES || (typeof pr.changed_files === 'number' && raw.length < pr.changed_files);
   return { files, truncated };
@@ -189,10 +189,25 @@ export async function gatherState(github, repo, number) {
   const changeSet = await fetchChangeSet(github, repo, pr);
   const fresh = classify(changeSet);
   const checkRuns = await github.paginate(github.rest.checks.listForRef, { ...repo, ref: headSha, filter: 'latest', per_page: 100 });
-  // Resolve each check run's suite to the workflow file that produced it, so a
-  // same-named job in another workflow cannot impersonate CI.
-  const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, { ...repo, head_sha: headSha, per_page: 100 });
+  // CI via the Actions jobs API: newest pull_request run of ci.yml for this
+  // head, latest attempt, its jobs (job id == check run id).
+  const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+    ...repo, head_sha: headSha, event: 'pull_request', per_page: 100,
+  });
   const pathBySuite = new Map(runs.map((r) => [r.check_suite_id, r.path]));
+  const ciPath = DEFAULT_CONFIG.ciCheck.workflowPath;
+  const ciRun = runs
+    .filter((r) => r.path === ciPath && r.event === 'pull_request')
+    .reduce((best, r) => (!best || r.id > best.id ? r : best), null);
+  let ciJobs = null;
+  if (ciRun) {
+    const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+      ...repo, run_id: ciRun.id, filter: 'latest', per_page: 100,
+    });
+    ciJobs = jobs
+      .filter((j) => j.run_attempt === undefined || ciRun.run_attempt === undefined || j.run_attempt === ciRun.run_attempt)
+      .map((j) => ({ id: j.id, name: j.name, status: j.status, conclusion: j.conclusion }));
+  }
   const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ ...repo, ref: headSha, per_page: 100 });
   const reviews = await github.paginate(github.rest.pulls.listReviews, { ...repo, pull_number: number, per_page: 100 });
   // Unknown (API error) → null → decideEligibility fails closed.
@@ -225,6 +240,7 @@ export async function gatherState(github, repo, number) {
         workflowPath: pathBySuite.get(c.check_suite?.id),
       })),
       statuses: (combined.statuses ?? []).map((s) => ({ context: s.context, state: s.state })),
+      ciJobs,
       reviews: reviews.map((r) => ({ login: r.user?.login, userType: r.user?.type, commitId: r.commit_id, state: r.state })),
       unresolvedThreads,
     },
@@ -263,23 +279,38 @@ export async function applyDecision(github, repo, raw, decision) {
   }
 }
 
-async function candidatePrNumbers(github, context) {
+export const MAX_TARGETS = 200; // GitHub matrices cap at 256 legs
+
+async function candidatePrs(github, context) {
   const repo = context.repo;
   const p = context.payload;
-  if (p.pull_request) return [p.pull_request.number];
+  if (p.pull_request) return [p.pull_request];
   if (p.workflow_run) {
-    const nums = (p.workflow_run.pull_requests ?? []).map((x) => x.number);
-    if (nums.length) return nums;
+    const listed = p.workflow_run.pull_requests ?? [];
+    if (listed.length) return listed;
     const open = await github.paginate(github.rest.pulls.list, { ...repo, state: 'open', per_page: 100 });
-    return open.filter((x) => x.head.sha === p.workflow_run.head_sha).map((x) => x.number);
+    return open.filter((x) => x.head.sha === p.workflow_run.head_sha);
   }
-  const open = await github.paginate(github.rest.pulls.list, { ...repo, state: 'open', base: DEFAULT_CONFIG.baseBranch, per_page: 100 });
-  return open.map((x) => x.number);
+  return github.paginate(github.rest.pulls.list, { ...repo, state: 'open', base: DEFAULT_CONFIG.baseBranch, per_page: 100 });
 }
 
-/** Job: list the PR numbers this event should evaluate (matrix input). */
+async function candidatePrNumbers(github, context) {
+  return (await candidatePrs(github, context)).map((x) => x.number);
+}
+
+/**
+ * Job: list the PR numbers this event should evaluate (matrix input), oldest
+ * updated first, capped at MAX_TARGETS so the matrix never exceeds 256 legs.
+ */
 export async function runTargets({ github, context, core }) {
-  const nums = [...new Set(await candidatePrNumbers(github, context))];
+  const prs = await candidatePrs(github, context);
+  const ts = (x) => (x.updated_at ? Date.parse(x.updated_at) : 0);
+  const sorted = [...prs].sort((a, b) => ts(a) - ts(b));
+  let nums = [...new Set(sorted.map((x) => x.number))];
+  if (nums.length > MAX_TARGETS) {
+    core.warning(`${nums.length} PRs to evaluate; capped at ${MAX_TARGETS} (oldest updated first). The rest are picked up by later sweeps.`);
+    nums = nums.slice(0, MAX_TARGETS);
+  }
   core.setOutput('prs', JSON.stringify(nums));
   core.info(`PRs to evaluate: ${JSON.stringify(nums)}`);
   return nums;
@@ -300,6 +331,7 @@ export async function runEligibility({ github, context, core, numbers }) {
       }
       const decision = decideEligibility(state);
       const action = await applyDecision(github, repo, raw, decision);
+      if (action.startsWith('CONFIGURATION GAP')) core.warning(`#${number}: ${action}`);
       rows.push({ number, risk: fresh.risk, eligible: decision.eligible, action, reasons: decision.reasons });
     } catch (e) {
       errors++;

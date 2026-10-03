@@ -7,9 +7,12 @@ export const CI_CHECK_NAME = 'Lint · Typecheck · Test · Build';
 export const GITHUB_ACTIONS_APP_ID = 15368;
 
 export const DEFAULT_CONFIG = Object.freeze({
-  // CI must be THIS check run: right name, created by the GitHub Actions app,
-  // from a run of .github/workflows/ci.yml. A same-named check from another
-  // workflow, another app, or a commit status never satisfies it.
+  // CI is verified through the Actions jobs API: the job named CI_CHECK_NAME in
+  // the latest attempt of the newest pull_request run of ci.yml for the head
+  // SHA must have succeeded, and EVERY check run on the head carrying that name
+  // must be one of that attempt's job ids (an Actions job id is its check run
+  // id). Anything else carrying the name is treated as a spoof. Commit
+  // statuses never satisfy CI. appId is used for branch protection.
   ciCheck: Object.freeze({
     name: CI_CHECK_NAME,
     appId: GITHUB_ACTIONS_APP_ID,
@@ -23,11 +26,8 @@ export const DEFAULT_CONFIG = Object.freeze({
     userType: 'Bot',
     states: Object.freeze(['COMMENTED', 'APPROVED']),
   }),
-  // The governance workflow's own eligibility jobs are excluded from "every
-  // other check" (they are in progress while deciding). Hiding a check by name
-  // only ever hides the excluder's own check: CI and review are required
-  // separately, so this cannot mask a genuine gate.
-  selfCheckPrefixes: Object.freeze(['Governance · merge eligibility', 'Governance · eligibility targets']),
+  // No self-exclusion: the governance jobs run on base-context events and
+  // their check runs are not attached to the PR head SHA.
   baseBranch: 'main',
   allowedAuthorAssociations: Object.freeze(['OWNER', 'MEMBER', 'COLLABORATOR']),
 });
@@ -66,6 +66,7 @@ export function outsiderReason(pr, config = DEFAULT_CONFIG) {
  *                      appId?: number, workflowPath?: string }>,
  *   statuses?: Array<{ context: string, state: string }>,
  *   reviews?: Array<{ login: string, userType: string, commitId: string, state: string }>,
+ *   ciJobs: Array<{ id: number, name: string, status: string, conclusion: string|null }> | null,
  *   unresolvedThreads: number | null,
  * }} state
  * @returns {{ eligible: boolean, reasons: string[] }}
@@ -88,14 +89,30 @@ export function decideEligibility(state, config = DEFAULT_CONFIG) {
     reasons.push(`Base branch is "${pr.baseRef ?? 'unknown'}", not ${config.baseBranch}.`);
   }
 
-  const isSelf = (r) => config.selfCheckPrefixes.some((p) => r.name.startsWith(p));
-  const runs = latestCheckRuns(state?.checkRuns).filter((r) => !isSelf(r));
-
-  // CI: the genuine ci.yml check run must exist and succeed.
   const ci = config.ciCheck;
-  const genuineCi = runs.find((r) => r.name === ci.name && r.appId === ci.appId && r.workflowPath === ci.workflowPath);
-  if (!genuineCi) {
-    reasons.push(`Required check "${ci.name}" from ${ci.workflowPath} (app ${ci.appId}) has not run on the head SHA.`);
+  const all = state?.checkRuns ?? [];
+  // CI-named runs are never deduplicated: an impostor must not mask a failure.
+  const ciRuns = all.filter((r) => r.name === ci.name);
+  const runs = [...ciRuns, ...latestCheckRuns(all.filter((r) => r.name !== ci.name))];
+
+  const jobs = state?.ciJobs;
+  if (!Array.isArray(jobs)) {
+    reasons.push(`No ${ci.workflowPath} pull_request run found for the head SHA; CI "${ci.name}" is unverified.`);
+  } else {
+    const job = jobs.find((j) => j.name === ci.name);
+    if (!job) {
+      reasons.push(`Job "${ci.name}" not found in the latest attempt of ${ci.workflowPath}.`);
+    } else if (job.status !== 'completed' || job.conclusion !== 'success') {
+      reasons.push(`CI job "${ci.name}" (${ci.workflowPath}, id ${job.id}) is ${job.status}/${job.conclusion}.`);
+    } else if (!ciRuns.some((r) => r.id === job.id)) {
+      reasons.push(`CI job "${ci.name}" (id ${job.id}) has no check run on the head SHA.`);
+    }
+    const jobIds = new Set(jobs.map((j) => j.id));
+    for (const r of ciRuns) {
+      if (!jobIds.has(r.id)) {
+        reasons.push(`Check run "${ci.name}" id ${r.id} is not a job of ${ci.workflowPath}'s latest attempt; treated as a spoof.`);
+      }
+    }
   }
 
   // Every other check run (including any same-named impostor) must succeed.

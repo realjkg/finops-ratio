@@ -23,6 +23,28 @@ too large, truncated file list). A determined author can still write harmful
 code that matches no pattern. Low-risk auto-merge relies on CI, the independent
 review and resolved conversations as well, not on the classifier alone.
 
+Examples the patterns do NOT catch (egress assembled at runtime or hidden in
+markup):
+
+- `window["Web"+"Socket"]` (no literal `WebSocket(` / `new WebSocket`)
+- `` <img src={`//evil`}> `` (a template literal, not a quoted `'//`/`"//`)
+- a helper that wraps `fetch` defined in an already-merged file
+- hostnames written without a URL scheme
+
+Also restricted regardless of path:
+
+- Symlinks: a git diff showing mode `120000`, or a file object whose `mode`
+  is `120000`. The PR files API does not expose file modes. There, a symlink
+  shows up as a one-line patch containing its target, which content rules see.
+  A `docs/x.md` symlink to `../.env` would still look like Markdown, so CLI and
+  diff-based runs are stricter than API runs.
+- Any file without a patch that is not a removal, including pure renames.
+- Agent instruction and policy files, matched case-insensitively:
+  - `agents.md`, `claude.md`, `gemini.md`, `copilot-instructions.md` and
+    `skill.md` in any directory;
+  - `.obvious/**`, `.claude/**`, `.cursor/**`, `.cursorrules` and
+    `.github/copilot*`.
+
 Low allow-list: `docs/**/*.{md,png,svg}` (images only when GitHub serves a
 patch, so in practice Markdown), `*.md`, `src/components/**/*.{ts,tsx,js,jsx,css}`
 and `*.test.*` outside `pages/` and `src/pages/`. Everything under `pages/` and
@@ -37,12 +59,19 @@ Auto-merge (squash, pinned to the evaluated head SHA) is enabled only when
 - Same-repo PR (not a fork) by an `OWNER`, `MEMBER` or `COLLABORATOR`.
 - Label `risk:low` **and** a fresh low classification of the current files.
 - Not a draft; base is `main`.
-- The check run `Lint · Typecheck · Test · Build` from the GitHub Actions app
-  (id 15368) from a run of `.github/workflows/ci.yml` succeeded. Same-named
-  checks from other workflows or apps don't count, and neither do commit
-  statuses.
-- Every other check run (except this workflow's eligibility jobs) succeeded,
-  and every commit status is `success`.
+- CI, verified through the Actions jobs API:
+  - The newest `pull_request` run of `.github/workflows/ci.yml` for the head
+    SHA is found.
+  - Its jobs in the latest attempt (`filter=latest`, matching `run_attempt`)
+    are listed. The job named exactly `Lint · Typecheck · Test · Build` must
+    have concluded `success`, and its check run must be on the head SHA.
+  - Every check run on the head SHA with that name must be one of those job
+    ids (an Actions job id is its check run id). Anything else with the name
+    is a spoof and blocks.
+  - Commit statuses never satisfy CI.
+- Every other check run succeeded (CI-named runs are never deduplicated). Every
+  commit status is `success`. Nothing is excluded by name: the governance jobs
+  run on base-context events, so their check runs are not on the PR head SHA.
 - A submitted review by `copilot-pull-request-reviewer[bot]` (type `Bot`) on
   the exact head SHA. The repository does not re-request review on push, so
   **a fresh Copilot review on the new head is required after each push**.
@@ -64,17 +93,32 @@ auto-mergeable.
 - **Before merge, the gate does nothing.** `pull_request_target` runs main's copy
   of the workflow, so the gate starts working only after it is on `main`, and
   it cannot classify its own PR.
-- **Copilot completion may be detected late.** It is detected through
-  `workflow_run` (if GitHub emits it for the dynamic Copilot workflow) or the
-  30-minute scheduled sweep.
+- **Copilot completion is picked up by the sweep (L2).** The scheduled
+  30-minute sweep is the mechanism. `workflow_run` listens to `CI` only,
+  because the Copilot review is a dynamic workflow: "Running Copilot Code
+  Review" is a run title, not a workflow name, and it is not expected to emit
+  `workflow_run`.
+- **A PR that falls behind `main` stalls (L5).** `protect-main.mjs` sets
+  `strict: true` (branches must be up to date), and nothing here updates a PR
+  branch that is behind `main`. Such a PR stalls until someone clicks
+  "Update branch" or merges `main` into it. After that, CI and a fresh Copilot
+  review must run again on the new head.
+- **Permissions and matrix cap (L6).**
+  - `classify`: contents read, pull-requests/issues/statuses write.
+  - `targets`: contents and pull-requests read.
+  - `merge-eligibility`: contents and pull-requests write (auto-merge, and the
+    squash fallback); checks, statuses and actions read.
+  - GitHub matrices cap at 256 legs, so `targets` caps the list at 200 PRs,
+    oldest updated first, and warns. The rest are evaluated by later sweeps.
 - **Some settings can't be read with GITHUB_TOKEN.** It cannot read classic
   branch protection details. The report shows the branch `protected` flag and
   any ruleset required checks (`GET /rules/branches/main`).
 - **Some settings need an admin.** Branch protection and "Allow auto-merge"
   need an admin to run `protect-main.mjs`. If auto-merge is not allowed, the
-  eligibility summary reports a CONFIGURATION GAP and the job stays green.
-- **Not detected:** hostnames written without a URL scheme, and egress hidden
-  behind indirection, such as a helper that wraps `fetch` defined in an
-  already-merged file.
+  eligibility summary reports a CONFIGURATION GAP and emits a warning
+  annotation; the job stays green.
+- **Assumption: an Actions job id equals its check run id.** This holds on
+  GitHub today. If it changed, CI would never verify, so nothing would be
+  auto-merged (fail closed).
 - **Some rules are noisy.** The `auth|tenant|rls|role` filename rule matches
   e.g. `urls.ts`.

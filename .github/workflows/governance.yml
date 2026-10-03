@@ -12,8 +12,8 @@
 #   nor are PRs by authors outside OWNER/MEMBER/COLLABORATOR.
 # - `pull_request_review` is deliberately NOT used: it runs the PR head's copy
 #   of this workflow, so a PR could rewrite its own gate. Review/copilot
-#   completion is picked up by workflow_run (when GitHub emits it) and by the
-#   scheduled sweep.
+#   completion is picked up by the scheduled sweep (the dynamic Copilot review
+#   workflow is not a named workflow and is not expected to emit workflow_run).
 # - GITHUB_TOKEN only, minimal per-job permissions, actions pinned to SHAs.
 #
 # Classification never fails because a PR is restricted: it labels the PR and
@@ -25,7 +25,7 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled, edited]
   workflow_run:
-    workflows: [CI, Running Copilot Code Review]
+    workflows: [CI]
     types: [completed]
   schedule:
     - cron: '7,37 * * * *'

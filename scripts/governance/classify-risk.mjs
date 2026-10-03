@@ -155,6 +155,24 @@ export function binaryPathsInDiff(text) {
 }
 
 /**
+ * Paths a git diff turns into symlinks (mode 120000). A symlink can point a
+ * "low" path at anything (e.g. docs/x.md -> ../.env), so it is restricted.
+ */
+export function symlinkPathsInDiff(text) {
+  const out = new Set();
+  let current = null;
+  for (const line of String(text).split('\n')) {
+    const git = /^diff --git a\/(.*) b\/(.*)$/.exec(line);
+    if (git) {
+      current = git[2];
+      continue;
+    }
+    if (current && /^(?:new file mode|new mode) 120000$/.test(line)) out.add(current);
+  }
+  return [...out];
+}
+
+/**
  * Classify a change set.
  * @param {{ files: Array<{ path: string, previousPath?: string, patch?: string,
  *           patchUnavailable?: boolean }>, diff?: string, truncated?: boolean }} input
@@ -163,6 +181,7 @@ export function classify(input, rules = loadRules()) {
   const files = input?.files ?? [];
   const fromDiff = input?.diff ? parseUnifiedDiff(input.diff) : {};
   const binary = new Set(input?.diff ? binaryPathsInDiff(input.diff) : []);
+  const symlinks = new Set(input?.diff ? symlinkPathsInDiff(input.diff) : []);
   const reasons = [];
   const seen = new Set();
   const add = (path, cls, rule) => {
@@ -182,6 +201,10 @@ export function classify(input, rules = loadRules()) {
       ...(fromDiff[f.path] ?? []),
     ];
     let hit = false;
+    if (String(f.mode ?? '') === '120000' || symlinks.has(f.path)) {
+      add(f.path, 'unclassified', 'symlink');
+      hit = true;
+    }
     for (const rule of rules.restricted) {
       if (rule.matchPath) {
         for (const p of candidatePaths) {
