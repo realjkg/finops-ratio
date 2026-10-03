@@ -2,7 +2,9 @@
 
 Branch `slice/01-focus-ingestion-worker`, created from
 `origin/slice/00-postgres-foundation` @ 2866556; amended Slice 0 merged in at
-47711ff (origin 446563e). Local commits only: nothing pushed, no PR, nothing
+47711ff (origin 446563e, round 2) and again at 614e1c6 (origin d75a152,
+round 3: tenant pinned at COMMIT, RT001 for missing/invisible parent batch,
+stricter migration classifier). Local commits only: nothing pushed, no PR, nothing
 merged elsewhere. **All data used is SYNTHETIC. No real provider export has
 been ingested; the manual real-export acceptance procedure is NOT YET
 PERFORMED** (`.obvious/skills/ingestion-ops/SKILL.md` §9).
@@ -33,7 +35,9 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 16 | 53e0282 | fix: reconciliation follows the amended 0001 CHECKs | impl |
 | 17 | edd65d8 | test: S3 test files fail at collection when RATIO_TEST_S3_ENDPOINT is unset | test hardening |
 | 18 | 1cc3406 | fix(build): keep src/ingest out of the Tailwind content scan | build fix |
-| 19 | (final) | docs: ops skill + evidence | docs |
+| 19 | 8e3019b | docs: ingestion-ops skill + Slice 1 design/test plan/evidence | docs |
+| 20 | 614e1c6 | merge origin/slice/00-postgres-foundation (round 3) — no Slice 1 code change needed | merge |
+| 21 | (final) | docs: evidence refreshed for the round-3 merge | docs |
 
 Honest notes on order:
 - Commit 3 was written after the implementation existed in the working tree
@@ -85,17 +89,17 @@ Slice 0 tests passed.
    vitest reports as "skipped" tests inside failed files (run still exit 1).
    They now fail at collection (no skipped count at all).
 
-## 4. Verification (merged HEAD 1cc3406, worktree, no local modifications)
+## 4. Verification (HEAD 614e1c6 = round-3 merge, worktree, no local modifications)
 
 | Command | Result |
 |---|---|
 | `npm ci` | exit 0. `npm audit --omit=dev`: **0 vulnerabilities** (dev-tree advisories pre-existing) |
 | `npm run lint` | exit 0 |
 | `rm -rf .next && npx tsc --noEmit` | exit 0 |
-| `npm test` | exit 0 — 38 files / 415 tests passed (Slice 1 fast files: 9 files / 97 tests) |
-| `RATIO_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres RATIO_TEST_S3_ENDPOINT=http://127.0.0.1:18333 npm run test:db` ×3 | exit 0 each: 20 files / **204 passed, 0 failed, 0 skipped, 0 todo** each run (26.5 s, 23.0 s, 24.1 s). Slice 1 DB files: 12 files / 106 tests |
+| `npm test` | exit 0 — 38 files / 417 tests passed (Slice 1 fast files: 9 files / 97 tests) |
+| `RATIO_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres RATIO_TEST_S3_ENDPOINT=http://127.0.0.1:18333 npm run test:db` ×3 | exit 0 each: 20 files / **211 passed, 0 failed, 0 skipped, 0 todo** each run (25.4 s, 28.1 s, 28.0 s). Slice 1 DB files: 12 files / 106 tests. No Slice 1 assertion needed changing for round 3 (none expects 42501 for a cross-tenant child-row insert; tenant-escape tests go through NOT_FOUND / RLS-filtered paths) |
 | `npm run test:db` with `RATIO_TEST_DATABASE_URL` unset | exit 1: "RATIO_TEST_DATABASE_URL is not set … refusing to run" |
-| `npm run test:db` with `RATIO_TEST_S3_ENDPOINT` unset | exit 1: 3 S3 files FAIL at collection ("RATIO_TEST_S3_ENDPOINT is not set"), 187 passed, nothing skipped |
+| `npm run test:db` with `RATIO_TEST_S3_ENDPOINT` unset | exit 1: 3 S3 files FAIL at collection ("RATIO_TEST_S3_ENDPOINT is not set"), 194 passed, nothing skipped |
 | `grep -rnE '\.(skip\|only\|todo\|fails)\b\|skipIf\|runIf' src/ingest` | no matches |
 | `npm run worker:build` | exit 0; `dist-worker/ingest/build-info.json` carries the git SHA; built CLI used for §5 |
 | `npm run build` | exit 0 (after commit 1cc3406 — before it, Tailwind's JIT scanned `src/ingest` and emitted an invalid class from a regex literal). Then `git checkout tsconfig.json next-env.d.ts`; no AGENTS.md/CLAUDE.md generated |
@@ -109,18 +113,20 @@ Slice 0 tests passed.
 S1 (200,000 rows, 1000-row chunks, each chunk its own lease-fenced txn), same
 machine, 3 runs each:
 - before the merge (local temp grant, no staged-only triggers): 7 660 / 8 004 / 7 825 ms
-- after the merge (amended 0001: per-row staged-only trigger with `FOR SHARE` on the batch): 9 465 / 11 505 / 10 712 ms
+- after the round-2 merge (per-row staged-only trigger with `FOR SHARE` on the batch): 9 465 / 11 505 / 10 712 ms
+- after the round-3 merge (HEAD 614e1c6): 9 851 / 9 930 / 10 286 ms
 
-≈ +1.5–3.7 s per 200k rows (≈ 8–18 µs per row, +20–45 % of the whole load
+≈ +2–3.7 s per 200k rows (≈ 10–18 µs per row, +25–45 % of the whole load
 including parse, gzip and evidence I/O). Acceptable for this slice; a
 statement-level trigger (one check per chunk) would remove most of it — a
 Slice 0 design choice, noted for the owner.
 
 ## 5. Manual end-to-end (built CLI, merged code, `v-e2e.txt`)
 
-Script `e2e.sh` (scratch, not committed): scratch DB `ratio_s1_e2e_39629773`,
+Run on HEAD 614e1c6 (round 3; identical results on 1cc3406 before it).
+Script `e2e.sh` (scratch, not committed): scratch DB `ratio_s1_e2e_d7121dca`,
 worker login `IN ROLE ratio_worker`, reader login `IN ROLE ratio_reader`,
-bucket `s1-e2e-39629773` seeded with `fixtures/focus-1.0-synthetic/base/**`,
+bucket `s1-e2e-d7121dca` seeded with `fixtures/focus-1.0-synthetic/base/**`,
 tenant provisioned as in SKILL §2, source credentials from the AWS SDK default
 chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env).
 
@@ -134,11 +140,11 @@ chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env).
 | batches | both `published/reconciled`, control = loaded exactly |
 | evidence re-hash (3 objects) | all `OK` (sha256 of the stored object = `ingest_artifacts.sha256`) |
 | `worker doctor --json --tenant …` | exit 0, all checks pass |
-| `RATIO_ENV=test worker replay-fixtures --json` | exit 0, 6/6 scenarios pass, tenant `fixture-20261003052354-a16a2d25` retained |
+| `RATIO_ENV=test worker replay-fixtures --json` | exit 0, 6/6 scenarios pass, tenant `fixture-20261003055540-a5cacb01` retained |
 | fixture tenant footprint | 341 fact rows (~409 kB), 8 batches, 8 runs, 38 objects / 75 458 bytes |
 | cleanup (scratch only) | bucket deleted, database and logins dropped |
 
-## 6. Mutation checks (merged code, `mutations.txt`)
+## 6. Mutation checks (run on the round-2 merge 53e0282+; the mutated lines are unchanged by round 3, `mutations.txt`)
 
 Each mutation applied to one line, the named tests run, the file restored
 byte-identically (`cmp`).
@@ -161,14 +167,14 @@ byte-identically (`cmp`).
 | 2 | Parser creates a staged revision | `demo 2` (batch `staged` with 10 fact rows, invisible to `ratio_reader`); C1 |
 | 3 | Validation passes, or inspectable quarantine | `demo 3` (reconciled + published; corrupt variant ⇒ quarantined, `quarantine show --json` lists sha256/row/column/code); W9 matrix, W11, K2 |
 | 4 | Reprocessing yields no duplicate published facts | `demo 4` (sync ×2, `replay --period`, backfill ⇒ one batch per period, totals = control); W2, R2 |
-| 5 | SIGKILL mid-run exposes no partial data | `demo 5 + 6` (real child process via tsx, paused by the NODE_ENV=test hook after ≥20 rows, `kill -9`, reader view = previous revision, checkpoint unchanged); C1, C1b |
+| 5 | SIGKILL mid-run exposes no partial data | `demo 5 + 6` (≈0.9 s per run; real child process via tsx, paused by the NODE_ENV=test hook after ≥20 rows, `kill -9`, reader view = previous revision, checkpoint unchanged); C1, C1b |
 | 6 | Restart completes safely or fails visibly without advancing checkpoint | `demo 5 + 6` (immediate restart exit 4, checkpoint unchanged; after lease expiry exit 0, totals = restatement control, killed run `abandoned`, its staged batch gone); L3, L6 |
 | 7 | App reads latest accepted revision; staged/quarantined inaccessible to `ratio_reader` | `demo 7` (reader LOGIN sees exactly the published batches; 42501 on cost_facts, ingest_batches, ingest_validation_errors, ingest_artifacts, sync_runs, period_publications); demo 2 |
 | 8 | Tenant-bound access fails closed | `demo 8` (no tenant ⇒ 0 rows; tenant B ⇒ none of A; worker cannot update A from B; CLI B + A's source ⇒ SOURCE_NOT_FOUND; malformed tenant ⇒ exit 2); T1, T2 |
 
 ## 8. Complete Slice 1 test list (final run; every test `passed`)
 
-### Fast suite (npm test) — Slice 1 files
+### Fast suite (npm test)
 
 - `src/ingest/cli.worker.test.ts`
   - passed: usage errors exit 2 and still print one evidence record
@@ -287,7 +293,7 @@ byte-identically (`cmp`).
 
 (97 tests)
 
-### DB suite (npm run test:db, final run 3) — Slice 1 files
+### DB suite (npm run test:db, final run 3)
 
 - `src/ingest/cliWorker.db.test.ts`
   - passed: K1 sync prints one evidence record, logs JSON without row contents or secrets, and appends RATIO_EVIDENCE_FILE (also for migrate)
