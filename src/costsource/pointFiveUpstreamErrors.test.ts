@@ -34,7 +34,7 @@ describe('PointFiveOAuthClient — no upstream body in errors', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const client = new PointFiveOAuthClient(
       CREDS,
-      httpFetchReturning({ ok: false, status: 401, text: `${MARKER} invalid_client Bearer s3cr3t` }),
+      httpFetchReturning({ ok: false, status: 401, text: `${MARKER} invalid_client Bearer s3cr3t-0123456789abcdef` }),
     );
     const err = await client.getAccessToken().catch((e: unknown) => e);
     expect((err as Error).message).toBe('PointFive OAuth token endpoint returned 401 (unauthorized)');

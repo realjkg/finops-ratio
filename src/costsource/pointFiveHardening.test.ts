@@ -20,7 +20,7 @@ const ENV = {
   POINTFIVE_OAUTH_TOKEN_URL: 'https://auth.example/oauth/token',
 };
 const SECRET_MSG =
-  'mcp said: Bearer pf.tok.SECRET denied at https://acct.blob.core.windows.net/c/x?sv=2024&sig=SASSECRET';
+  'mcp said: Bearer pf.tok.SECRET-0123456789 denied at https://acct.blob.core.windows.net/c/x?sv=2024&sig=SASSECRET';
 
 function transport(overrides: Partial<PointFiveMcpClient>): PointFiveMcpClient {
   return {

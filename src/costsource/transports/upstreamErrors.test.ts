@@ -13,7 +13,7 @@ afterEach(() => {
 describe('fetchChecked — no upstream body in the thrown error', () => {
   it('throws label + status + fixed reason only, and logs the redacted body server-side', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const body = 'UPSTREAM-BODY-MARKER token Bearer s3cr3t-token at https://x.example/p?sig=leak';
+    const body = 'UPSTREAM-BODY-MARKER token Bearer s3cr3t-token-0123456789 at https://x.example/p?sig=leak';
     const fetchImpl = vi.fn(async () => new Response(body, { status: 401 })) as unknown as typeof fetch;
     const err = await fetchChecked(fetchImpl, 'https://x.example/p', {}, 'Kubernetes FOCUS endpoint').catch((e: unknown) => e);
     expect((err as Error).message).toBe('Kubernetes FOCUS endpoint returned 401 (unauthorized)');

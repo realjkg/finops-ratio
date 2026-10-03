@@ -226,7 +226,7 @@ describe('#12 / #13 /api/v1/connectors?probe=true', () => {
             { id: 'kubernetes', name: 'K8s', kind: 'kubernetes', focusVersion: '1.0', coverage: 'private_cloud', capabilities: ['costRows'], configured: true, note: '', connection: 'connected' },
           ],
           healthCheck: async () => {
-            throw new Error('probe blew up: Bearer pr.tok.SECRET at https://x.example/p?sig=SASSECRET');
+            throw new Error('probe blew up: Bearer pr.tok.SECRET-0123456789 at https://x.example/p?sig=SASSECRET');
           },
         }),
       };

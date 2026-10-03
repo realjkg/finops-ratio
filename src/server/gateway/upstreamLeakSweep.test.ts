@@ -12,7 +12,7 @@ import { SlidingWindowRateLimiter } from './rateLimit';
 import { fetchChecked } from '@/costsource/transports/focusExport';
 
 const MARKER = 'UPSTREAM-BODY-MARKER';
-const SECRET = 'Bearer leak.tok.SECRET at https://x.example/p?sig=SASSECRET';
+const SECRET = 'Bearer leak.tok.SECRET-0123456789 at https://x.example/p?sig=SASSECRET';
 const ENV_KEYS = [
   'RATIO_API_TOKEN',
   'CM_PROVIDER',

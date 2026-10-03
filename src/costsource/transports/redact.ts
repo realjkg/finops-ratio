@@ -4,10 +4,13 @@
 //
 // Strips: PEM blocks, URL userinfo and query strings (presigned / SAS URLs
 // carry credentials there), Azure AccountKey= / SharedAccessSignature=, AWS
-// X-Amz-Signature / -Credential / -Security-Token, JWTs, Bearer (quoted or
-// bare) and Basic credentials, access/refresh/id tokens, client secrets, API
-// keys, passwords and secrets in JSON and k=v form, bare SAS parameters, and
-// AWS access key ids (AKIA… / ASIA…). Redaction runs BEFORE truncation, so a
+// X-Amz-Signature / -Credential / -Security-Token, JWTs, Authorization header
+// values (Bearer / Basic / token), free-text Bearer / Basic before a
+// credential-shaped value (>= 16 token chars — prose is left alone), GitHub
+// tokens, sk- / sk-proj- keys, AWS secret access keys, access / refresh / id
+// tokens, client secrets, API keys, passwords and secrets in JSON and k=v
+// form, bare token=, bare SAS parameters, and AWS access key ids (AKIA… /
+// ASIA…). Redaction runs BEFORE truncation, so a
 // cut can never leave a partial secret that no longer matches.
 
 /** Max characters of a redacted upstream body kept in the server log. */
@@ -18,7 +21,14 @@ const SAS_PARAMS = ['sig', 'sv', 'se', 'st', 'sp', 'sr', 'spr', 'srt', 'ss', 'si
 const SAS_RE = new RegExp(`\\b(${SAS_PARAMS.join('|')})=[^&\\s"'<>]*`, 'gi');
 
 // Credential-bearing field names, matched in JSON ("key": "value") and k=v forms.
-const SECRET_KEYS = 'access_token|refresh_token|id_token|client_secret|api[_-]?key|password|secret';
+const SECRET_KEYS =
+  'aws[_-]?secret[_-]?access[_-]?key|access_token|refresh_token|id_token|client_secret|api[_-]?key|password|secret';
+
+// A credential-shaped value: >= 16 token characters. Bearer / Basic in free
+// text are only redacted when followed by one, so prose ("Bearer of costs",
+// "Basic Support plan") is left alone; in an Authorization header they are
+// always redacted.
+const TOKEN_VALUE = `["']?[A-Za-z0-9._~+/=-]{16,}["']?`;
 const JSON_SECRET_RE = new RegExp(`("(?:${SECRET_KEYS})"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`, 'gi');
 const KV_SECRET_RE = new RegExp(`\\b((?:${SECRET_KEYS})\\s*[=:]\\s*)(?!\\[REDACTED)[^\\s&;,"'<>]+`, 'gi');
 
@@ -37,18 +47,22 @@ const RULES: Array<[RegExp, string]> = [
   [/\b(AccountKey|SharedAccessSignature)=[^;\s"'<>]+/gi, '$1=[REDACTED]'],
   // AWS SigV4 query / header credentials.
   [/\b(X-Amz-(?:Signature|Credential|Security-Token))(\s*[=:]\s*)[^\s&;,"'<>]+/gi, '$1$2[REDACTED]'],
-  // Bearer tokens, quoted or bare.
-  [/\bBearer\s+"[^"]*"/gi, 'Bearer [REDACTED]'],
-  [/\bBearer\s+'[^']*'/gi, 'Bearer [REDACTED]'],
-  [/\bBearer\s+(?!\[REDACTED)[^\s"'<>,;]+/gi, 'Bearer [REDACTED]'],
+  // Authorization header values: always redacted, whatever the scheme value.
+  [/\b(Authorization\s*:\s*(?:Bearer|Basic|token))\s+("[^"]*"|'[^']*'|(?!\[REDACTED)[^\s"'<>,;]+)/gi, '$1 [REDACTED]'],
+  // Bearer / Basic in free text: only before a credential-shaped value.
+  [new RegExp(`\\b(Bearer|Basic)\\s+${TOKEN_VALUE}`, 'g'), '$1 [REDACTED]'],
   // JWTs anywhere.
   [/\beyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[REDACTED_JWT]'],
-  // Basic auth credentials.
-  [/\bBasic\s+[A-Za-z0-9+/=._-]{6,}/g, 'Basic [REDACTED]'],
+  // GitHub tokens (classic ghp_/gho_/ghu_/ghs_/ghr_ and fine-grained github_pat_).
+  [/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g, '[REDACTED_GITHUB_TOKEN]'],
+  // OpenAI-style secret keys (sk-…, sk-proj-…).
+  [/\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}/g, '[REDACTED_API_KEY]'],
   // JSON "secret_key": "value".
   [JSON_SECRET_RE, '$1"[REDACTED]"'],
   // k=v / k: v secret fields.
   [KV_SECRET_RE, '$1[REDACTED]'],
+  // Bare token=value.
+  [/\b(token\s*=\s*)(?!\[REDACTED)[^\s&;,"'<>]+/gi, '$1[REDACTED]'],
   // Bare SAS parameters.
   [SAS_RE, '$1=[REDACTED]'],
   // AWS access key ids.

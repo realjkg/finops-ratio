@@ -39,7 +39,7 @@ describe('unparseable FOCUS dates are invalid rows', () => {
 
 describe('CloudConnectorAdapter redacts transport error text', () => {
   const SECRET_MSG =
-    'upstream said: Authorization Bearer abc.def.ghi rejected for https://acct.blob.core.windows.net/c/x.csv?sv=2024&sig=SASSECRET';
+    'upstream said: Authorization Bearer abc.def.ghi.0123456789 rejected for https://acct.blob.core.windows.net/c/x.csv?sv=2024&sig=SASSECRET';
   const env = { KUBERNETES_FOCUS_ENDPOINT: 'https://opencost.example/focus' };
   const failing = () => ({
     ping: async () => {
