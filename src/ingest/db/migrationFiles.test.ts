@@ -205,7 +205,7 @@ describe('loadMigrations', () => {
       'CREATE VIEW v AS SELECT x FROM a;\nCREATE POLICY p ON a USING (tenant_id = ratio.current_tenant_id());\n' +
       'CREATE TRIGGER t BEFORE INSERT ON a FOR EACH ROW EXECUTE FUNCTION f();\n' +
       'CREATE CONSTRAINT TRIGGER ct AFTER INSERT ON a DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION f();\n' +
-      'GRANT SELECT ON a TO ratio_reader;\nGRANT USAGE ON SCHEMA s TO ratio_worker, ratio_reader;\n' +
+      'GRANT SELECT ON a TO ratio_worker;\nGRANT USAGE ON SCHEMA s TO ratio_worker;\n' +
       'REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA s FROM PUBLIC;\n' +
       'SET LOCAL ROLE ratio_owner;\nSET LOCAL search_path = pg_catalog;\nSELECT pg_catalog.pg_has_role(\'a\', \'b\', \'MEMBER\');\n';
     expect(findNonExpandStatement(additive)).toBeNull();
@@ -275,7 +275,7 @@ describe('loadMigrations', () => {
       'GRANT SELECT ON ratio.cost_facts_published TO ratio_reader;\n' +
       'GRANT EXECUTE ON FUNCTION ratio.current_tenant_id() TO ratio_worker, ratio_reader;\n' +
       'GRANT SELECT, INSERT ON ratio.cost_facts TO ratio_worker;\n' +
-      'ALTER TABLE ratio.t ADD COLUMN y int NOT NULL DEFAULT 0;\nALTER TABLE ratio.t ADD COLUMN z int;\n' +
+      'ALTER TABLE ratio.t ADD COLUMN y int NOT NULL DEFAULT 0;\nALTER TABLE ratio.t ADD COLUMN z int;\nALTER TABLE ratio.t ADD COLUMN w int DEFAULT 1 NOT NULL;\n' +
       "-- ratio:allow-do creates roles\nDO $r$ BEGIN EXECUTE format('CREATE ROLE %I NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE', 'x'); END $r$;\n";
     expect(findForbiddenStatement(ok)).toBeNull();
     expect(findNonExpandStatement(ok)).toBeNull();
