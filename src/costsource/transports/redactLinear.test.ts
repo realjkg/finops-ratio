@@ -51,6 +51,11 @@ const INPUTS: Record<string, string> = {
   'colon authority then a long @-run': `'http://a:b/' + 'x@'.repeat(${SIZE} / 2)`,
   'colon authorities, @ only at the very end': `'http://a:1/'.repeat(${SIZE} / 11) + '@h'`,
   'backslash run in the authority': `'http://' + '\\\\'.repeat(${SIZE})`,
+  // Round 11: query / fragment to end of line.
+  'one query per JSON-escaped line, repeated': `'https://x/p?a=1\\\\n'.repeat(${SIZE} / 16)`,
+  'one query per real line, repeated': `'https://x/p?a=1\\n'.repeat(${SIZE} / 15)`,
+  'query then a long even backslash run then n': `'https://x/p?' + '\\\\\\\\'.repeat(${SIZE} / 2) + 'n'`,
+  'many URLs with queries on one line': `'https://x/p?q '.repeat(${SIZE} / 15)`,
   'double-escaped scheme repeated': `'http:\\\\\\\\\\\\/\\\\\\\\\\\\/'.repeat(${SIZE} / 13)`,
 };
 

@@ -236,31 +236,32 @@ function redactUrlUserinfo(text: string): string {
 }
 
 /**
- * End of a query / fragment that starts at `j`: whitespace or the end of the
- * text — except that a quoted part ("…", '…', `…`, \"…\") belongs to the query
- * whole, spaces included; an unterminated quote runs to the end. Every jump
- * moves forward, so this is linear.
+ * End of the LINE that starts at `j`: the next real `\n` / `\r`, the next
+ * JSON-escaped `\n` / `\r` whose backslash is itself unescaped (an odd run
+ * of backslashes before the `n` / `r`), or the end of the text. No quote or
+ * escape parsing otherwise — every such parser had a bypass (an escaped
+ * closing quote, a quote closed early, …). One forward pass: linear.
  */
-function queryEnd(text: string, j: number): number {
-  while (j < text.length) {
-    const c = text[j];
-    if (WS.test(c)) return j;
-    if (QUOTES.includes(c)) {
-      // Also covers an escaped \"…\": the `\` is consumed as a plain char and
-      // the closing `\"` ends in the same quote character.
-      const close = text.indexOf(c, j + 1);
-      j = close === -1 ? text.length : close + 1;
-    } else {
-      j += 1;
+function lineEnd(text: string, j: number): number {
+  for (let k = j; k < text.length; k += 1) {
+    const c = text[k];
+    if (c === '\n' || c === '\r') return k;
+    if (c === '\\') {
+      let r = k;
+      while (r < text.length && text[r] === '\\') r += 1;
+      if ((r - k) % 2 === 1 && (text[r] === 'n' || text[r] === 'r')) return r - 1;
+      k = r - 1; // skip the backslash run
     }
   }
-  return j;
+  return text.length;
 }
 
 /**
- * (b) Query and fragment: from the first `?` or `#` after the scheme up to
- * queryEnd() is replaced (`?[REDACTED]` / `#[REDACTED]`); scheme, host and path
- * are kept. Over-redacting the rest of a line is acceptable; leaking is not.
+ * (b) Query and fragment: from the first `?` or `#` after the scheme to the
+ * end of the line (lineEnd) is replaced (`?[REDACTED]` / `#[REDACTED]`);
+ * scheme, host and path are kept. Over-redacting the rest of the line is
+ * accepted (upstream error logs keep 300 chars anyway); leaking is not. The
+ * scan resumes after the redacted span, so every char is visited once.
  */
 function redactUrlQueries(text: string): string {
   let out = '';
@@ -270,7 +271,7 @@ function redactUrlQueries(text: string): string {
     let i = u.authStart;
     while (i < text.length && text[i] !== '?' && text[i] !== '#' && !WS.test(text[i])) i += 1;
     if (i < text.length && (text[i] === '?' || text[i] === '#')) {
-      const end = queryEnd(text, i + 1);
+      const end = lineEnd(text, i + 1);
       out += text.slice(pos, i + 1) + '[REDACTED]';
       pos = end;
       i = end;
