@@ -2,13 +2,30 @@
 // surface that must not change for existing callers.
 //
 // Every handler is invoked in-process with a fake req/res (no server, no
-// network). Response bodies are normalized (ISO timestamps → '<iso>') and
-// compared against src/compat/golden/api.json.
+// network) and the response is compared against src/compat/golden/api.json.
+//
+// Time: the clock (Date only — timers stay real) is FROZEN at FROZEN_NOW, so
+// every value derived from Date.now() is deterministic and PINNED by the
+// golden. Discovered by generating at two different instants and diffing:
+//   - costsource rows (both sandboxes): generatedAt, rows[].BillingPeriodStart,
+//     rows[].BillingPeriodEnd, rows[].ChargePeriodStart, rows[].ChargePeriodEnd
+//     (the current billing period)
+//   - costsource health (both sandboxes): checkedAt
+//   - costsource ingest round-trip: generatedAt, and the same four period
+//     columns (the request's seed rows are built from the clock)
+//   - hello: timestamp
+//   - tokenomics: generatedAt
+//   - prediction/accuracy: generatedAt
+// No other value differs between two clock instants, and nothing differs
+// between two runs at the same instant.
+// Only the explicit VOLATILE_FIELDS below (response-time stamps) are
+// normalized to '<volatile>'; every other value — including all other dates —
+// must match exactly.
 //
 // Goldens are GENERATED FROM origin/main behaviour: run this file with
 // COMPAT_WRITE=1 in an export of origin/main to (re)write the golden file, then
-// run it normally on the branch under test. See src/compat/README note in the
-// golden file's `_generatedFrom` field.
+// run it normally on the branch under test. The golden's `_generatedFrom`
+// field records the source commit.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
@@ -18,6 +35,15 @@ import { rawRowsForVersion } from '@/costsource/seed';
 
 const GOLDEN = path.resolve(__dirname, 'golden/api.json');
 const WRITE = process.env.COMPAT_WRITE === '1';
+
+/** The frozen clock (override with COMPAT_NOW only when discovering volatile fields). */
+const FROZEN_NOW = process.env.COMPAT_NOW ?? '2026-06-15T12:00:00.000Z';
+
+/**
+ * Response-time stamps — the ONLY normalized fields. (COMPAT_RAW=1 disables
+ * this, for the discovery run that lists clock-derived fields.)
+ */
+const VOLATILE_FIELDS = new Set(['generatedAt', 'checkedAt', 'createdAt', 'asOf', 'timestamp']);
 
 // Env that could change behaviour is cleared so the contract is the default build.
 const ENV_KEYS = [
@@ -41,12 +67,14 @@ beforeEach(() => {
     delete process.env[k];
   }
   vi.spyOn(console, 'info').mockImplementation(() => {});
+  vi.useFakeTimers({ toFake: ['Date'], now: new Date(FROZEN_NOW) });
 });
 afterEach(() => {
   for (const k of ENV_KEYS) {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
   }
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -113,19 +141,23 @@ async function call(mod: Promise<{ default: unknown }>, req: NextApiRequest): Pr
   return { status: res.statusCode, headers: res.headers, body: res.body };
 }
 
-const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
-
 /** What a client receives on the wire: res.json() serializes (Infinity → null etc.). */
 function wire(v: unknown): unknown {
   return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
 }
 
-/** Deep-normalize volatile values: ISO timestamps → '<iso>'. */
+/** Deep-normalize ONLY the explicit VOLATILE_FIELDS. */
 function normalize(v: unknown): unknown {
-  if (typeof v === 'string') return ISO.test(v) ? '<iso>' : v;
   if (Array.isArray(v)) return v.map(normalize);
   if (v && typeof v === 'object') {
-    return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, normalize(x)]));
+    return Object.fromEntries(
+      Object.entries(v as Record<string, unknown>).map(([k, x]) => [
+        k,
+        VOLATILE_FIELDS.has(k) && process.env.COMPAT_RAW !== '1' && x !== null && typeof x !== 'object'
+          ? '<volatile>'
+          : normalize(x),
+      ]),
+    );
   }
   return v;
 }
