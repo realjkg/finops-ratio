@@ -8,7 +8,10 @@
 //   L1  a run that committed work before its lease expired is abandoned as
 //       LEASE_EXPIRED_AFTER_COMMIT (with what it committed), distinguishable
 //       from a run that committed nothing (LEASE_EXPIRED).
+import crypto from 'crypto';
 import { Readable, Transform } from 'stream';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { S3EvidenceStore } from '../evidence/S3EvidenceStore';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeFocusSource } from '../sources/fake/FakeFocusSource';
 import { MemoryEvidenceStore } from '../evidence/MemoryEvidenceStore';
@@ -347,5 +350,107 @@ describe('PR #54 fifth review M3: a crash during replay --batch finishes nothing
     await sync(s, new FakeFocusSource([]));
     expect(await replayRun()).toMatchObject({ status: 'abandoned', error_code: 'LEASE_EXPIRED' });
   });
+});
+
+// Third challenger round on 9b32cfb (APPROVED): verifying an existing evidence
+// object (a full re-hash) must keep the lease alive while bytes flow, and must
+// stall visibly when they stop.
+describe('round 3 L1: verifying existing evidence feeds progress and is under the idle watchdog', () => {
+  /** An S3 client over a Map; the FIRST GET of `slowKey` is slow (or stalls); every other request is immediate. */
+  function mapClient(objects: Map<string, { body: Buffer; meta?: Record<string, string> }>, slow: { key: string; mode: 'slow' | 'stall' }): S3Client {
+    let slowDone = false;
+    return {
+      async send(cmd: unknown) {
+        if (cmd instanceof HeadObjectCommand) {
+          const o = objects.get(String(cmd.input.Key));
+          if (!o) throw Object.assign(new Error('NotFound'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } });
+          return { ContentLength: o.body.length, Metadata: o.meta ?? {} };
+        }
+        if (cmd instanceof PutObjectCommand) {
+          const b = cmd.input.Body;
+          const bytes = Buffer.isBuffer(b) ? b : await streamBytes(b as Readable);
+          objects.set(String(cmd.input.Key), { body: bytes, meta: cmd.input.Metadata });
+          return {};
+        }
+        if (cmd instanceof GetObjectCommand) {
+          const key = String(cmd.input.Key);
+          const o = objects.get(key);
+          if (!o) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } });
+          if (key === slow.key && !slowDone) {
+            slowDone = true;
+            return { Body: slowBody(o.body, slow.mode), ContentLength: o.body.length };
+          }
+          return { Body: Readable.from([o.body]), ContentLength: o.body.length };
+        }
+        throw new Error('unexpected command');
+      },
+    } as unknown as S3Client;
+  }
+  async function streamBytes(r: Readable): Promise<Buffer> {
+    const parts: Buffer[] = [];
+    for await (const c of r) parts.push(Buffer.from(c as Buffer));
+    return Buffer.concat(parts);
+  }
+  /** 16-byte chunks every 250 ms ('slow'), or one chunk and then nothing ever again ('stall'). */
+  function slowBody(b: Buffer, mode: 'slow' | 'stall'): Readable {
+    let i = 0;
+    const r = new Readable({
+      read() {
+        if (mode === 'stall' && i > 0) return; // never pushes again
+        const timer = setTimeout(() => {
+          if (i >= b.length) return void r.push(null);
+          r.push(b.subarray(i, i + 16));
+          i += 16;
+        }, i === 0 ? 0 : 250);
+        r.once('close', () => clearTimeout(timer));
+      },
+    });
+    return r;
+  }
+
+  const seeded = async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const bytes = csvGz(rowsOf(P, 4, '1.00'));
+    const key = `evidence/${s.tenantId}/${s.sourceId}/${crypto.createHash('sha256').update(bytes).digest('hex')}`;
+    // Pre-seeded WITHOUT the ratio-sha256 metadata: the capture must fully re-hash it.
+    const objects = new Map<string, { body: Buffer; meta?: Record<string, string> }>([[key, { body: bytes }]]);
+    return { s, bytes, key, objects };
+  };
+
+  it('a slow but progressing verify that outlasts stall + lease TTL keeps the lease: the period publishes', async () => {
+    const { s, bytes, key, objects } = await seeded();
+    expect(bytes.length / 16 * 0.25).toBeGreaterThan(1 + 2); // the verify outlasts stall (1 s) + TTL (2 s)
+    const evidence = new S3EvidenceStore({ client: mapClient(objects, { key, mode: 'slow' }), bucket: 'ev' });
+    const r = await runSync({
+      pool: t.pool,
+      tenantId: s.tenantId,
+      sourceKey: s.sourceKey,
+      source: new FakeFocusSource([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes }] }]),
+      evidence,
+      mode: 'sync',
+      settings: { stallTimeoutSeconds: 1, leaseTtlSeconds: 2, maxRunSeconds: 60 } as RunSyncOptions['settings'],
+      hooks: noSleep,
+    });
+    expect(r.status).toBe('succeeded');
+    expect(r.periods[0]).toMatchObject({ outcome: 'published' });
+  }, 30_000);
+
+  it('a verify that stops sending bytes fails EVIDENCE_STALLED at the stall limit (not hanging until MAX_RUN)', async () => {
+    const { s, bytes, key, objects } = await seeded();
+    const evidence = new S3EvidenceStore({ client: mapClient(objects, { key, mode: 'stall' }), bucket: 'ev' });
+    const started = Date.now();
+    const r = await runSync({
+      pool: t.pool,
+      tenantId: s.tenantId,
+      sourceKey: s.sourceKey,
+      source: new FakeFocusSource([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes }] }]),
+      evidence,
+      mode: 'sync',
+      settings: { stallTimeoutSeconds: 1, leaseTtlSeconds: 30, maxRunSeconds: 20, maxAttempts: 1 } as RunSyncOptions['settings'],
+      hooks: noSleep,
+    });
+    expect(Date.now() - started).toBeLessThan(6_000);
+    expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'EVIDENCE_STALLED' });
+  }, 30_000);
 });
 

@@ -5,7 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GetObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { S3FocusExportSource } from './S3FocusExportSource';
 import { S3EvidenceStore } from '../../evidence/S3EvidenceStore';
 import { runSync } from '../../worker/pipeline';
@@ -336,6 +336,43 @@ describe('S3 source → evidence → published facts', () => {
         expect((await evidenceBucket.get(evKey)).equals(forged), what).toBe(true);
         expect(await batchesOf(t.db.pool, s.tenantId, s.sourceId), what).toEqual([]);
       }
+    } finally {
+      await bucket.destroy();
+    }
+  });
+
+  it('X8 (round 3 L2) forged evidence carrying a COPIED ratio-sha256: an artifact passes the capture fast path but fails EVIDENCE_INTEGRITY at load; a parquet artifact too; a manifest fails at capture', async () => {
+    const bucket = await createTestBucket('x8');
+    try {
+      const store = new S3EvidenceStore({ client: evidenceBucket.client, bucket: evidenceBucket.name, prefix: evidenceBucket.root });
+      const forge = async (key: string, genuine: Buffer) =>
+        evidenceBucket.client.send(new PutObjectCommand({ Bucket: evidenceBucket.name, Key: key, Body: Buffer.alloc(genuine.length, 0x42), Metadata: { 'ratio-sha256': sha(genuine) } }));
+      const cases: Array<[string, string, Buffer, string]> = [
+        ['csv artifact', 'a.csv.gz', csvGz(rowsOf('2026-07-01', 2)), 'EVIDENCE_INTEGRITY'],
+        ['parquet artifact', 'part-00000.snappy.parquet', Buffer.from('PAR1 synthetic not-really-parquet PAR1'), 'EVIDENCE_INTEGRITY'],
+      ];
+      for (const [what, file, bytes, code] of cases) {
+        const ym = what === 'csv artifact' ? '2026-07' : '2026-08';
+        const key = DATA(bucket, ym) + file;
+        await bucket.put(key, bytes);
+        await bucket.put(META(bucket, ym) + 'focus-export-Manifest.json', manifest({ dataFiles: [key] }));
+        const s = await seedTenantSource(t.db.pool, { config: { layout: 'aws-data-exports', ...loc(bucket) } });
+        await forge(evidenceBucket.at(`evidence/${s.tenantId}/${s.sourceId}/${sha(bytes)}`), bytes);
+        const r = await runSync({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourceKey, source: new S3FocusExportSource({ client: bucket.client, location: loc(bucket) }), evidence: store, mode: 'backfill', range: { from: `${ym}-01`, to: `${ym}-01` }, hooks: noSleep });
+        expect(r.periods[0], what).toMatchObject({ outcome: 'failed', code });
+        expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId), what).toEqual({});
+        expect((await batchesOf(t.db.pool, s.tenantId, s.sourceId)).filter((b) => b.status !== 'staged'), what).toEqual([]);
+      }
+      // A manifest never takes the fast path: refused at capture.
+      const ym = '2026-09';
+      const key = DATA(bucket, ym) + 'a.csv.gz';
+      const M = manifest({ dataFiles: [key] });
+      await bucket.put(key, csvGz(rowsOf('2026-09-01', 1)));
+      await bucket.put(META(bucket, ym) + 'focus-export-Manifest.json', M);
+      const s = await seedTenantSource(t.db.pool, { config: { layout: 'aws-data-exports', ...loc(bucket) } });
+      await forge(evidenceBucket.at(`evidence/${s.tenantId}/${s.sourceId}/${sha(M)}`), M);
+      const r = await runSync({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourceKey, source: new S3FocusExportSource({ client: bucket.client, location: loc(bucket) }), evidence: store, mode: 'backfill', range: { from: `${ym}-01`, to: `${ym}-01` }, hooks: noSleep });
+      expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'EVIDENCE_INTEGRITY_MISMATCH' });
     } finally {
       await bucket.destroy();
     }

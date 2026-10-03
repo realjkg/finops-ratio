@@ -127,3 +127,75 @@ describe('S3EvidenceStore: an existing object is verified by its sha256, not its
   });
 });
 
+describe('S3EvidenceStore HEAD-metadata fast path (challenger round 3 L2)', () => {
+  const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
+  const good = Buffer.from('the real evidence bytes');
+  function client(stored: Buffer, meta: Record<string, string> | undefined, calls: string[], puts: Array<Record<string, string> | undefined>): S3Client {
+    return {
+      async send(cmd: unknown) {
+        if (cmd instanceof HeadObjectCommand) {
+          calls.push('head');
+          if (!stored.length) throw Object.assign(new Error('NotFound'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } });
+          return { ContentLength: stored.length, ...(meta ? { Metadata: meta } : {}) };
+        }
+        if (cmd instanceof GetObjectCommand) {
+          calls.push('get');
+          return { Body: Readable.from([stored]), ContentLength: stored.length };
+        }
+        if (cmd instanceof PutObjectCommand) {
+          calls.push('put');
+          puts.push(cmd.input.Metadata);
+          return {};
+        }
+        throw new Error('unexpected command');
+      },
+    } as unknown as S3Client;
+  }
+  const withFile = async <T>(fn: (file: string) => Promise<T>): Promise<T> => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-ev-'));
+    try {
+      const file = path.join(dir, 'f');
+      fs.writeFileSync(file, good);
+      return await fn(file);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('put stores ratio-sha256 as user metadata; putBytes too', async () => {
+    const calls: string[] = [];
+    const puts: Array<Record<string, string> | undefined> = [];
+    await withFile((file) => new S3EvidenceStore({ client: client(Buffer.alloc(0), undefined, calls, puts), bucket: 'ev' }).put('evidence/k', file, { sha256: sha(good), byteSize: good.length }));
+    await new S3EvidenceStore({ client: client(Buffer.alloc(0), undefined, calls, puts), bucket: 'ev' }).putBytes('evidence/k', good);
+    expect(puts).toEqual([{ 'ratio-sha256': sha(good) }, { 'ratio-sha256': sha(good) }]);
+  });
+
+  it('artifact (put): matching size AND matching ratio-sha256 => exists without reading the object', async () => {
+    const calls: string[] = [];
+    const r = await withFile((file) => new S3EvidenceStore({ client: client(good, { 'ratio-sha256': sha(good) }, calls, []), bucket: 'ev' }).put('evidence/k', file, { sha256: sha(good), byteSize: good.length }));
+    expect(r).toBe('exists');
+    expect(calls).toEqual(['head']);
+  });
+
+  for (const [what, meta] of [
+    ['no metadata', undefined],
+    ['a different ratio-sha256', { 'ratio-sha256': '0'.repeat(64) }],
+  ] as const) {
+    it(`artifact (put) with ${what}: the full re-hash runs`, async () => {
+      const calls: string[] = [];
+      const r = await withFile((file) => new S3EvidenceStore({ client: client(good, meta, calls, []), bucket: 'ev' }).put('evidence/k', file, { sha256: sha(good), byteSize: good.length }));
+      expect(r).toBe('exists');
+      expect(calls).toEqual(['head', 'get']);
+    });
+  }
+
+  it('manifest (putBytes): never the fast path — manifest evidence is not re-read at load, so it is always re-hashed here', async () => {
+    const calls: string[] = [];
+    const forged = Buffer.from('the FAKE evidence bytes');
+    await expect(new S3EvidenceStore({ client: client(forged, { 'ratio-sha256': sha(good) }, calls, []), bucket: 'ev' }).putBytes('evidence/k', good)).rejects.toMatchObject({
+      code: 'EVIDENCE_INTEGRITY_MISMATCH',
+    });
+    expect(calls).toEqual(['head', 'get']);
+  });
+});
+
