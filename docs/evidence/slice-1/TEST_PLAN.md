@@ -5,14 +5,17 @@ Fast suite = `npm test` (no DB, no S3). DB suite = `npm run test:db`
 `RATIO_TEST_S3_ENDPOINT` and FAIL — never skip — without it). No `.skip`,
 `.only`, `.todo`, `it.fails`, `skipIf`, `runIf`.
 
-S3 isolation: the local SeaweedFS can hold data in only ~2 buckets at once,
-so the suite creates ONE bucket per run (vitest globalSetup, deleted at the
-end) and each test works under its own unique key prefix in it.
+S3 isolation: the local SeaweedFS can hold data in only ~2 buckets at once
+and reclaims a deleted bucket's volumes lazily, so the suite uses ONE
+long-lived bucket (`ratio-s1-test`, created if missing, never deleted); the
+vitest globalSetup gives each run a unique `s1-run-…` key prefix and deletes
+everything under it at the end, and each test works under its own unique key
+prefix inside that.
 
 Fixtures: deterministic and synthetic only — `FakeFocusSource` (in-memory),
 `MemoryEvidenceStore`, the committed synthetic AWS-layout fixture
 (`fixtures/focus-1.0-synthetic`) seeded into per-test SeaweedFS buckets
-(one `s1-run-…` bucket per run with a unique `s1-<label>-<hex>` prefix per test, all deleted after), per-file Postgres databases (Slice 0 harness), and
+(the long-lived `ratio-s1-test` bucket, a unique `s1-run-…/` prefix per run and `s1-<label>-<hex>` per test, all objects deleted after), per-file Postgres databases (Slice 0 harness), and
 per-test LOGIN roles (`ratio_test_login_…`, dropped after).
 
 ## A. Fast suite
@@ -157,3 +160,12 @@ see EVIDENCE.md §1.
 | L-b | `worker/lease.db.test.ts` | worker sessions show lock 30 s / idle-in-tx 5 min / statement 30 min; takeover blocked by a held row lock fails `LOCK_TIMEOUT` within 10 s (lock timeout 1 s), no new run, then succeeds |
 | L-b cfg | `config.test.ts` | DB session timeout defaults and bounds |
 | L-e | `focus/validate.test.ts` | C1 controls and U+2028/U+2029 in header names ⇒ `INVALID_CHARACTER`; ordinary non-ASCII names accepted |
+
+Round L-k/L-j additions: `redact.test.ts` — a worker line with a BigInt, a
+Buffer and an object whose `toJSON` returns a secret is one valid, redacted
+line (BigInt as exact decimal text, Buffer as `[binary]`); a value that
+already holds the JSON-escaped secret form is redacted (W2). K7 also sets
+`RATIO_EVIDENCE_FILE` and requires the file to equal the redacted stdout
+records with no secret form, including a second-order (URL-encoded,
+JSON-escaped) form passed as an argument (W4).
+

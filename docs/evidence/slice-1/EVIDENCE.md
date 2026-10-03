@@ -61,7 +61,11 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 42 | 3745fc0 | test: redacted Errors are serialized, not dropped to `{}` (added while mutation-testing) | test |
 | 43 | 1f41db1 | docs: evidence for the redact-before-serialize round | docs |
 | 44 | cc17801 | merge origin/slice/00-postgres-foundation @ 17f07d7 (Slice 0 rounds 7-9 + origin/main #47/#49) — one conflict in `src/ingest/cli.ts` (Slice 0 `installProcessHandlers` vs Slice 1 `installProcessGuards`), resolved by keeping ONE handler (`installProcessHandlers`) extended with the worker-secret redaction pass; guard tests retargeted | merge |
-| 45 | (final) | docs: evidence for this round (§14) | docs |
+| 45 | 3541d6b | docs: evidence for the 17f07d7 merge (§14) | docs |
+| 46 | ce97fa5 | test: L-k worker line with BigInt/Buffer/toJSON (red: 1 failed, `r5-red-fast.txt`); L-j pre-escaped secret value (W2) and K7 `RATIO_EVIDENCE_FILE` assertion (W4) | tests |
+| 47 | 5a2056b | fix: worker `redactDeep` delegates to Slice 0's exported walker (one implementation) | impl |
+| 48 | 47c736c | test infra: one long-lived S3 test bucket with per-run prefixes; K5 deletes its replay-fixtures scratch | tests |
+| 49 | (final) | docs: evidence for this round (§15) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -583,7 +587,7 @@ reverting the Slice 1 commits needs no DB action; ingested rows stay in
 - The test kill hook and fake source ship in the build but are refused
   unless `NODE_ENV=test` (fake also needs `RATIO_ALLOW_FAKE_SOURCE=1`).
 - CI change not executed (no push); local SeaweedFS volume limit means the
-  suite must keep using one bucket per run.
+  suite uses one long-lived bucket with per-run prefixes (§15).
 - One stray `ratio_test_23557_*` database in the shared local cluster of
   unknown (gone) origin.
 
@@ -738,4 +742,83 @@ re-hash OK, doctor exit 0 `problems: []`, replay-fixtures 6/6
 cleaned up. Leftovers in the shared cluster unchanged and not attributable to
 this suite (`ratio_test_23557_*`, logins `ratio_test_login_1169_*`,
 `ratio_test_login_6414_*`); not dropped.
+
+## 15. Lows L-k and L-j (after the final challenger APPROVE at 3541d6b)
+
+**L-k — one redaction walker.** `redactDeep` in `src/ingest/redact.ts` is now
+a thin adapter: it supplies the worker's secret-aware string redactor and
+delegates the walk to Slice 0's exported `redactDeep` in `cli.ts` (BigInt as
+exact decimal text — no JSON.stringify throw that would escalate into the
+crash handler; Buffers/typed arrays as `[binary]`, never index by index;
+`toJSON` honoured and its result redacted; Errors as name/message/code/cause;
+cycles as `[circular]`). The second walker is gone. `cli.ts` already imports
+`redact.ts`, so the import is a cycle; it is only dereferenced at call time
+(never while modules load) and works in vitest, `tsx` and the tsc CJS build
+(`worker:build`, `node dist-worker/ingest/cli.js doctor --json`, and
+`require('dist-worker/ingest/redact.js')` first, all checked). Slice 0's
+`cli.ts` is unchanged.
+
+**L-j — tests with teeth for W2/W4.** `redact.test.ts`: a value (and a key)
+that already contains the JSON-escaped secret form is redacted. K7 now sets
+`RATIO_EVIDENCE_FILE` for all its invocations, adds a fourth one whose
+`--source` argument is a second-order secret form (URL-encoded JSON-escaped;
+usage error, exit 2, record still written), and requires the file to hold
+exactly the 4 redacted stdout records with no secret form.
+
+Red (at ce97fa5, `r5-red-fast.txt`): `Tests 1 failed | 19 passed (20)` —
+"Do not know how to serialize a BigInt". The W2 test and the K7 extension
+pass on the code they guard by design; they are proven by mutation.
+
+| Mutation | Result |
+|---|---|
+| W2 `secretForms` drops the JSON-escaped forms | 1 fails (pre-escaped value test), on both the old and the fixed code (`mut-W2.txt`, `mut-W2-fixed.txt`) |
+| W4 evidence file written with plain `JSON.stringify` (no line redactor) | K7 fails: "evidence file leaks pw%5C%22q%5C%5Cb%2522x", on both (`mut-W4.txt`, `mut-W4-fixed.txt`) |
+| drop the BigInt branch in the (single) walker | 2 fail: the L-k test and Slice 0's round-7 numeric-redaction test (`mut-bigint.txt`) |
+
+**Test-infrastructure defect found and fixed (not hidden).** The first
+`test:db` of this round failed 18 tests (all S3-writing: K1–K6, demo 1–8,
+X1–X5) with SeaweedFS `InternalError` (HTTP 500) on PutObject, and runs 2–3
+passed. Reproduced deterministically (twice, 12 failures each) by starting a
+full run right after a short run had created and deleted its own bucket: the
+local SeaweedFS reclaims a deleted bucket's volumes lazily and a new bucket
+needs fresh volume slots. Fix (47c736c): the suite uses ONE long-lived bucket
+(`ratio-s1-test`, created if missing, never deleted) with a unique per-run
+key prefix deleted at the end; K5 deletes the replay-fixtures scratch it
+causes (the command itself retains it by design). No assertion, timeout or
+test was changed. The same reproduction sequence then passed 295/295 twice.
+Found while checking: `ListBuckets` on this SeaweedFS returns an empty list,
+so the earlier "s1-run buckets left: []" leftover check proved nothing; it now
+lists the objects in `ratio-s1-test` (0 after every run). The manual e2e
+script also uses that bucket (evidence under a unique `e2e-<rnd>/` prefix;
+source objects at the fixture's own `ratio-synthetic/` keys, which its
+manifests name absolutely), and deletes what it wrote.
+
+**Gates at 47c736c:**
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 80 files / 1924 passed |
+| `test:db` x3 | 22 files / **295 passed** each (60.0 s, 57.4 s, 57.6 s) |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 276 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails` grep | 0 |
+| `pg_db_role_setting` rows | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored; no AGENTS.md/CLAUDE.md) |
+| ingestion code in `.next` | 0 matches |
+| objects left in `ratio-s1-test` | 0 |
+
+Manual end-to-end (built CLI at 47c736c, `ratio_s1_e2e_45ef97de`): status
+3->0->0, sync published + reconciled, re-sync `skipped_unchanged`, reader
+totals = control totals (55 / `30.8272954899`, 40 / `21.0978157665`), 3/3
+evidence re-hash OK, doctor exit 0, replay-fixtures 6/6
+(`fixture-20261003100337-da42674f`), cleanup: 48 objects, database and
+logins dropped. (Two earlier e2e attempts in this round are recorded as they
+happened: the first, still creating its own bucket, hit the same SeaweedFS
+500; the second put the source objects under a prefix that the fixture
+manifests do not name and correctly failed MANIFEST_INVALID — a script error,
+fixed as above.) Other `ratio_test_*` databases seen during the round belong
+to a concurrent agent's checkout (live vitest processes there) and were left
+alone; `ratio_test_23557_*` and logins `_1169_`/`_6414_` are unchanged.
 
