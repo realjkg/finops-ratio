@@ -23,7 +23,15 @@ export async function withTenantTransaction<T>(
     try {
       await client.query("SELECT set_config('ratio.tenant_id', $1, true)", [tenantId]);
       const result = await fn(client);
-      await client.query('COMMIT');
+      // A callback that swallowed a query error leaves the transaction ABORTED;
+      // PostgreSQL then answers COMMIT with the ROLLBACK command tag and nothing
+      // was written. That is a failure, never success (round 15).
+      const commit = await client.query('COMMIT');
+      if (commit.command !== 'COMMIT') {
+        throw Object.assign(new Error(`tenant transaction was rolled back (COMMIT answered ${commit.command ?? 'nothing'}): nothing was written`), {
+          code: 'TRANSACTION_ROLLED_BACK',
+        });
+      }
       return result;
     } catch (e) {
       await client.query('ROLLBACK').catch(() => undefined);

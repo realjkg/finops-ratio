@@ -180,7 +180,11 @@ async function inTransaction(client: ClientBase, fn: () => Promise<void>): Promi
   await client.query('BEGIN');
   try {
     await fn();
-    await client.query('COMMIT');
+    // An aborted transaction answers COMMIT with ROLLBACK: never report that as applied (round 15).
+    const commit = await client.query('COMMIT');
+    if (commit.command !== 'COMMIT') {
+      throw new MigrationError('TRANSACTION_ROLLED_BACK', `COMMIT was answered with ${commit.command ?? 'nothing'}: the transaction was rolled back`);
+    }
   } catch (e) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw e;

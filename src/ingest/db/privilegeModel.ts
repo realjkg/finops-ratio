@@ -260,6 +260,43 @@ async function roleViolations(client: ClientBase): Promise<string[]> {
     [RATIO_ROLES],
   );
   for (const { member, parent } of members.rows) problems.push(`role ${member} is a NOLOGIN member of ${parent}`);
+  // Attributes of every member, DIRECT OR TRANSITIVE (pg_auth_members graph —
+  // not pg_has_role, which is true for every superuser), of a ratio role
+  // (round 15). A BYPASSRLS member inherits e.g. the worker's base-table grants
+  // and ignores FORCE RLS; a SUPERUSER member is everything. Members of
+  // ratio_worker / ratio_reader: none of SUPERUSER, BYPASSRLS, REPLICATION,
+  // CREATEROLE, CREATEDB. Members of ratio_owner (the migrator login):
+  // CREATEROLE / CREATEDB are allowed (first-time role creation, a deployment
+  // decision), SUPERUSER / BYPASSRLS / REPLICATION are not.
+  const transitive = await client.query<{
+    member: string;
+    parent: string;
+    rolsuper: boolean;
+    rolbypassrls: boolean;
+    rolreplication: boolean;
+    rolcreaterole: boolean;
+    rolcreatedb: boolean;
+  }>(
+    `WITH RECURSIVE ratio AS (SELECT oid, rolname FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])),
+          mem(member, top) AS (
+            SELECT m.member, r.rolname FROM pg_catalog.pg_auth_members m JOIN ratio r ON r.oid = m.roleid
+            UNION
+            SELECT m.member, mem.top FROM pg_catalog.pg_auth_members m JOIN mem ON m.roleid = mem.member
+          )
+     SELECT DISTINCT rr.rolname AS member, mem.top AS parent, rr.rolsuper, rr.rolbypassrls, rr.rolreplication, rr.rolcreaterole, rr.rolcreatedb
+       FROM mem JOIN pg_catalog.pg_roles rr ON rr.oid = mem.member
+      ORDER BY 1, 2`,
+    [RATIO_ROLES],
+  );
+  for (const m of transitive.rows) {
+    const bad: string[] = [];
+    if (m.rolsuper) bad.push('SUPERUSER');
+    if (m.rolbypassrls) bad.push('BYPASSRLS');
+    if (m.rolreplication) bad.push('REPLICATION');
+    if (m.parent !== 'ratio_owner' && m.rolcreaterole) bad.push('CREATEROLE');
+    if (m.parent !== 'ratio_owner' && m.rolcreatedb) bad.push('CREATEDB');
+    for (const attr of bad) problems.push(`role ${m.member} (member of ${m.parent}) must not be ${attr}`);
+  }
   // Every other role (not superuser, not predefined pg_*, not a ratio role, not
   // a member of ratio_owner) may hold on schema ratio and its objects at most
   // what the ratio_reader / ratio_worker roles it belongs to are reviewed for.

@@ -9,6 +9,7 @@ export type MigrationErrorCode =
   | 'DUPLICATE_VERSION'
   | 'ORPHAN_DOWN'
   | 'BAD_MANIFEST'
+  | 'TRANSACTION_ROLLED_BACK'
   | 'DIR_MISSING'
   | 'MISSING_PHASE'
   | 'EXPAND_NOT_ADDITIVE'
