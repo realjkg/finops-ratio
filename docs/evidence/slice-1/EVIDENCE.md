@@ -69,7 +69,10 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 50 | c9e0490 | merge origin/slice/00-postgres-foundation @ 0ef880f (Slice 0 rounds 10-12) — one conflict in `.github/workflows/ci.yml`, resolved by keeping both the SeaweedFS step + `RATIO_TEST_S3_ENDPOINT` and the PG16 client-tools step + `RATIO_PG_DUMP`/`RATIO_PSQL` | merge |
 | 51 | 909ec1a | docs: evidence for the 0ef880f merge (§16) | docs |
 | 52 | fccebbd | merge origin/slice/00-postgres-foundation @ c016ffb (Slice 0 round 13: key-only setting diagnostics, system-schema ACL rule) — clean, no conflict | merge |
-| 53 | (final) | docs: evidence for this round (§17); pushed to origin/slice/01-focus-ingestion-worker as instructed | docs |
+| 53 | 0e80eff | docs: evidence for the c016ffb merge (§17); pushed to origin/slice/01-focus-ingestion-worker as instructed | docs |
+| 54 | 214b4e4 | test: redaction linearity guard (`redactLinear.test.ts`, child process, hard kill) and spawned > 2 MB crash-handler test (red: 5 failed, `r6-red.txt`) | tests |
+| 55 | 3d8f277 | fix: 16 KB input cap with delimiter cut + truncation marker; URL rules start a scheme only where no scheme character precedes; one cached literal-secret alternation | impl |
+| 56 | (final) | docs: evidence for this round (§18) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -939,5 +942,105 @@ Results:
 - 3 of 3 evidence objects re-hashed OK.
 - doctor exited 0.
 - replay-fixtures passed 6/6 (`fixture-20261003122309-fbe5c47d`).
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 18. Redaction performance (DoS on our own process) — linear, capped
+
+**Report.** On the Slice 0 round-14 compat build, `jsonLineRedactorFor` took
+0.9 s on a 20 KB message and 77 s on 200 KB. Any worker log line or crash
+handler carrying a large error could block the process for minutes.
+
+**Profile** (`profile-redact.ts`, `profile-patterns.js` in the scratchpad):
+- Time grew quadratically on a run of letters: `redact()` took 0.8 s at
+  20 KB, 3.4 s at 40 KB and 12.2 s at 80 KB.
+- `scrubLiterals`, the deep walk and the JSON-escape forms each stayed under
+  2 ms at those sizes. Words, secret prefixes and quote or backslash floods
+  were fast.
+- Per rule on 20 KB of letters, only the two URL rules were slow: about
+  370 ms each, against 0.2 ms or less for every other rule.
+- Root cause: in `[a-z][a-z0-9+.-]*:\/\/`, a failed match is retried from the
+  next position. Inside a run of scheme characters, each retry scans to the
+  end of the run, which is O(n²).
+
+**Fix (`3d8f277`, `src/ingest/redact.ts`):**
+- **Input cap.** Each string is capped at `MAX_REDACT_INPUT_CHARS` = 16 384
+  BEFORE any rule runs. This is the app redactor's approach from #47:
+  - the cut moves back to the last delimiter in `[\s,;&"'<>]`, so a secret
+    that straddles the cap is dropped whole;
+  - the marker `' …[TRUNCATED]'` is appended.
+
+  The existing 4000-character output cap is unchanged.
+- **URL rules.** They start a scheme only where no scheme character precedes
+  (a lookbehind), so a run of letters is scanned once.
+- **Literal secrets.** They form ONE escaped alternation per secrets array,
+  longest first, cached in a WeakMap. `redact()` and `scrubLiterals()` both
+  use it, so each is one linear pass and no regex is built per call.
+- **Measured** on the built `dist-worker` `jsonLineRedactorFor`, for letters,
+  `a://` repeated and words: 20 KB took ≤ 6.5 ms, 200 KB ≤ 1 ms, 2 MB ≤ 2.6 ms.
+  The 20 KB figure was the first call, with JIT warm-up.
+
+**Tests (`214b4e4`, red first).** The red run (`r6-red.txt`) had 5 failures:
+3 linearity cases and both spawned crashes, which were killed at 20 s.
+
+- **`src/ingest/redactLinear.test.ts`.** Each input runs in a tsx child
+  (`testing/redactLinearChild.ts`) under a hard SIGKILL.
+  - 14 adversarial inputs, each at 200 KB and 2 MB:
+    - a run of letters; scheme-like letters with dots and plus signs;
+    - `a://` repeated; a URL followed by a long path;
+    - secret-prefix fragments; repeated partial secrets (one character short),
+      URL-encoded and JSON-escaped;
+    - backslash, quote and `%`-encoding floods;
+    - `password="` repeated; `Bearer ` repeated;
+    - full secrets among fragments.
+  - Both entry points are timed: `redact()` and `jsonLineRedactorFor`, the
+    latter on a message, an Error and a nested key and array.
+  - Each call must finish in under 2 s, no secret form (raw, URL-encoded,
+    JSON-escaped) may survive, and `redact()` output stays ≤ 4000 characters.
+- **`cli.worker.test.ts`, spawned crash test.** A tsx child
+  (`testing/crashChild.ts`) wires `installProcessHandlers` the same way the
+  CLI entry does. It then crashes, by uncaughtException and by
+  unhandledRejection, with an Error of more than 2.1 MB. The message holds
+  secrets in every form, URL, quote, backslash and `%` fragments, and
+  40 000-letter runs. The test requires:
+  - exit 1, empty stdout;
+  - exactly one stderr line, which must be valid JSON with no secret form;
+  - crash handling that takes less than 2 s beyond a start-up baseline run.
+
+**Mutation proofs:**
+
+| Mutation | Result |
+|---|---|
+| Remove the input cap (`capForRedaction` returns the text) | guard fails: `a:// repeated` is killed. The query rule stays super-linear on that shape and the cap is what bounds it (`mut-nocap.txt`) |
+| Revert to the old algorithm (`redact.ts` from 214b4e4) | 7 fail: letters run, scheme-like run, `a://`, URL+long path, `password=` repeated, and both spawned crashes (`mut-oldalgo.txt`) |
+
+**Gates at 3d8f277:**
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 81 files / 1940 passed |
+| `test:db` x3 (PG16 tools as in CI) | 23 files / **340 passed** each; 0 object-store errors |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 321 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| change outside the Slice 1 paths vs the Slice 0 branch | none |
+| objects left in `ratio-s1-test` | 0 |
+
+The three test:db runs took 200 s, 212 s and 208 s, against about 60 s
+before. The host was heavily loaded: load average about 17, with another
+agent's vitest DB runs active. The four `ratio_test_*` databases seen
+afterwards belong to that checkout.
+
+**Manual end-to-end** (built CLI at 3d8f277, database `ratio_s1_e2e_fc6d77dd`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
 - Cleanup deleted 48 objects and dropped the database and logins.
 

@@ -169,3 +169,11 @@ already holds the JSON-escaped secret form is redacted (W2). K7 also sets
 records with no secret form, including a second-order (URL-encoded,
 JSON-escaped) form passed as an argument (W4).
 
+Redaction linearity (round after Slice 0 round-14 compat): `redactLinear.test.ts`
+runs 14 adversarial inputs at 200 KB and 2 MB through `redact()` and
+`jsonLineRedactorFor` in a tsx child under a hard kill (2 s per call, no
+secret form survives). `cli.worker.test.ts` spawns a child wired like the
+CLI entry and crashes it with a > 2 MB message (uncaughtException and
+unhandledRejection): exactly one redacted JSON line, exit 1, within 2 s of
+start-up.
+
