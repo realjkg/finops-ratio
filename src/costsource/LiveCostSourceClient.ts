@@ -14,6 +14,7 @@ import type {
   CostWindow,
 } from './CostSourceClient';
 import { withBasePath } from '@/lib/basePath';
+import { describeHttpError } from '@/lib/httpError';
 
 /** User-readable message for a live-data request refused for lack of API auth. */
 export const LIVE_DATA_AUTH_MESSAGE = 'Live connector data requires authenticated API access';
@@ -43,7 +44,7 @@ async function getJson<T>(url: string, label: string): Promise<T> {
     throw new LiveDataAuthError();
   }
   if (!res.ok) {
-    throw new Error(`${label} error ${res.status}: ${await res.text()}`);
+    throw new Error(await describeHttpError(label, res));
   }
   return (await res.json()) as T;
 }

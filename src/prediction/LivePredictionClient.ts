@@ -9,6 +9,7 @@ import type {
   ProposedChange,
 } from './PredictionClient';
 import { withBasePath } from '@/lib/basePath';
+import { describeHttpError } from '@/lib/httpError';
 
 const PREDICT_URL = withBasePath('/api/prediction/predict');
 const ACCURACY_URL = withBasePath('/api/prediction/accuracy');
@@ -32,7 +33,7 @@ export class LivePredictionClient implements PredictionClient {
       );
     }
     if (!res.ok) {
-      throw new Error(`Prediction API error ${res.status}: ${await res.text()}`);
+      throw new Error(await describeHttpError('Prediction API', res));
     }
     return (await res.json()) as ChangePrediction;
   }
@@ -49,7 +50,7 @@ export class LivePredictionClient implements PredictionClient {
       );
     }
     if (!res.ok) {
-      throw new Error(`Accuracy API error ${res.status}: ${await res.text()}`);
+      throw new Error(await describeHttpError('Accuracy API', res));
     }
     return (await res.json()) as AccuracyReport;
   }

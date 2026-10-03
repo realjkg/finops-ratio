@@ -11,6 +11,7 @@ import type {
   CMAttachInput,
 } from './CMClient';
 import { withBasePath } from '@/lib/basePath';
+import { describeHttpError } from '@/lib/httpError';
 
 const CM_URL = withBasePath('/api/v1/cm/change');
 
@@ -43,7 +44,7 @@ export class LiveCMClient implements CMClient {
       );
     }
     if (!res.ok) {
-      throw new Error(`CM gateway error ${res.status}: ${await res.text()}`);
+      throw new Error(await describeHttpError('CM gateway', res));
     }
     return (await res.json()) as T;
   }

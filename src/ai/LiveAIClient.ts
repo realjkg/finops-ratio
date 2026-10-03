@@ -4,6 +4,7 @@
 
 import type { AIClient, AIContext, AIMessage, AIResponse } from './AIClient';
 import { withBasePath } from '@/lib/basePath';
+import { describeHttpError } from '@/lib/httpError';
 
 const CHAT_URL = withBasePath('/api/v1/ai/chat');
 
@@ -24,7 +25,7 @@ export class LiveAIClient implements AIClient {
       );
     }
     if (!res.ok) {
-      throw new Error(`AI chat error ${res.status}: ${await res.text()}`);
+      throw new Error(await describeHttpError('AI chat', res));
     }
     return (await res.json()) as AIResponse;
   }

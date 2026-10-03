@@ -21,10 +21,12 @@
 // Error handling mirrors the sibling live clients: a typed Error on transport
 // failure and on non-2xx, never a raw fetch rejection. The non-2xx message is
 // unwrapped from the gateway's {error:{code,message}} envelope so it reads
-// identically to the message MockFinioClient throws for the same refusal.
+// identically to the message MockFinioClient throws for the same refusal; a
+// body that is not the envelope is never quoted (src/lib/httpError.ts).
 
 import type { FinioClient, FinioExport, HandshakeRequest, HandshakeResult } from './FinioClient';
 import { withBasePath } from '@/lib/basePath';
+import { describeHttpError, describeHttpErrorBody } from '@/lib/httpError';
 
 const HANDSHAKE_URL = withBasePath('/api/v1/a2a/handshake');
 const EXPORT_URL = withBasePath('/api/v1/finio/export');
@@ -55,17 +57,6 @@ function errorCode(body: string): string | null {
   }
 }
 
-/** Pull the human-readable message out of the gateway's error envelope. */
-function describeFailure(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as { error?: { message?: string } | string };
-    if (typeof parsed.error === 'string') return parsed.error;
-    if (parsed.error?.message) return parsed.error.message;
-  } catch {
-    // Not JSON — fall through to the raw body.
-  }
-  return body;
-}
 
 export class LiveFinioClient implements FinioClient {
   readonly mode = 'live' as const;
@@ -88,7 +79,7 @@ export class LiveFinioClient implements FinioClient {
       if (res.status === 401 && errorCode(body) === 'unauthorized_peer') {
         throw new FinioPeerAuthError();
       }
-      throw new Error(`FinIO handshake error ${res.status}: ${describeFailure(body)}`);
+      throw new Error(describeHttpErrorBody('FinIO handshake', res.status, body));
     }
     return (await res.json()) as HandshakeResult;
   }
@@ -105,7 +96,7 @@ export class LiveFinioClient implements FinioClient {
       );
     }
     if (!res.ok) {
-      throw new Error(`FinIO export error ${res.status}: ${describeFailure(await res.text())}`);
+      throw new Error(await describeHttpError('FinIO export', res));
     }
     return (await res.json()) as FinioExport;
   }
