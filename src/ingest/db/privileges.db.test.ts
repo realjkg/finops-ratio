@@ -1015,3 +1015,133 @@ describe('round 13 H2: explicit ACL entries in system schemas for ratio roles an
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 14 (Copilot on c016ffb): PUBLIC grants in system schemas
+// ---------------------------------------------------------------------------
+
+const systemBaseline = () => import('./systemBaseline');
+
+describe('round 14 High: PUBLIC privileges in system schemas beyond the PostgreSQL 16 baseline are refused (rolled back)', () => {
+  async function inTxn(fn: (c: Client) => Promise<void>): Promise<void> {
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    await c.query('BEGIN');
+    try {
+      await fn(c);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  }
+
+  it('drift: a fresh migrated database has exactly the stored PUBLIC system-schema baseline (pg_catalog, information_schema, pg_toast)', async () => {
+    const { SYSTEM_PUBLIC_BASELINE, systemPublicSnapshot } = await systemBaseline();
+    await inTxn(async (c) => {
+      expect(SYSTEM_PUBLIC_BASELINE.pgMajor).toBe(16);
+      expect(await systemPublicSnapshot(c)).toEqual([...SYSTEM_PUBLIC_BASELINE.entries].sort());
+      expect(SYSTEM_PUBLIC_BASELINE.entries.some((e) => e.includes(' on information_schema.'))).toBe(true);
+      expect(SYSTEM_PUBLIC_BASELINE.entries.some((e) => e.includes(' on pg_catalog.'))).toBe(true);
+    });
+  });
+
+  it('positive control: a clean migrated database has no PUBLIC system-schema finding', async () => {
+    const { privilegeModelViolations } = await model();
+    await inTxn(async (c) => {
+      expect((await privilegeModelViolations(c)).filter((p) => p.startsWith('PUBLIC holds') && /pg_catalog|information_schema|pg_toast/.test(p))).toEqual([]);
+    });
+  });
+
+  for (const [title, grant, re] of [
+    [
+      'a dynamically built GRANT SELECT ON pg_catalog.pg_authid TO PUBLIC',
+      "DO $$ BEGIN EXECUTE 'GRANT SELECT ON pg_catalog.pg_authid TO ' || 'PUBLIC'; END $$",
+      /PUBLIC holds SELECT on pg_catalog\.pg_authid \(not in the PostgreSQL 16 system baseline\)/,
+    ],
+    ['a column grant to PUBLIC', 'GRANT SELECT (rolpassword) ON pg_catalog.pg_authid TO PUBLIC', /PUBLIC holds SELECT\(rolpassword\) on pg_catalog\.pg_authid/],
+    ['EXECUTE on pg_read_file to PUBLIC', 'GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO PUBLIC', /PUBLIC holds EXECUTE on pg_catalog\.pg_read_file\(text\)/],
+    ['USAGE on pg_toast to PUBLIC', 'GRANT USAGE ON SCHEMA pg_toast TO PUBLIC', /PUBLIC holds USAGE on schema pg_toast/],
+    ['pg_toast is a system schema for the ratio-role rule too', 'GRANT USAGE ON SCHEMA pg_toast TO ratio_reader', /ratio_reader holds explicit USAGE on schema pg_toast/],
+  ] as const) {
+    it(title, async () => {
+      const { assertReviewedPrivileges } = await model();
+      await inTxn(async (c) => {
+        await c.query(grant);
+        await expect(assertReviewedPrivileges(c)).rejects.toThrow(re);
+      });
+    });
+  }
+
+  it('fails closed with a clear message when the baseline was generated for another PostgreSQL major version', async () => {
+    const { privilegeModelViolations } = await model();
+    const { SYSTEM_PUBLIC_BASELINE } = await systemBaseline();
+    await inTxn(async (c) => {
+      const problems = await (privilegeModelViolations as (c: Client, o?: unknown) => Promise<string[]>)(c, {
+        systemBaseline: { pgMajor: 15, entries: SYSTEM_PUBLIC_BASELINE.entries },
+      });
+      expect(problems.join('\n')).toMatch(/system baseline was generated for PostgreSQL 15 but the server is PostgreSQL 16: regenerate it/);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 15 (Copilot High): attributes of (transitive) members of ratio roles
+// ---------------------------------------------------------------------------
+
+describe('round 15 High: members of ratio roles must not carry dangerous attributes (rolled back; roles are cluster-global)', () => {
+  async function inTxn(fn: (c: Client, name: (p: string) => string) => Promise<void>): Promise<void> {
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    const sfx = Math.random().toString(16).slice(2, 10);
+    await c.query('BEGIN');
+    try {
+      await fn(c, (p) => `ratio_probe_${p}_${sfx}`);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  }
+
+  for (const [parent, attr] of [
+    ['ratio_worker', 'BYPASSRLS'],
+    ['ratio_worker', 'SUPERUSER'],
+    ['ratio_reader', 'REPLICATION'],
+    ['ratio_reader', 'CREATEROLE'],
+    ['ratio_worker', 'CREATEDB'],
+    ['ratio_owner', 'BYPASSRLS'],
+    ['ratio_owner', 'SUPERUSER'],
+    ['ratio_owner', 'REPLICATION'],
+  ] as const) {
+    it(`a LOGIN ${attr} member of ${parent} is refused`, async () => {
+      const { privilegeModelViolations } = await model();
+      await inTxn(async (c, name) => {
+        const login = name('m');
+        await c.query(`CREATE ROLE ${login} LOGIN ${attr} IN ROLE ${parent}`);
+        expect((await privilegeModelViolations(c)).join('\n')).toMatch(new RegExp(`role ${login} \\(member of ${parent}\\) must not be ${attr}`));
+      });
+    });
+  }
+
+  it('a transitive member (LOGIN member of a LOGIN member of ratio_worker) with BYPASSRLS is refused', async () => {
+    const { privilegeModelViolations } = await model();
+    await inTxn(async (c, name) => {
+      const mid = name('mid');
+      const leaf = name('leaf');
+      await c.query(`CREATE ROLE ${mid} LOGIN IN ROLE ratio_worker`);
+      await c.query(`CREATE ROLE ${leaf} LOGIN BYPASSRLS IN ROLE ${mid}`);
+      expect((await privilegeModelViolations(c)).join('\n')).toMatch(new RegExp(`role ${leaf} \\(member of ratio_worker\\) must not be BYPASSRLS`));
+    });
+  });
+
+  it('positive controls: a plain LOGIN member of ratio_worker passes; a CREATEROLE/CREATEDB LOGIN member of ratio_owner (the migrator) passes', async () => {
+    const { privilegeModelViolations } = await model();
+    await inTxn(async (c, name) => {
+      const w = name('w');
+      const m = name('migrator');
+      await c.query(`CREATE ROLE ${w} LOGIN IN ROLE ratio_worker`);
+      await c.query(`CREATE ROLE ${m} LOGIN CREATEROLE CREATEDB IN ROLE ratio_owner`);
+      const p = (await privilegeModelViolations(c)).filter((x) => x.includes(w) || x.includes(m));
+      expect(p).toEqual([]);
+    });
+  });
+});

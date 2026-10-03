@@ -422,3 +422,70 @@ describe('round 12 L2/L4: reviewed policy shapes are exact (kills the surviving 
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 14 M2: the expected foundation is versioned by applied migration
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates `<version>_<name>.manifest.json` for `dir` the way the script does:
+ * apply every up file up to `version` directly on a scratch database and
+ * snapshot the foundation.
+ */
+async function writeManifest(dir: string, version: string, sqlOverride?: string): Promise<void> {
+  const { foundationSnapshot } = await foundation();
+  const db = await freshDb(false);
+  const c = await connect(db);
+  const ups = fs.readdirSync(dir).filter((f) => f.endsWith('.up.sql') && f.slice(0, 4) <= version).sort();
+  for (const f of ups) {
+    await c.query('BEGIN');
+    await c.query(sqlOverride && f.startsWith(version) ? sqlOverride : fs.readFileSync(path.join(dir, f), 'utf8'));
+    await c.query('COMMIT');
+    await c.query('RESET ROLE');
+  }
+  await c.query('BEGIN READ ONLY');
+  const entries = await foundationSnapshot(c);
+  await c.query('ROLLBACK');
+  const up = ups.find((f) => f.startsWith(version))!;
+  fs.writeFileSync(path.join(dir, up.replace(/\.up\.sql$/, '.manifest.json')), JSON.stringify(entries, null, 2) + '\n');
+}
+
+describe('round 14 M2: a later migration may change a 0001 object when it ships its own manifest', () => {
+  const SET_DEFAULT = CONTRACT + 'ALTER TABLE ratio.sources ALTER COLUMN enabled SET DEFAULT false;\n';
+
+  it('the shipped migrations directory carries the 0001 manifest file, equal to FOUNDATION_0001', async () => {
+    const { FOUNDATION_0001 } = await foundation();
+    const file = path.join(DEFAULT_MIGRATIONS_DIR, '0001_ratio_schema.manifest.json');
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual([...FOUNDATION_0001]);
+  });
+
+  it('0001 → 0002 (alters a 0001 column default) with a 0002 manifest: both steps pass, and status is clean', async () => {
+    const dir = migrationsWith({ '0002_enabled_default.up.sql': SET_DEFAULT });
+    await writeManifest(dir, '0002');
+    const db = await freshDb(false);
+    const c = await connect(db);
+    expect(await migrateUp(c, { dir, allowContract: true })).toEqual({ applied: ['0001', '0002'] });
+    const st = await migrationStatus(c, { dir });
+    expect(st.privilegeProblems).toEqual([]);
+    expect(st.matches).toBe(true);
+  });
+
+  it('the same 0002 without a manifest is refused (the 0001 manifest still applies)', async () => {
+    await expectFoundationRefusal(SET_DEFAULT.replace(CONTRACT, ''), /column:ratio\.sources:enabled:boolean/);
+  });
+
+  it('a 0002 whose SQL does more than its reviewed manifest is refused', async () => {
+    const dir = migrationsWith({
+      '0002_enabled_default.up.sql': SET_DEFAULT + "ALTER TABLE ratio.sources ALTER COLUMN display_name SET DEFAULT 'x';\n",
+    });
+    await writeManifest(dir, '0002', SET_DEFAULT);
+    const db = await freshDb(false);
+    const c = await connect(db);
+    const err = await migrateUp(c, { dir, allowContract: true }).then(
+      () => null,
+      (e: Error & { code?: string }) => e,
+    );
+    expect(err?.code).toBe('PRIVILEGE_MODEL_VIOLATION');
+    expect(err!.message).toMatch(/required 0002 object missing or altered: column:ratio\.sources:display_name/);
+  });
+});

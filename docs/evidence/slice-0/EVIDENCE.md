@@ -1184,3 +1184,238 @@ H3 RLS FORCE not required for ratio tables           KILLED  RLS ENABLED but not
 | skip/only/todo/it.fails grep | 0 |
 | cluster state | `pg_db_role_setting` rows 0; `pg_parameter_acl` rows 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no `ratio_manifest_*` database; no system-schema ACL entry for a ratio role in the `postgres` database |
 | Slice 1 compat: scratch worktree `slice/01` 909ec1a + 0bf387e (removed) | merge clean (no conflict); tsc 0, lint 0, fast 1924/1924, test:db 340/340 ×2 |
+
+---
+
+# Round 14 — Copilot on c016ffb (1 High, 2 Medium)
+
+Base: c016ffb (on origin). Local commits only (not pushed). 0001 unchanged.
+The 0001 manifest moved from a TS constant to
+`0001_ratio_schema.manifest.json`; it has the same 306 entries. Raw logs:
+`scratchpad/r15/`.
+
+## R14.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 4fbf6fd | test(ingest): failing tests for round 14 (PUBLIC system-schema baseline, crash-line flush, versioned manifests) | tests (red) |
+| 756cb93 | test(ingest): type the spawned CLI env as NodeJS.ProcessEnv (tsc only; no behaviour change) | test typing |
+| a2dc70d | fix(ingest): PUBLIC system-schema baseline, synchronous crash line, per-version foundation manifests (round 14) | fix + generated baseline + manifest file + script |
+| (this) | docs(evidence): Slice 0 round 14 | docs |
+
+## R14.2 Red (at 4fbf6fd)
+
+**DB tests** (`foundation.db.test.ts` + `privileges.db.test.ts`): **10
+failed / 102 passed (112)**.
+- The system baseline module was missing, so the four PUBLIC grant tests,
+  the pg_toast tests and the version test all failed.
+- The loader rejected `*.manifest.json` (`BAD_FILENAME`).
+- `0001_ratio_schema.manifest.json` was absent.
+
+**Fast** (`cli.process.test.ts`): **2 failed / 1 passed**. No crash hook
+existed, so the built CLI ran the command instead of crashing. The refusal
+test passed on arrival.
+
+**Test-side fixes in the fix commit.** The compiled test CLI needs the
+migrations copied next to it, as `worker:build` does, because the manifests
+are now loaded from there. The env cast became `as unknown as ProcessEnv`.
+
+**One defect found while making it green.** The crash hook first ran
+alongside the command, so a fast `ECONNREFUSED` line raced the crash line.
+With the hook active, the CLI now crashes instead of running the command.
+
+## R14.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+B1 system baseline check not called                         KILLED  5
+B2 major-version check removed                              KILLED  version test
+B3 pg_toast not a system schema                             KILLED  both pg_toast tests
+B4 relation ACLs not compared for PUBLIC                    KILLED  drift + pg_authid
+B5 column ACLs not compared for PUBLIC                      KILLED  drift + rolpassword column
+B6 function ACLs not compared for PUBLIC                    KILLED  pg_read_file
+M1 active manifest is always 0001 (later manifests ignored) KILLED  0002 positive + "does more" test
+M2 active manifest = highest in the dir (ignores ledger)    KILLED  positive controls + 0002 tests
+C1 fatal line via async process.stderr.write                KILLED  both crash tests (the >2 MB line is lost)
+C2 crash hook honoured outside RATIO_ENV=test               KILLED  refusal test
+```
+
+## R14.4 Verification (main checkout at a2dc70d + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1812/1812 (includes cli.process.test.ts) |
+| `npm run test:db` **×10** consecutive (PG16 client tools pinned) | **10/10 exit 0, 227/227 each** (`run10-*.txt`) |
+| `npm run test:db` against the official **`postgres:16` docker image** (16.15, Debian build, as CI uses) | **227/227**: manifest and system baseline also match that build (`docker-pg16.txt`; container removed) |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` (migrations + manifest copied) / CLI smoke migrate → status → down → migrate → status on a scratch DB | 0 / all 0 (scratch DB dropped) |
+| `npm run build` | 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` 0; `pg_parameter_acl` 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no scratch databases; no system-schema ACL entry for a ratio role in `postgres` |
+
+## R14.5 Slice 1 compat (local slice/01 0e80eff ⊇ origin; scratch worktree, removed)
+
+**Merge.** One conflict, in `src/ingest/cli.ts`, in the main-module block
+plus the new helpers. It was resolved as follows:
+- kept `writeAllSync` and `testCrashHook`;
+- kept Slice 1's io object;
+- the single `installProcessHandlers` is Slice 1's extended version, which
+  also redacts worker secrets, now with the synchronous fd-2 fatal writer;
+- the crash hook is gated the same way.
+
+**Results:** tsc 0, lint 0, test:db 352/352 ×2. Fast tests: **1925/1927**.
+
+**The two failures are `cli.process.test.ts` crash tests**, which time out
+after 60 s. The cause is in Slice 1's merged crash handler. It runs every line
+through Slice 1's worker redactor (`jsonLineRedactorFor`) after Slice 0's.
+Measured on the merged build:
+- 0 pad: 0.2 s;
+- 20 KB message: 0.9 s;
+- 200 KB message: **77 s**.
+
+The output is truncated to ~4 KB. A 4 KB line fits a pipe buffer, so the
+flush race cannot happen there. But the test's ">2 MB line" assertion does
+not hold on the merge, and a crash handler that blocks for minutes on a large
+error message is a Slice 1 issue: **flag for the Slice 1 owner**. Options
+there: cap the message length before redaction (as Slice 1 already caps the
+output), or fix the super-linear redaction. Then adapt the size assertion.
+Slice 0's own tree is unaffected.
+
+# Round 15 — review on 344de78 (1 High, 1 Medium)
+
+Base: 344de78. Local commits only (not pushed). 0001 unchanged; no manifest or
+baseline change. Raw logs: `scratchpad/r16/`.
+
+## R15.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 8dcc585 | test(ingest): failing tests for round 15 (dangerous attributes on ratio-role members; COMMIT answered with ROLLBACK) | tests (red) + serial DB phase |
+| 40a7967 | fix(ingest): refuse dangerous attributes on (transitive) members of ratio roles; COMMIT answered with ROLLBACK is an error (round 15) | fix |
+| (this) | docs(evidence): Slice 0 round 15 | docs |
+
+## R15.2 Red (at 8dcc585)
+
+**Parallel DB phase: 11 failed / 228 passed (239).**
+- Nine member-attribute cases were not refused:
+  - BYPASSRLS, SUPERUSER and CREATEDB members of ratio_worker;
+  - REPLICATION and CREATEROLE members of ratio_reader;
+  - BYPASSRLS, SUPERUSER and REPLICATION members of ratio_owner.
+- The transitive BYPASSRLS member was not refused either.
+- `withTenantTransaction` returned normally after a swallowed `SELECT 1/0`.
+- The runner treated a COMMIT answered with `ROLLBACK` as success.
+- The two positive controls passed on arrival.
+
+**Serial phase: 1 failed (1).** The threat reproduced first: the leak
+assertion passed, because a committed BYPASSRLS LOGIN member of ratio_worker,
+set to tenant B, counted tenant A's `cost_facts` (> 0). Then the catalog
+check returned no problem for it, and the test failed there.
+
+The fast `tenant.test.ts` case (COMMIT tag `ROLLBACK`) was red as well; T1
+below shows it is load-bearing.
+
+## R15.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+R1 member-attribute check removed                 KILLED  9 parallel + the serial leak test
+R2 direct members only (no recursion)             KILLED  transitive test
+R3 owner members held to all five attributes      KILLED  positive control (CREATEROLE/CREATEDB migrator)
+R4 owner members exempt                           KILLED  3 owner tests
+R5 SUPERUSER not checked                          KILLED  2
+R6 BYPASSRLS not checked                          KILLED  3 + serial leak test
+R7 REPLICATION not checked                        KILLED  2
+R8 CREATEROLE not checked (non-owner)             KILLED  1
+R9 CREATEDB not checked (non-owner)               KILLED  1
+T1 tenant COMMIT tag not checked                  KILLED  fast test + DB test
+T2 runner (inTransaction) COMMIT tag not checked  KILLED  runner DB test
+```
+
+## R15.4 Verification (main checkout at 40a7967 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1813/1813 |
+| `npm run test:db` single run | 239/239 parallel + 1/1 serial |
+| `npm run test:db` **×10** consecutive | **7/10 exit 0** (239/239 + 1/1 each). See R15.5 for the other 3 |
+| `npm run test:db` and the serial config alone (URL unset) | exit 1 / exit 1 |
+| `npm run worker:build` | 0 |
+| `npm run build` | 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state afterwards | `pg_db_role_setting` 0; `pg_parameter_acl` 0; probe roles 0; `ratio_test_login*` 0; no non-superuser member of any ratio role; ratio roles NOLOGIN; no scratch databases |
+
+## R15.5 The 3 failed ×10 runs were caused by another agent's tests
+
+Runs 1, 8 and 9 each failed exactly one test (238/239), and each test failed
+in the same way. `createTestDatabase`'s `migrateUp` refused with:
+
+```
+run 1: role ratio_test_login_27461_89344cd86b (member of ratio_worker) must not be BYPASSRLS
+run 8: role ratio_test_login_13636_8660b4be81 (member of ratio_worker) must not be BYPASSRLS
+run 9: role ratio_test_login_16190_f77bc81d18 (member of ratio_worker) must not be BYPASSRLS
+```
+
+**Where the roles come from.** The 10-hex-character names come from Slice 1's
+`src/ingest/testing/db.ts` `createLogin()`, which uses
+`crypto.randomBytes(5)`. Slice 0 has no such file; its only test login uses a
+base-36 name and is a plain member. The Slice 1 agent was running its
+`test:db` on the shared cluster at the same time. Its `auth.db.test.ts`
+creates committed BYPASSRLS LOGIN members of ratio_worker, for example
+"A1 refuses a BYPASSRLS login even if it is a ratio_worker member".
+
+**Why this is not a Slice 0 defect.** Roles and memberships are
+cluster-global. While such a role exists, every database's catalog check
+must refuse it, and that is the threat this round closes. Slice 0's own
+committed dangerous login runs in the new serial phase
+(`*.serial.db.test.ts`, after the parallel phase). It is dropped in
+`finally`, and `afterAll` asserts that it is gone.
+
+**Residual limit.** The serial phase isolates only within one `test:db`
+process. Another process on the same cluster still overlaps for about 1.5 s
+while that role exists.
+
+## R15.6 Slice 1 compat (local slice/01 6a1244b ⊇ origin; scratch worktree, removed)
+
+The Slice 1 agent's worktree has moved on since then (fc71471, not merged
+here).
+
+**Merge.** There were three conflicts:
+- `cli.ts`: resolved as in round 14. The single handler is Slice 1's, with
+  the synchronous fd-2 writer and the crash hook.
+- `vitest.db.config.ts`: kept Slice 1's S3 `globalSetup` and added the
+  serial exclude.
+- `package.json`: took Slice 0's two-phase `test:db` and Slice 1's
+  `worker:build`, which writes build-info.
+
+| Gate | Result |
+|---|---|
+| npm ci / tsc / lint | 0 / 0 / 0 |
+| fast tests | 1976/1979 |
+| test:db run 1 (S3 at :18333, PG16 tools) | 369/370 |
+| test:db run 2 | 369/370 |
+| serial phase | 1/1 |
+
+**Fast-test failures (3), all on Slice 1's side:**
+- 2 are the known round-14 crash-redactor issue. Slice 1 truncates the crash
+  line, so the ">2 MB line" assertions fail (`159`/`160 > 2000000`).
+- 1 is a timing assertion in `cli.worker.test.ts` ("within 2 s", 2160 ms
+  under load). It passed 14/14 when rerun alone.
+
+**test:db failures, both from the same interference as R15.5,** inside
+Slice 1's own parallel run:
+- run 1: a migrateUp refused `ratio_test_login_23152_a26b0193c4` (BYPASSRLS
+  member of ratio_worker);
+- run 2: Slice 1's `doctor.db.test.ts` D1 saw an extra
+  `PRIVILEGE_MODEL_VIOLATION` problem next to `PENDING`.
+
+**Flag for the Slice 1 owner.** On the merge, Slice 1's committed BYPASSRLS
+and SUPERUSER test logins (`auth.db.test.ts`, via `createLogin`) make
+concurrent migrations and `--status`/doctor checks fail on the same cluster,
+correctly. Either:
+- move those tests to `*.serial.db.test.ts`; or
+- create the dangerous logins in a transaction that is rolled back, where no
+  separate connection is needed.
+
+A cluster-wide advisory lock would also work: shared in `createTestDatabase`,
+exclusive around a dangerous login. Separately, D1 should match `PENDING` as
+a member of `problems`, not the whole list.
