@@ -13,6 +13,7 @@ import { MemoryEvidenceStore } from '../evidence/MemoryEvidenceStore';
 import { IngestError } from '../errors';
 import type { ArtifactRef, PeriodListing, PeriodRange, ListOptions } from '../sources/types';
 import { runSync, type RunSyncOptions } from './pipeline';
+import { replayBatch } from './replay';
 import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup';
 import { batchesOf, expireLeases, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
 import { csvGz, rowsOf } from '../testing/focusCsv';
@@ -59,6 +60,55 @@ describe('H1: finishing an expired run', () => {
       expect(runs[1]).toMatchObject({ status: 'succeeded' });
     });
   }
+});
+
+describe('H1: a failure finish on an expired lease is LEASE_LOST too', () => {
+  it('runSync: the lease expires during the listing, then a run-level error (checkpoint read): LEASE_LOST, the run is never finished, the next acquisition abandons it', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    let failNextConnect = false;
+    // One connection attempt fails (a DB blip right after a long listing); finishing still reaches the DB.
+    const pool = new Proxy(t.pool, {
+      get(target, prop) {
+        if (prop === 'connect' && failNextConnect) {
+          failNextConnect = false;
+          return () => Promise.reject(new Error('connection refused'));
+        }
+        const v = Reflect.get(target, prop);
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    });
+    class SlowListing extends FakeFocusSource {
+      async listPeriods(): Promise<PeriodListing[]> {
+        await expireLeases(t.db.pool, s.tenantId, s.sourceId);
+        failNextConnect = true;
+        return [];
+      }
+    }
+    await expect(sync(s, new SlowListing([]), { pool })).rejects.toMatchObject({ code: 'LEASE_LOST' });
+    expect((await runsOf(t.db.pool, s.tenantId, s.sourceId))[0].status).toBe('running');
+    await sync(s, new FakeFocusSource([]));
+    expect((await runsOf(t.db.pool, s.tenantId, s.sourceId))[0]).toMatchObject({ status: 'abandoned', error_code: 'LEASE_EXPIRED' });
+  });
+
+  it('replay --batch: the lease expires, then the publish fails: LEASE_LOST, the replay run is never finished, the next acquisition abandons it', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const source = new FakeFocusSource([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P, 2, '1.00')) }] }]);
+    await sync(s, source);
+    source.setPeriods([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P, 3, '1.00')) }] }]);
+    await sync(s, source);
+    const [b1] = await batchesOf(t.db.pool, s.tenantId, s.sourceId);
+    const hooks = {
+      beforePublishStep: async () => {
+        await expireLeases(t.db.pool, s.tenantId, s.sourceId);
+        throw new Error('publish step failed');
+      },
+    };
+    await expect(replayBatch({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourceKey, batchId: b1.id, hooks })).rejects.toMatchObject({ code: 'LEASE_LOST' });
+    const replayRun = () => runsOf(t.db.pool, s.tenantId, s.sourceId).then((rs) => rs.find((r) => r.run_kind === 'replay')!);
+    expect((await replayRun()).status).toBe('running');
+    await sync(s, source);
+    expect(await replayRun()).toMatchObject({ status: 'abandoned', error_code: 'LEASE_EXPIRED' });
+  });
 });
 
 describe('M1: the re-listed manifest is evidence too', () => {
