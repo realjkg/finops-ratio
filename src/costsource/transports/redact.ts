@@ -27,10 +27,29 @@ const SECRET_KEYS =
   'aws[_-]?secret[_-]?access[_-]?key|access_token|refresh_token|id_token|session_token|private_token|' +
   'access_key|client_secret|api[_-]?key|password|passwd|pwd|secret|token|x-finio-session';
 
-// A key may carry an env-style prefix: RATIO_API_TOKEN, JIRA_API_TOKEN,
-// FINIO_PEER_TOKEN, SERVICENOW_PASSWORD, DB_PWD … (`\b` alone cannot match
-// after `_`, which is a word character).
-const KEY_PREFIX = '(?:[A-Za-z0-9_]*_)?';
+// Env-style keys: an UPPER-CASE prefix ending in `_` plus an UPPER-CASE
+// credential name — RATIO_API_TOKEN, JIRA_API_TOKEN, FINIO_PEER_TOKEN,
+// SERVICENOW_PASSWORD, DB_PWD … Matched case-SENSITIVELY so ordinary
+// snake_case fields (cost_per_token, input_token, is_secret, has_password,
+// team_token, max_tokens) are left alone; un-prefixed keys use the
+// case-insensitive rules above with a word boundary, which `_` blocks.
+const ENV_SECRET_KEYS =
+  'SECRET_ACCESS_KEY|ACCESS_TOKEN|REFRESH_TOKEN|ID_TOKEN|SESSION_TOKEN|PRIVATE_TOKEN|ACCESS_KEY|' +
+  'CLIENT_SECRET|API_?KEY|PASSWORD|PASSWD|PWD|SECRET|TOKEN';
+const ENV_KEY = `[A-Z0-9_]*_(?:${ENV_SECRET_KEYS})`;
+
+// A secret value: a whole "…" or '…' string (escaped quotes inside; an
+// unterminated quote runs to the end — over-redacting malformed text is the
+// safe side), or an unquoted run. Each alternative is deterministic (no
+// nested ambiguity), so matching stays linear.
+const SECRET_VALUE = `(?:"(?:[^"\\\\]|\\\\[\\s\\S])*"?|'(?:[^'\\\\]|\\\\[\\s\\S])*'?|(?!\\[REDACTED)[^\\s&;,"'<>]+)`;
+const JSON_VALUE = `"(?:[^"\\\\]|\\\\[\\s\\S])*"?`;
+
+/** Keep a quoted value's quote style; replace its content. */
+function redactValue(prefix: string, value: string): string {
+  const q = value[0];
+  return q === '"' || q === "'" ? `${prefix}${q}[REDACTED]${q}` : `${prefix}[REDACTED]`;
+}
 
 /** `user:pass` encoded as base64 (Basic credentials). */
 function isBasicCredential(v: string): boolean {
@@ -55,11 +74,10 @@ function credentialShaped(scheme: string, v: string): boolean {
 }
 
 const FREE_TEXT_AUTH_RE = /\b(Bearer|Basic)\s+(["']?)([A-Za-z0-9._~+/=-]+)\2/gi;
-const JSON_SECRET_RE = new RegExp(`("${KEY_PREFIX}(?:${SECRET_KEYS})"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`, 'gi');
-const KV_SECRET_RE = new RegExp(
-  `\\b(${KEY_PREFIX}(?:${SECRET_KEYS})\\s*[=:]\\s*)(?!\\[REDACTED)[^\\s&;,"'<>]+`,
-  'gi',
-);
+const JSON_SECRET_RE = new RegExp(`("(?:${SECRET_KEYS})"\\s*:\\s*)${JSON_VALUE}`, 'gi');
+const JSON_ENV_SECRET_RE = new RegExp(`("${ENV_KEY}"\\s*:\\s*)${JSON_VALUE}`, 'g');
+const KV_SECRET_RE = new RegExp(`\\b((?:${SECRET_KEYS})\\s*[=:]\\s*)(${SECRET_VALUE})`, 'gi');
+const KV_ENV_SECRET_RE = new RegExp(`\\b(${ENV_KEY}\\s*[=:]\\s*)(${SECRET_VALUE})`, 'g');
 
 /**
  * Patterns, applied in order (most specific first). Each replaces the secret
@@ -88,10 +106,12 @@ const RULES: Array<[RegExp, Replacement]> = [
   [/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g, '[REDACTED_GITHUB_TOKEN]'],
   // OpenAI-style secret keys (sk-…, sk-proj-…).
   [/\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}/g, '[REDACTED_API_KEY]'],
-  // JSON "secret_key": "value".
+  // JSON "secret_key": "value" (and env-style "RATIO_API_TOKEN": "value").
   [JSON_SECRET_RE, '$1"[REDACTED]"'],
-  // k=v / k: v secret fields.
-  [KV_SECRET_RE, '$1[REDACTED]'],
+  [JSON_ENV_SECRET_RE, '$1"[REDACTED]"'],
+  // k=v / k: v secret fields, quoted or not (and env-style RATIO_API_TOKEN=…).
+  [KV_SECRET_RE, (_m, prefix, value) => redactValue(prefix, value)],
+  [KV_ENV_SECRET_RE, (_m, prefix, value) => redactValue(prefix, value)],
   // Bare token=value.
   [/\b(token\s*=\s*)(?!\[REDACTED)[^\s&;,"'<>]+/gi, '$1[REDACTED]'],
   // Bare SAS parameters.
