@@ -11,7 +11,13 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const TSX = path.join(ROOT, 'node_modules', '.bin', 'tsx');
+/**
+ * The child runs as `node --import tsx <file>` (one process), not through the
+ * tsx wrapper binary, which runs the script in a GRANDCHILD: a SIGKILL on
+ * timeout would then hit only the wrapper and leave the runaway redaction
+ * running.
+ */
+const childArgs = (file: string) => ['--import', 'tsx', file];
 const CHILD = path.join(__dirname, 'testing', 'redactLinearChild.ts');
 const SIZES = [200_000, 2_000_000];
 const BUDGET_MS = 2_000;
@@ -46,7 +52,8 @@ interface Measurement {
 
 function runCase(expr: string) {
   const started = Date.now();
-  const r = spawnSync(TSX, [CHILD], {
+  const r = spawnSync(process.execPath, childArgs(CHILD), {
+    cwd: ROOT,
     env: { ...process.env, RATIO_LINEAR_CASE: JSON.stringify({ expr, sizes: SIZES }) },
     timeout: STARTUP_ALLOWANCE_MS + SIZES.length * 2 * BUDGET_MS,
     killSignal: 'SIGKILL',
@@ -91,7 +98,8 @@ describe('single-step budgets (child process, hard kill)', () => {
   for (const name of BUDGET_CASE_NAMES) {
     it(`${name}: < ${BUDGET_MS} ms, no secret survives`, () => {
       const started = Date.now();
-      const r = spawnSync(TSX, [BUDGET_CHILD], {
+      const r = spawnSync(process.execPath, childArgs(BUDGET_CHILD), {
+        cwd: ROOT,
         env: { ...process.env, RATIO_BUDGET_CASE: name },
         timeout: STARTUP_ALLOWANCE_MS + BUDGET_MS,
         killSignal: 'SIGKILL',
