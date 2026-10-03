@@ -145,3 +145,15 @@ see EVIDENCE.md §1.
 | K6 | `cliWorker.db.test.ts` | year-0000 and a Postgres-rejected value via the CLI: the value and pg text are absent from stdout/stderr, error_detail and stats |
 | L1 | `worker/lease.db.test.ts` | acquiring source X keeps source Y's staged facts; Y then publishes |
 | L2 | 〃 | an expired zombie cannot record a retry (attempt 1, no retries) |
+
+## G. Challenger round 3 additions
+
+| ID | File | Test |
+|---|---|---|
+| M3-a | `worker/stall.db.test.ts` | source trickling a chunk every 0.7 s for ~10 s (stall 3 s, TTL 5 s) succeeds; the lease is live in every sample (kills N2, N10) |
+| M3-b | 〃 | evidence read trickling the same way succeeds with the lease held (kills N2 on the evidence path) |
+| M3-c | 〃 | 1 s inserts (test statement trigger) + 1.6 s hook per chunk with a 2 s stall: no `EVIDENCE_STALLED` (kills N3) |
+| L-c | 〃 | run past max duration while streaming aborts with `MAX_RUN_EXCEEDED` in < 5 s, attempt 1, checkpoint null, next sync succeeds |
+| L-b | `worker/lease.db.test.ts` | worker sessions show lock 30 s / idle-in-tx 5 min / statement 30 min; takeover blocked by a held row lock fails `LOCK_TIMEOUT` within 10 s (lock timeout 1 s), no new run, then succeeds |
+| L-b cfg | `config.test.ts` | DB session timeout defaults and bounds |
+| L-e | `focus/validate.test.ts` | C1 controls and U+2028/U+2029 in header names ⇒ `INVALID_CHARACTER`; ordinary non-ASCII names accepted |

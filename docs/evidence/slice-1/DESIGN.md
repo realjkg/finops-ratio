@@ -458,3 +458,26 @@ skill wording; package.json description literal restored.
   first PR run.
 - (d) The per-row staged-only trigger stays; revisit once a real export's size
   is known (measured cost: EVIDENCE §4).
+
+## 16. Challenger round 3 (on 96c495a)
+
+- **M-3 (tests only):** M3-a/M3-b/M3-c prove a slow but progressing run
+  survives: trickling source, trickling evidence read, and slow inserts plus a
+  slow hook. They kill the mutations that previously survived (N2, N3, N10).
+- **L-b:** every worker/doctor session sets `lock_timeout`
+  (`RATIO_DB_LOCK_TIMEOUT_MS`, 30 s), `idle_in_transaction_session_timeout`
+  (`RATIO_DB_IDLE_IN_TX_TIMEOUT_MS`, 5 min) and `statement_timeout`
+  (`RATIO_DB_STATEMENT_TIMEOUT_MS`, 30 min — above the largest legitimate
+  statement, e.g. deleting a 20 M-row staged batch at acquisition). A run
+  acquisition blocked by another run's lock fails `LOCK_TIMEOUT` (CLI exit 4),
+  writes nothing and does not touch the checkpoint.
+- **L-c:** at `RATIO_MAX_RUN_SECONDS` an abort signal destroys any active
+  source/evidence stream with `MAX_RUN_EXCEEDED` (not retried), stops at the
+  next chunk/artifact boundary and starts no further period; the run finishes
+  `failed`, checkpoint untouched. (Lease renewal also stops, as before.)
+- **L-e:** C1 controls (U+0080–U+009F) and U+2028/U+2029 are refused in header
+  names (`INVALID_CHARACTER`) because header names become JSON keys.
+- **Deferred to an issue (orchestrator):** L-a (run history when a publish
+  commit outlives its lease), L-d (long DB steps don't count as progress), L4–L10.
+- **Re-run after the Slice 0 round-5 merge:** doctor D1 (probe migration) and
+  the tests that create superuser triggers (M2-backstop/M2-generic, K6, M3-c).

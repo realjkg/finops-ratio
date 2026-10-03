@@ -45,7 +45,19 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 26 | 8193b0d | fix: L3 — test-only switches refused in staging/production | impl |
 | 27 | f594ed3 | fix: M-1 — stall watchdogs, S3 timeouts, progress-gated heartbeat, max run duration | impl |
 | 28 | 20b79fc | docs: L11 skill wording + new settings; package.json description literal restored | docs |
-| 29 | (final) | docs: design/test plan/evidence for challenger round 1 | docs |
+| 29 | 96c495a | docs: design/test plan/evidence for challenger round 1 | docs |
+| 30 | b94ae2b | test: M-3 slow-but-progressing runs survive (pass on current code; mutation-proven) | tests |
+| 31 | a687f09 | test: failing tests for round-3 lows L-b, L-c, L-e | tests (red, `r3-red-*.txt`) |
+| 32 | fd00bb2 | fix: L-e C1 / U+2028 / U+2029 refused in header names | impl |
+| 33 | 93553b1 | fix: L-b lock/idle/statement timeouts; blocked takeover fails LOCK_TIMEOUT | impl |
+| 34 | d5918fa | fix: L-c run past max duration aborts itself (MAX_RUN_EXCEEDED) | impl |
+| 35 | (final) | docs: design/test plan/evidence for challenger round 3 | docs |
+
+Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
+passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
+passed (17)`: L-b (session settings were `0`) and L-c (the run streamed on for
+~10.5 s instead of aborting). The M-3 tests (b94ae2b) pass on the code they
+guard by design; they are proven by mutation (§6).
 
 Challenger round 1 red evidence (at cd87483): fast — `Tests 8 failed | 31
 passed (39)` (validator year-0/control chars, stall/L3 config, S3 timeouts;
@@ -105,17 +117,17 @@ Slice 0 tests passed.
    vitest reports as "skipped" tests inside failed files (run still exit 1).
    They now fail at collection (no skipped count at all).
 
-## 4. Verification (HEAD 20b79fc + docs, after challenger round 1; worktree, no local modifications)
+## 4. Verification (HEAD d5918fa + docs, after challenger round 3; worktree, no local modifications)
 
 | Command | Result |
 |---|---|
 | `npm ci` | exit 0. `npm audit --omit=dev`: **0 vulnerabilities** (dev-tree advisories pre-existing) |
 | `npm run lint` | exit 0 |
 | `rm -rf .next && npx tsc --noEmit` | exit 0 |
-| `npm test` | exit 0 — 39 files / 424 tests passed (Slice 1 fast files: 10 files / 104 tests) |
-| `RATIO_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres RATIO_TEST_S3_ENDPOINT=http://127.0.0.1:18333 npm run test:db` ×3 | exit 0 each: 21 files / **224 passed, 0 failed, 0 skipped, 0 todo** each run (36.1 s, 31.6 s, 31.3 s). Slice 1 DB files: 13 files / 119 tests. No Slice 1 assertion needed changing for round 3 (none expects 42501 for a cross-tenant child-row insert; tenant-escape tests go through NOT_FOUND / RLS-filtered paths) |
+| `npm test` | exit 0 — 39 files / 426 tests passed (Slice 1 fast files: 10 files / 106 tests) |
+| `RATIO_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres RATIO_TEST_S3_ENDPOINT=http://127.0.0.1:18333 npm run test:db` ×3 | exit 0 each: 21 files / **229 passed, 0 failed, 0 skipped, 0 todo** each run (55.4 s, 46.8 s, 46.8 s — the M-3 trickle tests add ~25 s by design). Slice 1 DB files: 13 files / 124 tests. No Slice 1 assertion needed changing for round 3 (none expects 42501 for a cross-tenant child-row insert; tenant-escape tests go through NOT_FOUND / RLS-filtered paths) |
 | `npm run test:db` with `RATIO_TEST_DATABASE_URL` unset | exit 1: "RATIO_TEST_DATABASE_URL is not set … refusing to run" |
-| `npm run test:db` with `RATIO_TEST_S3_ENDPOINT` unset | exit 1: 3 S3 files FAIL at collection ("RATIO_TEST_S3_ENDPOINT is not set"), 206 passed, nothing skipped |
+| `npm run test:db` with `RATIO_TEST_S3_ENDPOINT` unset | exit 1: 3 S3 files FAIL at collection ("RATIO_TEST_S3_ENDPOINT is not set"), 211 passed, nothing skipped |
 | `grep -rnE '\.(skip\|only\|todo\|fails)\b\|skipIf\|runIf' src/ingest` | no matches |
 | `npm run worker:build` | exit 0; `dist-worker/ingest/build-info.json` carries the git SHA; built CLI used for §5 |
 | `npm run build` | exit 0 (after commit 1cc3406 — before it, Tailwind's JIT scanned `src/ingest` and emitted an invalid class from a regex literal). Then `git checkout tsconfig.json next-env.d.ts`; no AGENTS.md/CLAUDE.md generated |
@@ -132,6 +144,7 @@ machine, 3 runs each:
 - after the round-2 merge (per-row staged-only trigger with `FOR SHARE` on the batch): 9 465 / 11 505 / 10 712 ms
 - after the round-3 merge (HEAD 614e1c6): 9 851 / 9 930 / 10 286 ms
 - after challenger round 1 (watchdog + progress-gated heartbeat): 9 339 / 9 690 / 10 013 ms (no measurable cost from the watchdog); SIGKILL demo 0.92 / 0.94 / 1.05 s
+- after challenger round 3 (session timeouts, max-run abort): 10 768 / 10 458 / 12 168 ms; SIGKILL demo 1.20 / 1.18 / 1.24 s — measured while another agent's DB suite was running in the same cluster (PID 10356), so not comparable 1:1; the new code adds no per-row work
 
 ≈ +2–3.7 s per 200k rows (≈ 10–18 µs per row, +25–45 % of the whole load
 including parse, gzip and evidence I/O). Acceptable for this slice; a
@@ -140,10 +153,10 @@ Slice 0 design choice, noted for the owner.
 
 ## 5. Manual end-to-end (built CLI, merged code, `v-e2e.txt`)
 
-Run on HEAD 20b79fc (after challenger round 1; identical results on 614e1c6 and 1cc3406 before it).
-Script `e2e.sh` (scratch, not committed): scratch DB `ratio_s1_e2e_5bb326cc`,
+Run on HEAD d5918fa (after challenger round 3; identical results on 20b79fc, 614e1c6 and 1cc3406 before it).
+Script `e2e.sh` (scratch, not committed): scratch DB `ratio_s1_e2e_b008f434`,
 worker login `IN ROLE ratio_worker`, reader login `IN ROLE ratio_reader`,
-bucket `s1-e2e-5bb326cc` seeded with `fixtures/focus-1.0-synthetic/base/**`,
+bucket `s1-e2e-b008f434` seeded with `fixtures/focus-1.0-synthetic/base/**`,
 tenant provisioned as in SKILL §2, source credentials from the AWS SDK default
 chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env).
 
@@ -157,7 +170,7 @@ chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env).
 | batches | both `published/reconciled`, control = loaded exactly |
 | evidence re-hash (3 objects) | all `OK` (sha256 of the stored object = `ingest_artifacts.sha256`) |
 | `worker doctor --json --tenant …` | exit 0, all checks pass |
-| `RATIO_ENV=test worker replay-fixtures --json` | exit 0, 6/6 scenarios pass, tenant `fixture-20261003063706-107fd8cc` retained |
+| `RATIO_ENV=test worker replay-fixtures --json` | exit 0, 6/6 scenarios pass, tenant `fixture-20261003070324-6ac69c12` retained |
 | fixture tenant footprint | 341 fact rows (~409 kB), 8 batches, 8 runs, 38 objects / 75 458 bytes |
 | cleanup (scratch only) | bucket deleted, database and logins dropped |
 
@@ -192,6 +205,19 @@ byte-identically (`cmp`).
 | R1-L1 staged cleanup across every source of the tenant | 1 fails (L1) |
 | R1-L2 retry recorded on an expired lease | 1 fails (L2) |
 | R1-L3 RATIO_ENV ignored by test switches | 1 fails (L3) |
+
+### Challenger round 3 mutation proofs (`mutations3.txt`, `mutations4.txt`)
+
+| Mutation | Killed by |
+|---|---|
+| N2 watchdog not re-armed when data arrives | M3-a (source path) and M3-b (evidence path) |
+| N10 capture never reports progress | M3-a (lease lost while trickling) |
+| N3 `touch()` is a no-op | M3-c (`EVIDENCE_STALLED`). A first version of M3-c (no slow insert, 0.8 s hook vs 1 s stall) let N3 survive: the stream buffers absorbed the file. M3-c now makes each insert slow (1 s statement trigger) and uses a 2 s stall with a 1.6 s hook, so only `touch()` bridges the ~2.6 s between evidence bytes |
+| Lb-1 no `lock_timeout` on worker sessions | L-b (fails at the session-settings assertion) |
+| Lb-2 lock timeout not mapped to LOCK_TIMEOUT | L-b (outcome `DB_55P03`) |
+| Lc-1 max-run abort timer never fires | L-c |
+| Lc-2 streams ignore the abort signal | L-c |
+| Le C1/U+2028 allowed in header names | V L-e |
 
 ## 7. Owner acceptance demonstration ↔ tests (`src/ingest/demo.db.test.ts`, committed fixture, real S3, real LOGIN roles)
 
@@ -232,6 +258,7 @@ byte-identically (`cmp`).
   - passed: config errors never echo secret values
   - passed: stall watchdog and maximum run duration have defaults and bounds (M-1)
   - passed: L3: test-only switches refuse to activate when RATIO_ENV is staging or production, even with NODE_ENV=test
+  - passed: L-b: worker DB session timeouts have defaults and bounds
 
 - `src/ingest/dependencyBoundary.test.ts`
   - passed: no file under pages/ or src/ (outside src/ingest) imports @aws-sdk/* or csv-parse
@@ -259,6 +286,7 @@ byte-identically (`cmp`).
   - passed: rejects malformed and impossible timestamps
   - passed: reports every missing required column
   - passed: rejects control characters in header names (M-2)
+  - passed: rejects C1 controls and U+2028/U+2029 in header names (they become JSON keys) (L-e)
   - passed: rejects duplicate column names
   - passed: maps a valid FOCUS 1.0 row; money stays the exact source string
   - passed: maps FOCUS 0.5 UsageQuantity/UsageUnit when ConsumedQuantity is absent
@@ -334,7 +362,7 @@ byte-identically (`cmp`).
   - passed: listing fingerprint is order-independent and changes with etag, size or manifest bytes
   - passed: classifies artifact formats
 
-(104 tests)
+(106 tests)
 
 ### DB suite (npm run test:db, final run 3)
 
@@ -393,6 +421,7 @@ byte-identically (`cmp`).
   - passed: L6 a crashed (simulated dead) run stops heartbeating, so its lease expires
   - passed: L1 (challenger) acquiring source X never deletes source Y's staged batch in the same tenant
   - passed: L2 (challenger) a zombie whose lease expired cannot record a retry (attempt and retries unchanged)
+  - passed: L-b worker sessions carry lock/idle/statement timeouts; a takeover blocked by a held row lock fails LOCK_TIMEOUT within its bound
 
 - `src/ingest/worker/publish.db.test.ts`
   - passed: publish steps are the documented, complete sequence
@@ -428,6 +457,10 @@ byte-identically (`cmp`).
   - passed: M1-evidence: an evidence read that never emits fails EVIDENCE_STALLED in bounded time; nothing published
   - passed: M1-heartbeat: a run that makes no progress stops renewing its lease, so another worker can take over
   - passed: M1-maxrun: renewal also stops after the maximum run duration, even while progressing
+  - passed: M3-a: a source trickling one chunk every 0.7 s for ~10 s (stall 3 s, TTL 5 s) succeeds and holds its lease throughout
+  - passed: M3-b: an evidence read trickling one chunk every 0.7 s for ~10 s (stall 3 s, TTL 5 s) succeeds and holds its lease
+  - passed: M3-c: slow downstream inserts plus a 0.8 x stall hook per chunk are not mistaken for an evidence stall
+  - passed: L-c: a run past its maximum duration aborts itself (MAX_RUN_EXCEEDED) while still streaming, checkpoint untouched
 
 - `src/ingest/worker/streaming.db.test.ts`
   - passed: S1 200,000 rows load in bounded chunks while the evidence stream is still being read
@@ -483,7 +516,7 @@ byte-identically (`cmp`).
   - passed: T1 B source keys, batch ids and quarantine reports are NOT_FOUND for tenant A; A syncs never change B
   - passed: T2 malformed or missing tenant ids are refused before any query
 
-(119 tests)
+(124 tests)
 
 Slice 0 suites (unchanged by Slice 1, all passing in the same runs): see
 `docs/evidence/slice-0/`.
@@ -525,6 +558,14 @@ reverting the Slice 1 commits needs no DB action; ingested rows stay in
   migration check (delegated decision (b), DESIGN §15).
 - A stalled attempt costs up to `RATIO_STALL_TIMEOUT_SECONDS` and is retried
   within the retry budget.
+- Deferred to an issue (orchestrator): L-a run-history accuracy when a publish
+  commit outlives its lease; L-d long DB steps do not count as progress (a
+  single statement longer than the stall limit stops lease renewal);
+  challenger L4–L10.
+- Leftover test objects in the shared cluster: `ratio_test_23557_*` (origin
+  gone) and login `ratio_test_login_1169_*` (origin gone) are not provably
+  mine and were not dropped; `ratio_test_10356_*` belonged to another agent's
+  run in progress at the time.
 - The S3 request timeout covers time-to-response only; body streaming is
   guarded by the stall watchdog.
 - `quarantine show` exposes validation messages but never cell values; an

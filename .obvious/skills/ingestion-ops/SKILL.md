@@ -37,7 +37,8 @@ publishes it per billing period. Readers (`ratio_reader`) see only
 | `RATIO_SOURCE_S3_ENDPOINT` / `_REGION` / `_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` / `_SESSION_TOKEN` / `_FORCE_PATH_STYLE` | sync/backfill/replay | where the provider export lives. No key pair ⇒ AWS SDK default credential chain. `http://` refused when `RATIO_ENV=production` |
 | `RATIO_EVIDENCE_S3_ENDPOINT` / `_REGION` / `_BUCKET` / `_PREFIX` / `_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` / `_SESSION_TOKEN` | sync/backfill/replay/replay-fixtures | evidence bucket (raw bytes, content-addressed, never deleted by code) |
 | `RATIO_LEASE_TTL_SECONDS` (300) · `RATIO_MAX_ATTEMPTS` (3) · `RATIO_RETRY_BASE_MS` (500) · `RATIO_RETRY_MAX_MS` (30000) | runs | lease and retry budget |
-| `RATIO_STALL_TIMEOUT_SECONDS` (120) · `RATIO_MAX_RUN_SECONDS` (21600) | runs | a source/evidence stream idle this long fails `SOURCE_STALLED`/`EVIDENCE_STALLED`; a run without progress this long, or older than the max run duration, stops renewing its lease (another worker can then take over) |
+| `RATIO_STALL_TIMEOUT_SECONDS` (120) · `RATIO_MAX_RUN_SECONDS` (21600) | runs | a source/evidence stream idle this long fails `SOURCE_STALLED`/`EVIDENCE_STALLED`; a run without progress this long stops renewing its lease (another worker can then take over); a run older than the max run duration aborts itself with `MAX_RUN_EXCEEDED` |
+| `RATIO_DB_LOCK_TIMEOUT_MS` (30000) · `RATIO_DB_IDLE_IN_TX_TIMEOUT_MS` (300000) · `RATIO_DB_STATEMENT_TIMEOUT_MS` (1800000) | worker/doctor DB sessions | a run blocked by another run's lock fails `LOCK_TIMEOUT` (exit 4); no session can hang forever |
 | `RATIO_S3_CONNECT_TIMEOUT_MS` (10000) · `RATIO_S3_REQUEST_TIMEOUT_MS` (60000) | S3 calls | connect and time-to-response timeouts (body streaming is covered by the stall watchdog) |
 | `RATIO_INSERT_CHUNK_ROWS` (1000) · `RATIO_MAX_ROWS_PER_BATCH` (20M) · `RATIO_MAX_ARTIFACT_BYTES` (5 GiB) · `RATIO_MAX_BATCH_BYTES` (20 GiB) · `RATIO_MAX_ARTIFACTS_PER_SET` (1000) · `RATIO_TMP_DIR` | runs | limits (exceeding ⇒ failed/quarantined, never partial) |
 | `RATIO_DOCTOR_MAX_STALENESS_HOURS` (48) | doctor | freshness threshold |
@@ -50,7 +51,7 @@ Test-only (refused otherwise, and always refused when `RATIO_ENV` is `staging` o
 
 Every command prints ONE evidence record on stdout (`{"type":"ratio.evidence", command, gitSha, artifactDigest, startedAt, finishedAt, results, pass, exitCode}`)
 and JSON logs on stderr. Exit codes: 0 ok · 1 failure (incl. quarantine) ·
-2 usage/config · 3 migrate status mismatch · 4 another run holds the lease.
+2 usage/config · 3 migrate status mismatch · 4 another run holds the lease (or its lock: `LOCK_TIMEOUT`).
 
 ## 1. Migrate
 
