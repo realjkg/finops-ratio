@@ -129,6 +129,15 @@ describe('AWS Data Exports layout', () => {
     });
   });
 
+  it('two names that redact to the same stored name (token=x, token=y) are MANIFEST_INVALID, never a primary-key collision at staging', () => {
+    const keys = [DATA + 'token=x.csv.gz', DATA + 'token=y.csv.gz'];
+    const r = parseManifest(manifest({ dataFiles: keys }), { location: loc, billingPeriod: P, listing: listing(keys) });
+    expect(r).toMatchObject({ ok: false, code: 'MANIFEST_INVALID' });
+    if (!r.ok) expect(r.message).not.toMatch(/token=x|token=y/);
+    // One such name alone is fine.
+    expect(parseManifest(manifest({ dataFiles: [keys[0]] }), { location: loc, billingPeriod: P, listing: listing([keys[0]]) }).ok).toBe(true);
+  });
+
   it('listing fingerprint is order-independent and changes with etag, size or manifest bytes', () => {
     const a = { name: 'a', key: 'k/a', byteSize: 1, version: 'e1' };
     const b = { name: 'b', key: 'k/b', byteSize: 2, version: 'e2' };

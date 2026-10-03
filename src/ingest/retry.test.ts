@@ -113,3 +113,44 @@ describe('withRetry', () => {
     await expect(withRetry(async () => 1, { maxAttempts: 0, baseMs: 1, maxMs: 1 })).rejects.toThrow(/maxAttempts/);
   });
 });
+
+describe('withRetry with an abort signal', () => {
+  const transient = () => Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' });
+
+  it('an abort during a long backoff rejects promptly with the abort reason; no further attempt runs', async () => {
+    const ac = new AbortController();
+    const reason = new Error('deadline');
+    let attempts = 0;
+    const started = Date.now();
+    setTimeout(() => ac.abort(reason), 50);
+    await expect(
+      withRetry(
+        async () => {
+          attempts++;
+          throw transient();
+        },
+        { maxAttempts: 5, baseMs: 60_000, maxMs: 60_000, random: () => 0.999, signal: ac.signal },
+      ),
+    ).rejects.toBe(reason);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(attempts).toBe(1);
+  });
+
+  it('a signal already aborted when an attempt fails is not retried', async () => {
+    const ac = new AbortController();
+    const reason = new Error('deadline');
+    let attempts = 0;
+    await expect(
+      withRetry(
+        async () => {
+          attempts++;
+          ac.abort(reason);
+          throw transient();
+        },
+        { maxAttempts: 5, baseMs: 1, maxMs: 1, sleep: async () => undefined, signal: ac.signal },
+      ),
+    ).rejects.toBe(reason);
+    expect(attempts).toBe(1);
+  });
+});
+

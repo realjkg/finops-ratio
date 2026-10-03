@@ -10,11 +10,11 @@ import type { Readable } from 'stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeFocusSource } from '../sources/fake/FakeFocusSource';
 import { MemoryEvidenceStore } from '../evidence/MemoryEvidenceStore';
-import type { ArtifactRef } from '../sources/types';
+import type { ArtifactRef, PeriodListing, PeriodRange } from '../sources/types';
 import { runSync, type RunSyncOptions } from './pipeline';
 import { runDoctor } from './doctor';
 import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup';
-import { runsOf, seedTenantSource, type SeededSource } from '../testing/db';
+import { batchesOf, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
 import { csvGz, rowsOf } from '../testing/focusCsv';
 import { createTestBucket, requireTestS3Endpoint, testS3Env, type TestBucket } from '../testing/s3';
 
@@ -191,3 +191,91 @@ describe('M4: doctor fails a source that has never published a period', () => {
     expect(after.checks.find((c) => c.name === name)).toMatchObject({ status: 'pass' });
   });
 });
+
+describe('Gap 1: names that collide once redacted are refused before anything is downloaded', () => {
+  it('token=x and token=y in one period: MANIFEST_INVALID, nothing opened, nothing staged', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const source = new FakeFocusSource([
+      {
+        billingPeriod: P,
+        artifacts: [
+          { name: 'r/token=x.csv.gz', bytes: csvGz(rowsOf(P, 1, '1.00', 'x')) },
+          { name: 'r/token=y.csv.gz', bytes: csvGz(rowsOf(P, 1, '1.00', 'y')) },
+        ],
+      },
+    ]);
+    const r = await sync(s, source);
+    expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'MANIFEST_INVALID' });
+    expect(source.opened).toEqual([]);
+    expect(await batchesOf(t.db.pool, s.tenantId, s.sourceId)).toEqual([]);
+  });
+});
+
+describe('Gap 2: evidence uploads are abort-aware', () => {
+  const settings = { maxRunSeconds: 1, stallTimeoutSeconds: 6 } as RunSyncOptions['settings'];
+  const set = () => [{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P, 2)) }] }];
+  /** A listing that carries manifest bytes (so the manifest evidence is uploaded first). */
+  class WithManifest extends FakeFocusSource {
+    async listPeriods(range?: PeriodRange): Promise<PeriodListing[]> {
+      return (await super.listPeriods(range)).map((l) => (l.ok ? { ...l, set: { ...l.set, manifest: { name: 'e-Manifest.json', bytes: Buffer.from('{}') } } } : l));
+    }
+  }
+  class UploadStore extends MemoryEvidenceStore {
+    sawSignal: boolean[] = [];
+    constructor(
+      private readonly which: 'put' | 'putBytes',
+      private readonly honours: boolean,
+    ) {
+      super();
+    }
+    private hang(signal: AbortSignal | undefined): Promise<never> {
+      this.sawSignal.push(!!signal);
+      return this.honours ? untilAborted(signal) : new Promise<never>(() => undefined);
+    }
+    async put(key: string, filePath: string, info: { sha256: string; byteSize: number }, opts?: { signal?: AbortSignal }) {
+      return this.which === 'put' ? this.hang(opts?.signal) : super.put(key, filePath, info);
+    }
+    async putBytes(key: string, bytes: Buffer, opts?: { signal?: AbortSignal }) {
+      return this.which === 'putBytes' ? this.hang(opts?.signal) : super.putBytes(key, bytes);
+    }
+  }
+
+  for (const which of ['put', 'putBytes'] as const) {
+    for (const honours of [true, false]) {
+      it(`${which === 'put' ? 'artifact' : 'manifest'} upload that ${honours ? 'honours' : 'ignores'} the signal and never finishes: MAX_RUN_EXCEEDED at the deadline`, async () => {
+        const s = await seedTenantSource(t.db.pool);
+        const evidence = new UploadStore(which, honours);
+        const started = Date.now();
+        const r = await runSync({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourceKey, source: new WithManifest(set()), evidence, mode: 'sync', settings, hooks: noSleep });
+        expect(Date.now() - started).toBeLessThan(5_000);
+        expect(evidence.sawSignal).toEqual([true]);
+        expect(r.status).toBe('failed');
+        expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'MAX_RUN_EXCEEDED' });
+      });
+    }
+  }
+});
+
+describe('Gap 3: the retry backoff is abort-aware', () => {
+  it('a transient failure with a 60 s backoff: the run fails MAX_RUN_EXCEEDED at the 1 s deadline, not after the backoff', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const source = new FakeFocusSource([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: csvGz(rowsOf(P, 2)) }] }], {
+      openFailure: () => Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' }),
+    });
+    const started = Date.now();
+    const r = await runSync({
+      pool: t.pool,
+      tenantId: s.tenantId,
+      sourceKey: s.sourceKey,
+      source,
+      evidence: new MemoryEvidenceStore(),
+      mode: 'sync',
+      settings: { maxRunSeconds: 1, retryBaseMs: 60_000, retryMaxMs: 60_000, maxAttempts: 3 } as RunSyncOptions['settings'],
+      hooks: { random: () => 0.999 }, // real sleep, maximum backoff
+    });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(source.opened).toEqual(['r/a.csv.gz']); // no second attempt after the abort
+    expect(r.periods[0]).toMatchObject({ outcome: 'failed', code: 'MAX_RUN_EXCEEDED' });
+  });
+});
+
