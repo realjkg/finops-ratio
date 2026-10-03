@@ -2,6 +2,8 @@
 // environment gates that must refuse BEFORE connecting, and leak checks.
 import { describe, expect, it } from 'vitest';
 import { EventEmitter } from 'events';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 import { installProcessHandlers, main } from './cli';
 
 function capture() {
@@ -170,5 +172,46 @@ describe('process-level crash handler (single implementation: cli.ts installProc
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0])).toMatchObject({ type: 'ratio.evidence', pass: false, exitCode: 1 });
   });
+});
+
+// Spawned process, real handlers (as the CLI entry wires them): a crash whose
+// message is over 2 MB must still yield exactly ONE redacted JSON line and
+// exit 1, promptly — the handler must never block on redaction.
+describe('crash handler in a spawned process with a > 2 MB message', () => {
+  const ROOT = path.resolve(__dirname, '..', '..');
+  const TSX = path.join(ROOT, 'node_modules', '.bin', 'tsx');
+  const CHILD = path.join(__dirname, 'testing', 'crashChild.ts');
+  const secret = 'pw"q\\b%22x';
+  const forms = [secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1), JSON.stringify(encodeURIComponent(secret)).slice(1, -1), 'S3-secret-key-crash-test'];
+  const childEnv = (extra: Record<string, string>) => ({
+    ...process.env,
+    RATIO_DATABASE_URL: `postgres://worker_login:${encodeURIComponent(secret)}@127.0.0.1:1/db`,
+    RATIO_MIGRATE_DATABASE_URL: `postgres://owner_login:${encodeURIComponent(secret)}@127.0.0.1:1/db`,
+    RATIO_SOURCE_S3_SECRET_ACCESS_KEY: 'S3-secret-key-crash-test',
+    RATIO_CRASH_SECRET: secret,
+    ...extra,
+  });
+  const spawnChild = (extra: Record<string, string>) => {
+    const started = Date.now();
+    const r = spawnSync(TSX, [CHILD], { env: childEnv(extra), timeout: 20_000, killSignal: 'SIGKILL', encoding: 'utf8', maxBuffer: 64 << 20 });
+    return { ...r, wallMs: Date.now() - started };
+  };
+
+  for (const mode of ['throw', 'reject'] as const) {
+    it(`${mode === 'throw' ? 'uncaughtException' : 'unhandledRejection'}: one redacted line, exit 1, handler within 2 s of start-up`, () => {
+      const baseline = spawnChild({ RATIO_CRASH_MODE: 'baseline' });
+      expect(baseline.status, baseline.stderr).toBe(0);
+      const r = spawnChild({ RATIO_CRASH_MODE: mode, RATIO_CRASH_BYTES: String(2_100_000) });
+      expect(r.signal, `killed after ${r.wallMs} ms`).toBeNull();
+      expect(r.status).toBe(1);
+      expect(r.stdout).toBe('');
+      const lines = r.stderr.split('\n').filter((l) => l.length > 0);
+      expect(lines).toHaveLength(1);
+      expect(() => JSON.parse(lines[0])).not.toThrow();
+      for (const f of forms) expect(lines[0], f).not.toContain(f);
+      // The crash handling itself (beyond the child's start-up) stays within budget.
+      expect(r.wallMs - baseline.wallMs).toBeLessThan(2_000);
+    }, 60_000);
+  }
 });
 
