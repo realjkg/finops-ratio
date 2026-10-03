@@ -241,7 +241,8 @@ describe('runClassify', () => {
   });
 
   it('L7: a publish failure (labels/comment/status) → setFailed', async () => {
-    const { github, pr } = fakeGithub({ addLabelsError: true });
+    // labels: [] so the classifier must ADD risk:low and hit the failing write.
+    const { github, pr } = fakeGithub({ addLabelsError: true, labels: [] });
     const core = fakeCore();
     await runClassify({ github, core, context: prCtx(pr) });
     expect(core.failed).toMatch(/could not be published/);
