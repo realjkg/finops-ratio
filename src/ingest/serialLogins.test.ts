@@ -148,6 +148,13 @@ describe('dangerous logins only in serial DB test files (static rule)', () => {
       "await db.pool.query('CREATE ROLE x NOLOGIN ROLE ratio_owner');",
       "await db.pool.query('CREATE ROLE x NOLOGIN ADMIN postgres');",
       "await db.pool.query('CREATE USER x IN ROLE ratio_owner');",
+      "await db.pool.query('ALTER GROUP pg_read_server_files ADD USER x');",
+      "await db.pool.query('ALTER GROUP ratio_owner ADD USER x, y');",
+      'await db.pool.query(`ALTER GROUP ${g} ADD USER ${login.name}`);',
+      "await db.pool.query('CREATE GROUP g SUPERUSER');",
+      "await db.pool.query('CREATE GROUP g WITH BYPASSRLS');",
+      "await db.pool.query('CREATE GROUP g IN ROLE pg_signal_backend');",
+      'await db.pool.query(`CREATE GROUP ${g} ${attr}`);',
     ];
     for (const code of bad) expect(violationsIn('x.db.test.ts', code, true).length, code).toBeGreaterThan(0);
     const ok = [
@@ -160,6 +167,9 @@ describe('dangerous logins only in serial DB test files (static rule)', () => {
       'await db.pool.query(`GRANT SELECT ON ratio.cost_facts TO ratio_reader`);',
       'await db.pool.query(`GRANT ratio_worker TO ${l.name}`);',
       "const s = 'refuses a BYPASSRLS login';",
+      'await db.pool.query(`ALTER GROUP ratio_reader ADD USER ${login.name}`);',
+      "await db.pool.query('ALTER GROUP pg_monitor DROP USER x');",
+      'await db.pool.query(`CREATE GROUP ${g} NOLOGIN`);',
     ];
     for (const code of ok) expect(violationsIn('x.db.test.ts', code, true), code).toEqual([]);
   });
