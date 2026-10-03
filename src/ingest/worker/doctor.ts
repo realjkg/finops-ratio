@@ -10,6 +10,7 @@ import { redact } from '../redact';
 import { messageOf } from '../errors';
 import { createWorkerPool, inspectRole, roleProblems } from './db';
 import { canonicalTenant } from './types';
+import { DEFAULT_FIRST_PUBLISH_GRACE_HOURS } from '../config';
 
 export interface DoctorCheck {
   name: string;
@@ -24,6 +25,8 @@ export interface DoctorOptions {
   migrateUrl?: string;
   tenantIds: string[];
   maxStalenessHours: number;
+  /** NEVER_PUBLISHED is skipped for a source created less than this many hours ago (default 48). */
+  firstPublishGraceHours?: number;
   migrationsDir?: string;
   secrets?: readonly string[];
 }
@@ -95,14 +98,21 @@ export async function runDoctor(opts: DoctorOptions): Promise<{ pass: boolean; c
       checks.push({ name: 'role_safety', status: 'fail', detail: errText(e, secrets) });
     }
     checks.push(await migrationCheck(opts, secrets));
-    for (const t of opts.tenantIds) checks.push(...(await sourceChecks(pool, t, opts.maxStalenessHours, secrets)));
+    const grace = opts.firstPublishGraceHours ?? DEFAULT_FIRST_PUBLISH_GRACE_HOURS;
+    for (const t of opts.tenantIds) checks.push(...(await sourceChecks(pool, t, opts.maxStalenessHours, grace, secrets)));
   } finally {
     await pool.end().catch(() => undefined);
   }
   return { pass: checks.every((c) => c.status !== 'fail'), checks };
 }
 
-async function sourceChecks(pool: ReturnType<typeof createWorkerPool>, tenantRaw: string, maxStalenessHours: number, secrets: readonly string[]): Promise<DoctorCheck[]> {
+async function sourceChecks(
+  pool: ReturnType<typeof createWorkerPool>,
+  tenantRaw: string,
+  maxStalenessHours: number,
+  firstPublishGraceHours: number,
+  secrets: readonly string[],
+): Promise<DoctorCheck[]> {
   const tenantId = canonicalTenant(tenantRaw);
   const c = await pool.connect();
   try {
@@ -115,7 +125,8 @@ async function sourceChecks(pool: ReturnType<typeof createWorkerPool>, tenantRaw
          (SELECT max(finished_at) FROM ratio.sync_runs WHERE source_id = s.id AND status = 'succeeded') AS last_success,
          (SELECT max(published_at) FROM ratio.period_publications WHERE source_id = s.id) AS last_published,
          (SELECT count(*)::int FROM ratio.period_publications WHERE source_id = s.id) AS published_periods,
-         extract(epoch FROM clock_timestamp() - (SELECT max(finished_at) FROM ratio.sync_runs WHERE source_id = s.id AND status = 'succeeded')) / 3600 AS age_hours
+         extract(epoch FROM clock_timestamp() - (SELECT max(finished_at) FROM ratio.sync_runs WHERE source_id = s.id AND status = 'succeeded')) / 3600 AS age_hours,
+         extract(epoch FROM clock_timestamp() - s.created_at) / 3600 AS source_age_hours
        FROM ratio.sources s ORDER BY s.source_key`,
     );
     assertCommitted(await c.query('COMMIT'));
@@ -124,7 +135,11 @@ async function sourceChecks(pool: ReturnType<typeof createWorkerPool>, tenantRaw
       const name = `source:${tenantId}/${s.source_key}`;
       if (!s.enabled) return { name, status: 'skip', detail: 'source disabled' };
       const last = s.last_run as { status: string; error_code: string | null; live: boolean | null } | null;
+      // Doctor has no warning level: inside the grace window NEVER_PUBLISHED is skipped (round-2 L2).
+      const neverPublished = Number(s.published_periods) === 0;
+      const inGrace = neverPublished && Number(s.source_age_hours) < firstPublishGraceHours;
       const data = {
+        firstPublicationGrace: inGrace,
         lastRunStatus: last?.status ?? null,
         lastRunErrorCode: last?.error_code ?? null,
         lastSuccessAt: s.last_success ? new Date(s.last_success).toISOString() : null,
@@ -136,7 +151,7 @@ async function sourceChecks(pool: ReturnType<typeof createWorkerPool>, tenantRaw
       if (!s.last_success) problems.push('NEVER_SUCCEEDED: no successful run');
       else if (Number(s.age_hours) > maxStalenessHours) problems.push(`STALE: last successful run older than ${maxStalenessHours}h`);
       // Successful runs that never published anything are not a healthy source (review M4, third round).
-      if (Number(s.published_periods) === 0) problems.push('NEVER_PUBLISHED: no billing period has ever been published');
+      if (neverPublished && !inGrace) problems.push('NEVER_PUBLISHED: no billing period has ever been published');
       if (last && (last.status === 'failed' || last.status === 'abandoned')) problems.push(`LAST_RUN_${last.status.toUpperCase()}: ${last.error_code ?? 'unknown'}`);
       if (last && last.status === 'running' && last.live === false) problems.push('RUN_LEASE_EXPIRED: a run is still marked running with an expired lease');
       return problems.length ? { name, status: 'fail', detail: redact(problems.join('; '), secrets), data } : { name, status: 'pass', data };

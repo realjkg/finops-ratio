@@ -109,7 +109,9 @@ npm run -s worker -- backfill --tenant <uuid> --source aws-focus --from 2026-01 
   `LEASE_EXPIRED` if it committed nothing, or `LEASE_EXPIRED_AFTER_COMMIT`
   (`error_detail` counts its batches, publications and checkpoint write) if
   work it committed before losing the lease stands — check those periods
-  rather than re-running blindly.
+  rather than re-running blindly. A run whose only checkpoint write was a
+  size-rejection memo committed no data: it stays `LEASE_EXPIRED`, with
+  "checkpoint written (rejection memo only)" in `error_detail`.
 - Periods are bounded to 2000-01..9999-12 (`--from/--to/--period`; else exit 2).
 - Listing problems that are never retried: `SOURCE_LISTING_INVALID` (a
   listing page claims more results without a continuation token — the whole
@@ -118,9 +120,10 @@ npm run -s worker -- backfill --tenant <uuid> --source aws-focus --from 2026-01 
   as stored (redacted) is `MANIFEST_INVALID`.
 - `ARTIFACT_SET_TOO_LARGE` / `ARTIFACT_TOO_LARGE` found only while capturing
   (sizes under-reported by the listing) are remembered for that exact listing
-  and limits: the next runs fail the period fast without downloading. Raise
-  `RATIO_MAX_BATCH_BYTES` / `RATIO_MAX_ARTIFACT_BYTES` (or wait for a new
-  export) to try again.
+  and limits: the next `sync`/`backfill` runs fail the period fast without
+  downloading. Raise `RATIO_MAX_BATCH_BYTES` / `RATIO_MAX_ARTIFACT_BYTES` (or
+  wait for a new export) to try again; `replay --period` always downloads
+  again (an explicit re-ingest ignores the memo).
 - `RATIO_MAX_RUN_SECONDS` bounds the whole run, listing and every open
   included: a run past it fails `MAX_RUN_EXCEEDED`.
 
@@ -179,10 +182,18 @@ Checks: `db_connectivity`, `role_safety`, `migration_version` (needs the
 owner URL, used in a READ ONLY transaction, or a worker login granted SELECT
 on `public.schema_migrations` — owner decision), and per source
 `source:<tenant>/<key>` (never succeeded, never published a period
-(`NEVER_PUBLISHED` — expected for a brand-new source until its first
-publication), last run failed/abandoned, running with expired lease, last
-success older than the staleness threshold ⇒ fail; disabled ⇒ skip). Exit 0
-only if nothing fails.
+(`NEVER_PUBLISHED`), last run failed/abandoned, running with expired lease,
+last success older than the staleness threshold ⇒ fail; disabled ⇒ skip).
+Exit 0 only if nothing fails.
+
+`NEVER_PUBLISHED` has a first-publication grace window measured from the
+source's `created_at`: `RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS` (default 48 —
+AWS Data Exports can take up to 24 h to deliver the first export; 0 disables
+the grace). Doctor has no warning level, so inside the window the finding is
+simply not reported and the check's `data.firstPublicationGrace` is `true`;
+after it, a source with zero published periods fails. A source still
+unpublished after the window: check the export configuration and the
+source's `config` (bucket/prefix/exportName), then the last runs' outcomes.
 
 ## 7. replay-fixtures (staging/test only)
 

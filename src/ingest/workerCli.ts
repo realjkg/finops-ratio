@@ -187,6 +187,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
         migrateUrl: cfg.migrateDatabaseUrl,
         tenantIds: args.tenants,
         maxStalenessHours: cfg.doctorMaxStalenessHours,
+        firstPublishGraceHours: cfg.doctorFirstPublishGraceHours,
         secrets,
       });
       for (const c of r.checks) log('doctor.check', { name: c.name, status: c.status, detail: c.detail ?? null });

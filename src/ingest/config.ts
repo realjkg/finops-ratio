@@ -81,6 +81,8 @@ export interface WorkerConfig {
   replayFixturesBucket: string | undefined;
   settings: WorkerSettings;
   doctorMaxStalenessHours: number;
+  /** NEVER_PUBLISHED is not reported for a source younger than this (round-2 L2; AWS's first export can take up to 24 h). */
+  doctorFirstPublishGraceHours: number;
   artifactDigest: string | null;
   evidenceFile: string | undefined;
   /** Test-only kill hook (pause after N rows). Non-null only when NODE_ENV === 'test'. */
@@ -150,6 +152,9 @@ export function testSwitchesPermitted(env: Env): boolean {
   return env.NODE_ENV === 'test' && ratioEnv !== 'staging' && ratioEnv !== 'production';
 }
 
+/** Default first-publication grace for doctor's NEVER_PUBLISHED (hours). */
+export const DEFAULT_FIRST_PUBLISH_GRACE_HOURS = 48;
+
 export function loadWorkerConfig(env: Env): WorkerConfig {
   const rawEnv = (env.RATIO_ENV ?? '').trim();
   const ratioEnv = (rawEnv === '' ? 'development' : rawEnv) as RatioEnv;
@@ -209,6 +214,7 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
       },
     },
     doctorMaxStalenessHours: int(env, 'RATIO_DOCTOR_MAX_STALENESS_HOURS', 48, 1, 24 * 366),
+    doctorFirstPublishGraceHours: int(env, 'RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS', DEFAULT_FIRST_PUBLISH_GRACE_HOURS, 0, 24 * 366),
     artifactDigest: digest ? digest : null,
     evidenceFile: env.RATIO_EVIDENCE_FILE || undefined,
     testPauseAfterRows,
