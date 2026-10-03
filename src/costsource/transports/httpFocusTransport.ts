@@ -10,9 +10,12 @@
 import type { CostWindow } from '../CostSourceClient';
 import type { FocusExportTransport } from '../CloudConnectorAdapter';
 import {
+  DEFAULT_MAX_OBJECT_BYTES,
   decodeExportBytes,
   fetchChecked,
+  readBodyCapped,
   rowsFromExportText,
+  windowIso,
   type FetchLike,
 } from './focusExport';
 
@@ -24,12 +27,16 @@ export interface HttpFocusTransportOptions {
   token?: string;
   label: string;
   fetch?: FetchLike;
+  /** Cap on the export body, counted while streaming (default 512 MiB). */
+  maxObjectBytes?: number;
 }
 
+/** Substitutes the parsed, normalized UTC instants (never the raw strings). */
 export function expandWindow(endpoint: string, window: CostWindow): string {
+  const w = windowIso(window);
   return endpoint
-    .replace(/\{start\}/g, encodeURIComponent(window.start))
-    .replace(/\{end\}/g, encodeURIComponent(window.end));
+    .replace(/\{start\}/g, encodeURIComponent(w.start))
+    .replace(/\{end\}/g, encodeURIComponent(w.end));
 }
 
 function currentMonthWindow(): CostWindow {
@@ -66,7 +73,8 @@ export function createHttpFocusTransport(opts: HttpFocusTransportOptions): Focus
     },
     async fetchExportRows(window) {
       const res = await get(window);
-      const text = await decodeExportBytes(new Uint8Array(await res.arrayBuffer()), opts.label);
+      const bytes = await readBodyCapped(res, opts.label, opts.maxObjectBytes ?? DEFAULT_MAX_OBJECT_BYTES);
+      const text = await decodeExportBytes(bytes, opts.label);
       return rowsFromExportText(text, window, opts.label);
     },
   };

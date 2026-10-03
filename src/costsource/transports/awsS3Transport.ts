@@ -12,6 +12,9 @@
 import type { FocusExportTransport } from '../CloudConnectorAdapter';
 import type { RawSourceRow } from '../focusRows';
 import {
+  DEFAULT_MAX_MANIFEST_BYTES,
+  DEFAULT_MAX_OBJECT_BYTES,
+  readBodyCapped,
   assertExportFileCap,
   assertManifestFilesPresent,
   decodeExportBytes,
@@ -36,6 +39,10 @@ export interface AwsS3TransportOptions {
   prefix?: string;
   endpoint?: string; // S3-compatible endpoint override
   fetch?: FetchLike;
+  /** Cap on a manifest's size (default 1 MiB). */
+  maxManifestBytes?: number;
+  /** Cap on each export object's size, counted while streaming (default 512 MiB). */
+  maxObjectBytes?: number;
 }
 
 const LABEL = 'S3 FOCUS export';
@@ -113,9 +120,9 @@ export function createAwsS3Transport(opts: AwsS3TransportOptions): FocusExportTr
     return all;
   }
 
-  async function readObject(key: string): Promise<string> {
+  async function readObject(key: string, cap = opts.maxObjectBytes ?? DEFAULT_MAX_OBJECT_BYTES): Promise<string> {
     const res = await signedGet(`${loc.base}${key.split('/').map(rfc3986).join('/')}`);
-    return decodeExportBytes(new Uint8Array(await res.arrayBuffer()), key);
+    return decodeExportBytes(await readBodyCapped(res, key, cap), key);
   }
 
   return {
@@ -137,7 +144,7 @@ export function createAwsS3Transport(opts: AwsS3TransportOptions): FocusExportTr
           throw new Error(`${LABEL}: export run incomplete: manifest missing (billing month ${month})`);
         }
         const latest = manifests.reduce((a, b) => (Date.parse(b.lastModified) > Date.parse(a.lastModified) ? b : a));
-        const manifest = parseManifest(await readObject(latest.key), LABEL, `billing month ${month}`);
+        const manifest = parseManifest(await readObject(latest.key, opts.maxManifestBytes ?? DEFAULT_MAX_MANIFEST_BYTES), LABEL, `billing month ${month}`);
         const dataFiles = manifest.dataFiles;
         if (!Array.isArray(dataFiles) || !dataFiles.every((f) => typeof f === 'string')) {
           throw new Error(`${LABEL}: export run incomplete: manifest unreadable (billing month ${month})`);

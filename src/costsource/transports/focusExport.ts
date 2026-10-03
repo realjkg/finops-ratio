@@ -69,6 +69,53 @@ async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+/** Default cap on a manifest's size (1 MiB). */
+export const DEFAULT_MAX_MANIFEST_BYTES = 1024 * 1024;
+/** Default cap on one export object's size (512 MiB), counted while streaming. */
+export const DEFAULT_MAX_OBJECT_BYTES = 512 * 1024 * 1024;
+
+function tooLarge(name: string, bytes: number, cap: number): Error {
+  return new Error(`export too large: ${name} (${bytes} > ${cap})`);
+}
+
+/**
+ * Read a response body, counting bytes as they stream; throws `export too
+ * large: <name> (<bytes> > <cap>)` as soon as the count passes `cap` (or up
+ * front when Content-Length already does) and cancels the stream.
+ */
+export async function readBodyCapped(res: Response, name: string, cap: number): Promise<Uint8Array> {
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > cap) {
+    await res.body?.cancel().catch(() => undefined);
+    throw tooLarge(name, declared, cap);
+  }
+  if (!res.body) {
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length > cap) throw tooLarge(name, bytes.length, cap);
+    return bytes;
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > cap) {
+      await reader.cancel().catch(() => undefined);
+      throw tooLarge(name, total, cap);
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.length;
+  }
+  return out;
+}
+
 /** Bytes of an export object → text, transparently gunzipping. Parquet is rejected loudly. */
 export async function decodeExportBytes(bytes: Uint8Array, name: string): Promise<string> {
   if (isParquet(bytes)) {
@@ -262,9 +309,18 @@ function toNumber(v: unknown, column: string): number {
 const ISO_DATE_RE =
   /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?)?\s*(Z|z|UTC|[+-]\d{2}:?\d{2})?$/;
 
-/** Strict ISO-8601 → epoch ms (UTC), or null when invalid / impossible. */
-export function parseIsoUtc(value: string): number | null {
-  const m = ISO_DATE_RE.exec(value.trim());
+// Windows are stricter still: date-only `YYYY-MM-DD` (00:00Z), or a `T`
+// date-time with optional `Z` / `±hh:mm` (none = UTC). Nothing else.
+const ISO_WINDOW_RE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|z|[+-]\d{2}:?\d{2})?)?$/;
+
+/**
+ * Strict ISO-8601 → epoch ms (UTC), or null when invalid / impossible.
+ * `window: true` applies the stricter window grammar.
+ */
+export function parseIsoUtc(value: string, opts: { window?: boolean } = {}): number | null {
+  if (typeof value !== 'string') return null;
+  const m = (opts.window ? ISO_WINDOW_RE : ISO_DATE_RE).exec(opts.window ? value : value.trim());
   if (!m) return null;
   const [, ys, mos, ds, hs = '0', mis = '0', ss = '0', frac = '', off] = m;
   const y = Number(ys);
@@ -316,9 +372,18 @@ function toStringValue(v: unknown): string {
   return typeof v === 'string' ? v : String(v);
 }
 
+// The runtime's ISO-4217 list (Node 22: 162 codes; it does NOT include XXX or
+// test / precious-metal codes). Absent on very old runtimes → shape check only.
+const KNOWN_CURRENCIES: ReadonlySet<string> | null = (() => {
+  const intl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
+  return typeof intl.supportedValuesOf === 'function' ? new Set(intl.supportedValuesOf('currency')) : null;
+})();
+
 function toCurrency(v: unknown, column: string): string {
   const s = toStringValue(v).trim();
-  if (!/^[A-Z]{3}$/.test(s)) throw new Error(`${column} is not an ISO-4217 currency code`);
+  if (!/^[A-Z]{3}$/.test(s) || (KNOWN_CURRENCIES && !KNOWN_CURRENCIES.has(s))) {
+    throw new Error(`${column} is not an ISO-4217 currency code`);
+  }
   return s;
 }
 
@@ -375,13 +440,44 @@ export function coerceFocusRecord(rec: Record<string, unknown>, opts: FocusRecor
   return out as unknown as RawSourceRow;
 }
 
-/** Throws unless both window bounds parse and start < end (half-open window). */
-export function assertValidWindow(window: CostWindow): void {
-  const start = Date.parse(window?.start);
-  const end = Date.parse(window?.end);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || !(start < end)) {
-    throw new Error('invalid cost window: start and end must be valid timestamps with start < end');
+/** A window's bounds as parsed epoch ms (UTC). */
+export interface ParsedWindow {
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * Parse a half-open window with the strict window grammar (see ISO_WINDOW_RE):
+ * both bounds must parse and start < end, else throws. Every consumer of a
+ * window (filtering, month selection, query parameters, URL expansion) uses
+ * these parsed instants — never Date.parse on the raw strings.
+ */
+export function parseWindow(window: CostWindow): ParsedWindow {
+  const startMs = parseIsoUtc(window?.start, { window: true });
+  const endMs = parseIsoUtc(window?.end, { window: true });
+  if (startMs === null || endMs === null || !(startMs < endMs)) {
+    throw new Error(
+      'invalid cost window: start and end must be ISO-8601 (YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS[.fff]][Z|±hh:mm]) with start < end',
+    );
   }
+  return { startMs, endMs };
+}
+
+/** Throws unless the window parses (see parseWindow). */
+export function assertValidWindow(window: CostWindow): void {
+  parseWindow(window);
+}
+
+/** The window's bounds as normalized ISO-8601 UTC strings (with ms). */
+export function windowIso(window: CostWindow): { start: string; end: string } {
+  const { startMs, endMs } = parseWindow(window);
+  return { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() };
+}
+
+function rowInParsedWindow(row: RawSourceRow, w: ParsedWindow): boolean {
+  const t = parseIsoUtc(row.ChargePeriodStart);
+  if (t === null) throw new Error('ChargePeriodStart is not a valid date');
+  return t >= w.startMs && t < w.endMs;
 }
 
 /**
@@ -390,9 +486,7 @@ export function assertValidWindow(window: CostWindow): void {
  * already validated, so this only fires for rows that bypassed coercion.)
  */
 export function inWindow(row: RawSourceRow, window: CostWindow): boolean {
-  const t = Date.parse(row.ChargePeriodStart);
-  if (Number.isNaN(t)) throw new Error('ChargePeriodStart is not a valid date');
-  return t >= Date.parse(window.start) && t < Date.parse(window.end);
+  return rowInParsedWindow(row, parseWindow(window));
 }
 
 /**
@@ -425,8 +519,8 @@ export function rowsFromRecords(
   artifact: string,
   opts: FocusRecordOptions = {},
 ): RawSourceRow[] {
-  assertValidWindow(window);
-  return validateFocusRecords(records, artifact, opts).filter((r) => inWindow(r, window));
+  const w = parseWindow(window);
+  return validateFocusRecords(records, artifact, opts).filter((r) => rowInParsedWindow(r, w));
 }
 
 /** Export text → coerced, window-filtered FOCUS rows (throws on any invalid row). */
@@ -456,9 +550,8 @@ interface BillingMonth {
 
 /** Every billing month (UTC) intersecting the half-open window [start, end), as YYYY-MM. */
 export function monthsInWindow(window: CostWindow): string[] {
-  assertValidWindow(window);
-  const start = new Date(window.start);
-  const endMs = Date.parse(window.end);
+  const { startMs, endMs } = parseWindow(window);
+  const start = new Date(startMs);
   const months: BillingMonth[] = [];
   let y = start.getUTCFullYear();
   let m = start.getUTCMonth();

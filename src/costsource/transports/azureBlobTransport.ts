@@ -12,6 +12,9 @@
 import type { FocusExportTransport } from '../CloudConnectorAdapter';
 import type { RawSourceRow } from '../focusRows';
 import {
+  DEFAULT_MAX_MANIFEST_BYTES,
+  DEFAULT_MAX_OBJECT_BYTES,
+  readBodyCapped,
   assertExportFileCap,
   assertManifestFilesPresent,
   decodeExportBytes,
@@ -30,6 +33,10 @@ export interface AzureBlobTransportOptions {
   exportUrl: string;
   sasToken: string;
   fetch?: FetchLike;
+  /** Cap on a run manifest's size (default 1 MiB). */
+  maxManifestBytes?: number;
+  /** Cap on each export blob's size, counted while streaming (default 512 MiB). */
+  maxObjectBytes?: number;
 }
 
 const LABEL = 'Azure Blob FOCUS export';
@@ -110,9 +117,9 @@ export function createAzureBlobTransport(opts: AzureBlobTransportOptions): Focus
     return all;
   }
 
-  async function readBlob(name: string): Promise<string> {
+  async function readBlob(name: string, cap = opts.maxObjectBytes ?? DEFAULT_MAX_OBJECT_BYTES): Promise<string> {
     const res = await fetchChecked(fetchImpl, blobUrl(name), { headers }, LABEL);
-    return decodeExportBytes(new Uint8Array(await res.arrayBuffer()), name);
+    return decodeExportBytes(await readBodyCapped(res, name, cap), name);
   }
 
   /**
@@ -127,7 +134,7 @@ export function createAzureBlobTransport(opts: AzureBlobTransportOptions): Focus
     for (const run of selectExportRuns(listing, window)) {
       const manifest = listing.find((o) => dirOf(o.key) === run.dir && /(^|\/)manifest\.json$/i.test(o.key));
       if (!manifest) throw new Error(`${LABEL}: export run incomplete: manifest missing (${run.dir})`);
-      const parsed = parseManifest(await readBlob(manifest.key), LABEL, run.dir);
+      const parsed = parseManifest(await readBlob(manifest.key, opts.maxManifestBytes ?? DEFAULT_MAX_MANIFEST_BYTES), LABEL, run.dir);
       const blobs = parsed.blobs;
       if (!Array.isArray(blobs) || !blobs.every((b) => b && typeof (b as { blobName?: unknown }).blobName === 'string')) {
         throw new Error(`${LABEL}: export run incomplete: manifest unreadable (${run.dir})`);

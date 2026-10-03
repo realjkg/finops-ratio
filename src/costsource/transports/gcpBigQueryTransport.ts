@@ -10,7 +10,7 @@
 // the dataset. Only rows inside the requested window are queried.
 
 import type { FocusExportTransport } from '../CloudConnectorAdapter';
-import { fetchChecked, readJsonBody, rowsFromRecords, type FetchLike } from './focusExport';
+import { fetchChecked, parseWindow, readJsonBody, rowsFromRecords, type FetchLike } from './focusExport';
 
 export interface GcpBigQueryTransportOptions {
   dataset: string;
@@ -152,9 +152,9 @@ export function bqRowsToRecords(res: BqQueryResponse): Record<string, unknown>[]
   });
 }
 
-/** ISO 8601 → BigQuery canonical TIMESTAMP literal. */
-function bqTimestamp(iso: string): string {
-  return new Date(iso).toISOString().replace('T', ' ').replace('Z', '+00');
+/** Parsed epoch ms → BigQuery canonical TIMESTAMP literal. */
+function bqTimestamp(ms: number): string {
+  return new Date(ms).toISOString().replace('T', ' ').replace('Z', '+00');
 }
 
 export function createGcpBigQueryTransport(opts: GcpBigQueryTransportOptions): FocusExportTransport {
@@ -209,6 +209,7 @@ export function createGcpBigQueryTransport(opts: GcpBigQueryTransportOptions): F
       return true;
     },
     async fetchExportRows(window) {
+      const parsed = parseWindow(window); // strict; the query uses the parsed instants
       const fqtn = `\`${table.project}.${table.dataset}.${table.table}\``;
       let res = await bq<BqQueryResponse>(`/projects/${encodeURIComponent(opts.projectId)}/queries`, {
         method: 'POST',
@@ -217,8 +218,8 @@ export function createGcpBigQueryTransport(opts: GcpBigQueryTransportOptions): F
           useLegacySql: false,
           parameterMode: 'NAMED',
           queryParameters: [
-            { name: 'start', parameterType: { type: 'TIMESTAMP' }, parameterValue: { value: bqTimestamp(window.start) } },
-            { name: 'end', parameterType: { type: 'TIMESTAMP' }, parameterValue: { value: bqTimestamp(window.end) } },
+            { name: 'start', parameterType: { type: 'TIMESTAMP' }, parameterValue: { value: bqTimestamp(parsed.startMs) } },
+            { name: 'end', parameterType: { type: 'TIMESTAMP' }, parameterValue: { value: bqTimestamp(parsed.endMs) } },
           ],
           timeoutMs: 30_000,
           maxResults: 10_000,
