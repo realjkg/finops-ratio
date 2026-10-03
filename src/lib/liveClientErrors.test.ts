@@ -201,9 +201,10 @@ describe.each(CASES)('%s — body read rejects on a failed response', (label, ca
 describe('FinIO handshake peer-auth with an unreadable body', () => {
   it('a 401 whose body cannot be read is the typed FinIO HTTP error (code unknown), not a raw stream error', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => rejectingBodyResponse(401)));
-    const err = await new LiveFinioClient()
+    const err = (await new LiveFinioClient()
       .handshake({ agentId: 'a', capabilities: ['finio.export'], focusVersion: '1.4', nonce: 'n' })
-      .catch((e: unknown) => e as Error);
+      .catch((e: unknown) => e)) as Error;
+    expect(err).toBeInstanceOf(Error);
     expect(err.message).toBe('FinIO handshake error 401');
     expect(err.message).not.toContain('STREAM-MARKER');
   });
