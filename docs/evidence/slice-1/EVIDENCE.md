@@ -144,7 +144,24 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 125 | 7e8b9e1 | fix: existing evidence verified by sha256 (M1); X4 now tampers after capture | impl |
 | 126 | 8638601 | fix: manifest GET pinned to its listed ETag (M2) | impl |
 | 127 | 368ce14 | fix: fake source keyed by period + name, pinned to version (M3) | impl |
-| 128 | (final) | docs: evidence for this round (§31, §32) | docs |
+| 128 | 9b32cfb | docs: evidence for the second-round Lows and the fourth review (§31, §32) | docs |
+| 129 | a3be62f | test: reap() must return only after every reaped process has exited (red under load) | tests |
+| 130 | 5659b5a | fix(test): reap() confirms every killed process is dead (CI #54 red, run 37157034669) | test infra |
+| 131 | 5dd24f1 | test: fifth review H1/M1/M2/M3 (red) | tests |
+| 132 | 1af19e8 | fix: H1 (mine; reverted in 812b956 in favour of the Copilot agent's) | impl |
+| 133 | 61d96b1 | fix: M1 years 1-99, M2 __proto__ columns, M3 crash during replay | impl |
+| 134 | b4f7dd3 | test: challenger round 3 — verify progress/watchdog, metadata fast path (red) | tests |
+| 135 | 95f3638 | fix: verify under the idle watchdog with progress; HEAD-metadata fast path (artifacts only); load re-hashes every format; legacy clause removed | impl |
+| 136 | 2e4a58a | refactor: one progress source for the verify (kills L1a) | impl |
+| 137 | d467e1b | test: put() must not leave its upload stream behind (red) | tests |
+| 138 | 664b209 | fix: put() always closes its upload body stream | impl |
+| 139 | 6412756 | **Copilot coding agent**: reject unsafe worker login capabilities (H1) | impl (agent) |
+| 140 | 812b956 | revert of 1af19e8 (owner's decision: the agent fixes H1) | revert |
+| 141 | 286dfd7 | merge origin/slice/01-focus-ingestion-worker (6412756) | merge |
+| 142 | b9f9505 | test: sixth review — conditional create, chunk byte budget, run-wide retry counter (red) | tests |
+| 143 | 70c6af5 | fix: conditional evidence create, chunk byte budget, run-wide retry counter | impl |
+| 144 | 1c6f244 | test: exact chunk split (kills B1b) | tests |
+| 145 | (final) | docs: evidence for this round (§33) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -2106,5 +2123,132 @@ Red tests are in `0d5c14d`.
 - doctor exited 0.
 - replay-fixtures passed 6/6. Its idempotent re-run exercises the new
   evidence `exists` verification.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 33. CI-red spawnCleanup; challenger round 3 Lows; fifth and sixth Copilot reviews (with the Copilot agent's H1)
+
+### CI red on #54 at 9b32cfb (run 37157034669): root cause and fix
+
+`cli.spawnCleanup.test.ts:134` failed: `alive(pid)` was still true right
+after the interrupted nested run had been reaped.
+
+**Root cause:** SIGKILL is asynchronous. `reap()` sent the kills and
+returned at once, so the check could run before the kernel had scheduled
+the target's exit.
+
+**Reproduced:** with `repro_kill_race.js`, the orphaned grandchild still
+showed `R` immediately after a group SIGKILL in 197 of 200 checks on an
+idle machine, and in 99 of 200 under 8 CPU burners. The new self-test,
+"dead as soon as reap() returns", failed 2 of 20 rounds under 12 burners.
+
+**Other candidates, ruled out:**
+- zombies already counted as dead;
+- the group kill reaches the worker and its child (they share the detached
+  group);
+- the marker scan finds the child.
+
+**Fix (`5659b5a`):**
+- `reap()` is async. It kills the group and every marker-carrying process,
+  adds group members found through `/proc` pgrp, then re-kills and polls
+  until all are dead (gone, `Z` or `X`) or 5 s pass.
+- `runFixture` awaits it and both tests require `leftAfterReap` to be empty.
+
+Mutation: with `reap()` returning without confirming, the self-test fails
+under load.
+
+**Proof:** spawnCleanup ×20 under parallel load (6 burners plus test:db ×5)
+passed 20/20, three separate times: load 8.9–9.6 at 2e4a58a, 664b209 and
+1c6f244.
+
+### Challenger round 3 Lows (tests in `reviewLows.db.test.ts` "round 3", `S3EvidenceStore.test.ts`, X8)
+
+| Low | Fix | Test | Mutations killed |
+|---|---|---|---|
+| L1 verify without watchdog or progress | `verifyExisting` streams through `idleWatchdog(stallMs, EVIDENCE_STALLED)`, whose data callback feeds run progress. `put`/`putBytes` take `{signal, onProgress, stallMs}`, and capture and both manifest captures pass them | a slow verify (16 B every 250 ms, longer than stall 1 s plus TTL 2 s) keeps the lease and publishes; it was LEASE_LOST before. A stalled verify fails EVIDENCE_STALLED in under 6 s; it hung to MAX_RUN before | L1a (no progress; killed after `2e4a58a` removed a duplicate feed), L1b (no watchdog), L1c (capture passes nothing) |
+| L2 HEAD-metadata fast path | `ratio-sha256` is stored on every upload. **Artifacts only:** HEAD with matching size AND matching ratio-sha256 gives `exists` without a read; anything else gets the full re-hash. **Safe because** every artifact a new batch references is re-hashed at load, and `loadArtifact` now also re-hashes **unsupported formats** (a forged parquet would otherwise slip into a quarantined batch). Unchanged and superseded outcomes make no new claim. **Manifests never take the fast path**, because manifest evidence is not re-read at load | unit: metadata written; fast path with HEAD only; missing or different metadata does the full re-hash; putBytes always re-hashes. **X8** (SeaweedFS), forged bytes carrying a *copied* ratio-sha256: a csv artifact fails EVIDENCE_INTEGRITY at load, a parquet artifact fails EVIDENCE_INTEGRITY at load, and a manifest fails EVIDENCE_INTEGRITY_MISMATCH at capture; nothing is published | L2a–L2e |
+| note: legacy clause | `committedWorkOf`'s "an unstamped write counts as data" branch is removed (every write is stamped) | the existing L3 tests | — |
+
+**Found in this round's gates** (`d467e1b`, `664b209`):
+- `npm test` exited 1 with all tests passing, because of an **unhandled
+  ENOENT**. `put()` handed `fs.createReadStream` to PutObject. A PutObject
+  that never read the body (failed, aborted, or a fake) let the stream open
+  after capture had deleted the temp file.
+- In production a fast-failing PutObject would crash the worker the same
+  way.
+- `put()` now owns the stream: it has an error listener and is destroyed in
+  `finally`.
+- The test requires the body to be destroyed for a failing PutObject and
+  for one that never reads; the mutation is killed.
+
+### Fifth Copilot review: H1 by the Copilot coding agent, M1–M3 by me
+
+The owner decided that Copilot's coding agent fixes H1. Its commit
+**`6412756`** (copilot-swe-agent[bot]) is merged **unchanged** (`286dfd7`).
+My own H1 (`1af19e8`) was reverted first (`812b956`) and kept for
+comparison in the scratchpad (`my-h1-1af19e8.diff`).
+
+**Verification of the agent's H1:**
+- Its 9 serial tests fail on the pre-`6412756` `db.ts` (H1-agent: 9
+  failed).
+- The edge tests from `5dd24f1` (SET-only, ADMIN-only, transitive; each
+  attribute; pg_read_server_files over each edge; the harmless role still
+  passes) all pass against it.
+- Mutations: m1 (REPLICATION not collected): 6 failed. m2 (no closure walk):
+  20 failed. m3 (inherit edges only): 9 failed. m4 (a server-file role not
+  collected): 4 failed. m5 (capabilities not reported): 25 failed.
+- The tests are in the serial file, create committed logins and roles, drop
+  them, and verify they are gone in `afterAll`.
+- `src/ingest/db` is unchanged.
+
+**H1 is still incomplete: BLOCKED.** The agent's check hard-codes the 5
+attributes plus the 3 server-file roles. Slice 0's full
+`REFUSED_PREDEFINED_ROLES` (pg_read/write_all_data, pg_signal_backend,
+pg_create_subscription, the pg_monitor family, pg_stat_scan_tables) exists
+only on `origin/main` (Slice 0 rounds 17–19, #53/#55/#56). This branch does
+not have it, and Slice 0 rounds may not be merged unasked. Completing H1
+(reuse that map; tests for each role over each edge) needs `origin/main`
+merged into this branch.
+
+| Finding | Fix (`61d96b1`) | Test (red at `5dd24f1`) | Mutation |
+|---|---|---|---|
+| M1 years 1–99 (`Date.UTC` maps them to 1900–1999) | `utcMs` builds instants with `setUTCFullYear`, for epochMs and daysInMonth | 0001-01-01 = −62135596800000; 0099-12-31T23:00Z comes 1 h before 0100-01-01; a charge period across the boundary is not inverted while a really inverted one still is | Date.UTC restored: 3 failed |
+| M2 `__proto__` column dropped | `extraColumns` is `Object.create(null)` | `__proto__`, `constructor` and `prototype` columns are kept in the JSON; Object.prototype is untouched | plain `{}`: failed |
+| M3 SimulatedCrash recorded as failed | replay rethrows SimulatedCrash before `finishRun` | the replay run stays `running` and is later abandoned `LEASE_EXPIRED` | rethrow removed: failed |
+
+### Sixth Copilot review (re-review after 6412756)
+
+| Finding | Fix (`70c6af5`) | Test (red at `b9f9505`) | Mutations |
+|---|---|---|---|
+| **High** HEAD then unconditional PUT races (S3EvidenceStore.ts:86/105) | every evidence PUT sends `IfNoneMatch: '*'`. On 412/409 the winner is verified with the full re-hash: `exists`, or EVIDENCE_INTEGRITY_MISMATCH. Nothing is overwritten. **SeaweedFS honours If-None-Match: \* on PUT**: the probe's second create got 412 PreconditionFailed and the content stayed the first write's | fake client: every PUT is conditional; a competitor between HEAD and PUT gives `exists` (genuine) or MISMATCH (different), for put and putBytes. **X9** on SeaweedFS: a real 412, then the same outcomes, with the winner's bytes unchanged | C1a/C1b (unconditional PUT; unit and X9), C1c (412 not handled), C1d (lost race accepted without verifying; unit and X9) |
+| **Medium** chunks bounded by rows only (load.ts:215) | `maxChunkBytes` (estimated from record characters). `RATIO_MAX_CHUNK_BYTES` defaults to 32 MiB and is validated to 1 MiB–1 GiB. A chunk flushes at rows OR bytes | 20 × ~100 KB records with a 250 KB budget split exactly `[3,3,3,3,3,3,2]` and all load (memory bounded to the budget plus one record). Small records stay `[10,10,5]`. Config: default, override and three refusals | B1a (no budget), B1b (counter not reset; killed after `1c6f244` pinned the exact split), B1c (default 0), B1d (bounds widened) |
+| **Medium** attempt counter reset per withRetry (pipeline.ts:155) | one run-wide counter: every retry increments it, and the record and the result use it | 2 listing retries plus 1 artifact retry give `attempts` 4, retries `[2,3,4]` and `sync_runs.attempt` 4 | R1 (per-call counter) |
+
+Mutation logs: `mutations36.txt` (CI, Lows, M1–M3 and S1) and
+`mutations38.txt` (agent H1 and the sixth review).
+
+### Gates at 1c6f244
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 4.5–7.0) | **3/3**, 92 files / 2062 passed each, 0 unhandled errors |
+| spawnCleanup ×20 under parallel load | **20/20** (load 9.1) |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 32 files / 465 passed; serial 4 files / 47 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 423 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at 1c6f244, private cluster, database
+`ratio_s1_e2e_93e36f4b`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
 - Cleanup deleted 48 objects and dropped the database and logins.
 

@@ -297,3 +297,22 @@ PR #54 fourth review:
   - X7: a pre-seeded artifact or manifest fails EVIDENCE_INTEGRITY_MISMATCH.
   - X4: tampering after capture fails EVIDENCE_INTEGRITY at load.
 
+Round 33:
+- `cli.spawnCleanup.test.ts`: `reap()` returns only after every process is
+  dead, 20 rounds; both fixture tests require `leftAfterReap` to be empty.
+- `reviewLows.db.test.ts` "round 3": the verify under the idle watchdog, with
+  progress.
+- `S3EvidenceStore.test.ts`: the HEAD-metadata fast path (artifacts only);
+  conditional create and race; the upload stream always closed.
+- On SeaweedFS:
+  - X8: forged evidence carrying a copied ratio-sha256 (csv and parquet
+    caught at load, manifest at capture).
+  - X9: the conditional-create race (a real 412).
+- `auth.serial.db.test.ts`: the agent's H1 tests plus SET-only, ADMIN-only
+  and transitive edges.
+- `focus/timestamp.test.ts`: years 1–99.
+- `validate.test.ts`: `__proto__`, constructor and prototype columns.
+- `reviewLows` "fifth": a crash during replay.
+- `reviewFindings6.db.test.ts`: the chunk byte budget; the run-wide retry
+  counter.
+
