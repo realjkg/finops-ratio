@@ -39,19 +39,35 @@ function runCli(env: Record<string, string>) {
 describe('built CLI crash path (piped stderr)', () => {
   for (const kind of ['uncaught', 'rejection'] as const) {
     it(`${kind}: exactly one redacted JSON line arrives on stderr and the exit code is 1 (large payload)`, () => {
-      // The pad makes the line larger than a pipe buffer: an async write followed by exit() would truncate or lose it.
+      // A > 2 MB error message. Since the Slice 1 merge every string is capped
+      // BEFORE redaction (reviewed design: bounded, linear redaction), so the
+      // line is small, redacted and marked truncated; the > 2 MB pipe delivery
+      // of writeAllSync itself is tested separately below.
       const r = runCli({ RATIO_ENV: 'test', RATIO_TEST_CRASH: kind, RATIO_TEST_CRASH_PAD: '2000000' });
       expect(r.status, r.stderr.slice(0, 300)).toBe(1);
       const lines = r.stderr.split('\n').filter((l) => l.length > 0);
       expect(lines).toHaveLength(1);
       const doc = JSON.parse(lines[0]);
       expect(doc).toMatchObject({ level: 'error', event: kind === 'uncaught' ? 'process.uncaughtException' : 'process.unhandledRejection' });
-      expect(lines[0].length).toBeGreaterThan(2_000_000);
+      expect(lines[0].length).toBeLessThan(16_384);
+      expect(doc.error.message).toContain('…[TRUNCATED]');
       for (const f of [PASSWORD, encodeURIComponent(PASSWORD), JSON.stringify(PASSWORD).slice(1, -1), 'ratio_user']) expect(lines[0]).not.toContain(f);
       expect(lines[0]).toContain('[redacted]');
     });
   }
 
+  it('writeAllSync delivers a > 2 MB line through a pipe even when process.exit() follows immediately', () => {
+    // The original intent of the large-payload case (round 14): a synchronous,
+    // EAGAIN-retrying write to fd 2, so nothing is lost on a pipe before exit().
+    const script = `const { writeAllSync } = require(${JSON.stringify(CLI)}); writeAllSync(2, 'x'.repeat(2_100_000) + '\\n'); process.exit(1);`;
+    const r = spawnSync(process.execPath, ['-e', script], { env: { PATH: process.env.PATH ?? '' } as unknown as NodeJS.ProcessEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 60_000 });
+    expect(r.status).toBe(1);
+    expect(r.stderr.length).toBe(2_100_001);
+    expect(r.stderr.endsWith('x\n')).toBe(true);
+  });
+
+  // Four sequential spawns of the built CLI (each failing to connect): process
+  // start-up work, not a race — the 5 s default timed out under a loaded host.
   it('the crash hook is refused outside RATIO_ENV=test (staging, production, unset): no process.* line', () => {
     for (const env of [{ RATIO_ENV: 'staging' }, { RATIO_ENV: 'production' }, { RATIO_ENV: 'test', NODE_ENV: 'production' }, {}] as Array<Record<string, string>>) {
       const r = runCli({ ...env, RATIO_TEST_CRASH: 'uncaught' });
@@ -61,5 +77,5 @@ describe('built CLI crash path (piped stderr)', () => {
       expect(r.status).toBe(1);
       expect(all).not.toContain('SuperSecretPw9');
     }
-  });
+  }, 60_000);
 });
