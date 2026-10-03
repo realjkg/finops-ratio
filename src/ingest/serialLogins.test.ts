@@ -135,6 +135,12 @@ describe('dangerous logins only in serial DB test files (static rule)', () => {
       "await db.pool.query('GRANT pg_read_all_data TO ' + n);",
       "await db.pool.query(`DO $$ BEGIN EXECUTE format('ALTER ROLE %I ' || 'BYPASS' || 'RLS', 'x'); END $$`);",
       "const stmt = 'ALTER ROLE x SUPERUSER';",
+      "await db.pool.query('CREATE ROLE x LOGIN IN ROLE pg_read_server_files');",
+      "await db.pool.query('CREATE ROLE x LOGIN IN GROUP pg_write_server_files');",
+      "await db.pool.query('CREATE ROLE x LOGIN IN ROLE ratio_worker, pg_signal_backend');",
+      "await db.pool.query('CREATE ROLE x NOLOGIN ROLE ratio_owner');",
+      "await db.pool.query('CREATE ROLE x NOLOGIN ADMIN postgres');",
+      "await db.pool.query('CREATE USER x IN ROLE ratio_owner');",
     ];
     for (const code of bad) expect(violationsIn('x.db.test.ts', code, true).length, code).toBeGreaterThan(0);
     const ok = [

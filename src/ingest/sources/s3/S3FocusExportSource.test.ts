@@ -124,3 +124,37 @@ describe('S3FocusExportSource with a fake S3 client', () => {
     expect(calls.at(-1)).toEqual({ key: DATA_KEY, ifMatch: '"d1"' });
   });
 });
+
+describe('S3FocusExportSource listing is abortable (Copilot M3)', () => {
+  it('an endlessly paginating listing stops when the signal aborts: every request carries the signal, no request after the abort', async () => {
+    let sends = 0;
+    let sendsAfterAbort = 0;
+    let withSignal = 0;
+    const ac = new AbortController();
+    const client = {
+      async send(_cmd: unknown, opts?: { abortSignal?: AbortSignal }) {
+        sends++;
+        if (ac.signal.aborted) sendsAfterAbort++;
+        if (opts?.abortSignal) withSignal++;
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 20);
+          opts?.abortSignal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(Object.assign(new Error('Request aborted'), { name: 'AbortError' }));
+          });
+        });
+        return { CommonPrefixes: [], Contents: [], IsTruncated: true, NextContinuationToken: `t${sends}` };
+      },
+    } as unknown as S3Client;
+    const src = new S3FocusExportSource({ client, location: LOC });
+    setTimeout(() => ac.abort(new Error('deadline')), 200);
+    await expect(src.listPeriods(undefined, { signal: ac.signal })).rejects.toThrow();
+    expect(sends).toBeGreaterThan(2);
+    expect(withSignal).toBe(sends);
+    expect(sendsAfterAbort).toBe(0);
+    const n = sends;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(sends).toBe(n);
+  });
+});
+

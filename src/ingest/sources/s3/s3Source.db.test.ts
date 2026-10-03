@@ -206,8 +206,12 @@ describe('S3 source → evidence → published facts', () => {
       await bucket.put(key, NEW);
       await expect(direct.openArtifact(listing.set.artifacts[0])).rejects.toMatchObject({ code: 'SOURCE_CHANGED', retryable: true });
 
-      // Through the pipeline: replaced right after the first listing.
+      // Through the pipeline: data AND manifest (now with a control) replaced right after the first listing.
+      const manifestKey = META(bucket, '2026-07') + 'focus-export-Manifest.json';
+      const manifestA = manifest({ dataFiles: [key] });
+      const manifestB = manifest({ dataFiles: [key], 'x-ratio-control': { rowCount: 3 } });
       await bucket.put(key, OLD);
+      await bucket.put(manifestKey, manifestA);
       let replaced = false;
       class Racy extends S3FocusExportSource {
         async listPeriods(range?: Parameters<S3FocusExportSource['listPeriods']>[0]) {
@@ -215,6 +219,7 @@ describe('S3 source → evidence → published facts', () => {
           if (!replaced) {
             replaced = true;
             await bucket.put(key, NEW);
+            await bucket.put(manifestKey, manifestB);
           }
           return out;
         }
@@ -234,6 +239,12 @@ describe('S3 source → evidence → published facts', () => {
       const arts = await t.db.pool.query(`SELECT sha256, evidence_key FROM ratio.ingest_artifacts WHERE tenant_id = $1`, [s.tenantId]);
       expect(arts.rows.map((a) => a.sha256)).toEqual([sha(NEW)]);
       expect(sha(await evidenceBucket.get(evidenceBucket.at(arts.rows[0].evidence_key)))).toBe(sha(NEW));
+      // Copilot M1: the re-listed manifest B (whose control the published batch reconciled against) is evidence too.
+      expect(r.periods[0]).toMatchObject({ outcome: 'published', reconciliation: 'reconciled' });
+      const keyB = r.manifestEvidence.find((k) => k.endsWith(sha(manifestB)));
+      expect(keyB, `manifest B in ${JSON.stringify(r.manifestEvidence)}`).toBeDefined();
+      expect((await evidenceBucket.get(evidenceBucket.at(keyB!))).equals(manifestB)).toBe(true);
+      expect(r.manifestEvidence.some((k) => k.endsWith(sha(manifestA)))).toBe(true);
     } finally {
       await bucket.destroy();
     }
