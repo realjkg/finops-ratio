@@ -228,3 +228,41 @@ describe('crash handler in a spawned process with a > 2 MB message', () => {
   }
 });
 
+// The CLI ENTRY's fatal path must write synchronously (writeAllSync to fd 2),
+// never through the async process.stderr stream: with process.exit() right
+// after, an async write can be lost on a pipe. The real entry (cli.ts run as
+// the main module) is crashed through its test-only hook with a preload that
+// replaces process.stderr/stdout.write by a marker; the line must still
+// arrive, and no async write may have been attempted (mutation W9).
+describe('CLI entry crash path writes synchronously (real entry, preloaded write spy)', () => {
+  const ROOT = path.resolve(__dirname, '..', '..');
+  const CLI_TS = path.join(__dirname, 'cli.ts');
+  const SPY = path.join(__dirname, 'testing', 'stderrWriteSpy.ts');
+  const PASSWORD = 'EntryPw9"x';
+  const URL = `postgres://ratio_user:${encodeURIComponent(PASSWORD)}@127.0.0.1:1/ratio_db`;
+
+  for (const kind of ['uncaught', 'rejection'] as const) {
+    it(`${kind}: one redacted JSON line via the synchronous path, no async stream write, exit 1`, () => {
+      const r = spawnSync(process.execPath, ['--import', 'tsx', '--import', SPY, CLI_TS, 'migrate'], {
+        cwd: ROOT,
+        env: { PATH: process.env.PATH ?? '', RATIO_MIGRATE_DATABASE_URL: URL, RATIO_ENV: 'test', RATIO_TEST_CRASH: kind, RATIO_TEST_CRASH_PAD: '100000' } as unknown as NodeJS.ProcessEnv,
+        encoding: 'utf8',
+        timeout: 30_000,
+        killSignal: 'SIGKILL',
+      });
+      expect(r.signal).toBeNull();
+      expect(r.status, r.stderr.slice(0, 300)).toBe(1);
+      expect(r.stderr).not.toMatch(/ASYNC_(STDERR|STDOUT)_WRITE_USED/);
+      const lines = r.stderr.split('\n').filter((l) => l.length > 0);
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0])).toMatchObject({ level: 'error', event: kind === 'uncaught' ? 'process.uncaughtException' : 'process.unhandledRejection' });
+      for (const f of [PASSWORD, encodeURIComponent(PASSWORD), 'ratio_user']) expect(lines[0]).not.toContain(f);
+    }, 60_000);
+  }
+
+  it('the spy itself works: an async stderr write in a child shows the marker (self-test)', () => {
+    const r = spawnSync(process.execPath, ['--import', 'tsx', '--import', SPY, '-e', "process.stderr.write('x\\n'); process.exit(1)"], { cwd: ROOT, encoding: 'utf8', timeout: 30_000 });
+    expect(r.stderr).toContain('ASYNC_STDERR_WRITE_USED');
+  });
+});
+
