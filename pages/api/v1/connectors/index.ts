@@ -1,7 +1,10 @@
 // GET /api/v1/connectors[?probe=true] — the connector registry, for automation.
 //
-// Lists every cost source with its server-resolved connection state and the env
-// contract that connects it (names only, never values). With `probe=true`, it
+// Lists every cost source with the env contract that connects it (names only,
+// never values). The server-resolved connection state and summary counts are
+// disclosed only to authenticated callers (valid Bearer, token configured);
+// anonymous callers get the env-independent projection, as
+// /api/costsource/sources does. With `probe=true`, it
 // also runs a live health check against every CONFIGURED connector in parallel
 // — a scheduler, uptime monitor, or IaC pipeline can call this after deploying
 // credentials to verify on-prem, private-cloud, and public-cloud sources end to
@@ -19,6 +22,7 @@ import type { CostSourceDescriptor, SourceHealth } from '@/costsource';
 import { sendError, withGateway } from '@/server/gateway';
 import { isOfflineSandboxSource, requireLiveDataAuth } from '@/server/gateway/liveDataAuth';
 import { redactErrorText } from '@/costsource/transports/redact';
+import { anonymousSourceView } from '@/costsource/sourceDisclosure';
 
 export interface ConnectorRegistryResponse {
   connectors: CostSourceDescriptor[];
@@ -39,16 +43,15 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void> {
   const probe = String(req.query.probe ?? '').toLowerCase();
   const wantsProbe = probe === 'true' || probe === '1';
-  if (wantsProbe) {
-    const auth = requireLiveDataAuth(req.headers.authorization);
-    if (!auth.ok) {
-      sendError(res, 401, auth.code, auth.message);
-      return;
-    }
+  const auth = requireLiveDataAuth(req.headers.authorization);
+  if (wantsProbe && !auth.ok) {
+    sendError(res, 401, auth.code, auth.message);
+    return;
   }
 
   const client = createCostSourceClient('mock');
-  const connectors = await client.listSources();
+  const resolved = await client.listSources();
+  const connectors = auth.ok ? resolved : anonymousSourceView(resolved);
   const summary = { connected: 0, available: 0, incomplete: 0, disabled: 0 };
   for (const c of connectors) {
     if (c.connection) summary[c.connection] += 1;

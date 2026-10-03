@@ -12,8 +12,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createCostSourceClient } from '@/costsource';
 import type { CostSourceDescriptor } from '@/costsource';
-import { sourcesForEnv } from '@/costsource/seed';
-import { isOfflineSandboxSource, requireLiveDataAuth } from '@/server/gateway/liveDataAuth';
+import { anonymousSourceView } from '@/costsource/sourceDisclosure';
+import { requireLiveDataAuth } from '@/server/gateway/liveDataAuth';
 
 export default async function handler(
   req: NextApiRequest,
@@ -31,9 +31,6 @@ export default async function handler(
     res.status(200).json(sources);
     return;
   }
-  const neutral = new Map(sourcesForEnv({}).map((s) => [s.id, s]));
-  res.status(200).json(
-    sources.map((s) => (isOfflineSandboxSource(s.id) ? s : (neutral.get(s.id) ?? s))),
-  );
+  res.status(200).json(anonymousSourceView(sources));
 }
 

@@ -10,8 +10,12 @@
 // SERVER-ONLY (token comparison uses node:crypto). The client-safe sandbox
 // allowlist lives in @/costsource/sandboxSources.
 //
-// Failed attempts are rate limited per client IP (x-forwarded-for first hop,
-// else the socket address) with the standard-tier sliding window: after
+// Failed attempts are rate limited per client IP with the standard-tier
+// sliding window. The client IP is the SOCKET address; X-Forwarded-For is
+// client-controlled and ignored unless RATIO_TRUSTED_PROXY_HOPS=N (integer
+// >= 1) declares N trusted proxies, in which case the Nth hop from the right
+// is used. The count is per process (each serverless instance counts on its
+// own); a shared store is a deployment item. After
 // STANDARD_TIER_LIMIT failed authentications in a minute that client gets 429
 // — for every non-sandbox request, even with the right token, so the limit
 // cannot be used as a guessing oracle.
@@ -52,11 +56,24 @@ export function authorizeSourceAccess(
 // Counts FAILED authentications only, per client IP.
 const failedAuth = new SlidingWindowRateLimiter(STANDARD_TIER_LIMIT, WINDOW_MS);
 
-/** Client IP: first hop of x-forwarded-for, else the socket address. */
-export function clientIp(req: NextApiRequest): string {
-  const xff = req.headers?.['x-forwarded-for'];
-  const first = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim();
-  return first || req.socket?.remoteAddress || 'unknown';
+/**
+ * Client IP for rate limiting. The socket remote address, unless
+ * RATIO_TRUSTED_PROXY_HOPS=N (integer >= 1) is set: then the Nth entry from the
+ * RIGHT of X-Forwarded-For (the address the outermost trusted proxy saw). Hops
+ * left of that are client-forgeable and never used. A malformed N, or an XFF
+ * with fewer than N entries, falls back to the socket address.
+ */
+export function clientIp(req: NextApiRequest, env: LiveDataEnv = process.env): string {
+  const socketIp = req.socket?.remoteAddress || 'unknown';
+  const raw = env.RATIO_TRUSTED_PROXY_HOPS?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return socketIp;
+  const hops = Number(raw);
+  if (!Number.isSafeInteger(hops) || hops < 1) return socketIp;
+  const header = req.headers?.['x-forwarded-for'];
+  const value = Array.isArray(header) ? header.join(',') : header;
+  if (!value) return socketIp;
+  const entries = value.split(',').map((e) => e.trim()).filter(Boolean);
+  return entries.length >= hops ? entries[entries.length - hops] : socketIp;
 }
 
 /**
@@ -72,7 +89,7 @@ export function gateSourceAccess(
   env: LiveDataEnv = process.env,
 ): boolean {
   if (isOfflineSandboxSource(sourceId)) return true;
-  const ip = clientIp(req);
+  const ip = clientIp(req, env);
   const state = failedAuth.peek(ip);
   if (!state.allowed) {
     res.setHeader('Retry-After', String(state.retryAfterSec));
