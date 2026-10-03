@@ -265,3 +265,13 @@ All in `foundation.db.test.ts`.
 | L1 | `foundation.db.test.ts` | `a new ratio table with RLS disabled (and no grants at all) is refused`, `a new ratio table with RLS forced but no reviewed policy is refused`, `an INHERITS (ratio.cost_facts) child — even outside schema ratio — is refused`, `a partition of a (new, otherwise compliant) partitioned ratio table is refused`, `ALTER TABLE … SET UNLOGGED on a new ratio table is refused (…)` |
 | L2 | `foundation.db.test.ts` | `G3: a tenant_isolation policy with USING (true) on a new table is refused`, `G2: the reviewed predicate but TO ratio_reader only is refused` (made exact in 8f6c8d9), `G4: the reviewed predicate under a different policy name is refused` |
 | L4 | `foundation.db.test.ts` | `L4: the tenants-table shape (id = current_tenant_id()) is not reusable on another table` |
+
+## Round 13 — setting values never printed; system-schema ACLs (tests committed red in 8769153)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| H1 | `privileges.db.test.ts` | `a migration setting ratio.api_token is refused; the error names the key and scope but never the value`, `migrationStatus (what --status --json prints) reports the key only`, `no diagnostic carries source text: a policy, a function body, a default and a constraint with a marker in them report names and hashes only` (sweep; green on arrival) |
+| H1 CLI | `cli.db.test.ts` | `round 13 H1: --status --json names a secret-valued setting key but never prints its value` (also plain `--status` and `migrate`) |
+| H1 policy change | `privileges.db.test.ts`, `cli.db.test.ts` | round-8/9 assertions that matched `key=value` now match `<key> for role …` |
+| H2 | `privileges.db.test.ts` (rolled back) | `positive control: a clean migrated database has no system-schema findings`, `GRANT SELECT ON pg_catalog.pg_authid TO ratio_reader`, `a column grant on pg_authid(rolpassword)`, `GRANT EXECUTE ON FUNCTION pg_read_file(text) TO ratio_worker`, `GRANT EXECUTE ON FUNCTION lo_import(text) TO ratio_owner`, `an explicit schema grant on information_schema`, `a grant to a LOGIN member of ratio_reader` |
+| challenger L1 | `foundation.db.test.ts` | `a new ratio table with RLS ENABLED but not FORCED (and the reviewed policy) is refused` (green on arrival; kills mutant H3) |

@@ -1118,3 +1118,69 @@ G4 shape ignores the policy name                KILLED
 when `/usr/lib/postgresql/16/bin/{pg_dump,psql}` are absent and prints their
 versions. It also adds `RATIO_PG_DUMP` / `RATIO_PSQL` to the DB-test step's
 env. The workflow was not executed here (no push).
+
+---
+
+# Round 13 — Copilot on 0ef880f (2 High) + challenger round-12 Low 1
+
+Base: 0ef880f (on origin; CI green, including the PG16 client step). Local
+commits only (not pushed). 0001 unchanged; manifest unchanged. Raw logs:
+`scratchpad/r14/`.
+
+## R13.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 8769153 | test(ingest): failing tests for round 13 (setting values never printed; explicit system-schema ACLs) | tests (red) |
+| 0bf387e | fix(ingest): diagnostics name setting keys, never values; explicit system-schema ACLs for ratio roles refused (round 13 H1, H2) | fix (+ one test defect, recorded in its message) |
+| (this) | docs(evidence): Slice 0 round 13 | docs |
+
+## R13.2 Red (at 8769153)
+
+`npm run test:db`: **21 failed / 194 passed (215)**.
+
+- **Value printed.** The `ratio.api_token` value appeared in the migration
+  error, in `migrationStatus` and in the CLI output.
+- **System-schema grants invisible.** All six were missed: SELECT on
+  pg_authid, the rolpassword column grant, EXECUTE on pg_read_file and
+  lo_import, USAGE on information_schema, and the grant to a LOGIN member.
+- **Assertions updated in the red commit.** 13 round-8/9 assertions matched
+  `key=value`. They now match `<key> for role …`, because values are no
+  longer reported.
+- **Green on arrival, as intended.** The source-text sweep and the
+  RLS-not-forced test passed. The sweep shows that no other diagnostic carries
+  source text; the RLS test kills the challenger's mutant H3.
+
+**Defects found while making it green.**
+- **Superusers as members.** The first fix treated superusers as "members of"
+  the ratio roles (`pg_has_role` is true for them), which flagged every
+  default catalog ACL entry of `postgres`. Superusers are now excluded.
+- **CLI test expectation.** The round-13 CLI test expected plain `migrate`
+  (nothing pending, so no check runs) to name the key. It now only requires
+  that the value is absent there.
+
+## R13.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+V1 setting value reported again                      KILLED  15 tests (incl. the secret-marker tests)
+A1 systemAclViolations not called                    KILLED  6
+A2 relation ACL branch removed                       KILLED  pg_authid, LOGIN member
+A3 column ACL branch removed                         KILLED  pg_authid(rolpassword)
+A4 function ACL branch removed                       KILLED  pg_read_file, lo_import
+A5 schema ACL branch removed                         KILLED  information_schema USAGE
+A6 members of ratio roles not checked                KILLED  LOGIN member
+H3 RLS FORCE not required for ratio tables           KILLED  RLS ENABLED but not FORCED
+```
+
+## R13.4 Verification (main checkout at 0bf387e + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1809/1809 |
+| `npm run test:db` **×10** consecutive (URL set, PG16 client tools pinned) | **10/10 exit 0, 215/215 each, no "Errors" line** (`run10-*.txt`) |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` rows 0; `pg_parameter_acl` rows 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no `ratio_manifest_*` database; no system-schema ACL entry for a ratio role in the `postgres` database |
+| Slice 1 compat: scratch worktree `slice/01` 909ec1a + 0bf387e (removed) | merge clean (no conflict); tsc 0, lint 0, fast 1924/1924, test:db 340/340 ×2 |
