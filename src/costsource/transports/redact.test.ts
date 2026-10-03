@@ -52,6 +52,9 @@ describe('redactUpstreamText', () => {
     ['x-finio-session:', 'x-finio-session: s3cretSessionValue'],
     ['X-FinIO-Session=', 'X-FinIO-Session=s3cretSessionValue2'],
     ['JSON "pwd"', '{"pwd":"s3cretJsonPwd"}'],
+    ['DB_PASSWD=', 'DB_PASSWD=s3cretDbPasswd'],
+    ['JSON "RATIO_API_TOKEN":', '{"RATIO_API_TOKEN":"s3cretJsonRatio"}'],
+    ['X-FinIO-Session:', 'X-FinIO-Session: s3cretHeaderSession'],
   ])('redacts a prefixed / new credential key: %s', (_label, input) => {
     const out = redactUpstreamText(input);
     expect(out).not.toMatch(/s3cret/);
@@ -62,5 +65,53 @@ describe('redactUpstreamText', () => {
     for (const prose of ['Basic Support plan', 'Bearer of costs', 'token count is high', 'password reset link sent']) {
       expect(redactUpstreamText(prose)).toBe(prose);
     }
+  });
+
+  it.each([
+    ['double-quoted env value', 'JIRA_API_TOKEN="s3cret value with spaces"'],
+    ['single-quoted env value', "SERVICENOW_PASSWORD='s3cret value'"],
+    ['double-quoted with escaped quote inside', 'RATIO_API_TOKEN="s3cret\\"tail-s3cret"'],
+    ['single-quoted with escaped quote inside', "FINIO_PEER_TOKEN='s3cret\\'tail-s3cret'"],
+    ['quoted after colon', 'JIRA_API_TOKEN: "s3cretColonQuoted"'],
+    ['lower-case quoted', 'password="s3cret pw"'],
+    ['JSON-ish "KEY": "value"', '{"JIRA_API_TOKEN": "s3cret\\"json"}'],
+    ['unterminated quote', 'JIRA_API_TOKEN="s3cretUnterminated and more'],
+  ])('redacts a whole quoted value: %s', (_label, input) => {
+    const out = redactUpstreamText(input);
+    expect(out).not.toMatch(/s3cret|tail-|json"/);
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it.each([
+    'cost_per_token: 0.002',
+    'input_token: 12',
+    'is_secret: false',
+    'has_password=true',
+    '{"team_token":"blue"}',
+    'max_tokens: 4096',
+    'tokenomics_report=ready',
+    '{"max_tokens": 512, "tokenomics_report": "ok"}',
+  ])('does not over-redact the ordinary field %j', (input) => {
+    expect(redactUpstreamText(input)).toBe(input);
+  });
+
+  it.each([
+    ['env-key runs', () => 'A_'.repeat(500_000) + 'TOKEN'],
+    ['upper-case word chars', () => 'A'.repeat(1_000_000)],
+    ['repeated open quotes', () => 'API_TOKEN="'.repeat(90_000)],
+    ['repeated single quotes', () => "PASSWORD='".repeat(100_000)],
+    ['one open quote then 1 MB', () => 'TOKEN="' + 'x'.repeat(1_000_000)],
+    ['backslash runs in a quote', () => 'TOKEN="' + '\\'.repeat(1_000_000)],
+    ['many short keys', () => 'X_TOKEN= '.repeat(110_000)],
+  ])('no catastrophic backtracking on 1 MB worst case: %s', (_label, make) => {
+    const input = make();
+    expect(input.length).toBeGreaterThanOrEqual(900_000);
+    let best = Infinity;
+    for (let i = 0; i < 3; i += 1) {
+      const t0 = performance.now();
+      redactUpstreamText(input, 64);
+      best = Math.min(best, performance.now() - t0);
+    }
+    expect(best).toBeLessThan(50);
   });
 });

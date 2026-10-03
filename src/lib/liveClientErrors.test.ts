@@ -85,16 +85,61 @@ describe.each(CASES)('%s', (label, call) => {
   });
 });
 
-describe('envelope message cap', () => {
-  it('an envelope message is capped at 200 characters', () => {
-    const long = 'A'.repeat(500);
-    expect(envelopeMessage(JSON.stringify({ error: long }))).toBe('A'.repeat(200));
-    expect(envelopeMessage(JSON.stringify({ error: { message: long } }))).toBe('A'.repeat(200));
-    expect(describeHttpErrorBody('X', 500, JSON.stringify({ error: long }))).toBe(`X error 500: ${'A'.repeat(200)}`);
+describe.each(CASES)('%s — proxy / WAF envelope-shaped bodies', (label, call) => {
+  it('a flat envelope with arbitrary text is not quoted', async () => {
+    respond(JSON.stringify({ error: `${MARKER} blocked by WAF rule 942100` }), 403);
+    const msg = await messageOf(call);
+    expect(msg).toBe(`${label} error 403`);
+    expect(msg).not.toContain(MARKER);
   });
 
-  it('applies through a live client too', async () => {
-    respond(JSON.stringify({ error: 'B'.repeat(1000) }), 500);
-    expect(await messageOf(() => new LiveHelloClient().getGreeting())).toBe(`Hello API error 500: ${'B'.repeat(200)}`);
+  it('a nested envelope with an unknown code and arbitrary message is not quoted', async () => {
+    respond(JSON.stringify({ error: { code: `waf_${MARKER}`, message: `${MARKER} denied` } }), 403);
+    const msg = await messageOf(call);
+    expect(msg).toBe(`${label} error 403`);
+    expect(msg).not.toContain(MARKER);
+  });
+
+  it('a known code with an unknown message surfaces the code only', async () => {
+    respond(JSON.stringify({ error: { code: 'rate_limited', message: `${MARKER} slow down` } }), 429);
+    const msg = await messageOf(call);
+    expect(msg).toBe(`${label} error 429: rate_limited`);
+    expect(msg).not.toContain(MARKER);
+  });
+});
+
+describe('allow-list', () => {
+  it('surfaces only exact allow-listed messages (no prefix / suffix / long variants)', () => {
+    expect(envelopeMessage(JSON.stringify({ error: 'Internal error' }))).toBe('Internal error');
+    expect(envelopeMessage(JSON.stringify({ error: `Internal error ${MARKER}` }))).toBeNull();
+    expect(envelopeMessage(JSON.stringify({ error: 'A'.repeat(500) }))).toBeNull();
+    expect(describeHttpErrorBody('X', 500, JSON.stringify({ error: 'B'.repeat(1000) }))).toBe('X error 500');
+  });
+
+  it("every fixed message / code our own routes emit is allow-listed", async () => {
+    const { INTERNAL_ERROR_MESSAGE } = await import('@/server/gateway/internalError');
+    const costsource = await import('@/server/costsourceRouteErrors');
+    const { INVALID_WINDOW_MESSAGE } = await import('@/costsource/transports/focusExport');
+    const { WEAK_TOKEN_MESSAGE, THROTTLED_MESSAGE } = await import('@/server/gateway/liveDataAuth');
+    const ticket = await import('@/cm/ticketRef');
+    const finio = await import('@/finio/exchange');
+    const { SAFE_ERROR_MESSAGES, SAFE_ERROR_CODES } = await import('./httpError');
+    const messages = [
+      INTERNAL_ERROR_MESSAGE,
+      costsource.UNKNOWN_SOURCE_MESSAGE,
+      costsource.NOT_CONFIGURED_MESSAGE,
+      costsource.NO_COST_ROWS_MESSAGE,
+      INVALID_WINDOW_MESSAGE,
+      WEAK_TOKEN_MESSAGE,
+      THROTTLED_MESSAGE,
+      ticket.INVALID_JIRA_REF_MESSAGE,
+      ticket.INVALID_SERVICENOW_REF_MESSAGE,
+      finio.FOCUS_VERSION_UNSUPPORTED_MESSAGE,
+      finio.INVALID_SESSION.message,
+    ];
+    for (const m of messages) expect(SAFE_ERROR_MESSAGES.has(m), m).toBe(true);
+    for (const c of ['internal_error', 'invalid_request', 'unauthorized', 'rate_limited', finio.INVALID_SESSION.code, 'focus_version_mismatch']) {
+      expect(SAFE_ERROR_CODES.has(c), c).toBe(true);
+    }
   });
 });
