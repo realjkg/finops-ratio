@@ -151,6 +151,11 @@ never collide on one header. The browser never holds the peer token (no
 `NEXT_PUBLIC_` copy exists — it would be compiled into the client bundle), so
 with `FINIO_PEER_TOKEN` set the `/finio/demo` page's live mode shows "peer
 authentication required" and peer agents call the API with `X-FinIO-Peer-Token`.
+In a gateway-authenticated deployment — `RATIO_API_TOKEN` set, or a live AI /
+CM provider selected — the gateway's own `401` (missing `Authorization:
+Bearer`) comes first, so the page shows a generic exchange failure rather than
+the peer-auth guidance; call the API with both the Bearer token and
+`X-FinIO-Peer-Token`.
 
 **Mock and live differ only in transport.** `MockFinioClient` runs the same
 exchange rules as the route — same negotiation, same session expiry, same 400 /
