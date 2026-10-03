@@ -74,6 +74,19 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   });
   log('run.started', { runId: lease.runId, mode: opts.mode, abandonedRuns: abandoned.length, discardedStagedBatches: discardedBatches });
 
+  // Background heartbeat so a long capture/parse of one large artifact cannot
+  // outlive the lease. It never revives an expired lease (heartbeat is fenced);
+  // a failure only means the next fenced write will report LEASE_LOST. Stopped
+  // on every exit path, including a simulated crash (a dead process is silent).
+  const beat = setInterval(() => {
+    void heartbeat(opts.pool, lease.tenantId, lease.runId, lease.token, settings.leaseTtlSeconds).then(
+      () => {
+        lastBeat = Date.now();
+      },
+      () => undefined,
+    );
+  }, Math.max(1000, Math.floor((settings.leaseTtlSeconds * 1000) / 3)));
+  beat.unref();
   let lastBeat = Date.now();
   const maybeHeartbeat = async () => {
     if (Date.now() - lastBeat >= (settings.leaseTtlSeconds * 1000) / 3) {
@@ -89,104 +102,112 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
     redactDeep({ periods, manifestEvidence, mode: opts.mode, abandonedRuns: abandoned, discardedStagedBatches: discardedBatches }, secrets) as Record<string, unknown>;
 
   try {
-    const source = typeof opts.source === 'function' ? opts.source(sourceRow) : opts.source;
-    const retryOpts = {
-      maxAttempts: settings.maxAttempts,
-      baseMs: settings.retryBaseMs,
-      maxMs: settings.retryMaxMs,
-      sleep: hooks.sleep,
-      random: hooks.random,
-    };
-    const onRetry = (period: string | null) => async ({ attempt, error }: { attempt: number; error: unknown }) => {
-      attempts = attempt;
-      const code = errorCodeOf(error);
-      log('run.retry', { runId: lease.runId, attempt, code, period });
-      await recordRetry(opts.pool, lease, { attempt, code, period, at: new Date().toISOString() });
-    };
-
-    let listings: PeriodListing[];
-    try {
-      listings = await withRetry(() => source.listPeriods(opts.range), { ...retryOpts, onRetry: onRetry(null) });
-    } catch (e) {
-      if (e instanceof IngestError && e.code === 'LEASE_LOST') throw e;
-      const code = e instanceof IngestError ? e.code : 'SOURCE_LIST_FAILED';
-      await finishRun(opts.pool, lease, { status: 'failed', errorCode: code, errorDetail: clean(`listing the source failed: ${messageOf(e)}`), stats: stats() });
-      log('run.finished', { runId: lease.runId, status: 'failed', code });
-      return { runId: lease.runId, status: 'failed', periods, errorCode: code, attempts, manifestEvidence };
-    }
-
-    const checkpoint = await withTenantTransaction(opts.pool, lease.tenantId, (c) => readCheckpoint(c, lease.sourceId));
-
-    for (const listing of listings) {
-      const period = listing.ok ? listing.set.billingPeriod : listing.billingPeriod;
-      const manifest = listing.ok ? listing.set.manifest : listing.manifest;
-      if (manifest) {
-        try {
-          manifestEvidence.push(await withRetry(() => captureManifest(opts.evidence, lease.tenantId, lease.sourceId, manifest.bytes), { ...retryOpts, onRetry: onRetry(period) }));
-        } catch (e) {
-          if (e instanceof SimulatedCrash || (e instanceof IngestError && e.code === 'LEASE_LOST')) throw e;
-          periods.push({ billingPeriod: period, outcome: 'failed', code: errorCodeOf(e), message: clean(messageOf(e)) });
-          continue;
-        }
-      }
-      if (!listing.ok) {
-        periods.push({ billingPeriod: period, outcome: 'failed', code: listing.code, message: clean(listing.message) });
-        log('period.failed', { runId: lease.runId, period, code: listing.code });
-        continue;
-      }
-      const prev = checkpoint[period];
-      if (opts.mode !== 'replay_period' && prev?.pinned) {
-        periods.push({ billingPeriod: period, outcome: 'skipped_pinned', batchId: prev.batchId });
-        log('period.skipped', { runId: lease.runId, period, reason: 'pinned' });
-        continue;
-      }
-      if (opts.mode === 'sync' && prev?.listing && prev.listing === listing.set.listingFingerprint) {
-        periods.push({ billingPeriod: period, outcome: 'skipped_unchanged', batchId: prev.batchId, artifactSetFingerprint: prev.fingerprint });
-        log('period.skipped', { runId: lease.runId, period, reason: 'unchanged' });
-        continue;
-      }
-      try {
-        const result = await withRetry(
-          () => processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set: listing.set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, clean, sourceRow }),
-          { ...retryOpts, onRetry: onRetry(period) },
-        );
-        periods.push(result);
-      } catch (e) {
-        if (e instanceof SimulatedCrash) throw e;
-        if (e instanceof IngestError && e.code === 'LEASE_LOST') throw e;
-        periods.push({ billingPeriod: period, outcome: 'failed', code: errorCodeOf(e), message: clean(messageOf(e)) });
-        log('period.failed', { runId: lease.runId, period, code: errorCodeOf(e) });
-      }
-    }
-  } catch (e) {
-    if (e instanceof SimulatedCrash) throw e; // a "dead process" finishes nothing
-    if (e instanceof IngestError && e.code === 'LEASE_LOST') {
-      log('run.lease_lost', { runId: lease.runId });
-      // Only finishes if the run was not taken over (conditioned on token + running).
-      await finishRun(opts.pool, lease, { status: 'failed', errorCode: 'LEASE_LOST', errorDetail: 'lease lost during the run', stats: stats() }).catch(() => false);
-      throw e;
-    }
-    const code = errorCodeOf(e);
-    await finishRun(opts.pool, lease, { status: 'failed', errorCode: code, errorDetail: clean(messageOf(e)), stats: stats() }).catch(() => false);
-    log('run.finished', { runId: lease.runId, status: 'failed', code });
-    throw e;
+    return await runPeriods();
+  } finally {
+    clearInterval(beat);
   }
 
-  const failed = periods.find((p) => !SUCCESS_OUTCOMES.has(p.outcome));
-  const status = failed ? 'failed' : 'succeeded';
-  const errorCode = failed?.code ?? (failed ? 'PERIOD_FAILED' : undefined);
-  const errorDetail = failed
-    ? clean(
-        periods
-          .filter((p) => !SUCCESS_OUTCOMES.has(p.outcome))
-          .map((p) => `${p.billingPeriod} ${p.outcome}${p.code ? ` ${p.code}` : ''}${p.message ? `: ${p.message}` : ''}`)
-          .join('; '),
-      )
-    : null;
-  const finished = await finishRun(opts.pool, lease, { status, errorCode: errorCode ?? null, errorDetail, stats: stats() });
-  if (!finished) throw new IngestError('LEASE_LOST', 'run was taken over before it could finish');
-  log('run.finished', { runId: lease.runId, status, code: errorCode ?? null, periods: periods.map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code ?? null })) });
-  return { runId: lease.runId, status, periods, ...(errorCode ? { errorCode } : {}), attempts, manifestEvidence };
+  async function runPeriods(): Promise<RunResult> {
+    try {
+      const source = typeof opts.source === 'function' ? opts.source(sourceRow) : opts.source;
+      const retryOpts = {
+        maxAttempts: settings.maxAttempts,
+        baseMs: settings.retryBaseMs,
+        maxMs: settings.retryMaxMs,
+        sleep: hooks.sleep,
+        random: hooks.random,
+      };
+      const onRetry = (period: string | null) => async ({ attempt, error }: { attempt: number; error: unknown }) => {
+        attempts = attempt;
+        const code = errorCodeOf(error);
+        log('run.retry', { runId: lease.runId, attempt, code, period });
+        await recordRetry(opts.pool, lease, { attempt, code, period, at: new Date().toISOString() });
+      };
+
+      let listings: PeriodListing[];
+      try {
+        listings = await withRetry(() => source.listPeriods(opts.range), { ...retryOpts, onRetry: onRetry(null) });
+      } catch (e) {
+        if (e instanceof IngestError && e.code === 'LEASE_LOST') throw e;
+        const code = e instanceof IngestError ? e.code : 'SOURCE_LIST_FAILED';
+        await finishRun(opts.pool, lease, { status: 'failed', errorCode: code, errorDetail: clean(`listing the source failed: ${messageOf(e)}`), stats: stats() });
+        log('run.finished', { runId: lease.runId, status: 'failed', code });
+        return { runId: lease.runId, status: 'failed', periods, errorCode: code, attempts, manifestEvidence };
+      }
+
+      const checkpoint = await withTenantTransaction(opts.pool, lease.tenantId, (c) => readCheckpoint(c, lease.sourceId));
+
+      for (const listing of listings) {
+        const period = listing.ok ? listing.set.billingPeriod : listing.billingPeriod;
+        const manifest = listing.ok ? listing.set.manifest : listing.manifest;
+        if (manifest) {
+          try {
+            manifestEvidence.push(await withRetry(() => captureManifest(opts.evidence, lease.tenantId, lease.sourceId, manifest.bytes), { ...retryOpts, onRetry: onRetry(period) }));
+          } catch (e) {
+            if (e instanceof SimulatedCrash || (e instanceof IngestError && e.code === 'LEASE_LOST')) throw e;
+            periods.push({ billingPeriod: period, outcome: 'failed', code: errorCodeOf(e), message: clean(messageOf(e)) });
+            continue;
+          }
+        }
+        if (!listing.ok) {
+          periods.push({ billingPeriod: period, outcome: 'failed', code: listing.code, message: clean(listing.message) });
+          log('period.failed', { runId: lease.runId, period, code: listing.code });
+          continue;
+        }
+        const prev = checkpoint[period];
+        if (opts.mode !== 'replay_period' && prev?.pinned) {
+          periods.push({ billingPeriod: period, outcome: 'skipped_pinned', batchId: prev.batchId });
+          log('period.skipped', { runId: lease.runId, period, reason: 'pinned' });
+          continue;
+        }
+        if (opts.mode === 'sync' && prev?.listing && prev.listing === listing.set.listingFingerprint) {
+          periods.push({ billingPeriod: period, outcome: 'skipped_unchanged', batchId: prev.batchId, artifactSetFingerprint: prev.fingerprint });
+          log('period.skipped', { runId: lease.runId, period, reason: 'unchanged' });
+          continue;
+        }
+        try {
+          const result = await withRetry(
+            () => processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set: listing.set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, clean, sourceRow }),
+            { ...retryOpts, onRetry: onRetry(period) },
+          );
+          periods.push(result);
+        } catch (e) {
+          if (e instanceof SimulatedCrash) throw e;
+          if (e instanceof IngestError && e.code === 'LEASE_LOST') throw e;
+          periods.push({ billingPeriod: period, outcome: 'failed', code: errorCodeOf(e), message: clean(messageOf(e)) });
+          log('period.failed', { runId: lease.runId, period, code: errorCodeOf(e) });
+        }
+      }
+    } catch (e) {
+      if (e instanceof SimulatedCrash) throw e; // a "dead process" finishes nothing
+      if (e instanceof IngestError && e.code === 'LEASE_LOST') {
+        log('run.lease_lost', { runId: lease.runId });
+        // Only finishes if the run was not taken over (conditioned on token + running).
+        await finishRun(opts.pool, lease, { status: 'failed', errorCode: 'LEASE_LOST', errorDetail: 'lease lost during the run', stats: stats() }).catch(() => false);
+        throw e;
+      }
+      const code = errorCodeOf(e);
+      await finishRun(opts.pool, lease, { status: 'failed', errorCode: code, errorDetail: clean(messageOf(e)), stats: stats() }).catch(() => false);
+      log('run.finished', { runId: lease.runId, status: 'failed', code });
+      throw e;
+    }
+
+    const failed = periods.find((p) => !SUCCESS_OUTCOMES.has(p.outcome));
+    const status = failed ? 'failed' : 'succeeded';
+    const errorCode = failed?.code ?? (failed ? 'PERIOD_FAILED' : undefined);
+    const errorDetail = failed
+      ? clean(
+          periods
+            .filter((p) => !SUCCESS_OUTCOMES.has(p.outcome))
+            .map((p) => `${p.billingPeriod} ${p.outcome}${p.code ? ` ${p.code}` : ''}${p.message ? `: ${p.message}` : ''}`)
+            .join('; '),
+        )
+      : null;
+    const finished = await finishRun(opts.pool, lease, { status, errorCode: errorCode ?? null, errorDetail, stats: stats() });
+    if (!finished) throw new IngestError('LEASE_LOST', 'run was taken over before it could finish');
+    log('run.finished', { runId: lease.runId, status, code: errorCode ?? null, periods: periods.map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code ?? null })) });
+    return { runId: lease.runId, status, periods, ...(errorCode ? { errorCode } : {}), attempts, manifestEvidence };
+  }
 }
 
 interface PeriodCtx {
