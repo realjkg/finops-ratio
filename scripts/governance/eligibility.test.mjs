@@ -456,6 +456,82 @@ describe('C1: decideMergeStatus', () => {
   });
 });
 
+describe('PR #47 regression: our own governance check runs on the head SHA', () => {
+  const BASE = 'realjkg/finops-ratio';
+  const ours = (id, name, status, conclusion, o = {}) => ({
+    id, name, status, conclusion,
+    appId: 15368, workflowPath: '.github/workflows/governance.yml', workflowEvent: 'pull_request_target', workflowHeadRepo: BASE,
+    ...o,
+  });
+  // Exact #47 set: run 37101786595 (pull_request_target), app github-actions.
+  const pr47 = () => {
+    const s = state();
+    s.checkRuns = [
+      { id: 1, ...CI, status: 'completed', conclusion: 'success' },
+      { id: 3, name: 'copilot-pull-request-reviewer', appId: 15368, workflowPath: 'dynamic/agents/copilot-pull-request-reviewer', status: 'completed', conclusion: 'success' },
+      ours(101, 'Governance · risk classification', 'completed', 'success'),
+      ours(102, 'Governance · eligibility targets', 'completed', 'success'),
+      ours(103, 'Governance · merge eligibility (#47)', 'completed', 'success'),
+      ours(104, 'Governance · revocations', 'completed', 'skipped'),
+    ];
+    return s;
+  };
+  const replace = (s, name, run) => { s.checkRuns = s.checkRuns.filter((r) => r.name !== name).concat(run); return s; };
+
+  it('the exact #47 check-run set is eligible', () => {
+    expect(decideEligibility(pr47())).toEqual({ eligible: true, reasons: [] });
+    expect(decideMergeStatus(pr47())).toMatchObject({ state: 'success', mode: 'low' });
+  });
+  it("the eligibility job's own in-progress run is not counted", () => {
+    const s = replace(pr47(), 'Governance · merge eligibility (#47)', ours(103, 'Governance · merge eligibility (#47)', 'in_progress', null));
+    expect(decideEligibility(s).eligible).toBe(true);
+  });
+  it('our own failing/in-progress eligibility targets or revocations runs are not inputs either', () => {
+    expect(decideEligibility(replace(pr47(), 'Governance · eligibility targets', ours(102, 'Governance · eligibility targets', 'completed', 'failure'))).eligible).toBe(true);
+    expect(decideEligibility(replace(pr47(), 'Governance · revocations', ours(104, 'Governance · revocations', 'queued', null))).eligible).toBe(true);
+  });
+  for (const [label, o] of [
+    ['another app', { appId: 999 }],
+    ['another workflow path', { workflowPath: '.github/workflows/evil.yml' }],
+    ['unresolved workflow path', { workflowPath: undefined }],
+    ['a PR-head event (pull_request)', { workflowEvent: 'pull_request' }],
+    ['a head repo other than the base repo', { workflowHeadRepo: 'mallory/finops-ratio' }],
+  ]) {
+    for (const conclusion of ['skipped', 'failure']) {
+      it(`impostor "Governance · revocations" from ${label} concluding ${conclusion} is refused`, () => {
+        const s = pr47();
+        s.checkRuns.push(ours(200, 'Governance · revocations', 'completed', conclusion, o));
+        const d = decideEligibility(s);
+        expect(d.eligible).toBe(false);
+        expect(d.reasons.join('\n')).toMatch(/Governance · revocations/);
+      });
+    }
+  }
+  it('an impostor "Governance · merge eligibility" in progress from another workflow is refused', () => {
+    const s = pr47();
+    s.checkRuns.push(ours(201, 'Governance · merge eligibility (#47)', 'in_progress', null, { workflowPath: '.github/workflows/evil.yml' }));
+    expect(decideEligibility(s).eligible).toBe(false);
+  });
+  it('our own risk classification failed ⇒ refused', () => {
+    const s = replace(pr47(), 'Governance · risk classification', ours(101, 'Governance · risk classification', 'completed', 'failure'));
+    const d = decideEligibility(s);
+    expect(d.eligible).toBe(false);
+    expect(d.reasons.join('\n')).toMatch(/Governance · risk classification/);
+  });
+  it('our own risk classification in progress ⇒ refused', () => {
+    const s = replace(pr47(), 'Governance · risk classification', ours(101, 'Governance · risk classification', 'in_progress', null));
+    expect(decideEligibility(s).eligible).toBe(false);
+  });
+  it('the PR base repo is what "ours" is compared against', () => {
+    const s = pr47();
+    s.pr = { ...s.pr, baseRepo: BASE, headRepo: BASE };
+    expect(decideEligibility(s).eligible).toBe(true);
+    const t = pr47();
+    t.pr = { ...t.pr, baseRepo: 'other/repo', headRepo: 'other/repo' };
+    expect(decideEligibility(t).eligible).toBe(false); // our runs no longer match the base repo ⇒ skipped revocations counts
+  });
+});
+
 describe('latestCheckRuns', () => {
   it('keeps the highest id per (name, app, workflow path)', () => {
     const runs = latestCheckRuns([

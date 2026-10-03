@@ -925,6 +925,52 @@ describe('M1: label mechanism removed', () => {
   });
 });
 
+describe('PR #47 regression via the API: governance suites are resolved to their workflow run', () => {
+  const GOV_RUN = { id: 37101786595, check_suite_id: GOV_SUITE, path: '.github/workflows/governance.yml', event: 'pull_request_target', head_repository: { full_name: 'o/r' } };
+  const CI_RUN = { id: 900, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, pull_requests: [{ number: 5, base: { ref: 'main' } }], head_repository: { full_name: 'o/r' } };
+  const govRuns = [
+    { id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: CI_SUITE } },
+    { id: 3, name: 'copilot-pull-request-reviewer', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: COPILOT_SUITE } },
+    { id: 101, name: 'Governance · risk classification', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: GOV_SUITE } },
+    { id: 102, name: 'Governance · eligibility targets', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: GOV_SUITE } },
+    { id: 103, name: 'Governance · merge eligibility (#5)', status: 'in_progress', conclusion: null, app: { id: 15368 }, check_suite: { id: GOV_SUITE } },
+    { id: 104, name: 'Governance · revocations', status: 'completed', conclusion: 'skipped', app: { id: 15368 }, check_suite: { id: GOV_SUITE } },
+  ];
+  // The head_sha listing (filtered to pull_request events) does not include the
+  // pull_request_target run; it is resolved by check_suite_id.
+  const runsApi = (p) => (p.check_suite_id === GOV_SUITE ? [GOV_RUN] : p.check_suite_id !== undefined ? [] : [CI_RUN]);
+
+  it('#47 shape: own governance runs (incl. skipped revocations, in-progress eligibility) do not block', async () => {
+    const { github, pr } = fakeGithub({ checkRuns: govRuns, workflowRuns: runsApi });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].reasons).toEqual([]);
+    expect(rows[0].eligible).toBe(true);
+    expect(github.calls.some((c) => c.name === 'actions.listWorkflowRunsForRepo' && c.params.check_suite_id === GOV_SUITE)).toBe(true);
+  });
+  it('an impostor "Governance · revocations" in a suite from another workflow is refused', async () => {
+    const evil = { id: 55, check_suite_id: EVIL_SUITE, path: '.github/workflows/evil.yml', event: 'pull_request', head_repository: { full_name: 'o/r' } };
+    const { github, pr } = fakeGithub({
+      checkRuns: [...govRuns, { id: 300, name: 'Governance · revocations', status: 'completed', conclusion: 'skipped', app: { id: 15368 }, check_suite: { id: EVIL_SUITE } }],
+      workflowRuns: (p) => (p.check_suite_id === EVIL_SUITE ? [evil] : runsApi(p)),
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+    expect(rows[0].reasons.join('\n')).toMatch(/Governance · revocations/);
+  });
+  it('if the governance suite cannot be resolved, its runs are ordinary checks (fail closed)', async () => {
+    const { github, pr } = fakeGithub({ checkRuns: govRuns, workflowRuns: (p) => (p.check_suite_id !== undefined ? [] : [CI_RUN]) });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+  });
+  it('our own failed risk classification still refuses', async () => {
+    const runs = govRuns.map((r) => (r.id === 101 ? { ...r, conclusion: 'failure' } : r));
+    const { github, pr } = fakeGithub({ checkRuns: runs, workflowRuns: runsApi });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+    expect(rows[0].reasons.join('\n')).toMatch(/risk classification/);
+  });
+});
+
 describe('runTargets', () => {
   it('PR event → that PR', async () => {
     const { github, pr } = fakeGithub();
