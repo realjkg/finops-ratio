@@ -30,6 +30,7 @@ interface LedgerRow {
   version: string;
   name: string;
   checksum: string;
+  down_checksum: string | null;
   applied_at: Date;
 }
 
@@ -37,17 +38,33 @@ const LEDGER_DDL = `CREATE TABLE IF NOT EXISTS public.schema_migrations (
   version    text PRIMARY KEY CHECK (version ~ '^[0-9]{4}$'),
   name       text NOT NULL,
   checksum   text NOT NULL CHECK (checksum ~ '^[0-9a-f]{64}$'),
+  down_checksum text CHECK (down_checksum ~ '^[0-9a-f]{64}$'),
   applied_at timestamptz NOT NULL DEFAULT now()
 )`;
+// Ledgers created before down checksums were recorded (dev/test only; never
+// released) get the column; their NULL down_checksum then reads as drift.
+const LEDGER_UPGRADE = `ALTER TABLE public.schema_migrations ADD COLUMN IF NOT EXISTS down_checksum text`;
+
+const norm = (v: string | undefined) => (v ?? '').trim().toLowerCase();
+
+/** Environments in which down migrations may run (allow-list). */
+export const DOWN_ALLOWED_ENVS: ReadonlySet<string> = new Set(['development', 'test', 'ci']);
 
 export function isProduction(env: Env): boolean {
-  return (env.NODE_ENV ?? '').toLowerCase() === 'production' || (env.RATIO_ENV ?? '').toLowerCase() === 'production';
+  return norm(env.NODE_ENV) === 'production' || norm(env.RATIO_ENV) === 'production';
 }
 
-/** Down migrations are for dev/test only, and need an explicit opt-in even there. */
+/**
+ * Down migrations are for dev/test only: refused when NODE_ENV is production,
+ * allowed only when RATIO_ENV (trimmed, lower-cased) is development, test or
+ * ci, and even then only with RATIO_ALLOW_DOWN_MIGRATIONS=1.
+ */
 export function assertDownAllowed(env: Env): void {
   if (isProduction(env)) {
     throw new MigrationError('DOWN_NOT_ALLOWED', 'down migrations are refused when NODE_ENV or RATIO_ENV is production');
+  }
+  if (!DOWN_ALLOWED_ENVS.has(norm(env.RATIO_ENV))) {
+    throw new MigrationError('DOWN_NOT_ALLOWED', 'down migrations require RATIO_ENV to be development, test or ci');
   }
   if (env.RATIO_ALLOW_DOWN_MIGRATIONS !== '1') {
     throw new MigrationError('DOWN_NOT_ALLOWED', 'down migrations require RATIO_ALLOW_DOWN_MIGRATIONS=1');
@@ -56,7 +73,9 @@ export function assertDownAllowed(env: Env): void {
 
 async function readLedger(client: ClientBase): Promise<LedgerRow[]> {
   const r = await client.query<LedgerRow>(
-    'SELECT version, name, checksum, applied_at FROM public.schema_migrations ORDER BY version',
+    // to_jsonb(...)->>: also readable (as NULL) on a pre-down_checksum ledger, so read-only status never fails on it.
+    `SELECT version, name, checksum, to_jsonb(m) ->> 'down_checksum' AS down_checksum, applied_at
+       FROM public.schema_migrations m ORDER BY version`,
   );
   return r.rows;
 }
@@ -74,6 +93,12 @@ function verifyApplied(files: MigrationFile[], applied: LedgerRow[]): void {
     if (!f) throw new MigrationError('MISSING_FILE', `applied migration ${row.version}_${row.name} not found on disk`);
     if (f.checksum !== row.checksum) {
       throw new MigrationError('CHECKSUM_MISMATCH', `applied migration ${row.version}_${row.name} has been modified since it was applied`);
+    }
+    if (f.downChecksum !== row.down_checksum) {
+      throw new MigrationError(
+        'CHECKSUM_MISMATCH',
+        `the down file of applied migration ${row.version}_${row.name} was changed, added or removed since it was applied`,
+      );
     }
   }
 }
@@ -110,6 +135,7 @@ export async function migrateUp(client: ClientBase, opts: MigrateUpOptions = {})
   return withLock(client, async () => {
     if (opts.hooks?.afterLockAcquired) await opts.hooks.afterLockAcquired();
     await client.query(LEDGER_DDL);
+    await client.query(LEDGER_UPGRADE);
     const applied = await readLedger(client);
     verifyApplied(files, applied);
 
@@ -134,11 +160,10 @@ export async function migrateUp(client: ClientBase, opts: MigrateUpOptions = {})
       await inTransaction(client, async () => {
         await client.query(f.upSql);
         await client.query('RESET ROLE');
-        await client.query('INSERT INTO public.schema_migrations (version, name, checksum) VALUES ($1, $2, $3)', [
-          f.version,
-          f.name,
-          f.checksum,
-        ]);
+        await client.query(
+          'INSERT INTO public.schema_migrations (version, name, checksum, down_checksum) VALUES ($1, $2, $3, $4)',
+          [f.version, f.name, f.checksum, f.downChecksum],
+        );
       });
       done.push(f.version);
       log('migrate.applied', { version: f.version, name: f.name, phase: f.phase });
@@ -188,8 +213,11 @@ export interface MigrationStatus {
     version: string;
     name: string;
     checksum: string;
+    downChecksum: string | null;
     appliedAt: string;
     fileChecksum: string | null;
+    fileDownChecksum: string | null;
+    /** up AND down checksums both equal the files on disk */
     checksumMatches: boolean;
   }>;
   pending: Array<{ version: string; name: string; phase: string; checksum: string }>;
@@ -209,9 +237,11 @@ export async function migrationStatus(client: ClientBase, opts: { dir?: string }
       version: r.version,
       name: r.name,
       checksum: r.checksum,
+      downChecksum: r.down_checksum,
       appliedAt: new Date(r.applied_at).toISOString(),
       fileChecksum: f ? f.checksum : null,
-      checksumMatches: !!f && f.checksum === r.checksum,
+      fileDownChecksum: f ? f.downChecksum : null,
+      checksumMatches: !!f && f.checksum === r.checksum && f.downChecksum === r.down_checksum,
     };
   });
   const pending = files

@@ -123,4 +123,36 @@ describe('ratio_reader', () => {
       c.release();
     }
   });
+
+  it('shadowing the uuid type with a temp table does not break or bypass the tenant filter (M5)', async () => {
+    for (const role of ['ratio_reader', 'ratio_worker'] as const) {
+      await withRole(db.pool, role, seed.a.tenantId, async (c) => {
+        await c.query('CREATE TEMP TABLE uuid (x text)');
+        await c.query('CREATE TEMP TABLE current_setting (x text)');
+        const v = await c.query(`SELECT count(*)::int AS n, count(DISTINCT tenant_id)::int AS t FROM ratio.cost_facts_published`);
+        expect(v.rows[0], role).toEqual({ n: seed.a.publishedRows, t: 1 });
+        await c.query(`SET LOCAL search_path = pg_temp, public`);
+        const v2 = await c.query(`SELECT count(*)::int AS n FROM ratio.cost_facts_published`);
+        expect(v2.rows[0].n, role).toBe(seed.a.publishedRows);
+      });
+    }
+    const fn = await db.pool.query(
+      `SELECT p.prosqlbody IS NOT NULL AS bound_at_creation, coalesce(p.proconfig, '{}') AS config
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'ratio' AND p.proname = 'current_tenant_id'`,
+    );
+    expect(fn.rows).toHaveLength(1);
+    const { bound_at_creation, config } = fn.rows[0] as { bound_at_creation: boolean; config: string[] };
+    expect(bound_at_creation || config.some((c) => c.startsWith('search_path=pg_catalog'))).toBe(true);
+  });
+
+  it('documented trust boundary: any holder of a reader credential can select any tenant via the GUC', async () => {
+    // Tenant isolation defends against application bugs (wrong/missing tenant),
+    // not against someone who holds a database credential: the tenant is a
+    // user-settable setting. Per-tenant DB roles would be the alternative (owner decision).
+    await withRole(db.pool, 'ratio_reader', seed.a.tenantId, async (c) => {
+      await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [seed.b.tenantId]);
+      const v = await c.query(`SELECT count(*)::int AS n, sum(billed_cost)::text AS total FROM ratio.cost_facts_published`);
+      expect(v.rows[0]).toEqual({ n: seed.b.publishedRows, total: seed.b.publishedTotal });
+    });
+  });
 });

@@ -96,7 +96,9 @@ describe('ratio_worker tenant isolation', () => {
   it('worker with tenant A cannot update tenant B rows (0 rows affected, data unchanged)', async () => {
     const updates: Array<[string, string, string]> = [
       ['sync_runs', `stats = '{"hacked":true}'`, 'stats::text'],
-      ['ingest_batches', 'row_count = 777', 'row_count::text'],
+      // Only staged batches are mutable (immutability triggers), so the batch probe
+      // is an exact no-op update: it still shows which rows RLS lets the worker touch.
+      ['ingest_batches', 'row_count = row_count', 'row_count::text'],
       ['period_publications', `published_at = '2000-01-01T00:00:00Z'`, 'published_at::text'],
       ['source_checkpoints', `periods = '{"hacked":"x"}'`, 'periods::text'],
     ];
@@ -342,6 +344,7 @@ describe('ratio_worker tenant isolation', () => {
       const url = new URL(db.url);
       url.username = login;
       const c = new Client({ connectionString: url.toString() });
+      c.on('error', () => undefined);
       try {
         await c.connect();
         const who = await c.query(`SELECT current_user AS u, session_user AS s`);

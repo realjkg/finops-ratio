@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { main } from './cli';
+import { main, redactor } from './cli';
 
 function capture() {
   const out: string[] = [];
@@ -49,7 +49,8 @@ describe('ingest CLI (no database)', () => {
     for (const env of [
       { RATIO_MIGRATE_DATABASE_URL: UNREACHABLE },
       { RATIO_MIGRATE_DATABASE_URL: UNREACHABLE, RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'production' },
-      { RATIO_MIGRATE_DATABASE_URL: UNREACHABLE, RATIO_ALLOW_DOWN_MIGRATIONS: '1', NODE_ENV: 'production' },
+      { RATIO_MIGRATE_DATABASE_URL: UNREACHABLE, RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'test', NODE_ENV: 'production' },
+      { RATIO_MIGRATE_DATABASE_URL: UNREACHABLE, RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'staging' },
     ]) {
       const c = capture();
       expect(await main(['migrate', '--down', '1'], env, c.io)).toBe(1);
@@ -70,5 +71,23 @@ describe('ingest CLI (no database)', () => {
     expect(all).not.toContain(UNREACHABLE);
     // Every line is structured JSON.
     for (const line of c.out.concat(c.err)) expect(() => JSON.parse(line)).not.toThrow();
+  });
+
+  it('redacts password= values in URL query strings and keyword DSNs', () => {
+    const cases: Array<[string, string]> = [
+      ['postgres://bob@127.0.0.1:1/db?sslmode=require&password=QuerySecret123', 'QuerySecret123'],
+      ['postgres://127.0.0.1:1/db?password=Enc%40ded%21Pw', 'Enc%40ded%21Pw'],
+      ["host=127.0.0.1 port=1 user=bob password=KeywordSecret456 dbname=x", 'KeywordSecret456'],
+      ["host=127.0.0.1 password='Quoted Secret 789' dbname=x", 'Quoted Secret 789'],
+    ];
+    for (const [url, secret] of cases) {
+      const redact = redactor(url);
+      const msg = `failed: ${url} -- detail password=${secret} and again ${secret}`;
+      const out = redact(msg);
+      expect(out, url).not.toContain(secret);
+      expect(out, url).toContain('[redacted]');
+    }
+    // Even text not derived from the configured URL never shows a password= value.
+    expect(redactor(undefined)('conn password=Stray999 failed')).not.toContain('Stray999');
   });
 });

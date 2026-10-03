@@ -6,7 +6,8 @@ import path from 'path';
 import {
   DEFAULT_MIGRATIONS_DIR,
   MigrationError,
-  findDestructiveStatement,
+  findForbiddenStatement,
+  findNonExpandStatement,
   findTransactionControl,
   loadMigrations,
 } from './migrationFiles';
@@ -110,20 +111,114 @@ describe('loadMigrations', () => {
       'DELETE FROM a;',
     ];
     for (const stmt of destructive) {
-      expect(findDestructiveStatement(stmt), stmt).not.toBeNull();
+      expect(findNonExpandStatement(stmt), stmt).not.toBeNull();
       expect(codeOf(() => loadMigrations(tmpDir({ '0001_a.up.sql': EXPAND + stmt })))).toBe('EXPAND_NOT_ADDITIVE');
     }
   });
 
-  it('allows destructive statements in a contract migration and ignores them in comments/bodies', () => {
+  it('expand is an allow-list: every challenger bypass is classified non-expand', () => {
+    // Each of these slipped through the earlier deny-list classifier.
+    const bypasses: Record<string, string> = {
+      do_block_execute_drop: "DO $$ BEGIN EXECUTE 'DROP TABLE ratio.cost_facts'; END $$;",
+      cte_delete: 'WITH d AS (DELETE FROM ratio.cost_facts RETURNING 1) SELECT count(*) FROM d;',
+      update_all: "UPDATE ratio.ingest_batches SET status = 'superseded';",
+      insert: 'INSERT INTO ratio.tenants (id, slug) VALUES (gen_random_uuid(), \'x\');',
+      no_force_rls: 'ALTER TABLE ratio.cost_facts NO FORCE ROW LEVEL SECURITY;',
+      disable_rls: 'ALTER TABLE ratio.cost_facts DISABLE ROW LEVEL SECURITY;',
+      alter_policy: 'ALTER POLICY tenant_isolation ON ratio.cost_facts USING (true);',
+      create_or_replace_view: 'CREATE OR REPLACE VIEW ratio.cost_facts_published AS SELECT * FROM ratio.cost_facts;',
+      create_or_replace_fn: "CREATE OR REPLACE FUNCTION ratio.current_tenant_id() RETURNS uuid LANGUAGE sql AS 'select null::uuid';",
+      create_or_replace_other_fn: "CREATE OR REPLACE FUNCTION ratio.f() RETURNS int LANGUAGE sql AS 'select 1';",
+      grant_public: 'GRANT SELECT ON ALL TABLES IN SCHEMA ratio TO PUBLIC;',
+      revoke_from_role: 'REVOKE SELECT ON ratio.cost_facts_published FROM ratio_reader;',
+      alter_role_bypass: 'ALTER ROLE ratio_worker BYPASSRLS;',
+      set_not_null: 'ALTER TABLE ratio.cost_facts ALTER COLUMN provider_name SET NOT NULL;',
+      add_constraint_validated: 'ALTER TABLE ratio.cost_facts ADD CONSTRAINT c CHECK (billed_cost > 0);',
+      add_column_then_drop: 'ALTER TABLE ratio.cost_facts ADD COLUMN x int, DROP COLUMN provider_name;',
+      call_proc: 'CALL some_proc_that_commits();',
+      session_set_role: 'SET ROLE ratio_owner;',
+      session_search_path: 'SET search_path = evil, pg_catalog;',
+      select_side_effect: 'SELECT pg_catalog.pg_terminate_backend(1);',
+      select_from_table: 'SELECT * FROM ratio.cost_facts;',
+      membership_grant: 'GRANT ratio_owner TO ratio_worker;',
+      alter_type_using: 'ALTER TABLE ratio.cost_facts ALTER billed_cost TYPE float8 USING billed_cost::float8;',
+      disable_trigger: 'ALTER TABLE ratio.cost_facts DISABLE TRIGGER ALL;',
+      comment_prefixed_drop: '/* x */ DROP TABLE ratio.cost_facts;',
+    };
+    for (const [name, sql] of Object.entries(bypasses)) {
+      expect(findNonExpandStatement(sql), name).not.toBeNull();
+      expect(codeOf(() => loadMigrations(tmpDir({ '0001_a.up.sql': EXPAND + sql }))), name).toMatch(
+        /^(EXPAND_NOT_ADDITIVE|FORBIDDEN_STATEMENT)$/,
+      );
+    }
+  });
+
+  it('always refuses RLS/policy/PUBLIC/role-escalation statements, even in a contract migration', () => {
+    const forbidden = [
+      'ALTER TABLE ratio.cost_facts DISABLE ROW LEVEL SECURITY;',
+      'alter table only ratio.cost_facts no force row level security;',
+      'DROP POLICY tenant_isolation ON ratio.cost_facts;',
+      'ALTER POLICY tenant_isolation ON ratio.cost_facts USING (true);',
+      'GRANT SELECT ON ratio.cost_facts TO PUBLIC;',
+      'GRANT SELECT ON ratio.cost_facts TO ratio_reader, public;',
+      'ALTER ROLE ratio_worker BYPASSRLS;',
+      'ALTER USER ratio_worker SUPERUSER;',
+      'ALTER ROLE ratio_reader WITH CREATEROLE;',
+      'CREATE ROLE evil SUPERUSER;',
+      "CREATE OR REPLACE FUNCTION ratio.current_tenant_id() RETURNS uuid LANGUAGE sql AS 'select null::uuid';",
+      'ALTER FUNCTION ratio.current_tenant_id() OWNER TO postgres;',
+      'ALTER TABLE ratio.cost_facts DISABLE TRIGGER ALL;',
+      "SET session_replication_role = 'replica';",
+      "SET LOCAL session_replication_role = 'replica';",
+    ];
+    for (const sql of forbidden) {
+      expect(findForbiddenStatement(sql), sql).not.toBeNull();
+      expect(codeOf(() => loadMigrations(tmpDir({ '0001_a.up.sql': CONTRACT + sql }))), sql).toBe('FORBIDDEN_STATEMENT');
+    }
+    // NOSUPERUSER / NOBYPASSRLS are de-escalations and are not forbidden.
+    expect(findForbiddenStatement('ALTER ROLE ratio_worker NOSUPERUSER NOBYPASSRLS NOCREATEROLE;')).toBeNull();
+  });
+
+  it('a DO block is expand only with a reasoned ratio:allow-do marker on the preceding line', () => {
+    const body = "DO $$ BEGIN RAISE NOTICE 'x'; END $$;";
+    expect(codeOf(() => loadMigrations(tmpDir({ '0001_a.up.sql': EXPAND + body })))).toBe('EXPAND_NOT_ADDITIVE');
+    expect(codeOf(() => loadMigrations(tmpDir({ '0001_a.up.sql': EXPAND + '-- ratio:allow-do\n' + body })))).toBe(
+      'EXPAND_NOT_ADDITIVE',
+    );
+    expect(
+      codeOf(() => loadMigrations(tmpDir({ '0001_a.up.sql': EXPAND + '-- ratio:allow-do role guard\n\nSELECT 1;\n' + body }))),
+    ).toBe('EXPAND_NOT_ADDITIVE');
+    const ok = loadMigrations(tmpDir({ '0001_a.up.sql': EXPAND + '-- ratio:allow-do creates roles idempotently\n' + body }));
+    expect(ok[0].phase).toBe('expand');
+  });
+
+  it('allows the additive vocabulary in expand and destructive statements in a contract migration', () => {
     expect(loadMigrations(tmpDir({ '0001_a.up.sql': CONTRACT + 'DROP TABLE a;' }))[0].phase).toBe('contract');
     const additive =
       EXPAND +
       "-- DROP TABLE a;\nCREATE TABLE a(x int, note text DEFAULT 'drop table x');\n" +
       'CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM a; END $$;\n' +
-      'ALTER TABLE a ADD COLUMN y int;\nCOMMENT ON TABLE a IS \'rename me\';';
-    expect(findDestructiveStatement(additive)).toBeNull();
+      'ALTER TABLE a ADD COLUMN y numeric(10,2) NOT NULL DEFAULT 0;\nCOMMENT ON TABLE a IS \'rename me\';\n' +
+      'ALTER TABLE a ADD CONSTRAINT a_y CHECK (y >= 0) NOT VALID;\nALTER TABLE a VALIDATE CONSTRAINT a_y;\n' +
+      'ALTER TABLE a ENABLE ROW LEVEL SECURITY;\nALTER TABLE a FORCE ROW LEVEL SECURITY;\n' +
+      'CREATE UNIQUE INDEX a_x ON a (x);\nCREATE SCHEMA s;\nCREATE SEQUENCE s.q;\nCREATE TYPE s.t AS (a int);\n' +
+      'CREATE VIEW v AS SELECT x FROM a;\nCREATE POLICY p ON a USING (true);\n' +
+      'CREATE TRIGGER t BEFORE INSERT ON a FOR EACH ROW EXECUTE FUNCTION f();\n' +
+      'CREATE CONSTRAINT TRIGGER ct AFTER INSERT ON a DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION f();\n' +
+      'GRANT SELECT ON a TO ratio_reader;\nGRANT USAGE ON SCHEMA s TO ratio_worker, ratio_reader;\n' +
+      'REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA s FROM PUBLIC;\n' +
+      'SET LOCAL ROLE ratio_owner;\nSET LOCAL search_path = pg_catalog;\nSELECT pg_catalog.pg_has_role(\'a\', \'b\', \'MEMBER\');\n';
+    expect(findNonExpandStatement(additive)).toBeNull();
+    expect(findForbiddenStatement(additive)).toBeNull();
     expect(loadMigrations(tmpDir({ '0001_a.up.sql': additive }))[0].phase).toBe('expand');
+  });
+
+  it('records a checksum for the down file too', () => {
+    const dir = tmpDir({ '0001_a.up.sql': EXPAND + 'CREATE TABLE a(x int);', '0001_a.down.sql': 'DROP TABLE a;' });
+    const [m] = loadMigrations(dir);
+    expect(m.downChecksum).toBe(crypto.createHash('sha256').update('DROP TABLE a;').digest('hex'));
+    const noDown = loadMigrations(tmpDir({ '0001_a.up.sql': EXPAND + 'CREATE TABLE a(x int);' }));
+    expect(noDown[0].downChecksum).toBeNull();
   });
 
   it('rejects migration files containing transaction control', () => {

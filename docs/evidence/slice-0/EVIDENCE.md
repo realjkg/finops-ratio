@@ -173,13 +173,16 @@ used anywhere. Nothing here demonstrates real-source ingestion.
   `pg_terminate_backend`).
 - Process-kill during a migration is not simulated; relies on Postgres
   aborting the transaction and releasing the session advisory lock.
-- The pre-existing-role guard (RAISE if a ratio role is SUPERUSER/BYPASSRLS) is
-  not tested: altering cluster-global roles would break concurrently running test
-  databases.
+- ~~The pre-existing-role guard … is not tested~~ — CORRECTED in round 2: that
+  claim was wrong. The guard IS testable by making the dangerous change and running
+  the 0001 body inside one transaction that is rolled back (other sessions never
+  see the change); `roles.db.test.ts` does exactly that (M1/M2).
 - Expand-additivity check is lexical (e.g. `SET NOT NULL`, `CREATE OR REPLACE
   FUNCTION` semantics changes are not detected).
-- Secret guard inspects JSON keys only, not values; it is deliberately broad
-  (false positives such as `partition_key` are rejected).
+- (Round 2) Secret guard now inspects keys AND string values (config, stats)
+  and free-text columns; still deliberately broad (false positives such as
+  `partition_key`), still blind to homoglyph keys and to secrets that match none
+  of the patterns. `cost_facts.extra_columns` is not checked (provider columns).
 - `period_publications` does not itself enforce that the pointed batch is
   `published` (the view filters on it; Slice 1 publish txn must keep them in sync).
 - Import-boundary test cannot see non-literal dynamic imports.
@@ -201,3 +204,146 @@ used anywhere. Nothing here demonstrates real-source ingestion.
 - Deployment: who holds CREATEROLE for first role creation; LOGIN grants for
   ratio_worker / ratio_reader; the migrating login must be a member of
   ratio_owner and able to CREATE in the database (verified with a DB-owner login).
+
+---
+
+# Round 2 — challenger REQUEST CHANGES (H1–H2, M1–M5, L1–L6) + orchestrator additions
+
+Base: origin `slice/00-postgres-foundation` @ 2866556. All commits local; not pushed.
+**0001 was amended in place** (it has never been merged, released or applied
+outside dev/test) instead of adding 0002 — orchestrator decision. Local dev DBs
+migrated with the old 0001 now report CHECKSUM_MISMATCH and must be recreated.
+
+## R2.1 Commits (order = audit trail)
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 02b5dad | test(ingest): failing tests for challenger findings H1-H2, M1-M5, L1-L6 | tests (red) |
+| 539aa87 | fix(ingest): make DB test teardown deterministic (H1) | fix |
+| 26e368c | fix(ingest): allow-list expand classifier, down checksums, down env allow-list (M3, L1, L2) | fix |
+| af87a78 | fix(ingest): amend unreleased 0001 — immutable published data, role guard, hardening (H2, M1, M2, M4, M5, L3, L4) | fix |
+| 54c9fc8 | fix(ingest): redact password= values in CLI output; CI down smoke sets RATIO_ENV=ci (L5, L2) | fix |
+| 5f3b6a1 | test(ingest): failing test for worker column grant UPDATE (row_count) on ingest_artifacts | test (red) |
+| 63e8274 | fix(ingest): 0001 grants ratio_worker UPDATE (row_count) on ingest_artifacts | fix |
+| 7cddc07 | test(ingest): Slice 1 publish + replay-rollback order in one worker transaction | compatibility test (green on arrival) |
+| (this) | docs(evidence): round 2 | docs |
+
+Honest notes: (1) between 26e368c and af87a78 the shipped 0001 does not load (the
+new classifier needs the `ratio:allow-do` marker that af87a78 adds) — an
+intermediate state, not a release. (2) The orchestrator asked for the column grant
+to be "in the same commits" as the 0001 amendment; those commits already existed,
+so it was done tests-first in its own red/green pair (5f3b6a1 → 63e8274) instead
+of rewriting history. (3) Two test-side hygiene edits (error listeners on raw
+test clients) ride in the H1 fix commit.
+
+## R2.2 Red evidence (at 02b5dad, implementation of round 2 absent)
+
+- `npx vitest run src/ingest` → exit 1: **10 failed / 31 passed** (classifier
+  allow-list ×5, down checksum, RATIO_ENV allow-list ×2, CLI down refusal for
+  staging, `redactor is not a function`). L6 guard passed (no violation exists — guard).
+- `npm run test:db` → exit 1: **38 failed / 58 passed (96)**. Per finding:
+  H1 `waitForNoBackends is not a function` + the leaked-client test **timed out
+  after 30 s** (old `close()` hangs on `pool.end()`); H2 every immutability test
+  (`expected {ok:true} … RT001/RT002/RT003`), reconciled-with-mismatch accepted,
+  laundering reached the unique index (23505) instead of a CHECK, NaN accepted;
+  M1/M2 old guard raised P0001 (not RT010) for super/bypass/membership and
+  ACCEPTED `ALTER ROLE ratio_worker CREATEROLE`; M5 temp `uuid` table broke the
+  view (42P13 "return type mismatch … during inlining"); L1 `column
+  "down_checksum" does not exist`; L2 down under `RATIO_ENV=staging` reverted;
+  L3 secret values/`pass` key/stats keys accepted; L4 PUBLIC had EXECUTE and the
+  reader could call `jsonb_has_secret_like_key`.
+- Column grant (5f3b6a1): 1 failed / 17 passed — worker `UPDATE row_count` got 42501.
+Raw: `scratchpad/slice0/r2/red-fast.txt`, `red-db.txt`, `red-colgrant.txt`.
+
+## R2.3 Green + verification (fresh clone at 7cddc07, `scratchpad/slice0/r2/clone`)
+
+| Command | Result |
+|---|---|
+| `npm ci` | exit 0 (450 packages after origin/main merge; audit: 5 high, pre-existing, none in pg) |
+| `npm run lint` | exit 0 |
+| `rm -rf .next && npx tsc --noEmit` | exit 0 |
+| `npm test` (no DB URL) | exit 0 — 29 files / 318 tests |
+| `npm run test:db` (URL unset) | exit 1 — "RATIO_TEST_DATABASE_URL is not set … refusing to run" |
+| `RATIO_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres npm run test:db` ×25 consecutive | **25/25 exit 0, 98/98 passed each, no "Errors" line** (`v-testdb-25-final.txt`). An earlier 25-run at 63e8274 (97 tests) was also 25/25 exit 0 |
+| `npm run worker:build` | exit 0 |
+| migrate on scratch DB via built CLI | status before: exit 3; `db:migrate` exit 0; status exit 0; re-run no-op exit 0; `--down 1` with `RATIO_ENV=staging`: exit 1 DOWN_NOT_ALLOWED; with `RATIO_ENV=test NODE_ENV=production`: exit 1; with `RATIO_ENV=test` + flag: reverted, schema and ledger empty; up again exit 0; status exit 0 (`v-migrate.txt`) |
+| `npm run build` | exit 0; `git checkout tsconfig.json next-env.d.ts` afterwards |
+| scope | no file under `pages/` or `src/` outside `src/ingest` changed since 2866556; no `pg`/ingestion code in `.next` |
+| `EXPLAIN` as worker | `current_tenant_id()` still inlined (appears as `NULLIF(current_setting(...))::uuid` in the Index Cond) |
+
+Leftover database note: one database `ratio_test_23557_140834c4c4e7` (empty, no
+`ratio` schema) exists in the shared cluster. Its directory timestamp falls inside
+the first 25-run window, but a 12-run instrumented check of the harness logged
+396 creates and 396 drops (no leak), and the final 25-run left nothing new. Other
+agents (Slice 1 / challenger) use the same cluster concurrently, so its origin is
+not established; it was left untouched rather than dropping a database this run
+may not own.
+
+## R2.4 Mutation table (re-run on the amended 0001; each restored byte-identically)
+
+| # | Mutation | Result |
+|---|---|---|
+| M1 | view gets `security_invoker = true` | 8 tests fail |
+| M2 | `current_tenant_id()` without NULLIF | 6 fail |
+| M3 | `GRANT SELECT ON ratio.cost_facts TO ratio_reader` | 3 fail |
+| M4 | secret-key regex without `sig` | 1 fails |
+| M5 | no FORCE RLS on cost_facts | 1 fails |
+| M6 | no FORCE RLS anywhere + no view tenant predicate | 13 fail |
+| M7 | drop sync_runs→sources FK | 1 fails |
+| M8 | **drop the view's `status = 'published'` join** | **1 fails** (`pointer to a staged batch: the view never exposes its rows…`, the in-transaction check) |
+| M9 | drop staged-only trigger on cost_facts | 2 fail |
+| M10 | drop both deferred `publication_consistency` triggers | 3 fail |
+| M11 | neutralise `reconciled_matches` CHECK | 1 fails |
+| M12 | drop finite CHECK on billed_cost | 1 fails |
+| M13 | role guard ignores memberships | 1 fails |
+| M14 | `current_tenant_id()` back to a `$$ … ::uuid $$` body | 1 fails |
+| M15 | drop `REVOKE EXECUTE … FROM PUBLIC` | 2 fail |
+| M16 | allow quarantined → published | 2 fail |
+| M17 | staged-only trigger stops checking INSERT/UPDATE parent | 2 fail |
+| M18 | neutralise `published_reconciliation` CHECK | 1 fails |
+| M19 | role guard ignores CREATEROLE/CREATEDB | 1 fails |
+| M20 | neutralise `sources_config_no_secret_values` | 1 fails |
+| M21 | drop staged-only trigger on ingest_artifacts | 2 fail |
+
+No mutation survived. Raw: `scratchpad/slice0/r2/mutations.txt`.
+
+## R2.5 Per-finding status
+
+| Finding | Status | Evidence |
+|---|---|---|
+| H1 flaky teardown | fixed | red: timeout/`not a function`; green: harness tests + 25/25 ×2 |
+| H2 mutable published batches | fixed (triggers + CHECKs in 0001) | immutability.db (19 tests incl. challenger repros), M8–M11, M16–M18, M21 |
+| M1 untested role guard | fixed + tested | roles.db; EVIDENCE claim corrected above |
+| M2 broader role guard | fixed | roles.db (membership, CREATEROLE/CREATEDB, REPLICATION); M13, M19 |
+| M3 deny-list classifier | replaced by allow-list + forbidden list | migrationFiles tests (25 bypass cases, 15 forbidden cases) |
+| M4 NaN/Infinity | fixed | NaN/±Infinity test (verified `abs('NaN') < 'Infinity'` is false); M12 |
+| M5 helper hardening + docs | fixed; DESIGN §3/§6 corrected; trust-boundary row added | reader M5 test; M14 |
+| L1 down checksum | fixed | migrationFiles, migrate.db, cli.db |
+| L2 down env allow-list | fixed; CI sets RATIO_ENV=ci | migrate.test, migrate.db, cli.test |
+| L3 secret keys/values | fixed (homoglyphs documented as a limitation) | schema.db L3 tests; M4, M20 |
+| L4 function EXECUTE | fixed | schema.db L4 tests; M15 |
+| L5 password= redaction | fixed | cli.test |
+| L6 session-level tenant | guard added (no violation existed) | tenantScope.test |
+| Orchestrator: worker UPDATE (row_count) | added, staged-only still enforced | 5f3b6a1 red → 63e8274 green; M21 |
+| Orchestrator: Slice 1 publish/replay order | compatible; no immediate check forbids superseding a pointed-to batch (the check is deferred) | 7cddc07 |
+| Orchestrator: no purge path | none added | — |
+
+## R2.6 Remaining gaps (round 2)
+
+- CI workflow still not executed here (no push).
+- Tenant isolation does not protect against a holder of a worker/reader DB
+  credential choosing another tenant (GUC is user-settable) — owner decision on
+  per-tenant roles.
+- Triggers can be disabled by the table owner or a superuser
+  (`DISABLE TRIGGER`, `session_replication_role`); the migration linter refuses
+  both in migrations, but a human with those credentials is not constrained.
+- The classifier is lexical; the body of a `ratio:allow-do` DO block is not inspected.
+- Per-row FOR SHARE in the child trigger: throughput at 200k rows unmeasured (Slice 1).
+- One leftover empty test database of unknown origin in the shared cluster (R2.3).
+
+## R2.7 Needs the human owner (unchanged list, plus)
+
+- The amended 0001 (schema, roles, RLS, triggers, grants incl. the new column
+  grant) — production/tenancy impact; retention: published/quarantined data and
+  evidence cannot be deleted or truncated through normal roles (by design, D7).
+- The trust boundary above (GUC-selected tenant vs per-tenant credentials).

@@ -27,7 +27,16 @@ interface StatusDoc {
   expectedVersion: string;
   currentVersion: string | null;
   matches: boolean;
-  applied: Array<{ version: string; name: string; checksum: string; appliedAt: string; fileChecksum: string | null; checksumMatches: boolean }>;
+  applied: Array<{
+    version: string;
+    name: string;
+    checksum: string;
+    downChecksum: string | null;
+    appliedAt: string;
+    fileChecksum: string | null;
+    fileDownChecksum: string | null;
+    checksumMatches: boolean;
+  }>;
   pending: Array<{ version: string; name: string; phase: string; checksum: string }>;
   unknownApplied: string[];
   problems: string[];
@@ -67,7 +76,9 @@ describe('ingest CLI (real Postgres)', () => {
     expect(r.code).toBe(0);
     const doc = onlyJson(r.out);
     expect(doc).toMatchObject({ expectedVersion: latest, currentVersion: latest, matches: true, pending: [], unknownApplied: [], problems: [] });
-    expect(doc.applied.map((a) => [a.version, a.checksum, a.checksumMatches])).toEqual(files.map((f) => [f.version, f.checksum, true]));
+    expect(doc.applied.map((a) => [a.version, a.checksum, a.downChecksum, a.fileDownChecksum, a.checksumMatches])).toEqual(
+      files.map((f) => [f.version, f.checksum, f.downChecksum, f.downChecksum, true]),
+    );
     expect(Number.isNaN(Date.parse(doc.applied[0].appliedAt))).toBe(false);
 
     // Re-running up is a no-op through the CLI too.
@@ -89,6 +100,14 @@ describe('ingest CLI (real Postgres)', () => {
     expect(doc.applied.find((a) => a.version === '0001')?.checksumMatches).toBe(false);
 
     await db.pool.query(`UPDATE public.schema_migrations SET checksum = $1 WHERE version = '0001'`, [files[0].checksum]);
+    // Drift in the recorded down checksum is a mismatch too.
+    await db.pool.query(`UPDATE public.schema_migrations SET down_checksum = repeat('0', 64) WHERE version = '0001'`);
+    r = await run(['migrate', '--status', '--json'], env);
+    expect(r.code).toBe(3);
+    doc = onlyJson(r.out);
+    expect(doc.problems).toContain('CHECKSUM_MISMATCH');
+    expect(doc.applied.find((a) => a.version === '0001')?.checksumMatches).toBe(false);
+    await db.pool.query(`UPDATE public.schema_migrations SET down_checksum = $1 WHERE version = '0001'`, [files[0].downChecksum]);
     await db.pool.query(`INSERT INTO public.schema_migrations (version, name, checksum) VALUES ('9999', 'from_newer_release', repeat('f', 64))`);
     r = await run(['migrate', '--status', '--json'], env);
     expect(r.code).toBe(3);
@@ -113,11 +132,11 @@ describe('ingest CLI (real Postgres)', () => {
     const db = await freshDb();
     const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
     expect((await run(['migrate'], env)).code).toBe(0);
-    const refused = await run(['migrate', '--down', '1'], { ...env, NODE_ENV: 'test' });
+    const refused = await run(['migrate', '--down', '1'], { ...env, RATIO_ENV: 'test' });
     expect(refused.code).toBe(1);
     expect(refused.out.concat(refused.err).join('\n')).toContain('DOWN_NOT_ALLOWED');
 
-    const ok = await run(['migrate', '--down', '1'], { ...env, NODE_ENV: 'test', RATIO_ALLOW_DOWN_MIGRATIONS: '1' });
+    const ok = await run(['migrate', '--down', '1'], { ...env, RATIO_ENV: 'test', RATIO_ALLOW_DOWN_MIGRATIONS: '1' });
     expect(ok.code).toBe(0);
     const ns = await db.pool.query(`SELECT to_regnamespace('ratio') AS n`);
     expect(ns.rows[0].n).toBeNull();
