@@ -28,6 +28,7 @@ import { runDoctor } from './worker/doctor';
 import { runReplayFixtures } from './worker/replayFixtures';
 import { makeSourceFactory } from './worker/sourceFactory';
 import type { WorkerHooks } from './worker/types';
+import { MIN_PERIOD_YEAR } from './worker/periods';
 
 type Env = Record<string, string | undefined>;
 
@@ -99,6 +100,7 @@ function parseArgs(argv: string[]): Args {
       a.source = v;
     } else if (flag === '--from' || flag === '--to' || flag === '--period') {
       if (!MONTH_RE.test(v)) usage(`${flag} must be YYYY-MM`);
+      if (Number(v.slice(0, 4)) < MIN_PERIOD_YEAR) usage(`${flag} must lie within ${MIN_PERIOD_YEAR}-01..9999-12`);
       a[flag.slice(2) as 'from' | 'to' | 'period'] = `${v}-01`;
     } else if (flag === '--batch') {
       if (!isTenantId(v)) usage('--batch must be a UUID');

@@ -11,7 +11,8 @@ const MODULE = path.join(__dirname, 'periods.ts');
 
 /** Evaluates `expr` (with `m` = the periods module) in a child; null when it had to be killed. */
 function inChild(expr: string): { value?: unknown; error?: { code?: string; message: string } } | null {
-  const code = `const m = await import(${JSON.stringify(MODULE)});
+  // tsx loads the module as CommonJS here: its exports arrive on `default`.
+  const code = `const mod = await import(${JSON.stringify(MODULE)}); const m = mod.periodsBetween ? mod : mod.default;
 try { process.stdout.write(JSON.stringify({ value: (${expr}) })); }
 catch (e) { process.stdout.write(JSON.stringify({ error: { code: e.code, message: e.message } })); }`;
   const r = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code], {

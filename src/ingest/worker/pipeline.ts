@@ -29,6 +29,7 @@ import {
   type CheckpointEntry,
 } from './publish';
 import { SUCCESS_OUTCOMES, SimulatedCrash, canonicalTenant, type PeriodResult, type RunResult, type WorkerHooks } from './types';
+import { assertPeriodRange, periodsBetween } from './periods';
 
 export type RunMode = 'sync' | 'backfill' | 'replay_period';
 export type LogFn = (event: string, fields?: Record<string, unknown>) => void;
@@ -52,12 +53,6 @@ export interface RunSyncOptions {
 const SOURCE_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 
 /** 'YYYY-MM-01' of the following month. */
-function nextPeriod(p: string): string {
-  const y = Number(p.slice(0, 4));
-  const m = Number(p.slice(5, 7));
-  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
-}
-
 function setFingerprint(shas: string[]): string {
   return crypto.createHash('sha256').update([...shas].sort().join('\n')).digest('hex');
 }
@@ -68,7 +63,8 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   const tenantId = canonicalTenant(opts.tenantId);
   if (typeof opts.sourceKey !== 'string' || !SOURCE_KEY_RE.test(opts.sourceKey)) throw new IngestError('INVALID_SOURCE_KEY', 'source key is invalid');
   if ((opts.mode === 'backfill' || opts.mode === 'replay_period') && !opts.range) throw new IngestError('INVALID_RANGE', `${opts.mode} needs a period range`);
-  if (opts.range && opts.range.from > opts.range.to) throw new IngestError('INVALID_RANGE', 'range from is after to');
+  // Bounded (2000-01..9999-12), well-formed and not inverted (review H2, third round).
+  if (opts.range) assertPeriodRange(opts.range);
   const settings = resolveSettings(opts.settings);
   const hooks = opts.hooks ?? {};
   const log: LogFn = opts.log ?? (() => undefined);
@@ -175,7 +171,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
       // that is a failure, never a silent "nothing to do" success.
       if (opts.mode === 'replay_period' && opts.range) {
         const listed = new Set(listings.map((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod)));
-        for (let p = opts.range.from; p <= opts.range.to; p = nextPeriod(p)) {
+        for (const p of periodsBetween(opts.range.from, opts.range.to)) {
           if (!listed.has(p)) {
             periods.push({ billingPeriod: p, outcome: 'failed', code: 'PERIOD_NOT_FOUND', message: `the source lists no period ${p}` });
             log('period.failed', { runId: lease.runId, period: p, code: 'PERIOD_NOT_FOUND' });
