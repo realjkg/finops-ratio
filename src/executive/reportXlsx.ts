@@ -51,6 +51,12 @@ export async function buildReportWorkbook(now: Date = new Date()): Promise<Buffe
   const widths = autoWidths(records);
 
   const book = new ExcelJS.Workbook();
+  // Stamp the workbook from the same clock that produced the report data,
+  // not library defaults ("Unknown" author, build-time timestamps).
+  book.creator = 'Ratio';
+  book.lastModifiedBy = 'Ratio';
+  book.created = now;
+  book.modified = now;
   const sheet = book.addWorksheet('Initiatives');
   // Assigning `columns` writes the header row (row 1) from each `header`.
   sheet.columns = REPORT_COLUMNS.map((col, i) => ({

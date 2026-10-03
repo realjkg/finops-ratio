@@ -108,6 +108,8 @@ describe('report workbook', () => {
 
     expect(grid[0]).toEqual([...REPORT_COLUMNS]);
     expect(grid).toHaveLength(model.rows.length + 1);
+    // eachRow skips empty rows, so also pin the sheet's real row count.
+    expect(sheet.rowCount).toBe(model.rows.length + 1);
     model.rows.forEach((row, i) => {
       expect(grid[i + 1]).toEqual([
         row.name,
@@ -129,6 +131,14 @@ describe('report workbook', () => {
     expect(sheet.getCell('C2').type).toBe(ExcelJS.ValueType.Number);
   });
 
+  it('stamps workbook metadata from the report clock, not library defaults', async () => {
+    const book = await readBook(await buildReportWorkbook(FIXED));
+    expect(book.creator).toBe('Ratio');
+    expect(book.lastModifiedBy).toBe('Ratio');
+    expect(book.created?.toISOString()).toBe(FIXED.toISOString());
+    expect(book.modified?.toISOString()).toBe(FIXED.toISOString());
+  });
+
   it('auto-fits column widths', async () => {
     const buffer = await buildReportWorkbook(FIXED);
     const sheet = (await readBook(buffer)).worksheets[0];
@@ -141,4 +151,3 @@ describe('report workbook', () => {
     });
   });
 });
-
