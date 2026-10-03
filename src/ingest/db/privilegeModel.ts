@@ -277,6 +277,73 @@ async function roleViolations(client: ClientBase): Promise<string[]> {
   return problems;
 }
 
+/**
+ * Settings that change what a session can see or enforce (trigger/FK
+ * bypass, RLS, name resolution, read-only, isolation, identity).
+ */
+export const SECURITY_RELEVANT_SETTINGS: readonly string[] = [
+  'session_replication_role',
+  'row_security',
+  'search_path',
+  'default_transaction_read_only',
+  'default_transaction_isolation',
+  'role',
+  'session_authorization',
+];
+
+/**
+ * Per-database / per-role setting defaults (`ALTER DATABASE … SET`, `ALTER
+ * ROLE … [IN DATABASE …] SET`, stored in pg_db_role_setting) apply to every
+ * NEW session, so a migration could plant e.g. session_replication_role =
+ * replica for the worker and every later worker session would skip the
+ * RT001–RT003 triggers and FK checks (round 8, L1). Targeted, not blanket
+ * (deployments may legitimately set e.g. statement_timeout per database):
+ *   - ANY setting on a ratio role itself (any database) is refused: the ratio
+ *     roles are NOLOGIN and are configured by migrations only;
+ *   - a SECURITY_RELEVANT_SETTINGS key is refused when it applies to this
+ *     database (ALTER DATABASE, or any role IN this database), to all roles
+ *     (ALTER ROLE ALL, here or everywhere), or to a member of a ratio role
+ *     (any database).
+ * pg_db_role_setting is a shared catalog: rows for other databases count only
+ * through the role rules above.
+ */
+async function settingViolations(client: ClientBase): Promise<string[]> {
+  const rows = await client.query<{
+    cfg: string;
+    rolname: string | null;
+    datname: string | null;
+    here: boolean;
+    all_roles_here: boolean;
+    ratio_role: boolean;
+    ratio_member: boolean;
+  }>(
+    `WITH ratio AS (SELECT oid, rolname FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])),
+          cur AS (SELECT oid FROM pg_catalog.pg_database WHERE datname = pg_catalog.current_database())
+     SELECT cfg, r.rolname, d.datname,
+            (s.setdatabase = (SELECT oid FROM cur)) AS here,
+            (s.setdatabase = 0 OR s.setdatabase = (SELECT oid FROM cur)) AND s.setrole = 0 AS all_roles_here,
+            EXISTS (SELECT 1 FROM ratio x WHERE x.oid = s.setrole) AS ratio_role,
+            (s.setrole <> 0 AND EXISTS (SELECT 1 FROM ratio x WHERE pg_catalog.pg_has_role(s.setrole, x.oid, 'MEMBER'))) AS ratio_member
+       FROM pg_catalog.pg_db_role_setting s
+       LEFT JOIN pg_catalog.pg_roles r ON r.oid = s.setrole
+       LEFT JOIN pg_catalog.pg_database d ON d.oid = s.setdatabase
+       CROSS JOIN LATERAL pg_catalog.unnest(s.setconfig) AS cfg
+      ORDER BY 1, 2, 3`,
+    [RATIO_ROLES],
+  );
+  const problems: string[] = [];
+  for (const row of rows.rows) {
+    const key = row.cfg.split('=')[0].trim().toLowerCase();
+    const where = `for role ${row.rolname ?? 'ALL'} in database ${row.datname ?? 'ALL'}`;
+    if (row.ratio_role) {
+      problems.push(`setting ${row.cfg} ${where} is not allowed (ratio roles carry no setting defaults)`);
+    } else if (SECURITY_RELEVANT_SETTINGS.includes(key) && (row.here || row.all_roles_here || row.ratio_member)) {
+      problems.push(`setting ${row.cfg} ${where} is not allowed (security-relevant default)`);
+    }
+  }
+  return problems;
+}
+
 /** Triggers, rules, event triggers and ledger hooks (challenger round 4, M1). */
 async function hookViolations(client: ClientBase): Promise<string[]> {
   const problems: string[] = [];
@@ -343,6 +410,7 @@ export async function privilegeModelViolations(client: ClientBase): Promise<stri
   );
   for (const { fn } of pub.rows) problems.push(`PUBLIC holds EXECUTE on ${fn}`);
   problems.push(...(await hookViolations(client)));
+  problems.push(...(await settingViolations(client)));
   problems.push(...(await roleViolations(client)));
   return problems;
 }

@@ -134,6 +134,8 @@ export function redactDeep(value: unknown, redact: (s: string) => string, seen: 
   seen.add(value);
   if (Array.isArray(value)) return value.map((v) => redactDeep(v, redact, seen));
   if (value instanceof Date) return value.toISOString();
+  // Raw bytes are never printed (Buffer.toJSON would expose them as numbers).
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return '[binary]';
   const toJSON = (value as { toJSON?: unknown }).toJSON;
   if (typeof toJSON === 'function') return redactDeep((toJSON as () => unknown).call(value), redact, seen);
   if (value instanceof Error) {
