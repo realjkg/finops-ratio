@@ -226,6 +226,11 @@ describe('a quote ends the authority (no running into the next JSON field)', () 
     expect(redactUpstreamText(input, 500)).toBe(input);
     const enc = String.raw`{\"u\":\"https://host\",\"e\":\"bob@corp.com\"}`;
     expect(redactUpstreamText(enc, 500)).toBe(enc);
+    // Single quotes and backticks end the authority too.
+    const single = "{'u':'https://host','e':'bob@corp.com'}";
+    expect(redactUpstreamText(single, 500)).toBe(single);
+    const tick = '`https://host`,`bob@corp.com`';
+    expect(redactUpstreamText(tick, 500)).toBe(tick);
   });
 
   it('URLs joined without a quote / space separator are each scanned', () => {
