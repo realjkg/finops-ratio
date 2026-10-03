@@ -345,6 +345,23 @@ describe('challenger round 2', () => {
   });
 });
 
+describe('challenger round 3', () => {
+  for (const p of ['.windsurf/rules/a.md', '.windsurf/x.json', 'CONVENTIONS.md', 'docs/Conventions.md', 'src/conventions.MD']) {
+    it(`P4: ${p} is restricted:policy`, () => {
+      const r = classify(paths(p));
+      expect(r.risk).toBe('restricted');
+      expect(r.classes).toContain('policy');
+    });
+  }
+  it('P3: unknown file modes (tree truncated / unavailable) are restricted', () => {
+    expect(classify({ files: [{ path: 'README.md' }], treeStatus: 'truncated' }).reasons)
+      .toContainEqual({ path: '', class: 'unclassified', rule: 'tree-truncated' });
+    expect(classify({ files: [{ path: 'README.md' }], treeStatus: 'unavailable' }).reasons)
+      .toContainEqual({ path: '', class: 'unclassified', rule: 'tree-unavailable' });
+    expect(classify({ files: [{ path: 'README.md' }], treeStatus: 'ok' }).risk).toBe('low');
+  });
+});
+
 describe('CLI', () => {
   it('prints JSON for positional paths and a diff file', async () => {
     const { spawnSync } = await import('node:child_process');

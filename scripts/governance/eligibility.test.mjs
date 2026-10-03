@@ -160,6 +160,16 @@ describe('decideEligibility', () => {
     expect(d.eligible).toBe(false);
     expect(why(d)).toMatch(/99/);
   });
+  it('P1/R2: failing CI-named check run id 3 + successful same-name/app/path run id 99 (the job) ⇒ ineligible; catches "dedupe CI runs by latest"', () => {
+    const s = state({ ciJobs: [{ id: 99, name: CI.name, status: 'completed', conclusion: 'success' }] });
+    s.checkRuns = s.checkRuns.filter((c) => c.name !== CI.name);
+    s.checkRuns.push({ id: 3, ...CI, status: 'completed', conclusion: 'failure' });
+    s.checkRuns.push({ id: 99, ...CI, status: 'completed', conclusion: 'success' });
+    const d = decideEligibility(s);
+    expect(d.eligible).toBe(false);
+    expect(why(d)).toMatch(/id 3\b/);
+  });
+
   it('N2: a CI-named check run whose id is not a ci.yml job is treated as a spoof', () => {
     const s = state();
     s.checkRuns.push({ id: 77, ...CI, status: 'completed', conclusion: 'success' });
