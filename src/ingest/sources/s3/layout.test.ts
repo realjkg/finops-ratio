@@ -105,6 +105,30 @@ describe('AWS Data Exports layout', () => {
     });
   }
 
+  // Copilot M2 (third review): the artifact name is STORED redacted
+  // (ingest_artifacts.artifact_name = redact(name), CHECK length <= 1024
+  // characters), so the limit applies to the stored, redacted form.
+  describe('artifact name length is bounded by the stored (redacted) length, 1024', () => {
+    const nameOf = (len: number, tail = '') => 'run-1/' + 'n'.repeat(len - 6 - tail.length) + tail; // relative to the period's data folder
+    const parse = (name: string) => {
+      const key = 'exports/focus/focus-export/data/BILLING_PERIOD=2026-07/' + name;
+      return parseManifest(manifest({ dataFiles: [key] }), { location: loc, billingPeriod: P, listing: listing([key]) });
+    };
+    it('1024 characters: accepted', () => {
+      const r = parse(nameOf(1024));
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.artifacts[0].name).toHaveLength(1024);
+    });
+    it('1025 characters: MANIFEST_INVALID', () => {
+      expect(parse(nameOf(1025))).toMatchObject({ ok: false, code: 'MANIFEST_INVALID' });
+    });
+    it('1021 raw characters whose REDACTED form (stored) is 1030: MANIFEST_INVALID', () => {
+      const name = nameOf(1021, '/token=x');
+      expect(name).toHaveLength(1021);
+      expect(parse(name)).toMatchObject({ ok: false, code: 'MANIFEST_INVALID' });
+    });
+  });
+
   it('listing fingerprint is order-independent and changes with etag, size or manifest bytes', () => {
     const a = { name: 'a', key: 'k/a', byteSize: 1, version: 'e1' };
     const b = { name: 'b', key: 'k/b', byteSize: 2, version: 'e2' };

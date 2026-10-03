@@ -37,6 +37,9 @@ describe('worker CLI (no database)', () => {
       ['backfill', '--tenant', T, '--source', 'focus-main', '--from', '2026-07', '--to', '2026-13'],
       ['backfill', '--tenant', T, '--source', 'focus-main', '--from', '2026-08', '--to', '2026-07'],
       ['backfill', '--tenant', T, '--source', 'focus-main', '--from', '2026-7', '--to', '2026-08'],
+      // Copilot H2 (third review): periods are bounded to 2000-01..9999-12 when parsed.
+      ['backfill', '--tenant', T, '--source', 'focus-main', '--from', '1999-12', '--to', '2000-01'],
+      ['replay', '--tenant', T, '--source', 'focus-main', '--period', '0000-01'],
       ['replay', '--tenant', T, '--source', 'focus-main'],
       ['replay', '--tenant', T, '--source', 'focus-main', '--batch', B, '--period', '2026-07'],
       ['replay', '--tenant', T, '--source', 'focus-main', '--batch', 'nope'],

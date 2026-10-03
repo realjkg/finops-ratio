@@ -5,7 +5,7 @@ import { Readable } from 'stream';
 import { describe, expect, it } from 'vitest';
 import { GetObjectCommand, ListObjectsV2Command, type S3Client } from '@aws-sdk/client-s3';
 import { S3FocusExportSource } from './S3FocusExportSource';
-import { dataPrefix, periodMetadataPrefix, type ExportLocation } from './layout';
+import { dataPrefix, metadataPrefix, periodMetadataPrefix, type ExportLocation } from './layout';
 
 const LOC: ExportLocation = { bucket: 'b', prefix: 'p', exportName: 'e' };
 const P = '2026-07-01';
@@ -177,3 +177,76 @@ describe('S3FocusExportSource listing is abortable (Copilot M3)', () => {
     expect(sendsAfterAbort).toBe(0);
   });
 });
+
+describe('S3FocusExportSource, PR #54 third review (H1, M1, M3)', () => {
+  const v1 = Buffer.from('version one');
+  const baseObjects = () =>
+    new Map<string, FakeObject>([
+      [MANIFEST_KEY, { etag: '"m1"', size: 0, body: () => Readable.from([manifestFor([DATA_KEY])]) }],
+      [DATA_KEY, { etag: '"d1"', size: v1.length, body: () => Readable.from([v1]) }],
+    ]);
+  /** The fake client, but the listing of `prefix` claims more pages without a continuation token. */
+  const truncatedWithoutToken = (inner: S3Client, prefix: string): S3Client =>
+    ({
+      async send(cmd: unknown, opts?: unknown) {
+        const r = await (inner.send as (c: unknown, o?: unknown) => Promise<Record<string, unknown>>)(cmd, opts);
+        if (cmd instanceof ListObjectsV2Command && cmd.input.Prefix === prefix) return { ...r, IsTruncated: true, NextContinuationToken: undefined };
+        return r;
+      },
+    }) as unknown as S3Client;
+
+  for (const [where, prefix] of [
+    ['the metadata folder (period discovery)', metadataPrefix(LOC)],
+    ["a period's data folder", dataPrefix(LOC, P)],
+  ] as const) {
+    it(`H1: a page of ${where} that is truncated but has no continuation token is SOURCE_LISTING_INVALID (non-retryable), never a short listing`, async () => {
+      const calls: Array<{ key: string; ifMatch?: string }> = [];
+      const inner = fakeClient(baseObjects(), calls);
+      // Sanity: the prefix really is one the source lists.
+      const seen: string[] = [];
+      const spy = { async send(cmd: unknown) { if (cmd instanceof ListObjectsV2Command) seen.push(cmd.input.Prefix ?? ''); return inner.send(cmd as never); } } as unknown as S3Client;
+      await new S3FocusExportSource({ client: spy, location: LOC }).listPeriods();
+      expect(seen).toContain(prefix);
+
+      const src = new S3FocusExportSource({ client: truncatedWithoutToken(inner, prefix), location: LOC });
+      await expect(src.listPeriods()).rejects.toMatchObject({ code: 'SOURCE_LISTING_INVALID', retryable: false });
+    });
+  }
+
+  it('M1: an artifact listed without an ETag is refused (SOURCE_LISTING_INVALID); a ref without a version is never fetched unconditionally', async () => {
+    const objects = baseObjects();
+    objects.set(DATA_KEY, { etag: '', size: v1.length, body: () => Readable.from([v1]) });
+    const calls: Array<{ key: string; ifMatch?: string }> = [];
+    const src = new S3FocusExportSource({ client: fakeClient(objects, calls), location: LOC });
+    const [listing] = await src.listPeriods();
+    expect(listing).toMatchObject({ ok: false, billingPeriod: P, code: 'SOURCE_LISTING_INVALID' });
+
+    const getsBefore = calls.length;
+    await expect(src.openArtifact({ name: 'run-1/a.csv.gz', key: DATA_KEY, byteSize: v1.length, version: '' })).rejects.toMatchObject({
+      code: 'SOURCE_LISTING_INVALID',
+      retryable: false,
+    });
+    expect(calls.length).toBe(getsBefore); // no GET at all, let alone one without If-Match
+  });
+
+  it('M3: the artifact GET carries the abort signal; an aborted open rejects with the abort reason', async () => {
+    let signalSeen: AbortSignal | undefined;
+    const ac = new AbortController();
+    const reason = Object.assign(new Error('run exceeded the maximum duration'), { code: 'MAX_RUN_EXCEEDED' });
+    const client = {
+      async send(cmd: unknown, opts?: { abortSignal?: AbortSignal }) {
+        if (!(cmd instanceof GetObjectCommand)) throw new Error('unexpected command');
+        signalSeen = opts?.abortSignal;
+        return new Promise((_, reject) => {
+          opts?.abortSignal?.addEventListener('abort', () => reject(Object.assign(new Error('Request aborted'), { name: 'AbortError' })), { once: true });
+        });
+      },
+    } as unknown as S3Client;
+    const src = new S3FocusExportSource({ client, location: LOC });
+    const opening = src.openArtifact({ name: 'run-1/a.csv.gz', key: DATA_KEY, byteSize: 1, version: '"d1"' }, { signal: ac.signal });
+    setTimeout(() => ac.abort(reason), 20);
+    await expect(opening).rejects.toBe(reason);
+    expect(signalSeen).toBe(ac.signal);
+  });
+});
+
