@@ -122,15 +122,22 @@ function s3Settings(env: Env, prefix: string, ratioEnv: RatioEnv): S3Settings {
   };
 }
 
+/** NODE_ENV=test and RATIO_ENV is not staging/production. */
+export function testSwitchesPermitted(env: Env): boolean {
+  const ratioEnv = (env.RATIO_ENV ?? '').trim();
+  return env.NODE_ENV === 'test' && ratioEnv !== 'staging' && ratioEnv !== 'production';
+}
+
 export function loadWorkerConfig(env: Env): WorkerConfig {
   const rawEnv = (env.RATIO_ENV ?? '').trim();
   const ratioEnv = (rawEnv === '' ? 'development' : rawEnv) as RatioEnv;
   if (!RATIO_ENVS.includes(ratioEnv)) fail(`RATIO_ENV must be one of ${RATIO_ENVS.join(', ')}`);
 
-  const isTestProcess = env.NODE_ENV === 'test';
+  // Test-only switches need NODE_ENV=test AND must never activate in a staging/production deployment.
+  const isTestProcess = testSwitchesPermitted(env);
   let testPauseAfterRows: number | null = null;
   if (env.RATIO_TEST_PAUSE_AFTER_ROWS !== undefined && env.RATIO_TEST_PAUSE_AFTER_ROWS !== '') {
-    if (!isTestProcess) fail('RATIO_TEST_PAUSE_AFTER_ROWS is a test-only hook and is refused unless NODE_ENV=test', 'TEST_HOOK_NOT_ALLOWED');
+    if (!isTestProcess) fail('RATIO_TEST_PAUSE_AFTER_ROWS is a test-only hook: refused unless NODE_ENV=test and RATIO_ENV is not staging/production', 'TEST_HOOK_NOT_ALLOWED');
     testPauseAfterRows = int(env, 'RATIO_TEST_PAUSE_AFTER_ROWS', 0, 1, 100_000_000);
   }
 

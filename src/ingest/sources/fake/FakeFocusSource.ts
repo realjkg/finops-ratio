@@ -4,6 +4,7 @@
 import crypto from 'crypto';
 import { Readable } from 'stream';
 import { IngestError } from '../../errors';
+import { testSwitchesPermitted } from '../../config';
 import type { ArtifactRef, ArtifactSetControl, FocusSource, PeriodListing, PeriodRange } from '../types';
 import { listingFingerprint, periodInRange } from '../s3/layout';
 
@@ -21,8 +22,8 @@ export interface FakeOptions {
 }
 
 export function assertFakeSourceAllowed(env: Record<string, string | undefined>): void {
-  if (!(env.NODE_ENV === 'test' && env.RATIO_ALLOW_FAKE_SOURCE === '1')) {
-    throw new IngestError('FAKE_SOURCE_NOT_ALLOWED', 'the fake source is test-only (needs NODE_ENV=test and RATIO_ALLOW_FAKE_SOURCE=1)');
+  if (!(testSwitchesPermitted(env) && env.RATIO_ALLOW_FAKE_SOURCE === '1')) {
+    throw new IngestError('FAKE_SOURCE_NOT_ALLOWED', 'the fake source is test-only (needs NODE_ENV=test, RATIO_ALLOW_FAKE_SOURCE=1, and RATIO_ENV not staging/production)');
   }
 }
 
