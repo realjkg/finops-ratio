@@ -332,7 +332,7 @@ describe('round 18: monitoring predefined roles are refused when reachable by a 
   // pg_monitor includes both. Only pg_monitor / pg_read_all_stats carry
   // pg_catalog ACL entries, so the system-ACL scan alone would miss
   // pg_read_all_settings and depends on PostgreSQL's catalog grants.
-  for (const pre of ['pg_monitor', 'pg_read_all_stats', 'pg_read_all_settings']) {
+  for (const pre of ['pg_monitor', 'pg_read_all_stats', 'pg_read_all_settings', 'pg_stat_scan_tables']) {
     for (const parent of ['ratio_worker', 'ratio_reader', 'ratio_owner'] as const) {
       // ADMIN only (Copilot on #53, C1): with ADMIN OPTION a member can grant the role to itself, so it is assumable too.
       for (const edge of ['default', 'SET only', 'ADMIN only', 'transitive SET only'] as const) {

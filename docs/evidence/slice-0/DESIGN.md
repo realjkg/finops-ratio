@@ -1055,6 +1055,13 @@ CASCADE` after apply left `--status` at `matches: true`.
   - **Now** detection no longer depends on PostgreSQL's catalog grants.
     Mutations S1 and S2 show it: with the system-ACL scan stripped for these
     roles (S1), or removed entirely (S2), all 36 cases are still refused.
+  - **Deployment note.** Monitoring (`pg_monitor` or its parts) must use a
+    separate login that is not a member of any ratio role; a ratio-role
+    member that can assume one of these roles is refused.
+  - **Follow-up.** `pg_stat_scan_tables` was added to the same list. It
+    runs monitoring functions that take ACCESS SHARE locks on any table, and
+    it is also part of `pg_monitor`. It is checked with the same
+    3 parents × 4 edge kinds matrix.
 - **ADMIN-only edge (Copilot C1).** An edge with `ADMIN TRUE, INHERIT FALSE,
   SET FALSE` is assumable: the member can grant the role to itself. The
   refused-role closure already followed every edge. The round-17 and round-18

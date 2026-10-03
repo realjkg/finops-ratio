@@ -1710,3 +1710,59 @@ with `git checkout`; the tree was clean afterwards.
 | `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json and next-env.d.ts restored; no AGENTS.md or CLAUDE.md |
 | skip/only/todo/it.fails grep | 0 |
 | private cluster before deletion | `pg_db_role_setting` 0; `pg_parameter_acl` 0; only the three NOLOGIN ratio roles besides postgres; no non-`pg_` role is a member of any role. The only two edges into the listed predefined roles are PostgreSQL's built-in `pg_monitor` → `pg_read_all_settings` / `pg_read_all_stats`. No scratch databases. Then stopped, `/tmp/r18pg` deleted, port 55541 closed |
+
+# Round 19 follow-ups (challenger's round-18 Lows)
+
+**Branch.** The work was prepared on `slice/00-r18-stats-roles-identifiers`.
+After #55 was merged into main at 9bee5bb, it moved to
+`slice/00-r19-followups`, created from `origin/main`. Both commits were
+cherry-picked (original hashes 96532e0 and d8bc235), and the uncommitted
+docs were applied as a patch. Local commits only; nothing pushed.
+
+**Cluster.** All DB runs used a private PostgreSQL 16.14 cluster: initdb as
+postgres into `/tmp/r19pg`, 127.0.0.1:55542, TCP only. It was stopped and
+deleted at the end. Raw logs: `scratchpad/r20/`.
+
+**Nothing regenerated.**
+
+## R19.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 3d28ade | test(ingest): round 18 follow-up — pg_stat_scan_tables refused over any edge (red); canonIdent malformed marker for 'ratio.', '.t', '""' | tests (red) |
+| 9349229 | fix(ingest): refuse pg_stat_scan_tables when reachable by a ratio-role member | fix |
+| (this) | docs(evidence): Slice 0 round 19 follow-ups | docs (DESIGN §27 note, TEST_PLAN, EVIDENCE) |
+
+## R19.2 Red and mutations
+
+**Red.** The `pg_stat_scan_tables` matrix failed 12 of 12 (3 parents × 4 edge
+kinds). The check reported nothing for them, because `pg_stat_scan_tables`
+has no catalog ACL footprint. The malformed-marker unit test passed on
+arrival: it targets mutants that survived the earlier tests.
+
+**Mutations.** Each was restored with `git checkout`; the tree was clean
+afterwards.
+
+```
+Z5 empty unquoted part not malformed (`ratio.`, `.t`)   SURVIVED with the 5abcaab tests (88/88); KILLED with the new test (1 failed / 89)
+Z6 zero-length quoted part not malformed (`""`)          SURVIVED with the 5abcaab tests (88/88); KILLED with the new test (1 failed / 89)
+R4 pg_stat_scan_tables not refused                       KILLED  12
+```
+
+The challenger did not spell out Z5 and Z6, so these are my definitions.
+Z5 removes the `if (!part) return bad` check for unquoted parts. Z6 removes
+the same check for quoted parts. Under either mutant `canonIdent` returns a
+well-formed name, such as `"ratio".""`, instead of the malformed marker. The
+older tests only compared that result against other names, and so did not
+notice.
+
+## R19.3 Verification
+
+| Command | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | 1884/1884 (and again on the new branch) |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json and next-env.d.ts restored; no AGENTS.md or CLAUDE.md |
+| skip/only/todo grep | 0 |
+| `npm run test:db` ×3 (prepared branch), plus ×1 on `slice/00-r19-followups` (same code) | 4/4 exit 0: 377/377 parallel + 2/2 serial each |
+| private cluster before deletion | `pg_db_role_setting` 0; `pg_parameter_acl` 0; only the three NOLOGIN ratio roles besides postgres; no membership edge from a non-`pg_` role; no scratch databases. Then stopped, `/tmp/r19pg` deleted, port 55542 closed |

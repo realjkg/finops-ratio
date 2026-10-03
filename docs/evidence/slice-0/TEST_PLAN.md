@@ -322,3 +322,11 @@ All in `foundation.db.test.ts`.
 | C2: dots in names | `migrationFiles.test.ts` | `the repro: ratio. t is ratio.t, never the unqualified name ratio (both directions)`, `CREATE TABLE <10 spellings> matches every other spelling of ratio.t, and not ratio`, `canonical equality across spacing styles; a trailing or doubled dot is malformed and matches nothing` (with the no-backtracking guards), `schemas, types and routines too, including a space before the argument list` |
 | Sweep | `migrationFiles.test.ts` | `round 18 sweep: names never stop early …` (11 cases) |
 | canonIdent | `migrationFiles.test.ts` | `renders every part quoted; a doubled quote inside a quoted part stays one escaped quote`, `the classifier uses it: …` |
+
+## Round 18 follow-up: challenger Lows (red commit 96532e0)
+
+| Item | File | Test name(s) |
+|---|---|---|
+| L1 | DESIGN §27 | deployment note: monitoring uses a separate login that is not a member of any ratio role (docs only) |
+| L2 | `migrationFiles.test.ts` (fast) | `'ratio.', '.t', '""' and friends are malformed (marker prefix), not some other canonical name` |
+| L3 | `memberPrivileges.db.test.ts` | `pg_stat_scan_tables: a LOGIN member of <ratio_worker / ratio_reader / ratio_owner> that can assume it (<default / SET only / ADMIN only / transitive SET only> edge) is refused` (12) |
