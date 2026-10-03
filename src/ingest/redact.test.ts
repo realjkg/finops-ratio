@@ -87,6 +87,37 @@ describe('jsonLineRedactorFor (redact before serialize)', () => {
     expect(parsed.err.cause.message).toContain('[redacted]');
   });
 
+  it('a value that already holds the JSON-escaped form of the secret is redacted (W2)', () => {
+    const line = jsonLineRedactorFor({ RATIO_DATABASE_URL: url });
+    const escaped = JSON.stringify(secret).slice(1, -1); // pw\"q\\b%22x as literal characters
+    const text = line({ detail: `server said: ${escaped}`, [escaped]: 1 });
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const printedValues = [...Object.keys(parsed), ...Object.values(parsed).map(String)].join('\n');
+    for (const f of forms(secret)) {
+      expect(text, f).not.toContain(f);
+      expect(printedValues, f).not.toContain(f);
+    }
+  });
+
+  it('a worker log line with a BigInt, a Buffer and a toJSON that returns a secret is one valid, redacted line (L-k)', () => {
+    const line = jsonLineRedactorFor({ RATIO_DATABASE_URL: url });
+    const value = {
+      rows: BigInt('9007199254740993'),
+      payload: Buffer.from(`bytes ${secret}`, 'utf8'),
+      custom: { toJSON: () => ({ note: `custom ${secret}` }) },
+    };
+    let text = '';
+    expect(() => (text = line(value))).not.toThrow();
+    const parsed = JSON.parse(text);
+    // BigInt is printed as its exact decimal text (no float rounding).
+    expect(parsed.rows).toBe('9007199254740993');
+    // Raw bytes are never printed, not even index by index.
+    expect(parsed.payload).toBe('[binary]');
+    // toJSON is honoured and its result is redacted.
+    expect(parsed.custom).toEqual({ note: 'custom [redacted]' });
+    for (const f of forms(secret)) expect(text, f).not.toContain(f);
+  });
+
   it('the serialized-text backstop never truncates long output', () => {
     const line = jsonLineRedactorFor({});
     const value = { rows: Array.from({ length: 500 }, (_, i) => `row-${i}-${'x'.repeat(20)}`) };

@@ -253,24 +253,39 @@ describe('worker CLI (real Postgres + S3)', () => {
     expect((doc.record.results as { checks: Array<{ name: string; status: string }> }).checks).toContainEqual(expect.objectContaining({ name: 'migration_version', status: 'pass' }));
   });
 
-  it('K7 a password with quotes, backslashes and %22, also used as a nonexistent DB name, never reaches stdout, stderr or the evidence record', async () => {
+  it('K7 a password with quotes, backslashes and %22, also used as a nonexistent DB name, never reaches stdout, stderr or the evidence record (stdout and RATIO_EVIDENCE_FILE)', async () => {
     const secret = 'pw"q\\b%22x';
     const u = new URL(t.login.url);
     u.password = encodeURIComponent(secret);
     u.pathname = '/' + encodeURIComponent(secret);
-    const forms = [secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret), JSON.stringify(encodeURIComponent(secret)).slice(1, -1), 'pw\\"q'];
+    // A second-order form (URL-encoded JSON-escaped secret) passed as an argument:
+    // only the line redactor's own form set covers it, so the evidence file must go
+    // through the same line redactor as stdout (L-j / W4).
+    const encodedEscaped = encodeURIComponent(JSON.stringify(secret).slice(1, -1));
+    const forms = [secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret), JSON.stringify(encodeURIComponent(secret)).slice(1, -1), 'pw\\"q', encodedEscaped];
     const T = '11111111-1111-4111-8111-111111111111';
-    for (const argv of [
-      ['sync', '--tenant', T, '--source', 'focus-main'],
-      ['doctor', '--json', '--tenant', T],
-      ['quarantine', 'show', '--tenant', T, '--batch', T, '--json'],
-    ]) {
-      const r = await cli(argv, env({ RATIO_DATABASE_URL: u.toString(), RATIO_MIGRATE_DATABASE_URL: u.toString() }));
-      expect(r.code, argv[0]).toBe(1);
+    const evidenceFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-evf-k7-')), 'records.jsonl');
+    const printedRecords: string[] = [];
+    for (const [argv, code] of [
+      [['sync', '--tenant', T, '--source', 'focus-main'], 1],
+      [['doctor', '--json', '--tenant', T], 1],
+      [['quarantine', 'show', '--tenant', T, '--batch', T, '--json'], 1],
+      [['sync', '--tenant', T, '--source', encodedEscaped], 2],
+    ] as Array<[string[], number]>) {
+      const r = await cli(argv, env({ RATIO_DATABASE_URL: u.toString(), RATIO_MIGRATE_DATABASE_URL: u.toString(), RATIO_EVIDENCE_FILE: evidenceFile }));
+      expect(r.code, argv.join(' ')).toBe(code);
       expect(r.out, argv[0]).toHaveLength(1);
+      printedRecords.push(r.out[0]);
       const printed = r.out.concat(r.err).join('\n');
       for (const f of forms) expect(printed, `${argv[0]} leaks ${f}`).not.toContain(f);
     }
+    const fileText = fs.readFileSync(evidenceFile, 'utf8');
+    for (const f of forms) expect(fileText, `evidence file leaks ${f}`).not.toContain(f);
+    const fileLines = fileText.split('\n').filter((l) => l.length > 0);
+    expect(fileLines).toHaveLength(4);
+    for (const l of fileLines) expect(JSON.parse(l)).toMatchObject({ type: 'ratio.evidence', pass: false });
+    // The evidence file holds exactly the records printed on stdout (same line redactor).
+    expect(fileLines).toEqual(printedRecords);
   });
 });
 
