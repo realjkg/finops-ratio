@@ -51,7 +51,7 @@ export async function runReplayFixtures(opts: {
 }): Promise<ReplayFixturesResult> {
   const log = opts.log ?? (() => undefined);
   const tenantId = crypto.randomUUID();
-  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+  const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14); // yyyymmddhhmmss
   const tenantSlug = `fixture-${stamp}-${crypto.randomBytes(4).toString('hex')}`;
   const sourcePrefix = `ratio-replay-fixtures/${tenantId}`;
   const prefixOf = (key: string) => `${sourcePrefix}/${key}`;

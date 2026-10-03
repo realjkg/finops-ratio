@@ -1,6 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ['./pages/**/*.{ts,tsx}', './src/**/*.{ts,tsx}'],
+  // Server-only ingestion code (src/ingest) has no UI and must never contribute classes to the client CSS.
+  content: ['./pages/**/*.{ts,tsx}', './src/**/*.{ts,tsx}', '!./src/ingest/**'],
   theme: {
     extend: {
       colors: {
