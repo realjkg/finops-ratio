@@ -698,7 +698,7 @@ describe('round 8 L1: per-database / per-role setting defaults (pg_db_role_setti
   it('a migration that sets session_replication_role for the database is refused; nothing committed', async () => {
     const c = await expectRunnerRefuses(
       "DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET session_replication_role = replica', current_database()); END $$;\n",
-      /setting session_replication_role=replica .*database/,
+      /setting session_replication_role for role ALL in database /,
       { contract: true },
     );
     expect(
@@ -709,7 +709,7 @@ describe('round 8 L1: per-database / per-role setting defaults (pg_db_role_setti
   it('a migration that sets anything on ratio_worker IN DATABASE is refused; nothing committed', async () => {
     await expectRunnerRefuses(
       "DO $$ BEGIN EXECUTE format('ALTER ROLE ratio_worker IN DATABASE %I SET statement_timeout = 0', current_database()); END $$;\n",
-      /setting statement_timeout=0 for role ratio_worker/,
+      /setting statement_timeout for role ratio_worker/,
       { contract: true },
     );
   });
@@ -723,7 +723,7 @@ describe('round 8 L1: per-database / per-role setting defaults (pg_db_role_setti
     await c.query('BEGIN');
     try {
       await c.query('ALTER ROLE ratio_worker SET row_security = off');
-      await expect(assertReviewedPrivileges(c)).rejects.toThrow(/setting row_security=off for role ratio_worker/);
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(/setting row_security for role ratio_worker/);
     } finally {
       await c.query('ROLLBACK');
     }
@@ -744,7 +744,7 @@ describe('round 8 L1: per-database / per-role setting defaults (pg_db_role_setti
       await c.query('BEGIN');
       try {
         for (const q of stmts) await c.query(q);
-        await expect(assertReviewedPrivileges(c), stmts.join('; ')).rejects.toThrow(/setting (session_replication_role|search_path)=/);
+        await expect(assertReviewedPrivileges(c), stmts.join('; ')).rejects.toThrow(/setting (session_replication_role|search_path) for role/);
       } finally {
         await c.query('ROLLBACK');
       }
@@ -763,7 +763,7 @@ describe('round 8 L1: per-database / per-role setting defaults (pg_db_role_setti
     try {
       await c.query(`CREATE ROLE ${other} NOLOGIN`);
       await c.query(`DO $$ BEGIN EXECUTE format('ALTER ROLE ${other} IN DATABASE %I SET row_security = off', current_database()); END $$`);
-      await expect(assertReviewedPrivileges(c)).rejects.toThrow(new RegExp(`setting row_security=off for role ${other} in database`));
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(new RegExp(`setting row_security for role ${other} in database`));
     } finally {
       await c.query('ROLLBACK');
     }
@@ -822,7 +822,7 @@ describe('round 9 L1: a ratio.* custom setting default (e.g. a default tenant) i
   it('ALTER DATABASE … SET ratio.tenant_id (DO/format, contract) is refused by the per-migration check; nothing committed', async () => {
     const c = await expectRunnerRefuses(
       "DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET %s = %L', current_database(), 'ratio.tenant_id', 'aaaaaaaa-0000-4000-8000-000000000001'); END $$;\n",
-      /setting ratio\.tenant_id=aaaaaaaa-0000-4000-8000-000000000001 for role ALL in database/,
+      /setting ratio\.tenant_id for role ALL in database/,
       { contract: true },
     );
     expect(
@@ -845,7 +845,7 @@ describe('round 9 L1: a ratio.* custom setting default (e.g. a default tenant) i
     await expectRunnerRefuses(
       `CREATE ROLE ${login} LOGIN IN ROLE ratio_reader;\n` +
         `DO $$ BEGIN EXECUTE format('ALTER ROLE ${login} IN DATABASE %I SET %s = %L', current_database(), 'ratio.tenant_id', 'aaaaaaaa-0000-4000-8000-000000000001'); END $$;\n`,
-      new RegExp(`setting ratio\\.tenant_id=aaaaaaaa-0000-4000-8000-000000000001 for role ${login}`),
+      new RegExp(`setting ratio\\.tenant_id for role ${login}`),
       { contract: true },
     );
   });
@@ -860,7 +860,7 @@ describe('round 9 L1: a ratio.* custom setting default (e.g. a default tenant) i
       await c.query('BEGIN');
       try {
         await c.query(stmt);
-        await expect(assertReviewedPrivileges(c), stmt).rejects.toThrow(/setting ratio\.\w+=x for role ALL/i);
+        await expect(assertReviewedPrivileges(c), stmt).rejects.toThrow(/setting ratio\.\w+ for role ALL/i);
       } finally {
         await c.query('ROLLBACK');
       }
@@ -889,7 +889,7 @@ describe('round 9 L1: a ratio.* custom setting default (e.g. a default tenant) i
     expect(await fresh()).toBe(seed.a.publishedRows);
     const { privilegeModelViolations } = await model();
     const c = await connect(db);
-    expect((await privilegeModelViolations(c)).join('\n')).toMatch(/setting ratio\.tenant_id=/);
+    expect((await privilegeModelViolations(c)).join('\n')).toMatch(/setting ratio\.tenant_id for role/);
   });
 });
 
@@ -906,7 +906,112 @@ describe('round 9 L2: more security-relevant keys', () => {
       // Connect first: a *_preload_libraries default makes every NEW session load the library.
       const c = await connect(db);
       await c.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET ${key} = %L', current_database(), '${value}'); END $$`);
-      expect((await privilegeModelViolations(c)).join('\n'), key).toMatch(new RegExp(`setting ${key}=`));
+      expect((await privilegeModelViolations(c)).join('\n'), key).toMatch(new RegExp(`setting ${key} for role`));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 13 (Copilot on 0ef880f)
+// ---------------------------------------------------------------------------
+
+const SECRET_MARKER = 'SECRET-MARKER-7f3a9c';
+
+describe('round 13 H1: diagnostics never print setting values (or any source text)', () => {
+  it('a migration setting ratio.api_token is refused; the error names the key and scope but never the value', async () => {
+    const db = await freshDb();
+    const c = await connect(db);
+    const dir = migrationsWith({
+      '0002_secret.up.sql':
+        CONTRACT + `DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET %s = %L', current_database(), 'ratio.api_token', '${SECRET_MARKER}'); END $$;\n`,
+    });
+    const err = await migrateUp(c, { dir, allowContract: true }).then(
+      () => null,
+      (e: Error & { code?: string }) => e,
+    );
+    expect(err?.code).toBe('PRIVILEGE_MODEL_VIOLATION');
+    expect(err!.message).toMatch(/setting ratio\.api_token for role ALL in database /);
+    expect(err!.message).not.toContain(SECRET_MARKER);
+    expect(err!.message).not.toContain('SECRET-MARKER');
+  });
+
+  it('migrationStatus (what --status --json prints) reports the key only', async () => {
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    await db.pool.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET %s = %L', current_database(), 'ratio.api_token', '${SECRET_MARKER}'); END $$`);
+    const c = await connect(db);
+    const st = await migrationStatus(c);
+    const json = JSON.stringify(st);
+    expect(st.problems).toContain('PRIVILEGE_MODEL_VIOLATION');
+    expect(st.privilegeProblems.join('\n')).toMatch(/setting ratio\.api_token for role ALL in database /);
+    expect(json).not.toContain(SECRET_MARKER);
+  });
+
+  it('no diagnostic carries source text: a policy, a function body, a default and a constraint with a marker in them report names and hashes only', async () => {
+    const { privilegeModelViolations } = await model();
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    await c.query('BEGIN');
+    try {
+      await c.query(`DO $$ BEGIN EXECUTE 'CREATE ' || 'POLICY leak ON ratio.cost_facts USING (provider_name <> ''${SECRET_MARKER}'')'; END $$`);
+      await c.query(`CREATE OR REPLACE FUNCTION ratio.tg_refuse_truncate() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RAISE NOTICE '${SECRET_MARKER}'; RETURN NULL; END $f$`);
+      await c.query(`ALTER TABLE ratio.sources ALTER COLUMN display_name SET DEFAULT '${SECRET_MARKER}'`);
+      await c.query(`ALTER TABLE ratio.tenants ADD CONSTRAINT leak_check CHECK (slug <> '${SECRET_MARKER}')`);
+      const problems = (await privilegeModelViolations(c)).join('\n');
+      expect(problems).toMatch(/policy:ratio\.cost_facts:leak:/);
+      expect(problems).toMatch(/function:ratio\.tg_refuse_truncate\(\)/);
+      expect(problems).toMatch(/column:ratio\.sources:display_name:/);
+      expect(problems).not.toContain(SECRET_MARKER);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+});
+
+describe('round 13 H2: explicit ACL entries in system schemas for ratio roles and their members are refused (rolled back)', () => {
+  async function inTxn(fn: (c: Client) => Promise<void>): Promise<void> {
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    await c.query('BEGIN');
+    try {
+      await fn(c);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  }
+
+  it('positive control: a clean migrated database has no system-schema findings', async () => {
+    const { privilegeModelViolations } = await model();
+    await inTxn(async (c) => {
+      expect((await privilegeModelViolations(c)).filter((p) => /pg_catalog|information_schema/.test(p))).toEqual([]);
+    });
+  });
+
+  for (const [title, grant, re] of [
+    ['GRANT SELECT ON pg_catalog.pg_authid TO ratio_reader', 'GRANT SELECT ON pg_catalog.pg_authid TO ratio_reader', /ratio_reader holds explicit SELECT on pg_catalog\.pg_authid/],
+    ['a column grant on pg_authid(rolpassword)', 'GRANT SELECT (rolpassword) ON pg_catalog.pg_authid TO ratio_worker', /ratio_worker holds explicit SELECT\(rolpassword\) on pg_catalog\.pg_authid/],
+    ['GRANT EXECUTE ON FUNCTION pg_read_file(text) TO ratio_worker', 'GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO ratio_worker', /ratio_worker holds explicit EXECUTE on pg_catalog\.pg_read_file\(text\)/],
+    ['GRANT EXECUTE ON FUNCTION lo_import(text) TO ratio_owner', 'GRANT EXECUTE ON FUNCTION pg_catalog.lo_import(text) TO ratio_owner', /ratio_owner holds explicit EXECUTE on pg_catalog\.lo_import\(text\)/],
+    ['an explicit schema grant on information_schema', 'GRANT USAGE ON SCHEMA information_schema TO ratio_reader', /ratio_reader holds explicit USAGE on schema information_schema/],
+  ] as const) {
+    it(title, async () => {
+      const { assertReviewedPrivileges } = await model();
+      await inTxn(async (c) => {
+        await c.query(grant);
+        await expect(assertReviewedPrivileges(c)).rejects.toThrow(re);
+      });
+    });
+  }
+
+  it('a grant to a LOGIN member of ratio_reader', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const login = `ratio_probe_login_${Math.random().toString(16).slice(2, 10)}`;
+    await inTxn(async (c) => {
+      await c.query(`CREATE ROLE ${login} LOGIN IN ROLE ratio_reader`);
+      await c.query(`GRANT SELECT ON pg_catalog.pg_authid TO ${login}`);
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(new RegExp(`${login} holds explicit SELECT on pg_catalog\\.pg_authid`));
+    });
   });
 });

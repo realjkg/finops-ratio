@@ -344,6 +344,15 @@ describe('round 12 L1: every ratio table has RLS enabled + forced, a reviewed po
     );
   });
 
+  it('a new ratio table with RLS ENABLED but not FORCED (and the reviewed policy) is refused', async () => {
+    await expectPolicyRefusal(
+      'SET LOCAL ROLE ratio_owner;\nCREATE TABLE ratio.half (tenant_id uuid NOT NULL, x int);\n' +
+        'ALTER TABLE ratio.half ENABLE ROW LEVEL SECURITY;\n' +
+        "DO $$ BEGIN EXECUTE 'CREATE ' || 'POLICY tenant_isolation ON ratio.half USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id())'; END $$;\n",
+      /table ratio\.half must have row-level security enabled and forced/,
+    );
+  });
+
   it('a new ratio table with RLS forced but no reviewed policy is refused', async () => {
     await expectPolicyRefusal(
       'SET LOCAL ROLE ratio_owner;\nCREATE TABLE ratio.plain (tenant_id uuid NOT NULL, x int);\n' +
