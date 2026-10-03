@@ -12,6 +12,7 @@
 
 import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import { checkAuth, resolveGatewayAuth, type GatewayEnv } from './auth';
+import { redactErrorText } from '@/costsource/transports/redact';
 import {
   SlidingWindowRateLimiter,
   type RateLimitResult,
@@ -169,8 +170,10 @@ export function withGateway(
     try {
       await handler(req, res, { tenant });
     } catch (err) {
-      // Never leak a stack trace — only the message in the envelope.
-      const message = err instanceof Error ? err.message : String(err);
+      // Never leak a stack trace — only the message in the envelope, redacted
+      // (Bearer tokens, URL query strings / SAS, AWS key ids) as a second line
+      // of defence against upstream text reaching the caller.
+      const message = redactErrorText(err);
       if (!res.headersSent) sendError(res, 500, 'internal_error', message);
     } finally {
       finish(res.statusCode);

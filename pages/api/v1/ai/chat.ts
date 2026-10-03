@@ -23,6 +23,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { AIContext, AIMessage } from '@/ai/AIClient';
+import { logUpstreamError, readJsonBody, statusReason } from '@/costsource/transports/redact';
 import { MockAIClient } from '@/ai/MockAIClient';
 import {
   OPENAI_COMPATIBLE_PRESETS,
@@ -138,11 +139,14 @@ class OpenAICompatibleAdapter implements AIAdapter {
       }),
     });
     if (!res.ok) {
-      throw new Error(`${this.label} error ${res.status}: ${await res.text()}`);
+      // Status + fixed reason only; the provider body goes to the redacted log.
+      const text = await res.text().catch(() => '');
+      if (text) logUpstreamError(this.label, res.status, text);
+      throw new Error(`${this.label} error ${res.status} (${statusReason(res.status)})`);
     }
-    const data = (await res.json()) as {
+    const data = await readJsonBody<{
       choices: Array<{ message: { content: string } }>;
-    };
+    }>(res, this.label);
     return data.choices[0]?.message.content ?? '';
   }
 }

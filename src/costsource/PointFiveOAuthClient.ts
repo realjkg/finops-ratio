@@ -11,6 +11,7 @@
 
 import type { PointFiveCredentials } from './pointfiveConfig';
 import { logUpstreamError, readJsonBody, statusReason } from './transports/focusExport';
+import { redactErrorText } from './transports/redact';
 
 const LABEL = 'PointFive OAuth token endpoint';
 
@@ -81,9 +82,7 @@ export class PointFiveOAuthClient {
         body,
       });
     } catch (err) {
-      throw new Error(
-        `PointFive OAuth token request failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      throw new Error(`PointFive OAuth token request failed: ${redactErrorText(err)}`);
     }
 
     if (!res.ok) {

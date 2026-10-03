@@ -24,17 +24,10 @@ import type {
 import { CANONICAL_FOCUS_VERSION } from './focusVersions';
 import type { RawSourceRow } from './focusRows';
 import { normalizeRows } from './normalize';
-import { redactUpstreamText } from './transports/redact';
-
-/**
- * Second line of defence: transports already keep upstream bodies out of their
- * errors, but anything that surfaces in health detail or a rethrown error is
- * redacted (Bearer tokens, URL query strings / SAS, AWS key ids) anyway.
- */
-const MAX_SURFACED_ERROR_CHARS = 1000;
-function safeErrorText(err: unknown): string {
-  return redactUpstreamText(err instanceof Error ? err.message : String(err), MAX_SURFACED_ERROR_CHARS);
-}
+// Second line of defence: transports already keep upstream bodies out of their
+// errors, but anything surfacing in health detail or a rethrown error is
+// redacted (Bearer tokens, URL query strings / SAS, AWS key ids) anyway.
+import { redactErrorText as safeErrorText } from './transports/redact';
 import {
   connectorDescriptor,
   connectorStatusNote,

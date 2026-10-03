@@ -14,7 +14,8 @@
 // Returns: CostRowsResult (normalized v1.4 rows + upgrade audit)
 //
 // Errors:
-//   400 — missing / invalid body fields
+//   400 — missing / invalid body fields, or an invalid FOCUS row (named by
+//         number — rows are validated, never silently normalized)
 //   422 — sourceId is not a focus_file kind source
 //   405 — non-POST method
 
@@ -24,6 +25,7 @@ import { findSource } from '@/costsource/seed';
 import type { CostRowsResult } from '@/costsource';
 import type { FocusVersion } from '@/costsource';
 import { FOCUS_VERSIONS } from '@/costsource';
+import { validateFocusRecords } from '@/costsource/transports/focusExport';
 
 function currentMonth(): { start: string; end: string } {
   const now = new Date();
@@ -78,7 +80,15 @@ export default async function handler(
       ? (windowRaw as { start: string; end: string })
       : currentMonth();
 
-  const result = FocusFileAdapter.ingest(rows, version, sourceId, window);
+  let validated;
+  try {
+    validated = validateFocusRecords(rows as Record<string, unknown>[], sourceId);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    return;
+  }
+
+  const result = FocusFileAdapter.ingest(validated, version, sourceId, window);
   res.status(200).json(result);
 }
 

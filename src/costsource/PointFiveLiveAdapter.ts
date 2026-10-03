@@ -26,6 +26,8 @@ import type {
 } from './CostSourceClient';
 import { CANONICAL_FOCUS_VERSION } from './focusVersions';
 import { normalizeRows } from './normalize';
+import { validateFocusRecords } from './transports/focusExport';
+import { redactErrorText } from './transports/redact';
 import { resolveWorkloadId } from './seed';
 import {
   POINTFIVE_FOCUS_VERSION,
@@ -150,18 +152,29 @@ export class PointFiveLiveAdapter {
         ...base,
         reachable: false,
         authed: false,
-        detail: `PointFive MCP health check failed: ${err instanceof Error ? err.message : String(err)}`,
+        detail: `PointFive MCP health check failed: ${redactErrorText(err)}`,
       };
     }
   }
 
   async fetchCostRows(window: CostWindow): Promise<CostRowsResult> {
     const credentials = this.requireConfigured('fetch cost rows');
-    const billing = await this.buildTransport(credentials).fetchBillingRows(window);
+    let billing: Record<string, unknown>[];
+    try {
+      billing = (await this.buildTransport(credentials).fetchBillingRows(window)) as unknown as Record<
+        string,
+        unknown
+      >[];
+    } catch (err) {
+      throw new Error(redactErrorText(err));
+    }
+    // Same validator as the FOCUS-export transports: an invalid row throws
+    // `pointfive-live: invalid FOCUS row N: <reason>` — never silently normalized.
+    const validated = validateFocusRecords(billing, POINTFIVE_LIVE_SOURCE_ID);
     // Reuse the existing version-negotiation shim: PointFive's FOCUS v1.0 export
     // is upgraded to the v1.4 canonical model and given Ratio's value context.
     const { rows, backfilledColumns } = normalizeRows(
-      billing,
+      validated,
       POINTFIVE_LIVE_SOURCE_ID,
       POINTFIVE_FOCUS_VERSION,
     );
@@ -180,10 +193,13 @@ export class PointFiveLiveAdapter {
     // Inert when dark: no transport, no network, just an empty finding set.
     if (this.status.state !== 'configured') return [];
     const client = this.buildTransport(this.status.credentials);
-    const [opportunities, anomalies] = await Promise.all([
-      client.listOpportunities(),
-      client.listAnomalies(),
-    ]);
+    let opportunities: PointFiveOpportunity[];
+    let anomalies: PointFiveAnomaly[];
+    try {
+      [opportunities, anomalies] = await Promise.all([client.listOpportunities(), client.listAnomalies()]);
+    } catch (err) {
+      throw new Error(redactErrorText(err));
+    }
     return [
       ...opportunities.map((o) => mapOpportunityToFinding(o, POINTFIVE_LIVE_SOURCE_ID)),
       ...anomalies.map((a) => mapAnomalyToFinding(a, POINTFIVE_LIVE_SOURCE_ID)),

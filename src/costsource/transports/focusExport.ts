@@ -13,7 +13,7 @@
 import type { CostWindow } from '../CostSourceClient';
 import type { RawSourceRow } from '../focusRows';
 import { COLUMNS_BY_VERSION } from '../focusVersions';
-import { redactUpstreamText } from './redact';
+import { logUpstreamError, redactErrorText, statusReason } from './redact';
 
 // --- fetch ------------------------------------------------------------------
 
@@ -22,36 +22,9 @@ export type FetchLike = typeof fetch;
 /** Default per-request timeout for connector calls. A health probe must never hang. */
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
-/** Fixed, body-free reason for an upstream HTTP status. */
-export function statusReason(status: number): string {
-  if (status === 400) return 'bad request';
-  if (status === 401) return 'unauthorized';
-  if (status === 403) return 'forbidden';
-  if (status === 404) return 'not found';
-  if (status === 408) return 'timeout';
-  if (status === 429) return 'rate limited';
-  if (status >= 500) return 'upstream error';
-  return 'request failed';
-}
-
-/**
- * Logs an upstream error body server-side ONLY (structured JSON, redacted,
- * truncated). Never part of an error that reaches an API caller.
- */
-export function logUpstreamError(label: string, status: number, body: string): void {
-  console.warn(
-    JSON.stringify({ tag: 'connector-upstream-error', label, status, body: redactUpstreamText(body) }),
-  );
-}
-
-/** Parse a JSON body with a FIXED error: a runtime JSON error would quote upstream content. */
-export async function readJsonBody<T>(res: { json(): Promise<unknown> }, label: string): Promise<T> {
-  try {
-    return (await res.json()) as T;
-  } catch {
-    throw new Error(`${label} returned a non-JSON response`);
-  }
-}
+// Upstream-error hygiene helpers live in ./redact (shared with the PointFive,
+// AI and change-management adapters); re-exported here for transport callers.
+export { logUpstreamError, readJsonBody, statusReason } from './redact';
 
 /**
  * fetch with a timeout and a typed, secret-free error on non-2xx. The thrown
@@ -69,7 +42,7 @@ export async function fetchChecked(
   try {
     res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
-    throw new Error(`${label} unreachable: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`${label} unreachable: ${redactErrorText(err)}`);
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
@@ -313,16 +286,12 @@ export function inWindow(row: RawSourceRow, window: CostWindow): boolean {
 }
 
 /**
- * Loose records → coerced, window-filtered FOCUS rows. Every record is validated
- * first: an invalid one throws naming `artifact` and its 1-based row number — it
- * is never dropped. Rows outside the window are filtered (selection, not loss).
+ * The shared FOCUS row validator: every record is coerced, and an invalid one
+ * throws `<artifact>: invalid FOCUS row N: <reason>` (1-based) — it is never
+ * dropped or silently normalized. No window filtering.
  */
-export function rowsFromRecords(
-  records: Record<string, unknown>[],
-  window: CostWindow,
-  artifact: string,
-): RawSourceRow[] {
-  const rows = records.map((rec, i) => {
+export function validateFocusRecords(records: Record<string, unknown>[], artifact: string): RawSourceRow[] {
+  return records.map((rec, i) => {
     try {
       return coerceFocusRecord(rec);
     } catch (err) {
@@ -330,7 +299,18 @@ export function rowsFromRecords(
       throw new Error(`${artifact}: invalid FOCUS row ${i + 1}: ${reason}`);
     }
   });
-  return rows.filter((r) => inWindow(r, window));
+}
+
+/**
+ * Loose records → validated (see `validateFocusRecords`), window-filtered FOCUS
+ * rows. Rows outside the window are filtered (selection, not loss).
+ */
+export function rowsFromRecords(
+  records: Record<string, unknown>[],
+  window: CostWindow,
+  artifact: string,
+): RawSourceRow[] {
+  return validateFocusRecords(records, artifact).filter((r) => inWindow(r, window));
 }
 
 /** Export text → coerced, window-filtered FOCUS rows (throws on any invalid row). */

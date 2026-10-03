@@ -26,3 +26,46 @@ export function redactUpstreamText(text: string, maxChars = MAX_LOGGED_BODY_CHAR
     .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[REDACTED_AWS_KEY_ID]');
   return redacted.slice(0, maxChars);
 }
+
+/** Max characters of error text surfaced in health detail / rethrown errors. */
+export const MAX_SURFACED_ERROR_CHARS = 1000;
+
+/**
+ * Redacted text of an error for anything that reaches an API caller (health
+ * detail, rethrown adapter errors) — a second line of defence behind the
+ * transports' own status-only errors.
+ */
+export function redactErrorText(err: unknown): string {
+  return redactUpstreamText(err instanceof Error ? err.message : String(err), MAX_SURFACED_ERROR_CHARS);
+}
+
+/** Fixed, body-free reason for an upstream HTTP status. */
+export function statusReason(status: number): string {
+  if (status === 400) return 'bad request';
+  if (status === 401) return 'unauthorized';
+  if (status === 403) return 'forbidden';
+  if (status === 404) return 'not found';
+  if (status === 408) return 'timeout';
+  if (status === 429) return 'rate limited';
+  if (status >= 500) return 'upstream error';
+  return 'request failed';
+}
+
+/**
+ * Logs an upstream error body server-side ONLY (structured JSON, redacted,
+ * truncated). Never part of an error that reaches an API caller.
+ */
+export function logUpstreamError(label: string, status: number, body: string): void {
+  console.warn(
+    JSON.stringify({ tag: 'upstream-error', label, status, body: redactUpstreamText(body) }),
+  );
+}
+
+/** Parse a JSON body with a FIXED error: a runtime JSON error would quote upstream content. */
+export async function readJsonBody<T>(res: { json(): Promise<unknown> }, label: string): Promise<T> {
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new Error(`${label} returned a non-JSON response`);
+  }
+}
