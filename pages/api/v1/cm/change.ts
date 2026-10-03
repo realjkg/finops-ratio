@@ -473,11 +473,14 @@ async function dispatch(adapter: CMAdapter, body: CMRequestBody, res: NextApiRes
       break;
     }
     case 'attach': {
+      // The audit record names the provider this deployment actually resolved
+      // (CM_PROVIDER / mock). The body's `provider` is ignored: a caller must
+      // not be able to label a mock or Jira reference as another system's.
       const record = await adapter.attachReference({
-        provider: body.provider,
+        provider: adapter.provider,
         ticketRef: body.ticketRef,
       });
-      res.status(200).json(record);
+      res.status(200).json({ ...record, provider: adapter.provider });
       break;
     }
     case 'status': {
