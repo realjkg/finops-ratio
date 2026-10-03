@@ -79,8 +79,26 @@ Auto-merge (squash, pinned to the evaluated head SHA) is enabled only when
   - Commit statuses never satisfy CI.
 - Every check run returned for the head SHA succeeded. No run is collapsed by
   name, in any suite (the API's `filter=latest` already returns the latest run
-  per suite). No check run is excluded by name: the governance jobs run on
-  base-context events, so their check runs are not on the PR head SHA.
+  per suite).
+
+  Our own governance workflow's check runs *do* appear on the PR head SHA,
+  because `pull_request_target` job runs attach to it (PR #47). A run counts
+  as ours only when all of these hold, and never by name alone:
+  - the app is GitHub Actions (15368);
+  - the workflow path is `.github/workflows/governance.yml`;
+  - the event is base-context (never `pull_request`);
+  - the workflow run's head repository is the PR's base repository.
+
+  Each check run's suite is resolved to its workflow run, by `check_suite_id`
+  where needed. Unresolved suites are ordinary checks.
+
+  Of our runs, `Governance · eligibility targets`, `Governance · merge
+  eligibility (#n)` and `Governance · revocations` are not inputs. The first two
+  are this decision's own jobs; the last only runs on comment events and is
+  skipped otherwise. `Governance · risk classification` remains an input and
+  must be completed and successful. A same-named run from another app,
+  workflow, event or repository is an ordinary check, so a skipped or failed
+  impostor still blocks.
 - Every commit status is `success`, except our own `Governance · merge
   eligibility` status, which is an output of this decision and is ignored.
 - A submitted review by `copilot-pull-request-reviewer[bot]` (type `Bot`) on

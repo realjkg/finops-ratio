@@ -306,7 +306,22 @@ export async function gatherState(github, repo, number, { eventComment } = {}) {
   const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
     ...repo, head_sha: headSha, event: 'pull_request', per_page: 100,
   });
-  const pathBySuite = new Map(runs.map((r) => [r.check_suite_id, r.path]));
+  // Resolve every check run's suite to its workflow run (path, event, head
+  // repository). The head_sha listing above only covers pull_request runs, so
+  // other suites (e.g. our pull_request_target governance runs) are resolved by
+  // check_suite_id. Unresolved ⇒ treated as an ordinary check (fail closed).
+  const runMeta = (r) => ({ path: r.path, event: r.event, headRepo: r.head_repository?.full_name });
+  const suiteMeta = new Map(runs.map((r) => [r.check_suite_id, runMeta(r)]));
+  const unresolved = [...new Set(checkRuns.map((c) => c.check_suite?.id).filter((id) => id != null && !suiteMeta.has(id)))];
+  for (const suiteId of unresolved) {
+    try {
+      const found = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, { ...repo, check_suite_id: suiteId, per_page: 100 });
+      const run = found.find((r) => r.check_suite_id === suiteId);
+      if (run) suiteMeta.set(suiteId, runMeta(run));
+    } catch {
+      // leave unresolved
+    }
+  }
   const ciPath = DEFAULT_CONFIG.ciCheck.workflowPath;
   // Only runs listing THIS PR against main count, and EVERY such run must have
   // a successful CI job on its latest attempt: a run triggered by another PR
@@ -393,7 +408,9 @@ export async function gatherState(github, repo, number, { eventComment } = {}) {
         status: c.status,
         conclusion: c.conclusion,
         appId: c.app?.id,
-        workflowPath: pathBySuite.get(c.check_suite?.id),
+        workflowPath: suiteMeta.get(c.check_suite?.id)?.path,
+        workflowEvent: suiteMeta.get(c.check_suite?.id)?.event,
+        workflowHeadRepo: suiteMeta.get(c.check_suite?.id)?.headRepo,
       })),
       statuses: (combined.statuses ?? []).map((s) => ({ context: s.context, state: s.state })),
       ciJobs,
