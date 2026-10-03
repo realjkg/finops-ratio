@@ -192,8 +192,9 @@ How each one reads its data (`src/costsource/transports/`, web-standard APIs onl
 
 - **Azure** — lists the export container with the SAS (needs `r` + `l`), picks
   the latest run for each requested month and reads ONLY the blobs its
-  `manifest.json` lists (no manifest, or a listed blob missing → error);
-  `AZURE_FOCUS_EXPORT_URL` can also point at a single blob.
+  `manifest.json` lists (no manifest, or a listed blob missing → error).
+  `AZURE_FOCUS_EXPORT_URL` must name the container (+ optional path); a
+  single-blob URL is rejected because one file cannot be verified as complete.
 - **AWS** — `ListObjectsV2` + `GetObject` signed with SigV4 (verified against the
   AWS reference vectors); for each billing period in the window it reads ONLY
   the `dataFiles` of the `metadata/BILLING_PERIOD=YYYY-MM/…-Manifest.json`
@@ -220,10 +221,14 @@ token. Every other source id — live connectors, PointFive live, and unknown id
 requires `Authorization: Bearer <RATIO_API_TOKEN>` (compared in constant time)
 and is refused outright when no token is configured; unknown ids answer 404 only
 after authentication. After 1,000 failed authentications in a minute from one
-client IP, every non-sandbox request from it gets 429. `GET
-/api/costsource/sources` shows live connector status only to authenticated
-callers; anonymous callers see the neutral registry. The offline demo is
-unchanged.
+client IP, every non-sandbox request from it gets 429. The client IP is the
+socket address; `X-Forwarded-For` is ignored unless `RATIO_TRUSTED_PROXY_HOPS=N`
+(integer ≥ 1) declares N trusted proxies, in which case the Nth entry from the
+right is used. The limiter is **per process** — each serverless instance counts
+separately — so a shared store is a deployment-brief item. `GET
+/api/costsource/sources` and `GET /api/v1/connectors` show live connector
+status only to authenticated callers; anonymous callers see the neutral
+registry. The offline demo is unchanged.
 
 **Fail loudly, never partially.** A connector either returns the complete data
 for the window or errors: too many export files, a truncated listing, a missing
