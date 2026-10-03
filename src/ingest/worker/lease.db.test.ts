@@ -216,10 +216,10 @@ describe('leases and concurrency', () => {
   it('L2 (challenger) a zombie whose lease expired cannot record a retry (attempt and retries unchanged)', async () => {
     const s = await seedTenantSource(t.db.pool);
     class ExpiringFailingSource extends FakeFocusSource {
-      calls = 0;
+      openCalls = 0;
       async openArtifact(ref: ArtifactRef): Promise<Readable> {
-        this.calls++;
-        if (this.calls === 1) {
+        this.openCalls++;
+        if (this.openCalls === 1) {
           await expireLeases(t.db.pool, s.tenantId, s.sourceId);
           throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
         }
@@ -231,7 +231,7 @@ describe('leases and concurrency', () => {
     const run = (await runsOf(t.db.pool, s.tenantId, s.sourceId))[0];
     expect(run.attempt).toBe(1);
     expect((run.stats as { retries?: unknown[] }).retries ?? []).toEqual([]);
-    expect(src.calls).toBe(1);
+    expect(src.openCalls).toBe(1);
   });
 });
 
