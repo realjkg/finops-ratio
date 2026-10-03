@@ -1,7 +1,7 @@
 // Workflow glue tested against an in-memory fake of the github-script Octokit.
 import { describe, it, expect } from 'vitest';
 import {
-  runClassify, runEligibility, runTargets, upsertReportComment, fetchChangeSet, mainProtection,
+  runClassify, runEligibility, runTargets, runRevocations, revocationFromEvent, upsertReportComment, fetchChangeSet, mainProtection,
 } from './gh-actions.mjs';
 import { classify } from './classify-risk.mjs';
 import { REPORT_MARKER } from './report.mjs';
@@ -83,7 +83,7 @@ function fakeGithub(opts = {}) {
       repos: {
         getBranch: rec('repos.getBranch', opts.branchError ? err('x', 403) : { protected: true }),
         getBranchRules: rec('repos.getBranchRules', opts.rulesError ? err('x', 404) : (opts.rules ?? [])),
-        createCommitStatus: rec('repos.createCommitStatus', {}),
+        createCommitStatus: rec('repos.createCommitStatus', (p) => (opts.statusError ? opts.statusError(p) : undefined) ?? {}),
         getCollaboratorPermissionLevel: rec('repos.getCollaboratorPermissionLevel', (p) => (opts.roles ?? {})[p.username] ?? { permission: 'write', role_name: 'write' }),
         getCombinedStatusForRef: rec('repos.getCombinedStatusForRef', { statuses: opts.statuses ?? [] }),
         listCommitStatusesForRef: rec('repos.listCommitStatusesForRef', (p) => (opts.statusesBySha ?? {})[p.ref] ?? []),
@@ -122,7 +122,8 @@ function fakeGithub(opts = {}) {
 function fakeCore() {
   const core = {
     out: '', failed: null, warnings: [], outputs: {},
-    info: () => {}, warning: (m) => core.warnings.push(m), setFailed: (m) => { core.failed = m; },
+    errors: [],
+    info: () => {}, warning: (m) => core.warnings.push(m), error: (m) => core.errors.push(m), setFailed: (m) => { core.failed = m; },
     setOutput: (k, v) => { core.outputs[k] = v; },
   };
   core.summary = { addRaw: (s) => { core.out += s; return core.summary; }, write: async () => {} };
@@ -771,7 +772,146 @@ describe('R1: sticky revocation', () => {
     const { github, pr } = fakeGithub();
     await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
     expect(names(github.calls)).not.toContain('issues.listComments');
-    expect(names(github.calls)).not.toContain('repos.listCommitStatusesForRef');
+  });
+});
+
+const BOT = { login: 'github-actions[bot]', type: 'Bot' };
+const statusCallsOrder = (github) => github.calls
+  .filter((c) => c.name === 'repos.createCommitStatus')
+  .map((c) => `${c.params.context}@${c.params.sha.slice(0, 1)}:${c.params.state}`);
+
+describe('Q1: eligibility status is posted only when it changes; cap errors are red', () => {
+  const LOW_OK = 'Eligible: risk:low and every gate passed.';
+  it('unchanged decision (latest bot status has the same state+description) posts nothing', async () => {
+    const { github, pr } = fakeGithub({ statusesBySha: { [HEAD]: [{ context: 'Governance · merge eligibility', state: 'success', description: LOW_OK, creator: BOT }] } });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)).toHaveLength(0);
+  });
+  it('only the LATEST bot status counts (API lists newest first)', async () => {
+    const { github, pr } = fakeGithub({ statusesBySha: { [HEAD]: [
+      { context: 'Governance · merge eligibility', state: 'failure', description: 'x', creator: BOT },
+      { context: 'Governance · merge eligibility', state: 'success', description: LOW_OK, creator: BOT },
+    ] } });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)).toHaveLength(1);
+    expect(eligStatus(github)[0].params.state).toBe('success');
+  });
+  it('a matching status by someone else does not count — the bot status is posted', async () => {
+    const { github, pr } = fakeGithub({ statusesBySha: { [HEAD]: [{ context: 'Governance · merge eligibility', state: 'success', description: LOW_OK, creator: { login: 'mallory', type: 'User' } }] } });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)).toHaveLength(1);
+  });
+  it('changed decision posts', async () => {
+    const { github, pr } = fakeGithub({ reviews: [], statusesBySha: { [HEAD]: [{ context: 'Governance · merge eligibility', state: 'success', description: LOW_OK, creator: BOT }] } });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)).toHaveLength(1);
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+  });
+  it('deferral path: fetches the new head\'s statuses and skips an unchanged pending', async () => {
+    const { github, pr } = fakeGithub({
+      headMovesAfterFirstGet: true,
+      statusesBySha: { [MOVED]: [{ context: 'Governance · merge eligibility', state: 'pending', description: 'Head moved during evaluation; re-evaluation pending.', creator: BOT }] },
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)).toHaveLength(0);
+    expect(github.calls.some((c) => c.name === 'repos.listCommitStatusesForRef' && c.params.ref === MOVED)).toBe(true);
+  });
+  it('if fetching existing statuses fails on the deferral path, post anyway', async () => {
+    const { github, pr } = fakeGithub({ headMovesAfterFirstGet: true });
+    const orig = github.rest.repos.listCommitStatusesForRef;
+    github.rest.repos.listCommitStatusesForRef = async (p) => {
+      if (p.ref === MOVED) throw Object.assign(new Error('boom'), { status: 500 });
+      return orig(p);
+    };
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github).map((c) => c.params.state)).toEqual(['pending']);
+  });
+  it('revocation: eligibility failure is posted BEFORE the "exception revoked" marker', async () => {
+    const restrictedFiles = [{ filename: 'package.json', status: 'modified', patch: '+x', changes: 1 }];
+    const edited = { id: 10, body: `/exception-approve ${HEAD}`, user: { login: 'boss', type: 'User' }, created_at: 'a', updated_at: 'b' };
+    const { github, pr } = fakeGithub({ files: restrictedFiles, labels: ['risk:restricted'], roles: { boss: { permission: 'admin', role_name: 'admin' } }, comments: [edited] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    const order = statusCallsOrder(github);
+    const firstFail = order.indexOf('Governance · merge eligibility@b:failure');
+    const marker = order.indexOf('Governance · exception revoked@b:failure');
+    expect(firstFail).toBeGreaterThanOrEqual(0);
+    expect(marker).toBeGreaterThan(firstFail);
+  });
+  it('cap error (1000 statuses per SHA+context) ⇒ surfaced as an error and the job fails', async () => {
+    const { github, pr } = fakeGithub({
+      statusError: (p) => (p.context === 'Governance · merge eligibility'
+        ? Object.assign(new Error('This SHA and context has reached the maximum number of statuses.'), { status: 422 })
+        : undefined),
+    });
+    const core = fakeCore();
+    await runEligibility({ github, core, context: prCtx(pr) });
+    expect(core.failed).toBeTruthy();
+    expect(core.errors.join('\n')).toMatch(/maximum number of statuses.*push a new commit/is);
+  });
+});
+
+describe('Q4: an already-marked SHA is never marked again', () => {
+  const restrictedFiles = [{ filename: 'package.json', status: 'modified', patch: '+x', changes: 1 }];
+  const ADMIN = { boss: { permission: 'admin', role_name: 'admin' } };
+  const cm = (id, body) => ({ id, body, user: { login: 'boss', type: 'User' }, created_at: 'a', updated_at: 'a' });
+  const marker = { context: 'Governance · exception revoked', state: 'failure', description: 'exception revoked by @boss in comment 11', creator: BOT };
+  it('second revocation for the marked head posts no marker (and no extra eligibility failure from recording)', async () => {
+    const { github, pr } = fakeGithub({
+      files: restrictedFiles, labels: ['risk:restricted'], roles: ADMIN,
+      comments: [cm(10, `/exception-approve ${HEAD}`), cm(11, `/exception-revoke ${HEAD}`), cm(12, `/exception-revoke ${HEAD}`)],
+      statusesBySha: { [HEAD]: [marker] },
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(revokedStatus(github)).toHaveLength(0);
+    expect(eligStatus(github)).toHaveLength(1); // only the decision itself
+  });
+  it('second revocation for a marked OTHER SHA posts nothing on it', async () => {
+    const { github, pr } = fakeGithub({
+      files: restrictedFiles, labels: ['risk:restricted'], roles: ADMIN,
+      comments: [cm(10, `/exception-approve ${HEAD}`), cm(11, `/exception-revoke ${MOVED}`)],
+      statusesBySha: { [MOVED]: [marker] },
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(github.calls.filter((c) => c.name === 'repos.createCommitStatus' && c.params.sha === MOVED)).toHaveLength(0);
+  });
+});
+
+describe('Q2: revocations job (edited/deleted comment events)', () => {
+  const ev = (action, comment, changes) => ({ action, issue: { number: 5, pull_request: { url: 'x' } }, comment, ...(changes ? { changes } : {}) });
+  const boss = { login: 'boss', type: 'User' };
+  it('revocationFromEvent: deleted command ⇒ revocation of the SHA it named', () => {
+    expect(revocationFromEvent(ev('deleted', { id: 7, body: `/exception-revoke ${HEAD}\nwhy`, user: boss })))
+      .toEqual({ sha: HEAD, login: 'boss', commentId: 7, why: 'edited-or-deleted', prNumber: 5 });
+  });
+  it('revocationFromEvent: edited command uses the PREVIOUS body', () => {
+    expect(revocationFromEvent(ev('edited', { id: 8, body: 'hi', user: boss }, { body: { from: `/exception-approve ${HEAD}` } })))
+      .toMatchObject({ sha: HEAD, commentId: 8 });
+    expect(revocationFromEvent(ev('edited', { id: 8, body: `/exception-approve ${HEAD}`, user: boss }, { title: { from: 'x' } }))).toBeNull();
+  });
+  it('revocationFromEvent: created, non-PR, bot, malformed ⇒ null', () => {
+    expect(revocationFromEvent(ev('created', { id: 1, body: `/exception-revoke ${HEAD}`, user: boss }))).toBeNull();
+    expect(revocationFromEvent({ ...ev('deleted', { id: 1, body: `/exception-revoke ${HEAD}`, user: boss }), issue: { number: 9 } })).toBeNull();
+    expect(revocationFromEvent(ev('deleted', { id: 1, body: `/exception-revoke ${HEAD}`, user: BOT }))).toBeNull();
+    expect(revocationFromEvent(ev('deleted', { id: 1, body: '/exception-revoke abc', user: boss }))).toBeNull();
+  });
+  it('runRevocations: admin ⇒ eligibility failure then marker on that SHA', async () => {
+    const { github } = fakeGithub({ roles: { boss: { permission: 'admin', role_name: 'admin' } } });
+    await runRevocations({ github, core: fakeCore(), context: { repo: REPO, payload: ev('deleted', { id: 7, body: `/exception-revoke ${HEAD}`, user: boss }) } });
+    expect(statusCallsOrder(github)).toEqual(['Governance · merge eligibility@b:failure', 'Governance · exception revoked@b:failure']);
+    expect(revokedStatus(github)[0].params.description).toBe('exception revoked by @boss in comment 7');
+  });
+  it('runRevocations: write-only author ⇒ nothing posted', async () => {
+    const { github } = fakeGithub({ roles: { boss: { permission: 'write', role_name: 'write' } } });
+    await runRevocations({ github, core: fakeCore(), context: { repo: REPO, payload: ev('deleted', { id: 7, body: `/exception-revoke ${HEAD}`, user: boss }) } });
+    expect(names(github.calls)).not.toContain('repos.createCommitStatus');
+  });
+  it('runRevocations: already marked ⇒ nothing posted', async () => {
+    const { github } = fakeGithub({
+      roles: { boss: { permission: 'admin', role_name: 'admin' } },
+      statusesBySha: { [HEAD]: [{ context: 'Governance · exception revoked', state: 'failure', description: 'd', creator: BOT }] },
+    });
+    await runRevocations({ github, core: fakeCore(), context: { repo: REPO, payload: ev('deleted', { id: 7, body: `/exception-revoke ${HEAD}`, user: boss }) } });
+    expect(names(github.calls)).not.toContain('repos.createCommitStatus');
   });
 });
 

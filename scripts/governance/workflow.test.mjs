@@ -50,7 +50,7 @@ describe('governance.yml', () => {
   });
 
   it('R2: targets and merge-eligibility only run for exception-command comments by OWNER/MEMBER/COLLABORATOR', () => {
-    const cond = "github.event_name != 'issue_comment' || (github.event.issue.pull_request && (startsWith(github.event.comment.body, '/exception-') || startsWith(github.event.changes.body.from, '/exception-')) && contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), github.event.comment.author_association))";
+    const cond = "github.event_name != 'issue_comment' || (github.event.issue.pull_request && (contains(github.event.comment.body, '/exception-') || contains(github.event.changes.body.from, '/exception-')) && contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]'), github.event.comment.author_association))";
     const job = (name) => code.slice(code.indexOf(`  ${name}:`), code.indexOf('steps:', code.indexOf(`  ${name}:`)));
     const ifLine = (name) => (job(name).match(/^ {4}if: (.*)$/m) ?? [])[1];
     // The condition must be AND-ed into each job's `if`, not merely present.
@@ -58,6 +58,20 @@ describe('governance.yml', () => {
     expect(ifLine('merge-eligibility')).toBe(
       `\${{ always() && needs.targets.result == 'success' && needs.targets.outputs.prs != '[]' && (${cond}) }}`,
     );
+  });
+
+  it('Q2: a separate revocations job handles edited/deleted comment events with no per-PR concurrency', () => {
+    const start = code.indexOf('  revocations:');
+    expect(start).toBeGreaterThan(-1);
+    const end = code.indexOf('\n  merge-eligibility:', start) > -1 && code.indexOf('\n  merge-eligibility:', start) > start
+      ? code.indexOf('\n  merge-eligibility:', start) : code.length;
+    const job = code.slice(start, end);
+    expect(job).toMatch(/^ {4}if: \$\{\{ github\.event_name == 'issue_comment' && \(github\.event\.action == 'edited' \|\| github\.event\.action == 'deleted'\) && github\.event\.issue\.pull_request && \(contains\(github\.event\.comment\.body, '\/exception-'\) \|\| contains\(github\.event\.changes\.body\.from, '\/exception-'\)\) \}\}$/m);
+    expect(job).not.toMatch(/governance-pr-/);
+    expect(job).toMatch(/group: governance-revocation-\$\{\{ github\.event\.comment\.id \}\}/);
+    expect(job).toMatch(/statuses: write/);
+    expect(job).toMatch(/runRevocations/);
+    expect(job).not.toMatch(/needs:/);
   });
 
   it('L2/N4: workflow_run listens to CI only (Copilot is picked up by the sweep)', () => {
