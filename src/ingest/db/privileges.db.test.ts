@@ -809,7 +809,7 @@ describe('round 8 L2 (S5): the runner resets a used caller connection before tak
 describe('round 9 L1: a ratio.* custom setting default (e.g. a default tenant) is refused', () => {
   it('ALTER DATABASE … SET ratio.tenant_id (DO/format, contract) is refused by the per-migration check; nothing committed', async () => {
     const c = await expectRunnerRefuses(
-      "DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET ratio.tenant_id = %L', current_database(), 'aaaaaaaa-0000-4000-8000-000000000001'); END $$;\n",
+      "DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET %s = %L', current_database(), 'ratio.tenant_id', 'aaaaaaaa-0000-4000-8000-000000000001'); END $$;\n",
       /setting ratio\.tenant_id=aaaaaaaa-0000-4000-8000-000000000001 for role ALL in database/,
       { contract: true },
     );
@@ -832,7 +832,7 @@ describe('round 9 L1: a ratio.* custom setting default (e.g. a default tenant) i
     });
     await expectRunnerRefuses(
       `CREATE ROLE ${login} LOGIN IN ROLE ratio_reader;\n` +
-        `DO $$ BEGIN EXECUTE format('ALTER ROLE ${login} IN DATABASE %I SET ratio.tenant_id = %L', current_database(), 'aaaaaaaa-0000-4000-8000-000000000001'); END $$;\n`,
+        `DO $$ BEGIN EXECUTE format('ALTER ROLE ${login} IN DATABASE %I SET %s = %L', current_database(), 'ratio.tenant_id', 'aaaaaaaa-0000-4000-8000-000000000001'); END $$;\n`,
       new RegExp(`setting ratio\\.tenant_id=aaaaaaaa-0000-4000-8000-000000000001 for role ${login}`),
       { contract: true },
     );
@@ -873,7 +873,7 @@ describe('round 9 L1: a ratio.* custom setting default (e.g. a default tenant) i
       }
     };
     expect(await fresh()).toBe(0);
-    await db.pool.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET ratio.tenant_id = %L', current_database(), '${seed.a.tenantId}'); END $$`);
+    await db.pool.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET %s = %L', current_database(), 'ratio.tenant_id', '${seed.a.tenantId}'); END $$`);
     expect(await fresh()).toBe(seed.a.publishedRows);
     const { privilegeModelViolations } = await model();
     const c = await connect(db);

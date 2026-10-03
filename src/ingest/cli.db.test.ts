@@ -179,14 +179,15 @@ describe('ingest CLI (real Postgres)', () => {
     const login = `ratio_probe_member_${Math.random().toString(16).slice(2, 10)}`;
     try {
       for (const stmt of [
-        `ALTER DATABASE %I SET ratio.tenant_id = 'aaaaaaaa-0000-4000-8000-000000000001'`,
-        `ALTER ROLE ${login} IN DATABASE %I SET ratio.tenant_id = 'aaaaaaaa-0000-4000-8000-000000000001'`,
+        `ALTER DATABASE %I SET %s = 'aaaaaaaa-0000-4000-8000-000000000001'`,
+        `ALTER ROLE ${login} IN DATABASE %I SET %s = 'aaaaaaaa-0000-4000-8000-000000000001'`,
       ]) {
         const db = await freshDb();
         const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
         expect((await run(['migrate'], env)).code).toBe(0);
         if (stmt.startsWith('ALTER ROLE')) await db.pool.query(`CREATE ROLE ${login} LOGIN IN ROLE ratio_reader`);
-        await db.pool.query(`DO $$ BEGIN EXECUTE format('${stmt.replace(/'/g, "''")}', current_database()); END $$`);
+        // The setting name is a format() argument (as in the challenger's repro), not SQL text.
+        await db.pool.query(`DO $$ BEGIN EXECUTE format('${stmt.replace(/'/g, "''")}', current_database(), 'ratio.tenant_id'); END $$`);
         const r = await run(['migrate', '--status', '--json'], env);
         expect(r.code, stmt).toBe(3);
         const doc = onlyJson(r.out) as StatusDoc & { privilegeProblems?: string[] };
