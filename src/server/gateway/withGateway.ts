@@ -11,6 +11,7 @@
 // Middleware order: method → size → auth → rate-limit → validate → dispatch.
 
 import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
+import { randomUUID } from 'crypto';
 import { checkAuth, isStrongToken, resolveGatewayAuth, type GatewayEnv } from './auth';
 import { redactErrorText } from '@/costsource/transports/redact';
 import {
@@ -57,8 +58,11 @@ export interface GatewayOptions {
 
 /** Consistent error envelope: { error: { code, message } }. Never a stack trace. */
 export interface GatewayErrorBody {
-  error: { code: string; message: string };
+  error: { code: string; message: string; requestId?: string };
 }
+
+/** The ONLY message a caller ever sees for an unhandled handler error. */
+export const INTERNAL_ERROR_MESSAGE = 'Internal error';
 
 export function sendError(
   res: NextApiResponse,
@@ -191,11 +195,30 @@ export function withGateway(
     try {
       await handler(req, res, { tenant });
     } catch (err) {
-      // Never leak a stack trace — only the message in the envelope, redacted
-      // (Bearer tokens, URL query strings / SAS, AWS key ids) as a second line
-      // of defence against upstream text reaching the caller.
-      const message = redactErrorText(err);
-      if (!res.headersSent) sendError(res, 500, 'internal_error', message);
+      // The caller gets a fixed message plus a random correlation id — never
+      // the thrown text (it can carry upstream / ITSM / provider detail or
+      // echoed input). The message itself goes only to the server log,
+      // redacted (Bearer tokens, URL query strings / SAS, AWS key ids), under
+      // the same requestId so an operator can find it.
+      const requestId = randomUUID();
+      console.error(
+        JSON.stringify({
+          tag: 'gateway',
+          event: 'unhandled_error',
+          requestId,
+          method: req.method ?? 'UNKNOWN',
+          path: req.url ?? '',
+          tenant,
+          status: 500,
+          error: redactErrorText(err),
+        }),
+      );
+      if (!res.headersSent) {
+        res.setHeader('X-Request-Id', requestId);
+        res.status(500).json({
+          error: { code: 'internal_error', message: INTERNAL_ERROR_MESSAGE, requestId },
+        } satisfies GatewayErrorBody);
+      }
     } finally {
       finish(res.statusCode);
     }
