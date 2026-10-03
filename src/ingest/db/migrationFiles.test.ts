@@ -197,11 +197,13 @@ describe('loadMigrations', () => {
     const additive =
       EXPAND +
       "-- DROP TABLE a;\nCREATE TABLE a(x int, note text DEFAULT 'drop table x');\n" +
+      '-- ratio:allow-function trigger function for a (round 4: functions in ANY schema need the marker)\n' +
       'CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM a; END $$;\n' +
       'ALTER TABLE a ADD COLUMN y numeric(10,2) NOT NULL DEFAULT 0;\nCOMMENT ON TABLE a IS \'rename me\';\n' +
       'ALTER TABLE a ADD CONSTRAINT a_y CHECK (y >= 0) NOT VALID;\nALTER TABLE a VALIDATE CONSTRAINT a_y;\n' +
       'ALTER TABLE a ENABLE ROW LEVEL SECURITY;\nALTER TABLE a FORCE ROW LEVEL SECURITY;\n' +
       'CREATE UNIQUE INDEX a_x ON a (x);\nCREATE SCHEMA s;\nCREATE SEQUENCE s.q;\nCREATE TYPE s.t AS (a int);\n' +
+      '-- ratio:allow-view projection of a (round 4: views in ANY schema need the marker)\n' +
       'CREATE VIEW v AS SELECT x FROM a;\nCREATE POLICY p ON a USING (tenant_id = ratio.current_tenant_id());\n' +
       'CREATE TRIGGER t BEFORE INSERT ON a FOR EACH ROW EXECUTE FUNCTION f();\n' +
       'CREATE CONSTRAINT TRIGGER ct AFTER INSERT ON a DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION f();\n' +
@@ -280,6 +282,94 @@ describe('loadMigrations', () => {
     expect(findForbiddenStatement(ok)).toBeNull();
     expect(findNonExpandStatement(ok)).toBeNull();
     expect(loadMigrations(tmpDir({ '0001_a.up.sql': ok }))[0].phase).toBe('expand');
+  });
+
+  it('round 4 (challenger round 3, M1): functions, procedures and views in ANY schema need a marker; SECURITY DEFINER needs its own', () => {
+    // The challenger repro: an unmarked expand migration that handed every login cross-tenant reads.
+    const repro =
+      'CREATE FUNCTION public.report_rows() RETURNS SETOF ratio.cost_facts LANGUAGE sql STABLE SECURITY DEFINER AS $$ SELECT * FROM ratio.cost_facts $$;';
+    expect(findForbiddenStatement(repro)).not.toBeNull();
+    expect(findNonExpandStatement(repro)).not.toBeNull();
+    expect(codeOf(() => loadMigrations(tmpDir({ '0002_report_helper.up.sql': EXPAND + '-- 0002: reporting helper\n' + repro })))).toMatch(
+      /^(EXPAND_NOT_ADDITIVE|FORBIDDEN_STATEMENT)$/,
+    );
+
+    // Unmarked function / procedure / view in a schema other than ratio: not expand.
+    const nonExpand: Record<string, string> = {
+      public_fn: "CREATE FUNCTION public.f() RETURNS bigint LANGUAGE sql STABLE AS 'select count(*) from ratio.cost_facts';",
+      quoted_public_fn: 'CREATE FUNCTION "public"."f"() RETURNS int LANGUAGE sql AS $$ select 1 $$;',
+      unqualified_fn: "CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'select 1';",
+      other_schema_fn: "CREATE FUNCTION reporting.f() RETURNS int LANGUAGE sql AS 'select 1';",
+      procedure: 'CREATE PROCEDURE public.p() LANGUAGE sql AS $$ SELECT 1 $$;',
+      ratio_procedure: 'CREATE PROCEDURE ratio.p() LANGUAGE sql AS $$ SELECT 1 $$;',
+      public_view: 'CREATE VIEW public.all_facts AS SELECT * FROM ratio.cost_facts;',
+      unqualified_view: 'CREATE VIEW all_facts AS SELECT * FROM ratio.cost_facts;',
+      view_with_options: 'CREATE VIEW public.v WITH (security_barrier = true) AS SELECT 1;',
+      recursive_view: 'CREATE RECURSIVE VIEW public.r (n) AS SELECT 1;',
+      materialized_view: 'CREATE MATERIALIZED VIEW public.mv AS SELECT * FROM ratio.cost_facts;',
+      ratio_materialized_view: 'CREATE MATERIALIZED VIEW ratio.mv AS SELECT * FROM ratio.cost_facts;',
+      or_replace_public_fn: "CREATE OR REPLACE FUNCTION public.f() RETURNS int LANGUAGE sql AS 'select 1';",
+      or_replace_public_view: 'CREATE OR REPLACE VIEW public.v AS SELECT 1;',
+      marker_wrong_kind_public: "-- ratio:allow-view reason\nCREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS 'select 1';",
+    };
+    for (const [name, sql] of Object.entries(nonExpand)) {
+      expect(findNonExpandStatement(sql), name).not.toBeNull();
+      expect(codeOf(() => loadMigrations(tmpDir({ '0002_a.up.sql': EXPAND + sql }))), name).toBe('EXPAND_NOT_ADDITIVE');
+    }
+
+    // SECURITY DEFINER anywhere, without its own reasoned marker: refused in ANY migration.
+    const fnMarker = '-- ratio:allow-function reporting helper\n';
+    const forbidden: Record<string, string> = {
+      repro_with_function_marker: fnMarker + repro,
+      ratio_secdef: fnMarker + "CREATE FUNCTION ratio.f() RETURNS int LANGUAGE sql SECURITY DEFINER AS 'select 1';",
+      lower_case: fnMarker + "create function public.f() returns int language sql security   definer as 'select 1';",
+      external_secdef: fnMarker + "CREATE FUNCTION public.f() RETURNS int LANGUAGE sql EXTERNAL SECURITY DEFINER AS 'select 1';",
+      procedure_secdef: fnMarker + 'CREATE PROCEDURE public.p() LANGUAGE sql SECURITY DEFINER AS $$ SELECT 1 $$;',
+      or_replace_secdef: "CREATE OR REPLACE FUNCTION public.f() RETURNS int LANGUAGE sql SECURITY DEFINER AS 'select 1';",
+      alter_function_secdef: 'ALTER FUNCTION public.f() SECURITY DEFINER;',
+      alter_routine_secdef: 'ALTER ROUTINE ratio.text_looks_secret(text) SECURITY DEFINER;',
+      do_body_secdef:
+        "-- ratio:allow-do harmless\nDO $$ BEGIN EXECUTE 'CREATE FUNCTION public.f() RETURNS int LANGUAGE sql SECURITY DEFINER AS ''select 1'''; END $$;",
+      do_body_alter_secdef: "-- ratio:allow-do harmless\nDO $$ BEGIN ALTER FUNCTION public.f() SECURITY DEFINER; END $$;",
+      marker_without_reason: '-- ratio:allow-security-definer\n' + fnMarker + repro,
+    };
+    for (const [name, sql] of Object.entries(forbidden)) {
+      expect(findForbiddenStatement(sql), name).not.toBeNull();
+      expect(codeOf(() => loadMigrations(tmpDir({ '0002_a.up.sql': CONTRACT + sql }))), name).toBe('FORBIDDEN_STATEMENT');
+      expect(codeOf(() => loadMigrations(tmpDir({ '0002_a.up.sql': EXPAND + sql }))), name).toMatch(/^(EXPAND_NOT_ADDITIVE|FORBIDDEN_STATEMENT)$/);
+    }
+    // SECURITY INVOKER (the default) is not SECURITY DEFINER.
+    expect(findForbiddenStatement("CREATE FUNCTION public.f() RETURNS int LANGUAGE sql SECURITY INVOKER AS 'select 1';")).toBeNull();
+  });
+
+  it('round 4: marked functions, procedures and views in any schema are expand; a marked SECURITY DEFINER passes the classifier (the runner catalog check is the backstop)', () => {
+    const ok =
+      EXPAND +
+      "-- ratio:allow-function reporting helper\nCREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS 'select 1';\n" +
+      "-- ratio:allow-function helper\nCREATE FUNCTION f2() RETURNS int LANGUAGE sql AS 'select 1';\n" +
+      '-- ratio:allow-function maintenance\nCREATE PROCEDURE ratio.p() LANGUAGE sql AS $$ SELECT 1 $$;\n' +
+      '-- ratio:allow-view projection\nCREATE VIEW public.v AS SELECT 1;\n' +
+      '-- ratio:allow-view snapshot\nCREATE MATERIALIZED VIEW ratio.mv AS SELECT 1 AS x;\n' +
+      'REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;\n';
+    expect(findForbiddenStatement(ok)).toBeNull();
+    expect(findNonExpandStatement(ok)).toBeNull();
+    expect(loadMigrations(tmpDir({ '0002_a.up.sql': ok }))[0].phase).toBe('expand');
+
+    const secdef =
+      EXPAND +
+      '-- ratio:allow-function reviewed definer helper\n' +
+      '-- ratio:allow-security-definer reviewed: reads only the caller tenant\n' +
+      "CREATE FUNCTION ratio.f() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS 'select 1';\n";
+    expect(findForbiddenStatement(secdef)).toBeNull();
+    expect(findNonExpandStatement(secdef)).toBeNull();
+    expect(loadMigrations(tmpDir({ '0002_a.up.sql': secdef }))[0].phase).toBe('expand');
+    // Order of the two markers in the comment block does not matter.
+    const swapped = secdef.replace(
+      '-- ratio:allow-function reviewed definer helper\n-- ratio:allow-security-definer reviewed: reads only the caller tenant\n',
+      '-- ratio:allow-security-definer reviewed: reads only the caller tenant\n-- ratio:allow-function reviewed definer helper\n',
+    );
+    expect(swapped).not.toBe(secdef);
+    expect(loadMigrations(tmpDir({ '0002_a.up.sql': swapped }))[0].phase).toBe('expand');
   });
 
   it('records a checksum for the down file too', () => {
