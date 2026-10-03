@@ -21,10 +21,15 @@ const CASES: Record<string, () => { out: string; forms: string[] }> = {
     const forms = secretForms([SELF_SIMILAR_SECRET]);
     return { out: scrubLiterals('a'.repeat(2_000_000), forms), forms };
   },
-  'jsonLineRedactorFor, 4096-char self-similar secret, 4000 x 4.5 KB strings': () => {
-    const line = jsonLineRedactorFor({ RATIO_BUDGET_SECRET: SELF_SIMILAR_SECRET });
-    const chunk = 'a'.repeat(4_500); // just under the input cap: ~400 overlapping occurrences per string
-    return { out: line({ rows: Array.from({ length: 4000 }, () => chunk) }), forms: [SELF_SIMILAR_SECRET] };
+  // Per string (each just under the input cap): occurrences x secret length is
+  // largest for a secret of half the string — ~2250 overlapping occurrences of
+  // a 2250-char secret, ~5 M character comparisons per string for an
+  // indexOf(p, i + 1) loop, ~4.5 K for KMP.
+  'jsonLineRedactorFor, 2250-char self-similar secret, 1000 x 4.5 KB strings': () => {
+    const secret = 'a'.repeat(2_250);
+    const line = jsonLineRedactorFor({ RATIO_BUDGET_SECRET: secret });
+    const chunk = 'a'.repeat(4_500);
+    return { out: line({ rows: Array.from({ length: 1000 }, () => chunk) }), forms: [secret] };
   },
 };
 

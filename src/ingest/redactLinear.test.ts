@@ -84,7 +84,7 @@ const BUDGET_CHILD = path.join(__dirname, 'testing', 'redactBudgetChild.ts');
 const BUDGET_CASE_NAMES = [
   'query rule uncapped, 2 MB a://',
   'scrubLiterals, 4096-char self-similar secret, 2 MB text',
-  'jsonLineRedactorFor, 4096-char self-similar secret, 4000 x 4.5 KB strings',
+  'jsonLineRedactorFor, 2250-char self-similar secret, 1000 x 4.5 KB strings',
 ];
 
 describe('single-step budgets (child process, hard kill)', () => {
