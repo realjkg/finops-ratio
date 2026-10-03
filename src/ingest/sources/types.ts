@@ -54,6 +54,8 @@ export type PeriodListing =
 export interface ListOptions {
   /** Aborts the listing (every request and between pages); it then rejects with the signal's reason. */
   signal?: AbortSignal;
+  /** Called after every completed page and every manifest read: an active listing keeps the run's lease renewing. */
+  progress?: () => void;
 }
 
 /** Options for opening one object: the run's abort signal reaches the request. */

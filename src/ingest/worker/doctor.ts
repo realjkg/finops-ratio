@@ -106,6 +106,14 @@ export async function runDoctor(opts: DoctorOptions): Promise<{ pass: boolean; c
   return { pass: checks.every((c) => c.status !== 'fail'), checks };
 }
 
+/**
+ * Runs that contacted the source. replay --batch (run_kind 'replay' with
+ * stats.replayBatch) only re-points a period at a retained batch and never
+ * reads the source: a rollback must not make a stale source look fresh.
+ * replay --period re-reads the source and counts (review M4, seventh round).
+ */
+const SOURCE_CONTACTED = `NOT (run_kind = 'replay' AND stats ? 'replayBatch')`;
+
 async function sourceChecks(
   pool: ReturnType<typeof createWorkerPool>,
   tenantRaw: string,
@@ -122,10 +130,10 @@ async function sourceChecks(
       `SELECT s.source_key, s.enabled,
          (SELECT row_to_json(x) FROM (SELECT status, error_code, finished_at, started_at, lease_expires_at > clock_timestamp() AS live
             FROM ratio.sync_runs WHERE source_id = s.id ORDER BY started_at DESC, id DESC LIMIT 1) x) AS last_run,
-         (SELECT max(finished_at) FROM ratio.sync_runs WHERE source_id = s.id AND status = 'succeeded') AS last_success,
+         (SELECT max(finished_at) FROM ratio.sync_runs WHERE source_id = s.id AND status = 'succeeded' AND ${SOURCE_CONTACTED}) AS last_success,
          (SELECT max(published_at) FROM ratio.period_publications WHERE source_id = s.id) AS last_published,
          (SELECT count(*)::int FROM ratio.period_publications WHERE source_id = s.id) AS published_periods,
-         extract(epoch FROM clock_timestamp() - (SELECT max(finished_at) FROM ratio.sync_runs WHERE source_id = s.id AND status = 'succeeded')) / 3600 AS age_hours,
+         extract(epoch FROM clock_timestamp() - (SELECT max(finished_at) FROM ratio.sync_runs WHERE source_id = s.id AND status = 'succeeded' AND ${SOURCE_CONTACTED})) / 3600 AS age_hours,
          extract(epoch FROM clock_timestamp() - s.created_at) / 3600 AS source_age_hours
        FROM ratio.sources s ORDER BY s.source_key`,
     );

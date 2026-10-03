@@ -3,7 +3,7 @@
 // (fail loudly). No delete code exists here by design (retention, D6).
 import crypto from 'crypto';
 import fs from 'fs';
-import { Writable, type Readable } from 'stream';
+import { Transform, Writable, type Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { IngestError } from '../errors';
@@ -116,8 +116,27 @@ export class S3EvidenceStore implements EvidenceStore {
     // The body stream is ours to close: when the SDK never reads it (a PutObject that fails or is
     // aborted), it would otherwise open the file after capture() deleted it and emit an
     // unhandled ENOENT. Destroyed (with a listener) whatever happens.
-    const body = fs.createReadStream(filePath);
-    body.on('error', () => undefined);
+    const file = fs.createReadStream(filePath);
+    file.on('error', () => undefined);
+    // The body is metered as the SDK consumes it (backpressure preserved): every chunk feeds
+    // run progress, so a long healthy upload keeps the lease, and with a stall limit it is under
+    // the same idle watchdog as the reads — an upload that stops moving is EVIDENCE_STALLED
+    // (review M2, seventh round). ContentLength and IfNoneMatch are unchanged.
+    const watchdog = opts.stallMs ? idleWatchdog(opts.stallMs, 'EVIDENCE_STALLED', 'uploading the evidence copy', () => opts.onProgress?.(), signal) : null;
+    const meter: Transform =
+      watchdog?.stream ??
+      new Transform({
+        transform(chunk: Buffer, _enc, cb) {
+          opts.onProgress?.();
+          cb(null, chunk);
+        },
+      });
+    let meterError: unknown = null;
+    meter.on('error', (e) => {
+      meterError = e;
+      file.destroy();
+    });
+    const body = file.pipe(meter);
     try {
       await this.client.send(
         new PutObjectCommand({
@@ -134,6 +153,7 @@ export class S3EvidenceStore implements EvidenceStore {
       );
     } catch (e) {
       if (signal?.aborted) throw signal.reason;
+      if (meterError instanceof IngestError) throw meterError;
       if (isCreateConflict(e)) {
         // Lost the race: the winner's bytes must be exactly ours (sixth review High).
         await this.verifyExisting(key, info.sha256, opts);
@@ -141,7 +161,9 @@ export class S3EvidenceStore implements EvidenceStore {
       }
       throw evidenceError('storing an evidence object', e);
     } finally {
-      body.destroy();
+      watchdog?.stop();
+      file.destroy();
+      meter.destroy();
     }
     return 'stored';
   }

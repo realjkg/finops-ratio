@@ -1,10 +1,12 @@
 // RUNTIME backstop against dangerous roles — the real control behind the
 // static rule in serialLogins.test.ts. Roles are cluster-global: a committed
 // role with SUPERUSER / BYPASSRLS / REPLICATION / CREATEROLE / CREATEDB, or
-// one that is (transitively) a member of such a role or of a server-file role
-// (pg_read_server_files, pg_write_server_files, pg_execute_server_program),
-// makes every concurrent migration, status and doctor check fail. Such tests
-// belong in *.serial.db.test.ts.
+// one that is (transitively) a member of such a role or of a refused
+// predefined role (exactly Slice 0's REFUSED_PREDEFINED_ROLES, read-only:
+// server-file roles, pg_read/write_all_data, pg_signal_backend,
+// pg_create_subscription, the pg_monitor family, pg_stat_scan_tables), makes
+// every concurrent migration, status and doctor check fail. Such tests belong
+// in *.serial.db.test.ts.
 //
 // Checks (backstopProblems):
 //   1. SNAPSHOT DIFF, regardless of name or pid: every dangerous role in the
@@ -28,11 +30,16 @@
 // the dangerous tests that need such roles run in the serial phase, alone.
 import { Client } from 'pg';
 import { requireTestDatabaseUrl } from '../db/testing/requireTestDatabaseUrl';
+import { REFUSED_PREDEFINED_ROLES } from '../db/privilegeModel';
 
 type Queryable = Pick<Client, 'query'>;
 
+/** The predefined roles the backstop treats as dangerous: Slice 0's list, never a copy (review M3, seventh round). */
+export const BACKSTOP_REFUSED_PREDEFINED: readonly string[] = Object.keys(REFUSED_PREDEFINED_ROLES);
+
+/** $1 is always BACKSTOP_REFUSED_PREDEFINED. */
 const DANGEROUS_ROLE = `(d.rolsuper OR d.rolbypassrls OR d.rolreplication OR d.rolcreaterole OR d.rolcreatedb
-                         OR d.rolname IN ('pg_read_server_files', 'pg_write_server_files', 'pg_execute_server_program'))`;
+                         OR d.rolname = ANY ($1::text[]))`;
 
 /** Every role in the cluster that is dangerous itself or (transitively) a member of a dangerous role. */
 export async function dangerousRoles(c: Queryable): Promise<string[]> {
@@ -42,6 +49,7 @@ export async function dangerousRoles(c: Queryable): Promise<string[]> {
                      WHERE ${DANGEROUS_ROLE}
                        AND (d.oid = r.oid OR pg_catalog.pg_has_role(r.oid, d.oid, 'MEMBER')))
       ORDER BY 1`,
+    [BACKSTOP_REFUSED_PREDEFINED],
   );
   return r.rows.map((x) => x.rolname);
 }
@@ -51,13 +59,13 @@ export async function dangerousTestRoles(c: Queryable, pid: number): Promise<str
   const r = await c.query<{ rolname: string }>(
     `SELECT r.rolname
        FROM pg_catalog.pg_roles r
-      WHERE r.rolname LIKE 'ratio\\_test\\_%' AND r.rolname LIKE $1
+      WHERE r.rolname LIKE 'ratio\\_test\\_%' AND r.rolname LIKE $2
         AND (r.rolsuper OR r.rolbypassrls OR r.rolreplication OR r.rolcreaterole OR r.rolcreatedb
              OR EXISTS (SELECT 1 FROM pg_catalog.pg_roles d
                          WHERE d.oid <> r.oid AND ${DANGEROUS_ROLE}
                            AND pg_catalog.pg_has_role(r.oid, d.oid, 'MEMBER')))
       ORDER BY 1`,
-    [`%\\_${pid}\\_%`],
+    [BACKSTOP_REFUSED_PREDEFINED, `%\\_${pid}\\_%`],
   );
   return r.rows.map((x) => x.rolname);
 }

@@ -48,7 +48,12 @@ export class S3FocusExportSource implements FocusSource {
     this.location = opts.location;
   }
 
-  private async list(prefix: string, delimiter: string | undefined, signal: AbortSignal | undefined): Promise<{ keys: Map<string, ListingEntry>; prefixes: string[] }> {
+  private async list(
+    prefix: string,
+    delimiter: string | undefined,
+    signal: AbortSignal | undefined,
+    progress?: () => void,
+  ): Promise<{ keys: Map<string, ListingEntry>; prefixes: string[] }> {
     const keys = new Map<string, ListingEntry>();
     const prefixes: string[] = [];
     let token: string | undefined;
@@ -66,6 +71,7 @@ export class S3FocusExportSource implements FocusSource {
         throw new IngestError('SOURCE_LISTING_INVALID', `listing ${prefix} claims more results but has no continuation token`);
       }
       token = r.IsTruncated ? r.NextContinuationToken : undefined;
+      progress?.(); // a completed page is progress (review M5, seventh round)
     } while (token);
     return { keys, prefixes };
   }
@@ -113,7 +119,7 @@ export class S3FocusExportSource implements FocusSource {
     const signal = opts.signal;
     let periods: string[];
     try {
-      const top = await this.list(metadataPrefix(this.location), '/', signal);
+      const top = await this.list(metadataPrefix(this.location), '/', signal, opts.progress);
       periods = top.prefixes
         .map((p) => parsePeriodPrefix(p, this.location))
         .filter((p): p is string => p !== null && periodInRange(p, range))
@@ -124,18 +130,18 @@ export class S3FocusExportSource implements FocusSource {
       throw sourceError('SOURCE_LIST_FAILED', 'listing the export metadata folder', e);
     }
     const out: PeriodListing[] = [];
-    for (const period of periods) out.push(await this.listPeriod(period, signal));
+    for (const period of periods) out.push(await this.listPeriod(period, signal, opts.progress));
     return out;
   }
 
-  private async listPeriod(billingPeriod: string, signal: AbortSignal | undefined): Promise<PeriodListing> {
+  private async listPeriod(billingPeriod: string, signal: AbortSignal | undefined, progress?: () => void): Promise<PeriodListing> {
     let metaKeys: string[];
     let meta: Map<string, ListingEntry>;
     let data: Map<string, ListingEntry>;
     try {
-      meta = (await this.list(periodMetadataPrefix(this.location, billingPeriod), undefined, signal)).keys;
+      meta = (await this.list(periodMetadataPrefix(this.location, billingPeriod), undefined, signal, progress)).keys;
       metaKeys = [...meta.keys()].filter(isManifestKey).sort();
-      data = (await this.list(dataPrefix(this.location, billingPeriod), undefined, signal)).keys;
+      data = (await this.list(dataPrefix(this.location, billingPeriod), undefined, signal, progress)).keys;
     } catch (e) {
       throwIfAborted(signal);
       if (e instanceof IngestError) throw e;
@@ -153,6 +159,7 @@ export class S3FocusExportSource implements FocusSource {
     let bytes: Buffer;
     try {
       bytes = await this.getBytes(manifestKey, MAX_MANIFEST_BYTES, signal, manifestEtag);
+      progress?.();
     } catch (e) {
       throwIfAborted(signal);
       if (e instanceof IngestError && e.code === 'MANIFEST_INVALID') return { ok: false, billingPeriod, code: e.code, message: e.message };

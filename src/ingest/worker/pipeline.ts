@@ -162,7 +162,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
       let listings: PeriodListing[];
       try {
         // The run's deadline bounds the listing too: the signal reaches every request (review M3).
-        listings = await withRetry(() => source.listPeriods(opts.range, { signal: runAbort.signal }), { ...retryOpts, onRetry: onRetry(null) });
+        listings = await withRetry(() => source.listPeriods(opts.range, { signal: runAbort.signal, progress }), { ...retryOpts, onRetry: onRetry(null) });
       } catch (e) {
         if (e instanceof IngestError && e.code === 'LEASE_LOST') throw e;
         const code = e instanceof IngestError ? e.code : 'SOURCE_LIST_FAILED';
@@ -229,7 +229,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
                 return await processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow, rejected: prev?.rejected });
               } catch (e) {
                 if (e instanceof IngestError && e.code === 'SOURCE_CHANGED') {
-                  const fresh = (await source.listPeriods({ from: period, to: period }, { signal: runAbort.signal })).find((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod) === period);
+                  const fresh = (await source.listPeriods({ from: period, to: period }, { signal: runAbort.signal, progress })).find((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod) === period);
                   if (!fresh) throw new IngestError('PERIOD_NOT_FOUND', `period ${period} is no longer listed by the source`);
                   // The re-listed manifest is what the batch will be built from: evidence first (review M1).
                   const freshManifest = fresh.ok ? fresh.set.manifest : fresh.manifest;

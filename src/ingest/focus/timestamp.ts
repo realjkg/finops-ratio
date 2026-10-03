@@ -45,7 +45,8 @@ export function parseFocusTimestamp(s: string): ParsedTimestamp | null {
     const zm = /^([+-])(\d{2}):?(\d{2})$/.exec(zone)!;
     const zh = Number(zm[2]);
     const zmin = Number(zm[3]);
-    if (zh > 14 || zmin > 59) return null;
+    // ISO 8601 / RFC 3339 offsets run from -14:00 to +14:00: hour 14 only as ±14:00 (review M1, seventh round).
+    if (zh > 14 || zmin > 59 || (zh === 14 && zmin !== 0)) return null;
     offsetMin = (zm[1] === '-' ? -1 : 1) * (zh * 60 + zmin);
     zoneOut = `${zm[1]}${zm[2]}:${zm[3]}`;
   }
