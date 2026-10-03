@@ -117,7 +117,20 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 98 | d3f6eef | fix: finishRun fenced on expiry + LEASE_LOST everywhere (H1), re-listed manifest captured (M1), abortable listing (M3), captured-bytes cap (M4), per-artifact control check (M5) | impl |
 | 99 | 13bcaea | test: serial-login guard flags IN ROLE / IN GROUP / ROLE / ADMIN / USER targets (M2) | tests (guard) |
 | 100 | b5bba2b | test: M3 with a real SDK client and a real CLI process; between-page abort | tests |
-| 101 | (final) | docs: evidence for this round (§27) | docs |
+| 101 | f22f1f6 | docs: evidence for the second Copilot review (§27) | docs |
+| 102 | 2517b86 | test: challenger Lows L1-L4 (red: DB 4, fast 1) | tests |
+| 103 | 3a11d23 | fix: per-artifact control counts compared under the stored (redacted) name (L2) | impl |
+| 104 | 88e686d | fix: capture-time size rejections remembered by listing fingerprint and limits (L3) | impl |
+| 105 | a0c5bdd | test: serial-login guard covers CREATE GROUP and ALTER GROUP … ADD USER (L4) | tests (guard) |
+| 106 | 8bb1fed | fix: abandoned runs that committed work are LEASE_EXPIRED_AFTER_COMMIT (L1) | impl |
+| 107 | 43af649 | test: PR #54 third review H1, H2, M1-M5 (red: fast 10, DB 5) | tests |
+| 108 | 13cdb09 | fix: S3 source — truncated page without token, unversioned artifacts, abortable GET (H1, M1, M3) | impl |
+| 109 | 94ea281 | fix: period ranges iterate by ordinal and are bounded 2000-01..9999-12 (H2) | impl |
+| 110 | b350bf5 | fix: artifact names bounded by their stored (redacted) length, 1024 (M2) | impl |
+| 111 | 7db189a | fix: doctor NEVER_PUBLISHED (M4) | impl |
+| 112 | 63ce64f | fix: evidence open honours the run's abort signal (M5) | impl |
+| 113 | b223564 | test: open deadlines abort-aware with a transport that ignores the signal (M3c/M5c) | tests |
+| 114 | (final) | docs: evidence for this round (§28, §29), ingestion-ops skill | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -1869,6 +1882,105 @@ expiry.
   40 / `21.0978157665`).
 - 3 of 3 evidence objects re-hashed OK.
 - doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 28. Challenger Lows on f22f1f6 (APPROVED): L1-L4
+
+All of these are prepared locally and not pushed. Red tests are in `2517b86`
+(`worker/reviewLows.db.test.ts`, `serialLogins.test.ts`).
+
+| Low | Fix | Test | Mutation(s) killed (`mutations28.txt`) |
+|---|---|---|---|
+| **L2** (real bug) the M5 per-artifact comparison looked up the raw control key, but `artifact_name` is stored redacted | `stored.get(redact(name))`, the same function `stageBatch` and `setArtifactRowCounts` use (`3a11d23`) | artifact `r/token=x.csv.gz` (stored as `r/token=[redacted]`) with a matching count: re-processing gives `unchanged`. Before the fix it gave CONTROL_VARIANCE_ON_UNCHANGED, which would have fired forever. A different count under that name is still caught | L2 (no redact) |
+| **L3** an unchanged under-reported listing re-downloaded up to the limit on every run | a capture-time ARTIFACT_SET_TOO_LARGE or ARTIFACT_TOO_LARGE is recorded in the period's checkpoint entry as `rejected: {listing fingerprint, code, maxArtifactBytes, maxBatchBytes}`, keeping the rest of the entry. The next run fails fast with the same code if the listing is identical and both limits are no higher. Any publication writes a fresh entry without it. Checkpoint periods are jsonb, so there is **no schema change** (`88e686d`) | both codes: the second sync of the unchanged listing **downloads 0 bytes** and fails the same way. Raised limits download again and publish (80 rows / `80.00`). A changed listing is downloaded again | L3a (not recorded), L3b (not consulted), L3c (limits ignored), L3d (fingerprint ignored) |
+| **L4** guard gaps: `ALTER GROUP <role> ADD USER`, `CREATE GROUP … <attr>` | CREATE GROUP gets the CREATE ROLE checks (attributes, dynamic part, membership clauses). ALTER GROUP g ADD USER is flagged unless g is ratio_worker or ratio_reader. GROUP is added to the prefilter (`a0c5bdd`) | 7 bad cases (literal, dynamic, WITH, IN ROLE) and 3 ok cases (ADD USER to ratio_reader, DROP USER, CREATE GROUP … NOLOGIN); no current file is flagged | L4a (CREATE GROUP unchecked), L4b (ALTER GROUP unchecked) |
+| **L1** work committed before a lease loss was indistinguishable from a real failure | when acquisition abandons an expired run, it counts what that run committed: batches it created that left `staged`, publications it made (a replay's included) and whether it wrote the checkpoint last. If anything, the run becomes `abandoned` / `LEASE_EXPIRED_AFTER_COMMIT` with `error_detail` such as `lease expired after the run committed work (1 batch published/superseded/quarantined, 1 publication, checkpoint written); that work stands; …`. Otherwise it stays `LEASE_EXPIRED`. These are existing text columns, so there is **no schema change** (`8bb1fed`) | P1 published, then the lease expires before P2 publishes: LEASE_LOST, and the next acquisition gives `LEASE_EXPIRED_AFTER_COMMIT` with "1 batch" and "1 publication" in the detail. A run that committed nothing stays `LEASE_EXPIRED`; all earlier LEASE_EXPIRED expectations (crash, publish, demo, lease tests) are unchanged | L1a (always LEASE_EXPIRED), L1b (always "after commit") |
+
+L3 and L1 interact: recording a rejection writes the checkpoint, so a run
+that lost its lease after only recording a rejection counts as having
+committed work ("checkpoint written").
+
+**Gates for the Lows at 8bb1fed:**
+- lint 0, tsc 0;
+- `npm test` ×3 under load: 3/3, 2023 passed each;
+- `test:db` ×3 on the private cluster: **3/3**, parallel 30 files / 432 passed
+  and serial 4 files / 21 passed;
+- the fail-not-skip checks both exit 1;
+- leftovers 0.
+
+## 29. PR #54 third Copilot review (f22f1f6): H1, H2, M1-M5
+
+Red tests are in `43af649`. tsc was red there, because the `opts` parameters
+did not exist yet.
+
+| Finding | Verified? | Fix | Test | Mutation(s) killed (`mutations29.txt`, `mutations29b.txt`) |
+|---|---|---|---|---|
+| **H1** a page with `IsTruncated: true` and no `NextContinuationToken` ended the listing silently, dropping later periods | real | `list()` throws `SOURCE_LISTING_INVALID` (non-retryable). This covers every paginated listing: the metadata folder, each period's metadata folder and data folder. The source's catch blocks pass it through instead of wrapping it as SOURCE_LIST_FAILED. The test helper `listKeys` refuses the same shape (`13cdb09`) | fake client truncating, without a token, the metadata-folder listing and a period's data-folder listing: the listing rejects `SOURCE_LISTING_INVALID`, `retryable: false` | H1a (check removed), H1b and H1c (each catch wraps it) |
+| **H2** `replay --period 9999-12` loops forever, synchronously | real: the child had to be killed after 20 s | `worker/periods.ts`: `periodsBetween` iterates by month ordinal. `assertPeriodRange` requires YYYY-MM-01 within 2000-01..9999-12 and from ≤ to, otherwise INVALID_RANGE. runSync validates before taking a lease, and the CLI refuses periods before 2000-01 when parsing (four-digit years cap at 9999) (`94ea281`) | the **CLI process** `replay --period 9999-12` exits 1 within 20 s with PERIOD_NOT_FOUND (killed by the test on regression). `periodsBetween` runs in a child under a hard kill: 9999-12 alone, 9999-10..9999-12, and across a year end; inverted, 1999-12, `10000-01`, day ≠ 01 and month 13 are INVALID_RANGE. runSync refuses those for backfill and replay_period with no run row; the CLI refuses `1999-12` and `0000-01` (exit 2) | H2a (string-compare loop in the pipeline), H2b (periodsBetween ending on string compare), H2c (no 2000 floor), H2d (runSync unvalidated), H2e (CLI unbounded) |
+| **M1** no ETag in the listing means a GET without If-Match | real | a period with an unversioned artifact is a period failure, `SOURCE_LISTING_INVALID`. `openArtifact` refuses a ref without a version (non-retryable) and always sends If-Match | ETag `''` in the listing gives that period `SOURCE_LISTING_INVALID`; `openArtifact` with `version: ''` rejects with no GET sent | M1a (listing accepts it), M1b (unconditional read) |
+| **M2** names up to 2048 characters accepted; the column allows 1024 | real | `parseManifest` refuses a name whose **stored (redacted) form** is longer than 1024 characters (code points, matching Postgres `length()`) with MANIFEST_INVALID, before anything is downloaded. The limit applies to the redacted form because that is what `artifact_name` stores, and redaction can lengthen a name (`…/token=x` → `…/token=[redacted]`) (`b350bf5`) | 1024 accepted; 1025 refused; 1021 raw characters that redact to 1030 refused | M2a (no bound), M2b (bound on the raw name) |
+| **M3** `openArtifact` ignored the run's signal, so at MAX_RUN_SECONDS a hanging open became SOURCE_STALLED | real: the red run took 18 s and reported a stall | `openArtifact(ref, { signal })`. The S3 GET carries the `abortSignal`, capture passes the run's signal, and `withDeadline` is abort-aware (it rejects with the signal's reason) | fake S3 client: the GET carries the signal, and an aborted open rejects with the reason. Pipeline: an open that never answers fails **MAX_RUN_EXCEEDED** in under 5 s (stall limit 6 s), and the source saw the signal. Added after the fix (`b223564`): a source that **ignores** the signal still fails MAX_RUN_EXCEEDED | M3a (no abortSignal), M3b (capture passes no signal), M3c (deadline not abort-aware; survived until the deaf-transport test) |
+| **M4** a source that never published reports healthy | real | doctor adds `NEVER_PUBLISHED` when an enabled source has 0 published periods (`7db189a`). **No fixture or e2e flow runs doctor before its first publish**: doctor.db D1 and cliWorker K-doctor publish first, and the e2e runs doctor after its sync | a successful empty run gives fail / NEVER_PUBLISHED (`publishedPeriods: 0`); after a publication the source passes | M4 |
+| **M5** `EvidenceStore.open` ignored the signal, so a hanging open became EVIDENCE_STALLED | real: the red run took 6 s and reported a stall | `open(key, { signal })`. The S3 store GET carries the `abortSignal`, the memory store honours it, and load passes the run's signal and uses the abort-aware deadline (`63ce64f`) | fake S3 client (new `S3EvidenceStore.test.ts`); pipeline: a hanging evidence open fails **MAX_RUN_EXCEEDED** in under 5 s. Added after the fix: a store that ignores the signal still fails MAX_RUN_EXCEEDED | M5a (no abortSignal), M5b (load passes no signal), M5c (deadline not abort-aware; survived until the deaf-store test) |
+
+### Signal audit (every S3 send and every await in the run path)
+
+S3 sends in `src/ingest` (non-test):
+
+| Call | Signal |
+|---|---|
+| `S3FocusExportSource.list` (ListObjectsV2, every page) | yes, plus a check between pages |
+| `S3FocusExportSource.getBytes` (manifest GET) | yes |
+| `S3FocusExportSource.openArtifact` (artifact GET, If-Match) | yes (M3) |
+| `S3EvidenceStore.open` (GET) | yes (M5) |
+| `S3EvidenceStore.existingSize` (HeadObject, before every put) | **no**: bounded by the client's request timeout (`RATIO_S3_REQUEST_TIMEOUT_MS`, 60 s) and SDK retries |
+| `S3EvidenceStore.put` (PutObject, artifact evidence: the largest transfer) | **no**: as above, bounded per request by the request timeout |
+| `S3EvidenceStore.putBytes` (PutObject, manifest evidence) | **no**: as above |
+| `replayFixtures` PutObject (operator fixture seeding, not a sync run) | no |
+
+Awaits in the run path without the signal:
+- `captureManifest` → `putBytes`, and `captureArtifact` → `evidence.put`
+  (see above).
+- `withRetry`'s backoff sleep: not abort-aware; it waits at most
+  `RATIO_RETRY_MAX_MS` (default 30 s) before the next attempt sees the
+  abort.
+- Every DB statement (lease, heartbeat, stage, load chunks, reconcile,
+  publish, finish): bounded by the session's `statement_timeout`,
+  `lock_timeout` and `idle_in_transaction_session_timeout`. The fact
+  stream itself stops on abort through the idle watchdog.
+
+Not fixed here; offered as a follow-up: pass the signal to the evidence
+puts and make the retry sleep abort-aware.
+
+The other paginated listing in the repository, outside Slice 1, has the same
+truncated-without-token shape: `src/costsource/transports/awsS3Transport.ts`
+(`continuationToken: truncated ? (… ?? '') : ''`). It is not touched, because
+that code is not Slice 1's, and it is reported here instead.
+
+### Gates at b223564
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 4.0–5.5) | **3/3**, 91 files / 2033 passed each |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 31 files / 439 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 410 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at b223564, private cluster, database
+`ratio_s1_e2e_f5f574ef`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0, so NEVER_PUBLISHED did not fire: doctor runs after the
+  first publication.
 - replay-fixtures passed 6/6.
 - Cleanup deleted 48 objects and dropped the database and logins.
 

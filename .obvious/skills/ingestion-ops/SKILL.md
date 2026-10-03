@@ -105,7 +105,24 @@ npm run -s worker -- backfill --tenant <uuid> --source aws-focus --from 2026-01 
   period NOT advanced, previous revision stays published.
 - Exit 4 = another live run on the source. A crashed run blocks the source
   until its lease (`RATIO_LEASE_TTL_SECONDS`) expires; the next run then marks
-  it `abandoned` and deletes its staged batch.
+  it `abandoned` and deletes its staged batch. It is abandoned as
+  `LEASE_EXPIRED` if it committed nothing, or `LEASE_EXPIRED_AFTER_COMMIT`
+  (`error_detail` counts its batches, publications and checkpoint write) if
+  work it committed before losing the lease stands — check those periods
+  rather than re-running blindly.
+- Periods are bounded to 2000-01..9999-12 (`--from/--to/--period`; else exit 2).
+- Listing problems that are never retried: `SOURCE_LISTING_INVALID` (a
+  listing page claims more results without a continuation token — the whole
+  listing fails; or an artifact has no ETag, so it cannot be read with
+  If-Match — that period fails). An artifact name longer than 1024 characters
+  as stored (redacted) is `MANIFEST_INVALID`.
+- `ARTIFACT_SET_TOO_LARGE` / `ARTIFACT_TOO_LARGE` found only while capturing
+  (sizes under-reported by the listing) are remembered for that exact listing
+  and limits: the next runs fail the period fast without downloading. Raise
+  `RATIO_MAX_BATCH_BYTES` / `RATIO_MAX_ARTIFACT_BYTES` (or wait for a new
+  export) to try again.
+- `RATIO_MAX_RUN_SECONDS` bounds the whole run, listing and every open
+  included: a run past it fails `MAX_RUN_EXCEEDED`.
 
 ## 4. Inspect runs, batches, quarantine
 
@@ -161,9 +178,11 @@ RATIO_DATABASE_URL=<worker url> RATIO_MIGRATE_DATABASE_URL=<owner url> \
 Checks: `db_connectivity`, `role_safety`, `migration_version` (needs the
 owner URL, used in a READ ONLY transaction, or a worker login granted SELECT
 on `public.schema_migrations` — owner decision), and per source
-`source:<tenant>/<key>` (never succeeded, last run failed/abandoned, running
-with expired lease, last success older than the staleness threshold ⇒ fail;
-disabled ⇒ skip). Exit 0 only if nothing fails.
+`source:<tenant>/<key>` (never succeeded, never published a period
+(`NEVER_PUBLISHED` — expected for a brand-new source until its first
+publication), last run failed/abandoned, running with expired lease, last
+success older than the staleness threshold ⇒ fail; disabled ⇒ skip). Exit 0
+only if nothing fails.
 
 ## 7. replay-fixtures (staging/test only)
 

@@ -245,3 +245,27 @@ endpoint:
 abort check between pages. X6 covers the re-listed manifest on SeaweedFS.
 `serialLogins.test.ts` covers membership-clause targets.
 
+Challenger Lows (`worker/reviewLows.db.test.ts`):
+- L2: a redacted artifact name keeps per-artifact control counts comparable.
+- L3: an unchanged, under-reported listing downloads 0 bytes on the second
+  sync; raised limits or a changed listing are tried again.
+- L1: LEASE_EXPIRED_AFTER_COMMIT versus LEASE_EXPIRED.
+- L4: `serialLogins.test.ts` covers CREATE GROUP and ALTER GROUP … ADD USER.
+
+PR #54 third review:
+- `S3FocusExportSource.test.ts`:
+  - a truncated page without a token is SOURCE_LISTING_INVALID;
+  - unversioned artifacts are refused, with no GET sent;
+  - the artifact GET carries the abort signal.
+- `S3EvidenceStore.test.ts`: the evidence GET carries the abort signal.
+- `layout.test.ts`: the stored (redacted) name is bounded at 1024.
+- `worker/periods.test.ts`: in a child under a hard kill, 9999-12, ranges
+  ending at 9999-12, and inverted or out-of-bounds ranges.
+- `cli.worker.test.ts`: periods before 2000-01 are refused.
+- `worker/reviewFindings3.db.test.ts`:
+  - `replay --period 9999-12` as a CLI process;
+  - runSync range validation;
+  - hanging source and evidence opens fail MAX_RUN_EXCEEDED, also when the
+    transport ignores the signal;
+  - doctor NEVER_PUBLISHED.
+
