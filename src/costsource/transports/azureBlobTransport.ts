@@ -2,11 +2,11 @@
 //
 // Cost Management writes each FOCUS export run into its own directory under the
 // configured container path (`<path>/<YYYYMMDD-YYYYMMDD>/<runId>/part_*.csv.gz`
-// plus a manifest). AZURE_FOCUS_EXPORT_URL is either:
-//   - the container (optionally + path prefix), e.g.
-//     https://acct.blob.core.windows.net/cost-exports/focus/ratio-daily
-//     → the transport lists blobs and reads the latest run for the window; or
-//   - a single blob URL ending in .csv / .csv.gz / .json → read directly.
+// plus a manifest). AZURE_FOCUS_EXPORT_URL names the container (optionally +
+// path prefix), e.g. https://acct.blob.core.windows.net/cost-exports/focus/ratio-daily
+// → the transport lists blobs, picks the latest run per month and reads only
+// the files its manifest lists. A single-blob URL is rejected: one blob cannot
+// be verified as a complete export run.
 // The SAS needs `r` (read) + `l` (list) on the container.
 
 import type { FocusExportTransport } from '../CloudConnectorAdapter';
@@ -33,13 +33,12 @@ export interface AzureBlobTransportOptions {
 }
 
 const LABEL = 'Azure Blob FOCUS export';
-const DIRECT_BLOB = /\.(csv|csv\.gz|gz|json|ndjson|jsonl)$/i;
+const DATA_FILE_URL = /\.(csv|csv\.gz|gz|json|ndjson|jsonl|parquet)$/i;
 
 export interface AzureLocation {
   origin: string; // https://acct.blob.core.windows.net
   container: string;
   prefix: string; // '' or 'path/to/exports/'
-  directBlob: boolean;
 }
 
 export function parseAzureExportUrl(exportUrl: string): AzureLocation {
@@ -49,12 +48,17 @@ export function parseAzureExportUrl(exportUrl: string): AzureLocation {
     throw new Error('AZURE_FOCUS_EXPORT_URL must include the container, e.g. https://acct.blob.core.windows.net/exports');
   }
   const path = rest.filter(Boolean).join('/');
-  const directBlob = DIRECT_BLOB.test(path);
+  if (DATA_FILE_URL.test(path)) {
+    throw new Error(
+      'AZURE_FOCUS_EXPORT_URL must name the export container (+ optional path), not a single blob: ' +
+        'a single file cannot be verified as a complete export run. ' +
+        'Use e.g. https://acct.blob.core.windows.net/<container>/<export path>',
+    );
+  }
   return {
     origin: url.origin,
     container,
-    prefix: directBlob || !path ? path : `${path}/`,
-    directBlob,
+    prefix: path ? `${path}/` : '',
   };
 }
 
@@ -137,15 +141,11 @@ export function createAzureBlobTransport(opts: AzureBlobTransportOptions): Focus
 
   return {
     async ping() {
-      if (loc.directBlob) {
-        await fetchChecked(fetchImpl, blobUrl(loc.prefix), { method: 'HEAD', headers }, LABEL);
-      } else {
-        await list(1, true);
-      }
+      await list(1, true);
       return true;
     },
     async fetchExportRows(window) {
-      const names = loc.directBlob ? [loc.prefix] : await manifestedBlobs(window);
+      const names = await manifestedBlobs(window);
       if (names.length === 0) {
         throw new Error(`${LABEL}: no CSV/JSON export files found under ${loc.container}/${loc.prefix}`);
       }

@@ -185,14 +185,16 @@ function azureListXml(blobs: Array<{ name: string; modified: string; size: numbe
 }
 
 describe('Azure Blob transport', () => {
-  it('parses container, prefix, and direct-blob URLs', () => {
+  it('parses container + prefix URLs and rejects single-blob URLs', () => {
     expect(parseAzureExportUrl('https://a.blob.core.windows.net/exports/focus/daily')).toEqual({
       origin: 'https://a.blob.core.windows.net',
       container: 'exports',
       prefix: 'focus/daily/',
-      directBlob: false,
     });
-    expect(parseAzureExportUrl('https://a.blob.core.windows.net/exports/f/part.csv.gz').directBlob).toBe(true);
+    // Single-blob mode was removed: one file cannot be verified as a complete run.
+    expect(() => parseAzureExportUrl('https://a.blob.core.windows.net/exports/f/part.csv.gz')).toThrow(
+      /must name the export container/,
+    );
     expect(() => parseAzureExportUrl('https://a.blob.core.windows.net/')).toThrow(/container/);
   });
 

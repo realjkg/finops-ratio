@@ -234,6 +234,15 @@ function isBlank(v: unknown): boolean {
 /** Strict decimal: optional minus, digits, optional fraction, optional exponent. */
 const DECIMAL_RE = /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/;
 
+/** Strict decimal (number or decimal string) → finite number, else null. */
+export function parseStrictDecimal(v: unknown): number | null {
+  let n: number;
+  if (typeof v === 'number') n = v;
+  else if (typeof v === 'string' && DECIMAL_RE.test(v.trim())) n = Number(v.trim());
+  else return null;
+  return Number.isFinite(n) ? n : null;
+}
+
 /**
  * Absent / empty numeric cells are 0; anything present must be a strict decimal
  * (no hex, no `Infinity`, no thousands separators) or a finite number.
