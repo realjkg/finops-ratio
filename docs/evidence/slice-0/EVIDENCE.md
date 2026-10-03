@@ -1026,3 +1026,95 @@ L1 0001 back to BETWEEN (manifest regenerated)          KILLED  pg_dump round tr
 | skip/only/todo/it.fails grep | 0 |
 | cluster state | `pg_db_role_setting` rows 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no `ratio_manifest_*` database |
 | Slice 1 compat: scratch worktree `slice/01` 770e333 + 60a6dc5 (removed) | merge clean (no conflict); tsc 0, lint 0, fast 1924/1924, test:db 319/319 ×2 (S3 test-bucket fix on Slice 1: no object-store errors) |
+
+---
+
+# Round 12 — challenger on 8079351 (1 High: flaky test) + Lows L1–L4
+
+Base: 8079351. Local commits only (not pushed). 0001 unchanged; manifest
+unchanged. Raw logs: `scratchpad/r13/`.
+
+## R12.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 6b52a3f | test(ingest): settingRows counts only rows this test could leak (fixes a cross-file race, challenger round 12 H1) | test fix (H1) |
+| a33a9ff | test(ingest): failing tests for round 12 Lows (per-table RLS/policy/inheritance rule, exact policy shapes) | tests (red) |
+| 737c94f | fix(ingest): every ratio table needs forced RLS, a reviewed policy and no inheritance; tenants policy shape not reusable (round 12 L1, L4) | fix |
+| 7cf79d1 | ci: pin PostgreSQL 16 client tools for the DB suite's pg_dump round-trip test (round 12 L3) | **CI workflow (restricted change)** |
+| 8f6c8d9 | test(ingest): G2 uses the reviewed policy name so only the roles differ (kills the 'shape ignores roles' mutant) | test |
+| (this) | docs(evidence): Slice 0 round 12 | docs |
+
+## R12.2 H1 — race fixed, 25 consecutive runs
+
+**Cause.** `settingRows()` counted the whole cluster-wide
+`pg_db_role_setting`. `cli.db.test.ts` and other privileges tests commit
+rows scoped to their own disposable databases in parallel, and those rows
+disappear when those databases are dropped.
+
+**Fix.** The count is now `WHERE setdatabase = 0 OR setdatabase = <this
+database>`. The assertion is unchanged.
+
+**Other cluster-global snapshots reviewed.** `roles.db.test.ts` reads only
+the ratio roles' own attributes and their memberships in other roles. No test
+commits either: every such probe is rolled back. Nothing snapshots
+`pg_parameter_acl`, role counts or `pg_database`.
+
+**Proof.** `npm run test:db` was run **25 times in a row** at 8f6c8d9:
+**25/25 exit 0, 203/203 each, 0 failures, no "Errors" line**
+(`run25-*.txt`).
+
+## R12.3 Red (at a33a9ff)
+
+`foundation.db.test.ts` + `privileges.db.test.ts`: **6 failed / 83 passed
+(89)**. Six attacks were APPLIED:
+- a new ratio table with RLS disabled;
+- a new ratio table with RLS forced but no policy;
+- an INHERITS (ratio.cost_facts) child;
+- a public partition of a new partitioned ratio table;
+- SET UNLOGGED on a new ratio table;
+- the tenants `id =` shape reused on another table.
+
+G2, G3 and G4 passed on arrival, as intended: they exist to kill mutants.
+Fixtures that created `ratio.session_probe` (round 7/8) now write
+`public.session_probe`, because a ratio table without RLS and a policy is now
+refused. What they probe is unchanged.
+
+Two fixture defects were fixed before the red commit. The partition was
+created while the migration was still `SET LOCAL ROLE ratio_owner`; it now
+uses `RESET ROLE` first. And `G2` initially used another policy name, so the
+name, not the roles, caused the refusal; 8f6c8d9 made it exact.
+
+## R12.4 Mutation table (privilegeModel.ts; each restored with `git checkout`, tree clean after)
+
+```
+T1 tableViolations not called                   KILLED  5 tests
+T2 RLS enabled/forced rule removed              KILLED
+T3 permanent-table rule removed                 KILLED  (SET UNLOGGED on a new table)
+T4 reviewed-policy-per-table rule removed       KILLED
+T5 inheritance rule removed                     KILLED  INHERITS child + partition
+T6 tenants shape reusable again (L4)            KILLED
+G2 shape ignores roles                          KILLED  (after 8f6c8d9; survived the first table)
+G3 shape ignores USING hash                     KILLED
+G4 shape ignores the policy name                KILLED
+```
+
+## R12.5 Verification (main checkout at 8f6c8d9 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1809/1809 |
+| `npm run test:db` ×25 (URL set) | 25/25 exit 0, 203/203 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| pg_dump test with `RATIO_PG_DUMP=/usr/lib/postgresql/16/bin/pg_dump` / with a missing binary | pass / **fails** (`spawnSync … ENOENT`): never skipped |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` rows 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no `ratio_manifest_*` database |
+| Slice 1 compat: scratch worktree `slice/01` 770e333 + 8f6c8d9 (removed) | **one conflict in `.github/workflows/ci.yml`**: Slice 1 adds a SeaweedFS step and `RATIO_TEST_S3_ENDPOINT`; this round adds the PG16 client-tools step and `RATIO_PG_DUMP` / `RATIO_PSQL`. Resolved by keeping both (YAML valid). tsc 0, lint 0, fast 1924/1924, test:db 328/328 ×2 |
+
+**Restricted change.** 7cf79d1 edits `.github/workflows/ci.yml`. It adds a
+"PostgreSQL 16 client tools" step, which installs `postgresql-client-16` only
+when `/usr/lib/postgresql/16/bin/{pg_dump,psql}` are absent and prints their
+versions. It also adds `RATIO_PG_DUMP` / `RATIO_PSQL` to the DB-test step's
+env. The workflow was not executed here (no push).

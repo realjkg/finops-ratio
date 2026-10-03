@@ -256,3 +256,12 @@ All in `foundation.db.test.ts`.
 | L1 | `dump a migrated database, restore it into a fresh one: the foundation still matches and the check passes` |
 | L2 | `ALTER POLICY … TO ratio_owner (split keyword) is refused` (green on arrival; kills the roles mutant) |
 | L3 | `REPLICA IDENTITY FULL on a 0001 table is refused`, `table entries pin relpersistence and relreplident` |
+
+## Round 12 — flaky leak check fixed; per-table rule (tests committed red in a33a9ff)
+
+| Item | File | Test name(s) |
+|---|---|---|
+| H1 race | `privileges.db.test.ts` | `settingRows()` scoped to `setdatabase IN (0, this database)` (6b52a3f); proof = 25 consecutive `test:db` runs (EVIDENCE R12) |
+| L1 | `foundation.db.test.ts` | `a new ratio table with RLS disabled (and no grants at all) is refused`, `a new ratio table with RLS forced but no reviewed policy is refused`, `an INHERITS (ratio.cost_facts) child — even outside schema ratio — is refused`, `a partition of a (new, otherwise compliant) partitioned ratio table is refused`, `ALTER TABLE … SET UNLOGGED on a new ratio table is refused (…)` |
+| L2 | `foundation.db.test.ts` | `G3: a tenant_isolation policy with USING (true) on a new table is refused`, `G2: the reviewed predicate but TO ratio_reader only is refused` (made exact in 8f6c8d9), `G4: the reviewed predicate under a different policy name is refused` |
+| L4 | `foundation.db.test.ts` | `L4: the tenants-table shape (id = current_tenant_id()) is not reusable on another table` |

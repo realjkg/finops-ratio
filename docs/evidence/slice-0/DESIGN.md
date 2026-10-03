@@ -710,3 +710,42 @@ CASCADE` after apply left `--status` at `matches: true`.
   in the inserting session under that session's own tenant, and the RLS
   WITH CHECK still decides what may be written; a default cannot read another
   tenant's rows through RLS.
+
+## 21. Round 12 — challenger on 8079351 (1 High: flaky test; Lows)
+
+- **H1 — test race, not a product defect.** The round-8 leak checks counted
+  the whole cluster-wide `pg_db_role_setting`, while other test files commit
+  (and later drop) rows scoped to their own disposable databases in parallel
+  (1 failure in 25 runs). `settingRows()` now counts only rows this test
+  could leak: all-databases rows (`setdatabase = 0`) and rows of the test's
+  own database. The other tests that snapshot cluster-global catalogs were
+  reviewed: `roles.db.test.ts` only reads ratio-role attributes and
+  memberships OF the ratio roles, which no test commits (all such probes are
+  rolled back); nothing snapshots `pg_parameter_acl`, role counts or
+  `pg_database`.
+- **L1 — per-table rule.** Every table in schema `ratio` (0001's and any later
+  one) must have RLS enabled AND forced, be permanent (not UNLOGGED), and
+  carry at least one reviewed policy. No relation may inherit from, or be a
+  partition of, a `ratio` table (or the reverse), because inheritance or
+  partitioning would route rows around the parent's policies. This applies
+  whether or not 0001 is in the ledger, in every migration's check and in
+  `--status`. Probe tables in the tests moved to schema `public`.
+- **L2.** Tests now kill the surviving policy-shape mutants:
+  - G3: `tenant_isolation` with `USING (true)` on a new table;
+  - G2: the reviewed name and predicate `TO ratio_reader` only;
+  - G4: the reviewed predicate under another name;
+  - G5: `ALTER TABLE … SET UNLOGGED` on a new ratio table, refused by the
+    permanent-table rule. 0001 tables cannot be made UNLOGGED because of their
+    FKs.
+- **L3 — CI.** The DB step uses pinned PostgreSQL 16 client tools for the
+  `pg_dump` round-trip test. They are installed as `postgresql-client-16`
+  when the runner image lacks them, and passed as `RATIO_PG_DUMP` /
+  `RATIO_PSQL`. The test still fails (never skips) when they are missing.
+  This is a restricted CI change.
+- **L4 — "exact predicate, wrong column".** Decision (simple): the tenants
+  table's `id = ratio.current_tenant_id()` policy is not a reusable shape. It
+  is allowed only as its exact 0001 entry on `ratio.tenants`. The remaining
+  reusable shape is `tenant_id = ratio.current_tenant_id()`, which cannot be
+  created on a table without a uuid-comparable `tenant_id` column. A table
+  whose `tenant_id` column is not actually the tenant is a semantic error that
+  review must catch (residual, documented).
