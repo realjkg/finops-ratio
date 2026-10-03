@@ -211,16 +211,29 @@ credentials (AWS keys on Lambda, Google ADC on GKE). A connector is only
 *incomplete* once its location (export URL, bucket, dataset, endpoint) is set;
 before that it is simply *available*.
 
-**Real billing data is never served anonymously.** `GET /api/costsource/rows`
-for a live connector requires `Authorization: Bearer <RATIO_API_TOKEN>`, and is
-refused outright when no token is configured. Sandbox sources stay open, so the
+**Real billing data is never served anonymously (deny by default).**
+`GET /api/costsource/rows` and `GET /api/costsource/health` serve only the two
+offline sandbox sources (`pointfive-sandbox`, `focus-file-sandbox`) without a
+token. Every other source id — live connectors, PointFive live, and unknown ids —
+requires `Authorization: Bearer <RATIO_API_TOKEN>` and is refused outright when
+no token is configured; unknown ids answer 404 only after authentication. The
 offline demo is unchanged.
 
+**Fail loudly, never partially.** A connector either returns the complete data
+for the window or errors: too many export files, a truncated listing, a missing
+billing month in a multi-month window, an exhausted BigQuery page cap, or an
+invalid row (missing `BilledCost` / `ChargePeriodStart` / `BillingCurrency`, an
+unparseable number) is an explicit error naming the artifact and row. Upstream
+error bodies are never returned to API callers — only label + HTTP status; the
+body is logged server-side, redacted and truncated.
+
 **Automation.** `GET /api/v1/connectors` returns every connector's
-server-resolved state and the env names that connect it; add `?probe=true` to
-health-check every configured connector in parallel — suitable for a deploy
-pipeline or uptime monitor. The `/connectors` page shows the same state and has a
-live **Test connection** probe.
+server-resolved state and the env names that connect it; add `?probe=true`
+(requires `Authorization: Bearer <RATIO_API_TOKEN>`) to health-check every
+configured connector in parallel — suitable for a deploy pipeline or uptime
+monitor. The `/connectors` page shows the same state; its **Test connection**
+button probes sandbox sources only — the browser never holds an API token, so
+live connectors are probed through the authenticated API.
 
 PointFive (live) is the one exception: it routes through PointFive's broker (a
 controlled-egress path), so it stays explicitly opt-in behind
