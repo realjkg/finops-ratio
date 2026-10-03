@@ -140,6 +140,7 @@ export function parseManifest(
   const artifacts: ArtifactRef[] = [];
   const artifactRowCounts: Record<string, number> = {};
   const seen = new Set<string>();
+  const seenStored = new Set<string>();
   for (const [i, entry] of d.dataFiles.entries()) {
     let ref: unknown;
     let rows: unknown;
@@ -167,7 +168,12 @@ export function parseManifest(
     if (segs.some((s) => s === '' || s === '.' || s === '..' || !SEGMENT_RE.test(s))) return invalid(`dataFiles[${i}] has an invalid path segment`);
     // The name is STORED redacted (ingest_artifacts.artifact_name = redact(name), CHECK
     // length <= 1024 characters): bound the stored form, before any evidence is written (review M2, third round).
-    if ([...redact(name)].length > MAX_STORED_NAME_CHARS) return invalid(`dataFiles[${i}] has a name longer than ${MAX_STORED_NAME_CHARS} characters (as stored)`);
+    const storedName = redact(name);
+    if ([...storedName].length > MAX_STORED_NAME_CHARS) return invalid(`dataFiles[${i}] has a name longer than ${MAX_STORED_NAME_CHARS} characters (as stored)`);
+    // Names are stored redacted and are part of the artifact's primary key: two names that
+    // redact alike would collide at staging, so the manifest is refused up front.
+    if (seenStored.has(storedName)) return invalid(`dataFiles[${i}] has the same stored (redacted) name as an earlier data file`);
+    seenStored.add(storedName);
     if (seen.has(key)) return invalid(`dataFiles[${i}] is listed twice`);
     seen.add(key);
     const listed = ctx.listing.get(key);

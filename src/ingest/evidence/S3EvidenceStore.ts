@@ -31,19 +31,22 @@ export class S3EvidenceStore implements EvidenceStore {
     return this.prefix + key;
   }
 
-  private async existingSize(key: string): Promise<number | null> {
+  private async existingSize(key: string, signal: AbortSignal | undefined): Promise<number | null> {
+    if (signal?.aborted) throw signal.reason;
     try {
-      const h = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: this.k(key) }));
+      const h = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: this.k(key) }), { abortSignal: signal });
       return Number(h.ContentLength ?? 0);
     } catch (e) {
+      if (signal?.aborted) throw signal.reason;
       const status = (e as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
       if (status === 404 || (e as { name?: string })?.name === 'NotFound') return null;
       throw evidenceError('checking an evidence object', e);
     }
   }
 
-  async put(key: string, filePath: string, info: { sha256: string; byteSize: number }): Promise<'stored' | 'exists'> {
-    const existing = await this.existingSize(key);
+  async put(key: string, filePath: string, info: { sha256: string; byteSize: number }, opts: { signal?: AbortSignal } = {}): Promise<'stored' | 'exists'> {
+    const signal = opts.signal;
+    const existing = await this.existingSize(key, signal);
     if (existing !== null) {
       if (existing !== info.byteSize) throw new IngestError('EVIDENCE_CONFLICT', 'an evidence object with this key but a different size exists');
       return 'exists';
@@ -58,22 +61,26 @@ export class S3EvidenceStore implements EvidenceStore {
           ContentType: 'application/octet-stream',
           Metadata: { 'ratio-sha256': info.sha256 },
         }),
+        { abortSignal: signal }, // the run's signal tears the upload down
       );
     } catch (e) {
+      if (signal?.aborted) throw signal.reason;
       throw evidenceError('storing an evidence object', e);
     }
     return 'stored';
   }
 
-  async putBytes(key: string, bytes: Buffer): Promise<'stored' | 'exists'> {
-    const existing = await this.existingSize(key);
+  async putBytes(key: string, bytes: Buffer, opts: { signal?: AbortSignal } = {}): Promise<'stored' | 'exists'> {
+    const signal = opts.signal;
+    const existing = await this.existingSize(key, signal);
     if (existing !== null) {
       if (existing !== bytes.length) throw new IngestError('EVIDENCE_CONFLICT', 'an evidence object with this key but a different size exists');
       return 'exists';
     }
     try {
-      await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: this.k(key), Body: bytes, ContentType: 'application/octet-stream' }));
+      await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: this.k(key), Body: bytes, ContentType: 'application/octet-stream' }), { abortSignal: signal });
     } catch (e) {
+      if (signal?.aborted) throw signal.reason;
       throw evidenceError('storing an evidence object', e);
     }
     return 'stored';

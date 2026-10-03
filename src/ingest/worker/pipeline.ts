@@ -144,6 +144,8 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         maxMs: settings.retryMaxMs,
         sleep: hooks.sleep,
         random: hooks.random,
+        // An abort (MAX_RUN_SECONDS) ends a backoff at once and is never retried.
+        signal: runAbort.signal,
       };
       const onRetry = (period: string | null) => async ({ attempt, error }: { attempt: number; error: unknown }) => {
         attempts = attempt;
@@ -184,7 +186,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         const manifest = listing.ok ? listing.set.manifest : listing.manifest;
         if (manifest) {
           try {
-            manifestEvidence.push(await withRetry(() => captureManifest(opts.evidence, lease.tenantId, lease.sourceId, manifest.bytes), { ...retryOpts, onRetry: onRetry(period) }));
+            manifestEvidence.push(await withRetry(() => captureManifest(opts.evidence, lease.tenantId, lease.sourceId, manifest.bytes, runAbort.signal), { ...retryOpts, onRetry: onRetry(period) }));
           } catch (e) {
             if (e instanceof SimulatedCrash || (e instanceof IngestError && e.code === 'LEASE_LOST')) throw e;
             periods.push({ billingPeriod: period, outcome: 'failed', code: errorCodeOf(e), message: clean(messageOf(e)) });
@@ -226,7 +228,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
                   if (!fresh) throw new IngestError('PERIOD_NOT_FOUND', `period ${period} is no longer listed by the source`);
                   // The re-listed manifest is what the batch will be built from: evidence first (review M1).
                   const freshManifest = fresh.ok ? fresh.set.manifest : fresh.manifest;
-                  if (freshManifest) manifestEvidence.push(await captureManifest(opts.evidence, lease.tenantId, lease.sourceId, freshManifest.bytes));
+                  if (freshManifest) manifestEvidence.push(await captureManifest(opts.evidence, lease.tenantId, lease.sourceId, freshManifest.bytes, runAbort.signal));
                   if (!fresh.ok) throw new IngestError(fresh.code, clean(fresh.message));
                   set = fresh.set;
                   log('period.relisted', { runId: lease.runId, period });
@@ -337,6 +339,11 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   const control = effectiveControl(set);
   const limits = settings.limits;
 
+  // Names are stored redacted and key the artifact rows: names that redact alike would
+  // collide at staging. Refused before anything is downloaded, whatever the source.
+  if (new Set(set.artifacts.map((a) => redact(a.name))).size !== set.artifacts.length) {
+    return { billingPeriod: period, outcome: 'failed', code: 'MANIFEST_INVALID', message: 'two artifact names are identical once redacted (as stored)' };
+  }
   // Size gate from the listing (nothing downloaded yet).
   const total = set.artifacts.reduce((a, x) => a + x.byteSize, 0);
   if (set.artifacts.length > limits.maxArtifactsPerSet || set.artifacts.some((a) => a.byteSize > limits.maxArtifactBytes) || total > limits.maxBatchBytes) {

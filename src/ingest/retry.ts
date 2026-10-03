@@ -2,6 +2,7 @@
 // classifier. Only transient failures (connection loss, throttling, 5xx) are
 // retried; validation, authorization, lease and integrity failures never are.
 import { IngestError } from './errors';
+import { raceAbort } from './stall';
 
 /** Delay before retry number `retry` (1 = first retry): uniform in [0, min(cap, base·2^(retry-1))]. */
 export function backoffDelay(retry: number, baseMs: number, maxMs: number, random: () => number): number {
@@ -36,23 +37,41 @@ export interface RetryOptions {
   /** Called before each retry with the attempt number about to run (2, 3, …). */
   onRetry?: (info: { attempt: number; delayMs: number; error: unknown }) => Promise<void> | void;
   isTransient?: (e: unknown) => boolean;
+  /** Aborts the retrying: no attempt after the abort, and a backoff in progress ends at once, rejecting with the signal's reason. */
+  signal?: AbortSignal;
 }
 
-const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** setTimeout sleep that an abort ends at once (and whose timer it clears). */
+function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal!.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 export async function withRetry<T>(fn: (attempt: number) => Promise<T>, opts: RetryOptions): Promise<T> {
   if (!Number.isInteger(opts.maxAttempts) || opts.maxAttempts < 1) throw new RangeError('maxAttempts must be a positive integer');
-  const sleep = opts.sleep ?? realSleep;
+  const signal = opts.signal;
   const random = opts.random ?? Math.random;
   const transient = opts.isTransient ?? isTransientError;
   for (let attempt = 1; ; attempt++) {
     try {
       return await fn(attempt);
     } catch (e) {
+      if (signal?.aborted) throw signal.reason;
       if (attempt >= opts.maxAttempts || !transient(e)) throw e;
       const delayMs = backoffDelay(attempt, opts.baseMs, opts.maxMs, random);
       if (opts.onRetry) await opts.onRetry({ attempt: attempt + 1, delayMs, error: e });
-      await sleep(delayMs);
+      if (opts.sleep) await raceAbort(opts.sleep(delayMs), signal);
+      else await abortableSleep(delayMs, signal);
     }
   }
 }

@@ -56,6 +56,27 @@ export function idleWatchdog(ms: number, code: string, what: string, onData?: (b
 }
 
 /**
+ * Settles like `p`, or rejects with the signal's reason as soon as `signal`
+ * aborts — also when whatever produces `p` ignores the signal (its later
+ * settlement is then ignored).
+ */
+export async function raceAbort<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return p;
+  p.catch(() => undefined); // a rejection after the abort is not an unhandled one
+  if (signal.aborted) throw signal.reason;
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([p, aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
+
+/**
  * Rejects with `code` if `p` does not settle within `ms` — or with the
  * signal's reason (e.g. MAX_RUN_EXCEEDED) as soon as `signal` aborts, so an
  * aborted run is never reported as a stall.

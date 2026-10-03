@@ -10,7 +10,7 @@ import { pipeline } from 'stream/promises';
 import { IngestError } from '../errors';
 import { isTransientError } from '../retry';
 import { evidenceKey, type EvidenceStore } from '../evidence/types';
-import { idleWatchdog, withDeadline } from '../stall';
+import { idleWatchdog, raceAbort, withDeadline } from '../stall';
 import type { ArtifactRef, FocusSource } from '../sources/types';
 
 export interface CapturedArtifact {
@@ -71,7 +71,8 @@ export async function captureArtifact(opts: {
     }
     const sha256 = hash.digest('hex');
     const key = evidenceKey(opts.tenantId, opts.sourceId, sha256);
-    const stored = await opts.evidence.put(key, file, { sha256, byteSize: size });
+    // The upload carries the run's signal, and an abort ends the wait even if the store ignores it.
+    const stored = await raceAbort(opts.evidence.put(key, file, { sha256, byteSize: size }, { signal: opts.signal }), opts.signal);
     return { ref: opts.ref, sha256, byteSize: size, evidenceKey: key, stored };
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => undefined);
@@ -79,9 +80,9 @@ export async function captureArtifact(opts: {
 }
 
 /** Stores manifest bytes as evidence; returns the key. */
-export async function captureManifest(evidence: EvidenceStore, tenantId: string, sourceId: string, bytes: Buffer): Promise<string> {
+export async function captureManifest(evidence: EvidenceStore, tenantId: string, sourceId: string, bytes: Buffer, signal?: AbortSignal): Promise<string> {
   const sha = crypto.createHash('sha256').update(bytes).digest('hex');
   const key = evidenceKey(tenantId, sourceId, sha);
-  await evidence.putBytes(key, bytes);
+  await raceAbort(evidence.putBytes(key, bytes, { signal }), signal);
   return key;
 }
