@@ -2,6 +2,7 @@
 // Callers only ever see the CostSourceClient interface and createCostSourceClient;
 // concrete implementations are an internal detail.
 import { LiveCostSourceClient } from './LiveCostSourceClient';
+export { LiveDataAuthError, LIVE_DATA_AUTH_MESSAGE } from './LiveCostSourceClient';
 import { MockCostSourceClient } from './MockCostSourceClient';
 import type { CostSourceClient } from './CostSourceClient';
 
