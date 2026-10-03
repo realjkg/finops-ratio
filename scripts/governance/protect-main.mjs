@@ -8,8 +8,17 @@
 import fs from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { CI_CHECK_NAME, GITHUB_ACTIONS_APP_ID } from './eligibility.mjs';
 
-export const REQUIRED_CHECKS = ['Lint · Typecheck · Test · Build', 'Governance · risk classification'];
+// CI is pinned to the GitHub Actions app so a status/check from another app
+// cannot satisfy it. The governance context is a COMMIT STATUS posted by the
+// classify job and is accepted from any source: it is informational (it is
+// always "success"; it never gates on risk), and merge eligibility re-classifies
+// the PR itself, so a spoofed status cannot make a restricted PR auto-mergeable.
+export const REQUIRED_CHECKS = [
+  { context: CI_CHECK_NAME, app_id: GITHUB_ACTIONS_APP_ID },
+  { context: 'Governance · risk classification' },
+];
 
 export function buildRequests({ repo, branch = 'main', enforceAdmins = true, checks = REQUIRED_CHECKS }) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo ?? '')) {
@@ -20,7 +29,7 @@ export function buildRequests({ repo, branch = 'main', enforceAdmins = true, che
       method: 'PUT',
       path: `/repos/${repo}/branches/${encodeURIComponent(branch)}/protection`,
       body: {
-        required_status_checks: { strict: true, checks: checks.map((context) => ({ context })) },
+        required_status_checks: { strict: true, checks: checks.map((c) => ({ ...c })) },
         enforce_admins: enforceAdmins,
         // PR required; approvals are 0 because merge eligibility is decided by
         // checks + independent review + resolved conversations, not by humans.

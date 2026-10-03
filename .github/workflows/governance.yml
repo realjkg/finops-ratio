@@ -8,6 +8,8 @@
 #   runs always come from the BASE branch; PR code is never checked out or
 #   executed. The PR's file list and patches are read through the API. A PR
 #   that edits this file or scripts/governance/** is itself restricted.
+# - Fork PRs are classified (labels + report) but are NEVER auto-merge eligible,
+#   nor are PRs by authors outside OWNER/MEMBER/COLLABORATOR.
 # - `pull_request_review` is deliberately NOT used: it runs the PR head's copy
 #   of this workflow, so a PR could rewrite its own gate. Review/copilot
 #   completion is picked up by workflow_run (when GitHub emits it) and by the
@@ -61,23 +63,60 @@ jobs:
             const mod = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/governance/gh-actions.mjs`).href);
             await mod.runClassify({ github, context, core });
 
-  merge-eligibility:
-    name: Governance · merge eligibility
+  targets:
+    name: Governance · eligibility targets
     needs: [classify]
     # Runs after classification on PR events, and on its own for the other
-    # triggers (where `classify` is skipped). It re-classifies the current file
-    # list itself, so it never trusts a possibly stale label alone.
+    # triggers (where `classify` is skipped). Emits the PR numbers to evaluate.
     if: ${{ always() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      prs: ${{ steps.list.outputs.prs }}
+    steps:
+      - name: Checkout governance scripts from the base/default branch (never the PR head)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        # No `ref`: every trigger here resolves github.sha on the base/default branch.
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/governance
+      - name: List PRs to evaluate
+        id: list
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const mod = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/governance/gh-actions.mjs`).href);
+            await mod.runTargets({ github, context, core });
+
+  merge-eligibility:
+    # One matrix leg per PR, each in its own per-PR concurrency group, so a
+    # sweep never queues behind (or drops) another PR's evaluation. The newest
+    # pending evaluation of the SAME PR replaces an older pending one, which is
+    # fine: it reads the freshest state. It re-classifies the current file list
+    # itself, so it never trusts a possibly stale label alone.
+    name: Governance · merge eligibility (#${{ matrix.pr }})
+    needs: [targets]
+    if: ${{ always() && needs.targets.result == 'success' && needs.targets.outputs.prs != '[]' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        pr: ${{ fromJSON(needs.targets.outputs.prs) }}
     concurrency:
-      group: governance-eligibility-${{ github.event.pull_request.number || 'sweep' }}
+      group: governance-pr-${{ matrix.pr }}
       cancel-in-progress: false
     permissions:
       contents: write       # enable/disable auto-merge, squash-merge an already-clean PR
-      pull-requests: write  # auto-merge mutations
+      pull-requests: write  # auto-merge mutations; read reviews
       checks: read          # check runs on the head SHA
       statuses: read        # commit statuses on the head SHA
+      actions: read         # map check suites to workflow files (CI must be ci.yml)
     steps:
       - name: Checkout governance scripts from the base/default branch (never the PR head)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -87,8 +126,12 @@ jobs:
           sparse-checkout: scripts/governance
       - name: Decide and apply auto-merge
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          PR_NUMBER: ${{ matrix.pr }}
         with:
           script: |
             const { pathToFileURL } = require('node:url');
             const mod = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/governance/gh-actions.mjs`).href);
-            await mod.runEligibility({ github, context, core });
+            const n = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(n) || n <= 0) throw new Error(`bad PR_NUMBER ${process.env.PR_NUMBER}`);
+            await mod.runEligibility({ github, context, core, numbers: [n] });

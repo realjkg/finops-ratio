@@ -5,31 +5,57 @@ const GOV_LABEL = /^(?:risk:|restricted:)/;
 
 const OWNER_ONLY_CLASSES = new Set(['retention', 'deployment']);
 
+const FRESH_REVIEW_NOTE =
+  '- A fresh Copilot review on the new head is required after each push (the repository does not re-request review on push; eligibility only counts a review whose commit is the current head SHA).';
+
 function cell(s) {
   return String(s).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/`/g, "'").replace(/\r?\n/g, ' ');
 }
 
-function protectionLine(mainProtection) {
-  if (!mainProtection) return null;
-  if (mainProtection.error) {
-    return `- Branch protection on \`main\` could not be verified (${cell(mainProtection.error)}); the token likely lacks admin rights. Recorded, not blocking.`;
+/**
+ * mainProtection: { protected?: boolean, rulesRequiredChecks?: string[],
+ *                   rulesError?: string, error?: string }
+ * `protected` comes from GET /branches/main (true for classic protection OR a
+ * ruleset; GITHUB_TOKEN cannot read classic protection details). Required checks
+ * come from GET /rules/branches/main, which reports rulesets only.
+ */
+function protectionLines(mp) {
+  if (!mp) return [];
+  if (mp.error) {
+    return [`- Branch protection on \`main\` could not be verified (${cell(mp.error)}); the token likely lacks the rights. Recorded, not blocking.`];
   }
-  if (mainProtection.protected === false) {
-    return '- **main is NOT protected.** Run `scripts/governance/protect-main.mjs` with an admin token. Recorded, not blocking.';
+  const lines = [];
+  if (mp.protected === false) {
+    lines.push('- **main is NOT protected.** Run `scripts/governance/protect-main.mjs` with an admin token. Recorded, not blocking.');
+  } else if (mp.protected === true) {
+    lines.push('- `main` reports `protected: true` (classic protection or a ruleset; details of classic protection are not readable with GITHUB_TOKEN).');
   }
-  return '- Branch protection on `main`: enabled.';
+  if (mp.rulesError) {
+    lines.push(`- Rules for \`main\` could not be read (${cell(mp.rulesError)}). Recorded, not blocking.`);
+  } else if (Array.isArray(mp.rulesRequiredChecks)) {
+    lines.push(
+      mp.rulesRequiredChecks.length
+        ? `- Ruleset on \`main\` requires status checks: ${mp.rulesRequiredChecks.map((c) => `\`${cell(c)}\``).join(', ')}.`
+        : '- No ruleset requires status checks on `main` (classic protection may still; run `protect-main.mjs --dry-run` to see the intended settings).',
+    );
+  }
+  return lines;
 }
 
 /** Markdown body for the job summary and the single upserted PR comment. */
 export function buildReport(result, ctx = {}) {
   const sha = ctx.headSha ? ` at \`${String(ctx.headSha).slice(0, 7)}\`` : '';
   const lines = [REPORT_MARKER];
-  const prot = protectionLine(ctx.mainProtection);
+  const prot = protectionLines(ctx.mainProtection);
+  const outsider = ctx.outsider
+    ? [`- **Never eligible for auto-merge:** ${cell(ctx.outsider)}. Classification is informational only.`]
+    : [];
 
   if (result.risk === 'low') {
     lines.push(`### Governance: risk:low${sha}`, '');
-    lines.push('No restricted paths or diff patterns matched. The merge-eligibility job may enable auto-merge once every check is green, the independent review has completed and all conversations are resolved.');
-    if (prot) lines.push('', prot);
+    lines.push('No restricted paths or diff patterns matched. "Low" means heuristically low, not proven safe: the rules in `scripts/governance/risk-rules.json` are pattern-based.');
+    lines.push('', 'The merge-eligibility job may enable auto-merge once CI is green, every other check has passed, the independent review has completed on this head and all conversations are resolved.', '');
+    lines.push(...outsider, FRESH_REVIEW_NOTE, ...prot);
     return `${lines.join('\n')}\n`;
   }
 
@@ -50,7 +76,7 @@ export function buildReport(result, ctx = {}) {
   if (ownerOnly.length) {
     lines.push('', `> **Owner checkpoint:** classes ${ownerOnly.map((c) => `\`${c}\``).join(', ')} may carry production-deploy or data-retention/deletion impact, which is NOT delegable to the orchestrator. Confirm there is no such impact or escalate to the owner.`);
   }
-  if (prot) lines.push('', prot);
+  lines.push('', ...outsider, FRESH_REVIEW_NOTE, ...prot);
   return `${lines.join('\n')}\n`;
 }
 

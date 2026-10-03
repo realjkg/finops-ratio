@@ -1,5 +1,5 @@
 {
-  "$comment": "PR risk rules (governance track). Reviewed like code: any change to this file is itself restricted (deployment / self-protection). Globs without a '/' match the file's basename anywhere; globs with a '/' match the full repo-relative path. 'scope' limits a rule to paths matching any of the listed globs. 'added-line-regex' rules only look at lines ADDED by the diff. A path matching no restricted rule is low ONLY if it matches 'low'; everything else is restricted:unclassified (fail-closed).",
+  "$comment": "PR risk rules (governance track). Reviewed like code: any change to this file is itself restricted (deployment / self-protection). Globs without a '/' match the file's basename anywhere; globs with a '/' match the full repo-relative path. 'scope' limits a rule to paths matching any of the listed globs. 'added-line-regex' rules only look at lines ADDED by the diff. A path matching no restricted rule is low ONLY if it matches 'low' (and none of that entry's 'except' globs) and its diff was inspectable; everything else is restricted:unclassified (fail-closed). 'low' means HEURISTICALLY low, not proven safe.",
   "version": 1,
   "restricted": [
     { "id": "migrations.paths", "class": "migrations", "kind": "path-glob", "patterns": ["**/migrations/**", "*.sql"] },
@@ -14,6 +14,7 @@
 
     { "id": "network_egress.transports", "class": "network_egress", "kind": "path-glob", "patterns": ["src/costsource/transports/**"] },
     { "id": "network_egress.fetch-call", "class": "network_egress", "kind": "added-line-regex", "pattern": "\\bfetch\\s*\\(", "scope": ["src/**", "pages/**"] },
+    { "id": "network_egress.browser-and-dynamic", "class": "network_egress", "kind": "added-line-regex", "pattern": "\\b(?:sendBeacon|WebSocket|XMLHttpRequest|EventSource)\\b|\\bimport\\s*\\(|['\"]//", "scope": ["src/**", "pages/**"] },
     { "id": "network_egress.url-literal", "class": "network_egress", "kind": "added-line-regex", "pattern": "\\b(?:https?|wss?)://[^\\s'\"`)<>]+", "flags": "i", "scope": ["src/**", "pages/**"] },
 
     { "id": "retention.path", "class": "retention", "kind": "path-regex", "pattern": "retention|purge", "flags": "i" },
@@ -30,12 +31,14 @@
 
     { "id": "dependencies.manifests", "class": "dependencies", "kind": "path-glob", "patterns": ["package.json", "package-lock.json", "npm-shrinkwrap.json"] },
 
-    { "id": "policy.obvious", "class": "policy", "kind": "path-glob", "patterns": [".obvious/obvious.md"] }
+    { "id": "policy.agent-instructions", "class": "policy", "kind": "path-glob", "patterns": [".obvious/**", ".claude/**", "CLAUDE.md", "AGENTS.md", "SKILL.md"] },
+
+    { "id": "routes.next-pages", "class": "routes", "kind": "path-glob", "patterns": ["pages/**", "src/pages/**"] }
   ],
   "low": [
-    { "id": "low.docs", "patterns": ["docs/**"] },
+    { "id": "low.docs", "patterns": ["docs/**/*.{md,png,svg}"] },
     { "id": "low.markdown", "patterns": ["*.md"] },
-    { "id": "low.ui-components", "patterns": ["src/components/**"] },
-    { "id": "low.tests", "patterns": ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx", "*.test.mjs", "*.test.cjs"] }
+    { "id": "low.ui-components", "patterns": ["src/components/**/*.{ts,tsx,js,jsx,css}"] },
+    { "id": "low.tests", "patterns": ["*.test.ts", "*.test.tsx", "*.test.js", "*.test.jsx", "*.test.mjs", "*.test.cjs"], "except": ["pages/**", "src/pages/**"] }
   ]
 }

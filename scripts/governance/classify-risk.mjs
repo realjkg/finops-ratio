@@ -93,7 +93,11 @@ export function loadRules(raw) {
         throw new Error(`unknown rule kind "${r.kind}" in ${r.id}`);
     }
   });
-  const low = data.low.map((r) => ({ ...r, matchPath: anyGlob(r.patterns) }));
+  const low = data.low.map((r) => {
+    const inc = anyGlob(r.patterns);
+    const exc = r.except ? anyGlob(r.except) : () => false;
+    return { ...r, matchPath: (p) => inc(p) && !exc(p) };
+  });
   return { version: data.version, restricted, low };
 }
 
@@ -133,6 +137,24 @@ export function parseUnifiedDiff(text, defaultPath) {
 }
 
 /**
+ * Paths whose diff is binary ("Binary files ... differ" / "GIT binary patch"):
+ * content rules cannot see them, so the classifier treats them as uninspectable.
+ */
+export function binaryPathsInDiff(text) {
+  const out = new Set();
+  let current = null;
+  for (const line of String(text).split('\n')) {
+    const git = /^diff --git a\/(.*) b\/(.*)$/.exec(line);
+    if (git) {
+      current = git[2];
+      continue;
+    }
+    if (current && (/^Binary files .* differ$/.test(line) || line === 'GIT binary patch')) out.add(current);
+  }
+  return [...out];
+}
+
+/**
  * Classify a change set.
  * @param {{ files: Array<{ path: string, previousPath?: string, patch?: string,
  *           patchUnavailable?: boolean }>, diff?: string, truncated?: boolean }} input
@@ -140,6 +162,7 @@ export function parseUnifiedDiff(text, defaultPath) {
 export function classify(input, rules = loadRules()) {
   const files = input?.files ?? [];
   const fromDiff = input?.diff ? parseUnifiedDiff(input.diff) : {};
+  const binary = new Set(input?.diff ? binaryPathsInDiff(input.diff) : []);
   const reasons = [];
   const seen = new Set();
   const add = (path, cls, rule) => {
@@ -175,7 +198,7 @@ export function classify(input, rules = loadRules()) {
     if (hit) continue;
     const isLow = candidatePaths.every((p) => rules.low.some((l) => l.matchPath(p)));
     if (!isLow) add(f.path, 'unclassified', 'fail-closed-default');
-    else if (f.patchUnavailable) add(f.path, 'unclassified', 'diff-unavailable');
+    else if (f.patchUnavailable || binary.has(f.path)) add(f.path, 'unclassified', 'diff-unavailable');
   }
 
   const classes = [...new Set(reasons.map((r) => r.class))].sort();

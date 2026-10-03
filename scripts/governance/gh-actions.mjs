@@ -3,7 +3,7 @@
 // The workflow checks this file out from the BASE commit (never the PR head),
 // so a PR cannot change the code that classifies it.
 import { classify } from './classify-risk.mjs';
-import { decideEligibility, DEFAULT_CONFIG } from './eligibility.mjs';
+import { decideEligibility, outsiderReason, DEFAULT_CONFIG } from './eligibility.mjs';
 import { REPORT_MARKER, buildReport, desiredLabels, labelChanges } from './report.mjs';
 
 const MAX_LISTED_FILES = 3000; // GitHub's hard cap for pulls.listFiles
@@ -12,6 +12,8 @@ const CLASSIFY_CONTEXT = 'Governance · risk classification';
 
 const LABEL_COLORS = { 'risk:low': '0e8a16', 'risk:restricted': 'b60205' };
 
+const AUTO_MERGE_NOT_ALLOWED = /auto.?merge is not allowed|allow_auto_merge|auto.?merge (?:is )?disabled for this repository/i;
+
 /** Changed files of a PR in classifier input shape (+ truncation flag). */
 export async function fetchChangeSet(github, repo, pr) {
   const raw = await github.paginate(github.rest.pulls.listFiles, { ...repo, pull_number: pr.number, per_page: 100 });
@@ -19,21 +21,39 @@ export async function fetchChangeSet(github, repo, pr) {
     path: f.filename,
     previousPath: f.previous_filename,
     patch: f.patch,
-    // GitHub omits `patch` for large or binary files: content rules cannot be
-    // evaluated, so the classifier treats an otherwise-low path as restricted.
-    patchUnavailable: f.patch === undefined && f.status !== 'removed' && (f.changes ?? 1) > 0,
+    // GitHub omits `patch` for large files and for anything it deems binary —
+    // including a source file with a NUL byte (changes: 0). Content rules
+    // cannot see those, so they are uninspectable unless the change is a pure
+    // removal or a pure rename. Fail closed.
+    patchUnavailable: f.patch === undefined && !(f.status === 'removed' || (f.status === 'renamed' && f.changes === 0)),
   }));
   const truncated = raw.length >= MAX_LISTED_FILES || (typeof pr.changed_files === 'number' && raw.length < pr.changed_files);
   return { files, truncated };
 }
 
+/**
+ * What GITHUB_TOKEN can see about main's protection: the branch `protected`
+ * flag, plus required status checks from the branch RULES API (rulesets).
+ */
 export async function mainProtection(github, repo, branch = 'main') {
+  let out;
   try {
     const { data } = await github.rest.repos.getBranch({ ...repo, branch });
-    return { protected: Boolean(data.protected) };
+    out = { protected: Boolean(data.protected) };
   } catch (e) {
     return { error: `HTTP ${e.status ?? '?'}` };
   }
+  try {
+    const rules = github.rest.repos.getBranchRules
+      ? await github.paginate(github.rest.repos.getBranchRules, { ...repo, branch, per_page: 100 })
+      : (await github.request('GET /repos/{owner}/{repo}/rules/branches/{branch}', { ...repo, branch })).data;
+    out.rulesRequiredChecks = rules
+      .filter((r) => r.type === 'required_status_checks')
+      .flatMap((r) => (r.parameters?.required_status_checks ?? []).map((c) => c.context));
+  } catch (e) {
+    out.rulesError = `HTTP ${e.status ?? '?'}`;
+  }
+  return out;
 }
 
 async function ensureLabel(github, repo, name) {
@@ -83,6 +103,19 @@ export async function upsertReportComment(github, repo, prNumber, body, { create
   return 'created';
 }
 
+async function disableAutoMerge(github, nodeId) {
+  await github.graphql(
+    'mutation($id:ID!){ disablePullRequestAutoMerge(input:{pullRequestId:$id}){ clientMutationId } }',
+    { id: nodeId },
+  );
+}
+
+const prIdentity = (pr) => ({
+  headRepo: pr.head?.repo?.full_name ?? null,
+  baseRepo: pr.base?.repo?.full_name ?? null,
+  authorAssociation: pr.author_association,
+});
+
 /** Job: classify the PR in the pull_request_target event. Never fails on risk. */
 export async function runClassify({ github, context, core }) {
   const repo = context.repo;
@@ -91,12 +124,25 @@ export async function runClassify({ github, context, core }) {
   const result = classify(changeSet);
   core.info(JSON.stringify(result, null, 2));
 
+  // A restricted change, or any new push, must not ride an earlier auto-merge
+  // enablement: switch it off before anything else is published.
+  if (pr.auto_merge && (result.risk !== 'low' || context.payload.action === 'synchronize')) {
+    try {
+      await disableAutoMerge(github, pr.node_id);
+      core.info('auto-merge disabled (restricted change or new push)');
+    } catch (e) {
+      core.setFailed(`Could not disable auto-merge on #${pr.number}: ${e.message}`);
+      return result;
+    }
+  }
+
   const protection = await mainProtection(github, repo);
-  const report = buildReport(result, { headSha: pr.head.sha, mainProtection: protection });
+  const outsider = outsiderReason(prIdentity(pr));
+  const report = buildReport(result, { headSha: pr.head.sha, mainProtection: protection, outsider });
   await core.summary.addRaw(report).write();
 
-  // Label/comment writes are reported, not fatal: e.g. a fork PR gets a
-  // read-only token. The classification itself is in the summary either way.
+  // Label/comment/status writes failing is an operational error (reported red);
+  // the classification itself is already in the summary.
   try {
     const labels = await syncLabels(github, repo, pr, result);
     core.info(`labels: +[${labels.add}] -[${labels.remove}]`);
@@ -139,31 +185,47 @@ async function unresolvedThreadCount(github, repo, number) {
 /** Gather everything decideEligibility needs for one PR. */
 export async function gatherState(github, repo, number) {
   const { data: pr } = await github.rest.pulls.get({ ...repo, pull_number: number });
+  const headSha = pr.head.sha;
   const changeSet = await fetchChangeSet(github, repo, pr);
   const fresh = classify(changeSet);
-  const checkRuns = await github.paginate(github.rest.checks.listForRef, {
-    ...repo,
-    ref: pr.head.sha,
-    filter: 'latest',
-    per_page: 100,
-  });
-  const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ ...repo, ref: pr.head.sha, per_page: 100 });
+  const checkRuns = await github.paginate(github.rest.checks.listForRef, { ...repo, ref: headSha, filter: 'latest', per_page: 100 });
+  // Resolve each check run's suite to the workflow file that produced it, so a
+  // same-named job in another workflow cannot impersonate CI.
+  const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, { ...repo, head_sha: headSha, per_page: 100 });
+  const pathBySuite = new Map(runs.map((r) => [r.check_suite_id, r.path]));
+  const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ ...repo, ref: headSha, per_page: 100 });
+  const reviews = await github.paginate(github.rest.pulls.listReviews, { ...repo, pull_number: number, per_page: 100 });
   // Unknown (API error) → null → decideEligibility fails closed.
   const unresolvedThreads = await unresolvedThreadCount(github, repo, number).catch(() => null);
+
+  // The head must not have moved while we were gathering.
+  const { data: again } = await github.rest.pulls.get({ ...repo, pull_number: number });
+  const moved = again.head.sha !== headSha;
+
   return {
     raw: pr,
     fresh,
+    moved,
     state: {
       pr: {
         number,
         draft: pr.draft,
         baseRef: pr.base.ref,
-        headSha: pr.head.sha,
+        headSha,
         labels: (pr.labels ?? []).map((l) => l.name),
+        ...prIdentity(pr),
       },
       freshRisk: fresh.risk,
-      checkRuns: checkRuns.map((c) => ({ id: c.id, name: c.name, status: c.status, conclusion: c.conclusion })),
+      checkRuns: checkRuns.map((c) => ({
+        id: c.id,
+        name: c.name,
+        status: c.status,
+        conclusion: c.conclusion,
+        appId: c.app?.id,
+        workflowPath: pathBySuite.get(c.check_suite?.id),
+      })),
       statuses: (combined.statuses ?? []).map((s) => ({ context: s.context, state: s.state })),
+      reviews: reviews.map((r) => ({ login: r.user?.login, userType: r.user?.type, commitId: r.commit_id, state: r.state })),
       unresolvedThreads,
     },
   };
@@ -174,10 +236,7 @@ export async function applyDecision(github, repo, raw, decision) {
   const hasAutoMerge = Boolean(raw.auto_merge);
   if (!decision.eligible) {
     if (!hasAutoMerge) return 'auto-merge already off';
-    await github.graphql(
-      'mutation($id:ID!){ disablePullRequestAutoMerge(input:{pullRequestId:$id}){ clientMutationId } }',
-      { id: raw.node_id },
-    );
+    await disableAutoMerge(github, raw.node_id);
     return 'auto-merge DISABLED';
   }
   if (hasAutoMerge) return 'auto-merge already on';
@@ -188,12 +247,17 @@ export async function applyDecision(github, repo, raw, decision) {
     );
     return 'auto-merge ENABLED (squash)';
   } catch (e) {
+    const msg = e.message ?? '';
     // GitHub refuses to *enable* auto-merge on a PR that is already mergeable
     // ("clean status"). Every condition was just verified, so squash-merge
     // directly, pinned to the head SHA we evaluated (refused if it moved).
-    if (/clean status/i.test(e.message ?? '')) {
+    if (/clean status/i.test(msg)) {
       await github.rest.pulls.merge({ ...repo, pull_number: raw.number, merge_method: 'squash', sha: raw.head.sha });
       return 'squash-merged (PR was already clean; pinned to evaluated head SHA)';
+    }
+    // Repository setting, not an evaluation error: report, do not turn red.
+    if (AUTO_MERGE_NOT_ALLOWED.test(msg)) {
+      return 'CONFIGURATION GAP: the repository does not allow auto-merge (enable "Allow auto-merge" in repo settings, e.g. via scripts/governance/protect-main.mjs). Not merged.';
     }
     throw e;
   }
@@ -213,15 +277,27 @@ async function candidatePrNumbers(github, context) {
   return open.map((x) => x.number);
 }
 
-/** Job: decide merge eligibility for the PR(s) relevant to this event. */
-export async function runEligibility({ github, context, core }) {
+/** Job: list the PR numbers this event should evaluate (matrix input). */
+export async function runTargets({ github, context, core }) {
+  const nums = [...new Set(await candidatePrNumbers(github, context))];
+  core.setOutput('prs', JSON.stringify(nums));
+  core.info(`PRs to evaluate: ${JSON.stringify(nums)}`);
+  return nums;
+}
+
+/** Job: decide merge eligibility for the given PR(s) (or those relevant to this event). */
+export async function runEligibility({ github, context, core, numbers }) {
   const repo = context.repo;
-  const numbers = await candidatePrNumbers(github, context);
+  const targets = numbers ?? (await candidatePrNumbers(github, context));
   const rows = [];
   let errors = 0;
-  for (const number of numbers) {
+  for (const number of targets) {
     try {
-      const { raw, fresh, state } = await gatherState(github, repo, number);
+      const { raw, fresh, moved, state } = await gatherState(github, repo, number);
+      if (moved) {
+        rows.push({ number, risk: fresh.risk, eligible: false, action: 'head moved during evaluation; deferred to the next event (auto-merge not enabled)', reasons: [] });
+        continue;
+      }
       const decision = decideEligibility(state);
       const action = await applyDecision(github, repo, raw, decision);
       rows.push({ number, risk: fresh.risk, eligible: decision.eligible, action, reasons: decision.reasons });
