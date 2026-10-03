@@ -637,3 +637,12 @@ describe('round 18 sweep: names never stop early (before "(", at line breaks, in
     });
   }
 });
+
+describe('round 18 follow-up (challenger Low 2): malformed names return the malformed marker', () => {
+  it("'ratio.', '.t', '\"\"' and friends are malformed (marker prefix), not some other canonical name", () => {
+    for (const bad of ['ratio.', '.t', '""', 'ratio..t', '"ratio".""', '"".t', 'ratio t', '"ratio']) {
+      expect(canonIdent(bad).startsWith('\u0000'), JSON.stringify(bad)).toBe(true);
+    }
+    for (const good of ['ratio', 'ratio.t', '"ratio" . "t"', '"a""b"']) expect(canonIdent(good).startsWith('\u0000'), good).toBe(false);
+  });
+});
