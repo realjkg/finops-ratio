@@ -175,6 +175,31 @@ describe('ingest CLI (real Postgres)', () => {
     }
   });
 
+  it('round 9 L1: --status exits 3 for a ratio.tenant_id default on the database or on a LOGIN member of ratio_reader', async () => {
+    const login = `ratio_probe_member_${Math.random().toString(16).slice(2, 10)}`;
+    try {
+      for (const stmt of [
+        `ALTER DATABASE %I SET ratio.tenant_id = 'aaaaaaaa-0000-4000-8000-000000000001'`,
+        `ALTER ROLE ${login} IN DATABASE %I SET ratio.tenant_id = 'aaaaaaaa-0000-4000-8000-000000000001'`,
+      ]) {
+        const db = await freshDb();
+        const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
+        expect((await run(['migrate'], env)).code).toBe(0);
+        if (stmt.startsWith('ALTER ROLE')) await db.pool.query(`CREATE ROLE ${login} LOGIN IN ROLE ratio_reader`);
+        await db.pool.query(`DO $$ BEGIN EXECUTE format('${stmt.replace(/'/g, "''")}', current_database()); END $$`);
+        const r = await run(['migrate', '--status', '--json'], env);
+        expect(r.code, stmt).toBe(3);
+        const doc = onlyJson(r.out) as StatusDoc & { privilegeProblems?: string[] };
+        expect(doc.matches).toBe(false);
+        expect(doc.privilegeProblems?.join('\n')).toMatch(/setting ratio\.tenant_id=/);
+        await db.close(); // its pg_db_role_setting rows go with the database
+      }
+    } finally {
+      const db = await freshDb();
+      await db.pool.query(`DROP ROLE IF EXISTS ${login}`);
+    }
+  });
+
   it('round 8 L1: a benign ALTER DATABASE … SET statement_timeout keeps --status at exit 0', async () => {
     const db = await freshDb();
     const env = { RATIO_MIGRATE_DATABASE_URL: db.url };

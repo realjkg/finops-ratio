@@ -801,3 +801,99 @@ describe('round 8 L2 (S5): the runner resets a used caller connection before tak
     expect((await db.pool.query(`SELECT sp, rs, eq FROM ratio.session_probe`)).rows[0]).toEqual({ sp: 'pg_catalog, pg_temp', rs: 'on', eq: true });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 9 (challenger Low 1/2 on 325b059): default tenant via setting defaults
+// ---------------------------------------------------------------------------
+
+describe('round 9 L1: a ratio.* custom setting default (e.g. a default tenant) is refused', () => {
+  it('ALTER DATABASE … SET ratio.tenant_id (DO/format, contract) is refused by the per-migration check; nothing committed', async () => {
+    const c = await expectRunnerRefuses(
+      "DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET ratio.tenant_id = %L', current_database(), 'aaaaaaaa-0000-4000-8000-000000000001'); END $$;\n",
+      /setting ratio\.tenant_id=aaaaaaaa-0000-4000-8000-000000000001 for role ALL in database/,
+      { contract: true },
+    );
+    expect(
+      (await c.query(`SELECT count(*)::int AS n FROM pg_db_role_setting WHERE setdatabase = (SELECT oid FROM pg_database WHERE datname = current_database())`)).rows[0].n,
+    ).toBe(0);
+  });
+
+  it('ALTER ROLE <LOGIN member of ratio_reader> IN DATABASE … SET ratio.tenant_id is refused by the per-migration check; nothing committed', async () => {
+    const login = `ratio_probe_member_${Math.random().toString(16).slice(2, 10)}`;
+    cleanups.push(async () => {
+      // Only if a (mutated) check let the migration commit: never leave a cluster-global login behind.
+      const admin = new Client({ connectionString: process.env.RATIO_TEST_DATABASE_URL });
+      await admin.connect();
+      try {
+        await admin.query(`DROP ROLE IF EXISTS ${login}`);
+      } finally {
+        await admin.end();
+      }
+    });
+    await expectRunnerRefuses(
+      `CREATE ROLE ${login} LOGIN IN ROLE ratio_reader;\n` +
+        `DO $$ BEGIN EXECUTE format('ALTER ROLE ${login} IN DATABASE %I SET ratio.tenant_id = %L', current_database(), 'aaaaaaaa-0000-4000-8000-000000000001'); END $$;\n`,
+      new RegExp(`setting ratio\\.tenant_id=aaaaaaaa-0000-4000-8000-000000000001 for role ${login}`),
+      { contract: true },
+    );
+  });
+
+  it('matching is case-insensitive and covers any ratio.* key, for ALL roles (rolled back)', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    const before = await settingRows(c);
+    for (const stmt of ["ALTER ROLE ALL SET \"RATIO.Tenant_ID\" = 'x'", "ALTER ROLE ALL SET ratio.anything_else = 'x'"]) {
+      await c.query('BEGIN');
+      try {
+        await c.query(stmt);
+        await expect(assertReviewedPrivileges(c), stmt).rejects.toThrow(/setting ratio\.\w+=x for role ALL/i);
+      } finally {
+        await c.query('ROLLBACK');
+      }
+    }
+    expect(await settingRows(c)).toBe(before);
+  });
+
+  it('the threat is real: with a database default tenant, a fresh reader session that never calls set_config sees that tenant (positive control: reader.db.test.ts "reader sees zero rows with no tenant set…")', async () => {
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const seed = await seedTwoTenants(db.pool);
+    const fresh = async () => {
+      const r = new Client({ connectionString: db.url });
+      await r.connect();
+      try {
+        await r.query('BEGIN');
+        await r.query('SET LOCAL ROLE ratio_reader');
+        return (await r.query(`SELECT count(*)::int AS n FROM ratio.cost_facts_published`)).rows[0].n as number;
+      } finally {
+        await r.query('ROLLBACK').catch(() => undefined);
+        await r.end();
+      }
+    };
+    expect(await fresh()).toBe(0);
+    await db.pool.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET ratio.tenant_id = %L', current_database(), '${seed.a.tenantId}'); END $$`);
+    expect(await fresh()).toBe(seed.a.publishedRows);
+    const { privilegeModelViolations } = await model();
+    const c = await connect(db);
+    expect((await privilegeModelViolations(c)).join('\n')).toMatch(/setting ratio\.tenant_id=/);
+  });
+});
+
+describe('round 9 L2: more security-relevant keys', () => {
+  it('lo_compat_privileges / session_preload_libraries / local_preload_libraries defaults for this database are refused', async () => {
+    const { privilegeModelViolations } = await model();
+    for (const [key, value] of [
+      ['lo_compat_privileges', 'on'],
+      ['session_preload_libraries', 'auto_explain'],
+      ['local_preload_libraries', 'auto_explain'],
+    ]) {
+      const db = await createTestDatabase({ migrate: true });
+      cleanups.push(() => db.close());
+      await db.pool.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET ${key} = %L', current_database(), '${value}'); END $$`);
+      const c = await connect(db);
+      expect((await privilegeModelViolations(c)).join('\n'), key).toMatch(new RegExp(`setting ${key}=`));
+    }
+  });
+});
