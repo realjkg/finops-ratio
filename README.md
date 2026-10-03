@@ -190,12 +190,14 @@ denominator.
 How each one reads its data (`src/costsource/transports/`, web-standard APIs only
 — no cloud SDKs, runs on Node 20+ and edge runtimes):
 
-- **Azure** — lists the export container with the SAS (needs `r` + `l`) and reads
-  the latest run for the requested month; `AZURE_FOCUS_EXPORT_URL` can also point
-  at a single blob.
+- **Azure** — lists the export container with the SAS (needs `r` + `l`), picks
+  the latest run for each requested month and reads ONLY the blobs its
+  `manifest.json` lists (no manifest, or a listed blob missing → error);
+  `AZURE_FOCUS_EXPORT_URL` can also point at a single blob.
 - **AWS** — `ListObjectsV2` + `GetObject` signed with SigV4 (verified against the
-  AWS reference vectors); prefers the `BILLING_PERIOD=YYYY-MM` folder for the
-  window. `AWS_S3_ENDPOINT` points the same reader at an **S3-compatible store
+  AWS reference vectors); for each billing period in the window it reads ONLY
+  the `dataFiles` of the `metadata/BILLING_PERIOD=YYYY-MM/…-Manifest.json`
+  manifest (no manifest, or a listed file missing → error). `AWS_S3_ENDPOINT` points the same reader at an **S3-compatible store
   (MinIO, Ceph RGW, StorageGRID)** for on-prem / private-cloud exports.
 - **GCP** — service-account JWT → OAuth token → parameterized BigQuery query over
   the window. `GOOGLE_APPLICATION_CREDENTIALS` may be a file path, inline JSON,
@@ -212,18 +214,25 @@ credentials (AWS keys on Lambda, Google ADC on GKE). A connector is only
 before that it is simply *available*.
 
 **Real billing data is never served anonymously (deny by default).**
-`GET /api/costsource/rows` and `GET /api/costsource/health` serve only the two
+`GET /api/costsource/rows`, `/findings` and `/health` serve only the two
 offline sandbox sources (`pointfive-sandbox`, `focus-file-sandbox`) without a
 token. Every other source id — live connectors, PointFive live, and unknown ids —
-requires `Authorization: Bearer <RATIO_API_TOKEN>` and is refused outright when
-no token is configured; unknown ids answer 404 only after authentication. The
-offline demo is unchanged.
+requires `Authorization: Bearer <RATIO_API_TOKEN>` (compared in constant time)
+and is refused outright when no token is configured; unknown ids answer 404 only
+after authentication. After 1,000 failed authentications in a minute from one
+client IP, every non-sandbox request from it gets 429. `GET
+/api/costsource/sources` shows live connector status only to authenticated
+callers; anonymous callers see the neutral registry. The offline demo is
+unchanged.
 
 **Fail loudly, never partially.** A connector either returns the complete data
 for the window or errors: too many export files, a truncated listing, a missing
 billing month in a multi-month window, an exhausted BigQuery page cap, or an
-invalid row (missing `BilledCost` / `ChargePeriodStart` / `BillingCurrency`, an
-unparseable number) is an explicit error naming the artifact and row. Upstream
+invalid row is an explicit error naming the artifact and row. Rows must carry
+`BilledCost`, `ChargePeriodStart` and a three-letter `BillingCurrency`; dates are
+strict ISO-8601 (no offset means UTC); numbers are plain decimals. Each row keeps
+its own currency — mixed currencies are never summed. An invalid or inverted
+window is a 400. Upstream
 error bodies are never returned to API callers — only label + HTTP status; the
 body is logged server-side, redacted and truncated.
 
