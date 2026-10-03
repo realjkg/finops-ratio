@@ -67,7 +67,9 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 48 | 47c736c | test infra: one long-lived S3 test bucket with per-run prefixes; K5 deletes its replay-fixtures scratch | tests |
 | 49 | 770e333 | docs: evidence for the L-k/L-j round (§15) | docs |
 | 50 | c9e0490 | merge origin/slice/00-postgres-foundation @ 0ef880f (Slice 0 rounds 10-12) — one conflict in `.github/workflows/ci.yml`, resolved by keeping both the SeaweedFS step + `RATIO_TEST_S3_ENDPOINT` and the PG16 client-tools step + `RATIO_PG_DUMP`/`RATIO_PSQL` | merge |
-| 51 | (final) | docs: evidence for this round (§16) | docs |
+| 51 | 909ec1a | docs: evidence for the 0ef880f merge (§16) | docs |
+| 52 | fccebbd | merge origin/slice/00-postgres-foundation @ c016ffb (Slice 0 round 13: key-only setting diagnostics, system-schema ACL rule) — clean, no conflict | merge |
+| 53 | (final) | docs: evidence for this round (§17); pushed to origin/slice/01-focus-ingestion-worker as instructed | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -886,5 +888,56 @@ The fail-not-skip behaviour is kept:
 - 3 of 3 evidence objects re-hashed OK.
 - doctor exited 0 with `problems: []`.
 - replay-fixtures passed 6/6 (`fixture-20261003114006-f8ec1a21`).
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 17. Slice 0 merge c016ffb (round 13) — merge fccebbd
+
+Clean merge (no conflict). The coordinator instructed that this reviewed merge
+be pushed to the already-published `origin/slice/01-focus-ingestion-worker`.
+
+**Doctor never prints setting values** (`settings-check.sh`, built CLI).
+Setup:
+- A scratch database migrated to 0001.
+- Three setting defaults whose VALUES carry a marker string:
+  - `ratio.tenant_id` for the worker login in that database;
+  - `search_path` for the whole database;
+  - `application_name` for `ratio_reader` in that database.
+
+Results:
+- doctor exited 1: `migration_version` fail, problems
+  `["PRIVILEGE_MODEL_VIOLATION"]`.
+- `migrate --status --json` exited 3, naming the three keys only:
+  - `setting ratio.tenant_id for role s1_set_worker_… in database …`
+  - `setting search_path for role ALL in database …`
+  - `setting application_name for role ratio_reader in database …`
+- The marker occurs **0 times** across doctor and status stdout+stderr.
+- Scratch database and login dropped; `pg_db_role_setting` back to 0 rows.
+
+**Gates at fccebbd:**
+
+| Check | Result |
+|---|---|
+| `npm ci` | exit 0 |
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 80 files / 1924 passed |
+| `test:db` x3 (PG16 `RATIO_PG_DUMP`/`RATIO_PSQL` as in CI) | 23 files / **340 passed** each (71.4 s, 62.5 s, 64.3 s); `InternalError` 0 in all three logs |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 321 passed, 0 skipped |
+| `RATIO_PG_DUMP=/nonexistent/pg_dump` | foundation round-trip fails (1 failed, 32 passed), not skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| change outside the Slice 1 paths vs the Slice 0 branch | none |
+| leftovers | 0 `ratio_test_*` databases/roles; 0 objects in `ratio-s1-test`; `pg_db_role_setting` 0 |
+
+**Manual end-to-end** (built CLI at fccebbd, database `ratio_s1_e2e_f916dac0`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6 (`fixture-20261003122309-fbe5c47d`).
 - Cleanup deleted 48 objects and dropped the database and logins.
 
