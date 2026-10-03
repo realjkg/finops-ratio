@@ -4,6 +4,13 @@
 import { Pool } from 'pg';
 import { IngestError } from '../errors';
 import { DEFAULT_DB_SESSION } from '../config';
+import { REFUSED_PREDEFINED_ROLES } from '../db/privilegeModel';
+
+/**
+ * Predefined roles a worker login must not be able to reach over ANY
+ * membership edge: exactly Slice 0's member-audit list (read-only import).
+ */
+const REFUSED_PREDEFINED: readonly string[] = Object.keys(REFUSED_PREDEFINED_ROLES);
 
 export function createWorkerPool(
   url: string,
@@ -64,15 +71,15 @@ export async function inspectRole(pool: Pick<Pool, 'query'>): Promise<RoleReport
            (CASE WHEN r.rolreplication THEN 'REPLICATION'::text END),
            (CASE WHEN r.rolcreaterole THEN 'CREATEROLE'::text END),
            (CASE WHEN r.rolcreatedb THEN 'CREATEDB'::text END),
-           (CASE WHEN r.rolname = 'pg_read_server_files' THEN 'pg_read_server_files'::text END),
-           (CASE WHEN r.rolname = 'pg_write_server_files' THEN 'pg_write_server_files'::text END),
-           (CASE WHEN r.rolname = 'pg_execute_server_program' THEN 'pg_execute_server_program'::text END)
+           (CASE WHEN r.rolname = ANY ($1::text[]) THEN r.rolname::text END)
          ) AS capabilities(capability)
         WHERE capability IS NOT NULL) AS unsafe_capabilities,
       EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ratio_owner')
         AND (pg_catalog.pg_has_role(current_user, 'ratio_owner', 'MEMBER') OR pg_catalog.pg_has_role(session_user, 'ratio_owner', 'MEMBER')) AS owner_member,
       EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ratio_worker')
-        AND pg_catalog.pg_has_role(current_user, 'ratio_worker', 'USAGE') AS worker_member`);
+        AND pg_catalog.pg_has_role(current_user, 'ratio_worker', 'USAGE') AS worker_member`,
+    [REFUSED_PREDEFINED],
+  );
   const row = r.rows[0];
   return {
     currentUser: row.cu,
