@@ -11,13 +11,17 @@ const R = '[redacted]';
 // runs synchronously on worker log lines, evidence records and in the crash
 // handler. The URL rules only start a scheme where no scheme character
 // precedes (lookbehind); without it a long run of letters restarts the scheme
-// scan at every position (quadratic: 200 KB took 77 s).
+// scan at every position (quadratic: 200 KB took 77 s). The query rule
+// consumes the whole URL whether or not it has a query (the callback keeps a
+// query-less URL unchanged), so the scan resumes AFTER it instead of retrying
+// from every later scheme start (`a://a://…` was quadratic).
 const SCHEME = '(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\\/\\/';
-const PATTERNS: Array<[RegExp, string]> = [
+type Replacement = string | ((match: string, ...groups: string[]) => string);
+const PATTERNS: Array<[RegExp, Replacement]> = [
   // Credentials embedded in any URL: scheme://user:pass@host or scheme://user@host
   [new RegExp(`(${SCHEME})[^\\s/@?#]+@`, 'gi'), `$1${R}@`],
   // Query strings of URLs (presigned URLs, SAS tokens, …)
-  [new RegExp(`(${SCHEME}[^\\s?#"']*)\\?[^\\s"']*`, 'gi'), `$1?${R}`],
+  [new RegExp(`(${SCHEME}[^\\s?#"']*)(\\?[^\\s"']*)?`, 'gi'), (match, url, query) => (query === undefined ? match : `${url}?${R}`)],
   // Authorization headers
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/g, `Bearer ${R}`],
   [/\bBasic\s+[A-Za-z0-9+/=]{8,}/g, `Basic ${R}`],
@@ -33,24 +37,55 @@ function escapeRegExp(s: string): string {
 
 /**
  * Max characters of a single string that are redacted at all (same approach
- * as the app redactor, #47). Error messages can be megabytes; only a short
- * prefix is ever kept (MAX_REDACTED_LENGTH), so the rest is dropped BEFORE
- * redaction, bounding the cost of every rule.
+ * as the app redactor, #47). Error messages can be megabytes; only
+ * MAX_REDACTED_LENGTH characters are ever kept, so the input is cut a little
+ * above that BEFORE redaction, bounding the cost of every rule to a few KB.
  */
-export const MAX_REDACT_INPUT_CHARS = 16_384;
+export const MAX_REDACT_INPUT_CHARS = MAX_REDACTED_LENGTH + 512;
 export const TRUNCATED_MARKER = ' …[TRUNCATED]';
 
+const DELIMITER = /[\s,;&"'<>]/;
+
+/** Index of the last delimiter before `limit` (the kept text is text.slice(0, it)), or 0. */
+function backToDelimiter(text: string, limit: number): number {
+  let cut = Math.min(limit, text.length) - 1;
+  while (cut > 0 && !DELIMITER.test(text[cut])) cut -= 1;
+  return Math.max(cut, 0);
+}
+
 /**
- * Caps the input for redaction. The cut moves back to the last delimiter, so
- * a secret straddling the cap is dropped whole rather than left half-present
- * in a form no rule recognises.
+ * Caps the input for redaction. The cut moves back to the last delimiter, and
+ * never lands inside an occurrence of a configured secret form (whose own
+ * characters may be delimiters, e.g. a quote): a secret straddling the cap is
+ * dropped whole, never left as a fragment no rule recognises.
  */
-export function capForRedaction(text: string): string {
+export function capForRedaction(text: string, secrets: readonly string[] = []): string {
   if (text.length <= MAX_REDACT_INPUT_CHARS) return text;
-  const head = text.slice(0, MAX_REDACT_INPUT_CHARS);
-  let cut = head.length - 1;
-  while (cut >= 0 && !/[\s,;&"'<>]/.test(head[cut])) cut -= 1;
-  return (cut > 0 ? head.slice(0, cut) : '') + TRUNCATED_MARKER;
+  let cut = backToDelimiter(text, MAX_REDACT_INPUT_CHARS);
+  const literals = literalPattern(secrets);
+  if (literals) {
+    const longest = literalLongest.get(secrets) ?? 0;
+    // Each step moves the cut strictly left, so this ends; it is bounded by the
+    // few secret occurrences that can overlap the cut.
+    for (let moved = true; moved && cut > 0; ) {
+      moved = false;
+      const from = Math.max(0, cut - longest);
+      const window = text.slice(from, cut + longest);
+      const re = new RegExp(literals.source, 'g');
+      for (let m = re.exec(window); m; m = re.exec(window)) {
+        const start = from + m.index;
+        const end = start + m[0].length;
+        if (start < cut && cut < end) {
+          cut = backToDelimiter(text, start + 1);
+          if (cut > start) cut = start; // the secret starts at the very beginning of a delimiter-free run
+          moved = true;
+          break;
+        }
+        if (m[0].length === 0) re.lastIndex += 1;
+      }
+    }
+  }
+  return text.slice(0, cut) + TRUNCATED_MARKER;
 }
 
 /**
@@ -59,22 +94,24 @@ export function capForRedaction(text: string): string {
  * cached: a single linear pass instead of one regex built per secret per call.
  */
 const literalPatterns = new WeakMap<readonly string[], RegExp | null>();
+const literalLongest = new WeakMap<readonly string[], number>();
 function literalPattern(secrets: readonly string[]): RegExp | null {
   let re = literalPatterns.get(secrets);
   if (re === undefined) {
     const parts = [...new Set(secrets.filter((x) => typeof x === 'string' && x.length >= 4))].sort((a, b) => b.length - a.length);
     re = parts.length ? new RegExp(parts.map(escapeRegExp).join('|'), 'g') : null;
     literalPatterns.set(secrets, re);
+    literalLongest.set(secrets, parts.length ? parts[0].length : 0);
   }
   return re;
 }
 
 /** Removes secrets from (capped) text, then caps it at MAX_REDACTED_LENGTH characters. */
 export function redact(text: string, secrets: readonly string[] = []): string {
-  let out = capForRedaction(String(text));
+  let out = capForRedaction(String(text), secrets);
   const literals = literalPattern(secrets);
   if (literals) out = out.replace(literals, R);
-  for (const [re, rep] of PATTERNS) out = out.replace(re, rep);
+  for (const [re, rep] of PATTERNS) out = typeof rep === 'string' ? out.replace(re, rep) : out.replace(re, rep);
   if (out.length > MAX_REDACTED_LENGTH) out = out.slice(0, MAX_REDACTED_LENGTH - 3) + '...';
   return out;
 }
