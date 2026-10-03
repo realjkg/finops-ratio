@@ -10,10 +10,11 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { createPredictionClient } from '@/prediction';
 import type { ChangePrediction, ProposedChange } from '@/prediction';
 import { withInternalErrorGuard } from '@/server/gateway/internalError';
+import { renderThrown } from '@/costsource/transports/redact';
 
 /** Known "unknown id" refusals → fixed 404 strings that never echo the input. */
 function classify(err: unknown): string | null {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = renderThrown(err);
   if (message.startsWith('Unknown workload:')) return 'Unknown workload';
   if (message.startsWith('Unknown model in switch:')) return 'Unknown model';
   return null;

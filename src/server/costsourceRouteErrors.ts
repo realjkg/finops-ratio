@@ -5,6 +5,8 @@
 // log; the caller gets one of these fixed strings, so nothing they sent is
 // echoed back. Anything not recognised here is an internal error (generic 500).
 
+import { renderThrown } from '@/costsource/transports/redact';
+
 export const UNKNOWN_SOURCE_MESSAGE = 'Unknown cost source';
 export const NOT_CONFIGURED_MESSAGE = 'Cost source is not configured — live credentials required';
 export const NO_COST_ROWS_MESSAGE = 'Cost source does not provide cost rows';
@@ -14,8 +16,9 @@ export interface ClassifiedError {
   message: string;
 }
 
+/** Total (never throws, whatever was thrown). */
 function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return renderThrown(err);
 }
 
 /** Only the cost-source client's own "Unknown cost source '<id>'" error is a 404. */

@@ -459,11 +459,20 @@ async function changeHandler(
   try {
     await dispatch(adapter, body, res);
   } catch (err) {
-    if (err instanceof InvalidTicketRefError) {
+    if (isInvalidTicketRef(err)) {
       sendError(res, 400, 'invalid_request', err.message);
       return;
     }
     throw err; // the gateway returns its generic 500 envelope.
+  }
+}
+
+/** `instanceof` itself can throw (a Proxy's getPrototypeOf trap); never here. */
+function isInvalidTicketRef(err: unknown): err is InvalidTicketRefError {
+  try {
+    return err instanceof InvalidTicketRefError;
+  } catch {
+    return false;
   }
 }
 

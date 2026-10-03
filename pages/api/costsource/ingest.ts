@@ -32,6 +32,7 @@ import {
   validateFocusRecords,
 } from '@/costsource/transports/focusExport';
 import { withInternalErrorGuard } from '@/server/gateway/internalError';
+import { renderThrown } from '@/costsource/transports/redact';
 
 function currentMonth(): { start: string; end: string } {
   const now = new Date();
@@ -102,7 +103,7 @@ async function handler(
     // `<known sourceId>: invalid FOCUS row N: <known column> <fixed reason>` —
     // which never quotes a cell value. Anything else (e.g. a TypeError from a
     // hostile non-primitive cell) is the guard's generic 500 + requestId.
-    const message = err instanceof Error ? err.message : String(err);
+    const message = renderThrown(err);
     if (!isFocusRowValidationMessage(message, sourceId)) throw err;
     res.status(400).json({ error: message });
     return;

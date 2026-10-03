@@ -140,7 +140,28 @@ export const MAX_SURFACED_ERROR_CHARS = 1000;
  * transports' own status-only errors.
  */
 export function redactErrorText(err: unknown): string {
-  return redactUpstreamText(err instanceof Error ? err.message : String(err), MAX_SURFACED_ERROR_CHARS);
+  return redactUpstreamText(renderThrown(err), MAX_SURFACED_ERROR_CHARS);
+}
+
+/** Fixed rendering for a thrown value that cannot be turned into text. */
+export const UNRENDERABLE_THROWN_VALUE = '[unrenderable thrown value]';
+
+/**
+ * Total: renders ANY thrown JS value to a string and never throws. Rendering
+ * can throw for valid thrown values — Object.create(null) (no toString),
+ * throwing / non-callable toString, a throwing `message` getter, a Proxy whose
+ * traps throw — and the error path must not itself escape.
+ */
+export function renderThrown(err: unknown): string {
+  try {
+    if (typeof err === 'string') return err;
+    if (typeof err === 'symbol') return err.toString();
+    const raw: unknown = err instanceof Error ? err.message : err;
+    const text = typeof raw === 'symbol' ? raw.toString() : String(raw);
+    return typeof text === 'string' ? text : UNRENDERABLE_THROWN_VALUE;
+  } catch {
+    return UNRENDERABLE_THROWN_VALUE;
+  }
 }
 
 /** Fixed, body-free reason for an upstream HTTP status. */
