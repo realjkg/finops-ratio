@@ -136,6 +136,27 @@ describe('ingest CLI (real Postgres)', () => {
     expect(onlyJson(ok.out)).toMatchObject({ matches: true, problems: [], privilegeProblems: [] });
   });
 
+  it('round 6 (Copilot High): a password with JSON metacharacters inside a real pg error is never printed, in any form', async () => {
+    const base = new URL(process.env.RATIO_TEST_DATABASE_URL!);
+    // The password doubles as the (non-existent) database name, so the server's error
+    // message (database "<pw>" does not exist) carries the decoded password verbatim.
+    for (const pw of ['ab"cd', 'ef\\gh', 'q"\\"x', 'nl\nz', 'üñí✓"']) {
+      const u = new URL(base.toString());
+      u.password = encodeURIComponent(pw);
+      u.pathname = '/' + encodeURIComponent(pw);
+      const url = u.toString();
+      for (const argv of [['migrate'], ['migrate', '--status', '--json']]) {
+        const r = await run(argv, { RATIO_MIGRATE_DATABASE_URL: url });
+        expect(r.code, JSON.stringify(pw)).toBe(1);
+        const all = r.out.concat(r.err).join('\n');
+        expect(all).toMatch(/does not exist/);
+        for (const f of [pw, JSON.stringify(pw).slice(1, -1), encodeURIComponent(pw)]) expect(all, `${JSON.stringify(pw)} as ${JSON.stringify(f)}`).not.toContain(f);
+        expect(all).toContain('[redacted]');
+        for (const line of r.out.concat(r.err)) expect(() => JSON.parse(line)).not.toThrow();
+      }
+    }
+  });
+
   it('status --json prints exactly one JSON document; plain status logs one line', async () => {
     const db = await freshDb();
     const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
