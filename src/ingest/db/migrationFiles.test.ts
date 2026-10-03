@@ -507,3 +507,36 @@ describe('round 16 M1: a REVOKE … FROM PUBLIC is expand only for objects creat
     expect(loadMigrations(DEFAULT_MIGRATIONS_DIR)[0].phase).toBe('expand');
   });
 });
+
+describe('round 17 (challenger L3): quoted identifiers are case-sensitive, unquoted ones fold to lower case', () => {
+  const t = (create: string, revoke: string) => EXPAND + create + '\n' + revoke + '\n';
+  const contract: Array<[string, string]> = [
+    ['CREATE TABLE ratio."t1" (x int);', 'REVOKE ALL ON ratio."T1" FROM PUBLIC;'],
+    ['CREATE TABLE ratio."T1" (x int);', 'REVOKE ALL ON ratio."t1" FROM PUBLIC;'],
+    ['CREATE TABLE ratio."T1" (x int);', 'REVOKE ALL ON ratio.T1 FROM PUBLIC;'], // T1 folds to t1
+    ['CREATE TABLE ratio.T1 (x int);', 'REVOKE ALL ON ratio."T1" FROM PUBLIC;'],
+    ['CREATE SCHEMA "S";', 'REVOKE ALL ON SCHEMA s FROM PUBLIC;'],
+    ['CREATE SCHEMA s;', 'REVOKE ALL ON SCHEMA "S" FROM PUBLIC;'],
+    ['CREATE TYPE ratio."E" AS ENUM (\'a\');', 'REVOKE USAGE ON TYPE ratio.e FROM PUBLIC;'],
+    ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.\"F\"() RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio.f() FROM PUBLIC;'],
+    ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.f() RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio."F"() FROM PUBLIC;'],
+  ];
+  for (const [create, revoke] of contract) {
+    it(`contract: ${create.split('\n').pop()} then ${revoke}`, () => {
+      expect(findNonExpandStatement(t(create, revoke))).not.toBeNull();
+    });
+  }
+  const expand: Array<[string, string]> = [
+    ['CREATE TABLE ratio."T1" (x int);', 'REVOKE ALL ON ratio."T1" FROM PUBLIC;'],
+    ['CREATE TABLE ratio."t1" (x int);', 'REVOKE ALL ON RATIO.T1 FROM PUBLIC;'],
+    ['CREATE TABLE ratio.T1 (x int);', 'REVOKE ALL ON "ratio"."t1" FROM PUBLIC;'],
+    ['CREATE SCHEMA "S";', 'REVOKE ALL ON SCHEMA "S" FROM PUBLIC;'],
+    ['CREATE SCHEMA S;', 'REVOKE ALL ON SCHEMA "s" FROM PUBLIC;'],
+    ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.\"F\"(x INT) RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio."F"(int) FROM PUBLIC;'],
+  ];
+  for (const [create, revoke] of expand) {
+    it(`expand: ${create.split('\n').pop()} then ${revoke}`, () => {
+      expect(findNonExpandStatement(t(create, revoke))).toBeNull();
+    });
+  }
+});
