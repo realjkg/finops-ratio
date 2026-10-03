@@ -205,3 +205,11 @@ Crash handler: the spawned test measures the handler inside the child and
 bounds the line at 16 KB; Slice 0's built-CLI crash test asserts the
 capped-but-redacted line plus a > 2 MB writeAllSync pipe flush.
 
+Dangerous logins, runtime backstop: `testing/dangerousLoginBackstop.ts` (setup
+file of the parallel DB config) fails any file whose process leaves a
+dangerous ratio_test_* login; self-test in `worker/backstop.serial.db.test.ts`.
+The static rule (`serialLogins.test.ts`) also covers USER, GRANT-to-login,
+concatenated/templated DDL, DO blocks and aliased/member createLogin.
+Entry fatal path: the real CLI entry crashed with a preloaded write spy must
+write its line synchronously (kills W9).
+

@@ -91,7 +91,13 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 72 | 1c18bea | test: absolute child-process budgets (query rule uncapped 2 MB; self-similar secrets), cheaper straddle sweep, `abcabc` overlap case (red: 2 failed, `r10-red.txt`) | tests |
 | 73 | 4fb8636 | test: self-similar JSON-line budget case tuned (2250-char secret, 1000 x 4.5 KB; red 3.85 s) | tests |
 | 74 | a055ea3 | fix: KMP literal matching, O(n + m) per form, overlaps kept | impl |
-| 75 | (final) | docs: evidence for this round (§22) | docs |
+| 75 | 11f2a43 | docs: evidence for the rounds 14-15 merge and the fc71471 fixes (§22) | docs |
+| 76 | fc9ab87 | test: widened dangerous-login guard self-test (red: alias import not flagged, `r11-red-guard.txt`); runtime backstop self-test (red: module missing) | tests |
+| 77 | 0e2bbc0 | fix: widened static rule + runtime backstop (setup file of the parallel DB config) | impl |
+| 78 | 59b3477 | test: redaction budget children run as `node --import tsx` | tests |
+| 79 | 31b33ce | test: the CLI entry's fatal path writes synchronously (preloaded write spy; kills W9) | tests |
+| 80 | 68c8456 | merge origin/main (54458f5, #44 Slice 0 at 289db6a) — clean, no content change | merge |
+| 81 | (final) | docs: evidence for this round (§23) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -1420,6 +1426,138 @@ the wall-time-versus-baseline check was replaced.
 
 **Manual end-to-end** (built CLI at a055ea3, private cluster, database
 `ratio_s1_e2e_2823a7fe`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 23. Dangerous-login backstop, child spawning, entry write path; main (#44) merged
+
+All DB runs below used the private cluster (127.0.0.1:55600, data under
+`/dev/shm/s1pg`), which was stopped and deleted afterwards.
+
+### Static rule widened (`serialLogins.test.ts`)
+
+The rule covers every non-serial DB test file. Files without
+`createLogin|ROLE|USER|GRANT` text are skipped before parsing, and the test
+has an explicit 30 s timeout.
+
+**(a) `createLogin`.** Only direct calls, with no attributes or a literal
+array of safe ones. An alias import, a member call (`x.createLogin`) or
+passing the function around (`const f = createLogin`) is flagged.
+
+**(b) Role DDL, outside `src/ingest/db/`.** Applied to every call (the string
+pieces of all its arguments, with `+` concatenations and template parts
+joined and every dynamic part kept as a placeholder) and to every standalone
+literal:
+- `CREATE`/`ALTER` `ROLE`/`USER` with a dangerous attribute, or with a dynamic
+  part after the role name (an attribute could hide there);
+- `GRANT` of any role other than `ratio_worker`/`ratio_reader` to a login;
+- `DO` blocks that touch roles or users.
+
+The self-test lists 15 bypass shapes that must be flagged and 9 safe shapes
+that must pass. Red against the old detector (`r11-red-guard.txt`).
+
+### Runtime backstop: the real control
+
+`src/ingest/testing/dangerousLoginBackstop.ts` runs as a setup file of
+`vitest.db.config.ts` only; serial files are exempt by design. After every
+test and after the file, it fails the file if the cluster holds a
+`ratio_test_*` role carrying this process's pid that has SUPERUSER,
+BYPASSRLS, REPLICATION, CREATEROLE or CREATEDB, or that is (transitively) a
+member of a role with one.
+
+**Self-test** (`worker/backstop.serial.db.test.ts`, serial, 8 tests):
+- each of the 5 attributes is reported, then clears after the drop;
+- a plain login granted a SUPERUSER role is reported;
+- another pid's dangerous login is ignored;
+- a clean cluster passes.
+
+**Mutation B1** (`mut-backstop.txt`): an obfuscated BYPASSRLS login is built
+at runtime in `auth.db.test.ts` (`['BYPASS','RLS'].join('')`). The static
+rule cannot see it.
+- With the backstop: the file fails with "dangerous test login(s) committed
+  by a NON-serial DB test file: ratio_test_login_<pid>_b1".
+- Without the setup file: the file passes, 7/7.
+
+| Static-rule mutation (`mutations23.txt`) | Result |
+|---|---|
+| G1: GRANT-to-login rule removed | self-test fails |
+| G2: call pieces not joined (literal-only scan) | self-test fails |
+| G3: USER not covered | self-test fails |
+| G4: createLogin passed around / aliased not flagged | self-test fails |
+
+### Child processes run as `node --import tsx`
+
+`redactLinear.test.ts` now spawns both its child kinds as a single node
+process, like the spawned crash test. The tsx wrapper binary ran the script
+in a grandchild, so the SIGKILL on timeout hit only the wrapper.
+
+Evidence: 9 of this checkout's `redactLinearChild.ts` processes, left over
+from earlier mutation runs, were still running after about 4.2 hours at
+about 21% CPU each. I killed them, and the host load average fell from
+about 17 to about 7. After the change, R6 still fails (2 MB budget killed
+at 10 s) and leaves no new child behind.
+
+One `redactBudgetChild.ts` process from another checkout (`scratchpad/rev9`)
+was also running. It is not mine and I left it alone; whoever owns it
+should kill it.
+
+### The entry's fatal path writes synchronously (W9)
+
+`cli.worker.test.ts` runs the real entry (`cli.ts` as the main module under
+`node --import tsx`), with a preloaded spy (`testing/stderrWriteSpy.ts`)
+that replaces `process.stderr.write` and `process.stdout.write` with a
+synchronously written marker. The entry is then crashed through its
+test-only hook.
+- Required: one redacted JSON line, no async stream write attempted, exit 1.
+- A spy self-test shows that an async write is marked.
+
+Mutation W9 (the entry handler uses `process.stderr.write` instead of
+`writeAllSync(2, …)`) fails both cases (`mut-W9.txt`). Slice 0's
+`cli.process.test.ts` alone does not catch W9: on Linux a pipe write is
+synchronous, so nothing is truncated.
+
+### Merge of origin/main (`68c8456`)
+
+#44 brought Slice 0 into main as a merge commit (54458f5) whose content is
+identical to 289db6a. The merge was clean. `git diff origin/main..HEAD`
+touches only:
+- Slice 1 paths (`src/ingest/**` Slice 1 files, `docs/evidence/slice-1`,
+  `fixtures/focus-1.0-synthetic`, `scripts/generate-focus-fixture.ts`,
+  `.obvious/skills/ingestion-ops`);
+- Slice 1's integration lines in shared files: `ci.yml` (SeaweedFS step and
+  `RATIO_TEST_S3_ENDPOINT`), `package.json` and `package-lock.json` (the
+  three approved dependencies, `worker:build` with build-info,
+  `fixture:generate`), `tailwind.config.js` (excludes `src/ingest`), and the
+  DB vitest configs (S3 globalSetup, backstop setup file);
+- in Slice 0's files: `cli.ts` (worker dispatch and the worker redaction pass
+  in the one crash handler, as reviewed) and `cli.process.test.ts` (the
+  capped-line reconciliation, the writeAllSync flush case and the 60 s
+  timeout).
+
+Nothing under `src/ingest/db/` differs.
+
+### Gates at 68c8456
+
+| Check | Result |
+|---|---|
+| `npm ci` / prod audit | exit 0 / 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×10, alongside test:db (load average 6.7–13.6) | **10/10**, 1990 passed each; 0 failures in redactCap, redactLinear and cli.worker |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 25 files / 368 passed; serial 3 files / 11 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (3 files fail at collection, 349 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at 68c8456, private cluster, database
+`ratio_s1_e2e_0cee60c7`):
 - migrate status went 3 -> 0 -> 0.
 - sync published and reconciled; the second sync reported `skipped_unchanged`.
 - Reader totals equal the control totals (55 / `30.8272954899`,
