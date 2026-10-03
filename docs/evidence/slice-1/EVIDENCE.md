@@ -65,7 +65,9 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 46 | ce97fa5 | test: L-k worker line with BigInt/Buffer/toJSON (red: 1 failed, `r5-red-fast.txt`); L-j pre-escaped secret value (W2) and K7 `RATIO_EVIDENCE_FILE` assertion (W4) | tests |
 | 47 | 5a2056b | fix: worker `redactDeep` delegates to Slice 0's exported walker (one implementation) | impl |
 | 48 | 47c736c | test infra: one long-lived S3 test bucket with per-run prefixes; K5 deletes its replay-fixtures scratch | tests |
-| 49 | (final) | docs: evidence for this round (§15) | docs |
+| 49 | 770e333 | docs: evidence for the L-k/L-j round (§15) | docs |
+| 50 | c9e0490 | merge origin/slice/00-postgres-foundation @ 0ef880f (Slice 0 rounds 10-12) — one conflict in `.github/workflows/ci.yml`, resolved by keeping both the SeaweedFS step + `RATIO_TEST_S3_ENDPOINT` and the PG16 client-tools step + `RATIO_PG_DUMP`/`RATIO_PSQL` | merge |
+| 51 | (final) | docs: evidence for this round (§16) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -821,4 +823,68 @@ manifests do not name and correctly failed MANIFEST_INVALID — a script error,
 fixed as above.) Other `ratio_test_*` databases seen during the round belong
 to a concurrent agent's checkout (live vitest processes there) and were left
 alone; `ratio_test_23557_*` and logins `_1169_`/`_6414_` are unchanged.
+
+## 16. Slice 0 merge 0ef880f (rounds 10-12) — merge c9e0490
+
+**Conflict.** `.github/workflows/ci.yml` only. Both sides were kept, in this
+order: "Start SeaweedFS", then "PostgreSQL 16 client tools", then the DB-test
+step with all four variables (`RATIO_TEST_DATABASE_URL`,
+`RATIO_TEST_S3_ENDPOINT`, `RATIO_PG_DUMP`, `RATIO_PSQL`). The YAML parses
+with js-yaml, and the step list and DB-step env were printed and checked.
+The fail-not-skip behaviour is kept:
+- Without `RATIO_TEST_DATABASE_URL`, test:db exits 1.
+- Without `RATIO_TEST_S3_ENDPOINT`, test:db exits 1 (3 files fail at
+  collection).
+- With `RATIO_PG_DUMP=/nonexistent/pg_dump`, the foundation round-trip test
+  fails (1 failed, 31 passed), and nothing is skipped.
+
+**Foundation / per-table RLS rule vs Slice 1.**
+- No Slice 1 code path, test, fixture or script creates a table, policy,
+  view or function in schema `ratio`. A grep of `src/ingest` outside `db/`
+  for CREATE TABLE/TRIGGER/POLICY/FUNCTION/INDEX/VIEW and ALTER TABLE finds
+  only the following.
+- **Test-only triggers.** Three tests add a trigger on `ratio.cost_facts`
+  that runs a `public.*` function, and drop both in a `finally` or `afterAll`:
+  - K6 (`s1_cli_poison`)
+  - the M2 poison test in `sync.db.test.ts` (`s1_poison`)
+  - the N3 stall test (`s1_slow_insert`)
+
+  K6 and the sync test assert that the catalog check reports
+  PRIVILEGE_MODEL_VIOLATION while the trigger exists, and a clean status
+  (exit 0 / `problems: []`, doctor `migration_version` pass) after it is
+  dropped. Both still pass with the new foundation, policy and table checks.
+- **Doctor D1.** The future-migration probe is a migration *file*
+  (`CREATE TABLE public.ratio_doctor_future_probe`) that is listed but never
+  applied, so it creates nothing in `ratio`. D1's checks pass.
+- **End-to-end.** migrate status, doctor and replay-fixtures report
+  `problems: []` against a freshly migrated database (new 0001 checksum
+  `078a5abe…`).
+
+**Gates at c9e0490:**
+
+| Check | Result |
+|---|---|
+| `npm ci` | exit 0 |
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 80 files / 1924 passed |
+| `test:db` x3 (with `RATIO_PG_DUMP`/`RATIO_PSQL` = PG16 tools, as in CI) | 23 files / **328 passed** each (72.6 s, 58.7 s, 61.0 s); 0 object-store errors (`InternalError` count 0 in all three logs) |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 309 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| `pg_db_role_setting` rows | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored; no AGENTS.md/CLAUDE.md) |
+| ingestion code in `.next` | 0 matches |
+| change outside the Slice 1 paths vs the Slice 0 branch | none |
+| leftovers | 0 `ratio_test_*` databases/roles; 0 objects in `ratio-s1-test` |
+
+**Manual end-to-end** (built CLI at c9e0490, database `ratio_s1_e2e_14530244`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0 with `problems: []`.
+- replay-fixtures passed 6/6 (`fixture-20261003114006-f8ec1a21`).
+- Cleanup deleted 48 objects and dropped the database and logins.
 
