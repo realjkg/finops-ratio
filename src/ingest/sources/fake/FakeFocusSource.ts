@@ -54,7 +54,8 @@ export class FakeFocusSource implements FocusSource {
       .sort((a, b) => (a.billingPeriod < b.billingPeriod ? -1 : 1))
       .map((p): PeriodListing => {
         if (p.error) return { ok: false, billingPeriod: p.billingPeriod, code: p.error.code, message: p.error.message };
-        const artifacts: ArtifactRef[] = (p.artifacts ?? []).map((a) => ({ name: a.name, key: a.name, byteSize: a.bytes.length, version: sha(a.bytes) }));
+        // Keyed by period AND name, like an S3 key (review M3, fourth round).
+        const artifacts: ArtifactRef[] = (p.artifacts ?? []).map((a) => ({ name: a.name, key: fakeKey(p.billingPeriod, a.name), byteSize: a.bytes.length, version: sha(a.bytes) }));
         const controlBytes = Buffer.from(JSON.stringify(p.control ?? null));
         return {
           ok: true,
@@ -75,12 +76,16 @@ export class FakeFocusSource implements FocusSource {
     this.calls.set(ref.name, call);
     const failure = this.opts.openFailure?.(ref.name, call);
     if (failure) throw failure;
-    for (const p of this.periods) {
-      const a = p.artifacts?.find((x) => x.name === ref.name);
-      if (a) return Readable.from(chunks(a.bytes));
-    }
-    throw new IngestError('SOURCE_READ_FAILED', `fake artifact ${ref.name} not found`);
+    // Resolved by period + name, then pinned to the listed version (an S3 If-Match).
+    const a = this.periods.flatMap((p) => (p.artifacts ?? []).filter((x) => fakeKey(p.billingPeriod, x.name) === ref.key))[0];
+    if (!a) throw new IngestError('SOURCE_READ_FAILED', `fake artifact ${ref.name} not found`);
+    if (sha(a.bytes) !== ref.version) throw new IngestError('SOURCE_CHANGED', `artifact ${ref.name} changed since it was listed`, { retryable: true });
+    return Readable.from(chunks(a.bytes));
   }
+}
+
+function fakeKey(billingPeriod: string, name: string): string {
+  return `${billingPeriod}/${name}`;
 }
 
 function* chunks(b: Buffer, size = 64 * 1024): Generator<Buffer> {
