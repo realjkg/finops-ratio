@@ -637,8 +637,11 @@ describe('round 7 High A: session-scoped settings a migration plants do not surv
     const db = await createTestDatabase({ migrate: true });
     cleanups.push(() => db.close());
     const c = await connect(db);
-    await c.query('SET SESSION AUTHORIZATION ratio_owner');
+    // SET ROLE first (as the owner session one could not SET ROLE ratio_worker).
     await c.query('SET ROLE ratio_worker');
+    await resetSession(c);
+    expect((await c.query(`SELECT current_user::text AS cu`)).rows[0].cu).toBe('postgres');
+    await c.query('SET SESSION AUTHORIZATION ratio_owner');
     await c.query('SET row_security = off');
     await c.query('SET search_path = public, pg_catalog');
     await resetSession(c);

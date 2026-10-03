@@ -207,8 +207,16 @@ export async function effectivePrivileges(client: ClientBase): Promise<Record<Ch
 async function roleViolations(client: ClientBase): Promise<string[]> {
   const problems: string[] = [];
   const schemaExists = (await client.query<{ e: boolean }>(`SELECT pg_catalog.to_regnamespace('ratio') IS NOT NULL AS e`)).rows[0].e;
-  const roles = await client.query<{ rolname: string; rolsuper: boolean; rolbypassrls: boolean; rolreplication: boolean; rolcreaterole: boolean; rolcreatedb: boolean }>(
-    `SELECT rolname, rolsuper, rolbypassrls, rolreplication, rolcreaterole, rolcreatedb
+  const roles = await client.query<{
+    rolname: string;
+    rolsuper: boolean;
+    rolbypassrls: boolean;
+    rolreplication: boolean;
+    rolcreaterole: boolean;
+    rolcreatedb: boolean;
+    rolcanlogin: boolean;
+  }>(
+    `SELECT rolname, rolsuper, rolbypassrls, rolreplication, rolcreaterole, rolcreatedb, rolcanlogin
        FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])`,
     [RATIO_ROLES],
   );
@@ -221,6 +229,7 @@ async function roleViolations(client: ClientBase): Promise<string[]> {
     }
     if (r.rolsuper || r.rolbypassrls || r.rolreplication) problems.push(`role ${name} must not be SUPERUSER, BYPASSRLS or REPLICATION`);
     if (name !== 'ratio_owner' && (r.rolcreaterole || r.rolcreatedb)) problems.push(`role ${name} must not have CREATEROLE or CREATEDB`);
+    if (r.rolcanlogin) problems.push(`role ${name} must not have LOGIN (deployment logins are separate member roles)`);
   }
   // A ratio role is a member of no role (covers pg_read_all_data & co. and each other).
   const memberOf = await client.query<{ member: string; parent: string }>(

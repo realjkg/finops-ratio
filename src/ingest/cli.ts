@@ -122,6 +122,13 @@ export function redactor(url: string | undefined): (s: string) => string {
  */
 export function redactDeep(value: unknown, redact: (s: string) => string, seen: WeakSet<object> = new WeakSet()): unknown {
   if (typeof value === 'string') return redact(value);
+  // Numbers, booleans and bigints serialize as bare JSON tokens: redact them by
+  // their text, as a JSON string, so the line stays valid JSON (round 7).
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    const text = String(value);
+    if (redact(text) !== text) return '[redacted]';
+    return typeof value === 'bigint' ? text : value;
+  }
   if (value === null || typeof value !== 'object') return value;
   if (seen.has(value)) return '[circular]';
   seen.add(value);
@@ -148,7 +155,49 @@ export function redactDeep(value: unknown, redact: (s: string) => string, seen: 
  */
 export function jsonLineRedactor(url: string | undefined): (value: unknown) => string {
   const redact = redactor(url);
-  return (value: unknown) => redact(JSON.stringify(redactDeep(value, redact)));
+  return (value: unknown) => {
+    const json = JSON.stringify(redactDeep(value, redact));
+    const out = redact(json);
+    if (out === json) return out;
+    // The backstop changed the serialized text (a secret spanning JSON
+    // structure). Never print broken JSON: if it no longer parses, print a
+    // fixed, valid line instead.
+    try {
+      JSON.parse(out);
+      return out;
+    } catch {
+      return REDACTED_LINE;
+    }
+  };
+}
+
+/** Printed instead of a line that the backstop could only redact into invalid JSON. */
+export const REDACTED_LINE = '{"error":"output redacted"}';
+
+/**
+ * Last line of defence for the CLI process: an uncaught exception or an
+ * unhandled rejection prints ONE redacted JSON line (never a raw stack, which
+ * could carry the connection string) and exits 1.
+ */
+export function installProcessHandlers(
+  proc: { on(event: string, listener: (reason: unknown) => void): unknown },
+  env: Env,
+  io: Pick<CliIO, 'err'>,
+  exit: (code: number) => void,
+): void {
+  const line = jsonLineRedactor(env.RATIO_MIGRATE_DATABASE_URL);
+  for (const event of ['uncaughtException', 'unhandledRejection']) {
+    proc.on(event, (reason: unknown) => {
+      let text = REDACTED_LINE;
+      try {
+        text = line({ ts: new Date().toISOString(), level: 'error', event: `process.${event}`, error: reason });
+      } catch {
+        // keep the fixed line
+      }
+      io.err(text);
+      exit(1);
+    });
+  }
 }
 
 export async function main(argv: string[], env: Env, io: CliIO): Promise<number> {
@@ -183,10 +232,13 @@ export async function main(argv: string[], env: Env, io: CliIO): Promise<number>
     return EXIT_ERROR;
   }
 
-  const client = new Client({ connectionString: url, connectionTimeoutMillis: 10_000, application_name: 'ratio-migrate' });
-  // An idle-connection error must not crash the process with an unredacted stack.
-  client.on('error', () => undefined);
+  let client: Client | undefined;
   try {
+    // Constructed inside the try: a malformed URL must surface as one redacted
+    // JSON line, not an exception thrown out of main (round 7, Low 1).
+    client = new Client({ connectionString: url, connectionTimeoutMillis: 10_000, application_name: 'ratio-migrate' });
+    // An idle-connection error must not crash the process with an unredacted stack.
+    client.on('error', () => undefined);
     await client.connect();
     if (args.status) {
       const status = await migrationStatus(client);
@@ -208,11 +260,12 @@ export async function main(argv: string[], env: Env, io: CliIO): Promise<number>
     emit('error', 'migrate.failed', { code: err.code ?? 'UNKNOWN', message: err.message ?? String(e) });
     return EXIT_ERROR;
   } finally {
-    await client.end().catch(() => undefined);
+    await client?.end().catch(() => undefined);
   }
 }
 
 if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
+  installProcessHandlers(process, process.env, { err: (l) => process.stderr.write(l + '\n') }, (code) => process.exit(code));
   void main(process.argv.slice(2), process.env, {
     out: (l) => process.stdout.write(l + '\n'),
     err: (l) => process.stderr.write(l + '\n'),
