@@ -289,7 +289,21 @@ export const SECURITY_RELEVANT_SETTINGS: readonly string[] = [
   'default_transaction_isolation',
   'role',
   'session_authorization',
+  // round 9: large-object ACL bypass and library loading at session start
+  'lo_compat_privileges',
+  'session_preload_libraries',
+  'local_preload_libraries',
 ];
+
+/**
+ * Security-relevant setting keys: the list above, plus ANY `ratio.*` custom
+ * setting (case-insensitive) — e.g. a default `ratio.tenant_id` would give
+ * every new session a tenant without set_config (round 9, L1).
+ */
+export function isSecurityRelevantSetting(key: string): boolean {
+  const k = key.trim().toLowerCase();
+  return SECURITY_RELEVANT_SETTINGS.includes(k) || k.startsWith('ratio.');
+}
 
 /**
  * Per-database / per-role setting defaults (`ALTER DATABASE … SET`, `ALTER
@@ -306,7 +320,8 @@ export const SECURITY_RELEVANT_SETTINGS: readonly string[] = [
  * legitimately set e.g. statement_timeout per database):
  *   - ANY setting on a ratio role itself is refused: the ratio roles are
  *     NOLOGIN and are configured by migrations only;
- *   - a SECURITY_RELEVANT_SETTINGS key is refused for any role in this
+ *   - a security-relevant key (SECURITY_RELEVANT_SETTINGS or any ratio.*
+ *     custom setting, see isSecurityRelevantSetting) is refused for any role in this
  *     database (ALTER DATABASE, ALTER ROLE x IN DATABASE this), for all roles
  *     (ALTER ROLE ALL), and for a member of a ratio role.
  */
@@ -341,7 +356,7 @@ async function settingViolations(client: ClientBase): Promise<string[]> {
     const where = `for role ${row.rolname ?? 'ALL'} in database ${row.datname ?? 'ALL'}`;
     if (row.ratio_role) {
       problems.push(`setting ${row.cfg} ${where} is not allowed (ratio roles carry no setting defaults)`);
-    } else if (SECURITY_RELEVANT_SETTINGS.includes(key) && (row.here || row.all_roles_here || row.ratio_member)) {
+    } else if (isSecurityRelevantSetting(key) && (row.here || row.all_roles_here || row.ratio_member)) {
       problems.push(`setting ${row.cfg} ${where} is not allowed (security-relevant default)`);
     }
   }

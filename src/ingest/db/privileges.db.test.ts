@@ -891,8 +891,9 @@ describe('round 9 L2: more security-relevant keys', () => {
     ]) {
       const db = await createTestDatabase({ migrate: true });
       cleanups.push(() => db.close());
-      await db.pool.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET ${key} = %L', current_database(), '${value}'); END $$`);
+      // Connect first: a *_preload_libraries default makes every NEW session load the library.
       const c = await connect(db);
+      await c.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET ${key} = %L', current_database(), '${value}'); END $$`);
       expect((await privilegeModelViolations(c)).join('\n'), key).toMatch(new RegExp(`setting ${key}=`));
     }
   });
