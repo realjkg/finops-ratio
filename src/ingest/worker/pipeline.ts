@@ -156,11 +156,13 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
 
       let listings: PeriodListing[];
       try {
-        listings = await withRetry(() => source.listPeriods(opts.range), { ...retryOpts, onRetry: onRetry(null) });
+        // The run's deadline bounds the listing too: the signal reaches every request (review M3).
+        listings = await withRetry(() => source.listPeriods(opts.range, { signal: runAbort.signal }), { ...retryOpts, onRetry: onRetry(null) });
       } catch (e) {
         if (e instanceof IngestError && e.code === 'LEASE_LOST') throw e;
         const code = e instanceof IngestError ? e.code : 'SOURCE_LIST_FAILED';
-        await finishRun(opts.pool, lease, { status: 'failed', errorCode: code, errorDetail: clean(`listing the source failed: ${messageOf(e)}`), stats: stats() });
+        const finished = await finishRun(opts.pool, lease, { status: 'failed', errorCode: code, errorDetail: clean(`listing the source failed: ${messageOf(e)}`), stats: stats() });
+        if (!finished) throw new IngestError('LEASE_LOST', 'run lost its lease before it could finish');
         log('run.finished', { runId: lease.runId, status: 'failed', code });
         return { runId: lease.runId, status: 'failed', periods, errorCode: code, attempts, manifestEvidence };
       }
@@ -222,8 +224,11 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
                 return await processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow });
               } catch (e) {
                 if (e instanceof IngestError && e.code === 'SOURCE_CHANGED') {
-                  const fresh = (await source.listPeriods({ from: period, to: period })).find((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod) === period);
+                  const fresh = (await source.listPeriods({ from: period, to: period }, { signal: runAbort.signal })).find((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod) === period);
                   if (!fresh) throw new IngestError('PERIOD_NOT_FOUND', `period ${period} is no longer listed by the source`);
+                  // The re-listed manifest is what the batch will be built from: evidence first (review M1).
+                  const freshManifest = fresh.ok ? fresh.set.manifest : fresh.manifest;
+                  if (freshManifest) manifestEvidence.push(await captureManifest(opts.evidence, lease.tenantId, lease.sourceId, freshManifest.bytes));
                   if (!fresh.ok) throw new IngestError(fresh.code, clean(fresh.message));
                   set = fresh.set;
                   log('period.relisted', { runId: lease.runId, period });
@@ -251,7 +256,9 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         throw e;
       }
       const code = errorCodeOf(e);
-      await finishRun(opts.pool, lease, { status: 'failed', errorCode: code, errorDetail: clean(messageOf(e)), stats: stats() }).catch(() => false);
+      // A finish that matched no row (lease expired or taken over) is LEASE_LOST; a finish that could not reach the DB leaves e (review H1).
+      const finished = await finishRun(opts.pool, lease, { status: 'failed', errorCode: code, errorDetail: clean(messageOf(e)), stats: stats() }).catch(() => null);
+      if (finished === false) throw new IngestError('LEASE_LOST', `run lost its lease before it could record its failure (${code})`);
       log('run.finished', { runId: lease.runId, status: 'failed', code });
       throw e;
     }
@@ -337,22 +344,36 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   }
 
   // Raw evidence first.
+  // The listed sizes are only the source's claim: the batch cap is enforced on
+  // the bytes actually captured — each capture may use at most what is left of
+  // maxBatchBytes (review M4).
   const captured: CapturedArtifact[] = [];
+  let capturedBytes = 0;
   for (const ref of [...set.artifacts].sort((a, b) => (a.name < b.name ? -1 : 1))) {
-    captured.push(
-      await captureArtifact({
+    const remaining = limits.maxBatchBytes - capturedBytes;
+    const cap = Math.min(limits.maxArtifactBytes, remaining);
+    let c: CapturedArtifact;
+    try {
+      c = await captureArtifact({
         source: ctx.source,
         evidence: ctx.evidence,
         ref,
         tenantId: lease.tenantId,
         sourceId: lease.sourceId,
         tmpDir: settings.tmpDir,
-        maxBytes: limits.maxArtifactBytes,
+        maxBytes: cap,
         stallMs: settings.stallTimeoutSeconds * 1000,
         progress: ctx.progress,
         signal: ctx.signal,
-      }),
-    );
+      });
+    } catch (e) {
+      if (e instanceof IngestError && e.code === 'ARTIFACT_TOO_LARGE' && cap < limits.maxArtifactBytes) {
+        throw new IngestError('ARTIFACT_SET_TOO_LARGE', 'the captured artifact set exceeds the configured batch byte limit (listed sizes were lower)');
+      }
+      throw e;
+    }
+    capturedBytes += c.byteSize;
+    captured.push(c);
     ctx.progress();
     await ctx.maybeHeartbeat();
   }
@@ -389,14 +410,14 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   const entry = (batchId: string) => (): CheckpointEntry => ({ fingerprint, listing: set.listingFingerprint, batchId, pinned: false });
 
   if (existing?.status === 'published') {
-    if (control && (await controlDisagrees(ctx.pool, control, existing.row_count, existing.total))) {
+    if (control && (await controlDisagrees(ctx.pool, lease.tenantId, control, existing))) {
       return { billingPeriod: period, outcome: 'failed', code: 'CONTROL_VARIANCE_ON_UNCHANGED', batchId: existing.id, message: 'artifacts are unchanged but the control totals no longer match the published batch' };
     }
     await refreshCheckpoint(ctx.pool, lease, period, entry(existing.id));
     return { billingPeriod: period, outcome: 'unchanged', batchId: existing.id, artifactSetFingerprint: fingerprint, rowCount: existing.row_count, billedTotal: existing.total };
   }
   if (existing?.status === 'superseded') {
-    if (control && (await controlDisagrees(ctx.pool, control, existing.row_count, existing.total))) {
+    if (control && (await controlDisagrees(ctx.pool, lease.tenantId, control, existing))) {
       return { billingPeriod: period, outcome: 'failed', code: 'CONTROL_VARIANCE_ON_UNCHANGED', batchId: existing.id, message: 'artifacts match a retained batch but the control totals do not' };
     }
     await publishBatch(ctx.pool, lease, { batchId: existing.id, billingPeriod: period, checkpoint: entry(existing.id) }, ctx.hooks);
@@ -511,9 +532,28 @@ function effectiveControl(set: PeriodArtifactSet): PeriodArtifactSet['control'] 
 
 const hasSetControl = (c: PeriodArtifactSet['control']) => !!c && (c.rowCount !== undefined || c.billedTotal !== undefined);
 
-async function controlDisagrees(pool: Pool, control: NonNullable<PeriodArtifactSet['control']>, rowCount: string, total: string): Promise<boolean> {
-  if (control.rowCount !== undefined && String(control.rowCount) !== rowCount) return true;
-  if (control.billedTotal !== undefined && !(await numericEquals(pool, control.billedTotal, total))) return true;
+/**
+ * Whether the listing's controls disagree with an existing batch of the same
+ * data: set-level row count and billed total, AND every per-artifact row count
+ * against the stored ingest_artifacts.row_count — exactly what reconcile()
+ * checks for a new batch (review M5).
+ */
+async function controlDisagrees(
+  pool: Pool,
+  tenantId: string,
+  control: NonNullable<PeriodArtifactSet['control']>,
+  batch: { id: string; row_count: string; total: string },
+): Promise<boolean> {
+  if (control.rowCount !== undefined && String(control.rowCount) !== batch.row_count) return true;
+  if (control.billedTotal !== undefined && !(await numericEquals(pool, control.billedTotal, batch.total))) return true;
+  const per = Object.entries(control.artifactRowCounts ?? {});
+  if (per.length) {
+    const stored = await workerTransaction(pool, tenantId, async (c) => {
+      const r = await c.query(`SELECT artifact_name, row_count::text AS row_count FROM ratio.ingest_artifacts WHERE batch_id = $1`, [batch.id]);
+      return new Map(r.rows.map((x: { artifact_name: string; row_count: string | null }) => [x.artifact_name, x.row_count]));
+    });
+    for (const [name, expected] of per) if (stored.get(name) !== String(expected)) return true;
+  }
   return false;
 }
 

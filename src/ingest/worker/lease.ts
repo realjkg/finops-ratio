@@ -150,8 +150,10 @@ export async function recordRetry(pool: Pool, lease: Lease, entry: Record<string
 }
 
 /**
- * Finishes the run. Conditioned on the token and status='running', so a
- * zombie whose run was abandoned by a takeover changes nothing (returns false).
+ * Finishes the run. Fenced like every other lease write — token,
+ * status='running' AND a live lease — so neither a zombie whose run was taken
+ * over nor a run whose lease has already expired can finish it (returns
+ * false: callers treat that as LEASE_LOST; the next acquisition abandons it).
  */
 export async function finishRun(
   pool: Pool,
@@ -162,7 +164,7 @@ export async function finishRun(
     const r = await c.query(
       `UPDATE ratio.sync_runs SET status = $3, finished_at = clock_timestamp(), error_code = $4, error_detail = $5,
          stats = stats || $6::jsonb
-       WHERE id = $1 AND lease_token = $2 AND status = 'running'`,
+       WHERE id = $1 AND lease_token = $2 AND status = 'running' AND lease_expires_at > clock_timestamp()`,
       [lease.runId, lease.token, outcome.status, outcome.errorCode ?? null, outcome.errorDetail ?? null, JSON.stringify(outcome.stats)],
     );
     return r.rowCount === 1;

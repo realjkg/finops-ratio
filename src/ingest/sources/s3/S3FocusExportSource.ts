@@ -6,7 +6,7 @@ import type { Readable } from 'stream';
 import { GetObjectCommand, ListObjectsV2Command, type S3Client } from '@aws-sdk/client-s3';
 import { IngestError } from '../../errors';
 import { isTransientError } from '../../retry';
-import type { ArtifactRef, FocusSource, PeriodListing, PeriodRange } from '../types';
+import type { ArtifactRef, FocusSource, ListOptions, PeriodListing, PeriodRange } from '../types';
 import {
   dataPrefix,
   isManifestKey,
@@ -21,6 +21,11 @@ import {
 } from './layout';
 
 const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
+
+/** Rejects with the signal's reason (e.g. MAX_RUN_EXCEEDED) once it has aborted. */
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw signal.reason;
+}
 
 function isPreconditionFailed(e: unknown): boolean {
   const x = e as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
@@ -43,13 +48,15 @@ export class S3FocusExportSource implements FocusSource {
     this.location = opts.location;
   }
 
-  private async list(prefix: string, delimiter?: string): Promise<{ keys: Map<string, ListingEntry>; prefixes: string[] }> {
+  private async list(prefix: string, delimiter: string | undefined, signal: AbortSignal | undefined): Promise<{ keys: Map<string, ListingEntry>; prefixes: string[] }> {
     const keys = new Map<string, ListingEntry>();
     const prefixes: string[] = [];
     let token: string | undefined;
     do {
+      throwIfAborted(signal); // between pages
       const r = await this.client.send(
         new ListObjectsV2Command({ Bucket: this.location.bucket, Prefix: prefix, Delimiter: delimiter, ContinuationToken: token }),
+        { abortSignal: signal }, // tears the in-flight request down
       );
       for (const c of r.Contents ?? []) if (c.Key) keys.set(c.Key, { size: Number(c.Size ?? 0), etag: String(c.ETag ?? '') });
       for (const p of r.CommonPrefixes ?? []) if (p.Prefix) prefixes.push(p.Prefix);
@@ -64,8 +71,9 @@ export class S3FocusExportSource implements FocusSource {
    * arrived — ContentLength is only an early hint, never trusted (it may be
    * missing on a chunked response, or wrong).
    */
-  private async getBytes(key: string, limit: number, ifMatch?: string): Promise<Buffer> {
-    const r = await this.client.send(new GetObjectCommand({ Bucket: this.location.bucket, Key: key, ...(ifMatch ? { IfMatch: ifMatch } : {}) }));
+  private async getBytes(key: string, limit: number, signal: AbortSignal | undefined): Promise<Buffer> {
+    throwIfAborted(signal);
+    const r = await this.client.send(new GetObjectCommand({ Bucket: this.location.bucket, Key: key }), { abortSignal: signal });
     const body = r.Body as Readable;
     const tooLarge = () => new IngestError('MANIFEST_INVALID', 'manifest is too large');
     if (r.ContentLength !== undefined && Number(r.ContentLength) > limit) {
@@ -87,29 +95,32 @@ export class S3FocusExportSource implements FocusSource {
     return Buffer.concat(parts, total);
   }
 
-  async listPeriods(range?: PeriodRange): Promise<PeriodListing[]> {
+  async listPeriods(range?: PeriodRange, opts: ListOptions = {}): Promise<PeriodListing[]> {
+    const signal = opts.signal;
     let periods: string[];
     try {
-      const top = await this.list(metadataPrefix(this.location), '/');
+      const top = await this.list(metadataPrefix(this.location), '/', signal);
       periods = top.prefixes
         .map((p) => parsePeriodPrefix(p, this.location))
         .filter((p): p is string => p !== null && periodInRange(p, range))
         .sort();
     } catch (e) {
+      throwIfAborted(signal);
       throw sourceError('SOURCE_LIST_FAILED', 'listing the export metadata folder', e);
     }
     const out: PeriodListing[] = [];
-    for (const period of periods) out.push(await this.listPeriod(period));
+    for (const period of periods) out.push(await this.listPeriod(period, signal));
     return out;
   }
 
-  private async listPeriod(billingPeriod: string): Promise<PeriodListing> {
+  private async listPeriod(billingPeriod: string, signal: AbortSignal | undefined): Promise<PeriodListing> {
     let metaKeys: string[];
     let data: Map<string, ListingEntry>;
     try {
-      metaKeys = [...(await this.list(periodMetadataPrefix(this.location, billingPeriod))).keys.keys()].filter(isManifestKey).sort();
-      data = (await this.list(dataPrefix(this.location, billingPeriod))).keys;
+      metaKeys = [...(await this.list(periodMetadataPrefix(this.location, billingPeriod), undefined, signal)).keys.keys()].filter(isManifestKey).sort();
+      data = (await this.list(dataPrefix(this.location, billingPeriod), undefined, signal)).keys;
     } catch (e) {
+      throwIfAborted(signal);
       throw sourceError('SOURCE_LIST_FAILED', `listing period ${billingPeriod}`, e);
     }
     if (metaKeys.length === 0) return { ok: false, billingPeriod, code: 'MANIFEST_MISSING', message: `no manifest for ${billingPeriod}` };
@@ -119,8 +130,9 @@ export class S3FocusExportSource implements FocusSource {
     const manifestKey = metaKeys[0];
     let bytes: Buffer;
     try {
-      bytes = await this.getBytes(manifestKey, MAX_MANIFEST_BYTES);
+      bytes = await this.getBytes(manifestKey, MAX_MANIFEST_BYTES, signal);
     } catch (e) {
+      throwIfAborted(signal);
       if (e instanceof IngestError && e.code === 'MANIFEST_INVALID') return { ok: false, billingPeriod, code: e.code, message: e.message };
       throw sourceError('SOURCE_READ_FAILED', `reading the manifest for ${billingPeriod}`, e);
     }

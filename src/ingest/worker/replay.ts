@@ -84,12 +84,15 @@ export async function replayBatch(opts: {
     log('replay.done', { runId: lease.runId, period: target.period, batchId, outcome });
     return { runId: lease.runId, billingPeriod: target.period, batchId, outcome };
   } catch (e) {
-    await finishRun(opts.pool, lease, {
+    if (e instanceof IngestError && e.code === 'LEASE_LOST') throw e;
+    // A finish that matched no row (lease expired or taken over) is LEASE_LOST; a finish that could not reach the DB leaves e (review H1).
+    const finished = await finishRun(opts.pool, lease, {
       status: 'failed',
       errorCode: errorCodeOf(e),
       errorDetail: redact(messageOf(e)),
       stats: { replayBatch: batchId, billingPeriod: target.period },
-    }).catch(() => false);
+    }).catch(() => null);
+    if (finished === false) throw new IngestError('LEASE_LOST', `run lost its lease before it could record its failure (${errorCodeOf(e)})`);
     throw e;
   }
 }

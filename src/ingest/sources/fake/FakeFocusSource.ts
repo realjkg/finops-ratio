@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { Readable } from 'stream';
 import { IngestError } from '../../errors';
 import { testSwitchesPermitted } from '../../config';
-import type { ArtifactRef, ArtifactSetControl, FocusSource, PeriodListing, PeriodRange } from '../types';
+import type { ArtifactRef, ArtifactSetControl, FocusSource, ListOptions, PeriodListing, PeriodRange } from '../types';
 import { listingFingerprint, periodInRange } from '../s3/layout';
 
 export interface FakePeriod {
@@ -47,7 +47,8 @@ export class FakeFocusSource implements FocusSource {
     this.periods = periods;
   }
 
-  async listPeriods(range?: PeriodRange): Promise<PeriodListing[]> {
+  async listPeriods(range?: PeriodRange, opts?: ListOptions): Promise<PeriodListing[]> {
+    if (opts?.signal?.aborted) throw opts.signal.reason;
     return [...this.periods]
       .filter((p) => periodInRange(p.billingPeriod, range))
       .sort((a, b) => (a.billingPeriod < b.billingPeriod ? -1 : 1))

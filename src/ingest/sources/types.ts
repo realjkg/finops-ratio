@@ -51,10 +51,15 @@ export type PeriodListing =
   | { ok: true; set: PeriodArtifactSet }
   | { ok: false; billingPeriod: string; code: string; message: string; manifest?: ManifestBytes };
 
+export interface ListOptions {
+  /** Aborts the listing (every request and between pages); it then rejects with the signal's reason. */
+  signal?: AbortSignal;
+}
+
 export interface FocusSource {
   readonly kind: 'focus_file' | 'fake';
   /** Artifact sets per billing period, sorted by period. Throws only on whole-listing failures. */
-  listPeriods(range?: PeriodRange): Promise<PeriodListing[]>;
+  listPeriods(range?: PeriodRange, opts?: ListOptions): Promise<PeriodListing[]>;
   /** Raw bytes of one artifact (streamed). */
   openArtifact(ref: ArtifactRef): Promise<Readable>;
 }
