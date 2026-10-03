@@ -204,16 +204,25 @@ describe('owner acceptance demonstration (synthetic fixture)', () => {
       RATIO_TEST_PAUSE_AFTER_ROWS: '20',
       RATIO_INSERT_CHUNK_ROWS: '10',
     });
-    const paused = await child.waitForEvent('test.paused');
-    expect(Number(paused.rowsInserted)).toBeGreaterThanOrEqual(20);
-    const staged = (await batchesOf(db.pool, s.tenantId, s.sourceId)).filter((b) => b.status === 'staged');
-    expect(staged).toHaveLength(1);
-    const stagedRows = await db.pool.query(`SELECT count(*)::int AS n FROM ratio.cost_facts WHERE tenant_id = $1 AND batch_id = $2`, [s.tenantId, staged[0].id]);
-    expect(stagedRows.rows[0].n).toBeGreaterThanOrEqual(20);
-    expect(await readerView(s.tenantId)).toEqual(baseView);
+    let staged: Array<{ id: string }>;
+    try {
+      const paused = await child.waitForEvent('test.paused');
+      expect(Number(paused.rowsInserted)).toBeGreaterThanOrEqual(20);
+      staged = (await batchesOf(db.pool, s.tenantId, s.sourceId)).filter((b) => b.status === 'staged');
+      expect(staged).toHaveLength(1);
+      const stagedRows = await db.pool.query(`SELECT count(*)::int AS n FROM ratio.cost_facts WHERE tenant_id = $1 AND batch_id = $2`, [s.tenantId, staged[0].id]);
+      expect(stagedRows.rows[0].n).toBeGreaterThanOrEqual(20);
+      expect(await readerView(s.tenantId)).toEqual(baseView);
 
-    expect(child.child.kill('SIGKILL')).toBe(true);
-    expect(await child.exited).toEqual({ code: null, signal: 'SIGKILL' });
+      expect(child.child.kill('SIGKILL')).toBe(true);
+      expect(await child.exited).toEqual({ code: null, signal: 'SIGKILL' });
+    } finally {
+      // A failed assertion above must not leave the paused worker running (it holds a lease and a connection).
+      if (child.child.exitCode === null && child.child.signalCode === null) {
+        child.child.kill('SIGKILL');
+        await child.exited;
+      }
+    }
 
     // demo 5: nothing partial is visible; previous revision intact; checkpoint untouched.
     expect(await readerView(s.tenantId)).toEqual(baseView);

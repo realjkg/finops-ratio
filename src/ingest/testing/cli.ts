@@ -3,6 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
+import { afterAll } from 'vitest';
 import { main } from '../cli';
 
 export const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -58,13 +59,47 @@ export interface Spawned {
   exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
 }
 
-/** Spawns the worker CLI from source (tsx) as a real OS process. */
+/**
+ * Every child spawned through these helpers, until it exits. The afterAll
+ * registered below (in every test file that imports this module) kills
+ * whatever is still running — also when a test failed mid-way — so no test
+ * child outlives its file (cli.spawnCleanup.test.ts proves it).
+ */
+const liveChildren = new Set<ChildProcess>();
+
+/** Registers a child for the end-of-file cleanup; returns it. */
+export function trackChild<T extends ChildProcess>(child: T): T {
+  liveChildren.add(child);
+  child.once('exit', () => liveChildren.delete(child));
+  return child;
+}
+
+/** SIGKILLs every tracked child that is still running and waits for it to exit. */
+export async function killTrackedChildren(): Promise<void> {
+  await Promise.all(
+    [...liveChildren].map(
+      (c) =>
+        new Promise<void>((resolve) => {
+          if (c.exitCode !== null || c.signalCode !== null) return resolve();
+          c.once('exit', () => resolve());
+          c.kill('SIGKILL');
+        }),
+    ),
+  );
+  liveChildren.clear();
+}
+
+afterAll(killTrackedChildren);
+
+/** Spawns the worker CLI from source (tsx) as a real OS process (tracked: killed at the end of the file). */
 export function spawnCli(argv: string[], env: Record<string, string>): Spawned {
-  const child = spawn(process.execPath, ['--import', 'tsx', CLI_SOURCE, ...argv], {
-    cwd: REPO_ROOT,
-    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...env } as unknown as NodeJS.ProcessEnv,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const child = trackChild(
+    spawn(process.execPath, ['--import', 'tsx', CLI_SOURCE, ...argv], {
+      cwd: REPO_ROOT,
+      env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...env } as unknown as NodeJS.ProcessEnv,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }),
+  );
   const stderr: string[] = [];
   const stdout: string[] = [];
   const waiters: Array<{ event: string; resolve: (v: Record<string, unknown>) => void }> = [];
