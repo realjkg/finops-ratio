@@ -596,6 +596,9 @@ describe('round 18 (Copilot on #53, C2): whitespace and comments around a qualif
     }
     // a CREATE whose name ends in a dot records nothing (fails closed)
     expect(findNonExpandStatement(t('CREATE TABLE ratio. (x int);', 'REVOKE ALL ON ratio FROM PUBLIC;'))).not.toBeNull();
+    // ... and not a shorter prefix of its last part either (no backtracking into a part)
+    expect(findNonExpandStatement(t('CREATE TABLE ratio. (x int);', 'REVOKE ALL ON rati FROM PUBLIC;'))).not.toBeNull();
+    expect(findNonExpandStatement(t('CREATE TABLE "a""b". (x int);', 'REVOKE ALL ON "a" FROM PUBLIC;'))).not.toBeNull();
   });
 
   it('schemas, types and routines too, including a space before the argument list', () => {
