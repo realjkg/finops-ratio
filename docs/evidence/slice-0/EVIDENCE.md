@@ -1419,3 +1419,120 @@ correctly. Either:
 A cluster-wide advisory lock would also work: shared in `createTestDatabase`,
 exclusive around a dangerous login. Separately, D1 should match `PENDING` as
 a member of `problems`, not the whole list.
+
+# Round 16: review on 289db6a (2 High, 1 Medium) + challenger round-15 Lows + spawn timeouts
+
+Base: 289db6a (round 15, pushed). Local commits only; nothing pushed.
+- 0001 is unchanged. The manifest and PUBLIC baseline needed no regeneration
+  (see R16.6).
+- **Every DB run in this round used a PRIVATE PostgreSQL 16 cluster**
+  (16.14): initdb into `/tmp/r16pg`, 127.0.0.1:55520, TCP only (`-k ''`),
+  started with `runuser -u postgres`. It was stopped and deleted at the end.
+  The shared 55432 cluster was not touched.
+- Raw logs: `scratchpad/r17/`.
+
+## R16.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 53839af | test(ingest): failing tests for round 16 (…) | tests (red) |
+| 7aba31b | fix(ingest): scan every privilege category for ratio-role members through their full membership closure; PUBLIC revokes are expand only on objects the file created; seed checks its COMMIT tag (round 16) | fix (+1 test correction, below) |
+| 4ba9a78 | test(ingest): explicit 60 s timeout for the spawn-based CLI crash tests | test timeouts |
+| (this) | docs(evidence): Slice 0 round 16 | docs |
+
+## R16.2 Red (at 53839af, private cluster)
+
+**`memberPrivileges.db.test.ts`: 39 failed / 2 passed (41).**
+- H1: every category × parent case failed, plus the transitive case and the
+  ratio-role language/tablespace/type case.
+- H2: every second-role case failed, plus the ratio-object, the two
+  system-ACL and the chain cases, and the assumable-role case.
+- The two passing tests were the scope-kept test and the positive control.
+
+**Serial `memberParameter.serial.db.test.ts`: 1 failed.** The threat was
+reproduced first:
+- before the grant, RT001 refused the delete and `SET session_replication_role`
+  was denied (42501);
+- after the grant, in replica mode, the PUBLISHED batch's facts were deleted
+  (rowCount > 0).
+
+Then the check reported nothing, and the test failed there.
+
+**Fast tests:**
+- `migrationFiles.test.ts`: 17 failed (every contract case, the mixed /
+  ordering / signature cases). The expand-stays and 0001 tests passed.
+- `fixtures.test.ts`: 1 failed (the seed returned normally).
+- `vitestConfigs.test.ts` passed on arrival, as expected: it guards wiring
+  that was already correct. Mutation L3 shows it can fail.
+
+**Correction to a red test, in the fix commit.** The per-category loop also
+required that the owner member's `database:CREATE` be refused. That
+contradicts the owner decision (the migrator may hold CREATE on the
+database) and the test's own positive control. That one case (owner ×
+database) is skipped, with a comment. The 40 remaining tests are unchanged.
+
+## R16.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+H1a members scanned on ratio objects only                 KILLED  33 + serial real-login test
+H1b owner members not scanned (ratio-scoped)              KILLED  7
+H1c tablespace category removed                           KILLED  5
+H1d language category removed                             KILLED  5
+H1e type category removed                                 KILLED  5
+H1f language: PUBLIC baseline not subtracted              KILLED  40 (every positive state flagged)
+H1g owner side allowed everything                         KILLED  7
+H2a privilege closure = self only                         KILLED  10
+H2b privilege closure follows INHERIT edges only          KILLED  10
+H2c privilege closure one level deep                      KILLED  chain test
+H2d system ACL: exact grantee only (round-13 join)        KILLED  3
+H2e system ACL closure one level deep                     KILLED  chain test
+H2f assumable SUPERUSER/BYPASSRLS/REPLICATION not checked KILLED  1
+H2g server-file roles not checked                         KILLED  1
+M1a every PUBLIC revoke is expand (old rule)              KILLED  17
+M1b ALL … IN SCHEMA not checked                           KILLED  2
+M1c routine signature ignored                             KILLED  overload test
+M1d creations later in the file count                     KILLED  ordering test
+M1e IF NOT EXISTS creations recorded                      KILLED  IF NOT EXISTS test
+L2  seed COMMIT tag not checked                           KILLED  fixtures test
+L3  parallel phase does not exclude serial files          KILLED  vitestConfigs test
+```
+
+## R16.4 Verification (main checkout at 4ba9a78 + docs; private cluster)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npm test` | 1836/1836 |
+| `npm run test:db` **×10** consecutive (RATIO_PG_DUMP/RATIO_PSQL = PG16 client tools, as CI uses) | **10/10 exit 0**: 279/279 parallel + 2/2 serial each (`run10-*.txt`) |
+| `npm run test:db` / serial config alone, URL unset | exit 1 / exit 1 |
+| `npm run worker:build` | 0 |
+| `npm run build` | 0; tsconfig.json and next-env.d.ts restored; no AGENTS.md or CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| private cluster before deletion | `pg_db_role_setting` 0; `pg_parameter_acl` 0; only the three ratio roles (all NOLOGIN) besides postgres; no members of a ratio role; no scratch databases. Then stopped, `/tmp/r16pg` deleted, port 55520 closed |
+
+## R16.5 Spawn-based tests
+
+**`cli.process.test.ts`.** Its three tests spawn the built CLI: the two
+large-payload crash tests, and the refusal test, which spawns four times in
+sequence. Each now has an explicit 60 s timeout (`SPAWN_TIMEOUT_MS`, the same
+as each `spawnSync` budget). The build `beforeAll` already had 180 s. The
+assertions are unchanged.
+
+**Other spawn-based tests:**
+- `foundation.db.test.ts` runs `pg_dump` and `psql`, under the DB suite's
+  30 s `testTimeout`. It is not at risk.
+- `src/costsource/transports/redactLinear.test.ts` is not Slice 0 code (it
+  came with the #47 security follow-up). Its child processes have a
+  deliberate hard 2 s budget, so it is left to its owner.
+
+## R16.6 No regeneration
+
+The foundation manifest pins only the `ratio`-scope privileges (`privilege:`
+entries for schema, relation and function in `ratio`). The PUBLIC system
+baseline covers PUBLIC only. Neither changed: a fresh database has no
+tablespace, language or type privilege beyond PUBLIC for any ratio role. The
+drift tests (`foundation.db.test.ts`, the round-14 baseline test) pass
+unchanged.
+
+The Slice 1 compat merge was not part of this round's gate list and was not
+run.
