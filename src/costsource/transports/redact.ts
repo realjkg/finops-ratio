@@ -207,11 +207,10 @@ function queryEnd(text: string, j: number): number {
     const c = text[j];
     if (WS.test(c)) return j;
     if (QUOTES.includes(c)) {
+      // Also covers an escaped \"…\": the `\` is consumed as a plain char and
+      // the closing `\"` ends in the same quote character.
       const close = text.indexOf(c, j + 1);
       j = close === -1 ? text.length : close + 1;
-    } else if (c === '\\' && text[j + 1] === '"') {
-      const close = text.indexOf('\\"', j + 2);
-      j = close === -1 ? text.length : close + 2;
     } else {
       j += 1;
     }

@@ -81,6 +81,16 @@ describe('query and fragment', () => {
     expect(out).not.toMatch(/\?(?!\[REDACTED\])[^\s]*URL-SECRET/);
   });
 
+  it('a fragment is replaced even when its key is not a credential name', () => {
+    expect(redactUpstreamText(`https://app.test/cb#code=${S}&x=1 done`, 500)).toBe('https://app.test/cb#[REDACTED] done');
+    expect(redactUpstreamText(`https://app.test/cb#${S}`, 500)).toBe('https://app.test/cb#[REDACTED]');
+  });
+
+  it('JSON-escaped: an @ after an escaped slash is path, not userinfo (host kept)', () => {
+    const out = redactUpstreamText(String.raw`{"u":"https:\/\/host.example\/users\/bob@corp.example"}`, 500);
+    expect(out).toContain(String.raw`https:\/\/host.example\/users\/bob@corp.example`);
+  });
+
   it('keeps scheme, host and path; replaces the whole query', () => {
     const out = redactUpstreamText(`GET https://acct.blob.core.windows.net/c/x.csv?sv=2024&sig="${S} z"&se=2030 failed`, 1000);
     expect(out).toBe('GET https://acct.blob.core.windows.net/c/x.csv?[REDACTED] failed');
