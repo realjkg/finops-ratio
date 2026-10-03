@@ -57,6 +57,25 @@ export async function deleteStagedBatches(c: PoolClient, sourceId: string): Prom
 }
 
 /**
+ * What an expiring run committed before it lost its lease (challenger L1):
+ * batches it created that left 'staged' (published, superseded or
+ * quarantined), publications it made (also a replay's), and the checkpoint if
+ * it wrote it last. null when it committed nothing. Lets operators tell a run
+ * whose work stands (LEASE_EXPIRED_AFTER_COMMIT) from one that did nothing.
+ */
+async function committedWorkOf(c: PoolClient, sourceId: string, runId: string): Promise<string | null> {
+  const r = await c.query(
+    `SELECT (SELECT count(*) FROM ratio.ingest_batches WHERE source_id = $1 AND run_id = $2 AND status <> 'staged')::int AS batches,
+            (SELECT count(*) FROM ratio.period_publications WHERE source_id = $1 AND published_by_run_id = $2)::int AS publications,
+            EXISTS (SELECT 1 FROM ratio.source_checkpoints WHERE source_id = $1 AND last_run_id = $2) AS checkpoint`,
+    [sourceId, runId],
+  );
+  const { batches, publications, checkpoint } = r.rows[0] as { batches: number; publications: number; checkpoint: boolean };
+  if (!batches && !publications && !checkpoint) return null;
+  return `${batches} ${batches === 1 ? 'batch' : 'batches'} published/superseded/quarantined, ${publications} ${publications === 1 ? 'publication' : 'publications'}, checkpoint ${checkpoint ? 'written' : 'not written'}`;
+}
+
+/**
  * Claims the single running slot of (tenant, source). A live lease ⇒
  * ALREADY_RUNNING. An expired one ⇒ that run is marked abandoned and every
  * staged batch of the source is deleted (decision: discard at next acquisition).
@@ -94,11 +113,13 @@ async function acquireRunTx(
     const abandoned: string[] = [];
     for (const r of running.rows) {
       if (r.live) throw new IngestError('ALREADY_RUNNING', 'another run holds a live lease on this source');
+      const committed = await committedWorkOf(c, source.id, r.id);
       await c.query(
-        `UPDATE ratio.sync_runs SET status = 'abandoned', finished_at = clock_timestamp(), error_code = 'LEASE_EXPIRED',
-           error_detail = 'lease expired without completion; run abandoned by a later acquisition'
+        `UPDATE ratio.sync_runs SET status = 'abandoned', finished_at = clock_timestamp(), error_code = $2, error_detail = $3
          WHERE id = $1 AND status = 'running'`,
-        [r.id],
+        committed
+          ? [r.id, 'LEASE_EXPIRED_AFTER_COMMIT', `lease expired after the run committed work (${committed}); that work stands; run abandoned by a later acquisition`]
+          : [r.id, 'LEASE_EXPIRED', 'lease expired without completion; run abandoned by a later acquisition'],
       );
       abandoned.push(r.id);
     }
