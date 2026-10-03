@@ -28,6 +28,7 @@ import { normalizeRows } from './normalize';
 // errors, but anything surfacing in health detail or a rethrown error is
 // redacted (Bearer tokens, URL query strings / SAS, AWS key ids) anyway.
 import { redactErrorText as safeErrorText } from './transports/redact';
+import { assertValidWindow } from './transports/focusExport';
 import {
   connectorDescriptor,
   connectorStatusNote,
@@ -121,6 +122,7 @@ export class CloudConnectorAdapter {
 
   async fetchCostRows(window: CostWindow): Promise<CostRowsResult> {
     const credentials = this.requireConfigured('fetch cost rows');
+    assertValidWindow(window);
     let exportRows: RawSourceRow[];
     try {
       exportRows = await this.transportFactory(credentials).fetchExportRows(window);

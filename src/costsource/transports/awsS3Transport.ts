@@ -13,11 +13,14 @@ import type { FocusExportTransport } from '../CloudConnectorAdapter';
 import type { RawSourceRow } from '../focusRows';
 import {
   assertExportFileCap,
+  assertManifestFilesPresent,
   decodeExportBytes,
   fetchChecked,
+  keyMonths,
   listingTruncatedError,
+  monthsInWindow,
+  parseManifest,
   rowsFromExportText,
-  selectExportObjects,
   xmlValues,
   type ExportObject,
   type FetchLike,
@@ -121,7 +124,29 @@ export function createAwsS3Transport(opts: AwsS3TransportOptions): FocusExportTr
       return true;
     },
     async fetchExportRows(window) {
-      const keys = selectExportObjects(await list(), window).map((o) => o.key);
+      // Completeness: AWS Data Exports writes one manifest per billing period
+      // (`metadata/BILLING_PERIOD=YYYY-MM/<export>-Manifest.json`) whose
+      // `dataFiles` lists the run's files. Read ONLY those; a missing manifest
+      // or a listed file absent from the listing is an incomplete run → throw.
+      const months = monthsInWindow(window);
+      const listing = await list();
+      const keySet = new Set<string>();
+      for (const month of months) {
+        const manifests = listing.filter((o) => /manifest\.json$/i.test(o.key) && keyMonths(o.key).has(month));
+        if (manifests.length === 0) {
+          throw new Error(`${LABEL}: export run incomplete: manifest missing (billing month ${month})`);
+        }
+        const latest = manifests.reduce((a, b) => (Date.parse(b.lastModified) > Date.parse(a.lastModified) ? b : a));
+        const manifest = parseManifest(await readObject(latest.key), LABEL, `billing month ${month}`);
+        const dataFiles = manifest.dataFiles;
+        if (!Array.isArray(dataFiles) || !dataFiles.every((f) => typeof f === 'string')) {
+          throw new Error(`${LABEL}: export run incomplete: manifest unreadable (billing month ${month})`);
+        }
+        const listed = (dataFiles as string[]).map((uri) => uri.replace(/^s3:\/\/[^/]+\//, ''));
+        assertManifestFilesPresent(listed, listing, LABEL, `billing month ${month}`);
+        for (const k of listed) keySet.add(k);
+      }
+      const keys = [...keySet].sort();
       if (keys.length === 0) {
         throw new Error(`${LABEL}: no CSV/JSON export files found under s3 prefix '${loc.prefix}'`);
       }

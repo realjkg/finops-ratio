@@ -26,7 +26,7 @@ import type {
 } from './CostSourceClient';
 import { CANONICAL_FOCUS_VERSION } from './focusVersions';
 import { normalizeRows } from './normalize';
-import { validateFocusRecords } from './transports/focusExport';
+import { assertValidWindow, validateFocusRecords } from './transports/focusExport';
 import { redactErrorText } from './transports/redact';
 import { resolveWorkloadId } from './seed';
 import {
@@ -159,6 +159,7 @@ export class PointFiveLiveAdapter {
 
   async fetchCostRows(window: CostWindow): Promise<CostRowsResult> {
     const credentials = this.requireConfigured('fetch cost rows');
+    assertValidWindow(window);
     let billing: Record<string, unknown>[];
     try {
       billing = (await this.buildTransport(credentials).fetchBillingRows(window)) as unknown as Record<

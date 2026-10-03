@@ -199,6 +199,9 @@ const NULLABLE_COLUMNS = new Set([
   'CapacityReservationStatus',
 ]);
 
+/** Currency columns: ISO-4217-shaped three-letter codes. */
+const CURRENCY_COLUMNS = new Set(['BillingCurrency', 'PricingCurrency']);
+
 const KNOWN_COLUMNS = new Set(Object.values(COLUMNS_BY_VERSION).flat());
 
 /**
@@ -208,30 +211,95 @@ const KNOWN_COLUMNS = new Set(Object.values(COLUMNS_BY_VERSION).flat());
  */
 const REQUIRED_COLUMNS = ['BilledCost', 'ChargePeriodStart', 'BillingCurrency'] as const;
 
+/** Options for row coercion. */
+export interface FocusRecordOptions {
+  /**
+   * Accept epoch-second timestamps (BigQuery's REST TIMESTAMP encoding) in date
+   * columns. Only the BigQuery transport sets this; everywhere else a bare
+   * number is not a date.
+   */
+  allowEpochSeconds?: boolean;
+  /**
+   * Keep the FOCUS `Tags` column and every `x_*` extension column as supplied
+   * (direct ingest). Connector exports drop provider `x_*` columns — Ratio adds
+   * its own.
+   */
+  keepExtensions?: boolean;
+}
+
 function isBlank(v: unknown): boolean {
   return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 }
 
-/** Absent / empty numeric cells are 0; anything present must parse as a finite number. */
+/** Strict decimal: optional minus, digits, optional fraction, optional exponent. */
+const DECIMAL_RE = /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/;
+
+/**
+ * Absent / empty numeric cells are 0; anything present must be a strict decimal
+ * (no hex, no `Infinity`, no thousands separators) or a finite number.
+ */
 function toNumber(v: unknown, column: string): number {
   if (isBlank(v)) return 0;
-  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v.trim()) : Number.NaN;
+  let n: number;
+  if (typeof v === 'number') n = v;
+  else if (typeof v === 'string' && DECIMAL_RE.test(v.trim())) n = Number(v.trim());
+  else n = Number.NaN;
   if (!Number.isFinite(n)) throw new Error(`${column} is not a number`);
   return n;
 }
 
-/** Blank date cells are ''; anything present must parse, or the row is invalid. */
-function toIsoDate(v: unknown, column: string): string {
+// ISO-8601 date or date-time. Offset-less date-times are UTC (never server
+// local). `YYYY-MM-DD HH:MM:SS UTC` (BigQuery text) is accepted as UTC.
+const ISO_DATE_RE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?)?\s*(Z|z|UTC|[+-]\d{2}:?\d{2})?$/;
+
+/** Strict ISO-8601 → epoch ms (UTC), or null when invalid / impossible. */
+export function parseIsoUtc(value: string): number | null {
+  const m = ISO_DATE_RE.exec(value.trim());
+  if (!m) return null;
+  const [, ys, mos, ds, hs = '0', mis = '0', ss = '0', frac = '', off] = m;
+  const y = Number(ys);
+  const mo = Number(mos);
+  const d = Number(ds);
+  const h = Number(hs);
+  const mi = Number(mis);
+  const s = Number(ss);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 59) return null;
+  const ms = Number(`${frac}000`.slice(0, 3));
+  let t = Date.UTC(y, mo - 1, d, h, mi, s, ms);
+  const check = new Date(t);
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return null;
+  if (off && off !== 'Z' && off !== 'z' && off !== 'UTC') {
+    const sign = off.startsWith('-') ? -1 : 1;
+    const digits = off.slice(1).replace(':', '');
+    const oh = Number(digits.slice(0, 2));
+    const om = Number(digits.slice(2, 4));
+    if (oh > 23 || om > 59) return null;
+    t -= sign * (oh * 60 + om) * 60_000;
+  }
+  return t;
+}
+
+const EPOCH_MIN_MS = Date.UTC(2000, 0, 1);
+const EPOCH_MAX_MS = Date.UTC(2100, 0, 1);
+
+/**
+ * Blank date cells are ''; anything present must be ISO-8601 (or, on the
+ * BigQuery path only, epoch seconds within 2000-01-01..2100-01-01), else the
+ * row is invalid. Output is always ISO-8601 UTC with milliseconds.
+ */
+function toIsoDate(v: unknown, column: string, opts: FocusRecordOptions): string {
   if (isBlank(v)) return '';
-  // BigQuery returns TIMESTAMP as epoch seconds (possibly fractional) strings.
-  if (typeof v === 'number' || (typeof v === 'string' && /^\d+(\.\d+)?(E\d+)?$/i.test(v))) {
-    const n = Number(v);
-    const ms = n > 1e12 ? n : n * 1000;
+  if (opts.allowEpochSeconds && (typeof v === 'number' || (typeof v === 'string' && DECIMAL_RE.test(v.trim())))) {
+    const ms = Number(typeof v === 'string' ? v.trim() : v) * 1000;
+    if (!Number.isFinite(ms) || ms < EPOCH_MIN_MS || ms >= EPOCH_MAX_MS) {
+      throw new Error(`${column} is not a valid date`);
+    }
     return new Date(ms).toISOString();
   }
-  const d = new Date(String(v).replace(' UTC', 'Z'));
-  if (Number.isNaN(d.getTime())) throw new Error(`${column} is not a valid date`);
-  return d.toISOString();
+  const t = typeof v === 'string' ? parseIsoUtc(v) : null;
+  if (t === null) throw new Error(`${column} is not a valid date`);
+  return new Date(t).toISOString();
 }
 
 function toStringValue(v: unknown): string {
@@ -239,29 +307,53 @@ function toStringValue(v: unknown): string {
   return typeof v === 'string' ? v : String(v);
 }
 
+function toCurrency(v: unknown, column: string): string {
+  const s = toStringValue(v).trim();
+  if (!/^[A-Z]{3}$/.test(s)) throw new Error(`${column} is not an ISO-4217 currency code`);
+  return s;
+}
+
+function isExtensionColumn(key: string): boolean {
+  return key === 'Tags' || key.startsWith('x_');
+}
+
 /**
  * A loose record from an export → a `RawSourceRow`. Only FOCUS columns are kept
- * (provider-specific `x_*` columns are dropped — Ratio adds its own). Optional
- * columns a real export leaves null (e.g. ResourceId on a tax line) become '' /
- * 0 rather than undefined, so the canonical upgrade never sees a hole.
+ * (provider-specific `x_*` columns are dropped — Ratio adds its own — unless
+ * `keepExtensions`). Optional columns a real export leaves null (e.g.
+ * ResourceId on a tax line) become '' / 0 rather than undefined, so the
+ * canonical upgrade never sees a hole.
+ *
+ * Normalization contract: dates → ISO-8601 UTC with milliseconds; numeric
+ * strings → numbers; currencies → validated three-letter codes. Each row keeps
+ * its own currency (mixed currencies are legitimate and never summed here).
  *
  * THROWS (with the reason) for an invalid record: a missing required column
- * (BilledCost / ChargePeriodStart / BillingCurrency) or an unparseable number.
- * `rowsFromRecords` adds the artifact name and row number.
+ * (BilledCost / ChargePeriodStart / BillingCurrency), an unparseable number or
+ * date, or an invalid currency. `validateFocusRecords` adds artifact + row.
  */
-export function coerceFocusRecord(rec: Record<string, unknown>): RawSourceRow {
+export function coerceFocusRecord(rec: Record<string, unknown>, opts: FocusRecordOptions = {}): RawSourceRow {
+  if (rec === null || typeof rec !== 'object' || Array.isArray(rec)) throw new Error('row is not an object');
   for (const col of REQUIRED_COLUMNS) {
     if (isBlank(rec[col])) throw new Error(`missing required column ${col}`);
   }
 
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(rec)) {
+    if (opts.keepExtensions && isExtensionColumn(key)) {
+      out[key] = value;
+      continue;
+    }
     if (!KNOWN_COLUMNS.has(key)) continue;
     if (NUMERIC_COLUMNS.has(key)) out[key] = toNumber(value, key);
-    else if (DATE_COLUMNS.has(key)) out[key] = toIsoDate(value, key);
+    else if (DATE_COLUMNS.has(key)) out[key] = toIsoDate(value, key, opts);
+    else if (CURRENCY_COLUMNS.has(key)) out[key] = isBlank(value) ? null : toCurrency(value, key);
     else if (NULLABLE_COLUMNS.has(key)) out[key] = value === '' || value == null ? null : toStringValue(value);
     else out[key] = toStringValue(value);
   }
+  // An absent optional PricingCurrency stays absent (the canonical upgrade
+  // derives it from BillingCurrency); never an explicit null.
+  if (out.PricingCurrency === null) delete out.PricingCurrency;
 
   // Fill the v1.0 core so the row satisfies the type even when the export left
   // optional-in-practice columns out entirely.
@@ -272,6 +364,15 @@ export function coerceFocusRecord(rec: Record<string, unknown>): RawSourceRow {
   // present 0 (fully discounted / credited usage) is a real value and is kept.
   if (isBlank(rec.EffectiveCost)) out.EffectiveCost = out.BilledCost;
   return out as unknown as RawSourceRow;
+}
+
+/** Throws unless both window bounds parse and start < end (half-open window). */
+export function assertValidWindow(window: CostWindow): void {
+  const start = Date.parse(window?.start);
+  const end = Date.parse(window?.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !(start < end)) {
+    throw new Error('invalid cost window: start and end must be valid timestamps with start < end');
+  }
 }
 
 /**
@@ -290,10 +391,14 @@ export function inWindow(row: RawSourceRow, window: CostWindow): boolean {
  * throws `<artifact>: invalid FOCUS row N: <reason>` (1-based) — it is never
  * dropped or silently normalized. No window filtering.
  */
-export function validateFocusRecords(records: Record<string, unknown>[], artifact: string): RawSourceRow[] {
+export function validateFocusRecords(
+  records: Record<string, unknown>[],
+  artifact: string,
+  opts: FocusRecordOptions = {},
+): RawSourceRow[] {
   return records.map((rec, i) => {
     try {
-      return coerceFocusRecord(rec);
+      return coerceFocusRecord(rec, opts);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       throw new Error(`${artifact}: invalid FOCUS row ${i + 1}: ${reason}`);
@@ -309,8 +414,10 @@ export function rowsFromRecords(
   records: Record<string, unknown>[],
   window: CostWindow,
   artifact: string,
+  opts: FocusRecordOptions = {},
 ): RawSourceRow[] {
-  return validateFocusRecords(records, artifact).filter((r) => inWindow(r, window));
+  assertValidWindow(window);
+  return validateFocusRecords(records, artifact, opts).filter((r) => inWindow(r, window));
 }
 
 /** Export text → coerced, window-filtered FOCUS rows (throws on any invalid row). */
@@ -328,7 +435,7 @@ export interface ExportObject {
 
 const DATA_FILE = /\.(csv|csv\.gz|gz|json|ndjson|jsonl)$/i;
 
-function dirOf(key: string): string {
+export function dirOf(key: string): string {
   const i = key.lastIndexOf('/');
   return i === -1 ? '' : key.slice(0, i);
 }
@@ -338,8 +445,9 @@ interface BillingMonth {
   m: number; // 0-based
 }
 
-/** Every billing month (UTC) intersecting the half-open window [start, end). */
-function monthsInWindow(window: CostWindow): BillingMonth[] {
+/** Every billing month (UTC) intersecting the half-open window [start, end), as YYYY-MM. */
+export function monthsInWindow(window: CostWindow): string[] {
+  assertValidWindow(window);
   const start = new Date(window.start);
   const endMs = Date.parse(window.end);
   const months: BillingMonth[] = [];
@@ -353,19 +461,33 @@ function monthsInWindow(window: CostWindow): BillingMonth[] {
       y += 1;
     }
   } while (Date.UTC(y, m, 1) < endMs);
+  return months.map((mo) => `${mo.y}-${String(mo.m + 1).padStart(2, '0')}`);
+}
+
+function monthLabel(y: string, m: string): string | null {
+  const mo = Number(m);
+  return mo >= 1 && mo <= 12 ? `${y}-${m}` : null;
+}
+
+/**
+ * Billing months (YYYY-MM) a key's DIRECTORY / partition segments name — never
+ * the file name, so `costs_2026-05-31.csv` inside a June run is a June file.
+ * Recognised segments: `BILLING_PERIOD=YYYY-MM` (AWS), `YYYYMMDD-YYYYMMDD`
+ * (Azure; the start date's month), and generic `YYYY-MM` / `YYYYMM`.
+ */
+export function keyMonths(key: string): Set<string> {
+  const months = new Set<string>();
+  const segments = key.split('/').slice(0, -1);
+  for (const seg of segments) {
+    let m: RegExpExecArray | null;
+    let label: string | null = null;
+    if ((m = /^BILLING_PERIOD=(\d{4})-(\d{2})$/.exec(seg))) label = monthLabel(m[1], m[2]);
+    else if ((m = /^(\d{4})(\d{2})\d{2}-\d{8}$/.exec(seg))) label = monthLabel(m[1], m[2]);
+    else if ((m = /^(\d{4})-(\d{2})$/.exec(seg))) label = monthLabel(m[1], m[2]);
+    else if ((m = /^(\d{4})(\d{2})$/.exec(seg))) label = monthLabel(m[1], m[2]);
+    if (label) months.add(label);
+  }
   return months;
-}
-
-function monthLabel(month: BillingMonth): string {
-  return `${month.y}-${String(month.m + 1).padStart(2, '0')}`;
-}
-
-/** Tokens a provider puts in the path of a billing month. */
-function monthTokens(month: BillingMonth): string[] {
-  const y = month.y;
-  const m = String(month.m + 1).padStart(2, '0');
-  // AWS: BILLING_PERIOD=2026-10 · Azure: 20261001-20261031 · generic: 2026-10 / 202610
-  return [`${y}-${m}`, `${y}${m}01`, `${y}${m}`];
 }
 
 /** Every file in the most recently written directory of a non-empty pool. */
@@ -375,46 +497,79 @@ function latestRun(pool: ExportObject[]): ExportObject[] {
   return pool.filter((o) => dirOf(o.key) === dir);
 }
 
+/** One selected export run: the billing month it serves and its directory. */
+export interface ExportRun {
+  month: string | null; // null only for an undated layout (fallback)
+  dir: string;
+  files: ExportObject[];
+}
+
 /**
- * Pick the export files to read from a listing. Cloud FOCUS exports land as one
+ * Pick the export runs to read from a listing. Cloud FOCUS exports land as one
  * directory per run (with manifests alongside); re-runs overwrite a period in a
  * NEW directory. So: keep data files and, for EACH billing month the window
- * intersects, take every file in that month's most recently written run
- * directory; the result is the union.
+ * intersects, take that month's most recently written run directory.
  *
- * A window inside one month keeps the original rule (no file names the month →
- * latest run overall). A window spanning several months throws naming any month
- * that has no export, rather than silently returning fewer months.
+ * Throws naming the month when any intersecting month has no export. The only
+ * fallback: when NO data file in the listing names ANY month (an undated
+ * layout) and the window is inside one month, the latest run overall is used.
  */
-export function selectExportObjects(objects: ExportObject[], window: CostWindow): ExportObject[] {
+export function selectExportRuns(objects: ExportObject[], window: CostWindow): ExportRun[] {
+  const months = monthsInWindow(window);
   const data = objects.filter(
     (o) => DATA_FILE.test(o.key) && !/manifest/i.test(o.key) && o.size > 0,
   );
   if (data.length === 0) return [];
 
-  const byKey = (a: ExportObject, b: ExportObject) => a.key.localeCompare(b.key);
-  const forMonth = (month: BillingMonth) => {
-    const tokens = monthTokens(month);
-    return data.filter((o) => tokens.some((t) => o.key.includes(t)));
-  };
-
-  const months = monthsInWindow(window);
-  if (months.length === 1) {
-    const pool = forMonth(months[0]);
-    return latestRun(pool.length > 0 ? pool : data).sort(byKey);
+  const dated = data.some((o) => keyMonths(o.key).size > 0);
+  if (!dated && months.length === 1) {
+    const files = latestRun(data);
+    return [{ month: null, dir: dirOf(files[0].key), files }];
   }
 
-  const picked = new Map<string, ExportObject>();
+  const runs: ExportRun[] = [];
   for (const month of months) {
-    const pool = forMonth(month);
+    const pool = data.filter((o) => keyMonths(o.key).has(month));
     if (pool.length === 0) {
       throw new Error(
-        `no FOCUS export found for billing month ${monthLabel(month)} in the requested window — refusing to return partial data`,
+        `no FOCUS export found for billing month ${month} in the requested window — refusing to return partial data`,
       );
     }
-    for (const o of latestRun(pool)) picked.set(o.key, o);
+    const files = latestRun(pool);
+    runs.push({ month, dir: dirOf(files[0].key), files });
   }
-  return [...picked.values()].sort(byKey);
+  return runs;
+}
+
+/** The data files of `selectExportRuns`, each key once, sorted. */
+export function selectExportObjects(objects: ExportObject[], window: CostWindow): ExportObject[] {
+  const picked = new Map<string, ExportObject>();
+  for (const run of selectExportRuns(objects, window)) {
+    for (const o of run.files) picked.set(o.key, o);
+  }
+  return [...picked.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+/** Parse a manifest body with a FIXED error (never quotes the content). */
+export function parseManifest(text: string, label: string, where: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  } catch {
+    // fall through
+  }
+  throw new Error(`${label}: export run incomplete: manifest unreadable (${where})`);
+}
+
+/** Throws unless every manifest-listed key is present in the listing. */
+export function assertManifestFilesPresent(listed: string[], listing: ExportObject[], label: string, where: string): void {
+  const present = new Set(listing.map((o) => o.key));
+  const missing = listed.filter((k) => !present.has(k));
+  if (missing.length > 0) {
+    throw new Error(
+      `${label}: export run incomplete: manifest lists ${missing.length} file(s) not present in the listing (${where})`,
+    );
+  }
 }
 
 /** Upper bound on export files read per fetch — protects the route from a runaway listing. */

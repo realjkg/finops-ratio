@@ -55,7 +55,12 @@ function azure(fetch: ReturnType<typeof fakeFetch>) {
 describe('H4 — S3 never silently drops export shards or listing pages', () => {
   it('throws when the selected run has more files than MAX_EXPORT_FILES', async () => {
     const keys = shards('focus/data/BILLING_PERIOD=2026-06/run1', MAX_EXPORT_FILES + 1);
-    const fetch = fakeFetch((url) => (url.includes('list-type=2') ? new Response(s3ListXml(keys)) : new Response(GOOD_CSV)));
+    const manifest = 'focus/metadata/BILLING_PERIOD=2026-06/x-Manifest.json';
+    const fetch = fakeFetch((url) => {
+      if (url.includes('list-type=2')) return new Response(s3ListXml([...keys, manifest]));
+      if (url.includes('Manifest.json')) return Response.json({ dataFiles: keys.map((k) => `s3://exports/${k}`) });
+      return new Response(GOOD_CSV);
+    });
     await expect(s3(fetch).fetchExportRows(WINDOW)).rejects.toThrow(
       new RegExp(`${MAX_EXPORT_FILES + 1} files.*cap of ${MAX_EXPORT_FILES}`),
     );
@@ -81,7 +86,11 @@ describe('H4 — S3 never silently drops export shards or listing pages', () => 
 describe('H5 — Azure never silently drops export shards or listing pages', () => {
   it('throws when the selected run has more files than MAX_EXPORT_FILES', async () => {
     const names = shards('focus/20260601-20260630/run1', MAX_EXPORT_FILES + 1);
-    const fetch = fakeFetch((url) => (url.includes('comp=list') ? new Response(azureListXml(names)) : new Response(GOOD_CSV)));
+    const fetch = fakeFetch((url) => {
+      if (url.includes('comp=list')) return new Response(azureListXml([...names, 'focus/20260601-20260630/run1/manifest.json']));
+      if (url.includes('manifest.json')) return Response.json({ blobs: names.map((blobName) => ({ blobName })) });
+      return new Response(GOOD_CSV);
+    });
     await expect(azure(fetch).fetchExportRows(WINDOW)).rejects.toThrow(
       new RegExp(`${MAX_EXPORT_FILES + 1} files.*cap of ${MAX_EXPORT_FILES}`),
     );

@@ -13,11 +13,14 @@ import type { FocusExportTransport } from '../CloudConnectorAdapter';
 import type { RawSourceRow } from '../focusRows';
 import {
   assertExportFileCap,
+  assertManifestFilesPresent,
   decodeExportBytes,
+  dirOf,
   fetchChecked,
   listingTruncatedError,
+  parseManifest,
   rowsFromExportText,
-  selectExportObjects,
+  selectExportRuns,
   xmlValues,
   type ExportObject,
   type FetchLike,
@@ -108,6 +111,30 @@ export function createAzureBlobTransport(opts: AzureBlobTransportOptions): Focus
     return decodeExportBytes(new Uint8Array(await res.arrayBuffer()), name);
   }
 
+  /**
+   * Completeness: each Cost Management export run directory carries a
+   * `manifest.json` whose `blobs[].blobName` lists the run's files. Read ONLY
+   * those; a run without a manifest, or a listed blob absent from the listing,
+   * is an incomplete run → throw.
+   */
+  async function manifestedBlobs(window: Parameters<FocusExportTransport['fetchExportRows']>[0]): Promise<string[]> {
+    const listing = await list();
+    const names = new Set<string>();
+    for (const run of selectExportRuns(listing, window)) {
+      const manifest = listing.find((o) => dirOf(o.key) === run.dir && /(^|\/)manifest\.json$/i.test(o.key));
+      if (!manifest) throw new Error(`${LABEL}: export run incomplete: manifest missing (${run.dir})`);
+      const parsed = parseManifest(await readBlob(manifest.key), LABEL, run.dir);
+      const blobs = parsed.blobs;
+      if (!Array.isArray(blobs) || !blobs.every((b) => b && typeof (b as { blobName?: unknown }).blobName === 'string')) {
+        throw new Error(`${LABEL}: export run incomplete: manifest unreadable (${run.dir})`);
+      }
+      const listed = (blobs as Array<{ blobName: string }>).map((b) => b.blobName.replace(/^\/+/, ''));
+      assertManifestFilesPresent(listed, listing, LABEL, run.dir);
+      for (const n of listed) names.add(n);
+    }
+    return [...names].sort();
+  }
+
   return {
     async ping() {
       if (loc.directBlob) {
@@ -118,9 +145,7 @@ export function createAzureBlobTransport(opts: AzureBlobTransportOptions): Focus
       return true;
     },
     async fetchExportRows(window) {
-      const names = loc.directBlob
-        ? [loc.prefix]
-        : selectExportObjects(await list(), window).map((o) => o.key);
+      const names = loc.directBlob ? [loc.prefix] : await manifestedBlobs(window);
       if (names.length === 0) {
         throw new Error(`${LABEL}: no CSV/JSON export files found under ${loc.container}/${loc.prefix}`);
       }

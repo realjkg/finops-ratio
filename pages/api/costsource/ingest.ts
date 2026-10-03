@@ -82,7 +82,8 @@ export default async function handler(
 
   let validated;
   try {
-    validated = validateFocusRecords(rows as Record<string, unknown>[], sourceId);
+    // Tags and x_* extension columns are preserved for direct ingest.
+    validated = validateFocusRecords(rows as Record<string, unknown>[], sourceId, { keepExtensions: true });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     return;

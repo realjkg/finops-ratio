@@ -2,7 +2,7 @@
 //
 // Each transport gets an injected `fetch` that answers like the real API
 // (Azure List Blobs XML, S3 ListObjectsV2 XML, Google OAuth + BigQuery JSON, a
-// plain FOCUS endpoint), so every request shape, auth header, pagination step,
+// plain HTTPS FOCUS export), so every request shape, auth header, pagination step,
 // and decode path is checked with no network.
 
 import { describe, it, expect, vi } from 'vitest';
@@ -75,9 +75,12 @@ describe('FOCUS export parsing', () => {
     expect(row).not.toHaveProperty('x_Vendor');
   });
 
-  it('converts BigQuery epoch-second timestamps', () => {
-    const row = coerceFocusRecord({ BilledCost: 1, BillingCurrency: 'USD', ChargePeriodStart: '1.7807616E9' });
+  it('converts BigQuery epoch-second timestamps (BigQuery path only)', () => {
+    const rec = { BilledCost: 1, BillingCurrency: 'USD', ChargePeriodStart: '1.7807616E9' };
+    const row = coerceFocusRecord(rec, { allowEpochSeconds: true });
     expect(row?.ChargePeriodStart).toBe(new Date(1.7807616e9 * 1000).toISOString());
+    // Off the BigQuery path a bare number is not a date.
+    expect(() => coerceFocusRecord(rec)).toThrow(/ChargePeriodStart/);
   });
 
   it('rejects rows without a cost, charge period, or currency rather than inventing or dropping them', () => {
@@ -118,7 +121,7 @@ describe('FOCUS export parsing', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Generic HTTPS endpoint (Kubernetes / Nutanix / any FOCUS endpoint)
+// HTTPS endpoint transport (Kubernetes / Nutanix)
 // ---------------------------------------------------------------------------
 
 describe('HTTP FOCUS transport', () => {
@@ -212,6 +215,9 @@ describe('Azure Blob transport', () => {
           ]),
         );
       }
+      if (url.includes('manifest.json')) {
+        return Response.json({ blobs: [{ blobName: 'focus/20260601-20260630/run2/part_0.csv.gz' }] });
+      }
       return new Response(gz as BodyInit);
     });
 
@@ -226,10 +232,14 @@ describe('Azure Blob transport', () => {
     const urls = fetch.mock.calls.map((c) => String(c[0]));
     expect(urls[0]).toContain('restype=container&comp=list&prefix=focus%2F&sv=2024&sig=abc');
     expect(urls[1]).toContain('marker=page2');
+    // The run's manifest is read first; only the blobs it lists are read.
     expect(urls[2]).toBe(
+      'https://a.blob.core.windows.net/exports/focus/20260601-20260630/run2/manifest.json?sv=2024&sig=abc',
+    );
+    expect(urls[3]).toBe(
       'https://a.blob.core.windows.net/exports/focus/20260601-20260630/run2/part_0.csv.gz?sv=2024&sig=abc',
     );
-    expect(urls).toHaveLength(3); // manifest never read
+    expect(urls).toHaveLength(4);
   });
 
   it('fails loudly when the container holds no readable export', async () => {
@@ -280,8 +290,14 @@ describe('AWS S3 transport', () => {
       }
       if (url.includes('list-type=2')) {
         return new Response(
-          s3ListXml([{ key: 'focus/ratio/data/BILLING_PERIOD=2026-06/part-0.csv.gz', modified: '2026-06-01T00:00:00Z' }]),
+          s3ListXml([
+            { key: 'focus/ratio/data/BILLING_PERIOD=2026-06/part-0.csv.gz', modified: '2026-06-01T00:00:00Z' },
+            { key: 'focus/ratio/metadata/BILLING_PERIOD=2026-06/ratio-Manifest.json', modified: '2026-06-01T00:00:01Z' },
+          ]),
         );
+      }
+      if (url.includes('Manifest.json')) {
+        return Response.json({ dataFiles: ['s3://exports/focus/ratio/data/BILLING_PERIOD=2026-06/part-0.csv.gz'] });
       }
       return new Response((await gzip(CSV)) as BodyInit);
     });
@@ -300,10 +316,14 @@ describe('AWS S3 transport', () => {
 
     const calls = fetch.mock.calls.map(([u, init]) => ({ url: String(u), headers: init?.headers as Record<string, string> }));
     expect(calls[1].url).toContain('continuation-token=tok%2F1');
-    // BILLING_PERIOD=2026-06 wins over the more recently written May re-run.
+    // The June billing period's manifest decides what is read (never the May re-run).
     expect(calls[2].url).toBe(
+      'https://exports.s3.us-east-1.amazonaws.com/focus/ratio/metadata/BILLING_PERIOD%3D2026-06/ratio-Manifest.json',
+    );
+    expect(calls[3].url).toBe(
       'https://exports.s3.us-east-1.amazonaws.com/focus/ratio/data/BILLING_PERIOD%3D2026-06/part-0.csv.gz',
     );
+    expect(calls).toHaveLength(4);
     for (const c of calls) {
       expect(c.headers.Authorization).toMatch(/^AWS4-HMAC-SHA256 Credential=AKIAEXAMPLE\/\d{8}\/us-east-1\/s3\/aws4_request/);
       expect(c.headers['x-amz-security-token']).toBe('session');

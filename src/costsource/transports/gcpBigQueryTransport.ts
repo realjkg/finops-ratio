@@ -250,7 +250,9 @@ export function createGcpBigQueryTransport(opts: GcpBigQueryTransportOptions): F
         );
       }
 
-      return rowsFromRecords(records, window, `${LABEL} ${table.project}.${table.dataset}.${table.table}`);
+      return rowsFromRecords(records, window, `${LABEL} ${table.project}.${table.dataset}.${table.table}`, {
+        allowEpochSeconds: true, // BigQuery REST encodes TIMESTAMP as epoch seconds
+      });
     },
   };
 }
