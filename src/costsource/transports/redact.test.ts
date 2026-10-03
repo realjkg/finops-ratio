@@ -38,4 +38,29 @@ describe('redactUpstreamText', () => {
     expect(out.length).toBeLessThanOrEqual(300);
     expect(out).not.toContain('AKIAIOSF');
   });
+
+  it.each([
+    ['RATIO_API_TOKEN=', 'RATIO_API_TOKEN=s3cretRatioValue'],
+    ['JIRA_API_TOKEN:', 'JIRA_API_TOKEN: s3cretJiraValue'],
+    ['FINIO_PEER_TOKEN=', 'env FINIO_PEER_TOKEN=s3cretPeerValue loaded'],
+    ['SERVICENOW_PASSWORD=', 'SERVICENOW_PASSWORD=s3cretSnowValue'],
+    ['OPENLLM_API_KEY=', 'OPENLLM_API_KEY=s3cretLlmValue'],
+    ['JSON "JIRA_API_TOKEN"', '{"JIRA_API_TOKEN": "s3cretJsonValue"}'],
+    ['pwd=', 'login pwd=s3cretPwdValue'],
+    ['passwd:', 'passwd: s3cretPasswdValue'],
+    ['DB_PWD=', 'DB_PWD=s3cretDbValue'],
+    ['x-finio-session:', 'x-finio-session: s3cretSessionValue'],
+    ['X-FinIO-Session=', 'X-FinIO-Session=s3cretSessionValue2'],
+    ['JSON "pwd"', '{"pwd":"s3cretJsonPwd"}'],
+  ])('redacts a prefixed / new credential key: %s', (_label, input) => {
+    const out = redactUpstreamText(input);
+    expect(out).not.toMatch(/s3cret/);
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('keeps prose that merely resembles a scheme or key intact', () => {
+    for (const prose of ['Basic Support plan', 'Bearer of costs', 'token count is high', 'password reset link sent']) {
+      expect(redactUpstreamText(prose)).toBe(prose);
+    }
+  });
 });

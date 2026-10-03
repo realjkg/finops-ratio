@@ -12,6 +12,7 @@ import { LiveTokenomicsClient } from '@/tokenomics/LiveTokenomicsClient';
 import { LiveCostSourceClient } from '@/costsource/LiveCostSourceClient';
 import { LiveCMClient } from '@/cm/LiveCMClient';
 import { LiveFinioClient } from '@/finio/LiveFinioClient';
+import { describeHttpErrorBody, envelopeMessage } from './httpError';
 
 const MARKER = 'RAW-BODY-MARKER';
 
@@ -81,5 +82,19 @@ describe.each(CASES)('%s', (label, call) => {
     const msg = await messageOf(call);
     expect(msg).toBe(`${label} error 404: Unknown cost source`);
     expect(msg).not.toContain(MARKER);
+  });
+});
+
+describe('envelope message cap', () => {
+  it('an envelope message is capped at 200 characters', () => {
+    const long = 'A'.repeat(500);
+    expect(envelopeMessage(JSON.stringify({ error: long }))).toBe('A'.repeat(200));
+    expect(envelopeMessage(JSON.stringify({ error: { message: long } }))).toBe('A'.repeat(200));
+    expect(describeHttpErrorBody('X', 500, JSON.stringify({ error: long }))).toBe(`X error 500: ${'A'.repeat(200)}`);
+  });
+
+  it('applies through a live client too', async () => {
+    respond(JSON.stringify({ error: 'B'.repeat(1000) }), 500);
+    expect(await messageOf(() => new LiveHelloClient().getGreeting())).toBe(`Hello API error 500: ${'B'.repeat(200)}`);
   });
 });

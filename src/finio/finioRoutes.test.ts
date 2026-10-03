@@ -112,12 +112,19 @@ describe('POST /api/v1/a2a/handshake', () => {
     expect(result.focusVersion).toBe('1.0');
   });
 
-  it('returns 409 naming both versions on a version it does not support', async () => {
-    const { res } = await openSession({ ...validBody, focusVersion: '2.0' });
-    expect(res.statusCode).toBe(409);
-    expect(errorOf(res).code).toBe('focus_version_mismatch');
-    expect(errorOf(res).message).toContain("requested '2.0'");
-    expect(errorOf(res).message).toContain('1.0, 1.1, 1.2, 1.3, 1.4');
+  it('returns a fixed 409 + structured supported list, never echoing the requested version', async () => {
+    for (const focusVersion of ['2.0', '<script>EVIL</script>']) {
+      const { res } = await openSession({ ...validBody, focusVersion });
+      expect(res.statusCode).toBe(409);
+      expect(res.body).toEqual({
+        error: {
+          code: 'focus_version_mismatch',
+          message: 'focusVersion not supported; responder supports 1.0–1.4',
+          supported: ['1.0', '1.1', '1.2', '1.3', '1.4'],
+        },
+      });
+      expect(JSON.stringify(res.body)).not.toContain(focusVersion);
+    }
   });
 
   it('returns 400 on a malformed body', async () => {

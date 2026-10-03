@@ -11,6 +11,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { InvalidTicketRefError } from './ticketRef';
+import * as changeRoute from '../../pages/api/v1/cm/change';
 
 const ENV_KEYS = [
   'RATIO_API_TOKEN',
@@ -315,5 +317,97 @@ describe('attach audit record: provider is the resolved provider, never the call
     const res = await call({ operation: 'attach', provider: 'jira', ticketRef: 'CHG0030001' });
     expect(res.statusCode).toBe(200);
     expect((res.body as { provider: string }).provider).toBe('servicenow');
+  });
+});
+
+// --- Each layer of the ticketRef defence must hold on its own ----------------
+
+const BAD_JIRA = ['ABC-1/../../admin', '%2e%2e/', 'ABC-1?x=', 'ABC-1#', ''];
+const BAD_SN = ['CHG0030001^ORnumberISNOTEMPTY', '../', 'CHG1?x=', ''];
+
+describe('handler gate alone (adapter checks bypassed by a fake adapter)', () => {
+  function fakeAdapter(provider: 'jira' | 'servicenow') {
+    const real =
+      provider === 'jira'
+        ? new changeRoute.JiraAdapter('https://jira.example', 't', 'OPS')
+        : new changeRoute.ServiceNowAdapter('acme.service-now.com', 'u', 'p');
+    return {
+      provider,
+      invalidRefMessage: (ref: string) => real.invalidRefMessage(ref),
+      createChange: vi.fn(),
+      attachReference: vi.fn(async () => ({ provider, ticketRef: 'X', url: 'u', createdAt: 'c' })),
+      getStatus: vi.fn(async () => ({ ticketRef: 'X', status: 's', updatedAt: 'u' })),
+    };
+  }
+
+  for (const provider of ['jira', 'servicenow'] as const) {
+    const bad = provider === 'jira' ? BAD_JIRA : BAD_SN;
+    it.each(bad)(`${provider}: %j is refused before the adapter is called`, async (ref) => {
+      const adapter = fakeAdapter(provider);
+      const handler = changeRoute.createChangeHandler(() => adapter as never);
+      for (const body of [
+        { operation: 'attach', provider, ticketRef: ref },
+        { operation: 'status', ticketRef: ref },
+      ]) {
+        const res = makeRes();
+        await handler(post(body), res as unknown as NextApiResponse);
+        expect(res.statusCode).toBe(400);
+      }
+      expect(adapter.attachReference).not.toHaveBeenCalled();
+      expect(adapter.getStatus).not.toHaveBeenCalled();
+    });
+  }
+});
+
+describe('adapter checks alone (called directly, no handler gate)', () => {
+  it.each(BAD_JIRA)('JiraAdapter refuses %j before any fetch', async (ref) => {
+    const fetchSpy = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', fetchSpy);
+    const jira = new changeRoute.JiraAdapter('https://jira.example', 't', 'OPS');
+    await expect(jira.getStatus(ref)).rejects.toBeInstanceOf(InvalidTicketRefError);
+    await expect(jira.attachReference({ provider: 'jira', ticketRef: ref })).rejects.toBeInstanceOf(InvalidTicketRefError);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it.each(BAD_SN)('ServiceNowAdapter refuses %j before any fetch', async (ref) => {
+    const fetchSpy = vi.fn(async () => new Response('{"result":[]}'));
+    vi.stubGlobal('fetch', fetchSpy);
+    const sn = new changeRoute.ServiceNowAdapter('acme.service-now.com', 'u', 'p');
+    await expect(sn.getStatus(ref)).rejects.toBeInstanceOf(InvalidTicketRefError);
+    await expect(sn.attachReference({ provider: 'servicenow', ticketRef: ref })).rejects.toBeInstanceOf(InvalidTicketRefError);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('a thrown InvalidTicketRefError from the adapter maps to 400 (not 500)', async () => {
+    const adapter = {
+      provider: 'jira',
+      createChange: vi.fn(),
+      attachReference: vi.fn(async () => {
+        throw new InvalidTicketRefError('ticketRef is not a valid Jira issue key');
+      }),
+      getStatus: vi.fn(),
+    };
+    const handler = changeRoute.createChangeHandler(() => adapter as never);
+    const res = makeRes();
+    await handler(post({ operation: 'attach', provider: 'jira', ticketRef: 'OPS-1' }), res as unknown as NextApiResponse);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: { code: 'invalid_request', message: 'ticketRef is not a valid Jira issue key' } });
+  });
+});
+
+describe('Jira URLs are built with encodeURIComponent (defence in depth)', () => {
+  it('getStatus, attachReference and the browse URL encode the key', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ fields: { status: { name: 'Open' }, updated: 'u' } }))),
+    );
+    const enc = vi.spyOn(globalThis, 'encodeURIComponent');
+    const jira = new changeRoute.JiraAdapter('https://jira.example', 't', 'OPS');
+    await jira.getStatus('OPS-11');
+    expect(enc).toHaveBeenCalledWith('OPS-11');
+    enc.mockClear();
+    await jira.attachReference({ provider: 'jira', ticketRef: 'OPS-12' });
+    // issue path + browse URL
+    expect(enc.mock.calls.filter((c) => c[0] === 'OPS-12').length).toBeGreaterThanOrEqual(2);
   });
 });

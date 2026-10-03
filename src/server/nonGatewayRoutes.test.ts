@@ -20,6 +20,7 @@ import ingestHandler from '../../pages/api/costsource/ingest';
 import predictHandler from '../../pages/api/prediction/predict';
 import accuracyHandler from '../../pages/api/prediction/accuracy';
 import tokenomicsHandler from '../../pages/api/tokenomics';
+import helloHandler from '../../pages/api/hello';
 
 const TOKEN = 'right-token-0123456789abcdef-0123456789';
 const AUTH = { authorization: `Bearer ${TOKEN}` };
@@ -320,5 +321,57 @@ describe('4xx messages are fixed and never echo caller input', () => {
     expect(res.statusCode).toBe(404);
     expect(res.body).toEqual({ error: 'Unknown model' });
     expectNoEcho(res);
+  });
+});
+
+describe('ingest 400s forward only the known validator grammar', () => {
+  const base = { sourceId: 'focus-file-sandbox', version: '1.0' };
+  const good = { BilledCost: 1, ChargePeriodStart: '2026-06-02T00:00:00Z', BillingCurrency: 'USD' };
+
+  it.each([
+    [{ ...good, BillingCurrency: 'ZZZ' }, 'focus-file-sandbox: invalid FOCUS row 1: BillingCurrency is not an ISO-4217 currency code'],
+    [{ ...good, BilledCost: 'abc' }, 'focus-file-sandbox: invalid FOCUS row 1: BilledCost is not a number'],
+    [{ ...good, ChargePeriodStart: 'nope' }, 'focus-file-sandbox: invalid FOCUS row 1: ChargePeriodStart is not a valid date'],
+    [{ BilledCost: 1, ChargePeriodStart: '2026-06-02T00:00:00Z' }, 'focus-file-sandbox: invalid FOCUS row 1: missing required column BillingCurrency'],
+    ['not-an-object', 'focus-file-sandbox: invalid FOCUS row 1: row is not an object'],
+  ])('known form %j is forwarded as a 400', async (row, message) => {
+    const res = await run(INGEST, makeReq('POST', { body: { ...base, rows: [row] } }));
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: message });
+  });
+
+  it.each([
+    ['a {"toString":1} currency', { ...good, BillingCurrency: { toString: 1 } }],
+    ['a non-primitive ResourceId', { ...good, ResourceId: { toString: 1 } }],
+  ])('%s is not forwarded: generic 500 with requestId', async (_l, row) => {
+    const res = await run(INGEST, makeReq('POST', { body: { ...base, rows: [row] } }));
+    expect(res.statusCode).toBe(500);
+    const body = res.body as { error: string; requestId: string };
+    expect(body).toEqual({ error: 'Internal error', requestId: expect.stringMatching(UUID) });
+    expect(res.headers['x-request-id']).toBe(body.requestId);
+    expect(JSON.stringify(res.body)).not.toMatch(/primitive|invalid FOCUS row/);
+  });
+});
+
+describe('predict: an unknown change type is a fixed 400, not a 500', () => {
+  it.each(['teleport', '<b>EVILTYPE</b>', '', 42])('type %j', async (type) => {
+    const res = await run(PREDICT, makeReq('POST', { body: { type, workloadId: 'wl-support' } }));
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: '`type` must be one of model_switch, demand_shape, scale, budget' });
+    expect(JSON.stringify(res.body)).not.toContain('EVILTYPE');
+    expect(JSON.stringify(res.body)).not.toContain('teleport');
+  });
+});
+
+describe('/api/hello is guarded too', () => {
+  it('a failure while responding becomes the generic 500', async () => {
+    const res = makeRes();
+    const realStatus = res.status.bind(res);
+    (res as unknown as { status: (c: number) => unknown }).status = (code: number) => {
+      if (code === 200) throw new Error(SECRET_DETAIL);
+      return realStatus(code);
+    };
+    await (helloHandler as unknown as NextApiHandler)(makeReq('GET'), res);
+    expectGeneric500(res);
   });
 });
