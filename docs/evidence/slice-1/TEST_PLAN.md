@@ -192,7 +192,16 @@ substring-of-another and self-overlapping secrets through redact,
 scrubLiterals and jsonLineRedactorFor: no 3-char remainder of any secret.
 Quarantine commit tag: `commitTag.db.test.ts`, a caught error after each
 state-changing statement of the quarantine transaction — the run fails, the
-batch stays staged, nothing recorded or published. Query rule alone
-(`redactCap.test.ts`): uncapped 16 KB median < 25 ms and
-time(48 KB)/time(16 KB) < 6.
+batch stays staged, nothing recorded or published. Query rule alone:
+uncapped 16 KB median < 25 ms (`redactCap.test.ts`) and uncapped 2 MB < 2 s
+in a child under a hard kill (`redactLinear.test.ts`).
+
+Serial DB phase: tests that COMMIT a dangerous login live in
+`*.serial.db.test.ts` (`worker/auth.serial.db.test.ts`), run alone after the
+parallel phase; `serialLogins.test.ts` statically guards the non-serial files.
+Literal matching budgets (child process, hard kill): self-similar secrets
+through scrubLiterals (2 MB) and jsonLineRedactorFor (1000 x 4.5 KB) < 2 s.
+Crash handler: the spawned test measures the handler inside the child and
+bounds the line at 16 KB; Slice 0's built-CLI crash test asserts the
+capped-but-redacted line plus a > 2 MB writeAllSync pipe flush.
 

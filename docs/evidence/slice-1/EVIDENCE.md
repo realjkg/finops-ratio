@@ -82,7 +82,16 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 63 | 1ae3e2d | test: overlapping secrets (3 entry points), quarantine commit-tag (parametrized), uncapped query-rule linearity (red: 12 failed, `r9-red.txt`; the quarantine cases are green by design and proven by mutation) | tests |
 | 64 | 89e58fc | fix: covered-run literal redaction (overlapping secrets), `QUERY_RULE` exported | impl |
 | 65 | 6a1244b | test: query-rule scaling check at 48/16 KB with adaptive repetitions (the first version took 400 s to fail under R6) | test |
-| 66 | (final) | docs: evidence for this round (§21) | docs |
+| 66 | fc71471 | docs: evidence for the e0a1057 Lows (§21) | docs |
+| 67 | 826c40d | merge local slice/00-postgres-foundation @ 289db6a (rounds 14-15) — conflicts: `cli.ts` (Slice 0's round-14 entry), `vitest.db.config.ts` (S3 globalSetup + serial exclude), `package.json` (two-phase test:db + Slice 1 worker:build); serial config gets the S3 globalSetup | merge |
+| 68 | 9197e7a | test: guard — no non-serial DB test commits a dangerous login (red: auth.db.test.ts:29, :60) | tests |
+| 69 | ecba4de | test: dangerous A1 logins move to `auth.serial.db.test.ts` | tests |
+| 70 | 18bc70c | test: Slice 0 crash-process test asserts the capped-but-redacted line; > 2 MB pipe flush tested on `writeAllSync`; explicit timeout on the four-spawn case | tests |
+| 71 | e2b6e15 | test: spawned crash test measures the handler inside the child (fd 3) + deterministic size bound | tests |
+| 72 | 1c18bea | test: absolute child-process budgets (query rule uncapped 2 MB; self-similar secrets), cheaper straddle sweep, `abcabc` overlap case (red: 2 failed, `r10-red.txt`) | tests |
+| 73 | 4fb8636 | test: self-similar JSON-line budget case tuned (2250-char secret, 1000 x 4.5 KB; red 3.85 s) | tests |
+| 74 | a055ea3 | fix: KMP literal matching, O(n + m) per form, overlaps kept | impl |
+| 75 | (final) | docs: evidence for this round (§22) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -1267,6 +1276,150 @@ The four `ratio_test_*` databases present afterwards belong to another live
 vitest run (a scratch compat checkout).
 
 **Manual end-to-end** (built CLI at 6a1244b, database `ratio_s1_e2e_5a6f8299`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 22. Slice 0 rounds 14-15 merge, dangerous test logins, challenger REQUEST_CHANGES on fc71471
+
+All DB tests in this round ran on a **private PostgreSQL 16 cluster**
+(`127.0.0.1:55600`). `initdb` refuses root, so the cluster runs as the
+unprivileged `postgres` user. Its data directory is on `/dev/shm/s1pg`,
+because the sandbox denies that uid file access under the scratchpad
+(initdb PANIC: could not open `global/pg_control`). The cluster was stopped
+and deleted at the end. The S3 store is still the shared SeaweedFS, isolated
+by per-run prefixes in `ratio-s1-test`.
+
+### Merge (`826c40d`)
+
+Local `slice/00-postgres-foundation` @ 289db6a (rounds 14-15) was merged.
+Conflicts:
+- **`cli.ts`:** took Slice 0's round-14 entry (synchronous `writeAllSync`
+  fatal path and the test crash hook). The single crash handler
+  (`installProcessHandlers` plus the worker pass) is unchanged.
+- **`vitest.db.config.ts`:** kept Slice 1's S3 globalSetup and added Slice 0's
+  `*.serial.db.test.ts` exclude.
+- **`package.json`:** took Slice 0's two-phase `test:db`, kept Slice 1's
+  `worker:build`.
+
+`vitest.db.serial.config.ts` also gets the S3 globalSetup, since serial files
+may need S3.
+
+### Dangerous test logins
+
+**The interference** (`d1-interference.sh`, private cluster): with a
+committed BYPASSRLS LOGIN member of `ratio_worker` present, which is what
+auth A1 used to create during the parallel phase, `doctor.db.test.ts` fails
+before D1 even runs. Its migration is refused with `PRIVILEGE_MODEL_VIOLATION:
+... role s1_interference_probe (member of ratio_worker) must not be
+BYPASSRLS`. Without that login it passes.
+
+**The fix:** the extra problem was purely interference, so the source was
+removed.
+- The two dangerous A1 cases moved to `src/ingest/worker/auth.serial.db.test.ts`
+  (serial phase, run alone; logins dropped and verified gone):
+  - a BYPASSRLS `ratio_worker` member;
+  - a member that can SET ROLE to a SUPERUSER role.
+- The rest of A1/A2 keeps only plain logins.
+- **D1 keeps its exact `problems: ['PENDING']` assertion.** No loosening is
+  needed once nothing in the parallel phase commits dangerous state.
+
+**Guard** (`src/ingest/serialLogins.test.ts`, static TS AST over every
+non-serial `*.db.test.ts`):
+- `createLogin` may take no attributes, or only a literal array of safe
+  ones.
+- In Slice 1's test files (outside `src/ingest/db/`), no role DDL literal may
+  carry SUPERUSER, BYPASSRLS, REPLICATION, CREATEROLE or CREATEDB. Slice 0's
+  `src/ingest/db/` tests use such DDL only inside rolled-back transactions.
+- A self-test covers both detectors. Red at 9197e7a on `auth.db.test.ts:29`
+  and `:60`.
+
+### Crash tests after the merge
+
+**Slice 0's built-CLI crash test** (`cli.process.test.ts`) expected a crash
+line over 2 MB. Slice 1's reviewed design caps every string before
+redaction, so both intents are now asserted separately:
+- **The crash line:** one JSON line under 16 KB, `error.message` marked
+  `…[TRUNCATED]`, `[redacted]` present, no form of the password.
+- **The flush:** a new case spawns node with the built `writeAllSync`
+  writing 2 100 001 bytes to fd 2, followed by `process.exit(1)`. Every byte
+  arrives.
+
+The refused-hook case (four sequential CLI spawns) timed out at the 5 s
+default under a loaded host. It now has an explicit 60 s timeout: this is
+start-up work, not a race. It is Slice 0's test, so Slice 0 should take the
+same change when it next merges.
+
+**`cli.worker.test.ts` spawned crash test** (failed at 2160 ms under load):
+the wall-time-versus-baseline check was replaced.
+- The child runs with `node --import tsx`, so fd 3 is inherited.
+- It reports on fd 3 the time from raising the crash to writing the
+  handler's line, which must be under 2 s; in practice it is milliseconds.
+- The line must be under 16 KB. This is a deterministic bound that follows
+  from the cap.
+- Old-algorithm mutation (`redact.ts` from 214b4e4): both cases are killed at
+  20 s (`mut-crash-oldalgo.txt`).
+
+### Challenger REQUEST_CHANGES on fc71471
+
+1. **Medium, flaky ratio test.** Removed. It is replaced by an absolute
+   budget in a child process under a hard kill
+   (`testing/redactBudgetChild.ts`, run from `redactLinear.test.ts`): the
+   uncapped `QUERY_RULE` on 2 MB of `a://` must finish in under 2 s. Fixed
+   code takes 12 ms; under R6 the child is killed at 10 s. No threshold was
+   loosened, and the 16 KB in-process median (< 25 ms) stays.
+2. **Low, slow straddle sweep.** Every form now runs at every offset with
+   the delimiter-free filler, which is the hardest case because the cut must
+   back up past the whole form. All three fillers, with the `redact()` check,
+   run at three critical offsets. That is 476 cases instead of 1212. The
+   timeout is unchanged.
+3. **Low, O(n·m) matching.** `coveredRuns` now uses a native `indexOf` to
+   find the first occurrence (most texts have none), then KMP with a cached
+   failure table, keeping overlapping occurrences: O(n + m) per form. Budget
+   cases run in a child under a hard kill, each under 2 s:
+
+   | Case | KMP | old indexOf loop |
+   |---|---|---|
+   | `scrubLiterals`, 4096-char `a` secret, 2 MB text | 88 ms | 7.7 s |
+   | `jsonLineRedactorFor`, 2250-char secret, 1000 × 4.5 KB strings | 184 ms | 3.85 s |
+
+   I first sized the JSON case at 4096 chars × 4000 strings, but the fixed
+   code took 440 ms there, mostly linear rule passes, which left too little
+   margin under load. 4fb8636 retuned it.
+4. **Low, mutation S3 survived.** Added the case `abcabc` in `abcabcabc`; a
+   non-overlapping scan would leave `abc`.
+
+| Mutation (`mutations22.txt`) | Result |
+|---|---|
+| R6: old quadratic query rule | 3 fail: 2 MB uncapped budget killed at 10 s; 16 KB median 1.78 s; at-cap `a://` median |
+| S3: no self-overlap (`k = 0` after a match) | 3 fail: `abcabc` case × 3 entry points |
+| S4: cap ignores secret forms | sweep fails |
+| K1: `indexOf(p, i + 1)` scan instead of KMP | 2 fail: both self-similar budgets killed |
+
+### Gates at a055ea3
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×10, run alongside test:db on the private cluster (load average 16.6–20.8) | **10/10**, 84 files / 1987 passed each; 0 failures in redactCap, redactLinear and cli.worker |
+| `test:db` ×5, private cluster, PG16 tools as in CI | **5/5**: parallel phase 25 files / 368 passed; serial phase 2 files / 3 passed |
+| two further `test:db` runs (load for the fast runs) | 2/2 |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 349 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster after the runs | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| change outside the Slice 1 paths vs Slice 0 @ 289db6a | none |
+
+**Manual end-to-end** (built CLI at a055ea3, private cluster, database
+`ratio_s1_e2e_2823a7fe`):
 - migrate status went 3 -> 0 -> 0.
 - sync published and reconciled; the second sync reported `skipped_unchanged`.
 - Reader totals equal the control totals (55 / `30.8272954899`,
