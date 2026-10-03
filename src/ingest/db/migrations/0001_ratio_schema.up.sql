@@ -620,6 +620,9 @@ GRANT SELECT ON ratio.tenants, ratio.sources TO ratio_worker;
 GRANT SELECT, INSERT, UPDATE ON ratio.sync_runs, ratio.period_publications, ratio.source_checkpoints TO ratio_worker;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ratio.ingest_batches TO ratio_worker;
 GRANT SELECT, INSERT, DELETE ON ratio.ingest_artifacts, ratio.ingest_validation_errors, ratio.cost_facts TO ratio_worker;
+-- Column-level only: the worker may record an artifact's row count after
+-- streaming it (still subject to the staged-only trigger); nothing else.
+GRANT UPDATE (row_count) ON ratio.ingest_artifacts TO ratio_worker;
 GRANT SELECT ON ratio.cost_facts_published TO ratio_worker;
 
 -- The reader sees the published view and nothing else.
