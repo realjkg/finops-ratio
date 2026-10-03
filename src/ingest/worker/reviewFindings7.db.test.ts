@@ -58,9 +58,11 @@ describe('M2: a new-object evidence upload feeds progress and is under the idle 
             seen.chunks++;
             if (mode === 'stall') {
               // Stops reading: only the body stream being destroyed ends this request.
+              // Like the real SDK: a body that errors ends the request with the SDK's own error, not the body's.
               await new Promise<never>((_, reject) => {
-                body.once('close', () => reject(Object.assign(new Error('Request aborted'), { name: 'AbortError' })));
-                body.once('error', reject);
+                const aborted = () => reject(Object.assign(new Error('Request aborted'), { name: 'AbortError' }));
+                body.once('close', aborted);
+                body.once('error', aborted);
               });
             }
             await sleep(400);

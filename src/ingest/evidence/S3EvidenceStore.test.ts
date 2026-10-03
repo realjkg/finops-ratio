@@ -386,9 +386,11 @@ describe('S3EvidenceStore.put meters the upload body (PR #54 seventh review M2)'
           for await (const c of body) {
             seen.got += (c as Buffer).length;
             if (mode === 'stall') {
+              // Like the real SDK: a body that errors ends the request with the SDK's own error, not the body's.
               await new Promise<never>((_, reject) => {
-                body.once('close', () => reject(Object.assign(new Error('Request aborted'), { name: 'AbortError' })));
-                body.once('error', reject);
+                const aborted = () => reject(Object.assign(new Error('Request aborted'), { name: 'AbortError' }));
+                body.once('close', aborted);
+                body.once('error', aborted);
               });
             }
           }
