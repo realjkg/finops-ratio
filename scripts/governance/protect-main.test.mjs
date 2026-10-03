@@ -25,12 +25,10 @@ describe('buildRequests', () => {
       checks: [
         // M1: CI must come from the GitHub Actions app (id 15368).
         { context: 'Lint · Typecheck · Test · Build', app_id: 15368 },
-        // Posted as a commit status by the classify job; any app accepted (see README:
-        // eligibility re-classifies itself, so a spoofed status cannot make a PR eligible).
-        { context: 'Governance · risk classification' },
-        // C1: posted by the eligibility job; success only when eligible (or an
-        // admin/maintain exception is valid), so native auto-merge cannot bypass the gate.
-        { context: 'Governance · merge eligibility' },
+        // H1: governance statuses are pinned to the GitHub Actions app too, so a
+        // status posted with a personal token cannot satisfy them.
+        { context: 'Governance · risk classification', app_id: 15368 },
+        { context: 'Governance · merge eligibility', app_id: 15368 },
       ],
     });
     expect(p.body.required_pull_request_reviews).toMatchObject({ required_approving_review_count: 0 });
@@ -54,6 +52,14 @@ describe('buildRequests', () => {
 
   it('rejects a malformed repo slug', () => {
     expect(() => buildRequests({ repo: 'nope', branch: 'main' })).toThrow(/owner\/name/);
+  });
+});
+
+describe('H1: every required check is pinned to the GitHub Actions app', () => {
+  it('app_id 15368 on all three', () => {
+    const checks = buildRequests({ repo: 'o/r' })[0].body.required_status_checks.checks;
+    expect(checks).toHaveLength(3);
+    for (const c of checks) expect(c.app_id, c.context).toBe(15368);
   });
 });
 

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { URL } from 'node:url';
 import {
   decideEligibility, decideMergeStatus, evaluateExceptionApproval, latestCheckRuns,
-  DEFAULT_CONFIG, CI_CHECK_NAME, ELIGIBILITY_CONTEXT, EXCEPTION_LABEL,
+  DEFAULT_CONFIG, CI_CHECK_NAME, ELIGIBILITY_CONTEXT,
 } from './eligibility.mjs';
 
 const HEAD = 'a'.repeat(40);
@@ -295,61 +295,90 @@ describe('C1: own eligibility status', () => {
   });
 });
 
-describe('C1: evaluateExceptionApproval', () => {
-  const COMMIT = '2026-10-01T10:00:00Z';
-  const labeled = (login, at, event = 'labeled', name = EXCEPTION_LABEL) => ({ event, label: { name }, actor: { login }, created_at: at });
-  const base = {
-    labels: ['risk:restricted', EXCEPTION_LABEL],
-    events: [labeled('boss', '2026-10-01T11:00:00Z')],
-    roles: { boss: { permission: 'admin', role_name: 'admin' } },
-    headCommittedAt: COMMIT,
-  };
-  it('admin added after the head commit ⇒ approved', () => {
-    expect(evaluateExceptionApproval(base)).toMatchObject({ approved: true, approver: 'boss' });
+describe('M1: evaluateExceptionApproval (SHA-bound approval comments)', () => {
+  const OTHER = 'e'.repeat(40);
+  let nextId = 100;
+  const c = (login, body, o = {}) => ({
+    id: o.id ?? nextId++,
+    body,
+    user: { login, type: o.bot ? 'Bot' : 'User' },
+    created_at: '2026-10-01T11:00:00Z',
+    updated_at: o.edited ? '2026-10-01T12:00:00Z' : '2026-10-01T11:00:00Z',
   });
-  it('maintain role ⇒ approved', () => {
-    expect(evaluateExceptionApproval({ ...base, roles: { boss: { permission: 'write', role_name: 'maintain' } } }).approved).toBe(true);
+  const roles = {
+    boss: { permission: 'admin', role_name: 'admin' },
+    keeper: { permission: 'write', role_name: 'maintain' },
+    dev: { permission: 'write', role_name: 'write' },
+    'some-bot[bot]': { permission: 'admin', role_name: 'admin' },
+  };
+  const ev = (comments, headSha = HEAD) => evaluateExceptionApproval({ comments, roles, headSha });
+
+  it('admin approval for the current head ⇒ approved', () => {
+    expect(ev([c('boss', `/exception-approve ${HEAD}`)])).toMatchObject({ approved: true, approver: 'boss' });
+  });
+  it('maintain role ⇒ approved; surrounding whitespace is trimmed; SHA case-insensitive', () => {
+    expect(ev([c('keeper', `  /exception-approve ${HEAD.toUpperCase()}\n`)]).approved).toBe(true);
   });
   it('write-only user ⇒ not approved', () => {
-    const r = evaluateExceptionApproval({ ...base, roles: { boss: { permission: 'write', role_name: 'write' } } });
-    expect(r.approved).toBe(false);
-    expect(r.reason).toMatch(/admin|maintain/);
+    expect(ev([c('dev', `/exception-approve ${HEAD}`)]).approved).toBe(false);
   });
   it('unknown permission ⇒ not approved', () => {
-    expect(evaluateExceptionApproval({ ...base, roles: {} }).approved).toBe(false);
+    expect(ev([c('stranger', `/exception-approve ${HEAD}`)]).approved).toBe(false);
   });
-  it('label added before the latest push ⇒ not approved', () => {
-    const r = evaluateExceptionApproval({ ...base, events: [labeled('boss', '2026-10-01T09:00:00Z')] });
-    expect(r.approved).toBe(false);
-    expect(r.reason).toMatch(/before/);
+  it('approval for an older SHA ⇒ not approved', () => {
+    expect(ev([c('boss', `/exception-approve ${OTHER}`)]).approved).toBe(false);
   });
-  it('latest event for the label is an unlabel (re-added label missing from events) ⇒ not approved', () => {
-    const r = evaluateExceptionApproval({ ...base, events: [labeled('boss', '2026-10-01T11:00:00Z'), labeled('boss', '2026-10-01T12:00:00Z', 'unlabeled')] });
-    expect(r.approved).toBe(false);
+  it('force-push back to an older SHA that has its own approval ⇒ approved (approval binds to content)', () => {
+    const comments = [c('boss', `/exception-approve ${HEAD}`, { id: 1 }), c('boss', `/exception-approve ${OTHER}`, { id: 2 })];
+    expect(ev(comments, HEAD).approved).toBe(true);
+    expect(ev(comments, OTHER).approved).toBe(true);
   });
-  it('the LATEST add counts: admin added, removed, re-added by a writer ⇒ not approved', () => {
-    const r = evaluateExceptionApproval({
-      ...base,
-      events: [labeled('boss', '2026-10-01T11:00:00Z'), labeled('boss', '2026-10-01T11:30:00Z', 'unlabeled'), labeled('dev', '2026-10-01T12:00:00Z')],
-      roles: { boss: { permission: 'admin', role_name: 'admin' }, dev: { permission: 'write', role_name: 'write' } },
+  it('edited comments (updated_at ≠ created_at) are ignored', () => {
+    expect(ev([c('boss', `/exception-approve ${HEAD}`, { edited: true })]).approved).toBe(false);
+  });
+  it('revoke for that SHA by admin/maintain revokes; latest by id wins', () => {
+    expect(ev([c('boss', `/exception-approve ${HEAD}`, { id: 10 }), c('keeper', `/exception-revoke ${HEAD}`, { id: 11 })]).approved).toBe(false);
+    expect(ev([
+      c('boss', `/exception-approve ${HEAD}`, { id: 10 }), c('boss', `/exception-revoke ${HEAD}`, { id: 11 }), c('boss', `/exception-approve ${HEAD}`, { id: 12 }),
+    ]).approved).toBe(true);
+    // Order of the array does not matter, ids do.
+    expect(ev([c('boss', `/exception-revoke ${HEAD}`, { id: 11 }), c('boss', `/exception-approve ${HEAD}`, { id: 10 })]).approved).toBe(false);
+  });
+  it('a revoke by a write-only user or for another SHA does not revoke', () => {
+    expect(ev([c('boss', `/exception-approve ${HEAD}`, { id: 10 }), c('dev', `/exception-revoke ${HEAD}`, { id: 11 })]).approved).toBe(true);
+    expect(ev([c('boss', `/exception-approve ${HEAD}`, { id: 10 }), c('boss', `/exception-revoke ${OTHER}`, { id: 11 })]).approved).toBe(true);
+  });
+  for (const body of [
+    '/exception-approve abc123',
+    `/exception-approve ${HEAD.slice(0, 39)}`,
+    `/exception-approve ${HEAD}0`,
+    `/exception-approve ${HEAD} looks good`,
+    `please /exception-approve ${HEAD}`,
+    `/exception-approve\n${HEAD}`,
+    `/Exception-Approve ${HEAD}`,
+    `/exception-approve ${'g'.repeat(40)}`,
+  ]) {
+    it(`malformed command ignored: ${JSON.stringify(body)}`, () => {
+      expect(ev([c('boss', body)]).approved).toBe(false);
     });
-    expect(r.approved).toBe(false);
+  }
+  it('bot-authored comments are ignored even with admin permission', () => {
+    expect(ev([c('some-bot[bot]', `/exception-approve ${HEAD}`, { bot: true })]).approved).toBe(false);
   });
-  it('label not present ⇒ not approved', () => {
-    expect(evaluateExceptionApproval({ ...base, labels: ['risk:restricted'] }).approved).toBe(false);
-  });
-  it('missing head commit time ⇒ not approved', () => {
-    expect(evaluateExceptionApproval({ ...base, headCommittedAt: undefined }).approved).toBe(false);
-  });
-  it('events for other labels are ignored', () => {
-    const r = evaluateExceptionApproval({ ...base, events: [...base.events, labeled('dev', '2026-10-01T13:00:00Z', 'labeled', 'bug')] });
+  it('no timestamps are compared (a backdated head commit is irrelevant)', () => {
+    const r = evaluateExceptionApproval({ comments: [c('boss', `/exception-approve ${HEAD}`)], roles, headSha: HEAD, headCommittedAt: '2099-01-01T00:00:00Z' });
     expect(r.approved).toBe(true);
+  });
+  it('no approval comment ⇒ not approved, with a reason naming the command', () => {
+    const r = ev([]);
+    expect(r.approved).toBe(false);
+    expect(r.reason).toContain(`/exception-approve ${HEAD}`);
   });
 });
 
 describe('C1: decideMergeStatus', () => {
   const restrictedState = (exception) => state({
-    pr: { labels: ['risk:restricted', 'restricted:migrations', EXCEPTION_LABEL] },
+    pr: { labels: ['risk:restricted', 'restricted:migrations'] },
     freshRisk: 'restricted',
     exception,
   });

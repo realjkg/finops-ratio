@@ -595,9 +595,16 @@ describe('P3: symlinks via the git tree API', () => {
 
 const eligStatus = (github) => github.calls.filter((c) => c.name === 'repos.createCommitStatus' && c.params.context === 'Governance · merge eligibility');
 
-describe('C1: eligibility commit status', () => {
+describe('C1/M1: eligibility commit status and SHA-bound exception approvals', () => {
   const restrictedFiles = [{ filename: 'package.json', status: 'modified', patch: '+x', changes: 1 }];
-  const ex = (login, at) => ({ event: 'labeled', label: { name: 'exception:approved' }, actor: { login }, created_at: at });
+  const restrictedLabels = ['risk:restricted', 'restricted:dependencies'];
+  let nextId = 1000;
+  const cmt = (login, body, o = {}) => ({
+    id: o.id ?? nextId++, body, user: { login, type: o.bot ? 'Bot' : 'User' },
+    created_at: '2026-10-01T11:00:00Z', updated_at: o.edited ? '2026-10-01T11:05:00Z' : '2026-10-01T11:00:00Z',
+  });
+  const ADMIN = { boss: { permission: 'admin', role_name: 'admin' }, dev: { permission: 'write', role_name: 'write' } };
+  const restrictedPr = (o = {}) => fakeGithub({ files: restrictedFiles, labels: restrictedLabels, roles: ADMIN, ...o });
 
   it('eligible low PR ⇒ success status on the evaluated head', async () => {
     const { github, pr } = fakeGithub();
@@ -614,40 +621,60 @@ describe('C1: eligibility commit status', () => {
     expect(st.params.description.length).toBeLessThanOrEqual(140);
     expect(gql(github, 'disablePullRequestAutoMerge')).toHaveLength(1);
   });
-  it('exception label added by a write-only user ⇒ failure', async () => {
-    const { github, pr } = fakeGithub({
-      files: restrictedFiles, labels: ['risk:restricted', 'restricted:dependencies', 'exception:approved'],
-      events: [ex('dev', '2026-10-01T11:00:00Z')], roles: { dev: { permission: 'write', role_name: 'write' } },
-    });
-    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
-    expect(eligStatus(github)[0].params.state).toBe('failure');
-  });
-  it('exception label added by an admin after the head commit ⇒ success, and auto-merge is NOT enabled', async () => {
-    const { github, pr } = fakeGithub({
-      files: restrictedFiles, labels: ['risk:restricted', 'restricted:dependencies', 'exception:approved'],
-      events: [ex('boss', '2026-10-01T11:00:00Z')], roles: { boss: { permission: 'admin', role_name: 'admin' } },
-    });
+  it('M1: admin /exception-approve <current head> ⇒ success; auto-merge NOT enabled', async () => {
+    const { github, pr } = restrictedPr({ comments: [cmt('boss', `/exception-approve ${HEAD}`)] });
     const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
     expect(eligStatus(github)[0].params).toMatchObject({ sha: HEAD, state: 'success' });
     expect(eligStatus(github)[0].params.description).toMatch(/exception/i);
     expect(gql(github, 'enablePullRequestAutoMerge')).toHaveLength(0);
     expect(rows[0].eligible).toBe(false);
     expect(github.calls.find((c) => c.name === 'repos.getCollaboratorPermissionLevel').params.username).toBe('boss');
+    // No timestamps: the head commit is never fetched.
+    expect(names(github.calls)).not.toContain('git.getCommit');
   });
-  it('exception label added before the latest push ⇒ failure', async () => {
-    const { github, pr } = fakeGithub({
-      files: restrictedFiles, labels: ['risk:restricted', 'restricted:dependencies', 'exception:approved'],
-      events: [ex('boss', '2026-10-01T09:00:00Z')], roles: { boss: { permission: 'admin', role_name: 'admin' } },
-      headCommittedAt: '2026-10-01T10:00:00Z',
-    });
+  it('M1: approval by a write-only user ⇒ failure', async () => {
+    const { github, pr } = restrictedPr({ comments: [cmt('dev', `/exception-approve ${HEAD}`)] });
     await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
     expect(eligStatus(github)[0].params.state).toBe('failure');
   });
-  it('admin exception but Copilot review missing ⇒ failure', async () => {
-    const { github, pr } = fakeGithub({
-      files: restrictedFiles, labels: ['risk:restricted', 'restricted:dependencies', 'exception:approved'], reviews: [],
-      events: [ex('boss', '2026-10-01T11:00:00Z')], roles: { boss: { permission: 'admin', role_name: 'admin' } },
-    });
+  it('M1: approval for an older SHA ⇒ failure (a new head has no approval)', async () => {
+    const { github, pr } = restrictedPr({ comments: [cmt('boss', `/exception-approve ${MOVED}`)] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+  });
+  it('M1: force-push back to an older SHA that has its own approval ⇒ success (approval binds to content)', async () => {
+    const { github, pr } = restrictedPr({ comments: [cmt('boss', `/exception-approve ${HEAD}`, { id: 1 }), cmt('boss', `/exception-approve ${MOVED}`, { id: 2 })] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('success');
+  });
+  it('M1: edited approval comment ⇒ ignored ⇒ failure', async () => {
+    const { github, pr } = restrictedPr({ comments: [cmt('boss', `/exception-approve ${HEAD}`, { edited: true })] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+  });
+  it('M1: /exception-revoke by an admin revokes', async () => {
+    const { github, pr } = restrictedPr({ comments: [cmt('boss', `/exception-approve ${HEAD}`, { id: 1 }), cmt('boss', `/exception-revoke ${HEAD}`, { id: 2 })] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+  });
+  it('M1: malformed SHA ⇒ ignored ⇒ failure', async () => {
+    const { github, pr } = restrictedPr({ comments: [cmt('boss', `/exception-approve ${HEAD.slice(0, 12)}`)] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+  });
+  it('M1: bot-authored approval ⇒ ignored ⇒ failure (permission never even looked up)', async () => {
+    const { github, pr } = restrictedPr({ comments: [cmt('github-actions[bot]', `/exception-approve ${HEAD}`, { bot: true })], roles: { 'github-actions[bot]': { permission: 'admin', role_name: 'admin' } } });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+    expect(names(github.calls)).not.toContain('repos.getCollaboratorPermissionLevel');
+  });
+  it('M1: a legacy exception:approved label grants nothing', async () => {
+    const { github, pr } = restrictedPr({ labels: [...restrictedLabels, 'exception:approved'] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(eligStatus(github)[0].params.state).toBe('failure');
+  });
+  it('M1: admin approval but Copilot review missing ⇒ failure', async () => {
+    const { github, pr } = restrictedPr({ reviews: [], comments: [cmt('boss', `/exception-approve ${HEAD}`)] });
     await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
     expect(eligStatus(github)[0].params.state).toBe('failure');
   });
@@ -670,15 +697,10 @@ describe('C1: eligibility commit status', () => {
   });
 });
 
-describe('C1: classify invalidates exception approval on push', () => {
-  it('synchronize removes exception:approved', async () => {
+describe('M1: label mechanism removed', () => {
+  it('classify on synchronize does not touch an exception:approved label', async () => {
     const { github, pr } = fakeGithub({ labels: ['risk:low', 'exception:approved'] });
     await runClassify({ github, core: fakeCore(), context: prCtx(pr, 'synchronize') });
-    expect(github.calls.filter((c) => c.name === 'issues.removeLabel').map((c) => c.params.name)).toContain('exception:approved');
-  });
-  it('other events leave it in place', async () => {
-    const { github, pr } = fakeGithub({ labels: ['risk:low', 'exception:approved'] });
-    await runClassify({ github, core: fakeCore(), context: prCtx(pr, 'labeled') });
     expect(github.calls.filter((c) => c.name === 'issues.removeLabel').map((c) => c.params.name)).not.toContain('exception:approved');
   });
 });
@@ -720,6 +742,18 @@ describe('runTargets', () => {
     const core = fakeCore();
     expect(await runTargets({ github, core, context: { repo: REPO, payload: {} }, now: new Date('2026-10-03T13:37:00Z') })).toEqual([3, 2, 1]);
     expect(core.warnings).toEqual([]);
+  });
+
+  it('issue_comment on a PR → that PR (approval comments are evaluated immediately)', async () => {
+    const { github } = fakeGithub();
+    const core = fakeCore();
+    expect(await runTargets({ github, core, context: { repo: REPO, payload: { issue: { number: 5, pull_request: { url: 'x' } }, comment: { id: 1 } } } })).toEqual([5]);
+  });
+  it('issue_comment on a plain issue → nothing', async () => {
+    const { github } = fakeGithub();
+    const core = fakeCore();
+    expect(await runTargets({ github, core, context: { repo: REPO, payload: { issue: { number: 9 }, comment: { id: 1 } } } })).toEqual([]);
+    expect(names(github.calls)).not.toContain('pulls.list');
   });
 
   it('L7: sweep lists only open PRs based on main', async () => {

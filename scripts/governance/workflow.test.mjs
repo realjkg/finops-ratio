@@ -44,6 +44,11 @@ describe('governance.yml', () => {
     expect(code).toMatch(/fail-fast: false/);
   });
 
+  it('M1: issue_comment (created) triggers evaluation; classification stays PR-only', () => {
+    expect(code).toMatch(/^\s{2}issue_comment:\s*\n\s+types: \[created\]/m);
+    expect(code).toMatch(/if: github\.event_name == 'pull_request_target'/);
+  });
+
   it('L2/N4: workflow_run listens to CI only (Copilot is picked up by the sweep)', () => {
     expect(code).toMatch(/workflows: \[CI\]/);
     expect(code).not.toMatch(/Running Copilot Code Review/);

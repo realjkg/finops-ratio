@@ -30,19 +30,28 @@ describe('buildReport', () => {
     expect(md).toContain('abc1234');
   });
 
-  it('C1: restricted report explains the exception queue', () => {
-    const md = buildReport(restricted, {});
-    expect(md).toContain('exception:approved');
+  it('M1: restricted report explains the SHA-bound exception queue', () => {
+    const sha = 'f'.repeat(40);
+    const md = buildReport(restricted, { headSha: sha });
+    expect(md).toContain(`/exception-approve ${sha}`);
+    expect(md).toContain('/exception-revoke');
     expect(md).toMatch(/admin or maintain/i);
-    expect(md).toMatch(/any push removes/i);
-    expect(md).toMatch(/approver merges/i);
+    expect(md).toMatch(/new head needs a new approval/i);
+    expect(md).toMatch(/link.*challenger review evidence/i);
     expect(md).toMatch(/never enables auto-merge for restricted/i);
+    expect(md).not.toContain('exception:approved');
+  });
+  it('M1: without a head SHA the command shows a placeholder', () => {
+    expect(buildReport(restricted, {})).toContain('/exception-approve <head-sha>');
   });
 
-  it('retention/deployment add the owner-only escalation note', () => {
-    expect(buildReport(restricted, {})).toMatch(/owner/i);
-    const migOnly = { ...restricted, classes: ['migrations'], reasons: [restricted.reasons[0]] };
-    expect(buildReport(migOnly, {})).not.toMatch(/NOT delegable/);
+  it('M2: no owner-only class distinction; the human gate is the production environment', () => {
+    for (const r of [restricted, { ...restricted, classes: ['migrations'], reasons: [restricted.reasons[0]] }]) {
+      const md = buildReport(r, {});
+      expect(md).not.toMatch(/NOT delegable/i);
+      expect(md).not.toMatch(/Owner checkpoint/i);
+      expect(md).toMatch(/production environment/i);
+    }
   });
 
   it('records when branch protection on main could not be confirmed, without blocking', () => {
