@@ -1015,3 +1015,71 @@ describe('round 13 H2: explicit ACL entries in system schemas for ratio roles an
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 14 (Copilot on c016ffb): PUBLIC grants in system schemas
+// ---------------------------------------------------------------------------
+
+const systemBaseline = () => import('./systemBaseline');
+
+describe('round 14 High: PUBLIC privileges in system schemas beyond the PostgreSQL 16 baseline are refused (rolled back)', () => {
+  async function inTxn(fn: (c: Client) => Promise<void>): Promise<void> {
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    await c.query('BEGIN');
+    try {
+      await fn(c);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  }
+
+  it('drift: a fresh migrated database has exactly the stored PUBLIC system-schema baseline (pg_catalog, information_schema, pg_toast)', async () => {
+    const { SYSTEM_PUBLIC_BASELINE, systemPublicSnapshot } = await systemBaseline();
+    await inTxn(async (c) => {
+      expect(SYSTEM_PUBLIC_BASELINE.pgMajor).toBe(16);
+      expect(await systemPublicSnapshot(c)).toEqual([...SYSTEM_PUBLIC_BASELINE.entries].sort());
+      expect(SYSTEM_PUBLIC_BASELINE.entries.some((e) => e.includes(' on information_schema.'))).toBe(true);
+      expect(SYSTEM_PUBLIC_BASELINE.entries.some((e) => e.includes(' on pg_catalog.'))).toBe(true);
+    });
+  });
+
+  it('positive control: a clean migrated database has no PUBLIC system-schema finding', async () => {
+    const { privilegeModelViolations } = await model();
+    await inTxn(async (c) => {
+      expect((await privilegeModelViolations(c)).filter((p) => p.startsWith('PUBLIC holds') && /pg_catalog|information_schema|pg_toast/.test(p))).toEqual([]);
+    });
+  });
+
+  for (const [title, grant, re] of [
+    [
+      'a dynamically built GRANT SELECT ON pg_catalog.pg_authid TO PUBLIC',
+      "DO $$ BEGIN EXECUTE 'GRANT SELECT ON pg_catalog.pg_authid TO ' || 'PUBLIC'; END $$",
+      /PUBLIC holds SELECT on pg_catalog\.pg_authid \(not in the PostgreSQL 16 system baseline\)/,
+    ],
+    ['a column grant to PUBLIC', 'GRANT SELECT (rolpassword) ON pg_catalog.pg_authid TO PUBLIC', /PUBLIC holds SELECT\(rolpassword\) on pg_catalog\.pg_authid/],
+    ['EXECUTE on pg_read_file to PUBLIC', 'GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO PUBLIC', /PUBLIC holds EXECUTE on pg_catalog\.pg_read_file\(text\)/],
+    ['USAGE on pg_toast to PUBLIC', 'GRANT USAGE ON SCHEMA pg_toast TO PUBLIC', /PUBLIC holds USAGE on schema pg_toast/],
+    ['pg_toast is a system schema for the ratio-role rule too', 'GRANT USAGE ON SCHEMA pg_toast TO ratio_reader', /ratio_reader holds explicit USAGE on schema pg_toast/],
+  ] as const) {
+    it(title, async () => {
+      const { assertReviewedPrivileges } = await model();
+      await inTxn(async (c) => {
+        await c.query(grant);
+        await expect(assertReviewedPrivileges(c)).rejects.toThrow(re);
+      });
+    });
+  }
+
+  it('fails closed with a clear message when the baseline was generated for another PostgreSQL major version', async () => {
+    const { privilegeModelViolations } = await model();
+    const { SYSTEM_PUBLIC_BASELINE } = await systemBaseline();
+    await inTxn(async (c) => {
+      const problems = await (privilegeModelViolations as (c: Client, o?: unknown) => Promise<string[]>)(c, {
+        systemBaseline: { pgMajor: 15, entries: SYSTEM_PUBLIC_BASELINE.entries },
+      });
+      expect(problems.join('\n')).toMatch(/system baseline was generated for PostgreSQL 15 but the server is PostgreSQL 16: regenerate it/);
+    });
+  });
+});
