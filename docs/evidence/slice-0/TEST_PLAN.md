@@ -205,3 +205,13 @@ Docs-only Lows (schema table, stale gap, rollback wording) have no tests; see DE
 | High C | `privileges.db.test.ts` | `ALTER ROLE ratio_owner LOGIN is reported by the check (and therefore by migrate --status)` (and the worker / reader variants; all in rolled-back transactions) |
 | Medium | `cli.test.ts` | `a non-string value whose text equals the secret is redacted AND the line stays valid JSON (round 7 Medium)` (replaces the round-6 numeric backstop test, whose expectation of invalid JSON was the defect), `backstop: a secret that spans JSON structure is removed and the output is replaced by a fixed valid JSON line` |
 | Low 1 | `cli.test.ts` | `a malformed connection URL (bad percent-encoding) exits 1 with a redacted JSON line, never a throw` (guard, green on arrival), `uncaughtException / unhandledRejection handlers print one redacted JSON line and exit 1`; added after the fix to kill the Client-outside-try mutation (bb169f6, see EVIDENCE R7): `a URL the pg Client constructor itself rejects (invalid port, unreadable sslcert) exits 1 with a redacted JSON line` |
+
+## Round 8 — challenger Lows (tests committed red in 0804514, before the fix)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| L1 setting defaults | `privileges.db.test.ts` | `a migration that sets session_replication_role for the database is refused; nothing committed`, `a migration that sets anything on ratio_worker IN DATABASE is refused; nothing committed`, `ALTER ROLE ratio_worker SET … (all databases, cluster-global) is refused — probed in a rolled-back transaction`, `ALTER ROLE ALL SET session_replication_role and a LOGIN member of ratio_reader with search_path are refused (rolled back)`, `a benign per-database default (statement_timeout) is not flagged`; added after the fix to kill mutations: `a security-relevant default for ANY role in this database (not only ratio roles) is refused (rolled back)` (6a1163f), `a setting row scoped to ANOTHER database does not count here (shared catalog; no cross-database interference)` (933e07f) |
+| L1 status | `cli.db.test.ts` | `round 8 L1: --status exits 3 when the database or ratio_worker (IN DATABASE) carries a security-relevant setting default`, `round 8 L1: a benign ALTER DATABASE … SET statement_timeout keeps --status at exit 0` |
+| L2 S11 | `cli.test.ts` | `round 8 L2 (S11): a reason whose toJSON throws (carrying the DSN) still yields one fixed JSON line and exit 1, never a throw` (green on arrival; kills the mutation) |
+| L2 S5 | `privileges.db.test.ts` | `a caller client with a hostile session search_path does not affect the first pending migration` (green on arrival; kills the mutation) |
+| L3 | `cli.test.ts` | `round 8 L3: Buffers and typed arrays are printed as "[binary]", never as their bytes` |

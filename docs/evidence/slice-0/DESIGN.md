@@ -197,6 +197,7 @@ does not bundle `pg`. `tsc --noEmit` (root tsconfig) type-checks `src/ingest`.
 | Edited migration silently diverges | sha256 checksum ledger | tamper test |
 | Migration leaking connection string | CLI redacts every string BEFORE JSON serialization (raw, URL-decoded, URL-encoded and JSON-escaped forms of the URL, user and password), then a backstop pass over the serialized line (round 6) | `cli.test.ts`, `cli.db.test.ts` (real pg error carrying the password); mutations H1–H5 |
 | A migration widens a role's privileges, adds a SECURITY DEFINER function, or installs a hook that runs after the check (rounds 4–5) | runner catalog check as the last statement before COMMIT (privilegeModel.ts): reviewed privilege allow-list for reader/worker, SECURITY DEFINER allow-list, no PUBLIC EXECUTE in ratio/public, reviewed triggers only, no rules/event triggers, no ledger policies, pinned role identity | `privileges.db.test.ts`; mutation tables R4/R5 |
+| A migration plants per-database / per-role setting defaults (`ALTER DATABASE … SET session_replication_role = replica`, `ALTER ROLE ratio_worker [IN DATABASE …] SET …`) that every new session inherits (round 8) | catalog check reads `pg_db_role_setting` rows that apply to this database: any setting on a ratio role, and security-relevant keys for any role here / all roles / ratio members, are refused; `--status` reports them | `privileges.db.test.ts`, `cli.db.test.ts` round 8; mutations S1–S7 |
 | SQL injection via tenant id | bound parameter + uuid validation | unit test |
 | **Credential holder selects another tenant** (round 2, M5) | NONE at the DB layer: the tenant is a user-settable GUC; any holder of a worker/reader credential can `set_config('ratio.tenant_id', <any uuid>, true)`. RLS/tenant isolation defends against application bugs (missing/wrong tenant), NOT against credential holders. The alternative — per-tenant DB roles/credentials — is an owner decision | characterization test `documented trust boundary…` |
 | Published data rewritten after publication (round 2, H2) | staged-only child trigger (RT001), TRUNCATE refused, batch lifecycle trigger (RT002), deferred pointer consistency (RT003), reconciliation CHECKs | `immutability.db.test.ts`; mutations M8–M11, M16–M18, M21 |
@@ -584,3 +585,30 @@ recreated (that is the intended behaviour of the checksum ledger).
   constructor throws on e.g. an invalid port or unreadable `sslcert`), and
   `installProcessHandlers()` prints one redacted JSON line on
   `uncaughtException` / `unhandledRejection` and exits 1.
+
+## 17. Round 8 — challenger approval of 7c5b6e2, Lows folded in
+
+- **L1 — setting defaults (`pg_db_role_setting`).** `ALTER DATABASE … SET` and
+  `ALTER ROLE … [IN DATABASE …] SET` apply to every NEW session, so a contract
+  migration could make every later worker session run with
+  `session_replication_role = replica` (no RT001–RT003, no FK checks). The
+  catalog check (every migration, and `--status`) now refuses, among rows that
+  apply to THIS database (`setdatabase` = this database or 0 = all):
+  - any setting on a ratio role itself (they are NOLOGIN and configured only by
+    migrations);
+  - a security-relevant key — `session_replication_role`, `row_security`,
+    `search_path`, `default_transaction_read_only`,
+    `default_transaction_isolation`, `role`, `session_authorization` — for any
+    role in this database (`ALTER DATABASE`, `ALTER ROLE x IN DATABASE this`),
+    for all roles (`ALTER ROLE ALL`), or for a member of a ratio role.
+  Decision: targeted rather than "refuse every row", so a deployment's benign
+  per-database defaults (e.g. `statement_timeout`) stay allowed. Rows scoped to
+  another database are not counted: they cannot affect sessions here, and
+  counting them made one database's drift fail every other database's
+  migrations in a shared cluster (observed in testing; see EVIDENCE R8).
+- **L2.** Tests now pin two previously untested pieces: the try/catch around
+  building the process-handler line (a `toJSON` that throws with the DSN
+  yields the fixed line and exit 1) and the session reset before the lock (a
+  caller client with a hostile session `search_path` / `row_security`).
+- **L3.** `redactDeep` prints Buffers, typed arrays and ArrayBuffers as
+  `"[binary]"`.

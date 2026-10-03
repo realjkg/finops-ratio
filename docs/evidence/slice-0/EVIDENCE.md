@@ -755,3 +755,69 @@ L1c process handlers print the raw reason               KILLED
 | `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
 | skip/only/todo/it.fails grep | 0 |
 | Slice 1 compat: scratch worktree `slice/01-focus-ingestion-worker` 1f41db1 + bb169f6 (removed) | one conflict in `cli.ts` (the main-module block: Slice 1 installs its own `installProcessGuards`); resolved by keeping Slice 1's block. tsc 0, eslint 0, fast 1204/1204, test:db 279/279 ×2 |
+
+---
+
+# Round 8 — challenger approval of 7c5b6e2 (0 High / 0 Medium), Lows L1–L3 folded in
+
+Base: 7c5b6e2. Local commits only (not pushed). 0001 unchanged. Raw logs:
+`scratchpad/r9/`.
+
+## R8.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 0804514 | test(ingest): failing tests for round 8 (pg_db_role_setting defaults, process-handler toJSON, reset before lock, binary values) | tests (red) |
+| 45f852a | fix(ingest): catalog check covers pg_db_role_setting defaults; Buffers print as [binary] (round 8 L1, L3) | fix |
+| 6a1163f | test(ingest): a security-relevant default for a non-ratio role in this database is refused (kills the 'here' mutation) | test |
+| 9f45398 | fix(ingest): setting check counts only pg_db_role_setting rows that apply to this database | fix |
+| 933e07f | test(ingest): a pg_db_role_setting row scoped to another database is not counted (kills the scope mutation) | test |
+| (this) | docs(evidence): Slice 0 round 8 | docs |
+
+## R8.2 Red (at 0804514)
+
+- `cli.test.ts`: 1 failed / 18 passed (the `[binary]` test). The S11 test passed
+  on arrival, as intended: it exists to kill the "no try/catch" mutation.
+- `privileges.db.test.ts` + `cli.db.test.ts`: 5 failed / 54 passed. Both
+  migrations that planted defaults APPLIED. `--status` exited 0. The
+  rolled-back `ALTER ROLE ratio_worker SET` and `ALTER ROLE ALL SET` cases were
+  not reported. S5 passed on arrival, as intended.
+- `pg_db_role_setting` was identical (empty) before and after the red run, and
+  after every later run and mutation run.
+
+**Defect found after the first fix (45f852a), fixed in 9f45398.** The first
+version counted setting rows for a ratio role in ANY database. The cli `--status`
+test commits `ALTER ROLE ratio_worker IN DATABASE <its own disposable db> SET …`.
+That shared-catalog row then failed concurrently running migrations in OTHER
+test databases: an intermittent failure of an unrelated `view variant` test (1
+in 4 runs). Rows are now counted only when they apply to this database (this
+database's OID, or 0 = all databases). Afterwards, 6 consecutive runs of the
+privileges and cli DB files were green, and test:db passed ×3.
+
+## R8.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+S1  settingViolations not called                         KILLED  6 tests
+S2  any-setting-on-ratio-role rule removed               KILLED  ratio_worker IN DATABASE statement_timeout
+S3  "any role in this database" rule removed             KILLED  (by 6a1163f)
+S4  "ALTER ROLE ALL" rule removed                        KILLED
+S5  ratio-member rule removed                            KILLED
+S6  key filter removed (every setting refused)           KILLED  benign statement_timeout (check + --status)
+S7  database-scope filter removed                        KILLED  (by 933e07f)
+S11 no try/catch around the process-handler line         KILLED
+S5b no session reset before the lock                     KILLED
+L3  binary values not special-cased                      KILLED
+```
+
+## R8.4 Verification (main checkout at 933e07f + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1095/1095 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 164/164 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state after all runs | `pg_db_role_setting` rows: 0; `ratio_owner/worker/reader` rolcanlogin = false; no `ratio_probe*` roles |
+| Slice 1 compat: scratch worktree `slice/01` 1f41db1 + 933e07f (removed) | same single `cli.ts` main-block conflict as round 7, resolved by keeping Slice 1's block. tsc 0, eslint 0, fast 1206/1206, test:db 289/289 ×2 |
