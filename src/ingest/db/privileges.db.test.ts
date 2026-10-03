@@ -16,7 +16,7 @@ import { Client } from 'pg';
 import { createTestDatabase, type TestDatabase } from './testing/harness';
 import { seedTwoTenants } from './testing/fixtures';
 import { DEFAULT_MIGRATIONS_DIR, loadMigrations } from './migrationFiles';
-import { migrateDown, migrateUp } from './migrate';
+import { migrateDown, migrateUp, migrationStatus } from './migrate';
 
 // Loaded lazily so each test reports its own failure while the module is missing.
 const model = () => import('./privilegeModel');
@@ -498,5 +498,66 @@ describe('round 5 L3/L4: sequence, database, parameter, FDW/server and large-obj
       /ratio_worker holds large_object:424242:SELECT/,
       { contract: true },
     );
+  });
+});
+
+describe('round 5: tests added for mutations that survived the first table', () => {
+  it('a reviewed trigger whose function is no longer owned by ratio_owner is refused', async () => {
+    await expectRunnerRefuses('ALTER FUNCTION ratio.tg_refuse_truncate() OWNER TO postgres;\n', /trigger ratio\.cost_facts:refuse_truncate:ratio\.tg_refuse_truncate\(\) \(function owner postgres\)/, {
+      contract: true,
+    });
+  });
+
+  it('status (no runner SET LOCAL) still detects drift under a hostile session search_path with public operators', async () => {
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    await db.pool.query(
+      "CREATE FUNCTION public.always_false(name, name) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select false';" +
+        "CREATE FUNCTION public.char_false(\"char\", \"char\") RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select false';" +
+        'CREATE OPERATOR public.= (LEFTARG = name, RIGHTARG = name, FUNCTION = public.always_false);' +
+        'CREATE OPERATOR public.<> (LEFTARG = "char", RIGHTARG = "char", FUNCTION = public.char_false);' +
+        'GRANT TRUNCATE ON ratio.cost_facts TO ratio_worker;',
+    );
+    const c = await connect(db);
+    await c.query('SET search_path = public, pg_catalog');
+    const st = await migrationStatus(c);
+    expect(st.problems).toContain('PRIVILEGE_MODEL_VIOLATION');
+    expect(st.privilegeProblems).toEqual(expect.arrayContaining(['ratio_worker holds relation:ratio.cost_facts:TRUNCATE beyond the reviewed set']));
+  });
+
+  it('assertReviewedPrivileges pins its own search_path (a caller-side hostile search_path cannot blind it)', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    await c.query('BEGIN');
+    try {
+      await c.query("CREATE FUNCTION public.always_false(name, name) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select false'");
+      await c.query('CREATE FUNCTION public.char_false("char", "char") RETURNS boolean LANGUAGE sql IMMUTABLE AS \'select false\'');
+      await c.query('REVOKE EXECUTE ON FUNCTION public.always_false(name, name), public.char_false("char", "char") FROM PUBLIC');
+      await c.query('CREATE OPERATOR public.= (LEFTARG = name, RIGHTARG = name, FUNCTION = public.always_false)');
+      await c.query('CREATE OPERATOR public.<> (LEFTARG = "char", RIGHTARG = "char", FUNCTION = public.char_false)');
+      await c.query('GRANT TRUNCATE ON ratio.cost_facts TO ratio_worker');
+      await c.query('SET LOCAL search_path = public, pg_catalog');
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(/ratio_worker holds relation:ratio\.cost_facts:TRUNCATE/);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+
+  it('a ratio role made a member of a role that grants nothing is still refused', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    const grp = `ratio_probe_parent_${Math.random().toString(16).slice(2, 10)}`;
+    await c.query('BEGIN');
+    try {
+      await c.query(`CREATE ROLE ${grp} NOLOGIN`);
+      await c.query(`GRANT ${grp} TO ratio_reader`);
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(new RegExp(`role ratio_reader must not be a member of ${grp}`));
+    } finally {
+      await c.query('ROLLBACK');
+    }
   });
 });
