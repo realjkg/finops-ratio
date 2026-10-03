@@ -296,16 +296,19 @@ export const SECURITY_RELEVANT_SETTINGS: readonly string[] = [
  * ROLE … [IN DATABASE …] SET`, stored in pg_db_role_setting) apply to every
  * NEW session, so a migration could plant e.g. session_replication_role =
  * replica for the worker and every later worker session would skip the
- * RT001–RT003 triggers and FK checks (round 8, L1). Targeted, not blanket
- * (deployments may legitimately set e.g. statement_timeout per database):
- *   - ANY setting on a ratio role itself (any database) is refused: the ratio
- *     roles are NOLOGIN and are configured by migrations only;
- *   - a SECURITY_RELEVANT_SETTINGS key is refused when it applies to this
- *     database (ALTER DATABASE, or any role IN this database), to all roles
- *     (ALTER ROLE ALL, here or everywhere), or to a member of a ratio role
- *     (any database).
- * pg_db_role_setting is a shared catalog: rows for other databases count only
- * through the role rules above.
+ * RT001–RT003 triggers and FK checks (round 8, L1).
+ * Only rows that apply to sessions in THIS database count (setdatabase =
+ * this database, or 0 = all databases): a row scoped to another database
+ * cannot affect sessions here and is that database's own check's business
+ * (pg_db_role_setting is a shared catalog; counting other databases' rows
+ * would also let one database's drift block every other database's
+ * migrations in a shared cluster). Targeted, not blanket (deployments may
+ * legitimately set e.g. statement_timeout per database):
+ *   - ANY setting on a ratio role itself is refused: the ratio roles are
+ *     NOLOGIN and are configured by migrations only;
+ *   - a SECURITY_RELEVANT_SETTINGS key is refused for any role in this
+ *     database (ALTER DATABASE, ALTER ROLE x IN DATABASE this), for all roles
+ *     (ALTER ROLE ALL), and for a member of a ratio role.
  */
 async function settingViolations(client: ClientBase): Promise<string[]> {
   const rows = await client.query<{
@@ -321,13 +324,14 @@ async function settingViolations(client: ClientBase): Promise<string[]> {
           cur AS (SELECT oid FROM pg_catalog.pg_database WHERE datname = pg_catalog.current_database())
      SELECT cfg, r.rolname, d.datname,
             (s.setdatabase = (SELECT oid FROM cur)) AS here,
-            (s.setdatabase = 0 OR s.setdatabase = (SELECT oid FROM cur)) AND s.setrole = 0 AS all_roles_here,
+            s.setrole = 0 AS all_roles_here,
             EXISTS (SELECT 1 FROM ratio x WHERE x.oid = s.setrole) AS ratio_role,
             (s.setrole <> 0 AND EXISTS (SELECT 1 FROM ratio x WHERE pg_catalog.pg_has_role(s.setrole, x.oid, 'MEMBER'))) AS ratio_member
        FROM pg_catalog.pg_db_role_setting s
        LEFT JOIN pg_catalog.pg_roles r ON r.oid = s.setrole
        LEFT JOIN pg_catalog.pg_database d ON d.oid = s.setdatabase
        CROSS JOIN LATERAL pg_catalog.unnest(s.setconfig) AS cfg
+      WHERE s.setdatabase = 0 OR s.setdatabase = (SELECT oid FROM cur)
       ORDER BY 1, 2, 3`,
     [RATIO_ROLES],
   );
