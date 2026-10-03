@@ -42,6 +42,8 @@ describe('fact chunks are bounded by bytes as well as rows', () => {
     expect(chunks.reduce((a, b) => a + b, 0)).toBe(20);
     expect(chunks.length).toBeGreaterThanOrEqual(7); // split by bytes: 20 rows, at most 3 per chunk
     for (const n of chunks) expect(n).toBeLessThanOrEqual(3); // pending bytes never exceed the budget by more than one record
+    // ...and every chunk starts from an empty budget (3 x ~100 KB reaches 250 KB; 2 do not): no degenerate 1-row chunks.
+    expect(chunks).toEqual([3, 3, 3, 3, 3, 3, 2]);
     expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({ [P]: { rows: 20, total: '20.00' } });
   });
 
