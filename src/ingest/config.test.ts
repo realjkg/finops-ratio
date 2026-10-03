@@ -16,6 +16,9 @@ describe('loadWorkerConfig', () => {
     expect(c.allowFakeSource).toBe(false);
     expect(c.artifactDigest).toBeNull();
     expect(c.sourceS3.region).toBe('us-east-1');
+    expect(c.doctorFirstPublishGraceHours).toBe(48); // challenger L2: covers AWS's up-to-24 h first export
+    expect(loadWorkerConfig({ ...base, RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS: '0' }).doctorFirstPublishGraceHours).toBe(0);
+    expect(loadWorkerConfig({ ...base, RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS: '72' }).doctorFirstPublishGraceHours).toBe(72);
   });
 
   it('refuses out-of-range or non-integer numbers', () => {
@@ -29,6 +32,8 @@ describe('loadWorkerConfig', () => {
       ['RATIO_MAX_ROWS_PER_BATCH', '-1'],
       ['RATIO_MAX_ARTIFACT_BYTES', 'lots'],
       ['RATIO_DOCTOR_MAX_STALENESS_HOURS', '0'],
+      ['RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS', '-1'],
+      ['RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS', '1.5'],
     ]) {
       expect(() => loadWorkerConfig({ ...base, [k]: v }), `${k}=${v}`).toThrow(expect.objectContaining({ code: 'CONFIG_INVALID' }));
     }

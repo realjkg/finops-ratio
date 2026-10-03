@@ -14,6 +14,7 @@ import { FakeFocusSource } from '../sources/fake/FakeFocusSource';
 import { MemoryEvidenceStore } from '../evidence/MemoryEvidenceStore';
 import type { ArtifactRef, PeriodListing, PeriodRange } from '../sources/types';
 import { runSync, type RunSyncOptions } from './pipeline';
+import { runDoctor } from './doctor';
 import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup';
 import { batchesOf, expireLeases, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
 import { csvGz, rowsOf } from '../testing/focusCsv';
@@ -153,3 +154,140 @@ describe('L1: work committed before the lease was lost is visible on the abandon
     expect((await runsOf(t.db.pool, s.tenantId, s.sourceId))[0]).toMatchObject({ status: 'abandoned', error_code: 'LEASE_EXPIRED' });
   });
 });
+
+// Second challenger round on cb559df (APPROVED): Lows L1-L3.
+describe('round 2 L1: replay --period re-downloads despite a rejection memo', () => {
+  class UnderReportingCounted extends FakeFocusSource {
+    bytesRead = 0;
+    async listPeriods(range?: PeriodRange): Promise<PeriodListing[]> {
+      return (await super.listPeriods(range)).map((l) => (l.ok ? { ...l, set: { ...l.set, artifacts: l.set.artifacts.map((a) => ({ ...a, byteSize: 1 })) } } : l));
+    }
+    async openArtifact(ref: ArtifactRef): Promise<Readable> {
+      const inner = await super.openArtifact(ref);
+      const count = new Transform({
+        transform: (chunk: Buffer, _enc, cb) => {
+          this.bytesRead += chunk.length;
+          cb(null, chunk);
+        },
+      });
+      return inner.pipe(count);
+    }
+  }
+
+  it("the operator's re-ingest really downloads again (and fails the same way); a later sync is fast again", async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const A = csvGz(rowsOf(P, 40, '1.00', 'a'));
+    const B = csvGz(rowsOf(P, 40, '1.00', 'b'));
+    const settings = { limits: { maxBatchBytes: Math.floor((A.length + B.length) * 0.75) } } as RunSyncOptions['settings'];
+    const source = new UnderReportingCounted([{ billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: A }, { name: 'r/b.csv.gz', bytes: B }] }]);
+    expect((await sync(s, source, { settings })).periods[0]).toMatchObject({ outcome: 'failed', code: 'ARTIFACT_SET_TOO_LARGE' });
+
+    source.bytesRead = 0;
+    const replay = await sync(s, source, { settings, mode: 'replay_period', range: { from: P, to: P } });
+    expect(source.bytesRead).toBeGreaterThan(0);
+    expect(replay.periods[0]).toMatchObject({ outcome: 'failed', code: 'ARTIFACT_SET_TOO_LARGE' });
+
+    source.bytesRead = 0;
+    expect((await sync(s, source, { settings })).periods[0]).toMatchObject({ outcome: 'failed', code: 'ARTIFACT_SET_TOO_LARGE' });
+    expect(source.bytesRead).toBe(0);
+  });
+});
+
+describe('round 2 L2: NEVER_PUBLISHED has a first-publication grace window', () => {
+  const doctor = (s: SeededSource, firstPublishGraceHours?: number) =>
+    runDoctor({ workerUrl: t.login.url, migrateUrl: t.db.url, tenantIds: [s.tenantId], maxStalenessHours: 48, ...(firstPublishGraceHours === undefined ? {} : { firstPublishGraceHours }) });
+  const check = (r: Awaited<ReturnType<typeof doctor>>, s: SeededSource) => r.checks.find((c) => c.name === `source:${s.tenantId}/${s.sourceKey}`)!;
+  const ageSource = (s: SeededSource, hours: number) => t.db.pool.query(`UPDATE ratio.sources SET created_at = now() - make_interval(hours => $2) WHERE id = $1`, [s.sourceId, hours]);
+
+  it('inside the default 48 h window: not reported (the source passes); data says it is in the grace window', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    expect((await sync(s, new FakeFocusSource([]))).status).toBe('succeeded');
+    await ageSource(s, 47);
+    const r = await doctor(s);
+    expect(check(r, s)).toMatchObject({ status: 'pass', data: expect.objectContaining({ publishedPeriods: 0, firstPublicationGrace: true }) });
+    expect(r.pass).toBe(true);
+  });
+
+  it('outside the default window: NEVER_PUBLISHED fails', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    expect((await sync(s, new FakeFocusSource([]))).status).toBe('succeeded');
+    await ageSource(s, 49);
+    const c = check(await doctor(s), s);
+    expect(c).toMatchObject({ status: 'fail', data: expect.objectContaining({ firstPublicationGrace: false }) });
+    expect(c.detail).toMatch(/NEVER_PUBLISHED/);
+  });
+
+  it('the window is configurable: 1 h with a 2 h old source fails; 0 disables the grace', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    expect((await sync(s, new FakeFocusSource([]))).status).toBe('succeeded');
+    await ageSource(s, 2);
+    expect(check(await doctor(s, 1), s).detail).toMatch(/NEVER_PUBLISHED/);
+    expect(check(await doctor(s, 3), s)).toMatchObject({ status: 'pass' });
+    const fresh = await seedTenantSource(t.db.pool);
+    expect((await sync(fresh, new FakeFocusSource([]))).status).toBe('succeeded');
+    expect(check(await doctor(fresh, 0), fresh).detail).toMatch(/NEVER_PUBLISHED/);
+  });
+});
+
+describe('round 2 L3: an abandoned run that only recorded a rejection memo', () => {
+  it('memo for P, lease lost before P2 publishes: LEASE_EXPIRED, detail "checkpoint written (rejection memo only)"; no data committed', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const A = csvGz(rowsOf(P, 40, '1.00', 'a'));
+    const B = csvGz(rowsOf(P, 40, '1.00', 'b'));
+    class UnderReportingP extends FakeFocusSource {
+      async listPeriods(range?: PeriodRange): Promise<PeriodListing[]> {
+        return (await super.listPeriods(range)).map((l) =>
+          l.ok && l.set.billingPeriod === P ? { ...l, set: { ...l.set, artifacts: l.set.artifacts.map((a) => ({ ...a, byteSize: 1 })) } } : l,
+        );
+      }
+    }
+    const source = new UnderReportingP([
+      { billingPeriod: P, artifacts: [{ name: 'r/a.csv.gz', bytes: A }, { name: 'r/b.csv.gz', bytes: B }] },
+      { billingPeriod: P2, artifacts: [{ name: 'r/c.csv.gz', bytes: csvGz(rowsOf(P2, 2, '1.00')) }] },
+    ]);
+    const settings = { limits: { maxBatchBytes: Math.floor((A.length + B.length) * 0.75) } } as RunSyncOptions['settings'];
+    const hooks = {
+      beforePublish: async ({ billingPeriod }: { billingPeriod: string }) => {
+        if (billingPeriod === P2) await expireLeases(t.db.pool, s.tenantId, s.sourceId);
+      },
+    };
+    await expect(sync(s, source, { settings, hooks })).rejects.toMatchObject({ code: 'LEASE_LOST' });
+    const [lost] = await runsOf(t.db.pool, s.tenantId, s.sourceId);
+    await sync(s, new FakeFocusSource([]));
+    const runs = await runsOf(t.db.pool, s.tenantId, s.sourceId);
+    expect(runs[0]).toMatchObject({ id: lost.id, status: 'abandoned', error_code: 'LEASE_EXPIRED' });
+    expect(runs[0].error_detail).toMatch(/checkpoint written \(rejection memo only\)/);
+    expect(runs[0].error_detail).not.toMatch(/committed work/);
+  });
+
+  it('a memo AND a publication in the same run: still LEASE_EXPIRED_AFTER_COMMIT', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const A = csvGz(rowsOf(P2, 40, '1.00', 'a'));
+    const B = csvGz(rowsOf(P2, 40, '1.00', 'b'));
+    class UnderReportingP2 extends FakeFocusSource {
+      async listPeriods(range?: PeriodRange): Promise<PeriodListing[]> {
+        return (await super.listPeriods(range)).map((l) =>
+          l.ok && l.set.billingPeriod === P2 ? { ...l, set: { ...l.set, artifacts: l.set.artifacts.map((a) => ({ ...a, byteSize: 1 })) } } : l,
+        );
+      }
+    }
+    const P3 = '2026-09-01';
+    const source = new UnderReportingP2([
+      { billingPeriod: P, artifacts: [{ name: 'r/x.csv.gz', bytes: csvGz(rowsOf(P, 2, '1.00')) }] },
+      { billingPeriod: P2, artifacts: [{ name: 'r/a.csv.gz', bytes: A }, { name: 'r/b.csv.gz', bytes: B }] },
+      { billingPeriod: P3, artifacts: [{ name: 'r/c.csv.gz', bytes: csvGz(rowsOf(P3, 2, '1.00')) }] },
+    ]);
+    const settings = { limits: { maxBatchBytes: Math.floor((A.length + B.length) * 0.75) } } as RunSyncOptions['settings'];
+    const hooks = {
+      beforePublish: async ({ billingPeriod }: { billingPeriod: string }) => {
+        if (billingPeriod === P3) await expireLeases(t.db.pool, s.tenantId, s.sourceId);
+      },
+    };
+    await expect(sync(s, source, { settings, hooks })).rejects.toMatchObject({ code: 'LEASE_LOST' });
+    await sync(s, new FakeFocusSource([]));
+    const [lost] = await runsOf(t.db.pool, s.tenantId, s.sourceId);
+    expect(lost).toMatchObject({ status: 'abandoned', error_code: 'LEASE_EXPIRED_AFTER_COMMIT' });
+    expect(lost.error_detail).toMatch(/1 publication/);
+  });
+});
+

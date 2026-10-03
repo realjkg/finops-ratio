@@ -180,6 +180,8 @@ describe('M4: doctor fails a source that has never published a period', () => {
   it('a successful run that published nothing: NEVER_PUBLISHED; after a publication the source passes', async () => {
     const s = await seedTenantSource(t.db.pool);
     expect((await sync(s, new FakeFocusSource([]))).status).toBe('succeeded');
+    // Past the first-publication grace window (challenger L2; default 48 h).
+    await t.db.pool.query(`UPDATE ratio.sources SET created_at = now() - interval '49 hours' WHERE id = $1`, [s.sourceId]);
     const name = `source:${s.tenantId}/${s.sourceKey}`;
     const before = await runDoctor({ workerUrl: t.login.url, migrateUrl: t.db.url, tenantIds: [s.tenantId], maxStalenessHours: 48 });
     expect(before.pass).toBe(false);
