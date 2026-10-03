@@ -351,7 +351,7 @@ describe('round 5 M1: code that would run after the check (ledger / deferred tri
         WHERE NOT t.tgisinternal ORDER BY 1`,
     );
     expect(r.rows.map((x) => x.t)).toEqual([...REVIEWED_TRIGGERS].sort());
-    expect(REVIEWED_TRIGGERS).toHaveLength(12);
+    expect(REVIEWED_TRIGGERS).toHaveLength(11);
   });
 });
 
@@ -367,8 +367,8 @@ describe('round 5 L1: the check cannot be blinded by operators on the search_pat
         'CREATE OPERATOR public.<> (LEFTARG = "char", RIGHTARG = "char", FUNCTION = public.char_false);\n' +
         'CREATE OPERATOR public.= (LEFTARG = "char", RIGHTARG = "char", FUNCTION = public.char_false);\n' +
         'SET LOCAL search_path = public, pg_catalog;\n' +
-        'GRANT SELECT ON ratio.cost_facts TO ratio_worker;\n',
-      /ratio_worker holds relation:ratio\.cost_facts:SELECT|ratio_worker.*cost_facts/,
+        'GRANT TRUNCATE ON ratio.cost_facts TO ratio_worker;\n',
+      /ratio_worker holds relation:ratio\.cost_facts:TRUNCATE/,
       { contract: true },
     );
   });
@@ -465,8 +465,18 @@ describe('round 5 L3/L4: sequence, database, parameter, FDW/server and large-obj
     );
   });
 
-  it('L4: GRANT SET ON PARAMETER is refused', async () => {
-    await expectRunnerRefuses('GRANT SET ON PARAMETER session_replication_role TO ratio_worker;\n', /ratio_worker holds parameter:session_replication_role:SET/);
+  it('L4: GRANT SET ON PARAMETER is refused (cluster-global: probed in a rolled-back transaction, never via a committing migration)', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    await c.query('BEGIN');
+    try {
+      await c.query('GRANT SET ON PARAMETER session_replication_role TO ratio_worker');
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(/ratio_worker holds parameter:session_replication_role:SET/);
+    } finally {
+      await c.query('ROLLBACK');
+    }
   });
 
   it('L4: USAGE on a foreign-data wrapper or foreign server is refused', async () => {

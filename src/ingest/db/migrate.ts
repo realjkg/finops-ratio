@@ -2,7 +2,7 @@
 // every migration in its own transaction, checksum-verified ledger.
 import type { ClientBase } from 'pg';
 import { DEFAULT_MIGRATIONS_DIR, MigrationError, loadMigrations, type MigrationFile } from './migrationFiles';
-import { assertReviewedPrivileges } from './privilegeModel';
+import { assertReviewedPrivileges, privilegeModelViolations } from './privilegeModel';
 
 /** Arbitrary constant; advisory locks are scoped to the current database. */
 export const MIGRATION_LOCK_KEY = '7307215502148461377';
@@ -119,6 +119,20 @@ async function withLock<T>(client: ClientBase, fn: () => Promise<T>): Promise<T>
   return result;
 }
 
+/**
+ * After a migration's SQL, inside its transaction: back to the runner's own
+ * role, a search_path the migration cannot have planted anything on, and
+ * every deferred constraint trigger fired NOW (not at COMMIT, after the
+ * check). The ledger write that follows fires any trigger on the ledger, also
+ * before the check; the check then refuses any such trigger (challenger
+ * round 4, M1).
+ */
+async function settle(client: ClientBase): Promise<void> {
+  await client.query('RESET ROLE');
+  await client.query('SET LOCAL search_path = pg_catalog, pg_temp');
+  await client.query('SET CONSTRAINTS ALL IMMEDIATE');
+}
+
 async function inTransaction(client: ClientBase, fn: () => Promise<void>): Promise<void> {
   await client.query('BEGIN');
   try {
@@ -160,13 +174,14 @@ export async function migrateUp(client: ClientBase, opts: MigrateUpOptions = {})
     for (const f of pending) {
       await inTransaction(client, async () => {
         await client.query(f.upSql);
-        await client.query('RESET ROLE');
-        // Catalog, not text: refuse (and roll back) any privilege beyond the reviewed model.
-        await assertReviewedPrivileges(client, `migration ${f.version}_${f.name}`);
+        await settle(client);
         await client.query(
           'INSERT INTO public.schema_migrations (version, name, checksum, down_checksum) VALUES ($1, $2, $3, $4)',
           [f.version, f.name, f.checksum, f.downChecksum],
         );
+        // Catalog, not text, and LAST before COMMIT: nothing the migration
+        // installed can run after it (see settle()).
+        await assertReviewedPrivileges(client, `migration ${f.version}_${f.name}`);
       });
       done.push(f.version);
       log('migrate.applied', { version: f.version, name: f.name, phase: f.phase });
@@ -198,9 +213,9 @@ export async function migrateDown(client: ClientBase, opts: MigrateDownOptions):
     for (const f of targets) {
       await inTransaction(client, async () => {
         await client.query(f.downSql!);
-        await client.query('RESET ROLE');
-        await assertReviewedPrivileges(client, `down migration ${f.version}_${f.name}`);
+        await settle(client);
         await client.query('DELETE FROM public.schema_migrations WHERE version = $1', [f.version]);
+        await assertReviewedPrivileges(client, `down migration ${f.version}_${f.name}`);
       });
       reverted.push(f.version);
       log('migrate.reverted', { version: f.version, name: f.name });
@@ -226,13 +241,26 @@ export interface MigrationStatus {
   }>;
   pending: Array<{ version: string; name: string; phase: string; checksum: string }>;
   unknownApplied: string[];
+  /** catalog privilege-model violations (privilegeModel.ts); any ⇒ problem PRIVILEGE_MODEL_VIOLATION */
+  privilegeProblems: string[];
   problems: string[];
 }
 
 /** Read-only: takes no lock and never creates the ledger. */
 export async function migrationStatus(client: ClientBase, opts: { dir?: string } = {}): Promise<MigrationStatus> {
   const files = loadMigrations(opts.dir ?? DEFAULT_MIGRATIONS_DIR);
-  const applied = (await ledgerExists(client)) ? await readLedger(client) : [];
+  // One read-only transaction with a pinned search_path for the ledger read
+  // and the catalog privilege check (challenger round 4, L1).
+  let applied: LedgerRow[];
+  let privilegeProblems: string[];
+  await client.query('BEGIN READ ONLY');
+  try {
+    await client.query(`SELECT pg_catalog.set_config('search_path', 'pg_catalog, pg_temp', true)`);
+    applied = (await ledgerExists(client)) ? await readLedger(client) : [];
+    privilegeProblems = await privilegeModelViolations(client);
+  } finally {
+    await client.query('ROLLBACK').catch(() => undefined);
+  }
   const byVersion = new Map(files.map((f) => [f.version, f]));
   const appliedSet = new Set(applied.map((r) => r.version));
   const appliedOut = applied.map((r) => {
@@ -256,6 +284,7 @@ export async function migrationStatus(client: ClientBase, opts: { dir?: string }
   if (pending.length) problems.push('PENDING');
   if (appliedOut.some((a) => a.fileChecksum !== null && !a.checksumMatches)) problems.push('CHECKSUM_MISMATCH');
   if (unknownApplied.length) problems.push('UNKNOWN_APPLIED');
+  if (privilegeProblems.length) problems.push('PRIVILEGE_MODEL_VIOLATION');
   return {
     expectedVersion: files.length ? files[files.length - 1].version : null,
     currentVersion: applied.length ? applied[applied.length - 1].version : null,
@@ -263,6 +292,7 @@ export async function migrationStatus(client: ClientBase, opts: { dir?: string }
     applied: appliedOut,
     pending,
     unknownApplied,
+    privilegeProblems,
     problems,
   };
 }
