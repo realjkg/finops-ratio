@@ -561,3 +561,112 @@ describe('round 5: tests added for mutations that survived the first table', () 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 7 (Copilot review of 19fdbed)
+// ---------------------------------------------------------------------------
+
+const HOSTILE_0002 =
+  CONTRACT +
+  'CREATE SCHEMA attacker;\n' +
+  "CREATE FUNCTION attacker.name_eq_false(name, name) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select false';\n" +
+  'CREATE OPERATOR attacker.= (LEFTARG = name, RIGHTARG = name, FUNCTION = attacker.name_eq_false);\n' +
+  "CREATE FUNCTION attacker.current_setting(text) RETURNS text LANGUAGE sql AS 'select ''attacker''::text';\n" +
+  '-- session-scoped settings planted for whatever runs next on this connection\n' +
+  'SET search_path = attacker, pg_catalog;\n' +
+  'SET row_security = off;\n';
+
+describe('round 7 High A: session-scoped settings a migration plants do not survive into the next migration', () => {
+  it('the next migration in the same run resolves names through the pinned path, as the runner role, with row_security on', async () => {
+    const db = await freshDb();
+    const c = await connect(db);
+    const dir = migrationsWith({
+      '0002_hostile.up.sql': HOSTILE_0002,
+      '0003_probe.up.sql':
+        EXPAND +
+        "CREATE TABLE ratio.session_probe AS SELECT current_setting('search_path') AS sp, current_setting('row_security') AS rs, ('a'::name = 'a'::name) AS eq, current_user::text AS cu;\n",
+    });
+    expect(await migrateUp(c, { dir, allowContract: true })).toEqual({ applied: ['0001', '0002', '0003'] });
+    const probe = (await db.pool.query(`SELECT sp, rs, eq, cu FROM ratio.session_probe`)).rows[0];
+    expect(probe).toEqual({ sp: 'pg_catalog, pg_temp', rs: 'on', eq: true, cu: 'postgres' });
+    // ... and the runner leaves the caller's connection pinned, not hostile.
+    expect((await c.query(`SELECT pg_catalog.current_setting('search_path') AS sp, pg_catalog.current_setting('row_security') AS rs`)).rows[0]).toEqual({
+      sp: 'pg_catalog, pg_temp',
+      rs: 'on',
+    });
+  });
+
+  it('the check of the following migration still detects a planted grant', async () => {
+    const db = await freshDb();
+    const c = await connect(db);
+    const dir = migrationsWith({
+      '0002_hostile.up.sql': HOSTILE_0002,
+      '0003_grant.up.sql': EXPAND + 'GRANT TRUNCATE ON ratio.cost_facts TO ratio_worker;\n',
+    });
+    const err = await migrateUp(c, { dir, allowContract: true }).then(
+      () => null,
+      (e: Error & { code?: string }) => e,
+    );
+    expect(err?.code).toBe('PRIVILEGE_MODEL_VIOLATION');
+    expect(err?.message).toMatch(/ratio_worker holds relation:ratio\.cost_facts:TRUNCATE/);
+    expect(await versions(c)).toEqual(['0001', '0002']);
+  });
+
+  it('down: a down file that plants a session search_path does not affect the next down step', async () => {
+    const db = await freshDb();
+    const c = await connect(db);
+    const dir = migrationsWith({
+      '0002_attacker.up.sql':
+        CONTRACT +
+        'CREATE SCHEMA attacker;\n' +
+        "CREATE FUNCTION attacker.name_eq_false(name, name) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select false';\n" +
+        'CREATE OPERATOR attacker.= (LEFTARG = name, RIGHTARG = name, FUNCTION = attacker.name_eq_false);\n',
+      '0002_attacker.down.sql':
+        "CREATE TABLE public.down_probe AS SELECT pg_catalog.current_setting('search_path') AS sp, ('a'::name = 'a'::name) AS eq;\n" +
+        'DROP SCHEMA attacker CASCADE;\n',
+      '0003_plant.up.sql': EXPAND + 'CREATE TABLE public.plant_marker (x int);\n',
+      '0003_plant.down.sql': 'DROP TABLE public.plant_marker;\nSET search_path = attacker, pg_catalog;\n',
+    });
+    expect(await migrateUp(c, { dir, allowContract: true })).toEqual({ applied: ['0001', '0002', '0003'] });
+    expect(await migrateDown(c, { steps: 2, dir, env: { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'test' } })).toEqual({ reverted: ['0003', '0002'] });
+    expect((await db.pool.query(`SELECT sp, eq FROM public.down_probe`)).rows[0]).toEqual({ sp: 'pg_catalog, pg_temp', eq: true });
+  });
+
+  it('resetSession clears SET SESSION AUTHORIZATION, SET ROLE, row_security and search_path', async () => {
+    const { resetSession } = (await import('./migrate')) as unknown as { resetSession: (c: Client) => Promise<void> };
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    await c.query('SET SESSION AUTHORIZATION ratio_owner');
+    await c.query('SET ROLE ratio_worker');
+    await c.query('SET row_security = off');
+    await c.query('SET search_path = public, pg_catalog');
+    await resetSession(c);
+    expect(
+      (
+        await c.query(
+          `SELECT session_user::text AS su, current_user::text AS cu, pg_catalog.current_setting('row_security') AS rs, pg_catalog.current_setting('search_path') AS sp`,
+        )
+      ).rows[0],
+    ).toEqual({ su: 'postgres', cu: 'postgres', rs: 'on', sp: 'pg_catalog, pg_temp' });
+  });
+});
+
+describe('round 7 High C: a ratio role with LOGIN is drift (rolled-back transactions; roles are cluster-global)', () => {
+  for (const role of ['ratio_owner', 'ratio_worker', 'ratio_reader']) {
+    it(`ALTER ROLE ${role} LOGIN is reported by the check (and therefore by migrate --status)`, async () => {
+      const { assertReviewedPrivileges, privilegeModelViolations } = await model();
+      const db = await createTestDatabase({ migrate: true });
+      cleanups.push(() => db.close());
+      const c = await connect(db);
+      await c.query('BEGIN');
+      try {
+        await c.query(`ALTER ROLE ${role} LOGIN`);
+        expect(await privilegeModelViolations(c)).toEqual(expect.arrayContaining([`role ${role} must not have LOGIN (deployment logins are separate member roles)`]));
+        await expect(assertReviewedPrivileges(c)).rejects.toThrow(new RegExp(`role ${role} must not have LOGIN`));
+      } finally {
+        await c.query('ROLLBACK');
+      }
+    });
+  }
+});
