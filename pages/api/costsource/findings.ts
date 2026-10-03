@@ -8,12 +8,13 @@
 // Errors:
 //   400 — missing sourceId
 //   401 — non-sandbox source without a valid Bearer token
+//   429 — too many failed authentications from this client IP (per minute)
 //   404 — unknown source (only after auth)
 //   405 — non-GET method
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createCostSourceClient } from '@/costsource';
 import type { CostFinding } from '@/costsource';
-import { authorizeSourceAccess } from '@/server/gateway/liveDataAuth';
+import { gateSourceAccess } from '@/server/gateway/liveDataAuth';
 
 function firstQueryValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -35,11 +36,7 @@ export default async function handler(
     return;
   }
 
-  const auth = authorizeSourceAccess(sourceId, req.headers.authorization);
-  if (!auth.ok) {
-    res.status(401).json({ error: auth.message });
-    return;
-  }
+  if (!gateSourceAccess(req, res, sourceId)) return;
 
   const client = createCostSourceClient('mock');
   try {

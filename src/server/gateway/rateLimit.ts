@@ -58,6 +58,25 @@ export class SlidingWindowRateLimiter {
     };
   }
 
+  /**
+   * Whether `key` is currently over the limit, WITHOUT consuming a slot. Lets a
+   * caller count only some events (e.g. failed auth) yet block every request
+   * from a key that is over the limit.
+   */
+  peek(key: string): RateLimitResult {
+    const now = this.now();
+    const recent = (this.hits.get(key) ?? []).filter((t) => t > now - this.windowMs);
+    const blocked = recent.length >= this.limit;
+    const resetMs = recent.length > 0 ? recent[0] + this.windowMs : now + this.windowMs;
+    return {
+      allowed: !blocked,
+      limit: this.limit,
+      remaining: Math.max(0, this.limit - recent.length),
+      resetMs,
+      retryAfterSec: blocked ? Math.max(1, Math.ceil((resetMs - now) / 1000)) : 0,
+    };
+  }
+
   /** Drop a key's history — exposed for tests and future tenant resets. */
   reset(key: string): void {
     this.hits.delete(key);

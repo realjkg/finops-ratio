@@ -19,6 +19,7 @@ export {
   checkAuth,
   extractBearer,
   tenantId,
+  tokensMatch,
 } from './auth';
 export type { GatewayAuthConfig, AuthOutcome } from './auth';
 

@@ -7,7 +7,9 @@
 // the reserved warm accent.
 //
 // Connection status depends on SERVER env, which the browser cannot see, so the
-// page loads it from /api/costsource/sources. The first render uses the
+// page loads it from /api/costsource/sources. That route discloses live
+// connector status only to authenticated API callers; the browser carries no
+// token, so live connectors show the neutral registry status here. The first render uses the
 // env-independent registry (`sourcesForEnv({})`) so it matches the static
 // prerender exactly; if the API is unreachable (static hosting, offline) that
 // view stays, every connector honestly reads as available, and the probe is
@@ -83,6 +85,13 @@ export default function Connectors() {
               {!live && (
                 <span className="rounded border border-edge px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-dim">
                   Offline view — status from bundled registry
+                </span>
+              )}
+              {live && (
+                // The browser holds no API token, so the server returns the
+                // neutral (env-independent) status for live connectors.
+                <span className="rounded border border-edge px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-dim">
+                  Live connector status requires authenticated API access
                 </span>
               )}
             </div>

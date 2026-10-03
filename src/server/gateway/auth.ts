@@ -8,6 +8,7 @@
 // AI provider (anything but mock, aliases included — see src/ai/providers.ts) or
 // live change-management provider is selected.
 
+import { createHash, timingSafeEqual } from 'crypto';
 import { LIVE_AI_PROVIDERS, normalizeAIProvider } from '@/ai/providers';
 
 export interface GatewayAuthConfig {
@@ -59,6 +60,17 @@ export function tenantId(token: string): string {
   return `tnt_${(hash >>> 0).toString(36)}`;
 }
 
+/**
+ * Constant-time token comparison (server-only). A plain `!==` leaks the length
+ * of the matching prefix through timing; comparing fixed-width SHA-256 digests
+ * with timingSafeEqual costs the same wherever the strings diverge. Aligned
+ * with `secretsMatch` in src/finio/config.ts.
+ */
+export function tokensMatch(presented: string, expected: string): boolean {
+  const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest();
+  return timingSafeEqual(digest(presented), digest(expected));
+}
+
 /** Validate the request's Bearer token against the configured token. */
 export function checkAuth(
   authHeader: string | string[] | undefined,
@@ -84,7 +96,7 @@ export function checkAuth(
       message: 'Missing Authorization: Bearer <token> header',
     };
   }
-  if (presented !== config.token) {
+  if (!tokensMatch(presented, config.token)) {
     return { ok: false, code: 'unauthorized', message: 'Invalid API token' };
   }
   return { ok: true, tenant: tenantId(presented) };

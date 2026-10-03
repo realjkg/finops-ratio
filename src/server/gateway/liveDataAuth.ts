@@ -7,20 +7,21 @@
 // gateway would otherwise enforce auth. Unknown ids are rejected with 401 BEFORE
 // any lookup, so anonymous callers cannot probe which live sources exist.
 //
-// Pure (no req/res, env injected) and free of secrets, so the allowlist is also
-// safe to import into the browser bundle to decide which UI actions to offer.
+// SERVER-ONLY (token comparison uses node:crypto). The client-safe sandbox
+// allowlist lives in @/costsource/sandboxSources.
+//
+// Failed attempts are rate limited per client IP (x-forwarded-for first hop,
+// else the socket address) with the standard-tier sliding window: after
+// STANDARD_TIER_LIMIT failed authentications in a minute that client gets 429
+// — for every non-sandbox request, even with the right token, so the limit
+// cannot be used as a guessing oracle.
 
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { isOfflineSandboxSource, OFFLINE_SANDBOX_SOURCE_IDS } from '@/costsource/sandboxSources';
 import { checkAuth, type AuthOutcome } from './auth';
+import { SlidingWindowRateLimiter, STANDARD_TIER_LIMIT, WINDOW_MS } from './rateLimit';
 
-/** Offline seed sources that are safe to serve without authentication. */
-export const OFFLINE_SANDBOX_SOURCE_IDS: ReadonlySet<string> = new Set([
-  'pointfive-sandbox',
-  'focus-file-sandbox',
-]);
-
-export function isOfflineSandboxSource(sourceId: string): boolean {
-  return OFFLINE_SANDBOX_SOURCE_IDS.has(sourceId);
-}
+export { isOfflineSandboxSource, OFFLINE_SANDBOX_SOURCE_IDS };
 
 type LiveDataEnv = Record<string, string | undefined>;
 
@@ -44,4 +45,45 @@ export function authorizeSourceAccess(
 ): AuthOutcome {
   if (isOfflineSandboxSource(sourceId)) return { ok: true, tenant: 'anonymous' };
   return requireLiveDataAuth(authHeader, env);
+}
+
+// --- failed-auth rate limiting ------------------------------------------------
+
+// Counts FAILED authentications only, per client IP.
+const failedAuth = new SlidingWindowRateLimiter(STANDARD_TIER_LIMIT, WINDOW_MS);
+
+/** Client IP: first hop of x-forwarded-for, else the socket address. */
+export function clientIp(req: NextApiRequest): string {
+  const xff = req.headers?.['x-forwarded-for'];
+  const first = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim();
+  return first || req.socket?.remoteAddress || 'unknown';
+}
+
+/**
+ * Deny-by-default gate for the costsource live-data routes (rows / findings /
+ * health). Sandbox ids pass. Otherwise: 429 when the client IP is over the
+ * failed-auth limit, 401 on a failed check (recorded), else allowed. Returns
+ * true when the handler may proceed; otherwise the response has been sent.
+ */
+export function gateSourceAccess(
+  req: NextApiRequest,
+  res: NextApiResponse,
+  sourceId: string,
+  env: LiveDataEnv = process.env,
+): boolean {
+  if (isOfflineSandboxSource(sourceId)) return true;
+  const ip = clientIp(req);
+  const state = failedAuth.peek(ip);
+  if (!state.allowed) {
+    res.setHeader('Retry-After', String(state.retryAfterSec));
+    res.status(429).json({ error: 'Too many failed authentication attempts' });
+    return false;
+  }
+  const auth = requireLiveDataAuth(req.headers.authorization, env);
+  if (!auth.ok) {
+    failedAuth.take(ip);
+    res.status(401).json({ error: auth.message });
+    return false;
+  }
+  return true;
 }

@@ -1,7 +1,8 @@
 // GET /api/costsource/rows?sourceId=&start=&end= — normalized FOCUS cost rows.
 // Delegates to the client seam: sandbox sources serve offline seed data; a
-// configured connector (cloud / Kubernetes / Nutanix / FOCUS endpoint) fetches
-// its REAL export.
+// configured connector (cloud / Kubernetes / Nutanix) or PointFive live fetches
+// its REAL export. Live connector status is likewise only disclosed to
+// authenticated callers (see /api/costsource/sources).
 //
 // Deny by default: only the offline sandbox sources are served anonymously.
 // Every other source id (live connectors, PointFive, unknown ids) requires
@@ -10,15 +11,18 @@
 // callers cannot discover which live sources exist.
 //
 // Errors:
-//   400 — missing sourceId / window
+//   400 — missing sourceId / window, or an invalid window (start / end must
+//         parse and start < end)
 //   401 — non-sandbox source without a valid Bearer token
+//   429 — too many failed authentications from this client IP (per minute)
 //   404 — unknown source
 //   409 — source not configured (live credentials required)
 //   405 — non-GET method
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createCostSourceClient } from '@/costsource';
 import type { CostRowsResult } from '@/costsource';
-import { authorizeSourceAccess } from '@/server/gateway/liveDataAuth';
+import { assertValidWindow } from '@/costsource/transports/focusExport';
+import { gateSourceAccess } from '@/server/gateway/liveDataAuth';
 
 function statusForError(message: string): number {
   if (message.includes('Unknown')) return 404;
@@ -49,11 +53,14 @@ export default async function handler(
     return;
   }
 
-  const auth = authorizeSourceAccess(sourceId, req.headers.authorization);
-  if (!auth.ok) {
-    res.status(401).json({ error: auth.message });
+  try {
+    assertValidWindow({ start, end });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     return;
   }
+
+  if (!gateSourceAccess(req, res, sourceId)) return;
 
   const client = createCostSourceClient('mock');
   try {

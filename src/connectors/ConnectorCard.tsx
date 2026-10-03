@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import type { CostSourceDescriptor, SourceHealth } from '@/costsource/CostSourceClient';
-import { isOfflineSandboxSource } from '@/server/gateway/liveDataAuth';
+import { isOfflineSandboxSource } from '@/costsource/sandboxSources';
 
 // Only the live PointFive adapter is a controlled-egress path: it routes through
 // PointFive's broker under OAuth 2.1. The sandbox mock is offline seed data.

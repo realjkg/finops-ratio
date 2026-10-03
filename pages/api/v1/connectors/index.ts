@@ -17,7 +17,8 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { createCostSourceClient } from '@/costsource';
 import type { CostSourceDescriptor, SourceHealth } from '@/costsource';
 import { sendError, withGateway } from '@/server/gateway';
-import { requireLiveDataAuth } from '@/server/gateway/liveDataAuth';
+import { isOfflineSandboxSource, requireLiveDataAuth } from '@/server/gateway/liveDataAuth';
+import { redactErrorText } from '@/costsource/transports/redact';
 
 export interface ConnectorRegistryResponse {
   connectors: CostSourceDescriptor[];
@@ -56,7 +57,9 @@ async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void>
   const body: ConnectorRegistryResponse = { connectors, summary };
 
   if (wantsProbe) {
-    const live = connectors.filter((c) => c.connection === 'connected');
+    // Every configured non-sandbox source — including PointFive live, whose
+    // descriptor carries `configured` but no `connection` field.
+    const live = connectors.filter((c) => c.configured && !isOfflineSandboxSource(c.id));
     body.health = await Promise.all(
       live.map((c) =>
         withTimeout(client.healthCheck(c.id), PROBE_TIMEOUT_MS, c.name).catch(
@@ -67,7 +70,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void>
             sourceVersion: c.focusVersion,
             canonicalVersion: '1.4',
             checkedAt: new Date().toISOString(),
-            detail: err instanceof Error ? err.message : String(err),
+            detail: redactErrorText(err),
           }),
         ),
       ),
