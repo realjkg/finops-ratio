@@ -72,7 +72,13 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 53 | 0e80eff | docs: evidence for the c016ffb merge (§17); pushed to origin/slice/01-focus-ingestion-worker as instructed | docs |
 | 54 | 214b4e4 | test: redaction linearity guard (`redactLinear.test.ts`, child process, hard kill) and spawned > 2 MB crash-handler test (red: 5 failed, `r6-red.txt`) | tests |
 | 55 | 3d8f277 | fix: 16 KB input cap with delimiter cut + truncation marker; URL rules start a scheme only where no scheme character precedes; one cached literal-secret alternation | impl |
-| 56 | (final) | docs: evidence for this round (§18) | docs |
+| 56 | 845ee56 | docs: evidence for the redaction-performance round (§18) | docs |
+| 57 | 47e0507 | test: L-p/L-q cap near the kept length, straddle sweep, per-string budgets (red: 6 failed, `r7-red.txt`; also red at type-check: `capForRedaction` gains a secrets parameter) | tests |
+| 58 | 5362489 | fix: cap = MAX_REDACTED_LENGTH + 512, straddle-safe cut, linear URL query rule | impl |
+| 59 | 5ab5972 | test: COMMIT answered with ROLLBACK must fail the run — publish, checkpoint, run bookkeeping (red: 3 failed, `r8-red.txt`) | tests |
+| 60 | d92541f | test: the publish case compares state like P1 (a failed publish leaves the new batch staged; my first version compared the whole batch list — a test defect, still red on the unfixed code) | tests |
+| 61 | b8a78aa | fix: `workerTransaction` checks the COMMIT reply (`COMMIT_ROLLED_BACK`); every worker transaction uses it | impl |
+| 62 | (final) | docs: evidence for this round (§19, §20) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -1035,6 +1041,136 @@ agent's vitest DB runs active. The four `ratio_test_*` databases seen
 afterwards belong to that checkout.
 
 **Manual end-to-end** (built CLI at 3d8f277, database `ratio_s1_e2e_fc6d77dd`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 19. L-p / L-q — cap just above the kept length, per-string budgets
+
+**L-p — the fix (`5362489`):**
+- **Cap lowered.** `MAX_REDACT_INPUT_CHARS = MAX_REDACTED_LENGTH + 512`
+  (4512, was 16 384). Only 4000 characters are ever kept, so no rule sees
+  more than about 4.5 KB per string.
+- **Straddle-safe cut.** The cut still backs up to a delimiter, and it now
+  also never lands inside an occurrence of a configured secret form. That
+  matters because a form's own characters can be delimiters: the quote in
+  `pw"q\b%22x`, and the full worker URL. A straddling secret is dropped
+  whole.
+- **Linear URL query rule.** The rule now consumes the whole URL whether or
+  not it has a query. A callback leaves a query-less URL unchanged, so the
+  scan resumes after the URL instead of retrying from every later scheme
+  start. `a://a://…` is no longer quadratic, even without the cap.
+
+**Sweep** (`redactCap.test.ts`, 1212 cases):
+- Every one of the 12 configured secret forms is placed at every offset
+  across the cut, with three fillers: no delimiters, spaces, and dense
+  `,;&<>`.
+- Either the form is kept whole or no prefix of 2 or more characters of it
+  remains.
+- `redact()` output contains no form in any case.
+
+**L-q — per-string budgets** (`redactCap.test.ts`, median of 9 runs after a
+warm-up). Shapes: `a://`, `x://y://`, `a.b://`, `http://`, `a://b?`, a run
+of letters, and scheme characters.
+- A string of exactly the cap length, so not truncated, must take < 25 ms.
+- A 2 MB string must take < 25 ms; the cap bounds the work.
+- A direct cap test checks that the cap is within MAX_REDACTED_LENGTH + 512,
+  that the cut lands on a delimiter, and that the marker is appended.
+
+Measured medians on the fixed code: at the cap ≤ 0.08 ms; at 2 MB ≤ 1.3 ms.
+At the old 16 KB cap these shapes took 64–119 ms; that was the red run.
+
+| Mutation | Result |
+|---|---|
+| R1: lookbehind removed | 2 fail: letters and scheme characters at the cap (median 107–120 ms; 67 / 44 ms standalone) (`mut-R1.txt`) |
+| R2: cap removed | 8 fail: the direct cap test (deterministic: length 999999 > 4525) and all seven 2 MB budgets (33–95 ms) (`mut-R2.txt`) |
+| R3: cut ignores secret forms | sweep fails: fragment `po` of the URL form left at the cut |
+
+The 2 MB budgets alone would be a marginal catch for R2 (15–53 ms
+standalone). The direct cap test is the deterministic one.
+
+## 20. COMMIT answered with ROLLBACK is a failure (Copilot finding on Slice 0's `tenant.ts`)
+
+**Where Slice 1 commits.** Every worker transaction went through Slice 0's
+`withTenantTransaction`, which ignored the COMMIT command tag:
+- lease: acquire, heartbeat, retry, finish;
+- load;
+- publish;
+- quarantine;
+- checkpoint refresh;
+- replay and replay-fixtures;
+- the pipeline's reads.
+
+Two places run their own BEGIN/COMMIT: replay-fixtures' admin `asTenant`
+and doctor's two read-only transactions. No Slice 1 code catches a
+statement error inside a transaction today, but nothing prevented it.
+
+**The bug, shown red (`5ab5972`).** A pool wrapper runs a failing statement
+right after a chosen statement inside the worker's transaction and swallows
+its error. Before the fix the worker reported success while PostgreSQL had
+discarded every write:
+- **publish path:** the run reported `succeeded`;
+- **checkpoint path** (backfill of an unchanged period → `refreshCheckpoint`):
+  `succeeded`, and the checkpoint did not actually advance;
+- **finishRun:** the run was reported `succeeded` while its row was still
+  `running`.
+
+**Fix (`b8a78aa`, `src/ingest/worker/tx.ts`).** `workerTransaction()` runs
+Slice 0's `withTenantTransaction`, so tenant handling stays in one place. It
+hands that helper clients whose COMMIT reply is checked: `assertCommitted`
+requires `result.command === 'COMMIT'` and otherwise throws `IngestError`
+`COMMIT_ROLLED_BACK`, which is not retryable. Slice 0's helper then issues
+ROLLBACK, a no-op, and rethrows.
+- All 20 worker call sites use `workerTransaction`.
+- replay-fixtures' admin transaction and doctor's read-only transactions call
+  `assertCommitted` on their COMMIT.
+- When Slice 0 round 15 makes its own helper check the tag, this wrapper is
+  redundant but harmless.
+
+**Tests** (`src/ingest/worker/commitTag.db.test.ts`):
+- **Publish path:** a caught error right after the checkpoint write. The run
+  fails with `COMMIT_ROLLED_BACK`. View, totals, publications and checkpoint
+  are unchanged, and pre-existing batches are unchanged; the newly loaded
+  batch stays only `staged`, as in P1. The run row is `failed` with
+  `COMMIT_ROLLED_BACK`, and a later clean run publishes normally.
+- **Checkpoint path:** the run fails with `COMMIT_ROLLED_BACK`; visible state
+  and checkpoint are unchanged.
+- **Run bookkeeping:** a caught error in `finishRun`'s transaction makes
+  `runSync` reject with `COMMIT_ROLLED_BACK`. The row stays `running` until
+  its lease expires and is then abandoned; it is never reported finished.
+
+| Mutation | Result |
+|---|---|
+| drop the check (`assertCommitted` never throws) | 3 fail (`mut-commit.txt`) |
+
+**Gates at b8a78aa:**
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 82 files / 1957 passed (run while test:db was running; the 25 ms medians held) |
+| `test:db` x3 (PG16 tools as in CI) | 24 files / **343 passed** each (214 s, 211 s, 205 s; host load average about 15–17 from other checkouts); 0 object-store errors |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 324 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| change outside `src/ingest` and `docs/evidence/slice-1` since 0e80eff | none |
+| objects left in `ratio-s1-test` | 0 |
+
+The one `ratio_test_*` database present afterwards belongs to another
+checkout's live vitest run.
+
+The L-p/L-q commit `5362489` also passed test:db x3 on its own: 23 files /
+340 each, plus the negatives.
+
+**Manual end-to-end** (built CLI at b8a78aa, database `ratio_s1_e2e_852ac99c`):
 - migrate status went 3 -> 0 -> 0.
 - sync published and reconciled; the second sync reported `skipped_unchanged`.
 - Reader totals equal the control totals (55 / `30.8272954899`,

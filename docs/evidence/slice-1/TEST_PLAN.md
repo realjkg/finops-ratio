@@ -177,3 +177,13 @@ CLI entry and crashes it with a > 2 MB message (uncaughtException and
 unhandledRejection): exactly one redacted JSON line, exit 1, within 2 s of
 start-up.
 
+Cap and per-string cost (L-p/L-q): `redactCap.test.ts` — cap within
+MAX_REDACTED_LENGTH + 512; a 1212-case sweep of every secret form across the
+cut (no fragment of >= 2 chars); medians of 9 runs < 25 ms for every
+scheme-repeat shape at the cap and at 2 MB.
+
+COMMIT tag: `worker/commitTag.db.test.ts` — a swallowed statement error
+inside the publish, checkpoint-refresh and finishRun transactions makes the
+run fail (`COMMIT_ROLLED_BACK`); nothing is published, the checkpoint does
+not move, the run is never reported finished.
+
