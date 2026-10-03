@@ -184,6 +184,20 @@ describe('ingest CLI (no database)', () => {
       for (const l of c.out.concat(c.err)) expect(() => JSON.parse(l)).not.toThrow();
     });
 
+    it('a URL the pg Client constructor itself rejects (invalid port, unreadable sslcert) exits 1 with a redacted JSON line', async () => {
+      for (const url of [
+        'postgres://ratio_user:SecretPw77@127.0.0.1:99999999/ratio_db',
+        'postgres://ratio_user:SecretPw77@127.0.0.1:1/ratio_db?sslcert=/nonexistent/ratio-test-cert',
+      ]) {
+        const c = capture();
+        await expect(main(['migrate'], { RATIO_MIGRATE_DATABASE_URL: url }, c.io), url).resolves.toBe(1);
+        const all = c.out.concat(c.err).join('\n');
+        expect(all).not.toMatch(/SecretPw77|ratio_user/);
+        expect(c.err).toHaveLength(1);
+        expect(JSON.parse(c.err[0])).toMatchObject({ level: 'error', event: 'migrate.failed' });
+      }
+    });
+
     it('uncaughtException / unhandledRejection handlers print one redacted JSON line and exit 1', () => {
       const install = (cli as unknown as { installProcessHandlers?: (p: EventEmitter, env: Record<string, string>, io: { err: (l: string) => void }, exit: (code: number) => void) => void })
         .installProcessHandlers;
