@@ -189,4 +189,53 @@ describe('S3 source → evidence → published facts', () => {
       await bucket.destroy();
     }
   });
+
+  it('X6 (H2) an object replaced between listing and GET: SeaweedFS honours If-Match (412 -> SOURCE_CHANGED); the run re-lists and publishes what it read', async () => {
+    const bucket = await createTestBucket('x6');
+    try {
+      const key = DATA(bucket, '2026-07') + 'a.csv.gz';
+      const OLD = csvGz(rowsOf('2026-07-01', 2, '5.00'));
+      const NEW = csvGz(rowsOf('2026-07-01', 3, '1.00'));
+      await bucket.put(key, OLD);
+      await bucket.put(META(bucket, '2026-07') + 'focus-export-Manifest.json', manifest({ dataFiles: [key] }));
+
+      // Direct: a GET conditional on the listed ETag of a since-replaced object is refused.
+      const direct = new S3FocusExportSource({ client: bucket.client, location: loc(bucket) });
+      const [listing] = await direct.listPeriods();
+      if (!listing.ok) throw new Error('listing failed');
+      await bucket.put(key, NEW);
+      await expect(direct.openArtifact(listing.set.artifacts[0])).rejects.toMatchObject({ code: 'SOURCE_CHANGED', retryable: true });
+
+      // Through the pipeline: replaced right after the first listing.
+      await bucket.put(key, OLD);
+      let replaced = false;
+      class Racy extends S3FocusExportSource {
+        async listPeriods(range?: Parameters<S3FocusExportSource['listPeriods']>[0]) {
+          const out = await super.listPeriods(range);
+          if (!replaced) {
+            replaced = true;
+            await bucket.put(key, NEW);
+          }
+          return out;
+        }
+      }
+      const s = await seedTenantSource(t.db.pool, { config: { layout: 'aws-data-exports', ...loc(bucket) } });
+      const r = await runSync({
+        pool: t.pool,
+        tenantId: s.tenantId,
+        sourceKey: s.sourceKey,
+        source: new Racy({ client: bucket.client, location: loc(bucket) }),
+        evidence: new S3EvidenceStore({ client: evidenceBucket.client, bucket: evidenceBucket.name, prefix: evidenceBucket.root }),
+        mode: 'sync',
+        hooks: noSleep,
+      });
+      expect(r.status).toBe('succeeded');
+      expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({ '2026-07-01': { rows: 3, total: '3.00' } });
+      const arts = await t.db.pool.query(`SELECT sha256, evidence_key FROM ratio.ingest_artifacts WHERE tenant_id = $1`, [s.tenantId]);
+      expect(arts.rows.map((a) => a.sha256)).toEqual([sha(NEW)]);
+      expect(sha(await evidenceBucket.get(evidenceBucket.at(arts.rows[0].evidence_key)))).toBe(sha(NEW));
+    } finally {
+      await bucket.destroy();
+    }
+  });
 });
