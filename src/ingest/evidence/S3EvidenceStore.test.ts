@@ -305,3 +305,61 @@ describe('S3EvidenceStore creates objects conditionally (If-None-Match: *) — s
   }
 });
 
+describe('S3EvidenceStore: a 409 ConditionalRequestConflict on the conditional create (challenger round 4 L1)', () => {
+  // S3 answers 409 (not 412) when a concurrent conditional write to the same key
+  // is in flight. Only the status is set here (no error name), so the status
+  // alone must route it to verification.
+  const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
+  const good = Buffer.from('the real evidence bytes');
+  function conflicting(existing: Buffer, seen: string[]): S3Client {
+    return {
+      async send(cmd: unknown) {
+        if (cmd instanceof HeadObjectCommand) {
+          seen.push('head');
+          throw Object.assign(new Error('NotFound'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } });
+        }
+        if (cmd instanceof PutObjectCommand) {
+          seen.push('put');
+          throw Object.assign(new Error('conflict'), { $metadata: { httpStatusCode: 409 } });
+        }
+        if (cmd instanceof GetObjectCommand) {
+          seen.push('get');
+          return { Body: Readable.from([existing]), ContentLength: existing.length };
+        }
+        throw new Error('unexpected command');
+      },
+    } as unknown as S3Client;
+  }
+  const withFile = async <T>(fn: (file: string) => Promise<T>): Promise<T> => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-ev-'));
+    try {
+      const file = path.join(dir, 'f');
+      fs.writeFileSync(file, good);
+      return await fn(file);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  for (const [what, op] of [
+    ['artifact (put)', 'put'],
+    ['manifest (putBytes)', 'putBytes'],
+  ] as const) {
+    it(`${what}: 409 with the genuine bytes in place => verified (GET), 'exists'`, async () => {
+      const seen: string[] = [];
+      const store = new S3EvidenceStore({ client: conflicting(good, seen), bucket: 'ev' });
+      const r = op === 'put' ? await withFile((file) => store.put('evidence/k', file, { sha256: sha(good), byteSize: good.length })) : await store.putBytes('evidence/k', good);
+      expect(r).toBe('exists');
+      expect(seen).toEqual(['head', 'put', 'get']);
+    });
+
+    it(`${what}: 409 with different bytes in place => EVIDENCE_INTEGRITY_MISMATCH (never EVIDENCE_STORE_FAILED, never overwritten)`, async () => {
+      const seen: string[] = [];
+      const store = new S3EvidenceStore({ client: conflicting(Buffer.from('the FAKE evidence bytes'), seen), bucket: 'ev' });
+      const p = op === 'put' ? withFile((file) => store.put('evidence/k', file, { sha256: sha(good), byteSize: good.length })) : store.putBytes('evidence/k', good);
+      await expect(p).rejects.toMatchObject({ code: 'EVIDENCE_INTEGRITY_MISMATCH' });
+      expect(seen).toEqual(['head', 'put', 'get']);
+    });
+  }
+});
+
