@@ -15,6 +15,7 @@ const COPILOT_SUITE = 300;
 const EVIL_SUITE = 400;
 
 const README = { filename: 'README.md', status: 'modified', patch: '+hi', changes: 1 };
+const DEFAULT_GOV_RUN = { id: 777, check_suite_id: 200, path: '.github/workflows/governance.yml', event: 'pull_request_target', head_repository: { full_name: 'o/r' }, repository: { full_name: 'o/r' } };
 
 function fakeGithub(opts = {}) {
   const calls = [];
@@ -107,12 +108,16 @@ function fakeGithub(opts = {}) {
           if (typeof opts.ciJobs === 'function') return opts.ciJobs(p);
           return opts.ciJobs ?? [{ id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', run_attempt: opts.ciAttempt ?? 1 }];
         }),
-        listWorkflowRunsForRepo: rec('actions.listWorkflowRunsForRepo', opts.workflowRuns ?? [
-          { id: 900, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: opts.ciAttempt ?? 1, pull_requests: [{ number: 5, base: { ref: 'main' } }] },
-          { check_suite_id: GOV_SUITE, path: '.github/workflows/governance.yml' },
-          { check_suite_id: COPILOT_SUITE, path: 'dynamic/agents/copilot-pull-request-reviewer' },
-          { check_suite_id: EVIL_SUITE, path: '.github/workflows/evil.yml' },
-        ]),
+        listWorkflowRunsForRepo: rec('actions.listWorkflowRunsForRepo', (p) => {
+          if (typeof opts.workflowRuns === 'function') return opts.workflowRuns(p);
+          // check_suite_id lookups resolve the default governance suite (pull_request_target, base repo).
+          if (p.check_suite_id !== undefined) return p.check_suite_id === GOV_SUITE ? [DEFAULT_GOV_RUN] : [];
+          return opts.workflowRuns ?? [
+            { id: 900, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: opts.ciAttempt ?? 1, pull_requests: [{ number: 5, base: { ref: 'main' } }] },
+            { check_suite_id: COPILOT_SUITE, path: 'dynamic/agents/copilot-pull-request-reviewer' },
+            { check_suite_id: EVIL_SUITE, path: '.github/workflows/evil.yml' },
+          ];
+        }),
       },
     },
   };
@@ -321,6 +326,7 @@ describe('runEligibility', () => {
       { id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: CI_SUITE } },
       { id: 77, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: EVIL_SUITE } },
       { id: 3, name: 'copilot-pull-request-reviewer', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: COPILOT_SUITE } },
+      { id: 2, name: 'Governance · risk classification', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: GOV_SUITE } },
     ] });
     const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
     expect(rows[0].eligible).toBe(false);
@@ -968,6 +974,65 @@ describe('PR #47 regression via the API: governance suites are resolved to their
     const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
     expect(rows[0].eligible).toBe(false);
     expect(rows[0].reasons.join('\n')).toMatch(/risk classification/);
+  });
+});
+
+describe('round 2: classify supersession, lookup failures, suite matching, forks', () => {
+  const GOV2 = 201;
+  const CI_RUN = { id: 900, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, pull_requests: [{ number: 5, base: { ref: 'main' } }], head_repository: { full_name: 'o/r' } };
+  const govRun = (id, suite, o = {}) => ({ id, check_suite_id: suite, path: '.github/workflows/governance.yml', event: 'pull_request_target', head_repository: { full_name: 'o/r' }, repository: { full_name: 'o/r' }, ...o });
+  const base = [
+    { id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: CI_SUITE } },
+    { id: 3, name: 'copilot-pull-request-reviewer', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: COPILOT_SUITE } },
+  ];
+  const classify = (id, suite, conclusion) => ({ id, name: 'Governance · risk classification', status: 'completed', conclusion, app: { id: 15368 }, check_suite: { id: suite } });
+
+  it('M1: two governance suites (older classify cancelled, newer success) resolved by check_suite_id ⇒ eligible', async () => {
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, classify(101, GOV_SUITE, 'cancelled'), classify(205, GOV2, 'success'),
+        { id: 206, name: 'Governance · revocations', status: 'completed', conclusion: 'skipped', app: { id: 15368 }, check_suite: { id: GOV2 } }],
+      workflowRuns: (p) => (p.check_suite_id === GOV_SUITE ? [govRun(1, GOV_SUITE)] : p.check_suite_id === GOV2 ? [govRun(2, GOV2)] : p.check_suite_id !== undefined ? [] : [CI_RUN]),
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].reasons).toEqual([]);
+    expect(rows[0].eligible).toBe(true);
+  });
+  it('L2/L3: a check_suite_id lookup that throws (403/429) leaves the PR not eligible and is logged as a warning', async () => {
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, classify(101, GOV_SUITE, 'success')],
+      workflowRuns: (p) => (p.check_suite_id !== undefined ? Object.assign(new Error('API rate limit exceeded'), { status: 429 }) : [CI_RUN]),
+    });
+    const core = fakeCore();
+    const rows = await runEligibility({ github, core, context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+    expect(core.warnings.join('\n')).toMatch(new RegExp(`check suite ${GOV_SUITE}.*429`, 's'));
+  });
+  it("L6: a lookup returning ANOTHER suite's run does not resolve this suite", async () => {
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, classify(101, GOV_SUITE, 'success')],
+      workflowRuns: (p) => (p.check_suite_id === GOV_SUITE ? [govRun(9, 999)] : p.check_suite_id !== undefined ? [] : [CI_RUN]),
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+  });
+  it('L6: head_repository (not repository) decides — a fork head with the base as repository is not ours', async () => {
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, classify(101, GOV_SUITE, 'success')],
+      workflowRuns: (p) => (p.check_suite_id === GOV_SUITE ? [govRun(9, GOV_SUITE, { head_repository: { full_name: 'mallory/r' } })] : p.check_suite_id !== undefined ? [] : [CI_RUN]),
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+    expect(rows[0].reasons.join('\n')).toMatch(/risk classification/);
+  });
+  it('L1: our workflow\'s run from a workflow_dispatch event is not ours — a skipped revocations from it blocks', async () => {
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, classify(101, GOV_SUITE, 'success'),
+        { id: 300, name: 'Governance · revocations', status: 'completed', conclusion: 'skipped', app: { id: 15368 }, check_suite: { id: GOV2 } }],
+      workflowRuns: (p) => (p.check_suite_id === GOV_SUITE ? [govRun(1, GOV_SUITE)] : p.check_suite_id === GOV2 ? [govRun(2, GOV2, { event: 'workflow_dispatch' })] : p.check_suite_id !== undefined ? [] : [CI_RUN]),
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+    expect(rows[0].reasons.join('\n')).toMatch(/Governance · revocations/);
   });
 });
 

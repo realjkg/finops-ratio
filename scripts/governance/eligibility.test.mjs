@@ -26,7 +26,7 @@ function state(overrides = {}) {
     freshRisk: 'low',
     checkRuns: [
       { id: 1, ...CI, status: 'completed', conclusion: 'success' },
-      { id: 2, name: 'Governance · risk classification', appId: 15368, workflowPath: '.github/workflows/governance.yml', status: 'completed', conclusion: 'success' },
+      { id: 2, name: 'Governance · risk classification', appId: 15368, workflowPath: '.github/workflows/governance.yml', workflowEvent: 'pull_request_target', workflowHeadRepo: 'realjkg/finops-ratio', status: 'completed', conclusion: 'success' },
       { id: 3, name: 'copilot-pull-request-reviewer', appId: 15368, workflowPath: 'dynamic/agents/copilot-pull-request-reviewer', status: 'completed', conclusion: 'success' },
     ],
     // N2: jobs of the latest attempt of the ci.yml pull_request run for the head SHA.
@@ -486,15 +486,86 @@ describe('PR #47 regression: our own governance check runs on the head SHA', () 
     const s = replace(pr47(), 'Governance · merge eligibility (#47)', ours(103, 'Governance · merge eligibility (#47)', 'in_progress', null));
     expect(decideEligibility(s).eligible).toBe(true);
   });
-  it('our own failing/in-progress eligibility targets or revocations runs are not inputs either', () => {
+  it('our own failing eligibility targets run is not an input', () => {
     expect(decideEligibility(replace(pr47(), 'Governance · eligibility targets', ours(102, 'Governance · eligibility targets', 'completed', 'failure'))).eligible).toBe(true);
-    expect(decideEligibility(replace(pr47(), 'Governance · revocations', ours(104, 'Governance · revocations', 'queued', null))).eligible).toBe(true);
   });
+  it('L4: our own revocations run is excluded ONLY when skipped — failure or queued blocks', () => {
+    expect(decideEligibility(replace(pr47(), 'Governance · revocations', ours(104, 'Governance · revocations', 'completed', 'failure'))).eligible).toBe(false);
+    expect(decideEligibility(replace(pr47(), 'Governance · revocations', ours(104, 'Governance · revocations', 'queued', null))).eligible).toBe(false);
+  });
+  it('L7: only "Governance · merge eligibility (#n)" names are our eligibility runs', () => {
+    const s = pr47();
+    s.checkRuns.push(ours(150, 'Governance · merge eligibility', 'completed', 'failure'));
+    s.checkRuns.push(ours(151, 'Governance · merge eligibility gate', 'completed', 'failure'));
+    const d = decideEligibility(s);
+    expect(d.eligible).toBe(false);
+    expect(d.reasons.join('\n')).toMatch(/merge eligibility gate/);
+  });
+  it('L5: no own risk classification run on the head ⇒ refused', () => {
+    const s = pr47();
+    s.checkRuns = s.checkRuns.filter((r) => r.name !== 'Governance · risk classification');
+    const d = decideEligibility(s);
+    expect(d.eligible).toBe(false);
+    expect(d.reasons.join('\n')).toMatch(/risk classification/);
+  });
+  it('L5: a classification run that is not ours does not satisfy the presence requirement', () => {
+    const s = replace(pr47(), 'Governance · risk classification', ours(101, 'Governance · risk classification', 'completed', 'success', { workflowPath: '.github/workflows/evil.yml' }));
+    expect(decideEligibility(s).eligible).toBe(false);
+  });
+  it('L5: a queued own classification run is present but pending ⇒ refused (not "missing")', () => {
+    const s = replace(pr47(), 'Governance · risk classification', ours(101, 'Governance · risk classification', 'queued', null));
+    const d = decideEligibility(s);
+    expect(d.eligible).toBe(false);
+    expect(d.reasons.join('\n')).toMatch(/queued/);
+  });
+
+  // M1: superseded, cancelled classify runs.
+  const twoClassify = (older, newer) => {
+    const s = pr47();
+    s.checkRuns = s.checkRuns.filter((r) => r.name !== 'Governance · risk classification');
+    s.checkRuns.push(ours(101, 'Governance · risk classification', 'completed', older));
+    s.checkRuns.push(ours(105, 'Governance · risk classification', 'completed', newer));
+    return s;
+  };
+  it('M1: older own classify cancelled + newer own classify success ⇒ eligible', () => {
+    expect(decideEligibility(twoClassify('cancelled', 'success'))).toEqual({ eligible: true, reasons: [] });
+  });
+  it('M1: newest own classify cancelled (older success) ⇒ refused', () => {
+    const d = decideEligibility(twoClassify('success', 'cancelled'));
+    expect(d.eligible).toBe(false);
+    expect(d.reasons.join('\n')).toMatch(/cancelled/);
+  });
+  it('M1: a single own classify run cancelled ⇒ refused', () => {
+    const s = replace(pr47(), 'Governance · risk classification', ours(101, 'Governance · risk classification', 'completed', 'cancelled'));
+    expect(decideEligibility(s).eligible).toBe(false);
+  });
+  it('M1: an older cancelled classify that is only superseded by a NON-own run is refused', () => {
+    const s = pr47();
+    s.checkRuns = s.checkRuns.filter((r) => r.name !== 'Governance · risk classification');
+    s.checkRuns.push(ours(101, 'Governance · risk classification', 'completed', 'cancelled'));
+    s.checkRuns.push(ours(105, 'Governance · risk classification', 'completed', 'success', { workflowPath: '.github/workflows/evil.yml' }));
+    expect(decideEligibility(s).eligible).toBe(false);
+  });
+  for (const [label, o] of [
+    ['another workflow', { workflowPath: '.github/workflows/evil.yml' }],
+    ['another event', { workflowEvent: 'workflow_dispatch' }],
+    ['another repo', { workflowHeadRepo: 'mallory/finops-ratio' }],
+    ['another app', { appId: 999 }],
+  ]) {
+    it(`M1: a cancelled classify from ${label} is refused even with a newer own success`, () => {
+      const s = pr47();
+      s.checkRuns.push(ours(90, 'Governance · risk classification', 'completed', 'cancelled', o));
+      const d = decideEligibility(s);
+      expect(d.eligible).toBe(false);
+      expect(d.reasons.join('\n')).toMatch(/cancelled/);
+    });
+  }
   for (const [label, o] of [
     ['another app', { appId: 999 }],
     ['another workflow path', { workflowPath: '.github/workflows/evil.yml' }],
     ['unresolved workflow path', { workflowPath: undefined }],
     ['a PR-head event (pull_request)', { workflowEvent: 'pull_request' }],
+    ['a workflow_dispatch event (runs the dispatched ref\'s code)', { workflowEvent: 'workflow_dispatch' }],
     ['a head repo other than the base repo', { workflowHeadRepo: 'mallory/finops-ratio' }],
   ]) {
     for (const conclusion of ['skipped', 'failure']) {
