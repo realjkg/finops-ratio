@@ -32,17 +32,20 @@ publishes it per billing period. Readers (`ratio_reader`) see only
 | Variable | Used by | Meaning |
 |---|---|---|
 | `RATIO_DATABASE_URL` | all worker commands | login that is a member of `ratio_worker` only (refused if superuser, BYPASSRLS, member of a superuser/BYPASSRLS role, or of `ratio_owner`) |
-| `RATIO_MIGRATE_DATABASE_URL` | `migrate`, `doctor` (ledger check, read-only txn), `replay-fixtures` (fixture tenant setup/teardown) | owner/migrator login |
+| `RATIO_MIGRATE_DATABASE_URL` | `migrate`, `doctor` (ledger check, read-only txn), `replay-fixtures` (creates the fixture tenant and its sources; nothing is deleted) | owner/migrator login |
 | `RATIO_ENV` | all | `development` (default) · `test` · `staging` · `production` |
 | `RATIO_SOURCE_S3_ENDPOINT` / `_REGION` / `_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` / `_SESSION_TOKEN` / `_FORCE_PATH_STYLE` | sync/backfill/replay | where the provider export lives. No key pair ⇒ AWS SDK default credential chain. `http://` refused when `RATIO_ENV=production` |
 | `RATIO_EVIDENCE_S3_ENDPOINT` / `_REGION` / `_BUCKET` / `_PREFIX` / `_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` / `_SESSION_TOKEN` | sync/backfill/replay/replay-fixtures | evidence bucket (raw bytes, content-addressed, never deleted by code) |
 | `RATIO_LEASE_TTL_SECONDS` (300) · `RATIO_MAX_ATTEMPTS` (3) · `RATIO_RETRY_BASE_MS` (500) · `RATIO_RETRY_MAX_MS` (30000) | runs | lease and retry budget |
+| `RATIO_STALL_TIMEOUT_SECONDS` (120) · `RATIO_MAX_RUN_SECONDS` (21600) | runs | a source/evidence stream idle this long fails `SOURCE_STALLED`/`EVIDENCE_STALLED`; a run without progress this long, or older than the max run duration, stops renewing its lease (another worker can then take over) |
+| `RATIO_S3_CONNECT_TIMEOUT_MS` (10000) · `RATIO_S3_REQUEST_TIMEOUT_MS` (60000) | S3 calls | connect and time-to-response timeouts (body streaming is covered by the stall watchdog) |
 | `RATIO_INSERT_CHUNK_ROWS` (1000) · `RATIO_MAX_ROWS_PER_BATCH` (20M) · `RATIO_MAX_ARTIFACT_BYTES` (5 GiB) · `RATIO_MAX_BATCH_BYTES` (20 GiB) · `RATIO_MAX_ARTIFACTS_PER_SET` (1000) · `RATIO_TMP_DIR` | runs | limits (exceeding ⇒ failed/quarantined, never partial) |
 | `RATIO_DOCTOR_MAX_STALENESS_HOURS` (48) | doctor | freshness threshold |
 | `RATIO_REPLAY_FIXTURES_BUCKET` | replay-fixtures | bucket for synthetic source objects (source credentials need Put/List/Delete there) |
 | `RATIO_GIT_SHA` · `RATIO_ARTIFACT_DIGEST` (`sha256:<hex>`) · `RATIO_EVIDENCE_FILE` | all | evidence record metadata; JSONL copy of each record |
 
-Test-only (refused otherwise): `RATIO_ALLOW_FAKE_SOURCE=1` + `NODE_ENV=test`;
+Test-only (refused otherwise, and always refused when `RATIO_ENV` is `staging` or
+`production`): `RATIO_ALLOW_FAKE_SOURCE=1` + `NODE_ENV=test`;
 `RATIO_TEST_PAUSE_AFTER_ROWS` (only with `NODE_ENV=test`).
 
 Every command prints ONE evidence record on stdout (`{"type":"ratio.evidence", command, gitSha, artifactDigest, startedAt, finishedAt, results, pass, exitCode}`)
