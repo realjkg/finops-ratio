@@ -79,6 +79,39 @@ describe('report workbook', () => {
     expect(rows[0]['Annual Run Rate ($)']).toBe(model.rows[0].annualRunRate);
   });
 
+  it('round-trips: the workbook opens with an "Initiatives" sheet whose every cell matches the model', () => {
+    const buffer = buildReportWorkbook(FIXED);
+    const book = XLSX.read(buffer, { type: 'buffer' });
+    expect(book.SheetNames).toEqual(['Initiatives']);
+
+    const sheet = book.Sheets.Initiatives;
+    // Raw 2-D view: header row first, then one array per data row.
+    const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
+    const model = buildReportModel(FIXED);
+
+    expect(grid[0]).toEqual([...REPORT_COLUMNS]);
+    expect(grid).toHaveLength(model.rows.length + 1);
+    model.rows.forEach((row, i) => {
+      expect(grid[i + 1]).toEqual([
+        row.name,
+        row.monthlyCost,
+        row.annualRunRate,
+        row.budgetConsumedPct,
+        row.status,
+        Number(row.costEfficiency.toFixed(1)),
+        row.savingsOpportunity,
+        row.lastUpdated,
+      ]);
+    });
+
+    // Spot-check addressed cells so cell placement (not just order) is pinned.
+    expect(sheet.A1.v).toBe('Initiative Name');
+    expect(sheet.H1.v).toBe('Last Updated');
+    expect(sheet.A2.v).toBe(model.rows[0].name);
+    expect(sheet.C2.v).toBe(model.rows[0].annualRunRate);
+    expect(sheet.C2.t).toBe('n');
+  });
+
   it('auto-fits column widths', () => {
     const buffer = buildReportWorkbook(FIXED);
     const book = XLSX.read(buffer, { type: 'buffer', cellStyles: true });
