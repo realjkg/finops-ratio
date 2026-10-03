@@ -387,9 +387,11 @@ describe('round 12 L2/L4: reviewed policy shapes are exact (kills the surviving 
   });
 
   it('G2: the reviewed predicate but TO ratio_reader only is refused', async () => {
+    // Same name and predicate as the reviewed shape: only the roles differ.
     await expectPolicyRefusal(
-      onNotes('POLICY tenant_isolation_r ON ratio.notes TO ratio_reader USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id())'),
-      /policy:ratio\.notes:tenant_isolation_r:.*roles=ratio_reader:.* is not a reviewed policy/,
+      "DO $$ BEGIN EXECUTE 'DROP ' || 'POLICY tenant_isolation ON ratio.notes'; END $$;\n" +
+        onNotes('POLICY tenant_isolation ON ratio.notes TO ratio_reader USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id())'),
+      /policy:ratio\.notes:tenant_isolation:.*roles=ratio_reader:.* is not a reviewed policy/,
       { '0002_notes.up.sql': NOTES_TABLE },
     );
   });
