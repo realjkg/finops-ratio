@@ -304,13 +304,13 @@ function controlKey(control: ArtifactSetControlLike | undefined): string {
 
 /**
  * For a control-mismatch quarantine, the control key it was judged against;
- * '' for one recorded before keys were stored (never equal to a current key,
- * so it may be re-reconciled once); null for any other (data-defect) cause.
+ * null for anything else — a data-defect cause, or a reason without a
+ * recorded key (none can exist: every control quarantine records its key), which
+ * therefore stays quarantined like any other terminal quarantine.
  */
 function controlQuarantineKey(reason: string | null): string | null {
-  if (!reason || !reason.startsWith(CONTROL_QUARANTINE_CODE)) return null;
-  const m = /^RECONCILIATION_VARIANCE \[controls:([0-9a-f]{16}|none)\]/.exec(reason);
-  return m ? m[1] : '';
+  const m = reason ? /^RECONCILIATION_VARIANCE \[controls:([0-9a-f]{16}|none)\]/.exec(reason) : null;
+  return m ? m[1] : null;
 }
 
 interface ArtifactSetControlLike {
