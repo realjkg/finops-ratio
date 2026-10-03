@@ -277,4 +277,27 @@ describe('/api/v1/ai/chat — OpenAI-compatible providers', () => {
     expect(JSON.stringify(res.body)).toContain('Mistral error 429');
     expect(JSON.stringify(res.body)).not.toContain('mk-secret');
   });
+
+  it('never returns the provider response body (status only; body to the redacted log)', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'mk-secret';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('UPSTREAM-BODY-MARKER quota', { status: 429 })));
+    const res = makeRes();
+    await handler(makeReq({ headers: AUTH, body: validBody }), res);
+    expect(res.statusCode).toBe(500);
+    expect(JSON.stringify(res.body)).toContain('Mistral error 429');
+    expect(JSON.stringify(res.body)).not.toContain('UPSTREAM-BODY-MARKER');
+    warn.mockRestore();
+  });
+
+  it('does not quote a non-JSON provider body in the error', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'mk-secret';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"a": LEAKED}')));
+    const res = makeRes();
+    await handler(makeReq({ headers: AUTH, body: validBody }), res);
+    expect(res.statusCode).toBe(500);
+    expect(JSON.stringify(res.body)).not.toContain('LEAKED');
+  });
 });
