@@ -187,3 +187,12 @@ inside the publish, checkpoint-refresh and finishRun transactions makes the
 run fail (`COMMIT_ROLLED_BACK`); nothing is published, the checkpoint does
 not move, the run is never reported finished.
 
+Overlapping secrets: `redact.test.ts` — two (both orders), three-way,
+substring-of-another and self-overlapping secrets through redact,
+scrubLiterals and jsonLineRedactorFor: no 3-char remainder of any secret.
+Quarantine commit tag: `commitTag.db.test.ts`, a caught error after each
+state-changing statement of the quarantine transaction — the run fails, the
+batch stays staged, nothing recorded or published. Query rule alone
+(`redactCap.test.ts`): uncapped 16 KB median < 25 ms and
+time(48 KB)/time(16 KB) < 6.
+

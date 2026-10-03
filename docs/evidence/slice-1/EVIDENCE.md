@@ -78,7 +78,11 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 59 | 5ab5972 | test: COMMIT answered with ROLLBACK must fail the run — publish, checkpoint, run bookkeeping (red: 3 failed, `r8-red.txt`) | tests |
 | 60 | d92541f | test: the publish case compares state like P1 (a failed publish leaves the new batch staged; my first version compared the whole batch list — a test defect, still red on the unfixed code) | tests |
 | 61 | b8a78aa | fix: `workerTransaction` checks the COMMIT reply (`COMMIT_ROLLED_BACK`); every worker transaction uses it | impl |
-| 62 | (final) | docs: evidence for this round (§19, §20) | docs |
+| 62 | e0a1057 | docs: evidence for L-p/L-q and the COMMIT-tag check (§19, §20) | docs |
+| 63 | 1ae3e2d | test: overlapping secrets (3 entry points), quarantine commit-tag (parametrized), uncapped query-rule linearity (red: 12 failed, `r9-red.txt`; the quarantine cases are green by design and proven by mutation) | tests |
+| 64 | 89e58fc | fix: covered-run literal redaction (overlapping secrets), `QUERY_RULE` exported | impl |
+| 65 | 6a1244b | test: query-rule scaling check at 48/16 KB with adaptive repetitions (the first version took 400 s to fail under R6) | test |
+| 66 | (final) | docs: evidence for this round (§21) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -1171,6 +1175,98 @@ The L-p/L-q commit `5362489` also passed test:db x3 on its own: 23 files /
 340 each, plus the negatives.
 
 **Manual end-to-end** (built CLI at b8a78aa, database `ratio_s1_e2e_852ac99c`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 21. Challenger Lows on e0a1057 (overlapping secrets, quarantine commit tag, query-rule linearity)
+
+**Finding 1 — overlapping distinct secrets leaked.** This was a regression
+from 3d8f277. The single combined alternation matched leftmost: it consumed
+one secret and left the rest of an overlapping one behind. With secrets
+`admin;x` and `x;secret;pw`, the text `admin;x;secret;pw` became
+`[redacted];secret;pw` through `redact()`, `scrubLiterals()` and
+`jsonLineRedactorFor`.
+
+Fix (`89e58fc`, `src/ingest/redact.ts`):
+- Every `indexOf` hit of every secret form, including overlapping hits of
+  the same form, goes into a difference array.
+- Each maximal covered run is replaced exactly once, so every character
+  covered by any occurrence of any secret is redacted.
+- Cost is linear in text length times the number of forms. The redaction
+  linearity guard and the per-string budgets still pass.
+- The cap's straddle check uses the same covered runs. A chain of
+  overlapping secrets across the cut is followed step by step and dropped
+  whole.
+
+Tests (`redact.test.ts`): five cases, each run through all three entry
+points (15 tests):
+- two overlapping secrets, in both orders;
+- a three-way overlap (`one;two` / `two;three;four` / `four;five`);
+- a secret that is a substring of another;
+- self-overlapping occurrences.
+
+No 3-character substring of any secret may survive, in the raw line or in
+the parsed keys and values. Red: 9 failed. The substring and self-overlap
+cases already passed and are kept as coverage.
+
+**Finding 2 — quarantine transaction commit tag** (`commitTag.db.test.ts`,
+parametrized). A caught error is injected after each state-changing
+statement of the quarantine transaction:
+- the validation-error insert;
+- the fact deletion;
+- the staged → quarantined update.
+
+In every case the run fails, the batch stays `staged`, no validation errors
+are recorded, and view, publications and checkpoint are unchanged. After an
+earlier statement, the next statement already fails with SQLSTATE 25P02
+(transaction aborted). After the last statement, only the COMMIT reply
+shows the failure, and the run fails with `COMMIT_ROLLED_BACK`.
+
+**Finding 3 — the query rule is linear on its own** (`redactCap.test.ts`).
+`QUERY_RULE` is exported and is the same object `redact` uses. It is applied
+uncapped to `a://` repeated:
+- a sanity check that a query is redacted and a query-less URL is unchanged;
+- a 16 KB median under 25 ms;
+- a size-scaling check: the ratio of medians time(48 KB)/time(16 KB) must
+  stay under 6 (about 3 when linear, about 9 when quadratic). Repetitions
+  are sized for at least about 5 ms per sample. Fixed code measures 2.4–2.9.
+
+My first scaling version (64/16 KB, 20 fixed repetitions) took 400 s to fail
+under R6. `6a1244b` fixed that; under R6 it now fails in 23 s with a ratio
+of 7.5.
+
+| Mutation | Result |
+|---|---|
+| M-overlap: leftmost single-alternation replacement (the 3d8f277 algorithm) | 9 fail: every entry point × the two-overlap and three-way cases (`mut-overlap.txt`) |
+| drop the COMMIT check | 4 fail: publish, checkpoint, finishRun and quarantine (last statement). The two quarantine cases after earlier statements still fail visibly through 25P02, as they should (`mut-commit2.txt`) |
+| R6: restore the old quadratic query rule | 2 fail: 16 KB uncapped median 346 ms; scaling ratio 7.46 > 6 (`mut-R6.txt`) |
+
+**Gates at 6a1244b:**
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 82 files / 1975 passed |
+| `test:db` x3 (PG16 tools as in CI) | 24 files / **346 passed** each (235 s, 221 s, 227 s; load average about 16 from other checkouts); 0 object-store errors |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 327 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| change outside `src/ingest` and `docs/evidence/slice-1` since 0e80eff | none |
+| objects left in `ratio-s1-test` | 0 |
+
+The four `ratio_test_*` databases present afterwards belong to another live
+vitest run (a scratch compat checkout).
+
+**Manual end-to-end** (built CLI at 6a1244b, database `ratio_s1_e2e_5a6f8299`):
 - migrate status went 3 -> 0 -> 0.
 - sync published and reconciled; the second sync reported `skipped_unchanged`.
 - Reader totals equal the control totals (55 / `30.8272954899`,
