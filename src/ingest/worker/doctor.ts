@@ -135,6 +135,8 @@ async function sourceChecks(pool: ReturnType<typeof createWorkerPool>, tenantRaw
       const problems: string[] = [];
       if (!s.last_success) problems.push('NEVER_SUCCEEDED: no successful run');
       else if (Number(s.age_hours) > maxStalenessHours) problems.push(`STALE: last successful run older than ${maxStalenessHours}h`);
+      // Successful runs that never published anything are not a healthy source (review M4, third round).
+      if (Number(s.published_periods) === 0) problems.push('NEVER_PUBLISHED: no billing period has ever been published');
       if (last && (last.status === 'failed' || last.status === 'abandoned')) problems.push(`LAST_RUN_${last.status.toUpperCase()}: ${last.error_code ?? 'unknown'}`);
       if (last && last.status === 'running' && last.live === false) problems.push('RUN_LEASE_EXPIRED: a run is still marked running with an expired lease');
       return problems.length ? { name, status: 'fail', detail: redact(problems.join('; '), secrets), data } : { name, status: 'pass', data };
