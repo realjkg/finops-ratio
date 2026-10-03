@@ -1,14 +1,18 @@
 // `worker replay-fixtures`: runs the deterministic SYNTHETIC fixture scenarios
 // (clean load, idempotent rerun, restatement supersession, reconciliation
-// variance rejection, crash mid-load + recovery, zombie fencing) against an
-// isolated tenant created for the run, through the real S3 source and evidence
-// store, verifies each outcome, then deletes that tenant's database rows and
-// the uploaded synthetic source objects. Evidence objects are retained (D6: no
-// evidence deletion code in this cycle). Refused unless RATIO_ENV is staging/test
-// (checked by the CLI before anything connects).
+// variance rejection, crash mid-load + recovery, zombie fencing) against a
+// FRESH isolated tenant created for this invocation (slug
+// fixture-<utc-timestamp>-<random>, sources labelled SYNTHETIC), through the
+// real S3 source and evidence store, and verifies each outcome.
+//
+// Nothing is deleted (orchestrator decision: no purge/delete path this cycle;
+// deletion is retention-class). The tenant's rows, its evidence objects and the
+// uploaded synthetic source objects stay in place and are reported in the
+// result, so staging accumulates fixture tenants until an owner-approved
+// retention slice. Refused unless RATIO_ENV is staging/test (CLI checks first).
 import crypto from 'crypto';
 import { Client, type Pool } from 'pg';
-import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { IngestError, errorCodeOf, messageOf } from '../errors';
 import { redact } from '../redact';
 import { withTenantTransaction } from '../db/tenant';
@@ -27,8 +31,10 @@ export interface ScenarioResult {
 export interface ReplayFixturesResult {
   pass: boolean;
   tenantId: string;
+  tenantSlug: string;
   scenarios: ScenarioResult[];
-  cleanup: { pass: boolean; detail?: string };
+  /** What this run left behind (never deleted by code). */
+  retained: { tenantId: string; sourcePrefix: string; evidencePrefix: string; note: string };
 }
 
 const EXPORT = 'focus-export';
@@ -45,7 +51,10 @@ export async function runReplayFixtures(opts: {
 }): Promise<ReplayFixturesResult> {
   const log = opts.log ?? (() => undefined);
   const tenantId = crypto.randomUUID();
-  const prefixOf = (key: string) => `ratio-replay-fixtures/${tenantId}/${key}`;
+  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+  const tenantSlug = `fixture-${stamp}-${crypto.randomBytes(4).toString('hex')}`;
+  const sourcePrefix = `ratio-replay-fixtures/${tenantId}`;
+  const prefixOf = (key: string) => `${sourcePrefix}/${key}`;
   const scenarios: ScenarioResult[] = [];
   const admin = new Client({ connectionString: opts.adminUrl, application_name: 'ratio-replay-fixtures' });
   admin.on('error', () => undefined);
@@ -124,14 +133,13 @@ export async function runReplayFixtures(opts: {
     log('replay_fixtures.scenario', { name, pass: scenarios.at(-1)!.pass });
   };
 
-  let cleanup: ReplayFixturesResult['cleanup'];
   try {
     await asTenant(admin, async () => {
-      await admin.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2)`, [tenantId, `fixture-${tenantId.slice(0, 8)}`]);
+      await admin.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2)`, [tenantId, tenantSlug]);
       for (const key of SOURCES) {
         await admin.query(
           `INSERT INTO ratio.sources (tenant_id, id, source_key, kind, display_name, coverage, declared_focus_version, config)
-           VALUES ($1, $2, $3, 'focus_file', 'Synthetic replay fixture', 'public_cloud', '1.0', $4)`,
+           VALUES ($1, $2, $3, 'focus_file', 'SYNTHETIC replay-fixtures data (not real provider data)', 'public_cloud', '1.0', $4)`,
           [tenantId, crypto.randomUUID(), key, JSON.stringify({ layout: 'aws-data-exports', bucket: opts.bucket, prefix: prefixOf(key), exportName: EXPORT })],
         );
       }
@@ -223,43 +231,19 @@ export async function runReplayFixtures(opts: {
       return { pass, detail: { zombie: z, winner: winner.status } };
     });
   } finally {
-    cleanup = await cleanUp(admin, tenantId, opts, prefixOf);
     await admin.end().catch(() => undefined);
   }
-  const pass = scenarios.length === 6 && scenarios.every((s) => s.pass) && cleanup.pass;
-  return { pass, tenantId, scenarios, cleanup };
-}
-
-async function cleanUp(
-  admin: Client,
-  tenantId: string,
-  opts: { sourceClient: S3Client; bucket: string; secrets?: readonly string[] },
-  prefixOf: (k: string) => string,
-): Promise<{ pass: boolean; detail?: string }> {
-  const problems: string[] = [];
-  try {
-    await admin.query('BEGIN');
-    await admin.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [tenantId]);
-    for (const table of ['cost_facts', 'ingest_validation_errors', 'period_publications', 'source_checkpoints', 'ingest_artifacts', 'ingest_batches', 'sync_runs', 'sources']) {
-      await admin.query(`DELETE FROM ratio.${table} WHERE tenant_id = $1`, [tenantId]);
-    }
-    await admin.query(`DELETE FROM ratio.tenants WHERE id = $1`, [tenantId]);
-    await admin.query('COMMIT');
-  } catch (e) {
-    await admin.query('ROLLBACK').catch(() => undefined);
-    problems.push(`database cleanup failed: ${errorCodeOf(e)} ${redact(messageOf(e), opts.secrets ?? []).slice(0, 300)}`);
-  }
-  try {
-    for (const key of SOURCES) {
-      let token: string | undefined;
-      do {
-        const r = await opts.sourceClient.send(new ListObjectsV2Command({ Bucket: opts.bucket, Prefix: `${prefixOf(key)}/`, ContinuationToken: token }));
-        for (const o of r.Contents ?? []) if (o.Key) await opts.sourceClient.send(new DeleteObjectCommand({ Bucket: opts.bucket, Key: o.Key }));
-        token = r.IsTruncated ? r.NextContinuationToken : undefined;
-      } while (token);
-    }
-  } catch (e) {
-    problems.push(`source object cleanup failed: ${errorCodeOf(e)}`);
-  }
-  return problems.length ? { pass: false, detail: problems.join('; ') } : { pass: true };
+  const pass = scenarios.length === 6 && scenarios.every((sc) => sc.pass);
+  return {
+    pass,
+    tenantId,
+    tenantSlug,
+    scenarios,
+    retained: {
+      tenantId,
+      sourcePrefix,
+      evidencePrefix: `evidence/${tenantId}/`,
+      note: 'fixture tenant rows, evidence objects and synthetic source objects are retained; cleanup awaits an owner-approved retention slice',
+    },
+  };
 }
