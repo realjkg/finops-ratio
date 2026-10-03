@@ -36,6 +36,11 @@ function runCli(env: Record<string, string>) {
   });
 }
 
+// Each case spawns the built CLI (four times for the refusal case). Process
+// start-up alone can exceed vitest's 5 s default on a loaded host, so the
+// timeout is explicit (round 16; same budget as each spawnSync below).
+const SPAWN_TIMEOUT_MS = 60_000;
+
 describe('built CLI crash path (piped stderr)', () => {
   for (const kind of ['uncaught', 'rejection'] as const) {
     it(`${kind}: exactly one redacted JSON line arrives on stderr and the exit code is 1 (large payload)`, () => {
@@ -53,7 +58,7 @@ describe('built CLI crash path (piped stderr)', () => {
       expect(doc.error.message).toContain('…[TRUNCATED]');
       for (const f of [PASSWORD, encodeURIComponent(PASSWORD), JSON.stringify(PASSWORD).slice(1, -1), 'ratio_user']) expect(lines[0]).not.toContain(f);
       expect(lines[0]).toContain('[redacted]');
-    });
+    }, SPAWN_TIMEOUT_MS);
   }
 
   it('writeAllSync delivers a > 2 MB line through a pipe even when process.exit() follows immediately', () => {
@@ -64,10 +69,8 @@ describe('built CLI crash path (piped stderr)', () => {
     expect(r.status).toBe(1);
     expect(r.stderr.length).toBe(2_100_001);
     expect(r.stderr.endsWith('x\n')).toBe(true);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
-  // Four sequential spawns of the built CLI (each failing to connect): process
-  // start-up work, not a race — the 5 s default timed out under a loaded host.
   it('the crash hook is refused outside RATIO_ENV=test (staging, production, unset): no process.* line', () => {
     for (const env of [{ RATIO_ENV: 'staging' }, { RATIO_ENV: 'production' }, { RATIO_ENV: 'test', NODE_ENV: 'production' }, {}] as Array<Record<string, string>>) {
       const r = runCli({ ...env, RATIO_TEST_CRASH: 'uncaught' });
@@ -77,5 +80,5 @@ describe('built CLI crash path (piped stderr)', () => {
       expect(r.status).toBe(1);
       expect(all).not.toContain('SuperSecretPw9');
     }
-  }, 60_000);
+  }, SPAWN_TIMEOUT_MS); // four sequential spawns
 });

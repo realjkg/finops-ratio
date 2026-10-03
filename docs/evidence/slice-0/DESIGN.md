@@ -857,3 +857,108 @@ CASCADE` after apply left `--status` at `matches: true`.
   COMMIT command tag and throw `TRANSACTION_ROLLED_BACK` (a `MigrationError` in
   the runner). These are the only COMMITs Slice 0 issues. Slice 1's worker
   transactions are reviewed by its owner.
+
+## 25. Round 16 — Copilot on 289db6a (2 High, 1 Medium) + challenger round-15 Lows
+
+- **H1: every privilege category for deployment logins.** Before this round,
+  members of the ratio roles were checked on schema `ratio` objects only. A
+  `LOGIN IN ROLE ratio_worker` that was granted `SET ON PARAMETER
+  session_replication_role` passed the check. It could then switch its own
+  session to `replica`, which skips the RT001–RT003 triggers and FK
+  enforcement. A real login reproduces this: it deletes the facts of a
+  PUBLISHED batch.
+  - **Who is checked now:** `ratio_owner` and every direct or transitive member
+    of a ratio role (`pg_auth_members` graph).
+  - **What is checked:** every category, the same as for `ratio_reader` /
+    `ratio_worker`:
+    - database, parameter, FDW, server and large-object privileges;
+    - relations, functions and schemas in every non-system schema;
+    - new this round: **tablespace** CREATE, **language** USAGE and **type**
+      USAGE. Language and type USAGE are reported only *beyond PUBLIC*:
+      PUBLIC holds USAGE on every language and type by default, so a grant
+      adds nothing until PUBLIC's is revoked;
+    - system-schema ACL entries.
+  - **What is allowed:**
+    - a worker or reader member: the reviewed set of each ratio role it belongs
+      to;
+    - the owner side (`ratio_owner` and its members), as an owner decision:
+      everything in `ratio`, plus `REVIEWED_OWNER_PRIVILEGES` (database CREATE,
+      CONNECT and TEMPORARY, public USAGE and CREATE), plus the ledger
+      `public.schema_migrations`. The migrator may own the database: `CREATE
+      SCHEMA` needs CREATE on it, and a database owner also holds CREATE on
+      `public` through `pg_database_owner`.
+  - **Unchanged:** cluster roles that are not members of a ratio role are
+    still checked on `ratio` objects only, and may hold nothing there. That
+    check still catches a renamed ratio role.
+  - The new categories also apply to `ratio_reader` and `ratio_worker`.
+    `REVIEWED_PRIVILEGES` is unchanged: a fresh database has none of these
+    privileges beyond PUBLIC.
+  - **No regeneration was needed.** The foundation manifest pins only the
+    `ratio`-scope privileges, and the PUBLIC baseline covers PUBLIC only. The
+    drift tests pass unchanged.
+- **H2: privileges held through a second role.** Every ACL-based check now
+  resolves each checked role's **upward membership closure**. That is every
+  role it can reach through any `pg_auth_members` edge, transitively:
+  - an INHERIT edge gives the role's privileges directly;
+  - a SET edge gives them through `SET ROLE`;
+  - an ADMIN edge gives them by granting the role to oneself.
+
+  `has_*_privilege()` alone follows only INHERIT edges, and the round-13
+  system-ACL join matched only the checked role's own OID.
+  - **Where the closure applies:** the ratio roles' effective privileges, the
+    member and non-member scans, and system-schema ACL entries. A system-ACL
+    entry reached this way is reported `(via <role>)`.
+  - **Superusers in a closure** are not enumerated, because they hold
+    everything. Reaching one is its own finding: a member that can assume a
+    SUPERUSER, BYPASSRLS or REPLICATION role is refused, and so is one that can
+    assume a CREATEROLE or CREATEDB role if it is a worker or reader member.
+    The message is `role X (member of P) can assume Y, which is ATTR`.
+  - **Server-file roles.** A member that can assume `pg_read_server_files`,
+    `pg_write_server_files` or `pg_execute_server_program` is refused too.
+    Those powers are outside every ACL.
+- **M1: PUBLIC revokes on pre-existing objects.** `REVOKE … FROM PUBLIC` used
+  to be expand unconditionally. On a pre-existing object it can break the
+  release that is still running: for example, `REVOKE CONNECT ON DATABASE
+  ratio_prod FROM PUBLIC` stops its logins reconnecting.
+  - It is now expand only when **every** object it names was created earlier
+    in the same file:
+    - schemas, and `ALL … IN SCHEMA` of a new schema;
+    - tables, views, materialized views and sequences;
+    - types and domains;
+    - functions and procedures, matched by IN-argument signature, so a
+      pre-existing overload does not count.
+  - Creations with `IF NOT EXISTS` or `OR REPLACE` do not count, because the
+    object may already exist.
+  - Everything else is **contract**: database, language, parameter, large
+    object, foreign objects, tablespace, a pre-existing `ratio` object, or a
+    system object.
+  - 0001 is unchanged and still expand: its two revokes are on its own new
+    schema and that schema's functions.
+  - **Test tightened.** The round-4 test that revoked `ALL FUNCTIONS IN SCHEMA
+    public` (a pre-existing schema) now revokes the functions it created by
+    signature. The old statement is in the contract list.
+- **L1 (round 15): CREATEROLE on the migrator.** The migrator login needs
+  CREATEROLE only on the **first** deploy to a cluster, when 0001 creates the
+  three ratio roles. Recommendation: grant it for that first migration only,
+  then `ALTER ROLE <migrator> NOCREATEROLE`. With CREATEROLE an owner login
+  could create roles and grant them `ratio_worker` or `ratio_reader`. The
+  check would then judge those roles as members, but it should not have to.
+  CREATEDB is never needed.
+- **L2 (round 15).** The seed fixture (`testing/fixtures.ts`) checks its own
+  COMMIT tag and throws `TRANSACTION_ROLLED_BACK`.
+- **L3 (round 15).** A fast test (`testing/vitestConfigs.test.ts`) asserts
+  that:
+  - every `*.serial.db.test.ts` file runs in the serial phase only (included by
+    `vitest.db.serial.config.ts`, excluded by `vitest.db.config.ts` and by the
+    fast suite);
+  - `memberLogin` and `memberParameter` are among them;
+  - the serial config is `fileParallelism: false`;
+  - `test:db` chains both phases.
+- **Spawn-based tests.** `cli.process.test.ts` spawns the built CLI (four
+  times in the refusal case). Its three tests now carry an explicit 60 s
+  timeout, because process start-up on a loaded host exceeded vitest's 5 s
+  default. The assertions are unchanged.
+- **Test isolation.** All of round 16's DB runs used a private PG16 cluster
+  (initdb into `/tmp/r16pg`, 127.0.0.1:55520, TCP only, no Unix socket). The
+  cluster was stopped and deleted afterwards. The shared 55432 cluster was not
+  used.

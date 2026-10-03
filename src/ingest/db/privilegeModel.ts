@@ -34,9 +34,16 @@ export const RATIO_ROLES = ['ratio_owner', 'ratio_worker', 'ratio_reader'] as co
  *   parameter:<name>:<SET|ALTER SYSTEM>      GRANT … ON PARAMETER
  *   foreign_data_wrapper:<name>:USAGE, foreign_server:<name>:USAGE
  *   large_object:<oid>:<PRIV|OWNER>
- * Relations and functions count only in schemas the role can use (without
- * USAGE they are unreachable; USAGE itself is checked). pg_catalog and
- * information_schema are the system's and are not checked.
+ *   tablespace:<name>:CREATE                                (round 16)
+ *   language:<name>:USAGE, type:<schema>.<name>:USAGE        (round 16; only
+ *     when PUBLIC does NOT hold it — PUBLIC holds USAGE on every language and
+ *     type by default, so a grant is an extension only beyond PUBLIC)
+ * Relations, functions and types count only in schemas the role can use
+ * (without USAGE they are unreachable; USAGE itself is checked). pg_catalog
+ * and information_schema are the system's and are not checked here (explicit
+ * ACL entries there are, see systemAclViolations).
+ * "Hold" means: the role itself OR any role in its upward membership closure
+ * (every role it can inherit from or SET ROLE to, transitively — round 16 H2).
  */
 export const REVIEWED_PRIVILEGES: Readonly<Record<CheckedRole, readonly string[]>> = {
   ratio_reader: [
@@ -160,7 +167,16 @@ function privilegeQuery(ratioOnly: boolean): string {
      SELECT ro.oid, 'large_object:' || lo.oid::text || ':' || a.privilege_type
        FROM roles ro CROSS JOIN pg_catalog.pg_largeobject_metadata lo
        CROSS JOIN LATERAL pg_catalog.aclexplode(lo.lomacl) a
-      WHERE a.grantee = 0 OR pg_catalog.pg_has_role(ro.oid, a.grantee, 'USAGE')`;
+      WHERE a.grantee = 0 OR pg_catalog.pg_has_role(ro.oid, a.grantee, 'USAGE')
+     UNION ALL
+     SELECT ro.oid, 'tablespace:' || ts.spcname || ':CREATE'
+       FROM roles ro CROSS JOIN pg_catalog.pg_tablespace ts
+      WHERE pg_catalog.has_tablespace_privilege(ro.oid, ts.oid, 'CREATE')
+     UNION ALL
+     SELECT ro.oid, 'language:' || l.lanname || ':USAGE'
+       FROM roles ro CROSS JOIN pg_catalog.pg_language l
+      WHERE pg_catalog.has_language_privilege(ro.oid, l.oid, 'USAGE')
+        AND NOT pg_catalog.has_language_privilege('public', l.oid, 'USAGE')`;
   return `
      schemas AS (
        SELECT n.oid, n.nspname FROM pg_catalog.pg_namespace n WHERE ${nsp}
@@ -196,21 +212,64 @@ function privilegeQuery(ratioOnly: boolean): string {
      SELECT ro.oid, 'function:' || ${FN_NAME}
        FROM roles ro CROSS JOIN pg_catalog.pg_proc p JOIN schemas n ON n.oid = p.pronamespace
       WHERE pg_catalog.has_schema_privilege(ro.oid, n.oid, 'USAGE')
-        AND pg_catalog.has_function_privilege(ro.oid, p.oid, 'EXECUTE')${extra}`;
+        AND pg_catalog.has_function_privilege(ro.oid, p.oid, 'EXECUTE')
+     UNION ALL
+     SELECT ro.oid, 'type:' || s.nspname || '.' || t.typname || ':USAGE'
+       FROM roles ro CROSS JOIN pg_catalog.pg_type t JOIN schemas s ON s.oid = t.typnamespace
+      WHERE NOT (t.typelem <> 0 AND t.typlen = -1) -- array types follow their element type
+        AND pg_catalog.has_schema_privilege(ro.oid, s.oid, 'USAGE')
+        AND pg_catalog.has_type_privilege(ro.oid, t.oid, 'USAGE')
+        AND NOT pg_catalog.has_type_privilege('public', t.oid, 'USAGE')${extra}`;
+}
+
+/**
+ * (principal oid, priv) for every principal in $1 (oid[]): what the principal
+ * itself or ANY role in its upward membership closure holds (round 16 H2).
+ * The closure follows every pg_auth_members edge upward, whatever its
+ * INHERIT / SET / ADMIN options: an INHERIT edge gives the privileges
+ * directly, a SET edge through SET ROLE, an ADMIN edge by granting the role to
+ * oneself. has_*_privilege() alone only follows INHERIT edges. Superuser roles
+ * in a closure are not enumerated (they hold everything; reaching one is
+ * reported by the member-attribute rule).
+ */
+function closurePrivilegeSql(ratioOnly: boolean): string {
+  return `WITH RECURSIVE up(principal, oid) AS (
+       SELECT p, p FROM pg_catalog.unnest($1::oid[]) AS p
+       UNION
+       SELECT up.principal, m.roleid FROM pg_catalog.pg_auth_members m JOIN up ON m.member = up.oid
+     ),
+     roles AS (
+       SELECT DISTINCT up.oid FROM up JOIN pg_catalog.pg_roles r ON r.oid = up.oid WHERE NOT r.rolsuper
+     ),
+     privs AS (WITH ${privilegeQuery(ratioOnly)})
+     SELECT DISTINCT up.principal::text AS principal, pv.priv FROM up JOIN privs pv(oid, priv) ON pv.oid = up.oid`;
+}
+
+async function closurePrivileges(client: ClientBase, principals: readonly string[], ratioOnly: boolean): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (!principals.length) return out;
+  const r = await client.query<{ principal: string; priv: string }>(closurePrivilegeSql(ratioOnly), [principals]);
+  for (const row of r.rows) {
+    const list = out.get(row.principal) ?? [];
+    list.push(row.priv);
+    out.set(row.principal, list);
+  }
+  return out;
 }
 
 /** Effective privileges of each checked role that exists, in REVIEWED_PRIVILEGES form. */
 export async function effectivePrivileges(client: ClientBase): Promise<Record<CheckedRole, string[]>> {
   await pinSearchPath(client);
-  const r = await client.query<{ role: CheckedRole; priv: string }>(
-    `WITH roles AS (
-       SELECT oid, rolname AS role FROM pg_catalog.pg_roles WHERE rolname IN ('ratio_reader', 'ratio_worker')
-     ),
-     privs AS (WITH ${privilegeQuery(false)})
-     SELECT ro.role, pv.priv FROM privs pv(oid, priv) JOIN roles ro ON ro.oid = pv.oid`,
+  const roles = await client.query<{ oid: string; role: CheckedRole }>(
+    `SELECT oid::text AS oid, rolname AS role FROM pg_catalog.pg_roles WHERE rolname IN ('ratio_reader', 'ratio_worker')`,
+  );
+  const privs = await closurePrivileges(
+    client,
+    roles.rows.map((r) => r.oid),
+    false,
   );
   const out: Record<CheckedRole, string[]> = { ratio_reader: [], ratio_worker: [] };
-  for (const row of r.rows) out[row.role].push(row.priv);
+  for (const { oid, role } of roles.rows) out[role].push(...(privs.get(oid) ?? []));
   return out;
 }
 
@@ -297,30 +356,133 @@ async function roleViolations(client: ClientBase): Promise<string[]> {
     if (m.parent !== 'ratio_owner' && m.rolcreatedb) bad.push('CREATEDB');
     for (const attr of bad) problems.push(`role ${m.member} (member of ${m.parent}) must not be ${attr}`);
   }
-  // Every other role (not superuser, not predefined pg_*, not a ratio role, not
-  // a member of ratio_owner) may hold on schema ratio and its objects at most
-  // what the ratio_reader / ratio_worker roles it belongs to are reviewed for.
-  // This is what catches a renamed ratio role (it keeps its grants and its
-  // members under the new name) and LOGIN members with extra grants.
-  const others = await client.query<{ role: string; priv: string; in_reader: boolean; in_worker: boolean }>(
-    `WITH ratio AS (
-       SELECT oid, rolname FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])
-     ),
-     roles AS (
-       SELECT r.oid, r.rolname AS role FROM pg_catalog.pg_roles r
-        WHERE NOT r.rolsuper AND r.rolname !~ '^pg_' AND r.oid NOT IN (SELECT oid FROM ratio)
-          AND NOT EXISTS (SELECT 1 FROM ratio o WHERE o.rolname = 'ratio_owner' AND pg_catalog.pg_has_role(r.oid, o.oid, 'MEMBER'))
-     ),
-     privs AS (WITH ${privilegeQuery(true)})
-     SELECT ro.role, pv.priv,
-            EXISTS (SELECT 1 FROM ratio x WHERE x.rolname = 'ratio_reader' AND pg_catalog.pg_has_role(ro.oid, x.oid, 'MEMBER')) AS in_reader,
-            EXISTS (SELECT 1 FROM ratio x WHERE x.rolname = 'ratio_worker' AND pg_catalog.pg_has_role(ro.oid, x.oid, 'MEMBER')) AS in_worker
-       FROM privs pv(oid, priv) JOIN roles ro ON ro.oid = pv.oid ORDER BY 1, 2`,
+  // Roles a member must not be able to reach by membership (round 16 H2): an
+  // INHERIT / SET / ADMIN path to a SUPERUSER, BYPASSRLS or REPLICATION role
+  // (CREATEROLE / CREATEDB too for worker/reader members) is the attribute
+  // itself; the server-file predefined roles read/write files or run programs
+  // as the server's OS user, outside every ACL.
+  const reach = await client.query<{
+    member: string;
+    parent: string;
+    target: string;
+    rolsuper: boolean;
+    rolbypassrls: boolean;
+    rolreplication: boolean;
+    rolcreaterole: boolean;
+    rolcreatedb: boolean;
+  }>(
+    `WITH RECURSIVE ratio AS (SELECT oid, rolname FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])),
+          mem(member, top) AS (
+            SELECT m.member, r.rolname FROM pg_catalog.pg_auth_members m JOIN ratio r ON r.oid = m.roleid
+            UNION
+            SELECT m.member, mem.top FROM pg_catalog.pg_auth_members m JOIN mem ON m.roleid = mem.member
+          ),
+          up(member, top, oid) AS (
+            SELECT mem.member, mem.top, m.roleid FROM mem JOIN pg_catalog.pg_auth_members m ON m.member = mem.member
+            UNION
+            SELECT up.member, up.top, m.roleid FROM up JOIN pg_catalog.pg_auth_members m ON m.member = up.oid
+          )
+     SELECT DISTINCT mr.rolname AS member, up.top AS parent, t.rolname AS target,
+            t.rolsuper, t.rolbypassrls, t.rolreplication, t.rolcreaterole, t.rolcreatedb
+       FROM up JOIN pg_catalog.pg_roles t ON t.oid = up.oid JOIN pg_catalog.pg_roles mr ON mr.oid = up.member
+      WHERE up.oid <> up.member AND up.oid NOT IN (SELECT oid FROM ratio)
+      ORDER BY 1, 2, 3`,
     [RATIO_ROLES],
   );
-  for (const { role, priv, in_reader, in_worker } of others.rows) {
-    const allowed = (in_reader && REVIEWED_PRIVILEGES.ratio_reader.includes(priv)) || (in_worker && REVIEWED_PRIVILEGES.ratio_worker.includes(priv));
-    if (!allowed) problems.push(`${role} holds ${priv} beyond the reviewed set of the ratio roles it belongs to`);
+  for (const m of reach.rows) {
+    const bad: string[] = [];
+    if (m.rolsuper) bad.push('SUPERUSER');
+    if (m.rolbypassrls) bad.push('BYPASSRLS');
+    if (m.rolreplication) bad.push('REPLICATION');
+    if (m.parent !== 'ratio_owner' && m.rolcreaterole) bad.push('CREATEROLE');
+    if (m.parent !== 'ratio_owner' && m.rolcreatedb) bad.push('CREATEDB');
+    for (const attr of bad) problems.push(`role ${m.member} (member of ${m.parent}) can assume ${m.target}, which is ${attr}`);
+    if (SERVER_FILE_ROLES.includes(m.target)) {
+      problems.push(`role ${m.member} (member of ${m.parent}) can assume ${m.target} (server file / program access is never reviewed)`);
+    }
+  }
+  problems.push(...(await memberPrivilegeViolations(client)));
+  return problems;
+}
+
+/** Predefined roles whose powers are outside every ACL (server files, server programs). */
+export const SERVER_FILE_ROLES: readonly string[] = ['pg_read_server_files', 'pg_write_server_files', 'pg_execute_server_program'];
+
+/**
+ * What a member of ratio_owner (the migrator login) — and ratio_owner itself —
+ * may hold OUTSIDE schema ratio (round 16 H1). Inside ratio it owns
+ * everything. The migrator may own the database (CREATE SCHEMA needs CREATE
+ * on it; a database owner also holds CREATE on schema public through
+ * pg_database_owner) and the migration ledger it creates in public.
+ */
+export const REVIEWED_OWNER_PRIVILEGES: readonly string[] = [
+  'database:CREATE',
+  'database:CONNECT',
+  'database:TEMPORARY',
+  'schema:public:USAGE',
+  'schema:public:CREATE',
+];
+const OWNER_LEDGER = /^relation:public\.schema_migrations:/;
+const RATIO_SCOPE = /^(schema:ratio:|relation:ratio\.|function:ratio\.|type:ratio\.)/;
+
+/**
+ * Privileges of every role other than ratio_reader / ratio_worker (those are
+ * checked against REVIEWED_PRIVILEGES directly), each resolved through its
+ * upward membership closure (round 16 H2):
+ *   - ratio_owner and every DIRECT OR TRANSITIVE member of a ratio role
+ *     (pg_auth_members graph; superusers are refused by the attribute rule):
+ *     EVERY category (round 16 H1) — a LOGIN member of ratio_worker granted
+ *     SET on session_replication_role could otherwise switch to replica and
+ *     skip the RT triggers and FKs. Allowed: the reviewed set of each ratio
+ *     role it belongs to; on the owner side also everything in schema ratio
+ *     and REVIEWED_OWNER_PRIVILEGES (+ the ledger).
+ *   - every other cluster role (not superuser, not predefined pg_*, not a
+ *     ratio role or member): schema ratio and its objects only, where it may
+ *     hold nothing. This catches a renamed ratio role (it keeps its grants and
+ *     members under the new name). Other databases' and the cluster's own
+ *     roles are otherwise not this check's business.
+ */
+async function memberPrivilegeViolations(client: ClientBase): Promise<string[]> {
+  const roles = await client.query<{ oid: string; role: string; is_member: boolean; owner_side: boolean; in_reader: boolean; in_worker: boolean }>(
+    `WITH RECURSIVE ratio AS (SELECT oid, rolname FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])),
+          mem(member, top) AS (
+            SELECT m.member, r.rolname FROM pg_catalog.pg_auth_members m JOIN ratio r ON r.oid = m.roleid
+            UNION
+            SELECT m.member, mem.top FROM pg_catalog.pg_auth_members m JOIN mem ON m.roleid = mem.member
+          )
+     SELECT r.oid::text AS oid, r.rolname AS role,
+            r.rolname = 'ratio_owner' OR EXISTS (SELECT 1 FROM mem WHERE mem.member = r.oid) AS is_member,
+            r.rolname = 'ratio_owner' OR EXISTS (SELECT 1 FROM mem WHERE mem.member = r.oid AND mem.top = 'ratio_owner') AS owner_side,
+            EXISTS (SELECT 1 FROM mem WHERE mem.member = r.oid AND mem.top = 'ratio_reader') AS in_reader,
+            EXISTS (SELECT 1 FROM mem WHERE mem.member = r.oid AND mem.top = 'ratio_worker') AS in_worker
+       FROM pg_catalog.pg_roles r
+      WHERE NOT r.rolsuper AND r.rolname NOT IN ('ratio_reader', 'ratio_worker')
+        AND (r.rolname !~ '^pg_' OR EXISTS (SELECT 1 FROM mem WHERE mem.member = r.oid))
+      ORDER BY 2`,
+    [RATIO_ROLES],
+  );
+  const members = roles.rows.filter((r) => r.is_member);
+  const others = roles.rows.filter((r) => !r.is_member);
+  const full = await closurePrivileges(
+    client,
+    members.map((r) => r.oid),
+    false,
+  );
+  const scoped = await closurePrivileges(
+    client,
+    others.map((r) => r.oid),
+    true,
+  );
+  const problems: string[] = [];
+  for (const r of roles.rows) {
+    const privs = [...new Set((r.is_member ? full : scoped).get(r.oid) ?? [])].sort();
+    for (const priv of privs) {
+      const allowed =
+        (r.owner_side && (RATIO_SCOPE.test(priv) || REVIEWED_OWNER_PRIVILEGES.includes(priv) || OWNER_LEDGER.test(priv))) ||
+        (r.in_reader && REVIEWED_PRIVILEGES.ratio_reader.includes(priv)) ||
+        (r.in_worker && REVIEWED_PRIVILEGES.ratio_worker.includes(priv));
+      if (!allowed) problems.push(`${r.role} holds ${priv} beyond the reviewed set of the ratio roles it belongs to`);
+    }
   }
   return problems;
 }
@@ -424,13 +586,25 @@ async function settingViolations(client: ClientBase): Promise<string[]> {
  * (attacl) and function (proacl) ACLs.
  */
 async function systemAclViolations(client: ClientBase): Promise<string[]> {
-  const rows = await client.query<{ role: string; what: string }>(
-    `WITH ratio AS (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])),
+  const rows = await client.query<{ role: string; what: string; via: string | null }>(
+    `WITH RECURSIVE ratio AS (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])),
+          mem(member) AS (
+            SELECT m.member FROM pg_catalog.pg_auth_members m JOIN ratio r ON r.oid = m.roleid
+            UNION
+            SELECT m.member FROM pg_catalog.pg_auth_members m JOIN mem ON m.roleid = mem.member
+          ),
           checked AS (
-            -- superusers are "members" of every role; they are not checked roles
+            -- the ratio roles and their direct or transitive members (membership
+            -- graph; superusers, members of everything, are refused elsewhere)
             SELECT r.oid, r.rolname FROM pg_catalog.pg_roles r
-             WHERE NOT r.rolsuper
-               AND EXISTS (SELECT 1 FROM ratio x WHERE r.oid = x.oid OR pg_catalog.pg_has_role(r.oid, x.oid, 'MEMBER'))
+             WHERE NOT r.rolsuper AND (r.oid IN (SELECT oid FROM ratio) OR r.oid IN (SELECT member FROM mem))
+          ),
+          -- round 16 H2: an entry granted to ANY role in a checked role's upward
+          -- closure (INHERIT, SET or ADMIN edge, transitively) is the checked role's
+          up(principal, oid) AS (
+            SELECT oid, oid FROM checked
+            UNION
+            SELECT up.principal, m.roleid FROM pg_catalog.pg_auth_members m JOIN up ON m.member = up.oid
           ),
           sys AS (SELECT oid, nspname, nspacl FROM pg_catalog.pg_namespace WHERE nspname = ANY ($2::text[])),
           entries AS (
@@ -448,10 +622,14 @@ async function systemAclViolations(client: ClientBase): Promise<string[]> {
             SELECT a.grantee, a.privilege_type || ' on ' || s.nspname || '.' || p.proname || '(' || pg_catalog.oidvectortypes(p.proargtypes) || ')'
               FROM pg_catalog.pg_proc p JOIN sys s ON s.oid = p.pronamespace CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) a
           )
-     SELECT ch.rolname AS role, e.what FROM entries e JOIN checked ch ON ch.oid = e.grantee ORDER BY 1, 2`,
+     SELECT DISTINCT ch.rolname AS role, e.what, CASE WHEN up.oid = up.principal THEN NULL ELSE pg_catalog.pg_get_userbyid(up.oid) END AS via
+       FROM entries e JOIN up ON up.oid = e.grantee JOIN checked ch ON ch.oid = up.principal ORDER BY 1, 2, 3`,
     [RATIO_ROLES, SYSTEM_SCHEMA_NAMES],
   );
-  return rows.rows.map((r) => `${r.role} holds explicit ${r.what} (system-schema ACL entries for ratio roles and their members are never reviewed)`);
+  return rows.rows.map(
+    (r) =>
+      `${r.role} holds explicit ${r.what}${r.via ? ` (via ${r.via})` : ''} (system-schema ACL entries for ratio roles and their members are never reviewed)`,
+  );
 }
 
 /** Triggers, rules, event triggers and ledger hooks (challenger round 4, M1). */
