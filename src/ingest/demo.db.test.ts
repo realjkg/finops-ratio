@@ -15,7 +15,10 @@ import { S3FocusExportSource } from './sources/s3/S3FocusExportSource';
 import { S3EvidenceStore } from './evidence/S3EvidenceStore';
 import { FIXTURE_LOCATION, generateSyntheticExport } from './fixtures/syntheticFocus';
 import { batchesOf, checkpointOf, connect, createLogin, expireLeases, publishedTotals, runsOf, seedTenantSource, type Login, type SeededSource } from './testing/db';
-import { createTestBucket, testS3Env, type TestBucket } from './testing/s3';
+import { createTestBucket, requireTestS3Endpoint, testS3Env, type TestBucket } from './testing/s3';
+
+// Fail the whole file at collection time (not "skipped" tests) when no S3 endpoint is configured.
+requireTestS3Endpoint();
 import { cli, committedControlTotals, committedObjects, COMMITTED_FIXTURE_DIR, spawnCli } from './testing/cli';
 
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');

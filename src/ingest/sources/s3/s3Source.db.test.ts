@@ -9,7 +9,10 @@ import { S3FocusExportSource } from './S3FocusExportSource';
 import { S3EvidenceStore } from '../../evidence/S3EvidenceStore';
 import { runSync } from '../../worker/pipeline';
 import { generateSyntheticExport } from '../../fixtures/syntheticFocus';
-import { createTestBucket, type TestBucket } from '../../testing/s3';
+import { createTestBucket, requireTestS3Endpoint, type TestBucket } from '../../testing/s3';
+
+// Fail the whole file at collection time (not "skipped" tests) when no S3 endpoint is configured.
+requireTestS3Endpoint();
 import { workerTestDb, noSleep, type WorkerTestDb } from '../../testing/workerSetup';
 import { batchesOf, publishedTotals, seedTenantSource } from '../../testing/db';
 import { csvGz, rowsOf } from '../../testing/focusCsv';

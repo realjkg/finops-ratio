@@ -7,7 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { generateSyntheticExport, FIXTURE_LOCATION } from './fixtures/syntheticFocus';
 import { workerTestDb, type WorkerTestDb } from './testing/workerSetup';
 import { batchesOf, publishedTotals, seedTenantSource, type SeededSource } from './testing/db';
-import { createTestBucket, testS3Env, TEST_S3_SECRET_ACCESS_KEY, type TestBucket } from './testing/s3';
+import { createTestBucket, requireTestS3Endpoint, testS3Env, TEST_S3_SECRET_ACCESS_KEY, type TestBucket } from './testing/s3';
+
+// Fail the whole file at collection time (not "skipped" tests) when no S3 endpoint is configured.
+requireTestS3Endpoint();
 import { cli } from './testing/cli';
 
 let t: WorkerTestDb;
