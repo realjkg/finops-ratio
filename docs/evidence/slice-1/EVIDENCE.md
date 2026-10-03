@@ -130,7 +130,11 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 111 | 7db189a | fix: doctor NEVER_PUBLISHED (M4) | impl |
 | 112 | 63ce64f | fix: evidence open honours the run's abort signal (M5) | impl |
 | 113 | b223564 | test: open deadlines abort-aware with a transport that ignores the signal (M3c/M5c) | tests |
-| 114 | (final) | docs: evidence for this round (§28, §29), ingestion-ops skill | docs |
+| 114 | 6d0e96c | docs: evidence for the Lows and the third review (§28, §29), ingestion-ops skill | docs |
+| 115 | 3a20394 | test: redaction collisions, abortable evidence uploads, abortable backoff (red: fast 6, DB 6) | tests |
+| 116 | 1090505 | fix: redaction collisions refused (parser + pipeline); evidence uploads and retry backoff abort-aware | impl |
+| 117 | 8d46f17 | test: no retry is recorded once the run is aborted (kills R3b) | tests |
+| 118 | (final) | docs: evidence for this round (§30) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -1950,8 +1954,8 @@ Awaits in the run path without the signal:
   `lock_timeout` and `idle_in_transaction_session_timeout`. The fact
   stream itself stops on abort through the idle watchdog.
 
-Not fixed here; offered as a follow-up: pass the signal to the evidence
-puts and make the retry sleep abort-aware.
+(Closed in §30: the evidence uploads carry the signal and the retry
+backoff is abort-aware.)
 
 The other paginated listing in the repository, outside Slice 1, has the same
 truncated-without-token shape: `src/costsource/transports/awsS3Transport.ts`
@@ -1981,6 +1985,66 @@ that code is not Slice 1's, and it is reported here instead.
 - 3 of 3 evidence objects re-hashed OK.
 - doctor exited 0, so NEVER_PUBLISHED did not fire: doctor runs after the
   first publication.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 30. Closing the audited gaps: redaction collisions, abortable uploads, abortable backoff
+
+| Gap | Fix (`1090505`) | Test (red at `3a20394`) | Mutation(s) killed (`mutations30.txt`, `mutations30b.txt`) |
+|---|---|---|---|
+| **1. Redaction name collision** (real bug): names that redact alike (`token=x`, `token=y` → `token=[redacted]`) collided on the `ingest_artifacts` primary key at staging | `parseManifest` refuses the manifest with MANIFEST_INVALID; the message names no file. The pipeline applies the same guard before the size gate, for every source | `layout.test.ts`: `token=x` and `token=y` in one period are MANIFEST_INVALID, while one of them alone is accepted. Pipeline (fake source): MANIFEST_INVALID with **nothing opened** and nothing staged; before the fix it failed at staging | C1a (parser check), C1b (pipeline guard) |
+| **2. Evidence uploads ignored the signal** | `put` and `putBytes` take `{ signal }`. In S3EvidenceStore, HeadObject (`existingSize`) and PutObject carry the `abortSignal` and reject with the reason; the memory store honours it. capture and captureManifest pass the run's signal and wrap the call in `raceAbort`, so an abort ends the wait even if a store ignores the signal | `S3EvidenceStore.test.ts`: `put` (PutObject hanging, and HeadObject hanging) and `putBytes`: every request carries the signal and the abort rejects with the reason. Pipeline: an artifact upload and a manifest upload that never finish, one store honouring the signal and one ignoring it, each fail **MAX_RUN_EXCEEDED** in under 5 s (deadline 1 s) | E2a (HeadObject), E2b (artifact PutObject), E2c (manifest PutObject), E2d (capture passes no signal), E2e (put not raced), E2f (pipeline passes no signal to the manifest capture), E2g (putBytes not raced) |
+| **3. Retry backoff not abort-aware** | `RetryOptions.signal`. An attempt that fails after the abort is neither retried nor recorded. The default backoff sleep ends at once on abort and clears its timer, so no long timer keeps the process alive; a hook sleep is raced with the signal. The pipeline passes `runAbort.signal` | `retry.test.ts`: an abort during a 60 s backoff rejects with the reason in under 2 s, after 1 attempt. With the signal already aborted when an attempt fails: no retry and **no `onRetry`** (strengthened in `8d46f17` after R3b survived). Pipeline: a transient open failure with a 60 s backoff fails **MAX_RUN_EXCEEDED** in under 5 s, with no second open | R3a (plain sleep; unit and pipeline), R3b (no check before the retry decision; killed once `onRetry` was asserted), R3c (pipeline passes no signal) |
+
+### Signal audit after §30
+
+Every S3 request in the run path carries the run's abort signal:
+
+| Request | Code |
+|---|---|
+| ListObjectsV2, every page, plus a check between pages | `S3FocusExportSource.list` |
+| manifest GET | `getBytes` |
+| artifact GET with If-Match | `openArtifact` |
+| evidence HeadObject | `existingSize` |
+| evidence PutObject (artifact and manifest) | `put` / `putBytes` |
+| evidence GET | `open` |
+
+The only S3 call without the signal is `replayFixtures`' PutObject, which
+seeds operator fixtures and is not a sync run.
+
+Every other await in the run path either carries the signal or is bounded:
+
+| Await | How it is bounded |
+|---|---|
+| opens | `withDeadline` with the signal |
+| uploads | `raceAbort` |
+| artifact and evidence streams | the idle watchdog, which listens to the signal |
+| retry backoff | abortable sleep |
+| DB statements: lease, heartbeat, staging, fact chunks, reconcile, publish, checkpoint, finish | the session's `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout` |
+| temp-file `mkdtemp`, `rm` | local filesystem |
+
+### Gates at 8d46f17
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 4.4–6.6) | **3/3**, 91 files / 2039 passed each |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 31 files / 445 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 410 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at 8d46f17, private cluster, database
+`ratio_s1_e2e_57951b24`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
 - replay-fixtures passed 6/6.
 - Cleanup deleted 48 objects and dropped the database and logins.
 

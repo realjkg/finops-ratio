@@ -269,3 +269,12 @@ PR #54 third review:
     transport ignores the signal;
   - doctor NEVER_PUBLISHED.
 
+Audit gaps closed:
+- Redaction collisions: `layout.test.ts`, plus `reviewFindings3` "Gap 1"
+  (nothing opened).
+- Abortable evidence uploads: `S3EvidenceStore.test.ts`, plus "Gap 2"
+  (artifact and manifest uploads, with a store that honours the signal and
+  one that ignores it).
+- Abortable retry backoff: `retry.test.ts`, plus "Gap 3" (a 60 s backoff
+  against a 1 s deadline).
+
