@@ -72,6 +72,11 @@ describe('pathOnly', () => {
     const out = pathOnly(long);
     expect(out.length).toBeLessThanOrEqual(600);
     expect(out).not.toContain('secret');
+    // Targets over 8 KB are not parsed at all (bounded cost) → placeholder;
+    // shorter long paths are parsed and the logged pathname is cut at 512.
+    expect(pathOnly('/' + 'a'.repeat(9_000))).toBe(NON_PATH_TARGET);
+    const cut = pathOnly('/' + 'b'.repeat(4_000));
+    expect(cut).toBe(`/${'b'.repeat(511)}…`);
     expect(() => pathOnly('http://[::1'.repeat(1000))).not.toThrow();
     expect(() => pathOnly('http://%zz@')).not.toThrow();
   });
