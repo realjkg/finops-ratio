@@ -501,4 +501,47 @@ describe('publication pointer always names the one published batch', () => {
     );
     expect(bad.rows).toEqual([]);
   });
+
+  it("Slice 1's exact publish order and replay-rollback order commit in ONE transaction as ratio_worker", async () => {
+    // Publish: prior published -> superseded, new staged -> published, upsert pointer.
+    // Replay rollback: current published -> superseded, target superseded -> published, repoint.
+    // Uses tenant B and restores its published batch; B's staged batch ends superseded.
+    const b = seed.b;
+    const c = await db.pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('SET LOCAL ROLE ratio_worker');
+      await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [b.tenantId]);
+      const upsert = (batch: string, run: string) =>
+        c.query(
+          `INSERT INTO ratio.period_publications (tenant_id, source_id, billing_period, batch_id, published_at, published_by_run_id)
+           VALUES ($1, $2, $3, $4, now(), $5)
+           ON CONFLICT (tenant_id, source_id, billing_period)
+           DO UPDATE SET batch_id = EXCLUDED.batch_id, published_at = EXCLUDED.published_at, published_by_run_id = EXCLUDED.published_by_run_id`,
+          [b.tenantId, b.sourceId, b.period, batch, run],
+        );
+      // publish the staged batch
+      await c.query(`UPDATE ratio.ingest_batches SET status = 'superseded', superseded_at = now() WHERE id = $1`, [b.batchPublished]);
+      await c.query(`UPDATE ratio.ingest_batches SET status = 'published', published_at = now() WHERE id = $1`, [b.batchStaged]);
+      await upsert(b.batchStaged, b.runNew);
+      const mid = await publishedView(c);
+      expect(mid.batches).toEqual([b.batchStaged]);
+      expect(mid.total).toBe('11111.10');
+      // replay rollback to the previously published batch
+      await c.query(`UPDATE ratio.ingest_batches SET status = 'superseded', superseded_at = now() WHERE id = $1`, [b.batchStaged]);
+      await c.query(`UPDATE ratio.ingest_batches SET status = 'published', published_at = now() WHERE id = $1`, [b.batchPublished]);
+      await upsert(b.batchPublished, b.runNew);
+      await c.query('COMMIT');
+    } catch (e) {
+      await c.query('ROLLBACK').catch(() => undefined);
+      throw e;
+    } finally {
+      c.release();
+    }
+    await withRole(db.pool, 'ratio_reader', b.tenantId, async (r) => {
+      expect(await publishedView(r)).toEqual({ n: b.publishedRows, total: b.publishedTotal, batches: [b.batchPublished] });
+    });
+    const st = await db.pool.query(`SELECT status FROM ratio.ingest_batches WHERE id = $1`, [b.batchStaged]);
+    expect(st.rows[0].status).toBe('superseded');
+  });
 });
