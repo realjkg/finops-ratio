@@ -14,6 +14,14 @@ import { redactErrorText } from '@/costsource/transports/redact';
 /** The ONLY message a caller ever sees for an unhandled error. */
 export const INTERNAL_ERROR_MESSAGE = 'Internal error';
 
+/**
+ * The request pathname only. Query strings can carry session ids, OAuth
+ * tokens or SAS signatures, so they are never written to a log.
+ */
+export function pathOnly(url: string | undefined): string {
+  return (url ?? '').split('?')[0];
+}
+
 export interface InternalErrorContext {
   method?: string;
   path?: string;
@@ -29,7 +37,7 @@ export function logInternalError(err: unknown, ctx: InternalErrorContext = {}): 
       event: 'unhandled_error',
       requestId,
       method: ctx.method ?? 'UNKNOWN',
-      path: ctx.path ?? '',
+      path: pathOnly(ctx.path),
       ...(ctx.tenant ? { tenant: ctx.tenant } : {}),
       status: 500,
       error: redactErrorText(err),
@@ -70,7 +78,7 @@ export function logClientErrorDetail(status: number, err: unknown, ctx: Internal
       tag: 'api',
       event: 'client_error_detail',
       method: ctx.method ?? 'UNKNOWN',
-      path: ctx.path ?? '',
+      path: pathOnly(ctx.path),
       status,
       error: redactErrorText(err),
     }),

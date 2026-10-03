@@ -12,7 +12,7 @@
 
 import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import { checkAuth, isStrongToken, resolveGatewayAuth, type GatewayEnv } from './auth';
-import { INTERNAL_ERROR_MESSAGE, logInternalError } from './internalError';
+import { INTERNAL_ERROR_MESSAGE, logInternalError, pathOnly } from './internalError';
 import {
   SlidingWindowRateLimiter,
   type RateLimitResult,
@@ -134,7 +134,7 @@ export function withGateway(
     const finish = (status: number) =>
       logger({
         method: req.method ?? 'UNKNOWN',
-        path: req.url ?? '',
+        path: pathOnly(req.url), // never the query string (session ids, tokens)
         tenant,
         status,
         latencyMs: Date.now() - start,
