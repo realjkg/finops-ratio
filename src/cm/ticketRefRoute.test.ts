@@ -292,3 +292,28 @@ describe('mock provider is unchanged', () => {
     expect((res.body as { ticketRef: string }).ticketRef).toBe('INC-123');
   });
 });
+
+describe('attach audit record: provider is the resolved provider, never the caller value', () => {
+  it.each(['jira', 'servicenow', 'mock'])('mock (default) provider ignores body provider %j', async (claimed) => {
+    vi.stubGlobal('fetch', vi.fn());
+    const res = await call({ operation: 'attach', provider: claimed, ticketRef: 'CHG-1' });
+    expect(res.statusCode).toBe(200);
+    expect((res.body as { provider: string }).provider).toBe('mock');
+  });
+
+  it('CM_PROVIDER=jira records "jira" even when the body claims servicenow', async () => {
+    useJira();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    const res = await call({ operation: 'attach', provider: 'servicenow', ticketRef: 'OPS-7' });
+    expect(res.statusCode).toBe(200);
+    expect((res.body as { provider: string }).provider).toBe('jira');
+  });
+
+  it('CM_PROVIDER=servicenow records "servicenow" even when the body claims jira', async () => {
+    useServiceNow();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"result":[{"number":"CHG0030001"}]}', { status: 200 })));
+    const res = await call({ operation: 'attach', provider: 'jira', ticketRef: 'CHG0030001' });
+    expect(res.statusCode).toBe(200);
+    expect((res.body as { provider: string }).provider).toBe('servicenow');
+  });
+});
