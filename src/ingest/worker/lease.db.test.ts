@@ -7,6 +7,7 @@ import { runSync, type RunSyncOptions } from './pipeline';
 import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup';
 import { batchesOf, expireLeases, publishedAs, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
 import { csvGz, rowsOf } from '../testing/focusCsv';
+import { SimulatedCrash } from './types';
 
 let t: WorkerTestDb;
 beforeAll(async () => {
@@ -128,5 +129,53 @@ describe('leases and concurrency', () => {
     expect(orphanFacts.rows[0].n).toBe(0);
     g.release();
     await expect(dead).rejects.toMatchObject({ code: 'LEASE_LOST' });
+  });
+
+  it('L5 a background heartbeat keeps a long-running run\'s lease alive', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const g = gate();
+    let reached!: () => void;
+    const arrived = new Promise<void>((r) => (reached = r));
+    const run = sync(s, new FakeFocusSource([period('r/a.csv.gz', csvGz(rowsOf(P, 1)))]), {
+      settings: { leaseTtlSeconds: 5 },
+      hooks: {
+        beforePublish: async () => {
+          reached();
+          await g.released;
+        },
+      },
+    });
+    await arrived;
+    const first = await t.db.pool.query(`SELECT heartbeat_at, lease_expires_at FROM ratio.sync_runs WHERE tenant_id = $1`, [s.tenantId]);
+    // Poll (no fixed sleep) until the heartbeat has moved the lease forward.
+    for (;;) {
+      const now = await t.db.pool.query(`SELECT heartbeat_at, lease_expires_at FROM ratio.sync_runs WHERE tenant_id = $1`, [s.tenantId]);
+      if (now.rows[0].lease_expires_at.getTime() > first.rows[0].lease_expires_at.getTime()) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    g.release();
+    expect((await run).status).toBe('succeeded');
+  });
+
+  it('L6 a crashed (simulated dead) run stops heartbeating, so its lease expires', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    await expect(
+      sync(s, new FakeFocusSource([period('r/a.csv.gz', csvGz(rowsOf(P, 3)))]), {
+        settings: { leaseTtlSeconds: 5, limits: { insertChunkRows: 1 } },
+        hooks: {
+          afterChunk: () => {
+            throw new SimulatedCrash();
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(SimulatedCrash);
+    // Poll until the 5 s lease has expired; a still-running heartbeat would keep extending it forever.
+    for (;;) {
+      const r = await t.db.pool.query(`SELECT lease_expires_at < clock_timestamp() AS expired FROM ratio.sync_runs WHERE tenant_id = $1`, [s.tenantId]);
+      if (r.rows[0].expired) break;
+      await new Promise((res) => setTimeout(res, 250));
+    }
+    const recovered = await sync(s, new FakeFocusSource([period('r/a.csv.gz', csvGz(rowsOf(P, 3)))]));
+    expect(recovered.status).toBe('succeeded');
   });
 });
