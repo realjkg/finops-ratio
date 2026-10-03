@@ -15,7 +15,7 @@
 //   500 — the responder built a row that fails FOCUS validation
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { withGateway, sendError, type GatewayContext } from '@/server/gateway';
+import { withGateway, sendError, logInternalError, type GatewayContext } from '@/server/gateway';
 import { validateSession } from '@/finio/sessionStore';
 import { buildFinioExport, INVALID_SESSION } from '@/finio/exchange';
 import { validateFocusRows } from '@/finio/focusValidation';
@@ -57,12 +57,20 @@ async function exportFocus(
 
   const check = validateFocusRows(payload.rows);
   if (!check.ok) {
-    sendError(
-      res,
-      500,
-      'invalid_focus_export',
-      `Refusing to emit non-conformant FOCUS rows: ${check.errors.join('; ')}`,
+    // Per-row detail goes to the server log under a requestId; the caller gets
+    // the code, a fixed message and the id (same shape as the gateway's 500).
+    const requestId = logInternalError(
+      new Error(`Refusing to emit non-conformant FOCUS rows: ${check.errors.join('; ')}`),
+      { method: req.method, path: req.url },
     );
+    res.setHeader('X-Request-Id', requestId);
+    res.status(500).json({
+      error: {
+        code: 'invalid_focus_export',
+        message: 'Refusing to emit non-conformant FOCUS rows',
+        requestId,
+      },
+    });
     return;
   }
 

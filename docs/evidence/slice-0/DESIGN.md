@@ -55,6 +55,13 @@ added in this slice (not needed). No other dependency.
     TRANSACTION`/`SAVEPOINT`/`RELEASE`/`END`/`ABORT`/`PREPARE TRANSACTION`) at
     statement level outside dollar-quoted bodies, comments and string literals
     (`TRANSACTION_CONTROL`) — these would break the one-txn-per-migration rule.
+- Session state (round 7): before the advisory lock and after every migration
+  transaction (committed or failed) the runner resets the session — `RESET
+  ROLE; SET SESSION AUTHORIZATION DEFAULT; RESET ALL; SET search_path =
+  pg_catalog, pg_temp` — so a plain `SET` a migration ran (search_path,
+  row_security, role, session authorization, …) cannot outlive its COMMIT into
+  the next migration or the caller. Migrations therefore run with
+  `search_path = pg_catalog, pg_temp` and must schema-qualify every name.
 - Each migration (current, round 5): `BEGIN; <up sql>; RESET ROLE; SET LOCAL
   search_path = pg_catalog, pg_temp; SET CONSTRAINTS ALL IMMEDIATE; INSERT
   schema_migrations; <catalog privilege check>; COMMIT`. Any error or check
@@ -124,14 +131,15 @@ Helper functions (schema `ratio`; all except `current_tenant_id` carry `SET sear
   block (`IF NOT EXISTS … CREATE ROLE … NOLOGIN`, with `duplicate_object` /
   `unique_violation` caught so concurrent migrations of different databases in
   one cluster cannot race). Then a guard (RT010): if any of the three is
-  SUPERUSER, BYPASSRLS or REPLICATION, if worker/reader have CREATEROLE or
+  SUPERUSER, BYPASSRLS, REPLICATION or LOGIN (LOGIN since round 7), if worker/reader have CREATEROLE or
   CREATEDB, or if any of them is a member of any role, the migration RAISEs
   (fails closed rather than ALTERing roles). Since round 5 the runner's catalog
   check re-verifies these invariants (and pins role identity) after every
   migration.
-  Roles are cluster-global; LOGIN/password are granted by deployment
-  (`ALTER ROLE ratio_worker LOGIN PASSWORD …` or a login role `GRANT ratio_worker
-  TO app_login`), not by migrations.
+  Roles are cluster-global and stay NOLOGIN. Deployment creates separate LOGIN
+  roles that are members of them (`CREATE ROLE app_worker LOGIN … IN ROLE
+  ratio_worker`); `ALTER ROLE ratio_worker LOGIN` is refused by 0001's guard
+  (RT010) and reported as drift by the catalog check (round 7).
 - Ownership: `CREATE SCHEMA ratio AUTHORIZATION ratio_owner`, then
   `SET LOCAL ROLE ratio_owner` so every object (tables, view, functions,
   policies) is owned by the non-superuser, non-BYPASSRLS owner. The migrating
@@ -189,6 +197,7 @@ does not bundle `pg`. `tsc --noEmit` (root tsconfig) type-checks `src/ingest`.
 | Edited migration silently diverges | sha256 checksum ledger | tamper test |
 | Migration leaking connection string | CLI redacts every string BEFORE JSON serialization (raw, URL-decoded, URL-encoded and JSON-escaped forms of the URL, user and password), then a backstop pass over the serialized line (round 6) | `cli.test.ts`, `cli.db.test.ts` (real pg error carrying the password); mutations H1–H5 |
 | A migration widens a role's privileges, adds a SECURITY DEFINER function, or installs a hook that runs after the check (rounds 4–5) | runner catalog check as the last statement before COMMIT (privilegeModel.ts): reviewed privilege allow-list for reader/worker, SECURITY DEFINER allow-list, no PUBLIC EXECUTE in ratio/public, reviewed triggers only, no rules/event triggers, no ledger policies, pinned role identity | `privileges.db.test.ts`; mutation tables R4/R5 |
+| A migration plants per-database / per-role setting defaults (`ALTER DATABASE … SET session_replication_role = replica`, `ALTER ROLE ratio_worker [IN DATABASE …] SET …`) that every new session inherits (round 8) | catalog check reads `pg_db_role_setting` rows that apply to this database: any setting on a ratio role, and security-relevant keys for any role here / all roles / ratio members, are refused; `--status` reports them | `privileges.db.test.ts`, `cli.db.test.ts` round 8; mutations S1–S7 |
 | SQL injection via tenant id | bound parameter + uuid validation | unit test |
 | **Credential holder selects another tenant** (round 2, M5) | NONE at the DB layer: the tenant is a user-settable GUC; any holder of a worker/reader credential can `set_config('ratio.tenant_id', <any uuid>, true)`. RLS/tenant isolation defends against application bugs (missing/wrong tenant), NOT against credential holders. The alternative — per-tenant DB roles/credentials — is an owner decision | characterization test `documented trust boundary…` |
 | Published data rewritten after publication (round 2, H2) | staged-only child trigger (RT001), TRUNCATE refused, batch lifecycle trigger (RT002), deferred pointer consistency (RT003), reconciliation CHECKs | `immutability.db.test.ts`; mutations M8–M11, M16–M18, M21 |
@@ -544,3 +553,78 @@ recreated (that is the intended behaviour of the checksum ledger).
   secret-value CHECKs, `ingest_validation_errors`); the stale "pointer not
   enforced" gap is removed from EVIDENCE (RT003 exists and is tested); §8 and
   EVIDENCE §7 state exactly what down drops and keeps, and why.
+
+## 16. Round 7 — Copilot review of 19fdbed (3 High, 1 Medium, + Low 1)
+
+- **High A — session-scoped settings outlived COMMIT.** The pinned
+  `SET LOCAL search_path` only masked, until COMMIT, a session-level
+  `SET search_path = attacker, pg_catalog` that a contract migration ran; the
+  next migration of the run then resolved `current_setting` and `=` through
+  schema `attacker` (reproduced). Fix: `resetSession()` (see §2) before the
+  lock and after every migration transaction. Chosen over a fresh connection
+  per migration: the advisory lock belongs to this session, and a new
+  connection would inherit `ALTER ROLE/DATABASE … SET` defaults a migration
+  could also plant, which the explicit session-level SET overrides. The
+  advisory lock calls are `pg_catalog`-qualified. `RESET ROLE` is redundant
+  with `SET SESSION AUTHORIZATION DEFAULT` (which also resets the current
+  user) and kept as belt and braces.
+- **High B — 0001 accepted a pre-existing LOGIN `ratio_*` role.** The RT010
+  guard now also rejects `rolcanlogin`. 0001 is edited in place: it has never
+  been applied outside dev/test (no deployed database), so any dev database
+  migrated with the previous bytes reports `CHECKSUM_MISMATCH` and must be
+  recreated; the down file is unchanged.
+- **High C — LOGIN invisible to the drift check.** The catalog check reports
+  `role <ratio role> must not have LOGIN …`; `--status` and the per-migration
+  backstop therefore see `ALTER ROLE ratio_owner LOGIN`.
+- **Medium — backstop could emit invalid JSON.** `redactDeep` redacts a
+  number/boolean/bigint whose text matches a secret to the string
+  `"[redacted]"` (bigints always become strings). The backstop pass is
+  JSON-aware: if its edit leaves text that no longer parses, the CLI prints
+  `{"error":"output redacted"}` instead.
+- **Low 1.** The pg `Client` is constructed inside `main`'s try (its
+  constructor throws on e.g. an invalid port or unreadable `sslcert`), and
+  `installProcessHandlers()` prints one redacted JSON line on
+  `uncaughtException` / `unhandledRejection` and exits 1.
+
+## 17. Round 8 — challenger approval of 7c5b6e2, Lows folded in
+
+- **L1 — setting defaults (`pg_db_role_setting`).** `ALTER DATABASE … SET` and
+  `ALTER ROLE … [IN DATABASE …] SET` apply to every NEW session, so a contract
+  migration could make every later worker session run with
+  `session_replication_role = replica` (no RT001–RT003, no FK checks). The
+  catalog check (every migration, and `--status`) now refuses, among rows that
+  apply to THIS database (`setdatabase` = this database or 0 = all):
+  - any setting on a ratio role itself (they are NOLOGIN and configured only by
+    migrations);
+  - a security-relevant key — `session_replication_role`, `row_security`,
+    `search_path`, `default_transaction_read_only`,
+    `default_transaction_isolation`, `role`, `session_authorization` — for any
+    role in this database (`ALTER DATABASE`, `ALTER ROLE x IN DATABASE this`),
+    for all roles (`ALTER ROLE ALL`), or for a member of a ratio role.
+  Decision: targeted rather than "refuse every row", so a deployment's benign
+  per-database defaults (e.g. `statement_timeout`) stay allowed. Rows scoped to
+  another database are not counted: they cannot affect sessions here, and
+  counting them made one database's drift fail every other database's
+  migrations in a shared cluster (observed in testing; see EVIDENCE R8).
+- **L2.** Tests now pin two previously untested pieces: the try/catch around
+  building the process-handler line (a `toJSON` that throws with the DSN
+  yields the fixed line and exit 1) and the session reset before the lock (a
+  caller client with a hostile session `search_path` / `row_security`).
+- **L3.** `redactDeep` prints Buffers, typed arrays and ArrayBuffers as
+  `"[binary]"`.
+
+## 18. Round 9 — challenger approval of 325b059, Low 1/2 folded in
+
+- **L1 — default tenant through setting defaults.** A contract migration could
+  run `ALTER DATABASE <db> SET ratio.tenant_id = '…'` (built with `format()`
+  in a DO block); every new session — e.g. a reader that never calls
+  `set_config` — then had a tenant and saw that tenant's published rows
+  instead of zero (reproduced in `privileges.db.test.ts`). The same held for
+  `ALTER ROLE <member login> SET ratio.tenant_id`. Fix:
+  `isSecurityRelevantSetting()` treats ANY `ratio.*` custom setting
+  (case-insensitive) as security-relevant, so the round-8 scope rules refuse
+  it for this database (any role), for ALL roles, and for members of ratio
+  roles; anything on a ratio role itself was already refused. Applies in
+  every migration's check and in `--status`.
+- **L2.** `lo_compat_privileges`, `session_preload_libraries` and
+  `local_preload_libraries` join the security-relevant keys.

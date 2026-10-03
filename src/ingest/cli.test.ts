@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { EventEmitter } from 'events';
+import * as cli from './cli';
 import { jsonLineRedactor, main, redactDeep, redactor } from './cli';
 
 function capture() {
@@ -8,6 +10,9 @@ function capture() {
 }
 
 // Port 1 on loopback: nothing listens there, so any connection attempt fails fast.
+const urlFor = (pw: string) => `postgres://ratio_user:${encodeURIComponent(pw)}@127.0.0.1:1/ratio_db`;
+const forms = (pw: string) => [pw, JSON.stringify(pw).slice(1, -1), encodeURIComponent(pw)];
+
 const UNREACHABLE = 'postgres://ratio_user:SuperSecretPw123@127.0.0.1:1/ratio_db';
 
 describe('ingest CLI (no database)', () => {
@@ -94,8 +99,6 @@ describe('ingest CLI (no database)', () => {
   describe('secrets are redacted BEFORE JSON serialization (Copilot High, round 6)', () => {
     // Passwords whose JSON-escaped form differs from the raw / URL-decoded form.
     const PASSWORDS = ['abc"def', 'back\\slash', 'mix"\\"ed', 'line\nbreak', 'tab\there', 'pässwörd✓', 'ls ps', 'ctl\u0001x', '{"k":"v"}'];
-    const urlFor = (pw: string) => `postgres://ratio_user:${encodeURIComponent(pw)}@127.0.0.1:1/ratio_db`;
-    const forms = (pw: string) => [pw, JSON.stringify(pw).slice(1, -1), encodeURIComponent(pw)];
 
     it('a message carrying the decoded password is redacted in every serialized form', () => {
       for (const pw of PASSWORDS) {
@@ -153,10 +156,96 @@ describe('ingest CLI (no database)', () => {
       expect(line).toContain('1970-01-01T00:00:00.000Z');
     });
 
-    it('backstop: a non-string value whose serialized text equals the secret is still redacted', () => {
+    it('a non-string value whose text equals the secret is redacted AND the line stays valid JSON (round 7 Medium)', () => {
       const pw = '90817263';
-      const line = jsonLineRedactor(urlFor(pw))({ pid: 90817263 });
+      const line = jsonLineRedactor(urlFor(pw))({ pid: 90817263, n: 123, big: BigInt(90817263), ok: true });
       expect(line).not.toContain(pw);
+      expect(JSON.parse(line)).toEqual({ pid: '[redacted]', n: 123, big: '[redacted]', ok: true });
+      const bool = jsonLineRedactor(urlFor('true'))({ flag: true, other: false });
+      expect(JSON.parse(bool)).toEqual({ flag: '[redacted]', other: false });
+    });
+
+    it('backstop: a secret that spans JSON structure is removed and the output is replaced by a fixed valid JSON line', () => {
+      const pw = 'k":"v';
+      const line = jsonLineRedactor(urlFor(pw))({ k: 'v' });
+      expect(line).not.toContain(pw);
+      expect(() => JSON.parse(line)).not.toThrow();
+      expect(JSON.parse(line)).toEqual({ error: 'output redacted' });
+    });
+  });
+
+  describe('round 7 Low 1: nothing escapes main or the process unredacted', () => {
+    it('a malformed connection URL (bad percent-encoding) exits 1 with a redacted JSON line, never a throw', async () => {
+      const url = 'postgres://ratio_user:Sec%zzRet99@127.0.0.1:1/ratio_db';
+      const c = capture();
+      expect(await main(['migrate'], { RATIO_MIGRATE_DATABASE_URL: url }, c.io)).toBe(1);
+      const all = c.out.concat(c.err).join('\n');
+      expect(all).not.toMatch(/Sec%zzRet99|Sec%zzRet|zzRet99|ratio_user/);
+      for (const l of c.out.concat(c.err)) expect(() => JSON.parse(l)).not.toThrow();
+    });
+
+    it('a URL the pg Client constructor itself rejects (invalid port, unreadable sslcert) exits 1 with a redacted JSON line', async () => {
+      for (const url of [
+        'postgres://ratio_user:SecretPw77@127.0.0.1:99999999/ratio_db',
+        'postgres://ratio_user:SecretPw77@127.0.0.1:1/ratio_db?sslcert=/nonexistent/ratio-test-cert',
+      ]) {
+        const c = capture();
+        await expect(main(['migrate'], { RATIO_MIGRATE_DATABASE_URL: url }, c.io), url).resolves.toBe(1);
+        const all = c.out.concat(c.err).join('\n');
+        expect(all).not.toMatch(/SecretPw77|ratio_user/);
+        expect(c.err).toHaveLength(1);
+        expect(JSON.parse(c.err[0])).toMatchObject({ level: 'error', event: 'migrate.failed' });
+      }
+    });
+
+    it('round 8 L2 (S11): a reason whose toJSON throws (carrying the DSN) still yields one fixed JSON line and exit 1, never a throw', () => {
+      const install = (cli as unknown as { installProcessHandlers: (p: EventEmitter, env: Record<string, string>, io: { err: (l: string) => void }, exit: (code: number) => void) => void })
+        .installProcessHandlers;
+      const url = urlFor('ab"cd');
+      const proc = new EventEmitter();
+      const err: string[] = [];
+      const codes: number[] = [];
+      install(proc, { RATIO_MIGRATE_DATABASE_URL: url }, { err: (l) => err.push(l) }, (code) => codes.push(code));
+      const evil = {
+        toJSON() {
+          throw new Error(`cannot serialize ${url}`);
+        },
+      };
+      expect(() => proc.emit('uncaughtException', evil)).not.toThrow();
+      expect(codes).toEqual([1]);
+      expect(err).toHaveLength(1);
+      expect(JSON.parse(err[0])).toEqual({ error: 'output redacted' });
+      expect(err[0]).not.toContain('ratio_user');
+    });
+
+    it('round 8 L3: Buffers and typed arrays are printed as "[binary]", never as their bytes', () => {
+      const pw = 'ab"cd';
+      const line = jsonLineRedactor(urlFor(pw))({ buf: Buffer.from(`x ${pw} y`), arr: new Uint8Array([1, 2, 3]), ab: new ArrayBuffer(4) });
+      expect(JSON.parse(line)).toEqual({ buf: '[binary]', arr: '[binary]', ab: '[binary]' });
+    });
+
+    it('uncaughtException / unhandledRejection handlers print one redacted JSON line and exit 1', () => {
+      const install = (cli as unknown as { installProcessHandlers?: (p: EventEmitter, env: Record<string, string>, io: { err: (l: string) => void }, exit: (code: number) => void) => void })
+        .installProcessHandlers;
+      expect(typeof install).toBe('function');
+      const pw = 'ab"cd';
+      for (const [event, payload] of [
+        ['uncaughtException', new Error(`boom ${pw}`)],
+        ['unhandledRejection', new Error(`rejected ${pw}`)],
+        ['unhandledRejection', `plain ${pw}`],
+      ] as const) {
+        const proc = new EventEmitter();
+        const err: string[] = [];
+        const codes: number[] = [];
+        install!(proc, { RATIO_MIGRATE_DATABASE_URL: urlFor(pw) }, { err: (l) => err.push(l) }, (code) => codes.push(code));
+        proc.emit(event, payload);
+        expect(codes, event).toEqual([1]);
+        expect(err, event).toHaveLength(1);
+        const doc = JSON.parse(err[0]);
+        expect(doc).toMatchObject({ level: 'error', event: `process.${event}` });
+        for (const f of forms(pw)) expect(err[0]).not.toContain(f);
+        expect(err[0]).toContain('[redacted]');
+      }
     });
   });
 });

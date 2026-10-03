@@ -215,8 +215,9 @@ used anywhere. Nothing here demonstrates real-source ingestion.
   decision.
 - CI change: adds a `postgres:16` service with trust auth inside the job
   container, and the CI trigger scope (main-only) for slice PRs.
-- Deployment: who holds CREATEROLE for first role creation; LOGIN grants for
-  ratio_worker / ratio_reader; the migrating login must be a member of
+- Deployment: who holds CREATEROLE for first role creation; separate LOGIN
+  roles that are members of ratio_worker / ratio_reader (since round 7 the ratio
+  roles themselves must stay NOLOGIN); the migrating login must be a member of
   ratio_owner and able to CREATE in the database (verified with a DB-owner login).
 
 ---
@@ -690,3 +691,201 @@ added in 590d196, together with the `toJSON` handling.
   round 2), stale classifier gap marked superseded.
 - TEST_PLAN: test names that no longer exist (first-plan names) replaced by the
   real ones; round-6 section.
+
+---
+
+# Round 7 — Copilot review of 19fdbed (3 High, 1 Medium, + Low 1)
+
+Base: 19fdbed. Local commits only (not pushed). **0001 edited in place**
+(High B; never applied outside dev/test — dev databases migrated with the old
+bytes report CHECKSUM_MISMATCH by design; the down file is unchanged). Raw
+logs: `scratchpad/r8/`.
+
+## R7.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 16c9dca | test(ingest): failing tests for Copilot round 7 (session GUC carry-over, LOGIN ratio roles, JSON-safe redaction, process handlers) | tests (red) |
+| 8f4b9c1 | fix(ingest): reset session state between migrations; LOGIN ratio roles refused (0001) and reported (check); JSON-safe redaction; process handlers (Copilot round 7) | fix (+ one test defect, recorded in its message) |
+| bb169f6 | test(ingest): a URL the pg Client constructor rejects exits 1 with one redacted JSON line (kills the Client-outside-try mutation) | test |
+| (this) | docs(evidence): Slice 0 round 7 | docs |
+
+## R7.2 Red (at 16c9dca)
+
+- `cli.test.ts`: 3 failed / 13 passed — numeric secret printed as invalid JSON
+  `{"pid":[redacted]…}`, structure-spanning secret printed as broken JSON, no
+  `installProcessHandlers`. The malformed-percent URL test passed (guard: pg
+  does not throw on it).
+- `privileges.db.test.ts` + `roles.db.test.ts`: 7 failed / 43 passed (50).
+  High A **reproduced**: the probe migration after the hostile one stored
+  `sp: 'attacker', rs: 'attacker', eq: false` (attacker.current_setting and
+  attacker.= were used); the down variant stored `sp: 'attacker, pg_catalog'`.
+  High B: 0001 succeeded with `ALTER ROLE ratio_* LOGIN` (rolled back). High C:
+  no LOGIN problem reported. All LOGIN probes ran in rolled-back transactions;
+  after every run `ratio_owner/worker/reader` were verified `rolcanlogin = f`.
+
+## R7.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+A1 no session reset after each migration                KILLED  next-migration probe, down probe
+A2 reset without the session search_path pin            KILLED  3 tests
+A3 reset without RESET ALL                              KILLED  probe (row_security), resetSession
+A4 reset without SET SESSION AUTHORIZATION DEFAULT      KILLED  resetSession
+A5 reset without RESET ROLE                             SURVIVED — by PostgreSQL semantics: SET SESSION
+                                                        AUTHORIZATION DEFAULT also resets the current
+                                                        user; RESET ROLE is kept as belt and braces
+B1 0001 guard ignores LOGIN                             KILLED  roles.db High B
+C1 check ignores LOGIN                                  KILLED  3 (owner/worker/reader)
+M1 primitives not redacted in redactDeep                KILLED  numeric/bigint/boolean valid-JSON test
+M2 backstop not JSON-aware                              KILLED  structure-spanning secret test
+M3 backstop removed entirely                            KILLED  structure-spanning secret test
+L1a Client constructed outside the try                  KILLED  (by bb169f6) constructor-rejected URL test
+L1b process handlers do not exit                        KILLED
+L1c process handlers print the raw reason               KILLED
+```
+
+## R7.4 Verification (main checkout at bb169f6 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1093/1093 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 154/154 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| Slice 1 compat: scratch worktree `slice/01-focus-ingestion-worker` 1f41db1 + bb169f6 (removed) | one conflict in `cli.ts` (the main-module block: Slice 1 installs its own `installProcessGuards`); resolved by keeping Slice 1's block. tsc 0, eslint 0, fast 1204/1204, test:db 279/279 ×2 |
+
+---
+
+# Round 8 — challenger approval of 7c5b6e2 (0 High / 0 Medium), Lows L1–L3 folded in
+
+Base: 7c5b6e2. Local commits only (not pushed). 0001 unchanged. Raw logs:
+`scratchpad/r9/`.
+
+## R8.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 0804514 | test(ingest): failing tests for round 8 (pg_db_role_setting defaults, process-handler toJSON, reset before lock, binary values) | tests (red) |
+| 45f852a | fix(ingest): catalog check covers pg_db_role_setting defaults; Buffers print as [binary] (round 8 L1, L3) | fix |
+| 6a1163f | test(ingest): a security-relevant default for a non-ratio role in this database is refused (kills the 'here' mutation) | test |
+| 9f45398 | fix(ingest): setting check counts only pg_db_role_setting rows that apply to this database | fix |
+| 933e07f | test(ingest): a pg_db_role_setting row scoped to another database is not counted (kills the scope mutation) | test |
+| (this) | docs(evidence): Slice 0 round 8 | docs |
+
+## R8.2 Red (at 0804514)
+
+- `cli.test.ts`: 1 failed / 18 passed (the `[binary]` test). The S11 test passed
+  on arrival, as intended: it exists to kill the "no try/catch" mutation.
+- `privileges.db.test.ts` + `cli.db.test.ts`: 5 failed / 54 passed. Both
+  migrations that planted defaults APPLIED. `--status` exited 0. The
+  rolled-back `ALTER ROLE ratio_worker SET` and `ALTER ROLE ALL SET` cases were
+  not reported. S5 passed on arrival, as intended.
+- `pg_db_role_setting` was identical (empty) before and after the red run, and
+  after every later run and mutation run.
+
+**Defect found after the first fix (45f852a), fixed in 9f45398.** The first
+version counted setting rows for a ratio role in ANY database. The cli `--status`
+test commits `ALTER ROLE ratio_worker IN DATABASE <its own disposable db> SET …`.
+That shared-catalog row then failed concurrently running migrations in OTHER
+test databases: an intermittent failure of an unrelated `view variant` test (1
+in 4 runs). Rows are now counted only when they apply to this database (this
+database's OID, or 0 = all databases). Afterwards, 6 consecutive runs of the
+privileges and cli DB files were green, and test:db passed ×3.
+
+## R8.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+S1  settingViolations not called                         KILLED  6 tests
+S2  any-setting-on-ratio-role rule removed               KILLED  ratio_worker IN DATABASE statement_timeout
+S3  "any role in this database" rule removed             KILLED  (by 6a1163f)
+S4  "ALTER ROLE ALL" rule removed                        KILLED
+S5  ratio-member rule removed                            KILLED
+S6  key filter removed (every setting refused)           KILLED  benign statement_timeout (check + --status)
+S7  database-scope filter removed                        KILLED  (by 933e07f)
+S11 no try/catch around the process-handler line         KILLED
+S5b no session reset before the lock                     KILLED
+L3  binary values not special-cased                      KILLED
+```
+
+## R8.4 Verification (main checkout at 933e07f + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1095/1095 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 164/164 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state after all runs | `pg_db_role_setting` rows: 0; `ratio_owner/worker/reader` rolcanlogin = false; no `ratio_probe*` roles |
+| Slice 1 compat: scratch worktree `slice/01` 1f41db1 + 933e07f (removed) | same single `cli.ts` main-block conflict as round 7, resolved by keeping Slice 1's block. tsc 0, eslint 0, fast 1206/1206, test:db 289/289 ×2 |
+
+---
+
+# Round 9 — challenger approval of 325b059 (0 High / 0 Medium), Low 1/2 folded in
+
+Base: 325b059. Local commits only (not pushed). 0001 unchanged. Raw logs:
+`scratchpad/r10/`.
+
+## R9.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 66cbb31 | test(ingest): failing tests for round 9 (ratio.* setting defaults = default tenant; more security-relevant keys) | tests (red) |
+| 76f65be | fix(ingest): ratio.* custom setting defaults and three more keys are security-relevant (round 9 L1, L2) | fix (plus one test defect, recorded in its message) |
+| 79afa89 | test(ingest): round-9 attack fixtures pass the setting name as a format() argument | test |
+| (this) | docs(evidence): Slice 0 round 9 | docs |
+
+## R9.2 Red (at 66cbb31)
+
+`privileges.db.test.ts` + `cli.db.test.ts`: **6 failed / 61 passed (67)**.
+
+- Both migrations that set `ratio.tenant_id` defaults were APPLIED: the
+  database-level one and the member-login `IN DATABASE` one.
+- `--status` exited 0 for both.
+- `ALTER ROLE ALL SET "RATIO.Tenant_ID"` was not reported.
+- The threat test **reproduced the escape**. A fresh `ratio_reader` session
+  saw 0 rows before the default and tenant A's published rows after it,
+  without ever calling `set_config`. The check then reported nothing.
+- The three new keys were not reported.
+
+`pg_db_role_setting` was empty and no `ratio_probe*` role existed after the red
+run, and after every later run, including all mutation runs.
+
+## R9.3 Notes
+
+- **Test defect (fixed in 76f65be).** The `*_preload_libraries` case set the
+  default before opening the checking connection, so that new session tried to
+  load the library and failed. It now connects first.
+- **Fast guard collision (79afa89).** `tenantScope.test.ts` ("no file under
+  src/ingest sets ratio.tenant_id at session level") flagged the fixtures'
+  literal `… SET ratio.tenant_id = …` text. The guard is NOT changed. The
+  fixtures now pass the setting name as a `format()` argument, the same form as
+  the challenger's repro. Flagged for the reviewer, since it is a
+  test-text change made to satisfy a lexical guard.
+
+## R9.4 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+R1  ratio.* rule dropped                                   KILLED  5 tests (both per-migration variants, --status, ALL roles, threat test)
+R2  helper match case-sensitive                            SURVIVED: the caller already lower-cases the key
+R2b case-insensitivity removed in caller AND helper        KILLED  ALTER ROLE ALL SET "RATIO.Tenant_ID"
+R3  lo_compat_privileges removed from the list             KILLED
+R4  session_preload_libraries removed                      KILLED
+R5  local_preload_libraries removed                        KILLED
+```
+
+## R9.5 Verification (main checkout at 79afa89 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1095/1095 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 170/170 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` rows: 0; `ratio_probe*` roles: 0 |
+| Slice 1 compat: scratch worktree `slice/01` 1f41db1 + 79afa89 (removed) | same single `cli.ts` main-block conflict, resolved by keeping Slice 1's block; tsc 0, eslint 0, fast 1206/1206, test:db 295/295 ×2 |

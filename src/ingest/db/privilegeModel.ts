@@ -207,8 +207,16 @@ export async function effectivePrivileges(client: ClientBase): Promise<Record<Ch
 async function roleViolations(client: ClientBase): Promise<string[]> {
   const problems: string[] = [];
   const schemaExists = (await client.query<{ e: boolean }>(`SELECT pg_catalog.to_regnamespace('ratio') IS NOT NULL AS e`)).rows[0].e;
-  const roles = await client.query<{ rolname: string; rolsuper: boolean; rolbypassrls: boolean; rolreplication: boolean; rolcreaterole: boolean; rolcreatedb: boolean }>(
-    `SELECT rolname, rolsuper, rolbypassrls, rolreplication, rolcreaterole, rolcreatedb
+  const roles = await client.query<{
+    rolname: string;
+    rolsuper: boolean;
+    rolbypassrls: boolean;
+    rolreplication: boolean;
+    rolcreaterole: boolean;
+    rolcreatedb: boolean;
+    rolcanlogin: boolean;
+  }>(
+    `SELECT rolname, rolsuper, rolbypassrls, rolreplication, rolcreaterole, rolcreatedb, rolcanlogin
        FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])`,
     [RATIO_ROLES],
   );
@@ -221,6 +229,7 @@ async function roleViolations(client: ClientBase): Promise<string[]> {
     }
     if (r.rolsuper || r.rolbypassrls || r.rolreplication) problems.push(`role ${name} must not be SUPERUSER, BYPASSRLS or REPLICATION`);
     if (name !== 'ratio_owner' && (r.rolcreaterole || r.rolcreatedb)) problems.push(`role ${name} must not have CREATEROLE or CREATEDB`);
+    if (r.rolcanlogin) problems.push(`role ${name} must not have LOGIN (deployment logins are separate member roles)`);
   }
   // A ratio role is a member of no role (covers pg_read_all_data & co. and each other).
   const memberOf = await client.query<{ member: string; parent: string }>(
@@ -264,6 +273,92 @@ async function roleViolations(client: ClientBase): Promise<string[]> {
   for (const { role, priv, in_reader, in_worker } of others.rows) {
     const allowed = (in_reader && REVIEWED_PRIVILEGES.ratio_reader.includes(priv)) || (in_worker && REVIEWED_PRIVILEGES.ratio_worker.includes(priv));
     if (!allowed) problems.push(`${role} holds ${priv} beyond the reviewed set of the ratio roles it belongs to`);
+  }
+  return problems;
+}
+
+/**
+ * Settings that change what a session can see or enforce (trigger/FK
+ * bypass, RLS, name resolution, read-only, isolation, identity).
+ */
+export const SECURITY_RELEVANT_SETTINGS: readonly string[] = [
+  'session_replication_role',
+  'row_security',
+  'search_path',
+  'default_transaction_read_only',
+  'default_transaction_isolation',
+  'role',
+  'session_authorization',
+  // round 9: large-object ACL bypass and library loading at session start
+  'lo_compat_privileges',
+  'session_preload_libraries',
+  'local_preload_libraries',
+];
+
+/**
+ * Security-relevant setting keys: the list above, plus ANY `ratio.*` custom
+ * setting (case-insensitive) — e.g. a default `ratio.tenant_id` would give
+ * every new session a tenant without set_config (round 9, L1).
+ */
+export function isSecurityRelevantSetting(key: string): boolean {
+  const k = key.trim().toLowerCase();
+  return SECURITY_RELEVANT_SETTINGS.includes(k) || k.startsWith('ratio.');
+}
+
+/**
+ * Per-database / per-role setting defaults (`ALTER DATABASE … SET`, `ALTER
+ * ROLE … [IN DATABASE …] SET`, stored in pg_db_role_setting) apply to every
+ * NEW session, so a migration could plant e.g. session_replication_role =
+ * replica for the worker and every later worker session would skip the
+ * RT001–RT003 triggers and FK checks (round 8, L1).
+ * Only rows that apply to sessions in THIS database count (setdatabase =
+ * this database, or 0 = all databases): a row scoped to another database
+ * cannot affect sessions here and is that database's own check's business
+ * (pg_db_role_setting is a shared catalog; counting other databases' rows
+ * would also let one database's drift block every other database's
+ * migrations in a shared cluster). Targeted, not blanket (deployments may
+ * legitimately set e.g. statement_timeout per database):
+ *   - ANY setting on a ratio role itself is refused: the ratio roles are
+ *     NOLOGIN and are configured by migrations only;
+ *   - a security-relevant key (SECURITY_RELEVANT_SETTINGS or any ratio.*
+ *     custom setting, see isSecurityRelevantSetting) is refused for any role in this
+ *     database (ALTER DATABASE, ALTER ROLE x IN DATABASE this), for all roles
+ *     (ALTER ROLE ALL), and for a member of a ratio role.
+ */
+async function settingViolations(client: ClientBase): Promise<string[]> {
+  const rows = await client.query<{
+    cfg: string;
+    rolname: string | null;
+    datname: string | null;
+    here: boolean;
+    all_roles_here: boolean;
+    ratio_role: boolean;
+    ratio_member: boolean;
+  }>(
+    `WITH ratio AS (SELECT oid, rolname FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])),
+          cur AS (SELECT oid FROM pg_catalog.pg_database WHERE datname = pg_catalog.current_database())
+     SELECT cfg, r.rolname, d.datname,
+            (s.setdatabase = (SELECT oid FROM cur)) AS here,
+            s.setrole = 0 AS all_roles_here,
+            EXISTS (SELECT 1 FROM ratio x WHERE x.oid = s.setrole) AS ratio_role,
+            (s.setrole <> 0 AND EXISTS (SELECT 1 FROM ratio x WHERE pg_catalog.pg_has_role(s.setrole, x.oid, 'MEMBER'))) AS ratio_member
+       FROM pg_catalog.pg_db_role_setting s
+       LEFT JOIN pg_catalog.pg_roles r ON r.oid = s.setrole
+       LEFT JOIN pg_catalog.pg_database d ON d.oid = s.setdatabase
+       CROSS JOIN LATERAL pg_catalog.unnest(s.setconfig) AS cfg
+      WHERE s.setdatabase = 0 OR s.setdatabase = (SELECT oid FROM cur)
+      ORDER BY 1, 2, 3`,
+    [RATIO_ROLES],
+  );
+  const problems: string[] = [];
+  for (const row of rows.rows) {
+    const key = row.cfg.split('=')[0].trim().toLowerCase();
+    const where = `for role ${row.rolname ?? 'ALL'} in database ${row.datname ?? 'ALL'}`;
+    if (row.ratio_role) {
+      problems.push(`setting ${row.cfg} ${where} is not allowed (ratio roles carry no setting defaults)`);
+    } else if (isSecurityRelevantSetting(key) && (row.here || row.all_roles_here || row.ratio_member)) {
+      problems.push(`setting ${row.cfg} ${where} is not allowed (security-relevant default)`);
+    }
   }
   return problems;
 }
@@ -334,6 +429,7 @@ export async function privilegeModelViolations(client: ClientBase): Promise<stri
   );
   for (const { fn } of pub.rows) problems.push(`PUBLIC holds EXECUTE on ${fn}`);
   problems.push(...(await hookViolations(client)));
+  problems.push(...(await settingViolations(client)));
   problems.push(...(await roleViolations(client)));
   return problems;
 }

@@ -92,16 +92,22 @@ describe('0001 role guard', () => {
     }
   });
 
+  it('round 7 High B: refuses a ratio role that can LOGIN (pre-created or altered; rolled back)', async () => {
+    for (const pre of ['ALTER ROLE ratio_owner LOGIN', 'ALTER ROLE ratio_worker LOGIN', 'ALTER ROLE ratio_reader LOGIN', "ALTER ROLE ratio_reader LOGIN PASSWORD 'x'"]) {
+      expect(await runUpAfter(pre), pre).toMatchObject({ ok: false, code: 'RT010' });
+    }
+  });
+
   it('the guard leaves no trace: roles are clean after all the rolled-back probes', async () => {
     const c = new Client({ connectionString: scratch.url });
     await c.connect();
     try {
       const r = await c.query(
-        `SELECT rolname, rolsuper, rolbypassrls, rolreplication, rolcreaterole, rolcreatedb FROM pg_roles
+        `SELECT rolname, rolsuper, rolbypassrls, rolreplication, rolcreaterole, rolcreatedb, rolcanlogin FROM pg_roles
          WHERE rolname IN ('ratio_owner','ratio_worker','ratio_reader') ORDER BY 1`,
       );
       for (const row of r.rows) {
-        expect(row, row.rolname).toMatchObject({ rolsuper: false, rolbypassrls: false, rolreplication: false, rolcreaterole: false, rolcreatedb: false });
+        expect(row, row.rolname).toMatchObject({ rolsuper: false, rolbypassrls: false, rolreplication: false, rolcreaterole: false, rolcreatedb: false, rolcanlogin: false });
       }
       const m = await c.query(
         `SELECT count(*)::int AS n FROM pg_auth_members a JOIN pg_roles r ON r.oid = a.member

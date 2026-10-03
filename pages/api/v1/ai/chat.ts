@@ -23,7 +23,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { AIContext, AIMessage } from '@/ai/AIClient';
-import { logUpstreamError, readJsonBody, statusReason } from '@/costsource/transports/redact';
+import { logUpstreamError, readJsonBody, renderThrown, statusReason } from '@/costsource/transports/redact';
 import { MockAIClient } from '@/ai/MockAIClient';
 import {
   OPENAI_COMPATIBLE_PRESETS,
@@ -61,9 +61,14 @@ interface AIAdapter {
  * so no provider text reaches the caller through the gateway 500.
  */
 function providerError(provider: string, err: unknown): Error {
-  const status = (err as { status?: unknown } | null)?.status;
+  let status: unknown;
+  try {
+    status = (err as { status?: unknown } | null)?.status; // a Proxy's get trap may throw
+  } catch {
+    status = undefined;
+  }
   const code = typeof status === 'number' ? status : 0;
-  logUpstreamError(provider, code, err instanceof Error ? err.message : String(err));
+  logUpstreamError(provider, code, renderThrown(err));
   return new Error(
     typeof status === 'number'
       ? `${provider} error ${status} (${statusReason(status)})`

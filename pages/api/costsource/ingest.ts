@@ -25,7 +25,14 @@ import { findSource } from '@/costsource/seed';
 import type { CostRowsResult } from '@/costsource';
 import type { FocusVersion } from '@/costsource';
 import { FOCUS_VERSIONS } from '@/costsource';
-import { validateFocusRecords } from '@/costsource/transports/focusExport';
+import {
+  assertValidWindow,
+  INVALID_WINDOW_MESSAGE,
+  isFocusRowValidationMessage,
+  validateFocusRecords,
+} from '@/costsource/transports/focusExport';
+import { withInternalErrorGuard } from '@/server/gateway/internalError';
+import { renderThrown } from '@/costsource/transports/redact';
 
 function currentMonth(): { start: string; end: string } {
   const now = new Date();
@@ -34,7 +41,7 @@ function currentMonth(): { start: string; end: string } {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-export default async function handler(
+async function handler(
   req: NextApiRequest,
   res: NextApiResponse<CostRowsResult | { error: string }>,
 ): Promise<void> {
@@ -65,7 +72,8 @@ export default async function handler(
   const src = findSource(sourceId);
   if (!src || src.kind !== 'focus_file') {
     res.status(422).json({
-      error: `'${sourceId}' is not a focus_file source. Use /api/costsource/rows for other sources.`,
+      // Fixed: never echo the caller's sourceId.
+      error: 'sourceId is not a focus_file source. Use /api/costsource/rows for other sources.',
     });
     return;
   }
@@ -79,13 +87,25 @@ export default async function handler(
     typeof (windowRaw as Record<string, unknown>).end === 'string'
       ? (windowRaw as { start: string; end: string })
       : currentMonth();
+  try {
+    assertValidWindow(window);
+  } catch {
+    res.status(400).json({ error: INVALID_WINDOW_MESSAGE });
+    return;
+  }
 
   let validated;
   try {
     // Tags and x_* extension columns are preserved for direct ingest.
     validated = validateFocusRecords(rows as Record<string, unknown>[], sourceId, { keepExtensions: true });
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    // Forward ONLY the validator's own grammar —
+    // `<known sourceId>: invalid FOCUS row N: <known column> <fixed reason>` —
+    // which never quotes a cell value. Anything else (e.g. a TypeError from a
+    // hostile non-primitive cell) is the guard's generic 500 + requestId.
+    const message = renderThrown(err);
+    if (!isFocusRowValidationMessage(message, sourceId)) throw err;
+    res.status(400).json({ error: message });
     return;
   }
 
@@ -93,3 +113,4 @@ export default async function handler(
   res.status(200).json(result);
 }
 
+export default withInternalErrorGuard(handler);

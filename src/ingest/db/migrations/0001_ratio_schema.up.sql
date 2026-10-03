@@ -41,10 +41,12 @@ BEGIN
   -- Fail closed (SQLSTATE RT010) rather than silently altering pre-existing roles.
   IF EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles
-    WHERE rolname IN ('ratio_owner', 'ratio_worker', 'ratio_reader') AND (rolsuper OR rolbypassrls OR rolreplication)
+    WHERE rolname IN ('ratio_owner', 'ratio_worker', 'ratio_reader') AND (rolsuper OR rolbypassrls OR rolreplication OR rolcanlogin)
   ) THEN
+    -- LOGIN too: deployment logins are separate member roles, so a pre-existing
+    -- ratio_* role that can log in is not one this migration created (round 7).
     RAISE EXCEPTION USING ERRCODE = 'RT010',
-      MESSAGE = 'ratio_owner/ratio_worker/ratio_reader must not be SUPERUSER, BYPASSRLS or REPLICATION';
+      MESSAGE = 'ratio_owner/ratio_worker/ratio_reader must not be SUPERUSER, BYPASSRLS, REPLICATION or LOGIN';
   END IF;
   IF EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles

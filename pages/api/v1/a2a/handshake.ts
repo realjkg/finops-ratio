@@ -11,7 +11,8 @@
 // 500 on a thrown handler. This handler owns the FinIO-specific outcomes:
 //   401 — missing or wrong X-FinIO-Peer-Token (only when one is configured)
 //   400 — malformed handshake body
-//   409 — a focusVersion outside the supported v1.0-v1.4 range
+//   409 — a focusVersion outside the supported v1.0-v1.4 range (fixed message +
+//         structured `supported` list; the requested value is never echoed)
 
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { withGateway, sendError, type GatewayContext } from '@/server/gateway';
@@ -53,7 +54,8 @@ async function handshake(
   // --- FOCUS version negotiation ---
   const negotiated = negotiateFocusVersion(parsed.request.focusVersion);
   if (!negotiated.ok) {
-    sendError(res, negotiated.failure.status, negotiated.failure.code, negotiated.failure.message);
+    const { status, code, message, supported } = negotiated.failure;
+    res.status(status).json({ error: { code, message, supported } });
     return;
   }
 

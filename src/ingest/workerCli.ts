@@ -303,27 +303,3 @@ export function recordMigrateEvidence(args: string[], env: Env, started: Date, e
     jsonLineRedactorFor(env),
   );
 }
-
-type GuardedProcess = { on(event: 'uncaughtException' | 'unhandledRejection', listener: (e: unknown) => void): unknown; exit(code: number): void };
-
-/**
- * Process-level guards for the CLI entry: an uncaught exception or unhandled
- * rejection anywhere emits exactly ONE redacted JSON line on stderr (code +
- * SQLSTATE-only/redacted message, never a raw stack) and exits 1.
- */
-export function installProcessGuards(env: Env, io: CliIO, proc: GuardedProcess = process as unknown as GuardedProcess): void {
-  const line = jsonLineRedactorFor(env);
-  let fired = false;
-  const onCrash = (kind: 'uncaughtException' | 'unhandledRejection') => (e: unknown) => {
-    if (fired) return;
-    fired = true;
-    try {
-      io.err(line({ ts: new Date().toISOString(), level: 'error', event: 'process.crash', kind, code: errorCodeOf(e), message: messageOf(e) }));
-    } catch {
-      // never let the guard itself throw
-    }
-    proc.exit(1);
-  };
-  proc.on('uncaughtException', onCrash('uncaughtException'));
-  proc.on('unhandledRejection', onCrash('unhandledRejection'));
-}

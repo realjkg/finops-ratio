@@ -2,8 +2,7 @@
 // environment gates that must refuse BEFORE connecting, and leak checks.
 import { describe, expect, it } from 'vitest';
 import { EventEmitter } from 'events';
-import { main } from './cli';
-import { installProcessGuards } from './workerCli';
+import { installProcessHandlers, main } from './cli';
 
 function capture() {
   const out: string[] = [];
@@ -111,22 +110,58 @@ describe('worker CLI (no database)', () => {
   });
 });
 
-describe('process-level guards (uncaughtException / unhandledRejection)', () => {
+describe('process-level crash handler (single implementation: cli.ts installProcessHandlers)', () => {
   const secret = 'pw"q\\b%22x';
-  const env = { RATIO_DATABASE_URL: `postgres://worker_login:${encodeURIComponent(secret)}@127.0.0.1:1/db` };
+  const forms = [secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret)];
+  // Worker secrets (not the migrate URL): the worker DB password and an S3 secret key.
+  const env = {
+    RATIO_DATABASE_URL: `postgres://worker_login:${encodeURIComponent(secret)}@127.0.0.1:1/db`,
+    RATIO_SOURCE_S3_SECRET_ACCESS_KEY: 'S3-secret-key-value-that-must-not-print',
+  };
+  function install() {
+    const proc = new EventEmitter();
+    const err: string[] = [];
+    const codes: number[] = [];
+    installProcessHandlers(proc, env, { err: (l) => err.push(l) }, (c) => codes.push(c));
+    return { proc, err, codes };
+  }
   for (const event of ['uncaughtException', 'unhandledRejection'] as const) {
-    it(`${event}: exactly one redacted JSON line on stderr, then exit 1`, () => {
-      const proc = Object.assign(new EventEmitter(), { exitCodes: [] as number[], exit(code: number) { this.exitCodes.push(code); } });
-      const err: string[] = [];
-      installProcessGuards(env, { out: () => undefined, err: (l) => err.push(l) }, proc);
-      proc.emit(event, Object.assign(new Error(`boom with ${secret} inside`), { code: 'XX000' }));
+    it(`${event}: exactly one JSON line with worker secrets redacted, then exit 1`, () => {
+      const { proc, err, codes } = install();
+      proc.emit(event, Object.assign(new Error(`boom ${secret} and S3-secret-key-value-that-must-not-print`), { code: 'XX000' }));
       expect(err).toHaveLength(1);
-      const rec = JSON.parse(err[0]);
-      expect(rec).toMatchObject({ level: 'error', event: 'process.crash', kind: event });
-      for (const f of [secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret)]) expect(err[0]).not.toContain(f);
-      expect(proc.exitCodes).toEqual([1]);
+      expect(JSON.parse(err[0])).toMatchObject({ level: 'error', event: `process.${event}` });
+      for (const f of [...forms, 'S3-secret-key-value-that-must-not-print']) expect(err[0]).not.toContain(f);
+      expect(codes).toEqual([1]);
     });
   }
+
+  it('a reason whose toJSON throws (carrying worker secrets) yields the fixed fallback line and exit 1 (S11)', () => {
+    const { proc, err, codes } = install();
+    const evil = {
+      toJSON() {
+        throw new Error(`cannot serialize ${secret}`);
+      },
+    };
+    expect(() => proc.emit('uncaughtException', evil)).not.toThrow();
+    expect(err).toEqual(['{"error":"output redacted"}']);
+    expect(codes).toEqual([1]);
+  });
+
+  it('a hostile reason (ownKeys trap that throws) yields the fixed fallback line and exit 1', () => {
+    const { proc, err, codes } = install();
+    const hostile = new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw new Error(`no keys ${secret}`);
+        },
+      },
+    );
+    expect(() => proc.emit('unhandledRejection', hostile)).not.toThrow();
+    expect(err).toEqual(['{"error":"output redacted"}']);
+    expect(codes).toEqual([1]);
+  });
 
   it('a malformed RATIO_DATABASE_URL is a reported failure (exit 1, one evidence record), never a throw', async () => {
     const out: string[] = [];

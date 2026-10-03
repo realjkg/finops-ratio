@@ -271,11 +271,21 @@ describe('/api/v1/ai/chat — OpenAI-compatible providers', () => {
     process.env.AI_PROVIDER = 'mistral';
     process.env.MISTRAL_API_KEY = 'mk-secret';
     vi.stubGlobal('fetch', vi.fn(async () => new Response('rate limited', { status: 429 })));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = makeRes();
     await handler(makeReq({ headers: AUTH, body: validBody }), res);
     expect(res.statusCode).toBe(500);
-    expect(JSON.stringify(res.body)).toContain('Mistral error 429');
+    // The provider error stays server-side: generic envelope to the caller,
+    // the message (redacted) in the structured log under the same requestId.
+    const err = (res.body as { error: { message: string; requestId: string } }).error;
+    expect(err.message).toBe('Internal error');
+    expect(JSON.stringify(res.body)).not.toContain('Mistral error 429');
     expect(JSON.stringify(res.body)).not.toContain('mk-secret');
+    const logged = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('Mistral error 429');
+    expect(logged).toContain(err.requestId);
+    expect(logged).not.toContain('mk-secret');
+    errSpy.mockRestore();
   });
 
   it('never returns the provider response body (status only; body to the redacted log)', async () => {
@@ -283,11 +293,16 @@ describe('/api/v1/ai/chat — OpenAI-compatible providers', () => {
     process.env.MISTRAL_API_KEY = 'mk-secret';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn(async () => new Response('UPSTREAM-BODY-MARKER quota', { status: 429 })));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = makeRes();
     await handler(makeReq({ headers: AUTH, body: validBody }), res);
     expect(res.statusCode).toBe(500);
-    expect(JSON.stringify(res.body)).toContain('Mistral error 429');
+    expect(JSON.stringify(res.body)).not.toContain('Mistral error 429');
     expect(JSON.stringify(res.body)).not.toContain('UPSTREAM-BODY-MARKER');
+    const logged = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('Mistral error 429');
+    expect(logged).not.toContain('UPSTREAM-BODY-MARKER');
+    errSpy.mockRestore();
     warn.mockRestore();
   });
 
@@ -295,10 +310,13 @@ describe('/api/v1/ai/chat — OpenAI-compatible providers', () => {
     process.env.AI_PROVIDER = 'mistral';
     process.env.MISTRAL_API_KEY = 'mk-secret';
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"a": LEAKED}')));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = makeRes();
     await handler(makeReq({ headers: AUTH, body: validBody }), res);
     expect(res.statusCode).toBe(500);
     expect(JSON.stringify(res.body)).not.toContain('LEAKED');
+    expect(errSpy.mock.calls.map((c) => String(c[0])).join('\n')).not.toContain('LEAKED');
+    errSpy.mockRestore();
   });
 });
 
@@ -325,18 +343,24 @@ describe('/api/v1/ai/chat — SDK provider errors carry status only', () => {
   it.each([
     ['claude', 'ANTHROPIC_API_KEY'],
     ['openai', 'OPENAI_API_KEY'],
-  ])('%s: a 401 from the provider returns "<provider> error 401 (unauthorized)" without the body', async (provider, keyEnv) => {
+  ])('%s: a 401 from the provider logs "<provider> error 401 (unauthorized)" server-side; the caller gets the generic 500', async (provider, keyEnv) => {
     process.env.RATIO_API_TOKEN = 'secret';
     process.env.AI_PROVIDER = provider;
     process.env[keyEnv] = 'sk-test-key';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     stub401();
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = makeRes();
     await handler(makeReq({ headers: AUTH, body: validBody }), res);
     expect(res.statusCode).toBe(500);
     const text = JSON.stringify(res.body);
     expect(text).not.toContain(MARKER);
-    expect(text).toContain(`${provider} error 401 (unauthorized)`);
+    expect(text).not.toContain(`${provider} error 401`);
+    expect((res.body as { error: { message: string } }).error.message).toBe('Internal error');
+    const logged = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain(`${provider} error 401 (unauthorized)`);
+    expect(logged).not.toContain(MARKER);
+    errSpy.mockRestore();
     warn.mockRestore();
   });
 });

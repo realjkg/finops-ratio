@@ -195,3 +195,32 @@ Test changes in the fix commit (1234da0), each recorded in its message:
 | High, end-to-end through a real pg error | `cli.db.test.ts` | `round 6 (Copilot High): a password with JSON metacharacters inside a real pg error is never printed, in any form` (the password is also the missing database name, so the server error carries it; `migrate` and `migrate --status --json`) |
 
 Docs-only Lows (schema table, stale gap, rollback wording) have no tests; see DESIGN §3/§8/§15.
+
+## Round 7 — Copilot review of 19fdbed (tests committed red in 16c9dca, before the fix)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| High A | `privileges.db.test.ts` | `the next migration in the same run resolves names through the pinned path, as the runner role, with row_security on`, `the check of the following migration still detects a planted grant`, `down: a down file that plants a session search_path does not affect the next down step`, `resetSession clears SET SESSION AUTHORIZATION, SET ROLE, row_security and search_path` |
+| High B | `roles.db.test.ts` | `round 7 High B: refuses a ratio role that can LOGIN (pre-created or altered; rolled back)`; `the guard leaves no trace…` now also asserts `rolcanlogin = false` |
+| High C | `privileges.db.test.ts` | `ALTER ROLE ratio_owner LOGIN is reported by the check (and therefore by migrate --status)` (and the worker / reader variants; all in rolled-back transactions) |
+| Medium | `cli.test.ts` | `a non-string value whose text equals the secret is redacted AND the line stays valid JSON (round 7 Medium)` (replaces the round-6 numeric backstop test, whose expectation of invalid JSON was the defect), `backstop: a secret that spans JSON structure is removed and the output is replaced by a fixed valid JSON line` |
+| Low 1 | `cli.test.ts` | `a malformed connection URL (bad percent-encoding) exits 1 with a redacted JSON line, never a throw` (guard, green on arrival), `uncaughtException / unhandledRejection handlers print one redacted JSON line and exit 1`; added after the fix to kill the Client-outside-try mutation (bb169f6, see EVIDENCE R7): `a URL the pg Client constructor itself rejects (invalid port, unreadable sslcert) exits 1 with a redacted JSON line` |
+
+## Round 8 — challenger Lows (tests committed red in 0804514, before the fix)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| L1 setting defaults | `privileges.db.test.ts` | `a migration that sets session_replication_role for the database is refused; nothing committed`, `a migration that sets anything on ratio_worker IN DATABASE is refused; nothing committed`, `ALTER ROLE ratio_worker SET … (all databases, cluster-global) is refused — probed in a rolled-back transaction`, `ALTER ROLE ALL SET session_replication_role and a LOGIN member of ratio_reader with search_path are refused (rolled back)`, `a benign per-database default (statement_timeout) is not flagged`; added after the fix to kill mutations: `a security-relevant default for ANY role in this database (not only ratio roles) is refused (rolled back)` (6a1163f), `a setting row scoped to ANOTHER database does not count here (shared catalog; no cross-database interference)` (933e07f) |
+| L1 status | `cli.db.test.ts` | `round 8 L1: --status exits 3 when the database or ratio_worker (IN DATABASE) carries a security-relevant setting default`, `round 8 L1: a benign ALTER DATABASE … SET statement_timeout keeps --status at exit 0` |
+| L2 S11 | `cli.test.ts` | `round 8 L2 (S11): a reason whose toJSON throws (carrying the DSN) still yields one fixed JSON line and exit 1, never a throw` (green on arrival; kills the mutation) |
+| L2 S5 | `privileges.db.test.ts` | `a caller client with a hostile session search_path does not affect the first pending migration` (green on arrival; kills the mutation) |
+| L3 | `cli.test.ts` | `round 8 L3: Buffers and typed arrays are printed as "[binary]", never as their bytes` |
+
+## Round 9 — challenger Lows (tests committed red in 66cbb31, before the fix)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| L1 per-migration | `privileges.db.test.ts` | `ALTER DATABASE … SET ratio.tenant_id (DO/format, contract) is refused by the per-migration check; nothing committed`, `ALTER ROLE <LOGIN member of ratio_reader> IN DATABASE … SET ratio.tenant_id is refused by the per-migration check; nothing committed`, `matching is case-insensitive and covers any ratio.* key, for ALL roles (rolled back)`, `the threat is real: with a database default tenant, a fresh reader session that never calls set_config sees that tenant (…)` |
+| L1 status | `cli.db.test.ts` | `round 9 L1: --status exits 3 for a ratio.tenant_id default on the database or on a LOGIN member of ratio_reader` |
+| L1 positive control | `reader.db.test.ts` (existing) | `reader sees zero rows with no tenant set, and an error (not data) with a malformed tenant`; also asserted (0 rows) at the start of the "threat is real" test |
+| L2 | `privileges.db.test.ts` | `lo_compat_privileges / session_preload_libraries / local_preload_libraries defaults for this database are refused` |

@@ -3,7 +3,7 @@
 // validation, and the rate-limit 429 path. Lives under src/ so Next never
 // compiles it as a deployed route (the Wave2b lesson).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { withGateway, type GatewayHandler } from './withGateway';
 import { SlidingWindowRateLimiter } from './rateLimit';
@@ -174,10 +174,103 @@ describe('withGateway', () => {
       limiter: new SlidingWindowRateLimiter(),
       validateBody: acceptBody,
     });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = makeRes();
     await handler(makeReq({ body: { valid: true } }), res);
     expect(res.statusCode).toBe(500);
-    expect(errorBody(res)).toEqual({ code: 'internal_error', message: 'boom' });
+    // Generic envelope: the thrown message never reaches the caller.
+    const body = errorBody(res) as { code: string; message: string; requestId?: string };
+    expect(body).toEqual({ code: 'internal_error', message: 'Internal error', requestId: expect.any(String) });
+    expect(JSON.stringify(res.body)).not.toContain('boom');
+    // ...but it IS in the structured server log, keyed by the same requestId.
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(String(errSpy.mock.calls[0][0])) as Record<string, unknown>;
+    expect(logged.requestId).toBe(body.requestId);
+    expect(logged.error).toBe('boom');
+    errSpy.mockRestore();
+  });
+
+  it('500: requestId is a random UUID, echoed in X-Request-Id, unique per request', async () => {
+    const throwing: GatewayHandler = () => {
+      throw new Error('kaboom');
+    };
+    const handler = withGateway(throwing, {
+      env: {},
+      logger: noopLogger,
+      limiter: new SlidingWindowRateLimiter(),
+      validateBody: acceptBody,
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const a = makeRes();
+    const b = makeRes();
+    await handler(makeReq({ body: { valid: true } }), a);
+    await handler(makeReq({ body: { valid: true } }), b);
+    const idA = (a.body as { error: { requestId: string } }).error.requestId;
+    const idB = (b.body as { error: { requestId: string } }).error.requestId;
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    expect(idA).toMatch(UUID);
+    expect(idB).toMatch(UUID);
+    expect(idA).not.toBe(idB);
+    expect(a.headers['x-request-id']).toBe(idA);
+    expect(b.headers['x-request-id']).toBe(idB);
+    errSpy.mockRestore();
+  });
+
+  it('500: the server log line is structured JSON with the redacted message and request context', async () => {
+    const throwing: GatewayHandler = () => {
+      throw new Error('upstream said Bearer abc.def.SECRETTOKEN123 at https://h.example/p?sig=SASSECRET');
+    };
+    const handler = withGateway(throwing, {
+      env: {},
+      logger: noopLogger,
+      limiter: new SlidingWindowRateLimiter(),
+      validateBody: acceptBody,
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = makeRes();
+    await handler(makeReq({ body: { valid: true } }), res);
+    const line = String(errSpy.mock.calls[0][0]);
+    const logged = JSON.parse(line) as Record<string, unknown>;
+    expect(logged).toMatchObject({ tag: 'gateway', event: 'unhandled_error', method: 'POST', path: '/api/v1/ai/chat', status: 500 });
+    expect(logged.error).toContain('upstream said');
+    expect(line).not.toContain('SECRETTOKEN123');
+    expect(line).not.toContain('SASSECRET');
+    expect(JSON.stringify(res.body)).not.toContain('upstream said');
+    errSpy.mockRestore();
+  });
+
+  it('500: a non-Error throw is still generic to the caller', async () => {
+    const throwing: GatewayHandler = () => {
+      throw 'raw string detail';
+    };
+    const handler = withGateway(throwing, {
+      env: {},
+      logger: noopLogger,
+      limiter: new SlidingWindowRateLimiter(),
+      validateBody: acceptBody,
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = makeRes();
+    await handler(makeReq({ body: { valid: true } }), res);
+    expect(res.statusCode).toBe(500);
+    expect(errorBody(res).message).toBe('Internal error');
+    expect(JSON.stringify(res.body)).not.toContain('raw string detail');
+    expect(String(errSpy.mock.calls[0][0])).toContain('raw string detail');
+    errSpy.mockRestore();
+  });
+
+  it('4xx envelopes produced by the gateway itself are unchanged (no requestId, no X-Request-Id)', async () => {
+    const handler = withGateway(okHandler, {
+      env: {},
+      logger: noopLogger,
+      limiter: new SlidingWindowRateLimiter(),
+      validateBody: () => ({ ok: false, message: 'Body must have x' }),
+    });
+    const res = makeRes();
+    await handler(makeReq({ body: {} }), res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: { code: 'invalid_request', message: 'Body must have x' } });
+    expect(res.headers['x-request-id']).toBeUndefined();
   });
 });
 

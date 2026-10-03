@@ -17,8 +17,9 @@ import { createCostSourceClient } from '@/costsource';
 import type { CostSourceDescriptor } from '@/costsource';
 import { anonymousSourceView } from '@/costsource/sourceDisclosure';
 import { evaluateLiveDataAuth, THROTTLED_MESSAGE } from '@/server/gateway/liveDataAuth';
+import { withInternalErrorGuard } from '@/server/gateway/internalError';
 
-export default async function handler(
+async function handler(
   req: NextApiRequest,
   res: NextApiResponse<CostSourceDescriptor[] | { error: string }>,
 ): Promise<void> {
@@ -40,3 +41,4 @@ export default async function handler(
   res.status(200).json(auth.kind === 'ok' ? sources : anonymousSourceView(sources));
 }
 
+export default withInternalErrorGuard(handler);

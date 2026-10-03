@@ -105,8 +105,9 @@ function verifyApplied(files: MigrationFile[], applied: LedgerRow[]): void {
 }
 
 async function withLock<T>(client: ClientBase, fn: () => Promise<T>): Promise<T> {
-  await client.query('SELECT pg_advisory_lock($1::bigint)', [MIGRATION_LOCK_KEY]);
-  const unlock = () => client.query('SELECT pg_advisory_unlock($1::bigint)', [MIGRATION_LOCK_KEY]);
+  await resetSession(client);
+  await client.query('SELECT pg_catalog.pg_advisory_lock($1::bigint)', [MIGRATION_LOCK_KEY]);
+  const unlock = () => client.query('SELECT pg_catalog.pg_advisory_unlock($1::bigint)', [MIGRATION_LOCK_KEY]);
   let result: T;
   try {
     result = await fn();
@@ -131,6 +132,41 @@ async function settle(client: ClientBase): Promise<void> {
   await client.query('RESET ROLE');
   await client.query('SET LOCAL search_path = pg_catalog, pg_temp');
   await client.query('SET CONSTRAINTS ALL IMMEDIATE');
+}
+
+/**
+ * Returns the connection to a known-clean SESSION state (challenger/Copilot
+ * round 7, High A). A migration can run plain `SET …` (not LOCAL), which
+ * outlives its COMMIT: a hostile search_path, row_security, a role or a
+ * session authorization would then apply to the next migration of the run
+ * (or to whoever reuses the client). Run before the lock is taken and after
+ * every migration transaction, committed or not:
+ *   RESET ROLE; SET SESSION AUTHORIZATION DEFAULT  (RESET ALL does not touch these)
+ *   RESET ALL                                        (row_security, session_replication_role, every other GUC)
+ *   SET search_path = pg_catalog, pg_temp           (session scope, so the pin survives COMMIT)
+ * Chosen over a fresh connection per migration: the advisory lock is held by
+ * this session, and a new connection would pick up per-role / per-database
+ * defaults (ALTER ROLE|DATABASE … SET) that a migration could also plant,
+ * whereas the explicit SET below overrides them. Consequence: migrations run
+ * with search_path = pg_catalog, pg_temp, so every object name in a migration
+ * must be schema-qualified.
+ */
+export async function resetSession(client: ClientBase): Promise<void> {
+  await client.query('RESET ROLE');
+  await client.query('SET SESSION AUTHORIZATION DEFAULT');
+  await client.query('RESET ALL');
+  await client.query('SET search_path = pg_catalog, pg_temp');
+}
+
+/** One migration transaction, followed by a session reset whatever happened. */
+async function inMigrationTransaction(client: ClientBase, fn: () => Promise<void>): Promise<void> {
+  try {
+    await inTransaction(client, fn);
+  } catch (e) {
+    await resetSession(client).catch(() => undefined); // never mask the real failure
+    throw e;
+  }
+  await resetSession(client);
 }
 
 async function inTransaction(client: ClientBase, fn: () => Promise<void>): Promise<void> {
@@ -172,7 +208,7 @@ export async function migrateUp(client: ClientBase, opts: MigrateUpOptions = {})
 
     const done: string[] = [];
     for (const f of pending) {
-      await inTransaction(client, async () => {
+      await inMigrationTransaction(client, async () => {
         await client.query(f.upSql);
         await settle(client);
         await client.query(
@@ -211,7 +247,7 @@ export async function migrateDown(client: ClientBase, opts: MigrateDownOptions):
 
     const reverted: string[] = [];
     for (const f of targets) {
-      await inTransaction(client, async () => {
+      await inMigrationTransaction(client, async () => {
         await client.query(f.downSql!);
         await settle(client);
         await client.query('DELETE FROM public.schema_migrations WHERE version = $1', [f.version]);

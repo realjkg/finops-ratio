@@ -7,8 +7,9 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createTokenomicsClient } from '@/tokenomics';
 import type { TokenomicsReport } from '@/tokenomics';
+import { withInternalErrorGuard } from '@/server/gateway/internalError';
 
-export default async function handler(
+async function handler(
   req: NextApiRequest,
   res: NextApiResponse<TokenomicsReport | { error: string }>,
 ): Promise<void> {
@@ -24,3 +25,4 @@ export default async function handler(
   res.status(200).json(report);
 }
 
+export default withInternalErrorGuard(handler);
