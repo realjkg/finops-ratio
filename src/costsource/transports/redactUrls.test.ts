@@ -6,8 +6,8 @@
 //       quotes included.
 // Over-redacting the rest of a line is acceptable; leaking is not.
 
-import { describe, expect, it } from 'vitest';
-import { applyRedactionRules, redactUpstreamText } from './redact';
+import { describe, expect, it, vi } from 'vitest';
+import { applyRedactionRules, logUpstreamError, redactUpstreamText } from './redact';
 
 const S = 'URL-SECRET';
 
@@ -89,10 +89,11 @@ describe('query and fragment', () => {
   it('JSON-escaped: an @ after an escaped slash is path, not userinfo (host kept)', () => {
     const out = redactUpstreamText(String.raw`{"u":"https:\/\/host.example\/users\/bob@corp.example"}`, 500);
     expect(out).toContain(String.raw`https:\/\/host.example\/users\/bob@corp.example`);
-    // A raw backslash is a path separator (as URL parsers treat it), so an @
-    // after it is path too.
+    // A lone `\` does NOT end the authority (DOMAIN\user NTLM credentials
+    // contain one), so an @ after a raw backslash is treated as userinfo —
+    // accepted over-redaction.
     const win = redactUpstreamText(String.raw`https://host.example\users\bob@corp.example`, 500);
-    expect(win).toBe(String.raw`https://host.example\users\bob@corp.example`);
+    expect(win).toBe('https://[REDACTED]@corp.example');
   });
 
   it('keeps scheme, host and path; replaces the whole query', () => {
@@ -112,3 +113,75 @@ describe('scan is applied by applyRedactionRules too (uncapped)', () => {
     expect(out).toBe('https://[REDACTED]@h/p?[REDACTED]');
   });
 });
+
+// --- Round 9 ---------------------------------------------------------------
+
+describe('Windows / NTLM DOMAIN\\user proxy credentials (regression in 403da2b)', () => {
+  it.each([
+    ['plain', String.raw`proxy http://CORP\jdoe:SECRETNTLM@proxy:8080 refused`],
+    ['JSON-escaped backslash', String.raw`{"proxy":"http://CORP\\jdoe:SECRETNTLM@proxy:8080"}`],
+    ['JSON-escaped URL + backslash', String.raw`{"proxy":"http:\/\/CORP\\jdoe:SECRETNTLM@proxy:8080\/x"}`],
+    ['double-escaped', String.raw`{\"proxy\":\"http:\\\/\\\/CORP\\\\jdoe:SECRETNTLM@proxy:8080\\\/x\"}`],
+  ])('%s', (_l, input) => {
+    const out = redactUpstreamText(input, 1000);
+    expect(out).not.toContain('SECRETNTLM');
+    expect(out).not.toContain('jdoe');
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('live-style through logUpstreamError', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      logUpstreamError('Proxy', 407, String.raw`{"message":"auth failed for http://CORP\\jdoe:SECRETNTLM@proxy:8080"}`);
+      const line = String(warn.mock.calls[0][0]);
+      expect(line).not.toContain('SECRETNTLM');
+      expect(line).toContain('[REDACTED]');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe('double-escaped scheme start https:\\\\\\/\\\\\\/', () => {
+  it('userinfo and query are redacted', () => {
+    const out = redactUpstreamText(String.raw`"u":"https:\\\/\\\/user:${S}@host\\\/p?sig=${S}"`, 1000);
+    expect(out).not.toContain(S);
+    expect(out).toContain('[REDACTED]');
+  });
+});
+
+describe('a literal / inside the password (user:pa/ss@host)', () => {
+  it.each([
+    String.raw`http://user:pa/ss${S}@host.example/x`,
+    String.raw`https://user:a/b/c${S}@host.example`,
+    String.raw`{"u":"https://user:pa/ss${S}@host.example/x"}`,
+  ])('%s', (input) => {
+    const out = redactUpstreamText(input, 1000);
+    expect(out).not.toContain(S);
+    expect(out).not.toMatch(/user:pa|user:a\//);
+  });
+
+  it('the extension stops at whitespace / a quote (limited over-redaction)', () => {
+    const out = redactUpstreamText(`http://host.example:8080/users/bob@corp.example see also mail@other.example`, 1000);
+    // host:port + a later @ in the same token is treated as userinfo (accepted),
+    // but nothing after the whitespace is touched.
+    expect(out).toBe('http://[REDACTED]@corp.example see also mail@other.example');
+  });
+
+  it('no ":" in the authority → no extension (path @ kept)', () => {
+    expect(redactUpstreamText('https://host.example/users/bob@corp.example', 500)).toBe(
+      'https://host.example/users/bob@corp.example',
+    );
+  });
+});
+
+describe('scheme-relative // only after a delimiter', () => {
+  it('a // inside a word is not a URL start (no redaction)', () => {
+    expect(redactUpstreamText('path a//b:c@d and x//y@z', 500)).toBe('path a//b:c@d and x//y@z');
+  });
+
+  it('after whitespace / quote / = it is', () => {
+    expect(redactUpstreamText(`x=//u:${S}@h/p`, 500)).toBe('x=//[REDACTED]@h/p');
+  });
+});
+
