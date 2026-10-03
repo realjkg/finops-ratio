@@ -1,5 +1,7 @@
-// Worker authorization: refuse superuser / BYPASSRLS / owner / non-worker
-// connections at startup; the reader role cannot drive any worker write path.
+// Worker authorization: refuse superuser / owner / non-worker connections at
+// startup; the reader role cannot drive any worker write path. The DANGEROUS
+// logins (BYPASSRLS member, member that can become a superuser) are committed
+// cluster-global state and live in auth.serial.db.test.ts.
 import crypto from 'crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDatabase, type TestDatabase } from '../db/testing/harness';
@@ -15,18 +17,16 @@ import { csvGz, rowsOf } from '../testing/focusCsv';
 
 let db: TestDatabase;
 const logins: Login[] = [];
-const extraRoles: string[] = [];
 beforeAll(async () => {
   db = await createTestDatabase({ migrate: true });
 });
 afterAll(async () => {
   for (const l of logins) await l.drop();
-  for (const r of extraRoles) await db.pool.query(`DROP ROLE IF EXISTS ${r}`);
   await db.close();
 });
 
-async function login(memberOf: Array<'ratio_worker' | 'ratio_reader' | 'ratio_owner'>, attrs: string[] = []) {
-  const l = await createLogin(db, memberOf, attrs);
+async function login(memberOf: Array<'ratio_worker' | 'ratio_reader' | 'ratio_owner'>) {
+  const l = await createLogin(db, memberOf);
   logins.push(l);
   return l;
 }
@@ -48,20 +48,6 @@ describe('worker refuses unsafe database roles', () => {
 
   it('A1 refuses a superuser connection', async () => {
     await expect(check(db.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE' });
-  });
-
-  it('A1 refuses a BYPASSRLS login even if it is a ratio_worker member', async () => {
-    const l = await login(['ratio_worker'], ['BYPASSRLS']);
-    await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE' });
-  });
-
-  it('A1 refuses a login that can SET ROLE to a superuser role', async () => {
-    const su = `ratio_test_su_${crypto.randomBytes(4).toString('hex')}`;
-    await db.pool.query(`CREATE ROLE ${su} NOLOGIN SUPERUSER`);
-    extraRoles.push(su);
-    const l = await login(['ratio_worker']);
-    await db.pool.query(`GRANT ${su} TO ${l.name}`);
-    await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE' });
   });
 
   it('A1 refuses a member of ratio_owner (could disable RLS)', async () => {
