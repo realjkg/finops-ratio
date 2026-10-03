@@ -7,6 +7,7 @@
 //   RT003  publication pointer and published batch disagree at COMMIT
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PoolClient } from 'pg';
+import { Client } from 'pg';
 import { attempt, createTestDatabase, withRole, type TestDatabase } from './testing/harness';
 import { artifactSha, fp, seedTwoTenants, type Seeded } from './testing/fixtures';
 
@@ -543,5 +544,175 @@ describe('publication pointer always names the one published batch', () => {
     });
     const st = await db.pool.query(`SELECT status FROM ratio.ingest_batches WHERE id = $1`, [b.batchStaged]);
     expect(st.rows[0].status).toBe('superseded');
+  });
+
+});
+
+describe('round 3: challenger round-2 findings', () => {
+  it('H1: switching ratio.tenant_id before COMMIT cannot smuggle a pointer to a staged batch past RT003 (repro T1)', async () => {
+    const a = seed.a;
+    for (const switchTo of ['', seed.b.tenantId]) {
+      const r = await workerCommit(async (c) => {
+        await c.query(`UPDATE ratio.period_publications SET batch_id = $1 WHERE source_id = $2`, [a.batchStaged, a.sourceId]);
+        await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [switchTo]);
+      });
+      expect(r, `switch to '${switchTo}'`).toMatchObject({ ok: false, code: 'RT003' });
+    }
+  });
+
+  it('H1: switching tenant before COMMIT cannot supersede the published batch without a replacement (repro T2)', async () => {
+    const a = seed.a;
+    for (const switchTo of [seed.b.tenantId, '']) {
+      const r = await workerCommit(async (c) => {
+        await c.query(`UPDATE ratio.ingest_batches SET status = 'superseded', superseded_at = now() WHERE id = $1`, [a.batchPublished]);
+        await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [switchTo]);
+      });
+      expect(r, `switch to '${switchTo}'`).toMatchObject({ ok: false, code: 'RT003' });
+    }
+    await withRole(db.pool, 'ratio_worker', a.tenantId, async (w) => {
+      expect(await publishedView(w)).toEqual({ n: a.publishedRows, total: a.publishedTotal, batches: [a.batchPublished] });
+    });
+  });
+
+  it('H1: a legitimate publish with a constant tenant still commits (positive control, fresh DB)', async () => {
+    const fresh = await createTestDatabase({ migrate: true });
+    try {
+      const s2 = await seedTwoTenants(fresh.pool);
+      const c = await fresh.pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query('SET LOCAL ROLE ratio_worker');
+        await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [s2.a.tenantId]);
+        await c.query(`UPDATE ratio.ingest_batches SET status = 'superseded', superseded_at = now() WHERE id = $1`, [s2.a.batchPublished]);
+        await c.query(`UPDATE ratio.ingest_batches SET status = 'published', published_at = now() WHERE id = $1`, [s2.a.batchStaged]);
+        await c.query(`UPDATE ratio.period_publications SET batch_id = $1 WHERE source_id = $2`, [s2.a.batchStaged, s2.a.sourceId]);
+        await c.query('COMMIT');
+      } finally {
+        await c.query('ROLLBACK').catch(() => undefined);
+        c.release();
+      }
+      const st = await fresh.pool.query(`SELECT status FROM ratio.ingest_batches WHERE id = $1`, [s2.a.batchStaged]);
+      expect(st.rows[0].status).toBe('published');
+    } finally {
+      await fresh.close();
+    }
+  });
+
+  it('H1: a child row whose parent batch is not found is refused by the trigger (RT001), not left to the FK', async () => {
+    const a = seed.a;
+    await superTxn(async (c) => {
+      const missing = 'eeeeeeee-0000-4000-8000-000000000001';
+      const ins = factInsert(missing, 1);
+      expect(await attempt(c, ins.sql, ins.params)).toMatchObject({ ok: false, code: 'RT001' });
+      expect(
+        await attempt(
+          c,
+          `INSERT INTO ratio.ingest_validation_errors (tenant_id, batch_id, error_ordinal, artifact_sha256, code, message)
+           VALUES ($1, $2, 1, $3, 'X', 'x')`,
+          [a.tenantId, missing, fp('x')],
+        ),
+      ).toMatchObject({ ok: false, code: 'RT001' });
+    });
+  });
+
+  it('M2: a fact insert racing an uncommitted publish waits on the batch row lock, then fails RT001 (two connections)', async () => {
+    const fresh = await createTestDatabase({ migrate: true });
+    const publisher = new Client({ connectionString: fresh.url });
+    const zombie = new Client({ connectionString: fresh.url });
+    const observer = new Client({ connectionString: fresh.url });
+    for (const c of [publisher, zombie, observer]) c.on('error', () => undefined);
+    try {
+      const s2 = await seedTwoTenants(fresh.pool);
+      const a = s2.a;
+      await Promise.all([publisher.connect(), zombie.connect(), observer.connect()]);
+      for (const c of [publisher, zombie]) {
+        await c.query('BEGIN');
+        await c.query('SET LOCAL ROLE ratio_worker');
+        await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [a.tenantId]);
+      }
+      // Publisher: publish the staged batch, uncommitted.
+      await publisher.query(`UPDATE ratio.ingest_batches SET status = 'superseded', superseded_at = now() WHERE id = $1`, [a.batchPublished]);
+      await publisher.query(`UPDATE ratio.ingest_batches SET status = 'published', published_at = now() WHERE id = $1`, [a.batchStaged]);
+      await publisher.query(`UPDATE ratio.period_publications SET batch_id = $1 WHERE source_id = $2`, [a.batchStaged, a.sourceId]);
+      // Zombie: append a fact to that (still staged, as far as it can see) batch.
+      const zombiePid = (await zombie.query('SELECT pg_backend_pid() AS p')).rows[0].p as number;
+      const insert = zombie
+        .query(
+          `INSERT INTO ratio.cost_facts (tenant_id, batch_id, source_id, artifact_sha256, row_ordinal, billing_period,
+             charge_period_start, charge_period_end, billed_cost, billing_currency)
+           VALUES ($1, $2, $3, $4, 77, $5, '2026-08-01T00:00:00Z', '2026-08-02T00:00:00Z', 1, 'USD')`,
+          [a.tenantId, a.batchStaged, a.sourceId, artifactSha(a.slug, a.batchStaged), a.period],
+        )
+        .then(
+          () => ({ ok: true as const }),
+          (e: { code?: string }) => ({ ok: false as const, code: e.code }),
+        );
+      // Observe (bounded poll) that the zombie is blocked on a lock held by the publisher.
+      let waiting = false;
+      for (let i = 0; i < 200 && !waiting; i++) {
+        const r = await observer.query(
+          `SELECT wait_event_type = 'Lock' AS w FROM pg_stat_activity WHERE pid = $1`,
+          [zombiePid],
+        );
+        waiting = r.rows[0]?.w === true;
+        if (!waiting) await new Promise((res) => setTimeout(res, 25));
+      }
+      expect(waiting).toBe(true);
+      const blockers = await observer.query(`SELECT pg_blocking_pids($1) AS b`, [zombiePid]);
+      const publisherPid = (await publisher.query('SELECT pg_backend_pid() AS p')).rows[0].p as number;
+      expect(blockers.rows[0].b).toEqual([publisherPid]);
+      await publisher.query('COMMIT');
+      expect(await insert).toEqual({ ok: false, code: 'RT001' });
+      await zombie.query('ROLLBACK');
+      const n = await fresh.pool.query(`SELECT count(*)::int AS n FROM ratio.cost_facts WHERE batch_id = $1 AND row_ordinal = 77`, [a.batchStaged]);
+      expect(n.rows[0].n).toBe(0);
+    } finally {
+      for (const c of [publisher, zombie, observer]) await c.end().catch(() => undefined);
+      await fresh.close();
+    }
+  });
+
+  it('M3: data columns cannot ride along with a legal transition', async () => {
+    const a = seed.a;
+    const cases: Array<[string, string]> = [
+      [a.batchPublished, `status = 'superseded', superseded_at = now(), loaded_billed_total = 0`],
+      [a.batchPublished, `status = 'superseded', superseded_at = now(), row_count = row_count + 1`],
+      [a.batchPublished, `status = 'superseded', superseded_at = now(), reconciliation = 'reconciled', control_row_count = row_count`],
+      [a.batchSuperseded, `status = 'published', published_at = now(), row_count = 99`],
+      [a.batchSuperseded, `status = 'published', published_at = now(), is_provisional = true`],
+      [a.batchSuperseded, `status = 'published', published_at = now(), quarantine_reason = 'x'`],
+    ];
+    for (const [batch, set] of cases) {
+      await superTxn(async (c) => {
+        if (batch === a.batchSuperseded) {
+          // make room for the replay: the live batch must leave 'published' first
+          await c.query(`UPDATE ratio.ingest_batches SET status = 'superseded', superseded_at = now() WHERE id = $1`, [a.batchPublished]);
+        }
+        expect(await attempt(c, `UPDATE ratio.ingest_batches SET ${set} WHERE id = $1`, [batch]), set).toMatchObject({ ok: false, code: 'RT002' });
+      });
+    }
+    // The same transitions without extra columns are legal.
+    await superTxn(async (c) => {
+      expect(
+        await attempt(c, `UPDATE ratio.ingest_batches SET status = 'superseded', superseded_at = now() WHERE id = $1`, [a.batchPublished]),
+      ).toMatchObject({ ok: true, rowCount: 1 });
+      expect(
+        await attempt(c, `UPDATE ratio.ingest_batches SET status = 'published', published_at = now() WHERE id = $1`, [a.batchSuperseded]),
+      ).toMatchObject({ ok: true, rowCount: 1 });
+    });
+  });
+
+  it('L2: the worker cannot call the publication check directly; the deferred trigger still works for it', async () => {
+    const r = await db.pool.query(
+      `SELECT p.oid::regprocedure::text AS fn FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'ratio' AND p.proname LIKE '%publication%' AND p.prorettype <> 'trigger'::regtype
+         AND has_function_privilege('ratio_worker', p.oid, 'EXECUTE')`,
+    );
+    expect(r.rows).toEqual([]);
+    // Trigger path, as the worker: an inconsistent end state is still refused at COMMIT.
+    const res = await workerCommit(async (c) => {
+      await c.query(`UPDATE ratio.ingest_batches SET status = 'superseded', superseded_at = now() WHERE id = $1`, [seed.a.batchPublished]);
+    });
+    expect(res).toMatchObject({ ok: false, code: 'RT003' });
   });
 });

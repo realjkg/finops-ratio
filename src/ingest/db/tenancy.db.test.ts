@@ -6,6 +6,8 @@ import { attempt, createTestDatabase, withRole, type TestDatabase } from './test
 import { TENANT_TABLES, artifactSha, fp, seedTwoTenants, type Seeded } from './testing/fixtures';
 import { withTenantTransaction } from './tenant';
 
+const CHILD_TABLES = new Set(['cost_facts', 'ingest_artifacts', 'ingest_validation_errors']);
+
 let db: TestDatabase;
 let seed: Seeded;
 
@@ -137,8 +139,17 @@ describe('ratio_worker tenant isolation', () => {
         const r = await attempt(c, sql, params);
         expect(r.ok, table).toBe(false);
         if (!r.ok) {
-          expect(r.code, table).toBe('42501');
-          expect(r.message, table).toMatch(/row-level security/);
+          // Child rows (facts, artifacts, validation errors) are refused one step
+          // earlier, by the staged-only trigger: tenant B's batch is invisible
+          // under tenant A, and a missing parent batch is RT001 (round 3). Every
+          // other table is refused by the RLS WITH CHECK.
+          if (CHILD_TABLES.has(table)) {
+            expect(r.code, table).toBe('RT001');
+            expect(r.message, table).toMatch(/batch .* not found/);
+          } else {
+            expect(r.code, table).toBe('42501');
+            expect(r.message, table).toMatch(/row-level security/);
+          }
         }
       });
     }

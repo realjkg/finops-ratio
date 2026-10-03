@@ -76,12 +76,14 @@ GRANT USAGE ON SCHEMA ratio TO ratio_worker, ratio_reader;
 -- SQL-standard body: parsed and bound when created, so a caller's search_path
 -- or a temp object named `uuid` cannot change what it resolves to, and it
 -- stays inlinable (no SET clause).
+-- ratio:allow-function tenant helper used by every RLS policy and the view
 CREATE FUNCTION ratio.current_tenant_id() RETURNS uuid
   LANGUAGE sql STABLE PARALLEL SAFE
   RETURN NULLIF(pg_catalog.current_setting('ratio.tenant_id', true), '')::pg_catalog.uuid;
 
 -- True when free text looks like it carries a credential: URL userinfo,
 -- signed-URL parameters, AWS access key ids, bearer tokens. Fail closed.
+-- ratio:allow-function secret-value guard used by CHECK constraints
 CREATE FUNCTION ratio.text_looks_secret(t text) RETURNS boolean
   LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
   SET search_path = pg_catalog, pg_temp
@@ -91,6 +93,7 @@ $fn$;
 
 -- True when any key, at any depth, looks like it names a secret. Deliberately
 -- broad (fail closed): non-secret config must avoid these substrings.
+-- ratio:allow-function secret-key guard used by CHECK constraints
 CREATE FUNCTION ratio.jsonb_has_secret_like_key(doc jsonb) RETURNS boolean
   LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
   SET search_path = pg_catalog, pg_temp
@@ -115,6 +118,7 @@ AS $fn$
 $fn$;
 
 -- True when any string value, at any depth, looks secret (see text_looks_secret).
+-- ratio:allow-function secret-value guard used by CHECK constraints
 CREATE FUNCTION ratio.jsonb_has_secret_like_value(doc jsonb) RETURNS boolean
   LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
   SET search_path = pg_catalog, pg_temp
@@ -359,6 +363,7 @@ CREATE TABLE ratio.source_checkpoints (
 -- Facts, artifacts and validation errors may be written only while their batch
 -- is `staged`. FOR SHARE on the batch row serializes against a concurrent
 -- status change (publish/quarantine) of that batch.
+-- ratio:allow-function staged-only immutability trigger function
 CREATE FUNCTION ratio.tg_child_of_staged_batch() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -370,7 +375,11 @@ BEGIN
     SELECT b.status INTO st FROM ratio.ingest_batches b
      WHERE b.tenant_id = OLD.tenant_id AND b.id = OLD.batch_id
      FOR SHARE;
-    IF FOUND AND st <> 'staged' THEN
+    IF NOT FOUND THEN
+      RAISE EXCEPTION USING ERRCODE = 'RT001',
+        MESSAGE = format('%s row: parent batch %s not found (or not visible to this tenant)', TG_TABLE_NAME, OLD.batch_id);
+    END IF;
+    IF st <> 'staged' THEN
       RAISE EXCEPTION USING ERRCODE = 'RT001',
         MESSAGE = format('%s rows of a %s batch are immutable', TG_TABLE_NAME, st);
     END IF;
@@ -379,8 +388,13 @@ BEGIN
     SELECT b.status INTO st FROM ratio.ingest_batches b
      WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.batch_id
      FOR SHARE;
-    -- Not found: the composite FK (or RLS) rejects the row with its own error.
-    IF FOUND AND st <> 'staged' THEN
+    -- Not found (missing, or another tenant's batch hidden by RLS): refuse here
+    -- rather than trusting the FK / RLS that would run later.
+    IF NOT FOUND THEN
+      RAISE EXCEPTION USING ERRCODE = 'RT001',
+        MESSAGE = format('%s row: parent batch %s not found (or not visible to this tenant)', TG_TABLE_NAME, NEW.batch_id);
+    END IF;
+    IF st <> 'staged' THEN
       RAISE EXCEPTION USING ERRCODE = 'RT001',
         MESSAGE = format('cannot add %s rows to a %s batch', TG_TABLE_NAME, st);
     END IF;
@@ -393,6 +407,7 @@ END
 $fn$;
 
 -- Ingested data is retained: TRUNCATE (which bypasses row triggers) is refused.
+-- ratio:allow-function TRUNCATE refusal trigger function
 CREATE FUNCTION ratio.tg_refuse_truncate() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -406,6 +421,7 @@ $fn$;
 -- deleted or have their data changed; allowed transitions are
 -- staged -> published | quarantined, published -> superseded (replaced) and
 -- superseded -> published (replay/rollback). Quarantined is terminal.
+-- ratio:allow-function batch lifecycle trigger function
 CREATE FUNCTION ratio.tg_batch_lifecycle() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -449,75 +465,94 @@ BEGIN
 END
 $fn$;
 
--- For one (tenant, source, period): a pointer exists iff a published batch
--- exists, and the pointer names that (single) published batch.
-CREATE FUNCTION ratio.assert_publication_consistent(p_tenant uuid, p_source uuid, p_period date) RETURNS void
-  LANGUAGE plpgsql
-  SET search_path = pg_catalog, pg_temp
-AS $fn$
-DECLARE
-  v_ptr uuid;
-  v_has_ptr boolean;
-  v_published uuid[];
-BEGIN
-  SELECT pp.batch_id INTO v_ptr FROM ratio.period_publications pp
-   WHERE pp.tenant_id = p_tenant AND pp.source_id = p_source AND pp.billing_period = p_period;
-  v_has_ptr := FOUND;
-  SELECT array_agg(b.id) INTO v_published FROM ratio.ingest_batches b
-   WHERE b.tenant_id = p_tenant AND b.source_id = p_source AND b.billing_period = p_period AND b.status = 'published';
-  IF v_has_ptr THEN
-    IF v_published IS NULL OR cardinality(v_published) <> 1 OR v_published[1] <> v_ptr THEN
-      RAISE EXCEPTION USING ERRCODE = 'RT003',
-        MESSAGE = format('publication pointer for source %s period %s must name its published batch', p_source, p_period);
-    END IF;
-  ELSIF v_published IS NOT NULL THEN
-    RAISE EXCEPTION USING ERRCODE = 'RT003',
-      MESSAGE = format('published batch for source %s period %s has no publication pointer', p_source, p_period);
-  END IF;
-END
-$fn$;
-
+-- Deferred (COMMIT-time) check for every (tenant, source, period) a row event
+-- touched: a pointer exists iff a published batch exists, and the pointer
+-- names that (single) published batch. Inlined in the trigger function (no
+-- separately callable helper, so the worker needs no EXECUTE grant for it).
+-- If RLS is active for the committing role, the tenant in force at COMMIT must
+-- be the row's tenant: otherwise RLS would hide the rows and the check would
+-- pass vacuously (challenger round 2, H1).
+-- ratio:allow-function deferred publication consistency trigger function
 CREATE FUNCTION ratio.tg_publication_consistency() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
 AS $fn$
+DECLARE
+  k record;
+  v_ptr uuid;
+  v_has_ptr boolean;
+  v_published uuid[];
 BEGIN
-  IF TG_OP IN ('INSERT', 'UPDATE') THEN
-    PERFORM ratio.assert_publication_consistent(NEW.tenant_id, NEW.source_id, NEW.billing_period);
-  END IF;
-  IF TG_OP IN ('UPDATE', 'DELETE') THEN
-    PERFORM ratio.assert_publication_consistent(OLD.tenant_id, OLD.source_id, OLD.billing_period);
-  END IF;
+  FOR k IN
+    SELECT DISTINCT x.tenant_id, x.source_id, x.billing_period
+    FROM (
+      SELECT NEW.tenant_id, NEW.source_id, NEW.billing_period WHERE TG_OP IN ('INSERT', 'UPDATE')
+      UNION ALL
+      SELECT OLD.tenant_id, OLD.source_id, OLD.billing_period WHERE TG_OP IN ('UPDATE', 'DELETE')
+    ) AS x(tenant_id, source_id, billing_period)
+  LOOP
+    IF (row_security_active('ratio.period_publications'::regclass) OR row_security_active('ratio.ingest_batches'::regclass))
+       AND ratio.current_tenant_id() IS DISTINCT FROM k.tenant_id THEN
+      RAISE EXCEPTION USING ERRCODE = 'RT003',
+        MESSAGE = 'ratio.tenant_id changed before COMMIT: publication consistency cannot be verified';
+    END IF;
+    SELECT pp.batch_id INTO v_ptr FROM ratio.period_publications pp
+     WHERE pp.tenant_id = k.tenant_id AND pp.source_id = k.source_id AND pp.billing_period = k.billing_period;
+    v_has_ptr := FOUND;
+    SELECT array_agg(b.id) INTO v_published FROM ratio.ingest_batches b
+     WHERE b.tenant_id = k.tenant_id AND b.source_id = k.source_id AND b.billing_period = k.billing_period
+       AND b.status = 'published';
+    IF v_has_ptr THEN
+      IF v_published IS NULL OR cardinality(v_published) <> 1 OR v_published[1] <> v_ptr THEN
+        RAISE EXCEPTION USING ERRCODE = 'RT003',
+          MESSAGE = format('publication pointer for source %s period %s must name its published batch', k.source_id, k.billing_period);
+      END IF;
+    ELSIF v_published IS NOT NULL THEN
+      RAISE EXCEPTION USING ERRCODE = 'RT003',
+        MESSAGE = format('published batch for source %s period %s has no publication pointer', k.source_id, k.billing_period);
+    END IF;
+  END LOOP;
   RETURN NULL;
 END
 $fn$;
 
+-- ratio:allow-function attaches the child_of_staged_batch guard
 CREATE TRIGGER child_of_staged_batch BEFORE INSERT OR UPDATE OR DELETE ON ratio.cost_facts
   FOR EACH ROW EXECUTE FUNCTION ratio.tg_child_of_staged_batch();
+-- ratio:allow-function attaches the child_of_staged_batch guard
 CREATE TRIGGER child_of_staged_batch BEFORE INSERT OR UPDATE OR DELETE ON ratio.ingest_artifacts
   FOR EACH ROW EXECUTE FUNCTION ratio.tg_child_of_staged_batch();
+-- ratio:allow-function attaches the child_of_staged_batch guard
 CREATE TRIGGER child_of_staged_batch BEFORE INSERT OR UPDATE OR DELETE ON ratio.ingest_validation_errors
   FOR EACH ROW EXECUTE FUNCTION ratio.tg_child_of_staged_batch();
 
+-- ratio:allow-function attaches the refuse_truncate guard
 CREATE TRIGGER refuse_truncate BEFORE TRUNCATE ON ratio.cost_facts
   FOR EACH STATEMENT EXECUTE FUNCTION ratio.tg_refuse_truncate();
+-- ratio:allow-function attaches the refuse_truncate guard
 CREATE TRIGGER refuse_truncate BEFORE TRUNCATE ON ratio.ingest_artifacts
   FOR EACH STATEMENT EXECUTE FUNCTION ratio.tg_refuse_truncate();
+-- ratio:allow-function attaches the refuse_truncate guard
 CREATE TRIGGER refuse_truncate BEFORE TRUNCATE ON ratio.ingest_validation_errors
   FOR EACH STATEMENT EXECUTE FUNCTION ratio.tg_refuse_truncate();
+-- ratio:allow-function attaches the refuse_truncate guard
 CREATE TRIGGER refuse_truncate BEFORE TRUNCATE ON ratio.ingest_batches
   FOR EACH STATEMENT EXECUTE FUNCTION ratio.tg_refuse_truncate();
+-- ratio:allow-function attaches the refuse_truncate guard
 CREATE TRIGGER refuse_truncate BEFORE TRUNCATE ON ratio.period_publications
   FOR EACH STATEMENT EXECUTE FUNCTION ratio.tg_refuse_truncate();
 
+-- ratio:allow-function attaches the batch_lifecycle guard
 CREATE TRIGGER batch_lifecycle BEFORE INSERT OR UPDATE OR DELETE ON ratio.ingest_batches
   FOR EACH ROW EXECUTE FUNCTION ratio.tg_batch_lifecycle();
 
 -- Checked at COMMIT, so a publish transaction may supersede, publish and
 -- re-point in any order; any other end state is refused.
+-- ratio:allow-function attaches the publication_consistency guard
 CREATE CONSTRAINT TRIGGER publication_consistency AFTER INSERT OR UPDATE OR DELETE ON ratio.period_publications
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION ratio.tg_publication_consistency();
+-- ratio:allow-function attaches the publication_consistency guard
 CREATE CONSTRAINT TRIGGER publication_consistency AFTER INSERT OR UPDATE OR DELETE ON ratio.ingest_batches
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION ratio.tg_publication_consistency();
@@ -574,6 +609,7 @@ CREATE POLICY tenant_isolation ON ratio.source_checkpoints
 -- tenant predicate and the status = 'published' join are defence in depth (the
 -- join also hides rows while an uncommitted transaction has a pointer that the
 -- deferred publication_consistency check would refuse at COMMIT).
+-- ratio:allow-view the one published read path (definer rights, reader-granted)
 CREATE VIEW ratio.cost_facts_published WITH (security_barrier = true) AS
 SELECT
   cf.tenant_id,
@@ -629,9 +665,9 @@ GRANT SELECT ON ratio.cost_facts_published TO ratio_worker;
 GRANT SELECT ON ratio.cost_facts_published TO ratio_reader;
 
 -- Functions: no EXECUTE for PUBLIC. The reader needs only the tenant helper
--- (view predicate + RLS policies); the worker also evaluates the CHECK guards
--- and the publication check. Trigger functions need no grant.
+-- (view predicate + RLS policies); the worker also evaluates the CHECK guards.
+-- Trigger functions need no grant (EXECUTE is checked when the trigger is created).
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA ratio FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION ratio.current_tenant_id() TO ratio_worker, ratio_reader;
 GRANT EXECUTE ON FUNCTION ratio.text_looks_secret(text), ratio.jsonb_has_secret_like_key(jsonb),
-  ratio.jsonb_has_secret_like_value(jsonb), ratio.assert_publication_consistent(uuid, uuid, date) TO ratio_worker;
+  ratio.jsonb_has_secret_like_value(jsonb) TO ratio_worker;

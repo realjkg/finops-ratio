@@ -347,3 +347,105 @@ No mutation survived. Raw: `scratchpad/slice0/r2/mutations.txt`.
   grant) — production/tenancy impact; retention: published/quarantined data and
   evidence cannot be deleted or truncated through normal roles (by design, D7).
 - The trust boundary above (GUC-selected tenant vs per-tenant credentials).
+
+---
+
+# Round 3 — challenger round 2 (1 High, 3 Medium, Lows)
+
+Base: `slice/00-postgres-foundation` @ 446563e. Local commits only. 0001 amended
+in place again (still unreleased). Work done in the main checkout
+`/home/user/finops-ratio` as instructed by the orchestrator.
+
+## R3.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 35316bd | test(ingest): failing tests for challenger round 2 (H1, M1-M3, L2) | tests (red) |
+| a0996c2 | test(ingest): reader grants are restricted in every schema; DEFAULT-then-NOT NULL is expand | test adjustment |
+| 56ef017 | fix(ingest): 0001 — tenant-pinned COMMIT check, not-found parent refused, markers (H1, L2) | fix |
+| 0acb539 | fix(ingest): classifier — policy/grant/body/view/function rules (M1) | fix |
+| (this) | docs(evidence): round 3 | docs |
+
+## R3.2 Red (at 35316bd)
+
+- Fast: 1 failed / 42 passed — classifier round-3 bypass cases (`create_policy_true: expected null not to be null`).
+- DB: 6 failed / 99 passed (105): H1 T1 and T2 COMMITTED (bypass reproduced), not-found
+  parent gave 23503 not RT001, tenancy child-table inserts gave 42501 not RT001, L2
+  (worker had EXECUTE on assert_publication_consistent), and M3 failed only because
+  the T2 bypass had committed and polluted the shared fixture. M2 and M3 pass against
+  the pre-fix code by design (they target surviving mutations N1/N14, see R3.4).
+Raw: `scratchpad/slice0/r3/red-fast.txt`, `red-db.txt`.
+
+## R3.3 Verification (fresh clone at 0acb539, `scratchpad/slice0/r3/clone`)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `npx tsc --noEmit` | exit 0 / 0 / 0 |
+| `npm test` (no DB) | exit 0 — 320/320 |
+| `npm run test:db` (URL unset) | exit 1 (refuses to run) |
+| `npm run test:db` ×15 consecutive | **15/15 exit 0, 105/105 each, no Errors line** (`v-testdb-15.txt`) |
+| `npm run worker:build` | exit 0 |
+| migrate up/down/up on scratch DB | status before 3; up 0; status 0; re-run 0; down with RATIO_ENV=staging 1; down with RATIO_ENV=test 0 (schema + ledger empty); up again 0; status 0 |
+| `npm run build` | exit 0 (tsconfig/next-env restored) |
+| scope | no `pages/` or non-ingest `src/` change since 446563e; no pg in `.next` |
+
+## R3.4 Mutation table (my M-series + challenger N-series + round-3 R3 mutations; each run restores the file)
+
+```
+M1 view security_invoker                         exit=1 KILLED  9 failed | 96 passed (105)
+M2 no NULLIF                                     exit=1 KILLED  8 failed | 97 passed (105)
+M3 reader GRANT cost_facts                       exit=1 KILLED  16 failed | 3 passed | 76 skipped (95)
+M4 key regex without sig                         exit=1 KILLED  1 failed | 104 passed (105)
+M5 no FORCE RLS cost_facts                       exit=1 KILLED  1 failed | 104 passed (105)
+M6 no FORCE anywhere + no view tenant predicate  exit=1 KILLED  15 failed | 90 passed (105)
+M7 drop sync_runs->sources FK                    exit=1 KILLED  1 failed | 104 passed (105)
+M8 drop view status join                         exit=1 KILLED  1 failed | 104 passed (105)
+M9 drop child trigger on cost_facts              exit=1 KILLED  5 failed | 100 passed (105)
+M10 drop both deferred triggers                  exit=1 KILLED  7 failed | 98 passed (105)
+M11 neutralise reconciled_matches                exit=1 KILLED  1 failed | 104 passed (105)
+M12 drop billed_cost finite                      exit=1 KILLED  1 failed | 104 passed (105)
+M13 guard ignores memberships                    exit=1 KILLED  1 failed | 104 passed (105)
+M14 old $$ ::uuid body                           exit=1 KILLED  1 failed | 104 passed (105)
+M15 drop REVOKE FROM PUBLIC                      exit=1 KILLED  2 failed | 103 passed (105)
+M18 neutralise published_reconciliation          exit=1 KILLED  1 failed | 104 passed (105)
+M20 neutralise config secret values              exit=1 KILLED  1 failed | 104 passed (105)
+M21 drop child trigger on artifacts              exit=1 KILLED  3 failed | 102 passed (105)
+N1 no FOR SHARE                                  exit=1 KILLED  1 failed | 104 passed (105)
+N2 INSERT into published allowed                 exit=1 KILLED  3 failed | 102 passed (105)
+N3 no refuse_truncate on cost_facts              exit=1 KILLED  1 failed | 104 passed (105)
+N4 quarantined->published allowed                exit=1 KILLED  2 failed | 103 passed (105)
+N5 identity check removed                        exit=1 KILLED  1 failed | 104 passed (105)
+N6 insert as published allowed                   exit=1 KILLED  1 failed | 104 passed (105)
+N7 drop RT003 trigger on batches only            exit=1 KILLED  5 failed | 100 passed (105)
+N8 RT003 immediate                               exit=1 KILLED  4 failed | 101 passed (105)
+N13 drop error_detail secret check               exit=1 KILLED  2 failed | 103 passed (105)
+N14 frozen columns check removed                 exit=1 KILLED  1 failed | 104 passed (105)
+N15 pointer w/o matching batch allowed           exit=1 KILLED  5 failed | 100 passed (105)
+R3a H1 tenant-at-COMMIT check removed            exit=1 KILLED  4 failed | 101 passed (105)
+R3b not-found parent trusted (INSERT path)       exit=1 KILLED  2 failed | 103 passed (105)
+restored
+N12/M19 guard ignores CREATEROLE/CREATEDB  ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 104 passed (105)
+```
+All 32 killed. Note M3 (`GRANT SELECT ON ratio.cost_facts TO ratio_reader`) is now
+killed one layer earlier: the classifier refuses to load the migration
+(FORBIDDEN_STATEMENT), so every migrated-DB test fails/skips. Challenger N9/N10/N11/N16
+are the same edits as M11/M12/M13/M18.
+
+## R3.5 Per-finding status
+
+| Finding | Status |
+|---|---|
+| H1 deferred RT003 blinded by tenant switch | fixed (row_security_active + tenant pin, RT003); not-found parent ⇒ RT001; killed by R3a/R3b |
+| M1 classifier gaps | fixed (rules in DESIGN §6/§12); DESIGN claim narrowed to "text-based, defence in depth, review is primary" |
+| M2 FOR SHARE race untested | two-connection test; kills N1 |
+| M3 frozen columns + legal transition | test; kills N14 |
+| L1 | accepted as documented |
+| L2 EXECUTE on the publication check | function inlined into the trigger and removed; worker has no EXECUTE; trigger verified working for the worker |
+| L3 ratio_owner CREATEROLE | documented in the threat model (owner decision to revoke after first migration) |
+
+## R3.6 Remaining gaps
+
+- The classifier stays lexical (marked bodies' semantics, non-literal dynamic SQL).
+- A credential holder can still choose any tenant (GUC) — unchanged owner decision.
+- CI not executed here (no push).
