@@ -17,7 +17,7 @@ import type { Readable } from 'stream';
 import { runSync, type RunSyncOptions } from './pipeline';
 import { replayBatch } from './replay';
 import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup';
-import { batchesOf, checkpointOf, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
+import { batchesOf, checkpointOf, expireLeases, publishedTotals, runsOf, seedTenantSource, type SeededSource } from '../testing/db';
 import { csvGz, focusRow, rowsOf } from '../testing/focusCsv';
 
 let t: WorkerTestDb;
@@ -181,6 +181,8 @@ describe('M4: replay after a takeover', () => {
     const [b1, b2] = await batchesOf(t.db.pool, s.tenantId, s.sourceId);
     const pool = takeoverBeforeFinish(t.pool, t.db.pool);
     await expect(replayBatch({ pool, tenantId: s.tenantId, sourceKey: s.sourceKey, batchId: b2.id })).rejects.toMatchObject({ code: 'LEASE_LOST' });
+    // The taken-over run is still `running` under the other token; let its lease lapse before the next replay.
+    await expireLeases(t.db.pool, s.tenantId, s.sourceId);
     await expect(replayBatch({ pool, tenantId: s.tenantId, sourceKey: s.sourceKey, batchId: b1.id })).rejects.toMatchObject({ code: 'LEASE_LOST' });
   });
 });
