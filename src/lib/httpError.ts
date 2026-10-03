@@ -112,8 +112,20 @@ export function describeHttpErrorBody(label: string, status: number, body: strin
   return message ? `${label} error ${status}: ${message}` : `${label} error ${status}`;
 }
 
+/**
+ * Read a failed response's body without ever throwing: `text()` can reject
+ * after fetch() resolved (the body stream fails mid-read), and that raw stream
+ * error must not escape in place of the typed HTTP error. Unreadable → ''.
+ */
+export async function readErrorBody(res: Response): Promise<string> {
+  try {
+    return await res.text();
+  } catch {
+    return '';
+  }
+}
+
 /** Read the body (never throws) and describe the failure. */
 export async function describeHttpError(label: string, res: Response): Promise<string> {
-  const body = await res.text().catch(() => '');
-  return describeHttpErrorBody(label, res.status, body);
+  return describeHttpErrorBody(label, res.status, await readErrorBody(res));
 }

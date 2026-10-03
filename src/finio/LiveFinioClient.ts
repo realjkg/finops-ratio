@@ -26,7 +26,7 @@
 
 import type { FinioClient, FinioExport, HandshakeRequest, HandshakeResult } from './FinioClient';
 import { withBasePath } from '@/lib/basePath';
-import { describeHttpError, describeHttpErrorBody } from '@/lib/httpError';
+import { describeHttpError, describeHttpErrorBody, readErrorBody } from '@/lib/httpError';
 
 const HANDSHAKE_URL = withBasePath('/api/v1/a2a/handshake');
 const EXPORT_URL = withBasePath('/api/v1/finio/export');
@@ -75,7 +75,8 @@ export class LiveFinioClient implements FinioClient {
       );
     }
     if (!res.ok) {
-      const body = await res.text();
+      // Never throws: an unreadable body is '' (code unknown → typed HTTP error).
+      const body = await readErrorBody(res);
       if (res.status === 401 && errorCode(body) === 'unauthorized_peer') {
         throw new FinioPeerAuthError();
       }
