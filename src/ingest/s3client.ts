@@ -11,6 +11,8 @@ export function makeS3Client(s: S3Settings): S3Client {
     forcePathStyle: s.forcePathStyle,
     ...(s.credentials ? { credentials: s.credentials } : {}),
     maxAttempts: 3,
+    // Every request (incl. a streamed body going idle on the socket) times out.
+    requestHandler: { requestTimeout: s.requestTimeoutMs, connectionTimeout: s.connectTimeoutMs, throwOnRequestTimeout: true },
     // Only send/validate flexible checksums when an operation requires them:
     // streamed uploads otherwise use aws-chunked trailers that some
     // S3-compatible stores (SeaweedFS) reject. Integrity is enforced by the

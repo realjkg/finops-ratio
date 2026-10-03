@@ -17,6 +17,7 @@ import { indexHeader, validateRow, type FactRow, type HeaderIndex } from '../foc
 import { assertLease, type Lease } from './lease';
 import type { WorkerHooks } from './types';
 import type { WorkerLimits } from '../config';
+import { idleWatchdog, withDeadline } from '../stall';
 
 export const MAX_STORED_ERRORS = 1000;
 const MAX_RECORD_BYTES = 1024 * 1024;
@@ -59,6 +60,10 @@ export interface LoadContext {
   limits: WorkerLimits;
   hooks: WorkerHooks;
   maybeHeartbeat: () => Promise<void>;
+  /** Idle limit for opening/reading the evidence copy (EVIDENCE_STALLED). */
+  stallMs: number;
+  /** Called whenever bytes or rows advance (keeps the lease renewing). */
+  progress: () => void;
 }
 
 export interface LoadArtifact {
@@ -145,7 +150,7 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
 
   let raw: Readable;
   try {
-    raw = await ctx.evidence.open(art.evidenceKey);
+    raw = await withDeadline(ctx.evidence.open(art.evidenceKey), ctx.stallMs, 'EVIDENCE_STALLED', 'opening the evidence copy');
   } catch (e) {
     if (e instanceof IngestError) throw e;
     throw new IngestError('EVIDENCE_STORE_FAILED', 'reading the evidence copy failed', { retryable: isTransientError(e), cause: e });
@@ -169,7 +174,14 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
     rawError = e;
     hashT.destroy(e);
   });
-  raw.pipe(hashT);
+  // Idle watchdog between the evidence stream and the parser. Slow downstream
+  // inserts touch() it, so only a source of bytes that goes silent trips it.
+  const watchdog = idleWatchdog(ctx.stallMs, 'EVIDENCE_STALLED', 'the evidence copy', () => ctx.progress());
+  watchdog.stream.on('error', (e) => {
+    raw.destroy();
+    hashT.destroy(e);
+  });
+  raw.pipe(watchdog.stream).pipe(hashT);
 
   const parser: Parser = parse({ bom: true, relax_column_count: false, skip_empty_lines: true, max_record_size: MAX_RECORD_BYTES });
   let gunzip: zlib.Gunzip | null = null;
@@ -221,6 +233,8 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
       throw e;
     }
     state.rowsInserted += rows.length;
+    watchdog.touch();
+    ctx.progress();
     await ctx.maybeHeartbeat();
     if (ctx.hooks.afterChunk) {
       await ctx.hooks.afterChunk({ runId: ctx.lease.runId, batchId: ctx.batchId, artifactSha256: art.sha256, chunkRows: rows.length, rowsInserted: state.rowsInserted });
@@ -262,7 +276,8 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
   } catch (e) {
     const isParseProblem = (e instanceof IngestError && e.code === 'INVALID_GZIP') || isCsvError(e);
     if (rawError || !isParseProblem) {
-      // Infrastructure failure, lease loss, DB error in a chunk, or a hook: stop reading and propagate.
+      // Infrastructure failure, stall, lease loss, DB error in a chunk, or a hook: stop reading and propagate.
+      watchdog.stop();
       raw.destroy();
       hashT.destroy();
       if (rawError && !(e instanceof IngestError && e.code === 'LEASE_LOST')) {

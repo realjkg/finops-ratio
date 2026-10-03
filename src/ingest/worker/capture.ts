@@ -10,6 +10,7 @@ import { pipeline } from 'stream/promises';
 import { IngestError } from '../errors';
 import { isTransientError } from '../retry';
 import { evidenceKey, type EvidenceStore } from '../evidence/types';
+import { idleWatchdog, withDeadline } from '../stall';
 import type { ArtifactRef, FocusSource } from '../sources/types';
 
 export interface CapturedArtifact {
@@ -28,6 +29,10 @@ export async function captureArtifact(opts: {
   sourceId: string;
   tmpDir: string;
   maxBytes: number;
+  /** Idle limit for opening/reading the source (SOURCE_STALLED). */
+  stallMs: number;
+  /** Called whenever bytes arrive (keeps the lease renewing). */
+  progress?: () => void;
 }): Promise<CapturedArtifact> {
   const dir = await fs.promises.mkdtemp(path.join(opts.tmpDir, 'ratio-capture-'));
   const file = path.join(dir, 'artifact');
@@ -47,14 +52,16 @@ export async function captureArtifact(opts: {
     });
     let body;
     try {
-      body = await opts.source.openArtifact(opts.ref);
+      body = await withDeadline(opts.source.openArtifact(opts.ref), opts.stallMs, 'SOURCE_STALLED', `opening artifact ${opts.ref.name}`);
     } catch (e) {
       if (e instanceof IngestError) throw e;
       throw new IngestError('SOURCE_READ_FAILED', `reading artifact ${opts.ref.name} failed`, { retryable: isTransientError(e), cause: e });
     }
+    const watchdog = idleWatchdog(opts.stallMs, 'SOURCE_STALLED', `artifact ${opts.ref.name}`, () => opts.progress?.());
     try {
-      await pipeline(body, meter, fs.createWriteStream(file, { mode: 0o600 }));
+      await pipeline(body, watchdog.stream, meter, fs.createWriteStream(file, { mode: 0o600 }));
     } catch (e) {
+      body.destroy();
       if (e instanceof IngestError) throw e;
       throw new IngestError('SOURCE_READ_FAILED', `streaming artifact ${opts.ref.name} failed`, { retryable: isTransientError(e), cause: e });
     }

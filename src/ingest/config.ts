@@ -20,6 +20,10 @@ export interface WorkerLimits {
 
 export interface WorkerSettings {
   leaseTtlSeconds: number;
+  /** A run with no progress (bytes read, rows inserted, steps finished) for this long stops renewing its lease; streams idle this long fail *_STALLED. */
+  stallTimeoutSeconds: number;
+  /** The lease is never renewed past this run age. */
+  maxRunSeconds: number;
   maxAttempts: number;
   retryBaseMs: number;
   retryMaxMs: number;
@@ -37,6 +41,8 @@ export const DEFAULT_LIMITS: WorkerLimits = {
 
 export const DEFAULT_SETTINGS: WorkerSettings = {
   leaseTtlSeconds: 300,
+  stallTimeoutSeconds: 120,
+  maxRunSeconds: 6 * 3600,
   maxAttempts: 3,
   retryBaseMs: 500,
   retryMaxMs: 30_000,
@@ -49,6 +55,10 @@ export interface S3Settings {
   region: string;
   forcePathStyle: boolean;
   credentials: { accessKeyId: string; secretAccessKey: string; sessionToken?: string } | undefined;
+  /** Socket/request timeout for every S3 call (RATIO_S3_REQUEST_TIMEOUT_MS). */
+  requestTimeoutMs: number;
+  /** Connection timeout (RATIO_S3_CONNECT_TIMEOUT_MS). */
+  connectTimeoutMs: number;
 }
 
 export interface WorkerConfig {
@@ -119,6 +129,8 @@ function s3Settings(env: Env, prefix: string, ratioEnv: RatioEnv): S3Settings {
     region,
     forcePathStyle: fps === '0' ? false : fps === '1' ? true : ep !== undefined,
     credentials: id && secret ? { accessKeyId: id, secretAccessKey: secret, ...(session ? { sessionToken: session } : {}) } : undefined,
+    requestTimeoutMs: int(env, 'RATIO_S3_REQUEST_TIMEOUT_MS', 60_000, 100, 600_000),
+    connectTimeoutMs: int(env, 'RATIO_S3_CONNECT_TIMEOUT_MS', 10_000, 100, 120_000),
   };
 }
 
@@ -167,6 +179,8 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
     replayFixturesBucket: fixturesBucket,
     settings: {
       leaseTtlSeconds: int(env, 'RATIO_LEASE_TTL_SECONDS', DEFAULT_SETTINGS.leaseTtlSeconds, 5, 3600),
+      stallTimeoutSeconds: int(env, 'RATIO_STALL_TIMEOUT_SECONDS', DEFAULT_SETTINGS.stallTimeoutSeconds, 1, 3600),
+      maxRunSeconds: int(env, 'RATIO_MAX_RUN_SECONDS', DEFAULT_SETTINGS.maxRunSeconds, 60, 7 * 86400),
       maxAttempts: int(env, 'RATIO_MAX_ATTEMPTS', DEFAULT_SETTINGS.maxAttempts, 1, 10),
       retryBaseMs,
       retryMaxMs,

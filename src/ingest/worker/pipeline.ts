@@ -75,10 +75,19 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   log('run.started', { runId: lease.runId, mode: opts.mode, abandonedRuns: abandoned.length, discardedStagedBatches: discardedBatches });
 
   // Background heartbeat so a long capture/parse of one large artifact cannot
-  // outlive the lease. It never revives an expired lease (heartbeat is fenced);
-  // a failure only means the next fenced write will report LEASE_LOST. Stopped
-  // on every exit path, including a simulated crash (a dead process is silent).
+  // outlive the lease — but ONLY while the run makes progress (bytes read, rows
+  // inserted, steps finished) and only up to the maximum run duration. A hung
+  // run therefore loses its lease and another worker can take over (its later
+  // writes are fenced). The heartbeat never revives an expired lease. Stopped on
+  // every exit path, including a simulated crash (a dead process is silent).
+  const runStart = Date.now();
+  let lastProgress = Date.now();
+  const progress = () => {
+    lastProgress = Date.now();
+  };
+  const mayRenew = () => Date.now() - lastProgress < settings.stallTimeoutSeconds * 1000 && Date.now() - runStart < settings.maxRunSeconds * 1000;
   const beat = setInterval(() => {
+    if (!mayRenew()) return;
     void heartbeat(opts.pool, lease.tenantId, lease.runId, lease.token, settings.leaseTtlSeconds).then(
       () => {
         lastBeat = Date.now();
@@ -89,7 +98,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   beat.unref();
   let lastBeat = Date.now();
   const maybeHeartbeat = async () => {
-    if (Date.now() - lastBeat >= (settings.leaseTtlSeconds * 1000) / 3) {
+    if (mayRenew() && Date.now() - lastBeat >= (settings.leaseTtlSeconds * 1000) / 3) {
       await heartbeat(opts.pool, lease.tenantId, lease.runId, lease.token, settings.leaseTtlSeconds);
       lastBeat = Date.now();
     }
@@ -167,10 +176,11 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         }
         try {
           const result = await withRetry(
-            () => processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set: listing.set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, clean, sourceRow }),
+            () => processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set: listing.set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, clean, sourceRow }),
             { ...retryOpts, onRetry: onRetry(period) },
           );
           periods.push(result);
+          progress();
         } catch (e) {
           if (e instanceof SimulatedCrash) throw e;
           if (e instanceof IngestError && e.code === 'LEASE_LOST') throw e;
@@ -221,6 +231,7 @@ interface PeriodCtx {
   log: LogFn;
   mode: RunMode;
   maybeHeartbeat: () => Promise<void>;
+  progress: () => void;
   clean: (s: string) => string;
   sourceRow: SourceRow;
 }
@@ -246,8 +257,19 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   const captured: CapturedArtifact[] = [];
   for (const ref of [...set.artifacts].sort((a, b) => (a.name < b.name ? -1 : 1))) {
     captured.push(
-      await captureArtifact({ source: ctx.source, evidence: ctx.evidence, ref, tenantId: lease.tenantId, sourceId: lease.sourceId, tmpDir: settings.tmpDir, maxBytes: limits.maxArtifactBytes }),
+      await captureArtifact({
+        source: ctx.source,
+        evidence: ctx.evidence,
+        ref,
+        tenantId: lease.tenantId,
+        sourceId: lease.sourceId,
+        tmpDir: settings.tmpDir,
+        maxBytes: limits.maxArtifactBytes,
+        stallMs: settings.stallTimeoutSeconds * 1000,
+        progress: ctx.progress,
+      }),
     );
+    ctx.progress();
     await ctx.maybeHeartbeat();
   }
   const fingerprint = setFingerprint(captured.map((c) => c.sha256));
@@ -314,7 +336,19 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   const focusVersion = ctx.sourceRow.declaredFocusVersion ?? '1.0';
   for (const c of [...unique.values()]) {
     await loadArtifact(
-      { pool: ctx.pool, evidence: ctx.evidence, lease, batchId, billingPeriod: period, focusVersion, limits, hooks: ctx.hooks, maybeHeartbeat: ctx.maybeHeartbeat },
+      {
+        pool: ctx.pool,
+        evidence: ctx.evidence,
+        lease,
+        batchId,
+        billingPeriod: period,
+        focusVersion,
+        limits,
+        hooks: ctx.hooks,
+        maybeHeartbeat: ctx.maybeHeartbeat,
+        stallMs: settings.stallTimeoutSeconds * 1000,
+        progress: ctx.progress,
+      },
       { name: c.ref.name, sha256: c.sha256, byteSize: c.byteSize, evidenceKey: c.evidenceKey, format: classifyArtifact(c.ref.name) },
       state,
     );
