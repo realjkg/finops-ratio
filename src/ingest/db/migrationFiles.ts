@@ -467,7 +467,7 @@ function recordCreated(u: string, created: CreatedObjects): void {
 
 /** True when `spec` (e.g. `F(INT, TEXT[])`) names a routine created earlier with exactly that signature. */
 function isCreatedRoutine(spec: string, created: CreatedObjects): boolean {
-  const m = new RegExp(`^${NAME} ?\\((.*)\\)$`).exec(spec.trim());
+  const m = new RegExp(`^${NAME} ?\\(([\\s\\S]*)\\)$`).exec(spec.trim());
   if (!m) return false;
   const overloads = created.routines.get(objName(m[1]));
   if (!overloads) return false;
@@ -484,19 +484,20 @@ function isCreatedRoutine(spec: string, created: CreatedObjects): boolean {
  * it is contract.
  */
 function isRevokeOnCreated(u: string, created: CreatedObjects): boolean {
-  const m = /^REVOKE (?:GRANT OPTION FOR )?(.+?) ON (.+) FROM PUBLIC(?: CASCADE| RESTRICT)?$/i.exec(u);
+  // [\s\S], not `.`: a quoted identifier may contain a line break (round 18 sweep)
+  const m = /^REVOKE (?:GRANT OPTION FOR )?([\s\S]+?) ON ([\s\S]+) FROM PUBLIC(?: CASCADE| RESTRICT)?$/i.exec(u);
   if (!m) return false;
   const target = m[2];
-  const all = /^ALL (?:TABLES|SEQUENCES|FUNCTIONS|PROCEDURES|ROUTINES) IN SCHEMA (.+)$/i.exec(target);
+  const all = /^ALL (?:TABLES|SEQUENCES|FUNCTIONS|PROCEDURES|ROUTINES) IN SCHEMA ([\s\S]+)$/i.exec(target);
   if (all) return splitTopLevel(all[1]).every((x) => created.schemas.has(objName(x)));
-  const schema = /^SCHEMA (.+)$/i.exec(target);
+  const schema = /^SCHEMA ([\s\S]+)$/i.exec(target);
   if (schema) return splitTopLevel(schema[1]).every((x) => created.schemas.has(objName(x)));
-  const routine = /^(?:FUNCTION|PROCEDURE|ROUTINE) (.+)$/i.exec(target);
+  const routine = /^(?:FUNCTION|PROCEDURE|ROUTINE) ([\s\S]+)$/i.exec(target);
   if (routine) return splitTopLevel(routine[1]).every((x) => isCreatedRoutine(x, created));
-  const type = /^(?:TYPE|DOMAIN) (.+)$/i.exec(target);
+  const type = /^(?:TYPE|DOMAIN) ([\s\S]+)$/i.exec(target);
   if (type) return splitTopLevel(type[1]).every((x) => created.types.has(objName(x)));
   if (/^(DATABASE|LANGUAGE|PARAMETER|LARGE OBJECT|FOREIGN|TABLESPACE|ALL )/i.test(target)) return false;
-  const rel = /^(?:TABLE |SEQUENCE )?(.+)$/i.exec(target)!;
+  const rel = /^(?:TABLE |SEQUENCE )?([\s\S]+)$/i.exec(target)!;
   return splitTopLevel(rel[1]).every((x) => new RegExp(`^${NAME}$`).test(x.trim()) && created.relations.has(objName(x)));
 }
 
