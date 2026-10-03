@@ -168,6 +168,11 @@ describe('a literal / inside the password (user:pa/ss@host)', () => {
     expect(out).toBe('http://[REDACTED]@corp.example see also mail@other.example');
   });
 
+  it('the extension never crosses a quote (next JSON field kept)', () => {
+    const input = '{"u":"http://host.example:8080/p","mail":"bob@corp.example"}';
+    expect(redactUpstreamText(input, 500)).toBe(input);
+  });
+
   it('no ":" in the authority → no extension (path @ kept)', () => {
     expect(redactUpstreamText('https://host.example/users/bob@corp.example', 500)).toBe(
       'https://host.example/users/bob@corp.example',

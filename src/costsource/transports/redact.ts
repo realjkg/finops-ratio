@@ -173,9 +173,9 @@ function nextUrlStart(text: string, from: number): { start: number; authStart: n
 
 /**
  * (a) Userinfo: everything between `://` and the LAST `@` before the authority
- * end is replaced, however long. The authority ends at `/ ? #`, whitespace, or
- * a JSON-escaped `\/` — NOT at a lone `\` or `\\` (Windows / NTLM
- * `DOMAIN\user:password@proxy` credentials contain one).
+ * end is replaced, however long. The authority ends at `/ ? #` or whitespace
+ * (a JSON-escaped `\/` ends it at its `/`) — NOT at a backslash: Windows /
+ * NTLM `DOMAIN\user:password@proxy` credentials contain one.
  *
  * A literal `/ ? #` inside a password (`user:pa/ss@host`) ends the authority
  * early; so when the authority contains `:` and no `@`, the userinfo is
@@ -196,7 +196,7 @@ function redactUrlUserinfo(text: string): string {
     let sawColon = false;
     for (; i < text.length; i += 1) {
       const c = text[i];
-      if (c === '/' || c === '?' || c === '#' || WS.test(c) || (c === '\\' && text[i + 1] === '/')) break;
+      if (c === '/' || c === '?' || c === '#' || WS.test(c)) break;
       if (c === '@') lastAt = i;
       else if (c === ':') sawColon = true;
     }
