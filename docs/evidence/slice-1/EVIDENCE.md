@@ -134,7 +134,17 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 115 | 3a20394 | test: redaction collisions, abortable evidence uploads, abortable backoff (red: fast 6, DB 6) | tests |
 | 116 | 1090505 | fix: redaction collisions refused (parser + pipeline); evidence uploads and retry backoff abort-aware | impl |
 | 117 | 8d46f17 | test: no retry is recorded once the run is aborted (kills R3b) | tests |
-| 118 | (final) | docs: evidence for this round (§30) | docs |
+| 118 | cb559df | docs: evidence for the audited gaps (§30) | docs |
+| 119 | ab523ce | test: second-round challenger Lows — replay vs memo, NEVER_PUBLISHED grace, memo-only abandon (red: DB 5, fast 2) | tests |
+| 120 | 61ba1d5 | fix: replay --period ignores the size-rejection memo (L1) | impl |
+| 121 | cd2defe | fix: memo-only abandoned runs stay LEASE_EXPIRED with "checkpoint written (rejection memo only)" (L3) | impl |
+| 122 | bc9c6d5 | fix: NEVER_PUBLISHED first-publication grace window, RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS (L2); skill | impl |
+| 123 | ecc3f82 | test: grace upper bound; memo + progress write still "after commit" (kills L2e, L3d) | tests |
+| 124 | 0d5c14d | test: fourth Copilot review M1-M3 (red: fast 5, DB 5) | tests |
+| 125 | 7e8b9e1 | fix: existing evidence verified by sha256 (M1); X4 now tampers after capture | impl |
+| 126 | 8638601 | fix: manifest GET pinned to its listed ETag (M2) | impl |
+| 127 | 368ce14 | fix: fake source keyed by period + name, pinned to version (M3) | impl |
+| 128 | (final) | docs: evidence for this round (§31, §32) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -2046,5 +2056,55 @@ Every other await in the run path either carries the signal or is bounded:
 - 3 of 3 evidence objects re-hashed OK.
 - doctor exited 0.
 - replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 31. Second-round challenger Lows on cb559df (APPROVED): L1-L3
+
+Red tests are in `ab523ce` (`worker/reviewLows.db.test.ts`, `config.test.ts`).
+
+| Low | Fix | Test | Mutation(s) killed (`mutations31.txt`, `mutations31b.txt`) |
+|---|---|---|---|
+| **L1** `replay --period` obeyed the size-rejection memo, so the operator's re-ingest did not re-download | the memo gate is skipped in `replay_period` mode; sync and backfill still fail fast (`61ba1d5`) | sync is rejected (memo recorded). `replay --period` then **downloads again** and fails the same way, which re-records the memo. The next sync downloads 0 bytes | L1 (replay honours the memo) |
+| **L2** NEVER_PUBLISHED fired for a brand-new source | first-publication grace measured from `sources.created_at`: `RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS`, default **48 h** (AWS's first export can take up to 24 h), accepted range 0 to 24×366, where 0 disables the grace. Doctor has **no warning level**, so inside the window the finding is skipped: the check passes with `data.firstPublicationGrace: true`. Documented in the ingestion-ops skill (`bc9c6d5`) | 47 h under the default passes (grace true); 49 h fails NEVER_PUBLISHED (grace false). A 2 h-old source fails with a 1 h window and passes with 3 h; with 0 a fresh source fails. Config: default 48, 0 and 72 accepted; -1, 1.5 and 24×366+1 refused. The third-review M4 test now ages its source past the window | L2a (no window), L2b (window never ends), L2c (configured value ignored), L2d (default 0), L2e (upper bound widened; killed once 24×366+1 was added in `ecc3f82`). Lowering the minimum cannot be observed, because the parser refuses a sign before it checks the range |
+| **L3** an abandoned run whose only checkpoint write was a rejection memo counted as "after commit" | progress writes (publish, refresh, pin) are stamped with `writtenBy`, and a memo records its own `runId` without restamping the entry. A run with no batch, no publication and only memo writes is abandoned as `LEASE_EXPIRED` with "lease expired without committing data; checkpoint written (rejection memo only)". When data and memos are both present it is `LEASE_EXPIRED_AFTER_COMMIT`, with "checkpoint written and N rejection memo(s)". An older, unstamped write still counts as data. No schema change (jsonb) (`cd2defe`) | memo for P, lease lost before P2 publishes: LEASE_EXPIRED with the memo-only detail. Memo plus publication: AFTER_COMMIT with "1 publication". Memo plus an unchanged refresh with no publication: AFTER_COMMIT with "0 publications" and "checkpoint written and 1 rejection memo" (`ecc3f82`) | L3a (memo stamped like progress), L3b (old rule), L3c (memo detail dropped), L3d (any memo means memo-only; killed by the refresh-plus-memo test) |
+
+**Gates for the Lows:** fast suite 13/13 config tests; the DB files
+`reviewLows`, `reviewFindings3`, `doctor`, `lease`, `replay` and `cliWorker`
+pass. The full gates for this round are listed below §32.
+
+## 32. PR #54 fourth Copilot review (cb559df): M1-M3
+
+Red tests are in `0d5c14d`.
+
+| Finding | Verified? | Fix | Test | Mutation(s) killed (`mutations32.txt`) |
+|---|---|---|---|---|
+| **M1** an existing evidence object was accepted on byte length alone | real: a same-size forged object was accepted as `exists` for an artifact and for a manifest | before returning `exists`, `S3EvidenceStore.put` and `putBytes` **stream and hash** the stored object. The ETag is not used, because it is not a content hash for multipart uploads. A mismatch is `EVIDENCE_INTEGRITY_MISMATCH` (non-retryable) and **nothing is overwritten**. The memory store follows the same contract, and the verification GET carries the run's signal (`7e8b9e1`). Cost: re-capturing an artifact that is already in evidence reads it back once | fake S3 client: same bytes give `exists`; forged bytes give the error with no PutObject sent, for both `put` and `putBytes`. Memory-store pipeline: the period fails and the forged object stays. **X7** (SeaweedFS): a pre-seeded artifact and a pre-seeded manifest each fail `EVIDENCE_INTEGRITY_MISMATCH`, the object is unchanged and nothing is staged. **X4** (load-time `EVIDENCE_INTEGRITY`) now tampers with the object *after* a genuine put, so the load re-hash stays covered | M1a and M1b (put / putBytes on size alone; unit and X7), M1c (memory store) |
+| **M2** the manifest GET was unconditional | real: a manifest replaced between the metadata listing and its GET was read against the older data listing | the metadata listing's ETag is kept and sent as **If-Match**. A manifest without a listed ETag is `SOURCE_LISTING_INVALID` for that period, consistent with unversioned artifacts. A 412 is `SOURCE_CHANGED` (retryable) and is no longer re-wrapped, so the pipeline retries the listing (`8638601`) | fake client: the GET carries `If-Match: "m1"`; a manifest replaced just before its GET gives `SOURCE_CHANGED`, retryable; a manifest with no ETag gives a SOURCE_LISTING_INVALID period with no GET sent. **X6b** (SeaweedFS): the manifest is replaced just before its GET, the first GET (with If-Match) gets **412**, the retry gets 200, and the run publishes reconciled against the new manifest, whose bytes are the only manifest evidence | M2a (no If-Match; unit and X6b), M2b (412 not mapped), M2c (re-wrapped as SOURCE_READ_FAILED), M2d (unversioned manifest read anyway) |
+| **M3** the fake looked artifacts up by name across all periods | real (test-only code): the same name in two periods read the first period's bytes | a fake ref's key is `<period>/<name>`. `openArtifact` resolves it by that key and refuses a stale version with `SOURCE_CHANGED`, retryable, mirroring If-Match (`368ce14`) | the same `r/a.csv.gz` in 2026-07 and 2026-08 with different bytes publishes each period's own totals (2 / `2.00`, 3 / `6.00`). A ref made stale after `setPeriods` gives SOURCE_CHANGED | M3a (name-only lookup), M3b (version ignored) |
+
+### Gates at 368ce14
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 5.8–9.6) | **3/3**, 91 files / 2044 passed each |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 31 files / 457 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 417 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at 368ce14, private cluster, database
+`ratio_s1_e2e_cdc8f681`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6. Its idempotent re-run exercises the new
+  evidence `exists` verification.
 - Cleanup deleted 48 objects and dropped the database and logins.
 

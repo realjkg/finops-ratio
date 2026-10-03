@@ -278,3 +278,22 @@ Audit gaps closed:
 - Abortable retry backoff: `retry.test.ts`, plus "Gap 3" (a 60 s backoff
   against a 1 s deadline).
 
+Second-round Lows (`reviewLows.db.test.ts`, "round 2"):
+- `replay --period` re-downloads despite a memo.
+- NEVER_PUBLISHED grace window, inside and outside it; configurable, with
+  bounds checked in `config.test.ts`.
+- Memo-only abandoned runs versus memo plus data.
+
+PR #54 fourth review:
+- `S3EvidenceStore.test.ts`: existing evidence is verified by sha256.
+- `S3FocusExportSource.test.ts`: the manifest GET carries If-Match; a
+  replaced manifest is SOURCE_CHANGED; a manifest with no ETag is refused.
+- `reviewFindings3.db.test.ts`:
+  - the fake is keyed by period and name;
+  - a stale ref is SOURCE_CHANGED;
+  - pre-seeded memory evidence fails EVIDENCE_INTEGRITY_MISMATCH.
+- On SeaweedFS:
+  - X6b: manifest race, 412, re-list.
+  - X7: a pre-seeded artifact or manifest fails EVIDENCE_INTEGRITY_MISMATCH.
+  - X4: tampering after capture fails EVIDENCE_INTEGRITY at load.
+
