@@ -449,3 +449,79 @@ are the same edits as M11/M12/M13/M18.
 - The classifier stays lexical (marked bodies' semantics, non-literal dynamic SQL).
 - A credential holder can still choose any tenant (GUC) — unchanged owner decision.
 - CI not executed here (no push).
+
+# Round 4 — challenger round 3 (M1, M2; Lows L1–L4 out of scope)
+
+Base: `slice/00-postgres-foundation` @ d75a152. Local commits only (the
+orchestrator pushes after re-review). 0001 is NOT changed in this round.
+Raw logs: `scratchpad/r5/` (session scratchpad).
+
+## R4.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| c0ed583 | test(ingest): failing tests for challenger round 3 (M1 catalog check, M2 OLD-path lock) | tests (red) |
+| 608d0bf | fix(ingest): runner checks the catalog privilege model before COMMIT; classifier marks functions/views in any schema (M1) | fix |
+| (this) | docs(evidence): Slice 0 round 4 | docs |
+
+## R4.2 Red (at c0ed583)
+
+- Fast (`migrationFiles.test.ts`): 2 failed / 20 passed (22) — the repro
+  `findForbiddenStatement(...)` returned null; marked procedures/materialized
+  views were not yet expand.
+- DB (`privileges.db.test.ts` + `immutability.db.test.ts`): 11 failed / 28 passed
+  (39). Every runner test failed: marked repro, view variant, implicit PUBLIC
+  EXECUTE, worker over-grants were APPLIED (`runner must refuse: expected null
+  not to be null`); down-path check absent; `privilegeModel` missing. The two
+  M2 twins pass against unchanged 0001 by design (behaviour was already
+  correct; they exist to kill the mutation in R4.4).
+
+## R4.3 Verification (main checkout at 608d0bf)
+
+| Command | Result |
+|---|---|
+| `npm ci` | exit 0 |
+| `npm run lint` | exit 0 |
+| `rm -rf .next && npx tsc --noEmit` | exit 0 |
+| `npx vitest run` (no DB) | exit 0 — 322/322 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 118/118 each |
+| `npm run test:db` (URL unset) | exit 1 ("RATIO_TEST_DATABASE_URL is not set … refusing to run") |
+| `npm run worker:build` | exit 0 |
+| `npm run build` | exit 0; `tsconfig.json`/`next-env.d.ts` restored; no AGENTS.md/CLAUDE.md |
+| `.skip/.only/.todo/it.fails` grep over `src`, `pages` | 0 hits |
+| Slice 1 compatibility (scratch worktree: `slice/01-focus-ingestion-worker` 83305f3 + 608d0bf, then removed) | test:db 224/224 (with `RATIO_TEST_S3_ENDPOINT` = local SeaweedFS), fast 419/419 |
+
+## R4.4 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+M2  OLD-path FOR SHARE removed (0001 l.377)            KILLED  1 failed | 2 passed (M2 tests)
+    × M2 (round 4): a fact DELETE racing an uncommitted publish … (expected false to be true: never blocked)
+    (the UPDATE twin survives by design: the NEW-path FOR SHARE also locks the batch)
+M1a runner check removed from migrateUp                KILLED  6 failed | 5 passed (11)
+M1b runner check removed from migrateDown              KILLED  1 failed | 10 passed (11)
+M1c SECURITY DEFINER catalog rule removed              KILLED  3 failed | 8 passed (11)
+M1d PUBLIC EXECUTE catalog rule removed                KILLED  2 failed | 9 passed (11)
+M1e reader/worker allow-list rule removed              KILLED  6 failed | 5 passed (11)
+M1f column-level privileges not enumerated             KILLED  2 failed | 9 passed (11)
+M1g classifier SECURITY DEFINER rule removed           KILLED  1 failed | 21 passed (22)
+M1h non-ratio functions expand without marker (old)    KILLED  1 failed | 21 passed (22)
+M1i non-ratio views expand without marker (old)        KILLED  1 failed | 21 passed (22)
+M1j marker read from last comment line only (old)      KILLED  1 failed | 21 passed (22)
+```
+
+## R4.5 Per-finding status
+
+| Finding | Status |
+|---|---|
+| M1 public SECURITY DEFINER / view / implicit PUBLIC EXECUTE | fixed in two layers: runner catalog check (privilegeModel.ts, up and down) + classifier rules; repro refused by each layer independently; killed by M1a–M1j |
+| M2 OLD-path FOR SHARE untested | delete twin + artifact-UPDATE twin; delete twin kills the mutation |
+
+## R4.6 Remaining gaps / owner flags
+
+- Fail closed: a database with extension functions in `public` (PUBLIC EXECUTE)
+  refuses migrations until they are revoked or moved (DESIGN §13). Owner flag.
+- The allow-list is code: a future migration that grants the worker something
+  new must update `REVIEWED_PRIVILEGES` in the same change.
+- PostgreSQL 17's `MAINTAIN` table privilege is not enumerated (CI and local
+  are 16); add it when upgrading.
+- CI not executed here (no push).

@@ -148,3 +148,18 @@ Test change after the red commit (a0996c2, before the classifier fix): the
 additive-vocabulary positive control granted SELECT on a non-ratio table to
 ratio_reader, which the stricter reader rule now forbids; it grants to
 ratio_worker instead. Added `ADD COLUMN … DEFAULT 1 NOT NULL` as a legal form.
+
+## Round 4 — challenger round 3 (tests committed red in c0ed583, before the fixes)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| M1 runner catalog check | `privileges.db.test.ts` | `0001 applies cleanly and the effective reader/worker privileges equal the reviewed allow-list exactly` (positive), `a legitimate marked expand migration (table, ratio function revoked from PUBLIC, ratio view, no new grants) still applies` (positive), `challenger repro (classifier bypassed): the public SECURITY DEFINER reader of ratio.cost_facts is refused before COMMIT` (also proves the leak is real: reader with no tenant reads all rows of both tenants), `the repro with reasoned markers passes the classifier but is refused by the runner and rolled back`, `a marked SECURITY DEFINER function owned by ratio_owner, revoked from PUBLIC and granted to nobody, is still refused (not on the reviewed list)`, `view variant: a marked superuser-owned view over ratio.cost_facts granted to ratio_worker is refused`, `view variant (classifier bypassed): a view granted to ratio_reader is refused`, `implicit grant: a marked public non-definer function is refused (PUBLIC holds EXECUTE by default)`, `implicit grant: a marked ratio function that keeps the default PUBLIC EXECUTE is refused`, `worker grants beyond the reviewed set (table privilege, column privilege, schema CREATE) are refused`, `the check also runs inside a down migration transaction` |
+| M1 classifier | `migrationFiles.test.ts` | `round 4 (challenger round 3, M1): functions, procedures and views in ANY schema need a marker; SECURITY DEFINER needs its own` (repro + 15 non-expand + 11 forbidden cases), `round 4: marked functions, procedures and views in any schema are expand; a marked SECURITY DEFINER passes the classifier (the runner catalog check is the backstop)` |
+| M2 OLD-path FOR SHARE | `immutability.db.test.ts` | `M2 (round 4): a fact DELETE racing an uncommitted publish waits on the batch row lock, then fails RT001; rows unchanged`, `M2 (round 4): an artifact UPDATE (worker column grant) racing an uncommitted publish waits, then fails RT001; row unchanged` |
+
+Test change in the red commit: the round-2 additive-vocabulary positive control
+created an unqualified function and view; under the round-4 rule those need
+markers, so the fixture now carries `ratio:allow-function` / `ratio:allow-view`
+markers (a policy change mandated by M1; the control still asserts the same
+additive vocabulary loads as expand, and the new round-4 test asserts the
+unmarked forms are refused).
