@@ -220,11 +220,16 @@ offline sandbox sources (`pointfive-sandbox`, `focus-file-sandbox`) without a
 token. Every other source id — live connectors, PointFive live, and unknown ids —
 requires `Authorization: Bearer <RATIO_API_TOKEN>` (compared in constant time)
 and is refused outright when no token is configured; unknown ids answer 404 only
-after authentication. After 1,000 failed authentications in a minute from one
-client IP, every non-sandbox request from it gets 429. The client IP is the
-socket address; `X-Forwarded-For` is ignored unless `RATIO_TRUSTED_PROXY_HOPS=N`
+after authentication. The token must be at least 32 characters: a shorter
+configured `RATIO_API_TOKEN` refuses live cost data with 503 (sandbox sources and
+the AI chat gateway are unaffected). Failed authentications — on rows, findings,
+health, `/api/costsource/sources` and `/api/v1/connectors` alike — share one
+count per client IP; after 1,000 in a minute that client's further failed
+attempts get 429, while a request with the valid token always passes. The client
+IP is the socket address; `X-Forwarded-For` is ignored unless `RATIO_TRUSTED_PROXY_HOPS=N`
 (integer ≥ 1) declares N trusted proxies, in which case the Nth entry from the
-right is used. The limiter is **per process** — each serverless instance counts
+right is used (a one-time warning is logged when `X-Forwarded-For` arrives
+without it). The limiter is **per process** — each serverless instance counts
 separately — so a shared store is a deployment-brief item. `GET
 /api/costsource/sources` and `GET /api/v1/connectors` show live connector
 status only to authenticated callers; anonymous callers see the neutral
@@ -234,10 +239,13 @@ registry. The offline demo is unchanged.
 for the window or errors: too many export files, a truncated listing, a missing
 billing month in a multi-month window, an exhausted BigQuery page cap, or an
 invalid row is an explicit error naming the artifact and row. Rows must carry
-`BilledCost`, `ChargePeriodStart` and a three-letter `BillingCurrency`; dates are
-strict ISO-8601 (no offset means UTC); numbers are plain decimals. Each row keeps
-its own currency — mixed currencies are never summed. An invalid or inverted
-window is a 400. Upstream
+`BilledCost`, `ChargePeriodStart` and a known ISO-4217 `BillingCurrency`; dates
+are strict ISO-8601 (no offset means UTC); numbers are plain decimals. Each row
+keeps its own currency — mixed currencies are never summed. Window bounds must
+be `YYYY-MM-DD` (00:00Z) or `YYYY-MM-DDTHH:MM[:SS[.fff]]` with optional `Z` /
+`±hh:mm` (none = UTC) and start < end; anything else is a 400. A manifest larger
+than 1 MiB or an export object larger than 512 MiB (counted while streaming) is
+an `export too large` error. Upstream
 error bodies are never returned to API callers — only label + HTTP status; the
 body is logged server-side, redacted and truncated.
 
