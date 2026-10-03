@@ -5,7 +5,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-const ENV_KEYS = ['RATIO_API_TOKEN', 'FOCUS_ENDPOINT_URL', 'FOCUS_ENDPOINT_TOKEN', 'AI_PROVIDER'] as const;
+const ENV_KEYS = [
+  'RATIO_API_TOKEN',
+  'FOCUS_ENDPOINT_URL',
+  'FOCUS_ENDPOINT_TOKEN',
+  'AI_PROVIDER',
+  'COSTSOURCE_POINTFIVE_LIVE',
+  'POINTFIVE_OAUTH_CLIENT_ID',
+  'POINTFIVE_OAUTH_CLIENT_SECRET',
+  'POINTFIVE_OAUTH_TOKEN_URL',
+] as const;
+
+function configurePointFiveLive() {
+  process.env.COSTSOURCE_POINTFIVE_LIVE = 'true';
+  process.env.POINTFIVE_OAUTH_CLIENT_ID = 'client';
+  process.env.POINTFIVE_OAUTH_CLIENT_SECRET = 'secret';
+  process.env.POINTFIVE_OAUTH_TOKEN_URL = 'https://auth.pointfive.example/token';
+}
 const CSV =
   'BilledCost,ChargePeriodStart,ServiceName,ResourceId\n42,2026-06-02T00:00:00Z,VMware vSphere,arn:ratio:workload/wl-001\n';
 const QUERY = { sourceId: 'focus-endpoint', start: '2026-06-01T00:00:00Z', end: '2026-07-01T00:00:00Z' };
@@ -145,5 +161,131 @@ describe('/api/v1/connectors', () => {
     const res = makeRes();
     await handler({ ...makeReq({}), method: 'POST' } as NextApiRequest, res as unknown as NextApiResponse);
     expect(res.statusCode).toBe(405);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Security review findings (PR #41): deny-by-default live-data gate.
+// ---------------------------------------------------------------------------
+
+describe('H1 — /api/costsource/rows is deny-by-default for non-sandbox sources', () => {
+  async function rowsFor(sourceId: string, headers: Record<string, string> = {}) {
+    const { default: handler } = await import('../../pages/api/costsource/rows');
+    const res = makeRes();
+    await handler(makeReq({ ...QUERY, sourceId }, headers), res as unknown as NextApiResponse);
+    return res;
+  }
+
+  it('refuses anonymous rows from configured pointfive-live and makes no upstream call', async () => {
+    configurePointFiveLive();
+    const fetchMock = vi.fn(async () => Response.json({ access_token: 't', expires_in: 3600 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await rowsFor('pointfive-live');
+    expect(res.statusCode).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses pointfive-live with a wrong token when RATIO_API_TOKEN is set', async () => {
+    configurePointFiveLive();
+    process.env.RATIO_API_TOKEN = 'right';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await rowsFor('pointfive-live', { authorization: 'Bearer wrong' });
+    expect(res.statusCode).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('answers 401 (not 404) to an anonymous request for an unknown source id', async () => {
+    const res = await rowsFor('no-such-source');
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('answers 404 for an unknown source id only after successful auth', async () => {
+    process.env.RATIO_API_TOKEN = 'right';
+    const res = await rowsFor('no-such-source', { authorization: 'Bearer right' });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('still serves both offline sandbox sources anonymously', async () => {
+    expect((await rowsFor('pointfive-sandbox')).statusCode).toBe(200);
+    expect((await rowsFor('focus-file-sandbox')).statusCode).toBe(200);
+  });
+});
+
+describe('H2 — /api/v1/connectors?probe=true always requires the API token', () => {
+  async function registry(query: Record<string, string>, headers: Record<string, string> = {}) {
+    const { default: handler } = await import('../../pages/api/v1/connectors/index');
+    const res = makeRes();
+    await handler(makeReq(query, headers), res as unknown as NextApiResponse);
+    return res;
+  }
+
+  it('refuses an anonymous probe under AI_PROVIDER=mock with no token and invokes no connector', async () => {
+    process.env.AI_PROVIDER = 'mock';
+    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    const fetchMock = vi.fn(async () => new Response(CSV));
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await registry({ probe: 'true' });
+    expect(res.statusCode).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses a probe with a wrong token and invokes no connector', async () => {
+    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    process.env.RATIO_API_TOKEN = 'right';
+    const fetchMock = vi.fn(async () => new Response(CSV));
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await registry({ probe: '1' }, { authorization: 'Bearer wrong' });
+    expect(res.statusCode).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('still lists connectors anonymously without probe (unchanged)', async () => {
+    process.env.AI_PROVIDER = 'mock';
+    const res = await registry({});
+    expect(res.statusCode).toBe(200);
+  });
+});
+
+describe('H3 — /api/costsource/health is deny-by-default for non-sandbox sources', () => {
+  async function health(sourceId: string, headers: Record<string, string> = {}) {
+    const { default: handler } = await import('../../pages/api/costsource/health');
+    const res = makeRes();
+    await handler(makeReq({ sourceId }, headers), res as unknown as NextApiResponse);
+    return res;
+  }
+
+  it('refuses an anonymous probe of a configured live connector with no transport call', async () => {
+    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    const fetchMock = vi.fn(async () => new Response(CSV));
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await health('focus-endpoint');
+    expect(res.statusCode).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses an anonymous probe of configured pointfive-live with no upstream call', async () => {
+    configurePointFiveLive();
+    const fetchMock = vi.fn(async () => Response.json({ access_token: 't', expires_in: 3600 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await health('pointfive-live');
+    expect(res.statusCode).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('answers 401 for an unknown id anonymously, 404 after auth', async () => {
+    expect((await health('no-such-source')).statusCode).toBe(401);
+    process.env.RATIO_API_TOKEN = 'right';
+    expect((await health('no-such-source', { authorization: 'Bearer right' })).statusCode).toBe(404);
+  });
+
+  it('serves sandbox health anonymously and live health with the right token', async () => {
+    expect((await health('pointfive-sandbox')).statusCode).toBe(200);
+    expect((await health('focus-file-sandbox')).statusCode).toBe(200);
+    process.env.FOCUS_ENDPOINT_URL = 'https://billing.internal/focus.csv';
+    process.env.RATIO_API_TOKEN = 'right';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(CSV)));
+    const res = await health('focus-endpoint', { authorization: 'Bearer right' });
+    expect(res.statusCode).toBe(200);
   });
 });
