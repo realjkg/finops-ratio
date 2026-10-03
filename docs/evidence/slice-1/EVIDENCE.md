@@ -59,7 +59,9 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 40 | 0d155a9 | test: worker CLI redact-before-serialize, process crash guards, malformed URL (red: 4 failed, `r4-red-fast.txt`); K7 integration | tests |
 | 41 | d634f6c | fix: `jsonLineRedactorFor` for every worker output line + evidence file; `installProcessGuards`; pool built inside try | impl |
 | 42 | 3745fc0 | test: redacted Errors are serialized, not dropped to `{}` (added while mutation-testing) | test |
-| 43 | (final) | docs: evidence for this round | docs |
+| 43 | 1f41db1 | docs: evidence for the redact-before-serialize round | docs |
+| 44 | cc17801 | merge origin/slice/00-postgres-foundation @ 17f07d7 (Slice 0 rounds 7-9 + origin/main #47/#49) — one conflict in `src/ingest/cli.ts` (Slice 0 `installProcessHandlers` vs Slice 1 `installProcessGuards`), resolved by keeping ONE handler (`installProcessHandlers`) extended with the worker-secret redaction pass; guard tests retargeted | merge |
+| 45 | (final) | docs: evidence for this round (§14) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -677,3 +679,63 @@ skipped_unchanged, reader totals = control totals (55 / `30.8272954899`,
 replay-fixtures 6/6 (`fixture-20261003075835-8e9aff14`), scratch cleaned up.
 Leftovers unchanged (`ratio_test_23557_*`, logins `_1169_`, `_6414_`; not
 attributable, not dropped).
+
+## 14. Slice 0 merge 17f07d7 (rounds 7-9 + origin/main #47/#49) — merge cc17801
+
+**Conflict resolution (one crash handler, not two).** `src/ingest/cli.ts`
+conflicted between Slice 0's `installProcessHandlers(proc, env, io, exit)`
+and Slice 1's `installProcessGuards(env, io)`. Kept Slice 0's
+`installProcessHandlers` as the single implementation and removed
+`installProcessGuards` from `workerCli.ts`. The kept handler's line function
+is Slice 0's `jsonLineRedactor(RATIO_MIGRATE_DATABASE_URL)` followed by the
+worker pass `jsonLineRedactorFor(env)` (worker DB URL, S3 keys, all forms);
+the result is re-parsed and, if anything throws or is not valid JSON, the
+fixed Slice 0 S11 fallback `{"error":"output redacted"}` is printed. Every
+event prints exactly one line and calls exit(1). The CLI entry installs it
+once, before `main`.
+
+Tests (`cli.worker.test.ts`, now importing `installProcessHandlers` from
+`./cli`): `uncaughtException` and `unhandledRejection` each print one JSON
+line with the worker DB password `pw"q\b%22x` (raw, JSON-escaped, URL-encoded)
+and an S3 secret key absent, then exit 1; a reason whose `toJSON` throws
+(carrying the secret) and a hostile Proxy whose `ownKeys` throws each yield
+exactly `{"error":"output redacted"}` and exit 1; malformed URL => exit 1 +
+evidence record. Slice 0's own handler tests pass unchanged. Mutation
+(`mutations6.txt`): dropping the worker pass => 2 tests fail.
+
+**`resetSession` / catalog checks.** Slice 1 never uses `ALTER ROLE ... SET`
+or `ALTER DATABASE ... SET`; worker timeouts (`lock_timeout`,
+`idle_in_transaction_session_timeout`, `statement_timeout`) are passed per
+connection via the pg `options` startup parameter (`-c ...`), which does not
+write `pg_db_role_setting`. After the test runs `pg_db_role_setting` had 0
+rows, and the new setting check reported no violation (doctor
+`migration_version` `problems: []` in the end-to-end). `resetSession` is used
+only by the migrate runner's own client; the worker pool is unaffected. The
+L-b test (session settings applied per worker connection) still passes.
+
+**Re-verification on cc17801** (worktree clean, no local modification):
+
+| Check | Result |
+|---|---|
+| `npm ci` | exit 0; prod audit 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 80 files / 1922 passed |
+| `test:db` x3 | 22 files / **295 passed** each (57.5 s, 49.3 s, 50.0 s) |
+| `test:db` without DB URL | exit 1 (fails, not skips) |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 276 passed, 0 skipped |
+| `pg_db_role_setting` rows after runs | 0 |
+| `.skip/.only/.todo/it.fails` grep | 0 |
+| `worker:build` | exit 0 |
+| `next build` | exit 0 (generated files restored; no AGENTS.md/CLAUDE.md) |
+| ingestion code in `.next` bundle | 0 matches |
+| change outside `src/ingest` (+ allowed files) vs Slice 0 branch | none |
+
+Manual end-to-end (built CLI, `ratio_s1_e2e_c4ad4fa2`): migrate status 3->0->0,
+sync published + reconciled, re-sync `skipped_unchanged`, reader totals =
+control totals (55 / `30.8272954899`, 40 / `21.0978157665`), 3/3 evidence
+re-hash OK, doctor exit 0 `problems: []`, replay-fixtures 6/6
+(`fixture-20261003093054-75800a71`), scratch database/roles/bucket prefix
+cleaned up. Leftovers in the shared cluster unchanged and not attributable to
+this suite (`ratio_test_23557_*`, logins `ratio_test_login_1169_*`,
+`ratio_test_login_6414_*`); not dropped.
+
