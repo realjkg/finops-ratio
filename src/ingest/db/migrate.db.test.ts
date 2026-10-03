@@ -24,6 +24,7 @@ async function freshDb(): Promise<TestDatabase> {
 
 async function connect(db: TestDatabase): Promise<Client> {
   const c = new Client({ connectionString: db.url });
+  c.on('error', () => undefined); // a terminated backend must never become an uncaught exception
   await c.connect();
   cleanups.push(() => c.end());
   return c;

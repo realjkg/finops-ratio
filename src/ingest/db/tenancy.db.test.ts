@@ -344,6 +344,7 @@ describe('ratio_worker tenant isolation', () => {
       const url = new URL(db.url);
       url.username = login;
       const c = new Client({ connectionString: url.toString() });
+      c.on('error', () => undefined);
       try {
         await c.connect();
         const who = await c.query(`SELECT current_user AS u, session_user AS s`);
