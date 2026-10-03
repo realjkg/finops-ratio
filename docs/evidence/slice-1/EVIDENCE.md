@@ -51,7 +51,10 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 32 | fd00bb2 | fix: L-e C1 / U+2028 / U+2029 refused in header names | impl |
 | 33 | 93553b1 | fix: L-b lock/idle/statement timeouts; blocked takeover fails LOCK_TIMEOUT | impl |
 | 34 | d5918fa | fix: L-c run past max duration aborts itself (MAX_RUN_EXCEEDED) | impl |
-| 35 | (final) | docs: design/test plan/evidence for challenger round 3 | docs |
+| 35 | 81ab2f6 | docs: design/test plan/evidence for challenger round 3 (challenger-approved) | docs |
+| 36 | c02c6aa | merge origin/slice/00-postgres-foundation @ 453377e (final Slice 0: round 5 + origin/main) — clean, no conflicts | merge |
+| 37 | 774ff13 | test: test-only triggers dropped and proven not to linger past the runner's catalog check | test-only |
+| 38 | (final) | docs: evidence for the final Slice 0 merge | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -576,3 +579,36 @@ reverting the Slice 1 commits needs no DB action; ingested rows stay in
   suite must keep using one bucket per run.
 - One stray `ratio_test_23557_*` database in the shared local cluster of
   unknown (gone) origin.
+
+## 12. Final Slice 0 merge (453377e) — re-verification
+
+Merged with a merge commit (c02c6aa), no conflicts. The merge brings Slice 0
+round 5 (runner + `migrate --status`/doctor catalog privilege check,
+`privilegeModel.ts`) and origin/main (governance workflow, costsource etc.).
+
+| Check | Result |
+|---|---|
+| `npm ci` / prod audit | exit 0 / 0 vulnerabilities |
+| lint, `rm -rf .next && tsc --noEmit` | exit 0 |
+| `npm test` | 68 files / 1189 passed (includes origin/main's suites) |
+| `test:db` ×3 (both env vars) | 22 files / **269 passed** each run (56.8 s, 46.9 s, 46.4 s), 0 skipped |
+| without `RATIO_TEST_DATABASE_URL` | exit 1 (refuses to run) |
+| without `RATIO_TEST_S3_ENDPOINT` | exit 1, 3 S3 files fail at collection, 251 passed, nothing skipped |
+| `.skip/.only/.todo/fails` grep | none |
+| `worker:build`, `next build` + restore | exit 0; no AGENTS.md/CLAUDE.md; no ingestion code in `.next`; no change outside `src/ingest` vs the Slice 0 branch |
+| targeted re-run: doctor D1 (4), M2-backstop, M2-generic, K6, M3-c | all pass. The D1 probe migration (`CREATE TABLE public.ratio_doctor_future_probe`) passes the classifier and is only reported as `PENDING` |
+| manual end-to-end (built CLI, DB `ratio_s1_e2e_90dbb1bf`) | status 3→migrate 0→status 0 (`problems: []`), sync published+reconciled, re-sync skipped_unchanged, reader totals = control totals, 3/3 evidence re-hash OK, doctor exit 0 (migration_version `problems: []`), replay-fixtures 6/6 (`fixture-20261003073233-da92a79c`), scratch cleaned up |
+
+**Finding (test-only, fixed in 774ff13):** the new catalog check reports any
+non-reviewed trigger as `PRIVILEGE_MODEL_VIOLATION`. The superuser-created
+test triggers in `sync.db` (M2-backstop/generic) and `cliWorker.db` (K6) were
+never dropped, so a later `migrate`/`doctor` in the same per-file database
+would have failed depending on test order (it did not in practice: they ran
+last). Both tests now assert the violation is reported while the trigger
+exists, drop it, and assert `migrate --status` (and doctor's
+`migration_version`) is clean afterwards. M3-c already dropped its trigger in
+`finally`. No production code path changed.
+
+Leftovers: login `ratio_test_login_6414_*` appeared during this session's
+window; an isolated re-run of `test:db` leaves zero new roles/databases, and
+PID 6414 is gone — not attributable to this suite, not dropped.
