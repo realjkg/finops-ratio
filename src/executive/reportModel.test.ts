@@ -3,12 +3,28 @@
 // row per initiative, the eight user-approved columns in order, R4 value pairing,
 // and a board-level summary that matches the Spend Summary. Pure — no DOM.
 import { describe, it, expect } from 'vitest';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { buildInitiativeBoard } from './initiativeModel';
 import { buildReportModel } from './reportModel';
 import { REPORT_COLUMNS, buildReportWorkbook } from './reportXlsx';
 
 const FIXED = new Date('2026-06-26T14:32:00Z');
+
+// Re-open a generated workbook from its bytes, as a spreadsheet app would.
+async function readBook(buffer: Buffer): Promise<ExcelJS.Workbook> {
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(buffer as unknown as ArrayBuffer);
+  return book;
+}
+
+// Dense 2-D view of a worksheet (ExcelJS row.values is 1-indexed; drop slot 0).
+function sheetGrid(sheet: ExcelJS.Worksheet): unknown[][] {
+  const grid: unknown[][] = [];
+  sheet.eachRow((row) => {
+    grid.push((row.values as unknown[]).slice(1));
+  });
+  return grid;
+}
 
 describe('report view-model', () => {
   const model = buildReportModel(FIXED);
@@ -63,28 +79,75 @@ describe('report workbook', () => {
     ]);
   });
 
-  it('writes a valid xlsx with a header row + one data row per initiative', () => {
-    const buffer = buildReportWorkbook(FIXED);
+  it('writes a valid xlsx with a header row + one data row per initiative', async () => {
+    const buffer = await buildReportWorkbook(FIXED);
     // Office Open XML is a zip archive — magic bytes 'PK'.
     expect(buffer.subarray(0, 2).toString('latin1')).toBe('PK');
 
-    const book = XLSX.read(buffer, { type: 'buffer' });
-    const sheet = book.Sheets[book.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+    const grid = sheetGrid((await readBook(buffer)).worksheets[0]);
+    const [header, ...rows] = grid;
     const model = buildReportModel(FIXED);
 
     expect(rows).toHaveLength(model.rows.length);
-    expect(Object.keys(rows[0])).toEqual([...REPORT_COLUMNS]);
-    expect(rows[0]['Initiative Name']).toBe(model.rows[0].name);
-    expect(rows[0]['Annual Run Rate ($)']).toBe(model.rows[0].annualRunRate);
+    expect(header).toEqual([...REPORT_COLUMNS]);
+    expect(rows[0][REPORT_COLUMNS.indexOf('Initiative Name')]).toBe(model.rows[0].name);
+    expect(rows[0][REPORT_COLUMNS.indexOf('Annual Run Rate ($)')]).toBe(
+      model.rows[0].annualRunRate,
+    );
   });
 
-  it('auto-fits column widths', () => {
-    const buffer = buildReportWorkbook(FIXED);
-    const book = XLSX.read(buffer, { type: 'buffer', cellStyles: true });
-    const sheet = book.Sheets[book.SheetNames[0]];
-    expect(sheet['!cols']).toBeDefined();
-    expect(sheet['!cols']).toHaveLength(REPORT_COLUMNS.length);
+  it('round-trips: the workbook opens with an "Initiatives" sheet whose every cell matches the model', async () => {
+    const buffer = await buildReportWorkbook(FIXED);
+    const book = await readBook(buffer);
+    expect(book.worksheets.map((ws) => ws.name)).toEqual(['Initiatives']);
+
+    const sheet = book.getWorksheet('Initiatives')!;
+    // Raw 2-D view: header row first, then one array per data row.
+    const grid = sheetGrid(sheet);
+    const model = buildReportModel(FIXED);
+
+    expect(grid[0]).toEqual([...REPORT_COLUMNS]);
+    expect(grid).toHaveLength(model.rows.length + 1);
+    // eachRow skips empty rows, so also pin the sheet's real row count.
+    expect(sheet.rowCount).toBe(model.rows.length + 1);
+    model.rows.forEach((row, i) => {
+      expect(grid[i + 1]).toEqual([
+        row.name,
+        row.monthlyCost,
+        row.annualRunRate,
+        row.budgetConsumedPct,
+        row.status,
+        Number(row.costEfficiency.toFixed(1)),
+        row.savingsOpportunity,
+        row.lastUpdated,
+      ]);
+    });
+
+    // Spot-check addressed cells so cell placement (not just order) is pinned.
+    expect(sheet.getCell('A1').value).toBe('Initiative Name');
+    expect(sheet.getCell('H1').value).toBe('Last Updated');
+    expect(sheet.getCell('A2').value).toBe(model.rows[0].name);
+    expect(sheet.getCell('C2').value).toBe(model.rows[0].annualRunRate);
+    expect(sheet.getCell('C2').type).toBe(ExcelJS.ValueType.Number);
+  });
+
+  it('stamps workbook metadata from the report clock, not library defaults', async () => {
+    const book = await readBook(await buildReportWorkbook(FIXED));
+    expect(book.creator).toBe('Ratio');
+    expect(book.lastModifiedBy).toBe('Ratio');
+    expect(book.created?.toISOString()).toBe(FIXED.toISOString());
+    expect(book.modified?.toISOString()).toBe(FIXED.toISOString());
+  });
+
+  it('auto-fits column widths', async () => {
+    const buffer = await buildReportWorkbook(FIXED);
+    const sheet = (await readBook(buffer)).worksheets[0];
+    const grid = sheetGrid(sheet);
+    expect(sheet.columns).toHaveLength(REPORT_COLUMNS.length);
+    REPORT_COLUMNS.forEach((_, c) => {
+      // Widest cell in the column (header included) + 2 chars of padding.
+      const widest = Math.max(...grid.map((r) => String(r[c]).length));
+      expect(sheet.getColumn(c + 1).width).toBe(widest + 2);
+    });
   });
 });
-
