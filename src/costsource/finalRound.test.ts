@@ -85,7 +85,7 @@ async function hit(handler: H, headers: Record<string, string>, socket: string) 
 // ---------------------------------------------------------------------------
 describe('1. failed-auth limiter client identity', () => {
   it('without RATIO_TRUSTED_PROXY_HOPS, rotating X-Forwarded-For does not reset the count', async () => {
-    process.env.RATIO_API_TOKEN = 'right-token';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     const handler = await healthHandler();
     for (let i = 0; i < 1000; i += 1) {
       expect(await hit(handler, { authorization: 'Bearer wrong', 'x-forwarded-for': `10.9.${i >> 8}.${i & 255}` }, '203.0.113.50')).toBe(401);
@@ -94,7 +94,7 @@ describe('1. failed-auth limiter client identity', () => {
   }, 60_000);
 
   it('without RATIO_TRUSTED_PROXY_HOPS, spoofing a victim IP in X-Forwarded-For does not lock the victim out', async () => {
-    process.env.RATIO_API_TOKEN = 'right-token';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     const handler = await healthHandler();
     for (let i = 0; i < 1001; i += 1) {
       await hit(handler, { authorization: 'Bearer wrong', 'x-forwarded-for': '198.51.100.77' }, '203.0.113.66');
@@ -104,7 +104,7 @@ describe('1. failed-auth limiter client identity', () => {
   }, 60_000);
 
   it('with RATIO_TRUSTED_PROXY_HOPS=N, the Nth hop from the right is the client', async () => {
-    process.env.RATIO_API_TOKEN = 'right-token';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     process.env.RATIO_TRUSTED_PROXY_HOPS = '2';
     const handler = await healthHandler();
     // client-forged, real client (added by the outer proxy), inner proxy
@@ -141,7 +141,7 @@ describe('2. GET /api/v1/connectors (no probe) hides live status from anonymous 
   }
   function configure() {
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
-    process.env.RATIO_API_TOKEN = 'right-token';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
   }
 
   it('anonymous: neutral projection and neutral summary', async () => {
@@ -161,7 +161,7 @@ describe('2. GET /api/v1/connectors (no probe) hides live status from anonymous 
 
   it('authenticated: real status and summary', async () => {
     configure();
-    const res = await list({ authorization: 'Bearer right-token' });
+    const res = await list({ authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
     expect(res.statusCode).toBe(200);
     expect(res.body.connectors.find((c) => c.id === 'kubernetes')).toMatchObject({ configured: true, connection: 'connected' });
     expect(res.body.summary.connected).toBe(1);

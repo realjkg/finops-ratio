@@ -96,7 +96,7 @@ describe('/api/costsource/rows — live-data auth gate', () => {
 
   it('refuses a live connector with a wrong token', async () => {
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     const res = await callRows({ authorization: 'Bearer wrong' });
     expect(res.statusCode).toBe(401);
   });
@@ -104,9 +104,9 @@ describe('/api/costsource/rows — live-data auth gate', () => {
   it('serves normalized live rows with the right token', async () => {
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
     process.env.KUBERNETES_FOCUS_TOKEN = 'upstream';
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     vi.stubGlobal('fetch', vi.fn(async () => new Response(CSV)));
-    const res = await callRows({ authorization: 'Bearer right' });
+    const res = await callRows({ authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
     expect(res.statusCode).toBe(200);
     const body = res.body as { rows: Array<{ BilledCost: number; ServiceName: string; x_RatioSourceId: string }> };
     expect(body.rows).toHaveLength(1);
@@ -115,10 +115,10 @@ describe('/api/costsource/rows — live-data auth gate', () => {
 
   it('returns 409 (not configured) for an available connector, with no network', async () => {
     // Deny-by-default (H1): the 409 is only reachable after live-data auth.
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const res = await callRows({ authorization: 'Bearer right' });
+    const res = await callRows({ authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
     expect(res.statusCode).toBe(409);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -150,10 +150,10 @@ describe('/api/v1/connectors', () => {
   it('probes only configured connectors and reports their live health', async () => {
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
     // H2: a probe invokes connectors with server credentials — token required.
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     const fetchMock = vi.fn(async () => new Response(CSV));
     vi.stubGlobal('fetch', fetchMock);
-    const res = await callRegistry({ probe: 'true' }, { authorization: 'Bearer right' });
+    const res = await callRegistry({ probe: 'true' }, { authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
     expect(res.statusCode).toBe(200);
     expect(res.body.summary.connected).toBe(1);
     expect(res.body.health).toEqual([expect.objectContaining({ sourceId: 'kubernetes', reachable: true })]);
@@ -191,7 +191,7 @@ describe('H1 — /api/costsource/rows is deny-by-default for non-sandbox sources
 
   it('refuses pointfive-live with a wrong token when RATIO_API_TOKEN is set', async () => {
     configurePointFiveLive();
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const res = await rowsFor('pointfive-live', { authorization: 'Bearer wrong' });
@@ -205,8 +205,8 @@ describe('H1 — /api/costsource/rows is deny-by-default for non-sandbox sources
   });
 
   it('answers 404 for an unknown source id only after successful auth', async () => {
-    process.env.RATIO_API_TOKEN = 'right';
-    const res = await rowsFor('no-such-source', { authorization: 'Bearer right' });
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
+    const res = await rowsFor('no-such-source', { authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
     expect(res.statusCode).toBe(404);
   });
 
@@ -236,7 +236,7 @@ describe('H2 — /api/v1/connectors?probe=true always requires the API token', (
 
   it('refuses a probe with a wrong token and invokes no connector', async () => {
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     const fetchMock = vi.fn(async () => new Response(CSV));
     vi.stubGlobal('fetch', fetchMock);
     const res = await registry({ probe: '1' }, { authorization: 'Bearer wrong' });
@@ -279,17 +279,17 @@ describe('H3 — /api/costsource/health is deny-by-default for non-sandbox sourc
 
   it('answers 401 for an unknown id anonymously, 404 after auth', async () => {
     expect((await health('no-such-source')).statusCode).toBe(401);
-    process.env.RATIO_API_TOKEN = 'right';
-    expect((await health('no-such-source', { authorization: 'Bearer right' })).statusCode).toBe(404);
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
+    expect((await health('no-such-source', { authorization: 'Bearer right-token-0123456789abcdef-0123456789' })).statusCode).toBe(404);
   });
 
   it('serves sandbox health anonymously and live health with the right token', async () => {
     expect((await health('pointfive-sandbox')).statusCode).toBe(200);
     expect((await health('focus-file-sandbox')).statusCode).toBe(200);
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     vi.stubGlobal('fetch', vi.fn(async () => new Response(CSV)));
-    const res = await health('kubernetes', { authorization: 'Bearer right' });
+    const res = await health('kubernetes', { authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
     expect(res.statusCode).toBe(200);
   });
 });
@@ -305,9 +305,9 @@ describe('Upstream error bodies never reach API callers', () => {
   it('rows: a failing live connector returns an error without the upstream body', async () => {
     const warn = silenceWarn();
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     vi.stubGlobal('fetch', vi.fn(async () => upstream401()));
-    const res = await callRows({ authorization: 'Bearer right' });
+    const res = await callRows({ authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
     expect(JSON.stringify(res.body)).not.toContain(MARKER);
     expect(JSON.stringify(res.body)).toContain('401');
@@ -316,10 +316,10 @@ describe('Upstream error bodies never reach API callers', () => {
 
   it('rows: a malformed upstream export body is not echoed in the parse error', async () => {
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     // Short line so the runtime's JSON error snippet would include all of it.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(`{"BilledCost":1}\n{"a": LEAKED}\n`)));
-    const res = await callRows({ authorization: 'Bearer right' });
+    const res = await callRows({ authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
     expect(JSON.stringify(res.body)).not.toContain('LEAKED');
   });
@@ -327,11 +327,11 @@ describe('Upstream error bodies never reach API callers', () => {
   it('health: the probe detail carries status only, never the upstream body', async () => {
     const warn = silenceWarn();
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     vi.stubGlobal('fetch', vi.fn(async () => upstream401()));
     const { default: handler } = await import('../../pages/api/costsource/health');
     const res = makeRes();
-    await handler(makeReq({ sourceId: 'kubernetes' }, { authorization: 'Bearer right' }), res as unknown as NextApiResponse);
+    await handler(makeReq({ sourceId: 'kubernetes' }, { authorization: 'Bearer right-token-0123456789abcdef-0123456789' }), res as unknown as NextApiResponse);
     expect(JSON.stringify(res.body)).toContain('401');
     expect(JSON.stringify(res.body)).not.toContain(MARKER);
     expect(JSON.stringify(res.body)).not.toContain('s3cr3t');
@@ -341,11 +341,11 @@ describe('Upstream error bodies never reach API callers', () => {
   it('probe: /api/v1/connectors?probe=true health never carries the upstream body', async () => {
     const warn = silenceWarn();
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     vi.stubGlobal('fetch', vi.fn(async () => upstream401()));
     const { default: handler } = await import('../../pages/api/v1/connectors/index');
     const res = makeRes();
-    await handler(makeReq({ probe: 'true' }, { authorization: 'Bearer right' }), res as unknown as NextApiResponse);
+    await handler(makeReq({ probe: 'true' }, { authorization: 'Bearer right-token-0123456789abcdef-0123456789' }), res as unknown as NextApiResponse);
     expect(res.statusCode).toBe(200);
     expect(JSON.stringify(res.body)).toContain('401');
     expect(JSON.stringify(res.body)).not.toContain(MARKER);
@@ -372,7 +372,7 @@ describe('/api/costsource/findings is deny-by-default for non-sandbox sources', 
 
   it('refuses pointfive-live findings with a wrong token', async () => {
     configurePointFiveLive();
-    process.env.RATIO_API_TOKEN = 'right';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const res = await findings('pointfive-live', { authorization: 'Bearer wrong' });
@@ -382,8 +382,8 @@ describe('/api/costsource/findings is deny-by-default for non-sandbox sources', 
 
   it('answers 401 for an unknown id anonymously, 404 after auth', async () => {
     expect((await findings('no-such-source')).statusCode).toBe(401);
-    process.env.RATIO_API_TOKEN = 'right';
-    expect((await findings('no-such-source', { authorization: 'Bearer right' })).statusCode).toBe(404);
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
+    expect((await findings('no-such-source', { authorization: 'Bearer right-token-0123456789abcdef-0123456789' })).statusCode).toBe(404);
   });
 
   it('still serves sandbox findings anonymously', async () => {

@@ -105,20 +105,20 @@ describe('#6 token comparison', () => {
   it('tokensMatch is a timing-safe digest comparison with exact semantics', async () => {
     const { tokensMatch } = await import('@/server/gateway/auth');
     expect(typeof tokensMatch).toBe('function');
-    expect(tokensMatch('right-token', 'right-token')).toBe(true);
-    expect(tokensMatch('right', 'right-token')).toBe(false);
-    expect(tokensMatch('right-tokenX', 'right-token')).toBe(false);
-    expect(tokensMatch('', 'right-token')).toBe(false);
+    expect(tokensMatch('right-token-0123456789abcdef-0123456789', 'right-token-0123456789abcdef-0123456789')).toBe(true);
+    expect(tokensMatch('right', 'right-token-0123456789abcdef-0123456789')).toBe(false);
+    expect(tokensMatch('right-token-0123456789abcdef-0123456789X', 'right-token-0123456789abcdef-0123456789')).toBe(false);
+    expect(tokensMatch('', 'right-token-0123456789abcdef-0123456789')).toBe(false);
   });
 
   it('rejects a prefix and a token+1 char; accepts a lowercase scheme', async () => {
-    process.env.RATIO_API_TOKEN = 'right-token';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
     vi.stubGlobal('fetch', vi.fn(async () => new Response('BilledCost,BillingCurrency,ChargePeriodStart\n1,USD,2026-06-02T00:00:00Z\n')));
     const q = { sourceId: 'kubernetes', start: '2026-06-01T00:00:00Z', end: '2026-07-01T00:00:00Z' };
     expect((await run(ROWS, req(q, { authorization: 'Bearer right' }))).statusCode).toBe(401);
-    expect((await run(ROWS, req(q, { authorization: 'Bearer right-tokenX' }))).statusCode).toBe(401);
-    expect((await run(ROWS, req(q, { authorization: 'bearer right-token' }))).statusCode).toBe(200);
+    expect((await run(ROWS, req(q, { authorization: 'Bearer right-token-0123456789abcdef-0123456789X' }))).statusCode).toBe(401);
+    expect((await run(ROWS, req(q, { authorization: 'bearer right-token-0123456789abcdef-0123456789' }))).statusCode).toBe(200);
   });
 });
 
@@ -128,7 +128,7 @@ describe('#6 failed-auth rate limiting on rows / findings / health', () => {
     ['findings', '../../pages/api/costsource/findings', { sourceId: 'pointfive-live' }],
     ['health', '../../pages/api/costsource/health', { sourceId: 'kubernetes' }],
   ])('%s: 429 after 1000 failed attempts per minute from one client IP', async (_n, path, q) => {
-    process.env.RATIO_API_TOKEN = 'right-token';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     const { default: handler } = (await import(path)) as { default: (a: NextApiRequest, b: NextApiResponse) => unknown };
     // Keyed on the socket address (X-Forwarded-For is ignored unless
     // RATIO_TRUSTED_PROXY_HOPS is set — see finalRound.test.ts).
@@ -143,10 +143,12 @@ describe('#6 failed-auth rate limiting on rows / findings / health', () => {
     expect(blocked.statusCode).toBe(429);
     expect(blocked.headers['retry-after']).toBeDefined();
 
-    // Even the right token is refused while the IP is blocked (no brute-force oracle).
+    // M2 (re-review): a request presenting a VALID token always passes — the
+    // limiter throttles only requests that would otherwise be 401.
     const right = makeRes();
-    await handler(req(q, { authorization: 'Bearer right-token' }, ip), right as unknown as NextApiResponse);
-    expect(right.statusCode).toBe(429);
+    await handler(req(q, { authorization: 'Bearer right-token-0123456789abcdef-0123456789' }, ip), right as unknown as NextApiResponse);
+    expect(right.statusCode).not.toBe(429);
+    expect(right.statusCode).not.toBe(401);
 
     // Another client (different socket address) is unaffected.
     const other = makeRes();
@@ -164,7 +166,7 @@ describe('#8 /api/costsource/sources hides live status from anonymous callers', 
     process.env.POINTFIVE_OAUTH_CLIENT_ID = 'c';
     process.env.POINTFIVE_OAUTH_CLIENT_SECRET = 's';
     process.env.POINTFIVE_OAUTH_TOKEN_URL = 'https://auth.example/token';
-    process.env.RATIO_API_TOKEN = 'right-token';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
   }
   type Src = { id: string; configured: boolean; connection?: string; note: string };
 
@@ -192,7 +194,7 @@ describe('#8 /api/costsource/sources hides live status from anonymous callers', 
 
   it('authenticated: real server-resolved status', async () => {
     configure();
-    const list = (await run(SOURCES, req({}, { authorization: 'Bearer right-token' }))).body as Src[];
+    const list = (await run(SOURCES, req({}, { authorization: 'Bearer right-token-0123456789abcdef-0123456789' }))).body as Src[];
     expect(list.find((s) => s.id === 'kubernetes')).toMatchObject({ configured: true, connection: 'connected' });
     expect(list.find((s) => s.id === 'pointfive-live')?.configured).toBe(true);
   });
@@ -201,20 +203,20 @@ describe('#8 /api/costsource/sources hides live status from anonymous callers', 
 // ---------------------------------------------------------------------------
 describe('#12 / #13 /api/v1/connectors?probe=true', () => {
   it('#13 probes a configured pointfive-live (no `connection` field) too', async () => {
-    process.env.RATIO_API_TOKEN = 'right-token';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     process.env.COSTSOURCE_POINTFIVE_LIVE = 'true';
     process.env.POINTFIVE_OAUTH_CLIENT_ID = 'c';
     process.env.POINTFIVE_OAUTH_CLIENT_SECRET = 's';
     process.env.POINTFIVE_OAUTH_TOKEN_URL = 'https://auth.example/token';
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ access_token: 't', token_type: 'bearer', expires_in: 3600 })));
-    const res = await run('../../pages/api/v1/connectors/index', req({ probe: 'true' }, { authorization: 'Bearer right-token' }));
+    const res = await run('../../pages/api/v1/connectors/index', req({ probe: 'true' }, { authorization: 'Bearer right-token-0123456789abcdef-0123456789' }));
     expect(res.statusCode).toBe(200);
     const health = (res.body as { health: Array<{ sourceId: string; reachable: boolean }> }).health;
     expect(health.map((h) => h.sourceId)).toContain('pointfive-live');
   });
 
   it('#12 a rejected probe is reported with redacted detail', async () => {
-    process.env.RATIO_API_TOKEN = 'right-token';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
     vi.doMock('@/costsource', async (orig) => {
       const real = (await orig()) as Record<string, unknown>;
       return {
@@ -229,7 +231,7 @@ describe('#12 / #13 /api/v1/connectors?probe=true', () => {
         }),
       };
     });
-    const res = await run('../../pages/api/v1/connectors/index', req({ probe: 'true' }, { authorization: 'Bearer right-token' }));
+    const res = await run('../../pages/api/v1/connectors/index', req({ probe: 'true' }, { authorization: 'Bearer right-token-0123456789abcdef-0123456789' }));
     const text = JSON.stringify(res.body);
     expect(text).toContain('probe blew up');
     expect(text).not.toContain('pr.tok.SECRET');
