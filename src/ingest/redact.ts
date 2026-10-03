@@ -38,6 +38,31 @@ const SECRET_ENV = /(SECRET|SESSION_TOKEN|PASSWORD|_TOKEN$)/;
 const URL_ENV = /DATABASE_URL$/;
 
 /** Literal secret values in the environment that must never be printed or stored. */
+function safeDecode(v: string): string {
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return v;
+  }
+}
+
+/**
+ * Every form a secret can take in our output: raw, URL-decoded, URL-encoded,
+ * and the JSON-escaped form of each (what JSON.stringify makes of a quote,
+ * backslash or control character inside it). Longest first.
+ */
+export function secretForms(raw: readonly string[]): string[] {
+  const forms = new Set<string>();
+  for (const s of raw) {
+    for (const v of [s, safeDecode(s), encodeURIComponent(s)]) {
+      forms.add(v);
+      forms.add(JSON.stringify(v).slice(1, -1));
+    }
+  }
+  return [...forms].filter((x) => x.length >= 4).sort((a, b) => b.length - a.length);
+}
+
+/** Literal secret values in the environment that must never be printed or stored, in every output form. */
 export function secretsFromEnv(env: Record<string, string | undefined>): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(env)) {
@@ -47,24 +72,55 @@ export function secretsFromEnv(env: Record<string, string | undefined>): string[
       out.push(v);
       try {
         const u = new URL(v);
-        if (u.password) out.push(u.password, decodeURIComponent(u.password));
-        if (u.username && u.username.length >= 3) out.push(u.username, decodeURIComponent(u.username));
+        if (u.password) out.push(u.password, safeDecode(u.password));
+        if (u.username && u.username.length >= 3) out.push(u.username, safeDecode(u.username));
+        for (const [qk, qv] of u.searchParams) if (/pass/i.test(qk) && qv) out.push(qv);
       } catch {
         // unparseable: the literal value is still redacted
       }
     }
   }
-  return [...new Set(out.filter((s) => s.length >= 4))].sort((a, b) => b.length - a.length);
+  return secretForms(out);
 }
 
-/** Deep-redacts every string inside a JSON-compatible value. */
-export function redactDeep<T>(value: T, secrets: readonly string[] = []): T {
+/**
+ * Deep copy with every string (and object key) redacted, walking arrays, plain
+ * objects and Errors (name, message, code, cause). Runs BEFORE serialization
+ * so JSON escaping can never hide a secret from the redactor.
+ */
+export function redactDeep<T>(value: T, secrets: readonly string[] = [], seen: WeakSet<object> = new WeakSet()): T {
   if (typeof value === 'string') return redact(value, secrets) as unknown as T;
-  if (Array.isArray(value)) return value.map((v) => redactDeep(v, secrets)) as unknown as T;
-  if (value && typeof value === 'object' && !(value instanceof Date)) {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = redactDeep(v, secrets);
+  if (value === null || typeof value !== 'object') return value;
+  if (value instanceof Date) return value;
+  if (seen.has(value as object)) return '[circular]' as unknown as T;
+  seen.add(value as object);
+  if (Array.isArray(value)) return value.map((v) => redactDeep(v, secrets, seen)) as unknown as T;
+  if (value instanceof Error) {
+    const e = value as Error & { code?: unknown; cause?: unknown };
+    const out: Record<string, unknown> = { name: e.name, message: redact(e.message, secrets) };
+    if (e.code !== undefined) out.code = redactDeep(e.code, secrets, seen);
+    if (e.cause !== undefined) out.cause = redactDeep(e.cause, secrets, seen);
     return out as T;
   }
-  return value;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[redact(k, secrets)] = redactDeep(v, secrets, seen);
+  return out as T;
+}
+
+/** Replaces literal secret forms in already-serialized text (no length cap). */
+export function scrubLiterals(text: string, forms: readonly string[]): string {
+  let out = text;
+  for (const f of forms) if (f.length >= 4) out = out.split(f).join('[redacted]');
+  return out;
+}
+
+/**
+ * The ONE way the worker CLI turns a value into an output line: redact every
+ * string before JSON.stringify, then a literal backstop over the serialized
+ * text (the forms include JSON-escaped secrets). Same pattern as Slice 0's
+ * migrate CLI.
+ */
+export function jsonLineRedactorFor(env: Record<string, string | undefined>, extra: readonly string[] = []): (value: unknown) => string {
+  const forms = secretForms([...secretsFromEnv(env), ...extra]);
+  return (value: unknown) => scrubLiterals(JSON.stringify(redactDeep(value, forms)), forms);
 }

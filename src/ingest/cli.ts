@@ -15,7 +15,7 @@
 import { Client } from 'pg';
 import { MigrationError } from './db/migrationFiles';
 import { assertDownAllowed, migrateDown, migrateUp, migrationStatus } from './db/migrate';
-import { isWorkerCommand, recordMigrateEvidence, workerMain } from './workerCli';
+import { installProcessGuards, isWorkerCommand, recordMigrateEvidence, workerMain } from './workerCli';
 
 export interface CliIO {
   out(line: string): void;
@@ -226,10 +226,12 @@ async function migrateMain(argv: string[], env: Env, io: CliIO): Promise<number>
 }
 
 if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
-  void main(process.argv.slice(2), process.env, {
+  const io: CliIO = {
     out: (l) => process.stdout.write(l + '\n'),
     err: (l) => process.stderr.write(l + '\n'),
-  }).then((code) => {
+  };
+  installProcessGuards(process.env, io);
+  void main(process.argv.slice(2), process.env, io).then((code) => {
     process.exitCode = code;
   });
 }

@@ -16,7 +16,7 @@ import type { CliIO } from './cli';
 import { loadWorkerConfig, type WorkerConfig } from './config';
 import { IngestError, errorCodeOf, messageOf } from './errors';
 import { appendEvidenceFile, buildEvidenceRecord, resolveGitSha } from './evidenceRecord';
-import { redact, secretsFromEnv } from './redact';
+import { jsonLineRedactorFor, redact, secretsFromEnv } from './redact';
 import { isTenantId } from './db/tenant';
 import { makeS3Client } from './s3client';
 import { S3EvidenceStore } from './evidence/S3EvidenceStore';
@@ -134,9 +134,11 @@ function argsForRecord(argv: string[]): Record<string, unknown> {
 export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<number> {
   const started = new Date();
   const secrets = secretsFromEnv(env);
+  // Every printed line is redacted BEFORE serialization (then a literal backstop).
+  const line = jsonLineRedactorFor(env);
   const clean = (s: string) => redact(s, secrets);
   const log = (event: string, fields: Record<string, unknown> = {}) => {
-    io.err(clean(JSON.stringify({ ts: new Date().toISOString(), level: event.endsWith('failed') || event === 'cli.error' || fields.status === 'fail' ? 'error' : 'info', event, ...fields })));
+    io.err(line({ ts: new Date().toISOString(), level: event.endsWith('failed') || event === 'cli.error' || fields.status === 'fail' ? 'error' : 'info', event, ...fields }));
   };
   const command = argv[0] === 'quarantine' ? 'quarantine show' : argv[0];
   let config: WorkerConfig | null = null;
@@ -153,8 +155,8 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
       exitCode,
       secrets,
     });
-    io.out(JSON.stringify(record));
-    appendEvidenceFile(config?.evidenceFile ?? env.RATIO_EVIDENCE_FILE, record);
+    io.out(line(record));
+    appendEvidenceFile(config?.evidenceFile ?? env.RATIO_EVIDENCE_FILE, record, line);
     return exitCode;
   };
   const fail = (e: unknown): number => {
@@ -193,7 +195,9 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
   }
 
   if (!cfg.databaseUrl) return fail(new IngestError('CONFIG_INVALID', 'RATIO_DATABASE_URL is not set'));
-  const pool: Pool = createWorkerPool(cfg.databaseUrl, { max: 4, ...cfg.db });
+  // Clients are constructed inside the try below, so a constructor failure is a
+  // reported (redacted) failure, never a throw out of main.
+  let pool: Pool | undefined;
   const clients: S3Client[] = [];
   const s3 = (which: 'source' | 'evidence') => {
     const c = makeS3Client(which === 'source' ? cfg.sourceS3 : cfg.evidenceS3);
@@ -212,13 +216,14 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
     hooks.afterChunk = async (info) => {
       if (paused || info.rowsInserted < threshold) return;
       paused = true;
-      io.err(JSON.stringify({ ts: new Date().toISOString(), level: 'info', event: 'test.paused', runId: info.runId, batchId: info.batchId, rowsInserted: info.rowsInserted }));
+      io.err(line({ ts: new Date().toISOString(), level: 'info', event: 'test.paused', runId: info.runId, batchId: info.batchId, rowsInserted: info.rowsInserted }));
       setInterval(() => undefined, 1 << 30);
       await new Promise<never>(() => undefined);
     };
   }
 
   try {
+    pool = createWorkerPool(cfg.databaseUrl, { max: 4, ...cfg.db });
     await assertSafeWorkerRole(pool);
     const tenantId = args.tenants[0];
     switch (args.command) {
@@ -271,7 +276,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
   } catch (e) {
     return fail(e);
   } finally {
-    await pool.end().catch(() => undefined);
+    await pool?.end().catch(() => undefined);
     for (const c of clients) c.destroy();
   }
 }
@@ -295,5 +300,30 @@ export function recordMigrateEvidence(args: string[], env: Env, started: Date, e
       exitCode,
       secrets: secretsFromEnv(env),
     }),
+    jsonLineRedactorFor(env),
   );
+}
+
+type GuardedProcess = { on(event: 'uncaughtException' | 'unhandledRejection', listener: (e: unknown) => void): unknown; exit(code: number): void };
+
+/**
+ * Process-level guards for the CLI entry: an uncaught exception or unhandled
+ * rejection anywhere emits exactly ONE redacted JSON line on stderr (code +
+ * SQLSTATE-only/redacted message, never a raw stack) and exits 1.
+ */
+export function installProcessGuards(env: Env, io: CliIO, proc: GuardedProcess = process as unknown as GuardedProcess): void {
+  const line = jsonLineRedactorFor(env);
+  let fired = false;
+  const onCrash = (kind: 'uncaughtException' | 'unhandledRejection') => (e: unknown) => {
+    if (fired) return;
+    fired = true;
+    try {
+      io.err(line({ ts: new Date().toISOString(), level: 'error', event: 'process.crash', kind, code: errorCodeOf(e), message: messageOf(e) }));
+    } catch {
+      // never let the guard itself throw
+    }
+    proc.exit(1);
+  };
+  proc.on('uncaughtException', onCrash('uncaughtException'));
+  proc.on('unhandledRejection', onCrash('unhandledRejection'));
 }

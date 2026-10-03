@@ -89,10 +89,10 @@ export function resolveGitSha(
 }
 
 /** Appends one JSON line to the evidence file, if configured. Never throws. */
-export function appendEvidenceFile(file: string | undefined, record: EvidenceRecord): void {
+export function appendEvidenceFile(file: string | undefined, record: EvidenceRecord, serialize: (v: unknown) => string = JSON.stringify): void {
   if (!file) return;
   try {
-    fs.appendFileSync(file, JSON.stringify(record) + '\n', { encoding: 'utf8', mode: 0o600 });
+    fs.appendFileSync(file, serialize(record) + '\n', { encoding: 'utf8', mode: 0o600 });
   } catch {
     // The stdout record is authoritative; a missing evidence file is reported by the caller's pipeline.
   }
