@@ -49,6 +49,7 @@ function migrationsWith(extra: Record<string, string>): string {
 }
 
 const EXPAND = '-- ratio:phase expand\n';
+const CONTRACT = '-- ratio:phase contract\n';
 const REPRO =
   'CREATE FUNCTION public.report_rows() RETURNS SETOF ratio.cost_facts LANGUAGE sql STABLE SECURITY DEFINER AS $$ SELECT * FROM ratio.cost_facts $$;';
 
@@ -61,13 +62,13 @@ async function fnExists(c: Client, name: string): Promise<boolean> {
 }
 
 /** Applies a 0002 through the runner (classifier included) and expects the catalog check to refuse it. */
-async function expectRunnerRefuses(sql: string, expectMessage: RegExp): Promise<Client> {
+async function expectRunnerRefuses(sql: string, expectMessage: RegExp, opts: { contract?: boolean } = {}): Promise<Client> {
   const db = await freshDb();
   const c = await connect(db);
-  const dir = migrationsWith({ '0002_extra.up.sql': EXPAND + sql });
+  const dir = migrationsWith({ '0002_extra.up.sql': (opts.contract ? CONTRACT : EXPAND) + sql });
   // The classifier lets it through (marked); only the catalog check stands in the way.
   expect(loadMigrations(dir).map((m) => m.version)).toEqual(['0001', '0002']);
-  const err = await migrateUp(c, { dir }).then(
+  const err = await migrateUp(c, { dir, allowContract: opts.contract === true }).then(
     () => null,
     (e: Error & { code?: string }) => e,
   );
@@ -227,5 +228,265 @@ describe('runner catalog check refuses what the classifier cannot see', () => {
     expect(err?.code).toBe('PRIVILEGE_MODEL_VIOLATION');
     expect(await versions(c)).toEqual(['0001', '0002']);
     expect((await c.query(`SELECT to_regclass('public.scratch_priv') IS NOT NULL AS e`)).rows[0].e).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 5 (challenger round 4): nothing a migration installs may run after the
+// catalog check, and the check pins hooks, role identity, search_path and the
+// remaining privilege kinds.
+// ---------------------------------------------------------------------------
+
+async function readerHasCostFacts(c: Client): Promise<boolean> {
+  return (await c.query(`SELECT has_table_privilege('ratio_reader', 'ratio.cost_facts', 'SELECT') AS h`)).rows[0].h;
+}
+
+describe('round 5 M1: code that would run after the check (ledger / deferred triggers) is refused', () => {
+  it('(a) expand: an AFTER INSERT trigger on public.schema_migrations granting the reader cost_facts is refused; nothing committed', async () => {
+    const c = await expectRunnerRefuses(
+      "-- ratio:allow-function audit hook\nCREATE FUNCTION public.audit_ledger() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'GRANT SELECT ON ratio.cost_facts, ratio.ingest_validation_errors TO ' || 'ratio_reader'; RETURN NULL; END $f$;\n" +
+        'REVOKE EXECUTE ON FUNCTION public.audit_ledger() FROM PUBLIC;\n' +
+        'CREATE TRIGGER audit_ledger AFTER INSERT ON public.schema_migrations FOR EACH ROW EXECUTE FUNCTION public.audit_ledger();\n',
+      /public\.schema_migrations/,
+    );
+    expect(await readerHasCostFacts(c)).toBe(false);
+    expect((await c.query(`SELECT count(*)::int AS n FROM pg_trigger WHERE tgrelid = 'public.schema_migrations'::regclass`)).rows[0].n).toBe(0);
+  });
+
+  it('(b) expand: a deferred constraint trigger on the ledger, function in another schema, is refused; nothing committed', async () => {
+    const c = await expectRunnerRefuses(
+      'CREATE SCHEMA hooks;\nCREATE TABLE hooks.tick(i int);\n' +
+        "-- ratio:allow-function deferred hook\nCREATE FUNCTION hooks.later() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'GRANT SELECT ON ratio.cost_facts TO ' || 'ratio_reader'; RETURN NULL; END $f$;\n" +
+        'CREATE CONSTRAINT TRIGGER later AFTER INSERT ON public.schema_migrations DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION hooks.later();\n',
+      /later/,
+    );
+    expect(await readerHasCostFacts(c)).toBe(false);
+    expect((await c.query(`SELECT to_regnamespace('hooks') IS NULL AS gone`)).rows[0].gone).toBe(true);
+  });
+
+  it('(c) contract: a deferred constraint trigger on a helper table, queued by an INSERT, is refused; nothing committed', async () => {
+    const c = await expectRunnerRefuses(
+      'CREATE TABLE public.tick(i int);\n' +
+        "CREATE FUNCTION public.later() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'GRANT SELECT ON ratio.cost_facts TO ' || 'ratio_reader'; RETURN NULL; END $f$;\n" +
+        'REVOKE EXECUTE ON FUNCTION public.later() FROM PUBLIC;\n' +
+        'CREATE CONSTRAINT TRIGGER later AFTER INSERT ON public.tick DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.later();\n' +
+        'INSERT INTO public.tick VALUES (1);\n',
+      /ratio_reader holds relation:ratio\.cost_facts:SELECT|trigger/,
+      { contract: true },
+    );
+    expect(await readerHasCostFacts(c)).toBe(false);
+  });
+
+  it('(c, isolated) the deferred trigger fires BEFORE the check (SET CONSTRAINTS ALL IMMEDIATE), so its GRANT is seen', async () => {
+    await expectRunnerRefuses(
+      'CREATE TABLE public.tick(i int);\n' +
+        "CREATE FUNCTION public.later() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'GRANT SELECT ON ratio.cost_facts TO ' || 'ratio_reader'; RETURN NULL; END $f$;\n" +
+        'REVOKE EXECUTE ON FUNCTION public.later() FROM PUBLIC;\n' +
+        'CREATE CONSTRAINT TRIGGER later AFTER INSERT ON public.tick DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.later();\n' +
+        'INSERT INTO public.tick VALUES (1);\n',
+      /ratio_reader holds relation:ratio\.cost_facts:SELECT/,
+      { contract: true },
+    );
+  });
+
+  it('(a, isolated) the ledger row is written BEFORE the check, so an AFTER INSERT ledger trigger has already run when the check looks', async () => {
+    await expectRunnerRefuses(
+      "-- ratio:allow-function audit hook\nCREATE FUNCTION public.audit_ledger() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN EXECUTE 'GRANT SELECT ON ratio.cost_facts TO ' || 'ratio_reader'; RETURN NULL; END $f$;\n" +
+        'REVOKE EXECUTE ON FUNCTION public.audit_ledger() FROM PUBLIC;\n' +
+        'CREATE TRIGGER audit_ledger AFTER INSERT ON public.schema_migrations FOR EACH ROW EXECUTE FUNCTION public.audit_ledger();\n',
+      /ratio_reader holds relation:ratio\.cost_facts:SELECT/,
+    );
+  });
+
+  it('an event trigger is refused', async () => {
+    const c = await expectRunnerRefuses(
+      'CREATE FUNCTION public.on_ddl() RETURNS event_trigger LANGUAGE plpgsql AS $f$ BEGIN NULL; END $f$;\n' +
+        'REVOKE EXECUTE ON FUNCTION public.on_ddl() FROM PUBLIC;\n' +
+        'CREATE EVENT TRIGGER ratio_probe_on_ddl ON ddl_command_end EXECUTE FUNCTION public.on_ddl();\n',
+      /event trigger ratio_probe_on_ddl/,
+      { contract: true },
+    );
+    expect((await c.query(`SELECT count(*)::int AS n FROM pg_event_trigger`)).rows[0].n).toBe(0);
+  });
+
+  it('a rule is refused (on a helper table, and on the ledger)', async () => {
+    await expectRunnerRefuses(
+      'CREATE TABLE public.tick(i int);\nCREATE RULE tick_notify AS ON INSERT TO public.tick DO ALSO NOTIFY ratio_probe;\n',
+      /rule tick_notify on public\.tick/,
+      { contract: true },
+    );
+    await expectRunnerRefuses(
+      'CREATE RULE ledger_notify AS ON INSERT TO public.schema_migrations DO ALSO NOTIFY ratio_probe;\n',
+      /rule ledger_notify on public\.schema_migrations/,
+      { contract: true },
+    );
+  });
+
+  it('a policy (or RLS) on the ledger is refused', async () => {
+    await expectRunnerRefuses(
+      'ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY;\n' +
+        'CREATE POLICY ledger_narrow ON public.schema_migrations AS RESTRICTIVE FOR SELECT USING (true);\n',
+      /public\.schema_migrations/,
+    );
+  });
+
+  it('a trigger on a ratio table that is not on the reviewed list is refused, even with a ratio_owner function in schema ratio', async () => {
+    await expectRunnerRefuses(
+      'SET LOCAL ROLE ratio_owner;\n' +
+        '-- ratio:allow-function extra guard\nCREATE FUNCTION ratio.tg_extra() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $f$ BEGIN RETURN NEW; END $f$;\n' +
+        'REVOKE EXECUTE ON FUNCTION ratio.tg_extra() FROM PUBLIC;\n' +
+        '-- ratio:allow-function attaches extra guard\nCREATE TRIGGER extra_guard BEFORE INSERT ON ratio.sync_runs FOR EACH ROW EXECUTE FUNCTION ratio.tg_extra();\n',
+      /trigger ratio\.sync_runs:extra_guard/,
+    );
+  });
+
+  it('positive control: the 0001 triggers are exactly the reviewed list', async () => {
+    const { REVIEWED_TRIGGERS } = await model();
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const r = await db.pool.query(
+      `SELECT n.nspname || '.' || c.relname || ':' || t.tgname || ':' || pn.nspname || '.' || p.proname || '()' AS t
+         FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+         JOIN pg_proc p ON p.oid = t.tgfoid JOIN pg_namespace pn ON pn.oid = p.pronamespace
+        WHERE NOT t.tgisinternal ORDER BY 1`,
+    );
+    expect(r.rows.map((x) => x.t)).toEqual([...REVIEWED_TRIGGERS].sort());
+    expect(REVIEWED_TRIGGERS).toHaveLength(12);
+  });
+});
+
+describe('round 5 L1: the check cannot be blinded by operators on the search_path', () => {
+  it('a migration that installs public.=/<> operators and puts public first on the search_path still has its grant detected', async () => {
+    await expectRunnerRefuses(
+      "CREATE FUNCTION public.always_false(name, name) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select false';\n" +
+        "CREATE FUNCTION public.always_true(name, name) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select true';\n" +
+        "CREATE FUNCTION public.char_false(\"char\", \"char\") RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select false';\n" +
+        'REVOKE EXECUTE ON FUNCTION public.always_false(name, name), public.always_true(name, name), public.char_false("char", "char") FROM PUBLIC;\n' +
+        'CREATE OPERATOR public.= (LEFTARG = name, RIGHTARG = name, FUNCTION = public.always_false);\n' +
+        'CREATE OPERATOR public.<> (LEFTARG = name, RIGHTARG = name, FUNCTION = public.always_true);\n' +
+        'CREATE OPERATOR public.<> (LEFTARG = "char", RIGHTARG = "char", FUNCTION = public.char_false);\n' +
+        'CREATE OPERATOR public.= (LEFTARG = "char", RIGHTARG = "char", FUNCTION = public.char_false);\n' +
+        'SET LOCAL search_path = public, pg_catalog;\n' +
+        'GRANT SELECT ON ratio.cost_facts TO ratio_worker;\n',
+      /ratio_worker holds relation:ratio\.cost_facts:SELECT|ratio_worker.*cost_facts/,
+      { contract: true },
+    );
+  });
+});
+
+describe('round 5 L2: role identity is pinned (a rename cannot launder grants)', () => {
+  /** Runs fn as the superuser in a transaction that is ALWAYS rolled back (role changes are cluster-global). */
+  async function inRolledBackTxn(fn: (c: Client) => Promise<void>): Promise<void> {
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    await c.query('BEGIN');
+    try {
+      await fn(c);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  }
+  const sfx = () => Math.random().toString(16).slice(2, 10);
+
+  it('GRANT to ratio_reader, rename it away and create an impostor ratio_reader: refused', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const old = `ratio_probe_renamed_${sfx()}`;
+    await inRolledBackTxn(async (c) => {
+      await c.query('GRANT SELECT ON ratio.cost_facts TO ratio_reader');
+      await c.query(`ALTER ROLE ratio_reader RENAME TO ${old}`);
+      await c.query('CREATE ROLE ratio_reader NOLOGIN');
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(new RegExp(`${old} holds relation:ratio\\.cost_facts:SELECT`));
+    });
+  });
+
+  it('rename without an impostor (members keep the old role): refused', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const old = `ratio_probe_renamed_${sfx()}`;
+    await inRolledBackTxn(async (c) => {
+      await c.query(`ALTER ROLE ratio_worker RENAME TO ${old}`);
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(/ratio_worker/);
+    });
+  });
+
+  it('a LOGIN member of ratio_reader holding an extra privilege is refused; a plain LOGIN member passes', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const login = `ratio_probe_login_${sfx()}`;
+    await inRolledBackTxn(async (c) => {
+      await c.query(`CREATE ROLE ${login} LOGIN IN ROLE ratio_reader`);
+      await assertReviewedPrivileges(c); // plain member: fine
+      await c.query(`GRANT SELECT ON ratio.ingest_batches TO ${login}`);
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(new RegExp(`${login} holds relation:ratio\\.ingest_batches:SELECT`));
+    });
+  });
+
+  it('a NOLOGIN member of a ratio role is refused', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const grp = `ratio_probe_group_${sfx()}`;
+    await inRolledBackTxn(async (c) => {
+      await c.query(`CREATE ROLE ${grp} NOLOGIN IN ROLE ratio_worker`);
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(new RegExp(`${grp} .*member of ratio_worker`));
+    });
+  });
+
+  it('a non-ratio role holding any privilege on ratio objects is refused', async () => {
+    const { assertReviewedPrivileges } = await model();
+    const other = `ratio_probe_other_${sfx()}`;
+    await inRolledBackTxn(async (c) => {
+      await c.query(`CREATE ROLE ${other} NOLOGIN`);
+      await c.query(`GRANT USAGE ON SCHEMA ratio TO ${other}`);
+      await expect(assertReviewedPrivileges(c)).rejects.toThrow(new RegExp(`${other} holds schema:ratio:USAGE`));
+    });
+  });
+
+  it('ratio role attributes and memberships are pinned', async () => {
+    const { assertReviewedPrivileges } = await model();
+    for (const stmt of ['ALTER ROLE ratio_reader BYPASSRLS', 'ALTER ROLE ratio_worker CREATEDB', 'GRANT pg_read_all_data TO ratio_reader']) {
+      await inRolledBackTxn(async (c) => {
+        await c.query(stmt);
+        await expect(assertReviewedPrivileges(c), stmt).rejects.toThrow(/ratio_(reader|worker)/);
+      });
+    }
+  });
+});
+
+describe('round 5 L3/L4: sequence, database, parameter, FDW/server and large-object privileges', () => {
+  it('L3: a sequence privilege beyond the reviewed set is refused', async () => {
+    await expectRunnerRefuses(
+      'CREATE SEQUENCE ratio.probe_seq;\nGRANT USAGE ON SEQUENCE ratio.probe_seq TO ratio_worker;\n',
+      /ratio_worker holds relation:ratio\.probe_seq:USAGE/,
+    );
+  });
+
+  it('L4: GRANT CREATE ON DATABASE built inside a DO block is refused', async () => {
+    await expectRunnerRefuses(
+      "-- ratio:allow-do grants on the current database\nDO $$ BEGIN EXECUTE format('GRANT CREATE ON DATABASE %I TO ratio_worker', current_database()); END $$;\n",
+      /ratio_worker holds database:CREATE/,
+    );
+  });
+
+  it('L4: GRANT SET ON PARAMETER is refused', async () => {
+    await expectRunnerRefuses('GRANT SET ON PARAMETER session_replication_role TO ratio_worker;\n', /ratio_worker holds parameter:session_replication_role:SET/);
+  });
+
+  it('L4: USAGE on a foreign-data wrapper or foreign server is refused', async () => {
+    await expectRunnerRefuses(
+      'CREATE FOREIGN DATA WRAPPER ratio_probe_fdw;\nGRANT USAGE ON FOREIGN DATA WRAPPER ratio_probe_fdw TO ratio_worker;\n',
+      /ratio_worker holds foreign_data_wrapper:ratio_probe_fdw:USAGE/,
+      { contract: true },
+    );
+    await expectRunnerRefuses(
+      'CREATE FOREIGN DATA WRAPPER ratio_probe_fdw;\nCREATE SERVER ratio_probe_srv FOREIGN DATA WRAPPER ratio_probe_fdw;\nGRANT USAGE ON FOREIGN SERVER ratio_probe_srv TO ratio_worker;\n',
+      /ratio_worker holds foreign_server:ratio_probe_srv:USAGE/,
+      { contract: true },
+    );
+  });
+
+  it('L4: a large-object privilege is refused', async () => {
+    await expectRunnerRefuses(
+      'SELECT pg_catalog.lo_create(424242);\nGRANT SELECT ON LARGE OBJECT 424242 TO ratio_worker;\n',
+      /ratio_worker holds large_object:424242:SELECT/,
+      { contract: true },
+    );
   });
 });

@@ -116,6 +116,26 @@ describe('ingest CLI (real Postgres)', () => {
     expect(doc.problems).toContain('UNKNOWN_APPLIED');
   });
 
+  it('round 5: --status --json runs the catalog privilege check and exits 3 on privilege drift', async () => {
+    const db = await freshDb();
+    const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
+    expect((await run(['migrate'], env)).code).toBe(0);
+    // Drift made outside the runner (e.g. by hand, or a hook): the ledger still matches the files.
+    await db.pool.query(`GRANT SELECT ON ratio.cost_facts TO ratio_reader`);
+    const r = await run(['migrate', '--status', '--json'], env);
+    expect(r.code).toBe(3);
+    const doc = onlyJson(r.out) as StatusDoc & { privilegeProblems?: string[] };
+    expect(doc.matches).toBe(false);
+    expect(doc.problems).toContain('PRIVILEGE_MODEL_VIOLATION');
+    expect(doc.privilegeProblems).toEqual(expect.arrayContaining([expect.stringMatching(/ratio_reader holds relation:ratio\.cost_facts:SELECT/)]));
+    expect(doc.applied.every((a) => a.checksumMatches)).toBe(true);
+    // Repaired: back to exit 0.
+    await db.pool.query(`REVOKE SELECT ON ratio.cost_facts FROM ratio_reader`);
+    const ok = await run(['migrate', '--status', '--json'], env);
+    expect(ok.code).toBe(0);
+    expect(onlyJson(ok.out)).toMatchObject({ matches: true, problems: [], privilegeProblems: [] });
+  });
+
   it('status --json prints exactly one JSON document; plain status logs one line', async () => {
     const db = await freshDb();
     const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
