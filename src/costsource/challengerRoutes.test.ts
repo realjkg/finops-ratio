@@ -130,25 +130,27 @@ describe('#6 failed-auth rate limiting on rows / findings / health', () => {
   ])('%s: 429 after 1000 failed attempts per minute from one client IP', async (_n, path, q) => {
     process.env.RATIO_API_TOKEN = 'right-token';
     const { default: handler } = (await import(path)) as { default: (a: NextApiRequest, b: NextApiResponse) => unknown };
-    const ip = { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' };
+    // Keyed on the socket address (X-Forwarded-For is ignored unless
+    // RATIO_TRUSTED_PROXY_HOPS is set — see finalRound.test.ts).
+    const ip = { remoteAddress: '203.0.113.9' };
     for (let i = 0; i < 1000; i += 1) {
       const res = makeRes();
-      await handler(req(q, { ...ip, authorization: 'Bearer wrong' }), res as unknown as NextApiResponse);
+      await handler(req(q, { authorization: 'Bearer wrong' }, ip), res as unknown as NextApiResponse);
       expect(res.statusCode).toBe(401);
     }
     const blocked = makeRes();
-    await handler(req(q, { ...ip, authorization: 'Bearer wrong' }), blocked as unknown as NextApiResponse);
+    await handler(req(q, { authorization: 'Bearer wrong' }, ip), blocked as unknown as NextApiResponse);
     expect(blocked.statusCode).toBe(429);
     expect(blocked.headers['retry-after']).toBeDefined();
 
     // Even the right token is refused while the IP is blocked (no brute-force oracle).
     const right = makeRes();
-    await handler(req(q, { ...ip, authorization: 'Bearer right-token' }), right as unknown as NextApiResponse);
+    await handler(req(q, { authorization: 'Bearer right-token' }, ip), right as unknown as NextApiResponse);
     expect(right.statusCode).toBe(429);
 
-    // Another client (different first hop) is unaffected.
+    // Another client (different socket address) is unaffected.
     const other = makeRes();
-    await handler(req(q, { 'x-forwarded-for': '198.51.100.7', authorization: 'Bearer wrong' }), other as unknown as NextApiResponse);
+    await handler(req(q, { authorization: 'Bearer wrong' }, { remoteAddress: '198.51.100.7' }), other as unknown as NextApiResponse);
     expect(other.statusCode).toBe(401);
   }, 60_000);
 });
