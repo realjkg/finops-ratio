@@ -760,7 +760,9 @@ describe('R1: sticky revocation', () => {
   it('a revoke naming an older SHA posts the sticky status on THAT SHA', async () => {
     const { github, pr } = fakeGithub({ files: restrictedFiles, labels: restrictedLabels, roles: ADMIN, comments: [approve, cmt(11, 'boss', `/exception-revoke ${MOVED}`)] });
     await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
-    expect(eligStatus(github)[0].params.state).toBe('success');
+    // Q1: the revoked SHA gets an eligibility failure (before its marker); the head's decision is unaffected.
+    expect(eligStatus(github).filter((c) => c.params.sha === HEAD).map((c) => c.params.state)).toEqual(['success']);
+    expect(eligStatus(github).filter((c) => c.params.sha === MOVED).map((c) => c.params.state)).toEqual(['failure']);
     expect(revokedStatus(github).map((c) => c.params.sha)).toEqual([MOVED]);
   });
   it('R3: approval with an evidence link on line 2 ⇒ success', async () => {
