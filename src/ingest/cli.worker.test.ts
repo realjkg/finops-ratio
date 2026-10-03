@@ -1,7 +1,9 @@
 // Worker commands of the CLI that need no database: argument validation,
 // environment gates that must refuse BEFORE connecting, and leak checks.
 import { describe, expect, it } from 'vitest';
+import { EventEmitter } from 'events';
 import { main } from './cli';
+import { installProcessGuards } from './workerCli';
 
 function capture() {
   const out: string[] = [];
@@ -108,3 +110,30 @@ describe('worker CLI (no database)', () => {
     expect(r.code).toBe(2);
   });
 });
+
+describe('process-level guards (uncaughtException / unhandledRejection)', () => {
+  const secret = 'pw"q\\b%22x';
+  const env = { RATIO_DATABASE_URL: `postgres://worker_login:${encodeURIComponent(secret)}@127.0.0.1:1/db` };
+  for (const event of ['uncaughtException', 'unhandledRejection'] as const) {
+    it(`${event}: exactly one redacted JSON line on stderr, then exit 1`, () => {
+      const proc = Object.assign(new EventEmitter(), { exitCodes: [] as number[], exit(code: number) { this.exitCodes.push(code); } });
+      const err: string[] = [];
+      installProcessGuards(env, { out: () => undefined, err: (l) => err.push(l) }, proc);
+      proc.emit(event, Object.assign(new Error(`boom with ${secret} inside`), { code: 'XX000' }));
+      expect(err).toHaveLength(1);
+      const rec = JSON.parse(err[0]);
+      expect(rec).toMatchObject({ level: 'error', event: 'process.crash', kind: event });
+      for (const f of [secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret)]) expect(err[0]).not.toContain(f);
+      expect(proc.exitCodes).toEqual([1]);
+    });
+  }
+
+  it('a malformed RATIO_DATABASE_URL is a reported failure (exit 1, one evidence record), never a throw', async () => {
+    const out: string[] = [];
+    const code = await main(['sync', '--tenant', T, '--source', 'focus-main'], { RATIO_DATABASE_URL: 'postgres://u:p@[bad/db', RATIO_EVIDENCE_S3_BUCKET: 'ev-bucket' }, { out: (l) => out.push(l), err: () => undefined });
+    expect(code).toBe(1);
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0])).toMatchObject({ type: 'ratio.evidence', pass: false, exitCode: 1 });
+  });
+});
+

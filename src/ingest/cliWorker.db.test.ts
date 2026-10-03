@@ -252,5 +252,25 @@ describe('worker CLI (real Postgres + S3)', () => {
     const doc = await cli(['doctor', '--json'], env());
     expect((doc.record.results as { checks: Array<{ name: string; status: string }> }).checks).toContainEqual(expect.objectContaining({ name: 'migration_version', status: 'pass' }));
   });
+
+  it('K7 a password with quotes, backslashes and %22, also used as a nonexistent DB name, never reaches stdout, stderr or the evidence record', async () => {
+    const secret = 'pw"q\\b%22x';
+    const u = new URL(t.login.url);
+    u.password = encodeURIComponent(secret);
+    u.pathname = '/' + encodeURIComponent(secret);
+    const forms = [secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret), JSON.stringify(encodeURIComponent(secret)).slice(1, -1), 'pw\\"q'];
+    const T = '11111111-1111-4111-8111-111111111111';
+    for (const argv of [
+      ['sync', '--tenant', T, '--source', 'focus-main'],
+      ['doctor', '--json', '--tenant', T],
+      ['quarantine', 'show', '--tenant', T, '--batch', T, '--json'],
+    ]) {
+      const r = await cli(argv, env({ RATIO_DATABASE_URL: u.toString(), RATIO_MIGRATE_DATABASE_URL: u.toString() }));
+      expect(r.code, argv[0]).toBe(1);
+      expect(r.out, argv[0]).toHaveLength(1);
+      const printed = r.out.concat(r.err).join('\n');
+      for (const f of forms) expect(printed, `${argv[0]} leaks ${f}`).not.toContain(f);
+    }
+  });
 });
 

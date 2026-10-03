@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_REDACTED_LENGTH, redact, secretsFromEnv } from './redact';
+import { MAX_REDACTED_LENGTH, jsonLineRedactorFor, redact, secretsFromEnv } from './redact';
 
 describe('redact', () => {
   const cases: Array<[string, string, RegExp]> = [
@@ -55,3 +55,37 @@ describe('redact', () => {
     expect(s).not.toContain('not-a-secret');
   });
 });
+
+// Slice 0 round 6 pattern: redact every string BEFORE serialization (escaping a
+// quote or backslash must not hide a secret from the redactor), then a literal
+// backstop over the serialized text.
+describe('jsonLineRedactorFor (redact before serialize)', () => {
+  const secret = 'pw"q\\b%22x';
+  const url = `postgres://worker_login:${encodeURIComponent(secret)}@127.0.0.1:5432/${encodeURIComponent(secret)}`;
+  const forms = (s: string) => {
+    const dec = (() => {
+      try {
+        return decodeURIComponent(s);
+      } catch {
+        return s;
+      }
+    })();
+    return [s, dec, encodeURIComponent(s), JSON.stringify(s).slice(1, -1), JSON.stringify(dec).slice(1, -1), JSON.stringify(encodeURIComponent(s)).slice(1, -1)];
+  };
+
+  it('no form of a quoted/backslashed/%22 password survives in a serialized line (values, keys, nested Errors)', () => {
+    const line = jsonLineRedactorFor({ RATIO_DATABASE_URL: url });
+    const err = Object.assign(new Error(`database "${secret}" does not exist`), { code: '3D000', cause: new Error(`inner ${secret}`) });
+    const text = line({ message: `database "${secret}" does not exist`, nested: { [secret]: [secret, encodeURIComponent(secret)] }, err });
+    expect(() => JSON.parse(text)).not.toThrow();
+    for (const f of forms(secret)) expect(text, f).not.toContain(f);
+    expect(text).toContain('[redacted]');
+  });
+
+  it('the serialized-text backstop never truncates long output', () => {
+    const line = jsonLineRedactorFor({});
+    const value = { rows: Array.from({ length: 500 }, (_, i) => `row-${i}-${'x'.repeat(20)}`) };
+    expect(JSON.parse(line(value))).toEqual(value);
+  });
+});
+
