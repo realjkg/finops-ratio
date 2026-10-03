@@ -145,6 +145,108 @@ function redactPem(text: string): string {
 }
 
 /**
+ * URL tokens — one bounded, LINEAR forward scan instead of length-capped
+ * regexes (a 2,048-char userinfo cap let `https://user:<3,000 chars>@host`
+ * through; a query matcher that stopped at quotes left `?foo="SECRET"`).
+ *
+ * A token starts at `scheme://` (any scheme, any case), at its JSON-escaped
+ * form `scheme:\/\/`, or at a scheme-relative `//` that follows the start of
+ * the text, whitespace, a quote, a bracket, `=` or `,`.
+ */
+const URL_START = /([a-z][a-z0-9+.-]{0,31}:)?(\/\/|\\\/\\\/)/gi;
+const SCHEME_RELATIVE_AFTER = /[\s"'`(=,<>[{]/;
+const WS = /\s/;
+const QUOTES = '"\'`';
+
+/** Where the next URL token starts at/after `from` (or null). */
+function nextUrlStart(text: string, from: number): { start: number; authStart: number } | null {
+  URL_START.lastIndex = from;
+  for (let m = URL_START.exec(text); m; m = URL_START.exec(text)) {
+    const start = m.index;
+    if (m[1] || start === 0 || SCHEME_RELATIVE_AFTER.test(text[start - 1])) {
+      return { start, authStart: start + m[0].length };
+    }
+  }
+  return null;
+}
+
+/**
+ * (a) Userinfo: everything between `://` and the LAST `@` before the first
+ * `/ ? # \` or whitespace is replaced, however long. The scan resumes at the
+ * authority end, so a URL nested in a path is handled too.
+ */
+function redactUrlUserinfo(text: string): string {
+  let out = '';
+  let pos = 0;
+  let from = 0;
+  for (let u = nextUrlStart(text, from); u; u = nextUrlStart(text, from)) {
+    let i = u.authStart;
+    let lastAt = -1;
+    for (; i < text.length; i += 1) {
+      const c = text[i];
+      if (c === '/' || c === '?' || c === '#' || c === '\\' || WS.test(c)) break;
+      if (c === '@') lastAt = i;
+    }
+    if (lastAt !== -1) {
+      out += text.slice(pos, u.authStart) + '[REDACTED]';
+      pos = lastAt; // keep the '@'
+    }
+    from = Math.max(i, u.authStart);
+  }
+  return out + text.slice(pos);
+}
+
+/**
+ * End of a query / fragment that starts at `j`: whitespace or the end of the
+ * text — except that a quoted part ("…", '…', `…`, \"…\") belongs to the query
+ * whole, spaces included; an unterminated quote runs to the end. Every jump
+ * moves forward, so this is linear.
+ */
+function queryEnd(text: string, j: number): number {
+  while (j < text.length) {
+    const c = text[j];
+    if (WS.test(c)) return j;
+    if (QUOTES.includes(c)) {
+      const close = text.indexOf(c, j + 1);
+      j = close === -1 ? text.length : close + 1;
+    } else if (c === '\\' && text[j + 1] === '"') {
+      const close = text.indexOf('\\"', j + 2);
+      j = close === -1 ? text.length : close + 2;
+    } else {
+      j += 1;
+    }
+  }
+  return j;
+}
+
+/**
+ * (b) Query and fragment: from the first `?` or `#` after the scheme up to
+ * queryEnd() is replaced (`?[REDACTED]` / `#[REDACTED]`); scheme, host and path
+ * are kept. Over-redacting the rest of a line is acceptable; leaking is not.
+ */
+function redactUrlQueries(text: string): string {
+  let out = '';
+  let pos = 0;
+  let from = 0;
+  for (let u = nextUrlStart(text, from); u; u = nextUrlStart(text, from)) {
+    let i = u.authStart;
+    while (i < text.length && text[i] !== '?' && text[i] !== '#' && !WS.test(text[i])) i += 1;
+    if (i < text.length && (text[i] === '?' || text[i] === '#')) {
+      const end = queryEnd(text, i + 1);
+      out += text.slice(pos, i + 1) + '[REDACTED]';
+      pos = end;
+      i = end;
+    }
+    from = Math.max(i, u.authStart);
+  }
+  return out + text.slice(pos);
+}
+
+function redactUrls(text: string): string {
+  return redactUrlQueries(redactUrlUserinfo(text));
+}
+
+/**
  * Patterns, applied in order (most specific first). Each replaces the secret
  * part with a `[REDACTED…]` marker and keeps enough context to stay useful.
  * Every rule must stay LINEAR (src/costsource/transports/redactLinear.test.ts).
@@ -152,14 +254,7 @@ function redactPem(text: string): string {
 type Replacement = string | ((match: string, ...groups: string[]) => string);
 
 const RULES: Array<[RegExp, Replacement]> = [
-  // URL userinfo: scheme://user:pass@host → scheme://[REDACTED]@host. Bounded
-  // scheme / userinfo lengths: an unbounded `[a-z0-9+.-]*` re-scanned every
-  // letter/dot run from every start (quadratic on `eyJa.`, `sk-`, `http://`).
-  [/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/@"'<>]{1,2048}@/gi, '$1[REDACTED]@'],
-  // URL query strings → keep scheme/host/path only. The query part is
-  // optional, so a URL without one still matches (and is consumed once)
-  // instead of failing after scanning the rest of the text.
-  [/(\bhttps?:\/\/[^\s"'<>?#]*)(\?[^\s"'<>#]*)?/gi, (_m, base, query) => (query ? `${base}?[REDACTED]` : base)],
+  // URL userinfo / query / fragment: see redactUrls() (a linear scan, not a rule).
   // Azure storage connection-string secrets.
   [/\b(AccountKey|SharedAccessSignature)=[^;\s"'<>]+/gi, '$1=[REDACTED]'],
   // AWS SigV4 query / header credentials.
@@ -197,7 +292,7 @@ const RULES: Array<[RegExp, Replacement]> = [
  * guard test; callers use redactUpstreamText / redactErrorText.
  */
 export function applyRedactionRules(text: string): string {
-  let redacted = redactPem(text);
+  let redacted = redactUrls(redactPem(text));
   for (const [re, replacement] of RULES) {
     redacted =
       typeof replacement === 'string'
