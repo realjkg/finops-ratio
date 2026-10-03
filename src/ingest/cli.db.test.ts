@@ -210,7 +210,8 @@ describe('ingest CLI (real Postgres)', () => {
     for (const argv of [['migrate', '--status', '--json'], ['migrate', '--status'], ['migrate']]) {
       const r = await run(argv, env);
       const all = r.out.concat(r.err).join('\n');
-      expect(all, argv.join(' ')).toMatch(/ratio\.api_token/);
+      // `migrate` with nothing pending runs no check (status does); it must still never print the value.
+      if (argv.includes('--status')) expect(all, argv.join(' ')).toMatch(/ratio\.api_token/);
       expect(all, argv.join(' ')).not.toContain(marker);
     }
   });
