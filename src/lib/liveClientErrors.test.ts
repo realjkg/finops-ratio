@@ -143,3 +143,78 @@ describe('allow-list', () => {
     }
   });
 });
+
+// --- Round 6: a failed response whose BODY READ rejects -----------------------
+// fetch() resolves, but res.text() / the body stream then fails (connection
+// reset mid-body). Every client must still throw its typed
+// "<label> error <status>" error — never the raw stream error.
+
+const STREAM_MARKER = 'STREAM-MARKER socket hang up at 10.0.0.7:443';
+
+/** A real Response whose body stream errors as soon as it is read. */
+function erroringStreamResponse(status: number): Response {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.error(new Error(STREAM_MARKER));
+    },
+  });
+  return new Response(stream, { status });
+}
+
+/** A Response-like object whose text() / json() reject. */
+function rejectingBodyResponse(status: number): Response {
+  return {
+    ok: false,
+    status,
+    headers: new Headers(),
+    text: () => Promise.reject(new Error(STREAM_MARKER)),
+    json: () => Promise.reject(new Error(STREAM_MARKER)),
+  } as unknown as Response;
+}
+
+describe.each(CASES)('%s — body read rejects on a failed response', (label, call) => {
+  it.each([
+    ['erroring body stream', erroringStreamResponse],
+    ['rejecting text()', rejectingBodyResponse],
+  ] as const)('%s → typed "<label> error <status>", no stream text', async (_k, make) => {
+    for (const status of [500, 401, 403]) {
+      vi.stubGlobal('fetch', vi.fn(async () => make(status)));
+      const err = await call().then(
+        () => {
+          throw new Error('expected a rejection');
+        },
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(Error);
+      const msg = (err as Error).message;
+      expect(msg).not.toContain('STREAM-MARKER');
+      expect(msg).not.toContain('socket hang up');
+      // LiveCostSourceClient maps every 401 to its typed LiveDataAuthError
+      // without reading the body; everything else is the label + status.
+      if (!(label.startsWith('CostSource') && status === 401)) {
+        expect(msg).toBe(`${label} error ${status}`);
+      }
+    }
+  });
+});
+
+describe('FinIO handshake peer-auth with an unreadable body', () => {
+  it('a 401 whose body cannot be read is the typed FinIO HTTP error (code unknown), not a raw stream error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => rejectingBodyResponse(401)));
+    const err = await new LiveFinioClient()
+      .handshake({ agentId: 'a', capabilities: ['finio.export'], focusVersion: '1.4', nonce: 'n' })
+      .catch((e: unknown) => e as Error);
+    expect(err.message).toBe('FinIO handshake error 401');
+    expect(err.message).not.toContain('STREAM-MARKER');
+  });
+
+  it('a readable unauthorized_peer 401 is still FinioPeerAuthError', async () => {
+    const { FinioPeerAuthError } = await import('@/finio/LiveFinioClient');
+    respond(JSON.stringify({ error: { code: 'unauthorized_peer', message: 'Missing FinIO peer token' } }), 401);
+    const err = await new LiveFinioClient()
+      .handshake({ agentId: 'a', capabilities: ['finio.export'], focusVersion: '1.4', nonce: 'n' })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(FinioPeerAuthError);
+  });
+});
+

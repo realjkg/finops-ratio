@@ -172,6 +172,37 @@ describe('CM route — ITSM body never reaches the caller', () => {
   });
 });
 
+describe('server-side upstream callers: a failed response whose body stream errors (round 6 sweep pin)', () => {
+  const STREAM_MARKER = 'STREAM-MARKER socket hang up';
+  function erroringStream(status: number) {
+    return new Response(
+      new ReadableStream({
+        start(c) {
+          c.error(new Error(STREAM_MARKER));
+        },
+      }),
+      { status },
+    );
+  }
+
+  it.each([
+    ['jira', { JIRA_BASE_URL: 'https://jira.example', JIRA_API_TOKEN: 't', JIRA_PROJECT_KEY: 'OPS' }],
+    ['servicenow', { SERVICENOW_INSTANCE: 'acme', SERVICENOW_USERNAME: 'u', SERVICENOW_PASSWORD: 'p' }],
+  ] as const)('CM %s createChange → generic 500; the stream error text reaches neither caller nor log', async (provider, env) => {
+    process.env.CM_PROVIDER = provider;
+    for (const [k, v] of Object.entries(env)) process.env[k] = v;
+    vi.stubGlobal('fetch', vi.fn(async () => erroringStream(502)));
+    const { default: handler } = await import('../../../pages/api/v1/cm/change');
+    const res = makeRes();
+    await handler(post(CM_CREATE), res as unknown as NextApiResponse);
+    expect(res.statusCode).toBe(500);
+    expect(errorMessage(res.body)).toBe('Internal error');
+    expect(JSON.stringify(res.body)).not.toContain('STREAM-MARKER');
+    expect(errorLog()).toContain('createChange failed (502');
+    expect(errorLog()).not.toContain('STREAM-MARKER');
+  });
+});
+
 describe('fetchChecked network-failure wrap is redacted', () => {
   it('strips tokens / query strings from the runtime error text', async () => {
     const fetchImpl = vi.fn(async () => {
