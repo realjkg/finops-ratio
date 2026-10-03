@@ -5,6 +5,7 @@
 import { classify } from './classify-risk.mjs';
 import {
   decideEligibility, decideMergeStatus, evaluateExceptionApproval, parseExceptionCommand, outsiderReason, isApproverRole,
+  isGovernanceCandidateRun,
   DEFAULT_CONFIG, ELIGIBILITY_CONTEXT, REVOKED_CONTEXT, ACTIONS_BOT_LOGIN,
 } from './eligibility.mjs';
 import { REPORT_MARKER, buildReport, desiredLabels, labelChanges } from './report.mjs';
@@ -295,7 +296,12 @@ export function eventCommentFor(payload, number) {
   return undefined;
 }
 
-export async function gatherState(github, repo, number, { eventComment } = {}) {
+/** Per-sweep memo for workflow-run lookups (never fetch the same thing twice). */
+export function newLookupCache() {
+  return { prtByHead: new Map(), suites: new Map() };
+}
+
+export async function gatherState(github, repo, number, { eventComment, core, cache = newLookupCache() } = {}) {
   const { data: pr } = await github.rest.pulls.get({ ...repo, pull_number: number });
   const headSha = pr.head.sha;
   const changeSet = await attachModes(github, repo, headSha, await fetchChangeSet(github, repo, pr));
@@ -306,7 +312,52 @@ export async function gatherState(github, repo, number, { eventComment } = {}) {
   const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
     ...repo, head_sha: headSha, event: 'pull_request', per_page: 100,
   });
-  const pathBySuite = new Map(runs.map((r) => [r.check_suite_id, r.path]));
+  // Resolve check-run suites to their workflow run (path, event, head
+  // repository) ONLY where it matters: suites holding a GitHub Actions run with
+  // one of our governance job names (the only runs that can ever be excluded or
+  // count as our classification). Every other suite stays unresolved without an
+  // API call, which is safe: unresolved ⇒ ordinary check (fail closed).
+  // Budget per head: one head_sha pull_request_target listing, then a
+  // check_suite_id lookup only for candidates still unresolved; both memoised
+  // in `cache` for the whole sweep.
+  const runMeta = (r) => ({ path: r.path, event: r.event, headRepo: r.head_repository?.full_name });
+  const suiteMeta = new Map(runs.map((r) => [r.check_suite_id, runMeta(r)]));
+  const candidates = [...new Set(checkRuns
+    .filter((c) => c.check_suite?.id != null && isGovernanceCandidateRun({ name: c.name, appId: c.app?.id }))
+    .map((c) => c.check_suite.id))]
+    .filter((id) => !suiteMeta.has(id));
+  if (candidates.length) {
+    if (!cache.prtByHead.has(headSha)) {
+      let listed = null;
+      try {
+        listed = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+          ...repo, head_sha: headSha, event: 'pull_request_target', per_page: 100,
+        });
+      } catch (e) {
+        core?.warning(`Could not list pull_request_target workflow runs for ${headSha.slice(0, 7)} (${e.status ? `HTTP ${e.status}` : e.message}); falling back to per-suite lookups.`);
+      }
+      cache.prtByHead.set(headSha, listed);
+    }
+    for (const r of cache.prtByHead.get(headSha) ?? []) {
+      if (!suiteMeta.has(r.check_suite_id)) suiteMeta.set(r.check_suite_id, runMeta(r));
+    }
+    for (const suiteId of candidates.filter((id) => !suiteMeta.has(id))) {
+      if (!cache.suites.has(suiteId)) {
+        let meta = null;
+        try {
+          const found = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, { ...repo, check_suite_id: suiteId, per_page: 100 });
+          const run = found.find((r) => r.check_suite_id === suiteId);
+          if (run) meta = runMeta(run);
+        } catch (e) {
+          // Unresolved ⇒ its check runs stay ordinary checks (fail closed).
+          core?.warning(`Could not resolve check suite ${suiteId} to its workflow run (${e.status ? `HTTP ${e.status}` : e.message}); its check runs are treated as ordinary checks.`);
+        }
+        cache.suites.set(suiteId, meta);
+      }
+      const meta = cache.suites.get(suiteId);
+      if (meta) suiteMeta.set(suiteId, meta);
+    }
+  }
   const ciPath = DEFAULT_CONFIG.ciCheck.workflowPath;
   // Only runs listing THIS PR against main count, and EVERY such run must have
   // a successful CI job on its latest attempt: a run triggered by another PR
@@ -393,7 +444,9 @@ export async function gatherState(github, repo, number, { eventComment } = {}) {
         status: c.status,
         conclusion: c.conclusion,
         appId: c.app?.id,
-        workflowPath: pathBySuite.get(c.check_suite?.id),
+        workflowPath: suiteMeta.get(c.check_suite?.id)?.path,
+        workflowEvent: suiteMeta.get(c.check_suite?.id)?.event,
+        workflowHeadRepo: suiteMeta.get(c.check_suite?.id)?.headRepo,
       })),
       statuses: (combined.statuses ?? []).map((s) => ({ context: s.context, state: s.state })),
       ciJobs,
@@ -523,10 +576,13 @@ export async function runEligibility({ github, context, core, numbers }) {
   const targets = numbers ?? (await candidatePrNumbers(github, context));
   const rows = [];
   let errors = 0;
+  const cache = newLookupCache(); // one memo for the whole sweep
   for (const number of targets) {
     try {
       const { raw, latest, fresh, moved, state, headStatuses } = await gatherState(github, repo, number, {
         eventComment: eventCommentFor(context.payload, number),
+        core,
+        cache,
       });
       if (moved) {
         // Apply an ineligible decision first (never leave auto-merge armed on a

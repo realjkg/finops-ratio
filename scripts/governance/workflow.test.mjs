@@ -14,6 +14,14 @@ describe('governance.yml', () => {
     for (const u of uses) expect(u, u).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
   });
 
+  it('L1: the header does not claim workflow_dispatch runs base-branch scripts', () => {
+    expect(wf).not.toMatch(/The workflow definition and the scripts it\s*\n?#?\s*runs always come from the BASE branch/);
+    expect(wf).toMatch(/workflow_dispatch runs the dispatched ref/);
+    // Checkout comments must not claim every trigger resolves to the base branch.
+    expect(wf).not.toMatch(/every trigger here resolves github\.sha on the base/);
+    expect(wf).toMatch(/workflow_dispatch checks out the\s*\n\s*#\s*dispatched ref/);
+  });
+
   it('only uses base-context triggers (no PR-head-controlled workflow)', () => {
     expect(code).toMatch(/^\s{2}pull_request_target:/m);
     expect(code).not.toMatch(/^\s{2}pull_request:/m);

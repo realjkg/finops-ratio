@@ -3,11 +3,13 @@
 # Governance track: PR risk classification + merge eligibility.
 #
 # Security model
-# - Runs ONLY on base-context events (pull_request_target, workflow_run,
-#   schedule, workflow_dispatch). The workflow definition and the scripts it
-#   runs always come from the BASE branch; PR code is never checked out or
-#   executed. The PR's file list and patches are read through the API. A PR
-#   that edits this file or scripts/governance/** is itself restricted.
+# - Triggers: pull_request_target, issue_comment, workflow_run and schedule
+#   run the workflow definition and scripts from the BASE/default branch; PR
+#   code is never checked out or executed (the PR's file list and patches are
+#   read through the API). workflow_dispatch runs the dispatched ref's code
+#   (only users with write access can dispatch), so its runs are never treated
+#   as this workflow's own check runs by the eligibility decision. A PR that
+#   edits this file or scripts/governance/** is itself restricted.
 # - Fork PRs are classified (labels + report) but are NEVER auto-merge eligible,
 #   nor are PRs by authors outside OWNER/MEMBER/COLLABORATOR.
 # - `pull_request_review` is deliberately NOT used: it runs the PR head's copy
@@ -92,7 +94,9 @@ jobs:
     steps:
       - name: Checkout governance scripts from the base/default branch (never the PR head)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        # No `ref`: every trigger here resolves github.sha on the base/default branch.
+        # No `ref`: pull_request_target, issue_comment, workflow_run and schedule resolve
+        # github.sha on the base/default branch. workflow_dispatch checks out the
+        # dispatched ref, which is why dispatch runs never count as the gate's own.
         with:
           persist-credentials: false
           sparse-checkout: scripts/governance
@@ -134,7 +138,9 @@ jobs:
     steps:
       - name: Checkout governance scripts from the base/default branch (never the PR head)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        # No `ref`: every trigger here resolves github.sha on the base/default branch.
+        # No `ref`: pull_request_target, issue_comment, workflow_run and schedule resolve
+        # github.sha on the base/default branch. workflow_dispatch checks out the
+        # dispatched ref, which is why dispatch runs never count as the gate's own.
         with:
           persist-credentials: false
           sparse-checkout: scripts/governance
