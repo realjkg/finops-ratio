@@ -73,11 +73,25 @@ jobs:
           npm run test      & PID_TEST=$!
           wait $PID_LINT && wait $PID_TYPE && wait $PID_TEST
 
+      # PostgreSQL 16 client tools for the pg_dump -> restore round-trip test
+      # (foundation.db.test.ts). Pinned by path; installed if the runner image
+      # lacks them. The test itself fails (never skips) if they are missing or
+      # not version 16.
+      - name: PostgreSQL 16 client tools
+        run: |
+          if [ ! -x /usr/lib/postgresql/16/bin/pg_dump ] || [ ! -x /usr/lib/postgresql/16/bin/psql ]; then
+            sudo apt-get update && sudo apt-get install -y postgresql-client-16
+          fi
+          /usr/lib/postgresql/16/bin/pg_dump --version
+          /usr/lib/postgresql/16/bin/psql --version
+
       # DB integration suite. `npm run test:db` FAILS (never skips) if the
       # URL is missing, so this step cannot go green without running.
       - name: DB tests (Postgres 16)
         env:
           RATIO_TEST_DATABASE_URL: postgres://postgres@localhost:5432/postgres
+          RATIO_PG_DUMP: /usr/lib/postgresql/16/bin/pg_dump
+          RATIO_PSQL: /usr/lib/postgresql/16/bin/psql
         run: npm run test:db
 
       # Production worker build + migration up/status/down/up smoke test on a
