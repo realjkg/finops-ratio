@@ -99,21 +99,55 @@ function literalParts(secrets: readonly string[]): readonly string[] {
   return parts;
 }
 
+/** KMP failure tables, one per literal list (parallel to literalParts), built once. */
+const failureTables = new WeakMap<readonly string[], Int32Array[]>();
+function failureTablesOf(parts: readonly string[]): Int32Array[] {
+  let tables = failureTables.get(parts);
+  if (tables === undefined) {
+    tables = parts.map((p) => {
+      const fail = new Int32Array(p.length);
+      for (let i = 1, k = 0; i < p.length; i++) {
+        while (k > 0 && p.charCodeAt(i) !== p.charCodeAt(k)) k = fail[k - 1];
+        if (p.charCodeAt(i) === p.charCodeAt(k)) k++;
+        fail[i] = k;
+      }
+      return fail;
+    });
+    failureTables.set(parts, tables);
+  }
+  return tables;
+}
+
 /**
  * The maximal runs of `text` covered by ANY occurrence of ANY secret —
  * overlapping occurrences of distinct secrets and of the same secret
  * included. A single leftmost alternation would consume one match and leave
  * the rest of an overlapping secret behind ('admin;x' + 'x;secret;pw' on
- * 'admin;x;secret;pw'). Every indexOf hit goes into a difference array, so
- * this stays linear in text length x number of secrets.
+ * 'admin;x;secret;pw'). Occurrences are found with KMP per form — O(n + m),
+ * also for a long self-similar secret where every position starts an
+ * occurrence (an indexOf(p, i + 1) loop is O(n * m) there) — after a native
+ * indexOf has found the first one (most texts contain none). Every occurrence
+ * goes into a difference array: linear in text length x number of forms.
  */
 function coveredRuns(text: string, parts: readonly string[]): Array<[number, number]> {
   let diff: Int32Array | null = null;
-  for (const p of parts) {
-    for (let i = text.indexOf(p); i !== -1; i = text.indexOf(p, i + 1)) {
-      if (!diff) diff = new Int32Array(text.length + 1);
-      diff[i] += 1;
-      diff[i + p.length] -= 1;
+  const tables = failureTablesOf(parts);
+  for (let f = 0; f < parts.length; f++) {
+    const p = parts[f];
+    const first = text.indexOf(p);
+    if (first === -1) continue;
+    if (!diff) diff = new Int32Array(text.length + 1);
+    const fail = tables[f];
+    const m = p.length;
+    for (let i = first, k = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i);
+      while (k > 0 && c !== p.charCodeAt(k)) k = fail[k - 1];
+      if (c === p.charCodeAt(k)) k++;
+      if (k === m) {
+        diff[i - m + 1] += 1;
+        diff[i + 1] -= 1;
+        k = fail[k - 1]; // keep overlapping occurrences
+      }
     }
   }
   if (!diff) return [];
