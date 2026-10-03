@@ -301,3 +301,42 @@ describe('/api/v1/ai/chat — OpenAI-compatible providers', () => {
     expect(JSON.stringify(res.body)).not.toContain('LEAKED');
   });
 });
+
+// ---------------------------------------------------------------------------
+// SDK adapters (Claude / OpenAI): provider error bodies never reach the caller.
+// ---------------------------------------------------------------------------
+
+describe('/api/v1/ai/chat — SDK provider errors carry status only', () => {
+  const AUTH = { authorization: 'Bearer secret' };
+  const MARKER = 'UPSTREAM-BODY-MARKER';
+
+  function stub401() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: `${MARKER} bad key` } }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+  }
+
+  it.each([
+    ['claude', 'ANTHROPIC_API_KEY'],
+    ['openai', 'OPENAI_API_KEY'],
+  ])('%s: a 401 from the provider returns "<provider> error 401 (unauthorized)" without the body', async (provider, keyEnv) => {
+    process.env.RATIO_API_TOKEN = 'secret';
+    process.env.AI_PROVIDER = provider;
+    process.env[keyEnv] = 'sk-test-key';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stub401();
+    const res = makeRes();
+    await handler(makeReq({ headers: AUTH, body: validBody }), res);
+    expect(res.statusCode).toBe(500);
+    const text = JSON.stringify(res.body);
+    expect(text).not.toContain(MARKER);
+    expect(text).toContain(`${provider} error 401 (unauthorized)`);
+    warn.mockRestore();
+  });
+});
