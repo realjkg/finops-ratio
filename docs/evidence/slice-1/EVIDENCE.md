@@ -111,7 +111,13 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 92 | fffe3f1 | docs: evidence for the fixture orphan and PR #54 findings (§25), skill notes | docs |
 | 93 | b5299a9 | test: an un-keyed RECONCILIATION_VARIANCE quarantine stays quarantined (red) | tests |
 | 94 | 90101c5 | fix: no legacy branch for un-keyed control quarantines (challenger Low 1) | impl |
-| 95 | (final) | docs: evidence for this round (§26) | docs |
+| 95 | 04504d5 | docs: evidence for challenger Low 1 (§26) | docs |
+| 96 | e630523 | test: PR #54 second review H1, M1-M5 (red: DB 7, fast 2) | tests |
+| 97 | 3a95994 | test: H1, a failure finish on an expired lease is LEASE_LOST (runSync run-level, replay --batch) (red: 2) | tests |
+| 98 | d3f6eef | fix: finishRun fenced on expiry + LEASE_LOST everywhere (H1), re-listed manifest captured (M1), abortable listing (M3), captured-bytes cap (M4), per-artifact control check (M5) | impl |
+| 99 | 13bcaea | test: serial-login guard flags IN ROLE / IN GROUP / ROLE / ADMIN / USER targets (M2) | tests (guard) |
+| 100 | b5bba2b | test: M3 with a real SDK client and a real CLI process; between-page abort | tests |
+| 101 | (final) | docs: evidence for this round (§27) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -1805,4 +1811,64 @@ Lows 2 and 3 are left for the follow-up issue, as agreed.
 - the fail-not-skip checks both exit 1;
 - leftovers 0;
 - `.skip`-style grep 0.
+
+## 27. PR #54 second Copilot review (fffe3f1): H1, M1-M5
+
+All DB runs used the private cluster (127.0.0.1:55600). The work sits on
+top of 04504d5 (challenger Low 1), which goes out in the same push.
+
+| Finding | Verified? | Fix (`d3f6eef`, guard `13bcaea`) | Test (red first unless noted) | Mutation(s) killed |
+|---|---|---|---|---|
+| **H1** `finishRun` not fenced on lease expiry | real: an expired run could still finish itself (failed or succeeded) | `AND lease_expires_at > clock_timestamp()` in `finishRun`. A `false` finish is `LEASE_LOST` in every path: the listing-failure finish, runSync's success finish, its run-level failure finish and replay `--batch`'s failure finish. A finish that cannot reach the DB still surfaces the original error | `reviewFindings2.db.test.ts`: the lease expires during an empty listing and during a failing listing (`e630523`). The lease expires during the listing and the checkpoint read then hits a failed connection (runSync run-level path). Replay `--batch`: the lease expires and a publish step fails (`3a95994`). Each test expects `LEASE_LOST`, the run row still `running`, and the next acquisition marks it `abandoned` / `LEASE_EXPIRED` (runSync cases: the next sync succeeds) | H1a (no expiry fence) fails all 4. H1b, H1c and H1d (each `false` finish ignored) each fail their path's test |
+| **M1** the re-listed manifest is not evidence | real: after `SOURCE_CHANGED` the batch was built from manifest B, but only A was captured | B is captured (`captureManifest`) and added to `manifestEvidence` before the batch is built from it. This also covers a re-listed period that is now invalid | fake versioned source with real manifest bytes: data **and** manifest replaced after the first listing. Expects A and B in `manifestEvidence`, B's evidence bytes carrying the control `{rowCount: 3}`, and published totals of 3 rows / `3.00`. **X6** (SeaweedFS) is extended the same way: manifest B with an `x-ratio-control` replaces A, and the run must reconcile, with B's evidence equal to B's bytes | M1 fails both the fake test and X6 |
+| **M2** guard: IN ROLE / IN GROUP / ROLE / ADMIN targets | real: `CREATE ROLE x LOGIN IN ROLE pg_read_server_files` passed the static rule | `sqlProblems` checks every `IN ROLE`, `IN GROUP`, `ROLE`, `ADMIN` and `USER` list in CREATE/ALTER ROLE/USER. Any name other than `ratio_worker` / `ratio_reader` (quoted or not, including a dynamic name) is flagged | 6 self-test cases (`IN ROLE pg_read_server_files`, `IN GROUP pg_write_server_files`, `IN ROLE ratio_worker, pg_signal_backend`, `ROLE ratio_owner`, `ADMIN postgres`, `CREATE USER … IN ROLE ratio_owner`). The ok cases (`IN ROLE ratio_reader`, `IN DATABASE`) stay clean, and no current DB test file is flagged | M2 (no target check) fails the self-test |
+| **M3** `MAX_RUN_SECONDS` does not bound the listing | real: the deadline aborted only the period work, so an endlessly paginating listing never returned | `FocusSource.listPeriods(range, { signal })`. The pipeline passes the run's abort signal to the listing and the re-list. The S3 source passes it to every request (`send(cmd, { abortSignal })`, which tears down the in-flight request) and checks it between pages and in its catch blocks (the reason, `MAX_RUN_EXCEEDED`, wins). The fake honours it | `reviewFindings2`: an endlessly paginating fake must fail `MAX_RUN_EXCEEDED` in under 10 s, with no pages after the run returns (red). `S3FocusExportSource.test.ts`: every request carries the signal and none is sent after the abort (red). Added after the fix (`b5bba2b`), against a local HTTP endpoint that is always truncated: (a) in-process with a real AWS SDK client, the request in flight at the deadline is never answered and must be **closed by the client**, the run fails `MAX_RUN_EXCEEDED` and nothing is sent afterwards; (b) the **worker CLI as an OS process** with `RATIO_MAX_RUN_SECONDS=60` (its configured floor, not lowered for tests) must fail `MAX_RUN_EXCEEDED` and **exit on its own** (exit 1, between 59 s and 100 s; the test timeout is 120 s), with no requests after the exit; (c) a transport that ignores the signal is still stopped by the check between pages | M3a (pipeline passes no signal) fails the fake test, (a) and (b). M3b (no `abortSignal`) fails the fake-client test and (a), the real SDK. M3c (no between-page check) survived the first tests (an abortable transport ends the loop by itself), so (c) was added and kills it. See `mutations27.txt` and `mutations27b.txt` |
+| **M4** `maxBatchBytes` checked on listed sizes only | real: a source under-reporting sizes could stage more than the cap | each capture is capped at `min(maxArtifactBytes, maxBatchBytes − captured so far)`. Overrunning the remaining allowance is `ARTIFACT_SET_TOO_LARGE`; an artifact over `maxArtifactBytes` on its own stays `ARTIFACT_TOO_LARGE` | listing reports 1 byte per artifact, and the cap is 75 % of A+B (each fits alone). Expects the period `failed` with `ARTIFACT_SET_TOO_LARGE`, no batch and nothing published | M4 (cap = `maxArtifactBytes`) fails |
+| **M5** "unchanged" ignores per-artifact control counts | real: swapping two artifacts' counts kept the set total and returned `unchanged` | `controlDisagrees` also compares every `artifactRowCounts` entry with the stored `ingest_artifacts.row_count` of the existing batch (for both the published and the superseded match) | counts `a:2, b:3` published, then `a:3, b:2` with the same data and total 5. The outcome must not be `unchanged`; expects `failed` with `CONTROL_VARIANCE_ON_UNCHANGED`, the published batch untouched and totals unchanged | M5 (per-artifact counts ignored) fails |
+
+**M5 deviates from the instruction.** The coordinator asked for the changed
+control to "re-reconcile and quarantine". Instead it fails the period with
+`CONTROL_VARIANCE_ON_UNCHANGED` and leaves the published batch untouched,
+exactly as the existing set-level check already treats changed set totals on
+unchanged data. Re-reconciling would mean creating a second batch of the
+same data keyed on the controls and then quarantining it, which is the
+quarantine-recovery mechanism (§25 M2) applied to a published batch. That
+is a behaviour change for the set-level case too. It is available if
+wanted: the alternative is to route a control mismatch on a
+published/superseded match into a control-keyed batch
+(`sha256(data fingerprint, control key)`), which reconcile() would then
+quarantine as `RECONCILIATION_VARIANCE [controls:<key>]`.
+
+**H1 goes beyond the two named paths.** The coordinator asked for LEASE_LOST
+"everywhere". Besides the listing-failure finish, two more failure finishes
+rethrew the original error when the finish matched no row: runSync's
+run-level catch and replay `--batch`'s catch. Both are now LEASE_LOST, with
+their own red tests (`3a95994`). The success finishes of runSync and replay
+were already LEASE_LOST, and with the expiry fence they now also cover
+expiry.
+
+### Gates at b5bba2b
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 4.5–7.0) | **3/3**, 89 files / 2023 passed each |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 29 files / 426 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (4 files fail at collection, 404 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at b5bba2b, private cluster, database
+`ratio_s1_e2e_0397dd8b`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
 

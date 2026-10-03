@@ -227,3 +227,21 @@ PERIOD_NOT_FOUND, control-quarantine recovery, replay pin of the current
 batch, replay LEASE_LOST after a takeover). Spawn cleanup also covers an
 interrupted nested run (process group + env-marker reaping).
 
+PR #54 second review: `worker/reviewFindings2.db.test.ts`:
+- H1: an expired lease is never finished; LEASE_LOST on the listing,
+  run-level and replay failure finishes; the next acquisition abandons the
+  run.
+- M1: the re-listed manifest is evidence.
+- M3: an endless listing stops at MAX_RUN_SECONDS.
+- M4: the batch cap applies to captured bytes.
+- M5: per-artifact control counts are part of the unchanged check.
+
+`worker/maxRunListing.db.test.ts`, against an always-truncated HTTP
+endpoint:
+- a real SDK client tears down the in-flight request;
+- the CLI process exits at RATIO_MAX_RUN_SECONDS.
+
+`S3FocusExportSource.test.ts`: the abort signal on every request, and the
+abort check between pages. X6 covers the re-listed manifest on SeaweedFS.
+`serialLogins.test.ts` covers membership-clause targets.
+
