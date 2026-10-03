@@ -2,8 +2,8 @@
 // strings, Bearer tokens, SAS parameters, and AWS access key ids, then
 // truncates to 300 characters.
 
-import { describe, expect, it } from 'vitest';
-import { redactUpstreamText } from './redact';
+import { describe, expect, it, vi } from 'vitest';
+import { logUpstreamError, redactUpstreamText } from './redact';
 
 describe('redactUpstreamText', () => {
   it('strips URL query strings', () => {
@@ -115,3 +115,76 @@ describe('redactUpstreamText', () => {
     expect(best).toBeLessThan(50);
   });
 });
+
+// --- Round 5: backslash-escaped quotes, backticks, mixed-case env keys ------
+
+describe('backslash-escaped quote delimiters (JSON-in-a-string bodies)', () => {
+  it.each([
+    ['escaped-quote value inside a JSON string', String.raw`"detail":"password=\"hunter2 secret words\""`],
+    ['env-style escaped-quote value', String.raw`RATIO_API_TOKEN=\"env secret words\"`],
+    ['inner escaped quote inside an escaped value', String.raw`token=\"a\\\"b secret\"`],
+    ['dangling escaped quote runs to the end', String.raw`pwd=\"dangling secret words`],
+    ['double-encoded JSON', String.raw`{\"password\":\"double encoded secret\"}`],
+    ['double-encoded env JSON', String.raw`{\"JIRA_API_TOKEN\": \"double env secret\", \"user\": \"bob\"}`],
+    ['backtick-quoted value', 'password=`backtick secret words`'],
+    ['backtick env value', 'SERVICENOW_PASSWORD=`backtick env secret`'],
+  ])('%s', (_label, input) => {
+    const out = redactUpstreamText(input);
+    expect(out).not.toMatch(/hunter2|secret words|env secret|b secret|double encoded|double env|backtick (env )?secret/);
+    expect(out).toContain('[REDACTED]');
+  });
+
+  it('double-encoded JSON keeps the neighbouring non-secret fields', () => {
+    const out = redactUpstreamText(String.raw`{\"password\":\"x-secret\",\"user\":\"bob\"}`);
+    expect(out).not.toContain('x-secret');
+    expect(out).toContain(String.raw`\"user\":\"bob\"`);
+  });
+
+  it('live-style: a Jira 500 body logged through logUpstreamError never carries the secret', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const body = String.raw`{"errorMessages":["bad"],"detail":"password=\"hunter2 secret words\" RATIO_API_TOKEN=\"env secret words\" {\"password\":\"double encoded secret\"}"}`;
+      logUpstreamError('Jira createChange', 500, body);
+      const line = String(warn.mock.calls[0][0]);
+      expect(line).not.toMatch(/hunter2|secret words|double encoded/);
+      expect((JSON.parse(line) as { body: string }).body).toContain('[REDACTED]');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe('mixed-case env keys (decision: redact when the key starts with an upper-case letter)', () => {
+  it.each(['Db_Password=s3cretMixed', 'Jira_Api_Token: s3cretMixed2', '{"Db_Password":"s3cretMixed3"}'])(
+    'redacts %j',
+    (input) => {
+      const out = redactUpstreamText(input);
+      expect(out).not.toContain('s3cret');
+      expect(out).toContain('[REDACTED]');
+    },
+  );
+
+  it.each(['has_password=true', 'cost_per_token: 0.002', 'is_secret: false', '{"team_token":"blue"}'])(
+    'still leaves lower-case snake_case %j alone',
+    (input) => {
+      expect(redactUpstreamText(input)).toBe(input);
+    },
+  );
+});
+
+describe('input cap', () => {
+  it('a secret straddling the 16 KB redaction cap is never emitted half-redacted', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXNlY3JldA';
+    for (let pad = 16_330; pad <= 16_384; pad += 3) {
+      const input = '-----BEGIN PRIVATE KEY-----\n' + 'Q'.repeat(pad - 60) + '\n-----END PRIVATE KEY----- ' + 'x'.repeat(40) + ' ' + jwt + ' tail';
+      const out = redactUpstreamText(input, Number.POSITIVE_INFINITY);
+      expect(out).not.toContain('eyJhbGci');
+      expect(out).not.toContain('c2lnbmF0');
+    }
+  });
+
+  it('output is still truncated to maxChars', () => {
+    expect(redactUpstreamText('y'.repeat(100_000), 300).length).toBeLessThanOrEqual(300);
+  });
+});
+
