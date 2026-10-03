@@ -28,6 +28,8 @@ export interface ListingEntry {
 
 const EXPORT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const SEGMENT_RE = /^[A-Za-z0-9!_.*'()=-]+$/;
+/** ingest_artifacts.artifact_name CHECK (length <= 1024), applied to the stored (redacted) name. */
+const MAX_STORED_NAME_CHARS = 1024;
 
 export function validateLocation(config: unknown): ExportLocation {
   const bad = (m: string): never => {
@@ -163,6 +165,9 @@ export function parseManifest(
     const name = key.slice(base.length);
     const segs = name.split('/');
     if (segs.some((s) => s === '' || s === '.' || s === '..' || !SEGMENT_RE.test(s))) return invalid(`dataFiles[${i}] has an invalid path segment`);
+    // The name is STORED redacted (ingest_artifacts.artifact_name = redact(name), CHECK
+    // length <= 1024 characters): bound the stored form, before any evidence is written (review M2, third round).
+    if ([...redact(name)].length > MAX_STORED_NAME_CHARS) return invalid(`dataFiles[${i}] has a name longer than ${MAX_STORED_NAME_CHARS} characters (as stored)`);
     if (seen.has(key)) return invalid(`dataFiles[${i}] is listed twice`);
     seen.add(key);
     const listed = ctx.listing.get(key);
