@@ -362,7 +362,8 @@ async function roleViolations(client: ClientBase): Promise<string[]> {
   // itself; the predefined roles in REFUSED_PREDEFINED_ROLES act outside (or
   // across) the per-object ACLs (round 16: server files/programs; round 17:
   // pg_read/write_all_data, pg_signal_backend, pg_create_subscription;
-  // round 18: pg_monitor, pg_read_all_stats, pg_read_all_settings).
+  // round 18: pg_monitor, pg_read_all_stats, pg_read_all_settings,
+  // pg_stat_scan_tables).
   const reach = await client.query<{
     member: string;
     parent: string;
@@ -428,6 +429,7 @@ export const REFUSED_PREDEFINED_ROLES: Readonly<Record<string, string>> = {
   pg_monitor: "reads every session's statements and every setting",
   pg_read_all_stats: "reads every session's statement text (pg_stat_activity.query)",
   pg_read_all_settings: 'reads every setting, including superuser-only ones',
+  pg_stat_scan_tables: 'runs monitoring functions that take ACCESS SHARE locks on any table',
 };
 
 /**
