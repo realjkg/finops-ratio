@@ -18,7 +18,7 @@ import { isAtLeast } from './focusVersions';
 import type { FocusCoreV10, RawSourceRow } from './focusRows';
 import { pointFiveLiveDescriptor, resolvePointFiveStatus } from './pointfiveConfig';
 import { connectorDescriptor, resolveConnectorStatus } from './connectorConfig';
-import { FOCUS_EXPORT_CONNECTOR_SPECS } from './focusExportConnectors';
+import { focusExportConnectorSpecsForEnv } from './focusExportConnectors';
 
 const RESOURCE_PREFIX = 'arn:ratio:workload/';
 
@@ -79,7 +79,7 @@ export function sourcesForEnv(env: Record<string, string | undefined>): CostSour
     // its env via the generic resolver, so `configured` honestly reflects whether
     // the connector is live. No env set → `available` (no network calls); the
     // server resolves real status, which /api/costsource/sources reports.
-    ...FOCUS_EXPORT_CONNECTOR_SPECS.map((spec) =>
+    ...focusExportConnectorSpecsForEnv(env).map((spec) =>
       connectorDescriptor(spec, resolveConnectorStatus(spec, env)),
     ),
   ];
