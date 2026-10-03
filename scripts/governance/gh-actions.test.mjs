@@ -289,11 +289,14 @@ describe('runEligibility', () => {
     expect(core.failed).toBeNull();
   });
 
-  it('explicit PR numbers (matrix leg) are evaluated without listing PRs', async () => {
+  it('explicit PR numbers (matrix leg) are evaluated without enumerating sweep targets', async () => {
     const { github } = fakeGithub();
     const rows = await runEligibility({ github, core: fakeCore(), context: { repo: REPO, payload: {} }, numbers: [5] });
     expect(rows.map((r) => r.number)).toEqual([5]);
-    expect(names(github.calls)).not.toContain('pulls.list');
+    // The only PR listing allowed is the L1 shared-head check (all open PRs, no base filter);
+    // the sweep's target enumeration (base: main) must not run in a matrix leg.
+    const lists = github.calls.filter((c) => c.name === 'pulls.list');
+    expect(lists.every((c) => c.params.base === undefined)).toBe(true);
   });
 
   it('H3: fork PR is never eligible and never enabled', async () => {
