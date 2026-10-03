@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:db": "vitest run --config vitest.db.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
