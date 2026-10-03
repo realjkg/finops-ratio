@@ -4,14 +4,15 @@ import { withTenantTransaction } from './tenant';
 
 const TENANT = 'aaaaaaaa-0000-4000-8000-000000000001';
 
-function fakePool() {
+function fakePool(commitTag = 'COMMIT') {
   const log: Array<{ sql: string; params?: unknown[] }> = [];
   let released = 0;
   let connects = 0;
   const client = {
     query: async (sql: string, params?: unknown[]) => {
       log.push({ sql, params });
-      return { rows: [], rowCount: 0 };
+      // like node-pg: the command tag of the statement (COMMIT answers COMMIT, or ROLLBACK when the txn was aborted)
+      return { rows: [], rowCount: 0, command: sql === 'COMMIT' ? commitTag : sql.split(' ')[0].toUpperCase() };
     },
     release: () => {
       released += 1;
@@ -64,4 +65,11 @@ describe('withTenantTransaction', () => {
     expect(f.log.map((l) => l.sql)).toEqual(['BEGIN', "SELECT set_config('ratio.tenant_id', $1, true)", 'ROLLBACK']);
     expect(f.released()).toBe(1);
   });
+
+  it('round 15: a COMMIT that the server answers with ROLLBACK (aborted transaction) is an error, not success', async () => {
+    const f = fakePool('ROLLBACK');
+    await expect(withTenantTransaction(f.pool, TENANT, async () => 'looks fine')).rejects.toMatchObject({ code: 'TRANSACTION_ROLLED_BACK' });
+    expect(f.released()).toBe(1);
+  });
 });
+

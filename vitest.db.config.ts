@@ -10,7 +10,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.db.test.ts'],
-    exclude: ['**/node_modules/**', '**/.next/**', '**/.claude/**', '**/dist/**', '**/dist-worker/**'],
+    // *.serial.db.test.ts run afterwards, alone (vitest.db.serial.config.ts).
+    exclude: ['**/node_modules/**', '**/.next/**', '**/.claude/**', '**/dist/**', '**/dist-worker/**', '**/*.serial.db.test.ts'],
     // Each test file (and each migration test case) creates, migrates and
     // drops a real database; that setup is part of the measured test time.
     testTimeout: 30_000,

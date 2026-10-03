@@ -1083,3 +1083,65 @@ describe('round 14 High: PUBLIC privileges in system schemas beyond the PostgreS
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 15 (Copilot High): attributes of (transitive) members of ratio roles
+// ---------------------------------------------------------------------------
+
+describe('round 15 High: members of ratio roles must not carry dangerous attributes (rolled back; roles are cluster-global)', () => {
+  async function inTxn(fn: (c: Client, name: (p: string) => string) => Promise<void>): Promise<void> {
+    const db = await createTestDatabase({ migrate: true });
+    cleanups.push(() => db.close());
+    const c = await connect(db);
+    const sfx = Math.random().toString(16).slice(2, 10);
+    await c.query('BEGIN');
+    try {
+      await fn(c, (p) => `ratio_probe_${p}_${sfx}`);
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  }
+
+  for (const [parent, attr] of [
+    ['ratio_worker', 'BYPASSRLS'],
+    ['ratio_worker', 'SUPERUSER'],
+    ['ratio_reader', 'REPLICATION'],
+    ['ratio_reader', 'CREATEROLE'],
+    ['ratio_worker', 'CREATEDB'],
+    ['ratio_owner', 'BYPASSRLS'],
+    ['ratio_owner', 'SUPERUSER'],
+    ['ratio_owner', 'REPLICATION'],
+  ] as const) {
+    it(`a LOGIN ${attr} member of ${parent} is refused`, async () => {
+      const { privilegeModelViolations } = await model();
+      await inTxn(async (c, name) => {
+        const login = name('m');
+        await c.query(`CREATE ROLE ${login} LOGIN ${attr} IN ROLE ${parent}`);
+        expect((await privilegeModelViolations(c)).join('\n')).toMatch(new RegExp(`role ${login} \\(member of ${parent}\\) must not be ${attr}`));
+      });
+    });
+  }
+
+  it('a transitive member (LOGIN member of a LOGIN member of ratio_worker) with BYPASSRLS is refused', async () => {
+    const { privilegeModelViolations } = await model();
+    await inTxn(async (c, name) => {
+      const mid = name('mid');
+      const leaf = name('leaf');
+      await c.query(`CREATE ROLE ${mid} LOGIN IN ROLE ratio_worker`);
+      await c.query(`CREATE ROLE ${leaf} LOGIN BYPASSRLS IN ROLE ${mid}`);
+      expect((await privilegeModelViolations(c)).join('\n')).toMatch(new RegExp(`role ${leaf} \\(member of ratio_worker\\) must not be BYPASSRLS`));
+    });
+  });
+
+  it('positive controls: a plain LOGIN member of ratio_worker passes; a CREATEROLE/CREATEDB LOGIN member of ratio_owner (the migrator) passes', async () => {
+    const { privilegeModelViolations } = await model();
+    await inTxn(async (c, name) => {
+      const w = name('w');
+      const m = name('migrator');
+      await c.query(`CREATE ROLE ${w} LOGIN IN ROLE ratio_worker`);
+      await c.query(`CREATE ROLE ${m} LOGIN CREATEROLE CREATEDB IN ROLE ratio_owner`);
+      const p = (await privilegeModelViolations(c)).filter((x) => x.includes(w) || x.includes(m));
+      expect(p).toEqual([]);
+    });
+  });
+});
