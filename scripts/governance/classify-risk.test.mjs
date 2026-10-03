@@ -309,6 +309,42 @@ describe('mixed PR', () => {
   });
 });
 
+describe('challenger round 2', () => {
+  for (const p of [
+    'Agents.md', 'docs/claude.MD', 'GEMINI.md', 'src/x/gemini.md', 'agents.MD',
+    '.github/copilot-instructions.md', 'src/x/Copilot-Instructions.md',
+    '.cursor/rules/a.mdc', '.cursorrules', '.github/copilot-setup-steps.yml',
+  ]) {
+    it(`N5: ${p} is restricted:policy`, () => {
+      const r = classify(paths(p));
+      expect(r.risk).toBe('restricted');
+      expect(r.classes).toContain('policy');
+    });
+  }
+  it('N4: a symlink (mode 120000) in a git diff is restricted', () => {
+    const diff = [
+      'diff --git a/docs/link.md b/docs/link.md',
+      'new file mode 120000',
+      'index 0000000..1111111',
+      '--- /dev/null',
+      '+++ b/docs/link.md',
+      '@@ -0,0 +1 @@',
+      '+../.env',
+      '\\ No newline at end of file',
+    ].join('\n');
+    const r = classify({ files: [{ path: 'docs/link.md' }], diff });
+    expect(r.risk).toBe('restricted');
+    expect(r.reasons).toContainEqual({ path: 'docs/link.md', class: 'unclassified', rule: 'symlink' });
+  });
+  it('N4: a mode change to 120000 is restricted', () => {
+    const diff = 'diff --git a/README.md b/README.md\nold mode 100644\nnew mode 120000\n';
+    expect(classify({ files: [{ path: 'README.md' }], diff }).risk).toBe('restricted');
+  });
+  it('N4: a file object carrying mode 120000 is restricted', () => {
+    expect(classify({ files: [{ path: 'README.md', mode: '120000' }] }).reasons).toContainEqual({ path: 'README.md', class: 'unclassified', rule: 'symlink' });
+  });
+});
+
 describe('CLI', () => {
   it('prints JSON for positional paths and a diff file', async () => {
     const { spawnSync } = await import('node:child_process');

@@ -93,8 +93,12 @@ function fakeGithub(opts = {}) {
         ])),
       },
       actions: {
+        listJobsForWorkflowRun: rec('actions.listJobsForWorkflowRun', (p) => {
+          if (typeof opts.ciJobs === 'function') return opts.ciJobs(p);
+          return opts.ciJobs ?? [{ id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', run_attempt: opts.ciAttempt ?? 1 }];
+        }),
         listWorkflowRunsForRepo: rec('actions.listWorkflowRunsForRepo', opts.workflowRuns ?? [
-          { check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml' },
+          { id: 900, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: opts.ciAttempt ?? 1 },
           { check_suite_id: GOV_SUITE, path: '.github/workflows/governance.yml' },
           { check_suite_id: COPILOT_SUITE, path: 'dynamic/agents/copilot-pull-request-reviewer' },
           { check_suite_id: EVIL_SUITE, path: '.github/workflows/evil.yml' },
@@ -132,7 +136,7 @@ describe('fetchChangeSet', () => {
     expect(cs.files[0].patchUnavailable).toBe(true);
     expect(classify(cs)).toMatchObject({ risk: 'restricted', reasons: [{ path: 'docs/a.png', rule: 'diff-unavailable' }] });
   });
-  it('H2: only removals and pure renames may lack a patch', async () => {
+  it('N1: only removals may lack a patch (pure renames are uninspectable too)', async () => {
     const { github } = fakeGithub({ files: [
       { filename: 'docs/old.md', status: 'removed', changes: 3 },
       { filename: 'docs/new.md', previous_filename: 'docs/prev.md', status: 'renamed', changes: 0 },
@@ -140,8 +144,17 @@ describe('fetchChangeSet', () => {
       { filename: 'x.md', status: 'modified', changes: 3 },
     ] });
     const cs = await fetchChangeSet(github, REPO, { number: 5, changed_files: 5 });
-    expect(cs.files.map((f) => f.patchUnavailable)).toEqual([false, false, true, true]);
+    expect(cs.files.map((f) => f.patchUnavailable)).toEqual([false, true, true, true]);
     expect(cs.truncated).toBe(true);
+  });
+});
+
+describe('N1: renamed binary-looking source', () => {
+  it('renamed A.tsx→B.tsx with NUL byte + fetch line, changes 0, no patch ⇒ restricted', async () => {
+    const { github } = fakeGithub({ files: [{ filename: 'src/components/B.tsx', previous_filename: 'src/components/A.tsx', status: 'renamed', changes: 0 }] });
+    const cs = await fetchChangeSet(github, REPO, { number: 5, changed_files: 1 });
+    expect(cs.files[0].patchUnavailable).toBe(true);
+    expect(classify(cs)).toMatchObject({ risk: 'restricted', reasons: [{ path: 'src/components/B.tsx', rule: 'diff-unavailable' }] });
   });
 });
 
@@ -289,9 +302,9 @@ describe('runEligibility', () => {
     expect(rows[0].eligible).toBe(false);
   });
 
-  it('M1: CI check that maps to another workflow path is rejected', async () => {
-    const { github, pr } = fakeGithub({ checkRuns: [
-      { id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: EVIL_SUITE } },
+  it('M1/N2: a CI-named check from another workflow with no genuine ci.yml job is rejected', async () => {
+    const { github, pr } = fakeGithub({ ciJobs: [], checkRuns: [
+      { id: 77, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: EVIL_SUITE } },
       { id: 3, name: 'copilot-pull-request-reviewer', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: COPILOT_SUITE } },
     ] });
     const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
@@ -340,6 +353,7 @@ describe('runEligibility', () => {
     const rows = await runEligibility({ github, core, context: prCtx(pr) });
     expect(core.failed).toBeNull();
     expect(rows[0].action).toMatch(/CONFIGURATION GAP/);
+    expect(core.warnings.join('\n')).toMatch(/CONFIGURATION GAP.*Allow auto-merge/s); // N6
     expect(core.out).toMatch(/CONFIGURATION GAP.*Allow auto-merge/s);
     expect(names(github.calls)).not.toContain('pulls.merge');
   });
@@ -373,6 +387,65 @@ describe('runEligibility', () => {
   });
 });
 
+describe('N2: CI via the Actions jobs API', () => {
+  it('happy path: the ci.yml pull_request run is resolved and its latest-attempt jobs are listed', async () => {
+    const { github, pr } = fakeGithub();
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(true);
+    const call = github.calls.find((c) => c.name === 'actions.listJobsForWorkflowRun');
+    expect(call.params).toMatchObject({ run_id: 900, filter: 'latest' });
+  });
+  it('masking: real failing job id 5 + impostor success id 99 in the same suite ⇒ ineligible', async () => {
+    const { github, pr } = fakeGithub({
+      ciJobs: [{ id: 5, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'failure', run_attempt: 1 }],
+      checkRuns: [
+        { id: 5, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'failure', app: { id: 15368 }, check_suite: { id: CI_SUITE } },
+        { id: 99, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: CI_SUITE } },
+        { id: 3, name: 'copilot-pull-request-reviewer', status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: COPILOT_SUITE } },
+      ],
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+    expect(gql(github, 'enablePullRequestAutoMerge')).toHaveLength(0);
+  });
+  it('missing CI job ⇒ ineligible', async () => {
+    const { github, pr } = fakeGithub({ ciJobs: [] });
+    expect((await runEligibility({ github, core: fakeCore(), context: prCtx(pr) }))[0].eligible).toBe(false);
+  });
+  it('no ci.yml pull_request run for the head ⇒ ineligible', async () => {
+    const { github, pr } = fakeGithub({ workflowRuns: [{ id: 901, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'push', run_attempt: 1 }] });
+    expect((await runEligibility({ github, core: fakeCore(), context: prCtx(pr) }))[0].eligible).toBe(false);
+  });
+  it('rerun: the latest attempt decides (attempt 1 failed, attempt 2 passed)', async () => {
+    const { github, pr } = fakeGithub({
+      ciAttempt: 2,
+      ciJobs: (p) => (p.filter === 'latest'
+        ? [{ id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', run_attempt: 2 }]
+        : [
+          { id: 0, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'failure', run_attempt: 1 },
+          { id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', run_attempt: 2 },
+        ]),
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(true);
+  });
+  it('rerun: jobs from an older attempt are ignored even if returned', async () => {
+    const { github, pr } = fakeGithub({
+      ciAttempt: 2,
+      ciJobs: [{ id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success', run_attempt: 1 }],
+    });
+    expect((await runEligibility({ github, core: fakeCore(), context: prCtx(pr) }))[0].eligible).toBe(false);
+  });
+  it('several ci.yml pull_request runs: the newest run (highest id) is used', async () => {
+    const { github, pr } = fakeGithub({ workflowRuns: [
+      { id: 800, check_suite_id: 1, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1 },
+      { id: 950, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1 },
+    ] });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(github.calls.find((c) => c.name === 'actions.listJobsForWorkflowRun').params.run_id).toBe(950);
+  });
+});
+
 describe('runTargets', () => {
   it('PR event → that PR', async () => {
     const { github, pr } = fakeGithub();
@@ -380,6 +453,18 @@ describe('runTargets', () => {
     expect(await runTargets({ github, core, context: prCtx(pr) })).toEqual([5]);
     expect(core.outputs.prs).toBe('[5]');
   });
+  it('N4: caps the matrix at 200 PRs, oldest-updated first', async () => {
+    const { github } = fakeGithub();
+    const many = Array.from({ length: 230 }, (_, i) => ({ number: i + 1, head: { sha: 'x' }, updated_at: new Date(Date.UTC(2026, 0, 1) + (230 - i) * 60000).toISOString() }));
+    github.rest.pulls.list = async (params) => { github.calls.push({ name: 'pulls.list', params }); return { data: many }; };
+    const core = fakeCore();
+    const nums = await runTargets({ github, core, context: { repo: REPO, payload: { schedule: 'x' } } });
+    expect(nums).toHaveLength(200);
+    expect(nums[0]).toBe(230); // oldest updated_at
+    expect(nums).not.toContain(1); // most recently updated beyond the cap
+    expect(core.warnings.join('\n')).toMatch(/200/);
+  });
+
   it('L7: sweep lists only open PRs based on main', async () => {
     const { github } = fakeGithub();
     const core = fakeCore();

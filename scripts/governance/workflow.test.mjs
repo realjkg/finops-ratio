@@ -44,6 +44,12 @@ describe('governance.yml', () => {
     expect(code).toMatch(/fail-fast: false/);
   });
 
+  it('L2/N4: workflow_run listens to CI only (Copilot is picked up by the sweep)', () => {
+    expect(code).toMatch(/workflows: \[CI\]/);
+    expect(code).not.toMatch(/Running Copilot Code Review/);
+    expect(code).toMatch(/schedule:/);
+  });
+
   it('M1: eligibility can resolve check runs to workflow paths (actions: read)', () => {
     expect(code).toMatch(/actions: read/);
   });

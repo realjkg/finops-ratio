@@ -25,9 +25,9 @@ function state(overrides = {}) {
       { id: 1, ...CI, status: 'completed', conclusion: 'success' },
       { id: 2, name: 'Governance · risk classification', appId: 15368, workflowPath: '.github/workflows/governance.yml', status: 'completed', conclusion: 'success' },
       { id: 3, name: 'copilot-pull-request-reviewer', appId: 15368, workflowPath: 'dynamic/agents/copilot-pull-request-reviewer', status: 'completed', conclusion: 'success' },
-      { id: 4, name: 'Governance · merge eligibility (#7)', appId: 15368, workflowPath: '.github/workflows/governance.yml', status: 'in_progress', conclusion: null },
-      { id: 5, name: 'Governance · eligibility targets', appId: 15368, workflowPath: '.github/workflows/governance.yml', status: 'completed', conclusion: 'success' },
     ],
+    // N2: jobs of the latest attempt of the ci.yml pull_request run for the head SHA.
+    ciJobs: [{ id: 1, name: 'Lint · Typecheck · Test · Build', status: 'completed', conclusion: 'success' }],
     statuses: [],
     reviews: [{ login: 'copilot-pull-request-reviewer[bot]', userType: 'Bot', commitId: HEAD, state: 'COMMENTED' }],
     unresolvedThreads: 0,
@@ -37,7 +37,7 @@ function state(overrides = {}) {
 const why = (d) => d.reasons.join('\n');
 
 describe('decideEligibility', () => {
-  it('eligible when every condition holds (own jobs excluded)', () => {
+  it('eligible when every condition holds', () => {
     expect(decideEligibility(state())).toEqual({ eligible: true, reasons: [] });
   });
 
@@ -150,10 +150,45 @@ describe('decideEligibility', () => {
     s.checkRuns.push({ id: 51, ...CI, appId: 999, status: 'completed', conclusion: 'success' });
     expect(decideEligibility(s).eligible).toBe(false);
   });
-  it('M1: a CI check whose workflow path could not be resolved does not satisfy CI', () => {
+  // N2: CI is verified through the Actions jobs API.
+  it('N2: masking — real failing CI job id 5 + impostor success id 99 in the same suite → ineligible', () => {
+    const s = state({ ciJobs: [{ id: 5, name: CI.name, status: 'completed', conclusion: 'failure' }] });
+    s.checkRuns = s.checkRuns.filter((c) => c.name !== CI.name);
+    s.checkRuns.push({ id: 5, ...CI, status: 'completed', conclusion: 'failure' });
+    s.checkRuns.push({ id: 99, ...CI, status: 'completed', conclusion: 'success' });
+    const d = decideEligibility(s);
+    expect(d.eligible).toBe(false);
+    expect(why(d)).toMatch(/99/);
+  });
+  it('N2: a CI-named check run whose id is not a ci.yml job is treated as a spoof', () => {
     const s = state();
-    s.checkRuns[0] = { ...s.checkRuns[0], workflowPath: undefined };
+    s.checkRuns.push({ id: 77, ...CI, status: 'completed', conclusion: 'success' });
+    const d = decideEligibility(s);
+    expect(d.eligible).toBe(false);
+    expect(why(d)).toMatch(/77/);
+  });
+  it('N2: missing CI job → ineligible', () => {
+    const d = decideEligibility(state({ ciJobs: [{ id: 2, name: 'other job', status: 'completed', conclusion: 'success' }] }));
+    expect(d.eligible).toBe(false);
+  });
+  it('N2: no ci.yml run found (ciJobs null) → ineligible', () => {
+    expect(decideEligibility(state({ ciJobs: null })).eligible).toBe(false);
+  });
+  it('N2: CI job not successful → ineligible even if its check run says success', () => {
+    expect(decideEligibility(state({ ciJobs: [{ id: 1, name: CI.name, status: 'completed', conclusion: 'cancelled' }] })).eligible).toBe(false);
+  });
+  it('N2: CI job success but its check run is not on the head SHA → ineligible', () => {
+    expect(decideEligibility(state({ ciJobs: [{ id: 1234, name: CI.name, status: 'completed', conclusion: 'success' }] })).eligible).toBe(false);
+  });
+
+  // N3: no name-based self exclusion.
+  it('N3: a check named like the governance eligibility job on the head SHA is NOT excluded', () => {
+    const s = state();
+    s.checkRuns.push({ id: 40, name: 'Governance · merge eligibility (#7)', appId: 15368, workflowPath: '.github/workflows/evil.yml', status: 'in_progress', conclusion: null });
     expect(decideEligibility(s).eligible).toBe(false);
+    const t = state();
+    t.checkRuns.push({ id: 41, name: 'Governance · eligibility targets', status: 'completed', conclusion: 'failure' });
+    expect(decideEligibility(t).eligible).toBe(false);
   });
   it('M1: a spoofed failing duplicate is not hidden by the genuine success (both must pass)', () => {
     const s = state();
@@ -187,11 +222,13 @@ describe('decideEligibility', () => {
     expect(decideEligibility(state({ reviews: [] })).eligible).toBe(false);
   });
 
-  it('only the latest run of a re-run check counts', () => {
+  it('only the latest run of a re-run non-CI check counts (CI is decided by job ids, never deduped)', () => {
     const s = state();
-    s.checkRuns.push({ id: 0, ...CI, status: 'completed', conclusion: 'failure' });
+    const other = { name: 'Other check', appId: 1, workflowPath: '.github/workflows/other.yml' };
+    s.checkRuns.push({ id: 10, ...other, status: 'completed', conclusion: 'failure' });
+    s.checkRuns.push({ id: 11, ...other, status: 'completed', conclusion: 'success' });
     expect(decideEligibility(s).eligible).toBe(true);
-    s.checkRuns.push({ id: 99, ...CI, status: 'completed', conclusion: 'failure' });
+    s.checkRuns.push({ id: 12, ...other, status: 'completed', conclusion: 'failure' });
     expect(decideEligibility(s).eligible).toBe(false);
   });
 
