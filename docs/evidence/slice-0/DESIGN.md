@@ -55,6 +55,13 @@ added in this slice (not needed). No other dependency.
     TRANSACTION`/`SAVEPOINT`/`RELEASE`/`END`/`ABORT`/`PREPARE TRANSACTION`) at
     statement level outside dollar-quoted bodies, comments and string literals
     (`TRANSACTION_CONTROL`) — these would break the one-txn-per-migration rule.
+- Session state (round 7): before the advisory lock and after every migration
+  transaction (committed or failed) the runner resets the session — `RESET
+  ROLE; SET SESSION AUTHORIZATION DEFAULT; RESET ALL; SET search_path =
+  pg_catalog, pg_temp` — so a plain `SET` a migration ran (search_path,
+  row_security, role, session authorization, …) cannot outlive its COMMIT into
+  the next migration or the caller. Migrations therefore run with
+  `search_path = pg_catalog, pg_temp` and must schema-qualify every name.
 - Each migration (current, round 5): `BEGIN; <up sql>; RESET ROLE; SET LOCAL
   search_path = pg_catalog, pg_temp; SET CONSTRAINTS ALL IMMEDIATE; INSERT
   schema_migrations; <catalog privilege check>; COMMIT`. Any error or check
@@ -124,14 +131,15 @@ Helper functions (schema `ratio`; all except `current_tenant_id` carry `SET sear
   block (`IF NOT EXISTS … CREATE ROLE … NOLOGIN`, with `duplicate_object` /
   `unique_violation` caught so concurrent migrations of different databases in
   one cluster cannot race). Then a guard (RT010): if any of the three is
-  SUPERUSER, BYPASSRLS or REPLICATION, if worker/reader have CREATEROLE or
+  SUPERUSER, BYPASSRLS, REPLICATION or LOGIN (LOGIN since round 7), if worker/reader have CREATEROLE or
   CREATEDB, or if any of them is a member of any role, the migration RAISEs
   (fails closed rather than ALTERing roles). Since round 5 the runner's catalog
   check re-verifies these invariants (and pins role identity) after every
   migration.
-  Roles are cluster-global; LOGIN/password are granted by deployment
-  (`ALTER ROLE ratio_worker LOGIN PASSWORD …` or a login role `GRANT ratio_worker
-  TO app_login`), not by migrations.
+  Roles are cluster-global and stay NOLOGIN. Deployment creates separate LOGIN
+  roles that are members of them (`CREATE ROLE app_worker LOGIN … IN ROLE
+  ratio_worker`); `ALTER ROLE ratio_worker LOGIN` is refused by 0001's guard
+  (RT010) and reported as drift by the catalog check (round 7).
 - Ownership: `CREATE SCHEMA ratio AUTHORIZATION ratio_owner`, then
   `SET LOCAL ROLE ratio_owner` so every object (tables, view, functions,
   policies) is owned by the non-superuser, non-BYPASSRLS owner. The migrating
@@ -544,3 +552,35 @@ recreated (that is the intended behaviour of the checksum ledger).
   secret-value CHECKs, `ingest_validation_errors`); the stale "pointer not
   enforced" gap is removed from EVIDENCE (RT003 exists and is tested); §8 and
   EVIDENCE §7 state exactly what down drops and keeps, and why.
+
+## 16. Round 7 — Copilot review of 19fdbed (3 High, 1 Medium, + Low 1)
+
+- **High A — session-scoped settings outlived COMMIT.** The pinned
+  `SET LOCAL search_path` only masked, until COMMIT, a session-level
+  `SET search_path = attacker, pg_catalog` that a contract migration ran; the
+  next migration of the run then resolved `current_setting` and `=` through
+  schema `attacker` (reproduced). Fix: `resetSession()` (see §2) before the
+  lock and after every migration transaction. Chosen over a fresh connection
+  per migration: the advisory lock belongs to this session, and a new
+  connection would inherit `ALTER ROLE/DATABASE … SET` defaults a migration
+  could also plant, which the explicit session-level SET overrides. The
+  advisory lock calls are `pg_catalog`-qualified. `RESET ROLE` is redundant
+  with `SET SESSION AUTHORIZATION DEFAULT` (which also resets the current
+  user) and kept as belt and braces.
+- **High B — 0001 accepted a pre-existing LOGIN `ratio_*` role.** The RT010
+  guard now also rejects `rolcanlogin`. 0001 is edited in place: it has never
+  been applied outside dev/test (no deployed database), so any dev database
+  migrated with the previous bytes reports `CHECKSUM_MISMATCH` and must be
+  recreated; the down file is unchanged.
+- **High C — LOGIN invisible to the drift check.** The catalog check reports
+  `role <ratio role> must not have LOGIN …`; `--status` and the per-migration
+  backstop therefore see `ALTER ROLE ratio_owner LOGIN`.
+- **Medium — backstop could emit invalid JSON.** `redactDeep` redacts a
+  number/boolean/bigint whose text matches a secret to the string
+  `"[redacted]"` (bigints always become strings). The backstop pass is
+  JSON-aware: if its edit leaves text that no longer parses, the CLI prints
+  `{"error":"output redacted"}` instead.
+- **Low 1.** The pg `Client` is constructed inside `main`'s try (its
+  constructor throws on e.g. an invalid port or unreadable `sslcert`), and
+  `installProcessHandlers()` prints one redacted JSON line on
+  `uncaughtException` / `unhandledRejection` and exits 1.

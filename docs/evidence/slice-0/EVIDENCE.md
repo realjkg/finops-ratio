@@ -215,8 +215,9 @@ used anywhere. Nothing here demonstrates real-source ingestion.
   decision.
 - CI change: adds a `postgres:16` service with trust auth inside the job
   container, and the CI trigger scope (main-only) for slice PRs.
-- Deployment: who holds CREATEROLE for first role creation; LOGIN grants for
-  ratio_worker / ratio_reader; the migrating login must be a member of
+- Deployment: who holds CREATEROLE for first role creation; separate LOGIN
+  roles that are members of ratio_worker / ratio_reader (since round 7 the ratio
+  roles themselves must stay NOLOGIN); the migrating login must be a member of
   ratio_owner and able to CREATE in the database (verified with a DB-owner login).
 
 ---
@@ -690,3 +691,67 @@ added in 590d196, together with the `toJSON` handling.
   round 2), stale classifier gap marked superseded.
 - TEST_PLAN: test names that no longer exist (first-plan names) replaced by the
   real ones; round-6 section.
+
+---
+
+# Round 7 — Copilot review of 19fdbed (3 High, 1 Medium, + Low 1)
+
+Base: 19fdbed. Local commits only (not pushed). **0001 edited in place**
+(High B; never applied outside dev/test — dev databases migrated with the old
+bytes report CHECKSUM_MISMATCH by design; the down file is unchanged). Raw
+logs: `scratchpad/r8/`.
+
+## R7.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 16c9dca | test(ingest): failing tests for Copilot round 7 (session GUC carry-over, LOGIN ratio roles, JSON-safe redaction, process handlers) | tests (red) |
+| 8f4b9c1 | fix(ingest): reset session state between migrations; LOGIN ratio roles refused (0001) and reported (check); JSON-safe redaction; process handlers (Copilot round 7) | fix (+ one test defect, recorded in its message) |
+| bb169f6 | test(ingest): a URL the pg Client constructor rejects exits 1 with one redacted JSON line (kills the Client-outside-try mutation) | test |
+| (this) | docs(evidence): Slice 0 round 7 | docs |
+
+## R7.2 Red (at 16c9dca)
+
+- `cli.test.ts`: 3 failed / 13 passed — numeric secret printed as invalid JSON
+  `{"pid":[redacted]…}`, structure-spanning secret printed as broken JSON, no
+  `installProcessHandlers`. The malformed-percent URL test passed (guard: pg
+  does not throw on it).
+- `privileges.db.test.ts` + `roles.db.test.ts`: 7 failed / 43 passed (50).
+  High A **reproduced**: the probe migration after the hostile one stored
+  `sp: 'attacker', rs: 'attacker', eq: false` (attacker.current_setting and
+  attacker.= were used); the down variant stored `sp: 'attacker, pg_catalog'`.
+  High B: 0001 succeeded with `ALTER ROLE ratio_* LOGIN` (rolled back). High C:
+  no LOGIN problem reported. All LOGIN probes ran in rolled-back transactions;
+  after every run `ratio_owner/worker/reader` were verified `rolcanlogin = f`.
+
+## R7.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+A1 no session reset after each migration                KILLED  next-migration probe, down probe
+A2 reset without the session search_path pin            KILLED  3 tests
+A3 reset without RESET ALL                              KILLED  probe (row_security), resetSession
+A4 reset without SET SESSION AUTHORIZATION DEFAULT      KILLED  resetSession
+A5 reset without RESET ROLE                             SURVIVED — by PostgreSQL semantics: SET SESSION
+                                                        AUTHORIZATION DEFAULT also resets the current
+                                                        user; RESET ROLE is kept as belt and braces
+B1 0001 guard ignores LOGIN                             KILLED  roles.db High B
+C1 check ignores LOGIN                                  KILLED  3 (owner/worker/reader)
+M1 primitives not redacted in redactDeep                KILLED  numeric/bigint/boolean valid-JSON test
+M2 backstop not JSON-aware                              KILLED  structure-spanning secret test
+M3 backstop removed entirely                            KILLED  structure-spanning secret test
+L1a Client constructed outside the try                  KILLED  (by bb169f6) constructor-rejected URL test
+L1b process handlers do not exit                        KILLED
+L1c process handlers print the raw reason               KILLED
+```
+
+## R7.4 Verification (main checkout at bb169f6 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1093/1093 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 154/154 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| Slice 1 compat: scratch worktree `slice/01-focus-ingestion-worker` 1f41db1 + bb169f6 (removed) | one conflict in `cli.ts` (the main-module block: Slice 1 installs its own `installProcessGuards`); resolved by keeping Slice 1's block. tsc 0, eslint 0, fast 1204/1204, test:db 279/279 ×2 |

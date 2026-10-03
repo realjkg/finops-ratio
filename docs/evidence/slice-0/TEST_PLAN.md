@@ -195,3 +195,13 @@ Test changes in the fix commit (1234da0), each recorded in its message:
 | High, end-to-end through a real pg error | `cli.db.test.ts` | `round 6 (Copilot High): a password with JSON metacharacters inside a real pg error is never printed, in any form` (the password is also the missing database name, so the server error carries it; `migrate` and `migrate --status --json`) |
 
 Docs-only Lows (schema table, stale gap, rollback wording) have no tests; see DESIGN §3/§8/§15.
+
+## Round 7 — Copilot review of 19fdbed (tests committed red in 16c9dca, before the fix)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| High A | `privileges.db.test.ts` | `the next migration in the same run resolves names through the pinned path, as the runner role, with row_security on`, `the check of the following migration still detects a planted grant`, `down: a down file that plants a session search_path does not affect the next down step`, `resetSession clears SET SESSION AUTHORIZATION, SET ROLE, row_security and search_path` |
+| High B | `roles.db.test.ts` | `round 7 High B: refuses a ratio role that can LOGIN (pre-created or altered; rolled back)`; `the guard leaves no trace…` now also asserts `rolcanlogin = false` |
+| High C | `privileges.db.test.ts` | `ALTER ROLE ratio_owner LOGIN is reported by the check (and therefore by migrate --status)` (and the worker / reader variants; all in rolled-back transactions) |
+| Medium | `cli.test.ts` | `a non-string value whose text equals the secret is redacted AND the line stays valid JSON (round 7 Medium)` (replaces the round-6 numeric backstop test, whose expectation of invalid JSON was the defect), `backstop: a secret that spans JSON structure is removed and the output is replaced by a fixed valid JSON line` |
+| Low 1 | `cli.test.ts` | `a malformed connection URL (bad percent-encoding) exits 1 with a redacted JSON line, never a throw` (guard, green on arrival), `uncaughtException / unhandledRejection handlers print one redacted JSON line and exit 1`; added after the fix to kill the Client-outside-try mutation (bb169f6, see EVIDENCE R7): `a URL the pg Client constructor itself rejects (invalid port, unreadable sslcert) exits 1 with a redacted JSON line` |
