@@ -379,3 +379,97 @@ recreated (that is the intended behaviour of the checksum ledger).
 - **M2/M3** tests only (two-connection race; data columns riding along with a
   legal transition) — they kill mutations N1 and N14.
 - **L1** accepted as documented.
+
+## 13. Round 4 — challenger round 3 (M1, M2; 0001 NOT changed)
+
+- **M1 — catalog check in the runner (the robust layer).** An unmarked expand
+  migration could create a `SECURITY DEFINER` function (or a view) outside
+  schema `ratio`; new functions are EXECUTE-able by PUBLIC, so every login
+  read every tenant's rows (staged/quarantined included). The classifier only
+  looked at `ratio` objects and at GRANT text. Now `migrateUp` / `migrateDown`
+  call `assertReviewedPrivileges` (`src/ingest/db/privilegeModel.ts`) inside
+  each migration's transaction, after `RESET ROLE` and before the ledger
+  write. It reads the catalog and throws `PRIVILEGE_MODEL_VIOLATION` (the
+  transaction rolls back, the run stops) when:
+  1. `ratio_reader` / `ratio_worker` *effectively* hold (directly, via PUBLIC
+     or via membership; `has_*_privilege`) any schema privilege
+     (USAGE/CREATE), relation privilege (table-level, sequence, or
+     column-level not covered by a table-level grant) or function EXECUTE
+     beyond `REVIEWED_PRIVILEGES` — the ONE explicit allow-list, equal to
+     0001's grants (+ `schema:public:USAGE`, PostgreSQL 15+'s PUBLIC default).
+     Relations/functions count only in schemas the role can use; USAGE itself
+     is checked; pg_catalog/information_schema are excluded;
+  2. any `SECURITY DEFINER` function outside pg_catalog/information_schema is
+     not both owned by `ratio_owner` and on `REVIEWED_SECURITY_DEFINER_FUNCTIONS`
+     (empty — 0001 defines none);
+  3. PUBLIC holds EXECUTE on any function in schemas `ratio` or `public`.
+  A later migration that legitimately widens a role's privileges must update
+  the allow-list in the same change (visible in review). Slice 1's worker
+  grants are exactly 0001's and pass unchanged (Slice 1 branch merged with this
+  fix in a scratch worktree: test:db 224/224, fast 419/419).
+- **M1 — classifier (lexical, defence in depth).** `CREATE FUNCTION|PROCEDURE`
+  and `CREATE [RECURSIVE|MATERIALIZED] VIEW` in ANY schema (qualified or not)
+  are expand only with a reasoned `ratio:allow-function` / `ratio:allow-view`
+  marker; `CREATE OR REPLACE` and TEMP views are never expand. `SECURITY
+  DEFINER` in any statement (CREATE, ALTER FUNCTION/ROUTINE/PROCEDURE), in any
+  phase, needs its own `-- ratio:allow-security-definer <reason>` marker, and
+  is always refused inside DO/function bodies and their string literals.
+  Markers are now read from the whole comment block directly above a statement
+  (so a SECURITY DEFINER function carries both markers). A marked SECURITY
+  DEFINER still fails at the runner unless reviewed into the allow-list.
+- **Not done: `ALTER DEFAULT PRIVILEGES … REVOKE EXECUTE … FROM PUBLIC` in
+  0001.** Default ACLs are per creating role; the repro function was created by
+  the migrating superuser, which 0001 cannot name portably, and `FOR ROLE
+  ratio_owner` would leave `pg_default_acl` entries that block `DROP ROLE` in
+  the shared cluster and that the down file would have to undo. The runner
+  check (3) catches the PUBLIC default regardless of who created the function,
+  so 0001 (and its checksums) stays unchanged.
+- **Operational consequence (fail closed):** a database where extensions were
+  installed into `public` (functions EXECUTE-able by PUBLIC) refuses every
+  migration until those functions are revoked from PUBLIC or the extension is
+  moved to its own schema the ratio roles cannot use. Flagged for the owner.
+- **M2** test only: the delete twin (and artifact-UPDATE twin) of the
+  insert-path race test, which kills "remove the OLD-path FOR SHARE".
+
+## 14. Round 5 — challenger round 4 (M1, L1–L4; 0001 NOT changed)
+
+- **M1 — nothing a migration installs runs after the check.** Transaction
+  order, up and down: migration SQL → `RESET ROLE`, `SET LOCAL search_path =
+  pg_catalog, pg_temp`, `SET CONSTRAINTS ALL IMMEDIATE` (queued deferred
+  constraint triggers fire now) → ledger INSERT/DELETE (any ledger trigger
+  fires now) → `assertReviewedPrivileges` as the LAST statement → COMMIT. The
+  check also refuses: any user trigger (including constraint triggers) that is
+  not on `REVIEWED_TRIGGERS` (0001's 11) or whose function is not a
+  `ratio_owner` function in schema `ratio`; any rule other than view `_RETURN`
+  rules outside the system schemas; any event trigger; RLS or any policy on
+  `public.schema_migrations`. A later migration that adds a trigger updates
+  `REVIEWED_TRIGGERS` in the same change.
+- **Status:** `migrate --status` runs the check in a READ ONLY transaction:
+  `privilegeProblems` in the JSON, problem `PRIVILEGE_MODEL_VIOLATION`, exit 3.
+- **L1:** the check pins `search_path = pg_catalog, pg_temp` itself
+  (transaction-local, via `pg_catalog.set_config`) before its queries, in
+  addition to the runner's `SET LOCAL`; status runs inside a transaction for
+  that reason.
+- **L2 (robust option, not a lexical rename ban):** role identity is checked in
+  the catalog. While schema `ratio` exists the three ratio roles must exist.
+  They must keep their safe attributes and be members of no role. Members of a
+  ratio role must be LOGIN roles. Every other role (not superuser, not
+  predefined `pg_*`, not a member of `ratio_owner`) may hold on schema `ratio`
+  and its objects only what its `ratio_reader`/`ratio_worker` memberships are
+  reviewed for. That check is what catches a renamed role that keeps its
+  grants and members, and LOGIN members with extra grants. Roles are checked by
+  OID, so test logins dropped concurrently cannot make the check error.
+  Consequence (fails closed): a cluster role in `pg_read_all_data` (or any role
+  with privileges on ratio objects) refuses migrations.
+- **L4:** database CREATE/TEMPORARY/CONNECT are now checked; CONNECT and
+  TEMPORARY are the reviewed PUBLIC defaults. Also checked: `GRANT … ON
+  PARAMETER` (`pg_parameter_acl`, cluster-global), FDW and foreign-server
+  USAGE, and large-object ACLs and ownership. Types and languages are not
+  enumerated: every type has PUBLIC USAGE by default and that is harmless.
+  Language USAGE only matters with CREATE on a schema, which is checked, and
+  untrusted languages cannot be granted. `lo_compat_privileges` is not checked.
+- Remaining by design: code a migration runs *during* its own SQL (e.g. COPY
+  TO PROGRAM as superuser, dblink) can have effects outside the transaction;
+  migrations are reviewed and contract needs `--allow-contract`. Trigger
+  function bodies of the reviewed triggers are pinned by name and owner, not
+  by body hash.

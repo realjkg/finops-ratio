@@ -672,6 +672,96 @@ describe('round 3: challenger round-2 findings', () => {
     }
   });
 
+  /**
+   * Round 4 (challenger round 3, M2): the OLD-row path of tg_child_of_staged_batch
+   * also takes FOR SHARE on the parent batch. A zombie DELETE / UPDATE of a
+   * child row of the batch being published must wait for the publisher's
+   * uncommitted status change and then fail RT001, leaving the rows untouched.
+   */
+  async function raceAgainstUncommittedPublish(
+    zombieSql: (a: Seeded['a']) => { sql: string; params: unknown[] },
+    snapshot: (pool: TestDatabase['pool'], a: Seeded['a']) => Promise<unknown>,
+  ): Promise<void> {
+    const fresh = await createTestDatabase({ migrate: true });
+    const publisher = new Client({ connectionString: fresh.url });
+    const zombie = new Client({ connectionString: fresh.url });
+    const observer = new Client({ connectionString: fresh.url });
+    for (const c of [publisher, zombie, observer]) c.on('error', () => undefined);
+    try {
+      const s2 = await seedTwoTenants(fresh.pool);
+      const a = s2.a;
+      const before = await snapshot(fresh.pool, a);
+      await Promise.all([publisher.connect(), zombie.connect(), observer.connect()]);
+      for (const c of [publisher, zombie]) {
+        await c.query('BEGIN');
+        await c.query('SET LOCAL ROLE ratio_worker');
+        await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [a.tenantId]);
+      }
+      // Publisher: publish the staged batch, uncommitted.
+      await publisher.query(`UPDATE ratio.ingest_batches SET status = 'superseded', superseded_at = now() WHERE id = $1`, [a.batchPublished]);
+      await publisher.query(`UPDATE ratio.ingest_batches SET status = 'published', published_at = now() WHERE id = $1`, [a.batchStaged]);
+      await publisher.query(`UPDATE ratio.period_publications SET batch_id = $1 WHERE source_id = $2`, [a.batchStaged, a.sourceId]);
+      // Zombie: change child rows of that (still staged, as far as it can see) batch.
+      const zombiePid = (await zombie.query('SELECT pg_backend_pid() AS p')).rows[0].p as number;
+      const z = zombieSql(a);
+      const write = zombie.query(z.sql, z.params).then(
+        (r) => ({ ok: true as const, rowCount: r.rowCount }),
+        (e: { code?: string }) => ({ ok: false as const, code: e.code }),
+      );
+      // Observe (bounded poll) that the zombie is blocked on a lock held by the publisher.
+      let waiting = false;
+      for (let i = 0; i < 200 && !waiting; i++) {
+        const r = await observer.query(`SELECT wait_event_type = 'Lock' AS w FROM pg_stat_activity WHERE pid = $1`, [zombiePid]);
+        waiting = r.rows[0]?.w === true;
+        if (!waiting) await new Promise((res) => setTimeout(res, 25));
+      }
+      expect(waiting).toBe(true);
+      const blockers = await observer.query(`SELECT pg_blocking_pids($1) AS b`, [zombiePid]);
+      const publisherPid = (await publisher.query('SELECT pg_backend_pid() AS p')).rows[0].p as number;
+      expect(blockers.rows[0].b).toEqual([publisherPid]);
+      await publisher.query('COMMIT');
+      expect(await write).toEqual({ ok: false, code: 'RT001' });
+      await zombie.query('ROLLBACK');
+      expect(await snapshot(fresh.pool, a)).toEqual(before);
+      const st = await fresh.pool.query(`SELECT status FROM ratio.ingest_batches WHERE id = $1`, [a.batchStaged]);
+      expect(st.rows[0].status).toBe('published');
+    } finally {
+      for (const c of [publisher, zombie, observer]) await c.end().catch(() => undefined);
+      await fresh.close();
+    }
+  }
+
+  it('M2 (round 4): a fact DELETE racing an uncommitted publish waits on the batch row lock, then fails RT001; rows unchanged', async () => {
+    await raceAgainstUncommittedPublish(
+      (a) => ({ sql: `DELETE FROM ratio.cost_facts WHERE tenant_id = $1 AND batch_id = $2`, params: [a.tenantId, a.batchStaged] }),
+      async (pool, a) => {
+        const r = await pool.query(
+          `SELECT count(*)::int AS n, sum(billed_cost)::text AS total FROM ratio.cost_facts WHERE tenant_id = $1 AND batch_id = $2`,
+          [a.tenantId, a.batchStaged],
+        );
+        expect(r.rows[0].n).toBe(2); // the seed's staged batch carries two facts
+        return r.rows[0];
+      },
+    );
+  });
+
+  it('M2 (round 4): an artifact UPDATE (worker column grant) racing an uncommitted publish waits, then fails RT001; row unchanged', async () => {
+    await raceAgainstUncommittedPublish(
+      (a) => ({
+        sql: `UPDATE ratio.ingest_artifacts SET row_count = row_count + 1 WHERE tenant_id = $1 AND batch_id = $2`,
+        params: [a.tenantId, a.batchStaged],
+      }),
+      async (pool, a) => {
+        const r = await pool.query(`SELECT artifact_name, row_count::int AS n FROM ratio.ingest_artifacts WHERE tenant_id = $1 AND batch_id = $2`, [
+          a.tenantId,
+          a.batchStaged,
+        ]);
+        expect(r.rows).toHaveLength(1);
+        return r.rows;
+      },
+    );
+  });
+
   it('M3: data columns cannot ride along with a legal transition', async () => {
     const a = seed.a;
     const cases: Array<[string, string]> = [

@@ -28,6 +28,17 @@ export type SourceKind =
 export type SourceCoverage = 'public_cloud' | 'private_cloud' | 'on_prem';
 export type SourceCapability = 'costRows' | 'findings';
 
+/** Connection state of a config-driven connector, as the UI presents it. */
+export type ConnectorConnection = 'connected' | 'available' | 'incomplete' | 'disabled';
+
+/** The env contract that connects a connector — names only, never values. */
+export interface ConnectorSetup {
+  flagEnv: string; // kill-switch; unset = auto
+  requiredEnv: string[];
+  optionalEnv: string[];
+  missingEnv: string[];
+}
+
 /** A configured cost source (adapter), as returned by `listSources`. */
 export interface CostSourceDescriptor {
   id: string;
@@ -38,6 +49,9 @@ export interface CostSourceDescriptor {
   capabilities: SourceCapability[];
   configured: boolean; // false = specified but missing credentials (e.g. live PointFive)
   note: string;
+  /** Config-driven connectors only: connection state + the env that connects it. */
+  connection?: ConnectorConnection;
+  setup?: ConnectorSetup;
 }
 
 /** Result of `fetchCostRows`: normalized rows + an audit of the version upgrade. */

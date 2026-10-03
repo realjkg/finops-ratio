@@ -449,3 +449,166 @@ are the same edits as M11/M12/M13/M18.
 - The classifier stays lexical (marked bodies' semantics, non-literal dynamic SQL).
 - A credential holder can still choose any tenant (GUC) — unchanged owner decision.
 - CI not executed here (no push).
+
+# Round 4 — challenger round 3 (M1, M2; Lows L1–L4 out of scope)
+
+Base: `slice/00-postgres-foundation` @ d75a152. Local commits only (the
+orchestrator pushes after re-review). 0001 is NOT changed in this round.
+Raw logs: `scratchpad/r5/` (session scratchpad).
+
+## R4.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| c0ed583 | test(ingest): failing tests for challenger round 3 (M1 catalog check, M2 OLD-path lock) | tests (red) |
+| 608d0bf | fix(ingest): runner checks the catalog privilege model before COMMIT; classifier marks functions/views in any schema (M1) | fix |
+| (this) | docs(evidence): Slice 0 round 4 | docs |
+
+## R4.2 Red (at c0ed583)
+
+- Fast (`migrationFiles.test.ts`): 2 failed / 20 passed (22) — the repro
+  `findForbiddenStatement(...)` returned null; marked procedures/materialized
+  views were not yet expand.
+- DB (`privileges.db.test.ts` + `immutability.db.test.ts`): 11 failed / 28 passed
+  (39). Every runner test failed: marked repro, view variant, implicit PUBLIC
+  EXECUTE, worker over-grants were APPLIED (`runner must refuse: expected null
+  not to be null`); down-path check absent; `privilegeModel` missing. The two
+  M2 twins pass against unchanged 0001 by design (behaviour was already
+  correct; they exist to kill the mutation in R4.4).
+
+## R4.3 Verification (main checkout at 608d0bf)
+
+| Command | Result |
+|---|---|
+| `npm ci` | exit 0 |
+| `npm run lint` | exit 0 |
+| `rm -rf .next && npx tsc --noEmit` | exit 0 |
+| `npx vitest run` (no DB) | exit 0 — 322/322 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 118/118 each |
+| `npm run test:db` (URL unset) | exit 1 ("RATIO_TEST_DATABASE_URL is not set … refusing to run") |
+| `npm run worker:build` | exit 0 |
+| `npm run build` | exit 0; `tsconfig.json`/`next-env.d.ts` restored; no AGENTS.md/CLAUDE.md |
+| `.skip/.only/.todo/it.fails` grep over `src`, `pages` | 0 hits |
+| Slice 1 compatibility (scratch worktree: `slice/01-focus-ingestion-worker` 83305f3 + 608d0bf, then removed) | test:db 224/224 (with `RATIO_TEST_S3_ENDPOINT` = local SeaweedFS), fast 419/419 |
+
+## R4.4 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+M2  OLD-path FOR SHARE removed (0001 l.377)            KILLED  1 failed | 2 passed (M2 tests)
+    × M2 (round 4): a fact DELETE racing an uncommitted publish … (expected false to be true: never blocked)
+    (the UPDATE twin survives by design: the NEW-path FOR SHARE also locks the batch)
+M1a runner check removed from migrateUp                KILLED  6 failed | 5 passed (11)
+M1b runner check removed from migrateDown              KILLED  1 failed | 10 passed (11)
+M1c SECURITY DEFINER catalog rule removed              KILLED  3 failed | 8 passed (11)
+M1d PUBLIC EXECUTE catalog rule removed                KILLED  2 failed | 9 passed (11)
+M1e reader/worker allow-list rule removed              KILLED  6 failed | 5 passed (11)
+M1f column-level privileges not enumerated             KILLED  2 failed | 9 passed (11)
+M1g classifier SECURITY DEFINER rule removed           KILLED  1 failed | 21 passed (22)
+M1h non-ratio functions expand without marker (old)    KILLED  1 failed | 21 passed (22)
+M1i non-ratio views expand without marker (old)        KILLED  1 failed | 21 passed (22)
+M1j marker read from last comment line only (old)      KILLED  1 failed | 21 passed (22)
+```
+
+## R4.5 Per-finding status
+
+| Finding | Status |
+|---|---|
+| M1 public SECURITY DEFINER / view / implicit PUBLIC EXECUTE | fixed in two layers: runner catalog check (privilegeModel.ts, up and down) + classifier rules; repro refused by each layer independently; killed by M1a–M1j |
+| M2 OLD-path FOR SHARE untested | delete twin + artifact-UPDATE twin; delete twin kills the mutation |
+
+## R4.6 Remaining gaps / owner flags
+
+- Fail closed: a database with extension functions in `public` (PUBLIC EXECUTE)
+  refuses migrations until they are revoked or moved (DESIGN §13). Owner flag.
+- The allow-list is code: a future migration that grants the worker something
+  new must update `REVIEWED_PRIVILEGES` in the same change.
+- PostgreSQL 17's `MAINTAIN` table privilege is not enumerated (CI and local
+  are 16); add it when upgrading.
+- CI not executed here (no push).
+
+# Round 5 — challenger round 4 (M1 + L1–L4)
+
+Base: 6b1e8bf. Local commits only (not pushed). 0001 unchanged. Raw logs:
+`scratchpad/r6/`.
+
+## R5.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| c62d794 | test(ingest): failing tests for challenger round 4 (post-check hooks, role identity, search_path, privilege kinds) | tests (red) |
+| 1234da0 | fix(ingest): catalog check is the last statement before COMMIT; pins hooks, role identity, search_path and more privilege kinds (round 4 M1, L1-L4) | fix |
+| 298142a | test(ingest): kill surviving round-5 mutations (trigger function owner, check-internal search_path pin, ratio-role memberships) | tests |
+| (this) | docs(evidence): Slice 0 round 5 | docs |
+
+## R5.2 Red (at c62d794)
+
+`privileges.db.test.ts` + `cli.db.test.ts`: **22 failed / 17 passed (39)**.
+Repro (c) and the L1 case were APPLIED (`runner must refuse: expected null
+not to be null`). Repros (a)/(b), the hooks, L2 and L4 were not refused, and
+status exited 0 on drift. L3 (the sequence branch) already passed, as
+expected: it exists to kill mutation P7/P8.
+
+**Incident during red (fixed):** the red L4 parameter test went through a
+committing migration. `GRANT SET ON PARAMETER session_replication_role TO
+ratio_worker` is stored in `pg_parameter_acl`, which is CLUSTER-GLOBAL, so it
+survived the drop of the test database. From the red run (~06:40Z) until it
+was found at the first green run, ratio_worker in the shared local cluster
+could `SET session_replication_role`. It was revoked by hand (`REVOKE SET ON
+PARAMETER session_replication_role FROM ratio_worker`), and `pg_parameter_acl`
+is empty again. The test now probes in a rolled-back transaction, so a
+mutated check can no longer commit the grant. Local dev cluster only.
+
+## R5.3 Verification (main checkout at 298142a)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 322/322 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 145/145 each |
+| `npm run test:db` (URL unset) | exit 1 ("RATIO_TEST_DATABASE_URL is not set") |
+| `npm run worker:build` / `npm run build` | 0 / 0 (tsconfig/next-env restored; no AGENTS.md/CLAUDE.md) |
+| skip/only/todo/it.fails grep | 0 |
+| Slice 1 compat: scratch worktree `slice/01-focus-ingestion-worker` d5918fa + 298142a (removed) | tsc 0, fast 428/428, test:db 269/269 ×2 |
+
+The first compat attempt was based on 93553b1. There the Slice 1 test
+`L-c … MAX_RUN_EXCEEDED` failed, and it also failed on 93553b1 WITHOUT this
+merge: it was Slice 1's own red commit. d5918fa (its fix, which landed during
+the run) passes with this merge.
+
+## R5.4 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+P1  check before ledger write (old order)            KILLED  (a, isolated)
+P2  no SET CONSTRAINTS ALL IMMEDIATE                  KILLED  (c, isolated)
+P3  trigger rule removed                              KILLED  (a), (b), unreviewed ratio trigger
+P3b trigger rule: owner/schema part removed           KILLED  re-owned reviewed trigger function (added in 298142a)
+P4  rule check removed                                KILLED
+P5  event trigger check removed                       KILLED
+P6  ledger policy/RLS check removed                   KILLED
+P7  both search_path pins removed                     KILLED  L1 migration test
+P7b only the check-internal pin removed               KILLED  check pins its own search_path (added in 298142a)
+P8  sequence branch removed                           KILLED  L3
+P9  database branch removed                           KILLED  L4 DO-block + 0001 allow-list equality
+P10 parameter branch removed                          KILLED
+P11 FDW branch removed                                KILLED
+P12 foreign server branch removed                     KILLED
+P13 large-object ACL branch removed                   KILLED
+P14 other-roles privilege check removed               KILLED  rename+impostor, LOGIN member extra grant, non-ratio role
+P15 missing ratio role check removed                  KILLED  rename without impostor
+P16 ratio role attribute checks removed               KILLED
+P17 ratio-role memberOf check removed                 KILLED  member of a no-privilege role (added in 298142a)
+P18 NOLOGIN member check removed                      KILLED
+P19 status ignores privilege problems                 KILLED  cli status test
+```
+Survived by design: removing only the `set_config` inside `migrationStatus`.
+The check pins search_path itself, so that line only protects the ledger read.
+
+## R5.5 Per-finding status
+
+| Finding | Status |
+|---|---|
+| M1 hooks after the check | fixed: order SQL → settle → ledger → check; triggers/rules/event triggers/ledger policies refused; repros (a)–(c) refused, nothing committed |
+| L1 operators / search_path | fixed (runner SET LOCAL + check-internal pin) |
+| L2 role rename | fixed in the catalog (robust option), see DESIGN §14 |
+| L3 sequence branch | tested (kills P8) |
+| L4 database / parameter / FDW / server / large objects | fixed + tested; types/languages documented as not enumerated |

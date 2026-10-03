@@ -1,5 +1,5 @@
-// Registry of every config-gated FOCUS-export connector added in the cloud-
-// connectors MVP (public cloud trio + Kubernetes + Nutanix). Centralizing the
+// Registry of every config-driven FOCUS-export connector: the public cloud trio,
+// Kubernetes (private cloud), and Nutanix (on-prem). Centralizing the
 // spec list keeps the seed registry and the mock client's dispatch in agreement
 // on exactly which sources route through `CloudConnectorAdapter`.
 //
