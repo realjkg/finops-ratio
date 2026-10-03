@@ -749,3 +749,29 @@ CASCADE` after apply left `--status` at `matches: true`.
   created on a table without a uuid-comparable `tenant_id` column. A table
   whose `tenant_id` column is not actually the tenant is a semantic error that
   review must catch (residual, documented).
+
+## 22. Round 13 — Copilot on 0ef880f (2 High) + challenger round-12 Low 1
+
+- **H1 — diagnostics leaked setting values.** Setting findings printed the
+  full `key=value` from `pg_db_role_setting`, so e.g. `ALTER DATABASE … SET
+  ratio.api_token = '<secret>'` was detected but its value reached
+  `migrate --status --json` (the CLI redactor only knows the connection URL).
+  The check now selects only the KEY in SQL (`split_part`), so the value never
+  reaches the process, and reports `setting <key> for role <r> in database
+  <d> …`. Sweep of every other message: manifest-diff and policy findings
+  print entry names, types, flags and md5 hashes only — never expression,
+  body, default or constraint text; the rest are identifiers (role, object,
+  rule, trigger names).
+- **H2 — explicit grants in system schemas.** The effective-privilege scan
+  skips `pg_catalog` / `information_schema` (PUBLIC's default catalog access
+  is the baseline), so `GRANT SELECT ON pg_catalog.pg_authid TO
+  ratio_reader` passed. A separate rule now inspects the explicit ACL entries
+  there — schema (`nspacl`), relation (`relacl`), column (`attacl`) and
+  function (`proacl`) — and refuses any entry naming a ratio role or a
+  non-superuser member of one (LOGIN members included): e.g. SELECT on
+  `pg_authid` or `pg_authid(rolpassword)`, EXECUTE on `pg_read_file` /
+  `lo_import` (not executable by default), USAGE on `information_schema`.
+  Entries for PUBLIC are not reported (baseline). Superusers are excluded
+  from "members" (`pg_has_role` is true for them on every role).
+- **Challenger Low 1.** A new ratio table with RLS ENABLED but not FORCED is
+  refused (test; kills the "FORCE not required" mutant).

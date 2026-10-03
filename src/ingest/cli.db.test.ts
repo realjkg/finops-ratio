@@ -171,7 +171,7 @@ describe('ingest CLI (real Postgres)', () => {
       expect(r.code, stmt).toBe(3);
       const doc = onlyJson(r.out) as StatusDoc & { privilegeProblems?: string[] };
       expect(doc.problems).toContain('PRIVILEGE_MODEL_VIOLATION');
-      expect(doc.privilegeProblems?.join('\n')).toMatch(/setting (session_replication_role|search_path)=/);
+      expect(doc.privilegeProblems?.join('\n')).toMatch(/setting (session_replication_role|search_path) for role/);
     }
   });
 
@@ -192,12 +192,27 @@ describe('ingest CLI (real Postgres)', () => {
         expect(r.code, stmt).toBe(3);
         const doc = onlyJson(r.out) as StatusDoc & { privilegeProblems?: string[] };
         expect(doc.matches).toBe(false);
-        expect(doc.privilegeProblems?.join('\n')).toMatch(/setting ratio\.tenant_id=/);
+        expect(doc.privilegeProblems?.join('\n')).toMatch(/setting ratio\.tenant_id for role/);
         await db.close(); // its pg_db_role_setting rows go with the database
       }
     } finally {
       const db = await freshDb();
       await db.pool.query(`DROP ROLE IF EXISTS ${login}`);
+    }
+  });
+
+  it('round 13 H1: --status --json names a secret-valued setting key but never prints its value', async () => {
+    const marker = 'SECRET-MARKER-cli-51d2';
+    const db = await freshDb();
+    const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
+    expect((await run(['migrate'], env)).code).toBe(0);
+    await db.pool.query(`DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET %s = %L', current_database(), 'ratio.api_token', '${marker}'); END $$`);
+    for (const argv of [['migrate', '--status', '--json'], ['migrate', '--status'], ['migrate']]) {
+      const r = await run(argv, env);
+      const all = r.out.concat(r.err).join('\n');
+      // `migrate` with nothing pending runs no check (status does); it must still never print the value.
+      if (argv.includes('--status')) expect(all, argv.join(' ')).toMatch(/ratio\.api_token/);
+      expect(all, argv.join(' ')).not.toContain(marker);
     }
   });
 

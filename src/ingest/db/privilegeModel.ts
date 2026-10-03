@@ -328,7 +328,7 @@ export function isSecurityRelevantSetting(key: string): boolean {
  */
 async function settingViolations(client: ClientBase): Promise<string[]> {
   const rows = await client.query<{
-    cfg: string;
+    key: string;
     rolname: string | null;
     datname: string | null;
     here: boolean;
@@ -338,7 +338,7 @@ async function settingViolations(client: ClientBase): Promise<string[]> {
   }>(
     `WITH ratio AS (SELECT oid, rolname FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])),
           cur AS (SELECT oid FROM pg_catalog.pg_database WHERE datname = pg_catalog.current_database())
-     SELECT cfg, r.rolname, d.datname,
+     SELECT pg_catalog.lower(pg_catalog.btrim(pg_catalog.split_part(cfg, '=', 1))) AS key, r.rolname, d.datname,
             (s.setdatabase = (SELECT oid FROM cur)) AS here,
             s.setrole = 0 AS all_roles_here,
             EXISTS (SELECT 1 FROM ratio x WHERE x.oid = s.setrole) AS ratio_role,
@@ -351,17 +351,60 @@ async function settingViolations(client: ClientBase): Promise<string[]> {
       ORDER BY 1, 2, 3`,
     [RATIO_ROLES],
   );
+  // Only the KEY and the scope are ever reported — never the value, which may
+  // be a secret (round 13, H1). The value is not even selected.
   const problems: string[] = [];
   for (const row of rows.rows) {
-    const key = row.cfg.split('=')[0].trim().toLowerCase();
+    const key = row.key;
     const where = `for role ${row.rolname ?? 'ALL'} in database ${row.datname ?? 'ALL'}`;
     if (row.ratio_role) {
-      problems.push(`setting ${row.cfg} ${where} is not allowed (ratio roles carry no setting defaults)`);
+      problems.push(`setting ${key} ${where} is not allowed (ratio roles carry no setting defaults)`);
     } else if (isSecurityRelevantSetting(key) && (row.here || row.all_roles_here || row.ratio_member)) {
-      problems.push(`setting ${row.cfg} ${where} is not allowed (security-relevant default)`);
+      problems.push(`setting ${key} ${where} is not allowed (security-relevant default)`);
     }
   }
   return problems;
+}
+
+/**
+ * Explicit ACL entries in the system schemas (pg_catalog, information_schema)
+ * that name a ratio role or any member of one (round 13, H2). The effective
+ * privilege scan skips these schemas because PUBLIC's default access to the
+ * catalogs is the normal baseline; but an explicit GRANT — e.g. SELECT on
+ * pg_catalog.pg_authid (or its rolpassword column), EXECUTE on
+ * pg_read_file / lo_import, USAGE on information_schema — is never part of
+ * the reviewed model. Covers schema (nspacl), relation (relacl), column
+ * (attacl) and function (proacl) ACLs.
+ */
+async function systemAclViolations(client: ClientBase): Promise<string[]> {
+  const rows = await client.query<{ role: string; what: string }>(
+    `WITH ratio AS (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])),
+          checked AS (
+            -- superusers are "members" of every role; they are not checked roles
+            SELECT r.oid, r.rolname FROM pg_catalog.pg_roles r
+             WHERE NOT r.rolsuper
+               AND EXISTS (SELECT 1 FROM ratio x WHERE r.oid = x.oid OR pg_catalog.pg_has_role(r.oid, x.oid, 'MEMBER'))
+          ),
+          sys AS (SELECT oid, nspname, nspacl FROM pg_catalog.pg_namespace WHERE nspname IN ('pg_catalog', 'information_schema')),
+          entries AS (
+            SELECT a.grantee, a.privilege_type || ' on schema ' || s.nspname AS what
+              FROM sys s CROSS JOIN LATERAL pg_catalog.aclexplode(s.nspacl) a
+            UNION ALL
+            SELECT a.grantee, a.privilege_type || ' on ' || s.nspname || '.' || c.relname
+              FROM pg_catalog.pg_class c JOIN sys s ON s.oid = c.relnamespace CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) a
+            UNION ALL
+            SELECT a.grantee, a.privilege_type || '(' || att.attname || ') on ' || s.nspname || '.' || c.relname
+              FROM pg_catalog.pg_attribute att JOIN pg_catalog.pg_class c ON c.oid = att.attrelid JOIN sys s ON s.oid = c.relnamespace
+              CROSS JOIN LATERAL pg_catalog.aclexplode(att.attacl) a
+             WHERE att.attacl IS NOT NULL
+            UNION ALL
+            SELECT a.grantee, a.privilege_type || ' on ' || s.nspname || '.' || p.proname || '(' || pg_catalog.oidvectortypes(p.proargtypes) || ')'
+              FROM pg_catalog.pg_proc p JOIN sys s ON s.oid = p.pronamespace CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) a
+          )
+     SELECT ch.rolname AS role, e.what FROM entries e JOIN checked ch ON ch.oid = e.grantee ORDER BY 1, 2`,
+    [RATIO_ROLES],
+  );
+  return rows.rows.map((r) => `${r.role} holds explicit ${r.what} (system-schema ACL entries for ratio roles and their members are never reviewed)`);
 }
 
 /** Triggers, rules, event triggers and ledger hooks (challenger round 4, M1). */
@@ -625,6 +668,7 @@ export async function privilegeModelViolations(client: ClientBase): Promise<stri
   problems.push(...(await foundationViolations(client)));
   problems.push(...(await policyViolations(client)));
   problems.push(...(await tableViolations(client)));
+  problems.push(...(await systemAclViolations(client)));
   problems.push(...(await roleViolations(client)));
   return problems;
 }
