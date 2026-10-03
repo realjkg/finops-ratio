@@ -27,7 +27,7 @@ afterAll(() => {
 
 function runCli(env: Record<string, string>) {
   return spawnSync(process.execPath, [CLI, 'migrate'], {
-    env: { PATH: process.env.PATH ?? '', RATIO_MIGRATE_DATABASE_URL: URL, ...env },
+    env: { PATH: process.env.PATH ?? '', RATIO_MIGRATE_DATABASE_URL: URL, ...env } as NodeJS.ProcessEnv,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     timeout: 60_000,
