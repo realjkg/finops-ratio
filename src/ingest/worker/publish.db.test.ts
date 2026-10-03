@@ -230,4 +230,31 @@ describe('zombie fencing', () => {
     const facts = await t.db.pool.query(`SELECT count(*)::int AS n FROM ratio.cost_facts WHERE tenant_id = $1`, [s.tenantId]);
     expect(facts.rows[0].n).toBe(6);
   });
+
+  it('P6 an expired lease stops a zombie at its next chunk even without a takeover', async () => {
+    const s = await seedTenantSource(t.db.pool);
+    const g = gate();
+    let chunks = 0;
+    const runA = sync(s, new FakeFocusSource([period('r/a.csv.gz', csvGz(rowsOf(P, 6, '2.00')))]), {
+      settings: { limits: { insertChunkRows: 2 } },
+      hooks: {
+        afterChunk: async () => {
+          chunks++;
+          if (chunks === 1) {
+            g.reached();
+            await g.released;
+          }
+        },
+      },
+    });
+    await g.arrived;
+    await expireLeases(t.db.pool, s.tenantId, s.sourceId);
+    g.release();
+    await expect(runA).rejects.toMatchObject({ code: 'LEASE_LOST' });
+    expect(chunks).toBe(1);
+    const facts = await t.db.pool.query(`SELECT count(*)::int AS n FROM ratio.cost_facts WHERE tenant_id = $1`, [s.tenantId]);
+    expect(facts.rows[0].n).toBe(2);
+    expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({});
+  });
 });
+
