@@ -492,6 +492,34 @@ export function inWindow(row: RawSourceRow, window: CostWindow): boolean {
 }
 
 /**
+ * True only when `message` is exactly one of validateFocusRecords' own forms
+ * for `artifact`: `<artifact>: invalid FOCUS row N: <reason>` where the reason
+ * is a fixed sentence about a KNOWN column. Anything else (e.g. a runtime
+ * TypeError from a hostile non-primitive cell) is not caller-safe text.
+ */
+export function isFocusRowValidationMessage(message: string, artifact: string): boolean {
+  const prefix = `${artifact}: invalid FOCUS row `;
+  if (!message.startsWith(prefix)) return false;
+  const m = /^[1-9][0-9]*: ([\s\S]*)$/.exec(message.slice(prefix.length));
+  if (!m) return false;
+  const reason = m[1];
+  if (reason === 'row is not an object') return true;
+  const REQUIRED = 'missing required column ';
+  if (reason.startsWith(REQUIRED)) {
+    return (REQUIRED_COLUMNS as readonly string[]).includes(reason.slice(REQUIRED.length));
+  }
+  const column = (suffix: string): string | null =>
+    reason.endsWith(suffix) ? reason.slice(0, reason.length - suffix.length) : null;
+  const num = column(' is not a number');
+  if (num !== null) return NUMERIC_COLUMNS.has(num);
+  const date = column(' is not a valid date');
+  if (date !== null) return DATE_COLUMNS.has(date);
+  const currency = column(' is not an ISO-4217 currency code');
+  if (currency !== null) return CURRENCY_COLUMNS.has(currency);
+  return false;
+}
+
+/**
  * The shared FOCUS row validator: every record is coerced, and an invalid one
  * throws `<artifact>: invalid FOCUS row N: <reason>` (1-based) — it is never
  * dropped or silently normalized. No window filtering.

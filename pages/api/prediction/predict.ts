@@ -19,6 +19,9 @@ function classify(err: unknown): string | null {
   return null;
 }
 
+const CHANGE_TYPES = ['model_switch', 'demand_shape', 'scale', 'budget'] as const;
+const UNKNOWN_TYPE_MESSAGE = `\`type\` must be one of ${CHANGE_TYPES.join(', ')}`;
+
 function isProposedChange(body: unknown): body is ProposedChange {
   return (
     typeof body === 'object' &&
@@ -42,6 +45,13 @@ async function handler(
     res
       .status(400)
       .json({ error: 'A ProposedChange with `type` and `workloadId` is required' });
+    return;
+  }
+
+  // Fixed 400 for an unknown change type (never echoed); previously it fell
+  // through the predictor switch and surfaced as a 500.
+  if (!(CHANGE_TYPES as readonly unknown[]).includes((req.body as { type?: unknown }).type)) {
+    res.status(400).json({ error: UNKNOWN_TYPE_MESSAGE });
     return;
   }
 

@@ -28,6 +28,7 @@ import { FOCUS_VERSIONS } from '@/costsource';
 import {
   assertValidWindow,
   INVALID_WINDOW_MESSAGE,
+  isFocusRowValidationMessage,
   validateFocusRecords,
 } from '@/costsource/transports/focusExport';
 import { withInternalErrorGuard } from '@/server/gateway/internalError';
@@ -97,9 +98,13 @@ async function handler(
     // Tags and x_* extension columns are preserved for direct ingest.
     validated = validateFocusRecords(rows as Record<string, unknown>[], sourceId, { keepExtensions: true });
   } catch (err) {
+    // Forward ONLY the validator's own grammar —
     // `<known sourceId>: invalid FOCUS row N: <known column> <fixed reason>` —
-    // composed only of server-known tokens; cell values are never quoted.
-    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    // which never quotes a cell value. Anything else (e.g. a TypeError from a
+    // hostile non-primitive cell) is the guard's generic 500 + requestId.
+    const message = err instanceof Error ? err.message : String(err);
+    if (!isFocusRowValidationMessage(message, sourceId)) throw err;
+    res.status(400).json({ error: message });
     return;
   }
 
