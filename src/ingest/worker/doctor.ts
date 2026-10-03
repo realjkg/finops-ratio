@@ -92,7 +92,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<{ pass: boolean; c
         name: 'role_safety',
         status: problems.length ? 'fail' : 'pass',
         ...(problems.length ? { detail: problems.join('; ') } : {}),
-        data: { superuser: role.superuser, bypassRls: role.bypassRls, canBecomePrivileged: role.canBecomePrivileged, ownerMember: role.ownerMember, workerMember: role.workerMember },
+        data: { superuser: role.superuser, bypassRls: role.bypassRls, canBecomePrivileged: role.canBecomePrivileged, unsafeCapabilities: role.unsafeCapabilities, ownerMember: role.ownerMember, workerMember: role.workerMember },
       });
     } catch (e) {
       checks.push({ name: 'role_safety', status: 'fail', detail: errText(e, secrets) });

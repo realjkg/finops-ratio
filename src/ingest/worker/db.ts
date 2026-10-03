@@ -38,17 +38,37 @@ export interface RoleReport {
   superuser: boolean;
   bypassRls: boolean;
   canBecomePrivileged: boolean;
+  unsafeCapabilities: string[];
   ownerMember: boolean;
   workerMember: boolean;
 }
 
 export async function inspectRole(pool: Pick<Pool, 'query'>): Promise<RoleReport> {
   const r = await pool.query(`
+    WITH RECURSIVE connected_roles(oid) AS (
+      SELECT oid FROM pg_catalog.pg_roles WHERE rolname IN (current_user, session_user)
+      UNION
+      SELECT m.roleid FROM pg_catalog.pg_auth_members m
+        JOIN connected_roles c ON c.oid = m.member
+    )
     SELECT current_user::text AS cu, session_user::text AS su,
       (SELECT bool_or(rolsuper) FROM pg_catalog.pg_roles WHERE rolname IN (current_user, session_user)) AS superuser,
       (SELECT bool_or(rolbypassrls) FROM pg_catalog.pg_roles WHERE rolname IN (current_user, session_user)) AS bypass,
-      EXISTS (SELECT 1 FROM pg_catalog.pg_roles r WHERE (r.rolsuper OR r.rolbypassrls)
-              AND (pg_catalog.pg_has_role(current_user, r.oid, 'MEMBER') OR pg_catalog.pg_has_role(session_user, r.oid, 'MEMBER'))) AS privileged,
+      EXISTS (SELECT 1 FROM connected_roles c JOIN pg_catalog.pg_roles r ON r.oid = c.oid
+              WHERE r.rolsuper OR r.rolbypassrls) AS privileged,
+      (SELECT COALESCE(array_agg(DISTINCT capability ORDER BY capability), ARRAY[]::text[])
+         FROM connected_roles c JOIN pg_catalog.pg_roles r ON r.oid = c.oid
+         CROSS JOIN LATERAL (VALUES
+           (CASE WHEN r.rolsuper THEN 'SUPERUSER'::text END),
+           (CASE WHEN r.rolbypassrls THEN 'BYPASSRLS'::text END),
+           (CASE WHEN r.rolreplication THEN 'REPLICATION'::text END),
+           (CASE WHEN r.rolcreaterole THEN 'CREATEROLE'::text END),
+           (CASE WHEN r.rolcreatedb THEN 'CREATEDB'::text END),
+           (CASE WHEN r.rolname = 'pg_read_server_files' THEN 'pg_read_server_files'::text END),
+           (CASE WHEN r.rolname = 'pg_write_server_files' THEN 'pg_write_server_files'::text END),
+           (CASE WHEN r.rolname = 'pg_execute_server_program' THEN 'pg_execute_server_program'::text END)
+         ) AS capabilities(capability)
+        WHERE capability IS NOT NULL) AS unsafe_capabilities,
       EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ratio_owner')
         AND (pg_catalog.pg_has_role(current_user, 'ratio_owner', 'MEMBER') OR pg_catalog.pg_has_role(session_user, 'ratio_owner', 'MEMBER')) AS owner_member,
       EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ratio_worker')
@@ -60,6 +80,7 @@ export async function inspectRole(pool: Pick<Pool, 'query'>): Promise<RoleReport
     superuser: !!row.superuser,
     bypassRls: !!row.bypass,
     canBecomePrivileged: !!row.privileged,
+    unsafeCapabilities: row.unsafe_capabilities,
     ownerMember: !!row.owner_member,
     workerMember: !!row.worker_member,
   };
@@ -70,6 +91,8 @@ export function roleProblems(r: RoleReport): string[] {
   if (r.superuser) p.push('connected role is a superuser (RLS would be bypassed)');
   if (r.bypassRls) p.push('connected role has BYPASSRLS');
   if (r.canBecomePrivileged && !r.superuser && !r.bypassRls) p.push('connected role is a member of a superuser or BYPASSRLS role');
+  const otherUnsafeCapabilities = r.unsafeCapabilities.filter((capability) => capability !== 'SUPERUSER' && capability !== 'BYPASSRLS');
+  if (otherUnsafeCapabilities.length) p.push(`connected role has unsafe capabilities: ${otherUnsafeCapabilities.join(', ')}`);
   if (r.ownerMember) p.push('connected role is a member of ratio_owner (could disable RLS)');
   if (!r.workerMember) p.push('connected role is not a member of ratio_worker');
   return p;

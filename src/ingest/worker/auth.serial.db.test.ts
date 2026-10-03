@@ -42,6 +42,33 @@ describe('worker refuses dangerous database roles (serial)', () => {
     await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE' });
   });
 
+  for (const attr of ['REPLICATION', 'CREATEROLE', 'CREATEDB']) {
+    it(`A1 refuses a ${attr} login even if it is a ratio_worker member`, async () => {
+      const l = await createLogin(db, ['ratio_worker'], [attr]);
+      logins.push(l);
+      await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE' });
+    });
+
+    it(`A1 refuses a ratio_worker login that can assume a ${attr} role`, async () => {
+      const role = `ratio_test_unsafe_${process.pid}_${crypto.randomBytes(4).toString('hex')}`;
+      await db.pool.query(`CREATE ROLE ${role} NOLOGIN ${attr}`);
+      extraRoles.push(role);
+      const l = await createLogin(db, ['ratio_worker']);
+      logins.push(l);
+      await db.pool.query(`GRANT ${role} TO ${l.name}`);
+      await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE' });
+    });
+  }
+
+  for (const role of ['pg_read_server_files', 'pg_write_server_files', 'pg_execute_server_program']) {
+    it(`A1 refuses a ratio_worker login that can assume ${role}`, async () => {
+      const l = await createLogin(db, ['ratio_worker']);
+      logins.push(l);
+      await db.pool.query(`GRANT ${role} TO ${l.name}`);
+      await expect(check(l.url)).rejects.toMatchObject({ code: 'UNSAFE_DB_ROLE' });
+    });
+  }
+
   it('A1 refuses a login that can SET ROLE to a superuser role', async () => {
     const su = `ratio_test_su_${crypto.randomBytes(4).toString('hex')}`;
     await db.pool.query(`CREATE ROLE ${su} NOLOGIN SUPERUSER`);
