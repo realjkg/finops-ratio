@@ -47,8 +47,9 @@ export const DEFAULT_CONFIG = Object.freeze({
   // Our own governance workflow's check runs DO appear on the PR head SHA:
   // pull_request_target job runs attach to it (PR #47). A run is "ours" only if
   // ALL hold: app = GitHub Actions, workflow path = governance.yml, event =
-  // pull_request_target (the only event whose suites attach to a PR head; a
-  // `pull_request` or `workflow_dispatch` run executes the ref's own code),
+  // pull_request_target (`pull_request` suites also attach to the PR head,
+  // as CI's do, but they and `workflow_dispatch` runs execute PR/ref-controlled
+  // code, so they are never trusted as ours),
   // and the workflow run's head repository = the PR's base repository.
   // Of ours:
   //  - eligibility targets / merge eligibility (#n) are this decision's own

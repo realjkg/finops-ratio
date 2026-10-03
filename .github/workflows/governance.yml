@@ -94,7 +94,9 @@ jobs:
     steps:
       - name: Checkout governance scripts from the base/default branch (never the PR head)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        # No `ref`: every trigger here resolves github.sha on the base/default branch.
+        # No `ref`: pull_request_target, issue_comment, workflow_run and schedule resolve
+        # github.sha on the base/default branch. workflow_dispatch checks out the
+        # dispatched ref, which is why dispatch runs never count as the gate's own.
         with:
           persist-credentials: false
           sparse-checkout: scripts/governance
@@ -136,7 +138,9 @@ jobs:
     steps:
       - name: Checkout governance scripts from the base/default branch (never the PR head)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        # No `ref`: every trigger here resolves github.sha on the base/default branch.
+        # No `ref`: pull_request_target, issue_comment, workflow_run and schedule resolve
+        # github.sha on the base/default branch. workflow_dispatch checks out the
+        # dispatched ref, which is why dispatch runs never count as the gate's own.
         with:
           persist-credentials: false
           sparse-checkout: scripts/governance

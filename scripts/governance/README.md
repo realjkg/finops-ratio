@@ -86,9 +86,10 @@ Auto-merge (squash, pinned to the evaluated head SHA) is enabled only when
   as ours only when all of these hold, and never by name alone:
   - the app is GitHub Actions (15368);
   - the workflow path is `.github/workflows/governance.yml`;
-  - the event is `pull_request_target`, the only event whose suites attach to
-    a PR head (a `pull_request` or `workflow_dispatch` run executes that ref's
-    own code, so it never counts as ours);
+  - the event is `pull_request_target`. `pull_request` suites also attach to
+    the PR head (CI's do), but they, like `workflow_dispatch` runs, execute
+    PR- or ref-controlled code, so they are never trusted as ours. Attachment
+    is not trust;
   - the workflow run's head repository is the PR's base repository.
 
   Each check run's suite is resolved to its workflow run, by `check_suite_id`
