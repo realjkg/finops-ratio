@@ -55,20 +55,43 @@ function parseMigrateArgs(args: string[]): MigrateArgs | string {
   return parsed;
 }
 
-/** Removes the connection URL and its credentials from any text we might print. */
-function redactor(url: string | undefined): (s: string) => string {
+const safeDecode = (v: string): string => {
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return v;
+  }
+};
+
+/**
+ * Removes the connection string and its credentials from any text we might
+ * print: the literal URL, URL userinfo, `password=` in a URL query string or
+ * a keyword DSN (quoted or not), and — independent of the configured URL —
+ * any `password=<value>` appearing in the text.
+ */
+export function redactor(url: string | undefined): (s: string) => string {
   const secrets: string[] = [];
   if (url) {
     secrets.push(url);
     try {
       const u = new URL(url);
-      if (u.password) secrets.push(u.password, decodeURIComponent(u.password));
-      if (u.username && u.username.length >= 3) secrets.push(u.username, decodeURIComponent(u.username));
+      if (u.password) secrets.push(u.password, safeDecode(u.password));
+      if (u.username && u.username.length >= 3) secrets.push(u.username, safeDecode(u.username));
+      for (const [k, v] of u.searchParams) if (/pass/i.test(k) && v) secrets.push(v, encodeURIComponent(v));
     } catch {
-      // unparseable URL: only the literal string is redacted
+      // not a URL (e.g. keyword DSN): handled below
+    }
+    for (const m of url.matchAll(/(?:^|[\s?&;])[a-z_]*pass[a-z_]*\s*=\s*(?:'((?:[^'\\]|\\.)*)'|([^\s&;]+))/gi)) {
+      const v = m[1] ?? m[2];
+      if (v) secrets.push(v, safeDecode(v));
     }
   }
-  return (s: string) => secrets.filter(Boolean).reduce((acc, sec) => acc.split(sec).join('[redacted]'), s);
+  const unique = [...new Set(secrets.filter((x) => x.length > 0))].sort((a, b) => b.length - a.length);
+  return (s: string) => {
+    let out = unique.reduce((acc, sec) => acc.split(sec).join('[redacted]'), s);
+    out = out.replace(/(password\s*=\s*)('(?:[^'\\]|\\.)*'|[^\s&;"]+)/gi, '$1[redacted]');
+    return out;
+  };
 }
 
 export async function main(argv: string[], env: Env, io: CliIO): Promise<number> {

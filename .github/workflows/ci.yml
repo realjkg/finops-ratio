@@ -90,7 +90,7 @@ jobs:
           npm run worker:build
           npm run -s worker -- migrate
           npm run -s worker -- migrate --status --json
-          RATIO_ALLOW_DOWN_MIGRATIONS=1 npm run -s worker -- migrate --down 1
+          RATIO_ENV=ci RATIO_ALLOW_DOWN_MIGRATIONS=1 npm run -s worker -- migrate --down 1
           npm run -s worker -- migrate
           npm run -s worker -- migrate --status --json
 
