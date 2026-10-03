@@ -520,6 +520,12 @@ describe('round 17 (challenger L3): quoted identifiers are case-sensitive, unquo
     ['CREATE TYPE ratio."E" AS ENUM (\'a\');', 'REVOKE USAGE ON TYPE ratio.e FROM PUBLIC;'],
     ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.\"F\"() RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio.f() FROM PUBLIC;'],
     ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.f() RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio."F"() FROM PUBLIC;'],
+    // a quoted name containing a dot is ONE identifier (a table "ratio.t1" on the search_path), not schema ratio + table t1
+    ['CREATE TABLE "ratio.t1" (x int);', 'REVOKE ALL ON ratio.t1 FROM PUBLIC;'],
+    ['CREATE TABLE ratio.t1 (x int);', 'REVOKE ALL ON "ratio.t1" FROM PUBLIC;'],
+    // the classifier's masking turns non-identifier characters inside quotes into `_`: names must come from the original text
+    ['CREATE TABLE "ratio.t1" (x int);', 'REVOKE ALL ON ratio_t1 FROM PUBLIC;'],
+    ['CREATE TABLE "a b" (x int);', 'REVOKE ALL ON a_b FROM PUBLIC;'],
   ];
   for (const [create, revoke] of contract) {
     it(`contract: ${create.split('\n').pop()} then ${revoke}`, () => {
@@ -533,6 +539,9 @@ describe('round 17 (challenger L3): quoted identifiers are case-sensitive, unquo
     ['CREATE SCHEMA "S";', 'REVOKE ALL ON SCHEMA "S" FROM PUBLIC;'],
     ['CREATE SCHEMA S;', 'REVOKE ALL ON SCHEMA "s" FROM PUBLIC;'],
     ["-- ratio:allow-function helper\nCREATE FUNCTION ratio.\"F\"(x INT) RETURNS int LANGUAGE sql AS 'select 1';", 'REVOKE EXECUTE ON FUNCTION ratio."F"(int) FROM PUBLIC;'],
+    ['CREATE TABLE "ratio.t1" (x int);', 'REVOKE ALL ON "ratio.t1" FROM PUBLIC;'],
+    // PostgreSQL folds only ASCII letters of unquoted names (UTF8): unquoted É IS "É"
+    ['CREATE TABLE ratio.É (x int);', 'REVOKE ALL ON ratio."É" FROM PUBLIC;'],
   ];
   for (const [create, revoke] of expand) {
     it(`expand: ${create.split('\n').pop()} then ${revoke}`, () => {
