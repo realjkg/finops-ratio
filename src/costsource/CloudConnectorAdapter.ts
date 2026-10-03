@@ -1,19 +1,19 @@
-// CloudConnectorAdapter — the shared FOCUS-export adapter for the cloud-
-// connectors MVP. One adapter serves the public-cloud trio (Azure / AWS / GCP),
-// Kubernetes (OpenCost / Kubecost), and Nutanix, because all five do the same
-// thing: fetch a FOCUS-formatted export from a configured endpoint and hand the
+// CloudConnectorAdapter — the shared FOCUS-export adapter. One adapter serves
+// the public-cloud trio (Azure / AWS / GCP), Kubernetes (OpenCost / Kubecost),
+// Nutanix, and the generic FOCUS endpoint, because all of them do the same
+// thing: fetch a FOCUS-formatted export from a configured location and hand the
 // rows to the EXISTING version-negotiation shim (`normalizeRows`, reused not
 // reimplemented) up to the v1.4 canonical model. Only auth/fetch is source-
-// specific — captured behind the injected `FocusExportTransport` seam.
+// specific — captured behind the `FocusExportTransport` seam, whose live
+// implementations live in ./transports/ and are named by each `ConnectorSpec`.
 //
-// SHIPS DARK, exactly like PointFiveLiveAdapter. A default build resolves every
-// connector to `disabled` (feature flag OFF) and makes ZERO network calls:
-//   - healthCheck() returns an honest "not authed / ships dark" state
+// CREDENTIAL-DRIVEN. With no env set a connector is `available` and makes ZERO
+// network calls:
+//   - healthCheck() returns an honest "ready to connect" state
 //   - fetchCostRows() throws a typed "not configured" error
-// Even on the `configured` path the live transport is a THIN, UNWIRED SEAM in
-// this MVP: the default transport factory throws a clear "not wired" error rather
-// than silently inventing data. A real cloud subscription wires a concrete
-// transport by injecting `transportFactory`; tests do the same with a fake.
+// Once its env is present it goes live through the spec's transport. A live
+// failure is surfaced as an honest health state / thrown error — the adapter
+// never substitutes seed data for a real source. Tests inject a fake transport.
 
 import type {
   CostRowsResult,
@@ -33,12 +33,11 @@ import {
 } from './connectorConfig';
 
 /**
- * The cloud-specific seam: fetch FOCUS-export rows + probe reachability. Tests
- * and (eventually) a live integration inject a concrete implementation; the
- * default build never reaches a real one.
+ * The source-specific seam: fetch FOCUS-export rows + probe reachability. Live
+ * implementations are in ./transports/; tests inject a fake.
  */
 export interface FocusExportTransport {
-  /** Lightweight reachability / auth probe against the export endpoint. */
+  /** Lightweight reachability / auth probe; resolves true or throws why not. */
   ping(): Promise<boolean>;
   /** FOCUS-shaped export rows for a window (the source's native version). */
   fetchExportRows(window: CostWindow): Promise<RawSourceRow[]>;
@@ -49,23 +48,7 @@ export type FocusExportTransportFactory = (
   credentials: Record<string, string>,
 ) => FocusExportTransport;
 
-// Default transport: the live FOCUS-export wiring is intentionally NOT built in
-// this MVP. The connectors ship dark; once a subscription exists, inject a
-// concrete transport. Until then every method throws so a misconfiguration is
-// loud, never a silent fabrication of cost data.
-const UNWIRED_DETAIL =
-  'live FOCUS-export transport not wired (MVP seam) — inject a transport to go live';
-
-const defaultUnwiredTransportFactory: FocusExportTransportFactory = () => ({
-  ping: async () => {
-    throw new Error(UNWIRED_DETAIL);
-  },
-  fetchExportRows: async () => {
-    throw new Error(UNWIRED_DETAIL);
-  },
-});
-
-/** Injectable dependencies — tests override env + transport; no network in CI. */
+/** Injectable dependencies — tests override env + transport; no network in CI. Defaults: process.env + the spec's live transport. */
 export interface CloudConnectorAdapterDeps {
   env?: Record<string, string | undefined>;
   transportFactory?: FocusExportTransportFactory;
@@ -80,7 +63,7 @@ export class CloudConnectorAdapter {
     deps: CloudConnectorAdapterDeps = {},
   ) {
     this.status = resolveConnectorStatus(spec, deps.env ?? process.env);
-    this.transportFactory = deps.transportFactory ?? defaultUnwiredTransportFactory;
+    this.transportFactory = deps.transportFactory ?? spec.transport;
   }
 
   /** Descriptor for `listSources()` — `configured` reflects the live status. */
@@ -88,7 +71,7 @@ export class CloudConnectorAdapter {
     return connectorDescriptor(this.spec, this.status);
   }
 
-  /** True only when the flag is on and all required credentials are present. */
+  /** True only when the kill-switch is not off and all required env is present. */
   get isConfigured(): boolean {
     return this.status.state === 'configured';
   }
@@ -101,7 +84,7 @@ export class CloudConnectorAdapter {
       checkedAt: new Date().toISOString(),
     };
 
-    // Dark / unconfigured: honest state, no network call.
+    // Not configured (available / incomplete / disabled): honest state, no network call.
     if (this.status.state !== 'configured') {
       return {
         ...base,
@@ -155,7 +138,7 @@ export class CloudConnectorAdapter {
     if (this.status.state !== 'configured') {
       throw new Error(
         `${this.spec.name} not configured (${this.status.state}) — cannot ${action}; ` +
-          `ships dark until ${this.spec.flagEnv} is on and credentials are set.`,
+          connectorStatusNote(this.spec, this.status),
       );
     }
     return this.status.credentials;

@@ -1,17 +1,59 @@
 // Connectors — Wave 4 Slice 4. Real object over the existing CostSourceClient seam.
 // Lists all registered cost-source adapters with identity, FOCUS version mapping,
-// connection status, and honest affordances. No new backend, no new deps.
-// Controlled-egress paths (live PointFive broker) carry the reserved warm accent.
+// server-resolved connection status, the env that connects each one, and a live
+// "Test connection" probe. Controlled-egress paths (live PointFive broker) carry
+// the reserved warm accent.
+//
+// Connection status depends on SERVER env, which the browser cannot see, so the
+// page loads it from /api/costsource/sources. The first render uses the
+// env-independent registry (`sourcesForEnv({})`) so it matches the static
+// prerender exactly; if the API is unreachable (static hosting, offline) that
+// view stays, every connector honestly reads as available, and the probe is
+// hidden.
 
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ConnectorCard } from '@/connectors/ConnectorCard';
-import { COST_SOURCES } from '@/costsource/seed';
+import { sourcesForEnv } from '@/costsource/seed';
+import { createCostSourceClient } from '@/costsource';
+import type { CostSourceDescriptor, SourceCoverage } from '@/costsource';
 
-// Split at module level: both groups are stable seed data (deterministic in mock mode).
-const connected = COST_SOURCES.filter((s) => s.configured);
-const available = COST_SOURCES.filter((s) => !s.configured);
+const COVERAGE_ORDER: SourceCoverage[] = ['public_cloud', 'private_cloud', 'on_prem'];
+const COVERAGE_LABEL: Record<SourceCoverage, string> = {
+  public_cloud: 'Public cloud',
+  private_cloud: 'Private cloud',
+  on_prem: 'On-prem',
+};
+
+const OFFLINE_SOURCES = sourcesForEnv({});
 
 export default function Connectors() {
+  const [sources, setSources] = useState<CostSourceDescriptor[]>(OFFLINE_SOURCES);
+  const [live, setLive] = useState(false);
+  const client = useMemo(() => createCostSourceClient('live'), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    client
+      .listSources()
+      .then((list) => {
+        if (!cancelled) {
+          setSources(list);
+          setLive(true);
+        }
+      })
+      .catch(() => {
+        // Offline / static hosting: keep the bundled registry, no probe.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  const connected = sources.filter((s) => s.configured);
+  const available = sources.filter((s) => !s.configured);
+  const onTest = live ? (id: string) => client.healthCheck(id) : undefined;
+
   return (
     <div className="flex h-full flex-col bg-void font-body text-txt">
       <main className="flex-1 overflow-y-auto px-6 py-6">
@@ -22,6 +64,26 @@ export default function Connectors() {
             <p className="mt-1 text-sm text-sub">
               Cost data enters through two ingest doors into one internal FOCUS v1.4 model.
             </p>
+            {/* Reach: what each deployment target can connect, and what is live. */}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {COVERAGE_ORDER.map((cov) => {
+                const all = sources.filter((s) => s.coverage === cov);
+                const on = all.filter((s) => s.configured).length;
+                return (
+                  <span
+                    key={cov}
+                    className="rounded border border-edge bg-slab px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-sub"
+                  >
+                    {COVERAGE_LABEL[cov]} · <span className="text-value">{on}</span>/{all.length} live
+                  </span>
+                );
+              })}
+              {!live && (
+                <span className="rounded border border-edge px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-dim">
+                  Offline view — status from bundled registry
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Two-ingest-doors model */}
@@ -96,7 +158,7 @@ export default function Connectors() {
               </h2>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {connected.map((src) => (
-                  <ConnectorCard key={src.id} source={src} />
+                  <ConnectorCard key={src.id} source={src} onTest={onTest} />
                 ))}
               </div>
             </section>
@@ -109,13 +171,14 @@ export default function Connectors() {
                 Available — {available.length} adapter{available.length !== 1 ? 's' : ''}
               </h2>
               <p className="mb-3 text-[12px] text-dim">
-                Ships dark by default. Set the feature flag and credentials for each
-                connector to activate it. No network calls are made until a connector is
-                fully configured.
+                Each connector goes live automatically once its environment variables are
+                set on the server — no feature flag, no code change. Nothing calls out until
+                a connector is fully configured; set its <span className="font-mono">COSTSOURCE_*_LIVE=false</span>{' '}
+                kill-switch to keep one off.
               </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {available.map((src) => (
-                  <ConnectorCard key={src.id} source={src} />
+                  <ConnectorCard key={src.id} source={src} onTest={onTest} />
                 ))}
               </div>
             </section>

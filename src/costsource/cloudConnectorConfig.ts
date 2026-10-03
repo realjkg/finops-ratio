@@ -6,11 +6,11 @@
 // version-negotiation shim upgrades whatever FOCUS version they emit (documented
 // v1.0) up to the v1.4 canonical model. Only auth/fetch is cloud-specific.
 //
-// All three SHIP DARK: a per-cloud feature flag is OFF by default and, even when
-// ON, the connector only goes live once its credentials are present. Status
-// resolution is the generic, pure `resolveConnectorStatus` over a `ConnectorSpec`
-// — see connectorConfig.ts. In a default build all three resolve to `disabled`
-// and make zero network calls.
+// All three are CREDENTIAL-DRIVEN: each goes live as soon as its env is set,
+// and its COSTSOURCE_*_LIVE flag is a kill-switch (set it to `false` to force a
+// connector off). Status resolution is the generic, pure
+// `resolveConnectorStatus` over a `ConnectorSpec` — see connectorConfig.ts. With
+// no env set, all three resolve to `available` and make zero network calls.
 
 import type { CostSourceDescriptor } from './CostSourceClient';
 import {
@@ -19,6 +19,9 @@ import {
   type ConnectorSpec,
   type ConnectorStatus,
 } from './connectorConfig';
+import { createAzureBlobTransport } from './transports/azureBlobTransport';
+import { createAwsS3Transport } from './transports/awsS3Transport';
+import { createGcpBigQueryTransport } from './transports/gcpBigQueryTransport';
 
 type EnvRecord = Record<string, string | undefined>;
 
@@ -27,7 +30,7 @@ export const AZURE_SOURCE_ID = 'azure-cost-management';
 export const AWS_SOURCE_ID = 'aws-data-exports';
 export const GCP_SOURCE_ID = 'gcp-bigquery-focus';
 
-/** Per-cloud feature-flag env vars. OFF unless explicitly truthy. */
+/** Per-cloud kill-switch env vars. Unset = auto (live once configured); `false` = off. */
 export const AZURE_LIVE_FLAG_ENV = 'COSTSOURCE_AZURE_LIVE';
 export const AWS_LIVE_FLAG_ENV = 'COSTSOURCE_AWS_LIVE';
 export const GCP_LIVE_FLAG_ENV = 'COSTSOURCE_GCP_LIVE';
@@ -50,6 +53,7 @@ export const AZURE_CONNECTOR_SPEC: ConnectorSpec = {
     sasToken: 'AZURE_FOCUS_SAS',
   },
   liveSummary: 'Azure Cost Management FOCUS export from a storage container',
+  transport: (c) => createAzureBlobTransport({ exportUrl: c.exportUrl, sasToken: c.sasToken }),
 };
 
 export const AWS_CONNECTOR_SPEC: ConnectorSpec = {
@@ -66,7 +70,22 @@ export const AWS_CONNECTOR_SPEC: ConnectorSpec = {
     accessKeyId: 'AWS_ACCESS_KEY_ID',
     secretAccessKey: 'AWS_SECRET_ACCESS_KEY',
   },
+  optionalEnv: {
+    sessionToken: 'AWS_SESSION_TOKEN',
+    prefix: 'AWS_FOCUS_EXPORT_PREFIX',
+    endpoint: 'AWS_S3_ENDPOINT',
+  },
   liveSummary: 'AWS Data Exports "FOCUS 1.0 with AWS columns" from an S3 bucket',
+  transport: (c) =>
+    createAwsS3Transport({
+      bucket: c.bucket,
+      region: c.region,
+      accessKeyId: c.accessKeyId,
+      secretAccessKey: c.secretAccessKey,
+      sessionToken: c.sessionToken,
+      prefix: c.prefix,
+      endpoint: c.endpoint,
+    }),
 };
 
 export const GCP_CONNECTOR_SPEC: ConnectorSpec = {
@@ -83,6 +102,8 @@ export const GCP_CONNECTOR_SPEC: ConnectorSpec = {
     credentials: 'GOOGLE_APPLICATION_CREDENTIALS',
   },
   liveSummary: 'GCP BigQuery FOCUS export billing dataset',
+  transport: (c) =>
+    createGcpBigQueryTransport({ dataset: c.dataset, projectId: c.projectId, credentials: c.credentials }),
 };
 
 /** The public-cloud connector specs, in Azure / AWS / GCP order. */

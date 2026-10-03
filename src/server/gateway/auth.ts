@@ -5,7 +5,10 @@
 // Offline/CI-safety invariant: with NO token configured AND the offline-safe
 // mock provider (the default), auth is NOT enforced — the demo and CI stay green
 // with zero env. Enforcement turns on only when a token is configured OR a live
-// provider (claude | openai | openllm) is selected.
+// AI provider (anything but mock, aliases included — see src/ai/providers.ts) or
+// live change-management provider is selected.
+
+import { LIVE_AI_PROVIDERS, normalizeAIProvider } from '@/ai/providers';
 
 export interface GatewayAuthConfig {
   /** Whether a Bearer token is required for this request. */
@@ -26,13 +29,12 @@ export interface GatewayEnv {
   CM_PROVIDER?: string;
 }
 
-const LIVE_AI_PROVIDERS = new Set(['claude', 'openai', 'openllm']);
 const LIVE_CM_PROVIDERS = new Set(['jira', 'servicenow']);
 
 /** Decide whether to enforce Bearer auth from the server environment. */
 export function resolveGatewayAuth(env: GatewayEnv): GatewayAuthConfig {
   const token = env.RATIO_API_TOKEN?.trim() || null;
-  const aiProvider = (env.AI_PROVIDER ?? '').toLowerCase();
+  const aiProvider = normalizeAIProvider(env.AI_PROVIDER);
   const cmProvider = (env.CM_PROVIDER ?? '').toLowerCase();
   const liveProvider =
     LIVE_AI_PROVIDERS.has(aiProvider) || LIVE_CM_PROVIDERS.has(cmProvider);

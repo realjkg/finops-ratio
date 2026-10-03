@@ -5,11 +5,14 @@
 //
 // Security: API keys NEVER reach the client. Only AIMessage[] and AIContext
 // cross the wire from the browser; keys are read here from server-side env and
-// the provider adapters (Claude / OpenAI / OpenLLM) are defined and instantiated
-// EXCLUSIVELY in this file — never imported from src/.
+// the provider adapters (Claude / OpenAI / OpenAI-compatible) are defined and
+// instantiated EXCLUSIVELY in this file — never imported from src/. The
+// provider registry (src/ai/providers.ts) carries env names only, never keys.
 //
-// Provider is selected by AI_PROVIDER (claude | openai | openllm | mock).
-// Unset/unknown → offline-safe mock, so the route works with no keys at all.
+// Provider is selected by AI_PROVIDER (claude | openai | mistral | qwen |
+// openllm | mock, plus aliases such as ollama / vllm). Mistral, Qwen, and any
+// open-weight model share one OpenAI-compatible adapter. Unset/unknown →
+// offline-safe mock, so the route works with no keys at all.
 //
 // The gateway owns: 405 method, 413 oversized, 401 auth, 429 rate-limit, 400
 // invalid body, 500 on a thrown handler. This handler owns: 422 misconfigured
@@ -21,6 +24,12 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { AIContext, AIMessage } from '@/ai/AIClient';
 import { MockAIClient } from '@/ai/MockAIClient';
+import {
+  OPENAI_COMPATIBLE_PRESETS,
+  normalizeAIProvider,
+  resolveOpenAICompatible,
+  type AIProvider,
+} from '@/ai/providers';
 import {
   withGateway,
   sendError,
@@ -37,7 +46,7 @@ const MAX_TOKENS = 1024;
 // These must never be imported from src/. The interface is intentionally inline.
 
 interface AIAdapter {
-  readonly provider: 'claude' | 'openai' | 'openllm' | 'mock';
+  readonly provider: AIProvider;
   /**
    * Call the LLM with the pre-built system prompt and the user message history
    * (system entries already stripped — the route prepends the system prompt).
@@ -97,12 +106,13 @@ class OpenAIAdapter implements AIAdapter {
   }
 }
 
-// OpenLLM — any OpenAI-compatible endpoint (Ollama, vLLM, LM Studio). No SDK:
-// a raw fetch keeps the adapter decoupled from a specific client version.
-class OpenLLMAdapter implements AIAdapter {
-  readonly provider = 'openllm' as const;
-
+// OpenAI-compatible chat completions — Mistral, Qwen, and any open-weight model
+// behind vLLM / Ollama / TGI / LM Studio / llama.cpp. No SDK: a raw fetch keeps
+// the adapter decoupled from a specific client version and vendor.
+class OpenAICompatibleAdapter implements AIAdapter {
   constructor(
+    readonly provider: AIProvider,
+    private readonly label: string,
     private readonly baseUrl: string,
     private readonly model: string,
     private readonly apiKey?: string,
@@ -128,7 +138,7 @@ class OpenLLMAdapter implements AIAdapter {
       }),
     });
     if (!res.ok) {
-      throw new Error(`OpenLLM error ${res.status}: ${await res.text()}`);
+      throw new Error(`${this.label} error ${res.status}: ${await res.text()}`);
     }
     const data = (await res.json()) as {
       choices: Array<{ message: { content: string } }>;
@@ -147,7 +157,7 @@ interface AdapterError {
 }
 
 function resolveAdapter(env: NodeJS.ProcessEnv, context: AIContext): AIAdapter {
-  const provider = (env.AI_PROVIDER ?? '').toLowerCase();
+  const provider = normalizeAIProvider(env.AI_PROVIDER);
   switch (provider) {
     case 'claude': {
       const key = env.ANTHROPIC_API_KEY;
@@ -169,18 +179,18 @@ function resolveAdapter(env: NodeJS.ProcessEnv, context: AIContext): AIAdapter {
       }
       return new OpenAIAdapter(key, env.OPENAI_MODEL);
     }
+    case 'mistral':
+    case 'qwen':
     case 'openllm': {
-      const baseUrl = env.OPENLLM_BASE_URL;
-      const model = env.OPENLLM_MODEL;
-      if (!baseUrl || !model) {
-        throw {
-          status: 422,
-          message: 'OPENLLM_BASE_URL and OPENLLM_MODEL are required for AI_PROVIDER=openllm',
-        } satisfies AdapterError;
+      const preset = OPENAI_COMPATIBLE_PRESETS[provider];
+      const resolved = resolveOpenAICompatible(preset, provider, env);
+      if (!resolved.ok) {
+        throw { status: 422, message: resolved.message } satisfies AdapterError;
       }
-      return new OpenLLMAdapter(baseUrl, model, env.OPENLLM_API_KEY);
+      const { baseUrl, model, apiKey } = resolved.value;
+      return new OpenAICompatibleAdapter(provider, preset.label, baseUrl, model, apiKey);
     }
-    default:
+    case 'mock':
       // Offline-safe default: the data-grounded mock, given the real context.
       return {
         provider: 'mock',

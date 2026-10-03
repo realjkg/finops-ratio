@@ -3,12 +3,13 @@
 // OpenCost and Kubecost both publish FOCUS-formatted cost exports for in-cluster
 // workloads. Ratio consumes those rows through the same version shim as every
 // other source — only the endpoint + (optional) bearer token is connector-
-// specific. SHIPS DARK: `COSTSOURCE_KUBERNETES_LIVE` is OFF by default and the
-// connector only goes live once the FOCUS endpoint is configured.
+// specific. CREDENTIAL-DRIVEN: the connector goes live once
+// KUBERNETES_FOCUS_ENDPOINT is set; `COSTSOURCE_KUBERNETES_LIVE=false` forces it
+// off.
 //
-// The optional token is read by the live transport (when wired), not required at
-// resolution time, so an unauthenticated in-cluster endpoint still resolves to
-// `configured` with just the endpoint present.
+// The optional bearer token is not required at resolution time, so an
+// unauthenticated in-cluster endpoint resolves to `configured` with just the
+// endpoint present. The endpoint may embed `{start}` / `{end}` placeholders.
 
 import type { CostSourceDescriptor } from './CostSourceClient';
 import {
@@ -17,16 +18,17 @@ import {
   type ConnectorSpec,
   type ConnectorStatus,
 } from './connectorConfig';
+import { createHttpFocusTransport } from './transports/httpFocusTransport';
 
 type EnvRecord = Record<string, string | undefined>;
 
 /** Canonical source id across the seam. */
 export const KUBERNETES_SOURCE_ID = 'kubernetes';
 
-/** Feature-flag env var. OFF unless explicitly truthy. */
+/** Kill-switch env var. Unset = auto (live once configured); `false` = off. */
 export const KUBERNETES_LIVE_FLAG_ENV = 'COSTSOURCE_KUBERNETES_LIVE';
 
-/** Optional bearer-token env var, consumed by the live transport when present. */
+/** Optional bearer-token env var, sent by the live transport when present. */
 export const KUBERNETES_TOKEN_ENV = 'KUBERNETES_FOCUS_TOKEN';
 
 export const KUBERNETES_CONNECTOR_SPEC: ConnectorSpec = {
@@ -40,7 +42,12 @@ export const KUBERNETES_CONNECTOR_SPEC: ConnectorSpec = {
   requiredEnv: {
     endpoint: 'KUBERNETES_FOCUS_ENDPOINT',
   },
+  optionalEnv: {
+    token: KUBERNETES_TOKEN_ENV,
+  },
   liveSummary: 'OpenCost / Kubecost FOCUS export over an in-cluster endpoint',
+  transport: (c) =>
+    createHttpFocusTransport({ endpoint: c.endpoint, token: c.token, label: 'Kubernetes FOCUS endpoint' }),
 };
 
 export function resolveKubernetesStatus(env: EnvRecord): ConnectorStatus {
