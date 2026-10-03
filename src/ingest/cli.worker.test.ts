@@ -1,0 +1,110 @@
+// Worker commands of the CLI that need no database: argument validation,
+// environment gates that must refuse BEFORE connecting, and leak checks.
+import { describe, expect, it } from 'vitest';
+import { main } from './cli';
+
+function capture() {
+  const out: string[] = [];
+  const err: string[] = [];
+  return { io: { out: (l: string) => out.push(l), err: (l: string) => err.push(l) }, out, err };
+}
+
+// Nothing listens on port 1: a connection attempt fails fast.
+const UNREACHABLE = 'postgres://ratio_worker_login:WorkerSecretPw42@127.0.0.1:1/ratio_db';
+const T = '11111111-1111-4111-8111-111111111111';
+const B = '22222222-2222-4222-8222-222222222222';
+const env = { RATIO_DATABASE_URL: UNREACHABLE };
+
+async function run(argv: string[], e: Record<string, string | undefined> = env) {
+  const c = capture();
+  const code = await main(argv, e, c.io);
+  return { code, ...c };
+}
+
+describe('worker CLI (no database)', () => {
+  it('usage errors exit 2 and still print one evidence record', async () => {
+    const cases: string[][] = [
+      ['sync'],
+      ['sync', '--tenant', T],
+      ['sync', '--source', 'focus-main'],
+      ['sync', '--tenant', 'not-a-uuid', '--source', 'focus-main'],
+      ['sync', '--tenant', T, '--source', 'Bad Key!'],
+      ['sync', '--tenant', T, '--source', 'focus-main', '--bogus'],
+      ['backfill', '--tenant', T, '--source', 'focus-main'],
+      ['backfill', '--tenant', T, '--source', 'focus-main', '--from', '2026-07', '--to', '2026-13'],
+      ['backfill', '--tenant', T, '--source', 'focus-main', '--from', '2026-08', '--to', '2026-07'],
+      ['backfill', '--tenant', T, '--source', 'focus-main', '--from', '2026-7', '--to', '2026-08'],
+      ['replay', '--tenant', T, '--source', 'focus-main'],
+      ['replay', '--tenant', T, '--source', 'focus-main', '--batch', B, '--period', '2026-07'],
+      ['replay', '--tenant', T, '--source', 'focus-main', '--batch', 'nope'],
+      ['quarantine', '--tenant', T, '--batch', B],
+      ['quarantine', 'show', '--tenant', T],
+      ['quarantine', 'show', '--batch', B],
+      ['doctor', '--tenant', 'nope', '--json'],
+      ['replay-fixtures', '--extra'],
+    ];
+    for (const argv of cases) {
+      const r = await run(argv, { ...env, RATIO_ENV: 'test' });
+      expect(r.code, argv.join(' ')).toBe(2);
+      expect(r.out, argv.join(' ')).toHaveLength(1);
+      const rec = JSON.parse(r.out[0]);
+      expect(rec).toMatchObject({ type: 'ratio.evidence', pass: false, exitCode: 2 });
+      for (const line of r.err) expect(() => JSON.parse(line)).not.toThrow();
+    }
+  });
+
+  it('missing RATIO_DATABASE_URL is a configuration error (exit 2)', async () => {
+    const r = await run(['sync', '--tenant', T, '--source', 'focus-main'], {});
+    expect(r.code).toBe(2);
+    expect(r.err.join('\n')).toMatch(/RATIO_DATABASE_URL/);
+  });
+
+  it('replay-fixtures is refused unless RATIO_ENV is staging or test, before connecting', async () => {
+    for (const ratioEnv of [undefined, 'development', 'production', 'STAGING']) {
+      const r = await run(['replay-fixtures', '--json'], { ...env, RATIO_ENV: ratioEnv });
+      expect(r.code, String(ratioEnv)).toBe(2);
+      const all = r.out.concat(r.err).join('\n');
+      expect(all).toMatch(/REPLAY_FIXTURES_NOT_ALLOWED/);
+      expect(all).not.toMatch(/ECONNREFUSED/);
+    }
+  });
+
+  it('the test kill hook outside NODE_ENV=test refuses to start (before connecting)', async () => {
+    const r = await run(['sync', '--tenant', T, '--source', 'focus-main'], { ...env, RATIO_TEST_PAUSE_AFTER_ROWS: '5', NODE_ENV: 'production' });
+    expect(r.code).toBe(2);
+    const all = r.out.concat(r.err).join('\n');
+    expect(all).toMatch(/TEST_HOOK_NOT_ALLOWED/);
+    expect(all).not.toMatch(/ECONNREFUSED/);
+  });
+
+  it('connection failures exit 1 and never echo the URL, user or password', async () => {
+    for (const argv of [
+      ['sync', '--tenant', T, '--source', 'focus-main'],
+      ['backfill', '--tenant', T, '--source', 'focus-main', '--from', '2026-07', '--to', '2026-08'],
+      ['replay', '--tenant', T, '--source', 'focus-main', '--batch', B],
+      ['quarantine', 'show', '--tenant', T, '--batch', B, '--json'],
+      ['doctor', '--json'],
+    ]) {
+      const r = await run(argv);
+      expect(r.code, argv.join(' ')).toBe(1);
+      const all = r.out.concat(r.err).join('\n');
+      expect(all).not.toContain('WorkerSecretPw42');
+      expect(all).not.toContain('ratio_worker_login');
+      expect(all).not.toContain(UNREACHABLE);
+      expect(r.out).toHaveLength(1);
+      expect(JSON.parse(r.out[0])).toMatchObject({ type: 'ratio.evidence', pass: false, exitCode: 1 });
+    }
+  });
+
+  it('doctor --json reports db_connectivity failure as a failed check', async () => {
+    const r = await run(['doctor', '--json']);
+    const rec = JSON.parse(r.out[0]);
+    expect(rec.command).toBe('doctor');
+    expect(rec.results.checks).toContainEqual(expect.objectContaining({ name: 'db_connectivity', status: 'fail' }));
+  });
+
+  it('unknown commands still exit 2 (Slice 0 contract unchanged)', async () => {
+    const r = await run(['frobnicate']);
+    expect(r.code).toBe(2);
+  });
+});
