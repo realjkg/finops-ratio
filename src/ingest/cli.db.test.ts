@@ -209,6 +209,19 @@ describe('ingest CLI (real Postgres)', () => {
     expect((await run(['migrate', '--status', '--json'], env)).code).toBe(0);
   });
 
+  it('round 10: after 0001 is applied, DROP SCHEMA ratio CASCADE makes --status exit 3 (required foundation missing)', async () => {
+    const db = await freshDb();
+    const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
+    expect((await run(['migrate'], env)).code).toBe(0);
+    await db.pool.query('DROP SCHEMA ratio CASCADE');
+    const r = await run(['migrate', '--status', '--json'], env);
+    expect(r.code).toBe(3);
+    const doc = onlyJson(r.out) as StatusDoc & { privilegeProblems?: string[] };
+    expect(doc.matches).toBe(false);
+    expect(doc.applied.every((a) => a.checksumMatches)).toBe(true);
+    expect(doc.privilegeProblems?.join('\n')).toMatch(/required 0001 object missing or altered/);
+  });
+
   it('status --json prints exactly one JSON document; plain status logs one line', async () => {
     const db = await freshDb();
     const env = { RATIO_MIGRATE_DATABASE_URL: db.url };
