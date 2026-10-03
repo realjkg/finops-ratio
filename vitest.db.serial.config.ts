@@ -15,6 +15,8 @@ export default defineConfig({
     include: ['src/**/*.serial.db.test.ts'],
     // Serial files may need S3 too: same per-run prefix setup as the parallel phase.
     globalSetup: ['src/ingest/testing/s3GlobalSetup.ts'],
+    // Backstop after each serial file: nothing dangerous may be left behind.
+    setupFiles: ['src/ingest/testing/dangerousLoginBackstopSerialSetup.ts'],
     exclude: ['**/node_modules/**', '**/.next/**', '**/.claude/**', '**/dist/**', '**/dist-worker/**'],
     fileParallelism: false,
     testTimeout: 60_000,
