@@ -1,0 +1,22 @@
+{
+  "base": {
+    "2026-07-01": {
+      "rowCount": 55,
+      "billedTotal": "30.8272954899"
+    },
+    "2026-08-01": {
+      "rowCount": 40,
+      "billedTotal": "21.0978157665"
+    }
+  },
+  "restatement": {
+    "2026-07-01": {
+      "rowCount": 56,
+      "billedTotal": "24.4997954899"
+    },
+    "2026-08-01": {
+      "rowCount": 40,
+      "billedTotal": "21.0978157665"
+    }
+  }
+}
