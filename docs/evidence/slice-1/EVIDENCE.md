@@ -54,7 +54,12 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 35 | 81ab2f6 | docs: design/test plan/evidence for challenger round 3 (challenger-approved) | docs |
 | 36 | c02c6aa | merge origin/slice/00-postgres-foundation @ 453377e (final Slice 0: round 5 + origin/main) — clean, no conflicts | merge |
 | 37 | 774ff13 | test: test-only triggers dropped and proven not to linger past the runner's catalog check | test-only |
-| 38 | (final) | docs: evidence for the final Slice 0 merge | docs |
+| 38 | f732b36 | docs: evidence for the final Slice 0 merge | docs |
+| 39 | c1247b7 | merge origin/slice/00-postgres-foundation @ 19fdbed (Slice 0 round 6: migrate CLI redacts before serialization) — one conflict in `src/ingest/cli.ts` (`main` dispatch vs Slice 0's `jsonLineRedactor`), resolved by keeping the worker dispatch and using Slice 0's line redactor in `migrateMain` | merge |
+| 40 | 0d155a9 | test: worker CLI redact-before-serialize, process crash guards, malformed URL (red: 4 failed, `r4-red-fast.txt`); K7 integration | tests |
+| 41 | d634f6c | fix: `jsonLineRedactorFor` for every worker output line + evidence file; `installProcessGuards`; pool built inside try | impl |
+| 42 | 3745fc0 | test: redacted Errors are serialized, not dropped to `{}` (added while mutation-testing) | test |
+| 43 | (final) | docs: evidence for this round | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -612,3 +617,63 @@ exists, drop it, and assert `migrate --status` (and doctor's
 Leftovers: login `ratio_test_login_6414_*` appeared during this session's
 window; an isolated re-run of `test:db` leaves zero new roles/databases, and
 PID 6414 is gone — not attributable to this suite, not dropped.
+
+## 13. Worker CLI redaction before serialization + process guards (after Slice 0 round 6, 19fdbed)
+
+**Was Slice 1's CLI already on the redact-before-serialize path?** Partly.
+The evidence record (`buildEvidenceRecord` → `redactDeep`) and `fail()`'s
+message (`clean(messageOf(e))`) were redacted before serialization, but the
+generic worker log line (`io.err(clean(JSON.stringify(...)))`), the stdout
+evidence line and the `RATIO_EVIDENCE_FILE` copy serialized first, and the
+secret list had no URL-encoded or JSON-escaped forms. Fixed test-first:
+
+- `jsonLineRedactorFor(env)` (redact.ts): redacts every string, object key and
+  Error (name/message/code/cause) BEFORE `JSON.stringify`, then a literal
+  backstop over the serialized text; secret forms = raw, URL-decoded,
+  URL-encoded and JSON-escaped (also `pass*` URL query params). No length cap
+  on the backstop. Used for every worker stderr line, the stdout evidence
+  record, the evidence-file copy (incl. migrate's) and the test pause signal.
+- `installProcessGuards(env, io)` (installed by the CLI entry): an
+  `uncaughtException`/`unhandledRejection` prints exactly one redacted JSON
+  line (`event: process.crash`, code, SQLSTATE-only/redacted message) and
+  exits 1.
+- The worker DB pool is constructed inside the `try` (S3 clients already
+  were), so a constructor failure is a reported failure with an evidence
+  record. (Slice 0's `migrate` client construction in `cli.ts` is Slice 0
+  code and was left as merged.)
+
+Tests: unit (`redact.test.ts`: password `pw"q\b%22x` in values, keys, nested
+Errors — no raw/decoded/encoded/JSON-escaped form survives; backstop never
+truncates; Errors serialized), guards (`cli.worker.test.ts`: both events, one
+redacted line, exit 1; malformed URL ⇒ exit 1 + evidence), integration K7
+(real Postgres: that password also used as a nonexistent DB name, for `sync`,
+`doctor --json`, `quarantine show --json` — nothing leaks in stdout/stderr).
+
+Mutation proofs (`mutations5.txt`):
+
+| Mutation | Result |
+|---|---|
+| MR1 no redaction before serialization | 1 fails (redacted Errors / forms test) |
+| MR2 guard does not exit | 2 fail |
+| MR3 guard prints raw `JSON.stringify(e.message)` | 2 fail |
+| MR4 `uncaughtException` guard not installed | 1 fails |
+| MR5a `messageOf` keeps raw pg text (one layer removed) | K7 still passes — the other layers redact (expected) |
+| MR5b all three layers removed (raw pg text + `fail()` without pre-redaction + serialize-then-redact with raw secrets only) | K7 fails (the secret leaks), so K7 has teeth |
+
+Not killable by a black-box test: the JSON-escaped forms in the serialized
+backstop alone (the pre-serialization pass already removes every literal) —
+kept as defense in depth.
+
+Re-verification on d634f6c/3745fc0: `npm ci` 0 (prod audit 0 vulns), lint 0,
+tsc 0, `npm test` 68 files / 1200 passed, `test:db` ×3 = 22 files / **271
+passed** each (57.5 s, 50.6 s, 46.7 s), no URL ⇒ exit 1, no S3 endpoint ⇒
+exit 1 with 3 files failing at collection and 252 passed (nothing skipped),
+no `.skip/.only/.todo`, `worker:build` 0, `next build` 0 (restored, no
+AGENTS.md/CLAUDE.md), no ingestion code in `.next`, no change outside
+`src/ingest` vs the Slice 0 branch. Manual end-to-end (built CLI,
+`ratio_s1_e2e_4746c231`): status 3→0→0, sync published+reconciled, re-sync
+skipped_unchanged, reader totals = control totals (55 / `30.8272954899`,
+40 / `21.0978157665`), 3/3 evidence re-hash OK, doctor exit 0,
+replay-fixtures 6/6 (`fixture-20261003075835-8e9aff14`), scratch cleaned up.
+Leftovers unchanged (`ratio_test_23557_*`, logins `_1169_`, `_6414_`; not
+attributable, not dropped).
