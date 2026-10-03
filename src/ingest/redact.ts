@@ -2,6 +2,8 @@
 // quarantine reasons, validation messages) or logs. Runs BEFORE writing: the
 // amended schema rejects free text that still looks like it carries a secret.
 
+import { redactDeep as walkRedact } from './cli';
+
 export const MAX_REDACTED_LENGTH = 4000;
 const R = '[redacted]';
 
@@ -84,27 +86,17 @@ export function secretsFromEnv(env: Record<string, string | undefined>): string[
 }
 
 /**
- * Deep copy with every string (and object key) redacted, walking arrays, plain
- * objects and Errors (name, message, code, cause). Runs BEFORE serialization
- * so JSON escaping can never hide a secret from the redactor.
+ * Deep copy with every string (and object key) redacted, BEFORE serialization
+ * so JSON escaping can never hide a secret from the redactor. There is ONE
+ * walker: Slice 0's `redactDeep` in cli.ts (BigInt as exact decimal text,
+ * Buffers/typed arrays as `[binary]`, `toJSON` honoured, Errors as
+ * name/message/code/cause, cycles as `[circular]`); this only supplies the
+ * worker's secret-aware string redactor. The result is plain JSON-safe data.
+ * (cli.ts imports this module too; the cycle is only dereferenced at call
+ * time, never while modules load.)
  */
-export function redactDeep<T>(value: T, secrets: readonly string[] = [], seen: WeakSet<object> = new WeakSet()): T {
-  if (typeof value === 'string') return redact(value, secrets) as unknown as T;
-  if (value === null || typeof value !== 'object') return value;
-  if (value instanceof Date) return value;
-  if (seen.has(value as object)) return '[circular]' as unknown as T;
-  seen.add(value as object);
-  if (Array.isArray(value)) return value.map((v) => redactDeep(v, secrets, seen)) as unknown as T;
-  if (value instanceof Error) {
-    const e = value as Error & { code?: unknown; cause?: unknown };
-    const out: Record<string, unknown> = { name: e.name, message: redact(e.message, secrets) };
-    if (e.code !== undefined) out.code = redactDeep(e.code, secrets, seen);
-    if (e.cause !== undefined) out.cause = redactDeep(e.cause, secrets, seen);
-    return out as T;
-  }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[redact(k, secrets)] = redactDeep(v, secrets, seen);
-  return out as T;
+export function redactDeep<T>(value: T, secrets: readonly string[] = []): T {
+  return walkRedact(value, (s) => redact(s, secrets)) as T;
 }
 
 /** Replaces literal secret forms in already-serialized text (no length cap). */
