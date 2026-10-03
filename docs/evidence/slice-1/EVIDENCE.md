@@ -108,7 +108,10 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 89 | 4398628 | test: M4 test lets the taken-over run's lease lapse before the second replay (still red on the old code) | tests |
 | 90 | bee19bf | fix: bounded streamed manifest read (H1); IfMatch-pinned artifact GET, SOURCE_CHANGED (H2) | impl |
 | 91 | 2f47fac | fix: re-list on SOURCE_CHANGED (H2), PERIOD_NOT_FOUND (M1), control-quarantine recovery (M2), replay pin + LEASE_LOST (M3, M4); ingestion-ops skill updated in the evidence commit | impl |
-| 92 | (final) | docs: evidence for this round (§25), skill notes | docs |
+| 92 | fffe3f1 | docs: evidence for the fixture orphan and PR #54 findings (§25), skill notes | docs |
+| 93 | b5299a9 | test: an un-keyed RECONCILIATION_VARIANCE quarantine stays quarantined (red) | tests |
+| 94 | 90101c5 | fix: no legacy branch for un-keyed control quarantines (challenger Low 1) | impl |
+| 95 | (final) | docs: evidence for this round (§26) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -1746,7 +1749,7 @@ object, equal the NEW bytes.
 - Quarantined batches are never modified, as Slice 0's lifecycle requires,
   and the uniqueness and immutability rules are unchanged.
 - An older control quarantine recorded without a key may be re-reconciled
-  once.
+  once. (Superseded by §26: this legacy branch was removed.)
 - The ingestion-ops skill documents the behaviour.
 
 ### Gates at 2f47fac (skill update in the docs commit)
@@ -1774,4 +1777,32 @@ object, equal the NEW bytes.
 - doctor exited 0.
 - replay-fixtures passed 6/6.
 - Cleanup deleted 48 objects and dropped the database and logins.
+
+## 26. Challenger Low 1 on fffe3f1: no legacy branch for un-keyed control quarantines
+
+Slice 1 never shipped, so every control quarantine records its key and no
+`RECONCILIATION_VARIANCE` quarantine without `[controls:<key>]` can exist.
+The legacy branch, which re-reconciled such a quarantine once, is removed
+(`90101c5`). `controlQuarantineKey` now returns a key only when the reason
+records one; anything else is terminal.
+
+**Test** (`reviewFindings.db.test.ts`, red at `b5299a9`): a control
+quarantine of the same data with an un-keyed reason is planted directly (as
+superuser). A sync with corrected controls must report `BATCH_QUARANTINED`
+naming that batch and create no new batch. Before the fix it re-reconciled
+and published.
+
+**Mutation M2d** (the legacy `''` branch restored) fails the test
+(`mut-M2d.txt`).
+
+Lows 2 and 3 are left for the follow-up issue, as agreed.
+
+**Gates at 90101c5:**
+- lint 0, tsc 0;
+- `npm test` 89 files / 2021 passed;
+- `test:db` ×2 on the private cluster: **2/2**, parallel 27 files / 416
+  passed and serial 4 files / 21 passed;
+- the fail-not-skip checks both exit 1;
+- leftovers 0;
+- `.skip`-style grep 0.
 
