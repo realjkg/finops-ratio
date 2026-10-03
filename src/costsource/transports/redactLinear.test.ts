@@ -26,6 +26,8 @@ const INPUTS: Record<string, string> = {
   'PEM BEGIN repeated': `'-----BEGIN A-----'.repeat(${SIZE} / 17)`,
   'PEM BEGIN then 300 KB, no END': `'-----BEGIN RSA PRIVATE KEY-----' + 'Q'.repeat(${SIZE})`,
   'eyJa. repeated': `'eyJa.'.repeat(${SIZE} / 5)`,
+  'eyJa- repeated (JWT run without dots)': `'eyJa-'.repeat(${SIZE} / 5)`,
+  'PEM END repeated': `'-----END A-----'.repeat(${SIZE} / 15)`,
   'sk- repeated': `'sk-'.repeat(${SIZE} / 3)`,
   'a:// repeated': `'a://'.repeat(${SIZE} / 4)`,
   'scheme-like letters/dots': `'a.b-c+d'.repeat(${SIZE} / 7)`,

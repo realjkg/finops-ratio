@@ -11,9 +11,13 @@
 // secret access keys, access / refresh / id / session / private tokens, access
 // keys, client secrets, API keys, passwords (password / passwd / pwd),
 // secrets, tokens and X-FinIO-Session values in JSON and k=v form — also with
-// an env-style prefix (RATIO_API_TOKEN=, SERVICENOW_PASSWORD=), bare token=, bare SAS parameters, and AWS access key ids (AKIA… /
-// ASIA…). Redaction runs BEFORE truncation, so a
-// cut can never leave a partial secret that no longer matches.
+// an env-style prefix (RATIO_API_TOKEN=, SERVICENOW_PASSWORD=, Db_Password=),
+// with values quoted "…", '…', `…`, backslash-escaped \"…\" or unquoted, in
+// plain or double-encoded JSON; bare token=, bare SAS parameters, and AWS
+// access key ids (AKIA… / ASIA…). Redaction runs BEFORE output truncation, so
+// a cut can never leave a partial secret that no longer matches. The input is
+// capped (MAX_REDACT_INPUT_CHARS) and every rule is linear, so redaction can
+// never stall the event loop (redactLinear.test.ts).
 
 /** Max characters of a redacted upstream body kept in the server log. */
 export const MAX_LOGGED_BODY_CHARS = 300;
@@ -27,28 +31,49 @@ const SECRET_KEYS =
   'aws[_-]?secret[_-]?access[_-]?key|access_token|refresh_token|id_token|session_token|private_token|' +
   'access_key|client_secret|api[_-]?key|password|passwd|pwd|secret|token|x-finio-session';
 
-// Env-style keys: an UPPER-CASE prefix ending in `_` plus an UPPER-CASE
-// credential name — RATIO_API_TOKEN, JIRA_API_TOKEN, FINIO_PEER_TOKEN,
-// SERVICENOW_PASSWORD, DB_PWD … Matched case-SENSITIVELY so ordinary
-// snake_case fields (cost_per_token, input_token, is_secret, has_password,
-// team_token, max_tokens) are left alone; un-prefixed keys use the
-// case-insensitive rules above with a word boundary, which `_` blocks.
-const ENV_SECRET_KEYS =
-  'SECRET_ACCESS_KEY|ACCESS_TOKEN|REFRESH_TOKEN|ID_TOKEN|SESSION_TOKEN|PRIVATE_TOKEN|ACCESS_KEY|' +
-  'CLIENT_SECRET|API_?KEY|PASSWORD|PASSWD|PWD|SECRET|TOKEN';
-const ENV_KEY = `[A-Z0-9_]*_(?:${ENV_SECRET_KEYS})`;
+/** A case-insensitive character-class spelling of an ASCII word (no regex flag needed). */
+function anyCase(word: string): string {
+  return word.replace(/[a-z]/gi, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`);
+}
 
-// A secret value: a whole "…" or '…' string (escaped quotes inside; an
-// unterminated quote runs to the end — over-redacting malformed text is the
-// safe side), or an unquoted run. Each alternative is deterministic (no
-// nested ambiguity), so matching stays linear.
-const SECRET_VALUE = `(?:"(?:[^"\\\\]|\\\\[\\s\\S])*"?|'(?:[^'\\\\]|\\\\[\\s\\S])*'?|(?!\\[REDACTED)[^\\s&;,"'<>]+)`;
-const JSON_VALUE = `"(?:[^"\\\\]|\\\\[\\s\\S])*"?`;
+// Env-style keys: a prefix that STARTS WITH AN UPPER-CASE LETTER, made of
+// `_`-terminated segments, then a credential name in any case —
+// RATIO_API_TOKEN, JIRA_API_TOKEN, FINIO_PEER_TOKEN, SERVICENOW_PASSWORD,
+// DB_PWD, and mixed-case Db_Password / Jira_Api_Token. Decision: a leading
+// capital marks an env / config key; ordinary lower-case snake_case fields
+// (cost_per_token, input_token, is_secret, has_password, team_token,
+// max_tokens) are left alone. Un-prefixed keys use the case-insensitive rules
+// with a word boundary, which `_` blocks. Each segment ends at `_`, which the
+// segment class excludes, so there is one way to split a key (linear).
+const ENV_CREDENTIALS = [
+  'secret_access_key', 'access_token', 'refresh_token', 'id_token', 'session_token', 'private_token',
+  'access_key', 'client_secret', 'api_key', 'apikey', 'password', 'passwd', 'pwd', 'secret', 'token',
+];
+const ENV_KEY = `[A-Z][A-Za-z0-9]*_(?:[A-Za-z0-9]*_)*(?:${ENV_CREDENTIALS.map(anyCase).join('|')})`;
 
-/** Keep a quoted value's quote style; replace its content. */
+// Secret value grammar. Every alternative is deterministic and always
+// succeeds once started (closing delimiters are optional — an unterminated
+// value runs to the end, over-redacting malformed text, the safe side), so
+// matching never backtracks and stays linear.
+const BT = '`';
+// \"…\" — a quoted value inside an already-escaped (JSON-in-a-string) body.
+// Units: a plain char; `\\\X` (an escaped backslash + escaped char, i.e. an
+// inner escape such as \\\"); `\X` other than the closing `\"`.
+const ESC_DQ = String.raw`\\"(?:[^"\\]|\\\\\\[\s\S]|\\[^"])*(?:\\")?`;
+const DQ = String.raw`"(?:[^"\\]|\\[\s\S])*"?`;
+const SQ = String.raw`'(?:[^'\\]|\\[\s\S])*'?`;
+const BQ = `${BT}(?:[^${BT}\\\\]|\\\\[\\s\\S])*${BT}?`;
+const UNQUOTED = String.raw`(?!\[REDACTED)[^\s&;,"'<>]+`;
+const SECRET_VALUE = `(?:${ESC_DQ}|${DQ}|${SQ}|${BQ}|${UNQUOTED})`;
+const JSON_VALUE = `(?:${ESC_DQ}|${DQ})`;
+/** A JSON key, optionally with backslash-escaped quotes (double-encoded JSON). */
+const jsonKey = (key: string) => String.raw`(\\?"(?:` + key + String.raw`)\\?"\s*:\s*)`;
+
+/** Keep a value's delimiter style; replace its content. */
 function redactValue(prefix: string, value: string): string {
+  if (value.startsWith('\\"')) return `${prefix}\\"[REDACTED]\\"`;
   const q = value[0];
-  return q === '"' || q === "'" ? `${prefix}${q}[REDACTED]${q}` : `${prefix}[REDACTED]`;
+  return q === '"' || q === "'" || q === BT ? `${prefix}${q}[REDACTED]${q}` : `${prefix}[REDACTED]`;
 }
 
 /** `user:pass` encoded as base64 (Basic credentials). */
@@ -74,24 +99,67 @@ function credentialShaped(scheme: string, v: string): boolean {
 }
 
 const FREE_TEXT_AUTH_RE = /\b(Bearer|Basic)\s+(["']?)([A-Za-z0-9._~+/=-]+)\2/gi;
-const JSON_SECRET_RE = new RegExp(`("(?:${SECRET_KEYS})"\\s*:\\s*)${JSON_VALUE}`, 'gi');
-const JSON_ENV_SECRET_RE = new RegExp(`("${ENV_KEY}"\\s*:\\s*)${JSON_VALUE}`, 'g');
+const JSON_SECRET_RE = new RegExp(`${jsonKey(SECRET_KEYS)}(${JSON_VALUE})`, 'gi');
+const JSON_ENV_SECRET_RE = new RegExp(`${jsonKey(ENV_KEY)}(${JSON_VALUE})`, 'g');
 const KV_SECRET_RE = new RegExp(`\\b((?:${SECRET_KEYS})\\s*[=:]\\s*)(${SECRET_VALUE})`, 'gi');
 const KV_ENV_SECRET_RE = new RegExp(`\\b(${ENV_KEY}\\s*[=:]\\s*)(${SECRET_VALUE})`, 'g');
 
 /**
+ * PEM blocks, without a regex: `[\s\S]*?-----END` re-scanned the rest of the
+ * text from every BEGIN (quadratic on repeated BEGINs). One forward pass; an
+ * unterminated block is redacted up to the next BEGIN or the end.
+ */
+function redactPem(text: string): string {
+  const BEGIN = '-----BEGIN ';
+  const END = '-----END ';
+  let out = '';
+  let pos = 0;
+  // Position of the next END marker at/after the current body (-1: none left).
+  // Cached so a run of BEGINs without an END does not re-scan to the end of
+  // the text each time.
+  let endIdx = -2;
+  for (;;) {
+    const begin = text.indexOf(BEGIN, pos);
+    if (begin === -1) return out + text.slice(pos);
+    const headerEnd = text.indexOf('-----', begin + BEGIN.length);
+    if (headerEnd === -1 || headerEnd - begin > BEGIN.length + 64) {
+      // Not a PEM header: keep it and move on.
+      out += text.slice(pos, begin + BEGIN.length);
+      pos = begin + BEGIN.length;
+      continue;
+    }
+    const bodyStart = headerEnd + 5;
+    const nextBegin = text.indexOf(BEGIN, bodyStart);
+    if (endIdx !== -1 && endIdx < bodyStart) endIdx = text.indexOf(END, bodyStart);
+    const end = endIdx;
+    let stop: number;
+    if (end !== -1 && (nextBegin === -1 || end < nextBegin)) {
+      const endClose = text.indexOf('-----', end + END.length);
+      stop = endClose !== -1 && endClose - end <= END.length + 64 ? endClose + 5 : end + END.length;
+    } else {
+      stop = nextBegin === -1 ? text.length : nextBegin;
+    }
+    out += text.slice(pos, begin) + '[REDACTED_PEM]';
+    pos = stop;
+  }
+}
+
+/**
  * Patterns, applied in order (most specific first). Each replaces the secret
  * part with a `[REDACTED…]` marker and keeps enough context to stay useful.
+ * Every rule must stay LINEAR (src/costsource/transports/redactLinear.test.ts).
  */
 type Replacement = string | ((match: string, ...groups: string[]) => string);
 
 const RULES: Array<[RegExp, Replacement]> = [
-  // PEM blocks (private keys, certificates).
-  [/-----BEGIN [A-Z0-9 ]+-----[\s\S]*?-----END [A-Z0-9 ]+-----/g, '[REDACTED_PEM]'],
-  // URL userinfo: scheme://user:pass@host → scheme://[REDACTED]@host.
-  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@"'<>]+@/gi, '$1[REDACTED]@'],
-  // URL query strings → keep scheme/host/path only.
-  [/(\bhttps?:\/\/[^\s"'<>?#]*)\?[^\s"'<>#]*/gi, '$1?[REDACTED]'],
+  // URL userinfo: scheme://user:pass@host → scheme://[REDACTED]@host. Bounded
+  // scheme / userinfo lengths: an unbounded `[a-z0-9+.-]*` re-scanned every
+  // letter/dot run from every start (quadratic on `eyJa.`, `sk-`, `http://`).
+  [/\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/@"'<>]{1,2048}@/gi, '$1[REDACTED]@'],
+  // URL query strings → keep scheme/host/path only. The query part is
+  // optional, so a URL without one still matches (and is consumed once)
+  // instead of failing after scanning the rest of the text.
+  [/(\bhttps?:\/\/[^\s"'<>?#]*)(\?[^\s"'<>#]*)?/gi, (_m, base, query) => (query ? `${base}?[REDACTED]` : base)],
   // Azure storage connection-string secrets.
   [/\b(AccountKey|SharedAccessSignature)=[^;\s"'<>]+/gi, '$1=[REDACTED]'],
   // AWS SigV4 query / header credentials.
@@ -100,35 +168,68 @@ const RULES: Array<[RegExp, Replacement]> = [
   [/\b(Authorization\s*:\s*(?:Bearer|Basic|token))\s+("[^"]*"|'[^']*'|(?!\[REDACTED)[^\s"'<>,;]+)/gi, '$1 [REDACTED]'],
   // Bearer / Basic in free text (any case): only before a credential-shaped value.
   [FREE_TEXT_AUTH_RE, (match, scheme, _q, value) => (credentialShaped(scheme, value) ? `${scheme} [REDACTED]` : match)],
-  // JWTs anywhere.
-  [/\beyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[REDACTED_JWT]'],
+  // JWTs anywhere: three or more dot-separated segments starting `eyJ`. The
+  // pattern consumes the whole `eyJ…` run (dots optional) and the callback
+  // decides, so it never fails after scanning a long `[\w-]` run (the old
+  // `[\w-]+\.` form was quadratic on `eyJa-eyJa-…`).
+  [/\beyJ[\w-]*(?:\.[\w-]+)*/g, (match) => (match.split('.').length >= 3 ? '[REDACTED_JWT]' : match)],
   // GitHub tokens (classic ghp_/gho_/ghu_/ghs_/ghr_ and fine-grained github_pat_).
   [/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g, '[REDACTED_GITHUB_TOKEN]'],
   // OpenAI-style secret keys (sk-…, sk-proj-…).
   [/\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}/g, '[REDACTED_API_KEY]'],
-  // JSON "secret_key": "value" (and env-style "RATIO_API_TOKEN": "value").
-  [JSON_SECRET_RE, '$1"[REDACTED]"'],
-  [JSON_ENV_SECRET_RE, '$1"[REDACTED]"'],
-  // k=v / k: v secret fields, quoted or not (and env-style RATIO_API_TOKEN=…).
+  // JSON "secret_key": "value" — plain or double-encoded (\"key\":\"value\"),
+  // and env-style keys ("RATIO_API_TOKEN": "value").
+  [JSON_SECRET_RE, (_m, prefix, value) => redactValue(prefix, value)],
+  [JSON_ENV_SECRET_RE, (_m, prefix, value) => redactValue(prefix, value)],
+  // k=v / k: v secret fields: "…", '…', `…`, \"…\" (escaped) or unquoted.
   [KV_SECRET_RE, (_m, prefix, value) => redactValue(prefix, value)],
   [KV_ENV_SECRET_RE, (_m, prefix, value) => redactValue(prefix, value)],
-  // Bare token=value.
-  [/\b(token\s*=\s*)(?!\[REDACTED)[^\s&;,"'<>]+/gi, '$1[REDACTED]'],
+  // Bare token=value (not one of the quoted forms handled above).
+  [/\b(token\s*=\s*)(?!\[REDACTED|\\"|["'`])[^\s&;,"'<>]+/gi, '$1[REDACTED]'],
   // Bare SAS parameters.
   [SAS_RE, '$1=[REDACTED]'],
   // AWS access key ids.
   [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[REDACTED_AWS_KEY_ID]'],
 ];
 
-export function redactUpstreamText(text: string, maxChars = MAX_LOGGED_BODY_CHARS): string {
-  let redacted = text;
+/**
+ * Every rule over the FULL text (no input cap). Exported for the linearity
+ * guard test; callers use redactUpstreamText / redactErrorText.
+ */
+export function applyRedactionRules(text: string): string {
+  let redacted = redactPem(text);
   for (const [re, replacement] of RULES) {
     redacted =
       typeof replacement === 'string'
         ? redacted.replace(re, replacement)
         : redacted.replace(re, (match: string, ...groups: string[]) => replacement(match, ...groups));
   }
-  return redacted.slice(0, maxChars);
+  return redacted;
+}
+
+/**
+ * Max characters of input that are redacted at all. Upstream bodies can be
+ * megabytes; only a short prefix is ever logged, so the rest is dropped BEFORE
+ * redaction, bounding the cost of every rule.
+ */
+export const MAX_REDACT_INPUT_CHARS = 16_384;
+export const TRUNCATED_MARKER = ' …[TRUNCATED]';
+
+/**
+ * Cap the input for redaction. The cut moves back to the last delimiter, so a
+ * secret straddling the cap is dropped whole — never left half-present in a
+ * form no rule recognises (e.g. a JWT missing its signature part).
+ */
+function capForRedaction(text: string): string {
+  if (text.length <= MAX_REDACT_INPUT_CHARS) return text;
+  const head = text.slice(0, MAX_REDACT_INPUT_CHARS);
+  let cut = head.length - 1;
+  while (cut >= 0 && !/[\s,;&"'<>]/.test(head[cut])) cut -= 1;
+  return (cut > 0 ? head.slice(0, cut) : '') + TRUNCATED_MARKER;
+}
+
+export function redactUpstreamText(text: string, maxChars = MAX_LOGGED_BODY_CHARS): string {
+  return applyRedactionRules(capForRedaction(text)).slice(0, maxChars);
 }
 
 /** Max characters of error text surfaced in health detail / rethrown errors. */
