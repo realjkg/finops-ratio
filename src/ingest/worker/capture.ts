@@ -1,0 +1,76 @@
+// Raw evidence first (D6): stream each source artifact to a local temp file
+// while hashing (sha256) and counting bytes under a hard cap, then store it in
+// the evidence bucket at its content-addressed key. The source is read exactly
+// once; nothing is parsed here.
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { Transform } from 'stream';
+import { pipeline } from 'stream/promises';
+import { IngestError } from '../errors';
+import { isTransientError } from '../retry';
+import { evidenceKey, type EvidenceStore } from '../evidence/types';
+import type { ArtifactRef, FocusSource } from '../sources/types';
+
+export interface CapturedArtifact {
+  ref: ArtifactRef;
+  sha256: string;
+  byteSize: number;
+  evidenceKey: string;
+  stored: 'stored' | 'exists';
+}
+
+export async function captureArtifact(opts: {
+  source: FocusSource;
+  evidence: EvidenceStore;
+  ref: ArtifactRef;
+  tenantId: string;
+  sourceId: string;
+  tmpDir: string;
+  maxBytes: number;
+}): Promise<CapturedArtifact> {
+  const dir = await fs.promises.mkdtemp(path.join(opts.tmpDir, 'ratio-capture-'));
+  const file = path.join(dir, 'artifact');
+  try {
+    const hash = crypto.createHash('sha256');
+    let size = 0;
+    const meter = new Transform({
+      transform(chunk: Buffer, _enc, cb) {
+        size += chunk.length;
+        if (size > opts.maxBytes) {
+          cb(new IngestError('ARTIFACT_TOO_LARGE', `artifact ${opts.ref.name} exceeds the configured byte limit`));
+          return;
+        }
+        hash.update(chunk);
+        cb(null, chunk);
+      },
+    });
+    let body;
+    try {
+      body = await opts.source.openArtifact(opts.ref);
+    } catch (e) {
+      if (e instanceof IngestError) throw e;
+      throw new IngestError('SOURCE_READ_FAILED', `reading artifact ${opts.ref.name} failed`, { retryable: isTransientError(e), cause: e });
+    }
+    try {
+      await pipeline(body, meter, fs.createWriteStream(file, { mode: 0o600 }));
+    } catch (e) {
+      if (e instanceof IngestError) throw e;
+      throw new IngestError('SOURCE_READ_FAILED', `streaming artifact ${opts.ref.name} failed`, { retryable: isTransientError(e), cause: e });
+    }
+    const sha256 = hash.digest('hex');
+    const key = evidenceKey(opts.tenantId, opts.sourceId, sha256);
+    const stored = await opts.evidence.put(key, file, { sha256, byteSize: size });
+    return { ref: opts.ref, sha256, byteSize: size, evidenceKey: key, stored };
+  } finally {
+    await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/** Stores manifest bytes as evidence; returns the key. */
+export async function captureManifest(evidence: EvidenceStore, tenantId: string, sourceId: string, bytes: Buffer): Promise<string> {
+  const sha = crypto.createHash('sha256').update(bytes).digest('hex');
+  const key = evidenceKey(tenantId, sourceId, sha);
+  await evidence.putBytes(key, bytes);
+  return key;
+}
