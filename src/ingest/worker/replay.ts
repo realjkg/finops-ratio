@@ -9,7 +9,7 @@ import { resolveSettings, type WorkerSettings } from '../config';
 import { workerTransaction } from './tx';
 import { acquireRun, finishRun, loadSource } from './lease';
 import { publishBatch, refreshCheckpoint, type CheckpointEntry } from './publish';
-import { canonicalTenant, type WorkerHooks } from './types';
+import { SimulatedCrash, canonicalTenant, type WorkerHooks } from './types';
 import type { LogFn } from './pipeline';
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -84,6 +84,9 @@ export async function replayBatch(opts: {
     log('replay.done', { runId: lease.runId, period: target.period, batchId, outcome });
     return { runId: lease.runId, billingPeriod: target.period, batchId, outcome };
   } catch (e) {
+    // A "dead process" finishes nothing: the run stays running until its lease expires,
+    // exactly as in runSync (review M3, fifth round).
+    if (e instanceof SimulatedCrash) throw e;
     if (e instanceof IngestError && e.code === 'LEASE_LOST') throw e;
     // A finish that matched no row (lease expired or taken over) is LEASE_LOST; a finish that could not reach the DB leaves e (review H1).
     const finished = await finishRun(opts.pool, lease, {

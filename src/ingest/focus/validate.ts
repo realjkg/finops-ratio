@@ -169,7 +169,9 @@ export function validateRow(
   }
   if (errors.length) return { ok: false, errors };
 
-  const extraColumns: Record<string, string> = {};
+  // Null prototype: a column named __proto__ (or constructor/prototype) is an
+  // ordinary own key here, never the prototype setter (review M2, fifth round).
+  const extraColumns: Record<string, string> = Object.create(null) as Record<string, string>;
   index.columns.forEach((col, i) => {
     if (!MAPPED.has(col) && values[i] !== '') extraColumns[col] = values[i];
   });

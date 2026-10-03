@@ -12,8 +12,19 @@ export interface ParsedTimestamp {
   epochMs: number;
 }
 
+/**
+ * UTC instant of a calendar date-time. Date.UTC maps years 0-99 to 1900-1999,
+ * so the year is set with setUTCFullYear (proleptic Gregorian, any year).
+ */
+function utcMs(y: number, mo0: number, d: number, h = 0, mi = 0, s = 0, ms = 0): number {
+  const t = new Date(0);
+  t.setUTCFullYear(y, mo0, d);
+  t.setUTCHours(h, mi, s, ms);
+  return t.getTime();
+}
+
 function daysInMonth(y: number, m: number): number {
-  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return new Date(utcMs(y, m, 0)).getUTCDate();
 }
 
 export function parseFocusTimestamp(s: string): ParsedTimestamp | null {
@@ -39,7 +50,7 @@ export function parseFocusTimestamp(s: string): ParsedTimestamp | null {
     zoneOut = `${zm[1]}${zm[2]}:${zm[3]}`;
   }
   const ms = frac ? Number((frac.slice(1) + '00').slice(0, 3)) : 0;
-  const epochMs = Date.UTC(y, mo - 1, d, h, mi, sec, ms) - offsetMin * 60_000;
+  const epochMs = utcMs(y, mo - 1, d, h, mi, sec, ms) - offsetMin * 60_000;
   const iso = `${ys}-${mos}-${ds}T${hs}:${mis}:${ss}${frac}${zoneOut}`;
   return { iso, epochMs };
 }
