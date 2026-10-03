@@ -263,7 +263,7 @@ CREATE TABLE ratio.ingest_artifacts (
   source_id      uuid NOT NULL,
   batch_id       uuid NOT NULL,
   artifact_name  text NOT NULL CHECK (
-                   length(artifact_name) BETWEEN 1 AND 1024 AND artifact_name !~ '[?#]' AND NOT ratio.text_looks_secret(artifact_name)
+                   length(artifact_name) >= 1 AND length(artifact_name) <= 1024 AND artifact_name !~ '[?#]' AND NOT ratio.text_looks_secret(artifact_name)
                  ),
   sha256         text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
   byte_size      bigint NOT NULL CHECK (byte_size >= 0),

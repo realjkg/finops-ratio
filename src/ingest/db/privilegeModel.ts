@@ -8,6 +8,7 @@
 // in the same change, so the widening is visible in code review.
 import type { ClientBase } from 'pg';
 import { MigrationError } from './migrationFiles';
+import { FOUNDATION_0001 } from './foundationManifest';
 
 export type CheckedRole = 'ratio_reader' | 'ratio_worker';
 export const RATIO_ROLES = ['ratio_owner', 'ratio_worker', 'ratio_reader'] as const;
@@ -399,6 +400,197 @@ async function hookViolations(client: ClientBase): Promise<string[]> {
   return problems;
 }
 
+const b = (x: unknown) => (x === true ? 'true' : 'false');
+
+/** Every policy on a table in schema ratio, rendered as a manifest line. */
+async function policyEntries(client: ClientBase): Promise<string[]> {
+  const policies = await client.query<{ t: string; name: string; cmd: string; permissive: boolean; roles: string; using: string; chk: string }>(
+    `SELECT 'ratio.' || c.relname AS t, p.polname AS name, p.polcmd::text AS cmd, p.polpermissive AS permissive,
+            (SELECT pg_catalog.string_agg(CASE WHEN r = 0 THEN 'public' ELSE pg_catalog.pg_get_userbyid(r) END, ',' ORDER BY 1)
+               FROM pg_catalog.unnest(p.polroles) AS r) AS roles,
+            coalesce(pg_catalog.md5(pg_catalog.pg_get_expr(p.polqual, p.polrelid)), '') AS using,
+            coalesce(pg_catalog.md5(pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid)), '') AS chk
+       FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_class c ON c.oid = p.polrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'ratio'`,
+  );
+  return policies.rows.map(
+    (p) => `policy:${p.t}:${p.name}:cmd=${p.cmd}:permissive=${b(p.permissive)}:roles=${p.roles}:using=${p.using}:check=${p.chk}`,
+  );
+}
+
+/** `policy:<schema>.<table>:<rest>` → `policy:<rest>` (the shape, independent of the table). */
+const policyShape = (entry: string) => entry.replace(/^policy:[^:]+:/, 'policy:');
+
+/**
+ * Reviewed policy SHAPES (name, command, permissive, roles, USING / WITH CHECK
+ * hashes — not the table): exactly the 0001 tenant_isolation policy on
+ * `tenant_id = ratio.current_tenant_id()` for all commands, to PUBLIC,
+ * permissive. A later migration's new ratio table may use that reviewed shape;
+ * any other policy must be added to this list in a reviewed change (round 11).
+ * The tenants table's `id = ratio.current_tenant_id()` policy is NOT a reusable
+ * shape (round 12, L4): on another table `id` is not the tenant, so it is
+ * allowed only as its exact 0001 manifest entry on ratio.tenants. The
+ * tenant_id shape needs no column check: the expression cannot be created
+ * unless the table has a uuid-comparable tenant_id column.
+ */
+export const REVIEWED_POLICY_SHAPES: readonly string[] = [
+  ...new Set(FOUNDATION_0001.filter((e) => e.startsWith('policy:') && !e.startsWith('policy:ratio.tenants:')).map(policyShape)),
+];
+
+/** True when a rendered policy entry is reviewed (exact 0001 entry or reviewed shape). */
+function isReviewedPolicy(entry: string): boolean {
+  return FOUNDATION_0001.includes(entry) || REVIEWED_POLICY_SHAPES.includes(policyShape(entry));
+}
+
+/**
+ * Every table in schema ratio — 0001's and any a later migration adds — must
+ * have RLS enabled AND forced, be permanent (not UNLOGGED/TEMP), and carry at
+ * least one reviewed policy; and no relation may inherit from, or be a
+ * partition of, a ratio table (or the reverse) — inheritance/partitioning
+ * would route rows around the parent's policies (round 12, L1).
+ */
+async function tableViolations(client: ClientBase): Promise<string[]> {
+  const problems: string[] = [];
+  const tables = await client.query<{ t: string; rls: boolean; force: boolean; persistence: string }>(
+    `SELECT 'ratio.' || c.relname AS t, c.relrowsecurity AS rls, c.relforcerowsecurity AS force, c.relpersistence::text AS persistence
+       FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'ratio' AND c.relkind IN ('r', 'p') ORDER BY 1`,
+  );
+  const policies = await policyEntries(client);
+  for (const t of tables.rows) {
+    if (!t.rls || !t.force) problems.push(`table ${t.t} must have row-level security enabled and forced`);
+    if (t.persistence !== 'p') problems.push(`table ${t.t} must be a permanent (logged) table`);
+    if (!policies.some((e) => e.startsWith(`policy:${t.t}:`) && isReviewedPolicy(e))) problems.push(`table ${t.t} has no reviewed policy`);
+  }
+  const inherits = await client.query<{ child: string; parent: string }>(
+    `SELECT cn.nspname || '.' || c.relname AS child, pn.nspname || '.' || p.relname AS parent
+       FROM pg_catalog.pg_inherits i
+       JOIN pg_catalog.pg_class c ON c.oid = i.inhrelid JOIN pg_catalog.pg_namespace cn ON cn.oid = c.relnamespace
+       JOIN pg_catalog.pg_class p ON p.oid = i.inhparent JOIN pg_catalog.pg_namespace pn ON pn.oid = p.relnamespace
+      WHERE c.relkind IN ('r', 'p', 'f') AND (cn.nspname = 'ratio' OR pn.nspname = 'ratio')
+      ORDER BY 1, 2`,
+  );
+  for (const r of inherits.rows) problems.push(`${r.child} inherits from or is a partition of ${r.parent}`);
+  return problems;
+}
+
+/**
+ * Any policy on a ratio table that is neither a 0001 manifest entry nor of a
+ * reviewed shape is refused — whether or not 0001 is in the ledger
+ * (round 11, M1). Permissive policies are ORed, so an extra one widens access
+ * (e.g. USING (true)). Decision: RESTRICTIVE ones are refused too — their
+ * expressions run for every candidate row and may call functions, and they
+ * can deny service; none is reviewed.
+ */
+async function policyViolations(client: ClientBase): Promise<string[]> {
+  return (await policyEntries(client))
+    .filter((e) => !isReviewedPolicy(e))
+    .sort()
+    .map((e) => `${e} is not a reviewed policy`);
+}
+
+/**
+ * The reviewed 0001 foundation as it is in the catalog, one normalized string
+ * per object (round 10). Compared with FOUNDATION_0001 (generated from a fresh
+ * 0001 apply, see foundationManifest.ts) whenever the ledger says 0001 is
+ * applied: every manifest entry must be present, so dropping, disabling or
+ * replacing any of these is a violation. Bodies/definitions are pinned by md5
+ * of PostgreSQL's own deparse (pg_get_functiondef / _viewdef / _constraintdef
+ * / _indexdef / _expr), computed with search_path = pg_catalog, pg_temp.
+ */
+export async function foundationSnapshot(client: ClientBase): Promise<string[]> {
+  await pinSearchPath(client);
+  const q = async (sql: string) => (await client.query<{ e: string }>(sql)).rows.map((r) => r.e);
+  const entries: string[] = [];
+  entries.push(
+    ...(await q(`SELECT 'schema:' || n.nspname || ':owner=' || pg_catalog.pg_get_userbyid(n.nspowner) AS e
+                   FROM pg_catalog.pg_namespace n WHERE n.nspname = 'ratio'`)),
+  );
+  const tables = await client.query<{ t: string; owner: string; rls: boolean; force: boolean; persistence: string; replident: string }>(
+    `SELECT 'ratio.' || c.relname AS t, pg_catalog.pg_get_userbyid(c.relowner) AS owner, c.relrowsecurity AS rls, c.relforcerowsecurity AS force,
+            c.relpersistence::text AS persistence, c.relreplident::text AS replident
+       FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'ratio' AND c.relkind IN ('r', 'p')`,
+  );
+  for (const t of tables.rows) {
+    entries.push(`table:${t.t}:owner=${t.owner}:rls=${b(t.rls)}:force=${b(t.force)}:persistence=${t.persistence}:replident=${t.replident}`);
+  }
+  const columns = await client.query<{ t: string; col: string; typ: string; nn: boolean; def: string }>(
+    `SELECT 'ratio.' || c.relname AS t, a.attname AS col, pg_catalog.format_type(a.atttypid, a.atttypmod) AS typ, a.attnotnull AS nn,
+            coalesce(pg_catalog.md5(pg_catalog.pg_get_expr(d.adbin, d.adrelid)), '') AS def
+       FROM pg_catalog.pg_attribute a
+       JOIN pg_catalog.pg_class c ON c.oid = a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+       LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+      WHERE n.nspname = 'ratio' AND c.relkind IN ('r', 'p', 'v') AND a.attnum > 0 AND NOT a.attisdropped`,
+  );
+  for (const r of columns.rows) entries.push(`column:${r.t}:${r.col}:${r.typ}:notnull=${b(r.nn)}:default=${r.def}`);
+  entries.push(...(await policyEntries(client)));
+  const triggers = await client.query<{ t: string; name: string; fn: string; enabled: string; type: number; deferrable: boolean; initdeferred: boolean }>(
+    `SELECT 'ratio.' || c.relname AS t, tg.tgname AS name, fn.nspname || '.' || p.proname || '()' AS fn, tg.tgenabled::text AS enabled,
+            tg.tgtype::int AS type, tg.tgdeferrable AS deferrable, tg.tginitdeferred AS initdeferred
+       FROM pg_catalog.pg_trigger tg
+       JOIN pg_catalog.pg_class c ON c.oid = tg.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_catalog.pg_proc p ON p.oid = tg.tgfoid JOIN pg_catalog.pg_namespace fn ON fn.oid = p.pronamespace
+      WHERE n.nspname = 'ratio' AND NOT tg.tgisinternal`,
+  );
+  for (const t of triggers.rows) {
+    entries.push(
+      `trigger:${t.t}:${t.name}:fn=${t.fn}:enabled=${t.enabled}:type=${t.type}:deferrable=${b(t.deferrable)}:initdeferred=${b(t.initdeferred)}`,
+    );
+  }
+  entries.push(
+    ...(await q(`SELECT 'function:' || ${FN_NAME} || ':owner=' || pg_catalog.pg_get_userbyid(p.proowner)
+                        || ':secdef=' || CASE WHEN p.prosecdef THEN 'true' ELSE 'false' END
+                        || ':def=' || pg_catalog.md5(pg_catalog.pg_get_functiondef(p.oid)) AS e
+                   FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+                  WHERE n.nspname = 'ratio'`)),
+  );
+  entries.push(
+    ...(await q(`SELECT 'view:ratio.' || c.relname || ':owner=' || pg_catalog.pg_get_userbyid(c.relowner)
+                        || ':options=' || coalesce(pg_catalog.array_to_string(c.reloptions, ','), '')
+                        || ':def=' || pg_catalog.md5(pg_catalog.pg_get_viewdef(c.oid)) AS e
+                   FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                  WHERE n.nspname = 'ratio' AND c.relkind IN ('v', 'm')`)),
+  );
+  entries.push(
+    ...(await q(`SELECT 'constraint:ratio.' || c.relname || ':' || k.conname || ':type=' || k.contype::text
+                        || ':validated=' || CASE WHEN k.convalidated THEN 'true' ELSE 'false' END
+                        || ':def=' || pg_catalog.md5(pg_catalog.pg_get_constraintdef(k.oid)) AS e
+                   FROM pg_catalog.pg_constraint k JOIN pg_catalog.pg_class c ON c.oid = k.conrelid
+                   JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                  WHERE n.nspname = 'ratio' AND k.contype IN ('c', 'f', 'p', 'u', 'x')`)),
+  );
+  entries.push(
+    ...(await q(`SELECT 'index:ratio.' || t.relname || ':' || i.relname || ':def=' || pg_catalog.md5(pg_catalog.pg_get_indexdef(i.oid)) AS e
+                   FROM pg_catalog.pg_index x JOIN pg_catalog.pg_class i ON i.oid = x.indexrelid
+                   JOIN pg_catalog.pg_class t ON t.oid = x.indrelid JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+                  WHERE n.nspname = 'ratio'`)),
+  );
+  // The reviewed ratio-scope grants must be PRESENT (e.g. the reader's SELECT on the view).
+  const eff = await effectivePrivileges(client);
+  for (const role of ['ratio_reader', 'ratio_worker'] as const) {
+    for (const p of eff[role]) if (/^(schema:ratio:|relation:ratio\.|function:ratio\.)/.test(p)) entries.push(`privilege:${role}:${p}`);
+  }
+  return entries.sort();
+}
+
+const FOUNDATION_ORDER = ['schema', 'table', 'trigger', 'policy', 'function', 'view', 'privilege', 'constraint', 'index', 'column'];
+
+/** Missing or altered 0001 objects, when (and only when) the ledger says 0001 is applied. */
+async function foundationViolations(client: ClientBase): Promise<string[]> {
+  const ledger = (await client.query<{ e: boolean }>(`SELECT pg_catalog.to_regclass('public.schema_migrations') IS NOT NULL AS e`)).rows[0].e;
+  if (!ledger) return [];
+  const applied = (await client.query<{ e: boolean }>(`SELECT EXISTS (SELECT 1 FROM public.schema_migrations WHERE version = '0001') AS e`)).rows[0].e;
+  if (!applied) return [];
+  const present = new Set(await foundationSnapshot(client));
+  // Most significant first, so a truncated error message still names the root cause
+  // (e.g. the schema, not 128 of its columns).
+  const rank = (e: string) => FOUNDATION_ORDER.indexOf(e.slice(0, e.indexOf(':')));
+  return FOUNDATION_0001.filter((e) => !present.has(e))
+    .sort((x, y) => rank(x) - rank(y) || (x < y ? -1 : 1))
+    .map((e) => `required 0001 object missing or altered: ${e}`);
+}
+
 /** Every deviation from the reviewed model, one human-readable line each (empty when compliant). */
 export async function privilegeModelViolations(client: ClientBase): Promise<string[]> {
   await pinSearchPath(client);
@@ -430,6 +622,9 @@ export async function privilegeModelViolations(client: ClientBase): Promise<stri
   for (const { fn } of pub.rows) problems.push(`PUBLIC holds EXECUTE on ${fn}`);
   problems.push(...(await hookViolations(client)));
   problems.push(...(await settingViolations(client)));
+  problems.push(...(await foundationViolations(client)));
+  problems.push(...(await policyViolations(client)));
+  problems.push(...(await tableViolations(client)));
   problems.push(...(await roleViolations(client)));
   return problems;
 }

@@ -889,3 +889,232 @@ R5  local_preload_libraries removed                        KILLED
 | skip/only/todo/it.fails grep | 0 |
 | cluster state | `pg_db_role_setting` rows: 0; `ratio_probe*` roles: 0 |
 | Slice 1 compat: scratch worktree `slice/01` 1f41db1 + 79afa89 (removed) | same single `cli.ts` main-block conflict, resolved by keeping Slice 1's block; tsc 0, eslint 0, fast 1206/1206, test:db 295/295 ×2 |
+
+---
+
+# Round 10 — Copilot on 17f07d7 (2 High): the reviewed foundation must be present
+
+Base: 17f07d7, the orchestrator's merge of origin/main; `git pull --ff-only`
+was already up to date. Local commits only (not pushed). 0001 unchanged. Raw
+logs: `scratchpad/r11/`.
+
+## R10.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| df64a63 | test(ingest): failing tests for round 10 — the reviewed 0001 foundation must be present, not only free of extras | tests (red) |
+| f3f84e1 | fix(ingest): catalog check requires the reviewed 0001 foundation to be present and unaltered (round 10, Copilot Highs) | fix + generated manifest + generator script |
+| (this) | docs(evidence): Slice 0 round 10 | docs |
+
+## R10.2 Red (at df64a63)
+
+`foundation.db.test.ts` + `cli.db.test.ts`: **14 failed / 11 passed (25)**.
+- 11 attacks were APPLIED (`runner must refuse: expected null not to be null`):
+  every DROP TRIGGER, DISABLE / ENABLE REPLICA TRIGGER, NOT DEFERRABLE RT003,
+  NO FORCE / DISABLE RLS, DROP POLICY / USING (true), the no-op guard
+  function, the dropped / NOT VALID FK, the revoked view grant and
+  security_invoker, the dropped partial index, the column type change, and
+  DROP SCHEMA ratio CASCADE.
+- `--status` after an out-of-band DROP SCHEMA exited 0 with `matches: true`.
+- The manifest module was absent.
+- The positive controls passed: pre-migration, clean apply, post-down.
+
+One defect was fixed before the red commit: the first NOT DEFERRABLE fixture
+renamed the constraint trigger and recreated it under the old name. The
+trigger's pg_constraint row kept that name, so the recreate failed with 23505.
+The fixture now drops the trigger and recreates it.
+
+## R10.3 Mutation table (privilegeModel.ts; each restored with `git checkout`, tree clean after)
+
+```
+F0  foundationViolations not called                          KILLED  13 tests
+F1  ledger gating removed (required before 0001 / after down) KILLED  positive controls + 3 CLI status tests
+F2  trigger presence not required                             KILLED  3
+F3  tgenabled not compared                                    KILLED  DISABLE / ENABLE REPLICA
+F4  deferrable / initially-deferred not compared              KILLED  NOT DEFERRABLE RT003
+F5  RLS enabled/forced not compared                           KILLED
+F6  policy presence not required                              KILLED
+F6b policy USING / WITH CHECK hashes not compared             KILLED  USING (true)
+F7  function definition hash not compared                     KILLED  no-op guard function
+F8  constraint presence not required                          KILLED  dropped FK
+F8b convalidated not compared                                 SURVIVED: by design, pg_get_constraintdef prints
+                                                              "NOT VALID", so the definition hash catches it too
+                                                              (the flag is kept as belt and braces)
+F9  required grants not checked                               KILLED  revoked reader grant
+F10 view options not compared                                 KILLED  security_invoker
+F11 index presence not required                               KILLED
+F12 column presence/type not required                         KILLED
+F13 schema entry not required                                 KILLED  both DROP SCHEMA tests
+```
+
+## R10.4 Verification (main checkout at f3f84e1 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1809/1809 (includes the suites merged from origin/main) |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 185/185 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` rows 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no `ratio_manifest_*` scratch database left |
+| Slice 1 compat: scratch worktree `slice/01` 3541d6b (already contains 17f07d7) + f3f84e1 (removed) | merge clean (no conflict); tsc 0, lint 0, fast 1922/1922; test:db 310/310 in runs 1, 5 and 6 |
+
+**Compat note.** Full test:db runs 2–4 on the merge each had 18 failures, all
+in the S3-backed files (cliWorker, demo, s3Source). Every failure came from
+`InternalError 500` returned by the local SeaweedFS (`ratio-s3`) on evidence
+puts in `beforeAll`. None came from the catalog check. On the same base
+(3541d6b without this change) a full run passed 295/295. `s3Source.db.test.ts`
+alone passed on the merge 2/2, and two later full runs on the merge passed
+310/310. These are transient object-store errors.
+
+---
+
+# Round 11 — challenger on 0b041c5 (0 High / 1 Medium) + Lows L1–L3
+
+Base: 0b041c5. Local commits only (not pushed). **0001 edited in place**
+(L1). It has never been deployed. Dev databases migrated with the old bytes
+report CHECKSUM_MISMATCH by design. The down file is unchanged. Raw logs:
+`scratchpad/r12/`.
+
+## R11.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 4907dc7 | test(ingest): failing tests for round 11 (extra policies on ratio tables; pg_dump round trip; policy roles; replica identity) | tests (red) |
+| 60a6dc5 | fix(ingest): refuse unreviewed policies on ratio tables; dump-stable 0001 CHECK; pin persistence and replica identity (round 11) | fix + regenerated manifest |
+| (this) | docs(evidence): Slice 0 round 11 | docs |
+
+## R11.2 Red (at 4907dc7)
+
+`foundation.db.test.ts`: **8 failed / 15 passed (23)**.
+- Four policy attacks were APPLIED: the split-keyword repro, FOR SELECT,
+  TO ratio_worker, AS RESTRICTIVE, and the extra policy on a new table.
+- The no-ledger case reported nothing, and status said `matches: true`.
+- The pg_dump round trip changed exactly one entry:
+  `ingest_artifacts_artifact_name_check`.
+- REPLICA IDENTITY FULL was applied, and the table entries lacked
+  persistence/replident.
+- The `ALTER POLICY … TO ratio_owner` test passed on arrival, as intended:
+  roles were already in the entry, and the test exists to kill the roles
+  mutant.
+
+## R11.3 Mutation table (each restored with `git checkout`; tree clean after)
+
+```
+P1 policyViolations not called                          KILLED  5 tests
+P2 reviewed-shape allowance removed (manifest only)     KILLED  new-table positive + the round-4 legitimate-migration positive
+P3 manifest allowance removed (shapes only)             SURVIVED: by design, every 0001 policy IS of a reviewed
+                                                        shape (the shapes are derived from them)
+P4 RESTRICTIVE policies allowed                         KILLED
+P5 policy roles not rendered                            KILLED  TO ratio_worker variant, ALTER POLICY … TO ratio_owner
+P6 relpersistence not rendered (manifest regenerated)   KILLED  entry-shape test only (UNLOGGED cannot be set on a
+                                                        0001 table because of its FKs)
+P7 relreplident not rendered (manifest regenerated)     KILLED  REPLICA IDENTITY FULL
+L1 0001 back to BETWEEN (manifest regenerated)          KILLED  pg_dump round trip
+```
+
+## R11.4 Verification (main checkout at 60a6dc5 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1809/1809 |
+| `npm run test:db` ×3 (URL set) | 3/3 exit 0, 194/194 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` rows 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no `ratio_manifest_*` database |
+| Slice 1 compat: scratch worktree `slice/01` 770e333 + 60a6dc5 (removed) | merge clean (no conflict); tsc 0, lint 0, fast 1924/1924, test:db 319/319 ×2 (S3 test-bucket fix on Slice 1: no object-store errors) |
+
+---
+
+# Round 12 — challenger on 8079351 (1 High: flaky test) + Lows L1–L4
+
+Base: 8079351. Local commits only (not pushed). 0001 unchanged; manifest
+unchanged. Raw logs: `scratchpad/r13/`.
+
+## R12.1 Commits
+
+| Hash | Subject | Kind |
+|---|---|---|
+| 6b52a3f | test(ingest): settingRows counts only rows this test could leak (fixes a cross-file race, challenger round 12 H1) | test fix (H1) |
+| a33a9ff | test(ingest): failing tests for round 12 Lows (per-table RLS/policy/inheritance rule, exact policy shapes) | tests (red) |
+| 737c94f | fix(ingest): every ratio table needs forced RLS, a reviewed policy and no inheritance; tenants policy shape not reusable (round 12 L1, L4) | fix |
+| 7cf79d1 | ci: pin PostgreSQL 16 client tools for the DB suite's pg_dump round-trip test (round 12 L3) | **CI workflow (restricted change)** |
+| 8f6c8d9 | test(ingest): G2 uses the reviewed policy name so only the roles differ (kills the 'shape ignores roles' mutant) | test |
+| (this) | docs(evidence): Slice 0 round 12 | docs |
+
+## R12.2 H1 — race fixed, 25 consecutive runs
+
+**Cause.** `settingRows()` counted the whole cluster-wide
+`pg_db_role_setting`. `cli.db.test.ts` and other privileges tests commit
+rows scoped to their own disposable databases in parallel, and those rows
+disappear when those databases are dropped.
+
+**Fix.** The count is now `WHERE setdatabase = 0 OR setdatabase = <this
+database>`. The assertion is unchanged.
+
+**Other cluster-global snapshots reviewed.** `roles.db.test.ts` reads only
+the ratio roles' own attributes and their memberships in other roles. No test
+commits either: every such probe is rolled back. Nothing snapshots
+`pg_parameter_acl`, role counts or `pg_database`.
+
+**Proof.** `npm run test:db` was run **25 times in a row** at 8f6c8d9:
+**25/25 exit 0, 203/203 each, 0 failures, no "Errors" line**
+(`run25-*.txt`).
+
+## R12.3 Red (at a33a9ff)
+
+`foundation.db.test.ts` + `privileges.db.test.ts`: **6 failed / 83 passed
+(89)**. Six attacks were APPLIED:
+- a new ratio table with RLS disabled;
+- a new ratio table with RLS forced but no policy;
+- an INHERITS (ratio.cost_facts) child;
+- a public partition of a new partitioned ratio table;
+- SET UNLOGGED on a new ratio table;
+- the tenants `id =` shape reused on another table.
+
+G2, G3 and G4 passed on arrival, as intended: they exist to kill mutants.
+Fixtures that created `ratio.session_probe` (round 7/8) now write
+`public.session_probe`, because a ratio table without RLS and a policy is now
+refused. What they probe is unchanged.
+
+Two fixture defects were fixed before the red commit. The partition was
+created while the migration was still `SET LOCAL ROLE ratio_owner`; it now
+uses `RESET ROLE` first. And `G2` initially used another policy name, so the
+name, not the roles, caused the refusal; 8f6c8d9 made it exact.
+
+## R12.4 Mutation table (privilegeModel.ts; each restored with `git checkout`, tree clean after)
+
+```
+T1 tableViolations not called                   KILLED  5 tests
+T2 RLS enabled/forced rule removed              KILLED
+T3 permanent-table rule removed                 KILLED  (SET UNLOGGED on a new table)
+T4 reviewed-policy-per-table rule removed       KILLED
+T5 inheritance rule removed                     KILLED  INHERITS child + partition
+T6 tenants shape reusable again (L4)            KILLED
+G2 shape ignores roles                          KILLED  (after 8f6c8d9; survived the first table)
+G3 shape ignores USING hash                     KILLED
+G4 shape ignores the policy name                KILLED
+```
+
+## R12.5 Verification (main checkout at 8f6c8d9 + docs)
+
+| Command | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npx vitest run` | 1809/1809 |
+| `npm run test:db` ×25 (URL set) | 25/25 exit 0, 203/203 each |
+| `npm run test:db` (URL unset) | exit 1 |
+| pg_dump test with `RATIO_PG_DUMP=/usr/lib/postgresql/16/bin/pg_dump` / with a missing binary | pass / **fails** (`spawnSync … ENOENT`): never skipped |
+| `npm run worker:build` / `npm run build` | 0 / 0; tsconfig.json + next-env.d.ts restored; no AGENTS.md/CLAUDE.md |
+| skip/only/todo/it.fails grep | 0 |
+| cluster state | `pg_db_role_setting` rows 0; `ratio_probe*` roles 0; ratio roles NOLOGIN; no `ratio_manifest_*` database |
+| Slice 1 compat: scratch worktree `slice/01` 770e333 + 8f6c8d9 (removed) | **one conflict in `.github/workflows/ci.yml`**: Slice 1 adds a SeaweedFS step and `RATIO_TEST_S3_ENDPOINT`; this round adds the PG16 client-tools step and `RATIO_PG_DUMP` / `RATIO_PSQL`. Resolved by keeping both (YAML valid). tsc 0, lint 0, fast 1924/1924, test:db 328/328 ×2 |
+
+**Restricted change.** 7cf79d1 edits `.github/workflows/ci.yml`. It adds a
+"PostgreSQL 16 client tools" step, which installs `postgresql-client-16` only
+when `/usr/lib/postgresql/16/bin/{pg_dump,psql}` are absent and prints their
+versions. It also adds `RATIO_PG_DUMP` / `RATIO_PSQL` to the DB-test step's
+env. The workflow was not executed here (no push).
