@@ -4,7 +4,7 @@
 // so a PR cannot change the code that classifies it.
 import { classify } from './classify-risk.mjs';
 import {
-  decideEligibility, decideMergeStatus, evaluateExceptionApproval, parseExceptionCommand, outsiderReason,
+  decideEligibility, decideMergeStatus, evaluateExceptionApproval, parseExceptionCommand, outsiderReason, isApproverRole,
   DEFAULT_CONFIG, ELIGIBILITY_CONTEXT, REVOKED_CONTEXT, ACTIONS_BOT_LOGIN,
 } from './eligibility.mjs';
 import { REPORT_MARKER, buildReport, desiredLabels, labelChanges } from './report.mjs';
@@ -207,11 +207,15 @@ async function unresolvedThreadCount(github, repo, number) {
 }
 
 /** Gather everything decideEligibility needs for one PR. */
-/** Sticky revocation statuses on a SHA, honoured only from the Actions bot. */
-async function actionsRevocations(github, repo, sha) {
-  const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, { ...repo, ref: sha, per_page: 100 });
-  return statuses.filter((st) => st.context === REVOKED_CONTEXT && st.creator?.login === ACTIONS_BOT_LOGIN);
+/** All commit statuses on a SHA (newest first, as the API returns them). */
+async function listStatuses(github, repo, sha) {
+  return github.paginate(github.rest.repos.listCommitStatusesForRef, { ...repo, ref: sha, per_page: 100 });
 }
+
+/** Sticky revocation statuses in a status list, honoured only from the Actions bot. */
+const revokedFrom = (statuses) => (statuses ?? []).filter((st) => st.context === REVOKED_CONTEXT && st.creator?.login === ACTIONS_BOT_LOGIN);
+
+const STATUS_CAP = /maximum number of statuses/i;
 
 /**
  * Record each revocation as a sticky failure status on the SHA it names
@@ -223,15 +227,59 @@ export async function recordRevocations(github, repo, revocations, known = {}) {
   for (const r of revocations ?? []) {
     if (done.has(r.sha)) continue;
     done.add(r.sha);
-    const existing = known[r.sha] ?? (await actionsRevocations(github, repo, r.sha));
-    if (existing.length) continue;
+    const statuses = known[r.sha] ?? (await listStatuses(github, repo, r.sha));
+    if (revokedFrom(statuses).length) continue;
+    const description = `exception revoked by @${r.login} in comment ${r.commentId}`;
+    // Eligibility goes red FIRST, then the permanent marker is recorded.
+    await postEligibilityStatus(github, repo, r.sha, 'failure', description, { existing: statuses });
     await github.rest.repos.createCommitStatus({
       ...repo,
       sha: r.sha,
       state: 'failure',
       context: REVOKED_CONTEXT,
-      description: `exception revoked by @${r.login} in comment ${r.commentId}`.slice(0, 140),
+      description: description.slice(0, 140),
     });
+  }
+}
+
+/**
+ * Revocation carried by an issue_comment edited/deleted event on a PR: the
+ * comment's ORIGINAL body parsed as an exception command (any SHA it names).
+ * Null for anything else. The author's role is checked by the caller.
+ */
+export function revocationFromEvent(payload) {
+  if (!payload?.issue?.pull_request) return null;
+  const c = eventCommentFor(payload, payload.issue.number);
+  if (!c || !c.user?.login || c.user.type === 'Bot') return null;
+  const cmd = parseExceptionCommand(c.body);
+  if (!cmd) return null;
+  return { sha: cmd.sha, login: c.user.login, commentId: c.id, why: 'edited-or-deleted', prNumber: payload.issue.number };
+}
+
+/**
+ * Job `revocations`: record a revocation straight from an edited/deleted
+ * comment event (no per-PR queue), after checking the author is admin/maintain.
+ */
+export async function runRevocations({ github, context, core }) {
+  const repo = context.repo;
+  const r = revocationFromEvent(context.payload);
+  if (!r) {
+    core.info('No exception command in the edited/deleted comment; nothing to revoke.');
+    return null;
+  }
+  try {
+    const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ ...repo, username: r.login });
+    if (!isApproverRole({ permission: data.permission, role_name: data.role_name })) {
+      core.info(`@${r.login} is not admin/maintain; their command carries no approval to revoke.`);
+      return null;
+    }
+    await recordRevocations(github, repo, [r]);
+    core.info(`Revocation recorded for ${r.sha.slice(0, 7)} (comment ${r.commentId}, @${r.login}).`);
+    return r;
+  } catch (e) {
+    if (e.statusCap) core.error(e.message);
+    core.setFailed(`Could not record the revocation: ${e.message}`);
+    return null;
   }
 }
 
@@ -292,6 +340,10 @@ export async function gatherState(github, repo, number, { eventComment } = {}) {
   // Unknown (API error) → null → decideEligibility fails closed.
   const unresolvedThreads = await unresolvedThreadCount(github, repo, number).catch(() => null);
 
+  // Every status on the head (creator-aware): used to avoid re-posting an
+  // unchanged eligibility status and to read sticky revocations.
+  const headStatuses = await listStatuses(github, repo, headSha);
+
   // Exception approval (restricted PRs only): SHA-bound approval comments with
   // sticky revocation. Permission is looked up only for authors of well-formed
   // non-bot commands. Any API failure ⇒ not approved (fail closed).
@@ -308,9 +360,8 @@ export async function gatherState(github, repo, number, { eventComment } = {}) {
         const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ ...repo, username });
         roles[username] = { permission: data.permission, role_name: data.role_name };
       }
-      const revokedStatuses = await actionsRevocations(github, repo, headSha);
-      exception = evaluateExceptionApproval({ comments, roles, headSha, revokedStatuses, eventComment });
-      await recordRevocations(github, repo, exception.revocations, { [headSha.toLowerCase()]: revokedStatuses });
+      exception = evaluateExceptionApproval({ comments, roles, headSha, revokedStatuses: revokedFrom(headStatuses), eventComment });
+      await recordRevocations(github, repo, exception.revocations, { [headSha.toLowerCase()]: headStatuses });
     } catch (e) {
       exception = { approved: false, reason: `Could not verify exception approvals (${e.status ? `HTTP ${e.status}` : e.message}).` };
     }
@@ -323,6 +374,7 @@ export async function gatherState(github, repo, number, { eventComment } = {}) {
   return {
     raw: pr,
     latest: again,
+    headStatuses,
     fresh,
     moved,
     state: {
@@ -387,15 +439,38 @@ export async function applyDecision(github, repo, raw, decision) {
 
 export const MAX_TARGETS = 200; // GitHub matrices cap at 256 legs
 
-/** The required eligibility status on a head SHA. */
-export async function postEligibilityStatus(github, repo, sha, state, description) {
-  await github.rest.repos.createCommitStatus({
-    ...repo,
-    sha,
-    state,
-    context: ELIGIBILITY_CONTEXT,
-    description: String(description).slice(0, 140),
-  });
+/**
+ * The required eligibility status on a SHA, posted only when (state,
+ * description) differs from the latest one github-actions[bot] created there:
+ * GitHub caps statuses at 1000 per SHA and context, and unconditional
+ * re-posting could freeze the status. `existing` is the SHA's status list when
+ * already gathered; otherwise it is fetched, and if that fails we post anyway.
+ * Hitting the cap throws an error marked `statusCap` (the job goes red).
+ */
+export async function postEligibilityStatus(github, repo, sha, state, description, { existing } = {}) {
+  const desc = String(description).slice(0, 140);
+  let statuses = existing;
+  if (!statuses) {
+    try {
+      statuses = await listStatuses(github, repo, sha);
+    } catch {
+      statuses = null;
+    }
+  }
+  const latest = (statuses ?? []).find((st) => st.context === ELIGIBILITY_CONTEXT && st.creator?.login === ACTIONS_BOT_LOGIN);
+  if (latest && latest.state === state && latest.description === desc) return 'unchanged';
+  try {
+    await github.rest.repos.createCommitStatus({ ...repo, sha, state, context: ELIGIBILITY_CONTEXT, description: desc });
+  } catch (e) {
+    if (STATUS_CAP.test(e.message ?? '')) {
+      throw Object.assign(new Error(
+        `GitHub refuses more "${ELIGIBILITY_CONTEXT}" statuses on ${sha.slice(0, 7)} (maximum number of statuses per SHA and context); `
+        + 'the status is frozen at its last value. To resolve, push a new commit to the PR head.',
+      ), { statusCap: true });
+    }
+    throw e;
+  }
+  return 'posted';
 }
 
 async function candidatePrs(github, context) {
@@ -450,7 +525,7 @@ export async function runEligibility({ github, context, core, numbers }) {
   let errors = 0;
   for (const number of targets) {
     try {
-      const { raw, latest, fresh, moved, state } = await gatherState(github, repo, number, {
+      const { raw, latest, fresh, moved, state, headStatuses } = await gatherState(github, repo, number, {
         eventComment: eventCommentFor(context.payload, number),
       });
       if (moved) {
@@ -468,13 +543,14 @@ export async function runEligibility({ github, context, core, numbers }) {
       // exception yields a success status, and the approver merges.
       const action = await applyDecision(github, repo, raw, decision);
       if (action.startsWith('CONFIGURATION GAP')) core.warning(`#${number}: ${action}`);
-      await postEligibilityStatus(github, repo, state.pr.headSha, status.state, status.description);
+      await postEligibilityStatus(github, repo, state.pr.headSha, status.state, status.description, { existing: headStatuses });
       rows.push({
         number, risk: fresh.risk, eligible: decision.eligible,
         action: `${action}; status ${status.state} (${status.mode})`, reasons: decision.reasons,
       });
     } catch (e) {
       errors++;
+      if (e.statusCap) core.error(e.message);
       let action = `error: ${e.message}`;
       // Fail closed: if auto-merge is on and we could not re-verify, turn it off.
       try {

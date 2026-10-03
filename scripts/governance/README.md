@@ -152,18 +152,32 @@ that context is excluded from the generic "every status is success" rule. A
 writer therefore cannot block a PR by forging a revocation status. Any other
 failing status they post still blocks, just as a failing CI run would.
 
-Residual risk: a revoke comment that is edited or deleted before any
-evaluation has run is still caught, through the edited/deleted event's old
-body. It would be lost only if that event's workflow run also failed. The
-30-minute sweep cannot recover a deleted revoke.
+Edited and deleted comment events are also handled by a separate
+`revocations` job, so they are never dropped by a newer evaluation of the
+same PR. It has no per-PR concurrency group: runs are keyed by comment id. It
+reads the original command from the event, checks that the author is
+admin/maintain, posts eligibility `failure`, and then posts the marker.
+Eligibility always goes red before the marker is recorded.
+
+**Pushing any commit to the PR head is the guaranteed revoke.** A new head has
+no approval. Comment-based revocation would be lost only if the edit/delete
+event's workflow run also failed; the 30-minute sweep cannot recover a deleted
+revoke.
+
+**Status cap.** GitHub keeps at most 1000 statuses per SHA and context. The
+eligibility status is therefore posted only when its (state, description)
+differs from the latest one `github-actions[bot]` created on that SHA. If the
+cap is still reached, the job fails (red) with an error. The status on that SHA
+is then frozen at its last value; resolve this by pushing a new commit to the
+PR head.
 
 **When evaluation runs on comments.** `issue_comment` events (`created`,
 `edited`, `deleted`) re-evaluate the PR immediately. The `targets` and
 `merge-eligibility` jobs only run when:
 
 - the issue is a PR;
-- the comment body, or for an edit its previous body, starts with
-  `/exception-`;
+- the comment body, or for an edit its previous body, contains `/exception-`
+  (the code still requires the first line to be exactly the command);
 - the comment author's association is OWNER, MEMBER or COLLABORATOR.
 
 Other comments are ignored. Every other trigger is unaffected.

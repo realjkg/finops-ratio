@@ -192,6 +192,9 @@ function collectReasons(state, config) {
 
 const roleOf = (r) => (r ? (APPROVER_ROLES.has(r.role_name) ? r.role_name : r.permission === 'admin' ? 'admin' : r.role_name ?? r.permission) : undefined);
 
+/** True when a getCollaboratorPermissionLevel record grants admin or maintain. */
+export const isApproverRole = (record) => APPROVER_ROLES.has(roleOf(record));
+
 /**
  * Parse an exception command from the FIRST line of a comment (trimmed); null
  * unless that line matches exactly. Later lines are free text (evidence link).

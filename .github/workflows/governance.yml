@@ -81,7 +81,7 @@ jobs:
     needs: [classify]
     # Runs after classification on PR events, and on its own for the other
     # triggers (where `classify` is skipped). Emits the PR numbers to evaluate.
-    if: ${{ always() && (github.event_name != 'issue_comment' || (github.event.issue.pull_request && (startsWith(github.event.comment.body, '/exception-') || startsWith(github.event.changes.body.from, '/exception-')) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))) }}
+    if: ${{ always() && (github.event_name != 'issue_comment' || (github.event.issue.pull_request && (contains(github.event.comment.body, '/exception-') || contains(github.event.changes.body.from, '/exception-')) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -113,7 +113,7 @@ jobs:
     # itself, so it never trusts a possibly stale label alone.
     name: Governance · merge eligibility (#${{ matrix.pr }})
     needs: [targets]
-    if: ${{ always() && needs.targets.result == 'success' && needs.targets.outputs.prs != '[]' && (github.event_name != 'issue_comment' || (github.event.issue.pull_request && (startsWith(github.event.comment.body, '/exception-') || startsWith(github.event.changes.body.from, '/exception-')) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))) }}
+    if: ${{ always() && needs.targets.result == 'success' && needs.targets.outputs.prs != '[]' && (github.event_name != 'issue_comment' || (github.event.issue.pull_request && (contains(github.event.comment.body, '/exception-') || contains(github.event.changes.body.from, '/exception-')) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -149,3 +149,32 @@ jobs:
             const n = Number(process.env.PR_NUMBER);
             if (!Number.isInteger(n) || n <= 0) throw new Error(`bad PR_NUMBER ${process.env.PR_NUMBER}`);
             await mod.runEligibility({ github, context, core, numbers: [n] });
+
+  revocations:
+    # Records a revocation straight from an edited/deleted comment event, outside
+    # the per-PR eligibility queue (keyed by comment id, never dropped by a newer
+    # evaluation of the same PR): eligibility failure first, then the permanent
+    # "Governance · exception revoked" marker. The author's role is checked in code.
+    name: Governance · revocations
+    if: ${{ github.event_name == 'issue_comment' && (github.event.action == 'edited' || github.event.action == 'deleted') && github.event.issue.pull_request && (contains(github.event.comment.body, '/exception-') || contains(github.event.changes.body.from, '/exception-')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: governance-revocation-${{ github.event.comment.id }}
+      cancel-in-progress: false
+    permissions:
+      contents: read        # base-branch scripts
+      statuses: write       # eligibility failure + revocation marker
+    steps:
+      - name: Checkout governance scripts from the base/default branch (never the PR head)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/governance
+      - name: Record revocation
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const mod = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/governance/gh-actions.mjs`).href);
+            await mod.runRevocations({ github, context, core });
