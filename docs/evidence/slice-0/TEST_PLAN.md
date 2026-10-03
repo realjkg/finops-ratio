@@ -132,3 +132,19 @@ schema `a quarantined batch must carry a reason…`, `validation errors are capp
 tenancy batch-update probe uses an exact no-op update (still proves RLS row scope);
 migrate.db failing-migration fixture marked `contract` (INSERT is outside the
 expand allow-list) and run with `allowContract`; fixtures seed through the legal lifecycle.
+
+## Round 3 — challenger round 2 (tests committed red in 35316bd, before the fixes)
+
+| Finding | File | Test name(s) |
+|---|---|---|
+| H1 tenant switch before COMMIT | `immutability.db.test.ts` | `H1: switching ratio.tenant_id before COMMIT cannot smuggle a pointer to a staged batch past RT003 (repro T1)`, `H1: switching tenant before COMMIT cannot supersede the published batch without a replacement (repro T2)`, `H1: a legitimate publish with a constant tenant still commits (positive control, fresh DB)`, `H1: a child row whose parent batch is not found is refused by the trigger (RT001), not left to the FK` |
+| H1 consequence | `tenancy.db.test.ts` | `worker with tenant A cannot insert rows carrying tenant B's id` — child tables now expect RT001 (trigger) instead of 42501 (RLS); other tables unchanged |
+| M1 classifier | `migrationFiles.test.ts` | `round 3: policy, reader-grant, view, DO-body, NOT NULL column and function/trigger bypasses are caught (challenger round 2)` (18 forbidden + 9 non-expand cases), `round 3: the reasoned markers make ratio views, functions and triggers expand; legitimate forms still pass` |
+| M2 FOR SHARE race | `immutability.db.test.ts` | `M2: a fact insert racing an uncommitted publish waits on the batch row lock, then fails RT001 (two connections)` |
+| M3 frozen + transition | `immutability.db.test.ts` | `M3: data columns cannot ride along with a legal transition` |
+| L2 no EXECUTE | `immutability.db.test.ts` | `L2: the worker cannot call the publication check directly; the deferred trigger still works for it` |
+
+Test change after the red commit (a0996c2, before the classifier fix): the
+additive-vocabulary positive control granted SELECT on a non-ratio table to
+ratio_reader, which the stricter reader rule now forbids; it grants to
+ratio_worker instead. Added `ADD COLUMN … DEFAULT 1 NOT NULL` as a legal form.

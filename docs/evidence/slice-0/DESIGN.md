@@ -170,12 +170,13 @@ does not bundle `pg`. `tsc --noEmit` (root tsconfig) type-checks `src/ingest`.
 | Edited migration silently diverges | sha256 checksum ledger | tamper test |
 | Migration leaking connection string | CLI never logs URLs; logs structured JSON with error message/code only | n/a (reviewed) |
 | SQL injection via tenant id | bound parameter + uuid validation | unit test |
-
 | **Credential holder selects another tenant** (round 2, M5) | NONE at the DB layer: the tenant is a user-settable GUC; any holder of a worker/reader credential can `set_config('ratio.tenant_id', <any uuid>, true)`. RLS/tenant isolation defends against application bugs (missing/wrong tenant), NOT against credential holders. The alternative — per-tenant DB roles/credentials — is an owner decision | characterization test `documented trust boundary…` |
 | Published data rewritten after publication (round 2, H2) | staged-only child trigger (RT001), TRUNCATE refused, batch lifecycle trigger (RT002), deferred pointer consistency (RT003), reconciliation CHECKs | `immutability.db.test.ts`; mutations M8–M11, M16–M18, M21 |
 | Pre-existing dangerous roles (round 2, M1/M2) | 0001 guard RT010: SUPER/BYPASSRLS/REPLICATION, CREATEROLE/CREATEDB on worker/reader, any membership | `roles.db.test.ts`; M13, M19 |
-| Migration smuggles a destructive or isolation-disabling statement (round 2, M3) | expand allow-list; always-forbidden list | `migrationFiles.test.ts` |
+| Migration smuggles a destructive or isolation-disabling statement (round 2, M3; round 3, M1) | **Text-based linter, defence in depth — code review of every migration is the primary control.** What is enforced: an expand allow-list; reasoned markers for ratio views (`ratio:allow-view`), functions/triggers (`ratio:allow-function`) and DO blocks (`ratio:allow-do`); an always-forbidden list (RLS disable/no-force, DISABLE TRIGGER, DROP/ALTER POLICY, permissive policies not using exactly the tenant predicate, any grant to ratio_reader beyond its three reviewed grants, grants to PUBLIC, role membership for ratio roles, role escalation, replacing current_tenant_id, session_replication_role), also applied to statements and string literals inside dollar-quoted bodies. Not enforced: semantics (e.g. a marked function that deletes rows, dynamic SQL built from non-literal pieces, a policy predicate that is exact but on the wrong column) | `migrationFiles.test.ts` |
 | NaN/Infinity money (round 2, M4) | `abs(x) < 'Infinity'` on every money/quantity/total | NaN/±Infinity test; M12 |
+| Tenant switched before COMMIT to blind the deferred check (round 3, H1) | the COMMIT-time check raises RT003 when RLS is active and `ratio.tenant_id` ≠ the row's tenant | `immutability.db.test.ts` H1 tests; mutation R3a |
+| `ratio_owner` holds CREATEROLE (round 3, L3) | Allowed by the role guard (worker/reader may not) because a deployment may run first-time role creation as the owner. Risk: an owner login could create a new role and grant it ratio_worker/ratio_reader, or create login roles. Mitigation: owner credentials are migration-only (not used by the app/worker); deployment should grant CREATEROLE only for the first migration and revoke it after (owner decision) | documented |
 | Triggers bypassed | only by the table owner (`ALTER TABLE … DISABLE TRIGGER`, refused by the migration linter) or a superuser (`session_replication_role = replica`, also linter-refused); worker/reader cannot | deny tests |
 
 Out of scope here: worker startup role check (Slice 1), error redaction
@@ -354,3 +355,27 @@ recreated (that is the intended behaviour of the checksum ledger).
 - Cost note: the child trigger does one indexed lookup + `FOR SHARE` per row;
   Slice 1's 200k-row load should measure it (a statement-level trigger with
   transition tables is the fallback).
+
+## 12. Round 3 — challenger round 2 (applied; 0001 amended in place again)
+
+- **H1** The deferred publication check runs under the session's tenant at
+  COMMIT. A worker could change `ratio.tenant_id` (to '' or another tenant)
+  after an inconsistent change; RLS then hid the rows and the check passed.
+  Now: if `row_security_active` for `period_publications`/`ingest_batches`
+  and `ratio.current_tenant_id()` ≠ the row's tenant ⇒ RT003. Superusers
+  (RLS inactive) still get the full check. The staged-only child trigger now
+  raises RT001 when the parent batch is not found/visible (no reliance on the
+  FK/RLS running later); consequently tenant-B child inserts under tenant A
+  fail RT001 instead of 42501.
+- **L2** The check lives inside the trigger function; the separate
+  `assert_publication_consistent` was removed, so the worker has no EXECUTE on
+  any publication function. Verified: trigger functions need no EXECUTE at fire time.
+- **M1** classifier rules — see the threat-model row (text-based, defence in
+  depth). Decision: ratio_reader may receive only USAGE ON SCHEMA ratio,
+  SELECT ON ratio.cost_facts_published and EXECUTE ON ratio.current_tenant_id()
+  — in any schema (stricter than the request). Permissive policies must use
+  exactly `(tenant_id = ratio.current_tenant_id())` or `(id = …)` in USING and
+  WITH CHECK (stricter than "references"; blocks `… OR true`).
+- **M2/M3** tests only (two-connection race; data columns riding along with a
+  legal transition) — they kill mutations N1 and N14.
+- **L1** accepted as documented.
