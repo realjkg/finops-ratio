@@ -9,7 +9,7 @@ import type {
   ProposedChange,
 } from './PredictionClient';
 import { withBasePath } from '@/lib/basePath';
-import { describeHttpError } from '@/lib/httpError';
+import { describeHttpError, readJsonResponse } from '@/lib/httpError';
 
 const PREDICT_URL = withBasePath('/api/prediction/predict');
 const ACCURACY_URL = withBasePath('/api/prediction/accuracy');
@@ -35,7 +35,7 @@ export class LivePredictionClient implements PredictionClient {
     if (!res.ok) {
       throw new Error(await describeHttpError('Prediction API', res));
     }
-    return (await res.json()) as ChangePrediction;
+    return readJsonResponse<ChangePrediction>(res, 'Prediction API');
   }
 
   async getAccuracyReport(): Promise<AccuracyReport> {
@@ -52,7 +52,7 @@ export class LivePredictionClient implements PredictionClient {
     if (!res.ok) {
       throw new Error(await describeHttpError('Accuracy API', res));
     }
-    return (await res.json()) as AccuracyReport;
+    return readJsonResponse<AccuracyReport>(res, 'Accuracy API');
   }
 }
 

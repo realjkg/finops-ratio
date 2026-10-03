@@ -125,6 +125,20 @@ export async function readErrorBody(res: Response): Promise<string> {
   }
 }
 
+/**
+ * Parse a SUCCESSFUL response's JSON body without ever quoting it. `res.json()`
+ * errors (V8's JSON.parse messages include the malformed text) and body-stream
+ * failures both become the fixed `<label> returned an invalid response` — so a
+ * 200 captive-portal / proxy HTML page or truncated JSON never reaches the UI.
+ */
+export async function readJsonResponse<T>(res: Response, label: string): Promise<T> {
+  try {
+    return JSON.parse(await res.text()) as T;
+  } catch {
+    throw new Error(`${label} returned an invalid response`);
+  }
+}
+
 /** Read the body (never throws) and describe the failure. */
 export async function describeHttpError(label: string, res: Response): Promise<string> {
   return describeHttpErrorBody(label, res.status, await readErrorBody(res));

@@ -26,7 +26,7 @@
 
 import type { FinioClient, FinioExport, HandshakeRequest, HandshakeResult } from './FinioClient';
 import { withBasePath } from '@/lib/basePath';
-import { describeHttpError, describeHttpErrorBody, readErrorBody } from '@/lib/httpError';
+import { describeHttpError, describeHttpErrorBody, readErrorBody, readJsonResponse } from '@/lib/httpError';
 
 const HANDSHAKE_URL = withBasePath('/api/v1/a2a/handshake');
 const EXPORT_URL = withBasePath('/api/v1/finio/export');
@@ -82,7 +82,7 @@ export class LiveFinioClient implements FinioClient {
       }
       throw new Error(describeHttpErrorBody('FinIO handshake', res.status, body));
     }
-    return (await res.json()) as HandshakeResult;
+    return readJsonResponse<HandshakeResult>(res, 'FinIO handshake');
   }
 
   async export(sessionId: string): Promise<FinioExport> {
@@ -99,6 +99,6 @@ export class LiveFinioClient implements FinioClient {
     if (!res.ok) {
       throw new Error(await describeHttpError('FinIO export', res));
     }
-    return (await res.json()) as FinioExport;
+    return readJsonResponse<FinioExport>(res, 'FinIO export');
   }
 }

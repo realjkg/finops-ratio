@@ -3,7 +3,7 @@
 // never a raw fetch rejection or silent undefined.
 import type { HelloClient, HelloMessage } from './HelloClient';
 import { withBasePath } from '@/lib/basePath';
-import { describeHttpError } from '@/lib/httpError';
+import { describeHttpError, readJsonResponse } from '@/lib/httpError';
 
 const HELLO_URL = withBasePath('/api/hello');
 
@@ -24,7 +24,7 @@ export class LiveHelloClient implements HelloClient {
     if (!res.ok) {
       throw new Error(await describeHttpError('Hello API', res));
     }
-    return (await res.json()) as HelloMessage;
+    return readJsonResponse<HelloMessage>(res, 'Hello API');
   }
 }
 
