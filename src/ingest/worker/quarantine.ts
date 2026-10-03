@@ -3,7 +3,7 @@
 // validation errors. Read-only, tenant-scoped (RLS), no row contents.
 import type { Pool } from 'pg';
 import { IngestError } from '../errors';
-import { withTenantTransaction } from '../db/tenant';
+import { workerTransaction } from './tx';
 import { canonicalTenant } from './types';
 
 export interface QuarantineReport {
@@ -34,7 +34,7 @@ const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 export async function showBatch(pool: Pool, tenantId: string, batchId: string): Promise<QuarantineReport> {
   const tenant = canonicalTenant(tenantId);
   if (typeof batchId !== 'string' || !UUID_RE.test(batchId)) throw new IngestError('INVALID_BATCH', 'batch id must be a UUID');
-  return withTenantTransaction(pool, tenant, async (c) => {
+  return workerTransaction(pool, tenant, async (c) => {
     const b = await c.query(
       `SELECT b.id::text, s.source_key, b.billing_period::text AS period, b.status, b.quarantine_reason, b.reconciliation,
               b.row_count::text AS row_count, b.loaded_billed_total::text AS loaded, b.control_row_count::text AS control_rows,

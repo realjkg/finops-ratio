@@ -15,7 +15,7 @@ import { Client, type Pool } from 'pg';
 import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { IngestError, errorCodeOf, messageOf } from '../errors';
 import { redact } from '../redact';
-import { withTenantTransaction } from '../db/tenant';
+import { assertCommitted, workerTransaction } from './tx';
 import { generateSyntheticExport, type FixtureVariant } from '../fixtures/syntheticFocus';
 import { S3FocusExportSource } from '../sources/s3/S3FocusExportSource';
 import type { EvidenceStore } from '../evidence/types';
@@ -65,7 +65,7 @@ export async function runReplayFixtures(opts: {
     try {
       await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [tenantId]);
       const r = await fn();
-      await c.query('COMMIT');
+      assertCommitted(await c.query('COMMIT'));
       return r;
     } catch (e) {
       await c.query('ROLLBACK').catch(() => undefined);
@@ -82,7 +82,7 @@ export async function runReplayFixtures(opts: {
     Object.fromEntries(Object.entries(generateSyntheticExport({ variant }).totals).map(([p, t]) => [p, { rows: t.rowCount, total: t.billedTotal }]));
 
   const totals = (sourceKey: string) =>
-    withTenantTransaction(opts.workerPool, tenantId, async (c) => {
+    workerTransaction(opts.workerPool, tenantId, async (c) => {
       const r = await c.query(
         `SELECT v.billing_period::text AS p, count(*)::int AS n, sum(v.billed_cost)::text AS total
          FROM ratio.cost_facts_published v JOIN ratio.sources s ON s.tenant_id = v.tenant_id AND s.id = v.source_id
@@ -92,7 +92,7 @@ export async function runReplayFixtures(opts: {
       return Object.fromEntries(r.rows.map((x) => [x.p, { rows: x.n, total: x.total }]));
     });
   const batchStatuses = (sourceKey: string) =>
-    withTenantTransaction(opts.workerPool, tenantId, async (c) => {
+    workerTransaction(opts.workerPool, tenantId, async (c) => {
       const r = await c.query(
         `SELECT b.billing_period::text AS p, b.status, b.reconciliation FROM ratio.ingest_batches b
          JOIN ratio.sources s ON s.tenant_id = b.tenant_id AND s.id = b.source_id WHERE s.source_key = $1 ORDER BY b.created_at, b.id`,
@@ -101,7 +101,7 @@ export async function runReplayFixtures(opts: {
       return r.rows.map((x) => `${x.p}:${x.status}:${x.reconciliation}`);
     });
   const expireLease = (sourceKey: string) =>
-    withTenantTransaction(opts.workerPool, tenantId, async (c) => {
+    workerTransaction(opts.workerPool, tenantId, async (c) => {
       const r = await c.query(
         `UPDATE ratio.sync_runs r SET lease_expires_at = clock_timestamp() - interval '1 second'
          FROM ratio.sources s WHERE s.tenant_id = r.tenant_id AND s.id = r.source_id AND s.source_key = $1 AND r.status = 'running'`,

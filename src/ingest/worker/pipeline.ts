@@ -7,7 +7,7 @@ import { IngestError, errorCodeOf, messageOf } from '../errors';
 import { redact, redactDeep } from '../redact';
 import { withRetry } from '../retry';
 import { resolveSettings, type WorkerLimits, type WorkerSettings } from '../config';
-import { withTenantTransaction } from '../db/tenant';
+import { workerTransaction } from './tx';
 import type { EvidenceStore } from '../evidence/types';
 import { classifyArtifact } from '../sources/s3/layout';
 import type { FocusSource, PeriodArtifactSet, PeriodListing, PeriodRange } from '../sources/types';
@@ -158,7 +158,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         return { runId: lease.runId, status: 'failed', periods, errorCode: code, attempts, manifestEvidence };
       }
 
-      const checkpoint = await withTenantTransaction(opts.pool, lease.tenantId, (c) => readCheckpoint(c, lease.sourceId));
+      const checkpoint = await workerTransaction(opts.pool, lease.tenantId, (c) => readCheckpoint(c, lease.sourceId));
 
       for (const listing of listings) {
         const period = listing.ok ? listing.set.billingPeriod : listing.billingPeriod;
@@ -295,7 +295,7 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   const fingerprint = setFingerprint(captured.map((c) => c.sha256));
 
   // Existing batch for exactly this artifact set?
-  const existing = await withTenantTransaction(ctx.pool, lease.tenantId, async (c) => {
+  const existing = await workerTransaction(ctx.pool, lease.tenantId, async (c) => {
     const r = await c.query(
       `SELECT id::text, status, row_count::text AS row_count, loaded_billed_total::text AS total, reconciliation
        FROM ratio.ingest_batches WHERE source_id = $1 AND billing_period = $2 AND artifact_set_fingerprint = $3`,

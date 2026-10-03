@@ -4,7 +4,7 @@
 import crypto from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { IngestError } from '../errors';
-import { withTenantTransaction } from '../db/tenant';
+import { workerTransaction } from './tx';
 
 export interface SourceRow {
   tenantId: string;
@@ -82,7 +82,7 @@ async function acquireRunTx(
   sourceKey: string,
   opts: { kind: RunKind; ttlSeconds: number; periodFrom?: string; periodTo?: string; stats?: Record<string, unknown> },
 ): Promise<{ lease: Lease; source: SourceRow; abandoned: string[]; discardedBatches: number }> {
-  return withTenantTransaction(pool, tenantId, async (c) => {
+  return workerTransaction(pool, tenantId, async (c) => {
     const source = await loadSource(c, sourceKey);
     if (!source.enabled) throw new IngestError('SOURCE_DISABLED', 'source is disabled');
     await c.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [`ratio.sync:${source.tenantId}:${source.id}`]);
@@ -126,7 +126,7 @@ export async function assertLease(c: PoolClient, lease: Pick<Lease, 'runId' | 't
 
 /** Extends a LIVE lease. Never revives an expired or taken-over one. */
 export async function heartbeat(pool: Pool, tenantId: string, runId: string, token: string, ttlSeconds: number): Promise<void> {
-  await withTenantTransaction(pool, tenantId, async (c) => {
+  await workerTransaction(pool, tenantId, async (c) => {
     const r = await c.query(
       `UPDATE ratio.sync_runs SET lease_expires_at = clock_timestamp() + make_interval(secs => $3), heartbeat_at = clock_timestamp()
        WHERE id = $1 AND lease_token = $2 AND status = 'running' AND lease_expires_at > clock_timestamp()`,
@@ -138,7 +138,7 @@ export async function heartbeat(pool: Pool, tenantId: string, runId: string, tok
 
 /** Records a retry on the run (fenced). */
 export async function recordRetry(pool: Pool, lease: Lease, entry: Record<string, unknown>): Promise<void> {
-  await withTenantTransaction(pool, lease.tenantId, async (c) => {
+  await workerTransaction(pool, lease.tenantId, async (c) => {
     const r = await c.query(
       `UPDATE ratio.sync_runs SET attempt = attempt + 1,
          stats = jsonb_set(stats, '{retries}', coalesce(stats->'retries', '[]'::jsonb) || jsonb_build_array($3::jsonb))
@@ -158,7 +158,7 @@ export async function finishRun(
   lease: Lease,
   outcome: { status: 'succeeded' | 'failed'; errorCode?: string | null; errorDetail?: string | null; stats: Record<string, unknown> },
 ): Promise<boolean> {
-  return withTenantTransaction(pool, lease.tenantId, async (c) => {
+  return workerTransaction(pool, lease.tenantId, async (c) => {
     const r = await c.query(
       `UPDATE ratio.sync_runs SET status = $3, finished_at = clock_timestamp(), error_code = $4, error_detail = $5,
          stats = stats || $6::jsonb

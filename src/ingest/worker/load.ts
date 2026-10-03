@@ -11,7 +11,7 @@ import { parse, type Parser } from 'csv-parse';
 import type { Pool } from 'pg';
 import { IngestError } from '../errors';
 import { isTransientError } from '../retry';
-import { withTenantTransaction } from '../db/tenant';
+import { workerTransaction } from './tx';
 import type { EvidenceStore } from '../evidence/types';
 import { indexHeader, validateRow, type FactRow, type HeaderIndex } from '../focus/validate';
 import { assertLease, type Lease } from './lease';
@@ -90,7 +90,7 @@ FROM unnest($7::bigint[], $8::timestamptz[], $9::timestamptz[], $10::numeric[], 
 
 async function insertChunk(ctx: LoadContext, artifactSha256: string, rows: Array<{ ordinal: number; fact: FactRow }>): Promise<void> {
   const col = <K extends keyof FactRow>(k: K) => rows.map((r) => r.fact[k]);
-  await withTenantTransaction(ctx.pool, ctx.lease.tenantId, async (c) => {
+  await workerTransaction(ctx.pool, ctx.lease.tenantId, async (c) => {
     await assertLease(c, ctx.lease, 'SHARE');
     await c.query(INSERT_SQL, [
       ctx.lease.tenantId,

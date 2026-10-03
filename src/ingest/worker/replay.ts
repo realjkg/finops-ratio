@@ -6,7 +6,7 @@ import type { Pool } from 'pg';
 import { IngestError, errorCodeOf, messageOf } from '../errors';
 import { redact } from '../redact';
 import { resolveSettings, type WorkerSettings } from '../config';
-import { withTenantTransaction } from '../db/tenant';
+import { workerTransaction } from './tx';
 import { acquireRun, finishRun, loadSource } from './lease';
 import { publishBatch } from './publish';
 import { canonicalTenant, type WorkerHooks } from './types';
@@ -22,7 +22,7 @@ export interface ReplayBatchResult {
 }
 
 async function lookup(pool: Pool, tenantId: string, sourceKey: string, batchId: string) {
-  return withTenantTransaction(pool, tenantId, async (c) => {
+  return workerTransaction(pool, tenantId, async (c) => {
     const source = await loadSource(c, sourceKey);
     const r = await c.query(
       `SELECT id::text, billing_period::text AS period, status, artifact_set_fingerprint AS fingerprint
@@ -63,7 +63,7 @@ export async function replayBatch(opts: {
     stats: { replayBatch: batchId },
   });
   try {
-    const current = await withTenantTransaction(opts.pool, tenantId, async (c) => {
+    const current = await workerTransaction(opts.pool, tenantId, async (c) => {
       const r = await c.query(`SELECT batch_id::text FROM ratio.period_publications WHERE source_id = $1 AND billing_period = $2`, [lease.sourceId, target.period]);
       return (r.rows[0]?.batch_id as string | undefined) ?? null;
     });

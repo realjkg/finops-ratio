@@ -6,7 +6,7 @@
 // the batch is still 'staged'; the status transition is the last write.
 import type { Pool, PoolClient } from 'pg';
 import { IngestError } from '../errors';
-import { withTenantTransaction } from '../db/tenant';
+import { workerTransaction } from './tx';
 import { redact } from '../redact';
 import { assertLease, type Lease } from './lease';
 import type { ValidationErrorRow } from './load';
@@ -74,7 +74,7 @@ export async function stageBatch(
     artifacts: Array<{ name: string; sha256: string; byteSize: number; evidenceKey: string }>;
   },
 ): Promise<void> {
-  await withTenantTransaction(pool, lease.tenantId, async (c) => {
+  await workerTransaction(pool, lease.tenantId, async (c) => {
     await assertLease(c, lease, 'SHARE');
     await c.query(
       `INSERT INTO ratio.ingest_batches (tenant_id, id, source_id, run_id, billing_period, artifact_set_fingerprint, status,
@@ -95,7 +95,7 @@ export async function stageBatch(
 
 /** Deletes one staged batch of this run (children first). Used before a retry of the same artifact set. */
 export async function discardStagedBatch(pool: Pool, lease: Lease, batchId: string): Promise<void> {
-  await withTenantTransaction(pool, lease.tenantId, async (c) => {
+  await workerTransaction(pool, lease.tenantId, async (c) => {
     await assertLease(c, lease, 'SHARE');
     const b = await c.query(`SELECT 1 FROM ratio.ingest_batches WHERE id = $1 AND status = 'staged' FOR UPDATE`, [batchId]);
     if (b.rowCount !== 1) return;
@@ -113,7 +113,7 @@ export interface Aggregates {
 }
 
 export async function aggregateBatch(pool: Pool, lease: Lease, batchId: string): Promise<Aggregates> {
-  return withTenantTransaction(pool, lease.tenantId, async (c) => {
+  return workerTransaction(pool, lease.tenantId, async (c) => {
     const r = await c.query(
       `SELECT count(*)::text AS n, coalesce(sum(billed_cost), 0)::text AS total, count(DISTINCT billing_currency)::int AS currencies
        FROM ratio.cost_facts WHERE batch_id = $1`,
@@ -141,7 +141,7 @@ export async function finalizeStaged(
   lease: Lease,
   b: { batchId: string; rowCount: string; billedTotal: string; reconciliation: 'reconciled' | 'unverified'; perArtifactRows: Map<string, number> },
 ): Promise<void> {
-  await withTenantTransaction(pool, lease.tenantId, async (c) => {
+  await workerTransaction(pool, lease.tenantId, async (c) => {
     await assertLease(c, lease, 'SHARE');
     await setArtifactRowCounts(c, b.batchId, b.perArtifactRows);
     const r = await c.query(
@@ -170,7 +170,7 @@ export async function quarantineBatch(
   hooks: WorkerHooks,
 ): Promise<void> {
   const ctx: HookContext = { runId: lease.runId, batchId: q.batchId, billingPeriod: q.billingPeriod };
-  await withTenantTransaction(pool, lease.tenantId, async (c) => {
+  await workerTransaction(pool, lease.tenantId, async (c) => {
     await assertLease(c, lease, 'UPDATE');
     await setArtifactRowCounts(c, q.batchId, q.perArtifactRows);
     if (q.errors.length) {
@@ -218,7 +218,7 @@ export async function publishBatch(
   const step = async (s: PublishStep) => {
     if (hooks.beforePublishStep) await hooks.beforePublishStep(s, ctx);
   };
-  await withTenantTransaction(pool, lease.tenantId, async (c) => {
+  await workerTransaction(pool, lease.tenantId, async (c) => {
     for (const s of PUBLISH_STEPS) {
       await step(s);
       switch (s) {
@@ -276,7 +276,7 @@ export async function publishBatch(
 
 /** Records an unchanged period in the checkpoint (fenced); nothing visible changes. */
 export async function refreshCheckpoint(pool: Pool, lease: Lease, period: string, make: (prev: Partial<CheckpointEntry> | null) => CheckpointEntry): Promise<void> {
-  await withTenantTransaction(pool, lease.tenantId, async (c) => {
+  await workerTransaction(pool, lease.tenantId, async (c) => {
     await assertLease(c, lease, 'UPDATE');
     const prev = (await readCheckpoint(c, lease.sourceId))[period] ?? null;
     await writeCheckpoint(c, lease, period, make(prev));

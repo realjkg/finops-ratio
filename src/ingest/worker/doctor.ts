@@ -2,6 +2,7 @@
 // migration version vs code, and per-source last run / freshness. Every
 // connection it opens has default_transaction_read_only=on. Any failed check
 // makes the result fail (non-zero exit).
+import { assertCommitted } from './tx';
 import { Client } from 'pg';
 import { migrationStatus } from '../db/migrate';
 import { DEFAULT_MIGRATIONS_DIR } from '../db/migrationFiles';
@@ -42,7 +43,7 @@ async function migrationCheck(opts: DoctorOptions, secrets: readonly string[]): 
       await c.connect();
       await c.query('BEGIN READ ONLY');
       const st = await migrationStatus(c, { dir: opts.migrationsDir ?? DEFAULT_MIGRATIONS_DIR });
-      await c.query('COMMIT');
+      assertCommitted(await c.query('COMMIT'));
       return {
         name: 'migration_version',
         status: st.matches ? 'pass' : 'fail',
@@ -117,7 +118,7 @@ async function sourceChecks(pool: ReturnType<typeof createWorkerPool>, tenantRaw
          extract(epoch FROM clock_timestamp() - (SELECT max(finished_at) FROM ratio.sync_runs WHERE source_id = s.id AND status = 'succeeded')) / 3600 AS age_hours
        FROM ratio.sources s ORDER BY s.source_key`,
     );
-    await c.query('COMMIT');
+    assertCommitted(await c.query('COMMIT'));
     if (r.rowCount === 0) return [{ name: `tenant:${tenantId}`, status: 'fail', detail: 'NO_SOURCES: no sources visible for this tenant' }];
     return r.rows.map((s): DoctorCheck => {
       const name = `source:${tenantId}/${s.source_key}`;
