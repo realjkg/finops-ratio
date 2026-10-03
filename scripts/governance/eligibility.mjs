@@ -82,6 +82,21 @@ export function isOwnGovernanceRun(run, pr, config = DEFAULT_CONFIG) {
     && run.workflowHeadRepo === pr.baseRepo;
 }
 
+/**
+ * Could this check run be one of ours? GitHub Actions app AND one of our
+ * governance job names. Only such runs can ever be excluded or count as our
+ * classification, so only their suites are worth resolving (API budget).
+ */
+export function isGovernanceCandidateRun(run, config = DEFAULT_CONFIG) {
+  const own = config.ownWorkflow;
+  const name = String(run?.name ?? '');
+  return run?.appId === own.appId
+    && (name === own.classifyName
+      || own.nonInputNames.includes(name)
+      || own.skippedOnlyNames.includes(name)
+      || own.nonInputPrefixes.some((p) => name.startsWith(p)));
+}
+
 /** Our own governance runs that are not inputs to the eligibility decision. */
 function isOwnNonInputRun(run, pr, config, all) {
   const own = config.ownWorkflow;
