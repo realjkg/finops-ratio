@@ -3,8 +3,6 @@
 export const REPORT_MARKER = '<!-- ratio-governance:risk-report -->';
 const GOV_LABEL = /^(?:risk:|restricted:)/;
 
-const OWNER_ONLY_CLASSES = new Set(['retention', 'deployment']);
-
 const FRESH_REVIEW_NOTE =
   '- A fresh Copilot review on the new head is required after each push (the repository does not re-request review on push; eligibility only counts a review whose commit is the current head SHA).';
 
@@ -72,16 +70,14 @@ export function buildReport(result, ctx = {}) {
   lines.push('- [ ] Operational evidence complete (exact commands, results, fixture provenance, known gaps).');
   lines.push('- [ ] Rollback verified in test (procedure + result linked).');
   lines.push('- [ ] Merge decision logged with reasoning in the PR body.');
+  const full = /^[0-9a-f]{40}$/i.test(String(ctx.headSha ?? '')) ? String(ctx.headSha).toLowerCase() : '<head-sha>';
   lines.push('', '#### Exception queue', '');
-  lines.push('This PR can only merge through the exception path. The required status `Governance · merge eligibility` stays `failure` until all of the following hold:');
-  lines.push('- A user with **admin or maintain** permission adds the label `exception:approved` after the evidence above is in place.');
+  lines.push('This PR can only merge through the exception path. The required status `Governance · merge eligibility` stays `failure` until both of the following hold:');
+  lines.push(`- A user with **admin or maintain** permission (the orchestrator or owner) posts a PR comment whose whole body is \`/exception-approve ${full}\`, after the independent challenger review evidence is recorded in the PR. The comment should also link that challenger review evidence: the gate does not parse the link, but it is the audit trail.`);
   lines.push('- Every non-risk gate passes: genuine CI on every run, a Copilot review on the head, zero unresolved threads, a same-repo PR, no shared head, not a draft, base `main`.');
   lines.push('');
-  lines.push('Any push removes the approval, and a new approval is needed for the new head. The workflow never enables auto-merge for restricted PRs; the approver merges.');
-  const ownerOnly = result.classes.filter((c) => OWNER_ONLY_CLASSES.has(c));
-  if (ownerOnly.length) {
-    lines.push('', `> **Owner checkpoint:** classes ${ownerOnly.map((c) => `\`${c}\``).join(', ')} may carry production-deploy or data-retention/deletion impact, which is NOT delegable to the orchestrator. Confirm there is no such impact or escalate to the owner.`);
-  }
+  lines.push('The approval binds to that exact commit SHA. A new head needs a new approval. Edited comments are ignored, and `/exception-revoke <sha>` revokes an approval. The workflow never enables auto-merge for restricted PRs; merge manually once the status is green.');
+  lines.push('', '> The non-delegable human gate is the **production environment** (deploys, production data deletion), not this merge.');
   lines.push('', ...outsider, FRESH_REVIEW_NOTE, ...prot);
   return `${lines.join('\n')}\n`;
 }

@@ -10,18 +10,17 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { CI_CHECK_NAME, GITHUB_ACTIONS_APP_ID, ELIGIBILITY_CONTEXT } from './eligibility.mjs';
 
-// CI is pinned to the GitHub Actions app so a status/check from another app
-// cannot satisfy it. The governance context is a COMMIT STATUS posted by the
-// classify job and is accepted from any source: it is informational (it is
-// always "success"; it never gates on risk), and merge eligibility re-classifies
-// the PR itself, so a spoofed status cannot make a restricted PR auto-mergeable.
+// Every required check is pinned to the GitHub Actions app (15368): a status
+// posted with a personal access token or another app cannot satisfy it.
+// Residual: any workflow with `statuses: write` runs as the same app; only a
+// ruleset required-workflow or a dedicated GitHub App closes that (README).
 export const REQUIRED_CHECKS = [
   { context: CI_CHECK_NAME, app_id: GITHUB_ACTIONS_APP_ID },
-  { context: 'Governance · risk classification' },
+  { context: 'Governance · risk classification', app_id: GITHUB_ACTIONS_APP_ID },
   // Posted by the eligibility job: success only for an eligible low-risk PR or a
   // valid admin/maintain exception. Requiring it means enabling GitHub's native
   // auto-merge by hand cannot bypass the gate.
-  { context: ELIGIBILITY_CONTEXT },
+  { context: ELIGIBILITY_CONTEXT, app_id: GITHUB_ACTIONS_APP_ID },
 ];
 
 export function buildRequests({ repo, branch = 'main', enforceAdmins = true, checks = REQUIRED_CHECKS }) {

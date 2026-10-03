@@ -21,7 +21,8 @@
 #
 # The eligibility job posts the REQUIRED commit status "Governance · merge
 # eligibility" on the evaluated head: success only for an eligible low-risk PR
-# or a valid admin/maintain `exception:approved` on a restricted PR; failure
+# or a restricted PR with a valid SHA-bound approval comment
+# (`/exception-approve <head sha>` by an admin/maintain user); failure
 # otherwise; pending while deferred. Enabling native auto-merge by hand cannot
 # bypass it. The workflow never enables auto-merge for restricted PRs.
 
@@ -30,6 +31,10 @@ name: Governance
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled, edited]
+  # Base-context like pull_request_target (runs the default-branch workflow):
+  # evaluates a PR as soon as an approval/revoke comment is posted.
+  issue_comment:
+    types: [created]
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -123,7 +128,7 @@ jobs:
       checks: read          # check runs on the head SHA
       statuses: write       # read statuses; post the required "Governance · merge eligibility" status
       actions: read         # map check suites to workflow files (CI must be ci.yml)
-      issues: read          # exception:approved label events (exception path)
+      issues: read          # PR comments: /exception-approve <sha> (exception path)
     steps:
       - name: Checkout governance scripts from the base/default branch (never the PR head)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0

@@ -4,8 +4,8 @@
 // so a PR cannot change the code that classifies it.
 import { classify } from './classify-risk.mjs';
 import {
-  decideEligibility, decideMergeStatus, evaluateExceptionApproval, outsiderReason,
-  DEFAULT_CONFIG, ELIGIBILITY_CONTEXT, EXCEPTION_LABEL,
+  decideEligibility, decideMergeStatus, evaluateExceptionApproval, parseExceptionCommand, outsiderReason,
+  DEFAULT_CONFIG, ELIGIBILITY_CONTEXT,
 } from './eligibility.mjs';
 import { REPORT_MARKER, buildReport, desiredLabels, labelChanges } from './report.mjs';
 
@@ -160,18 +160,6 @@ export async function runClassify({ github, context, core }) {
     }
   }
 
-  // Any push invalidates an exception approval: drop the label (the eligibility
-  // job also rejects approvals older than the head commit).
-  const labelNames = (pr.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
-  if (context.payload.action === 'synchronize' && labelNames.includes(EXCEPTION_LABEL)) {
-    try {
-      await github.rest.issues.removeLabel({ ...repo, issue_number: pr.number, name: EXCEPTION_LABEL });
-      core.info(`${EXCEPTION_LABEL} removed (new push)`);
-    } catch (e) {
-      if (e.status !== 404) core.setFailed(`Could not remove ${EXCEPTION_LABEL} on #${pr.number}: ${e.message}`);
-    }
-  }
-
   const protection = await mainProtection(github, repo);
   const outsider = outsiderReason(prIdentity(pr));
   const report = buildReport(result, { headSha: pr.head.sha, mainProtection: protection, outsider });
@@ -264,25 +252,25 @@ export async function gatherState(github, repo, number) {
   // Unknown (API error) → null → decideEligibility fails closed.
   const unresolvedThreads = await unresolvedThreadCount(github, repo, number).catch(() => null);
 
-  // Exception approval (restricted PRs): label timeline, approver permission,
-  // head commit time. Any API failure ⇒ not approved (fail closed).
-  const labelNames = (pr.labels ?? []).map((l) => l.name);
+  // Exception approval (restricted PRs only): SHA-bound approval comments.
+  // Permission is looked up only for authors of well-formed, unedited, non-bot
+  // commands naming this head. Any API failure ⇒ not approved (fail closed).
   let exception;
-  if (labelNames.includes(EXCEPTION_LABEL)) {
+  if (fresh.risk !== 'low') {
     try {
-      const events = await github.paginate(github.rest.issues.listEvents, { ...repo, issue_number: number, per_page: 100 });
-      const logins = [...new Set(events
-        .filter((e) => e.event === 'labeled' && e.label?.name === EXCEPTION_LABEL && e.actor?.login)
-        .map((e) => e.actor.login))];
+      const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: number, per_page: 100 });
+      const authors = [...new Set(comments
+        .filter((c) => c.user?.type !== 'Bot' && c.updated_at === c.created_at && parseExceptionCommand(c.body)?.sha === headSha.toLowerCase())
+        .map((c) => c.user?.login)
+        .filter(Boolean))];
       const roles = {};
-      for (const username of logins) {
+      for (const username of authors) {
         const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ ...repo, username });
         roles[username] = { permission: data.permission, role_name: data.role_name };
       }
-      const { data: commit } = await github.rest.git.getCommit({ ...repo, commit_sha: headSha });
-      exception = evaluateExceptionApproval({ labels: labelNames, events, roles, headCommittedAt: commit.committer?.date });
+      exception = evaluateExceptionApproval({ comments, roles, headSha });
     } catch (e) {
-      exception = { approved: false, reason: `Could not verify ${EXCEPTION_LABEL} (${e.status ? `HTTP ${e.status}` : e.message}).` };
+      exception = { approved: false, reason: `Could not verify exception approvals (${e.status ? `HTTP ${e.status}` : e.message}).` };
     }
   }
 
@@ -372,6 +360,8 @@ async function candidatePrs(github, context) {
   const repo = context.repo;
   const p = context.payload;
   if (p.pull_request) return [p.pull_request];
+  // issue_comment: evaluate the PR right away (e.g. a new approval comment).
+  if (p.issue) return p.issue.pull_request ? [{ number: p.issue.number }] : [];
   if (p.workflow_run) {
     const listed = p.workflow_run.pull_requests ?? [];
     if (listed.length) return listed;

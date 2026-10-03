@@ -105,34 +105,56 @@ hand still cannot merge past the gate.
 Our own previous eligibility status is ignored when evaluating, because it is
 an output, not an input.
 
-**Exception queue (restricted PRs).** A restricted PR can only merge when all
-of the following hold:
+**Exception queue (restricted PRs).** The orchestrator or owner posts
+`/exception-approve <sha>` after the independent review evidence is recorded.
+A restricted PR can only merge when both of the following hold:
 
-- It carries the label `exception:approved`.
-- The most recent labeled/unlabeled event for that label (from the issue events
-  timeline) is a "labeled" by a user whose repository role is **admin or
-  maintain** (checked with `getCollaboratorPermissionLevel`).
-- That event is later than the head commit's committer date.
+- There is a PR comment whose trimmed body is exactly
+  `/exception-approve <40-hex SHA>`, where the SHA is the PR's current head.
+  The comment must be:
+  - by a user with **admin or maintain** permission (checked with
+    `getCollaboratorPermissionLevel`, using `role_name` or `permission`);
+  - not edited (`updated_at === created_at`; edited comments are ignored);
+  - not bot-authored.
+
+  All comments are read, across pages. The latest qualifying command by id
+  wins. A later `/exception-revoke <sha>` by an admin/maintain user revokes
+  the approval for that SHA.
 - Every non-risk condition holds: genuine CI on every qualifying run, a Copilot
   review on the head, zero unresolved threads, a same-repo PR by an
   OWNER/MEMBER/COLLABORATOR, no other open PR with the same head, not a draft,
   base `main`.
 
-Any push invalidates the approval: the classify job removes the label on
-`synchronize`, and an approval older than the head commit is rejected. The
-workflow never enables auto-merge for restricted PRs; the approver merges.
+No timestamps are compared. The approval binds to content (the commit SHA),
+so a new head simply has no approval. A force-push back to a previously
+approved SHA is approved again, because it is the same reviewed content. Posting
+a comment triggers an immediate re-evaluation (`issue_comment`). The workflow
+never enables auto-merge for restricted PRs; merge manually once the status is
+green.
 
-Residual risk: committer dates are set by the author, but removing the label on
-push is the primary invalidation. Like the classification status, the
-eligibility status can be posted by any workflow with `statuses: write`. A
-writer could add such a workflow in a PR, which would itself be restricted, so
-only rulesets with required workflows close this completely.
+**Who approves.** The owner has delegated merging restricted code, including
+migrations, deployment and retention-class code, to the orchestrator.
 
-The required status `Governance · risk classification` is a commit status
-posted by the classify job, accepted from any app. That is safe because it is
-always `success` (it reports, it never gates on risk), and eligibility
-re-classifies the PR itself, so a spoofed status cannot make a restricted PR
-auto-mergeable.
+- Approvals may be posted by the owner account the orchestrator acts through.
+- Separation of duties comes from the independent challenger review recorded
+  in the PR.
+- Every approval comment must link that evidence. The gate does not parse the
+  link; it is the audit trail.
+- The non-delegable human gate is the **production environment** (deploys,
+  production data deletion). It will be enforced by a GitHub Environment with
+  required reviewers once one exists.
+
+**Required checks are pinned to the GitHub Actions app.** `protect-main.mjs`
+sets `app_id: 15368` on all three required checks: CI,
+`Governance · risk classification` and `Governance · merge eligibility`. A
+status posted with a personal access token or another app is therefore
+rejected. Residual risk: any workflow on any branch with `statuses: write` runs
+as the same app via `GITHUB_TOKEN` and could post these statuses. Only a
+ruleset required-workflow or a dedicated GitHub App closes that. Workflow
+changes are classified restricted, but that is detection, not prevention.
+
+The classification status is informational. It is always `success` and never
+gates on risk; eligibility re-classifies the PR itself.
 
 ## Known limitations (documented, not fixed)
 

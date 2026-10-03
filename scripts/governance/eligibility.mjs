@@ -6,8 +6,12 @@
 export const CI_CHECK_NAME = 'Lint · Typecheck · Test · Build';
 /** Commit status posted by the eligibility job; required by branch protection. */
 export const ELIGIBILITY_CONTEXT = 'Governance · merge eligibility';
-/** Label an admin/maintainer adds to approve a restricted PR (exception path). */
-export const EXCEPTION_LABEL = 'exception:approved';
+/**
+ * Exception path for restricted PRs: an unedited, non-bot PR comment whose
+ * trimmed body is exactly `/exception-approve <40-hex head SHA>` (or
+ * `/exception-revoke <sha>`) by an admin/maintain user.
+ */
+export const EXCEPTION_COMMAND = /^\/exception-(approve|revoke) ([0-9a-fA-F]{40})$/;
 const APPROVER_ROLES = new Set(['admin', 'maintain']);
 const STATUS_DESCRIPTION_MAX = 140;
 export const GITHUB_ACTIONS_APP_ID = 15368;
@@ -178,36 +182,46 @@ function collectReasons(state, config) {
 
 const roleOf = (r) => (r ? (APPROVER_ROLES.has(r.role_name) ? r.role_name : r.permission === 'admin' ? 'admin' : r.role_name ?? r.permission) : undefined);
 
+/** Parse an exception command; null unless the trimmed body matches exactly. */
+export function parseExceptionCommand(body) {
+  const m = EXCEPTION_COMMAND.exec(String(body ?? '').trim());
+  return m ? { action: m[1], sha: m[2].toLowerCase() } : null;
+}
+
 /**
- * Exception approval for a restricted PR. Valid only when the label is present,
- * the LATEST labeled/unlabeled event for it is a "labeled" by an actor with
- * admin or maintain permission, and that event is later than the head commit
- * (any push invalidates it; the classify job also removes the label on push).
- * @param {{ labels: string[], events: Array<{ event: string, label?: { name: string },
- *           actor?: { login: string }, created_at: string }>,
+ * SHA-bound exception approval for a restricted PR. Only comments that
+ *   - parse exactly as `/exception-approve <sha>` or `/exception-revoke <sha>`,
+ *   - were never edited (updated_at === created_at),
+ *   - are not bot-authored,
+ *   - come from a user with admin or maintain permission,
+ *   - name the PR's CURRENT head SHA,
+ * count; the latest such comment (by id) decides. No timestamps are compared:
+ * an approval binds to the exact content (commit SHA) it names, so a new head
+ * simply has no approval.
+ * @param {{ comments: Array<{ id: number, body: string, user?: { login: string, type?: string },
+ *           created_at?: string, updated_at?: string }>,
  *           roles: Record<string, { permission?: string, role_name?: string }>,
- *           headCommittedAt?: string }} input
+ *           headSha: string }} input
  */
-export function evaluateExceptionApproval({ labels, events, roles, headCommittedAt }) {
-  if (!(labels ?? []).includes(EXCEPTION_LABEL)) return { approved: false, reason: `No ${EXCEPTION_LABEL} label.` };
-  const mine = (events ?? [])
-    .filter((e) => (e.event === 'labeled' || e.event === 'unlabeled') && e.label?.name === EXCEPTION_LABEL)
-    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
-  const last = mine[mine.length - 1];
-  if (!last || last.event !== 'labeled') {
-    return { approved: false, reason: `${EXCEPTION_LABEL}: no current "labeled" event found.` };
+export function evaluateExceptionApproval({ comments, roles, headSha }) {
+  const head = String(headSha ?? '').toLowerCase();
+  const command = `/exception-approve ${head || '<head-sha>'}`;
+  const decisive = (comments ?? [])
+    .map((c) => ({ c, cmd: parseExceptionCommand(c.body) }))
+    .filter(({ c, cmd }) => cmd
+      && cmd.sha === head
+      && c.updated_at === c.created_at
+      && c.user?.type !== 'Bot'
+      && APPROVER_ROLES.has(roleOf(roles?.[c.user?.login])))
+    .sort((a, b) => a.c.id - b.c.id);
+  const last = decisive[decisive.length - 1];
+  if (!last) {
+    return { approved: false, reason: `Restricted: needs \`${command}\` by an admin/maintain user (none found).` };
   }
-  const login = last.actor?.login;
-  const role = roleOf(roles?.[login]);
-  if (!APPROVER_ROLES.has(role)) {
-    return { approved: false, reason: `${EXCEPTION_LABEL} added by @${login ?? 'unknown'} (${role ?? 'unknown'} permission), not admin or maintain.` };
+  if (last.cmd.action === 'revoke') {
+    return { approved: false, reason: `Exception for ${head.slice(0, 7)} revoked by @${last.c.user.login}.` };
   }
-  const headAt = Date.parse(headCommittedAt ?? '');
-  if (!Number.isFinite(headAt)) return { approved: false, reason: `${EXCEPTION_LABEL}: head commit time unknown.` };
-  if (!(Date.parse(last.created_at) > headAt)) {
-    return { approved: false, reason: `${EXCEPTION_LABEL} was added before the latest push; re-approval required.` };
-  }
-  return { approved: true, approver: login, reason: `Exception approved by @${login} (${role}).` };
+  return { approved: true, approver: last.c.user.login, commentId: last.c.id, reason: `Exception approved by @${last.c.user.login} for ${head.slice(0, 7)}.` };
 }
 
 /**
@@ -225,11 +239,10 @@ export function decideMergeStatus(state, config = DEFAULT_CONFIG) {
     return {
       state: 'success',
       mode: 'exception',
-      description: clip(`Restricted; exception approved by @${exception.approver}; all non-risk gates passed. Approver merges.`),
+      description: clip(`Restricted; exception approved by @${exception.approver}; all non-risk gates passed. Merge manually.`),
       reasons: tagged.map((r) => r.text),
     };
   }
-  const labelled = (state?.pr?.labels ?? []).includes(EXCEPTION_LABEL);
-  const top = nonRisk[0]?.text ?? (labelled && exception?.reason ? exception.reason : tagged[0].text);
+  const top = nonRisk[0]?.text ?? exception?.reason ?? tagged[0].text;
   return { state: 'failure', mode: 'blocked', description: clip(top), reasons: tagged.map((r) => r.text) };
 }
