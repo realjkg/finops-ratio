@@ -1036,6 +1036,89 @@ describe('round 2: classify supersession, lookup failures, suite matching, forks
   });
 });
 
+describe('PR #49 Copilot M: suite lookups are limited to governance-named Actions runs, batched and memoised', () => {
+  const CI_RUN = { id: 900, check_suite_id: CI_SUITE, path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, pull_requests: [{ number: 5, base: { ref: 'main' } }], head_repository: { full_name: 'o/r' } };
+  const govRun = (suite) => ({ id: 37101786595, check_suite_id: suite, path: '.github/workflows/governance.yml', event: 'pull_request_target', head_repository: { full_name: 'o/r' } });
+  const cr = (id, name, suite, o = {}) => ({ id, name, status: 'completed', conclusion: 'success', app: { id: 15368 }, check_suite: { id: suite }, ...o });
+  const base = [
+    cr(1, 'Lint · Typecheck · Test · Build', CI_SUITE),
+    cr(3, 'copilot-pull-request-reviewer', COPILOT_SUITE),
+  ];
+  const gov = (suite) => [
+    cr(101, 'Governance · risk classification', suite),
+    cr(102, 'Governance · eligibility targets', suite),
+    cr(103, 'Governance · merge eligibility (#5)', suite, { status: 'in_progress', conclusion: null }),
+    cr(104, 'Governance · revocations', suite, { conclusion: 'skipped' }),
+  ];
+  const suiteLookups = (github) => github.calls.filter((c) => c.name === 'actions.listWorkflowRunsForRepo' && c.params.check_suite_id !== undefined);
+  const prtListings = (github) => github.calls.filter((c) => c.name === 'actions.listWorkflowRunsForRepo' && c.params.event === 'pull_request_target');
+
+  it('N third-party suites (incl. governance-named, other app) + M non-governance Actions suites ⇒ zero check_suite_id lookups', async () => {
+    const thirdParty = Array.from({ length: 5 }, (_, i) => cr(500 + i,
+      ['Governance · risk classification', 'Governance · revocations', 'Governance · merge eligibility (#5)', 'Governance · eligibility targets', 'sonar'][i],
+      1000 + i, { app: { id: 999 } }));
+    const otherActions = Array.from({ length: 4 }, (_, i) => cr(600 + i, ['build', 'lint', 'Governance', 'Governance · something else'][i], 2000 + i));
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, ...thirdParty, ...otherActions],
+      workflowRuns: (p) => (p.check_suite_id !== undefined ? [] : [CI_RUN]),
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(suiteLookups(github)).toHaveLength(0);
+    expect(prtListings(github)).toHaveLength(0);
+  });
+  it('one governance suite resolved by the head_sha pull_request_target listing ⇒ zero check_suite_id lookups, eligible', async () => {
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, ...gov(GOV_SUITE)],
+      workflowRuns: (p) => (p.check_suite_id !== undefined ? [] : p.event === 'pull_request_target' ? [govRun(GOV_SUITE)] : [CI_RUN]),
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].reasons).toEqual([]);
+    expect(prtListings(github)).toHaveLength(1);
+    expect(prtListings(github)[0].params).toMatchObject({ head_sha: HEAD, event: 'pull_request_target' });
+    expect(suiteLookups(github)).toHaveLength(0);
+  });
+  it('one governance suite NOT in the listing ⇒ exactly one check_suite_id lookup, eligible', async () => {
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, ...gov(GOV_SUITE)],
+      workflowRuns: (p) => (p.check_suite_id === GOV_SUITE ? [govRun(GOV_SUITE)] : p.check_suite_id !== undefined ? [] : p.event === 'pull_request_target' ? [] : [CI_RUN]),
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(true);
+    expect(suiteLookups(github).map((c) => c.params.check_suite_id)).toEqual([GOV_SUITE]);
+  });
+  it('a failing pull_request_target listing falls back to check_suite_id lookups (and warns)', async () => {
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, ...gov(GOV_SUITE)],
+      workflowRuns: (p) => (p.event === 'pull_request_target' ? Object.assign(new Error('rate limited'), { status: 429 })
+        : p.check_suite_id === GOV_SUITE ? [govRun(GOV_SUITE)] : p.check_suite_id !== undefined ? [] : [CI_RUN]),
+    });
+    const core = fakeCore();
+    const rows = await runEligibility({ github, core, context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(true);
+    expect(suiteLookups(github)).toHaveLength(1);
+    expect(core.warnings.join('\n')).toMatch(/pull_request_target.*429/s);
+  });
+  it('an impostor "Governance · revocations" from another app triggers no lookup and is still refused', async () => {
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, ...gov(GOV_SUITE), cr(300, 'Governance · revocations', 3000, { app: { id: 999 }, conclusion: 'skipped' })],
+      workflowRuns: (p) => (p.check_suite_id === GOV_SUITE ? [govRun(GOV_SUITE)] : p.check_suite_id !== undefined ? [] : p.event === 'pull_request_target' ? [] : [CI_RUN]),
+    });
+    const rows = await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(rows[0].eligible).toBe(false);
+    expect(rows[0].reasons.join('\n')).toMatch(/Governance · revocations/);
+    expect(suiteLookups(github).map((c) => c.params.check_suite_id)).toEqual([GOV_SUITE]);
+  });
+  it('memoised within a sweep: the same suite and head listing are fetched once across evaluations', async () => {
+    const { github, pr } = fakeGithub({
+      checkRuns: [...base, ...gov(GOV_SUITE)],
+      workflowRuns: (p) => (p.check_suite_id === GOV_SUITE ? [govRun(GOV_SUITE)] : p.check_suite_id !== undefined ? [] : p.event === 'pull_request_target' ? [] : [CI_RUN]),
+    });
+    await runEligibility({ github, core: fakeCore(), context: { repo: REPO, payload: { schedule: 'x' } }, numbers: [5, 5] });
+    expect(suiteLookups(github)).toHaveLength(1);
+    expect(prtListings(github)).toHaveLength(1);
+  });
+});
+
 describe('runTargets', () => {
   it('PR event → that PR', async () => {
     const { github, pr } = fakeGithub();
