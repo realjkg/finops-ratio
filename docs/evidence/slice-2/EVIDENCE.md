@@ -502,11 +502,11 @@ reported to the coordinator instead of changed here.
 
 | # | Wait | Where | Hard bound | On expiry |
 |---|---|---|---|---|
-| 1 | `docker ps` (preflight) | local.mjs `localTest` → `runProcess` | 60 s | SIGKILL, reject |
-| 2 | `docker compose up -d --wait` | `up` | 600 s (allows a first image pull in CI) | SIGKILL, reject |
-| 3 | `docker compose down [-v]` | `down` (developer `local:down` and local:test cleanup) | 300 s; local:test also wraps it in a 330 s `withDeadline` | SIGKILL, reject; the cleanup records `error: …` and the run fails |
-| 4 | `npm run worker:build` | `migrate`, `workerCli` | 300 s | SIGKILL, reject |
-| 5 | worker CLI `migrate`, `migrate --status`, `sync` | `workerCli` | 600 s each (the worker also has its own `RATIO_MAX_RUN_SECONDS` and stall timeouts) | SIGKILL, reject |
+| 1 | `docker ps` (preflight) | local.mjs `localTest` → `runProcess` | 60 s | SIGKILL of the process group, immediate reject (§13a) |
+| 2 | `docker compose up -d --wait` | `up` | 600 s (allows a first image pull in CI) | SIGKILL of the process group, immediate reject (§13a) |
+| 3 | `docker compose down [-v]` | `down` (developer `local:down` and local:test cleanup) | 300 s; local:test also wraps it in a 330 s `withDeadline` | SIGKILL of the process group, immediate reject (§13a); the cleanup records `error: …` and the run fails |
+| 4 | `npm run worker:build` | `migrate`, `workerCli` | 300 s | SIGKILL of the process group, immediate reject (§13a) |
+| 5 | worker CLI `migrate`, `migrate --status`, `sync` | `workerCli` | 600 s each (the worker also has its own `RATIO_MAX_RUN_SECONDS` and stall timeouts) | SIGKILL of the process group, immediate reject (§13a) |
 | 6 | Postgres readiness | `up` → `waitUntil` | 120 s overall, 5 s per attempt | reject "timed out waiting for postgres" |
 | 7 | S3 readiness (`fetch` with `signal`, body cancelled) | `up` → `waitUntil` | 120 s overall, 5 s per attempt | attempt aborted; reject at overall |
 | 8 | every Postgres session (readiness probe; version check and bootstrap; seed provisioning) | `withClient` | connect 5 s; each statement 60 s (`query_timeout` client-side and `statement_timeout` server-side); `end()` 5 s; whole session 120 s | the socket is destroyed (also when the caller's signal aborts); reject |
@@ -567,3 +567,80 @@ is bounded too.
 Slice 0 (`src/ingest/db`) and Slice 1 worker semantics are unchanged in this
 round. The pre-existing Slice 1 `periods.test.ts` timeout under extreme load
 (§11) still stands and is not addressed here.
+
+## 13a. Challenger Low 1 on b27f4ba: the `runProcess` deadline was not hard with `capture: true`
+
+The challenger APPROVED b27f4ba (0 High, 0 Medium). Its Low 1 contradicted
+§13: rows 1–5 claimed a hard bound, but with `capture: true` `runProcess`
+SIGKILLed only the child and settled only on `close`. `close` never fires
+while a grandchild still holds the stdout pipe. The challenger confirmed it
+live: the call was still waiting more than 8 s past a 1 s deadline.
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| aff055d | L19 tests | **red** (`red/red-challenger-runprocess.txt`: 6 failed / 112; afterAll killed the leftover sleepers) |
+| 9227eb5 | the fix | green |
+| (this commit) | this section, plus DESIGN §11 | docs |
+
+### Fix (lib.mjs `runProcess`)
+
+- **Its own process group.** Each command is spawned `detached: true`, so it
+  runs in its own process group. On timeout, `process.kill(-pid, 'SIGKILL')`
+  kills the command **and its descendants**.
+- **Rejects at the deadline.** At `timeoutMs` the promise rejects at once
+  ("timed out after N ms (killed)") and the stdio pipes are destroyed. It no
+  longer waits for `close`.
+- **A held pipe after exit.** The command may exit while a descendant keeps
+  the pipe open. In that case the result is settled `exitGraceMs` (2 s) after
+  `exit`, still inside the deadline: the group is killed, the pipe is
+  destroyed, and the result is resolved or rejected on the exit status.
+- **Ctrl-C and SIGTERM.** The groups are detached, so Ctrl-C to `local.mjs`
+  would not reach them. `local.mjs` therefore handles SIGINT and SIGTERM by
+  calling `killLiveProcessGroups()`, then exits 130 or 143.
+- **Deadline inventory (§13):** rows 1–5 now read "SIGKILL of the whole
+  process group and an immediate reject at the bound, whatever the stdio
+  mode". After `exit` with the pipe still held, the result settles within at
+  most 2 s.
+
+### Tests (L19, `scripts/local/local.test.mjs`)
+
+| Case | Expected |
+|---|---|
+| `bash -c '(sleep N) & sleep N'`, `capture: true`, 500 ms | rejects "timed out after 500 ms" in < 2 s; no `sleep N` left |
+| the same without capture (inherited stdio) | the same |
+| `bash -c 'echo hi; (sleep N) & exit 0'`, `capture: true`, grace 300 ms, 10 s deadline | resolves `{ code: 0, out: 'hi\n' }` in < 3 s; the grandchild is killed |
+| `bash -c '(sleep N) & exit 0'`, grace 60 s, deadline 500 ms | rejects at the deadline; the grandchild is killed |
+| `bash -c '(sleep N) & exit 4'`, grace 300 ms | rejects "exited 4"; the grandchild is killed |
+| static | `local.mjs` kills the live groups on SIGINT/SIGTERM; `runProcess` spawns `detached: true` |
+
+Every case uses a unique `sleep` duration as a marker. The test reads
+`/proc/*/cmdline` to check that nothing with that marker survives, and an
+`afterAll` kills any survivor. After the red run, the mutations and the gates,
+0 marker processes remained.
+
+### Mutation checks (scratch `mutate7.sh`; each applied, run, restored; tree clean after; 0 orphans)
+
+| ID | Mutation | Result |
+|---|---|---|
+| R1 | **the old behaviour: settle on `close` only** (the deadline kills just the child; no exit grace) | **killed**: 6/112 |
+| R2 | the deadline kills the group but waits for `close` | **killed**: 4/112 |
+| R3 | no exit grace | **killed**: 2/112 |
+| R4 | kill only the child, not its process group | **killed**: 5/112 |
+| R5 | not detached (no process group of its own) | **killed**: 6/112 |
+| R6 | `local.mjs` does not kill the live groups on SIGINT/SIGTERM | **killed**: 1/112 (static) |
+
+### Gates (HEAD 9227eb5)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `npx tsc --noEmit` | 0 / 0 |
+| `scripts/local/local.test.mjs` | 112 passed |
+| `npm test` | **2324 passed** (100 files) |
+| `npm run local:test` (`ratio-local-test`, 54339/18353/3110; every docker, npm and worker command now in its own process group) | pass in 25 s; `appReady: pid-verified`; totals 55 / `30.8272954899`, 40 / `21.0978157665`; 95 distinct rows; `appStop: stopped`; `down: ok (-v)`; `failures: []` |
+| leftovers | none: no marker sleepers, no `ratio-local*` containers or volumes, no `.ratio-local/` |
+
+`test:db`, `next build` and `check:bundle` were not re-run for this change.
+It touches only `scripts/local/*.mjs`, which none of them build or test; the
+§13 results stand.

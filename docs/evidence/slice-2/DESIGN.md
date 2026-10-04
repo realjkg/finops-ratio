@@ -589,7 +589,14 @@ are closed as a class, not line by line.
   - The limit covers headers and body: a stalled body is a timeout, not the
     old silently-null body.
 - `runProcess` refuses to run without a deadline, so every docker, npm and
-  worker command carries one.
+  worker command carries one. The deadline is hard whatever the stdio mode
+  (challenger Low 1 on b27f4ba, EVIDENCE §13a):
+  - each command runs in its own process group, which is SIGKILLed at the
+    deadline;
+  - the promise rejects at once instead of waiting for `close`, which never
+    fires while a grandchild still holds a pipe;
+  - a pipe still held after `exit` is ended after a 2 s grace;
+  - `local.mjs` kills the live groups on SIGINT/SIGTERM.
 - The pg sessions have a hard limit at every stage:
   - connect timeout;
   - `query_timeout` (client side);
