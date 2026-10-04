@@ -313,6 +313,14 @@ It refuses any project name or port shared with the developer stack or with
 
    No other period may appear.
 5. **`sync` again:** every period `skipped_unchanged`.
+
+   **Both syncs must also exit 0** (`syncTwice`; Copilot 4177490229 /
+   4177490261). The CLI runs with `allowFail` so that a failing sync's
+   evidence record, with its quarantine codes, can still be read. A non-zero
+   exit fails the run even with a valid record, and the exit code is
+   recorded. A failed first sync records the catalog's quarantine reasons
+   and then fails, reporting both the exit code and the reasons; no second
+   sync runs.
 6. **`next start`** (reader login, token, tenant binding). An anonymous read
    must get 401. Then it pages `GET /api/v1/costs/published?limit=500` until
    `nextCursor` is null, with a page cap of ⌈rows/500⌉ + 1.

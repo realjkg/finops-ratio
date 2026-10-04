@@ -1,0 +1,22 @@
+KILLED   CM21 the exit-code check dropped
+           by: FIRST sync: a valid, passing record but exit code 1 ⇒ the run fails, the code is recorded, the diagnostics still run, no second sync
+           by: FIRST sync: exit code 1 with a quarantine ⇒ both the exit code and the reasons are reported
+           by: SECOND sync: a valid all-skipped record but exit code 1 ⇒ the run fails, the code is recorded
+KILLED   CM22 only the first sync checks the exit code
+           by: SECOND sync: a valid all-skipped record but exit code 1 ⇒ the run fails, the code is recorded
+           by: a missing evidence record, a null exit code (killed by a signal) or a non-number code also fail
+KILLED   CM23 a non-zero code accepted when the record passes
+           by: FIRST sync: a valid, passing record but exit code 1 ⇒ the run fails, the code is recorded, the diagnostics still run, no second sync
+           by: SECOND sync: a valid all-skipped record but exit code 1 ⇒ the run fails, the code is recorded
+           by: a missing evidence record, a null exit code (killed by a signal) or a non-number code also fail
+KILLED   CM24 the diagnostics skipped on a failed first sync
+           by: FIRST sync: a valid, passing record but exit code 1 ⇒ the run fails, the code is recorded, the diagnostics still run, no second sync
+KILLED   CM25 the acceptance body back to judging only the record (no syncTwice)
+           by: every comparison runs and fails the run
+           by: uses the real worker CLI twice and the real route; no fake source, no test hook, no control in the manifest
+KILLED   CM26 allowFail without saying who judges the exit code
+           by: sweep: every allowFail command in scripts/local judges its exit code nearby, or says who does (Copilot 4177490229)
+killed 6 of 6
+ M scripts/local/acceptance.mjs
+ M scripts/local/local.mjs
+

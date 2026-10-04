@@ -6,10 +6,15 @@ ephemeral only. Not pushed; no PR. Design: `DESIGN.md` (this directory).
 **How to read this file.** It is a log:
 - §1–§9 record the first round, at HEAD 78cfe11;
 - §10 records the coordinator's decisions;
-- §11 records the challenger round.
+- §11 records the challenger round;
+- §12 records the Copilot review of PR #63.
 
-Each section is accurate as of its own commits. The current gates and runs
-are in **§11**. The files in `runs/` are §11's runs, at 6e518fc.
+Each section is accurate as of its own commits.
+- **§11** has the last full gate set and the data-mutation runs; the files in
+  `runs/` are §11's runs, at 6e518fc.
+- **§12** has the gates after the exit-code fix (ad0e82d). Its files in
+  `runs/` are `acc1k-copilot-exit-code.json` and
+  `code-mutations-exit-code.txt`.
 
 **Isolation.** Other agents share this host and its Docker daemon, so every run
 used its own names and ports, and everything was removed afterwards:
@@ -470,3 +475,91 @@ problem. The challenger's two mutations are now built in, and both fail
 
 Every sum, count, digest and API total still agreed for the last two. Only
 the full-row comparison catches them.
+
+## 12. Copilot review of PR #63 at ba8c47a (2 Medium, CI green); local, not pushed
+
+**Findings 4177490229 (`local.mjs:686`) and 4177490261 (`local.mjs:692`).**
+Both acceptance syncs ran the worker CLI with `allowFail: true`, and the
+verdict read only the evidence record. A sync that printed a valid record
+but exited non-zero would therefore have passed. The plain `sync()` path,
+which `local:test` uses, already rejected `r.code !== 0`.
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| ddf01c0 | A11 (fake runner) and the A9 updates and sweep | **red** (`red/red-copilot-sync-exit.txt`: 8 failed / 66) |
+| ad0e82d | `syncTwice`: both syncs judged on exit code + record; `local:acceptance` uses it; `syncRecord`'s `allowFail` documented | green |
+| (this commit) | DESIGN §5, this section, runs | docs |
+
+### The fix
+
+`syncTwice` (`acceptance.mjs`) runs both syncs through an injected runner
+(`sync(name)` ⇒ `{ code, record }`). Each sync must exit with **exactly 0**,
+and its record must pass the existing checks.
+
+**First sync, on failure:**
+- the exit code is recorded (`steps.sync.exit`);
+- the catalog's quarantine reasons are recorded (`beforeFail`);
+- the run fails, listing both the exit code and the record's reasons;
+- no second sync runs.
+
+**Second sync:** the exit code must be 0 and every period
+`skipped_unchanged`.
+
+A missing record, a `null` code (the process was killed by a signal) or a
+non-number code also fail.
+
+### Sweep of every `allowFail` and ignored `.code` in `scripts/local/*.mjs`
+
+| Site | Exit code |
+|---|---|
+| `migrate --status --json` (`local.mjs`, shared by `local:test`) | judged: `status.code !== 0` ⇒ throw |
+| `syncRecord` (the worker `sync`) | judged by every caller: `sync()` (`local:sync`, `local:test`) rejects `r.code !== 0`; `syncTwice` requires 0. A comment now says so |
+| the control-total calculator (`python3`) | judged: `calc.code !== 0` ⇒ throw |
+| every other `runProcess` / `run` call (`docker`, `npm`, compose `up`/`down`, `worker:build`, `migrate`) | no `allowFail`: `runProcess` rejects any non-zero exit |
+| `lib.mjs`, `bootstrap.mjs`, `acceptance.mjs`, `fetch-focus-sample.mjs` | no CLI call with `allowFail` |
+
+A static test (A9 sweep) now requires every `allowFail: true` line in
+`scripts/local` to either check `.code !== 0` within the next 3 lines or
+carry an "exit code judged by" comment just above.
+
+### Tests and mutations
+
+A11 uses a fake runner:
+- a valid, passing first-sync record with **code 1** ⇒ fails; the code and
+  the diagnostics are recorded; no second sync;
+- the same with a quarantine ⇒ both the exit code and the reasons are
+  reported;
+- a valid, all-skipped second-sync record with **code 1** ⇒ fails; the code
+  is recorded;
+- no record, a `null` code, or `"0"` ⇒ fail.
+
+Code mutations (scratch `code_mutations3.py`; `runs/code-mutations-exit-code.txt`).
+The `M` lines in that file's status output are the then-uncommitted fix,
+committed as ad0e82d. **6/6 were killed:**
+
+| Id | Mutation | Killed by |
+|---|---|---|
+| CM21 | the exit-code check dropped | A11 (first and second sync) |
+| CM22 | only the first sync checks the code | A11 (second sync) |
+| CM23 | a non-zero code accepted when the record passes | A11 |
+| CM24 | the diagnostics skipped on a failed first sync | A11 |
+| CM25 | the acceptance body no longer uses `syncTwice` | A9 |
+| CM26 | `syncRecord`'s `allowFail` without saying who judges the code | A9 sweep |
+
+### Gates (HEAD ad0e82d)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **105 files / 2498 tests passed** |
+| `next build` | 0 (`tsconfig.json`/`next-env.d.ts` restored) |
+| `npm run local:acceptance` 1k ×1 | **pass, 23.3 s**. `sync` exit 0: 2024-09 published 999 / `20.28022672899`, 2024-10 published 1 / `0.24000000000`, both unverified. `syncAgain` exit 0, both `skipped_unchanged`. 1000 rows compared on 21 fields. `appStop: stopped`, `down: ok (-v)` (`runs/acc1k-copilot-exit-code.json`) |
+| leftovers | no `ratio-s2b*` containers or volumes, no `.ratio-local/`, tree clean |
+
+`test:db`, `local:test` and the 10k run were not re-run in this round, as
+the coordinator did not ask for them. Nothing they exercise changed:
+- `src/` is untouched;
+- `local:test` still goes through the unchanged `sync()`; only
+  `syncRecord`'s comment changed.
