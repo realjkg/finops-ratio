@@ -1,0 +1,42 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+ ❯ src/server/costs/publishedCosts.db.test.ts (26 tests | 2 failed) 1192ms
+   ❯ D11 a stalled reader connection is destroyed and its slot freed (Copilot 4176494809) (2)
+     × D11a mid-request stall: the client-side query_timeout fires ⇒ 500, the slot is freed, the next request succeeds 15ms
+     × D11b a request deadline below query_timeout fires first ⇒ 500, the client destroyed, the next request succeeds 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D11 a stalled reader connection is destroyed and its slot freed (Copilot 4176494809) > D11a mid-request stall: the client-side query_timeout fires ⇒ 500, the slot is freed, the next request succeeds
+TypeError: createReaderPool is not a function
+ ❯ scenario src/server/costs/publishedCosts.db.test.ts:564:18
+    562|     const via = new URL(reader.url);
+    563|     via.port = String(proxy.port);
+    564|     const pool = createReaderPool(via.toString(), { max: 1, query_time…
+       |                  ^
+    565|     const route = createPublishedCostsRoute({
+    566|       env: { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_API_TENANT_ID: C.t…
+ ❯ src/server/costs/publishedCosts.db.test.ts:593:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D11 a stalled reader connection is destroyed and its slot freed (Copilot 4176494809) > D11b a request deadline below query_timeout fires first ⇒ 500, the client destroyed, the next request succeeds
+TypeError: createReaderPool is not a function
+ ❯ scenario src/server/costs/publishedCosts.db.test.ts:564:18
+    562|     const via = new URL(reader.url);
+    563|     via.port = String(proxy.port);
+    564|     const pool = createReaderPool(via.toString(), { max: 1, query_time…
+       |                  ^
+    565|     const route = createPublishedCostsRoute({
+    566|       env: { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_API_TENANT_ID: C.t…
+ ❯ src/server/costs/publishedCosts.db.test.ts:598:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 24 passed (26)
+   Start at  06:59:47
+   Duration  2.84s (tests 54%, transform 37%, import 8%, setup 2%)
+

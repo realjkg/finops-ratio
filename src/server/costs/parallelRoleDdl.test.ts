@@ -212,3 +212,77 @@ describe('cluster-wide role changes only in serial DB test files (static guard)'
     expect(v("await expectRunnerRefuses('GRANT ratio_worker TO x;');")).toEqual([]);
   });
 });
+
+// --- Copilot review of f684dbc: 4176494757 (High) and 4176494775 (High) -----
+// "BEGIN and ROLLBACK somewhere in the function" is not proof, and a raw-text
+// prefilter skips SQL that the AST would rebuild. Each bypass shape must be
+// flagged; unresolvable SQL outside a verified rolled-back transaction too.
+describe('guard soundness (Copilot 4176494757, 4176494775)', () => {
+  const v = (code: string) => parallelRoleDdlViolations('x.db.test.ts', code);
+  const GRANT = 'await c.query(`GRANT ratio_worker TO ${x}`);';
+
+  it('bypass 1: BEGIN and ROLLBACK on a DIFFERENT client than the GRANT ⇒ flagged', () => {
+    expect(v("async function f(c, d) { await d.query('BEGIN'); try { " + GRANT + " } finally { await d.query('ROLLBACK'); } }")).not.toEqual([]);
+  });
+
+  it('bypass 2: ROLLBACK BEFORE the GRANT ⇒ flagged', () => {
+    expect(v("async function f(c) { await c.query('BEGIN'); await c.query('ROLLBACK'); " + GRANT + ' }')).not.toEqual([]);
+    expect(v("async function f(c) { await c.query('BEGIN'); try { await c.query('ROLLBACK'); " + GRANT + " } finally { await c.query('ROLLBACK'); } }")).not.toEqual([]);
+  });
+
+  it('bypass 3: the GRANT in an unused NESTED function of a function that BEGINs and ROLLBACKs ⇒ flagged', () => {
+    expect(v("async function f(c) { await c.query('BEGIN'); const g = async () => { " + GRANT + " }; await c.query('ROLLBACK'); return g; }")).not.toEqual([]);
+  });
+
+  it('bypass 4: a CONDITIONAL BEGIN or a CONDITIONAL ROLLBACK ⇒ flagged', () => {
+    expect(v("async function f(c, t) { if (t) await c.query('BEGIN'); try { " + GRANT + " } finally { await c.query('ROLLBACK'); } }")).not.toEqual([]);
+    expect(v("async function f(c, t) { await c.query('BEGIN'); try { " + GRANT + " } finally { if (t) await c.query('ROLLBACK'); } }")).not.toEqual([]);
+  });
+
+  it('straight-line: an early exit, a COMMIT or no ROLLBACK after the GRANT ⇒ flagged; plain BEGIN; GRANT; ROLLBACK passes', () => {
+    expect(v("async function f(c, t) { await c.query('BEGIN'); " + GRANT + " if (t) return; await c.query('ROLLBACK'); }")).not.toEqual([]);
+    expect(v("async function f(c) { await c.query('BEGIN'); " + GRANT + " await c.query('COMMIT'); await c.query('ROLLBACK'); }")).not.toEqual([]);
+    expect(v("async function f(c) { await c.query('BEGIN'); " + GRANT + ' }')).not.toEqual([]);
+    expect(v("async function f(c) { await c.query('BEGIN'); " + GRANT + " await c.query('ROLLBACK'); }")).toEqual([]);
+    // BEGIN in an outer try, the finally rolls back (Slice 0 roles.db.test.ts shape).
+    expect(v("async function f(c, p) { try { await c.query('BEGIN'); if (p) " + GRANT + " } finally { await c.query('ROLLBACK').catch(() => undefined); } }")).toEqual([]);
+  });
+
+  it('helpers: the helper itself must BEGIN, call the callback with THAT client inside the transaction, and ROLLBACK unconditionally', () => {
+    const use = "\nit('t', async () => { await h(async (k) => { await k.query(`GRANT ratio_worker TO ${x}`); }); });";
+    expect(v("async function h(fn) { const c = a(); await c.query('BEGIN'); try { await fn(c); } finally { await c.query('ROLLBACK'); } }" + use)).toEqual([]);
+    // A different client is passed to the callback.
+    expect(v("async function h(fn) { const c = a(); const d = b(); await c.query('BEGIN'); try { await fn(d); } finally { await c.query('ROLLBACK'); } }" + use)).not.toEqual([]);
+    // The callback runs after the ROLLBACK.
+    expect(v("async function h(fn) { const c = a(); await c.query('BEGIN'); await c.query('ROLLBACK'); await fn(c); }" + use)).not.toEqual([]);
+    // The ROLLBACK is conditional.
+    expect(v("async function h(fn, t) { const c = a(); await c.query('BEGIN'); try { await fn(c); } finally { if (t) await c.query('ROLLBACK'); } }" + use)).not.toEqual([]);
+    // The callback ends the transaction itself before the GRANT.
+    expect(
+      v("async function h(fn) { const c = a(); await c.query('BEGIN'); try { await fn(c); } finally { await c.query('ROLLBACK'); } }\nit('t', async () => { await h(async (k) => { await k.query('COMMIT'); await k.query(`GRANT ratio_worker TO ${x}`); }); });"),
+    ).not.toEqual([]);
+  });
+
+  it('SQL the AST can rebuild is checked even when the raw text has no keyword: concatenation ⇒ flagged', () => {
+    expect(v("await db.pool.query('GR' + 'ANT ratio_worker TO x');")).not.toEqual([]);
+    expect(v("await db.pool.query('ALT' + 'ER ROLE x NOLOGIN');")).not.toEqual([]);
+  });
+
+  it('unresolvable SQL outside a verified rolled-back transaction ⇒ flagged: a bare variable, a call, a statement-position hole', () => {
+    expect(v('async function f(sql) { await db.pool.query(sql); }')).not.toEqual([]);
+    expect(v('await db.pool.query(buildSql());')).not.toEqual([]);
+    expect(v('await db.pool.query(`${stmt}`);')).not.toEqual([]);
+    expect(v("await db.pool.query(`DO $$ BEGIN EXECUTE format('${s}', current_database()); END $$`);")).not.toEqual([]);
+    expect(v('await db.pool.query({ text: q, values: [] });')).not.toEqual([]);
+  });
+
+  it('resolvable SQL is judged by its text: a const literal, a for-of over literals, value-position holes', () => {
+    expect(v("const SQL = 'SELECT 1'; await db.pool.query(SQL);")).toEqual([]);
+    expect(v("const G = 'GRANT ratio_worker TO x'; await db.pool.query(G);")).not.toEqual([]);
+    expect(v("for (const s of ['SELECT 1', 'SELECT 2']) await db.pool.query(s);")).toEqual([]);
+    expect(v("for (const s of ['SELECT 1', 'REVOKE ratio_worker FROM x']) await db.pool.query(s);")).not.toEqual([]);
+    expect(v('await db.pool.query(`SELECT * FROM t WHERE id = ${id}`, []);')).toEqual([]);
+    // Inside a verified rolled-back transaction, unresolvable SQL is fine.
+    expect(v("async function f(c, sql) { await c.query('BEGIN'); try { await c.query(sql); } finally { await c.query('ROLLBACK'); } }")).toEqual([]);
+  });
+});

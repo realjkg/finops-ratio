@@ -11,6 +11,7 @@
 // staged + quarantined batches per tenant) and a third tenant published by
 // the REAL Slice 1 worker library (FakeFocusSource, in-memory evidence).
 import crypto from 'crypto';
+import net from 'net';
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { NextApiHandler } from 'next';
 import { Pool } from 'pg';
@@ -23,7 +24,7 @@ import { FakeFocusSource } from '../../ingest/sources/fake/FakeFocusSource';
 import { MemoryEvidenceStore } from '../../ingest/evidence/MemoryEvidenceStore';
 import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
 import { createPublishedCostsRoute, ROUTE_MESSAGES } from './publishedCostsRoute';
-import { closeReaderPools, readerPool } from './readerPool';
+import { closeReaderPools, createReaderPool, readerPool } from './readerPool';
 import { PUBLISHED_COSTS_SQL, readPublishedCosts, setAfterPageHookForTests } from './publishedCosts';
 import { withTenantTransaction } from '../../ingest/db/tenant';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
@@ -519,4 +520,82 @@ describe('D10 output never depends on session settings (Copilot 4176238982)', ()
     }
   });
 
+});
+
+// --- Copilot 4176494809: a stalled reader connection never holds a pool slot --
+// A TCP proxy in front of the test Postgres that can stop forwarding the
+// server's answers (a lost response / stalled connection). With max: 1, a
+// slot that was not freed would make the next request wait and fail.
+describe('D11 a stalled reader connection is destroyed and its slot freed (Copilot 4176494809)', () => {
+  async function stallProxy(host: string, port: number) {
+    let stalled = false;
+    const sockets = new Set<net.Socket>();
+    const srv = net.createServer((client) => {
+      const upstream = net.connect({ host, port });
+      sockets.add(client);
+      sockets.add(upstream);
+      client.on('error', () => undefined);
+      upstream.on('error', () => undefined);
+      client.on('data', (d) => upstream.write(d));
+      upstream.on('data', (d) => {
+        if (!stalled) client.write(d);
+      });
+      client.on('close', () => upstream.destroy());
+      upstream.on('close', () => client.destroy());
+    });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    return {
+      port: (srv.address() as net.AddressInfo).port,
+      stall: (on: boolean) => {
+        stalled = on;
+      },
+      close: async () => {
+        for (const s of sockets) s.destroy();
+        await new Promise((r) => srv.close(() => r(undefined)));
+      },
+    };
+  }
+
+  async function scenario(opts: { query_timeout: number; requestDeadlineMs?: number }) {
+    const real = new URL(reader.url);
+    const proxy = await stallProxy(real.hostname, Number(real.port || 5432));
+    const via = new URL(reader.url);
+    via.port = String(proxy.port);
+    const pool = createReaderPool(via.toString(), { max: 1, query_timeout: opts.query_timeout });
+    const route = createPublishedCostsRoute({
+      env: { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_API_TENANT_ID: C.tenantId, RATIO_READER_DATABASE_URL: via.toString() },
+      poolFor: () => pool,
+      logger: () => undefined,
+      ...(opts.requestDeadlineMs ? { requestDeadlineMs: opts.requestDeadlineMs } : {}),
+    });
+    const req = () => call(route, makeReq({ headers: bearer(), query: { limit: '5' } }));
+    try {
+      expect((await req()).statusCode).toBe(200);
+      proxy.stall(true);
+      const t0 = Date.now();
+      const stuck = await req();
+      const took = Date.now() - t0;
+      expect(stuck.statusCode).toBe(500);
+      // The stuck client was destroyed, not returned to the pool.
+      expect(pool.totalCount).toBe(0);
+      proxy.stall(false);
+      const t1 = Date.now();
+      expect((await req()).statusCode).toBe(200);
+      expect(Date.now() - t1).toBeLessThan(3_000);
+      return took;
+    } finally {
+      await pool.end().catch(() => undefined);
+      await proxy.close();
+    }
+  }
+
+  it('D11a mid-request stall: the client-side query_timeout fires ⇒ 500, the slot is freed, the next request succeeds', async () => {
+    const took = await scenario({ query_timeout: 1_000 });
+    expect(took).toBeLessThan(4_000);
+  }, 30_000);
+
+  it('D11b a request deadline below query_timeout fires first ⇒ 500, the client destroyed, the next request succeeds', async () => {
+    const took = await scenario({ query_timeout: 60_000, requestDeadlineMs: 800 });
+    expect(took).toBeLessThan(3_000);
+  }, 30_000);
 });

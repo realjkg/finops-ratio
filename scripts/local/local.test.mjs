@@ -48,7 +48,7 @@ import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import process from 'node:process';
 import { clearTimeout, setTimeout } from 'node:timers';
-import { bootstrapPlan } from './bootstrap.mjs';
+import { EXPECTED_MEMBERSHIP_OPTIONS, bootstrapPlan, membershipProblems } from './bootstrap.mjs';
 
 const { AbortController } = globalThis;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -1218,5 +1218,159 @@ describe('L20 an interrupted local:test still cleans up (Copilot 4176238924)', (
     expect(src).toMatch(/runLocalTest\(\{[\s\S]*?signal: interrupt\.signal,/);
     expect(src).toMatch(/'down', '--remove-orphans', [^\n]*\], \{ timeoutMs, signal: null \}\)/);
     expect(src).not.toMatch(/process\.once\(sig/);
+  });
+});
+
+// --- Copilot 4176494789: bootstrap membership edges are verified in full (PG16
+// admin_option / inherit_option / set_option), not only member → parent.
+describe('L21 bootstrap membership edges have the exact intended PG16 options (Copilot 4176494789)', () => {
+  const edge = (member, parent, over = {}) => ({ member, parent, admin_option: false, inherit_option: true, set_option: true, ...over });
+  const good = () => [
+    edge(LOCAL_NAMES.migrator, 'ratio_owner'),
+    edge(LOCAL_NAMES.worker, 'ratio_worker'),
+    edge(LOCAL_NAMES.reader, 'ratio_reader'),
+  ];
+
+  it('the intended shape, declared per membership: no ADMIN, INHERIT TRUE, SET TRUE (what CREATE ROLE … IN ROLE gives on PG16)', () => {
+    expect(EXPECTED_MEMBERSHIP_OPTIONS).toEqual({ admin_option: false, inherit_option: true, set_option: true });
+    expect(membershipProblems(good(), LOCAL_NAMES)).toEqual([]);
+  });
+
+  it.each([
+    ['admin_option', true],
+    ['inherit_option', false],
+    ['set_option', false],
+  ])('%s = %s on ANY of the three edges fails', (option, value) => {
+    for (let i = 0; i < 3; i += 1) {
+      const rows = good();
+      rows[i] = { ...rows[i], [option]: value };
+      const problems = membershipProblems(rows, LOCAL_NAMES);
+      expect(problems, `edge ${i}`).toHaveLength(1);
+      expect(problems[0]).toContain(option);
+      expect(problems[0]).toContain(rows[i].member);
+    }
+  });
+
+  it('an option that is missing (NULL, an older server) fails closed', () => {
+    const rows = good();
+    rows[2] = { ...rows[2], set_option: null };
+    expect(membershipProblems(rows, LOCAL_NAMES).join('\n')).toMatch(/set_option/);
+  });
+
+  it('a duplicate grant of the same edge (another grantor), a missing edge, an extra edge, a ratio role as a member: each fails', () => {
+    expect(membershipProblems([...good(), edge(LOCAL_NAMES.reader, 'ratio_reader')], LOCAL_NAMES).join('\n')).toMatch(/more than one/);
+    expect(membershipProblems(good().slice(1), LOCAL_NAMES).join('\n')).toMatch(/missing/);
+    expect(membershipProblems([...good(), edge(LOCAL_NAMES.reader, 'ratio_worker')], LOCAL_NAMES).join('\n')).toMatch(/not expected/);
+    expect(membershipProblems([...good(), edge('ratio_reader', 'ratio_worker')], LOCAL_NAMES).join('\n')).toMatch(/not expected/);
+  });
+
+  it('verifyBootstrap reads the three PG16 option columns and judges them with membershipProblems', () => {
+    const src = read('scripts/local/bootstrap.mjs');
+    expect(src).toMatch(/a\.admin_option[\s\S]*?a\.inherit_option[\s\S]*?a\.set_option/);
+    expect(src).toMatch(/problems\.push\(\.\.\.membershipProblems\(edges\.rows, names\)\)/);
+  });
+});
+
+// --- Copilot 4176494798: after an interrupt, the body must not spawn (or keep)
+// a child the cleanup no longer sees. Deterministic: an injected delay puts the
+// spawn after the cleanup started.
+describe('L22 no late child after an interrupt (Copilot 4176494798)', () => {
+  const mine = [];
+  afterAll(() => {
+    for (const c of mine) {
+      try {
+        process.kill(-c.pid, 'SIGKILL');
+      } catch {
+        // gone
+      }
+    }
+  });
+  const sleeperGroup = () => {
+    const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: true });
+    mine.push(c);
+    return trackProcessGroup(c);
+  };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  it('a spawn attempted after the abort (the port re-check was slow) is refused by spawnGuard: nothing is started', async () => {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort('SIGINT'), 100);
+    const down = vi.fn(async () => undefined);
+    let started = null;
+    const summary = await runLocalTest({
+      project: 'p',
+      down,
+      downTimeoutMs: 5_000,
+      bodySettleMs: 5_000,
+      signal: ac.signal,
+      body: async ({ setApp, spawnGuard }) => {
+        await wait(400);
+        setApp(
+          spawnGuard(() => {
+            started = sleeperGroup();
+            return started;
+          })(),
+        );
+      },
+    });
+    expect(started).toBeNull();
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(summary.interrupted).toBe('SIGINT');
+  }, 15_000);
+
+  it('a child handed to setApp after the cleanup started is killed and awaited before runLocalTest returns (not left detached)', async () => {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort('SIGTERM'), 100);
+    const down = vi.fn(async () => undefined);
+    let late = null;
+    const summary = await runLocalTest({
+      project: 'p',
+      down,
+      downTimeoutMs: 5_000,
+      bodySettleMs: 5_000,
+      signal: ac.signal,
+      body: async ({ setApp }) => {
+        await wait(400);
+        late = sleeperGroup(); // a spawn that did not go through spawnGuard
+        setApp(late);
+      },
+    });
+    expect(late).not.toBeNull();
+    expect(childExited(late)).toBe(true);
+    expect(liveProcessGroups()).not.toContain(late.pid);
+    expect(summary.lateChildren).toBe(1);
+    expect(down).toHaveBeenCalledTimes(1);
+  }, 15_000);
+
+  it('runLocalTest waits for an interrupted body to settle, bounded by bodySettleMs', async () => {
+    let settledAt = 0;
+    const ac = new AbortController();
+    setTimeout(() => ac.abort('SIGINT'), 50);
+    const t0 = Date.now();
+    await runLocalTest({
+      project: 'p',
+      down: async () => undefined,
+      downTimeoutMs: 5_000,
+      bodySettleMs: 5_000,
+      signal: ac.signal,
+      body: async () => {
+        await wait(600);
+        settledAt = Date.now();
+      },
+    });
+    expect(settledAt).toBeGreaterThan(0);
+    expect(Date.now()).toBeGreaterThanOrEqual(settledAt);
+    const ac2 = new AbortController();
+    setTimeout(() => ac2.abort('SIGINT'), 50);
+    const t1 = Date.now();
+    await runLocalTest({ project: 'p', down: async () => undefined, downTimeoutMs: 5_000, bodySettleMs: 300, signal: ac2.signal, body: () => new Promise(() => undefined) });
+    expect(Date.now() - t1).toBeLessThan(2_000);
+    expect(Date.now() - t0).toBeGreaterThan(600);
+  }, 15_000);
+
+  it('local.mjs spawns next start only through spawnGuard', () => {
+    const src = read('scripts/local/local.mjs');
+    expect(src).toMatch(/start: spawnGuard\(\(\) =>\s*trackProcessGroup\(\s*spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'/);
+    expect(src).toMatch(/body: async \(\{ steps, setApp, spawnGuard \}\) =>/);
   });
 });
