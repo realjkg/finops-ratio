@@ -35,7 +35,8 @@ ordinary commits and plain pushes (never a force-push).
 | 23 | `b9b2274` | Copilot's review 5407941028 of c85079f (1 High, 2 Medium) and the challenger's one Low on revision 22 (APPROVED, 0 High, 0 Medium), §3x: merge targets terminal, enforced by a locking trigger (`tg_anomaly_merge_guard`, `REVIEWED_TRIGGERS` 14 → 15) with re-pointing before a survivor is merged; M1-log eligibility over everything its fit and selection read; calendar factors from valid samples only; "never reopened". |
 | 24 | `f3209ea` | Copilot's review 5407981134 of b9b2274 (3 High, 1 Medium) and the challenger's one Low on revision 23 (APPROVED, 0 High, 0 Medium), §3y: account-scope daily forecasts rebuilt on read with stored interval state, and a scope census (peak 5.24 GB); anomaly changes published in the detect run's success transaction; valid-sample rules for the log-scale detectors; a scale-aware zero week in `budget5.py` (outputs unchanged); a `repointed` event. |
 | 25 | `45b0088` | Copilot's review 5408081799 of f3209ea (1 High, 2 Medium, 2 Low) and the challenger's Low and nit on revision 24 (APPROVED, 0 High, 0 Medium), §3z: an `occurrence` in the anomaly dedup key for re-introduced restatements; bounded backtest retention with pins; the `bottom_up` summary for non-leaf scopes; `forecast_scope_state` arrays checked; stale scope counts; event-target foreign keys. |
-| 26 | this revision | Copilot's review 5408165158 of 45b0088 (1 Medium, 1 Low) and the challenger's three Low items on revision 25 (APPROVED, 0 High, 0 Medium), §3aa: bounded shares (cold-start, committed, untagged), defined APE and interval width; the retention threat-model row and rollback text brought up to date; `backtest --pin` in the success transaction; `historyDays` from leaves' first usage day; "fresh replay". |
+| 26 | `546e00b` | Copilot's review 5408165158 of 45b0088 (1 Medium, 1 Low) and the challenger's three Low items on revision 25 (APPROVED, 0 High, 0 Medium), §3aa: bounded shares (cold-start, committed, untagged), defined APE and interval width; the retention threat-model row and rollback text brought up to date; `backtest --pin` in the success transaction; `historyDays` from leaves' first usage day; "fresh replay". |
+| 27 | this revision | Copilot's review 5408199807 of 546e00b (2 High, 1 Medium), after the challenger APPROVED revision 26 without findings, §3ab: retention never removes anything a running run uses (shared/exclusive retention lock); every multi-transaction run captures its input runs once and reads them by id; billed month-end `B` removed from the contract and recorded as a gap; a share-test wording fix. |
 
 ## 2. Governance wording: reverted
 
@@ -577,6 +578,36 @@ was checked against 45b0088 and is valid.
 | **Y3** (challenger) replay wording | **Fixed.** "A fresh replay of the same batches (a new stack, from the same input) gives the same ids and occurrences" | DESIGN §7 (5-3) |
 | Scripts | No script changed; all 13 hashes as in revision 25; no disk or budget figure changes | App. B |
 
+## 3ab. Revision 27: Copilot's review 5408199807 of 546e00b
+
+The challenger APPROVED revision 26 with no findings. Copilot's three
+threads are about cross-run concurrency and the billed forecast; each was
+checked against 546e00b and is valid. Z4 is a wording slip found while
+checking.
+
+| Item | Change | Where |
+|---|---|---|
+| **Z1 r4179306667** (High) retention vs running runs | **Fixed.** Both retention functions now take the exclusive form of a per-tenant retention lock, and every run start takes it in shared form. Neither function removes: rows of a `running` run of any kind; the runs the pointers name; a batch visible under a running run's captured mark; a run named as a running run's input or previous run. The rollup function was checked too: it now keeps batches visible under running runs' marks and the run-keyed rows of their input rollup runs. 4-3 test (a detect run outlives two forecast successes and their retention passes, with its state, its forecast run and its previous run intact; start and retention serialize) and 4-2 test (a captured mark survives a restatement and a retention pass); mutants: no running-run exclusion, no lock, rollup retention ignoring captured marks | App. D.1; DESIGN §6.1, §7 (4-2, 4-3) |
+| **Z2 r4179306694** (High) detect pins its forecast | **Fixed.** In its acquisition transaction a run records its inputs on its own `analytics_runs` row: `input_rollup_run_id` and `input_batch_seq_hwm` from `rollup_pointer` (forecast, detect, backtest), `input_forecast_run_id` from `forecast_pointer` (detect), and `prev_run_id`, the latest succeeded run of its own kind (forecast, detect). They are set once, not updatable, and checked by `tg_analytics_run_success` on INSERT. The run then reads those runs by id, never through the pointers. 5-3 test (a pointer move mid-detect and mid-replay changes nothing the run reads; the column refuses UPDATE with 42501) and mutant (reading through the pointer) | App. D.1; DESIGN §7 (5-3) |
+| **Z3 r4179306710** (Medium) billed month-end | **Removed and recorded.** Every model forecasts `M` (`EffectiveCost`), and committed usage can be billed at 0 while amortised, so `B` cannot be derived from `M`. A billed-usage model with its own calibration is a follow-up slice. Removed from §3.1, §3.6's table, §4.1, the `forecasts` API row, the 4-5 tests (now: no response carries a billed value) and App. D (`billed_month_end` and its CHECK); D-09 says billed month-end is deferred; the parity statement and Known limits name the gap. Billed **actuals** stay in `costs/daily`. **The FT targets are all on `M`** (FT-1 now says so); none changes | DESIGN §0, §3.1, §3.6, §3.10, §4.1, §5.1, §7 (4-5), §8; App. D.2 |
+| **Z4** share wording | **Fixed.** A share is `null` only when both of its parts are 0; the netting case (committed +5, uncommitted −5 → 0.5) is a 5-2a test | DESIGN §7 (5-2a) |
+| Scripts | No script changed; all 13 hashes as in revision 26; no disk or budget figure changes (four columns on `analytics_runs`) | App. B |
+
+**Z2 sweep: every place a run reads another run's output across transactions**
+
+| Reader | Reads | Now |
+|---|---|---|
+| detect | forecast rows (`forecast_state`, `forecast_points`, intervals) | by `input_forecast_run_id` |
+| detect | rollup rows (`cost_daily`, `cost_daily_scope`, …) | at the visible batch under `input_batch_seq_hwm`, run-keyed rows of `input_rollup_run_id` |
+| detect | its previous `detector_state`, `detector_scope_state`, `detector_cohort_state` | by `prev_run_id` |
+| forecast | rollup rows | as detect |
+| forecast | its previous `forecast_state` (daily updates between weekly refits) | by `prev_run_id` |
+| backtest | rollup rows | as detect |
+| rollup | published facts | one transaction per batch (D.1); its own mark is set by trigger at success, so no capture is needed |
+| retention functions | every run-keyed table | the exclusive retention lock; never a running run's inputs (Z1) |
+| API and `freshness` | pointers and views | one statement or one REPEATABLE READ transaction (revisions 18, 21, 22) |
+| detect's anomaly writes | `anomalies` | the detect writer's lock and its success transaction (revision 24) |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -618,8 +649,8 @@ Appendix B (B.4, B.5.6–B.5.14).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 26 (the commit that adds this line; the same eight reasons
-as at revision 25, `45b0088`, revision 24, `f3209ea`, revision 23, `b9b2274`, revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
+at revision 27 (the commit that adds this line; the same eight reasons
+as at revision 26, `546e00b`, revision 25, `45b0088`, revision 24, `f3209ea`, revision 23, `b9b2274`, revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
 `ddbb6f0`, revision 17, `cc54e79`, and `9e0d703`, revision 16). Revision 16 gave the same risk and classes
 as every revision since 4, and **one more reason than before**: `retention.mention`
 on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is
