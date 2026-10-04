@@ -27,6 +27,10 @@ export const READ_TIMEOUTS = Object.freeze({
 
 type Connectable = Pick<Pool, 'connect'>;
 
+/** Clients that already carry the stray-error listener (one per client, for its whole life). */
+const strayErrorGuarded = new WeakSet<object>();
+const ignoreStrayError = (): void => undefined;
+
 /** A server-side SQL error carries a SQLSTATE; anything else (timeout, lost connection) poisons the client. */
 function clientSideFailure(err: unknown): boolean {
   const code = (err as { code?: unknown } | null)?.code;
@@ -52,7 +56,14 @@ export async function readWithDeadline<T>(pool: Connectable, read: (pool: Connec
   const guard = (client: PoolClient): PoolClient => {
     let poisoned: Error | null = null;
     let released = false;
-    (client as unknown as { on?: (e: string, f: () => void) => void }).on?.('error', () => undefined);
+    // A stray 'error' (e.g. the socket destroyed at the deadline while no
+    // query is active) must never crash the process. Attached ONCE per client
+    // (challenger Medium on 480dd87: per checkout, a pooled client that is
+    // never retired collected one listener per request).
+    if (!strayErrorGuarded.has(client)) {
+      strayErrorGuarded.add(client);
+      (client as unknown as { on?: (e: string, f: () => void) => void }).on?.('error', ignoreStrayError);
+    }
     const finish = (err: Error | null) => {
       if (released) return;
       released = true;
