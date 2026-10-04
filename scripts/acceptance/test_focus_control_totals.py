@@ -164,7 +164,7 @@ class MainTests(unittest.TestCase):
             code, out, err = self.run_main(['--expect-sha256', '0' * 64, p])
             self.assertEqual(code, 2)
             self.assertEqual(out, '')
-            self.assertIn('sha256', err.lower())
+            self.assertIn('SHA-256 mismatch', err)
 
     def test_bad_input_exits_1_without_output(self):
         with tempfile.TemporaryDirectory() as d:
