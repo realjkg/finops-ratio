@@ -15,7 +15,13 @@
 // (no raw-text prefilter: the AST decides, Copilot 4176494775):
 //   1. A call that provably runs inside BEGIN … ROLLBACK is fine, whatever its
 //      SQL. "Provably" is strict (Copilot 4176494757); anything else is not:
-//        - the receiver is a client identifier, never a pool (autocommit);
+//        - the receiver is a transaction-capable CLIENT (challenger Low on
+//          480dd87): a `const` initialised with `await <x>.connect()`,
+//          `new Client(…)` with Client imported from 'pg', or `await f(…)`
+//          where f is a function of this file that only returns such a
+//          client; or the client parameter of a verified helper's callback
+//          that is never reassigned. Anything else (a pool, `db.admin`, a
+//          `let`, an alias, a plain parameter) counts as autocommit;
 //        - BEGIN on the SAME receiver is an unconditional statement (a direct
 //          statement of an enclosing block) strictly BEFORE the call, in the
 //          same function (a nested function never counts);
@@ -33,8 +39,12 @@
 //   2. Any other call: its SQL is rebuilt from the AST (string literals,
 //      templates, `+` concatenation, `const` bindings and `for…of` over array
 //      literals); dynamic VALUES are placeholders. It is a finding when:
-//        - it contains a cluster-wide role change:
+//        - it contains a cluster-wide role change (SQL comments stripped
+//          first, in two readings: outside quoted text, and everywhere):
 //            - GRANT <role> TO …;
+//            - CREATE ROLE | USER | GROUP … ROLE | ADMIN | USER <existing>
+//              (adds existing roles as members; IN ROLE / IN GROUP is atomic
+//              for the new role and accepted);
 //            - REVOKE <role> FROM …;
 //            - GRANT/REVOKE … ON DATABASE | TABLESPACE | PARAMETER (shared
 //              catalogs);
@@ -44,11 +54,30 @@
 //          CREATE ROLE … IN ROLE of createLogin are database-local or atomic;
 //        - or it cannot be read: a bare variable, a call, an object, or a
 //          dynamic part in STATEMENT position (fail closed).
-//   3. A finding may only stay if it is on the reviewed ALLOWLIST below (file,
+//   3. Any use of `query` that is not a direct `<x>.query(…)` call
+//      (.call / .apply / .bind, an alias, destructuring, a computed
+//      ['query']) is a finding: the guard cannot see what it runs.
+//   4. A finding may only stay if it is on the reviewed ALLOWLIST below (file,
 //      SHA-256 of the call's text, reason); an allowlist entry that no longer
 //      matches a finding fails too (drift).
 // Test titles and SQL handed to a helper (e.g. a migration text for the
 // runner, which runs it in its own transaction) are not `.query(...)` calls.
+//
+// Remaining limits (static analysis of test code, not a sandbox):
+//   - only *.db.test.ts files are scanned; shared test helpers (e.g.
+//     src/ingest/testing/db.ts: createLogin's atomic CREATE ROLE … IN ROLE and
+//     DROP ROLE) are not;
+//   - only `query` is a SQL sink: another method that runs SQL (a Cursor, a
+//     driver other than pg) is not seen;
+//   - SQL that comes from outside the file (imports, files read at run time,
+//     production code behind a wrapper) is unreadable: it is a finding unless
+//     it runs in a proven BEGIN … ROLLBACK, or is on the reviewed allowlist;
+//   - transaction control is recognised only as literal BEGIN / ROLLBACK /
+//     COMMIT … strings on the same receiver text; a client passed into a
+//     function the file does not declare is not followed (fail closed).
+// Slice 1's runtime backstop (src/ingest/testing/dangerousLoginBackstop.ts)
+// catches a dangerous login left behind, not a membership change on an
+// existing login: for those, this static guard is the control.
 import { describe, expect, it } from 'vitest';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -102,10 +131,80 @@ function walk(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
+/**
+ * SQL comments removed (challenger Low on 480dd87, (c)). Two readings, both
+ * matched: comments outside quoted text only (a `--` inside '…' is text), and
+ * comments everywhere (a comment inside an EXECUTE '…' string is a comment
+ * when that string runs). Nested block comments are handled.
+ */
+function withoutComments(sql: string, respectQuotes: boolean): string {
+  let out = '';
+  let quote: string | null = null;
+  for (let i = 0; i < sql.length; ) {
+    const ch = sql[i];
+    const next = sql[i + 1];
+    if (quote) {
+      out += ch;
+      if (ch === quote) {
+        if (next === quote) {
+          out += next;
+          i += 2;
+          continue;
+        }
+        quote = null;
+      }
+      i += 1;
+      continue;
+    }
+    if (respectQuotes && (ch === "'" || ch === '"')) {
+      quote = ch;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === '-' && next === '-') {
+      while (i < sql.length && sql[i] !== '\n') i += 1;
+      out += ' ';
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      let depth = 1;
+      i += 2;
+      while (i < sql.length && depth > 0) {
+        if (sql[i] === '/' && sql[i + 1] === '*') {
+          depth += 1;
+          i += 2;
+        } else if (sql[i] === '*' && sql[i + 1] === '/') {
+          depth -= 1;
+          i += 2;
+        } else i += 1;
+      }
+      out += ' ';
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 /** Cluster-wide role changes in one SQL-ish text (dynamic parts are HOLE). */
 export function clusterRoleChanges(raw: string): string[] {
+  const found = new Set<string>();
+  for (const variant of [withoutComments(raw, true), withoutComments(raw, false)]) for (const c of roleChangesIn(variant)) found.add(c);
+  return [...found];
+}
+
+function roleChangesIn(raw: string): string[] {
   const text = raw.toUpperCase();
   const out: string[] = [];
+  // CREATE ROLE … ROLE / ADMIN / USER <existing> makes EXISTING roles members of
+  // the new role (challenger Low on 480dd87, (b)); IN ROLE / IN GROUP only makes
+  // the new role a member: atomic for a new role, accepted.
+  for (const m of text.matchAll(/\bCREATE\s+(?:ROLE|USER|GROUP)\s+(\S+)([^;]*)/g)) {
+    const rest = m[2].replace(/\bIN\s+(?:ROLE|GROUP)\s+[^\s,;]+(?:\s*,\s*[^\s,;]+)*/g, ' ');
+    if (/\b(?:ROLE|ADMIN|USER)\s+\S/.test(rest)) out.push('CREATE ROLE … ROLE/ADMIN/USER (adds existing roles as members)');
+  }
   const SHARED = /\bON\s+(?:DATABASE|TABLESPACE|PARAMETER)\b/;
   for (const m of text.matchAll(/\bGRANT\s+([^;]*?)\s+TO\s/g)) {
     if (!/\bON\b/.test(m[1])) out.push('GRANT <role> TO (membership)');
@@ -196,9 +295,78 @@ function hasEarlyExit(n: ts.Node): boolean {
   return found;
 }
 
-/** Is `call` (receiver `recv`) provably inside BEGIN … ROLLBACK on `recv`, within `fn` itself? */
-function rolledBackWithin(call: ts.Node, recv: string, fn: Fn | undefined): boolean {
+// --- which receivers are transaction-capable clients (challenger Low on 480dd87, (a), (e))
+
+const declOf = (id: ts.Identifier, r: Resolver): ts.Declaration | undefined => {
+  const sym = r.checker.getSymbolAtLocation(id);
+  return sym?.valueDeclaration ?? sym?.declarations?.[0];
+};
+
+/** `Client` named-imported from 'pg' (a dedicated connection). */
+function pgClientClass(id: ts.Identifier, r: Resolver): boolean {
+  const d = declOf(id, r);
+  if (!d || !ts.isImportSpecifier(d)) return false;
+  const mod = d.parent.parent.parent.moduleSpecifier;
+  return (d.propertyName ?? d.name).text === 'Client' && ts.isStringLiteral(mod) && mod.text === 'pg';
+}
+
+/** A function of this file whose every `return` (it has at least one) is a provable client. */
+function clientFactory(id: ts.Identifier, r: Resolver, depth: number): boolean {
+  const d = declOf(id, r);
+  const fn = d && ts.isFunctionDeclaration(d) ? d : d && ts.isVariableDeclaration(d) && d.initializer && isFn(d.initializer) ? d.initializer : undefined;
   if (!fn || !fn.body || !ts.isBlock(fn.body)) return false;
+  const returns: ts.ReturnStatement[] = [];
+  const visit = (n: ts.Node) => {
+    if (n !== fn && isFn(n)) return;
+    if (ts.isReturnStatement(n)) returns.push(n);
+    ts.forEachChild(n, visit);
+  };
+  visit(fn.body);
+  return returns.length > 0 && returns.every((ret) => ret.expression !== undefined && ts.isIdentifier(ret.expression) && provableClient(ret.expression, r, depth + 1));
+}
+
+/**
+ * A receiver is a transaction-capable client only when it is a `const`
+ * initialised with `await <x>.connect()`, `new Client(…)` (Client from 'pg'),
+ * or `await f(…)` where f is a function of this file returning such a client.
+ * Anything else (a pool under another name, `db.admin`, a `let`, a parameter
+ * outside a verified helper, an import) counts as autocommit.
+ */
+function provableClient(e: ts.Expression, r: Resolver, depth = 0): boolean {
+  if (depth > 4 || !ts.isIdentifier(e)) return false;
+  const d = declOf(e, r);
+  if (!d || !ts.isVariableDeclaration(d) || !d.initializer) return false;
+  const list = d.parent;
+  if (!ts.isVariableDeclarationList(list) || !(list.flags & ts.NodeFlags.Const) || ts.isForOfStatement(list.parent)) return false;
+  const init = d.initializer;
+  if (ts.isNewExpression(init) && ts.isIdentifier(init.expression)) return pgClientClass(init.expression, r);
+  if (!ts.isAwaitExpression(init) || !ts.isCallExpression(init.expression)) return false;
+  const call = init.expression;
+  if (ts.isPropertyAccessExpression(call.expression) && call.expression.name.text === 'connect' && call.arguments.length === 0) return true;
+  if (ts.isIdentifier(call.expression)) return clientFactory(call.expression, r, depth);
+  return false;
+}
+
+/** An assignment to `name` anywhere under `scope`. */
+function assignedIn(scope: ts.Node, name: string): boolean {
+  let found = false;
+  const visit = (n: ts.Node) => {
+    if (found) return;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment && ts.isIdentifier(n.left) && n.left.text === name) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(scope);
+  return found;
+}
+
+/** Is `call` (receiver `recvExpr`) provably inside BEGIN … ROLLBACK on that receiver, within `fn` itself? */
+function rolledBackWithin(call: ts.Node, recvExpr: ts.Expression, fn: Fn | undefined, r: Resolver): boolean {
+  if (!fn || !fn.body || !ts.isBlock(fn.body)) return false;
+  if (!provableClient(recvExpr, r)) return false;
+  const recv = recvExpr.getText();
   // The enclosing blocks of the call inside fn, innermost first, with the call's statement in each.
   const chain: Array<{ block: ts.Block; stmt: ts.Statement }> = [];
   for (let n: ts.Node = call; n !== fn; n = n.parent) {
@@ -239,7 +407,7 @@ function rolledBackWithin(call: ts.Node, recv: string, fn: Fn | undefined): bool
 }
 
 /** Helpers of the file that call a callback parameter with a client inside a verified BEGIN … ROLLBACK: name → callback argument indexes. */
-function verifiedHelpers(sf: ts.SourceFile): Map<string, Set<number>> {
+function verifiedHelpers(sf: ts.SourceFile, r: Resolver): Map<string, Set<number>> {
   const out = new Map<string, Set<number>>();
   const check = (name: string, fn: Fn) => {
     for (const p of fn.parameters) {
@@ -256,7 +424,7 @@ function verifiedHelpers(sf: ts.SourceFile): Map<string, Set<number>> {
       for (let k = 0; k < width; k += 1) {
         const ok = calls.every((c) => {
           const a = c.arguments[k];
-          return a !== undefined && ts.isIdentifier(a) && rolledBackWithin(c, a.text, fn);
+          return a !== undefined && ts.isIdentifier(a) && rolledBackWithin(c, a, fn, r);
         });
         if (ok) {
           if (!out.has(name)) out.set(name, new Set());
@@ -274,10 +442,16 @@ function verifiedHelpers(sf: ts.SourceFile): Map<string, Set<number>> {
   return out;
 }
 
-/** The call is on a callback's client parameter, inside a verified helper, and the callback never ends the transaction itself. */
-function viaHelper(call: ts.Node, recv: string, helpers: Map<string, Set<number>>): boolean {
+/**
+ * The call is on a callback's client parameter, inside a verified helper; the
+ * callback never ends the transaction itself and never reassigns that
+ * parameter (challenger Low on 480dd87, (e)).
+ */
+function viaHelper(call: ts.Node, recvExpr: ts.Expression, helpers: Map<string, Set<number>>): boolean {
   const f = fnOf(call);
-  if (!f || !f.body) return false;
+  if (!f || !f.body || !ts.isIdentifier(recvExpr)) return false;
+  const recv = recvExpr.text;
+  if (assignedIn(f.body, recv)) return false;
   const k = f.parameters.findIndex((p) => ts.isIdentifier(p.name) && p.name.text === recv);
   if (k < 0) return false;
   const outer = f.parent;
@@ -299,6 +473,7 @@ function viaHelper(call: ts.Node, recv: string, helpers: Map<string, Set<number>
  * Anything else (let, imports, destructuring, properties) resolves to nothing.
  */
 interface Resolver {
+  checker: ts.TypeChecker;
   values(id: ts.Identifier): ts.Expression[] | null;
 }
 
@@ -316,6 +491,7 @@ function resolverFor(file: string, sf: ts.SourceFile): Resolver {
   };
   const checker = ts.createProgram({ rootNames: [file], options: { noResolve: true, noLib: true, types: [] }, host }).getTypeChecker();
   return {
+    checker,
     values(id) {
       const sym = checker.getSymbolAtLocation(id);
       const decl = sym?.valueDeclaration ?? sym?.declarations?.[0];
@@ -410,14 +586,32 @@ const callHash = (n: ts.Node) => crypto.createHash('sha256').update(n.getText().
 /** Every `.query(...)` call of a file, judged by the rules above: the findings (before the allowlist). */
 export function queryFindings(file: string, code: string): QueryFinding[] {
   const sf = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true);
-  const helpers = verifiedHelpers(sf);
   const resolver = resolverFor(file, sf);
+  const helpers = verifiedHelpers(sf, resolver);
   const out: QueryFinding[] = [];
+  /** An indirect use is identified by its whole enclosing statement (the bare `x.query` text is not distinctive). */
+  const finding = (n: ts.Node, problem: string) => {
+    let st: ts.Node = n;
+    while (st.parent && !ts.isSourceFile(st.parent) && !ts.isBlock(st.parent)) st = st.parent;
+    out.push({ file, line: sf.getLineAndCharacterOfPosition(n.getStart()).line + 1, sha256: callHash(st), problems: [problem] });
+  };
   const visit = (n: ts.Node) => {
+    // (d) Any use of `query` other than a direct `<x>.query(…)` call: .call /
+    // .apply / .bind, an alias, destructuring, a computed member.
+    if (ts.isPropertyAccessExpression(n) && n.name.text === 'query' && !(ts.isCallExpression(n.parent) && n.parent.expression === n)) {
+      finding(n, 'indirect use of query (not a direct .query(...) call)');
+    }
+    if (ts.isElementAccessExpression(n) && (ts.isStringLiteral(n.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(n.argumentExpression)) && n.argumentExpression.text === 'query') {
+      finding(n, "computed ['query'] member");
+    }
+    if (ts.isBindingElement(n) && ts.isObjectBindingPattern(n.parent)) {
+      const key = n.propertyName ?? n.name;
+      if ((ts.isIdentifier(key) || ts.isStringLiteral(key)) && key.text === 'query') finding(n, 'query destructured from an object');
+    }
     if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'query') {
-      const recv = n.expression.expression.getText();
-      const pool = /(^|\.)\w*pool$/i.test(recv);
-      const safe = !pool && (rolledBackWithin(n, recv, fnOf(n)) || viaHelper(n, recv, helpers));
+      const recvExpr = n.expression.expression;
+      const pool = /(^|\.)\w*pool$/i.test(recvExpr.getText());
+      const safe = !pool && (rolledBackWithin(n, recvExpr, fnOf(n), resolver) || viaHelper(n, recvExpr, helpers));
       if (!safe) {
         const texts = n.arguments.length ? sqlTexts(n.arguments[0], resolver) : [UNREADABLE];
         const problems = new Set<string>();
@@ -444,12 +638,13 @@ export function parallelRoleDdlViolations(file: string, code: string): string[] 
 /** How many `.query(...)` calls in a file the rules accept as rolled back (for the non-vacuity check). */
 function rolledBackQueries(file: string, code: string): number {
   const sf = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true);
-  const helpers = verifiedHelpers(sf);
+  const resolver = resolverFor(file, sf);
+  const helpers = verifiedHelpers(sf, resolver);
   let n = 0;
   const visit = (m: ts.Node) => {
     if (ts.isCallExpression(m) && ts.isPropertyAccessExpression(m.expression) && m.expression.name.text === 'query') {
-      const recv = m.expression.expression.getText();
-      if (!/(^|\.)\w*pool$/i.test(recv) && (rolledBackWithin(m, recv, fnOf(m)) || viaHelper(m, recv, helpers))) n += 1;
+      const recvExpr = m.expression.expression;
+      if (!/(^|\.)\w*pool$/i.test(recvExpr.getText()) && (rolledBackWithin(m, recvExpr, fnOf(m), resolver) || viaHelper(m, recvExpr, helpers))) n += 1;
     }
     ts.forEachChild(m, visit);
   };
@@ -520,14 +715,14 @@ describe('cluster-wide role changes only in serial DB test files (static guard)'
     expect(v('await pool.query("GRANT CREATE ON DATABASE x TO " + r);')).toHaveLength(1);
     expect(v('await adminPool.query(`REVOKE SET ON PARAMETER session_replication_role FROM ${r}`);')).toHaveLength(1);
     // Flagged: a client with no transaction in sight.
-    expect(v('async function f(c) { await c.query(`GRANT ratio_worker TO ${x}`); }')).toHaveLength(1);
-    expect(v("async function f(c) { await c.query('BEGIN'); await c.query(`GRANT ratio_worker TO ${x}`); await c.query('COMMIT'); }")).toHaveLength(1);
+    expect(v('async function f() { const c = await db.pool.connect(); await c.query(`GRANT ratio_worker TO ${x}`); }')).toHaveLength(1);
+    expect(v("async function f() { const c = await db.pool.connect(); await c.query('BEGIN'); await c.query(`GRANT ratio_worker TO ${x}`); await c.query('COMMIT'); }")).toHaveLength(1);
     // Flagged: a pool call inside a function that rolls back ITS client (the pool statement still autocommits).
-    expect(v("async function f(c) { await c.query('BEGIN'); try { await db.pool.query(`GRANT ratio_worker TO ${x}`); } finally { await c.query('ROLLBACK'); } }")).toHaveLength(1);
+    expect(v("async function f() { const c = await db.pool.connect(); await c.query('BEGIN'); try { await db.pool.query(`GRANT ratio_worker TO ${x}`); } finally { await c.query('ROLLBACK'); } }")).toHaveLength(1);
     // Not flagged: inside BEGIN … ROLLBACK, directly or through a helper of the file.
-    expect(v("async function f(c) { await c.query('BEGIN'); try { await c.query(`GRANT ratio_worker TO ${x}`); } finally { await c.query('ROLLBACK'); } }")).toEqual([]);
+    expect(v("async function f() { const c = await db.pool.connect(); await c.query('BEGIN'); try { await c.query(`GRANT ratio_worker TO ${x}`); } finally { await c.query('ROLLBACK'); } }")).toEqual([]);
     expect(
-      v("async function inTxn(fn) { const c = x(); await c.query('BEGIN'); try { await fn(c); } finally { await c.query('ROLLBACK'); } }\nit('t', async () => { await inTxn(async (c) => { await c.query(`GRANT ${a} TO ${b}`); }); });"),
+      v("async function inTxn(fn) { const c = await db.pool.connect(); await c.query('BEGIN'); try { await fn(c); } finally { await c.query('ROLLBACK'); } }\nit('t', async () => { await inTxn(async (c) => { await c.query(`GRANT ${a} TO ${b}`); }); });"),
     ).toEqual([]);
     // Not flagged: database-local or scoped changes.
     expect(v('await db.pool.query(`GRANT SELECT ON ratio.cost_facts TO ratio_reader`);')).toEqual([]);
@@ -549,44 +744,44 @@ describe('guard soundness (Copilot 4176494757, 4176494775)', () => {
   const GRANT = 'await c.query(`GRANT ratio_worker TO ${x}`);';
 
   it('bypass 1: BEGIN and ROLLBACK on a DIFFERENT client than the GRANT ⇒ flagged', () => {
-    expect(v("async function f(c, d) { await d.query('BEGIN'); try { " + GRANT + " } finally { await d.query('ROLLBACK'); } }")).not.toEqual([]);
+    expect(v("async function f() { const c = await db.pool.connect(); const d = await db.pool.connect(); await d.query('BEGIN'); try { " + GRANT + " } finally { await d.query('ROLLBACK'); } }")).not.toEqual([]);
   });
 
   it('bypass 2: ROLLBACK BEFORE the GRANT ⇒ flagged', () => {
-    expect(v("async function f(c) { await c.query('BEGIN'); await c.query('ROLLBACK'); " + GRANT + ' }')).not.toEqual([]);
-    expect(v("async function f(c) { await c.query('BEGIN'); try { await c.query('ROLLBACK'); " + GRANT + " } finally { await c.query('ROLLBACK'); } }")).not.toEqual([]);
+    expect(v("async function f() { const c = await db.pool.connect(); await c.query('BEGIN'); await c.query('ROLLBACK'); " + GRANT + ' }')).not.toEqual([]);
+    expect(v("async function f() { const c = await db.pool.connect(); await c.query('BEGIN'); try { await c.query('ROLLBACK'); " + GRANT + " } finally { await c.query('ROLLBACK'); } }")).not.toEqual([]);
   });
 
   it('bypass 3: the GRANT in an unused NESTED function of a function that BEGINs and ROLLBACKs ⇒ flagged', () => {
-    expect(v("async function f(c) { await c.query('BEGIN'); const g = async () => { " + GRANT + " }; await c.query('ROLLBACK'); return g; }")).not.toEqual([]);
+    expect(v("async function f() { const c = await db.pool.connect(); await c.query('BEGIN'); const g = async () => { " + GRANT + " }; await c.query('ROLLBACK'); return g; }")).not.toEqual([]);
   });
 
   it('bypass 4: a CONDITIONAL BEGIN or a CONDITIONAL ROLLBACK ⇒ flagged', () => {
-    expect(v("async function f(c, t) { if (t) await c.query('BEGIN'); try { " + GRANT + " } finally { await c.query('ROLLBACK'); } }")).not.toEqual([]);
-    expect(v("async function f(c, t) { await c.query('BEGIN'); try { " + GRANT + " } finally { if (t) await c.query('ROLLBACK'); } }")).not.toEqual([]);
+    expect(v("async function f(t) { const c = await db.pool.connect(); if (t) await c.query('BEGIN'); try { " + GRANT + " } finally { await c.query('ROLLBACK'); } }")).not.toEqual([]);
+    expect(v("async function f(t) { const c = await db.pool.connect(); await c.query('BEGIN'); try { " + GRANT + " } finally { if (t) await c.query('ROLLBACK'); } }")).not.toEqual([]);
   });
 
   it('straight-line: an early exit, a COMMIT or no ROLLBACK after the GRANT ⇒ flagged; plain BEGIN; GRANT; ROLLBACK passes', () => {
-    expect(v("async function f(c, t) { await c.query('BEGIN'); " + GRANT + " if (t) return; await c.query('ROLLBACK'); }")).not.toEqual([]);
-    expect(v("async function f(c) { await c.query('BEGIN'); " + GRANT + " await c.query('COMMIT'); await c.query('ROLLBACK'); }")).not.toEqual([]);
-    expect(v("async function f(c) { await c.query('BEGIN'); " + GRANT + ' }')).not.toEqual([]);
-    expect(v("async function f(c) { await c.query('BEGIN'); " + GRANT + " await c.query('ROLLBACK'); }")).toEqual([]);
+    expect(v("async function f(t) { const c = await db.pool.connect(); await c.query('BEGIN'); " + GRANT + " if (t) return; await c.query('ROLLBACK'); }")).not.toEqual([]);
+    expect(v("async function f() { const c = await db.pool.connect(); await c.query('BEGIN'); " + GRANT + " await c.query('COMMIT'); await c.query('ROLLBACK'); }")).not.toEqual([]);
+    expect(v("async function f() { const c = await db.pool.connect(); await c.query('BEGIN'); " + GRANT + ' }')).not.toEqual([]);
+    expect(v("async function f() { const c = await db.pool.connect(); await c.query('BEGIN'); " + GRANT + " await c.query('ROLLBACK'); }")).toEqual([]);
     // BEGIN in an outer try, the finally rolls back (Slice 0 roles.db.test.ts shape).
-    expect(v("async function f(c, p) { try { await c.query('BEGIN'); if (p) " + GRANT + " } finally { await c.query('ROLLBACK').catch(() => undefined); } }")).toEqual([]);
+    expect(v("async function f(p) { const c = await db.pool.connect(); try { await c.query('BEGIN'); if (p) " + GRANT + " } finally { await c.query('ROLLBACK').catch(() => undefined); } }")).toEqual([]);
   });
 
   it('helpers: the helper itself must BEGIN, call the callback with THAT client inside the transaction, and ROLLBACK unconditionally', () => {
     const use = "\nit('t', async () => { await h(async (k) => { await k.query(`GRANT ratio_worker TO ${x}`); }); });";
-    expect(v("async function h(fn) { const c = a(); await c.query('BEGIN'); try { await fn(c); } finally { await c.query('ROLLBACK'); } }" + use)).toEqual([]);
+    expect(v("async function h(fn) { const c = await db.pool.connect(); await c.query('BEGIN'); try { await fn(c); } finally { await c.query('ROLLBACK'); } }" + use)).toEqual([]);
     // A different client is passed to the callback.
-    expect(v("async function h(fn) { const c = a(); const d = b(); await c.query('BEGIN'); try { await fn(d); } finally { await c.query('ROLLBACK'); } }" + use)).not.toEqual([]);
+    expect(v("async function h(fn) { const c = await db.pool.connect(); const d = await db.pool.connect(); await c.query('BEGIN'); try { await fn(d); } finally { await c.query('ROLLBACK'); } }" + use)).not.toEqual([]);
     // The callback runs after the ROLLBACK.
-    expect(v("async function h(fn) { const c = a(); await c.query('BEGIN'); await c.query('ROLLBACK'); await fn(c); }" + use)).not.toEqual([]);
+    expect(v("async function h(fn) { const c = await db.pool.connect(); await c.query('BEGIN'); await c.query('ROLLBACK'); await fn(c); }" + use)).not.toEqual([]);
     // The ROLLBACK is conditional.
-    expect(v("async function h(fn, t) { const c = a(); await c.query('BEGIN'); try { await fn(c); } finally { if (t) await c.query('ROLLBACK'); } }" + use)).not.toEqual([]);
+    expect(v("async function h(fn, t) { const c = await db.pool.connect(); await c.query('BEGIN'); try { await fn(c); } finally { if (t) await c.query('ROLLBACK'); } }" + use)).not.toEqual([]);
     // The callback ends the transaction itself before the GRANT.
     expect(
-      v("async function h(fn) { const c = a(); await c.query('BEGIN'); try { await fn(c); } finally { await c.query('ROLLBACK'); } }\nit('t', async () => { await h(async (k) => { await k.query('COMMIT'); await k.query(`GRANT ratio_worker TO ${x}`); }); });"),
+      v("async function h(fn) { const c = await db.pool.connect(); await c.query('BEGIN'); try { await fn(c); } finally { await c.query('ROLLBACK'); } }\nit('t', async () => { await h(async (k) => { await k.query('COMMIT'); await k.query(`GRANT ratio_worker TO ${x}`); }); });"),
     ).not.toEqual([]);
   });
 
@@ -610,7 +805,7 @@ describe('guard soundness (Copilot 4176494757, 4176494775)', () => {
     expect(v("for (const s of ['SELECT 1', 'REVOKE ratio_worker FROM x']) await db.pool.query(s);")).not.toEqual([]);
     expect(v('await db.pool.query(`SELECT * FROM t WHERE id = ${id}`, []);')).toEqual([]);
     // Inside a verified rolled-back transaction, unresolvable SQL is fine.
-    expect(v("async function f(c, sql) { await c.query('BEGIN'); try { await c.query(sql); } finally { await c.query('ROLLBACK'); } }")).toEqual([]);
+    expect(v("async function f(sql) { const c = await db.pool.connect(); await c.query('BEGIN'); try { await c.query(sql); } finally { await c.query('ROLLBACK'); } }")).toEqual([]);
   });
 });
 
