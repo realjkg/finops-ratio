@@ -40,6 +40,19 @@ describe('replay-fixtures is test-only (L3 decision)', () => {
     }
   });
 
+  it('M-A: RATIO_ENV=test WITHOUT the opt-in fails fast before any I/O: exit 2, the reason names RATIO_ALLOW_SYNTHETIC_PROVIDERS=1', async () => {
+    const OPT_IN_REASON =
+      'replay-fixtures needs RATIO_ALLOW_SYNTHETIC_PROVIDERS=1: it ingests the SYNTHETIC fixture (provider SyntheticCloud), which is excluded without the opt-in, so every scenario would quarantine';
+    for (const optIn of [undefined, '', '0']) {
+      const started = Date.now();
+      const r = await run(['replay-fixtures', '--json'], { ...env, RATIO_ENV: 'test', RATIO_ALLOW_SYNTHETIC_PROVIDERS: optIn });
+      expect(r.code, String(optIn)).toBe(2);
+      expect(JSON.parse(r.out[0]).results.error, String(optIn)).toEqual({ code: 'REPLAY_FIXTURES_NOT_ALLOWED', message: OPT_IN_REASON });
+      expect(r.all).not.toMatch(/ECONNREFUSED/);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    }
+  });
+
   it('RATIO_ENV=test passes the gate (it then fails only on the unreachable database, i.e. after the gate)', async () => {
     const r = await run(['replay-fixtures', '--json'], { ...env, RATIO_ENV: 'test', RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1' });
     expect(r.all).not.toMatch(/REPLAY_FIXTURES_NOT_ALLOWED/);
