@@ -40,7 +40,8 @@ is a follow-up PR on `design/slice-3-5-followups`, branched from
 | 25 | `45b0088` | Copilot's review 5408081799 of f3209ea (1 High, 2 Medium, 2 Low) and the challenger's Low and nit on revision 24 (APPROVED, 0 High, 0 Medium), §3z: an `occurrence` in the anomaly dedup key for re-introduced restatements; bounded backtest retention with pins; the `bottom_up` summary for non-leaf scopes; `forecast_scope_state` arrays checked; stale scope counts; event-target foreign keys. |
 | 26 | `546e00b` | Copilot's review 5408165158 of 45b0088 (1 Medium, 1 Low) and the challenger's three Low items on revision 25 (APPROVED, 0 High, 0 Medium), §3aa: bounded shares (cold-start, committed, untagged), defined APE and interval width; the retention threat-model row and rollback text brought up to date; `backtest --pin` in the success transaction; `historyDays` from leaves' first usage day; "fresh replay". |
 | 27 | `28f8970` (PR #70, merged as `f35c383`) | Copilot's review 5408199807 of 546e00b (2 High, 1 Medium), after the challenger APPROVED revision 26 without findings, §3ab: retention never removes anything a running run uses (shared/exclusive retention lock); every multi-transaction run captures its input runs once and reads them by id; billed month-end `B` removed from the contract and recorded as a gap; a share-test wording fix. |
-| 28 (follow-up to merged #70) | this revision | Copilot's review 5408232490 of 28f8970 (1 High, 1 Low) and the challenger's four Low items on revision 27 (APPROVED, 0 High, 0 Medium), §3ac: the sizing scripts' commitment draw made once per account and the scripts re-run (37,033 leaves; false-positive total 0.102, 0.132 conservative; peak 5.242 GB unchanged); the last billed-`B` line removed; the retention functions' isolation, lock order and transaction placement, and the crashed-run growth, stated; the input high-water mark checked on INSERT. |
+| 28 (follow-up to merged #70) | `0926b19` (PR #71) | Copilot's review 5408232490 of 28f8970 (1 High, 1 Low) and the challenger's four Low items on revision 27 (APPROVED, 0 High, 0 Medium), §3ac: the sizing scripts' commitment draw made once per account and the scripts re-run (37,033 leaves; false-positive total 0.102, 0.132 conservative; peak 5.242 GB unchanged); the last billed-`B` line removed; the retention functions' isolation, lock order and transaction placement, and the crashed-run growth, stated; the input high-water mark checked on INSERT. |
+| 29 (follow-up to merged #70) | this revision | Copilot's review 5408332571 of 0926b19 (3 High, 1 Medium, all on revision 28's crashed-run bound) and the challenger's one Low on revision 28 (APPROVED, 0 High, 0 Medium), §3ad: every start runs a retention cleanup pass after its acquisition commits, so crashed retries cannot accumulate; the bound restated (one left-over run per kind, ≈ 0.1 GB of state plus the superseded batches its mark pinned); `assertLease` on reading transactions too; the 4-3 test covers consecutive crashed replacements. |
 
 ## 2. Governance wording: reverted
 
@@ -628,7 +629,7 @@ because of the same stale `B` line; AA2 closes it.
 | **r4179306710** (Medium; revision 27's Z3, thread still open) | Fixed in revision 27 (merged with #70) except the line above. After AA2, nothing promises a billed forecast, so the thread can be resolved | App. D.3 |
 | **AA3** challenger L1: retention isolation | **Fixed.** Both retention functions are `LANGUAGE plpgsql VOLATILE`. The first statement takes the exclusive retention lock. The second raises unless `transaction_isolation` is `read committed`, so every later statement's snapshot is taken after the lock is granted. New 4-3 test for the ordering where the start holds the shared lock first: F1 and D's previous run's state survive the retention pass, and a REPEATABLE READ call is refused. New mutants: retention under REPEATABLE READ, the lock taken after the first read | App. D.1; DESIGN §6.1, §7 (4-3) |
 | **AA4** challenger L2: deadlock | **Fixed.** A run calls retention in its own transaction after its success commit, holding no run-row or pointer lock. 4-3 test: a start marking a stale run `abandoned` at the same time does not deadlock. New mutant: retention inside the success transaction | DESIGN §6.1, §7 (4-2, 4-3); App. D.1 |
-| **AA5** challenger L3: crashed runs | **Bounded growth stated; an expired lease is not treated as dead.** A write transaction checks the lease only at its start (`assertLease … FOR UPDATE`), so one that began before the lease expired can still be reading the run's inputs. Proving that none is in flight would need the run-row locks that AA4 keeps out of retention, and that would reopen Z1's race. The growth is bounded: at most one crashed run per kind (the next start of that kind marks it `abandoned`), ≈ 0.1 GB per run at `fleet15k`'s sizes, released at that kind's next start. It cannot affect `fleet15k`'s peak, since each run is a fresh stack. 4-3 test: a crashed detect run's inputs are kept until the next detect start, then released | App. D.1; DESIGN §6.1, §7 (4-3) |
+| **AA5** challenger L3: crashed runs | **Superseded in revision 29 (§3ad, Copilot r4179428574): the bound below did not hold, since a start only marked the stale run `abandoned` and retention ran only after a success; every start now runs a cleanup pass.** Revision 28's text: **Bounded growth stated; an expired lease is not treated as dead.** A write transaction checks the lease only at its start (`assertLease … FOR UPDATE`), so one that began before the lease expired can still be reading the run's inputs. Proving that none is in flight would need the run-row locks that AA4 keeps out of retention, and that would reopen Z1's race. The growth is bounded: at most one crashed run per kind (the next start of that kind marks it `abandoned`), ≈ 0.1 GB per run at `fleet15k`'s sizes, released at that kind's next start. It cannot affect `fleet15k`'s peak, since each run is a fresh stack. 4-3 test: a crashed detect run's inputs are kept until the next detect start, then released | App. D.1; DESIGN §6.1, §7 (4-3) |
 | **AA6** challenger L4b: input mark | **Fixed.** `tg_analytics_run_success` also checks on INSERT that `input_batch_seq_hwm` equals the input rollup run's recorded `batch_seq_hwm`, the rule the pointer guard enforces. New 5-3 test: a mismatched mark is refused. New mutant: the trigger without the equality check | App. D.1; DESIGN §7 (5-3) |
 | Scripts | 13 embedded. 7 fixed, re-run and re-hashed: `sizing.py`, `budget.py`, `budget2.py`, `budget5.py`, `reactivation.py`, `drift_ttd.py` and `rollup12.py`. Each was re-run from its Appendix B copy and gave byte-identical output; `budget5.py` and `reactivation.py` were also run twice. `budget3.py` and `budget4.py` are unchanged (kept as run); `budget3.py`'s Appendix B copy reproduces its as-run output. `csvsize.py` and the three SQL files have no account model and were not re-run | App. B |
 
@@ -681,6 +682,28 @@ because of the same stale `B` line; AA2 closes it.
 | `rollup12.py` | leaf `forecast_totals` rows; `cost_daily` rows | 222,312; 4,520,344 | 222,198; 4,518,026 |
 | `rollup12.py` | delta per run; natural-1 run; **peak** (natural-3) | +0.091 GB; 5.052 GB; **5.242 GB** (5.282) | unchanged |
 
+## 3ad. Revision 29: Copilot's review 5408332571 of 0926b19 and the challenger's Low on revision 28
+
+The challenger APPROVED revision 28 (0 High, 0 Medium, 1 Low). Copilot's
+four threads are one issue: revision 28's answer to the challenger's L3
+(AA5, §3ac) claimed a bound that does not hold. A start only marked the
+stale run `abandoned`, and retention ran only after a success commit, so
+each crashed replacement left one more abandoned run's output until some
+run succeeded. Checked against 0926b19: valid. The challenger's L1
+(the bound left out superseded batches) is about the same bound and is
+answered with it.
+
+| Item | Change | Where |
+|---|---|---|
+| **r4179428541** (High) App D:471 | **Fixed by a cleanup pass at every start.** After its acquisition transaction commits and before any other work, a start runs `ratio.analytics_apply_retention()` and then `ratio.analytics_apply_forecast_retention()`, each in its own transaction under revision 28's rules (READ COMMITTED with the lock first; no run-row or pointer lock held). It calls both because a crashed run of one kind can pin another kind's rows (a detect run's input rollup run). `failed` and `abandoned` runs are removable whatever their `run_seq` unless a `running` run names them as input or previous run, which the INSERT trigger already rules out. I chose this over a retry or storage cap, because it makes the bound real instead of declaring it | App. D.1 ("Crashed runs", "Acquiring the lease", "Writing", the function row) |
+| **r4179428559** (High) DESIGN:2388 | **Restated:** per kind, at most one run that has written output is left over, the crashed run before its takeover or the abandoned run until the takeover's cleanup pass ends. A run writes nothing beyond its run row until its own pass has finished, and that pass removes every abandoned run; a start that crashes inside its pass wrote nothing, and the next pass removes both | DESIGN §6.1; App. D.1 |
+| **r4179428574** (High) EVIDENCE:631 | §3ac's AA5 row is marked as superseded by this section; its original text is kept as the record | §3ac |
+| **r4179428588** (Medium) DESIGN:2544, one crash only | **4-3 test extended:** D1, D2 and D3 each write state and crash and are taken over in turn; after every takeover's cleanup pass no abandoned run's rows remain, and the run-keyed tables never hold more than the kept runs, the running run and one crashed run's output; a start that crashes inside its own pass, and the start after it, keep the bound; the same for rollup and backtest runs. **Mutants:** no cleanup pass at start; the pass begun before the acquisition commits; abandoned runs newer than the latest success kept. 4-2 names the start's pass too | DESIGN §7 (4-2, 4-3) |
+| Takeover cannot delete the new run's inputs (checked, as asked) | **Confirmed.** The new run's row, with `input_*` and `prev_run_id`, commits in its acquisition transaction before the pass begins. The pass takes the exclusive lock first and reads in READ COMMITTED, so it sees that `running` row, and the Z1 exclusion keeps its inputs, its previous run, its own rows and the pointers' runs. 4-3 asserts the new run's forecast run and previous run survive every pass | App. D.1; DESIGN §7 (4-3) |
+| In-flight transactions of the stale run (found while checking) | Removing a stale run's inputs at takeover is safe only if nothing of that run is still reading. The takeover's `abandoned` update waits on the run row, which every transaction of the run holds `FOR UPDATE` from `assertLease`; **revision 29 extends `assertLease` to transactions that only read the run's inputs** (it named write transactions only). After the update commits, every later transaction of that run fails with `LEASE_LOST`. An expired lease alone is still not treated as dead (revision 28). 4-3 test: a takeover waits for a still-open transaction of the stale run | App. D.1 ("Acquiring the lease", "Writing"); DESIGN §6.1, §7 (4-3) |
+| **Challenger L1** on 0926b19: superseded batches | **Added to the bound.** The left-over run's size is ≈ 0.1 GB of state **plus the rollup rows of the superseded batches its captured mark pinned**: a restated period of `fleet15k`'s size is ≈ 1.1 M `cost_daily` rows × 180 B ≈ 0.2 GB, each restatement under the mark separately. The takeover's cleanup pass releases all of it. `fleet15k` has no restatements and each run is a fresh stack, so its peak is unaffected | App. D.1; DESIGN §6.1 |
+| Scripts, figures | No script changed; all 13 SHA-256s as in revision 28; no disk or budget figure changes | App. B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -728,13 +751,14 @@ Appendix B (B.4, B.5.6–B.5.14).
 
 ## 5. Governance classification
 
-**Revision 28, this follow-up PR.** `origin/main` is now `f35c383`, which
-contains PR #70, so `node scripts/governance/classify-risk.mjs --git
-origin/main...HEAD` at revision 28 (the commit that adds this paragraph)
-reads only this PR's diff. It gives:
+**Revisions 28 and 29, this follow-up PR.** `origin/main` is now
+`f35c383`, which contains PR #70, so `node scripts/governance/classify-risk.mjs --git
+origin/main...HEAD` reads only this PR's diff. At revision 28 and again at
+revision 29 (the commit that changes this line) it gives:
 - `"risk": "restricted"`, classes `retention` and `secrets`;
 - `retention.mention` on `APPENDIX_D_SCHEMA_SKETCH.md`, `DESIGN.md` and
-  this file: the added lines say how the retention functions run (AA3–AA5);
+  this file: the added lines say how the retention functions run (AA3–AA5)
+  and, in revision 29, the start's cleanup pass;
 - `secrets.password-assignment` and `retention.delete-from` on this file
   only, because this paragraph quotes the two lines that matched those
   rules in PR #70: the `POSTGRES_PASSWORD=<throwaway>` run command

@@ -156,7 +156,7 @@ sub-account or billing account therefore always resolves to the same id.
 | `cost_daily_scope` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, usage_date)**; same measures as `cost_daily` | analytics | reader via view (the run in `rollup_pointer`) |
 | `account_dim` | **(tenant_id, run_id, account_id)**; business_unit (modal tag, 28 days), account_age_days (identity columns via `cost_accounts`) | analytics | analytics; reader via view (the run in `rollup_pointer`) |
 | `rollup_batches` | **(tenant_id, batch_seq integer)**, unique (tenant_id, batch_id); source_id, billing_period, rolled_up_at, run_id, row totals (to prove rollup = published totals). **Each batch is rolled up in one transaction** (rev. 13), under `assertLease`, that writes all its rollup rows and this row together. A `rollup_batches` row therefore means a complete batch. A batch completed by a run that later fails stays correct, and becomes visible only when a later run's pointer covers it | analytics | analytics |
-| function `ratio.analytics_apply_retention()` | `SECURITY DEFINER`, owned by `ratio_owner`, `SET search_path = pg_catalog, pg_temp`, no arguments, fixed SQL; returns removed-row counts per table. Removes only: rollup rows (`cost_daily`, `cost_resource_daily`, `billing_daily`) of a batch below the visible batch of its (source, period), i.e. the highest rolled-up `batch_seq` ≤ `rollup_pointer.batch_seq_hwm` (rev. 13); run-keyed rows (`cost_daily_scope`, `billing_daily_scope`, `account_dim`) of runs other than the pointed run and the one before it. **Runs still in use are protected (rev. 27, Copilot r4179306667):** the function holds the exclusive form of the per-tenant retention lock that run starts take in shared form (D.1, "Run inputs"). It never removes rows of a `running` run, of any kind. It never removes a batch that is visible under the `input_batch_seq_hwm` of a `running` run, nor run-keyed rows of a rollup run named as a `running` run's `input_rollup_run_id`. Nothing a reader or a running run can still see is removed. Never: anomalies and their children, backtests, `rollup_batches`, `analytics_runs`. On `REVIEWED_SECURITY_DEFINER_FUNCTIONS`; EXECUTE revoked from PUBLIC, granted to `ratio_analytics` | the job, after each rollup or forecast run | — |
+| function `ratio.analytics_apply_retention()` | `SECURITY DEFINER`, owned by `ratio_owner`, `SET search_path = pg_catalog, pg_temp`, no arguments, fixed SQL; returns removed-row counts per table. Removes only (rev. 29: also every `failed` or `abandoned` run's run-keyed rows, D.1 "Crashed runs"): rollup rows (`cost_daily`, `cost_resource_daily`, `billing_daily`) of a batch below the visible batch of its (source, period), i.e. the highest rolled-up `batch_seq` ≤ `rollup_pointer.batch_seq_hwm` (rev. 13); run-keyed rows (`cost_daily_scope`, `billing_daily_scope`, `account_dim`) of runs other than the pointed run and the one before it. **Runs still in use are protected (rev. 27, Copilot r4179306667):** the function holds the exclusive form of the per-tenant retention lock that run starts take in shared form (D.1, "Run inputs"). It never removes rows of a `running` run, of any kind. It never removes a batch that is visible under the `input_batch_seq_hwm` of a `running` run, nor run-keyed rows of a rollup run named as a `running` run's `input_rollup_run_id`. Nothing a reader or a running run can still see is removed. Never: anomalies and their children, backtests, `rollup_batches`, `analytics_runs`. On `REVIEWED_SECURITY_DEFINER_FUNCTIONS`; EXECUTE revoked from PUBLIC, granted to `ratio_analytics` | the job, after each run's success commit (rev. 28) and in each run start's cleanup pass (rev. 29, D.1) | — |
 
 Indexes: primary keys only; a BRIN on `cost_daily (usage_date)` is added
 only if a measured query needs it (it was part of the wide variant measured
@@ -219,7 +219,11 @@ only one starter of a kind can be inside the allocation at a time.
     nothing; it is not retried silently.
   - If a `running` run of that kind with a live lease exists, it refuses
     with `ALREADY_RUNNING`.
-  - An expired one is marked `abandoned`.
+  - An expired one is marked `abandoned`. That `UPDATE` waits for any
+    transaction of the stale run still in flight, since each holds the
+    run row `FOR UPDATE` ("Writing", below); after it commits, every later
+    transaction of that run fails with `LEASE_LOST`. The start then runs
+    its cleanup pass (rev. 29, "Crashed runs" below) before any other work.
   - It then inserts its own run with a fresh `lease_token`, a TTL, and the
     next `run_seq`.
 - **Run inputs are captured once (rev. 27, Copilot r4179306694).** A run
@@ -244,7 +248,8 @@ only one starter of a kind can be inside the allocation at a time.
   pointer guard enforces). A
   forecast pointer that moves in the middle of a detect run or a replay
   therefore changes nothing that run reads.
-- **Writing.** Every write transaction of the run starts with
+- **Writing.** Every transaction of the run, including one that only
+  reads its inputs (rev. 29), starts with
   `assertLease(run_id, lease_token) FOR UPDATE`. A run whose lease expired
   or was taken over fails with `LEASE_LOST` and commits nothing more
   (fencing).
@@ -456,20 +461,57 @@ delete a running detect run's own state and the forecast run it reads.
   success transaction, it would hold the run row while waiting for the
   exclusive lock. A same-kind start holds the shared lock while it marks
   that stale run `abandoned`, so the two could deadlock.
-- **Crashed runs: bounded growth, not lease-based exclusion.** A crashed
-  run stays `running` until the next start of its kind marks it
-  `abandoned`, and until then its inputs stay protected. Retention does
-  **not** treat an expired lease as dead. A write transaction that began
-  before the lease expired can still be reading those inputs, and proving
-  that none is in flight would take the run-row locks the previous point
-  avoids. That would reopen the Z1 race. The growth is bounded instead:
-  - per crashed run, one forecast run's state and its previous run,
-    one rollup run's run-keyed rows, and any batches superseded under its
-    mark;
-  - ≈ 0.1 GB at most on `fleet15k`'s sizes, and one such run per kind
-    (four kinds);
-  - it is released at that kind's next start;
-  - it never affects `fleet15k`'s peak, since each run is a fresh stack.
+- **Crashed runs: a cleanup pass at every start (rev. 29, Copilot
+  r4179428541; replaces revision 28's bound).** Revision 28 said a crashed
+  run's leftovers were released at its kind's next start. They were not.
+  The start only marked the stale run `abandoned`, and retention ran only
+  after a success commit. So a series of crashed replacements kept one more
+  abandoned run's output per attempt until some run succeeded. Now:
+  - **Every start runs a cleanup pass** after its acquisition transaction
+    commits and before any other work: `ratio.analytics_apply_retention()`,
+    then `ratio.analytics_apply_forecast_retention()`, each in its own
+    transaction under the two rules above (READ COMMITTED with the lock
+    first; no run-row or pointer lock held). It calls both, because a
+    crashed run of one kind can pin another kind's rows, such as a detect
+    run's input rollup run. A run whose post-success retention call was
+    lost to a crash is covered by the next start too.
+  - **`failed` and `abandoned` runs are removable whatever their
+    `run_seq`.** They are terminal and never read again, so both functions
+    remove their run-keyed rows and backtest output, unless a `running`
+    run names them as an input or `prev_run_id`. The INSERT trigger already
+    requires those to be `succeeded`, so in practice the exception never
+    applies. Batches that a failed rollup run completed above the mark are
+    not its output in this sense: they are published data, and the next
+    successful rollup exposes them ("The high-water mark", above).
+  - **Nothing in use is removed.**
+    - The takeover's `abandoned` update waits for every in-flight
+      transaction of the stale run (above). So once it commits, no
+      transaction of that run is reading anything, and none can start.
+      An expired lease alone does not show that, which is why retention
+      still does not treat it as dead (revision 28).
+    - The new run's row, with its inputs and previous run, is committed
+      before the pass begins. The pass takes the exclusive lock first and
+      reads in READ COMMITTED, so it sees that `running` row and keeps
+      everything the Z1 exclusion keeps: its inputs, its previous run,
+      its own rows and the pointers' runs.
+  - **The bound.** A run writes nothing beyond its run row until its
+    cleanup pass has finished, and that pass removes every abandoned run.
+    So **per kind, at most one run that has written output is left over**:
+    the crashed run before its takeover, or the abandoned run between the
+    takeover and the end of the takeover's cleanup pass.
+    - A start that crashes during its own cleanup pass has written
+      nothing, and the next start's pass removes both runs.
+    - Crashed retries therefore cannot accumulate.
+    - **Its size** (rev. 29, the challenger's L1 on 0926b19): ≈ 0.1 GB
+      of state at `fleet15k`'s sizes (one forecast run's state and the
+      previous run it pinned, or one rollup run's run-keyed rows), **plus
+      the rollup rows of the superseded batches that its captured mark
+      pinned**. Revision 28 left those out. A restated period of
+      `fleet15k`'s size is ≈ 1.1 M `cost_daily` rows × 180 B ≈ 0.2 GB,
+      and each restatement under the mark is pinned separately. The
+      takeover's cleanup pass releases all of it. There are four kinds.
+    - `fleet15k` has no restatements, and each of its runs is a fresh
+      stack, so its peak is unaffected.
 
 **Backtest output (rev. 25, Copilot r4179229471):** the same function also removes
 the `forecast_backtests` and `forecast_backtest_points` rows of every
