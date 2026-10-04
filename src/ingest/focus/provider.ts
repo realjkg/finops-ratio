@@ -25,8 +25,8 @@ export const SOURCE_TYPE_PROVIDERS: Readonly<Record<string, readonly string[]>> 
  * The fixed set of SYNTHETIC provider names: the project's fixtures
  * (syntheticFocus.ts, testing/focusCsv.ts write SyntheticCloud) and the Slice 3
  * generator (SyntheticAWS, SyntheticAzure, SyntheticGCP). With the explicit
- * opt-in RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 (default off; refused in
- * production; config.ts) every name here is accepted by every checked source
+ * opt-in RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 (default off; accepted only with
+ * RATIO_ENV explicitly development or test; config.ts) every name here is accepted by every checked source
  * type; without it none is. The opt-in never widens real-provider acceptance:
  * real names are still checked against SOURCE_TYPE_PROVIDERS alone. Otherwise a
  * tampered "AWS" export carrying them would be published as AWS spend

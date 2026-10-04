@@ -2,7 +2,7 @@
 
 Branch `fix/62-provider-source-check`, from `origin/main` at 827773f (Slices 0,
 1, 2 and 2b merged). Restricted class: it changes Slice 1 worker behaviour, so
-it needs a challenger review. Not pushed; no PR.
+it needs a challenger review. Pushed; PR pending.
 
 **The gap (found by the Slice 2b acceptance run).** The worker never compares
 FOCUS `ProviderName` with the source it is ingesting. An "AWS Data Exports"
@@ -192,7 +192,8 @@ Unchecked types (D4) keep today's behaviour: no header or NULL rule.
 - `config.ts` (D1): `WorkerSettings.allowSyntheticProviders` (default
   false) and `syntheticProvidersOptIn(env)`: `RATIO_ALLOW_SYNTHETIC_PROVIDERS`
   `'1'` on; unset, `''` or `'0'` off; anything else `CONFIG_INVALID`;
-  `'1'` with `RATIO_ENV=production` ⇒ `SYNTHETIC_PROVIDERS_NOT_ALLOWED`.
+  `'1'` is accepted only with `RATIO_ENV` explicitly `development` or
+  `test`; otherwise `SYNTHETIC_PROVIDERS_NOT_ALLOWED` (challenger L3).
   The CLI passes its own env's value, and logs
   `config.synthetic_providers_allowed` (level `warn`; the size of the set, no
   names: logs carry no row values, Slice 1 K1) once at startup when it
@@ -391,6 +392,22 @@ The first draft proposed each item below; the orchestrator decided them on
       environment.
     - **D-21** (per-source synthetic markers, Slice 3) is the proper way to
       restore `replay-fixtures` in staging later.
+    - **Opt-in required, and no hang (challenger M-A, fresh review at
+      12a0c97).** With `RATIO_ENV=test` but no opt-in, every scenario
+      quarantined. `zombie_fencing` then awaited a `beforePublish` that never
+      came, and the process never exited. Two fixes, defense in depth:
+      - the CLI refuses `replay-fixtures` at startup, before any I/O, unless
+        `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` (exit 2,
+        `REPLAY_FIXTURES_NOT_ALLOWED`, naming the opt-in). This is a
+        fail-fast check, not a bypass;
+      - the scenario races `beforePublish` against the zombie settling. A
+        zombie that never reaches publish gives `pass:false` with
+        `reachedPublish: false` at once. The admin client connects inside
+        the `try`, so `finally` always ends it.
+
+      Tests: `replayFixturesEnv.test.ts` (CLI) and
+      `replayFixturesQuarantine.db.test.ts` (library, bounded by the
+      per-test timeout, client ended). Mutations M32–M34 are killed.
   - **Tracked item (deferred to Slice 3, design D-21):** a per-source
     synthetic marker, so the opt-in applies to the SYNTHETIC sources only,
     not process-wide.
@@ -416,7 +433,7 @@ The first draft proposed each item below; the orchestrator decided them on
 - **D5: accepted.** `AWS` only. `Amazon Web Services` is not allowed until
   a real export proves otherwise (§2.1).
 
-## 8a. Batches published before a policy change are not re-checked (challenger L4)
+## 8a. Batches published before a policy change are not re-checked (challenger L4; follow-up issue #66)
 
 The check runs when a batch is **loaded**.
 - A batch published before this change is not re-validated.
@@ -440,6 +457,13 @@ The check runs when a batch is **loaded**.
 - If a re-check of unchanged bytes is ever needed, it is an operator
   procedure, or a `replay --period --revalidate` mode, which is not built.
   This is escalated, not changed here.
+
+**`replay --batch` path.** `replay --batch <superseded batch>` (Slice 1)
+re-points a period at a retained batch without re-loading it. It can
+therefore re-publish a superseded **pre-#62** batch, which may contain
+foreign-provider rows, or one loaded under an earlier allowlist or opt-in.
+That is by design: the batch is an immutable, retained revision. It is
+covered by the same follow-up, issue #66.
 
 **Impact today: none.** No production data exists. Only the SYNTHETIC
 fixture and the public sample have ever been ingested, all locally and

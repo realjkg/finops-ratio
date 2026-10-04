@@ -1,7 +1,7 @@
 # Issue #62 — evidence: the worker rejects rows whose `ProviderName` does not match the source type
 
-Branch `fix/62-provider-source-check`, from `origin/main` 827773f. Not pushed;
-no PR. Design: `DESIGN.md` (this directory). Restricted class (Slice 1 worker
+Branch `fix/62-provider-source-check`, from `origin/main` 827773f; merged with
+`origin/main` (#65) at 12a0c97. Pushed; PR pending. Design: `DESIGN.md` (this directory). Restricted class (Slice 1 worker
 behaviour): needs a challenger review.
 
 **How to read this file.**
@@ -357,8 +357,8 @@ rule, and it was not edited (Slice 1 tests are frozen).
   the Slice 1 test.
 - M31c: the gate removed. Killed by all three tests.
 
-**L4: kept as documented (DESIGN §8a); follow-up issue draft for the
-orchestrator to open:**
+**L4: kept as documented (DESIGN §8a); follow-up issue draft, opened by the
+orchestrator as #66:**
 
 > **Title:** Worker: re-check an unchanged, already-published batch under the current ingestion policy (`replay --period --revalidate`)
 >
@@ -416,3 +416,61 @@ orchestrator to open:**
 
 **Cleanup:** the private cluster, the `i62-s3` container and its volume,
 the compose project and the scratch files were removed after the run.
+
+## 10. Fresh challenger review at 12a0c97 (REQUEST CHANGES: 1 Medium, 4 Low)
+
+### 10.1 Gate record at the merge head 12a0c97 (challenger's run)
+
+The orchestrator merged `origin/main` (#65) into the branch and pushed. The
+fresh challenger ran these gates at 12a0c97, on a private PG16 + SeaweedFS:
+
+| Gate | Result |
+|---|---|
+| lint, tsc | exit 0 |
+| `npm test` | 110 files / **2599 passed** |
+| `npm run test:db` | parallel 35 files / **625 passed**; serial 6 files / **173 passed**; exit 0 |
+
+### 10.2 M-A: `replay-fixtures` hung forever with the opt-in off
+
+The challenger reproduced it: the process was still running at 240 s.
+- With `RATIO_ENV=test` and no `RATIO_ALLOW_SYNTHETIC_PROVIDERS`, every
+  period quarantines `PROVIDER_MISMATCH`.
+- `zombie_fencing` then awaited `atPublish`, which only `beforePublish`
+  resolves, so it never resolved.
+
+| SHA | Commit | Kind |
+|---|---|---|
+| e0422dc | CLI test, opt-in off ⇒ exit 2 promptly (`replayFixturesEnv.test.ts`); library test: under a policy that quarantines everything, `runReplayFixtures` returns `pass:false` within the 60 s per-test timeout, `zombie_fencing.detail.reachedPublish === false`, and no `ratio-replay-fixtures` connection is left (`replayFixturesQuarantine.db.test.ts`) | **red** (`red/red-ma-cli.txt`: 1 failed / 4; `red/red-ma-library.txt`: **timed out at 60 s**, the hang reproduced) |
+| c4c8b90 | CLI startup gate (opt-in required, before any I/O); `zombie_fencing` races `atPublish` against the zombie settling; the admin client connects inside the `try` | green |
+
+**Mutations (`runs/code-mutations-ma.txt`; all killed):**
+- M32: the CLI opt-in gate removed. Killed by the CLI test.
+- M33: the unbounded `await atPublish`, i.e. the hang. Killed: the library
+  test timed out at 60 s.
+- M34: the admin client never ended. Killed: the library test sees the
+  connection left open.
+
+**SKILL.md §8 fixed.** Step 5 (the sync steps on the SyntheticCloud fixture,
+and `replay-fixtures`) now runs with `RATIO_ENV=development|test` plus
+`RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`.
+
+### 10.3 Lows
+
+- **L-a:** the stale "refused in production" wording is replaced by "only
+  `RATIO_ENV` explicitly development or test" in `config.ts`, `provider.ts`
+  and DESIGN §4.
+- **L-b:** Slice 2b EVIDENCE §2, the §6 table and the §12 gate row carry a
+  dated "superseded by #62" note. It points at the new pins: 942 /
+  `18.00663861840` and 9441 / `112.16617543240`. The historical figures are
+  not rewritten.
+- **L-c:** `ingestion-ops/SKILL.md` updated:
+  - §0 gains `RATIO_ALLOW_SYNTHETIC_PROVIDERS` and its `RATIO_ENV` rule;
+  - §4 gains `PROVIDER_MISMATCH` and notes that a published batch can carry
+    excluded rows with a nonzero `validation_error_count`;
+  - §10 gains the D12 gap, citing #66.
+- **L-d:**
+  - the status lines now read "Pushed; PR pending";
+  - DESIGN §8a and EVIDENCE §9.1 cite #66;
+  - §8a names the `replay --batch` path, which can re-publish a superseded
+    pre-#62 batch;
+  - the gate record at 12a0c97 is above (§10.1).

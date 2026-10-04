@@ -34,7 +34,7 @@ export interface WorkerSettings {
   /**
    * Issue #62 (orchestrator D1): accept the synthetic fixtures' provider names
    * (focus/provider.ts SYNTHETIC_PROVIDERS). RATIO_ALLOW_SYNTHETIC_PROVIDERS=1;
-   * default false; refused when RATIO_ENV=production.
+   * default false; accepted only with RATIO_ENV explicitly development or test.
    */
   allowSyntheticProviders: boolean;
 }

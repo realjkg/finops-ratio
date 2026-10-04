@@ -1,0 +1,4 @@
+{"mutation": "M32 CLI opt-in gate removed", "killed": true, "details": [{"exit": 1, "failed": ["M-A: RATIO_ENV=test WITHOUT the opt-in fails fast before any I/O: exit 2, the reason names RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 22ms"], "timedOut": false}]}
+{"mutation": "M33 zombie_fencing waits for publish unbounded (the hang)", "killed": true, "details": [{"exit": 1, "failed": ["returns pass:false promptly (zombie_fencing included) and ends its admin client 60011ms"], "timedOut": true}]}
+{"mutation": "M34 admin client not ended", "killed": true, "details": [{"exit": 1, "failed": ["returns pass:false promptly (zombie_fencing included) and ends its admin client 859ms"], "timedOut": false}]}
+ALL KILLED

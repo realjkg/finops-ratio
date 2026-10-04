@@ -60,7 +60,13 @@ used its own names and ports, and everything was removed afterwards:
 
 Computed by `scripts/acceptance/focus_control_totals.py` (Python, stdlib only,
 integer arithmetic) from the **upstream** files. Pinned in
-`fixtures/focus-1.0-sample/control-totals.json`.
+`fixtures/focus-1.0-sample/control-totals.json` (as of Slice 2b).
+
+> **Superseded by #62 (2026-10-04).** These were the all-provider totals. The pins in
+> `fixtures/focus-1.0-sample/control-totals.json` are now the **AWS rows only** (`--provider AWS`):
+> 1k 2024-09 **942 / `18.00663861840`** (57 rows excluded; 2024-10 Oracle-only, quarantined);
+> 10k 2024-09 **9441 / `112.16617543240`** (557 excluded; 2024-10 quarantined).
+> See `docs/evidence/issue-62/EVIDENCE.md` §4. The figures below are kept as Slice 2b history.
 
 | File | Billing period | Currency | Rows | BilledCost | EffectiveCost | EffectiveCost nulls |
 |---|---|---|---|---|---|---|
@@ -183,6 +189,7 @@ The full JSON summaries are in `runs/acc1k-1.json`, `runs/acc1k-2.json` and
 | | 1k run 1 | 1k run 2 | 10k |
 |---|---|---|---|
 | exit / pass | 0 / true | 0 / true | 0 / true |
+| *(note)* | *Slice 2b history. Superseded by #62 (2026-10-04): the runs now publish 942 / `18.00663861840` (1k) and 9441 / `112.16617543240` (10k), AWS rows only, with 2024-10 quarantined. See `docs/evidence/issue-62/EVIDENCE.md`* | | |
 | first `sync` | 2024-09 `published` 999 / `20.28022672899`; 2024-10 `published` 1 / `0.24000000000`; both `unverified` | identical | 2024-09 `published` 9998 / `151.41648035487`; 2024-10 `published` 2 / `0.01361088710`; both `unverified` |
 | second `sync` | both `skipped_unchanged` | both `skipped_unchanged` | both `skipped_unchanged` |
 | anonymous read | 401 | 401 | 401 |
@@ -555,7 +562,7 @@ committed as ad0e82d. **6/6 were killed:**
 | `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
 | `npm test` | **105 files / 2498 tests passed** |
 | `next build` | 0 (`tsconfig.json`/`next-env.d.ts` restored) |
-| `npm run local:acceptance` 1k ×1 | **pass, 23.3 s**. `sync` exit 0: 2024-09 published 999 / `20.28022672899`, 2024-10 published 1 / `0.24000000000`, both unverified. `syncAgain` exit 0, both `skipped_unchanged`. 1000 rows compared on 21 fields. `appStop: stopped`, `down: ok (-v)` (`runs/acc1k-copilot-exit-code.json`) |
+| `npm run local:acceptance` 1k ×1 | (Slice 2b history; superseded by #62 on 2026-10-04: now 942 / `18.00663861840` AWS rows only, see `docs/evidence/issue-62/EVIDENCE.md`) **pass, 23.3 s**. `sync` exit 0: 2024-09 published 999 / `20.28022672899`, 2024-10 published 1 / `0.24000000000`, both unverified. `syncAgain` exit 0, both `skipped_unchanged`. 1000 rows compared on 21 fields. `appStop: stopped`, `down: ok (-v)` (`runs/acc1k-copilot-exit-code.json`) |
 | leftovers | no `ratio-s2b*` containers or volumes, no `.ratio-local/`, tree clean |
 
 `test:db`, `local:test` and the 10k run were not re-run in this round, as
