@@ -8,13 +8,16 @@
 //   - connecting is bounded (connectionTimeoutMillis);
 //   - the whole request (tenant transaction, login check, reads) has a
 //     deadline;
-//   - a client that saw a client-side failure (timeout, connection lost: an
-//     error without a SQLSTATE) or outlived the request deadline is DESTROYED
-//     (release(err) plus its socket), never returned to the pool. Once
-//     poisoned, it accepts no further query (the ROLLBACK fails at once
-//     instead of queueing behind the stuck one).
+//   - a client that saw anything but a session-preserving SQL error, or
+//     outlived the request deadline, is DESTROYED (release(err) plus its
+//     socket), never returned to the pool. Once poisoned, it accepts no
+//     further query (the ROLLBACK fails at once instead of queueing behind
+//     the stuck one or going to a dead transport).
+//   - The SQL error is classified POSITIVELY (Copilot 4176969214): a code that
+//     merely looks like a SQLSTATE is not one (Node's EPIPE is 5 uppercase
+//     letters too).
 // Slice 0's withTenantTransaction is unchanged: it releases through this guard.
-import type { Pool, PoolClient } from 'pg';
+import { DatabaseError, type Pool, type PoolClient } from 'pg';
 
 export const READ_TIMEOUTS = Object.freeze({
   /** pg connectionTimeoutMillis. */
@@ -31,10 +34,31 @@ type Connectable = Pick<Pool, 'connect'>;
 const strayErrorGuarded = new WeakSet<object>();
 const ignoreStrayError = (): void => undefined;
 
-/** A server-side SQL error carries a SQLSTATE; anything else (timeout, lost connection) poisons the client. */
-function clientSideFailure(err: unknown): boolean {
-  const code = (err as { code?: unknown } | null)?.code;
-  return !(typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code));
+const SQLSTATE = /^[0-9A-Z]{5}$/;
+/** SQLSTATEs that end or break the session even at severity ERROR: class 08 (connection exception), 57P01–57P05 (shutdown, crash, idle timeouts). */
+const SESSION_ENDING = /^(?:08|57P0[1-5])/;
+
+/**
+ * True only for a SQL error the SERVER raised that leaves the session usable:
+ * a pg DatabaseError (from the wire protocol) with severity exactly ERROR
+ * (FATAL/PANIC end the session; a localized or missing severity fails safe),
+ * a SQLSTATE-shaped code outside the session-ending classes, and no Node
+ * system-error fields. Everything else poisons the client: Node system errors
+ * (EPIPE, ECONNRESET, …: errno/syscall), pg's query_timeout and "Connection
+ * terminated" errors, errors without a code, and look-alikes that are not a
+ * DatabaseError.
+ */
+export function isSessionPreservingSqlError(err: unknown): boolean {
+  if (!(err instanceof DatabaseError)) return false;
+  const e = err as DatabaseError & { errno?: unknown; syscall?: unknown };
+  return (
+    e.severity === 'ERROR' &&
+    typeof e.code === 'string' &&
+    SQLSTATE.test(e.code) &&
+    !SESSION_ENDING.test(e.code) &&
+    e.errno === undefined &&
+    e.syscall === undefined
+  );
 }
 
 function destroySocket(client: PoolClient): void {
@@ -80,7 +104,7 @@ export async function readWithDeadline<T>(pool: Connectable, read: (pool: Connec
             const stop = poisoned ?? expired;
             if (stop) return Promise.reject(stop);
             return (target.query as (...a: unknown[]) => Promise<unknown>)(...args).catch((e: unknown) => {
-              if (clientSideFailure(e)) poisoned = e instanceof Error ? e : new Error(String(e));
+              if (!isSessionPreservingSqlError(e)) poisoned = e instanceof Error ? e : new Error(String(e));
               throw e;
             });
           };
