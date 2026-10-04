@@ -2,6 +2,7 @@
 // (scripts/local/acceptance.mjs). No Docker, no database, no network.
 // DESIGN: docs/evidence/slice-2b/DESIGN.md §8 (A1–A8).
 import { describe, expect, it } from 'vitest';
+import { Buffer } from 'node:buffer';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -40,6 +41,7 @@ import { LOCAL_NAMES } from './lib.mjs';
 import { parseManifest } from '../../src/ingest/sources/s3/layout';
 import { indexHeader, validateRow } from '../../src/ingest/focus/validate';
 
+const { Response, structuredClone } = globalThis;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const DATASET = JSON.parse(read('fixtures/focus-1.0-sample/dataset.json'));
