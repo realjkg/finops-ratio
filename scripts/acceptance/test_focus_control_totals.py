@@ -363,6 +363,56 @@ class ProviderFilterTests(unittest.TestCase):
             self.assertEqual(doc['excluded'], [])
 
 
+class TimestampFollowupTests(unittest.TestCase):
+    """PR #68 follow-ups: timestamps are compared and formatted like the worker and the API."""
+
+    ROW = '"2024-09-01 00:00:00","2024-10-01 00:00:00","{start}","{end}","USD",1,1,1,1,"AWS","S","C","Usage","r","s","b",1,"u",1,"u",1,"u","a",NULL,NULL'
+
+    def rows(self, start, end):
+        return fct.compute(csv_bytes(self.ROW.format(start=start, end=end), header=FULL_HEADER), rows=True, providers=['AWS'])['rows']
+
+    def test_years_below_1000_are_ordered_and_formatted_with_four_digits(self):
+        # Copilot r4178585902: strftime('%Y') does not pad year 99, so '99-…' > '100-…' as text.
+        # validateRow orders 0099-12-31 23:00 → 0100-01-01 00:00 correctly (timestamp.test.ts).
+        row = self.rows('0099-12-31 23:00:00', '0100-01-01 00:00:00')[0]
+        # The API formats with to_char(…, 'YYYY-…'), which zero-pads to four digits.
+        self.assertEqual(row['chargePeriodStart'], '0099-12-31T23:00:00.000000Z')
+        self.assertEqual(row['chargePeriodEnd'], '0100-01-01T00:00:00.000000Z')
+        self.assertEqual(fct.format_timestamp('0001-02-03 04:05:06'), '0001-02-03T04:05:06.000000Z')
+        # ...and a genuinely inverted pair across the boundary is still refused.
+        with self.assertRaises(fct.ControlTotalsError):
+            self.rows('0100-01-01 00:00:00', '0099-12-31 23:00:00')
+
+    def test_order_is_judged_at_millisecond_precision_like_the_worker(self):
+        # Challenger L-1: timestamp.ts keeps milliseconds only (truncated), so .000500 and .000100
+        # are the same instant for validateRow: accepted, not inverted.
+        self.assertEqual(len(self.rows('2024-09-18 22:00:00.000500', '2024-09-18 22:00:00.000100')), 1)
+        # A difference that survives truncation is still inverted.
+        with self.assertRaises(fct.ControlTotalsError):
+            self.rows('2024-09-18 22:00:00.001000', '2024-09-18 22:00:00.000999')
+        # The published value keeps its microseconds (the API returns them).
+        self.assertEqual(self.rows('2024-09-18 22:00:00.000500', '2024-09-18 22:00:01')[0]['chargePeriodStart'], '2024-09-18T22:00:00.000500Z')
+
+    def test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash(self):
+        # Informational (challenger): 9999-12-31T23:00:00-02:00 is 10000-01-01T01:00Z, which Python's
+        # datetime cannot hold (OverflowError). It must be a ControlTotalsError (exit 1, no traceback).
+        for text in ['9999-12-31T23:00:00-02:00', '0001-01-01T00:30:00+01:00']:
+            with self.subTest(text=text):
+                with self.assertRaises(fct.ControlTotalsError):
+                    fct.format_timestamp(text)
+                with self.assertRaises(fct.ControlTotalsError):
+                    self.rows(text, '2024-09-18 22:00:00')
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, 'f.csv')
+            with open(p, 'wb') as fh:
+                fh.write(csv_bytes(self.ROW.format(start='9999-12-31T23:00:00-02:00', end='9999-12-31T23:30:00-02:00'), header=FULL_HEADER))
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = fct.main(['--rows', '--provider', 'AWS', p])
+            self.assertEqual((code, out.getvalue()), (1, ''))
+            self.assertIn('refused:', err.getvalue())
+
+
 class MainTests(unittest.TestCase):
     def run_main(self, argv):
         out, err = io.StringIO(), io.StringIO()
