@@ -1250,7 +1250,7 @@ describe('L20 an interrupted local:test still cleans up (Copilot 4176238924)', (
 // --- Copilot 4176494789: bootstrap membership edges are verified in full (PG16
 // admin_option / inherit_option / set_option), not only member → parent.
 describe('L21 bootstrap membership edges have the exact intended PG16 options (Copilot 4176494789)', () => {
-  const edge = (member, parent, over = {}) => ({ member, parent, admin_option: false, inherit_option: true, set_option: true, ...over });
+  const edge = (member, parent, over = {}) => ({ member, parent, grantor: 'postgres', grantor_is_bootstrap_superuser: true, admin_option: false, inherit_option: true, set_option: true, ...over });
   const good = () => [
     edge(LOCAL_NAMES.migrator, 'ratio_owner'),
     edge(LOCAL_NAMES.worker, 'ratio_worker'),
@@ -1611,5 +1611,62 @@ describe('L24 bootstrap login attributes are normalised and verified in full (Co
     expect(runs(await load('vitest.db.serial.config.ts'))).toBe(true);
     expect(runs(await load('vitest.db.config.ts'))).toBe(false);
     expect(runs(await load('vitest.config.ts'))).toBe(false);
+  });
+});
+
+// --- Copilot 4176878790 (High): the membership check must see EVERY edge that
+// touches a managed role (the 3 ratio roles and the 3 local logins), on EITHER
+// side: an unrelated login granted ratio_reader (member = that login) was
+// invisible to a member-only query. Fail closed: the bootstrap never revokes.
+describe('L25 every membership edge touching a managed role is judged, either side; grantor and predefined roles (Copilot 4176878790)', () => {
+  const edge = (member, parent, over = {}) => ({ member, parent, grantor: 'postgres', grantor_is_bootstrap_superuser: true, admin_option: false, inherit_option: true, set_option: true, ...over });
+  const good = () => [edge(LOCAL_NAMES.migrator, 'ratio_owner'), edge(LOCAL_NAMES.worker, 'ratio_worker'), edge(LOCAL_NAMES.reader, 'ratio_reader')];
+  const logins = [LOCAL_NAMES.migrator, LOCAL_NAMES.worker, LOCAL_NAMES.reader];
+
+  it('an unexpected member of any ratio role, anything granted TO a local login, and a login in any other role each fail', () => {
+    for (const role of ['ratio_owner', 'ratio_worker', 'ratio_reader']) {
+      const p = membershipProblems([...good(), edge('someone_else', role)], LOCAL_NAMES);
+      expect(p, role).toEqual([`membership someone_else->${role} is not expected`]);
+    }
+    for (const l of logins) {
+      expect(membershipProblems([...good(), edge('some_role', l)], LOCAL_NAMES), l).toEqual([`membership some_role->${l} is not expected`]);
+      expect(membershipProblems([...good(), edge(l, 'app_admins')], LOCAL_NAMES), l).toEqual([`membership ${l}->app_admins is not expected`]);
+    }
+  });
+
+  it("membership of a managed role in a predefined pg_* role fails and is named as such, with Slice 0's reason for each REFUSED_PREDEFINED_ROLES entry", async () => {
+    const { REFUSED_PREDEFINED_ROLES } = await import('../../src/ingest/db/privilegeModel');
+    expect(Object.keys(REFUSED_PREDEFINED_ROLES).length).toBeGreaterThanOrEqual(11);
+    for (const member of [...logins, 'ratio_owner', 'ratio_worker', 'ratio_reader']) {
+      for (const [role, reason] of Object.entries(REFUSED_PREDEFINED_ROLES)) {
+        const p = membershipProblems([...good(), edge(member, role)], LOCAL_NAMES);
+        expect(p, `${member}->${role}`).toHaveLength(1);
+        expect(p[0]).toContain(`membership ${member}->${role} is not expected`);
+        expect(p[0]).toContain('predefined role');
+        expect(p[0]).toContain(reason);
+      }
+    }
+    // Any other predefined role too (not only Slice 0's refused list).
+    expect(membershipProblems([...good(), edge(LOCAL_NAMES.reader, 'pg_checkpoint')], LOCAL_NAMES).join('\n')).toMatch(/pg_checkpoint is not expected \(predefined role/);
+  });
+
+  it('an expected edge granted by anyone but the bootstrap superuser (e.g. through ADMIN delegation) fails, naming the grantor; an unknown grantor fails closed', () => {
+    for (let i = 0; i < 3; i += 1) {
+      const rows = good();
+      rows[i] = { ...rows[i], grantor: 'delegate', grantor_is_bootstrap_superuser: false };
+      const p = membershipProblems(rows, LOCAL_NAMES);
+      expect(p, `edge ${i}`).toEqual([`membership ${rows[i].member}->${rows[i].parent}: granted by delegate, expected the bootstrap superuser`]);
+    }
+    const rows = good();
+    rows[0] = { ...rows[0], grantor: null, grantor_is_bootstrap_superuser: null };
+    expect(membershipProblems(rows, LOCAL_NAMES).join('\n')).toMatch(/granted by unknown, expected the bootstrap superuser/);
+  });
+
+  it('verifyBootstrap selects every edge with a managed role on EITHER side, with its grantor; the bootstrap revokes nothing (fail closed)', () => {
+    const src = read('scripts/local/bootstrap.mjs');
+    expect(src).toMatch(/WHERE m\.rolname = ANY \(\$1::text\[\]\) OR g\.rolname = ANY \(\$1::text\[\]\)/);
+    expect(src).toMatch(/a\.grantor = 10\b[\s\S]*?AS grantor_is_bootstrap_superuser/);
+    expect(src).not.toMatch(/\bREVOKE\b/);
+    expect(bootstrapPlan(LOCAL_NAMES).join('\n')).not.toMatch(/\bREVOKE\b/);
   });
 });
