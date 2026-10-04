@@ -1,20 +1,20 @@
 {
   "type": "ratio.local-acceptance",
   "dataset": "1k",
-  "mutation": "swap-billed",
+  "mutation": "corrupt-text-columns",
   "project": "ratio-s2b-acc",
   "steps": {
     "timingsMs": {
-      "controlTotals": 199,
-      "stage": 118,
-      "up": 4485,
-      "migrate": 5211,
-      "seed": 633,
-      "sync": 805,
-      "syncAgain": 390,
-      "appStart": 667,
-      "apiRead": 188,
-      "total": 23955
+      "controlTotals": 316,
+      "stage": 157,
+      "up": 4462,
+      "migrate": 4464,
+      "seed": 594,
+      "sync": 848,
+      "syncAgain": 573,
+      "appStart": 781,
+      "apiRead": 190,
+      "total": 23748
     },
     "dataset": {
       "key": "1k",
@@ -24,7 +24,7 @@
       "commit": "adbdd17a132984d6e8583c149c236d2199c3f5bc",
       "licence": "CC BY 4.0"
     },
-    "mutation": "swap-billed",
+    "mutation": "corrupt-text-columns",
     "control": [
       {
         "billingPeriod": "2024-09-01",
@@ -61,8 +61,8 @@
       "objects": [
         {
           "key": "focus-sample/focus-1-0-sample/data/BILLING_PERIOD=2024-09/sample-e91e5ac7edf0/focus-1-0-sample-00001.csv.gz",
-          "bytes": 91720,
-          "sha256": "4a507878d7ae877732adb0e2d8f868aef523b1854fd875353c48352686f92dff"
+          "bytes": 91745,
+          "sha256": "4ff1b96f7ef69fe42062595a25b2fd9371c4adc0be9426c563f3f03dec01e5f2"
         },
         {
           "key": "focus-sample/focus-1-0-sample/metadata/BILLING_PERIOD=2024-09/focus-1-0-sample-Manifest.json",
@@ -112,7 +112,7 @@
     },
     "sync": {
       "exit": 0,
-      "durationMs": 598,
+      "durationMs": 497,
       "periods": [
         {
           "period": "2024-09-01",
@@ -169,7 +169,7 @@
   },
   "pass": false,
   "failures": [
-    "the API read differs from the independent control totals:\n  API rows 2024-09-01|USD: rowDigest 16d4a55746297998831eb7fb2785c105a07eda8c1a1bb608168926bf77b09e5f != control 704b8c4919c9c46e393173834c3878e8972cff1207af7b9b8833a42b77a52ee1"
+    "the API rows differ from the upstream records (full-row comparison, keyed by Id):\n  row Id=11472: providerName \"AWS~mutated\" != upstream \"AWS\"\n  row Id=11472: serviceName \"Amazon Simple Queue Service~mutated\" != upstream \"Amazon Simple Queue Service\"\n  row Id=11472: serviceCategory \"Integration~mutated\" != upstream \"Integration\"\n  row Id=11472: chargeCategory \"Usage~mutated\" != upstream \"Usage\"\n  row Id=11472: resourceId \"arn:ats:sqs:us-test-2:347410479675:mibelllmel-i-032l64f2065481b12~mutated\" != upstream \"arn:ats:sqs:us-test-2:347410479675:mibelllmel-i-032l64f2065481b12\"\n  row Id=11472: extraColumns {\"BillingAccountName\":\"SunBird\",\"BillingPeriodEnd\":\"2024-10-01 00:00:00\",\"ChargeDescription\":\"$0.40 per million Amazon SQS standard requests in Tier1 in US West (Oregon)~mutated\",\"ChargeFrequency\":\"Usage-Based\",\"ContractedUnitPrice\":\"0.00000000000\",\"Id\":\"11472\",\"InvoiceIssuerName\":\"Amazon Web Servic\u2026 != upstream {\"BillingAccountName\":\"SunBird\",\"BillingPeriodEnd\":\"2024-10-01 00:00:00\",\"ChargeDescription\":\"$0.40 per million Amazon SQS standard requests in Tier1 in US West (Oregon)\",\"ChargeFrequency\":\"Usage-Based\",\"ContractedUnitPrice\":\"0.00000000000\",\"Id\":\"11472\",\"InvoiceIssuerName\":\"Amazon Web Services, Inc.\u2026"
   ],
-  "error": "the API read differs from the independent control totals:\n  API rows 2024-09-01|USD: rowDigest 16d4a55746297998831eb7fb2785c105a07eda8c1a1bb608168926bf77b09e5f != control 704b8c4919c9c46e393173834c3878e8972cff1207af7b9b8833a42b77a52ee1"
+  "error": "the API rows differ from the upstream records (full-row comparison, keyed by Id):\n  row Id=11472: providerName \"AWS~mutated\" != upstream \"AWS\"\n  row Id=11472: serviceName \"Amazon Simple Queue Service~mutated\" != upstream \"Amazon Simple Queue Service\"\n  row Id=11472: serviceCategory \"Integration~mutated\" != upstream \"Integration\"\n  row Id=11472: chargeCategory \"Usage~mutated\" != upstream \"Usage\"\n  row Id=11472: resourceId \"arn:ats:sqs:us-test-2:347410479675:mibelllmel-i-032l64f2065481b12~mutated\" != upstream \"arn:ats:sqs:us-test-2:347410479675:mibelllmel-i-032l64f2065481b12\"\n  row Id=11472: extraColumns {\"BillingAccountName\":\"SunBird\",\"BillingPeriodEnd\":\"2024-10-01 00:00:00\",\"ChargeDescription\":\"$0.40 per million Amazon SQS standard requests in Tier1 in US West (Oregon)~mutated\",\"ChargeFrequency\":\"Usage-Based\",\"ContractedUnitPrice\":\"0.00000000000\",\"Id\":\"11472\",\"InvoiceIssuerName\":\"Amazon Web Servic\u2026 != upstream {\"BillingAccountName\":\"SunBird\",\"BillingPeriodEnd\":\"2024-10-01 00:00:00\",\"ChargeDescription\":\"$0.40 per million Amazon SQS standard requests in Tier1 in US West (Oregon)\",\"ChargeFrequency\":\"Usage-Based\",\"ContractedUnitPrice\":\"0.00000000000\",\"Id\":\"11472\",\"InvoiceIssuerName\":\"Amazon Web Services, Inc.\u2026"
 }

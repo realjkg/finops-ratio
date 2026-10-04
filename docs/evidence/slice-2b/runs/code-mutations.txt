@@ -1,33 +1,45 @@
-KILLED   CM1 quoted "NULL" treated as null | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-            × only the UNQUOTED token is a null: a quoted "NULL" string and a quoted "" are kept byte for byte 15ms
-            FAIL  scripts/local/acceptance.test.mjs > A3 staging the committed 1k file as an AWS Data Exports layout > only the UNQUOTED token is a null: a quoted "NULL" string and a quoted "" are kept byte for b
-KILLED   CM2 lossless check ignores a changed record | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-            × is lossless: inverting the null mapping and merging the periods gives back the upstream records exactly 94ms
-            FAIL  scripts/local/acceptance.test.mjs > A3 staging the committed 1k file as an AWS Data Exports layout > is lossless: inverting the null mapping and merging the periods gives back the upstream recor
-KILLED   CM3 sum at the first scale, not the largest | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-            × sums exactly at the largest scale seen 19ms
-            FAIL  scripts/local/acceptance.test.mjs > A4 exact decimals (BigInt; Postgres sum(numeric) scale rule) > sums exactly at the largest scale seen
-KILLED   CM4 row digest not compared | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-            × every kind of difference is a problem 10ms
-            FAIL  scripts/local/acceptance.test.mjs > A5 API rows and totals vs the control > every kind of difference is a problem
-KILLED   CM5 sync reconciliation not checked | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-            × first sync: every control period published with the control’s count and billed total, unverified; nothing else 10ms
-            FAIL  scripts/local/acceptance.test.mjs > A5 API rows and totals vs the control > first sync: every control period published with the control’s count and billed total, unverified; nothing else
-KILLED   CM6 fetch writes without verifying | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-            × refuses a wrong hash, a wrong size, an oversized body or an HTTP error, leaving no file 6ms
-            FAIL  scripts/local/acceptance.test.mjs > A7 pinned dataset files (no network in tests: the fetch is injected) > refuses a wrong hash, a wrong size, an oversized body or an HTTP error, leaving no file
-KILLED   CM7 catalog is_provisional not checked | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-            × catalog: exactly one published, unverified, non-provisional batch per control period, with the control’s count and total 9ms
-            FAIL  scripts/local/acceptance.test.mjs > A5 API rows and totals vs the control > catalog: exactly one published, unverified, non-provisional batch per control period, with the control’s count and tot
-KILLED   CM8 double-ingest copy byte-identical | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-            × double-ingest: a second data file with the same records but different bytes, listed in the manifest 75ms
-            FAIL  scripts/local/acceptance.test.mjs > A6 mutations change the staged objects as DESIGN §6 says > double-ingest: a second data file with the same records but different bytes, listed in the manifest
-KILLED   CM9 python: quoted "NULL" is a null | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-            × P1: the calculator’s own unit tests pass 95ms
-            FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > P1: the calculator’s own unit tests pass
-KILLED   CM10 python: sum at the smallest scale | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-            × P1: the calculator’s own unit tests pass 143ms
-            FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > P1: the calculator’s own unit tests pass
+KILLED   CM1 quoted "NULL" treated as null
+           by: only the UNQUOTED token is a null: a quoted "NULL" string and a quoted "" are kept byte for byte
+KILLED   CM2 lossless check ignores a changed record
+           by: is lossless: inverting the null mapping and merging the periods gives back the upstream records exactly
+KILLED   CM3 sum at the first scale, not the largest
+           by: sums exactly at the largest scale seen
+KILLED   CM4 row digest not compared
+           by: every kind of difference is a problem, with its exact message
+KILLED   CM5 sync reconciliation not checked
+           by: first sync: every control period published with the control’s count and billed total, unverified; nothing else
+KILLED   CM6 fetch writes without verifying
+           by: refuses a wrong hash, a wrong size, an oversized body or an HTTP error, leaving no file
+KILLED   CM7 catalog is_provisional not checked
+           by: catalog: exactly one published, unverified, non-provisional batch per control period, with the control’s count and total
+KILLED   CM8 double-ingest copy byte-identical
+           by: double-ingest: a second data file with the same records but different bytes, listed in the manifest
+KILLED   CM9 python: quoted "NULL" is a null
+           by: P1: the calculator’s own unit tests pass
+KILLED   CM10 python: sum at the smallest scale
+           by: P1: the calculator’s own unit tests pass
+KILLED   CM11 lossless check ignores the header
+           by: is lossless: inverting the null mapping and merging the periods gives back the upstream records exactly
+KILLED   CM12 catalog ignores an unexpected period
+           by: catalog: exactly one published, unverified, non-provisional batch per control period, with the control’s count and total
+KILLED   CM13 effectiveCostNulls not compared
+           by: every kind of difference is a problem, with its exact message
+KILLED   CM14 distinct-key check dropped
+           by: every kind of difference is a problem, with its exact message
+KILLED   CM15 row compare: extraColumns always equal
+           by: a change in ANY compared field is reported, exactly once, with the field and the Id
+           by: null vs value, a dropped or an unexpected extra column, and decimal scale all count
+KILLED   CM16 row compare: unexpected extra key allowed
+           by: null vs value, a dropped or an unexpected extra column, and decimal scale all count
+KILLED   CM17 row compare: upstream record without API row ignored
+           by: identity, completeness and the metadata fields
+KILLED   CM18 python rows: NULL token kept as text
+           by: --rows: one expected API row per upstream record, keyed by Id; the first one checked by hand against the upstream line
+           by: P1: the calculator’s own unit tests pass
+KILLED   CM19 python rows: offset not converted to UTC
+           by: P1: the calculator’s own unit tests pass
+KILLED   CM20 corrupt-list-cost mutation changes nothing
+           by: corrupt-list-cost: one record of the largest period, ListCost + 1 in the last decimal place
+killed 20 of 20
 git status after restore:
- M scripts/local/acceptance.test.mjs
-
+  clean

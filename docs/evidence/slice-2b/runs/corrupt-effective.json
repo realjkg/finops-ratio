@@ -5,16 +5,16 @@
   "project": "ratio-s2b-acc",
   "steps": {
     "timingsMs": {
-      "controlTotals": 173,
-      "stage": 94,
-      "up": 4255,
-      "migrate": 4309,
-      "seed": 589,
-      "sync": 680,
-      "syncAgain": 362,
-      "appStart": 644,
-      "apiRead": 149,
-      "total": 22475
+      "controlTotals": 193,
+      "stage": 107,
+      "up": 4408,
+      "migrate": 4793,
+      "seed": 588,
+      "sync": 702,
+      "syncAgain": 367,
+      "appStart": 687,
+      "apiRead": 180,
+      "total": 23284
     },
     "dataset": {
       "key": "1k",
@@ -112,7 +112,7 @@
     },
     "sync": {
       "exit": 0,
-      "durationMs": 459,
+      "durationMs": 493,
       "periods": [
         {
           "period": "2024-09-01",

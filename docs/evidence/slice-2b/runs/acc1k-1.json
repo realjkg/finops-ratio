@@ -5,18 +5,18 @@
   "project": "ratio-s2b-acc",
   "steps": {
     "timingsMs": {
-      "controlTotals": 136,
-      "stage": 118,
-      "up": 4228,
-      "migrate": 4254,
-      "seed": 592,
-      "sync": 624,
-      "syncAgain": 354,
-      "appStart": 586,
-      "apiRead": 149,
-      "evidenceRehash": 14,
+      "controlTotals": 255,
+      "stage": 111,
+      "up": 4245,
+      "migrate": 3784,
+      "seed": 563,
+      "sync": 602,
+      "syncAgain": 322,
+      "appStart": 591,
+      "apiRead": 167,
+      "evidenceRehash": 12,
       "catalog": 16,
-      "total": 22126
+      "total": 21944
     },
     "dataset": {
       "key": "1k",
@@ -114,7 +114,7 @@
     },
     "sync": {
       "exit": 0,
-      "durationMs": 435,
+      "durationMs": 421,
       "periods": [
         {
           "period": "2024-09-01",
@@ -165,6 +165,11 @@
       "rows": 1000,
       "pages": 2,
       "limit": 500
+    },
+    "rowsCompared": {
+      "rows": 1000,
+      "fieldsPerRow": 21,
+      "extraColumns": 25
     },
     "evidence": [
       {

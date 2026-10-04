@@ -3,6 +3,14 @@
 Branch `slice/02b-sample-acceptance`, from `origin/main` 91a0721. Local and
 ephemeral only. Not pushed; no PR. Design: `DESIGN.md` (this directory).
 
+**How to read this file.** It is a log:
+- §1–§9 record the first round, at HEAD 78cfe11;
+- §10 records the coordinator's decisions;
+- §11 records the challenger round.
+
+Each section is accurate as of its own commits. The current gates and runs
+are in **§11**. The files in `runs/` are §11's runs, at 6e518fc.
+
 **Isolation.** Other agents share this host and its Docker daemon, so every run
 used its own names and ports, and everything was removed afterwards:
 - `local:acceptance`: project `ratio-s2b-acc` on 127.0.0.1:55810 (PG),
@@ -90,7 +98,7 @@ So each total is computed **four** ways, and all agree, as exact strings:
 | 7 | 2c6eafb | CI step | ci |
 | 8 | 9749335 | quarantine reasons recorded when the first sync fails | green |
 | 9 | 78cfe11 | test: a quoted `"NULL"` is kept (kills code mutation CM1) | test |
-| 10 | (this commit) | EVIDENCE, run summaries | docs |
+| 10 | 68229da | EVIDENCE, run summaries | docs |
 
 ## 4. Red evidence (`red/`)
 
@@ -316,8 +324,8 @@ Oracle rows is accepted (DESIGN §9). Tracked in **realjkg/finops-ratio#62**.
 | Decision | What changed | Commit |
 |---|---|---|
 | 1. Python in CI accepted | CI sets up Python 3.12 with `actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065` (v5.6.0, SHA-pinned like the governance workflow's actions; `ci.yml`'s other actions use tags). This comes before `npm ci`, because `npm test` runs P2. A separate step asserts `>= 3.10`. Documented in `README.md` (Quick start) and DESIGN §7. Fail-not-skip is kept. A8 guards the pin and the step order statically | 654b829 |
-| 2. Deployment brief updated (evidence update under delegation) | `docs/evidence/slice-2/DEPLOYMENT_BRIEF.md`: governance line 3, the status row and D-02 (Decision log and §1) now say **PERFORMED on public sample data**. They link this file and give the dataset commit and both files' control totals. D-02 restates the limits, unchanged: a real AWS manifest, real-export null encoding, Google data, real billing data. The §8 check is ticked, worded "on public sample data". The production go-live gate, the owner actions (§7) and the D-09 check are **not** touched | (this commit) |
-| 3. `ProviderName` vs source type | the pointer to #62 above | (this commit) |
+| 2. Deployment brief updated (evidence update under delegation) | `docs/evidence/slice-2/DEPLOYMENT_BRIEF.md`: governance line 3, the status row and D-02 (Decision log and §1) now say **PERFORMED on public sample data**. They link this file and give the dataset commit and both files' control totals. D-02 restates the limits, unchanged: a real AWS manifest, real-export null encoding, Google data, real billing data. The §8 check is ticked, worded "on public sample data". The production go-live gate, the owner actions (§7) and the D-09 check are **not** touched | 68229da |
+| 3. `ProviderName` vs source type | the pointer to #62 above | 68229da |
 
 Gates after decision 1:
 - `npx vitest run scripts/governance scripts/local scripts/acceptance`:
@@ -326,3 +334,139 @@ Gates after decision 1:
 - the assertion command exits 0 locally (Python 3.11.15).
 
 GitHub CI was not run (nothing is pushed).
+
+## 11. Challenger review of 91a0721..68229da (REQUEST CHANGES: 1 Medium, 4 Low); local, not pushed
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 6908555 | A10 full-row tests, P1 expected-row tests, A5 exact messages and new cases, 2 new mutations, `__pycache__/` gitignore test, the pinned column classification | **red** (`red/red-challenger-fast.txt`: 15 failed / 64; `red/red-challenger-python.txt`: 4 errors / 20) |
+| 13763f5 | full-row comparison (`--rows`, `rowProblems`), wired into `local:acceptance`; mutations `corrupt-text-columns`, `corrupt-list-cost` | green (M1) |
+| f54b39f | `scripts/acceptance/__pycache__/*.pyc` removed from git; `__pycache__/` ignored | L1 |
+| 6e518fc | DESIGN §4/§5/§6/§8, the brief's D-02 "Also checked" wording, the stale texts, and the §8 sign-off wording | docs (M1 wording, L3, L4) |
+| (this commit) | this section; `runs/` replaced with the 6e518fc runs | docs |
+
+### M1: the full-row comparison
+
+**The gap.** The run compared only `Id`, `BilledCost`, `EffectiveCost`, the
+currency and the period per row. The challenger corrupted `ServiceName`,
+`ProviderName`, `ChargeDescription`, `ResourceId`, `ChargeCategory` and
+`ListCost` in the staged rows, and the run still passed.
+
+**The fix, in two parts.**
+- **The expected side.** `focus_control_totals.py --rows` computes, for each
+  **upstream** record, the exact API row (DESIGN §4). It uses the
+  independent Python tokenizer, never the staged copy. Every upstream
+  column is classified (`columns`):
+  - 19 are mapped to named API fields;
+  - 25 are returned verbatim in `extraColumns`;
+  - `notReturned` is empty: every upstream value comes back.
+
+  The classification is pinned in `control-totals.json` (for 1k and 10k)
+  and asserted literally in A10.
+- **The comparison.** `rowProblems` (in `local:acceptance`, after the
+  totals) requires, per API row matched by `extraColumns.Id`:
+  - strict equality on all **21** upstream-derived fields: money and
+    quantities as decimal strings with their scale, `billingPeriod` as
+    `YYYY-MM-DD`, timestamps as `…T…​.ffffffZ`, every text field,
+    `focusVersion`, and `extraColumns` with the same keys and values;
+  - an upstream `NULL` must be `null` or absent;
+  - exactly the route's 26 fields. A10 reads the `SELECT` aliases from
+    `publishedCosts.ts` to catch drift;
+  - the shape of the 5 metadata fields, one source, and one API row per
+    upstream record.
+
+**Unit evidence.**
+- A10: any compared field changed ⇒ exactly one problem, naming the field
+  and the Id. Also: null vs value, scale, an extra or a dropped
+  `extraColumns` key, a missing, duplicate or unknown Id, the field set,
+  the metadata shapes, the report cap.
+- P1: the mapping, null/empty handling, offset → UTC, the `Usage*`
+  fallback, and the fail-closed cases.
+- P2: `--rows` on the 1k file gives 1000 unique Ids, and its first row
+  equals upstream data line 1 **mapped by hand**.
+
+**Live evidence.** In every passing run, `rowsCompared` was
+`{rows: 1000 | 10000, fieldsPerRow: 21, extraColumns: 25}`, with no
+problem. The challenger's two mutations are now built in, and both fail
+(below).
+
+### L1–L4
+
+- **L1:** the two `.pyc` files are removed from git, and `.gitignore` has
+  `__pycache__/` (A8 asserts it). `git status` stays clean after an
+  unguarded `python3 -m unittest`.
+- **L2:** A5 now asserts the **exact** problem list of every case (totals,
+  rows, sync, re-sync, catalog, artifact set, lossless). New cases, each
+  built so that **only** that check can see it:
+  - `effectiveCostNulls` alone: the control's null count changed; the sums,
+    digest, counts and API totals all agree;
+  - the distinct-key check alone: same row count, two rows share
+    (batch, artifact, ordinal);
+  - a catalog batch for an unexpected period;
+  - a changed staged header with untouched records.
+
+  The four code mutations that used to survive are now killed: CM11–CM14
+  below.
+- **L3:**
+  - `ci.yml`'s acceptance comment and §8 no longer say python3 is
+    preinstalled: CI pins 3.12 (§10);
+  - the brief's Slice 1 status row now says the SYNTHETIC fixture **and the
+    public FOCUS sample** were ingested, locally and ephemerally, and that
+    no real billing data ever was.
+- **L4:** the brief's §8 release check reads "**The acceptance run
+  performed on public sample data and signed off by the orchestrator under
+  the owner's delegation (Slice 2b PR)**". This is a change to §10
+  decision 2, which had dropped "signed off". The check says explicitly
+  that this sign-off covers the acceptance run only, **not** production
+  go-live, which stays the owner's non-delegable gate (§7, owner action 1).
+  The go-live gate and the owner actions are otherwise untouched.
+
+### Code mutations (scratch `code_mutations2.py`; `runs/code-mutations.txt`)
+
+20/20 were killed; the tree was clean after restore.
+
+| Id | Mutation | Killed by |
+|---|---|---|
+| CM1–CM10 | as §7.2 | as §7.2 (re-run: all killed) |
+| CM11 | the lossless check ignores the header | A3 (changed header) |
+| CM12 | the catalog ignores an unexpected period | A5 catalog (extra, unexpected period) |
+| CM13 | `effectiveCostNulls` not compared | A5 (`effectiveCostNulls` alone) |
+| CM14 | the distinct-key check dropped | A5 (distinct-row check alone) |
+| CM15 | row compare: `extraColumns` always equal | A10 |
+| CM16 | row compare: an unexpected `extraColumns` key allowed | A10 |
+| CM17 | row compare: an upstream record without an API row ignored | A10 |
+| CM18 | Python rows: the `NULL` token kept as text | P1, P2 (hand-mapped row) |
+| CM19 | Python rows: the offset not converted to UTC | P1 |
+| CM20 | the `corrupt-list-cost` mutation changes nothing | A6 |
+
+### Gates (HEAD 6e518fc)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **105 files / 2492 tests passed** (44.8 s) |
+| `npm run test:db` ×1 (private PG16 55830, created and deleted again) | **597 + 173 passed** (110 s) |
+| `next build` / `check:bundle` | 0 / pass |
+| `npm run local:test` (`ratio-s2b-test`) | pass, 26 s (`runs/localtest.json`) |
+| `npm run local:acceptance` 1k ×2 | pass, **21.9 s** and **21.9 s**; 1000 rows compared on 21 fields; totals as §2 |
+| `npm run local:acceptance -- --dataset 10k` | pass, **29.0 s**; 10000 rows compared on 21 fields; totals as §2 |
+| data mutations (1k), 10/10 fail | see below |
+| leftovers | no `ratio-s2b*` containers, volumes or networks; no `.ratio-local/`; `.ratio-sample-data/` removed; private cluster deleted; tree clean |
+
+| Mutation | Exit | First failing check (abridged) |
+|---|---|---|
+| `corrupt-billed` | 1 | first sync: `billedTotal "20.28022672900" != control "20.28022672899"` |
+| `corrupt-effective` | 1 | API rows: `effectiveCost 14.97651418587 != control 14.97651418586`; rowDigest |
+| `drop-row` | 1 | first sync: `rowCount "998" != control "999"` |
+| `double-ingest` | 1 | first sync: `rowCount "1998" != control "999"` |
+| `shift-period` | 1 | first sync: `rowCount "1000"`; `control period 2024-10-01 was not synced` |
+| `swap-billed` | 1 | API rows: rowDigest only |
+| `skip-null-conversion` | 1 | first sync: both periods `quarantined` (`UNPARSEABLE_NUMBER x7` / `x1`) |
+| `skip-period-split` | 1 | first sync: 2024-09 `quarantined` (`PERIOD_MISMATCH x1`) |
+| **`corrupt-text-columns`** | 1 | full-row: `row Id=11472: providerName "AWS~mutated" != upstream "AWS"`, then `serviceName`, `serviceCategory`, `chargeCategory`, `resourceId`, and `extraColumns` (ChargeDescription) |
+| **`corrupt-list-cost`** | 1 | full-row: `row Id=11472: listCost "0.00000080001" != upstream "0.00000080000"` |
+
+Every sum, count, digest and API total still agreed for the last two. Only
+the full-row comparison catches them.

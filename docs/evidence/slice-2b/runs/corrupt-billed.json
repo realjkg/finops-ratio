@@ -5,13 +5,13 @@
   "project": "ratio-s2b-acc",
   "steps": {
     "timingsMs": {
-      "controlTotals": 134,
-      "stage": 98,
-      "up": 4320,
-      "migrate": 4182,
-      "seed": 578,
-      "sync": 617,
-      "total": 20491
+      "controlTotals": 204,
+      "stage": 95,
+      "up": 4327,
+      "migrate": 4432,
+      "seed": 590,
+      "sync": 648,
+      "total": 20971
     },
     "dataset": {
       "key": "1k",
@@ -109,7 +109,7 @@
     },
     "sync": {
       "exit": 0,
-      "durationMs": 434,
+      "durationMs": 447,
       "periods": [
         {
           "period": "2024-09-01",
