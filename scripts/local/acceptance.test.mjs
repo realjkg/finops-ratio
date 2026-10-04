@@ -14,6 +14,7 @@ import {
   MUTATIONS,
   SAMPLE_NAMES,
   aggregateApiRows,
+  syncTwice,
   artifactSetProblems,
   batchProblems,
   canonicalDecimal,
@@ -567,6 +568,80 @@ describe('A10 full-row comparison: every API row vs its UPSTREAM record, keyed b
   });
 });
 
+describe('A11 both syncs are judged on the CLI exit code too (Copilot 4177490229 / 4177490261)', () => {
+  const control = {
+    totals: [
+      { billingPeriod: '2024-09-01', billingCurrency: 'USD', rowCount: '2', billedCost: '1.35' },
+      { billingPeriod: '2024-10-01', billingCurrency: 'USD', rowCount: '1', billedCost: '0.24000000000' },
+    ],
+  };
+  const published = {
+    pass: true,
+    results: {
+      periods: [
+        { billingPeriod: '2024-09-01', outcome: 'published', rowCount: '2', billedTotal: '1.35', reconciliation: 'unverified' },
+        { billingPeriod: '2024-10-01', outcome: 'published', rowCount: '1', billedTotal: '0.24000000000', reconciliation: 'unverified' },
+      ],
+    },
+  };
+  const unchanged = { pass: true, results: { periods: [{ billingPeriod: '2024-09-01', outcome: 'skipped_unchanged' }, { billingPeriod: '2024-10-01', outcome: 'skipped_unchanged' }] } };
+  /** A fake worker runner: returns the scripted { code, record } per call, and records the calls. */
+  const fakeRunner = (...results) => {
+    const calls = [];
+    const sync = async (name) => {
+      calls.push(name);
+      return results[calls.length - 1];
+    };
+    return { sync, calls };
+  };
+
+  it('both exit 0 with valid records ⇒ passes, both results reported', async () => {
+    const { sync, calls } = fakeRunner({ code: 0, record: published }, { code: 0, record: unchanged });
+    const reported = [];
+    const out = await syncTwice({ sync, control, report: (name, r) => reported.push([name, r.code]) });
+    expect(calls).toEqual(['sync', 'syncAgain']);
+    expect(reported).toEqual([['sync', 0], ['syncAgain', 0]]);
+    expect(out.first.code).toBe(0);
+    expect(out.second.code).toBe(0);
+  });
+
+  it('FIRST sync: a valid, passing record but exit code 1 ⇒ the run fails, the code is recorded, the diagnostics still run, no second sync', async () => {
+    const { sync, calls } = fakeRunner({ code: 1, record: published }, { code: 0, record: unchanged });
+    const reported = [];
+    let diagnostics = null;
+    await expect(
+      syncTwice({ sync, control, report: (name, r) => reported.push([name, r.code]), beforeFail: async (problems) => (diagnostics = problems) }),
+    ).rejects.toThrow('first sync:\n  sync: the worker CLI exited 1 (expected 0)');
+    expect(calls).toEqual(['sync']);
+    expect(reported).toEqual([['sync', 1]]);
+    expect(diagnostics).toEqual(['sync: the worker CLI exited 1 (expected 0)']);
+  });
+
+  it('FIRST sync: exit code 1 with a quarantine ⇒ both the exit code and the reasons are reported', async () => {
+    const quarantined = { pass: false, results: { periods: [{ ...published.results.periods[0], outcome: 'quarantined', code: 'VALIDATION_FAILED' }, published.results.periods[1]] } };
+    const { sync } = fakeRunner({ code: 1, record: quarantined });
+    await expect(syncTwice({ sync, control })).rejects.toThrow(
+      'first sync:\n  sync: the worker CLI exited 1 (expected 0)\n  sync: the evidence record does not pass\n  sync 2024-09-01: quarantined VALIDATION_FAILED',
+    );
+  });
+
+  it('SECOND sync: a valid all-skipped record but exit code 1 ⇒ the run fails, the code is recorded', async () => {
+    const { sync, calls } = fakeRunner({ code: 0, record: published }, { code: 1, record: unchanged });
+    const reported = [];
+    await expect(syncTwice({ sync, control, report: (name, r) => reported.push([name, r.code]) })).rejects.toThrow(
+      'second sync:\n  second sync: the worker CLI exited 1 (expected 0)',
+    );
+    expect(calls).toEqual(['sync', 'syncAgain']);
+    expect(reported).toEqual([['sync', 0], ['syncAgain', 1]]);
+  });
+
+  it('a missing evidence record, a null exit code (killed by a signal) or a non-number code also fail', async () => {
+    await expect(syncTwice({ sync: fakeRunner({ code: 0, record: null }).sync, control })).rejects.toThrow('sync: the worker CLI printed no evidence record');
+    await expect(syncTwice({ sync: fakeRunner({ code: null, record: published }).sync, control })).rejects.toThrow('sync: the worker CLI exited null (expected 0)');
+    await expect(syncTwice({ sync: fakeRunner({ code: 0, record: published }, { code: '0', record: unchanged }).sync, control })).rejects.toThrow('second sync: the worker CLI exited "0" (expected 0)');
+  });
+});
+
 describe('A6 mutations change the staged objects as DESIGN §6 says', () => {
   const clean09 = recordsOf(STAGED, '2024-09');
   const diffIdx = (a, b) => a.map((l, i) => (l !== b[i] ? i : -1)).filter((i) => i >= 0);
@@ -756,7 +831,9 @@ describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
   });
 
   it('uses the real worker CLI twice and the real route; no fake source, no test hook, no control in the manifest', () => {
-    expect(body.match(/syncRecord\(settings, secrets, SAMPLE_NAMES\.sourceKey\)/g)).toHaveLength(2);
+    // One runner, called twice by syncTwice (first sync, then the re-sync; A11 proves both are judged on the exit code).
+    expect(body.match(/syncRecord\(settings, secrets, SAMPLE_NAMES\.sourceKey\)/g)).toHaveLength(1);
+    expect(body).toMatch(/await syncTwice\(\{\s*control,\s*sync: \(name\) => timed\(name, \(\) => syncRecord\(settings, secrets, SAMPLE_NAMES\.sourceKey\)\),/);
     expect(src).toMatch(/workerCli\(settings, secrets, \['sync', '--tenant', secrets\.RATIO_LOCAL_TENANT_ID, '--source', sourceKey\]/);
     expect(body).toMatch(/startAppAndWait\(settings, secrets, \{ setApp, spawnGuard \}\)/);
     for (const forbidden of ['RATIO_ALLOW_FAKE_SOURCE', 'RATIO_TEST_', 'x-ratio-control', "'fake'", 'NODE_ENV: \'test\'']) {
@@ -766,11 +843,22 @@ describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
     expect(lib).not.toMatch(/'x-ratio-control'\s*:/);
   });
 
+  it('sweep: every allowFail command in scripts/local judges its exit code nearby, or says who does (Copilot 4177490229)', () => {
+    for (const file of ['scripts/local/local.mjs', 'scripts/local/lib.mjs', 'scripts/local/bootstrap.mjs', 'scripts/local/acceptance.mjs']) {
+      const lines = read(file).split('\n');
+      lines.forEach((line, i) => {
+        if (!/allowFail: true/.test(line)) return;
+        const after = lines.slice(i, i + 4).join('\n');
+        const before = lines.slice(Math.max(0, i - 4), i).join('\n');
+        const judged = /\.code !== 0/.test(after) || /exit code judged by /.test(before);
+        expect(judged, `${file}:${i + 1}: ${line.trim()}`).toBe(true);
+      });
+    }
+  });
+
   it('every comparison runs and fails the run', () => {
     for (const call of [
-      'const syncIssues = syncProblems(first.record, control);',
-      "fail('first sync', syncIssues)",
-      "fail('second sync', resyncProblems(second.record, control))",
+      'await syncTwice({',
       'compareAcceptance({ control, apiTotals: totals, rows })',
       'artifactSetProblems(rows, dataShas)',
       "fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control))",
