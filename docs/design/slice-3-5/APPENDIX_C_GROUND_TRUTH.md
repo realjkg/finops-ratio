@@ -25,8 +25,9 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
      forecast targets. Expected per seed on `fleet15k`: ≈ 158 labels that
      can reach `warning` in the window, ≈ 73 true groups (Appendix B.5.7);
    - **enriched**: ≥ **100 meaningful** labels per gated kind of AT-2 in the
-     evaluation window, placed on **individual** (never folded) series;
-     used for recall and time-to-detect only.
+     evaluation window, placed on **individual** (never folded) series and
+     never on intermittent series with a zero share above 50 % (`info`
+     only, DESIGN §4.2, D-24); used for recall and time-to-detect only.
    `ci` guarantees at least 2 labels of every kind (deterministic
    placement) so every code path is exercised in CI.
 5. **Profile differences.** `fleet15k` has no `new_region` (no region
@@ -61,8 +62,8 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
 
 | Kind | Expected | Entity | Injection (multiplicative on `M` unless stated) | Window | Notes for scoring |
 |---|---|---|---|---|---|
-| `spike` | alert | leaf series | × U(1.5, 6) for 1–3 days | start … start + len − 1 | gated (AT-2, 0.90) |
-| `level_shift` | alert | leaf series | × U(1.2, 3.0) from start, permanent | start … start + 13 | gated (0.90); after 14 days the new level is normal (`new_baseline`) |
+| `spike` | alert | leaf series | × U(1.5, 6) for 1, 2 or 3 days (equally likely) | start … start + len − 1 | gated (AT-2, 0.90) |
+| `level_shift` | alert | leaf series | × m from start, permanent, with **log m ~ U(log 1.2, log 3.0)** (log-uniform; pinned in rev. 6, as `budget4.py` assumes) | start … start + 13 | gated (0.90); after 14 days the new level is normal (`new_baseline`) |
 | `gradual_drift` | alert | leaf series | extra linear slope reaching + U(30 %, 150 %) after U(14, 45) days, then held | start … start + ramp | gated (0.75); TTD also from the day cumulative excess crosses min impact |
 | `new_service` | alert | (account, service) never seen in the account | new series at ≥ min impact (meaningful class) | first day … + 2 | gated (0.90); account age ≥ 30 days |
 | `new_region` | alert | (account, service, region) | new region row for an existing service | first day … + 2 | `ci` and `full` only |
@@ -84,7 +85,7 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
 | `onboarding` | **no alert** | account | S-curve ramp over 10–40 days | ramp | AT-5 (D6 must not fire unless cohort p99 is exceeded) |
 | `offboarding` | **no alert** at ≥ `warning` | account | decay to 0 over 7–30 days | decay | `info` drop groups are correct |
 | `constant_amortised` | **no alert**, gated | leaf series | the same effective cost every day | whole span | AT-5 |
-| `month_end_batch`, `monthly_cycle`, `holiday`, `intermittent` | **no alert** (stressor cohorts) | account / series | DESIGN §2.3 | their days | detections at ≥ `warning` are **false** and count in AT-1 and AT-4 (no exclusion); AT-7 reports the per-cohort breakdown, including first occurrences of a calendar class |
+| `month_end_batch`, `monthly_cycle`, `holiday`, `intermittent` | **no alert** (stressor cohorts) | account / series | DESIGN §2.3 | their days | detections at ≥ `warning` are **false** and count in AT-1 and AT-4 (no exclusion); AT-7 reports the per-cohort breakdown, including first and second occurrences of a calendar class. Calendar factors are **one per series and class**, constant across months and across the class's days (pinned in rev. 6); the generator's `--calendar-jitter 0.10` option draws each month's factor within ±10 % for a reported robustness run only. `intermittent` series with a zero share above 50 % are `info` only: `alert` labels on them are reported, never gated (D-24) |
 | `mtd_restatement`, `late_data` | **no alert** (`ci` only) | source / period | revised or late month-to-date rows | revision day | no group from a revision alone; `restated` resolution tested |
 
 ## C.3 Label format (`labels.jsonl`, one JSON object per line)
@@ -153,8 +154,10 @@ and the evaluator's own actuals computed from the source bucket.
    are reported under AT-6; it is **false** if it qualifies only for
    `no_alert` labels or none.
 6. **Recall** (enriched seed): per gated kind, over meaningful `alert`
-   labels on individual series; a label is detected if a qualifying group
-   reaches ≥ `warning`.
+   labels on individual series (none on `info`-only intermittent series);
+   a label is detected if a qualifying group reaches ≥ `warning`. Labels on
+   calendar-cohort event days and on weekly-scored intermittent series are
+   also reported separately (AT-7).
 7. **Time-to-detect** (enriched seed): first detection day of the first
    qualifying group − L.start, with data for day d available on d + 1; for
    `gradual_drift` also − (first day the cumulative excess ≥ min impact).
@@ -198,6 +201,8 @@ the harness can see failure:
 | compute precision on the enriched seed | the seed check fails (precision is natural-only) |
 | pool the tuning seed into precision | the seed check fails (tuning is never scored) |
 | exclude the `month_end_batch` cohort from AT-4 | the cohort-inclusion test fails |
+| drop the `info`-only intermittent series' signals from the fatigue output | the `info`-per-day count falls; the fatigue-output test fails |
+| score the calendar-jitter robustness run as a gate | the gate-set test fails (the run is reported only) |
 | score a detection day with quantiles that include errors from that day or later | the as-of test fails |
 | replace the Wilson rule by the point estimate | a fixture with p̂ = 0.80, n = 20 passes wrongly; the test fails |
 | count duplicates as correct | AT-6 and precision tests fail |
