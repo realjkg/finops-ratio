@@ -35,3 +35,6 @@ out
 .env.local
 .env.*.local
 
+# Local ephemeral stack state (generated secrets; removed by `npm run local:down -- -v`)
+.ratio-local/
+
