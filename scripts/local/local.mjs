@@ -5,15 +5,20 @@
 //   npm run local:migrate   worker:build, migrate as the non-superuser migrator, status must match
 //   npm run local:seed      buckets, the committed SYNTHETIC FOCUS fixture, tenant + source
 //   npm run local:sync      worker sync as the ratio_worker login
-//   npm run local:down      docker compose down        (-- -v: also volumes and .ratio-local/)
-//   npm run local:test      up → migrate → seed → sync → API read → assert control totals → down -v
+//   npm run local:down      docker compose down        (-- -v: also volumes and .ratio-local/<project>/)
+//   npm run local:test      its OWN stack: preflight → up → migrate → seed → sync → API read
+//                           under next start → assert control totals → down -v
 //
 // Every command is idempotent. Secrets are generated on the first `up` into
-// .ratio-local/env (gitignored, mode 0600); nothing secret is committed.
-// Settings (env): RATIO_LOCAL_PROJECT (ratio-local), RATIO_LOCAL_PG_PORT
-// (54329), RATIO_LOCAL_S3_PORT (18343), RATIO_LOCAL_APP_PORT (3100); all
-// ports bind 127.0.0.1 only.
+// .ratio-local/<project>/env (gitignored; directory 0700, file 0600); nothing
+// secret is committed. Settings (env): RATIO_LOCAL_PROJECT (ratio-local),
+// RATIO_LOCAL_PG_PORT (54329), RATIO_LOCAL_S3_PORT (18343),
+// RATIO_LOCAL_APP_PORT (3100). local:test ignores those and uses
+// RATIO_LOCAL_TEST_PROJECT (ratio-local-test), RATIO_LOCAL_TEST_PG_PORT
+// (54339), RATIO_LOCAL_TEST_S3_PORT (18353), RATIO_LOCAL_TEST_APP_PORT (3110),
+// refusing any overlap with the developer stack. All ports bind 127.0.0.1 only.
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
@@ -23,17 +28,20 @@ import { setTimeout } from 'node:timers';
 
 const { fetch } = globalThis;
 import {
-  LOCAL_ENV_FILE,
   LOCAL_NAMES,
-  LOCAL_STATE_DIR,
   apiEnv,
   compareControlTotals,
   connectionUrl,
   generateLocalSecrets,
   localSettings,
+  localStatePaths,
+  localTestSettings,
+  ownsListeningSocket,
   parseEnvFile,
-  serializeEnvFile,
+  preflightProblems,
+  removeProjectState,
   workerEnv,
+  writeEnvFileSecure,
 } from './lib.mjs';
 import { runBootstrap } from './bootstrap.mjs';
 
@@ -43,20 +51,20 @@ const { Client } = require(path.join(ROOT, 'node_modules', 'pg'));
 const COMPOSE_FILE = path.join(ROOT, 'docker-compose.local.yml');
 const FIXTURE_BASE = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'base');
 const CONTROL_TOTALS = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'control-totals.json');
-const STATE_DIR = path.join(ROOT, LOCAL_STATE_DIR);
-const ENV_FILE = path.join(ROOT, LOCAL_ENV_FILE);
 
 const log = (msg, fields = {}) => process.stderr.write(`${JSON.stringify({ tag: 'ratio-local', msg, ...fields })}\n`);
 
-// --- state -------------------------------------------------------------------
+// --- state (per compose project) ------------------------------------------------
 
-function loadSecrets({ create }) {
-  if (fs.existsSync(ENV_FILE)) return parseEnvFile(fs.readFileSync(ENV_FILE, 'utf8'));
-  if (!create) throw new Error(`${LOCAL_ENV_FILE} not found: run npm run local:up first`);
-  fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
+const envFileOf = (settings) => path.join(ROOT, localStatePaths(settings.project).envFile);
+
+function loadSecrets(settings, { create }) {
+  const file = envFileOf(settings);
+  if (fs.existsSync(file)) return parseEnvFile(fs.readFileSync(file, 'utf8'));
+  if (!create) throw new Error(`${localStatePaths(settings.project).envFile} not found: run npm run local:up first`);
   const secrets = generateLocalSecrets();
-  fs.writeFileSync(ENV_FILE, serializeEnvFile(secrets), { mode: 0o600 });
-  log('generated local secrets', { file: LOCAL_ENV_FILE });
+  writeEnvFileSecure(file, secrets);
+  log('generated local secrets', { file: localStatePaths(settings.project).envFile });
   return secrets;
 }
 
@@ -122,7 +130,7 @@ const superUrl = (settings, secrets) =>
 // --- commands ----------------------------------------------------------------
 
 async function up(settings) {
-  const secrets = loadSecrets({ create: true });
+  const secrets = loadSecrets(settings, { create: true });
   await compose(settings, secrets, ['up', '-d', '--wait', 'postgres', 's3']);
   await waitFor('postgres', () => withClient(superUrl(settings, secrets), async (c) => (await c.query('SELECT 1')).rowCount === 1));
   await waitFor('s3', async () => {
@@ -147,7 +155,7 @@ async function workerCli(settings, secrets, args, opts = {}) {
 }
 
 async function migrate(settings) {
-  const secrets = loadSecrets({ create: false });
+  const secrets = loadSecrets(settings, { create: false });
   await run('npm', ['run', '-s', 'worker:build']);
   await workerCli(settings, secrets, ['migrate']);
   const status = await workerCli(settings, secrets, ['migrate', '--status', '--json'], { allowFail: true });
@@ -182,7 +190,7 @@ function s3Client(settings, secrets) {
 }
 
 async function seed(settings) {
-  const secrets = loadSecrets({ create: false });
+  const secrets = loadSecrets(settings, { create: false });
   const { CreateBucketCommand, DeleteObjectCommand, PutObjectCommand } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
   const s3 = s3Client(settings, secrets);
   try {
@@ -238,7 +246,7 @@ async function seed(settings) {
 }
 
 async function sync(settings) {
-  const secrets = loadSecrets({ create: false });
+  const secrets = loadSecrets(settings, { create: false });
   const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', LOCAL_NAMES.sourceKey], { allowFail: true });
   process.stdout.write(r.out);
   if (r.code !== 0) throw new Error(`worker sync exited ${r.code}`);
@@ -247,9 +255,10 @@ async function sync(settings) {
 
 async function down(settings, { volumes }) {
   // Compose interpolates the whole file even for `down`: give it the real or a placeholder password.
-  const secrets = fs.existsSync(ENV_FILE) ? parseEnvFile(fs.readFileSync(ENV_FILE, 'utf8')) : { RATIO_LOCAL_PG_SUPERUSER_PASSWORD: 'unused-for-down' };
+  const file = envFileOf(settings);
+  const secrets = fs.existsSync(file) ? parseEnvFile(fs.readFileSync(file, 'utf8')) : { RATIO_LOCAL_PG_SUPERUSER_PASSWORD: 'unused-for-down' };
   await compose(settings, secrets, ['--profile', 'app', '--profile', 'worker', 'down', '--remove-orphans', ...(volumes ? ['-v'] : [])]);
-  if (volumes) fs.rmSync(STATE_DIR, { recursive: true, force: true });
+  if (volumes) removeProjectState(ROOT, settings.project);
   log(volumes ? 'down: containers, network, volumes and local secrets removed' : 'down: containers and network removed (volumes kept)', { project: settings.project });
 }
 
@@ -260,8 +269,59 @@ async function getJson(url, token) {
   return { status: r.status, body: await r.json().catch(() => null) };
 }
 
-async function localTest(settings) {
+/** True when something accepts TCP connections on 127.0.0.1:port. */
+function portInUse(p) {
+  return new Promise((resolve) => {
+    const s = net.connect({ host: '127.0.0.1', port: p });
+    s.setTimeout(1000);
+    s.once('connect', () => {
+      s.destroy();
+      resolve(true);
+    });
+    s.once('timeout', () => {
+      s.destroy();
+      resolve(true);
+    });
+    s.once('error', () => resolve(false));
+  });
+}
+
+/**
+ * Waits until `next start` answers AND the answering server is the process
+ * we spawned: fails fast if the child exits; on Linux the listening socket
+ * must belong to the child (or a descendant); without /proc the pre-start
+ * port check is what guarantees no other server sits on the port.
+ */
+async function waitForOwnServer(child, appPort, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`next start exited (code ${child.exitCode}, signal ${child.signalCode}) before it was ready`);
+    let ok;
+    try {
+      ok = (await fetch(`http://127.0.0.1:${appPort}/api/hello`)).status === 200;
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      const owned = ownsListeningSocket({ pid: child.pid, port: appPort });
+      if (owned === false) throw new Error(`a process other than the next start we spawned answers on port ${appPort}`);
+      return owned === true ? 'pid-verified' : 'port-preflight-only';
+    }
+    if (Date.now() > deadline) throw new Error('timed out waiting for next start');
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+async function localTest() {
   if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  // local:test owns its stack end to end (down -v at the end), so it uses its
+  // OWN project and ports and refuses to start over anything already there.
+  const settings = localTestSettings(process.env);
+  const containers = (await run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${settings.project}`], { capture: true })).out.split('\n').filter(Boolean).length;
+  const busyPorts = [];
+  for (const p of [settings.pgPort, settings.s3Port, settings.appPort]) if (await portInUse(p)) busyPorts.push(p);
+  const problems = preflightProblems({ stateExists: fs.existsSync(path.join(ROOT, localStatePaths(settings.project).dir)), containers, busyPorts });
+  if (problems.length) throw new Error(`local:test refuses to start (nothing was changed):\n  ${problems.join('\n  ')}`);
   const summary = { project: settings.project, steps: {} };
   let app;
   try {
@@ -282,14 +342,14 @@ async function localTest(settings) {
     if (Object.values(summary.steps.sync).some((o) => o !== 'published')) throw new Error(`first sync did not publish every period: ${JSON.stringify(summary.steps.sync)}`);
     if (Object.values(summary.steps.syncAgain).some((o) => o !== 'skipped_unchanged')) throw new Error(`second sync was not a no-op: ${JSON.stringify(summary.steps.syncAgain)}`);
 
-    const secrets = loadSecrets({ create: false });
+    const secrets = loadSecrets(settings, { create: false });
     const base = `http://127.0.0.1:${settings.appPort}`;
     app = spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
       cwd: ROOT,
       env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
       stdio: ['ignore', 'ignore', 'inherit'],
     });
-    await waitFor('next start', async () => (await fetch(`${base}/api/hello`)).status === 200, 60_000);
+    summary.steps.appReady = await waitForOwnServer(app, settings.appPort);
 
     const anon = await getJson(`${base}/api/v1/costs/published`);
     if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
@@ -343,7 +403,7 @@ const COMMANDS = {
   seed: (s) => seed(s),
   sync: (s) => sync(s),
   down: (s, args) => down(s, { volumes: args.includes('-v') || args.includes('--volumes') }),
-  test: (s) => localTest(s),
+  test: () => localTest(),
 };
 
 async function main(argv) {

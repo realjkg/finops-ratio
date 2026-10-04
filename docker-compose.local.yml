@@ -2,7 +2,7 @@
 # NOT a production artefact: production hosting is an owner decision
 # (docs/evidence/slice-2/DEPLOYMENT_BRIEF.md). Drive it with the npm scripts:
 #   npm run local:up | local:migrate | local:seed | local:sync | local:down [-- -v] | local:test
-# They generate the secrets below into .ratio-local/env (gitignored) and pass
+# They generate the secrets below into .ratio-local/<project>/env (gitignored) and pass
 # them in; running `docker compose` by hand without them fails fast.
 #
 # - Every port is published on 127.0.0.1 only.
@@ -23,7 +23,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_DB: postgres
-      POSTGRES_PASSWORD: "${RATIO_LOCAL_PG_SUPERUSER_PASSWORD:?run npm run local:up (it generates .ratio-local/env)}"
+      POSTGRES_PASSWORD: "${RATIO_LOCAL_PG_SUPERUSER_PASSWORD:?run npm run local:up (it generates .ratio-local/<project>/env)}"
     ports:
       - "127.0.0.1:${RATIO_LOCAL_PG_PORT:-54329}:5432"
     volumes:

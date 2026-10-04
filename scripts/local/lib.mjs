@@ -2,10 +2,39 @@
 // No Docker, no network, no database here: everything is unit-tested in
 // scripts/local/local.test.mjs. Nothing in this file is a production setting.
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
-/** Gitignored; holds the generated local secrets. Removed by `local:down -v`. */
+/**
+ * Gitignored. Holds one directory PER COMPOSE PROJECT (`.ratio-local/<project>/env`),
+ * so two stacks (a developer's and local:test's, or two checkouts' projects)
+ * never share or wipe each other's secrets. `local:down -v` removes only its
+ * own project's directory.
+ */
 export const LOCAL_STATE_DIR = '.ratio-local';
-export const LOCAL_ENV_FILE = `${LOCAL_STATE_DIR}/env`;
+
+export function localStatePaths(project) {
+  if (typeof project !== 'string' || !PROJECT_RE.test(project)) throw new Error('invalid compose project name for the local state directory');
+  const dir = `${LOCAL_STATE_DIR}/${project}`;
+  return { dir, envFile: `${dir}/env` };
+}
+
+/** Removes `<root>/.ratio-local/<project>/`, then `.ratio-local/` itself if it is now empty. */
+export function removeProjectState(root, project) {
+  const { dir } = localStatePaths(project);
+  fs.rmSync(path.join(root, dir), { recursive: true, force: true });
+  const parent = path.join(root, LOCAL_STATE_DIR);
+  if (fs.existsSync(parent) && fs.readdirSync(parent).length === 0) fs.rmdirSync(parent);
+}
+
+/** Writes the env file owner-only: directory 0700, file 0600 (also tightening an existing file). */
+export function writeEnvFileSecure(file, env) {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700);
+  fs.writeFileSync(file, serializeEnvFile(env), { mode: 0o600 });
+  fs.chmodSync(file, 0o600);
+}
 
 /** Fixed local names (non-secret). */
 export const LOCAL_NAMES = Object.freeze({
@@ -90,6 +119,97 @@ export function localSettings(env) {
     s3Port: port(env, 'RATIO_LOCAL_S3_PORT', 18343),
     appPort: port(env, 'RATIO_LOCAL_APP_PORT', 3100),
   };
+}
+
+/**
+ * local:test's OWN project and ports (RATIO_LOCAL_TEST_*), never the
+ * developer's RATIO_LOCAL_* stack: it brings its stack up and tears it down
+ * with `down -v`, so it must not be able to point at a running dev stack.
+ */
+export function localTestSettings(env) {
+  const project = env.RATIO_LOCAL_TEST_PROJECT ?? 'ratio-local-test';
+  if (!PROJECT_RE.test(project)) throw new Error('RATIO_LOCAL_TEST_PROJECT must be lower-case letters, digits, - or _');
+  const test = {
+    project,
+    pgPort: port(env, 'RATIO_LOCAL_TEST_PG_PORT', 54339),
+    s3Port: port(env, 'RATIO_LOCAL_TEST_S3_PORT', 18353),
+    appPort: port(env, 'RATIO_LOCAL_TEST_APP_PORT', 3110),
+  };
+  const dev = localSettings(env);
+  if (test.project === dev.project) throw new Error(`local:test refuses the developer stack's project name (${dev.project})`);
+  for (const p of [test.pgPort, test.s3Port, test.appPort]) {
+    if ([dev.pgPort, dev.s3Port, dev.appPort].includes(p)) throw new Error(`local:test refuses port ${p}: the developer stack uses it`);
+  }
+  return test;
+}
+
+/** What makes local:test refuse to start (it would otherwise reuse or wipe something it did not create). */
+export function preflightProblems({ stateExists, containers, busyPorts }) {
+  const out = [];
+  if (stateExists) out.push('local state for this project already exists (another stack or an interrupted run): run local:down -- -v for it first');
+  if (containers > 0) out.push(`${containers} container(s) of this compose project already exist`);
+  if (busyPorts.length) out.push(`port(s) already in use on 127.0.0.1: ${busyPorts.join(', ')}`);
+  return out;
+}
+
+/**
+ * Linux: true when the process `pid` (or a descendant) holds the LISTENING
+ * TCP socket on `port` (from <procRoot>/net/tcp{,6} and <procRoot>/<pid>/fd);
+ * false when another process does or nothing listens; null when /proc is not
+ * available (the caller relies on its pre-start port check instead).
+ */
+export function ownsListeningSocket({ pid, port: p, procRoot = '/proc' }) {
+  const tables = ['tcp', 'tcp6'].map((t) => path.join(procRoot, 'net', t)).filter((f) => fs.existsSync(f));
+  if (tables.length === 0) return null;
+  const listening = new Set();
+  for (const t of tables) {
+    for (const line of fs.readFileSync(t, 'utf8').split('\n').slice(1)) {
+      const f = line.trim().split(/\s+/);
+      if (f.length < 10) continue;
+      const local = f[1];
+      const portHex = local.slice(local.lastIndexOf(':') + 1);
+      if (f[3] === '0A' && parseInt(portHex, 16) === p) listening.add(f[9]);
+    }
+  }
+  if (listening.size === 0) return false;
+  const seen = new Set();
+  const todo = [String(pid)];
+  while (todo.length) {
+    const cur = todo.pop();
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    const fdDir = path.join(procRoot, cur, 'fd');
+    let fds;
+    try {
+      fds = fs.readdirSync(fdDir);
+    } catch {
+      fds = [];
+    }
+    for (const fd of fds) {
+      let target;
+      try {
+        target = fs.readlinkSync(path.join(fdDir, fd));
+      } catch {
+        continue;
+      }
+      const m = /^socket:\[(\d+)\]$/.exec(target);
+      if (m && listening.has(m[1])) return true;
+    }
+    let tasks;
+    try {
+      tasks = fs.readdirSync(path.join(procRoot, cur, 'task'));
+    } catch {
+      tasks = [];
+    }
+    for (const t of tasks) {
+      try {
+        todo.push(...fs.readFileSync(path.join(procRoot, cur, 'task', t, 'children'), 'utf8').split(/\s+/).filter(Boolean));
+      } catch {
+        // a task that ended meanwhile
+      }
+    }
+  }
+  return false;
 }
 
 export function connectionUrl({ user, password, port: p, database }) {
