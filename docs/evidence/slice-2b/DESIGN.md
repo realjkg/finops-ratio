@@ -401,7 +401,8 @@ worker or the expected side.
 - The worker does not check that a source's rows match the provider its
   source type implies. An "AWS Data Exports" source carrying Microsoft and
   Oracle rows is accepted. For a real AWS export that cannot happen, but a
-  misconfigured bucket could feed foreign rows.
+  misconfigured bucket could feed foreign rows. Tracked in
+  realjkg/finops-ratio#62.
 - The `NULL` token is a sample-format artifact; how real exports write a
   null is confirmed only when a real export is connected (brief D-02,
   optional owner action).

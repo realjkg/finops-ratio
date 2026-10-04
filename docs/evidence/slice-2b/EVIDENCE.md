@@ -307,4 +307,20 @@ and no migration or Slice 0/1 test changed.
 
 **Finding (backlog, not changed):** the worker does not check `ProviderName`
 against the source type. An "AWS Data Exports" source carrying Microsoft and
-Oracle rows is accepted (DESIGN §9).
+Oracle rows is accepted (DESIGN §9). Tracked in **realjkg/finops-ratio#62**.
+
+## 10. Coordinator decisions on §9 (local, not pushed)
+
+| Decision | What changed | Commit |
+|---|---|---|
+| 1. Python in CI accepted | CI sets up Python 3.12 with `actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065` (v5.6.0, SHA-pinned like the governance workflow's actions; `ci.yml`'s other actions use tags). This comes before `npm ci`, because `npm test` runs P2. A separate step asserts `>= 3.10`. Documented in `README.md` (Quick start) and DESIGN §7. Fail-not-skip is kept. A8 guards the pin and the step order statically | 654b829 |
+| 2. Deployment brief updated (evidence update under delegation) | `docs/evidence/slice-2/DEPLOYMENT_BRIEF.md`: governance line 3, the status row and D-02 (Decision log and §1) now say **PERFORMED on public sample data**. They link this file and give the dataset commit and both files' control totals. D-02 restates the limits, unchanged: a real AWS manifest, real-export null encoding, Google data, real billing data. The §8 check is ticked, worded "on public sample data". The production go-live gate, the owner actions (§7) and the D-09 check are **not** touched | (this commit) |
+| 3. `ProviderName` vs source type | the pointer to #62 above | (this commit) |
+
+Gates after decision 1:
+- `npx vitest run scripts/governance scripts/local scripts/acceptance`:
+  608 passed, then 51/51 in `acceptance.test.mjs` with the new CI guard;
+- the CI YAML parses, and its step order is checked;
+- the assertion command exits 0 locally (Python 3.11.15).
+
+GitHub CI was not run (nothing is pushed).
