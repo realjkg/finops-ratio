@@ -72,6 +72,8 @@ import {
   CONTROL_TOTALS_FILE as SAMPLE_CONTROL_TOTALS_FILE,
   SAMPLE_NAMES,
   artifactSetProblems,
+  rowProblems,
+  UPSTREAM_COMPARED_FIELDS,
   batchProblems,
   compareAcceptance,
   localAcceptanceSettings,
@@ -136,6 +138,8 @@ const MAX_PAGES = 100;
 const CONTROL_CALCULATOR_TIMEOUT_MS = 120_000;
 /** local:acceptance reads with the route's largest page size (query.ts: 1..500). */
 const ACCEPTANCE_PAGE_LIMIT = 500;
+/** Upstream-derived fields compared per row (UPSTREAM_COMPARED_FIELDS), recorded in the summary. */
+const API_ROW_FIELDS_COMPARED = UPSTREAM_COMPARED_FIELDS.length;
 
 // --- processes ---------------------------------------------------------------
 
@@ -623,11 +627,11 @@ async function acceptance(args) {
   fail(`dataset ${opts.dataset} (${pin.localPath}) does not match dataset.json; re-run \`npm run sample:fetch\``, verifyDatasetBytes(bytes, pin));
 
   const calcStarted = Date.now();
-  const calc = await run('python3', [CONTROL_CALCULATOR, '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
+  const calc = await run('python3', [CONTROL_CALCULATOR, '--rows', '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
   if (calc.code !== 0) throw new Error(`the control-total calculator exited ${calc.code}`);
   const control = JSON.parse(calc.out);
   const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, SAMPLE_CONTROL_TOTALS_FILE), 'utf8'))[opts.dataset];
-  if (JSON.stringify({ input: control.input, totals: control.totals }) !== JSON.stringify(pinned)) {
+  if (JSON.stringify({ input: control.input, columns: control.columns, totals: control.totals }) !== JSON.stringify(pinned)) {
     throw new Error(`the calculator's output differs from the pinned ${SAMPLE_CONTROL_TOTALS_FILE} (${opts.dataset})`);
   }
   const calcMs = Date.now() - calcStarted;
@@ -697,6 +701,9 @@ async function acceptance(args) {
       const { rows, totals, pages } = await timed('apiRead', () => readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: ACCEPTANCE_PAGE_LIMIT, maxPages }));
       steps.api = { totals, rows: rows.length, pages, limit: ACCEPTANCE_PAGE_LIMIT };
       fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, dataShas)]);
+      // Every API row against its UPSTREAM record (the calculator's --rows), every field (challenger M1).
+      fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control));
+      steps.rowsCompared = { rows: control.rows.length, fieldsPerRow: API_ROW_FIELDS_COMPARED, extraColumns: control.columns.extra.length };
 
       // Evidence re-hash and the catalog.
       const rehash = await timed('evidenceRehash', () => rehashEvidence(settings, secrets, sourceId, dataShas));

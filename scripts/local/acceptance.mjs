@@ -45,7 +45,13 @@ export const MUTATIONS = Object.freeze([
   'swap-billed',
   'skip-null-conversion',
   'skip-period-split',
+  // Slice 2b challenger M1: values outside Id/BilledCost/EffectiveCost.
+  'corrupt-text-columns',
+  'corrupt-list-cost',
 ]);
+
+/** The six text columns the challenger corrupted (M1); all are mapped API fields except ChargeDescription (extraColumns). */
+const CORRUPT_TEXT_COLUMNS = ['ServiceName', 'ProviderName', 'ChargeDescription', 'ResourceId', 'ChargeCategory', 'ServiceCategory'];
 
 export const DATASET_KEYS = Object.freeze(['1k', '10k']);
 
@@ -349,9 +355,20 @@ function mutatePlan(bytes, clean, kind) {
   const largest = plan.periods.reduce((a, b) => (recordCount(b) > recordCount(a) ? b : a));
   const recs = largest.files[0].records;
   switch (kind) {
+    case 'corrupt-text-columns': {
+      const fields = splitRecord(recs[0]);
+      for (const c of CORRUPT_TEXT_COLUMNS) {
+        const i = colIndex(c);
+        const v = `${isNullToken(fields[i]) ? '' : fields[i].value}~mutated`;
+        fields[i] = { raw: `"${v.replaceAll('"', '""')}"`, value: v, quoted: true };
+      }
+      recs[0] = joinRecord(fields);
+      break;
+    }
     case 'corrupt-billed':
-    case 'corrupt-effective': {
-      const i = colIndex(kind === 'corrupt-billed' ? 'BilledCost' : 'EffectiveCost');
+    case 'corrupt-effective':
+    case 'corrupt-list-cost': {
+      const i = colIndex({ 'corrupt-billed': 'BilledCost', 'corrupt-effective': 'EffectiveCost', 'corrupt-list-cost': 'ListCost' }[kind]);
       const at = recs.findIndex((l) => {
         const f = splitRecord(l)[i];
         return f.value !== '' && DEC_RE.test(f.value);
@@ -564,6 +581,112 @@ export function artifactSetProblems(rows, stagedDataSha256s) {
   for (const s of want) if (!got.has(s)) problems.push(`staged data object ${s} has no row in the API`);
   for (const s of got) if (!want.has(s)) problems.push(`API rows reference artifact ${s}, which was not staged`);
   return problems;
+}
+
+/**
+ * The fields of a GET /api/v1/costs/published row that come from the upstream
+ * record (src/server/costs/publishedCosts.ts). Each is compared exactly with
+ * the calculator's expected row.
+ */
+export const UPSTREAM_COMPARED_FIELDS = Object.freeze([
+  'billingPeriod',
+  'chargePeriodStart',
+  'chargePeriodEnd',
+  'billedCost',
+  'effectiveCost',
+  'listCost',
+  'contractedCost',
+  'billingCurrency',
+  'providerName',
+  'serviceName',
+  'serviceCategory',
+  'chargeCategory',
+  'resourceId',
+  'subAccountId',
+  'billingAccountId',
+  'usageQuantity',
+  'usageUnit',
+  'pricingQuantity',
+  'pricingUnit',
+  'focusVersion',
+  'extraColumns',
+]);
+
+/** Batch metadata: no upstream counterpart, so only its shape is checked (plus artifactSetProblems / the distinct-key check). */
+const METADATA_SHAPES = Object.freeze({
+  sourceId: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  batchId: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  artifactSha256: /^[0-9a-f]{64}$/,
+  rowOrdinal: /^[0-9]+$/,
+  publishedAt: /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$/,
+});
+
+/** Every field of an API row: exactly these, no more, no fewer. */
+export const API_ROW_FIELDS = Object.freeze([...UPSTREAM_COMPARED_FIELDS, ...Object.keys(METADATA_SHAPES)]);
+
+const sortedObject = (o) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
+const shown = (v) => {
+  const s = JSON.stringify(v && typeof v === 'object' ? sortedObject(v) : v);
+  return s === undefined ? 'undefined' : s.length > 300 ? `${s.slice(0, 300)}…` : s;
+};
+
+/**
+ * Full-row comparison (challenger M1). Every API row is matched by
+ * extraColumns.Id to the calculator's expected row for the UPSTREAM record
+ * (never the staged copy), and each of UPSTREAM_COMPARED_FIELDS must be
+ * equal exactly. That covers money and quantities (numeric::text), the
+ * dates, the timestamps, every text field, focusVersion and extraColumns
+ * (same keys, same values). Also checked: the row's field set is exactly
+ * API_ROW_FIELDS; extraColumns only holds columns the upstream file
+ * classifies as extra; the metadata fields have their shape; one source;
+ * every upstream record has exactly one API row. Returns the problems,
+ * capped at `limit` plus a count line.
+ */
+export function rowProblems(apiRows, expected, { limit = 20 } = {}) {
+  const problems = [];
+  const want = new Map(expected.rows.map((r) => [r.extraColumns.Id, r]));
+  const extraAllowed = new Set(expected.columns.extra);
+  const seen = new Set();
+  const sources = new Set();
+  apiRows.forEach((row, i) => {
+    const id = row.extraColumns?.Id;
+    if (typeof id !== 'string' || id === '') {
+      problems.push(`API row ${i} has no extraColumns.Id`);
+      return;
+    }
+    if (seen.has(id)) {
+      problems.push(`Id ${id} appears in more than one API row`);
+      return;
+    }
+    seen.add(id);
+    const keys = Object.keys(row);
+    const missing = API_ROW_FIELDS.filter((f) => !keys.includes(f));
+    const unexpected = keys.filter((k) => !API_ROW_FIELDS.includes(k));
+    if (missing.length || unexpected.length) {
+      problems.push(`row Id=${id}: fields differ from the API contract (missing: ${missing.join(', ') || 'none'}; unexpected: ${unexpected.join(', ') || 'none'})`);
+      return;
+    }
+    for (const [f, re] of Object.entries(METADATA_SHAPES)) {
+      if (typeof row[f] !== 'string' || !re.test(row[f])) problems.push(`row Id=${id}: ${f} ${shown(row[f])} has the wrong shape`);
+    }
+    if (METADATA_SHAPES.sourceId.test(row.sourceId)) sources.add(row.sourceId);
+    const exp = want.get(id);
+    if (!exp) {
+      problems.push(`row Id=${id}: not an upstream record`);
+      return;
+    }
+    for (const k of Object.keys(row.extraColumns)) {
+      if (!extraAllowed.has(k)) problems.push(`row Id=${id}: extraColumns has ${k}, which is not an extra column of the upstream file`);
+    }
+    for (const f of UPSTREAM_COMPARED_FIELDS) {
+      // extraColumns: same keys and values, compared in full (shown() only truncates the message).
+      const equal = f === 'extraColumns' ? row[f] !== null && typeof row[f] === 'object' && JSON.stringify(sortedObject(row[f])) === JSON.stringify(sortedObject(exp[f])) : row[f] === exp[f];
+      if (!equal) problems.push(`row Id=${id}: ${f} ${shown(row[f])} != upstream ${shown(exp[f])}`);
+    }
+  });
+  for (const id of want.keys()) if (!seen.has(id)) problems.push(`upstream record Id=${id} has no API row`);
+  if (sources.size > 1) problems.push(`the API rows come from ${sources.size} sources, expected 1`);
+  return problems.length > limit ? [...problems.slice(0, limit), `… and ${problems.length - limit} more row problems`] : problems;
 }
 
 /** Per period: the control's row count and billed total. The worker publishes one currency per batch. */

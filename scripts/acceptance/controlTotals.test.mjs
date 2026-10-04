@@ -21,7 +21,7 @@ const DATASET = JSON.parse(fs.readFileSync(path.join(ROOT, 'fixtures', 'focus-1.
 const PINNED = JSON.parse(fs.readFileSync(path.join(ROOT, 'fixtures', 'focus-1.0-sample', 'control-totals.json'), 'utf8'));
 
 function python(args) {
-  const r = spawnSync('python3', args, { cwd: ROOT, encoding: 'utf8', timeout: 120_000, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
+  const r = spawnSync('python3', args, { cwd: ROOT, encoding: 'utf8', timeout: 120_000, maxBuffer: 256 * 1024 * 1024, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' } });
   if (r.error) throw new Error(`python3 could not be run (required by the acceptance tooling): ${r.error.message}`);
   return r;
 }
