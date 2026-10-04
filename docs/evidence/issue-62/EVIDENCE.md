@@ -571,3 +571,38 @@ ids are random UUIDs, and the local stack has one tenant. It is fixed anyway.
 - lint and `tsc --noEmit`: exit 0;
 - `npm test`: 110 files, all passed;
 - `local:acceptance` 1k (project `ratio-orch-acc`, ports 56490–56492): `pass: true`. 2024-09 was published with 942 rows / `18.00663861840`, `validation_error_count` 57 and `error_codes {PROVIDER_MISMATCH: 57}`. 2024-10 was quarantined with `PROVIDER_MISMATCH`. `down -v` removed the stack.
+
+## 14. PR #67 Copilot review: the control validates excluded records too
+
+Copilot (review 5407215437, thread r4178490371) found a mismatch between the
+worker and the independent calculator.
+- **The worker:** `load.ts` runs `validateRow` on every record **before** the
+  provider check. An invalid foreign-provider record is therefore a
+  validation error, and the batch quarantines.
+- **The calculator:** `--rows --provider AWS` counted such a record as a plain
+  exclusion without running `expected_row()`, so it would predict a
+  publication.
+
+| Commit | Kind |
+|---|---|
+| bd1fc1c `test_focus_control_totals.py` `test_rows_validate_excluded_records_like_the_worker` | **red** (`red/red-copilot-excluded-validation.txt`: a Microsoft record with `ChargePeriodStart` = `not-a-timestamp` was not rejected) |
+| (this fix, after bd1fc1c) `focus_control_totals.py`: with `--rows`, an excluded record goes through `expected_row()` before it is counted | green |
+
+The test covers two invalid foreign records: a bad timestamp, and a
+non-numeric `ListCost`. Each must now be rejected, as the same record from
+the allowed provider already was. A valid foreign record is still a plain
+exclusion.
+
+Without `--rows`, the calculator validates only the totals columns, for
+allowed and excluded records alike. That behaviour is unchanged.
+
+**Gates after the fix:**
+- the Python suite: 28 tests OK;
+- `controlTotals.test.mjs`: 5 passed (the real 1k sample, `--rows --provider AWS`: 942 / `18.00663861840`, 57 + 1 excluded);
+- lint and `tsc`: exit 0;
+- `npm test`: all passed;
+- `local:acceptance` (project `ratio-orch-acc`, ports 56490–56492):
+  - **10k** `pass: true`: 9441 / `112.16617543240` published, `{PROVIDER_MISMATCH: 557}`, 2024-10 quarantined;
+  - **1k** `pass: true`: 942 / `18.00663861840`, `{PROVIDER_MISMATCH: 57}`, 2024-10 quarantined.
+
+Every excluded record in both upstream samples passes `expected_row()`.

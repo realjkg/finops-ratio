@@ -357,12 +357,15 @@ def compute(data, row_id_column='Id', rows=False, focus_version='1.0', providers
             if _is_null(provider_field) or provider_field[0] == '':
                 raise ControlTotalsError(f'record {n}: ProviderName is null or empty')
             if provider_field[0] not in providers:
-                e = excluded.setdefault(period, {})
-                e[provider_field[0]] = e.get(provider_field[0], 0) + 1
                 if rows:
+                    # The worker validates the whole row BEFORE the provider check (load.ts), so an
+                    # invalid foreign record is a validation error, not an exclusion (PR #67 review).
+                    expected_row(rec, pos, header, period, focus_version, n)
                     if id_field[0] in seen_ids:
                         raise ControlTotalsError(f'record {n}: {row_id_column} is not unique')
                     seen_ids.add(id_field[0])
+                e = excluded.setdefault(period, {})
+                e[provider_field[0]] = e.get(provider_field[0], 0) + 1
                 continue
 
         g = groups.setdefault((period, currency), {'rows': 0, 'billed': [], 'effective': [], 'nulls': 0, 'lines': []})
