@@ -692,7 +692,7 @@ async function acceptance(args) {
 
       // The real worker CLI, twice, judged on its exit code AND its evidence
       // record (syncTwice; Copilot 4177490229 / 4177490261).
-      const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
+      const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation, excludedRows: p.excludedRows }));
       await syncTwice({
         control,
         sync: (name) => timed(name, () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey)),
