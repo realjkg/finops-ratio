@@ -287,7 +287,7 @@ describe('D7 the fake (synthetic) source type', () => {
     expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCount: '1', billedTotal: '1.00', excludedRows: '1' });
     const shown = await showBatch(t.pool, s.tenantId, r.periods[0].batchId!);
     expect(shown.errors.map((e) => [e.rowOrdinal, e.code, e.message])).toEqual([
-      ['2', 'PROVIDER_MISMATCH', 'ProviderName is not allowed for source type fake (allowed: SyntheticCloud); row excluded'],
+      ['2', 'PROVIDER_MISMATCH', 'ProviderName is not allowed for source type fake (allowed: SyntheticCloud, SyntheticAWS, SyntheticAzure, SyntheticGCP); row excluded'],
     ]);
   });
 });
@@ -326,6 +326,29 @@ describe('D9 synthetic providers need the explicit opt-in (orchestrator decision
     const r = await sync(s, synthetic(), { settings: { allowSyntheticProviders: true } });
     expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCount: '2', billedTotal: '3.00' });
     expect(r.periods[0]).not.toHaveProperty('excludedRows');
+  });
+
+  it('the fixed synthetic set: OFF ⇒ each excluded; ON ⇒ each accepted; real foreign names still excluded with it ON', async () => {
+    const rows = [
+      row('SyntheticCloud', '1.00', 's1'),
+      row('SyntheticAWS', '2.00', 's2'),
+      row('SyntheticAzure', '3.00', 's3'),
+      row('SyntheticGCP', '4.00', 's4'),
+      row('AWS', '5.00', 'a1'),
+      row('Microsoft', '6.00', 'm1'),
+      row('Amazon Web Services', '7.00', 'l1'),
+    ];
+    const off = await awsSource();
+    const rOff = await sync(off, new FakeFocusSource([period([['run/x.csv.gz', csvGz(rows)]])]), { settings: { allowSyntheticProviders: false } });
+    expect(rOff.periods[0]).toMatchObject({ outcome: 'published', rowCount: '1', billedTotal: '5.00', excludedRows: '6' });
+    const on = await awsSource();
+    const rOn = await sync(on, new FakeFocusSource([period([['run/x.csv.gz', csvGz(rows)]])]), { settings: { allowSyntheticProviders: true } });
+    expect(rOn.periods[0]).toMatchObject({ outcome: 'published', rowCount: '5', billedTotal: '15.00', excludedRows: '2' });
+    const shown = await showBatch(t.pool, on.tenantId, rOn.periods[0].batchId!);
+    expect(shown.errors.map((e) => [e.rowOrdinal, e.code])).toEqual([
+      ['6', 'PROVIDER_MISMATCH'],
+      ['7', 'PROVIDER_MISMATCH'],
+    ]);
   });
 
   it('library default: follows RATIO_ALLOW_SYNTHETIC_PROVIDERS of the process (the DB suites set it in their vitest config); unset ⇒ OFF', async () => {
@@ -380,6 +403,6 @@ describe('D10 the worker CLI: the opt-in comes from its env only, and is logged 
     expect(r.code).toBe(0);
     const logs = optInLogs(r.err);
     expect(logs).toHaveLength(1);
-    expect(logs[0]).toMatchObject({ level: 'warn', providers: ['SyntheticCloud'] });
+    expect(logs[0]).toMatchObject({ level: 'warn', providers: ['SyntheticCloud', 'SyntheticAWS', 'SyntheticAzure', 'SyntheticGCP'] });
   });
 });

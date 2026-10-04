@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROVIDER_MISMATCH,
   SOURCE_TYPE_PROVIDERS,
-  SYNTHETIC_PROVIDER_NAMES,
+  SYNTHETIC_PROVIDERS,
   checkProviderHeader,
   checkProviderName,
   providerPolicyFor,
@@ -34,13 +34,13 @@ describe('U1 the allowlist per source type', () => {
   it('is exactly AWS for AWS Data Exports and nothing for fake; the synthetic providers are a separate, gated list', () => {
     expect(PROVIDER_MISMATCH).toBe('PROVIDER_MISMATCH');
     expect(SOURCE_TYPE_PROVIDERS).toEqual({ 'aws-data-exports': ['AWS'], fake: [] });
-    expect(SYNTHETIC_PROVIDER_NAMES).toEqual(['SyntheticCloud']);
+    expect(SYNTHETIC_PROVIDERS).toEqual(['SyntheticCloud', 'SyntheticAWS', 'SyntheticAzure', 'SyntheticGCP']);
   });
 
   it('cannot be changed at runtime', () => {
     expect(Object.isFrozen(SOURCE_TYPE_PROVIDERS)).toBe(true);
     for (const list of Object.values(SOURCE_TYPE_PROVIDERS)) expect(Object.isFrozen(list)).toBe(true);
-    expect(Object.isFrozen(SYNTHETIC_PROVIDER_NAMES)).toBe(true);
+    expect(Object.isFrozen(SYNTHETIC_PROVIDERS)).toBe(true);
     for (const opts of [OFF, ON]) {
       const p = awsPolicy(opts);
       expect(Object.isFrozen(p)).toBe(true);
@@ -50,9 +50,9 @@ describe('U1 the allowlist per source type', () => {
 
   it('resolves the source type from the source row (kind + config.layout); synthetic providers only with the opt-in', () => {
     expect(providerPolicyFor(AWS_SOURCE, OFF)).toEqual({ sourceType: 'aws-data-exports', allowed: ['AWS'] });
-    expect(providerPolicyFor(AWS_SOURCE, ON)).toEqual({ sourceType: 'aws-data-exports', allowed: ['AWS', 'SyntheticCloud'] });
+    expect(providerPolicyFor(AWS_SOURCE, ON)).toEqual({ sourceType: 'aws-data-exports', allowed: ['AWS', 'SyntheticCloud', 'SyntheticAWS', 'SyntheticAzure', 'SyntheticGCP'] });
     expect(providerPolicyFor({ kind: 'fake', config: { fixture: 'synthetic-base' } }, OFF)).toEqual({ sourceType: 'fake', allowed: [] });
-    expect(providerPolicyFor({ kind: 'fake', config: {} }, ON)).toEqual({ sourceType: 'fake', allowed: ['SyntheticCloud'] });
+    expect(providerPolicyFor({ kind: 'fake', config: {} }, ON)).toEqual({ sourceType: 'fake', allowed: ['SyntheticCloud', 'SyntheticAWS', 'SyntheticAzure', 'SyntheticGCP'] });
   });
 
   it('only a literal true turns the opt-in on', () => {
@@ -94,7 +94,7 @@ describe('U1 checkProviderName', () => {
   it('excludes a foreign provider with PROVIDER_MISMATCH on column ProviderName', () => {
     for (const [opts, allowed] of [
       [OFF, 'AWS'],
-      [ON, 'AWS, SyntheticCloud'],
+      [ON, 'AWS, SyntheticCloud, SyntheticAWS, SyntheticAzure, SyntheticGCP'],
     ] as const) {
       for (const foreign of ['Microsoft', 'Oracle', 'Google Cloud', 'Alibaba Cloud']) {
         const r = checkProviderName(foreign, awsPolicy(opts));
@@ -110,7 +110,7 @@ describe('U1 checkProviderName', () => {
 
   it('is an exact match: case, whitespace, the long name and prefixes all mismatch', () => {
     const p = awsPolicy(ON);
-    for (const near of ['aws', 'Aws', 'aWS', ' AWS', 'AWS ', 'AWS\t', 'A WS', 'AWSX', 'AW', 'AWS, Inc.', 'Amazon Web Services', 'Amazon Web Services, Inc.', 'amazon web services', 'ＡＷＳ', 'syntheticcloud', 'SyntheticCloud ']) {
+    for (const near of ['aws', 'Aws', 'aWS', ' AWS', 'AWS ', 'AWS\t', 'A WS', 'AWSX', 'AW', 'AWS, Inc.', 'Amazon Web Services', 'Amazon Web Services, Inc.', 'amazon web services', 'ＡＷＳ', 'syntheticcloud', 'SyntheticCloud ', 'syntheticaws', 'SyntheticAWS ', 'SyntheticAws', 'Synthetic AWS', 'SyntheticOracle']) {
       const r = checkProviderName(near, p);
       expect(r.ok, JSON.stringify(near)).toBe(false);
       if (!r.ok) expect(r.error.code, JSON.stringify(near)).toBe('PROVIDER_MISMATCH');
@@ -123,7 +123,7 @@ describe('U1 checkProviderName', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.exclude).toBe(true);
-      expect(r.error.message).toBe('ProviderName is not allowed for source type fake (allowed: SyntheticCloud); row excluded');
+      expect(r.error.message).toBe('ProviderName is not allowed for source type fake (allowed: SyntheticCloud, SyntheticAWS, SyntheticAzure, SyntheticGCP); row excluded');
     }
     const off = checkProviderName('SyntheticCloud', providerPolicyFor({ kind: 'fake', config: {} }, OFF)!);
     expect(off.ok).toBe(false);
@@ -151,6 +151,53 @@ describe('U1 checkProviderName', () => {
     const p = awsPolicy(ON);
     for (const v of ['constructor', '__proto__', 'toString', 'length', '0', 'includes']) {
       expect(checkProviderName(v, p).ok, v).toBe(false);
+    }
+  });
+});
+
+describe('U1 the fixed SYNTHETIC_PROVIDERS set under the opt-in (orchestrator, 2026-10-04)', () => {
+  const SOURCES = [
+    ['aws-data-exports', AWS_SOURCE],
+    ['fake', { kind: 'fake', config: { fixture: 'synthetic-base' } }],
+  ] as const;
+  const SYNTHETIC = ['SyntheticCloud', 'SyntheticAWS', 'SyntheticAzure', 'SyntheticGCP'];
+
+  it('opt-in OFF: none of them is accepted by any source type', () => {
+    for (const [type, src] of SOURCES) {
+      const p = providerPolicyFor(src, OFF)!;
+      for (const name of SYNTHETIC) {
+        const r = checkProviderName(name, p);
+        expect(r.ok, `${type} ${name}`).toBe(false);
+        if (!r.ok) expect(r.error.code, `${type} ${name}`).toBe('PROVIDER_MISMATCH');
+      }
+    }
+  });
+
+  it('opt-in ON: every one of them is accepted by every source type', () => {
+    for (const [type, src] of SOURCES) {
+      const p = providerPolicyFor(src, ON)!;
+      for (const name of SYNTHETIC) expect(checkProviderName(name, p), `${type} ${name}`).toEqual({ ok: true });
+    }
+  });
+
+  it('opt-in ON never widens real-provider acceptance: real names are checked against the per-type allowlist exactly as with it OFF', () => {
+    const REAL = ['AWS', 'Amazon Web Services', 'Microsoft', 'Oracle', 'Google Cloud', 'Alibaba Cloud', 'aws', 'AWS ', 'Azure', 'GCP', 'Google', 'Cloud'];
+    for (const [type, src] of SOURCES) {
+      const on = providerPolicyFor(src, ON)!;
+      const off = providerPolicyFor(src, OFF)!;
+      for (const name of REAL) expect(checkProviderName(name, on).ok, `${type} ${name}`).toBe(checkProviderName(name, off).ok);
+    }
+    // Spelled out: AWS stays allowed for aws-data-exports only; fake still refuses it.
+    expect(checkProviderName('AWS', providerPolicyFor(AWS_SOURCE, ON)!).ok).toBe(true);
+    expect(checkProviderName('AWS', providerPolicyFor({ kind: 'fake', config: {} }, ON)!).ok).toBe(false);
+    // The base lists stay real providers only.
+    for (const list of Object.values(SOURCE_TYPE_PROVIDERS)) for (const name of SYNTHETIC) expect(list).not.toContain(name);
+  });
+
+  it('opt-in ON: the policy is exactly the per-type list followed by the synthetic set, and nothing else', () => {
+    for (const [type, src] of SOURCES) {
+      expect(providerPolicyFor(src, ON)!.allowed, type).toEqual([...SOURCE_TYPE_PROVIDERS[type], ...SYNTHETIC]);
+      expect(providerPolicyFor(src, OFF)!.allowed, type).toEqual([...SOURCE_TYPE_PROVIDERS[type]]);
     }
   });
 });
