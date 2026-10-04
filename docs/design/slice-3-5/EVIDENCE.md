@@ -78,8 +78,15 @@ Appendix B (B.4, B.5.6).
 
 ## 5. Governance classification of this revision
 
-Recorded at commit time with
-`node scripts/governance/classify-risk.mjs --git origin/main...HEAD`; the
-result is quoted in the design agent's report to the orchestrator. It is
-expected to be **restricted** (the retention terms and the named
-secret-bearing variables), and that is correct.
+`node scripts/governance/classify-risk.mjs --git origin/main...HEAD` at
+`9b33984` (revision 3):
+
+- `"risk": "restricted"`, classes `retention` and `secrets`;
+- `secrets.password-assignment` on `APPENDIX_B_SIZING.md` (the
+  `POSTGRES_PASSWORD=<throwaway>` run command, no secret value);
+- `retention.mention` on `APPENDIX_D_SCHEMA_SKETCH.md`, `DESIGN.md` and
+  this file.
+
+That is the correct classification for this content; the PR goes through
+the restricted exception path. (Revision 2 at `461fbc2` classified `low`
+only because of the wording reverted in §2.)
