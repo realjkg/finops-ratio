@@ -474,3 +474,22 @@ and `replay-fixtures`) now runs with `RATIO_ENV=development|test` plus
   - §8a names the `replay --batch` path, which can re-publish a superseded
     pre-#62 batch;
   - the gate record at 12a0c97 is above (§10.1).
+
+### 10.4 Final gates (code and docs at b396790; this record is docs-only)
+
+Run on a private PG16 cluster (`/dev/shm/i62pg`, 127.0.0.1:55930) and a
+private SeaweedFS container `i62-s3` (127.0.0.1:55931). Other agents'
+clusters were not touched. `npm ci` was refreshed for the merged
+`package-lock.json`. `next build` was re-run for the merged app;
+`tsconfig.json` and `next-env.d.ts` were restored after it (not committed,
+L5).
+
+| Gate | Result |
+|---|---|
+| lint, tsc | exit 0 |
+| `npm test` | 110 files / **2600 passed** (merge head 2599, plus the new CLI opt-in case) |
+| `npm run test:db` ×1 | parallel 36 files / **626 passed** (merge head 625, plus the M-A library test); serial 6 files / **173 passed**; exit 0 |
+| `local:acceptance` 1k | exit 0, `pass: true`, 22.8 s, 0 opt-in log lines. First sync exit 1: 2024-09 `published` 942 / `18.00663861840`, `excludedRows` 57; 2024-10 `quarantined` `PROVIDER_MISMATCH`. Second sync exit 1. Catalog `{PROVIDER_MISMATCH: 57}` / `{PROVIDER_MISMATCH: 1}`. `down` `ok (-v)` (`runs/acc1k-final-review2.json`) |
+
+**Cleanup:** the cluster, the container and its volume, the compose
+project and the scratch files were removed after the run.
