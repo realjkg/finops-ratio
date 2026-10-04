@@ -458,14 +458,14 @@ function rolledBackQueries(file: string, code: string): number {
 }
 
 /** The repository scan: findings not on the allowlist, and allowlist entries that match nothing. */
-function repositoryScan(): { unlisted: QueryFinding[]; stale: typeof ALLOWLIST; all: QueryFinding[] } {
+function repositoryScan(allowlist: typeof ALLOWLIST = ALLOWLIST): { unlisted: QueryFinding[]; stale: typeof ALLOWLIST; all: QueryFinding[] } {
   const files = walk(SRC).filter((f) => !f.endsWith('.serial.db.test.ts'));
   const all = files.flatMap((f) => queryFindings(path.relative(ROOT, f), fs.readFileSync(f, 'utf8')));
-  const listed = (f: QueryFinding) => ALLOWLIST.some((a) => a.file === f.file && a.sha256 === f.sha256);
+  const listed = (f: QueryFinding) => allowlist.some((a) => a.file === f.file && a.sha256 === f.sha256);
   return {
     all,
     unlisted: all.filter((f) => !listed(f)),
-    stale: ALLOWLIST.filter((a) => !all.some((f) => f.file === a.file && f.sha256 === a.sha256)),
+    stale: allowlist.filter((a) => !all.some((f) => f.file === a.file && f.sha256 === a.sha256)),
   };
 }
 describe('cluster-wide role changes only in serial DB test files (static guard)', () => {
@@ -474,6 +474,16 @@ describe('cluster-wide role changes only in serial DB test files (static guard)'
     expect(walk(SRC).filter((f) => !f.endsWith('.serial.db.test.ts')).length).toBeGreaterThan(20);
     expect(scan.unlisted.map((f) => `${f.file}:${f.line} sha256 ${f.sha256} ${f.problems.join('; ')}`)).toEqual([]);
     expect(scan.stale).toEqual([]);
+  }, 60_000);
+
+  it('the allowlist is exact: an entry that matches no finding is stale (drift), and a finding without an entry is reported', () => {
+    expect(ALLOWLIST.length).toBe(3);
+    const ghost = { file: 'src/ingest/db/commit.db.test.ts', sha256: '0'.repeat(64), reason: 'drifted' };
+    const withGhost = repositoryScan([...ALLOWLIST, ghost]);
+    expect(withGhost.stale).toEqual([ghost]);
+    const withoutFirst = repositoryScan(ALLOWLIST.slice(1));
+    expect(withoutFirst.unlisted.map((f) => f.sha256)).toEqual([ALLOWLIST[0].sha256]);
+    for (const a of ALLOWLIST) expect(a.reason.length).toBeGreaterThan(40);
   }, 60_000);
 
   it('the Slice 0/1 files with role DDL (rolled back, database-local or atomic) pass unchanged, non-vacuously', () => {
