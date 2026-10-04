@@ -896,3 +896,90 @@ Slice 0 limitation.**
 
 No production file changed in this section, so the `next build`,
 `check:bundle` and `local:test` results of §14 stand.
+
+## 15. Copilot review of f684dbc (2 High, 3 Medium); local, not pushed
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| b73ae23 | guard soundness self-tests, RD1–RD3, D11, L21, L22 | **red** (`red/red-copilot5-fast.txt`: 19 failed / 143; `red/red-copilot5-db.txt`: D11a/D11b failed / 26) |
+| cb29bbb | strict `BEGIN … ROLLBACK` proof; every `.query` call scanned; unreadable SQL fails closed; reviewed allowlist; D10b in an explicit `BEGIN … ROLLBACK` | green (4176494757, 4176494775) |
+| de4d25a | reader client-side deadlines; a stuck client is destroyed | green (4176494809) |
+| 631888e | bootstrap verifies each membership's full PG16 shape | green (4176494789) |
+| 5e2a232 | `spawnGuard`, late `setApp` child killed and awaited, the body settles before the sweep | green (4176494798) |
+| 720dca5 | guard allowlist drift self-test | test |
+| (this commit) | DESIGN §2.2/§2.4/§13, TEST_PLAN §G, this section | docs |
+
+**Changes to existing Slice 2 tests:**
+- D10b (DB) now runs in its own explicit `BEGIN … finally ROLLBACK`. The
+  API's SQL is imported, so the guard cannot read its text, and
+  `withTenantTransaction` commits. The assertions are unchanged.
+- The L15/L20 static checks now accept `start: spawnGuard(() => …)`.
+- The L20 test whose body never settles passes `bodySettleMs: 200`, because
+  `runLocalTest` now waits (bounded) for the body to settle.
+- The guard's main test now reports the full SHA-256 of each finding.
+
+No assertion was weakened.
+
+### Mapping
+
+| Comment | Severity | Commit(s) | Test(s) / evidence |
+|---|---|---|---|
+| **4176494757**: BEGIN and ROLLBACK anywhere in the enclosing function is no proof | High | b73ae23, cb29bbb | **Acceptance is now strict:**<ul><li>the same receiver for BEGIN, the call and the ROLLBACK;</li><li>BEGIN is an unconditional statement strictly before the call, in the same function (a nested function never counts);</li><li>nothing ends the transaction in between;</li><li>the ROLLBACK is unconditional after the call: first in the `finally` of an enclosing `try`, or straight-line with no `return`, `throw`, `break`, `continue` or `COMMIT` in between;</li><li>helpers (`inTxn`) are verified by the same rules for their callback call with that client, and the callback must not end the transaction itself.</li></ul>**Self-tests flag each bypass:** a different client; ROLLBACK before the GRANT; an unused nested function; a conditional BEGIN; a conditional ROLLBACK; plus an early exit, COMMIT or no ROLLBACK on a straight line, and 4 helper bypasses. **Slice 0/1 files:** unchanged and passing. Non-vacuity: memberPrivileges ≥ 6, privileges ≥ 6 and roles ≥ 2 proven rolled-back calls. Mutations G1–G7 |
+| **4176494775**: the raw-text prefilter skips SQL the AST would rebuild | High | b73ae23, cb29bbb | **The prefilter is gone:** every `.query(...)` call of every non-serial DB test file is scanned. **How the SQL is rebuilt:** from the AST, with a one-file TypeScript checker covering literals, templates, `+` concatenation, `const` bindings, `for…of` over array literals, parameters of functions only ever called directly, and SQL quote doubling (`.replace(/'/g, "''")`); dynamic values are placeholders. **Findings outside a proven transaction:** a bare variable, a call, an object, or a dynamic part in statement position (start of a statement, `EXECUTE`, `format('…`). Self-tests cover concatenation (`'GR' + 'ANT …'`, `'ALT' + 'ER ROLE …'`), the variable case, a call, a statement hole, an object, and the resolvable cases. **Reviewed allowlist: 3 entries,** all Slice 0 calls (file, SHA-256 of the call, reason; listed below); drift fails, with a self-test. Mutations G8–G11 |
+| **4176494809**: the API pool has no client-side deadline | Medium | b73ae23, de4d25a | **Bounds:**<ul><li>`query_timeout` 12 s, above the server's 10 s `statement_timeout`;</li><li>`connectionTimeoutMillis` 5 s;</li><li>`readWithDeadline` bounds the whole request at 20 s: tenant transaction, login check and reads.</li></ul>**A guarded client** that had a client-side failure (no SQLSTATE), or is still held at the deadline, is released with the error and its socket destroyed. Once poisoned, it refuses further queries, so the ROLLBACK doesn't queue behind the stuck one. Slice 0's `withTenantTransaction` is unchanged. **Tests:**<ul><li>RD1: the config;</li><li>RD2: a query that never answers, a poisoning timeout, a healthy release;</li><li>RD3: the route against a fake Postgres that accepts and never answers gives 500 within the connect deadline, and a connection stalled mid-request gives 500 at the deadline with the client destroyed;</li><li>D11, real Postgres behind a stall proxy with `max: 1`: 500 within the deadline (`query_timeout`, D11a; request deadline, D11b), 0 pooled clients, and the next request succeeds.</li></ul>Mutations Q1–Q5 |
+| **4176494789**: bootstrap ignores the PG16 membership options | Medium | b73ae23, 631888e | `verifyBootstrap` reads `admin_option`, `inherit_option` and `set_option`, and `membershipProblems` requires exactly one grant per login → ratio-role edge with `EXPECTED_MEMBERSHIP_OPTIONS` = {admin false, inherit true, set true} (what `CREATE ROLE … IN ROLE` gives on PG16). A NULL option fails closed. L21: each wrong option on each of the 3 edges, a NULL option, a duplicate grant, a missing edge, an extra edge, a ratio role as a member, and a static check. `local:test` ran the real bootstrap on PG16 and the verification passed. Mutations B1–B5 |
+| **4176494798**: a late `startIfPortFree` can spawn after the cleanup | Medium | b73ae23, 5e2a232 | Once the cleanup has started (body done or interrupted):<ul><li>`spawnGuard` refuses to spawn, and `next start` is spawned through it;</li><li>a child handed to `setApp` late is SIGKILLed (its group) and awaited (`summary.lateChildren`);</li><li>`runLocalTest` waits for the interrupted body to settle, bounded by `bodySettleMs` (10 s), before the caller's final process-group sweep.</li></ul>L22 is deterministic, with an injected 400 ms delay after a 100 ms abort. Mutations S1–S4 |
+
+### The reviewed allowlist (3 entries, all in Slice 0 test files, which this PR may not edit)
+
+| File | Call | Why it is safe |
+|---|---|---|
+| `src/ingest/db/commit.db.test.ts` | `real.query(sql as string, params)` in a pass-through proxy | It passes `migrateUp`'s SQL (the repository's own migrations, copied) to a scratch database and turns every COMMIT into a ROLLBACK, so nothing is committed. 0001 changes no membership or attribute of an existing login. |
+| `src/ingest/db/foundation.db.test.ts` | `c.query(sqlOverride … : fs.readFileSync(…))` in `writeManifest` | The repository migrations (or this file's `ALTER TABLE ratio.sources … SET DEFAULT` override), applied to a fresh scratch database as the manifest script does. This is the same SQL the runner applies to every test database. |
+| `src/ingest/db/immutability.db.test.ts` | `zombie.query(z.sql, z.params)` | `z.sql` comes from this file's `zombieSql` callbacks: a DELETE on `ratio.cost_facts` and an UPDATE on `ratio.ingest_artifacts`, both database-local DML. The zombie's BEGIN is issued in a loop, so it can't be proven statically, and the test rolls it back. |
+
+Every other `.query` call in the 34 non-serial DB test files is either
+proven to run inside `BEGIN … ROLLBACK`, or its SQL is read and contains no
+cluster-wide role change.
+
+### Mutation checks (scratch `mutate10.sh`; each applied, run, restored; tree clean after; 0 orphans)
+
+| ID | Mutation | Result |
+|---|---|---|
+| G1 | receiver ignored for BEGIN/ROLLBACK | **killed** (2) |
+| G2 | a ROLLBACK/COMMIT between BEGIN and the call ignored | **killed** (1) |
+| G3 | a nested function judged by its enclosing function | **killed** (1) |
+| G4 | BEGIN accepted anywhere before the call (conditional) | **killed** (1) |
+| G5 | ROLLBACK anywhere in the finally (conditional) | **killed** (2) |
+| G6 | straight line: early exits not checked | **killed** (1) |
+| G7 | any callback helper accepted | **killed** (1) |
+| G8 | the raw-text prefilter back | **killed** (4) |
+| G9 | unreadable SQL accepted | **killed** (3) |
+| G10 | statement-position holes not detected | **killed** (1) |
+| G11 | allowlist drift not reported | **killed** (1) |
+| Q1 | no client-side `query_timeout` | **killed**: RD1 (D11 sets its own `query_timeout`, so it still passes) |
+| Q2 | a stuck client released without the error (returned to the pool) | **killed**: RD 3/6, D11 2/2 |
+| Q3 | a client-side failure does not poison the client | **killed**: RD 1, D11a |
+| Q4 | no request deadline (the race removed) | **killed**: RD 2/6. D11b still passes: the deadline's destroy alone ends the stuck query |
+| Q5 | the destroyed client's socket is not destroyed | **killed**: RD2 |
+| B1 / B2 / B3 | `admin_option` / `inherit_option` / `set_option` not checked | **killed** (1 / 1 / 2) |
+| B4 | a duplicate grant not reported | **killed** (1) |
+| B5 | `verifyBootstrap` ignores the options | **killed** (1) |
+| S1 | `spawnGuard` does not refuse after the cleanup started | **killed** (1) |
+| S2 | a late `setApp` child is kept | **killed** (1) |
+| S3 | the body is not awaited before returning | **killed** (2) |
+| S4 | `next start` spawned without `spawnGuard` | **killed** (3) |
+
+### Gates (HEAD 720dca5)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **2375 passed** (103 files) |
+| `npm run test:db` ×3 (private PG16 at 55700 + S3 prefixes) | **594 + 167** passed ×3 (114, 112, 113 s) |
+| `worker:build`; `next build`; `check:bundle` | 0; 0 (`tsconfig.json`/`next-env.d.ts` restored); pass (116 client / 91 server files) |
+| `npm run local:test` (`ratio-local-test`, 54339/18353/3110) | pass in 27 s: the new membership verification passed on the real PG16 bootstrap; `appReady: pid-verified`; totals `"55"` / `"40"`, `30.8272954899` / `21.0978157665`; 95 distinct rows; `appStop: stopped`; `down: ok (-v)`; `failures: []` |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+| leftovers | none: private cluster stopped and deleted; no `ratio-local*` containers or volumes; no `.ratio-local/`; no sleepers |

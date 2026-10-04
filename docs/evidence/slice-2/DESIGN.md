@@ -154,6 +154,23 @@ Pool session settings (startup `options`):
   options take precedence over `ALTER ROLE` / `ALTER DATABASE` defaults, so no
   role or database default can change the output (§12).
 - `max: 4`, `application_name=ratio-reader-api`.
+- **Client-side deadlines** (Copilot 4176494809; `readDeadline.ts`). The
+  server's `statement_timeout` cannot see a stalled connection or a lost
+  response, so the client bounds every step itself:
+  - `connectionTimeoutMillis` 5 s;
+  - `query_timeout` 12 s, slightly above the server's 10 s
+    `statement_timeout`;
+  - the whole request (tenant transaction, login check, reads) has a 20 s
+    deadline.
+- **A stuck client is destroyed, never pooled.** That covers a client that
+  hit a client-side failure (a timeout or a lost connection: an error
+  without a SQLSTATE) and a client still held at the request deadline:
+  - it is released with the error, which makes pg-pool drop it, and its
+    socket is destroyed;
+  - once poisoned, it refuses further queries, so the ROLLBACK cannot queue
+    behind the stuck query;
+  - Slice 0's `withTenantTransaction` is unchanged: it releases through this
+    guard.
 - Every read asserts, inside its transaction, that the isolation level is
   REPEATABLE READ, the transaction is read-only, and DateStyle, IntervalStyle
   and TimeZone have the pinned values. Any other value fails closed, before
@@ -246,7 +263,7 @@ Response (200):
 | 503 `not_configured` | `RATIO_API_TENANT_ID` or `RATIO_READER_DATABASE_URL` missing or invalid |
 | 400 `invalid_request` | validation |
 | 503 `unsafe_db_login` + `requestId` (body and `X-Request-Id`) | reader-login check failed; logged as its own event with reason codes |
-| 500 `internal_error` + `requestId` | anything else (gateway; message logged redacted, never returned) |
+| 500 `internal_error` + `requestId` | anything else, including a client-side query timeout, a lost connection, or the 20 s request deadline (gateway; message logged redacted, never returned) |
 
 Every response of the route, whatever layer writes it, carries
 `Cache-Control: no-store`.
@@ -766,3 +783,44 @@ code.**
   nothing. It would also weaken the deadline: an inherited-stdio command
   could leave a grandchild that a timeout no longer kills. EVIDENCE §14 has
   the transcript.
+
+## 13. Copilot review of f684dbc (2 High, 3 Medium; local, not pushed)
+
+**High (4176494757, 4176494775): the parallel-role-DDL guard is sound.**
+- **Proving `BEGIN … ROLLBACK`.** It is no longer "BEGIN and ROLLBACK
+  somewhere in the function". Every one of these must hold:
+  - the same receiver for BEGIN, the call and the ROLLBACK;
+  - an unconditional BEGIN strictly before the call, in the same function (a
+    nested function never counts);
+  - nothing ending the transaction in between;
+  - an unconditional ROLLBACK after the call: either first in the `finally`
+    of an enclosing `try`, or straight-line with no `return`, `throw`,
+    `break`, `continue` or `COMMIT` in between.
+
+  Helpers such as `inTxn` are verified by the same rules for their callback
+  call.
+- **No raw-text prefilter.** Every `.query(...)` call is scanned.
+- **Rebuilding the SQL.** The SQL is rebuilt from the AST with a one-file
+  TypeScript checker: constants, `for…of` over array literals, and parameters
+  of functions that are only ever called directly.
+- **Unreadable SQL fails closed.** Outside a proven transaction, these are
+  findings: a bare variable, a call, an object, or a dynamic part in
+  statement position.
+- **Allowlist.** 3 Slice 0 calls are on a reviewed allowlist (file, SHA-256
+  of the call, reason), and drift fails. Every Slice 1 call and every other
+  Slice 0 call is proven or readable.
+
+**Medium (4176494809): client-side deadlines for the reader API** (§2.2).
+
+**Medium (4176494789): bootstrap membership shape.** `verifyBootstrap` reads
+`admin_option`, `inherit_option` and `set_option`. It requires exactly one
+grant per login → ratio-role edge, with ADMIN FALSE, INHERIT TRUE and SET
+TRUE: what `CREATE ROLE … IN ROLE` gives on PG16. A NULL option fails
+closed.
+
+**Medium (4176494798): no late child after an interrupt.** Once the cleanup
+has started:
+- `spawnGuard` refuses to spawn (`next start` is spawned through it);
+- a child handed to `setApp` late is SIGKILLed and awaited;
+- `runLocalTest` waits, for at most 10 s, for the interrupted body to settle
+  before returning to the final process-group sweep.
