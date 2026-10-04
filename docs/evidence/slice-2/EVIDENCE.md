@@ -1317,3 +1317,107 @@ its 2 relative import paths.
 
 The first gate run (HEAD 007097c) stopped at `npm test`, which failed on the
 import boundary. That is what led to b3d659d; nothing else failed.
+
+## 17. Copilot review of 5e4acf9 (1 High, 3 Low); local, not pushed
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 159a60f | L25 (unit), D13 membership cases (real PG16); L21's fixture gains the grantor columns | **red** (`red/red-copilot7-fast.txt`: 3 failed / 158; `red/red-copilot7-db.txt`: 4 failed / 6) |
+| 497284c | every membership edge touching a managed role, on either side, judged with its grantor; predefined roles named; fail closed | green (4176878790) |
+| e8f2d18 | historical evidence marked as such; current claims made accurate (TEST_PLAN, DESIGN, EVIDENCE, brief); `bootstrap.mjs` header comment | docs (4176878802, 4176878833, sweep) |
+| (this commit) | this section | docs |
+
+**At red, the High reproduced live on PG16.** For an unrelated login
+granted `ratio_reader`, and for an unrelated role granted the local reader
+login, `verifyBootstrap` returned `''`: the bootstrap reported clean. The
+pg_read_all_data case was already caught, because it is on the member side,
+but it was not named as a predefined role. The delegated-grantor case
+missed the delegate's own edge.
+
+**Changes to existing Slice 2 tests:** L21's row fixture gains the 2 new
+columns (`grantor`, `grantor_is_bootstrap_superuser`, both good). Its
+assertions are unchanged.
+
+### Mapping
+
+| Comment | Severity | Commit(s) | Fix / evidence |
+|---|---|---|---|
+| **4176878790**: the membership query only sees edges whose MEMBER is managed, so `GRANT ratio_reader TO x` is missed | High | 159a60f, 497284c | **The query.** `verifyBootstrap` reads every `pg_auth_members` row whose member OR roleid is a managed role (the 3 ratio roles and the 3 local logins), with `pg_get_userbyid(grantor)` and `grantor = 10`.<br>**What fails.** Anything outside the three expected edges: an unexpected member of a ratio role; anything granted TO a login; a login or ratio role in any other role. Membership in a `pg_*` role is named as a predefined role, with Slice 0's reason.<br>**Grantor.** An expected edge must be granted by the bootstrap superuser. PG16 records any superuser's grant that way (probed live, below), so another grantor means ADMIN delegation. ADMIN on an expected edge was already refused.<br>**Decision: fail closed, never REVOKE** (below).<br>**Tests:** L25 (unit); D13 on real PG16 with 4 planted cases, each failing verification, `runBootstrap` refusing, and the edge still present afterwards. Mutations E1–E7 |
+| **4176878802**: the §7 transcript has numeric `rowCount` but claims "all exact strings" | Low | e8f2d18 | The transcript is labelled as historical, from before 4176238961 (numeric `rowCount`), with a pointer to the current gates. The sentence after it now says exactly what matched as a string at the time. |
+| **4176878833**: TEST_PLAN says the bootstrap has no GRANT | Low | e8f2d18 | L1–L8 now separates the three membership re-grants (login → its ratio role, explicit options, pinned by L4) from the prohibited database and object grants. |
+| **4176878813**: the PR description | Low | — | Left to the coordinator, as instructed. |
+
+### The decision: fail closed, never revoke (4176878790)
+
+A local cluster may share roles with something else, and a membership the
+bootstrap did not create may be intended there. So the bootstrap changes
+only its own three edges: the item-5 re-grant, which normalises options.
+On anything else, `local:up` fails with the full list and the remedy:
+remove the membership yourself, or `local:down -v`.
+
+Migration 0001 grants no role membership: a search of
+`0001_ratio_schema.up.sql` finds no `GRANT <role> TO`, `IN ROLE` or ADMIN
+OPTION. So `up` on an already migrated cluster sees the same three edges.
+
+`local:test` runs `up` twice, both before `migrate`, and passed (gates
+below). The second `up` runs the full check against the logins the first
+one created.
+
+**Predefined roles.** `bootstrap.mjs` is a plain node script and cannot
+import Slice 0's TypeScript `REFUSED_PREDEFINED_ROLES`. It keeps a mirror of
+the reasons, and L25 imports Slice 0's list and requires every entry to be
+named with the same reason, so a drift fails (mutant E6). Any other `pg_*`
+role is refused too (L25: `pg_checkpoint`).
+
+### PG16 grantor probe (throwaway roles on the private cluster, dropped; 0 left)
+
+| Step | Recorded grantor |
+|---|---|
+| `CREATE ROLE … IN ROLE p` as `postgres` | `postgres` (oid 10) |
+| `GRANT p TO …` as another SUPERUSER role (`SET ROLE`) | `postgres` (oid 10) |
+| `GRANT p TO …` as a login holding `p` WITH ADMIN | that login |
+
+### Sweep of stale statements (4176878833 and the coordinator's sweep)
+
+| Where | Was | Now |
+|---|---|---|
+| EVIDENCE header | "Nothing pushed, no GitHub comments" | how to read the log, and what is historical (counts, "not pushed", "CI not run", transcripts) versus current (DESIGN §1–§6, the latest gates) |
+| EVIDENCE §6, §9 | "Not executed in GitHub" / "CI steps have not run" | marked historical; CI has since run green on the pushed commits |
+| EVIDENCE §7 | the pre-fix transcript presented as current | labelled pre-fix; the sentence corrected (Low 4176878802) |
+| EVIDENCE §15 | "reviewed allowlist (3 entries)" | marked superseded (5 entries since §15a); the membership row notes it saw the member side only |
+| TEST_PLAN L1–L8 | "no GRANT" | the 3 membership re-grants separated from prohibited grants (Low 4176878833) |
+| TEST_PLAN D7, X4, L21 | the original pool settings, numeric totals, options only | each notes its later extension (F/G pool settings, string totals, H/L25 either side and grantor) |
+| TEST_PLAN | L23/L24/D13 filed under G (f684dbc) | a new section H for 787824b/5e4acf9, with L25 and the D13 membership cases |
+| DESIGN §1, §3.1 | no normalisation or membership rule in the overview | the bootstrap row; item 6; the verification order (`runBootstrap` ends in `verifyBootstrap`) |
+| DESIGN §4 | resource exhaustion without the client deadlines; no stray-role threat | both added |
+| DESIGN, Slice 0 boundary paragraph | silent on the serial-config include | the one include entry stated |
+| DEPLOYMENT_BRIEF | — | operator note: audit every member of each ratio role |
+| `bootstrap.mjs` header | "re-running changes nothing but the passwords" | a drifted login is normalised back (comment only) |
+
+The per-round sections (EVIDENCE §10–§16, DESIGN §8–§13, TEST_PLAN D–G)
+keep their wording as records of their round. The reading note covers them.
+
+### Mutation checks (scratch `mut17.py`; each applied, run, restored from git; tree clean after; 0 `ratio_bs_*` roles left)
+
+| ID | Mutation | Result |
+|---|---|---|
+| E1 | **the member-only edge query (the reviewed bug)** | **killed**: L25 static; D13 unrelated login → `ratio_reader`, role → reader login, delegated grantor (3) |
+| E2 | a roleid-only edge query | **killed**: L25 static; D13 `pg_read_all_data` |
+| E3 | grantor not checked | **killed**: L25 grantor; D13 delegated grantor |
+| E4 | the grantor flag always true in SQL | **killed**: L25 static; D13 delegated grantor |
+| E5 | predefined roles not named | **killed**: L25; D13 `pg_read_all_data` |
+| E6 | the mirror drifts from Slice 0 (one reason changed) | **killed**: L25 |
+| E7 | the bootstrap REVOKEs unexpected members of the ratio roles (fail open) | **killed**: D13 unrelated login (the edge must remain; `runBootstrap` must refuse), delegated grantor |
+
+### Gates (HEAD e8f2d18; scratch `gates-r17.sh`)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **2409 passed** (103 files) |
+| `npm run test:db` ×2 (private PG16 at 55700 + S3 prefixes) | **595 + 173** passed ×2 (120, 114 s); the serial phase is 169 + D13's 4 membership cases |
+| `worker:build`; `next build`; `check:bundle`; `npm audit --omit=dev` | 0; 0; pass (116 client / 91 server files); 0 vulnerabilities |
+| `npm run local:test` (`ratio-local-test`) | pass in 27 s. `up: ok (twice)`, so the either-side membership check passed twice on the real bootstrap. `privilegeProblems: []`; `appReady: pid-verified`; totals `rowCount` `"55"` / `"40"`, `billedCost` `"30.8272954899"` / `"21.0978157665"`; 95 distinct rows; `appStop: stopped`; `down: ok (-v)`; `failures: []` |
+| leftovers | none: no `ratio-local*` containers or volumes, no `.ratio-local/`, no `next` or vitest processes, 0 `ratio_bs_*` roles; the private cluster is stopped and deleted after this run |
