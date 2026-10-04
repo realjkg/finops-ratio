@@ -226,7 +226,7 @@ only one starter of a kind can be inside the allocation at a time.
     `LEASE_LOST`. The start then runs its cleanup pass (rev. 29, "Crashed
     runs" below) before any other work.
   - **The wait is bounded (rev. 30, the challenger's L3).** The `UPDATE`
-    runs under `SET LOCAL lock_timeout` (5 s by default, configurable).
+    runs under a `lock_timeout` (5 s by default, configurable).
     Without it, a long stale transaction would keep the start waiting
     while it holds the per-kind lock and the shared retention lock, and
     every retention pass in the tenant would stall behind it. On timeout
@@ -234,6 +234,22 @@ only one starter of a kind can be inside the allocation at a time.
     releases both locks and inserts nothing, and the start fails with
     `ALREADY_RUNNING`, marked retryable. A later start retries the
     takeover once the stale transaction has ended.
+  - **Where the timeout is set (rev. 31, the challenger's L1 on
+    c615ea3).** The acquisition transaction runs in this order:
+    1. it takes the per-kind lock;
+    2. it takes the shared retention lock;
+    3. it reads the latest `running` run;
+    4. only then, `SET LOCAL lock_timeout = '5s'`, the `abandoned`
+       `UPDATE`, and `SET LOCAL lock_timeout = 0` straight after;
+    5. it does the `INSERT`.
+
+    `lock_timeout` also applies to advisory-lock waits; the challenger's
+    PG16 probe showed it. If the timeout were set at the start of the
+    transaction, a start that waits more than 5 s behind a retention pass
+    holding the exclusive lock would fail with a spurious
+    `ALREADY_RUNNING`, which is likely on `full`. The advisory-lock waits
+    in steps 1 and 2 therefore have no timeout: a retention pass always
+    ends, and it holds no run-row lock.
   - It then inserts its own run with a fresh `lease_token`, a TTL, and the
     next `run_seq`.
 - **Run inputs are captured once (rev. 27, Copilot r4179306694).** A run
@@ -267,10 +283,39 @@ only one starter of a kind can be inside the allocation at a time.
   `assertLease(…, 'SHARE')` this way. The takeover's `UPDATE` still waits
   for both kinds. A run whose lease expired or was taken over fails with
   `LEASE_LOST` and commits nothing more (fencing).
-  - **The lease TTL must exceed the run's longest single transaction.**
-    Either lock blocks the run's own heartbeat, an `UPDATE` of the same
-    row, until that transaction ends. A shorter TTL would let the lease
-    expire under a healthy run.
+  - **Enough lease left before each transaction (rev. 31, Copilot
+    r4179490968; replaces revision 30's "TTL > the longest
+    transaction").** Either lock blocks the run's own heartbeat, an
+    `UPDATE` of the same row, until the transaction ends. The heartbeat
+    then renews only a lease that is **still live**; on `main`,
+    `heartbeat()` has `lease_expires_at > clock_timestamp()` in its
+    `WHERE` (`src/ingest/worker/lease.ts:162–169`). So "TTL > the
+    transaction" is not enough. A transaction that starts just before a
+    heartbeat delays that heartbeat by its whole length, and if the old
+    expiry passes meanwhile, the lease lapses under a healthy run.
+  - **The numbers on `main`.** TTL `leaseTtlSeconds` = 300 s by default
+    (`RATIO_LEASE_TTL_SECONDS`, 5–3600; `src/ingest/config.ts:52`,
+    `:231`). The heartbeat fires every TTL / 3 = 100 s, at least every 1 s
+    (`src/ingest/worker/pipeline.ts:131`, `:136`). The analytics jobs use
+    the same settings. Without a check, the safe limit for one transaction
+    is TTL − interval − margin = 300 − 100 − 30 = **170 s**, not 300 s.
+  - **The rule.** Every run transaction has a duration budget `b`, which
+    the job's chunking keeps it under; the margin is m = 30 s (TTL / 10).
+    Before taking the run-row lock, `assertLease` reads the remaining
+    lifetime `r = lease_expires_at − clock_timestamp()`.
+    - If `r < b + m`, it **renews first**, with the same live-only
+      heartbeat `UPDATE`, and checks again.
+    - If `b + m > TTL`, the transaction is refused before it starts
+      (`LEASE_BUDGET`, a chunking bug; it fails closed).
+
+    After the check, the lease outlives the transaction's planned end by
+    at least m. A heartbeat blocked behind the transaction runs at the
+    latest when the transaction ends, while the lease is still live, so
+    it renews. The same holds for parallel readers: each one checked its
+    own end before taking its lock. At the defaults, **every transaction
+    budget must be ≤ TTL − m = 270 s**. A transaction that overruns its
+    budget by more than m can lose the lease. That fails safe: the run
+    gets `LEASE_LOST` and is retried; nothing is half-written.
 - **`batch_seq`** is allocated only by the lease holder, inside its
   transaction, as **`coalesce(max(batch_seq), 0) + 1`** over the tenant's
   `rollup_batches`. It starts at 1 on an empty tenant (rev. 15; a bare
@@ -558,13 +603,48 @@ kind, and every start's cleanup pass.
   succeeded, not pinned, and not named by a `running` run.
 - **After the commit.** Only after the function's transaction has
   committed does the caller delete those runs' files. Each run has its
-  own evidence directory, `backtest/<run_id>/`. Before deleting, the
-  caller writes `deleted.json` into the directory, with each file's name,
-  size and SHA-256; that file stays. The SHA-256 manifest in `stats` also
-  stays, for a run that recorded one.
+  own evidence directory, `backtest/<run_id>/`. A `deleted.json` with each
+  file's name, size and SHA-256 stays there. The SHA-256 manifest in
+  `stats` also stays, for a run that recorded one.
+- **Claimed by an atomic rename (rev. 31, Copilot r4179490982).** The
+  exclusive retention lock ends at the function's commit, so two passes
+  can receive the same ids. Without serialization, one pass could delete
+  files while the other was still hashing them or writing `deleted.json`.
+  The file phase holds no database lock, keeping the rule that a pass
+  holds no run-row or pointer lock (revision 28). It is serialized per
+  directory instead.
+  - A pass claims `backtest/<run_id>/` by renaming it to
+    `backtest/.deleting-<run_id>-<pass_id>/`. That is one `rename(2)` on
+    one filesystem, so it is atomic and exactly one pass wins. A loser
+    gets `ENOENT` and skips the run. A directory that holds only
+    `deleted.json` is skipped without a claim.
+  - In its claimed directory, the winner:
+    1. hashes every file except `deleted.json`;
+    2. writes `deleted.json`, the earlier entries plus the new ones, to a
+       temporary name and renames it into place, **before deleting
+       anything**;
+    3. deletes the listed files, treating `ENOENT` as done;
+    4. renames the directory back to `backtest/<run_id>/`.
+  - If that name exists again, because a dying writer's staging file
+    recreated it, the winner moves the merged `deleted.json` into it the
+    same way (temporary file, then rename) and removes the claimed
+    directory. A later pass deletes the staging file. Either way,
+    `deleted.json` ends in `backtest/<run_id>/` (DESIGN §3.8) and is
+    cumulative.
+- **Interrupted claims are finished.** Every pass also lists
+  `backtest/.deleting-*`. A claim older than one hour (the pass id
+  carries its start time, and a pass takes far less) belongs to a pass
+  that died or stalled.
+  - A later pass re-claims it by renaming it to its own
+    `.deleting-<run_id>-<pass_id>/`, again atomic with one winner, and
+    resumes at step 1, merging `deleted.json`.
+  - If the stalled pass wakes up, it finds its paths gone (`ENOENT`) and
+    stops. Every step works by name, and `deleted.json` is written before
+    any deletion, so no file is deleted without being recorded.
 - **Idempotent.** The list holds every eligible run, not only those whose
-  rows this call removed. A directory already cleaned costs one `stat`,
-  and a file left by an interrupted deletion is removed by the next pass.
+  rows this call removed. A directory already cleaned costs one
+  `readdir`, and a file left by an interrupted deletion is removed by a
+  later pass.
 - **Safe against a concurrent backtest.** A `running` run's id is never
   returned, and a backtest writes only under its own run id. A fenced
   writer cannot add files after its takeover. A backtest writes each
