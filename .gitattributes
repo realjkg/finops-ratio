@@ -1,3 +1,6 @@
 # Migration checksums are over raw bytes: pin line endings so a checkout
 # on another OS cannot change an applied checksum.
 src/ingest/db/migrations/*.sql text eol=lf
+# Public FOCUS sample data (Slice 2b) is pinned by the SHA-256 of its exact
+# upstream bytes: never convert its line endings.
+fixtures/focus-1.0-sample/*.csv -text
