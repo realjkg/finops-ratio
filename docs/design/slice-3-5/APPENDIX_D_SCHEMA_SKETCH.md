@@ -144,7 +144,7 @@ sub-account or billing account therefore always resolves to the same id.
 |---|---|---|---|
 | role `ratio_analytics` | NOLOGIN, no attributes, no membership (guarded like 0001's roles) | — | — |
 | view `publications_published` | tenant_id, source_id, billing_period, batch_id, published_at, row_count, loaded_billed_total, reconciliation, is_provisional — from `period_publications` ⋈ `ingest_batches` (`status = 'published'`) | — | analytics, reader (`freshness`) |
-| `analytics_runs` | **(tenant_id, id)**, kind ∈ {rollup, forecast, detect, backtest}, as_of date, status ∈ {running, succeeded, failed, abandoned}, **`run_seq bigint NOT NULL`** (per tenant and kind, strictly increasing, starting at 1; **allocated for every kind** inside the run's acquisition transaction, under the per-(tenant, kind) advisory lock, as `coalesce(max(run_seq), 0) + 1`; the trigger re-checks it, and `UNIQUE (tenant_id, kind, run_seq)` turns a bypassed lock into SQLSTATE 23505 → `RUN_SEQ_CONFLICT`, D.1), **`lease_token uuid`, `lease_expires_at`, `heartbeat_at`** (rev. 13; the worker's `sync_runs` lease pattern), **`batch_seq_hwm integer`** (rollup runs only: NULL on INSERT, set **by trigger** on the transition to `succeeded` to `coalesce(max(batch_seq), 0)` over the tenant's `rollup_batches`, then frozen; rev. 15, rev. 16), `UNIQUE (tenant_id, kind, run_seq)` (rev. 16); `succeeded`, `failed`, `abandoned` terminal (rev. 16); started_at, finished_at, code_version text, params jsonb, stats jsonb, error_code; **run inputs (rev. 27, Copilot r4179306694)**: `input_rollup_run_id`, `input_batch_seq_hwm` (forecast, detect and backtest runs), `input_forecast_run_id` (detect runs), `prev_run_id` (forecast and detect runs: the latest succeeded run of the same kind whose state the run continues), each a composite FK to `analytics_runs` where it names a run, written once on INSERT in the acquisition transaction and never updatable (D.1, "Run inputs"). **Grants (rev. 17; rev. 27):** column-level INSERT that excludes `batch_seq_hwm` and `finished_at`; column-level UPDATE of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`), so `run_seq`, `kind`, `as_of`, `batch_seq_hwm`, the four input columns, `started_at`, `code_version` and `params` are not updatable | analytics | analytics |
+| `analytics_runs` | **(tenant_id, id)**, kind ∈ {rollup, forecast, detect, backtest}, as_of date, status ∈ {running, succeeded, failed, abandoned}, **`run_seq bigint NOT NULL`** (per tenant and kind, strictly increasing, starting at 1; **allocated for every kind** inside the run's acquisition transaction, under the per-(tenant, kind) advisory lock, as `coalesce(max(run_seq), 0) + 1`; the trigger re-checks it, and `UNIQUE (tenant_id, kind, run_seq)` turns a bypassed lock into SQLSTATE 23505 → `RUN_SEQ_CONFLICT`, D.1), **`lease_token uuid`, `lease_expires_at`, `heartbeat_at`** (rev. 13; the worker's `sync_runs` lease pattern), **`batch_seq_hwm integer`** (rollup runs only: NULL on INSERT, set **by trigger** on the transition to `succeeded` to `coalesce(max(batch_seq), 0)` over the tenant's `rollup_batches`, then frozen; rev. 15, rev. 16), `UNIQUE (tenant_id, kind, run_seq)` (rev. 16); `succeeded`, `failed`, `abandoned` terminal (rev. 16); started_at, finished_at, code_version text, params jsonb, stats jsonb, error_code; **run inputs (rev. 27, Copilot r4179306694)**: `input_rollup_run_id`, `input_batch_seq_hwm` (forecast, detect and backtest runs), `input_forecast_run_id` (detect runs), `prev_run_id` (forecast and detect runs: the latest succeeded run of the same kind whose state the run continues), each a composite FK to `analytics_runs` where it names a run, written once on INSERT in the acquisition transaction and never updatable (D.1, "Run inputs"); **`export_files_state text`** (rev. 34, Copilot r4179572957): `'present'` or `'deleted'` on backtest runs, NULL on every other kind, `CHECK ((kind = 'backtest') = (export_files_state IS NOT NULL))`, `'present'` on INSERT, and set once to `'deleted'` after the run's export files are gone (D.1, "Export files"). **Grants (rev. 17; rev. 27; rev. 34):** column-level INSERT that excludes `batch_seq_hwm` and `finished_at`; column-level UPDATE of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`, `export_files_state`), so `run_seq`, `kind`, `as_of`, `batch_seq_hwm`, the four input columns, `started_at`, `code_version` and `params` are not updatable | analytics | analytics |
 | `forecast_leaves` (rev. 15; **rows never deleted, identity columns immutable**, only `last_day` updated (rev. 17; previously called "insert-only"); outside retention, counted conservatively in every run's disk delta, B.5.12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `leaf_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name), and `UNIQUE (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)` as the target of `cost_series`' derivation FK (rev. 17), every component `NOT NULL` with the D.0 `''` sentinel; `account_id NOT NULL`, bound by **one composite FK `(tenant_id, account_id, billing_currency, provider_name, billing_account_id, sub_account_id)` → `cost_accounts (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id)`** (rev. 18, Copilot r4178908321: a plain `account_id` FK only proved that *some* account exists, so a leaf could name account B's components while pointing at account A); `UNIQUE (tenant_id, id, account_id)` as the target of the root-cause FK (rev. 18); first_day, last_day | analytics (INSERT; UPDATE of `last_day` only: identity columns immutable, no DELETE; rev. 17) | analytics |
 | `cost_series` | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `series_id` (D.0), `leaf_id` (immutable), with **one composite FK `(tenant_id, leaf_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)` → `forecast_leaves (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)`** (rev. 17; replaces revision 16's two separate FKs), so a series can only belong to the leaf its own components name; **`UNIQUE (tenant_id, id, leaf_id)`** (the target of the root-cause FK); `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name, region_key), every component `NOT NULL` with the D.0 `''` sentinel (`region_key` is `''` for global services and for every `fleet15k` series); `account_id NOT NULL`, bound by the same **composite FK to `cost_accounts`' id and natural key** as `forecast_leaves` (rev. 18); first_day, last_day | analytics (INSERT; UPDATE of `last_day` only: identity columns immutable, no DELETE; rev. 17) | analytics |
 | `cost_accounts` (rev. 12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `account_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id), every component `NOT NULL` with the D.0 `''` sentinel (a billing-account-level tax, credit, fee or purchase row with a null `SubAccountId` belongs to the account row with `sub_account_id = ''`); **`UNIQUE (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id)`**, the target of the account FKs of `forecast_leaves` and `cost_series` (rev. 18); first_day, last_day | analytics (INSERT; UPDATE of `last_day` only: identity columns immutable, no DELETE; rev. 17) | analytics |
@@ -156,7 +156,7 @@ sub-account or billing account therefore always resolves to the same id.
 | `cost_daily_scope` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, usage_date)**; same measures as `cost_daily` | analytics | reader via view (the run in `rollup_pointer`) |
 | `account_dim` | **(tenant_id, run_id, account_id)**; business_unit (modal tag, 28 days), account_age_days (identity columns via `cost_accounts`) | analytics | analytics; reader via view (the run in `rollup_pointer`) |
 | `rollup_batches` | **(tenant_id, batch_seq integer)**, unique (tenant_id, batch_id); source_id, billing_period, rolled_up_at, run_id, row totals (to prove rollup = published totals). **Each batch is rolled up in one transaction** (rev. 13), under `assertLease`, that writes all its rollup rows and this row together. A `rollup_batches` row therefore means a complete batch. A batch completed by a run that later fails stays correct, and becomes visible only when a later run's pointer covers it | analytics | analytics |
-| function `ratio.analytics_apply_retention()` | `SECURITY DEFINER`, owned by `ratio_owner`, `SET search_path = pg_catalog, pg_temp`, no arguments, fixed SQL; returns removed-row counts per table. Removes only: rollup rows (`cost_daily`, `cost_resource_daily`, `billing_daily`) of a batch below the visible batch of its (source, period), i.e. the highest rolled-up `batch_seq` ≤ `rollup_pointer.batch_seq_hwm` (rev. 13); run-keyed rows (`cost_daily_scope`, `billing_daily_scope`, `account_dim`) of runs other than the pointed run and the one before it. **Runs still in use are protected (rev. 27, Copilot r4179306667):** the function holds the exclusive form of the per-tenant retention lock that run starts take in shared form (D.1, "Run inputs"). It never removes rows of a `running` run, of any kind. It never removes a batch that is visible under the `input_batch_seq_hwm` of a `running` run, nor run-keyed rows of a rollup run named as a `running` run's `input_rollup_run_id`. Nothing a reader or a running run can still see is removed. Never: anomalies and their children, backtests, `rollup_batches`, `analytics_runs`. On `REVIEWED_SECURITY_DEFINER_FUNCTIONS`; EXECUTE revoked from PUBLIC, granted to `ratio_analytics` | the job, after each rollup or forecast run | — |
+| function `ratio.analytics_apply_retention()` | `SECURITY DEFINER`, owned by `ratio_owner`, `SET search_path = pg_catalog, pg_temp`, no arguments, fixed SQL; returns removed-row counts per table. Removes only (rev. 29: also every `failed` or `abandoned` run's run-keyed rows, D.1 "Crashed runs"): rollup rows (`cost_daily`, `cost_resource_daily`, `billing_daily`) of a batch below the visible batch of its (source, period), i.e. the highest rolled-up `batch_seq` ≤ `rollup_pointer.batch_seq_hwm` (rev. 13); run-keyed rows (`cost_daily_scope`, `billing_daily_scope`, `account_dim`) of runs other than the pointed run and the one before it. **Runs still in use are protected (rev. 27, Copilot r4179306667):** the function holds the exclusive form of the per-tenant retention lock that run starts take in shared form (D.1, "Run inputs"). It never removes rows of a `running` run, of any kind. It never removes a batch that is visible under the `input_batch_seq_hwm` of a `running` run, nor run-keyed rows of a rollup run named as a `running` run's `input_rollup_run_id`. Nothing a reader or a running run can still see is removed. Never: anomalies and their children, backtests, `rollup_batches`, `analytics_runs`. On `REVIEWED_SECURITY_DEFINER_FUNCTIONS`; EXECUTE revoked from PUBLIC, granted to `ratio_analytics` | the job, after each run's success commit (rev. 28) and in each run start's cleanup pass (rev. 29, D.1) | — |
 
 Indexes: primary keys only; a BRIN on `cost_daily (usage_date)` is added
 only if a measured query needs it (it was part of the wide variant measured
@@ -219,7 +219,37 @@ only one starter of a kind can be inside the allocation at a time.
     nothing; it is not retried silently.
   - If a `running` run of that kind with a live lease exists, it refuses
     with `ALREADY_RUNNING`.
-  - An expired one is marked `abandoned`.
+  - An expired one is marked `abandoned`. That `UPDATE` waits for any
+    transaction of the stale run still in flight, since each holds the
+    run row locked (`FOR UPDATE` or `FOR SHARE`, "Writing", below); after
+    it commits, every later transaction of that run fails with
+    `LEASE_LOST`. The start then runs its cleanup pass (rev. 29, "Crashed
+    runs" below) before any other work.
+  - **The wait is bounded (rev. 30, the challenger's L3).** The `UPDATE`
+    runs under a `lock_timeout` (5 s by default, configurable).
+    Without it, a long stale transaction would keep the start waiting
+    while it holds the per-kind lock and the shared retention lock, and
+    every retention pass in the tenant would stall behind it. On timeout
+    (SQLSTATE 55P03) the acquisition transaction rolls back, which
+    releases both locks and inserts nothing, and the start fails with
+    `ALREADY_RUNNING`, marked retryable. A later start retries the
+    takeover once the stale transaction has ended.
+  - **Where the timeout is set (rev. 31, the challenger's L1 on
+    c615ea3).** The acquisition transaction runs in this order:
+    1. it takes the per-kind lock;
+    2. it takes the shared retention lock;
+    3. it reads the latest `running` run;
+    4. only then, `SET LOCAL lock_timeout = '5s'`, the `abandoned`
+       `UPDATE`, and `SET LOCAL lock_timeout = 0` straight after;
+    5. it does the `INSERT`.
+
+    `lock_timeout` also applies to advisory-lock waits; the challenger's
+    PG16 probe showed it. If the timeout were set at the start of the
+    transaction, a start that waits more than 5 s behind a retention pass
+    holding the exclusive lock would fail with a spurious
+    `ALREADY_RUNNING`, which is likely on `full`. The advisory-lock waits
+    in steps 1 and 2 therefore have no timeout: a retention pass always
+    ends, and it holds no run-row lock.
   - It then inserts its own run with a fresh `lease_token`, a TTL, and the
     next `run_seq`.
 - **Run inputs are captured once (rev. 27, Copilot r4179306694).** A run
@@ -238,13 +268,165 @@ only one starter of a kind can be inside the allocation at a time.
   at the visible batch under `input_batch_seq_hwm`, run-keyed rollup rows
   of `input_rollup_run_id`, forecast rows of `input_forecast_run_id`,
   never through the pointers. `tg_analytics_run_success` checks on INSERT
-  that each named input run is `succeeded` and of the right kind. A
+  that each named input run is `succeeded` and of the right kind, **and
+  that `input_batch_seq_hwm` equals the input rollup run's own recorded
+  `batch_seq_hwm`** (rev. 28, the challenger's L4b; the same rule the
+  pointer guard enforces). A
   forecast pointer that moves in the middle of a detect run or a replay
   therefore changes nothing that run reads.
-- **Writing.** Every write transaction of the run starts with
-  `assertLease(run_id, lease_token) FOR UPDATE`. A run whose lease expired
-  or was taken over fails with `LEASE_LOST` and commits nothing more
-  (fencing).
+- **Writing.** Every transaction of the run, including one that only
+  reads its inputs (rev. 29), starts with `assertLease(run_id,
+  lease_token)`. A transaction that writes takes the run row `FOR UPDATE`.
+  One that only reads takes it **`FOR SHARE`** (rev. 30, the challenger's
+  L1), so concurrent readers of one run, such as `full`'s 4 parallel
+  workers, do not wait for each other. The worker on `main` already uses
+  `assertLease(…, 'SHARE')` this way. The takeover's `UPDATE` still waits
+  for both kinds. A run whose lease expired or was taken over fails with
+  `LEASE_LOST` and commits nothing more (fencing).
+  - **Enough lease left before each transaction (rev. 31, Copilot
+    r4179490968; replaces revision 30's "TTL > the longest
+    transaction").** Either lock blocks the run's own heartbeat, an
+    `UPDATE` of the same row, until the transaction ends. The heartbeat
+    then renews only a lease that is **still live**; on `main`,
+    `heartbeat()` has `lease_expires_at > clock_timestamp()` in its
+    `WHERE` (`src/ingest/worker/lease.ts:162–169`). So "TTL > the
+    transaction" is not enough. A transaction that starts just before a
+    heartbeat delays that heartbeat by its whole length, and if the old
+    expiry passes meanwhile, the lease lapses under a healthy run.
+  - **The numbers on `main`.** TTL `leaseTtlSeconds` = 300 s by default
+    (`RATIO_LEASE_TTL_SECONDS`, 5–3600; `src/ingest/config.ts:52`,
+    `:231`). The heartbeat fires every `max(1 s, TTL / 3)`, so 100 s at the
+    default (`src/ingest/worker/pipeline.ts:131`, `:136`). The analytics
+    jobs use the same settings. Without a check, the safe limit for one
+    transaction is TTL − interval − m = 300 − 100 − 30 = **170 s**, not
+    300 s.
+  - **The margin (rev. 32, Copilot r4179528066).** Revision 31 wrote
+    "m = 30 s (TTL / 10)", which is TTL / 10 only at the 300 s default,
+    while its own test used TTL 6 s with a 1 s margin. One rule now
+    applies everywhere: **m = max(1 s, TTL / 10)**.
+  - **The slack (rev. 34, Copilot r4179572925).** Revisions 32–33
+    admitted `b + m = TTL`, but the check under the lock (step 2 below)
+    still needs a full `b + m` left. The time between the renewal's
+    commit and the lock grant made that check fail at the boundary, and
+    with `LEASE_RETRY` a maximal budget would retry until
+    `maxRunSeconds`. So a slack is reserved for that interval:
+    **s = max(250 ms, TTL / 100)**.
+    - **Why this value:** s covers the renewal's commit, the next
+      `BEGIN`, an uncontended row-lock grant, and the client's own
+      scheduling between them (event-loop delay, a GC pause). On the
+      local stack each of these takes a few milliseconds, and 250 ms is
+      two orders of magnitude above that. TTL / 100 (= m / 10 once m is
+      TTL / 10) scales it for long TTLs, where a job does more between
+      renewal and lock. A longer wait is lock contention, which step 4
+      handles; s is not meant to absorb it.
+    - **Admission:** a transaction is admitted only if
+      **b + m + s ≤ TTL**, so `LEASE_BUDGET` refuses any budget above
+      TTL − m − s. The check under the lock stays `≥ b + m`.
+    - **The largest budgets** across `RATIO_LEASE_TTL_SECONDS`'s range
+      5–3600 s, with the heartbeat at `max(1 s, TTL / 3)`:
+
+      | TTL | m | s | largest budget TTL − m − s | heartbeat |
+      |---|---|---|---|---|
+      | 5 s | 1 s | 0.25 s | 3.75 s | 1.7 s |
+      | 6 s (the 4-3 tests) | 1 s | 0.25 s | 4.75 s | 2 s |
+      | 300 s (default) | 30 s | 3 s | 267 s | 100 s |
+      | 3600 s | 360 s | 36 s | 3204 s | 1200 s |
+
+    - The configuration already enforces **TTL ≥ 5 s**
+      (`src/ingest/config.ts:231`: `int(env, 'RATIO_LEASE_TTL_SECONDS',
+      …, 5, 3600)`). At that minimum the largest budget is 3.75 s (rev.
+      33, the challenger's nit; rev. 34 with the slack). The heartbeat
+      interval does not enter the rule, because the check below
+      guarantees the margin whenever a heartbeat is held up.
+  - **The rule (rev. 32: renewal outside the work transaction; Copilot
+    r4179528051, the challenger's L1 on aeef207).** Every run transaction
+    has a duration budget `b`, which the job's chunking keeps it under.
+    If `b + m + s > TTL`, the transaction is refused before anything
+    starts (`LEASE_BUDGET`, a chunking bug; it fails closed; rev. 34:
+    with the slack). Otherwise:
+    1. **Renew, if needed, in its own short transaction.** The job reads
+       the remaining lifetime `r = lease_expires_at − clock_timestamp()`
+       without a lock. If `r < b + m + s`, it calls the live-only heartbeat,
+       which is `main`'s `heartbeat()`: its own transaction, committed at
+       once. Revision 31 put the renewal inside `assertLease`, which is
+       inside the work transaction. There the `UPDATE`'s row lock would
+       last until the work transaction committed, up to the whole
+       budget. It would block the other readers' `FOR SHARE`, so
+       parallel readers would run one at a time, and it would block the
+       heartbeat. (`main`'s `assertLease`, `lease.ts:151–159`, only
+       checks and locks; it never renews.)
+    2. **Begin the work transaction and lock the lease row**, `FOR SHARE`
+       or `FOR UPDATE`, with the final check under that lock: the lease
+       is live, and `lease_expires_at ≥ clock_timestamp() + b + m`.
+    3. **If the lease is not live** (expired or taken over),
+       the result is `LEASE_LOST` at once. That is fencing, and the run
+       stops.
+    4. **If only the remaining-time check fails**, the lease is live but
+       too short after the lock wait. The transaction rolls back before
+       doing anything, renews (step 1) and retries step 2 once. If that
+       retry also falls short, the result is **`LEASE_RETRY`** (rev. 33,
+       the challenger's L1 on 66205dd), a distinct retryable code, not
+       `LEASE_LOST`.
+       - The job retries a `LEASE_RETRY` transaction with jittered
+         backoff, from 100 ms doubling to 5 s, for as long as the lease
+         is live. Every retry renews first.
+       - **A retry is not progress (rev. 35, the challenger's L1 on
+         644d1aa).** On `main` the heartbeat renews only while the run
+         makes progress: `mayRenew()` requires progress within
+         `stallTimeoutSeconds` (120 s by default; `pipeline.ts:122`,
+         `config.ts:232`). A stalled run then lets its lease lapse.
+         Revisions 33–34's retry renewed outside that loop. It bypassed
+         the check, so a reader starved by its own run's back-to-back
+         writers could keep the run alive for `maxRunSeconds` (6 h). A
+         writer queued behind the current one gets in before the reader's
+         post-renewal `FOR SHARE`. Now:
+         - step 1's renewals go through the same `mayRenew()` gate as
+           `main`'s heartbeat;
+         - a `LEASE_RETRY` never counts as progress;
+         - a transaction's consecutive `LEASE_RETRY`s are timed from the
+           first one. Once they span `stallTimeoutSeconds`, the job
+           stops retrying and fails the run with **`LEASE_STALLED`**.
+           This is the same idle-watchdog pattern as `main`'s
+           `SOURCE_STALLED` and `EVIDENCE_STALLED`: the run stops
+           renewing, its lease lapses, and a later start takes over.
+       - **Why not pause the run's writers while a reader retries:**
+         that needs a run-wide gate across parallel workers, which is a
+         new lock that the writers would have to order against the lease
+         row. It also hides a chunking problem that the stall failure
+         reports.
+       - The run's existing `maxRunSeconds` (`config.ts:233`, 6 h by
+         default) still bounds the whole run, as on `main`.
+       - **`LEASE_RETRY` cannot loop on a budget that does not fit**
+         (rev. 34). Admission guarantees that right after a renewal at
+         least `b + m + s` is left. So a retry falls short only if the
+         renewal-to-lock time exceeds s, which is lock contention. If
+         the contention does not end, `LEASE_STALLED` ends the loop
+         after `stallTimeoutSeconds` (rev. 35). A budget that could not fit even immediately
+         after a renewal is refused at admission with `LEASE_BUDGET` and
+         never reaches step 4.
+       - **Why this option:** revision 32 mapped the second failure to
+         `LEASE_LOST`. A healthy run could then be fenced purely because
+         its lock waits were held up behind back-to-back writers of its
+         own (step 2's `FOR SHARE` queues behind each `FOR UPDATE`).
+       - Retrying "until a deadline" inside `assertLease` would hide that
+         wait from the job. "At most one writing transaction at a time"
+         would not prevent it: one writer after another can still delay
+         a reader past its margin.
+       - A distinct code keeps `LEASE_LOST` for a lease that really is
+         not live, and leaves the scheduling to the job, which can
+         back off.
+
+    After step 2, the lease outlives the transaction's planned end by at
+    least m. A heartbeat blocked behind the transaction runs at the
+    latest when the transaction ends, while the lease is still live, so
+    it renews. The same holds for parallel readers: each one checked its
+    own end under its lock. A renewal `UPDATE` that waits behind a
+    reader's `FOR SHARE` ends by that reader's end, which is at least m
+    before expiry. At the defaults, **every transaction budget must be
+    ≤ TTL − m − s = 267 s** (rev. 34; 270 s before the slack). A transaction that overruns its budget by more
+    than m can lose the lease. That fails safe: the run gets `LEASE_LOST`
+    and is retried, and nothing is half-written. Contention alone, with
+    the lease live, never gives `LEASE_LOST` (step 4).
 - **`batch_seq`** is allocated only by the lease holder, inside its
   transaction, as **`coalesce(max(batch_seq), 0) + 1`** over the tenant's
   `rollup_batches`. It starts at 1 on an empty tenant (rev. 15; a bare
@@ -333,6 +515,11 @@ enforced only by the job, and the id sequences had no stated grants.
     `succeeded`, `running` → `failed`, `running` → `abandoned`.
     **`succeeded`, `failed` and `abandoned` are terminal**: any change out
     of them is refused, so succeeded → running → succeeded is impossible.
+    **One exception (rev. 34):** on a terminal `backtest` run,
+    `export_files_state` may change from `'present'` to `'deleted'`, with
+    every other column unchanged. Nothing else may change on a terminal
+    row, and `'deleted'` never goes back. On INSERT a backtest run must
+    have `'present'`.
   - On a rollup run's transition to `succeeded`, it sets
     `batch_seq_hwm := coalesce(max(batch_seq), 0)` over the tenant's
     `rollup_batches`.
@@ -437,13 +624,237 @@ Forecast and detect runs may overlap (one writer per kind, not per
 tenant), so without this rule a forecast run's retention pass could
 delete a running detect run's own state and the forecast run it reads.
 
+**How the retention functions run (rev. 28, the challenger's L1–L3).**
+- **READ COMMITTED, lock first.** Both functions are `LANGUAGE plpgsql
+  VOLATILE`. Their **first statement** takes the exclusive retention
+  lock. The second checks `current_setting('transaction_isolation') =
+  'read committed'` and raises otherwise. Each later statement therefore
+  takes a snapshot after the lock was granted, and sees every run start
+  that committed while it waited. The challenger's PG16 probe showed why:
+  under REPEATABLE READ the snapshot is taken before the lock wait, and
+  retention deleted F1, which a just-started detect run had pinned.
+  Under READ COMMITTED it did not.
+- **Own transaction, after the success commit.** A run calls retention in
+  a separate transaction **after** its success transaction has
+  committed, holding no run-row or pointer locks. Called inside the
+  success transaction, it would hold the run row while waiting for the
+  exclusive lock. A same-kind start holds the shared lock while it marks
+  that stale run `abandoned`, so the two could deadlock.
+- **Crashed runs: a cleanup pass at every start (rev. 29, Copilot
+  r4179428541; replaces revision 28's bound).** Revision 28 said a crashed
+  run's leftovers were released at its kind's next start. They were not.
+  The start only marked the stale run `abandoned`, and retention ran only
+  after a success commit. So a series of crashed replacements kept one more
+  abandoned run's output per attempt until some run succeeded. Now:
+  - **Every start runs a cleanup pass** after its acquisition transaction
+    commits and before any other work: `ratio.analytics_apply_retention()`,
+    then `ratio.analytics_apply_forecast_retention()`, each in its own
+    transaction under the two rules above (READ COMMITTED with the lock
+    first; no run-row or pointer lock held). It calls both, because a
+    crashed run of one kind can pin another kind's rows, such as a detect
+    run's input rollup run. A run whose post-success retention call was
+    lost to a crash is covered by the next start too.
+  - **`failed` and `abandoned` runs are removable whatever their
+    `run_seq`.** They are terminal and never read again, so both functions
+    remove their run-keyed rows and backtest output (and the pass their
+    export files, "Backtest output" below), **unless they are pinned in
+    `analytics_run_pins` or named by a `running` run** as an input or
+    `prev_run_id` (rev. 30, the challenger's L2; pins as in revision 25).
+    In practice neither applies: the INSERT trigger requires inputs to be
+    `succeeded`, and a pin is written only in a success transaction or
+    while the run is kept. Batches that a failed rollup run completed above the mark are
+    not its output in this sense: they are published data, and the next
+    successful rollup exposes them ("The high-water mark", above).
+  - **Nothing in use is removed.**
+    - The takeover's `abandoned` update waits for every in-flight
+      transaction of the stale run (above). So once it commits, no
+      transaction of that run is reading anything, and none can start.
+      An expired lease alone does not show that, which is why retention
+      still does not treat it as dead (revision 28).
+    - The new run's row, with its inputs and previous run, is committed
+      before the pass begins. The pass takes the exclusive lock first and
+      reads in READ COMMITTED, so it sees that `running` row and keeps
+      everything the Z1 exclusion keeps: its inputs, its previous run,
+      its own rows and the pointers' runs.
+  - **The bound.** A run writes nothing beyond its run row until its
+    cleanup pass has finished, and that pass removes every abandoned run.
+    So **per kind, at most one run that has written output is left over**:
+    the crashed run before its takeover, or the abandoned run between the
+    takeover and the end of the takeover's cleanup pass.
+    - A start that crashes during its own cleanup pass has written
+      nothing, and the next start's pass removes both runs.
+    - Crashed retries therefore cannot accumulate.
+    - **Its size** (rev. 29, the challenger's L1 on 0926b19): ≈ 0.1 GB
+      of state at `fleet15k`'s sizes (one forecast run's state and the
+      previous run it pinned, or one rollup run's run-keyed rows), **plus
+      the rollup rows of the superseded batches that its captured mark
+      pinned**. Revision 28 left those out. A restated period of
+      `fleet15k`'s size is ≈ 1.1 M `cost_daily` rows × 180 B ≈ 0.2 GB,
+      and each restatement under the mark is pinned separately. The
+      takeover's cleanup pass releases all of it. There are four kinds.
+    - **A backtest run's export files** (rev. 30, Copilot r4179466023): a
+      crashed or fenced backtest may already have written ≈ 0.2–0.25 GB of
+      gzip exports (DESIGN §3.8). Revisions 25–29 deleted export files
+      only from the backtest command, so a rollup, forecast or detect
+      start reclaimed the rows but not the files. Now every pass deletes
+      them ("Backtest output", below), so the bound covers them too.
+    - `fleet15k` has no restatements, and each of its runs is a fresh
+      stack, so its peak is unaffected.
+
 **Backtest output (rev. 25, Copilot r4179229471):** the same function also removes
 the `forecast_backtests` and `forecast_backtest_points` rows of every
 `backtest` run that is `succeeded`, `failed` or `abandoned` and is neither
 among the 2 latest succeeded backtest runs nor in `analytics_run_pins`.
-It never touches a `running` run. The backtest command then deletes those
-runs' per-origin export files and keeps their SHA-256 manifest in the
-run's `stats`. Pinned runs are archived, never deleted (DESIGN §3.8).
+It never touches a `running` run. Pinned runs are archived, never deleted
+(DESIGN §3.8).
+
+**Export files: every pass deletes them (rev. 30, Copilot r4179466023).**
+Revisions 25–29 left the per-origin export files to the backtest command.
+A crashed backtest's files then stayed, beyond the bound of 2 plus pinned
+runs, until some later backtest ran. Now the file cleanup belongs to every
+pass that calls this function: each run's post-success pass, of any
+kind, and every start's cleanup pass.
+- **Same eligibility as the rows.** The function also returns the ids of
+  every terminal `backtest` run that is not kept: not among the 2 latest
+  succeeded, not pinned, and not named by a `running` run. **Since rev. 34
+  (Copilot r4179572957), only runs whose `export_files_state` is still
+  `'present'`.** Before that, the list held every eligible run forever.
+  `analytics_runs` is never pruned, and a cleaned directory keeps its
+  `deleted.json`, so every pass read the directory of every historical
+  backtest: O(all backtests ever run).
+- **After the commit.** Only after the function's transaction has
+  committed does the caller delete those runs' files. Each run has its
+  own evidence directory, `backtest/<run_id>/`. A `deleted.json` with each
+  file's name, size and SHA-256 stays there. The SHA-256 manifest in
+  `stats` also stays, for a run that recorded one.
+- **Claimed by an atomic rename (rev. 31, Copilot r4179490982).** The
+  exclusive retention lock ends at the function's commit, so two passes
+  can receive the same ids. Without serialization, one pass could delete
+  files while the other was still hashing them or writing `deleted.json`.
+  The file phase holds no database lock, keeping the rule that a pass
+  holds no run-row or pointer lock (revision 28). It is serialized per
+  directory instead.
+  - **Filesystem assumption (rev. 32, the challenger's L2).** This
+    protocol needs the evidence directory on a **local POSIX
+    filesystem**, where `rename(2)` within `backtest/` is atomic and a
+    rename of a missing source fails with `ENOENT`. That holds for the
+    local stack's volume. It does **not** hold on an object store, which
+    has no atomic directory rename, nor on some network filesystems. The
+    off-box artefact store that DESIGN §3.8 mentions for the future
+    therefore needs its own claim mechanism (for example a conditional
+    write of a claim object, or a database row) before cleanup may run
+    against it.
+  - A pass claims `backtest/<run_id>/` by renaming it to
+    `backtest/.deleting-<run_id>-<pass_id>/`. That is one `rename(2)` on
+    one filesystem, so it is atomic and exactly one pass wins. A loser
+    gets `ENOENT` and skips the run. A directory that holds only
+    `deleted.json` is skipped without a claim.
+  - **`ENOENT` with no claim: nothing to clean (rev. 35, Copilot
+    r4179612202).** A backtest can fail before `backtest/<run_id>/`
+    exists. Then the claim's `ENOENT` does not mean a competing pass.
+    Revision 34 treated it as one, so the run stayed `'present'` and was
+    listed again by every pass.
+    - On `ENOENT`, the pass looks in its one listing of `backtest/` (the
+      read it already does for stale claims) for `.deleting-<run_id>-*`.
+    - If a claim is there, another pass owns the run, or stale-claim
+      recovery will finish it, so the pass skips it.
+    - If neither the source nor a claim is there, the run has no files.
+      The pass marks it `'deleted'` (step 5) without touching the disk.
+      Nothing was deleted, so no `deleted.json` is written.
+    - **Why no re-check is needed.** `readdir` is not atomic against
+      concurrent renames, so the listing can miss a claim made or
+      renamed back during the pass. Marking `'deleted'` in that case is
+      still harmless:
+      - a claim's owner finishes its work regardless of the state, and
+        its step 5 then updates no row;
+      - a stale claim is found by stale-claim recovery from the listing
+        of `backtest/`, which never consults the state;
+      - a rename back only restores a directory already cleaned down to
+        `deleted.json`;
+      - and a terminal run's directory is never created afresh, since it
+        is created only inside the run's lease transactions.
+    - So the case costs no extra directory read, and each such run is
+      handled once, by one rename attempt.
+  - In its claimed directory, the winner:
+    1. hashes every file except `deleted.json` and any temporary
+       manifest. A temporary manifest is exactly `deleted.json.tmp-<pass_id>`
+       (rev. 32, the challenger's nit). A re-claim between another
+       pass's temporary write and its rename carries such an orphan
+       along, and it is not an export file. It is never hashed or
+       listed, and step 3 deletes it;
+    2. writes `deleted.json`, the earlier entries plus the new ones, to
+       its own `deleted.json.tmp-<pass_id>` and renames it into place,
+       **before deleting anything**;
+    3. deletes the listed files and any orphaned `deleted.json.tmp-*`,
+       treating `ENOENT` as done;
+    4. renames the directory back to `backtest/<run_id>/`;
+    5. **marks the run cleaned** (rev. 34): in a short transaction of
+       its own, `UPDATE analytics_runs SET export_files_state =
+       'deleted' WHERE … AND export_files_state = 'present'`. A crash
+       before this write leaves the run `'present'`. The next pass then
+       finds only `deleted.json`, skips the claim and writes the state:
+       the step is idempotent.
+  - **A terminal run's directory gets no new entries** (rev. 34).
+    Staging files live in `backtest/.staging/`, not in the run's
+    directory. The run's directory is created, and each file is moved
+    into it, only inside a transaction that holds the run's lease, so
+    after the takeover's `abandoned` update nothing more can arrive.
+    Revisions 30–33 staged inside the run's directory. A dying writer's
+    staging file could then recreate it after the cleanup, which a
+    persisted `'deleted'` state would never revisit. If the name exists
+    anyway (manual intervention), the winner moves the merged
+    `deleted.json` into it the same way, removes the claimed directory,
+    and leaves the run `'present'` for a later pass. `deleted.json` ends
+    in `backtest/<run_id>/` (DESIGN §3.8) and is cumulative.
+- **Interrupted claims are finished.** Every pass also lists
+  `backtest/.deleting-*`, with **one** read of `backtest/` itself (rev.
+  34). A claim older than one hour (the pass id
+  carries its start time, and a pass takes far less) belongs to a pass
+  that died or stalled.
+  - A later pass re-claims it by renaming it to its own
+    `.deleting-<run_id>-<pass_id>/`, again atomic with one winner, and
+    resumes at step 1, merging `deleted.json`.
+  - If the stalled pass wakes up, it finds its paths gone (`ENOENT`) and
+    stops. `deleted.json` is written before any deletion, so no file is
+    deleted without being recorded.
+  - **Every step works by name** (rev. 32, the challenger's L2). Each
+    operation resolves a full path from `backtest/` afresh. No pass holds
+    a directory file descriptor across steps, uses `openat`/`unlinkat`
+    relative to one, or sets its working directory inside a claim.
+    Otherwise a stalled pass could keep working on a directory that was
+    re-claimed under another name, and the `ENOENT` stop above would not
+    happen.
+- **Idempotent, and O(1) once cleaned (rev. 34).** The list holds every
+  eligible run still `'present'`, not only those whose rows this call
+  removed. So an interrupted deletion is finished by a later pass, and a
+  cleaned run costs nothing.
+  - A pass does a constant number of directory reads: one of
+    `backtest/` (stale claims), one of `backtest/.staging/` (orphaned
+    staging files of terminal runs), and one per run still `'present'`.
+  - **No retention lock is needed for the state.** The run is terminal
+    and not kept, and a backtest run is never a `running` run's input or
+    previous run. A pin is refused once the output is removed
+    (`RUN_NOT_KEPT`). So no run can become kept between the function's
+    commit and the state write.
+  - The write takes the run row only briefly, and no lease holder
+    contends for a terminal row.
+  - A wrong `'deleted'` can only make cleanup skip a directory. It never
+    deletes a file, so it fails safe.
+- **Safe against a concurrent backtest.** A `running` run's id is never
+  returned, and a backtest writes only under its own run id. A fenced
+  writer cannot add files after its takeover. A backtest writes each
+  export file to a staging name and moves it into place only inside a
+  transaction that holds its lease (`FOR SHARE`). The takeover's
+  `abandoned` update waits for that transaction, and every later move
+  fails with `LEASE_LOST`. A staging file left by a writer that dies is
+  in `backtest/.staging/`, named `<run_id>-<file>`. The next pass removes
+  it once that run is terminal, and never touches a `running` run's
+  staging files (rev. 34; revisions 30–33 staged inside the run's
+  directory).
+- **Pins cannot race the deletion.** A later pin (rev. 26) takes the
+  shared retention lock and refuses a run that is no longer kept
+  (`RUN_NOT_KEPT`). So no run is pinned between the function's commit and
+  its files' deletion.
 
 ## D.2 Migration 0003 — forecasts
 
@@ -456,7 +867,7 @@ run's `stats`. Pinned runs are archived, never deleted (DESIGN §3.8).
 | `forecast_totals` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, window)** with window ∈ {month_end, next_30, next_90}; actual_to_date, expected_total, lo80, hi80, lo95, hi95 (ordered as in D.3, rev. 20), last_published_day, quantile source ∈ {own, cohort, extrapolated} (rev. 17), **no billed column** (rev. 27, Copilot r4179306710: `billed_month_end` and its CHECK are removed, since billed month-end is not forecast in Slices 3–5, DESIGN §3.1), `clamped boolean` (rev. 20: the total's quantiles were widened to reach the point; reported next to FT-7); on non-leaf rows the `bottom_up` summary of DESIGN §3.6, `history_days` (from the minimum `forecast_leaves.first_day` of the scope's leaves, rev. 26), `leaf_count`, `cold_start_share` (Σ\|E\| of estimated leaves ÷ Σ\|E\| of all leaves, in [0, 1], NULL when 0; rev. 26) (rev. 25, Copilot r4179229481; NULL on leaf rows, whose method and flag are in `forecast_state`) | all scopes, **including every leaf for all three windows** (rev. 17, Copilot r4178843716: revision 16 stored the leaf month-end total only, and a leaf's next-30 and next-90 intervals cannot be rebuilt from daily bounds, DESIGN §3.4); ≈ 111 k leaf rows per `fleet15k` run (B.5.12) |
 | `forecast_backtests` | **(tenant_id, run_id, block, level, billing_currency, segment, horizon_bucket, metric)** (rev. 21, Copilot r4179039337); every key column `NOT NULL`:<br>– `block` ∈ {calibration, scoring}; revision 20 kept it outside the key, so the same level, bucket and metric in the two blocks collided;<br>– `billing_currency`: per-currency metrics (FT-1's APE of each currency's total), or `''` for a unitless metric pooled over currencies (coverage, WAPE ratios; D.0 sentinel);<br>– `segment`: `all`, `individual`, `other_services`, a stressor cohort, `event_days`, `non_event_days`, `with_anomaly_days` (FT-4 and FT-9 report these separately; revision 20 had no column for them);<br>– `horizon_bucket`: a daily bucket {1, 2–7, 8–14, 15–30, 31–60, 61–90}, a month-end remaining-days bucket {1, 2–7, 8–14, 15–31}, `day1` and `day15` (FT-1, FT-2), or `next_30` / `next_90`.<br>Value, n, origins; the metrics include `clamped_share` (rev. 20: the share of buckets, and of total windows, whose quantiles were clamped, reported next to FT-7) | the accuracy report; kept for the 2 latest succeeded backtest runs and every pinned run (rev. 25); written by `backtest` runs only, under `assertLease`, so no row is added after the run's status leaves `running` |
 | `forecast_backtest_points` | **(tenant_id, run_id, origin_day, scope_kind, scope_key, billing_currency, h)**; expected, lo80, hi80, lo95, hi95 | **aggregate scopes only** (≈ 0.01 GB per `fleet15k` run); leaf points are exported as gzip JSON Lines to the run's evidence directory (≈ 0.2 GB), never stored in the database; both kept for the 2 latest succeeded backtest runs and every pinned run (rev. 25; revisions 3–24 kept all of them) |
-| `analytics_run_pins` (rev. 25) | **(tenant_id, run_id)** (composite FK to `analytics_runs`); reference text (e.g. `acceptance:4-6`, a PR's evidence path), pinned_at | INSERT only by analytics, no UPDATE or DELETE grant to anyone: a pin is permanent. Written by `ratio-analytics backtest --pin <reference>` **in the run's own success transaction** (rev. 26; the acceptance runs, PR 4-6 and 5-4, always use it, so no retention pass falls between success and pin), or later from a PR's evidence while the run is still kept; the forecast retention function keeps pinned runs' output |
+| `analytics_run_pins` (rev. 25) | **(tenant_id, run_id)** (composite FK to `analytics_runs`); reference text (e.g. `acceptance:4-6`, a PR's evidence path), pinned_at | INSERT only by analytics, no UPDATE or DELETE grant to anyone: a pin is permanent. Written by `ratio-analytics backtest --pin <reference>` **in the run's own success transaction** (rev. 26; the acceptance runs, PR 4-6 and 5-4, always use it, so no retention pass falls between success and pin), or later from a PR's evidence while the run is still kept (rev. 30: under the shared retention lock, refused with `RUN_NOT_KEPT` once the run's output is removed, D.1); the forecast retention function keeps pinned runs' output |
 | `detector_cohort_state` (rev. 12) | **(tenant_id, run_id, cohort_key text)**; D6's per-cohort growth fit (μ̂_k numeric[13], σ̂, n_k) and the pooled scales `σ_pool`, `s₂` per cohort | one row per cohort per detect run; run-keyed, retention keeps 2 runs (previously kept in `detector_state` under a cohort key, which mixed key types) |
 | `detector_state` | **(tenant_id, run_id, leaf_id)** (the forecast leaf, D.0; composite FK to `forecast_leaves`); D3: anchor_day and the **complete M1 state as of the anchor** (rev. 18, Copilot r4178908350): `anchor_method`, `anchor_level`, `anchor_trend`, `anchor_phi`, `anchor_season numeric[7]`, `anchor_cal_start`, `anchor_cal_mid`, `anchor_cal_end`, `anchor_log_var`, copied when the baseline is anchored from **the leaf's model state as of day a**: the state the daily O(1) update has carried to a (DESIGN §4.3), written in D.3's layout, whether or not a forecast run happened on a (refits are weekly, so a `forecast_state` row for day a usually does not exist; rev. 19, the challenger's L3), and never changed until the next re-anchoring, so `ŷ(t | a)` is D.3's formula on these columns alone and a weekly refit or a calendar-factor update cannot move it (revision 17 kept level, trend and season only, so `φ` and the calendar factors were read from the current state); `cusum_pos`, `cusum_neg`, days_since_anchor; the current episode (DESIGN §4.2, rev. 18): `ep_start`, `ep_excess_sum`, `ep_expected_sum`; D2: weekday medians numeric[7] and `mad` of calendar-adjusted `log y` over 56 days, `scale_floor`, `sigma_pool`; D8: previous day's one-step log residual, `s2` (pooled 2-day scale); intermittent: `scoring` ∈ {daily, weekly, hurdle}, zero share over 56 days, last 8 weekly sums numeric[8] (weekly), `q_hat`, `m_hat`, `v_hat` and `r1` with the route ∈ {warning, info_only} (hurdle), weekly `cusum_pos`; D4 reactivation: active days in the last 56, `last_active_before_dormancy`, the active share of the 28 days ending there and the active-day mean of the 56 days ending there (extended to at most 112 days for ≥ 3 values; the series keeps its last 3 active-day values); as-of error-bucket counts per cohort (fallback level in use), including 2-day sums, from which each detect run derives D1's `q₀.₉₉` / `q₀.₀₁`, `σ_pool` and `s₂` (none stored; rev. 18); D5/D7: trailing committed share, trailing untagged share; last_day | one row per leaf (`leaf_id`, D.0) per detect run (≈ 37 k in `fleet15k`, ≈ 0.7 KB each incl. forecast state, assumption; + ≈ 110 B for the rev. 18 anchor and episode columns, B.5.12); UPDATE by analytics; run-keyed, retention keeps 2 runs |
 | `detector_scope_state` (rev. 18, Copilot r4178908395) | **(tenant_id, run_id, scope_kind, scope_key, billing_currency)** with `scope_kind` ∈ {billing_account, business_unit, provider, tenant} and `scope_key` as in D.0; D3 on aggregate scopes (DESIGN §4.2): anchor_day, **`baseline numeric[28]`** (the scope's bottom-up forecast `ŷ(a + 1 … a + 28 \| a)`, frozen when the baseline is anchored; 28 days is the oldest a baseline may be), size decile (for the pooled scale), `cusum_pos`, `cusum_neg`, days_since_anchor, `ep_start`, `ep_excess_sum`, `ep_expected_sum`; last_day | one row per D3 aggregate scope per detect run (100 in `fleet15k` by the rev. 24 census; sized at 550 as an upper bound, ≈ 0.6 KB each, assumption: ≈ 0.001 GB for 2 runs, B.5.12); UPDATE by analytics; run-keyed, retention keeps 2 runs. Revision 17 had nowhere to keep an aggregate's anchor and sums between runs, since `detector_state` is keyed by `leaf_id` |
@@ -606,7 +1017,8 @@ them would not fit the disk budget. The formula generalises:
   `forecast_leaves.account_id`: at most 3 leaves on `fleet15k` and at
   most 80 on `full`.
 - **Totals:** the account's month-end, next-30 and next-90 totals are
-  stored in `forecast_totals`, like every scope's, with `B` on month-end.
+  stored in `forecast_totals`, like every scope's (no billed value: billed
+  month-end is not forecast, DESIGN §3.1; rev. 28).
 
 4-4b test: an account's reconstructed points equal the sum of its leaves'
 reconstructed points, and its bounds equal step 4 on its own state;
@@ -626,6 +1038,6 @@ mutant: the account's bounds summed from its leaves' bounds.
 
 | Role | Grants added |
 |---|---|
-| `ratio_analytics` | USAGE on schema `ratio`; SELECT on `cost_facts_published`, `publications_published`; SELECT, INSERT on every table above, **except `analytics_runs`, where INSERT is column-level and excludes `batch_seq_hwm` and `finished_at`** (rev. 16); UPDATE on the listed columns; USAGE on the identity sequences of `cost_accounts`, `forecast_leaves` and `cost_series` (no others exist: `batch_seq` and `run_seq` are allocated, not sequences); column-level UPDATE on each pointer of its own list (D.1: `rollup_pointer` with `batch_seq_hwm`, `forecast_pointer` without) and on `analytics_runs` of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`) (never `run_seq`, `kind`, `as_of`, `batch_seq_hwm`); EXECUTE on `ratio.current_tenant_id()`, the secret-guard functions its CHECKs evaluate, and the two retention functions; **no DELETE on any table** (D-12) |
+| `ratio_analytics` | USAGE on schema `ratio`; SELECT on `cost_facts_published`, `publications_published`; SELECT, INSERT on every table above, **except `analytics_runs`, where INSERT is column-level and excludes `batch_seq_hwm` and `finished_at`** (rev. 16); UPDATE on the listed columns; USAGE on the identity sequences of `cost_accounts`, `forecast_leaves` and `cost_series` (no others exist: `batch_seq` and `run_seq` are allocated, not sequences); column-level UPDATE on each pointer of its own list (D.1: `rollup_pointer` with `batch_seq_hwm`, `forecast_pointer` without) and on `analytics_runs` of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`, `export_files_state`) (rev. 34: the last one, guarded by the run trigger; never `run_seq`, `kind`, `as_of`, `batch_seq_hwm`); EXECUTE on `ratio.current_tenant_id()`, the secret-guard functions its CHECKs evaluate, and the two retention functions; **no DELETE on any table** (D-12) |
 | `ratio_reader` | SELECT on the new reader views only |
 | `ratio_worker` | none |

@@ -4,7 +4,10 @@ Part of [DESIGN.md](DESIGN.md). Branch `design/slice-3-5-forecast-anomaly`,
 from `origin/main` at 827773f. Design documents only. Revisions 1–4 were
 not pushed by the design agent; from revision 5 the branch is on
 `origin/design/slice-3-5-forecast-anomaly` and revisions are added by
-ordinary commits and plain pushes (never a force-push).
+ordinary commits and plain pushes (never a force-push). PR #70 was merged
+at revision 27 (`28f8970`; merge commit `f35c383` on `main`). Revision 28
+is a follow-up PR on `design/slice-3-5-followups`, branched from
+`origin/main` at `f35c383`, under the same rules.
 
 ## 1. Revisions
 
@@ -36,7 +39,15 @@ ordinary commits and plain pushes (never a force-push).
 | 24 | `f3209ea` | Copilot's review 5407981134 of b9b2274 (3 High, 1 Medium) and the challenger's one Low on revision 23 (APPROVED, 0 High, 0 Medium), §3y: account-scope daily forecasts rebuilt on read with stored interval state, and a scope census (peak 5.24 GB); anomaly changes published in the detect run's success transaction; valid-sample rules for the log-scale detectors; a scale-aware zero week in `budget5.py` (outputs unchanged); a `repointed` event. |
 | 25 | `45b0088` | Copilot's review 5408081799 of f3209ea (1 High, 2 Medium, 2 Low) and the challenger's Low and nit on revision 24 (APPROVED, 0 High, 0 Medium), §3z: an `occurrence` in the anomaly dedup key for re-introduced restatements; bounded backtest retention with pins; the `bottom_up` summary for non-leaf scopes; `forecast_scope_state` arrays checked; stale scope counts; event-target foreign keys. |
 | 26 | `546e00b` | Copilot's review 5408165158 of 45b0088 (1 Medium, 1 Low) and the challenger's three Low items on revision 25 (APPROVED, 0 High, 0 Medium), §3aa: bounded shares (cold-start, committed, untagged), defined APE and interval width; the retention threat-model row and rollback text brought up to date; `backtest --pin` in the success transaction; `historyDays` from leaves' first usage day; "fresh replay". |
-| 27 | this revision | Copilot's review 5408199807 of 546e00b (2 High, 1 Medium), after the challenger APPROVED revision 26 without findings, §3ab: retention never removes anything a running run uses (shared/exclusive retention lock); every multi-transaction run captures its input runs once and reads them by id; billed month-end `B` removed from the contract and recorded as a gap; a share-test wording fix. |
+| 27 | `28f8970` (PR #70, merged as `f35c383`) | Copilot's review 5408199807 of 546e00b (2 High, 1 Medium), after the challenger APPROVED revision 26 without findings, §3ab: retention never removes anything a running run uses (shared/exclusive retention lock); every multi-transaction run captures its input runs once and reads them by id; billed month-end `B` removed from the contract and recorded as a gap; a share-test wording fix. |
+| 28 (follow-up to merged #70) | `0926b19` (PR #71) | Copilot's review 5408232490 of 28f8970 (1 High, 1 Low) and the challenger's four Low items on revision 27 (APPROVED, 0 High, 0 Medium), §3ac: the sizing scripts' commitment draw made once per account and the scripts re-run (37,033 leaves; false-positive total 0.102, 0.132 conservative; peak 5.242 GB unchanged); the last billed-`B` line removed; the retention functions' isolation, lock order and transaction placement, and the crashed-run growth, stated; the input high-water mark checked on INSERT. |
+| 29 (follow-up to merged #70) | `7e49bfb` | Copilot's review 5408332571 of 0926b19 (3 High, 1 Medium, all on revision 28's crashed-run bound) and the challenger's one Low on revision 28 (APPROVED, 0 High, 0 Medium), §3ad: every start runs a retention cleanup pass after its acquisition commits, so crashed retries cannot accumulate; the bound restated (one left-over run per kind, ≈ 0.1 GB of state plus the superseded batches its mark pinned); `assertLease` on reading transactions too; the 4-3 test covers consecutive crashed replacements. |
+| 30 (follow-up to merged #70) | `c615ea3` | Copilot's review 5408381491 of 7e49bfb (1 Medium) and the challenger's three Low items on revision 29 (APPROVED, 0 High, 0 Medium), §3ae: every retention pass also deletes eligible backtest export files after its commit; read-only run transactions take the lease row `FOR SHARE`, and the TTL must exceed the longest transaction; pinned failed or abandoned runs are kept; the takeover's wait is bounded by a `lock_timeout`. |
+| 31 (follow-up to merged #70) | `aeef207`, `591b9cf` (§5 record) | Copilot's review 5408406528 of c615ea3 (2 Medium) and the challenger's one Low on revision 30 (APPROVED, 0 High, 0 Medium), §3af: `assertLease` renews the lease before a transaction when less than its budget plus 30 s is left, and refuses budgets above TTL − 30 s (≤ 270 s at `main`'s defaults); the file phase of retention is serialized per directory by an atomic claim-and-rename, with `deleted.json` written before deletion and stale claims finished; `lock_timeout` set only around the `abandoned` update. |
+| 32 (follow-up to merged #70) | `66205dd` | Copilot's review 5408458938 of 591b9cf (1 High, 1 Medium) and the challenger's two Lows and nit on revision 31 (APPROVED, 0 High, 0 Medium), §3ag: the lease renewal commits in its own short transaction, and the work transaction checks the remaining lifetime under its lock (retry once, then `LEASE_LOST`); one margin rule, m = max(1 s, TTL / 10), with TTL ≥ 5 s; the claim protocol's local-POSIX assumption and by-name rule stated; temporary manifests excluded from hashing. |
+| 33 (follow-up to merged #70) | `8bee00e` | The challenger's REQUEST CHANGES on revision 32 (1 Medium, 1 Low, 1 nit), §3ah: a renewing overlapping-readers case that kills the in-transaction-renewal mutant; `LEASE_RETRY`, a retryable code for a live lease that stays short under contention, with `LEASE_LOST` kept for a lease that is not live; the TTL minimum cited from `config.ts:231`. |
+| 34 (follow-up to merged #70) | `644d1aa` | Copilot's review 5408520252 of 66205dd (2 Medium, both still open at 8bee00e), §3ai: a renewal-to-lock slack s = max(250 ms, TTL / 100), admitting only `b + m + s ≤ TTL` (largest budget 267 s at the default), so a maximal budget passes and `LEASE_RETRY` cannot loop on a budget that does not fit; `analytics_runs.export_files_state`, so a pass reads a constant number of directories instead of every historical backtest's, with staging moved to `backtest/.staging/`. |
+| 35 (follow-up to merged #70) | this revision | Copilot's review 5408560003 of 644d1aa (1 Medium, 1 Low) and the challenger's three Lows and nit on revisions 33–34 (APPROVED, 0 High, 0 Medium), §3aj: a backtest with no directory is marked cleaned instead of retried forever; the renewal-trigger wording; `LEASE_RETRY` counted as no progress, so starvation ends in `LEASE_STALLED` after `stallTimeoutSeconds`; a 100 ms injected delay with a retry-tolerant assertion; the tests that kill the no-slack mutant. |
 
 ## 2. Governance wording: reverted
 
@@ -608,6 +619,191 @@ checking.
 | API and `freshness` | pointers and views | one statement or one REPEATABLE READ transaction (revisions 18, 21, 22) |
 | detect's anomaly writes | `anomalies` | the detect writer's lock and its success transaction (revision 24) |
 
+## 3ac. Revision 28 (follow-up to merged #70): Copilot's review 5408232490 of 28f8970 and the challenger's Lows on revision 27
+
+The challenger APPROVED revision 27 (0 High, 0 Medium, 4 Low). PR #70 was
+then merged at `28f8970`, so this revision is a follow-up PR from
+`origin/main` at `f35c383`. Copilot's two threads and the challenger's
+four Lows were each checked against `28f8970`, and all six are valid.
+Copilot's earlier thread r4179306710 (revision 27's Z3) was still open
+because of the same stale `B` line; AA2 closes it.
+
+| Item | Change | Where |
+|---|---|---|
+| **AA1 r4179339429** (High) commitment double draw | **Confirmed and fixed.** `(m > 20000 and random() < 0.6) or random() < 0.1` gives 0.6 + 0.4 × 0.1 = **0.64** above $20 k/month. Under the log-normal, P(m > $20 k) = 0.0369, so the overall rate was 12.0 % instead of 11.8 %. An account above $20 k whose first draw failed also used a second random number, which shifted every later draw. Every copy now draws once: `random() < (0.6 if m > 20000 else 0.1)`. The 7 scripts that feed current figures were fixed and re-run; `budget3.py` and `budget4.py` are kept verbatim as run and labelled (table below). **The spec was not changed:** DESIGN §2.3's Commitments row said "≈ 12 % of accounts (most large ones)" and now states the rule exactly. New 3-1a test: the commitment rate by class over 1,000,000 account draws (0.60 ± 0.01 above $20 k/month, ≈ 4 standard errors; 0.10 ± 0.002 below). New mutant: the double draw (64 %). **No target is crossed, so D-20 is not triggered:** the false-positive total is 0.102 (0.132 conservative) against 0.15, and the peak stays 5.242 GB against 5.5 GB | App. B (top note, B.2–B.5.13); DESIGN §0, §2.3, §2.8, §2.9, §3.2, §4.2, §4.9, §7 (3-1a), §8 (D-23, Known limits); §4 |
+| **AA2 r4179339445** (Low; also the challenger's L4a) | **Fixed.** App. D.3's account Totals bullet no longer promises `B`: "no billed value: billed month-end is not forecast". A sweep of DESIGN and the appendices for `` `B` ``, "billed month-end" and "billed forecast" found no other promise. Every remaining mention says it is not forecast (DESIGN §0, §3.1, §3.6, the `forecasts` API row, D-09, §8) or concerns billed actuals | App. D.3 |
+| **r4179306710** (Medium; revision 27's Z3, thread still open) | Fixed in revision 27 (merged with #70) except the line above. After AA2, nothing promises a billed forecast, so the thread can be resolved | App. D.3 |
+| **AA3** challenger L1: retention isolation | **Fixed.** Both retention functions are `LANGUAGE plpgsql VOLATILE`. The first statement takes the exclusive retention lock. The second raises unless `transaction_isolation` is `read committed`, so every later statement's snapshot is taken after the lock is granted. New 4-3 test for the ordering where the start holds the shared lock first: F1 and D's previous run's state survive the retention pass, and a REPEATABLE READ call is refused. New mutants: retention under REPEATABLE READ, the lock taken after the first read | App. D.1; DESIGN §6.1, §7 (4-3) |
+| **AA4** challenger L2: deadlock | **Fixed.** A run calls retention in its own transaction after its success commit, holding no run-row or pointer lock. 4-3 test: a start marking a stale run `abandoned` at the same time does not deadlock. New mutant: retention inside the success transaction | DESIGN §6.1, §7 (4-2, 4-3); App. D.1 |
+| **AA5** challenger L3: crashed runs | **Superseded in revision 29 (§3ad, Copilot r4179428574): the bound below did not hold, since a start only marked the stale run `abandoned` and retention ran only after a success; every start now runs a cleanup pass.** Revision 28's text: **Bounded growth stated; an expired lease is not treated as dead.** A write transaction checks the lease only at its start (`assertLease … FOR UPDATE`), so one that began before the lease expired can still be reading the run's inputs. Proving that none is in flight would need the run-row locks that AA4 keeps out of retention, and that would reopen Z1's race. The growth is bounded: at most one crashed run per kind (the next start of that kind marks it `abandoned`), ≈ 0.1 GB per run at `fleet15k`'s sizes, released at that kind's next start. It cannot affect `fleet15k`'s peak, since each run is a fresh stack. 4-3 test: a crashed detect run's inputs are kept until the next detect start, then released | App. D.1; DESIGN §6.1, §7 (4-3) |
+| **AA6** challenger L4b: input mark | **Fixed.** `tg_analytics_run_success` also checks on INSERT that `input_batch_seq_hwm` equals the input rollup run's recorded `batch_seq_hwm`, the rule the pointer guard enforces. New 5-3 test: a mismatched mark is refused. New mutant: the trigger without the equality check | App. D.1; DESIGN §7 (5-3) |
+| Scripts | 13 embedded. 7 fixed, re-run and re-hashed: `sizing.py`, `budget.py`, `budget2.py`, `budget5.py`, `reactivation.py`, `drift_ttd.py` and `rollup12.py`. Each was re-run from its Appendix B copy and gave byte-identical output; `budget5.py` and `reactivation.py` were also run twice. `budget3.py` and `budget4.py` are unchanged (kept as run); `budget3.py`'s Appendix B copy reproduces its as-run output. `csvsize.py` and the three SQL files have no account model and were not re-run | App. B |
+
+**Which scripts feed current figures (AA1)**
+
+| Script | Status in revision 28 | Why |
+|---|---|---|
+| `sizing.py` (B.4) | fixed, re-run, new hash | B.2's full-grain figures |
+| `budget.py` (B.5.6) | fixed, re-run, new hash | the adopted variant D and the ladder |
+| `budget2.py` (B.5.7) | fixed, re-run, new hash | folding loss, eligible series |
+| `budget5.py` (B.5.10) | fixed, re-run, new hash | the current false-positive budget |
+| `reactivation.py` (B.5.11) | fixed, re-run, new hash | D4's reactivation line |
+| `drift_ttd.py` (B.5.13) | fixed, re-run, new hash | AT-3's drift time-to-detect |
+| `rollup12.py` (B.5.12) | leaf count 37,052 → 37,033, re-run, new hash | the disk delta and the peak |
+| `budget3.py` (B.5.8) | **kept as run**, labelled | superseded revision-5 budget; its Garwood interval does not depend on the leaf list. A copy with only the draw changed gives the same Garwood intervals, pass probabilities, peaks and totals |
+| `budget4.py` (B.5.9) | **kept as run**, labelled | superseded revision-6 budget; every current figure it gave is recomputed by `budget5.py` |
+| `csvsize.py`, `rowsize*.sql` | unchanged | no account model |
+
+**AA1 before and after** (revision 27 → revision 28):
+
+| Script | Figure | Revision 27 | Revision 28 |
+|---|---|---|---|
+| `sizing.py` | commitment accounts, 1,500 / 15,000 | 179 / 1,804 | 174 / 1,693 |
+| `sizing.py` | `full`: account × service / × region series | 106,942 / 146,640 | 106,829 / 146,632 |
+| `sizing.py` | `full`: fact rows per day; 13 periods; stored | ≈ 198.9 k; 78.6 M; 47.1 / 81.2 GB | ≈ 198.3 k; 78.3 M; 47.0 / 80.9 GB |
+| `sizing.py` | 1,500 accounts: series; 13 periods | 10,543 / 14,639; 7.79 M (8.0 GB) | 10,697 / 14,742; 7.86 M (8.1 GB) |
+| `budget.py` | variant D leaves (individual / `Other`) | 37,052 (22,498 / 14,554) | 37,033 (22,493 / 14,540) |
+| `budget.py` | variant D facts / objects; total | 2.711 / 0.294 GB; 4.90 GB | 2.709 / 0.293 GB; **4.90 GB** |
+| `budget.py` | variant A leaves; total | 45,067; 6.08 GB | 45,060; 6.07 GB |
+| `budget.py` | variants B and C leaves; fact rows | 43,565; 5.69 M | 43,558; 5.68 M |
+| `budget2.py` | full-mix series; folded | 107,273; 84,775 (79.0 %) | 107,109; 84,616 (79.0 %) |
+| `budget2.py` | leaves ≥ $200/day; ≥ $100/day | 1,799; 3,906 | 1,800; 3,914 |
+| `budget5.py` | reachable leaves: daily / weekly / hurdle; ≥ $500/day | 3,440: 3,259 / 66 / 115; 476 | 3,443: 3,280 / 72 / 91; 479 |
+| `budget5.py` | D1 ∧ D2; D3 resolution bound / conservative | 0.0061; 0.0066 / 0.0298 | 0.0062; 0.0067 / 0.0300 |
+| `budget5.py` | weekly; hurdle (every alarm); calendar; first occurrences | 0.0139; 0.0028 (0.0028); 0.0012; 0.0490 | 0.0158; 0.0021 (0.0022); 0.0011; 0.0482 |
+| `budget5.py` | **total / conservative** (weekly doubled) | **0.101 / 0.131** (0.146) | **0.102 / 0.132** (0.147) |
+| `budget5.py` | jitter: calendar term; totals and P(pass) | 0.0827; 0.183 (0.993), 0.213 (0.959) | 0.0869; 0.187 (0.990), 0.218 (0.949) |
+| `budget5.py` | hurdle routes `warning` / `info`; clustered ρ 0.3 / 0.6 after the gate | 114.0 / 1.0; 0.0107 / 0.0123 | 90.2 / 0.8; 0.0083 / 0.0095 |
+| `budget5.py` | weekly sensitivity: sd 1.0 / ρ 0.3 | 0.0285 / 0.0082 | 0.0311 / 0.0092 |
+| `budget5.py` | calendar without the component | 7.040 | 6.900 |
+| `budget5.py` | event-day recall, one contaminated cycle: 3 / 2 prior cycles | 0.999 / 0.716 | 1.000 / 0.717 |
+| `budget5.py` | grid (z_T / h) that moved | 4.5 / 8.5 0.120; 4.5 / 9.5 0.089 / 0.114; 5.0 / 7.5 0.178; 5.0 / 8.0 cons. 0.199; 5.0 / 8.5 cons. 0.156 | 0.121; 0.090 / 0.115; 0.177; 0.200; 0.157 |
+| `budget5.py` | pass probabilities at pinned rates; fatigue; peaks | 0.999 at 0.15; 1.30 / 1.33; 5.15 / 5.19 GB | unchanged |
+| `reactivation.py` | generator: union (28-day history); worst case (14 days) | 1.4 × 10⁻⁵; 8.5 × 10⁻⁵ | 1.2 × 10⁻⁵; 9.2 × 10⁻⁵ |
+| `reactivation.py` | no history condition: generator / ρ 0.3 / ρ 0.6 | 0.0017 / 0.027 / 0.32 | 0.0019 / 0.030 / 0.35 |
+| `reactivation.py` | chain union: ρ 0.3 / ρ 0.6 | 0.00094 / 0.054 | 0.00100 / 0.059 |
+| `reactivation.py` | label pass rate on any individual series | 0.970 | 0.971 |
+| `drift_ttd.py` | shares ≤ 7 days: all detectors / D3 restart / D3 no restart / noise-free; cumulative clause | 0.726 / 0.535 / 0.235 / 0.668; 0.092 | 0.720 / 0.540 / 0.232 / 0.665; 0.091 |
+| `drift_ttd.py` | medians and p90s | 5 / 7 / 11 / 6; 18 | unchanged |
+| `rollup12.py` | leaf `forecast_totals` rows; `cost_daily` rows | 222,312; 4,520,344 | 222,198; 4,518,026 |
+| `rollup12.py` | delta per run; natural-1 run; **peak** (natural-3) | +0.091 GB; 5.052 GB; **5.242 GB** (5.282) | unchanged |
+
+## 3ad. Revision 29: Copilot's review 5408332571 of 0926b19 and the challenger's Low on revision 28
+
+The challenger APPROVED revision 28 (0 High, 0 Medium, 1 Low). Copilot's
+four threads are one issue: revision 28's answer to the challenger's L3
+(AA5, §3ac) claimed a bound that does not hold. A start only marked the
+stale run `abandoned`, and retention ran only after a success commit, so
+each crashed replacement left one more abandoned run's output until some
+run succeeded. Checked against 0926b19: valid. The challenger's L1
+(the bound left out superseded batches) is about the same bound and is
+answered with it.
+
+| Item | Change | Where |
+|---|---|---|
+| **r4179428541** (High) App D:471 | **Fixed by a cleanup pass at every start.** After its acquisition transaction commits and before any other work, a start runs `ratio.analytics_apply_retention()` and then `ratio.analytics_apply_forecast_retention()`, each in its own transaction under revision 28's rules (READ COMMITTED with the lock first; no run-row or pointer lock held). It calls both because a crashed run of one kind can pin another kind's rows (a detect run's input rollup run). `failed` and `abandoned` runs are removable whatever their `run_seq` unless a `running` run names them as input or previous run, which the INSERT trigger already rules out. I chose this over a retry or storage cap, because it makes the bound real instead of declaring it | App. D.1 ("Crashed runs", "Acquiring the lease", "Writing", the function row) |
+| **r4179428559** (High) DESIGN:2388 | **Restated:** per kind, at most one run that has written output is left over, the crashed run before its takeover or the abandoned run until the takeover's cleanup pass ends. A run writes nothing beyond its run row until its own pass has finished, and that pass removes every abandoned run; a start that crashes inside its pass wrote nothing, and the next pass removes both | DESIGN §6.1; App. D.1 |
+| **r4179428574** (High) EVIDENCE:631 | §3ac's AA5 row is marked as superseded by this section; its original text is kept as the record | §3ac |
+| **r4179428588** (Medium) DESIGN:2544, one crash only | **4-3 test extended:** D1, D2 and D3 each write state and crash and are taken over in turn; after every takeover's cleanup pass no abandoned run's rows remain, and the run-keyed tables never hold more than the kept runs, the running run and one crashed run's output; a start that crashes inside its own pass, and the start after it, keep the bound; the same for rollup and backtest runs. **Mutants:** no cleanup pass at start; the pass begun before the acquisition commits; abandoned runs newer than the latest success kept. 4-2 names the start's pass too | DESIGN §7 (4-2, 4-3) |
+| Takeover cannot delete the new run's inputs (checked, as asked) | **Confirmed.** The new run's row, with `input_*` and `prev_run_id`, commits in its acquisition transaction before the pass begins. The pass takes the exclusive lock first and reads in READ COMMITTED, so it sees that `running` row, and the Z1 exclusion keeps its inputs, its previous run, its own rows and the pointers' runs. 4-3 asserts the new run's forecast run and previous run survive every pass | App. D.1; DESIGN §7 (4-3) |
+| In-flight transactions of the stale run (found while checking) | Removing a stale run's inputs at takeover is safe only if nothing of that run is still reading. The takeover's `abandoned` update waits on the run row, which every transaction of the run holds `FOR UPDATE` from `assertLease`; **revision 29 extends `assertLease` to transactions that only read the run's inputs** (it named write transactions only). After the update commits, every later transaction of that run fails with `LEASE_LOST`. An expired lease alone is still not treated as dead (revision 28). 4-3 test: a takeover waits for a still-open transaction of the stale run | App. D.1 ("Acquiring the lease", "Writing"); DESIGN §6.1, §7 (4-3) |
+| **Challenger L1** on 0926b19: superseded batches | **Added to the bound.** The left-over run's size is ≈ 0.1 GB of state **plus the rollup rows of the superseded batches its captured mark pinned**: a restated period of `fleet15k`'s size is ≈ 1.1 M `cost_daily` rows × 180 B ≈ 0.2 GB, each restatement under the mark separately. The takeover's cleanup pass releases all of it. `fleet15k` has no restatements and each run is a fresh stack, so its peak is unaffected | App. D.1; DESIGN §6.1 |
+| Scripts, figures | No script changed; all 13 SHA-256s as in revision 28; no disk or budget figure changes | App. B |
+
+## 3ae. Revision 30: Copilot's review 5408381491 of 7e49bfb and the challenger's Lows on revision 29
+
+The challenger APPROVED revision 29 (0 High, 0 Medium, 3 Low). Copilot
+raised 1 Medium. All four are about the crashed-run cleanup of revision 29
+and were checked against 7e49bfb. All are valid.
+
+| Item | Change | Where |
+|---|---|---|
+| **BB1 r4179466023** (Medium) export files outside the bound | (Refined in revision 34, §3ai: a persisted cleanup state and staging in `backtest/.staging/`.) **Fixed by deleting export files in every pass.** A crashed or fenced backtest may already have written ≈ 0.2–0.25 GB of gzip exports, and only the backtest command deleted export files. A rollup, forecast or detect start's pass therefore reclaimed the rows but not the files. Now every pass that calls the forecast retention function deletes the files too: each run's post-success pass, of any kind, and every start's cleanup pass. **Eligibility** is the same as for the rows: the function also returns the ids of every terminal backtest run that is not kept, not pinned and not named by a running run. **Order:** files are deleted only after the function's transaction commits. A `deleted.json` with each file's name, size and SHA-256 stays in the run's directory. **Idempotent:** every eligible run is listed, not only those removed in this call, so an interrupted deletion finishes at the next pass. **Concurrent backtest:** a running run's id is never returned, and each run writes only under `backtest/<run_id>/`. A backtest moves each finished file into place only inside a transaction that holds its lease (`FOR SHARE`), so the takeover waits for the move, and a fenced writer's next move fails with `LEASE_LOST`. A staging file left by a dying writer is removed by the next pass. **Pins:** a later pin takes the shared retention lock and is refused with `RUN_NOT_KEPT` once the output is gone, so a pin cannot race the deletion. The bound now names the files. New 4-3 test: a crashed backtest's exports are deleted by the next detect start's pass, and pinned and running backtests' files are untouched. New mutants: export deletion only in the backtest command; deletion before the commit | App. D.1 ("Export files", "Crashed runs", pins row); DESIGN §3.8, §6.1, §7 (4-3), §10 |
+| **BB2** challenger L1: read-only transactions | (The TTL rule here is refined in revision 31, §3af.) **Changed to `FOR SHARE`.** A transaction that only reads takes the run row `FOR SHARE`, and one that writes takes it `FOR UPDATE`. Concurrent readers of one run, such as `full`'s 4 parallel workers, then do not wait for each other; the challenger's PG16 probe measured 1.7 s with `FOR UPDATE` and 0 s with `FOR SHARE`. The worker on `main` already uses `assertLease(…, 'SHARE')`. The takeover still waits for both kinds. **Stated:** the lease TTL must exceed the run's longest single transaction, since either lock blocks the run's own heartbeat. New 4-3 test (two readers share, and the takeover waits for both) and mutant (read-only `FOR UPDATE`) | App. D.1 ("Writing", "Acquiring the lease"); DESIGN §6.1, §7 (4-3) |
+| **BB3** challenger L2: pins | **Fixed.** Failed and abandoned runs are removable "unless pinned or named by a running run", as revision 25's pins require. New 4-3 test and mutant: a pinned failed run keeps its output | App. D.1; DESIGN §6.1, §7 (4-3) |
+| **BB4** challenger L3: takeover stall | (Where the timeout is set is refined in revision 31, §3af.) **A `lock_timeout` on the takeover.** The `abandoned` update runs under `SET LOCAL lock_timeout` (5 s by default). On timeout (55P03) the acquisition transaction rolls back, releasing the per-kind lock and the shared retention lock and inserting nothing, and the start fails with a retryable `ALREADY_RUNNING`. Without it, a long stale transaction stalled every retention pass in the tenant. New 4-3 test: a retention pass started during the wait completes. New mutant: no `lock_timeout` | App. D.1 ("Acquiring the lease"); DESIGN §6.1, §7 (4-3) |
+| Sweep | DESIGN §3.8 (evidence directory and later pins), §6.1 (removal list, backtest output, crashed runs), §7 (4-3 test and mutants; revision 25's backtest test now deletes the files in the next pass) and §10 (rollback) all say the same; App. D's `analytics_run_pins` row states the pin rule | DESIGN; App. D |
+| Scripts, figures | No script changed; all 13 SHA-256s as in revision 28; no disk or budget figure changes | App. B |
+
+## 3af. Revision 31: Copilot's review 5408406528 of c615ea3 and the challenger's Low on revision 30
+
+The challenger APPROVED revision 30 (0 High, 0 Medium, 1 Low), and Copilot
+raised 2 Medium. Each was checked against c615ea3, and for CC1 against
+`main`'s `src/ingest/worker/lease.ts`, `pipeline.ts` and `config.ts`. All
+three are valid.
+
+| Item | Change | Where |
+|---|---|---|
+| **CC1 r4179490968** (Medium) "TTL > transaction" is not enough | (Refined in revision 32, §3ag: the renewal is in its own transaction, and m = max(1 s, TTL / 10).) **Confirmed on `main`.** `heartbeat()` renews only a lease that is still live (`lease_expires_at > clock_timestamp()` in its `WHERE`, `lease.ts:162–169`). The TTL defaults to 300 s (`config.ts:52`, `RATIO_LEASE_TTL_SECONDS` 5–3600), and the heartbeat fires every TTL / 3 = 100 s (`pipeline.ts:131`, `:136`). A transaction started just before a heartbeat delays it by the transaction's whole length, so without a check the safe limit is 300 − 100 − 30 = 170 s, not 300 s. **Fix, the preferred option:** every run transaction has a duration budget `b`. Before taking the run-row lock, `assertLease` renews the lease (the same live-only update) if less than `b` + 30 s is left, and refuses with `LEASE_BUDGET` if `b` + 30 s > TTL. The lease then outlives every in-flight transaction's planned end by at least 30 s, so a blocked heartbeat still finds the lease live. At the defaults, every budget must be ≤ 270 s. An overrun fails safe (`LEASE_LOST`). **New 4-3 timing tests** (TTL 6 s, heartbeat 2 s): a 4.5 s reader started 0.1 s before a heartbeat does not fence the run, also with two readers in parallel; a 5.5 s budget is refused. **New mutant:** TTL greater than the transaction, without the check (fences the run) | App. D.1 ("Writing"); DESIGN §6.1, §7 (4-3) |
+| **CC2 r4179490982** (Medium) file cleanup not serialized | (Refined in revision 32, §3ag: the filesystem assumption and temporary manifests.) **Fixed with the claim-and-rename option.** The file phase holds no database lock, which keeps the revision 28 rule that a pass holds no run-row or pointer lock. A pass claims `backtest/<run_id>/` by an atomic `rename(2)` to `backtest/.deleting-<run_id>-<pass_id>/`; a loser gets `ENOENT` and skips. The winner hashes the files, then writes the merged `deleted.json` (temporary file, then rename) **before deleting anything**. It then deletes with `ENOENT` treated as done and renames the directory back, so `deleted.json` ends in `backtest/<run_id>/` as §3.8 says, and it is cumulative. If a dying writer has recreated the name, the manifest is moved in the same way and a later pass removes the staging file. **Interrupted claims:** a claim older than one hour is re-claimed by an atomic rename and finished. A stalled original then finds its paths gone and stops without deleting anything unrecorded. **New 4-3 test:** two concurrent passes on one directory (one claims, no `ENOENT` failure, one complete `deleted.json`), plus an interrupted claim finished by a later pass. **New mutant:** no claim | App. D.1 ("Export files"); DESIGN §3.8, §7 (4-3) |
+| **CC3** challenger L1: timeout placement | **Fixed.** `lock_timeout` also applies to advisory-lock waits, as the challenger's PG16 probe showed, so setting it at the start of the acquisition transaction would make a start queued behind a retention pass longer than 5 s fail with a spurious `ALREADY_RUNNING`. The acquisition order is now stated: per-kind lock; shared retention lock; read; `SET LOCAL lock_timeout = '5s'` immediately before the `abandoned` update and `= 0` straight after; insert. **New 4-3 case:** a start that waits 8 s behind a retention pass succeeds. **New mutant:** timeout set at the start of the transaction | App. D.1 ("Acquiring the lease"); DESIGN §6.1, §7 (4-3) |
+| §3ae, BB2 and BB4 rows | Marked as refined here; their text is kept as the record | §3ae |
+| Scripts, figures | No script changed; all 13 SHA-256s as in revision 28; no disk or budget figure changes | App. B |
+
+## 3ag. Revision 32: Copilot's review 5408458938 of 591b9cf and the challenger's Lows and nit on revision 31
+
+The challenger APPROVED revision 31 (0 High, 0 Medium) with two Lows and a
+nit. Copilot raised 1 High and 1 Medium. Copilot's High is the same point
+as the challenger's L1. Each was checked against 591b9cf and, for the
+lease, against `main`'s `src/ingest/worker/lease.ts`, `pipeline.ts` and
+`config.ts`. All are valid.
+
+| Item | Change | Where |
+|---|---|---|
+| **r4179528051** (High; also the challenger's L1; refined in revision 33, §3ah: the overlap test and `LEASE_RETRY`) renewal inside the work transaction | **Fixed.** Revision 31 had `assertLease` renew the lease, which put the heartbeat `UPDATE` inside the work transaction. Its row lock then lasts until commit, up to the whole budget. It blocks the other readers' `FOR SHARE`, which serializes revision 30's parallel readers, and it blocks the heartbeat. (`main`'s `assertLease`, `lease.ts:151–159`, only checks and locks.) The rule is now three steps. **1.** If needed, renew in its own short transaction, `main`'s `heartbeat()`, committed at once. **2.** Begin the work transaction, lock the lease row `FOR SHARE` or `FOR UPDATE`, and check under that lock that the lease is live and at least `b + m` is left. **3.** If that check fails while the lease is live, roll back, renew and retry once; a second failure is `LEASE_LOST`. **Why retry once:** one failure can be a benign race, a lock wait behind a writer or a background heartbeat; two in a row mean the run cannot keep its lease, so it fails safe. The two-reader test now makes the readers really overlap: right after a renewal, neither needs to renew, and their `FOR SHARE` holds overlap for ≥ 4 s. New tests for the retry path. **New mutant:** renewal inside the work transaction (the readers serialize) | App. D.1 ("Writing"); DESIGN §6.1, §7 (4-3) |
+| **r4179528066** (Medium) margin not one rule | (Refined in revision 34, §3ai: a slack s lowers each largest budget by s.) **Fixed.** Revision 31's "m = 30 s (TTL / 10)" holds only at the 300 s default, and its own test used TTL 6 s with m = 1 s. The rule is now **m = max(1 s, TTL / 10)** everywhere: the budget limit TTL − m, the renewal trigger `b + m`, `LEASE_BUDGET`, and the tests. Checked across `RATIO_LEASE_TTL_SECONDS`'s range 5–3600 s, with the heartbeat at `max(1 s, TTL / 3)`: <br>• 300 s: m = 30 s, budget ≤ 270 s, heartbeat every 100 s;<br>• 6 s: m = 1 s, budget ≤ 5 s;<br>• 5 s: m = 1 s, budget ≤ 4 s, heartbeat every 1.7 s;<br>• 3600 s: m = 360 s, budget ≤ 3240 s.<br>**Lower bound:** TTL ≥ 5 s, the range's own minimum; below 2 s no useful budget is left. The heartbeat interval does not enter the rule. **New tests:** margin values, and the 4 s and 4.1 s budgets at TTL 5 s. **New mutant:** m hard-coded at 30 s (every budget at TTL 6 s is refused) | App. D.1 ("Writing"); DESIGN §6.1, §7 (4-3) |
+| **Challenger L2** filesystem assumption | **Stated.** Claim-by-rename needs a local POSIX filesystem, where `rename(2)` within `backtest/` is atomic. That does not hold on an object store or on some network filesystems, so the future off-box artefact store (DESIGN §3.8) needs its own claim mechanism before cleanup may run against it. "Every step works by name" now rules out a directory file descriptor held across steps, `openat` or `unlinkat` relative to one, and a working directory inside a claim | App. D.1 ("Export files"); DESIGN §3.8 |
+| **Challenger nit** orphaned temporary manifest | **Fixed.** A temporary manifest is exactly `deleted.json.tmp-<pass_id>`. Step 1 never hashes or lists a file matching `deleted.json.tmp-*`, and step 3 deletes such orphans. New 4-3 test: a pass is killed between its temporary write and the rename, and the re-claiming pass neither lists nor keeps the orphan. New mutant: the temporary manifest hashed as an export | App. D.1; DESIGN §7 (4-3) |
+| §3af rows CC1, CC2 | Marked as refined here; their text is kept as the record | §3af |
+| Scripts, figures | No script changed; all 13 SHA-256s as in revision 28; no disk or budget figure changes | App. B |
+
+## 3ah. Revision 33: the challenger's REQUEST CHANGES on revision 32
+
+The challenger returned REQUEST CHANGES on 66205dd: 1 Medium, 1 Low and
+1 nit. It verified the rest of revision 32: the retry path, the margin
+rule across 5–3600 s, the sweep, the hashes, both classifier runs and the
+rollback. Each item was checked against 66205dd, and all three are valid.
+Copilot's review of 66205dd had not arrived when this revision was
+pushed.
+
+| Item | Change | Where |
+|---|---|---|
+| **M1** (Medium) the overlapping-readers test cannot kill its mutant | **Valid.** Revision 32's readers start right after a renewal, at TTL 6 s with ≈ 6 s left, which is ≥ `b + m` = 5.5 s. So revision 31's conditional in-transaction renewal would never run an `UPDATE` there, and two `FOR SHARE` holders overlap anyway: the mutant passes. **Added a renewing case:** two 4.5 s readers begin 1.5 s after a renewal (r ≈ 4.5 s < 5.5 s). The first renews in its own short transaction, which sets expiry to start + 6 s; the second then needs none. Both hold `FOR SHARE` from start to start + 4.5 s, overlapping ≥ 4 s and ending ≥ 1.5 s (≥ m) before expiry. The background heartbeat waits for both and renews. Under the mutant, the first reader's in-transaction `UPDATE` blocks the second reader's `FOR SHARE` until it commits, so the overlap is ≈ 0 and the test fails. The no-renewal case stays for overlap alone; the mutant entry now names the renewing case | DESIGN §7 (4-3) |
+| **L1** (Low) "second failure is `LEASE_LOST`" can fence a healthy run | **Valid. Option (b): a distinct retryable code.** A live lease that is still short after the renew-and-retry gives **`LEASE_RETRY`**. The job retries it with jittered backoff (100 ms doubling to 5 s) while the lease is live, renewing first each time, within the run's `maxRunSeconds` (`config.ts:233`, 6 h). `LEASE_LOST` stays for a lease that is not live (expired or taken over). **Why (b):** <br>• (a), retrying until a deadline inside `assertLease`, hides the wait from the job;<br>• (c), one writing transaction at a time, does not prevent the case, because one writer after another still delays a reader past its margin;<br>• (b) keeps fencing and scheduling apart.<br>**New 4-3 test:** three back-to-back 2 s writers with a 4.5 s reader queued between them give `LEASE_RETRY`, never `LEASE_LOST`, and the reader runs after them with the run live; a taken-over lease gives `LEASE_LOST` at once. **New mutant:** a second shortfall mapped to `LEASE_LOST`, which fences the healthy run | App. D.1 ("Writing", steps 3–4); DESIGN §6.1, §7 (4-3) |
+| **Nit** "a TTL below 2 s leaves no useful budget" | (Refined in revision 34, §3ai: with the slack, 3.75 s.) **Replaced** by the configuration minimum: `config.ts:231` enforces TTL ≥ 5 s, where the largest budget is 4 s | App. D.1; DESIGN §6.1 |
+| §3ag row r4179528051 | Marked as refined here; its text is kept as the record | §3ag |
+| Scripts, figures | No script changed; all 13 SHA-256s as in revision 28; no disk or budget figure changes | App. B |
+
+## 3ai. Revision 34: Copilot's review 5408520252 of 66205dd
+
+Copilot reviewed 66205dd before revision 33 was pushed and raised two
+Mediums. Both were checked against 8bee00e, and both still apply. No
+review of revision 33 has arrived.
+
+| Item | Change | Where |
+|---|---|---|
+| **r4179572925** (Medium; refined in revision 35, §3aj: the delay test and the mutant's killing cases) no slack at the lease boundary | **Valid.** `b + m = TTL` was admitted, but the check under the lock still needs a full `b + m` left. The renewal's commit, the next `BEGIN` and the lock grant take time, so a budget at the maximum failed at the boundary. With `LEASE_RETRY` it would retry until `maxRunSeconds`. **Fix:** a slack **s = max(250 ms, TTL / 100)**. A transaction is admitted only if `b + m + s ≤ TTL`, so `LEASE_BUDGET` refuses budgets above TTL − m − s. The renewal trigger is `r < b + m + s`, and the check under the lock stays `≥ b + m`. **Why this s:** on the local stack the commit, `BEGIN` and an uncontended lock grant take milliseconds, and 250 ms is two orders of magnitude above that, with room for an event-loop delay or GC pause. TTL / 100 scales it for long TTLs. A longer wait is contention, which `LEASE_RETRY` handles. **Largest budgets:** 3.75 s at TTL 5 s, 4.75 s at 6 s, 267 s at 300 s, 3204 s at 3600 s. **No endless retry:** right after a renewal at least `b + m + s` is left, so a retry falls short only under contention; a budget that cannot fit even then is refused at admission with `LEASE_BUDGET`. **Tests:** at TTL 5 s, 3.75 s is admitted and 3.76 s refused; 3.75 s with an injected 200 ms renewal-to-lock delay passes on its first attempt. **Mutant:** no slack, so a 4 s budget at TTL 5 s is admitted and retries until `maxRunSeconds` | App. D.1 ("Writing"); DESIGN §6.1, §7 (4-3) |
+| **r4179572957** (Medium; refined in revision 35, §3aj: runs with no directory) the cleanup reads every historical directory | **Valid.** `analytics_runs` is never pruned and a cleaned directory keeps `deleted.json`, so each pass read every historical backtest's directory: O(all backtests). **Fix:** **`analytics_runs.export_files_state`**, `'present'` or `'deleted'` on backtest runs and NULL on other kinds (CHECK). After the rename back, a short transaction sets it to `'deleted'`, and passes list only runs still `'present'`. Each pass makes two more directory reads, of `backtest/` (stale claims) and `backtest/.staging/` (orphaned staging). A crash before the state write is finished idempotently by the next pass. **Two states, not three:** the filesystem rename is the claim, so a `'claimed'` database state would only add a write that could disagree with the filesystem after a crash. **Staging moved** to `backtest/.staging/`. A run's directory gets entries only inside lease transactions, so a terminal run's directory cannot be recreated after it is marked `'deleted'`. **Locks:** no retention lock is needed. The run is terminal and not kept, a backtest run is never a running run's input or previous run, and a later pin is refused once the output is gone (`RUN_NOT_KEPT`). **Schema:** 0002's `analytics_runs` gains the column. It is added to the column-level UPDATE grant. `tg_analytics_run_success` allows exactly one change on a terminal row, `'present'` → `'deleted'` on a backtest run, and requires `'present'` on a backtest INSERT. **Test:** after 50 cleaned backtests, a pass makes exactly two directory reads (injected filesystem). **Mutant:** state never set, giving 52 reads | App. D.1 (`analytics_runs` row, trigger, "Export files", grants); DESIGN §3.8, §6.1, §6.2 (0002), §7 (4-3) |
+| §3ag, §3ah rows (margin, nit) and §3ae BB1 row | Marked as refined here; their text is kept as the record | §3ae, §3ag, §3ah |
+| Scripts, figures | No script changed; all 13 SHA-256s as in revision 28; no disk or budget figure changes | App. B |
+
+## 3aj. Revision 35: Copilot's review 5408560003 of 644d1aa and the challenger's Lows and nit on revisions 33–34
+
+The challenger APPROVED revisions 33–34 (0 High, 0 Medium) with three
+Lows and a nit. Copilot raised 1 Medium and 1 Low, and the Low is the
+same as the challenger's L2. Each was checked against 644d1aa. All are
+valid.
+
+| Item | Change | Where |
+|---|---|---|
+| **r4179612202** (Medium) a run with no directory is never marked cleaned | **Valid.** A backtest can fail before `backtest/<run_id>/` exists. The claim's `ENOENT` was then read as a competing pass, so the run stayed `'present'` and every pass listed it again. **Fix:** on `ENOENT`, the pass looks for `.deleting-<run_id>-*` in its one listing of `backtest/`, the read it already makes for stale claims. A claim means another pass owns the run, so it skips it. Neither source nor claim means there are no files: the pass marks the run `'deleted'` without touching the disk, and no `deleted.json` is written, since nothing was deleted. **The race:** `readdir` can miss a claim that is made or renamed back during the pass. Marking `'deleted'` then is still harmless: the claim's owner finishes regardless of the state; stale-claim recovery works from the listing, not the state; a rename back restores only a cleaned directory; and a terminal run's directory is never created afresh. So no re-check is needed. **New test:** 20 no-directory backtests are marked by one pass with no extra read, and the next pass attempts no claim for them. **New mutant:** `ENOENT` treated as a competing claim (20 attempts every pass) | App. D.1 ("Export files"); DESIGN §7 (4-3) |
+| **r4179612223** (Low; also the challenger's L2) renewal trigger wording | **Fixed.** DESIGN §6.1 now says "less than the budget plus m plus s", as App. D does | DESIGN §6.1 |
+| **Challenger L1** a `LEASE_RETRY` loop can keep a stuck run alive for 6 h | **Valid. Stall accounting**, chosen over pausing writers. Step 1's renewals now pass `main`'s `mayRenew()` gate (progress within `stallTimeoutSeconds`, 120 s; `pipeline.ts:122`), and a `LEASE_RETRY` is never progress. Once a transaction's consecutive `LEASE_RETRY`s span `stallTimeoutSeconds`, the job fails the run with `LEASE_STALLED`, the same idle-watchdog pattern as `main`'s `SOURCE_STALLED` and `EVIDENCE_STALLED`. The run stops renewing, its lease lapses, and a later start takes over. Run-wide progress alone would not notice, because the starving writers keep committing. **Why not pause writers:** that needs a run-wide gate across parallel workers, a new lock ordered against the lease row, and it would hide the chunking problem the stall reports. **New test** (`stallTimeoutSeconds` 10 s): a continuous stream of 2 s writers starves a 4.5 s reader, which ends in `LEASE_STALLED` within 10 s plus one backoff, not 6 h. **New mutant:** no stall accounting | App. D.1 ("Writing", step 4); DESIGN §6.1, §7 (4-3) |
+| **Challenger L3** 50 ms of headroom in the delay test | **Fixed, robust option:** the injected delay is now 100 ms (s − 150 ms), and the test asserts "passes within the one internal retry and never returns `LEASE_RETRY`", not "first attempt" | DESIGN §7 (4-3) |
+| **Challenger nit** which test kills the no-slack mutant | **Valid:** the injected-delay case does not kill it, since 3.75 + 1 ≤ 5 and about 4.9 s remain. The mutant entry now cites the cases that do: the 3.76 s budget, which the mutant admits instead of refusing with `LEASE_BUDGET`; and the 4 s budget, which fits `b + m = TTL` but not `b + m + s`, and which the mutant admits and loops on with `LEASE_RETRY`. That 4 s case is now an explicit test | DESIGN §7 (4-3) |
+| §3ai rows r4179572925 and r4179572957 | Marked as refined here; their text is kept as the record | §3ai |
+| Scripts, figures | No script changed; all 13 SHA-256s as in revision 28; no disk or budget figure changes | App. B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -630,24 +826,81 @@ checking.
 | Peak disk, rev. 6 | 5.15 GB (5.19 GB with natural-3) | `budget4.py` (B.5.9) |
 | Re-run of every embedded script (rev. 6) | all 8 SHA-256s match; Python outputs reproduce (`budget4.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3c |
 | Hurdle statistic, in-control (rev. 7) | 0.00002–0.00052 alarms per series-week at zero shares 0.55–0.8, h = 9.0; gate r₁ < 0.30 passes 98.8–99.2 % of independent series-weeks | `budget5.py` (B.5.10) |
-| False-positive budget at z_T 4.5, h 9.0 (rev. 7) | **0.101/day** (0.131 with every conservative bound; 0.146 with the weekly term doubled); ±10 % jitter: P(pass) 0.993 / 0.959 | `budget5.py` (B.5.10) |
+| False-positive budget at z_T 4.5, h 9.0 (rev. 7) | **0.101/day** (0.131 with every conservative bound; 0.146 with the weekly term doubled); ±10 % jitter: P(pass) 0.993 / 0.959; superseded by rev. 28 below | `budget5.py` (B.5.10) |
 | Zero-week rule in `budget5.py` (rev. 24) | outputs byte-identical to revision 7's script; weekly alarm counts 259 / 221 / 229 in 120,000 weeks at zero shares 0.3 / 0.4 / 0.5, old and new | `budget5.py` (B.5.10) |
-| Hurdle routes under the generator | ≈ 114 of 115 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 | `budget5.py` (B.5.10) |
+| Hurdle routes under the generator | ≈ 114 of 115 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 (rev. 28 below) | `budget5.py` (B.5.10) |
 | Peak disk, rev. 7 | 5.15 GB (5.19 GB with natural-3) | `budget5.py` (B.5.10) |
 | D4 reactivation false positives (rev. 8) | 3 × 10⁻⁵/day with the history condition (generator); without it 0.0017 (generator), 0.32 (persistence 0.6) | `reactivation.py` as of revision 8 (superseded in B.5.11) |
 | D4 reactivation false positives (rev. 9; ρ > 0 underestimated, see rev. 10) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` as of revision 9 |
-| D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6) | `reactivation.py` (B.5.11) |
-| `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series) | `reactivation.py` (B.5.11) |
+| D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6); rev. 28 below | `reactivation.py` (B.5.11) |
+| `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series; 0.971 in rev. 28) | `reactivation.py` (B.5.11) |
 | Billing rollup disk delta (rev. 12; corrected in rev. 13; forecast leaves in rev. 15; leaf totals in rev. 17; detector state in rev. 18; measured `cost_daily` row in rev. 22; scope census and account scope in rev. 24) | +0.091 GB per run (rev. 22: 0.024; rev. 18: 0.082; rev. 17: 0.066; revs. 15–16: 0.031; rev. 13: 0.025; rev. 12: 0.026); peak 5.24 GB (5.28 GB with natural-3) | `rollup12.py` (B.5.12) |
 | Drift time-to-detect from AT-3's anchor (rev. 18) | noise-free first-passing day median 6, p90 12 days (not a lower bound); D3 alone median 7, p90 13 (with the restart); all detectors on the true baseline median 5, p90 11 | `drift_ttd.py` (B.5.13) |
 | Garwood intervals, exact (rev. 12) | unchanged at three decimals (e.g. 7 groups: [0.046, 0.236]) | `budget3.py` (B.5.8) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
+| One commitment draw per account (rev. 28) | `fleet15k` leaves 37,033 (was 37,052); variant D still 4.90 GB per run; folding loss 79.0 % and 25.6 % unchanged; `full` 78.3 M fact rows over 13 periods (was 78.6 M) | `sizing.py`, `budget.py`, `budget2.py` (B.2, B.5.3, B.5.7) |
+| False-positive budget at z_T 4.5, h 9.0 (rev. 28) | **0.102/day** (0.132 with every conservative bound; 0.147 with the weekly term doubled); ±10 % jitter: P(pass) 0.990 / 0.949; still the least strict pair under 0.15 | `budget5.py` (B.5.10) |
+| Hurdle routes under the generator (rev. 28) | ≈ 90 of 91 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 | `budget5.py` (B.5.10) |
+| D4 reactivation false positives (rev. 28) | union of (i) and (ii): 1.2 × 10⁻⁵/day (generator; worst case 9.2 × 10⁻⁵), 0.00100 (ρ 0.3), 0.059 (ρ 0.6) | `reactivation.py` (B.5.11) |
+| Drift time-to-detect (rev. 28) | medians and p90s unchanged; shares ≤ 7 days 0.720 (all detectors), 0.540 (D3 with the restart), 0.665 (noise-free) | `drift_ttd.py` (B.5.13) |
+| Disk delta and peak (rev. 28) | +0.091 GB per run; natural-1 run 5.052 GB; **peak 5.242 GB** (5.282 GB with natural-3); unchanged at three decimals with 37,033 leaves | `rollup12.py` (B.5.12) |
+| Re-run of the embedded scripts (rev. 28) | all 13 SHA-256s match Appendix B (7 updated); the 7 fixed scripts reproduce from their Appendix B copies byte for byte; `budget3.py` reproduces its as-run output | §3ac |
 
 The measurement scripts are reproduced verbatim, with SHA-256, in
 Appendix B (B.4, B.5.6–B.5.14).
 
 ## 5. Governance classification
 
+**Revisions 28–35, this follow-up PR.** `origin/main` is now
+`f35c383`, which contains PR #70, so `node scripts/governance/classify-risk.mjs --git
+origin/main...HEAD` reads only this PR's diff. At revisions 28 to 35,
+including the follow-up commit that adds the GitHub paragraph below, it
+gives:
+- `"risk": "restricted"`, classes `retention` and `secrets`;
+- `retention.mention` on `APPENDIX_D_SCHEMA_SKETCH.md`, `DESIGN.md` and
+  this file: the added lines say how the retention functions run (AA3–AA5)
+  and, in revisions 29 and 30, the start's cleanup pass and the export
+  files;
+- `secrets.password-assignment` and `retention.delete-from` on this file
+  only, because this paragraph quotes the two lines that matched those
+  rules in PR #70: the `POSTGRES_PASSWORD=<throwaway>` run command
+  (Appendix B.5.6) and the threat-model test that a `DELETE FROM
+  ratio.cost_daily` by the analytics login is refused (DESIGN). Both
+  lines are on `main` and unchanged, so they are not in this diff.
+
+`APPENDIX_B_SIZING.md` has no reason of its own this time: its added
+lines are figures, labels and the fixed scripts.
+
+**From `aeef207` (revision 31), the PR's governance report lists
+`DESIGN.md` as `unclassified` / `diff-unavailable` instead of its
+`retention.mention`.** Revisions 28–30 expected the GitHub API to return
+every patch, since each file's diff was small. That held until the diff of
+`DESIGN.md` grew: at `aeef207` the API returns no patch for `DESIGN.md`
+(228 changed lines, many of them long table rows). It still returns the
+patches of the other three files. As for PR #70 at `3aaa678`:
+- **the report at `aeef207`:** `retention.mention` on
+  `APPENDIX_D_SCHEMA_SKETCH.md` and this file;
+  `secrets.password-assignment` and `retention.delete-from` on this file;
+  `unclassified` / `diff-unavailable` on `DESIGN.md`. Risk `restricted`,
+  classes **`retention`, `secrets` and `unclassified`**;
+- **why:** with no patch, no content rule can match `DESIGN.md`, and
+  `classify-risk.mjs` fails closed (`patchUnavailable` → `unclassified` /
+  `diff-unavailable`);
+- **the content did not change:** no retention statement in `DESIGN.md`
+  was removed or reworded; the report can no longer see it;
+- **the local verdict is unchanged:** `--git` reads the full diff and
+  still gives `restricted`, `retention` and `secrets`, with the five
+  reasons listed above;
+- **the verdict is not weaker:** `unclassified` is an extra class, and
+  the PR stays `restricted`.
+
+The GitHub-mode result was reproduced locally. `classify-risk.mjs` was fed
+the PR's file list from the API, with `patchUnavailable` set as
+`gh-actions.mjs` sets it, and with the patches the API returns. It gives
+the five reasons in the first bullet. That is the correct classification
+for this content; the PR goes through the restricted exception path.
+
+**PR #70 (revisions 1–27), as recorded at revision 27.**
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
 at revision 27 (the commit that adds this line; the same eight reasons
 as at revision 26, `546e00b`, revision 25, `45b0088`, revision 24, `f3209ea`, revision 23, `b9b2274`, revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
