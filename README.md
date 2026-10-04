@@ -28,6 +28,13 @@ npm run typecheck # tsc --noEmit (also enforced in CI)
 No external services, API keys, or auth are required to run the app — the Node.js
 back-end runs in-process as Next.js API routes.
 
+**Development dependency: Python 3.10+ (`python3`, standard library only).**
+`npm test` and `npm run local:acceptance` run the independent control-total
+calculator `scripts/acceptance/focus_control_totals.py`. Without `python3` those
+tests **fail**; they never skip. CI pins Python 3.12. The acceptance run on the
+public FOCUS 1.0 Sample Data (FinOps Foundation, CC BY 4.0) is described in
+`docs/evidence/slice-2b/DESIGN.md`. It also needs Docker, like `local:test`.
+
 ## Stack
 
 **React front-end + Node.js back-end, unified in Next.js 14 (Pages Router).** The

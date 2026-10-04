@@ -355,7 +355,13 @@ worker or the expected side.
   that breaks real data but not the synthetic fixture would otherwise go
   unseen.
 - **Hermetic:** the file is committed, the hash is checked, and there is no
-  network. `python3` is preinstalled on `ubuntu-latest`.
+  network.
+- **Python is a development dependency (decided by the coordinator):**
+  - Python 3.10+ as `python3`, standard library only, needed for `npm test`
+    (P2) and `local:acceptance`. Without it those tests fail, never skip.
+  - CI pins Python 3.12 with `actions/setup-python` (SHA-pinned, v5.6.0)
+    before `npm ci`, then asserts `>= 3.10` in a separate step.
+  - It is documented in `README.md` (Quick start).
 - **The 10k run stays on demand** (`sample:fetch` then
   `local:acceptance -- --dataset 10k`). In CI it would need a network fetch
   at test time or a 7.5 MB commit, and it adds no new shape.

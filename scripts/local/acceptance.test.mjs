@@ -601,6 +601,17 @@ describe('A8 wiring, pins and attribution', () => {
     expect(scripts['sample:fetch']).toBe('node scripts/acceptance/fetch-focus-sample.mjs');
   });
 
+  it('CI: Python pinned by SHA and asserted >= 3.10 before npm ci; the 1k acceptance runs after local:test', () => {
+    const ci = read('.github/workflows/ci.yml');
+    const at = (s) => ci.indexOf(s);
+    expect(ci).toMatch(/uses: actions\/setup-python@[0-9a-f]{40} # v\d+\.\d+\.\d+\n\s+with:\n\s+python-version: '3\.\d+'/);
+    expect(ci).toContain('assert sys.version_info >= (3, 10)');
+    expect(at('uses: actions/setup-python@')).toBeLessThan(at('run: npm ci'));
+    expect(at('assert sys.version_info >= (3, 10)')).toBeLessThan(at('run: npm ci'));
+    expect(at('run: npm run local:test')).toBeGreaterThan(0);
+    expect(at('run: npm run local:acceptance\n')).toBeGreaterThan(at('run: npm run local:test'));
+  });
+
   it('the fetched data and local state are gitignored; the committed CSV is never EOL-converted', () => {
     const ignore = read('.gitignore').split('\n');
     expect(ignore).toContain('.ratio-sample-data/');
