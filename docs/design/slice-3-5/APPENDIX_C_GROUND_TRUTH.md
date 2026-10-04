@@ -13,10 +13,16 @@ Part of [DESIGN.md](DESIGN.md) §2.5 and §4.8.
 3. **Labels never enter the database** and are not in the source bucket.
    They are written to `<out>/ground-truth/labels.jsonl` and read only by
    the evaluator.
-4. **Rates per account-month are fixed by profile kind**, so `ci`, `dev` and
-   `fleet-15k` carry the same mix at different scales. `ci` guarantees at
-   least 2 labels of every kind (deterministic placement) so every code path
-   is exercised in CI.
+4. **Rates per account-month are fixed by profile kind**, so `ci`,
+   `fleet15k` and `full` carry the same mix at different scales, with two
+   exceptions. `ci` guarantees at least 2 labels of every kind
+   (deterministic placement) so every code path is exercised in CI.
+   `fleet15k` has no `new_region` (no region dimension), applies
+   `tagging_loss` and `commitment_effect` to whole series, and **enriches
+   its evaluation window** to ≥ 60 meaningful labels per main kind (spike,
+   level shift, drift, new service, runaway resource, shared cause); each
+   label records `enriched: true|false` so the evaluator can re-weight
+   (C.4 rule 5).
 5. **Placement:** labels are spread over the whole span (training data is
    contaminated, as in reality, which is what tests robust fitting), but
    **scored only in the evaluation window** (the last ≈ 6 months). No label
@@ -93,7 +99,10 @@ an as-of replay over the evaluation window.
    detected once its first matching group exists.
 5. **Precision** (at ≥ `warning`): G is **correct** if it matches at least
    one `alert` label of any impact class; **false** if it matches only
-   `no_alert` labels or none.
+   `no_alert` labels or none. On `fleet15k`, precision is also reported
+   **re-weighted to natural label rates**: correct groups matching only
+   enriched labels count with weight (natural rate ÷ enriched rate) of their
+   kind; false groups count fully. AT-1 is judged on the re-weighted value.
 6. **Recall:** over `alert` labels with `impactClass = meaningful`, by kind;
    a label counts as detected if a matching group reaches ≥ `warning`
    (≥ `info` for `spend_drop`).
@@ -101,7 +110,8 @@ an as-of replay over the evaluation window.
    available on d + 1, a same-day-available detection is TTD 1 at best. For
    `gradual_drift`, also first detection day − (first day the cumulative
    excess ≥ min impact).
-8. **Alert volume:** groups at ≥ `warning` by first detection day.
+8. **Alert volume:** groups at ≥ `warning` by first detection day, and
+   false groups alone (the `fleet15k` form of AT-4).
 9. **Determinism:** the evaluator's output (JSON) for a given dataset and
    API output is byte-identical across runs; the TypeScript job's own
    summary must agree with it (DESIGN §3.8).
@@ -115,6 +125,7 @@ harness can see failure:
 |---|---|
 | drop all groups of one kind from the API output | that kind's recall → 0 |
 | shift every detection day by + 5 days | TTD rises; matches outside the window fall out |
+| treat every label as not enriched | re-weighted precision equals raw precision; the test fails |
 | add a group on every `month_end_credit` label | precision falls; AT-5 fails |
 | split one `shared_cause` group into N groups | AT-6 fails |
 | relabel a `no_alert` label as `alert` in a copy of `labels.jsonl` | recall falls by exactly that label |

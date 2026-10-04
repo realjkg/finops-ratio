@@ -26,15 +26,19 @@ invariants enforced by the existing catalogue tests:
 | role `ratio_analytics` | NOLOGIN, no attributes, no membership (guarded like 0001's roles) | — | — |
 | view `publications_published` | tenant_id, source_id, billing_period, batch_id, published_at, row_count, loaded_billed_total, reconciliation, is_provisional — from `period_publications` ⋈ `ingest_batches` (`status = 'published'`) | — | analytics, reader (`freshness`) |
 | `analytics_runs` | **(tenant_id, id)**, kind ∈ {rollup, forecast, detect, backtest}, as_of date, status ∈ {running, succeeded, failed}, started_at, finished_at, code_version text, params jsonb, stats jsonb, error_code | analytics | analytics |
-| `cost_series` | **(tenant_id, id bigint)**, unique (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name, region_key) where `region_key` is `''` for global services; first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
-| `cost_daily` | **(tenant_id, batch_id, series_id, usage_date)**; source_id, billing_period; `m_usage_effective`, `billed_total`, `effective_total`, `committed_effective`, `committed_share` inputs, `recurring_billed`, `one_time_billed`, `credit_billed`, `tax_billed`, `adjustment_billed`, `correction_billed`, `untagged_usage_effective`, `tags_invalid_rows`, `row_count` | analytics (INSERT … SELECT from `cost_facts_published` per batch) | analytics; reader via `cost_daily_published` (joins the current publication) |
+| `cost_series` | **(tenant_id, id bigint)**, unique (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name, region_key) where `region_key` is `''` for global services and for every `fleet15k` series; first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
+| `cost_daily` (narrow, usage only) | **(tenant_id, series_id, usage_date, batch_id)**; `m_usage_effective`, `billed_total`, `effective_total`, `committed_effective`, `untagged_usage_effective`, `row_count`; no other btree (measured 217 B per row incl. the key, Appendix B.5) | analytics (INSERT … SELECT from `cost_facts_published` per batch) | analytics; reader via `cost_daily_published` (joins the current publication) |
+| `billing_daily` (sparse) | **(tenant_id, batch_id, sub_account_id, usage_date, kind)** with kind ∈ {recurring, one_time, credit, tax, adjustment, correction}; billed, effective, row_count, `tags_invalid_rows`; a row only where the amount is non-zero | analytics | analytics; reader via view |
 | `cost_resource_daily` | **(tenant_id, batch_id, series_id, usage_date, resource_id)**; `m_usage_effective` (rows above a floor only) | analytics | analytics; reader via view |
 | `cost_daily_scope` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, usage_date)**; same measures as `cost_daily` | analytics | reader via view (current rollup run) |
 | `account_dim` | **(tenant_id, run_id, billing_account_id, sub_account_id)**; provider_name, billing_currency, business_unit (modal tag, 28 days), first_day, last_day, account_age_days | analytics | analytics; reader via view |
 | `rollup_batches` | **(tenant_id, batch_id)**; source_id, billing_period, rolled_up_at, run_id, row totals (to prove rollup = published totals) | analytics | analytics |
 
-Indexes: `cost_daily` btree `(tenant_id, series_id, usage_date)` and BRIN
-`(usage_date)`; `cost_daily_scope` btree on its key.
+Indexes: primary keys only; a BRIN on `cost_daily (usage_date)` is added
+only if a measured query needs it (it was part of the wide variant measured
+at 317 B per row).
+The `source_id` and `billing_period` of a rollup row are those of its
+batch (`rollup_batches`), not repeated per row.
 
 ## D.2 Migration 0003 — forecasts
 
@@ -60,18 +64,16 @@ run instead of 90.
 
 | Object | Columns (key first) | Notes |
 |---|---|---|
-| `anomalies` | **(tenant_id, id uuid)**; dedup key unique (tenant_id, scope_kind, scope_key, category, first_day); category, scope_kind ∈ {leaf, account, billing_account_service, billing_account, business_unit, provider, tenant}, scope_key, billing_currency, first_day, last_day, severity, status, status_reason, impact, expected, actual, relative, detectors text[], basis_batch_ids uuid[], first_detected_at, last_evaluated_at, run_id_first, run_id_last | INSERT by analytics; UPDATE of last_day, severity (upwards), impact/expected/actual/relative, status (auto transitions only), last_evaluated_at, basis_batch_ids by analytics; status columns by `ratio_triage` only if D-15 = build |
+| `anomalies` | **(tenant_id, id uuid)**; dedup key unique (tenant_id, scope_kind, scope_key, category, first_day); category, scope_kind ∈ {leaf, account, billing_account_service, billing_account, business_unit, provider, tenant}, scope_key, billing_currency, first_day, last_day, severity, status, status_reason, impact, expected, actual, relative, detectors text[], basis_batch_ids uuid[], first_detected_at, last_evaluated_at, run_id_first, run_id_last | INSERT by analytics; UPDATE of last_day, severity (upwards), impact/expected/actual/relative, status (automatic open → resolved only), last_evaluated_at, basis_batch_ids by analytics. No other writer in Slices 3–5 (D-15 deferred) |
 | `anomaly_days` | **(tenant_id, anomaly_id, day)**; actual, expected, lo80, hi80, lo95, hi95, z_mad, cusum | evidence for the detail view |
 | `anomaly_root_causes` | **(tenant_id, anomaly_id, rank)** rank 1..10; dimension set (sub_account_id, service_name, region_key, resource_id), excess, share | |
-| `anomaly_events` | **(tenant_id, anomaly_id, seq)**; at, from_status, to_status, reason, actor (`job`, or the API key fingerprint if D-15 = build) | append-only: INSERT only, no UPDATE grant to anyone |
-| role `ratio_triage` | only if D-15 = build | column-level UPDATE (status, status_reason) on `anomalies`, INSERT on `anomaly_events` |
+| `anomaly_events` | **(tenant_id, anomaly_id, seq)**; at, from_status, to_status, reason, actor (`job` in Slices 3–5; a person's identity once D-15's deferral ends) | append-only: INSERT only, no UPDATE grant to anyone |
 | reader views | `anomalies_current`, `anomaly_days_published`, `anomaly_root_causes_published`, `anomaly_events_published` | tenant predicate; nothing else |
 
 ## D.5 Grants summary (to be mirrored in `REVIEWED_PRIVILEGES`)
 
 | Role | Grants added |
 |---|---|
-| `ratio_analytics` | USAGE on schema `ratio`; SELECT on `cost_facts_published`, `publications_published`; SELECT, INSERT on every table above; UPDATE on the listed columns; USAGE on `cost_series`' identity sequence; EXECUTE on `ratio.current_tenant_id()` and the secret-guard functions its CHECKs evaluate; removal of derived rows only if D-12 adopts it |
+| `ratio_analytics` | USAGE on schema `ratio`; SELECT on `cost_facts_published`, `publications_published`; SELECT, INSERT on every table above; UPDATE on the listed columns; USAGE on `cost_series`' identity sequence; EXECUTE on `ratio.current_tenant_id()` and the secret-guard functions its CHECKs evaluate; removal of rollup rows of superseded batches and of forecast state older than the last 2 runs (D-12, decided; restricted change) |
 | `ratio_reader` | SELECT on the new reader views only |
-| `ratio_triage` (optional) | as above |
 | `ratio_worker` | none |

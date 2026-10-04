@@ -2,8 +2,10 @@
 
 Branch `design/slice-3-5-forecast-anomaly`, from `origin/main` at 827773f
 (Slices 0, 1, 2 and 2b merged). **Design only: this branch adds documents
-and no code.** Nothing here is decided until the orchestrator rules on §8
-under the owner's delegation; every decision has a recommended default.
+and no code.** **The decisions in §8 were decided by the orchestrator
+under the owner's delegation on 2026-10-04**; this revision records them and
+applies them (three data profiles, the `fleet15k` sizing, the re-ordered
+plan, tracked items in §9).
 
 **Owner's goal.** Analyse cloud spend across **15,000 simulated accounts**,
 **predict expected costs** and **flag meaningful anomalies automatically**,
@@ -28,8 +30,9 @@ such. The production go-live sign-off stays the owner's non-delegable gate
 | 5 | API and UI surface |
 | 6 | Security and governance |
 | 7 | Slicing plan: PRs in order, tests first |
-| 8 | Open decisions, each with a recommended default |
-| 9 | Rollback |
+| 8 | Decision log (decided by the orchestrator, 2026-10-04) and owner actions |
+| 9 | Tracked items (side findings), each with an owner |
+| 10 | Rollback |
 | [Appendix A](APPENDIX_A_EXTERNAL_TOOLS.md) | External tools: every claim, its source, verified or not |
 | [Appendix B](APPENDIX_B_SIZING.md) | Sizing model, row counts, storage, load times |
 | [Appendix C](APPENDIX_C_GROUND_TRUTH.md) | Ground-truth catalogue, label format and matching rules |
@@ -63,11 +66,21 @@ derived from a seed rule (§1.1).
    15,000-account, three-provider, four-currency FOCUS 1.0 estate in the AWS
    Data Exports layout, with **ground-truth labelled anomalies and labelled
    billing artefacts that must not alert**. It goes through the **real**
-   worker (`sync`) and the **real** published view: no backdoor. Recommended
-   grain: one row per account × service × region × pricing/tag split × day.
-   At 13 billing periods that is **≈ 78.6 M rows (≈ 6 M per month), 47–81 GB
-   in Postgres**: an on-demand run on a developer machine, not CI. CI runs a
-   150-account, 4-period profile (≈ 0.24 M rows).
+   worker (`sync`) and the **real** published view: no backdoor. Three
+   profiles (D-01..D-03, §2.8):
+   - **`ci`**: 150 accounts, 4 billing periods, full grain (region, pricing
+     and tag splits), ≈ 0.24 M rows; runs in CI.
+   - **`fleet15k`: the profile that proves the owner's goal.** All
+     **15,000 accounts** at **account × service × day**, minimal columns,
+     **4 billing periods (122 days)**. Each account carries its top 2
+     services individually (top 4 for the largest 5 % of accounts) plus one
+     "Other services" series: ≈ 45 k series, **≈ 5.65 M fact rows,
+     ≈ 5.2 GB in total** (objects, facts, rollups, forecasts, indexes),
+     from per-row sizes **measured on PostgreSQL 16**; estimated load
+     5–16 min. The full service mix does **not** fit 6 GB at a span that
+     still supports the backtest (Appendix B.5).
+   - **`full`**: 13 periods at region level, ≈ 78.6 M rows, 47–81 GB; runs
+     on demand on a machine with ≥ 150 GB (an owner action, §8).
 2. **Slice 4 — forecasting.** A TypeScript batch job (`ratio-analytics`)
    reads only published facts, builds daily rollup tables in SQL, fits a
    transparent model ladder (seasonal-naive → robust Holt-Winters, damped
@@ -88,7 +101,8 @@ derived from a seed rule (§1.1).
    `CostFinding` type. Evaluation against the generator's ground truth
    reports precision, recall, time-to-detect and alerts per day.
 
-**Proposed acceptance targets** (details §3.10, §4.9): month-end forecast of
+**Acceptance targets** (details §3.10, §4.9; each says which profile
+assesses it): month-end forecast of
 each currency's fleet total within **5 %** median absolute error when made on
 day 1 (FinOps Foundation "Run" maturity allows 12 % [A16]); leaf 30-day
 WAPE ≤ 20 % on clean days and at least 10 % better than seasonal-naive;
@@ -100,13 +114,14 @@ average. No vendor publishes comparable precision, recall or WAPE figures
 (Appendix A, "what is not published"), so these targets are ours and are
 measured, not benchmarked.
 
-**What needs deciding** is listed in §8 (20 decisions). The ones with the
-widest effect: the grain and time span (D-01, D-02), the first post-0001
-migration with a new least-privilege role and its knock-on edits to Slice 0
-tests (D-07), how long derived data is kept (D-12), whether anomaly status
-changes need a write endpoint before per-user identity exists (D-15), and how
-rule R4 ("every cost paired with value") applies to fleet spend that has no
-value attribution (D-16).
+**Decisions** (§8): all 20 are decided by the orchestrator (2026-10-04).
+Notable: three data profiles (D-01..D-03); keep the per-row trigger and
+revisit only if the `fleet15k` load exceeds 60 min (D-06); the first
+post-0001 migration may edit only the Slice 0/1 assertions that "0001 is the
+only migration" (D-07); the acknowledge/resolve write endpoint is deferred
+until per-user identity exists (D-15); notifications are a follow-up slice
+(D-17). The `full` profile's machine is an **owner action**. The plan starts
+with the `daysInMonthOf` bug fix (§7).
 
 ## 1. Gap analysis
 
@@ -211,10 +226,10 @@ monthly horizons (F-g); intra-day detection (A-j).
 
 | # | Finding | Effect | Proposed handling |
 |---|---|---|---|
-| F1 | `daysInMonthOf` (`src/lib/forecast.ts`) builds the last day with the **local-time** `Date` constructor and reads it back with `getUTCDate()`. Verified: with `TZ=Asia/Tokyo`, February 2026 returns **27**; with `TZ=UTC`, 28. `remainingWeekdaysInMonth` and `budgetStatus.ts` inherit it. | Wrong month length on any server east of UTC. | Fix test-first before Slice 4 reuses any calendar helper (PR 4-0, §7). Restricted (`financial_semantics`). |
-| F2 | Rule **R4** ("every cost shown MUST be paired with its value context") cannot hold for fleet cloud spend: the synthetic estate has no value attribution. | A fleet anomaly or forecast view would violate a non-negotiable rule. | D-16. |
-| F3 | The local compose runs SeaweedFS with `-volume.max=64 -master.volumeSizeLimitMB=64`, i.e. **about 4 GiB** of capacity **(assumption: capacity = volumes × size limit)**. The fleet profile needs ≈ 5.5 GB of source objects plus the same again as evidence. | The fleet run cannot fit the default local stack. | A separate fleet compose override or settings (restricted, `deployment` class), PR 3-4. |
-| F4 | D-09's revisit trigger is "a real month above a few million rows". The fleet profile has ≈ 6 M rows per month (synthetic, but the same load path). | D-09 must be reviewed with the fleet run's measurements. | D-06. |
+| F1 | `daysInMonthOf` (`src/lib/forecast.ts`) builds the last day with the **local-time** `Date` constructor and reads it back with `getUTCDate()`. Verified: with `TZ=Asia/Tokyo`, February 2026 returns **27**; with `TZ=UTC`, 28. `remainingWeekdaysInMonth` and `budgetStatus.ts` inherit it. | Wrong month length on any server east of UTC. | Fixed first, as an independent bug fix (PR 4-0, §7); tracked as T5 (§9). Restricted (`financial_semantics`). |
+| F2 | Rule **R4** ("every cost shown MUST be paired with its value context") cannot hold for fleet cloud spend: the synthetic estate has no value attribution. | A fleet anomaly or forecast view would violate a non-negotiable rule. | D-16 (decided: label "value context: not attributed"); tracked as T2. |
+| F3 | The local compose runs SeaweedFS with `-volume.max=64 -master.volumeSizeLimitMB=64`, i.e. **about 4 GiB** of capacity **(assumption: capacity = volumes × size limit)**. `full` needs ≈ 11 GB (source objects plus evidence); `fleet15k` ≈ 0.34 GB. | `full` cannot fit the default local stack; `fleet15k` should. | Measured in PR 3-4; override (restricted, `deployment`) only if needed; tracked as T1. |
+| F4 | D-09's revisit trigger is "a real month above a few million rows". `full` has ≈ 6 M rows per month (synthetic, but the same load path). | D-09 must be reviewed with measurements. | D-06 (decided: keep the trigger; revisit if the `fleet15k` load exceeds 60 min); tracked as T6. |
 | F5 | `.obvious/obvious.md`'s anomaly rule (15 % over yesterday) is a workload-budget rule, not a fleet detector. | Two anomaly rule sets could confuse users. | D-19: keep both, name them differently. |
 | F6 | `cost_facts` has only its primary key `(tenant_id, batch_id, artifact_sha256, row_ordinal)`; Tags, region, charge frequency and pricing category live as strings in `extra_columns`. | Any per-account or per-tag query on facts scans a whole batch. | Rollups are built **once per published batch** (§2.9); nothing queries facts by account at request time. |
 
@@ -246,13 +261,13 @@ monthly horizons (F-g); intra-day detection (A-j).
 
 | Level | FOCUS column | Model |
 |---|---|---|
-| Tenant | — (`ratio.tenants`) | One fleet tenant `synthetic-fleet-15k` (+ one small control tenant in the `dev` profile, to prove isolation at scale). |
+| Tenant | — (`ratio.tenants`) | One fleet tenant `synthetic-fleet-15k` (+ one `ci`-sized control tenant loaded next to it in `fleet15k`, to prove isolation at scale). |
 | Provider | `ProviderName`, `InvoiceIssuerName` | Three providers, synthetic-named (D-04): `SyntheticAWS` (60 % of accounts), `SyntheticAzure` (25 %), `SyntheticGCP` (15 %). |
 | Organisation = billing account | `BillingAccountId`, `BillingAccountName` | **36 billing accounts**: 20 AWS-like payer organisations, 10 Azure-like billing accounts, 6 GCP-like billing accounts. Each billing account is **one ingestion source** (one export), as a payer account's Data Export is in reality. |
 | Currency | `BillingCurrency` | One per billing account (FOCUS; and the worker quarantines a mixed-currency batch, `MIXED_BILLING_CURRENCY`). 29 × USD, 4 × EUR, 2 × GBP, 1 × JPY (a zero-minor-unit currency, on purpose). |
 | Sub-account | `SubAccountId`, `SubAccountName` | **15,000** sub-accounts (AWS accounts / Azure subscriptions / GCP projects), assigned to billing accounts with a heavy-tailed share (the largest billing account holds ≈ 15 % of rows). Ids are drawn from a reserved synthetic range (D-04). |
 | Business unit | `Tags` key `business-unit` | 12 business units spanning providers. An account has one business unit; the **analytics** layer derives it as the account's modal `business-unit` tag over the trailing 28 days of tagged spend, so tagging loss does not move an account between units. |
-| Other tags | `Tags` keys `cost-center` (≈ 400 values), `env` (`prod`, `staging`, `dev`, `sandbox`), `app` | `env` drives weekly seasonality (§2.3). `cost-center` is the governed key used for tag-coverage detection. |
+| Other tags | `Tags` keys `cost-center` (≈ 400 values), `env` (`prod`, `staging`, `dev`, `sandbox`), `app` | `env` drives weekly seasonality (§2.3); it is not emitted in `fleet15k`, where only `business-unit` and `cost-center` are. `cost-center` is the governed key used for tag-coverage detection. |
 | Service | `ServiceName`, `ServiceCategory` | A catalogue of ≈ 60 synthetic service names per provider across FOCUS service categories (Compute, Storage, Databases, Networking, AI and Machine Learning, Analytics, Management and Governance, Security…). |
 | Region | `RegionId`, `RegionName` | 70 % of services are regional; a regional account-service spends in 1 region with probability 0.65, more with a geometric tail capped at 6. |
 
@@ -262,7 +277,11 @@ fleet of ≈ $59 M per month, p99 account ≈ $50 k, largest ≈ $0.8 M; the top
 1 % of accounts carry ≈ 29 % of spend and the top 10 % ≈ 69 %. Services per
 account grow with size (`3 + 4·log10(1 + spend/100)` + noise): mean 7,
 p99 15. Non-USD amounts use the same distribution in their own currency
-(no FX model, D-10).
+(no FX model, D-10). **In `fleet15k`** the same accounts keep their top 2
+services as individual series (top 4 for the largest 5 % of accounts by
+spend) and sum the rest into one `Other services` series per account (≈ 3
+series per account, ≈ 45 k in total); injected anomalies and new services
+are always placed on individual series (§2.4).
 
 ### 2.3 Series model
 
@@ -288,11 +307,19 @@ Each leaf series (account × service × region) is generated as
 
 ### 2.4 FOCUS rows and the grain
 
-**Grain (recommended, D-01):** one row per **account × service × region ×
-(pricing / tag split) × day**, i.e. FOCUS rows already aggregated to the day
-and to the series, with `ChargePeriodStart/End` = the UTC day. Non-usage rows
-(purchase, tax, credit, recurring fee, correction) are added at their natural
-frequency.
+**Grain (decided, D-01), per profile.** FOCUS rows are already aggregated
+to the day and to the series, with `ChargePeriodStart/End` = the UTC day.
+Non-usage rows (purchase, tax, credit, recurring fee, correction) are added
+at their natural frequency.
+
+| Profile | Usage-row grain | Columns |
+|---|---|---|
+| `ci`, `full` | account × service × region × (pricing / tag split) × day | the existing fixture's `COLUMNS` set |
+| `fleet15k` | **account × service × day**: no region, pricing or tag split; a series switches wholly (e.g. to `Committed`, or loses its tag) rather than splitting | **minimal**: the worker's five required columns (`BilledCost`, `BillingCurrency`, `ChargePeriodStart`, `ChargePeriodEnd`, `BillingPeriodStart`) plus what detection needs: `EffectiveCost`, `ProviderName`, `BillingAccountId`, `SubAccountId`, `ServiceName`, `ServiceCategory`, `ChargeCategory`, `ChargeClass` (corrections only), `ChargeFrequency`, `PricingCategory` (committed rows only), `ResourceId` (injected runaway resources only), `Tags` (`business-unit`, `cost-center` only). Measured `extra_columns`: ≈ 100 B per row (Appendix B.5). |
+
+In `fleet15k` an injected runaway resource is the one exception to "no
+split": it is emitted as its own row with `ResourceId` for its window
+(≈ 100 labels × ≤ 20 days: negligible rows).
 
 Why not charge level: at a realistic 25 resources per series, resource ×
 hourly rows over 13 months would be **≈ 35 billion rows**, and resource ×
@@ -322,8 +349,18 @@ README and the dataset manifest):
 ### 2.5 Ground truth: injected anomalies and billing artefacts
 
 Injected deterministically from the seed, in every profile, with the same
-rates per account-month (counts for `fleet-15k` over 13 periods). The full
-catalogue, label format and matching rules are in Appendix C.
+rates per account-month. Counts below are for `full` (15,000 accounts, 13
+periods); `fleet15k` has the same rates over 4 periods, i.e. ≈ 4/13 of each
+count (≈ 90 spikes, ≈ 45 level shifts …), **without `new_region`** (it has
+no region dimension) and with whole-series `tagging_loss` and
+`commitment_effect` (no tag or pricing split). At natural rates the
+`fleet15k` evaluation window (days 57–122) would hold only ≈ 12–25
+meaningful labels per main kind, too few for a recall target; so
+`fleet15k` **enriches** the evaluation window to **≥ 60 meaningful labels
+per main kind** (spike, level shift, drift, new service, runaway resource,
+shared cause), and its alert-volume target is stated on false-positive
+groups (§4.9). The full catalogue, label format and matching rules are in
+Appendix C.
 
 | Kind | Label | What is injected | ≈ count |
 |---|---|---|---|
@@ -377,7 +414,7 @@ noise (§3.9).
 ### 2.7 Output and delivery through the real path
 
 ```
-generator --profile ci|dev|fleet-15k --seed <n> --out <dir>
+generator --profile ci|fleet15k|full --seed <n> --out <dir>
   <dir>/export/<billing-account>/focus/<exportName>/data/BILLING_PERIOD=YYYY-MM/<runId>/part-00001.csv.gz …
   <dir>/export/<billing-account>/focus/<exportName>/metadata/BILLING_PERIOD=YYYY-MM/<exportName>-Manifest.json
   <dir>/ground-truth/labels.jsonl, series-params.jsonl
@@ -396,49 +433,88 @@ local:synthetic …           (scripts/local, its own project and ports, like lo
   (`PERIOD_MISMATCH` otherwise) and one currency.
 - Files are split at ≤ 500 k rows; the largest batch is ≈ 0.9 M rows per
   month, under `RATIO_MAX_ROWS_PER_BATCH` (20 M) and the byte caps.
-- An independent check for the `ci` and `dev` profiles: the Python control
-  calculator pattern of Slice 2b (stdlib only) recomputes per-period
-  totals from the gzip objects, not from the generator's own sums.
-- **Daily-delivery replay** (dev profile, one source, one month): the
+- An independent check for the `ci` and `fleet15k` profiles: the Python
+  control calculator pattern of Slice 2b (stdlib only) recomputes
+  per-period totals from the gzip objects, not from the generator's own
+  sums.
+- **Daily-delivery replay** (`ci` profile, one source, one month): the
   current month is delivered as 30 successive month-to-date exports (new
   execution id each day), so the worker's supersede-and-republish path and
   the analytics job's restatement handling (§4.7) run as they would on a
-  live export. At fleet scale this replay would ingest ≈ 93 M extra rows
-  for one month, so the fleet profile simulates data availability in the
-  analytics job instead (`--as-of`, §4.8).
+  live export. At `full` scale this replay would ingest ≈ 93 M extra rows
+  for one month (≈ 21 M at `fleet15k` scale), so the large profiles
+  simulate data availability in the analytics job instead (`--as-of`,
+  §4.8).
 
-### 2.8 Time span, grain and sizing
+### 2.8 Profiles, time span and sizing (decided: D-01, D-02, D-03)
 
-Full model and numbers: Appendix B. Summary:
+Full model, measurements and arithmetic: Appendix B (B.5 for `fleet15k`).
 
-| Profile | Accounts | Span | Rows / day | Fact rows | Stored facts (0.6–1.03 KB/row) | Single-worker load (20 k / 6 k rows/s) | Where it runs |
-|---|---|---|---|---|---|---|---|
-| `ci` | 150 | 4 periods (≈ 120 d) | ≈ 2.0 k | ≈ 0.24 M | ≤ 0.3 GB | ≤ 1 min | CI, every PR |
-| `dev` | 1,500 (+ control tenant) | 13 periods (395 d) | ≈ 19.7 k | ≈ 7.8 M | 5–8 GB | 6–22 min | on demand |
-| `fleet-15k` | 15,000 | 13 periods (395 d) | ≈ 199 k | ≈ 78.6 M | **47–81 GB** | **65–218 min** | on demand, reference machine |
+| Profile | Accounts | Grain | Span | Series | Fact rows | Total disk (objects + facts + rollups + forecasts + indexes) | Single-worker load (20 k / 6 k rows/s) | Where it runs |
+|---|---|---|---|---|---|---|---|---|
+| `ci` | 150 | full (region, pricing and tag splits) | 4 periods (≈ 120 d) | ≈ 1.5 k | ≈ 0.24 M | < 0.3 GB | ≤ 1 min | CI, every PR |
+| **`fleet15k`** | **15,000** | account × service × day; top 2 services per account individually (top 4 for the largest 5 %) + `Other services` | **4 periods (122 d)** | **≈ 45 k** | **≈ 5.65 M** | **≈ 5.2 GB** (≈ 5.0 GB once the generator's local copy is removed after a verified upload) | **5 / 16 min** | this container class (≈ 10 GB free, 4 CPU, 15 GB RAM) and on demand |
+| `full` | 15,000 | full | 13 periods (395 d) | ≈ 147 k | ≈ 78.6 M | 60–95 GB | 65–218 min | **owner action**: a machine with ≥ 150 GB free (§8) |
 
-The two load rates are measured, not guessed: ≈ 20 k rows/s for the narrow
-synthetic fixture (Slice 1, 200 k rows in ≈ 10 s, with the per-row trigger)
-and ≈ 6 k rows/s for the real-shaped public sample (Slice 2b, 10 k rows in
-1.6 s end to end). Neither was measured at tens of millions of rows; PR 3-4
-measures it.
+**`fleet15k` per-row sizes are measured**, not assumed: on an ephemeral
+PostgreSQL 16 container, 400 k rows of the `fleet15k` shape in a table with
+`cost_facts`' exact columns and primary key take **554 B per row** in total
+(heap 410 B, of which `extra_columns` 100 B, plus the primary-key index);
+the narrow usage rollup takes **217 B per row** with its primary key
+(Appendix B.5). The gzip size per row (≈ 20 B measured on a synthetic CSV,
+**30 B assumed**) is an estimate; objects are counted three times
+(generator output, source bucket, evidence bucket).
 
-**Why 13 periods (D-02):** weekly seasonality needs ≥ 8 weeks to fit; the
-backtest needs a training window (≈ 6 months) plus an evaluation window
-(≈ 6 months) that holds weekly origins for the 30-day horizon, at least three
-monthly origins for the 90-day horizon, and at least six month-ends. Seven
-periods would give a 90-day evaluation of one origin. Annual seasonality is
-out of scope at any span below ≈ 25 months.
+**The full service mix does not fit 6 GB.** With all ≈ 107 k account ×
+service series, the same per-row costs give 11.4 GB for 4 periods, 8.5 GB
+for 3 and 5.7 GB for 2; and 2 periods (61 days) leave no fully held-out
+month after the 56 days that weekly seasonality needs. So `fleet15k` keeps
+**all 15,000 accounts** and reduces the **service axis**: each account's
+long tail of services is summed into one `Other services` series. This is
+stated in the dataset manifest and the generator's README; it is the only
+fidelity given up, and no account is dropped.
 
-**Reference machine (assumption, for the fleet run):** 8 vCPU, 32 GB RAM,
-NVMe SSD, **≥ 150 GB free** (Postgres ≈ 60–95 GB with rollups and WAL,
-SeaweedFS ≈ 11 GB for source + evidence, generator output ≈ 6 GB). CI
-runners and this session's sandbox do not have that disk (assumption about
-GitHub-hosted runners: ≈ 14 GB of free SSD), which is why CI runs `ci` only.
+**Why 4 periods for `fleet15k` (D-02).** With periods of 31, 30, 31 and 30
+days (122 days):
+- **weekly seasonality**: on the first day of period 3, the model has
+  61 days of history (≥ 56, eight weeks);
+- **month-end on day 1 and day 15 against fully held-out months**: periods
+  3 **and** 4 (4 month-end origins);
+- **rolling-origin backtest**: weekly origins from day 57; 6 origins for
+  horizons up to 30 days, 9 for horizons up to 7 days;
+- 3 periods (91 days) would meet the letter (one held-out month) but leave
+  one or two origins at the 30-day horizon, too few to report a WAPE; 5
+  periods would add one 90-day origin at ≈ 6.4 GB, over budget.
+
+**Why 13 periods for `full`.** A training window of ≈ 6 months plus an
+evaluation window of ≈ 6 months with weekly origins at the 30-day horizon,
+≥ 3 origins at the 90-day horizon and ≥ 6 month-ends.
+
+**What each profile can assess:**
+
+| Capability or target | `ci` | `fleet15k` | `full` |
+|---|---|---|---|
+| All 15,000 accounts analysed, forecast and monitored (the owner's goal) | no (150) | **yes** | yes |
+| Forecast FT-1, FT-2 (tenant month-end, day 1 / 15) | smoke only | yes (2 held-out months × 4 currencies: small n, reported with it) | yes (≥ 6 months) |
+| FT-3 (billing-account month-end), FT-4, FT-5, FT-6, FT-7 (pooled coverage) | smoke only | yes | yes |
+| FT-7 with per-series own quantiles (≥ 26 errors per bucket) | no | **no** (too few origins; cohort-pooled only) | yes |
+| FT-8 (90-day horizon) | no | **no** (needs ≥ 146 days) | yes |
+| FT-10 runtime at ≈ 107 k leaf series | no | **no** (≈ 45 k leaves; measured and scaled, not gated) | yes |
+| Detection: spike, level shift, drift, new service, runaway resource, drop, shared cause, new-account runaway, billing-artefact suppression, month-end batch cohort | every kind ≥ 2 labels (smoke) | **yes**, with labels enriched in the evaluation window (≥ 60 meaningful per main kind; recall reported with Wilson intervals) | yes |
+| **New region** (D4 at region level), region rows in root causes | **yes** | **no** (no region dimension) | yes |
+| Tagging loss, commitment effect | yes (partial splits) | yes, coarser (whole-series switches) | yes |
+| Alert volume per day (AT-4), time-to-detect (AT-3) | no | yes (66-day evaluation window) | yes (≈ 180 days) |
+| Load time and D-06's 60-minute trigger | no | **yes** | yes |
+| Storage at 78.6 M rows, D-09 at ≈ 6 M rows per month | no | no | yes |
+
+**This container class** (measured by the orchestrator: ≈ 10 GB free disk,
+4 CPUs, 15 GB RAM) runs `ci` and `fleet15k`; `full` needs the owner's
+environment action. GitHub-hosted runners (assumption: ≈ 14 GB of free
+SSD) run `ci` only.
 
 ### 2.9 Storage strategy
 
-Three options were considered for making 78.6 M facts queryable:
+Three options were considered for making the facts (5.65 M in `fleet15k`, 78.6 M in `full`) queryable:
 
 | Option | Verdict | Reason |
 |---|---|---|
@@ -449,27 +525,33 @@ Three options were considered for making 78.6 M facts queryable:
 Rollup design (schema sketch in Appendix D):
 
 - `cost_series`: one row per (currency, provider, billing account,
-  sub-account, service, region) with first/last day seen; ≈ 147 k rows.
-- `cost_daily`: one row per (series, UTC charge day, **publishing batch**)
-  with measure columns: usage-based effective cost, billed and effective
-  totals, committed effective, recurring, one-time, credit, tax, adjustment,
-  correction amounts, untagged usage effective, row count. ≈ 58 M rows,
-  **≈ 9–11 GB**. For the synthetic grain the rollup is only ≈ 1.35× fewer
-  rows than the facts but ≈ 5× narrower; on real resource-level or hourly
-  exports it compresses by orders of magnitude.
+  sub-account, service, region) with first/last day seen; ≈ 45 k rows in
+  `fleet15k` (region empty), ≈ 147 k in `full`.
+- `cost_daily` (**narrow**, usage only): one row per (series, UTC charge
+  day, **publishing batch**) with five measures (usage-based effective cost,
+  billed total, effective total, committed effective, untagged usage
+  effective) and a row count; primary key `(tenant_id, series_id,
+  usage_date, batch_id)` and no other btree. **Measured: 217 B per row**
+  including the key (a wider 13-measure variant with a second btree and a
+  BRIN measured 317 B; Appendix B.5). ≈ 5.5 M rows / ≈ 1.2 GB in
+  `fleet15k`; ≈ 58 M rows / ≈ 12.6 GB in `full`.
+- `billing_daily` (**sparse**): non-usage amounts (recurring, one-time,
+  credit, tax, adjustment, correction) per (account, day, category), only
+  where non-zero: ≈ 38 k rows per month for 15,000 accounts. Keeping these
+  out of `cost_daily` is what lets the usage rollup stay narrow.
 - `cost_resource_daily`: resource-level rows only above a floor
   ($25/day equivalent), for root cause.
 - `cost_daily_scope`: precomputed daily totals for the API's aggregate
   scopes (tenant, billing account, business unit, provider, service; per
-  currency): ≈ 2–5 k scopes × 395 days.
+  currency): ≈ 2–5 k scopes × the span's days (≤ 0.15 GB in `fleet15k`).
 - **Rollups are versioned by batch**, so they are append-only like facts:
   the read side joins the current publication (§6.2), a restated period
   gets new rollup rows, and the superseded batch's rollup rows become
   unreachable. Removing those unreachable rows is D-12.
-- **No partitioning of the rollups initially:** at ≈ 10 GB, a btree on
-  `(tenant_id, series_id, usage_date)` plus a BRIN on `usage_date` (rows
-  arrive roughly in date order per batch) is enough for the job's full
-  scans and the API's narrow reads. Runtime partition creation would need
+- **No partitioning of the rollups initially:** the primary key serves the
+  job's per-series scans and the API's narrow reads; a BRIN on
+  `usage_date` (rows arrive roughly in date order per batch) is added only
+  if a measured query needs it. Runtime partition creation would need
   DDL rights or a reviewed `SECURITY DEFINER` function, which the privilege
   model deliberately does not have. Revisit if the §5.3 latency SLOs are
   missed.
@@ -480,23 +562,31 @@ Rollup design (schema sketch in Appendix D):
 
 ### 2.10 Slice 3 performance targets
 
-| Target | `ci` | `fleet-15k` (reference machine) |
-|---|---|---|
-| Generation (single process, streaming, bounded memory) | ≤ 10 s | ≤ 30 min, peak RSS ≤ 1 GB, output ≈ 5–6 GB gzip |
-| Upload to local S3 | ≤ 10 s | ≤ 20 min |
-| Worker load, all sources | ≤ 60 s | ≤ 90 min wall with 4 parallel sources (to be measured; fallback: record and escalate under D-06) |
-| Re-sync (all `skipped_unchanged`) | ≤ 15 s | ≤ 2 min |
-| Stored bytes per fact row | ≤ 0.6 KB | ≤ 0.6 KB |
-| End-to-end CI step (stack, load, rollup, forecast, detect, evaluate) | ≤ 120 s | n/a |
+| Target | `ci` | `fleet15k` (this container class) | `full` (owner's machine) |
+|---|---|---|---|
+| Generation (single process, streaming, bounded memory) | ≤ 10 s | ≤ 5 min, peak RSS ≤ 1 GB | ≤ 30 min, peak RSS ≤ 1 GB |
+| Upload to local S3 | ≤ 10 s | ≤ 3 min | ≤ 20 min |
+| Worker load, all sources | ≤ 60 s | **measured**; estimate 5–16 min single worker; **> 60 min triggers the D-06 review** | measured; ≤ 90 min wall with 4 parallel sources |
+| Re-sync (all `skipped_unchanged`) | ≤ 15 s | ≤ 1 min | ≤ 2 min |
+| Stored bytes per fact row | ≤ 0.6 KB | ≤ 0.56 KB (554 B measured) | ≤ 0.6 KB |
+| Total disk (objects + facts + rollups + forecasts + indexes) | < 0.3 GB | **≤ 5.5 GB** (≈ 5.2 GB estimated; hard ceiling 6 GB) | ≤ 100 GB |
+| End-to-end CI step (stack, load, rollup, forecast, detect, evaluate) | ≤ 120 s | n/a | n/a |
 
 ### 2.11 Local stack implications
 
 - `local:synthetic` follows `local:acceptance`: its own project and ports,
   the preflight that refuses existing state, every step under a hard
   deadline, `down -v` always, pass/fail in one place.
-- The fleet profile needs larger SeaweedFS limits (F3); the compose change
-  is `deployment` class (restricted). The worker's default
-  `RATIO_MAX_RUN_SECONDS` (6 h) already covers the largest source.
+- **SeaweedFS capacity** (F3, tracked in §9): the default local settings
+  give ≈ 4 GiB (assumption: volumes × size limit). `fleet15k` needs
+  ≈ 0.34 GB in the two buckets, so it should fit; PR 3-4 measures it and
+  adds a compose override only if needed. `full` needs ≈ 11 GB and does
+  need the override (`deployment` class, restricted).
+- **WAL inside the 6 GB budget:** the `fleet15k` stack runs Postgres with a
+  bounded `max_wal_size` (e.g. 256 MB) so that write-ahead log does not eat
+  the headroom; same override PR.
+- The worker's default `RATIO_MAX_RUN_SECONDS` (6 h) already covers the
+  largest source in every profile.
 - CI gains one step (the `ci` profile) after `local:acceptance`; the job's
   10-minute timeout keeps headroom (measured job time on main ≈ 275 s before
   Slice 2b's step).
@@ -649,23 +739,28 @@ its forecasts.
 | **Skill vs baseline** | 1 − WAPE(model) / WAPE(M0) | per level |
 | **Skill vs oracle** | WAPE(model) − WAPE(oracle), oracle = the generator's true expectation | synthetic only; shows how close the model is to irreducible noise |
 
-### 3.10 Acceptance targets (fleet-15k, evaluation window, clean days unless noted)
+### 3.10 Acceptance targets (evaluation window, clean days unless noted)
 
-| # | Target | Reference point |
-|---|---|---|
-| FT-1 | Month-end forecast of each currency's tenant total, made on **day 1**: median APE ≤ **5 %**, max ≤ 12 % | FinOps Foundation variance guidance: ≤ 12 % at Run [A16]. Synthetic data is cleaner than real data, hence the stricter median. |
-| FT-2 | Same, made on **day 15**: median APE ≤ 3 % | — |
-| FT-3 | Billing-account month-end (day 1): median APE ≤ 10 % | FinOps Run 12 % |
-| FT-4 | Leaf (account × service) daily WAPE, horizons 1–30: ≤ **20 %** for series with ≥ 56 days of history | no vendor publishes one (Appendix A) |
-| FT-5 | Leaf skill vs M0 ≥ **10 %** (WAPE at least 10 % lower) | our baseline |
-| FT-6 | Month-end WAPE not worse than the existing weighted-7-day method at any level, and ≥ 20 % better at tenant level | `src/lib/forecast.ts` |
-| FT-7 | 80 % interval coverage in **[75 %, 85 %]**, 95 % coverage in [92 %, 97.5 %], pooled per level and horizon bucket | AWS publishes an 80 % interval, not its coverage [A1] |
-| FT-8 | 90-day total at billing-account level: median APE ≤ 15 % | — |
-| FT-9 | All days (anomalies included): reported, not gated | shows contamination effect |
-| FT-10 | Fit + forecast for all scopes ≤ **15 min** wall, ≤ 4 GB RSS; backtest ≤ 60 min | reference machine |
+The gating profile is **`fleet15k`** (all 15,000 accounts) wherever it can
+assess the target; `full` gates what `fleet15k` cannot (§2.8), when the
+owner's environment exists. In `fleet15k`, `Other services` leaves are
+scored with the others and also reported separately.
+
+| # | Target | Assessed on | Reference point |
+|---|---|---|---|
+| FT-1 | Month-end forecast of each currency's tenant total, made on **day 1**: median APE ≤ **5 %**, max ≤ 12 % | `fleet15k` (8 points: 2 held-out months × 4 currencies, reported with n), `full` | FinOps Foundation variance guidance: ≤ 12 % at Run [A16]. Synthetic data is cleaner than real data, hence the stricter median. |
+| FT-2 | Same, made on **day 15**: median APE ≤ 3 % | `fleet15k`, `full` | — |
+| FT-3 | Billing-account month-end (day 1): median APE ≤ 10 % | `fleet15k` (72 points), `full` | FinOps Run 12 % |
+| FT-4 | Leaf (account × service) daily WAPE, horizons 1–30: ≤ **20 %** for series with ≥ 56 days of history | `fleet15k` (6 origins), `full` | no vendor publishes one (Appendix A) |
+| FT-5 | Leaf skill vs M0 ≥ **10 %** (WAPE at least 10 % lower) | `fleet15k`, `full` | our baseline |
+| FT-6 | Month-end WAPE not worse than the existing weighted-7-day method at any level, and ≥ 20 % better at tenant level | `fleet15k`, `full` | `src/lib/forecast.ts` |
+| FT-7 | 80 % interval coverage in **[75 %, 85 %]**, 95 % coverage in [92 %, 97.5 %], pooled per level and horizon bucket | `fleet15k` (cohort-pooled quantiles); `full` (also per-series quantiles) | AWS publishes an 80 % interval, not its coverage [A1] |
+| FT-8 | 90-day total at billing-account level: median APE ≤ 15 % | **`full` only** | — |
+| FT-9 | All days (anomalies included): reported, not gated | all | shows contamination effect |
+| FT-10 | Fit + forecast for all scopes ≤ **15 min** wall, ≤ 4 GB RSS; backtest ≤ 60 min | `fleet15k` (≈ 45 k leaves, this container class: 4 CPU, 15 GB); `full` (≈ 107 k leaves, owner's machine) | — |
 
 A target that is missed is **recorded and escalated** with the measured
-value, never relaxed in the same PR (D-20).
+value, **never relaxed** (D-20).
 
 ### 3.11 Where it runs
 
@@ -741,23 +836,25 @@ using data with charge day ≤ `D − 1` (the last published day).
 |---|---|---|---|
 | D1 | **Residual vs interval** | `y > hi₉₉` (one-sided 99 % empirical quantile for h = 1) or `y < lo₉₉` | spikes, drops, runaway onset |
 | D2 | **Robust z (MAD)** | `z = (y − median₂₈ʷ) / (1.4826 · MAD₂₈ʷ)`, weekday-adjusted, `\|z\| ≥ 4` | spikes when the model is mis-fit; independent of the model |
-| D3 | **CUSUM** on standardised one-step residuals | `S⁺ₜ = max(0, S⁺ₜ₋₁ + zₜ − k)` exceeds `h` (two-sided; k = 0.5, h = 5 as a starting point, tuned on the `dev` profile) | level shifts, gradual drift, runaway growth |
+| D3 | **CUSUM** on standardised one-step residuals | `S⁺ₜ = max(0, S⁺ₜ₋₁ + zₜ − k)` exceeds `h` (two-sided; k = 0.5, h = 5 as a starting point, tuned on the `fleet15k` tuning seed) | level shifts, gradual drift, runaway growth |
 | D4 | **New dimension** | a (account, service) or (account, service, region) first seen with `M ≥` minimum impact on its first or any of its first 3 days, in an account older than 30 days | new service, new region |
 | D5 | **Tag coverage** | the account's untagged share of `M` (governed key `cost-center`) rises ≥ 20 pp vs its trailing 28-day median and the untagged amount ≥ minimum impact | tagging loss (category `tagging`, not a spend anomaly) |
 | D6 | **Cold-start guardrail** | in an account's first 14 days, daily `M` above the 99th percentile of its cohort's day-k spend **and** ≥ 10 × minimum impact | runaway in a new account (AWS needs 10 days, Vantage > 12 days [A6, A17]) |
 
 **Combination:** a leaf-day is a candidate if (D1 **and** D2), or D3, or D4,
 or D5, or D6. Requiring D1 and D2 together for one-day deviations trades a
-little recall for a large cut in false positives; it is tuned on `dev` and
-frozen before the `fleet-15k` evaluation. Aggregate scopes (billing account,
+little recall for a large cut in false positives; it is tuned on `fleet15k`
+generated with a **tuning seed** and frozen before the evaluation, which
+uses a **different seed** (and `full` when available). Aggregate scopes (billing account,
 business unit, provider, tenant) run D1–D3 on their own bottom-up forecast
 too (§4.5).
 
 ### 4.3 Daily state
 
 Holt-Winters updates are O(1) per series per day, so the as-of replay over
-the evaluation window (≈ 180 days × ≈ 107 k series) is a few tens of
-millions of updates: seconds to minutes in TypeScript. Parameters are refit
+the evaluation window (≈ 66 days × ≈ 45 k series in `fleet15k`; ≈ 180
+days × ≈ 107 k series in `full`) is at most a few tens of millions of
+updates: seconds to minutes in TypeScript. Parameters are refit
 weekly; states and CUSUM sums are carried daily.
 
 ### 4.4 Impact and severity
@@ -814,7 +911,7 @@ with a reason on every transition, recorded in an append-only events table:
 |---|---|---|
 | → `open` | job | `detected` |
 | `open`/`acknowledged` → `resolved` | job | `auto_recovered` (3 consecutive days back inside the 80 % interval), `new_baseline` (a level shift persisting 14 days is accepted as the new normal), `restated` (§4.7) |
-| `open` → `acknowledged`, → `resolved` | a person, through the API | `acknowledged`, `expected`, `fixed`, `not_an_anomaly` (feedback, used to report precision as users see it) — **only if D-15 allows a write endpoint** |
+| `open` → `acknowledged`, → `resolved` | a person, through the API | **Deferred (D-15, decided):** no write endpoint until per-user identity exists. Reason codes reserved for then: `acknowledged`, `expected`, `fixed`, `not_an_anomaly`. Until then, detection opens findings automatically and the job resolves them when the anomaly ends (rows above). |
 
 **Mapping onto `CostFinding`** (`src/costsource/CostSourceClient.ts`), via a
 new `ratio-native` source behind the CostSource seam:
@@ -873,18 +970,26 @@ with charge day ≤ D − 1).
 - **Suppression check:** every `no_alert` label kind must have 0 matching
   groups at ≥ `warning`.
 
-### 4.9 Acceptance targets (fleet-15k, evaluation window)
+### 4.9 Acceptance targets (evaluation window)
 
-| # | Target |
-|---|---|
-| AT-1 | Precision ≥ **0.80** overall at ≥ `warning`, reported per kind |
-| AT-2 | Recall ≥ **0.90** on meaningful `spike`, `level_shift`, `new_service`, `new_region`, `runaway_resource`; ≥ **0.75** on `gradual_drift`, `tagging_loss`, `new_account_runaway` |
-| AT-3 | Median time-to-detect ≤ **1 day** after data availability for spikes, level shifts, new service/region, runaway; p90 ≤ 3 days; drift: median ≤ 7 days after crossing the minimum impact |
-| AT-4 | Mean ≤ **5** new groups per day fleet-wide at ≥ `warning` (≈ 0.33 per 1,000 accounts), p95 day ≤ 15 |
-| AT-5 | **Zero** `warning`+ groups on credit, purchase, tax, recurring-fee, correction, onboarding and commitment-effect labels |
-| AT-6 | One group per shared-cause event: fan-in labels (Appendix C) produce exactly 1 group, not N |
-| AT-7 | Month-end-batch cohort: false positives reported, not gated (known limitation of a weekly-only model) |
-| AT-8 | Daily detection run ≤ **5 min**; as-of replay of the evaluation window ≤ 60 min (reference machine) |
+`fleet15k` gates every target it can assess (§2.8); `new_region` and the
+natural-rate alert volume are gated on `ci` (smoke) and `full`. Because
+`fleet15k` enriches its evaluation window with labels (§2.5), its precision
+is **re-weighted to natural label rates** before it is compared with AT-1
+(true groups scaled by natural ÷ enriched rate per kind; false groups
+unchanged), and its alert-volume target is stated on false-positive groups,
+which enrichment does not change.
+
+| # | Target | Assessed on |
+|---|---|---|
+| AT-1 | Precision ≥ **0.80** overall at ≥ `warning` (re-weighted on `fleet15k`), reported per kind | `fleet15k`, `full` |
+| AT-2 | Recall ≥ **0.90** on meaningful `spike`, `level_shift`, `new_service`, `runaway_resource` (and `new_region` on `full`); ≥ **0.75** on `gradual_drift`, `tagging_loss`, `new_account_runaway`; Wilson 95 % interval reported with each | `fleet15k`; `new_region` on `ci` (smoke) and `full` |
+| AT-3 | Median time-to-detect ≤ **1 day** after data availability for spikes, level shifts, new service/region, runaway; p90 ≤ 3 days; drift: median ≤ 7 days after crossing the minimum impact | `fleet15k`, `full` |
+| AT-4 | Natural rates: mean ≤ **5** new groups per day fleet-wide at ≥ `warning` (≈ 0.33 per 1,000 accounts), p95 day ≤ 15. Equivalent on `fleet15k`: mean ≤ **1.0** false-positive group per day (5 × (1 − 0.80)), p95 day ≤ 3 | `full`; `fleet15k` (false-positive form) |
+| AT-5 | **Zero** `warning`+ groups on credit, purchase, tax, recurring-fee, correction, onboarding and commitment-effect labels | `fleet15k`, `full` |
+| AT-6 | One group per shared-cause event: fan-in labels (Appendix C) produce exactly 1 group, not N | `fleet15k`, `full` |
+| AT-7 | Month-end-batch cohort: false positives reported, not gated (known limitation of a weekly-only model) | all |
+| AT-8 | Daily detection run ≤ **5 min**; as-of replay of the evaluation window ≤ 60 min | `fleet15k` (this container class), `full` |
 
 For comparison: none of the reference vendors publishes precision, recall or
 alert-volume figures (Appendix A). AWS's 24-hour data latency and Azure's
@@ -903,7 +1008,7 @@ detection latency on a daily source.
 | `anomalies?status=&severity=&category=&scope=&from=&to=&cursor=&limit=` | anomaly groups (decimal strings), keyset by `(first_day desc, id)` | `anomalies_current` |
 | `anomalies/{id}` | group + daily expected / actual / interval + root causes + transitions | same |
 | `freshness` | per source and period: published batch, published at, provisional flag, reconciliation | `publications_published` |
-| `POST anomalies/{id}/status` | **only if D-15 = build**: `{to, reason}`; actor = the API key's fingerprint | write through `ratio_triage` (§6.1) |
+| `POST anomalies/{id}/status` | **deferred (D-15, decided)** until per-user identity exists; not built in Slices 3–5 | — |
 
 The CostSource seam gains `ratio-native` (`fetchFindings` maps §4.6), so
 `pages/api/costsource/findings.ts` and the existing UI list native and
@@ -925,7 +1030,7 @@ reason codes only.
 
 ### 5.3 Latency SLOs at 15,000 accounts
 
-Server-side p95, reference machine, warm cache, measured by a scripted load
+Server-side p95 at **15,000 accounts on `fleet15k`** in this container class (and on `full` when available), warm cache, measured by a scripted load
 run in PR 5-6 (targets, not yet measurements):
 
 | Request | p95 |
@@ -957,8 +1062,8 @@ shown. How R4's value pairing applies is D-16. No new signature component
 | `ratio_owner` (existing) | owns everything | — (migration only) |
 | `ratio_worker` (existing) | unchanged | read or write analytics tables |
 | `ratio_reader` (existing, **widened** by SELECT on the new definer views only, D-08) | read published facts and published analytics views | any base table, any write |
-| **`ratio_analytics`** (new) | SELECT on `cost_facts_published` and `publications_published`; SELECT/INSERT on analytics tables; column-level UPDATE on lifecycle columns, run status and pointers; (DELETE on derived rows only if D-12 says so) | any ingestion base table (`cost_facts`, batches, artifacts, …), any reader view write, DDL, role membership |
-| **`ratio_triage`** (new, only if D-15 = build) | column-level UPDATE of an anomaly's status fields; INSERT into the anomaly events table | anything else |
+| **`ratio_analytics`** (new) | SELECT on `cost_facts_published` and `publications_published`; SELECT/INSERT on analytics tables; column-level UPDATE on lifecycle columns, run status and pointers; removal of rollup rows of superseded batches and of forecast state older than the last 2 runs (D-12, decided; restricted) | any ingestion base table (`cost_facts`, batches, artifacts, …), any reader view write, DDL, role membership |
+| `ratio_triage` (**deferred** with the write endpoint, D-15) | — not created in Slices 3–5 | — |
 
 Every login is checked at start-up / per request, reusing Slice 1's
 `inspectRole` + `roleProblems` and Slice 0's `REFUSED_PREDEFINED_ROLES`:
@@ -989,9 +1094,12 @@ Consequences that need approval (D-07):
   `ratio_local_analytics` login (D-04 model: the migrator stays NOCREATEROLE);
   `verifyBootstrap`'s managed set grows accordingly.
 - **Slice 0 tests that assume 0001 is the only migration must change.**
-  Slice 1's design already noted five such tests. This is the first time a
-  Slice 0 test changes since Slice 0 merged; each edit is listed in the PR
-  with its reason.
+  Slice 1's design already noted five such tests. Under D-07 (decided),
+  these are the **only** Slice 0 or Slice 1 test edits allowed: assertions
+  that 0001 is the only migration, or equivalent migration counts. Each is
+  listed in the PR with before/after, gets challenger scrutiny, and no
+  assertion is weakened (tracked as T3). Any other Slice 0/1 test that would
+  need to change stops the PR for escalation.
 - Every new table follows the Slice 0 invariants, which the existing
   catalogue tests enforce generically: `tenant_id uuid NOT NULL`, composite
   tenant FKs, RLS enabled **and** forced with the exact tenant policy shape,
@@ -1004,13 +1112,13 @@ Consequences that need approval (D-07):
 |---|---|---|
 | Analytics reads staged, quarantined or superseded data | only the published view and the published-batch view are granted; rollups key on the published batch | DB: tenants seeded with every batch state; rollup totals = published totals exactly |
 | Analytics job writes facts or publishes | no grant on ingestion tables; startup login check | DB: `INSERT INTO ratio.cost_facts` as the analytics login ⇒ 42501; mutation: add the grant ⇒ the catalogue check fails |
-| Tenant A's forecasts or anomalies visible to tenant B | FORCE RLS on every new table, definer views with the tenant predicate, API binding unchanged | DB matrix per new table and view (two tenants, `dev` profile control tenant at scale) |
+| Tenant A's forecasts or anomalies visible to tenant B | FORCE RLS on every new table, definer views with the tenant predicate, API binding unchanged | DB matrix per new table and view (two tenants; the `ci`-sized control tenant next to `fleet15k` at scale) |
 | Derived data outlives a restatement | batch-keyed rollups; reader views join the current publication; `restated` resolution | DB: republish ⇒ API totals and anomalies follow the new batch |
 | A float leaks into money | numeric columns (catalogue scan), SQL-side impact, import boundary for model code | catalogue test; unit: model module not importable from rollup/API code |
 | Ground truth leaks into the detector (overstated accuracy) | labels outside the DB and outside the source bucket; the job has no file input for them | static test: the analytics CLI has no labels path; evaluator-only module |
 | Synthetic data mistaken for billing data | synthetic provider names and id ranges, tenant slug and display names, dataset manifest marker (D-04) | generator unit tests; local run asserts display names |
 | Resource exhaustion through new endpoints | precomputed scopes, keyset, `limit` ≤ 500, existing timeouts and rate limit | route tests at limits; load run (§5.3) |
-| Status write abuse (if D-15 = build) | separate role with column-level UPDATE only, transition table, actor recorded, rate limit | route + DB tests; mutation: allow `resolved → open` ⇒ fails |
+| Status write abuse | no write surface in Slices 3–5 (D-15 deferred); status changes only by the job, recorded in the append-only events table | static test: no non-GET handler under the anomaly routes |
 | Analytics job login drifts to a privileged role | per-start login check (Slice 1 logic) + catalogue check after migrations | serial DB suite per edge kind, as for the reader |
 
 ### 6.4 Restricted classes touched (governance gate)
@@ -1023,9 +1131,9 @@ Consequences that need approval (D-07):
 | `src/costsource/**` (`ratio-native`, `CostFinding` fields) | `financial_semantics` | 5-5 |
 | `pages/api/v1/**` | `routes` | 4-5, 5-5 |
 | `scripts/local/**`, `docker-compose*`, `.github/workflows/**` | `deployment` (compose, CI) | 3-3, 3-4 |
-| file names containing `role`, `tenant`, `auth` under `src/` | `auth_tenancy` | 4-1, 5-7 |
+| file names containing `role`, `tenant`, `auth` under `src/` | `auth_tenancy` | 4-1 |
 | `package.json` (scripts only; **no new dependency**) | `dependencies` | 3-2, 4-2 |
-| removal of derived rows (D-12) | the gate's data-lifetime class (added-line rule) | 4-2 / 4-4 if adopted |
+| removal of derived rows (D-12, decided) | the gate's data-lifetime class (added-line rule) | 4-2, 4-4 |
 
 Only this design PR is expected to classify `low`.
 
@@ -1052,54 +1160,81 @@ review, and the Copilot review resolved. Mutation targets are code changes
 that must make at least one test fail; each PR records them in its
 evidence.
 
-| PR | Scope | Tests-first acceptance criteria | Mutation targets |
+**Order (decided):** PR **4-0 comes first**, as an independent bug fix: the
+`daysInMonthOf` defect exists in shipped code today. Then 3-1 onwards. PR
+ids keep their slice numbers so references stay stable.
+
+| Order | PR | Scope | Tests-first acceptance criteria | Mutation targets |
+|---|---|---|---|---|
+| 0 | **3-0** | This design and its decision log | review only | — |
+| 1 | **4-0** | **Bug fix, independent:** F1 (`daysInMonthOf` and `remainingWeekdaysInMonth` under a non-UTC process time zone; `budgetStatus.ts` inherits it) | red tests under `TZ=Asia/Tokyo` and `TZ=America/Los_Angeles` (February 2026 = 28 days; a leap February = 29; weekday counts at month ends); existing forecast and budget tests unchanged and green | local-time `Date` constructor restored; off-by-one in the weekday loop |
+| 2 | **3-1** | Generator core (pure, no I/O): fleet model, series model, PRNG, BigInt money, ground-truth injection, **profiles `ci` / `fleet15k` / `full`**; `src/ingest/fixtures/fleet/**` | deterministic: same seed ⇒ same digest, different seed ⇒ different; adding an account leaves others' draws unchanged; heavy tail (top-1 % share within ±3 pp of target at 15,000 accounts); **every row passes the worker's own validator** (`src/ingest/focus/validate.ts`); one currency per billing account; `BillingPeriodStart` = period; FOCUS rules (Purchase ⇒ not Usage-Based; Committed ⇔ commitment id; Tax ⇒ no pricing category); `fleet15k`: exactly 15,000 accounts, ≤ 5 usage series per account, only the minimal column set, `Other services` = the sum of the account's remaining services; each label's effect present in the rows and absent outside its window; the `fleet15k` evaluation window holds ≥ 60 meaningful labels per main kind; no-alert artefacts at their rates | PRNG stream shared across entities; off-by-one in an injection window; credit sign flipped; mixed currency in a billing account; float in the money path; label written without its effect; an account dropped from `fleet15k` |
+| 3 | **3-2** | Writer: AWS Data Exports layout, gzip, manifests with `x-ratio-control`, file splits, `dataset.json`, labels; `npm run synthetic:generate` | output accepted by `src/ingest/sources/s3/layout.ts`; bounded memory on a 1 M-row run; byte-identical re-run; pinned `ci` golden digest; control totals = BigInt sums = Python recomputation | manifest lists a file twice; control total off by 1e-10; split drops the last row; gzip mtime not zeroed |
+| 4 | **3-3** | `local:synthetic` (own project and ports; provisions 36 sources + the control tenant; parallel sync; asserts) + CI step for `ci` | every period `published` and `reconciled`; totals = `dataset.json`; re-sync all `skipped_unchanged`; no fake source, no hook (static test like 2b's A9); cleanup always | skip one source; assert only row counts; run with the fake source |
+| 5 | **3-4** | **`fleet15k` run in this container class** + evidence: load time (D-06 trigger), bytes per row, total disk vs the 6 GB ceiling, SeaweedFS fit (T1), bounded WAL; compose or settings override only if measured necessary | §2.10 `fleet15k` targets measured and recorded; a missed target is reported and escalated (D-20), never hidden | — (measurement PR) |
+| 6 | **4-1** | Migration 0002 + privilege model + bootstrap + the permitted Slice 0/1 test edits (D-07, T3) | catalogue check passes with the new reviewed sets; analytics login refused for each unsafe shape (serial suite); reader cannot see base analytics tables; tenant matrix on each new table; foundation manifest regenerated and drift-tested; **every edited Slice 0/1 test listed with before/after and shown not weakened** | grant analytics SELECT on `cost_facts`; remove FORCE RLS from one new table; widen reader to a base table; float column |
+| 7 | **4-2** | `ratio-analytics rollup` (incremental by published batch); narrow `cost_daily` + sparse `billing_daily` | rollup totals per (source, period, currency) = published totals **exactly**; restatement switches the read side; idempotent re-run; tag parsing failure counted, never crashes (`pg_input_is_valid` on PG16 [A21]); EXPLAIN shows the PK-prefix path through the security-barrier view **(to verify)**; removal of superseded-batch rollup rows (D-12, restricted) | group by the wrong day; include a superseded batch; skip the untagged measure; remove a row of a current batch |
+| 8 | **4-3** | Migration 0003 (forecast tables, pointer, views) | as 4-1, for the new objects | as 4-1 |
+| 9 | **4-4** | Model library (`src/analytics/model/**`, pure): M0, M1, M1-log, Hampel, grid search, empirical intervals, cold-start ladder, bottom-up; forecast job; backtest command | known-answer tests on hand-computed series; independent Python reference for small cases; invariants: bottom-up coherence, intervals ordered, lower ≥ 0; no leakage (an origin cannot see later data: test with a poisoned future); FT-4/5/7 on the `fleet15k` tuning seed | seasonal index off by one weekday; trend undamped; leakage of day t; interval from in-sample residuals |
+| 10 | **4-5** | API: `costs/daily`, `forecasts`, `forecasts/accuracy`, `freshness` | Slice 2 route test set (auth, 400s, keyset, tenant, unsafe login, no-store, decimal strings); latency check on `fleet15k` | read tenant from the query; OFFSET pagination; number instead of string |
+| 11 | **4-6** | Forecast acceptance on `fleet15k` (evaluation seed) + Python evaluator | FT-1…FT-7, FT-9, FT-10 recorded with the profile and n; evaluator and job agree; FT-8 marked "`full` only, pending OA-1" | — |
+| 12 | **5-1** | Migration 0004 (anomaly tables, events, views; **no** `ratio_triage`, D-15) | as 4-1 | as 4-1 |
+| 13 | **5-2** | Detectors D1–D6, severity, grouping, root cause (pure) | unit cases per detector and per grouping rule; commitment-effect rule; fan-in produces one group | CUSUM reset missing; MAD constant wrong; fan-in threshold off by one; severity downgrade allowed |
+| 14 | **5-3** | `ratio-analytics detect` (daily + as-of replay), automatic open and resolve, restatement | replay on the `fleet15k` tuning seed; `restated` path via the `ci` daily-delivery replay; `new_region` on `ci` | detect on day D using day D data (leakage); auto-resolve after 1 day |
+| 15 | **5-4** | Evaluation harness (Python) + `fleet15k` acceptance (evaluation seed) | AT-1…AT-8 recorded per kind and profile, precision re-weighted to natural rates, Wilson intervals on recall; `new_region` at scale and natural-rate AT-4 marked "`full` only, pending OA-1" | matcher accepts any day; no-alert labels ignored; re-weighting skipped |
+| 16 | **5-5** | API `anomalies`, `anomalies/{id}` (GET only); `ratio-native` CostSource adapter; `CostFinding` optional fields (D-18) | route test set; PointFive mapping unchanged (existing tests untouched); decimal string ↔ number display rounding; no non-GET handler | wrong status vocabulary; impact sign flipped |
+| 17 | **5-6** | UI: forecast panel, native anomalies in Findings with the R4 label (D-16, T2); latency run (§5.3) on `fleet15k` | component tests; SLOs measured | — |
+| — | *5-7 (deferred, D-15)* | status write endpoint + `ratio_triage` | not built until per-user identity exists | — |
+| — | *`full` runs* | 4-6 and 5-4 repeated on `full` | after owner action OA-1 (§8) | — |
+| — | *follow-up slice* | notification delivery (D-17) | own design and egress review | — |
+
+## 8. Decision log (decided by orchestrator, 2026-10-04)
+
+Every decision below was **decided by the orchestrator under the owner's
+delegation on 2026-10-04**. "As recommended" means the default proposed in
+the first revision of this design was adopted unchanged.
+
+| Id | Decision | Decided | Revisit when |
 |---|---|---|---|
-| **3-0** | This design | review only | — |
-| **3-1** | Generator core (pure, no I/O): fleet model, series model, PRNG, BigInt money, ground-truth injection; `src/ingest/fixtures/fleet/**` | deterministic: same seed ⇒ same digest, different seed ⇒ different; adding an account leaves others' draws unchanged; heavy tail (top-1 % share within ±3 pp of target on `dev`); **every row passes the worker's own validator** (`src/ingest/focus/validate.ts`); one currency per billing account; `BillingPeriodStart` = period; FOCUS rules (Purchase ⇒ not Usage-Based; Committed ⇔ commitment id; Tax ⇒ no pricing category); each label's injected effect is present in the rows and absent outside its window; no-alert artefacts present at their rates | PRNG stream shared across entities; off-by-one in an injection window; credit sign flipped; mixed currency in a billing account; float in money path; label written without its effect |
-| **3-2** | Writer: AWS Data Exports layout, gzip, manifests with `x-ratio-control`, file splits, `dataset.json`, labels; `npm run synthetic:generate` | output accepted by `src/ingest/sources/s3/layout.ts`; bounded memory on a 1 M-row run; byte-identical re-run; pinned `ci` golden digest; control totals = BigInt sums = Python recomputation | manifest lists a file twice; control total off by 1e-10; split drops the last row; gzip mtime not zeroed |
-| **3-3** | `local:synthetic` (own project/ports; provision 36 sources; parallel sync; asserts) + CI step for `ci` | every period `published`/`reconciled`; totals = `dataset.json`; re-sync all `skipped_unchanged`; no fake source, no hook (static test like 2b's A9); cleanup always | skip one source; assert only row counts; run with the fake source |
-| **3-4** | Fleet run on demand + compose override (F3) + evidence: timings, bytes per row, D-09 review data | §2.10 targets measured and recorded; a missed target is reported, not hidden | — (measurement PR) |
-| **4-0** | Fix F1 (`daysInMonthOf` under non-UTC TZ) | test with `TZ=Asia/Tokyo` and `TZ=America/Los_Angeles` | local-time constructor restored |
-| **4-1** | Migration 0002 + privilege model + bootstrap + Slice 0 test updates | catalogue check passes with the new reviewed sets; analytics login refused for each unsafe shape (serial suite); reader cannot see base analytics tables; tenant matrix on each new table; foundation manifest regenerated and drift-tested | grant analytics SELECT on `cost_facts`; drop FORCE RLS on one new table; widen reader to a base table; float column |
-| **4-2** | `ratio-analytics rollup` (incremental by published batch) | rollup totals per (source, period, currency) = published totals **exactly**; restatement switches the read side; idempotent re-run; tag parsing failure counted, never crashes (`pg_input_is_valid` on PG16 [A21]); EXPLAIN shows the PK-prefix path through the security-barrier view **(to verify)** | group by the wrong day; include superseded batch; drop untagged measure |
-| **4-3** | Migration 0003 (forecast tables, pointer, views) | as 4-1, for the new objects | as 4-1 |
-| **4-4** | Model library (`src/analytics/model/**`, pure): M0, M1, M1-log, Hampel, grid search, empirical intervals, cold-start ladder, bottom-up; forecast job; backtest command | known-answer tests on hand-computed series; independent Python reference for small cases; invariants: bottom-up coherence, intervals ordered, lower ≥ 0; no leakage (an origin cannot see later data: test with a poisoned future); targets FT-4/5/7 on `dev` | seasonal index off by one weekday; trend undamped; leakage of day t; interval from in-sample residuals |
-| **4-5** | API: `costs/daily`, `forecasts`, `forecasts/accuracy`, `freshness` | Slice 2 route test set (auth, 400s, keyset, tenant, unsafe login, no-store, decimal strings); latency check on `dev` | read tenant from the query; OFFSET pagination; number instead of string |
-| **4-6** | Forecast acceptance on `fleet-15k` + Python evaluator | FT-1…FT-10 recorded; evaluator and job agree | — |
-| **5-1** | Migration 0004 (anomaly tables, events, views; `ratio_triage` only if D-15) | as 4-1 | as 4-1 |
-| **5-2** | Detectors D1–D6, severity, grouping, root cause (pure) | unit cases per detector and per grouping rule; commitment-effect rule; fan-in produces one group | CUSUM reset missing; MAD constant wrong; fan-in threshold off by one; severity downgrade allowed |
-| **5-3** | `ratio-analytics detect` (daily + as-of replay), lifecycle auto-transitions, restatement | replay over `dev` meets AT-1…AT-5 at `dev` scale; `restated` path via the daily-delivery replay | detect on day D using day D data (leakage); auto-resolve after 1 day |
-| **5-4** | Evaluation harness (Python) + `fleet-15k` acceptance | AT-1…AT-8 recorded per kind | matcher accepts any day; no-alert labels ignored |
-| **5-5** | API `anomalies`, `anomalies/{id}`; `ratio-native` CostSource adapter; `CostFinding` optional fields (D-18) | route test set; PointFive mapping unchanged (existing tests untouched); decimal string ↔ number display rounding | wrong status vocabulary; impact sign flipped |
-| **5-6** | UI: forecast panel, native anomalies in Findings; latency run (§5.3) | component tests; SLOs measured | — |
-| **5-7** | *(only if D-15 = build)* status write endpoint + `ratio_triage` | transition table enforced in DB and route; actor recorded; rate limited | allow `resolved → open`; write any column |
+| D-01 | Fact grain | **Three profiles.** `ci` and `full`: account × service × region × pricing/tag split × day, resource rows only for named and runaway resources. **`fleet15k`: account × service × day, minimal columns** (§2.4), all 15,000 accounts; top 2 services per account individually (top 4 for the largest 5 %) + `Other services` (§2.8, Appendix B.5). | `fleet15k` measurements exceed the 6 GB ceiling (then: escalate with the options of B.5, never fewer accounts) |
+| D-02 | Span | `ci`: 4 periods. **`fleet15k`: 4 periods (122 days)**, the shortest span that gives ≥ 56 days of training, two fully held-out months for day-1 and day-15 month-end forecasts, and ≥ 6 rolling origins at the 30-day horizon. `full`: 13 periods. | a target needs more origins than `fleet15k` provides |
+| D-03 | Where each profile runs | `ci` in CI on every PR; `fleet15k` in this container class (≈ 10 GB free, 4 CPU, 15 GB RAM) and on demand; `full` on demand on a machine with ≥ 150 GB free — **an owner action (OA-1), not a decision** | OA-1 is done |
+| D-04 | Synthetic identity | as recommended: `SyntheticAWS/Azure/GCP`, invented service names, ids from a reserved prefix, tenant `synthetic-fleet-15k`, display names "SYNTHETIC", manifest marker | — |
+| D-05 | Storage | as recommended: batch-keyed rollup tables written by `ratio_analytics`; no materialised views; no partitioning initially. Refined by the measurement: narrow `cost_daily` (PK only) + sparse `billing_daily` | §5.3 SLOs missed |
+| D-06 | Per-row staged-only trigger (brief D-09) | **keep it.** Load time is measured on `fleet15k` (PR 3-4). **Trigger: if the `fleet15k` load exceeds 60 minutes, revisit with that evidence.** | the trigger fires |
+| D-07 | First post-0001 migration | accepted: 0002–0004 as expand migrations with the new role. **The only edits allowed to Slice 0 and Slice 1 tests are those that assert "0001 is the only migration" (or an equivalent migration count).** Each such edit is listed in the PR with before/after, gets challenger scrutiny, and **no assertion is weakened** (T3, §9). | any other Slice 0/1 test would need to change: stop and escalate |
+| D-08 | Read access | as recommended: widen `ratio_reader` by SELECT on the new definer views only | — |
+| D-09 | Monitored measure | as recommended: `EffectiveCost` of usage-based, non-correction rows; billed month-end separately | — |
+| D-10 | Currency | as recommended: per billing currency; no FX in Slices 3–5 | a reporting currency is required |
+| D-11 | Compute stack | as recommended: SQL rollups + TypeScript job; Python stdlib only as the independent evaluator | — |
+| D-12 | Lifetime of derived data | accepted **as a restricted change**: anomalies, events and backtests kept; `ratio_analytics` may remove rollup rows of superseded batches and forecast state older than the last 2 runs | — |
+| D-13 | Default thresholds | as recommended: min impact USD/EUR/GBP 100, JPY 15,000 per day; `warning` ≥ min and ≥ 20 %; `critical` ≥ 10 × min and ≥ 50 %, or ≥ 50 × min cumulative | measured precision or recall disagree (escalate, D-20) |
+| D-14 | Spend drops | as recommended: detected, `info` by default | — |
+| D-15 | Manual acknowledge / resolve | **deferred** until per-user identity exists. Detection opens findings automatically, and the job marks a finding resolved when the anomaly ends (`auto_recovered`, `new_baseline`, `restated`). No write endpoint and no `ratio_triage` role in Slices 3–5 | per-user identity exists (brief D-10 / D-06 revisited) |
+| D-16 | R4 for fleet spend | as recommended: "value context: not attributed" shown next to every fleet cost, forecast and anomaly (tracked as T2) | value attribution exists for fleet accounts |
+| D-17 | Notifications | **a follow-up slice** with its own egress review | — |
+| D-18 | `CostFinding` shape | as recommended: additive optional fields | — |
+| D-19 | Relation to existing rules | as recommended: keep obvious.md's workload rule; fleet rules named separately | — |
+| D-20 | Missed acceptance targets | **recorded and escalated, never relaxed** | — |
 
-## 8. Open decisions (orchestrator decides under delegation)
+### Owner actions (not decisions)
 
-| Id | Decision | Recommended default | Main alternative |
+| Id | Action | Unblocks |
+|---|---|---|
+| OA-1 | Provide an environment with **≥ 150 GB free disk** (reference: 8 vCPU, 32 GB RAM, NVMe) for the `full` profile. This is environment provisioning, not production hosting; BOUNDARY v2 still applies (local, ephemeral, synthetic). | FT-8, per-series interval quantiles, `new_region` at scale, natural-rate AT-4, FT-10 at ≈ 107 k leaves, D-09 data at ≈ 6 M rows per month |
+
+## 9. Tracked items (side findings)
+
+| Id | Item | Owner | Status / next step |
 |---|---|---|---|
-| D-01 | Fact grain of the generator | account × service × region × pricing/tag split × day; resource rows only for named and runaway resources | resource × day (≈ 1.45 B rows: infeasible locally) |
-| D-02 | Span of `dev` / `fleet-15k` | 13 billing periods | 7 periods (half the storage; 90-day backtest on one origin) |
-| D-03 | Where each profile runs | `ci` in CI; `dev` and `fleet-15k` on demand with recorded evidence | fleet in a scheduled workflow (needs a large runner: hosting spend, owner action) |
-| D-04 | Synthetic identity | provider names `SyntheticAWS/Azure/GCP`, invented service names, ids from a reserved prefix, tenant `synthetic-fleet-15k`, display names "SYNTHETIC", manifest marker | real provider and service names (more realistic, more risk of being mistaken for real data) |
-| D-05 | Storage strategy | batch-keyed rollup tables written by `ratio_analytics`; no materialised views; no partitioning initially (btree + BRIN) | partition rollups by month via a reviewed `SECURITY DEFINER` partition function |
-| D-06 | D-09 review (per-row staged-only trigger) | keep it; decide with PR 3-4's measured load time | statement-level trigger (Slice 0 change) |
-| D-07 | First post-0001 migration | 0002–0004 as expand migrations with new roles, accepting the listed Slice 0 test edits, each PR restricted-reviewed | a separate schema for analytics (needs its own privilege-model branch; more change, not less) |
-| D-08 | Read access to analytics | widen `ratio_reader` by SELECT on the new definer views only | a second reader login for analytics |
-| D-09 | Monitored measure | `EffectiveCost` of usage-based, non-correction rows; billed month-end separately | `BilledCost` (alerts on purchases and credits) |
-| D-10 | Currency | per billing currency everywhere; no FX in Slices 3–5 | a reporting currency with an FX table (needs a rate source) |
-| D-11 | Compute stack | SQL rollups + TypeScript job; Python stdlib only as the independent evaluator | Python runtime with numpy/statsmodels |
-| D-12 | Lifetime of derived data | keep anomalies, events and forecast backtests indefinitely (D-03 spirit); allow `ratio_analytics` to remove rollup rows of superseded batches and forecast state older than the last 2 runs (derived and recomputable from kept facts). Restricted change. | keep all derived rows (storage grows with every daily republish) |
-| D-13 | Default thresholds | min impact USD/EUR/GBP 100, JPY 15,000 per day; `warning` at ≥ min and ≥ 20 %; `critical` at ≥ 10 × min and ≥ 50 % or ≥ 50 × min cumulative | AWS-like $100 and 40 % |
-| D-14 | Spend drops | detected; `info` by default (not notified); scored at `info` | full severity like increases |
-| D-15 | Manual lifecycle (acknowledge / resolve) | **defer the write endpoint** (PR 5-7) until per-user identity exists (D-10 of the brief: one key per deployment cannot say *who* acknowledged); Slice 5 ships auto-transitions and read APIs | build now with actor = API-key fingerprint and `ratio_triage` |
-| D-16 | R4 (value pairing) for fleet spend | show "value context: not attributed" next to every fleet cost, forecast and anomaly; never hide it (honest-risk guardrail) | exempt fleet views from R4 (a rule change in `.obvious/`, policy class) |
-| D-17 | Notifications | out of Slices 3–5; follow-up slice for webhooks (obvious.md API-first) with a separate egress review | e-mail/Slack now |
-| D-18 | `CostFinding` shape | additive optional fields (`currency`, decimal `impact`, `scope`, days, expected/actual) | a separate native type and endpoint only |
-| D-19 | Relation to existing rules | keep obvious.md's 15 %-over-yesterday rule for AI-workload budgets; name the fleet detector's rules separately; later re-point `src/prediction`'s `forecast_engine` source to Slice 4 | replace the workload rule |
-| D-20 | Missed acceptance targets | record the measured value and escalate; no target is relaxed inside the PR that misses it | allow the implementer to retune targets |
+| T1 | **SeaweedFS capacity.** The local compose runs `-volume.max=64 -master.volumeSizeLimitMB=64`, ≈ 4 GiB (assumption: volumes × size limit). `fleet15k` needs ≈ 0.34 GB in the two buckets and should fit; `full` needs ≈ 11 GB. | Slice 3 implementer (PR 3-4) | measure on `fleet15k`; add a compose or settings override (restricted, `deployment`) only if measured necessary; required for `full` |
+| T2 | **R4 conflict.** Fleet spend has no value attribution, so "every cost paired with value" cannot be met literally. Decided handling: the D-16 label. | Slice 5 implementer (PR 5-6); any change to the rule itself: orchestrator, with the owner | label implemented and tested in 5-6; rule text in `.obvious/obvious.md` unchanged |
+| T3 | **Slice 0/1 test edits for migration 0002.** Only assertions that 0001 is the only migration (or equivalent counts) may change (D-07). Slice 1's design already noted five such tests. | Slice 4 implementer (PR 4-1); the challenger reviews each edit | the PR lists every edited assertion with before/after and why it is not weakened |
+| T4 | **Wrong CLAUDE.md in this session's context.** The harness loaded `/home/user/adaptcloud/CLAUDE.md` (an unrelated "Agnus Dei / Sage" homeschool project) as project instructions for this repository. It was ignored; nothing in this design depends on it. | orchestrator (session and environment configuration) | report it to whoever configures the sessions, so future agents on this repository do not receive another project's instructions |
+| T5 | **F1, the `daysInMonthOf` time-zone bug** (verified: February 2026 = 27 days under `TZ=Asia/Tokyo`). | PR 4-0 implementer | first PR of the plan |
+| T6 | **F4, D-09's trigger** at ≈ 6 M rows per month in `full`. | orchestrator (D-06) | `fleet15k` load time measured in 3-4; `full` after OA-1 |
 
-## 9. Rollback
+## 10. Rollback
 
 - **Design PR:** revert the documents.
 - **Generator and local run (Slice 3):** revert the PRs; nothing in the
