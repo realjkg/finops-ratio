@@ -13,7 +13,7 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Pool } from 'pg';
 import type { CliIO } from './cli';
-import { loadWorkerConfig, type WorkerConfig } from './config';
+import { loadWorkerConfig, syntheticProvidersOptIn, type WorkerConfig } from './config';
 import { SYNTHETIC_PROVIDERS } from './focus/provider';
 import { IngestError, errorCodeOf, messageOf } from './errors';
 import { appendEvidenceFile, buildEvidenceRecord, resolveGitSha } from './evidenceRecord';
@@ -178,6 +178,13 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
       throw new IngestError(
         'REPLAY_FIXTURES_NOT_ALLOWED',
         'replay-fixtures runs only when RATIO_ENV is test: it ingests synthetic providers, which are allowed only in development/test (per-source synthetic markers are tracked as D-21 for Slice 3)',
+      );
+    }
+    // Fail fast (challenger M-A): without the opt-in every scenario would quarantine. A check, not a bypass.
+    if (args.command === 'replay-fixtures' && !syntheticProvidersOptIn(env)) {
+      throw new IngestError(
+        'REPLAY_FIXTURES_NOT_ALLOWED',
+        'replay-fixtures needs RATIO_ALLOW_SYNTHETIC_PROVIDERS=1: it ingests the SYNTHETIC fixture (provider SyntheticCloud), which is excluded without the opt-in, so every scenario would quarantine',
       );
     }
     config = loadWorkerConfig(env);
