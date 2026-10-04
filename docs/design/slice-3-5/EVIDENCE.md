@@ -30,7 +30,8 @@ ordinary commits and plain pushes (never a force-push).
 | 18 | `f1981c2`, `ddbb6f0` | The challenger's REQUEST CHANGES on cc54e79 (1 Medium, 5 Low), §3r: severity of a multi-day statistic on its window's mean (as the budget computed it), with the D3 episode and its restart stated; AT-3's drift target checked (`drift_ttd.py`, B.5.13: not infeasible by construction, at risk, unchanged under D-20); day-index leftovers; fan-in step 1 by the rule's own scope; root-cause leaf and account FKs; the 5.5 / 6 GB limits apply to the peak; D1's log quantile and the intermittent-interval wording. Copilot's review 5407703235 of cc54e79 (seven threads), §3s: accounts bound to their natural key; the complete M1 anchor state for D3; aggregate-scope detector state; `freshness` states its rollup snapshot and a bounded coverage share; per-bucket quantile sources; a working recall mutation. Disk delta +0.082 GB per run, peak 5.23 GB. |
 | 19 | `0dd6743` | Copilot's review 5407780981 of ddbb6f0 (2 High, 1 Medium) and the challenger's four Low items on revision 18 (APPROVED, 0 High, 0 Medium), with two plan slips, §3t: named resources only in `cost_resource_daily` (no `''` sentinel for `resource_id`); a positive `scale_level` and clamped quantiles so leaf bounds stay ordered for negative usage; billed `B` on month-end only; "lower bound" renamed; the 28-day re-anchoring cap wins; the D3 anchor is the daily-updated state; `freshness` reads its batch and sums in one statement; the weekly and hurdle baselines named; the 4-4b and 4-5 tests completed. |
 | 20 | `d4616a8` | Copilot's review 5407820380 of 0dd6743 (1 High, 3 Medium) and the challenger's three Low items on revision 19 (APPROVED, 0 High, 0 Medium), §3u: `freshness` keyset on `(share, leaf_id)`; a per-currency resource floor (a quarter of the minimum impact); the conditional floor applied to intermittent series and to every total; `detector_scope_state` in every retention list and test; clamping's effect on FT-7 reported. |
-| 21 | this revision | Copilot's review 5407844545 of d4616a8 (2 High, 1 Medium) and the challenger's one Low on revision 20 (APPROVED, 0 High, 0 Medium), §3v: `block`, currency and segment in the backtest report's key; `n` = 0 origins left out of the totals calibration; month-end errors bucketed by remaining days; the backtest report published by a view on the latest succeeded backtest run; EVIDENCE §3u's section reference corrected. |
+| 21 | `3aaa678`, `bddefe9` | Copilot's review 5407844545 of d4616a8 (2 High, 1 Medium) and the challenger's one Low on revision 20 (APPROVED, 0 High, 0 Medium), §3v: `block`, currency and segment in the backtest report's key; `n` = 0 origins left out of the totals calibration; month-end errors bucketed by remaining days; the backtest report published by a view on the latest succeeded backtest run; EVIDENCE §3u's section reference corrected. |
+| 22 | this revision | Copilot's review 5407898631 of bddefe9 (3 High, 1 Medium, 1 Low) and the challenger's one Low on revision 21 (APPROVED, 0 High, 0 Medium), §3w: billed `B` only at scopes with a billing source; parent integrity of the anomaly tables; M1-log eligibility and its runtime fallback; the `cost_daily` row measured with its six measures (`rowsize3.sql`; peak 5.18 GB); D-21's provider names; backtest reads atomic per snapshot. |
 
 ## 2. Governance wording: reverted
 
@@ -481,12 +482,30 @@ it `failed`, switches to the new run's rows on success, and the mutant
 | **E1** §3u section reference | **Fixed.** The retention list is in DESIGN §6.1 (the retention functions' paragraph), not §6.2 | §3u |
 | Scripts | No script changed; all 12 hashes as in revision 20; no disk figure changes (the backtest report is a few thousand rows per run) | App. B |
 
+## 3w. Revision 22: Copilot's review 5407898631 of bddefe9 and the challenger's Low on revision 21
+
+The challenger APPROVED revision 21 (0 High, 0 Medium, 1 Low). Each item
+was checked against bddefe9 and is valid. R1's CHECK and R2's
+constraints were checked on a throwaway PostgreSQL 16.14 cluster (port
+55781, removed afterwards).
+
+| Item | Change | Where |
+|---|---|---|
+| **R1 r4179088862** (High) leaf billed `B` | **Fixed by narrowing the contract.** Credits, purchases, fees and tax exist per account and charge category only (`billing_daily`, `billing_daily_scope`), so a leaf (account × service) and the fleet-wide service scope have no billed source. `B` is now promised only at account, billing-account, business-unit, provider and tenant scope; `billed_month_end` carries `CHECK (billed_month_end IS NULL OR (window = 'month_end' AND scope_kind IN (…)))`. No allocation to services is invented, as with `attributed: false`. Probe: a leaf, a service-scope and a next-30 row with a billed value each fail 23514. 4-5 test (account, billing account and tenant carry `billedMonthEnd`; leaf and service do not); mutant: `billedMonthEnd` on a leaf | DESIGN §3.1, §5.1, §7 (4-5); App. D.2 |
+| **R2 r4179088890** (High) anomaly parent integrity | **Fixed.** `(tenant_id, merged_into)` → `anomalies (tenant_id, id)`; `CHECK ((status_reason IS NOT DISTINCT FROM 'merged') = (merged_into IS NOT NULL))`, `CHECK (merged_into IS NULL OR status = 'resolved')`, `CHECK (merged_into IS DISTINCT FROM id)`; the three child tables reference `anomalies` with `ON DELETE RESTRICT`. Nothing deletes anomalies: no DELETE grant, and neither retention function names an anomaly table. Probe: a dangling or cross-tenant target → 23503; a merged row without a target, a target on an open row, a merged row still open, a self-merge → 23514; an orphan child → 23503; deleting a referenced parent → refused; a plain `=` CHECK (mutant) passes a target on an open row because `NULL = false` is NULL. 5-1 tests and mutants | App. D.4; DESIGN §6.1, §7 (5-1) |
+| **R3 r4179088906** (High) M1-log with non-positive values | **Fixed.** Eligibility: every value of the last 28 days > 0. **Runtime fallback, chosen:** a value ≤ 0 after selection switches that leaf to M0 at that update (`log_fallback`), and to M1 at the next weekly refit. M0 needs no fitted state, and clamping would invent data. The rule is fixed before the scoring block, so it is not a selection on scored data. D3's anchor and D.3's reconstruction were checked: `exp(…) − 1` takes no log of an observation, and a leaf-day with `M` ≤ 0 is not scored on the log scale (§3.1). 4-4a test (−5 and 0 after selection: no NaN, the switch and the flag); mutants: eligibility on zeros only, `log1p` of a value ≤ 0, clamping | DESIGN §3.2, §7 (4-4a); App. D.2 |
+| **R4 r4179088921** (Medium) sixth `cost_daily` measure | **Fixed by measuring.** `rowsize3.sql` (new, B.5.14, SHA-256 `a6032a63…`), on a throwaway PostgreSQL 16.14 cluster, twice: integer `batch_seq` with six measures is **172.3 B** per row with the multi-day measure 0 and **180.2 B** with it non-zero, against the **193 B** that `budget.py` estimated (uuid key, five measures: 217.0 B, reproducing B.5.2). The estimate was **too high, not too low**. `rollup12.py` applies 180.2 B: −0.058 GB per run, delta +0.024 GB, natural-1 run 4.986 GB, peaks **5.176 / 5.216 GB** (5.18 / 5.22), under the 5.5 GB target. SHA-256 `a0931c44…` → `beb47e98e01e822e832a9f9340221be879251352bd2aa3bcfbfe62769a0d730a`. DESIGN, App. B, App. D, §4 and the PR body updated; DESIGN §2.9's stale "five measures" corrected | App. B.5.2, B.5.12, B.5.14; DESIGN §2.8, §2.9, §2.10; App. D.1 |
+| **R5 r4179088932** (Low) D-21 names | **Fixed.** The generator emits `SyntheticAWS`, `SyntheticAzure` and `SyntheticGCP` and no other provider name; `SyntheticCloud` is the existing fixtures' name (checked: `src/ingest/focus/provider.ts` on main), which it does not emit | DESIGN §8 D-21 |
+| **R6** (challenger) backtest snapshot | **Fixed.** The switch is atomic per snapshot: one statement, or one REPEATABLE READ transaction, sees one run; two READ COMMITTED statements can straddle the commit. The accuracy route reads page and count in one REPEATABLE READ transaction; the 4-4b test is written that way, with a mutant reading them in two READ COMMITTED statements | DESIGN §5.1, §7 (4-4b); App. D.2 |
+| Scripts | `rollup12.py` changed (hash above); `rowsize3.sql` added (13 embedded scripts); the other eleven unchanged | App. B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
 |---|---|---|
 | Lean `fleet15k` fact row | 554.2 B (heap 409.6, `extra_columns` 100.5) | 400 k rows, `cost_facts`' exact columns and PK, ephemeral `postgres:16` container (Appendix B.5.2) |
 | Narrow rollup row (uuid batch key) | 217.0 B | same |
+| Narrow rollup row as designed: integer `batch_seq`, six measures (rev. 22) | 172.3 B with the multi-day measure 0 (`fleet15k`); 180.2 B with it non-zero on every row (used in the budget) | `rowsize3.sql` on a throwaway PostgreSQL 16.14 cluster, 400 k rows, run twice (B.5.14) |
 | Gzip per CSV row (`fleet15k` columns) | 19.4 B (30 B used) | 200 k synthetic rows, Python `gzip` level 6 |
 | `daysInMonthOf` under `TZ=Asia/Tokyo` | February 2026 → 27 (UTC: 28) | `node` one-liner (DESIGN §1.7 F1) |
 | Disk budget, adopted `fleet15k` variant | 4.90 GB per run (rev. 3); 4.96 GB per run and **5.11 GB peak** across the sequential runs (rev. 4) | `budget.py` (B.5.3), `budget2.py` (B.5.7) |
@@ -509,19 +528,19 @@ it `failed`, switches to the new run's rows on success, and the mutant
 | D4 reactivation false positives (rev. 9; ρ > 0 underestimated, see rev. 10) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` as of revision 9 |
 | D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6) | `reactivation.py` (B.5.11) |
 | `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series) | `reactivation.py` (B.5.11) |
-| Billing rollup disk delta (rev. 12; corrected in rev. 13; forecast leaves in rev. 15; leaf totals in rev. 17; detector state in rev. 18) | +0.082 GB per run (rev. 17: 0.066; revs. 15–16: 0.031; rev. 13: 0.025; rev. 12: 0.026); peak 5.23 GB (5.27 GB with natural-3) | `rollup12.py` (B.5.12) |
+| Billing rollup disk delta (rev. 12; corrected in rev. 13; forecast leaves in rev. 15; leaf totals in rev. 17; detector state in rev. 18; measured `cost_daily` row in rev. 22) | +0.024 GB per run (rev. 18: 0.082; rev. 17: 0.066; revs. 15–16: 0.031; rev. 13: 0.025; rev. 12: 0.026); peak 5.18 GB (5.22 GB with natural-3) | `rollup12.py` (B.5.12) |
 | Drift time-to-detect from AT-3's anchor (rev. 18) | noise-free first-passing day median 6, p90 12 days (not a lower bound); D3 alone median 7, p90 13 (with the restart); all detectors on the true baseline median 5, p90 11 | `drift_ttd.py` (B.5.13) |
 | Garwood intervals, exact (rev. 12) | unchanged at three decimals (e.g. 7 groups: [0.046, 0.236]) | `budget3.py` (B.5.8) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
 
 The measurement scripts are reproduced verbatim, with SHA-256, in
-Appendix B (B.4, B.5.6–B.5.13).
+Appendix B (B.4, B.5.6–B.5.14).
 
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 21 (`3aaa678` and the commit that adds this line; the same
-eight reasons as at revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
+at revision 22 (the commit that adds this line; the same eight reasons
+as at revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
 `ddbb6f0`, revision 17, `cc54e79`, and `9e0d703`, revision 16). Revision 16 gave the same risk and classes
 as every revision since 4, and **one more reason than before**: `retention.mention`
 on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is

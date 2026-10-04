@@ -174,7 +174,9 @@ triggers of the real table add no stored bytes; TOAST is not involved at
 these row widths.
 
 **Not measured (estimates, checked in PR 3-4):** the narrow rollup with an
-integer `batch_seq` instead of a uuid (≈ 193 B: −12 B heap, −12 B index);
+integer `batch_seq` instead of a uuid (≈ 193 B: −12 B heap, −12 B index;
+**measured in revision 22 at 172.3 B, 180.2 B with a non-zero sixth
+measure**, B.5.14);
 gzip bytes per row (19.4 B measured on 200,000 synthetic CSV rows with the
 `fleet15k` columns, **30 B used**); WAL with `max_wal_size=256MB` and
 temporary files (**0.3 GB budgeted each**); the cluster's own catalogs
@@ -2437,7 +2439,7 @@ for label, pool in (("as specified: non-intermittent individual series", [i for 
 # non-intermittent leaves are active every day, so they never meet the dormancy condition outside a label
 ```
 
-### B.5.12 Revisions 12–18: billing rollup by charge category, rollup pointer, forecast leaves, leaf totals, detector state, disk delta
+### B.5.12 Revisions 12–22: billing rollup by charge category, rollup pointer, forecast leaves, leaf totals, detector state, measured `cost_daily` row, disk delta
 
 Computed by `rollup12.py` (below; standard library, no randomness, < 1 s).
 Revision 12 adds:
@@ -2474,6 +2476,15 @@ assumptions):
   row; the scalar it replaces is not subtracted);
 - `detector_scope_state` for the ≈ 550 aggregate scopes (≈ 600 B per row).
 
+Revision 22 measures the `cost_daily` row as it now is: six numeric
+measures (`multi_day_usage_effective` was added in revision 15 and never
+measured or budgeted) and the integer `batch_seq` (B.5.14). The measured
+row is **smaller** than the 193 B `budget.py` estimated: 172.3 B with the
+sixth measure 0, as on `fleet15k`, and 180.2 B with it non-zero on every
+row. The correction uses 180.2 B, so it also holds for real data with
+multi-day usage: 4,520,344 rows × (180.2 − 193) B = **−0.058 GB** per
+run.
+
 The byte sizes are **assumptions** (150 B per narrow row, as for
 `billing_daily` in `budget.py`), measured in PR 3-4.
 
@@ -2485,24 +2496,25 @@ The byte sizes are **assumptions** (150 B per narrow row, as for
 | leaf `forecast_totals`, three windows (rev. 17) | 222,312 rows, **0.033 GB** |
 | `forecast_state`: `scale_level`, `log_var` (rev. 17) | **0.002 GB** |
 | detector anchor and episode, `q_source`, `detector_scope_state` (rev. 18) | **0.016 GB** |
+| `cost_daily` row measured with six measures: 180.2 B instead of the 193 B budgeted (rev. 22, B.5.14) | **−0.058 GB** |
 | `rollup_pointer`, `billing_daily` re-key | ≈ 0 |
-| **Delta per run** | **+0.082 GB** (revision 17: 0.066; revisions 15–16: 0.031; revision 13: 0.025; revision 12: 0.026) |
-| natural-1 run | 4.961 → **5.044 GB** |
-| **Peak, 5 runs** | 5.151 → **5.234 GB** |
-| **Peak, 6 runs (natural-3)** | 5.191 → **5.274 GB** |
+| **Delta per run** | **+0.024 GB** (revision 18: 0.082; revision 17: 0.066; revisions 15–16: 0.031; revision 13: 0.025; revision 12: 0.026) |
+| natural-1 run | 4.961 → **4.986 GB** |
+| **Peak, 5 runs** | 5.151 → **5.176 GB** |
+| **Peak, 6 runs (natural-3)** | 5.191 → **5.216 GB** |
 
 Both peaks stay under the 5.5 GB target and the 6 GB ceiling.
 
 SHA-256 of `rollup12.py` as run:
-`a0931c448ddf6e09b42d0eb3d43a291445cfcdc618ddc33713425c004f304b9e`
-(revision 17: `d296e8ff…`; revision 16: `6bb735b8…`).
+`beb47e98e01e822e832a9f9340221be879251352bd2aa3bcfbfe62769a0d730a`
+(revision 18: `a0931c44…`; revision 17: `d296e8ff…`; revision 16: `6bb735b8…`).
 
 `rollup12.py`:
 
 ```python
 # fleet15k, revision 12 (category count corrected in revision 13; forecast leaves added in revision 15; leaf totals and
 # two leaf-state columns added in revision 17; detector anchor, episode, aggregate D3 state and per-bucket quantile
-# sources added in revision 18): disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
+# sources added in revision 18; `cost_daily` row size measured with its six measures in revision 22): disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
 # charge category, `cost_accounts`, `billing_daily_scope`, `rollup_pointer`) and the resulting peak disk.
 # Standard library only, no randomness. Inputs from budget5.py / budget3.py; byte sizes are ASSUMPTIONS
 # (measured in PR 3-4), at the same 150 B per narrow row used for `billing_daily` in budget.py.
@@ -2539,11 +2551,20 @@ state_cols_gb = LEAVES * 2 * 12 * RUNS_KEPT / 1e9
 # scope, a 28-value baseline plus sums, ASSUMPTION 600 B. All run-keyed, 2 runs kept.
 ANCHOR_EP_B, QSRC_B, SCOPE_STATE_B = 110, 100, 600
 rev18_gb = (LEAVES * (ANCHOR_EP_B + QSRC_B) + SCOPES * SCOPE_STATE_B) * RUNS_KEPT / 1e9
-delta = scope_gb + acct_gb + billing_delta_gb + leaves_gb + leaf_totals_gb + state_cols_gb + rev18_gb
+# revision 22: `cost_daily` carries six numeric measures (`multi_day_usage_effective` since revision 15) and the integer
+# `batch_seq`. budget.py budgets 193 B per row (estimated from the 217 B uuid-key measurement); rowsize3.sql measures the
+# real shape on PostgreSQL 16 (B.5.14): 172.3 B with the sixth measure 0 (as on fleet15k), 180.2 B with it non-zero on
+# every row. The correction uses the larger, so it covers real data with multi-day usage too.
+COST_DAILY_ROWS = LEAVES * DAYS          # one row per leaf and day, as budget.py's series_days (region '' on fleet15k)
+BUDGETED_B, MEASURED_B = 193.0, 180.2
+cost_daily_corr_gb = COST_DAILY_ROWS * (MEASURED_B - BUDGETED_B) / 1e9
+delta = scope_gb + acct_gb + billing_delta_gb + leaves_gb + leaf_totals_gb + state_cols_gb + rev18_gb + cost_daily_corr_gb
 print("billing_daily_scope rows %d (%.3f GB), cost_accounts %.3f GB, forecast_leaves + leaf_id %.3f GB, rollup_pointer ~0"
       % (scope_rows, scope_gb, acct_gb, leaves_gb))
-print("leaf forecast_totals rows %d (%.3f GB), forecast_state columns %.4f GB, rev. 18 detector and source state %.4f GB: delta per run %.3f GB"
-      % (LEAVES * WINDOWS * RUNS_KEPT, leaf_totals_gb, state_cols_gb, rev18_gb, delta))
+print("leaf forecast_totals rows %d (%.3f GB), forecast_state columns %.4f GB, rev. 18 detector and source state %.4f GB"
+      % (LEAVES * WINDOWS * RUNS_KEPT, leaf_totals_gb, state_cols_gb, rev18_gb))
+print("cost_daily measured row %.1f B vs %.0f B budgeted, %d rows: %+.3f GB; delta per run %.3f GB"
+      % (MEASURED_B, BUDGETED_B, COST_DAILY_ROWS, cost_daily_corr_gb, delta))
 
 # peak disk, as budget5.py, with the delta added to every run
 points = 5 * 30 + 30 + 23 + 16 + 9
@@ -2707,4 +2728,83 @@ print("cumulative clause (>= 50 x min, `critical`): reached after the anchor + m
       % (pct(c50, .5), pct(c50, .9), sum(1 for x in c50 if x <= 7) / len(c50)))
 print("share of labels whose injected relative excess first reaches 20 %% after the anchor + 7 days: %.3f"
       % (sum(1 for x in e if x[0] + 1 > 7) / len(e)))
+```
+
+### B.5.14 Revision 22: the `cost_daily` row with its six measures
+
+Copilot r4179088921 found that `cost_daily` gained a sixth numeric
+measure in revision 15 (`multi_day_usage_effective`), while the B.5
+measurement and `budget.py`'s 193 B estimate still described five. The
+row was re-measured with `rowsize3.sql` (below) on a throwaway PostgreSQL
+16.14 cluster (Unix socket only, removed afterwards), run twice with the
+same figures; 400,000 rows of the same shape as `rowsize2.sql`, the
+primary key the only index:
+
+| Variant | Bytes per row | Heap per row |
+|---|---|---|
+| uuid batch key, five measures (revision 3's shape; `rowsize2.sql` measured 217.0) | 217.0 | 117.0 |
+| integer `batch_seq`, five measures (budgeted at ≈ 193) | 172.3 | 109.2 |
+| integer `batch_seq`, **six measures, the sixth 0** (`fleet15k`) | **172.3** | 109.2 |
+| integer `batch_seq`, **six measures, the sixth non-zero on every row** | **180.2** | 117.0 |
+
+The sixth measure costs nothing when it is 0, because the row's padding
+absorbs it, and 7.9 B when it holds a 10-decimal amount. The integer key
+saves 44.7 B, not the estimated 24 B. `rollup12.py` (B.5.12) applies the
+180.2 B figure. The peak falls to 5.176 GB (5.216 GB with natural-3), and
+the 5.5 GB target and 6 GB ceiling still hold. The target is unchanged.
+
+SHA-256 of `rowsize3.sql` as run:
+`a6032a6304b5f8285650759d3fac9ca9301021ec23c654c3e2d49696ebce863e`.
+
+`rowsize3.sql`:
+
+```sql
+-- Throwaway measurement for the fleet15k sizing (Appendix B.5.14, revision 22). Not product code.
+-- The narrow usage rollup as Appendix D.1 defines it since revision 15: six numeric measures (the sixth is
+-- multi_day_usage_effective) and the integer batch key batch_seq. 400k rows shaped as in rowsize.sql /
+-- rowsize2.sql (107,000 series, 10-decimal money), primary key the only index.
+\timing off
+CREATE TABLE src AS
+SELECT i, (i % 107000)::bigint AS series_id, date '2026-05-01' + (i / 107000) AS usage_date,
+       round((random() * 900)::numeric, 10) AS x
+FROM generate_series(0, 399999) g(i);
+
+-- (a) revision-3 shape: uuid batch key, five measures (measured at 217.0 B in rowsize2.sql)
+CREATE TABLE cd_uuid5 (
+  tenant_id uuid NOT NULL, series_id bigint NOT NULL, usage_date date NOT NULL, batch_id uuid NOT NULL,
+  m_usage_effective numeric NOT NULL, billed_total numeric NOT NULL, effective_total numeric NOT NULL,
+  committed_effective numeric NOT NULL, untagged_usage_effective numeric NOT NULL, row_count integer NOT NULL,
+  PRIMARY KEY (tenant_id, series_id, usage_date, batch_id));
+INSERT INTO cd_uuid5 SELECT '11111111-1111-1111-1111-111111111111', series_id, usage_date,
+       '22222222-2222-2222-2222-222222222222', x, x, x, 0, 0, 1 FROM src;
+
+-- (b) integer batch_seq, five measures (estimated at 193 B until now)
+CREATE TABLE cd_int5 (
+  tenant_id uuid NOT NULL, series_id bigint NOT NULL, usage_date date NOT NULL, batch_seq integer NOT NULL,
+  m_usage_effective numeric NOT NULL, billed_total numeric NOT NULL, effective_total numeric NOT NULL,
+  committed_effective numeric NOT NULL, untagged_usage_effective numeric NOT NULL, row_count integer NOT NULL,
+  PRIMARY KEY (tenant_id, series_id, usage_date, batch_seq));
+INSERT INTO cd_int5 SELECT '11111111-1111-1111-1111-111111111111', series_id, usage_date, 1, x, x, x, 0, 0, 1 FROM src;
+
+-- (c) integer batch_seq, six measures, multi_day_usage_effective = 0 (fleet15k: no multi-day usage rows)
+CREATE TABLE cd_int6 (
+  tenant_id uuid NOT NULL, series_id bigint NOT NULL, usage_date date NOT NULL, batch_seq integer NOT NULL,
+  m_usage_effective numeric NOT NULL, multi_day_usage_effective numeric NOT NULL, billed_total numeric NOT NULL,
+  effective_total numeric NOT NULL, committed_effective numeric NOT NULL, untagged_usage_effective numeric NOT NULL,
+  row_count integer NOT NULL,
+  PRIMARY KEY (tenant_id, series_id, usage_date, batch_seq));
+INSERT INTO cd_int6 SELECT '11111111-1111-1111-1111-111111111111', series_id, usage_date, 1, x, 0, x, x, 0, 0, 1 FROM src;
+
+-- (d) as (c) with a non-zero 10-decimal multi-day amount on every row (an upper bound for real data)
+CREATE TABLE cd_int6_full (LIKE cd_int6 INCLUDING ALL);
+INSERT INTO cd_int6_full SELECT '11111111-1111-1111-1111-111111111111', series_id, usage_date, 1, x, x, x, x, 0, 0, 1 FROM src;
+
+VACUUM ANALYZE cd_uuid5; VACUUM ANALYZE cd_int5; VACUUM ANALYZE cd_int6; VACUUM ANALYZE cd_int6_full;
+SELECT t, n, round(total::numeric / n, 1) AS bytes_per_row, round(heap::numeric / n, 1) AS heap_per_row
+FROM (VALUES
+  ('cd_uuid5', (SELECT count(*) FROM cd_uuid5), pg_total_relation_size('cd_uuid5'), pg_relation_size('cd_uuid5')),
+  ('cd_int5', (SELECT count(*) FROM cd_int5), pg_total_relation_size('cd_int5'), pg_relation_size('cd_int5')),
+  ('cd_int6', (SELECT count(*) FROM cd_int6), pg_total_relation_size('cd_int6'), pg_relation_size('cd_int6')),
+  ('cd_int6_full', (SELECT count(*) FROM cd_int6_full), pg_total_relation_size('cd_int6_full'), pg_relation_size('cd_int6_full'))
+) AS v(t, n, total, heap);
 ```
