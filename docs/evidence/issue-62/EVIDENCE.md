@@ -547,3 +547,27 @@ new test.
 
 No DB test depends on the old order. The only `CONFIG_INVALID` assertion on an
 unknown `RATIO_ENV` (`config.test.ts:49`) passes no opt-in.
+
+## 13. PR #67 Copilot review: tenant-scoped catalog correlation
+
+Copilot (review 5407190027, thread r4178465830; it rated the finding High)
+pointed at `catalogSnapshot` in `scripts/local/local.mjs`. It runs as the local
+superuser, so row-level security does not apply. Its `error_codes` subquery
+correlated `ingest_validation_errors` on `batch_id` alone, but batch ids are
+unique only within a tenant: the primary key is `(tenant_id, id)`, and the
+errors key is `(tenant_id, batch_id, error_ordinal)`. A batch with the same
+UUID in another tenant would have had its errors counted.
+
+The practical impact was nil. The script is local acceptance only, the batch
+ids are random UUIDs, and the local stack has one tenant. It is fixed anyway.
+
+| Commit | Kind |
+|---|---|
+| `local.test.mjs` L17: every `<x>.batch_id = <y>.id` correlation in `local.mjs`/`acceptance.mjs` must also bind `<x>.tenant_id = <y>.tenant_id` | **red** (`red/red-copilot-tenant-scope.txt`: L17 failed) |
+| `local.mjs`: `WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id` | green |
+
+**Gates after the fix:**
+- `scripts/local` unit tests: 238 passed;
+- lint and `tsc --noEmit`: exit 0;
+- `npm test`: 110 files, all passed;
+- `local:acceptance` 1k (project `ratio-orch-acc`, ports 56490–56492): `pass: true`. 2024-09 was published with 942 rows / `18.00663861840`, `validation_error_count` 57 and `error_codes {PROVIDER_MISMATCH: 57}`. 2024-10 was quarantined with `PROVIDER_MISMATCH`. `down -v` removed the stack.

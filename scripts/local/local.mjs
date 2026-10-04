@@ -587,7 +587,7 @@ async function catalogSnapshot(settings, secrets) {
                 row_count::text AS row_count, loaded_billed_total::text AS loaded_billed_total,
                 validation_error_count::text AS validation_error_count, quarantine_reason,
                 (SELECT coalesce(jsonb_object_agg(e.code, e.n), '{}'::jsonb)
-                   FROM (SELECT code, count(*)::int AS n FROM ratio.ingest_validation_errors v WHERE v.batch_id = b.id GROUP BY code) e) AS error_codes
+                   FROM (SELECT code, count(*)::int AS n FROM ratio.ingest_validation_errors v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id GROUP BY code) e) AS error_codes
            FROM ratio.ingest_batches b WHERE tenant_id = $1 ORDER BY billing_period, status`,
         [secrets.RATIO_LOCAL_TENANT_ID],
       );
