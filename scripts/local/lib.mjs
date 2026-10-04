@@ -399,15 +399,17 @@ export function childExited(child) {
 function waitForExit(child, timeoutMs) {
   if (childExited(child)) return Promise.resolve(true);
   return new Promise((resolve) => {
+    let timer = null;
     const onExit = () => {
       clearTimeout(timer);
       resolve(true);
     };
-    const timer = setTimeout(() => {
+    // Listen first: if that throws, no timer is left behind.
+    child.once('exit', onExit);
+    timer = setTimeout(() => {
       child.removeListener('exit', onExit);
       resolve(childExited(child));
     }, timeoutMs);
-    child.once('exit', onExit);
   });
 }
 
@@ -641,21 +643,21 @@ export function groupAlive(pgid) {
   return false;
 }
 
-/** Signals a tracked leader's whole group; any other child alone. */
+/**
+ * Signals a tracked leader's whole group; any other child alone. Only ESRCH
+ * (the group is already empty) falls back to the child itself; any other
+ * failure propagates, as child.kill's does (the caller records it).
+ */
 function signalChild(child, signal) {
   if (GROUP_LEADERS.has(child) && Number.isInteger(child.pid) && child.pid > 1) {
     try {
       process.kill(-child.pid, signal);
       return;
-    } catch {
-      // the group is gone: fall back to the child itself
+    } catch (e) {
+      if (e?.code !== 'ESRCH') throw e;
     }
   }
-  try {
-    child.kill(signal);
-  } catch {
-    // already gone
-  }
+  child.kill(signal);
 }
 
 /** Drops `pgid` from the live set only once its group is empty (not when the leader exits). */
