@@ -801,3 +801,188 @@ in the commit that follows this record.
 **After `git merge origin/main` (af6ad77; ad876ae is main + ebbde12, and the
 merge changes no file):** lint exit 0, tsc exit 0, `npm test` 111 files /
 **2610 passed**.
+
+## 18. PR #68 merged; post-merge challenger APPROVE; follow-ups (`fix/68-calculator-followups`)
+
+**PR #68** (`fix/67-copilot-followups`) was merged by the owner at
+6f84ffa (merge commit 0947091 on main). CI was green, and the post-merge
+challenger review **APPROVED** it with 0 High and 0 Medium. Four items
+remained:
+- one Copilot finding (r4178585902);
+- challenger Lows L-1 and L-2;
+- one informational item.
+
+All four are fixed on `fix/68-calculator-followups`, cut from `origin/main`
+0947091, test-first.
+
+| Item | Red | Fix |
+|---|---|---|
+| Copilot r4178585902: unpadded years break the inverted-period comparison | b684945 | 5f83926 |
+| ~~Challenger L-1: sub-millisecond precision~~ (wrong; superseded by §18.1) | b684945 | 5f83926, reverted by f43a2b6 |
+| Informational: `OverflowError` near year 9999 | b684945 | 5f83926 |
+| Challenger L-2: L18 counts a repeated binding twice | b684945 | 1500718 |
+
+Red output:
+- `red/red-pr68-python.txt`: 5 errors. The 0099→0100 case and the
+  millisecond case were refused; the overflow cases raised `OverflowError`.
+- `red/red-pr68-l18.txt`: 1 failed. The challenger's probe was not flagged.
+
+**Copilot r4178585902.**
+- **The bug.** `expected_row` compared `format_timestamp()` strings, and
+  `strftime('%Y')` does not pad year 99. So `'99-12-31…' > '100-01-01…'`,
+  and a valid 0099-12-31 23:00 → 0100-01-01 00:00 interval was refused.
+  `validateRow` orders it correctly (`timestamp.test.ts`).
+- **The second bug, confirmed.** The same unpadded year was in the `--rows`
+  API values. Postgres `to_char(…, 'YYYY…')`, which the API uses, gives
+  `0099-12-31T23:00:00.000000Z`. Checked on a scratch PG16: the calculator
+  would have predicted `99-12-31…` and reported a false mismatch.
+- **The fix:**
+  - `parse_timestamp` returns an aware UTC `datetime`;
+  - `format_utc` formats with an explicit `{year:04d}`;
+  - the order check compares instants, never text.
+
+**Challenger L-1. CORRECTED in §18.1: the conclusion was wrong.** The
+millisecond rule recorded here (start `.000500` with end `.000100` "accepted,
+as the worker does") missed the database constraint. `load.ts` inserts the
+full fraction into `timestamptz`, and `cost_facts_charge_period CHECK
+(charge_period_end >= charge_period_start)` compares microseconds. Such a row
+never publishes. The contract is now **microseconds on both sides**.
+
+**Informational (year 9999).** The worker's behaviour was checked first.
+- `parseFocusTimestamp('9999-12-31T23:00:00-02:00')` accepts the value
+  (epochMs 253402304400000 = +010000-01-01T01:00Z).
+- Postgres stores it, and `to_char` gives `10000-01-01T01:00:00.000000Z`.
+- Likewise, `0001-01-01T00:30:00+01:00` is accepted. It becomes 1 BC,
+  which `to_char` prints as `0001-12-31T23:30:00.000000Z` with no BC marker,
+  an API quirk noted here only.
+
+Python's `datetime` cannot hold either value. The calculator now raises
+`ControlTotalsError` ("not representable in UTC within years 1..9999"): exit
+1 with `refused:`, never a traceback. That fails closed, in the same class as
+the "stricter on formats" note (§16). A worker/calculator disagreement on
+such an input stops the acceptance run instead of passing it.
+
+**Challenger L-2.** In the L18 lint, identical tenant bindings (either
+spelling) now count **once per literal**.
+- Consequence, documented in the self-test: two batch-id correlations
+  between the same alias pair in one literal are always flagged, even if
+  each has its own copy of the binding. This is a conservative lint; use
+  distinct aliases.
+- The earlier "good" probe with two correlations and two copies moved to
+  the flagged list.
+- `local.mjs` and `acceptance.mjs` still pass.
+
+**Mutations (`runs/code-mutations-pr68-followups.txt`; all 7 killed):**
+
+| Id | Mutation | Killed by |
+|---|---|---|
+| P1 | compare padded formatted text | the millisecond test |
+| P1b | strftime year again (unpadded) | the 0099 test |
+| P1c | the original bug: compare unpadded strftime text | both tests |
+| P2 | no millisecond truncation | the millisecond test |
+| P2b | rounding instead of truncation | the millisecond test |
+| P4 | `OverflowError` not caught | the overflow test |
+| L2 | repeated bindings counted again | the L-2 probe |
+
+**Gates (at 1500718; no `src/` change, so `test:db` was not required):**
+
+| Gate | Result |
+|---|---|
+| lint, tsc | exit 0 |
+| `npm test` | 111 files / **2611 passed** |
+| Python suite | 32 tests, OK |
+| `local:acceptance` 1k | exit 0, `pass: true`, 22.9 s. 942 / `18.00663861840`, `excludedRows` 57; 2024-10 quarantined `PROVIDER_MISMATCH`; 942 rows compared (`runs/acc1k-pr68-followups.json`) |
+| `local:acceptance` 10k | exit 0, `pass: true`, 28.6 s. 9441 / `112.16617543240`, `excludedRows` 557; 2024-10 quarantined; 9441 rows compared (`runs/acc10k-pr68-followups.json`) |
+
+Both acceptance runs used project `ratio-i62g-acc` on 56650/56651/56652
+(checked free first). The scratch PG16 for the Postgres check ran on 56630
+and was removed.
+
+
+### 18.1 PR #69 Copilot r4178626016 (High): one precision contract, microseconds, on both sides
+
+**What happened before (red evidence, 8ce85c5, `red/red-pr69-db.txt`).** A
+row with ChargePeriodStart `…00.000500Z` and End `…00.000100Z`:
+- passed `validateRow`, which compared `epochMs` (both are `.000`);
+- reached the insert, where Postgres stored the microseconds and the
+  `cost_facts_charge_period` CHECK rejected it (SQLSTATE 23514);
+- left the period **`failed` with code `DB_23514`**: the run failed, the
+  batch was not quarantined, and the checkpoint did not advance.
+
+The `DB_REJECTED_VALUE` backstop covers class 22 only, and 23514 is class 23.
+So **every later sync fails the same way**, instead of giving a clean
+`CHARGE_PERIOD_INVERTED` quarantine. Meanwhile the calculator's millisecond
+rule (§18, challenger L-1) predicted a publication.
+
+**Postgres's rounding, measured on PG 16.14** (`'…'::timestamptz`):
+
+| Input fraction | Stored |
+|---|---|
+| `.0000005` | `.000000` |
+| `.0000015` | `.000002` |
+| `.0000025` | `.000002` |
+| `.0000035` | `.000004` |
+| `.0000045` | `.000004` |
+| `.9999995` | next second |
+
+That is `rint(strtod(frac) * 1e6)`, round half to even on the double, as in
+PG's `ParseFractionalSecond`.
+
+**Fix (f43a2b6):**
+- **Worker.** `ParsedTimestamp.epochUs` is the instant as `timestamptz`
+  stores it. The fraction is rounded with the same `rint` (half to even) on
+  the same double, as a `bigint`. `validateRow` compares `epochUs` for
+  `CHARGE_PERIOD_INVERTED`, and `epochMs` is kept everywhere else.
+  - The DB test fuzzes 2006 fractions of 7–9 digits (ties included) against
+    Postgres `extract(epoch …)`: every one is identical.
+  - The sub-ms row is now quarantined `VALIDATION_FAILED`, with one stored
+    error, `CHARGE_PERIOD_INVERTED` on `ChargePeriodEnd`, row 2. Nothing is
+    published, and the constraint is never reached.
+- **Calculator.** The millisecond truncation is reverted. The order is
+  compared on full-precision instants. `TIMESTAMP_RE` allows at most 6
+  fraction digits, so no rounding is needed there; this is stricter than
+  the worker's 9.
+  - Item 2's test now requires `.000500` → `.000100` (and `.000002` →
+    `.000001`) to be **refused**.
+  - Equal to the microsecond is accepted, also across an offset.
+
+**Test defects corrected after red** (no assertion weakened):
+- The unit test's 10-digit probe `.0000004999` moved to 9 digits
+  (`.000000499`, also checked on PG: `.000000`). The worker accepts at most 9
+  digits and refuses 10 as `UNPARSEABLE_TIMESTAMP`.
+- BigInt literals were replaced by `BigInt()` calls: the tsconfig target is
+  below ES2020.
+
+**Mutations (`runs/code-mutations-pr69.txt`).** Run bytecode-safe:
+`__pycache__` cleared before every mutant, Python with `-B` and
+`PYTHONDONTWRITEBYTECODE=1`. This follows the challenger's caution that a
+same-size mutant written in the same second can reuse cached bytecode. This
+round's earlier Python mutations were re-run the same way.
+
+| Id | Mutation | Result |
+|---|---|---|
+| W1 | worker at millisecond precision (the old rule) | killed (unit + DB) |
+| W2 | worker rounds half up | killed (unit PG probe + DB fuzz) |
+| W3 | worker truncates 7–9 digits | killed |
+| C1 | calculator truncates to milliseconds (the reverted rule) | killed |
+| C2 | calculator ignores the order | killed |
+| P1b, P1c, P4 (re-run) | unpadded strftime year; the original unpadded-text comparison; `OverflowError` not caught | all killed |
+| P1 (re-run) | compare padded formatted text | **survives, and is equivalent**: under the µs rule, fixed-width UTC text with six fraction digits orders exactly as the instants do (years 1..9999) |
+
+P2 and P2b (the millisecond truncation) no longer apply. The challenger's
+Z1 (truncate only the start) is moot under the µs rule.
+
+**Gates (at f43a2b6; private PG16 on 127.0.0.1:56730, SeaweedFS
+`i62-s3` on 56731):**
+
+| Gate | Result |
+|---|---|
+| lint, tsc (and `tsc -p tsconfig.worker.json`) | exit 0 |
+| `npm test` | 112 files / **2616 passed** |
+| Python suite | 32 tests, OK |
+| `npm run test:db` ×1 | parallel 37 files / **630 passed**; serial 6 files / **173 passed**; exit 0 |
+| `local:acceptance` 1k | exit 0, `pass: true`, 22.1 s. 942 / `18.00663861840`, `excludedRows` 57; 2024-10 quarantined `PROVIDER_MISMATCH`; 942 rows compared (`runs/acc1k-pr69.json`) |
+| `local:acceptance` 10k | exit 0, `pass: true`, 29.1 s. 9441 / `112.16617543240`, 557 excluded; 9441 rows compared (`runs/acc10k-pr69.json`) |
+
+Both acceptance runs used project `ratio-i62h-acc` on 56750–56752 (checked
+free first).

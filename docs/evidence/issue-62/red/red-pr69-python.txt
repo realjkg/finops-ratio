@@ -1,0 +1,13 @@
+...........................F....
+======================================================================
+FAIL: test_order_is_judged_at_microsecond_precision_like_the_database (test_focus_control_totals.TimestampFollowupTests.test_order_is_judged_at_microsecond_precision_like_the_database)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 390, in test_order_is_judged_at_microsecond_precision_like_the_database
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+----------------------------------------------------------------------
+Ran 32 tests in 0.021s
+
+FAILED (failures=1)

@@ -1,0 +1,30 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ scripts/local/local.test.mjs (162 tests | 1 failed | 158 skipped) 39ms
+   ❯ L18 superuser catalog queries are tenant-scoped (PR #67 review) (4)
+     × L-2 (challenger, PR #68): a repeated binding counts once per literal, so it cannot cover a second correlation 28ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/local.test.mjs > L18 superuser catalog queries are tenant-scoped (PR #67 review) > L-2 (challenger, PR #68): a repeated binding counts once per literal, so it cannot cover a second correlation
+AssertionError: `SELECT (SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND b.tenant_id = v.tenant_id AND v.batch_id = b.id), (SELECT 1 FROM f v WHERE v.batch_id = b.id)`: expected [] to not deeply equal []
+
+Compared values have no visual difference.
+
+ ❯ scripts/local/local.test.mjs:1764:57
+    1762|       '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_…
+    1763|     ]) {
+    1764|       expect(untenantedBatchCorrelations(bad), bad).not.toEqual([]);
+       |                                                         ^
+    1765|     }
+    1766|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed | 158 skipped (162)
+   Start at  17:24:08
+   Duration  694ms (transform 63%, import 26%, tests 10%, worker 1%)
+

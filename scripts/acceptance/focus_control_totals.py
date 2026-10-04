@@ -208,8 +208,13 @@ def _is_null(field):
     return not quoted and text == 'NULL'
 
 
-def format_timestamp(text):
-    """'2024-09-18 22:00:00' (no offset = UTC) -> '2024-09-18T22:00:00.000000Z', as the API's to_char formats it."""
+def parse_timestamp(text):
+    """A FOCUS date-time with seconds (no offset = UTC) -> an aware UTC datetime.
+
+    A value whose UTC instant falls outside years 1..9999 (e.g. 9999-12-31T23:00:00-02:00) cannot be
+    held by datetime; it is refused as a ControlTotalsError, never an OverflowError (PR #68 review).
+    The worker accepts such a value, so the control fails closed there ("stricter on formats").
+    """
     m = TIMESTAMP_RE.match(text)
     if not m:
         raise ControlTotalsError('not a date-time with seconds')
@@ -225,7 +230,24 @@ def format_timestamp(text):
         t = datetime.datetime(int(y), int(mo), int(d), int(h), int(mi), int(s), int((frac or '').ljust(6, '0')), tzinfo=tz)
     except ValueError:
         raise ControlTotalsError('not a valid date-time') from None
-    return t.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    try:
+        return t.astimezone(datetime.timezone.utc)
+    except OverflowError:
+        raise ControlTotalsError('not representable in UTC within years 1..9999') from None
+
+
+def format_utc(t):
+    """As the API's to_char(... AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') formats it.
+
+    The year is zero-padded to four digits explicitly: strftime('%Y') does not pad years below 1000
+    on every platform (PR #68 review, Copilot r4178585902).
+    """
+    return f'{t.year:04d}-{t.month:02d}-{t.day:02d}T{t.hour:02d}:{t.minute:02d}:{t.second:02d}.{t.microsecond:06d}Z'
+
+
+def format_timestamp(text):
+    """'2024-09-18 22:00:00' (no offset = UTC) -> '2024-09-18T22:00:00.000000Z', as the API's to_char formats it."""
+    return format_utc(parse_timestamp(text))
 
 
 def classify_columns(header):
@@ -259,7 +281,7 @@ def expected_row(rec, pos, header, period, focus_version, n):
         if v is None:
             raise ControlTotalsError(f'record {n}: {col} is null')
         try:
-            return format_timestamp(v)
+            return parse_timestamp(v)
         except ControlTotalsError as e:
             raise ControlTotalsError(f'record {n}: {col}: {e}') from None
 
@@ -273,13 +295,17 @@ def expected_row(rec, pos, header, period, focus_version, n):
         if any(ord(ch) < 0x20 and ch not in '\t\n\r' for ch in text):
             raise ControlTotalsError(f'record {n}: {name} contains a control character (only TAB, CR and LF are allowed)')
     start, end = ts('ChargePeriodStart'), ts('ChargePeriodEnd')
-    if end < start:  # both UTC, fixed-width YYYY-MM-DDTHH:MM:SS.ffffffZ: text order is time order
+    # Compared as instants (never as text) at full microsecond precision, as Postgres stores and
+    # the cost_facts_charge_period CHECK compares them (PR #69 review: the millisecond rule was wrong).
+    # TIMESTAMP_RE allows at most 6 fraction digits, so no rounding is needed here; the worker rounds
+    # 7-9 digits as Postgres does (timestamp.ts epochUs).
+    if end < start:
         raise ControlTotalsError(f'record {n}: ChargePeriodEnd is before ChargePeriodStart')
 
     return {
         'billingPeriod': period,
-        'chargePeriodStart': start,
-        'chargePeriodEnd': end,
+        'chargePeriodStart': format_utc(start),
+        'chargePeriodEnd': format_utc(end),
         'billedCost': dec('BilledCost'),
         'effectiveCost': dec('EffectiveCost'),
         'listCost': dec('ListCost'),

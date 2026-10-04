@@ -1,0 +1,85 @@
+..........................EEEEE...
+======================================================================
+ERROR: test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash (test_focus_control_totals.TimestampFollowupTests.test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash) (text='9999-12-31T23:00:00-02:00')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 402, in test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash
+    fct.format_timestamp(text)
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 228, in format_timestamp
+    return t.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+OverflowError: date value out of range
+
+======================================================================
+ERROR: test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash (test_focus_control_totals.TimestampFollowupTests.test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash) (text='0001-01-01T00:30:00+01:00')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 402, in test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash
+    fct.format_timestamp(text)
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 228, in format_timestamp
+    return t.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+OverflowError: date value out of range
+
+======================================================================
+ERROR: test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash (test_focus_control_totals.TimestampFollowupTests.test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 411, in test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash
+    code = fct.main(['--rows', '--provider', 'AWS', p])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 462, in main
+    doc = compute(data, row_id_column=args.row_id_column, rows=args.rows, focus_version=args.focus_version, providers=args.providers)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 394, in compute
+    expected_rows.append(expected_row(rec, pos, header, period, focus_version, n))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 275, in expected_row
+    start, end = ts('ChargePeriodStart'), ts('ChargePeriodEnd')
+                 ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 262, in ts
+    return format_timestamp(v)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 228, in format_timestamp
+    return t.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+OverflowError: date value out of range
+
+======================================================================
+ERROR: test_order_is_judged_at_millisecond_precision_like_the_worker (test_focus_control_totals.TimestampFollowupTests.test_order_is_judged_at_millisecond_precision_like_the_worker)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 389, in test_order_is_judged_at_millisecond_precision_like_the_worker
+    self.assertEqual(len(self.rows('2024-09-18 22:00:00.000500', '2024-09-18 22:00:00.000100')), 1)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 372, in rows
+    return fct.compute(csv_bytes(self.ROW.format(start=start, end=end), header=FULL_HEADER), rows=True, providers=['AWS'])['rows']
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 394, in compute
+    expected_rows.append(expected_row(rec, pos, header, period, focus_version, n))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 277, in expected_row
+    raise ControlTotalsError(f'record {n}: ChargePeriodEnd is before ChargePeriodStart')
+focus_control_totals.ControlTotalsError: record 2: ChargePeriodEnd is before ChargePeriodStart
+
+======================================================================
+ERROR: test_years_below_1000_are_ordered_and_formatted_with_four_digits (test_focus_control_totals.TimestampFollowupTests.test_years_below_1000_are_ordered_and_formatted_with_four_digits)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 377, in test_years_below_1000_are_ordered_and_formatted_with_four_digits
+    row = self.rows('0099-12-31 23:00:00', '0100-01-01 00:00:00')[0]
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 372, in rows
+    return fct.compute(csv_bytes(self.ROW.format(start=start, end=end), header=FULL_HEADER), rows=True, providers=['AWS'])['rows']
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 394, in compute
+    expected_rows.append(expected_row(rec, pos, header, period, focus_version, n))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/focus_control_totals.py", line 277, in expected_row
+    raise ControlTotalsError(f'record {n}: ChargePeriodEnd is before ChargePeriodStart')
+focus_control_totals.ControlTotalsError: record 2: ChargePeriodEnd is before ChargePeriodStart
+
+----------------------------------------------------------------------
+Ran 32 tests in 0.015s
+
+FAILED (errors=5)

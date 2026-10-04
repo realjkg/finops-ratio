@@ -1699,14 +1699,16 @@ describe('L18 superuser catalog queries are tenant-scoped (PR #67 review)', () =
         const key = pairKey(child, parent);
         correlations.set(key, [...(correlations.get(key) ?? []), text]);
       }
-      const bindings = new Map();
+      // Identical bindings (either spelling) count ONCE per literal (challenger L-2, PR #68): a
+      // second textual copy cannot cover a second correlation. So each unordered pair carries at most
+      // one binding, and two correlations between the same pair in one literal are always flagged.
+      const bindings = new Set();
       for (const m of sql.matchAll(/\b(\w+)\.tenant_id\s*=\s*(\w+)\.tenant_id\b/g)) {
         if (m[1] === m[2]) continue; // a tautology
-        const key = pairKey(m[1], m[2]);
-        bindings.set(key, (bindings.get(key) ?? 0) + 1);
+        bindings.add(pairKey(m[1], m[2]));
       }
       for (const [key, texts] of correlations) {
-        const bound = bindings.get(key) ?? 0;
+        const bound = bindings.has(key) ? 1 : 0;
         if (bound < texts.length) problems.push(...texts.slice(bound));
       }
     }
@@ -1745,10 +1747,23 @@ describe('L18 superuser catalog queries are tenant-scoped (PR #67 review)', () =
       expect(untenantedBatchCorrelations(bad), bad).not.toEqual([]);
     }
     for (const good of [
-      // Two correlations, two bindings (either direction) between the same unordered pair.
-      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id AND b.tenant_id = v.tenant_id AND b.batch_id = v.id`',
+      // One correlation, one binding, written in the other direction.
+      '`SELECT 1 FROM e v WHERE b.tenant_id = v.tenant_id AND v.batch_id = b.id`',
     ]) {
       expect(untenantedBatchCorrelations(good), good).toEqual([]);
+    }
+  });
+
+  it('L-2 (challenger, PR #68): a repeated binding counts once per literal, so it cannot cover a second correlation', () => {
+    for (const bad of [
+      // The challenger's probe: the same equality written twice, plus an unbound second correlation.
+      '`SELECT (SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND b.tenant_id = v.tenant_id AND v.batch_id = b.id), (SELECT 1 FROM f v WHERE v.batch_id = b.id)`',
+      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.tenant_id = b.tenant_id AND v.batch_id = b.id AND b.batch_id = v.id`',
+      // Consequence, deliberate (conservative lint): two correlations between the same alias pair in
+      // one literal are flagged even if each is written with its own copy of the binding.
+      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id AND b.tenant_id = v.tenant_id AND b.batch_id = v.id`',
+    ]) {
+      expect(untenantedBatchCorrelations(bad), bad).not.toEqual([]);
     }
   });
 
