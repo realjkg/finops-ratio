@@ -258,6 +258,25 @@ class ProviderFilterTests(unittest.TestCase):
         with self.assertRaises(fct.ControlTotalsError):
             fct.compute(csv_bytes(ok.format(p='AWS', id='a'), ok.format(p='Microsoft', id='a'), header=FULL_HEADER), rows=True, providers=['AWS'])
 
+    def test_rows_validate_excluded_records_like_the_worker(self):
+        # PR #67 review: the worker runs validateRow BEFORE the provider check, so an invalid
+        # foreign-provider record is a validation error (the batch quarantines), not an exclusion.
+        # With --rows the control must reject it too, or it would predict a publication.
+        ok = '"2024-09-01 00:00:00","2024-10-01 00:00:00","{start}","2024-09-18 23:00:00","USD",1,1,{lc},1,"{p}","S","C","Usage","r","s","b",1,"u",1,"u",1,"u","{id}",NULL,NULL'
+        good = dict(start='2024-09-18 22:00:00', lc='1')
+        bad_start = dict(start='not-a-timestamp', lc='1')
+        bad_number = dict(start='2024-09-18 22:00:00', lc='"x1"')
+        for bad in (bad_start, bad_number):
+            data = csv_bytes(ok.format(p='AWS', id='a', **good), ok.format(p='Microsoft', id='m', **bad), header=FULL_HEADER)
+            with self.assertRaises(fct.ControlTotalsError, msg=str(bad)):
+                fct.compute(data, rows=True, providers=['AWS'])
+            # The same invalid record from the allowed provider is rejected as before.
+            with self.assertRaises(fct.ControlTotalsError, msg=str(bad)):
+                fct.compute(csv_bytes(ok.format(p='AWS', id='m', **bad), header=FULL_HEADER), rows=True, providers=['AWS'])
+        # A valid foreign record is still a plain exclusion.
+        doc = fct.compute(csv_bytes(ok.format(p='AWS', id='a', **good), ok.format(p='Microsoft', id='m', **good), header=FULL_HEADER), rows=True, providers=['AWS'])
+        self.assertEqual(doc['excluded'], [{'billingPeriod': '2024-09-01', 'rowCount': '1', 'providers': {'Microsoft': '1'}}])
+
     def test_several_providers_may_be_allowed(self):
         data = csv_bytes('"2024-09-01 00:00:00","USD",1,1,"AWS","a"', '"2024-09-01 00:00:00","USD",2,2,"X","x"', '"2024-09-01 00:00:00","USD",4,4,"Y","y"', header=PROVIDER_HEADER)
         doc = fct.compute(data, providers=['AWS', 'X'])

@@ -1,0 +1,13 @@
+F
+======================================================================
+FAIL: test_rows_validate_excluded_records_like_the_worker (scripts.acceptance.test_focus_control_totals.ProviderFilterTests.test_rows_validate_excluded_records_like_the_worker)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 271, in test_rows_validate_excluded_records_like_the_worker
+    with self.assertRaises(fct.ControlTotalsError, msg=str(bad)):
+AssertionError: ControlTotalsError not raised : {'start': 'not-a-timestamp', 'lc': '1'}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.005s
+
+FAILED (failures=1)
