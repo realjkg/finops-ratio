@@ -801,3 +801,99 @@ in the commit that follows this record.
 **After `git merge origin/main` (af6ad77; ad876ae is main + ebbde12, and the
 merge changes no file):** lint exit 0, tsc exit 0, `npm test` 111 files /
 **2610 passed**.
+
+## 18. PR #68 merged; post-merge challenger APPROVE; follow-ups (`fix/68-calculator-followups`)
+
+**PR #68** (`fix/67-copilot-followups`) was merged by the owner at
+6f84ffa (merge commit 0947091 on main). CI was green, and the post-merge
+challenger review **APPROVED** it with 0 High and 0 Medium. Four items
+remained:
+- one Copilot finding (r4178585902);
+- challenger Lows L-1 and L-2;
+- one informational item.
+
+All four are fixed on `fix/68-calculator-followups`, cut from `origin/main`
+0947091, test-first.
+
+| Item | Red | Fix |
+|---|---|---|
+| Copilot r4178585902: unpadded years break the inverted-period comparison | b684945 | 5f83926 |
+| Challenger L-1: sub-millisecond precision | b684945 | 5f83926 |
+| Informational: `OverflowError` near year 9999 | b684945 | 5f83926 |
+| Challenger L-2: L18 counts a repeated binding twice | b684945 | 1500718 |
+
+Red output:
+- `red/red-pr68-python.txt`: 5 errors. The 0099→0100 case and the
+  millisecond case were refused; the overflow cases raised `OverflowError`.
+- `red/red-pr68-l18.txt`: 1 failed. The challenger's probe was not flagged.
+
+**Copilot r4178585902.**
+- **The bug.** `expected_row` compared `format_timestamp()` strings, and
+  `strftime('%Y')` does not pad year 99. So `'99-12-31…' > '100-01-01…'`,
+  and a valid 0099-12-31 23:00 → 0100-01-01 00:00 interval was refused.
+  `validateRow` orders it correctly (`timestamp.test.ts`).
+- **The second bug, confirmed.** The same unpadded year was in the `--rows`
+  API values. Postgres `to_char(…, 'YYYY…')`, which the API uses, gives
+  `0099-12-31T23:00:00.000000Z`. Checked on a scratch PG16: the calculator
+  would have predicted `99-12-31…` and reported a false mismatch.
+- **The fix:**
+  - `parse_timestamp` returns an aware UTC `datetime`;
+  - `format_utc` formats with an explicit `{year:04d}`;
+  - the order check compares instants, never text.
+
+**Challenger L-1.** `timestamp.ts` keeps milliseconds, truncated. The order
+is now judged on instants truncated to milliseconds (`worker_ms`):
+- start `.000500` with end `.000100` is the same instant, so it is accepted,
+  as the worker does;
+- `.001000` with `.000999` is still refused;
+- the published value keeps its microseconds, because the API returns them.
+
+**Informational (year 9999).** The worker's behaviour was checked first.
+- `parseFocusTimestamp('9999-12-31T23:00:00-02:00')` accepts the value
+  (epochMs 253402304400000 = +010000-01-01T01:00Z).
+- Postgres stores it, and `to_char` gives `10000-01-01T01:00:00.000000Z`.
+- Likewise, `0001-01-01T00:30:00+01:00` is accepted. It becomes 1 BC,
+  which `to_char` prints as `0001-12-31T23:30:00.000000Z` with no BC marker,
+  an API quirk noted here only.
+
+Python's `datetime` cannot hold either value. The calculator now raises
+`ControlTotalsError` ("not representable in UTC within years 1..9999"): exit
+1 with `refused:`, never a traceback. That fails closed, in the same class as
+the "stricter on formats" note (§16). A worker/calculator disagreement on
+such an input stops the acceptance run instead of passing it.
+
+**Challenger L-2.** In the L18 lint, identical tenant bindings (either
+spelling) now count **once per literal**.
+- Consequence, documented in the self-test: two batch-id correlations
+  between the same alias pair in one literal are always flagged, even if
+  each has its own copy of the binding. This is a conservative lint; use
+  distinct aliases.
+- The earlier "good" probe with two correlations and two copies moved to
+  the flagged list.
+- `local.mjs` and `acceptance.mjs` still pass.
+
+**Mutations (`runs/code-mutations-pr68-followups.txt`; all 7 killed):**
+
+| Id | Mutation | Killed by |
+|---|---|---|
+| P1 | compare padded formatted text | the millisecond test |
+| P1b | strftime year again (unpadded) | the 0099 test |
+| P1c | the original bug: compare unpadded strftime text | both tests |
+| P2 | no millisecond truncation | the millisecond test |
+| P2b | rounding instead of truncation | the millisecond test |
+| P4 | `OverflowError` not caught | the overflow test |
+| L2 | repeated bindings counted again | the L-2 probe |
+
+**Gates (at 1500718; no `src/` change, so `test:db` was not required):**
+
+| Gate | Result |
+|---|---|
+| lint, tsc | exit 0 |
+| `npm test` | 111 files / **2611 passed** |
+| Python suite | 32 tests, OK |
+| `local:acceptance` 1k | exit 0, `pass: true`, 22.9 s. 942 / `18.00663861840`, `excludedRows` 57; 2024-10 quarantined `PROVIDER_MISMATCH`; 942 rows compared (`runs/acc1k-pr68-followups.json`) |
+| `local:acceptance` 10k | exit 0, `pass: true`, 28.6 s. 9441 / `112.16617543240`, `excludedRows` 557; 2024-10 quarantined; 9441 rows compared (`runs/acc10k-pr68-followups.json`) |
+
+Both acceptance runs used project `ratio-i62g-acc` on 56650/56651/56652
+(checked free first). The scratch PG16 for the Postgres check ran on 56630
+and was removed.

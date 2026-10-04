@@ -1,0 +1,8 @@
+{"mutation": "P1 compare formatted text again (the Copilot bug)", "killed": true, "details": [{"exit": 1, "failed": ["test_order_is_judged_at_millisecond_precision_like_the_worker"]}]}
+{"mutation": "P1b strftime year again (unpadded)", "killed": true, "details": [{"exit": 1, "failed": ["test_years_below_1000_are_ordered_and_formatted_with_four_digits"]}]}
+{"mutation": "P2 microsecond comparison (no truncation)", "killed": true, "details": [{"exit": 1, "failed": ["test_order_is_judged_at_millisecond_precision_like_the_worker"]}]}
+{"mutation": "P2b rounding instead of truncation", "killed": true, "details": [{"exit": 1, "failed": ["test_order_is_judged_at_millisecond_precision_like_the_worker"]}]}
+{"mutation": "P4 OverflowError not caught", "killed": true, "details": [{"exit": 1, "failed": ["test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash", "test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash", "test_a_utc_value_beyond_year_9999_is_a_controlled_refusal_not_a_crash"]}]}
+{"mutation": "L2 repeated bindings counted again", "killed": true, "details": [{"exit": 1, "failed": ["L-2 (challenger, PR #68): a repeated binding counts once per literal, so it cannot cover a second correlation 22ms"]}]}
+ALL KILLED
+{"mutation": "P1c the original bug: compare unpadded strftime text", "killed": true, "failed": ["test_order_is_judged_at_millisecond_precision_like_the_worker", "test_years_below_1000_are_ordered_and_formatted_with_four_digits"]}
