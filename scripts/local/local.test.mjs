@@ -1410,19 +1410,31 @@ describe('L23 the app is stopped as a process group; a group is tracked until em
         }
       });
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  /** An app double: the leader exits on SIGTERM; its child (same group) ignores SIGTERM. */
+  /**
+   * An app double: the leader exits on SIGTERM; its child (same group)
+   * ignores SIGTERM. Ready when BOTH have printed "ready", which each does only
+   * after installing its own handler (node's built-in SIGTERM handler already
+   * shows in SigCgt at startup, so /proc cannot tell; this has no race).
+   */
   async function appDouble() {
+    const grandchild = "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000)";
     const leader = spawn(
       process.execPath,
       [
         '-e',
-        "const { spawn } = require('child_process'); spawn(process.execPath, ['-e', \"process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)\"], { stdio: 'ignore' }); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);",
+        `const { spawn } = require('child_process'); spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}], { stdio: ['ignore', 'inherit', 'ignore'] }); process.on('SIGTERM', () => process.exit(0)); process.stdout.write('ready\\n'); setInterval(() => {}, 1000);`,
       ],
-      { detached: true, stdio: 'ignore' },
+      { detached: true, stdio: ['ignore', 'pipe', 'ignore'] },
     );
     groups.push(leader.pid);
     trackProcessGroup(leader);
-    for (let i = 0; i < 100 && members(leader.pid).length < 2; i += 1) await wait(50);
+    let out = '';
+    leader.stdout.on('data', (d) => {
+      out += d;
+    });
+    const ready = () => (out.match(/ready/g) ?? []).length === 2;
+    for (let i = 0; i < 200 && !ready(); i += 1) await wait(25);
+    expect(ready()).toBe(true);
     expect(members(leader.pid).length).toBe(2);
     return leader;
   }
@@ -1446,7 +1458,7 @@ describe('L23 the app is stopped as a process group; a group is tracked until em
         setApp(app);
       },
     });
-    expect(summary.steps.appStop).toBe('killed');
+    expect(summary.steps.appStop, JSON.stringify(summary)).toBe('killed');
     expect(members(app.pid)).toEqual([]);
   }, 15_000);
 

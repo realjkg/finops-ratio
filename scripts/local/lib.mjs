@@ -418,12 +418,29 @@ function waitForExit(child, timeoutMs) {
  * caller's cleanup can go on).
  */
 export async function stopChild(child, { graceMs = 10_000, killMs = 5_000 } = {}) {
-  if (childExited(child)) return 'already-exited';
-  child.kill('SIGTERM');
-  if (await waitForExit(child, graceMs)) return 'stopped';
-  child.kill('SIGKILL');
-  if (await waitForExit(child, killMs)) return 'killed';
+  // A tracked group leader (next start, runProcess commands) is stopped as its
+  // whole PROCESS GROUP, and counts as gone only when the group is empty
+  // (Copilot 4176705245): a descendant that survives the leader's TERM gets
+  // the KILL, and the result is never 'stopped' while it lives.
+  const group = GROUP_LEADERS.has(child);
+  const gone = () => childExited(child) && (!group || !groupAlive(child.pid));
+  if (gone()) return 'already-exited';
+  signalChild(child, 'SIGTERM');
+  if (await waitUntilGone(child, gone, graceMs)) return 'stopped';
+  signalChild(child, 'SIGKILL');
+  if (await waitUntilGone(child, gone, killMs)) return 'killed';
   return 'unresponsive';
+}
+
+/** Waits (bounded) for the child to exit and, for a group, the group to empty. */
+async function waitUntilGone(child, gone, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  if (!(await waitForExit(child, timeoutMs))) return false;
+  while (!gone()) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return true;
 }
 
 /**
@@ -499,15 +516,7 @@ export async function runLocalTest({ project, body, down, stopOptions, downTimeo
   let closing = false;
   const lateKills = [];
   const killLate = (child) => {
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-    } catch {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // already gone
-      }
-    }
+    killGroup(child, 'SIGKILL');
     lateKills.push(waitForExit(child, 5_000));
   };
   const setApp = (child) => {
@@ -597,6 +606,62 @@ export function installInterruptHandlers({ proc = process, onFirst, onForce }) {
 
 /** Process groups of runProcess children still running (pgid = child pid). */
 const LIVE_GROUPS = new Set();
+/** Children that lead their own process group (spawned detached by runProcess or tracked). */
+const GROUP_LEADERS = new WeakSet();
+
+/**
+ * True while process group `pgid` has a live (non-zombie) member. Linux:
+ * kill(-pgid, 0) fails with ESRCH once the group is empty; zombies still
+ * count for kill(), so /proc confirms (a container's PID 1 may not reap
+ * orphans). Never true for pgid <= 1.
+ */
+export function groupAlive(pgid) {
+  if (!Number.isInteger(pgid) || pgid <= 1) return false;
+  try {
+    process.kill(-pgid, 0);
+  } catch (e) {
+    return e?.code === 'EPERM';
+  }
+  let entries;
+  try {
+    entries = fs.readdirSync('/proc');
+  } catch {
+    return true; // no /proc: kill(-pgid, 0) succeeded
+  }
+  for (const d of entries) {
+    if (!/^\d+$/.test(d)) continue;
+    try {
+      const stat = fs.readFileSync(`/proc/${d}/stat`, 'utf8');
+      const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      if (Number(f[2]) === pgid && f[0] !== 'Z') return true;
+    } catch {
+      // ended meanwhile
+    }
+  }
+  return false;
+}
+
+/** Signals a tracked leader's whole group; any other child alone. */
+function signalChild(child, signal) {
+  if (GROUP_LEADERS.has(child) && Number.isInteger(child.pid) && child.pid > 1) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // the group is gone: fall back to the child itself
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // already gone
+  }
+}
+
+/** Drops `pgid` from the live set only once its group is empty (not when the leader exits). */
+function pruneGroup(pgid) {
+  if (!groupAlive(pgid)) LIVE_GROUPS.delete(pgid);
+}
 
 function killGroup(child, signal) {
   try {
@@ -617,14 +682,16 @@ function killGroup(child, signal) {
  */
 export function trackProcessGroup(child) {
   if (child?.pid) {
+    GROUP_LEADERS.add(child);
     LIVE_GROUPS.add(child.pid);
-    child.once('exit', () => LIVE_GROUPS.delete(child.pid));
+    child.once('exit', () => pruneGroup(child.pid));
   }
   return child;
 }
 
 /** The pids (= process group ids) currently tracked. */
 export function liveProcessGroups() {
+  for (const pid of [...LIVE_GROUPS]) pruneGroup(pid);
   return [...LIVE_GROUPS];
 }
 
@@ -635,14 +702,14 @@ export function liveProcessGroups() {
  * local.mjs would otherwise not reach them.
  */
 export function killLiveProcessGroups() {
-  for (const pid of LIVE_GROUPS) {
+  for (const pid of [...LIVE_GROUPS]) {
     try {
       process.kill(-pid, 'SIGKILL');
     } catch {
       // already gone
     }
+    pruneGroup(pid);
   }
-  LIVE_GROUPS.clear();
 }
 
 /**
@@ -665,7 +732,10 @@ export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = f
       return;
     }
     const child = spawnFn(cmd, args, { cwd, env, detached: true, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
-    if (child.pid) LIVE_GROUPS.add(child.pid);
+    if (child.pid) {
+      GROUP_LEADERS.add(child);
+      LIVE_GROUPS.add(child.pid);
+    }
     let out = '';
     let settled = false;
     let graceTimer = null;
@@ -681,7 +751,7 @@ export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = f
       if (graceTimer) clearTimeout(graceTimer);
       child.stdout?.destroy();
       child.stderr?.destroy();
-      LIVE_GROUPS.delete(child.pid);
+      pruneGroup(child.pid);
       settle();
     };
     const byExit = (code, signal) => () => {
