@@ -227,8 +227,11 @@ runs `clean_load`, `idempotent_rerun`, `restatement_supersession`,
 `zombie_fencing`. Exit 0 only if all six pass. **Test-only** (issue #62): it is
 refused unless `RATIO_ENV=test`, with exit 2 `REPLAY_FIXTURES_NOT_ALLOWED`
 before any I/O. It ingests synthetic providers, which are allowed only in
-development/test with `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`. Staging returns
-with per-source synthetic markers (D-21, Slice 3).
+development/test with `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`. **`RATIO_ENV=test`
+without `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` is also refused**, with exit 2
+`REPLAY_FIXTURES_NOT_ALLOWED` before any I/O (the message names the opt-in).
+Without the opt-in every scenario would quarantine `PROVIDER_MISMATCH`.
+Staging returns with per-source synthetic markers (D-21, Slice 3).
 
 **Nothing is deleted** (no purge/delete path in this cycle — deletion is
 retention-class and owner-only). The tenant's rows, its evidence objects

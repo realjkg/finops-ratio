@@ -28,7 +28,9 @@ afterAll(async () => {
 });
 
 async function adminConnections(): Promise<number> {
-  const r = await t.db.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'ratio-replay-fixtures'`);
+  // Scoped to THIS test database: K5 (cliWorker.db.test.ts) runs replay-fixtures with the same
+  // application_name in parallel against the same cluster (challenger L-1).
+  const r = await t.db.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'ratio-replay-fixtures' AND datname = current_database()`);
   return r.rows[0].n;
 }
 
