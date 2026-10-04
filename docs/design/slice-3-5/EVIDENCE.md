@@ -23,7 +23,8 @@ ordinary commits and plain pushes (never a force-push).
 | 11 | `d6be584` (PR #70) | Revision 10 approved by the challenger (0 High, 0 Medium). Two wording Lows (§3h): D-21 and the opt-in text state the contract #62 shipped in #67 and #68; the prior-mean lookback is capped at 112 days. |
 | 12 | `d691069` | Copilot's review 5407381989 of PR #70 at d6be584 (2 High, 2 Medium), each verified and fixed (§3i): one leaf identity everywhere (`series_id`), a billing rollup by charge category behind `costs/daily`'s billed totals, an exact Garwood interval, and a rollup pointer. |
 | 13 | `86c2c29` | The challenger's REQUEST CHANGES on revision 12 (2 Medium, 1 Low) and Copilot's review 5407430521 (r4178706470, High): rollup pointer semantics and a single lease-holding writer; exactly-once coverage with nulls; stable ids under null identity columns; pointer guard, sequence grants and per-batch atomicity; `rollup12.py` category count (§3j). |
-| 14 | this revision | The challenger's REQUEST CHANGES on revision 13 (1 Medium, 3 Low), §3k: the high-water mark is the tenant's `max(batch_seq)`; the pointer trigger's scope stated; sentinel groups marked `attributed: false`; the negative-usage blind spot in the budget table and the limits. |
+| 14 | `10cd9ce` | The challenger's REQUEST CHANGES on revision 13 (1 Medium, 3 Low), §3k: the high-water mark is the tenant's `max(batch_seq)`; the pointer trigger's scope stated; sentinel groups marked `attributed: false`; the negative-usage blind spot in the budget table and the limits. |
+| 15 | this revision | The challenger's REQUEST CHANGES on revision 14 (1 Medium, 3 Low), §3l: the high-water mark and the sequence allocation are defined on an empty tenant (`coalesce(max, 0)`, `NOT NULL`); the monotonicity reason corrected; the known-limits list made complete. |
 
 ## 2. Governance wording: reverted
 
@@ -279,6 +280,16 @@ were valid.
 | **L3** negative-usage blind spot | **Valid.** **Fix:** a row in the "not covered by any line" part of the FP budget table, and a new "Known limits" list in §8 with this bullet. Days with `M` ≤ 0 are unscored, and a same-day negative-`Usage` credit can mask a spike. Only negative-`Usage` rows can do this, since `Credit` and `Tax` are outside `M`. `fleet15k` emits none: a recall blind spot, measurable on real data only | DESIGN §4.2, §8 |
 | Scripts | No embedded script changed; the 11 SHA-256s are those of revision 13 | Appendix B |
 
+## 3l. Revision 15: the challenger's review of 10cd9ce
+
+| Item | Change | Where |
+|---|---|---|
+| **M1** empty tenant | **Valid.** `max(batch_seq)` over an empty `rollup_batches` is NULL. The first pointer row would have stored NULL. After that, `batch_seq_hwm <= $hwm` would update nothing (`POINTER_STALE` on every run), and the trigger's "decreases" check would also be NULL, jamming the pointer for good. Allocation by `max + 1` was undefined too. **Fix:** `batch_seq_hwm integer NOT NULL` = `coalesce(max(batch_seq), 0)`; `batch_seq` = `coalesce(max(batch_seq), 0) + 1` (starts at 1); `run_seq` the same, also `NOT NULL`, on both pointers. Views at mark 0 return nothing. Test (4-2): the first run on an empty tenant succeeds with mark 0, and a later run with a batch moves the pointer. Mutants: `coalesce` removed; column nullable | Appendix D.1, D.2; DESIGN §2.9, §7 (4-2) |
+| **L1** monotonicity reason | **Valid.** The mark is monotone because `rollup_batches` is **never pruned**: the retention function excludes it. The previous reason, about what retention removes, was wrong | Appendix D.1 |
+| **L2** known limits wording | **Valid.** `fleet15k` has no region dimension, so `region_key = ''` on every row. The limit now reads "no null account or service identity columns", and the folding figures cite §2.5 and §2.8 | DESIGN §8 |
+| **L3** completeness | The list is now **complete** rather than "selected". Added: calendar jitter +0.082/day (reported, not in the total) with its pass probabilities; extrapolated intervals never scored; 31–90-day horizons not assessed on `fleet15k`; `new_region`, FT-8, per-series quantiles and FT-10 / AT-8 at `full` scale. Also collected from elsewhere in the design: calendar recall with two prior cycles, no holiday calendar, the budget's scale-heterogeneity and burst-spread assumptions, AT-3 on noisier real series, intermittent-series time-to-detect and the D-24 `info` remainder, idealised data arrival, and partial lifecycle parity (D-15, D-17) | DESIGN §8 |
+| Scripts | No embedded script changed; the 11 SHA-256s are those of revision 13 | Appendix B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -317,8 +328,8 @@ Appendix B (B.4, B.5.6–B.5.11).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 14 (the commit that adds this line, PR #70's head when pushed;
-the same reasons as at `86c2c29`, revision 13, `d691069`, revision 12, `d6be584`, revision 11, at `bd440b5`, revision 10
+at revision 15 (the commit that adds this line, PR #70's head when pushed;
+the same reasons as at `10cd9ce`, revision 14, `86c2c29`, revision 13, `d691069`, revision 12, `d6be584`, revision 11, at `bd440b5`, revision 10
 after merging `origin/main`, and at
 `9f1febb` before the merge, `bb4379c`, revision 9, `04e6cf8`, revision 8,
 `380e9a0`, revision 7,

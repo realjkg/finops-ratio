@@ -15,8 +15,9 @@ revision 9 the challenger's Medium on revision 8 (the history condition
 looked at the wrong days), and revision 10 the three Low items on
 revision 9 (approved), revision 11 two wording Lows, revision 12 the
 Copilot review of PR #70 (2 High, 2 Medium), revision 13 the
-challenger's two Medium items on revision 12, and revision 14 its Medium
-and three Low items on revision 13; the revision history and the item-by-item responses are in
+challenger's two Medium items on revision 12, revision 14 its Medium
+and three Low items on revision 13, and revision 15 its Medium and three
+Low items on revision 14; the revision history and the item-by-item responses are in
 [EVIDENCE.md](EVIDENCE.md).
 
 **Owner's goal.** Analyse cloud spend across **15,000 simulated accounts**,
@@ -720,9 +721,10 @@ Rollup design (schema sketch in Appendix D):
   needs for `groupBy=chargeCategory` and for billed totals at aggregate
   scopes.
 - `rollup_pointer` (rev. 12, rev. 13): the current succeeded rollup run
-  and its `batch_seq` high-water mark (the tenant's `max(batch_seq)` in
-  `rollup_batches`, rev. 14), moved **forwards only** in the same
-  transaction that marks the run succeeded. Rollups have **one writer per
+  and its `batch_seq` high-water mark (`coalesce(max(batch_seq), 0)` over
+  the tenant's `rollup_batches`, `NOT NULL`, 0 on an empty tenant; rev. 14,
+  rev. 15), moved **forwards only** in the same transaction that marks the
+  run succeeded. Rollups have **one writer per
   tenant**, under the worker's lease and fencing pattern, which also
   allocates `batch_seq`. Batch-keyed views show, per (source, period), the
   highest **rolled-up** batch at or below the mark, so a restatement never
@@ -2066,7 +2068,7 @@ revision 10:** 4-0 landed as #65; #62 landed through #67 and #68 (§0).
 | 5 | **3-3** | `local:synthetic` (own project and ports; upload + SHA-256 verification; local copy removed by default; 36 + 1 sources; parallel sync with the opt-in in the worker environment only; asserts; evaluator export; `down -v`) + CI step for `ci` | every period `published` and `reconciled`; totals = `dataset.json`; re-sync all `skipped_unchanged`; no fake source, no hook (static test like 2b's A9); **static test: `RATIO_ALLOW_SYNTHETIC_PROVIDERS` set only by `local:synthetic`'s worker spawn, and there only together with `RATIO_ENV=development` (or `test`), never by `local:test`, `local:acceptance`, other `local:*` commands, compose files or non-synthetic CI steps**; cross-check that the worker refuses `=1` under `staging`, `production` and an unset `RATIO_ENV`; cleanup always | opt-in set globally (in the parent environment or compose); skip one source; assert only row counts; keep the local copy; run with the fake source |
 | 6 | **3-4** | **`fleet15k` runs in this container class** (tuning, tuning-natural, natural-1, natural-2 [, natural-3], enriched; sequential; **measures the retained evaluator-input sizes**, assumed 0.04 GB per run and 0.03 GB of actuals in `budget2.py`/`budget3.py`; peak disk measured against 5.18 GB) + evidence: load time (D-06 trigger), bytes per row, the int batch key's real size, total disk per run vs 5.5 GB / 6 GB, peak WAL with and without `max_wal_size=256MB`, SeaweedFS fit (T1) | §2.10 targets measured and recorded; a miss is reported and escalated (D-20) | — (measurement PR) |
 | 7 | **4-1** | Migration 0002 (incl. the retention function) + privilege model + bootstrap + the D-07 test edits | catalogue check passes with the new reviewed sets; analytics login refused for each unsafe shape (serial suite); reader cannot see base analytics tables; tenant matrix on each new table; retention function on the reviewed list, PUBLIC without EXECUTE, analytics without DELETE; foundation manifest regenerated and drift-tested; **every edited Slice 0/1 assertion listed, exact old set → exact new set**; `cost_series` and `cost_accounts` unique on the full natural key (two providers, or two billing accounts, reusing one sub-account id get two rows); `rollup_pointer` only references a succeeded rollup run; **the pointer guard triggers** refuse a backwards move, a non-succeeded run and a wrong-kind run, even for a direct `UPDATE` by the analytics login; USAGE on the identity sequences only for `ratio_analytics` (reader, worker and PUBLIC without it); natural keys `NOT NULL` and `UNIQUE NULLS NOT DISTINCT` | grant analytics SELECT on `cost_facts`; drop `provider_name` or `billing_account_id` from a natural key; drop the pointer guard trigger; grant sequence USAGE to `ratio_reader`; make a natural-key column nullable; grant analytics DELETE on `cost_daily`; remove FORCE RLS from one new table; widen reader to a base table; float column; retention function without pinned `search_path` |
-| 8 | **4-2** | `ratio-analytics rollup` (incremental by published batch, `batch_seq`); narrow `cost_daily` + sparse `billing_daily` by charge category + `billing_daily_scope`; `rollup_pointer` moved in the run's success transaction; retention call after each rollup | rollup totals per (source, period, currency) = published totals **exactly**, billed and effective, **over every charge category** (`cost_daily` + `billing_daily`, and `billing_daily_scope` at each scope); **pointer atomicity**: a rollup killed mid-run, or failed, leaves every reader view byte-identical to before; a restatement becomes visible only when its run's pointer update commits, and **while it is published but not yet rolled up, every view still returns the previous batch** (no gap); the reader views never return rows above `batch_seq_hwm`; **concurrency** (rev. 13): two rollups started together → the second is refused `ALREADY_RUNNING`; a run whose lease expires mid-run is fenced (`LEASE_LOST`) and a later run proceeds; a publish landing mid-run is picked up by the next run, not half by this one; a late commit of an older run cannot move the pointer backwards (`POINTER_STALE`); **a batch completed by a run that then fails is visible after the next successful run, even when that run rolls up nothing new** (rev. 14); **null columns** (rev. 13): rows with a null `ChargeCategory`, a null `ChargeFrequency` and a null `SubAccountId` each land in exactly one table, under the `''` sentinels, and the rollup totals still equal the published totals exactly; **stable ids under nulls** (Copilot r4178706470): two batches, and a restatement, each with rows missing `ServiceName`, `SubAccountId` or `BillingAccountId`, resolve to the **same** `series_id` / `account_id` (no new id is allocated); `M` excludes `Usage-Based` credit and tax rows; restatement switches the read side; idempotent re-run; tag parsing failure counted, never crashes (`pg_input_is_valid` on PG16 [A21]); EXPLAIN shows the PK-prefix path through the security-barrier view **(to verify)**; retention removes exactly the superseded batch's rows and old runs, nothing else, and never a row the pointer still exposes | group by the wrong day; move the pointer before the run's rows commit; drop the monotone guard from the pointer update; take the high-water mark from the run's own batches instead of the tenant's `max(batch_seq)`; filter batch-keyed views on live publication status; route with `<> 'Usage'` (drops null categories); store a nullable key component as NULL; **remove the `coalesce(nullif(…, ''), '')` normalization at id allocation** (a second batch with a missing service then mints a new `series_id`); omit `Credit` or `Tax` from `billing_daily_scope`; retention removes a batch above the pointer's high-water mark; include a superseded batch; drop `ChargeCategory = 'Usage'` from `M`; skip the untagged measure; retention removes a current batch's row |
+| 8 | **4-2** | `ratio-analytics rollup` (incremental by published batch, `batch_seq`); narrow `cost_daily` + sparse `billing_daily` by charge category + `billing_daily_scope`; `rollup_pointer` moved in the run's success transaction; retention call after each rollup | rollup totals per (source, period, currency) = published totals **exactly**, billed and effective, **over every charge category** (`cost_daily` + `billing_daily`, and `billing_daily_scope` at each scope); **pointer atomicity**: a rollup killed mid-run, or failed, leaves every reader view byte-identical to before; a restatement becomes visible only when its run's pointer update commits, and **while it is published but not yet rolled up, every view still returns the previous batch** (no gap); the reader views never return rows above `batch_seq_hwm`; **concurrency** (rev. 13): two rollups started together → the second is refused `ALREADY_RUNNING`; a run whose lease expires mid-run is fenced (`LEASE_LOST`) and a later run proceeds; a publish landing mid-run is picked up by the next run, not half by this one; a late commit of an older run cannot move the pointer backwards (`POINTER_STALE`); **a batch completed by a run that then fails is visible after the next successful run, even when that run rolls up nothing new** (rev. 14); **the first run on an empty tenant succeeds with mark 0 and every view empty, and a later run with a batch moves the pointer** (rev. 15); **null columns** (rev. 13): rows with a null `ChargeCategory`, a null `ChargeFrequency` and a null `SubAccountId` each land in exactly one table, under the `''` sentinels, and the rollup totals still equal the published totals exactly; **stable ids under nulls** (Copilot r4178706470): two batches, and a restatement, each with rows missing `ServiceName`, `SubAccountId` or `BillingAccountId`, resolve to the **same** `series_id` / `account_id` (no new id is allocated); `M` excludes `Usage-Based` credit and tax rows; restatement switches the read side; idempotent re-run; tag parsing failure counted, never crashes (`pg_input_is_valid` on PG16 [A21]); EXPLAIN shows the PK-prefix path through the security-barrier view **(to verify)**; retention removes exactly the superseded batch's rows and old runs, nothing else, and never a row the pointer still exposes | group by the wrong day; move the pointer before the run's rows commit; drop the monotone guard from the pointer update; take the high-water mark from the run's own batches instead of the tenant's `max(batch_seq)`; remove the `coalesce(…, 0)` from the mark or from `batch_seq` allocation; make `batch_seq_hwm` nullable; filter batch-keyed views on live publication status; route with `<> 'Usage'` (drops null categories); store a nullable key component as NULL; **remove the `coalesce(nullif(…, ''), '')` normalization at id allocation** (a second batch with a missing service then mints a new `series_id`); omit `Credit` or `Tax` from `billing_daily_scope`; retention removes a batch above the pointer's high-water mark; include a superseded batch; drop `ChargeCategory = 'Usage'` from `M`; skip the untagged measure; retention removes a current batch's row |
 | 9 | **4-3** | Migration 0003 (forecast tables, backtest points, detector state, detector cohort state, pointer, views) | as 4-1, for the new objects; `forecast_state` and `detector_state` keyed by `series_id` with a composite FK to `cost_series` | as 4-1; key a leaf table by (sub-account, service, currency) |
 | 10 | **4-4a** | Model library (pure): M0, M1, M1-log, **calendar-event component** (3 classes, significance-gated factors), Hampel with the scale floor, 288-point grid search, cold-start ladder, the `fleet15k` fixed rule | known-answer tests on hand-computed series; independent Python reference for small cases; constant series: no cleaning, finite outputs; intermittent series: no NaN; calendar: factors estimated on raw `y` by the median of m ≥ 3 values; a × 1.3 month-end factor is applied after 2 cycles at σ ≤ 0.13 and after 3 at σ ≤ 0.17, never with m < 3, never on a series without the effect at |t| < 3; one anomalous day in 3 cycles moves the factor by less than half its effect; Hampel applies the learned factors before its 4-MAD test (a × 1.3 month-end on a σ = 0.05 series is not cleaned); the business-day rule handles months ending on a weekend; refit throughput measured (§3.11) | seasonal index off by one weekday; trend undamped; scale floor removed; grid point skipped; factor estimated on cleaned data; mean instead of median; Hampel before the factors |
 | 11 | **4-4b** | Intervals with **expanding as-of calibration**, cohort fallback, bottom-up hierarchy, backtest blocks, per-origin exports, forecast and backtest commands | invariants: bottom-up coherence, intervals ordered, lower ≥ 0; **no leakage** (an origin cannot see later data: poisoned-future test); **as-of calibration** (test: poisoning the errors of days ≥ t leaves every interval issued at t unchanged); exports complete (178 points per leaf on `fleet15k`) with SHA-256 manifest; an empty horizon bucket uses the √h-scaled quantiles of the longest populated bucket, flagged `extrapolated` and excluded from FT-7; FT-4/5/7 on the tuning seed | interval quantiles from in-sample residuals; calibration from the scoring block; `env` in the cohort key; selection enabled on `fleet15k`; an export missing a horizon; an `extrapolated` interval scored |
@@ -2119,29 +2121,61 @@ owner's delegation, for revision 7.
 | D-24 | Intermittent series with a zero share above 50 % | **decided by the orchestrator under the owner's delegation (rev. 7; the challenger's option a):** a **hurdle (compound-binomial) weekly statistic** (q̂, m̂, v̂ from the last 56 days; z = (W − 7q̂m̂)/√(7q̂(v̂ + m̂²) − 7q̂²m̂²); CUSUM k = 0.5, h = 9.0) with a **clustering gate** (lag-1 autocorrelation of the 56-day active-day indicator: < 0.30 → `warning` possible; ≥ 0.30 → `info` only, since clustered occurrence cannot be modelled in these slices). **A series is scored only with ≥ 3 active days in the 56-day window**; one with fewer is dormant and covered by D4's reactivation rule (rev. 8). Conditions: the `info`-signal recall of the `info`-only remainder is reported in AT-7; series with 30–50 % zeros keep the non-overlapping weekly sums | real data, or the `full` profile (OA-1) |
 | D-21 | Synthetic providers under #62 | **decided by the orchestrator (rev. 3):** #62 exports a fixed `SYNTHETIC_PROVIDERS` set `{SyntheticCloud, SyntheticAWS, SyntheticAzure, SyntheticGCP}`; with the opt-in every name in it is accepted for any layout, without it none is. The generator uses exactly those names; `local:synthetic` sets the opt-in for its own workers only; Slice 3 starts after #62 merges. **Revisit trigger fired (rev. 11):** #62 shipped (#67, #68) a stricter contract than first assumed. `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` is accepted only with `RATIO_ENV` explicitly `development` or `test`; unset, unknown, `staging` and `production` are refused. An explicit in-process `allowSyntheticProviders: true` throws `SYNTHETIC_PROVIDERS_NOT_ALLOWED` without the process env opt-in. **The decision still holds**: `local:synthetic` spawns its workers with `RATIO_ENV=development`, and Slice 3's static test checks development/test-only acceptance (§2.7, §6.3) | #62 changes its contract again |
 
-### Known limits (collected; rev. 14)
+### Known limits (complete; rev. 14, completed in rev. 15)
 
-Each is stated where it arises; they are collected here so that the
-decision log carries them.
+Each limit is stated where it arises; this list collects **all** of them,
+so that the decision log carries them.
 - **Folding on `fleet15k`.** 79.0 % of account × service series and 25.6 %
   of spend are folded; recall and leaf-forecast figures are measured on
-  individual series only (§2.5). `full` (OA-1) removes this.
+  individual series only (§2.5, §2.8). `full` (OA-1) removes this.
 - **Generator-only validation.** The targets validate the implementation,
-  not real-world accuracy (§3.10). Pinned calendar factors, independent
-  intermittent days, no null identity columns and no negative usage are
-  generator properties that `tuning-natural` shares, so it cannot detect
-  their misspecification.
+  not real-world accuracy (§3.10). Several generator properties are shared
+  by `tuning-natural`, so it cannot detect their misspecification:
+  - pinned calendar factors;
+  - independent intermittent days;
+  - no null account or service identity columns (`region_key` is `''` on
+    every `fleet15k` row, since there is no region dimension);
+  - no negative usage.
+- **Calendar jitter.** With ±10 % month-to-month factors, the cohorts add
+  ≈ +0.082 false groups per day. This is **reported, not in the total**;
+  the pass probability is then 0.993 at the design total and 0.959 at the
+  conservative total (§2.3, §4.2). Real calendars are measured on real
+  data only.
+- **Calendar recall with two prior cycles** falls to ≈ 0.72 when a prior
+  cycle held an undetected anomaly (§3.2).
+- **No holiday calendar.** Holiday drops are `info` (§2.3, §3.2).
+- **Budget assumptions.** The false-positive budget assumes a 10 % scale
+  heterogeneity, and the intermittent weekly term could be up to ≈ 2 × with
+  a wider burst-size spread (§4.2).
+- **D3's frozen-baseline autocorrelation** is covered by no bound, only by
+  the `tuning-natural` measurement (§4.2).
+- **AT-3 on real data.** On the generator every meaningful level shift is
+  ≥ 4.8σ. On noisier real series a × 1.2 shift can take ≈ 8 days by D3
+  (§4.2).
+- **Intermittent series.** Weekly scoring lengthens time-to-detect by up
+  to 7 days. Clustered series with more than 50 % zero days are `info`
+  only, outside AT-2 (D-24; §4.2).
 - **Reactivation false positives on real data.** With clustered
   intermittent days, about 0.00094 per day at ρ = 0.3 and 0.054 at ρ = 0.6
   (§4.2, D4).
 - **Quarterly jobs** get no size override in D4 (b)(ii) (§4.2).
-- **D3's frozen-baseline autocorrelation** is covered by no bound, only by
-  the `tuning-natural` measurement (§4.2).
 - **Negative usage (rev. 14).** Leaf-days with `M` ≤ 0 are not scored on
   the log scale, and a same-day negative-`Usage` credit can mask a spike.
   Only negative-`Usage` rows can do this, since `Credit` and `Tax` are
   outside `M`. `fleet15k` emits none, so this recall blind spot is
   unmeasured until real data (§3.1, §4.2 budget table).
+- **Intervals and horizons.** An `extrapolated` interval (an empty horizon
+  bucket filled by √h scaling) is never scored. 31–90-day horizons are not
+  assessed on `fleet15k` (§3.4, §3.8).
+- **`full`-only targets.** `new_region` (no region dimension on
+  `fleet15k`), FT-8, per-series interval quantiles, and FT-10 / AT-8 at
+  ≈ 107 k leaves need the `full` profile, so they wait for OA-1 (§2.5,
+  §3.10, §8 OA-1).
+- **Idealised data arrival on `fleet15k`.** Closed months load at once;
+  late data and month-to-date restatement are exercised on `ci` only
+  (§0, §2.7).
+- **Partial lifecycle parity.** Human acknowledge/resolve is deferred
+  (D-15), and notification delivery is a follow-up slice (D-17) (§0).
 - **The pointer guard trigger** protects against bugs, not against a
   compromised analytics login (Appendix D.1).
 
