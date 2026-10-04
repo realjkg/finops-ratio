@@ -89,11 +89,45 @@ No status label flipped at `DEMO_NOW`, but all of the figures above did.
 
 ### Audit for the same class of bug (local-time vs UTC)
 
-I grepped `src/` and `pages/` (excluding tests) for the local getters and
-setters (`getFullYear/Month/Date/Day/Hours/Minutes`, `setFullYear/Month/Date/Hours`),
-for the multi-argument local constructor `new Date(y, m, …)`, and for
-`toLocale*String`, `Intl.DateTimeFormat` and `getTimezoneOffset`. The only
-hit was the line fixed here. Everything else is UTC-consistent:
+I grepped `src/` and `pages/` (excluding tests) for:
+- the local getters and setters (`getFullYear/Month/Date/Day/Hours/Minutes`,
+  `setFullYear/Month/Date/Hours`);
+- the multi-argument local constructor `new Date(y, m, …)`;
+- string parsing: `Date.parse(` and `new Date(<string>)`;
+- `toLocale*String`, `Intl.DateTimeFormat` and `getTimezoneOffset`.
+
+The hits fall into four groups.
+
+**1. Fixed here.** `forecast.ts` `daysInMonthOf`.
+
+**2. Found, the same class, out of scope for this PR.**
+`src/finio/focusValidation.ts` `parseIso` calls `Date.parse(value)` on the
+FOCUS period strings. JavaScript reads a zoneless date-time
+(`2026-03-08T02:00:00`) as host-local time, so the verdict depends on the
+host TZ. On a daylight-saving day it changes:
+- the half-open period `[2026-03-08T02:00:00, 2026-03-08T03:00:00)` is
+  accepted under `TZ=UTC`;
+- it is rejected as `start >= end` under `TZ=America/Los_Angeles`, where both
+  bounds parse to the same instant.
+
+I reproduced this with plain `node`. It is not a budget-calendar bug and
+this PR does not change it. It is tracked in a follow-up issue (number
+pending from the coordinator).
+
+**3. Local display formatting, deliberate, not calendar logic.** These render
+an instant for the person looking at the screen, in their own zone. They
+compute no budget day, month or period.
+- `src/findings/FindingsPage.tsx:579`:
+  `new Date(record.createdAt).toLocaleString('en-US', { …, timeZoneName: 'short' })`,
+  which also prints the zone name.
+- `src/finio/FinioPage.tsx:254`:
+  `new Date(loadState.handshake.expiresAt).toLocaleTimeString()`.
+
+The other `toLocaleString('en-US', …)` hits format numbers, not dates
+(`lib/format.ts`, `MockAIClient.ts`, `TokenomicsPage.tsx`, `FinioPage.tsx:36`,
+`pages/api/v1/ai/chat.ts`).
+
+**4. UTC-consistent, or parsing zoned instants only.**
 
 | Helper | Calendar |
 |---|---|
@@ -105,6 +139,11 @@ hit was the line fixed here. Everything else is UTC-consistent:
 | `executive/reportModel.ts` `periodLabel` | `toLocaleString(…, { timeZone: 'UTC' })` |
 | `executive/reportFilename.ts` | `toISOString` |
 | `ingest/focus/timestamp.ts` `daysInMonth`, `ingest/fixtures/syntheticFocus.ts` | `setUTCFullYear` / `Date.UTC` + `getUTCDate` |
+| `costsource/transports/focusExport.ts` `parseIsoUtc`, `PointFiveLiveAdapter.ts` `detectedAt` | own parser: `Date.UTC`, then an explicit offset; zoneless strings are read as UTC |
+| `transports/awsS3Transport.ts:146`, `focusExport.ts:627` | `Date.parse` on S3 `LastModified`, which carries `Z` |
+| `lib/format.ts` `timeAgo`; sorts in `AlertHistoryTab.tsx` and `layout/Footer.tsx` | `new Date(iso)` on `triggered_at` values that carry `Z` |
+| `ingest/worker/doctor.ts`, `quarantine.ts`, `ingest/db/migrate.ts` | `new Date(<pg timestamptz value>)`, an instant |
+| `data/workloads.ts` `DEMO_NOW` | literal with `Z` |
 
 As a broader sweep, I ran the whole `npm test` suite after the fix under
 five host TZs (§6). It passed in every one.
@@ -149,8 +188,9 @@ generated with Python's `calendar` module and hard-coded in the test.
      fed the oracle's inputs (30 days, 3 weekdays);
    - the entire `BudgetStatus` output is identical across all five zones.
 
-This runs inside the normal `npm test`: about 2 s, five children spawned in
-parallel, one per zone. It needs nothing beyond `tsx`, which is already a
+This runs inside the normal `npm test` and adds about 2 s. There is one child
+per zone, five in all. They start one after another, from each zone's
+`describe` `beforeAll`, and the cross-zone test reuses their results. It needs nothing beyond `tsx`, which is already a
 devDependency, and Node's bundled ICU time-zone data. CI catches a
 regression with no special setup.
 
