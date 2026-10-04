@@ -373,7 +373,8 @@ describe('D7 reader session settings', () => {
         `SELECT current_setting('search_path') AS sp, current_setting('default_transaction_read_only') AS ro,
                 current_setting('statement_timeout') AS st, current_setting('TimeZone') AS tz`,
       );
-      expect(r.rows[0]).toEqual({ sp: 'pg_catalog, pg_temp', ro: 'on', st: '10s', tz: 'UTC' });
+      // A startup-option value is reported as given (no space after the comma).
+      expect(r.rows[0]).toEqual({ sp: 'pg_catalog,pg_temp', ro: 'on', st: '10s', tz: 'UTC' });
     } finally {
       c.release();
     }

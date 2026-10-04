@@ -129,7 +129,8 @@ describe('R3 input validation through the route (400, fixed message, no DB work)
 
   it('bad values ⇒ 400 and the body never echoes them', async () => {
     const hostile = '<script>EVIL</script>';
-    for (const query of [{ limit: '0' }, { limit: '501' }, { period: hostile }, { from: '2026-08', to: '2026-07' }, { cursor: hostile }, { limit: ['1', '2'] }]) {
+    const queries: Array<Record<string, string | string[]>> = [{ limit: '0' }, { limit: '501' }, { period: hostile }, { from: '2026-08', to: '2026-07' }, { cursor: hostile }, { limit: ['1', '2'] }];
+    for (const query of queries) {
       const res = await call(route(), makeReq({ headers: bearer(), query, remoteAddress: ip() }));
       expect(res.statusCode, JSON.stringify(query)).toBe(400);
       expect(errorCode(res.body)).toBe('invalid_request');
