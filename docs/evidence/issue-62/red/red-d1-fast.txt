@@ -1,0 +1,269 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/syntheticProviders.test.ts (4 tests | 4 failed) 15ms
+   ❯ RATIO_ALLOW_SYNTHETIC_PROVIDERS (4)
+     × defaults to OFF everywhere: the default settings, resolveSettings, an empty env, the loaded config 7ms
+     × "1" turns it on (outside production); "" and "0" leave it off 2ms
+     × refuses any other value (no "true", "yes", spaces) 1ms
+     × is refused when RATIO_ENV=production: a production config never accepts synthetic providers 1ms
+ ❯ src/ingest/focus/provider.test.ts (17 tests | 6 failed) 39ms
+   ❯ U1 the allowlist per source type (6)
+     × is exactly AWS for AWS Data Exports and nothing for fake; the synthetic providers are a separate, gated list 14ms
+     × resolves the source type from the source row (kind + config.layout); synthetic providers only with the opt-in 1ms
+     × only a literal true turns the opt-in on 2ms
+   ❯ U1 checkProviderName (8)
+     × opt-in OFF: SyntheticCloud under aws-data-exports is excluded as PROVIDER_MISMATCH 1ms
+     × excludes a foreign provider with PROVIDER_MISMATCH on column ProviderName 6ms
+     × the fake type refuses AWS, and everything without the opt-in 2ms
+ ❯ scripts/local/acceptance.test.mjs (77 tests | 2 failed) 2157ms
+   ❯ A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that (10)
+     × synthetic-provider opt-in (orchestrator D1): OFF in the worker env by default and for the acceptance run; ON only for the synthetic fixture sync 19ms
+   ❯ A9 local.mjs acceptance: the real path, no bypass (static) (6)
+     × local:sync / local:test path: sync() still rejects a non-zero worker exit and a missing record 2ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > synthetic-provider opt-in (orchestrator D1): OFF in the worker env by default and for the acceptance run; ON only for the synthetic fixture sync
+AssertionError: expected undefined to be '1' // Object.is equality
+
+- Expected:
+"1"
+
++ Received:
+undefined
+
+ ❯ scripts/local/acceptance.test.mjs:826:104
+    824|     expect(workerEnv(settings, secrets)).not.toHaveProperty('RATIO_ALL…
+    825|     expect(workerEnv(settings, secrets, { syntheticProviders: false })…
+    826|     expect(workerEnv(settings, secrets, { syntheticProviders: true }).…
+       |                                                                                                        ^
+    827|     const src = read('scripts/local/local.mjs');
+    828|     const body = src.slice(src.indexOf('async function acceptance('), …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A9 local.mjs acceptance: the real path, no bypass (static) > local:sync / local:test path: sync() still rejects a non-zero worker exit and a missing record
+AssertionError: expected 'async function sync(settings) {\n  co…' to match /const r = await syncRecord\(settings,…/
+
+- Expected:
+/const r = await syncRecord\(settings, secrets, LOCAL_NAMES\.sourceKey, \{ syntheticProviders: true \}\);/
+
++ Received:
+"async function sync(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const r = await syncRecord(settings, secrets, LOCAL_NAMES.sourceKey);
+  if (r.code !== 0) throw new Error(`worker sync exited ${r.code}`);
+  if (r.record === null) throw new Error('worker sync printed no evidence record');
+  return r.record;
+}"
+
+ ❯ scripts/local/acceptance.test.mjs:1054:16
+    1052|     const fn = local.slice(start, local.indexOf('\n}\n', start) + 2);
+    1053|     // Issue #62 D1: the SYNTHETIC fixture source syncs with the synth…
+    1054|     expect(fn).toMatch(/const r = await syncRecord\(settings, secrets,…
+       |                ^
+    1055|     expect(fn).toMatch(/if \(r\.code !== 0\) throw new Error\(`worker …
+    1056|     expect(fn).toMatch(/if \(r\.record === null\) throw new Error\('wo…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯
+
+ FAIL  src/ingest/syntheticProviders.test.ts > RATIO_ALLOW_SYNTHETIC_PROVIDERS > defaults to OFF everywhere: the default settings, resolveSettings, an empty env, the loaded config
+AssertionError: expected undefined to be false // Object.is equality
+
+- Expected:
+false
+
++ Received:
+undefined
+
+ ❯ src/ingest/syntheticProviders.test.ts:11:54
+      9| describe('RATIO_ALLOW_SYNTHETIC_PROVIDERS', () => {
+     10|   it('defaults to OFF everywhere: the default settings, resolveSetting…
+     11|     expect(DEFAULT_SETTINGS.allowSyntheticProviders).toBe(false);
+       |                                                      ^
+     12|     expect(resolveSettings().allowSyntheticProviders).toBe(false);
+     13|     expect(resolveSettings({ leaseTtlSeconds: 10 }).allowSyntheticProv…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/12]⎯
+
+ FAIL  src/ingest/syntheticProviders.test.ts > RATIO_ALLOW_SYNTHETIC_PROVIDERS > "1" turns it on (outside production); "" and "0" leave it off
+TypeError: syntheticProvidersOptIn is not a function
+ ❯ src/ingest/syntheticProviders.test.ts:22:12
+     20|
+     21|   it('"1" turns it on (outside production); "" and "0" leave it off', …
+     22|     expect(syntheticProvidersOptIn({ RATIO_ALLOW_SYNTHETIC_PROVIDERS: …
+       |            ^
+     23|     expect(loadWorkerConfig({ ...base, RATIO_ALLOW_SYNTHETIC_PROVIDERS…
+     24|     expect(loadWorkerConfig({ ...base, RATIO_ENV: 'staging', RATIO_ALL…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/12]⎯
+
+ FAIL  src/ingest/syntheticProviders.test.ts > RATIO_ALLOW_SYNTHETIC_PROVIDERS > refuses any other value (no "true", "yes", spaces)
+AssertionError: true
+ ❯ src/ingest/syntheticProviders.test.ts:33:90
+     31|   it('refuses any other value (no "true", "yes", spaces)', () => {
+     32|     for (const v of ['true', 'yes', 'on', ' 1', '1 ', '01', '2', 'TRUE…
+     33|       expect(() => loadWorkerConfig({ ...base, RATIO_ALLOW_SYNTHETIC_P…
+       |                                                                                          ^
+     34|       expect(() => syntheticProvidersOptIn({ RATIO_ALLOW_SYNTHETIC_PRO…
+     35|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/12]⎯
+
+ FAIL  src/ingest/syntheticProviders.test.ts > RATIO_ALLOW_SYNTHETIC_PROVIDERS > is refused when RATIO_ENV=production: a production config never accepts synthetic providers
+AssertionError: expected function to throw an error, but it didn't
+ ❯ src/ingest/syntheticProviders.test.ts:39:112
+     37|
+     38|   it('is refused when RATIO_ENV=production: a production config never …
+     39|     expect(() => loadWorkerConfig({ ...base, RATIO_ENV: 'production', …
+       |                                                                                                                ^
+     40|       expect.objectContaining({ code: 'SYNTHETIC_PROVIDERS_NOT_ALLOWED…
+     41|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/12]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 the allowlist per source type > is exactly AWS for AWS Data Exports and nothing for fake; the synthetic providers are a separate, gated list
+AssertionError: expected { 'aws-data-exports': [ …(2) ], …(1) } to deeply equal { 'aws-data-exports': [ 'AWS' ], …(1) }
+
+- Expected
++ Received
+
+  {
+    "aws-data-exports": [
+      "AWS",
++     "SyntheticCloud",
+    ],
+-   "fake": [],
++   "fake": [
++     "SyntheticCloud",
++   ],
+  }
+
+ ❯ src/ingest/focus/provider.test.ts:36:35
+     34|   it('is exactly AWS for AWS Data Exports and nothing for fake; the sy…
+     35|     expect(PROVIDER_MISMATCH).toBe('PROVIDER_MISMATCH');
+     36|     expect(SOURCE_TYPE_PROVIDERS).toEqual({ 'aws-data-exports': ['AWS'…
+       |                                   ^
+     37|     expect(SYNTHETIC_PROVIDER_NAMES).toEqual(['SyntheticCloud']);
+     38|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/12]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 the allowlist per source type > resolves the source type from the source row (kind + config.layout); synthetic providers only with the opt-in
+AssertionError: expected { Object (sourceType, allowed) } to deeply equal { Object (sourceType, allowed) }
+
+- Expected
++ Received
+
+  {
+    "allowed": [
+      "AWS",
++     "SyntheticCloud",
+    ],
+    "sourceType": "aws-data-exports",
+  }
+
+ ❯ src/ingest/focus/provider.test.ts:52:48
+     50|
+     51|   it('resolves the source type from the source row (kind + config.layo…
+     52|     expect(providerPolicyFor(AWS_SOURCE, OFF)).toEqual({ sourceType: '…
+       |                                                ^
+     53|     expect(providerPolicyFor(AWS_SOURCE, ON)).toEqual({ sourceType: 'a…
+     54|     expect(providerPolicyFor({ kind: 'fake', config: { fixture: 'synth…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/12]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 the allowlist per source type > only a literal true turns the opt-in on
+AssertionError: undefined: expected [ 'AWS', 'SyntheticCloud' ] to deeply equal [ 'AWS' ]
+
+- Expected
++ Received
+
+  [
+    "AWS",
++   "SyntheticCloud",
+  ]
+
+ ❯ src/ingest/focus/provider.test.ts:60:119
+     58|   it('only a literal true turns the opt-in on', () => {
+     59|     for (const v of [undefined, null, 1, '1', 'true', {}]) {
+     60|       expect(providerPolicyFor(AWS_SOURCE, { allowSyntheticProviders: …
+       |                                                                                                                       ^
+     61|     }
+     62|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/12]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 checkProviderName > opt-in OFF: SyntheticCloud under aws-data-exports is excluded as PROVIDER_MISMATCH
+AssertionError: expected { ok: true } to deeply equal { ok: false, exclude: true, …(1) }
+
+- Expected
++ Received
+
+  {
+-   "error": {
+-     "code": "PROVIDER_MISMATCH",
+-     "column": "ProviderName",
+-     "message": "ProviderName is not allowed for source type aws-data-exports (allowed: AWS); row excluded",
+-   },
+-   "exclude": true,
+-   "ok": false,
++   "ok": true,
+  }
+
+ ❯ src/ingest/focus/provider.test.ts:87:65
+     85|
+     86|   it('opt-in OFF: SyntheticCloud under aws-data-exports is excluded as…
+     87|     expect(checkProviderName('SyntheticCloud', awsPolicy(OFF))).toEqua…
+       |                                                                 ^
+     88|       ok: false,
+     89|       exclude: true,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/12]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 checkProviderName > excludes a foreign provider with PROVIDER_MISMATCH on column ProviderName
+AssertionError: expected 'ProviderName is not allowed for sourc…' to be 'ProviderName is not allowed for sourc…' // Object.is equality
+
+Expected: "ProviderName is not allowed for source type aws-data-exports (allowed: AWS); row excluded"
+Received: "ProviderName is not allowed for source type aws-data-exports (allowed: AWS, SyntheticCloud); row excluded"
+
+ ❯ src/ingest/focus/provider.test.ts:106:33
+    104|         expect(r.error.code).toBe('PROVIDER_MISMATCH');
+    105|         expect(r.error.column).toBe('ProviderName');
+    106|         expect(r.error.message).toBe(`ProviderName is not allowed for …
+       |                                 ^
+    107|       }
+    108|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/12]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 checkProviderName > the fake type refuses AWS, and everything without the opt-in
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/ingest/focus/provider.test.ts:129:20
+    127|     }
+    128|     const off = checkProviderName('SyntheticCloud', providerPolicyFor(…
+    129|     expect(off.ok).toBe(false);
+       |                    ^
+    130|     if (!off.ok) expect(off.error.message).toBe('ProviderName is not a…
+    131|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/12]⎯
+
+
+ Test Files  3 failed | 1 passed (4)
+      Tests  12 failed | 93 passed (105)
+   Start at  14:30:54
+   Duration  4.06s (tests 42%, transform 40%, import 17%, worker 1%)
+
+  Transform  transforming modules took 2.14s · 40% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

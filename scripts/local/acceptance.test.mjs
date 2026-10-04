@@ -7,12 +7,16 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { parse as parseCsvSync } from 'csv-parse/sync';
 import {
   MUTATIONS,
   SAMPLE_NAMES,
+  SAMPLE_PROVIDERS,
+  expectedSyncExit,
+  publishedDataShas,
   aggregateApiRows,
   syncTwice,
   artifactSetProblems,
@@ -39,7 +43,7 @@ import {
   verifyDatasetBytes,
   verifyStagingLossless,
 } from './acceptance.mjs';
-import { LOCAL_NAMES } from './lib.mjs';
+import { LOCAL_NAMES, runProcess, workerEnv } from './lib.mjs';
 // The worker's OWN manifest parser and row validator (unchanged production code):
 // the staged objects must pass them before any stack is involved.
 import { parseManifest } from '../../src/ingest/sources/s3/layout';
@@ -407,7 +411,7 @@ describe('A5 API rows and totals vs the control', () => {
   });
 
   it('catalog: exactly one published, unverified, non-provisional batch per control period, with the control’s count and total', () => {
-    const b = (o) => ({ billing_period: '2024-09-01', status: 'published', reconciliation: 'unverified', is_provisional: false, row_count: '2', loaded_billed_total: '1.35', ...o });
+    const b = (o) => ({ billing_period: '2024-09-01', status: 'published', reconciliation: 'unverified', is_provisional: false, row_count: '2', loaded_billed_total: '1.35', validation_error_count: '0', error_codes: {}, ...o });
     const good = [b({}), b({ billing_period: '2024-10-01', row_count: '1', loaded_billed_total: '0.24000000000' })];
     expect(batchProblems(good, control)).toEqual([]);
     const bad = {
@@ -590,7 +594,8 @@ describe('A11 both syncs are judged on the CLI exit code too (Copilot 4177490229
     const calls = [];
     const sync = async (name) => {
       calls.push(name);
-      return results[calls.length - 1];
+      // Challenger L2: every result carries the worker's captured stderr (no opt-in log here).
+      return { stderr: '', ...results[calls.length - 1] };
     };
     return { sync, calls };
   };
@@ -639,6 +644,245 @@ describe('A11 both syncs are judged on the CLI exit code too (Copilot 4177490229
     await expect(syncTwice({ sync: fakeRunner({ code: 0, record: null }).sync, control })).rejects.toThrow('sync: the worker CLI printed no evidence record');
     await expect(syncTwice({ sync: fakeRunner({ code: null, record: published }).sync, control })).rejects.toThrow('sync: the worker CLI exited null (expected 0)');
     await expect(syncTwice({ sync: fakeRunner({ code: 0, record: published }, { code: '0', record: unchanged }).sync, control })).rejects.toThrow('second sync: the worker CLI exited "0" (expected 0)');
+  });
+});
+
+describe('A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that', () => {
+  // As the calculator reports it with --provider AWS: 2024-09 mixed, 2024-10 every row foreign.
+  const control = {
+    providerFilter: ['AWS'],
+    totals: [{ billingPeriod: '2024-09-01', billingCurrency: 'USD', rowCount: '2', billedCost: '1.35' }],
+    excluded: [
+      { billingPeriod: '2024-09-01', rowCount: '3', providers: { Microsoft: '2', Oracle: '1' } },
+      { billingPeriod: '2024-10-01', rowCount: '1', providers: { Oracle: '1' } },
+    ],
+  };
+  const expectProblems = (problems, expected, name) => {
+    expect(problems.length, `${name}: ${JSON.stringify(problems)}`).toBe(expected.length);
+    expected.forEach((e, i) => (e instanceof RegExp ? expect(problems[i], name).toMatch(e) : expect(problems[i], name).toBe(e)));
+  };
+  const firstGood = [
+    { billingPeriod: '2024-09-01', outcome: 'published', rowCount: '2', billedTotal: '1.35', reconciliation: 'unverified', excludedRows: '3' },
+    { billingPeriod: '2024-10-01', outcome: 'quarantined', code: 'PROVIDER_MISMATCH' },
+  ];
+  const secondGood = [
+    { billingPeriod: '2024-09-01', outcome: 'skipped_unchanged' },
+    { billingPeriod: '2024-10-01', outcome: 'failed', code: 'BATCH_QUARANTINED' },
+  ];
+  const rec = (periods, pass) => ({ type: 'ratio.evidence', pass, results: { periods } });
+
+  it('the sample source expects exactly the AWS provider, a constant written independently of the worker', () => {
+    expect(SAMPLE_PROVIDERS).toEqual(['AWS']);
+    expect(Object.isFrozen(SAMPLE_PROVIDERS)).toBe(true);
+    for (const file of ['scripts/local/acceptance.mjs', 'scripts/local/local.mjs', 'scripts/acceptance/focus_control_totals.py']) {
+      expect(read(file), file).not.toMatch(/focus\/provider|SOURCE_TYPE_PROVIDERS|providerPolicyFor/);
+    }
+  });
+
+  it('the pinned control: AWS rows only in the totals, the foreign rows per period under excluded', () => {
+    expect(PINNED['1k'].providerFilter).toEqual(['AWS']);
+    expect(PINNED['1k'].totals.map((t) => [t.billingPeriod, t.rowCount])).toEqual([['2024-09-01', '942']]);
+    expect(PINNED['1k'].excluded).toEqual([
+      { billingPeriod: '2024-09-01', rowCount: '57', providers: { Microsoft: '51', Oracle: '6' } },
+      { billingPeriod: '2024-10-01', rowCount: '1', providers: { Oracle: '1' } },
+    ]);
+    expect(PINNED['10k'].providerFilter).toEqual(['AWS']);
+    expect(PINNED['10k'].totals.map((t) => [t.billingPeriod, t.rowCount])).toEqual([['2024-09-01', '9441']]);
+    expect(PINNED['10k'].excluded).toEqual([
+      { billingPeriod: '2024-09-01', rowCount: '557', providers: { Microsoft: '491', Oracle: '66' } },
+      { billingPeriod: '2024-10-01', rowCount: '2', providers: { Oracle: '2' } },
+    ]);
+  });
+
+  it('expected worker exit: 1 when some period has every row excluded (it is quarantined), else 0', () => {
+    expect(expectedSyncExit(control)).toBe(1);
+    expect(expectedSyncExit({ ...control, excluded: [control.excluded[0]] })).toBe(0);
+    expect(expectedSyncExit({ totals: control.totals })).toBe(0);
+    expect(expectedSyncExit({ ...control, excluded: [] })).toBe(0);
+  });
+
+  it('first sync: the mixed period published with excludedRows; the all-foreign period quarantined PROVIDER_MISMATCH; the record fails', () => {
+    expect(syncProblems(rec(firstGood, false), control)).toEqual([]);
+    const bad = {
+      'record passes': [rec(firstGood, true), ['sync: the evidence record passes, expected a failed run (a period has every row excluded)']],
+      'excludedRows missing': [rec([{ ...firstGood[0], excludedRows: undefined }, firstGood[1]], false), ['sync 2024-09-01: excludedRows undefined != control "3"']],
+      'excludedRows wrong': [rec([{ ...firstGood[0], excludedRows: '2' }, firstGood[1]], false), ['sync 2024-09-01: excludedRows "2" != control "3"']],
+      'foreign rows published': [
+        rec([{ ...firstGood[0], rowCount: '5', billedTotal: '7.35', excludedRows: undefined }, firstGood[1]], false),
+        ['sync 2024-09-01: rowCount "5" != control "2"', 'sync 2024-09-01: billedTotal "7.35" != control "1.35"', 'sync 2024-09-01: excludedRows undefined != control "3"'],
+      ],
+      'all-foreign period published': [
+        rec([firstGood[0], { billingPeriod: '2024-10-01', outcome: 'published', rowCount: '1', billedTotal: '0.24' }], true),
+        ['sync: the evidence record passes, expected a failed run (a period has every row excluded)', 'sync 2024-10-01: published, expected quarantined PROVIDER_MISMATCH (every row excluded)'],
+      ],
+      'all-foreign period quarantined for another reason': [
+        rec([firstGood[0], { ...firstGood[1], code: 'EMPTY_BATCH' }], false),
+        ['sync 2024-10-01: quarantined EMPTY_BATCH, expected quarantined PROVIDER_MISMATCH (every row excluded)'],
+      ],
+      'all-foreign period missing': [rec([firstGood[0]], false), ['sync: control period 2024-10-01 was not synced']],
+    };
+    for (const [name, [record, expected]] of Object.entries(bad)) expectProblems(syncProblems(record, control), expected, name);
+    // Without exclusions in the control, an excludedRows on the result is a problem too.
+    const plain = { totals: control.totals };
+    expectProblems(syncProblems(rec([firstGood[0]], true), plain), ['sync 2024-09-01: excludedRows "3" != control undefined'], 'unexpected exclusions');
+  });
+
+  it('second sync: the published period skipped_unchanged, the quarantined one failed BATCH_QUARANTINED', () => {
+    expect(resyncProblems(rec(secondGood, false), control)).toEqual([]);
+    expectProblems(
+      resyncProblems(rec([secondGood[0], { billingPeriod: '2024-10-01', outcome: 'skipped_unchanged' }], true), control),
+      ['second sync: the evidence record passes, expected a failed run (a period has every row excluded)', 'second sync 2024-10-01: skipped_unchanged, expected failed BATCH_QUARANTINED'],
+      'quarantined period skipped',
+    );
+    expectProblems(resyncProblems(rec([secondGood[0]], false), control), ['second sync: control period 2024-10-01 missing'], 'missing');
+  });
+
+  it('syncTwice: both syncs must exit exactly 1 here, with these records', async () => {
+    const runner = (...results) => {
+      let i = 0;
+      return async () => ({ stderr: '', ...results[i++] });
+    };
+    const ok = await syncTwice({ sync: runner({ code: 1, record: rec(firstGood, false) }, { code: 1, record: rec(secondGood, false) }), control });
+    expect([ok.first.code, ok.second.code]).toEqual([1, 1]);
+    await expect(syncTwice({ sync: runner({ code: 0, record: rec(firstGood, false) }), control })).rejects.toThrow('first sync:\n  sync: the worker CLI exited 0 (expected 1)');
+    await expect(syncTwice({ sync: runner({ code: 1, record: rec(firstGood, false) }, { code: 0, record: rec(secondGood, false) }), control })).rejects.toThrow(
+      'second sync:\n  second sync: the worker CLI exited 0 (expected 1)',
+    );
+  });
+
+  it('catalog: the published batch carries the exclusions as stored PROVIDER_MISMATCH errors; the all-foreign batch is quarantined', () => {
+    const pub = {
+      billing_period: '2024-09-01',
+      status: 'published',
+      reconciliation: 'unverified',
+      is_provisional: false,
+      row_count: '2',
+      loaded_billed_total: '1.35',
+      validation_error_count: '3',
+      error_codes: { PROVIDER_MISMATCH: 3 },
+      quarantine_reason: null,
+    };
+    const quar = {
+      billing_period: '2024-10-01',
+      status: 'quarantined',
+      reconciliation: 'unverified',
+      is_provisional: false,
+      row_count: '0',
+      loaded_billed_total: '0',
+      validation_error_count: '1',
+      error_codes: { PROVIDER_MISMATCH: 1 },
+      quarantine_reason: 'PROVIDER_MISMATCH: every data row (1) has a ProviderName not allowed for source type aws-data-exports (PROVIDER_MISMATCH x1)',
+    };
+    expect(batchProblems([pub, quar], control)).toEqual([]);
+    const bad = {
+      'published count of errors': [[{ ...pub, validation_error_count: '0' }, quar], ['catalog 2024-09-01: validation_error_count 0 != control 3']],
+      'published error codes': [
+        [{ ...pub, error_codes: { PROVIDER_MISMATCH: 2, MISSING_VALUE: 1 } }, quar],
+        ['catalog 2024-09-01: stored error codes {"MISSING_VALUE":1,"PROVIDER_MISMATCH":2} != {"PROVIDER_MISMATCH":3}'],
+      ],
+      'quarantined batch published': [
+        [pub, { ...quar, status: 'published', quarantine_reason: null }],
+        ['catalog 2024-10-01: status published, expected quarantined', 'catalog 2024-10-01: quarantine_reason null, expected PROVIDER_MISMATCH'],
+      ],
+      'quarantined for another reason': [
+        [pub, { ...quar, quarantine_reason: 'EMPTY_BATCH: the artifact set contains no data rows' }],
+        ['catalog 2024-10-01: quarantine_reason "EMPTY_BATCH: the artifact set contains no data rows", expected PROVIDER_MISMATCH'],
+      ],
+      'quarantined with rows': [[pub, { ...quar, row_count: '1' }], ['catalog 2024-10-01: row_count 1 != 0']],
+      'quarantined error count': [
+        [pub, { ...quar, validation_error_count: '2', error_codes: { PROVIDER_MISMATCH: 2 } }],
+        ['catalog 2024-10-01: validation_error_count 2 != control 1', 'catalog 2024-10-01: stored error codes {"PROVIDER_MISMATCH":2} != {"PROVIDER_MISMATCH":1}'],
+      ],
+      'quarantined batch missing': [[pub], ['catalog 2024-10-01: 0 batches (), expected exactly 1']],
+    };
+    for (const [name, [batches, expected]] of Object.entries(bad)) expectProblems(batchProblems(batches, control), expected, name);
+    // Without exclusions, any stored error on a published batch is a problem.
+    expectProblems(
+      batchProblems([{ ...pub, validation_error_count: '1', error_codes: { PROVIDER_MISMATCH: 1 } }], { totals: control.totals }),
+      ['catalog 2024-09-01: validation_error_count 1 != control 0', 'catalog 2024-09-01: stored error codes {"PROVIDER_MISMATCH":1} != {}'],
+      'unexpected errors',
+    );
+  });
+
+  it('the API artifact set is the staged data objects of the PUBLISHED periods only', () => {
+    const objects = [
+      { kind: 'data', key: 'p/e/data/BILLING_PERIOD=2024-09/x/a.csv.gz', sha256: 'a'.repeat(64) },
+      { kind: 'data', key: 'p/e/data/BILLING_PERIOD=2024-09/x/b.csv.gz', sha256: 'b'.repeat(64) },
+      { kind: 'data', key: 'p/e/data/BILLING_PERIOD=2024-10/x/c.csv.gz', sha256: 'c'.repeat(64) },
+      { kind: 'manifest', key: 'p/e/metadata/BILLING_PERIOD=2024-09/m-Manifest.json', sha256: 'd'.repeat(64) },
+    ];
+    expect(publishedDataShas(objects, control)).toEqual(['a'.repeat(64), 'b'.repeat(64)]);
+    const both = { totals: [...control.totals, { billingPeriod: '2024-10-01', billingCurrency: 'USD', rowCount: '1', billedCost: '1' }] };
+    expect(publishedDataShas(objects, both)).toEqual(['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)]);
+    // On the real staging of the committed file: the 2024-10 (Oracle-only) object is not expected in the API.
+    const shas = publishedDataShas(STAGED.objects, PINNED['1k']);
+    expect(shas).toEqual(dataObjects(STAGED, '2024-09').map((o) => o.sha256));
+    expect(shas).not.toContain(dataObjects(STAGED, '2024-10')[0].sha256);
+  });
+
+  it('synthetic-provider opt-in (orchestrator D1): OFF in the worker env by default and for the acceptance run; ON only for the synthetic fixture sync', () => {
+    const settings = { pgPort: 1, s3Port: 2, appPort: 3 };
+    const secrets = { RATIO_LOCAL_WORKER_PASSWORD: 'w', RATIO_LOCAL_MIGRATOR_PASSWORD: 'm', RATIO_LOCAL_S3_ACCESS_KEY_ID: 'a', RATIO_LOCAL_S3_SECRET_ACCESS_KEY: 's' };
+    // Challenger L2: OFF is explicit ('0'), so an opt-in exported in the operator's shell cannot leak in.
+    expect(workerEnv(settings, secrets).RATIO_ALLOW_SYNTHETIC_PROVIDERS).toBe('0');
+    expect(workerEnv(settings, secrets, { syntheticProviders: false }).RATIO_ALLOW_SYNTHETIC_PROVIDERS).toBe('0');
+    const inherited = { RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1', RATIO_ENV: 'staging' };
+    expect({ ...inherited, ...workerEnv(settings, secrets) }).toMatchObject({ RATIO_ALLOW_SYNTHETIC_PROVIDERS: '0', RATIO_ENV: 'development' });
+    // ...because local.mjs run() lays the command's env OVER the inherited one.
+    expect(read('scripts/local/local.mjs')).toMatch(/runProcess\(cmd, args, \{ cwd: ROOT, env: \{ \.\.\.process\.env, \.\.\.env \}/);
+    expect(workerEnv(settings, secrets, { syntheticProviders: true }).RATIO_ALLOW_SYNTHETIC_PROVIDERS).toBe('1');
+    const src = read('scripts/local/local.mjs');
+    const body = src.slice(src.indexOf('async function acceptance('), src.indexOf('// --- main'));
+    expect(body).not.toMatch(/syntheticProviders|RATIO_ALLOW_SYNTHETIC_PROVIDERS/);
+    // The only opt-in in local.mjs is the synthetic fixture's sync (local:sync / local:test).
+    expect(src.match(/syntheticProviders: true/g)).toHaveLength(1);
+  });
+
+  it('L2: the acceptance syncs are judged on the worker stderr too: the synthetic-provider opt-in log must be absent', async () => {
+    const runner = (...results) => {
+      let i = 0;
+      return async () => results[i++];
+    };
+    const first = { code: 1, record: rec(firstGood, false) };
+    const second = { code: 1, record: rec(secondGood, false) };
+    const LOG = '{"ts":"x","level":"warn","event":"config.synthetic_providers_allowed","syntheticProviderCount":4}\n';
+    await expect(syncTwice({ sync: runner({ ...first, stderr: '' }, { ...second, stderr: '' }), control })).resolves.toBeTruthy();
+    await expect(syncTwice({ sync: runner({ ...first, stderr: LOG }), control })).rejects.toThrow(
+      'first sync:\n  sync: the worker ran with the synthetic-provider opt-in (config.synthetic_providers_allowed logged); the acceptance run must have it off',
+    );
+    await expect(syncTwice({ sync: runner({ ...first, stderr: '' }, { ...second, stderr: LOG }), control })).rejects.toThrow(
+      'second sync:\n  second sync: the worker ran with the synthetic-provider opt-in (config.synthetic_providers_allowed logged); the acceptance run must have it off',
+    );
+    await expect(syncTwice({ sync: runner(first), control })).rejects.toThrow('first sync:\n  sync: the worker CLI stderr was not captured');
+  });
+
+  it('L2: runProcess can capture stderr (and still passes it through); local.mjs captures it for the worker syncs', async () => {
+    await expect(runProcess(process.execPath, ['-e', 'process.stdout.write("o"); process.stderr.write("e")'], { capture: true, captureErr: true, timeoutMs: 10_000 })).resolves.toEqual({
+      code: 0,
+      out: 'o',
+      err: 'e',
+    });
+    // Without captureErr the result shape is unchanged.
+    await expect(runProcess(process.execPath, ['-e', 'process.stdout.write("o")'], { capture: true, timeoutMs: 10_000 })).resolves.toEqual({ code: 0, out: 'o' });
+    const src = read('scripts/local/local.mjs');
+    const fn = src.slice(src.indexOf('async function syncRecord('), src.indexOf('async function sync(settings)'));
+    expect(fn).toMatch(/\{ allowFail: true, syntheticProviders, captureErr: true \}/);
+    expect(fn).toMatch(/return \{ code: r\.code, record, stderr: r\.err \};/);
+    // ...and run() forwards captureErr to runProcess (the first live run found it dropped there).
+    const runFn = src.slice(src.indexOf('function run(cmd, args'), src.indexOf('function composeEnv('));
+    expect(runFn).toMatch(/\{ env = \{\}, capture = false, captureErr = false, allowFail = false,/);
+    expect(runFn).toMatch(/runProcess\(cmd, args, \{ cwd: ROOT, env: \{ \.\.\.process\.env, \.\.\.env \}, capture, captureErr, allowFail,/);
+  });
+
+  it('local.mjs: the evidence of EVERY staged object is re-hashed; the API artifact set uses the published periods only; the pin covers the filter', () => {
+    const src = read('scripts/local/local.mjs');
+    const body = src.slice(src.indexOf('async function acceptance('), src.indexOf('// --- main'));
+    expect(body).toMatch(/const dataShas = staged\.objects\.filter\(\(o\) => o\.kind === 'data'\)\.map\(\(o\) => o\.sha256\);/);
+    expect(body).toMatch(/const publishedShas = publishedDataShas\(staged\.objects, control\);/);
+    expect(body).toContain('rehashEvidence(settings, secrets, sourceId, dataShas)');
+    expect(body).toContain(
+      'JSON.stringify({ input: control.input, columns: control.columns, providerFilter: control.providerFilter, excluded: control.excluded, totals: control.totals }) !== JSON.stringify(pinned)',
+    );
   });
 });
 
@@ -825,7 +1069,8 @@ describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
 
   it('checks the pin and runs the independent calculator before any stack exists', () => {
     expect(body).toMatch(/verifyDatasetBytes\(bytes, pin\)/);
-    expect(body).toMatch(/run\('python3', \[CONTROL_CALCULATOR, '--rows', '--expect-sha256', pin\.sha256, file\]/);
+    // Issue #62: the control counts the AWS Data Exports type's provider only, an explicit exact filter.
+    expect(body).toMatch(/run\('python3', \[CONTROL_CALCULATOR, '--rows', \.\.\.SAMPLE_PROVIDERS\.flatMap\(\(p\) => \['--provider', p\]\), '--expect-sha256', pin\.sha256, file\]/);
     expect(body.indexOf("run('python3'")).toBeLessThan(body.indexOf('runLocalTest({'));
     expect(body.indexOf('stageFocusSample(bytes')).toBeLessThan(body.indexOf('runLocalTest({'));
   });
@@ -848,7 +1093,8 @@ describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
     const start = local.indexOf('async function sync(settings) {');
     expect(start).toBeGreaterThan(0);
     const fn = local.slice(start, local.indexOf('\n}\n', start) + 2);
-    expect(fn).toMatch(/const r = await syncRecord\(settings, secrets, LOCAL_NAMES\.sourceKey\);/);
+    // Issue #62 D1: the SYNTHETIC fixture source syncs with the synthetic-provider opt-in.
+    expect(fn).toMatch(/const r = await syncRecord\(settings, secrets, LOCAL_NAMES\.sourceKey, \{ syntheticProviders: true \}\);/);
     expect(fn).toMatch(/if \(r\.code !== 0\) throw new Error\(`worker sync exited \$\{r\.code\}`\);/);
     expect(fn).toMatch(/if \(r\.record === null\) throw new Error\('worker sync printed no evidence record'\);/);
   });
@@ -874,7 +1120,7 @@ describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
     for (const call of [
       'await syncTwice({',
       'compareAcceptance({ control, apiTotals: totals, rows })',
-      'artifactSetProblems(rows, dataShas)',
+      'artifactSetProblems(rows, publishedShas)',
       "fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control))",
       "fail('catalog', batchProblems(catalog.batches, control))",
     ]) {

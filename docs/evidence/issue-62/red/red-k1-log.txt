@@ -1,0 +1,37 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts (20 tests | 1 failed | 18 skipped) 790ms
+   ❯ D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup (2)
+     × ON ("1"): published, and the opt-in is logged exactly once, with the size of the set but no provider name (Slice 1 K1: logs carry no row values) 187ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup > ON ("1"): published, and the opt-in is logged exactly once, with the size of the set but no provider name (Slice 1 K1: logs carry no row values)
+AssertionError: expected { Object (ts, level, ...) } to match object { level: 'warn', …(1) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "level": "warn",
+-   "syntheticProviderCount": 4,
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:406:21
+    404|     const logs = optInLogs(r.err);
+    405|     expect(logs).toHaveLength(1);
+    406|     expect(logs[0]).toMatchObject({ level: 'warn', syntheticProviderCo…
+       |                     ^
+    407|     const all = r.out.concat(r.err).join('\n');
+    408|     for (const name of ['SyntheticCloud', 'SyntheticAWS', 'SyntheticAz…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 18 skipped (20)
+   Start at  14:42:43
+   Duration  3.20s (transform 49%, tests 36%, import 12%, setup 3%)
+

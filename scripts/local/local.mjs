@@ -71,7 +71,9 @@ import { runBootstrap } from './bootstrap.mjs';
 import {
   CONTROL_TOTALS_FILE as SAMPLE_CONTROL_TOTALS_FILE,
   SAMPLE_NAMES,
+  SAMPLE_PROVIDERS,
   artifactSetProblems,
+  publishedDataShas,
   rowProblems,
   UPSTREAM_COMPARED_FIELDS,
   batchProblems,
@@ -148,8 +150,8 @@ const interrupt = new AbortController();
 
 // Every command is bound to the interrupt (killed when it fires, never started
 // after it), except `down`, which is the cleanup itself (signal: null).
-function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs, signal = interrupt.signal } = {}) {
-  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs, signal: signal ?? undefined });
+function run(cmd, args, { env = {}, capture = false, captureErr = false, allowFail = false, timeoutMs, signal = interrupt.signal } = {}) {
+  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, captureErr, allowFail, timeoutMs, signal: signal ?? undefined });
 }
 
 function composeEnv(settings, secrets) {
@@ -232,9 +234,9 @@ async function up(settings) {
   log('up: postgres 16 + s3 running, roles bootstrapped', { project: settings.project, pgPort: settings.pgPort, s3Port: settings.s3Port });
 }
 
-async function workerCli(settings, secrets, args, opts = {}) {
+async function workerCli(settings, secrets, args, { syntheticProviders = false, ...opts } = {}) {
   if (!fs.existsSync(path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'))) await run('npm', ['run', '-s', 'worker:build'], { timeoutMs: WORKER_BUILD_TIMEOUT_MS });
-  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets), capture: true, timeoutMs: WORKER_CLI_TIMEOUT_MS, ...opts });
+  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets, { syntheticProviders }), capture: true, timeoutMs: WORKER_CLI_TIMEOUT_MS, ...opts });
 }
 
 async function migrate(settings) {
@@ -369,8 +371,9 @@ async function seed(settings) {
  * allowFail: a failing sync's record (its outcomes and quarantine codes) must still be readable.
  * The exit code judged by every caller: sync() rejects r.code !== 0, syncTwice (acceptance.mjs) requires 0.
  */
-async function syncRecord(settings, secrets, sourceKey) {
-  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', sourceKey], { allowFail: true });
+async function syncRecord(settings, secrets, sourceKey, { syntheticProviders = false } = {}) {
+  // stderr captured too: local:acceptance requires the opt-in log line to be absent (challenger L2).
+  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', sourceKey], { allowFail: true, syntheticProviders, captureErr: true });
   process.stdout.write(r.out);
   let record = null;
   try {
@@ -378,12 +381,13 @@ async function syncRecord(settings, secrets, sourceKey) {
   } catch {
     // no evidence record: judged by the caller
   }
-  return { code: r.code, record };
+  return { code: r.code, record, stderr: r.err };
 }
 
 async function sync(settings) {
   const secrets = loadSecrets(settings, { create: false });
-  const r = await syncRecord(settings, secrets, LOCAL_NAMES.sourceKey);
+  // The SYNTHETIC fixture source (ProviderName SyntheticCloud): the explicit opt-in (issue #62 D1).
+  const r = await syncRecord(settings, secrets, LOCAL_NAMES.sourceKey, { syntheticProviders: true });
   if (r.code !== 0) throw new Error(`worker sync exited ${r.code}`);
   if (r.record === null) throw new Error('worker sync printed no evidence record');
   return r.record;
@@ -581,8 +585,10 @@ async function catalogSnapshot(settings, secrets) {
       const batches = await c.query(
         `SELECT to_char(billing_period, 'YYYY-MM-DD') AS billing_period, status, reconciliation, is_provisional,
                 row_count::text AS row_count, loaded_billed_total::text AS loaded_billed_total,
-                validation_error_count::text AS validation_error_count, quarantine_reason
-           FROM ratio.ingest_batches WHERE tenant_id = $1 ORDER BY billing_period, status`,
+                validation_error_count::text AS validation_error_count, quarantine_reason,
+                (SELECT coalesce(jsonb_object_agg(e.code, e.n), '{}'::jsonb)
+                   FROM (SELECT code, count(*)::int AS n FROM ratio.ingest_validation_errors v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id GROUP BY code) e) AS error_codes
+           FROM ratio.ingest_batches b WHERE tenant_id = $1 ORDER BY billing_period, status`,
         [secrets.RATIO_LOCAL_TENANT_ID],
       );
       const facts = await c.query(
@@ -630,11 +636,12 @@ async function acceptance(args) {
   fail(`dataset ${opts.dataset} (${pin.localPath}) does not match dataset.json; re-run \`npm run sample:fetch\``, verifyDatasetBytes(bytes, pin));
 
   const calcStarted = Date.now();
-  const calc = await run('python3', [CONTROL_CALCULATOR, '--rows', '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
+  // Issue #62: the control counts the AWS rows only (exact match); the worker must exclude the rest.
+  const calc = await run('python3', [CONTROL_CALCULATOR, '--rows', ...SAMPLE_PROVIDERS.flatMap((p) => ['--provider', p]), '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
   if (calc.code !== 0) throw new Error(`the control-total calculator exited ${calc.code}`);
   const control = JSON.parse(calc.out);
   const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, SAMPLE_CONTROL_TOTALS_FILE), 'utf8'))[opts.dataset];
-  if (JSON.stringify({ input: control.input, columns: control.columns, totals: control.totals }) !== JSON.stringify(pinned)) {
+  if (JSON.stringify({ input: control.input, columns: control.columns, providerFilter: control.providerFilter, excluded: control.excluded, totals: control.totals }) !== JSON.stringify(pinned)) {
     throw new Error(`the calculator's output differs from the pinned ${SAMPLE_CONTROL_TOTALS_FILE} (${opts.dataset})`);
   }
   const calcMs = Date.now() - calcStarted;
@@ -643,6 +650,8 @@ async function acceptance(args) {
   const staged = stageFocusSample(bytes, { mutation: opts.mutation }); // proves the clean plan lossless first
   const stageMs = Date.now() - stageStarted;
   const dataShas = staged.objects.filter((o) => o.kind === 'data').map((o) => o.sha256);
+  // The API's artifact set: the data objects of the periods that publish (an all-foreign period is quarantined).
+  const publishedShas = publishedDataShas(staged.objects, control);
   const totalRows = control.totals.reduce((n, t) => n + Number(t.rowCount), 0);
 
   await preflight(settings, 'local:acceptance');
@@ -659,6 +668,7 @@ async function acceptance(args) {
       steps.dataset = { key: opts.dataset, file: pin.localPath, bytes: pin.bytes, sha256: pin.sha256, commit: dataset.commit, licence: dataset.licence };
       steps.mutation = opts.mutation;
       steps.control = control.totals;
+      steps.excluded = control.excluded;
       steps.staging = { periods: staged.periods, objects: staged.objects.map((o) => ({ key: o.key, bytes: o.body.length, sha256: o.sha256 })), nullTokensReplaced: staged.nullTokensReplaced };
 
       await timed('up', () => up(settings));
@@ -684,7 +694,7 @@ async function acceptance(args) {
 
       // The real worker CLI, twice, judged on its exit code AND its evidence
       // record (syncTwice; Copilot 4177490229 / 4177490261).
-      const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
+      const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation, excludedRows: p.excludedRows }));
       await syncTwice({
         control,
         sync: (name) => timed(name, () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey)),
@@ -705,7 +715,7 @@ async function acceptance(args) {
       const maxPages = Math.ceil(totalRows / ACCEPTANCE_PAGE_LIMIT) + 1;
       const { rows, totals, pages } = await timed('apiRead', () => readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: ACCEPTANCE_PAGE_LIMIT, maxPages }));
       steps.api = { totals, rows: rows.length, pages, limit: ACCEPTANCE_PAGE_LIMIT };
-      fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, dataShas)]);
+      fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, publishedShas)]);
       // Every API row against its UPSTREAM record (the calculator's --rows), every field (challenger M1).
       fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control));
       steps.rowsCompared = { rows: control.rows.length, fieldsPerRow: API_ROW_FIELDS_COMPARED, extraColumns: control.columns.extra.length };

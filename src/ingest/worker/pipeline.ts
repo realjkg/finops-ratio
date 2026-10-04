@@ -6,7 +6,7 @@ import type { Pool } from 'pg';
 import { IngestError, errorCodeOf, messageOf } from '../errors';
 import { redact, redactDeep } from '../redact';
 import { withRetry } from '../retry';
-import { resolveSettings, type WorkerLimits, type WorkerSettings } from '../config';
+import { resolveSettings, syntheticProvidersOptIn, type WorkerLimits, type WorkerSettings } from '../config';
 import { workerTransaction } from './tx';
 import type { EvidenceStore } from '../evidence/types';
 import { classifyArtifact } from '../sources/s3/layout';
@@ -14,6 +14,7 @@ import type { FocusSource, PeriodArtifactSet, PeriodListing, PeriodRange } from 
 import { captureArtifact, captureManifest, type CapturedArtifact } from './capture';
 import { acquireRun, finishRun, heartbeat, recordRetry, type Lease, type SourceRow } from './lease';
 import { addError, loadArtifact, newLoadState } from './load';
+import { PROVIDER_MISMATCH, providerPolicyFor } from '../focus/provider';
 import {
   aggregateBatch,
   discardStagedBatch,
@@ -65,7 +66,12 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   if ((opts.mode === 'backfill' || opts.mode === 'replay_period') && !opts.range) throw new IngestError('INVALID_RANGE', `${opts.mode} needs a period range`);
   // Bounded (2000-01..9999-12), well-formed and not inverted (review H2, third round).
   if (opts.range) assertPeriodRange(opts.range);
-  const settings = resolveSettings(opts.settings);
+  // The synthetic-provider opt-in (issue #62 D1): explicit in settings (the CLI passes its own env's
+  // value), else this process's RATIO_ALLOW_SYNTHETIC_PROVIDERS (library callers; default off).
+  const settings = resolveSettings({
+    ...opts.settings,
+    allowSyntheticProviders: opts.settings?.allowSyntheticProviders ?? syntheticProvidersOptIn(process.env),
+  });
   const hooks = opts.hooks ?? {};
   const log: LogFn = opts.log ?? (() => undefined);
   const secrets = opts.secrets ?? [];
@@ -473,13 +479,15 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
     // A control-mismatch quarantine records WHICH controls it was judged against
     // (first in the reason, so no truncation can drop it): see the M2 lookup above.
     const label = code === CONTROL_QUARANTINE_CODE ? `${code} [controls:${currentControls}]` : code;
+    // validation_error_count covers every stored error, provider exclusions included (issue #62).
+    const errorCount = state.errorCount + state.excludedCount;
     await quarantineBatch(
       ctx.pool,
       lease,
-      { batchId, billingPeriod: period, reason: ctx.clean(quarantineReason(label, detail, state.errorCodes)), errors: state.errors, errorCount: state.errorCount, perArtifactRows: state.perArtifactRows, ...extra },
+      { batchId, billingPeriod: period, reason: ctx.clean(quarantineReason(label, detail, state.errorCodes)), errors: state.errors, errorCount, perArtifactRows: state.perArtifactRows, ...extra },
       ctx.hooks,
     );
-    ctx.log('batch.quarantined', { runId: lease.runId, period, batchId, code, errors: state.errorCount });
+    ctx.log('batch.quarantined', { runId: lease.runId, period, batchId, code, errors: errorCount });
     return { billingPeriod: period, outcome: 'quarantined', code, batchId, artifactSetFingerprint: fingerprint, ...(extra.reconciliation ? { reconciliation: extra.reconciliation } : {}) };
   };
 
@@ -487,6 +495,7 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   if (unique.size !== captured.length) return quarantine('DUPLICATE_ARTIFACT', 'two artifacts in the set have identical bytes');
 
   const focusVersion = ctx.sourceRow.declaredFocusVersion ?? '1.0';
+  const providerPolicy = providerPolicyFor(ctx.sourceRow, { allowSyntheticProviders: settings.allowSyntheticProviders });
   for (const c of [...unique.values()]) {
     await loadArtifact(
       {
@@ -502,6 +511,7 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
         stallMs: settings.stallTimeoutSeconds * 1000,
         progress: ctx.progress,
         signal: ctx.signal,
+        providerPolicy,
       },
       { name: c.ref.name, sha256: c.sha256, byteSize: c.byteSize, evidenceKey: c.evidenceKey, format: classifyArtifact(c.ref.name) },
       state,
@@ -509,15 +519,20 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
     if (state.halted) break;
   }
   if (state.errorCount > 0) {
-    const first = [...state.errorCodes.keys()][0];
+    // The batch code comes from the hard errors; provider exclusions are listed in the summary only.
+    const first = [...state.errorCodes.keys()].find((c) => c !== PROVIDER_MISMATCH);
     const code = state.errorCodes.has('ROW_LIMIT_EXCEEDED') ? 'ROW_LIMIT_EXCEEDED' : first === 'UNSUPPORTED_FORMAT' ? 'UNSUPPORTED_FORMAT' : 'VALIDATION_FAILED';
-    return quarantine(code, `${state.errorCount} validation error(s)`);
+    return quarantine(code, `${state.errorCount + state.excludedCount} validation error(s)`);
   }
 
   // Reconcile in Postgres.
   const agg = await aggregateBatch(ctx.pool, lease, batchId);
   if (agg.rowCount !== String(state.rowsInserted)) {
     throw new IngestError('INTERNAL_COUNT_MISMATCH', `loaded ${agg.rowCount} rows but parsed ${state.rowsInserted}`);
+  }
+  if (agg.rowCount === '0' && state.excludedCount > 0) {
+    // Every row was excluded by the provider check: never published (issue #62).
+    return quarantine(PROVIDER_MISMATCH, `every data row (${state.excludedCount}) has a ProviderName not allowed for source type ${providerPolicy?.sourceType}`, { rowCount: '0', billedTotal: '0' });
   }
   if (agg.rowCount === '0') return quarantine('EMPTY_BATCH', 'the artifact set contains no data rows', { rowCount: '0', billedTotal: '0' });
   if (agg.currencies > 1) {
@@ -533,12 +548,21 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
       billedTotal: agg.billedTotal,
     });
   }
-  await finalizeStaged(ctx.pool, lease, { batchId, rowCount: agg.rowCount, billedTotal: agg.billedTotal, reconciliation: verdict.reconciliation, perArtifactRows: state.perArtifactRows });
+  await finalizeStaged(ctx.pool, lease, {
+    batchId,
+    rowCount: agg.rowCount,
+    billedTotal: agg.billedTotal,
+    reconciliation: verdict.reconciliation,
+    perArtifactRows: state.perArtifactRows,
+    errors: state.errors,
+    errorCount: state.excludedCount,
+  });
+  const excluded = state.excludedCount > 0 ? { excludedRows: String(state.excludedCount) } : {};
 
   if (ctx.hooks.beforePublish) await ctx.hooks.beforePublish({ runId: lease.runId, batchId, billingPeriod: period });
   await publishBatch(ctx.pool, lease, { batchId, billingPeriod: period, checkpoint: entry(batchId) }, ctx.hooks);
-  ctx.log('batch.published', { runId: lease.runId, period, batchId, rows: agg.rowCount, reconciliation: verdict.reconciliation });
-  return { billingPeriod: period, outcome: 'published', batchId, artifactSetFingerprint: fingerprint, rowCount: agg.rowCount, billedTotal: agg.billedTotal, reconciliation: verdict.reconciliation };
+  ctx.log('batch.published', { runId: lease.runId, period, batchId, rows: agg.rowCount, reconciliation: verdict.reconciliation, ...excluded });
+  return { billingPeriod: period, outcome: 'published', batchId, artifactSetFingerprint: fingerprint, rowCount: agg.rowCount, billedTotal: agg.billedTotal, reconciliation: verdict.reconciliation, ...excluded };
 }
 
 /**

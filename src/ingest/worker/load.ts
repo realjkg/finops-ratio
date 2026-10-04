@@ -4,6 +4,9 @@
 // error no further facts are inserted, but validation continues so the batch's
 // error count is complete. A parse failure first drains the evidence stream so
 // tampering is reported as EVIDENCE_INTEGRITY, never as a data problem.
+// Issue #62: a row whose ProviderName is outside the source type's allowlist
+// is EXCLUDED (recorded as PROVIDER_MISMATCH, not inserted, loading goes on);
+// it is not an error of the batch. A NULL/missing ProviderName is an error.
 import crypto from 'crypto';
 import zlib from 'zlib';
 import { Transform, Writable, type Readable } from 'stream';
@@ -15,6 +18,7 @@ import { isTransientError } from '../retry';
 import { workerTransaction } from './tx';
 import type { EvidenceStore } from '../evidence/types';
 import { indexHeader, validateRow, type FactRow, type HeaderIndex } from '../focus/validate';
+import { checkProviderHeader, checkProviderName, type ProviderPolicy } from '../focus/provider';
 import { assertLease, type Lease } from './lease';
 import type { WorkerHooks } from './types';
 import type { WorkerLimits } from '../config';
@@ -35,20 +39,33 @@ export interface LoadState {
   rowsSeen: number;
   rowsInserted: number;
   errors: ValidationErrorRow[];
+  /** Hard errors: any one quarantines the batch. */
   errorCount: number;
+  /** Rows excluded by the provider check (issue #62); their errors are stored too. */
+  excludedCount: number;
   errorCodes: Map<string, number>;
   perArtifactRows: Map<string, number>;
   halted: boolean;
 }
 
 export function newLoadState(): LoadState {
-  return { rowsSeen: 0, rowsInserted: 0, errors: [], errorCount: 0, errorCodes: new Map(), perArtifactRows: new Map(), halted: false };
+  return { rowsSeen: 0, rowsInserted: 0, errors: [], errorCount: 0, excludedCount: 0, errorCodes: new Map(), perArtifactRows: new Map(), halted: false };
+}
+
+function recordError(state: LoadState, e: ValidationErrorRow): void {
+  state.errorCodes.set(e.code, (state.errorCodes.get(e.code) ?? 0) + 1);
+  if (state.errors.length < MAX_STORED_ERRORS) state.errors.push({ ...e, message: e.message.slice(0, 1000) });
 }
 
 export function addError(state: LoadState, e: ValidationErrorRow): void {
   state.errorCount++;
-  state.errorCodes.set(e.code, (state.errorCodes.get(e.code) ?? 0) + 1);
-  if (state.errors.length < MAX_STORED_ERRORS) state.errors.push({ ...e, message: e.message.slice(0, 1000) });
+  recordError(state, e);
+}
+
+/** A row excluded by the provider check: stored with the errors, but it does not stop the load or fail the batch. */
+export function addExclusion(state: LoadState, e: ValidationErrorRow): void {
+  state.excludedCount++;
+  recordError(state, e);
 }
 
 export interface LoadContext {
@@ -67,6 +84,8 @@ export interface LoadContext {
   progress: () => void;
   /** Aborts the parse (e.g. maximum run duration exceeded). */
   signal?: AbortSignal;
+  /** The source type's ProviderName policy (issue #62); null = not checked. */
+  providerPolicy: ProviderPolicy | null;
 }
 
 export interface LoadArtifact {
@@ -298,6 +317,12 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
           break;
         }
         header = h.index;
+        const providerHeader = ctx.providerPolicy ? checkProviderHeader(h.index, ctx.providerPolicy) : null;
+        if (providerHeader) {
+          addError(state, { artifactSha256: art.sha256, rowOrdinal: null, column: providerHeader.column, code: providerHeader.code, message: providerHeader.message });
+          stoppedEarly = true;
+          break;
+        }
         continue;
       }
       ordinal++;
@@ -314,6 +339,20 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
         pending = [];
         pendingBytes = 0;
         continue;
+      }
+      if (ctx.providerPolicy) {
+        const p = checkProviderName(v.fact.providerName, ctx.providerPolicy);
+        if (!p.ok) {
+          const e = { artifactSha256: art.sha256, rowOrdinal: ordinal, column: p.error.column, code: p.error.code, message: p.error.message };
+          if (p.exclude) {
+            addExclusion(state, e);
+            continue;
+          }
+          addError(state, e);
+          pending = [];
+          pendingBytes = 0;
+          continue;
+        }
       }
       if (state.errorCount > 0) continue;
       pending.push({ ordinal, fact: v.fact });

@@ -1,0 +1,98 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts (20 tests | 3 failed) 1689ms
+   ❯ D7 the fake (synthetic) source type (1)
+     × excludes AWS rows: only the synthetic provider is allowed 73ms
+   ❯ D9 synthetic providers need the explicit opt-in (orchestrator decision D1, 2026-10-04) (5)
+     × the fixed synthetic set: OFF ⇒ each excluded; ON ⇒ each accepted; real foreign names still excluded with it ON 70ms
+   ❯ D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup (2)
+     × ON ("1"): published, and the opt-in is logged exactly once, naming the providers 159ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D7 the fake (synthetic) source type > excludes AWS rows: only the synthetic provider is allowed
+AssertionError: expected [ [ '2', 'PROVIDER_MISMATCH', …(1) ] ] to deeply equal [ [ '2', 'PROVIDER_MISMATCH', …(1) ] ]
+
+- Expected
++ Received
+
+  [
+    [
+      "2",
+      "PROVIDER_MISMATCH",
+-     "ProviderName is not allowed for source type fake (allowed: SyntheticCloud, SyntheticAWS, SyntheticAzure, SyntheticGCP); row excluded",
++     "ProviderName is not allowed for source type fake (allowed: SyntheticCloud); row excluded",
+    ],
+  ]
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:289:72
+    287|     expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCoun…
+    288|     const shown = await showBatch(t.pool, s.tenantId, r.periods[0].bat…
+    289|     expect(shown.errors.map((e) => [e.rowOrdinal, e.code, e.message]))…
+       |                                                                        ^
+    290|       ['2', 'PROVIDER_MISMATCH', 'ProviderName is not allowed for sour…
+    291|     ]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D9 synthetic providers need the explicit opt-in (orchestrator decision D1, 2026-10-04) > the fixed synthetic set: OFF ⇒ each excluded; ON ⇒ each accepted; real foreign names still excluded with it ON
+AssertionError: expected { billingPeriod: '2026-07-01', …(7) } to match object { outcome: 'published', …(3) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "billedTotal": "15.00",
+-   "excludedRows": "2",
++   "billedTotal": "6.00",
++   "excludedRows": "5",
+    "outcome": "published",
+-   "rowCount": "5",
++   "rowCount": "2",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:346:28
+    344|     const on = await awsSource();
+    345|     const rOn = await sync(on, new FakeFocusSource([period([['run/x.cs…
+    346|     expect(rOn.periods[0]).toMatchObject({ outcome: 'published', rowCo…
+       |                            ^
+    347|     const shown = await showBatch(t.pool, on.tenantId, rOn.periods[0].…
+    348|     expect(shown.errors.map((e) => [e.rowOrdinal, e.code])).toEqual([
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup > ON ("1"): published, and the opt-in is logged exactly once, naming the providers
+AssertionError: expected { Object (ts, level, ...) } to match object { level: 'warn', providers: [ …(4) ] }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "level": "warn",
+    "providers": [
+      "SyntheticCloud",
+-     "SyntheticAWS",
+-     "SyntheticAzure",
+-     "SyntheticGCP",
+    ],
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:406:21
+    404|     const logs = optInLogs(r.err);
+    405|     expect(logs).toHaveLength(1);
+    406|     expect(logs[0]).toMatchObject({ level: 'warn', providers: ['Synthe…
+       |                     ^
+    407|   });
+    408| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 17 passed (20)
+   Start at  14:37:35
+   Duration  3.77s (tests 57%, transform 33%, import 8%, setup 2%)
+

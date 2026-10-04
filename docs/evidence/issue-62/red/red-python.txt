@@ -1,0 +1,74 @@
+.................EEEEEF.EE...
+======================================================================
+ERROR: test_a_period_with_no_allowed_row_has_no_totals_entry (test_focus_control_totals.ProviderFilterTests.test_a_period_with_no_allowed_row_has_no_totals_entry)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 267, in test_a_period_with_no_allowed_row_has_no_totals_entry
+    doc = fct.compute(data, providers=['AWS'])
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_fails_closed_under_a_filter (test_focus_control_totals.ProviderFilterTests.test_fails_closed_under_a_filter) (name='provider NULL')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 280, in test_fails_closed_under_a_filter
+    fct.compute(csv_bytes(row, header=PROVIDER_HEADER), providers=['AWS'])
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_fails_closed_under_a_filter (test_focus_control_totals.ProviderFilterTests.test_fails_closed_under_a_filter) (name='provider empty')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 280, in test_fails_closed_under_a_filter
+    fct.compute(csv_bytes(row, header=PROVIDER_HEADER), providers=['AWS'])
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_fails_closed_under_a_filter (test_focus_control_totals.ProviderFilterTests.test_fails_closed_under_a_filter) (name='foreign row with a bad BilledCost')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 280, in test_fails_closed_under_a_filter
+    fct.compute(csv_bytes(row, header=PROVIDER_HEADER), providers=['AWS'])
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_fails_closed_under_a_filter (test_focus_control_totals.ProviderFilterTests.test_fails_closed_under_a_filter)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 282, in test_fails_closed_under_a_filter
+    fct.compute(csv_bytes('"2024-09-01 00:00:00","USD",1,1,"a",""'), providers=['AWS'])  # no ProviderName column
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_only_exact_matches_are_counted_the_rest_is_reported_per_period (test_focus_control_totals.ProviderFilterTests.test_only_exact_matches_are_counted_the_rest_is_reported_per_period)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 239, in test_only_exact_matches_are_counted_the_rest_is_reported_per_period
+    doc = fct.compute(data, providers=['AWS'], rows=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_several_providers_may_be_allowed (test_focus_control_totals.ProviderFilterTests.test_several_providers_may_be_allowed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 254, in test_several_providers_may_be_allowed
+    doc = fct.compute(data, providers=['AWS', 'X'])
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+FAIL: test_main_takes_repeatable_provider_arguments (test_focus_control_totals.ProviderFilterTests.test_main_takes_repeatable_provider_arguments)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 295, in test_main_takes_repeatable_provider_arguments
+    self.assertEqual(code, 0, err.getvalue())
+AssertionError: 2 != 0 : usage: unrecognized arguments: --provider --provider X /tmp/tmpnf516y4x/f.csv
+
+
+----------------------------------------------------------------------
+Ran 26 tests in 0.012s
+
+FAILED (failures=1, errors=7)

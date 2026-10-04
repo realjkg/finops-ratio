@@ -1,0 +1,144 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts (19 tests | 6 failed) 1586ms
+   ❯ D1 a mixed-provider file on an AWS Data Exports source (3)
+     × excludes exactly the foreign rows (recorded as PROVIDER_MISMATCH) and publishes the rest 134ms
+   ❯ D9 synthetic providers need the explicit opt-in (orchestrator decision D1, 2026-10-04) (4)
+     × opt-in OFF: SyntheticCloud under aws-data-exports is excluded (PROVIDER_MISMATCH); AWS is published 41ms
+     × opt-in OFF: an all-synthetic batch is quarantined PROVIDER_MISMATCH, never published 34ms
+     × library default: follows RATIO_ALLOW_SYNTHETIC_PROVIDERS of the process (the DB suites set it in their vitest config); unset ⇒ OFF 4ms
+   ❯ D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup (2)
+     × OFF ("0"): the synthetic fixture is quarantined PROVIDER_MISMATCH, nothing is published, no opt-in log 393ms
+     × ON ("1"): published, and the opt-in is logged exactly once, naming the providers 137ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D1 a mixed-provider file on an AWS Data Exports source > excludes exactly the foreign rows (recorded as PROVIDER_MISMATCH) and publishes the rest
+AssertionError: expected 'ProviderName is not allowed for sourc…' to be 'ProviderName is not allowed for sourc…' // Object.is equality
+
+Expected: "ProviderName is not allowed for source type aws-data-exports (allowed: AWS); row excluded"
+Received: "ProviderName is not allowed for source type aws-data-exports (allowed: AWS, SyntheticCloud); row excluded"
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:116:25
+    114|     for (const e of shown.errors) {
+    115|       expect(e.artifactSha256).toBe(mixedSha);
+    116|       expect(e.message).toBe('ProviderName is not allowed for source t…
+       |                         ^
+    117|       expect(e.message).not.toMatch(/Microsoft|Oracle/);
+    118|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D9 synthetic providers need the explicit opt-in (orchestrator decision D1, 2026-10-04) > opt-in OFF: SyntheticCloud under aws-data-exports is excluded (PROVIDER_MISMATCH); AWS is published
+AssertionError: expected { billingPeriod: '2026-07-01', …(6) } to match object { outcome: 'published', …(3) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "billedTotal": "2.00",
+-   "excludedRows": "1",
++   "billedTotal": "3.00",
+    "outcome": "published",
+-   "rowCount": "1",
++   "rowCount": "2",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:310:26
+    308|     const s = await awsSource();
+    309|     const r = await sync(s, synthetic(), { settings: { allowSyntheticP…
+    310|     expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCoun…
+       |                          ^
+    311|     const shown = await showBatch(t.pool, s.tenantId, r.periods[0].bat…
+    312|     expect(shown.errors.map((e) => [e.rowOrdinal, e.code, e.message]))…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D9 synthetic providers need the explicit opt-in (orchestrator decision D1, 2026-10-04) > opt-in OFF: an all-synthetic batch is quarantined PROVIDER_MISMATCH, never published
+AssertionError: expected { billingPeriod: '2026-07-01', …(6) } to match object { outcome: 'quarantined', …(1) }
+(6 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "code": "PROVIDER_MISMATCH",
+-   "outcome": "quarantined",
++   "outcome": "published",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:320:26
+    318|     const s = await awsSource();
+    319|     const r = await sync(s, new FakeFocusSource([period([['run/x.csv.g…
+    320|     expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code:…
+       |                          ^
+    321|     expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).t…
+    322|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D9 synthetic providers need the explicit opt-in (orchestrator decision D1, 2026-10-04) > library default: follows RATIO_ALLOW_SYNTHETIC_PROVIDERS of the process (the DB suites set it in their vitest config); unset ⇒ OFF
+AssertionError: expected undefined to be '1' // Object.is equality
+
+- Expected:
+"1"
+
++ Received:
+undefined
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:332:57
+    330|
+    331|   it('library default: follows RATIO_ALLOW_SYNTHETIC_PROVIDERS of the …
+    332|     expect(process.env.RATIO_ALLOW_SYNTHETIC_PROVIDERS).toBe('1');
+       |                                                         ^
+    333|     const run = (s: SeededSource) =>
+    334|       runSync({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourc…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup > OFF ("0"): the synthetic fixture is quarantined PROVIDER_MISMATCH, nothing is published, no opt-in log
+AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:369:20
+    367|     const s = await seedTenantSource(t.db.pool, { kind: 'fake', config…
+    368|     const r = await cli(['sync', '--tenant', s.tenantId, '--source', s…
+    369|     expect(r.code).toBe(1);
+       |                    ^
+    370|     const periods = (r.record.results as { periods: Array<{ outcome: s…
+    371|     expect(periods.length).toBeGreaterThan(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup > ON ("1"): published, and the opt-in is logged exactly once, naming the providers
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:382:18
+    380|     expect(r.code).toBe(0);
+    381|     const logs = optInLogs(r.err);
+    382|     expect(logs).toHaveLength(1);
+       |                  ^
+    383|     expect(logs[0]).toMatchObject({ level: 'warn', providers: ['Synthe…
+    384|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 13 passed (19)
+   Start at  14:31:03
+   Duration  3.03s (tests 66%, transform 25%, import 6%, setup 2%)
+

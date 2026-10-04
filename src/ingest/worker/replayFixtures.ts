@@ -9,7 +9,8 @@
 // deletion is retention-class). The tenant's rows, its evidence objects and the
 // uploaded synthetic source objects stay in place and are reported in the
 // result, so staging accumulates fixture tenants until an owner-approved
-// retention slice. Refused unless RATIO_ENV is staging/test (CLI checks first).
+// retention slice. Refused unless RATIO_ENV is test (CLI checks first; issue #62 L3:
+// it ingests synthetic providers, allowed only in development/test; staging returns with D-21).
 import crypto from 'crypto';
 import { Client, type Pool } from 'pg';
 import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
@@ -48,6 +49,8 @@ export async function runReplayFixtures(opts: {
   evidence: EvidenceStore;
   log?: LogFn;
   secrets?: readonly string[];
+  /** The synthetic-provider opt-in (issue #62 D1); omitted ⇒ runSync's default (this process's env). */
+  allowSyntheticProviders?: boolean;
 }): Promise<ReplayFixturesResult> {
   const log = opts.log ?? (() => undefined);
   const tenantId = crypto.randomUUID();
@@ -58,7 +61,6 @@ export async function runReplayFixtures(opts: {
   const scenarios: ScenarioResult[] = [];
   const admin = new Client({ connectionString: opts.adminUrl, application_name: 'ratio-replay-fixtures' });
   admin.on('error', () => undefined);
-  await admin.connect();
 
   const asTenant = async <T>(c: Client, fn: () => Promise<T>): Promise<T> => {
     await c.query('BEGIN');
@@ -120,6 +122,7 @@ export async function runReplayFixtures(opts: {
       log,
       secrets: opts.secrets,
       ...extra,
+      settings: { ...(opts.allowSyntheticProviders === undefined ? {} : { allowSyntheticProviders: opts.allowSyntheticProviders }), ...extra.settings },
     });
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -134,6 +137,8 @@ export async function runReplayFixtures(opts: {
   };
 
   try {
+    // Connected inside the try, so the finally always ends the client (challenger M-A).
+    await admin.connect();
     await asTenant(admin, async () => {
       await admin.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2)`, [tenantId, tenantSlug]);
       for (const key of SOURCES) {
@@ -221,14 +226,24 @@ export async function runReplayFixtures(opts: {
         () => 'completed',
         (e) => (e instanceof IngestError ? e.code : 'ERROR'),
       );
-      await atPublish;
+      // Bounded (challenger M-A): if the zombie never reaches publish (e.g. every period is
+      // quarantined), it settles instead, and the scenario fails at once rather than hanging.
+      const reachedPublish = await Promise.race([atPublish.then(() => true), zombieOutcome.then(() => false)]);
+      if (!reachedPublish) {
+        release();
+        return { pass: false, detail: { reachedPublish, zombie: await zombieOutcome } };
+      }
       const expired = await expireLease('fx-zombie');
-      const winner = await sync('fx-zombie');
-      release();
+      let winner: Awaited<ReturnType<typeof sync>>;
+      try {
+        winner = await sync('fx-zombie');
+      } finally {
+        release();
+      }
       const z = await zombieOutcome;
       const t = await totals('fx-zombie');
       const pass = expired === 1 && winner.status === 'succeeded' && z === 'LEASE_LOST' && same(t, expected('base'));
-      return { pass, detail: { zombie: z, winner: winner.status } };
+      return { pass, detail: { reachedPublish, zombie: z, winner: winner.status } };
     });
   } finally {
     await admin.end().catch(() => undefined);
