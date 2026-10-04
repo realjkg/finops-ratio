@@ -1,0 +1,99 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/focus/chargePeriodPrecision.test.ts (5 tests | 4 failed) 22ms
+   ❯ epochUs: the instant at Postgres microsecond precision (2)
+     × matches what PG16 stores for 7-9 fraction digits (probed on a scratch PG16: rint, half to even) 9ms
+     × keeps 1-6 digits exactly and applies the offset 2ms
+   ❯ validateRow: CHARGE_PERIOD_INVERTED at microsecond precision (3)
+     × a sub-millisecond inversion is refused (it would violate cost_facts_charge_period at insert) 5ms
+     × rounding decides: .0000026 (→3) after .0000025 (→2) is inverted the other way round 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/focus/chargePeriodPrecision.test.ts > epochUs: the instant at Postgres microsecond precision > matches what PG16 stores for 7-9 fraction digits (probed on a scratch PG16: rint, half to even)
+AssertionError: .0000005: expected NaN to be 0n // Object.is equality
+
+- Expected:
+0n
+
++ Received:
+NaN
+
+ ❯ src/ingest/focus/chargePeriodPrecision.test.ts:34:104
+     32|     ];
+     33|     const whole = parseFocusTimestamp(`${BASE}Z`)!.epochUs;
+     34|     for (const [frac, us] of pg) expect(parseFocusTimestamp(`${BASE}${…
+       |                                                                                                        ^
+     35|   });
+     36|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/ingest/focus/chargePeriodPrecision.test.ts > epochUs: the instant at Postgres microsecond precision > keeps 1-6 digits exactly and applies the offset
+AssertionError: expected undefined to be 1782950400000500n // Object.is equality
+
+- Expected:
+1782950400000500n
+
++ Received:
+undefined
+
+ ❯ src/ingest/focus/chargePeriodPrecision.test.ts:38:61
+     36|
+     37|   it('keeps 1-6 digits exactly and applies the offset', () => {
+     38|     expect(parseFocusTimestamp(`${BASE}.000500Z`)!.epochUs).toBe(BigIn…
+       |                                                             ^
+     39|     expect(parseFocusTimestamp('2026-07-02T02:00:00.5+02:00')!.epochUs…
+     40|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/ingest/focus/chargePeriodPrecision.test.ts > validateRow: CHARGE_PERIOD_INVERTED at microsecond precision > a sub-millisecond inversion is refused (it would violate cost_facts_charge_period at insert)
+AssertionError: expected [] to deeply equal [ 'CHARGE_PERIOD_INVERTED' ]
+
+- Expected
++ Received
+
+- [
+-   "CHARGE_PERIOD_INVERTED",
+- ]
++ []
+
+ ❯ src/ingest/focus/chargePeriodPrecision.test.ts:45:63
+     43| describe('validateRow: CHARGE_PERIOD_INVERTED at microsecond precision…
+     44|   it('a sub-millisecond inversion is refused (it would violate cost_fa…
+     45|     expect(chargeCodes(`${BASE}.000500Z`, `${BASE}.000100Z`)).toEqual(…
+       |                                                               ^
+     46|     expect(chargeCodes(`${BASE}.000002Z`, `${BASE}.000001Z`)).toEqual(…
+     47|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/ingest/focus/chargePeriodPrecision.test.ts > validateRow: CHARGE_PERIOD_INVERTED at microsecond precision > rounding decides: .0000026 (→3) after .0000025 (→2) is inverted the other way round
+AssertionError: expected [] to deeply equal [ 'CHARGE_PERIOD_INVERTED' ]
+
+- Expected
++ Received
+
+- [
+-   "CHARGE_PERIOD_INVERTED",
+- ]
++ []
+
+ ❯ src/ingest/focus/chargePeriodPrecision.test.ts:57:65
+     55|
+     56|   it('rounding decides: .0000026 (→3) after .0000025 (→2) is inverted …
+     57|     expect(chargeCodes(`${BASE}.0000026Z`, `${BASE}.0000025Z`)).toEqua…
+       |                                                                 ^
+     58|   });
+     59| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 1 passed (5)
+   Start at  17:34:41
+   Duration  540ms (transform 73%, import 13%, tests 12%, worker 2%)
+

@@ -383,13 +383,19 @@ class TimestampFollowupTests(unittest.TestCase):
         with self.assertRaises(fct.ControlTotalsError):
             self.rows('0100-01-01 00:00:00', '0099-12-31 23:00:00')
 
-    def test_order_is_judged_at_millisecond_precision_like_the_worker(self):
-        # Challenger L-1: timestamp.ts keeps milliseconds only (truncated), so .000500 and .000100
-        # are the same instant for validateRow: accepted, not inverted.
-        self.assertEqual(len(self.rows('2024-09-18 22:00:00.000500', '2024-09-18 22:00:00.000100')), 1)
-        # A difference that survives truncation is still inverted.
+    def test_order_is_judged_at_microsecond_precision_like_the_database(self):
+        # PR #69 Copilot r4178626016 (corrects the challenger's L-1): the worker stores the full
+        # fraction in timestamptz, and cost_facts_charge_period CHECK (end >= start) compares
+        # microseconds. So .000500 → .000100 can never be published: it must be REFUSED.
+        with self.assertRaises(fct.ControlTotalsError):
+            self.rows('2024-09-18 22:00:00.000500', '2024-09-18 22:00:00.000100')
+        with self.assertRaises(fct.ControlTotalsError):
+            self.rows('2024-09-18 22:00:00.000002', '2024-09-18 22:00:00.000001')
         with self.assertRaises(fct.ControlTotalsError):
             self.rows('2024-09-18 22:00:00.001000', '2024-09-18 22:00:00.000999')
+        # Equal to the microsecond is accepted (also across an offset).
+        self.assertEqual(len(self.rows('2024-09-18 22:00:00.000500', '2024-09-18 22:00:00.000500')), 1)
+        self.assertEqual(len(self.rows('2024-09-18T22:00:00.000500Z', '2024-09-19T00:00:00.000500+02:00')), 1)
         # The published value keeps its microseconds (the API returns them).
         self.assertEqual(self.rows('2024-09-18 22:00:00.000500', '2024-09-18 22:00:01')[0]['chargePeriodStart'], '2024-09-18T22:00:00.000500Z')
 
