@@ -14,7 +14,7 @@ import crypto from 'crypto';
 import net from 'net';
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { NextApiHandler } from 'next';
-import { Pool } from 'pg';
+import { DatabaseError, Pool, type PoolClient } from 'pg';
 import { createTestDatabase, type TestDatabase } from '../../ingest/db/testing/harness';
 import { seedTwoTenants, type Seeded } from '../../ingest/db/testing/fixtures';
 import { createLogin, seedTenantSource, publishedTotals, type Login } from '../../ingest/testing/db';
@@ -25,6 +25,7 @@ import { MemoryEvidenceStore } from '../../ingest/evidence/MemoryEvidenceStore';
 import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
 import { createPublishedCostsRoute, ROUTE_MESSAGES } from './publishedCostsRoute';
 import { closeReaderPools, createReaderPool, readerPool } from './readerPool';
+import { readWithDeadline } from './readDeadline';
 import { PUBLISHED_COSTS_SQL, readPublishedCosts, setAfterPageHookForTests } from './publishedCosts';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
 
@@ -643,67 +644,86 @@ describe('D12 a pooled reader client keeps a flat listener count across requests
 
 // --- Copilot 4176969214: a backend killed mid-request (pg_terminate_backend:
 // the server sends FATAL 57P01, then closes) is a dead session, not a SQL
-// error. The client must be poisoned at that error: nothing more (not the
-// ROLLBACK) is sent on it, it is destroyed rather than pooled, and the next
-// request gets a fresh connection.
+// error. The client must be poisoned AT that error: the guard refuses every
+// later query on it (the ROLLBACK gets that same FATAL error back instead of
+// reaching pg), it is destroyed rather than pooled, and the next request gets
+// a fresh connection.
 describe('D14 a reader backend terminated mid-request is destroyed at once (Copilot 4176969214)', () => {
-  it('pg_terminate_backend while the page query waits ⇒ 500; no query after the FATAL reaches that client; the slot is freed; the next request succeeds', async () => {
+  /** Holds ratio.cost_facts so a reader query waits; returns the waiting reader backend's pid. */
+  async function lockAndFindWaiter(locker: PoolClient): Promise<number> {
+    await locker.query('BEGIN');
+    await locker.query('LOCK TABLE ratio.cost_facts IN ACCESS EXCLUSIVE MODE');
+    return waiterPid();
+  }
+  async function waiterPid(): Promise<number> {
+    for (let i = 0; i < 80; i += 1) {
+      const r = await db.pool.query(
+        `SELECT pid FROM pg_catalog.pg_stat_activity WHERE usename = $1 AND datname = current_database() AND wait_event_type = 'Lock'`,
+        [reader.name],
+      );
+      if (r.rows[0]?.pid) return r.rows[0].pid as number;
+      await new Promise((r2) => setTimeout(r2, 25));
+    }
+    throw new Error('no reader backend waiting on the lock');
+  }
+
+  it('readWithDeadline on the real pool: the FATAL 57P01 poisons the client; the ROLLBACK is refused with that same error (never sent to pg); release destroys the client', async () => {
     const pool = createReaderPool(reader.url, { max: 1 });
-    // Every query that reaches a REAL client, in order, with how it ended.
-    const sent: Array<{ client: number; sql: string; error?: string }> = [];
-    const ids = new WeakMap<object, number>();
-    const spyPool = {
-      connect: async () => {
-        const c = await pool.connect();
-        if (!ids.has(c)) {
-          const id = ids.set(c, sent.length + 1000 + Math.floor(Math.random() * 1e6)).get(c)!;
-          const real = c.query.bind(c) as (...a: unknown[]) => Promise<unknown>;
-          (c as unknown as { query: unknown }).query = (...args: unknown[]) => {
-            const entry: { client: number; sql: string; error?: string } = { client: id, sql: typeof args[0] === 'string' ? args[0] : String((args[0] as { text?: string })?.text ?? '') };
-            sent.push(entry);
-            return real(...args).catch((e: unknown) => {
-              entry.error = `${(e as { severity?: string })?.severity ?? ''} ${(e as { code?: string })?.code ?? ''}`.trim() || 'no-code';
-              throw e;
-            });
-          };
+    const locker = await db.pool.connect();
+    let failure: unknown;
+    let rollback: unknown = 'not attempted';
+    try {
+      const reading = readWithDeadline(pool, async (p) => {
+        const client = await p.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('SELECT count(*) FROM ratio.cost_facts_published').catch(async (e: unknown) => {
+            failure = e;
+            rollback = await client.query('ROLLBACK').then(
+              () => 'sent',
+              (r: unknown) => r,
+            );
+            throw e;
+          });
+        } finally {
+          client.release();
         }
-        return c;
-      },
-    };
+      }, 20_000);
+      const settled = reading.then(
+        () => 'resolved',
+        (e: unknown) => e,
+      );
+      const pid = await lockAndFindWaiter(locker);
+      await db.pool.query('SELECT pg_catalog.pg_terminate_backend($1)', [pid]);
+      expect(await settled).toBe(failure);
+      expect(failure).toBeInstanceOf(DatabaseError);
+      expect(failure).toMatchObject({ severity: 'FATAL', code: '57P01' });
+      // Refused by the guard with the poisoned error itself; pg would have answered "Client was closed and is not queryable".
+      expect(rollback).toBe(failure);
+      expect(pool.totalCount).toBe(0);
+    } finally {
+      await locker.query('ROLLBACK').catch(() => undefined);
+      locker.release();
+      await pool.end().catch(() => undefined);
+    }
+  }, 30_000);
+
+  it('through the route: 500, the slot is freed (no client kept), and the next request succeeds on a fresh connection', async () => {
+    const pool = createReaderPool(reader.url, { max: 1 });
     const route = createPublishedCostsRoute({
       env: { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_API_TENANT_ID: C.tenantId, RATIO_READER_DATABASE_URL: reader.url },
-      poolFor: () => spyPool,
+      poolFor: () => pool,
       logger: () => undefined,
     });
     const req = () => call(route, makeReq({ headers: bearer(), query: { limit: '5' } }));
     const locker = await db.pool.connect();
     try {
       expect((await req()).statusCode).toBe(200);
-      // Hold the facts table so the page query waits (the reader's lock_timeout is 5 s).
-      await locker.query('BEGIN');
-      await locker.query('LOCK TABLE ratio.cost_facts IN ACCESS EXCLUSIVE MODE');
       const pending = req();
-      let pid: number | undefined;
-      for (let i = 0; i < 80 && pid === undefined; i += 1) {
-        const r = await db.pool.query(
-          `SELECT pid FROM pg_catalog.pg_stat_activity WHERE usename = $1 AND datname = current_database() AND wait_event_type = 'Lock'`,
-          [reader.name],
-        );
-        pid = r.rows[0]?.pid;
-        if (pid === undefined) await new Promise((r2) => setTimeout(r2, 25));
-      }
-      expect(pid, 'the reader backend waiting on the lock').toBeDefined();
+      const pid = await lockAndFindWaiter(locker);
       await db.pool.query('SELECT pg_catalog.pg_terminate_backend($1)', [pid]);
-      const res = await pending;
-      expect(res.statusCode).toBe(500);
+      expect((await pending).statusCode).toBe(500);
       await locker.query('ROLLBACK');
-
-      // The FATAL (57P01) was the last thing that client ever saw: no ROLLBACK was queued on the dead transport.
-      const fatal = sent.findIndex((e) => e.error === 'FATAL 57P01');
-      expect(fatal, JSON.stringify(sent)).toBeGreaterThanOrEqual(0);
-      const after = sent.slice(fatal + 1).filter((e) => e.client === sent[fatal].client);
-      expect(after, JSON.stringify(after)).toEqual([]);
-      // Destroyed, not pooled; the next request gets a fresh connection and succeeds.
       expect(pool.totalCount).toBe(0);
       const t1 = Date.now();
       expect((await req()).statusCode).toBe(200);
