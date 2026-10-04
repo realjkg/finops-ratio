@@ -25,7 +25,6 @@ import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
 import { createPublishedCostsRoute, ROUTE_MESSAGES } from './publishedCostsRoute';
 import { closeReaderPools, readerPool } from './readerPool';
 import { PUBLISHED_COSTS_SQL, readPublishedCosts, setAfterPageHookForTests } from './publishedCosts';
-import { READER_SESSION_OPTIONS } from './readerPool';
 import { withTenantTransaction } from '../../ingest/db/tenant';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
 
@@ -509,64 +508,12 @@ describe('D7 reader session settings', () => {
 // --- Copilot 4176238982: the output may not depend on any session setting ------
 // date::text follows DateStyle; a cursor built from such a value no longer
 // decodes. Two layers, each tested on its own: the SQL formats every date and
-// timestamp explicitly (D10b), and the pool pins DateStyle / IntervalStyle /
-// TimeZone and the read asserts them, failing closed (D10a, D10c).
+// timestamp explicitly (D10b, here), and the pool pins DateStyle / IntervalStyle
+// / TimeZone and the read asserts them, failing closed (D10a, D10c: they change
+// a login's ROLE defaults, which is cluster state, so they live in
+// publishedCosts.serial.db.test.ts).
 describe('D10 output never depends on session settings (Copilot 4176238982)', () => {
-  const HOSTILE_ROLE_DEFAULTS: Array<[string, string]> = [
-    ['DateStyle', 'SQL, DMY'],
-    ['TimeZone', 'America/Sao_Paulo'],
-    ['IntervalStyle', 'sql_standard'],
-    ['extra_float_digits', '-15'],
-  ];
   const PERIOD = /^\d{4}-(0[1-9]|1[0-2])-01$/;
-  const TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
-
-  async function hostileLogin(): Promise<Login> {
-    const l = await login(['ratio_reader']);
-    for (const [k, v] of HOSTILE_ROLE_DEFAULTS) await db.pool.query(`ALTER ROLE ${l.name} SET ${k} = '${v}'`);
-    return l;
-  }
-
-  async function walk(readerUrl: string): Promise<{ rows: Row[]; pages: Body[] }> {
-    const pages: Body[] = [];
-    let cursor: string | null = null;
-    for (let i = 0; i < 100; i += 1) {
-      const body = await getOk(C.tenantId, cursor ? { limit: '5', cursor } : { limit: '5' }, { readerUrl });
-      pages.push(body);
-      cursor = body.page.nextCursor;
-      if (!cursor) break;
-    }
-    return { rows: pages.flatMap((p) => p.data), pages };
-  }
-
-  it('D10a a reader login whose ROLE defaults are DateStyle=SQL,DMY, a non-UTC TimeZone, sql_standard intervals and extra_float_digits=-15 gets canonical output, and paging through nextCursor returns every row exactly once', async () => {
-    const odd = await hostileLogin();
-    // The role defaults are real: a plain session of this login sees them.
-    const plain = new Pool({ connectionString: odd.url, max: 1 });
-    try {
-      const s = await plain.query(`SELECT current_setting('DateStyle') AS ds, current_setting('TimeZone') AS tz, (DATE '2026-05-01')::text AS d`);
-      expect(s.rows[0]).toEqual({ ds: 'SQL, DMY', tz: 'America/Sao_Paulo', d: '01/05/2026' });
-    } finally {
-      await plain.end();
-    }
-    const canonical = await walk(reader.url);
-    const hostile = await walk(odd.url);
-    expect(hostile.rows).toHaveLength(34);
-    expect(new Set(hostile.rows.map(key)).size).toBe(34);
-    expect(hostile.rows.map(key).sort()).toEqual((await groundTruth(C.tenantId)).map(key).sort());
-    expect(hostile.pages.map((p) => p.data.length)).toEqual([5, 5, 5, 5, 5, 5, 4]);
-    expect(hostile.rows).toEqual(canonical.rows);
-    expect(hostile.pages[0].totals).toEqual(canonical.pages[0].totals);
-    for (const r of hostile.rows) {
-      expect(r.billingPeriod).toMatch(PERIOD);
-      expect(r.chargePeriodStart).toMatch(TS);
-      expect(r.publishedAt).toMatch(TS);
-    }
-    for (const t of hostile.pages[0].totals ?? []) {
-      expect(t.billingPeriod).toMatch(PERIOD);
-      expect(typeof t.rowCount).toBe('string');
-    }
-  });
 
   it('D10b the SQL alone is setting-independent: under hostile SET LOCAL values every column of the page and the totals equals the canonical output', async () => {
     // A plain pool: none of the reader pool's pinned options.
@@ -601,19 +548,4 @@ describe('D10 output never depends on session settings (Copilot 4176238982)', ()
     }
   });
 
-  it('D10c fail closed: a pool that pins everything but DateStyle, for a login whose default is SQL,DMY, is refused (no data served)', async () => {
-    const odd = await hostileLogin();
-    const options = READER_SESSION_OPTIONS.split(' -c ')
-      .map((o) => o.replace(/^-c /, ''))
-      .filter((o) => !/^DateStyle=/.test(o))
-      .map((o) => `-c ${o}`)
-      .join(' ');
-    expect(options).not.toMatch(/DateStyle/);
-    const unpinned = new Pool({ connectionString: odd.url, max: 1, options });
-    try {
-      await expect(readPublishedCosts(unpinned, C.tenantId, { from: null, to: null, limit: 5, cursor: null })).rejects.toThrow(/published-costs read requires/);
-    } finally {
-      await unpinned.end();
-    }
-  });
 });
