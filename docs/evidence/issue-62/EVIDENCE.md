@@ -316,3 +316,91 @@ staging accepted; M24 unset `RATIO_ENV` accepted; M25 only production
 refused; M26 case-insensitive `RATIO_ENV`; M27 `workerEnv` omits the opt-in;
 M28 the acceptance ignores the log; M29 stderr not captured; M30
 `runProcess` drops stderr.
+
+### 9.1 Orchestrator decisions on L3 and L4 (2026-10-04)
+
+**L3: `replay-fixtures` is test-only.**
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 61febe3 | `src/ingest/replayFixturesEnv.test.ts` | **red** (`red/red-replay-fixtures-test-only.txt`: 2 failed / 3. The `RATIO_ENV=test` case passes at red, because test was already allowed) |
+| 7d6d2cb | the CLI accepts `replay-fixtures` only with `RATIO_ENV=test`, plus the docs | green |
+
+The gate in `workerCli.ts`:
+- refuses `RATIO_ENV=staging` (and every value but `test`) **before any I/O**;
+- exits 2 with `REPLAY_FIXTURES_NOT_ALLOWED` and the message: "replay-fixtures
+  runs only when RATIO_ENV is test: it ingests synthetic providers, which are
+  allowed only in development/test (per-source synthetic markers are tracked
+  as D-21 for Slice 3)";
+- has no in-code opt-in bypass.
+
+Under BOUNDARY v2 there is no staging environment, so there is no impact
+today. D-21 is the way to restore staging later (DESIGN §8 D1).
+
+**Docs and scripts that referred to staging (grep):**
+- `.obvious/skills/ingestion-ops/SKILL.md` §7: the example now uses
+  `RATIO_ENV=test RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`, and the gate text is
+  updated;
+- `DEPLOYMENT_BRIEF.md`: the operational-settings row and the retention list;
+- `replayFixtures.ts` and `workerCli.ts`: header comments.
+
+No script invokes `replay-fixtures` with staging.
+
+The Slice 1 test `cli.worker.test.ts` "replay-fixtures is refused unless
+RATIO_ENV is staging or test" still passes. Its cases (unset, development,
+production, `STAGING`) are all still refused. Its title now under-states the
+rule, and it was not edited (Slice 1 tests are frozen).
+
+**Mutations (`runs/code-mutations-replay-fixtures.txt`; all killed):**
+- M31: staging re-allowed. Killed by the staging test.
+- M31b: development allowed too. Killed by the every-other-value test and by
+  the Slice 1 test.
+- M31c: the gate removed. Killed by all three tests.
+
+**L4: kept as documented (DESIGN §8a); follow-up issue draft for the
+orchestrator to open:**
+
+> **Title:** Worker: re-check an unchanged, already-published batch under the current ingestion policy (`replay --period --revalidate`)
+>
+> **Context.** Batches are keyed on their data fingerprint (the artifact
+> sha256s). Once a period's artifact set is published, an unchanged listing
+> is `skipped_unchanged`. `backfill` and `replay --period` find the same
+> batch and return `unchanged` without reading a row (#62 D12 test).
+> Batches published before a policy change are therefore never re-checked
+> against the new rules. Examples of such changes: #62's `ProviderName`
+> allowlist, a later allowlist edit, or the synthetic-provider opt-in being
+> turned off. Quarantined batches have the same gap (Slice 1 DESIGN §12).
+> No production data exists today.
+>
+> **Proposal.** Either:
+> - an explicit operator mode, `ratio-ingest replay --tenant <t> --source
+>   <s> --period YYYY-MM --revalidate`, that re-loads the period's retained
+>   evidence (never the source) through the current validation and provider
+>   policy into a NEW staged batch; or
+> - a documented operator procedure with the same effect.
+>
+> **Acceptance criteria (tests first):**
+> 1. With identical bytes and a tightened policy (a provider removed from
+>    the allowlist, or the synthetic opt-in turned off), `--revalidate`
+>    produces a new batch that excludes the now-foreign rows
+>    (`PROVIDER_MISMATCH`) and publishes the rest. If every row is
+>    excluded, or a hard error appears, it quarantines, and the period's
+>    current publication is untouched (one transaction, fenced like every
+>    publish).
+> 2. With identical bytes and an unchanged policy, the result is identical
+>    (same rows, same totals). Either the new batch is a no-op re-point, or
+>    the mode reports `unchanged-under-current-policy` without publishing.
+>    Decide which in the design note.
+> 3. Bytes are read only from the evidence store, re-hashed against
+>    `ingest_artifacts.sha256`. A mismatch fails `EVIDENCE_INTEGRITY` and
+>    publishes nothing.
+> 4. The batch-key scheme must allow two batches over the same artifact set
+>    (data fingerprint plus a policy or revalidation key, like the
+>    controls-key precedent in Slice 1 review M2). Superseded batches stay
+>    immutable.
+> 5. Every run writes an evidence record naming the mode, the old and new
+>    batch ids and the outcome. `doctor` stays green.
+> 6. A mutation where `--revalidate` silently returns `unchanged` fails a
+>    test. So does one where it reads from the source instead of evidence.
+> 7. Restricted class (Slice 1 worker behaviour): challenger review
+>    required.
