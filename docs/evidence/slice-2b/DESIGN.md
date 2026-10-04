@@ -224,6 +224,33 @@ the unquoted `NULL` count per column; and, per (billing period, currency):
 
 The digest is what catches a value moved between rows, which no sum can see.
 
+**Expected API rows (`--rows`; challenger M1).** For every upstream record,
+the calculator also emits the exact row that `GET /api/v1/costs/published`
+must return. That is the contract of `src/server/costs/publishedCosts.ts`,
+written down independently in Python (`API_FIELD`); it is not imported from
+the worker. The rules:
+
+| API field(s) | From the upstream record |
+|---|---|
+| `billingPeriod` | `BillingPeriodStart` ⇒ `YYYY-MM-DD` (must be a first-of-month midnight) |
+| `chargePeriodStart`, `chargePeriodEnd` | ⇒ UTC, `YYYY-MM-DDTHH:MM:SS.ffffffZ` (no offset = UTC; an offset is converted) |
+| `billedCost`, `effectiveCost`, `listCost`, `contractedCost`, `pricingQuantity` | plain decimal ⇒ `numeric::text` form (scale kept, no leading zeros, no negative zero) |
+| `usageQuantity`, `usageUnit` | `ConsumedQuantity` / `ConsumedUnit`, else `UsageQuantity` / `UsageUnit` |
+| `billingCurrency`, `providerName`, `serviceName`, `serviceCategory`, `chargeCategory`, `resourceId`, `subAccountId`, `billingAccountId`, `pricingUnit` | the text, verbatim |
+| `focusVersion` | the source's declared version (`1.0`) |
+| `extraColumns` | every other column, verbatim, when neither null nor empty |
+
+- An unquoted `NULL`, an empty field or a missing column ⇒ `null` (or absent
+  from `extraColumns`). A quoted `"NULL"` is the text `NULL`.
+- The output also carries `columns`, which classifies every upstream column:
+  `mapped` (column ⇒ API field), `extra` (in `extraColumns`) and
+  `notReturned`.
+- For this dataset the pinned classification is 19 mapped, 25 extra, and
+  `notReturned` empty: **every upstream value is returned**. The only lossy
+  mappings are `BillingPeriodStart`'s time of day (validated as midnight) and
+  the `Usage*` fallbacks (absent in this dataset).
+- Test A10 asserts the classification literally, so any drift fails.
+
 **Pinned expectations.**
 - `fixtures/focus-1.0-sample/control-totals.json` holds the calculator's
   output for both files.
@@ -262,8 +289,9 @@ It refuses any project name or port shared with the developer stack or with
 1. **Before anything starts:**
    - a Next.js build must exist;
    - the dataset file's size and SHA-256 must equal `dataset.json`;
-   - `python3 focus_control_totals.py --expect-sha256 …` (120 s deadline),
-     whose output must equal the pinned `control-totals.json` entry;
+   - `python3 focus_control_totals.py --rows --expect-sha256 …` (120 s
+     deadline). Its `input`, `columns` and `totals` must equal the pinned
+     `control-totals.json` entry; its `rows` feed the full-row comparison;
    - `stageFocusSample` + the lossless round-trip check (§2.1), plus an
      optional mutation (§6);
    - the preflight (no state, containers or busy ports for the project).
@@ -299,7 +327,25 @@ It refuses any project name or port shared with the developer stack or with
        digest equal the control. This is a third implementation of the
        sum, with the same scale rule;
    - the set of `artifactSha256` in the API equals the SHA-256 set of the
-     staged data objects.
+     staged data objects;
+   - **full-row comparison** (`rowProblems`; challenger M1). Every API row is
+     matched by `extraColumns.Id` to the calculator's expected row for the
+     **upstream** record (§4). All 21 upstream-derived fields must be
+     strictly equal:
+     - strings for text and decimal strings for money and quantities, scale
+       included;
+     - `null` for upstream nulls;
+     - `extraColumns`: the same keys and the same values.
+     
+     In addition:
+     - each row has exactly the route's 26 fields (`API_ROW_FIELDS`; A10
+       checks them against the `SELECT` list in `publishedCosts.ts`);
+     - `extraColumns` holds only columns classified `extra`;
+     - the 5 metadata fields (`sourceId`, `batchId`, `artifactSha256`,
+       `rowOrdinal`, `publishedAt`) have their shape, and there is one
+       source;
+     - every upstream record has exactly one API row, and no API row lacks
+       an upstream record.
 8. **Evidence re-hash** (brief §8): for each staged data object, the evidence
    object `evidence/<tenant>/<source>/<sha256>` is fetched from the evidence
    bucket and re-hashed. The hash must equal its key and the staged bytes'
@@ -334,6 +380,8 @@ expected side always comes from the untouched upstream file.
 | `swap-billed` | `BilledCost` swapped between two records of the largest period whose values differ | digest only (sums unchanged) |
 | `skip-null-conversion` | step 1 of the converter skipped | worker quarantines (`UNPARSEABLE_NUMBER`) |
 | `skip-period-split` | step 2 skipped: one file, all rows, in the earliest period | worker quarantines (`PERIOD_MISMATCH`) |
+| `corrupt-text-columns` (challenger M1) | the first record of the largest period: `ServiceName`, `ProviderName`, `ChargeDescription`, `ResourceId`, `ChargeCategory`, `ServiceCategory` each get `~mutated` appended (still quoted strings) | full-row comparison only (sums, counts and digests unchanged) |
+| `corrupt-list-cost` (challenger M1) | the first record of the largest period: `ListCost` + 1 in the last decimal place | full-row comparison only |
 
 These mutations are harness-only. They change what is uploaded, never the
 worker or the expected side.
@@ -374,12 +422,14 @@ worker or the expected side.
 | A2 | 〃 | tokenizer: quotes, `""` escapes, raw bytes kept; refuses CR, an unterminated quote, junk after a quote, a ragged row |
 | A3 | 〃 | `stageFocusSample` on the committed 1k file: the layout keys, two periods with 999 / 1 records, the manifest (`dataFiles`, period, no `x-ratio-control`), every unquoted `NULL` gone, quoted values unchanged, and the **byte-exact round trip** to upstream |
 | A4 | 〃 | decimals: `sumDecimals` (max-scale rule, negatives, zero, no float), `canonicalDecimal` |
-| A5 | 〃 | `aggregateApiRows` + `compareAcceptance`: equal ⇒ none; any differing count, sum, scale, null count, digest, missing or extra key ⇒ a mismatch |
+| A5 | 〃 | `aggregateApiRows` + `compareAcceptance`, the sync, re-sync and catalog checks: equal ⇒ none; every case asserts its **exact** problem list (challenger L2), including the cases only one check can see: `effectiveCostNulls` alone, the distinct-key check alone, a catalog batch for an unexpected period, and (A3) a changed header |
+| A10 | 〃 (challenger M1) | `rowProblems`: equal ⇒ none; a change in any of the 21 compared fields is reported exactly once with the field and the Id; null vs value, decimal scale, a dropped or unexpected `extraColumns` key; missing, duplicate or unknown Id; the 26-field contract (checked against `publishedCosts.ts`); metadata shapes; one source; the report cap; the pinned column classification asserted literally |
 | A6 | 〃 | each mutation changes the staged objects as §6 says; an unknown kind is refused |
 | A7 | 〃 | `verifyDatasetFile` / `fetchPinnedFile`: a size or hash mismatch is refused and leaves no file; a matching body is written atomically; a fetch is bounded by a deadline |
 | A8 | 〃 | `package.json` wires `local:acceptance` and `sample:fetch`; `.ratio-sample-data/` is gitignored; `NOTICE.md` names the licence, the source, the commit and the changes; the committed file's SHA-256 equals `dataset.json` |
 | A9 | 〃 (added with the wiring, 862e2be) | static: `local:acceptance` runs on its own settings, after the preflight, inside `runLocalTest` with the interrupt; the pin and the calculator are checked before any stack exists; the real worker CLI runs twice, with no fake source, test hook or manifest control; every comparison fails the run |
-| P1 | `scripts/acceptance/test_focus_control_totals.py` | the Python calculator: tokenizer, decimal sums (exact, max scale), NULL handling per column, the digest, fail-closed cases, `--expect-sha256` |
+| P1 | `scripts/acceptance/test_focus_control_totals.py` | the Python calculator: tokenizer, decimal sums (exact, max scale), NULL handling per column, the digest, fail-closed cases, `--expect-sha256`; and the expected API rows (`--rows`): the mapping of every field, null/empty handling, timestamp conversion, the `Usage*` fallback, the column classification, a duplicate Id and bad timestamps refused |
+| P2 + rows | 〃 (vitest) | also: `--rows` on the committed 1k file gives 1000 rows with unique Ids, and its first row equals upstream data line 1 **mapped by hand** |
 | P2 | `scripts/acceptance/controlTotals.test.mjs` (vitest) | runs P1 (exit 0 required; python3 missing ⇒ **fail**, never skip), then runs the calculator on the committed 1k file and requires its output to equal the pinned `control-totals.json` |
 | E2E | `npm run local:acceptance` (CI) and `-- --dataset 10k` (on demand) | §5; mutation runs §6 |
 

@@ -162,7 +162,9 @@ jobs:
       # layout, synced twice by the real worker CLI, and read back through the
       # real route under next start. Totals per period and currency, the row
       # count, and the row sums and digests must equal control totals computed
-      # independently in Python (python3 is preinstalled on ubuntu-latest). Its
+      # independently in Python (the 3.12 pinned by "Setup Python 3.12" above).
+      # Every API row must also equal its upstream record, field by field
+      # (keyed by Id; DESIGN §5). Its
       # own project ratio-local-acceptance on 127.0.0.1:54349 / 18363 / 3120
       # (scripts/local/acceptance.mjs localAcceptanceSettings). Always torn
       # down with `down -v`. The 10k file is run on demand (DESIGN §7).

@@ -24,7 +24,7 @@ Status at the time of writing (branch `slice/02-local-env-brief`):
 | Piece | Where it stands |
 |---|---|
 | Slice 0: Postgres foundation (schema `ratio`, RLS, roles, migration runner, catalog privilege model) | merged |
-| Slice 1: FOCUS ingestion worker CLI (`ratio-ingest`: sync / backfill / replay / quarantine / doctor / replay-fixtures) | merged; **only the SYNTHETIC fixture has ever been ingested** |
+| Slice 1: FOCUS ingestion worker CLI (`ratio-ingest`: sync / backfill / replay / quarantine / doctor / replay-fixtures) | merged. Ingested so far, **all locally and ephemerally**: the SYNTHETIC fixture, and the public FOCUS 1.0 Sample Data (FinOps Foundation, CC BY 4.0; Slice 2b acceptance run). **No real billing data has ever been ingested.** |
 | Slice 2: local stack + `GET /api/v1/costs/published` + this brief | PR #59 |
 | Acceptance run (ingestion-ops SKILL §9) | **PERFORMED on public sample data** (updated by Slice 2b, branch `slice/02b-sample-acceptance`; evidence: `docs/evidence/slice-2b/EVIDENCE.md`). Dataset: FinOps Foundation FOCUS 1.0 Sample Data at commit `adbdd17a132984d6e8583c149c236d2199c3f5bc` (CC BY 4.0). Both files went through the real worker and the real API; the reader totals equal control totals computed independently from the CSVs, exactly: **1k file**: 2024-09 999 rows / BilledCost `20.28022672899`, 2024-10 1 row / `0.24000000000`; **10k file**: 2024-09 9998 rows / `151.41648035487`, 2024-10 2 rows / `0.01361088710` (all USD). It does **not** cover real billing data (D-02 limits). |
 
@@ -142,9 +142,29 @@ below and in the Decision log). The two candidates considered were:
     | 10k | 2024-09 | 9998 | `151.41648035487` |
     | 10k | 2024-10 | 2 | `0.01361088710` |
 
-  - **Also checked:** per-row digests, EffectiveCost sums, the evidence
-    re-hash and the catalog (published, `unverified`, not provisional).
-  - **Mutations:** eight data mutations each fail the run.
+  - **Also checked:**
+    - **every API row against its upstream record, field by field**, keyed
+      by `Id`. The expected row comes from the upstream CSV via the
+      independent Python calculator, never from the staged copy. It covers
+      all 21 upstream-derived fields of the API row:
+      - billingPeriod (YYYY-MM-DD) and the two charge-period timestamps
+        (UTC, microseconds, as the API formats them);
+      - the four cost columns, usage and pricing quantities (decimal
+        strings, exact, scale included);
+      - currency, provider, service, service category, charge category,
+        resource, sub-account and billing-account ids, units;
+      - focusVersion;
+      - `extraColumns`, with the same keys and values as the upstream file.
+
+      An upstream `NULL` must be null or absent. The API row must have
+      exactly the route's 26 fields. The upstream column classification is
+      pinned: 19 mapped columns, 25 returned verbatim in `extraColumns`,
+      none dropped;
+    - per-group row digests, EffectiveCost sums and null counts;
+    - the evidence re-hash;
+    - the catalog (published, `unverified`, not provisional).
+  - **Mutations:** ten data mutations each fail the run, including six text
+    columns corrupted and ListCost + 1 in the last digit.
   - **CI:** the 1k run is in CI.
   - **Limits, unchanged:**
     - a real AWS Data Exports manifest is **not** verified (the staged
@@ -462,20 +482,24 @@ take:
 These are verification steps, not decisions. Each is checked before the first
 production deploy:
 
-- [x] **The acceptance run performed on public sample data**: the FOCUS 1.0
-      Sample Data (D-02), in Slice 2b, the follow-up PR to #59
+- [x] **The acceptance run performed on public sample data and signed off
+      by the orchestrator under the owner's delegation (Slice 2b PR)**: the
+      FOCUS 1.0 Sample Data (D-02), in the follow-up PR to #59
       (`docs/evidence/slice-2b/EVIDENCE.md`). All of these were checked:
       - row counts vs the CSV files;
       - totals per period and currency vs totals computed independently from
         the CSV, equal exactly;
+      - every API row equal to its upstream record, field by field;
       - idempotent re-sync;
       - evidence re-hash;
       - read back through the API;
       - the CC BY 4.0 attribution recorded.
 
-      A real billing comparison (vs the Billing console) follows only if the
-      owner connects real data (optional owner action 4). It is **not**
-      covered by this tick (D-02 limits).
+      This sign-off covers the acceptance run only. It is **not** the
+      production go-live sign-off, which stays the owner's non-delegable
+      gate (§7, owner action 1). A real billing comparison (vs the Billing
+      console) follows only if the owner connects real data (optional owner
+      action 4). It is **not** covered by this tick (D-02 limits).
 - [ ] D-09 reviewed against the acceptance run's size.
 - [ ] D-07 items 1–3 applied (protect-main, auto-merge for `low` only, Copilot
       review_on_push); the GitHub App installed (owner action 3).

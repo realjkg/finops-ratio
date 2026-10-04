@@ -280,8 +280,10 @@ uncommitted CM1 test. Output: `runs/code-mutations.txt`.
 **Not run here:** GitHub CI (nothing is pushed).
 - The CI step is added and expected to cost about 25 s; the job measured
   275 s on main (run 37194601870) against `timeout-minutes: 10`.
-- `python3` is preinstalled on `ubuntu-latest`. The step depends on it, and
-  P2 fails, never skips, without it.
+- The step and P2 depend on `python3`, and P2 fails, never skips, without it.
+  CI pins Python 3.12 with `actions/setup-python` (§10, decision 1). This
+  sentence originally said "preinstalled on `ubuntu-latest`"; that was
+  corrected in §11 (L3).
 
 ## 9. Scope, gaps and items for the orchestrator
 
