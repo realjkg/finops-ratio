@@ -983,3 +983,124 @@ cluster-wide role change.
 | `npm run local:test` (`ratio-local-test`, 54339/18353/3110) | pass in 27 s: the new membership verification passed on the real PG16 bootstrap; `appReady: pid-verified`; totals `"55"` / `"40"`, `30.8272954899` / `21.0978157665`; 95 distinct rows; `appStop: stopped`; `down: ok (-v)`; `failures: []` |
 | `npm audit --omit=dev` | 0 vulnerabilities |
 | leftovers | none: private cluster stopped and deleted; no `ratio-local*` containers or volumes; no `.ratio-local/`; no sleepers |
+
+## 15a. Challenger REQUEST CHANGES on f684dbc..480dd87 (1 Medium, 1 Low); local, not pushed
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 4556d48 | RD4, D12 (listener leak); guard hardening self-tests (a)–(e) | **red** (`red/red-challenger6-fast.txt`: 6 failed / 26; `red/red-challenger6-db.txt`: D12 **expected 51 to be 1**, the live leak) |
+| f63d374 | the stray-error listener is attached once per client (`WeakSet`) | green (Medium) |
+| a2dba00 | guard hardening (a)–(e); header documents the remaining limits | green (Low), with the 2 open findings below |
+| 1abb85d | self-test: a comment inside an `EXECUTE '…'` string is stripped | test |
+| (this commit) | this section | docs |
+
+### Medium: error-listener leak in `readDeadline.ts` `guard()`
+
+- **The defect.** Every checkout added `client.on('error', …)` and never
+  removed it. A pooled client is never retired, so it collected one
+  listener per request. D12 reproduced this live in red: 51 listeners after
+  51 requests on a `max: 1` pool.
+- **The fix.** The listener is attached once per client, tracked in a
+  module-level `WeakSet`. It stays for the client's life, which keeps the
+  stray-error protection while the client sits in the pool.
+- **Tests.**
+  - RD4 (unit, fake EventEmitter client): 50 reads on one pooled client leave
+    exactly 1 listener, 50 releases, and no `MaxListenersExceededWarning`.
+  - D12 (DB, a real `max: 1` reader pool, 51 requests): the client's
+    listener count after the last request equals the count after the first.
+- **Mutation M1** (per-checkout `on()` back) fails both RD4 and D12.
+
+### Low: guard hardening (`parallelRoleDdl.test.ts`)
+
+- **(a) Client provenance.** A receiver is transaction-capable only when it
+  is one of these:
+  - a `const` initialised with `await <x>.connect()`;
+  - a `const` initialised with `new Client(…)`, where `Client` is
+    named-imported from `'pg'`;
+  - a `const` initialised with `await f(…)`, where `f` is a function of the
+    file that only returns such a client;
+  - the client parameter of a verified helper.
+
+  `const c = db.pool`, `db.admin`, a `let`, a `new Client` from another
+  module, or a factory that returns something else all count as autocommit,
+  so a fake `BEGIN … ROLLBACK` on them is flagged. The helper's own client
+  must be provable too.
+- **(b) CREATE ROLE that adds members.** `CREATE ROLE | USER | GROUP …
+  ROLE | ADMIN | USER <x>` adds existing roles as members, so it counts as a
+  role change. `… IN ROLE` / `IN GROUP` stays accepted, because it is atomic
+  for the new role.
+- **(c) Comments stripped before matching**, in two readings whose findings
+  are combined:
+  - outside quoted text only, so a `--` inside `'…'` is text and the GRANT
+    after it still counts;
+  - everywhere, so a comment inside an `EXECUTE '…'` string is stripped too.
+
+  Nested block comments are handled.
+- **(d) Indirect use of `query` is a finding:** `.call`, `.apply`, `.bind`,
+  any non-call `x.query`, a computed `['query']`, and destructuring
+  (`{ query }`, `{ query: run }`).
+- **(e) Reassigned clients.** A verified helper's callback client that the
+  callback reassigns is rejected. A plain parameter is never provable, so
+  `c = …` after BEGIN in the same function is flagged too.
+- **Earlier self-tests now use provable clients** (`const c = await
+  db.pool.connect()`), so each rule from §15 is still tested on its own
+  rather than being masked by (a).
+- **Remaining limits are documented in the guard's header:**
+  - only `*.db.test.ts` files are scanned, not the shared test helpers;
+  - `query` is the only SQL sink;
+  - SQL from outside the file is unreadable, so it fails closed;
+  - transaction control is recognised by literal text on the same
+    receiver.
+  - Slice 1's runtime backstop covers dangerous logins, not membership
+    changes.
+
+### Open: 2 NEW Slice 1 findings, reported before widening the allowlist
+
+The stricter scan, rule (d), surfaced two calls that were blind spots before:
+
+| File | Statement (SHA-256 of the enclosing statement) | What it is |
+|---|---|---|
+| `src/ingest/worker/commitTag.db.test.ts:37` | `const r = await (target.query as …).apply(target, args);` (`ac2dcea8a0c1013076cc3b723d762a9b2366a192e86ba8c1a816809a52f37f43`) | `swallowingPool`: a Proxy over a worker pool client. It forwards the worker's own query calls, then injects `SELECT 1 / 0` after a matching statement. |
+| `src/ingest/worker/reviewFindings.db.test.ts:182` | `return (target.query as …).apply(target, args);` (`583be933c615bcae4dbc20bb359875133647de9e8ea49a9f45e3e056c594312c`) | A Proxy over a worker pool client that forwards the worker's own query calls. Before the run-finish UPDATE, it rotates the lease with `admin.query`, which is database-local DML. |
+
+- **What they run.** Both forward whatever the Slice 1 worker's production
+  code sends. The guard cannot read that SQL, so it fails closed.
+- **Not allowlisted, per the instruction.** They are reported here first. The
+  guard's repository tests (3 of the guard's 19) fail on exactly these two.
+- **Ready to approve.** The two allowlist entries are prepared, with the
+  hashes above and a "Slice 1, worker pass-through" reason.
+  - With the entries applied (locally, not committed), the guard is 19/19
+    green; the mutation baseline below used that temporary state.
+  - Nothing else in Slice 0/1 changed status: the 3 existing entries still
+    match exactly.
+
+### Mutation checks (scratch `mutate11.sh`; each applied, run, restored; tree restored to the committed state after)
+
+| ID | Mutation | Result |
+|---|---|---|
+| M1 | per-checkout `on('error')` back (no `WeakSet`) | **killed**: RD4, D12 |
+| H1 | (a) client provenance not required | **killed** (2) |
+| H2 | (a) `new X()` accepted whatever `X` is | **killed** (1) |
+| H3 | (a) a local factory accepted whatever it returns | **killed** (1) |
+| H4 | (a) a `let` accepted | **killed** (1) |
+| H5 | (b) `CREATE ROLE … ROLE/ADMIN/USER` not a role change | **killed** (1) |
+| H6 | (c) comments not stripped at all | **killed** (1) |
+| H7 | (c) only the quote-respecting reading | **killed** (1): the `EXECUTE '…/**/…'` case |
+| H8 | (c) only the quote-ignoring reading | **killed** (1): the `SELECT '--'; GRANT …` case |
+| H9 | (d) `.call` / `.apply` / `.bind` / alias not flagged | **killed** (4) |
+| H10 | (d) computed `['query']` not flagged | **killed** (1) |
+| H11 | (d) destructured `query` not flagged | **killed** (1) |
+| H12 | (e) a reassigned callback client accepted | **killed** (1) |
+
+### Gates (HEAD 1abb85d)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **2379 passed, 3 failed** (103 files). All 3 failures are the guard's repository-scan tests, and they fail ONLY on the 2 open Slice 1 findings above. With the 2 prepared entries applied the guard is 19/19 |
+| `npm run test:db` ×2 (private PG16 at 55700 + S3 prefixes) | **595 + 167** passed ×2 (118, 114 s), D12 included |
+| `worker:build`; `next build`; `check:bundle`; `npm audit --omit=dev` | 0; 0; pass (116 client / 91 server files); 0 vulnerabilities |
+| `npm run local:test` | pass in 27 s; totals `"55"` / `"40"`; `appStop: stopped`; `down: ok (-v)`; `failures: []` |
+| leftovers | none: private cluster stopped and deleted; no `ratio-local*` containers or volumes; no `.ratio-local/`; no sleepers |
