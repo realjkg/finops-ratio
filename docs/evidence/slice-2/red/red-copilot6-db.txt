@@ -1,0 +1,56 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+ ❯ src/server/localBootstrap.serial.db.test.ts (2 tests | 2 failed) 106ms
+   ❯ local bootstrap on pre-existing logins with wrong attributes (Copilot 4176705227) (2)
+     × verifyBootstrap reports every wrong attribute and setting before the bootstrap 13ms
+     × runBootstrap normalises all of it; afterwards the logins have exactly the intended attributes and no per-role settings 24ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/localBootstrap.serial.db.test.ts > local bootstrap on pre-existing logins with wrong attributes (Copilot 4176705227) > verifyBootstrap reports every wrong attribute and setting before the bootstrap
+AssertionError: expected 'ratio_bs_m_4d5f93aa has rolsuper\nrat…' to contain 'ratio_bs_m_4d5f93aa: rolinherit'
+
+- Expected
++ Received
+
+- ratio_bs_m_4d5f93aa: rolinherit
++ ratio_bs_m_4d5f93aa has rolsuper
++ ratio_bs_w_4d5f93aa has rolcreaterole
++ ratio_bs_w_4d5f93aa has rolcreatedb
++ ratio_bs_r_4d5f93aa must have LOGIN
++ ratio_bs_r_4d5f93aa has rolbypassrls
++ ratio_bs_r_4d5f93aa has rolreplication
++ membership ratio_bs_m_4d5f93aa->ratio_owner: inherit_option is false, expected true
++ database ratio_bs_db_4d5f93aa must be owned by ratio_bs_m_4d5f93aa
+
+ ❯ src/server/localBootstrap.serial.db.test.ts:64:24
+     62|       `${names.reader}: per-role setting statement_timeout`,
+     63|     ]) {
+     64|       expect(problems).toContain(expected);
+       |                        ^
+     65|     }
+     66|     expect(problems).not.toMatch(/=public|= ?1\b/);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/server/localBootstrap.serial.db.test.ts > local bootstrap on pre-existing logins with wrong attributes (Copilot 4176705227) > runBootstrap normalises all of it; afterwards the logins have exactly the intended attributes and no per-role settings
+Error: bootstrap verification failed:
+  membership ratio_bs_m_4d5f93aa->ratio_owner: inherit_option is false, expected true
+ ❯ runBootstrap scripts/local/bootstrap.mjs:117:30
+    115|   }
+    116|   const problems = await verifyBootstrap(client, names);
+    117|   if (problems.length) throw new Error(`bootstrap verification failed:…
+       |                              ^
+    118| }
+    119|
+ ❯ src/server/localBootstrap.serial.db.test.ts:70:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  08:16:11
+   Duration  1.17s (transform 66%, tests 20%, setup 11%, import 1%, worker 1%)
+

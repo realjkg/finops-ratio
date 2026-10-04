@@ -48,7 +48,7 @@ import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import process from 'node:process';
 import { clearTimeout, setTimeout } from 'node:timers';
-import { EXPECTED_MEMBERSHIP_OPTIONS, bootstrapPlan, membershipProblems } from './bootstrap.mjs';
+import { EXPECTED_MEMBERSHIP_OPTIONS, LOGIN_ATTRIBUTES, bootstrapPlan, loginAttributeProblems, membershipProblems } from './bootstrap.mjs';
 
 const { AbortController } = globalThis;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -132,7 +132,8 @@ describe('L3 settings', () => {
 describe('L4 role bootstrap plan (Slice 0 privilege model: no dangerous attribute or membership)', () => {
   const plan = bootstrapPlan(LOCAL_NAMES);
   const text = plan.join('\n');
-  const roleDdl = plan.filter((s) => /\b(CREATE|ALTER) ROLE\b/i.test(s));
+  // Attribute-setting role DDL (RESET ALL clears settings; it sets no attribute).
+  const roleDdl = plan.filter((s) => /\b(CREATE|ALTER) ROLE\b/i.test(s) && !/\bRESET ALL$/.test(s));
 
   it('names are the documented local logins', () => {
     expect(LOCAL_NAMES).toMatchObject({
@@ -163,7 +164,13 @@ describe('L4 role bootstrap plan (Slice 0 privilege model: no dangerous attribut
     expect(text).toMatch(/CREATE ROLE ratio_local_migrator LOGIN [^\n]*IN ROLE ratio_owner/);
     expect(text).toMatch(/CREATE ROLE ratio_local_worker LOGIN [^\n]*IN ROLE ratio_worker/);
     expect(text).toMatch(/CREATE ROLE ratio_local_reader LOGIN [^\n]*IN ROLE ratio_reader/);
-    expect(text).not.toMatch(/\bGRANT\b/);
+    // The only GRANTs are the membership re-grants that normalise each login's one edge (Copilot 4176705227): no object grant.
+    const grants = plan.filter((s) => /\bGRANT\b/.test(s));
+    expect(grants).toEqual([
+      'GRANT ratio_owner TO ratio_local_migrator WITH ADMIN FALSE, INHERIT TRUE, SET TRUE',
+      'GRANT ratio_worker TO ratio_local_worker WITH ADMIN FALSE, INHERIT TRUE, SET TRUE',
+      'GRANT ratio_reader TO ratio_local_reader WITH ADMIN FALSE, INHERIT TRUE, SET TRUE',
+    ]);
   });
 
   it('the migrator owns the database; nothing is granted on the database or any object', () => {
@@ -1372,5 +1379,187 @@ describe('L22 no late child after an interrupt (Copilot 4176494798)', () => {
     const src = read('scripts/local/local.mjs');
     expect(src).toMatch(/start: spawnGuard\(\(\) =>\s*trackProcessGroup\(\s*spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'/);
     expect(src).toMatch(/body: async \(\{ steps, setApp, spawnGuard \}\) =>/);
+  });
+});
+
+// --- Copilot 4176705245: stopping next start must stop its whole process group,
+// and a group stays tracked until it is EMPTY (not merely until its leader exits).
+describe('L23 the app is stopped as a process group; a group is tracked until empty (Copilot 4176705245)', () => {
+  const groups = [];
+  afterAll(() => {
+    for (const pgid of groups) {
+      try {
+        process.kill(-pgid, 'SIGKILL');
+      } catch {
+        // gone
+      }
+    }
+  });
+  /** pids whose process group is pgid (Linux /proc/<pid>/stat field 5). */
+  const members = (pgid) =>
+    fs
+      .readdirSync('/proc')
+      .filter((d) => /^\d+$/.test(d))
+      .filter((d) => {
+        try {
+          const stat = fs.readFileSync(`/proc/${d}/stat`, 'utf8');
+          const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+          return Number(fields[2]) === pgid && fields[0] !== 'Z';
+        } catch {
+          return false;
+        }
+      });
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  /** An app double: the leader exits on SIGTERM; its child (same group) ignores SIGTERM. */
+  async function appDouble() {
+    const leader = spawn(
+      process.execPath,
+      [
+        '-e',
+        "const { spawn } = require('child_process'); spawn(process.execPath, ['-e', \"process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)\"], { stdio: 'ignore' }); process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000);",
+      ],
+      { detached: true, stdio: 'ignore' },
+    );
+    groups.push(leader.pid);
+    trackProcessGroup(leader);
+    for (let i = 0; i < 100 && members(leader.pid).length < 2; i += 1) await wait(50);
+    expect(members(leader.pid).length).toBe(2);
+    return leader;
+  }
+
+  it('stopChild signals the whole group: a descendant that survives the leader\'s TERM is SIGKILLed, and the result is not "stopped"', async () => {
+    const app = await appDouble();
+    const result = await stopChild(app, { graceMs: 800, killMs: 3_000 });
+    expect(result).toBe('killed');
+    expect(members(app.pid)).toEqual([]);
+  }, 15_000);
+
+  it('runLocalTest: the summary reports killed (never stopped) while a descendant survived TERM, and nothing of the group remains', async () => {
+    let app;
+    const summary = await runLocalTest({
+      project: 'p',
+      down: async () => undefined,
+      downTimeoutMs: 5_000,
+      stopOptions: { graceMs: 800, killMs: 3_000 },
+      body: async ({ setApp }) => {
+        app = await appDouble();
+        setApp(app);
+      },
+    });
+    expect(summary.steps.appStop).toBe('killed');
+    expect(members(app.pid)).toEqual([]);
+  }, 15_000);
+
+  it('an obeying group (leader and child both exit on TERM) is "stopped"', async () => {
+    const leader = spawn(
+      process.execPath,
+      ['-e', "const { spawn } = require('child_process'); spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); setInterval(() => {}, 1000);"],
+      { detached: true, stdio: 'ignore' },
+    );
+    groups.push(leader.pid);
+    trackProcessGroup(leader);
+    for (let i = 0; i < 100 && members(leader.pid).length < 2; i += 1) await wait(50);
+    await expect(stopChild(leader, { graceMs: 3_000, killMs: 3_000 })).resolves.toBe('stopped');
+    expect(members(leader.pid)).toEqual([]);
+  }, 15_000);
+
+  it('a group stays tracked after its leader exits while a descendant lives; the sweep then kills it and it leaves the set', async () => {
+    const app = await appDouble();
+    process.kill(app.pid, 'SIGKILL'); // the leader only
+    await new Promise((r) => (childExited(app) ? r() : app.once('exit', r)));
+    expect(members(app.pid).length).toBe(1);
+    expect(liveProcessGroups()).toContain(app.pid);
+    killLiveProcessGroups();
+    for (let i = 0; i < 100 && members(app.pid).length; i += 1) await wait(50);
+    expect(members(app.pid)).toEqual([]);
+    expect(liveProcessGroups()).not.toContain(app.pid);
+  }, 15_000);
+
+  it('every kill site in scripts/local/*.mjs targets the process group (process.kill(-pid, …)); a bare child.kill only as the fallback for an untracked child', () => {
+    const lib = read('scripts/local/lib.mjs');
+    const bare = lib.split('\n').filter((l) => /\bchild\.kill\(/.test(l));
+    for (const l of bare) expect(l, l).toMatch(/child\.kill\(signal\)/);
+    expect(read('scripts/local/local.mjs')).not.toMatch(/\.kill\(/);
+  });
+});
+
+// --- Copilot 4176705227: the complete intended attribute set of every bootstrap
+// login is normalised AND verified (INHERIT first of all).
+describe('L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227)', () => {
+  const good = (name) => ({
+    rolname: name,
+    rolcanlogin: true,
+    rolinherit: true,
+    rolsuper: false,
+    rolbypassrls: false,
+    rolreplication: false,
+    rolcreaterole: false,
+    rolcreatedb: false,
+    rolconnlimit: -1,
+    validity: 'infinity',
+  });
+  const logins = [LOCAL_NAMES.migrator, LOCAL_NAMES.worker, LOCAL_NAMES.reader];
+
+  it('the intended attributes: LOGIN INHERIT NOSUPERUSER NOBYPASSRLS NOREPLICATION NOCREATEROLE NOCREATEDB, no connection limit, no expiry', () => {
+    expect(LOGIN_ATTRIBUTES).toEqual({
+      rolcanlogin: true,
+      rolinherit: true,
+      rolsuper: false,
+      rolbypassrls: false,
+      rolreplication: false,
+      rolcreaterole: false,
+      rolcreatedb: false,
+      rolconnlimit: -1,
+    });
+    expect(loginAttributeProblems(logins.map(good), [], LOCAL_NAMES)).toEqual([]);
+    expect(loginAttributeProblems(logins.map((l) => ({ ...good(l), validity: 'none' })), [], LOCAL_NAMES)).toEqual([]);
+  });
+
+  it.each([
+    ['rolinherit', false],
+    ['rolcanlogin', false],
+    ['rolsuper', true],
+    ['rolbypassrls', true],
+    ['rolreplication', true],
+    ['rolcreaterole', true],
+    ['rolcreatedb', true],
+    ['rolconnlimit', 0],
+    ['rolconnlimit', 5],
+    ['rolinherit', null],
+    ['validity', 'past'],
+    ['validity', 'future'],
+  ])('%s = %s on any login fails verification', (attr, value) => {
+    for (const l of logins) {
+      const rows = logins.map(good).map((r) => (r.rolname === l ? { ...r, [attr]: value } : r));
+      const p = loginAttributeProblems(rows, [], LOCAL_NAMES);
+      expect(p, `${l} ${attr}`).toHaveLength(1);
+      expect(p[0]).toContain(l);
+      expect(p[0]).toContain(attr === 'validity' ? 'VALID UNTIL' : attr);
+    }
+  });
+
+  it('a missing login fails; any per-role setting of a login (global or in the database) is reported by key, never by value', () => {
+    expect(loginAttributeProblems(logins.slice(1).map(good), [], LOCAL_NAMES).join('\n')).toMatch(/missing/);
+    const p = loginAttributeProblems(logins.map(good), [{ role: LOCAL_NAMES.reader, database: 'ratio', setconfig: ['search_path=public', 'statement_timeout=1'] }], LOCAL_NAMES);
+    expect(p).toHaveLength(2);
+    expect(p.join('\n')).toMatch(/search_path/);
+    expect(p.join('\n')).not.toMatch(/public|=1/);
+  });
+
+  it('the plan normalises every existing login: the full attribute set, CONNECTION LIMIT -1, VALID UNTIL infinity, and RESET ALL (global and in the database)', () => {
+    const plan = bootstrapPlan(LOCAL_NAMES);
+    for (const l of logins) {
+      expect(plan).toContain(`ALTER ROLE ${l} LOGIN INHERIT NOSUPERUSER NOBYPASSRLS NOREPLICATION NOCREATEDB NOCREATEROLE CONNECTION LIMIT -1 VALID UNTIL 'infinity'`);
+      expect(plan).toContain(`ALTER ROLE ${l} RESET ALL`);
+      const inDb = plan.indexOf(`ALTER ROLE ${l} IN DATABASE ratio RESET ALL`);
+      expect(inDb).toBeGreaterThan(plan.findIndex((s) => s.startsWith("SELECT 'CREATE DATABASE")));
+    }
+  });
+
+  it('verifyBootstrap reads rolinherit, rolconnlimit, the expiry and pg_db_role_setting, and judges them with loginAttributeProblems', () => {
+    const src = read('scripts/local/bootstrap.mjs');
+    expect(src).toMatch(/rolinherit[\s\S]*?rolconnlimit[\s\S]*?rolvaliduntil/);
+    expect(src).toMatch(/pg_catalog\.pg_db_role_setting/);
+    expect(src).toMatch(/problems\.push\(\.\.\.loginAttributeProblems\(/);
   });
 });

@@ -1,0 +1,366 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+ ❯ scripts/local/local.test.mjs (152 tests | 21 failed) 10723ms
+   ❯ L23 the app is stopped as a process group; a group is tracked until empty (Copilot 4176705245) (5)
+     × stopChild signals the whole group: a descendant that survives the leader's TERM is SIGKILLed, and the result is not "stopped" 89ms
+     × runLocalTest: the summary reports killed (never stopped) while a descendant survived TERM, and nothing of the group remains 66ms
+     × an obeying group (leader and child both exit on TERM) is "stopped" 66ms
+     × a group stays tracked after its leader exits while a descendant lives; the sweep then kills it and it leaves the set 64ms
+     × every kill site in scripts/local/*.mjs targets the process group (process.kill(-pid, …)); a bare child.kill only as the fallback for an untracked child 2ms
+   ❯ L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) (16)
+     × the intended attributes: LOGIN INHERIT NOSUPERUSER NOBYPASSRLS NOREPLICATION NOCREATEROLE NOCREATEDB, no connection limit, no expiry 2ms
+     × rolinherit = false on any login fails verification 1ms
+     × rolcanlogin = false on any login fails verification 1ms
+     × rolsuper = true on any login fails verification 8ms
+     × rolbypassrls = true on any login fails verification 0ms
+     × rolreplication = true on any login fails verification 0ms
+     × rolcreaterole = true on any login fails verification 0ms
+     × rolcreatedb = true on any login fails verification 0ms
+     × rolconnlimit = 0 on any login fails verification 0ms
+     × rolconnlimit = 5 on any login fails verification 0ms
+     × rolinherit = null on any login fails verification 0ms
+     × validity = past on any login fails verification 0ms
+     × validity = future on any login fails verification 0ms
+     × a missing login fails; any per-role setting of a login (global or in the database) is reported by key, never by value 0ms
+     × the plan normalises every existing login: the full attribute set, CONNECTION LIMIT -1, VALID UNTIL infinity, and RESET ALL (global and in the database) 1ms
+     × verifyBootstrap reads rolinherit, rolconnlimit, the expiry and pg_db_role_setting, and judges them with loginAttributeProblems 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 21 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/local.test.mjs > L23 the app is stopped as a process group; a group is tracked until empty (Copilot 4176705245) > stopChild signals the whole group: a descendant that survives the leader's TERM is SIGKILLed, and the result is not "stopped"
+AssertionError: expected 'stopped' to be 'killed' // Object.is equality
+
+Expected: "killed"
+Received: "stopped"
+
+ ❯ scripts/local/local.test.mjs:1426:20
+    1424|     const app = await appDouble();
+    1425|     const result = await stopChild(app, { graceMs: 800, killMs: 3_000 …
+    1426|     expect(result).toBe('killed');
+       |                    ^
+    1427|     expect(members(app.pid)).toEqual([]);
+    1428|   }, 15_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L23 the app is stopped as a process group; a group is tracked until empty (Copilot 4176705245) > runLocalTest: the summary reports killed (never stopped) while a descendant survived TERM, and nothing of the group remains
+AssertionError: expected 'stopped' to be 'killed' // Object.is equality
+
+Expected: "killed"
+Received: "stopped"
+
+ ❯ scripts/local/local.test.mjs:1442:35
+    1440|       },
+    1441|     });
+    1442|     expect(summary.steps.appStop).toBe('killed');
+       |                                   ^
+    1443|     expect(members(app.pid)).toEqual([]);
+    1444|   }, 15_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L23 the app is stopped as a process group; a group is tracked until empty (Copilot 4176705245) > an obeying group (leader and child both exit on TERM) is "stopped"
+AssertionError: expected [ '17815' ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "17815",
++ ]
+
+ ❯ scripts/local/local.test.mjs:1456:33
+    1454|     for (let i = 0; i < 100 && members(leader.pid).length < 2; i += 1)…
+    1455|     await expect(stopChild(leader, { graceMs: 3_000, killMs: 3_000 }))…
+    1456|     expect(members(leader.pid)).toEqual([]);
+       |                                 ^
+    1457|   }, 15_000);
+    1458|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L23 the app is stopped as a process group; a group is tracked until empty (Copilot 4176705245) > a group stays tracked after its leader exits while a descendant lives; the sweep then kills it and it leaves the set
+AssertionError: expected [] to include 17822
+ ❯ scripts/local/local.test.mjs:1464:33
+    1462|     await new Promise((r) => (childExited(app) ? r() : app.once('exit'…
+    1463|     expect(members(app.pid).length).toBe(1);
+    1464|     expect(liveProcessGroups()).toContain(app.pid);
+       |                                 ^
+    1465|     killLiveProcessGroups();
+    1466|     for (let i = 0; i < 100 && members(app.pid).length; i += 1) await …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L23 the app is stopped as a process group; a group is tracked until empty (Copilot 4176705245) > every kill site in scripts/local/*.mjs targets the process group (process.kill(-pid, …)); a bare child.kill only as the fallback for an untracked child
+AssertionError:   child.kill('SIGTERM');: expected '  child.kill(\'SIGTERM\');' to match /child\.kill\(signal\)/
+
+- Expected:
+/child\.kill\(signal\)/
+
++ Received:
+"  child.kill('SIGTERM');"
+
+ ❯ scripts/local/local.test.mjs:1474:40
+    1472|     const lib = read('scripts/local/lib.mjs');
+    1473|     const bare = lib.split('\n').filter((l) => /\bchild\.kill\(/.test(…
+    1474|     for (const l of bare) expect(l, l).toMatch(/child\.kill\(signal\)/…
+       |                                        ^
+    1475|     expect(read('scripts/local/local.mjs')).not.toMatch(/\.kill\(/);
+    1476|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > the intended attributes: LOGIN INHERIT NOSUPERUSER NOBYPASSRLS NOREPLICATION NOCREATEROLE NOCREATEDB, no connection limit, no expiry
+AssertionError: expected undefined to deeply equal { rolcanlogin: true, …(7) }
+
+- Expected:
+{
+  "rolbypassrls": false,
+  "rolcanlogin": true,
+  "rolconnlimit": -1,
+  "rolcreatedb": false,
+  "rolcreaterole": false,
+  "rolinherit": true,
+  "rolreplication": false,
+  "rolsuper": false,
+}
+
++ Received:
+undefined
+
+ ❯ scripts/local/local.test.mjs:1497:30
+    1495|
+    1496|   it('the intended attributes: LOGIN INHERIT NOSUPERUSER NOBYPASSRLS N…
+    1497|     expect(LOGIN_ATTRIBUTES).toEqual({
+       |                              ^
+    1498|       rolcanlogin: true,
+    1499|       rolinherit: true,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > rolinherit = false on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > rolcanlogin = false on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > rolsuper = true on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > rolbypassrls = true on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > rolreplication = true on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > rolcreaterole = true on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > rolcreatedb = true on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > rolconnlimit = 0 on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > rolconnlimit = 5 on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > rolinherit = null on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > validity = past on any login fails verification
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > validity = future on any login fails verification
+TypeError: loginAttributeProblems is not a function
+ ❯ scripts/local/local.test.mjs:1527:39
+    1525|     for (const l of logins) {
+    1526|       const rows = logins.map(good).map((r) => (r.rolname === l ? { ..…
+    1527|       const p = loginAttributeProblems(rows, [], LOCAL_NAMES);
+       |                                       ^
+    1528|       expect(p, `${l} ${attr}`).toHaveLength(1);
+    1529|       expect(p[0]).toContain(l);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > a missing login fails; any per-role setting of a login (global or in the database) is reported by key, never by value
+TypeError: loginAttributeProblems is not a function
+ ❯ scripts/local/local.test.mjs:1535:34
+    1533|
+    1534|   it('a missing login fails; any per-role setting of a login (global o…
+    1535|     expect(loginAttributeProblems(logins.slice(1).map(good), [], LOCAL…
+       |                                  ^
+    1536|     const p = loginAttributeProblems(logins.map(good), [{ role: LOCAL_…
+    1537|     expect(p).toHaveLength(2);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > the plan normalises every existing login: the full attribute set, CONNECTION LIMIT -1, VALID UNTIL infinity, and RESET ALL (global and in the database)
+AssertionError: expected [ …(11) ] to include 'ALTER ROLE ratio_local_migrator LOGIN…'
+ ❯ scripts/local/local.test.mjs:1545:20
+    1543|     const plan = bootstrapPlan(LOCAL_NAMES);
+    1544|     for (const l of logins) {
+    1545|       expect(plan).toContain(`ALTER ROLE ${l} LOGIN INHERIT NOSUPERUSE…
+       |                    ^
+    1546|       expect(plan).toContain(`ALTER ROLE ${l} RESET ALL`);
+    1547|       const inDb = plan.indexOf(`ALTER ROLE ${l} IN DATABASE ratio RES…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L24 bootstrap login attributes are normalised and verified in full (Copilot 4176705227) > verifyBootstrap reads rolinherit, rolconnlimit, the expiry and pg_db_role_setting, and judges them with loginAttributeProblems
+AssertionError: expected '// LOCAL role bootstrap for the Ratio…' to match /rolinherit[\s\S]*?rolconnlimit[\s\S]*…/
+
+- Expected:
+/rolinherit[\s\S]*?rolconnlimit[\s\S]*?rolvaliduntil/
+
++ Received:
+"// LOCAL role bootstrap for the Ratio stack (run by `npm run local:up`, as the
+// local container superuser). LOCAL AND EPHEMERAL ONLY: production role and
+// login provisioning follows D-04 as decided (an admin pre-creates the roles;
+// docs/evidence/slice-2/DEPLOYMENT_BRIEF.md, Decision log).
+//
+// What it creates (every step idempotent; re-running changes nothing but the
+// passwords, which are re-set from .ratio-local/<project>/env):
+//   1. ratio_owner, ratio_worker, ratio_reader — EXACTLY as migration 0001
+//      would (NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE, member
+//      of nothing). Pre-creating them means the migrator never needs
+//      CREATEROLE. 0001's guard (RT010) and the runner's catalog check still
+//      verify them on every migration.
+//   2. Three LOGIN roles, each with every NO... attribute and exactly ONE
+//      membership:
+//        ratio_local_migrator IN ROLE ratio_owner  (owns database `ratio`)
+//        ratio_local_worker   IN ROLE ratio_worker
+//        ratio_local_reader   IN ROLE ratio_reader
+//   3. Database `ratio`, owned by the migrator (CREATE SCHEMA and the ledger
+//      in `public` need it; Slice 0's REVIEWED_OWNER_PRIVILEGES allow it).
+// Nothing is GRANTed to any login on the database or on any object: an
+// explicit grant to a ratio-role member would exceed Slice 0's reviewed set.
+// Verification: verifyBootstrap() below, then `local:migrate` runs
+// `migrate --status --json`, whose catalog check (Slice 0's privilege model)
+// must report no privilege problem for these exact logins.
+
+const IDENT_RE = /^[a-z_][a-z0-9_]{0,62}$/;
+const SAFE_ATTRS = 'NOSUPERUSER NOBYPASSRLS NOREPLICATION NOCREATEDB NOCREATEROLE';
+export const RATIO_ROLES = Object.freeze(['ratio_owner', 'ratio_worker', 'ratio_reader']);
+
+function ident(name) {
+  if (typeof name !== 'string' || !IDENT_RE.test(name)) throw new Error('bootstrap: identifiers must be plain lower-case names');
+  return name;
+}
+
+/** The logins and the ratio role each one is a member of. */
+export function loginMemberships(names) {
+  return [
+    [ident(names.migrator), 'ratio_owner'],
+    [ident(names.worker), 'ratio_worker'],
+    [ident(names.reader), 'ratio_reader'],
+  ];
+}
+
+const ifMissing = (role, ddl) =>
+  `DO $bootstrap$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '${role}') THEN ${ddl}; END IF; END $bootstrap$`;
+
+/** Every statement of the bootstrap, in order. No secret is part of the plan. */
+export function bootstrapPlan(names) {
+  const database = ident(names.database);
+  const migrator = ident(names.migrator);
+  const plan = [];
+  for (const r of RATIO_ROLES) plan.push(ifMissing(r, `CREATE ROLE ${r} NOLOGIN ${SAFE_ATTRS}`));
+  for (const [login, parent] of loginMemberships(names)) {
+    plan.push(ifMissing(login, `CREATE ROLE ${login} LOGIN ${SAFE_ATTRS} IN ROLE ${parent}`));
+    // Re-assert the safe attributes on a login that already existed.
+    plan.push(`ALTER ROLE ${login} LOGIN ${SAFE_ATTRS}`);
+  }
+  // CREATE DATABASE cannot run in a DO block: the runner executes the row this returns (like psql \\gexec).
+  plan.push(`SELECT 'CREATE DATABASE ${database} OWNER ${migrator}' AS ddl WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = '${database}')`);
+  plan.push(`ALTER DATABASE ${database} OWNER TO ${migrator}`);
+  return plan;
+}
+
+/**
+ * The exact PG16 shape of every bootstrap membership (login → its one ratio
+ * role), as `CREATE ROLE … IN ROLE` creates it on PG16:
+ *   - admin_option FALSE: the login cannot grant its ratio role to anyone;
+ *   - inherit_option TRUE: the login holds the role's privileges directly
+ *     (the reader reads the view, the worker writes, the migrator owns);
+ *   - set_option TRUE: PG16's default for IN ROLE; Slice 0's catalog check
+ *     reviews it with the rest of the closure.
+ */
+export const EXPECTED_MEMBERSHIP_OPTIONS = Object.freeze({ admin_option: false, inherit_option: true, set_option: true });
+
+/**
+ * Problems with the membership rows of the ratio roles and the logins: exactly
+ * one grant per expected login → ratio-role edge, each with exactly
+ * EXPECTED_MEMBERSHIP_OPTIONS (a missing option, e.g. NULL, fails closed), and
+ * no other edge.
+ */
+export function membershipProblems(rows, names) {
+  const problems = [];
+  const expected = new Map(loginMemberships(names).map(([l, p]) => [`${l}->${p}`, { member: l, parent: p }]));
+  const seen = new Map();
+  for (const r of rows) {
+    const key = `${r.member}->${r.parent}`;
+    if (!expected.has(key)) {
+      problems.push(`membership ${key} is not expected`);
+      continue;
+    }
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+    for (const [option, want] of Object.entries(EXPECTED_MEMBERSHIP_OPTIONS)) {
+      if (r[option] !== want) problems.push(`membership ${key}: ${option} is ${JSON.stringify(r[option] ?? null)}, expected ${want}`);
+    }
+  }
+  for (const key of expected.keys()) {
+    const n = seen.get(key) ?? 0;
+    if (n === 0) problems.push(`membership ${key} is missing`);
+    if (n > 1) problems.push(`membership ${key} has more than one grant (${n}, e.g. from another grantor)`);
+  }
+  return problems;
+}
+
+/** Runs the plan on a superuser client, then sets the login passwords (server-side quoting) and verifies. */
+export async function runBootstrap(client, names, passwords) {
+  for (const sql of bootstrapPlan(names)) {
+    const r = await client.query(sql);
+    if (/^SELECT 'CREATE DATABASE /.test(sql)) for (const row of r.rows) await client.query(row.ddl);
+  }
+  for (const [login] of loginMemberships(names)) {
+    const password = passwords[login];
+    if (typeof password !== 'string' || password.length < 32) throw new Error(`bootstrap: no strong password for ${login}`);
+    const f = await client.query(`SELECT pg_catalog.format('ALTER ROLE %I PASSWORD %L', $1::text, $2::text) AS sql`, [login, password]);
+    await client.query(f.rows[0].sql);
+  }
+  const problems = await verifyBootstrap(client, names);
+  if (problems.length) throw new Error(`bootstrap verification failed:\\n  ${problems.join('\\n  ')}`);
+}
+
+/** The bootstrap's own invariants (Slice 0's catalog check is the authoritative one, run by local:migrate). */
+export async function verifyBootstrap(client, names) {
+  const problems = [];
+  const roles = await client.query(
+    `SELECT rolname, rolcanlogin, rolsuper, rolbypassrls, rolreplication, rolcreaterole, rolcreatedb
+       FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])`,
+    [[...RATIO_ROLES, ...loginMemberships(names).map(([l]) => l)]],
+  );
+  const byName = new Map(roles.rows.map((r) => [r.rolname, r]));
+  const expectRole = (name, login) => {
+    const r = byName.get(name);
+    if (!r) return problems.push(`${name} is missing`);
+    if (r.rolcanlogin !== login) problems.push(`${name} must ${login ? '' : 'not '}have LOGIN`);
+    for (const a of ['rolsuper', 'rolbypassrls', 'rolreplication', 'rolcreaterole', 'rolcreatedb']) if (r[a]) problems.push(`${name} has ${a}`);
+  };
+  for (const r of RATIO_ROLES) expectRole(r, false);
+  for (const [login] of loginMemberships(names)) expectRole(login, true);
+  // PG16: one row per grant, with its ADMIN / INHERIT / SET options (Copilot 4176494789).
+  const edges = await client.query(
+    `SELECT m.rolname AS member, g.rolname AS parent, a.admin_option, a.inherit_option, a.set_option
+       FROM pg_catalog.pg_auth_members a
+       JOIN pg_catalog.pg_roles m ON m.oid = a.member JOIN pg_catalog.pg_roles g ON g.oid = a.roleid
+      WHERE m.rolname = ANY ($1::text[]) ORDER BY 1, 2`,
+    [[...RATIO_ROLES, ...loginMemberships(names).map(([l]) => l)]],
+  );
+  problems.push(...membershipProblems(edges.rows, names));
+  const db = await client.query(
+    `SELECT pg_catalog.pg_get_userbyid(datdba) AS owner FROM pg_catalog.pg_database WHERE datname = $1`,
+    [ident(names.database)],
+  );
+  if (db.rows[0]?.owner !== names.migrator) problems.push(`database ${names.database} must be owned by ${names.migrator}`);
+  return problems;
+}
+"
+
+ ❯ scripts/local/local.test.mjs:1554:17
+    1552|   it('verifyBootstrap reads rolinherit, rolconnlimit, the expiry and p…
+    1553|     const src = read('scripts/local/bootstrap.mjs');
+    1554|     expect(src).toMatch(/rolinherit[\s\S]*?rolconnlimit[\s\S]*?rolvali…
+       |                 ^
+    1555|     expect(src).toMatch(/pg_catalog\.pg_db_role_setting/);
+    1556|     expect(src).toMatch(/problems\.push\(\.\.\.loginAttributeProblems\…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/21]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  21 failed | 131 passed (152)
+   Start at  08:15:51
+   Duration  11.44s (tests 98%, transform 2%, import 1%)
+
