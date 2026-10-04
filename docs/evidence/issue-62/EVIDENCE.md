@@ -493,3 +493,30 @@ L5).
 
 **Cleanup:** the cluster, the container and its volume, the compose
 project and the scratch files were removed after the run.
+
+## 11. Challenger APPROVED at fc7ad89 (0 High, 0 Medium); the two Lows landed
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 2dee8e4 | L-1: a deterministic check. An idle session with `application_name = 'ratio-replay-fixtures'` sits in the `postgres` database (the challenger's reproduction), and `adminConnections()` must still count 0 | **red** (`red/red-l1-connection-scope.txt`: "expected 1 to be +0", because the cluster-wide query counted the other database's session) |
+| 5152578 | `adminConnections()` adds `AND datname = current_database()`. L-2: SKILL.md §7 states that `RATIO_ENV=test` without `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` is refused (exit 2 `REPLAY_FIXTURES_NOT_ALLOWED`); the DEPLOYMENT_BRIEF operational row adds the opt-in requirement | green |
+
+**M34 re-run with the scoped query** (`runs/code-mutation-m34-rerun.txt`):
+the admin client never ended is still **killed** ("expected 1 to be +0"),
+because the admin client connects to the test's own database.
+
+**Known pre-existing gap (informational; not in this PR, logged on #58 by
+the orchestrator):** mutation **Y4** survives. Dropping
+`z === 'LEASE_LOST'` from the `zombie_fencing` pass condition goes
+unnoticed, because K5 (`cliWorker.db.test.ts`) only asserts that all six
+scenarios pass. This predates #62.
+
+**Final gates (at 5152578; private PG16 `/dev/shm/i62pg` on 127.0.0.1:55930
+and SeaweedFS `i62-s3` on 127.0.0.1:55931; `/tmp/aidg_pg` not touched):**
+
+| Gate | Result |
+|---|---|
+| lint, tsc | exit 0 |
+| `npm test` | 110 files / **2600 passed** |
+| `replayFixturesQuarantine.db.test.ts` + `cliWorker.db.test.ts`, run concurrently (vitest file parallelism) against one cluster, ×3 | **9 passed** each time (2 files), exit 0 ×3 |
+| `npm run test:db` ×1 | parallel 36 files / **627 passed**; serial 6 files / **173 passed**; exit 0 |
