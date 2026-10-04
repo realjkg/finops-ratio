@@ -25,7 +25,7 @@ ordinary commits and plain pushes (never a force-push).
 | 13 | `86c2c29` | The challenger's REQUEST CHANGES on revision 12 (2 Medium, 1 Low) and Copilot's review 5407430521 (r4178706470, High): rollup pointer semantics and a single lease-holding writer; exactly-once coverage with nulls; stable ids under null identity columns; pointer guard, sequence grants and per-batch atomicity; `rollup12.py` category count (§3j). |
 | 14 | `10cd9ce` | The challenger's REQUEST CHANGES on revision 13 (1 Medium, 3 Low), §3k: the high-water mark is the tenant's `max(batch_seq)`; the pointer trigger's scope stated; sentinel groups marked `attributed: false`; the negative-usage blind spot in the budget table and the limits. |
 | 15 | `dc43f4f`, `a268c0e` | The challenger's REQUEST CHANGES on revision 14 (1 Medium, 3 Low), §3l, and Copilot's review 5407477027 of 10cd9ce (16 findings), §3m: the high-water mark and the sequence allocation are defined on an empty tenant (`coalesce(max, 0)`, `NOT NULL`); the monotonicity reason corrected; the known-limits list made complete. |
-| 16 | this revision | The challenger's REQUEST CHANGES on revision 15 (2 Medium, 4 Low), §3n: the run row is closed for INSERT with terminal statuses and a unique `run_seq`; an effect window for every label kind; multi-day usage in the limits with a coverage share; leaf derivation enforced by FKs. |
+| 16 | `9e0d703` and the §5 refresh | The challenger's REQUEST CHANGES on revision 15 (2 Medium, 4 Low), §3n: the run row is closed for INSERT with terminal statuses and a unique `run_seq`; an effect window for every label kind; multi-day usage in the limits with a coverage share; leaf derivation enforced by FKs. |
 
 ## 2. Governance wording: reverted
 
@@ -368,19 +368,20 @@ Appendix B (B.4, B.5.6–B.5.12).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 16 (the commit that adds this line, PR #70's head when pushed;
-the same reasons as at `a268c0e`, revision 15, `10cd9ce`, revision 14, `86c2c29`, revision 13, `d691069`, revision 12, `d6be584`, revision 11, at `bd440b5`, revision 10
-after merging `origin/main`, and at
-`9f1febb` before the merge, `bb4379c`, revision 9, `04e6cf8`, revision 8,
-`380e9a0`, revision 7,
-`66a1fa2`, revision 6, `fc7ee66`, revision 5, and `faeabb4`, revision 4):
+at `9e0d703` (revision 16). It gives the same risk and classes as every
+revision since 4, and **one more reason than before**: `retention.mention`
+on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is
+"outside retention" (rev. 16, L4). That is a statement about the D-12
+retention policy, so the rule is right to match it. Revisions 4–15 (`faeabb4`
+… `a268c0e`, including the merge `bd440b5`) had the seven reasons below
+without it:
 
 - `"risk": "restricted"`, classes `retention` and `secrets`;
 - `secrets.password-assignment` on `APPENDIX_B_SIZING.md` (the
   `POSTGRES_PASSWORD=<throwaway>` run command, no secret value) and on
   this file (which quotes it);
-- `retention.mention` on `APPENDIX_D_SCHEMA_SKETCH.md`, `DESIGN.md` and
-  this file;
+- `retention.mention` on `APPENDIX_D_SCHEMA_SKETCH.md`, `DESIGN.md`,
+  this file and, since revision 16, `APPENDIX_B_SIZING.md`;
 - `retention.delete-from` on `DESIGN.md` (the threat-model test that a
   `DELETE FROM ratio.cost_daily` by the analytics login is refused) and on
   this file (which quotes it).
