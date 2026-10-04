@@ -165,9 +165,19 @@ Pool session settings (startup `options`):
     `statement_timeout`;
   - the whole request (tenant transaction, login check, reads) has a 20 s
     deadline.
-- **A stuck client is destroyed, never pooled.** That covers a client that
-  hit a client-side failure (a timeout or a lost connection: an error
-  without a SQLSTATE) and a client still held at the request deadline:
+- **A stuck or broken client is destroyed, never pooled.** That covers a
+  client still held at the request deadline, and a client whose query failed
+  with anything but a session-preserving SQL error (Copilot 4176969214,
+  §15). A session-preserving SQL error is classified positively. It must be
+  a pg `DatabaseError` with:
+  - severity exactly `ERROR`;
+  - a SQLSTATE outside class 08 and 57P01–57P05;
+  - no Node `errno`/`syscall`.
+
+  So Node system errors (EPIPE, ECONNRESET, …), pg's `query_timeout`,
+  "Connection terminated", errors without a code, look-alikes, and
+  `pg_terminate_backend`'s FATAL 57P01 all poison the client. For such a
+  client:
   - it is released with the error, which makes pg-pool drop it, and its
     socket is destroyed;
   - once poisoned, it refuses further queries, so the ROLLBACK cannot queue
@@ -899,3 +909,29 @@ has started:
   intended there. Removing it is left to a person. `local:up` fails with
   the full list and the remedy. Migration 0001 grants no role membership,
   so a migrated cluster has exactly the three expected edges.
+
+## 15. Copilot review of cb06552 (1 Medium; local, not pushed)
+
+**Medium 4176969214: the reader guard's "is this a SQL error?" test.**
+- **Cause:** it matched any code of 5 uppercase letters or digits, and
+  Node's `EPIPE` is one. A broken socket therefore looked like a server SQL
+  error:
+  - the client was not poisoned;
+  - the tenant transaction's ROLLBACK went to the dead transport;
+  - `release()` ran without the error.
+- **Fix:** `isSessionPreservingSqlError` (`readDeadline.ts`) classifies
+  positively. It requires `err instanceof DatabaseError`; `pg` 8.23.1 exports
+  pg-protocol's class, and exactly one copy is installed. It also requires:
+  - severity exactly `ERROR`. FATAL and PANIC end the session. Severity is
+    the localised `S` field, so a localised server fails safe: its clients
+    are recycled, never kept broken;
+  - a SQLSTATE that is not class 08 (connection exception) or 57P01–57P05
+    (shutdown, crash and similar);
+  - no `errno`/`syscall`.
+
+  Everything else poisons. 57014 (`statement_timeout`) and ordinary errors
+  such as 42P01, 42501 and 40001 keep the session, which stays usable after
+  the ROLLBACK.
+- **Sweep:** no other place in `src/server/costs` or `scripts/local`
+  classifies errors by code shape. `scripts/local` checks exact codes only
+  (`ESRCH`, `EPERM`, its own `RATIO_LOCAL_DEADLINE`).
