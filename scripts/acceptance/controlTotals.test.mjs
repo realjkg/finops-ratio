@@ -35,11 +35,14 @@ describe('P2 independent control totals (Python)', () => {
 
   it('reproduces the pinned control totals of the committed 1k file exactly', () => {
     const pin = DATASET.files['1k'];
-    const r = python([CALC, '--expect-sha256', pin.sha256, path.join(ROOT, pin.localPath)]);
+    // Issue #62: the AWS Data Exports sample source publishes the AWS rows only (exact match).
+    const r = python([CALC, '--provider', 'AWS', '--expect-sha256', pin.sha256, path.join(ROOT, pin.localPath)]);
     expect(r.status, r.stderr).toBe(0);
     const doc = JSON.parse(r.stdout);
     expect(doc.type).toBe('ratio.focus-control-totals');
     expect(doc.input).toEqual(PINNED['1k'].input);
+    expect(doc.providerFilter).toEqual(PINNED['1k'].providerFilter);
+    expect(doc.excluded).toEqual(PINNED['1k'].excluded);
     expect(doc.input).toEqual({ sha256: pin.sha256, bytes: pin.bytes, dataRows: pin.dataRows });
     expect(doc.totals).toEqual(PINNED['1k'].totals);
     expect(doc.columns).toEqual(PINNED['1k'].columns);
@@ -54,12 +57,14 @@ describe('P2 independent control totals (Python)', () => {
 
   it('--rows: one expected API row per upstream record, keyed by Id; the first one checked by hand against the upstream line', () => {
     const pin = DATASET.files['1k'];
-    const r = python([CALC, '--rows', '--expect-sha256', pin.sha256, path.join(ROOT, pin.localPath)]);
+    const r = python([CALC, '--rows', '--provider', 'AWS', '--expect-sha256', pin.sha256, path.join(ROOT, pin.localPath)]);
     expect(r.status, r.stderr).toBe(0);
     const doc = JSON.parse(r.stdout);
-    expect({ input: doc.input, columns: doc.columns, totals: doc.totals }).toEqual(PINNED['1k']);
-    expect(doc.rows).toHaveLength(1000);
-    expect(new Set(doc.rows.map((x) => x.extraColumns.Id)).size).toBe(1000);
+    expect({ input: doc.input, columns: doc.columns, providerFilter: doc.providerFilter, excluded: doc.excluded, totals: doc.totals }).toEqual(PINNED['1k']);
+    // AWS rows only: 942 of the 1000 upstream records (51 Microsoft and 7 Oracle are excluded).
+    expect(doc.rows).toHaveLength(942);
+    expect(new Set(doc.rows.map((x) => x.extraColumns.Id)).size).toBe(942);
+    expect(doc.rows.every((x) => x.providerName === 'AWS')).toBe(true);
     for (const row of doc.rows) for (const k of Object.keys(row.extraColumns)) expect(doc.columns.extra).toContain(k);
     // Upstream data line 1, mapped by hand (NULL ⇒ null or omitted; numbers in numeric::text form; timestamps as the API formats them).
     expect(doc.rows[0]).toEqual({
@@ -101,6 +106,19 @@ describe('P2 independent control totals (Python)', () => {
         SubAccountName: 'Atlas Nimbus',
       },
     });
+  }, 120_000);
+
+  it('without --provider it still gives the all-provider totals recorded by Slice 2b (EVIDENCE §2)', () => {
+    const pin = DATASET.files['1k'];
+    const r = python([CALC, '--expect-sha256', pin.sha256, path.join(ROOT, pin.localPath)]);
+    expect(r.status, r.stderr).toBe(0);
+    const doc = JSON.parse(r.stdout);
+    expect(doc).not.toHaveProperty('providerFilter');
+    expect(doc).not.toHaveProperty('excluded');
+    expect(doc.totals.map((t) => [t.billingPeriod, t.rowCount, t.billedCost, t.effectiveCost, t.rowDigest])).toEqual([
+      ['2024-09-01', '999', '20.28022672899', '14.97651418586', '704b8c4919c9c46e393173834c3878e8972cff1207af7b9b8833a42b77a52ee1'],
+      ['2024-10-01', '1', '0.24000000000', '0.00000000000', '3ac9ffea540e79689c84e48af59b652872318ec2ebfe343745853f2f9ca634f3'],
+    ]);
   }, 120_000);
 
   it('refuses a file whose SHA-256 is not the pinned one (exit 2, no output)', () => {

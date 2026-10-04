@@ -1,0 +1,280 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts (13 tests | 11 failed) 1420ms
+   ❯ D1 a mixed-provider file on an AWS Data Exports source (3)
+     × excludes exactly the foreign rows (recorded as PROVIDER_MISMATCH) and publishes the rest 630ms
+     × an unchanged listing is skipped on the next sync (the published batch with exclusions is final) 48ms
+   ❯ D2 a batch whose every row is foreign is never published (2)
+     × is quarantined PROVIDER_MISMATCH; the period keeps its prior publication; a re-sync stays BATCH_QUARANTINED 80ms
+     × on a fresh source nothing is published at all, even across several all-foreign artifacts 42ms
+   ❯ D3 a NULL or missing ProviderName quarantines the whole batch (fail closed) (2)
+     × an empty ProviderName cell ⇒ VALIDATION_FAILED, MISSING_VALUE on ProviderName, nothing published 36ms
+     × a header without ProviderName ⇒ VALIDATION_FAILED, MISSING_REQUIRED_COLUMN on ProviderName 36ms
+   ❯ D4 the match is exact end to end (1)
+     × case and whitespace variants and the long name are excluded 39ms
+   ❯ D5 a mismatch together with another error (2)
+     × quarantines the whole batch VALIDATION_FAILED and counts both 35ms
+     × an unsupported artifact still names the batch UNSUPPORTED_FORMAT when a mismatch was recorded first 45ms
+   ❯ D6 manifest controls that count the foreign rows (1)
+     × disagree with the loaded batch ⇒ RECONCILIATION_VARIANCE (fail closed), nothing published 41ms
+   ❯ D7 the fake (synthetic) source type (1)
+     × excludes AWS rows: only the synthetic provider is allowed 40ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D1 a mixed-provider file on an AWS Data Exports source > excludes exactly the foreign rows (recorded as PROVIDER_MISMATCH) and publishes the rest
+AssertionError: expected { billingPeriod: '2026-07-01', …(6) } to match object { outcome: 'published', …(4) }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "billedTotal": "16.75",
+-   "excludedRows": "3",
++   "billedTotal": "28.75",
+    "outcome": "published",
+    "reconciliation": "unverified",
+-   "rowCount": "6",
++   "rowCount": "9",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:74:26
+     72|     expect(r.status).toBe('succeeded');
+     73|     expect(r.periods).toHaveLength(1);
+     74|     expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCoun…
+       |                          ^
+     75|     expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).t…
+     76|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D1 a mixed-provider file on an AWS Data Exports source > an unchanged listing is skipped on the next sync (the published batch with exclusions is final)
+AssertionError: expected { billingPeriod: '2026-07-01', …(6) } to match object { outcome: 'published', …(1) }
+(6 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "excludedRows": "1",
+    "outcome": "published",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:111:48
+    109|     const s = await awsSource();
+    110|     const source = new FakeFocusSource([period([['run/x.csv.gz', csvGz…
+    111|     expect((await sync(s, source)).periods[0]).toMatchObject({ outcome…
+       |                                                ^
+    112|     const again = await sync(s, source);
+    113|     expect(again.status).toBe('succeeded');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D2 a batch whose every row is foreign is never published > is quarantined PROVIDER_MISMATCH; the period keeps its prior publication; a re-sync stays BATCH_QUARANTINED
+AssertionError: expected 'succeeded' to be 'failed' // Object.is equality
+
+Expected: "failed"
+Received: "succeeded"
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:136:22
+    134|     source.setPeriods([period([['run2/x.csv.gz', csvGz([row('Microsoft…
+    135|     const r = await sync(s, source);
+    136|     expect(r.status).toBe('failed');
+       |                      ^
+    137|     expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code:…
+    138|     expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/11]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D2 a batch whose every row is foreign is never published > on a fresh source nothing is published at all, even across several all-foreign artifacts
+AssertionError: expected { billingPeriod: '2026-07-01', …(6) } to match object { outcome: 'quarantined', …(1) }
+(6 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "code": "PROVIDER_MISMATCH",
+-   "outcome": "quarantined",
++   "outcome": "published",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:168:26
+    166|       new FakeFocusSource([period([['run/a.csv.gz', csvGz([row('Oracle…
+    167|     );
+    168|     expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code:…
+       |                          ^
+    169|     expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).t…
+    170|     expect((await batchesOf(t.db.pool, s.tenantId, s.sourceId))[0]).to…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/11]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D3 a NULL or missing ProviderName quarantines the whole batch (fail closed) > an empty ProviderName cell ⇒ VALIDATION_FAILED, MISSING_VALUE on ProviderName, nothing published
+AssertionError: expected 'succeeded' to be 'failed' // Object.is equality
+
+Expected: "failed"
+Received: "succeeded"
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:178:22
+    176|     const s = await awsSource();
+    177|     const r = await sync(s, new FakeFocusSource([period([['run/x.csv.g…
+    178|     expect(r.status).toBe('failed');
+       |                      ^
+    179|     expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code:…
+    180|     expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/11]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D3 a NULL or missing ProviderName quarantines the whole batch (fail closed) > a header without ProviderName ⇒ VALIDATION_FAILED, MISSING_REQUIRED_COLUMN on ProviderName
+AssertionError: expected { billingPeriod: '2026-07-01', …(6) } to match object { outcome: 'quarantined', …(1) }
+(6 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "code": "VALIDATION_FAILED",
+-   "outcome": "quarantined",
++   "outcome": "published",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:192:26
+    190|     const header = FOCUS_HEADER.filter((c) => c !== 'ProviderName');
+    191|     const r = await sync(s, new FakeFocusSource([period([['run/x.csv.g…
+    192|     expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code:…
+       |                          ^
+    193|     expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).t…
+    194|     const [b] = await batchesOf(t.db.pool, s.tenantId, s.sourceId);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/11]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D4 the match is exact end to end > case and whitespace variants and the long name are excluded
+AssertionError: expected { billingPeriod: '2026-07-01', …(6) } to match object { outcome: 'published', …(3) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "billedTotal": "1.00",
+-   "excludedRows": "5",
++   "billedTotal": "21.00",
+    "outcome": "published",
+-   "rowCount": "1",
++   "rowCount": "6",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:221:26
+    219|       ]),
+    220|     );
+    221|     expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCoun…
+       |                          ^
+    222|     const shown = await showBatch(t.pool, s.tenantId, r.periods[0].bat…
+    223|     expect(shown.errors.map((e) => [e.rowOrdinal, e.code])).toEqual([
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/11]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D5 a mismatch together with another error > quarantines the whole batch VALIDATION_FAILED and counts both
+AssertionError: expected { …(13) } to match object { status: 'quarantined', …(1) }
+(11 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "error_count": "2",
++   "error_count": "1",
+    "status": "quarantined",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:239:15
+    237|     expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code:…
+    238|     const [b] = await batchesOf(t.db.pool, s.tenantId, s.sourceId);
+    239|     expect(b).toMatchObject({ status: 'quarantined', error_count: '2' …
+       |               ^
+    240|     expect(b.quarantine_reason).toBe('VALIDATION_FAILED: 2 validation …
+    241|     const shown = await showBatch(t.pool, s.tenantId, b.id);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/11]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D5 a mismatch together with another error > an unsupported artifact still names the batch UNSUPPORTED_FORMAT when a mismatch was recorded first
+AssertionError: expected { …(13) } to match object { error_count: '2' }
+(12 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "error_count": "2",
++   "error_count": "1",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:253:69
+    251|     const r = await sync(s, new FakeFocusSource([period([['a/x.csv.gz'…
+    252|     expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code:…
+    253|     expect((await batchesOf(t.db.pool, s.tenantId, s.sourceId))[0]).to…
+       |                                                                     ^
+    254|   });
+    255| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/11]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D6 manifest controls that count the foreign rows > disagree with the loaded batch ⇒ RECONCILIATION_VARIANCE (fail closed), nothing published
+AssertionError: expected { billingPeriod: '2026-07-01', …(6) } to match object { outcome: 'quarantined', …(2) }
+(5 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "code": "RECONCILIATION_VARIANCE",
+-   "outcome": "quarantined",
+-   "reconciliation": "variance",
++   "outcome": "published",
++   "reconciliation": "reconciled",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:261:26
+    259|     const s = await awsSource();
+    260|     const r = await sync(s, new FakeFocusSource([period([['run/x.csv.g…
+    261|     expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code:…
+       |                          ^
+    262|     const [b] = await batchesOf(t.db.pool, s.tenantId, s.sourceId);
+    263|     expect(b).toMatchObject({ status: 'quarantined', error_count: '1',…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/11]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D7 the fake (synthetic) source type > excludes AWS rows: only the synthetic provider is allowed
+AssertionError: expected { billingPeriod: '2026-07-01', …(6) } to match object { outcome: 'published', …(3) }
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "billedTotal": "1.00",
+-   "excludedRows": "1",
++   "billedTotal": "3.00",
+    "outcome": "published",
+-   "rowCount": "1",
++   "rowCount": "2",
+  }
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:272:26
+    270|     const s = await seedTenantSource(t.db.pool, { kind: 'fake', config…
+    271|     const r = await sync(s, new FakeFocusSource([period([['run/x.csv.g…
+    272|     expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCoun…
+       |                          ^
+    273|     const shown = await showBatch(t.pool, s.tenantId, r.periods[0].bat…
+    274|     expect(shown.errors.map((e) => [e.rowOrdinal, e.code, e.message]))…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/11]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  11 failed | 2 passed (13)
+   Start at  14:05:42
+   Duration  2.94s (tests 62%, transform 29%, import 7%, setup 2%)
+

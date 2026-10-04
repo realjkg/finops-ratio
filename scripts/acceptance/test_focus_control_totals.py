@@ -217,6 +217,88 @@ class ExpectedRowTests(unittest.TestCase):
             fct.compute(csv_bytes(row, header=FULL_HEADER), rows=True)  # ConsumedQuantity not a plain decimal
 
 
+PROVIDER_HEADER = '"BillingPeriodStart","BillingCurrency","BilledCost","EffectiveCost","ProviderName","Id"\n'
+
+
+class ProviderFilterTests(unittest.TestCase):
+    """Issue #62: the control for an AWS Data Exports source counts the AWS rows only (exact match)."""
+
+    def test_only_exact_matches_are_counted_the_rest_is_reported_per_period(self):
+        data = csv_bytes(
+            '"2024-09-01 00:00:00","USD",1.10,1.00,"AWS","a"',
+            '"2024-09-01 00:00:00","USD",2.00,2.00,"Microsoft","m1"',
+            '"2024-09-01 00:00:00","USD",0.25,NULL,"AWS","b"',
+            '"2024-09-01 00:00:00","USD",3,3,"aws","lower"',
+            '"2024-09-01 00:00:00","USD",4,4,"AWS ","trailing"',
+            '"2024-09-01 00:00:00","USD",5,5,"Amazon Web Services","long"',
+            '"2024-09-01 00:00:00","USD",6,6,"Oracle","o1"',
+            '"2024-10-01 00:00:00","USD",7,7,"Oracle","o2"',
+            '"2024-10-01 00:00:00","USD",8,8,"Microsoft","m2"',
+            header=PROVIDER_HEADER,
+        )
+        doc = fct.compute(data, providers=['AWS'], rows=True)
+        self.assertEqual(doc['providerFilter'], ['AWS'])
+        self.assertEqual([(t['billingPeriod'], t['rowCount'], t['billedCost'], t['effectiveCostNulls']) for t in doc['totals']], [('2024-09-01', '2', '1.35', '1')])
+        lines = sorted(['a\t1.10\t1.00\n', 'b\t0.25\t\\N\n'], key=lambda s: s.encode())
+        self.assertEqual(doc['totals'][0]['rowDigest'], hashlib.sha256(''.join(lines).encode()).hexdigest())
+        self.assertEqual(doc['excluded'], [
+            {'billingPeriod': '2024-09-01', 'rowCount': '5', 'providers': {'AWS ': '1', 'Amazon Web Services': '1', 'Microsoft': '1', 'Oracle': '1', 'aws': '1'}},
+            {'billingPeriod': '2024-10-01', 'rowCount': '2', 'providers': {'Microsoft': '1', 'Oracle': '1'}},
+        ])
+        self.assertEqual([r['extraColumns']['Id'] for r in doc['rows']], ['a', 'b'])
+        # The whole file is still described: every record was read and validated.
+        self.assertEqual(doc['input']['dataRows'], 9)
+
+    def test_several_providers_may_be_allowed(self):
+        data = csv_bytes('"2024-09-01 00:00:00","USD",1,1,"AWS","a"', '"2024-09-01 00:00:00","USD",2,2,"X","x"', '"2024-09-01 00:00:00","USD",4,4,"Y","y"', header=PROVIDER_HEADER)
+        doc = fct.compute(data, providers=['AWS', 'X'])
+        self.assertEqual(doc['totals'][0]['rowCount'], '2')
+        self.assertEqual(doc['excluded'], [{'billingPeriod': '2024-09-01', 'rowCount': '1', 'providers': {'Y': '1'}}])
+
+    def test_no_filter_keeps_the_previous_document(self):
+        data = csv_bytes('"2024-09-01 00:00:00","USD",1,1,"AWS","a"', '"2024-09-01 00:00:00","USD",2,2,"Microsoft","m"', header=PROVIDER_HEADER)
+        doc = fct.compute(data)
+        self.assertEqual(doc['totals'][0]['rowCount'], '2')
+        self.assertNotIn('providerFilter', doc)
+        self.assertNotIn('excluded', doc)
+
+    def test_a_period_with_no_allowed_row_has_no_totals_entry(self):
+        data = csv_bytes('"2024-10-01 00:00:00","USD",7,7,"Oracle","o"', header=PROVIDER_HEADER)
+        doc = fct.compute(data, providers=['AWS'])
+        self.assertEqual(doc['totals'], [])
+        self.assertEqual(doc['excluded'], [{'billingPeriod': '2024-10-01', 'rowCount': '1', 'providers': {'Oracle': '1'}}])
+
+    def test_fails_closed_under_a_filter(self):
+        # A NULL or empty ProviderName: the worker quarantines the whole batch; the control cannot predict it.
+        for name, row in {
+            'provider NULL': '"2024-09-01 00:00:00","USD",1,1,NULL,"a"',
+            'provider empty': '"2024-09-01 00:00:00","USD",1,1,"","a"',
+            'foreign row with a bad BilledCost': '"2024-09-01 00:00:00","USD",abc,1,"Microsoft","a"',
+        }.items():
+            with self.subTest(name=name):
+                with self.assertRaises(fct.ControlTotalsError):
+                    fct.compute(csv_bytes(row, header=PROVIDER_HEADER), providers=['AWS'])
+        with self.assertRaises(fct.ControlTotalsError):
+            fct.compute(csv_bytes('"2024-09-01 00:00:00","USD",1,1,"a",""'), providers=['AWS'])  # no ProviderName column
+        with self.assertRaises(fct.ControlTotalsError):
+            fct.compute(csv_bytes('"2024-09-01 00:00:00","USD",1,1,"AWS","a"', header=PROVIDER_HEADER), providers=[''])
+
+    def test_main_takes_repeatable_provider_arguments(self):
+        data = csv_bytes('"2024-09-01 00:00:00","USD",1,1,"AWS","a"', '"2024-09-01 00:00:00","USD",2,2,"X","x"', header=PROVIDER_HEADER)
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, 'f.csv')
+            with open(p, 'wb') as fh:
+                fh.write(data)
+            out, err = io.StringIO(), io.StringIO()
+            with redirect_stdout(out), redirect_stderr(err):
+                code = fct.main(['--provider', 'AWS', '--provider', 'X', p])
+            self.assertEqual(code, 0, err.getvalue())
+            doc = json.loads(out.getvalue())
+            self.assertEqual(doc['providerFilter'], ['AWS', 'X'])
+            self.assertEqual(doc['totals'][0]['rowCount'], '2')
+            self.assertEqual(doc['excluded'], [])
+
+
 class MainTests(unittest.TestCase):
     def run_main(self, argv):
         out, err = io.StringIO(), io.StringIO()
