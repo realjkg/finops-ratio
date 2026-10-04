@@ -818,7 +818,7 @@ All four are fixed on `fix/68-calculator-followups`, cut from `origin/main`
 | Item | Red | Fix |
 |---|---|---|
 | Copilot r4178585902: unpadded years break the inverted-period comparison | b684945 | 5f83926 |
-| Challenger L-1: sub-millisecond precision | b684945 | 5f83926 |
+| ~~Challenger L-1: sub-millisecond precision~~ (wrong; superseded by §18.1) | b684945 | 5f83926, reverted by f43a2b6 |
 | Informational: `OverflowError` near year 9999 | b684945 | 5f83926 |
 | Challenger L-2: L18 counts a repeated binding twice | b684945 | 1500718 |
 
@@ -841,12 +841,12 @@ Red output:
   - `format_utc` formats with an explicit `{year:04d}`;
   - the order check compares instants, never text.
 
-**Challenger L-1.** `timestamp.ts` keeps milliseconds, truncated. The order
-is now judged on instants truncated to milliseconds (`worker_ms`):
-- start `.000500` with end `.000100` is the same instant, so it is accepted,
-  as the worker does;
-- `.001000` with `.000999` is still refused;
-- the published value keeps its microseconds, because the API returns them.
+**Challenger L-1. CORRECTED in §18.1: the conclusion was wrong.** The
+millisecond rule recorded here (start `.000500` with end `.000100` "accepted,
+as the worker does") missed the database constraint. `load.ts` inserts the
+full fraction into `timestamptz`, and `cost_facts_charge_period CHECK
+(charge_period_end >= charge_period_start)` compares microseconds. Such a row
+never publishes. The contract is now **microseconds on both sides**.
 
 **Informational (year 9999).** The worker's behaviour was checked first.
 - `parseFocusTimestamp('9999-12-31T23:00:00-02:00')` accepts the value
@@ -897,3 +897,92 @@ spelling) now count **once per literal**.
 Both acceptance runs used project `ratio-i62g-acc` on 56650/56651/56652
 (checked free first). The scratch PG16 for the Postgres check ran on 56630
 and was removed.
+
+
+### 18.1 PR #69 Copilot r4178626016 (High): one precision contract, microseconds, on both sides
+
+**What happened before (red evidence, 8ce85c5, `red/red-pr69-db.txt`).** A
+row with ChargePeriodStart `…00.000500Z` and End `…00.000100Z`:
+- passed `validateRow`, which compared `epochMs` (both are `.000`);
+- reached the insert, where Postgres stored the microseconds and the
+  `cost_facts_charge_period` CHECK rejected it (SQLSTATE 23514);
+- left the period **`failed` with code `DB_23514`**: the run failed, the
+  batch was not quarantined, and the checkpoint did not advance.
+
+The `DB_REJECTED_VALUE` backstop covers class 22 only, and 23514 is class 23.
+So **every later sync fails the same way**, instead of giving a clean
+`CHARGE_PERIOD_INVERTED` quarantine. Meanwhile the calculator's millisecond
+rule (§18, challenger L-1) predicted a publication.
+
+**Postgres's rounding, measured on PG 16.14** (`'…'::timestamptz`):
+
+| Input fraction | Stored |
+|---|---|
+| `.0000005` | `.000000` |
+| `.0000015` | `.000002` |
+| `.0000025` | `.000002` |
+| `.0000035` | `.000004` |
+| `.0000045` | `.000004` |
+| `.9999995` | next second |
+
+That is `rint(strtod(frac) * 1e6)`, round half to even on the double, as in
+PG's `ParseFractionalSecond`.
+
+**Fix (f43a2b6):**
+- **Worker.** `ParsedTimestamp.epochUs` is the instant as `timestamptz`
+  stores it. The fraction is rounded with the same `rint` (half to even) on
+  the same double, as a `bigint`. `validateRow` compares `epochUs` for
+  `CHARGE_PERIOD_INVERTED`, and `epochMs` is kept everywhere else.
+  - The DB test fuzzes 2006 fractions of 7–9 digits (ties included) against
+    Postgres `extract(epoch …)`: every one is identical.
+  - The sub-ms row is now quarantined `VALIDATION_FAILED`, with one stored
+    error, `CHARGE_PERIOD_INVERTED` on `ChargePeriodEnd`, row 2. Nothing is
+    published, and the constraint is never reached.
+- **Calculator.** The millisecond truncation is reverted. The order is
+  compared on full-precision instants. `TIMESTAMP_RE` allows at most 6
+  fraction digits, so no rounding is needed there; this is stricter than
+  the worker's 9.
+  - Item 2's test now requires `.000500` → `.000100` (and `.000002` →
+    `.000001`) to be **refused**.
+  - Equal to the microsecond is accepted, also across an offset.
+
+**Test defects corrected after red** (no assertion weakened):
+- The unit test's 10-digit probe `.0000004999` moved to 9 digits
+  (`.000000499`, also checked on PG: `.000000`). The worker accepts at most 9
+  digits and refuses 10 as `UNPARSEABLE_TIMESTAMP`.
+- BigInt literals were replaced by `BigInt()` calls: the tsconfig target is
+  below ES2020.
+
+**Mutations (`runs/code-mutations-pr69.txt`).** Run bytecode-safe:
+`__pycache__` cleared before every mutant, Python with `-B` and
+`PYTHONDONTWRITEBYTECODE=1`. This follows the challenger's caution that a
+same-size mutant written in the same second can reuse cached bytecode. This
+round's earlier Python mutations were re-run the same way.
+
+| Id | Mutation | Result |
+|---|---|---|
+| W1 | worker at millisecond precision (the old rule) | killed (unit + DB) |
+| W2 | worker rounds half up | killed (unit PG probe + DB fuzz) |
+| W3 | worker truncates 7–9 digits | killed |
+| C1 | calculator truncates to milliseconds (the reverted rule) | killed |
+| C2 | calculator ignores the order | killed |
+| P1b, P1c, P4 (re-run) | unpadded strftime year; the original unpadded-text comparison; `OverflowError` not caught | all killed |
+| P1 (re-run) | compare padded formatted text | **survives, and is equivalent**: under the µs rule, fixed-width UTC text with six fraction digits orders exactly as the instants do (years 1..9999) |
+
+P2 and P2b (the millisecond truncation) no longer apply. The challenger's
+Z1 (truncate only the start) is moot under the µs rule.
+
+**Gates (at f43a2b6; private PG16 on 127.0.0.1:56730, SeaweedFS
+`i62-s3` on 56731):**
+
+| Gate | Result |
+|---|---|
+| lint, tsc (and `tsc -p tsconfig.worker.json`) | exit 0 |
+| `npm test` | 112 files / **2616 passed** |
+| Python suite | 32 tests, OK |
+| `npm run test:db` ×1 | parallel 37 files / **630 passed**; serial 6 files / **173 passed**; exit 0 |
+| `local:acceptance` 1k | exit 0, `pass: true`, 22.1 s. 942 / `18.00663861840`, `excludedRows` 57; 2024-10 quarantined `PROVIDER_MISMATCH`; 942 rows compared (`runs/acc1k-pr69.json`) |
+| `local:acceptance` 10k | exit 0, `pass: true`, 29.1 s. 9441 / `112.16617543240`, 557 excluded; 9441 rows compared (`runs/acc10k-pr69.json`) |
+
+Both acceptance runs used project `ratio-i62h-acc` on 56750–56752 (checked
+free first).
