@@ -81,3 +81,45 @@ describe('M-A replay-fixtures under a policy that quarantines everything', () =>
     expect(await adminConnections()).toBe(0);
   });
 });
+
+describe('F1 (Copilot r4178520620) a failing expireLease in zombie_fencing still releases the zombie', () => {
+  it('the zombie is released, its run finishes (no running run, no live heartbeat), and the scenario fails promptly', { timeout: 60_000 }, async () => {
+    const r = await runReplayFixtures({
+      workerPool: t.pool,
+      adminUrl: t.db.url,
+      sourceClient: fx.client,
+      bucket: fx.name,
+      evidence: new MemoryEvidenceStore(),
+      allowSyntheticProviders: true,
+      testHooks: {
+        beforeExpireLease: (sourceKey) => {
+          if (sourceKey === 'fx-zombie') throw new Error('injected expireLease fault (F1)');
+        },
+      },
+    });
+    prefixes.push(r.retained.sourcePrefix);
+    expect(r.pass).toBe(false);
+    const byName = Object.fromEntries(r.scenarios.map((s) => [s.name, s]));
+    // Every scenario before zombie_fencing is unaffected by the fault.
+    for (const name of ['clean_load', 'idempotent_rerun', 'restatement_supersession', 'reconciliation_variance_rejection', 'crash_mid_load_recovery']) {
+      expect(byName[name].pass, name).toBe(true);
+    }
+    expect(byName.zombie_fencing.pass).toBe(false);
+    expect(JSON.stringify(byName.zombie_fencing.detail)).toContain('injected expireLease fault (F1)');
+    // Released: the zombie's run is no longer running, and nothing heartbeats after the call returned.
+    const heartbeats = async () =>
+      (
+        await t.db.pool.query(
+          `SELECT r.status, r.heartbeat_at::text AS hb FROM ratio.sync_runs r JOIN ratio.sources s ON s.tenant_id = r.tenant_id AND s.id = r.source_id
+           WHERE r.tenant_id = $1 AND s.source_key = 'fx-zombie' ORDER BY r.started_at`,
+          [r.tenantId],
+        )
+      ).rows as Array<{ status: string; hb: string }>;
+    const runs = await heartbeats();
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs.filter((x) => x.status === 'running')).toEqual([]);
+    await new Promise((res) => setTimeout(res, 1500));
+    expect(await heartbeats()).toEqual(runs);
+    expect(await adminConnections()).toBe(0);
+  });
+});

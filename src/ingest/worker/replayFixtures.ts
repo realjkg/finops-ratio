@@ -51,6 +51,8 @@ export async function runReplayFixtures(opts: {
   secrets?: readonly string[];
   /** The synthetic-provider opt-in (issue #62 D1); omitted ⇒ runSync's default (this process's env). */
   allowSyntheticProviders?: boolean;
+  /** Fault-injection seam for tests (library only; the CLI never passes it). Throwing fails that step. */
+  testHooks?: { beforeExpireLease?: (sourceKey: string) => void | Promise<void> };
 }): Promise<ReplayFixturesResult> {
   const log = opts.log ?? (() => undefined);
   const tenantId = crypto.randomUUID();
@@ -102,8 +104,9 @@ export async function runReplayFixtures(opts: {
       );
       return r.rows.map((x) => `${x.p}:${x.status}:${x.reconciliation}`);
     });
-  const expireLease = (sourceKey: string) =>
-    workerTransaction(opts.workerPool, tenantId, async (c) => {
+  const expireLease = async (sourceKey: string) => {
+    await opts.testHooks?.beforeExpireLease?.(sourceKey);
+    return workerTransaction(opts.workerPool, tenantId, async (c) => {
       const r = await c.query(
         `UPDATE ratio.sync_runs r SET lease_expires_at = clock_timestamp() - interval '1 second'
          FROM ratio.sources s WHERE s.tenant_id = r.tenant_id AND s.id = r.source_id AND s.source_key = $1 AND r.status = 'running'`,
@@ -111,6 +114,7 @@ export async function runReplayFixtures(opts: {
       );
       return r.rowCount ?? 0;
     });
+  };
   const sync = (sourceKey: string, extra: Partial<Parameters<typeof runSync>[0]> = {}) =>
     runSync({
       pool: opts.workerPool,
@@ -233,12 +237,16 @@ export async function runReplayFixtures(opts: {
         release();
         return { pass: false, detail: { reachedPublish, zombie: await zombieOutcome } };
       }
-      const expired = await expireLease('fx-zombie');
+      // Every path after reachedPublish releases the zombie and waits for it to settle (Copilot F1):
+      // a failing expireLease or winner sync must not leave it blocked in beforePublish, heartbeating.
+      let expired: number;
       let winner: Awaited<ReturnType<typeof sync>>;
       try {
+        expired = await expireLease('fx-zombie');
         winner = await sync('fx-zombie');
       } finally {
         release();
+        await zombieOutcome;
       }
       const z = await zombieOutcome;
       const t = await totals('fx-zombie');

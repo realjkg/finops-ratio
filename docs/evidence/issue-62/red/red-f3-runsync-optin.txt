@@ -1,0 +1,60 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/worker/runSyncOptIn.test.ts (5 tests | 2 failed) 25ms
+   ❯ F3 runSync cannot enable synthetic providers without the validated opt-in (5)
+     × explicit true without the opt-in is refused before any I/O 17ms
+     × explicit true with RATIO_ENV=production (or staging, or unset) and the opt-in at 1 is refused before any I/O 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/worker/runSyncOptIn.test.ts > F3 runSync cannot enable synthetic providers without the validated opt-in > explicit true without the opt-in is refused before any I/O
+AssertionError: {}: expected Error: pool used: the opt-in gate was pas… to match object { Object (code) }
+
+- Expected
++ Received
+
+- {
+-   "code": "SYNTHETIC_PROVIDERS_NOT_ALLOWED",
++ Error {
++   "message": "pool used: the opt-in gate was passed",
+  }
+
+ ❯ src/ingest/worker/runSyncOptIn.test.ts:56:51
+     54|     for (const env of [{}, { RATIO_ENV: 'test' }, { RATIO_ENV: 'develo…
+     55|       setEnv(env);
+     56|       await expect(run(true), JSON.stringify(env)).rejects.toMatchObje…
+       |                                                   ^
+     57|     }
+     58|     expect(poolUses).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/ingest/worker/runSyncOptIn.test.ts > F3 runSync cannot enable synthetic providers without the validated opt-in > explicit true with RATIO_ENV=production (or staging, or unset) and the opt-in at 1 is refused before any I/O
+AssertionError: production: expected Error: pool used: the opt-in gate was pas… to match object { Object (code) }
+
+- Expected
++ Received
+
+- {
+-   "code": "SYNTHETIC_PROVIDERS_NOT_ALLOWED",
++ Error {
++   "message": "pool used: the opt-in gate was passed",
+  }
+
+ ❯ src/ingest/worker/runSyncOptIn.test.ts:64:48
+     62|     for (const ratioEnv of ['production', 'staging', undefined]) {
+     63|       setEnv({ RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1', ...(ratioEnv ? { …
+     64|       await expect(run(true), String(ratioEnv)).rejects.toMatchObject(…
+       |                                                ^
+     65|     }
+     66|     expect(poolUses).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 passed (5)
+   Start at  17:04:38
+   Duration  1.46s (transform 75%, import 22%, tests 2%, worker 1%)
+

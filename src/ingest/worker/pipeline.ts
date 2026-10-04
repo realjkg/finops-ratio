@@ -66,12 +66,23 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   if ((opts.mode === 'backfill' || opts.mode === 'replay_period') && !opts.range) throw new IngestError('INVALID_RANGE', `${opts.mode} needs a period range`);
   // Bounded (2000-01..9999-12), well-formed and not inverted (review H2, third round).
   if (opts.range) assertPeriodRange(opts.range);
-  // The synthetic-provider opt-in (issue #62 D1): explicit in settings (the CLI passes its own env's
-  // value), else this process's RATIO_ALLOW_SYNTHETIC_PROVIDERS (library callers; default off).
-  const settings = resolveSettings({
-    ...opts.settings,
-    allowSyntheticProviders: opts.settings?.allowSyntheticProviders ?? syntheticProvidersOptIn(process.env),
-  });
+  // The synthetic-provider opt-in (issue #62 D1; Copilot F3): an explicit `false` is a pure override.
+  // Every other path (default or an explicit request) is decided by THIS PROCESS's validated opt-in:
+  // RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 with RATIO_ENV explicitly development or test. A caller cannot
+  // enable synthetic providers by asking: an explicit request without the opt-in fails closed here,
+  // before any I/O. (No injected env: a caller could assert any env it likes.)
+  const requested = opts.settings?.allowSyntheticProviders;
+  let allowSyntheticProviders = false;
+  if (requested !== false) {
+    allowSyntheticProviders = syntheticProvidersOptIn(process.env);
+    if (requested !== undefined && !allowSyntheticProviders) {
+      throw new IngestError(
+        'SYNTHETIC_PROVIDERS_NOT_ALLOWED',
+        'allowSyntheticProviders was requested, but this process has no RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 with RATIO_ENV explicitly development or test',
+      );
+    }
+  }
+  const settings = resolveSettings({ ...opts.settings, allowSyntheticProviders });
   const hooks = opts.hooks ?? {};
   const log: LogFn = opts.log ?? (() => undefined);
   const secrets = opts.secrets ?? [];

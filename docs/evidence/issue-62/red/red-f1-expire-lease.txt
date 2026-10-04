@@ -1,0 +1,39 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/worker/replayFixturesQuarantine.db.test.ts (3 tests | 1 failed | 2 skipped) 1502ms
+   ❯ F1 (Copilot r4178520620) a failing expireLease in zombie_fencing still releases the zombie (1)
+     × the zombie is released, its run finishes (no running run, no live heartbeat), and the scenario fails promptly 1063ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/worker/replayFixturesQuarantine.db.test.ts > F1 (Copilot r4178520620) a failing expireLease in zombie_fencing still releases the zombie > the zombie is released, its run finishes (no running run, no live heartbeat), and the scenario fails promptly
+AssertionError: expected [ { status: 'running', …(1) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "hb": "2026-10-04 17:00:02.506245+00",
++     "status": "running",
++   },
++ ]
+
+ ❯ src/ingest/worker/replayFixturesQuarantine.db.test.ts:120:56
+    118|     const runs = await heartbeats();
+    119|     expect(runs.length).toBeGreaterThan(0);
+    120|     expect(runs.filter((x) => x.status === 'running')).toEqual([]);
+       |                                                        ^
+    121|     await new Promise((res) => setTimeout(res, 1500));
+    122|     expect(await heartbeats()).toEqual(runs);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 skipped (3)
+   Start at  16:59:59
+   Duration  2.80s (tests 64%, transform 22%, import 10%, setup 4%)
+

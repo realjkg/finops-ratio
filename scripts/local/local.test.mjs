@@ -1685,23 +1685,29 @@ describe('L18 superuser catalog queries are tenant-scoped (PR #67 review)', () =
         ...[...sql.matchAll(/(?:\b(\w+)\.)?batch_id\s*=\s*(\w+)\.id\b/g)].map((m) => [m[1], m[2], m[0]]),
         ...[...sql.matchAll(/\b(\w+)\.id\s*=\s*(?:\b(\w+)\.)?batch_id\b/g)].map((m) => [m[2], m[1], m[0]]),
       ];
-      // Per alias pair: at least as many tenant bindings as batch-id correlations, so a second
-      // subquery that reuses already-scoped aliases is still flagged (challenger mutation C).
+      // Per UNORDERED alias pair: at least as many tenant bindings as batch-id correlations, in
+      // both directions together, so a second subquery that reuses already-scoped aliases is still
+      // flagged (challenger mutation C), and reversed pairs cannot share one binding (challenger at
+      // ebbde12, ii). Each binding is counted once; `x.tenant_id = x.tenant_id` binds nothing (i).
+      const pairKey = (a, b) => [a, b].sort().join('|');
       const correlations = new Map();
       for (const [child, parent, text] of pairs) {
         if (child === undefined) {
           problems.push(text);
           continue;
         }
-        const key = `${child}|${parent}`;
+        const key = pairKey(child, parent);
         correlations.set(key, [...(correlations.get(key) ?? []), text]);
       }
+      const bindings = new Map();
+      for (const m of sql.matchAll(/\b(\w+)\.tenant_id\s*=\s*(\w+)\.tenant_id\b/g)) {
+        if (m[1] === m[2]) continue; // a tautology
+        const key = pairKey(m[1], m[2]);
+        bindings.set(key, (bindings.get(key) ?? 0) + 1);
+      }
       for (const [key, texts] of correlations) {
-        const [child, parent] = key.split('|');
-        const bindings =
-          [...sql.matchAll(new RegExp(`\\b${child}\\.tenant_id\\s*=\\s*${parent}\\.tenant_id\\b`, 'g'))].length +
-          [...sql.matchAll(new RegExp(`\\b${parent}\\.tenant_id\\s*=\\s*${child}\\.tenant_id\\b`, 'g'))].length;
-        if (bindings < texts.length) problems.push(...texts.slice(bindings));
+        const bound = bindings.get(key) ?? 0;
+        if (bound < texts.length) problems.push(...texts.slice(bound));
       }
     }
     return problems;
@@ -1722,6 +1728,25 @@ describe('L18 superuser catalog queries are tenant-scoped (PR #67 review)', () =
     for (const good of [
       '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id`',
       '`SELECT 1 FROM e v WHERE b.id = v.batch_id AND b.tenant_id = v.tenant_id`',
+    ]) {
+      expect(untenantedBatchCorrelations(good), good).toEqual([]);
+    }
+  });
+
+  it('blind spots (challenger at ebbde12): a tautological self-binding, and reversed pairs sharing one binding, are flagged', () => {
+    for (const bad of [
+      // (i) child === parent: `b.tenant_id = b.tenant_id` is a tautology and binds nothing.
+      '`SELECT 1 FROM e b WHERE b.batch_id = b.id AND b.tenant_id = b.tenant_id`',
+      '`SELECT 1 FROM e b WHERE b.batch_id = b.id AND b.id = b.batch_id AND b.tenant_id = b.tenant_id`',
+      // (ii) reversed pairs: one binding between v and b, but two correlations (v→b and b→v).
+      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id AND b.batch_id = v.id`',
+      '`SELECT 1 FROM e v WHERE b.tenant_id = v.tenant_id AND b.id = v.batch_id AND v.id = b.batch_id`',
+    ]) {
+      expect(untenantedBatchCorrelations(bad), bad).not.toEqual([]);
+    }
+    for (const good of [
+      // Two correlations, two bindings (either direction) between the same unordered pair.
+      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id AND b.tenant_id = v.tenant_id AND b.batch_id = v.id`',
     ]) {
       expect(untenantedBatchCorrelations(good), good).toEqual([]);
     }

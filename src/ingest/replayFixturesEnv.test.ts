@@ -5,6 +5,8 @@
 // naming the reason. Per-source synthetic markers (D-21, Slice 3) are the way to
 // restore staging later. There is no in-code opt-in bypass.
 import { describe, expect, it } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { main } from './cli';
 
 // Nothing listens on port 1: an attempted connection would show as ECONNREFUSED.
@@ -19,6 +21,21 @@ async function run(argv: string[], e: Record<string, string | undefined>) {
   const code = await main(argv, e, { out: (l) => out.push(l), err: (l) => err.push(l) });
   return { code, out, err, all: out.concat(err).join('\n') };
 }
+
+describe('F1 seam: testHooks.beforeExpireLease is unreachable from the CLI (static)', () => {
+  it('no production source passes testHooks; only replayFixtures.ts declares and reads it', () => {
+    const root = path.resolve(__dirname);
+    const files = (fs.readdirSync(root, { recursive: true }) as string[])
+      .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && !f.split(path.sep).includes('testing'))
+      .map((f) => path.join(root, f));
+    const users = files.filter((f) => /\btestHooks\b/.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(root, f));
+    expect(users).toEqual([path.join('worker', 'replayFixtures.ts')]);
+    const cli = fs.readFileSync(path.join(root, 'workerCli.ts'), 'utf8');
+    const call = cli.slice(cli.indexOf('runReplayFixtures({'), cli.indexOf('});', cli.indexOf('runReplayFixtures({')));
+    expect(call).toContain('allowSyntheticProviders: cfg.settings.allowSyntheticProviders');
+    expect(call).not.toMatch(/testHooks|beforeExpireLease/);
+  });
+});
 
 describe('replay-fixtures is test-only (L3 decision)', () => {
   it('RATIO_ENV=staging fails closed before any I/O: exit 2, REPLAY_FIXTURES_NOT_ALLOWED, the reason named', async () => {

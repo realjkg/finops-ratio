@@ -266,10 +266,20 @@ def expected_row(rec, pos, header, period, focus_version, n):
     def first(*vals):
         return next((v for v in vals if v is not None), None)
 
+    # The worker's validateRow refuses a C0 control other than TAB/LF/CR in ANY value
+    # (INVALID_CHARACTER, validate.ts) and an end before the start (CHARGE_PERIOD_INVERTED).
+    # The batch then quarantines, so --rows must not predict a publication (Copilot F2).
+    for name, (text, _quoted) in zip(header, rec):
+        if any(ord(ch) < 0x20 and ch not in '\t\n\r' for ch in text):
+            raise ControlTotalsError(f'record {n}: {name} contains a control character (only TAB, CR and LF are allowed)')
+    start, end = ts('ChargePeriodStart'), ts('ChargePeriodEnd')
+    if end < start:  # both UTC, fixed-width YYYY-MM-DDTHH:MM:SS.ffffffZ: text order is time order
+        raise ControlTotalsError(f'record {n}: ChargePeriodEnd is before ChargePeriodStart')
+
     return {
         'billingPeriod': period,
-        'chargePeriodStart': ts('ChargePeriodStart'),
-        'chargePeriodEnd': ts('ChargePeriodEnd'),
+        'chargePeriodStart': start,
+        'chargePeriodEnd': end,
         'billedCost': dec('BilledCost'),
         'effectiveCost': dec('EffectiveCost'),
         'listCost': dec('ListCost'),

@@ -1,0 +1,93 @@
+......................FFFFFFFFFFF......
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules) (case='inverted charge period', provider='foreign')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 301, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules) (case='inverted charge period', provider='allowed')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 304, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules) (case='inverted across an offset', provider='foreign')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 301, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules) (case='inverted across an offset', provider='allowed')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 304, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules) (case='control character (BEL)', provider='foreign')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 301, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules) (case='control character (BEL)', provider='allowed')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 304, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules) (case='control character (NUL)', provider='foreign')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 301, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules) (case='control character (NUL)', provider='allowed')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 304, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules) (case='control character (ESC) in an extra column', provider='foreign')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 301, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules) (case='control character (ESC) in an extra column', provider='allowed')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 304, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError):
+AssertionError: ControlTotalsError not raised
+
+======================================================================
+FAIL: test_rows_enforce_the_worker_charge_period_and_control_character_rules (test_focus_control_totals.ProviderFilterTests.test_rows_enforce_the_worker_charge_period_and_control_character_rules)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 312, in test_rows_enforce_the_worker_charge_period_and_control_character_rules
+    with self.assertRaises(fct.ControlTotalsError) as ctx:
+AssertionError: ControlTotalsError not raised
+
+----------------------------------------------------------------------
+Ran 29 tests in 0.013s
+
+FAILED (failures=11)
