@@ -850,6 +850,8 @@ describe('guard hardening (challenger Low on 480dd87)', () => {
     expect(v("await db.pool.query('GRANT ratio_worker /* ON DATABASE d */ TO x');")).not.toEqual([]);
     expect(v("await db.pool.query('ALTER--c\\nROLE x NOLOGIN');")).not.toEqual([]);
     expect(v("await db.pool.query('REVOKE /* ON TABLE t */ ratio_worker FROM x');")).not.toEqual([]);
+    // A comment inside an EXECUTE '…' string is a comment when that string runs.
+    expect(v("await db.pool.query(\"DO $$ BEGIN EXECUTE 'GRANT/**/ratio_worker TO x'; END $$\");")).not.toEqual([]);
     // A '--' inside a string literal is text, not a comment: the GRANT after it still counts.
     expect(v("await db.pool.query(\"SELECT '--'; GRANT ratio_worker TO x\");")).not.toEqual([]);
   });
