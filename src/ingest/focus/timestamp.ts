@@ -10,6 +10,18 @@ export interface ParsedTimestamp {
   iso: string;
   /** Instant in ms (fractional digits beyond ms are ignored here, kept in iso). */
   epochMs: number;
+  /**
+   * Instant in microseconds as Postgres STORES it (timestamptz): the fraction is rounded to
+   * microseconds with rint of the double, half to even, as PG's ParseFractionalSecond does.
+   * Used where the database compares stored values (cost_facts_charge_period; PR #69 review).
+   */
+  epochUs: bigint;
+}
+
+/** rint (round half to even) of a non-negative double, as C rint in the default rounding mode. */
+function rint(x: number): number {
+  const r = Math.round(x);
+  return r - x === 0.5 && r % 2 !== 0 ? r - 1 : r;
 }
 
 /**
@@ -52,6 +64,9 @@ export function parseFocusTimestamp(s: string): ParsedTimestamp | null {
   }
   const ms = frac ? Number((frac.slice(1) + '00').slice(0, 3)) : 0;
   const epochMs = utcMs(y, mo - 1, d, h, mi, sec, ms) - offsetMin * 60_000;
+  // Postgres: fsec = rint(strtod(".ddd…") * 1e6); 1-6 digits are exact, 7-9 are rounded (half to even).
+  const fracUs = frac ? rint(Number(`0${frac}`) * 1_000_000) : 0;
+  const epochUs = BigInt(utcMs(y, mo - 1, d, h, mi, sec, 0) - offsetMin * 60_000) * BigInt(1000) + BigInt(fracUs);
   const iso = `${ys}-${mos}-${ds}T${hs}:${mis}:${ss}${frac}${zoneOut}`;
-  return { iso, epochMs };
+  return { iso, epochMs, epochUs };
 }

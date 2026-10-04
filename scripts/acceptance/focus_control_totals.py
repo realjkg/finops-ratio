@@ -250,11 +250,6 @@ def format_timestamp(text):
     return format_utc(parse_timestamp(text))
 
 
-def worker_ms(t):
-    """The instant at the worker's precision: timestamp.ts keeps milliseconds, truncated (challenger L-1)."""
-    return t.replace(microsecond=t.microsecond // 1000 * 1000)
-
-
 def classify_columns(header):
     return {
         'mapped': {c: API_FIELD[c] for c in header if c in API_FIELD},
@@ -300,8 +295,11 @@ def expected_row(rec, pos, header, period, focus_version, n):
         if any(ord(ch) < 0x20 and ch not in '\t\n\r' for ch in text):
             raise ControlTotalsError(f'record {n}: {name} contains a control character (only TAB, CR and LF are allowed)')
     start, end = ts('ChargePeriodStart'), ts('ChargePeriodEnd')
-    # Compared as instants (never as text) at the worker's millisecond precision (PR #68 review).
-    if worker_ms(end) < worker_ms(start):
+    # Compared as instants (never as text) at full microsecond precision, as Postgres stores and
+    # the cost_facts_charge_period CHECK compares them (PR #69 review: the millisecond rule was wrong).
+    # TIMESTAMP_RE allows at most 6 fraction digits, so no rounding is needed here; the worker rounds
+    # 7-9 digits as Postgres does (timestamp.ts epochUs).
+    if end < start:
         raise ControlTotalsError(f'record {n}: ChargePeriodEnd is before ChargePeriodStart')
 
     return {

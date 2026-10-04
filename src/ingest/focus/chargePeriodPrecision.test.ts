@@ -22,21 +22,21 @@ describe('epochUs: the instant at Postgres microsecond precision', () => {
   it('matches what PG16 stores for 7-9 fraction digits (probed on a scratch PG16: rint, half to even)', () => {
     // [input fraction, microseconds Postgres stores] — from SELECT '…'::timestamptz on PG 16.14.
     const pg: Array<[string, bigint]> = [
-      ['.0000005', 0n],
-      ['.0000015', 2n],
-      ['.0000025', 2n],
-      ['.0000035', 4n],
-      ['.0000045', 4n],
-      ['.0000004999', 0n],
-      ['.9999995', 1_000_000n],
+      ['.0000005', BigInt(0)],
+      ['.0000015', BigInt(2)],
+      ['.0000025', BigInt(2)],
+      ['.0000035', BigInt(4)],
+      ['.0000045', BigInt(4)],
+      ['.000000499', BigInt(0)], // 9 digits (the worker accepts at most 9; 10 are refused as UNPARSEABLE_TIMESTAMP)
+      ['.9999995', BigInt(1_000_000)],
     ];
     const whole = parseFocusTimestamp(`${BASE}Z`)!.epochUs;
     for (const [frac, us] of pg) expect(parseFocusTimestamp(`${BASE}${frac}Z`)!.epochUs - whole, frac).toBe(us);
   });
 
   it('keeps 1-6 digits exactly and applies the offset', () => {
-    expect(parseFocusTimestamp(`${BASE}.000500Z`)!.epochUs).toBe(BigInt(Date.UTC(2026, 6, 2)) * 1000n + 500n);
-    expect(parseFocusTimestamp('2026-07-02T02:00:00.5+02:00')!.epochUs).toBe(BigInt(Date.UTC(2026, 6, 2)) * 1000n + 500_000n);
+    expect(parseFocusTimestamp(`${BASE}.000500Z`)!.epochUs).toBe(BigInt(Date.UTC(2026, 6, 2)) * BigInt(1000) + BigInt(500));
+    expect(parseFocusTimestamp('2026-07-02T02:00:00.5+02:00')!.epochUs).toBe(BigInt(Date.UTC(2026, 6, 2)) * BigInt(1000) + BigInt(500_000));
   });
 });
 

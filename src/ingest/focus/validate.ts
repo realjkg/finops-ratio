@@ -164,7 +164,9 @@ export function validateRow(
   if (ts.BillingPeriodStart && ts.BillingPeriodStart.epochMs !== periodStartMs) {
     errors.push({ column: 'BillingPeriodStart', code: 'PERIOD_MISMATCH', message: `row does not belong to billing period ${billingPeriod}` });
   }
-  if (ts.ChargePeriodStart && ts.ChargePeriodEnd && ts.ChargePeriodEnd.epochMs < ts.ChargePeriodStart.epochMs) {
+  // Compared at the precision Postgres stores (µs), exactly as cost_facts_charge_period
+  // CHECK (charge_period_end >= charge_period_start) will (PR #69 review): never at ms.
+  if (ts.ChargePeriodStart && ts.ChargePeriodEnd && ts.ChargePeriodEnd.epochUs < ts.ChargePeriodStart.epochUs) {
     errors.push({ column: 'ChargePeriodEnd', code: 'CHARGE_PERIOD_INVERTED', message: 'ChargePeriodEnd is before ChargePeriodStart' });
   }
   if (errors.length) return { ok: false, errors };
