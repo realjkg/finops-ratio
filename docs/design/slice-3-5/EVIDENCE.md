@@ -31,7 +31,8 @@ ordinary commits and plain pushes (never a force-push).
 | 19 | `0dd6743` | Copilot's review 5407780981 of ddbb6f0 (2 High, 1 Medium) and the challenger's four Low items on revision 18 (APPROVED, 0 High, 0 Medium), with two plan slips, §3t: named resources only in `cost_resource_daily` (no `''` sentinel for `resource_id`); a positive `scale_level` and clamped quantiles so leaf bounds stay ordered for negative usage; billed `B` on month-end only; "lower bound" renamed; the 28-day re-anchoring cap wins; the D3 anchor is the daily-updated state; `freshness` reads its batch and sums in one statement; the weekly and hurdle baselines named; the 4-4b and 4-5 tests completed. |
 | 20 | `d4616a8` | Copilot's review 5407820380 of 0dd6743 (1 High, 3 Medium) and the challenger's three Low items on revision 19 (APPROVED, 0 High, 0 Medium), §3u: `freshness` keyset on `(share, leaf_id)`; a per-currency resource floor (a quarter of the minimum impact); the conditional floor applied to intermittent series and to every total; `detector_scope_state` in every retention list and test; clamping's effect on FT-7 reported. |
 | 21 | `3aaa678`, `bddefe9` | Copilot's review 5407844545 of d4616a8 (2 High, 1 Medium) and the challenger's one Low on revision 20 (APPROVED, 0 High, 0 Medium), §3v: `block`, currency and segment in the backtest report's key; `n` = 0 origins left out of the totals calibration; month-end errors bucketed by remaining days; the backtest report published by a view on the latest succeeded backtest run; EVIDENCE §3u's section reference corrected. |
-| 22 | this revision | Copilot's review 5407898631 of bddefe9 (3 High, 1 Medium, 1 Low) and the challenger's one Low on revision 21 (APPROVED, 0 High, 0 Medium), §3w: billed `B` only at scopes with a billing source; parent integrity of the anomaly tables; M1-log eligibility and its runtime fallback; the `cost_daily` row measured with its six measures (`rowsize3.sql`; peak 5.18 GB); D-21's provider names; backtest reads atomic per snapshot. |
+| 22 | `c85079f` | Copilot's review 5407898631 of bddefe9 (3 High, 1 Medium, 1 Low) and the challenger's one Low on revision 21 (APPROVED, 0 High, 0 Medium), §3w: billed `B` only at scopes with a billing source; parent integrity of the anomaly tables; M1-log eligibility and its runtime fallback; the `cost_daily` row measured with its six measures (`rowsize3.sql`; peak 5.18 GB); D-21's provider names; backtest reads atomic per snapshot. |
+| 23 | this revision | Copilot's review 5407941028 of c85079f (1 High, 2 Medium) and the challenger's one Low on revision 22 (APPROVED, 0 High, 0 Medium), §3x: merge targets terminal, enforced by a locking trigger (`tg_anomaly_merge_guard`, `REVIEWED_TRIGGERS` 14 → 15) with re-pointing before a survivor is merged; M1-log eligibility over everything its fit and selection read; calendar factors from valid samples only; "never reopened". |
 
 ## 2. Governance wording: reverted
 
@@ -499,6 +500,20 @@ constraints were checked on a throwaway PostgreSQL 16.14 cluster (port
 | **R6** (challenger) backtest snapshot | **Fixed.** The switch is atomic per snapshot: one statement, or one REPEATABLE READ transaction, sees one run; two READ COMMITTED statements can straddle the commit. The accuracy route reads page and count in one REPEATABLE READ transaction; the 4-4b test is written that way, with a mutant reading them in two READ COMMITTED statements | DESIGN §5.1, §7 (4-4b); App. D.2 |
 | Scripts | `rollup12.py` changed (hash above); `rowsize3.sql` added (13 embedded scripts); the other eleven unchanged | App. B |
 
+## 3x. Revision 23: Copilot's review 5407941028 of c85079f and the challenger's Low on revision 22
+
+The challenger APPROVED revision 22 (0 High, 0 Medium, 1 Low). Each item
+was checked against c85079f and is valid. S1 was checked on a throwaway
+PostgreSQL 16.14 cluster (port 55791, removed afterwards).
+
+| Item | Change | Where |
+|---|---|---|
+| **S1 r4179131145** (High) merge cycles | **Fixed.** A `BEFORE INSERT OR UPDATE OF merged_into` trigger, `ratio.tg_anomaly_merge_guard()` (`SECURITY INVOKER`, pinned `search_path`, owned by `ratio_owner`), locks the target row `FOR UPDATE` and refuses a target that is itself merged (`MERGE_TARGET_NOT_TERMINAL`), and refuses merging a group that others still point at (`MERGE_SOURCE_HAS_MEMBERS`). Every pointer is one level deep to a survivor, so no cycle can form. **A survivor merged later** (a billing-account group absorbed by a provider-wide group): the job re-points its members to the new survivor first, with an event each, then merges it. Prohibiting that would split the provider-wide event in two (AT-6). `REVIEWED_TRIGGERS`: 0001's 11 → 13 (0002) → 14 (0003) → **15** (0004 adds `ratio.anomalies:merge_guard:ratio.tg_anomaly_merge_guard()`). The same sweep fixed DESIGN §6.2's stale "`REVIEWED_TRIGGERS` is unchanged (no new triggers)". Probe: A → B then B → A refused; C → D, then D → E refused until C is re-pointed, then E → C refused; S1, S2 → BA, re-pointed to PW, BA → PW leaves every pointer at PW; **concurrent** X → Y and Y → X: one commits, the other is refused. Mutants: without the trigger the two-row cycle commits; **without the row lock both concurrent cross-merges commit** (probe). 5-1 and 5-2b tests and mutants | App. D.1, D.4; DESIGN §4.5, §6.2, §7 (5-1, 5-2b) |
+| **S2 r4179131180** M1-log fit window | **Fixed.** Eligibility requires every value the M1-log fit or its selection reads to be > 0: the whole fit history up to the origin and every day of the selection block, not only the last 28 days. 4-4a test with the only −5 forty days back (not eligible); mutant: the trailing-28 check | DESIGN §3.2, §7 (4-4a) |
+| **S3 r4179131198** calendar samples | **Fixed.** A calendar sample counts only if `y > 0` and `ŷ_weekly > 0`; `m` counts valid samples; the median, `σ` and the significance test use that one valid set; fewer than 3 valid samples gives factor 0. 4-4a tests with zeros (0 / 0) and a negative event day; mutants: all samples (NaN), `m` counted before dropping invalid ones | DESIGN §3.2, §7 (4-4a) |
+| **T1** (challenger) "not reopened" | **Fixed.** "A resolved group is never reopened; a later candidate starts a new group" (a new first day, so a new dedup key and id). Sweep: no other reopen wording in the documents | DESIGN §4.5 |
+| Scripts | No script changed; all 13 hashes as in revision 22; no disk figure changes (one trigger) | App. B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -539,8 +554,8 @@ Appendix B (B.4, B.5.6–B.5.14).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 22 (the commit that adds this line; the same eight reasons
-as at revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
+at revision 23 (the commit that adds this line; the same eight reasons
+as at revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
 `ddbb6f0`, revision 17, `cc54e79`, and `9e0d703`, revision 16). Revision 16 gave the same risk and classes
 as every revision since 4, and **one more reason than before**: `retention.mention`
 on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is
