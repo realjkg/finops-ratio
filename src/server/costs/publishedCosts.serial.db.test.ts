@@ -255,3 +255,67 @@ describe('D10 output never depends on session settings: role defaults (serial; C
     }
   });
 });
+
+// --- challenger Medium on 7142a86: D6 cases moved from publishedCosts.db.test.ts.
+// Each GRANTs, REVOKEs or ALTERs ROLE on an EXISTING login with autocommit:
+// roles are cluster-wide, and Slice 0's catalog check (memberships in one
+// statement, has_*_privilege — which follows live memberships — in a later
+// one) running concurrently in another test database could see a half-applied
+// state. Serial phase only; parallelRoleDdl.test.ts enforces it. Assertions
+// identical to the originals; only the helpers are local to this file.
+describe('D6 (serial) the reader-login safety check, with role changes on an existing login', () => {
+  async function login(memberOf: Array<'ratio_worker' | 'ratio_reader' | 'ratio_owner'>): Promise<Login> {
+    const l = await createLogin(db, memberOf);
+    logins.push(l);
+    return l;
+  }
+  async function get(tenantId: string, query: Record<string, string> = {}, opts: { readerUrl: string }) {
+    const route = createPublishedCostsRoute({
+      env: { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_API_TENANT_ID: tenantId, RATIO_READER_DATABASE_URL: opts.readerUrl },
+      logger: () => undefined,
+    });
+    return call(route, makeReq({ headers: bearer(), query }));
+  }
+  async function refused(readerUrl: string) {
+    const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({ error: { code: 'unsafe_db_login', message: ROUTE_MESSAGES.unsafeLogin, requestId: expect.stringMatching(/^[0-9a-f-]{36}$/) } });
+    expect(res.headers['x-request-id']).toBe((res.body as { error: { requestId: string } }).error.requestId);
+    expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|superuser/i);
+    return res;
+  }
+
+  it('a reader that can only SET ROLE ratio_worker (no inherit) is refused', async () => {
+    const l = await login([]);
+    await db.pool.query(`GRANT ratio_reader TO ${l.name}`);
+    await db.pool.query(`GRANT ratio_worker TO ${l.name} WITH INHERIT FALSE, SET TRUE`);
+    await refused(l.url);
+  });
+
+  it('a reader holding ratio_reader only through SET (no inherited privileges) is refused', async () => {
+    const l = await login([]);
+    await db.pool.query(`GRANT ratio_reader TO ${l.name} WITH INHERIT FALSE, SET TRUE`);
+    await refused(l.url);
+  });
+
+  it('the check runs on every request: a login made unsafe while pooled is refused at once, and served again when fixed', async () => {
+    const l = await login(['ratio_reader']);
+    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
+    await db.pool.query(`GRANT ratio_worker TO ${l.name}`);
+    await refused(l.url);
+    await db.pool.query(`REVOKE ratio_worker FROM ${l.name}`);
+    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
+  });
+
+  it('a pooled login set NOLOGIN is refused on the very next request (pooled sessions survive NOLOGIN); LOGIN again ⇒ served', async () => {
+    const l = await login(['ratio_reader']);
+    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
+    await db.pool.query(`ALTER ROLE ${l.name} NOLOGIN`);
+    // The pooled session is still connected: Postgres does not end it on NOLOGIN.
+    const alive = await db.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename = $1`, [l.name]);
+    expect(alive.rows[0].n).toBeGreaterThan(0);
+    await refused(l.url);
+    await db.pool.query(`ALTER ROLE ${l.name} LOGIN`);
+    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
+  });
+});

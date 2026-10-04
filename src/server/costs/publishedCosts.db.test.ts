@@ -302,6 +302,10 @@ describe('D5 period filter', () => {
   });
 });
 
+// The D6 cases that GRANT / REVOKE / ALTER ROLE on an existing login commit
+// cluster-wide role changes, so they run in the serial phase:
+// publishedCosts.serial.db.test.ts, 'D6 (serial)'. parallelRoleDdl.test.ts
+// keeps them out of this file.
 describe('D6 the reader-login safety check refuses unsafe logins (503, nothing served)', () => {
   async function refused(readerUrl: string) {
     const res = await get(seeded.a.tenantId, {}, { readerUrl });
@@ -332,21 +336,8 @@ describe('D6 the reader-login safety check refuses unsafe logins (503, nothing s
     await refused((await login(['ratio_reader', 'ratio_worker'])).url);
   });
 
-  it('a reader that can only SET ROLE ratio_worker (no inherit) is refused', async () => {
-    const l = await login([]);
-    await db.pool.query(`GRANT ratio_reader TO ${l.name}`);
-    await db.pool.query(`GRANT ratio_worker TO ${l.name} WITH INHERIT FALSE, SET TRUE`);
-    await refused(l.url);
-  });
-
   it('a login with no ratio membership is refused', async () => {
     await refused((await login([])).url);
-  });
-
-  it('a reader holding ratio_reader only through SET (no inherited privileges) is refused', async () => {
-    const l = await login([]);
-    await db.pool.query(`GRANT ratio_reader TO ${l.name} WITH INHERIT FALSE, SET TRUE`);
-    await refused(l.url);
   });
 
   it('N3: a login DROPPED while its session is pooled is never served (Postgres errors on the dead role OID ⇒ 500, no data)', async () => {
@@ -356,15 +347,6 @@ describe('D6 the reader-login safety check refuses unsafe logins (503, nothing s
     const res = await get(seeded.a.tenantId, {}, { readerUrl: l.url });
     expect([500, 503]).toContain(res.statusCode);
     expect(JSON.stringify(res.body)).not.toContain('billedCost');
-  });
-
-  it('the check runs on every request: a login made unsafe while pooled is refused at once, and served again when fixed', async () => {
-    const l = await login(['ratio_reader']);
-    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
-    await db.pool.query(`GRANT ratio_worker TO ${l.name}`);
-    await refused(l.url);
-    await db.pool.query(`REVOKE ratio_worker FROM ${l.name}`);
-    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
   });
 
   it('the reason is logged for the operator as a distinct unsafe_db_login event (codes, no role names), never returned', async () => {
@@ -389,17 +371,6 @@ describe('D6 the reader-login safety check refuses unsafe logins (503, nothing s
     expect(text).not.toMatch(/ratio_owner|ratio_reader|ratio_worker|postgres:/);
   });
 
-  it('a pooled login set NOLOGIN is refused on the very next request (pooled sessions survive NOLOGIN); LOGIN again ⇒ served', async () => {
-    const l = await login(['ratio_reader']);
-    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
-    await db.pool.query(`ALTER ROLE ${l.name} NOLOGIN`);
-    // The pooled session is still connected: Postgres does not end it on NOLOGIN.
-    const alive = await db.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename = $1`, [l.name]);
-    expect(alive.rows[0].n).toBeGreaterThan(0);
-    await refused(l.url);
-    await db.pool.query(`ALTER ROLE ${l.name} LOGIN`);
-    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
-  });
 });
 
 describe('D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ ONLY)', () => {
