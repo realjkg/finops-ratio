@@ -563,7 +563,7 @@ ids are random UUIDs, and the local stack has one tenant. It is fixed anyway.
 
 | Commit | Kind |
 |---|---|
-| `local.test.mjs` L17: every `<x>.batch_id = <y>.id` correlation in `local.mjs`/`acceptance.mjs` must also bind `<x>.tenant_id = <y>.tenant_id` | **red** (`red/red-copilot-tenant-scope.txt`: L17 failed) |
+| `local.test.mjs` L17 (renamed L18 in §15): every `<x>.batch_id = <y>.id` correlation in `local.mjs`/`acceptance.mjs` must also bind `<x>.tenant_id = <y>.tenant_id` | **red** (`red/red-copilot-tenant-scope.txt`: L17 failed) |
 | `local.mjs`: `WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id` | green |
 
 **Gates after the fix:**
@@ -606,3 +606,31 @@ allowed and excluded records alike. That behaviour is unchanged.
   - **1k** `pass: true`: 942 / `18.00663861840`, `{PROVIDER_MISMATCH: 57}`, 2024-10 quarantined.
 
 Every excluded record in both upstream samples passes `expected_row()`.
+
+## 15. Challenger Low on the tenant-scope check: guard the invariant, not the query
+
+The challenger approved c0ff7d0..1df6bdc with 0 High and 0 Medium. Its one Low
+was that the §13 static check guarded today's query, not the invariant. Two
+mutations survived it:
+- a second unscoped subquery next to the fixed one (C);
+- reversed operands, `b.id = a.batch_id` (D).
+
+They survived because the tenant binding was searched across the whole file,
+and reversed operands were not matched at all.
+
+The check is renamed L18 (the label L17 was already used in `local.test.mjs`).
+It now:
+- works per SQL template literal;
+- matches both operand orders and an unaliased `batch_id`;
+- requires the `tenant_id` binding between the same two aliases inside the same literal.
+
+A self-test asserts that the challenger's mutations A–D, and a binding placed
+in a different literal, are all flagged, and that scoped forms in either
+order pass.
+
+**Mutation:** removing the tenant binding from the fixed `local.mjs` query
+fails L18 (1 failed).
+
+**Gates:**
+- `scripts/local` unit tests: 239 passed;
+- lint: exit 0.

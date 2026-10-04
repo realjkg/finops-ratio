@@ -1672,18 +1672,53 @@ describe('L25 every membership edge touching a managed role is judged, either si
   });
 });
 
-describe('L17 superuser catalog queries are tenant-scoped (PR #67 review)', () => {
+describe('L18 superuser catalog queries are tenant-scoped (PR #67 review)', () => {
   // Batch ids are unique only within a tenant (PK (tenant_id, id)), and the catalog
   // snapshot runs as the local superuser, which bypasses row-level security. Every
-  // correlation on a batch id must therefore also bind the tenant.
-  it('every `batch_id = <alias>.id` correlation also binds `tenant_id = <alias>.tenant_id`', () => {
-    for (const file of ['scripts/local/local.mjs', 'scripts/local/acceptance.mjs']) {
-      const src = read(file);
-      const joins = [...src.matchAll(/(\w+)\.batch_id\s*=\s*(\w+)\.id\b/g)];
-      for (const [, child, parent] of joins) {
-        expect(src, `${file}: ${child}.batch_id = ${parent}.id`).toMatch(new RegExp(`\\b${child}\\.tenant_id\\s*=\\s*${parent}\\.tenant_id\\b`));
+  // correlation on a batch id must therefore bind the tenant in the SAME SQL text.
+  // Returns the batch-id correlations in `src` that lack a tenant binding between the
+  // same two aliases inside the same template literal. An unaliased batch_id counts as unscoped.
+  function untenantedBatchCorrelations(src) {
+    const problems = [];
+    for (const [sql] of src.matchAll(/`[^`]*`/g)) {
+      const pairs = [
+        ...[...sql.matchAll(/(?:\b(\w+)\.)?batch_id\s*=\s*(\w+)\.id\b/g)].map((m) => [m[1], m[2], m[0]]),
+        ...[...sql.matchAll(/\b(\w+)\.id\s*=\s*(?:\b(\w+)\.)?batch_id\b/g)].map((m) => [m[2], m[1], m[0]]),
+      ];
+      for (const [child, parent, text] of pairs) {
+        const bound =
+          child !== undefined &&
+          (new RegExp(`\\b${child}\\.tenant_id\\s*=\\s*${parent}\\.tenant_id\\b`).test(sql) ||
+            new RegExp(`\\b${parent}\\.tenant_id\\s*=\\s*${child}\\.tenant_id\\b`).test(sql));
+        if (!bound) problems.push(text);
       }
     }
-    expect([...read('scripts/local/local.mjs').matchAll(/\.batch_id\s*=\s*\w+\.id\b/g)].length).toBeGreaterThan(0);
+    return problems;
+  }
+
+  it('the checker flags every unscoped form (the challenger mutations A-D) and accepts scoped ones', () => {
+    for (const bad of [
+      '`SELECT 1 FROM x v WHERE b.id = v.batch_id`',
+      '`SELECT 1 FROM x WHERE batch_id = b.id`',
+      '`SELECT (SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id), (SELECT 1 FROM ratio.ingest_artifacts a WHERE a.batch_id = b.id)`',
+      '`SELECT 1 FROM ratio.ingest_artifacts a WHERE b.id = a.batch_id`',
+      '`SELECT 1 FROM e v WHERE v.batch_id = b.id` + `v.tenant_id = b.tenant_id`',
+    ]) {
+      expect(untenantedBatchCorrelations(bad), bad).not.toEqual([]);
+    }
+    for (const good of [
+      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id`',
+      '`SELECT 1 FROM e v WHERE b.id = v.batch_id AND b.tenant_id = v.tenant_id`',
+    ]) {
+      expect(untenantedBatchCorrelations(good), good).toEqual([]);
+    }
+  });
+
+  it('no batch-id correlation in scripts/local is missing its tenant binding', () => {
+    for (const file of ['scripts/local/local.mjs', 'scripts/local/acceptance.mjs']) {
+      expect(untenantedBatchCorrelations(read(file)), file).toEqual([]);
+    }
+    // The catalog query is still there (the check above is not vacuous).
+    expect(read('scripts/local/local.mjs')).toMatch(/v\.tenant_id = b\.tenant_id AND v\.batch_id = b\.id/);
   });
 });
