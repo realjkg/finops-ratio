@@ -15,7 +15,7 @@
 // (readerLogin.ts) ⇒ 503 unsafe_db_login when unsafe.
 import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import type { Pool } from 'pg';
-import { isTenantId } from '@/ingest/db/tenant';
+import { publishedCostsConfig } from './config';
 import { sendError, withGateway, type GatewayLogEntry } from '@/server/gateway';
 import { logInternalError } from '@/server/gateway/internalError';
 import { evaluateLiveDataAuth, THROTTLED_MESSAGE, WEAK_TOKEN_MESSAGE, type LiveAuthResult } from '@/server/gateway/liveDataAuth';
@@ -67,20 +67,19 @@ export function createPublishedCostsRoute(deps: PublishedCostsRouteDeps = {}): N
   const poolFor = deps.poolFor ?? readerPool;
 
   async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void> {
-    const env = envOf();
-    const tenantId = env.RATIO_API_TENANT_ID ?? '';
-    const readerUrl = env.RATIO_READER_DATABASE_URL?.trim() ?? '';
-    if (!isTenantId(tenantId) || readerUrl === '') {
+    const config = publishedCostsConfig(envOf());
+    if (!config.ok) {
       sendError(res, 503, 'not_configured', ROUTE_MESSAGES.notConfigured);
       return;
     }
+    const { tenantId, readerUrl } = config;
     const parsed = parsePublishedCostsQuery(req.query ?? {});
     if (!parsed.ok) {
       sendError(res, 400, 'invalid_request', parsed.message);
       return;
     }
     try {
-      const page = await readPublishedCosts(poolFor(readerUrl), tenantId.toLowerCase(), parsed.value);
+      const page = await readPublishedCosts(poolFor(readerUrl), tenantId, parsed.value);
       res.setHeader('Cache-Control', 'no-store');
       res.status(200).json(page);
     } catch (err) {
