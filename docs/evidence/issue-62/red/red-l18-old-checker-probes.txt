@@ -1,0 +1,4 @@
+MISSED  `SELECT 1 FROM e b WHERE b.batch_id = b.id AND b.tenant_id = b.tenant_id`
+MISSED  `SELECT 1 FROM e b WHERE b.batch_id = b.id AND b.id = b.batch_id AND b.tenant_id = b.tenant_id`
+MISSED  `SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id AND b.batch_id = v.id`
+MISSED  `SELECT 1 FROM e v WHERE b.tenant_id = v.tenant_id AND b.id = v.batch_id AND v.id = b.batch_id`

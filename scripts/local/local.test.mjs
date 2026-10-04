@@ -1727,6 +1727,25 @@ describe('L18 superuser catalog queries are tenant-scoped (PR #67 review)', () =
     }
   });
 
+  it('blind spots (challenger at ebbde12): a tautological self-binding, and reversed pairs sharing one binding, are flagged', () => {
+    for (const bad of [
+      // (i) child === parent: `b.tenant_id = b.tenant_id` is a tautology and binds nothing.
+      '`SELECT 1 FROM e b WHERE b.batch_id = b.id AND b.tenant_id = b.tenant_id`',
+      '`SELECT 1 FROM e b WHERE b.batch_id = b.id AND b.id = b.batch_id AND b.tenant_id = b.tenant_id`',
+      // (ii) reversed pairs: one binding between v and b, but two correlations (v→b and b→v).
+      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id AND b.batch_id = v.id`',
+      '`SELECT 1 FROM e v WHERE b.tenant_id = v.tenant_id AND b.id = v.batch_id AND v.id = b.batch_id`',
+    ]) {
+      expect(untenantedBatchCorrelations(bad), bad).not.toEqual([]);
+    }
+    for (const good of [
+      // Two correlations, two bindings (either direction) between the same unordered pair.
+      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id AND b.tenant_id = v.tenant_id AND b.batch_id = v.id`',
+    ]) {
+      expect(untenantedBatchCorrelations(good), good).toEqual([]);
+    }
+  });
+
   it('no batch-id correlation in scripts/local is missing its tenant binding', () => {
     for (const file of ['scripts/local/local.mjs', 'scripts/local/acceptance.mjs']) {
       expect(untenantedBatchCorrelations(read(file)), file).toEqual([]);
