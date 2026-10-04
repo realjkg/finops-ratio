@@ -195,6 +195,8 @@ describe('cluster-wide role changes only in serial DB test files (static guard)'
     // Flagged: a client with no transaction in sight.
     expect(v('async function f(c) { await c.query(`GRANT ratio_worker TO ${x}`); }')).toHaveLength(1);
     expect(v("async function f(c) { await c.query('BEGIN'); await c.query(`GRANT ratio_worker TO ${x}`); await c.query('COMMIT'); }")).toHaveLength(1);
+    // Flagged: a pool call inside a function that rolls back ITS client (the pool statement still autocommits).
+    expect(v("async function f(c) { await c.query('BEGIN'); try { await db.pool.query(`GRANT ratio_worker TO ${x}`); } finally { await c.query('ROLLBACK'); } }")).toHaveLength(1);
     // Not flagged: inside BEGIN … ROLLBACK, directly or through a helper of the file.
     expect(v("async function f(c) { await c.query('BEGIN'); try { await c.query(`GRANT ratio_worker TO ${x}`); } finally { await c.query('ROLLBACK'); } }")).toEqual([]);
     expect(
