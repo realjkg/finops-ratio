@@ -1,6 +1,6 @@
 # Appendix B — Sizing: row counts, storage, load times
 
-Part of [DESIGN.md](DESIGN.md) §2.8–§2.10. B.1–B.4 size the **full grain** (`ci`, `full`); **B.5 sizes `fleet15k`** from per-row sizes measured on PostgreSQL 16.
+Part of [DESIGN.md](DESIGN.md) §2.8–§2.10. B.1–B.4 size the **full grain** (`ci`, `full`); **B.5 budgets `fleet15k`** from per-row sizes measured on PostgreSQL 16 (revision 3).
 
 ## B.1 Model
 
@@ -139,14 +139,18 @@ print("charge-level resource x hourly over 395d: %.1fB rows" % (usage_series * r
 print("resource x daily over 395d: %.2fB rows" % (usage_series * res_per_series * 395 / 1e9))
 ```
 
-## B.5 `fleet15k`: sizing from measured row sizes
+## B.5 `fleet15k`: disk budget from measured row sizes (revision 3)
 
 ### B.5.1 The constraint
 
-`fleet15k` must hold **all 15,000 accounts** and fit comfortably in
-**≤ 6 GB in total**: object storage, Postgres facts, rollups, forecasts and
-indexes (orchestrator decision, 2026-10-04). The container class it runs in
-has ≈ 10 GB free disk, 4 CPUs and 15 GB RAM.
+`fleet15k` must hold **all 15,000 accounts**, with a **5.5 GB target** and
+a **6 GB ceiling** in total per run: object storage, Postgres facts,
+rollups, forecasts, indexes, the backtest exports, the control tenant, WAL
+and temporary files (orchestrator decisions, 2026-10-04). The container
+class it runs in has ≈ 10 GB free disk, 4 CPUs and 15 GB RAM. The three
+seeds (tuning, natural, enriched) run **sequentially**, each ending with
+`down -v`, so the budget applies to one run; between runs only the
+evaluator's exported inputs are kept (≤ 0.3 GB each).
 
 ### B.5.2 What was measured (2026-10-04)
 
@@ -157,79 +161,104 @@ removed afterwards), with the scripts in B.5.6:
 |---|---|---|---|---|
 | `cost_facts`, `fleet15k` row (lean) | `cost_facts`' exact columns and primary key; 10-decimal money; `Tags` with `business-unit` and `cost-center` only; `ChargeFrequency`; `PricingCategory` on 1 row in 10 | **554.2** | 409.6 | 100.5 |
 | `cost_facts`, first-revision minimal row | as above, plus `env` tag and `PricingCategory` on every row | 599.8 | 455.1 | 147.0 |
-| `cost_daily`, narrow (5 measures, primary key only) | Appendix D §D.1 | **217.0** | 117.0 | — |
+| `cost_daily`, narrow (5 measures, primary key with a uuid batch id) | Appendix D §D.1 | **217.0** | 117.0 | — |
 | `cost_daily`, wide (13 measures, PK + btree + BRIN) | first-revision sketch | 317.3 | 167.2 | — |
 
-Each measurement used 400,000 rows. Not measured: the CHECK constraints,
-foreign keys and triggers of the real table add no stored bytes; TOAST is
-not involved at these row widths.
+Each measurement used 400,000 rows. The CHECK constraints, foreign keys and
+triggers of the real table add no stored bytes; TOAST is not involved at
+these row widths.
 
-**Gzip bytes per row:** 19.4 B measured on 200,000 synthetic CSV rows with
-the `fleet15k` column set (B.5.6, `csvsize.py`); **30 B is used** below
-because real generator output has more distinct values (e.g. billed ≠
-effective on committed rows). Objects are counted **three times**: the
-generator's output directory, the source bucket and the evidence bucket.
+**Not measured (estimates, checked in PR 3-4):** the narrow rollup with an
+integer `batch_seq` instead of a uuid (≈ 193 B: −12 B heap, −12 B index);
+gzip bytes per row (19.4 B measured on 200,000 synthetic CSV rows with the
+`fleet15k` columns, **30 B used**); WAL with `max_wal_size=256MB` and
+temporary files (**0.3 GB budgeted each**); the cluster's own catalogs
+(0.05 GB).
 
-### B.5.3 Arithmetic
+### B.5.3 Re-budget and the escalation ladder
 
-Same account model and seed as B.4. Each account keeps its top 2 services as
-individual series (top 4 for the largest 5 % by spend) and sums the rest into
-one `Other services` series; non-usage rows (tax, recurring fee, credits,
-commitment purchases) are added monthly.
+Every item is counted (M11): facts including the `Unused` commitment rows
+(one per commitment account per day), the narrow rollup, `billing_daily`,
+`cost_daily_scope` (≈ 550 scopes × 122 days × 2 runs), objects in the
+**source and evidence buckets only** (the generator's local copy is removed
+after a verified upload, by default), forecast and detector state for 2
+runs, aggregate forecast points, the **per-origin backtest exports**
+(178 points per leaf × 30 B, gzip JSON Lines; §3.8), backtest points for
+aggregate scopes in the database, anomalies, dimensions, the control
+tenant, WAL, temporary files and the cluster base.
 
-| Quantity | Value |
+| Variant | Leaves (individual / `Other`) | Fact rows | Total |
+|---|---|---|---|
+| **A**: rev. 2 design (top 2, top 4 for the largest 5 %; uuid batch key; 150-account control) | 45,067 (31,071 / 13,996) | 5.87 M | **6.08 GB: over the ceiling** |
+| **B** = A + control tenant 15 accounts + top 2 for every account | 43,565 (29,569 / 13,996) | 5.69 M | 5.71 GB |
+| **C** = B + integer `batch_seq` in `cost_daily` | 43,565 | 5.69 M | 5.59 GB |
+| **D** = C + **top 1 for accounts below median spend** (≈ 3.6 % of spend), top 2 at or above | **37,052 (22,498 / 14,554)** | **4.89 M** | **4.90 GB** |
+
+**Adopted: D**, the first variant under the 5.5 GB target. Breakdown:
+
+| Item | GB |
 |---|---|
-| Accounts | **15,000** (all) |
-| Usage series (account × service, incl. `Other services`) | **45,067** (3.00 per account); the full mix would be ≈ 107 k |
-| Non-usage rows per month | 37,665 |
-| Span | 4 billing periods of 31, 30, 31, 30 days = **122 days** |
-| Fact rows per day / total | ≈ 46.3 k / **≈ 5.65 M** |
-| Series-days (rollup rows) | ≈ 5.50 M |
-| Postgres facts (554 B/row) | **3.13 GB** |
-| `cost_daily` rollup (217 B/row) | **1.19 GB** |
-| Objects (30 B/row × 3 copies) | **0.51 GB** (0.34 GB once the generator's local copy is removed after a verified upload) |
-| Forecast state (2 runs), aggregate forecast points, `cost_daily_scope`, `billing_daily`, `account_dim`, anomalies | **≈ 0.34 GB** (assumption, deliberately generous) |
-| **Total** | **≈ 5.17 GB** (≈ 5.0 GB without the local copy) |
-| Headroom to 6 GB | ≈ 0.8–1.0 GB, kept for WAL (`max_wal_size` bounded, e.g. 256 MB), temporary files and the control tenant (`ci`-sized, < 0.3 GB) |
-| Single-worker load at 20 k / 6 k rows/s | **4.7 / 15.7 min** (D-06 trigger: 60 min) |
+| facts (554 B/row, measured) | 2.711 |
+| `cost_daily` (≈ 193 B/row with `batch_seq`, estimated from 217 B measured) | 0.872 |
+| `billing_daily` (sparse) | 0.023 |
+| `cost_daily_scope` | 0.030 |
+| objects: source + evidence buckets (30 B/row × 2) | 0.294 |
+| forecast state + detector state (2 runs) | 0.044 |
+| forecast points + totals, aggregate scopes (2 runs) | 0.015 |
+| backtest leaf points, exported (gzip JSON Lines) | 0.198 |
+| backtest aggregate points in the database | 0.012 |
+| anomalies, days, root causes, events | 0.020 |
+| `cost_series`, `account_dim` (2 runs) | 0.012 |
+| control tenant (15 accounts, full grain) | 0.022 |
+| WAL budget (`max_wal_size` 256 MB) | 0.300 |
+| temporary files budget | 0.300 |
+| cluster base | 0.050 |
+| **total** | **4.90** |
 
-**Honest reading of the headroom.** 5.2 GB inside a 6 GB ceiling is
-comfortable only if the measured sizes hold. PR 3-4 measures the real total.
-If it exceeds 5.5 GB, the escalation options, in order, are: remove the
-generator's local copy after upload (−0.17 GB); keep 2 individual services
-for every account (−0.16 GB, B.5.6 variant); shorten to 3 periods (−1.3 GB,
-but only 1–2 origins at the 30-day horizon). **The account count is never
-reduced.**
+Margin: ≈ 0.6 GB to the target, ≈ 1.1 GB to the ceiling. Single-worker
+load: 4.89 M rows at 20 k / 6 k rows/s = **4 / 14 min** (D-06 trigger:
+60 min).
+
+**If PR 3-4 measures more than 5.5 GB**, there is no further automatic
+step: a shorter span would break the nested backtest (§3.8 needs the
+calibration and scoring blocks), and the account count is never reduced.
+The measurements go to the orchestrator.
+
+**Eligible series for the CUSUM budget (§4.2).** The same script counts the
+leaves whose mean `M` is ≥ $500/day (USD-equivalent; min impact ÷ 0.20):
+**504** in variant D.
 
 ### B.5.4 What does not fit, and why
 
-With the same measured per-row costs, keeping **every** account × service
-series (≈ 107 k):
+With the per-row costs of B.5.2 and the rev. 2 item list (i.e. **before**
+the items added in rev. 3, so these are lower bounds), keeping **every**
+account × service series (≈ 107 k):
 
-| Span | Fact rows | Total | Verdict |
+| Span | Fact rows | Total (lower bound) | Verdict |
 |---|---|---|---|
-| 4 periods (122 d) | 13.24 M | **11.37 GB** | does not fit |
-| 3 periods (91 d) | 9.87 M | 8.48 GB | does not fit |
-| 2 periods (61 d) | 6.62 M | 5.68 GB | fits on paper, no headroom, and **fails the backtest requirement**: after the 56 days weekly seasonality needs, no month is fully held out |
+| 4 periods (122 d) | 13.24 M | ≥ 11.37 GB | does not fit |
+| 3 periods (91 d) | 9.87 M | ≥ 8.48 GB | does not fit |
+| 2 periods (61 d) | 6.62 M | ≥ 5.68 GB | does not fit the target, and **fails the backtest**: no calibration or held-out block after the 56 days of warm-up |
 
 So with all 15,000 accounts at daily grain, the full service mix cannot fit
-6 GB at any span that supports the required backtest. What fits is all
-15,000 accounts with the **service axis reduced** to the top services plus
-an `Other services` series, which is `fleet15k`.
+at any span that supports the backtest. What fits is all 15,000 accounts
+with the **service axis reduced**: `fleet15k`.
 
 ### B.5.5 What `fleet15k` gives up
 
-- **Service granularity** below each account's top 2 (top 4) services: the
-  tail is one series, so an anomaly confined to a tail service is diluted.
-  The generator therefore places every injected anomaly and every new
-  service on an individual series; the tail is scored like any leaf and
-  reported separately.
-- **Region**: no region dimension, so `new_region` and region root causes
+- **Service granularity:** each account keeps its top 2 services (top 1
+  below median spend); the tail is one `Other services` series. Labels are
+  injected into the full mix **before** folding, at natural rates, so the
+  loss is measured: folded labels are reported (detected through
+  `Other services` or a parent scope, or lost), not gated. FT-4/FT-5 gate
+  on individual leaves only.
+- **Region:** no region dimension, so `new_region` and region root causes
   are assessed on `ci` and `full` only.
-- **Pricing and tag splits**: commitment effects and tagging loss are
-  whole-series switches.
-- **Span**: no 90-day horizon evaluation, and too few origins for
-  per-series interval quantiles (cohort-pooled only).
+- **Pricing and tag splits:** commitment effects, commitment expiry and
+  tagging loss are whole-series switches.
+- **Span:** no 90-day horizon, cohort-pooled intervals only.
+- **Data arrival:** idealised (closed months at once); late data and
+  month-to-date restatement only on `ci`.
 
 DESIGN §2.8 lists, target by target, what `fleet15k` can and cannot assess.
 
@@ -239,60 +268,86 @@ SHA-256 of each file as run:
 
 | File | SHA-256 |
 |---|---|
-| `fleet15k.py` (arithmetic) | `4e8db5a7f0a282fa578d68813508292ac024491688e3aea0e051088cf788a06c` |
+| `budget.py` (rev. 3 budget, ladder and eligible-series count) | `8a06c8419e63f6d0bff06c9a6e3314a3d7e3749f0ad8f466c2f1ab3762a900db` |
 | `rowsize.sql` (first-revision row and wide rollup) | `387931c9c7e8839af750e8c6fc09a984a7139b0be41c5eadd88444a062ba54c0` |
 | `rowsize2.sql` (lean row and narrow rollup; run after `rowsize.sql` in the same database) | `562a39da3c7b2f294de725d55ed8b42b5f89fd3866fa6a5ec89e1c44ae4aa19d` |
 | `csvsize.py` (gzip bytes per row) | `f2e11fc2af32418ee0b5e1830ecde90e82cb69946a61f05e575251ab2ca8c446` |
 
-How they were run: `docker run -d --rm --name s35-rowsize -p
-127.0.0.1:<port>:5432 postgres:16`, with the image's required superuser
-credential passed as a throwaway environment value, then `psql -U
-postgres -v ON_ERROR_STOP=1 -q < rowsize.sql`, then the same with
-`rowsize2.sql`, then `docker stop` (the container was removed). `python3
-fleet15k.py` and `python3 csvsize.py` need only the standard library. The
-full-mix series count printed by `fleet15k.py` (107,273) differs slightly
-from B.2's (106,942) because the random draws interleave differently; both
-are "≈ 107 k". These are design aids, not product code, and are not
-committed as files.
+How they were run: `docker run -d --rm --name s35-rowsize -e
+POSTGRES_PASSWORD=<throwaway> -p 127.0.0.1:<port>:5432 postgres:16`, then
+`psql -U postgres -v ON_ERROR_STOP=1 -q < rowsize.sql`, then the same with
+`rowsize2.sql`, then `docker stop` (`--rm` removed the container).
+`python3 budget.py` and `python3 csvsize.py` need only the standard
+library. Revision 2's `fleet15k.py` is superseded by `budget.py`. These are
+design aids, not product code, and are not committed as files.
 
-`fleet15k.py`:
+`budget.py`:
 
 ```python
-import random, math, sys
-# fleet15k sizing: account x service x day, top services individually + one "Other services" series.
-# Same account model and seed as sizing.py (Appendix B.4).
-random.seed(42)
+import random, math
+# fleet15k disk budget (Appendix B.5, revision 3). Same account model and seed as sizing.py.
+# Service shares within an account: geometric, share_i proportional to 0.5**i (dominant 50-60 %).
 N = 15000
-spend = [math.exp(random.gauss(math.log(800), 1.8)) for _ in range(N)]
-cut = sorted(spend, reverse=True)[N // 20]          # top 5 % of accounts by spend
-series = 0; full_series = 0; commit_accts = 0
-for m in spend:
-    k = max(1, min(80, round(3 + 4 * math.log10(1 + m / 100) + random.gauss(0, 2.0))))
-    full_series += k
-    keep = 4 if m >= cut else 2
-    series += min(k, keep) + (1 if k > keep else 0)
-    commit_accts += (m > 20000 and random.random() < 0.6) or random.random() < 0.1
-billing_rows_month = N + int(.15 * N) + commit_accts * 3 + N   # tax, credits, purchases, recurring fee
-DAYS = 122                                   # 4 billing periods: 31 + 30 + 31 + 30
-FACT_B, ROLLUP_B, GZ_B = 554.2, 217.0, 30.0  # measured on PG16 (B.5), gzip estimate rounded up
-rows_day = series + billing_rows_month / 30.4
-facts = rows_day * DAYS
-series_days = series * DAYS
-gb = lambda b: b / 1e9
-facts_gb = gb(facts * FACT_B)
-rollup_gb = gb(series_days * ROLLUP_B)
-objects_gb = gb(facts * GZ_B * 3)            # generator output + source bucket + evidence bucket
-small_gb = gb(series * 400 * 2 + 15000 * 200 + 2e6 * 150)   # forecast state x2 runs, account dim, aggregate points
-print("full-mix series %d ; fleet15k series %d (%.2f per account)" % (full_series, series, series / N))
-print("billing rows/month %d ; fact rows/day %.0f ; fact rows %.2fM ; series-days %.2fM" % (billing_rows_month, rows_day, facts / 1e6, series_days / 1e6))
-print("facts %.2f GB ; rollup %.2f GB ; objects %.2f GB ; forecasts+dims %.2f GB ; total %.2f GB" % (facts_gb, rollup_gb, objects_gb, small_gb, facts_gb + rollup_gb + objects_gb + small_gb))
-print("load @20k rows/s %.1f min ; @6k rows/s %.1f min" % (facts / 20000 / 60, facts / 6000 / 60))
-# alternatives, same per-row costs
-for label, s, d in [("full service mix, 4 periods", full_series, 122), ("full service mix, 3 periods", full_series, 91),
-                    ("full service mix, 2 periods", full_series, 61)]:
-    f = (s + billing_rows_month / 30.4) * d
-    tot = gb(f * FACT_B) + gb(s * d * ROLLUP_B) + gb(f * GZ_B * 3)
-    print("%s: fact rows %.2fM, total %.2f GB" % (label, f / 1e6, tot))
+def run(keep_small, keep_large, large_frac, verbose=False):
+    random.seed(42)
+    spend = [math.exp(random.gauss(math.log(800), 1.8)) for _ in range(N)]
+    cut = sorted(spend, reverse=True)[int(N * large_frac)] if large_frac > 0 else float('inf')
+    leaves = other = commit_accts = 0
+    eligible = 0                                   # leaves with mean >= 500 / day (USD-equivalent)
+    for m in spend:
+        k = max(1, min(80, round(3 + 4 * math.log10(1 + m / 100) + random.gauss(0, 2.0))))
+        commit_accts += (m > 20000 and random.random() < 0.6) or random.random() < 0.1
+        keep = keep_large if m >= cut else keep_small
+        w = [0.5 ** i for i in range(k)]; tot = sum(w)
+        daily = m / 30.4
+        indiv = min(k, keep)
+        for i in range(indiv):
+            leaves += 1
+            eligible += daily * w[i] / tot >= 500
+        if k > keep:
+            leaves += 1; other += 1
+            eligible += daily * sum(w[keep:]) / tot >= 500
+    return leaves, other, eligible, commit_accts
+
+DAYS = 122
+FACT_B, ROLLUP_B, ROLLUP_SEQ_B, GZ_B = 554.2, 217.0, 193.0, 30.0
+def budget(label, keep_small, keep_large, large_frac, batch_seq, control_accounts):
+    leaves, other, eligible, commit_accts = run(keep_small, keep_large, large_frac)
+    billing_month = N + int(.15 * N) + commit_accts * 3 + N
+    unused_rows = commit_accts * DAYS                       # one Unused commitment row per commitment account per day
+    facts = (leaves + billing_month / 30.4) * DAYS + unused_rows
+    series_days = leaves * DAYS
+    scopes = 550
+    rows = {
+        'facts (554 B/row, measured)': facts * FACT_B,
+        'cost_daily (217 B/row measured; 193 B with an int batch key, estimated)': series_days * (ROLLUP_SEQ_B if batch_seq else ROLLUP_B),
+        'billing_daily (sparse)': billing_month * 4 * 150,
+        'cost_daily_scope (550 scopes x 122 d x 2 runs)': scopes * DAYS * 2 * 220,
+        'objects: source + evidence buckets (30 B/row x 2)': facts * GZ_B * 2,
+        'forecast state + detector state (2 runs)': leaves * 600 * 2,
+        'forecast points + totals, aggregate scopes (2 runs)': scopes * 90 * 2 * 150,
+        'backtest leaf points, exported gzip JSONL (178 per leaf x 30 B)': leaves * 178 * 30,
+        'backtest aggregate points in DB': scopes * 178 * 120,
+        'anomalies, days, root causes, events': 20e6,
+        'cost_series, account_dim (2 runs)': leaves * 150 + N * 200 * 2,
+        'control tenant (%d accounts, full grain)' % control_accounts: control_accounts * 1600,  # per-account ~1.6 KB/day-equivalent incl. rollup+objects over 122 d
+        'WAL (max_wal_size 256 MB, budget)': 0.30e9,
+        'temporary files (budget)': 0.30e9,
+        'cluster base (catalogs, empty DBs)': 0.05e9,
+    }
+    # control tenant: ~13.4 fact rows/account/day at full grain (B.2), ~650 B incl. rollup + objects
+    rows['control tenant (%d accounts, full grain)' % control_accounts] = control_accounts * 13.4 * DAYS * 900
+    total = sum(rows.values())
+    print('== %s: leaves %d (Other %d, individual %d), eligible >= $500/day %d, fact rows %.2fM, total %.2f GB'
+          % (label, leaves, other, leaves - other, eligible, facts / 1e6, total / 1e9))
+    for k, v in rows.items():
+        print('   %-75s %6.3f GB' % (k, v / 1e9))
+    return total
+
+budget('A: top 2 (top 4 for largest 5 %), uuid batch key, 150-account control', 2, 4, 0.05, False, 150)
+budget('B: top 2 for all, uuid batch key, 15-account control', 2, 2, 0.0, False, 15)
+budget('C: top 2 for all, int batch key, 15-account control', 2, 2, 0.0, True, 15)
+budget('D: top 1 below median, top 2 above, int batch key, 15-account control', 1, 2, 0.5, True, 15)
 ```
 
 `rowsize.sql`:

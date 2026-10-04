@@ -40,6 +40,8 @@ page itself (PR 3-0 review action).
 | A20 | FOCUS 1.0 | Allowed values and rules for `ChargeCategory` (Usage, Purchase, Tax, Credit, Adjustment), `ChargeClass` (Correction or null), `ChargeFrequency` (One-Time, Recurring, Usage-Based; Purchase ⇒ not Usage-Based), `PricingCategory` (Standard, Dynamic, Committed, Other; Committed when CommitmentDiscountId is not null; null for Tax), `CommitmentDiscountStatus` (Used, Unused), `EffectiveCost` (amortised; 0 for a Purchase covering future charges; = BilledCost for unrelated charges such as Credit), `BilledCost` | FOCUS_Spec repository, tag `v1.0`, commit `f7f58a0a7e545258779839d4f2114819f278c6f3`, `specification/columns/*.md` (cloned and read in this session) | **P** |
 | A21 | PostgreSQL | Before PG17, `REFRESH MATERIALIZED VIEW` requires ownership; PG17 adds the grantable `MAINTAIN` privilege. PG16 adds `pg_input_is_valid()` and `pg_input_error_info()` | https://www.postgresql.org/docs/17/sql-refreshmaterializedview.html ; https://www.postgresql.org/docs/release/17.0/ ; https://www.postgresql.org/docs/16/release-16.html | S |
 | A22 | Methods literature | Seasonal-naive and ETS / Holt-Winters with damped trend; time-series cross-validation (rolling origin); prediction intervals from empirical / bootstrapped errors; hierarchical bottom-up and MinT reconciliation — Hyndman & Athanasopoulos, *Forecasting: Principles and Practice* (3rd ed., OTexts). CUSUM — Page (1954), *Biometrika* 41. MAD scale constant 1.4826 — Rousseeuw & Croux (1993), *JASA* 88. Hampel filter — Hampel (1974), *JASA* 69. | standard references | not re-read in this session (well-established; cited for method, not for numbers) |
+| A23 | CUSUM run lengths | Siegmund's approximation of the one-sided in-control average run length of a CUSUM with reference value k and decision interval h: ARL₀ ≈ (e^{2kb} − 2kb − 1) / (2k²), b = h + 1.166; for k = 0.5, h = 5 it gives ≈ 938 (one-sided), consistent with the commonly tabulated two-sided ≈ 465 — Siegmund (1985), *Sequential Analysis: Tests and Confidence Intervals*, Springer; Montgomery, *Introduction to Statistical Quality Control*, tabular CUSUM chapter | standard references | not re-read in this session; the arithmetic is checked by a simulation test in PR 5-2a (ARL₀ within ±15 %) |
+| A24 | Wilson score interval | Wilson (1927), *JASA* 22; Brown, Cai & DasGupta (2001), *Statistical Science* 16, recommend it over the Wald interval for small n | standard references | not re-read in this session; formula in Appendix C.5 |
 
 ## What is not published
 
@@ -68,6 +70,8 @@ forecasts, not daily series.
 | §2.1, §2.3, §2.4, §4.1 (FOCUS semantics) | A20 |
 | §2.9 (no materialised views), PR 4-2 (`pg_input_is_valid`) | A21 |
 | §3.2–§3.6, §4.2 (methods) | A22 |
+| §4.2 (D3 false-alarm arithmetic) | A23 |
+| §4.9, Appendix C.5 (gate rules) | A24 |
 | §3.10 FT-1, FT-3 | A16 |
 | §4.4 default thresholds comparison | A7, A17 |
 | §4.5 root causes | A8 |
