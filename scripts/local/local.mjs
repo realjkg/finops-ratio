@@ -29,17 +29,20 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-const { AbortSignal, fetch } = globalThis;
+const { AbortController, AbortSignal, fetch } = globalThis;
 import {
   LOCAL_NAMES,
   apiEnv,
   compareControlTotals,
   connectionUrl,
+  exitCodeForSignal,
   fetchJson,
   generateLocalSecrets,
+  installInterruptHandlers,
   killLiveProcessGroups,
   localSettings,
   localStatePaths,
+  localTestExitCode,
   localTestSettings,
   portInUse,
   parseEnvFile,
@@ -48,6 +51,7 @@ import {
   runLocalTest,
   runProcess,
   startIfPortFree,
+  trackProcessGroup,
   waitForOwnServer,
   waitUntil,
   withDeadline,
@@ -107,8 +111,14 @@ const MAX_PAGES = 100;
 
 // --- processes ---------------------------------------------------------------
 
-function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs } = {}) {
-  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs });
+/** The subcommand, and the interrupt that SIGINT/SIGTERM fires (see main). */
+const COMMAND = process.argv[2];
+const interrupt = new AbortController();
+
+// Every command is bound to the interrupt (killed when it fires, never started
+// after it), except `down`, which is the cleanup itself (signal: null).
+function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs, signal = interrupt.signal } = {}) {
+  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs, signal: signal ?? undefined });
 }
 
 function composeEnv(settings, secrets) {
@@ -307,7 +317,7 @@ async function down(settings, { volumes, timeoutMs }) {
   // Compose interpolates the whole file even for `down`: give it the real or a placeholder password.
   const file = envFileOf(settings);
   const secrets = fs.existsSync(file) ? parseEnvFile(fs.readFileSync(file, 'utf8')) : { RATIO_LOCAL_PG_SUPERUSER_PASSWORD: 'unused-for-down' };
-  await compose(settings, secrets, ['--profile', 'app', '--profile', 'worker', 'down', '--remove-orphans', ...(volumes ? ['-v'] : [])], { timeoutMs });
+  await compose(settings, secrets, ['--profile', 'app', '--profile', 'worker', 'down', '--remove-orphans', ...(volumes ? ['-v'] : [])], { timeoutMs, signal: null });
   if (volumes) removeProjectState(ROOT, settings.project);
   log(volumes ? 'down: containers, network, volumes and local secrets removed' : 'down: containers and network removed (volumes kept)', { project: settings.project });
 }
@@ -336,6 +346,8 @@ async function localTest() {
     project: settings.project,
     down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
     downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
+    // SIGINT/SIGTERM abort this: the body ends, then the same cleanup runs.
+    signal: interrupt.signal,
     body: async ({ steps, setApp }) => {
       await up(settings);
       await up(settings); // idempotent
@@ -359,12 +371,17 @@ async function localTest() {
       // Re-check the app port right before spawning (minutes after the preflight).
       const app = await startIfPortFree({
         port: settings.appPort,
+        // Its own process group, tracked with the commands: a forced exit
+        // (second signal) kills it too, never leaving an orphan next start.
         start: () =>
-          spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
-            cwd: ROOT,
-            env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
-            stdio: ['ignore', 'ignore', 'inherit'],
-          }),
+          trackProcessGroup(
+            spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
+              cwd: ROOT,
+              env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
+              stdio: ['ignore', 'ignore', 'inherit'],
+              detached: true,
+            }),
+          ),
       });
       setApp(app);
       steps.appReady = await waitForOwnServer({
@@ -407,9 +424,12 @@ async function localTest() {
       if (mismatches.length) throw new Error(`reader totals differ from the fixture control totals:\n  ${mismatches.join('\n  ')}`);
     },
   });
+  // Safety net: nothing local:test started may outlive it (e.g. a command the
+  // interrupted body was still starting while the cleanup ran).
+  killLiveProcessGroups();
   process.stdout.write(`${JSON.stringify({ type: 'ratio.local-test', ...summary })}\n`);
   if (!summary.pass) log('local:test failed', { failures: summary.failures });
-  return summary.pass ? 0 : 1;
+  return localTestExitCode(summary);
 }
 
 // --- main ----------------------------------------------------------------------
@@ -433,15 +453,31 @@ async function main(argv) {
   return (await COMMANDS[cmd](localSettings(process.env), args)) ?? 0;
 }
 
-// runProcess runs each command in its own (detached) process group, so a
-// Ctrl-C or SIGTERM to this script would not reach them: kill them first.
-for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.once(sig, () => {
+// SIGINT / SIGTERM. Every command (and next start) runs in its own detached
+// process group, so a Ctrl-C to this script does not reach them by itself.
+// - local:test: the first signal aborts the run, which then goes through the
+//   SAME bounded cleanup (stop next start, `down -v`) and exits 130/143.
+// - every other command (up, migrate, seed, sync, down): kill the live groups
+//   and exit 130/143 at once; whatever already exists (containers, volumes,
+//   .ratio-local/<project>/) stays for `npm run local:down [-- -v]`.
+// - a second signal forces an immediate exit (groups killed, cleanup skipped).
+installInterruptHandlers({
+  onFirst: (sig) => {
+    if (COMMAND === 'test') {
+      log('interrupted: ending the run, then the normal cleanup', { signal: sig });
+      interrupt.abort(sig);
+      return;
+    }
     killLiveProcessGroups();
-    log('interrupted: child process groups killed', { signal: sig });
-    process.exit(sig === 'SIGINT' ? 130 : 143);
-  });
-}
+    log('interrupted: child processes killed; use local:down to clean up', { signal: sig });
+    process.exit(exitCodeForSignal(sig));
+  },
+  onForce: (sig) => {
+    killLiveProcessGroups();
+    log('second signal: forced exit, cleanup skipped', { signal: sig });
+    process.exit(exitCodeForSignal(sig));
+  },
+});
 
 main(process.argv.slice(2)).then(
   (code) => process.exit(code),

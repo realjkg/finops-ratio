@@ -489,22 +489,84 @@ export function finalizeLocalTestSummary({ project, steps, error, cleanup }) {
  * pass/fail with finalizeLocalTestSummary. The body reports the spawned app
  * through setApp(child) as soon as it exists, so cleanup can stop it.
  */
-export async function runLocalTest({ project, body, down, stopOptions, downTimeoutMs }) {
+export async function runLocalTest({ project, body, down, stopOptions, downTimeoutMs, signal }) {
   const steps = {};
   let app = null;
   let error = null;
+  // An interrupt (SIGINT/SIGTERM in local.mjs aborts `signal` with the signal
+  // name) ends the body at once, whatever it is awaiting, and goes through the
+  // SAME bounded cleanup; its commands, bound to the signal, are killed. A
+  // signal during the cleanup is recorded (exit code) but runs nothing twice.
+  let interrupted = null;
+  let onAbort = () => undefined;
+  const aborted = new Promise((_, reject) => {
+    onAbort = () => {
+      interrupted = String(signal.reason ?? 'interrupt');
+      reject(new Error(`interrupted by ${interrupted}`));
+    };
+  });
+  aborted.catch(() => undefined);
+  if (signal) {
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
   try {
-    await body({
-      steps,
-      setApp: (child) => {
-        app = child;
-      },
-    });
+    await Promise.race([
+      Promise.resolve().then(() =>
+        body({
+          steps,
+          signal,
+          setApp: (child) => {
+            app = child;
+          },
+        }),
+      ),
+      aborted,
+    ]);
   } catch (e) {
     error = e?.message ?? String(e);
   }
   const cleanup = await cleanupLocalTest({ app, down, stopOptions, downTimeoutMs });
-  return finalizeLocalTestSummary({ project, steps, error, cleanup });
+  signal?.removeEventListener('abort', onAbort);
+  const summary = finalizeLocalTestSummary({ project, steps, error, cleanup });
+  if (interrupted) {
+    summary.interrupted = interrupted;
+    if (summary.pass) {
+      summary.pass = false;
+      summary.failures.push(`interrupted by ${interrupted} during the cleanup`);
+    }
+  }
+  return summary;
+}
+
+/** 130 for SIGINT, 143 for SIGTERM (128 + the signal number), as a shell reports them. */
+export function exitCodeForSignal(signal) {
+  return signal === 'SIGTERM' ? 143 : 130;
+}
+
+/** local:test's exit code: an interrupt wins (130/143), else 0 only when the run passed. */
+export function localTestExitCode(summary) {
+  if (summary.interrupted) return exitCodeForSignal(summary.interrupted);
+  return summary.pass === true ? 0 : 1;
+}
+
+/**
+ * SIGINT/SIGTERM handling for local.mjs (proc is injectable for tests): the
+ * FIRST signal calls onFirst(signal); any later one calls onForce(signal).
+ * Returns a function that removes the listeners.
+ */
+export function installInterruptHandlers({ proc = process, onFirst, onForce }) {
+  let count = 0;
+  const handler = (sig) => {
+    count += 1;
+    if (count === 1) onFirst(sig);
+    else onForce(sig);
+  };
+  const signals = ['SIGINT', 'SIGTERM'];
+  for (const sig of signals) proc.on(sig, handler);
+  return () => {
+    for (const sig of signals) proc.removeListener(sig, handler);
+  };
 }
 
 /** Process groups of runProcess children still running (pgid = child pid). */
@@ -523,9 +585,28 @@ function killGroup(child, signal) {
 }
 
 /**
- * SIGKILLs every process group runProcess still has running. local.mjs calls
- * it on SIGINT/SIGTERM: the groups are detached, so a Ctrl-C to local.mjs
- * would otherwise not reach them.
+ * Tracks a child spawned outside runProcess (next start) in the same set, so
+ * killLiveProcessGroups reaches it too. Spawn it `detached: true` (its own
+ * group). It leaves the set when it exits. Returns the child.
+ */
+export function trackProcessGroup(child) {
+  if (child?.pid) {
+    LIVE_GROUPS.add(child.pid);
+    child.once('exit', () => LIVE_GROUPS.delete(child.pid));
+  }
+  return child;
+}
+
+/** The pids (= process group ids) currently tracked. */
+export function liveProcessGroups() {
+  return [...LIVE_GROUPS];
+}
+
+/**
+ * SIGKILLs every tracked process group (runProcess commands and next start).
+ * local.mjs calls it on a forced exit (second signal) and when interrupting a
+ * command other than local:test: the groups are detached, so a Ctrl-C to
+ * local.mjs would otherwise not reach them.
  */
 export function killLiveProcessGroups() {
   for (const pid of LIVE_GROUPS) {
@@ -548,18 +629,28 @@ export function killLiveProcessGroups() {
  *   is settled exitGraceMs after 'exit' (the group is then killed and the
  *   pipe destroyed), still within the deadline.
  */
-export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = false, timeoutMs, exitGraceMs = 2_000, spawnFn = spawn } = {}) {
+export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = false, timeoutMs, exitGraceMs = 2_000, spawnFn = spawn, signal } = {}) {
   return new Promise((resolve, reject) => {
     requireDeadline(timeoutMs, `runProcess(${cmd} ${args[0] ?? ''}) timeoutMs`);
     const label = `${cmd} ${args[0] ?? ''}`;
+    // Bound to an interrupt signal: never started once it fired; killed when it fires.
+    if (signal?.aborted) {
+      reject(new Error(`${label} not started: interrupted by ${signal.reason ?? 'interrupt'}`));
+      return;
+    }
     const child = spawnFn(cmd, args, { cwd, env, detached: true, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
     if (child.pid) LIVE_GROUPS.add(child.pid);
     let out = '';
     let settled = false;
     let graceTimer = null;
+    const onAbort = () => {
+      killGroup(child, 'SIGKILL');
+      finish(() => reject(new Error(`${label} interrupted by ${signal.reason ?? 'interrupt'} (killed)`)));
+    };
     const finish = (settle) => {
       if (settled) return;
       settled = true;
+      signal?.removeEventListener('abort', onAbort);
       clearTimeout(deadline);
       if (graceTimer) clearTimeout(graceTimer);
       child.stdout?.destroy();
@@ -576,6 +667,7 @@ export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = f
       finish(() => reject(new Error(`${label} timed out after ${timeoutMs} ms (killed)`)));
     }, timeoutMs);
     if (capture) child.stdout.on('data', (d) => (out += d));
+    signal?.addEventListener('abort', onAbort, { once: true });
     child.on('error', (e) => finish(() => reject(e)));
     child.on('exit', (code, signal) => {
       graceTimer = setTimeout(() => {
@@ -641,7 +733,8 @@ export function compareControlTotals(totals, control) {
       problems.push(`${key}: not in the control totals`);
       continue;
     }
-    if (t.rowCount !== c.rowCount) problems.push(`${key}: rowCount ${t.rowCount} != control ${c.rowCount}`);
+    // The API's rowCount is a bigint count as a decimal string (Copilot 4176238961).
+    if (typeof t.rowCount !== 'string' || t.rowCount !== String(c.rowCount)) problems.push(`${key}: rowCount ${JSON.stringify(t.rowCount)} != control "${c.rowCount}"`);
     if (t.billedCost !== c.billedTotal) problems.push(`${key}: billedCost ${t.billedCost} != control ${c.billedTotal}`);
   }
   for (const key of Object.keys(control)) if (!seen.has(key)) problems.push(`${key}: missing from the API totals`);

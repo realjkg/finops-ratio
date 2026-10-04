@@ -1046,7 +1046,8 @@ describe('L19 runProcess deadline is hard even when a grandchild holds stdio (ch
 
   it('local.mjs kills every live process group on SIGINT/SIGTERM (runProcess spawns each command in its own group)', () => {
     const src = read('scripts/local/local.mjs');
-    expect(src).toMatch(/for \(const sig of \['SIGINT', 'SIGTERM'\]\)[\s\S]{0,200}killLiveProcessGroups\(\)/);
+    // Since Copilot 4176238924 the handlers are installInterruptHandlers (L20); they still kill the live groups.
+    expect(src).toMatch(/installInterruptHandlers\(\{[\s\S]*?killLiveProcessGroups\(\)[\s\S]*?onForce: \(sig\) => \{\s*killLiveProcessGroups\(\)/);
     expect(read('scripts/local/lib.mjs')).toMatch(/detached: true/);
   });
 });

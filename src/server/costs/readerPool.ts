@@ -5,7 +5,10 @@
 //   - default_transaction_read_only = on;
 //   - statement / lock / idle-in-transaction timeouts, so a request can never
 //     hold a connection or a lock indefinitely;
-//   - timezone = UTC.
+//   - TimeZone = UTC, DateStyle = ISO, MDY, IntervalStyle = postgres: the
+//     output never depends on a database or role default (Copilot 4176238982;
+//     startup options take precedence over ALTER ROLE / ALTER DATABASE
+//     defaults, and publishedCosts.ts asserts them in every read).
 import { Pool } from 'pg';
 
 export const READER_SESSION_OPTIONS = [
@@ -19,7 +22,9 @@ export const READER_SESSION_OPTIONS = [
   '-c statement_timeout=10000',
   '-c lock_timeout=5000',
   '-c idle_in_transaction_session_timeout=30000',
-  '-c timezone=UTC',
+  '-c TimeZone=UTC',
+  '-c DateStyle=ISO,MDY',
+  '-c IntervalStyle=postgres',
 ].join(' ');
 
 const pools = new Map<string, Pool>();

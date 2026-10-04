@@ -8,7 +8,18 @@
 //   2. the page (keyset, limit + 1 rows to know whether more exist);
 //   3. on the first page only, totals per period and currency.
 // Money, quantities and counts are produced as text by Postgres: never a JS
-// number. Every value is a bound parameter.
+// number (rowCount is a bigint count, so it is a decimal string too). Every
+// value is a bound parameter.
+//
+// No returned or cursor-encoded value may depend on a session setting
+// (Copilot 4176238982): dates and timestamps are formatted explicitly with
+// to_char (date::text follows DateStyle, and a cursor built from it would not
+// decode); numeric, bigint and uuid text output is setting-independent; there
+// are no float, interval or money-typed columns (extra_float_digits,
+// IntervalStyle and lc_monetary cannot apply); extra_columns is jsonb whose
+// values the worker writes as strings. As a second layer the reader pool pins
+// DateStyle, IntervalStyle and TimeZone and the read asserts them, failing
+// closed.
 import type { Pool } from 'pg';
 import { withTenantTransaction } from '@/ingest/db/tenant';
 import { assertSafeReaderLogin } from './readerLogin';
@@ -46,7 +57,8 @@ export interface PublishedCostRow {
 export interface PublishedCostsTotal {
   billingPeriod: string;
   billingCurrency: string;
-  rowCount: number;
+  /** bigint count as a decimal string (exact beyond 2^53), like the money amounts. */
+  rowCount: string;
   billedCost: string;
 }
 
@@ -58,13 +70,14 @@ export interface PublishedCostsPage {
 }
 
 const ISO = `'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`;
+const DAY = `'YYYY-MM-DD'`;
 
 // $1 from (date|null), $2 to (date|null) — shared by both statements.
 const PERIOD_FILTER = `($1::pg_catalog.date IS NULL OR v.billing_period >= $1::pg_catalog.date)
        AND ($2::pg_catalog.date IS NULL OR v.billing_period <= $2::pg_catalog.date)`;
 
 const PAGE_SQL = `
-  SELECT v.billing_period::pg_catalog.text AS "billingPeriod",
+  SELECT pg_catalog.to_char(v.billing_period, ${DAY}) AS "billingPeriod",
          v.source_id::pg_catalog.text AS "sourceId",
          v.batch_id::pg_catalog.text AS "batchId",
          v.artifact_sha256 AS "artifactSha256",
@@ -99,7 +112,7 @@ const PAGE_SQL = `
    LIMIT $7`;
 
 const TOTALS_SQL = `
-  SELECT v.billing_period::pg_catalog.text AS "billingPeriod",
+  SELECT pg_catalog.to_char(v.billing_period, ${DAY}) AS "billingPeriod",
          v.billing_currency AS "billingCurrency",
          pg_catalog.count(*)::pg_catalog.text AS "rowCount",
          pg_catalog.sum(v.billed_cost)::pg_catalog.text AS "billedCost"
@@ -107,6 +120,12 @@ const TOTALS_SQL = `
    WHERE ${PERIOD_FILTER}
    GROUP BY v.billing_period, v.billing_currency
    ORDER BY v.billing_period, v.billing_currency`;
+
+/** The two statements, exported for the setting-independence tests (D10b, U3). */
+export const PUBLISHED_COSTS_SQL = Object.freeze({ page: PAGE_SQL, totals: TOTALS_SQL });
+
+/** Session settings the read requires (pinned by readerPool.ts; asserted per read, failing closed). */
+const REQUIRED_SESSION = Object.freeze({ iso: 'repeatable read', ro: 'on', datestyle: 'ISO, MDY', intervalstyle: 'postgres', timezone: 'UTC' });
 
 // TEST SEAM (D8 only): runs between the page query and the totals query, to
 // commit a publish inside an open read. Module-level, NOT a parameter of the
@@ -122,14 +141,25 @@ export function setAfterPageHookForTests(fn: (() => Promise<void>) | null): void
 export async function readPublishedCosts(pool: Pick<Pool, 'connect'>, tenantId: string, q: PublishedCostsQuery): Promise<PublishedCostsPage> {
   return withTenantTransaction(pool, tenantId, async (client) => {
     await client.query('SET TRANSACTION READ ONLY');
-    // Page and totals must share one snapshot. The reader pool starts every
-    // transaction at REPEATABLE READ (readerPool.ts); fail closed on any pool
-    // that does not, rather than return totals that can disagree with the page.
-    const tx = await client.query<{ iso: string; ro: string }>(
-      `SELECT pg_catalog.current_setting('transaction_isolation') AS iso, pg_catalog.current_setting('transaction_read_only') AS ro`,
+    // Page and totals must share one snapshot, and the output must not depend
+    // on session settings. The reader pool starts every transaction at
+    // REPEATABLE READ and pins DateStyle / IntervalStyle / TimeZone
+    // (readerPool.ts); fail closed on any session that differs, rather than
+    // return totals that can disagree with the page or values (and cursors)
+    // in another format.
+    const tx = await client.query<Record<keyof typeof REQUIRED_SESSION, string>>(
+      `SELECT pg_catalog.current_setting('transaction_isolation') AS iso,
+              pg_catalog.current_setting('transaction_read_only') AS ro,
+              pg_catalog.current_setting('DateStyle') AS datestyle,
+              pg_catalog.current_setting('IntervalStyle') AS intervalstyle,
+              pg_catalog.current_setting('TimeZone') AS timezone`,
     );
-    if (tx.rows[0].iso !== 'repeatable read' || tx.rows[0].ro !== 'on') {
-      throw new Error(`published-costs read requires a REPEATABLE READ READ ONLY transaction (got ${tx.rows[0].iso}, read_only ${tx.rows[0].ro})`);
+    const got = tx.rows[0];
+    const wrong = (Object.keys(REQUIRED_SESSION) as Array<keyof typeof REQUIRED_SESSION>).filter((k) => got?.[k] !== REQUIRED_SESSION[k]);
+    if (wrong.length) {
+      throw new Error(
+        `published-costs read requires a REPEATABLE READ READ ONLY transaction with DateStyle ISO, MDY, IntervalStyle postgres and TimeZone UTC (wrong: ${wrong.join(', ')})`,
+      );
     }
     await assertSafeReaderLogin(client);
 
@@ -156,7 +186,7 @@ export async function readPublishedCosts(pool: Pick<Pool, 'connect'>, tenantId: 
     let totals: PublishedCostsTotal[] | null = null;
     if (!c) {
       const t = await client.query<{ billingPeriod: string; billingCurrency: string; rowCount: string; billedCost: string }>(TOTALS_SQL, [q.from, q.to]);
-      totals = t.rows.map((r) => ({ billingPeriod: r.billingPeriod, billingCurrency: r.billingCurrency, rowCount: Number(r.rowCount), billedCost: r.billedCost }));
+      totals = t.rows.map((r) => ({ billingPeriod: r.billingPeriod, billingCurrency: r.billingCurrency, rowCount: r.rowCount, billedCost: r.billedCost }));
     }
     return { data, page: { limit: q.limit, nextCursor }, totals };
   });
