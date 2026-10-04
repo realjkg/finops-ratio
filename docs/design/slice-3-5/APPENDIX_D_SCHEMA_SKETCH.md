@@ -78,8 +78,12 @@ sub-account or billing account therefore always resolves to the same id.
   **(tenant_id, billing_currency, provider_name, billing_account_id,
   sub_account_id, service_name, region_key)**. Stable id
   **`series_id` = `cost_series.id`**, allocated once per natural key and
-  never reused or renumbered; `cost_series` is insert-only and outside
-  retention. The batch-keyed rollups (`cost_daily`, `cost_resource_daily`)
+  never reused or renumbered. `cost_series` **never deletes a row and
+  never changes a row's identity columns** (`id`, the natural key,
+  `leaf_id`): the analytics login has no DELETE on it and may UPDATE only
+  `last_day`, and neither retention function touches it. Revisions 15 and
+  16 called it "insert-only", which that `last_day` update contradicted
+  (rev. 17); the same holds for `forecast_leaves` and `cost_accounts`. The batch-keyed rollups (`cost_daily`, `cost_resource_daily`)
   carry `series_id`, and D4's region-novelty rule works at this grain.
 - **Forecast leaf (forecast and detection grain; rev. 15, Copilot
   r4178753680):** one `forecast_leaves` row per **account × service**, with
@@ -136,9 +140,9 @@ sub-account or billing account therefore always resolves to the same id.
 | role `ratio_analytics` | NOLOGIN, no attributes, no membership (guarded like 0001's roles) | — | — |
 | view `publications_published` | tenant_id, source_id, billing_period, batch_id, published_at, row_count, loaded_billed_total, reconciliation, is_provisional — from `period_publications` ⋈ `ingest_batches` (`status = 'published'`) | — | analytics, reader (`freshness`) |
 | `analytics_runs` | **(tenant_id, id)**, kind ∈ {rollup, forecast, detect, backtest}, as_of date, status ∈ {running, succeeded, failed, abandoned}, **`run_seq bigint NOT NULL`** (per tenant and kind, strictly increasing, starting at 1; **allocated for every kind** inside the run's acquisition transaction, under the per-(tenant, kind) advisory lock, as `coalesce(max(run_seq), 0) + 1`; the trigger re-checks it, and `UNIQUE (tenant_id, kind, run_seq)` turns a bypassed lock into SQLSTATE 23505 → `RUN_SEQ_CONFLICT`, D.1), **`lease_token uuid`, `lease_expires_at`, `heartbeat_at`** (rev. 13; the worker's `sync_runs` lease pattern), **`batch_seq_hwm integer`** (rollup runs only: NULL on INSERT, set **by trigger** on the transition to `succeeded` to `coalesce(max(batch_seq), 0)` over the tenant's `rollup_batches`, then frozen; rev. 15, rev. 16), `UNIQUE (tenant_id, kind, run_seq)` (rev. 16); `succeeded`, `failed`, `abandoned` terminal (rev. 16); started_at, finished_at, code_version text, params jsonb, stats jsonb, error_code. **Grants (rev. 17):** column-level INSERT that excludes `batch_seq_hwm` and `finished_at`; column-level UPDATE of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`), so `run_seq`, `kind`, `as_of`, `batch_seq_hwm`, `started_at`, `code_version` and `params` are not updatable | analytics | analytics |
-| `forecast_leaves` (rev. 15; **insert-only**, outside retention, counted conservatively in every run's disk delta, B.5.12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `leaf_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name), and `UNIQUE (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)` as the target of `cost_series`' derivation FK (rev. 17), every component `NOT NULL` with the D.0 `''` sentinel; `account_id` (composite FK to `cost_accounts`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
-| `cost_series` | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `series_id` (D.0), `leaf_id` (immutable), with **one composite FK `(tenant_id, leaf_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)` → `forecast_leaves (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)`** (rev. 17; replaces revision 16's two separate FKs), so a series can only belong to the leaf its own components name; **`UNIQUE (tenant_id, id, leaf_id)`** (the target of the root-cause FK); `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name, region_key), every component `NOT NULL` with the D.0 `''` sentinel (`region_key` is `''` for global services and for every `fleet15k` series); `account_id` (composite FK to `cost_accounts`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
-| `cost_accounts` (rev. 12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `account_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id), every component `NOT NULL` with the D.0 `''` sentinel (a billing-account-level tax, credit, fee or purchase row with a null `SubAccountId` belongs to the account row with `sub_account_id = ''`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
+| `forecast_leaves` (rev. 15; **rows never deleted, identity columns immutable**, only `last_day` updated (rev. 17; previously called "insert-only"); outside retention, counted conservatively in every run's disk delta, B.5.12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `leaf_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name), and `UNIQUE (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)` as the target of `cost_series`' derivation FK (rev. 17), every component `NOT NULL` with the D.0 `''` sentinel; `account_id` (composite FK to `cost_accounts`); first_day, last_day | analytics (INSERT; UPDATE of `last_day` only: identity columns immutable, no DELETE; rev. 17) | analytics |
+| `cost_series` | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `series_id` (D.0), `leaf_id` (immutable), with **one composite FK `(tenant_id, leaf_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)` → `forecast_leaves (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)`** (rev. 17; replaces revision 16's two separate FKs), so a series can only belong to the leaf its own components name; **`UNIQUE (tenant_id, id, leaf_id)`** (the target of the root-cause FK); `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name, region_key), every component `NOT NULL` with the D.0 `''` sentinel (`region_key` is `''` for global services and for every `fleet15k` series); `account_id` (composite FK to `cost_accounts`); first_day, last_day | analytics (INSERT; UPDATE of `last_day` only: identity columns immutable, no DELETE; rev. 17) | analytics |
+| `cost_accounts` (rev. 12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `account_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id), every component `NOT NULL` with the D.0 `''` sentinel (a billing-account-level tax, credit, fee or purchase row with a null `SubAccountId` belongs to the account row with `sub_account_id = ''`); first_day, last_day | analytics (INSERT; UPDATE of `last_day` only: identity columns immutable, no DELETE; rev. 17) | analytics |
 | `cost_daily` (narrow, usage only) | **(tenant_id, series_id, usage_date, batch_seq)**, `batch_seq integer` with a composite FK to `rollup_batches (tenant_id, batch_seq)`; `m_usage_effective` (`ChargeCategory = 'Usage'`, `ChargeFrequency = 'Usage-Based'`, no correction, and a charge period of **at most one day**: `ChargePeriodEnd − ChargePeriodStart ≤ 1 day`, rev. 15), `multi_day_usage_effective` (the `Usage` rows excluded by that last test, attributed to their start day), `billed_total`, `effective_total`, `committed_effective`, `untagged_usage_effective`, `row_count`; no other btree (217 B per row measured with a uuid batch key; ≈ 193 B estimated with `batch_seq`, Appendix B.5) | analytics (INSERT … SELECT from `cost_facts_published` per batch) | analytics; reader via `cost_daily_published` (the highest rolled-up batch ≤ the `rollup_pointer` mark per (source, period), D.1) |
 | `billing_daily` (sparse; re-keyed in rev. 12, routing fixed in rev. 13) | **(tenant_id, batch_seq, account_id, usage_date, charge_category, charge_frequency, is_correction)**, all `NOT NULL` with the D.0 sentinels: every row with **`ChargeCategory IS DISTINCT FROM 'Usage'`** (Purchase, Tax, Credit, Adjustment, and a null category as `''`, shown `(unknown)`), by FOCUS `ChargeCategory` and `ChargeFrequency` (`''` when null), corrections flagged; billed, effective, row_count, `tags_invalid_rows`; **a row for every group with at least one fact row, zero amounts included** (rev. 15: revision 12's "only where non-zero" dropped zero-valued non-usage rows and their `row_count`, which broke exactly-once). `cost_daily` takes exactly the rows with `ChargeCategory = 'Usage'` (all frequencies, corrections and negative amounts included) in its `billed_total` / `effective_total`. The two predicates are complements under SQL's three-valued logic, so every published row lands in exactly one table | analytics | analytics; reader via `billing_daily_published` |
 | `billing_daily_scope` (rev. 12) | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, usage_date, charge_category)**; billed, effective, row_count. **Every charge category**: `Usage` from `cost_daily`, the others from `billing_daily`; a row for every group with at least one fact row, zero amounts included (rev. 15) | analytics | reader via `billing_daily_scope_published` (the run in `rollup_pointer`) |
@@ -251,10 +255,17 @@ only one starter of a kind can be inside the allocation at a time.
 summary also named pointer enforcement, sequence grants and publication
 atomicity. Checking found two gaps, now closed: the pointer rules were
 enforced only by the job, and the id sequences had no stated grants.
-- **Pointer grants.** `rollup_pointer` and `forecast_pointer`:
-  - `ratio_analytics` has SELECT, INSERT (the first row) and column-level
-    UPDATE of (`run_id`, `run_seq`, `batch_seq_hwm`, `as_of`,
-    `updated_at`); no DELETE, no TRUNCATE.
+- **Pointer grants, one column list per pointer (rev. 17, Copilot
+  r4178843669).** Revisions 13–16 gave both pointers one shared list. It
+  named `batch_seq_hwm` on `forecast_pointer`, which has no such column,
+  so that GRANT would fail when the migration ran.
+  - `rollup_pointer`: `ratio_analytics` has SELECT, INSERT (the first
+    row) and column-level UPDATE of (`run_id`, `run_seq`, `batch_seq_hwm`,
+    `as_of`, `updated_at`).
+  - `forecast_pointer`: SELECT, INSERT (the first row) and column-level
+    UPDATE of (`run_id`, `run_seq`, `as_of`, `updated_at`).
+  - Neither has DELETE or TRUNCATE. A catalogue test asserts each list
+    exactly (4-1, 4-3).
   - `ratio_reader` sees them only through the definer views.
   - `ratio_worker` has nothing.
 - **Pointer guard in the database (rev. 13; tightened in rev. 15, Copilot
@@ -383,24 +394,88 @@ latest succeeded runs).
 
 | Object | Columns (key first) | Notes |
 |---|---|---|
-| `forecast_pointer` | **(tenant_id)**, run_id, `run_seq bigint NOT NULL`, as_of, updated_at | the current forecast run; INSERT/UPDATE by analytics only; forwards only (`run_seq` increases) and only to a `succeeded` forecast run, enforced by the same kind of guard trigger as `rollup_pointer` (D.1) |
-| `forecast_state` | **(tenant_id, run_id, leaf_id)** (the forecast leaf, D.0; composite FK to `forecast_leaves`); method ∈ {none, mean, m0, m1, m1_log} (`fleet15k`: fixed rule; `full`: selected in the calibration block), history_days, cold_start flag, alpha, beta, gamma, phi, level, trend, `season numeric[7]`, **calendar factors** `cal_start`, `cal_mid`, `cal_end` (log, 0 when not applied; median estimate on raw `y`) with their value counts m and t-statistics, last_day, `q80_lo/hi numeric[6]`, `q95_lo/hi numeric[6]` (per horizon bucket, relative to level), quantile source ∈ {own, cohort, extrapolated} (`extrapolated`: an empty bucket filled by √h scaling, never scored), cohort key (provider, service category, size decile; no `env`) | ≈ 37 k rows per `fleet15k` run, ≈ 107 k per `full` run, ≈ 0.4 KB each (**assumption**) |
+| `forecast_pointer` | **(tenant_id)**, run_id, `run_seq bigint NOT NULL`, as_of, updated_at | the current forecast run; INSERT/UPDATE by analytics only, UPDATE of (`run_id`, `run_seq`, `as_of`, `updated_at`) only (D.1; rev. 17); forwards only (`run_seq` increases) and only to a `succeeded` forecast run, enforced by the same kind of guard trigger as `rollup_pointer` (D.1) |
+| `forecast_state` | **(tenant_id, run_id, leaf_id)** (the forecast leaf, D.0; composite FK to `forecast_leaves`); method ∈ {none, mean, m0, m1, m1_log} (`fleet15k`: fixed rule; `full`: selected in the calibration block), history_days, cold_start flag, alpha, beta, gamma, phi, level, trend, `season numeric[7]`, **calendar factors** `cal_start`, `cal_mid`, `cal_end` (log, 0 when not applied; median estimate on raw `y`) with their value counts m and t-statistics, last_day, `q80_lo/hi numeric[6]`, `q95_lo/hi numeric[6]` (per horizon bucket, as applied, in units of `scale_level`), **`scale_level`** (the leaf's trailing 28-day mean `M` at the as-of day: the level the calibration errors are divided by, DESIGN §3.4; rev. 17), **`log_var`** (`m1_log` only: the one-step residual variance on the `log1p` scale, for the back-transform; rev. 17), quantile source ∈ {own, cohort, extrapolated} (`extrapolated`: an empty bucket filled by √h scaling, never scored), cohort key (provider, service category, size decile; no `env`) | ≈ 37 k rows per `fleet15k` run, ≈ 107 k per `full` run, ≈ 0.4 KB each (**assumption**) |
 | `forecast_points` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, day)**; expected, lo80, hi80, lo95, hi95 | aggregate scopes only, 90 days |
-| `forecast_totals` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, window)** with window ∈ {month_end, next_30, next_90}; actual_to_date, expected_total, lo80, hi80, lo95, hi95, billed_month_end (month_end only), last_published_day | all scopes incl. leaves for month_end |
+| `forecast_totals` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, window)** with window ∈ {month_end, next_30, next_90}; actual_to_date, expected_total, lo80, hi80, lo95, hi95, billed_month_end (month_end only), last_published_day, quantile source ∈ {own, cohort, extrapolated} (rev. 17) | all scopes, **including every leaf for all three windows** (rev. 17, Copilot r4178843716: revision 16 stored the leaf month-end total only, and a leaf's next-30 and next-90 intervals cannot be rebuilt from daily bounds, DESIGN §3.4); ≈ 111 k leaf rows per `fleet15k` run (B.5.12) |
 | `forecast_backtests` | **(tenant_id, run_id, level, horizon_bucket, metric)**; value, n, origins, block ∈ {calibration, scoring} | the accuracy report; kept (not touched by retention) |
 | `forecast_backtest_points` | **(tenant_id, run_id, origin_day, scope_kind, scope_key, billing_currency, h)**; expected, lo80, hi80, lo95, hi95 | **aggregate scopes only** (≈ 0.01 GB per `fleet15k` run); leaf points are exported as gzip JSON Lines to the run's evidence directory (≈ 0.2 GB), never stored in the database; both kept (exempt from D-12) |
 | `detector_cohort_state` (rev. 12) | **(tenant_id, run_id, cohort_key text)**; D6's per-cohort growth fit (μ̂_k numeric[13], σ̂, n_k) and the pooled scales `σ_pool`, `s₂` per cohort | one row per cohort per detect run; run-keyed, retention keeps 2 runs (previously kept in `detector_state` under a cohort key, which mixed key types) |
 | `detector_state` | **(tenant_id, run_id, leaf_id)** (the forecast leaf, D.0; composite FK to `forecast_leaves`); D3: anchor_day, anchor state (level, trend, season numeric[7]), `cusum_pos`, `cusum_neg`, days_since_anchor; D2: weekday medians numeric[7] and `mad` of calendar-adjusted `log y` over 56 days, `scale_floor`, `sigma_pool`; D8: previous day's one-step log residual, `s2` (pooled 2-day scale); intermittent: `scoring` ∈ {daily, weekly, hurdle}, zero share over 56 days, last 8 weekly sums numeric[8] (weekly), `q_hat`, `m_hat`, `v_hat` and `r1` with the route ∈ {warning, info_only} (hurdle), weekly `cusum_pos`; D4 reactivation: active days in the last 56, `last_active_before_dormancy`, the active share of the 28 days ending there and the active-day mean of the 56 days ending there (extended to at most 112 days for ≥ 3 values; the series keeps its last 3 active-day values); as-of error-bucket counts per cohort (fallback level in use), including 2-day sums; D5/D7: trailing committed share, trailing untagged share; last_day | one row per leaf (`leaf_id`, D.0) per detect run (≈ 37 k in `fleet15k`, ≈ 0.7 KB each incl. forecast state, assumption); UPDATE by analytics; run-keyed, retention keeps 2 runs |
 
+**Fixed-length arrays (rev. 17, Copilot r4178843775).** PostgreSQL does
+not enforce a declared array size or dimension count: `numeric[7]` is the
+same type as `numeric[]`, and a two-dimensional or a 6-element value would
+be stored. Every fixed-length array column therefore carries
+`CHECK (array_ndims(x) = 1 AND cardinality(x) = n AND array_lower(x, 1)
+= 1 AND array_position(x, NULL) IS NULL)`:
+- `forecast_state`: `season` (n = 7); `q80_lo`, `q80_hi`, `q95_lo`,
+  `q95_hi` (n = 6);
+- `detector_state`: the anchor `season` and the weekday medians (n = 7);
+  the last weekly sums (n = 8);
+- `detector_cohort_state`: `μ̂_k` (n = 13).
+
+`'{}'` is rejected: its `array_ndims` is NULL, but its cardinality is 0, so the CHECK is false. A
+lower bound other than 1 (`'[0:6]={…}'`) is rejected because D.3 indexes
+from 1. The CHECK passes a NULL column, which is how a method without that
+state (`none`) stores it. Rejection tests in 4-3: 6 and 8 elements, a
+7-element two-dimensional array, an empty array, lower bound 0 and a NULL
+element are each refused (SQLSTATE 23514); mutant: drop one CHECK.
+
 ## D.3 Leaf forecasts on read
 
-A leaf forecast for day `t + h` is a pure function of its
-`forecast_state` row: `level + Σφ^i·trend + season[(t+h) mod 7]` (or its
-log form), with interval `level × q(bucket(h))`. The function lives in a
-shared module used by the job (to write aggregates and backtests) and by the
-API (to answer a leaf request), and a test asserts both give identical
-output for the same row. This keeps leaf storage at one row per **leaf** (`leaf_id`) per
-run instead of 90.
+A leaf's daily forecast is a pure function of its `forecast_state` row.
+Revision 16's formula left out the calendar factor, and it called
+`level × q` the interval, although that is only the error term added to
+the point (rev. 17, Copilot r4178843747). The full reconstruction, for a
+row issued at as-of day `t` and a target day `d = t + h` (1 ≤ h ≤ 90):
+
+1. **Weekly part `w(d)`.** Let `k` be the ISO weekday of `d` minus 1
+   (Monday = 0) and `Φ(h) = φ + φ² + … + φ^h` (damped trend).
+   - `mean` (cold start, DESIGN §3.5): `w = level × season[k + 1]`, where
+     `season` holds the account's weekday ratios (all 1 without a
+     profile).
+   - `m0`: `w = season[k + 1]`, the 4-week weekday means; `level` and
+     `trend` are unused.
+   - `m1`: `w = level + Φ(h)·trend + season[k + 1]`.
+   - `m1_log`: `w = exp(level + Φ(h)·trend + season[k + 1] + log_var / 2)
+     − 1`, the back-transform of the fit on `log1p(y)` with its variance
+     correction (DESIGN §3.2).
+   - `none`: no forecast (`no_history`).
+2. **Calendar factor `c(d)`.** `exp(cal_start)`, `exp(cal_mid)` or
+   `exp(cal_end)` when `d` is a `month_start`, `mid_month` or `month_end`
+   day (DESIGN §3.2; the class follows from the date alone), else 1. A
+   factor that was not applied is stored as 0, so it gives 1.
+3. **Point.** `ŷ(d) = w(d) × c(d)`.
+4. **Bounds.** With `b` the index 1..6 of h's bucket {1, 2–7, 8–14, 15–30,
+   31–60, 61–90} and `L = scale_level`:
+   - `lo80 = max(0, ŷ + L × q80_lo[b])`, `hi80 = ŷ + L × q80_hi[b]`;
+   - `lo95 = max(0, ŷ + L × q95_lo[b])`, `hi95 = ŷ + L × q95_hi[b]`.
+
+   The stored quantiles are those applied: the cold-start × 1.5 (DESIGN
+   §3.5) and the √h scaling of an empty bucket (§3.4) are already in them,
+   and `quantile source` says which. `L` is stored because `level` is on
+   the log scale for `m1_log` and unused for `m0`, so `level × q` was not
+   even on the right scale for those methods.
+
+This is the formula the job uses for leaf points (whose sums are the
+aggregate points, DESIGN §3.6) and for the leaf backtest export. It lives
+in one shared module, used by the job and by the API (to answer a leaf
+request). Two tests (4-4b):
+- **One function:** the job and the API give identical output for the
+  same row.
+- **Equal to the backtest:** a `forecast` run with `as_of` equal to a
+  backtest origin's day writes `forecast_state` rows whose reconstruction
+  equals that origin's exported backtest points: the point and all four
+  bounds, for every exported h, compared as exact decimal strings.
+
+**Leaf totals are stored, not reconstructed (rev. 17).** DESIGN §3.4
+calibrates the month-end, next-30 and next-90 totals on errors of the
+totals themselves, and forbids summing daily bounds. `forecast_totals`
+therefore holds all three windows for every leaf (D.2).
+
+Leaf storage is thus one `forecast_state` row and three `forecast_totals`
+rows per **leaf** (`leaf_id`) per run, instead of 90 daily rows.
 
 ## D.4 Migration 0004 — anomalies
 
@@ -416,6 +491,6 @@ run instead of 90.
 
 | Role | Grants added |
 |---|---|
-| `ratio_analytics` | USAGE on schema `ratio`; SELECT on `cost_facts_published`, `publications_published`; SELECT, INSERT on every table above, **except `analytics_runs`, where INSERT is column-level and excludes `batch_seq_hwm` and `finished_at`** (rev. 16); UPDATE on the listed columns; USAGE on the identity sequences of `cost_accounts`, `forecast_leaves` and `cost_series` (no others exist: `batch_seq` and `run_seq` are allocated, not sequences); column-level UPDATE on the pointers as listed and on `analytics_runs` of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`) (never `run_seq`, `kind`, `as_of`, `batch_seq_hwm`); EXECUTE on `ratio.current_tenant_id()`, the secret-guard functions its CHECKs evaluate, and the two retention functions; **no DELETE on any table** (D-12) |
+| `ratio_analytics` | USAGE on schema `ratio`; SELECT on `cost_facts_published`, `publications_published`; SELECT, INSERT on every table above, **except `analytics_runs`, where INSERT is column-level and excludes `batch_seq_hwm` and `finished_at`** (rev. 16); UPDATE on the listed columns; USAGE on the identity sequences of `cost_accounts`, `forecast_leaves` and `cost_series` (no others exist: `batch_seq` and `run_seq` are allocated, not sequences); column-level UPDATE on each pointer of its own list (D.1: `rollup_pointer` with `batch_seq_hwm`, `forecast_pointer` without) and on `analytics_runs` of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`) (never `run_seq`, `kind`, `as_of`, `batch_seq_hwm`); EXECUTE on `ratio.current_tenant_id()`, the secret-guard functions its CHECKs evaluate, and the two retention functions; **no DELETE on any table** (D-12) |
 | `ratio_reader` | SELECT on the new reader views only |
 | `ratio_worker` | none |

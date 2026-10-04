@@ -2434,7 +2434,7 @@ for label, pool in (("as specified: non-intermittent individual series", [i for 
 # non-intermittent leaves are active every day, so they never meet the dormancy condition outside a label
 ```
 
-### B.5.12 Revisions 12–15: billing rollup by charge category, rollup pointer, forecast leaves, disk delta
+### B.5.12 Revisions 12–17: billing rollup by charge category, rollup pointer, forecast leaves, leaf totals, disk delta
 
 Computed by `rollup12.py` (below; standard library, no randomness, < 1 s).
 Revision 12 adds:
@@ -2448,10 +2448,20 @@ Revision 12 adds:
 
 Revision 15 adds `forecast_leaves` (account × service, regions summed; one
 row per leaf, ≈ 37 k on `fleet15k`, where the region is `''` everywhere)
-and an 8-byte `leaf_id` on every `cost_series` row. `forecast_leaves` is
-**insert-only** and outside retention, like `cost_series`. Each run is a
-separate `down -v` stack, so the table is rebuilt per run; the script
-counts it in every run's delta, which is conservative (rev. 16).
+and an 8-byte `leaf_id` on every `cost_series` row. `forecast_leaves`,
+like `cost_series`, **never deletes a row and never changes a row's
+identity columns**; the job updates only `last_day`. It is outside
+retention. (Revisions 15 and 16 called both tables "insert-only", which
+that `last_day` update contradicted; rev. 17.) Each run is a separate
+`down -v` stack, so the table is rebuilt per run; the script counts it in
+every run's delta, which is conservative (rev. 16).
+
+Revision 17 adds the leaf rows of `forecast_totals` for **all three
+windows** (month-end, next 30, next 90 days): 37,052 leaves × 3 windows ×
+2 forecast runs kept = 222,312 rows. Revision 16 stored only the leaf
+month-end total and counted none of those rows. It also adds two numeric
+columns to each `forecast_state` row (`scale_level`, `log_var`; Appendix
+D.2, D.3).
 
 The byte sizes are **assumptions** (150 B per narrow row, as for
 `billing_daily` in `budget.py`), measured in PR 3-4.
@@ -2461,21 +2471,25 @@ The byte sizes are **assumptions** (150 B per narrow row, as for
 | `billing_daily_scope` | 550 scopes × (122 days + 4 non-usage categories × 4 months) × 2 runs kept = 151,800 rows, **0.023 GB** (revision 12 counted 5 categories: 156,200 rows) |
 | `cost_accounts` | 15,000 rows, **0.002 GB** |
 | `forecast_leaves` + `leaf_id` (rev. 15) | 37,052 rows, **0.006 GB** |
+| leaf `forecast_totals`, three windows (rev. 17) | 222,312 rows, **0.033 GB** |
+| `forecast_state`: `scale_level`, `log_var` (rev. 17) | **0.002 GB** |
 | `rollup_pointer`, `billing_daily` re-key | ≈ 0 |
-| **Delta per run** | **+0.031 GB** (revision 13: 0.025; revision 12: 0.026) |
-| natural-1 run | 4.961 → **4.992 GB** |
-| **Peak, 5 runs** | 5.151 → **5.182 GB** |
-| **Peak, 6 runs (natural-3)** | 5.191 → **5.222 GB** |
+| **Delta per run** | **+0.066 GB** (revisions 15–16: 0.031; revision 13: 0.025; revision 12: 0.026) |
+| natural-1 run | 4.961 → **5.027 GB** |
+| **Peak, 5 runs** | 5.151 → **5.217 GB** |
+| **Peak, 6 runs (natural-3)** | 5.191 → **5.257 GB** |
 
 Both peaks stay under the 5.5 GB target and the 6 GB ceiling.
 
 SHA-256 of `rollup12.py` as run:
-`6bb735b8a396b3a45355f3be00e07c95eb6f3d4a3c36ec794837061118355c66`.
+`d296e8ff52c11494e5f538fe706da295ae8695f5589b2067270365627eabe8e5`
+(revision 16: `6bb735b8…`).
 
 `rollup12.py`:
 
 ```python
-# fleet15k, revision 12 (category count corrected in revision 13; forecast leaves added in revision 15): disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
+# fleet15k, revision 12 (category count corrected in revision 13; forecast leaves added in revision 15; leaf totals and
+# two leaf-state columns added in revision 17): disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
 # charge category, `cost_accounts`, `billing_daily_scope`, `rollup_pointer`) and the resulting peak disk.
 # Standard library only, no randomness. Inputs from budget5.py / budget3.py; byte sizes are ASSUMPTIONS
 # (measured in PR 3-4), at the same 150 B per narrow row used for `billing_daily` in budget.py.
@@ -2500,9 +2514,17 @@ billing_delta_gb = 0.0
 # revision 15: `forecast_leaves` (account x service, regions summed; one per leaf on fleet15k, where region is '')
 # and an 8-byte `leaf_id` on every `cost_series` row
 leaves_gb = LEAVES * ROW_B / 1e9 + LEAVES * 8 / 1e9
-delta = scope_gb + acct_gb + billing_delta_gb + leaves_gb
-print("billing_daily_scope rows %d (%.3f GB), cost_accounts %.3f GB, forecast_leaves + leaf_id %.3f GB, rollup_pointer ~0: delta per run %.3f GB"
-      % (scope_rows, scope_gb, acct_gb, leaves_gb, delta))
+# revision 17: leaf rows of `forecast_totals` for all three windows (month_end, next_30, next_90); revision 16 stored
+# month_end only for leaves and counted none of them. Forecast retention keeps the 2 latest succeeded runs.
+WINDOWS = 3
+leaf_totals_gb = LEAVES * WINDOWS * RUNS_KEPT * ROW_B / 1e9
+# revision 17: two more numeric columns per `forecast_state` row (`scale_level`, `log_var`), 12 B each, 2 runs
+state_cols_gb = LEAVES * 2 * 12 * RUNS_KEPT / 1e9
+delta = scope_gb + acct_gb + billing_delta_gb + leaves_gb + leaf_totals_gb + state_cols_gb
+print("billing_daily_scope rows %d (%.3f GB), cost_accounts %.3f GB, forecast_leaves + leaf_id %.3f GB, rollup_pointer ~0"
+      % (scope_rows, scope_gb, acct_gb, leaves_gb))
+print("leaf forecast_totals rows %d (%.3f GB), forecast_state columns %.4f GB: delta per run %.3f GB"
+      % (LEAVES * WINDOWS * RUNS_KEPT, leaf_totals_gb, state_cols_gb, delta))
 
 # peak disk, as budget5.py, with the delta added to every run
 points = 5 * 30 + 30 + 23 + 16 + 9

@@ -26,7 +26,7 @@ ordinary commits and plain pushes (never a force-push).
 | 14 | `10cd9ce` | The challenger's REQUEST CHANGES on revision 13 (1 Medium, 3 Low), §3k: the high-water mark is the tenant's `max(batch_seq)`; the pointer trigger's scope stated; sentinel groups marked `attributed: false`; the negative-usage blind spot in the budget table and the limits. |
 | 15 | `dc43f4f`, `a268c0e` | The challenger's REQUEST CHANGES on revision 14 (1 Medium, 3 Low), §3l, and Copilot's review 5407477027 of 10cd9ce (16 findings), §3m: the high-water mark and the sequence allocation are defined on an empty tenant (`coalesce(max, 0)`, `NOT NULL`); the monotonicity reason corrected; the known-limits list made complete. |
 | 16 | `9e0d703`, `1ac82f7`, `6cad4cd` | The challenger's REQUEST CHANGES on revision 15 (2 Medium, 4 Low), §3n: the run row is closed for INSERT with terminal statuses and a unique `run_seq`; an effect window for every label kind; multi-day usage in the limits with a coverage share; leaf derivation enforced by FKs. |
-| 17 | this revision | Copilot's review 5407588631 of 6cad4cd (6 High, 4 Medium, 1 Low), §3o: one writer per tenant and job kind for `run_seq`; one day index `t` for every detector; fan-in before persistence with merge semantics; daily excess vs cumulative impact and `ρ` at expected 0; stale wording swept. |
+| 17 | `77a2faf`, `f288d2f`, this revision | Copilot's review 5407588631 of 6cad4cd (6 High, 4 Medium, 1 Low), §3o: one writer per tenant and job kind for `run_seq`; one day index `t` for every detector; fan-in before persistence with merge semantics; daily excess vs cumulative impact and `ρ` at expected 0; stale wording swept. The challenger's REQUEST CHANGES on 6cad4cd (2 Medium, 4 Low), §3p: one composite FK binds a series to its leaf; separate grant, trigger and concurrent-UNIQUE tests; a CHECK for root causes without a leaf; paginated per-leaf coverage; §5 wording. Copilot's review 5407636005 of 6cad4cd (six new threads), §3q: one UPDATE column list per pointer; leaf totals stored for all three windows (disk delta +0.066 GB per run, peak 5.22 GB); the full leaf reconstruction formula; CHECKs on fixed-length arrays; "insert-only" replaced. |
 
 ## 2. Governance wording: reverted
 
@@ -349,7 +349,38 @@ revision 16, and all eleven are valid.
 | **r4178820523** "series key" | **Fixed.** The backtest export names `leaf_id`; the grouping sort key also uses `leaf_id` (sweep) | DESIGN §3.8, §4.5 |
 | **r4178820566** storage per series | **Fixed.** "one row per **leaf** (`leaf_id`) per run" | App. D.3 |
 | **r4178820480** FT on tuning | **Fixed.** 4-4b runs FT-4/5/7 on **natural-1**; the tuning seeds never feed an acceptance figure | DESIGN §7 (4-4b) |
-| Scripts | No embedded script changed; the 11 SHA-256s are those of revision 15 | App. B |
+| Scripts | No script changed for these eleven threads; `rollup12.py` changed in the same revision for r4178843716 (§3q) | App. B |
+
+## 3p. Revision 17: the challenger's review of 6cad4cd (2 Medium, 4 Low)
+
+The new constraints and tests were checked on a throwaway PostgreSQL 16.14
+cluster (Unix socket only, port 55731, removed afterwards); the results are
+quoted per item.
+
+| Item | Change | Where |
+|---|---|---|
+| **M1** run-row tests | **Valid.** PostgreSQL checks privileges before triggers run, so revision 16's single test ("refused by the grant and by the trigger") could not show the trigger, and a sequential duplicate `run_seq` is caught by the trigger's max + 1 check, never by the UNIQUE. **Fix:** separate tests, each with its own mutant. (1) **Grant:** as the analytics login an INSERT supplying `batch_seq_hwm` fails 42501, even for an otherwise valid row; `has_column_privilege(…, 'batch_seq_hwm', 'INSERT')` is false; mutant: widen the grant (the probe then reaches the trigger instead). (2) **Trigger:** as a fixture role holding the privilege, a supplied mark, a pre-`succeeded` row and an out-of-order `run_seq` each fail with the trigger's own error. (3) **Re-succeed** refused. (4) **UNIQUE:** two concurrent same-kind inserts without the advisory lock: the second fails 23505 with the constraint, and both commit (duplicate `run_seq`) without it; plus a catalogue check. The allocation rule (lock, max + 1, trigger re-check, UNIQUE → `RUN_SEQ_CONFLICT`) is now stated once and the same for every kind | App. D.1, D.5; DESIGN §7 (4-1) |
+| **M2** leaf derivation | **Valid.** The two FKs could each match a different leaf (the challenger's probe accepted `leaf_id` = svcA's leaf with `service_name` = svcB). **Fix:** **one** composite FK `(tenant_id, leaf_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)` → `forecast_leaves (tenant_id, id, …)`, backed by a UNIQUE on those columns. Probe: the wrong-leaf series fails 23503; two regions of one service share one `leaf_id`; the revision-16 form, kept as the mutant, accepts the wrong leaf. Same as Copilot r4178843614 (§3q) | App. D.0, D.1; DESIGN §7 (4-1) |
+| **L1** root cause without a leaf | **Valid.** The `(tenant_id, series_id, leaf_id)` FK is `MATCH SIMPLE`, so a NULL `leaf_id` skips it and `series_id` = 999 was accepted. **Fix:** `CHECK (series_id IS NULL OR leaf_id IS NOT NULL)` and a plain `(tenant_id, series_id)` FK. Probe: NULL leaf with series 999 or with a real series fails 23514; a series of another leaf, or leaf 1 with series 999, fails 23503; an account-level cause (both NULL) is accepted. `UNIQUE cost_series (tenant_id, id, leaf_id)` is listed in the `cost_series` row | App. D.1, D.4; DESIGN §7 (4-1) |
+| **L2** §5 wording | **Valid.** For a file without a patch the classifier adds `diff-unavailable` **instead of** that file's content reasons (no added lines to match), and the report's classes gain `unclassified`. §5 and the PR body now say so | §5 |
+| **L3** role table | **Valid.** The DESIGN role row names the three identity sequences, the column-level INSERT on `analytics_runs`, and the exact UPDATE list (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`); so do App. D's `analytics_runs` row and D.5 | DESIGN §6.1; App. D.1, D.5 |
+| **L4** Lows | **Valid.** (a) The "non-zero" wording at DESIGN:718 was already fixed with Copilot r4178820404. (b) Known limits: a leaf billed only in multi-day rows has `M` = 0 every day and is never scored; `freshness` shows it at 100 %. (c) `freshness` per-leaf coverage is keyset-paginated (`limit` ≤ 500, cursor), sorted by share descending, with `minShare=`; the 4-5 latency check covers its first and a deep page, with the mutant "returned unpaginated" | DESIGN §5.1, §7 (4-5), §8 |
+| Scripts | No script changed for these six items | App. B |
+
+## 3q. Revision 17: Copilot's review 5407636005 of 6cad4cd (six new threads)
+
+Each thread was checked against 6cad4cd; all six are valid. The review's
+other ten open threads are those of review 5407588631 (§3o).
+
+| Thread | Disposition | Where |
+|---|---|---|
+| **r4178843614** (High) leaf FKs | **Fixed** as the challenger's M2 (§3p): one composite FK with a matching UNIQUE on `forecast_leaves`, covering D.0, the `forecast_leaves` and `cost_series` rows and the root-cause FK | App. D.0, D.1, D.4 |
+| **r4178843669** (High) pointer UPDATE lists | **Fixed.** One shared list named `batch_seq_hwm` on `forecast_pointer`, which has no such column; on PostgreSQL 16.14 that GRANT fails with 42703 (column does not exist). Each pointer now has its own list: `rollup_pointer` (`run_id`, `run_seq`, `batch_seq_hwm`, `as_of`, `updated_at`), `forecast_pointer` (`run_id`, `run_seq`, `as_of`, `updated_at`), in D.1, the `forecast_pointer` row, D.5 and DESIGN §6.1. Catalogue tests in 4-1 and 4-3; mutant: one shared list | App. D.1, D.2, D.5; DESIGN §6.1, §7 |
+| **r4178843716** (High) leaf next-30/90 totals | **Fixed by storing them.** `forecast_totals` now holds month-end, next-30 and next-90 rows for every leaf, with a `quantile source` column; §3.7 says so. Revision 16 stored only the leaf month-end total, and §3.4 forbids rebuilding total intervals from daily bounds. **Sizing:** those rows had not been counted at all; `rollup12.py` now counts 222,312 leaf rows (2 runs kept, 0.033 GB) plus two `forecast_state` columns (0.002 GB). Delta per run 0.031 → **0.066 GB**; natural-1 run 5.027 GB; peaks **5.217 / 5.257 GB** (5.22 / 5.26), under the 5.5 GB target. Tests in 4-3 and 4-5; mutant: month-end only | App. D.2, D.3, B.5.12; DESIGN §2.8, §3.7, §7 |
+| **r4178843747** (High) leaf reconstruction | **Fixed.** D.3 gives the full formula per method (`mean`, `m0`, `m1`, `m1_log` with its variance correction): weekly part × calendar factor = point; bounds = point + `scale_level` × the applied quantile, floored at 0 for the lower bounds. `scale_level` (the trailing 28-day mean `M`, by which §3.4 now says errors are divided) and `log_var` are stored. Tests (4-4b): job and API identical, and a run at a backtest origin reconstructs that origin's exported points exactly, on event days and for every method; mutants: no calendar factor, `level × q` as a bound, scaling by `level` | App. D.2, D.3; DESIGN §3.4, §7 (4-4b) |
+| **r4178843775** array lengths | **Fixed.** Every fixed-length array (`season`, the four quantile arrays, the detector's weekday medians and weekly sums, `μ̂_k`) has `CHECK (array_ndims(x) = 1 AND cardinality(x) = n AND array_lower(x, 1) = 1 AND array_position(x, NULL) IS NULL)`. Probe: without it, `numeric[7]` stores 6 elements and a 2-D array; with it, 6 and 8 elements, a 7-element 2-D array, `'{}'`, lower bound 0 and a NULL element each fail 23514, and a NULL column passes. Rejection tests and mutant in 4-3 | App. D.2; DESIGN §7 (4-3) |
+| **r4178843811** "insert-only" | **Fixed.** `forecast_leaves`, `cost_series` and `cost_accounts` are described as **rows never deleted, identity columns immutable, only `last_day` updated**, matching their grants, in App. D (D.0, the three rows), B.5.12 and DESIGN §2.9. They remain outside retention, which B.5.12 and D.0 still say | App. D.0, D.1, B.5.12; DESIGN §2.9 |
+| Re-run | All 11 embedded scripts re-run: `rollup12.py` changed, SHA-256 `6bb735b8…` → `d296e8ff52c11494e5f538fe706da295ae8695f5589b2067270365627eabe8e5`; the other ten hashes and outputs unchanged; budget totals 0.101 / 0.131 | App. B |
 
 ## 4. Measurements used by the design
 
@@ -379,7 +410,7 @@ revision 16, and all eleven are valid.
 | D4 reactivation false positives (rev. 9; ρ > 0 underestimated, see rev. 10) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` as of revision 9 |
 | D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6) | `reactivation.py` (B.5.11) |
 | `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series) | `reactivation.py` (B.5.11) |
-| Billing rollup disk delta (rev. 12; corrected in rev. 13; forecast leaves in rev. 15) | +0.031 GB per run (rev. 13: 0.025; rev. 12: 0.026); peak 5.18 GB (5.22 GB with natural-3) | `rollup12.py` (B.5.12) |
+| Billing rollup disk delta (rev. 12; corrected in rev. 13; forecast leaves in rev. 15; leaf totals in rev. 17) | +0.066 GB per run (revs. 15–16: 0.031; rev. 13: 0.025; rev. 12: 0.026); peak 5.22 GB (5.26 GB with natural-3) | `rollup12.py` (B.5.12) |
 | Garwood intervals, exact (rev. 12) | unchanged at three decimals (e.g. 7 groups: [0.046, 0.236]) | `budget3.py` (B.5.8) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
 
@@ -409,13 +440,16 @@ without it:
   this file (which quotes it).
 
 **The PR's governance report at `9e0d703`** (the same classifier, fed
-from the GitHub API's PR file list instead of `--git`) also lists
+from the GitHub API's PR file list instead of `--git`) lists
 `unclassified` / **`diff-unavailable`** for `DESIGN.md` and
-`APPENDIX_B_SIZING.md`.
+`APPENDIX_B_SIZING.md` **instead of** those two files' content reasons,
+and its classes are therefore `retention`, `secrets` **and
+`unclassified`** (rev. 17, the challenger's L2; revision 16 said "also
+lists", which was wrong).
 - **Why:** GitHub returned no patch for those two files; the API omits the
-  patch for very large diffs. `classify-risk.mjs` then fails closed for a
-  file whose added lines it cannot inspect (line 251: `patchUnavailable` →
-  `unclassified` / `diff-unavailable`).
+  patch for very large diffs. With no added lines, no content rule can
+  match those files, and `classify-risk.mjs` then fails closed (line 251:
+  `patchUnavailable` → `unclassified` / `diff-unavailable`).
 - **What it is not:** a content class. The local `--git` run above reads the
   full diff of the same files and finds only the retention and secrets
   reasons listed.
