@@ -4,7 +4,10 @@ Part of [DESIGN.md](DESIGN.md). Branch `design/slice-3-5-forecast-anomaly`,
 from `origin/main` at 827773f. Design documents only. Revisions 1–4 were
 not pushed by the design agent; from revision 5 the branch is on
 `origin/design/slice-3-5-forecast-anomaly` and revisions are added by
-ordinary commits and plain pushes (never a force-push).
+ordinary commits and plain pushes (never a force-push). PR #70 was merged
+at revision 27 (`28f8970`; merge commit `f35c383` on `main`). Revision 28
+is a follow-up PR on `design/slice-3-5-followups`, branched from
+`origin/main` at `f35c383`, under the same rules.
 
 ## 1. Revisions
 
@@ -36,7 +39,8 @@ ordinary commits and plain pushes (never a force-push).
 | 24 | `f3209ea` | Copilot's review 5407981134 of b9b2274 (3 High, 1 Medium) and the challenger's one Low on revision 23 (APPROVED, 0 High, 0 Medium), §3y: account-scope daily forecasts rebuilt on read with stored interval state, and a scope census (peak 5.24 GB); anomaly changes published in the detect run's success transaction; valid-sample rules for the log-scale detectors; a scale-aware zero week in `budget5.py` (outputs unchanged); a `repointed` event. |
 | 25 | `45b0088` | Copilot's review 5408081799 of f3209ea (1 High, 2 Medium, 2 Low) and the challenger's Low and nit on revision 24 (APPROVED, 0 High, 0 Medium), §3z: an `occurrence` in the anomaly dedup key for re-introduced restatements; bounded backtest retention with pins; the `bottom_up` summary for non-leaf scopes; `forecast_scope_state` arrays checked; stale scope counts; event-target foreign keys. |
 | 26 | `546e00b` | Copilot's review 5408165158 of 45b0088 (1 Medium, 1 Low) and the challenger's three Low items on revision 25 (APPROVED, 0 High, 0 Medium), §3aa: bounded shares (cold-start, committed, untagged), defined APE and interval width; the retention threat-model row and rollback text brought up to date; `backtest --pin` in the success transaction; `historyDays` from leaves' first usage day; "fresh replay". |
-| 27 | this revision | Copilot's review 5408199807 of 546e00b (2 High, 1 Medium), after the challenger APPROVED revision 26 without findings, §3ab: retention never removes anything a running run uses (shared/exclusive retention lock); every multi-transaction run captures its input runs once and reads them by id; billed month-end `B` removed from the contract and recorded as a gap; a share-test wording fix. |
+| 27 | `28f8970` (PR #70, merged as `f35c383`) | Copilot's review 5408199807 of 546e00b (2 High, 1 Medium), after the challenger APPROVED revision 26 without findings, §3ab: retention never removes anything a running run uses (shared/exclusive retention lock); every multi-transaction run captures its input runs once and reads them by id; billed month-end `B` removed from the contract and recorded as a gap; a share-test wording fix. |
+| 28 (follow-up to merged #70) | this revision | Copilot's review 5408232490 of 28f8970 (1 High, 1 Low) and the challenger's four Low items on revision 27 (APPROVED, 0 High, 0 Medium), §3ac: the sizing scripts' commitment draw made once per account and the scripts re-run (37,033 leaves; false-positive total 0.102, 0.132 conservative; peak 5.242 GB unchanged); the last billed-`B` line removed; the retention functions' isolation, lock order and transaction placement, and the crashed-run growth, stated; the input high-water mark checked on INSERT. |
 
 ## 2. Governance wording: reverted
 
@@ -608,6 +612,75 @@ checking.
 | API and `freshness` | pointers and views | one statement or one REPEATABLE READ transaction (revisions 18, 21, 22) |
 | detect's anomaly writes | `anomalies` | the detect writer's lock and its success transaction (revision 24) |
 
+## 3ac. Revision 28 (follow-up to merged #70): Copilot's review 5408232490 of 28f8970 and the challenger's Lows on revision 27
+
+The challenger APPROVED revision 27 (0 High, 0 Medium, 4 Low). PR #70 was
+then merged at `28f8970`, so this revision is a follow-up PR from
+`origin/main` at `f35c383`. Copilot's two threads and the challenger's
+four Lows were each checked against `28f8970`, and all six are valid.
+Copilot's earlier thread r4179306710 (revision 27's Z3) was still open
+because of the same stale `B` line; AA2 closes it.
+
+| Item | Change | Where |
+|---|---|---|
+| **AA1 r4179339429** (High) commitment double draw | **Confirmed and fixed.** `(m > 20000 and random() < 0.6) or random() < 0.1` gives 0.6 + 0.4 × 0.1 = **0.64** above $20 k/month. Under the log-normal, P(m > $20 k) = 0.0369, so the overall rate was 12.0 % instead of 11.8 %. An account above $20 k whose first draw failed also used a second random number, which shifted every later draw. Every copy now draws once: `random() < (0.6 if m > 20000 else 0.1)`. The 7 scripts that feed current figures were fixed and re-run; `budget3.py` and `budget4.py` are kept verbatim as run and labelled (table below). **The spec was not changed:** DESIGN §2.3's Commitments row said "≈ 12 % of accounts (most large ones)" and now states the rule exactly. New 3-1a test: the commitment rate by class over 1,000,000 account draws (0.60 ± 0.01 above $20 k/month, ≈ 4 standard errors; 0.10 ± 0.002 below). New mutant: the double draw (64 %). **No target is crossed, so D-20 is not triggered:** the false-positive total is 0.102 (0.132 conservative) against 0.15, and the peak stays 5.242 GB against 5.5 GB | App. B (top note, B.2–B.5.13); DESIGN §0, §2.3, §2.8, §2.9, §3.2, §4.2, §4.9, §7 (3-1a), §8 (D-23, Known limits); §4 |
+| **AA2 r4179339445** (Low; also the challenger's L4a) | **Fixed.** App. D.3's account Totals bullet no longer promises `B`: "no billed value: billed month-end is not forecast". A sweep of DESIGN and the appendices for `` `B` ``, "billed month-end" and "billed forecast" found no other promise. Every remaining mention says it is not forecast (DESIGN §0, §3.1, §3.6, the `forecasts` API row, D-09, §8) or concerns billed actuals | App. D.3 |
+| **r4179306710** (Medium; revision 27's Z3, thread still open) | Fixed in revision 27 (merged with #70) except the line above. After AA2, nothing promises a billed forecast, so the thread can be resolved | App. D.3 |
+| **AA3** challenger L1: retention isolation | **Fixed.** Both retention functions are `LANGUAGE plpgsql VOLATILE`. The first statement takes the exclusive retention lock. The second raises unless `transaction_isolation` is `read committed`, so every later statement's snapshot is taken after the lock is granted. New 4-3 test for the ordering where the start holds the shared lock first: F1 and D's previous run's state survive the retention pass, and a REPEATABLE READ call is refused. New mutants: retention under REPEATABLE READ, the lock taken after the first read | App. D.1; DESIGN §6.1, §7 (4-3) |
+| **AA4** challenger L2: deadlock | **Fixed.** A run calls retention in its own transaction after its success commit, holding no run-row or pointer lock. 4-3 test: a start marking a stale run `abandoned` at the same time does not deadlock. New mutant: retention inside the success transaction | DESIGN §6.1, §7 (4-2, 4-3); App. D.1 |
+| **AA5** challenger L3: crashed runs | **Bounded growth stated; an expired lease is not treated as dead.** A write transaction checks the lease only at its start (`assertLease … FOR UPDATE`), so one that began before the lease expired can still be reading the run's inputs. Proving that none is in flight would need the run-row locks that AA4 keeps out of retention, and that would reopen Z1's race. The growth is bounded: at most one crashed run per kind (the next start of that kind marks it `abandoned`), ≈ 0.1 GB per run at `fleet15k`'s sizes, released at that kind's next start. It cannot affect `fleet15k`'s peak, since each run is a fresh stack. 4-3 test: a crashed detect run's inputs are kept until the next detect start, then released | App. D.1; DESIGN §6.1, §7 (4-3) |
+| **AA6** challenger L4b: input mark | **Fixed.** `tg_analytics_run_success` also checks on INSERT that `input_batch_seq_hwm` equals the input rollup run's recorded `batch_seq_hwm`, the rule the pointer guard enforces. New 5-3 test: a mismatched mark is refused. New mutant: the trigger without the equality check | App. D.1; DESIGN §7 (5-3) |
+| Scripts | 13 embedded. 7 fixed, re-run and re-hashed: `sizing.py`, `budget.py`, `budget2.py`, `budget5.py`, `reactivation.py`, `drift_ttd.py` and `rollup12.py`. Each was re-run from its Appendix B copy and gave byte-identical output; `budget5.py` and `reactivation.py` were also run twice. `budget3.py` and `budget4.py` are unchanged (kept as run); `budget3.py`'s Appendix B copy reproduces its as-run output. `csvsize.py` and the three SQL files have no account model and were not re-run | App. B |
+
+**Which scripts feed current figures (AA1)**
+
+| Script | Status in revision 28 | Why |
+|---|---|---|
+| `sizing.py` (B.4) | fixed, re-run, new hash | B.2's full-grain figures |
+| `budget.py` (B.5.6) | fixed, re-run, new hash | the adopted variant D and the ladder |
+| `budget2.py` (B.5.7) | fixed, re-run, new hash | folding loss, eligible series |
+| `budget5.py` (B.5.10) | fixed, re-run, new hash | the current false-positive budget |
+| `reactivation.py` (B.5.11) | fixed, re-run, new hash | D4's reactivation line |
+| `drift_ttd.py` (B.5.13) | fixed, re-run, new hash | AT-3's drift time-to-detect |
+| `rollup12.py` (B.5.12) | leaf count 37,052 → 37,033, re-run, new hash | the disk delta and the peak |
+| `budget3.py` (B.5.8) | **kept as run**, labelled | superseded revision-5 budget; its Garwood interval does not depend on the leaf list. A copy with only the draw changed gives the same Garwood intervals, pass probabilities, peaks and totals |
+| `budget4.py` (B.5.9) | **kept as run**, labelled | superseded revision-6 budget; every current figure it gave is recomputed by `budget5.py` |
+| `csvsize.py`, `rowsize*.sql` | unchanged | no account model |
+
+**AA1 before and after** (revision 27 → revision 28):
+
+| Script | Figure | Revision 27 | Revision 28 |
+|---|---|---|---|
+| `sizing.py` | commitment accounts, 1,500 / 15,000 | 179 / 1,804 | 174 / 1,693 |
+| `sizing.py` | `full`: account × service / × region series | 106,942 / 146,640 | 106,829 / 146,632 |
+| `sizing.py` | `full`: fact rows per day; 13 periods; stored | ≈ 198.9 k; 78.6 M; 47.1 / 81.2 GB | ≈ 198.3 k; 78.3 M; 47.0 / 80.9 GB |
+| `sizing.py` | 1,500 accounts: series; 13 periods | 10,543 / 14,639; 7.79 M (8.0 GB) | 10,697 / 14,742; 7.86 M (8.1 GB) |
+| `budget.py` | variant D leaves (individual / `Other`) | 37,052 (22,498 / 14,554) | 37,033 (22,493 / 14,540) |
+| `budget.py` | variant D facts / objects; total | 2.711 / 0.294 GB; 4.90 GB | 2.709 / 0.293 GB; **4.90 GB** |
+| `budget.py` | variant A leaves; total | 45,067; 6.08 GB | 45,060; 6.07 GB |
+| `budget.py` | variants B and C leaves; fact rows | 43,565; 5.69 M | 43,558; 5.68 M |
+| `budget2.py` | full-mix series; folded | 107,273; 84,775 (79.0 %) | 107,109; 84,616 (79.0 %) |
+| `budget2.py` | leaves ≥ $200/day; ≥ $100/day | 1,799; 3,906 | 1,800; 3,914 |
+| `budget5.py` | reachable leaves: daily / weekly / hurdle; ≥ $500/day | 3,440: 3,259 / 66 / 115; 476 | 3,443: 3,280 / 72 / 91; 479 |
+| `budget5.py` | D1 ∧ D2; D3 resolution bound / conservative | 0.0061; 0.0066 / 0.0298 | 0.0062; 0.0067 / 0.0300 |
+| `budget5.py` | weekly; hurdle (every alarm); calendar; first occurrences | 0.0139; 0.0028 (0.0028); 0.0012; 0.0490 | 0.0158; 0.0021 (0.0022); 0.0011; 0.0482 |
+| `budget5.py` | **total / conservative** (weekly doubled) | **0.101 / 0.131** (0.146) | **0.102 / 0.132** (0.147) |
+| `budget5.py` | jitter: calendar term; totals and P(pass) | 0.0827; 0.183 (0.993), 0.213 (0.959) | 0.0869; 0.187 (0.990), 0.218 (0.949) |
+| `budget5.py` | hurdle routes `warning` / `info`; clustered ρ 0.3 / 0.6 after the gate | 114.0 / 1.0; 0.0107 / 0.0123 | 90.2 / 0.8; 0.0083 / 0.0095 |
+| `budget5.py` | weekly sensitivity: sd 1.0 / ρ 0.3 | 0.0285 / 0.0082 | 0.0311 / 0.0092 |
+| `budget5.py` | calendar without the component | 7.040 | 6.900 |
+| `budget5.py` | event-day recall, one contaminated cycle: 3 / 2 prior cycles | 0.999 / 0.716 | 1.000 / 0.717 |
+| `budget5.py` | grid (z_T / h) that moved | 4.5 / 8.5 0.120; 4.5 / 9.5 0.089 / 0.114; 5.0 / 7.5 0.178; 5.0 / 8.0 cons. 0.199; 5.0 / 8.5 cons. 0.156 | 0.121; 0.090 / 0.115; 0.177; 0.200; 0.157 |
+| `budget5.py` | pass probabilities at pinned rates; fatigue; peaks | 0.999 at 0.15; 1.30 / 1.33; 5.15 / 5.19 GB | unchanged |
+| `reactivation.py` | generator: union (28-day history); worst case (14 days) | 1.4 × 10⁻⁵; 8.5 × 10⁻⁵ | 1.2 × 10⁻⁵; 9.2 × 10⁻⁵ |
+| `reactivation.py` | no history condition: generator / ρ 0.3 / ρ 0.6 | 0.0017 / 0.027 / 0.32 | 0.0019 / 0.030 / 0.35 |
+| `reactivation.py` | chain union: ρ 0.3 / ρ 0.6 | 0.00094 / 0.054 | 0.00100 / 0.059 |
+| `reactivation.py` | label pass rate on any individual series | 0.970 | 0.971 |
+| `drift_ttd.py` | shares ≤ 7 days: all detectors / D3 restart / D3 no restart / noise-free; cumulative clause | 0.726 / 0.535 / 0.235 / 0.668; 0.092 | 0.720 / 0.540 / 0.232 / 0.665; 0.091 |
+| `drift_ttd.py` | medians and p90s | 5 / 7 / 11 / 6; 18 | unchanged |
+| `rollup12.py` | leaf `forecast_totals` rows; `cost_daily` rows | 222,312; 4,520,344 | 222,198; 4,518,026 |
+| `rollup12.py` | delta per run; natural-1 run; **peak** (natural-3) | +0.091 GB; 5.052 GB; **5.242 GB** (5.282) | unchanged |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -630,24 +703,53 @@ checking.
 | Peak disk, rev. 6 | 5.15 GB (5.19 GB with natural-3) | `budget4.py` (B.5.9) |
 | Re-run of every embedded script (rev. 6) | all 8 SHA-256s match; Python outputs reproduce (`budget4.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3c |
 | Hurdle statistic, in-control (rev. 7) | 0.00002–0.00052 alarms per series-week at zero shares 0.55–0.8, h = 9.0; gate r₁ < 0.30 passes 98.8–99.2 % of independent series-weeks | `budget5.py` (B.5.10) |
-| False-positive budget at z_T 4.5, h 9.0 (rev. 7) | **0.101/day** (0.131 with every conservative bound; 0.146 with the weekly term doubled); ±10 % jitter: P(pass) 0.993 / 0.959 | `budget5.py` (B.5.10) |
+| False-positive budget at z_T 4.5, h 9.0 (rev. 7) | **0.101/day** (0.131 with every conservative bound; 0.146 with the weekly term doubled); ±10 % jitter: P(pass) 0.993 / 0.959; superseded by rev. 28 below | `budget5.py` (B.5.10) |
 | Zero-week rule in `budget5.py` (rev. 24) | outputs byte-identical to revision 7's script; weekly alarm counts 259 / 221 / 229 in 120,000 weeks at zero shares 0.3 / 0.4 / 0.5, old and new | `budget5.py` (B.5.10) |
-| Hurdle routes under the generator | ≈ 114 of 115 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 | `budget5.py` (B.5.10) |
+| Hurdle routes under the generator | ≈ 114 of 115 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 (rev. 28 below) | `budget5.py` (B.5.10) |
 | Peak disk, rev. 7 | 5.15 GB (5.19 GB with natural-3) | `budget5.py` (B.5.10) |
 | D4 reactivation false positives (rev. 8) | 3 × 10⁻⁵/day with the history condition (generator); without it 0.0017 (generator), 0.32 (persistence 0.6) | `reactivation.py` as of revision 8 (superseded in B.5.11) |
 | D4 reactivation false positives (rev. 9; ρ > 0 underestimated, see rev. 10) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` as of revision 9 |
-| D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6) | `reactivation.py` (B.5.11) |
-| `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series) | `reactivation.py` (B.5.11) |
+| D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6); rev. 28 below | `reactivation.py` (B.5.11) |
+| `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series; 0.971 in rev. 28) | `reactivation.py` (B.5.11) |
 | Billing rollup disk delta (rev. 12; corrected in rev. 13; forecast leaves in rev. 15; leaf totals in rev. 17; detector state in rev. 18; measured `cost_daily` row in rev. 22; scope census and account scope in rev. 24) | +0.091 GB per run (rev. 22: 0.024; rev. 18: 0.082; rev. 17: 0.066; revs. 15–16: 0.031; rev. 13: 0.025; rev. 12: 0.026); peak 5.24 GB (5.28 GB with natural-3) | `rollup12.py` (B.5.12) |
 | Drift time-to-detect from AT-3's anchor (rev. 18) | noise-free first-passing day median 6, p90 12 days (not a lower bound); D3 alone median 7, p90 13 (with the restart); all detectors on the true baseline median 5, p90 11 | `drift_ttd.py` (B.5.13) |
 | Garwood intervals, exact (rev. 12) | unchanged at three decimals (e.g. 7 groups: [0.046, 0.236]) | `budget3.py` (B.5.8) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
+| One commitment draw per account (rev. 28) | `fleet15k` leaves 37,033 (was 37,052); variant D still 4.90 GB per run; folding loss 79.0 % and 25.6 % unchanged; `full` 78.3 M fact rows over 13 periods (was 78.6 M) | `sizing.py`, `budget.py`, `budget2.py` (B.2, B.5.3, B.5.7) |
+| False-positive budget at z_T 4.5, h 9.0 (rev. 28) | **0.102/day** (0.132 with every conservative bound; 0.147 with the weekly term doubled); ±10 % jitter: P(pass) 0.990 / 0.949; still the least strict pair under 0.15 | `budget5.py` (B.5.10) |
+| Hurdle routes under the generator (rev. 28) | ≈ 90 of 91 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 | `budget5.py` (B.5.10) |
+| D4 reactivation false positives (rev. 28) | union of (i) and (ii): 1.2 × 10⁻⁵/day (generator; worst case 9.2 × 10⁻⁵), 0.00100 (ρ 0.3), 0.059 (ρ 0.6) | `reactivation.py` (B.5.11) |
+| Drift time-to-detect (rev. 28) | medians and p90s unchanged; shares ≤ 7 days 0.720 (all detectors), 0.540 (D3 with the restart), 0.665 (noise-free) | `drift_ttd.py` (B.5.13) |
+| Disk delta and peak (rev. 28) | +0.091 GB per run; natural-1 run 5.052 GB; **peak 5.242 GB** (5.282 GB with natural-3); unchanged at three decimals with 37,033 leaves | `rollup12.py` (B.5.12) |
+| Re-run of the embedded scripts (rev. 28) | all 13 SHA-256s match Appendix B (7 updated); the 7 fixed scripts reproduce from their Appendix B copies byte for byte; `budget3.py` reproduces its as-run output | §3ac |
 
 The measurement scripts are reproduced verbatim, with SHA-256, in
 Appendix B (B.4, B.5.6–B.5.14).
 
 ## 5. Governance classification
 
+**Revision 28, this follow-up PR.** `origin/main` is now `f35c383`, which
+contains PR #70, so `node scripts/governance/classify-risk.mjs --git
+origin/main...HEAD` at revision 28 (the commit that adds this paragraph)
+reads only this PR's diff. It gives:
+- `"risk": "restricted"`, classes `retention` and `secrets`;
+- `retention.mention` on `APPENDIX_D_SCHEMA_SKETCH.md`, `DESIGN.md` and
+  this file: the added lines say how the retention functions run (AA3–AA5);
+- `secrets.password-assignment` and `retention.delete-from` on this file
+  only, because this paragraph quotes the two lines that matched those
+  rules in PR #70: the `POSTGRES_PASSWORD=<throwaway>` run command
+  (Appendix B.5.6) and the threat-model test that a `DELETE FROM
+  ratio.cost_daily` by the analytics login is refused (DESIGN). Both
+  lines are on `main` and unchanged, so they are not in this diff.
+
+`APPENDIX_B_SIZING.md` has no reason of its own this time: its added
+lines are figures, labels and the fixed scripts. Each file's diff is
+small, so the GitHub API is expected to return every patch and the PR's
+governance report to give the same result. If it lists `diff-unavailable`
+rows instead, they are recorded here, as they were for PR #70. The PR
+goes through the restricted exception path.
+
+**PR #70 (revisions 1–27), as recorded at revision 27.**
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
 at revision 27 (the commit that adds this line; the same eight reasons
 as at revision 26, `546e00b`, revision 25, `45b0088`, revision 24, `f3209ea`, revision 23, `b9b2274`, revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,

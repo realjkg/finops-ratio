@@ -238,7 +238,10 @@ only one starter of a kind can be inside the allocation at a time.
   at the visible batch under `input_batch_seq_hwm`, run-keyed rollup rows
   of `input_rollup_run_id`, forecast rows of `input_forecast_run_id`,
   never through the pointers. `tg_analytics_run_success` checks on INSERT
-  that each named input run is `succeeded` and of the right kind. A
+  that each named input run is `succeeded` and of the right kind, **and
+  that `input_batch_seq_hwm` equals the input rollup run's own recorded
+  `batch_seq_hwm`** (rev. 28, the challenger's L4b; the same rule the
+  pointer guard enforces). A
   forecast pointer that moves in the middle of a detect run or a replay
   therefore changes nothing that run reads.
 - **Writing.** Every write transaction of the run starts with
@@ -437,6 +440,37 @@ Forecast and detect runs may overlap (one writer per kind, not per
 tenant), so without this rule a forecast run's retention pass could
 delete a running detect run's own state and the forecast run it reads.
 
+**How the retention functions run (rev. 28, the challenger's L1–L3).**
+- **READ COMMITTED, lock first.** Both functions are `LANGUAGE plpgsql
+  VOLATILE`. Their **first statement** takes the exclusive retention
+  lock. The second checks `current_setting('transaction_isolation') =
+  'read committed'` and raises otherwise. Each later statement therefore
+  takes a snapshot after the lock was granted, and sees every run start
+  that committed while it waited. The challenger's PG16 probe showed why:
+  under REPEATABLE READ the snapshot is taken before the lock wait, and
+  retention deleted F1, which a just-started detect run had pinned.
+  Under READ COMMITTED it did not.
+- **Own transaction, after the success commit.** A run calls retention in
+  a separate transaction **after** its success transaction has
+  committed, holding no run-row or pointer locks. Called inside the
+  success transaction, it would hold the run row while waiting for the
+  exclusive lock. A same-kind start holds the shared lock while it marks
+  that stale run `abandoned`, so the two could deadlock.
+- **Crashed runs: bounded growth, not lease-based exclusion.** A crashed
+  run stays `running` until the next start of its kind marks it
+  `abandoned`, and until then its inputs stay protected. Retention does
+  **not** treat an expired lease as dead. A write transaction that began
+  before the lease expired can still be reading those inputs, and proving
+  that none is in flight would take the run-row locks the previous point
+  avoids. That would reopen the Z1 race. The growth is bounded instead:
+  - per crashed run, one forecast run's state and its previous run,
+    one rollup run's run-keyed rows, and any batches superseded under its
+    mark;
+  - ≈ 0.1 GB at most on `fleet15k`'s sizes, and one such run per kind
+    (four kinds);
+  - it is released at that kind's next start;
+  - it never affects `fleet15k`'s peak, since each run is a fresh stack.
+
 **Backtest output (rev. 25, Copilot r4179229471):** the same function also removes
 the `forecast_backtests` and `forecast_backtest_points` rows of every
 `backtest` run that is `succeeded`, `failed` or `abandoned` and is neither
@@ -606,7 +640,8 @@ them would not fit the disk budget. The formula generalises:
   `forecast_leaves.account_id`: at most 3 leaves on `fleet15k` and at
   most 80 on `full`.
 - **Totals:** the account's month-end, next-30 and next-90 totals are
-  stored in `forecast_totals`, like every scope's, with `B` on month-end.
+  stored in `forecast_totals`, like every scope's (no billed value: billed
+  month-end is not forecast, DESIGN §3.1; rev. 28).
 
 4-4b test: an account's reconstructed points equal the sum of its leaves'
 reconstructed points, and its bounds equal step 4 on its own state;
