@@ -2187,7 +2187,7 @@ The rule adds < 0.0001 per day to `budget5.py`'s totals under the generator
   active-day values for the 112-day lookback).
 
 SHA-256 of `reactivation.py` as run:
-`4b79642027c68dc1293c04c881d3eafe8d32f379e19dcaa95665772032a28cce`.
+`70c6b6a6759a3d157c9413fc2204410232ccc8fd8717d03ddc4b1712b4010c07`.
 
 `reactivation.py`:
 
@@ -2199,7 +2199,7 @@ import random, math, bisect
 # day t0 - 1 is the last active day before it. `warning` if (a) the series was active on >= 50 % of the 28 days
 # ending at t0 - 1 (>= 14 such days required), or (b) the restart day is >= 10 x the min impact and >= 3 x the
 # prior active-day mean: the active-day values in the 56 days ending at t0 - 1, extended back to up to 112 days
-# (or all history) until there are >= 3; else `info`.
+# (at most 112 days) until there are >= 3; else `info`.
 # Independent days (the generator): exact window probabilities, sampled prior mean. Clustered days (rho > 0): a
 # simulated two-state chain with the real stretch, history and prior-mean definitions (the independent-history
 # formula underestimates there and is printed only for comparison). Fixed seeds throughout.

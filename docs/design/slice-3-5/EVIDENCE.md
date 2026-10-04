@@ -19,7 +19,8 @@ ordinary commits and plain pushes (never a force-push).
 | 7 | `380e9a0`, `801019a` | Revision 6 approved by the challenger (0 High, 0 Medium). D-24 decided by the orchestrator (option a): hurdle statistic with a clustering gate for intermittent series above 50 % zeros; the challenger's Low items L1–L4 answered (§3d); `budget5.py` (B.5.10). |
 | 8 | `04e6cf8`, `dbbd552` | Revision 7 approved by the challenger. The remaining Low, dormant series that reactivate, folded in by extending D4 (§3e); `reactivation.py` (B.5.11). |
 | 9 | `bb4379c`, `d70f074` | The challenger's REQUEST CHANGES on revision 8 (1 Medium): the reactivation history condition looked at the wrong days. History moved to the pre-dormancy period and a size override added, both decided by the orchestrator (§3f); `reactivation.py` updated (B.5.11). |
-| 10 | `9f1febb`; merge of `origin/main` `bd440b5`; this commit | Revision 9 approved by the challenger. The three Low items (§3g): reactivation false positives under day clustering simulated on the chain (the independent-history approximation underestimated); the prior mean of the size override looks back up to 112 days; the D4 text made consistent. `origin/main` merged (#65, #67, #68; no conflicts, no file under `docs/design/slice-3-5/` touched by main); DESIGN §0 and §7 note that PR 4-0 and #62 have landed. |
+| 10 | `9f1febb`; merge of `origin/main` `bd440b5`; `adf0d19` | Revision 9 approved by the challenger. The three Low items (§3g): reactivation false positives under day clustering simulated on the chain (the independent-history approximation underestimated); the prior mean of the size override looks back up to 112 days; the D4 text made consistent. `origin/main` merged (#65, #67, #68; no conflicts, no file under `docs/design/slice-3-5/` touched by main); DESIGN §0 and §7 note that PR 4-0 and #62 have landed. |
+| 11 | this revision (PR #70) | Revision 10 approved by the challenger (0 High, 0 Medium). Two wording Lows (§3h): D-21 and the opt-in text state the contract #62 shipped in #67 and #68; the prior-mean lookback is capped at 112 days. |
 
 ## 2. Governance wording: reverted
 
@@ -228,9 +229,17 @@ The challenger approved revision 9 (dbbd552..d70f074).
 | Item | Change | Where |
 |---|---|---|
 | **L1** clustered-day figures | Revision 9's ρ > 0 figures treated the history as independent of the dormant window, and that **underestimates**: a clustered series that has just gone quiet was usually in an active run before. `reactivation.py` now simulates the two-state chain (2,000,000 days per zero-share bin) and applies the real stretch, history and prior-mean definitions, scaled by the exact window probability at each leaf's zero share. Per day: **(i) 0.00083, (ii) 0.00012, union 0.00094 at ρ = 0.3; (i) 0.052, (ii) 0.0016, union 0.054 at ρ = 0.6** (revision 9: (i) 0.00015 and 0.0064). The challenger measured 0.00087, 0.050 and union 0.052. The generator (ρ = 0) is exact, so no gate moves; the figures are stated as the **real-data risk**: about a third of the design margin if real intermittent series cluster strongly | DESIGN §4.2 (D4 paragraph, budget line); Appendix B.5.11 |
-| **L2** monthly cadence | The prior mean of (ii) uses the active-day values in the 56 days ending at the last active day, extended back to up to 112 days (or all history) until there are ≥ 3. A monthly job (≈ 2 active days in 56) now gets a prior mean, and a 10 × restart reaches `warning`. Cost under the generator: 1.0 × 10⁻⁵ per day (was 9 × 10⁻⁶); at ρ = 0.3 / 0.6: 0.00012 / 0.0016. **Named limit: a quarterly job** (≤ 2 active days in 112) still has no prior mean and gets `info` unless (i) holds. The state is the last 3 active-day values per series, so peak disk is unchanged (5.15 GB; 5.19 GB with natural-3) | DESIGN §4.2, §4.3, §7 (5-2a); Appendix B.5.11, D.2 |
+| **L2** monthly cadence | The prior mean of (ii) uses the active-day values in the 56 days ending at the last active day, extended back to at most 112 days until there are ≥ 3 (the cap was stated as "or all history" in revision 10, fixed in revision 11). A monthly job (≈ 2 active days in 56) now gets a prior mean, and a 10 × restart reaches `warning`. Cost under the generator: 1.0 × 10⁻⁵ per day (was 9 × 10⁻⁶); at ρ = 0.3 / 0.6: 0.00012 / 0.0016. **Named limit: a quarterly job** (≤ 2 active days in 112) still has no prior mean and gets `info` unless (i) holds. The state is the last 3 active-day values per series, so peak disk is unchanged (5.15 GB; 5.19 GB with natural-3) | DESIGN §4.2, §4.3, §7 (5-2a); Appendix B.5.11, D.2 |
 | **L3** consistency | Revision 8's stale "False positives" bullet in §4.2 deleted. The worst case is named as **the union of (i) and (ii) with 14 days of history, 8.5 × 10⁻⁵**, in DESIGN, EVIDENCE and the B.5.11 table alike (it was 8.4 × 10⁻⁵ with the 56-day prior mean). The script prints (ii) at both history lengths instead of `nan` | DESIGN §4.2; Appendix B.5.11 |
 | Re-run | All 10 embedded SHA-256s match (9 unchanged, `reactivation.py` updated); every Python script re-run, outputs unchanged except `reactivation.py`; `reactivation.py` identical on two runs | §4 |
+
+## 3h. Revision 11: wording Lows on revision 10 (PR #70)
+
+| Item | Change | Where |
+|---|---|---|
+| **L1** #62's contract | The text now states the contract #62 shipped in #67 and #68: `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` is accepted only when `RATIO_ENV` is **explicitly** `development` or `test`; unset, unknown, `staging` and `production` are refused with `SYNTHETIC_PROVIDERS_NOT_ALLOWED`. An in-process `runSync` with `allowSyntheticProviders: true` throws the same error without the process env opt-in, so library callers need the env opt-in too. `local:synthetic` spawns its workers with `RATIO_ENV=development`. Slice 3's static test checks development/test-only acceptance, plus a cross-check of the refusals. **D-21's revisit trigger ("#62 changes its contract") fired; the decision still holds** | DESIGN §2.1, §2.7, §6.3, §7 (3-3), §8 D-21 |
+| **L2** fallback wording | The prior-mean lookback of D4 (b)(ii) is **capped at 112 days**: "or all history" removed everywhere. This matches the simulation and the named quarterly limit. The comment in `reactivation.py` changed, so its SHA-256 changed; its output is unchanged | DESIGN §4.2; Appendix B.5.11; §3g |
+| Re-run | The 10 embedded SHA-256s match (9 unchanged, `reactivation.py` updated for the comment); `reactivation.py` re-run with identical figures | Appendix B.5.11 |
 
 ## 4. Measurements used by the design
 
@@ -268,7 +277,8 @@ Appendix B (B.4, B.5.6–B.5.11).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at `bd440b5` (revision 10 after merging `origin/main`; the same reasons as at
+at revision 11 (the commit that adds this line, PR #70's head when pushed;
+the same reasons as at `bd440b5`, revision 10 after merging `origin/main`, and at
 `9f1febb` before the merge, `bb4379c`, revision 9, `04e6cf8`, revision 8,
 `380e9a0`, revision 7,
 `66a1fa2`, revision 6, `fc7ee66`, revision 5, and `faeabb4`, revision 4):
