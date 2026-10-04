@@ -144,7 +144,7 @@ sub-account or billing account therefore always resolves to the same id.
 |---|---|---|---|
 | role `ratio_analytics` | NOLOGIN, no attributes, no membership (guarded like 0001's roles) | — | — |
 | view `publications_published` | tenant_id, source_id, billing_period, batch_id, published_at, row_count, loaded_billed_total, reconciliation, is_provisional — from `period_publications` ⋈ `ingest_batches` (`status = 'published'`) | — | analytics, reader (`freshness`) |
-| `analytics_runs` | **(tenant_id, id)**, kind ∈ {rollup, forecast, detect, backtest}, as_of date, status ∈ {running, succeeded, failed, abandoned}, **`run_seq bigint NOT NULL`** (per tenant and kind, strictly increasing, starting at 1; **allocated for every kind** inside the run's acquisition transaction, under the per-(tenant, kind) advisory lock, as `coalesce(max(run_seq), 0) + 1`; the trigger re-checks it, and `UNIQUE (tenant_id, kind, run_seq)` turns a bypassed lock into SQLSTATE 23505 → `RUN_SEQ_CONFLICT`, D.1), **`lease_token uuid`, `lease_expires_at`, `heartbeat_at`** (rev. 13; the worker's `sync_runs` lease pattern), **`batch_seq_hwm integer`** (rollup runs only: NULL on INSERT, set **by trigger** on the transition to `succeeded` to `coalesce(max(batch_seq), 0)` over the tenant's `rollup_batches`, then frozen; rev. 15, rev. 16), `UNIQUE (tenant_id, kind, run_seq)` (rev. 16); `succeeded`, `failed`, `abandoned` terminal (rev. 16); started_at, finished_at, code_version text, params jsonb, stats jsonb, error_code; **run inputs (rev. 27, Copilot r4179306694)**: `input_rollup_run_id`, `input_batch_seq_hwm` (forecast, detect and backtest runs), `input_forecast_run_id` (detect runs), `prev_run_id` (forecast and detect runs: the latest succeeded run of the same kind whose state the run continues), each a composite FK to `analytics_runs` where it names a run, written once on INSERT in the acquisition transaction and never updatable (D.1, "Run inputs"). **Grants (rev. 17; rev. 27):** column-level INSERT that excludes `batch_seq_hwm` and `finished_at`; column-level UPDATE of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`), so `run_seq`, `kind`, `as_of`, `batch_seq_hwm`, the four input columns, `started_at`, `code_version` and `params` are not updatable | analytics | analytics |
+| `analytics_runs` | **(tenant_id, id)**, kind ∈ {rollup, forecast, detect, backtest}, as_of date, status ∈ {running, succeeded, failed, abandoned}, **`run_seq bigint NOT NULL`** (per tenant and kind, strictly increasing, starting at 1; **allocated for every kind** inside the run's acquisition transaction, under the per-(tenant, kind) advisory lock, as `coalesce(max(run_seq), 0) + 1`; the trigger re-checks it, and `UNIQUE (tenant_id, kind, run_seq)` turns a bypassed lock into SQLSTATE 23505 → `RUN_SEQ_CONFLICT`, D.1), **`lease_token uuid`, `lease_expires_at`, `heartbeat_at`** (rev. 13; the worker's `sync_runs` lease pattern), **`batch_seq_hwm integer`** (rollup runs only: NULL on INSERT, set **by trigger** on the transition to `succeeded` to `coalesce(max(batch_seq), 0)` over the tenant's `rollup_batches`, then frozen; rev. 15, rev. 16), `UNIQUE (tenant_id, kind, run_seq)` (rev. 16); `succeeded`, `failed`, `abandoned` terminal (rev. 16); started_at, finished_at, code_version text, params jsonb, stats jsonb, error_code; **run inputs (rev. 27, Copilot r4179306694)**: `input_rollup_run_id`, `input_batch_seq_hwm` (forecast, detect and backtest runs), `input_forecast_run_id` (detect runs), `prev_run_id` (forecast and detect runs: the latest succeeded run of the same kind whose state the run continues), each a composite FK to `analytics_runs` where it names a run, written once on INSERT in the acquisition transaction and never updatable (D.1, "Run inputs"); **`export_files_state text`** (rev. 34, Copilot r4179572957): `'present'` or `'deleted'` on backtest runs, NULL on every other kind, `CHECK ((kind = 'backtest') = (export_files_state IS NOT NULL))`, `'present'` on INSERT, and set once to `'deleted'` after the run's export files are gone (D.1, "Export files"). **Grants (rev. 17; rev. 27; rev. 34):** column-level INSERT that excludes `batch_seq_hwm` and `finished_at`; column-level UPDATE of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`, `export_files_state`), so `run_seq`, `kind`, `as_of`, `batch_seq_hwm`, the four input columns, `started_at`, `code_version` and `params` are not updatable | analytics | analytics |
 | `forecast_leaves` (rev. 15; **rows never deleted, identity columns immutable**, only `last_day` updated (rev. 17; previously called "insert-only"); outside retention, counted conservatively in every run's disk delta, B.5.12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `leaf_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name), and `UNIQUE (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)` as the target of `cost_series`' derivation FK (rev. 17), every component `NOT NULL` with the D.0 `''` sentinel; `account_id NOT NULL`, bound by **one composite FK `(tenant_id, account_id, billing_currency, provider_name, billing_account_id, sub_account_id)` → `cost_accounts (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id)`** (rev. 18, Copilot r4178908321: a plain `account_id` FK only proved that *some* account exists, so a leaf could name account B's components while pointing at account A); `UNIQUE (tenant_id, id, account_id)` as the target of the root-cause FK (rev. 18); first_day, last_day | analytics (INSERT; UPDATE of `last_day` only: identity columns immutable, no DELETE; rev. 17) | analytics |
 | `cost_series` | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `series_id` (D.0), `leaf_id` (immutable), with **one composite FK `(tenant_id, leaf_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)` → `forecast_leaves (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)`** (rev. 17; replaces revision 16's two separate FKs), so a series can only belong to the leaf its own components name; **`UNIQUE (tenant_id, id, leaf_id)`** (the target of the root-cause FK); `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name, region_key), every component `NOT NULL` with the D.0 `''` sentinel (`region_key` is `''` for global services and for every `fleet15k` series); `account_id NOT NULL`, bound by the same **composite FK to `cost_accounts`' id and natural key** as `forecast_leaves` (rev. 18); first_day, last_day | analytics (INSERT; UPDATE of `last_day` only: identity columns immutable, no DELETE; rev. 17) | analytics |
 | `cost_accounts` (rev. 12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `account_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id), every component `NOT NULL` with the D.0 `''` sentinel (a billing-account-level tax, credit, fee or purchase row with a null `SubAccountId` belongs to the account row with `sub_account_id = ''`); **`UNIQUE (tenant_id, id, billing_currency, provider_name, billing_account_id, sub_account_id)`**, the target of the account FKs of `forecast_leaves` and `cost_series` (rev. 18); first_day, last_day | analytics (INSERT; UPDATE of `last_day` only: identity columns immutable, no DELETE; rev. 17) | analytics |
@@ -304,26 +304,49 @@ only one starter of a kind can be inside the allocation at a time.
     "m = 30 s (TTL / 10)", which is TTL / 10 only at the 300 s default,
     while its own test used TTL 6 s with a 1 s margin. One rule now
     applies everywhere: **m = max(1 s, TTL / 10)**.
-    - At TTL 300 s, m = 30 s and the largest budget is TTL − m = 270 s.
-    - At TTL 6 s (the 4-3 tests), m = 1 s and the largest budget is 5 s.
-    - At the bottom of `RATIO_LEASE_TTL_SECONDS`'s range, TTL 5 s gives
-      m = 1 s, a largest budget of 4 s and a heartbeat every 1.7 s. At
-      the top, TTL 3600 s gives m = 360 s, a largest budget of 3240 s and
-      a heartbeat every 1200 s.
+  - **The slack (rev. 34, Copilot r4179572925).** Revisions 32–33
+    admitted `b + m = TTL`, but the check under the lock (step 2 below)
+    still needs a full `b + m` left. The time between the renewal's
+    commit and the lock grant made that check fail at the boundary, and
+    with `LEASE_RETRY` a maximal budget would retry until
+    `maxRunSeconds`. So a slack is reserved for that interval:
+    **s = max(250 ms, TTL / 100)**.
+    - **Why this value:** s covers the renewal's commit, the next
+      `BEGIN`, an uncontended row-lock grant, and the client's own
+      scheduling between them (event-loop delay, a GC pause). On the
+      local stack each of these takes a few milliseconds, and 250 ms is
+      two orders of magnitude above that. TTL / 100 (= m / 10 once m is
+      TTL / 10) scales it for long TTLs, where a job does more between
+      renewal and lock. A longer wait is lock contention, which step 4
+      handles; s is not meant to absorb it.
+    - **Admission:** a transaction is admitted only if
+      **b + m + s ≤ TTL**, so `LEASE_BUDGET` refuses any budget above
+      TTL − m − s. The check under the lock stays `≥ b + m`.
+    - **The largest budgets** across `RATIO_LEASE_TTL_SECONDS`'s range
+      5–3600 s, with the heartbeat at `max(1 s, TTL / 3)`:
+
+      | TTL | m | s | largest budget TTL − m − s | heartbeat |
+      |---|---|---|---|---|
+      | 5 s | 1 s | 0.25 s | 3.75 s | 1.7 s |
+      | 6 s (the 4-3 tests) | 1 s | 0.25 s | 4.75 s | 2 s |
+      | 300 s (default) | 30 s | 3 s | 267 s | 100 s |
+      | 3600 s | 360 s | 36 s | 3204 s | 1200 s |
+
     - The configuration already enforces **TTL ≥ 5 s**
       (`src/ingest/config.ts:231`: `int(env, 'RATIO_LEASE_TTL_SECONDS',
-      …, 5, 3600)`), so at the smallest allowed TTL the largest budget is
-      4 s (rev. 33, the challenger's nit). The heartbeat interval does not
-      enter the rule, because the check below guarantees the margin
-      whenever a heartbeat is held up.
+      …, 5, 3600)`). At that minimum the largest budget is 3.75 s (rev.
+      33, the challenger's nit; rev. 34 with the slack). The heartbeat
+      interval does not enter the rule, because the check below
+      guarantees the margin whenever a heartbeat is held up.
   - **The rule (rev. 32: renewal outside the work transaction; Copilot
     r4179528051, the challenger's L1 on aeef207).** Every run transaction
     has a duration budget `b`, which the job's chunking keeps it under.
-    If `b + m > TTL`, the transaction is refused before anything starts
-    (`LEASE_BUDGET`, a chunking bug; it fails closed). Otherwise:
+    If `b + m + s > TTL`, the transaction is refused before anything
+    starts (`LEASE_BUDGET`, a chunking bug; it fails closed; rev. 34:
+    with the slack). Otherwise:
     1. **Renew, if needed, in its own short transaction.** The job reads
        the remaining lifetime `r = lease_expires_at − clock_timestamp()`
-       without a lock. If `r < b + m`, it calls the live-only heartbeat,
+       without a lock. If `r < b + m + s`, it calls the live-only heartbeat,
        which is `main`'s `heartbeat()`: its own transaction, committed at
        once. Revision 31 put the renewal inside `assertLease`, which is
        inside the work transaction. There the `UPDATE`'s row lock would
@@ -349,6 +372,13 @@ only one starter of a kind can be inside the allocation at a time.
          is live. Every retry renews first.
        - The run's existing `maxRunSeconds` (`config.ts:233`, 6 h by
          default) bounds the retries, as it bounds any run on `main`.
+       - **`LEASE_RETRY` cannot loop on a budget that does not fit**
+         (rev. 34). Admission guarantees that right after a renewal at
+         least `b + m + s` is left. So a retry falls short only if the
+         renewal-to-lock time exceeds s, which is lock contention, and
+         contention ends. A budget that could not fit even immediately
+         after a renewal is refused at admission with `LEASE_BUDGET` and
+         never reaches step 4.
        - **Why this option:** revision 32 mapped the second failure to
          `LEASE_LOST`. A healthy run could then be fenced purely because
          its lock waits were held up behind back-to-back writers of its
@@ -368,7 +398,7 @@ only one starter of a kind can be inside the allocation at a time.
     own end under its lock. A renewal `UPDATE` that waits behind a
     reader's `FOR SHARE` ends by that reader's end, which is at least m
     before expiry. At the defaults, **every transaction budget must be
-    ≤ TTL − m = 270 s**. A transaction that overruns its budget by more
+    ≤ TTL − m − s = 267 s** (rev. 34; 270 s before the slack). A transaction that overruns its budget by more
     than m can lose the lease. That fails safe: the run gets `LEASE_LOST`
     and is retried, and nothing is half-written. Contention alone, with
     the lease live, never gives `LEASE_LOST` (step 4).
@@ -460,6 +490,11 @@ enforced only by the job, and the id sequences had no stated grants.
     `succeeded`, `running` → `failed`, `running` → `abandoned`.
     **`succeeded`, `failed` and `abandoned` are terminal**: any change out
     of them is refused, so succeeded → running → succeeded is impossible.
+    **One exception (rev. 34):** on a terminal `backtest` run,
+    `export_files_state` may change from `'present'` to `'deleted'`, with
+    every other column unchanged. Nothing else may change on a terminal
+    row, and `'deleted'` never goes back. On INSERT a backtest run must
+    have `'present'`.
   - On a rollup run's transition to `succeeded`, it sets
     `batch_seq_hwm := coalesce(max(batch_seq), 0)` over the tenant's
     `rollup_batches`.
@@ -656,7 +691,12 @@ pass that calls this function: each run's post-success pass, of any
 kind, and every start's cleanup pass.
 - **Same eligibility as the rows.** The function also returns the ids of
   every terminal `backtest` run that is not kept: not among the 2 latest
-  succeeded, not pinned, and not named by a `running` run.
+  succeeded, not pinned, and not named by a `running` run. **Since rev. 34
+  (Copilot r4179572957), only runs whose `export_files_state` is still
+  `'present'`.** Before that, the list held every eligible run forever.
+  `analytics_runs` is never pruned, and a cleaned directory keeps its
+  `deleted.json`, so every pass read the directory of every historical
+  backtest: O(all backtests ever run).
 - **After the commit.** Only after the function's transaction has
   committed does the caller delete those runs' files. Each run has its
   own evidence directory, `backtest/<run_id>/`. A `deleted.json` with each
@@ -696,15 +736,28 @@ kind, and every start's cleanup pass.
        **before deleting anything**;
     3. deletes the listed files and any orphaned `deleted.json.tmp-*`,
        treating `ENOENT` as done;
-    4. renames the directory back to `backtest/<run_id>/`.
-  - If that name exists again, because a dying writer's staging file
-    recreated it, the winner moves the merged `deleted.json` into it the
-    same way (temporary file, then rename) and removes the claimed
-    directory. A later pass deletes the staging file. Either way,
-    `deleted.json` ends in `backtest/<run_id>/` (DESIGN §3.8) and is
-    cumulative.
+    4. renames the directory back to `backtest/<run_id>/`;
+    5. **marks the run cleaned** (rev. 34): in a short transaction of
+       its own, `UPDATE analytics_runs SET export_files_state =
+       'deleted' WHERE … AND export_files_state = 'present'`. A crash
+       before this write leaves the run `'present'`. The next pass then
+       finds only `deleted.json`, skips the claim and writes the state:
+       the step is idempotent.
+  - **A terminal run's directory gets no new entries** (rev. 34).
+    Staging files live in `backtest/.staging/`, not in the run's
+    directory. The run's directory is created, and each file is moved
+    into it, only inside a transaction that holds the run's lease, so
+    after the takeover's `abandoned` update nothing more can arrive.
+    Revisions 30–33 staged inside the run's directory. A dying writer's
+    staging file could then recreate it after the cleanup, which a
+    persisted `'deleted'` state would never revisit. If the name exists
+    anyway (manual intervention), the winner moves the merged
+    `deleted.json` into it the same way, removes the claimed directory,
+    and leaves the run `'present'` for a later pass. `deleted.json` ends
+    in `backtest/<run_id>/` (DESIGN §3.8) and is cumulative.
 - **Interrupted claims are finished.** Every pass also lists
-  `backtest/.deleting-*`. A claim older than one hour (the pass id
+  `backtest/.deleting-*`, with **one** read of `backtest/` itself (rev.
+  34). A claim older than one hour (the pass id
   carries its start time, and a pass takes far less) belongs to a pass
   that died or stalled.
   - A later pass re-claims it by renaming it to its own
@@ -720,10 +773,22 @@ kind, and every start's cleanup pass.
     Otherwise a stalled pass could keep working on a directory that was
     re-claimed under another name, and the `ENOENT` stop above would not
     happen.
-- **Idempotent.** The list holds every eligible run, not only those whose
-  rows this call removed. A directory already cleaned costs one
-  `readdir`, and a file left by an interrupted deletion is removed by a
-  later pass.
+- **Idempotent, and O(1) once cleaned (rev. 34).** The list holds every
+  eligible run still `'present'`, not only those whose rows this call
+  removed. So an interrupted deletion is finished by a later pass, and a
+  cleaned run costs nothing.
+  - A pass does a constant number of directory reads: one of
+    `backtest/` (stale claims), one of `backtest/.staging/` (orphaned
+    staging files of terminal runs), and one per run still `'present'`.
+  - **No retention lock is needed for the state.** The run is terminal
+    and not kept, and a backtest run is never a `running` run's input or
+    previous run. A pin is refused once the output is removed
+    (`RUN_NOT_KEPT`). So no run can become kept between the function's
+    commit and the state write.
+  - The write takes the run row only briefly, and no lease holder
+    contends for a terminal row.
+  - A wrong `'deleted'` can only make cleanup skip a directory. It never
+    deletes a file, so it fails safe.
 - **Safe against a concurrent backtest.** A `running` run's id is never
   returned, and a backtest writes only under its own run id. A fenced
   writer cannot add files after its takeover. A backtest writes each
@@ -731,7 +796,10 @@ kind, and every start's cleanup pass.
   transaction that holds its lease (`FOR SHARE`). The takeover's
   `abandoned` update waits for that transaction, and every later move
   fails with `LEASE_LOST`. A staging file left by a writer that dies is
-  in the same directory, and the next pass removes it.
+  in `backtest/.staging/`, named `<run_id>-<file>`. The next pass removes
+  it once that run is terminal, and never touches a `running` run's
+  staging files (rev. 34; revisions 30–33 staged inside the run's
+  directory).
 - **Pins cannot race the deletion.** A later pin (rev. 26) takes the
   shared retention lock and refuses a run that is no longer kept
   (`RUN_NOT_KEPT`). So no run is pinned between the function's commit and
@@ -919,6 +987,6 @@ mutant: the account's bounds summed from its leaves' bounds.
 
 | Role | Grants added |
 |---|---|
-| `ratio_analytics` | USAGE on schema `ratio`; SELECT on `cost_facts_published`, `publications_published`; SELECT, INSERT on every table above, **except `analytics_runs`, where INSERT is column-level and excludes `batch_seq_hwm` and `finished_at`** (rev. 16); UPDATE on the listed columns; USAGE on the identity sequences of `cost_accounts`, `forecast_leaves` and `cost_series` (no others exist: `batch_seq` and `run_seq` are allocated, not sequences); column-level UPDATE on each pointer of its own list (D.1: `rollup_pointer` with `batch_seq_hwm`, `forecast_pointer` without) and on `analytics_runs` of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`) (never `run_seq`, `kind`, `as_of`, `batch_seq_hwm`); EXECUTE on `ratio.current_tenant_id()`, the secret-guard functions its CHECKs evaluate, and the two retention functions; **no DELETE on any table** (D-12) |
+| `ratio_analytics` | USAGE on schema `ratio`; SELECT on `cost_facts_published`, `publications_published`; SELECT, INSERT on every table above, **except `analytics_runs`, where INSERT is column-level and excludes `batch_seq_hwm` and `finished_at`** (rev. 16); UPDATE on the listed columns; USAGE on the identity sequences of `cost_accounts`, `forecast_leaves` and `cost_series` (no others exist: `batch_seq` and `run_seq` are allocated, not sequences); column-level UPDATE on each pointer of its own list (D.1: `rollup_pointer` with `batch_seq_hwm`, `forecast_pointer` without) and on `analytics_runs` of exactly (`status`, `lease_token`, `lease_expires_at`, `heartbeat_at`, `finished_at`, `stats`, `error_code`, `export_files_state`) (rev. 34: the last one, guarded by the run trigger; never `run_seq`, `kind`, `as_of`, `batch_seq_hwm`); EXECUTE on `ratio.current_tenant_id()`, the secret-guard functions its CHECKs evaluate, and the two retention functions; **no DELETE on any table** (D-12) |
 | `ratio_reader` | SELECT on the new reader views only |
 | `ratio_worker` | none |
