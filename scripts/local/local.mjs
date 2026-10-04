@@ -8,6 +8,13 @@
 //   npm run local:down      docker compose down        (-- -v: also volumes and .ratio-local/<project>/)
 //   npm run local:test      its OWN stack: preflight → up → migrate → seed → sync → API read
 //                           under next start → assert control totals → down -v
+//   npm run local:acceptance [-- --dataset 1k|10k] [--mutation <kind>]
+//                           (Slice 2b) its OWN stack, like local:test, on the public
+//                           FOCUS 1.0 Sample Data: control totals (python3) → stage as
+//                           AWS Data Exports → up → migrate → seed → sync ×2 → API read
+//                           → exact comparison, evidence re-hash, catalog → down -v.
+//                           Settings: RATIO_LOCAL_ACCEPTANCE_PROJECT (ratio-local-acceptance),
+//                           RATIO_LOCAL_ACCEPTANCE_{PG,S3,APP}_PORT (54349, 18363, 3120).
 //
 // Every command is idempotent. Secrets are generated on the first `up` into
 // .ratio-local/<project>/env (gitignored; directory 0700, file 0600); nothing
@@ -22,6 +29,8 @@
 // *_TIMEOUT_MS constants; the full inventory is in
 // docs/evidence/slice-2/EVIDENCE.md §13): nothing here can hang `local:up`,
 // and local:test always reaches its `down -v`.
+import { Buffer } from 'node:buffer';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -59,6 +68,20 @@ import {
   writeEnvFileSecure,
 } from './lib.mjs';
 import { runBootstrap } from './bootstrap.mjs';
+import {
+  CONTROL_TOTALS_FILE as SAMPLE_CONTROL_TOTALS_FILE,
+  SAMPLE_NAMES,
+  artifactSetProblems,
+  batchProblems,
+  compareAcceptance,
+  localAcceptanceSettings,
+  parseAcceptanceArgs,
+  readDataset,
+  resyncProblems,
+  stageFocusSample,
+  syncProblems,
+  verifyDatasetBytes,
+} from './acceptance.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
@@ -66,6 +89,7 @@ const { Client } = require(path.join(ROOT, 'node_modules', 'pg'));
 const COMPOSE_FILE = path.join(ROOT, 'docker-compose.local.yml');
 const FIXTURE_BASE = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'base');
 const CONTROL_TOTALS = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'control-totals.json');
+const CONTROL_CALCULATOR = path.join(ROOT, 'scripts', 'acceptance', 'focus_control_totals.py');
 
 const log = (msg, fields = {}) => process.stderr.write(`${JSON.stringify({ tag: 'ratio-local', msg, ...fields })}\n`);
 
@@ -108,6 +132,10 @@ const APP_READY_ATTEMPT_TIMEOUT_MS = 5_000;
 /** Each API read: longer than the route's own 10 s DB statement_timeout (readerPool.ts). */
 const API_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_PAGES = 100;
+/** local:acceptance: the independent control-total calculator (python3) on the pinned file. */
+const CONTROL_CALCULATOR_TIMEOUT_MS = 120_000;
+/** local:acceptance reads with the route's largest page size (query.ts: 1..500). */
+const ACCEPTANCE_PAGE_LIMIT = 500;
 
 // --- processes ---------------------------------------------------------------
 
@@ -243,74 +271,115 @@ function s3Client(settings, secrets) {
   });
 }
 
-async function seed(settings) {
-  const secrets = loadSecrets(settings, { create: false });
-  const { CreateBucketCommand, DeleteObjectCommand, PutObjectCommand } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
-  const s3 = s3Client(settings, secrets);
-  try {
-    for (const Bucket of [LOCAL_NAMES.sourceBucket, LOCAL_NAMES.evidenceBucket]) {
-      try {
-        await withDeadline((signal) => s3.send(new CreateBucketCommand({ Bucket }), { abortSignal: signal }), S3_REQUEST_TIMEOUT_MS, `s3 create bucket ${Bucket}`);
-      } catch (e) {
-        if (e?.name !== 'BucketAlreadyOwnedByYou' && e?.name !== 'BucketAlreadyExists') throw e;
-      }
-      // A fresh SeaweedFS bucket answers 500 until its volumes are allocated:
-      // warm it with a probe object so the worker's first evidence write does
-      // not spend its bounded retries on that (seen locally: 2 retries).
-      await waitUntil({
-        what: `s3 bucket ${Bucket} writable`,
-        timeoutMs: BUCKET_WARM_TIMEOUT_MS,
-        attemptTimeoutMs: S3_REQUEST_TIMEOUT_MS,
-        probe: async (signal) => {
-          await s3.send(new PutObjectCommand({ Bucket, Key: '.ratio-local-warmup', Body: 'warmup' }), { abortSignal: signal });
-          await s3.send(new DeleteObjectCommand({ Bucket, Key: '.ratio-local-warmup' }), { abortSignal: signal });
-          return true;
-        },
-      });
+const s3Commands = () => require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+
+/** Creates (idempotent) and warms the source and evidence buckets. */
+async function ensureBuckets(s3) {
+  const { CreateBucketCommand, DeleteObjectCommand, PutObjectCommand } = s3Commands();
+  for (const Bucket of [LOCAL_NAMES.sourceBucket, LOCAL_NAMES.evidenceBucket]) {
+    try {
+      await withDeadline((signal) => s3.send(new CreateBucketCommand({ Bucket }), { abortSignal: signal }), S3_REQUEST_TIMEOUT_MS, `s3 create bucket ${Bucket}`);
+    } catch (e) {
+      if (e?.name !== 'BucketAlreadyOwnedByYou' && e?.name !== 'BucketAlreadyExists') throw e;
     }
-    const files = fixtureFiles(FIXTURE_BASE);
-    for (const f of files) {
-      const Key = path.relative(FIXTURE_BASE, f).split(path.sep).join('/');
-      const Body = fs.readFileSync(f);
-      await withDeadline((signal) => s3.send(new PutObjectCommand({ Bucket: LOCAL_NAMES.sourceBucket, Key, Body }), { abortSignal: signal }), S3_REQUEST_TIMEOUT_MS, `s3 put ${Key}`);
-    }
-    log('seed: SYNTHETIC fixture uploaded', { bucket: LOCAL_NAMES.sourceBucket, objects: files.length });
-  } finally {
-    s3.destroy();
+    // A fresh SeaweedFS bucket answers 500 until its volumes are allocated:
+    // warm it with a probe object so the worker's first evidence write does
+    // not spend its bounded retries on that (seen locally: 2 retries).
+    await waitUntil({
+      what: `s3 bucket ${Bucket} writable`,
+      timeoutMs: BUCKET_WARM_TIMEOUT_MS,
+      attemptTimeoutMs: S3_REQUEST_TIMEOUT_MS,
+      probe: async (signal) => {
+        await s3.send(new PutObjectCommand({ Bucket, Key: '.ratio-local-warmup', Body: 'warmup' }), { abortSignal: signal });
+        await s3.send(new DeleteObjectCommand({ Bucket, Key: '.ratio-local-warmup' }), { abortSignal: signal });
+        return true;
+      },
+    });
   }
+}
+
+/** PUTs { Key, body() } objects into the source bucket, each under a hard deadline. */
+async function putObjects(s3, objects) {
+  const { PutObjectCommand } = s3Commands();
+  for (const o of objects) {
+    const Body = o.body();
+    await withDeadline((signal) => s3.send(new PutObjectCommand({ Bucket: LOCAL_NAMES.sourceBucket, Key: o.Key, Body }), { abortSignal: signal }), S3_REQUEST_TIMEOUT_MS, `s3 put ${o.Key}`);
+  }
+}
+
+/**
+ * Provisions the local tenant and one focus_file source as the owner login
+ * (ingestion-ops SKILL §2; RLS applies to the owner too). Idempotent.
+ * Returns the source's id.
+ */
+async function provisionSource(settings, secrets, { tenantSlug, sourceKey, displayName, prefix, exportName }) {
   const migratorUrl = workerEnv(settings, secrets).RATIO_MIGRATE_DATABASE_URL;
-  await withClient(migratorUrl, async (c) => {
-    // Provisioning is an owner action (ingestion-ops SKILL §2); RLS applies to the owner too.
+  return withClient(migratorUrl, async (c) => {
     await c.query('BEGIN');
     try {
       await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [secrets.RATIO_LOCAL_TENANT_ID]);
-      await c.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, [secrets.RATIO_LOCAL_TENANT_ID, LOCAL_NAMES.tenantSlug]);
+      await c.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, [secrets.RATIO_LOCAL_TENANT_ID, tenantSlug]);
       await c.query(
         `INSERT INTO ratio.sources (tenant_id, id, source_key, kind, display_name, coverage, declared_focus_version, config)
-         VALUES ($1, gen_random_uuid(), $2, 'focus_file', 'SYNTHETIC local FOCUS fixture (not real data)', 'public_cloud', '1.0', $3::jsonb)
+         VALUES ($1, gen_random_uuid(), $2, 'focus_file', $3, 'public_cloud', '1.0', $4::jsonb)
          ON CONFLICT (tenant_id, source_key) DO NOTHING`,
-        [
-          secrets.RATIO_LOCAL_TENANT_ID,
-          LOCAL_NAMES.sourceKey,
-          JSON.stringify({ layout: 'aws-data-exports', bucket: LOCAL_NAMES.sourceBucket, prefix: LOCAL_NAMES.fixturePrefix, exportName: LOCAL_NAMES.fixtureExportName }),
-        ],
+        [secrets.RATIO_LOCAL_TENANT_ID, sourceKey, displayName, JSON.stringify({ layout: 'aws-data-exports', bucket: LOCAL_NAMES.sourceBucket, prefix, exportName })],
       );
+      const id = await c.query(`SELECT id::text AS id FROM ratio.sources WHERE tenant_id = $1 AND source_key = $2`, [secrets.RATIO_LOCAL_TENANT_ID, sourceKey]);
       const commit = await c.query('COMMIT');
       if (commit.command !== 'COMMIT') throw new Error('provisioning transaction was rolled back');
+      if (id.rowCount !== 1) throw new Error(`source ${sourceKey} is not visible after provisioning`);
+      return id.rows[0].id;
     } catch (e) {
       await c.query('ROLLBACK').catch(() => undefined);
       throw e;
     }
   });
+}
+
+async function seed(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const s3 = s3Client(settings, secrets);
+  try {
+    await ensureBuckets(s3);
+    const files = fixtureFiles(FIXTURE_BASE);
+    await putObjects(
+      s3,
+      files.map((f) => ({ Key: path.relative(FIXTURE_BASE, f).split(path.sep).join('/'), body: () => fs.readFileSync(f) })),
+    );
+    log('seed: SYNTHETIC fixture uploaded', { bucket: LOCAL_NAMES.sourceBucket, objects: files.length });
+  } finally {
+    s3.destroy();
+  }
+  await provisionSource(settings, secrets, {
+    tenantSlug: LOCAL_NAMES.tenantSlug,
+    sourceKey: LOCAL_NAMES.sourceKey,
+    displayName: 'SYNTHETIC local FOCUS fixture (not real data)',
+    prefix: LOCAL_NAMES.fixturePrefix,
+    exportName: LOCAL_NAMES.fixtureExportName,
+  });
   log('seed: tenant and source provisioned', { tenant: secrets.RATIO_LOCAL_TENANT_ID, source: LOCAL_NAMES.sourceKey });
+}
+
+/** One worker `sync` of a source; returns the exit code and the evidence record (stdout's last line). */
+async function syncRecord(settings, secrets, sourceKey) {
+  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', sourceKey], { allowFail: true });
+  process.stdout.write(r.out);
+  let record = null;
+  try {
+    record = JSON.parse(r.out.trim().split('\n').pop());
+  } catch {
+    // no evidence record: judged by the caller
+  }
+  return { code: r.code, record };
 }
 
 async function sync(settings) {
   const secrets = loadSecrets(settings, { create: false });
-  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', LOCAL_NAMES.sourceKey], { allowFail: true });
-  process.stdout.write(r.out);
+  const r = await syncRecord(settings, secrets, LOCAL_NAMES.sourceKey);
   if (r.code !== 0) throw new Error(`worker sync exited ${r.code}`);
-  return JSON.parse(r.out.trim().split('\n').pop());
+  if (r.record === null) throw new Error('worker sync printed no evidence record');
+  return r.record;
 }
 
 async function down(settings, { volumes, timeoutMs }) {
@@ -325,18 +394,80 @@ async function down(settings, { volumes, timeoutMs }) {
 
 // --- end to end ----------------------------------------------------------------
 
-async function localTest() {
-  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
-  // local:test owns its stack end to end (down -v at the end), so it uses its
-  // OWN project and ports and refuses to start over anything already there.
-  const settings = localTestSettings(process.env);
+/**
+ * local:test and local:acceptance own their stack end to end (down -v at the
+ * end), so before changing anything they refuse existing state, existing
+ * containers of the project or a busy port.
+ */
+async function preflight(settings, what) {
   const containers = (await run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${settings.project}`], { capture: true, timeoutMs: DOCKER_PS_TIMEOUT_MS })).out
     .split('\n')
     .filter(Boolean).length;
   const busyPorts = [];
   for (const p of [settings.pgPort, settings.s3Port, settings.appPort]) if (await portInUse(p)) busyPorts.push(p);
   const problems = preflightProblems({ stateExists: fs.existsSync(path.join(ROOT, localStatePaths(settings.project).dir)), containers, busyPorts });
-  if (problems.length) throw new Error(`local:test refuses to start (nothing was changed):\n  ${problems.join('\n  ')}`);
+  if (problems.length) throw new Error(`${what} refuses to start (nothing was changed):\n  ${problems.join('\n  ')}`);
+}
+
+/** Spawns `next start` (reader URL, token, tenant binding) in its own tracked group and waits until it is ours and ready. */
+async function startAppAndWait(settings, secrets, { setApp, spawnGuard }) {
+  const base = `http://127.0.0.1:${settings.appPort}`;
+  // Re-check the app port right before spawning (minutes after the preflight).
+  const app = await startIfPortFree({
+    port: settings.appPort,
+    // Its own process group, tracked with the commands: a forced exit
+    // (second signal) kills it too, never leaving an orphan next start.
+    // Refused once the cleanup has started (an interrupt during the port re-check).
+    start: spawnGuard(() =>
+      trackProcessGroup(
+        spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
+          cwd: ROOT,
+          env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
+          stdio: ['ignore', 'ignore', 'inherit'],
+          detached: true,
+        }),
+      ),
+    ),
+  });
+  setApp(app);
+  return waitForOwnServer({
+    child: app,
+    port: settings.appPort,
+    timeoutMs: APP_READY_TIMEOUT_MS,
+    attemptTimeoutMs: APP_READY_ATTEMPT_TIMEOUT_MS,
+    probe: async (signal) => {
+      const r = await fetch(`${base}/api/hello`, { signal });
+      await r.body?.cancel();
+      return r.status === 200;
+    },
+  });
+}
+
+/** Pages GET /api/v1/costs/published until nextCursor is null; every read bounded. Page 1 carries the totals. */
+async function readPublished(base, token, { limit, maxPages }) {
+  const rows = [];
+  let totals = null;
+  let cursor = null;
+  let pages = 0;
+  for (let page = 0; page < maxPages; page += 1) {
+    const r = await fetchJson(`${base}/api/v1/costs/published?limit=${limit}${cursor ? `&cursor=${cursor}` : ''}`, { token, timeoutMs: API_REQUEST_TIMEOUT_MS });
+    if (r.status !== 200) throw new Error(`API read answered ${r.status}: ${JSON.stringify(r.body)}`);
+    if (page === 0) totals = r.body.totals;
+    rows.push(...r.body.data);
+    pages += 1;
+    cursor = r.body.page.nextCursor;
+    if (!cursor) break;
+  }
+  if (cursor) throw new Error(`more than ${maxPages} pages`);
+  return { rows, totals, pages };
+}
+
+async function localTest() {
+  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  // local:test owns its stack end to end (down -v at the end), so it uses its
+  // OWN project and ports and refuses to start over anything already there.
+  const settings = localTestSettings(process.env);
+  await preflight(settings, 'local:test');
 
   // runLocalTest runs the body, then ALWAYS the bounded cleanup (stop the app,
   // `down -v`), then decides pass/fail in one pure function
@@ -368,35 +499,7 @@ async function localTest() {
 
       const secrets = loadSecrets(settings, { create: false });
       const base = `http://127.0.0.1:${settings.appPort}`;
-      // Re-check the app port right before spawning (minutes after the preflight).
-      const app = await startIfPortFree({
-        port: settings.appPort,
-        // Its own process group, tracked with the commands: a forced exit
-        // (second signal) kills it too, never leaving an orphan next start.
-        // Refused once the cleanup has started (an interrupt during the port re-check).
-        start: spawnGuard(() =>
-          trackProcessGroup(
-            spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
-              cwd: ROOT,
-              env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
-              stdio: ['ignore', 'ignore', 'inherit'],
-              detached: true,
-            }),
-          ),
-        ),
-      });
-      setApp(app);
-      steps.appReady = await waitForOwnServer({
-        child: app,
-        port: settings.appPort,
-        timeoutMs: APP_READY_TIMEOUT_MS,
-        attemptTimeoutMs: APP_READY_ATTEMPT_TIMEOUT_MS,
-        probe: async (signal) => {
-          const r = await fetch(`${base}/api/hello`, { signal });
-          await r.body?.cancel();
-          return r.status === 200;
-        },
-      });
+      steps.appReady = await startAppAndWait(settings, secrets, { setApp, spawnGuard });
 
       // Every API read is bounded (Copilot 4176117553): a next start that is
       // alive but stuck fails the run instead of blocking the cleanup.
@@ -404,18 +507,7 @@ async function localTest() {
       if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
       steps.anonymous = anon.status;
 
-      const rows = [];
-      let totals = null;
-      let cursor = null;
-      for (let page = 0; page < MAX_PAGES; page += 1) {
-        const r = await fetchJson(`${base}/api/v1/costs/published?limit=17${cursor ? `&cursor=${cursor}` : ''}`, { token: secrets.RATIO_LOCAL_API_TOKEN, timeoutMs: API_REQUEST_TIMEOUT_MS });
-        if (r.status !== 200) throw new Error(`API read answered ${r.status}: ${JSON.stringify(r.body)}`);
-        if (page === 0) totals = r.body.totals;
-        rows.push(...r.body.data);
-        cursor = r.body.page.nextCursor;
-        if (!cursor) break;
-      }
-      if (cursor) throw new Error(`more than ${MAX_PAGES} pages`);
+      const { rows, totals } = await readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: 17, maxPages: MAX_PAGES });
       const control = JSON.parse(fs.readFileSync(CONTROL_TOTALS, 'utf8')).base;
       const mismatches = compareControlTotals(totals ?? [], control);
       const keys = new Set(rows.map((r) => `${r.batchId}/${r.artifactSha256}/${r.rowOrdinal}`));
@@ -434,6 +526,190 @@ async function localTest() {
   return localTestExitCode(summary);
 }
 
+// --- acceptance on the public FOCUS 1.0 Sample Data (Slice 2b) -------------------
+//
+// docs/evidence/slice-2b/DESIGN.md §5. The pinned sample file, staged as an AWS
+// Data Exports layout in this run's own SeaweedFS, goes through the REAL worker
+// CLI (sync ×2) and the REAL route under next start. The result must equal
+// control totals computed independently (Python) from the upstream file.
+
+/**
+ * Re-hashes the evidence object of every staged data object
+ * (`evidence/<tenant>/<source>/<sha256>`, Slice 1 D6). Each must hash to its
+ * key and to the staged bytes' SHA-256.
+ */
+async function rehashEvidence(settings, secrets, sourceId, shas) {
+  const { GetObjectCommand } = s3Commands();
+  const s3 = s3Client(settings, secrets);
+  const results = [];
+  try {
+    for (const sha of shas) {
+      const Key = `evidence/${secrets.RATIO_LOCAL_TENANT_ID}/${sourceId}/${sha}`;
+      const bytes = await withDeadline(
+        async (signal) => {
+          const r = await s3.send(new GetObjectCommand({ Bucket: LOCAL_NAMES.evidenceBucket, Key }), { abortSignal: signal });
+          return Buffer.from(await r.Body.transformToByteArray());
+        },
+        S3_REQUEST_TIMEOUT_MS,
+        `s3 get evidence ${sha.slice(0, 12)}`,
+      );
+      results.push({ sha256: sha, rehash: crypto.createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length });
+    }
+  } finally {
+    s3.destroy();
+  }
+  return results;
+}
+
+/**
+ * Catalog check as the local superuser, in a READ ONLY transaction: the
+ * sample tenant's batches, and the average stored fact size for D-09
+ * (informational).
+ */
+async function catalogSnapshot(settings, secrets) {
+  const url = connectionUrl({ user: 'postgres', password: secrets.RATIO_LOCAL_PG_SUPERUSER_PASSWORD, port: settings.pgPort, database: LOCAL_NAMES.database });
+  return withClient(url, async (c) => {
+    await c.query('BEGIN TRANSACTION READ ONLY');
+    try {
+      const batches = await c.query(
+        `SELECT to_char(billing_period, 'YYYY-MM-DD') AS billing_period, status, reconciliation, is_provisional,
+                row_count::text AS row_count, loaded_billed_total::text AS loaded_billed_total
+           FROM ratio.ingest_batches WHERE tenant_id = $1 ORDER BY billing_period, status`,
+        [secrets.RATIO_LOCAL_TENANT_ID],
+      );
+      const facts = await c.query(
+        `SELECT count(*)::text AS rows, round(avg(pg_column_size(f.*)), 1)::text AS avg_row_bytes,
+                round(avg(pg_column_size(f.extra_columns)), 1)::text AS avg_extra_columns_bytes
+           FROM ratio.cost_facts f WHERE tenant_id = $1`,
+        [secrets.RATIO_LOCAL_TENANT_ID],
+      );
+      return { batches: batches.rows, facts: facts.rows[0] };
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+}
+
+/** Steps' wall time in ms, kept in the summary even when a step throws. */
+function timer(steps) {
+  steps.timingsMs = {};
+  return async (name, fn) => {
+    const t0 = Date.now();
+    try {
+      return await fn();
+    } finally {
+      steps.timingsMs[name] = Date.now() - t0;
+    }
+  };
+}
+
+const fail = (what, problems) => {
+  if (problems.length) throw new Error(`${what}:\n  ${problems.join('\n  ')}`);
+};
+
+async function acceptance(args) {
+  const started = Date.now();
+  const opts = parseAcceptanceArgs(args);
+  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  const settings = localAcceptanceSettings(process.env);
+
+  // 1. Before anything starts: the pinned file, the independent control, the staging.
+  const dataset = readDataset(ROOT);
+  const pin = dataset.files[opts.dataset];
+  const file = path.join(ROOT, pin.localPath);
+  if (!fs.existsSync(file)) throw new Error(`${pin.localPath} is missing: run \`npm run sample:fetch\` first (pinned download, SHA-256 checked)`);
+  const bytes = fs.readFileSync(file);
+  fail(`dataset ${opts.dataset} (${pin.localPath}) does not match dataset.json; re-run \`npm run sample:fetch\``, verifyDatasetBytes(bytes, pin));
+
+  const calcStarted = Date.now();
+  const calc = await run('python3', [CONTROL_CALCULATOR, '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
+  if (calc.code !== 0) throw new Error(`the control-total calculator exited ${calc.code}`);
+  const control = JSON.parse(calc.out);
+  const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, SAMPLE_CONTROL_TOTALS_FILE), 'utf8'))[opts.dataset];
+  if (JSON.stringify({ input: control.input, totals: control.totals }) !== JSON.stringify(pinned)) {
+    throw new Error(`the calculator's output differs from the pinned ${SAMPLE_CONTROL_TOTALS_FILE} (${opts.dataset})`);
+  }
+  const calcMs = Date.now() - calcStarted;
+
+  const stageStarted = Date.now();
+  const staged = stageFocusSample(bytes, { mutation: opts.mutation }); // proves the clean plan lossless first
+  const stageMs = Date.now() - stageStarted;
+  const dataShas = staged.objects.filter((o) => o.kind === 'data').map((o) => o.sha256);
+  const totalRows = control.totals.reduce((n, t) => n + Number(t.rowCount), 0);
+
+  await preflight(settings, 'local:acceptance');
+
+  const summary = await runLocalTest({
+    project: settings.project,
+    down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
+    downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
+    signal: interrupt.signal,
+    body: async ({ steps, setApp, spawnGuard }) => {
+      const timed = timer(steps);
+      steps.timingsMs.controlTotals = calcMs;
+      steps.timingsMs.stage = stageMs;
+      steps.dataset = { key: opts.dataset, file: pin.localPath, bytes: pin.bytes, sha256: pin.sha256, commit: dataset.commit, licence: dataset.licence };
+      steps.mutation = opts.mutation;
+      steps.control = control.totals;
+      steps.staging = { periods: staged.periods, objects: staged.objects.map((o) => ({ key: o.key, bytes: o.body.length, sha256: o.sha256 })), nullTokensReplaced: staged.nullTokensReplaced };
+
+      await timed('up', () => up(settings));
+      const status = await timed('migrate', () => migrate(settings));
+      steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
+      const secrets = loadSecrets(settings, { create: false });
+
+      // Stage into the run's own SeaweedFS, then provision the sample source.
+      const sourceId = await timed('seed', async () => {
+        const s3 = s3Client(settings, secrets);
+        try {
+          await ensureBuckets(s3);
+          await putObjects(
+            s3,
+            staged.objects.map((o) => ({ Key: o.key, body: () => o.body })),
+          );
+        } finally {
+          s3.destroy();
+        }
+        return provisionSource(settings, secrets, SAMPLE_NAMES);
+      });
+      steps.seed = { objects: staged.objects.length, source: SAMPLE_NAMES.sourceKey };
+
+      // The real worker CLI, twice.
+      const first = await timed('sync', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
+      const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
+      steps.sync = { exit: first.code, durationMs: first.record?.durationMs, periods: outcomes(first.record) };
+      fail('first sync', syncProblems(first.record, control));
+      const second = await timed('syncAgain', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
+      steps.syncAgain = { exit: second.code, periods: outcomes(second.record) };
+      fail('second sync', resyncProblems(second.record, control));
+
+      // The real route under next start.
+      steps.appReady = await timed('appStart', () => startAppAndWait(settings, secrets, { setApp, spawnGuard }));
+      const base = `http://127.0.0.1:${settings.appPort}`;
+      const anon = await fetchJson(`${base}/api/v1/costs/published`, { timeoutMs: API_REQUEST_TIMEOUT_MS });
+      if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
+      steps.anonymous = anon.status;
+      const maxPages = Math.ceil(totalRows / ACCEPTANCE_PAGE_LIMIT) + 1;
+      const { rows, totals, pages } = await timed('apiRead', () => readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: ACCEPTANCE_PAGE_LIMIT, maxPages }));
+      steps.api = { totals, rows: rows.length, pages, limit: ACCEPTANCE_PAGE_LIMIT };
+      fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, dataShas)]);
+
+      // Evidence re-hash and the catalog.
+      const rehash = await timed('evidenceRehash', () => rehashEvidence(settings, secrets, sourceId, dataShas));
+      steps.evidence = rehash;
+      fail('evidence re-hash', rehash.filter((r) => r.rehash !== r.sha256).map((r) => `evidence ${r.sha256} re-hashes to ${r.rehash}`));
+      const catalog = await timed('catalog', () => catalogSnapshot(settings, secrets));
+      steps.catalog = catalog;
+      fail('catalog', batchProblems(catalog.batches, control));
+    },
+  });
+  killLiveProcessGroups();
+  summary.steps.timingsMs = { ...(summary.steps.timingsMs ?? {}), total: Date.now() - started };
+  process.stdout.write(`${JSON.stringify({ type: 'ratio.local-acceptance', dataset: opts.dataset, mutation: opts.mutation, ...summary })}\n`);
+  if (!summary.pass) log('local:acceptance failed', { mutation: opts.mutation, failures: summary.failures });
+  return localTestExitCode(summary);
+}
+
 // --- main ----------------------------------------------------------------------
 
 const done = (p) => p.then(() => 0);
@@ -444,6 +720,7 @@ const COMMANDS = {
   sync: (s) => done(sync(s)),
   down: (s, args) => done(down(s, { volumes: args.includes('-v') || args.includes('--volumes'), timeoutMs: DOWN_TIMEOUT_MS })),
   test: () => localTest(),
+  acceptance: (_s, args) => acceptance(args),
 };
 
 async function main(argv) {
@@ -457,15 +734,16 @@ async function main(argv) {
 
 // SIGINT / SIGTERM. Every command (and next start) runs in its own detached
 // process group, so a Ctrl-C to this script does not reach them by itself.
-// - local:test: the first signal aborts the run, which then goes through the
-//   SAME bounded cleanup (stop next start, `down -v`) and exits 130/143.
+// - local:test and local:acceptance (built on the same runLocalTest): the
+//   first signal aborts the run, which then goes through the SAME bounded
+//   cleanup (stop next start, `down -v`) and exits 130/143.
 // - every other command (up, migrate, seed, sync, down): kill the live groups
 //   and exit 130/143 at once; whatever already exists (containers, volumes,
 //   .ratio-local/<project>/) stays for `npm run local:down [-- -v]`.
 // - a second signal forces an immediate exit (groups killed, cleanup skipped).
 installInterruptHandlers({
   onFirst: (sig) => {
-    if (COMMAND === 'test') {
+    if (COMMAND === 'test' || COMMAND === 'acceptance') {
       log('interrupted: ending the run, then the normal cleanup', { signal: sig });
       interrupt.abort(sig);
       return;

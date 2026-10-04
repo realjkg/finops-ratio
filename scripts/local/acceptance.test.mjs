@@ -541,6 +541,51 @@ describe('A7 pinned dataset files (no network in tests: the fetch is injected)',
   });
 });
 
+describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
+  const src = read('scripts/local/local.mjs');
+  const body = src.slice(src.indexOf('async function acceptance('), src.indexOf('// --- main'));
+
+  it('is a command of local.mjs, on its own settings, after the preflight, inside runLocalTest with the interrupt', () => {
+    expect(src).toMatch(/acceptance: \(_s, args\) => acceptance\(args\),/);
+    expect(body).toMatch(/const settings = localAcceptanceSettings\(process\.env\);/);
+    expect(body.indexOf("await preflight(settings, 'local:acceptance');")).toBeGreaterThan(0);
+    expect(body.indexOf("await preflight(settings, 'local:acceptance');")).toBeLessThan(body.indexOf('runLocalTest({'));
+    expect(body).toMatch(/runLocalTest\(\{[\s\S]*?down: \(\) => down\(settings, \{ volumes: true, timeoutMs: DOWN_TIMEOUT_MS \}\),[\s\S]*?signal: interrupt\.signal,/);
+    expect(body).toMatch(/killLiveProcessGroups\(\);\s*summary\.steps\.timingsMs/);
+  });
+
+  it('checks the pin and runs the independent calculator before any stack exists', () => {
+    expect(body).toMatch(/verifyDatasetBytes\(bytes, pin\)/);
+    expect(body).toMatch(/run\('python3', \[CONTROL_CALCULATOR, '--expect-sha256', pin\.sha256, file\]/);
+    expect(body.indexOf("run('python3'")).toBeLessThan(body.indexOf('runLocalTest({'));
+    expect(body.indexOf('stageFocusSample(bytes')).toBeLessThan(body.indexOf('runLocalTest({'));
+  });
+
+  it('uses the real worker CLI twice and the real route; no fake source, no test hook, no control in the manifest', () => {
+    expect(body.match(/syncRecord\(settings, secrets, SAMPLE_NAMES\.sourceKey\)/g)).toHaveLength(2);
+    expect(src).toMatch(/workerCli\(settings, secrets, \['sync', '--tenant', secrets\.RATIO_LOCAL_TENANT_ID, '--source', sourceKey\]/);
+    expect(body).toMatch(/startAppAndWait\(settings, secrets, \{ setApp, spawnGuard \}\)/);
+    for (const forbidden of ['RATIO_ALLOW_FAKE_SOURCE', 'RATIO_TEST_', 'x-ratio-control', "'fake'", 'NODE_ENV: \'test\'']) {
+      expect(src, forbidden).not.toContain(forbidden);
+    }
+    const lib = read('scripts/local/acceptance.mjs');
+    expect(lib).not.toMatch(/'x-ratio-control'\s*:/);
+  });
+
+  it('every comparison runs and fails the run', () => {
+    for (const call of [
+      "fail('first sync', syncProblems(first.record, control))",
+      "fail('second sync', resyncProblems(second.record, control))",
+      'compareAcceptance({ control, apiTotals: totals, rows })',
+      'artifactSetProblems(rows, dataShas)',
+      "fail('catalog', batchProblems(catalog.batches, control))",
+    ]) {
+      expect(body, call).toContain(call);
+    }
+    expect(body).toMatch(/fail\('evidence re-hash', rehash\.filter\(\(r\) => r\.rehash !== r\.sha256\)/);
+  });
+});
+
 describe('A8 wiring, pins and attribution', () => {
   it('npm scripts', () => {
     const scripts = JSON.parse(read('package.json')).scripts;

@@ -21,7 +21,9 @@
     "local:seed": "node scripts/local/local.mjs seed",
     "local:sync": "node scripts/local/local.mjs sync",
     "local:down": "node scripts/local/local.mjs down",
-    "local:test": "node scripts/local/local.mjs test"
+    "local:test": "node scripts/local/local.mjs test",
+    "local:acceptance": "node scripts/local/local.mjs acceptance",
+    "sample:fetch": "node scripts/acceptance/fetch-focus-sample.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
