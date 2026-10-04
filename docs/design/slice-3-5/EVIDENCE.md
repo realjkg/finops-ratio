@@ -520,8 +520,8 @@ Appendix B (B.4, B.5.6–B.5.13).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 21 (the commit that adds this line; the same eight reasons
-as at revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
+at revision 21 (`3aaa678` and the commit that adds this line; the same
+eight reasons as at revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
 `ddbb6f0`, revision 17, `cc54e79`, and `9e0d703`, revision 16). Revision 16 gave the same risk and classes
 as every revision since 4, and **one more reason than before**: `retention.mention`
 on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is
@@ -556,6 +556,34 @@ lists", which was wrong).
   reasons listed.
 - **Effect on the verdict:** none. The risk is `restricted` either way, and
   the extra rows are recorded here as they appear rather than avoided.
+
+**From `3aaa678` (revision 21) the report also lists `EVIDENCE.md` as
+`unclassified` / `diff-unavailable`.** This file's diff grew past the
+size for which the GitHub API returns a patch, so the API now returns no
+patch for **three** files: `DESIGN.md`, `APPENDIX_B_SIZING.md` and this
+file. The report at `3aaa678`:
+- `retention.mention` on `APPENDIX_D_SCHEMA_SKETCH.md`, the only file of
+  the three with content reasons whose patch is still returned;
+- `unclassified` / `diff-unavailable` on the three files above;
+- risk `restricted`, classes **`retention` and `unclassified`**.
+
+`secrets` **no longer appears on GitHub**, and `retention.delete-from` no
+longer appears either. Both come only from `APPENDIX_B_SIZING.md` and
+this file, whose content the report can no longer see. That is the only
+reason the GitHub classes changed:
+- **the content did not change:** no secret-like line and no retention
+  statement was removed or reworded;
+- **the local verdict is unchanged:** `--git` reads the full diff and
+  still gives `restricted`, `retention` and `secrets`, with the same eight
+  reasons listed above;
+- **the verdict is not weaker:** the classifier fails closed on the
+  missing patches, and the PR remains `restricted`.
+
+The GitHub-mode result was reproduced locally by feeding
+`classify-risk.mjs` the PR's file list from the API, with
+`patchUnavailable` set as `gh-actions.mjs` sets it and the diff of the
+three files whose patch the API returns: it gives the four reasons
+above.
 
 That is the correct classification for this content; the PR goes through
 the restricted exception path. (Revision 2 at `461fbc2` classified `low`
