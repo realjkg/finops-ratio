@@ -147,10 +147,11 @@ print("resource x daily over 395d: %.2fB rows" % (usage_series * res_per_series 
 a **6 GB ceiling** in total per run: object storage, Postgres facts,
 rollups, forecasts, indexes, the backtest exports, the control tenant, WAL
 and temporary files (orchestrator decisions, 2026-10-04). The container
-class it runs in has ≈ 10 GB free disk, 4 CPUs and 15 GB RAM. The three
-seeds (tuning, natural, enriched) run **sequentially**, each ending with
-`down -v`, so the budget applies to one run; between runs only the
-evaluator's exported inputs are kept (≤ 0.3 GB each).
+class it runs in has ≈ 10 GB free disk, 4 CPUs and 15 GB RAM. The seeds
+(tuning, natural-1, natural-2 [, natural-3], enriched) run
+**sequentially**, each ending with `down -v`; the per-run budget is B.5.3,
+and the **peak across the sequence**, with the retained evaluator exports,
+is B.5.7.
 
 ### B.5.2 What was measured (2026-10-04)
 
@@ -215,7 +216,9 @@ tenant, WAL, temporary files and the cluster base.
 | cluster base | 0.050 |
 | **total** | **4.90** |
 
-Margin: ≈ 0.6 GB to the target, ≈ 1.1 GB to the ceiling. Single-worker
+Margin: ≈ 0.6 GB to the target, ≈ 1.1 GB to the ceiling, per run. Revision 4 adds
+FT-7's scoring origins (4.96 GB for the natural-1 run) and the peak across
+the sequential runs, **5.11 GB** (B.5.7). Single-worker
 load: 4.89 M rows at 20 k / 6 k rows/s = **4 / 14 min** (D-06 trigger:
 60 min).
 
@@ -490,4 +493,158 @@ for i in range(N):
 raw = buf.getvalue().encode()
 gz = gzip.compress(raw, 6, mtime=0)
 print("csv bytes/row %.1f  gzip bytes/row %.1f" % (len(raw) / N, len(gz) / N))
+```
+
+### B.5.7 Revision 4: folding loss, expected group rate, CUSUM `h`, peak disk
+
+Computed by `budget2.py` (below), which reproduces `budget.py`'s account
+model, seed and adopted variant D exactly (same 37,052 leaves).
+
+**Folding loss (N2).**
+
+| Quantity | Value |
+|---|---|
+| account × service series in the full service mix | 107,273 |
+| of which folded into `Other services` | **84,775 (79.0 %)** |
+| fleet spend in `Other services` | **25.6 %** |
+| `fleet15k` leaves (individual + `Other services`) | 37,052 |
+
+**Series that can reach `warning` (N1, L-e).** Leaves with mean `M` ≥
+$500/day: **504** (the CUSUM-eligible set: a sustained 20 % deviation is
+worth ≥ $100/day); ≥ $200/day: 1,799; ≥ $100/day: 3,906 (these can reach
+`warning` only with large relative excursions, covered by the "everything
+else" share and measured on the tuning seed).
+
+**Expected labels and groups per natural seed** (61-day window; Appendix C
+rates; spend-weighted placement; 62.5 % of labels reaching `warning`;
+recall 0.90): ≈ 132.8 series-level + 15.4 account-level + 10.0 fan-in
+= **≈ 158 labels**; **≈ 73 true groups (≈ 1.20 per day)**; false-positive
+budget for precision 0.80: **≈ 0.30 per day**. Expected groups including
+false positives: ≈ 92 per seed, **≈ 183 with two seeds**, ≈ 275 with three.
+Wilson 95 % lower bound at p̂ = 0.80: 0.711 (n = 100), 0.726 (n = 140),
+0.735 (n = 175).
+
+**Siegmund ARL₀** (k = 0.5) and expected D3 false alarms per day on the
+504 eligible series: h = 6 → 2,573 days, 0.196; h = 6.5 → 4,252, 0.119;
+**h = 7 → 7,020, 0.072**; h = 7.5 → 11,585, 0.044.
+
+**Peak disk across the sequential runs (L-b).** FT-7's scoring origins
+(L-a) raise the leaf backtest export to 228 points per leaf: **0.253 GB**,
+so the natural-1 run's own budget is **4.96 GB** (B.5.3's 4.90 GB −
+0.198 + 0.253 + 0.003 for the aggregate points). The other runs skip the
+leaf export (4.70 GB). Retained between runs (assumptions): ≈ 0.04 GB of
+compact evaluator inputs per run (anomaly pages, root causes, matches,
+evidence record) and, after natural-1, its leaf export plus the
+evaluator's per-leaf daily actuals (≈ 0.03 GB gzip).
+
+| Sequence | Peak during a run | Retained at the end |
+|---|---|---|
+| tuning, natural-1, natural-2, enriched | **5.11 GB** | 0.44 GB |
+| with natural-3 | 5.15 GB | 0.48 GB |
+
+Both peaks are under the **5.5 GB target** and the 6 GB ceiling. Pruning
+rule: after each run's evaluation the bulky inputs not needed later are
+removed and only their SHA-256 manifest is kept; natural-1's leaf export and
+actuals are kept until the forecast evaluation (PR 4-6) has run. If an
+off-box artefact store is available, the retained exports move there after
+their SHA-256 is recorded, and the peak becomes the largest single run
+(4.96 GB).
+
+SHA-256 of `budget2.py` as run:
+`2dfe56df71853f7acbe8f8af51b6e1d396624c8e1b871f7f8b0e9abf36b59fe0`.
+
+`budget2.py`:
+
+```python
+import random, math
+# fleet15k, revision 4: folding loss, eligible series, natural-seed group rate, CUSUM h, peak disk.
+# Same account model, seed and adopted variant D as budget.py (Appendix B.5.3).
+N = 15000
+random.seed(42)
+spend = [math.exp(random.gauss(math.log(800), 1.8)) for _ in range(N)]
+med = sorted(spend, reverse=True)[int(N * 0.5)]   # as budget.py's cut
+tot_spend = sum(spend)
+svc_total = svc_folded = 0
+spend_other = 0.0
+leaf_means = []                        # mean daily M of each fleet15k leaf (USD-equivalent)
+for m in spend:
+    k = max(1, min(80, round(3 + 4 * math.log10(1 + m / 100) + random.gauss(0, 2.0))))
+    _ = (m > 20000 and random.random() < 0.6) or random.random() < 0.1   # budget.py's commit draw, kept for the same sequence
+    keep = 2 if m >= med else 1
+    w = [0.5 ** i for i in range(k)]; ws = sum(w)
+    daily = m / 30.4
+    svc_total += k
+    for i in range(min(k, keep)):
+        leaf_means.append(daily * w[i] / ws)
+    if k > keep:
+        svc_folded += k - keep
+        share = sum(w[keep:]) / ws
+        spend_other += m * share
+        leaf_means.append(daily * share)
+print("account x service series in the full mix: %d; folded into Other: %d (%.1f %%)" % (svc_total, svc_folded, 100 * svc_folded / svc_total))
+print("fleet spend in Other services: %.1f %%" % (100 * spend_other / tot_spend))
+print("fleet15k leaves: %d" % len(leaf_means))
+for thr in (500, 200, 100):
+    print("leaves with mean M >= $%d/day: %d" % (thr, sum(1 for x in leaf_means if x >= thr)))
+
+# Natural label rates: Appendix C counts for `full` (15,000 accounts, 395 days), kinds that can reach `warning` on fleet15k.
+series_kinds = {'spike': 300, 'level_shift': 150, 'gradual_drift': 100, 'new_service': 150,
+                'runaway_resource': 100, 'commitment_expiry': 60}
+account_kinds = {'tagging_loss': 80, 'new_account_runaway': 20}
+fanin_kinds = {'shared_cause': 40, 'provider_shared_cause': 15, 'price_change': 10}
+days = 61
+folded_share = spend_other / tot_spend          # spend-weighted placement (rev. 4)
+reach_warning = 0.50 + 0.25 * 0.5               # meaningful + half of "near"
+recall = 0.90
+per_day = lambda c: c / 395.0
+lab_series = sum(per_day(c) for c in series_kinds.values()) * days
+lab_acct = sum(per_day(c) for c in account_kinds.values()) * days
+lab_fan = sum(per_day(c) for c in fanin_kinds.values()) * days
+true_groups = (lab_series * (1 - folded_share) + lab_acct) * reach_warning * recall + lab_fan * recall
+print("natural labels in the 61-day window: series %.1f, account %.1f, fan-in %.1f, total %.1f" % (lab_series, lab_acct, lab_fan, lab_series + lab_acct + lab_fan))
+print("expected true groups at >= warning per natural seed: %.0f (%.2f per day)" % (true_groups, true_groups / days))
+fp_budget = true_groups / days * (1 - 0.80) / 0.80
+print("false-positive budget for precision 0.80: %.2f per day" % fp_budget)
+for seeds in (1, 2, 3):
+    tg = true_groups * seeds
+    n = tg / 0.80
+    print("natural seeds pooled: %d -> expected groups n ~ %.0f" % (seeds, n))
+
+# Siegmund ARL0, one-sided, k = 0.5
+def arl(h, k=0.5):
+    b = h + 1.166
+    return (math.exp(2 * k * b) - 2 * k * b - 1) / (2 * k * k)
+elig = sum(1 for x in leaf_means if x >= 500)
+for h in (6.0, 6.5, 7.0, 7.5):
+    print("h=%.1f ARL0=%.0f  D3 false alarms/day on %d series: %.3f" % (h, arl(h), elig, elig / arl(h)))
+
+# Wilson lower bound
+def wilson_lo(p, n, z=1.96):
+    return (p + z * z / (2 * n) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n)
+for n in (100, 140, 175):
+    print("Wilson lower, p=0.80, n=%d: %.3f" % (n, wilson_lo(0.80, n)))
+
+# Peak disk across sequential runs (GB). One run's budget from budget.py variant D = 4.90,
+# of which the backtest leaf export is 0.198 (only natural-1 exports it).
+# rev. 4 origins: 5 calibration origins x 30 points + P4 origins 93/100/107/114 (30+23+16+9) = 228 points per leaf
+points = 5 * 30 + 30 + 23 + 16 + 9
+bt_export = len(leaf_means) * points * 30 / 1e9
+run_full = 4.90 - 0.198 + bt_export + 0.012 * (points / 178.0 - 1)
+print('backtest points per leaf %d; leaf export %.3f GB; one run with the export %.3f GB' % (points, bt_export, run_full))
+per_run_eval = 0.04      # anomaly pages, root causes, days, label matches (assumption)
+nat1_actuals = 0.03      # evaluator's own per-leaf daily actuals for natural-1, gzip (assumption)
+runs = ['tuning', 'natural-1', 'natural-2', 'enriched']
+retained = 0.0; peak = 0.0
+for r in runs:
+    own = run_full if r == 'natural-1' else run_full - bt_export
+    peak = max(peak, own + retained)
+    retained += per_run_eval + (bt_export + nat1_actuals if r == 'natural-1' else 0)
+print("peak disk across %d sequential runs: %.2f GB; retained after the last run: %.2f GB" % (len(runs), peak, retained))
+runs3 = ['tuning', 'natural-1', 'natural-2', 'natural-3', 'enriched']
+retained = 0.0; peak = 0.0
+for r in runs3:
+    own = run_full if r == 'natural-1' else run_full - bt_export
+    peak = max(peak, own + retained)
+    retained += per_run_eval + (bt_export + nat1_actuals if r == 'natural-1' else 0)
+print("with a third natural seed: peak %.2f GB; retained %.2f GB" % (peak, retained))
 ```

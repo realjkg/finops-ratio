@@ -4,8 +4,9 @@ Branch `design/slice-3-5-forecast-anomaly`, from `origin/main` at 827773f
 (Slices 0, 1, 2 and 2b merged). **Design only: this branch adds documents
 and no code.** The decisions in §8 were **decided by the orchestrator under
 the owner's delegation on 2026-10-04**. This third revision answers the
-challenger's REQUEST CHANGES on 461fbc2 (1 High, 12 Medium, 8 Low); the
-revision history and the item-by-item response are in
+challenger's REQUEST CHANGES on 461fbc2 (1 High, 12 Medium, 8 Low), and
+revision 4 its re-review of 461fbc2..9a17924 (2 Medium, 5 Low); the
+revision history and the item-by-item responses are in
 [EVIDENCE.md](EVIDENCE.md).
 
 **Owner's goal.** Analyse cloud spend across **15,000 simulated accounts**,
@@ -86,14 +87,19 @@ derived from a seed rule (§1.1).
      above median spend keep their top 2 services as individual series,
      accounts below the median keep their top 1, and each account's other
      services are summed into one `Other services` series (≈ 37 k series,
-     ≈ 22.5 k of them individual). Anomalies on a folded tail service are
-     injected at natural rates and their loss is reported, not gated
-     (§2.5). **Disk: ≈ 4.9 GB** including WAL, temporary files, the
-     control tenant and the backtest exports, from per-row sizes measured
-     on PostgreSQL 16 (Appendix B.5). Run three times, sequentially, with
-     a tuning seed, a natural-rate seed and an enriched seed (§4.8).
-   - **`full`**: 13 periods at region level, ≈ 78.6 M rows, 47–81 GB;
-     needs owner action OA-1.
+     ≈ 22.5 k of them individual). **What that folds: ≈ 79 % of the
+     account × service series and ≈ 26 % of fleet spend sit in
+     `Other services`** (Appendix B.5.7). Anomalies on a folded service are
+     injected at natural rates (spend-weighted) and their loss is reported,
+     not gated (§2.5); **recall and leaf-forecast figures on `fleet15k`
+     are measured on individual series only.** The `full` profile (owner
+     action OA-1) removes this limitation. **Disk: ≈ 4.96 GB per run,
+     ≈ 5.11 GB peak** across the sequential runs (tuning, two pooled
+     natural-rate seeds, enriched; §4.8), including WAL, temporary files,
+     the control tenant and the retained evaluator exports, from per-row
+     sizes measured on PostgreSQL 16 (Appendix B.5).
+   - **`full`**: 13 periods at region level, all services individual,
+     ≈ 78.6 M rows, 47–81 GB; needs owner action OA-1.
 2. **Slice 4 — forecasting.** A TypeScript batch job (`ratio-analytics`)
    reads only published facts, builds daily rollup tables in SQL and fits a
    transparent model (robust Holt-Winters, damped trend, weekly seasonality;
@@ -109,20 +115,24 @@ derived from a seed rule (§1.1).
    Severity by **dollar impact and relative deviation**. Candidates are
    **grouped across the hierarchy by a fixed precedence**, provider-wide
    first. The lifecycle maps onto `CostFinding`. Precision is measured at
-   **natural label rates**, recall on an **enriched** seed, with Wilson
+   **natural label rates** pooled over two seeds, recall on an
+   **enriched** seed (individual series only on `fleet15k`), with Wilson
    bounds (§4.9).
 
 **Acceptance targets** (§3.10, §4.9, each with its profile and decision
 rule): month-end forecast of each currency's fleet total within **5 %**
-median absolute error when made on day 1; individual-leaf 30-day WAPE
-≤ 20 % (the `Other services` leaves are reported separately) and ≥ 10 %
-better than seasonal-naive; 80 % interval coverage 75–85 % on held-out
-data; anomaly **precision ≥ 0.80** (Wilson 95 % lower bound ≥ 0.70);
-**recall ≥ 0.90** on meaningful spikes, level shifts, new services and
-runaway resources (lower bound ≥ 0.80, ≥ 100 labels per kind); **median
-time-to-detect ≤ 1 day** after data availability; **≤ 5 alert groups per
-day** and **≤ 1 false-positive group per day** at natural rates. No vendor
-publishes comparable figures (Appendix A), so these are Ratio's own.
+median absolute error when made on day 1; 30-day WAPE ≤ 20 % and ≥ 10 %
+better than seasonal-naive, **measured on individual series only** on
+`fleet15k` (the `Other services` leaves are reported separately); 80 %
+interval coverage 75–85 % on held-out origins; anomaly **precision ≥ 0.80**
+(Wilson 95 % lower bound ≥ 0.70, n ≥ 100 groups pooled over two
+natural-rate seeds); **recall ≥ 0.90** on meaningful spikes, level shifts,
+new services and runaway resources, **measured on individual series only**
+on `fleet15k` (lower bound ≥ 0.80, ≥ 100 labels per kind); **median
+time-to-detect ≤ 1 day** after data availability; at natural rates,
+**≤ 0.30 false-positive groups per day** on `fleet15k`, derived from the
+expected ≈ 1.2 true groups per day (§4.9). No vendor publishes comparable
+figures (Appendix A), so these are Ratio's own.
 
 **Decisions** (§8) are all decided (2026-10-04); this revision amends D-07
 (exact-set wording, accepted by the orchestrator), D-12 (removal only
@@ -420,12 +430,31 @@ Impacts are drawn so that ≈ 50 % of `alert` events are **meaningful**
 (≥ 2 × the minimum impact of §4.4), ≈ 25 % near the threshold (0.5–2 ×) and
 ≈ 25 % below it. Recall is scored only on meaningful labels (§4.8).
 
-**Tail services (`fleet15k`).** Labels are injected into the full service
-mix at natural rates **before** folding, so a share of them land on
-services that fold into `Other services`; those labels carry
-`folded: true`. The evaluator reports how many folded labels are detected
-(through the `Other services` leaf or a parent scope) and how many are
-lost. This is reported, **not gated**: it measures what the folding costs.
+**Placement of natural-seed labels (N2).**
+- **Series-level kinds** (spike, level shift, drift, runaway resource,
+  commitment expiry, drop, new service): the target series is drawn with
+  probability **proportional to its mean spend** (`M`) over the full
+  service mix, before folding. Rationale: impact thresholds are in
+  dollars, so it is the spend-heavy series that produce meaningful
+  anomalies; a per-series-uniform draw would put ≈ 79 % of labels on tail
+  services worth a few dollars a day. Expected share of these labels on
+  folded services: **≈ 26 %** (the spend share of `Other services`).
+- **Account-level kinds** (tagging loss, new-account runaway): accounts
+  drawn uniformly.
+- **Fan-in kinds**: the (provider or billing account, service) drawn
+  proportional to the service's spend there.
+- **Enriched seed:** gated kinds on **individual** series only.
+
+**Tail services (`fleet15k`).** Labels on services that fold into
+`Other services` carry `folded: true`. The evaluator reports how many of
+them are detected (through the `Other services` leaf or a parent scope) and
+how many are lost: **reported, not gated**. Because recall is gated on the
+enriched seed's individual-series labels and FT-4/FT-5 on individual
+leaves, every `fleet15k` recall and leaf-forecast figure is **"measured on
+individual series only"**: it says nothing about the ≈ 79 % of
+account × service series and ≈ 26 % of spend that `fleet15k` folds. The
+`full` profile, which keeps every service individual, is what removes this
+limitation (owner action OA-1); the trade-off is surfaced to the owner.
 
 The generator also writes each series' **true parameters**, so the
 evaluator can compute the **oracle** expected value (§3.9).
@@ -446,11 +475,13 @@ evaluator can compute the **oracle** expected value (§3.9).
   count; sorted object keys.
 - **Golden digest:** the `ci` profile's manifest SHA-256 (over every object
   and the ground truth) is pinned in a test.
-- **Seeds:** three named seeds per large profile, fixed in the generator:
-  **tuning** (thresholds and `h` are tuned here, never scored), **natural**
-  (natural label rates; precision, alert volume and forecast targets), and
+- **Seeds:** named seeds per large profile, fixed in the generator:
+  **tuning** (thresholds and `h` are tuned here, never scored);
+  **natural-1** and **natural-2** (natural label rates, pooled for
+  precision and false-positive rate; forecast targets on natural-1 only),
+  plus **natural-3** if the pooled group count is below 140 (§4.9); and
   **enriched** (recall and time-to-detect; §4.8). The evaluation seeds are
-  not used until the tuned parameters are frozen and committed.
+  not generated until the tuned parameters are frozen and committed.
 
 ### 2.7 Output and delivery through the real path
 
@@ -473,15 +504,23 @@ local:synthetic --profile … --seed …   (scripts/local, its own project and p
 
 - **#62 synthetic opt-in.** `local:synthetic` sets
   `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` **in the environment of the worker
-  processes it spawns, and nowhere else**. It is off by default everywhere.
-  A static test asserts that `local:test`, `local:acceptance`,
-  `local:up`/`seed`/`sync`, the compose files and every non-synthetic CI
-  step never set it, and that the worker refuses it when
-  `RATIO_ENV=production` (#62 owns that refusal; Slice 3 adds the
-  cross-check). **Slice 3 PRs start only after #62 merges** (§7).
-- **Three sequential runs per large profile** (tuning, natural, enriched),
-  each ending with `down -v`, so the disk holds one run at a time plus the
-  exported evaluator inputs (Appendix B.5).
+  processes it spawns, and nowhere else**. Every other command that starts
+  a worker (`local:test`, `local:acceptance`, `local:sync`, the compose
+  `worker` profile) sets **`RATIO_ALLOW_SYNTHETIC_PROVIDERS=0` explicitly**
+  in the worker's environment, as #62 now does, so an inherited parent
+  value cannot switch it on. A static test asserts both: `=1` only in
+  `local:synthetic`'s worker spawn, `=0` in every other worker start, and
+  never `=1` in compose files or non-synthetic CI steps; the worker refuses
+  `=1` when `RATIO_ENV=production` (#62 owns that refusal; Slice 3 adds
+  the cross-check). **Slice 3 PRs start only after #62 merges** (§7).
+- **Sequential runs per large profile** (tuning, natural-1, natural-2
+  [, natural-3], enriched), each ending with `down -v`, so the disk holds
+  one run at a time plus the retained evaluator exports. Only natural-1
+  writes the per-origin leaf backtest export (the forecast targets use it);
+  the other runs skip it. **Peak disk ≈ 5.11 GB** (5.15 GB with
+  natural-3), against the 5.5 GB target and the 6 GB ceiling; if an
+  off-box artefact store is available, the retained exports (≤ 0.48 GB)
+  move there after their SHA-256 is recorded (Appendix B.5.7).
 - Manifests carry `x-ratio-control` (row count and billed total), so every
   batch must be `reconciled`.
 - Every period's rows have `BillingPeriodStart` equal to the folder's period
@@ -505,7 +544,7 @@ Full model, measurements and arithmetic: Appendix B (B.5 for `fleet15k`).
 | Profile | Accounts | Grain | Span | Leaf series | Fact rows | Disk | Single-worker load (20 k / 6 k rows/s) | Where it runs |
 |---|---|---|---|---|---|---|---|---|
 | `ci` | 150 (+ 15 control) | full | 4 periods (≈ 120 d) | ≈ 1.5 k | ≈ 0.24 M | < 0.3 GB | ≤ 1 min | CI, every PR |
-| **`fleet15k`** | **15,000** (+ 15 control) | account × service × day; top 2 services individually at or above median spend, top 1 below, + `Other services` (**tail-service caveat**) | **4 periods (122 d)** | **≈ 37.1 k** (22.5 k individual) | **≈ 4.89 M** | **≈ 4.90 GB** per run, all-in (Appendix B.5) | **4 / 14 min** | this container class (≈ 10 GB free, 4 CPU, 15 GB RAM); three sequential runs |
+| **`fleet15k`** | **15,000** (+ 15 control) | account × service × day; top 2 services individually at or above median spend, top 1 below, + `Other services` (**tail-service caveat**) | **4 periods (122 d)** | **≈ 37.1 k** (22.5 k individual) | **≈ 4.89 M** | **≈ 4.96 GB** per run, **≈ 5.11 GB peak** across the sequential runs, all-in (Appendix B.5.7) | **4 / 14 min** | this container class (≈ 10 GB free, 4 CPU, 15 GB RAM); three sequential runs |
 | `full` | 15,000 | full | 13 periods (395 d) | ≈ 147 k | ≈ 78.6 M | 60–95 GB | 65–218 min | owner action OA-1 |
 
 **`fleet15k` per-row sizes are measured** on an ephemeral PostgreSQL 16
@@ -529,9 +568,16 @@ in order, each step re-budgeted (Appendix B.5):
 | 2 | top 2 individual services for every account (no top 4) | 5.71 GB (steps 1 + 2) |
 | 3 | integer batch key in `cost_daily` instead of a uuid (estimated −24 B/row) | 5.59 GB |
 | 4 | **top 1 for accounts below median spend** (they carry ≈ 3.6 % of spend), top 2 at or above | **4.90 GB** |
+| rev. 4 | P4 scoring origins for FT-7 (228 instead of 178 backtest points per leaf, +0.06 GB); retained exports across the sequential runs | **4.96 GB per run; 5.11 GB peak** (5.15 GB with natural-3) |
 
-Step 4 is needed to reach the **5.5 GB target**; with it the run has
-≈ 0.6 GB margin to the target and ≈ 1.1 GB to the ceiling. If PR 3-4's
+Step 4 is needed to reach the **5.5 GB target**; with it the peak has
+≈ 0.4 GB margin to the target and ≈ 0.9 GB to the ceiling.
+
+**What the folding costs (N2, Appendix B.5.7):** **≈ 79.0 %** of the
+fleet's account × service series (84,775 of 107,273) and **≈ 25.6 %** of
+fleet spend sit in `Other services`. `fleet15k`'s recall and leaf-forecast
+figures are therefore **measured on individual series only**; the `full`
+profile (OA-1) removes this limitation. If PR 3-4's
 measured total still exceeds 5.5 GB, the next step is **not** a shorter
 span (the nested backtest of §3.8 needs 4 periods) and **not** fewer
 accounts: it is escalated to the orchestrator with the measurements.
@@ -549,14 +595,14 @@ Three periods could not separate calibration from scoring.
 | All 15,000 accounts analysed, forecast and monitored (the owner's goal) | no (150) | **yes** (with the tail-service caveat) | yes |
 | FT-1, FT-2 (tenant month-end, day 1 / 15) | smoke | yes; n = 8 each (2 months × 4 currencies), reported with n | yes |
 | FT-3 … FT-6 | smoke | yes; FT-4 and FT-5 on **individual** leaves (≈ 22.5 k), `Other services` reported separately | yes |
-| FT-7 (coverage on held-out data) | no | yes: calibrated on P3, scored on P4 | yes |
+| FT-7 (coverage on held-out data) | no | yes: calibrated on forecast days ≤ 92, scored from origins 93–114 | yes |
 | FT-8 (90-day horizon) | no | **no** | yes |
 | FT-10 runtime | no | at ≈ 37 k leaves | at ≈ 107 k leaves |
-| Precision (AT-1), alert volume (AT-4) | no | **yes, natural-rate seed** | yes |
-| Recall (AT-2), time-to-detect (AT-3) | smoke (≥ 2 labels per kind) | **yes, enriched seed** | yes |
+| Precision (AT-1), false-positive rate (AT-4) | no | **yes, two pooled natural-rate seeds** | yes |
+| Recall (AT-2), time-to-detect (AT-3) | smoke (≥ 2 labels per kind) | **yes, enriched seed, individual series only** | yes, all series |
 | `new_region`, region root causes | **yes** | **no** | yes |
 | `provider_shared_cause`, `price_change` (AT-6) | smoke | yes | yes |
-| Tail-service loss | n/a | **reported** | n/a |
+| Tail-service loss (≈ 79 % of series, ≈ 26 % of spend folded) | n/a | **reported** | n/a (nothing folded) |
 | Late data, month-to-date restatement | **yes** (daily-delivery replay) | no (idealised arrival) | no |
 | Load time and D-06's 60-minute trigger | no | **yes** | yes |
 | Storage at 78.6 M rows, D-09 at ≈ 6 M rows per month | no | no | yes |
@@ -607,7 +653,7 @@ Rollup design (schema sketch in Appendix D):
 | Worker load, all sources | ≤ 60 s | **measured**; estimate 4–14 min single worker; **> 60 min triggers the D-06 review** | measured; ≤ 90 min wall with 4 parallel sources |
 | Re-sync (all `skipped_unchanged`) | ≤ 15 s | ≤ 1 min | ≤ 2 min |
 | Stored bytes per fact row | ≤ 0.6 KB | ≤ 0.56 KB (554 B measured) | ≤ 0.6 KB |
-| Disk per run, all-in (Appendix B.5) | < 0.3 GB | **≤ 5.5 GB target** (≈ 4.90 GB estimated; 6 GB ceiling) | ≤ 100 GB |
+| Disk, all-in (Appendix B.5) | < 0.3 GB | **≤ 5.5 GB target at peak** (≈ 4.96 GB per run, ≈ 5.11 GB peak across the sequential runs; 6 GB ceiling) | ≤ 100 GB |
 | WAL | — | `max_wal_size` set to 256 MB; **its effect on peak WAL size and on load time is measured in PR 3-4** | measured |
 | End-to-end CI step | ≤ 120 s | n/a | n/a |
 
@@ -773,20 +819,22 @@ seed for scoring):
 | Block | Days | Used for |
 |---|---|---|
 | Warm-up | 1–61 (P1, P2) | training only; never scored. Every pre-existing series has ≥ 56 days of history at day 62. |
-| Calibration | 62–92 (P3) | interval quantiles (cohort-pooled), from the errors of origins 62, 69, 76, 83 and 90 whose forecast days fall in P3 |
-| Scoring | 93–122 (P4) | interval coverage (FT-7); points also scored here |
+| Calibration | 62–92 (P3) | interval quantiles (cohort-pooled), from the errors of origins 62, 69, 76, 83 and 90 **for forecast days ≤ 92 only** (so the quantiles use no information from day 93 on) |
+| Scoring | 93–122 (P4) | interval coverage (FT-7) **from origins ≥ 93 only**: 93 (h 1–30), 100 (h 1–23), 107 (h 1–16), 114 (h 1–9); points also scored here |
 
 - **Point forecasts** (FT-1…FT-6) use the fixed rule of §3.2, so nothing is
   selected; they are scored on **all origins** in P3 and P4.
-- **Origins:** weekly at days 62, 69, 76, 83, 90 for horizons 1–30 (every
-  forecast day ≤ 122), plus days 97, 104, 111, 115 for horizons 1–7:
-  **178 forecast points per leaf**. Month-end origins: day 1 and day 15 of
-  P3 and P4 (days 62, 76, 93, 107).
-- **n:** FT-4/FT-5 ≈ 22.5 k individual leaves × 178 points ≈ 4.0 M
+- **Origins (L-a):** weekly at days 62, 69, 76, 83, 90 for horizons 1–30,
+  and the P4 origins 93, 100, 107, 114 for the horizons that stay inside
+  day 122: **228 forecast points per leaf**. An interval issued at an
+  origin ≥ 93 uses quantiles calibrated on forecast days ≤ 92, so **no
+  interval scored by FT-7 uses information from after its origin**.
+  Month-end origins: day 1 and day 15 of P3 and P4 (days 62, 76, 93, 107).
+- **n:** FT-4/FT-5 ≈ 22.5 k individual leaves × 228 points ≈ 5.1 M
   leaf-days (plus ≈ 14.6 k `Other services` leaves reported separately);
-  FT-7 is scored only on forecast days in P4 (origins 93 and later, and the
-  P4 days of earlier origins); FT-1/FT-2 n = 8 each (2 months × 4
-  currencies); FT-3 n = 72 (36 billing accounts × 2 months).
+  FT-7 ≈ 22.5 k × 78 points ≈ 1.8 M leaf-days from origins 93–114 (all
+  ≈ 37 k leaves pooled per level are reported too); FT-1/FT-2 n = 8 each
+  (2 months × 4 currencies); FT-3 n = 72 (36 billing accounts × 2 months).
 - 90-day horizons are not assessable on `fleet15k`.
 
 **`full`** (13 periods): warm-up months 1–6; **calibration block** months
@@ -807,8 +855,9 @@ month-end).
   series key, h, expected, lo80, hi80, lo95, hi95) as gzip JSON Lines with
   a SHA-256 manifest into the run's evidence directory, and the same for
   every aggregate scope into `forecast_backtest_points` in the database.
-  Size: ≈ 0.20 GB per `fleet15k` run (37 k leaves × 178 points × ≈ 30 B
-  gzip; Appendix B.5). These outputs are **exempt from D-12**: they are
+  Size: ≈ 0.25 GB for the `fleet15k` natural-1 run (37 k leaves × 228
+  points × ≈ 30 B gzip; the other runs skip the leaf export; Appendix
+  B.5.7). These outputs are **exempt from D-12**: they are
   never removed by the retention function and are kept with the run's
   evidence.
 - **Two implementations of every metric:** the TypeScript backtest computes
@@ -851,10 +900,10 @@ OA-1 exists.
 | FT-1 | Month-end forecast of each currency's tenant total, made on **day 1**: median APE ≤ **5 %**, max ≤ 12 % | `fleet15k` (n = 8), `full` | FinOps Foundation variance guidance: ≤ 12 % at Run [A16] |
 | FT-2 | Same, made on **day 15**: median APE ≤ 3 % | `fleet15k` (n = 8), `full` | — |
 | FT-3 | Billing-account month-end (day 1): median APE ≤ 10 % | `fleet15k` (n = 72), `full` | FinOps Run 12 % |
-| FT-4 | **Individual-leaf** daily WAPE, horizons 1–30: ≤ **20 %**. `Other services` leaves are **excluded from the gate** and reported separately | `fleet15k` (≈ 4.0 M leaf-days), `full` | no vendor publishes one |
+| FT-4 | Daily WAPE, horizons 1–30: ≤ **20 %**, **measured on individual series only** on `fleet15k`; `Other services` leaves are excluded from the gate and reported separately | `fleet15k` (≈ 5.1 M leaf-days), `full` (all services individual) | no vendor publishes one |
 | FT-5 | Individual-leaf skill vs M0 ≥ **10 %** | `fleet15k`, `full` | our baseline |
 | FT-6 | Month-end WAPE not worse than the weighted-7-day method at any level, ≥ 20 % better at tenant level | `fleet15k`, `full` | `src/lib/forecast.ts` |
-| FT-7 | On the **scoring block** only: 80 % coverage in [75 %, 85 %], 95 % in [92 %, 97.5 %], pooled per level and horizon bucket | `fleet15k` (P4), `full` (months 10–13) | AWS publishes an 80 % interval, not its coverage [A1] |
+| FT-7 | On the **scoring block** only, from **origins inside it** (no interval uses information after its origin): 80 % coverage in [75 %, 85 %], 95 % in [92 %, 97.5 %], pooled per level and horizon bucket | `fleet15k` (origins 93–114, individual leaves), `full` (origins in months 10–13) | AWS publishes an 80 % interval, not its coverage [A1] |
 | FT-8 | 90-day total at billing-account level: median APE ≤ 15 % | **`full` only** | — |
 | FT-9 | All days (anomalies included), `Other services` leaves, stressor cohorts (`holiday`, `monthly_cycle`, `month_end_batch`, `intermittent`, `price_change`): reported, not gated | all | contamination and misspecification effects |
 | FT-10 | Fit + forecast for all scopes ≤ **15 min** wall, ≤ 4 GB RSS; backtest ≤ 60 min | `fleet15k` (this container class), `full` (OA-1) | cost estimate below |
@@ -1003,34 +1052,46 @@ D3 instead compares actuals with a **baseline frozen at an anchor day `a`**:
   and the sums restart). While a sum is positive the baseline stays
   frozen, so a drift cannot be absorbed.
 
-**False-alarm arithmetic and the choice of `h`.** Only a series whose
-expected `M` is ≥ min impact ÷ 0.20 (≈ $500/day) can produce a `warning`
-from a sustained 20 % deviation, so false alarms that count against AT-4
-come from these **eligible** series: ≈ **504** on `fleet15k` (Appendix B.5;
-CUSUM alarms on other series are filtered out by severity). AT-4 allows
-≤ 1.0 false-positive group per day; the budget gives **≤ 0.25 per day to
-D3**. With in-control `z` i.i.d. N(0, 1), Siegmund's approximation for the
-one-sided in-control average run length is
-`ARL₀ ≈ (e^{2kb} − 2kb − 1) / (2k²)`, `b = h + 1.166` [A23]. With k = 0.5:
+**False-positive budget (N1).** The budget is derived from the expected
+true-group rate, not from a volume cap. On `fleet15k`'s natural-rate seeds
+the 61-day evaluation window holds ≈ 158 labels of the kinds that can reach
+`warning`; with spend-weighted placement (≈ 26 % on folded services), ≈ 62 %
+of the rest reaching `warning` (meaningful, plus half of "near") and ≈ 0.90
+detected, that is **≈ 73 true groups per seed, ≈ 1.2 per day** (Appendix
+B.5.7). Precision ≥ 0.80 then allows false positives of at most
+1.2 × 0.20 / 0.80 ≈ **0.30 per day in total**, split as follows:
 
-| h | ARL₀ (days) | expected D3 false alarms per day on 504 eligible series |
+| Share | Source | Basis |
 |---|---|---|
-| 5 | ≈ 938 | 0.54 |
-| 5.5 | ≈ 1,556 | 0.32 |
-| **6** | **≈ 2,575** | **0.20** |
-| 6.5 | ≈ 4,250 | 0.12 |
+| **0.07 / day** | D3 (CUSUM) on the **504 eligible series** (mean `M` ≥ $500/day, i.e. min impact ÷ 0.20) | Siegmund, table below |
+| 0.02 / day | D1 ∧ D2 on the same series | normal theory: P(z > 2.33 and z ≥ 4) ≈ 3 × 10⁻⁵ per series-day |
+| 0.21 / day | everything else: D4–D7; the ≈ 550 aggregate scopes (§4.5 step 6); **smaller series reaching `warning` through large relative excursions** (≈ 3,900 leaves have mean `M` ≥ $100/day and can reach `warning` only with excursions ≥ 20 % worth ≥ $100, i.e. far into their tail); misspecification cohorts | not derivable in closed form: **covered empirically on the tuning seed** |
 
-**h = 6** is the starting point: the smallest value inside the 0.25 budget.
-Detection delay for a shift of δ standard deviations is
-≈ `(h + 1.166) / (δ − k)` days: ≈ 2 days for +20 % on a series with 5 %
-noise (δ = 4), ≈ 5 days at 10 % noise (δ = 2). Real residuals are
-heavier-tailed and autocorrelated (a frozen baseline makes them
-correlated), so the normal-theory ARL₀ is optimistic: `h` is **tuned on the
-tuning seed** so that the measured D3-attributed false-positive rate on
-eligible series is ≤ 0.25 per day, then frozen. The same budget check is
-applied to D1 ∧ D2 (normal theory ≈ 0.02 per day on 504 series), and the
-remaining ≈ 0.5 per day is left for D4–D7, aggregate scopes and
-misspecification.
+With in-control `z` i.i.d. N(0, 1), Siegmund's approximation for the
+one-sided in-control average run length is
+`ARL₀ ≈ (e^{2kb} − 2kb − 1) / (2k²)`, `b = h + 1.166` [A23]. With
+k = 0.5, on 504 eligible series:
+
+| h | ARL₀ (days) | expected D3 false alarms per day |
+|---|---|---|
+| 6 | ≈ 2,573 | 0.196 |
+| 6.5 | ≈ 4,252 | 0.119 |
+| **7** | **≈ 7,020** | **0.072** |
+| 7.5 | ≈ 11,585 | 0.044 |
+
+**h = 7** is the starting point: the smallest value whose expected rate fits
+the 0.07 share (0.072, within rounding; h = 7.5 is the fallback). Detection
+delay for a shift of δ standard deviations is ≈ `(h + 1.166) / (δ − k)`
+days: ≈ 2.3 days for +20 % on a series with 5 % noise (δ = 4), ≈ 5.4 days at
+10 % noise (δ = 2); large shifts are caught on day 1 by D1 ∧ D2, so AT-3's
+median is unaffected, and drift's 7-day median keeps room. Real residuals
+are heavier-tailed and autocorrelated (a frozen baseline makes them
+correlated), so the normal-theory ARL₀ is optimistic: on the **tuning
+seed** every share is measured (the D3 share on eligible series, the D1 ∧ D2
+share, and the "everything else" share including small series' relative
+excursions and aggregate scopes), `h` and the D1/D2 thresholds are raised
+until each share is within its budget, and the result is frozen before any
+evaluation seed is generated.
 
 **Combination and precedence.** A leaf-day is a candidate if (D1 **and**
 D2), or D3, or D4, or D5, or D6, or D7. When several fire, the candidate's
@@ -1148,16 +1209,29 @@ its id. The `ci` daily-delivery replay (§2.7) exercises this with the
 
 ### 4.8 Evaluation against ground truth
 
-**Three sequential runs per large profile (H1).** Each is a full
+**Sequential runs per large profile (H1, N1).** Each is a full
 `local:synthetic` run that ends with `down -v`, so only one is on disk at a
-time; only the evaluator's inputs (API pages, backtest exports, evidence
-record; ≤ 0.3 GB) are kept between runs.
+time; between runs only the evaluator's compact inputs (API pages, root
+causes, matches, evidence record: ≈ 0.04 GB per run) and natural-1's
+backtest export and actuals (≈ 0.28 GB) are kept. Peak ≈ 5.11 GB
+(Appendix B.5.7).
 
 | Run | Seed | Label rates | Used for | Not used for |
 |---|---|---|---|---|
-| 1 | **tuning** | natural + enriched kinds | choosing `h`, D1/D2 thresholds and grouping thresholds; freezing them in a committed config | any gate |
-| 2 | **natural** | natural rates (§2.5) | **precision (AT-1)**, **alert volume (AT-4, both forms)**, AT-5, AT-6, forecast targets (§3.10) | recall |
-| 3 | **enriched** | ≥ 100 **meaningful** labels per gated kind in the evaluation window, injected on individual series | **recall (AT-2)**, time-to-detect (AT-3), AT-5, AT-6 | precision, alert volume |
+| 1 | **tuning** | natural + enriched kinds | measuring each false-positive share (§4.2) and choosing `h`, D1/D2 and grouping thresholds; freezing them in a committed config | any gate |
+| 2 | **natural-1** | natural rates, spend-weighted placement (§2.5) | **precision (AT-1)** and **false-positive rate (AT-4)**, pooled with natural-2; AT-5, AT-6; **forecast targets** (§3.10; the only run with the leaf backtest export) | recall |
+| 3 | **natural-2** | natural rates, a different seed | pooled with natural-1 for AT-1 and AT-4; AT-5, AT-6 | recall, forecast targets |
+| (3b) | **natural-3** | natural rates | only if natural-1 + natural-2 give fewer than **140** groups at ≥ `warning` (the n at which p̂ = 0.80 has a Wilson lower bound ≥ 0.72); pooled the same way | recall, forecast targets |
+| 4 | **enriched** | ≥ 100 **meaningful** labels per gated kind in the evaluation window, on individual series only | **recall (AT-2)**, time-to-detect (AT-3), AT-5, AT-6 | precision, false-positive rate |
+
+**Expected n (N1, Appendix B.5.7).** Per natural seed on `fleet15k`:
+≈ 158 labels of the kinds that can reach `warning` in the 61-day window,
+≈ 73 true groups (≈ 1.2 per day) and, at precision 0.80, ≈ 92 groups in
+total. Two pooled seeds give **≈ 183 groups** (Wilson lower bound at
+p̂ = 0.80 ≈ 0.735), comfortably above n ≥ 100; natural-3 is the fallback if
+the measured count is low. On `full`, with no folding and new regions, the
+same derivation gives ≈ 1.6 true groups per day over ≈ 213 days, so one
+natural seed suffices there.
 
 The re-weighting scheme of the previous revision is **dropped**: precision
 is only ever measured at natural rates.
@@ -1195,13 +1269,13 @@ the group is about.
 
 | # | Target | Run | Decision rule |
 |---|---|---|---|
-| AT-1 | Precision at ≥ `warning` ≥ **0.80** | natural | point estimate ≥ 0.80 **and** Wilson 95 % lower bound ≥ 0.70; requires n ≥ 100 groups, otherwise "insufficient n", reported and escalated (not a pass) |
-| AT-2 | Recall on meaningful labels ≥ **0.90** for `spike`, `level_shift`, `new_service`, `runaway_resource` (and `new_region` on `full`); ≥ **0.75** for `gradual_drift`, `tagging_loss`, `new_account_runaway`, `commitment_expiry` | enriched | per kind: point estimate ≥ target **and** Wilson 95 % lower bound ≥ target − 0.10, with n ≥ 100 meaningful labels per kind (at n = 100 and p = 0.90 the lower bound is ≈ 0.83; at p = 0.75, ≈ 0.66) |
+| AT-1 | Precision at ≥ `warning` ≥ **0.80** | natural-1 + natural-2 pooled (+ natural-3 if needed) on `fleet15k`; natural on `full` | point estimate ≥ 0.80 **and** Wilson 95 % lower bound ≥ 0.70; requires n ≥ 100 pooled groups (expected ≈ 183), otherwise "insufficient n", reported and escalated (not a pass) |
+| AT-2 | Recall on meaningful labels ≥ **0.90** for `spike`, `level_shift`, `new_service`, `runaway_resource` (and `new_region` on `full`); ≥ **0.75** for `gradual_drift`, `tagging_loss`, `new_account_runaway`, `commitment_expiry`. On `fleet15k`: **measured on individual series only** (≈ 79 % of account × service series and ≈ 26 % of spend are folded and not covered; `full` covers them) | enriched | per kind: point estimate ≥ target **and** Wilson 95 % lower bound ≥ target − 0.10, with n ≥ 100 meaningful labels per kind (at n = 100 and p = 0.90 the lower bound is ≈ 0.83; at p = 0.75, ≈ 0.66) |
 | AT-3 | Median time-to-detect ≤ **1 day** after data availability for spikes, level shifts, new service/region, runaway; p90 ≤ 3 days; drift: median ≤ 7 days after its cumulative excess crosses the minimum impact | enriched | point estimates |
-| AT-4 | Mean ≤ **5** new groups per day at ≥ `warning`, p95 day ≤ 15; **and** mean ≤ **1.0** false-positive group per day, p95 day ≤ 3 | natural | point estimates over the 61-day window |
+| AT-4 | False-positive groups at ≥ `warning`: mean ≤ **0.25 × the expected true-group rate**, i.e. **≤ 0.30 per day on `fleet15k`** and ≤ 0.40 per day on `full`; p95 day ≤ 2. Total groups per day are reported, not gated (the earlier "≤ 5 groups per day" form is retired: at ≈ 1.2 true groups per day it could never bind) | natural seeds pooled | point estimates over the pooled 61-day windows |
 | AT-5 | **Zero** `warning`+ groups qualifying only for credit (incl. `Usage-Based`), purchase, tax (incl. `Usage-Based`), recurring-fee, correction, onboarding, commitment-effect and `constant_amortised` labels | natural and enriched | exact |
 | AT-6 | One group per shared-cause event per currency (`shared_cause`, `provider_shared_cause`, `price_change`), no duplicates | natural and enriched | exact |
-| AT-7 | Stressor cohorts (`month_end_batch`, `monthly_cycle`, `holiday`, `intermittent`) and folded tail labels: reported, not gated | natural | — |
+| AT-7 | Stressor cohorts (`month_end_batch`, `monthly_cycle`, `holiday`, `intermittent`) and folded tail labels (detected / lost): reported, not gated | natural seeds | — |
 | AT-8 | Daily detection run ≤ **5 min**; as-of replay of the evaluation window ≤ 60 min | `fleet15k` (this container class), `full` (4 threads) | measured (§3.11) |
 
 For comparison: none of the reference vendors publishes precision, recall or
@@ -1302,7 +1376,10 @@ including current rollups and anomalies. So:
   detector state; `CREATE OR REPLACE` is not expand, so the first is never
   redefined): `SECURITY DEFINER` functions owned by `ratio_owner`, with `SET search_path = pg_catalog, pg_temp`, a
   fixed SQL body (no dynamic SQL, no arguments), marked
-  `ratio:allow-function` and added to `REVIEWED_SECURITY_DEFINER_FUNCTIONS`
+  **both** migration markers the linter requires for such a statement,
+  `ratio:allow-function` and `ratio:allow-security-definer`
+  (`migrationFiles.ts` refuses a `SECURITY DEFINER` without the latter),
+  and added to `REVIEWED_SECURITY_DEFINER_FUNCTIONS`
   (its first entries). EXECUTE is revoked from PUBLIC and granted to
   `ratio_analytics` only.
 - They run as the owner, who is non-superuser, non-BYPASSRLS and bound by
@@ -1444,22 +1521,22 @@ output relies on; D-21). PR ids keep their slice numbers.
 | 1 | **4-0** | **Bug fix, independent:** F1 (`daysInMonthOf`, `remainingWeekdaysInMonth`, and `budgetStatus.ts` through them, under a non-UTC process time zone) | red tests under `TZ=Asia/Tokyo` and `TZ=America/Los_Angeles` (February 2026 = 28 days; a leap February = 29; weekday counts at month ends); existing forecast and budget tests unchanged and green | local-time `Date` constructor restored; off-by-one in the weekday loop |
 | — | *#62* | worker provider check with `SYNTHETIC_PROVIDERS` and the opt-in (its own PR) | as in #62 | as in #62 |
 | 2 | **3-1a** | Generator core (pure): fleet model, `SYN-` ids, `Synthetic*` provider names, series model, PRNG, BigInt money, FOCUS row rules, commitments (incl. `Unused` and expiry), the three profiles' grain and columns, `fleet15k` folding | deterministic digests; adding an account leaves others' draws unchanged; heavy tail (top-1 % share within ±3 pp); **every row passes the worker's own validator** (`src/ingest/focus/validate.ts`); one currency per billing account; `BillingPeriodStart` = period; FOCUS rules (Purchase ⇒ not Usage-Based; Committed ⇔ commitment id; Tax ⇒ no pricing category); only `SYNTHETIC_PROVIDERS` names; ids match `^SYN-(A|BA)-[0-9A-HJKMNP-TV-Z]+$` and never a 12-digit number; `fleet15k`: exactly 15,000 accounts, ≤ 3 usage series per account, minimal columns only, `Other services` = the exact sum of the folded services | PRNG stream shared across entities; credit sign flipped; mixed currency in a billing account; float in the money path; a non-synthetic provider name; a numeric id; an account dropped; folding loses a cent |
-| 3 | **3-1b** | Ground truth, stressors and seeds: every label kind of Appendix C, natural / enriched / tuning seeds, folded-label marking, `usage_based_credit`/`_tax` rows, `series-params.jsonl` | each label's effect present in the rows and absent outside its window; natural seed rates within ±10 % of Appendix C; enriched seed ≥ 100 meaningful labels per gated kind in the evaluation window, all on individual series; `folded: true` exactly for labels on folded services; stressor cohorts present; seeds produce disjoint label sets | label written without its effect; enriched labels placed on folded services; tuning and natural seeds identical; `Usage-Based` credit emitted as `Usage` |
+| 3 | **3-1b** | Ground truth, stressors and seeds: every label kind of Appendix C, tuning / natural-1..3 / enriched seeds, spend-weighted placement, folded-label marking, `usage_based_credit`/`_tax` rows, `series-params.jsonl` | each label's effect present in the rows and absent outside its window; natural seed rates within ±10 % of Appendix C; enriched seed ≥ 100 meaningful labels per gated kind in the evaluation window, all on individual series; `folded: true` exactly for labels on folded services; stressor cohorts present; seeds produce disjoint label sets | label written without its effect; enriched labels placed on folded services; tuning and natural seeds identical; `Usage-Based` credit emitted as `Usage` |
 | 4 | **3-2** | Writer: AWS Data Exports layout, gzip, manifests with `x-ratio-control`, file splits, `dataset.json`, labels; `npm run synthetic:generate` | output accepted by `src/ingest/sources/s3/layout.ts`; bounded memory on a 1 M-row run; byte-identical re-run; pinned `ci` golden digest; control totals = BigInt sums = Python recomputation | manifest lists a file twice; control total off by 1e-10; split drops the last row; gzip mtime not zeroed |
 | 5 | **3-3** | `local:synthetic` (own project and ports; upload + SHA-256 verification; local copy removed by default; 36 + 1 sources; parallel sync with the opt-in in the worker environment only; asserts; evaluator export; `down -v`) + CI step for `ci` | every period `published` and `reconciled`; totals = `dataset.json`; re-sync all `skipped_unchanged`; no fake source, no hook (static test like 2b's A9); **static test: `RATIO_ALLOW_SYNTHETIC_PROVIDERS` set only by `local:synthetic`'s worker spawn, never by `local:test`, `local:acceptance`, other `local:*` commands, compose files or non-synthetic CI steps**; cleanup always | opt-in set globally (in the parent environment or compose); skip one source; assert only row counts; keep the local copy; run with the fake source |
-| 6 | **3-4** | **`fleet15k` runs in this container class** (tuning, natural, enriched, sequential) + evidence: load time (D-06 trigger), bytes per row, the int batch key's real size, total disk per run vs 5.5 GB / 6 GB, peak WAL with and without `max_wal_size=256MB`, SeaweedFS fit (T1) | §2.10 targets measured and recorded; a miss is reported and escalated (D-20) | — (measurement PR) |
+| 6 | **3-4** | **`fleet15k` runs in this container class** (tuning, natural-1, natural-2 [, natural-3], enriched; sequential; peak disk measured against 5.11 GB) + evidence: load time (D-06 trigger), bytes per row, the int batch key's real size, total disk per run vs 5.5 GB / 6 GB, peak WAL with and without `max_wal_size=256MB`, SeaweedFS fit (T1) | §2.10 targets measured and recorded; a miss is reported and escalated (D-20) | — (measurement PR) |
 | 7 | **4-1** | Migration 0002 (incl. the retention function) + privilege model + bootstrap + the D-07 test edits | catalogue check passes with the new reviewed sets; analytics login refused for each unsafe shape (serial suite); reader cannot see base analytics tables; tenant matrix on each new table; retention function on the reviewed list, PUBLIC without EXECUTE, analytics without DELETE; foundation manifest regenerated and drift-tested; **every edited Slice 0/1 assertion listed, exact old set → exact new set** | grant analytics SELECT on `cost_facts`; grant analytics DELETE on `cost_daily`; remove FORCE RLS from one new table; widen reader to a base table; float column; retention function without pinned `search_path` |
 | 8 | **4-2** | `ratio-analytics rollup` (incremental by published batch, `batch_seq`); narrow `cost_daily` + sparse `billing_daily`; retention call after each rollup | rollup totals per (source, period, currency) = published totals **exactly**; `M` excludes `Usage-Based` credit and tax rows; restatement switches the read side; idempotent re-run; tag parsing failure counted, never crashes (`pg_input_is_valid` on PG16 [A21]); EXPLAIN shows the PK-prefix path through the security-barrier view **(to verify)**; retention removes exactly the superseded batch's rows and old runs, nothing else | group by the wrong day; include a superseded batch; drop `ChargeCategory = 'Usage'` from `M`; skip the untagged measure; retention removes a current batch's row |
 | 9 | **4-3** | Migration 0003 (forecast tables, backtest points, detector state, pointer, views) | as 4-1, for the new objects | as 4-1 |
 | 10 | **4-4a** | Model library (pure): M0, M1, M1-log, Hampel with the scale floor, 288-point grid search, cold-start ladder, the `fleet15k` fixed rule | known-answer tests on hand-computed series; independent Python reference for small cases; constant series: no cleaning, finite outputs; intermittent series: no NaN; refit throughput measured (§3.11) | seasonal index off by one weekday; trend undamped; scale floor removed; grid point skipped |
 | 11 | **4-4b** | Intervals, cohort calibration (no `env`), bottom-up hierarchy, nested backtest blocks, per-origin exports, forecast and backtest commands | invariants: bottom-up coherence, intervals ordered, lower ≥ 0; **no leakage** (an origin cannot see later data: poisoned-future test); **calibration never on the scoring block** (test: poisoning P4 errors leaves P4 intervals unchanged); exports complete (178 points per leaf on `fleet15k`) with SHA-256 manifest; FT-4/5/7 on the tuning seed | interval quantiles from in-sample residuals; calibration from the scoring block; `env` in the cohort key; selection enabled on `fleet15k`; an export missing a horizon |
 | 12 | **4-5** | API: `costs/daily`, `forecasts`, `forecasts/accuracy`, `freshness` | Slice 2 route test set (auth, 400s, keyset, tenant, unsafe login, no-store, decimal strings); latency check on `fleet15k` | read tenant from the query; OFFSET pagination; number instead of string |
-| 13 | **4-6** | Forecast acceptance on `fleet15k` (natural seed) + Python evaluator (own actuals from the bucket) | FT-1…FT-7, FT-9, FT-10 recorded with n; `Other services` reported separately; evaluator and job agree; FT-8 marked "`full` only, pending OA-1" | evaluator reading the job's rollups instead of the bucket; `Other services` included in the FT-4 gate |
+| 13 | **4-6** | Forecast acceptance on `fleet15k` (natural-1) + Python evaluator (own actuals from the bucket) | FT-1…FT-7, FT-9, FT-10 recorded with n; `Other services` reported separately; evaluator and job agree; FT-8 marked "`full` only, pending OA-1" | evaluator reading the job's rollups instead of the bucket; `Other services` included in the FT-4 gate |
 | 14 | **5-1** | Migration 0004 (anomaly tables, events, views; no `ratio_triage`) | as 4-1 | as 4-1 |
 | 15 | **5-2a** | Detectors D1–D7 (pure): scale floor, frozen-baseline CUSUM with re-anchoring, commitment rules, category precedence | unit cases per detector; a slow drift that an adaptive one-step CUSUM misses is caught; ARL₀ of D3 on simulated N(0,1) within ±15 % of Siegmund's value at h = 5 and 6; constant series never fire; precedence table exact | CUSUM on adaptive one-step residuals; re-anchor while `S⁺ > 0`; MAD floor removed; `commitment_expiry` classified as `commitment_effect`; precedence order swapped |
 | 16 | **5-2b** | Grouping steps 1–6 (provider-wide first), deterministic ids, merges, root causes, severity | one group per provider-wide, billing-account and account fan-in; same input ⇒ same groups and ids; merges only within ±1 day; root causes ranked by excess | provider-wide rule skipped; fan-in threshold off by one; random group ids; severity downgrade allowed; merge window unbounded |
 | 17 | **5-3** | `ratio-analytics detect` (daily + as-of replay), automatic open and resolve, restatement | replay on the tuning seed; parameters frozen and committed before any evaluation seed is generated; `restated` path via the `ci` daily-delivery replay; `new_region` on `ci` | detect on day D using day D data (leakage); auto-resolve after 1 day |
-| 18 | **5-4** | Evaluation harness (Python) + `fleet15k` acceptance: precision and AT-4 on the natural seed, recall and TTD on the enriched seed | matching with X = 30 %, k = 3; duplicates counted false; Wilson rules of §4.9; folded labels and stressor cohorts reported; `new_region` and FT-8 marked "`full` only" | matcher accepts any day; matcher ignores the 30 % / top-3 rule; no-alert labels ignored; precision computed on the enriched seed; Wilson bound replaced by the point estimate; duplicates counted correct |
+| 18 | **5-4** | Evaluation harness (Python) + `fleet15k` acceptance: precision and AT-4 on the pooled natural seeds, recall and TTD on the enriched seed (individual series only) | matching with X = 30 %, k = 3; duplicates counted false; Wilson rules of §4.9; folded labels and stressor cohorts reported; `new_region` and FT-8 marked "`full` only" | matcher accepts any day; matcher ignores the 30 % / top-3 rule; no-alert labels ignored; precision computed on the enriched seed; Wilson bound replaced by the point estimate; duplicates counted correct |
 | 19 | **5-5** | API `anomalies`, `anomalies/{id}` (GET only); `ratio-native` CostSource adapter; `CostFinding` optional fields (D-18) | route test set; PointFive mapping unchanged (existing tests untouched); decimal string ↔ number display rounding; no non-GET handler | wrong status vocabulary; impact sign flipped |
 | 20 | **5-6** | UI: forecast panel, native anomalies in Findings with the R4 label (D-16, T2); latency run (§5.3) on `fleet15k` | component tests; SLOs measured | — |
 | — | *5-7 (deferred, D-15)* | status write endpoint + `ratio_triage` | not built until per-user identity exists | — |

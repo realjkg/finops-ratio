@@ -13,11 +13,14 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
 3. **Labels never enter the database** and are not in the source bucket.
    They are written to `<out>/ground-truth/labels.jsonl` and read only by
    the evaluator.
-4. **Seeds.** Each large profile has three seeds (DESIGN §2.6):
-   - **tuning**: natural rates plus enriched kinds; used to tune and freeze
-     thresholds; never scored;
-   - **natural**: the natural rates of DESIGN §2.5 per account-month; used
-     for precision, alert volume and forecast targets;
+4. **Seeds.** Each large profile has these seeds (DESIGN §2.6, §4.8):
+   - **tuning**: natural rates plus enriched kinds; used to measure the
+     false-positive shares and to tune and freeze thresholds; never scored;
+   - **natural-1, natural-2** (and **natural-3** if the pooled group count
+     is below 140): the natural rates of DESIGN §2.5 per account-month;
+     pooled for precision and false-positive rate; natural-1 alone for the
+     forecast targets. Expected per seed on `fleet15k`: ≈ 158 labels that
+     can reach `warning` in the window, ≈ 73 true groups (Appendix B.5.7);
    - **enriched**: ≥ **100 meaningful** labels per gated kind of AT-2 in the
      evaluation window, placed on **individual** (never folded) series;
      used for recall and time-to-detect only.
@@ -41,9 +44,15 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
    DESIGN §4.4 in the label's currency), ≈ 25 % **near** (0.5–2 ×) and
    ≈ 25 % **sub-threshold** (< 0.5 ×); the enriched seed draws its gated
    labels as meaningful only. `impactClass` is in the label.
-8. **Tail services.** On the natural seed, labels land on services in
-   proportion to their natural rates, including services that `fleet15k`
-   folds into `Other services`; those labels carry `folded: true`.
+8. **Placement (natural seeds).** Series-level kinds pick their series
+   with probability **proportional to its mean spend** over the full
+   service mix, before folding; account-level kinds pick accounts
+   uniformly; fan-in kinds pick (scope, service) proportional to spend.
+   Labels that land on services `fleet15k` folds into `Other services`
+   (≈ 26 % of series-level labels, the spend share of `Other services`)
+   carry `folded: true`. Enriched-seed gated labels are on individual
+   series only, so `fleet15k` recall is **measured on individual series
+   only** (≈ 79 % of account × service series are folded).
 
 ## C.2 Catalogue
 
@@ -133,7 +142,7 @@ and the evaluator's own actuals computed from the source bucket.
    detector's naming is reported as a confusion matrix, not penalised).
 4. **Multi-label:** G may qualify for several labels; each counts as
    detected by G.
-5. **Precision** (natural seed, groups at ≥ `warning`): G is **correct** if
+5. **Precision** (natural seeds pooled, groups at ≥ `warning`): G is **correct** if
    it qualifies for at least one `alert` label (any impact class) not
    already detected by an earlier group; it is a **duplicate** if every
    `alert` label it qualifies for was already detected by an earlier group
@@ -146,9 +155,9 @@ and the evaluator's own actuals computed from the source bucket.
 7. **Time-to-detect** (enriched seed): first detection day of the first
    qualifying group − L.start, with data for day d available on d + 1; for
    `gradual_drift` also − (first day the cumulative excess ≥ min impact).
-8. **Alert volume** (natural seed): groups at ≥ `warning` by first
-   detection day, and false groups alone.
-9. **Folded labels** (natural seed, `fleet15k`): reported as detected
+8. **False-positive rate** (natural seeds pooled): false groups at
+   ≥ `warning` by first detection day (gated); all groups (reported).
+9. **Folded labels** (natural seeds, `fleet15k`): reported as detected
    (a qualifying group exists) or lost; not gated.
 10. **Determinism:** the evaluator's JSON output for a given dataset and API
     output is byte-identical across runs; the TypeScript job's own summary
@@ -161,10 +170,10 @@ Wilson score interval, 95 % (z = 1.96), for a proportion p̂ over n:
 
 | Gate | Seed | Statistic | Passes when |
 |---|---|---|---|
-| AT-1 precision | natural | correct ÷ all groups at ≥ `warning` | p̂ ≥ 0.80 **and** Wilson lower ≥ 0.70, n ≥ 100 (fewer: "insufficient n", escalated) |
+| AT-1 precision | natural seeds pooled | correct ÷ all groups at ≥ `warning` | p̂ ≥ 0.80 **and** Wilson lower ≥ 0.70, n ≥ 100 (expected ≈ 183 with two seeds; fewer than 140 after two: run natural-3; fewer than 100 after three: "insufficient n", escalated) |
 | AT-2 recall, per kind | enriched | detected ÷ meaningful labels | p̂ ≥ target **and** Wilson lower ≥ target − 0.10, n ≥ 100 per kind |
 | AT-3 time-to-detect | enriched | median, p90 | point estimates ≤ targets |
-| AT-4 volume | natural | groups per day; false groups per day | means and p95 days ≤ targets |
+| AT-4 false-positive rate | natural seeds pooled | false groups per day | mean ≤ 0.30 (`fleet15k`) / 0.40 (`full`), p95 day ≤ 2 |
 | AT-5 suppression | natural, enriched | count | exactly 0 |
 | AT-6 one group per shared event | natural, enriched | groups per fan-in label per currency; duplicates | exactly 1; 0 duplicates |
 
@@ -184,6 +193,7 @@ the harness can see failure:
 | split one `shared_cause` group into N groups | AT-6 fails (N − 1 duplicates) |
 | matcher accepts a label explaining 5 % of the excess and ranked 4th | precision rises spuriously; the C.4 rule test fails |
 | compute precision on the enriched seed | the seed check fails (precision is natural-only) |
+| pool the tuning seed into precision | the seed check fails (tuning is never scored) |
 | replace the Wilson rule by the point estimate | a fixture with p̂ = 0.80, n = 20 passes wrongly; the test fails |
 | count duplicates as correct | AT-6 and precision tests fail |
 | relabel a `no_alert` label as `alert` in a copy of `labels.jsonl` | recall falls by exactly that label |
