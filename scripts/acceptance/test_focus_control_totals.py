@@ -142,6 +142,81 @@ class ComputeTests(unittest.TestCase):
         self.assertEqual(doc['totals'][0]['rowDigest'], hashlib.sha256(b'k1\t1\t1\n').hexdigest())
 
 
+FULL_HEADER = (
+    '"BillingPeriodStart","BillingPeriodEnd","ChargePeriodStart","ChargePeriodEnd","BillingCurrency","BilledCost",'
+    '"EffectiveCost","ListCost","ContractedCost","ProviderName","ServiceName","ServiceCategory","ChargeCategory",'
+    '"ResourceId","SubAccountId","BillingAccountId","ConsumedQuantity","ConsumedUnit","UsageQuantity","UsageUnit",'
+    '"PricingQuantity","PricingUnit","Id","Tags","Note"\n'
+)
+
+
+class ExpectedRowTests(unittest.TestCase):
+    """The API contract per row (publishedCosts.ts), derived from the UPSTREAM record."""
+
+    def test_one_row_maps_to_the_api_contract(self):
+        data = csv_bytes(
+            '"2024-09-01 00:00:00","2024-10-01 00:00:00","2024-09-18 22:00:00","2024-09-18T23:00:00.5+02:00","USD",'
+            '007.50,-0.000,NULL,"","AWS","Amazon S3","","Usage","arn:x",NULL,"123",2.000,"Requests",9,"Other",'
+            '1.5,"NULL","r1","{""a"": ""b""}",NULL',
+            header=FULL_HEADER,
+        )
+        doc = fct.compute(data, rows=True)
+        self.assertEqual(doc['rows'], [{
+            'billingPeriod': '2024-09-01',
+            'chargePeriodStart': '2024-09-18T22:00:00.000000Z',
+            'chargePeriodEnd': '2024-09-18T21:00:00.500000Z',
+            'billedCost': '7.50',
+            'effectiveCost': '0.000',
+            'listCost': None,
+            'contractedCost': None,
+            'billingCurrency': 'USD',
+            'providerName': 'AWS',
+            'serviceName': 'Amazon S3',
+            'serviceCategory': None,
+            'chargeCategory': 'Usage',
+            'resourceId': 'arn:x',
+            'subAccountId': None,
+            'billingAccountId': '123',
+            'usageQuantity': '2.000',
+            'usageUnit': 'Requests',
+            'pricingQuantity': '1.5',
+            'pricingUnit': 'NULL',
+            'focusVersion': '1.0',
+            'extraColumns': {'BillingPeriodEnd': '2024-10-01 00:00:00', 'Id': 'r1', 'Tags': '{"a": "b"}'},
+        }])
+
+    def test_usage_falls_back_when_consumed_is_null(self):
+        data = csv_bytes(
+            '"2024-09-01 00:00:00","2024-10-01 00:00:00","2024-09-18 22:00:00","2024-09-18 23:00:00","USD",'
+            '1,1,1,1,"P","S","C","Usage","r","s","b",NULL,NULL,9.0,"Hrs",1,"u","r1",NULL,NULL',
+            header=FULL_HEADER,
+        )
+        row = fct.compute(data, rows=True)['rows'][0]
+        self.assertEqual((row['usageQuantity'], row['usageUnit']), ('9.0', 'Hrs'))
+
+    def test_columns_are_classified_explicitly(self):
+        doc = fct.compute(csv_bytes('"2024-09-01 00:00:00","USD",1,1,"a",""'))
+        self.assertEqual(doc['columns'], {
+            'mapped': {'BillingPeriodStart': 'billingPeriod', 'BillingCurrency': 'billingCurrency', 'BilledCost': 'billedCost', 'EffectiveCost': 'effectiveCost'},
+            'extra': ['Id', 'Note'],
+            'notReturned': [],
+        })
+        self.assertNotIn('rows', doc)
+
+    def test_rows_fail_closed(self):
+        ok = '"2024-09-01 00:00:00","2024-10-01 00:00:00","2024-09-18 22:00:00","2024-09-18 23:00:00","USD",1,1,1,1,"P","S","C","Usage","r","s","b",1,"u",1,"u",1,"u","{id}",NULL,NULL'
+        with self.assertRaises(fct.ControlTotalsError):
+            fct.compute(csv_bytes(ok.format(id='a'), ok.format(id='a'), header=FULL_HEADER), rows=True)  # duplicate Id
+        for bad in ['"2024-09-18"', '"2024-09-18 22:00:00.1234567"', '"2024-09-18 25:00:00"', 'NULL']:
+            with self.subTest(bad=bad):
+                row = ok.format(id='a').replace('"2024-09-18 22:00:00"', bad)
+                with self.assertRaises(fct.ControlTotalsError):
+                    fct.compute(csv_bytes(row, header=FULL_HEADER), rows=True)
+        row = ok.format(id='a').replace(',1,"u",1,"u",1,"u",', ',1e3,"u",1,"u",1,"u",')
+        with self.assertRaises(fct.ControlTotalsError):
+            fct.compute(csv_bytes(row, header=FULL_HEADER), rows=True)  # ConsumedQuantity not a plain decimal
+
+
 class MainTests(unittest.TestCase):
     def run_main(self, argv):
         out, err = io.StringIO(), io.StringIO()

@@ -28,6 +28,9 @@ import {
   planStaging,
   readDataset,
   resyncProblems,
+  rowProblems,
+  API_ROW_FIELDS,
+  UPSTREAM_COMPARED_FIELDS,
   stageFocusSample,
   sumDecimals,
   syncProblems,
@@ -185,19 +188,23 @@ describe('A3 staging the committed 1k file as an AWS Data Exports layout', () =>
     const clone = () => structuredClone(STAGED.plan);
     const changed = clone();
     changed.periods[0].files[0].records[5] = changed.periods[0].files[0].records[5].replace(/,0\./, ',1.');
-    expect(verifyStagingLossless(UPSTREAM_1K, changed).length).toBeGreaterThan(0);
+    expect(verifyStagingLossless(UPSTREAM_1K, changed)).toEqual(['period 2024-09: staged record 6 differs from upstream']);
     const dropped = clone();
     dropped.periods[0].files[0].records.pop();
-    expect(verifyStagingLossless(UPSTREAM_1K, dropped).length).toBeGreaterThan(0);
+    expect(verifyStagingLossless(UPSTREAM_1K, dropped)).toEqual(['period 2024-09: 998 staged records, upstream has 999']);
     const duplicated = clone();
     duplicated.periods[0].files[0].records.push(duplicated.periods[0].files[0].records[0]);
-    expect(verifyStagingLossless(UPSTREAM_1K, duplicated).length).toBeGreaterThan(0);
+    expect(verifyStagingLossless(UPSTREAM_1K, duplicated)).toEqual(['period 2024-09: 1000 staged records, upstream has 999', 'period 2024-09: staged record 1000 differs from upstream']);
     const moved = clone();
     moved.periods[1].files[0].records.push(moved.periods[0].files[0].records.pop());
-    expect(verifyStagingLossless(UPSTREAM_1K, moved).length).toBeGreaterThan(0);
+    expect(verifyStagingLossless(UPSTREAM_1K, moved)).toEqual(['period 2024-09: 998 staged records, upstream has 999', 'period 2024-10: 2 staged records, upstream has 1', 'period 2024-10: staged record 2 differs from upstream']);
     const reordered = clone();
     reordered.periods[0].files[0].records.reverse();
-    expect(verifyStagingLossless(UPSTREAM_1K, reordered).length).toBeGreaterThan(0);
+    expect(verifyStagingLossless(UPSTREAM_1K, reordered)).toEqual(['period 2024-09: staged record 1 differs from upstream']);
+    // Only the header check can see this one: every record is untouched.
+    const header = clone();
+    header.header = header.header.replace('"BilledCost"', '"BilledCostX"');
+    expect(verifyStagingLossless(UPSTREAM_1K, header)).toEqual(['the staged header differs from the upstream header']);
   });
 
   it('is deterministic (same bytes, same SHA-256s)', () => {
@@ -315,38 +322,55 @@ describe('A5 API rows and totals vs the control', () => {
     expect(compareAcceptance({ control, apiTotals, rows })).toEqual([]);
   });
 
-  it('every kind of difference is a problem', () => {
+  /** Exact problem lists: a string must be equal, a RegExp must match, in order and with nothing extra. */
+  const expectProblems = (problems, expected, name) => {
+    expect(problems.length, `${name}: ${JSON.stringify(problems)}`).toBe(expected.length);
+    expected.forEach((e, i) => (e instanceof RegExp ? expect(problems[i], name).toMatch(e) : expect(problems[i], name).toBe(e)));
+  };
+  const DIGEST = /^API rows 2024-09-01\|USD: rowDigest [0-9a-f]{64} != control [0-9a-f]{64}$/;
+
+  it('every kind of difference is a problem, with its exact message', () => {
     const cases = {
-      'api rowCount': { apiTotals: [{ ...apiTotals[0], rowCount: '3' }, apiTotals[1]] },
-      'api rowCount as a number': { apiTotals: [{ ...apiTotals[0], rowCount: 2 }, apiTotals[1]] },
-      'api billed value': { apiTotals: [{ ...apiTotals[0], billedCost: '1.36' }, apiTotals[1]] },
-      'api billed scale': { apiTotals: [{ ...apiTotals[0], billedCost: '1.350' }, apiTotals[1]] },
-      'api period missing': { apiTotals: [apiTotals[0]] },
-      'api extra period': { apiTotals: [...apiTotals, { ...apiTotals[1], billingPeriod: '2024-11-01' }] },
-      'api duplicate entry': { apiTotals: [...apiTotals, apiTotals[0]] },
-      'api null totals': { apiTotals: null },
-      'row billed': { rows: [row({ rowOrdinal: '0', billedCost: '1.11', effectiveCost: '1.00', extraColumns: { Id: 'a' } }), rows[1], rows[2]] },
-      'row effective': { rows: [row({ rowOrdinal: '0', billedCost: '1.10', effectiveCost: '0.99', extraColumns: { Id: 'a' } }), rows[1], rows[2]] },
-      'row effective null count': { rows: [rows[0], row({ rowOrdinal: '1', billedCost: '0.25', effectiveCost: '0', extraColumns: { Id: 'b' } }), rows[2]] },
-      'row swapped values (digest)': {
-        rows: [row({ rowOrdinal: '0', billedCost: '0.25', effectiveCost: '1.00', extraColumns: { Id: 'a' } }), row({ rowOrdinal: '1', billedCost: '1.10', effectiveCost: null, extraColumns: { Id: 'b' } }), rows[2]],
-      },
-      'row missing': { rows: [rows[0], rows[2]] },
-      'row duplicated (same key)': { rows: [...rows, rows[0]] },
-      'row missing Id': { rows: [row({ rowOrdinal: '0', billedCost: '1.10', effectiveCost: '1.00', extraColumns: {} }), rows[1], rows[2]] },
-      'row billed not a decimal string': { rows: [row({ rowOrdinal: '0', billedCost: 1.1, effectiveCost: '1.00', extraColumns: { Id: 'a' } }), rows[1], rows[2]] },
-      'row in another currency': { rows: [rows[0], rows[1], { ...rows[2], billingCurrency: 'EUR' }] },
+      'api rowCount': [{ apiTotals: [{ ...apiTotals[0], rowCount: '3' }, apiTotals[1]] }, ['API totals 2024-09-01|USD: rowCount "3" != control "2"']],
+      'api rowCount as a number': [{ apiTotals: [{ ...apiTotals[0], rowCount: 2 }, apiTotals[1]] }, ['API totals 2024-09-01|USD: rowCount 2 != control "2"']],
+      'api billed value': [{ apiTotals: [{ ...apiTotals[0], billedCost: '1.36' }, apiTotals[1]] }, ['API totals 2024-09-01|USD: billedCost "1.36" != control "1.35"']],
+      'api billed scale': [{ apiTotals: [{ ...apiTotals[0], billedCost: '1.350' }, apiTotals[1]] }, ['API totals 2024-09-01|USD: billedCost "1.350" != control "1.35"']],
+      'api period missing': [{ apiTotals: [apiTotals[0]] }, ['API totals 2024-10-01|USD: missing']],
+      'api extra period': [{ apiTotals: [...apiTotals, { ...apiTotals[1], billingPeriod: '2024-11-01' }] }, ['API totals 2024-11-01|USD: not in the control']],
+      'api duplicate entry': [{ apiTotals: [...apiTotals, apiTotals[0]] }, ['API totals 2024-09-01|USD: more than one entry']],
+      'api null totals': [{ apiTotals: null }, ['the API returned no totals on page 1']],
+      'row billed': [{ rows: [row({ rowOrdinal: '0', billedCost: '1.11', effectiveCost: '1.00', extraColumns: { Id: 'a' } }), rows[1], rows[2]] }, ['API rows 2024-09-01|USD: billedCost 1.36 != control 1.35', DIGEST]],
+      'row effective': [{ rows: [row({ rowOrdinal: '0', billedCost: '1.10', effectiveCost: '0.99', extraColumns: { Id: 'a' } }), rows[1], rows[2]] }, ['API rows 2024-09-01|USD: effectiveCost 0.99 != control 1.00', DIGEST]],
+      'row effective null replaced by 0': [{ rows: [rows[0], row({ rowOrdinal: '1', billedCost: '0.25', effectiveCost: '0', extraColumns: { Id: 'b' } }), rows[2]] }, ['API rows 2024-09-01|USD: effectiveCostNulls 0 != control 1', DIGEST]],
+      'row swapped values (digest only)': [
+        { rows: [row({ rowOrdinal: '0', billedCost: '0.25', effectiveCost: '1.00', extraColumns: { Id: 'a' } }), row({ rowOrdinal: '1', billedCost: '1.10', effectiveCost: null, extraColumns: { Id: 'b' } }), rows[2]] },
+        [DIGEST],
+      ],
+      'row missing': [
+        { rows: [rows[0], rows[2]] },
+        ['API rows over all pages: 2 (2 distinct), control 3', 'API rows 2024-09-01|USD: rowCount 1 != control 2', 'API rows 2024-09-01|USD: billedCost 1.10 != control 1.35', 'API rows 2024-09-01|USD: effectiveCostNulls 0 != control 1', DIGEST],
+      ],
+      'row duplicated (same key)': [
+        { rows: [...rows, rows[0]] },
+        ['API rows over all pages: 4 (3 distinct), control 3', 'API rows 2024-09-01|USD: rowCount 3 != control 2', 'API rows 2024-09-01|USD: billedCost 2.45 != control 1.35', 'API rows 2024-09-01|USD: effectiveCost 2.00 != control 1.00', DIGEST],
+      ],
+      'row missing Id': [{ rows: [row({ rowOrdinal: '0', billedCost: '1.10', effectiveCost: '1.00', extraColumns: {} }), rows[1], rows[2]] }, ['API rows: row 0: extraColumns.Id is missing']],
+      'row billed not a decimal string': [{ rows: [row({ rowOrdinal: '0', billedCost: 1.1, effectiveCost: '1.00', extraColumns: { Id: 'a' } }), rows[1], rows[2]] }, ['API rows: row 0: billedCost is not a decimal string']],
+      'row in another currency': [{ rows: [rows[0], rows[1], { ...rows[2], billingCurrency: 'EUR' }] }, ['API rows 2024-10-01|USD: none', 'API rows 2024-10-01|EUR: not in the control']],
+      // Only the null-count check can see this one: the sums, the digest, the counts and the API totals all still agree.
+      'effectiveCostNulls alone': [{ control: { totals: [{ ...control.totals[0], effectiveCostNulls: '2' }, control.totals[1]] } }, ['API rows 2024-09-01|USD: effectiveCostNulls 1 != control 2']],
+      // Only the distinct-key check can see this one: same row count, same values, two rows share (batch, artifact, ordinal).
+      'distinct-row check alone': [{ rows: [rows[0], { ...rows[1], rowOrdinal: '0' }, rows[2]] }, ['API rows over all pages: 3 (2 distinct), control 3']],
     };
-    for (const [name, change] of Object.entries(cases)) {
-      const problems = compareAcceptance({ control, apiTotals, rows, ...change });
-      expect(problems.length, name).toBeGreaterThan(0);
+    for (const [name, [change, expected]] of Object.entries(cases)) {
+      expectProblems(compareAcceptance({ control, apiTotals, rows, ...change }), expected, name);
     }
   });
 
   it('the API artifact set must equal the staged data objects', () => {
     expect(artifactSetProblems(rows, ['f'.repeat(64), 'e'.repeat(64)])).toEqual([]);
-    expect(artifactSetProblems(rows, ['f'.repeat(64)]).length).toBeGreaterThan(0);
-    expect(artifactSetProblems(rows, ['f'.repeat(64), 'e'.repeat(64), 'd'.repeat(64)]).length).toBeGreaterThan(0);
+    expect(artifactSetProblems(rows, ['f'.repeat(64)])).toEqual([`API rows reference artifact ${'e'.repeat(64)}, which was not staged`]);
+    expect(artifactSetProblems(rows, ['f'.repeat(64), 'e'.repeat(64), 'd'.repeat(64)])).toEqual([`staged data object ${'d'.repeat(64)} has no row in the API`]);
   });
 
   it('first sync: every control period published with the control’s count and billed total, unverified; nothing else', () => {
@@ -357,15 +381,16 @@ describe('A5 API rows and totals vs the control', () => {
     ];
     expect(syncProblems(rec(good), control)).toEqual([]);
     const bad = {
-      quarantined: [{ ...good[0], outcome: 'quarantined', code: 'UNPARSEABLE_NUMBER' }, good[1]],
-      count: [{ ...good[0], rowCount: '3' }, good[1]],
-      billed: [{ ...good[0], billedTotal: '1.350' }, good[1]],
-      reconciled: [{ ...good[0], reconciliation: 'reconciled' }, good[1]],
-      missing: [good[0]],
-      extra: [...good, { ...good[1], billingPeriod: '2024-11-01' }],
+      quarantined: [[{ ...good[0], outcome: 'quarantined', code: 'UNPARSEABLE_NUMBER' }, good[1]], ['sync 2024-09-01: quarantined UNPARSEABLE_NUMBER']],
+      count: [[{ ...good[0], rowCount: '3' }, good[1]], ['sync 2024-09-01: rowCount "3" != control "2"']],
+      billed: [[{ ...good[0], billedTotal: '1.350' }, good[1]], ['sync 2024-09-01: billedTotal "1.350" != control "1.35"']],
+      reconciled: [[{ ...good[0], reconciliation: 'reconciled' }, good[1]], ['sync 2024-09-01: reconciliation "reconciled", expected "unverified" (no control totals in the manifest)']],
+      missing: [[good[0]], ['sync: control period 2024-10-01 was not synced']],
+      extra: [[...good, { ...good[1], billingPeriod: '2024-11-01' }], ['sync: unexpected period 2024-11-01 (published)']],
+      duplicate: [[...good, good[1]], ['sync: unexpected period 2024-10-01 (published)']],
     };
-    for (const [name, periods] of Object.entries(bad)) expect(syncProblems(rec(periods), control).length, name).toBeGreaterThan(0);
-    expect(syncProblems(rec(good, false), control).length).toBeGreaterThan(0);
+    for (const [name, [periods, expected]] of Object.entries(bad)) expectProblems(syncProblems(rec(periods), control), expected, name);
+    expectProblems(syncProblems(rec(good, false), control), ['sync: the evidence record does not pass'], 'pass false');
   });
 
   it('second sync: every control period skipped_unchanged; nothing else', () => {
@@ -375,8 +400,9 @@ describe('A5 API rows and totals vs the control', () => {
       { billingPeriod: '2024-10-01', outcome: 'skipped_unchanged' },
     ];
     expect(resyncProblems(rec(good), control)).toEqual([]);
-    expect(resyncProblems(rec([good[0], { ...good[1], outcome: 'published' }]), control).length).toBeGreaterThan(0);
-    expect(resyncProblems(rec([good[0]]), control).length).toBeGreaterThan(0);
+    expectProblems(resyncProblems(rec([good[0], { ...good[1], outcome: 'published' }]), control), ['second sync 2024-10-01: published, expected skipped_unchanged'], 'published');
+    expectProblems(resyncProblems(rec([good[0]]), control), ['second sync: control period 2024-10-01 missing'], 'missing');
+    expectProblems(resyncProblems(rec([...good, { ...good[0], billingPeriod: '2024-11-01' }]), control), ['second sync: unexpected period 2024-11-01 (skipped_unchanged)'], 'extra');
   });
 
   it('catalog: exactly one published, unverified, non-provisional batch per control period, with the control’s count and total', () => {
@@ -384,15 +410,160 @@ describe('A5 API rows and totals vs the control', () => {
     const good = [b({}), b({ billing_period: '2024-10-01', row_count: '1', loaded_billed_total: '0.24000000000' })];
     expect(batchProblems(good, control)).toEqual([]);
     const bad = {
-      quarantined: [...good, b({ status: 'quarantined' })],
-      superseded: [...good, b({ status: 'superseded' })],
-      provisional: [b({ is_provisional: true }), good[1]],
-      reconciled: [b({ reconciliation: 'reconciled' }), good[1]],
-      count: [b({ row_count: '3' }), good[1]],
-      total: [b({ loaded_billed_total: '1.350' }), good[1]],
-      missing: [good[0]],
+      quarantined: [[...good, b({ status: 'quarantined' })], ['catalog 2024-09-01: 2 batches (published, quarantined), expected exactly 1']],
+      superseded: [[...good, b({ status: 'superseded' })], ['catalog 2024-09-01: 2 batches (published, superseded), expected exactly 1']],
+      status: [[b({ status: 'superseded' }), good[1]], ['catalog 2024-09-01: status superseded']],
+      provisional: [[b({ is_provisional: true }), good[1]], ['catalog 2024-09-01: is_provisional true']],
+      reconciled: [[b({ reconciliation: 'reconciled' }), good[1]], ['catalog 2024-09-01: reconciliation reconciled']],
+      count: [[b({ row_count: '3' }), good[1]], ['catalog 2024-09-01: row_count 3 != control 2']],
+      total: [[b({ loaded_billed_total: '1.350' }), good[1]], ['catalog 2024-09-01: loaded_billed_total 1.350 != control 1.35']],
+      missing: [[good[0]], ['catalog 2024-10-01: 0 batches (), expected exactly 1']],
+      'extra, unexpected period': [[...good, b({ billing_period: '2024-11-01' })], ['catalog: unexpected batch(es) for 2024-11-01: published']],
     };
-    for (const [name, batches] of Object.entries(bad)) expect(batchProblems(batches, control).length, name).toBeGreaterThan(0);
+    for (const [name, [batches, expected]] of Object.entries(bad)) expectProblems(batchProblems(batches, control), expected, name);
+  });
+});
+
+describe('A10 full-row comparison: every API row vs its UPSTREAM record, keyed by Id', () => {
+  const expectedRow = (o) => ({
+    billingPeriod: '2024-09-01',
+    chargePeriodStart: '2024-09-18T22:00:00.000000Z',
+    chargePeriodEnd: '2024-09-18T23:00:00.000000Z',
+    billedCost: '1.10',
+    effectiveCost: '1.00',
+    listCost: null,
+    contractedCost: '1.00',
+    billingCurrency: 'USD',
+    providerName: 'AWS',
+    serviceName: 'Amazon S3',
+    serviceCategory: 'Storage',
+    chargeCategory: 'Usage',
+    resourceId: 'arn:x',
+    subAccountId: '1',
+    billingAccountId: '2',
+    usageQuantity: '2.000',
+    usageUnit: 'GB',
+    pricingQuantity: '2',
+    pricingUnit: 'GB',
+    focusVersion: '1.0',
+    extraColumns: { Id: 'a', Tags: '{"k": "v"}' },
+    ...o,
+  });
+  const expected = {
+    columns: { mapped: {}, extra: ['Id', 'Tags', 'BillingPeriodEnd'], notReturned: [] },
+    rows: [expectedRow({}), expectedRow({ billedCost: '0.25', effectiveCost: null, extraColumns: { Id: 'b', BillingPeriodEnd: '2024-10-01 00:00:00' } })],
+  };
+  const meta = (i) => ({
+    sourceId: '11111111-1111-4111-8111-111111111111',
+    batchId: '22222222-2222-4222-8222-222222222222',
+    artifactSha256: 'f'.repeat(64),
+    rowOrdinal: String(i),
+    publishedAt: '2026-10-04T10:00:00.123456Z',
+  });
+  const api = () => expected.rows.map((r, i) => ({ ...meta(i), ...structuredClone(r) }));
+
+  it('the API row field set is the route contract (publishedCosts.ts): 21 compared to upstream + 5 batch metadata', () => {
+    expect([...UPSTREAM_COMPARED_FIELDS].sort()).toEqual(Object.keys(expectedRow({})).sort());
+    expect([...API_ROW_FIELDS].sort()).toEqual([...UPSTREAM_COMPARED_FIELDS, 'sourceId', 'batchId', 'artifactSha256', 'rowOrdinal', 'publishedAt'].sort());
+    // Drift guard: the route's SELECT list (page query) names exactly these fields.
+    const route = read('src/server/costs/publishedCosts.ts');
+    const page = route.slice(route.indexOf('AS "billingPeriod"') - 80, route.indexOf('AS "publishedAt"') + 20);
+    const aliases = [...page.matchAll(/ AS "([A-Za-z0-9]+)"/g)].map((m) => m[1]);
+    expect(aliases.sort()).toEqual([...API_ROW_FIELDS].sort());
+  });
+
+  it('equal ⇒ no problem', () => {
+    expect(rowProblems(api(), expected)).toEqual([]);
+  });
+
+  it('a change in ANY compared field is reported, exactly once, with the field and the Id', () => {
+    for (const f of UPSTREAM_COMPARED_FIELDS) {
+      const rows = api();
+      rows[1][f] = f === 'extraColumns' ? { ...rows[1].extraColumns, BillingPeriodEnd: 'x' } : rows[1][f] === null ? 'x' : `${rows[1][f]}0`;
+      const problems = rowProblems(rows, expected);
+      expect(problems.length, `${f}: ${JSON.stringify(problems)}`).toBe(1);
+      expect(problems[0], f).toMatch(new RegExp(`^row Id=b: ${f} .* != upstream `));
+    }
+  });
+
+  it('null vs value, a dropped or an unexpected extra column, and decimal scale all count', () => {
+    const cases = [
+      [(r) => (r[0].listCost = '0'), ['row Id=a: listCost "0" != upstream null']],
+      [(r) => (r[0].effectiveCost = null), ['row Id=a: effectiveCost null != upstream "1.00"']],
+      [(r) => (r[0].billedCost = '1.1'), ['row Id=a: billedCost "1.1" != upstream "1.10"']],
+      [(r) => delete r[0].extraColumns.Tags, ['row Id=a: extraColumns {"Id":"a"} != upstream {"Id":"a","Tags":"{\\"k\\": \\"v\\"}"}']],
+      [
+        (r) => (r[0].extraColumns.ChargeClass = 'NULL'),
+        ['row Id=a: extraColumns has ChargeClass, which is not an extra column of the upstream file', 'row Id=a: extraColumns {"ChargeClass":"NULL","Id":"a","Tags":"{\\"k\\": \\"v\\"}"} != upstream {"Id":"a","Tags":"{\\"k\\": \\"v\\"}"}'],
+      ],
+    ];
+    for (const [mutate, want] of cases) {
+      const rows = api();
+      mutate(rows);
+      expect(rowProblems(rows, expected)).toEqual(want);
+    }
+  });
+
+  it('identity, completeness and the metadata fields', () => {
+    const rows = api();
+    expect(rowProblems([rows[0]], expected)).toEqual(['upstream record Id=b has no API row']);
+    expect(rowProblems([...rows, { ...rows[0], rowOrdinal: '9' }], expected)).toEqual(['Id a appears in more than one API row']);
+    expect(rowProblems([...rows, { ...rows[0], rowOrdinal: '9', extraColumns: { Id: 'zz' } }], expected)).toEqual(['row Id=zz: not an upstream record']);
+    expect(rowProblems([{ ...rows[0], extraColumns: {} }, rows[1]], expected)).toEqual(['API row 0 has no extraColumns.Id', 'upstream record Id=a has no API row']);
+    const extraField = api();
+    extraField[0].tenantId = 'x';
+    expect(rowProblems(extraField, expected)).toEqual(['row Id=a: fields differ from the API contract (missing: none; unexpected: tenantId)']);
+    const missingField = api();
+    delete missingField[0].focusVersion;
+    expect(rowProblems(missingField, expected)).toEqual(['row Id=a: fields differ from the API contract (missing: focusVersion; unexpected: none)']);
+    for (const [f, bad] of [['sourceId', 'x'], ['batchId', 'x'], ['artifactSha256', 'F'.repeat(64)], ['rowOrdinal', '-1'], ['publishedAt', '2026-10-04T10:00:00Z']]) {
+      const r = api();
+      r[0][f] = bad;
+      expect(rowProblems(r, expected), f).toEqual([`row Id=a: ${f} ${JSON.stringify(bad)} has the wrong shape`]);
+    }
+    const twoSources = api();
+    twoSources[1].sourceId = '33333333-3333-4333-8333-333333333333';
+    expect(rowProblems(twoSources, expected)).toEqual(['the API rows come from 2 sources, expected 1']);
+  });
+
+  it('caps the report and says how many more there are', () => {
+    const many = { columns: expected.columns, rows: Array.from({ length: 30 }, (_, i) => expectedRow({ extraColumns: { Id: `r${i}` } })) };
+    const rows = many.rows.map((r, i) => ({ ...meta(i), ...structuredClone(r), billedCost: '9' }));
+    const problems = rowProblems(rows, many);
+    expect(problems).toHaveLength(21);
+    expect(problems[20]).toBe('… and 10 more row problems');
+  });
+
+  it('the pinned column classification is explicit: 19 mapped, 25 returned in extraColumns, none dropped', () => {
+    const mapped = {
+      BilledCost: 'billedCost',
+      BillingAccountId: 'billingAccountId',
+      BillingCurrency: 'billingCurrency',
+      BillingPeriodStart: 'billingPeriod',
+      ChargeCategory: 'chargeCategory',
+      ChargePeriodEnd: 'chargePeriodEnd',
+      ChargePeriodStart: 'chargePeriodStart',
+      ConsumedQuantity: 'usageQuantity',
+      ConsumedUnit: 'usageUnit',
+      ContractedCost: 'contractedCost',
+      EffectiveCost: 'effectiveCost',
+      ListCost: 'listCost',
+      PricingQuantity: 'pricingQuantity',
+      PricingUnit: 'pricingUnit',
+      ProviderName: 'providerName',
+      ResourceId: 'resourceId',
+      ServiceCategory: 'serviceCategory',
+      ServiceName: 'serviceName',
+      SubAccountId: 'subAccountId',
+    };
+    const extra = [
+      'AvailabilityZone', 'BillingAccountName', 'BillingPeriodEnd', 'ChargeClass', 'ChargeDescription', 'ChargeFrequency',
+      'CommitmentDiscountCategory', 'CommitmentDiscountId', 'CommitmentDiscountName', 'CommitmentDiscountStatus',
+      'CommitmentDiscountType', 'ContractedUnitPrice', 'InvoiceIssuerName', 'ListUnitPrice', 'PricingCategory', 'PublisherName',
+      'RegionId', 'RegionName', 'ResourceName', 'ResourceType', 'Id', 'SkuId', 'SkuPriceId', 'SubAccountName', 'Tags',
+    ];
+    for (const key of ['1k', '10k']) expect(PINNED[key].columns, key).toEqual({ mapped, extra, notReturned: [] });
+    expect([...Object.keys(mapped), ...extra].sort()).toEqual([...HEADER].sort());
   });
 });
 
@@ -402,11 +573,11 @@ describe('A6 mutations change the staged objects as DESIGN §6 says', () => {
   const stage = (mutation) => stageFocusSample(UPSTREAM_1K, { mutation });
 
   it('the list of kinds is exactly the documented one', () => {
-    expect([...MUTATIONS]).toEqual(['corrupt-billed', 'corrupt-effective', 'drop-row', 'double-ingest', 'shift-period', 'swap-billed', 'skip-null-conversion', 'skip-period-split']);
+    expect([...MUTATIONS]).toEqual(['corrupt-billed', 'corrupt-effective', 'drop-row', 'double-ingest', 'shift-period', 'swap-billed', 'skip-null-conversion', 'skip-period-split', 'corrupt-text-columns', 'corrupt-list-cost']);
     expect(() => stage('nope')).toThrow(/mutation/);
   });
 
-  for (const [kind, column] of [['corrupt-billed', 'BilledCost'], ['corrupt-effective', 'EffectiveCost']]) {
+  for (const [kind, column] of [['corrupt-billed', 'BilledCost'], ['corrupt-effective', 'EffectiveCost'], ['corrupt-list-cost', 'ListCost']]) {
     it(`${kind}: one record of the largest period, ${column} + 1 in the last decimal place`, () => {
       const s = stage(kind);
       expect(s.mutation).toBe(kind);
@@ -424,6 +595,22 @@ describe('A6 mutations change the staged objects as DESIGN §6 says', () => {
       expect(recordsOf(s, '2024-10')).toEqual(recordsOf(STAGED, '2024-10'));
     });
   }
+
+  it('corrupt-text-columns: one record of the largest period, six text columns changed, still quoted strings (the challenger’s mutation)', () => {
+    const s = stage('corrupt-text-columns');
+    const m = recordsOf(s, '2024-09');
+    const d = diffIdx(clean09, m);
+    expect(d).toHaveLength(1);
+    const before = fieldsOf(clean09[d[0]]);
+    const after = fieldsOf(m[d[0]]);
+    const changed = before.map((f, i) => (f.raw !== after[i].raw ? HEADER[i] : null)).filter(Boolean).sort();
+    expect(changed).toEqual(['ChargeCategory', 'ChargeDescription', 'ProviderName', 'ResourceId', 'ServiceCategory', 'ServiceName']);
+    for (const c of changed) {
+      expect(after[col(c)].quoted, c).toBe(true);
+      expect(after[col(c)].value, c).not.toBe(before[col(c)].value);
+    }
+    expect(recordsOf(s, '2024-10')).toEqual(recordsOf(STAGED, '2024-10'));
+  });
 
   it('drop-row: the last record of the largest period is gone', () => {
     const m = recordsOf(stage('drop-row'), '2024-09');
@@ -563,7 +750,7 @@ describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
 
   it('checks the pin and runs the independent calculator before any stack exists', () => {
     expect(body).toMatch(/verifyDatasetBytes\(bytes, pin\)/);
-    expect(body).toMatch(/run\('python3', \[CONTROL_CALCULATOR, '--expect-sha256', pin\.sha256, file\]/);
+    expect(body).toMatch(/run\('python3', \[CONTROL_CALCULATOR, '--rows', '--expect-sha256', pin\.sha256, file\]/);
     expect(body.indexOf("run('python3'")).toBeLessThan(body.indexOf('runLocalTest({'));
     expect(body.indexOf('stageFocusSample(bytes')).toBeLessThan(body.indexOf('runLocalTest({'));
   });
@@ -586,6 +773,7 @@ describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
       "fail('second sync', resyncProblems(second.record, control))",
       'compareAcceptance({ control, apiTotals: totals, rows })',
       'artifactSetProblems(rows, dataShas)',
+      "fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control))",
       "fail('catalog', batchProblems(catalog.batches, control))",
     ]) {
       expect(body, call).toContain(call);
@@ -616,6 +804,7 @@ describe('A8 wiring, pins and attribution', () => {
     const ignore = read('.gitignore').split('\n');
     expect(ignore).toContain('.ratio-sample-data/');
     expect(ignore).toContain('.ratio-local/');
+    expect(ignore).toContain('__pycache__/');
     expect(read('.gitattributes')).toMatch(/^fixtures\/focus-1\.0-sample\/\*\.csv -text$/m);
   });
 

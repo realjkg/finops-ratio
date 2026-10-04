@@ -1,0 +1,41 @@
+...........EEEE.....
+======================================================================
+ERROR: test_columns_are_classified_explicitly (test_focus_control_totals.ExpectedRowTests.test_columns_are_classified_explicitly)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/test_focus_control_totals.py", line 199, in test_columns_are_classified_explicitly
+    self.assertEqual(doc['columns'], {
+                     ~~~^^^^^^^^^^^
+KeyError: 'columns'
+
+======================================================================
+ERROR: test_one_row_maps_to_the_api_contract (test_focus_control_totals.ExpectedRowTests.test_one_row_maps_to_the_api_contract)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/test_focus_control_totals.py", line 163, in test_one_row_maps_to_the_api_contract
+    doc = fct.compute(data, rows=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'rows'
+
+======================================================================
+ERROR: test_rows_fail_closed (test_focus_control_totals.ExpectedRowTests.test_rows_fail_closed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/test_focus_control_totals.py", line 209, in test_rows_fail_closed
+    fct.compute(csv_bytes(ok.format(id='a'), ok.format(id='a'), header=FULL_HEADER), rows=True)  # duplicate Id
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'rows'
+
+======================================================================
+ERROR: test_usage_falls_back_when_consumed_is_null (test_focus_control_totals.ExpectedRowTests.test_usage_falls_back_when_consumed_is_null)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/test_focus_control_totals.py", line 194, in test_usage_falls_back_when_consumed_is_null
+    row = fct.compute(data, rows=True)['rows'][0]
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'rows'
+
+----------------------------------------------------------------------
+Ran 20 tests in 0.009s
+
+FAILED (errors=4)

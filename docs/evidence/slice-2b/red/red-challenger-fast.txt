@@ -1,0 +1,567 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435
+
+ ❯ scripts/acceptance/controlTotals.test.mjs (4 tests | 3 failed) 313ms
+   ❯ P2 independent control totals (Python) (4)
+     × P1: the calculator’s own unit tests pass 80ms
+     × reproduces the pinned control totals of the committed 1k file exactly 145ms
+     × --rows: one expected API row per upstream record, keyed by Id; the first one checked by hand against the upstream line 43ms
+ ❯ scripts/local/acceptance.test.mjs (60 tests | 12 failed) 1881ms
+   ❯ A10 full-row comparison: every API row vs its UPSTREAM record, keyed by Id (7)
+     × the API row field set is the route contract (publishedCosts.ts): 21 compared to upstream + 5 batch metadata 10ms
+     × equal ⇒ no problem 1ms
+     × a change in ANY compared field is reported, exactly once, with the field and the Id 0ms
+     × null vs value, a dropped or an unexpected extra column, and decimal scale all count 1ms
+     × identity, completeness and the metadata fields 1ms
+     × caps the report and says how many more there are 1ms
+   ❯ A6 mutations change the staged objects as DESIGN §6 says (11)
+     × the list of kinds is exactly the documented one 4ms
+     × corrupt-list-cost: one record of the largest period, ListCost + 1 in the last decimal place 12ms
+     × corrupt-text-columns: one record of the largest period, six text columns changed, still quoted strings (the challenger’s mutation) 1ms
+   ❯ A9 local.mjs acceptance: the real path, no bypass (static) (4)
+     × checks the pin and runs the independent calculator before any stack exists 1ms
+     × every comparison runs and fails the run 22ms
+   ❯ A8 wiring, pins and attribution (5)
+     × the fetched data and local state are gitignored; the committed CSV is never EOL-converted 2ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 15 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > P1: the calculator’s own unit tests pass
+AssertionError: 
+...........EEEE.....
+======================================================================
+ERROR: test_columns_are_classified_explicitly (test_focus_control_totals.ExpectedRowTests.test_columns_are_classified_explicitly)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/test_focus_control_totals.py", line 199, in test_columns_are_classified_explicitly
+    self.assertEqual(doc['columns'], {
+                     ~~~^^^^^^^^^^^
+KeyError: 'columns'
+
+======================================================================
+ERROR: test_one_row_maps_to_the_api_contract (test_focus_control_totals.ExpectedRowTests.test_one_row_maps_to_the_api_contract)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/test_focus_control_totals.py", line 163, in test_one_row_maps_to_the_api_contract
+    doc = fct.compute(data, rows=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'rows'
+
+======================================================================
+ERROR: test_rows_fail_closed (test_focus_control_totals.ExpectedRowTests.test_rows_fail_closed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/test_focus_control_totals.py", line 209, in test_rows_fail_closed
+    fct.compute(csv_bytes(ok.format(id='a'), ok.format(id='a'), header=FULL_HEADER), rows=True)  # duplicate Id
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'rows'
+
+======================================================================
+ERROR: test_usage_falls_back_when_consumed_is_null (test_focus_control_totals.ExpectedRowTests.test_usage_falls_back_when_consumed_is_null)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/test_focus_control_totals.py", line 194, in test_usage_falls_back_when_consumed_is_null
+    row = fct.compute(data, rows=True)['rows'][0]
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'rows'
+
+----------------------------------------------------------------------
+Ran 20 tests in 0.006s
+
+FAILED (errors=4)
+: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ scripts/acceptance/controlTotals.test.mjs:32:50
+     30|   it('P1: the calculator’s own unit tests pass', () => {
+     31|     const r = python(['-m', 'unittest', 'discover', '-s', 'scripts/acc…
+     32|     expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+       |                                                  ^
+     33|     expect(r.stderr).toMatch(/\nOK\b/);
+     34|   }, 120_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/15]⎯
+
+ FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > reproduces the pinned control totals of the committed 1k file exactly
+AssertionError: expected undefined to deeply equal { mapped: { …(19) }, …(2) }
+
+- Expected:
+{
+  "extra": [
+    "AvailabilityZone",
+    "BillingAccountName",
+    "BillingPeriodEnd",
+    "ChargeClass",
+    "ChargeDescription",
+    "ChargeFrequency",
+    "CommitmentDiscountCategory",
+    "CommitmentDiscountId",
+    "CommitmentDiscountName",
+    "CommitmentDiscountStatus",
+    "CommitmentDiscountType",
+    "ContractedUnitPrice",
+    "InvoiceIssuerName",
+    "ListUnitPrice",
+    "PricingCategory",
+    "PublisherName",
+    "RegionId",
+    "RegionName",
+    "ResourceName",
+    "ResourceType",
+    "Id",
+    "SkuId",
+    "SkuPriceId",
+    "SubAccountName",
+    "Tags",
+  ],
+  "mapped": {
+    "BilledCost": "billedCost",
+    "BillingAccountId": "billingAccountId",
+    "BillingCurrency": "billingCurrency",
+    "BillingPeriodStart": "billingPeriod",
+    "ChargeCategory": "chargeCategory",
+    "ChargePeriodEnd": "chargePeriodEnd",
+    "ChargePeriodStart": "chargePeriodStart",
+    "ConsumedQuantity": "usageQuantity",
+    "ConsumedUnit": "usageUnit",
+    "ContractedCost": "contractedCost",
+    "EffectiveCost": "effectiveCost",
+    "ListCost": "listCost",
+    "PricingQuantity": "pricingQuantity",
+    "PricingUnit": "pricingUnit",
+    "ProviderName": "providerName",
+    "ResourceId": "resourceId",
+    "ServiceCategory": "serviceCategory",
+    "ServiceName": "serviceName",
+    "SubAccountId": "subAccountId",
+  },
+  "notReturned": [],
+}
+
++ Received:
+undefined
+
+ ❯ scripts/acceptance/controlTotals.test.mjs:45:25
+     43|     expect(doc.input).toEqual({ sha256: pin.sha256, bytes: pin.bytes, …
+     44|     expect(doc.totals).toEqual(PINNED['1k'].totals);
+     45|     expect(doc.columns).toEqual(PINNED['1k'].columns);
+       |                         ^
+     46|     expect(doc).not.toHaveProperty('rows');
+     47|     // The unquoted SQL-null token, per column, as profiled in DESIGN …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/15]⎯
+
+ FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > --rows: one expected API row per upstream record, keyed by Id; the first one checked by hand against the upstream line
+AssertionError: usage: unrecognized arguments: --rows
+: expected 2 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 2
+
+ ❯ scripts/acceptance/controlTotals.test.mjs:58:32
+     56|     const pin = DATASET.files['1k'];
+     57|     const r = python([CALC, '--rows', '--expect-sha256', pin.sha256, p…
+     58|     expect(r.status, r.stderr).toBe(0);
+       |                                ^
+     59|     const doc = JSON.parse(r.stdout);
+     60|     expect({ input: doc.input, columns: doc.columns, totals: doc.total…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A10 full-row comparison: every API row vs its UPSTREAM record, keyed by Id > the API row field set is the route contract (publishedCosts.ts): 21 compared to upstream + 5 batch metadata
+TypeError: UPSTREAM_COMPARED_FIELDS is not iterable
+ ❯ scripts/local/acceptance.test.mjs:466:16
+    464|
+    465|   it('the API row field set is the route contract (publishedCosts.ts):…
+    466|     expect([...UPSTREAM_COMPARED_FIELDS].sort()).toEqual(Object.keys(e…
+       |                ^
+    467|     expect([...API_ROW_FIELDS].sort()).toEqual([...UPSTREAM_COMPARED_F…
+    468|     // Drift guard: the route's SELECT list (page query) names exactly…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A10 full-row comparison: every API row vs its UPSTREAM record, keyed by Id > equal ⇒ no problem
+TypeError: rowProblems is not a function
+ ❯ scripts/local/acceptance.test.mjs:476:23
+    474|
+    475|   it('equal ⇒ no problem', () => {
+    476|     expect(rowProblems(api(), expected)).toEqual([]);
+       |                       ^
+    477|   });
+    478|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A10 full-row comparison: every API row vs its UPSTREAM record, keyed by Id > a change in ANY compared field is reported, exactly once, with the field and the Id
+TypeError: UPSTREAM_COMPARED_FIELDS is not iterable
+ ❯ scripts/local/acceptance.test.mjs:480:21
+    478|
+    479|   it('a change in ANY compared field is reported, exactly once, with t…
+    480|     for (const f of UPSTREAM_COMPARED_FIELDS) {
+       |                     ^
+    481|       const rows = api();
+    482|       rows[1][f] = f === 'extraColumns' ? { ...rows[1].extraColumns, B…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A10 full-row comparison: every API row vs its UPSTREAM record, keyed by Id > null vs value, a dropped or an unexpected extra column, and decimal scale all count
+TypeError: rowProblems is not a function
+ ❯ scripts/local/acceptance.test.mjs:503:25
+    501|       const rows = api();
+    502|       mutate(rows);
+    503|       expect(rowProblems(rows, expected)).toEqual(want);
+       |                         ^
+    504|     }
+    505|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A10 full-row comparison: every API row vs its UPSTREAM record, keyed by Id > identity, completeness and the metadata fields
+TypeError: rowProblems is not a function
+ ❯ scripts/local/acceptance.test.mjs:509:23
+    507|   it('identity, completeness and the metadata fields', () => {
+    508|     const rows = api();
+    509|     expect(rowProblems([rows[0]], expected)).toEqual(['upstream record…
+       |                       ^
+    510|     expect(rowProblems([...rows, { ...rows[0], rowOrdinal: '9' }], exp…
+    511|     expect(rowProblems([...rows, { ...rows[0], rowOrdinal: '9', extraC…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A10 full-row comparison: every API row vs its UPSTREAM record, keyed by Id > caps the report and says how many more there are
+TypeError: rowProblems is not a function
+ ❯ scripts/local/acceptance.test.mjs:532:33
+    530|     const many = { columns: expected.columns, rows: Array.from({ lengt…
+    531|     const rows = many.rows.map((r, i) => ({ ...meta(i), ...structuredC…
+    532|     const problems = rowProblems(rows, many);
+       |                                 ^
+    533|     expect(problems).toHaveLength(21);
+    534|     expect(problems[20]).toBe('… and 10 more row problems');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A6 mutations change the staged objects as DESIGN §6 says > the list of kinds is exactly the documented one
+AssertionError: expected [ 'corrupt-billed', …(7) ] to deeply equal [ 'corrupt-billed', …(9) ]
+
+- Expected
++ Received
+
+@@ -5,8 +5,6 @@
+    "double-ingest",
+    "shift-period",
+    "swap-billed",
+    "skip-null-conversion",
+    "skip-period-split",
+-   "corrupt-text-columns",
+-   "corrupt-list-cost",
+  ]
+
+ ❯ scripts/local/acceptance.test.mjs:576:28
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A6 mutations change the staged objects as DESIGN §6 says > corrupt-list-cost: one record of the largest period, ListCost + 1 in the last decimal place
+Error: unknown mutation "corrupt-list-cost"
+ ❯ stageFocusSample scripts/local/acceptance.mjs:412:65
+    410|  */
+    411| export function stageFocusSample(bytes, { mutation = null } = {}) {
+    412|   if (mutation !== null && !MUTATIONS.includes(mutation)) throw new Er…
+       |                                                                 ^
+    413|   const clean = planStaging(bytes);
+    414|   const problems = verifyStagingLossless(bytes, clean);
+ ❯ stage scripts/local/acceptance.test.mjs:573:47
+ ❯ scripts/local/acceptance.test.mjs:582:17
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A6 mutations change the staged objects as DESIGN §6 says > corrupt-text-columns: one record of the largest period, six text columns changed, still quoted strings (the challenger’s mutation)
+Error: unknown mutation "corrupt-text-columns"
+ ❯ stageFocusSample scripts/local/acceptance.mjs:412:65
+    410|  */
+    411| export function stageFocusSample(bytes, { mutation = null } = {}) {
+    412|   if (mutation !== null && !MUTATIONS.includes(mutation)) throw new Er…
+       |                                                                 ^
+    413|   const clean = planStaging(bytes);
+    414|   const problems = verifyStagingLossless(bytes, clean);
+ ❯ stage scripts/local/acceptance.test.mjs:573:47
+ ❯ scripts/local/acceptance.test.mjs:600:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A9 local.mjs acceptance: the real path, no bypass (static) > checks the pin and runs the independent calculator before any stack exists
+AssertionError: expected 'async function acceptance(args) {\n  …' to match /run\('python3', \[CONTROL_CALCULATOR,…/
+
+- Expected:
+/run\('python3', \[CONTROL_CALCULATOR, '--rows', '--expect-sha256', pin\.sha256, file\]/
+
++ Received:
+"async function acceptance(args) {
+  const started = Date.now();
+  const opts = parseAcceptanceArgs(args);
+  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  const settings = localAcceptanceSettings(process.env);
+
+  // 1. Before anything starts: the pinned file, the independent control, the staging.
+  const dataset = readDataset(ROOT);
+  const pin = dataset.files[opts.dataset];
+  const file = path.join(ROOT, pin.localPath);
+  if (!fs.existsSync(file)) throw new Error(`${pin.localPath} is missing: run \\`npm run sample:fetch\\` first (pinned download, SHA-256 checked)`);
+  const bytes = fs.readFileSync(file);
+  fail(`dataset ${opts.dataset} (${pin.localPath}) does not match dataset.json; re-run \\`npm run sample:fetch\\``, verifyDatasetBytes(bytes, pin));
+
+  const calcStarted = Date.now();
+  const calc = await run('python3', [CONTROL_CALCULATOR, '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
+  if (calc.code !== 0) throw new Error(`the control-total calculator exited ${calc.code}`);
+  const control = JSON.parse(calc.out);
+  const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, SAMPLE_CONTROL_TOTALS_FILE), 'utf8'))[opts.dataset];
+  if (JSON.stringify({ input: control.input, totals: control.totals }) !== JSON.stringify(pinned)) {
+    throw new Error(`the calculator's output differs from the pinned ${SAMPLE_CONTROL_TOTALS_FILE} (${opts.dataset})`);
+  }
+  const calcMs = Date.now() - calcStarted;
+
+  const stageStarted = Date.now();
+  const staged = stageFocusSample(bytes, { mutation: opts.mutation }); // proves the clean plan lossless first
+  const stageMs = Date.now() - stageStarted;
+  const dataShas = staged.objects.filter((o) => o.kind === 'data').map((o) => o.sha256);
+  const totalRows = control.totals.reduce((n, t) => n + Number(t.rowCount), 0);
+
+  await preflight(settings, 'local:acceptance');
+
+  const summary = await runLocalTest({
+    project: settings.project,
+    down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
+    downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
+    signal: interrupt.signal,
+    body: async ({ steps, setApp, spawnGuard }) => {
+      const timed = timer(steps);
+      steps.timingsMs.controlTotals = calcMs;
+      steps.timingsMs.stage = stageMs;
+      steps.dataset = { key: opts.dataset, file: pin.localPath, bytes: pin.bytes, sha256: pin.sha256, commit: dataset.commit, licence: dataset.licence };
+      steps.mutation = opts.mutation;
+      steps.control = control.totals;
+      steps.staging = { periods: staged.periods, objects: staged.objects.map((o) => ({ key: o.key, bytes: o.body.length, sha256: o.sha256 })), nullTokensReplaced: staged.nullTokensReplaced };
+
+      await timed('up', () => up(settings));
+      const status = await timed('migrate', () => migrate(settings));
+      steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
+      const secrets = loadSecrets(settings, { create: false });
+
+      // Stage into the run's own SeaweedFS, then provision the sample source.
+      const sourceId = await timed('seed', async () => {
+        const s3 = s3Client(settings, secrets);
+        try {
+          await ensureBuckets(s3);
+          await putObjects(
+            s3,
+            staged.objects.map((o) => ({ Key: o.key, body: () => o.body })),
+          );
+        } finally {
+          s3.destroy();
+        }
+        return provisionSource(settings, secrets, SAMPLE_NAMES);
+      });
+      steps.seed = { objects: staged.objects.length, source: SAMPLE_NAMES.sourceKey };
+
+      // The real worker CLI, twice.
+      const first = await timed('sync', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
+      const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
+      steps.sync = { exit: first.code, durationMs: first.record?.durationMs, periods: outcomes(first.record) };
+      const syncIssues = syncProblems(first.record, control);
+      // Diagnostics before failing: the batches' quarantine reasons (codes and counts, never cell values).
+      if (syncIssues.length) steps.catalog = await catalogSnapshot(settings, secrets).catch((e) => ({ error: e.message }));
+      fail('first sync', syncIssues);
+      const second = await timed('syncAgain', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
+      steps.syncAgain = { exit: second.code, periods: outcomes(second.record) };
+      fail('second sync', resyncProblems(second.record, control));
+
+      // The real route under next start.
+      steps.appReady = await timed('appStart', () => startAppAndWait(settings, secrets, { setApp, spawnGuard }));
+      const base = `http://127.0.0.1:${settings.appPort}`;
+      const anon = await fetchJson(`${base}/api/v1/costs/published`, { timeoutMs: API_REQUEST_TIMEOUT_MS });
+      if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
+      steps.anonymous = anon.status;
+      const maxPages = Math.ceil(totalRows / ACCEPTANCE_PAGE_LIMIT) + 1;
+      const { rows, totals, pages } = await timed('apiRead', () => readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: ACCEPTANCE_PAGE_LIMIT, maxPages }));
+      steps.api = { totals, rows: rows.length, pages, limit: ACCEPTANCE_PAGE_LIMIT };
+      fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, dataShas)]);
+
+      // Evidence re-hash and the catalog.
+      const rehash = await timed('evidenceRehash', () => rehashEvidence(settings, secrets, sourceId, dataShas));
+      steps.evidence = rehash;
+      fail('evidence re-hash', rehash.filter((r) => r.rehash !== r.sha256).map((r) => `evidence ${r.sha256} re-hashes to ${r.rehash}`));
+      const catalog = await timed('catalog', () => catalogSnapshot(settings, secrets));
+      steps.catalog = catalog;
+      fail('catalog', batchProblems(catalog.batches, control));
+    },
+  });
+  killLiveProcessGroups();
+  summary.steps.timingsMs = { ...(summary.steps.timingsMs ?? {}), total: Date.now() - started };
+  process.stdout.write(`${JSON.stringify({ type: 'ratio.local-acceptance', dataset: opts.dataset, mutation: opts.mutation, ...summary })}\\n`);
+  if (!summary.pass) log('local:acceptance failed', { mutation: opts.mutation, failures: summary.failures });
+  return localTestExitCode(summary);
+}
+
+"
+
+ ❯ scripts/local/acceptance.test.mjs:753:18
+    751|   it('checks the pin and runs the independent calculator before any st…
+    752|     expect(body).toMatch(/verifyDatasetBytes\(bytes, pin\)/);
+    753|     expect(body).toMatch(/run\('python3', \[CONTROL_CALCULATOR, '--row…
+       |                  ^
+    754|     expect(body.indexOf("run('python3'")).toBeLessThan(body.indexOf('r…
+    755|     expect(body.indexOf('stageFocusSample(bytes')).toBeLessThan(body.i…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A9 local.mjs acceptance: the real path, no bypass (static) > every comparison runs and fails the run
+AssertionError: fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control)): expected 'async function acceptance(args) {\n  …' to contain 'fail(\'the API rows differ from the u…'
+
+- Expected
++ Received
+
+- fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control))
++ async function acceptance(args) {
++   const started = Date.now();
++   const opts = parseAcceptanceArgs(args);
++   if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
++   const settings = localAcceptanceSettings(process.env);
++
++   // 1. Before anything starts: the pinned file, the independent control, the staging.
++   const dataset = readDataset(ROOT);
++   const pin = dataset.files[opts.dataset];
++   const file = path.join(ROOT, pin.localPath);
++   if (!fs.existsSync(file)) throw new Error(`${pin.localPath} is missing: run \`npm run sample:fetch\` first (pinned download, SHA-256 checked)`);
++   const bytes = fs.readFileSync(file);
++   fail(`dataset ${opts.dataset} (${pin.localPath}) does not match dataset.json; re-run \`npm run sample:fetch\``, verifyDatasetBytes(bytes, pin));
++
++   const calcStarted = Date.now();
++   const calc = await run('python3', [CONTROL_CALCULATOR, '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
++   if (calc.code !== 0) throw new Error(`the control-total calculator exited ${calc.code}`);
++   const control = JSON.parse(calc.out);
++   const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, SAMPLE_CONTROL_TOTALS_FILE), 'utf8'))[opts.dataset];
++   if (JSON.stringify({ input: control.input, totals: control.totals }) !== JSON.stringify(pinned)) {
++     throw new Error(`the calculator's output differs from the pinned ${SAMPLE_CONTROL_TOTALS_FILE} (${opts.dataset})`);
++   }
++   const calcMs = Date.now() - calcStarted;
++
++   const stageStarted = Date.now();
++   const staged = stageFocusSample(bytes, { mutation: opts.mutation }); // proves the clean plan lossless first
++   const stageMs = Date.now() - stageStarted;
++   const dataShas = staged.objects.filter((o) => o.kind === 'data').map((o) => o.sha256);
++   const totalRows = control.totals.reduce((n, t) => n + Number(t.rowCount), 0);
++
++   await preflight(settings, 'local:acceptance');
++
++   const summary = await runLocalTest({
++     project: settings.project,
++     down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
++     downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
++     signal: interrupt.signal,
++     body: async ({ steps, setApp, spawnGuard }) => {
++       const timed = timer(steps);
++       steps.timingsMs.controlTotals = calcMs;
++       steps.timingsMs.stage = stageMs;
++       steps.dataset = { key: opts.dataset, file: pin.localPath, bytes: pin.bytes, sha256: pin.sha256, commit: dataset.commit, licence: dataset.licence };
++       steps.mutation = opts.mutation;
++       steps.control = control.totals;
++       steps.staging = { periods: staged.periods, objects: staged.objects.map((o) => ({ key: o.key, bytes: o.body.length, sha256: o.sha256 })), nullTokensReplaced: staged.nullTokensReplaced };
++
++       await timed('up', () => up(settings));
++       const status = await timed('migrate', () => migrate(settings));
++       steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
++       const secrets = loadSecrets(settings, { create: false });
++
++       // Stage into the run's own SeaweedFS, then provision the sample source.
++       const sourceId = await timed('seed', async () => {
++         const s3 = s3Client(settings, secrets);
++         try {
++           await ensureBuckets(s3);
++           await putObjects(
++             s3,
++             staged.objects.map((o) => ({ Key: o.key, body: () => o.body })),
++           );
++         } finally {
++           s3.destroy();
++         }
++         return provisionSource(settings, secrets, SAMPLE_NAMES);
++       });
++       steps.seed = { objects: staged.objects.length, source: SAMPLE_NAMES.sourceKey };
++
++       // The real worker CLI, twice.
++       const first = await timed('sync', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
++       const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
++       steps.sync = { exit: first.code, durationMs: first.record?.durationMs, periods: outcomes(first.record) };
++       const syncIssues = syncProblems(first.record, control);
++       // Diagnostics before failing: the batches' quarantine reasons (codes and counts, never cell values).
++       if (syncIssues.length) steps.catalog = await catalogSnapshot(settings, secrets).catch((e) => ({ error: e.message }));
++       fail('first sync', syncIssues);
++       const second = await timed('syncAgain', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
++       steps.syncAgain = { exit: second.code, periods: outcomes(second.record) };
++       fail('second sync', resyncProblems(second.record, control));
++
++       // The real route under next start.
++       steps.appReady = await timed('appStart', () => startAppAndWait(settings, secrets, { setApp, spawnGuard }));
++       const base = `http://127.0.0.1:${settings.appPort}`;
++       const anon = await fetchJson(`${base}/api/v1/costs/published`, { timeoutMs: API_REQUEST_TIMEOUT_MS });
++       if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
++       steps.anonymous = anon.status;
++       const maxPages = Math.ceil(totalRows / ACCEPTANCE_PAGE_LIMIT) + 1;
++       const { rows, totals, pages } = await timed('apiRead', () => readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: ACCEPTANCE_PAGE_LIMIT, maxPages }));
++       steps.api = { totals, rows: rows.length, pages, limit: ACCEPTANCE_PAGE_LIMIT };
++       fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, dataShas)]);
++
++       // Evidence re-hash and the catalog.
++       const rehash = await timed('evidenceRehash', () => rehashEvidence(settings, secrets, sourceId, dataShas));
++       steps.evidence = rehash;
++       fail('evidence re-hash', rehash.filter((r) => r.rehash !== r.sha256).map((r) => `evidence ${r.sha256} re-hashes to ${r.rehash}`));
++       const catalog = await timed('catalog', () => catalogSnapshot(settings, secrets));
++       steps.catalog = catalog;
++       fail('catalog', batchProblems(catalog.batches, control));
++     },
++   });
++   killLiveProcessGroups();
++   summary.steps.timingsMs = { ...(summary.steps.timingsMs ?? {}), total: Date.now() - started };
++   process.stdout.write(`${JSON.stringify({ type: 'ratio.local-acceptance', dataset: opts.dataset, mutation: opts.mutation, ...summary })}\n`);
++   if (!summary.pass) log('local:acceptance failed', { mutation: opts.mutation, failures: summary.failures });
++   return localTestExitCode(summary);
++ }
++
++
+
+ ❯ scripts/local/acceptance.test.mjs:779:26
+    777|       "fail('catalog', batchProblems(catalog.batches, control))",
+    778|     ]) {
+    779|       expect(body, call).toContain(call);
+       |                          ^
+    780|     }
+    781|     expect(body).toMatch(/fail\('evidence re-hash', rehash\.filter\(\(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A8 wiring, pins and attribution > the fetched data and local state are gitignored; the committed CSV is never EOL-converted
+AssertionError: expected [ '# Logs', 'logs', '*.log', …(41) ] to include '__pycache__/'
+ ❯ scripts/local/acceptance.test.mjs:807:20
+    805|     expect(ignore).toContain('.ratio-sample-data/');
+    806|     expect(ignore).toContain('.ratio-local/');
+    807|     expect(ignore).toContain('__pycache__/');
+       |                    ^
+    808|     expect(read('.gitattributes')).toMatch(/^fixtures\/focus-1\.0-samp…
+    809|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/15]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  15 failed | 49 passed (64)
+   Start at  11:28:05
+   Duration  3.51s (tests 62%, transform 26%, import 11%)
+
