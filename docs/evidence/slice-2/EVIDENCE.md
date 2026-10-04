@@ -17,7 +17,7 @@ noted:
 - transcripts.
 
 **The current state** is in DESIGN.md §1–§6 (kept current) and in the
-latest section's gates (§17).
+latest section's gates (now §18).
 
 Isolation:
 - Every DB run used a private PG16 cluster: `initdb` as `postgres` (via
@@ -213,7 +213,7 @@ appears in the baseline run on origin/main.
 (§14).** Here `rowCount` is still a JSON number (`55`, `40`). Since dfc7d35
 it is the bigint's decimal string (`"55"`, `"40"`), and `local:test`
 compares it as an exact string (L8). For the current output, see the latest
-gates (§17, `npm run local:test`).
+gates (the latest section, `npm run local:test`).
 ```
 {"type":"ratio.local-test","project":"ratio-local-s2a","steps":{"up":"ok (twice)",
  "migrate":{"currentVersion":"0001","privilegeProblems":[]},"seed":"ok (twice)",
@@ -1421,3 +1421,83 @@ keep their wording as records of their round. The reading note covers them.
 | `worker:build`; `next build`; `check:bundle`; `npm audit --omit=dev` | 0; 0; pass (116 client / 91 server files); 0 vulnerabilities |
 | `npm run local:test` (`ratio-local-test`) | pass in 27 s. `up: ok (twice)`, so the either-side membership check passed twice on the real bootstrap. `privilegeProblems: []`; `appReady: pid-verified`; totals `rowCount` `"55"` / `"40"`, `billedCost` `"30.8272954899"` / `"21.0978157665"`; 95 distinct rows; `appStop: stopped`; `down: ok (-v)`; `failures: []` |
 | leftovers | none: no `ratio-local*` containers or volumes, no `.ratio-local/`, no `next` or vitest processes, 0 `ratio_bs_*` roles; the private cluster is stopped and deleted after this run |
+
+## 18. Copilot review of cb06552 (1 Medium); local, not pushed
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| d77c088 | RD5 (unit); D14 with a query spy | **red**. `red/red-copilot8-fast.txt`: 8 failed / 25 (EPIPE and the code-shaped look-alikes were treated as SQL errors). The spy in D14 was flagged by the role-DDL guard, see 9b4b5f9 |
+| 9b4b5f9 | D14 rewritten with direct `.query('literal')` calls only (no allowlist change) | **red**. `red/red-copilot8-db.txt`: 1 failed / 29. The ROLLBACK after FATAL 57P01 reached pg and came back as pg's own "Connection terminated unexpectedly" |
+| 83e878d | `isSessionPreservingSqlError`: a positive classification | green (4176969214) |
+| 7eb1d26 | a look-alike with severity ERROR and a SQLSTATE that is not a DatabaseError poisons | test, added to kill mutant R4 by behaviour |
+| 5030c28 | DESIGN §2.2 and §15, TEST_PLAN I | docs |
+| (this commit) | this section | docs |
+
+No existing test changed.
+
+### Mapping
+
+| Comment | Severity | Commit(s) | Fix / evidence |
+|---|---|---|---|
+| **4176969214**: `clientSideFailure` treats any 5-character uppercase code as a SQLSTATE, so `EPIPE` keeps a broken client | Medium | d77c088, 9b4b5f9, 83e878d, 7eb1d26 | **Positive classification.** A client is kept only for a `DatabaseError` (`pg` 8.23.1 exports pg-protocol's class; one copy installed, `npm ls pg-protocol`) with:<ul><li>severity exactly `ERROR`;</li><li>a SQLSTATE outside class 08 and 57P01–57P05;</li><li>no `errno`/`syscall`.</li></ul>**Everything else poisons and destroys the client:** system errors, `query_timeout`, "Connection terminated", no code, look-alikes, FATAL.<br>**Tests:** RD5 (14 poisoning cases, 4 keeping cases, static); D14 on real PG16 (`pg_terminate_backend` mid-request).<br>Mutations R1–R6 |
+
+### Beyond the comment
+
+**`pg_terminate_backend` is a DatabaseError.** The server sends FATAL 57P01
+before it closes the connection, so `instanceof DatabaseError` alone would
+have kept that dead session. Two rules close this:
+- the severity must be exactly `ERROR`;
+- the session-ending SQLSTATE classes are excluded.
+
+D14a proves it on real PG16. RD5 covers 57P01 even when its severity reads
+`ERROR`.
+
+**The role-DDL guard caught my first D14.** That version spied on
+`client.query` with `.bind` and reassignment, which is indirect query use
+in a non-serial DB file. I did not widen the allowlist, and I did not hide
+the spy behind a Proxy. The rewritten D14 uses literal queries and observes
+the ROLLBACK's outcome instead:
+- poisoned at the FATAL: the guard rejects it with that same error object;
+- red: pg answered "Connection terminated unexpectedly", i.e. the query
+  reached the dead client.
+
+**D14b was green at red.** pg-pool drops a client whose connection ended
+whatever the guard does, so the route-level 500 / slot freed / next 200
+holds either way. It stays as route-level regression coverage. D14a is the
+test that discriminates.
+
+**Sweep.** No other place in `src/server/costs` or `scripts/local`
+classifies errors by code shape. `scripts/local` compares exact codes only
+(`ESRCH`, `EPERM`, its own `RATIO_LOCAL_DEADLINE`). The route keys on its
+own error classes.
+
+### Mutation checks (scratch `mut18.py`; each applied, run, restored from git; tree clean after)
+
+The unit runs are `readDeadline.test.ts`; the DB runs are D11 and D14 on
+the private PG16 cluster.
+
+| ID | Mutation | Result |
+|---|---|---|
+| R1 | **the regex-only check again (the reviewed bug)** | **killed**: RD5 (6: EPIPE, the look-alike, FATAL, 08, 57P01 at ERROR, localised severity); D14a |
+| R2 | severity not checked | **killed**: RD5 (localised severity; static) |
+| R3 | the session-ending classes not excluded | **killed**: RD5 (08006; 57P01 at ERROR) |
+| R4 | no `instanceof DatabaseError` (structural only) | **killed**: RD5 static, and since 7eb1d26 the severity-ERROR look-alike |
+| R5 | `errno`/`syscall` not checked | **killed**: RD5 (a DatabaseError carrying errno/syscall) |
+| R6 | every error poisons (over-poisoning) | **killed**: RD5 (42P01, 57014, 42501, 40001 must keep the client) |
+
+D11 and D14b pass under every mutant, as expected. D14a fails only where
+FATAL 57P01 would keep the client (R1). Under R2 and R3 alone, the other
+rule still catches it.
+
+### Gates (HEAD 5030c28; scratch `gates-r18.sh`)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **2428 passed** (103 files), including the role-DDL guard (unchanged allowlist, 5 entries) |
+| `npm run test:db` ×2 (private PG16 at 55700 + S3 prefixes) | **597 + 173** passed ×2 (118, 114 s); the parallel phase is 595 + D14's 2 |
+| `worker:build`; `next build`; `check:bundle`; `npm audit --omit=dev` | 0; 0; pass (116 client / 91 server files; `readDeadline.ts` now imports `DatabaseError` from `pg` at runtime, still server-only); 0 vulnerabilities |
+| `npm run local:test` (`ratio-local-test`) | pass in 26 s; `privilegeProblems: []`; `appReady: pid-verified`; totals `"55"` / `"40"`, `"30.8272954899"` / `"21.0978157665"`; 95 distinct rows; `appStop: stopped`; `down: ok (-v)`; `failures: []` |
+| leftovers | none: no `ratio-local*` containers or volumes, no `.ratio-local/`, no `next` or vitest processes; the private cluster is stopped and deleted after this run |
