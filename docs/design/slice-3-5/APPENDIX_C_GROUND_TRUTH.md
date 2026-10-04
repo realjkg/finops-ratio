@@ -8,8 +8,23 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
    **before** `fleet15k` folds tail services, by separate PRNG streams per
    label kind (adding a kind does not move the other kinds' draws).
 2. **Every label's effect is in the rows, and nothing else is.** A unit test
-   regenerates each series without the label and checks that the difference
-   is exactly the label's effect, inside its window only (PR 3-1b).
+   regenerates each series without the label and checks that the
+   difference is exactly the label's effect, inside the label's **effect
+   window** and nowhere else (PR 3-1b). Each label has two windows (rev. 15,
+   Copilot r4178753752):
+   - **Effect window** (`effectStart`, `effectEnd`): the days whose rows the
+     label changes. For most kinds it equals the scoring window. It is
+     wider for three:
+     - `level_shift`: from `start` to the end of the span (permanent);
+     - `gradual_drift`: from `start` to the end of the span (held after
+       the ramp);
+     - `dormant_reactivation`: from the first zero day of the gap to the
+       end of the span, since the gap is part of the injection.
+   - **Scoring window** (`start`, `end`, the catalogue's Window column): the
+     days a detection must fall in to match (C.4).
+
+   The test checks the effect window. The evaluator uses the scoring
+   window.
 3. **Labels never enter the database** and are not in the source bucket.
    They are written to `<out>/ground-truth/labels.jsonl` and read only by
    the evaluator.
@@ -100,9 +115,9 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
 {"labelId":"gt-000123","kind":"level_shift","expected":"alert","impactClass":"meaningful",
  "seed":"natural","enriched":false,"folded":false,
  "tenantSlug":"synthetic-fleet-15k","currency":"USD",
- "entity":{"billingAccountId":"SYN-BA-03FZ","subAccountId":"SYN-A-7KQ2M9XD","serviceName":"…","regionId":null,"resourceId":null},
+ "entity":{"providerName":"SyntheticAWS","billingAccountId":"SYN-BA-03FZ","subAccountId":"SYN-A-7KQ2M9XD","serviceName":"…","regionId":null,"resourceId":null},
  "childEntities":[],
- "start":"2026-05-12","end":"2026-05-25",
+ "start":"2026-05-12","end":"2026-05-25","effectStart":"2026-05-12","effectEnd":"2026-07-31",
  "dailyExcess":{"2026-05-12":"2140.0000000000","2026-05-13":"2161.4000000000"},
  "totalExcess":"…","seedStream":"level_shift/…","generatorVersion":"…"}
 ```

@@ -24,7 +24,7 @@ ordinary commits and plain pushes (never a force-push).
 | 12 | `d691069` | Copilot's review 5407381989 of PR #70 at d6be584 (2 High, 2 Medium), each verified and fixed (§3i): one leaf identity everywhere (`series_id`), a billing rollup by charge category behind `costs/daily`'s billed totals, an exact Garwood interval, and a rollup pointer. |
 | 13 | `86c2c29` | The challenger's REQUEST CHANGES on revision 12 (2 Medium, 1 Low) and Copilot's review 5407430521 (r4178706470, High): rollup pointer semantics and a single lease-holding writer; exactly-once coverage with nulls; stable ids under null identity columns; pointer guard, sequence grants and per-batch atomicity; `rollup12.py` category count (§3j). |
 | 14 | `10cd9ce` | The challenger's REQUEST CHANGES on revision 13 (1 Medium, 3 Low), §3k: the high-water mark is the tenant's `max(batch_seq)`; the pointer trigger's scope stated; sentinel groups marked `attributed: false`; the negative-usage blind spot in the budget table and the limits. |
-| 15 | this revision | The challenger's REQUEST CHANGES on revision 14 (1 Medium, 3 Low), §3l: the high-water mark and the sequence allocation are defined on an empty tenant (`coalesce(max, 0)`, `NOT NULL`); the monotonicity reason corrected; the known-limits list made complete. |
+| 15 | this revision | The challenger's REQUEST CHANGES on revision 14 (1 Medium, 3 Low), §3l, and Copilot's review 5407477027 of 10cd9ce (16 findings), §3m: the high-water mark and the sequence allocation are defined on an empty tenant (`coalesce(max, 0)`, `NOT NULL`); the monotonicity reason corrected; the known-limits list made complete. |
 
 ## 2. Governance wording: reverted
 
@@ -288,7 +288,34 @@ were valid.
 | **L1** monotonicity reason | **Valid.** The mark is monotone because `rollup_batches` is **never pruned**: the retention function excludes it. The previous reason, about what retention removes, was wrong | Appendix D.1 |
 | **L2** known limits wording | **Valid.** `fleet15k` has no region dimension, so `region_key = ''` on every row. The limit now reads "no null account or service identity columns", and the folding figures cite §2.5 and §2.8 | DESIGN §8 |
 | **L3** completeness | The list is now **complete** rather than "selected". Added: calendar jitter +0.082/day (reported, not in the total) with its pass probabilities; extrapolated intervals never scored; 31–90-day horizons not assessed on `fleet15k`; `new_region`, FT-8, per-series quantiles and FT-10 / AT-8 at `full` scale. Also collected from elsewhere in the design: calendar recall with two prior cycles, no holiday calendar, the budget's scale-heterogeneity and burst-spread assumptions, AT-3 on noisier real series, intermittent-series time-to-detect and the D-24 `info` remainder, idealised data arrival, and partial lifecycle parity (D-15, D-17) | DESIGN §8 |
-| Scripts | No embedded script changed; the 11 SHA-256s are those of revision 13 | Appendix B |
+| Scripts | No script changed for these four items; `rollup12.py` changed in the same revision for the forecast leaves (§3m) | Appendix B |
+
+## 3m. Revision 15: Copilot's review 5407477027 of 10cd9ce (8 High, 5 Medium, 3 Low)
+
+Each thread was checked against the design; all 16 were valid. Many were
+stale text left by earlier revisions, so a sweep for the same kinds of
+remnant was made as well (last row).
+
+| Thread | Disposition | Where |
+|---|---|---|
+| **r4178753680** (High) forecast leaf vs `series_id` | **Fixed.** The forecast leaf is account × service with regions summed, but forecast and detector state were keyed by `series_id`, whose natural key includes the region. Fix: a separate stable identity, **`leaf_id`** (`forecast_leaves`, natural key without the region). Every `cost_series` row carries its `leaf_id`; forecast state, detector state, the `leaf` anomaly scope and root causes key on it. This keeps the model grain and sizing. On `fleet15k`, `region_key = ''` everywhere, so leaf and series are one-to-one. Disk: +0.006 GB per run (`rollup12.py`) | App. D.0, D.1, D.2, D.4; DESIGN §2.9, §3.1, §7 (4-3) |
+| **r4178753639** (High) pointer trigger trusts supplied numbers | **Fixed.** The trigger now requires `run_seq`, `as_of` and (rollup) `batch_seq_hwm` to equal the referenced run row's. The mark is recorded on `analytics_runs` by a database trigger at the transition to `succeeded` (`coalesce(max(batch_seq), 0)`) and is frozen afterwards. `run_seq`, `kind`, `as_of` and `batch_seq_hwm` are outside the UPDATE grant. Direct-UPDATE tests in 4-1 | App. D.1; DESIGN §7 (4-1) |
+| **r4178753787** (Medium) non-zero filter | **Fixed.** `billing_daily` and `billing_daily_scope` keep a row for every group with at least one fact row, zero amounts included, so `row_count` and exactly-once hold. Test in 4-2 | App. D.1; DESIGN §7 (4-2) |
+| **r4178753811** (Medium) multi-day usage | **Fixed by defining the filter** (not by dropping the claim). FOCUS allows any charge period, and `M` is a daily signal: a multi-day row attributed to one day would be an artificial spike, and prorating would invent a shape the source never stated. `M` now requires a charge period of at most one day. Such rows stay in billed and effective totals and in `multi_day_usage_effective`. D-09 is refined accordingly; tested in 4-2. `fleet15k` emits only one-day usage rows | DESIGN §2.9, §3.1, §8 D-09; App. D.1 |
+| **r4178753752** (Medium) mutation invariant | **Fixed.** Each label has an **effect window** (`effectStart`, `effectEnd`) for the counterfactual test and a **scoring window** (`start`, `end`) for matching. `level_shift` and `gradual_drift` run to the end of the span; `dormant_reactivation` covers the gap and the restart. The label format gains `providerName` in `entity`, which the leaf identity needs | App. C.1, C.3 |
+| **r4178753707** (High) `REVIEWED_TRIGGERS` | **Fixed.** Checked on main: `src/ingest/db/privilegeModel.ts` lists 0001's eleven triggers in `REVIEWED_TRIGGERS`, and `hookViolations` rejects any other. 0002 adds `rollup_pointer:pointer_guard` and `analytics_runs:run_success`, and 0003 adds `forecast_pointer:pointer_guard`. PRs 4-1 and 4-3 extend the list by exactly those entries (old set → new set) | App. D.1; DESIGN §6.2, §7 (4-1, 4-3) |
+| **r4178753649** (High) sequence grants | **Fixed.** No `rollup_batches` identity sequence exists. The grant list now names the identity sequences of `cost_accounts`, `forecast_leaves` and `cost_series` only | App. D.1, D.5 |
+| **r4178753613** (High) App. D header | **Fixed.** Views join a pointer, not the live publication; only `publications_published` reads the live publication | App. D (header) |
+| **r4178753670** (High) DESIGN "rollups versioned by batch" | **Fixed.** The read side is the highest rolled-up batch ≤ the pointer mark | DESIGN §2.9 |
+| **r4178753692** (High) threat-model row | **Fixed.** The restatement switch happens on the rollup pointer's commit, never earlier and never as a gap | DESIGN §6.3 |
+| **r4178753724** (Medium) migration row 0002 | **Fixed.** "Joined to the current publication" removed; the triggers and `forecast_leaves` are listed | DESIGN §6.2 |
+| **r4178753796** (Medium) "three sequential runs" | **Fixed.** Five mandatory runs plus natural-3 if needed | DESIGN §2.8 |
+| **r4178753851** (Low) App. B seed list | **Fixed.** tuning-natural added | App. B.5.1 |
+| **r4178753871** (Low) D-03 "three sequential seeds" | **Fixed.** Five mandatory seeds plus an optional natural-3 (refined rev. 5) | DESIGN §8 D-03 |
+| **r4178753825** (High) 178 points | **Fixed.** 228 points per leaf in the 4-4b acceptance criterion; the revision-3 budget's 178 in B.5.3 is marked as that revision's figure | DESIGN §7 (4-4b); App. B.5.3 |
+| **r4178753880** (Low) EVIDENCE script range | **Fixed.** B.5.6–B.5.12 | §4 |
+| Sweep | Also fixed: the `cost_daily` reader-view note in App. D.1 ("joins the current publication") and the 4-3 plan row (keyed by `series_id`). Checked and found current: D2's window, h, budget totals, D-24 wording, disk figures, and every remaining "publication" mention (the freshness endpoint and the worker's own publication) | App. D.1; DESIGN §7 |
+| Re-run | All 11 embedded scripts re-run; `rollup12.py` changed (forecast leaves), hash updated; every other output unchanged; peaks 5.182 / 5.222 GB (still 5.18 / 5.22) | App. B.5.12 |
 
 ## 4. Measurements used by the design
 
@@ -318,12 +345,12 @@ were valid.
 | D4 reactivation false positives (rev. 9; ρ > 0 underestimated, see rev. 10) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` as of revision 9 |
 | D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6) | `reactivation.py` (B.5.11) |
 | `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series) | `reactivation.py` (B.5.11) |
-| Billing rollup disk delta (rev. 12; corrected in rev. 13) | +0.025 GB per run (was 0.026); peak 5.18 GB (5.22 GB with natural-3) | `rollup12.py` (B.5.12) |
+| Billing rollup disk delta (rev. 12; corrected in rev. 13; forecast leaves in rev. 15) | +0.031 GB per run (rev. 13: 0.025; rev. 12: 0.026); peak 5.18 GB (5.22 GB with natural-3) | `rollup12.py` (B.5.12) |
 | Garwood intervals, exact (rev. 12) | unchanged at three decimals (e.g. 7 groups: [0.046, 0.236]) | `budget3.py` (B.5.8) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
 
 The measurement scripts are reproduced verbatim, with SHA-256, in
-Appendix B (B.4, B.5.6–B.5.11).
+Appendix B (B.4, B.5.6–B.5.12).
 
 ## 5. Governance classification
 
