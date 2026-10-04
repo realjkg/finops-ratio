@@ -2586,14 +2586,17 @@ from the anchor, detection on the day after the data day):
 
 | Case | Median | p90 | Share ≤ 7 days |
 |---|---|---|---|
-| Lower bound: the first day the injected excess passes, + 1 | 6 | 12 | 0.668 |
+| Noise-free first-passing day: the first day the injected excess itself passes, + 1 (not a lower bound: noise can pass earlier) | 6 | 12 | 0.668 |
 | D1 ∧ D2, D8 and D3, all on the true baseline and scale (optimistic) | 5 | 11 | 0.726 |
 | D3 alone, restart after an alarm (DESIGN §4.2, rev. 18) | 7 | 13 | 0.535 |
 | D3 alone, no restart (episode from its first positive day) | 11 | 25 | 0.235 |
 | Cumulative clause (`critical` at 50 × min) reached | 18 | 31 | 0.092 |
 
-**Reading.** The target is not infeasible by construction: even the lower
-bound has a median of 6. D3 is the detector that sees a slow drift, since
+**Reading.** The target is not infeasible by construction: the
+noise-free first-passing day has a median of 6, and noise lets some
+detections come earlier still (median 5 with every detector on the true
+baseline). Revision 18 called that row a "lower bound", which the median
+of 5 contradicts (rev. 19, the challenger's L1). D3 is the detector that sees a slow drift, since
 D1 and D8 compare with adaptive one-step forecasts that follow the ramp.
 D3 alone reaches a median of 7 only with the restart after an alarm, and
 only with the true scale. The real `σ(h)` grows with the horizon and
@@ -2603,12 +2606,13 @@ measurement decides, and a miss goes to the owner (DESIGN §8, Known
 limits).
 
 SHA-256 of `drift_ttd.py` as run:
-`3d5fe545d80d0ef208f4c75c07dce48200e9a6254d19826dc84d4ed4f109cec8`.
+`9b04c754eea7b9d14b6eda11b3ece3498d7c939296d928a4b1ad286724cad0ff`
+(revision 18: `3d5fe545…`; only the printed label changed).
 
 `drift_ttd.py`:
 
 ```python
-# fleet15k, revision 18: time-to-detect of meaningful `gradual_drift` labels against AT-3's drift anchor (the first day
+# fleet15k, revision 18 (output label corrected in revision 19): time-to-detect of meaningful `gradual_drift` labels against AT-3's drift anchor (the first day
 # the label's cumulative excess reaches the minimum impact), under the severity rule of DESIGN 4.4 as revised in
 # revision 18 (one-day statistics: the day's excess and relative value; multi-day statistics: their window's mean).
 # Optimistic on purpose: every detector sees the true pre-drift baseline and the true noise scale (no estimation
@@ -2686,7 +2690,7 @@ for d3_only, reset, name in ((False, True, 'D1-D2, D8, D3 (reset)'), (True, True
     t = sorted(x[0] for x in res)
     print("%-22s: TTD from the anchor median %d, p90 %d, share <= 7 days %.3f" % (name, pct(t, .5), pct(t, .9), sum(1 for x in t if x <= 7) / len(t)))
 b = sorted(x[1] for x in res)
-print("lower bound (first day the injected excess passes the warning test, + 1): median %d, p90 %d, share <= 7 days %.3f"
+print("noise-free first-passing day (first day the injected excess itself passes the warning test, + 1; not a lower bound): median %d, p90 %d, share <= 7 days %.3f"
       % (pct(b, .5), pct(b, .9), sum(1 for x in b if x <= 7) / len(b)))
 r = random.Random(43); e = []
 for _ in range(20000):

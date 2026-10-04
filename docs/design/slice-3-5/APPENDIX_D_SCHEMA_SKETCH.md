@@ -34,7 +34,10 @@ declared `NOT NULL`.
 The convention is the one `region_key` already used. It applies to
 `provider_name`, `billing_account_id`, `sub_account_id`, `service_name`,
 `region_key`, `charge_category`, `charge_frequency` and the business-unit
-tag. A null and an empty source value therefore mean the same thing, and
+tag. **It does not apply to `resource_id`** (rev. 19): every row belongs
+to some series, account and category, so a sentinel group keeps all
+rows, but a row without a resource id belongs to no resource. Such rows
+are left out of `cost_resource_daily` and stay in `cost_daily` (D.1). A null and an empty source value therefore mean the same thing, and
 no key can hold a NULL that `UNIQUE` would treat as distinct.
 
 Display labels are applied on read, never stored:
@@ -148,7 +151,7 @@ sub-account or billing account therefore always resolves to the same id.
 | `billing_daily` (sparse; re-keyed in rev. 12, routing fixed in rev. 13) | **(tenant_id, batch_seq, account_id, usage_date, charge_category, charge_frequency, is_correction)**, all `NOT NULL` with the D.0 sentinels: every row with **`ChargeCategory IS DISTINCT FROM 'Usage'`** (Purchase, Tax, Credit, Adjustment, and a null category as `''`, shown `(unknown)`), by FOCUS `ChargeCategory` and `ChargeFrequency` (`''` when null), corrections flagged; billed, effective, row_count, `tags_invalid_rows`; **a row for every group with at least one fact row, zero amounts included** (rev. 15: revision 12's "only where non-zero" dropped zero-valued non-usage rows and their `row_count`, which broke exactly-once). `cost_daily` takes exactly the rows with `ChargeCategory = 'Usage'` (all frequencies, corrections and negative amounts included) in its `billed_total` / `effective_total`. The two predicates are complements under SQL's three-valued logic, so every published row lands in exactly one table | analytics | analytics; reader via `billing_daily_published` |
 | `billing_daily_scope` (rev. 12) | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, usage_date, charge_category)**; billed, effective, row_count. **Every charge category**: `Usage` from `cost_daily`, the others from `billing_daily`; a row for every group with at least one fact row, zero amounts included (rev. 15) | analytics | reader via `billing_daily_scope_published` (the run in `rollup_pointer`) |
 | `rollup_pointer` (rev. 12; monotone in rev. 13; HWM redefined in rev. 14; defined on an empty tenant in rev. 15) | **(tenant_id)**; run_id (composite FK to a `succeeded` `analytics_runs` row of kind `rollup`), `run_seq bigint NOT NULL`, **`batch_seq_hwm integer NOT NULL`** = **`coalesce(max(batch_seq), 0)`** over the tenant's `rollup_batches`, read in the run's success transaction under `assertLease` (not the run's own batches; 0 on a tenant with no rolled-up batch, where every view returns nothing), as_of, updated_at | UPDATE by analytics only, **in the same transaction** that marks the rollup run `succeeded` (mirrors `forecast_pointer`), after `assertLease`, and **only forwards**: `… WHERE run_seq < $run_seq AND batch_seq_hwm <= $hwm`; zero rows updated fails the run (`POINTER_STALE`) | every rollup reader view |
-| `cost_resource_daily` | **(tenant_id, batch_seq, series_id, usage_date, resource_id)**; `m_usage_effective` (rows above a floor only) | analytics | analytics; reader via view |
+| `cost_resource_daily` | **(tenant_id, batch_seq, series_id, usage_date, resource_id)**, `resource_id text NOT NULL CHECK (resource_id <> '')`; `m_usage_effective`. **Named rows above the floor only (rev. 19, Copilot r4178975173):** the rollup selects `nullif(ResourceId, '') IS NOT NULL` and the $25/day floor. `resource_id` is the one key component that takes **no** `''` sentinel (D.0): an unnamed row is not a resource. Its cost stays in `cost_daily` and the totals, and root causes show it as the series' unattributed remainder (DESIGN §2.9). Revision 18 filtered by the floor alone, so a high-cost unnamed row (null after ingestion's normalization) would have failed the primary key's `NOT NULL` | analytics | analytics; reader via view |
 | `cost_daily_scope` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, usage_date)**; same measures as `cost_daily` | analytics | reader via view (the run in `rollup_pointer`) |
 | `account_dim` | **(tenant_id, run_id, account_id)**; business_unit (modal tag, 28 days), account_age_days (identity columns via `cost_accounts`) | analytics | analytics; reader via view (the run in `rollup_pointer`) |
 | `rollup_batches` | **(tenant_id, batch_seq integer)**, unique (tenant_id, batch_id); source_id, billing_period, rolled_up_at, run_id, row totals (to prove rollup = published totals). **Each batch is rolled up in one transaction** (rev. 13), under `assertLease`, that writes all its rollup rows and this row together. A `rollup_batches` row therefore means a complete batch. A batch completed by a run that later fails stays correct, and becomes visible only when a later run's pointer covers it | analytics | analytics |
@@ -182,6 +185,9 @@ of its `batch_seq` (`rollup_batches`), not repeated per row.
   say which batch its coverage came from, beside the live publication
   from `publications_published`, so a lagging snapshot is stated
   (`coverageStale`) instead of being labelled with the published batch.
+  **The visible batch and the coverage sums are read in one statement**
+  (a join of this view with `cost_daily_published`), so both see the same
+  pointer (rev. 19, the challenger's L4).
 - **Run-keyed views** (`cost_daily_scope_published`,
   `billing_daily_scope_published`, `account_dim_published`) return only the
   pointed run.
@@ -403,13 +409,13 @@ for its own run-keyed tables (`forecast_state`, `forecast_points`,
 | Object | Columns (key first) | Notes |
 |---|---|---|
 | `forecast_pointer` | **(tenant_id)**, run_id, `run_seq bigint NOT NULL`, as_of, updated_at | the current forecast run; INSERT/UPDATE by analytics only, UPDATE of (`run_id`, `run_seq`, `as_of`, `updated_at`) only (D.1; rev. 17); forwards only (`run_seq` increases) and only to a `succeeded` forecast run, enforced by the same kind of guard trigger as `rollup_pointer` (D.1) |
-| `forecast_state` | **(tenant_id, run_id, leaf_id)** (the forecast leaf, D.0; composite FK to `forecast_leaves`); method ∈ {none, mean, m0, m1, m1_log} (`fleet15k`: fixed rule; `full`: selected in the calibration block), history_days, cold_start flag, alpha, beta, gamma, phi, level, trend, `season numeric[7]`, **calendar factors** `cal_start`, `cal_mid`, `cal_end` (log, 0 when not applied; median estimate on raw `y`) with their value counts m and t-statistics, last_day, `q80_lo/hi numeric[6]`, `q95_lo/hi numeric[6]` (per horizon bucket, as applied, in units of `scale_level`), **`scale_level`** (the leaf's trailing 28-day mean `M` at the as-of day: the level the calibration errors are divided by, DESIGN §3.4; rev. 17), **`log_var`** (`m1_log` only: the one-step residual variance on the `log1p` scale, for the back-transform; rev. 17), **`q_source text[6]`**, one source per horizon bucket, each ∈ {own, cohort, extrapolated} (`extrapolated`: an empty bucket filled by √h scaling, never scored; rev. 18, Copilot r4178908381: revision 17's single scalar could not describe six buckets that fall back independently), cohort key (provider, service category, size decile; no `env`) | ≈ 37 k rows per `fleet15k` run, ≈ 107 k per `full` run, ≈ 0.4 KB each (**assumption**) |
+| `forecast_state` | **(tenant_id, run_id, leaf_id)** (the forecast leaf, D.0; composite FK to `forecast_leaves`); method ∈ {none, mean, m0, m1, m1_log} (`fleet15k`: fixed rule; `full`: selected in the calibration block), history_days, cold_start flag, alpha, beta, gamma, phi, level, trend, `season numeric[7]`, **calendar factors** `cal_start`, `cal_mid`, `cal_end` (log, 0 when not applied; median estimate on raw `y`) with their value counts m and t-statistics, last_day, `q80_lo/hi numeric[6]`, `q95_lo/hi numeric[6]` (per horizon bucket, as applied, in units of `scale_level`, clamped around 0 so the bounds are ordered, D.3; rev. 19), **`scale_level`** (the leaf's trailing 28-day mean of **`|M|`** at the as-of day, floored at min impact / 10,000, so always > 0: the scale the calibration errors are divided by, DESIGN §3.4; rev. 17, made positive in rev. 19), `CHECK (scale_level > 0)`, **`log_var`** (`m1_log` only: the one-step residual variance on the `log1p` scale, for the back-transform; rev. 17), **`q_source text[6]`**, one source per horizon bucket, each ∈ {own, cohort, extrapolated} (`extrapolated`: an empty bucket filled by √h scaling, never scored; rev. 18, Copilot r4178908381: revision 17's single scalar could not describe six buckets that fall back independently), cohort key (provider, service category, size decile; no `env`) | ≈ 37 k rows per `fleet15k` run, ≈ 107 k per `full` run, ≈ 0.4 KB each (**assumption**) |
 | `forecast_points` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, day)**; expected, lo80, hi80, lo95, hi95 | aggregate scopes only, 90 days |
 | `forecast_totals` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, window)** with window ∈ {month_end, next_30, next_90}; actual_to_date, expected_total, lo80, hi80, lo95, hi95, billed_month_end (month_end only), last_published_day, quantile source ∈ {own, cohort, extrapolated} (rev. 17) | all scopes, **including every leaf for all three windows** (rev. 17, Copilot r4178843716: revision 16 stored the leaf month-end total only, and a leaf's next-30 and next-90 intervals cannot be rebuilt from daily bounds, DESIGN §3.4); ≈ 111 k leaf rows per `fleet15k` run (B.5.12) |
 | `forecast_backtests` | **(tenant_id, run_id, level, horizon_bucket, metric)**; value, n, origins, block ∈ {calibration, scoring} | the accuracy report; kept (not touched by retention) |
 | `forecast_backtest_points` | **(tenant_id, run_id, origin_day, scope_kind, scope_key, billing_currency, h)**; expected, lo80, hi80, lo95, hi95 | **aggregate scopes only** (≈ 0.01 GB per `fleet15k` run); leaf points are exported as gzip JSON Lines to the run's evidence directory (≈ 0.2 GB), never stored in the database; both kept (exempt from D-12) |
 | `detector_cohort_state` (rev. 12) | **(tenant_id, run_id, cohort_key text)**; D6's per-cohort growth fit (μ̂_k numeric[13], σ̂, n_k) and the pooled scales `σ_pool`, `s₂` per cohort | one row per cohort per detect run; run-keyed, retention keeps 2 runs (previously kept in `detector_state` under a cohort key, which mixed key types) |
-| `detector_state` | **(tenant_id, run_id, leaf_id)** (the forecast leaf, D.0; composite FK to `forecast_leaves`); D3: anchor_day and the **complete M1 state as of the anchor** (rev. 18, Copilot r4178908350): `anchor_method`, `anchor_level`, `anchor_trend`, `anchor_phi`, `anchor_season numeric[7]`, `anchor_cal_start`, `anchor_cal_mid`, `anchor_cal_end`, `anchor_log_var`, copied from that day's `forecast_state` row when the baseline is anchored and never changed until the next re-anchoring, so `ŷ(t | a)` is D.3's formula on these columns alone and a weekly refit or a calendar-factor update cannot move it (revision 17 kept level, trend and season only, so `φ` and the calendar factors were read from the current state); `cusum_pos`, `cusum_neg`, days_since_anchor; the current episode (DESIGN §4.2, rev. 18): `ep_start`, `ep_excess_sum`, `ep_expected_sum`; D2: weekday medians numeric[7] and `mad` of calendar-adjusted `log y` over 56 days, `scale_floor`, `sigma_pool`; D8: previous day's one-step log residual, `s2` (pooled 2-day scale); intermittent: `scoring` ∈ {daily, weekly, hurdle}, zero share over 56 days, last 8 weekly sums numeric[8] (weekly), `q_hat`, `m_hat`, `v_hat` and `r1` with the route ∈ {warning, info_only} (hurdle), weekly `cusum_pos`; D4 reactivation: active days in the last 56, `last_active_before_dormancy`, the active share of the 28 days ending there and the active-day mean of the 56 days ending there (extended to at most 112 days for ≥ 3 values; the series keeps its last 3 active-day values); as-of error-bucket counts per cohort (fallback level in use), including 2-day sums, from which each detect run derives D1's `q₀.₉₉` / `q₀.₀₁`, `σ_pool` and `s₂` (none stored; rev. 18); D5/D7: trailing committed share, trailing untagged share; last_day | one row per leaf (`leaf_id`, D.0) per detect run (≈ 37 k in `fleet15k`, ≈ 0.7 KB each incl. forecast state, assumption; + ≈ 110 B for the rev. 18 anchor and episode columns, B.5.12); UPDATE by analytics; run-keyed, retention keeps 2 runs |
+| `detector_state` | **(tenant_id, run_id, leaf_id)** (the forecast leaf, D.0; composite FK to `forecast_leaves`); D3: anchor_day and the **complete M1 state as of the anchor** (rev. 18, Copilot r4178908350): `anchor_method`, `anchor_level`, `anchor_trend`, `anchor_phi`, `anchor_season numeric[7]`, `anchor_cal_start`, `anchor_cal_mid`, `anchor_cal_end`, `anchor_log_var`, copied when the baseline is anchored from **the leaf's model state as of day a**: the state the daily O(1) update has carried to a (DESIGN §4.3), written in D.3's layout, whether or not a forecast run happened on a (refits are weekly, so a `forecast_state` row for day a usually does not exist; rev. 19, the challenger's L3), and never changed until the next re-anchoring, so `ŷ(t | a)` is D.3's formula on these columns alone and a weekly refit or a calendar-factor update cannot move it (revision 17 kept level, trend and season only, so `φ` and the calendar factors were read from the current state); `cusum_pos`, `cusum_neg`, days_since_anchor; the current episode (DESIGN §4.2, rev. 18): `ep_start`, `ep_excess_sum`, `ep_expected_sum`; D2: weekday medians numeric[7] and `mad` of calendar-adjusted `log y` over 56 days, `scale_floor`, `sigma_pool`; D8: previous day's one-step log residual, `s2` (pooled 2-day scale); intermittent: `scoring` ∈ {daily, weekly, hurdle}, zero share over 56 days, last 8 weekly sums numeric[8] (weekly), `q_hat`, `m_hat`, `v_hat` and `r1` with the route ∈ {warning, info_only} (hurdle), weekly `cusum_pos`; D4 reactivation: active days in the last 56, `last_active_before_dormancy`, the active share of the 28 days ending there and the active-day mean of the 56 days ending there (extended to at most 112 days for ≥ 3 values; the series keeps its last 3 active-day values); as-of error-bucket counts per cohort (fallback level in use), including 2-day sums, from which each detect run derives D1's `q₀.₉₉` / `q₀.₀₁`, `σ_pool` and `s₂` (none stored; rev. 18); D5/D7: trailing committed share, trailing untagged share; last_day | one row per leaf (`leaf_id`, D.0) per detect run (≈ 37 k in `fleet15k`, ≈ 0.7 KB each incl. forecast state, assumption; + ≈ 110 B for the rev. 18 anchor and episode columns, B.5.12); UPDATE by analytics; run-keyed, retention keeps 2 runs |
 | `detector_scope_state` (rev. 18, Copilot r4178908395) | **(tenant_id, run_id, scope_kind, scope_key, billing_currency)** with `scope_kind` ∈ {billing_account, business_unit, provider, tenant} and `scope_key` as in D.0; D3 on aggregate scopes (DESIGN §4.2): anchor_day, **`baseline numeric[28]`** (the scope's bottom-up forecast `ŷ(a + 1 … a + 28 \| a)`, frozen when the baseline is anchored; 28 days is the oldest a baseline may be), size decile (for the pooled scale), `cusum_pos`, `cusum_neg`, days_since_anchor, `ep_start`, `ep_excess_sum`, `ep_expected_sum`; last_day | one row per aggregate scope per detect run (≈ 550 in `fleet15k`, ≈ 0.6 KB each, assumption: ≈ 0.001 GB for 2 runs, B.5.12); UPDATE by analytics; run-keyed, retention keeps 2 runs. Revision 17 had nowhere to keep an aggregate's anchor and sums between runs, since `detector_state` is keyed by `leaf_id` |
 
 **Fixed-length arrays (rev. 17, Copilot r4178843775).** PostgreSQL does
@@ -460,9 +466,24 @@ row issued at as-of day `t` and a target day `d = t + h` (1 ≤ h ≤ 90):
    factor that was not applied is stored as 0, so it gives 1.
 3. **Point.** `ŷ(d) = w(d) × c(d)`.
 4. **Bounds.** With `b` the index 1..6 of h's bucket {1, 2–7, 8–14, 15–30,
-   31–60, 61–90} and `L = scale_level`:
-   - `lo80 = max(0, ŷ + L × q80_lo[b])`, `hi80 = ŷ + L × q80_hi[b]`;
-   - `lo95 = max(0, ŷ + L × q95_lo[b])`, `hi95 = ŷ + L × q95_hi[b]`.
+   31–60, 61–90}, `L = scale_level` (> 0) and `f(v) = max(0, v)` if
+   `ŷ ≥ 0`, else `f(v) = v`:
+   - `lo80 = f(ŷ + L × q80_lo[b])`, `hi80 = ŷ + L × q80_hi[b]`;
+   - `lo95 = f(ŷ + L × q95_lo[b])`, `hi95 = ŷ + L × q95_hi[b]`.
+
+   **Order (rev. 19, Copilot r4178975191).** The quantiles are stored
+   clamped, `q95_lo ≤ q80_lo ≤ 0 ≤ q80_hi ≤ q95_hi` in every bucket (the job clamps them; the property test below checks it),
+   and `L` > 0, so `lo95 ≤ lo80 ≤ ŷ ≤ hi80 ≤ hi95` for every row:
+   - for `ŷ ≥ 0`, flooring at 0 keeps the lower bounds ≤ `ŷ`;
+   - for `ŷ < 0` (net negative usage) there is no floor, so the lower
+     bounds stay below the point and the upper bounds above it, negative
+     or not.
+
+   Revision 18 used the trailing mean of `M`, which can be ≤ 0 and flip
+   the adjustments, and floored the lower bounds at 0 even below a
+   negative point. The same rule is used by §3.4's aggregate intervals
+   and by the backtest export, which call this function; D1 uses log
+   errors on positive points only and is unaffected.
 
    The stored quantiles are those applied: the cold-start × 1.5 (DESIGN
    §3.5) and the √h scaling of an empty bucket (§3.4) are already in them,
@@ -479,14 +500,23 @@ in one shared module, used by the job and by the API (to answer a leaf
 request). Tests (4-4b, and 5-3 for the anchor):
 - **One function:** the job and the API give identical output for the
   same row.
+- **Ordered bounds (rev. 19):** a property test over 10,000 random rows
+  (negative trailing means, negative points, biased quantiles) finds
+  `lo95 ≤ lo80 ≤ ŷ ≤ hi80 ≤ hi95` every time; a leaf with a negative
+  28-day mean `M` gets `scale_level` > 0; a negative point keeps raw
+  lower bounds. Mutants: the signed mean as `scale_level`; the 0 floor on
+  a negative point; unclamped quantiles.
 - **Per-bucket source (rev. 18):** a leaf whose buckets 1–3 are `own`, 4
   is `cohort` and 5–6 are `extrapolated` returns those sources day by day,
   and FT-7 skips exactly the days in buckets 5–6; mutant: one scalar
   source per row.
-- **D3's anchor (rev. 18):** `ŷ(t | a)` from `detector_state`'s anchor
-  columns equals D.3's formula on the anchor day's `forecast_state` row,
-  and stays equal after a weekly refit and after a calendar-factor update;
-  mutant: read `φ` or the calendar factors from the current state.
+- **D3's anchor (rev. 18; rev. 19):** the anchor columns written on day
+  a equal the leaf's daily-updated model state as of a, in D.3's layout,
+  on a day with no forecast run; `ŷ(t | a)` from them equals D.3's
+  formula on that state, and stays equal after a weekly refit and after a
+  calendar-factor update. Mutants: read `φ` or the calendar factors from
+  the current state; copy the last `forecast_state` row instead of the
+  state as of a.
 - **Equal to the backtest:** a `forecast` run with `as_of` equal to a
   backtest origin's day writes `forecast_state` rows whose reconstruction
   equals that origin's exported backtest points: the point and all four
