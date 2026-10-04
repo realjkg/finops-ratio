@@ -42,7 +42,7 @@ import {
   verifyDatasetBytes,
   verifyStagingLossless,
 } from './acceptance.mjs';
-import { LOCAL_NAMES } from './lib.mjs';
+import { LOCAL_NAMES, workerEnv } from './lib.mjs';
 // The worker's OWN manifest parser and row validator (unchanged production code):
 // the staged objects must pass them before any stack is involved.
 import { parseManifest } from '../../src/ingest/sources/s3/layout';
@@ -818,6 +818,19 @@ describe('A12 issue #62: foreign-provider rows are excluded by the worker, and t
     expect(shas).not.toContain(dataObjects(STAGED, '2024-10')[0].sha256);
   });
 
+  it('synthetic-provider opt-in (orchestrator D1): OFF in the worker env by default and for the acceptance run; ON only for the synthetic fixture sync', () => {
+    const settings = { pgPort: 1, s3Port: 2, appPort: 3 };
+    const secrets = { RATIO_LOCAL_WORKER_PASSWORD: 'w', RATIO_LOCAL_MIGRATOR_PASSWORD: 'm', RATIO_LOCAL_S3_ACCESS_KEY_ID: 'a', RATIO_LOCAL_S3_SECRET_ACCESS_KEY: 's' };
+    expect(workerEnv(settings, secrets)).not.toHaveProperty('RATIO_ALLOW_SYNTHETIC_PROVIDERS');
+    expect(workerEnv(settings, secrets, { syntheticProviders: false })).not.toHaveProperty('RATIO_ALLOW_SYNTHETIC_PROVIDERS');
+    expect(workerEnv(settings, secrets, { syntheticProviders: true }).RATIO_ALLOW_SYNTHETIC_PROVIDERS).toBe('1');
+    const src = read('scripts/local/local.mjs');
+    const body = src.slice(src.indexOf('async function acceptance('), src.indexOf('// --- main'));
+    expect(body).not.toMatch(/syntheticProviders|RATIO_ALLOW_SYNTHETIC_PROVIDERS/);
+    // The only opt-in in local.mjs is the synthetic fixture's sync (local:sync / local:test).
+    expect(src.match(/syntheticProviders: true/g)).toHaveLength(1);
+  });
+
   it('local.mjs: the evidence of EVERY staged object is re-hashed; the API artifact set uses the published periods only; the pin covers the filter', () => {
     const src = read('scripts/local/local.mjs');
     const body = src.slice(src.indexOf('async function acceptance('), src.indexOf('// --- main'));
@@ -1037,7 +1050,8 @@ describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
     const start = local.indexOf('async function sync(settings) {');
     expect(start).toBeGreaterThan(0);
     const fn = local.slice(start, local.indexOf('\n}\n', start) + 2);
-    expect(fn).toMatch(/const r = await syncRecord\(settings, secrets, LOCAL_NAMES\.sourceKey\);/);
+    // Issue #62 D1: the SYNTHETIC fixture source syncs with the synthetic-provider opt-in.
+    expect(fn).toMatch(/const r = await syncRecord\(settings, secrets, LOCAL_NAMES\.sourceKey, \{ syntheticProviders: true \}\);/);
     expect(fn).toMatch(/if \(r\.code !== 0\) throw new Error\(`worker sync exited \$\{r\.code\}`\);/);
     expect(fn).toMatch(/if \(r\.record === null\) throw new Error\('worker sync printed no evidence record'\);/);
   });

@@ -9,6 +9,8 @@ import { showBatch } from './quarantine';
 import { workerTestDb, noSleep, type WorkerTestDb } from '../testing/workerSetup';
 import { batchesOf, publishedTotals, seedTenantSource, type SeededSource } from '../testing/db';
 import { FOCUS_HEADER, csvGz, focusRow, type FocusRow } from '../testing/focusCsv';
+import { cli } from '../testing/cli';
+import { createTestBucket, requireTestS3Endpoint, testS3Env, type TestBucket } from '../testing/s3';
 
 let t: WorkerTestDb;
 beforeAll(async () => {
@@ -23,8 +25,19 @@ const AWS_CONFIG = { layout: 'aws-data-exports', bucket: 'unused-bucket', prefix
 
 const awsSource = () => seedTenantSource(t.db.pool, { kind: 'focus_file', config: AWS_CONFIG });
 
+/** Production-like by default: the synthetic-provider opt-in is explicitly OFF unless a test turns it on. */
 function sync(s: SeededSource, source: FakeFocusSource, extra: Partial<RunSyncOptions> = {}) {
-  return runSync({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourceKey, source, evidence: new MemoryEvidenceStore(), mode: 'sync', ...extra, hooks: { ...noSleep, ...extra.hooks } });
+  return runSync({
+    pool: t.pool,
+    tenantId: s.tenantId,
+    sourceKey: s.sourceKey,
+    source,
+    evidence: new MemoryEvidenceStore(),
+    mode: 'sync',
+    ...extra,
+    settings: { allowSyntheticProviders: false, ...extra.settings },
+    hooks: { ...noSleep, ...extra.hooks },
+  });
 }
 
 const row = (provider: string, cost: string, tag: string, extra: FocusRow = {}): FocusRow => focusRow(P, { ProviderName: provider, BilledCost: cost, ResourceId: tag, ...extra });
@@ -100,7 +113,7 @@ describe('D1 a mixed-provider file on an AWS Data Exports source', () => {
     const mixedSha = shown.batch.artifacts.find((a) => a.name === 'run/a-mixed.csv.gz')!.sha256;
     for (const e of shown.errors) {
       expect(e.artifactSha256).toBe(mixedSha);
-      expect(e.message).toBe('ProviderName is not allowed for source type aws-data-exports (allowed: AWS, SyntheticCloud); row excluded');
+      expect(e.message).toBe('ProviderName is not allowed for source type aws-data-exports (allowed: AWS); row excluded');
       expect(e.message).not.toMatch(/Microsoft|Oracle/);
     }
   });
@@ -268,7 +281,9 @@ describe('D6 manifest controls that count the foreign rows', () => {
 describe('D7 the fake (synthetic) source type', () => {
   it('excludes AWS rows: only the synthetic provider is allowed', async () => {
     const s = await seedTenantSource(t.db.pool, { kind: 'fake', config: { fixture: 'synthetic-base' } });
-    const r = await sync(s, new FakeFocusSource([period([['run/x.csv.gz', csvGz([row('SyntheticCloud', '1.00', 's1'), row('AWS', '2.00', 'a1')])]])]));
+    const r = await sync(s, new FakeFocusSource([period([['run/x.csv.gz', csvGz([row('SyntheticCloud', '1.00', 's1'), row('AWS', '2.00', 'a1')])]])]), {
+      settings: { allowSyntheticProviders: true },
+    });
     expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCount: '1', billedTotal: '1.00', excludedRows: '1' });
     const shown = await showBatch(t.pool, s.tenantId, r.periods[0].batchId!);
     expect(shown.errors.map((e) => [e.rowOrdinal, e.code, e.message])).toEqual([
@@ -283,5 +298,88 @@ describe('D8 a source without a recognised type is not checked (DESIGN §8 D4)',
     const r = await sync(s, new FakeFocusSource([period([['run/x.csv.gz', csvGz([row('Microsoft', '2.00', 'm1'), row('', '1.00', 'n1')])]])]));
     expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCount: '2', billedTotal: '3.00' });
     expect(r.periods[0]).not.toHaveProperty('excludedRows');
+  });
+});
+
+describe('D9 synthetic providers need the explicit opt-in (orchestrator decision D1, 2026-10-04)', () => {
+  const synthetic = () => new FakeFocusSource([period([['run/x.csv.gz', csvGz([row('SyntheticCloud', '1.00', 's1'), row('AWS', '2.00', 'a1')])]])]);
+
+  it('opt-in OFF: SyntheticCloud under aws-data-exports is excluded (PROVIDER_MISMATCH); AWS is published', async () => {
+    const s = await awsSource();
+    const r = await sync(s, synthetic(), { settings: { allowSyntheticProviders: false } });
+    expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCount: '1', billedTotal: '2.00', excludedRows: '1' });
+    const shown = await showBatch(t.pool, s.tenantId, r.periods[0].batchId!);
+    expect(shown.errors.map((e) => [e.rowOrdinal, e.code, e.message])).toEqual([
+      ['1', 'PROVIDER_MISMATCH', 'ProviderName is not allowed for source type aws-data-exports (allowed: AWS); row excluded'],
+    ]);
+  });
+
+  it('opt-in OFF: an all-synthetic batch is quarantined PROVIDER_MISMATCH, never published', async () => {
+    const s = await awsSource();
+    const r = await sync(s, new FakeFocusSource([period([['run/x.csv.gz', csvGz([row('SyntheticCloud', '1.00', 's1')])]])]), { settings: { allowSyntheticProviders: false } });
+    expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code: 'PROVIDER_MISMATCH' });
+    expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({});
+  });
+
+  it('opt-in ON: SyntheticCloud is accepted', async () => {
+    const s = await awsSource();
+    const r = await sync(s, synthetic(), { settings: { allowSyntheticProviders: true } });
+    expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCount: '2', billedTotal: '3.00' });
+    expect(r.periods[0]).not.toHaveProperty('excludedRows');
+  });
+
+  it('library default: follows RATIO_ALLOW_SYNTHETIC_PROVIDERS of the process (the DB suites set it in their vitest config); unset ⇒ OFF', async () => {
+    expect(process.env.RATIO_ALLOW_SYNTHETIC_PROVIDERS).toBe('1');
+    const run = (s: SeededSource) =>
+      runSync({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourceKey, source: synthetic(), evidence: new MemoryEvidenceStore(), mode: 'sync', hooks: noSleep });
+    const on = await awsSource();
+    expect((await run(on)).periods[0]).toMatchObject({ outcome: 'published', rowCount: '2' });
+    const prev = process.env.RATIO_ALLOW_SYNTHETIC_PROVIDERS;
+    delete process.env.RATIO_ALLOW_SYNTHETIC_PROVIDERS;
+    try {
+      const off = await awsSource();
+      expect((await run(off)).periods[0]).toMatchObject({ outcome: 'published', rowCount: '1', excludedRows: '1' });
+    } finally {
+      process.env.RATIO_ALLOW_SYNTHETIC_PROVIDERS = prev;
+    }
+  });
+});
+
+describe('D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup', () => {
+  let evidence: TestBucket;
+  beforeAll(async () => {
+    requireTestS3Endpoint();
+    evidence = await createTestBucket('ev62');
+  });
+  afterAll(async () => {
+    await evidence?.destroy();
+  });
+  const cliEnv = (optIn: string) => ({
+    RATIO_DATABASE_URL: t.login.url,
+    ...testS3Env(evidence),
+    NODE_ENV: 'test',
+    RATIO_ALLOW_FAKE_SOURCE: '1',
+    RATIO_ALLOW_SYNTHETIC_PROVIDERS: optIn,
+  });
+  const optInLogs = (err: string[]) => err.map((l) => JSON.parse(l)).filter((l) => l.event === 'config.synthetic_providers_allowed');
+
+  it('OFF ("0"): the synthetic fixture is quarantined PROVIDER_MISMATCH, nothing is published, no opt-in log', async () => {
+    const s = await seedTenantSource(t.db.pool, { kind: 'fake', config: { fixture: 'synthetic-base' } });
+    const r = await cli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], cliEnv('0'));
+    expect(r.code).toBe(1);
+    const periods = (r.record.results as { periods: Array<{ outcome: string; code?: string }> }).periods;
+    expect(periods.length).toBeGreaterThan(0);
+    for (const p of periods) expect(p).toMatchObject({ outcome: 'quarantined', code: 'PROVIDER_MISMATCH' });
+    expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({});
+    expect(optInLogs(r.err)).toEqual([]);
+  });
+
+  it('ON ("1"): published, and the opt-in is logged exactly once, naming the providers', async () => {
+    const s = await seedTenantSource(t.db.pool, { kind: 'fake', config: { fixture: 'synthetic-base' } });
+    const r = await cli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], cliEnv('1'));
+    expect(r.code).toBe(0);
+    const logs = optInLogs(r.err);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ level: 'warn', providers: ['SyntheticCloud'] });
   });
 });

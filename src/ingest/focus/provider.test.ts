@@ -1,10 +1,11 @@
-// Issue #62 (U1): the per-source-type ProviderName allowlist and the
-// PROVIDER_MISMATCH reason. Pure; no database. DESIGN: docs/evidence/issue-62/DESIGN.md.
+// Issue #62 (U1): the per-source-type ProviderName allowlist, the
+// PROVIDER_MISMATCH reason and the synthetic-provider opt-in (orchestrator
+// decision D1, 2026-10-04). Pure; no database. DESIGN: docs/evidence/issue-62/DESIGN.md.
 import { describe, expect, it } from 'vitest';
 import {
   PROVIDER_MISMATCH,
   SOURCE_TYPE_PROVIDERS,
-  SYNTHETIC_PROVIDER_NAME,
+  SYNTHETIC_PROVIDER_NAMES,
   checkProviderHeader,
   checkProviderName,
   providerPolicyFor,
@@ -14,9 +15,11 @@ import { indexHeader } from './validate';
 import { FOCUS_HEADER } from '../testing/focusCsv';
 
 const AWS_SOURCE = { kind: 'focus_file', config: { layout: 'aws-data-exports', bucket: 'b', prefix: '', exportName: 'x' } };
+const OFF = { allowSyntheticProviders: false };
+const ON = { allowSyntheticProviders: true };
 
-function awsPolicy(): ProviderPolicy {
-  const p = providerPolicyFor(AWS_SOURCE);
+function awsPolicy(opts = OFF): ProviderPolicy {
+  const p = providerPolicyFor(AWS_SOURCE, opts);
   if (!p) throw new Error('an aws-data-exports source must resolve a provider policy');
   return p;
 }
@@ -28,63 +31,85 @@ function headerIndex(cols: readonly string[]) {
 }
 
 describe('U1 the allowlist per source type', () => {
-  it('is exactly AWS (+ the synthetic fixture provider) for AWS Data Exports, and the synthetic provider for fake', () => {
+  it('is exactly AWS for AWS Data Exports and nothing for fake; the synthetic providers are a separate, gated list', () => {
     expect(PROVIDER_MISMATCH).toBe('PROVIDER_MISMATCH');
-    expect(SYNTHETIC_PROVIDER_NAME).toBe('SyntheticCloud');
-    expect(SOURCE_TYPE_PROVIDERS).toEqual({ 'aws-data-exports': ['AWS', 'SyntheticCloud'], fake: ['SyntheticCloud'] });
+    expect(SOURCE_TYPE_PROVIDERS).toEqual({ 'aws-data-exports': ['AWS'], fake: [] });
+    expect(SYNTHETIC_PROVIDER_NAMES).toEqual(['SyntheticCloud']);
   });
 
   it('cannot be changed at runtime', () => {
     expect(Object.isFrozen(SOURCE_TYPE_PROVIDERS)).toBe(true);
     for (const list of Object.values(SOURCE_TYPE_PROVIDERS)) expect(Object.isFrozen(list)).toBe(true);
-    const p = awsPolicy();
-    expect(Object.isFrozen(p)).toBe(true);
-    expect(Object.isFrozen(p.allowed)).toBe(true);
+    expect(Object.isFrozen(SYNTHETIC_PROVIDER_NAMES)).toBe(true);
+    for (const opts of [OFF, ON]) {
+      const p = awsPolicy(opts);
+      expect(Object.isFrozen(p)).toBe(true);
+      expect(Object.isFrozen(p.allowed)).toBe(true);
+    }
   });
 
-  it('resolves the source type from the source row (kind + config.layout)', () => {
-    expect(providerPolicyFor(AWS_SOURCE)).toEqual({ sourceType: 'aws-data-exports', allowed: ['AWS', 'SyntheticCloud'] });
-    expect(providerPolicyFor({ kind: 'fake', config: { fixture: 'synthetic-base' } })).toEqual({ sourceType: 'fake', allowed: ['SyntheticCloud'] });
-    expect(providerPolicyFor({ kind: 'fake', config: {} })).toEqual({ sourceType: 'fake', allowed: ['SyntheticCloud'] });
+  it('resolves the source type from the source row (kind + config.layout); synthetic providers only with the opt-in', () => {
+    expect(providerPolicyFor(AWS_SOURCE, OFF)).toEqual({ sourceType: 'aws-data-exports', allowed: ['AWS'] });
+    expect(providerPolicyFor(AWS_SOURCE, ON)).toEqual({ sourceType: 'aws-data-exports', allowed: ['AWS', 'SyntheticCloud'] });
+    expect(providerPolicyFor({ kind: 'fake', config: { fixture: 'synthetic-base' } }, OFF)).toEqual({ sourceType: 'fake', allowed: [] });
+    expect(providerPolicyFor({ kind: 'fake', config: {} }, ON)).toEqual({ sourceType: 'fake', allowed: ['SyntheticCloud'] });
+  });
+
+  it('only a literal true turns the opt-in on', () => {
+    for (const v of [undefined, null, 1, '1', 'true', {}]) {
+      expect(providerPolicyFor(AWS_SOURCE, { allowSyntheticProviders: v as unknown as boolean })?.allowed, String(v)).toEqual(['AWS']);
+    }
   });
 
   it('resolves no type (no check) for a source the CLI cannot run: focus_file without the AWS layout, an unknown kind', () => {
-    // DESIGN §8 D4: the source factory refuses these before any data is read.
-    expect(providerPolicyFor({ kind: 'focus_file', config: {} })).toBeNull();
-    expect(providerPolicyFor({ kind: 'focus_file', config: { layout: 'AWS-DATA-EXPORTS' } })).toBeNull();
-    expect(providerPolicyFor({ kind: 'focus_file', config: { layout: 'azure-cost-exports' } })).toBeNull();
-    expect(providerPolicyFor({ kind: 'other', config: { layout: 'aws-data-exports' } })).toBeNull();
-    expect(providerPolicyFor({ kind: 'focus_file', config: null as unknown as Record<string, unknown> })).toBeNull();
+    // DESIGN §8 D4; the source factory refuses these before any data is read (sourceFactory.test.ts).
+    expect(providerPolicyFor({ kind: 'focus_file', config: {} }, ON)).toBeNull();
+    expect(providerPolicyFor({ kind: 'focus_file', config: { layout: 'AWS-DATA-EXPORTS' } }, ON)).toBeNull();
+    expect(providerPolicyFor({ kind: 'focus_file', config: { layout: 'azure-cost-exports' } }, ON)).toBeNull();
+    expect(providerPolicyFor({ kind: 'other', config: { layout: 'aws-data-exports' } }, ON)).toBeNull();
+    expect(providerPolicyFor({ kind: 'focus_file', config: null }, ON)).toBeNull();
   });
 
   it('does not resolve a type from inherited properties of the config', () => {
     const inherited = Object.create({ layout: 'aws-data-exports' }) as Record<string, unknown>;
-    expect(providerPolicyFor({ kind: 'focus_file', config: inherited })).toBeNull();
+    expect(providerPolicyFor({ kind: 'focus_file', config: inherited }, ON)).toBeNull();
   });
 });
 
 describe('U1 checkProviderName', () => {
   it('accepts exactly the allowed values', () => {
-    const p = awsPolicy();
-    expect(checkProviderName('AWS', p)).toEqual({ ok: true });
-    expect(checkProviderName('SyntheticCloud', p)).toEqual({ ok: true });
+    expect(checkProviderName('AWS', awsPolicy(OFF))).toEqual({ ok: true });
+    expect(checkProviderName('AWS', awsPolicy(ON))).toEqual({ ok: true });
+    expect(checkProviderName('SyntheticCloud', awsPolicy(ON))).toEqual({ ok: true });
+  });
+
+  it('opt-in OFF: SyntheticCloud under aws-data-exports is excluded as PROVIDER_MISMATCH', () => {
+    expect(checkProviderName('SyntheticCloud', awsPolicy(OFF))).toEqual({
+      ok: false,
+      exclude: true,
+      error: { column: 'ProviderName', code: 'PROVIDER_MISMATCH', message: 'ProviderName is not allowed for source type aws-data-exports (allowed: AWS); row excluded' },
+    });
   });
 
   it('excludes a foreign provider with PROVIDER_MISMATCH on column ProviderName', () => {
-    const p = awsPolicy();
-    for (const foreign of ['Microsoft', 'Oracle', 'Google Cloud', 'Alibaba Cloud']) {
-      const r = checkProviderName(foreign, p);
-      expect(r.ok, foreign).toBe(false);
-      if (r.ok) continue;
-      expect(r.exclude, foreign).toBe(true);
-      expect(r.error.code).toBe('PROVIDER_MISMATCH');
-      expect(r.error.column).toBe('ProviderName');
-      expect(r.error.message).toBe('ProviderName is not allowed for source type aws-data-exports (allowed: AWS, SyntheticCloud); row excluded');
+    for (const [opts, allowed] of [
+      [OFF, 'AWS'],
+      [ON, 'AWS, SyntheticCloud'],
+    ] as const) {
+      for (const foreign of ['Microsoft', 'Oracle', 'Google Cloud', 'Alibaba Cloud']) {
+        const r = checkProviderName(foreign, awsPolicy(opts));
+        expect(r.ok, foreign).toBe(false);
+        if (r.ok) continue;
+        expect(r.exclude, foreign).toBe(true);
+        expect(r.error.code).toBe('PROVIDER_MISMATCH');
+        expect(r.error.column).toBe('ProviderName');
+        expect(r.error.message).toBe(`ProviderName is not allowed for source type aws-data-exports (allowed: ${allowed}); row excluded`);
+      }
     }
   });
 
   it('is an exact match: case, whitespace, the long name and prefixes all mismatch', () => {
-    const p = awsPolicy();
+    const p = awsPolicy(ON);
     for (const near of ['aws', 'Aws', 'aWS', ' AWS', 'AWS ', 'AWS\t', 'A WS', 'AWSX', 'AW', 'AWS, Inc.', 'Amazon Web Services', 'Amazon Web Services, Inc.', 'amazon web services', 'ＡＷＳ', 'syntheticcloud', 'SyntheticCloud ']) {
       const r = checkProviderName(near, p);
       expect(r.ok, JSON.stringify(near)).toBe(false);
@@ -92,34 +117,38 @@ describe('U1 checkProviderName', () => {
     }
   });
 
-  it('the fake type refuses AWS', () => {
-    const p = providerPolicyFor({ kind: 'fake', config: {} })!;
-    const r = checkProviderName('AWS', p);
+  it('the fake type refuses AWS, and everything without the opt-in', () => {
+    const on = providerPolicyFor({ kind: 'fake', config: {} }, ON)!;
+    const r = checkProviderName('AWS', on);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.exclude).toBe(true);
       expect(r.error.message).toBe('ProviderName is not allowed for source type fake (allowed: SyntheticCloud); row excluded');
     }
+    const off = checkProviderName('SyntheticCloud', providerPolicyFor({ kind: 'fake', config: {} }, OFF)!);
+    expect(off.ok).toBe(false);
+    if (!off.ok) expect(off.error.message).toBe('ProviderName is not allowed for source type fake (allowed: none); row excluded');
   });
 
   it('a NULL (empty) ProviderName is a hard MISSING_VALUE error, not an exclusion (fail closed: the whole batch is quarantined)', () => {
-    const r = checkProviderName(null, awsPolicy());
-    expect(r).toEqual({
-      ok: false,
-      exclude: false,
-      error: { column: 'ProviderName', code: 'MISSING_VALUE', message: 'required value is empty (FOCUS 1.0: ProviderName must not be null)' },
-    });
+    for (const opts of [OFF, ON]) {
+      expect(checkProviderName(null, awsPolicy(opts))).toEqual({
+        ok: false,
+        exclude: false,
+        error: { column: 'ProviderName', code: 'MISSING_VALUE', message: 'required value is empty (FOCUS 1.0: ProviderName must not be null)' },
+      });
+    }
   });
 
   it('never puts the cell value into the error message', () => {
     const marker = 'Leaky-Provider-Value-7f3a';
-    const r = checkProviderName(marker, awsPolicy());
+    const r = checkProviderName(marker, awsPolicy(ON));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(JSON.stringify(r.error)).not.toContain(marker);
   });
 
   it('does not match inherited or prototype names', () => {
-    const p = awsPolicy();
+    const p = awsPolicy(ON);
     for (const v of ['constructor', '__proto__', 'toString', 'length', '0', 'includes']) {
       expect(checkProviderName(v, p).ok, v).toBe(false);
     }
