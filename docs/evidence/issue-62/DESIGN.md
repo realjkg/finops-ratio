@@ -187,7 +187,8 @@ Unchecked types (D4) keep today's behaviour: no header or NULL rule.
   `'1'` on; unset, `''` or `'0'` off; anything else `CONFIG_INVALID`;
   `'1'` with `RATIO_ENV=production` ⇒ `SYNTHETIC_PROVIDERS_NOT_ALLOWED`.
   The CLI passes its own env's value, and logs
-  `config.synthetic_providers_allowed` (level `warn`) once at startup when it
+  `config.synthetic_providers_allowed` (level `warn`; the size of the set, no
+  names: logs carry no row values, Slice 1 K1) once at startup when it
   is on. `replay-fixtures` passes it through. A library caller that sets
   nothing gets this process's env value (default off).
 - `worker/load.ts`: `LoadContext.providerPolicy`; after the header is

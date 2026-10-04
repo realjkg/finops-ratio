@@ -182,7 +182,8 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
   const cfg = config;
   if (cfg.settings.allowSyntheticProviders) {
     // Logged once per process start (issue #62 D1): synthetic provider names are accepted.
-    log('config.synthetic_providers_allowed', { level: 'warn', providers: [...SYNTHETIC_PROVIDERS], detail: 'RATIO_ALLOW_SYNTHETIC_PROVIDERS=1: synthetic fixture provider names are accepted; never set this for real billing data' });
+    // Counts only: provider names are row values, and logs never carry row values (Slice 1 K1).
+    log('config.synthetic_providers_allowed', { level: 'warn', syntheticProviderCount: SYNTHETIC_PROVIDERS.length, detail: 'RATIO_ALLOW_SYNTHETIC_PROVIDERS=1: the fixed synthetic provider set (focus/provider.ts) is accepted; never set this for real billing data' });
   }
 
   if (args.command === 'doctor') {
