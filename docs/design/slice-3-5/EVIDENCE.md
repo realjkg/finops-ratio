@@ -32,7 +32,8 @@ ordinary commits and plain pushes (never a force-push).
 | 20 | `d4616a8` | Copilot's review 5407820380 of 0dd6743 (1 High, 3 Medium) and the challenger's three Low items on revision 19 (APPROVED, 0 High, 0 Medium), §3u: `freshness` keyset on `(share, leaf_id)`; a per-currency resource floor (a quarter of the minimum impact); the conditional floor applied to intermittent series and to every total; `detector_scope_state` in every retention list and test; clamping's effect on FT-7 reported. |
 | 21 | `3aaa678`, `bddefe9` | Copilot's review 5407844545 of d4616a8 (2 High, 1 Medium) and the challenger's one Low on revision 20 (APPROVED, 0 High, 0 Medium), §3v: `block`, currency and segment in the backtest report's key; `n` = 0 origins left out of the totals calibration; month-end errors bucketed by remaining days; the backtest report published by a view on the latest succeeded backtest run; EVIDENCE §3u's section reference corrected. |
 | 22 | `c85079f` | Copilot's review 5407898631 of bddefe9 (3 High, 1 Medium, 1 Low) and the challenger's one Low on revision 21 (APPROVED, 0 High, 0 Medium), §3w: billed `B` only at scopes with a billing source; parent integrity of the anomaly tables; M1-log eligibility and its runtime fallback; the `cost_daily` row measured with its six measures (`rowsize3.sql`; peak 5.18 GB); D-21's provider names; backtest reads atomic per snapshot. |
-| 23 | this revision | Copilot's review 5407941028 of c85079f (1 High, 2 Medium) and the challenger's one Low on revision 22 (APPROVED, 0 High, 0 Medium), §3x: merge targets terminal, enforced by a locking trigger (`tg_anomaly_merge_guard`, `REVIEWED_TRIGGERS` 14 → 15) with re-pointing before a survivor is merged; M1-log eligibility over everything its fit and selection read; calendar factors from valid samples only; "never reopened". |
+| 23 | `b9b2274` | Copilot's review 5407941028 of c85079f (1 High, 2 Medium) and the challenger's one Low on revision 22 (APPROVED, 0 High, 0 Medium), §3x: merge targets terminal, enforced by a locking trigger (`tg_anomaly_merge_guard`, `REVIEWED_TRIGGERS` 14 → 15) with re-pointing before a survivor is merged; M1-log eligibility over everything its fit and selection read; calendar factors from valid samples only; "never reopened". |
+| 24 | this revision | Copilot's review 5407981134 of b9b2274 (3 High, 1 Medium) and the challenger's one Low on revision 23 (APPROVED, 0 High, 0 Medium), §3y: account-scope daily forecasts rebuilt on read with stored interval state, and a scope census (peak 5.24 GB); anomaly changes published in the detect run's success transaction; valid-sample rules for the log-scale detectors; a scale-aware zero week in `budget5.py` (outputs unchanged); a `repointed` event. |
 
 ## 2. Governance wording: reverted
 
@@ -514,6 +515,35 @@ PostgreSQL 16.14 cluster (port 55791, removed afterwards).
 | **T1** (challenger) "not reopened" | **Fixed.** "A resolved group is never reopened; a later candidate starts a new group" (a new first day, so a new dedup key and id). Sweep: no other reopen wording in the documents | DESIGN §4.5 |
 | Scripts | No script changed; all 13 hashes as in revision 22; no disk figure changes (one trigger) | App. B |
 
+## 3y. Revision 24: Copilot's review 5407981134 of b9b2274 and the challenger's Low on revision 23
+
+The challenger APPROVED revision 23 (0 High, 0 Medium, 1 Low). Each item
+was checked against b9b2274 and is valid.
+
+| Item | Change | Where |
+|---|---|---|
+| **U1 r4179171086** (High) account-scope daily forecasts | **Fixed with option (b), on read**, the cheaper honest design. An account's daily point is the sum of its leaves' D.3 points, which is the bottom-up rule of §3.6, so it adds up with its leaves. Its bounds come from one new `forecast_scope_state` row per account and run: the account's own calibrated scale, quantiles and per-bucket sources, cohort-pooled by provider × size decile. Its totals are in `forecast_totals`. A request reads ≤ 3 leaf rows on `fleet15k` and ≤ 80 on `full`. Option (a) would add ≥ 0.405 GB and take the peak to ≈ 5.6 GB, above the 5.5 GB target. **The sweep below found a second gap:** `budget.py` sized 550 aggregate scopes, but the census gives ≈ 820 (100 hierarchical + 720 fleet-wide service scopes with currencies, an upper bound), and account totals were not counted. `rollup12.py` now counts both: +0.039 GB (270 more scopes) + 0.027 GB (account state and totals). Delta 0.024 → **0.091 GB** per run; natural-1 run 5.052 GB; peaks **5.242 / 5.282 GB**, under the 5.5 GB target, so no D-20 escalation. SHA-256 `beb47e98…` → `8f29a107740860272c960b78e3e56bc700377c1fee9850e69cefc8e4a0f70ee3`. 4-4b test: account points equal the sum of the leaves', and its bounds equal D.3 step 4 on its own state; mutant: summed leaf bounds. `forecast_scope_state` is run-keyed, so it joins migration 0003, the forecast retention function's list and its 4-3 test (seven tables) | App. D.1, D.2, D.3, B.5.12; DESIGN §2.8, §2.10, §3.6, §6.1, §6.2, §8 D-12 |
+| **U2 r4179171113** (High) anomaly publication | **Fixed with one transaction**: every `anomalies`, `anomaly_days`, `anomaly_root_causes` and `anomaly_events` change of a detect run is written in its success transaction, with `assertLease … FOR UPDATE` and the transition to `succeeded`. A failed, killed or fenced run leaves the four tables untouched; a REPEATABLE READ reader sees all of a run's changes or none. **Why not run-versioned rows:** anomalies live across runs and are not run-keyed, so versioning would copy every open group each run or need a latest-version view. The changes per run are small, so one transaction is cheap. 5-3 tests (killed, failed, fenced; atomic switch) and mutants (rows written as found; rows committed before `assertLease`) | App. D.4; DESIGN §7 (5-3) |
+| **U3 r4179171132** (High) sparse and non-positive series | **Fixed.** A day is valid when `M` > 0. Routing counts **non-positive** days (≥ 30 % → intermittent), so a daily-scored series has ≥ 40 valid days. D2's medians and MAD use valid days, and a weekday with < 3 valid days falls back to the overall valid median. D1 needs a positive actual and point. D8 needs a valid pair, with `s₂` from valid pairs. D3 carries `S±` over invalid days. D6 needs two valid growths, and its fit uses valid growths. **Budget:** `budget5.py` draws every daily-scored `fleet15k` leaf with 56 valid days, which is exact for the generator (its non-intermittent series have no zero or negative day), so it computes exactly these statistics and needs no change for this item. Real series with up to 16 invalid days estimate from as few as 40 values; that is now a Known limit. 5-2a tests and mutants | DESIGN §3.4, §4.2, §7 (5-2a), §8 |
+| **U4 r4179171151** (Medium) zero weeks | **Fixed.** A non-positive week is scored as 0.1 × the median of the weeks before it, scale-aware, and enters the 8-week history that way; it can only lower `S⁺`. `budget5.py` uses the same rule. **Re-run side by side with revision 7's script: byte-identical output**, including the same alarm counts in a direct comparison, so the weekly term (0.0139) and the totals (0.101 / 0.131) stand and the 0.15 margin holds. SHA-256 `7bc2ea76…` → `def110531f5780ae60a428486d52492dd3385862417d823adc05e02fa50a8d57`. The cited line App B:1239 is `budget4.py`, revision 6's superseded script, kept verbatim. 5-2a test (the same z in USD and in JPY) and mutant (`log(0.001)`) | DESIGN §4.2, §7 (5-2a); App. B.5.10 |
+| **V1** (challenger) `repointed` | **Fixed.** §4.6 gains `resolved` → `resolved` with reason `repointed`; `anomaly_events` records `from_merged_into` and `to_merged_into`, with a CHECK that a `repointed` event names two different targets; the 5-2b test checks the event for each re-pointed singleton | DESIGN §4.5, §4.6, §7 (5-2b); App. D.4 |
+| Scripts | `rollup12.py` and `budget5.py` changed (hashes above); 13 embedded scripts, all hashing to their stated values | App. B |
+
+**U1 sweep: every promised scope × forecast output and where it lives**
+
+| Scope (count on `fleet15k`) | Daily points + intervals | Totals (3 windows) | Billed `B` | Sized in |
+|---|---|---|---|---|
+| leaf (37,052) | on read, `forecast_state` | `forecast_totals` | none | B.5.12 (rev. 15, 17, 18) |
+| account (15,000) | on read: leaves' `forecast_state` + `forecast_scope_state` | `forecast_totals` | `forecast_totals` | B.5.12 (rev. 24; totals were missing before) |
+| billing account, business unit, provider, tenant (100) | `forecast_points` | `forecast_totals` | `forecast_totals` | `budget.py`'s 550 |
+| fleet-wide service (≤ 720) | `forecast_points` | `forecast_totals` | none | 550 + the census's 270 (rev. 24) |
+
+The same census covers the rollup side (`cost_daily_scope`,
+`billing_daily_scope`), the aggregate backtest points and
+`detector_scope_state`, whose D3 scopes are the 100 hierarchical ones.
+`costs/daily` at account or leaf scope reads `cost_daily` and
+`billing_daily` directly (sized in B.5.3).
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -537,13 +567,14 @@ PostgreSQL 16.14 cluster (port 55791, removed afterwards).
 | Re-run of every embedded script (rev. 6) | all 8 SHA-256s match; Python outputs reproduce (`budget4.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3c |
 | Hurdle statistic, in-control (rev. 7) | 0.00002–0.00052 alarms per series-week at zero shares 0.55–0.8, h = 9.0; gate r₁ < 0.30 passes 98.8–99.2 % of independent series-weeks | `budget5.py` (B.5.10) |
 | False-positive budget at z_T 4.5, h 9.0 (rev. 7) | **0.101/day** (0.131 with every conservative bound; 0.146 with the weekly term doubled); ±10 % jitter: P(pass) 0.993 / 0.959 | `budget5.py` (B.5.10) |
+| Zero-week rule in `budget5.py` (rev. 24) | outputs byte-identical to revision 7's script; weekly alarm counts 259 / 221 / 229 in 120,000 weeks at zero shares 0.3 / 0.4 / 0.5, old and new | `budget5.py` (B.5.10) |
 | Hurdle routes under the generator | ≈ 114 of 115 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 | `budget5.py` (B.5.10) |
 | Peak disk, rev. 7 | 5.15 GB (5.19 GB with natural-3) | `budget5.py` (B.5.10) |
 | D4 reactivation false positives (rev. 8) | 3 × 10⁻⁵/day with the history condition (generator); without it 0.0017 (generator), 0.32 (persistence 0.6) | `reactivation.py` as of revision 8 (superseded in B.5.11) |
 | D4 reactivation false positives (rev. 9; ρ > 0 underestimated, see rev. 10) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` as of revision 9 |
 | D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6) | `reactivation.py` (B.5.11) |
 | `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series) | `reactivation.py` (B.5.11) |
-| Billing rollup disk delta (rev. 12; corrected in rev. 13; forecast leaves in rev. 15; leaf totals in rev. 17; detector state in rev. 18; measured `cost_daily` row in rev. 22) | +0.024 GB per run (rev. 18: 0.082; rev. 17: 0.066; revs. 15–16: 0.031; rev. 13: 0.025; rev. 12: 0.026); peak 5.18 GB (5.22 GB with natural-3) | `rollup12.py` (B.5.12) |
+| Billing rollup disk delta (rev. 12; corrected in rev. 13; forecast leaves in rev. 15; leaf totals in rev. 17; detector state in rev. 18; measured `cost_daily` row in rev. 22; scope census and account scope in rev. 24) | +0.091 GB per run (rev. 22: 0.024; rev. 18: 0.082; rev. 17: 0.066; revs. 15–16: 0.031; rev. 13: 0.025; rev. 12: 0.026); peak 5.24 GB (5.28 GB with natural-3) | `rollup12.py` (B.5.12) |
 | Drift time-to-detect from AT-3's anchor (rev. 18) | noise-free first-passing day median 6, p90 12 days (not a lower bound); D3 alone median 7, p90 13 (with the restart); all detectors on the true baseline median 5, p90 11 | `drift_ttd.py` (B.5.13) |
 | Garwood intervals, exact (rev. 12) | unchanged at three decimals (e.g. 7 groups: [0.046, 0.236]) | `budget3.py` (B.5.8) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
@@ -554,8 +585,8 @@ Appendix B (B.4, B.5.6–B.5.14).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 23 (the commit that adds this line; the same eight reasons
-as at revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
+at revision 24 (the commit that adds this line; the same eight reasons
+as at revision 23, `b9b2274`, revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
 `ddbb6f0`, revision 17, `cc54e79`, and `9e0d703`, revision 16). Revision 16 gave the same risk and classes
 as every revision since 4, and **one more reason than before**: `retention.mention`
 on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is

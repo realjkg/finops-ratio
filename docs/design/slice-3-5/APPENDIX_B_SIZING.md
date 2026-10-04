@@ -1601,7 +1601,18 @@ conservative), p95 day 3, maximum ≈ 4.
 hurdle state is four numbers per intermittent leaf).
 
 SHA-256 of `budget5.py` as run:
-`7bc2ea765a6eabc61d017e1ab44e61f2b1781b47302612bddb257a7a645f0d5b`.
+`def110531f5780ae60a428486d52492dd3385862417d823adc05e02fa50a8d57`
+(revision 7: `7bc2ea76…`). **Revision 24** (Copilot r4179171151) changed
+one rule: a non-positive weekly sum is scored as 0.1 × the median of the
+weeks before it, scale-aware, instead of `log(0.001)`. Old and new
+scripts were run side by side, and **their outputs are byte-identical**.
+A zero week (probability 0.5⁷ ≈ 0.8 % at 50 % zero days) can only lower
+`S⁺`, and the 8-week median and MAD are robust to one floored value. So
+the weekly term (0.0139) and the totals (0.101 / 0.131) stand. A direct
+comparison of the weekly simulation at zero shares 0.3, 0.4 and 0.5 gives
+the same alarm counts (259, 221, 229 in 120,000 weeks). `budget4.py`
+(B.5.9) keeps the old rule. It is revision 6's superseded script, kept
+verbatim as run.
 
 `budget5.py`:
 
@@ -1613,7 +1624,8 @@ from collections import deque
 # weekly term to burst-size spread and day clustering; pass probability under calendar jitter).
 # False-positive budget with estimation noise, D8, intermittent weekly scoring, a median-based calendar estimator
 # (pinned and jittered), itemised other sources, TTD and spike recall, pass probabilities, alert fatigue and
-# peak disk. Standard library only; fixed seeds.
+# peak disk. Standard library only; fixed seeds. Revision 24: a non-positive weekly sum is scored scale-aware
+# (ZERO_WEEK x the median of the weeks before it) instead of as log(0.001).
 # Account model, seed and leaf list are those of budget.py / budget2.py / budget3.py (37,052 leaves).
 N = 15000
 random.seed(42)
@@ -1754,6 +1766,7 @@ def d3_terms(h, eps):
     return est, res_bound, cons, n
 
 # ---- intermittent series: non-overlapping weekly sums, 8-week robust median/MAD, CUSUM ----
+ZERO_WEEK = 0.1                                # a non-positive week counts as 10 % of the median week before it (rev. 24)
 def weekly_sim(p, h, weeks, seed, sb=0.5, rho=0.0):
     # sb: sd of log burst size; rho: lag-1 autocorrelation of the active-day indicator (Markov chain)
     r = random.Random(seed); hist = []; S = 0.0; alarms = 0; rels = []; n = 0
@@ -1767,7 +1780,15 @@ def weekly_sim(p, h, weeks, seed, sb=0.5, rho=0.0):
                 act = r.random() < (p11 if prev else p01); prev = act
             if act:
                 wsum += math.exp(r.gauss(0, sb) - sb * sb / 2) / (1 - p)
-        x = math.log(wsum) if wsum > 0 else math.log(1e-3)
+        if wsum > 0:
+            x = math.log(wsum)
+        elif hist:
+            # revision 24 (Copilot r4179171151): a non-positive week is scored at ZERO_WEEK x the median of the weekly sums
+            # before it (scale-aware; revision 7 used log(0.001), which depends on the currency unit); that value also
+            # enters the 8-week history. With no week before it the week is skipped (warm-up).
+            hs0 = sorted(hist); x = (hs0[(len(hs0) - 1) // 2] + hs0[len(hs0) // 2]) / 2 + math.log(ZERO_WEEK)
+        else:
+            continue
         if len(hist) == 8:
             hs = sorted(hist); med = (hs[3] + hs[4]) / 2
             dv = sorted(abs(v - med) for v in hist); mad = (dv[3] + dv[4]) / 2
@@ -2439,7 +2460,7 @@ for label, pool in (("as specified: non-intermittent individual series", [i for 
 # non-intermittent leaves are active every day, so they never meet the dormancy condition outside a label
 ```
 
-### B.5.12 Revisions 12–22: billing rollup by charge category, rollup pointer, forecast leaves, leaf totals, detector state, measured `cost_daily` row, disk delta
+### B.5.12 Revisions 12–24: billing rollup by charge category, rollup pointer, forecast leaves, leaf totals, detector state, measured `cost_daily` row, scope census, disk delta
 
 Computed by `rollup12.py` (below; standard library, no randomness, < 1 s).
 Revision 12 adds:
@@ -2476,6 +2497,25 @@ assumptions):
   row; the scalar it replaces is not subtracted);
 - `detector_scope_state` for the ≈ 550 aggregate scopes (≈ 600 B per row).
 
+Revision 24 (Copilot r4179171086) adds a **scope census**. `budget.py`
+sized 550 aggregate scopes. Counted by kind, with each scope in all 4
+currencies as an upper bound, there are:
+- 100 hierarchical scopes: 36 billing accounts, 12 business units × 4,
+  3 providers × 4, the tenant × 4;
+- 720 fleet-wide service scopes: 3 × 60 services × 4.
+
+The 270 above 550 get the same per-scope rows as the rest: daily points
+and totals for 2 runs, `cost_daily_scope`, the `Usage` rows of
+`billing_daily_scope`, and 228 aggregate backtest points each. That adds
+0.039 GB. D3 runs on the 100 hierarchical scopes only, so
+`detector_scope_state` stays within its 550.
+
+**Accounts** (15,000) get daily forecasts **on read**: the sum of their
+leaves' points, with bounds from one `forecast_scope_state` row per
+account and run (≈ 450 B, assumption). Their totals are stored in
+`forecast_totals`. Together that adds 0.027 GB. Storing account daily
+points would have added ≥ 0.405 GB and taken the peak to ≈ 5.6 GB.
+
 Revision 22 measures the `cost_daily` row as it now is: six numeric
 measures (`multi_day_usage_effective` was added in revision 15 and never
 measured or budgeted) and the integer `batch_seq` (B.5.14). The measured
@@ -2498,23 +2538,26 @@ The byte sizes are **assumptions** (150 B per narrow row, as for
 | detector anchor and episode, `q_source`, `detector_scope_state` (rev. 18) | **0.016 GB** |
 | `cost_daily` row measured with six measures: 180.2 B instead of the 193 B budgeted (rev. 22, B.5.14) | **−0.058 GB** |
 | `rollup_pointer`, `billing_daily` re-key | ≈ 0 |
-| **Delta per run** | **+0.024 GB** (revision 18: 0.082; revision 17: 0.066; revisions 15–16: 0.031; revision 13: 0.025; revision 12: 0.026) |
-| natural-1 run | 4.961 → **4.986 GB** |
-| **Peak, 5 runs** | 5.151 → **5.176 GB** |
-| **Peak, 6 runs (natural-3)** | 5.191 → **5.216 GB** |
+| scope census: 270 aggregate scopes above the 550 budgeted (rev. 24) | **0.039 GB** |
+| account scope: `forecast_scope_state` and account totals (rev. 24) | **0.027 GB** |
+| **Delta per run** | **+0.091 GB** (revision 22: 0.024; revision 18: 0.082; revision 17: 0.066; revisions 15–16: 0.031; revision 13: 0.025; revision 12: 0.026) |
+| natural-1 run | 4.961 → **5.052 GB** |
+| **Peak, 5 runs** | 5.151 → **5.242 GB** |
+| **Peak, 6 runs (natural-3)** | 5.191 → **5.282 GB** |
 
 Both peaks stay under the 5.5 GB target and the 6 GB ceiling.
 
 SHA-256 of `rollup12.py` as run:
-`beb47e98e01e822e832a9f9340221be879251352bd2aa3bcfbfe62769a0d730a`
-(revision 18: `a0931c44…`; revision 17: `d296e8ff…`; revision 16: `6bb735b8…`).
+`8f29a107740860272c960b78e3e56bc700377c1fee9850e69cefc8e4a0f70ee3`
+(revision 22: `beb47e98…`; revision 18: `a0931c44…`; revision 17: `d296e8ff…`; revision 16: `6bb735b8…`).
 
 `rollup12.py`:
 
 ```python
 # fleet15k, revision 12 (category count corrected in revision 13; forecast leaves added in revision 15; leaf totals and
 # two leaf-state columns added in revision 17; detector anchor, episode, aggregate D3 state and per-bucket quantile
-# sources added in revision 18; `cost_daily` row size measured with its six measures in revision 22): disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
+# sources added in revision 18; `cost_daily` row size measured with its six measures in revision 22; the scope census
+# and account-scope forecasts added in revision 24): disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
 # charge category, `cost_accounts`, `billing_daily_scope`, `rollup_pointer`) and the resulting peak disk.
 # Standard library only, no randomness. Inputs from budget5.py / budget3.py; byte sizes are ASSUMPTIONS
 # (measured in PR 3-4), at the same 150 B per narrow row used for `billing_daily` in budget.py.
@@ -2558,13 +2601,30 @@ rev18_gb = (LEAVES * (ANCHOR_EP_B + QSRC_B) + SCOPES * SCOPE_STATE_B) * RUNS_KEP
 COST_DAILY_ROWS = LEAVES * DAYS          # one row per leaf and day, as budget.py's series_days (region '' on fleet15k)
 BUDGETED_B, MEASURED_B = 193.0, 180.2
 cost_daily_corr_gb = COST_DAILY_ROWS * (MEASURED_B - BUDGETED_B) / 1e9
-delta = scope_gb + acct_gb + billing_delta_gb + leaves_gb + leaf_totals_gb + state_cols_gb + rev18_gb + cost_daily_corr_gb
+# revision 24 (Copilot r4179171086): scope census. budget.py sized 550 aggregate scopes. Counted per scope kind, with
+# every scope in each of the 4 currencies as an upper bound: 36 billing accounts (one currency each), 12 business units
+# x 4, 3 providers x 4, the tenant x 4 = 100 hierarchical scopes, plus the fleet-wide service scope, 3 x 60 services x 4
+# currencies = 720. The 270 scopes above 550 get the same per-scope rows as the 550 (daily points and totals for 2
+# runs, cost_daily_scope, the Usage rows of billing_daily_scope; the service scope has no non-usage rows) and their
+# aggregate backtest points (228 per scope, counted in every run). D3 runs on the 100 hierarchical scopes only, so
+# detector_scope_state needs no more than the 550 already counted.
+HIER, SERVICE_SCOPES = 36 + 12 * 4 + 3 * 4 + 4, 3 * 60 * 4
+EXTRA = HIER + SERVICE_SCOPES - SCOPES
+extra_scope_gb = EXTRA * ((90 + 3) * RUNS_KEPT * ROW_B + DAYS * RUNS_KEPT * 220 + DAYS * RUNS_KEPT * ROW_B + 228 * 120) / 1e9
+# Account scope (15,000): daily points and intervals are reconstructed on read from the account's leaves' forecast_state
+# rows (Appendix D.3) and one forecast_scope_state row per account and run (ASSUMPTION 450 B: scale, four 6-bucket
+# quantile arrays, per-bucket sources); its month-end, next-30 and next-90 totals are stored in forecast_totals.
+SCOPE_STATE_ACCT_B = 450
+acct_scope_gb = N_ACCOUNTS * RUNS_KEPT * (SCOPE_STATE_ACCT_B + 3 * ROW_B) / 1e9
+delta = scope_gb + acct_gb + billing_delta_gb + leaves_gb + leaf_totals_gb + state_cols_gb + rev18_gb + cost_daily_corr_gb + extra_scope_gb + acct_scope_gb
 print("billing_daily_scope rows %d (%.3f GB), cost_accounts %.3f GB, forecast_leaves + leaf_id %.3f GB, rollup_pointer ~0"
       % (scope_rows, scope_gb, acct_gb, leaves_gb))
 print("leaf forecast_totals rows %d (%.3f GB), forecast_state columns %.4f GB, rev. 18 detector and source state %.4f GB"
       % (LEAVES * WINDOWS * RUNS_KEPT, leaf_totals_gb, state_cols_gb, rev18_gb))
-print("cost_daily measured row %.1f B vs %.0f B budgeted, %d rows: %+.3f GB; delta per run %.3f GB"
-      % (MEASURED_B, BUDGETED_B, COST_DAILY_ROWS, cost_daily_corr_gb, delta))
+print("cost_daily measured row %.1f B vs %.0f B budgeted, %d rows: %+.3f GB"
+      % (MEASURED_B, BUDGETED_B, COST_DAILY_ROWS, cost_daily_corr_gb))
+print("scope census: %d hierarchical + %d service scopes, %d above the 550 budgeted: %.3f GB; account scope (state + totals): %.3f GB; delta per run %.3f GB"
+      % (HIER, SERVICE_SCOPES, EXTRA, extra_scope_gb, acct_scope_gb, delta))
 
 # peak disk, as budget5.py, with the delta added to every run
 points = 5 * 30 + 30 + 23 + 16 + 9
@@ -2750,8 +2810,9 @@ primary key the only index:
 The sixth measure costs nothing when it is 0, because the row's padding
 absorbs it, and 7.9 B when it holds a 10-decimal amount. The integer key
 saves 44.7 B, not the estimated 24 B. `rollup12.py` (B.5.12) applies the
-180.2 B figure. The peak falls to 5.176 GB (5.216 GB with natural-3), and
-the 5.5 GB target and 6 GB ceiling still hold. The target is unchanged.
+180.2 B figure. At revision 22 the peak fell to 5.176 GB (5.216 GB with
+natural-3); revision 24's scope census brings it to 5.242 / 5.282 GB
+(B.5.12). The 5.5 GB target and 6 GB ceiling still hold. The target is unchanged.
 
 SHA-256 of `rowsize3.sql` as run:
 `a6032a6304b5f8285650759d3fac9ca9301021ec23c654c3e2d49696ebce863e`.
