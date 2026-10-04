@@ -16,7 +16,8 @@ ordinary commits and plain pushes (never a force-push).
 | 4 | `faeabb4`, `4492d2f` | The challenger's re-review of 461fbc2..9a17924 (2 Medium, 5 Low), all answered (§3a). |
 | 5 | `fc7ee66`, `f5676d9` | The challenger's review of 9a17924..4492d2f (1 High, 2 Medium, 3 Low), all answered (§3b); the orchestrator's decisions D-22 (calendar component, option a) and D-23 (≤ 0.15/day design margin) recorded. |
 | 6 | `66a1fa2`, `472dbe3` | The challenger's review of 4492d2f..f5676d9 (1 High, 2 Medium, 4 Low), all answered (§3c): intermittent series on non-overlapping weekly sums or `info` only (D-24, proposed), calendar factors on raw `y` with a median estimator and a calendar-aware Hampel, estimation noise in every budget term, D8, h = 9.0, `budget4.py` (B.5.9). |
-| 7 | `380e9a0` and the §5 refresh | Revision 6 approved by the challenger (0 High, 0 Medium). D-24 decided by the orchestrator (option a): hurdle statistic with a clustering gate for intermittent series above 50 % zeros; the challenger's Low items L1–L4 answered (§3d); `budget5.py` (B.5.10). |
+| 7 | `380e9a0`, `801019a` | Revision 6 approved by the challenger (0 High, 0 Medium). D-24 decided by the orchestrator (option a): hurdle statistic with a clustering gate for intermittent series above 50 % zeros; the challenger's Low items L1–L4 answered (§3d); `budget5.py` (B.5.10). |
+| 8 | this revision | Revision 7 approved by the challenger. The remaining Low, dormant series that reactivate, folded in by extending D4 (§3e); `reactivation.py` (B.5.11). |
 
 ## 2. Governance wording: reverted
 
@@ -174,6 +175,25 @@ in §3c: the frozen-baseline autocorrelation in D3, the scale-heterogeneity
 assumption, and calendar or occurrence misspecification, which
 `tuning-natural` cannot see because it comes from the same generator.
 
+## 3e. Revision 8: dormant series that reactivate
+
+The challenger approved revision 7 (472dbe3..801019a). The one remaining
+Low, folded in at the orchestrator's request: a series with fewer than 3
+active days in its 56-day window is not scored, and D4 fired only on a
+first-seen (account, service), so a dormant resource restarting at high
+spend went unflagged until 3 active days had entered the window, by which
+time `q̂` and `m̂` were inflated by the new regime.
+
+| Item | Change | Where |
+|---|---|---|
+| D4 extended | **Reactivation rule:** a series with < 3 active days in the prior 56-day window that has a **day** whose excess passes the `warning` rules becomes a D4 candidate under the existing severity rules. **One day, not a 2-day sum**: the dormant series' expected value is ≈ 0, so one day's excess equals its spend, there is no noise scale to average over, and a second day only delays the alert; it is also D4's first-seen test | DESIGN §4.2 (table, new paragraph, precedence), §4.3 state; Appendix D.2 |
+| History condition | Measured first: without it the rule fires on bursty intermittent series that happen to have ≤ 2 active days (0.0017/day under the generator, 0.32/day if every intermittent series had persistence 0.6). So `warning` requires the series to have been active on ≥ 50 % of its ≥ 14 days before the dormant window; otherwise `info` | DESIGN §4.2; Appendix B.5.11 |
+| False positives | Under the generator **< 0.0001/day (3 × 10⁻⁵), effectively 0 by construction**: the generator has no unlabelled series that is regular, goes dormant and restarts; the only route is an ≈ 80 %-zero intermittent series with ≤ 2 active days by chance and ≥ 50 % active history. Own budget line; totals 0.101 / 0.131 + 3 × 10⁻⁵. Stated that **real data may produce false positives here** (seasonal, campaign or quarterly workloads, planned restarts), which `tuning-natural` cannot show | DESIGN §4.2; Appendix B.5.11 |
+| Recall | The existing seeds planted no reactivation, so the rule was never scored. New label kind **`dormant_reactivation`**, enriched and `ci` seeds only: ≥ 100 meaningful labels on individual series drawn by spend; active on ≥ 50 % of ≥ 14 days, zero for ≥ 56 days, restart on a day in 71–115 at × U(0.5, 3) the earlier level. Scored in AT-2 and reported against 0.90; **gating it is left to the orchestrator** (it would be a new target). Natural seeds carry none, so precision and the false-positive rate are unaffected | DESIGN §2.5, §4.9 AT-2/AT-3, §7 (3-1b, 5-2a); Appendix C.1, C.2 |
+| D-24 row | Names the rule: a series is scored only with ≥ 3 active days in the 56-day window; fewer → dormant → D4's reactivation rule | DESIGN §8 D-24 |
+| Disk | Unchanged: 5.15 GB peak (5.19 GB with natural-3); the labels are on the enriched seed only and a dormant gap removes rows | Appendix B.5.11 |
+| Re-run | All 10 embedded SHA-256s match (9 unchanged, `reactivation.py` new); every Python script re-run with unchanged outputs; `reactivation.py` gives identical output on two runs | §4 |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -198,10 +218,11 @@ assumption, and calendar or occurrence misspecification, which
 | False-positive budget at z_T 4.5, h 9.0 (rev. 7) | **0.101/day** (0.131 with every conservative bound; 0.146 with the weekly term doubled); ±10 % jitter: P(pass) 0.993 / 0.959 | `budget5.py` (B.5.10) |
 | Hurdle routes under the generator | ≈ 114 of 115 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 | `budget5.py` (B.5.10) |
 | Peak disk, rev. 7 | 5.15 GB (5.19 GB with natural-3) | `budget5.py` (B.5.10) |
+| D4 reactivation false positives (rev. 8) | 3 × 10⁻⁵/day with the history condition (generator); without it 0.0017 (generator), 0.32 (persistence 0.6) | `reactivation.py` (B.5.11) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
 
 The measurement scripts are reproduced verbatim, with SHA-256, in
-Appendix B (B.4, B.5.6–B.5.10).
+Appendix B (B.4, B.5.6–B.5.11).
 
 ## 5. Governance classification
 

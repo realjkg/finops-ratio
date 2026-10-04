@@ -2113,3 +2113,126 @@ for runs in (['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'enriched'],
         retained += per_run_eval + (bt_export + nat1_actuals if r_ == 'natural-1' else 0)
     print("%d runs: peak %.2f GB, retained at end %.2f GB" % (len(runs), peak, retained))
 ```
+
+### B.5.11 Revision 8: false positives of D4's reactivation rule
+
+Computed by `reactivation.py` (below; standard library, exact
+probabilities, no sampling, < 1 s; two runs give identical output). It
+rebuilds the leaf list and the intermittent flags of `budget5.py` and
+computes, for each of the 1,884 intermittent leaves (all sizes; the other
+leaves are active every day and never dormant), the probability per day of
+≤ 2 active days in the previous 56 followed by an active day whose value
+reaches the minimum impact (the dormant series' expected value is taken as
+0, which overstates the excess). Days follow a two-state chain with lag-1
+autocorrelation ρ; ρ = 0 is the generator. It counts qualifying days, an
+upper bound on episodes. The history condition (active on ≥ 50 % of the
+n ≥ 14 days before the dormant window) is evaluated for independent days
+exactly, and for ρ > 0 as an approximation that treats the history as
+independent of the window.
+
+| Case | Candidates per day at ≥ `warning` |
+|---|---|
+| Rule without the history condition, ρ = 0 (generator) | 0.00169 (0.00033 at `critical`) |
+| … ρ = 0.3 | 0.0268 |
+| … ρ = 0.6 | 0.320 |
+| **With the history condition, ρ = 0, n = 14 (worst case)** | **0.000032** |
+| … n = 28 / 56 | 0.000002 / < 10⁻⁶ |
+| … ρ = 0.3 / 0.6 (approximation, n = 14) | 0.00072 / 0.0160 |
+
+P(≤ 2 active days in 56, then an active day), independent days: 1.1 × 10⁻¹⁴
+at zero share 0.5, 1.1 × 10⁻¹⁰ at 0.6, 2.0 × 10⁻⁷ at 0.7, 8.3 × 10⁻⁵ at
+0.8.
+
+The rule adds 3 × 10⁻⁵ per day to `budget5.py`'s totals (0.101 and
+0.131); no other figure changes. **Peak disk** is unchanged at 5.15 GB
+(5.19 GB with natural-3): the `dormant_reactivation` labels exist only on
+the enriched seed, and a dormant gap removes rows rather than adding them.
+
+SHA-256 of `reactivation.py` as run:
+`7c40727a9a64f16b944ecf3c7261fd1f2aa4b2ed70b76a77ecfd960c4c8441e1`.
+
+`reactivation.py`:
+
+```python
+import random, math
+# fleet15k, revision 8: false positives of D4's reactivation rule (a series with < 3 active days in the prior
+# 56-day window that has a day with M >= the min impact; `warning` only if the series was active on >= 50 % of
+# its >= 14 days before that window, else `info`). Exact two-state-chain probabilities, no sampling.
+# Account model, leaf list and intermittent flags as budget5.py; the calendar-cohort stream is drawn so that
+# the intermittent stream stays aligned. Standard library only.
+# Account model, seed and leaf list are those of budget.py / budget2.py / budget3.py (37,052 leaves).
+N = 15000
+random.seed(42)
+spend = [math.exp(random.gauss(math.log(800), 1.8)) for _ in range(N)]
+med_spend = sorted(spend, reverse=True)[int(N * 0.5)]
+leaves = []                                   # (mean M/day, log-noise s, account, individual?)
+for a, m in enumerate(spend):
+    k = max(1, min(80, round(3 + 4 * math.log10(1 + m / 100) + random.gauss(0, 2.0))))
+    _ = (m > 20000 and random.random() < 0.6) or random.random() < 0.1
+    keep = 2 if m >= med_spend else 1
+    w = [0.5 ** i for i in range(k)]; ws = sum(w)
+    s = min(0.15, max(0.03, 0.15 - 0.04 * math.log10(max(m, 1) / 100)))
+    daily = m / 30.4
+    for i in range(min(k, keep)):
+        leaves.append((daily * w[i] / ws, s, a, True))
+    if k > keep:
+        leaves.append((daily * sum(w[keep:]) / ws, s, a, False))
+print("leaves %d (must equal 37052)" % len(leaves))
+
+MIN = 100.0
+def need_rel(L): return max(0.20, MIN / L)
+def thr_sigma(L, s): return math.log(1 + need_rel(L)) / s          # warning threshold in sigma units (log scale)
+def Q(z): return 0.5 * math.erfc(z / math.sqrt(2))
+def arl(h, k=0.5):
+    b = h + 1.166
+    return (math.exp(2 * k * b) - 2 * k * b - 1) / (2 * k * k)
+
+rc = random.Random(7)                         # calendar cohorts (as budget3.py)
+cohort = []
+for a in range(N):
+    u = rc.random(); cohort.append('meb' if u < 0.05 else ('mc' if u < 0.10 else None))
+ri = random.Random(17)                        # intermittent series: 5 % of leaves, zero share U(0.3, 0.8)
+inter = [(ri.random() < 0.05, ri.uniform(0.3, 0.8)) for _ in leaves]
+
+def p_dormant_then_active(p, rho, W=56, K=2):
+    # P(<= K active days in the W days before day t, and day t active), stationary two-state chain with
+    # active probability pi = 1 - p and lag-1 autocorrelation rho of the active indicator
+    pi = 1 - p; p11 = pi + rho * (1 - pi); p01 = pi * (1 - rho)
+    dp = {(0, 0): 1 - pi, (1, 1): pi}            # (active count so far, today's state) after day 1
+    for _ in range(W - 1):
+        nx = {}
+        for (c, st), pr in dp.items():
+            pa = p11 if st else p01
+            for a, q in ((1, pa), (0, 1 - pa)):
+                c2 = c + a
+                if c2 <= K:
+                    nx[(c2, a)] = nx.get((c2, a), 0.0) + pr * q
+        dp = nx
+    return sum(pr * (p11 if st else p01) for (c, st), pr in dp.items())
+def p_value_ge(L, p, amount=MIN, sb=0.5):
+    # active-day value L * exp(N(0, sb) - sb^2/2) / (1 - p) reaches the min impact (expected ~ 0 while dormant)
+    return Q((math.log(amount * (1 - p) / L) + sb * sb / 2) / sb)
+inter_idx = [i for i, x in enumerate(inter) if x[0]]
+print("intermittent leaves: %d (all sizes); with zero share > 0.5: %d" % (len(inter_idx), sum(1 for i in inter_idx if inter[i][1] > 0.5)))
+for p in (0.5, 0.6, 0.7, 0.8):
+    print("zero share %.1f: P(<= 2 active in 56, then an active day) = %.2e (independent), %.2e (rho 0.3), %.2e (rho 0.6)"
+          % (p, p_dormant_then_active(p, 0.0), p_dormant_then_active(p, 0.3), p_dormant_then_active(p, 0.6)))
+for rho in (0.0, 0.3, 0.6):
+    fp = sum(p_dormant_then_active(inter[i][1], rho) * p_value_ge(leaves[i][0], inter[i][1]) for i in inter_idx)
+    crit = sum(p_dormant_then_active(inter[i][1], rho) * p_value_ge(leaves[i][0], inter[i][1], 10 * MIN) for i in inter_idx)
+    print("reactivation rule, expected false candidates per day at >= warning, rho %.1f: %.5f (of which critical, >= 10 x min: %.5f)" % (rho, fp, crit))
+# history condition: active on >= 50 % of the n >= 14 days before the dormant window (else `info` only).
+# For independent days the history is independent of the window; n = 14 is the worst case (shortest history).
+def p_hist_regular(p, n=14):
+    pi = 1 - p
+    return sum(math.comb(n, k) * pi ** k * (1 - pi) ** (n - k) for k in range((n + 1) // 2, n + 1))
+for n in (14, 28, 56):
+    w = sum(p_dormant_then_active(inter[i][1], 0.0) * p_value_ge(leaves[i][0], inter[i][1]) * p_hist_regular(inter[i][1], n)
+            for i in inter_idx)
+    print("with the history condition (history %d days), independent days: `warning` candidates per day %.6f" % (n, w))
+for rho in (0.3, 0.6):
+    w = sum(p_dormant_then_active(inter[i][1], rho) * p_value_ge(leaves[i][0], inter[i][1]) * p_hist_regular(inter[i][1], 14)
+            for i in inter_idx)
+    print("   rho %.1f, history 14 days treated as independent of the window (approximation): %.5f" % (rho, w))
+# non-intermittent leaves are active every day, so they never meet the dormancy condition
+```

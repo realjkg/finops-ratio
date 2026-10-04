@@ -27,7 +27,10 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
    - **enriched**: ≥ **100 meaningful** labels per gated kind of AT-2 in the
      evaluation window, placed on **individual** (never folded) series,
      intermittent series included; used for recall and time-to-detect
-     only. A label on an intermittent series that is `info` only at
+     only. The enriched seed also carries ≥ 100 meaningful
+     `dormant_reactivation` labels (C.2); natural seeds carry none, so
+     precision and the false-positive rate are unaffected. A label on an
+     intermittent series that is `info` only at
      detection time (clustered occurrence, DESIGN §4.2, D-24) is reported
      in AT-7, not gated.
    `ci` guarantees at least 2 labels of every kind (deterministic
@@ -74,6 +77,7 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
 | `commitment_expiry` | alert | leaf series with a commitment | the commitment ends without renewal: committed share falls ≥ 20 pp and effective cost rises + U(20 %, 60 %) | start … start + 6 | gated (0.75) |
 | `spend_drop` | alert at `info` (D-14) | leaf series | × U(0.1, 0.6) for ≥ 3 days | start … start + 6 | scored at ≥ `info`, not gated |
 | `new_account_runaway` | alert | new account | spend ≥ 10 × min impact and above its cohort's p99 for day k ≤ 14 | its days | gated (0.75); tests guardrail D6 |
+| `dormant_reactivation` (rev. 8; enriched and `ci` seeds only) | alert | individual leaf series, drawn by spend | the series is active on ≥ 50 % of its first ≥ 14 days, then zero for ≥ 56 days, then restarts on a day in 71–115 (`fleet15k`) at × U(0.5, 3) its earlier mean level (meaningful class only) | restart day … + 2 | scored by D4's reactivation rule (DESIGN §4.2) and reported against 0.90; gating is the orchestrator's decision; TTD reported |
 | `shared_cause` | alert (one group per currency) | (billing account, service) | the same `spike` or `level_shift` in the service in 5–20 accounts of one billing account on the same day | as the underlying kind | AT-6: exactly one group; `childEntities` lists the accounts |
 | `provider_shared_cause` | alert (one group per currency) | (provider, service) | the same `spike` or `level_shift` in the service across ≥ 2 billing accounts of one provider, ≥ 20 accounts, on the same day | as the underlying kind | AT-6 |
 | `price_change` | alert (one group per currency) | (provider, service) | stressor: every account using the service × U(0.8, 1.3) from the day (increases scored; decreases at `info`) | start … start + 6 | AT-6 |
