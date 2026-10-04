@@ -144,3 +144,16 @@ jobs:
       - name: Local stack end to end (local:test)
         run: npm run local:test
 
+      # Slice 2b: acceptance run on the public FOCUS 1.0 Sample Data (FinOps
+      # Foundation, CC BY 4.0; fixtures/focus-1.0-sample/NOTICE.md). The committed
+      # 1k file (SHA-256 pinned, no network) is staged as an AWS Data Exports
+      # layout, synced twice by the real worker CLI, and read back through the
+      # real route under next start. Totals per period and currency, the row
+      # count, and the row sums and digests must equal control totals computed
+      # independently in Python (python3 is preinstalled on ubuntu-latest). Its
+      # own project ratio-local-acceptance on 127.0.0.1:54349 / 18363 / 3120
+      # (scripts/local/acceptance.mjs localAcceptanceSettings). Always torn
+      # down with `down -v`. The 10k file is run on demand (DESIGN §7).
+      - name: Acceptance run on the FOCUS 1.0 sample data (local:acceptance, 1k)
+        run: npm run local:acceptance
+
