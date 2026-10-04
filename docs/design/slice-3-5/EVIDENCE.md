@@ -22,7 +22,8 @@ ordinary commits and plain pushes (never a force-push).
 | 10 | `9f1febb`; merge of `origin/main` `bd440b5`; `adf0d19` | Revision 9 approved by the challenger. The three Low items (§3g): reactivation false positives under day clustering simulated on the chain (the independent-history approximation underestimated); the prior mean of the size override looks back up to 112 days; the D4 text made consistent. `origin/main` merged (#65, #67, #68; no conflicts, no file under `docs/design/slice-3-5/` touched by main); DESIGN §0 and §7 note that PR 4-0 and #62 have landed. |
 | 11 | `d6be584` (PR #70) | Revision 10 approved by the challenger (0 High, 0 Medium). Two wording Lows (§3h): D-21 and the opt-in text state the contract #62 shipped in #67 and #68; the prior-mean lookback is capped at 112 days. |
 | 12 | `d691069` | Copilot's review 5407381989 of PR #70 at d6be584 (2 High, 2 Medium), each verified and fixed (§3i): one leaf identity everywhere (`series_id`), a billing rollup by charge category behind `costs/daily`'s billed totals, an exact Garwood interval, and a rollup pointer. |
-| 13 | this revision | The challenger's REQUEST CHANGES on revision 12 (2 Medium, 1 Low) and Copilot's review 5407430521 (r4178706470, High): rollup pointer semantics and a single lease-holding writer; exactly-once coverage with nulls; stable ids under null identity columns; pointer guard, sequence grants and per-batch atomicity; `rollup12.py` category count (§3j). |
+| 13 | `86c2c29` | The challenger's REQUEST CHANGES on revision 12 (2 Medium, 1 Low) and Copilot's review 5407430521 (r4178706470, High): rollup pointer semantics and a single lease-holding writer; exactly-once coverage with nulls; stable ids under null identity columns; pointer guard, sequence grants and per-batch atomicity; `rollup12.py` category count (§3j). |
+| 14 | this revision | The challenger's REQUEST CHANGES on revision 13 (1 Medium, 3 Low), §3k: the high-water mark is the tenant's `max(batch_seq)`; the pointer trigger's scope stated; sentinel groups marked `attributed: false`; the negative-usage blind spot in the budget table and the limits. |
 
 ## 2. Governance wording: reverted
 
@@ -268,6 +269,16 @@ were valid.
 | Copilot summary: pointer enforcement, sequence grants, publication atomicity | **Two gaps found and closed.** (1) The pointer rules were enforced only by the job: a `BEFORE INSERT OR UPDATE` guard trigger on `rollup_pointer` and `forecast_pointer` now rejects a non-succeeded or wrong-kind run, a non-increasing `run_seq` and a falling high-water mark, with column-level UPDATE grants only. (2) Sequence grants were unstated: `cost_series.id` and `cost_accounts.id` are identity columns, and USAGE on their sequences goes to `ratio_analytics` only; `batch_seq` and `run_seq` are not sequences. **A third point tightened:** each batch is rolled up in one transaction together with its `rollup_batches` row, so a run that fails leaves only complete batches, visible only once a later pointer covers them. Publication atomicity holds: the visible set changes only in the run's success transaction (M1) | Appendix D.1, D.2; DESIGN §6.1, §7 (4-1) |
 | Re-run | All 11 embedded scripts re-run; 11 SHA-256s match (10 unchanged, `rollup12.py` updated); outputs unchanged except `rollup12.py`; budget totals 0.101 / 0.131; both SQL measurements reproduced on a fresh `postgres:16` container | §4; Appendix B |
 
+## 3k. Revision 14: the challenger's review of 86c2c29
+
+| Item | Change | Where |
+|---|---|---|
+| **M1** HWM per run | **Valid.** Suppose a run completes batch B2 and then fails, and the next run rolls up nothing new. With a per-run mark, that run either failed `POINTER_STALE` or left the mark below B2. B2 then stayed hidden, B1 stayed visible, and retention kept B1, all indefinitely. **Fix:** `batch_seq_hwm` is the **tenant's `max(batch_seq)` in `rollup_batches`**, read in the success transaction under `assertLease`. This is safe because each `rollup_batches` row commits with all its batch's rows and there is one writer; it is monotone by construction. Test (4-2): a batch completed by a failed run is visible after the next run, even one with nothing new. Mutation: the mark taken from the run's own batches | Appendix D.1; DESIGN §2.9, §7 (4-2) |
+| **L1** trigger scope | **Valid.** One sentence added: the pointer trigger guards against bugs, not a compromised job. `ratio_analytics` can mark its own run `succeeded`, so that check is self-certifying, but it cannot disable or replace the trigger, which `ratio_owner` owns; the login is neither the owner nor a superuser | Appendix D.1; DESIGN §8 known limits |
+| **L2** labels not reversible | **Valid.** **Fix:** sentinel groups return `key: null`, `attributed: false` and the label; every other group returns `attributed: true` and its source value. A literal `untagged` or `(none)` is then distinguishable. Totals are unaffected. API contract (§5.1) and the 4-5 test | DESIGN §5.1, §7 (4-5) |
+| **L3** negative-usage blind spot | **Valid.** **Fix:** a row in the "not covered by any line" part of the FP budget table, and a new "Known limits" list in §8 with this bullet. Days with `M` ≤ 0 are unscored, and a same-day negative-`Usage` credit can mask a spike. Only negative-`Usage` rows can do this, since `Credit` and `Tax` are outside `M`. `fleet15k` emits none: a recall blind spot, measurable on real data only | DESIGN §4.2, §8 |
+| Scripts | No embedded script changed; the 11 SHA-256s are those of revision 13 | Appendix B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -306,8 +317,8 @@ Appendix B (B.4, B.5.6–B.5.11).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 13 (the commit that adds this line, PR #70's head when pushed;
-the same reasons as at `d691069`, revision 12, `d6be584`, revision 11, at `bd440b5`, revision 10
+at revision 14 (the commit that adds this line, PR #70's head when pushed;
+the same reasons as at `86c2c29`, revision 13, `d691069`, revision 12, `d6be584`, revision 11, at `bd440b5`, revision 10
 after merging `origin/main`, and at
 `9f1febb` before the merge, `bb4379c`, revision 9, `04e6cf8`, revision 8,
 `380e9a0`, revision 7,

@@ -111,7 +111,7 @@ sub-account or billing account therefore always resolves to the same id.
 | `cost_daily` (narrow, usage only) | **(tenant_id, series_id, usage_date, batch_seq)**, `batch_seq integer` with a composite FK to `rollup_batches (tenant_id, batch_seq)`; `m_usage_effective` (`ChargeCategory = 'Usage'` and `ChargeFrequency = 'Usage-Based'`, no correction), `billed_total`, `effective_total`, `committed_effective`, `untagged_usage_effective`, `row_count`; no other btree (217 B per row measured with a uuid batch key; ≈ 193 B estimated with `batch_seq`, Appendix B.5) | analytics (INSERT … SELECT from `cost_facts_published` per batch) | analytics; reader via `cost_daily_published` (joins the current publication) |
 | `billing_daily` (sparse; re-keyed in rev. 12, routing fixed in rev. 13) | **(tenant_id, batch_seq, account_id, usage_date, charge_category, charge_frequency, is_correction)**, all `NOT NULL` with the D.0 sentinels: every row with **`ChargeCategory IS DISTINCT FROM 'Usage'`** (Purchase, Tax, Credit, Adjustment, and a null category as `''`, shown `(unknown)`), by FOCUS `ChargeCategory` and `ChargeFrequency` (`''` when null), corrections flagged; billed, effective, row_count, `tags_invalid_rows`; a row only where the amount is non-zero. `cost_daily` takes exactly the rows with `ChargeCategory = 'Usage'` (all frequencies, corrections and negative amounts included) in its `billed_total` / `effective_total`. The two predicates are complements under SQL's three-valued logic, so every published row lands in exactly one table | analytics | analytics; reader via `billing_daily_published` |
 | `billing_daily_scope` (rev. 12) | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, usage_date, charge_category)**; billed, effective, row_count. **Every charge category**: `Usage` from `cost_daily`, the others from `billing_daily`; a row only where non-zero | analytics | reader via `billing_daily_scope_published` (the run in `rollup_pointer`) |
-| `rollup_pointer` (rev. 12; monotone in rev. 13) | **(tenant_id)**; run_id (composite FK to a `succeeded` `analytics_runs` row of kind `rollup`), `run_seq`, `batch_seq_hwm integer` (the highest `batch_seq` that run committed), as_of, updated_at | UPDATE by analytics only, **in the same transaction** that marks the rollup run `succeeded` (mirrors `forecast_pointer`), after `assertLease`, and **only forwards**: `… WHERE run_seq < $run_seq AND batch_seq_hwm <= $hwm`; zero rows updated fails the run (`POINTER_STALE`) | every rollup reader view |
+| `rollup_pointer` (rev. 12; monotone in rev. 13; HWM redefined in rev. 14) | **(tenant_id)**; run_id (composite FK to a `succeeded` `analytics_runs` row of kind `rollup`), `run_seq`, `batch_seq_hwm integer` = **the tenant's `max(batch_seq)` in `rollup_batches`**, read in the run's success transaction under `assertLease` (not the run's own batches), as_of, updated_at | UPDATE by analytics only, **in the same transaction** that marks the rollup run `succeeded` (mirrors `forecast_pointer`), after `assertLease`, and **only forwards**: `… WHERE run_seq < $run_seq AND batch_seq_hwm <= $hwm`; zero rows updated fails the run (`POINTER_STALE`) | every rollup reader view |
 | `cost_resource_daily` | **(tenant_id, batch_seq, series_id, usage_date, resource_id)**; `m_usage_effective` (rows above a floor only) | analytics | analytics; reader via view |
 | `cost_daily_scope` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, usage_date)**; same measures as `cost_daily` | analytics | reader via view (the run in `rollup_pointer`) |
 | `account_dim` | **(tenant_id, run_id, account_id)**; business_unit (modal tag, 28 days), account_age_days (identity columns via `cost_accounts`) | analytics | analytics; reader via view (the run in `rollup_pointer`) |
@@ -165,12 +165,26 @@ lease pattern (`src/ingest/worker/lease.ts`):
 - **`batch_seq`** is allocated only by the lease holder, inside its
   transaction, as one more than the tenant's maximum. Two writers can
   therefore never interleave sequence numbers.
+- **The high-water mark (rev. 14)** is the tenant's `max(batch_seq)` in
+  `rollup_batches`. It is read in the run's success transaction, after
+  `assertLease`; it is not the maximum of the run's own batches.
+  - **Why it is safe:** every `rollup_batches` row commits in the same
+    transaction as all of its batch's rows, and there is one writer per
+    tenant. So every batch at or below the maximum is complete.
+  - **Why it matters:** a batch that run A completed before failing is
+    exposed by the next successful run B, even if B rolls up nothing new.
+    With revision 13's per-run definition, B's mark was either undefined
+    (`POINTER_STALE`) or stayed below A's batch. B2 then stayed hidden
+    forever, readers saw B1 forever, and retention kept B1 forever.
+  - **It is monotone by construction:** `max(batch_seq)` never falls,
+    because rows are only removed by retention, which never removes the
+    visible or a higher batch.
 - **Moving the pointer** is monotone: the run's success transaction updates
   `rollup_pointer` only if the stored `run_seq` is lower and the stored
   `batch_seq_hwm` is not higher. An older run that commits late therefore
-  cannot move the pointer backwards. A run that rolled up nothing new can
-  still publish refreshed run-keyed rows, since `run_seq` grows while the
-  high-water mark stays put.
+  cannot move the pointer backwards. A run that rolled up nothing new still
+  moves the pointer: `run_seq` grows, and the mark covers any batch
+  completed by an earlier failed run.
 - **What a reader can see** is exactly the pointed run's high-water mark.
   Rows of a run that has not moved the pointer are invisible, because
   their `batch_seq` is above it.
@@ -195,6 +209,12 @@ enforced only by the job, and the id sequences had no stated grants.
   - for `rollup_pointer`, a `batch_seq_hwm` that decreases.
 
   The job's `WHERE` guard and this trigger enforce the same rule twice.
+  **The trigger guards against bugs, not against a compromised job.**
+  `ratio_analytics` can mark its own run `succeeded`, so the "succeeded"
+  check is self-certifying. What the login cannot do is disable or replace
+  the trigger: the trigger and its function are owned by `ratio_owner`,
+  and the login is neither the owner nor a superuser (checked at start-up,
+  §6.1).
 - **Sequences.** `cost_series.id` and `cost_accounts.id` are
   `GENERATED ALWAYS AS IDENTITY`, owned by `ratio_owner`. USAGE on their two
   sequences is granted to `ratio_analytics` only, since INSERT needs it;
