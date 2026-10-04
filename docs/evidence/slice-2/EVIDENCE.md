@@ -773,3 +773,126 @@ parent ok after detached ignore child        [detached-ignore] node exit: 0
   isolation. Both are outside what Slice 2 may change without stopping first,
   so it is reported instead. Before this round it had not been seen in about
   ten `test:db` runs.
+
+## 14a. Challenger REQUEST CHANGES on 7142a86 (1 Medium): parallel-phase role changes
+
+**Correction to §14.** §14 called the intermittent `test:db` failure "not
+caused by this change". That holds for that round's commits, but the cause is
+in this PR's own earlier Slice 2 tests, so it is fixed here.
+
+### Root cause (challenger)
+
+- **The race.** Slice 0's `memberPrivilegeViolations`, the catalog check run
+  by every `migrate`, `migrate --status` and `doctor`, reads in two steps:
+  1. a role's memberships, in one statement;
+  2. its privileges, with `has_*_privilege()`, in a later statement.
+
+  `has_*_privilege()` follows the LIVE memberships, not the statement's
+  snapshot. A role change committed between the two statements is therefore
+  half-visible: the check sees privileges "beyond the reviewed set of the
+  ratio roles it belongs to".
+- **The trigger.** `src/server/costs/publishedCosts.db.test.ts` ran in the
+  PARALLEL DB phase and committed, with autocommit `db.pool.query`, role
+  changes on existing logins. Roles are cluster-wide, so a concurrent
+  `migrate` or `doctor` in another test database (here `doctor.db.test.ts`)
+  could see the half-applied state. The offending D6 statements:
+  - `GRANT ratio_reader` then `GRANT ratio_worker … SET`;
+  - `GRANT ratio_reader … INHERIT FALSE`;
+  - `GRANT ratio_worker` then `REVOKE`;
+  - `ALTER ROLE … NOLOGIN` then `LOGIN`.
+- **Measured (by the challenger).** This file caused violations in concurrent
+  checks. The other 8 parallel DB files caused 0 violations in thousands of
+  checks: they only `CREATE ROLE … IN ROLE` atomically through `createLogin`,
+  or change roles inside `BEGIN … ROLLBACK`.
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 0307c79 | `parallelRoleDdl.test.ts`: the static guard | **red** (`red/red-parallel-role-ddl.txt`: it flags exactly the 7 D6 statements at lines 337, 338, 348, 364, 366, 395 and 400; the Slice 0/1 files pass) |
+| 8c4919c | the four D6 tests move to `publishedCosts.serial.db.test.ts` | green |
+| 06b5f90 | guard self-test: a pool statement inside a client's `BEGIN … ROLLBACK` still autocommits | test |
+| (this commit) | this section, plus TEST_PLAN | docs |
+
+### The move
+
+These four tests moved to `publishedCosts.serial.db.test.ts`, as
+'D6 (serial)'. Their assertions are byte-identical; only the helpers
+(`login`, `get`, `refused`) are local copies with the same assertions:
+- "a reader that can only SET ROLE ratio_worker (no inherit) is refused";
+- "a reader holding ratio_reader only through SET (no inherited privileges)
+  is refused";
+- "the check runs on every request: a login made unsafe while pooled is
+  refused at once, and served again when fixed";
+- "a pooled login set NOLOGIN is refused on the very next request …; LOGIN
+  again ⇒ served".
+
+The parallel file keeps the D6 cases that only `CREATE ROLE … IN ROLE`
+atomically. It also keeps N3, which drops a login (`DROP ROLE` is atomic, and
+the other files' drops caused 0 violations).
+
+### The guard (`src/server/costs/parallelRoleDdl.test.ts`, in `npm test`)
+
+It covers every non-serial `*.db.test.ts` in `src/`, and is modelled on Slice
+1's `serialLogins.test.ts`: the same TypeScript AST walk and the same
+"string pieces, dynamic parts as placeholders" reading of SQL.
+
+**What it flags.** A `.query(...)` call whose SQL makes a cluster-wide role
+change must provably run inside `BEGIN … ROLLBACK`. Cluster-wide role changes
+are:
+- `GRANT <role> TO`;
+- `REVOKE <role> FROM`;
+- `GRANT`/`REVOKE … ON DATABASE | TABLESPACE | PARAMETER`;
+- `ALTER ROLE | USER | GROUP`, except `ALTER ROLE … IN DATABASE`, a setting
+  scoped to one test database.
+
+**What counts as inside `BEGIN … ROLLBACK`.** The receiver is not a pool
+(a pool autocommits), and either:
+- an enclosing function issues both `query('BEGIN')` and `query('ROLLBACK')`;
+  or
+- the enclosing callback is passed to a helper of the file that does (for
+  example `inTxn`).
+
+**What it does not flag.** Object grants (`GRANT … ON <table> TO`) are
+database-local. `CREATE ROLE … IN ROLE` is atomic. Test titles and SQL handed
+to a helper are not `.query(...)` calls.
+
+**Slice 0/1 files.** Unchanged, and they pass. The check is not vacuous:
+`memberPrivileges.db.test.ts` and `privileges.db.test.ts` each run more than 5
+such statements, all recognised as rolled back. `cli.db.test.ts`'s autocommit
+`GRANT SELECT ON ratio.cost_facts` and its `ALTER ROLE … IN DATABASE` are
+database-local, so they are not flagged.
+
+### Mutation checks (scratch `mutate9.sh`, `mutate9b.sh`; each applied, run, restored; tree clean after)
+
+| ID | Mutation | Caught by |
+|---|---|---|
+| M1 | one D6 `GRANT ratio_worker TO <existing login>` back in the parallel file | the guard (main test) |
+| M2 | one D6 `REVOKE ratio_worker FROM <login>` back | the guard |
+| M3 | the D6 `ALTER ROLE … NOLOGIN` back | the guard |
+| M4 | guard: a pool not recognised as autocommit | self-test (pool inside a client's `BEGIN … ROLLBACK`) |
+| M5 | guard: `BEGIN` alone counts (no `ROLLBACK` required) | self-test (`BEGIN … COMMIT` flagged) |
+| M6 | guard: transaction helpers of the file not recognised | the main test and the Slice 0/1 test (`inTxn` callers flagged), plus the self-test |
+| M7b | guard: membership `GRANT` not treated as a cluster-wide change | the Slice 0/1 non-vacuous count and the self-test. The first M7 edit broke the file (a load error, not a test failure), so it was re-run as M7b. |
+| M8 | guard: every `ALTER ROLE` exempted (not only `IN DATABASE`) | the Slice 0/1 non-vacuous count and the self-test |
+
+### Known Slice 0 limitation (not in this PR)
+
+The race itself is in Slice 0's catalog check, and production
+`migrate`/`doctor` can hit it. If a DBA changes ratio-role memberships at the
+same moment, the check can be falsely refused. It fails closed, and a rerun
+passes. REPEATABLE READ does not fix it, because `has_*_privilege` ignores the
+snapshot. **Tracked as a follow-up issue opened by the coordinator: a known
+Slice 0 limitation.**
+
+### Gates (HEAD 06b5f90)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **2348 passed** (102 files; the guard included) |
+| `npm run test:db` ×6 (private PG16 at 55700 + S3 prefixes) | **592 + 167** passed in **6 of 6** runs (106, 116, 107, 104, 105, 105 s); 0 `PRIVILEGE_MODEL_VIOLATION` lines in any log. The parallel count fell from 596 because 4 tests moved, and the serial count rose from 163 by the same 4 |
+| leftovers | none: private cluster stopped and deleted |
+
+No production file changed in this section, so the `next build`,
+`check:bundle` and `local:test` results of §14 stand.
