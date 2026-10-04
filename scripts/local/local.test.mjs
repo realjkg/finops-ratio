@@ -1699,14 +1699,16 @@ describe('L18 superuser catalog queries are tenant-scoped (PR #67 review)', () =
         const key = pairKey(child, parent);
         correlations.set(key, [...(correlations.get(key) ?? []), text]);
       }
-      const bindings = new Map();
+      // Identical bindings (either spelling) count ONCE per literal (challenger L-2, PR #68): a
+      // second textual copy cannot cover a second correlation. So each unordered pair carries at most
+      // one binding, and two correlations between the same pair in one literal are always flagged.
+      const bindings = new Set();
       for (const m of sql.matchAll(/\b(\w+)\.tenant_id\s*=\s*(\w+)\.tenant_id\b/g)) {
         if (m[1] === m[2]) continue; // a tautology
-        const key = pairKey(m[1], m[2]);
-        bindings.set(key, (bindings.get(key) ?? 0) + 1);
+        bindings.add(pairKey(m[1], m[2]));
       }
       for (const [key, texts] of correlations) {
-        const bound = bindings.get(key) ?? 0;
+        const bound = bindings.has(key) ? 1 : 0;
         if (bound < texts.length) problems.push(...texts.slice(bound));
       }
     }
