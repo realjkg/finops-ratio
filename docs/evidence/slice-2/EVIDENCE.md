@@ -344,3 +344,68 @@ mutations below (C2, K2a, K2b).
 | `npm run local:test` (default isolated settings: `ratio-local-test`, 54339/18353/3110) | pass; `appReady: pid-verified`; totals 55 / `30.8272954899`, 40 / `21.0978157665`; 95 distinct rows; `down -v` |
 | `npm audit --omit=dev` | 0 vulnerabilities |
 | leftovers (`ps`, docker, `.ratio-local/`) | none |
+
+### §10 addendum
+
+**D-01 enforcement is issue #60.** The brief's Appendix A now points to it.
+
+## 11. Challenger delta review of 323984e..85e6185 (REQUEST CHANGES: 1 Medium, 6 Low); local, not pushed
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 2ed1748 | tests for every code item | **red** (`red/red-delta-{fast,db}.txt`: fast 14 failed / 101, DB 1 failed / 27) |
+| 30b8f55 | code notes, N3, local helpers | green |
+| 21d9ce7 | D-01 tightened, D-02 facts, go-live gate, DESIGN §2.2/§2.4/§9, TEST_PLAN §E | docs |
+| (this commit) | this section | docs |
+
+**Gap tests that passed on first run, as expected:** "an existing 0755 state
+directory becomes 0700" (L6f), plus the N3 NULL-`rolcanlogin` and
+NULL-reader cases, which the old truthiness checks already refused. Their
+teeth are shown below (L6f, N3c).
+
+### Mapping
+
+| Finding | Commit(s) | Test(s) / evidence |
+|---|---|---|
+| **Medium**: D-01 too loose (SSE-S3 is S3's default; `aws/s3` SSE-KMS is transparent to `s3:GetObject`) | 21d9ce7 | Docs: Decision log, §1 and Appendix A now say unrestricted only with SSE-KMS under a customer-managed key (key policy as access control) or client-side encryption; SSE-S3 and `aws/s3` explicitly restricted. Appendix A references **#60**, with acceptance criteria that `AES256` and `aws/s3` (alias or ARN) classify as restricted, plus mutations for both |
+| Low: D-02 facts | 21d9ce7 | Docs: `FOCUS-1.0/focus_sample.csv`, `FOCUS-1.0/focus_sample_10000.csv`; AWS, Microsoft and Oracle only (no Google in these files); the claim cited from `FOCUS-1.0/README.md` at adbdd17 |
+| Low: L6e (`owned === false` ignored) | 2ed1748, 30b8f55 | `local.test.mjs` L13 (`waitForOwnServer` is now in `lib.mjs`, injectable probe/owns/clock); mutation L6e killed |
+| Low: L6f (existing directory to 0700) | 2ed1748 | L14; mutation L6f killed |
+| Low: port re-check before spawn (no `/proc`) | 2ed1748, 30b8f55 | L15 (`portInUse` against a real listener; `startIfPortFree` never spawns on a busy port; `local.mjs` spawns only through it); mutation P1 killed |
+| Low: DESIGN §2.2/§2.4 | 21d9ce7 | NOLOGIN rule, fail-closed fields, codes-only logging, `default_transaction_isolation`, the per-request statement list (two catalog queries, not one), the 503 `requestId`, `no-store` |
+| Low: governance, production go-live not delegated | 21d9ce7 | Brief banner "PRODUCTION GO-LIVE IS A NON-DELEGABLE HUMAN GATE"; §7 owner actions: (1) go-live sign-off, (2) hosting spend, (3) GitHub App, (4) real billing data, optional; §8 ends with the sign-off check. The Decision log is unchanged apart from the D-01 / D-02 corrections and renumbered owner-action references |
+| Low: `Cache-Control: no-store` on errors | 2ed1748, 30b8f55 | route R6 (401, 429, 503 weak, 405, 400, 503 not_configured, 503 unsafe, 500) and D1 (200). Set once, first thing in the route, so the gateway's own errors are covered; mutation CC1 killed |
+| Low: test-only `hooks` on the public signature | 2ed1748, 30b8f55 | `testSeam.test.ts` (3 parameters; seam refused outside vitest; no production file names it); D8 now uses the seam; mutations TS1, TS2 killed; **X1 re-run: D8x and D8y killed** |
+| Low: N3, a missing session_user row treated as login-capable | 2ed1748, 30b8f55 | `readerLogin.test.ts`: no row, NULL `rolcanlogin`, NULL reader, NULL worker ⇒ refused (strict `=== true` / `=== false`); DB D6: a login dropped while pooled is never served. Live probe: Postgres raises 42704 "invalid role OID" on every statement of a session whose role was dropped (`session_user`, `current_user`, the `rolcanlogin` query), so the read fails closed with a 500; mutations N3a–N3c killed |
+
+### Mutation checks (scratch `mutate4.sh`; each applied, run, restored; tree clean after)
+
+| ID | Mutation | Result |
+|---|---|---|
+| L6e | `waitForOwnServer` ignores `owned === false` | **killed**: local 1/44 |
+| L6f | existing state directory not tightened to 0700 | **killed**: local 1/44 |
+| P1 | no port re-check before spawning `next start` | **killed**: local 1/44 |
+| N3a | NULL worker reachability treated as safe | **killed**: readerLogin 2/16 |
+| N3b | a missing reader row crashes instead of refusing | **killed**: readerLogin 1/16 |
+| N3c | NULL `rolcanlogin` treated as login-capable | **killed**: readerLogin 2/16 |
+| CC1 | `Cache-Control: no-store` removed | **killed**: route 1/14, DB 1/27 |
+| TS1 | seam allowed outside vitest | **killed**: seam 1/3 |
+| TS2 | `hooks` parameter back on the public signature | **killed**: seam 1/3 |
+| D8x | **X1 re-run through the seam**: REPEATABLE READ default AND the in-transaction assertion removed | **killed**: DB 3/27, incl. D8 "a publish committed between the page query and the totals query cannot make them disagree" |
+| D8y | the seam call removed from the read (no publish injected) | **killed**: DB 1/27 (D8 notices the publish never ran) |
+
+### Gates (HEAD 21d9ce7 + this file)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **2256 passed** ×3, sequential, each run concurrent with `test:db` (load average about 12) |
+| `npm test` ×3 in parallel *and* concurrent with `test:db` (an extra stress run) | 2254/2256 ×3: the pre-existing Slice 1 test `src/ingest/worker/periods.test.ts` timed out at vitest's 5 s default. It spawns 8 `tsx` children and takes 3.6 s alone; it passes alone and in every sequential run; neither it nor `periods.ts` was changed in Slice 2. Not fixed (a Slice 1 test; out of scope). Noted for a follow-up: a per-test timeout like `cli.process.test.ts` has. |
+| `npm run test:db` ×3 (private PG16 at 55700 + S3 prefixes) | **595 + 161** passed ×3; 123 / 114 / 110 s |
+| `worker:build`; `next build` | 0; 0 (`tsconfig.json`/`next-env.d.ts` restored) |
+| `npm run check:bundle` | pass (116 client files, 91 server files) |
+| `npm run local:test` (`ratio-local-test`, 54339/18353/3110) | pass; `appReady: pid-verified`; totals 55 / `30.8272954899`, 40 / `21.0978157665`; 95 distinct rows; `down -v` |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+| leftovers | none |
