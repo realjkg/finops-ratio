@@ -38,6 +38,9 @@ out
 # Local ephemeral stack state (generated secrets; removed by `npm run local:down -- -v`)
 .ratio-local/
 
+# Python bytecode (scripts/acceptance/*.py)
+__pycache__/
+
 # Public FOCUS sample data fetched on demand by `npm run sample:fetch` (pinned, SHA-256 checked; CC BY 4.0)
 .ratio-sample-data/
 
