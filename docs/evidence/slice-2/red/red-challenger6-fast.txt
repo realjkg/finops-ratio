@@ -1,0 +1,113 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+(node:8189) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 error listeners added to [EventEmitter]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/server/costs/readDeadline.test.ts (7 tests | 1 failed) 847ms
+   ❯ RD4 the stray-error listener is attached once per client, not per request (1)
+     × 50 reads on one pooled client leave exactly one guard listener 12ms
+ ❯ src/server/costs/parallelRoleDdl.test.ts (19 tests | 5 failed) 2149ms
+   ❯ guard hardening (challenger Low on 480dd87) (6)
+     × (a) only a client that provably comes from `await x.connect()`, `new Client` (pg) or a local function returning one is transaction-capable 9ms
+     × (b) CREATE ROLE … ROLE / ADMIN / USER <existing> adds members: a role change; plain CREATE ROLE … IN ROLE stays accepted 2ms
+     × (c) SQL comments are stripped before matching (outside string literals) 1ms
+     × (d) any indirect use of query is flagged: .call, .apply, .bind, destructuring, a computed member 1ms
+     × (e) a client reassigned before the call is not the client that BEGAN 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/parallelRoleDdl.test.ts > guard hardening (challenger Low on 480dd87) > (a) only a client that provably comes from `await x.connect()`, `new Client` (pg) or a local function returning one is transaction-capable
+AssertionError: expected [] to not deeply equal []
+
+Compared values have no visual difference.
+
+ ❯ src/server/costs/parallelRoleDdl.test.ts:625:46
+    623|   it('(a) only a client that provably comes from `await x.connect()`, …
+    624|     // A pool, or anything else, under a client-like name: autocommit …
+    625|     expect(v(TXN('const c = db.pool;'))).not.toEqual([]);
+       |                                              ^
+    626|     expect(v(TXN('const c = db.admin;'))).not.toEqual([]);
+    627|     expect(v(TXN('const c = getThing();'))).not.toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/server/costs/parallelRoleDdl.test.ts > guard hardening (challenger Low on 480dd87) > (b) CREATE ROLE … ROLE / ADMIN / USER <existing> adds members: a role change; plain CREATE ROLE … IN ROLE stays accepted
+AssertionError: expected [] to not deeply equal []
+
+Compared values have no visual difference.
+
+ ❯ src/server/costs/parallelRoleDdl.test.ts:645:84
+    643|
+    644|   it('(b) CREATE ROLE … ROLE / ADMIN / USER <existing> adds members: a…
+    645|     expect(v("await db.pool.query('CREATE ROLE x LOGIN ROLE ratio_work…
+       |                                                                                    ^
+    646|     expect(v("await db.pool.query('CREATE ROLE x NOLOGIN ADMIN some_lo…
+    647|     expect(v("await db.pool.query('CREATE ROLE x USER some_login');"))…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/server/costs/parallelRoleDdl.test.ts > guard hardening (challenger Low on 480dd87) > (c) SQL comments are stripped before matching (outside string literals)
+AssertionError: expected [] to not deeply equal []
+
+Compared values have no visual difference.
+
+ ❯ src/server/costs/parallelRoleDdl.test.ts:654:73
+    652|
+    653|   it('(c) SQL comments are stripped before matching (outside string li…
+    654|     expect(v("await db.pool.query('GRANT/**/ratio_worker TO x');")).no…
+       |                                                                         ^
+    655|     expect(v("await db.pool.query('GRANT ratio_worker /* ON DATABASE d…
+    656|     expect(v("await db.pool.query('ALTER--c\\nROLE x NOLOGIN');")).not…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/server/costs/parallelRoleDdl.test.ts > guard hardening (challenger Low on 480dd87) > (d) any indirect use of query is flagged: .call, .apply, .bind, destructuring, a computed member
+AssertionError: expected [] to not deeply equal []
+
+Compared values have no visual difference.
+
+ ❯ src/server/costs/parallelRoleDdl.test.ts:663:57
+    661|
+    662|   it('(d) any indirect use of query is flagged: .call, .apply, .bind, …
+    663|     expect(v("await c.query.call(c, 'SELECT 1');")).not.toEqual([]);
+       |                                                         ^
+    664|     expect(v("await c.query.apply(c, ['SELECT 1']);")).not.toEqual([]);
+    665|     expect(v('const q = db.pool.query.bind(db.pool);')).not.toEqual([]…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  src/server/costs/parallelRoleDdl.test.ts > guard hardening (challenger Low on 480dd87) > (e) a client reassigned before the call is not the client that BEGAN
+AssertionError: expected [] to not deeply equal []
+
+Compared values have no visual difference.
+
+ ❯ src/server/costs/parallelRoleDdl.test.ts:676:11
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  src/server/costs/readDeadline.test.ts > RD4 the stray-error listener is attached once per client, not per request > 50 reads on one pooled client leave exactly one guard listener
+AssertionError: expected 50 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 50
+
+ ❯ src/server/costs/readDeadline.test.ts:172:43
+    170|       process.off('warning', onWarning);
+    171|     }
+    172|     expect(client.listenerCount('error')).toBe(1);
+       |                                           ^
+    173|     expect(client.release).toHaveBeenCalledTimes(50);
+    174|     expect(warnings).not.toContain('MaxListenersExceededWarning');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  6 failed | 20 passed (26)
+   Start at  07:36:43
+   Duration  3.11s (tests 71%, transform 16%, import 13%)
+

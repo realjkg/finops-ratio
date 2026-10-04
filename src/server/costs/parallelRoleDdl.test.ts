@@ -613,3 +613,76 @@ describe('guard soundness (Copilot 4176494757, 4176494775)', () => {
     expect(v("async function f(c, sql) { await c.query('BEGIN'); try { await c.query(sql); } finally { await c.query('ROLLBACK'); } }")).toEqual([]);
   });
 });
+
+// --- challenger Low on 480dd87: guard hardening ---------------------------------
+describe('guard hardening (challenger Low on 480dd87)', () => {
+  const v = (code: string) => parallelRoleDdlViolations('x.db.test.ts', code);
+  const TXN = (decl: string) =>
+    `async function f() { ${decl} await c.query('BEGIN'); try { await c.query(\`GRANT ratio_worker TO \${x}\`); } finally { await c.query('ROLLBACK'); } }`;
+
+  it('(a) only a client that provably comes from `await x.connect()`, `new Client` (pg) or a local function returning one is transaction-capable', () => {
+    // A pool, or anything else, under a client-like name: autocommit ⇒ flagged.
+    expect(v(TXN('const c = db.pool;'))).not.toEqual([]);
+    expect(v(TXN('const c = db.admin;'))).not.toEqual([]);
+    expect(v(TXN('const c = getThing();'))).not.toEqual([]);
+    expect(v(TXN('let c = await db.pool.connect();'))).not.toEqual([]);
+    expect(v("import { Client } from './fake';\n" + TXN('const c = new Client({});'))).not.toEqual([]);
+    // Provable clients pass.
+    expect(v(TXN('const c = await db.pool.connect();'))).toEqual([]);
+    expect(v("import { Client } from 'pg';\n" + TXN('const c = new Client({});'))).toEqual([]);
+    expect(
+      v("import { Client } from 'pg';\nasync function connect(d) { const k = new Client({ connectionString: d }); await k.connect(); return k; }\n" + TXN('const c = await connect(db);')),
+    ).toEqual([]);
+    // A local function that returns something else is not a client source.
+    expect(v('async function connect(d) { return d.pool; }\n' + TXN('const c = await connect(db);'))).not.toEqual([]);
+    // A helper must itself use a provable client for its callback.
+    expect(
+      v("async function h(fn) { const c = db.pool; await c.query('BEGIN'); try { await fn(c); } finally { await c.query('ROLLBACK'); } }\nit('t', async () => { await h(async (k) => { await k.query(`GRANT ratio_worker TO ${x}`); }); });"),
+    ).not.toEqual([]);
+  });
+
+  it('(b) CREATE ROLE … ROLE / ADMIN / USER <existing> adds members: a role change; plain CREATE ROLE … IN ROLE stays accepted', () => {
+    expect(v("await db.pool.query('CREATE ROLE x LOGIN ROLE ratio_worker');")).not.toEqual([]);
+    expect(v("await db.pool.query('CREATE ROLE x NOLOGIN ADMIN some_login');")).not.toEqual([]);
+    expect(v("await db.pool.query('CREATE ROLE x USER some_login');")).not.toEqual([]);
+    expect(v("await db.pool.query('CREATE GROUP g USER some_login');")).not.toEqual([]);
+    expect(v('await db.pool.query(`CREATE ROLE ${n} LOGIN IN ROLE ratio_reader`);')).toEqual([]);
+    expect(v('await db.pool.query(`CREATE ROLE ${n} LOGIN IN GROUP ratio_reader`);')).toEqual([]);
+  });
+
+  it('(c) SQL comments are stripped before matching (outside string literals)', () => {
+    expect(v("await db.pool.query('GRANT/**/ratio_worker TO x');")).not.toEqual([]);
+    expect(v("await db.pool.query('GRANT ratio_worker /* ON DATABASE d */ TO x');")).not.toEqual([]);
+    expect(v("await db.pool.query('ALTER--c\\nROLE x NOLOGIN');")).not.toEqual([]);
+    expect(v("await db.pool.query('REVOKE /* ON TABLE t */ ratio_worker FROM x');")).not.toEqual([]);
+    // A '--' inside a string literal is text, not a comment: the GRANT after it still counts.
+    expect(v("await db.pool.query(\"SELECT '--'; GRANT ratio_worker TO x\");")).not.toEqual([]);
+  });
+
+  it('(d) any indirect use of query is flagged: .call, .apply, .bind, destructuring, a computed member', () => {
+    expect(v("await c.query.call(c, 'SELECT 1');")).not.toEqual([]);
+    expect(v("await c.query.apply(c, ['SELECT 1']);")).not.toEqual([]);
+    expect(v('const q = db.pool.query.bind(db.pool);')).not.toEqual([]);
+    expect(v('const { query } = db.pool;')).not.toEqual([]);
+    expect(v('const { query: run } = db.pool;')).not.toEqual([]);
+    expect(v("await db.pool['query']('GRANT ratio_worker TO x');")).not.toEqual([]);
+  });
+
+  it('(e) a client reassigned before the call is not the client that BEGAN', () => {
+    expect(
+      v(
+        "async function h(fn) { const c = await db.pool.connect(); await c.query('BEGIN'); try { await fn(c); } finally { await c.query('ROLLBACK'); } }\nit('t', async () => { await h(async (k) => { k = other; await k.query(`GRANT ratio_worker TO ${x}`); }); });",
+      ),
+    ).not.toEqual([]);
+    expect(
+      v("async function f(c) { await c.query('BEGIN'); c = await db.pool.connect(); try { await c.query(`GRANT ratio_worker TO ${x}`); } finally { await c.query('ROLLBACK'); } }"),
+    ).not.toEqual([]);
+  });
+
+  it('the Slice 0/1 files still pass with the same 3-entry allowlist', () => {
+    const scan = repositoryScan();
+    expect(scan.unlisted).toEqual([]);
+    expect(scan.stale).toEqual([]);
+    expect(ALLOWLIST).toHaveLength(3);
+  }, 60_000);
+});

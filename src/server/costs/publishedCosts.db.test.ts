@@ -611,3 +611,32 @@ describe('D11 a stalled reader connection is destroyed and its slot freed (Copil
     expect(took).toBeLessThan(3_000);
   }, 30_000);
 });
+
+// --- challenger Medium on 480dd87: no 'error' listener leak on a pooled client.
+describe('D12 a pooled reader client keeps a flat listener count across requests', () => {
+  it("51 requests on a max: 1 pool: the client's error-listener count after the first request is the count after the last", async () => {
+    const pool = createReaderPool(reader.url, { max: 1 });
+    const route = createPublishedCostsRoute({
+      env: { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_API_TENANT_ID: C.tenantId, RATIO_READER_DATABASE_URL: reader.url },
+      poolFor: () => pool,
+      logger: () => undefined,
+    });
+    const listeners = async () => {
+      const c = await pool.connect();
+      try {
+        return c.listenerCount('error');
+      } finally {
+        c.release();
+      }
+    };
+    try {
+      expect((await call(route, makeReq({ headers: bearer(), query: { limit: '1' } }))).statusCode).toBe(200);
+      const first = await listeners();
+      for (let i = 0; i < 50; i += 1) expect((await call(route, makeReq({ headers: bearer(), query: { limit: '1' } }))).statusCode).toBe(200);
+      expect(pool.totalCount).toBe(1);
+      expect(await listeners()).toBe(first);
+    } finally {
+      await pool.end();
+    }
+  }, 60_000);
+});

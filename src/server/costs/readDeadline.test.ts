@@ -5,6 +5,7 @@
 // the whole request (tenant transaction, login check, reads) has a deadline.
 // A client that timed out, failed at the connection level, or outlived the
 // request deadline is DESTROYED (release(err)), never returned to the pool.
+import { EventEmitter } from 'events';
 import net from 'net';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
@@ -144,4 +145,32 @@ describe('RD3 the route answers within its deadline when Postgres stalls', () =>
     expect(c.release).toHaveBeenCalledTimes(1);
     expect(c.release.mock.calls[0][0]).toBeInstanceOf(Error);
   }, 10_000);
+});
+
+// --- challenger Medium on 480dd87: guard() added an 'error' listener on EVERY
+// checkout and never removed it; a pooled client is never retired under steady
+// traffic, so the listeners grew without bound (MaxListenersExceededWarning).
+describe('RD4 the stray-error listener is attached once per client, not per request', () => {
+  it('50 reads on one pooled client leave exactly one guard listener', async () => {
+    const client = Object.assign(new EventEmitter(), { query: vi.fn(async () => ({ rows: [] })), release: vi.fn() });
+    const pool = { connect: vi.fn(async () => client) } as unknown as Pick<Pool, 'connect'>;
+    const warnings: string[] = [];
+    const onWarning = (w: Error) => warnings.push(w.name);
+    process.on('warning', onWarning);
+    try {
+      for (let i = 0; i < 50; i += 1) {
+        await readWithDeadline(pool, async (p) => {
+          const c = await p.connect();
+          await c.query('SELECT 1');
+          c.release();
+        }, 5_000);
+      }
+      await new Promise((r) => setImmediate(r));
+    } finally {
+      process.off('warning', onWarning);
+    }
+    expect(client.listenerCount('error')).toBe(1);
+    expect(client.release).toHaveBeenCalledTimes(50);
+    expect(warnings).not.toContain('MaxListenersExceededWarning');
+  });
 });
