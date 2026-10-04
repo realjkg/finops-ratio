@@ -216,6 +216,7 @@ describe('RD5 only a real, session-preserving SQL error keeps a client; everythi
     ['a pg query_timeout error', new Error('Query read timeout')],
     ['"Connection terminated unexpectedly"', new Error('Connection terminated unexpectedly')],
     ['a plain object with a SQLSTATE-shaped code (not a DatabaseError)', Object.assign(new Error('looks like SQL'), { code: '42P01' })],
+    ['a look-alike with severity ERROR and a SQLSTATE that is not a DatabaseError', Object.assign(new Error('fake server error'), { severity: 'ERROR', code: '42P01' })],
     ['a DatabaseError with severity FATAL (57P01, pg_terminate_backend)', dbErr('57P01', 'FATAL')],
     ['a DatabaseError of class 08 (connection exception)', dbErr('08006')],
     ['a DatabaseError 57P01 even if severity says ERROR', dbErr('57P01')],
