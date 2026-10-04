@@ -18,7 +18,7 @@ ordinary commits and plain pushes (never a force-push).
 | 6 | `66a1fa2`, `472dbe3` | The challenger's review of 4492d2f..f5676d9 (1 High, 2 Medium, 4 Low), all answered (§3c): intermittent series on non-overlapping weekly sums or `info` only (D-24, proposed), calendar factors on raw `y` with a median estimator and a calendar-aware Hampel, estimation noise in every budget term, D8, h = 9.0, `budget4.py` (B.5.9). |
 | 7 | `380e9a0`, `801019a` | Revision 6 approved by the challenger (0 High, 0 Medium). D-24 decided by the orchestrator (option a): hurdle statistic with a clustering gate for intermittent series above 50 % zeros; the challenger's Low items L1–L4 answered (§3d); `budget5.py` (B.5.10). |
 | 8 | `04e6cf8`, `dbbd552` | Revision 7 approved by the challenger. The remaining Low, dormant series that reactivate, folded in by extending D4 (§3e); `reactivation.py` (B.5.11). |
-| 9 | this revision | The challenger's REQUEST CHANGES on revision 8 (1 Medium): the reactivation history condition looked at the wrong days. History moved to the pre-dormancy period and a size override added, both decided by the orchestrator (§3f); `reactivation.py` updated (B.5.11). |
+| 9 | `bb4379c` and the §5 refresh | The challenger's REQUEST CHANGES on revision 8 (1 Medium): the reactivation history condition looked at the wrong days. History moved to the pre-dormancy period and a size override added, both decided by the orchestrator (§3f); `reactivation.py` updated (B.5.11). |
 
 ## 2. Governance wording: reverted
 
@@ -253,7 +253,8 @@ Appendix B (B.4, B.5.6–B.5.11).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at `04e6cf8` (revision 8; the same reasons as at `380e9a0`, revision 7,
+at `bb4379c` (revision 9; the same reasons as at `04e6cf8`, revision 8,
+`380e9a0`, revision 7,
 `66a1fa2`, revision 6, `fc7ee66`, revision 5, and `faeabb4`, revision 4):
 
 - `"risk": "restricted"`, classes `retention` and `secrets`;
