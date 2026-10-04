@@ -22,14 +22,17 @@ export const SOURCE_TYPE_PROVIDERS: Readonly<Record<string, readonly string[]>> 
 });
 
 /**
- * Provider names of the project's SYNTHETIC fixtures (syntheticFocus.ts,
- * testing/focusCsv.ts). Accepted, by any checked source type, ONLY with the
- * explicit opt-in RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 (default off; refused in
- * production; config.ts). Otherwise a tampered "AWS" export carrying them would
- * be published as AWS spend (DESIGN §8 D1). The synthetic provider names planned
- * for Slice 3 (brief D-04) are added here.
+ * The fixed set of SYNTHETIC provider names: the project's fixtures
+ * (syntheticFocus.ts, testing/focusCsv.ts write SyntheticCloud) and the Slice 3
+ * generator (SyntheticAWS, SyntheticAzure, SyntheticGCP). With the explicit
+ * opt-in RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 (default off; refused in
+ * production; config.ts) every name here is accepted by every checked source
+ * type; without it none is. The opt-in never widens real-provider acceptance:
+ * real names are still checked against SOURCE_TYPE_PROVIDERS alone. Otherwise a
+ * tampered "AWS" export carrying them would be published as AWS spend
+ * (DESIGN §8 D1). Frozen; exact names.
  */
-export const SYNTHETIC_PROVIDER_NAMES: readonly string[] = Object.freeze(['SyntheticCloud']);
+export const SYNTHETIC_PROVIDERS: readonly string[] = Object.freeze(['SyntheticCloud', 'SyntheticAWS', 'SyntheticAzure', 'SyntheticGCP']);
 
 export interface ProviderPolicy {
   readonly sourceType: string;
@@ -38,7 +41,7 @@ export interface ProviderPolicy {
 
 function policy(sourceType: 'aws-data-exports' | 'fake', allowSynthetic: boolean): ProviderPolicy {
   const base = SOURCE_TYPE_PROVIDERS[sourceType];
-  return Object.freeze({ sourceType, allowed: allowSynthetic ? Object.freeze([...base, ...SYNTHETIC_PROVIDER_NAMES]) : base });
+  return Object.freeze({ sourceType, allowed: allowSynthetic ? Object.freeze([...base, ...SYNTHETIC_PROVIDERS]) : base });
 }
 
 /**

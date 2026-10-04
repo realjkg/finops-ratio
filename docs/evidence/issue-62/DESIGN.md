@@ -47,10 +47,14 @@ resolved from the RLS-visible source row, never from the data:
 | `kind = 'fake'` | `fake` | none |
 | anything else | none: not checked (see D4) | — |
 
-The synthetic fixtures' provider names (`SYNTHETIC_PROVIDER_NAMES` =
-`SyntheticCloud`, plus the names Slice 3 D-04 will add) are added to a
-checked type's list **only with the explicit opt-in
-`RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`** (§8 D1, decided 2026-10-04).
+The fixed, exported `SYNTHETIC_PROVIDERS` set (`SyntheticCloud`,
+`SyntheticAWS`, `SyntheticAzure` and `SyntheticGCP`; the last three are for
+the Slice 3 generator) is added to every checked type's list **only with the
+explicit opt-in `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`** (§8 D1, decided
+2026-10-04).
+- With the opt-in off, none of them is accepted anywhere.
+- With it on, real provider names are still checked against the per-type
+  list exactly as before. The opt-in never widens real-provider acceptance.
 
 **Matching is exact**: case-sensitive, no trimming, no normalisation, no
 prefix match. `aws`, ` AWS`, `AWS ` and `Amazon Web Services` are all
@@ -175,7 +179,7 @@ Unchecked types (D4) keep today's behaviour: no header or NULL rule.
 ## 4. Implementation (minimal)
 
 - `src/ingest/focus/provider.ts` (new, pure): `PROVIDER_MISMATCH`,
-  the frozen `SOURCE_TYPE_PROVIDERS` and `SYNTHETIC_PROVIDER_NAMES`,
+  the frozen `SOURCE_TYPE_PROVIDERS` and `SYNTHETIC_PROVIDERS`,
   `providerPolicyFor(sourceRow, { allowSyntheticProviders })`,
   `checkProviderHeader(index, policy)` and `checkProviderName(value, policy)`.
 - `config.ts` (D1): `WorkerSettings.allowSyntheticProviders` (default
@@ -291,7 +295,8 @@ columns.
 | D6 | 〃 | mixed file + a set-level control counting every row ⇒ `RECONCILIATION_VARIANCE` |
 | D7 | 〃 | the `fake` type rejects `AWS` |
 | D8 | 〃 | an unrecognised type is not checked (D4) |
-| D9 | 〃 (D1 decision) | opt-in off ⇒ `SyntheticCloud` under `aws-data-exports` excluded `PROVIDER_MISMATCH` (and an all-synthetic batch quarantined); on ⇒ accepted; a library caller follows the process env, unset ⇒ off |
+| D9 | 〃 (D1 decision) | opt-in off ⇒ `SyntheticCloud` under `aws-data-exports` excluded `PROVIDER_MISMATCH` (and an all-synthetic batch quarantined); on ⇒ accepted; the whole synthetic set: off ⇒ each excluded, on ⇒ each accepted while `Microsoft` and `Amazon Web Services` stay excluded; a library caller follows the process env, unset ⇒ off |
+| U2 | `src/ingest/focus/provider.test.ts` (synthetic set) | the set is exactly the four names, frozen; off ⇒ none accepted by any type; on ⇒ each accepted by every type; on never changes the verdict for real names (`AWS` still refused by `fake`); the base lists hold no synthetic name |
 | D10 | 〃 (D1 decision) | the worker CLI: `'0'` ⇒ the synthetic fixture is quarantined, no opt-in log; `'1'` ⇒ published, the opt-in logged exactly once |
 | S1 | `src/ingest/syntheticProviders.test.ts` (D1 decision) | default off (`DEFAULT_SETTINGS`, `resolveSettings`, `loadWorkerConfig` for every `RATIO_ENV`); `'1'` on; other values refused; refused in production |
 | G1 | `src/ingest/worker/sourceFactory.test.ts` (D4 decision) | every source row without a provider policy is refused by the source factory (`SOURCE_CONFIG_INVALID`); every row it accepts has a policy |
@@ -316,7 +321,9 @@ harness only:
 | M4 | loose match (trim / prefix: `startsWith`) | U1 |
 | M5 | mismatch excluded but all-foreign batch published as zero rows / `EMPTY_BATCH` | D2 |
 | M6 | exclusion not counted in `validation_error_count` | D1 |
-| M17 | synthetic providers always allowed (opt-in ignored) | U1, D9, D10 |
+| M17 | synthetic providers always allowed (opt-in ignored) | U1, U2, D9, D10 |
+| M21 | the opt-in widens real names (`Microsoft` accepted when on) | U2, D9 |
+| M22 | a synthetic name dropped from the set (`SyntheticGCP`) | U2, D9 |
 | M18 | opt-in default on (`DEFAULT_SETTINGS` / unset env) | S1, D9 |
 | M19 | opt-in accepted in production | S1 |
 | M20 | factory accepts `focus_file` without the AWS layout | G1 |
@@ -330,9 +337,12 @@ The first draft proposed each item below; the orchestrator decided them on
   The draft put `SyntheticCloud` on the `aws-data-exports` allowlist. That
   re-opens the gap #62 closes: a tampered "AWS" export carrying
   `SyntheticCloud` rows would be published as AWS spend. Decided:
-  - `SyntheticCloud` (and the synthetic provider names planned for Slice 3,
-    D-04) are accepted ONLY when `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` is set.
-    The base lists hold only real providers.
+  - The fixed `SYNTHETIC_PROVIDERS` set (`SyntheticCloud`, `SyntheticAWS`,
+    `SyntheticAzure`, `SyntheticGCP`; the last three for the Slice 3
+    generator) is accepted ONLY when `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` is
+    set. With it set, every name in the set is accepted by every checked
+    type. The base lists hold only real providers, and the opt-in never
+    widens real-provider acceptance (addition decided 2026-10-04).
   - The opt-in defaults to OFF. A production or default config never
     accepts them: `RATIO_ENV=production` with the opt-in is refused at
     config load (`SYNTHETIC_PROVIDERS_NOT_ALLOWED`).
