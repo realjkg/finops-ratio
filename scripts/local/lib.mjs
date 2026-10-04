@@ -733,8 +733,9 @@ export function compareControlTotals(totals, control) {
       problems.push(`${key}: not in the control totals`);
       continue;
     }
-    // The API's rowCount is a bigint count as a decimal string (Copilot 4176238961).
-    if (typeof t.rowCount !== 'string' || t.rowCount !== String(c.rowCount)) problems.push(`${key}: rowCount ${JSON.stringify(t.rowCount)} != control "${c.rowCount}"`);
+    // The API's rowCount is a bigint count as a decimal string (Copilot 4176238961):
+    // strict !== against the control's text form, so a JS number never matches.
+    if (t.rowCount !== String(c.rowCount)) problems.push(`${key}: rowCount ${JSON.stringify(t.rowCount)} != control "${c.rowCount}"`);
     if (t.billedCost !== c.billedTotal) problems.push(`${key}: billedCost ${t.billedCost} != control ${c.billedTotal}`);
   }
   for (const key of Object.keys(control)) if (!seen.has(key)) problems.push(`${key}: missing from the API totals`);
