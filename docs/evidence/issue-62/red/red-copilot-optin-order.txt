@@ -1,0 +1,25 @@
+- ObjectContaining {
+-   "code": "SYNTHETIC_PROVIDERS_NOT_ALLOWED",
++ IngestError {
++   "message": "RATIO_ENV must be one of development, test, staging, production",
++   "name": "IngestError",
++   "code": "CONFIG_INVALID",
++   "retryable": false,
+  }
+
+ ❯ src/ingest/syntheticProviders.test.ts:75:89
+     73|   it('L3 (PR #67 review): loadWorkerConfig reports the refused opt-in …
+     74|     for (const ratioEnv of ['prod', 'dev', 'TEST', 'Development', 'loc…
+     75|       expect(() => loadWorkerConfig({ ...base, ...ON, RATIO_ENV: ratio…
+       |                                                                                         ^
+     76|     }
+     77|     // Without the opt-in, an unknown RATIO_ENV is still a plain confi…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 passed (10)
+   Start at  16:29:29
+   Duration  647ms (transform 72%, import 12%, tests 9%, worker 7%)
+

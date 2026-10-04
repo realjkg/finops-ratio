@@ -70,6 +70,17 @@ describe('RATIO_ALLOW_SYNTHETIC_PROVIDERS', () => {
     }
   });
 
+  it('L3 (PR #67 review): loadWorkerConfig reports the refused opt-in before rejecting an unknown RATIO_ENV', () => {
+    for (const ratioEnv of ['prod', 'dev', 'TEST', 'Development', 'local', 'testing', 'ci', 'Production', 'STAGING']) {
+      expect(() => loadWorkerConfig({ ...base, ...ON, RATIO_ENV: ratioEnv }), ratioEnv).toThrow(NOT_ALLOWED);
+    }
+    // Without the opt-in, an unknown RATIO_ENV is still a plain configuration error.
+    for (const ratioEnv of ['prod', 'TEST', 'ci']) {
+      expect(() => loadWorkerConfig({ ...base, RATIO_ENV: ratioEnv }), ratioEnv).toThrow(expect.objectContaining({ code: 'CONFIG_INVALID' }));
+      expect(() => loadWorkerConfig({ ...base, RATIO_ALLOW_SYNTHETIC_PROVIDERS: '0', RATIO_ENV: ratioEnv }), ratioEnv).toThrow(expect.objectContaining({ code: 'CONFIG_INVALID' }));
+    }
+  });
+
   it('the refusal names the rule, not the value', () => {
     try {
       syntheticProvidersOptIn({ ...ON, RATIO_ENV: 'staging' });
