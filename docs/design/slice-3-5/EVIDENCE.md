@@ -34,7 +34,8 @@ ordinary commits and plain pushes (never a force-push).
 | 22 | `c85079f` | Copilot's review 5407898631 of bddefe9 (3 High, 1 Medium, 1 Low) and the challenger's one Low on revision 21 (APPROVED, 0 High, 0 Medium), §3w: billed `B` only at scopes with a billing source; parent integrity of the anomaly tables; M1-log eligibility and its runtime fallback; the `cost_daily` row measured with its six measures (`rowsize3.sql`; peak 5.18 GB); D-21's provider names; backtest reads atomic per snapshot. |
 | 23 | `b9b2274` | Copilot's review 5407941028 of c85079f (1 High, 2 Medium) and the challenger's one Low on revision 22 (APPROVED, 0 High, 0 Medium), §3x: merge targets terminal, enforced by a locking trigger (`tg_anomaly_merge_guard`, `REVIEWED_TRIGGERS` 14 → 15) with re-pointing before a survivor is merged; M1-log eligibility over everything its fit and selection read; calendar factors from valid samples only; "never reopened". |
 | 24 | `f3209ea` | Copilot's review 5407981134 of b9b2274 (3 High, 1 Medium) and the challenger's one Low on revision 23 (APPROVED, 0 High, 0 Medium), §3y: account-scope daily forecasts rebuilt on read with stored interval state, and a scope census (peak 5.24 GB); anomaly changes published in the detect run's success transaction; valid-sample rules for the log-scale detectors; a scale-aware zero week in `budget5.py` (outputs unchanged); a `repointed` event. |
-| 25 | this revision | Copilot's review 5408081799 of f3209ea (1 High, 2 Medium, 2 Low) and the challenger's Low and nit on revision 24 (APPROVED, 0 High, 0 Medium), §3z: an `occurrence` in the anomaly dedup key for re-introduced restatements; bounded backtest retention with pins; the `bottom_up` summary for non-leaf scopes; `forecast_scope_state` arrays checked; stale scope counts; event-target foreign keys. |
+| 25 | `45b0088` | Copilot's review 5408081799 of f3209ea (1 High, 2 Medium, 2 Low) and the challenger's Low and nit on revision 24 (APPROVED, 0 High, 0 Medium), §3z: an `occurrence` in the anomaly dedup key for re-introduced restatements; bounded backtest retention with pins; the `bottom_up` summary for non-leaf scopes; `forecast_scope_state` arrays checked; stale scope counts; event-target foreign keys. |
+| 26 | this revision | Copilot's review 5408165158 of 45b0088 (1 Medium, 1 Low) and the challenger's three Low items on revision 25 (APPROVED, 0 High, 0 Medium), §3aa: bounded shares (cold-start, committed, untagged), defined APE and interval width; the retention threat-model row and rollback text brought up to date; `backtest --pin` in the success transaction; `historyDays` from leaves' first usage day; "fresh replay". |
 
 ## 2. Governance wording: reverted
 
@@ -562,6 +563,20 @@ PostgreSQL 16.14 cluster (port 55801, removed afterwards).
 | **W6** (challenger nit) event-target FKs | **Fixed.** `(tenant_id, from_merged_into)` and `(tenant_id, to_merged_into)` → `anomalies (tenant_id, id)`, `ON DELETE RESTRICT`. Probe: a `repointed` event naming a nonexistent target fails 23503; one with the same old and new target fails 23514. 5-1 test and mutant | App. D.4; DESIGN §7 (5-1) |
 | Scripts | No script changed; all 13 hashes as in revision 24; no disk or budget figure changes | App. B |
 
+## 3aa. Revision 26: Copilot's review 5408165158 of 45b0088 and the challenger's Lows on revision 25
+
+The challenger APPROVED revision 25 (0 High, 0 Medium, 3 Low). Each item
+was checked against 45b0088 and is valid.
+
+| Item | Change | Where |
+|---|---|---|
+| **X1 r4179273924** (Medium) shares | **Fixed at every cited place, all with the same rule as `freshness`'s coverage share:** absolute values in numerator and denominator, `null` when the denominator is 0.<br>– **:1168, `coldStartShare`:** `Σ\|E\|` of estimated leaves ÷ `Σ\|E\|` of all leaves.<br>– **:1309, APE of totals:** undefined when `\|Y\|` < ε, so excluded from the median and max and counted separately. **Interval width** (the next row, same problem) is now divided by the positive scale `L` instead of ŷ.<br>– **:1432, committed share:** `\|C\| / (\|C\| + \|U\|)`.<br>– **:1604, D5's untagged share:** `\|N\| / (\|N\| + \|T\|)`.<br>– **D5 and D7** take their 28-day medians over defined days and need ≥ 14 of them.<br>– **Sweep:** `ρ̄` with `Σexpected` ≤ 0 follows `ρ_t`'s rule; WAPE's `Σ\|y\|` and MAPE (≥ $10/day series only) need no change.<br>4-5 and 5-2a tests and mutants | DESIGN §3.6, §3.9, §4.1, §4.2, §4.4, §7 (4-5, 5-2a); App. D.2 |
+| **X2 r4179273964** (Low) stale threat-model row | **Fixed.** The row now says the functions never remove a rollup row at or above the visible batch (the pointer-mark guard, not revision 12's "not published"), an anomaly, or the output of the 2 latest, pinned or running backtest runs. Its mutations: retention above the mark, 1 run instead of 2, removing pinned or latest backtest output, tested in 4-2 and 4-3. The rollback section (:2657) no longer says backtests are never removed | DESIGN §6.3, §10 |
+| **Y1** (challenger) pin timing | **Fixed.** `ratio-analytics backtest --pin <reference>` writes the pin in the run's own success transaction; the acceptance runs (4-6, 5-4) always use it. 4-3 test (pinned at success, still kept after two newer backtests and a retention pass) and mutant (pin written after the success transaction) | DESIGN §3.8, §7 (4-3); App. D.2 |
+| **Y2** (challenger) `historyDays` above the account | **Fixed.** Counted from the minimum `forecast_leaves.first_day` of the scope's leaves as of the run's as-of day, which is usage-only and defined for every scope kind. 4-5 test (a business unit with an earlier tax row) and mutant (`cost_accounts.first_day`) | DESIGN §3.6, §7 (4-5); App. D.2 |
+| **Y3** (challenger) replay wording | **Fixed.** "A fresh replay of the same batches (a new stack, from the same input) gives the same ids and occurrences" | DESIGN §7 (5-3) |
+| Scripts | No script changed; all 13 hashes as in revision 25; no disk or budget figure changes | App. B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -603,8 +618,8 @@ Appendix B (B.4, B.5.6–B.5.14).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 25 (the commit that adds this line; the same eight reasons
-as at revision 24, `f3209ea`, revision 23, `b9b2274`, revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
+at revision 26 (the commit that adds this line; the same eight reasons
+as at revision 25, `45b0088`, revision 24, `f3209ea`, revision 23, `b9b2274`, revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
 `ddbb6f0`, revision 17, `cc54e79`, and `9e0d703`, revision 16). Revision 16 gave the same risk and classes
 as every revision since 4, and **one more reason than before**: `retention.mention`
 on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is
