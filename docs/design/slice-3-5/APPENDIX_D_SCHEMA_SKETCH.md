@@ -370,13 +370,38 @@ only one starter of a kind can be inside the allocation at a time.
        - The job retries a `LEASE_RETRY` transaction with jittered
          backoff, from 100 ms doubling to 5 s, for as long as the lease
          is live. Every retry renews first.
+       - **A retry is not progress (rev. 35, the challenger's L1 on
+         644d1aa).** On `main` the heartbeat renews only while the run
+         makes progress: `mayRenew()` requires progress within
+         `stallTimeoutSeconds` (120 s by default; `pipeline.ts:122`,
+         `config.ts:232`). A stalled run then lets its lease lapse.
+         Revisions 33–34's retry renewed outside that loop. It bypassed
+         the check, so a reader starved by its own run's back-to-back
+         writers could keep the run alive for `maxRunSeconds` (6 h). A
+         writer queued behind the current one gets in before the reader's
+         post-renewal `FOR SHARE`. Now:
+         - step 1's renewals go through the same `mayRenew()` gate as
+           `main`'s heartbeat;
+         - a `LEASE_RETRY` never counts as progress;
+         - a transaction's consecutive `LEASE_RETRY`s are timed from the
+           first one. Once they span `stallTimeoutSeconds`, the job
+           stops retrying and fails the run with **`LEASE_STALLED`**.
+           This is the same idle-watchdog pattern as `main`'s
+           `SOURCE_STALLED` and `EVIDENCE_STALLED`: the run stops
+           renewing, its lease lapses, and a later start takes over.
+       - **Why not pause the run's writers while a reader retries:**
+         that needs a run-wide gate across parallel workers, which is a
+         new lock that the writers would have to order against the lease
+         row. It also hides a chunking problem that the stall failure
+         reports.
        - The run's existing `maxRunSeconds` (`config.ts:233`, 6 h by
-         default) bounds the retries, as it bounds any run on `main`.
+         default) still bounds the whole run, as on `main`.
        - **`LEASE_RETRY` cannot loop on a budget that does not fit**
          (rev. 34). Admission guarantees that right after a renewal at
          least `b + m + s` is left. So a retry falls short only if the
-         renewal-to-lock time exceeds s, which is lock contention, and
-         contention ends. A budget that could not fit even immediately
+         renewal-to-lock time exceeds s, which is lock contention. If
+         the contention does not end, `LEASE_STALLED` ends the loop
+         after `stallTimeoutSeconds` (rev. 35). A budget that could not fit even immediately
          after a renewal is refused at admission with `LEASE_BUDGET` and
          never reaches step 4.
        - **Why this option:** revision 32 mapped the second failure to
@@ -724,6 +749,32 @@ kind, and every start's cleanup pass.
     one filesystem, so it is atomic and exactly one pass wins. A loser
     gets `ENOENT` and skips the run. A directory that holds only
     `deleted.json` is skipped without a claim.
+  - **`ENOENT` with no claim: nothing to clean (rev. 35, Copilot
+    r4179612202).** A backtest can fail before `backtest/<run_id>/`
+    exists. Then the claim's `ENOENT` does not mean a competing pass.
+    Revision 34 treated it as one, so the run stayed `'present'` and was
+    listed again by every pass.
+    - On `ENOENT`, the pass looks in its one listing of `backtest/` (the
+      read it already does for stale claims) for `.deleting-<run_id>-*`.
+    - If a claim is there, another pass owns the run, or stale-claim
+      recovery will finish it, so the pass skips it.
+    - If neither the source nor a claim is there, the run has no files.
+      The pass marks it `'deleted'` (step 5) without touching the disk.
+      Nothing was deleted, so no `deleted.json` is written.
+    - **Why no re-check is needed.** `readdir` is not atomic against
+      concurrent renames, so the listing can miss a claim made or
+      renamed back during the pass. Marking `'deleted'` in that case is
+      still harmless:
+      - a claim's owner finishes its work regardless of the state, and
+        its step 5 then updates no row;
+      - a stale claim is found by stale-claim recovery from the listing
+        of `backtest/`, which never consults the state;
+      - a rename back only restores a directory already cleaned down to
+        `deleted.json`;
+      - and a terminal run's directory is never created afresh, since it
+        is created only inside the run's lease transactions.
+    - So the case costs no extra directory read, and each such run is
+      handled once, by one rename attempt.
   - In its claimed directory, the winner:
     1. hashes every file except `deleted.json` and any temporary
        manifest. A temporary manifest is exactly `deleted.json.tmp-<pass_id>`
