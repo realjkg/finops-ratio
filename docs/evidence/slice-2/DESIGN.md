@@ -290,6 +290,22 @@ and resets the password with `ALTER ROLE … PASSWORD` when the role exists.
 4. No `GRANT` on the database or on any object to a login. An explicit grant
    to a member would exceed the reviewed set, and Slice 0's check would refuse
    it.
+5. **A login that already exists is normalised on every run** (Copilot
+   4176705227, EVIDENCE §16):
+   - `ALTER ROLE … LOGIN INHERIT NOSUPERUSER NOBYPASSRLS NOREPLICATION
+     NOCREATEDB NOCREATEROLE CONNECTION LIMIT -1 VALID UNTIL 'infinity'`;
+   - `ALTER ROLE … RESET ALL`, and `ALTER ROLE … IN DATABASE ratio RESET ALL`
+     once the database exists;
+   - `GRANT <its ratio role> TO <login> WITH ADMIN FALSE, INHERIT TRUE, SET
+     TRUE`. This is the login's one membership edge, granted again with its
+     exact options; it grants no object privilege. On PG16 an edge granted
+     while the login was NOINHERIT keeps `inherit_option = false`, even after
+     `ALTER ROLE … INHERIT`, and re-granting by the same grantor updates it.
+   `verifyBootstrap` then checks the complete set against `pg_roles`: every
+   attribute in `LOGIN_ATTRIBUTES`, and no expiry (`rolvaliduntil` NULL or
+   `infinity`; a past or future date fails). It also requires no per-role
+   setting in `pg_db_role_setting`, globally or in any database; settings are
+   reported by key only. A NULL or missing value fails closed.
 
 How the bootstrap is verified:
 - `local:migrate` runs `migrate`, then `migrate --status --json`. That must
@@ -581,7 +597,11 @@ in order:
   - `childExited` checks the exit code OR the signal;
   - `stopChild` returns at once if the child has already exited, otherwise
     sends SIGTERM and waits a bounded grace period, then SIGKILL and waits a
-    bounded time, then gives up (`unresponsive`);
+    bounded time, then gives up (`unresponsive`). For a tracked group leader
+    (`next start`, `runProcess` commands) both signals go to the whole
+    process group (`-pgid`), and the child counts as gone only when the
+    group is empty. The result is never `stopped` while a descendant lives
+    (Copilot 4176705245, EVIDENCE §16);
   - `cleanupLocalTest` stops the app (errors are recorded, not thrown) and
     then **always** runs `down -v`, exactly once;
   - `runProcess` takes a timeout that SIGKILLs and rejects; local:test's
@@ -634,7 +654,10 @@ are closed as a class, not line by line.
   - the promise rejects at once instead of waiting for `close`, which never
     fires while a grandchild still holds a pipe;
   - a pipe still held after `exit` is ended after a 2 s grace;
-  - `local.mjs` kills the live groups on SIGINT/SIGTERM.
+  - `local.mjs` kills the live groups on SIGINT/SIGTERM;
+  - a group leaves the live set only once it is EMPTY: `kill(-pgid, 0)`
+    gives ESRCH, or only zombies remain (this container's PID 1 does not
+    reap orphans). The leader's exit is not enough (Copilot 4176705245).
 - The pg sessions have a hard limit at every stage:
   - connect timeout;
   - `query_timeout` (client side);

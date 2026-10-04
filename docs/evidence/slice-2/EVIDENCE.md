@@ -1147,3 +1147,146 @@ in realjkg/finops-ratio#61.
 - Only the guard's test file changed after the §15a gate run, so the
   `test:db` ×2, build, `check:bundle` and `local:test` results recorded in
   §15a still apply.
+
+## 16. Copilot review of 787824b (2 Medium); local, not pushed
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 89aedd1 | L23 (process-group stop, tracking until empty), L24 (login attributes), D13 (serial, real PG16) | **red** (`red/red-copilot6-fast.txt`: 21 failed / 152; `red/red-copilot6-db.txt`: D13 2 failed / 2) |
+| 6259311 | the bootstrap normalises and verifies each login's complete attribute set, its settings and its membership edge | green (4176705227) |
+| ac9d535 | `stopChild` stops a tracked leader's whole process group; a group is tracked until it is empty | green (4176705245) |
+| 9795bca | a failing stop is recorded as its own error | **red**, a regression in ac9d535 (`expected 'error: EPERM'`, received `'error: child.once is not a function'`, plus 1 unhandled error) |
+| ac423d0 | `signalChild` falls back only on ESRCH; `waitForExit` listens before arming its timer | green |
+| 007097c | a stop whose exit wait cannot listen leaves no timer armed | test, added to kill mutant S2 |
+| b3d659d | D13 moved from `src/server/` to `scripts/local/localBootstrap.serial.db.test.ts`; `vitest.db.serial.config.ts` includes exactly `scripts/local/*.serial.db.test.ts`; an L24 wiring check | test placement. The first gate run's `npm test` failed Slice 0's import-boundary test: `pg` and `src/ingest` were imported from outside the reviewed read-API island |
+| (this commit) | DESIGN §3.1 item 5, §10 (`stopChild`) and §11 (live groups); TEST_PLAN L23, L24, D13; this section | docs |
+
+**Changes to existing Slice 2 tests:**
+- **L4** (my own test). The plan now contains `RESET ALL` statements and
+  the 3 membership re-grants:
+  - `roleDdl` skips the `RESET ALL` statements, which set no attribute;
+  - "no GRANT in the plan" became an exact list of the 3 membership
+    re-grants. There is still no object grant.
+- **The L16 `cleanupLocalTest` test** went from `toMatch(/error/)` to
+  `toBe('error: EPERM')`.
+
+Both changes are stricter: no assertion was weakened.
+
+**One config change outside Slice 2 files.** `vitest.db.serial.config.ts`
+gains one include entry, `scripts/local/*.serial.db.test.ts`. Its existing
+entry, setup files, backstop and `fileParallelism: false` are unchanged.
+Slice 0's `vitestConfigs.test.ts` only walks `src/`, so the new L24 check
+loads all three configs and requires that D13 runs in the serial phase
+only (mutant W1).
+
+### Mapping
+
+| Comment | Severity | Commit(s) | Test(s) / evidence |
+|---|---|---|---|
+| **4176705227**: an existing login may be NOINHERIT; the bootstrap must reassert INHERIT and verify `rolinherit` | Medium | 89aedd1, 6259311, b3d659d | **Swept to the complete attribute set.** On every run, every login is normalised with `LOGIN INHERIT NOSUPERUSER NOBYPASSRLS NOREPLICATION NOCREATEDB NOCREATEROLE CONNECTION LIMIT -1 VALID UNTIL 'infinity'`, `RESET ALL` (global, and `IN DATABASE ratio`), and its one membership edge is re-granted `WITH ADMIN FALSE, INHERIT TRUE, SET TRUE`.<br>`verifyBootstrap` checks `pg_roles` for every attribute in `LOGIN_ATTRIBUTES` (including `rolinherit` and `rolconnlimit = -1`) and for no expiry (`rolvaliduntil` NULL or `infinity`; past or future fails). It also reports any `pg_db_role_setting` row of a login, globally or per database, by **key only**. NULL or missing fails closed.<br>**L24:** each wrong attribute on each login, plus NULL, past or future expiry, a missing login, settings by key.<br>**D13 (real PG16):** pre-existing logins with 11 wrong attributes or settings are all reported, then all normalised. Mutations B1–B8 |
+| **4176705245**: cleanup signals only the leader, not its process group | Medium | 89aedd1, ac9d535, 9795bca, ac423d0, 007097c | **stopChild:** for a tracked group leader, TERM and then KILL go to `-pgid`, and the stop counts as done only when the leader has exited AND the group is empty. It is never `stopped` while a descendant is alive.<br>**LIVE_GROUPS:** a group is dropped only once it is empty. The leader exit, `runProcess` finish, `liveProcessGroups` and `killLiveProcessGroups` all prune by emptiness, and the `clear()` is gone.<br>**Sweep:** see below.<br>**L23:** an app double whose child survives the leader's TERM, which gives `killed` and an empty group; `runLocalTest` reports `appStop: killed`; an obeying group gives `stopped`; tracked until empty; static kill-site check. Mutations G1–G7, S1, S2 |
+
+### The finding behind the membership re-grant (4176705227)
+
+A login created `NOINHERIT … IN ROLE ratio_owner` gets an edge with
+`inherit_option = false`, and `ALTER ROLE … INHERIT` does not change it.
+D13 surfaced this as `membership …->ratio_owner: inherit_option is false`,
+which the §15 option check reported correctly.
+
+Normalising the attribute alone would therefore leave the login without its
+privileges. On PG16, re-granting by the same grantor updates the options of
+the existing edge. This was verified live with a throwaway probe on the
+private cluster (`admin|inherit|set`, roles dropped afterwards):
+
+| Step | Options |
+|---|---|
+| `CREATE ROLE … NOINHERIT IN ROLE p` | `f\|f\|t` |
+| `ALTER ROLE … INHERIT` | `f\|f\|t` (unchanged) |
+| `GRANT p TO … WITH ADMIN FALSE, INHERIT TRUE, SET TRUE` | `f\|t\|t`, still 1 edge |
+
+That is why the plan re-grants each edge with its exact options.
+
+### Kill-site sweep (4176705245)
+
+Every signal site in `scripts/local/*.mjs` sends to the process group
+(`process.kill(-pgid, …)`):
+- **stopChild**, through `signalChild`;
+- **killLate**, **runProcess's deadline** and **onAbort**, through
+  `killGroup`;
+- **killLiveProcessGroups**, the sweep;
+- **groupAlive**, which sends only signal 0, as a probe.
+
+The only bare `child.kill(signal)` calls are the fallbacks:
+- an untracked child;
+- ESRCH, meaning the group is already empty.
+
+`local.mjs` has no kill call; it uses `killLiveProcessGroups` only. L23
+checks both statically.
+
+**Note on zombies.** `kill(-pgid, 0)` still succeeds while only zombies are
+left, and this container's PID 1 (`process_api`) does not reap orphans.
+`groupAlive` therefore confirms with `/proc/<pid>/stat`, skipping state
+`Z`. Mutant G6, which uses `kill(-pgid, 0)` alone, is killed.
+
+**Test-double note.** Node installs its own SIGTERM handler at startup, so
+`/proc/<pid>/status` SigCgt cannot show when a script's
+`process.on('SIGTERM')` is in place. The L23 double therefore signals
+readiness: each process prints `ready` after installing its handler. The
+first version raced, and the TERM sometimes arrived first.
+
+### Regression found and fixed within the round (9795bca, ac423d0)
+
+ac9d535's `signalChild` swallowed a throwing `child.kill`, which the old
+code had let propagate. As a result:
+- `cleanupLocalTest` recorded `child.once is not a function` instead of the
+  stop's own `EPERM`;
+- the exit-wait timer, armed before `child.once` threw, fired later as an
+  unhandled error, so vitest exited 1 with every test passing.
+
+The fix has two parts:
+- `signalChild` falls back to the child itself only on ESRCH; any other
+  failure propagates, as before;
+- `waitForExit` registers its listener before arming the timer.
+
+### Mutation checks (scratch `mut16.py`; each applied, run, restored from git; tree clean after)
+
+The unit runs are `scripts/local/local.test.mjs`. The DB runs are
+`localBootstrap.serial.db.test.ts` on the private PG16 cluster. The B
+mutants ran D13 at its original path. b3d659d then moved it, changing only
+its 2 relative import paths.
+
+| ID | Mutation | Result |
+|---|---|---|
+| G1 | stopChild TERMs the leader only | **killed**: obeying group not `stopped`; static |
+| G2 | stopChild TERMs and KILLs the leader only | **killed** (4) |
+| G3 | stopChild: gone = the leader exited (group ignored) | **killed**: `stopped` while the child lives; runLocalTest summary |
+| G4 | the group removed from LIVE_GROUPS when the leader exits | **killed**: tracked until empty |
+| G5 | `pruneGroup` ignores emptiness | **killed** (2) |
+| G6 | `groupAlive` = `kill(-pgid, 0)` only (zombies count) | **killed** (1) |
+| G7 | killLate kills the leader only | **killed**: static kill-site check |
+| S1 | `signalChild` swallows every failure (ac9d535) | **killed**: `error: EPERM` |
+| S2 | `waitForExit` arms its timer before listening | **killed** by 007097c (it survived the first run) |
+| B1 | the INHERIT reassert dropped | **killed**: L24 plan; D13 normalisation |
+| B2 | the `rolinherit` check dropped | **killed**: L24 (false, NULL); D13 detection |
+| B3 | `rolinherit` dropped from the verify query | **killed**: D13 (fails closed as NULL) |
+| B4 | the membership re-grant dropped | **killed**: L4; D13 (`inherit_option` false) |
+| B5 / B6 | the global / in-database `RESET ALL` dropped | **killed**: L24 plan; D13 |
+| B7 | the `pg_db_role_setting` check dropped | **killed**: D13 detection |
+| B8 | a past VALID UNTIL accepted | **killed**: L24; D13 |
+| W1 | the `scripts/local` serial include dropped (D13 would never run) | **killed**: L24 wiring check |
+
+### Gates (HEAD b3d659d; scratch `gates-r16.sh`)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **2405 passed** (103 files); `scripts/local/local.test.mjs` 154/154, exit 0, no unhandled error |
+| `npm run test:db` ×2 (private PG16 at 55700 + S3 prefixes) | **595 + 169** passed ×2 (121, 115 s). The serial phase is 167 + D13's 2 |
+| `worker:build`; `next build`; `check:bundle`; `npm audit --omit=dev` | 0; 0; pass (116 client / 91 server files); 0 vulnerabilities |
+| `npm run local:test` (`ratio-local-test`) | pass in 27 s. `up: ok (twice)`: the second run re-applied the new normalisation to logins that already existed, and the full verification passed both times. `privilegeProblems: []`; `appReady: pid-verified`; totals `"55"` / `"40"`, `30.8272954899` / `21.0978157665`; 95 distinct rows; `appStop: stopped`, which now means the whole group of the real `next start` was empty after TERM; `down: ok (-v)`; `failures: []` |
+| leftovers | none: no `ratio-local*` containers or volumes, no `.ratio-local/`, no sleepers or `next` processes; the private cluster is stopped and deleted after this run |
+
+The first gate run (HEAD 007097c) stopped at `npm test`, which failed on the
+import boundary. That is what led to b3d659d; nothing else failed.
