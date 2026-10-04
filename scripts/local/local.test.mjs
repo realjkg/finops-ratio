@@ -581,7 +581,8 @@ describe('L16 stopping next start and cleaning up never hang', () => {
     const r = await cleanupLocalTest({ app: broken, down, stopOptions: { graceMs: 50, killMs: 50 } });
     expect(down).toHaveBeenCalledTimes(1);
     expect(r.down).toBe('ok');
-    expect(r.app).toMatch(/error/);
+    // The stop failure itself is recorded (not swallowed by the group signalling, Copilot 4176705245 round).
+    expect(r.app).toBe('error: EPERM');
     expect(await cleanupLocalTest({ app: null, down })).toEqual({ app: null, down: 'ok' });
     expect(down).toHaveBeenCalledTimes(2);
   }, 5_000);
