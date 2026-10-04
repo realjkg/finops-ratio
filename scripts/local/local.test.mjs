@@ -3,7 +3,7 @@
 // bootstrap plan (no dangerous attribute or membership), the compose file
 // (loopback-only ports, digest-pinned images, no trust auth), .env.example
 // (names only) and the control-total comparison used by `local:test`.
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
@@ -19,11 +19,15 @@ import {
   localTestSettings,
   ownsListeningSocket,
   parseEnvFile,
+  portInUse,
   preflightProblems,
   removeProjectState,
   serializeEnvFile,
+  startIfPortFree,
+  waitForOwnServer,
   writeEnvFileSecure,
 } from './lib.mjs';
+import net from 'node:net';
 import { bootstrapPlan } from './bootstrap.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -378,5 +382,93 @@ describe('L12 readiness: the responding server must be the one local:test starte
 
   it('null (unknown) when /proc is not available, so the caller can fall back', () => {
     expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: path.join(tmp(), 'missing') })).toBeNull();
+  });
+});
+
+// --- challenger delta review (L6e, L6f, pre-spawn port re-check) -------------
+describe('L13 waitForOwnServer (L6e): readiness refuses a server that is not ours', () => {
+  const child = (over = {}) => ({ pid: 4242, exitCode: null, signalCode: null, ...over });
+  let clock = 0;
+  const deps = (over = {}) => ({
+    port: 3110,
+    now: () => clock,
+    sleep: async (ms) => {
+      clock += ms;
+    },
+    timeoutMs: 5_000,
+    intervalMs: 500,
+    ...over,
+  });
+
+  it('owned === true ⇒ pid-verified', async () => {
+    await expect(waitForOwnServer({ child: child(), probe: async () => true, owns: () => true, ...deps() })).resolves.toBe('pid-verified');
+  });
+
+  it('owned === false ⇒ refuses: another process answers on the port', async () => {
+    await expect(waitForOwnServer({ child: child(), probe: async () => true, owns: () => false, ...deps() })).rejects.toThrow(/other than/);
+  });
+
+  it('owned === null (no /proc) ⇒ relies on the port preflight', async () => {
+    await expect(waitForOwnServer({ child: child(), probe: async () => true, owns: () => null, ...deps() })).resolves.toBe('port-preflight-only');
+  });
+
+  it('passes pid and port to the ownership check', async () => {
+    const owns = vi.fn(() => true);
+    await waitForOwnServer({ child: child(), probe: async () => true, owns, ...deps() });
+    expect(owns).toHaveBeenCalledWith({ pid: 4242, port: 3110 });
+  });
+
+  it('a child that exits before it is ready fails fast (even if something answers)', async () => {
+    await expect(waitForOwnServer({ child: child({ exitCode: 1 }), probe: async () => true, owns: () => true, ...deps() })).rejects.toThrow(/exited/);
+  });
+
+  it('keeps polling through connection errors; times out if never ready', async () => {
+    clock = 0;
+    let calls = 0;
+    const probe = async () => {
+      calls += 1;
+      if (calls < 3) throw new Error('ECONNREFUSED');
+      return true;
+    };
+    await expect(waitForOwnServer({ child: child(), probe, owns: () => true, ...deps() })).resolves.toBe('pid-verified');
+    clock = 0;
+    await expect(waitForOwnServer({ child: child(), probe: async () => false, owns: () => true, ...deps() })).rejects.toThrow(/timed out/);
+  });
+});
+
+describe('L14 env directory tightened (L6f)', () => {
+  it('an existing 0755 state directory becomes 0700', () => {
+    const root = tmp();
+    const dir = path.join(root, '.ratio-local', 'p2');
+    fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
+    fs.chmodSync(dir, 0o755);
+    writeEnvFileSecure(path.join(dir, 'env'), { A: 'x' });
+    expect(fs.statSync(dir).mode & 0o777).toBe(0o700);
+  });
+});
+
+describe('L15 the app port is re-checked right before next start is spawned (no /proc platforms)', () => {
+  it('portInUse sees a real listener and its absence', async () => {
+    const server = net.createServer(() => undefined);
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const port = server.address().port;
+    expect(await portInUse(port)).toBe(true);
+    await new Promise((r) => server.close(r));
+    expect(await portInUse(port)).toBe(false);
+  });
+
+  it('startIfPortFree refuses (and never spawns) when the port became busy', async () => {
+    const start = vi.fn(() => 'child');
+    await expect(startIfPortFree({ port: 3110, isBusy: async () => true, start })).rejects.toThrow(/3110/);
+    expect(start).not.toHaveBeenCalled();
+    await expect(startIfPortFree({ port: 3110, isBusy: async () => false, start })).resolves.toBe('child');
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it('local.mjs spawns next start only through startIfPortFree and waits through waitForOwnServer', () => {
+    const src = read('scripts/local/local.mjs');
+    expect(src).toMatch(/startIfPortFree\(\{[\s\S]*?start: \(\) =>\s*spawn\(/);
+    expect(src).toMatch(/waitForOwnServer\(\{/);
+    expect(src.match(/spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'/g)).toHaveLength(1);
   });
 });

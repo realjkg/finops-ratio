@@ -24,7 +24,7 @@ import { MemoryEvidenceStore } from '../../ingest/evidence/MemoryEvidenceStore';
 import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
 import { createPublishedCostsRoute, ROUTE_MESSAGES } from './publishedCostsRoute';
 import { closeReaderPools, readerPool } from './readerPool';
-import { readPublishedCosts } from './publishedCosts';
+import { readPublishedCosts, setAfterPageHookForTests } from './publishedCosts';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
 
 interface Row {
@@ -182,6 +182,7 @@ describe('D1 tenant isolation', () => {
     expect(new Set(bodyB.data.map((r) => r.batchId))).toEqual(new Set([b.batchPublished]));
     expect(bodyA.data.map((r) => r.sourceId).every((x) => x === a.sourceId)).toBe(true);
     expect(bodyA.totals).toEqual([{ billingPeriod: a.period, billingCurrency: 'USD', rowCount: a.publishedRows, billedCost: a.publishedTotal }]);
+    expect((await get(a.tenantId)).headers['cache-control']).toBe('no-store');
     expect(bodyB.totals).toEqual([{ billingPeriod: b.period, billingCurrency: 'USD', rowCount: b.publishedRows, billedCost: b.publishedTotal }]);
     // Nothing of B in A's answer and vice versa.
     const textA = JSON.stringify(bodyA);
@@ -346,6 +347,15 @@ describe('D6 the reader-login safety check refuses unsafe logins (503, nothing s
     await refused(l.url);
   });
 
+  it('N3: a login DROPPED while its session is pooled is never served (Postgres errors on the dead role OID ⇒ 500, no data)', async () => {
+    const l = await login(['ratio_reader']);
+    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
+    await db.pool.query(`DROP ROLE ${l.name}`);
+    const res = await get(seeded.a.tenantId, {}, { readerUrl: l.url });
+    expect([500, 503]).toContain(res.statusCode);
+    expect(JSON.stringify(res.body)).not.toContain('billedCost');
+  });
+
   it('the check runs on every request: a login made unsafe while pooled is refused at once, and served again when fixed', async () => {
     const l = await login(['ratio_reader']);
     expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
@@ -399,14 +409,19 @@ describe('D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ
     try {
       await runSync({ pool, tenantId: s.tenantId, sourceKey: 'snap', source, evidence, mode: 'sync' });
       let republished = false;
-      const page = await readPublishedCosts(readerPool(reader.url), s.tenantId, { from: null, to: null, limit: 100, cursor: null }, {
-        afterPage: async () => {
-          // A restatement is published and COMMITTED while the read transaction is open.
-          source.setPeriods([{ billingPeriod: '2026-03-01', artifacts: [{ name: 'mar/b.csv.gz', bytes: csvGz(rowsOf('2026-03-01', 7, '2.00', 'new')) }] }]);
-          const r = await runSync({ pool, tenantId: s.tenantId, sourceKey: 'snap', source, evidence, mode: 'sync' });
-          republished = r.periods[0].outcome === 'published';
-        },
+      // Test-only seam (module level, refused outside vitest): not a parameter of the public read.
+      setAfterPageHookForTests(async () => {
+        // A restatement is published and COMMITTED while the read transaction is open.
+        source.setPeriods([{ billingPeriod: '2026-03-01', artifacts: [{ name: 'mar/b.csv.gz', bytes: csvGz(rowsOf('2026-03-01', 7, '2.00', 'new')) }] }]);
+        const r = await runSync({ pool, tenantId: s.tenantId, sourceKey: 'snap', source, evidence, mode: 'sync' });
+        republished = r.periods[0].outcome === 'published';
       });
+      let page!: Awaited<ReturnType<typeof readPublishedCosts>>;
+      try {
+        page = await readPublishedCosts(readerPool(reader.url), s.tenantId, { from: null, to: null, limit: 100, cursor: null });
+      } finally {
+        setAfterPageHookForTests(null);
+      }
       expect(republished).toBe(true);
       expect(page.data).toHaveLength(5);
       expect(page.totals).toEqual([{ billingPeriod: '2026-03-01', billingCurrency: 'USD', rowCount: 5, billedCost: '5.00' }]);

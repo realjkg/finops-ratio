@@ -1,0 +1,27 @@
+
+ RUN  v5.0.1 <repo>
+
+ ❯ src/server/costs/publishedCosts.db.test.ts (27 tests | 1 failed) 1138ms
+   ❯ D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ ONLY) (3)
+     × a publish committed between the page query and the totals query cannot make them disagree 56ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ ONLY) > a publish committed between the page query and the totals query cannot make them disagree
+TypeError: setAfterPageHookForTests is not a function
+ ❯ src/server/costs/publishedCosts.db.test.ts:413:7
+    411|       let republished = false;
+    412|       // Test-only seam (module level, refused outside vitest): not a …
+    413|       setAfterPageHookForTests(async () => {
+       |       ^
+    414|         // A restatement is published and COMMITTED while the read tra…
+    415|         source.setPeriods([{ billingPeriod: '2026-03-01', artifacts: […
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 26 passed (27)
+   Start at  03:05:08
+   Duration  2.62s (tests 56%, transform 32%, import 10%, setup 2%)
+

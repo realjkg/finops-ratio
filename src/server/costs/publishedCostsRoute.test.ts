@@ -171,6 +171,34 @@ describe('R5 an unsafe database login is a distinct, logged 503 (challenger Low 
   });
 });
 
+describe('R6 no response of the route is cacheable (Cache-Control: no-store), errors included', () => {
+  it('401, 429, 503 weak token, 405, 400, 503 not_configured, 503 unsafe_db_login and 500 all carry no-store', async () => {
+    const unsafe = { connect: vi.fn(async () => Promise.reject(new UnsafeReaderLoginError(['x'], ['UNCLASSIFIED']))) };
+    const broken = { connect: vi.fn(async () => Promise.reject(new Error('db down'))) };
+    const throttledClient = '10.250.250.251';
+    for (let i = 0; i < 1001; i += 1) await call(route(), makeReq({ headers: { authorization: 'Bearer wrong' }, remoteAddress: throttledClient }));
+    const cases: Array<[string, () => Promise<{ statusCode: number; headers: Record<string, string> }>, number]> = [
+      ['401', () => call(route(), makeReq({ remoteAddress: ip() })), 401],
+      ['429', () => call(route(), makeReq({ headers: { authorization: 'Bearer wrong' }, remoteAddress: throttledClient })), 429],
+      ['503 weak', () => call(route({ ...BASE_ENV, RATIO_API_TOKEN: 'weak' }), makeReq({ headers: bearer('weak'), remoteAddress: ip() })), 503],
+      ['405', () => call(route(), makeReq({ method: 'POST', headers: bearer(), remoteAddress: ip() })), 405],
+      ['400', () => call(route(), makeReq({ headers: bearer(), query: { limit: '0' }, remoteAddress: ip() })), 400],
+      ['503 not_configured', () => call(route({ ...BASE_ENV, RATIO_API_TENANT_ID: undefined }), makeReq({ headers: bearer(), remoteAddress: ip() })), 503],
+      [
+        '503 unsafe_db_login',
+        () => call(createPublishedCostsRoute({ env: BASE_ENV, poolFor: () => unsafe as never, logger: () => undefined }), makeReq({ headers: bearer(), remoteAddress: ip() })),
+        503,
+      ],
+      ['500', () => call(createPublishedCostsRoute({ env: BASE_ENV, poolFor: () => broken as never, logger: () => undefined }), makeReq({ headers: bearer(), remoteAddress: ip() })), 500],
+    ];
+    for (const [name, run, status] of cases) {
+      const res = await run();
+      expect(res.statusCode, name).toBe(status);
+      expect(res.headers['cache-control'], name).toBe('no-store');
+    }
+  });
+});
+
 describe('R4 the page route is the factory default', () => {
   it('pages/api/v1/costs/published.ts exports a handler that refuses an anonymous request', async () => {
     const saved = process.env.RATIO_API_TOKEN;

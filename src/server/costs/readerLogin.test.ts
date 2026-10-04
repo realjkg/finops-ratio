@@ -11,10 +11,14 @@ interface Catalog {
   privileged?: boolean;
   unsafe?: string[];
   owner?: boolean;
-  reader?: boolean;
-  worker?: boolean;
-  canLogin?: boolean;
+  reader?: boolean | null;
+  worker?: boolean | null;
+  canLogin?: boolean | null;
+  /** The reader query returns no row at all. */
+  noRow?: boolean;
 }
+
+const pick = <K extends keyof Catalog>(c: Catalog, k: K, d: Catalog[K]) => (k in c ? c[k] : d);
 
 /** A fake client answering Slice 1's inspectRole query and the reader query. */
 function client(c: Catalog) {
@@ -36,7 +40,8 @@ function client(c: Catalog) {
           ],
         };
       }
-      return { rows: [{ reader: c.reader ?? true, worker: c.worker ?? false, can_login: c.canLogin ?? true }] };
+      if (c.noRow) return { rows: [] };
+      return { rows: [{ reader: pick(c, 'reader', true), worker: pick(c, 'worker', false), can_login: pick(c, 'canLogin', true) }] };
     },
   } as never;
 }
@@ -71,6 +76,28 @@ describe('reader-login reason codes', () => {
     const r = await readerLoginReport(client({ owner: true, worker: true, canLogin: false, unsafe: ['pg_signal_backend'] }));
     expect(r.reasons).toEqual(['REFUSED_PREDEFINED_ROLE', 'OWNER_MEMBER', 'WORKER_REACHABLE', 'LOGIN_DISABLED']);
   });
+
+  // N3 (challenger delta review): anything the reader query cannot affirm is
+  // unsafe. Postgres itself errors (42704) on a session whose role was
+  // dropped, so these shapes only arise from a driver or catalog surprise —
+  // and must then refuse, never serve or crash with a TypeError.
+  it('fails closed when the reader query returns no row', async () => {
+    const r = await readerLoginReport(client({ noRow: true }));
+    expect(r.problems.length).toBeGreaterThan(0);
+    expect(r.reasons).toEqual(['NOT_READER_MEMBER', 'WORKER_REACHABLE', 'LOGIN_DISABLED']);
+  });
+
+  const nulls: Array<[string, Catalog, string]> = [
+    ['rolcanlogin is NULL (missing session_user row)', { canLogin: null }, 'LOGIN_DISABLED'],
+    ['reader membership is NULL', { reader: null }, 'NOT_READER_MEMBER'],
+    ['worker reachability is NULL', { worker: null }, 'WORKER_REACHABLE'],
+  ];
+  for (const [name, catalog, reason] of nulls) {
+    it(`fails closed when ${name}`, async () => {
+      const r = await readerLoginReport(client(catalog));
+      expect(r.reasons).toEqual([reason]);
+    });
+  }
 
   it('assertSafeReaderLogin throws UnsafeReaderLoginError carrying problems and codes', async () => {
     const e = await assertSafeReaderLogin(client({ canLogin: false })).then(
