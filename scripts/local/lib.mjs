@@ -783,9 +783,14 @@ export function connectionUrl({ user, password, port: p, database }) {
 }
 
 /** Env for every worker CLI command against the local stack (source and evidence on the local SeaweedFS). */
-export function workerEnv(settings, secrets) {
+/**
+ * Env for the worker CLI. `syntheticProviders: true` adds the synthetic-provider
+ * opt-in (issue #62 D1), for the SYNTHETIC fixture source only; default off.
+ */
+export function workerEnv(settings, secrets, { syntheticProviders = false } = {}) {
   const s3 = `http://127.0.0.1:${settings.s3Port}`;
   return {
+    ...(syntheticProviders === true ? { RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1' } : {}),
     RATIO_ENV: 'development',
     RATIO_DATABASE_URL: connectionUrl({ user: LOCAL_NAMES.worker, password: secrets.RATIO_LOCAL_WORKER_PASSWORD, port: settings.pgPort, database: LOCAL_NAMES.database }),
     RATIO_MIGRATE_DATABASE_URL: connectionUrl({ user: LOCAL_NAMES.migrator, password: secrets.RATIO_LOCAL_MIGRATOR_PASSWORD, port: settings.pgPort, database: LOCAL_NAMES.database }),

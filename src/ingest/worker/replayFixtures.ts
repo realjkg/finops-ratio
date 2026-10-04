@@ -48,6 +48,8 @@ export async function runReplayFixtures(opts: {
   evidence: EvidenceStore;
   log?: LogFn;
   secrets?: readonly string[];
+  /** The synthetic-provider opt-in (issue #62 D1); omitted ⇒ runSync's default (this process's env). */
+  allowSyntheticProviders?: boolean;
 }): Promise<ReplayFixturesResult> {
   const log = opts.log ?? (() => undefined);
   const tenantId = crypto.randomUUID();
@@ -120,6 +122,7 @@ export async function runReplayFixtures(opts: {
       log,
       secrets: opts.secrets,
       ...extra,
+      settings: { ...(opts.allowSyntheticProviders === undefined ? {} : { allowSyntheticProviders: opts.allowSyntheticProviders }), ...extra.settings },
     });
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 

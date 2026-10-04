@@ -14,6 +14,7 @@ import type { S3Client } from '@aws-sdk/client-s3';
 import type { Pool } from 'pg';
 import type { CliIO } from './cli';
 import { loadWorkerConfig, type WorkerConfig } from './config';
+import { SYNTHETIC_PROVIDER_NAMES } from './focus/provider';
 import { IngestError, errorCodeOf, messageOf } from './errors';
 import { appendEvidenceFile, buildEvidenceRecord, resolveGitSha } from './evidenceRecord';
 import { jsonLineRedactorFor, redact, secretsFromEnv } from './redact';
@@ -179,6 +180,10 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
     return fail(e);
   }
   const cfg = config;
+  if (cfg.settings.allowSyntheticProviders) {
+    // Logged once per process start (issue #62 D1): synthetic provider names are accepted.
+    log('config.synthetic_providers_allowed', { level: 'warn', providers: [...SYNTHETIC_PROVIDER_NAMES], detail: 'RATIO_ALLOW_SYNTHETIC_PROVIDERS=1: synthetic fixture provider names are accepted; never set this for real billing data' });
+  }
 
   if (args.command === 'doctor') {
     try {
@@ -270,6 +275,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
           evidence: evidenceStore(),
           log,
           secrets,
+          allowSyntheticProviders: cfg.settings.allowSyntheticProviders,
         });
         return finish({ ...r }, r.pass, r.pass ? EXIT_OK : EXIT_FAIL);
       }

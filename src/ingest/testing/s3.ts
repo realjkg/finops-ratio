@@ -56,10 +56,15 @@ function sharedBucket(): string {
   return name;
 }
 
-/** Env for the worker CLI: source and evidence on the test endpoint; evidence under the scope's root. */
+/**
+ * Env for the worker CLI: source and evidence on the test endpoint; evidence under the scope's root.
+ * Also the synthetic-provider opt-in (issue #62 D1): the CLI tests ingest the SYNTHETIC fixture
+ * (ProviderName SyntheticCloud); a test that needs it off overrides it with '0'.
+ */
 export function testS3Env(evidence: TestBucket): Record<string, string> {
   const endpoint = requireTestS3Endpoint();
   return {
+    RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1',
     RATIO_SOURCE_S3_ENDPOINT: endpoint,
     RATIO_SOURCE_S3_REGION: 'us-east-1',
     RATIO_SOURCE_S3_ACCESS_KEY_ID: TEST_S3_ACCESS_KEY_ID,

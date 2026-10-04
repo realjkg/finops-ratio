@@ -9,6 +9,9 @@ requireTestDatabaseUrl(process.env);
 export default defineConfig({
   test: {
     environment: 'node',
+    // Issue #62 D1: the DB suites ingest the SYNTHETIC fixture (ProviderName SyntheticCloud)
+    // through the library; synthetic provider names need this explicit opt-in (default off).
+    env: { RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1' },
     include: ['src/**/*.db.test.ts'],
     // One shared S3 bucket per run (created/deleted here) when RATIO_TEST_S3_ENDPOINT is set.
     globalSetup: ['src/ingest/testing/s3GlobalSetup.ts'],

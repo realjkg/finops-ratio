@@ -43,9 +43,14 @@ resolved from the RLS-visible source row, never from the data:
 
 | Source row | Source type | Allowed `ProviderName` (exact) |
 |---|---|---|
-| `kind = 'focus_file'`, `config.layout = 'aws-data-exports'` | `aws-data-exports` | `AWS`, `SyntheticCloud` (see D1) |
-| `kind = 'fake'` | `fake` | `SyntheticCloud` |
+| `kind = 'focus_file'`, `config.layout = 'aws-data-exports'` | `aws-data-exports` | `AWS` |
+| `kind = 'fake'` | `fake` | none |
 | anything else | none: not checked (see D4) | — |
+
+The synthetic fixtures' provider names (`SYNTHETIC_PROVIDER_NAMES` =
+`SyntheticCloud`, plus the names Slice 3 D-04 will add) are added to a
+checked type's list **only with the explicit opt-in
+`RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`** (§8 D1, decided 2026-10-04).
 
 **Matching is exact**: case-sensitive, no trimming, no normalisation, no
 prefix match. `aws`, ` AWS`, `AWS ` and `Amazon Web Services` are all
@@ -170,9 +175,17 @@ Unchecked types (D4) keep today's behaviour: no header or NULL rule.
 ## 4. Implementation (minimal)
 
 - `src/ingest/focus/provider.ts` (new, pure): `PROVIDER_MISMATCH`,
-  `SYNTHETIC_PROVIDER_NAME`, the frozen `SOURCE_TYPE_PROVIDERS`,
-  `providerPolicyFor(sourceRow)`, `checkProviderHeader(index, policy)` and
-  `checkProviderName(value, policy)`.
+  the frozen `SOURCE_TYPE_PROVIDERS` and `SYNTHETIC_PROVIDER_NAMES`,
+  `providerPolicyFor(sourceRow, { allowSyntheticProviders })`,
+  `checkProviderHeader(index, policy)` and `checkProviderName(value, policy)`.
+- `config.ts` (D1): `WorkerSettings.allowSyntheticProviders` (default
+  false) and `syntheticProvidersOptIn(env)`: `RATIO_ALLOW_SYNTHETIC_PROVIDERS`
+  `'1'` on; unset, `''` or `'0'` off; anything else `CONFIG_INVALID`;
+  `'1'` with `RATIO_ENV=production` ⇒ `SYNTHETIC_PROVIDERS_NOT_ALLOWED`.
+  The CLI passes its own env's value, and logs
+  `config.synthetic_providers_allowed` (level `warn`) once at startup when it
+  is on. `replay-fixtures` passes it through. A library caller that sets
+  nothing gets this process's env value (default off).
 - `worker/load.ts`: `LoadContext.providerPolicy`; after the header is
   indexed, the header check; after `validateRow` succeeds, the row check.
   NULL ⇒ `addError` (as any row error). Mismatch ⇒ new `addExclusion`:
@@ -277,9 +290,21 @@ columns.
 | D5 | 〃 | mismatch + a hard error ⇒ quarantined `VALIDATION_FAILED`, `validation_error_count` = both |
 | D6 | 〃 | mixed file + a set-level control counting every row ⇒ `RECONCILIATION_VARIANCE` |
 | D7 | 〃 | the `fake` type rejects `AWS` |
-| A-tests | `scripts/local/acceptance.test.mjs`, `scripts/acceptance/*` | calculator `--provider` (exact, NULL counted as excluded), the new sync / re-sync / catalog / artifact-set checks with their exact problem lists, A9 static wiring (`--provider AWS` passed) |
+| D8 | 〃 | an unrecognised type is not checked (D4) |
+| D9 | 〃 (D1 decision) | opt-in off ⇒ `SyntheticCloud` under `aws-data-exports` excluded `PROVIDER_MISMATCH` (and an all-synthetic batch quarantined); on ⇒ accepted; a library caller follows the process env, unset ⇒ off |
+| D10 | 〃 (D1 decision) | the worker CLI: `'0'` ⇒ the synthetic fixture is quarantined, no opt-in log; `'1'` ⇒ published, the opt-in logged exactly once |
+| S1 | `src/ingest/syntheticProviders.test.ts` (D1 decision) | default off (`DEFAULT_SETTINGS`, `resolveSettings`, `loadWorkerConfig` for every `RATIO_ENV`); `'1'` on; other values refused; refused in production |
+| G1 | `src/ingest/worker/sourceFactory.test.ts` (D4 decision) | every source row without a provider policy is refused by the source factory (`SOURCE_CONFIG_INVALID`); every row it accepts has a policy |
+| A-tests | `scripts/local/acceptance.test.mjs`, `scripts/acceptance/*` | calculator `--provider` (exact; NULL refused), the new sync / re-sync / catalog / artifact-set checks with their exact problem lists, A9 static wiring (`--provider AWS` passed); the local opt-in: off in `workerEnv` by default and for `local:acceptance`, on only for the synthetic fixture's sync |
 
-Slice 0/1 tests are not modified.
+Slice 0/1 test files are not modified. The opt-in reaches them through the
+harness only:
+- the `env` of `vitest.db.config.ts` and `vitest.db.serial.config.ts` (the
+  library tests);
+- `testS3Env()` in `src/ingest/testing/s3.ts` (the CLI tests, e.g.
+  `cliWorker.db.test.ts` and `demo.db.test.ts`, build the worker CLI env with
+  it);
+- `local.mjs` (`local:sync`, `local:test`: the synthetic fixture source only).
 
 ## 7. Mutations (must each fail a test)
 
@@ -291,36 +316,49 @@ Slice 0/1 tests are not modified.
 | M4 | loose match (trim / prefix: `startsWith`) | U1 |
 | M5 | mismatch excluded but all-foreign batch published as zero rows / `EMPTY_BATCH` | D2 |
 | M6 | exclusion not counted in `validation_error_count` | D1 |
+| M17 | synthetic providers always allowed (opt-in ignored) | U1, D9, D10 |
+| M18 | opt-in default on (`DEFAULT_SETTINGS` / unset env) | S1, D9 |
+| M19 | opt-in accepted in production | S1 |
+| M20 | factory accepts `focus_file` without the AWS layout | G1 |
 
-## 8. Decisions for the orchestrator
+## 8. Decisions (decided by orchestrator, 2026-10-04)
 
-- **D1: `SyntheticCloud` is on the `aws-data-exports` allowlist.** The
-  project's synthetic fixture (`syntheticFocus.ts`, `testing/focusCsv.ts`)
-  writes `ProviderName = SyntheticCloud`. It is staged in the AWS Data
-  Exports layout and ingested through `focus_file` sources in Slice 1 tests
-  (`s3Source.db.test.ts`, `cliWorker.db.test.ts`, `demo.db.test.ts`,
-  `maxRunListing.db.test.ts`), by `replay-fixtures`, and by `local:test`.
-  Excluding it would quarantine all of them, and Slice 0/1 tests must not
-  change.
-  - Security delta: none for real providers. Every real provider name is
-    still rejected. A tamperer could equally write `AWS`, so this check is
-    a misrouting control, not an anti-tamper control.
-  - The cleaner alternative: an explicit source-config marker for synthetic
-    sources (e.g. `"synthetic": true`), with `AWS` alone on the AWS type.
-    It needs edits to those Slice 1 tests (and `replayFixtures.ts`,
-    `local.mjs`).
-- **D2: NULL ⇒ whole-batch quarantine** (§3), despite AWS's documented
-  conformance gap. Alternative: allow it with a flag.
-- **D3: mismatch ⇒ row exclusion and publish the rest** (§2.2), as briefed.
-  Alternative: whole-batch quarantine (one line). Also, this requires that
-  manifest controls covering foreign rows quarantine (D6).
-- **D4: unrecognised source types are not checked.** `focus_file` without
-  `layout: aws-data-exports` cannot reach the data through the CLI (the
-  factory refuses it first). It is reachable only by injecting a
-  `FocusSource` through the library API, which is what about a hundred
-  Slice 1 tests do (`config: {}`). Fail-closed for unrecognised types would
-  break them.
-- **D5: `Amazon Web Services` not allowed** (§2.1), pending a real export.
+The first draft proposed each item below; the orchestrator decided them on
+2026-10-04.
+
+- **D1: changed. Synthetic providers are gated by an explicit opt-in.**
+  The draft put `SyntheticCloud` on the `aws-data-exports` allowlist. That
+  re-opens the gap #62 closes: a tampered "AWS" export carrying
+  `SyntheticCloud` rows would be published as AWS spend. Decided:
+  - `SyntheticCloud` (and the synthetic provider names planned for Slice 3,
+    D-04) are accepted ONLY when `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` is set.
+    The base lists hold only real providers.
+  - The opt-in defaults to OFF. A production or default config never
+    accepts them: `RATIO_ENV=production` with the opt-in is refused at
+    config load (`SYNTHETIC_PROVIDERS_NOT_ALLOWED`).
+  - The worker CLI logs once at startup when it is on.
+  - The test and local harnesses turn it on (§6), not the Slice 0/1 test
+    files. No Slice 1 test file needed an edit. `testS3Env()` is a Slice 1
+    harness helper (not a test file), so the orchestrator should confirm it
+    is the right place.
+  - `local:acceptance` runs with it OFF: the public sample is
+    production-shaped.
+  - `replay-fixtures` (staging) needs the operator to set the opt-in for
+    that invocation, since it ingests the SYNTHETIC fixture.
+- **D2: accepted, fail closed.** An empty or missing `ProviderName`
+  quarantines the batch (§3). **Revisit trigger:** if a real AWS export
+  shows null `ProviderName` rows (the documented conformance gap), revisit
+  this policy using that evidence. Real exports are an owner action.
+- **D3: accepted.** Exclude the foreign rows, publish the rest, and
+  reconcile against the manifest controls. Controls that count the foreign
+  rows quarantine the batch `RECONCILIATION_VARIANCE` (D6 test).
+- **D4: accepted, with a guard.** An unrecognised source type is not
+  checked. `src/ingest/worker/sourceFactory.test.ts` ("D4 guard") pins that
+  the source factory refuses every such row, so the unchecked path stays
+  unreachable from the CLI. The bypass in `providerPolicyFor` carries a
+  comment naming that test.
+- **D5: accepted.** `AWS` only. `Amazon Web Services` is not allowed until
+  a real export proves otherwise (§2.1).
 
 ## 9. Rollback
 

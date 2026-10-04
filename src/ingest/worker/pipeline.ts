@@ -6,7 +6,7 @@ import type { Pool } from 'pg';
 import { IngestError, errorCodeOf, messageOf } from '../errors';
 import { redact, redactDeep } from '../redact';
 import { withRetry } from '../retry';
-import { resolveSettings, type WorkerLimits, type WorkerSettings } from '../config';
+import { resolveSettings, syntheticProvidersOptIn, type WorkerLimits, type WorkerSettings } from '../config';
 import { workerTransaction } from './tx';
 import type { EvidenceStore } from '../evidence/types';
 import { classifyArtifact } from '../sources/s3/layout';
@@ -66,7 +66,12 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   if ((opts.mode === 'backfill' || opts.mode === 'replay_period') && !opts.range) throw new IngestError('INVALID_RANGE', `${opts.mode} needs a period range`);
   // Bounded (2000-01..9999-12), well-formed and not inverted (review H2, third round).
   if (opts.range) assertPeriodRange(opts.range);
-  const settings = resolveSettings(opts.settings);
+  // The synthetic-provider opt-in (issue #62 D1): explicit in settings (the CLI passes its own env's
+  // value), else this process's RATIO_ALLOW_SYNTHETIC_PROVIDERS (library callers; default off).
+  const settings = resolveSettings({
+    ...opts.settings,
+    allowSyntheticProviders: opts.settings?.allowSyntheticProviders ?? syntheticProvidersOptIn(process.env),
+  });
   const hooks = opts.hooks ?? {};
   const log: LogFn = opts.log ?? (() => undefined);
   const secrets = opts.secrets ?? [];
@@ -490,7 +495,7 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   if (unique.size !== captured.length) return quarantine('DUPLICATE_ARTIFACT', 'two artifacts in the set have identical bytes');
 
   const focusVersion = ctx.sourceRow.declaredFocusVersion ?? '1.0';
-  const providerPolicy = providerPolicyFor(ctx.sourceRow);
+  const providerPolicy = providerPolicyFor(ctx.sourceRow, { allowSyntheticProviders: settings.allowSyntheticProviders });
   for (const c of [...unique.values()]) {
     await loadArtifact(
       {

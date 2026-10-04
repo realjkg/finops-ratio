@@ -234,9 +234,9 @@ async function up(settings) {
   log('up: postgres 16 + s3 running, roles bootstrapped', { project: settings.project, pgPort: settings.pgPort, s3Port: settings.s3Port });
 }
 
-async function workerCli(settings, secrets, args, opts = {}) {
+async function workerCli(settings, secrets, args, { syntheticProviders = false, ...opts } = {}) {
   if (!fs.existsSync(path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'))) await run('npm', ['run', '-s', 'worker:build'], { timeoutMs: WORKER_BUILD_TIMEOUT_MS });
-  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets), capture: true, timeoutMs: WORKER_CLI_TIMEOUT_MS, ...opts });
+  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets, { syntheticProviders }), capture: true, timeoutMs: WORKER_CLI_TIMEOUT_MS, ...opts });
 }
 
 async function migrate(settings) {
@@ -371,8 +371,8 @@ async function seed(settings) {
  * allowFail: a failing sync's record (its outcomes and quarantine codes) must still be readable.
  * The exit code judged by every caller: sync() rejects r.code !== 0, syncTwice (acceptance.mjs) requires 0.
  */
-async function syncRecord(settings, secrets, sourceKey) {
-  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', sourceKey], { allowFail: true });
+async function syncRecord(settings, secrets, sourceKey, { syntheticProviders = false } = {}) {
+  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', sourceKey], { allowFail: true, syntheticProviders });
   process.stdout.write(r.out);
   let record = null;
   try {
@@ -385,7 +385,8 @@ async function syncRecord(settings, secrets, sourceKey) {
 
 async function sync(settings) {
   const secrets = loadSecrets(settings, { create: false });
-  const r = await syncRecord(settings, secrets, LOCAL_NAMES.sourceKey);
+  // The SYNTHETIC fixture source (ProviderName SyntheticCloud): the explicit opt-in (issue #62 D1).
+  const r = await syncRecord(settings, secrets, LOCAL_NAMES.sourceKey, { syntheticProviders: true });
   if (r.code !== 0) throw new Error(`worker sync exited ${r.code}`);
   if (r.record === null) throw new Error('worker sync printed no evidence record');
   return r.record;
