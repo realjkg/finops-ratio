@@ -786,7 +786,8 @@ Appendix B (B.4, B.5.6–B.5.14).
 **Revisions 28–31, this follow-up PR.** `origin/main` is now
 `f35c383`, which contains PR #70, so `node scripts/governance/classify-risk.mjs --git
 origin/main...HEAD` reads only this PR's diff. At revisions 28, 29, 30
-and 31 (the commit that changes this line) it gives:
+and 31, and at the follow-up commit that adds the GitHub paragraph below,
+it gives:
 - `"risk": "restricted"`, classes `retention` and `secrets`;
 - `retention.mention` on `APPENDIX_D_SCHEMA_SKETCH.md`, `DESIGN.md` and
   this file: the added lines say how the retention functions run (AA3–AA5)
@@ -800,11 +801,36 @@ and 31 (the commit that changes this line) it gives:
   lines are on `main` and unchanged, so they are not in this diff.
 
 `APPENDIX_B_SIZING.md` has no reason of its own this time: its added
-lines are figures, labels and the fixed scripts. Each file's diff is
-small, so the GitHub API is expected to return every patch and the PR's
-governance report to give the same result. If it lists `diff-unavailable`
-rows instead, they are recorded here, as they were for PR #70. The PR
-goes through the restricted exception path.
+lines are figures, labels and the fixed scripts.
+
+**From `aeef207` (revision 31), the PR's governance report lists
+`DESIGN.md` as `unclassified` / `diff-unavailable` instead of its
+`retention.mention`.** Revisions 28–30 expected the GitHub API to return
+every patch, since each file's diff was small. That held until the diff of
+`DESIGN.md` grew: at `aeef207` the API returns no patch for `DESIGN.md`
+(228 changed lines, many of them long table rows). It still returns the
+patches of the other three files. As for PR #70 at `3aaa678`:
+- **the report at `aeef207`:** `retention.mention` on
+  `APPENDIX_D_SCHEMA_SKETCH.md` and this file;
+  `secrets.password-assignment` and `retention.delete-from` on this file;
+  `unclassified` / `diff-unavailable` on `DESIGN.md`. Risk `restricted`,
+  classes **`retention`, `secrets` and `unclassified`**;
+- **why:** with no patch, no content rule can match `DESIGN.md`, and
+  `classify-risk.mjs` fails closed (`patchUnavailable` → `unclassified` /
+  `diff-unavailable`);
+- **the content did not change:** no retention statement in `DESIGN.md`
+  was removed or reworded; the report can no longer see it;
+- **the local verdict is unchanged:** `--git` reads the full diff and
+  still gives `restricted`, `retention` and `secrets`, with the five
+  reasons listed above;
+- **the verdict is not weaker:** `unclassified` is an extra class, and
+  the PR stays `restricted`.
+
+The GitHub-mode result was reproduced locally. `classify-risk.mjs` was fed
+the PR's file list from the API, with `patchUnavailable` set as
+`gh-actions.mjs` sets it, and with the patches the API returns. It gives
+the five reasons in the first bullet. That is the correct classification
+for this content; the PR goes through the restricted exception path.
 
 **PR #70 (revisions 1–27), as recorded at revision 27.**
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
