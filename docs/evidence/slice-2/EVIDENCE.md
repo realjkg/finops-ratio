@@ -1104,3 +1104,30 @@ The stricter scan, rule (d), surfaced two calls that were blind spots before:
 | `worker:build`; `next build`; `check:bundle`; `npm audit --omit=dev` | 0; 0; pass (116 client / 91 server files); 0 vulnerabilities |
 | `npm run local:test` | pass in 27 s; totals `"55"` / `"40"`; `appStop: stopped`; `down: ok (-v)`; `failures: []` |
 | leftovers | none: private cluster stopped and deleted; no `ratio-local*` containers or volumes; no `.ratio-local/`; no sleepers |
+
+### Decision on the 2 Slice 1 findings: approved, allowlisted (commit 8bc8513)
+
+The coordinator approved adding both calls to the allowlist, because Slice 1
+test files may not change. The allowlist goes from 3 to 5 entries in a
+separate commit, so it can be reviewed on its own. The entries are
+`src/ingest/worker/commitTag.db.test.ts:37` and
+`src/ingest/worker/reviewFindings.db.test.ts:182`, with the hashes above.
+
+**Rationale, recorded in each entry's `reason`:**
+- **The proxies forward only the worker's own SQL.** The worker runs as a
+  `ratio_worker` member. Under the Slice 0 privilege model it has no
+  CREATEROLE, owns no role and holds no ADMIN option, so it cannot GRANT or
+  REVOKE role membership or ALTER ROLE, even if that SQL tried.
+- **The only statements the proxies add** are `SELECT 1 / 0` (commitTag) and
+  a database-local lease UPDATE on `ratio.sync_runs` through `admin.query`
+  (reviewFindings).
+- **Runtime backstop:** a membership or role change attempted through these
+  calls would fail with a permission error (SQLSTATE 42501), not succeed
+  silently.
+
+**Gates after the decision (HEAD 8bc8513):**
+- `npm run lint` and `npx tsc --noEmit`: 0 errors each.
+- `npm test`: **2382 passed** (103 files), all green; the guard is 19/19.
+- Only the guard's test file changed after the §15a gate run, so the
+  `test:db` ×2, build, `check:bundle` and `local:test` results recorded in
+  §15a still apply.
