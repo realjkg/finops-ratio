@@ -1113,17 +1113,33 @@ separate commit, so it can be reviewed on its own. The entries are
 `src/ingest/worker/commitTag.db.test.ts:37` and
 `src/ingest/worker/reviewFindings.db.test.ts:182`, with the hashes above.
 
-**Rationale, recorded in each entry's `reason`:**
-- **The proxies forward only the worker's own SQL.** The worker runs as a
-  `ratio_worker` member. Under the Slice 0 privilege model it has no
-  CREATEROLE, owns no role and holds no ADMIN option, so it cannot GRANT or
-  REVOKE role membership or ALTER ROLE, even if that SQL tried.
+**Rationale, recorded in each entry's `reason`** (corrected after the
+challenger's approval of 911ff84; reason text only, the hashed calls are
+unchanged):
+- **The proxies forward only the worker's own SQL, and the worker's runtime
+  code issues no role DDL at all.** There is no GRANT, REVOKE, ALTER ROLE or
+  CREATE ROLE outside migrations and tests (verified by search of `src/`).
+  This is what makes the entries safe.
+- **GRANT and REVOKE of ratio-role membership are refused** for a
+  `ratio_worker` member (no CREATEROLE, no ADMIN option): SQLSTATE 42501,
+  verified.
+- **ALTER ROLE is not refused.** An ordinary role CAN `ALTER ROLE <itself>
+  SET …` and change its own password (the challenger verified this on
+  PG16). The earlier wording "cannot … ALTER ROLE" was wrong.
+- **The hashes pin the exact calls,** so any change to them is re-reviewed.
 - **The only statements the proxies add** are `SELECT 1 / 0` (commitTag) and
   a database-local lease UPDATE on `ratio.sync_runs` through `admin.query`
   (reviewFindings).
-- **Runtime backstop:** a membership or role change attempted through these
-  calls would fail with a permission error (SQLSTATE 42501), not succeed
-  silently.
+
+**Remaining limits of the guard, now also in its header:**
+- **Transaction control hidden inside other SQL:** `'BEGIN; COMMIT'`, a
+  multi-statement `'SELECT 1; COMMIT'`, or COMMIT held in a const.
+- **A computed member** `db.pool[k]`, where `k` is a const holding `'query'`.
+- **Dynamic SQL built inside PL/pgSQL** (`||`, `format()`), an inherent limit
+  of static analysis.
+
+All three need deliberate obfuscation. The underlying Slice 0 race is tracked
+in realjkg/finops-ratio#61.
 
 **Gates after the decision (HEAD 8bc8513):**
 - `npm run lint` and `npx tsc --noEmit`: 0 errors each.

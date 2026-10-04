@@ -75,6 +75,15 @@
 //   - transaction control is recognised only as literal BEGIN / ROLLBACK /
 //     COMMIT … strings on the same receiver text; a client passed into a
 //     function the file does not declare is not followed (fail closed).
+//   - contrived gaps that need deliberate obfuscation, not accidents:
+//       - transaction control hidden inside other SQL: 'BEGIN; COMMIT', a
+//         multi-statement 'SELECT 1; COMMIT', or COMMIT held in a const (only
+//         a literal BEGIN / ROLLBACK / COMMIT … string is recognised);
+//       - a computed member `db.pool[k]` where k is a const holding 'query';
+//       - dynamic SQL built inside PL/pgSQL (`||`, format()), an inherent
+//         limit of static analysis;
+//     the underlying Slice 0 race (has_*_privilege follows live memberships)
+//     is tracked in realjkg/finops-ratio#61.
 // Slice 1's runtime backstop (src/ingest/testing/dangerousLoginBackstop.ts)
 // catches a dangerous login left behind, not a membership change on an
 // existing login: for those, this static guard is the control.
@@ -124,14 +133,14 @@ export const ALLOWLIST: ReadonlyArray<{ file: string; sha256: string; reason: st
     // const r = await (target.query as …).apply(target, args); — swallowingPool's Proxy over a worker pool client
     sha256: 'ac2dcea8a0c1013076cc3b723d762a9b2366a192e86ba8c1a816809a52f37f43',
     reason:
-      "Slice 1 (approved by the coordinator; Slice 1 test files may not change). The proxied calls forward only the worker's own SQL. The worker runs as a ratio_worker member, which under the Slice 0 privilege model has no CREATEROLE, owns no role and holds no ADMIN option, so it cannot GRANT or REVOKE role membership or ALTER ROLE, even if that SQL tried. Runtime backstop: such a statement would fail with a permission error (42501), not succeed silently. The only added statement is SELECT 1 / 0 on the same client.",
+      "Slice 1 (approved by the coordinator; Slice 1 test files may not change). The proxied calls forward only the worker's own SQL, and the worker's runtime code issues no role DDL at all: no GRANT, REVOKE, ALTER ROLE or CREATE ROLE outside migrations and tests (verified by search). As a ratio_worker member (no CREATEROLE, no ADMIN option) it cannot GRANT or REVOKE ratio-role membership either: refused with 42501 (verified). It can still ALTER ROLE itself (SET …, its own password), so the safety rests on the absence of role DDL, and the hash pins this exact call: any change to it is re-reviewed. The only added statement is SELECT 1 / 0 on the same client.",
   },
   {
     file: 'src/ingest/worker/reviewFindings.db.test.ts',
     // return (target.query as …).apply(target, args); — a Proxy over a worker pool client
     sha256: '583be933c615bcae4dbc20bb359875133647de9e8ea49a9f45e3e056c594312c',
     reason:
-      "Slice 1 (approved by the coordinator; Slice 1 test files may not change). The proxied calls forward only the worker's own SQL. The worker runs as a ratio_worker member, which under the Slice 0 privilege model has no CREATEROLE, owns no role and holds no ADMIN option, so it cannot GRANT or REVOKE role membership or ALTER ROLE, even if that SQL tried. Runtime backstop: such a statement would fail with a permission error (42501), not succeed silently. The only added statement is a database-local lease UPDATE (ratio.sync_runs) through admin.query.",
+      "Slice 1 (approved by the coordinator; Slice 1 test files may not change). The proxied calls forward only the worker's own SQL, and the worker's runtime code issues no role DDL at all: no GRANT, REVOKE, ALTER ROLE or CREATE ROLE outside migrations and tests (verified by search). As a ratio_worker member (no CREATEROLE, no ADMIN option) it cannot GRANT or REVOKE ratio-role membership either: refused with 42501 (verified). It can still ALTER ROLE itself (SET …, its own password), so the safety rests on the absence of role DDL, and the hash pins this exact call: any change to it is re-reviewed. The only added statement is a database-local lease UPDATE (ratio.sync_runs) through admin.query.",
   },
 ];
 
