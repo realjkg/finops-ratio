@@ -28,7 +28,8 @@ ordinary commits and plain pushes (never a force-push).
 | 16 | `9e0d703`, `1ac82f7`, `6cad4cd` | The challenger's REQUEST CHANGES on revision 15 (2 Medium, 4 Low), §3n: the run row is closed for INSERT with terminal statuses and a unique `run_seq`; an effect window for every label kind; multi-day usage in the limits with a coverage share; leaf derivation enforced by FKs. |
 | 17 | `77a2faf`, `f288d2f`, `cc54e79` | Copilot's review 5407588631 of 6cad4cd (6 High, 4 Medium, 1 Low), §3o: one writer per tenant and job kind for `run_seq`; one day index `t` for every detector; fan-in before persistence with merge semantics; daily excess vs cumulative impact and `ρ` at expected 0; stale wording swept. The challenger's REQUEST CHANGES on 6cad4cd (2 Medium, 4 Low), §3p: one composite FK binds a series to its leaf; separate grant, trigger and concurrent-UNIQUE tests; a CHECK for root causes without a leaf; paginated per-leaf coverage; §5 wording. Copilot's review 5407636005 of 6cad4cd (six new threads), §3q: one UPDATE column list per pointer; leaf totals stored for all three windows (disk delta +0.066 GB per run, peak 5.22 GB); the full leaf reconstruction formula; CHECKs on fixed-length arrays; "insert-only" replaced. |
 | 18 | `f1981c2`, `ddbb6f0` | The challenger's REQUEST CHANGES on cc54e79 (1 Medium, 5 Low), §3r: severity of a multi-day statistic on its window's mean (as the budget computed it), with the D3 episode and its restart stated; AT-3's drift target checked (`drift_ttd.py`, B.5.13: not infeasible by construction, at risk, unchanged under D-20); day-index leftovers; fan-in step 1 by the rule's own scope; root-cause leaf and account FKs; the 5.5 / 6 GB limits apply to the peak; D1's log quantile and the intermittent-interval wording. Copilot's review 5407703235 of cc54e79 (seven threads), §3s: accounts bound to their natural key; the complete M1 anchor state for D3; aggregate-scope detector state; `freshness` states its rollup snapshot and a bounded coverage share; per-bucket quantile sources; a working recall mutation. Disk delta +0.082 GB per run, peak 5.23 GB. |
-| 19 | this revision | Copilot's review 5407780981 of ddbb6f0 (2 High, 1 Medium) and the challenger's four Low items on revision 18 (APPROVED, 0 High, 0 Medium), with two plan slips, §3t: named resources only in `cost_resource_daily` (no `''` sentinel for `resource_id`); a positive `scale_level` and clamped quantiles so leaf bounds stay ordered for negative usage; billed `B` on month-end only; "lower bound" renamed; the 28-day re-anchoring cap wins; the D3 anchor is the daily-updated state; `freshness` reads its batch and sums in one statement; the weekly and hurdle baselines named; the 4-4b and 4-5 tests completed. |
+| 19 | `0dd6743` | Copilot's review 5407780981 of ddbb6f0 (2 High, 1 Medium) and the challenger's four Low items on revision 18 (APPROVED, 0 High, 0 Medium), with two plan slips, §3t: named resources only in `cost_resource_daily` (no `''` sentinel for `resource_id`); a positive `scale_level` and clamped quantiles so leaf bounds stay ordered for negative usage; billed `B` on month-end only; "lower bound" renamed; the 28-day re-anchoring cap wins; the D3 anchor is the daily-updated state; `freshness` reads its batch and sums in one statement; the weekly and hurdle baselines named; the 4-4b and 4-5 tests completed. |
+| 20 | this revision | Copilot's review 5407820380 of 0dd6743 (1 High, 3 Medium) and the challenger's three Low items on revision 19 (APPROVED, 0 High, 0 Medium), §3u: `freshness` keyset on `(share, leaf_id)`; a per-currency resource floor (a quarter of the minimum impact); the conditional floor applied to intermittent series and to every total; `detector_scope_state` in every retention list and test; clamping's effect on FT-7 reported. |
 
 ## 2. Governance wording: reverted
 
@@ -442,6 +443,22 @@ mutants fails thousands of 20,000.
 | **D2** "nets to 0" | **Fixed.** `null` only when every day's sums are 0; the netting case (`M` +10 / −10, multi-day +5 / −5 on two days) has the defined share 10 / 30 = 0.33, now a 4-5 test | DESIGN §7 (4-5) |
 | Scripts | `drift_ttd.py`'s label changed (hash above, output figures identical); the other eleven are unchanged (`rollup12.py` `a0931c44…`); no disk figure changes | App. B |
 
+## 3u. Revision 20: Copilot's review 5407820380 of 0dd6743 and the challenger's Lows on revision 19
+
+The challenger APPROVED revision 19 (0 High, 0 Medium, 3 Low). Each item
+was checked against 0dd6743 and is valid. P3 and the challenger's L2 are
+the same finding.
+
+| Item | Change | Where |
+|---|---|---|
+| **P1 r4179014779** (High) `freshness` keyset | **Fixed.** Order `(share DESC NULLS LAST, leaf_id ASC)`; the cursor carries both, with an explicit null branch (`share < s OR (share = s AND leaf_id > id)` plus every null after a non-null cursor; `share IS NULL AND leaf_id > id` after a null one). Probe on PostgreSQL 16.14 (port 55761, removed afterwards), 37,052 leaves (30,000 tied at 0, 2,052 in 7 tied values, 5,000 null), pages of 500: every leaf visited exactly once; the mutant without the tie-breaker visits 7,000 and misses 30,052. 4-5 traversal test and mutants | DESIGN §5.1, §7 (4-5) |
+| **P2 r4179014804** resource floor | **Fixed.** The floor is a quarter of the tenant's minimum impact **in that currency** (defaults USD/EUR/GBP 25, JPY 3,750 per day), read from the same per-currency setting, never converted (D-10), and recorded in the rollup run's `stats`. 4-2 test in each of the four currencies (0.24 × out, 0.26 × in); mutant: one literal 25. **Sizing:** unchanged. `fleet15k` names only injected runaway resources, and the budget never counted `cost_resource_daily` separately, so `rollup12.py` was not re-run | DESIGN §2.9, §7 (4-2); App. D.1 |
+| **P3 r4179014824** / **L2** intermittent floor | **Fixed.** Intermittent intervals follow the rule of every interval: floored at 0 only when the point is ≥ 0. Sweep: no other unconditional interval floor remains (the other `max(0, …)` are CUSUM recursions and sampling code) | DESIGN §3.4 |
+| **P4 r4179014849** retention list | **Fixed.** `detector_scope_state` added to §6.2's list and D-12, matching App. D.1's function; the governance row now names 4-3 for the forecast retention test, which checks all six run-keyed forecast and detector tables keep exactly the 2 latest runs; mutant: leave `detector_scope_state` out. App. B has no table list to change | DESIGN §6.2, §6.4, §7 (4-3), §8 D-12 |
+| **L1** totals intervals | **Fixed.** Every `forecast_totals` row, at every level and window, uses the same rule: scale `L_T = n × L` (n forecast days in the window), total-error quantiles clamped around 0, floor at 0 only for a total ≥ 0; `n` = 0 gives a zero-width interval at the actuals. The 4-4b property test covers 10,000 random totals rows, negative next-30 totals included; mutant: floor a negative total at 0 | DESIGN §3.4; App. D.2, D.3; DESIGN §7 (4-4b) |
+| **L3** clamping vs FT-7 | **Stated, target unchanged.** Clamping only widens a biased bucket, so it can over-cover and fail FT-7's upper limits (85 %, 97.5 %). `forecast_backtests` gains a `clamped_share` metric and `forecast_totals` a `clamped` flag; 4-4b and 4-6 report the share of clamped buckets and total windows next to FT-7 | DESIGN §3.4, §7 (4-4b, 4-6); App. D.2 |
+| Scripts | No script changed; all 12 hashes as in revision 19. The new `clamped` flag (1 B per totals row) sits inside `rollup12.py`'s 150 B-per-row assumption | App. B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -481,9 +498,9 @@ Appendix B (B.4, B.5.6–B.5.13).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 19 (the commit that adds this line; the same eight reasons
-as at revision 18, `ddbb6f0`, revision 17, `cc54e79`, and `9e0d703`,
-revision 16). Revision 16 gave the same risk and classes
+at revision 20 (the commit that adds this line; the same eight reasons
+as at revision 19, `0dd6743`, revision 18, `ddbb6f0`, revision 17,
+`cc54e79`, and `9e0d703`, revision 16). Revision 16 gave the same risk and classes
 as every revision since 4, and **one more reason than before**: `retention.mention`
 on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is
 "outside retention" (rev. 16, L4). That is a statement about the D-12
