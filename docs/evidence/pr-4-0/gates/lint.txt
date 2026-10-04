@@ -1,0 +1,6 @@
+
+> ratio@1.0.0 lint
+> eslint .
+
+
+[exit code 0]

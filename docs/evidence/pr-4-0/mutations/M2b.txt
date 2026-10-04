@@ -1,0 +1,396 @@
+Mutation M2b off-by-one month index in the Date.UTC idiom: Date.UTC(y, m, 0) with m 0-based
+- return daysInMonth(date.getUTCFullYear(), date.getUTCMonth() + 1);
++ return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 0)).getUTCDate();
+Run: TZ=UTC npx vitest run src/lib/forecast.calendar.test.ts
+exit code 1
+
+
+ RUN  v5.0.1 <repo>
+
+ ❯ src/lib/forecast.calendar.test.ts (47 tests | 34 failed) 2259ms
+   ❯ Date helpers in this process (TZ=UTC) (27)
+     × 2026-02-10T12:00:00.000Z: 28 days, 13 weekdays left (non-leap Feb) 9ms
+     × 2026-02-26T18:00:00.000Z: 28 days, 1 weekdays left (non-leap Feb, two days before the end) 1ms
+     × 2026-02-28T23:59:59.999Z: 28 days, 0 weekdays left (non-leap Feb, last instant) 1ms
+     × 2024-02-10T12:00:00.000Z: 29 days, 14 weekdays left (leap Feb) 1ms
+     × 2024-02-29T00:00:00.000Z: 29 days, 0 weekdays left (leap day, first instant) 1ms
+     × 2000-02-15T06:00:00.000Z: 29 days, 10 weekdays left (leap Feb (400-year rule)) 1ms
+     × 2100-02-15T06:00:00.000Z: 28 days, 9 weekdays left (non-leap Feb (100-year rule)) 0ms
+     × 2026-04-01T00:00:00.000Z: 30 days, 21 weekdays left (30-day month, first instant) 1ms
+     × 2026-04-30T23:30:00.000Z: 30 days, 0 weekdays left (30-day month, last day late UTC (already May in Tokyo)) 1ms
+     × 2026-06-25T17:42:00.000Z: 30 days, 3 weekdays left (30-day month, DEMO_NOW) 1ms
+     × 2026-06-29T20:00:00.000Z: 30 days, 1 weekdays left (30-day month, day before the end) 3ms
+     × 2026-09-15T14:00:00.000Z: 30 days, 11 weekdays left (30-day month) 0ms
+     × 2026-05-31T23:59:59.999Z: 31 days, 0 weekdays left (31-day month, last instant) 0ms
+     × 2026-07-01T00:00:00.000Z: 31 days, 22 weekdays left (31-day month, first instant (still June in LA)) 0ms
+     × 2026-03-08T10:00:00.000Z: 31 days, 17 weekdays left (US DST start day) 0ms
+     × 2026-03-29T01:30:00.000Z: 31 days, 2 weekdays left (EU DST start day) 0ms
+     × 2026-03-30T22:00:00.000Z: 31 days, 1 weekdays left (DST-start month, day before the end) 1ms
+     × 2026-03-31T23:59:59.999Z: 31 days, 0 weekdays left (DST-start month, last instant) 0ms
+     × 2026-10-25T01:30:00.000Z: 31 days, 5 weekdays left (EU DST end day) 2ms
+     × 2026-11-01T09:30:00.000Z: 30 days, 21 weekdays left (US DST end day) 0ms
+     × 2026-11-30T23:00:00.000Z: 30 days, 0 weekdays left (DST-end month, last day late UTC) 0ms
+     × 2025-12-31T12:00:00.000Z: 31 days, 0 weekdays left (Dec 31) 0ms
+     × 2026-12-31T23:59:59.999Z: 31 days, 0 weekdays left (last instant of a year) 0ms
+     × 2023-12-31T23:00:00.000Z: 31 days, 0 weekdays left (year boundary into a leap year) 0ms
+   ❯ child process under TZ=UTC (3)
+     × daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case 8ms
+     × computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays) 1ms
+   ❯ child process under TZ=Asia/Tokyo (3)
+     × daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case 5ms
+     × computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays) 1ms
+   ❯ child process under TZ=Pacific/Kiritimati (3)
+     × daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case 6ms
+     × computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays) 1ms
+   ❯ child process under TZ=America/Los_Angeles (3)
+     × daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case 7ms
+     × computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays) 1ms
+   ❯ child process under TZ=Pacific/Pago_Pago (3)
+     × daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case 2ms
+     × computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays) 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 34 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-02-10T12:00:00.000Z: 28 days, 13 weekdays left (non-leap Feb)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-02-26T18:00:00.000Z: 28 days, 1 weekdays left (non-leap Feb, two days before the end)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-02-28T23:59:59.999Z: 28 days, 0 weekdays left (non-leap Feb, last instant)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2100-02-15T06:00:00.000Z: 28 days, 9 weekdays left (non-leap Feb (100-year rule))
+AssertionError: expected 31 to be 28 // Object.is equality
+
+- Expected
++ Received
+
+- 28
++ 31
+
+ ❯ src/lib/forecast.calendar.test.ts:164:30
+    162|   it.each(CASES)('%s: %i days, %i weekdays left (%s)', (iso, days, wee…
+    163|     const d = new Date(iso);
+    164|     expect(daysInMonthOf(d)).toBe(days);
+       |                              ^
+    165|     expect(remainingWeekdaysInMonth(d)).toBe(weekdays);
+    166|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/34]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2024-02-10T12:00:00.000Z: 29 days, 14 weekdays left (leap Feb)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2024-02-29T00:00:00.000Z: 29 days, 0 weekdays left (leap day, first instant)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2000-02-15T06:00:00.000Z: 29 days, 10 weekdays left (leap Feb (400-year rule))
+AssertionError: expected 31 to be 29 // Object.is equality
+
+- Expected
++ Received
+
+- 29
++ 31
+
+ ❯ src/lib/forecast.calendar.test.ts:164:30
+    162|   it.each(CASES)('%s: %i days, %i weekdays left (%s)', (iso, days, wee…
+    163|     const d = new Date(iso);
+    164|     expect(daysInMonthOf(d)).toBe(days);
+       |                              ^
+    165|     expect(remainingWeekdaysInMonth(d)).toBe(weekdays);
+    166|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/34]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-04-01T00:00:00.000Z: 30 days, 21 weekdays left (30-day month, first instant)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-04-30T23:30:00.000Z: 30 days, 0 weekdays left (30-day month, last day late UTC (already May in Tokyo))
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-06-25T17:42:00.000Z: 30 days, 3 weekdays left (30-day month, DEMO_NOW)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-06-29T20:00:00.000Z: 30 days, 1 weekdays left (30-day month, day before the end)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-09-15T14:00:00.000Z: 30 days, 11 weekdays left (30-day month)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-11-01T09:30:00.000Z: 30 days, 21 weekdays left (US DST end day)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-11-30T23:00:00.000Z: 30 days, 0 weekdays left (DST-end month, last day late UTC)
+AssertionError: expected 31 to be 30 // Object.is equality
+
+- Expected
++ Received
+
+- 30
++ 31
+
+ ❯ src/lib/forecast.calendar.test.ts:164:30
+    162|   it.each(CASES)('%s: %i days, %i weekdays left (%s)', (iso, days, wee…
+    163|     const d = new Date(iso);
+    164|     expect(daysInMonthOf(d)).toBe(days);
+       |                              ^
+    165|     expect(remainingWeekdaysInMonth(d)).toBe(weekdays);
+    166|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/34]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-05-31T23:59:59.999Z: 31 days, 0 weekdays left (31-day month, last instant)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-07-01T00:00:00.000Z: 31 days, 22 weekdays left (31-day month, first instant (still June in LA))
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-10-25T01:30:00.000Z: 31 days, 5 weekdays left (EU DST end day)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2025-12-31T12:00:00.000Z: 31 days, 0 weekdays left (Dec 31)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-12-31T23:59:59.999Z: 31 days, 0 weekdays left (last instant of a year)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2023-12-31T23:00:00.000Z: 31 days, 0 weekdays left (year boundary into a leap year)
+AssertionError: expected 30 to be 31 // Object.is equality
+
+- Expected
++ Received
+
+- 31
++ 30
+
+ ❯ src/lib/forecast.calendar.test.ts:164:30
+    162|   it.each(CASES)('%s: %i days, %i weekdays left (%s)', (iso, days, wee…
+    163|     const d = new Date(iso);
+    164|     expect(daysInMonthOf(d)).toBe(days);
+       |                              ^
+    165|     expect(remainingWeekdaysInMonth(d)).toBe(weekdays);
+    166|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/34]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-03-08T10:00:00.000Z: 31 days, 17 weekdays left (US DST start day)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-03-29T01:30:00.000Z: 31 days, 2 weekdays left (EU DST start day)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-03-30T22:00:00.000Z: 31 days, 1 weekdays left (DST-start month, day before the end)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-03-31T23:59:59.999Z: 31 days, 0 weekdays left (DST-start month, last instant)
+AssertionError: expected 28 to be 31 // Object.is equality
+
+- Expected
++ Received
+
+- 31
++ 28
+
+ ❯ src/lib/forecast.calendar.test.ts:164:30
+    162|   it.each(CASES)('%s: %i days, %i weekdays left (%s)', (iso, days, wee…
+    163|     const d = new Date(iso);
+    164|     expect(daysInMonthOf(d)).toBe(days);
+       |                              ^
+    165|     expect(remainingWeekdaysInMonth(d)).toBe(weekdays);
+    166|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/34]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=UTC > daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Asia/Tokyo > daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Pacific/Kiritimati > daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=America/Los_Angeles > daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Pacific/Pago_Pago > daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case
+AssertionError: expected [ { …(3) }, { …(3) }, { …(3) }, …(24) ] to deeply equal [ { …(3) }, { …(3) }, { …(3) }, …(24) ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "daysInMonth": 28,
++     "daysInMonth": 31,
+      "iso": "2026-02-10T12:00:00.000Z",
+-     "remainingWeekdays": 13,
++     "remainingWeekdays": 15,
+    },
+    {
+-     "daysInMonth": 28,
++     "daysInMonth": 31,
+      "iso": "2026-02-26T18:00:00.000Z",
+-     "remainingWeekdays": 1,
++     "remainingWeekdays": 3,
+    },
+    {
+-     "daysInMonth": 28,
++     "daysInMonth": 31,
+      "iso": "2026-02-28T23:59:59.999Z",
+-     "remainingWeekdays": 0,
++     "remainingWeekdays": 2,
+    },
+    {
+-     "daysInMonth": 29,
++     "daysInMonth": 31,
+      "iso": "2024-02-10T12:00:00.000Z",
+-     "remainingWeekdays": 14,
++     "remainingWeekdays": 15,
+    },
+    {
+-     "daysInMonth": 29,
++     "daysInMonth": 31,
+      "iso": "2024-02-29T00:00:00.000Z",
+-     "remainingWeekdays": 0,
++     "remainingWeekdays": 1,
+    },
+    {
+-     "daysInMonth": 29,
++     "daysInMonth": 31,
+      "iso": "2000-02-15T06:00:00.000Z",
+-     "remainingWeekdays": 10,
++     "remainingWeekdays": 12,
+    },
+    {
+-     "daysInMonth": 28,
++     "daysInMonth": 31,
+      "iso": "2100-02-15T06:00:00.000Z",
+-     "remainingWeekdays": 9,
++     "remainingWeekdays": 12,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-04-01T00:00:00.000Z",
+-     "remainingWeekdays": 21,
++     "remainingWeekdays": 22,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-04-30T23:30:00.000Z",
+-     "remainingWeekdays": 0,
++     "remainingWeekdays": 1,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-06-25T17:42:00.000Z",
+-     "remainingWeekdays": 3,
++     "remainingWeekdays": 4,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-06-29T20:00:00.000Z",
+-     "remainingWeekdays": 1,
++     "remainingWeekdays": 2,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-09-15T14:00:00.000Z",
+-     "remainingWeekdays": 11,
++     "remainingWeekdays": 12,
+    },
+    {
+      "daysInMonth": 31,
+      "iso": "2026-01-15T03:00:00.000Z",
+      "remainingWeekdays": 11,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-05-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-07-01T00:00:00.000Z",
+-     "remainingWeekdays": 22,
++     "remainingWeekdays": 21,
+    },
+    {
+      "daysInMonth": 31,
+      "iso": "2026-08-31T12:00:00.000Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 28,
+      "iso": "2026-03-08T10:00:00.000Z",
+-     "remainingWeekdays": 17,
++     "remainingWeekdays": 15,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 28,
+      "iso": "2026-03-29T01:30:00.000Z",
+-     "remainingWeekdays": 2,
++     "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 28,
+      "iso": "2026-03-30T22:00:00.000Z",
+-     "remainingWeekdays": 1,
++     "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 28,
+      "iso": "2026-03-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-10-25T01:30:00.000Z",
+      "remainingWeekdays": 5,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-11-01T09:30:00.000Z",
+-     "remainingWeekdays": 21,
++     "remainingWeekdays": 22,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-11-30T23:00:00.000Z",
+-     "remainingWeekdays": 0,
++     "remainingWeekdays": 1,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2025-12-31T12:00:00.000Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-12-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+      "daysInMonth": 31,
+      "iso": "2027-01-01T00:00:00.000Z",
+      "remainingWeekdays": 20,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2023-12-31T23:00:00.000Z",
+      "remainingWeekdays": 0,
+    },
+  ]
+
+ ❯ src/lib/forecast.calendar.test.ts:191:28
+    189|       remainingWeekdays,
+    190|     }));
+    191|     expect(probe.calendar).toEqual(expected);
+       |                            ^
+    192|   });
+    193|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/34]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=UTC > computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays)
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Asia/Tokyo > computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays)
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Pacific/Kiritimati > computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays)
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=America/Los_Angeles > computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays)
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Pacific/Pago_Pago > computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays)
+AssertionError: wl-support: expected 6 to be 5 // Object.is equality
+
+- Expected
++ Received
+
+- 5
++ 6
+
+ ❯ src/lib/forecast.calendar.test.ts:209:49
+    207|         remainingWeekdays: DEMO_REMAINING_WEEKDAYS,
+    208|       });
+    209|       expect(status!.monthly.remainingDays, id).toBe(5);
+       |                                                 ^
+    210|       expect(status!.monthly.projectedEom, id).toBe(round2(oracle.proj…
+    211|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/34]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  34 failed | 13 passed (47)
+   Start at  14:32:15
+   Duration  3.00s (tests 90%, transform 8%, import 2%)
+
