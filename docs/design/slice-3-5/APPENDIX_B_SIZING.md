@@ -2450,24 +2450,23 @@ The byte sizes are **assumptions** (150 B per narrow row, as for
 
 | Item | Value |
 |---|---|
-| `billing_daily_scope` | 550 scopes × (122 days + 5 categories × 4 months) × 2 runs kept = 156,200 rows, **0.023 GB** |
+| `billing_daily_scope` | 550 scopes × (122 days + 4 non-usage categories × 4 months) × 2 runs kept = 151,800 rows, **0.023 GB** (revision 12 counted 5 categories: 156,200 rows) |
 | `cost_accounts` | 15,000 rows, **0.002 GB** |
 | `rollup_pointer`, `billing_daily` re-key | ≈ 0 |
-| **Delta per run** | **+0.026 GB** |
-| natural-1 run | 4.961 → **4.987 GB** |
-| **Peak, 5 runs** | 5.151 → **5.177 GB** |
-| **Peak, 6 runs (natural-3)** | 5.191 → **5.217 GB** |
+| **Delta per run** | **+0.025 GB** (revision 12: 0.026) |
+| natural-1 run | 4.961 → **4.986 GB** |
+| **Peak, 5 runs** | 5.151 → **5.176 GB** |
+| **Peak, 6 runs (natural-3)** | 5.191 → **5.216 GB** |
 
 Both peaks stay under the 5.5 GB target and the 6 GB ceiling.
 
 SHA-256 of `rollup12.py` as run:
-`ad0cf39b71282c2d5654135de5671cb4e114961ee5a04d91714eeae89e993f84`.
+`b47ec3f69c72e620f0df75e41bf7482fcf88469bc9461b2bf24a699220b7134d`.
 
 `rollup12.py`:
 
 ```python
-import math
-# fleet15k, revision 12: disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
+# fleet15k, revision 12 (category count corrected in revision 13): disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
 # charge category, `cost_accounts`, `billing_daily_scope`, `rollup_pointer`) and the resulting peak disk.
 # Standard library only, no randomness. Inputs from budget5.py / budget3.py; byte sizes are ASSUMPTIONS
 # (measured in PR 3-4), at the same 150 B per narrow row used for `billing_daily` in budget.py.
@@ -2478,7 +2477,8 @@ DAYS = 122
 MONTHS = 4
 RUNS_KEPT = 2            # run-keyed rows: the 2 latest succeeded rollup runs (D-12)
 ROW_B = 150              # ASSUMPTION: bytes per narrow rollup row incl. primary key
-NONUSAGE_CATS = 5        # Purchase (one-time), Purchase (recurring fee), Tax, Credit, Adjustment/correction
+NONUSAGE_CATS = 4        # FOCUS non-usage categories: Purchase, Tax, Credit, Adjustment (the scope table is keyed by
+                         # charge_category only; a null category, `(unknown)`, does not occur in fleet15k)
 
 # `billing_daily_scope`: per scope and day one Usage row; non-usage rows at most monthly per category
 scope_rows = SCOPES * (DAYS + NONUSAGE_CATS * MONTHS) * RUNS_KEPT

@@ -21,7 +21,8 @@ ordinary commits and plain pushes (never a force-push).
 | 9 | `bb4379c`, `d70f074` | The challenger's REQUEST CHANGES on revision 8 (1 Medium): the reactivation history condition looked at the wrong days. History moved to the pre-dormancy period and a size override added, both decided by the orchestrator (§3f); `reactivation.py` updated (B.5.11). |
 | 10 | `9f1febb`; merge of `origin/main` `bd440b5`; `adf0d19` | Revision 9 approved by the challenger. The three Low items (§3g): reactivation false positives under day clustering simulated on the chain (the independent-history approximation underestimated); the prior mean of the size override looks back up to 112 days; the D4 text made consistent. `origin/main` merged (#65, #67, #68; no conflicts, no file under `docs/design/slice-3-5/` touched by main); DESIGN §0 and §7 note that PR 4-0 and #62 have landed. |
 | 11 | `d6be584` (PR #70) | Revision 10 approved by the challenger (0 High, 0 Medium). Two wording Lows (§3h): D-21 and the opt-in text state the contract #62 shipped in #67 and #68; the prior-mean lookback is capped at 112 days. |
-| 12 | this revision | Copilot's review 5407381989 of PR #70 at d6be584 (2 High, 2 Medium), each verified and fixed (§3i): one leaf identity everywhere (`series_id`), a billing rollup by charge category behind `costs/daily`'s billed totals, an exact Garwood interval, and a rollup pointer. |
+| 12 | `d691069` | Copilot's review 5407381989 of PR #70 at d6be584 (2 High, 2 Medium), each verified and fixed (§3i): one leaf identity everywhere (`series_id`), a billing rollup by charge category behind `costs/daily`'s billed totals, an exact Garwood interval, and a rollup pointer. |
+| 13 | this revision | The challenger's REQUEST CHANGES on revision 12 (2 Medium, 1 Low) and Copilot's review 5407430521 (r4178706470, High): rollup pointer semantics and a single lease-holding writer; exactly-once coverage with nulls; stable ids under null identity columns; pointer guard, sequence grants and per-batch atomicity; `rollup12.py` category count (§3j). |
 
 ## 2. Governance wording: reverted
 
@@ -255,6 +256,18 @@ were valid.
 | **Medium r4178656806** rollup pointer | **Valid**: the run-keyed reader views said "current rollup run" with no pointer. **Fix:** a `rollup_pointer` (run id and `batch_seq` high-water mark), updated in the same transaction that marks the rollup run succeeded, mirroring `forecast_pointer`. Batch-keyed views return, per (source, period), the highest batch ≤ the high-water mark; run-keyed views return the pointed run. Retention never removes a row the pointer still exposes. Tests: a killed or failed rollup leaves every view unchanged, and a restatement appears only when its pointer update commits | DESIGN §2.9, §6.1, §6.2, §7 (4-1, 4-2); Appendix D.1 |
 | Re-run | Every embedded script re-run: 11 SHA-256s match (9 unchanged, `budget3.py` updated, `rollup12.py` new); every Python output unchanged except the new script; both SQL measurements reproduced on a fresh `postgres:16` container (554.2 / 217.0 / 599.8 / 317.3 B per row) | §4; Appendix B |
 
+## 3j. Revision 13: the challenger's review of d691069 and Copilot's review 5407430521
+
+| Item | Change | Where |
+|---|---|---|
+| **M1 (a)** gap after a restatement | **Valid.** Batch-keyed views required the batch to be published, so after B2 was published but before it was rolled up, the (source, period) vanished. **Fix:** batch-keyed views return, per (source, period), the **highest rolled-up `batch_seq` ≤ `batch_seq_hwm`**, from `rollup_batches`, whatever its live publication status: a rollup run is a snapshot. Retention removes only batches below that visible batch | Appendix D.1; DESIGN §2.9, §6.1 |
+| **M1 (b)** concurrent rollups | **Valid.** **Fix:** one rollup writer per tenant, using the worker's lease and fencing pattern (`lease.ts`): an advisory lock at acquisition, `lease_token` / `lease_expires_at` on `analytics_runs`, `ALREADY_RUNNING`, expired runs `abandoned`, `assertLease … FOR UPDATE` in every write transaction, `LEASE_LOST`. `batch_seq` and a new `run_seq` are allocated only by the lease holder. The pointer update is **monotone** (`WHERE run_seq < $run_seq AND batch_seq_hwm <= $hwm`; zero rows → `POINTER_STALE`). `run_seq` lets a run with no new batch still publish refreshed scope rows. 4-2 tests: two concurrent rollups, an expiring lease, a publish mid-run, a late older run. Mutation: drop the monotone guard | Appendix D.1; DESIGN §2.9, §7 (4-2) |
+| **M2** exactly-once with nulls | **Valid.** **Fix:** routing by `ChargeCategory = 'Usage'` → `cost_daily` and `IS DISTINCT FROM 'Usage'` → `billing_daily`, so a null category lands once, as `(unknown)`. One sentinel convention: every nullable key component is stored as `''`, `NOT NULL`, with display labels on read (Appendix D.0). Catch-all groups stated for every `groupBy` (`(not attributed)`, `(none)`, `untagged`, `(unknown provider)`, `(unknown)`), and totals are equal under every grouping. Negative usage is included in `M` on purpose; a day with `M` ≤ 0 is not scored on the log scale. Tests with null `ChargeCategory`, `ChargeFrequency` and `SubAccountId`. `fleet15k` emits no such nulls, so this is for real data | Appendix D.0, D.1; DESIGN §2.9, §3.1, §5.1, §7 (4-2, 4-5) |
+| **Low** `rollup12.py` | **Valid.** 4 non-usage categories, not 5. **Fix:** delta 0.026 → **0.025 GB per run**; peaks 5.176 / 5.216 GB (still 5.18 / 5.22 at two decimals). Hash `ad0cf39b…` → `b47ec3f6…` | Appendix B.5.12; DESIGN §2.7, §2.8 |
+| **Copilot High r4178706470** null identity columns | **Valid.** `provider_name`, `service_name`, `sub_account_id` and `billing_account_id` are nullable in 0001, and `validate.ts` maps empty cells to NULL. A plain `UNIQUE` treats NULLs as distinct, so a null-bearing identity could get a new id per batch. **Fix:** normalization `coalesce(nullif(col, ''), '')` of every natural-key component (currency, provider, billing account, sub-account, service, region) at id allocation; `NOT NULL` on every natural-key column; and `UNIQUE NULLS NOT DISTINCT` (PG 15+; we pin 16) as defence in depth. Ids are allocated only by the lease holder with `INSERT … ON CONFLICT DO NOTHING`. Tests: repeated batches and a restatement with a missing service, sub-account or billing account reuse the same ids. Mutation: remove the normalization | Appendix D.0, D.1; DESIGN §7 (4-1, 4-2) |
+| Copilot summary: pointer enforcement, sequence grants, publication atomicity | **Two gaps found and closed.** (1) The pointer rules were enforced only by the job: a `BEFORE INSERT OR UPDATE` guard trigger on `rollup_pointer` and `forecast_pointer` now rejects a non-succeeded or wrong-kind run, a non-increasing `run_seq` and a falling high-water mark, with column-level UPDATE grants only. (2) Sequence grants were unstated: `cost_series.id` and `cost_accounts.id` are identity columns, and USAGE on their sequences goes to `ratio_analytics` only; `batch_seq` and `run_seq` are not sequences. **A third point tightened:** each batch is rolled up in one transaction together with its `rollup_batches` row, so a run that fails leaves only complete batches, visible only once a later pointer covers them. Publication atomicity holds: the visible set changes only in the run's success transaction (M1) | Appendix D.1, D.2; DESIGN §6.1, §7 (4-1) |
+| Re-run | All 11 embedded scripts re-run; 11 SHA-256s match (10 unchanged, `rollup12.py` updated); outputs unchanged except `rollup12.py`; budget totals 0.101 / 0.131; both SQL measurements reproduced on a fresh `postgres:16` container | §4; Appendix B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -283,7 +296,7 @@ were valid.
 | D4 reactivation false positives (rev. 9; ρ > 0 underestimated, see rev. 10) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` as of revision 9 |
 | D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6) | `reactivation.py` (B.5.11) |
 | `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series) | `reactivation.py` (B.5.11) |
-| Billing rollup disk delta (rev. 12) | +0.026 GB per run; peak 5.18 GB (5.22 GB with natural-3) | `rollup12.py` (B.5.12) |
+| Billing rollup disk delta (rev. 12; corrected in rev. 13) | +0.025 GB per run (was 0.026); peak 5.18 GB (5.22 GB with natural-3) | `rollup12.py` (B.5.12) |
 | Garwood intervals, exact (rev. 12) | unchanged at three decimals (e.g. 7 groups: [0.046, 0.236]) | `budget3.py` (B.5.8) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
 
@@ -293,8 +306,8 @@ Appendix B (B.4, B.5.6–B.5.11).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 12 (the commit that adds this line, PR #70's head when pushed;
-the same reasons as at `d6be584`, revision 11, at `bd440b5`, revision 10
+at revision 13 (the commit that adds this line, PR #70's head when pushed;
+the same reasons as at `d691069`, revision 12, `d6be584`, revision 11, at `bd440b5`, revision 10
 after merging `origin/main`, and at
 `9f1febb` before the merge, `bb4379c`, revision 9, `04e6cf8`, revision 8,
 `380e9a0`, revision 7,

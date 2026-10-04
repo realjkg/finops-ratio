@@ -19,7 +19,58 @@ invariants enforced by the existing catalogue tests:
   filter on `ratio.current_tenant_id()` and join the **current** publication
   or the **current** run pointer.
 
-## D.0 Identities (stated once; rev. 12)
+## D.0 Identities (stated once; rev. 12, sentinels rev. 13)
+
+**Sentinel convention (rev. 13).** FOCUS leaves most identity columns
+optional, and the worker requires only `BilledCost`, `BillingCurrency`,
+`ChargePeriodStart`, `ChargePeriodEnd` and `BillingPeriodStart`. So
+**every nullable text component of a natural key or primary key is stored
+as `''` (empty string) when the source value is null or empty**, and is
+declared `NOT NULL`.
+
+The convention is the one `region_key` already used. It applies to
+`provider_name`, `billing_account_id`, `sub_account_id`, `service_name`,
+`region_key`, `charge_category`, `charge_frequency` and the business-unit
+tag. A null and an empty source value therefore mean the same thing, and
+no key can hold a NULL that `UNIQUE` would treat as distinct.
+
+Display labels are applied on read, never stored:
+
+| Component | Label for `''` |
+|---|---|
+| `charge_category` | `(unknown)` |
+| `service_name`, `region_key` | `(not attributed)` |
+| `sub_account_id`, `billing_account_id` | `(none)` |
+| business unit | `untagged` |
+| `provider_name` | `(unknown provider)` |
+
+`fleet15k`'s generator emits all of these columns on every row, so the
+sentinels matter for real data and for the `ci` null-column tests (DESIGN
+§7, PR 4-2).
+
+**Stable ids under nulls (rev. 13, Copilot r4178706470).** The facts carry
+nullable identity columns: `provider_name`, `service_name`,
+`sub_account_id` and `billing_account_id` are nullable in
+`0001_ratio_schema.up.sql`, and `validate.ts` maps missing or empty cells
+to NULL. A plain `UNIQUE` treats NULLs as distinct, so repeated batches
+could allocate several `series_id` / `account_id` for one null-bearing
+identity, which breaks the stable-id contract. Three layers prevent it:
+1. **Normalization at identity allocation.** The rollup builds every
+   natural-key component as `coalesce(nullif(col, ''), '')`: currency,
+   provider, billing account, sub-account, service and region.
+   `billing_currency` is already `NOT NULL` and checked as `^[A-Z]{3}$` by
+   0001.
+2. **`NOT NULL`** on every natural-key column of `cost_series` and
+   `cost_accounts`.
+3. **`UNIQUE NULLS NOT DISTINCT`** (PostgreSQL 15+; this project pins 16)
+   on both natural keys. This is defence in depth: with `NOT NULL` it never
+   changes a result, but if a later migration relaxed a `NOT NULL`, NULLs
+   would still collide rather than mint new ids.
+
+Ids are allocated only by the rollup writer, under its lease (D.1), with
+`INSERT … ON CONFLICT (natural key) DO NOTHING` followed by a `SELECT` of
+the id. A repeated batch, or a restatement, with a missing service,
+sub-account or billing account therefore always resolves to the same id.
 
 - **Leaf (forecast and detection series):** one `cost_series` row. Natural
   key: **(tenant_id, billing_currency, provider_name, billing_account_id,
@@ -54,18 +105,18 @@ invariants enforced by the existing catalogue tests:
 |---|---|---|---|
 | role `ratio_analytics` | NOLOGIN, no attributes, no membership (guarded like 0001's roles) | — | — |
 | view `publications_published` | tenant_id, source_id, billing_period, batch_id, published_at, row_count, loaded_billed_total, reconciliation, is_provisional — from `period_publications` ⋈ `ingest_batches` (`status = 'published'`) | — | analytics, reader (`freshness`) |
-| `analytics_runs` | **(tenant_id, id)**, kind ∈ {rollup, forecast, detect, backtest}, as_of date, status ∈ {running, succeeded, failed}, started_at, finished_at, code_version text, params jsonb, stats jsonb, error_code | analytics | analytics |
-| `cost_series` | **(tenant_id, id bigint)** = `series_id` (D.0), unique (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name, region_key) where `region_key` is `''` for global services and for every `fleet15k` series; `account_id` (composite FK to `cost_accounts`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
-| `cost_accounts` (rev. 12) | **(tenant_id, id bigint)** = `account_id` (D.0), unique (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
+| `analytics_runs` | **(tenant_id, id)**, kind ∈ {rollup, forecast, detect, backtest}, as_of date, status ∈ {running, succeeded, failed, abandoned}, **`run_seq bigint`** (per tenant and kind, allocated by the lease holder, strictly increasing), **`lease_token uuid`, `lease_expires_at`, `heartbeat_at`** (rev. 13; the worker's `sync_runs` lease pattern), started_at, finished_at, code_version text, params jsonb, stats jsonb, error_code | analytics | analytics |
+| `cost_series` | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `series_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name, region_key), every component `NOT NULL` with the D.0 `''` sentinel (`region_key` is `''` for global services and for every `fleet15k` series); `account_id` (composite FK to `cost_accounts`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
+| `cost_accounts` (rev. 12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `account_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id), every component `NOT NULL` with the D.0 `''` sentinel (a billing-account-level tax, credit, fee or purchase row with a null `SubAccountId` belongs to the account row with `sub_account_id = ''`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
 | `cost_daily` (narrow, usage only) | **(tenant_id, series_id, usage_date, batch_seq)**, `batch_seq integer` with a composite FK to `rollup_batches (tenant_id, batch_seq)`; `m_usage_effective` (`ChargeCategory = 'Usage'` and `ChargeFrequency = 'Usage-Based'`, no correction), `billed_total`, `effective_total`, `committed_effective`, `untagged_usage_effective`, `row_count`; no other btree (217 B per row measured with a uuid batch key; ≈ 193 B estimated with `batch_seq`, Appendix B.5) | analytics (INSERT … SELECT from `cost_facts_published` per batch) | analytics; reader via `cost_daily_published` (joins the current publication) |
-| `billing_daily` (sparse; re-keyed in rev. 12) | **(tenant_id, batch_seq, account_id, usage_date, charge_category, charge_frequency, is_correction)**: every row whose `ChargeCategory` is **not** `Usage` (Purchase, Tax, Credit, Adjustment), by FOCUS `ChargeCategory` and `ChargeFrequency`, corrections flagged; billed, effective, row_count, `tags_invalid_rows`; a row only where the amount is non-zero. Usage rows (all frequencies, corrections included) are in `cost_daily`'s `billed_total` / `effective_total`, so the two tables partition the published facts | analytics | analytics; reader via `billing_daily_published` |
+| `billing_daily` (sparse; re-keyed in rev. 12, routing fixed in rev. 13) | **(tenant_id, batch_seq, account_id, usage_date, charge_category, charge_frequency, is_correction)**, all `NOT NULL` with the D.0 sentinels: every row with **`ChargeCategory IS DISTINCT FROM 'Usage'`** (Purchase, Tax, Credit, Adjustment, and a null category as `''`, shown `(unknown)`), by FOCUS `ChargeCategory` and `ChargeFrequency` (`''` when null), corrections flagged; billed, effective, row_count, `tags_invalid_rows`; a row only where the amount is non-zero. `cost_daily` takes exactly the rows with `ChargeCategory = 'Usage'` (all frequencies, corrections and negative amounts included) in its `billed_total` / `effective_total`. The two predicates are complements under SQL's three-valued logic, so every published row lands in exactly one table | analytics | analytics; reader via `billing_daily_published` |
 | `billing_daily_scope` (rev. 12) | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, usage_date, charge_category)**; billed, effective, row_count. **Every charge category**: `Usage` from `cost_daily`, the others from `billing_daily`; a row only where non-zero | analytics | reader via `billing_daily_scope_published` (the run in `rollup_pointer`) |
-| `rollup_pointer` (rev. 12) | **(tenant_id)**; run_id (composite FK to a `succeeded` `analytics_runs` row of kind `rollup`), `batch_seq_hwm integer` (the highest `batch_seq` that run committed), as_of, updated_at | UPDATE by analytics only, **in the same transaction** that marks the rollup run `succeeded` (mirrors `forecast_pointer`) | every rollup reader view |
+| `rollup_pointer` (rev. 12; monotone in rev. 13) | **(tenant_id)**; run_id (composite FK to a `succeeded` `analytics_runs` row of kind `rollup`), `run_seq`, `batch_seq_hwm integer` (the highest `batch_seq` that run committed), as_of, updated_at | UPDATE by analytics only, **in the same transaction** that marks the rollup run `succeeded` (mirrors `forecast_pointer`), after `assertLease`, and **only forwards**: `… WHERE run_seq < $run_seq AND batch_seq_hwm <= $hwm`; zero rows updated fails the run (`POINTER_STALE`) | every rollup reader view |
 | `cost_resource_daily` | **(tenant_id, batch_seq, series_id, usage_date, resource_id)**; `m_usage_effective` (rows above a floor only) | analytics | analytics; reader via view |
 | `cost_daily_scope` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, usage_date)**; same measures as `cost_daily` | analytics | reader via view (the run in `rollup_pointer`) |
 | `account_dim` | **(tenant_id, run_id, account_id)**; business_unit (modal tag, 28 days), account_age_days (identity columns via `cost_accounts`) | analytics | analytics; reader via view (the run in `rollup_pointer`) |
-| `rollup_batches` | **(tenant_id, batch_seq integer)**, unique (tenant_id, batch_id); source_id, billing_period, rolled_up_at, run_id, row totals (to prove rollup = published totals) | analytics | analytics |
-| function `ratio.analytics_apply_retention()` | `SECURITY DEFINER`, owned by `ratio_owner`, `SET search_path = pg_catalog, pg_temp`, no arguments, fixed SQL; returns removed-row counts per table. Removes only: rollup rows (`cost_daily`, `cost_resource_daily`, `billing_daily`) whose `batch_seq`'s batch is no longer the published batch of its (source, period); run-keyed rows (`cost_daily_scope`, `billing_daily_scope`, `account_dim`) of runs other than the pointed run and the one before it. A superseded batch's rows are removed only once the replacing batch's `batch_seq` is ≤ `rollup_pointer.batch_seq_hwm`, so nothing a reader can still see is removed. Never: anomalies and their children, backtests, `rollup_batches`, `analytics_runs`. On `REVIEWED_SECURITY_DEFINER_FUNCTIONS`; EXECUTE revoked from PUBLIC, granted to `ratio_analytics` | the job, after each rollup or forecast run | — |
+| `rollup_batches` | **(tenant_id, batch_seq integer)**, unique (tenant_id, batch_id); source_id, billing_period, rolled_up_at, run_id, row totals (to prove rollup = published totals). **Each batch is rolled up in one transaction** (rev. 13), under `assertLease`, that writes all its rollup rows and this row together. A `rollup_batches` row therefore means a complete batch. A batch completed by a run that later fails stays correct, and becomes visible only when a later run's pointer covers it | analytics | analytics |
+| function `ratio.analytics_apply_retention()` | `SECURITY DEFINER`, owned by `ratio_owner`, `SET search_path = pg_catalog, pg_temp`, no arguments, fixed SQL; returns removed-row counts per table. Removes only: rollup rows (`cost_daily`, `cost_resource_daily`, `billing_daily`) of a batch below the visible batch of its (source, period), i.e. the highest rolled-up `batch_seq` ≤ `rollup_pointer.batch_seq_hwm` (rev. 13); run-keyed rows (`cost_daily_scope`, `billing_daily_scope`, `account_dim`) of runs other than the pointed run and the one before it. Nothing a reader can still see is removed. Never: anomalies and their children, backtests, `rollup_batches`, `analytics_runs`. On `REVIEWED_SECURITY_DEFINER_FUNCTIONS`; EXECUTE revoked from PUBLIC, granted to `ratio_analytics` | the job, after each rollup or forecast run | — |
 
 Indexes: primary keys only; a BRIN on `cost_daily (usage_date)` is added
 only if a measured query needs it (it was part of the wide variant measured
@@ -73,20 +124,92 @@ at 317 B per row).
 The `source_id`, `billing_period` and `batch_id` of a rollup row are those
 of its `batch_seq` (`rollup_batches`), not repeated per row.
 
-**Which rollup rows a reader sees (rev. 12).** The `rollup_pointer` names
-one succeeded rollup run and its high-water mark `batch_seq_hwm`.
+**Which rollup rows a reader sees (rev. 12; corrected in rev. 13).** The
+`rollup_pointer` names one succeeded rollup run and its high-water mark
+`batch_seq_hwm`.
 - **Batch-keyed views** (`cost_daily_published`, `billing_daily_published`,
   `cost_resource_daily_published`) return, per (source, period), only the
-  rows of the **highest `batch_seq` ≤ `batch_seq_hwm`** whose batch is
-  published.
+  rows of the **highest *rolled-up* `batch_seq` ≤ `batch_seq_hwm`**, as
+  recorded in `rollup_batches`. Whether that batch is *still* the live
+  publication does not matter. A rollup run is a snapshot of what it
+  rolled up.
+
+  Revision 12 also required the batch to be published. After a
+  restatement publishes B2, B1 is superseded, but B2 is not rolled up until
+  the next run, so the (source, period) would have vanished from every
+  view. Now readers keep seeing B1 until the run that rolls up B2 commits
+  and moves the pointer.
 - **Run-keyed views** (`cost_daily_scope_published`,
   `billing_daily_scope_published`, `account_dim_published`) return only the
   pointed run.
 
 A rollup that is still running, or that failed, is never visible. A
 restatement becomes visible in one step, when its run commits and moves
-the pointer. Until then, readers keep seeing the previous batch rather than
-a gap or a half-written mix.
+the pointer. Retention keeps a superseded batch's rows until its
+replacement's `batch_seq` is ≤ `batch_seq_hwm`, so nothing a view can
+return is ever removed.
+
+**One rollup writer per tenant (rev. 13).** Rollup runs use the worker's
+lease pattern (`src/ingest/worker/lease.ts`):
+- **Acquiring the lease.** The job takes
+  `pg_advisory_xact_lock(hashtextextended('ratio.analytics.rollup:' || tenant_id, 0))`.
+  - If a `running` rollup run with a live lease exists, it refuses with
+    `ALREADY_RUNNING`.
+  - An expired one is marked `abandoned`.
+  - It then inserts its own run with a fresh `lease_token`, a TTL, and the
+    next `run_seq`.
+- **Writing.** Every write transaction of the run starts with
+  `assertLease(run_id, lease_token) FOR UPDATE`. A run whose lease expired
+  or was taken over fails with `LEASE_LOST` and commits nothing more
+  (fencing).
+- **`batch_seq`** is allocated only by the lease holder, inside its
+  transaction, as one more than the tenant's maximum. Two writers can
+  therefore never interleave sequence numbers.
+- **Moving the pointer** is monotone: the run's success transaction updates
+  `rollup_pointer` only if the stored `run_seq` is lower and the stored
+  `batch_seq_hwm` is not higher. An older run that commits late therefore
+  cannot move the pointer backwards. A run that rolled up nothing new can
+  still publish refreshed run-keyed rows, since `run_seq` grows while the
+  high-water mark stays put.
+- **What a reader can see** is exactly the pointed run's high-water mark.
+  Rows of a run that has not moved the pointer are invisible, because
+  their `batch_seq` is above it.
+
+**Grants and database-side enforcement (rev. 13).** Copilot's review
+summary also named pointer enforcement, sequence grants and publication
+atomicity. Checking found two gaps, now closed: the pointer rules were
+enforced only by the job, and the id sequences had no stated grants.
+- **Pointer grants.** `rollup_pointer` and `forecast_pointer`:
+  - `ratio_analytics` has SELECT, INSERT (the first row) and column-level
+    UPDATE of (`run_id`, `run_seq`, `batch_seq_hwm`, `as_of`,
+    `updated_at`); no DELETE, no TRUNCATE.
+  - `ratio_reader` sees them only through the definer views.
+  - `ratio_worker` has nothing.
+- **Pointer guard in the database.** A `BEFORE INSERT OR UPDATE` trigger
+  function on each pointer (plain `SECURITY INVOKER`, `SET search_path`
+  pinned, marked `ratio:allow-function`, reviewed in `privilegeModel.ts`)
+  rejects:
+  - a `run_id` whose `analytics_runs` row is not `succeeded` or is of the
+    wrong kind;
+  - a `run_seq` that does not increase;
+  - for `rollup_pointer`, a `batch_seq_hwm` that decreases.
+
+  The job's `WHERE` guard and this trigger enforce the same rule twice.
+- **Sequences.** `cost_series.id` and `cost_accounts.id` are
+  `GENERATED ALWAYS AS IDENTITY`, owned by `ratio_owner`. USAGE on their two
+  sequences is granted to `ratio_analytics` only, since INSERT needs it;
+  `ratio_reader`, `ratio_worker` and PUBLIC get nothing, and the catalogue
+  check asserts it. `batch_seq` and `run_seq` are **not** sequences. They
+  are allocated as one more than the tenant's maximum, inside the lease
+  holder's transaction, under the advisory lock, so no sequence grant
+  exists for them.
+- **Publication atomicity.** The worker publishes batches on its own
+  schedule; the analytics side never changes what is published. What
+  readers of analytics see changes only when a rollup run's success
+  transaction marks the run `succeeded` and moves the pointer, one
+  transaction, after `assertLease`. A batch published mid-run is either
+  wholly in the run, when it was rolled up before the run's last batch
+  transaction, or wholly in the next run.
 
 `CREATE OR REPLACE` is not an expand statement, so 0002's function is never
 redefined: **0003 adds a second reviewed function,
@@ -99,7 +222,7 @@ latest succeeded runs).
 
 | Object | Columns (key first) | Notes |
 |---|---|---|
-| `forecast_pointer` | **(tenant_id)**, run_id, as_of, updated_at | the current forecast run; UPDATE by analytics only |
+| `forecast_pointer` | **(tenant_id)**, run_id, `run_seq`, as_of, updated_at | the current forecast run; INSERT/UPDATE by analytics only; forwards only (`run_seq` increases) and only to a `succeeded` forecast run, enforced by the same kind of guard trigger as `rollup_pointer` (D.1) |
 | `forecast_state` | **(tenant_id, run_id, series_id)** (the leaf, D.0; composite FK to `cost_series`); method ∈ {none, mean, m0, m1, m1_log} (`fleet15k`: fixed rule; `full`: selected in the calibration block), history_days, cold_start flag, alpha, beta, gamma, phi, level, trend, `season numeric[7]`, **calendar factors** `cal_start`, `cal_mid`, `cal_end` (log, 0 when not applied; median estimate on raw `y`) with their value counts m and t-statistics, last_day, `q80_lo/hi numeric[6]`, `q95_lo/hi numeric[6]` (per horizon bucket, relative to level), quantile source ∈ {own, cohort, extrapolated} (`extrapolated`: an empty bucket filled by √h scaling, never scored), cohort key (provider, service category, size decile; no `env`) | ≈ 37 k rows per `fleet15k` run, ≈ 107 k per `full` run, ≈ 0.4 KB each (**assumption**) |
 | `forecast_points` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, day)**; expected, lo80, hi80, lo95, hi95 | aggregate scopes only, 90 days |
 | `forecast_totals` | **(tenant_id, run_id, scope_kind, scope_key, billing_currency, window)** with window ∈ {month_end, next_30, next_90}; actual_to_date, expected_total, lo80, hi80, lo95, hi95, billed_month_end (month_end only), last_published_day | all scopes incl. leaves for month_end |
