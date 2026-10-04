@@ -797,3 +797,7 @@ were not touched.
 
 The lint, tsc and `npm test` re-run after the merge with `origin/main` is
 in the commit that follows this record.
+
+**After `git merge origin/main` (af6ad77; ad876ae is main + ebbde12, and the
+merge changes no file):** lint exit 0, tsc exit 0, `npm test` 111 files /
+**2610 passed**.
