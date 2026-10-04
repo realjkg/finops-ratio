@@ -1,0 +1,367 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+ ❯ src/server/costs/publishedCosts.db.test.ts (30 tests | 7 failed) 1182ms
+   ❯ D1 tenant isolation (3)
+     × the key bound to tenant A returns exactly A’s published facts; bound to B exactly B’s 43ms
+   ❯ D2 only published facts (2)
+     × worker-published tenant: the quarantined period and the superseded revision are invisible; totals equal the ground truth 18ms
+   ❯ D3 money as exact decimal strings (1)
+     × values round-trip exactly as Postgres numeric text; never a JS number 11ms
+   ❯ D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ ONLY) (3)
+     × a publish committed between the page query and the totals query cannot make them disagree 83ms
+   ❯ D10 output never depends on session settings (Copilot 4176238982) (3)
+     × D10a a reader login whose ROLE defaults are DateStyle=SQL,DMY, a non-UTC TimeZone, sql_standard intervals and extra_float_digits=-15 gets canonical output, and paging through nextCursor returns every row exactly once 57ms
+     × D10b the SQL alone is setting-independent: under hostile SET LOCAL values every column of the page and the totals equals the canonical output 10ms
+     × D10c fail closed: a pool that pins everything but DateStyle, for a login whose default is SQL,DMY, is refused (no data served) 21ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D1 tenant isolation > the key bound to tenant A returns exactly A’s published facts; bound to B exactly B’s
+AssertionError: expected [ { …(4) } ] to deeply equal [ { …(4) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "billedCost": "30.30",
+      "billingCurrency": "USD",
+      "billingPeriod": "2026-08-01",
+-     "rowCount": "2",
++     "rowCount": 2,
+    },
+  ]
+
+ ❯ src/server/costs/publishedCosts.db.test.ts:187:26
+    185|     expect(new Set(bodyB.data.map((r) => r.batchId))).toEqual(new Set(…
+    186|     expect(bodyA.data.map((r) => r.sourceId).every((x) => x === a.sour…
+    187|     expect(bodyA.totals).toEqual([{ billingPeriod: a.period, billingCu…
+       |                          ^
+    188|     expect((await get(a.tenantId)).headers['cache-control']).toBe('no-…
+    189|     expect(bodyB.totals).toEqual([{ billingPeriod: b.period, billingCu…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D2 only published facts > worker-published tenant: the quarantined period and the superseded revision are invisible; totals equal the ground truth
+AssertionError: expected [ { …(4) }, { …(4) } ] to deeply equal [ { …(4) }, { …(4) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "billedCost": "0.0000000023",
+      "billingCurrency": "USD",
+      "billingPeriod": "2026-05-01",
+-     "rowCount": "23",
++     "rowCount": 23,
+    },
+    {
+      "billedCost": "12345678901234567891.123456789012345678",
+      "billingCurrency": "USD",
+      "billingPeriod": "2026-06-01",
+-     "rowCount": "11",
++     "rowCount": 11,
+    },
+  ]
+
+ ❯ src/server/costs/publishedCosts.db.test.ts:232:29
+    230|     expect(rows.map(key).sort()).toEqual((await groundTruth(C.tenantId…
+    231|     const truth = await publishedTotals(db.pool, C.tenantId, C.sourceI…
+    232|     expect(pages[0].totals).toEqual(
+       |                             ^
+    233|       Object.entries(truth).map(([p, t]) => ({ billingPeriod: p, billi…
+    234|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D3 money as exact decimal strings > values round-trip exactly as Postgres numeric text; never a JS number
+AssertionError: expected [ { …(4) } ] to deeply equal [ { …(4) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "billedCost": "12345678901234567891.123456789012345678",
+      "billingCurrency": "USD",
+      "billingPeriod": "2026-06-01",
+-     "rowCount": "11",
++     "rowCount": 11,
+    },
+  ]
+
+ ❯ src/server/costs/publishedCosts.db.test.ts:254:29
+    252|     }
+    253|     const sum = await db.pool.query(`SELECT ($1::numeric + 10 * 0.10):…
+    254|     expect(pages[0].totals).toEqual([{ billingPeriod: '2026-06-01', bi…
+       |                             ^
+    255|     const may = await getOk(C.tenantId, { period: '2026-05' });
+    256|     expect(may.totals?.[0].billedCost).toBe('0.0000000023');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ ONLY) > a publish committed between the page query and the totals query cannot make them disagree
+AssertionError: expected [ { …(4) } ] to deeply equal [ { …(4) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "billedCost": "5.00",
+      "billingCurrency": "USD",
+      "billingPeriod": "2026-03-01",
+-     "rowCount": "5",
++     "rowCount": 5,
+    },
+  ]
+
+ ❯ src/server/costs/publishedCosts.db.test.ts:430:27
+    428|       expect(republished).toBe(true);
+    429|       expect(page.data).toHaveLength(5);
+    430|       expect(page.totals).toEqual([{ billingPeriod: '2026-03-01', bill…
+       |                           ^
+    431|       expect(new Set(page.data.map((r) => r.batchId)).size).toBe(1);
+    432|       // A fresh read sees the restatement, consistently.
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D10 output never depends on session settings (Copilot 4176238982) > D10a a reader login whose ROLE defaults are DateStyle=SQL,DMY, a non-UTC TimeZone, sql_standard intervals and extra_float_digits=-15 gets canonical output, and paging through nextCursor returns every row exactly once
+AssertionError: {"error":{"code":"invalid_request","message":"cursor is not valid"}}: expected 400 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 400
+
+ ❯ getOk src/server/costs/publishedCosts.db.test.ts:142:52
+    140| async function getOk(tenantId: string, query: Record<string, string> =…
+    141|   const res = await get(tenantId, query, opts);
+    142|   expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
+       |                                                    ^
+    143|   return res.body as Body;
+    144| }
+ ❯ walk src/server/costs/publishedCosts.db.test.ts:534:20
+ ❯ src/server/costs/publishedCosts.db.test.ts:553:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D10 output never depends on session settings (Copilot 4176238982) > D10b the SQL alone is setting-independent: under hostile SET LOCAL values every column of the page and the totals equals the canonical output
+TypeError: Cannot read properties of undefined (reading 'page')
+ ❯ src/server/costs/publishedCosts.db.test.ts:578:58
+    576|         withTenantTransaction(plain, C.tenantId, async (c) => {
+    577|           for (const [k, v] of sets) await c.query(`SELECT pg_catalog.…
+    578|           const page = await c.query(PUBLISHED_COSTS_SQL.page, [null, …
+       |                                                          ^
+    579|           const totals = await c.query(PUBLISHED_COSTS_SQL.totals, [nu…
+    580|           return { page: page.rows, totals: totals.rows };
+ ❯ withTenantTransaction src/ingest/db/tenant.ts:25:22
+ ❯ src/server/costs/publishedCosts.db.test.ts:582:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D10 output never depends on session settings (Copilot 4176238982) > D10c fail closed: a pool that pins everything but DateStyle, for a login whose default is SQL,DMY, is refused (no data served)
+AssertionError: promise resolved "{ data: [ { …(26) }, …(4) ], …(2) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "data": [
++     {
++       "artifactSha256": "9eb11b2bc2f51e40bb568b45a6a17cd35349ff79d9b2637c94dc158fcff2eafc",
++       "batchId": "aa3d71ae-3f63-4e75-8a73-f88136dc3795",
++       "billedCost": "0.0000000001",
++       "billingAccountId": "000000000001",
++       "billingCurrency": "USD",
++       "billingPeriod": "01/05/2026",
++       "chargeCategory": "Usage",
++       "chargePeriodEnd": "2026-05-02T01:00:00.000000Z",
++       "chargePeriodStart": "2026-05-02T00:00:00.000000Z",
++       "contractedCost": "1.25",
++       "effectiveCost": "1.25",
++       "extraColumns": {
++         "BillingPeriodEnd": "2026-06-01T00:00:00Z",
++         "Tags": "{\"env\":\"test\"}",
++       },
++       "focusVersion": "1.0",
++       "listCost": "1.50",
++       "pricingQuantity": "1",
++       "pricingUnit": "Hours",
++       "providerName": "SyntheticCloud",
++       "publishedAt": "2026-10-04T05:22:27.895758Z",
++       "resourceId": "may-0",
++       "rowOrdinal": "1",
++       "serviceCategory": "Compute",
++       "serviceName": "Synthetic Compute",
++       "sourceId": "b5df11eb-9d69-4bee-b19c-9c6bd1644664",
++       "subAccountId": "000000000002",
++       "usageQuantity": "1",
++       "usageUnit": "Hours",
++     },
++     {
++       "artifactSha256": "9eb11b2bc2f51e40bb568b45a6a17cd35349ff79d9b2637c94dc158fcff2eafc",
++       "batchId": "aa3d71ae-3f63-4e75-8a73-f88136dc3795",
++       "billedCost": "0.0000000001",
++       "billingAccountId": "000000000001",
++       "billingCurrency": "USD",
++       "billingPeriod": "01/05/2026",
++       "chargeCategory": "Usage",
++       "chargePeriodEnd": "2026-05-02T01:00:00.000000Z",
++       "chargePeriodStart": "2026-05-02T00:00:00.000000Z",
++       "contractedCost": "1.25",
++       "effectiveCost": "1.25",
++       "extraColumns": {
++         "BillingPeriodEnd": "2026-06-01T00:00:00Z",
++         "Tags": "{\"env\":\"test\"}",
++       },
++       "focusVersion": "1.0",
++       "listCost": "1.50",
++       "pricingQuantity": "1",
++       "pricingUnit": "Hours",
++       "providerName": "SyntheticCloud",
++       "publishedAt": "2026-10-04T05:22:27.895758Z",
++       "resourceId": "may-1",
++       "rowOrdinal": "2",
++       "serviceCategory": "Compute",
++       "serviceName": "Synthetic Compute",
++       "sourceId": "b5df11eb-9d69-4bee-b19c-9c6bd1644664",
++       "subAccountId": "000000000002",
++       "usageQuantity": "1",
++       "usageUnit": "Hours",
++     },
++     {
++       "artifactSha256": "9eb11b2bc2f51e40bb568b45a6a17cd35349ff79d9b2637c94dc158fcff2eafc",
++       "batchId": "aa3d71ae-3f63-4e75-8a73-f88136dc3795",
++       "billedCost": "0.0000000001",
++       "billingAccountId": "000000000001",
++       "billingCurrency": "USD",
++       "billingPeriod": "01/05/2026",
++       "chargeCategory": "Usage",
++       "chargePeriodEnd": "2026-05-02T01:00:00.000000Z",
++       "chargePeriodStart": "2026-05-02T00:00:00.000000Z",
++       "contractedCost": "1.25",
++       "effectiveCost": "1.25",
++       "extraColumns": {
++         "BillingPeriodEnd": "2026-06-01T00:00:00Z",
++         "Tags": "{\"env\":\"test\"}",
++       },
++       "focusVersion": "1.0",
++       "listCost": "1.50",
++       "pricingQuantity": "1",
++       "pricingUnit": "Hours",
++       "providerName": "SyntheticCloud",
++       "publishedAt": "2026-10-04T05:22:27.895758Z",
++       "resourceId": "may-2",
++       "rowOrdinal": "3",
++       "serviceCategory": "Compute",
++       "serviceName": "Synthetic Compute",
++       "sourceId": "b5df11eb-9d69-4bee-b19c-9c6bd1644664",
++       "subAccountId": "000000000002",
++       "usageQuantity": "1",
++       "usageUnit": "Hours",
++     },
++     {
++       "artifactSha256": "9eb11b2bc2f51e40bb568b45a6a17cd35349ff79d9b2637c94dc158fcff2eafc",
++       "batchId": "aa3d71ae-3f63-4e75-8a73-f88136dc3795",
++       "billedCost": "0.0000000001",
++       "billingAccountId": "000000000001",
++       "billingCurrency": "USD",
++       "billingPeriod": "01/05/2026",
++       "chargeCategory": "Usage",
++       "chargePeriodEnd": "2026-05-02T01:00:00.000000Z",
++       "chargePeriodStart": "2026-05-02T00:00:00.000000Z",
++       "contractedCost": "1.25",
++       "effectiveCost": "1.25",
++       "extraColumns": {
++         "BillingPeriodEnd": "2026-06-01T00:00:00Z",
++         "Tags": "{\"env\":\"test\"}",
++       },
++       "focusVersion": "1.0",
++       "listCost": "1.50",
++       "pricingQuantity": "1",
++       "pricingUnit": "Hours",
++       "providerName": "SyntheticCloud",
++       "publishedAt": "2026-10-04T05:22:27.895758Z",
++       "resourceId": "may-3",
++       "rowOrdinal": "4",
++       "serviceCategory": "Compute",
++       "serviceName": "Synthetic Compute",
++       "sourceId": "b5df11eb-9d69-4bee-b19c-9c6bd1644664",
++       "subAccountId": "000000000002",
++       "usageQuantity": "1",
++       "usageUnit": "Hours",
++     },
++     {
++       "artifactSha256": "9eb11b2bc2f51e40bb568b45a6a17cd35349ff79d9b2637c94dc158fcff2eafc",
++       "batchId": "aa3d71ae-3f63-4e75-8a73-f88136dc3795",
++       "billedCost": "0.0000000001",
++       "billingAccountId": "000000000001",
++       "billingCurrency": "USD",
++       "billingPeriod": "01/05/2026",
++       "chargeCategory": "Usage",
++       "chargePeriodEnd": "2026-05-02T01:00:00.000000Z",
++       "chargePeriodStart": "2026-05-02T00:00:00.000000Z",
++       "contractedCost": "1.25",
++       "effectiveCost": "1.25",
++       "extraColumns": {
++         "BillingPeriodEnd": "2026-06-01T00:00:00Z",
++         "Tags": "{\"env\":\"test\"}",
++       },
++       "focusVersion": "1.0",
++       "listCost": "1.50",
++       "pricingQuantity": "1",
++       "pricingUnit": "Hours",
++       "providerName": "SyntheticCloud",
++       "publishedAt": "2026-10-04T05:22:27.895758Z",
++       "resourceId": "may-4",
++       "rowOrdinal": "5",
++       "serviceCategory": "Compute",
++       "serviceName": "Synthetic Compute",
++       "sourceId": "b5df11eb-9d69-4bee-b19c-9c6bd1644664",
++       "subAccountId": "000000000002",
++       "usageQuantity": "1",
++       "usageUnit": "Hours",
++     },
++   ],
++   "page": {
++     "limit": 5,
++     "nextCursor": "WyIwMS8wNS8yMDI2IiwiYjVkZjExZWItOWQ2OS00YmVlLWIxOWMtOWM2YmQxNjQ0NjY0IiwiOWViMTFiMmJjMmY1MWU0MGJiNTY4YjQ1YTZhMTdjZDM1MzQ5ZmY3OWQ5YjI2MzdjOTRkYzE1OGZjZmYyZWFmYyIsIjUiXQ",
++   },
++   "totals": [
++     {
++       "billedCost": "0.0000000023",
++       "billingCurrency": "USD",
++       "billingPeriod": "01/05/2026",
++       "rowCount": 23,
++     },
++     {
++       "billedCost": "12345678901234567891.123456789012345678",
++       "billingCurrency": "USD",
++       "billingPeriod": "01/06/2026",
++       "rowCount": 11,
++     },
++   ],
+  }
+
+ ❯ src/server/costs/publishedCosts.db.test.ts:614:111
+    612|     const unpinned = new Pool({ connectionString: odd.url, max: 1, opt…
+    613|     try {
+    614|       await expect(readPublishedCosts(unpinned, C.tenantId, { from: nu…
+       |                                                                                                               ^
+    615|     } finally {
+    616|       await unpinned.end();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 23 passed (30)
+   Start at  05:22:25
+   Duration  2.92s (tests 52%, transform 37%, import 9%, setup 2%)
+

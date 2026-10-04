@@ -24,7 +24,9 @@ import { MemoryEvidenceStore } from '../../ingest/evidence/MemoryEvidenceStore';
 import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
 import { createPublishedCostsRoute, ROUTE_MESSAGES } from './publishedCostsRoute';
 import { closeReaderPools, readerPool } from './readerPool';
-import { readPublishedCosts, setAfterPageHookForTests } from './publishedCosts';
+import { PUBLISHED_COSTS_SQL, readPublishedCosts, setAfterPageHookForTests } from './publishedCosts';
+import { READER_SESSION_OPTIONS } from './readerPool';
+import { withTenantTransaction } from '../../ingest/db/tenant';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
 
 interface Row {
@@ -42,7 +44,8 @@ interface Row {
 interface Total {
   billingPeriod: string;
   billingCurrency: string;
-  rowCount: number;
+  /** bigint count as a decimal string (Copilot 4176238961). */
+  rowCount: string;
   billedCost: string;
 }
 interface Body {
@@ -181,9 +184,9 @@ describe('D1 tenant isolation', () => {
     expect(new Set(bodyA.data.map((r) => r.batchId))).toEqual(new Set([a.batchPublished]));
     expect(new Set(bodyB.data.map((r) => r.batchId))).toEqual(new Set([b.batchPublished]));
     expect(bodyA.data.map((r) => r.sourceId).every((x) => x === a.sourceId)).toBe(true);
-    expect(bodyA.totals).toEqual([{ billingPeriod: a.period, billingCurrency: 'USD', rowCount: a.publishedRows, billedCost: a.publishedTotal }]);
+    expect(bodyA.totals).toEqual([{ billingPeriod: a.period, billingCurrency: 'USD', rowCount: String(a.publishedRows), billedCost: a.publishedTotal }]);
     expect((await get(a.tenantId)).headers['cache-control']).toBe('no-store');
-    expect(bodyB.totals).toEqual([{ billingPeriod: b.period, billingCurrency: 'USD', rowCount: b.publishedRows, billedCost: b.publishedTotal }]);
+    expect(bodyB.totals).toEqual([{ billingPeriod: b.period, billingCurrency: 'USD', rowCount: String(b.publishedRows), billedCost: b.publishedTotal }]);
     // Nothing of B in A's answer and vice versa.
     const textA = JSON.stringify(bodyA);
     for (const id of [b.tenantId, b.sourceId, b.batchPublished, b.batchSuperseded, b.batchStaged, b.batchQuarantined]) expect(textA).not.toContain(id);
@@ -227,7 +230,7 @@ describe('D2 only published facts', () => {
     expect(rows.map(key).sort()).toEqual((await groundTruth(C.tenantId)).map(key).sort());
     const truth = await publishedTotals(db.pool, C.tenantId, C.sourceId);
     expect(pages[0].totals).toEqual(
-      Object.entries(truth).map(([p, t]) => ({ billingPeriod: p, billingCurrency: 'USD', rowCount: t.rows, billedCost: t.total })),
+      Object.entries(truth).map(([p, t]) => ({ billingPeriod: p, billingCurrency: 'USD', rowCount: String(t.rows), billedCost: t.total })),
     );
     expect(Object.keys(truth)).toEqual(['2026-05-01', '2026-06-01']);
   });
@@ -248,7 +251,7 @@ describe('D3 money as exact decimal strings', () => {
       expect(r.publishedAt).toMatch(/Z$/);
     }
     const sum = await db.pool.query(`SELECT ($1::numeric + 10 * 0.10)::text AS s`, [PRECISE]);
-    expect(pages[0].totals).toEqual([{ billingPeriod: '2026-06-01', billingCurrency: 'USD', rowCount: 11, billedCost: sum.rows[0].s }]);
+    expect(pages[0].totals).toEqual([{ billingPeriod: '2026-06-01', billingCurrency: 'USD', rowCount: '11', billedCost: sum.rows[0].s }]);
     const may = await getOk(C.tenantId, { period: '2026-05' });
     expect(may.totals?.[0].billedCost).toBe('0.0000000023');
   });
@@ -424,12 +427,12 @@ describe('D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ
       }
       expect(republished).toBe(true);
       expect(page.data).toHaveLength(5);
-      expect(page.totals).toEqual([{ billingPeriod: '2026-03-01', billingCurrency: 'USD', rowCount: 5, billedCost: '5.00' }]);
+      expect(page.totals).toEqual([{ billingPeriod: '2026-03-01', billingCurrency: 'USD', rowCount: '5', billedCost: '5.00' }]);
       expect(new Set(page.data.map((r) => r.batchId)).size).toBe(1);
       // A fresh read sees the restatement, consistently.
       const after = await readPublishedCosts(readerPool(reader.url), s.tenantId, { from: null, to: null, limit: 100, cursor: null });
       expect(after.data).toHaveLength(7);
-      expect(after.totals).toEqual([{ billingPeriod: '2026-03-01', billingCurrency: 'USD', rowCount: 7, billedCost: '14.00' }]);
+      expect(after.totals).toEqual([{ billingPeriod: '2026-03-01', billingCurrency: 'USD', rowCount: '7', billedCost: '14.00' }]);
     } finally {
       await pool.end();
     }
@@ -490,13 +493,127 @@ describe('D7 reader session settings', () => {
     try {
       const r = await c.query(
         `SELECT current_setting('search_path') AS sp, current_setting('default_transaction_read_only') AS ro,
-                current_setting('statement_timeout') AS st, current_setting('TimeZone') AS tz`,
+                current_setting('statement_timeout') AS st, current_setting('TimeZone') AS tz,
+                current_setting('DateStyle') AS ds, current_setting('IntervalStyle') AS ist`,
       );
-      // A startup-option value is reported as given (no space after the comma).
-      expect(r.rows[0]).toEqual({ sp: 'pg_catalog,pg_temp', ro: 'on', st: '10s', tz: 'UTC' });
+      // A startup-option value is reported as given (no space after the comma);
+      // DateStyle is canonicalised by the server.
+      expect(r.rows[0]).toEqual({ sp: 'pg_catalog,pg_temp', ro: 'on', st: '10s', tz: 'UTC', ds: 'ISO, MDY', ist: 'postgres' });
     } finally {
       c.release();
     }
     expect(readerPool(reader.url)).toBe(pool);
+  });
+});
+
+// --- Copilot 4176238982: the output may not depend on any session setting ------
+// date::text follows DateStyle; a cursor built from such a value no longer
+// decodes. Two layers, each tested on its own: the SQL formats every date and
+// timestamp explicitly (D10b), and the pool pins DateStyle / IntervalStyle /
+// TimeZone and the read asserts them, failing closed (D10a, D10c).
+describe('D10 output never depends on session settings (Copilot 4176238982)', () => {
+  const HOSTILE_ROLE_DEFAULTS: Array<[string, string]> = [
+    ['DateStyle', 'SQL, DMY'],
+    ['TimeZone', 'America/Sao_Paulo'],
+    ['IntervalStyle', 'sql_standard'],
+    ['extra_float_digits', '-15'],
+  ];
+  const PERIOD = /^\d{4}-(0[1-9]|1[0-2])-01$/;
+  const TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+
+  async function hostileLogin(): Promise<Login> {
+    const l = await login(['ratio_reader']);
+    for (const [k, v] of HOSTILE_ROLE_DEFAULTS) await db.pool.query(`ALTER ROLE ${l.name} SET ${k} = '${v}'`);
+    return l;
+  }
+
+  async function walk(readerUrl: string): Promise<{ rows: Row[]; pages: Body[] }> {
+    const pages: Body[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 100; i += 1) {
+      const body = await getOk(C.tenantId, cursor ? { limit: '5', cursor } : { limit: '5' }, { readerUrl });
+      pages.push(body);
+      cursor = body.page.nextCursor;
+      if (!cursor) break;
+    }
+    return { rows: pages.flatMap((p) => p.data), pages };
+  }
+
+  it('D10a a reader login whose ROLE defaults are DateStyle=SQL,DMY, a non-UTC TimeZone, sql_standard intervals and extra_float_digits=-15 gets canonical output, and paging through nextCursor returns every row exactly once', async () => {
+    const odd = await hostileLogin();
+    // The role defaults are real: a plain session of this login sees them.
+    const plain = new Pool({ connectionString: odd.url, max: 1 });
+    try {
+      const s = await plain.query(`SELECT current_setting('DateStyle') AS ds, current_setting('TimeZone') AS tz, (DATE '2026-05-01')::text AS d`);
+      expect(s.rows[0]).toEqual({ ds: 'SQL, DMY', tz: 'America/Sao_Paulo', d: '01/05/2026' });
+    } finally {
+      await plain.end();
+    }
+    const canonical = await walk(reader.url);
+    const hostile = await walk(odd.url);
+    expect(hostile.rows).toHaveLength(34);
+    expect(new Set(hostile.rows.map(key)).size).toBe(34);
+    expect(hostile.rows.map(key).sort()).toEqual((await groundTruth(C.tenantId)).map(key).sort());
+    expect(hostile.pages.map((p) => p.data.length)).toEqual([5, 5, 5, 5, 5, 5, 4]);
+    expect(hostile.rows).toEqual(canonical.rows);
+    expect(hostile.pages[0].totals).toEqual(canonical.pages[0].totals);
+    for (const r of hostile.rows) {
+      expect(r.billingPeriod).toMatch(PERIOD);
+      expect(r.chargePeriodStart).toMatch(TS);
+      expect(r.publishedAt).toMatch(TS);
+    }
+    for (const t of hostile.pages[0].totals ?? []) {
+      expect(t.billingPeriod).toMatch(PERIOD);
+      expect(typeof t.rowCount).toBe('string');
+    }
+  });
+
+  it('D10b the SQL alone is setting-independent: under hostile SET LOCAL values every column of the page and the totals equals the canonical output', async () => {
+    // A plain pool: none of the reader pool's pinned options.
+    const plain = new Pool({ connectionString: reader.url, max: 1 });
+    try {
+      const run = (sets: Array<[string, string]>) =>
+        withTenantTransaction(plain, C.tenantId, async (c) => {
+          for (const [k, v] of sets) await c.query(`SELECT pg_catalog.set_config($1, $2, true)`, [k, v]);
+          const page = await c.query(PUBLISHED_COSTS_SQL.page, [null, null, null, null, null, null, 1000]);
+          const totals = await c.query(PUBLISHED_COSTS_SQL.totals, [null, null]);
+          return { page: page.rows, totals: totals.rows };
+        });
+      const base = await run([
+        ['DateStyle', 'ISO, MDY'],
+        ['TimeZone', 'UTC'],
+        ['IntervalStyle', 'postgres'],
+        ['extra_float_digits', '1'],
+      ]);
+      expect(base.page).toHaveLength(34);
+      for (const r of base.page) expect(r.billingPeriod).toMatch(PERIOD);
+      for (const style of ['SQL, DMY', 'German', 'Postgres, DMY', 'SQL, MDY']) {
+        const r = await run([
+          ['DateStyle', style],
+          ['TimeZone', 'Pacific/Chatham'],
+          ['IntervalStyle', 'iso_8601'],
+          ['extra_float_digits', '-15'],
+        ]);
+        expect(r, style).toEqual(base);
+      }
+    } finally {
+      await plain.end();
+    }
+  });
+
+  it('D10c fail closed: a pool that pins everything but DateStyle, for a login whose default is SQL,DMY, is refused (no data served)', async () => {
+    const odd = await hostileLogin();
+    const options = READER_SESSION_OPTIONS.split(' -c ')
+      .map((o) => o.replace(/^-c /, ''))
+      .filter((o) => !/^DateStyle=/.test(o))
+      .map((o) => `-c ${o}`)
+      .join(' ');
+    expect(options).not.toMatch(/DateStyle/);
+    const unpinned = new Pool({ connectionString: odd.url, max: 1, options });
+    try {
+      await expect(readPublishedCosts(unpinned, C.tenantId, { from: null, to: null, limit: 5, cursor: null })).rejects.toThrow(/published-costs read requires/);
+    } finally {
+      await unpinned.end();
+    }
   });
 });

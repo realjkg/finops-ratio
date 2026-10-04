@@ -21,6 +21,12 @@ import {
   parseEnvFile,
   cleanupLocalTest,
   childExited,
+  exitCodeForSignal,
+  installInterruptHandlers,
+  killLiveProcessGroups,
+  liveProcessGroups,
+  localTestExitCode,
+  trackProcessGroup,
   fetchJson,
   finalizeLocalTestSummary,
   runLocalTest,
@@ -41,9 +47,10 @@ import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import process from 'node:process';
-import { setTimeout } from 'node:timers';
+import { clearTimeout, setTimeout } from 'node:timers';
 import { bootstrapPlan } from './bootstrap.mjs';
 
+const { AbortController } = globalThis;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -254,8 +261,8 @@ describe('L7 npm scripts', () => {
 describe('L8 control totals comparison (local:test acceptance)', () => {
   const control = { '2026-07-01': { rowCount: 55, billedTotal: '30.8272954899' }, '2026-08-01': { rowCount: 40, billedTotal: '21.0978157665' } };
   const totals = [
-    { billingPeriod: '2026-07-01', billingCurrency: 'USD', rowCount: 55, billedCost: '30.8272954899' },
-    { billingPeriod: '2026-08-01', billingCurrency: 'USD', rowCount: 40, billedCost: '21.0978157665' },
+    { billingPeriod: '2026-07-01', billingCurrency: 'USD', rowCount: '55', billedCost: '30.8272954899' },
+    { billingPeriod: '2026-08-01', billingCurrency: 'USD', rowCount: '40', billedCost: '21.0978157665' },
   ];
 
   it('equal totals ⇒ no mismatch', () => {
@@ -266,9 +273,12 @@ describe('L8 control totals comparison (local:test acceptance)', () => {
     const mut = (i, patch) => totals.map((t, j) => (j === i ? { ...t, ...patch } : t));
     expect(compareControlTotals(mut(0, { billedCost: '30.82729548990' }), control)).toHaveLength(1);
     expect(compareControlTotals(mut(0, { billedCost: '30.8272954898' }), control)).toHaveLength(1);
-    expect(compareControlTotals(mut(1, { rowCount: 39 }), control)).toHaveLength(1);
+    expect(compareControlTotals(mut(1, { rowCount: '39' }), control)).toHaveLength(1);
+    // The API's rowCount is a decimal string (Copilot 4176238961): a JS number is a mismatch, even when equal in value.
+    expect(compareControlTotals(mut(1, { rowCount: 40 }), control)).toHaveLength(1);
+    expect(compareControlTotals(mut(1, { rowCount: '040' }), control)).toHaveLength(1);
     expect(compareControlTotals(totals.slice(1), control)).toHaveLength(1);
-    expect(compareControlTotals([...totals, { billingPeriod: '2026-09-01', billingCurrency: 'USD', rowCount: 1, billedCost: '1' }], control)).toHaveLength(1);
+    expect(compareControlTotals([...totals, { billingPeriod: '2026-09-01', billingCurrency: 'USD', rowCount: '1', billedCost: '1' }], control)).toHaveLength(1);
     expect(compareControlTotals([...totals, { ...totals[0], billingCurrency: 'EUR' }], control)).not.toEqual([]);
   });
 
@@ -481,7 +491,7 @@ describe('L15 the app port is re-checked right before next start is spawned (no 
 
   it('local.mjs spawns next start only through startIfPortFree and waits through waitForOwnServer', () => {
     const src = read('scripts/local/local.mjs');
-    expect(src).toMatch(/startIfPortFree\(\{[\s\S]*?start: \(\) =>\s*spawn\(/);
+    expect(src).toMatch(/startIfPortFree\(\{[\s\S]*?start: \(\) =>\s*(trackProcessGroup\(\s*)?spawn\(/);
     expect(src).toMatch(/waitForOwnServer\(\{/);
     expect(src.match(/spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'/g)).toHaveLength(1);
   });
@@ -946,7 +956,8 @@ describe('L18 local:test summary finalisation', () => {
     const src = read('scripts/local/local.mjs');
     expect(src).toMatch(/const app = await startIfPortFree\(\{[\s\S]*?\}\);\s*setApp\(app\);/);
     expect(src).toMatch(/process\.stdout\.write\(`\$\{JSON\.stringify\(\{ type: 'ratio\.local-test', \.\.\.summary \}\)\}\\n`\);/);
-    expect(src).toMatch(/return summary\.pass \? 0 : 1;/);
+    // The exit code now also covers an interrupt (130/143): localTestExitCode, tested in L20.
+    expect(src).toMatch(/return localTestExitCode\(summary\);/);
     expect(src).toMatch(/return \(await COMMANDS\[cmd\]\(localSettings\(process\.env\), args\)\) \?\? 0;/);
     expect(src).not.toMatch(/summary\.pass = /); // only finalizeLocalTestSummary decides
   });
@@ -1037,5 +1048,174 @@ describe('L19 runProcess deadline is hard even when a grandchild holds stdio (ch
     const src = read('scripts/local/local.mjs');
     expect(src).toMatch(/for \(const sig of \['SIGINT', 'SIGTERM'\]\)[\s\S]{0,200}killLiveProcessGroups\(\)/);
     expect(read('scripts/local/lib.mjs')).toMatch(/detached: true/);
+  });
+});
+
+// --- Copilot 4176238924: SIGINT/SIGTERM during local:test must go through the
+// normal bounded cleanup (stop the app, down -v), then exit 130/143; a second
+// signal forces an immediate exit. next start is tracked with the other groups.
+describe('L20 an interrupted local:test still cleans up (Copilot 4176238924)', () => {
+  const spawnedHere = [];
+  afterAll(() => {
+    for (const c of spawnedHere) {
+      try {
+        process.kill(-c.pid, 'SIGKILL');
+      } catch {
+        // gone
+      }
+    }
+  });
+  /** A detached sleeper tracked like next start. */
+  const trackedSleeper = () => {
+    const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: true });
+    spawnedHere.push(c);
+    return trackProcessGroup(c);
+  };
+  const exitedWithin = (c, ms) =>
+    new Promise((r) => {
+      if (childExited(c)) return r(true);
+      const t = setTimeout(() => r(false), ms);
+      c.once('exit', () => {
+        clearTimeout(t);
+        r(true);
+      });
+    });
+
+  it('exit codes: SIGINT 130, SIGTERM 143; an interrupted run exits with them even if everything else passed', () => {
+    expect(exitCodeForSignal('SIGINT')).toBe(130);
+    expect(exitCodeForSignal('SIGTERM')).toBe(143);
+    expect(localTestExitCode({ pass: true, failures: [] })).toBe(0);
+    expect(localTestExitCode({ pass: false, failures: ['x'] })).toBe(1);
+    expect(localTestExitCode({ pass: false, interrupted: 'SIGINT' })).toBe(130);
+    expect(localTestExitCode({ pass: false, interrupted: 'SIGTERM' })).toBe(143);
+    expect(localTestExitCode({ pass: true, interrupted: 'SIGINT' })).toBe(130);
+  });
+
+  it('SIGINT mid-body: the in-flight command is killed, the app is stopped, down -v runs exactly once, the run fails with interrupted=SIGINT (exit 130)', async () => {
+    const ac = new AbortController();
+    const down = vi.fn(async () => undefined);
+    let inFlight;
+    const t0 = Date.now();
+    setTimeout(() => ac.abort('SIGINT'), 300);
+    const summary = await runLocalTest({
+      project: 'p',
+      down,
+      downTimeoutMs: 5_000,
+      stopOptions: { graceMs: 3_000, killMs: 3_000 },
+      signal: ac.signal,
+      body: async ({ steps, setApp, signal }) => {
+        setApp(trackedSleeper());
+        steps.up = 'started';
+        // A long command (like compose up or the worker), bound to the run's signal.
+        const p = runProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+          timeoutMs: 60_000,
+          signal,
+          spawnFn: (...a) => {
+            inFlight = spawn(...a);
+            spawnedHere.push(inFlight);
+            return inFlight;
+          },
+        });
+        await p;
+        steps.after = 'never';
+      },
+    });
+    expect(elapsed(t0)).toBeLessThan(5_000);
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(summary.interrupted).toBe('SIGINT');
+    expect(summary.pass).toBe(false);
+    expect(summary.error).toMatch(/interrupted by SIGINT/);
+    expect(summary.steps.appStop).toBe('stopped');
+    expect(summary.steps.down).toBe('ok (-v)');
+    expect(summary.steps.after).toBeUndefined();
+    expect(await exitedWithin(inFlight, 2_000)).toBe(true);
+    expect(localTestExitCode(summary)).toBe(130);
+  }, 15_000);
+
+  it('SIGTERM while the body ignores every signal: cleanup still runs once (exit 143)', async () => {
+    const ac = new AbortController();
+    const down = vi.fn(async () => undefined);
+    setTimeout(() => ac.abort('SIGTERM'), 100);
+    const summary = await runLocalTest({ project: 'p', down, downTimeoutMs: 5_000, signal: ac.signal, body: () => new Promise(() => undefined) });
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(summary.interrupted).toBe('SIGTERM');
+    expect(localTestExitCode(summary)).toBe(143);
+  }, 10_000);
+
+  it('a signal that arrives during the cleanup is recorded (exit 130) and does not run the cleanup twice', async () => {
+    const ac = new AbortController();
+    const down = vi.fn(async () => {
+      ac.abort('SIGINT');
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    const summary = await runLocalTest({ project: 'p', down, downTimeoutMs: 5_000, signal: ac.signal, body: async () => undefined });
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(summary.interrupted).toBe('SIGINT');
+    expect(localTestExitCode(summary)).toBe(130);
+  }, 10_000);
+
+  it('runProcess bound to an aborted signal never spawns; aborting mid-run kills the group and rejects at once', async () => {
+    const spawnFn = vi.fn();
+    const pre = new AbortController();
+    pre.abort('SIGINT');
+    await expect(runProcess(process.execPath, ['-e', ''], { timeoutMs: 5_000, signal: pre.signal, spawnFn })).rejects.toThrow(/interrupted/);
+    expect(spawnFn).not.toHaveBeenCalled();
+    const ac = new AbortController();
+    let child;
+    const t0 = Date.now();
+    setTimeout(() => ac.abort('SIGTERM'), 200);
+    await expect(
+      runProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+        timeoutMs: 60_000,
+        signal: ac.signal,
+        spawnFn: (...a) => {
+          child = spawn(...a);
+          spawnedHere.push(child);
+          return child;
+        },
+      }),
+    ).rejects.toThrow(/interrupted/);
+    expect(elapsed(t0)).toBeLessThan(3_000);
+    expect(await exitedWithin(child, 2_000)).toBe(true);
+  }, 10_000);
+
+  it('installInterruptHandlers: the first signal calls onFirst once; a second one forces (onForce); dispose removes the listeners', () => {
+    const proc = new EventEmitter();
+    const onFirst = vi.fn();
+    const onForce = vi.fn();
+    const dispose = installInterruptHandlers({ proc, onFirst, onForce });
+    proc.emit('SIGINT', 'SIGINT');
+    expect(onFirst).toHaveBeenCalledTimes(1);
+    expect(onFirst).toHaveBeenCalledWith('SIGINT');
+    expect(onForce).not.toHaveBeenCalled();
+    proc.emit('SIGTERM', 'SIGTERM');
+    expect(onFirst).toHaveBeenCalledTimes(1);
+    expect(onForce).toHaveBeenCalledWith('SIGTERM');
+    dispose();
+    expect(proc.listenerCount('SIGINT')).toBe(0);
+    expect(proc.listenerCount('SIGTERM')).toBe(0);
+  });
+
+  it('next start style children are tracked: killLiveProcessGroups kills them; an exited child leaves the set', async () => {
+    const c = trackedSleeper();
+    expect(liveProcessGroups()).toContain(c.pid);
+    killLiveProcessGroups();
+    expect(await exitedWithin(c, 2_000)).toBe(true);
+    expect(liveProcessGroups()).not.toContain(c.pid);
+    const d = trackedSleeper();
+    d.kill('SIGKILL');
+    await exitedWithin(d, 2_000);
+    expect(liveProcessGroups()).not.toContain(d.pid);
+  }, 10_000);
+
+  it('local.mjs: next start is detached and tracked; the first signal aborts local:test (cleanup), other commands kill and exit; a second signal forces; down ignores the interrupt', () => {
+    const src = read('scripts/local/local.mjs');
+    expect(src).toMatch(/start: \(\) =>\s*trackProcessGroup\(\s*spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'[\s\S]*?detached: true/);
+    expect(src).toMatch(/installInterruptHandlers\(\{/);
+    expect(src).toMatch(/onFirst: \(sig\) => \{\s*if \(COMMAND === 'test'\) \{\s*[\s\S]{0,200}?interrupt\.abort\(sig\);\s*return;\s*\}\s*killLiveProcessGroups\(\);/);
+    expect(src).toMatch(/onForce: \(sig\) => \{\s*killLiveProcessGroups\(\);[\s\S]{0,200}?process\.exit\(exitCodeForSignal\(sig\)\);/);
+    expect(src).toMatch(/runLocalTest\(\{[\s\S]*?signal: interrupt\.signal,/);
+    expect(src).toMatch(/'down', '--remove-orphans', [^\n]*\], \{ timeoutMs, signal: null \}\)/);
+    expect(src).not.toMatch(/process\.once\(sig/);
   });
 });
