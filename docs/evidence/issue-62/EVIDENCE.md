@@ -270,3 +270,50 @@ test was touched.
   opt-in at config load.
 - `SYNTHETIC_PROVIDERS` is a frozen array, so it cannot be changed at
   runtime (a frozen `Set` still accepts `add`). Exact, case-sensitive names.
+
+## 9. Challenger round (REQUEST CHANGES: 1 Medium, Lows), at 62fef2a
+
+| SHA | Commit | Item |
+|---|---|---|
+| ff3a963 | revert Next's build rewrites of `tsconfig.json` / `next-env.d.ts` to main (a new commit; ed2e3cb not rewritten) | L5 |
+| c1e0cdb | tests | **red** (`red/red-challenger-fast.txt` 7 failed / 88; `red/red-challenger-db.txt` 2 failed / 26). L3: S1-L3, the library and CLI cases. L2: `workerEnv` `'0'`, the stderr checks, `captureErr`. L1: D11 passes at red, because it pins existing reconcile behaviour |
+| 2108b61 | the opt-in is accepted only with `RATIO_ENV` explicitly `development`/`test` (checked first; exit 2). `workerEnv` sets `'0'` explicitly. The syncs capture stderr; the acceptance fails on the opt-in log. Harness: the DB vitest env adds `RATIO_ENV=test`, `testS3Env()` adds `RATIO_ENV=development` | L3, L2 |
+| e80445f | DEPLOYMENT_BRIEF (status row, D-02, the D-02 detail table, the §8 check), the Slice 2b DESIGN backlog note, DESIGN D3 + §2.2 controls table, L3 notes, §8a re-check gap; D12 test; mutation record | M1, L1, L3, L4 |
+| 423341d | test: `run()` must forward `captureErr` | **red** (`red/red-challenger-run-captureerr.txt`). The first live `local:acceptance` run failed "stderr was not captured": `run()` dropped the option |
+| 62fef2a | `run()` forwards `captureErr` | L2 |
+
+**L4, corrected against the code.** The suggested remedy, `replay`, does not
+re-check identical bytes. `replay --period` and `backfill` both find the
+published batch by data fingerprint and return `unchanged`. The new D12 test
+pins this. New bytes, a re-delivered export, are checked under the current
+policy (D12, second case). DESIGN §8a records this as the known Slice 1 gap
+and escalates a possible `--revalidate` mode. No production data exists, so
+there is no impact today.
+
+**L3, escalated, not widened.** `replay-fixtures` runs in staging and ingests
+the SYNTHETIC fixture. In staging it can no longer opt in, so its scenarios
+would see every row excluded. A narrower path is needed (DESIGN §8 D1). The
+per-source synthetic marker is tracked for Slice 3 (D-21).
+
+**Gates:**
+
+| Gate | Result |
+|---|---|
+| lint, tsc | exit 0, after the L5 revert and at 62fef2a |
+| `npm test` | **2549 passed** (108 files), at 62fef2a |
+| `npm run test:db` ×1 | parallel **625 passed**, serial **173 passed** (at e80445f; later commits change `scripts/local` only, covered by `npm test`) |
+| `npm run local:test` | exit 0, `pass: true` (`runs/localtest-challenger.json`); the synthetic fixture sync logs the opt-in (2 lines, 2 syncs) |
+| `local:acceptance` 1k | exit 0, `pass: true`, 22.3 s; 0 opt-in log lines (`runs/acc1k-challenger.json`) |
+| `local:acceptance` 1k, `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` (and `RATIO_ENV=test`) exported in the parent shell | exit 0, `pass: true`, 22.7 s; 0 opt-in log lines: the worker ran with `'0'` (`runs/acc1k-challenger-parent-optin.json`) |
+| the same, with the pre-fix `workerEnv` (opt-in omitted when off), as a live mutation | exit 1: `sync: the worker ran with the synthetic-provider opt-in (config.synthetic_providers_allowed logged); the acceptance run must have it off`; `down` `ok (-v)` (`runs/acc1k-l2-leak-mutation.json`) |
+
+Both acceptance runs give the same results as before: 942 /
+`18.00663861840`, `excludedRows` 57, 2024-10 quarantined
+`PROVIDER_MISMATCH`, and the catalog codes `{PROVIDER_MISMATCH: 57}` and
+`{PROVIDER_MISMATCH: 1}`.
+
+**Mutations (all killed; `runs/code-mutations-challenger.txt`):** M23
+staging accepted; M24 unset `RATIO_ENV` accepted; M25 only production
+refused; M26 case-insensitive `RATIO_ENV`; M27 `workerEnv` omits the opt-in;
+M28 the acceptance ignores the log; M29 stderr not captured; M30
+`runProcess` drops stderr.
