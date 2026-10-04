@@ -25,6 +25,24 @@
 
 const IDENT_RE = /^[a-z_][a-z0-9_]{0,62}$/;
 const SAFE_ATTRS = 'NOSUPERUSER NOBYPASSRLS NOREPLICATION NOCREATEDB NOCREATEROLE';
+/**
+ * The complete attribute set every bootstrap login must have (Copilot
+ * 4176705227), normalised on every run and verified against pg_roles:
+ * LOGIN, INHERIT (a NOINHERIT login would not receive its ratio role's
+ * privileges), none of the dangerous attributes, no connection limit, and no
+ * expiry (VALID UNTIL 'infinity'; NULL is accepted too).
+ */
+export const LOGIN_ATTRIBUTES = Object.freeze({
+  rolcanlogin: true,
+  rolinherit: true,
+  rolsuper: false,
+  rolbypassrls: false,
+  rolreplication: false,
+  rolcreaterole: false,
+  rolcreatedb: false,
+  rolconnlimit: -1,
+});
+const LOGIN_DDL = `LOGIN INHERIT ${SAFE_ATTRS} CONNECTION LIMIT -1 VALID UNTIL 'infinity'`;
 export const RATIO_ROLES = Object.freeze(['ratio_owner', 'ratio_worker', 'ratio_reader']);
 
 function ident(name) {
@@ -52,12 +70,19 @@ export function bootstrapPlan(names) {
   for (const r of RATIO_ROLES) plan.push(ifMissing(r, `CREATE ROLE ${r} NOLOGIN ${SAFE_ATTRS}`));
   for (const [login, parent] of loginMemberships(names)) {
     plan.push(ifMissing(login, `CREATE ROLE ${login} LOGIN ${SAFE_ATTRS} IN ROLE ${parent}`));
-    // Re-assert the safe attributes on a login that already existed.
-    plan.push(`ALTER ROLE ${login} LOGIN ${SAFE_ATTRS}`);
+    // Normalise a login that already existed: the complete attribute set,
+    // no per-role setting, and its one membership edge with the exact PG16
+    // options (an edge granted while the login was NOINHERIT keeps
+    // inherit_option false; re-granting by the same grantor updates it).
+    plan.push(`ALTER ROLE ${login} ${LOGIN_DDL}`);
+    plan.push(`ALTER ROLE ${login} RESET ALL`);
+    plan.push(`GRANT ${parent} TO ${login} WITH ADMIN FALSE, INHERIT TRUE, SET TRUE`);
   }
   // CREATE DATABASE cannot run in a DO block: the runner executes the row this returns (like psql \gexec).
   plan.push(`SELECT 'CREATE DATABASE ${database} OWNER ${migrator}' AS ddl WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datname = '${database}')`);
   plan.push(`ALTER DATABASE ${database} OWNER TO ${migrator}`);
+  // Per-role settings scoped to this database (the global ones are reset above).
+  for (const [login] of loginMemberships(names)) plan.push(`ALTER ROLE ${login} IN DATABASE ${database} RESET ALL`);
   return plan;
 }
 
@@ -101,6 +126,38 @@ export function membershipProblems(rows, names) {
   return problems;
 }
 
+/**
+ * Problems with the bootstrap logins' attributes (rows from pg_roles, with
+ * `validity` = 'none' | 'infinity' | 'past' | 'future' computed from
+ * rolvaliduntil) and per-role settings (rows from pg_db_role_setting: role,
+ * database, setconfig). A NULL or missing attribute fails closed. Settings are
+ * reported by KEY only (a value may be a secret).
+ */
+export function loginAttributeProblems(roleRows, settingRows, names) {
+  const problems = [];
+  const byName = new Map(roleRows.map((r) => [r.rolname, r]));
+  for (const [login] of loginMemberships(names)) {
+    const r = byName.get(login);
+    if (!r) {
+      problems.push(`${login}: missing`);
+      continue;
+    }
+    for (const [attr, want] of Object.entries(LOGIN_ATTRIBUTES)) {
+      if (r[attr] !== want) problems.push(`${login}: ${attr} is ${JSON.stringify(r[attr] ?? null)}, expected ${want}`);
+    }
+    if (r.validity !== 'none' && r.validity !== 'infinity') problems.push(`${login}: VALID UNTIL is ${r.validity ?? 'unknown'}, expected no expiry`);
+  }
+  const logins = new Set(loginMemberships(names).map(([l]) => l));
+  for (const row of settingRows) {
+    if (!logins.has(row.role)) continue;
+    for (const entry of row.setconfig ?? []) {
+      const key = String(entry).split('=')[0];
+      problems.push(`${row.role}: per-role setting ${key} (${row.database === '*' ? 'all databases' : `database ${row.database}`}) is not expected`);
+    }
+  }
+  return problems;
+}
+
 /** Runs the plan on a superuser client, then sets the login passwords (server-side quoting) and verifies. */
 export async function runBootstrap(client, names, passwords) {
   for (const sql of bootstrapPlan(names)) {
@@ -133,7 +190,23 @@ export async function verifyBootstrap(client, names) {
     for (const a of ['rolsuper', 'rolbypassrls', 'rolreplication', 'rolcreaterole', 'rolcreatedb']) if (r[a]) problems.push(`${name} has ${a}`);
   };
   for (const r of RATIO_ROLES) expectRole(r, false);
-  for (const [login] of loginMemberships(names)) expectRole(login, true);
+  // The logins: the complete intended attribute set and no per-role settings (Copilot 4176705227).
+  const logins = await client.query(
+    `SELECT rolname, rolcanlogin, rolinherit, rolsuper, rolbypassrls, rolreplication, rolcreaterole, rolcreatedb, rolconnlimit,
+            CASE WHEN rolvaliduntil IS NULL THEN 'none' WHEN rolvaliduntil = 'infinity' THEN 'infinity'
+                 WHEN rolvaliduntil <= now() THEN 'past' ELSE 'future' END AS validity
+       FROM pg_catalog.pg_roles WHERE rolname = ANY ($1::text[])`,
+    [loginMemberships(names).map(([l]) => l)],
+  );
+  const settings = await client.query(
+    `SELECT r.rolname AS role, COALESCE(d.datname, '*') AS database, s.setconfig
+       FROM pg_catalog.pg_db_role_setting s
+       JOIN pg_catalog.pg_roles r ON r.oid = s.setrole
+       LEFT JOIN pg_catalog.pg_database d ON d.oid = s.setdatabase
+      WHERE r.rolname = ANY ($1::text[])`,
+    [loginMemberships(names).map(([l]) => l)],
+  );
+  problems.push(...loginAttributeProblems(logins.rows, settings.rows, names));
   // PG16: one row per grant, with its ADMIN / INHERIT / SET options (Copilot 4176494789).
   const edges = await client.query(
     `SELECT m.rolname AS member, g.rolname AS parent, a.admin_option, a.inherit_option, a.set_option
