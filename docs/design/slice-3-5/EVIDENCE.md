@@ -11,7 +11,8 @@ design agent.
 | 1 | `cb464e8` | First design: gap analysis, generator, forecasting, detection, API, security, plan, 20 open decisions with recommended defaults; appendices A–D. |
 | 2 | `272d119`, `461fbc2` | The orchestrator's decisions of 2026-10-04 recorded (D-01..D-20); three profiles (`ci`, `fleet15k`, `full`); `fleet15k` sized from row sizes measured on PostgreSQL 16; plan re-ordered (the `daysInMonthOf` fix first); tracked items T1–T6. |
 | 3 | `9b33984`, `9a17924` | The challenger's REQUEST CHANGES on 461fbc2 (1 High, 12 Medium, 8 Low), all answered (§3); the orchestrator's M9 mapping recorded as D-21; the governance wording of revisions 1–2 reverted (§2). |
-| 4 | this revision | The challenger's re-review of 461fbc2..9a17924 (2 Medium, 5 Low), all answered (§3a). |
+| 4 | `faeabb4`, `4492d2f` | The challenger's re-review of 461fbc2..9a17924 (2 Medium, 5 Low), all answered (§3a). |
+| 5 | this revision | The challenger's review of 9a17924..4492d2f (1 High, 2 Medium, 3 Low), all answered (§3b); the orchestrator's decisions D-22 (calendar component, option a) and D-23 (≤ 0.15/day design margin) recorded. |
 
 ## 2. Governance wording: reverted
 
@@ -77,6 +78,26 @@ The classification of this revision is recorded in §5.
 | **L-e** budget coverage | The 0.21/day share explicitly covers smaller series reaching `warning` through relative excursions (≈ 3,900 leaves ≥ $100/day) and the ≈ 550 aggregate scopes, measured empirically on the tuning seed | DESIGN §4.2; Appendix B.5.7 |
 | EVIDENCE §5 | Refreshed to the current classifier output (adds `retention.delete-from`) | §5 |
 
+## 3b. Response to the challenger's review of 9a17924..4492d2f
+
+| Item | Change | Where |
+|---|---|---|
+| **H1** periodic cohorts | Option (a), decided by the orchestrator (D-22). **Calendar-event component** in the forecast: 3 fixed classes (days 1–3, 15–16, last 2 business days), multiplicative per-series log factors from prior occurrences, applied only when significant (\|t\| ≥ 3): hard-threshold shrinkage instead of empirical Bayes toward a near-zero pooled prior, with the reasons given. Needs ≥ 1 prior cycle; `fleet15k` gives 2 (P3 events) and 3 (P4) for every pre-existing series. **First occurrences** (accounts onboarding in the span) are quantified, ≈ 0.031/day (≈ 1.9 groups per seed), and counted in the budget. The cohorts stay in AT-1 and AT-4. Effect: cohort false events ≈ 7.2 candidate leaf-events/day without the component, below the Monte Carlo resolution with it. The model-family caveat for real calendars is stated | DESIGN §0, §2.3, §2.5, §3.2, §4.1, §4.2, §4.9, §8 D-22; Appendix B.5.8, C |
+| **M1** margin and measured budget | Design target ≤ 0.15 false groups/day in expectation (D-23); every source itemised, by closed form or Monte Carlo (`budget3.py`), with no unmeasured share. **Aggregate scopes in closed form:** 550/ARL₀ + 550·Q(z_T) (0.0958 at z_T 4, h 7; 0.0493 at the chosen 4.5 / 7.5). Detectors moved to the **log scale** (the linear-scale log-normal tail breaks the arithmetic) with **z_T = 4.5, h = 7.5**: total **0.092/day**, 0.136 with the conservative D3 bound. **P(pass AT-1 and AT-4) ≈ 0.999** at 0.15/day (0.435 at the 0.30 gate). False positives measured on a natural-rate **tuning-natural** seed, with Garwood intervals. D6 redefined on two-day growth (the level rule paged on large normal onboardings). Peak disk 5.15 GB (5.19 with natural-3), `budget3.py` SHA-256 recorded | DESIGN §4.2, §4.8, §4.9, §8 D-23; Appendix B.5.8, C |
+| **M2** detection leakage | **Expanding as-of calibration** everywhere: any interval, D1 quantile or D3 σ(h) used at time t uses errors on days ≤ t − 1. The replay starts at day 57; D1 and D3 are live from day 62 (warm-up stated); D2 from day 29. The scored window and n are unchanged; the false-positive rate is also reported for days 62–75 and 76–122. §3.4, §3.8, the replay rule and FT-7 are made consistent (coverage scored from origins ≥ 93, each calibrated as of its origin) | DESIGN §3.4, §3.8, §4.2, §7 |
+| **L1** share vs h | The shares are now the computed values at the chosen thresholds; no rounded share is set against an h | DESIGN §4.2 |
+| **L2** alert fatigue | Reported every run: mean, p95 and maximum day at ≥ `warning`, the same for false groups, and `info` groups per day. Explicit bound: mean ≤ 1.5, p95 ≤ 3, max ≤ 6 (expected 1.31 / 3 / 4); reported and escalated, not gated (a gate would be an owner decision) | DESIGN §4.9 |
+| **L3** assumed sizes | The retained-input sizes are marked as assumptions in DESIGN and Appendix B, and PR 3-4 measures them | DESIGN §2.7, §4.8, §7; Appendix B.5.7, B.5.8 |
+| Re-run | Every embedded script was re-run on revision 5's text: the 7 SHA-256s match, the Python outputs are identical (`budget3.py` byte-identical between two runs), and both SQL measurements reproduce on a fresh `postgres:16` container (554.2 / 217.0 / 599.8 / 317.3 B per row) | §4 |
+
+**Targets at risk, stated plainly.** No target has been changed. One may
+not be met honestly: **AT-3's p90 ≤ 3 days for level shifts**. The stricter
+CUSUM threshold (h = 7.5) delays small shifts (× 1.2–1.4 on series with
+σ ≈ 0.05–0.07) to 2–4 days. If the enriched seed confirms the miss, the
+trade-off between alert volume and detection delay is an **owner
+decision**. The calendar component's thin basis (2–3 cycles) is an
+in-family result. Real calendars are measurable only on real data.
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -88,6 +109,9 @@ The classification of this revision is recorded in §5.
 | Disk budget, adopted `fleet15k` variant | 4.90 GB per run (rev. 3); 4.96 GB per run and **5.11 GB peak** across the sequential runs (rev. 4) | `budget.py` (B.5.3), `budget2.py` (B.5.7) |
 | Folding loss, `fleet15k` | 79.0 % of account × service series, 25.6 % of spend in `Other services` | `budget2.py` (B.5.7) |
 | Expected natural-seed groups | ≈ 73 true (≈ 1.2/day), ≈ 92 total per seed; ≈ 183 pooled over two | `budget2.py` (B.5.7) |
+| False-positive budget at z_T 4.5, h 7.5 | 0.092/day (0.136 with the D3 bound); P(pass AT-1 and AT-4) ≈ 0.999 at 0.15/day | `budget3.py` (B.5.8) |
+| Peak disk, rev. 5 | 5.15 GB (5.19 GB with natural-3) | `budget3.py` (B.5.8) |
+| Re-run of every embedded script (rev. 5) | all 7 SHA-256s match; outputs identical; SQL sizes reproduced on a fresh container | §3b |
 
 The measurement scripts are reproduced verbatim, with SHA-256, in
 Appendix B (B.4, B.5.6).

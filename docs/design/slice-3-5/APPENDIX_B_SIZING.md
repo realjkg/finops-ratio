@@ -532,7 +532,7 @@ Wilson 95 % lower bound at p̂ = 0.80: 0.711 (n = 100), 0.726 (n = 140),
 (L-a) raise the leaf backtest export to 228 points per leaf: **0.253 GB**,
 so the natural-1 run's own budget is **4.96 GB** (B.5.3's 4.90 GB −
 0.198 + 0.253 + 0.003 for the aggregate points). The other runs skip the
-leaf export (4.70 GB). Retained between runs (assumptions): ≈ 0.04 GB of
+leaf export (4.70 GB). Retained between runs (**assumptions**, measured in PR 3-4): ≈ 0.04 GB of
 compact evaluator inputs per run (anomaly pages, root causes, matches,
 evidence record) and, after natural-1, its leaf export plus the
 evaluator's per-leaf daily actuals (≈ 0.03 GB gzip).
@@ -647,4 +647,286 @@ for r in runs3:
     peak = max(peak, own + retained)
     retained += per_run_eval + (bt_export + nat1_actuals if r == 'natural-1' else 0)
 print("with a third natural seed: peak %.2f GB; retained %.2f GB" % (peak, retained))
+```
+
+### B.5.8 Revision 5: false-positive budget with the calendar component, pass probabilities, peak disk
+
+Computed by `budget3.py` (below; standard library, fixed seeds, ≈ 30 s).
+It rebuilds the same 37,052 leaves as `budget.py`/`budget2.py` and adds,
+**as assumptions of the generator model** (DESIGN §2.3):
+- each leaf's log-noise σ = clamp(0.15 − 0.04 · log10(account monthly
+  spend / 100), 0.03, 0.15);
+- calendar cohort flags on a separate stream (5 % `month_end_batch`, 5 %
+  `monthly_cycle`);
+- the min impact of $100/day.
+
+**Reachable leaves.** 3,440 leaves can reach `warning` at all (a ≥ 20 %
+and ≥ $100 excess is < 9σ); 344 of them are in a calendar cohort; 504 have
+mean `M` ≥ $500/day.
+
+**Components** (expected false groups per day, natural rates, 61-day
+window; candidate leaf-events, an upper bound on groups):
+
+| z_T | h | ARL₀ | D1 ∧ D2 | D3 (bound: every eligible alarm) | aggregate (closed form) | calendar cohorts (no component) | first occurrences | other (allowance) | **total** (with D3 bound) |
+|---|---|---|---|---|---|---|---|---|---|
+| 4.0 | 7.0 | 7,020 | 0.0089 | 0.0000 (0.0718) | 0.0958 | 0.0003 (7.252) | 0.0312 | 0.010 | **0.146** (0.218) |
+| 4.0 | 7.5 | 11,585 | 0.0089 | 0.0000 (0.0435) | 0.0649 | 0.0003 (7.252) | 0.0312 | 0.010 | **0.115** (0.159) |
+| 4.0 | 8.0 | 19,112 | 0.0089 | 0.0000 (0.0264) | 0.0462 | 0.0003 (7.252) | 0.0312 | 0.010 | **0.097** (0.123) |
+| 4.5 | 7.0 | 7,020 | 0.0017 | 0.0000 (0.0718) | 0.0802 | 0.0000 (7.207) | 0.0310 | 0.010 | **0.123** (0.195) |
+| **4.5** | **7.5** | **11,585** | **0.0017** | **0.0000 (0.0435)** | **0.0493** | **0.0000 (7.190)** | **0.0310** | **0.010** | **0.092 (0.136)** |
+| 4.5 | 8.0 | 19,112 | 0.0017 | 0.0000 (0.0264) | 0.0306 | 0.0000 (7.182) | 0.0309 | 0.010 | **0.073** (0.100) |
+
+- "0.0000" means below the Monte Carlo resolution: no simulated CUSUM
+  alarm episode (3 M steps per h) had a mean excess that reached
+  `warning` on any reachable leaf, and no simulated cohort event did
+  once the factor was applied.
+- The "no component" column is the revision-4 model without the calendar
+  component: ≈ 7.2 candidate leaf-events per day, of the same order as
+  the challenger's ≈ 150 groups after grouping. It is the size of the
+  problem the calendar component removes.
+- **First occurrences** are the unlearnable residual: ≈ 0.031 per day,
+  ≈ 1.9 groups per 61-day seed.
+
+**Pass probability** (two pooled natural seeds, 122 days, true groups ~
+Poisson(146), false groups Poisson per day; AT-1 = p̂ ≥ 0.80 and Wilson
+lower ≥ 0.70 with n ≥ 100; AT-4 = mean ≤ 0.30 and p95 day ≤ 2; 4,000
+simulations):
+
+| True false-positive rate | AT-1 | AT-4 | both |
+|---|---|---|---|
+| 0.11 / day | 1.000 | 1.000 | 1.000 |
+| **0.15 / day (design margin)** | **0.999** | **1.000** | **0.999** |
+| 0.30 / day (the gate) | 0.510 | 0.511 | 0.435 |
+| 0.45 / day | 0.012 | 0.005 | 0.004 |
+
+**Garwood 95 % intervals** for a count measured over one 61-day seed: 4
+groups → 0.066/day [0.018, 0.168]; 7 → 0.115 [0.046, 0.236]; 9 → 0.148
+[0.067, 0.280]; 15 → 0.246 [0.138, 0.406].
+
+**Alert fatigue** (≥ `warning`, Poisson approximation, ≈ 1.2 true +
+0.11 false per day): mean 1.31, p95 day 3, typical maximum over 61 days 4.
+
+**Peak disk** (GB; the natural-1 run carries the leaf backtest export and
+the calendar factors; retained-input sizes are **assumptions**, measured in
+PR 3-4):
+
+| Sequence | natural-1 run | other runs | peak | retained at the end |
+|---|---|---|---|---|
+| tuning, tuning-natural, natural-1, natural-2, enriched | 4.961 | 4.708 | **5.15** | 0.48 |
+| … with natural-3 | 4.961 | 4.708 | **5.19** | 0.52 |
+
+Both peaks are under the 5.5 GB target and the 6 GB ceiling.
+
+SHA-256 of `budget3.py` as run:
+`7b133ff92cd538170cb169302719fe829d8fefd7287f02192ea29b1c382d90c0`.
+
+`budget3.py`:
+
+```python
+import random, math
+# fleet15k, revision 5: false-positive budget with the calendar component, D1/D2/D3 thresholds,
+# pass probabilities, alert-fatigue bounds and peak disk. Standard library only.
+# Account model, seed and leaf list are those of budget.py / budget2.py (variant D, 37,052 leaves).
+N = 15000
+random.seed(42)
+spend = [math.exp(random.gauss(math.log(800), 1.8)) for _ in range(N)]
+med = sorted(spend, reverse=True)[int(N * 0.5)]
+leaves = []                                   # (mean M per day, log-noise s, account index)
+for a, m in enumerate(spend):
+    k = max(1, min(80, round(3 + 4 * math.log10(1 + m / 100) + random.gauss(0, 2.0))))
+    _ = (m > 20000 and random.random() < 0.6) or random.random() < 0.1
+    keep = 2 if m >= med else 1
+    w = [0.5 ** i for i in range(k)]; ws = sum(w)
+    s = min(0.15, max(0.03, 0.15 - 0.04 * math.log10(max(m, 1) / 100)))   # noise: 15 % small ... 3 % large accounts
+    daily = m / 30.4
+    for i in range(min(k, keep)):
+        leaves.append((daily * w[i] / ws, s, a))
+    if k > keep:
+        leaves.append((daily * sum(w[keep:]) / ws, s, a))
+print("leaves %d (must equal budget.py variant D: 37052)" % len(leaves))
+
+MIN = 100.0                                   # min impact per day (USD-equivalent)
+def need_rel(L):                              # relative excess per day needed for `warning`
+    return max(0.20, MIN / L)
+def Q(z):                                     # upper tail of N(0,1)
+    return 0.5 * math.erfc(z / math.sqrt(2))
+def arl(h, k=0.5):                            # Siegmund, one-sided
+    b = h + 1.166
+    return (math.exp(2 * k * b) - 2 * k * b - 1) / (2 * k * k)
+
+# Cohort flags (generator: 5 % month_end_batch, 5 % monthly_cycle accounts), on a separate stream.
+rc = random.Random(7)
+cohort = [None] * N
+for a in range(N):
+    u = rc.random()
+    cohort[a] = 'meb' if u < 0.05 else ('mc' if u < 0.10 else None)
+
+reach = [x for x in leaves if math.log(1 + need_rel(x[0])) / x[1] < 9]   # leaves that can reach `warning` at all
+elig500 = sum(1 for x in leaves if x[0] >= 500)
+n_cohort_reach = sum(1 for x in reach if cohort[x[2]] is not None)
+print("leaves that can reach warning (needed excess < 9 sigma): %d; of them in a calendar cohort: %d; mean M >= $500/day: %d"
+      % (len(reach), n_cohort_reach, elig500))
+
+# --- CUSUM alarm episodes (in-control N(0,1), k = 0.5): distribution of the mean z over the run ---
+def episodes(h, steps, seed):
+    r = random.Random(seed); S = 0.0; run = []; out = []
+    for _ in range(steps):
+        z = r.gauss(0, 1)
+        S = max(0.0, S + z - 0.5)
+        if S == 0.0:
+            run = []
+        else:
+            run.append(z)
+            if S > h:
+                out.append(sum(run) / len(run)); S = 0.0; run = []
+    return out
+STEPS = 3_000_000
+def d3_rate(h, eps):
+    a = arl(h); tot = 0.0
+    for L, s, _ in reach:
+        thr = math.log(1 + need_rel(L)) / s           # mean z needed (log scale)
+        p = sum(1 for m in eps if m >= thr) / len(eps) if eps else 0.0
+        tot += p / a
+    return tot
+def d12_rate(zt):
+    return sum(Q(max(zt, math.log(1 + need_rel(L)) / s)) for L, s, _ in reach)
+
+# --- calendar residual for the cohort series (Monte Carlo of the significance-gated estimator) ---
+# Events per month: month_start 3 days, mid_month 2 days, month_end 2 business days.
+# meb: month_end factor 1.3; mc: month_start and mid_month factors U(1.2, 1.6).
+# Estimator: mean log ratio over n prior cycles (d days each); applied only if t = r / (s / sqrt(n d)) >= 3.
+# mode 'gated' = the design; mode 'none' = no calendar component (the revision-4 model), for contrast.
+def event_alarm_prob(L, s, d, fl_draw, n_prior, zt, h, r, trials, mode):
+    hits = 0
+    for _ in range(trials):
+        fl = fl_draw(r)
+        if mode == 'none' or n_prior == 0:
+            fhat = 0.0
+        else:
+            rbar = fl + r.gauss(0, s / math.sqrt(n_prior * d))
+            t = rbar / (s / math.sqrt(n_prior * d))
+            fhat = rbar if t >= 3 else 0.0
+        resid = (fl - fhat) / s
+        S = 0.0; fired = False; zs = []
+        for _d in range(d):
+            z = resid + r.gauss(0, 1)
+            zs.append(z)
+            S = max(0.0, S + z - 0.5)
+            if z >= zt and math.exp(s * z) - 1 >= need_rel(L):
+                fired = True
+            if S > h and math.exp(s * (sum(zs) / len(zs))) - 1 >= need_rel(L):
+                fired = True
+        hits += fired
+    return hits / trials
+def cohort_events(a):
+    c = cohort[a]
+    if c == 'meb':
+        return [(2, lambda r: math.log(1.3))]
+    if c == 'mc':
+        return [(3, lambda r: math.log(r.uniform(1.2, 1.6))), (2, lambda r: math.log(r.uniform(1.2, 1.6)))]
+    return []
+def calendar_fp(zt, h, mode='gated', trials=400, seed=11):
+    # expected false groups per 61-day window: each event class occurs twice in the window
+    # (P3 with 2 prior cycles, P4 with 3 prior cycles on fleet15k)
+    r = random.Random(seed); tot = 0.0
+    for L, s, a in reach:
+        for d, draw in cohort_events(a):
+            for n_prior in (2, 3):
+                tot += event_alarm_prob(L, s, d, draw, n_prior, zt, h, r, trials, mode)
+    return tot
+def first_occurrence(zt, h, trials=400, seed=13):
+    # Cohort accounts onboarding on days 31..115 meet an event class for the first time inside the
+    # evaluation window with no prior cycle (factor not applied). Per-account probability of such an
+    # onboarding: 600/395 per day x 85 days / 15,000 accounts.
+    p_onb = 600 / 395.0 * 85 / N
+    r = random.Random(seed); tot = 0.0
+    for L, s, a in reach:
+        for d, draw in cohort_events(a):
+            tot += p_onb * event_alarm_prob(L, s, d, draw, 0, zt, h, r, trials, 'gated')
+    return tot
+
+AGG = 550
+print()
+print("== components: expected false-positive groups per day (natural rates, 61-day window) ==")
+for zt in (4.0, 4.5):
+    for h in (7.0, 7.5, 8.0):
+        eps = episodes(h, STEPS, seed=int(h * 10))
+        c_d12 = d12_rate(zt)
+        c_d3 = d3_rate(h, eps)
+        c_d3_ub = elig500 / arl(h)
+        c_agg = AGG / arl(h) + AGG * Q(zt)
+        c_cal = calendar_fp(zt, h) / 61.0
+        c_cal_none = calendar_fp(zt, h, mode='none') / 61.0
+        c_first = first_occurrence(zt, h) / 61.0
+        c_other = 0.01                                # D4-D7, holidays, intermittent weekly sums: allowance, measured
+        tot = c_d12 + c_d3 + c_agg + c_cal + c_first + c_other
+        print("zT=%.1f h=%.1f ARL0=%6.0f | D1&D2 %.4f | D3 %.4f (bound %.4f) | aggregate %.4f | calendar %.4f (no component: %.3f) | first-occurrence %.4f | other %.3f | TOTAL %.3f | with D3 bound %.3f"
+              % (zt, h, arl(h), c_d12, c_d3, c_d3_ub, c_agg, c_cal, c_cal_none, c_first, c_other, tot, tot - c_d3 + c_d3_ub))
+
+# --- pass probabilities for AT-1 and AT-4 (two pooled natural seeds, 122 days) ---
+def poisson(r, lam):
+    if lam > 30:
+        return max(0, int(round(r.gauss(lam, math.sqrt(lam)))))
+    L = math.exp(-lam); k = 0; p = 1.0
+    while True:
+        p *= r.random()
+        if p <= L:
+            return k
+        k += 1
+def wilson_lo(p, n, z=1.96):
+    return (p + z * z / (2 * n) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n)
+def pass_prob(lam, tp_mean=146, days=122, sims=4000, seed=5):
+    r = random.Random(seed); ok1 = ok4 = both = 0
+    for _ in range(sims):
+        tp = poisson(r, tp_mean)
+        daily = [poisson(r, lam) for _ in range(days)]
+        fp = sum(daily)
+        n = tp + fp
+        p = tp / n if n else 0
+        a1 = n >= 100 and p >= 0.80 and wilson_lo(p, n) >= 0.70
+        p95 = sorted(daily)[int(0.95 * days)]
+        a4 = fp / days <= 0.30 and p95 <= 2
+        ok1 += a1; ok4 += a4; both += a1 and a4
+    return ok1 / sims, ok4 / sims, both / sims
+print()
+for lam in (0.11, 0.15, 0.30, 0.45):
+    print("P(pass) at a true FP rate of %.2f/day: AT-1 %.3f, AT-4 %.3f, both %.3f" % ((lam,) + pass_prob(lam)))
+
+# --- exact (Garwood) 95 % interval for a count measured over 61 days ---
+def chi2_ppf(p, k):                                    # Wilson-Hilferty approximation
+    from statistics import NormalDist
+    z = NormalDist().inv_cdf(p)
+    return k * (1 - 2 / (9 * k) + z * math.sqrt(2 / (9 * k))) ** 3
+for cnt in (4, 7, 9, 15):
+    lo = 0.5 * chi2_ppf(0.025, 2 * cnt) / 61; hi = 0.5 * chi2_ppf(0.975, 2 * cnt + 2) / 61
+    print("measured %2d false groups in 61 days: %.3f/day, 95 %% interval [%.3f, %.3f]" % (cnt, cnt / 61, lo, hi))
+
+# --- alert fatigue (natural rates, >= warning): Poisson approximation ---
+def pois_q(lam, q):
+    c = 0.0; k = 0; t = math.exp(-lam)
+    while True:
+        c += t
+        if c >= q:
+            return k
+        k += 1; t *= lam / k
+lam = 1.2 + 0.11
+print("groups/day at >= warning: mean %.2f, p95 day %d, typical max over 61 days %d" % (lam, pois_q(lam, 0.95), pois_q(lam, 1 - 1 / 61)))
+
+# --- peak disk across the sequential runs (GB) ---
+points = 5 * 30 + 30 + 23 + 16 + 9
+bt_export = len(leaves) * points * 30 / 1e9
+calendar_state = len(leaves) * 3 * 12 * 2 / 1e9        # 3 factors per leaf, 2 runs
+run_nat1 = 4.90 - 0.198 + bt_export + 0.012 * (points / 178.0 - 1) + calendar_state
+run_other = run_nat1 - bt_export
+per_run_eval = 0.04     # ASSUMPTION (measured in PR 3-4): compact evaluator inputs per run
+nat1_actuals = 0.03     # ASSUMPTION (measured in PR 3-4): evaluator's per-leaf daily actuals, gzip
+for runs in (['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'enriched'],
+             ['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'natural-3', 'enriched']):
+    retained = 0.0; peak = 0.0
+    for r_ in runs:
+        own = run_nat1 if r_ == 'natural-1' else run_other
+        peak = max(peak, own + retained)
+        retained += per_run_eval + (bt_export + nat1_actuals if r_ == 'natural-1' else 0)
+    print("%d runs: natural-1 run %.3f GB, other runs %.3f GB, peak %.2f GB, retained at end %.2f GB"
+          % (len(runs), run_nat1, run_other, peak, retained))
 ```

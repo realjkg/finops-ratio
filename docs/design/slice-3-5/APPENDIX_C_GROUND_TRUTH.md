@@ -14,8 +14,11 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
    They are written to `<out>/ground-truth/labels.jsonl` and read only by
    the evaluator.
 4. **Seeds.** Each large profile has these seeds (DESIGN §2.6, §4.8):
-   - **tuning**: natural rates plus enriched kinds; used to measure the
-     false-positive shares and to tune and freeze thresholds; never scored;
+   - **tuning**: natural rates plus enriched kinds (label-dense); used for
+     recall-side tuning only; never scored;
+   - **tuning-natural**: natural rates, its own seed; used to **measure the
+     false-positive sources** and to tune and freeze z_T and h (measured
+     total ≤ 0.15/day, Garwood 95 % upper bound ≤ 0.30/day); never scored;
    - **natural-1, natural-2** (and **natural-3** if the pooled group count
      is below 140): the natural rates of DESIGN §2.5 per account-month;
      pooled for precision and false-positive rate; natural-1 alone for the
@@ -81,7 +84,7 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
 | `onboarding` | **no alert** | account | S-curve ramp over 10–40 days | ramp | AT-5 (D6 must not fire unless cohort p99 is exceeded) |
 | `offboarding` | **no alert** at ≥ `warning` | account | decay to 0 over 7–30 days | decay | `info` drop groups are correct |
 | `constant_amortised` | **no alert**, gated | leaf series | the same effective cost every day | whole span | AT-5 |
-| `month_end_batch`, `monthly_cycle`, `holiday`, `intermittent` | **no alert** (stressor cohorts) | account / series | DESIGN §2.3 | their days | AT-7: false positives reported, not gated |
+| `month_end_batch`, `monthly_cycle`, `holiday`, `intermittent` | **no alert** (stressor cohorts) | account / series | DESIGN §2.3 | their days | detections at ≥ `warning` are **false** and count in AT-1 and AT-4 (no exclusion); AT-7 reports the per-cohort breakdown, including first occurrences of a calendar class |
 | `mtd_restatement`, `late_data` | **no alert** (`ci` only) | source / period | revised or late month-to-date rows | revision day | no group from a revision alone; `restated` resolution tested |
 
 ## C.3 Label format (`labels.jsonl`, one JSON object per line)
@@ -173,7 +176,7 @@ Wilson score interval, 95 % (z = 1.96), for a proportion p̂ over n:
 | AT-1 precision | natural seeds pooled | correct ÷ all groups at ≥ `warning` | p̂ ≥ 0.80 **and** Wilson lower ≥ 0.70, n ≥ 100 (expected ≈ 183 with two seeds; fewer than 140 after two: run natural-3; fewer than 100 after three: "insufficient n", escalated) |
 | AT-2 recall, per kind | enriched | detected ÷ meaningful labels | p̂ ≥ target **and** Wilson lower ≥ target − 0.10, n ≥ 100 per kind |
 | AT-3 time-to-detect | enriched | median, p90 | point estimates ≤ targets |
-| AT-4 false-positive rate | natural seeds pooled | false groups per day | mean ≤ 0.30 (`fleet15k`) / 0.40 (`full`), p95 day ≤ 2 |
+| AT-4 false-positive rate | natural seeds pooled, all cohorts included | false groups per day | mean ≤ 0.30 (`fleet15k`) / 0.40 (`full`), p95 day ≤ 2; the Garwood 95 % interval is reported with it |
 | AT-5 suppression | natural, enriched | count | exactly 0 |
 | AT-6 one group per shared event | natural, enriched | groups per fan-in label per currency; duplicates | exactly 1; 0 duplicates |
 
@@ -194,6 +197,8 @@ the harness can see failure:
 | matcher accepts a label explaining 5 % of the excess and ranked 4th | precision rises spuriously; the C.4 rule test fails |
 | compute precision on the enriched seed | the seed check fails (precision is natural-only) |
 | pool the tuning seed into precision | the seed check fails (tuning is never scored) |
+| exclude the `month_end_batch` cohort from AT-4 | the cohort-inclusion test fails |
+| score a detection day with quantiles that include errors from that day or later | the as-of test fails |
 | replace the Wilson rule by the point estimate | a fixture with p̂ = 0.80, n = 20 passes wrongly; the test fails |
 | count duplicates as correct | AT-6 and precision tests fail |
 | relabel a `no_alert` label as `alert` in a copy of `labels.jsonl` | recall falls by exactly that label |
