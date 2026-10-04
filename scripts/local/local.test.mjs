@@ -19,15 +19,22 @@ import {
   localTestSettings,
   ownsListeningSocket,
   parseEnvFile,
+  cleanupLocalTest,
+  childExited,
   portInUse,
   preflightProblems,
   removeProjectState,
+  runProcess,
   serializeEnvFile,
   startIfPortFree,
+  stopChild,
   waitForOwnServer,
   writeEnvFileSecure,
 } from './lib.mjs';
 import net from 'node:net';
+import { EventEmitter } from 'node:events';
+import { spawn } from 'node:child_process';
+import process from 'node:process';
 import { bootstrapPlan } from './bootstrap.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -470,5 +477,111 @@ describe('L15 the app port is re-checked right before next start is spawned (no 
     expect(src).toMatch(/startIfPortFree\(\{[\s\S]*?start: \(\) =>\s*spawn\(/);
     expect(src).toMatch(/waitForOwnServer\(\{/);
     expect(src.match(/spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'/g)).toHaveLength(1);
+  });
+});
+
+// --- Copilot 4176004971 (High): a child already killed by a signal has
+// exitCode === null and signalCode !== null; waiting for 'exit' then hangs
+// forever and local:test never reaches down -v. Every cleanup wait is bounded.
+describe('L16 stopping next start and cleaning up never hang', () => {
+  /** A child that has ALREADY exited through a signal: its 'exit' event is in the past and never fires again. */
+  const signalled = () => Object.assign(new EventEmitter(), { pid: 99999, exitCode: null, signalCode: 'SIGKILL', kill: vi.fn(() => false) });
+  /** A child that never exits, whatever it is sent. */
+  const stuck = () => Object.assign(new EventEmitter(), { pid: 99998, exitCode: null, signalCode: null, kill: vi.fn(() => true) });
+  const spawned = [];
+  const sleeper = (extra = '') => {
+    const c = spawn(process.execPath, ['-e', `${extra}setInterval(() => {}, 1000)`], { stdio: 'ignore' });
+    spawned.push(c);
+    return c;
+  };
+  // Never leave a sleeper behind, even when a test fails.
+  afterAll(() => {
+    for (const c of spawned) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
+  });
+  const exited = (c) => new Promise((r) => (childExited(c) ? r() : c.once('exit', r)));
+
+  it('childExited: an exit code OR a signal means exited', () => {
+    expect(childExited({ exitCode: 0, signalCode: null })).toBe(true);
+    expect(childExited({ exitCode: null, signalCode: 'SIGTERM' })).toBe(true);
+    expect(childExited({ exitCode: null, signalCode: null })).toBe(false);
+  });
+
+  it('a child already killed by a signal is recognised at once (no wait, no kill)', async () => {
+    const c = signalled();
+    const t0 = Date.now();
+    await expect(stopChild(c, { graceMs: 30_000, killMs: 30_000 })).resolves.toBe('already-exited');
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(c.kill).not.toHaveBeenCalled();
+  }, 5_000);
+
+  it('a REAL child SIGKILLed before the wait does not hang the wait', async () => {
+    const c = sleeper();
+    c.kill('SIGKILL');
+    await exited(c);
+    expect(c.exitCode).toBeNull();
+    expect(c.signalCode).toBe('SIGKILL');
+    const t0 = Date.now();
+    await expect(stopChild(c, { graceMs: 30_000, killMs: 30_000 })).resolves.toBe('already-exited');
+    expect(Date.now() - t0).toBeLessThan(1000);
+  }, 5_000);
+
+  it('a running child that ignores SIGTERM is SIGKILLed after the grace period', async () => {
+    const c = sleeper("process.on('SIGTERM', () => {}); ");
+    await new Promise((r) => setTimeout(r, 300)); // let it install the handler
+    await expect(stopChild(c, { graceMs: 300, killMs: 3_000 })).resolves.toBe('killed');
+    expect(c.signalCode).toBe('SIGKILL');
+  }, 10_000);
+
+  it('a running child that obeys SIGTERM is stopped', async () => {
+    const c = sleeper();
+    await expect(stopChild(c, { graceMs: 3_000, killMs: 3_000 })).resolves.toBe('stopped');
+  }, 10_000);
+
+  it('a child that never exits is given up on after a bounded time (cleanup goes on)', async () => {
+    const c = stuck();
+    await expect(stopChild(c, { graceMs: 50, killMs: 50 })).resolves.toBe('unresponsive');
+    expect(c.kill).toHaveBeenNthCalledWith(1, 'SIGTERM');
+    expect(c.kill).toHaveBeenNthCalledWith(2, 'SIGKILL');
+  }, 5_000);
+
+  it('cleanupLocalTest: with an already-signalled app, down -v still runs, once', async () => {
+    const down = vi.fn(async () => undefined);
+    const r = await cleanupLocalTest({ app: signalled(), down, stopOptions: { graceMs: 30_000, killMs: 30_000 } });
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(r).toEqual({ app: 'already-exited', down: 'ok' });
+  }, 5_000);
+
+  it('cleanupLocalTest: down -v runs even when stopping the app throws, and with no app at all', async () => {
+    const down = vi.fn(async () => undefined);
+    const broken = { ...stuck(), kill: () => { throw new Error('EPERM'); } };
+    const r = await cleanupLocalTest({ app: broken, down, stopOptions: { graceMs: 50, killMs: 50 } });
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(r.down).toBe('ok');
+    expect(r.app).toMatch(/error/);
+    expect(await cleanupLocalTest({ app: null, down })).toEqual({ app: null, down: 'ok' });
+    expect(down).toHaveBeenCalledTimes(2);
+  }, 5_000);
+
+  it('cleanupLocalTest reports a failing down -v instead of throwing past the summary', async () => {
+    const r = await cleanupLocalTest({ app: null, down: async () => Promise.reject(new Error('compose down failed')) });
+    expect(r.down).toMatch(/compose down failed/);
+  });
+
+  it('runProcess has a bounded timeout: a hanging command is killed and rejected', async () => {
+    const t0 = Date.now();
+    await expect(runProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeoutMs: 300 })).rejects.toThrow(/timed out/);
+    expect(Date.now() - t0).toBeLessThan(5_000);
+    await expect(runProcess(process.execPath, ['-e', 'process.stdout.write("ok")'], { capture: true, timeoutMs: 10_000 })).resolves.toEqual({ code: 0, out: 'ok' });
+    await expect(runProcess(process.execPath, ['-e', 'process.exit(3)'], { timeoutMs: 10_000 })).rejects.toThrow(/exited 3/);
+    await expect(runProcess(process.execPath, ['-e', 'process.exit(3)'], { allowFail: true, timeoutMs: 10_000 })).resolves.toMatchObject({ code: 3 });
+  }, 10_000);
+
+  it('local.mjs cleans up only through cleanupLocalTest, with a bounded down; no unbounded exit wait remains', () => {
+    const src = read('scripts/local/local.mjs');
+    expect(src).toMatch(/await cleanupLocalTest\(\{/);
+    expect(src).not.toMatch(/once\('exit'/);
+    expect(src).not.toMatch(/\.exitCode !== null \? /);
+    expect(src).toMatch(/function run\([^)]*\) \{\s*return runProcess\(/);
+    expect(src).toMatch(/timeoutMs: DOWN_TIMEOUT_MS/);
   });
 });
