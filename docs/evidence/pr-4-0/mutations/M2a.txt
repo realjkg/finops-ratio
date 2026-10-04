@@ -1,0 +1,540 @@
+Mutation M2a off-by-one month index: 0-based getUTCMonth passed as a 1-based month
+- return daysInMonth(date.getUTCFullYear(), date.getUTCMonth() + 1);
++ return daysInMonth(date.getUTCFullYear(), date.getUTCMonth());
+Run: TZ=UTC npx vitest run src/lib/forecast.calendar.test.ts
+exit code 1
+
+
+ RUN  v5.0.1 <repo>
+
+ ❯ src/lib/forecast.calendar.test.ts (47 tests | 27 failed | 15 skipped) 2112ms
+   ❯ Date helpers in this process (TZ=UTC) (27)
+     × 2026-02-10T12:00:00.000Z: 28 days, 13 weekdays left (non-leap Feb) 9ms
+     × 2026-02-26T18:00:00.000Z: 28 days, 1 weekdays left (non-leap Feb, two days before the end) 1ms
+     × 2026-02-28T23:59:59.999Z: 28 days, 0 weekdays left (non-leap Feb, last instant) 1ms
+     × 2024-02-10T12:00:00.000Z: 29 days, 14 weekdays left (leap Feb) 1ms
+     × 2024-02-29T00:00:00.000Z: 29 days, 0 weekdays left (leap day, first instant) 2ms
+     × 2000-02-15T06:00:00.000Z: 29 days, 10 weekdays left (leap Feb (400-year rule)) 1ms
+     × 2100-02-15T06:00:00.000Z: 28 days, 9 weekdays left (non-leap Feb (100-year rule)) 1ms
+     × 2026-04-01T00:00:00.000Z: 30 days, 21 weekdays left (30-day month, first instant) 1ms
+     × 2026-04-30T23:30:00.000Z: 30 days, 0 weekdays left (30-day month, last day late UTC (already May in Tokyo)) 3ms
+     × 2026-06-25T17:42:00.000Z: 30 days, 3 weekdays left (30-day month, DEMO_NOW) 1ms
+     × 2026-06-29T20:00:00.000Z: 30 days, 1 weekdays left (30-day month, day before the end) 1ms
+     × 2026-09-15T14:00:00.000Z: 30 days, 11 weekdays left (30-day month) 0ms
+     × 2026-01-15T03:00:00.000Z: 31 days, 11 weekdays left (31-day month) 1ms
+     × 2026-05-31T23:59:59.999Z: 31 days, 0 weekdays left (31-day month, last instant) 0ms
+     × 2026-07-01T00:00:00.000Z: 31 days, 22 weekdays left (31-day month, first instant (still June in LA)) 0ms
+     × 2026-03-08T10:00:00.000Z: 31 days, 17 weekdays left (US DST start day) 0ms
+     × 2026-03-29T01:30:00.000Z: 31 days, 2 weekdays left (EU DST start day) 1ms
+     × 2026-03-30T22:00:00.000Z: 31 days, 1 weekdays left (DST-start month, day before the end) 0ms
+     × 2026-03-31T23:59:59.999Z: 31 days, 0 weekdays left (DST-start month, last instant) 0ms
+     × 2026-10-25T01:30:00.000Z: 31 days, 5 weekdays left (EU DST end day) 0ms
+     × 2026-11-01T09:30:00.000Z: 30 days, 21 weekdays left (US DST end day) 0ms
+     × 2026-11-30T23:00:00.000Z: 30 days, 0 weekdays left (DST-end month, last day late UTC) 0ms
+     × 2025-12-31T12:00:00.000Z: 31 days, 0 weekdays left (Dec 31) 1ms
+     × 2026-12-31T23:59:59.999Z: 31 days, 0 weekdays left (last instant of a year) 0ms
+     × 2027-01-01T00:00:00.000Z: 31 days, 20 weekdays left (first instant of a year (still 2026 in LA)) 0ms
+     × 2023-12-31T23:00:00.000Z: 31 days, 0 weekdays left (year boundary into a leap year) 0ms
+   ❯ every zone produces the identical BudgetStatus (1)
+     × the whole computeBudgetStatus output is TZ-independent 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=UTC
+Error: probe failed under TZ=UTC: Command failed: /opt/node22/bin/node --import tsx <repo>/src/lib/calendarTzProbe.ts ["2026-02-10T12:00:00.000Z","2026-02-26T18:00:00.000Z","2026-02-28T23:59:59.999Z","2024-02-10T12:00:00.000Z","2024-02-29T00:00:00.000Z","2000-02-15T06:00:00.000Z","2100-02-15T06:00:00.000Z","2026-04-01T00:00:00.000Z","2026-04-30T23:30:00.000Z","2026-06-25T17:42:00.000Z","2026-06-29T20:00:00.000Z","2026-09-15T14:00:00.000Z","2026-01-15T03:00:00.000Z","2026-05-31T23:59:59.999Z","2026-07-01T00:00:00.000Z","2026-08-31T12:00:00.000Z","2026-03-08T10:00:00.000Z","2026-03-29T01:30:00.000Z","2026-03-30T22:00:00.000Z","2026-03-31T23:59:59.999Z","2026-10-25T01:30:00.000Z","2026-11-01T09:30:00.000Z","2026-11-30T23:00:00.000Z","2025-12-31T12:00:00.000Z","2026-12-31T23:59:59.999Z","2027-01-01T00:00:00.000Z","2023-12-31T23:00:00.000Z"]
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+    138| export function daysInMonth(year: number, month: number): number {
+    139|   if (!Number.isInteger(month) || month < 1 || month > 12) {
+    140|     throw new RangeError(`month must be an integer 1–12, got ${month}`…
+       |           ^
+    141|   }
+    142|   if (month === 2) return isLeapYear(year) ? 29 : 28;
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ src/lib/forecast.calendar.test.ts:105:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/32]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Asia/Tokyo
+Error: probe failed under TZ=Asia/Tokyo: Command failed: /opt/node22/bin/node --import tsx <repo>/src/lib/calendarTzProbe.ts ["2026-02-10T12:00:00.000Z","2026-02-26T18:00:00.000Z","2026-02-28T23:59:59.999Z","2024-02-10T12:00:00.000Z","2024-02-29T00:00:00.000Z","2000-02-15T06:00:00.000Z","2100-02-15T06:00:00.000Z","2026-04-01T00:00:00.000Z","2026-04-30T23:30:00.000Z","2026-06-25T17:42:00.000Z","2026-06-29T20:00:00.000Z","2026-09-15T14:00:00.000Z","2026-01-15T03:00:00.000Z","2026-05-31T23:59:59.999Z","2026-07-01T00:00:00.000Z","2026-08-31T12:00:00.000Z","2026-03-08T10:00:00.000Z","2026-03-29T01:30:00.000Z","2026-03-30T22:00:00.000Z","2026-03-31T23:59:59.999Z","2026-10-25T01:30:00.000Z","2026-11-01T09:30:00.000Z","2026-11-30T23:00:00.000Z","2025-12-31T12:00:00.000Z","2026-12-31T23:59:59.999Z","2027-01-01T00:00:00.000Z","2023-12-31T23:00:00.000Z"]
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+    138| export function daysInMonth(year: number, month: number): number {
+    139|   if (!Number.isInteger(month) || month < 1 || month > 12) {
+    140|     throw new RangeError(`month must be an integer 1–12, got ${month}`…
+       |           ^
+    141|   }
+    142|   if (month === 2) return isLeapYear(year) ? 29 : 28;
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ src/lib/forecast.calendar.test.ts:105:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/32]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Pacific/Kiritimati
+Error: probe failed under TZ=Pacific/Kiritimati: Command failed: /opt/node22/bin/node --import tsx <repo>/src/lib/calendarTzProbe.ts ["2026-02-10T12:00:00.000Z","2026-02-26T18:00:00.000Z","2026-02-28T23:59:59.999Z","2024-02-10T12:00:00.000Z","2024-02-29T00:00:00.000Z","2000-02-15T06:00:00.000Z","2100-02-15T06:00:00.000Z","2026-04-01T00:00:00.000Z","2026-04-30T23:30:00.000Z","2026-06-25T17:42:00.000Z","2026-06-29T20:00:00.000Z","2026-09-15T14:00:00.000Z","2026-01-15T03:00:00.000Z","2026-05-31T23:59:59.999Z","2026-07-01T00:00:00.000Z","2026-08-31T12:00:00.000Z","2026-03-08T10:00:00.000Z","2026-03-29T01:30:00.000Z","2026-03-30T22:00:00.000Z","2026-03-31T23:59:59.999Z","2026-10-25T01:30:00.000Z","2026-11-01T09:30:00.000Z","2026-11-30T23:00:00.000Z","2025-12-31T12:00:00.000Z","2026-12-31T23:59:59.999Z","2027-01-01T00:00:00.000Z","2023-12-31T23:00:00.000Z"]
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+    138| export function daysInMonth(year: number, month: number): number {
+    139|   if (!Number.isInteger(month) || month < 1 || month > 12) {
+    140|     throw new RangeError(`month must be an integer 1–12, got ${month}`…
+       |           ^
+    141|   }
+    142|   if (month === 2) return isLeapYear(year) ? 29 : 28;
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ src/lib/forecast.calendar.test.ts:105:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/32]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=America/Los_Angeles
+Error: probe failed under TZ=America/Los_Angeles: Command failed: /opt/node22/bin/node --import tsx <repo>/src/lib/calendarTzProbe.ts ["2026-02-10T12:00:00.000Z","2026-02-26T18:00:00.000Z","2026-02-28T23:59:59.999Z","2024-02-10T12:00:00.000Z","2024-02-29T00:00:00.000Z","2000-02-15T06:00:00.000Z","2100-02-15T06:00:00.000Z","2026-04-01T00:00:00.000Z","2026-04-30T23:30:00.000Z","2026-06-25T17:42:00.000Z","2026-06-29T20:00:00.000Z","2026-09-15T14:00:00.000Z","2026-01-15T03:00:00.000Z","2026-05-31T23:59:59.999Z","2026-07-01T00:00:00.000Z","2026-08-31T12:00:00.000Z","2026-03-08T10:00:00.000Z","2026-03-29T01:30:00.000Z","2026-03-30T22:00:00.000Z","2026-03-31T23:59:59.999Z","2026-10-25T01:30:00.000Z","2026-11-01T09:30:00.000Z","2026-11-30T23:00:00.000Z","2025-12-31T12:00:00.000Z","2026-12-31T23:59:59.999Z","2027-01-01T00:00:00.000Z","2023-12-31T23:00:00.000Z"]
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+    138| export function daysInMonth(year: number, month: number): number {
+    139|   if (!Number.isInteger(month) || month < 1 || month > 12) {
+    140|     throw new RangeError(`month must be an integer 1–12, got ${month}`…
+       |           ^
+    141|   }
+    142|   if (month === 2) return isLeapYear(year) ? 29 : 28;
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ src/lib/forecast.calendar.test.ts:105:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/32]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Pacific/Pago_Pago
+Error: probe failed under TZ=Pacific/Pago_Pago: Command failed: /opt/node22/bin/node --import tsx <repo>/src/lib/calendarTzProbe.ts ["2026-02-10T12:00:00.000Z","2026-02-26T18:00:00.000Z","2026-02-28T23:59:59.999Z","2024-02-10T12:00:00.000Z","2024-02-29T00:00:00.000Z","2000-02-15T06:00:00.000Z","2100-02-15T06:00:00.000Z","2026-04-01T00:00:00.000Z","2026-04-30T23:30:00.000Z","2026-06-25T17:42:00.000Z","2026-06-29T20:00:00.000Z","2026-09-15T14:00:00.000Z","2026-01-15T03:00:00.000Z","2026-05-31T23:59:59.999Z","2026-07-01T00:00:00.000Z","2026-08-31T12:00:00.000Z","2026-03-08T10:00:00.000Z","2026-03-29T01:30:00.000Z","2026-03-30T22:00:00.000Z","2026-03-31T23:59:59.999Z","2026-10-25T01:30:00.000Z","2026-11-01T09:30:00.000Z","2026-11-30T23:00:00.000Z","2025-12-31T12:00:00.000Z","2026-12-31T23:59:59.999Z","2027-01-01T00:00:00.000Z","2023-12-31T23:00:00.000Z"]
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+    138| export function daysInMonth(year: number, month: number): number {
+    139|   if (!Number.isInteger(month) || month < 1 || month > 12) {
+    140|     throw new RangeError(`month must be an integer 1–12, got ${month}`…
+       |           ^
+    141|   }
+    142|   if (month === 2) return isLeapYear(year) ? 29 : 28;
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ src/lib/forecast.calendar.test.ts:105:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/32]⎯
+
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 27 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-02-10T12:00:00.000Z: 28 days, 13 weekdays left (non-leap Feb)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-02-26T18:00:00.000Z: 28 days, 1 weekdays left (non-leap Feb, two days before the end)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-02-28T23:59:59.999Z: 28 days, 0 weekdays left (non-leap Feb, last instant)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2100-02-15T06:00:00.000Z: 28 days, 9 weekdays left (non-leap Feb (100-year rule))
+AssertionError: expected 31 to be 28 // Object.is equality
+
+- Expected
++ Received
+
+- 28
++ 31
+
+ ❯ src/lib/forecast.calendar.test.ts:164:30
+    162|   it.each(CASES)('%s: %i days, %i weekdays left (%s)', (iso, days, wee…
+    163|     const d = new Date(iso);
+    164|     expect(daysInMonthOf(d)).toBe(days);
+       |                              ^
+    165|     expect(remainingWeekdaysInMonth(d)).toBe(weekdays);
+    166|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/32]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2024-02-10T12:00:00.000Z: 29 days, 14 weekdays left (leap Feb)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2024-02-29T00:00:00.000Z: 29 days, 0 weekdays left (leap day, first instant)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2000-02-15T06:00:00.000Z: 29 days, 10 weekdays left (leap Feb (400-year rule))
+AssertionError: expected 31 to be 29 // Object.is equality
+
+- Expected
++ Received
+
+- 29
++ 31
+
+ ❯ src/lib/forecast.calendar.test.ts:164:30
+    162|   it.each(CASES)('%s: %i days, %i weekdays left (%s)', (iso, days, wee…
+    163|     const d = new Date(iso);
+    164|     expect(daysInMonthOf(d)).toBe(days);
+       |                              ^
+    165|     expect(remainingWeekdaysInMonth(d)).toBe(weekdays);
+    166|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/32]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-04-01T00:00:00.000Z: 30 days, 21 weekdays left (30-day month, first instant)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-04-30T23:30:00.000Z: 30 days, 0 weekdays left (30-day month, last day late UTC (already May in Tokyo))
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-06-25T17:42:00.000Z: 30 days, 3 weekdays left (30-day month, DEMO_NOW)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-06-29T20:00:00.000Z: 30 days, 1 weekdays left (30-day month, day before the end)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-09-15T14:00:00.000Z: 30 days, 11 weekdays left (30-day month)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-11-01T09:30:00.000Z: 30 days, 21 weekdays left (US DST end day)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-11-30T23:00:00.000Z: 30 days, 0 weekdays left (DST-end month, last day late UTC)
+AssertionError: expected 31 to be 30 // Object.is equality
+
+- Expected
++ Received
+
+- 30
++ 31
+
+ ❯ src/lib/forecast.calendar.test.ts:164:30
+    162|   it.each(CASES)('%s: %i days, %i weekdays left (%s)', (iso, days, wee…
+    163|     const d = new Date(iso);
+    164|     expect(daysInMonthOf(d)).toBe(days);
+       |                              ^
+    165|     expect(remainingWeekdaysInMonth(d)).toBe(weekdays);
+    166|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/32]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-01-15T03:00:00.000Z: 31 days, 11 weekdays left (31-day month)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2027-01-01T00:00:00.000Z: 31 days, 20 weekdays left (first instant of a year (still 2026 in LA))
+RangeError: month must be an integer 1–12, got 0
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+    138| export function daysInMonth(year: number, month: number): number {
+    139|   if (!Number.isInteger(month) || month < 1 || month > 12) {
+    140|     throw new RangeError(`month must be an integer 1–12, got ${month}`…
+       |           ^
+    141|   }
+    142|   if (month === 2) return isLeapYear(year) ? 29 : 28;
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ src/lib/forecast.calendar.test.ts:164:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/32]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-05-31T23:59:59.999Z: 31 days, 0 weekdays left (31-day month, last instant)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-07-01T00:00:00.000Z: 31 days, 22 weekdays left (31-day month, first instant (still June in LA))
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-10-25T01:30:00.000Z: 31 days, 5 weekdays left (EU DST end day)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2025-12-31T12:00:00.000Z: 31 days, 0 weekdays left (Dec 31)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-12-31T23:59:59.999Z: 31 days, 0 weekdays left (last instant of a year)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2023-12-31T23:00:00.000Z: 31 days, 0 weekdays left (year boundary into a leap year)
+AssertionError: expected 30 to be 31 // Object.is equality
+
+- Expected
++ Received
+
+- 31
++ 30
+
+ ❯ src/lib/forecast.calendar.test.ts:164:30
+    162|   it.each(CASES)('%s: %i days, %i weekdays left (%s)', (iso, days, wee…
+    163|     const d = new Date(iso);
+    164|     expect(daysInMonthOf(d)).toBe(days);
+       |                              ^
+    165|     expect(remainingWeekdaysInMonth(d)).toBe(weekdays);
+    166|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/32]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-03-08T10:00:00.000Z: 31 days, 17 weekdays left (US DST start day)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-03-29T01:30:00.000Z: 31 days, 2 weekdays left (EU DST start day)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-03-30T22:00:00.000Z: 31 days, 1 weekdays left (DST-start month, day before the end)
+ FAIL  src/lib/forecast.calendar.test.ts > Date helpers in this process (TZ=UTC) > 2026-03-31T23:59:59.999Z: 31 days, 0 weekdays left (DST-start month, last instant)
+AssertionError: expected 28 to be 31 // Object.is equality
+
+- Expected
++ Received
+
+- 31
++ 28
+
+ ❯ src/lib/forecast.calendar.test.ts:164:30
+    162|   it.each(CASES)('%s: %i days, %i weekdays left (%s)', (iso, days, wee…
+    163|     const d = new Date(iso);
+    164|     expect(daysInMonthOf(d)).toBe(days);
+       |                              ^
+    165|     expect(remainingWeekdaysInMonth(d)).toBe(weekdays);
+    166|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/32]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > every zone produces the identical BudgetStatus > the whole computeBudgetStatus output is TZ-independent
+Error: probe failed under TZ=UTC: Command failed: /opt/node22/bin/node --import tsx <repo>/src/lib/calendarTzProbe.ts ["2026-02-10T12:00:00.000Z","2026-02-26T18:00:00.000Z","2026-02-28T23:59:59.999Z","2024-02-10T12:00:00.000Z","2024-02-29T00:00:00.000Z","2000-02-15T06:00:00.000Z","2100-02-15T06:00:00.000Z","2026-04-01T00:00:00.000Z","2026-04-30T23:30:00.000Z","2026-06-25T17:42:00.000Z","2026-06-29T20:00:00.000Z","2026-09-15T14:00:00.000Z","2026-01-15T03:00:00.000Z","2026-05-31T23:59:59.999Z","2026-07-01T00:00:00.000Z","2026-08-31T12:00:00.000Z","2026-03-08T10:00:00.000Z","2026-03-29T01:30:00.000Z","2026-03-30T22:00:00.000Z","2026-03-31T23:59:59.999Z","2026-10-25T01:30:00.000Z","2026-11-01T09:30:00.000Z","2026-11-30T23:00:00.000Z","2025-12-31T12:00:00.000Z","2026-12-31T23:59:59.999Z","2027-01-01T00:00:00.000Z","2023-12-31T23:00:00.000Z"]
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+<repo>/src/lib/forecast.ts:140
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+          ^
+
+RangeError: month must be an integer 1–12, got 0
+    at daysInMonth (<repo>/src/lib/forecast.ts:140:11)
+    at daysInMonthOf (<repo>/src/lib/forecast.ts:148:10)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:33:20)
+    at Array.map (<anonymous>)
+    at <anonymous> (<repo>/src/lib/calendarTzProbe.ts:29:22)
+    at Object.<anonymous> (<repo>/src/lib/calendarTzProbe.ts:46:41)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object.transformer (<repo>/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+
+Node.js v22.22.0
+
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+    138| export function daysInMonth(year: number, month: number): number {
+    139|   if (!Number.isInteger(month) || month < 1 || month > 12) {
+    140|     throw new RangeError(`month must be an integer 1–12, got ${month}`…
+       |           ^
+    141|   }
+    142|   if (month === 2) return isLeapYear(year) ? 29 : 28;
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ daysInMonth src/lib/forecast.ts:140:11
+ ❯ daysInMonthOf src/lib/forecast.ts:148:10
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:33:20
+ ❯ <anonymous> src/lib/calendarTzProbe.ts:29:22
+ ❯ Object.<anonymous> src/lib/calendarTzProbe.ts:46:41
+ ❯ Object.transformer node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188
+ ❯ src/lib/forecast.calendar.test.ts:105:25
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/32]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  27 failed | 5 passed | 15 skipped (47)
+   Start at  14:32:11
+   Duration  2.57s (tests 93%, transform 5%, import 2%, worker 1%)
+

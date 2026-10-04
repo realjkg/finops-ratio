@@ -1,0 +1,334 @@
+Mutation M1b local/UTC mix, reversed: (year, month) read with local getters
+- return daysInMonth(date.getUTCFullYear(), date.getUTCMonth() + 1);
++ return daysInMonth(date.getFullYear(), date.getMonth() + 1);
+Run: TZ=UTC npx vitest run src/lib/forecast.calendar.test.ts
+exit code 1
+
+
+ RUN  v5.0.1 <repo>
+
+ ❯ src/lib/forecast.calendar.test.ts (47 tests | 4 failed) 1682ms
+   ❯ child process under TZ=Asia/Tokyo (3)
+     × daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case 13ms
+   ❯ child process under TZ=Pacific/Kiritimati (3)
+     × daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case 4ms
+   ❯ child process under TZ=America/Los_Angeles (3)
+     × daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case 3ms
+   ❯ child process under TZ=Pacific/Pago_Pago (3)
+     × daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Asia/Tokyo > daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case
+AssertionError: expected [ { …(3) }, { …(3) }, { …(3) }, …(24) ] to deeply equal [ { …(3) }, { …(3) }, { …(3) }, …(24) ]
+
+- Expected
++ Received
+
+@@ -8,13 +8,13 @@
+      "daysInMonth": 28,
+      "iso": "2026-02-26T18:00:00.000Z",
+      "remainingWeekdays": 1,
+    },
+    {
+-     "daysInMonth": 28,
++     "daysInMonth": 31,
+      "iso": "2026-02-28T23:59:59.999Z",
+-     "remainingWeekdays": 0,
++     "remainingWeekdays": 2,
+    },
+    {
+      "daysInMonth": 29,
+      "iso": "2024-02-10T12:00:00.000Z",
+      "remainingWeekdays": 14,
+@@ -38,13 +38,13 @@
+      "daysInMonth": 30,
+      "iso": "2026-04-01T00:00:00.000Z",
+      "remainingWeekdays": 21,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-04-30T23:30:00.000Z",
+-     "remainingWeekdays": 0,
++     "remainingWeekdays": 1,
+    },
+    {
+      "daysInMonth": 30,
+      "iso": "2026-06-25T17:42:00.000Z",
+      "remainingWeekdays": 3,
+@@ -63,11 +63,11 @@
+      "daysInMonth": 31,
+      "iso": "2026-01-15T03:00:00.000Z",
+      "remainingWeekdays": 11,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-05-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+      "daysInMonth": 31,
+@@ -93,11 +93,11 @@
+      "daysInMonth": 31,
+      "iso": "2026-03-30T22:00:00.000Z",
+      "remainingWeekdays": 1,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-03-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+      "daysInMonth": 31,
+@@ -108,13 +108,13 @@
+      "daysInMonth": 30,
+      "iso": "2026-11-01T09:30:00.000Z",
+      "remainingWeekdays": 21,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-11-30T23:00:00.000Z",
+-     "remainingWeekdays": 0,
++     "remainingWeekdays": 1,
+    },
+    {
+      "daysInMonth": 31,
+      "iso": "2025-12-31T12:00:00.000Z",
+      "remainingWeekdays": 0,
+
+ ❯ src/lib/forecast.calendar.test.ts:191:28
+    189|       remainingWeekdays,
+    190|     }));
+    191|     expect(probe.calendar).toEqual(expected);
+       |                            ^
+    192|   });
+    193|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Pacific/Kiritimati > daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case
+AssertionError: expected [ { …(3) }, { …(3) }, { …(3) }, …(24) ] to deeply equal [ { …(3) }, { …(3) }, { …(3) }, …(24) ]
+
+- Expected
++ Received
+
+@@ -8,13 +8,13 @@
+      "daysInMonth": 28,
+      "iso": "2026-02-26T18:00:00.000Z",
+      "remainingWeekdays": 1,
+    },
+    {
+-     "daysInMonth": 28,
++     "daysInMonth": 31,
+      "iso": "2026-02-28T23:59:59.999Z",
+-     "remainingWeekdays": 0,
++     "remainingWeekdays": 2,
+    },
+    {
+      "daysInMonth": 29,
+      "iso": "2024-02-10T12:00:00.000Z",
+      "remainingWeekdays": 14,
+@@ -38,13 +38,13 @@
+      "daysInMonth": 30,
+      "iso": "2026-04-01T00:00:00.000Z",
+      "remainingWeekdays": 21,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-04-30T23:30:00.000Z",
+-     "remainingWeekdays": 0,
++     "remainingWeekdays": 1,
+    },
+    {
+      "daysInMonth": 30,
+      "iso": "2026-06-25T17:42:00.000Z",
+      "remainingWeekdays": 3,
+@@ -63,21 +63,21 @@
+      "daysInMonth": 31,
+      "iso": "2026-01-15T03:00:00.000Z",
+      "remainingWeekdays": 11,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-05-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+      "daysInMonth": 31,
+      "iso": "2026-07-01T00:00:00.000Z",
+      "remainingWeekdays": 22,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-08-31T12:00:00.000Z",
+      "remainingWeekdays": 0,
+    },
+    {
+      "daysInMonth": 31,
+@@ -93,11 +93,11 @@
+      "daysInMonth": 31,
+      "iso": "2026-03-30T22:00:00.000Z",
+      "remainingWeekdays": 1,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-03-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+      "daysInMonth": 31,
+@@ -108,13 +108,13 @@
+      "daysInMonth": 30,
+      "iso": "2026-11-01T09:30:00.000Z",
+      "remainingWeekdays": 21,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-11-30T23:00:00.000Z",
+-     "remainingWeekdays": 0,
++     "remainingWeekdays": 1,
+    },
+    {
+      "daysInMonth": 31,
+      "iso": "2025-12-31T12:00:00.000Z",
+      "remainingWeekdays": 0,
+
+ ❯ src/lib/forecast.calendar.test.ts:191:28
+    189|       remainingWeekdays,
+    190|     }));
+    191|     expect(probe.calendar).toEqual(expected);
+       |                            ^
+    192|   });
+    193|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=America/Los_Angeles > daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case
+AssertionError: expected [ { …(3) }, { …(3) }, { …(3) }, …(24) ] to deeply equal [ { …(3) }, { …(3) }, { …(3) }, …(24) ]
+
+- Expected
++ Received
+
+@@ -33,13 +33,13 @@
+      "daysInMonth": 28,
+      "iso": "2100-02-15T06:00:00.000Z",
+      "remainingWeekdays": 9,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-04-01T00:00:00.000Z",
+-     "remainingWeekdays": 21,
++     "remainingWeekdays": 22,
+    },
+    {
+      "daysInMonth": 30,
+      "iso": "2026-04-30T23:30:00.000Z",
+      "remainingWeekdays": 0,
+@@ -68,13 +68,13 @@
+      "daysInMonth": 31,
+      "iso": "2026-05-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-07-01T00:00:00.000Z",
+-     "remainingWeekdays": 22,
++     "remainingWeekdays": 21,
+    },
+    {
+      "daysInMonth": 31,
+      "iso": "2026-08-31T12:00:00.000Z",
+      "remainingWeekdays": 0,
+
+ ❯ src/lib/forecast.calendar.test.ts:191:28
+    189|       remainingWeekdays,
+    190|     }));
+    191|     expect(probe.calendar).toEqual(expected);
+       |                            ^
+    192|   });
+    193|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Pacific/Pago_Pago > daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case
+AssertionError: expected [ { …(3) }, { …(3) }, { …(3) }, …(24) ] to deeply equal [ { …(3) }, { …(3) }, { …(3) }, …(24) ]
+
+- Expected
++ Received
+
+@@ -33,13 +33,13 @@
+      "daysInMonth": 28,
+      "iso": "2100-02-15T06:00:00.000Z",
+      "remainingWeekdays": 9,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-04-01T00:00:00.000Z",
+-     "remainingWeekdays": 21,
++     "remainingWeekdays": 22,
+    },
+    {
+      "daysInMonth": 30,
+      "iso": "2026-04-30T23:30:00.000Z",
+      "remainingWeekdays": 0,
+@@ -68,13 +68,13 @@
+      "daysInMonth": 31,
+      "iso": "2026-05-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-07-01T00:00:00.000Z",
+-     "remainingWeekdays": 22,
++     "remainingWeekdays": 21,
+    },
+    {
+      "daysInMonth": 31,
+      "iso": "2026-08-31T12:00:00.000Z",
+      "remainingWeekdays": 0,
+@@ -103,13 +103,13 @@
+      "daysInMonth": 31,
+      "iso": "2026-10-25T01:30:00.000Z",
+      "remainingWeekdays": 5,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 31,
+      "iso": "2026-11-01T09:30:00.000Z",
+-     "remainingWeekdays": 21,
++     "remainingWeekdays": 22,
+    },
+    {
+      "daysInMonth": 30,
+      "iso": "2026-11-30T23:00:00.000Z",
+      "remainingWeekdays": 0,
+
+ ❯ src/lib/forecast.calendar.test.ts:191:28
+    189|       remainingWeekdays,
+    190|     }));
+    191|     expect(probe.calendar).toEqual(expected);
+       |                            ^
+    192|   });
+    193|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 43 passed (47)
+   Start at  14:32:05
+   Duration  2.13s (tests 91%, transform 7%, import 2%)
+

@@ -122,12 +122,34 @@ export function forecastStatus(projectedEom: number, monthlyBudget: number): For
 }
 
 // --- Calendar helpers used to drive the deterministic demo clock ---
+//
+// The budget calendar is UTC (proleptic Gregorian): a budget day or month is
+// the UTC calendar day or month of the instant, whatever the host time zone, so
+// the server and every browser agree on "today" and on the month length. The
+// Date-taking helpers below read only getUTC* fields, and never construct a
+// Date from local-time fields. Month lengths are pure arithmetic on explicit
+// (year, month) values.
 
-export function daysInMonthOf(date: Date): number {
-  return new Date(date.getUTCFullYear(), date.getUTCMonth() + 1, 0).getUTCDate();
+export function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
 
-// Count Mon–Fri strictly after `date` through end of month (today excluded).
+/** Days in `month` (1–12, NOT 0-based) of `year`. Pure; no Date, no time zone. */
+export function daysInMonth(year: number, month: number): number {
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw new RangeError(`month must be an integer 1–12, got ${month}`);
+  }
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+}
+
+/** Days in the UTC calendar month containing `date`. */
+export function daysInMonthOf(date: Date): number {
+  return daysInMonth(date.getUTCFullYear(), date.getUTCMonth() + 1);
+}
+
+// Count Mon–Fri strictly after `date`'s UTC day through the end of its UTC
+// month (today excluded). Weekdays come from Date.UTC + getUTCDay, so UTC only.
 export function remainingWeekdaysInMonth(date: Date): number {
   const year = date.getUTCFullYear();
   const month = date.getUTCMonth();
