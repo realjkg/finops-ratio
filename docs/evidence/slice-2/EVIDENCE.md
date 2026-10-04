@@ -644,3 +644,132 @@ Every case uses a unique `sleep` duration as a marker. The test reads
 `test:db`, `next build` and `check:bundle` were not re-run for this change.
 It touches only `scripts/local/*.mjs`, which none of them build or test; the
 §13 results stand.
+
+## 14. Copilot review of 0a742b9 (3 Medium); local, not pushed
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 08ca079 | U1–U3, D10a–c, D7, string `rowCount` in D1–D3/D8, L8, L20 | **red** (`red/red-copilot4-fast.txt`: 21 failed / 133; `red/red-copilot4-db.txt`: 7 failed / 30, D10a with "cursor is not valid" on page 2) |
+| dfc7d35 | explicit date formatting, pinned and asserted session settings, string `rowCount`, interrupt-aware `local:test` | green |
+| f299f46 | the control-totals `rowCount` check is one strict comparison (mutation I8 showed the `typeof` guard was redundant) | refactor |
+| 40fd4df | D10a and D10c move to `publishedCosts.serial.db.test.ts` | test move |
+| (this commit) | DESIGN §2.2/§2.3/§12, TEST_PLAN §F, this section | docs |
+
+**Changes to existing Slice 2 tests:**
+- Every `rowCount` expectation is now a string. Before, a JS number was the
+  contract under test; the contract changed on purpose, so the expectations
+  follow it.
+- The static check in L18 now asserts `return localTestExitCode(summary);`,
+  which also covers 130/143; it used to assert `summary.pass ? 0 : 1`.
+- L19's static check now finds `killLiveProcessGroups()` inside
+  `installInterruptHandlers`.
+- L15's regex allows `trackProcessGroup(spawn(…))`.
+
+**Why D10a and D10c moved.** They run `ALTER ROLE … SET` on a reader login,
+which is cluster state, and Slice 1's static rule (`serialLogins.test.ts`)
+flags role DDL with a dynamic part in a parallel DB file. The full gate run
+caught this. The two tests now run in the serial phase and page tenant A at
+limit 1, so page 2 onwards still needs the cursor. D10b, the SQL alone, stays
+in the parallel file.
+
+No assertion was weakened.
+
+### Mapping
+
+| Comment | Commit(s) | Test(s) / evidence |
+|---|---|---|
+| **4176238982**: `billing_period` follows DateStyle; under `SQL, DMY` the periods are not canonical and the next cursor is unusable | 08ca079, dfc7d35 | **Fix, two layers:** <ul><li>`to_char(billing_period, 'YYYY-MM-DD')` in the page and the totals, and so in the cursor;</li><li>the pool pins `DateStyle=ISO,MDY`, `IntervalStyle=postgres` and `TimeZone=UTC`, and every read asserts them with the isolation level and read-only, failing closed before any read.</li></ul> **Sweep of every returned or cursor value:**<ul><li>timestamps were already `to_char(… AT TIME ZONE 'UTC', …)`;</li><li>numeric, bigint and uuid text forms ignore every setting;</li><li>there are no float, interval or money-typed columns;</li><li>`lc_numeric` affects only `to_char` of numbers (unused);</li><li>`extraColumns` is jsonb with worker-written string values.</li></ul> **Tests:**<ul><li>D10a: role defaults `SQL, DMY`, Sao Paulo, `sql_standard` and `extra_float_digits=-15` are proven active on a plain session; the API output equals the canonical login's and paging through `nextCursor` (limit 1) returns every row exactly once;</li><li>D10b: the SQL alone, under hostile `SET LOCAL` values, equals the canonical output;</li><li>D10c: an unpinned DateStyle fails closed;</li><li>U2, U3, D7.</li></ul> Startup options take precedence over `ALTER ROLE … SET`, as D10a shows. Mutations A1–A7 |
+| **4176238961**: `count(*)` converted to a JS number loses precision above 2^53 | 08ca079, dfc7d35 | `rowCount` is the bigint's decimal string, like the money amounts. U1: `'9007199254740993'` and `'9223372036854775807'` are exact, through JSON too. Sweep: no other `Number()` on a database value (`rowOrdinal`, money and quantities were already text). The contract change is documented in DESIGN §2.3: the API is new and unreleased (#59 not merged), has no consumers, and changes type now without versioning. Updated: D1–D3 and D8, `local:test`'s comparison (L8: a numeric `40` or `'040'` is a mismatch), and the DESIGN example. Mutations A8, I8b |
+| **4176238924**: SIGINT/SIGTERM exits at once, so `local:test` never reaches `down -v` | 08ca079, dfc7d35 | **First signal:** `local:test`'s run is aborted. The body ends, its commands are killed, and none starts afterwards. Then the same bounded cleanup runs (stop `next start`, then `down -v`, which is not bound to the interrupt). Exit 130/143, and the summary records `interrupted`. **Second signal:** a forced exit; the groups are killed and the cleanup is skipped. **`next start`** runs in its own detached group, tracked with the commands, which closes the challenger's Info note. **Other commands** kill their groups and exit 130/143, leaving state for `local:down` (documented in DESIGN §12 and in the comment above `installInterruptHandlers` in `local.mjs`). L20 is the unit and static coverage; the live runs follow below. Mutations I1–I7 |
+| challenger Low (`stty tostop`) | (none) | Kept detached for every command, with evidence in the next section. |
+
+### Live interrupt runs (`interrupt-live.sh`, `interrupt-serving.sh`; real Docker, real `next start`)
+
+| Case | Exit | Summary | Left behind |
+|---|---|---|---|
+| SIGINT 4 s into `local:test` (during compose up) | **130** | `interrupted: SIGINT`, `down: ok (-v)`, pass false | 0 containers, 0 volumes, no state dir |
+| SIGTERM to `local.mjs` **alone** as soon as `next start` runs (its own pgid 22291) | **143** | `interrupted: SIGTERM`, `appStop: stopped`, `down: ok (-v)`, error "interrupted by SIGTERM" | no `next start`, 0 containers, 0 volumes, no state dir |
+| SIGTERM 21 s in (the run was already in its cleanup) | **143** | every step ok, `appStop: stopped`, `down: ok (-v)`, failure "interrupted by SIGTERM during the cleanup" | nothing |
+| two SIGINTs (6 s, then +0.5 s) | **130** | forced exit, "cleanup skipped" | 1 container, 2 volumes, state dir (as documented); a manual `local:down -v` for `ratio-local-test` removed all of it |
+| SIGINT 3 s into the developer's `local:up` (`ratio-local-int`) | **130** | "child processes killed; use local:down to clean up" | 2 containers, 2 volumes, state dir kept for `local:down -v`, which then removed everything |
+
+### `stty tostop` (challenger Low): measured, detaching kept
+
+A real pty (`script(1)`) with `stty tostop`, and node in the foreground:
+
+```
+plain node write ok                          [baseline] node exit: 0
+child-ok / parent ok after non-detached child [non-detached] node exit: 0
+child-ok / parent ok after detached inherit child [detached-inherit] node exit: 0
+piped: child-ok / parent ok after detached piped child [detached-pipe] node exit: 0
+parent ok after detached SILENT child        [detached-silent] node exit: 0
+parent ok after detached ignore child        [detached-ignore] node exit: 0
+```
+
+- **Why detaching is safe here.** Node's `detached: true` is `setsid()`: the
+  child's session id equals its pid (`ps -o pid,pgid,sid,tty`:
+  `31519 31519 31519 ?`), and it has no controlling terminal. Terminal job
+  control, including TOSTOP, applies only to the terminal's own session.
+- **The one stop that was seen came from the harness.** GNU `timeout` without
+  `--foreground` moves node into a background process group, and node was
+  then stopped (`T`) on its own write, with or without a detached child.
+- **Why not detach only when output is captured or not a TTY.** It would gain
+  nothing, and it would let an inherited-stdio command leave a grandchild
+  that the deadline cannot kill. So every command stays detached, and #58
+  needs no change for this.
+
+### Mutation checks (scratch `mutate8.sh`, `mutate8b.sh`; each applied, run, restored; tree clean after; 0 orphans)
+
+| ID | Mutation | Caught by |
+|---|---|---|
+| A0 | **the original code**: `date::text`, no DateStyle pin, no DateStyle assertion (`mutate8c.sh`) | serial **D10a** fails with exactly the reported symptom: `{"error":{"code":"invalid_request","message":"cursor is not valid"}}` on page 2; D10c; D10b |
+| A1 | page: `billing_period::text` again (formatting removed, pin kept) | U3 `billing_period is formatted with to_char…`; DB **D10b** (the SQL alone under hostile DateStyles) |
+| A2 | totals: `billing_period::text` again (pin kept) | U3; DB **D10b** |
+| A3 | DateStyle pin removed | U2 `the reader pool pins…`; DB **D10a** (role default `SQL, DMY` ⇒ the assertion refuses the read; re-run on the serial file after the move: caught) |
+| A4 | TimeZone pin removed | U2; DB: 26/30 fail (the test cluster defaults to `Etc/UTC`, not the pinned `UTC`, so every read is refused: fail closed) |
+| A5 | IntervalStyle pin removed | U2; DB **D10a** (role default `sql_standard`; re-run on the serial file: caught) |
+| A6 | DateStyle dropped from the in-transaction assertion | U2 `DateStyle SQL, DMY / German ⇒ refused`; DB **D10c** (re-run on the serial file: caught) |
+| A7 | the whole session assertion off | U2 (6 cases); DB D10c and the existing REPEATABLE READ fail-closed test |
+| A8 | `rowCount` through `Number()` again | U1 (both); DB D1, D2, D3, D8, D10a |
+| I1 | `local:test` interrupt exits at once (no cleanup) | L20 static (`onFirst … COMMAND === 'test' … interrupt.abort`) |
+| I2 | `runLocalTest` ignores the interrupt | L20 "SIGTERM while the body ignores every signal" |
+| I3 | `runProcess` ignores the interrupt once running | L20 "SIGINT mid-body" (the in-flight command is not killed) and "runProcess bound to an aborted signal" |
+| I4 | a second signal is not forced | L20 `installInterruptHandlers` |
+| I5 | `next start` not tracked | L20 static; L15 |
+| I6 | the exit code ignores the interrupt | L20 (4 tests) |
+| I7 | `down` bound to the interrupt (it would be refused during the cleanup) | L20 static |
+| I8 | the `typeof` guard in the control-totals check removed | **survived: equivalent.** `!==` against the string already rejects a number, so the guard was removed (f299f46) |
+| I8b | the control-totals check compares by numeric value | L8 (`40` and `'040'`) |
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `npx tsc --noEmit` (HEAD 40fd4df) | 0 / 0 |
+| `npm test` (40fd4df) | **2345 passed** (101 files), run alongside `test:db` |
+| `npm run test:db` (private PG16 at 55700 + S3 prefixes) | at 40fd4df: **596 + 163** passed in 3 of 4 runs (113, 111, 108 s). The fourth run failed once, in `doctor.db.test.ts`; see the note below |
+| `worker:build`; `next build`; `check:bundle`; `npm audit --omit=dev` (f299f46; no production file changed after it) | 0; 0 (`tsconfig.json`/`next-env.d.ts` restored); pass (116 client / 91 server files); 0 vulnerabilities |
+| `npm run local:test` (f299f46, `ratio-local-test`, 54339/18353/3110) | pass in 26 s; `appReady: pid-verified`; totals `rowCount` **`"55"` / `"40"`** (strings), `30.8272954899` / `21.0978157665`; 95 distinct rows; `appStop: stopped`; `down: ok (-v)` |
+| live interrupt runs | all five cases as in the table above |
+| leftovers | none: private cluster stopped and deleted; no `ratio-local*` containers or volumes; no `.ratio-local/`; no `next start` or sleeper processes |
+
+**Intermittent `test:db` failure (1 of 4 runs; not caused by this change).**
+- **What happened.** `doctor.db.test.ts`'s `beforeAll` migration was refused
+  with `PRIVILEGE_MODEL_VIOLATION`, which named a test login
+  `ratio_test_login_14967_…`. The check reported the login as holding
+  `ratio_worker`'s table privileges "beyond the reviewed set of the ratio
+  roles it belongs to".
+- **Likely cause** (not proven). The migration's catalog check reads the
+  catalog in several statements at READ COMMITTED. When a parallel DB test
+  file drops a worker login between two of those statements, the check sees
+  the login's privileges but no longer its membership.
+- **Why it is not from this change.** No production file touches role DDL, and
+  this round's only change to the parallel DB phase took role DDL *out* of it
+  (40fd4df).
+- **Not fixed here.** A fix belongs to Slice 0's catalog check (for example,
+  reading the catalog in one REPEATABLE READ snapshot) or to Slice 1's test
+  isolation. Both are outside what Slice 2 may change without stopping first,
+  so it is reported instead. Before this round it had not been seen in about
+  ten `test:db` runs.

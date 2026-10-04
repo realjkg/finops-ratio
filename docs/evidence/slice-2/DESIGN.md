@@ -150,8 +150,14 @@ Pool session settings (startup `options`):
   (500) on a pool without it.
 - `statement_timeout=10000`, `lock_timeout=5000` and
   `idle_in_transaction_session_timeout=30000`.
-- `timezone=UTC`.
+- `TimeZone=UTC`, `DateStyle=ISO,MDY` and `IntervalStyle=postgres`. Startup
+  options take precedence over `ALTER ROLE` / `ALTER DATABASE` defaults, so no
+  role or database default can change the output (§12).
 - `max: 4`, `application_name=ratio-reader-api`.
+- Every read asserts, inside its transaction, that the isolation level is
+  REPEATABLE READ, the transaction is read-only, and DateStyle, IntervalStyle
+  and TimeZone have the pinned values. Any other value fails closed, before
+  any read.
 
 ### 2.3 Query
 
@@ -204,12 +210,27 @@ Response (200):
              "usageQuantity": "1", "usageUnit": "…", "pricingQuantity": "1", "pricingUnit": "…",
              "focusVersion": "1.0", "extraColumns": {}, "publishedAt": "…Z" }],
   "page": { "limit": 100, "nextCursor": "…" },
-  "totals": [{ "billingPeriod": "2026-07-01", "billingCurrency": "USD", "rowCount": 55, "billedCost": "30.8272954899" }]
+  "totals": [{ "billingPeriod": "2026-07-01", "billingCurrency": "USD", "rowCount": "55", "billedCost": "30.8272954899" }]
 }
 ```
-- **Money and quantities** are decimal strings produced by Postgres
-  (`::text`), never a JS number.
-- **Timestamps** are formatted in SQL in UTC with microseconds.
+- **Money, quantities and counts** are decimal strings produced by Postgres
+  (`::text`), never a JS number. That includes `totals[].rowCount`, a bigint
+  count, which is exact beyond 2^53.
+  - **Contract change (Copilot 4176238961):** `rowCount` was a JSON number
+    until 0a742b9, and is a string from this change on.
+  - The API is new and unreleased (PR #59, not merged), and nothing consumes
+    it yet, so the type changes now, without versioning.
+- **No value depends on a session setting:**
+  - `billingPeriod` is `to_char(billing_period, 'YYYY-MM-DD')`, in the rows,
+    in the totals and therefore in the cursor. `date::text` would follow
+    DateStyle.
+  - Timestamps are formatted in SQL in UTC with microseconds
+    (`to_char(ts AT TIME ZONE 'UTC', …)`).
+  - The numeric, bigint and uuid text forms do not depend on any setting.
+  - There are no float, interval or money-typed columns, so
+    `extra_float_digits`, IntervalStyle and `lc_monetary` cannot apply.
+  - `lc_numeric` affects only `to_char` of numbers, which is not used.
+  - `extraColumns` is jsonb whose values the worker always writes as strings.
 - **`totals`** (per period and currency, over the whole filter, summed in
   Postgres) is returned on the first page only, the request without a
   `cursor`. That keeps a deep page from rescanning the filter. Later pages
@@ -669,3 +690,79 @@ code.**
 - `.obvious/skills/ingestion-ops/SKILL.md` still calls retention (D-03) and
   the ledger grant (D-05) "owner decisions". It is reported to the
   coordinator rather than changed here.
+
+## 12. Copilot review of 0a742b9 (3 Medium; local, not pushed)
+
+**Medium (4176238982): API output independent of session settings.**
+- `billing_period` was serialised with `date::text`, which follows DateStyle.
+  Under a role or database default such as `SQL, DMY`, the API emitted
+  `01/05/2026` and the next cursor failed to decode. The DB test D10a
+  reproduced this in red: page 2 answered "cursor is not valid".
+- Two layers now protect the output, each tested on its own:
+  1. **The SQL formats every date and timestamp explicitly.** D10b runs the
+     page and totals statements on a plain session under four hostile
+     DateStyles, a non-UTC TimeZone, `IntervalStyle=iso_8601` and
+     `extra_float_digits=-15`, and requires output identical to the canonical
+     one.
+  2. **The pool pins DateStyle, IntervalStyle and TimeZone, and the read
+     asserts them, failing closed.** Tests: U2 (unit), D7 (pinned values), and
+     D10c (a pool that pins everything except DateStyle, for a login whose
+     default is SQL, DMY, is refused).
+- **Column sweep** (§2.3):
+
+  | Columns | Status |
+  |---|---|
+  | `billingPeriod` | was the only setting-dependent output; fixed |
+  | timestamps | already explicit |
+  | numeric, bigint, uuid, text | setting-independent |
+  | float, interval or money-typed | none exist |
+
+**Medium (4176238961): `rowCount` as a decimal string.**
+- `Number(count)` lost precision above 2^53. `rowCount` is now the bigint's
+  text form (U1: `'9007199254740993'` round-trips exactly, through JSON too).
+- No other field went through `Number()`. `rowOrdinal`, the money amounts and
+  the quantities were already text.
+- This is a contract change on an unreleased API with no consumers (§2.3).
+  The route tests, the DB tests and `local:test`'s control-totals comparison
+  now require a string.
+
+**Medium (4176238924): an interrupted `local:test` still cleans up.**
+- **The first SIGINT/SIGTERM** aborts the run's signal:
+  - the body ends at once, whatever it is awaiting;
+  - every command bound to the signal is killed (its process group), and none
+    starts afterwards;
+  - the **same bounded cleanup** runs: stop `next start`, then `down -v`,
+    which is not bound to the interrupt;
+  - the summary records `interrupted`, and the exit code is 130 (SIGINT) or
+    143 (SIGTERM);
+  - a signal during the cleanup is recorded but runs nothing twice.
+- **A second signal** forces an immediate exit: every tracked group is
+  killed, and the cleanup is skipped.
+- **`next start`** now runs in its own detached group, tracked with the
+  commands. This closes the challenger's Info note: a SIGTERM to `local.mjs`
+  alone no longer orphans `next start`.
+- After every run, `killLiveProcessGroups()` is a safety net, so nothing
+  local:test started outlives it.
+- **The other commands** (`up`, `migrate`, `seed`, `sync`, `down`) kill their
+  live groups and exit 130/143 at once on an interrupt. Whatever already
+  exists (containers, volumes, `.ratio-local/<project>/`) stays for
+  `npm run local:down [-- -v]`. That is deliberate: `down -v` deletes data,
+  so a developer's Ctrl-C during `local:up` does not delete their volumes.
+
+**Challenger Low (`stty tostop`): detaching is kept for every command.**
+- Node's `detached: true` calls `setsid()`, so the child is in a new
+  **session** without a controlling terminal. The terminal's job control,
+  including TOSTOP, applies only to processes of its own session.
+- Measured in a real pty (`script(1)`, `stty tostop`, node in the
+  foreground), every mode writes and exits 0:
+  - a detached child writing to the inherited terminal;
+  - a detached child with piped output;
+  - a detached child that stays silent;
+  - a non-detached child.
+- The only stop observed came from the test harness itself: GNU `timeout`
+  without `--foreground` puts node into a background process group. That
+  happens with or without detaching.
+- So detaching only when the output is captured, or is not a TTY, would gain
+  nothing. It would also weaken the deadline: an inherited-stdio command
+  could leave a grandchild that a timeout no longer kills. EVIDENCE §14 has
+  the transcript.
