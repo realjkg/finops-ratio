@@ -404,3 +404,15 @@ orchestrator to open:**
 >    test. So does one where it reads from the source instead of evidence.
 > 7. Restricted class (Slice 1 worker behaviour): challenger review
 >    required.
+
+### 9.2 Final gates (code at 7d6d2cb, docs at f96ac60)
+
+| Gate | Result |
+|---|---|
+| lint, tsc | exit 0 |
+| `npm test` | **2552 passed** (109 files) |
+| `npm run test:db` ×1 | parallel **625 passed** (35 files); serial **173 passed** (6 files); exit 0. Run after every code commit |
+| `local:acceptance` 1k | exit 0, `pass: true`, 23.2 s, 0 opt-in log lines. First sync exit 1: 2024-09 `published` 942 / `18.00663861840`, `excludedRows` 57; 2024-10 `quarantined` `PROVIDER_MISMATCH`. Catalog `{PROVIDER_MISMATCH: 57}` / `{PROVIDER_MISMATCH: 1}` (`runs/acc1k-final.json`) |
+
+**Cleanup:** the private cluster, the `i62-s3` container and its volume,
+the compose project and the scratch files were removed after the run.
