@@ -197,7 +197,7 @@ Today **nothing is ever deleted**. That covers:
 - evidence objects;
 - superseded batches and their facts;
 - quarantined batches (their facts are deleted; the errors stay);
-- `replay-fixtures` tenants in staging (one tenant per run, measured at about
+- `replay-fixtures` tenants (one per run; test-only since #62, measured at about
   341 rows and about 75 KB of objects).
 
 Slice 0's triggers forbid deleting facts of published or superseded batches.
@@ -398,7 +398,7 @@ Slice 2 reuses the existing API auth unchanged:
 | DB session timeouts | lock 30 s, idle-in-tx 5 min, statement 30 min | Statement timeout must exceed the largest legitimate statement (deleting a 20M-row staged batch at acquisition). |
 | **Evidence bucket write protection: an ASSUMPTION** | — | Tamper detection happens when evidence is captured (full re-hash; conditional `If-None-Match: *` PUT) and loaded (re-hash). Evidence of unchanged or superseded periods, republish and `replay --batch` is **not** re-read (HEAD-metadata fast path for artifacts). The design assumes **only the worker credential can write** the evidence bucket, and it has **no delete**. Recommended: bucket versioning + object lock (governance or compliance mode, D-03), a deny-delete bucket policy, access logging. |
 | Optional evidence audit job (issue #58, item 2) | not built | A periodic job that re-hashes evidence objects and compares them with `ingest_artifacts.sha256`, restoring continuous assurance on the fast paths above. Recommended before production if object lock is not used. |
-| `replay-fixtures` | refused outside `staging`/`test` | Leaves one fixture tenant per run (no purge, D-03). |
+| `replay-fixtures` | **test-only** since #62: refused unless `RATIO_ENV=test` (it ingests synthetic providers, allowed only in development/test; staging returns with per-source synthetic markers, D-21) | Leaves one fixture tenant per run (no purge, D-03). |
 
 ## 4. Hosting options (plan: AWS, see the Decision log; provisioning and spend are owner actions)
 

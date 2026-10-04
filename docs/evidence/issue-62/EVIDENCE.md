@@ -265,9 +265,9 @@ test was touched.
   in-process CLI tests in `cliWorker.db.test.ts` and `demo.db.test.ts`.
   testS3Env() placement confirmed by orchestrator, 2026-10-04: harness
   helper, not a test file; preferred over editing Slice 1 test files.
-- `replay-fixtures` in staging needs `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` for
-  that invocation (it ingests the synthetic fixture). Production refuses the
-  opt-in at config load.
+- `replay-fixtures` was later made **test-only** (§9.1, L3 decision). Its
+  `RATIO_ENV=test` runs need `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`. Production
+  refuses the opt-in at config load.
 - `SYNTHETIC_PROVIDERS` is a frozen array, so it cannot be changed at
   runtime (a frozen `Set` still accepts `add`). Exact, case-sensitive names.
 
@@ -290,10 +290,9 @@ policy (D12, second case). DESIGN §8a records this as the known Slice 1 gap
 and escalates a possible `--revalidate` mode. No production data exists, so
 there is no impact today.
 
-**L3, escalated, not widened.** `replay-fixtures` runs in staging and ingests
-the SYNTHETIC fixture. In staging it can no longer opt in, so its scenarios
-would see every row excluded. A narrower path is needed (DESIGN §8 D1). The
-per-source synthetic marker is tracked for Slice 3 (D-21).
+**L3, escalated, not widened.** `replay-fixtures` ran in staging, where it
+can no longer opt in. The orchestrator then decided to make it test-only
+(§9.1). The per-source synthetic marker is tracked for Slice 3 (D-21).
 
 **Gates:**
 

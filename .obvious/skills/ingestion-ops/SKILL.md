@@ -195,10 +195,11 @@ after it, a source with zero published periods fails. A source still
 unpublished after the window: check the export configuration and the
 source's `config` (bucket/prefix/exportName), then the last runs' outcomes.
 
-## 7. replay-fixtures (staging/test only)
+## 7. replay-fixtures (test only)
 
 ```bash
-RATIO_ENV=staging RATIO_DATABASE_URL=<worker url> RATIO_MIGRATE_DATABASE_URL=<owner url> \
+RATIO_ENV=test RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 \
+RATIO_DATABASE_URL=<worker url> RATIO_MIGRATE_DATABASE_URL=<owner url> \
 RATIO_REPLAY_FIXTURES_BUCKET=<scratch bucket> RATIO_EVIDENCE_S3_BUCKET=<evidence bucket> ... \
   npm run -s worker -- replay-fixtures --json
 ```
@@ -207,14 +208,17 @@ three sources whose display name says SYNTHETIC), uploads the SYNTHETIC export
 under `ratio-replay-fixtures/<tenant>/…` in `RATIO_REPLAY_FIXTURES_BUCKET`, and
 runs `clean_load`, `idempotent_rerun`, `restatement_supersession`,
 `reconciliation_variance_rejection`, `crash_mid_load_recovery`,
-`zombie_fencing`. Exit 0 only if all six pass. Refused unless `RATIO_ENV` is
-`staging` or `test`.
+`zombie_fencing`. Exit 0 only if all six pass. **Test-only** (issue #62): it is
+refused unless `RATIO_ENV=test`, with exit 2 `REPLAY_FIXTURES_NOT_ALLOWED`
+before any I/O. It ingests synthetic providers, which are allowed only in
+development/test with `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`. Staging returns
+with per-source synthetic markers (D-21, Slice 3).
 
 **Nothing is deleted** (no purge/delete path in this cycle — deletion is
 retention-class and owner-only). The tenant's rows, its evidence objects
 (`evidence/<tenant>/…` under the evidence prefix) and the synthetic source
 objects stay, and are listed in `results.retained` of the evidence record.
-Staging therefore accumulates one fixture tenant per run — measured locally
+A test database therefore accumulates one fixture tenant per run — measured locally
 (2026-10-03): 341 fact rows (~409 kB of row data), 8 batches, 8 sync runs, and
 38 objects / ~75 KB (synthetic source files + evidence) per run. Identify them with
 `SELECT id, slug FROM ratio.tenants WHERE slug LIKE 'fixture-%'`. Cleanup

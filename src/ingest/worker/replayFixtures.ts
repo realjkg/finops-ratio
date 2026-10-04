@@ -9,7 +9,8 @@
 // deletion is retention-class). The tenant's rows, its evidence objects and the
 // uploaded synthetic source objects stay in place and are reported in the
 // result, so staging accumulates fixture tenants until an owner-approved
-// retention slice. Refused unless RATIO_ENV is staging/test (CLI checks first).
+// retention slice. Refused unless RATIO_ENV is test (CLI checks first; issue #62 L3:
+// it ingests synthetic providers, allowed only in development/test; staging returns with D-21).
 import crypto from 'crypto';
 import { Client, type Pool } from 'pg';
 import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';

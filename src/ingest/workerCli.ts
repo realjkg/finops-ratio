@@ -7,7 +7,7 @@
 //   replay          --tenant <uuid> --source <key> (--batch <uuid> | --period YYYY-MM)
 //   quarantine show --tenant <uuid> --batch <uuid> [--json]
 //   doctor          [--tenant <uuid>]... [--json]          (read-only)
-//   replay-fixtures [--json]                               (RATIO_ENV staging|test only)
+//   replay-fixtures [--json]                               (RATIO_ENV=test only; issue #62 L3)
 //
 // Exit codes: 0 ok · 1 failure · 2 usage/configuration · 4 another run holds the lease.
 import type { S3Client } from '@aws-sdk/client-s3';
@@ -172,8 +172,13 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
   let args: Args;
   try {
     args = parseArgs(argv);
-    if (args.command === 'replay-fixtures' && env.RATIO_ENV !== 'staging' && env.RATIO_ENV !== 'test') {
-      throw new IngestError('REPLAY_FIXTURES_NOT_ALLOWED', 'replay-fixtures runs only when RATIO_ENV is staging or test');
+    // Test-only (issue #62, challenger L3 decision): it ingests the SYNTHETIC fixture, whose provider
+    // names are accepted only in development/test. No in-code opt-in bypass; staging returns with D-21.
+    if (args.command === 'replay-fixtures' && env.RATIO_ENV !== 'test') {
+      throw new IngestError(
+        'REPLAY_FIXTURES_NOT_ALLOWED',
+        'replay-fixtures runs only when RATIO_ENV is test: it ingests synthetic providers, which are allowed only in development/test (per-source synthetic markers are tracked as D-21 for Slice 3)',
+      );
     }
     config = loadWorkerConfig(env);
   } catch (e) {

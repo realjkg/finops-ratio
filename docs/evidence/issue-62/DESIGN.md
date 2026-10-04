@@ -377,15 +377,20 @@ The first draft proposed each item below; the orchestrator decided them on
     preferred over editing Slice 1 test files.
   - `local:acceptance` runs with it OFF: the public sample is
     production-shaped.
-  - **Open item, escalated (L3):** `replay-fixtures` runs in staging (its
-    CLI allows `RATIO_ENV` staging or test; Slice 1 DESIGN §14). It ingests
-    the SYNTHETIC fixture, so in staging it can no longer get the opt-in. Its
-    scenarios would see every row excluded. The opt-in was deliberately
-    **not** widened to staging. A narrower path is needed and was escalated
-    to the orchestrator. One possibility is that `replay-fixtures` opts in
-    for its own runs only, in code, because it creates its own fresh
-    fixture tenant and SYNTHETIC-labelled sources. In `RATIO_ENV=test` it
-    still works with the opt-in set.
+  - **`replay-fixtures` is test-only (L3; decided by orchestrator,
+    2026-10-04).** It ingests the SYNTHETIC fixture, whose provider names
+    are allowed only in development/test. Its CLI now accepts
+    `RATIO_ENV=test` only; it previously accepted staging or test.
+    `RATIO_ENV=staging`, and every other value, fails closed before any I/O:
+    exit 2, `REPLAY_FIXTURES_NOT_ALLOWED`, with a message naming the reason
+    and D-21. Pinned by `src/ingest/replayFixturesEnv.test.ts`; mutation M31
+    (staging re-allowed) is killed.
+    - There is **no in-code opt-in bypass**. A path that switches the opt-in
+      on by itself is the mechanism the challenger closed.
+    - **Impact: none today.** Under BOUNDARY v2 there is no staging
+      environment.
+    - **D-21** (per-source synthetic markers, Slice 3) is the proper way to
+      restore `replay-fixtures` in staging later.
   - **Tracked item (deferred to Slice 3, design D-21):** a per-source
     synthetic marker, so the opt-in applies to the SYNTHETIC sources only,
     not process-wide.
