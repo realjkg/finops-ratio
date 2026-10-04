@@ -868,6 +868,10 @@ describe('A12 issue #62: foreign-provider rows are excluded by the worker, and t
     const fn = src.slice(src.indexOf('async function syncRecord('), src.indexOf('async function sync(settings)'));
     expect(fn).toMatch(/\{ allowFail: true, syntheticProviders, captureErr: true \}/);
     expect(fn).toMatch(/return \{ code: r\.code, record, stderr: r\.err \};/);
+    // ...and run() forwards captureErr to runProcess (the first live run found it dropped there).
+    const runFn = src.slice(src.indexOf('function run(cmd, args'), src.indexOf('function composeEnv('));
+    expect(runFn).toMatch(/\{ env = \{\}, capture = false, captureErr = false, allowFail = false,/);
+    expect(runFn).toMatch(/runProcess\(cmd, args, \{ cwd: ROOT, env: \{ \.\.\.process\.env, \.\.\.env \}, capture, captureErr, allowFail,/);
   });
 
   it('local.mjs: the evidence of EVERY staged object is re-hashed; the API artifact set uses the published periods only; the pin covers the filter', () => {
