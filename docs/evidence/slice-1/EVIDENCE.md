@@ -165,7 +165,12 @@ session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
 | 146 | dfeff7a | merge origin/main (2066adc: Slice 0 rounds 17-19, #53 #55 #56); `src/ingest/db` identical to origin/main | merge |
 | 147 | 6c35fbc | test: every Slice 0 refused predefined role over every edge kind (red: 32) | tests (serial) |
 | 148 | db62ab8 | fix: worker refuses Slice 0's full REFUSED_PREDEFINED_ROLES over the closure (H1 completed) | impl |
-| 149 | (final) | docs: evidence for this round (§34) | docs |
+| 149 | 0c0aa7d | docs: evidence for §34 | docs |
+| 150 | 1294c94 | test: a 409 ConditionalRequestConflict on the conditional create is verified (challenger round 4 L1; kills Q3) | tests |
+| 151 | 1609ca1 | test: seventh review M1-M5 (red: fast 4, DB 4, serial 9) | tests |
+| 152 | 1107d58 | fix: ±14:00 offsets, metered upload, backstop from Slice 0's list, replay --batch freshness, listing progress | impl |
+| 153 | 2325a7f | test: stalled-upload fakes reject like the real SDK (kills M2c) | tests |
+| 154 | (final) | docs: evidence for this round (§35) | docs |
 
 Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
 passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
@@ -2315,6 +2320,52 @@ was rewritten in the valid form above.
 
 **Manual end-to-end** (built CLI at db62ab8, private cluster, database
 `ratio_s1_e2e_8f0d2c44`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 35. Challenger round 4 L1; PR #54 seventh Copilot review (0c0aa7d), M1-M5
+
+**Challenger L1 (`1294c94`):** unit tests for a PutObject that throws
+`{ $metadata: { httpStatusCode: 409 } }`. The error has no name, so the
+status alone must route it. Covered for put and putBytes:
+- the genuine bytes in place: verified (GET), then `exists`;
+- different bytes in place: EVIDENCE_INTEGRITY_MISMATCH.
+
+Mutations: **Q3** (409 not treated as a lost race) fails 4 tests; Q3b (a
+lost race accepted without verifying) fails 2 (`mutations40.txt`).
+Challenger L2 (periodic evidence audit) and L3 (a non-deterministic reap
+race) go to the follow-up issue.
+
+| Finding | Verified? | Fix (`1107d58`) | Test (red at `1609ca1`) | Mutations killed (`mutations41.txt`) |
+|---|---|---|---|---|
+| **M1** timestamp.ts:48: `+14:59` accepted | real | hour 14 only as ±14:00 | +14:00, -14:00, +1400, +13:59, -12:45 accepted; +14:01, +14:59, -14:30, +1430 refused | M1 (`+14:mm` accepted) |
+| **M2** S3EvidenceStore.ts:133: a new-object upload ignored onProgress | real: an upload slower than stall + TTL lost the lease | the body is `file.pipe(meter)`. The meter is the idle watchdog's stream (EVIDENCE_STALLED) or a counting Transform, and each chunk the SDK pulls calls onProgress, with backpressure preserved. ContentLength and IfNoneMatch are unchanged, and both streams are destroyed in `finally` | unit: progress while the body is read, every byte arrives, ContentLength/IfNoneMatch intact; a stopped consumer gives EVIDENCE_STALLED. Pipeline (stall 1 s, TTL 2 s): an upload of about 600 KB at one 64 KiB chunk per 400 ms keeps the lease and publishes; a stalled upload fails EVIDENCE_STALLED in under 6 s (it hung to MAX_RUN before) | M2a (no progress; unit and pipeline), M2b (no watchdog), M2c (stall reported as EVIDENCE_STORE_FAILED; killed after `2325a7f` made the fakes reject with an SDK-like AbortError, as the real SDK does), M2d (raw file stream sent) |
+| **M3** dangerousLoginBackstop.ts:35: only the 3 server-file roles | real | the predicate binds `BACKSTOP_REFUSED_PREDEFINED = Object.keys(REFUSED_PREDEFINED_ROLES)` (Slice 0, read-only) as `$1` | serial self-test: a drift test against Slice 0's list and an explicit list. For each of the 11 roles, a login of this process that is a member is reported by the pid check and the snapshot diff, and dropping it clears the report | M3a (one role dropped: 2 failed), M3b (back to the server-file roles: 9 failed) |
+| **M4** doctor.ts:129: replay --batch refreshed freshness | real: after a rollback, a stale source looked fresh | both freshness subqueries exclude `run_kind = 'replay' AND stats ? 'replayBatch'`; replay --period still counts | stale source, then replay --batch: still STALE; then replay --period: passes | M4a (replay --batch counted), M4b (every replay excluded) |
+| **M5** pipeline.ts:165: an active listing never fed progress | real: a 4 s listing (stall 1 s, TTL 2 s) ended LEASE_LOST | `ListOptions.progress`. The S3 source calls it after every completed page and every manifest read, and the pipeline passes the run's progress to the listing and the re-list | unit: the exact sequence list/progress ×3, then get/progress. Pipeline: a 10 × 400 ms listing that reports each page publishes; an idle one still ends LEASE_LOST | M5a (pipeline passes none), M5b (no per-page progress), M5c (none after the manifest read) |
+
+### Gates at 2325a7f
+
+| Check | Result |
+|---|---|
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 3.1–6.7) | **3/3**, 92 files / 2119 passed each, 0 unhandled errors |
+| spawnCleanup ×20 under parallel load | **20/20** (load 10.1) |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 33 files / 568 passed; serial 4 files / 104 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 526 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at 2325a7f, private cluster, database
+`ratio_s1_e2e_da56917a`):
 - migrate status went 3 -> 0 -> 0.
 - sync published and reconciled; the second sync reported `skipped_unchanged`.
 - Reader totals equal the control totals (55 / `30.8272954899`,

@@ -320,3 +320,17 @@ Round 34: `auth.serial.db.test.ts` checks every role in Slice 0's
 REFUSED_PREDEFINED_ROLES over INHERIT, SET-only, ADMIN-only and transitive
 edges, plus a drift test that pins the test's role list to Slice 0's.
 
+Round 35:
+- `S3EvidenceStore.test.ts`:
+  - a 409 conditional-create conflict is verified;
+  - the upload is metered, with a stalled consumer failing EVIDENCE_STALLED.
+- `timestamp.test.ts`: ±14:00 offsets.
+- `S3FocusExportSource.test.ts`: listing progress per page and manifest.
+- `backstop.serial.db.test.ts`: every Slice 0 refused predefined role, plus
+  a drift test.
+- `reviewFindings7.db.test.ts`:
+  - an upload slower than stall + TTL keeps the lease, and a stalled one
+    fails;
+  - replay --batch versus replay --period freshness in doctor;
+  - a slow listing keeps the lease, and an idle one is LEASE_LOST.
+
