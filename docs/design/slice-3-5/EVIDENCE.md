@@ -15,7 +15,8 @@ ordinary commits and plain pushes (never a force-push).
 | 3 | `9b33984`, `9a17924` | The challenger's REQUEST CHANGES on 461fbc2 (1 High, 12 Medium, 8 Low), all answered (§3); the orchestrator's M9 mapping recorded as D-21; the governance wording of revisions 1–2 reverted (§2). |
 | 4 | `faeabb4`, `4492d2f` | The challenger's re-review of 461fbc2..9a17924 (2 Medium, 5 Low), all answered (§3a). |
 | 5 | `fc7ee66`, `f5676d9` | The challenger's review of 9a17924..4492d2f (1 High, 2 Medium, 3 Low), all answered (§3b); the orchestrator's decisions D-22 (calendar component, option a) and D-23 (≤ 0.15/day design margin) recorded. |
-| 6 | this revision | The challenger's review of 4492d2f..f5676d9 (1 High, 2 Medium, 4 Low), all answered (§3c): intermittent series on non-overlapping weekly sums or `info` only (D-24, proposed), calendar factors on raw `y` with a median estimator and a calendar-aware Hampel, estimation noise in every budget term, D8, h = 9.0, `budget4.py` (B.5.9). |
+| 6 | `66a1fa2`, `472dbe3` | The challenger's review of 4492d2f..f5676d9 (1 High, 2 Medium, 4 Low), all answered (§3c): intermittent series on non-overlapping weekly sums or `info` only (D-24, proposed), calendar factors on raw `y` with a median estimator and a calendar-aware Hampel, estimation noise in every budget term, D8, h = 9.0, `budget4.py` (B.5.9). |
+| 7 | this revision | Revision 6 approved by the challenger (0 High, 0 Medium). D-24 decided by the orchestrator (option a): hurdle statistic with a clustering gate for intermittent series above 50 % zeros; the challenger's Low items L1–L4 answered (§3d); `budget5.py` (B.5.10). |
 
 ## 2. Governance wording: reverted
 
@@ -108,6 +109,9 @@ in-family result. Real calendars are measurable only on real data.
 
 ## 3c. Response to the challenger's review of 4492d2f..f5676d9 (revision 6)
 
+D-24's `info`-only rule below was replaced in revision 7 by the
+orchestrator's decision (hurdle statistic with a clustering gate, §3d).
+
 All figures from `budget4.py` (Appendix B.5.9) at the chosen z_T = 4.5,
 h = 9.0, unless stated.
 
@@ -146,6 +150,30 @@ multipliers). What remains open:
 - **Calendar estimates from two cycles** lose recall (≈ 0.72) when a prior
   cycle held a missed anomaly. Expected to be rare in AT-2, and reported.
 
+## 3d. Revision 7: the orchestrator's D-24 decision and the challenger's Low items on revision 6
+
+The challenger approved revision 6 (0 High, 0 Medium). The orchestrator
+decided D-24 as the challenger's option (a). All figures are from
+`budget5.py` (Appendix B.5.10) at z_T = 4.5, h = 9.0.
+
+| Item | Change | Where |
+|---|---|---|
+| **D-24** decided | Leaves with a zero share above 0.5 get a **hurdle (compound-binomial) weekly statistic**: q̂, m̂, v̂ from the last 56 days, z = (W − 7q̂m̂)/√(7q̂(v̂ + m̂²) − 7q̂²m̂²), CUSUM k = 0.5, h = 9.0. **Clustering gate:** lag-1 autocorrelation r₁ of the 56-day active-day indicator; r₁ < **0.30** → `warning` possible, ≥ 0.30 → `info` only. Threshold justified by r₁'s noise at n = 56 (independent: mean −0.02, sd 0.13; 0.30 admits 98.8–99.2 % of independent series-weeks and 2.6–12.7 % of ρ = 0.6 ones; the 0.20–0.40 trade-off tabulated). Recorded as **decided by the orchestrator under delegation**, with both conditions: `info`-signal recall of the `info`-only remainder reported in AT-7; revisited with real data or the `full` profile | DESIGN §0, §2.3, §2.5, §4.2, §4.3, §4.8, §4.9 AT-2/AT-7, §7 (5-2a, 5-4), §8 D-24; Appendix B.5.10, C.1, C.2, C.4, C.6, D.2 |
+| Hurdle budget term | Own line: **0.0028/day** (every gated alarm 0.0028; `info` signals 0.0002). In-control 0.00002–0.00052 alarms per series-week at zero shares 0.55–0.8 (the challenger's 0.0000 / 0.0001 / 0.0005 at 0.6 / 0.7 / 0.8). Sensitivities: all clustered at ρ = 0.3: 0.011; at ρ = 0.6: 0.168 before the gate, 0.012 after it. **Total 0.101, conservative 0.131** (≤ 0.15) | DESIGN §4.2; Appendix B.5.10 |
+| `warning` / `info` split | Under the generator (independent days): **≈ 114 of the 115 leaves score to `warning`, ≈ 1 is `info` only** in a given week; spend outside AT-2 **≈ 0.03 %** of the reachable leaves' spend (revision 6: 3.5 %) | DESIGN §4.2, §4.9 AT-2 |
+| **L4** rationale | Corrected: clustered occurrence cannot be modelled in these slices (it needs a dependent-occurrence model, outside the model ladder). The "56 days do not pin down an occurrence rate" wording is removed | DESIGN §4.2, §8 D-24 |
+| **L1** `month_start` cycles | At day 62 `month_start` has **1** prior cycle (P1's days 1–3 have no weekly baseline), so P3 uses 1 and P4 2. Budget recomputed: calendar term 0.0012 (+0.0007) | DESIGN §3.2, §4.2; Appendix B.5.10 |
+| **L2** weekly term | Stated next to 0.0139: up to ≈ 2 × (**0.0285** with burst-size log sd 1.0; day clustering at ρ = 0.3 gives 0.0082). With it doubled, the conservative total is 0.146, still ≤ 0.15 | DESIGN §4.2; Appendix B.5.10 |
+| **L3** jitter | Pass probability under ±10 % jitter (calendar term 0.083 with `month_start`'s single cycle): **0.993** at the design total (0.183/day), **0.959** at the conservative total (0.213/day), slightly under the challenger's 0.98–0.995 for the conservative case. Stated that `tuning-natural` uses pinned factors and so **cannot detect jitter-type misspecification**; only real data can | DESIGN §2.3, §4.2 |
+| Re-run | Every embedded script re-run on revision 7's text: the 9 SHA-256s match (8 unchanged, `budget5.py` new); the Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy; `budget4.py`'s figures reproduced); both SQL measurements reproduce on a fresh `postgres:16` container (554.2 / 217.0 / 599.8 / 317.3 B per row). Peak disk 5.15 GB (5.19 GB with natural-3) | §4; Appendix B.5.10 |
+
+**Targets, stated plainly.** No target has been changed. D-24 now narrows
+AT-2 only by the clustered remainder (≈ 0.03 % of reachable spend under
+the generator, more on real data). What the model cannot settle stays as
+in §3c: the frozen-baseline autocorrelation in D3, the scale-heterogeneity
+assumption, and calendar or occurrence misspecification, which
+`tuning-natural` cannot see because it comes from the same generator.
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -166,9 +194,14 @@ multipliers). What remains open:
 | Level-shift TTD at z_T 4.5, h 9.0 | median 1, p90 1 day (spend-weighted, per series, and × 1.2–1.4 alone) | `budget4.py` (B.5.9) |
 | Peak disk, rev. 6 | 5.15 GB (5.19 GB with natural-3) | `budget4.py` (B.5.9) |
 | Re-run of every embedded script (rev. 6) | all 8 SHA-256s match; Python outputs reproduce (`budget4.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3c |
+| Hurdle statistic, in-control (rev. 7) | 0.00002–0.00052 alarms per series-week at zero shares 0.55–0.8, h = 9.0; gate r₁ < 0.30 passes 98.8–99.2 % of independent series-weeks | `budget5.py` (B.5.10) |
+| False-positive budget at z_T 4.5, h 9.0 (rev. 7) | **0.101/day** (0.131 with every conservative bound; 0.146 with the weekly term doubled); ±10 % jitter: P(pass) 0.993 / 0.959 | `budget5.py` (B.5.10) |
+| Hurdle routes under the generator | ≈ 114 of 115 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 | `budget5.py` (B.5.10) |
+| Peak disk, rev. 7 | 5.15 GB (5.19 GB with natural-3) | `budget5.py` (B.5.10) |
+| Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
 
 The measurement scripts are reproduced verbatim, with SHA-256, in
-Appendix B (B.4, B.5.6–B.5.9).
+Appendix B (B.4, B.5.6–B.5.10).
 
 ## 5. Governance classification
 

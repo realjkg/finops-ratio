@@ -7,8 +7,9 @@ the owner's delegation on 2026-10-04**. This third revision answers the
 challenger's REQUEST CHANGES on 461fbc2 (1 High, 12 Medium, 8 Low), and
 revision 4 its re-review of 461fbc2..9a17924 (2 Medium, 5 Low), and
 revision 5 its review of 9a17924..4492d2f (1 High, 2 Medium, 3 Low),
-and revision 6 its review of 4492d2f..f5676d9 (1 High, 2 Medium, 4 Low);
-the revision history and the item-by-item responses are in
+revision 6 its review of 4492d2f..f5676d9 (1 High, 2 Medium, 4 Low), and
+revision 7 the orchestrator's D-24 decision and the challenger's four Low
+items on revision 6 (approved, 0 High, 0 Medium); the revision history and the item-by-item responses are in
 [EVIDENCE.md](EVIDENCE.md).
 
 **Owner's goal.** Analyse cloud spend across **15,000 simulated accounts**,
@@ -117,7 +118,8 @@ derived from a seed rule (§1.1).
 3. **Slice 5 — anomaly detection.** Residuals against the forecast
    interval, a floored robust z-score (MAD), a 2-day residual sum, CUSUM on
    a frozen baseline with a false-alarm budget derived from AT-4
-   (intermittent series on non-overlapping weekly sums), new-dimension
+   (intermittent series on non-overlapping weekly sums or a hurdle
+   statistic), new-dimension
    detection,
    tag-coverage loss, commitment-coverage rules and a cold-start guardrail.
    Severity by **dollar impact and relative deviation**. Candidates are
@@ -140,7 +142,7 @@ on `fleet15k` (lower bound ≥ 0.80, ≥ 100 labels per kind); **median
 time-to-detect ≤ 1 day** after data availability; at natural rates,
 **≤ 0.30 false-positive groups per day** on `fleet15k` (gate, derived from
 the expected ≈ 1.2 true groups per day), with the detector **tuned to
-≤ 0.15 per day** (design total 0.098, 0.128 with every conservative
+≤ 0.15 per day** (design total 0.101, 0.131 with every conservative
 bound, at z_T = 4.5 and h = 9.0). If the true rate is 0.15 per day, both
 precision and false-positive gates pass with probability ≈ 0.999; that
 probability is conditional on the assumed rate, and the real control is the
@@ -151,9 +153,9 @@ figures (Appendix A), so these are Ratio's own.
 **Decisions** (§8) are all decided (2026-10-04); this revision amends D-07
 (exact-set wording, accepted by the orchestrator), D-12 (removal only
 through a reviewed `SECURITY DEFINER` function) and D-04 (non-numeric
-synthetic ids), and records the #62 dependency. Revision 6 proposes D-24
-(`info`-only scoring for intermittent series with more than 50 % zero
-days), which awaits the orchestrator's confirmation. The `full` profile needs
+synthetic ids), and records the #62 dependency. D-24 (intermittent series
+with more than 50 % zero days: a hurdle statistic with a clustering gate)
+was decided by the orchestrator in revision 7. The `full` profile needs
 owner action OA-1. The plan starts with the `daysInMonthOf` bug fix, and
 Slice 3 starts only after #62 merges (§7).
 
@@ -365,7 +367,7 @@ is reported separately, §3.10, §4.9):
 | `monthly_cycle` (5 % of accounts) | billing runs on days 1–3 and 15–16; **one factor per series and class**, drawn once from U(1.2, 1.6), then constant across months and across the class's days (pinned) | **not an anomaly; learned by the calendar component**; detections count against AT-1 and AT-4; WAPE reported |
 | `holiday` (all accounts) | a fixed synthetic holiday calendar (≈ 1 day per month in the span), × 0.5–0.8 on `prod` and × 0.2–0.5 on others | not an anomaly; not learnable in 4 periods (no holiday calendar in the model); drops are `info` (D-14) and grouped provider-wide (§4.5 step 2b); any `warning`+ detection counts against AT-1 and AT-4 |
 | `price_change` (provider-wide) | one provider changes one service's unit price on one day, × 0.8–1.3 for every account using it | an **alert**, expected as **one provider-wide group** (§4.5) |
-| `intermittent` (5 % of series) | zero on 30–80 % of days, Poisson-like bursts | forecast reported separately (MAPE excluded); zero share ≤ 50 %: scored on non-overlapping weekly sums; > 50 %: `info` only (§4.2) |
+| `intermittent` (5 % of series) | zero on 30–80 % of days, Poisson-like bursts | forecast reported separately (MAPE excluded); zero share ≤ 50 %: scored on non-overlapping weekly sums; > 50 %: a hurdle (compound-binomial) weekly statistic, `info` only when the active days are clustered (§4.2, D-24) |
 | `constant_amortised` (commitment-only series) | the same effective cost every day (pure amortisation) | **zero** `warning`+ groups (gated, AT-5); exercises the MAD floor |
 | `mtd_restatement`, `late_data` (`ci` only) | month-to-date exports that revise earlier days; rows for day d first appearing on day d + 2 | `restated` resolution; no group from a revision alone. On `fleet15k` data arrival is idealised: closed months load at once (§0) |
 
@@ -375,9 +377,12 @@ calendar component (§3.2) faces exactly the pattern it models. That makes
 the gated false-positive figure an implementation check, not evidence about
 real billing. A **robustness run** draws each month's factor with ±10 %
 uniform jitter around the series' factor (e.g. 1.17–1.43 around 1.3); it
-is **reported, not gated**. At the chosen thresholds it adds **≈ 0.063
-false groups per day** (Appendix B.5.9), on its own almost half the design
-margin. Real calendars will not match the pinned model: business-day
+is **reported, not gated**. At the chosen thresholds it adds **≈ 0.082
+false groups per day** (Appendix B.5.10), on its own more than half the
+design margin. Under it, the pass probability of AT-1 and AT-4 is ≈ 0.993
+at the design total and ≈ 0.959 at the conservative total. **`tuning-natural`
+cannot see this:** it is generated with the same pinned factors, so it
+cannot detect jitter-type misspecification; only real data can. Real calendars will not match the pinned model: business-day
 shifts, quarter-ends, irregular billing dates and month-to-month changes in
 size all leave residual on event days, and only real data can measure it
 (D-22).
@@ -472,9 +477,10 @@ Impacts are drawn so that ≈ 50 % of `alert` events are **meaningful**
   drawn uniformly.
 - **Fan-in kinds**: the (provider or billing account, service) drawn
   proportional to the service's spend there.
-- **Enriched seed:** gated kinds on **individual** series only, and none
-  on intermittent series with a zero share above 50 %, which are `info`
-  only (§4.2, D-24).
+- **Enriched seed:** gated kinds on **individual** series only. Intermittent
+  series are included; a label on a series whose occurrence is clustered
+  at detection time (`info` only, §4.2, D-24) is reported in AT-7, not
+  gated.
 
 **Tail services (`fleet15k`).** Labels on services that fold into
 `Other services` carry `folded: true`. The evaluator reports how many of
@@ -579,7 +585,7 @@ Full model, measurements and arithmetic: Appendix B (B.5 for `fleet15k`).
 | Profile | Accounts | Grain | Span | Leaf series | Fact rows | Disk | Single-worker load (20 k / 6 k rows/s) | Where it runs |
 |---|---|---|---|---|---|---|---|---|
 | `ci` | 150 (+ 15 control) | full | 4 periods (≈ 120 d) | ≈ 1.5 k | ≈ 0.24 M | < 0.3 GB | ≤ 1 min | CI, every PR |
-| **`fleet15k`** | **15,000** (+ 15 control) | account × service × day; top 2 services individually at or above median spend, top 1 below, + `Other services` (**tail-service caveat**) | **4 periods (122 d)** | **≈ 37.1 k** (22.5 k individual) | **≈ 4.89 M** | **≈ 4.96 GB** per run, **≈ 5.15 GB peak** across the sequential runs, all-in (Appendix B.5.8, re-derived in B.5.9) | **4 / 14 min** | this container class (≈ 10 GB free, 4 CPU, 15 GB RAM); three sequential runs |
+| **`fleet15k`** | **15,000** (+ 15 control) | account × service × day; top 2 services individually at or above median spend, top 1 below, + `Other services` (**tail-service caveat**) | **4 periods (122 d)** | **≈ 37.1 k** (22.5 k individual) | **≈ 4.89 M** | **≈ 4.96 GB** per run, **≈ 5.15 GB peak** across the sequential runs, all-in (Appendix B.5.8, re-derived in B.5.9 and B.5.10) | **4 / 14 min** | this container class (≈ 10 GB free, 4 CPU, 15 GB RAM); three sequential runs |
 | `full` | 15,000 | full | 13 periods (395 d) | ≈ 147 k | ≈ 78.6 M | 60–95 GB | 65–218 min | owner action OA-1 |
 
 **`fleet15k` per-row sizes are measured** on an ephemeral PostgreSQL 16
@@ -802,12 +808,12 @@ multiplied by per-series factors for three fixed **event classes**:
     90 %. The threshold applies nothing to a series without evidence
     (false application ≈ 0.3 % of series-classes at |t| ≥ 3), and lets a
     real factor through whole once it is significant.
-  - Measured effect (Appendix B.5.9): at the chosen thresholds the
+  - Measured effect (Appendix B.5.10): at the chosen thresholds the
     cohorts' expected false groups fall from **≈ 7.0 candidate leaf-events
-    per day without the component** to **≈ 0.0005 per day with it**,
+    per day without the component** to **≈ 0.0012 per day with it**,
     with the generator's pinned factors (§2.3). With ±10 % month-to-month
     jitter in the factors (a reported robustness run, not gated) the
-    residual is **≈ 0.063 per day**.
+    residual is **≈ 0.083 per day** (Appendix B.5.10).
 - **How many cycles it needs.** At least **m = 3 prior values**: one
   cycle of `month_start` (d = 3), two of `mid_month` or `month_end`
   (d = 2); then only if the effect is significant. A × 1.3 effect (log
@@ -816,12 +822,16 @@ multiplied by per-series factors for three fixed **event classes**:
 - **Before that:** no factor. The **first occurrence** of a class, and the
   second occurrence of a 2-day class, are unlearnable; their false groups
   are counted explicitly in the budget (§4.2), not hidden.
-- **What `fleet15k`'s 4 periods give.** Every series that exists from day 1
-  has **2 prior cycles** of each class at day 62 (P1, P2), so its P3 events
-  use 2 cycles and its P4 events use 3. Accounts onboarding during the span
+- **What `fleet15k`'s 4 periods give.** A series that exists from day 1
+  has **2 prior cycles** of `mid_month` and `month_end` at day 62 (P1, P2),
+  so its P3 events use 2 cycles and its P4 events use 3. For
+  **`month_start` it has only 1** (rev. 7, L1): P1's days 1–3 have no
+  weekly baseline to form `log(y / ŷ_weekly)` against, so P3's
+  `month_start` uses P2 alone (m = 3) and P4's uses P2 and P3. The budget
+  assumes exactly that (+0.0007 per day against revision 6). Accounts onboarding during the span
   meet a class for the first or second time inside the evaluation window:
   about **3.0 false groups per 61-day seed**, or 0.049 per day (Appendix
-  B.5.9). Two or three cycles is a thin basis. It works here because the
+  B.5.10). Two or three cycles is a thin basis. It works here because the
   generator's cohorts follow exactly these classes with one constant
   factor per series and class (§2.3). **Real calendars will not match
   that:** shifted business days, quarter-ends, irregular billing dates and
@@ -1217,18 +1227,49 @@ the last 56 is not scored daily, so that bursts do not look like spikes:
   An alarm is a candidate on the week's last day; it is `warning` only if
   the week's excess passes §4.4. Time-to-detect on these series is up to
   7 days longer, and their labels are reported separately (AT-7).
-- **Zero share > 50 %: `info` only (D-24).** The weekly CUSUM still runs,
-  but its candidates are capped at `info`. Why not a count or occurrence
-  model: a hurdle model (occurrence × size) needs a stable occurrence rate,
-  which 56 days with more than 28 zero days do not pin down. On these
-  series the weekly statistic itself is unstable: 0.011 in-control alarms
-  per series-week at 80 % zeros, more than five times the rate at 50 %. They
-  are also small: **115 of the 3,440 leaves that can reach `warning`, 3.5 %
-  of those leaves' spend** (2.1 % for the 66 weekly-scored ones). **Recall
-  limit, stated plainly:** an anomaly on such a series never reaches
-  `warning`. The enriched seed places no gated label on them, and their
-  natural-seed labels are reported, not gated, like folded labels (§2.5).
-  They produce ≈ 0.05 `info` signals per day.
+  The term is sensitive to the burst model: with a burst-size spread of
+  sd 1.0 on the log scale instead of 0.5 it doubles, to ≈ 0.03 per day
+  (day clustering at ρ = 0.3 lowers it, to 0.008; Appendix B.5.10).
+- **Zero share > 50 %: hurdle statistic (D-24, decided by the
+  orchestrator, rev. 7).** The median and MAD of weekly sums are unstable
+  when most days are zero (0.011 in-control alarms per series-week at 80 %
+  zeros, more than five times the rate at 50 %), so these series get a
+  **hurdle (compound-binomial) weekly statistic**. From the 56 days before
+  the week: `q̂` = share of active days, `m̂` and `v̂` = mean and variance
+  of the active-day values. For the week's sum `W`:
+  `z = (W − 7q̂m̂) / √(7q̂(v̂ + m̂²) − 7q̂²m̂²)`, the mean and variance of a
+  sum of 7 independent days that are active with probability `q̂`. One-sided
+  CUSUM with k = 0.5 and the same h = 9.0; scored only with ≥ 3 active
+  days in the window. In-control rate, by Monte Carlo of exactly this
+  statistic with independent days: **0.00002–0.00052 alarms per
+  series-week** for zero shares 0.55–0.8 (the challenger's simulation:
+  0.0000 / 0.0001 / 0.0005 at 0.6 / 0.7 / 0.8).
+- **Clustering gate.** The hurdle variance assumes independent active
+  days. If active days come in runs, the week-to-week variance is larger
+  and the statistic over-alarms: with lag-1 persistence ρ = 0.6 on every
+  one of these series, 0.17 alarms per day before the gate. So each week
+  the job computes **r₁, the lag-1 autocorrelation of the active-day
+  indicator over the same 56 days**. **r₁ < 0.30:** treated as
+  independent, alarms can reach `warning`. **r₁ ≥ 0.30:** clustered,
+  candidates are capped at `info`. Why 0.30: at n = 56, r₁ for an
+  independent series has mean ≈ −0.02 and sd ≈ 0.13 (≈ 1/√56), so 0.30 is
+  ≈ 2.4 sd above it and admits 98.8–99.2 % of independent series-weeks;
+  for ρ = 0.6, r₁ has mean 0.52–0.56 and sd 0.12–0.19, and only 2.6–12.7 %
+  of series-weeks pass (the spread grows with the zero share, since fewer
+  transitions are observed). A lower threshold rejects more independent
+  series (0.20 admits 94–95 %); a higher one admits more clustered ones
+  (0.40 admits 10–21 % at ρ = 0.6). After the gate the ρ = 0.6 case costs
+  0.012 per day, and ρ = 0.3 (inside the gate half the time) 0.011.
+- **Why clustered series stay `info`.** Clustered occurrence cannot be
+  modelled in these slices: it needs a model of dependent occurrence (a
+  two-state switching process or a self-exciting count), which is outside
+  Slices 3–5's model ladder (§3.2). Under the generator, whose intermittent
+  days are independent, **≈ 114 of the 115 leaves score to `warning` and
+  ≈ 1 is `info` only** in a given week; the spend left out of AT-2 is
+  **≈ 0.03 % of the reachable leaves' spend** (rev. 6: 3.5 %). Real data
+  will have more clustered series. AT-7 reports the `info`-signal recall
+  of the `info`-only remainder, and D-24 is revisited with real data or
+  the `full` profile.
 
 | Id | Detector | Fires when | Targets |
 |---|---|---|---|
@@ -1315,7 +1356,7 @@ that is the **AT-4 gate**. The detector is **tuned to a margin: ≤ 0.15
 false groups per day in expectation, all sources included**.
 
 Every source has its own line, derived by closed form or Monte Carlo over
-the `fleet15k` leaf list (`budget4.py`, Appendix B.5.9; natural rates,
+the `fleet15k` leaf list (`budget5.py`, Appendix B.5.10; natural rates,
 z_T = 4.5, h = 9.0). The figures count candidate leaf-events, an upper
 bound on groups, since grouping only merges.
 
@@ -1324,18 +1365,18 @@ bound on groups, since grouping only merges.
 | D1 ∧ D2 on the 3,259 daily-scored leaves that can reach `warning` (≥ 20 % and ≥ $100 excess) | per series-day probability from the Monte Carlo of the 56-day median and MAD with the pooled floor, D1's as-of quantile and the forecast's level error, with the `warning` test | **0.0061** |
 | D8 on the same leaves | the same Monte Carlo for the 2-day sum against `z_T · s₂`, with the `warning` test on the 2-day mean | **0.0003** |
 | D3 on leaves | scale-mixed in-control rate (effective ARL₀ ≈ 19,700 days) × P(the alarm episode's mean excess reaches `warning`), from 3 M simulated steps = **75 alarm episodes** at h = 9.0 | estimate **< 0.0001**, but **resolution-limited**: 0 hits in 75 episodes bound P(`warning` \| alarm) by 3/75 per leaf, i.e. **≤ 0.0066**. Conservative bound (every alarm on the 476 daily-scored leaves ≥ $500/day counted as `warning`, the resolution bound on the rest): **0.0298**. Neither covers the frozen-baseline autocorrelation |
-| Intermittent, weekly-scored (66 leaves, zero share 30–50 %) | Monte Carlo of the weekly statistic (8-week estimated median and MAD) × P(the week's excess reaches `warning`) ÷ 7 | **0.0139** |
-| Intermittent, `info` only (115 leaves, zero share > 50 %) | capped at `info` | **0** (≈ 0.048 `info` signals per day) |
+| Intermittent, weekly-scored (66 leaves, zero share 30–50 %) | Monte Carlo of the weekly statistic (8-week estimated median and MAD) × P(the week's excess reaches `warning`) ÷ 7 | **0.0139** (could be up to ≈ 2 ×, ≈ 0.03, with a wider burst-size spread) |
+| Intermittent, hurdle-scored (115 leaves, zero share > 50 %) | Monte Carlo of the hurdle statistic with the clustering gate, independent days as generated, × P(the week's excess reaches `warning`) ÷ 7; conservative: every gated alarm | **0.0028** (every alarm: 0.0028; `info` signals ≈ 0.0002 per day) |
 | Aggregate scopes (≈ 550), D3 only, **every alarm counted** | 550 × the scale-mixed in-control rate | **0.0279** |
-| Calendar cohorts after the component (pinned factors, P3 and P4 events with 2 and 3 prior cycles) | Monte Carlo of the median estimator and of D1 ∧ D2, D8 and D3 on the residual | **0.0005** (without the component: ≈ 7.0) |
+| Calendar cohorts after the component (pinned factors; P3 and P4 events with 2 and 3 prior cycles, `month_start` with 1 and 2) | Monte Carlo of the median estimator and of D1 ∧ D2, D8 and D3 on the residual | **0.0012** (without the component: ≈ 7.0) |
 | First and second occurrences of a calendar class (cohort accounts onboarding in the span; no factor yet) | Monte Carlo, × onboarding probability | **0.0490** (≈ 3.0 groups per seed) |
 | D4 new dimension | the generator emits no unlabelled new service or region; measured on `tuning-natural` | **0** by construction |
 | D5 tag coverage | no unlabelled tag change; measured | **0** by construction |
 | D6 cold start | two consecutive days above the fitted 99.9th percentile, × onboardings | **< 0.0001** (4 × 10⁻⁵ if the tail is 10 × the fit) |
 | D7 commitment coverage | every commitment change is labelled (`commitment_effect` is `info`, `commitment_expiry` an alert) | **0** by construction |
 | Holidays | drops are `info` (D-14); the return to normal is not an excess over the forecast | **0** by construction; measured |
-| **Total** | | **0.098** (**0.128** with the conservative D3 bound) |
-| *Reported, not in the total:* calendar factors with ±10 % month-to-month jitter (§2.3) | same Monte Carlo, jittered factors | +0.063 |
+| **Total** | | **0.101** (**0.131** with every conservative bound; 0.146 if the weekly term is also doubled) |
+| *Reported, not in the total:* calendar factors with ±10 % month-to-month jitter (§2.3) | same Monte Carlo, jittered factors | +0.082 (calendar term 0.083 instead of 0.0012); P(pass) 0.993 / 0.959 at the design / conservative total |
 | *Not covered by any line:* frozen-baseline autocorrelation in D3 | — | measured on `tuning-natural` only |
 
 **Choice of thresholds.** With k = 0.5 (Siegmund ARL₀ shown; the budget
@@ -1343,19 +1384,20 @@ uses the scale-mixed rate):
 
 | z_T | h | ARL₀ (Siegmund, days) | Total | Total, conservative |
 |---|---|---|---|---|
-| 4.5 | 7.5 | 11,585 | 0.173 | 0.259 |
-| 4.5 | 8.0 | 19,112 | 0.139 | 0.198 |
-| 4.5 | 8.5 | 31,523 | 0.115 | 0.157 |
-| **4.5** | **9.0** | **51,985** | **0.098** | **0.128** |
-| 4.5 | 9.5 | 85,723 | 0.087 | 0.112 |
-| 5.0 | 7.5 | 11,585 | 0.168 | 0.254 |
-| 5.0 | 8.0 | 19,112 | 0.133 | 0.193 |
-| 5.0 | 8.5 | 31,523 | 0.110 | 0.152 |
-| 5.0 | 9.0 | 51,985 | 0.093 | 0.122 |
-| 5.0 | 9.5 | 85,723 | 0.082 | 0.107 |
+| 4.5 | 7.5 | 11,585 | 0.183 | 0.269 |
+| 4.5 | 8.0 | 19,112 | 0.145 | 0.205 |
+| 4.5 | 8.5 | 31,523 | 0.120 | 0.162 |
+| **4.5** | **9.0** | **51,985** | **0.101** | **0.131** |
+| 4.5 | 9.5 | 85,723 | 0.089 | 0.114 |
+| 5.0 | 7.5 | 11,585 | 0.178 | 0.264 |
+| 5.0 | 8.0 | 19,112 | 0.140 | 0.199 |
+| 5.0 | 8.5 | 31,523 | 0.115 | 0.156 |
+| 5.0 | 9.0 | 51,985 | 0.096 | 0.126 |
+| 5.0 | 9.5 | 85,723 | 0.084 | 0.109 |
 
 **z_T = 4.5, h = 9.0** is the least strict pair (lowest z_T, then lowest
-h) whose total stays ≤ 0.15 **with every conservative bound**. h rises
+h) whose total stays ≤ 0.15 **with every conservative bound** (rev. 7: still
+so with the hurdle term and `month_start`'s single cycle). h rises
 from 7.5 to 9.0 because the scale error roughly doubles CUSUM's in-control
 rate. Raising z_T buys little, since D1 ∧ D2 and D8 are already small; the
 large terms are D3 on leaves and aggregates (set by h) and the unlearnable
@@ -1367,7 +1409,9 @@ days, true groups ~ Poisson(146)). **If** the true false-positive rate is
 0.15 per day, AT-1 and AT-4 both pass with **probability ≈ 0.999**; at
 0.20, ≈ 0.977; at the 0.30 gate, ≈ 0.435. These are probabilities
 **conditional on an assumed rate**. They say what the margin buys; they do
-not say what the rate is.
+not say what the rate is. **Under ±10 % calendar jitter** (rev. 7, L3) the
+rate would be ≈ 0.183 per day from the design total (P(pass) ≈ 0.993) or
+≈ 0.213 from the conservative one (≈ 0.959).
 
 **The real control is the measurement (M1, rev. 6 M2).** The table above
 predicts the rate from a model of the generator, with assumptions
@@ -1383,6 +1427,12 @@ in the table, and raises z_T and h, in steps of 0.25, until:
 For example, 7 false groups in 61 days is 0.115 per day, with a 95 %
 interval of [0.046, 0.236]; 9 groups is 0.148, [0.067, 0.280]. The frozen
 values are committed before any evaluation seed is generated.
+
+**What the control cannot see.** `tuning-natural` comes from the same
+generator: pinned calendar factors, independent intermittent days, the
+generator's burst sizes. It measures the implementation against that
+model, so it **cannot detect** misspecification of the jitter kind (or
+clustered occurrence, or wider bursts). Only real data can.
 
 **Delay cost, and AT-3 (rev. 6, L1).** CUSUM detection delay is ≈
 `(h + 1.166) / (δ − k)` days: at h = 9.0, ≈ 2.9 days for a 4σ shift and
@@ -1418,7 +1468,8 @@ Per series the job carries, between daily runs: the M1 state and the
 calendar factors (with their value counts m and t-statistics), the anchor
 day and anchor state for D3, `S⁺`/`S⁻`, the 56-day weekday medians and MAD
 of `log y` for D2, the previous day's one-step residual for D8, for
-intermittent series the last 8 weekly sums and the weekly `S⁺`, the
+intermittent series the last 8 weekly sums (zero share ≤ 50 %) or the
+hurdle's q̂, m̂, v̂ and r₁ (> 50 %), and the weekly `S⁺`, the
 trailing committed and untagged shares for D5/D7, and the per-cohort as-of
 error buckets, including the 2-day sums for `s₂` (Appendix D,
 `detector_state`). D6's per-k growth fit is per cohort, recomputed daily
@@ -1528,7 +1579,7 @@ its id. The `ci` daily-delivery replay (§2.7) exercises this with the
 time; between runs only the evaluator's compact inputs (API pages, root
 causes, matches, evidence record: ≈ 0.04 GB per run) and natural-1's
 backtest export and actuals (≈ 0.28 GB) are kept (both sizes are
-assumptions until PR 3-4 measures them). Peak ≈ 5.15 GB (Appendix B.5.8, re-derived in B.5.9).
+assumptions until PR 3-4 measures them). Peak ≈ 5.15 GB (Appendix B.5.8, re-derived in B.5.9 and B.5.10).
 
 | Run | Seed | Label rates | Used for | Not used for |
 |---|---|---|---|---|
@@ -1537,7 +1588,7 @@ assumptions until PR 3-4 measures them). Peak ≈ 5.15 GB (Appendix B.5.8, re-de
 | 2 | **natural-1** | natural rates, spend-weighted placement (§2.5) | **precision (AT-1)** and **false-positive rate (AT-4)**, pooled with natural-2; AT-5, AT-6; **forecast targets** (§3.10; the only run with the leaf backtest export) | recall |
 | 3 | **natural-2** | natural rates, a different seed | pooled with natural-1 for AT-1 and AT-4; AT-5, AT-6 | recall, forecast targets |
 | (3b) | **natural-3** | natural rates | only if natural-1 + natural-2 give fewer than **140** groups at ≥ `warning` (the n at which p̂ = 0.80 has a Wilson lower bound ≥ 0.72); pooled the same way | recall, forecast targets |
-| 4 | **enriched** | ≥ 100 **meaningful** labels per gated kind in the evaluation window, on individual series only, none on `info`-only intermittent series (D-24) | **recall (AT-2)**, time-to-detect (AT-3), AT-5, AT-6 | precision, false-positive rate |
+| 4 | **enriched** | ≥ 100 **meaningful** labels per gated kind in the evaluation window, on individual series only, intermittent series included (labels on series that are `info` only at detection time are reported in AT-7, D-24) | **recall (AT-2)**, time-to-detect (AT-3), AT-5, AT-6 | precision, false-positive rate |
 
 **Expected n (N1, Appendix B.5.7).** Per natural seed on `fleet15k`:
 ≈ 158 labels of the kinds that can reach `warning` in the 61-day window,
@@ -1585,21 +1636,22 @@ the group is about.
 | # | Target | Run | Decision rule |
 |---|---|---|---|
 | AT-1 | Precision at ≥ `warning` ≥ **0.80** | natural-1 + natural-2 pooled (+ natural-3 if needed) on `fleet15k`; natural on `full` | point estimate ≥ 0.80 **and** Wilson 95 % lower bound ≥ 0.70; requires n ≥ 100 pooled groups (expected ≈ 183), otherwise "insufficient n", reported and escalated (not a pass) |
-| AT-2 | Recall on meaningful labels ≥ **0.90** for `spike`, `level_shift`, `new_service`, `runaway_resource` (and `new_region` on `full`); ≥ **0.75** for `gradual_drift`, `tagging_loss`, `new_account_runaway`, `commitment_expiry`. On `fleet15k`: **measured on individual series only** (≈ 79 % of account × service series and ≈ 26 % of spend are folded and not covered; `full` covers them), and not on `info`-only intermittent series (3.5 % of the spend of leaves that can reach `warning`, D-24) | enriched | per kind: point estimate ≥ target **and** Wilson 95 % lower bound ≥ target − 0.10, with n ≥ 100 meaningful labels per kind (at n = 100 and p = 0.90 the lower bound is ≈ 0.83; at p = 0.75, ≈ 0.66) |
+| AT-2 | Recall on meaningful labels ≥ **0.90** for `spike`, `level_shift`, `new_service`, `runaway_resource` (and `new_region` on `full`); ≥ **0.75** for `gradual_drift`, `tagging_loss`, `new_account_runaway`, `commitment_expiry`. On `fleet15k`: **measured on individual series only** (≈ 79 % of account × service series and ≈ 26 % of spend are folded and not covered; `full` covers them), and not on intermittent series whose occurrence is clustered (`info` only; ≈ 1 of 115 hurdle-scored leaves under the generator, ≈ 0.03 % of the spend of leaves that can reach `warning`, D-24) | enriched | per kind: point estimate ≥ target **and** Wilson 95 % lower bound ≥ target − 0.10, with n ≥ 100 meaningful labels per kind (at n = 100 and p = 0.90 the lower bound is ≈ 0.83; at p = 0.75, ≈ 0.66) |
 | AT-3 | Median time-to-detect ≤ **1 day** after data availability for spikes, level shifts, new service/region, runaway; p90 ≤ 3 days; drift: median ≤ 7 days after its cumulative excess crosses the minimum impact. With D8 and the pinned multipliers, level shifts on `fleet15k` are expected at median 1, p90 1 day (§4.2): **no longer at risk on the generator**; weekly-scored intermittent series are reported separately | enriched | point estimates |
 | AT-4 | False-positive groups at ≥ `warning`, **all cohorts included** (month-end, monthly-cycle and holiday cohorts are not excluded): mean ≤ **0.25 × the expected true-group rate**, i.e. **≤ 0.30 per day on `fleet15k`** and ≤ 0.40 per day on `full`; p95 day ≤ 2. Design margin: tuned to ≤ 0.15 per day (§4.2). The earlier "≤ 5 groups per day" form is retired: at ≈ 1.2 true groups per day it could never bind | natural seeds pooled | point estimates over the pooled 61-day windows; also reported for days 62–75 and 76–122 separately |
 | AT-5 | **Zero** `warning`+ groups qualifying only for credit (incl. `Usage-Based`), purchase, tax (incl. `Usage-Based`), recurring-fee, correction, onboarding, commitment-effect and `constant_amortised` labels | natural and enriched | exact |
 | AT-6 | One group per shared-cause event per currency (`shared_cause`, `provider_shared_cause`, `price_change`), no duplicates | natural and enriched | exact |
-| AT-7 | Per-cohort breakdown of the false groups already counted in AT-1 and AT-4 (`month_end_batch`, `monthly_cycle`, `holiday`, `intermittent` weekly-scored, first and second occurrences of a calendar class), the `info` signals of `info`-only intermittent series, labels on calendar-cohort event days (detected / missed), and folded tail labels (detected / lost); the ±10 % calendar-jitter robustness run on `tuning-natural`: reported | natural seeds | — |
+| AT-7 | Per-cohort breakdown of the false groups already counted in AT-1 and AT-4 (`month_end_batch`, `monthly_cycle`, `holiday`, `intermittent` weekly- and hurdle-scored, first and second occurrences of a calendar class), the **`info`-signal recall** of intermittent series that are `info` only because their occurrence is clustered (D-24), the number of hurdle-scored series in each route, labels on calendar-cohort event days (detected / missed), and folded tail labels (detected / lost); the ±10 % calendar-jitter robustness run on `tuning-natural`: reported | natural seeds | — |
 | AT-8 | Daily detection run ≤ **5 min**; as-of replay of the evaluation window ≤ 60 min | `fleet15k` (this container class), `full` (4 threads) | measured (§3.11) |
 
-**Alert-fatigue outputs (L2, restated in rev. 6 after H1), reported every
-run and stated as a bound.** At natural rates, groups at ≥ `warning` per
-day are ≈ 1.2 true + 0.098 false (0.128 with the conservative D3 bound).
-Under a Poisson approximation: **mean ≈ 1.30 (1.33), p95 day 3, maximum
-over a 61-day window ≈ 4** (Appendix B.5.9). The `info`-only intermittent
-series add **≈ 0.05 `info` signals per day** (p95 day 0, maximum ≈ 1),
-which are not notified. The evaluator reports, for each natural seed and
+**Alert-fatigue outputs (L2, restated in rev. 6 after H1 and in rev. 7),
+reported every run and stated as a bound.** At natural rates, groups at
+≥ `warning` per day are ≈ 1.2 true + 0.101 false (0.131 with every
+conservative bound). Under a Poisson approximation: **mean ≈ 1.30 (1.33),
+p95 day 3, maximum over a 61-day window ≈ 4** (Appendix B.5.10). The
+hurdle-scored series' `info` signals (clustered series, or alarms the
+gate caps) are ≈ 0.0002 per day under the generator, and are not
+notified. The evaluator reports, for each natural seed and
 pooled:
 - mean, p95 and maximum day of groups at ≥ `warning`;
 - the same for false groups;
@@ -1854,7 +1906,7 @@ output relies on; D-21). PR ids keep their slice numbers.
 | 1 | **4-0** | **Bug fix, independent:** F1 (`daysInMonthOf`, `remainingWeekdaysInMonth`, and `budgetStatus.ts` through them, under a non-UTC process time zone) | red tests under `TZ=Asia/Tokyo` and `TZ=America/Los_Angeles` (February 2026 = 28 days; a leap February = 29; weekday counts at month ends); existing forecast and budget tests unchanged and green | local-time `Date` constructor restored; off-by-one in the weekday loop |
 | — | *#62* | worker provider check with `SYNTHETIC_PROVIDERS` and the opt-in (its own PR) | as in #62 | as in #62 |
 | 2 | **3-1a** | Generator core (pure): fleet model, `SYN-` ids, `Synthetic*` provider names, series model, PRNG, BigInt money, FOCUS row rules, commitments (incl. `Unused` and expiry), the three profiles' grain and columns, `fleet15k` folding | deterministic digests; adding an account leaves others' draws unchanged; heavy tail (top-1 % share within ±3 pp); **every row passes the worker's own validator** (`src/ingest/focus/validate.ts`); one currency per billing account; `BillingPeriodStart` = period; FOCUS rules (Purchase ⇒ not Usage-Based; Committed ⇔ commitment id; Tax ⇒ no pricing category); only `SYNTHETIC_PROVIDERS` names; ids match `^SYN-(A|BA)-[0-9A-HJKMNP-TV-Z]+$` and never a 12-digit number; `fleet15k`: exactly 15,000 accounts, ≤ 3 usage series per account, minimal columns only, `Other services` = the exact sum of the folded services | PRNG stream shared across entities; credit sign flipped; mixed currency in a billing account; float in the money path; a non-synthetic provider name; a numeric id; an account dropped; folding loses a cent |
-| 3 | **3-1b** | Ground truth, stressors and seeds: every label kind of Appendix C, tuning / natural-1..3 / enriched seeds, spend-weighted placement, folded-label marking, `usage_based_credit`/`_tax` rows, `series-params.jsonl` | each label's effect present in the rows and absent outside its window; level-shift multipliers log-uniform on [1.2, 3.0] (KS test on 10,000 draws); calendar factors constant per series and class across months and days, and the `--calendar-jitter 0.10` option (robustness run only) varying them by month within ±10 %; natural seed rates within ±10 % of Appendix C; enriched seed ≥ 100 meaningful labels per gated kind in the evaluation window, all on individual series; `folded: true` exactly for labels on folded services; stressor cohorts present; seeds produce disjoint label sets | label written without its effect; enriched labels placed on folded services or `info`-only intermittent series; tuning and natural seeds identical; `Usage-Based` credit emitted as `Usage`; calendar factor redrawn each month without the jitter option |
+| 3 | **3-1b** | Ground truth, stressors and seeds: every label kind of Appendix C, tuning / natural-1..3 / enriched seeds, spend-weighted placement, folded-label marking, `usage_based_credit`/`_tax` rows, `series-params.jsonl` | each label's effect present in the rows and absent outside its window; level-shift multipliers log-uniform on [1.2, 3.0] (KS test on 10,000 draws); calendar factors constant per series and class across months and days, and the `--calendar-jitter 0.10` option (robustness run only) varying them by month within ±10 %; natural seed rates within ±10 % of Appendix C; enriched seed ≥ 100 meaningful labels per gated kind in the evaluation window, all on individual series; `folded: true` exactly for labels on folded services; stressor cohorts present; seeds produce disjoint label sets | label written without its effect; enriched labels placed on folded services; tuning and natural seeds identical; `Usage-Based` credit emitted as `Usage`; calendar factor redrawn each month without the jitter option |
 | 4 | **3-2** | Writer: AWS Data Exports layout, gzip, manifests with `x-ratio-control`, file splits, `dataset.json`, labels; `npm run synthetic:generate` | output accepted by `src/ingest/sources/s3/layout.ts`; bounded memory on a 1 M-row run; byte-identical re-run; pinned `ci` golden digest; control totals = BigInt sums = Python recomputation | manifest lists a file twice; control total off by 1e-10; split drops the last row; gzip mtime not zeroed |
 | 5 | **3-3** | `local:synthetic` (own project and ports; upload + SHA-256 verification; local copy removed by default; 36 + 1 sources; parallel sync with the opt-in in the worker environment only; asserts; evaluator export; `down -v`) + CI step for `ci` | every period `published` and `reconciled`; totals = `dataset.json`; re-sync all `skipped_unchanged`; no fake source, no hook (static test like 2b's A9); **static test: `RATIO_ALLOW_SYNTHETIC_PROVIDERS` set only by `local:synthetic`'s worker spawn, never by `local:test`, `local:acceptance`, other `local:*` commands, compose files or non-synthetic CI steps**; cleanup always | opt-in set globally (in the parent environment or compose); skip one source; assert only row counts; keep the local copy; run with the fake source |
 | 6 | **3-4** | **`fleet15k` runs in this container class** (tuning, tuning-natural, natural-1, natural-2 [, natural-3], enriched; sequential; **measures the retained evaluator-input sizes**, assumed 0.04 GB per run and 0.03 GB of actuals in `budget2.py`/`budget3.py`; peak disk measured against 5.15 GB) + evidence: load time (D-06 trigger), bytes per row, the int batch key's real size, total disk per run vs 5.5 GB / 6 GB, peak WAL with and without `max_wal_size=256MB`, SeaweedFS fit (T1) | §2.10 targets measured and recorded; a miss is reported and escalated (D-20) | — (measurement PR) |
@@ -1866,10 +1918,10 @@ output relies on; D-21). PR ids keep their slice numbers.
 | 12 | **4-5** | API: `costs/daily`, `forecasts`, `forecasts/accuracy`, `freshness` | Slice 2 route test set (auth, 400s, keyset, tenant, unsafe login, no-store, decimal strings); latency check on `fleet15k` | read tenant from the query; OFFSET pagination; number instead of string |
 | 13 | **4-6** | Forecast acceptance on `fleet15k` (natural-1) + Python evaluator (own actuals from the bucket) | FT-1…FT-7, FT-9, FT-10 recorded with n; `Other services` reported separately; evaluator and job agree; FT-8 marked "`full` only, pending OA-1" | evaluator reading the job's rollups instead of the bucket; `Other services` included in the FT-4 gate |
 | 14 | **5-1** | Migration 0004 (anomaly tables, events, views; no `ratio_triage`) | as 4-1 | as 4-1 |
-| 15 | **5-2a** | Detectors D1–D8 (pure) on the **log scale**, calendar-adjusted: 56-day D2 window with the pooled floor, D8 on 2-day sums with the pooled `s₂`, frozen-baseline CUSUM with re-anchoring and as-of `σ(h)`, D6 on two-day growth with the fitted percentile, intermittent series on **non-overlapping** weekly sums (zero share ≤ 50 %) or `info` only (> 50 %), aggregate scopes on D3 only, commitment rules, category precedence | unit cases per detector; a slow drift that an adaptive one-step CUSUM misses is caught; ARL₀ of D3 on simulated N(0,1) within ±15 % of Siegmund's value at h = 7.5 and 9.0; **per series-day rates of D1 ∧ D2 and D8 on simulated series with estimated median, MAD and pooled scale within ±25 % of `budget4.py`'s 4.3 × 10⁻⁵ and 1.5 × 10⁻⁵**; the weekly statistic's in-control rate within ±25 % of `budget4.py`'s per zero share; D8 fires by day 2 on a 4.9σ shift in ≥ 85 % of 2,000 trials; an `info`-only intermittent series never yields `warning`; D6's threshold from a log-normal fit with n_k < 30 falling back to the pooled mean; constant series never fire; a calendar-cohort series with its factor applied does not fire on event days; precedence table exact | CUSUM on adaptive one-step residuals; re-anchor while `S⁺ > 0`; MAD floor removed; pooled floor removed; 28-day window; `commitment_expiry` classified as `commitment_effect`; precedence order swapped; z on the linear scale; σ(h) from errors after D − 1; calendar factor not applied to D2; weekly sums overlapping (rolling); D8 on the series' own MAD; `info` cap removed; aggregate scopes running D2; D6 on the empirical percentile |
+| 15 | **5-2a** | Detectors D1–D8 (pure) on the **log scale**, calendar-adjusted: 56-day D2 window with the pooled floor, D8 on 2-day sums with the pooled `s₂`, frozen-baseline CUSUM with re-anchoring and as-of `σ(h)`, D6 on two-day growth with the fitted percentile, intermittent series on **non-overlapping** weekly sums (zero share ≤ 50 %) or the **hurdle statistic with the clustering gate** (> 50 %, D-24), aggregate scopes on D3 only, commitment rules, category precedence | unit cases per detector; a slow drift that an adaptive one-step CUSUM misses is caught; ARL₀ of D3 on simulated N(0,1) within ±15 % of Siegmund's value at h = 7.5 and 9.0; **per series-day rates of D1 ∧ D2 and D8 on simulated series with estimated median, MAD and pooled scale within ±25 % of `budget5.py`'s 4.3 × 10⁻⁵ and 1.5 × 10⁻⁵**; the weekly statistic's in-control rate within ±25 % of `budget5.py`'s per zero share; the hurdle statistic's mean and variance match the compound-binomial formula on simulated independent days (±5 %), its in-control rate is within a factor of 2 of `budget5.py`'s at zero shares 0.6–0.8, and a series with lag-1 persistence 0.6 is routed to `info` in ≥ 85 % of weeks while an independent one passes in ≥ 97 %; D8 fires by day 2 on a 4.9σ shift in ≥ 85 % of 2,000 trials; a hurdle-scored series whose r₁ ≥ 0.30 never yields `warning`; D6's threshold from a log-normal fit with n_k < 30 falling back to the pooled mean; constant series never fire; a calendar-cohort series with its factor applied does not fire on event days; precedence table exact | CUSUM on adaptive one-step residuals; re-anchor while `S⁺ > 0`; MAD floor removed; pooled floor removed; 28-day window; `commitment_expiry` classified as `commitment_effect`; precedence order swapped; z on the linear scale; σ(h) from errors after D − 1; calendar factor not applied to D2; weekly sums overlapping (rolling); D8 on the series' own MAD; clustering gate removed; hurdle variance without the −7q̂²m̂² term; aggregate scopes running D2; D6 on the empirical percentile |
 | 16 | **5-2b** | Grouping steps 1–6 (provider-wide first), deterministic ids, merges, root causes, severity | one group per provider-wide, billing-account and account fan-in; same input ⇒ same groups and ids; merges only within ±1 day; root causes ranked by excess | provider-wide rule skipped; fan-in threshold off by one; random group ids; severity downgrade allowed; merge window unbounded |
 | 17 | **5-3** | `ratio-analytics detect` (daily + as-of replay from day 57, live from day 62), automatic open and resolve, restatement | thresholds tuned on **tuning-natural** (false positives: measured total ≤ 0.15/day, Garwood upper ≤ 0.30/day) and on tuning (recall side), frozen and committed before any evaluation seed is generated; replay uses only errors ≤ D − 1 (poisoned-future test); `restated` path via the `ci` daily-delivery replay; `new_region` on `ci` | detect on day D using day D data (leakage); auto-resolve after 1 day |
-| 18 | **5-4** | Evaluation harness (Python) + `fleet15k` acceptance: precision and AT-4 on the pooled natural seeds (cohorts included), recall and TTD on the enriched seed (individual series only) | matching with X = 30 %, k = 3; duplicates counted false; Wilson rules of §4.9; Garwood intervals on every false-positive rate; alert-fatigue outputs (mean, p95, max; `info` per day, `info`-only intermittent signals separately); per-cohort, first- and second-occurrence and calendar-event-day breakdowns; the calendar-jitter robustness run reported; folded labels reported; `new_region` and FT-8 marked "`full` only" | matcher accepts any day; matcher ignores the 30 % / top-3 rule; no-alert labels ignored; precision computed on the enriched seed; Wilson bound replaced by the point estimate; duplicates counted correct |
+| 18 | **5-4** | Evaluation harness (Python) + `fleet15k` acceptance: precision and AT-4 on the pooled natural seeds (cohorts included), recall and TTD on the enriched seed (individual series only) | matching with X = 30 %, k = 3; duplicates counted false; Wilson rules of §4.9; Garwood intervals on every false-positive rate; alert-fatigue outputs (mean, p95, max; `info` per day, hurdle-scored series' `info` signals and routes separately; `info`-signal recall of clustered intermittent series); per-cohort, first- and second-occurrence and calendar-event-day breakdowns; the calendar-jitter robustness run reported; folded labels reported; `new_region` and FT-8 marked "`full` only" | matcher accepts any day; matcher ignores the 30 % / top-3 rule; no-alert labels ignored; precision computed on the enriched seed; Wilson bound replaced by the point estimate; duplicates counted correct |
 | 19 | **5-5** | API `anomalies`, `anomalies/{id}` (GET only); `ratio-native` CostSource adapter; `CostFinding` optional fields (D-18) | route test set; PointFive mapping unchanged (existing tests untouched); decimal string ↔ number display rounding; no non-GET handler | wrong status vocabulary; impact sign flipped |
 | 20 | **5-6** | UI: forecast panel, native anomalies in Findings with the R4 label (D-16, T2); latency run (§5.3) on `fleet15k` | component tests; SLOs measured | — |
 | — | *5-7 (deferred, D-15)* | status write endpoint + `ratio_triage` | not built until per-user identity exists | — |
@@ -1881,9 +1933,9 @@ output relies on; D-21). PR ids keep their slice numbers.
 Every decision below was **decided by the orchestrator under the owner's
 delegation on 2026-10-04**. "As recommended" means the first revision's
 default was adopted unchanged. "Refined (rev. 3)" marks a change made in
-answer to the challenger's review of 461fbc2, inside the decision as taken. **D-24 is
-the one exception: it is proposed by the design lead in revision 6 and is
-not decided until the orchestrator confirms it.**
+answer to the challenger's review of 461fbc2, inside the decision as taken.
+D-24 was proposed in revision 6 and decided by the orchestrator, under the
+owner's delegation, for revision 7.
 
 | Id | Decision | Decided | Revisit when |
 |---|---|---|---|
@@ -1908,8 +1960,8 @@ not decided until the orchestrator confirms it.**
 | D-19 | Relation to existing rules | as recommended: keep obvious.md's workload rule; fleet rules named separately | — |
 | D-20 | Missed acceptance targets | **recorded and escalated, never relaxed** | — |
 | D-22 | Month-start and month-end patterns | **decided by the orchestrator (rev. 5, option a):** the forecast gains a calendar-event component (§3.2: month-start, mid-month, month-end; multiplicative, per series, significance-gated); the `month_end_batch` and `monthly_cycle` cohorts stay in AT-1 and AT-4; first occurrences are counted in the budget | the real-data residual on calendar days is measured |
-| D-23 | False-positive design margin | **decided by the orchestrator (rev. 5):** the detector is tuned to ≤ 0.15 false groups per day in expectation (gate 0.30), measured on a natural-rate tuning seed (`tuning-natural`) with a Garwood interval; the aggregate-scope term is derived in closed form. Rev. 6 applies it with estimation noise in every term, D8 added and h = 9.0 (total 0.098, 0.128 with every conservative bound); the decision itself is unchanged | measured rates differ from the derivation |
-| D-24 | Intermittent series with a zero share above 50 % | **proposed in rev. 6, pending the orchestrator's confirmation:** `info` only (no count model in Slices 3–5); the recall limit is stated (AT-2 does not cover them: 115 of 3,440 reachable leaves, 3.5 % of their spend on `fleet15k`); series with 30–50 % zeros are scored on non-overlapping weekly sums | real data shows a material share of spend on such series; then a hurdle (occurrence × size) model |
+| D-23 | False-positive design margin | **decided by the orchestrator (rev. 5):** the detector is tuned to ≤ 0.15 false groups per day in expectation (gate 0.30), measured on a natural-rate tuning seed (`tuning-natural`) with a Garwood interval; the aggregate-scope term is derived in closed form. Rev. 6 applies it with estimation noise in every term, D8 added and h = 9.0; rev. 7 adds the hurdle term and `month_start`'s single prior cycle (total 0.101, 0.131 with every conservative bound); the decision itself is unchanged | measured rates differ from the derivation |
+| D-24 | Intermittent series with a zero share above 50 % | **decided by the orchestrator under the owner's delegation (rev. 7; the challenger's option a):** a **hurdle (compound-binomial) weekly statistic** (q̂, m̂, v̂ from the last 56 days; z = (W − 7q̂m̂)/√(7q̂(v̂ + m̂²) − 7q̂²m̂²); CUSUM k = 0.5, h = 9.0) with a **clustering gate** (lag-1 autocorrelation of the 56-day active-day indicator: < 0.30 → `warning` possible; ≥ 0.30 → `info` only, since clustered occurrence cannot be modelled in these slices). Conditions: the `info`-signal recall of the `info`-only remainder is reported in AT-7; series with 30–50 % zeros keep the non-overlapping weekly sums | real data, or the `full` profile (OA-1) |
 | D-21 | Synthetic providers under #62 | **decided by the orchestrator (rev. 3):** #62 exports a fixed `SYNTHETIC_PROVIDERS` set `{SyntheticCloud, SyntheticAWS, SyntheticAzure, SyntheticGCP}`; with `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` every name in it is accepted for any layout, with the opt-in off none is. The generator uses exactly those names; `local:synthetic` sets the opt-in for its own workers only; Slice 3 starts after #62 merges | #62 changes its contract |
 
 ### Owner actions (not decisions)

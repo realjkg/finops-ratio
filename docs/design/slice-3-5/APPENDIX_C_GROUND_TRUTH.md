@@ -25,9 +25,11 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
      forecast targets. Expected per seed on `fleet15k`: ≈ 158 labels that
      can reach `warning` in the window, ≈ 73 true groups (Appendix B.5.7);
    - **enriched**: ≥ **100 meaningful** labels per gated kind of AT-2 in the
-     evaluation window, placed on **individual** (never folded) series and
-     never on intermittent series with a zero share above 50 % (`info`
-     only, DESIGN §4.2, D-24); used for recall and time-to-detect only.
+     evaluation window, placed on **individual** (never folded) series,
+     intermittent series included; used for recall and time-to-detect
+     only. A label on an intermittent series that is `info` only at
+     detection time (clustered occurrence, DESIGN §4.2, D-24) is reported
+     in AT-7, not gated.
    `ci` guarantees at least 2 labels of every kind (deterministic
    placement) so every code path is exercised in CI.
 5. **Profile differences.** `fleet15k` has no `new_region` (no region
@@ -85,7 +87,7 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
 | `onboarding` | **no alert** | account | S-curve ramp over 10–40 days | ramp | AT-5 (D6 must not fire unless cohort p99 is exceeded) |
 | `offboarding` | **no alert** at ≥ `warning` | account | decay to 0 over 7–30 days | decay | `info` drop groups are correct |
 | `constant_amortised` | **no alert**, gated | leaf series | the same effective cost every day | whole span | AT-5 |
-| `month_end_batch`, `monthly_cycle`, `holiday`, `intermittent` | **no alert** (stressor cohorts) | account / series | DESIGN §2.3 | their days | detections at ≥ `warning` are **false** and count in AT-1 and AT-4 (no exclusion); AT-7 reports the per-cohort breakdown, including first and second occurrences of a calendar class. Calendar factors are **one per series and class**, constant across months and across the class's days (pinned in rev. 6); the generator's `--calendar-jitter 0.10` option draws each month's factor within ±10 % for a reported robustness run only. `intermittent` series with a zero share above 50 % are `info` only: `alert` labels on them are reported, never gated (D-24) |
+| `month_end_batch`, `monthly_cycle`, `holiday`, `intermittent` | **no alert** (stressor cohorts) | account / series | DESIGN §2.3 | their days | detections at ≥ `warning` are **false** and count in AT-1 and AT-4 (no exclusion); AT-7 reports the per-cohort breakdown, including first and second occurrences of a calendar class. Calendar factors are **one per series and class**, constant across months and across the class's days (pinned in rev. 6); the generator's `--calendar-jitter 0.10` option draws each month's factor within ±10 % for a reported robustness run only. `intermittent` series with a zero share above 50 % are scored by the hurdle statistic; those whose active days are clustered (lag-1 autocorrelation ≥ 0.30) are `info` only, and `alert` labels on them are reported with their `info`-signal recall, never gated (D-24) |
 | `mtd_restatement`, `late_data` | **no alert** (`ci` only) | source / period | revised or late month-to-date rows | revision day | no group from a revision alone; `restated` resolution tested |
 
 ## C.3 Label format (`labels.jsonl`, one JSON object per line)
@@ -154,7 +156,8 @@ and the evaluator's own actuals computed from the source bucket.
    are reported under AT-6; it is **false** if it qualifies only for
    `no_alert` labels or none.
 6. **Recall** (enriched seed): per gated kind, over meaningful `alert`
-   labels on individual series (none on `info`-only intermittent series);
+   labels on individual series (labels on intermittent series that are
+   `info` only at detection time are excluded and reported);
    a label is detected if a qualifying group reaches ≥ `warning`. Labels on
    calendar-cohort event days and on weekly-scored intermittent series are
    also reported separately (AT-7).
@@ -201,7 +204,7 @@ the harness can see failure:
 | compute precision on the enriched seed | the seed check fails (precision is natural-only) |
 | pool the tuning seed into precision | the seed check fails (tuning is never scored) |
 | exclude the `month_end_batch` cohort from AT-4 | the cohort-inclusion test fails |
-| drop the `info`-only intermittent series' signals from the fatigue output | the `info`-per-day count falls; the fatigue-output test fails |
+| drop the `info` signals of clustered intermittent series from the output | their `info`-signal recall (AT-7) falls to 0; the AT-7 report test fails |
 | score the calendar-jitter robustness run as a gate | the gate-set test fails (the run is reported only) |
 | score a detection day with quantiles that include errors from that day or later | the as-of test fails |
 | replace the Wilson rule by the point estimate | a fixture with p̂ = 0.80, n = 20 passes wrongly; the test fails |

@@ -937,6 +937,11 @@ for runs in (['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'enriched'],
 
 ### B.5.9 Revision 6: false-positive budget with estimation noise, D8, intermittent series, calendar robustness, TTD, peak disk
 
+**Superseded for the budget by B.5.10 (revision 7)**, which replaces the
+`info`-only rule for intermittent series by the hurdle statistic (D-24) and
+gives `month_start` one prior cycle at day 62; the figures below are the
+revision-6 record.
+
 Computed by `budget4.py` (below; standard library, fixed seeds, ≈ 2 min;
 two runs give byte-identical output). It supersedes `budget3.py`'s budget
 (B.5.8), whose figures stay as the revision-5 record. It rebuilds the same
@@ -1453,6 +1458,642 @@ if pick_:
     for name, lam in (("warning+ groups/day (true 1.2 + design total %.3f)" % pick_[2], 1.2 + pick_[2]),
                       ("warning+ groups/day (true 1.2 + conservative %.3f)" % pick_[3], 1.2 + pick_[3]),
                       ("info-only intermittent signals/day", pick_[4])):
+        print("%s: mean %.2f, p95 %d, typical max over 61 days %d" % (name, lam, pois_q(lam, 0.95), pois_q(lam, 1 - 1 / 61)))
+
+# ---- peak disk (unchanged inputs from budget3.py; intermittent weekly state is negligible) ----
+points = 5 * 30 + 30 + 23 + 16 + 9
+bt_export = len(leaves) * points * 30 / 1e9
+calendar_state = len(leaves) * 3 * 12 * 2 / 1e9
+run_nat1 = 4.90 - 0.198 + bt_export + 0.012 * (points / 178.0 - 1) + calendar_state
+run_other = run_nat1 - bt_export
+per_run_eval = 0.04     # ASSUMPTION, measured in PR 3-4
+nat1_actuals = 0.03     # ASSUMPTION, measured in PR 3-4
+for runs in (['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'enriched'],
+             ['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'natural-3', 'enriched']):
+    retained = 0.0; peak = 0.0
+    for r_ in runs:
+        own = run_nat1 if r_ == 'natural-1' else run_other
+        peak = max(peak, own + retained)
+        retained += per_run_eval + (bt_export + nat1_actuals if r_ == 'natural-1' else 0)
+    print("%d runs: peak %.2f GB, retained at end %.2f GB" % (len(runs), peak, retained))
+```
+
+### B.5.10 Revision 7: hurdle statistic for intermittent series, `month_start` with one prior cycle, sensitivities
+
+Computed by `budget5.py` (below; standard library, fixed seeds, ≈ 3 min;
+two runs give byte-identical output). It is `budget4.py` (B.5.9) with four
+changes, and supersedes B.5.9's budget; every other figure of B.5.9 is
+reproduced unchanged by `budget5.py`.
+1. **Hurdle statistic** for the 115 leaves with a zero share above 50 %
+   (D-24): from the 56 days before each week, `q̂` (active share), `m̂`,
+   `v̂` (mean and variance of active-day values);
+   `z = (W − 7q̂m̂) / √(7q̂(v̂ + m̂²) − 7q̂²m̂²)`; CUSUM k = 0.5; scored with ≥ 3
+   active days. **Clustering gate:** r₁ = lag-1 autocorrelation of the
+   56-day active-day indicator; r₁ < 0.30 → alarms can be `warning`, else
+   `info`. Days are simulated as a two-state chain with lag-1
+   autocorrelation ρ (ρ = 0 is the generator's independent model); active
+   values log-normal with sd 0.5 and mean 1/(1 − zero share).
+   200,000 series-weeks per zero share at ρ = 0, 100,000 at ρ = 0.3 and 0.6.
+2. **`month_start` has 1 prior cycle at day 62** (P1's days 1–3 have no
+   weekly baseline): its P3 events use 1 prior cycle and its P4 events 2;
+   the other classes keep 2 and 3.
+3. **Sensitivity of the weekly term** (zero share ≤ 50 %) to burst-size
+   spread (log sd 1.0 instead of 0.5) and day clustering (ρ = 0.3).
+4. **Pass probability under the ±10 % calendar jitter.**
+
+**Hurdle statistic, in-control alarms per series-week (all alarms / alarms
+passing the gate) and share of series-weeks passing the gate.**
+
+| ρ | zero share 0.55 | 0.60 | 0.70 | 0.80 | gate pass |
+|---|---|---|---|---|---|
+| 0 (h = 9.0) | 0.00003 / 0.00002 | 0.00005 / 0.00005 | 0.00022 / 0.00020 | 0.00054 / 0.00052 | 0.989–0.992 |
+| 0.3 (h = 9.0) | 0.00053 / 0.00020 | 0.00093 / 0.00030 | 0.00176 / 0.00077 | 0.00330 / 0.00169 | 0.584–0.605 |
+| 0.6 (h = 9.0) | 0.00670 / 0.00017 | 0.00834 / 0.00033 | 0.01230 / 0.00094 | 0.01414 / 0.00187 | 0.020–0.094 |
+
+**Gate threshold: the estimation noise of r₁ at n = 56** (20,000 windows
+each). Independent days: mean −0.019, sd 0.132 (zero share 0.6) and 0.128
+(0.8). ρ = 0.6: mean 0.555, sd 0.120 (0.6) and 0.515, sd 0.192 (0.8).
+
+| Threshold | P(pass \| independent), zero share 0.6 / 0.8 | P(pass \| ρ = 0.6) | P(pass \| ρ = 0.3) |
+|---|---|---|---|
+| 0.20 | 0.953 / 0.941 | 0.007 / 0.073 | 0.305 / 0.342 |
+| 0.25 | 0.978 / 0.968 | 0.011 / 0.085 | 0.428 / 0.442 |
+| **0.30** | **0.992 / 0.988** | **0.026 / 0.127** | **0.583 / 0.598** |
+| 0.35 | 0.997 / 0.995 | 0.050 / 0.171 | 0.726 / 0.714 |
+| 0.40 | 0.999 / 0.998 | 0.097 / 0.211 | 0.836 / 0.809 |
+
+**Hurdle-scored leaves at z_T = 4.5, h = 9.0** (expected false groups per
+day):
+
+| Case | Value |
+|---|---|
+| As generated (independent days): `warning` / every gated alarm / `info` signals | **0.0028 / 0.0028** / 0.0002 |
+| Routes | ≈ 114.0 leaves to `warning` scoring, ≈ 1.0 `info` only; spend outside AT-2 ≈ 0.03 % of reachable individual leaves' spend |
+| Every hurdle leaf clustered at ρ = 0.3 (sensitivity) | `warning` 0.0107, every gated alarm 0.0109; ≈ 68 leaves pass the gate |
+| Every hurdle leaf clustered at ρ = 0.6 (sensitivity) | 0.168 before the gate; after it `warning` 0.0123; ≈ 5 leaves pass |
+
+**Weekly term sensitivity** (zero share ≤ 50 %, h = 9.0): as generated
+0.0139; burst-size log sd 1.0: **0.0285** (≈ 2 ×); day clustering ρ = 0.3:
+0.0082.
+
+**Components at z_T = 4.5, h = 9.0** (changed lines only; the others are as
+in B.5.9): hurdle 0.0028 (conservative 0.0028); calendar cohorts **0.0012**
+(rev. 6: 0.0005; ±10 % jitter: **0.0827**). **Total 0.101, conservative
+0.131** (0.146 if the weekly term is doubled).
+
+**Grid** (total / conservative):
+
+| z_T | h = 7.5 | 8.0 | 8.5 | 9.0 | 9.5 |
+|---|---|---|---|---|---|
+| 4.5 | 0.183 / 0.269 | 0.145 / 0.205 | 0.120 / 0.162 | **0.101 / 0.131** | 0.089 / 0.114 |
+| 5.0 | 0.178 / 0.264 | 0.140 / 0.199 | 0.115 / 0.156 | 0.096 / 0.126 | 0.084 / 0.109 |
+
+z_T = 4.5, h = 9.0 stays the least strict pair under 0.15 with every
+conservative bound.
+
+**Pass probability under the ±10 % jitter** (calendar term 0.0827 instead
+of 0.0012): design total 0.101 → 0.183 per day, **P(pass) 0.993**;
+conservative 0.131 → 0.213, **P(pass) 0.959**. At the pinned rates the
+table of B.5.9 is unchanged (0.10 → 1.000, 0.15 → 0.999, 0.20 → 0.977,
+0.30 → 0.435).
+
+**Detection and fatigue:** TTD, spike recall, event-day recall and D8
+figures are identical to B.5.9. Fatigue at ≥ `warning`: mean 1.30 (1.33
+conservative), p95 day 3, maximum ≈ 4.
+
+**Peak disk:** **5.15 GB** for 5 runs, **5.19 GB** with natural-3 (the
+hurdle state is four numbers per intermittent leaf).
+
+SHA-256 of `budget5.py` as run:
+`7bc2ea765a6eabc61d017e1ab44e61f2b1781b47302612bddb257a7a645f0d5b`.
+
+`budget5.py`:
+
+```python
+import random, math, bisect
+from collections import deque
+# fleet15k, revision 7 (budget4.py of revision 6 plus: a hurdle weekly statistic with a clustering gate for
+# intermittent series with more than 50 % zero days; month_start with 1 prior cycle at day 62; sensitivity of the
+# weekly term to burst-size spread and day clustering; pass probability under calendar jitter).
+# False-positive budget with estimation noise, D8, intermittent weekly scoring, a median-based calendar estimator
+# (pinned and jittered), itemised other sources, TTD and spike recall, pass probabilities, alert fatigue and
+# peak disk. Standard library only; fixed seeds.
+# Account model, seed and leaf list are those of budget.py / budget2.py / budget3.py (37,052 leaves).
+N = 15000
+random.seed(42)
+spend = [math.exp(random.gauss(math.log(800), 1.8)) for _ in range(N)]
+med_spend = sorted(spend, reverse=True)[int(N * 0.5)]
+leaves = []                                   # (mean M/day, log-noise s, account, individual?)
+for a, m in enumerate(spend):
+    k = max(1, min(80, round(3 + 4 * math.log10(1 + m / 100) + random.gauss(0, 2.0))))
+    _ = (m > 20000 and random.random() < 0.6) or random.random() < 0.1
+    keep = 2 if m >= med_spend else 1
+    w = [0.5 ** i for i in range(k)]; ws = sum(w)
+    s = min(0.15, max(0.03, 0.15 - 0.04 * math.log10(max(m, 1) / 100)))
+    daily = m / 30.4
+    for i in range(min(k, keep)):
+        leaves.append((daily * w[i] / ws, s, a, True))
+    if k > keep:
+        leaves.append((daily * sum(w[keep:]) / ws, s, a, False))
+print("leaves %d (must equal 37052)" % len(leaves))
+
+MIN = 100.0
+def need_rel(L): return max(0.20, MIN / L)
+def thr_sigma(L, s): return math.log(1 + need_rel(L)) / s          # warning threshold in sigma units (log scale)
+def Q(z): return 0.5 * math.erfc(z / math.sqrt(2))
+def arl(h, k=0.5):
+    b = h + 1.166
+    return (math.exp(2 * k * b) - 2 * k * b - 1) / (2 * k * k)
+
+rc = random.Random(7)                         # calendar cohorts (as budget3.py)
+cohort = []
+for a in range(N):
+    u = rc.random(); cohort.append('meb' if u < 0.05 else ('mc' if u < 0.10 else None))
+ri = random.Random(17)                        # intermittent series: 5 % of leaves, zero share U(0.3, 0.8)
+inter = [(ri.random() < 0.05, ri.uniform(0.3, 0.8)) for _ in leaves]
+
+reach_idx = [i for i, x in enumerate(leaves) if thr_sigma(x[0], x[1]) < 9]
+daily_idx = [i for i in reach_idx if not inter[i][0]]
+weekly_idx = [i for i in reach_idx if inter[i][0] and inter[i][1] <= 0.5]
+hurdle_idx = [i for i in reach_idx if inter[i][0] and inter[i][1] > 0.5]
+elig500 = sum(1 for i in daily_idx if leaves[i][0] >= 500)
+ind_reach = [i for i in reach_idx if leaves[i][3]]
+tot_sp = sum(leaves[i][0] for i in ind_reach)
+print("spend share of reachable individual leaves: weekly-scored %.3f, hurdle-scored %.3f"
+      % (sum(leaves[i][0] for i in ind_reach if i in set(weekly_idx)) / tot_sp,
+         sum(leaves[i][0] for i in ind_reach if i in set(hurdle_idx)) / tot_sp))
+print("reachable leaves %d: daily-scored %d, intermittent weekly-scored (zero share <= 0.5) %d, intermittent hurdle-scored (> 0.5) %d; daily-scored >= $500/day %d"
+      % (len(reach_idx), len(daily_idx), len(weekly_idx), len(hurdle_idx), elig500))
+
+# ---- estimation noise: D2's 56-day weekday-adjusted median / MAD with a pooled floor; forecast bias ----
+# Each draw is one series' state on one day, in units of its true sigma:
+#   med, mad  from 56 i.i.d. N(0,1) values (the 56-day window of D2);
+#   c1        the cohort-pooled long-run scale estimate, relative error exp(N(0, 0.1)) (assumption);
+#   sg        D2's scale = max(1.4826 * MAD, 0.8 * c1)   (floor: a lucky-small MAD cannot shrink the scale);
+#   b         the one-step forecast's level error, sd sqrt(a / (2 - a)) = 0.42 at a = 0.3.
+rw = random.Random(23)
+W = 20000
+VB = 0.42 ** 2
+EST = []                                       # (median, sigma_hat, forecast bias b, pooled scale c1)
+for _ in range(W):
+    xs = sorted(rw.gauss(0, 1) for _ in range(56))
+    med = (xs[27] + xs[28]) / 2
+    dev = sorted(abs(x - med) for x in xs)
+    mad = (dev[27] + dev[28]) / 2
+    c1 = math.exp(rw.gauss(0, 0.1))
+    EST.append((med, max(1.4826 * mad, 0.8 * c1), rw.gauss(0, 0.42), c1))
+D1Q = 2.326 * math.sqrt(1 + VB)                # D1's as-of 99 % quantile of one-step errors (true-sigma units, x c1)
+S2 = math.sqrt(2 + 4 * VB)                     # sd of a 2-day residual sum (bias common to both days)
+def p_d12(thr, T):
+    # P(D2 z >= T and D1 fires and warning reached) for one series-day
+    return sum(Q(max(m + T * sg, b + max(D1Q * c1, thr))) for m, sg, b, c1 in EST) / W
+def p_d8(thr, T):
+    # P(2-day residual sum >= T * S2 * c1 and its 2-day mean reaches warning) for one series-day;
+    # residual = x - b with x ~ N(0, 1) per day, scale = pooled S2 * c1
+    return sum(Q((2 * b + max(T * S2 * c1, 2 * thr)) / math.sqrt(2)) for m, sg, b, c1 in EST) / W
+def arl_gen(k, h):
+    b = h + 1.166
+    return (math.exp(2 * k * b) - 2 * k * b - 1) / (2 * k * k)
+def rate_scaled(h, cs):
+    # CUSUM on z / c with reference 0.5 and limit h is, in true units, reference 0.5c and limit hc
+    return sum(1.0 / arl_gen(0.5 * c, h * c) for c in cs) / len(cs)
+C1S = [e[3] for e in EST]                      # leaves: D3 standardised by the pooled scale
+CAGG = []                                      # rejected option: aggregates on their own 56-day MAD scale
+for _ in range(W):
+    xs = sorted(rw.gauss(0, 1) for _ in range(56))
+    med = (xs[27] + xs[28]) / 2
+    dev = sorted(abs(x - med) for x in xs)
+    CAGG.append(1.4826 * (dev[27] + dev[28]) / 2)
+def binned_sum(idx, fn, T):
+    cache = {}; tot = 0.0
+    for i in idx:
+        L, s = leaves[i][0], leaves[i][1]
+        t = round(thr_sigma(L, s), 1)
+        if t not in cache:
+            cache[t] = fn(t, T)
+        tot += cache[t]
+    return tot
+print("per series-day, thr 0: P(D1 & D2) at T 4.5 %.2e, T 5.0 %.2e (i.i.d. Q(4.5) = %.2e); P(D8) at T 4.5 %.2e, T 5.0 %.2e"
+      % (p_d12(0, 4.5), p_d12(0, 5.0), Q(4.5), p_d8(0, 4.5), p_d8(0, 5.0)))
+rw28 = random.Random(29); est28 = []
+for _ in range(W):
+    xs = sorted(rw28.gauss(0, 1) for _ in range(28))
+    med = (xs[13] + xs[14]) / 2
+    dev = sorted(abs(x - med) for x in xs)
+    est28.append((med, 1.4826 * (dev[13] + dev[14]) / 2, rw28.gauss(0, 0.42), 1.0))
+print("for comparison, a 28-day window without the pooled floor: P(D1 & D2) at T 4.5, thr 0 = %.2e"
+      % (sum(Q(max(m + 4.5 * sg, b + D1Q)) for m, sg, b, c1 in est28) / W))
+print("effective D3 in-control rate per series-day with scale noise, h 7.5: pooled scale (leaves and aggregates) %.2e; own 56-day MAD scale %.2e (rejected); nominal %.2e"
+      % (rate_scaled(7.5, C1S), rate_scaled(7.5, CAGG), 1 / arl(7.5)))
+
+# ---- D3 alarm episodes (in-control), for the resolution-limited bound ----
+def episodes(h, steps, seed):
+    r = random.Random(seed); S = 0.0; run = []; out = []
+    for _ in range(steps):
+        z = r.gauss(0, 1); S = max(0.0, S + z - 0.5)
+        if S == 0.0:
+            run = []
+        else:
+            run.append(z)
+            if S > h:
+                out.append(sum(run) / len(run)); S = 0.0; run = []
+    return out
+def upper95(k, n):
+    # 95 % upper bound on a proportion: rule of three for k = 0, Wilson otherwise
+    if k == 0:
+        return 3.0 / n
+    p = k / n; z = 1.96
+    return min(1.0, (p + z * z / (2 * n) + z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n))
+def d3_terms(h, eps):
+    # est: P(alarm episode reaches warning) from the simulated episodes; resolution bound: its 95 % upper
+    # bound per leaf (resolution-limited by the number of episodes); conservative: every alarm on a leaf
+    # >= $500/day counted as warning, the resolution bound on the others
+    a = 1.0 / rate_scaled(h, C1S); est = res_bound = cons = 0.0; n = len(eps)
+    for i in daily_idx:
+        L, s = leaves[i][0], leaves[i][1]
+        k = sum(1 for m in eps if m >= thr_sigma(L, s))
+        est += (k / n) / a
+        res_bound += upper95(k, n) / a
+        cons += (1.0 if L >= 500 else upper95(k, n)) / a
+    return est, res_bound, cons, n
+
+# ---- intermittent series: non-overlapping weekly sums, 8-week robust median/MAD, CUSUM ----
+def weekly_sim(p, h, weeks, seed, sb=0.5, rho=0.0):
+    # sb: sd of log burst size; rho: lag-1 autocorrelation of the active-day indicator (Markov chain)
+    r = random.Random(seed); hist = []; S = 0.0; alarms = 0; rels = []; n = 0
+    pi = 1 - p; p11 = pi + rho * (1 - pi); p01 = pi * (1 - rho); prev = True
+    for _ in range(weeks):
+        wsum = 0.0
+        for _d in range(7):
+            if rho == 0.0:
+                act = r.random() >= p
+            else:
+                act = r.random() < (p11 if prev else p01); prev = act
+            if act:
+                wsum += math.exp(r.gauss(0, sb) - sb * sb / 2) / (1 - p)
+        x = math.log(wsum) if wsum > 0 else math.log(1e-3)
+        if len(hist) == 8:
+            hs = sorted(hist); med = (hs[3] + hs[4]) / 2
+            dv = sorted(abs(v - med) for v in hist); mad = (dv[3] + dv[4]) / 2
+            sg = max(1.4826 * mad, 0.05)
+            z = (x - med) / sg
+            S = max(0.0, S + z - 0.5); n += 1
+            if S > h:
+                alarms += 1; rels.append(math.exp(x - med) - 1); S = 0.0
+        hist.append(x)
+        if len(hist) > 8:
+            hist.pop(0)
+    return alarms / n, rels
+def weekly_terms(h, sb=0.5, rho=0.0):
+    out = {}
+    for p in (0.3, 0.4, 0.5):
+        rate, rels = weekly_sim(p, h, 120000, seed=int(p * 100) + int(h * 10), sb=sb, rho=rho)
+        out[p] = (rate, sorted(rels))
+    def lookup(p):
+        keys = sorted(out); kk = min(keys, key=lambda q: abs(q - p)); return out[kk]
+    warn = 0.0
+    for i in weekly_idx:
+        L = leaves[i][0]; rate, rels = lookup(inter[i][1])
+        frac = (len(rels) - bisect.bisect_left(rels, need_rel(L))) / len(rels) if rels else 0.0
+        warn += rate * frac / 7.0
+    return out, warn
+
+# ---- intermittent series with > 50 % zero days: hurdle (compound-binomial) weekly statistic + clustering gate ----
+# From the 56 days before the week: q = share of active days, m and v = mean and variance of the active-day values.
+# z = (W - 7 q m) / sqrt(7 q (v + m^2) - 7 q^2 m^2), one-sided CUSUM k = 0.5, limit h; scored only with >= 3 active days.
+# Gate: lag-1 autocorrelation r1 of the 56-day active-day indicator; r1 < GATE -> `warning` possible, else `info` only.
+GATE = 0.30
+def r1_of(ind):
+    n = len(ind); mu = sum(ind) / n
+    den = sum((x - mu) ** 2 for x in ind)
+    if den == 0:
+        return 0.0
+    return sum((ind[t] - mu) * (ind[t + 1] - mu) for t in range(n - 1)) / den
+def hurdle_sim(p, rho, hs, weeks, seed, sb=0.5):
+    pi = 1 - p; r = random.Random(seed)
+    p11 = pi + rho * (1 - pi); p01 = pi * (1 - rho)
+    state = [r.random() < pi]
+    def day():
+        a = r.random() < (p11 if state[0] else p01)
+        state[0] = a
+        return (1 if a else 0, math.exp(r.gauss(0, sb) - sb * sb / 2) / pi if a else 0.0)
+    win = deque(day() for _ in range(56))
+    S = {h: 0.0 for h in hs}; al = {h: 0 for h in hs}; aw = {h: 0 for h in hs}; rels = {h: [] for h in hs}
+    n = 0; gp = 0; unscored = 0
+    for _ in range(weeks):
+        ind = [a for a, _v in win]; act = [v for a, v in win if a]
+        wk = [day() for _ in range(7)]
+        k = len(act)
+        if k >= 3:
+            q = k / 56; m = sum(act) / k; v = sum((x - m) ** 2 for x in act) / (k - 1)
+            gate = r1_of(ind) < GATE
+            W = sum(v_ for _a, v_ in wk)
+            z = (W - 7 * q * m) / math.sqrt(7 * q * (v + m * m) - 7 * q * q * m * m)
+            n += 1; gp += gate
+            for h in hs:
+                S[h] = max(0.0, S[h] + z - 0.5)
+                if S[h] > h:
+                    al[h] += 1; S[h] = 0.0
+                    if gate:
+                        aw[h] += 1; rels[h].append(W / (7 * q * m) - 1)
+        else:
+            unscored += 1
+        for d in wk:
+            win.append(d); win.popleft()
+    return {h: (al[h] / n, aw[h] / n, sorted(rels[h])) for h in hs}, gp / n, unscored / weeks
+HS = (7.5, 8.0, 8.5, 9.0, 9.5)
+HP = (0.55, 0.6, 0.7, 0.8)
+HSIM = {}
+for rho in (0.0, 0.3, 0.6):
+    for p in HP:
+        HSIM[(rho, p)] = hurdle_sim(p, rho, HS, 200000 if rho == 0.0 else 100000, seed=int(p * 100) + int(rho * 1000) + 101)
+def hlook(rho, p):
+    return HSIM[(rho, min(HP, key=lambda q: abs(q - p)))]
+def hurdle_terms(h, rho=0.0):
+    warn = every = info = 0.0; n_warn = 0.0; sp_out = 0.0
+    for i in hurdle_idx:
+        L = leaves[i][0]; res, gp, _u = hlook(rho, inter[i][1]); a_all, a_w, rels = res[h]
+        frac = (len(rels) - bisect.bisect_left(rels, need_rel(L))) / len(rels) if rels else 0.0
+        warn += a_w * frac / 7.0; every += a_w / 7.0; info += (a_all - a_w) / 7.0
+        n_warn += gp
+        if leaves[i][3]:
+            sp_out += L * (1 - gp)
+    return warn, every, info, n_warn, sp_out / tot_sp
+print()
+print("hurdle statistic, in-control alarms per series-week (all / passing the gate), share of series-weeks passing the gate (GATE r1 < %.2f):" % GATE)
+for rho in (0.0, 0.3, 0.6):
+    for p in HP:
+        res, gp, u = HSIM[(rho, p)]
+        print("   rho %.1f zero share %.2f: h 9.0 %.5f / %.5f, h 8.5 %.5f / %.5f; gate pass %.3f; unscored weeks %.3f"
+              % (rho, p, res[9.0][0], res[9.0][1], res[8.5][0], res[8.5][1], gp, u))
+# gate threshold: estimation noise of r1 at n = 56
+rg = random.Random(41)
+def r1_draw(p, rho):
+    pi = 1 - p; p11 = pi + rho * (1 - pi); p01 = pi * (1 - rho); a = rg.random() < pi; ind = []
+    for _ in range(56):
+        a = rg.random() < (p11 if a else p01); ind.append(1 if a else 0)
+    return r1_of(ind)
+R1 = {(p, rho): sorted(r1_draw(p, rho) for _ in range(20000)) for p in (0.6, 0.8) for rho in (0.0, 0.3, 0.6)}
+for p in (0.6, 0.8):
+    for rho in (0.0, 0.6):
+        xs = R1[(p, rho)]; mu = sum(xs) / len(xs); sd = math.sqrt(sum((x - mu) ** 2 for x in xs) / len(xs))
+        print("r1 at n = 56, zero share %.1f, true rho %.1f: mean %.3f, sd %.3f" % (p, rho, mu, sd))
+for g in (0.20, 0.25, 0.30, 0.35, 0.40):
+    print("gate %.2f: P(pass | independent) %.3f / %.3f, P(pass | rho 0.6) %.3f / %.3f, P(pass | rho 0.3) %.3f / %.3f (zero share 0.6 / 0.8)"
+          % (g, *[bisect.bisect_left(R1[(p, rho)], g) / 20000 for rho in (0.0, 0.6, 0.3) for p in (0.6, 0.8)]))
+
+# ---- calendar cohorts: median estimator, pinned factors (and a jittered robustness run) ----
+def cal_events(a):
+    c = cohort[a]
+    if c == 'meb': return [(2, lambda r: 1.3)]
+    if c == 'mc': return [(3, lambda r: r.uniform(1.2, 1.6)), (2, lambda r: r.uniform(1.2, 1.6))]
+    return []
+def event_fires(L, s, d, f, n_prior, T, h, r, jitter, spike=1.0, contam=1.0):
+    # spike: multiplier on the current cycle's event days (recall check); contam: multiplier on the
+    # first prior cycle's event days (an undetected anomaly inside the estimator's window)
+    t = thr_sigma(L, s)
+    def fac():
+        return math.log(f * (r.uniform(1 - jitter, 1 + jitter) if jitter else 1.0))
+    if n_prior == 0:
+        fhat = 0.0
+    else:
+        vals = []
+        for _c in range(n_prior):
+            fl = fac() + (math.log(contam) if _c == 0 else 0.0)
+            vals += [fl + s * r.gauss(0, 1) for _ in range(d)]
+        vals.sort(); m = len(vals)
+        rbar = vals[m // 2] if m % 2 else (vals[m // 2 - 1] + vals[m // 2]) / 2
+        se = 1.2533 * s / math.sqrt(m)
+        fhat = rbar if (m >= 3 and rbar / se >= 3) else 0.0
+    fl = fac() + math.log(spike); med, sg, b, c1 = EST[r.randrange(W)]
+    S = 0.0; zs = []
+    for _d in range(d):
+        x = (fl - fhat) / s + r.gauss(0, 1)                # log residual in sigma units
+        zs.append(x - b)
+        if x >= med + T * sg and x - b >= max(D1Q * c1, t):     # D1 and D2
+            return True
+        if len(zs) >= 2 and (zs[-1] + zs[-2]) >= T * S2 * c1 and (zs[-1] + zs[-2]) / 2 >= t:   # D8
+            return True
+        S = max(0.0, S + (x - b) / c1 - 0.5)
+        if S > h and sum(zs) / len(zs) >= t:               # D3
+            return True
+    return False
+def calendar_term(T, h, jitter, trials=300, seed=11, priors=(2, 3)):
+    # priors = (0, 0): the same two occurrences with no calendar component
+    r = random.Random(seed); tot = 0.0
+    for i in daily_idx:
+        L, s, a, _ = leaves[i]
+        for d, draw in cal_events(a):
+            pr = priors if priors == (0, 0) else ((priors[0] - 1, priors[1] - 1) if d == 3 else priors)
+            for n_prior in pr:
+                hits = sum(event_fires(L, s, d, draw(r), n_prior, T, h, r, jitter) for _ in range(trials))
+                tot += hits / trials
+    return tot / 61.0
+def calendar_recall(T, h, n_prior, trials=4000, seed=19):
+    # recall of a x1.5-3 anomaly on the current cycle's event days, with 3 prior cycles that are clean,
+    # or whose first cycle held an undetected anomaly of the same size (worst case: not excluded)
+    r = random.Random(seed)
+    pool = [i for i in daily_idx if cal_events(leaves[i][2]) and leaves[i][3]]
+    out = []
+    for contaminated in (False, True):
+        hit = n = 0
+        while n < trials:
+            i = r.choice(pool); L, s, a, _ = leaves[i]
+            d, draw = r.choice(cal_events(a)); f = draw(r)
+            m = r.uniform(1.5, 3.0)
+            if L * f * (m - 1) < 200:
+                continue
+            n += 1
+            hit += event_fires(L, s, d, f, n_prior, T, h, r, 0.0, spike=m, contam=(m if contaminated else 1.0))
+        out.append(hit / n)
+    return out
+def first_occ_term(T, h, trials=300, seed=13):
+    # accounts onboarding in the span meet each class with 0 and then 1 prior cycle inside the window;
+    # with 1 prior cycle a 2-day class has m = 2 < 3 values, so it is still unlearned
+    p_onb = 600 / 395.0 * 85 / N
+    r = random.Random(seed); tot = 0.0
+    for i in daily_idx:
+        L, s, a, _ = leaves[i]
+        for d, draw in cal_events(a):
+            for n_prior in (0, 1):
+                tot += p_onb * sum(event_fires(L, s, d, draw(r), n_prior, T, h, r, 0.0) for _ in range(trials)) / trials
+    return tot / 61.0
+
+# ---- D6: two consecutive days of growth above the parametric 99.9th percentile ----
+def d6_term(q=None):
+    onboard_window = 600 / 395.0 * 61           # onboardings whose first 14 days fall in the window (approx.)
+    if q is None:
+        q = Q(3.090)                             # 99.9th percentile of a fitted log-normal, exact if the fit holds
+    big = sum(1 for x in spend if x / 30.4 >= 1000) / N   # share of accounts able to reach 10 x min impact
+    return onboard_window * 13 * q * q * big / 61.0
+
+AGG = 550
+print("D6: %.6f per day if the fitted log-normal holds; %.6f if the true exceedance is 10x (heavy tail, q = 0.01)" % (d6_term(), d6_term(0.01)))
+print()
+print("== component grid: expected false groups per day at >= warning (natural rates, 61-day window) ==")
+rows = []
+for T in (4.5, 5.0):
+    for h in (7.5, 8.0, 8.5, 9.0, 9.5):
+        eps = episodes(h, 3_000_000, seed=int(h * 10))
+        c12 = binned_sum(daily_idx, p_d12, T)
+        c8 = binned_sum(daily_idx, p_d8, T)
+        d3e, d3r, d3b, neps = d3_terms(h, eps)
+        wk, cw = weekly_terms(h)
+        chw, che, cinfo, _nw, _so = hurdle_terms(h)
+        cagg = AGG * rate_scaled(h, C1S)           # aggregates run D3 only, pooled scale; every alarm counted
+        cagg_own = AGG * rate_scaled(h, CAGG)      # rejected option, reported
+        ccal = calendar_term(T, h, 0.0)
+        cjit = calendar_term(T, h, 0.10)
+        cfo = first_occ_term(T, h)
+        c6 = d6_term()
+        c4 = c5 = c7 = chol = 0.0
+        total = c12 + c8 + d3e + cw + chw + cagg + ccal + cfo + c6
+        total_cons = c12 + c8 + d3b + cw + che + cagg + ccal + cfo + c6
+        rows.append((T, h, total, total_cons, cinfo, ccal, cjit))
+        print("T=%.1f h=%.1f ARL0=%6.0f | D1&D2 %.4f | D8 %.4f | D3 est %.4f, resolution bound %.4f (%d episodes), conservative (every alarm on leaves >= $500/day) %.4f | intermittent weekly %.4f | hurdle %.4f (every alarm %.4f; info %.4f) | aggregate %.4f (own-MAD scale %.4f) | calendar %.4f (jitter 10%%: %.4f) | first occ %.4f | D6 %.5f | D4 D5 D7 holidays 0 | TOTAL %.3f | conservative %.3f"
+              % (T, h, arl(h), c12, c8, d3e, d3r, neps, d3b, cw, chw, che, cinfo, cagg, cagg_own, ccal, cjit, cfo, c6, total, total_cons))
+        print("   intermittent weekly in-control alarm rate per series-week: " + ", ".join("p=%.1f %.4f" % (p, wk[p][0]) for p in sorted(wk)))
+
+# ---- time-to-detect for level shifts and recall for spikes at the chosen thresholds ----
+def ttd_and_recall(T, h, n=20000, seed=31, weighted=True, lo=1.2, hi=3.0):
+    r = random.Random(seed)
+    cand = [i for i in daily_idx if leaves[i][3]]
+    wts = [leaves[i][0] for i in cand]; cum = []
+    c = 0.0
+    for x in wts:
+        c += x; cum.append(c)
+    def pick():
+        if not weighted:
+            return r.choice(cand)
+        return cand[bisect.bisect_left(cum, r.random() * c)]
+    ttds = []
+    while len(ttds) < n:
+        i = pick(); L, s = leaves[i][0], leaves[i][1]
+        mlt = math.exp(r.uniform(math.log(lo), math.log(hi)))        # pinned: log-uniform multiplier
+        if L * (mlt - 1) < 200:                                         # meaningful only (enriched)
+            continue
+        dl = math.log(mlt) / s; med, sg, b, c1 = EST[r.randrange(W)]
+        S = 0.0; zs = []; day = 0
+        while True:
+            day += 1
+            x = dl + r.gauss(0, 1); zs.append(x - b)
+            if x >= med + T * sg and x - b >= D1Q * c1: break
+            if len(zs) >= 2 and (zs[-1] + zs[-2]) >= T * S2 * c1: break
+            S = max(0.0, S + (x - b) / c1 - 0.5)
+            if S > h: break
+            if day > 60: break
+        ttds.append(day)
+    ttds.sort()
+    hit = 0; tot = 0
+    while tot < n:
+        i = pick(); L, s = leaves[i][0], leaves[i][1]
+        mlt = r.uniform(1.5, 6.0); dur = r.choice((1, 2, 3))
+        if L * (mlt - 1) < 200:
+            continue
+        tot += 1; dl = math.log(mlt) / s; med, sg, b, c1 = EST[r.randrange(W)]
+        S = 0.0; zs = []
+        for _d in range(dur + 1):                                      # spike days, then one day after
+            x = (dl if _d < dur else 0.0) + r.gauss(0, 1); zs.append(x - b)
+            if x >= med + T * sg and x - b >= D1Q * c1: hit += 1; break
+            if len(zs) >= 2 and (zs[-1] + zs[-2]) >= T * S2 * c1: hit += 1; break
+            S = max(0.0, S + (x - b) / c1 - 0.5)
+            if S > h: hit += 1; break
+    return ttds[n // 2], ttds[int(0.9 * n)], sum(1 for t in ttds if t <= 3) / n, hit / tot
+print()
+rs = random.Random(37); cand_ = [i for i in daily_idx if leaves[i][3]]; dls = []
+while len(dls) < 5000:
+    i = rs.choice(cand_); L, s_ = leaves[i][0], leaves[i][1]
+    m_ = math.exp(rs.uniform(math.log(1.2), math.log(1.4)))
+    if L * (m_ - 1) >= 200:
+        dls.append(math.log(m_) / s_)
+dls.sort()
+print("meaningful x1.2-1.4 level shifts in sigma units (per series): min %.2f, p10 %.2f, p50 %.2f, p90 %.2f"
+      % (dls[0], dls[500], dls[2500], dls[4500]))
+chosen = [r_ for r_ in rows if r_[3] <= 0.15]
+pick_ = min(chosen, key=lambda r_: (r_[0], r_[1])) if chosen else None
+if True:
+    _T, _h = 4.5, 9.0
+    print("calendar cohorts at T=%.1f h=%.1f without the calendar component: %.3f candidate leaf-events per day"
+          % (_T, _h, calendar_term(_T, _h, 0.0, trials=100, priors=(0, 0))))
+print("least strict pair with conservative total <= 0.15: %s" % (("T=%.1f h=%.1f (total %.3f, conservative %.3f)" % pick_[:4]) if pick_ else "none in the grid"))
+if pick_:
+    T, h = pick_[0], pick_[1]
+    hw, he, hi, nw, so = hurdle_terms(h)
+    print("hurdle-scored leaves (%d): expected in `warning` scoring %.1f, `info` only %.1f (gate, independent occurrence as generated); spend share of reachable individual leaves outside AT-2: %.4f"
+          % (len(hurdle_idx), nw, len(hurdle_idx) - nw, so))
+    hw3, he3, _i3, nw3, so3 = hurdle_terms(h, rho=0.3)
+    print("   sensitivity, every hurdle leaf clustered at rho 0.3 (just inside the gate): warning %.4f, every gated alarm %.4f per day; %.1f leaves pass the gate"
+          % (hw3, he3, nw3))
+    s6 = sum(hlook(0.6, inter[i][1])[0][h][0] / 7.0 for i in hurdle_idx)
+    hw6, he6, _i6, nw6, _s6 = hurdle_terms(h, rho=0.6)
+    print("   every hurdle leaf clustered at rho 0.6: all alarms before the gate %.4f per day; after the gate: warning %.4f, every gated alarm %.4f; %.1f leaves pass the gate"
+          % (s6, hw6, he6, nw6))
+    _o, wsb = weekly_terms(h, sb=1.0)
+    _o, wrho = weekly_terms(h, rho=0.3)
+    print("   weekly term (zero share <= 0.5) sensitivity: as generated %.4f; burst-size sd 1.0 %.4f; day clustering rho 0.3 %.4f"
+          % (weekly_terms(h)[1], wsb, wrho))
+    print("   month_start with 1 prior cycle (P3) and 2 (P4): calendar term %.4f (rev. 6 assumption of 2 and 3 cycles: see budget4.py)" % pick_[5])
+ttd_pairs = sorted({(4.5, 8.5), (5.0, 8.0), (5.0, 8.5)} | ({(pick_[0], pick_[1])} if pick_ else set()))
+for T, h in ttd_pairs:
+    p50, p90, le3, rec = ttd_and_recall(T, h)
+    q50, q90, qle3, qrec = ttd_and_recall(T, h, weighted=False)
+    print("T=%.1f h=%.1f: level shift TTD (spend-weighted) median %d, p90 %d days (share <= 3 days %.3f), spike recall %.3f | (per series) median %d, p90 %d (<= 3 days %.3f), spike recall %.3f"
+          % (T, h, p50, p90, le3, rec, q50, q90, qle3, qrec))
+    s50, s90, sle3, _ = ttd_and_recall(T, h, n=5000, weighted=False, lo=1.2, hi=1.4)
+    print("   small shifts only (x1.2-1.4, meaningful, per series): TTD median %d, p90 %d days (share <= 3 days %.3f)" % (s50, s90, sle3))
+for T, h in ttd_pairs:
+    for n_prior in (2, 3):
+        clean, dirty = calendar_recall(T, h, n_prior)
+        print("T=%.1f h=%.1f: event-day anomaly recall (x1.5-3), %d clean prior cycles %.3f; one of the %d prior cycles held an undetected anomaly of the same size %.3f"
+              % (T, h, n_prior, clean, n_prior, dirty))
+# D8 alone: smallest shift (sigma units) it catches by day 2 with probability >= 0.5 and >= 0.9 at the chosen T
+if pick_:
+    T = pick_[0]
+    for target in (0.5, 0.9):
+        dl = 0.0
+        while sum(Q((T * S2 * c1 - 2 * (dl - b)) / math.sqrt(2)) for m, sg, b, c1 in EST[:4000]) / 4000 < target:
+            dl += 0.05
+        print("D8 at T=%.1f: P(fires by day 2) >= %.1f for shifts >= %.2f sigma" % (T, target, dl))
+
+# ---- pass probabilities (conditional on an assumed true rate) ----
+def poisson(r, lam):
+    if lam > 30: return max(0, int(round(r.gauss(lam, math.sqrt(lam)))))
+    L = math.exp(-lam); k = 0; p = 1.0
+    while True:
+        p *= r.random()
+        if p <= L: return k
+        k += 1
+def wilson_lo(p, n, z=1.96):
+    return (p + z * z / (2 * n) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n)
+def pass_prob(lam, tp_mean=146, days=122, sims=4000, seed=5):
+    r = random.Random(seed); both = 0
+    for _ in range(sims):
+        tp = poisson(r, tp_mean); daily = [poisson(r, lam) for _ in range(days)]
+        fp = sum(daily); n = tp + fp; p = tp / n if n else 0
+        a1 = n >= 100 and p >= 0.80 and wilson_lo(p, n) >= 0.70
+        a4 = fp / days <= 0.30 and sorted(daily)[int(0.95 * days)] <= 2
+        both += a1 and a4
+    return both / sims
+print()
+for lam in (0.10, 0.15, 0.20, 0.30):
+    print("P(pass AT-1 and AT-4 | true FP rate %.2f/day) = %.3f" % (lam, pass_prob(lam)))
+if pick_:
+    for name, lam in (("design total", pick_[2]), ("conservative", pick_[3])):
+        lj = lam - pick_[5] + pick_[6]
+        print("with +/-10 %% calendar jitter (calendar term %.4f instead of %.4f): %s %.3f -> %.3f/day, P(pass) %.3f"
+              % (pick_[6], pick_[5], name, lam, lj, pass_prob(lj)))
+
+# ---- alert fatigue (Poisson approximation) ----
+def pois_q(lam, q):
+    c = 0.0; k = 0; t = math.exp(-lam)
+    while True:
+        c += t
+        if c >= q: return k
+        k += 1; t *= lam / k
+if pick_:
+    for name, lam in (("warning+ groups/day (true 1.2 + design total %.3f)" % pick_[2], 1.2 + pick_[2]),
+                      ("warning+ groups/day (true 1.2 + conservative %.3f)" % pick_[3], 1.2 + pick_[3]),
+                      ("info signals/day from hurdle-scored series", pick_[4])):
         print("%s: mean %.2f, p95 %d, typical max over 61 days %d" % (name, lam, pois_q(lam, 0.95), pois_q(lam, 1 - 1 / 61)))
 
 # ---- peak disk (unchanged inputs from budget3.py; intermittent weekly state is negligible) ----
