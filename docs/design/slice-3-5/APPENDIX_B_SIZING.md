@@ -144,9 +144,12 @@ print("resource x daily over 395d: %.2fB rows" % (usage_series * res_per_series 
 ### B.5.1 The constraint
 
 `fleet15k` must hold **all 15,000 accounts**, with a **5.5 GB target** and
-a **6 GB ceiling** in total per run: object storage, Postgres facts,
-rollups, forecasts, indexes, the backtest exports, the control tenant, WAL
-and temporary files (orchestrator decisions, 2026-10-04). The container
+a **6 GB ceiling** for the **peak across the sequential runs**: one run's
+object storage, Postgres facts, rollups, forecasts, indexes, backtest
+exports, control tenant, WAL and temporary files, plus the evaluator
+exports retained from the runs before it (orchestrator decisions,
+2026-10-04; DESIGN §2.8 and §2.10 apply them to the peak). Revisions 3–17
+said "in total per run" here, which is looser than the peak; rev. 18. The container
 class it runs in has ≈ 10 GB free disk, 4 CPUs and 15 GB RAM. The seeds
 (tuning, tuning-natural, natural-1, natural-2 [, natural-3], enriched;
 tuning-natural added in revision 5) run
@@ -217,7 +220,7 @@ tenant, WAL, temporary files and the cluster base.
 | cluster base | 0.050 |
 | **total** | **4.90** |
 
-Margin: ≈ 0.6 GB to the target, ≈ 1.1 GB to the ceiling, per run. Revision 4 adds
+Margin of this single run (revision 3): ≈ 0.6 GB to the target, ≈ 1.1 GB to the ceiling; the limits apply to the peak (B.5.1), whose current value is in B.5.12. Revision 4 adds
 FT-7's scoring origins (4.96 GB for the natural-1 run) and the peak across
 the sequential runs, **5.11 GB** (B.5.7). Single-worker
 load: 4.89 M rows at 20 k / 6 k rows/s = **4 / 14 min** (D-06 trigger:
@@ -2434,7 +2437,7 @@ for label, pool in (("as specified: non-intermittent individual series", [i for 
 # non-intermittent leaves are active every day, so they never meet the dormancy condition outside a label
 ```
 
-### B.5.12 Revisions 12–17: billing rollup by charge category, rollup pointer, forecast leaves, leaf totals, disk delta
+### B.5.12 Revisions 12–18: billing rollup by charge category, rollup pointer, forecast leaves, leaf totals, detector state, disk delta
 
 Computed by `rollup12.py` (below; standard library, no randomness, < 1 s).
 Revision 12 adds:
@@ -2463,6 +2466,14 @@ month-end total and counted none of those rows. It also adds two numeric
 columns to each `forecast_state` row (`scale_level`, `log_var`; Appendix
 D.2, D.3).
 
+Revision 18 adds, all run-keyed with 2 runs kept (byte sizes are
+assumptions):
+- the complete M1 anchor state and the D3 episode in `detector_state`
+  (≈ 110 B per leaf row);
+- the per-bucket `q_source text[6]` in `forecast_state` (≈ 100 B per leaf
+  row; the scalar it replaces is not subtracted);
+- `detector_scope_state` for the ≈ 550 aggregate scopes (≈ 600 B per row).
+
 The byte sizes are **assumptions** (150 B per narrow row, as for
 `billing_daily` in `budget.py`), measured in PR 3-4.
 
@@ -2473,23 +2484,25 @@ The byte sizes are **assumptions** (150 B per narrow row, as for
 | `forecast_leaves` + `leaf_id` (rev. 15) | 37,052 rows, **0.006 GB** |
 | leaf `forecast_totals`, three windows (rev. 17) | 222,312 rows, **0.033 GB** |
 | `forecast_state`: `scale_level`, `log_var` (rev. 17) | **0.002 GB** |
+| detector anchor and episode, `q_source`, `detector_scope_state` (rev. 18) | **0.016 GB** |
 | `rollup_pointer`, `billing_daily` re-key | ≈ 0 |
-| **Delta per run** | **+0.066 GB** (revisions 15–16: 0.031; revision 13: 0.025; revision 12: 0.026) |
-| natural-1 run | 4.961 → **5.027 GB** |
-| **Peak, 5 runs** | 5.151 → **5.217 GB** |
-| **Peak, 6 runs (natural-3)** | 5.191 → **5.257 GB** |
+| **Delta per run** | **+0.082 GB** (revision 17: 0.066; revisions 15–16: 0.031; revision 13: 0.025; revision 12: 0.026) |
+| natural-1 run | 4.961 → **5.044 GB** |
+| **Peak, 5 runs** | 5.151 → **5.234 GB** |
+| **Peak, 6 runs (natural-3)** | 5.191 → **5.274 GB** |
 
 Both peaks stay under the 5.5 GB target and the 6 GB ceiling.
 
 SHA-256 of `rollup12.py` as run:
-`d296e8ff52c11494e5f538fe706da295ae8695f5589b2067270365627eabe8e5`
-(revision 16: `6bb735b8…`).
+`a0931c448ddf6e09b42d0eb3d43a291445cfcdc618ddc33713425c004f304b9e`
+(revision 17: `d296e8ff…`; revision 16: `6bb735b8…`).
 
 `rollup12.py`:
 
 ```python
 # fleet15k, revision 12 (category count corrected in revision 13; forecast leaves added in revision 15; leaf totals and
-# two leaf-state columns added in revision 17): disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
+# two leaf-state columns added in revision 17; detector anchor, episode, aggregate D3 state and per-bucket quantile
+# sources added in revision 18): disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
 # charge category, `cost_accounts`, `billing_daily_scope`, `rollup_pointer`) and the resulting peak disk.
 # Standard library only, no randomness. Inputs from budget5.py / budget3.py; byte sizes are ASSUMPTIONS
 # (measured in PR 3-4), at the same 150 B per narrow row used for `billing_daily` in budget.py.
@@ -2520,11 +2533,17 @@ WINDOWS = 3
 leaf_totals_gb = LEAVES * WINDOWS * RUNS_KEPT * ROW_B / 1e9
 # revision 17: two more numeric columns per `forecast_state` row (`scale_level`, `log_var`), 12 B each, 2 runs
 state_cols_gb = LEAVES * 2 * 12 * RUNS_KEPT / 1e9
-delta = scope_gb + acct_gb + billing_delta_gb + leaves_gb + leaf_totals_gb + state_cols_gb
+# revision 18: `detector_state` gains the complete M1 anchor state (phi, 3 calendar factors, log_var, method) and the
+# D3 episode (start, excess sum, expected sum): ASSUMPTION 110 B per leaf row; `forecast_state` gains `q_source text[6]`:
+# ASSUMPTION 100 B per leaf row (the scalar it replaces not subtracted); `detector_scope_state`: one row per aggregate
+# scope, a 28-value baseline plus sums, ASSUMPTION 600 B. All run-keyed, 2 runs kept.
+ANCHOR_EP_B, QSRC_B, SCOPE_STATE_B = 110, 100, 600
+rev18_gb = (LEAVES * (ANCHOR_EP_B + QSRC_B) + SCOPES * SCOPE_STATE_B) * RUNS_KEPT / 1e9
+delta = scope_gb + acct_gb + billing_delta_gb + leaves_gb + leaf_totals_gb + state_cols_gb + rev18_gb
 print("billing_daily_scope rows %d (%.3f GB), cost_accounts %.3f GB, forecast_leaves + leaf_id %.3f GB, rollup_pointer ~0"
       % (scope_rows, scope_gb, acct_gb, leaves_gb))
-print("leaf forecast_totals rows %d (%.3f GB), forecast_state columns %.4f GB: delta per run %.3f GB"
-      % (LEAVES * WINDOWS * RUNS_KEPT, leaf_totals_gb, state_cols_gb, delta))
+print("leaf forecast_totals rows %d (%.3f GB), forecast_state columns %.4f GB, rev. 18 detector and source state %.4f GB: delta per run %.3f GB"
+      % (LEAVES * WINDOWS * RUNS_KEPT, leaf_totals_gb, state_cols_gb, rev18_gb, delta))
 
 # peak disk, as budget5.py, with the delta added to every run
 points = 5 * 30 + 30 + 23 + 16 + 9
@@ -2543,4 +2562,145 @@ for runs in (['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'enriched'],
             peak = max(peak, own + retained)
             retained += per_run_eval + (bt_export + nat1_actuals if r_ == 'natural-1' else 0)
         print("%d runs, delta %.3f GB: natural-1 run %.3f GB, peak %.3f GB" % (len(runs), d, run_nat1 + d, peak))
+```
+
+### B.5.13 Revision 18: drift time-to-detect against AT-3's anchor
+
+Computed by `drift_ttd.py` (below; standard library, fixed seeds, ≈ 2 s).
+The challenger's M1 on revision 17 asked whether AT-3's drift target
+(median ≤ 7 days after the label's cumulative excess reaches the minimum
+impact) is feasible once severity is tested per candidate (DESIGN §4.4).
+
+**Arithmetic.** A drift of plateau excess `E` reached over `R` days has
+daily excess `E·k / R` on day `k`. Its cumulative excess reaches `min` at
+`k_c ≈ √(2R · min / E)`. A candidate can reach `warning` only once a
+day's excess is ≥ `min` **and** its relative value ≥ 20 %, i.e. from
+`k_w = R · max(min / E, 0.20 / a)`, where `a` is the plateau's relative
+size. For `E` = 2 × min and `R` = 45 that is 22.5 against 6.7 (the
+challenger's case). For large leaves the 20 % test binds: at `a` = 0.30
+and `R` = 45, `k_w − k_c` = 28 days.
+
+**Distribution** (20,000 meaningful labels, drawn as Appendix C.2 draws
+them and placed by spend on daily-scored individual leaves; days counted
+from the anchor, detection on the day after the data day):
+
+| Case | Median | p90 | Share ≤ 7 days |
+|---|---|---|---|
+| Lower bound: the first day the injected excess passes, + 1 | 6 | 12 | 0.668 |
+| D1 ∧ D2, D8 and D3, all on the true baseline and scale (optimistic) | 5 | 11 | 0.726 |
+| D3 alone, restart after an alarm (DESIGN §4.2, rev. 18) | 7 | 13 | 0.535 |
+| D3 alone, no restart (episode from its first positive day) | 11 | 25 | 0.235 |
+| Cumulative clause (`critical` at 50 × min) reached | 18 | 31 | 0.092 |
+
+**Reading.** The target is not infeasible by construction: even the lower
+bound has a median of 6. D3 is the detector that sees a slow drift, since
+D1 and D8 compare with adaptive one-step forecasts that follow the ramp.
+D3 alone reaches a median of 7 only with the restart after an alarm, and
+only with the true scale. The real `σ(h)` grows with the horizon and
+carries the pooled-scale error, so the measured median is likely above 7.
+The target and its anchor are unchanged (D-20). The enriched-seed
+measurement decides, and a miss goes to the owner (DESIGN §8, Known
+limits).
+
+SHA-256 of `drift_ttd.py` as run:
+`3d5fe545d80d0ef208f4c75c07dce48200e9a6254d19826dc84d4ed4f109cec8`.
+
+`drift_ttd.py`:
+
+```python
+# fleet15k, revision 18: time-to-detect of meaningful `gradual_drift` labels against AT-3's drift anchor (the first day
+# the label's cumulative excess reaches the minimum impact), under the severity rule of DESIGN 4.4 as revised in
+# revision 18 (one-day statistics: the day's excess and relative value; multi-day statistics: their window's mean).
+# Optimistic on purpose: every detector sees the true pre-drift baseline and the true noise scale (no estimation
+# noise, no forecast adaptation), so a real detector can only be slower. Standard library only; fixed seeds.
+# Account model, seed and leaf list are those of budget.py / budget5.py (37,052 leaves); drift labels as Appendix C.2:
+# extra linear slope reaching + U(30 %, 150 %) of the level after U(14, 45) days, then held; enriched seed: meaningful
+# only (plateau excess >= 2 x min impact), placed on daily-scored individual leaves proportional to spend.
+import random, math, bisect
+N = 15000
+random.seed(42)
+spend = [math.exp(random.gauss(math.log(800), 1.8)) for _ in range(N)]
+med_spend = sorted(spend, reverse=True)[int(N * 0.5)]
+leaves = []                                   # (mean M/day, log-noise s, account, individual?)
+for a, m in enumerate(spend):
+    k = max(1, min(80, round(3 + 4 * math.log10(1 + m / 100) + random.gauss(0, 2.0))))
+    _ = (m > 20000 and random.random() < 0.6) or random.random() < 0.1
+    keep = 2 if m >= med_spend else 1
+    w = [0.5 ** i for i in range(k)]; ws = sum(w)
+    s = min(0.15, max(0.03, 0.15 - 0.04 * math.log10(max(m, 1) / 100)))
+    daily = m / 30.4
+    for i in range(min(k, keep)):
+        leaves.append((daily * w[i] / ws, s, a, True))
+    if k > keep:
+        leaves.append((daily * sum(w[keep:]) / ws, s, a, False))
+assert len(leaves) == 37052
+MIN = 100.0
+ri = random.Random(17)                        # intermittent flags, as budget5.py
+inter = [(ri.random() < 0.05, ri.uniform(0.3, 0.8)) for _ in leaves]
+cand = [i for i, x in enumerate(leaves) if x[3] and not inter[i][0]]
+cum = []; c = 0.0
+for i in cand:
+    c += leaves[i][0]; cum.append(c)
+T, H, K = 4.5, 9.0, 0.5
+
+def label(r):
+    while True:
+        i = cand[bisect.bisect_left(cum, r.random() * c)]
+        L, s = leaves[i][0], leaves[i][1]
+        a = r.uniform(0.3, 1.5); R = r.randint(14, 45)
+        if L * a >= 2 * MIN:
+            return L, s, a, R
+
+def one(r, d3_only, reset):
+    # d3_only: D3 alone (its baseline is frozen; D1 and D8 compare with adaptive one-step forecasts, which follow a
+    # slow ramp); reset: S+ restarts at 0 after an alarm and the next episode starts there (as budget5.py's episodes)
+    L, s, a, R = label(r)
+    kc = next(k for k in range(1, 400) if sum(L * a * min(j, R) / R for j in range(1, k + 1)) >= MIN)   # the anchor
+    k_bound = next(k for k in range(1, 400) if L * a * min(k, R) / R >= MIN and a * min(k, R) / R >= 0.20)
+    S = 0.0; ep = []; zprev = None; xprev = None
+    for k in range(1, 200):
+        inj = a * min(k, R) / R                                   # injected relative excess on day k
+        z = math.log(1 + inj) / s + r.gauss(0, 1)                # standardised log residual vs the true baseline
+        x = L * (math.exp(z * s) - 1)                            # observed excess on day k
+        cands = []
+        if not d3_only and z >= T:                                # D1 and D2 (true quantile and scale): one day
+            cands.append((x, x / L))
+        if not d3_only and zprev is not None and z + zprev >= T * math.sqrt(2):   # D8 (s2 = sqrt(2) s): 2-day mean
+            cands.append(((x + xprev) / 2, (x + xprev) / (2 * L)))
+        S = max(0.0, S + z - K)
+        ep = ep + [x] if S > 0 else []
+        if S > H:                                                 # D3: the episode's mean excess
+            cands.append((sum(ep) / len(ep), sum(ep) / (len(ep) * L)))
+            if reset:
+                S = 0.0; ep = []
+        zprev, xprev = z, x
+        if any(e >= MIN and q >= 0.20 for e, q in cands):
+            return (k + 1) - kc, k_bound + 1 - kc                # detection on k + 1 (data for day d on d + 1)
+    return 999, k_bound + 1 - kc
+
+def pct(v, p): return v[min(len(v) - 1, int(p * len(v)))]
+for d3_only, reset, name in ((False, True, 'D1-D2, D8, D3 (reset)'), (True, True, 'D3 only (reset)'),
+                             (True, False, 'D3 only (no reset)')):
+    r = random.Random(41)
+    res = [one(r, d3_only, reset) for _ in range(20000)]
+    t = sorted(x[0] for x in res)
+    print("%-22s: TTD from the anchor median %d, p90 %d, share <= 7 days %.3f" % (name, pct(t, .5), pct(t, .9), sum(1 for x in t if x <= 7) / len(t)))
+b = sorted(x[1] for x in res)
+print("lower bound (first day the injected excess passes the warning test, + 1): median %d, p90 %d, share <= 7 days %.3f"
+      % (pct(b, .5), pct(b, .9), sum(1 for x in b if x <= 7) / len(b)))
+r = random.Random(43); e = []
+for _ in range(20000):
+    L, s, a, R = label(r)
+    kc = next(k for k in range(1, 400) if sum(L * a * min(j, R) / R for j in range(1, k + 1)) >= MIN)
+    kw = next(k for k in range(1, 400) if L * a * min(k, R) / R >= MIN and a * min(k, R) / R >= 0.20)
+    k50 = next(k for k in range(1, 4000) if sum(L * a * min(j, R) / R for j in range(1, k + 1)) >= 50 * MIN)
+    e.append((kw - kc, L, a, R, k50 - kc))
+e.sort()
+print("worst cases (days from the anchor to the first day the injected excess passes, L, a, R):",
+      ", ".join("%d (%.0f, %.2f, %d)" % x[:4] for x in e[-3:]))
+c50 = sorted(x[4] + 1 for x in e)
+print("cumulative clause (>= 50 x min, `critical`): reached after the anchor + median %d, p90 %d days; share <= 7 days %.3f"
+      % (pct(c50, .5), pct(c50, .9), sum(1 for x in c50 if x <= 7) / len(c50)))
+print("share of labels whose injected relative excess first reaches 20 %% after the anchor + 7 days: %.3f"
+      % (sum(1 for x in e if x[0] + 1 > 7) / len(e)))
 ```

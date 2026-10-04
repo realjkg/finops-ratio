@@ -233,4 +233,4 @@ the harness can see failure:
 | score a detection day with quantiles that include errors from that day or later | the as-of test fails |
 | replace the Wilson rule by the point estimate | a fixture with p̂ = 0.80, n = 20 passes wrongly; the test fails |
 | count duplicates as correct | AT-6 and precision tests fail |
-| relabel a `no_alert` label as `alert` in a copy of `labels.jsonl` | recall falls by exactly that label |
+| add, in a copy of `labels.jsonl`, one **meaningful** label of an existing gated kind (e.g. `spike`) on a leaf and days where no group exists (rev. 18, Copilot r4178908374: revision 17's mutation relabelled a `no_alert` label as `alert`, which does not make its kind gated under C.4, so recall did not change) | that kind's missed count rises by exactly 1 and its recall denominator by 1; the test fails otherwise |
