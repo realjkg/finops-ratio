@@ -1,10 +1,18 @@
 # Ratio — deployment decision brief (Slice 2)
 
-> **The owner has delegated decisions D-01..D-10 to the orchestrator; they are
-> recorded below as DECIDED (Decision log).** What stays with the owner are
-> actions only the owner can take: granting account access, installing the
-> GitHub App, and approving hosting spend (§7). Nothing has been provisioned
-> or spent. Everything built so far is local and ephemeral (BOUNDARY v2).
+> **PRODUCTION GO-LIVE IS A NON-DELEGABLE HUMAN GATE.** Only the owner signs
+> it off (§7, owner action 1). That decision is **not** delegated.
+>
+> The owner has delegated the design decisions D-01..D-10 to the orchestrator;
+> they are recorded below as DECIDED (Decision log). What stays with the owner
+> (§7):
+> 1. the production go-live sign-off;
+> 2. approving hosting spend;
+> 3. installing the GitHub App;
+> 4. optionally, connecting real billing data later.
+>
+> Nothing has been provisioned or spent. Everything built so far is local and
+> ephemeral (BOUNDARY v2).
 
 Status at the time of writing (branch `slice/02-local-env-brief`):
 
@@ -22,17 +30,17 @@ Each decision below was **decided by the orchestrator under delegation,
 
 | ID | Decision | Rationale (one line) | Revisit when |
 |---|---|---|---|
-| D-01 | Snapshot / manifest artifacts are **unrestricted ONLY when the source encrypts them with strong encryption**: SSE-KMS, or an equivalent AES-256 at-rest scheme, with the encryption **verified from object metadata at ingest**. Anything else stays **restricted**, which is today's default. Foundation manifests (`src/ingest/db/migrations/*.manifest.json`) stay restricted review artefacts. Enforcement (checking the encryption metadata at ingest) is follow-up work (issue draft in Appendix A); until it lands, everything is treated as restricted, the safe subset. | The owner's rule, made checkable; restricted-by-default never under-protects. | A source cannot provide SSE-KMS / AES-256 metadata, or the follow-up issue lands. |
-| D-02 | **The acceptance run uses the FinOps Foundation's public "FOCUS 1.0 Sample Data"**: https://github.com/FinOps-Open-Cost-and-Usage-Spec/focus-sample-data at commit `adbdd17a132984d6e8583c149c236d2199c3f5bc`, files `focus_sample.csv` (1k rows) and `focus_sample_10000.csv` (10k rows). It is anonymized real-world data covering AWS, Google, Microsoft and Oracle. **Licence: CC BY 4.0 — attribution is required** wherever the data, or results derived from it, are committed or published (credit the FinOps Foundation / FOCUS project, link the repository and the licence, and state any changes made). The data is loaded into the local SeaweedFS bucket, ingested by the worker, and read back through `GET /api/v1/costs/published`. The run is **not blocked on the owner**. It is a separate follow-up PR after #59 merges; nothing of it is in #59. A real AWS (or Azure/GCP) billing connection becomes a later, **optional** owner action. When one is added, option (a) still applies: a read-only IAM role assumed via the SDK chain, with no static keys. | Real-world shape and multi-provider coverage with no account access, so ingestion is validated now. The licence permits reuse with attribution. | The owner connects real billing data, or the sample's layout differs from what the worker expects (the sample is a set of CSV files, not an AWS Data Exports bucket layout; staging them in the expected layout is part of the follow-up PR). |
+| D-01 | Source snapshot / evidence artifacts are **unrestricted ONLY** when the source encrypts them so that holding read access to the object is **not** enough to read the plaintext. That means either: **SSE-KMS with a customer-managed KMS key**, where the key id is **not** the AWS-managed `aws/s3` key (by alias or by ARN) and the key policy is the access control, verified from the object's metadata at ingest; or **client-side encryption by the source** (the stored object is ciphertext and the worker is not given the key). **Everything else stays restricted**, explicitly including **`ServerSideEncryption: AES256` (SSE-S3)**, which S3 applies to every object by default since January 2023, and **SSE-KMS with the AWS-managed `aws/s3` key**. Both are transparent to anyone holding `s3:GetObject`. Foundation manifests (`src/ingest/db/migrations/*.manifest.json`) stay restricted review artefacts regardless. Enforcement is follow-up work, tracked in **realjkg/finops-ratio#60** (Appendix A). Until it lands, everything is treated as restricted, the safe subset. | The owner's "encrypted by the source with strong encryption" only means something if the encryption is an access-control boundary independent of the bucket; default and AWS-managed encryption are not. Restricted-by-default never under-protects. | A source can only offer SSE-S3 or `aws/s3`, or #60 lands. |
+| D-02 | **The acceptance run uses the FinOps Foundation's public "FOCUS 1.0 Sample Data"**: https://github.com/FinOps-Open-Cost-and-Usage-Spec/focus-sample-data at commit `adbdd17a132984d6e8583c149c236d2199c3f5bc`, files `FOCUS-1.0/focus_sample.csv` (1k rows) and `FOCUS-1.0/focus_sample_10000.csv` (10k rows). `FOCUS-1.0/README.md` at that commit states that it is anonymized real-world FOCUS data. **The two files contain AWS, Microsoft and Oracle data only.** The upstream README also lists Google, but there is no Google data in these files, so Google coverage is NOT tested by this run. **Licence: CC BY 4.0 — attribution is required** wherever the data, or results derived from it, are committed or published (credit the FinOps Foundation / FOCUS project, link the repository and the licence, and state any changes made). The data is loaded into the local SeaweedFS bucket, ingested by the worker, and read back through `GET /api/v1/costs/published`. The run is **not blocked on the owner**. It is a separate follow-up PR after #59 merges; nothing of it is in #59. A real AWS (or Azure/GCP) billing connection becomes a later, **optional** owner action. When one is added, option (a) still applies: a read-only IAM role assumed via the SDK chain, with no static keys. | Real-world shape and three-provider coverage (AWS, Microsoft, Oracle) with no account access, so ingestion is validated now. The licence permits reuse with attribution. | The owner connects real billing data, or the sample's layout differs from what the worker expects (the sample is a set of CSV files, not an AWS Data Exports bucket layout; staging them in the expected layout is part of the follow-up PR). |
 | D-03 | **Keep everything until a dedicated retention slice** (option a); a staging-only cleanup of `fixture-*` tenants comes first, as its own slice. | No purge path exists that respects the immutability triggers; keeping data is reversible, deleting is not. | Before the first non-pilot tenant, or storage cost becomes material. |
 | D-04 | **An admin pre-creates the three NOLOGIN ratio roles; the migrator is NOCREATEROLE from day one** (option a, the local model). | Role creation never sits on an app credential; proven locally by `migrate --status` with `privilegeProblems: []`. | The managed Postgres offering cannot pre-create roles. |
 | D-05 | **A separate monitoring login, a member of no ratio role, with SELECT on the ledger only** (option c). | Keeps the owner credential off worker hosts without changing the reviewed ratio privileges. | One more credential is judged too costly (fallback: option a). |
 | D-06 | **Session tenant** (option a): one reader and one worker login per deployment; the app binds the tenant. | Simple and pooled; right for a single-tenant pilot. | Before a second external tenant shares a cluster. |
-| D-07 | Items **1–3 now** (protect `main`, auto-merge for `low` only, Copilot `review_on_push`). For item 4, **option (b), a dedicated GitHub App** posting the gate's verdict as a check run. Installing it needs the owner's GitHub account (owner action 2). | Merge gating a workflow change cannot forge. | The plan gains required-workflow rulesets (option a), or the App is retired. |
+| D-07 | Items **1–3 now** (protect `main`, auto-merge for `low` only, Copilot `review_on_push`). For item 4, **option (b), a dedicated GitHub App** posting the gate's verdict as a check run. Installing it needs the owner's GitHub account (owner action 3). | Merge gating a workflow change cannot forge. | The plan gains required-workflow rulesets (option a), or the App is retired. |
 | D-08 | **Stay on PostgreSQL 16** for the pilot; managed minor upgrades allowed; a major upgrade is a reviewed change. | Every test, baseline and pin is PG16; PG16 is supported to Nov 2028. | PG16 end of life approaches, or a needed feature is 17+. |
 | D-09 | **Keep the per-row staged-only trigger** (option a). | Proven and mutation-tested; cost is about 10–18 µs per row. | The acceptance run shows a real month above a few million rows. |
 | D-10 | **One API key per deployment** (option a), bound to its tenant by `RATIO_API_TENANT_ID`. | No new auth surface for the pilot. | Together with D-06, before multi-tenant production. |
-| Hosting | **The plan is AWS** (§4 first row): RDS / Aurora PostgreSQL 16, S3 with versioning + object lock + SSE-KMS for evidence, ECS Fargate for the app, EventBridge Scheduler → ECS RunTask for the one-shot worker. Provisioning and spend stay owner actions (owner action 3, when Slice 3 provisions). | Native object lock and KMS (D-01, D-03); the worker's only real source type is AWS Data Exports, so a later AWS billing connection needs no cross-cloud credential. §4 listed options without naming one; this records AWS as the plan for those reasons. | Real billing data comes from another cloud, or the owner declines the spend. |
+| Hosting | **The plan is AWS** (§4 first row): RDS / Aurora PostgreSQL 16, S3 with versioning + object lock + SSE-KMS for evidence, ECS Fargate for the app, EventBridge Scheduler → ECS RunTask for the one-shot worker. Provisioning and spend stay owner actions (owner action 2, when Slice 3 provisions). | Native object lock and KMS (D-01, D-03); the worker's only real source type is AWS Data Exports, so a later AWS billing connection needs no cross-cloud credential. §4 listed options without naming one; this records AWS as the plan for those reasons. | Real billing data comes from another cloud, or the owner declines the spend. |
 
 ## 1. Decisions: option analysis (kept as the rationale)
 
@@ -54,14 +62,16 @@ encrypted by the source with strong encryption."* It is **unresolved** which
 | (b) It means manifests | Manifests are not secret, but they ARE the reviewed security baseline. Treating them as unrestricted would let a baseline change through without restricted review. Not recommended. |
 | (c) Both | Both of the above risks. |
 
-- **Recommended default (DECIDED in a stricter, checkable form: unrestricted
-  only with source encryption verified from object metadata at ingest; see the
-  Decision log):** (a). **Keep manifests restricted.** They stay under
-  `**/migrations/**`, which the governance gate already classifies as
-  restricted, and a change to them is a reviewed security change. Evidence may
-  be classed "unrestricted storage" only when it is encrypted at the source with
-  a customer-managed key and the key policy, not the bucket policy, is the access
-  control.
+- **Decided (see the Decision log): option (a), with "strong encryption"
+  defined as an access-control boundary.** That means SSE-KMS with a
+  customer-managed key (never the AWS-managed `aws/s3` key) whose key policy is
+  the access control, or client-side encryption by the source. **SSE-S3
+  (`AES256`, S3's default for every object since January 2023) and SSE-KMS with
+  `aws/s3` stay restricted**: anyone with `s3:GetObject` reads them in
+  plaintext, so "encrypted at rest" alone says nothing about who can read.
+  **Manifests stay restricted.** They live under `**/migrations/**`, which the
+  governance gate already classifies as restricted, and a change to them is a
+  reviewed security change. Enforcement: realjkg/finops-ratio#60.
 - **Blocks:** the evidence-bucket placement and storage class (with D-03), and
   any change to the governance classification of manifest files.
 
@@ -82,7 +92,7 @@ encrypted by the source with strong encryption."* It is **unresolved** which
   policy to that role.
 - **What the sample run settles and what it does not:**
   - it validates parsing, validation, publication and the read path on real,
-    multi-provider FOCUS 1.0 data, and gives D-09 a real row-size measurement;
+    multi-provider FOCUS 1.0 data (AWS, Microsoft and Oracle; no Google in these files), and gives D-09 a real row-size measurement;
   - it does **not** verify a real AWS Data Exports manifest's semantics
     (control totals expected absent ⇒ `unverified`; one or several manifests
     per period). That stays open until real billing data is connected.
@@ -361,19 +371,23 @@ Cross-cutting for every option:
 - **Worker schedule:** disable the scheduler. A running job finishes or aborts
   at `RATIO_MAX_RUN_SECONDS`. The lease and fencing make a later restart safe.
 
-## 7. Owner actions (non-decision)
+## 7. Owner actions
 
-The decisions are made (Decision log). These are the actions only the owner
-can take:
+The design decisions are made (Decision log). The owner keeps the production
+go-live decision, which is non-delegable, and the actions only the owner can
+take:
 
-1. **Connect real billing data later (optional).** When the owner wants it:
+1. **Owner sign-off for production go-live.** This is a non-delegable human
+   gate: nothing goes to production until the owner signs off. It comes after
+   every release readiness check in §8 has passed.
+2. **Approve the hosting spend** when Slice 3 provisions the AWS plan (Decision
+   log, Hosting).
+3. **Install the GitHub App** for the governance gate (D-07 item 4, option b).
+   It needs the owner's GitHub account.
+4. **Connect real billing data later (optional).** When the owner wants it:
    the S3 bucket and prefix of a real FOCUS export, and a read-only IAM role
    ARN the worker may assume (D-02, option a). This does **not** block the
    acceptance run, which uses the public FOCUS 1.0 Sample Data (D-02).
-2. **Install the GitHub App** for the governance gate (D-07 item 4, option b).
-   It needs the owner's GitHub account.
-3. **Approve the hosting spend** when Slice 3 provisions the AWS plan (Decision
-   log, Hosting).
 
 ## 8. Release readiness checks (engineering; verified when Slice 3 provisions)
 
@@ -386,12 +400,12 @@ production deploy:
       independently from the CSV, idempotent re-sync, evidence re-hash, read
       back through the API, and the CC BY 4.0 attribution recorded. A real
       billing comparison (vs the Billing console) follows only if the owner
-      connects real data (optional owner action 1).
+      connects real data (optional owner action 4).
 - [ ] D-09 reviewed against the acceptance run's size.
 - [ ] D-07 items 1–3 applied (protect-main, auto-merge for `low` only, Copilot
-      review_on_push); the GitHub App installed (owner action 2).
+      review_on_push); the GitHub App installed (owner action 3).
 - [ ] Postgres 16 provisioned on the hosting plan with TLS; backups and
-      point-in-time recovery enabled and **a restore tested** (owner action 3).
+      point-in-time recovery enabled and **a restore tested** (after owner action 2).
 - [ ] Roles created per D-04. `migrate`, then `migrate --status --json` exits 0
       with `privilegeProblems: []`. Owner `CREATE` on `public` removed (§2).
 - [ ] Worker and reader logins: one membership each. The API answers 200 (not
@@ -406,39 +420,52 @@ production deploy:
 - [ ] Monitoring login separate from every ratio role (§2).
 - [ ] CI green on the release commit, including `check:bundle` and `local:test`.
 - [ ] Rollback plan (§6) rehearsed in staging, including the NOLOGIN kill switch.
+- [ ] **Owner sign-off for production go-live recorded (owner action 1). Non-delegable.**
 
-## Appendix A: Issue draft for D-01 enforcement (not opened from this session)
+## Appendix A: D-01 enforcement, tracked in realjkg/finops-ratio#60
 
-The D-01 decision needs enforcement code. This session does not write to
-GitHub (no push, no comments), so the issue is drafted here for the
-orchestrator to open.
-
-**Title:** Enforce D-01: treat snapshot / evidence artifacts as unrestricted
-only with verified source encryption
+The D-01 decision needs enforcement code. It is tracked in **issue #60**,
+which the orchestrator keeps in line with this appendix. This appendix is the
+specification the issue implements.
 
 **Context:** D-01 (decided 2026-10-04). Today every artifact is treated as
 restricted, the safe subset. The worker records no encryption metadata.
 
 **Scope:**
-- The worker reads the source object's encryption metadata at capture time,
-  from the S3 HEAD/GET response: `ServerSideEncryption`, `SSEKMSKeyId`, and
-  the bucket-key flag.
-- It records an encryption classification per artifact: `sse-kms`,
-  `aes256`, or `none/unknown`.
-- Only `sse-kms` or an equivalent AES-256 at-rest scheme may be classed
-  "unrestricted". Everything else stays restricted.
+- At capture time, the worker reads the source object's encryption metadata
+  from the S3 HEAD/GET response: `ServerSideEncryption`, `SSEKMSKeyId` and the
+  bucket-key flag. If the source declares client-side encryption, it also reads
+  the envelope's metadata.
+- It records a classification per artifact. Exactly one of:
+  - `sse-kms-cmk`: `aws:kms` / `aws:kms:dsse` with a key id that is a
+    customer-managed key, i.e. not `alias/aws/s3` and not the account's
+    AWS-managed `aws/s3` key ARN;
+  - `client-side`;
+  - `restricted`: everything else, including `AES256` (SSE-S3), `aws/s3`
+    SSE-KMS, no header, an unknown value, or a metadata read that fails.
+- Only `sse-kms-cmk` and `client-side` may be classed "unrestricted".
 - Foundation manifests stay restricted regardless.
 
-**Acceptance criteria (tests first, red commit before the implementation):**
-1. Unit: classification from header combinations — SSE-KMS with a key id ⇒
-   `sse-kms`; `AES256` ⇒ `aes256`; missing or unknown ⇒ restricted. A missing
-   header never yields "unrestricted".
-2. S3 integration (SeaweedFS, or a fake client where SeaweedFS lacks KMS):
-   objects with and without encryption headers are classified correctly
-   at capture.
-3. The classification is persisted with the artifact. If this needs a
-   schema change, it is an expand migration with its own reviewed manifest
-   update.
-4. Mutation: classifying a missing header as encrypted fails a test.
-5. No change in behaviour for consumers until a reviewed consumer uses the
+**Acceptance criteria (tests first: a red commit before the implementation):**
+1. **Unit, classification from header combinations:**
+   - `aws:kms` with a customer-managed key ARN ⇒ `sse-kms-cmk`;
+   - `ServerSideEncryption: AES256` (SSE-S3, S3's default since January 2023)
+     ⇒ **`restricted`**;
+   - `aws:kms` with `SSEKMSKeyId` = `alias/aws/s3`, or the AWS-managed `aws/s3`
+     key ARN (resolved through the key's metadata: `KeyManager = AWS`) ⇒
+     **`restricted`**;
+   - a missing, empty or unknown header ⇒ `restricted`;
+   - a metadata or key-lookup error ⇒ `restricted`.
+   - Nothing defaults to unrestricted.
+2. **S3 integration** (SeaweedFS, or a fake client where SeaweedFS lacks KMS):
+   objects with no header, `AES256`, `aws/s3` and a customer-managed key are
+   classified as above at capture.
+3. **Persistence:** the classification is stored with the artifact. If this
+   needs a schema change, it is an expand migration with its own reviewed
+   manifest update.
+4. **Mutations, each of which must fail a test:**
+   - classifying a missing header as encrypted;
+   - classifying `AES256` as unrestricted;
+   - accepting the `aws/s3` key.
+5. **No behaviour change for consumers** until a reviewed consumer uses the
    classification (default restricted).

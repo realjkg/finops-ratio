@@ -249,7 +249,7 @@ The reader totals equal `fixtures/focus-1.0-synthetic/control-totals.json`
   `ubuntu-latest` and the image pulls are expected to add about 1–2 min to a
   job that currently runs about 3.5–4 min under a 10 min timeout.
 - The deployment brief records D-01..D-10 as DECIDED (owner delegation to the
-  orchestrator, 2026-10-04). Remaining owner actions: connecting real billing data (optional), the GitHub App, hosting spend. The acceptance run uses the public FOCUS 1.0 Sample Data (CC BY 4.0) in a follow-up PR after #59.
+  orchestrator, 2026-10-04). The production go-live sign-off is NOT delegated (non-delegable owner gate). Owner actions: (1) go-live sign-off, (2) hosting spend, (3) GitHub App, (4) real billing data, optional. The acceptance run uses the public FOCUS 1.0 Sample Data (CC BY 4.0) in a follow-up PR after #59.
 
 ## 10. Challenger Lows and Copilot review of PR #59 (local batch on 323984e; not pushed)
 

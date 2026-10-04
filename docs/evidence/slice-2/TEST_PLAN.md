@@ -78,4 +78,17 @@ Isolation:
 | L9–L12 | `scripts/local/local.test.mjs` | state per compose project and scoped removal; env file 0600 / directory 0700, also when rewritten; `local:test` settings isolated from the developer's, overlap refused, preflight refusals; listener ownership from a synthetic `/proc` (own pid, descendant, IPv6, foreign pid, not listening, no `/proc`) | L5 L3, L6, Copilot 4175802603 / 4175802639 |
 | X7 | scratch `isolation-e2e.sh` | a developer stack runs while `local:test` passes on its own project (readiness `pid-verified`); the developer stack and its env file are unchanged; a foreign server on the test app port ⇒ `local:test` refuses before creating anything | L6, Copilot 4175802603 / 4175802639 |
 | X8 | scratch `sideeffects.sh` | lazy-load side effects on an up-to-date DB with the manifest missing, eager vs lazy builds | L1 |
-| X9 | scratch `mutate2.sh`, `mutate3.sh` | mutation checks for every fix of this batch (EVIDENCE §11) | all |
+| X9 | scratch `mutate2.sh`, `mutate3.sh` | mutation checks for every fix of this batch (EVIDENCE §10) | all |
+
+## E. Challenger delta review of 323984e..85e6185 (red: 2ed1748)
+
+| ID | File | What it proves | Source |
+|---|---|---|---|
+| N3 | `readerLogin.test.ts` | a missing reader row, or a NULL `rolcanlogin`, reader or worker field, refuses (strict comparisons), never crashes or serves | N3 |
+| N3-db | `publishedCosts.db.test.ts` D6 | a login dropped while its session is pooled is never served (42704 ⇒ 500, no data) | N3 |
+| R6 | `publishedCostsRoute.test.ts` | `Cache-Control: no-store` on 401, 429, 503 weak, 405, 400, 503 not_configured, 503 unsafe_db_login and 500; on 200 in D1 | code note |
+| TS | `testSeam.test.ts` | `readPublishedCosts` takes exactly three parameters (no hooks); the seam throws outside vitest; no production file names it. D8 runs through the seam | code note |
+| L13 | `scripts/local/local.test.mjs` | `waitForOwnServer`: owned true ⇒ `pid-verified`; **false ⇒ refuse** (L6e); null ⇒ `port-preflight-only`; pid and port passed; an exited child fails fast; polls through connection errors; times out | L6e |
+| L14 | 〃 | an existing 0755 state directory is tightened to 0700 | L6f |
+| L15 | 〃 | `portInUse` against a real listener; `startIfPortFree` never spawns on a busy port; `local.mjs` spawns `next start` only through it | port re-check |
+| X10 | scratch `mutate4.sh` | 11 mutations, incl. D8 re-run through the seam (EVIDENCE §11) | all |

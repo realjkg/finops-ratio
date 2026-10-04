@@ -9,7 +9,9 @@ Slice 1 merged). The slice has three concerns:
    view as a `ratio_reader` member;
 3. a **deployment decision brief**. It first recorded the decisions as open.
    The owner then delegated D-01..D-10 to the orchestrator, and the brief now
-   records them as decided (§8). Provisioning and spending remain owner actions.
+   records them as decided (§8). The **production go-live sign-off is not
+   delegated**: it stays a non-delegable owner gate, as do hosting spend, the
+   GitHub App install and (optionally) connecting real billing data.
 
 Boundary (BOUNDARY v2): local and ephemeral only. No production
 infrastructure is provisioned. Slice 1's worker semantics do not change.
@@ -108,22 +110,43 @@ before it reads anything. The check reuses Slice 1's logic:
     (`pg_has_role(current_user, 'ratio_reader', 'USAGE')`), because the API
     never runs `SET ROLE`;
   - the login must not be able to reach `ratio_worker` over **any** edge
-    (closure query). A reader that can write is not a reader.
+    (closure query). A reader that can write is not a reader;
+  - the login's `rolcanlogin` must still be true. `ALTER ROLE … NOLOGIN` does
+    not end pooled sessions, so this rule makes NOLOGIN an immediate kill
+    switch (§8).
+  - The reader rules fail closed: a missing row or a NULL field counts as
+    unsafe.
 
-Any problem ⇒ the transaction is rolled back, the route answers 503
-`unsafe_db_login` with a fixed message, and the reasons go only to the server
-log, redacted.
+Any problem ⇒ the transaction is rolled back and the route answers 503
+`unsafe_db_login` with a fixed message and a `requestId` (body and
+`X-Request-Id`). The operator log gets **one** `unsafe_db_login` event with
+status 503, the same `requestId` and fixed reason **codes** only (§8). The
+problem texts can name roles, so they are never logged or returned.
 
 Why per request and not once at start-up: role attributes and memberships can
 change while a process runs, and a superuser flag takes effect in sessions
-that are already open. The check is one catalog query, and it costs about a
-millisecond against the read.
+that are already open.
+
+What runs per request inside the read transaction:
+1. `BEGIN` and `set_config` (Slice 0's `withTenantTransaction`);
+2. `SET TRANSACTION READ ONLY`;
+3. the isolation / read-only assertion;
+4. two catalog queries for the login check (Slice 1's `inspectRole`, then the
+   reader query);
+5. the page;
+6. the totals (first page only);
+7. `COMMIT`.
+
+The catalog queries cost about a millisecond against the read.
 
 Pool session settings (startup `options`):
 - `search_path=pg_catalog,pg_temp`. This is Slice 0's deployment note option 2,
   so the owner's `CREATE` on `public` cannot shadow anything. Every name in the
   API's SQL is schema-qualified.
 - `default_transaction_read_only=on`.
+- `default_transaction_isolation=repeatable read`: page 1's rows and its totals
+  share one snapshot (§8). The read asserts it in-transaction and refuses
+  (500) on a pool without it.
 - `statement_timeout=10000`, `lock_timeout=5000` and
   `idle_in_transaction_session_timeout=30000`.
 - `timezone=UTC`.
@@ -200,8 +223,11 @@ Response (200):
 | 405 | not GET (gateway) |
 | 503 `not_configured` | `RATIO_API_TENANT_ID` or `RATIO_READER_DATABASE_URL` missing or invalid |
 | 400 `invalid_request` | validation |
-| 503 `unsafe_db_login` | reader-login check failed |
+| 503 `unsafe_db_login` + `requestId` (body and `X-Request-Id`) | reader-login check failed; logged as its own event with reason codes |
 | 500 `internal_error` + `requestId` | anything else (gateway; message logged redacted, never returned) |
+
+Every response of the route, whatever layer writes it, carries
+`Cache-Control: no-store`.
 
 ## 3. Local stack
 
@@ -452,5 +478,41 @@ NOLOGIN gets 503 even on a pooled connection. Brief §6 says exactly that.
 several value shapes, the reader URL too.
 
 **Decisions** (owner delegation to the orchestrator, 2026-10-04): the brief
-now records D-01..D-10 as decided (Decision log at its top). Provisioning,
-spending and account access stay owner actions.
+now records D-01..D-10 as decided (Decision log at its top). The owner keeps,
+in order:
+1. the non-delegable production go-live sign-off;
+2. hosting spend;
+3. the GitHub App install;
+4. optionally, connecting real billing data.
+
+## 9. Challenger delta review of 323984e..85e6185 (local, not pushed)
+
+- **D-01 tightened (Medium).** Unrestricted only with SSE-KMS using a
+  customer-managed key (not `aws/s3`) whose key policy is the access control,
+  or client-side encryption by the source. SSE-S3 (`AES256`, S3's default since
+  January 2023) and `aws/s3` SSE-KMS are transparent to anyone with
+  `s3:GetObject` and stay restricted. Enforcement: issue #60 (brief
+  Appendix A).
+- **D-02 facts.** The data is in `FOCUS-1.0/focus_sample.csv` and
+  `FOCUS-1.0/focus_sample_10000.csv`, and covers AWS, Microsoft and Oracle only
+  (no Google in these files). The "anonymized real-world" claim is cited from
+  `FOCUS-1.0/README.md` at adbdd17.
+- **Production go-live is a non-delegable owner gate,** restored in the
+  brief's banner, §7 and §8.
+- **Code notes:**
+  - `Cache-Control: no-store` is set first on every response of the route,
+    covering the gateway's errors too.
+  - The publish-injection hook is no longer a parameter of the public
+    `readPublishedCosts`. It is a module-level seam
+    (`setAfterPageHookForTests`), refused outside vitest, and a test fails if
+    any production file names it.
+  - Reader-login fields fail closed on a missing row or NULL (N3). A dropped
+    login is not served either: Postgres errors 42704 on its session ⇒ 500.
+- **Local:** `portInUse`, `startIfPortFree` (the app port is re-checked right
+  before `next start` is spawned, which matters where there is no `/proc`) and
+  `waitForOwnServer` now live in `lib.mjs` and are unit-tested, including
+  `owned === false ⇒ refuse` (L6e) and tightening an existing directory to 0700
+  (L6f).
+- **§2.2/§2.4 brought in line** with the code: the NOLOGIN rule, codes-only
+  logging, `default_transaction_isolation`, the per-request query list, the
+  503's `requestId`, and `no-store`.
