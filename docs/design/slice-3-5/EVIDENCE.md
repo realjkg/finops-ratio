@@ -16,7 +16,7 @@ ordinary commits and plain pushes (never a force-push).
 | 4 | `faeabb4`, `4492d2f` | The challenger's re-review of 461fbc2..9a17924 (2 Medium, 5 Low), all answered (§3a). |
 | 5 | `fc7ee66`, `f5676d9` | The challenger's review of 9a17924..4492d2f (1 High, 2 Medium, 3 Low), all answered (§3b); the orchestrator's decisions D-22 (calendar component, option a) and D-23 (≤ 0.15/day design margin) recorded. |
 | 6 | `66a1fa2`, `472dbe3` | The challenger's review of 4492d2f..f5676d9 (1 High, 2 Medium, 4 Low), all answered (§3c): intermittent series on non-overlapping weekly sums or `info` only (D-24, proposed), calendar factors on raw `y` with a median estimator and a calendar-aware Hampel, estimation noise in every budget term, D8, h = 9.0, `budget4.py` (B.5.9). |
-| 7 | this revision | Revision 6 approved by the challenger (0 High, 0 Medium). D-24 decided by the orchestrator (option a): hurdle statistic with a clustering gate for intermittent series above 50 % zeros; the challenger's Low items L1–L4 answered (§3d); `budget5.py` (B.5.10). |
+| 7 | `380e9a0` and the §5 refresh | Revision 6 approved by the challenger (0 High, 0 Medium). D-24 decided by the orchestrator (option a): hurdle statistic with a clustering gate for intermittent series above 50 % zeros; the challenger's Low items L1–L4 answered (§3d); `budget5.py` (B.5.10). |
 
 ## 2. Governance wording: reverted
 
@@ -206,8 +206,8 @@ Appendix B (B.4, B.5.6–B.5.10).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at `66a1fa2` (revision 6; the same reasons as at `fc7ee66`, revision 5,
-and `faeabb4`, revision 4):
+at `380e9a0` (revision 7; the same reasons as at `66a1fa2`, revision 6,
+`fc7ee66`, revision 5, and `faeabb4`, revision 4):
 
 - `"risk": "restricted"`, classes `retention` and `secrets`;
 - `secrets.password-assignment` on `APPENDIX_B_SIZING.md` (the
