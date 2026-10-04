@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import process from 'node:process';
 import { clearTimeout, setTimeout } from 'node:timers';
 import { URL } from 'node:url';
 
@@ -506,31 +507,84 @@ export async function runLocalTest({ project, body, down, stopOptions, downTimeo
   return finalizeLocalTestSummary({ project, steps, error, cleanup });
 }
 
+/** Process groups of runProcess children still running (pgid = child pid). */
+const LIVE_GROUPS = new Set();
+
+function killGroup(child, signal) {
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // already gone
+    }
+  }
+}
+
 /**
- * Runs a command under a REQUIRED deadline: still running after timeoutMs it
- * is SIGKILLed and the promise rejects ("timed out"), so no caller can hang.
+ * SIGKILLs every process group runProcess still has running. local.mjs calls
+ * it on SIGINT/SIGTERM: the groups are detached, so a Ctrl-C to local.mjs
+ * would otherwise not reach them.
  */
-export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = false, timeoutMs, spawnFn = spawn } = {}) {
+export function killLiveProcessGroups() {
+  for (const pid of LIVE_GROUPS) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
+  LIVE_GROUPS.clear();
+}
+
+/**
+ * Runs a command under a REQUIRED, HARD deadline, whatever the stdio mode.
+ * - The command runs in its own process group (detached), so a timeout
+ *   SIGKILLs it AND its descendants.
+ * - At timeoutMs the promise rejects ("timed out") at once: it does not wait
+ *   for 'close', which never fires while a grandchild still holds a stdio pipe.
+ * - When the command exits but a descendant keeps the pipe open, the result
+ *   is settled exitGraceMs after 'exit' (the group is then killed and the
+ *   pipe destroyed), still within the deadline.
+ */
+export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = false, timeoutMs, exitGraceMs = 2_000, spawnFn = spawn } = {}) {
   return new Promise((resolve, reject) => {
     requireDeadline(timeoutMs, `runProcess(${cmd} ${args[0] ?? ''}) timeoutMs`);
-    const child = spawnFn(cmd, args, { cwd, env, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
+    const label = `${cmd} ${args[0] ?? ''}`;
+    const child = spawnFn(cmd, args, { cwd, env, detached: true, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
+    if (child.pid) LIVE_GROUPS.add(child.pid);
     let out = '';
-    let timedOut = false;
-    if (capture) child.stdout.on('data', (d) => (out += d));
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, timeoutMs);
-    child.on('error', (e) => {
-      clearTimeout(timer);
-      reject(e);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (timedOut) reject(new Error(`${cmd} ${args[0] ?? ''} timed out after ${timeoutMs} ms (killed)`));
-      else if (code !== 0 && !allowFail) reject(new Error(`${cmd} ${args[0] ?? ''} exited ${code}`));
+    let settled = false;
+    let graceTimer = null;
+    const finish = (settle) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (graceTimer) clearTimeout(graceTimer);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      LIVE_GROUPS.delete(child.pid);
+      settle();
+    };
+    const byExit = (code, signal) => () => {
+      if (code !== 0 && !allowFail) reject(new Error(`${label} exited ${code ?? `by ${signal}`}`));
       else resolve({ code, out });
+    };
+    const deadline = setTimeout(() => {
+      killGroup(child, 'SIGKILL');
+      finish(() => reject(new Error(`${label} timed out after ${timeoutMs} ms (killed)`)));
+    }, timeoutMs);
+    if (capture) child.stdout.on('data', (d) => (out += d));
+    child.on('error', (e) => finish(() => reject(e)));
+    child.on('exit', (code, signal) => {
+      graceTimer = setTimeout(() => {
+        // A descendant still holds the pipe: end it and settle on the exit status.
+        killGroup(child, 'SIGKILL');
+        finish(byExit(code, signal));
+      }, exitGraceMs);
     });
+    child.on('close', (code, signal) => finish(byExit(code, signal)));
   });
 }
 

@@ -37,6 +37,7 @@ import {
   connectionUrl,
   fetchJson,
   generateLocalSecrets,
+  killLiveProcessGroups,
   localSettings,
   localStatePaths,
   localTestSettings,
@@ -430,6 +431,16 @@ async function main(argv) {
     return 2;
   }
   return (await COMMANDS[cmd](localSettings(process.env), args)) ?? 0;
+}
+
+// runProcess runs each command in its own (detached) process group, so a
+// Ctrl-C or SIGTERM to this script would not reach them: kill them first.
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.once(sig, () => {
+    killLiveProcessGroups();
+    log('interrupted: child process groups killed', { signal: sig });
+    process.exit(sig === 'SIGINT' ? 130 : 143);
+  });
 }
 
 main(process.argv.slice(2)).then(
