@@ -1671,3 +1671,19 @@ describe('L25 every membership edge touching a managed role is judged, either si
     expect(bootstrapPlan(LOCAL_NAMES).join('\n')).not.toMatch(/\bREVOKE\b/);
   });
 });
+
+describe('L17 superuser catalog queries are tenant-scoped (PR #67 review)', () => {
+  // Batch ids are unique only within a tenant (PK (tenant_id, id)), and the catalog
+  // snapshot runs as the local superuser, which bypasses row-level security. Every
+  // correlation on a batch id must therefore also bind the tenant.
+  it('every `batch_id = <alias>.id` correlation also binds `tenant_id = <alias>.tenant_id`', () => {
+    for (const file of ['scripts/local/local.mjs', 'scripts/local/acceptance.mjs']) {
+      const src = read(file);
+      const joins = [...src.matchAll(/(\w+)\.batch_id\s*=\s*(\w+)\.id\b/g)];
+      for (const [, child, parent] of joins) {
+        expect(src, `${file}: ${child}.batch_id = ${parent}.id`).toMatch(new RegExp(`\\b${child}\\.tenant_id\\s*=\\s*${parent}\\.tenant_id\\b`));
+      }
+    }
+    expect([...read('scripts/local/local.mjs').matchAll(/\.batch_id\s*=\s*\w+\.id\b/g)].length).toBeGreaterThan(0);
+  });
+});
