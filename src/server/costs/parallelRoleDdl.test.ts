@@ -119,6 +119,20 @@ export const ALLOWLIST: ReadonlyArray<{ file: string; sha256: string; reason: st
     reason:
       "Slice 0. z.sql comes from this file's zombieSql callbacks: a DELETE FROM ratio.cost_facts and an UPDATE of ratio.ingest_artifacts, both database-local DML. The zombie client's BEGIN is issued in a loop (not provable statically), and the test rolls it back.",
   },
+  {
+    file: 'src/ingest/worker/commitTag.db.test.ts',
+    // const r = await (target.query as …).apply(target, args); — swallowingPool's Proxy over a worker pool client
+    sha256: 'ac2dcea8a0c1013076cc3b723d762a9b2366a192e86ba8c1a816809a52f37f43',
+    reason:
+      "Slice 1 (approved by the coordinator; Slice 1 test files may not change). The proxied calls forward only the worker's own SQL. The worker runs as a ratio_worker member, which under the Slice 0 privilege model has no CREATEROLE, owns no role and holds no ADMIN option, so it cannot GRANT or REVOKE role membership or ALTER ROLE, even if that SQL tried. Runtime backstop: such a statement would fail with a permission error (42501), not succeed silently. The only added statement is SELECT 1 / 0 on the same client.",
+  },
+  {
+    file: 'src/ingest/worker/reviewFindings.db.test.ts',
+    // return (target.query as …).apply(target, args); — a Proxy over a worker pool client
+    sha256: '583be933c615bcae4dbc20bb359875133647de9e8ea49a9f45e3e056c594312c',
+    reason:
+      "Slice 1 (approved by the coordinator; Slice 1 test files may not change). The proxied calls forward only the worker's own SQL. The worker runs as a ratio_worker member, which under the Slice 0 privilege model has no CREATEROLE, owns no role and holds no ADMIN option, so it cannot GRANT or REVOKE role membership or ALTER ROLE, even if that SQL tried. Runtime backstop: such a statement would fail with a permission error (42501), not succeed silently. The only added statement is a database-local lease UPDATE (ratio.sync_runs) through admin.query.",
+  },
 ];
 
 function walk(dir: string, acc: string[] = []): string[] {
@@ -672,7 +686,7 @@ describe('cluster-wide role changes only in serial DB test files (static guard)'
   }, 60_000);
 
   it('the allowlist is exact: an entry that matches no finding is stale (drift), and a finding without an entry is reported', () => {
-    expect(ALLOWLIST.length).toBe(3);
+    expect(ALLOWLIST.length).toBe(5);
     const ghost = { file: 'src/ingest/db/commit.db.test.ts', sha256: '0'.repeat(64), reason: 'drifted' };
     const withGhost = repositoryScan([...ALLOWLIST, ghost]);
     expect(withGhost.stale).toEqual([ghost]);
@@ -876,10 +890,10 @@ describe('guard hardening (challenger Low on 480dd87)', () => {
     ).not.toEqual([]);
   });
 
-  it('the Slice 0/1 files still pass with the same 3-entry allowlist', () => {
+  it('the Slice 0/1 files pass with the reviewed 5-entry allowlist (3 Slice 0, 2 Slice 1)', () => {
     const scan = repositoryScan();
     expect(scan.unlisted).toEqual([]);
     expect(scan.stale).toEqual([]);
-    expect(ALLOWLIST).toHaveLength(3);
+    expect(ALLOWLIST).toHaveLength(5);
   }, 60_000);
 });
