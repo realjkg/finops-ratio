@@ -2114,50 +2114,68 @@ for runs in (['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'enriched'],
     print("%d runs: peak %.2f GB, retained at end %.2f GB" % (len(runs), peak, retained))
 ```
 
-### B.5.11 Revision 8: false positives of D4's reactivation rule
+### B.5.11 Revisions 8 and 9: false positives of D4's reactivation rule, and the label pass rate
 
-Computed by `reactivation.py` (below; standard library, exact
-probabilities, no sampling, < 1 s; two runs give identical output). It
-rebuilds the leaf list and the intermittent flags of `budget5.py` and
-computes, for each of the 1,884 intermittent leaves (all sizes; the other
-leaves are active every day and never dormant), the probability per day of
-≤ 2 active days in the previous 56 followed by an active day whose value
-reaches the minimum impact (the dormant series' expected value is taken as
-0, which overstates the excess). Days follow a two-state chain with lag-1
-autocorrelation ρ; ρ = 0 is the generator. It counts qualifying days, an
-upper bound on episodes. The history condition (active on ≥ 50 % of the
-n ≥ 14 days before the dormant window) is evaluated for independent days
-exactly, and for ρ > 0 as an approximation that treats the history as
-independent of the window.
+Computed by `reactivation.py` (below; standard library, < 10 s; two runs
+give identical output). It rebuilds the leaf list and the intermittent
+flags of `budget5.py`. For each of the 1,884 intermittent leaves (all
+sizes; the other leaves are active every day and are never dormant outside
+a label), it computes the probability per day of ≤ 2 active days in the
+previous 56, followed by an active day whose value reaches the minimum
+impact. The dormant series' expected value is taken as 0, which overstates
+the excess. These window probabilities are exact for a two-state chain
+with lag-1 autocorrelation ρ (ρ = 0 is the generator); they count
+qualifying days, an upper bound on episodes.
 
-| Case | Candidates per day at ≥ `warning` |
-|---|---|
-| Rule without the history condition, ρ = 0 (generator) | 0.00169 (0.00033 at `critical`) |
-| … ρ = 0.3 | 0.0268 |
-| … ρ = 0.6 | 0.320 |
-| **With the history condition, ρ = 0, n = 14 (worst case)** | **0.000032** |
-| … n = 28 / 56 | 0.000002 / < 10⁻⁶ |
-| … ρ = 0.3 / 0.6 (approximation, n = 14) | 0.00072 / 0.0160 |
+Revision 9 rule (DESIGN §4.2, D4 (b)): `warning` if **(i)** the series
+was active on ≥ 50 % of the 28 days ending at its last active day before
+the dormant stretch (≥ 14 such days), or **(ii)** the restart day is
+≥ 10 × the min impact and ≥ 3 × the mean of its active-day values in the 56
+days ending there (≥ 3 active days).
+- (i) is exact for independent days: the history is independent of the
+  stretch apart from its last day, which is active.
+- (ii) samples the prior active-day mean, 2,000 fixed-seed draws per zero
+  share.
+- For ρ > 0 both treat the history as independent of the window, an
+  approximation.
 
-P(≤ 2 active days in 56, then an active day), independent days: 1.1 × 10⁻¹⁴
-at zero share 0.5, 1.1 × 10⁻¹⁰ at 0.6, 2.0 × 10⁻⁷ at 0.7, 8.3 × 10⁻⁵ at
-0.8.
+| Case (candidates per day at ≥ `warning`) | ρ = 0 (generator) | ρ = 0.3 | ρ = 0.6 |
+|---|---|---|---|
+| No history condition (revision 8's first measurement) | 0.00169 | 0.0268 | 0.320 |
+| Size only, ≥ 10 × min, no relative test (bound) | 0.00033 | 0.00481 | 0.0503 |
+| **(i), 28 days of history** | **0.000005** | 0.000151 | 0.00635 |
+| **(ii), size override** | **0.000009** | 0.000141 | 0.00155 |
+| **(i) or (ii), union bound** | **0.000014** | **0.00029** | **0.0079** |
+| (i), worst case of 14 days of history | 0.000075 | 0.00155 | 0.0298 |
 
-The rule adds 3 × 10⁻⁵ per day to `budget5.py`'s totals (0.101 and
-0.131); no other figure changes. **Peak disk** is unchanged at 5.15 GB
-(5.19 GB with natural-3): the `dormant_reactivation` labels exist only on
-the enriched seed, and a dormant gap removes rows rather than adding them.
+**Labels.** 20,000 `dormant_reactivation` labels were simulated per the
+specification: non-intermittent individual series drawn by spend, active
+every day up to a last active day a uniform on 16 … r − 57, restart day r
+uniform on 73–115, so the gap is free (≥ 56 days), at × U(0.5, 3) the
+earlier level, meaningful only. The rule fires on every label, and **every
+label reaches `warning` under (i): pass rate 1.000**. For comparison, with
+the labels placed on any individual series, intermittent ones with their
+own pattern: 0.970 under (i), 0.970 under (i) or (ii).
+
+The rule adds < 0.0001 per day to `budget5.py`'s totals (0.101 and 0.131);
+no other figure changes. **Peak disk** is unchanged at 5.15 GB (5.19 GB
+with natural-3): the labels exist only on the enriched seed, and a dormant
+gap removes rows rather than adding them.
 
 SHA-256 of `reactivation.py` as run:
-`7c40727a9a64f16b944ecf3c7261fd1f2aa4b2ed70b76a77ecfd960c4c8441e1`.
+`256a37f5a489e9bea17cb8e4e2b9ebf686f787eed8401d8f6b9d0522ece8bb4b`.
 
 `reactivation.py`:
 
 ```python
-import random, math
-# fleet15k, revision 8: false positives of D4's reactivation rule (a series with < 3 active days in the prior
-# 56-day window that has a day with M >= the min impact; `warning` only if the series was active on >= 50 % of
-# its >= 14 days before that window, else `info`). Exact two-state-chain probabilities, no sampling.
+import random, math, bisect
+# fleet15k, revision 9: false positives of D4's reactivation rule and the pass rate of `dormant_reactivation`
+# labels. Rule: a series with < 3 active days in the prior 56-day window has a day with M >= the min impact.
+# Dormant stretch = the longest run of days ending at D - 1 with at most 2 active days; t0 = its first day, so
+# day t0 - 1 is the last active day before it. `warning` if (a) the series was active on >= 50 % of the 28 days
+# ending at t0 - 1 (>= 14 such days required), or (b) the restart day is >= 10 x the min impact and >= 3 x the
+# mean of the active-day values in the 56 days ending at t0 - 1 (>= 3 active days); else `info`.
+# Window probabilities are exact (two-state chain); the size override and the label check use fixed-seed sampling.
 # Account model, leaf list and intermittent flags as budget5.py; the calendar-cohort stream is drawn so that
 # the intermittent stream stays aligned. Standard library only.
 # Account model, seed and leaf list are those of budget.py / budget2.py / budget3.py (37,052 leaves).
@@ -2221,18 +2239,77 @@ for rho in (0.0, 0.3, 0.6):
     fp = sum(p_dormant_then_active(inter[i][1], rho) * p_value_ge(leaves[i][0], inter[i][1]) for i in inter_idx)
     crit = sum(p_dormant_then_active(inter[i][1], rho) * p_value_ge(leaves[i][0], inter[i][1], 10 * MIN) for i in inter_idx)
     print("reactivation rule, expected false candidates per day at >= warning, rho %.1f: %.5f (of which critical, >= 10 x min: %.5f)" % (rho, fp, crit))
-# history condition: active on >= 50 % of the n >= 14 days before the dormant window (else `info` only).
-# For independent days the history is independent of the window; n = 14 is the worst case (shortest history).
-def p_hist_regular(p, n=14):
-    pi = 1 - p
-    return sum(math.comb(n, k) * pi ** k * (1 - pi) ** (n - k) for k in range((n + 1) // 2, n + 1))
-for n in (14, 28, 56):
-    w = sum(p_dormant_then_active(inter[i][1], 0.0) * p_value_ge(leaves[i][0], inter[i][1]) * p_hist_regular(inter[i][1], n)
-            for i in inter_idx)
-    print("with the history condition (history %d days), independent days: `warning` candidates per day %.6f" % (n, w))
-for rho in (0.3, 0.6):
-    w = sum(p_dormant_then_active(inter[i][1], rho) * p_value_ge(leaves[i][0], inter[i][1]) * p_hist_regular(inter[i][1], 14)
-            for i in inter_idx)
-    print("   rho %.1f, history 14 days treated as independent of the window (approximation): %.5f" % (rho, w))
-# non-intermittent leaves are active every day, so they never meet the dormancy condition
+# (a) history = the n days ending at the last active day before the dormant stretch (that day is active).
+# For independent days the history is independent of the stretch apart from its last day being active.
+def p_hist_regular(p, n=28):
+    pi = 1 - p; need = (n + 1) // 2 - 1                  # active days needed among the other n - 1 days
+    return sum(math.comb(n - 1, k) * pi ** k * (1 - pi) ** (n - 1 - k) for k in range(max(0, need), n))
+# (b) size override: restart value X * mu_a against 3 x the sample mean of the active-day values in 56 days
+# (mu_a = true active-day mean = L / (1 - p); X ~ lognormal, mean 1, log sd 0.5). Ybar draws per zero share.
+rs = random.Random(53)
+def ybar_draws(p, k=2000):
+    out = []
+    while len(out) < k:
+        n = sum(1 for _ in range(56) if rs.random() >= p)
+        if n >= 3:
+            out.append(sum(math.exp(rs.gauss(0, 0.5) - 0.125) for _ in range(n)) / n)
+    return out
+YB = {round(q, 2): ybar_draws(q) for q in [0.30 + 0.05 * j for j in range(11)]}
+def p_override(L, p):
+    mu = L / (1 - p); c = 10 * MIN / mu; ys = YB[round(round(p / 0.05) * 0.05, 2)]
+    return sum(Q((math.log(max(c, 3 * y)) + 0.125) / 0.5) for y in ys) / len(ys)
+def p_size_only(L, p):
+    return p_value_ge(L, p, 10 * MIN)
+PO = {i: p_override(leaves[i][0], inter[i][1]) for i in inter_idx}
+print()
+for n in (14, 28):
+    for rho in (0.0, 0.3, 0.6):
+        dm = [p_dormant_then_active(inter[i][1], rho) for i in inter_idx]
+        a_ = sum(d * p_value_ge(leaves[i][0], inter[i][1]) * p_hist_regular(inter[i][1], n) for d, i in zip(dm, inter_idx))
+        b_ = sum(d * PO[i] for d, i in zip(dm, inter_idx)) if n == 28 else float('nan')
+        so = sum(d * p_size_only(leaves[i][0], inter[i][1]) for d, i in zip(dm, inter_idx))
+        print("history %d days, rho %.1f%s: (a) history route %.6f | (b) size override %.6f (size-only bound, no relative test, %.5f) | union bound %.6f per day"
+              % (n, rho, "" if rho == 0 else " (history treated as independent of the window, approximation)", a_, b_, so, a_ + (b_ if b_ == b_ else 0.0)))
+# ---- `dormant_reactivation` labels: pass rate of the rule as specified (Appendix C.2) ----
+def label_pass(leaf, rl):
+    L, s_, _a, _ind = leaves[leaf]
+    p = inter[leaf][1] if inter[leaf][0] else 0.0
+    r = rl.randint(73, 115); a = rl.randint(16, r - 57)       # last active day a, gap a+1 .. r-1 (>= 56 days)
+    act = [False] + [rl.random() >= p for _ in range(a)]       # days 1..a
+    act[a] = True
+    val = [0.0] + [(L / (1 - p)) * math.exp(rl.gauss(0, 0.5 if p else s_) - (0.125 if p else s_ * s_ / 2)) if act[d] else 0.0 for d in range(1, a + 1)]
+    while True:
+        m = rl.uniform(0.5, 3.0)
+        if L * m >= 2 * MIN:
+            break
+    x = L * m * math.exp(rl.gauss(0, s_) - s_ * s_ / 2)          # restart day
+    cnt = 0; t0 = r                                                # dormant stretch: back from r - 1
+    for d in range(r - 1, 0, -1):
+        if d <= a and act[d]:
+            if cnt == 2:
+                break
+            cnt += 1
+        t0 = d
+    last = t0 - 1
+    hist = [act[d] for d in range(max(1, last - 27), last + 1)]
+    ok_a = len(hist) >= 14 and sum(hist) >= 0.5 * len(hist)
+    av = [val[d] for d in range(max(1, last - 55), last + 1) if act[d]]
+    ok_b = len(av) >= 3 and x >= 10 * MIN and x >= 3 * sum(av) / len(av)
+    return ok_a, ok_a or ok_b, x >= MIN
+rl = random.Random(61)
+ind = [i for i, x in enumerate(leaves) if x[3]]
+# a meaningful restart (>= 2 x min impact at x U(0.5, 3) the level) needs L >= 2 x MIN / 3
+ind = [i for i in ind if 3 * leaves[i][0] >= 2 * MIN]
+for label, pool in (("as specified: non-intermittent individual series", [i for i in ind if not inter[i][0]]),
+                    ("for comparison: any individual series, intermittent ones with their own pattern", ind)):
+    cum = []; c = 0.0
+    for i in pool:
+        c += leaves[i][0]; cum.append(c)
+    ra = rab = fire = 0; n = 20000
+    for _ in range(n):
+        i = pool[bisect.bisect_left(cum, rl.random() * c)]
+        a_, ab_, f_ = label_pass(i, rl)
+        ra += a_; rab += ab_; fire += f_
+    print("labels %s: rule fires %.4f; reaches `warning` via (a) %.4f, via (a) or (b) %.4f (n = %d)" % (label, fire / n, ra / n, rab / n, n))
+# non-intermittent leaves are active every day, so they never meet the dormancy condition outside a label
 ```

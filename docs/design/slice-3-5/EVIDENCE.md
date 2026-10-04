@@ -17,7 +17,8 @@ ordinary commits and plain pushes (never a force-push).
 | 5 | `fc7ee66`, `f5676d9` | The challenger's review of 9a17924..4492d2f (1 High, 2 Medium, 3 Low), all answered (§3b); the orchestrator's decisions D-22 (calendar component, option a) and D-23 (≤ 0.15/day design margin) recorded. |
 | 6 | `66a1fa2`, `472dbe3` | The challenger's review of 4492d2f..f5676d9 (1 High, 2 Medium, 4 Low), all answered (§3c): intermittent series on non-overlapping weekly sums or `info` only (D-24, proposed), calendar factors on raw `y` with a median estimator and a calendar-aware Hampel, estimation noise in every budget term, D8, h = 9.0, `budget4.py` (B.5.9). |
 | 7 | `380e9a0`, `801019a` | Revision 6 approved by the challenger (0 High, 0 Medium). D-24 decided by the orchestrator (option a): hurdle statistic with a clustering gate for intermittent series above 50 % zeros; the challenger's Low items L1–L4 answered (§3d); `budget5.py` (B.5.10). |
-| 8 | `04e6cf8` and the §5 refresh | Revision 7 approved by the challenger. The remaining Low, dormant series that reactivate, folded in by extending D4 (§3e); `reactivation.py` (B.5.11). |
+| 8 | `04e6cf8`, `dbbd552` | Revision 7 approved by the challenger. The remaining Low, dormant series that reactivate, folded in by extending D4 (§3e); `reactivation.py` (B.5.11). |
+| 9 | this revision | The challenger's REQUEST CHANGES on revision 8 (1 Medium): the reactivation history condition looked at the wrong days. History moved to the pre-dormancy period and a size override added, both decided by the orchestrator (§3f); `reactivation.py` updated (B.5.11). |
 
 ## 2. Governance wording: reverted
 
@@ -177,6 +178,8 @@ assumption, and calendar or occurrence misspecification, which
 
 ## 3e. Revision 8: dormant series that reactivate
 
+The history condition below was corrected in revision 9 (§3f).
+
 The challenger approved revision 7 (472dbe3..801019a). The one remaining
 Low, folded in at the orchestrator's request: a series with fewer than 3
 active days in its 56-day window is not scored, and D4 fired only on a
@@ -193,6 +196,27 @@ time `q̂` and `m̂` were inflated by the new regime.
 | D-24 row | Names the rule: a series is scored only with ≥ 3 active days in the 56-day window; fewer → dormant → D4's reactivation rule | DESIGN §8 D-24 |
 | Disk | Unchanged: 5.15 GB peak (5.19 GB with natural-3); the labels are on the enriched seed only and a dormant gap removes rows | Appendix B.5.11 |
 | Re-run | All 10 embedded SHA-256s match (9 unchanged, `reactivation.py` new); every Python script re-run with unchanged outputs; `reactivation.py` gives identical output on two runs | §4 |
+
+## 3f. Revision 9: response to the challenger's review of 801019a..dbbd552
+
+The challenger confirmed that all 10 hashes, every `reactivation.py`
+figure, the AT-2 counting and the dormant window reproduce, and raised one
+Medium. **The history condition looked at the wrong days:** the ≥ 14 days
+before the 56-day window are dormant zeros whenever the gap is longer than
+56 days. That had three effects:
+- only ≈ 37 % of `dormant_reactivation` labels would pass;
+- a regular resource dormant for more than about 63–70 days got `info`;
+- a sparse but expensive resource got `info` even at critical size.
+
+The orchestrator decided both (a) and (b).
+
+| Item | Change | Where |
+|---|---|---|
+| **(a)** pre-dormancy history | The *dormant stretch* is the longest run of days ending at D − 1 with ≤ 2 active days. Condition (i): active on ≥ 50 % of the **28 days ending at the last active day before that stretch** (≥ 14 such days). A gap of any length is judged on the days before it. The label generator leaves the gap free (last active day uniform on 16 … r − 57, restart on 73–115, gap ≥ 56). Labels are placed on non-intermittent individual series. **Verified in `reactivation.py`: 20,000 labels per the spec, pass rate 1.000** (0.970 if placed on any individual series, intermittent ones included) | DESIGN §2.5, §4.2 (D4 row and paragraph), §4.3, §7 (3-1b, 5-2a); Appendix B.5.11, C.2, D.2 |
+| **(b)** size override | Condition (ii): `warning`/`critical` regardless of history when the restart day is ≥ 10 × the min impact **and** ≥ 3 × the series' prior active-day mean. **Window: the active-day values in the 56 days ending at the last active day, ≥ 3 of them.** Active days only, so a usually-zero series is not "3 ×" just by being active; 56 days so that a weekly batch gives ≈ 8 values rather than ≈ 4; the same window as the hurdle statistic | DESIGN §4.2; Appendix B.5.11 |
+| False-positive cost | Union of (i) and (ii), per day: **1.4 × 10⁻⁵ under the generator** (5 × 10⁻⁶ by (i), 9 × 10⁻⁶ by (ii); worst case of 14 days of history 8.4 × 10⁻⁵); **0.00029 at ρ = 0.3**; **0.0079 at ρ = 0.6**. These are approximations for ρ > 0. The size-only bound without the relative test is 0.00033 / 0.0048 / 0.050, which matches the challenger's estimates; the relative test removes ≈ 97 % of it | DESIGN §4.2; Appendix B.5.11 |
+| Totals | **0.101 / 0.131** (conservative), + < 0.0001 from the reactivation line; ≤ 0.15 | DESIGN §4.2 |
+| Re-run | All 10 embedded SHA-256s match (9 unchanged, `reactivation.py` updated); every Python script re-run, unchanged outputs except `reactivation.py`'s new lines; `reactivation.py` identical on two runs. Peak disk 5.15 GB (5.19 GB with natural-3) | §4; Appendix B.5.11 |
 
 ## 4. Measurements used by the design
 
@@ -218,7 +242,9 @@ time `q̂` and `m̂` were inflated by the new regime.
 | False-positive budget at z_T 4.5, h 9.0 (rev. 7) | **0.101/day** (0.131 with every conservative bound; 0.146 with the weekly term doubled); ±10 % jitter: P(pass) 0.993 / 0.959 | `budget5.py` (B.5.10) |
 | Hurdle routes under the generator | ≈ 114 of 115 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 | `budget5.py` (B.5.10) |
 | Peak disk, rev. 7 | 5.15 GB (5.19 GB with natural-3) | `budget5.py` (B.5.10) |
-| D4 reactivation false positives (rev. 8) | 3 × 10⁻⁵/day with the history condition (generator); without it 0.0017 (generator), 0.32 (persistence 0.6) | `reactivation.py` (B.5.11) |
+| D4 reactivation false positives (rev. 8) | 3 × 10⁻⁵/day with the history condition (generator); without it 0.0017 (generator), 0.32 (persistence 0.6) | `reactivation.py` as of revision 8 (superseded in B.5.11) |
+| D4 reactivation false positives (rev. 9) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` (B.5.11) |
+| `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series) | `reactivation.py` (B.5.11) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
 
 The measurement scripts are reproduced verbatim, with SHA-256, in
