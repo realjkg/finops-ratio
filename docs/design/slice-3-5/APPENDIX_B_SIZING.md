@@ -703,7 +703,7 @@ simulations):
 | 0.30 / day (the gate) | 0.510 | 0.511 | 0.435 |
 | 0.45 / day | 0.012 | 0.005 | 0.004 |
 
-**Garwood 95 % intervals** for a count measured over one 61-day seed: 4
+**Garwood 95 % intervals** (exact since revision 12, below) for a count measured over one 61-day seed: 4
 groups → 0.066/day [0.018, 0.168]; 7 → 0.115 [0.046, 0.236]; 9 → 0.148
 [0.067, 0.280]; 15 → 0.246 [0.138, 0.406].
 
@@ -721,8 +721,22 @@ PR 3-4):
 
 Both peaks are under the 5.5 GB target and the 6 GB ceiling.
 
-SHA-256 of `budget3.py` as run:
-`7b133ff92cd538170cb169302719fe829d8fefd7287f02192ea29b1c382d90c0`.
+SHA-256 of `budget3.py` as run (revision 12):
+`d86367fb8d248fc540c47533f24114ab1ebe35ca341268dcc99674d2a0166c8d`.
+
+**Revision 12 (Copilot r4178656790).** The Garwood interval above was
+computed with the Wilson–Hilferty approximation to the chi-square
+quantile, although it is called exact, and the tuning control relies on
+its upper bound. `budget3.py` now computes it exactly: by the identity
+`0.5 · χ²(p, 2k) = ` the Poisson mean at which the CDF reaches `p`,
+solved by bisection on the Poisson CDF (standard library, no
+approximation).
+- Every printed figure is unchanged at three decimals; the full output is
+  byte-identical.
+- The exact and approximate bounds differ by ≤ 0.0002 per day at the lower
+  end and ≤ 0.00002 at the upper end; for example, 7 groups gives
+  [0.04614, 0.23644] exactly, against [0.04597, 0.23645].
+- The revision-5 hash was `7b133ff92cd538170cb169302719fe829d8fefd7287f02192ea29b1c382d90c0`.
 
 `budget3.py`:
 
@@ -897,12 +911,28 @@ for lam in (0.11, 0.15, 0.30, 0.45):
     print("P(pass) at a true FP rate of %.2f/day: AT-1 %.3f, AT-4 %.3f, both %.3f" % ((lam,) + pass_prob(lam)))
 
 # --- exact (Garwood) 95 % interval for a count measured over 61 days ---
-def chi2_ppf(p, k):                                    # Wilson-Hilferty approximation
-    from statistics import NormalDist
-    z = NormalDist().inv_cdf(p)
-    return k * (1 - 2 / (9 * k) + z * math.sqrt(2 / (9 * k))) ** 3
+# Exact: 0.5 * chi2 quantiles with 2k and 2k + 2 degrees of freedom equal the Poisson means at which
+# P(X >= k) = 0.025 and P(X <= k) = 0.025; solved by bisection on the Poisson CDF (no approximation).
+def pois_cdf(k, lam):
+    t = math.exp(-lam); c = t
+    for j in range(1, k + 1):
+        t *= lam / j; c += t
+    return c
+def solve_lam(k, target):                              # lambda with pois_cdf(k, lambda) = target (decreasing in lambda)
+    lo, hi = 0.0, 200.0
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if pois_cdf(k, mid) > target:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+def garwood(cnt, alpha=0.05):
+    lo = 0.0 if cnt == 0 else solve_lam(cnt - 1, 1 - alpha / 2)
+    hi = solve_lam(cnt, alpha / 2)
+    return lo, hi
 for cnt in (4, 7, 9, 15):
-    lo = 0.5 * chi2_ppf(0.025, 2 * cnt) / 61; hi = 0.5 * chi2_ppf(0.975, 2 * cnt + 2) / 61
+    lo, hi = garwood(cnt); lo /= 61; hi /= 61
     print("measured %2d false groups in 61 days: %.3f/day, 95 %% interval [%.3f, %.3f]" % (cnt, cnt / 61, lo, hi))
 
 # --- alert fatigue (natural rates, >= warning): Poisson approximation ---
@@ -2401,4 +2431,82 @@ for label, pool in (("as specified: non-intermittent individual series", [i for 
         ra += a_; rab += ab_; fire += f_
     print("labels %s: rule fires %.4f; reaches `warning` via (a) %.4f, via (a) or (b) %.4f (n = %d)" % (label, fire / n, ra / n, rab / n, n))
 # non-intermittent leaves are active every day, so they never meet the dormancy condition outside a label
+```
+
+### B.5.12 Revision 12: billing rollup by charge category, rollup pointer, disk delta
+
+Computed by `rollup12.py` (below; standard library, no randomness, < 1 s).
+Revision 12 adds:
+- `cost_accounts`, one row per account;
+- re-keys `billing_daily` by `account_id` and FOCUS charge category,
+  frequency and correction flag (same row count; the integer key is not
+  larger than the sub-account text);
+- adds `billing_daily_scope`: per rollup run, scope, day and charge
+  category, with `Usage` daily and the non-usage categories at most monthly;
+- adds `rollup_pointer`, one row per tenant.
+
+The byte sizes are **assumptions** (150 B per narrow row, as for
+`billing_daily` in `budget.py`), measured in PR 3-4.
+
+| Item | Value |
+|---|---|
+| `billing_daily_scope` | 550 scopes × (122 days + 5 categories × 4 months) × 2 runs kept = 156,200 rows, **0.023 GB** |
+| `cost_accounts` | 15,000 rows, **0.002 GB** |
+| `rollup_pointer`, `billing_daily` re-key | ≈ 0 |
+| **Delta per run** | **+0.026 GB** |
+| natural-1 run | 4.961 → **4.987 GB** |
+| **Peak, 5 runs** | 5.151 → **5.177 GB** |
+| **Peak, 6 runs (natural-3)** | 5.191 → **5.217 GB** |
+
+Both peaks stay under the 5.5 GB target and the 6 GB ceiling.
+
+SHA-256 of `rollup12.py` as run:
+`ad0cf39b71282c2d5654135de5671cb4e114961ee5a04d91714eeae89e993f84`.
+
+`rollup12.py`:
+
+```python
+import math
+# fleet15k, revision 12: disk delta of the billing rollup by charge category (`billing_daily` keyed by account and
+# charge category, `cost_accounts`, `billing_daily_scope`, `rollup_pointer`) and the resulting peak disk.
+# Standard library only, no randomness. Inputs from budget5.py / budget3.py; byte sizes are ASSUMPTIONS
+# (measured in PR 3-4), at the same 150 B per narrow row used for `billing_daily` in budget.py.
+N_ACCOUNTS = 15000
+LEAVES = 37052
+SCOPES = 550             # aggregate scopes (billing account, business unit, provider, tenant), as budget.py
+DAYS = 122
+MONTHS = 4
+RUNS_KEPT = 2            # run-keyed rows: the 2 latest succeeded rollup runs (D-12)
+ROW_B = 150              # ASSUMPTION: bytes per narrow rollup row incl. primary key
+NONUSAGE_CATS = 5        # Purchase (one-time), Purchase (recurring fee), Tax, Credit, Adjustment/correction
+
+# `billing_daily_scope`: per scope and day one Usage row; non-usage rows at most monthly per category
+scope_rows = SCOPES * (DAYS + NONUSAGE_CATS * MONTHS) * RUNS_KEPT
+scope_gb = scope_rows * ROW_B / 1e9
+# `cost_accounts`: one row per (currency, provider, billing account, sub-account)
+acct_gb = N_ACCOUNTS * ROW_B / 1e9
+# `billing_daily`: re-keyed by account_id (integer) instead of the sub-account text; same row count, not larger
+billing_delta_gb = 0.0
+# `rollup_pointer`: one row per tenant
+delta = scope_gb + acct_gb + billing_delta_gb
+print("billing_daily_scope rows %d (%.3f GB), cost_accounts %.3f GB, rollup_pointer ~0: delta per run %.3f GB"
+      % (scope_rows, scope_gb, acct_gb, delta))
+
+# peak disk, as budget5.py, with the delta added to every run
+points = 5 * 30 + 30 + 23 + 16 + 9
+bt_export = LEAVES * points * 30 / 1e9
+calendar_state = LEAVES * 3 * 12 * 2 / 1e9
+run_nat1 = 4.90 - 0.198 + bt_export + 0.012 * (points / 178.0 - 1) + calendar_state
+run_other = run_nat1 - bt_export
+per_run_eval = 0.04     # ASSUMPTION, measured in PR 3-4
+nat1_actuals = 0.03     # ASSUMPTION, measured in PR 3-4
+for runs in (['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'enriched'],
+             ['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'natural-3', 'enriched']):
+    for d in (0.0, delta):
+        retained = 0.0; peak = 0.0
+        for r_ in runs:
+            own = (run_nat1 if r_ == 'natural-1' else run_other) + d
+            peak = max(peak, own + retained)
+            retained += per_run_eval + (bt_export + nat1_actuals if r_ == 'natural-1' else 0)
+        print("%d runs, delta %.3f GB: natural-1 run %.3f GB, peak %.3f GB" % (len(runs), d, run_nat1 + d, peak))
 ```

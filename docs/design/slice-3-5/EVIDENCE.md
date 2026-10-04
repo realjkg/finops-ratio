@@ -20,7 +20,8 @@ ordinary commits and plain pushes (never a force-push).
 | 8 | `04e6cf8`, `dbbd552` | Revision 7 approved by the challenger. The remaining Low, dormant series that reactivate, folded in by extending D4 (§3e); `reactivation.py` (B.5.11). |
 | 9 | `bb4379c`, `d70f074` | The challenger's REQUEST CHANGES on revision 8 (1 Medium): the reactivation history condition looked at the wrong days. History moved to the pre-dormancy period and a size override added, both decided by the orchestrator (§3f); `reactivation.py` updated (B.5.11). |
 | 10 | `9f1febb`; merge of `origin/main` `bd440b5`; `adf0d19` | Revision 9 approved by the challenger. The three Low items (§3g): reactivation false positives under day clustering simulated on the chain (the independent-history approximation underestimated); the prior mean of the size override looks back up to 112 days; the D4 text made consistent. `origin/main` merged (#65, #67, #68; no conflicts, no file under `docs/design/slice-3-5/` touched by main); DESIGN §0 and §7 note that PR 4-0 and #62 have landed. |
-| 11 | this revision (PR #70) | Revision 10 approved by the challenger (0 High, 0 Medium). Two wording Lows (§3h): D-21 and the opt-in text state the contract #62 shipped in #67 and #68; the prior-mean lookback is capped at 112 days. |
+| 11 | `d6be584` (PR #70) | Revision 10 approved by the challenger (0 High, 0 Medium). Two wording Lows (§3h): D-21 and the opt-in text state the contract #62 shipped in #67 and #68; the prior-mean lookback is capped at 112 days. |
+| 12 | this revision | Copilot's review 5407381989 of PR #70 at d6be584 (2 High, 2 Medium), each verified and fixed (§3i): one leaf identity everywhere (`series_id`), a billing rollup by charge category behind `costs/daily`'s billed totals, an exact Garwood interval, and a rollup pointer. |
 
 ## 2. Governance wording: reverted
 
@@ -241,6 +242,19 @@ The challenger approved revision 9 (dbbd552..d70f074).
 | **L2** fallback wording | The prior-mean lookback of D4 (b)(ii) is **capped at 112 days**: "or all history" removed everywhere. This matches the simulation and the named quarterly limit. The comment in `reactivation.py` changed, so its SHA-256 changed; its output is unchanged | DESIGN §4.2; Appendix B.5.11; §3g |
 | Re-run | The 10 embedded SHA-256s match (9 unchanged, `reactivation.py` updated for the comment); `reactivation.py` re-run with identical figures | Appendix B.5.11 |
 
+## 3i. Revision 12: Copilot's review of PR #70 at d6be584 (review 5407381989)
+
+Each finding was checked against the design before it was fixed; all four
+were valid.
+
+| Item | Change | Where |
+|---|---|---|
+| **High r4178656730** leaf key | **Valid.** `forecast_state` keyed a leaf by (sub-account, service, currency) while `cost_series` carries provider and billing account too, so provider-local ids could collide. Also, `detector_state` stored D6's cohort rows under `series_id`, and `account_dim`, `billing_daily` and the root-cause dimensions used provider-local ids. **Fix:** the leaf identity is stated once (Appendix D.0): the `cost_series` natural key (currency, provider, billing account, sub-account, service, region) and its stable, never-reused id `series_id`. `forecast_state` and `detector_state` key on `series_id` with a composite FK. A new `cost_accounts` gives accounts the same treatment. `account_dim`, `billing_daily` and the root causes use `account_id` / `series_id`. Aggregate `scope_key`s are built only from full identities, and the anomaly dedup key includes the currency. D6's cohort rows move to `detector_cohort_state`. Tests and a mutation in 4-1 and 4-3 | DESIGN §2.9, §3.1, §4.5, §6.2, §7; Appendix D.0–D.4 |
+| **High r4178656766** billing endpoint | **Valid**: `costs/daily` promised billed and effective totals and `groupBy=chargeCategory` but read only usage rollups. **Fix, adding rather than narrowing**: FinOps parity needs billed totals that include credits, tax, purchases and fees. `billing_daily` is re-keyed by account and FOCUS charge category, frequency and correction flag. With `cost_daily` (all `Usage` rows) it partitions the published facts. `billing_daily_scope` gives every charge category per scope and day, and two published views expose both. Semantics: `M` stays usage-only (reported on the `Usage` group); non-usage amounts are shown as "not attributed" under `groupBy=service/region`, so totals add up. Disk: **+0.026 GB per run; peak 5.18 GB (5.22 GB with natural-3)**, under the 6 GB ceiling (`rollup12.py`, B.5.12). Tests: billed and effective totals equal the published totals across all categories | DESIGN §2.8, §2.9, §5.1, §6.2, §7 (4-2, 4-5); Appendix B.5.12, D.1 |
+| **Medium r4178656790** Garwood | **Valid**: `budget3.py` used Wilson–Hilferty while calling the interval exact. **Fix:** an exact computation by bisection on the Poisson CDF (the identity 0.5·χ²(p, 2k) = Poisson mean), standard library only. **No printed figure changes** at three decimals; the output is byte-identical. The exact and approximate bounds differ by ≤ 0.0002 at the lower end and ≤ 0.00002 at the upper end. PR 5-4's harness is required to use the exact computation. `budget3.py`'s hash: `7b133ff9…` → `d86367fb…` | Appendix B.5.8; DESIGN §7 (5-4) |
+| **Medium r4178656806** rollup pointer | **Valid**: the run-keyed reader views said "current rollup run" with no pointer. **Fix:** a `rollup_pointer` (run id and `batch_seq` high-water mark), updated in the same transaction that marks the rollup run succeeded, mirroring `forecast_pointer`. Batch-keyed views return, per (source, period), the highest batch ≤ the high-water mark; run-keyed views return the pointed run. Retention never removes a row the pointer still exposes. Tests: a killed or failed rollup leaves every view unchanged, and a restatement appears only when its pointer update commits | DESIGN §2.9, §6.1, §6.2, §7 (4-1, 4-2); Appendix D.1 |
+| Re-run | Every embedded script re-run: 11 SHA-256s match (9 unchanged, `budget3.py` updated, `rollup12.py` new); every Python output unchanged except the new script; both SQL measurements reproduced on a fresh `postgres:16` container (554.2 / 217.0 / 599.8 / 317.3 B per row) | §4; Appendix B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -269,6 +283,8 @@ The challenger approved revision 9 (dbbd552..d70f074).
 | D4 reactivation false positives (rev. 9; ρ > 0 underestimated, see rev. 10) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` as of revision 9 |
 | D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6) | `reactivation.py` (B.5.11) |
 | `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series) | `reactivation.py` (B.5.11) |
+| Billing rollup disk delta (rev. 12) | +0.026 GB per run; peak 5.18 GB (5.22 GB with natural-3) | `rollup12.py` (B.5.12) |
+| Garwood intervals, exact (rev. 12) | unchanged at three decimals (e.g. 7 groups: [0.046, 0.236]) | `budget3.py` (B.5.8) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
 
 The measurement scripts are reproduced verbatim, with SHA-256, in
@@ -277,8 +293,9 @@ Appendix B (B.4, B.5.6–B.5.11).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 11 (the commit that adds this line, PR #70's head when pushed;
-the same reasons as at `bd440b5`, revision 10 after merging `origin/main`, and at
+at revision 12 (the commit that adds this line, PR #70's head when pushed;
+the same reasons as at `d6be584`, revision 11, at `bd440b5`, revision 10
+after merging `origin/main`, and at
 `9f1febb` before the merge, `bb4379c`, revision 9, `04e6cf8`, revision 8,
 `380e9a0`, revision 7,
 `66a1fa2`, revision 6, `fc7ee66`, revision 5, and `faeabb4`, revision 4):

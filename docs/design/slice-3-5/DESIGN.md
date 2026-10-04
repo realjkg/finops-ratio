@@ -13,7 +13,8 @@ items on revision 6 (approved, 0 High, 0 Medium), and revision 8 the one
 Low left on revision 7 (approved): dormant series that reactivate, and
 revision 9 the challenger's Medium on revision 8 (the history condition
 looked at the wrong days), and revision 10 the three Low items on
-revision 9 (approved); the revision history and the item-by-item responses are in
+revision 9 (approved), revision 11 two wording Lows, and revision 12 the
+Copilot review of PR #70 (2 High, 2 Medium); the revision history and the item-by-item responses are in
 [EVIDENCE.md](EVIDENCE.md).
 
 **Owner's goal.** Analyse cloud spend across **15,000 simulated accounts**,
@@ -100,8 +101,8 @@ derived from a seed rule (§1.1).
      injected at natural rates (spend-weighted) and their loss is reported,
      not gated (§2.5); **recall and leaf-forecast figures on `fleet15k`
      are measured on individual series only.** The `full` profile (owner
-     action OA-1) removes this limitation. **Disk: ≈ 4.96 GB per run,
-     ≈ 5.15 GB peak** across the sequential runs (tuning, tuning-natural,
+     action OA-1) removes this limitation. **Disk: ≈ 4.99 GB per run,
+     ≈ 5.18 GB peak** across the sequential runs (tuning, tuning-natural,
      two pooled natural-rate seeds, enriched; §4.8), including WAL,
      temporary files,
      the control tenant and the retained evaluator exports, from per-row
@@ -585,7 +586,7 @@ local:synthetic --profile … --seed …   (scripts/local, its own project and p
   `down -v`, so the disk holds one run at a time plus the retained
   evaluator exports. Only natural-1 writes the per-origin leaf backtest
   export (the forecast targets use it); the other runs skip it. **Peak
-  disk ≈ 5.15 GB** (5.19 GB with natural-3), against the 5.5 GB target and
+  disk ≈ 5.18 GB** (5.22 GB with natural-3; revision 12's billing rollup adds 0.026 GB per run, Appendix B.5.12), against the 5.5 GB target and
   the 6 GB ceiling; if an off-box artefact store is available, the
   retained exports (≤ 0.52 GB) move there after their SHA-256 is recorded
   (Appendix B.5.8). The retained-input sizes are **assumptions** until PR
@@ -613,7 +614,7 @@ Full model, measurements and arithmetic: Appendix B (B.5 for `fleet15k`).
 | Profile | Accounts | Grain | Span | Leaf series | Fact rows | Disk | Single-worker load (20 k / 6 k rows/s) | Where it runs |
 |---|---|---|---|---|---|---|---|---|
 | `ci` | 150 (+ 15 control) | full | 4 periods (≈ 120 d) | ≈ 1.5 k | ≈ 0.24 M | < 0.3 GB | ≤ 1 min | CI, every PR |
-| **`fleet15k`** | **15,000** (+ 15 control) | account × service × day; top 2 services individually at or above median spend, top 1 below, + `Other services` (**tail-service caveat**) | **4 periods (122 d)** | **≈ 37.1 k** (22.5 k individual) | **≈ 4.89 M** | **≈ 4.96 GB** per run, **≈ 5.15 GB peak** across the sequential runs, all-in (Appendix B.5.8, re-derived in B.5.9 and B.5.10) | **4 / 14 min** | this container class (≈ 10 GB free, 4 CPU, 15 GB RAM); three sequential runs |
+| **`fleet15k`** | **15,000** (+ 15 control) | account × service × day; top 2 services individually at or above median spend, top 1 below, + `Other services` (**tail-service caveat**) | **4 periods (122 d)** | **≈ 37.1 k** (22.5 k individual) | **≈ 4.89 M** | **≈ 4.99 GB** per run, **≈ 5.18 GB peak** across the sequential runs, all-in (Appendix B.5.8; revision 12 delta in B.5.12) | **4 / 14 min** | this container class (≈ 10 GB free, 4 CPU, 15 GB RAM); three sequential runs |
 | `full` | 15,000 | full | 13 periods (395 d) | ≈ 147 k | ≈ 78.6 M | 60–95 GB | 65–218 min | owner action OA-1 |
 
 **`fleet15k` per-row sizes are measured** on an ephemeral PostgreSQL 16
@@ -638,7 +639,8 @@ in order, each step re-budgeted (Appendix B.5):
 | 3 | integer batch key in `cost_daily` instead of a uuid (estimated −24 B/row) | 5.59 GB |
 | 4 | **top 1 for accounts below median spend** (they carry ≈ 3.6 % of spend), top 2 at or above | **4.90 GB** |
 | rev. 4 | P4 scoring origins for FT-7 (228 instead of 178 backtest points per leaf, +0.06 GB); retained exports across the sequential runs | 4.96 GB per run; 5.11 GB peak |
-| rev. 5 | calendar factors in the forecast and detector state (+0.002 GB); one more sequential run, `tuning-natural` (§4.8) | **4.96 GB per run; 5.15 GB peak** (5.19 GB with natural-3) |
+| rev. 5 | calendar factors in the forecast and detector state (+0.002 GB); one more sequential run, `tuning-natural` (§4.8) | 4.96 GB per run; 5.15 GB peak (5.19 GB with natural-3) |
+| rev. 12 | billing rollup by charge category (`billing_daily_scope`, `cost_accounts`, `rollup_pointer`; +0.026 GB per run, Appendix B.5.12) | **4.99 GB per run; 5.18 GB peak** (5.22 GB with natural-3) |
 
 Step 4 is needed to reach the **5.5 GB target**; with it the peak has
 ≈ 0.35 GB margin to the target and ≈ 0.85 GB to the ceiling.
@@ -697,12 +699,25 @@ Rollup design (schema sketch in Appendix D):
   **integer `batch_seq`** per tenant, its source, period and totals.
 - `cost_series`: one row per (currency, provider, billing account,
   sub-account, service, region); ≈ 37 k in `fleet15k`, ≈ 147 k in `full`.
+  **Its stable id `series_id` is the leaf identity** used by every forecast,
+  detector and anomaly table (Appendix D.0). `cost_accounts` does the same
+  for accounts. No table keys on a provider-local id alone.
 - `cost_daily` (**narrow**, usage only): one row per (series, UTC charge
   day, `batch_seq`) with five measures and a row count; primary key only.
   Measured 217 B/row with a uuid batch key; ≈ 193 B estimated with
   `batch_seq`. ≈ 4.5 M rows / ≈ 0.87 GB in `fleet15k`.
-- `billing_daily` (**sparse**): non-usage amounts per (account, day, kind),
-  only where non-zero.
+- `billing_daily` (**sparse**): every non-`Usage` charge category
+  (Purchase, Tax, Credit, Adjustment) per (account, day, `ChargeCategory`,
+  `ChargeFrequency`, correction flag), only where non-zero. With
+  `cost_daily` (all `Usage` rows) it partitions the published facts.
+- `billing_daily_scope` (rev. 12): per rollup run, scope, day and **charge
+  category** (`Usage` included), the billed and effective totals the API
+  needs for `groupBy=chargeCategory` and for billed totals at aggregate
+  scopes.
+- `rollup_pointer` (rev. 12): the current succeeded rollup run and its
+  `batch_seq` high-water mark, moved in the same transaction that marks
+  the run succeeded. Every rollup reader view joins it, so a partial or
+  failed run is never visible (Appendix D.1).
 - `cost_resource_daily`: resource rows above a floor ($25/day equivalent).
 - `cost_daily_scope`: precomputed daily totals for the API's aggregate
   scopes, per rollup run (≈ 550 scopes in `fleet15k`).
@@ -726,7 +741,7 @@ Rollup design (schema sketch in Appendix D):
 | Worker load, all sources | ≤ 60 s | **measured**; estimate 4–14 min single worker; **> 60 min triggers the D-06 review** | measured; ≤ 90 min wall with 4 parallel sources |
 | Re-sync (all `skipped_unchanged`) | ≤ 15 s | ≤ 1 min | ≤ 2 min |
 | Stored bytes per fact row | ≤ 0.6 KB | ≤ 0.56 KB (554 B measured) | ≤ 0.6 KB |
-| Disk, all-in (Appendix B.5) | < 0.3 GB | **≤ 5.5 GB target at peak** (≈ 4.96 GB per run, ≈ 5.15 GB peak across the sequential runs; 6 GB ceiling) | ≤ 100 GB |
+| Disk, all-in (Appendix B.5) | < 0.3 GB | **≤ 5.5 GB target at peak** (≈ 4.99 GB per run, ≈ 5.18 GB peak across the sequential runs; 6 GB ceiling) | ≤ 100 GB |
 | WAL | — | `max_wal_size` set to 256 MB; **its effect on peak WAL size and on load time is measured in PR 3-4** | measured |
 | End-to-end CI step | ≤ 120 s | n/a | n/a |
 
@@ -763,8 +778,10 @@ Rollup design (schema sketch in Appendix D):
   tax-to-pre-tax ratio. Credits and one-time purchases are **not**
   forecast (they are unknowable from history); the API states that.
 
-**Scopes.** Leaf = **account × service** (≈ 107 k series in `full`, regions
-summed; ≈ 37 k in `fleet15k`, of which ≈ 22.5 k individual services and
+**Scopes.** Leaf = **account × service**, identified by its `cost_series`
+id; its natural key carries currency, provider, billing account,
+sub-account, service and region (Appendix D.0). That is ≈ 107 k series in
+`full`, with regions summed; ≈ 37 k in `fleet15k`, of which ≈ 22.5 k individual services and
 ≈ 14.6 k `Other services`; region-level novelty is a detector, §4.2). Roll-ups: sub-account, business
 unit, billing account, provider, service (fleet-wide), tenant; each per
 currency.
@@ -1633,7 +1650,7 @@ one group.
 | 6 | **Aggregate-only:** an aggregate-scope candidate whose excess is < 80 % explained by groups already formed that day | (aggregate scope), top contributors as root causes |
 
 - **Deterministic chaining across days.** Group ids are derived from the
-  dedup key (UUID v5 of tenant, scope kind, scope key, category, first day),
+  dedup key (UUID v5 of tenant, scope kind, scope key, currency, category, first day; scope keys as in Appendix D.0),
   so the same input always gives the same ids. When a broader rule (steps
   2–4) on day D claims leaves whose own groups started within ±1 day of the
   broader group's start, those groups are **merged** into the broader
@@ -1644,7 +1661,7 @@ one group.
 - **Root causes:** up to **10** contributors ranked by excess over the
   group's days, from leaf `M`, region rows and resource rows, each with its
   amount and share (AWS ranks up to 10 root causes [A8]).
-- **Dedup key:** (tenant, scope kind, scope key, category, first day). A
+- **Dedup key:** (tenant, scope kind, scope key, currency, category, first day), with the full-identity scope keys of Appendix D.0. A
   group that resolved more than 7 days ago is not reopened.
 
 ### 4.6 Lifecycle and the `CostFinding` mapping
@@ -1697,7 +1714,7 @@ its id. The `ci` daily-delivery replay (§2.7) exercises this with the
 time; between runs only the evaluator's compact inputs (API pages, root
 causes, matches, evidence record: ≈ 0.04 GB per run) and natural-1's
 backtest export and actuals (≈ 0.28 GB) are kept (both sizes are
-assumptions until PR 3-4 measures them). Peak ≈ 5.15 GB (Appendix B.5.8, re-derived in B.5.9 and B.5.10).
+assumptions until PR 3-4 measures them). Peak ≈ 5.18 GB (5.22 GB with natural-3; Appendix B.5.12).
 
 | Run | Seed | Label rates | Used for | Not used for |
 |---|---|---|---|---|
@@ -1792,7 +1809,7 @@ latency on a daily source.
 
 | Endpoint | Returns | Reads (definer views, §6.2) |
 |---|---|---|
-| `costs/daily?scope=…&groupBy=…&from=&to=&currency=&cursor=&limit=` | daily `M`, billed and effective totals per group; `groupBy` ∈ billingAccount, subAccount, businessUnit, provider, service, region, chargeCategory | `cost_daily_published`, `cost_daily_scope_published` |
+| `costs/daily?scope=…&groupBy=…&from=&to=&currency=&cursor=&limit=` | daily `M` (usage only, §3.1) and **billed and effective totals over every charge category** (usage, purchases, recurring fees, tax, credits, adjustments) per group; `groupBy` ∈ billingAccount, subAccount, businessUnit, provider, service, region, chargeCategory. With `groupBy=chargeCategory`, `M` is reported on the `Usage` group only. With `groupBy=service` or `region`, non-usage amounts (which `billing_daily` holds per account) appear in one group `(not attributed to a service)` / `(not attributed to a region)`, so totals still add up | `cost_daily_published`, `cost_daily_scope_published`, **`billing_daily_published`, `billing_daily_scope_published`** (rev. 12); all through `rollup_pointer` |
 | `forecasts?scope=&key=&currency=` | daily expected + 80/95 % intervals (90 days), month-end, next 30/90 days, method, cold-start flag, as-of and last published day | `forecasts_current` |
 | `forecasts/accuracy?level=&horizon=` | the latest backtest report (§3.9) | `forecast_backtests_current` |
 | `anomalies?status=&severity=&category=&scope=&from=&to=&cursor=&limit=` | anomaly groups (decimal strings), keyset by `(first_day desc, id)` | `anomalies_current` |
@@ -1891,11 +1908,14 @@ including current rollups and anomalies. So:
 - **What it removes**, and nothing else:
   - `cost_daily`, `cost_resource_daily`, `billing_daily` rows whose
     `batch_seq` belongs to a batch that is **no longer the published batch**
-    of its (source, period), once the replacing batch's rollup is committed;
-  - run-keyed rows of **`cost_daily_scope`, `account_dim`**,
-    `forecast_state`, `forecast_points`, `forecast_totals` and
-    `detector_state` older than the **2 latest succeeded runs** of their
-    kind.
+    of its (source, period), once the replacing batch's `batch_seq` is ≤
+    the **`rollup_pointer`'s high-water mark** (so nothing a reader can
+    still see is removed);
+  - run-keyed rows of **`cost_daily_scope`, `billing_daily_scope`,
+    `account_dim`** other than the pointed rollup run and the one before it,
+    and of `forecast_state`, `forecast_points`, `forecast_totals`,
+    `detector_state` and `detector_cohort_state` older than the **2 latest
+    succeeded runs** of their kind.
 - **What it never touches:** `anomalies`, `anomaly_days`,
   `anomaly_root_causes`, `anomaly_events`, `forecast_backtests`,
   `forecast_backtest_points`, `rollup_batches`, `analytics_runs`, the
@@ -1911,8 +1931,8 @@ foundation manifest and catalogue check:
 
 | Migration | Adds |
 |---|---|
-| **0002** | role `ratio_analytics` (DO block marked `ratio:allow-do`, same RT010-style guard as 0001); definer view `publications_published`; `analytics_runs`, `rollup_batches`, `cost_series`, `cost_daily`, `billing_daily`, `cost_resource_daily`, `cost_daily_scope`, `account_dim`; reader views joined to the current publication; **`ratio.analytics_apply_retention()`** |
-| **0003** | `forecast_pointer`, `forecast_state`, `forecast_points`, `forecast_totals`, `forecast_backtests`, `forecast_backtest_points` (aggregate scopes), `detector_state`; reader views; **`ratio.analytics_apply_forecast_retention()`** |
+| **0002** | role `ratio_analytics` (DO block marked `ratio:allow-do`, same RT010-style guard as 0001); definer view `publications_published`; `analytics_runs`, `rollup_batches`, `cost_accounts`, `cost_series`, `cost_daily`, `billing_daily`, `billing_daily_scope`, `cost_resource_daily`, `cost_daily_scope`, `account_dim`, **`rollup_pointer`**; reader views joined to the current publication **and the rollup pointer** (Appendix D.1); **`ratio.analytics_apply_retention()`** |
+| **0003** | `forecast_pointer`, `forecast_state`, `forecast_points`, `forecast_totals`, `forecast_backtests`, `forecast_backtest_points` (aggregate scopes), `detector_state`, `detector_cohort_state`; reader views; **`ratio.analytics_apply_forecast_retention()`** |
 | **0004** | `anomalies`, `anomaly_days`, `anomaly_root_causes`, `anomaly_events` (append-only); reader views. No `ratio_triage` (D-15) |
 
 Consequences (D-07, amended wording accepted by the orchestrator):
@@ -2028,19 +2048,19 @@ revision 10:** 4-0 landed as #65; #62 landed through #67 and #68 (§0).
 | 3 | **3-1b** | Ground truth, stressors and seeds: every label kind of Appendix C, tuning / natural-1..3 / enriched seeds, spend-weighted placement, folded-label marking, `usage_based_credit`/`_tax` rows, `series-params.jsonl` | each label's effect present in the rows and absent outside its window; level-shift multipliers log-uniform on [1.2, 3.0] (KS test on 10,000 draws); calendar factors constant per series and class across months and days, and the `--calendar-jitter 0.10` option (robustness run only) varying them by month within ±10 %; natural seed rates within ±10 % of Appendix C; enriched seed ≥ 100 meaningful labels per gated kind in the evaluation window, all on individual series, plus ≥ 100 meaningful `dormant_reactivation` labels (non-intermittent series active every day up to a last active day ≥ 16, then zero for a gap of any length ≥ 56 days, restarting on a day in 73–115; none on natural seeds); `folded: true` exactly for labels on folded services; stressor cohorts present; seeds produce disjoint label sets | label written without its effect; enriched labels placed on folded services; tuning and natural seeds identical; `Usage-Based` credit emitted as `Usage`; a `dormant_reactivation` label with a dormant gap shorter than 56 days; calendar factor redrawn each month without the jitter option |
 | 4 | **3-2** | Writer: AWS Data Exports layout, gzip, manifests with `x-ratio-control`, file splits, `dataset.json`, labels; `npm run synthetic:generate` | output accepted by `src/ingest/sources/s3/layout.ts`; bounded memory on a 1 M-row run; byte-identical re-run; pinned `ci` golden digest; control totals = BigInt sums = Python recomputation | manifest lists a file twice; control total off by 1e-10; split drops the last row; gzip mtime not zeroed |
 | 5 | **3-3** | `local:synthetic` (own project and ports; upload + SHA-256 verification; local copy removed by default; 36 + 1 sources; parallel sync with the opt-in in the worker environment only; asserts; evaluator export; `down -v`) + CI step for `ci` | every period `published` and `reconciled`; totals = `dataset.json`; re-sync all `skipped_unchanged`; no fake source, no hook (static test like 2b's A9); **static test: `RATIO_ALLOW_SYNTHETIC_PROVIDERS` set only by `local:synthetic`'s worker spawn, and there only together with `RATIO_ENV=development` (or `test`), never by `local:test`, `local:acceptance`, other `local:*` commands, compose files or non-synthetic CI steps**; cross-check that the worker refuses `=1` under `staging`, `production` and an unset `RATIO_ENV`; cleanup always | opt-in set globally (in the parent environment or compose); skip one source; assert only row counts; keep the local copy; run with the fake source |
-| 6 | **3-4** | **`fleet15k` runs in this container class** (tuning, tuning-natural, natural-1, natural-2 [, natural-3], enriched; sequential; **measures the retained evaluator-input sizes**, assumed 0.04 GB per run and 0.03 GB of actuals in `budget2.py`/`budget3.py`; peak disk measured against 5.15 GB) + evidence: load time (D-06 trigger), bytes per row, the int batch key's real size, total disk per run vs 5.5 GB / 6 GB, peak WAL with and without `max_wal_size=256MB`, SeaweedFS fit (T1) | §2.10 targets measured and recorded; a miss is reported and escalated (D-20) | — (measurement PR) |
-| 7 | **4-1** | Migration 0002 (incl. the retention function) + privilege model + bootstrap + the D-07 test edits | catalogue check passes with the new reviewed sets; analytics login refused for each unsafe shape (serial suite); reader cannot see base analytics tables; tenant matrix on each new table; retention function on the reviewed list, PUBLIC without EXECUTE, analytics without DELETE; foundation manifest regenerated and drift-tested; **every edited Slice 0/1 assertion listed, exact old set → exact new set** | grant analytics SELECT on `cost_facts`; grant analytics DELETE on `cost_daily`; remove FORCE RLS from one new table; widen reader to a base table; float column; retention function without pinned `search_path` |
-| 8 | **4-2** | `ratio-analytics rollup` (incremental by published batch, `batch_seq`); narrow `cost_daily` + sparse `billing_daily`; retention call after each rollup | rollup totals per (source, period, currency) = published totals **exactly**; `M` excludes `Usage-Based` credit and tax rows; restatement switches the read side; idempotent re-run; tag parsing failure counted, never crashes (`pg_input_is_valid` on PG16 [A21]); EXPLAIN shows the PK-prefix path through the security-barrier view **(to verify)**; retention removes exactly the superseded batch's rows and old runs, nothing else | group by the wrong day; include a superseded batch; drop `ChargeCategory = 'Usage'` from `M`; skip the untagged measure; retention removes a current batch's row |
-| 9 | **4-3** | Migration 0003 (forecast tables, backtest points, detector state, pointer, views) | as 4-1, for the new objects | as 4-1 |
+| 6 | **3-4** | **`fleet15k` runs in this container class** (tuning, tuning-natural, natural-1, natural-2 [, natural-3], enriched; sequential; **measures the retained evaluator-input sizes**, assumed 0.04 GB per run and 0.03 GB of actuals in `budget2.py`/`budget3.py`; peak disk measured against 5.18 GB) + evidence: load time (D-06 trigger), bytes per row, the int batch key's real size, total disk per run vs 5.5 GB / 6 GB, peak WAL with and without `max_wal_size=256MB`, SeaweedFS fit (T1) | §2.10 targets measured and recorded; a miss is reported and escalated (D-20) | — (measurement PR) |
+| 7 | **4-1** | Migration 0002 (incl. the retention function) + privilege model + bootstrap + the D-07 test edits | catalogue check passes with the new reviewed sets; analytics login refused for each unsafe shape (serial suite); reader cannot see base analytics tables; tenant matrix on each new table; retention function on the reviewed list, PUBLIC without EXECUTE, analytics without DELETE; foundation manifest regenerated and drift-tested; **every edited Slice 0/1 assertion listed, exact old set → exact new set**; `cost_series` and `cost_accounts` unique on the full natural key (two providers, or two billing accounts, reusing one sub-account id get two rows); `rollup_pointer` only references a succeeded rollup run | grant analytics SELECT on `cost_facts`; drop `provider_name` or `billing_account_id` from a natural key; grant analytics DELETE on `cost_daily`; remove FORCE RLS from one new table; widen reader to a base table; float column; retention function without pinned `search_path` |
+| 8 | **4-2** | `ratio-analytics rollup` (incremental by published batch, `batch_seq`); narrow `cost_daily` + sparse `billing_daily` by charge category + `billing_daily_scope`; `rollup_pointer` moved in the run's success transaction; retention call after each rollup | rollup totals per (source, period, currency) = published totals **exactly**, billed and effective, **over every charge category** (`cost_daily` + `billing_daily`, and `billing_daily_scope` at each scope); **pointer atomicity**: a rollup killed mid-run, or failed, leaves every reader view byte-identical to before; a restatement becomes visible only when its run's pointer update commits; the reader views never return rows above `batch_seq_hwm`; `M` excludes `Usage-Based` credit and tax rows; restatement switches the read side; idempotent re-run; tag parsing failure counted, never crashes (`pg_input_is_valid` on PG16 [A21]); EXPLAIN shows the PK-prefix path through the security-barrier view **(to verify)**; retention removes exactly the superseded batch's rows and old runs, nothing else, and never a row the pointer still exposes | group by the wrong day; move the pointer before the run's rows commit; omit `Credit` or `Tax` from `billing_daily_scope`; retention removes a batch above the pointer's high-water mark; include a superseded batch; drop `ChargeCategory = 'Usage'` from `M`; skip the untagged measure; retention removes a current batch's row |
+| 9 | **4-3** | Migration 0003 (forecast tables, backtest points, detector state, detector cohort state, pointer, views) | as 4-1, for the new objects; `forecast_state` and `detector_state` keyed by `series_id` with a composite FK to `cost_series` | as 4-1; key a leaf table by (sub-account, service, currency) |
 | 10 | **4-4a** | Model library (pure): M0, M1, M1-log, **calendar-event component** (3 classes, significance-gated factors), Hampel with the scale floor, 288-point grid search, cold-start ladder, the `fleet15k` fixed rule | known-answer tests on hand-computed series; independent Python reference for small cases; constant series: no cleaning, finite outputs; intermittent series: no NaN; calendar: factors estimated on raw `y` by the median of m ≥ 3 values; a × 1.3 month-end factor is applied after 2 cycles at σ ≤ 0.13 and after 3 at σ ≤ 0.17, never with m < 3, never on a series without the effect at |t| < 3; one anomalous day in 3 cycles moves the factor by less than half its effect; Hampel applies the learned factors before its 4-MAD test (a × 1.3 month-end on a σ = 0.05 series is not cleaned); the business-day rule handles months ending on a weekend; refit throughput measured (§3.11) | seasonal index off by one weekday; trend undamped; scale floor removed; grid point skipped; factor estimated on cleaned data; mean instead of median; Hampel before the factors |
 | 11 | **4-4b** | Intervals with **expanding as-of calibration**, cohort fallback, bottom-up hierarchy, backtest blocks, per-origin exports, forecast and backtest commands | invariants: bottom-up coherence, intervals ordered, lower ≥ 0; **no leakage** (an origin cannot see later data: poisoned-future test); **as-of calibration** (test: poisoning the errors of days ≥ t leaves every interval issued at t unchanged); exports complete (178 points per leaf on `fleet15k`) with SHA-256 manifest; an empty horizon bucket uses the √h-scaled quantiles of the longest populated bucket, flagged `extrapolated` and excluded from FT-7; FT-4/5/7 on the tuning seed | interval quantiles from in-sample residuals; calibration from the scoring block; `env` in the cohort key; selection enabled on `fleet15k`; an export missing a horizon; an `extrapolated` interval scored |
-| 12 | **4-5** | API: `costs/daily`, `forecasts`, `forecasts/accuracy`, `freshness` | Slice 2 route test set (auth, 400s, keyset, tenant, unsafe login, no-store, decimal strings); latency check on `fleet15k` | read tenant from the query; OFFSET pagination; number instead of string |
+| 12 | **4-5** | API: `costs/daily`, `forecasts`, `forecasts/accuracy`, `freshness` | Slice 2 route test set (auth, 400s, keyset, tenant, unsafe login, no-store, decimal strings); `costs/daily` billed and effective totals equal the published billed and effective totals for the same days and scope, credits, tax, purchases and fees included; `groupBy=chargeCategory` returns every category present and `M` only on `Usage`; latency check on `fleet15k` | read tenant from the query; OFFSET pagination; number instead of string; billed totals from `cost_daily` alone |
 | 13 | **4-6** | Forecast acceptance on `fleet15k` (natural-1) + Python evaluator (own actuals from the bucket) | FT-1…FT-7, FT-9, FT-10 recorded with n; `Other services` reported separately; evaluator and job agree; FT-8 marked "`full` only, pending OA-1" | evaluator reading the job's rollups instead of the bucket; `Other services` included in the FT-4 gate |
 | 14 | **5-1** | Migration 0004 (anomaly tables, events, views; no `ratio_triage`) | as 4-1 | as 4-1 |
 | 15 | **5-2a** | Detectors D1–D8 (pure) on the **log scale**, calendar-adjusted: 56-day D2 window with the pooled floor, D8 on 2-day sums with the pooled `s₂`, frozen-baseline CUSUM with re-anchoring and as-of `σ(h)`, D6 on two-day growth with the fitted percentile, intermittent series on **non-overlapping** weekly sums (zero share ≤ 50 %) or the **hurdle statistic with the clustering gate** (> 50 %, D-24), aggregate scopes on D3 only, commitment rules, category precedence | unit cases per detector; a slow drift that an adaptive one-step CUSUM misses is caught; ARL₀ of D3 on simulated N(0,1) within ±15 % of Siegmund's value at h = 7.5 and 9.0; **per series-day rates of D1 ∧ D2 and D8 on simulated series with estimated median, MAD and pooled scale within ±25 % of `budget5.py`'s 4.3 × 10⁻⁵ and 1.5 × 10⁻⁵**; the weekly statistic's in-control rate within ±25 % of `budget5.py`'s per zero share; the hurdle statistic's mean and variance match the compound-binomial formula on simulated independent days (±5 %), its in-control rate is within a factor of 2 of `budget5.py`'s at zero shares 0.6–0.8, and a series with lag-1 persistence 0.6 is routed to `info` in ≥ 85 % of weeks while an independent one passes in ≥ 97 %; D8 fires by day 2 on a 4.9σ shift in ≥ 85 % of 2,000 trials; a hurdle-scored series whose r₁ ≥ 0.30 never yields `warning`; D6's threshold from a log-normal fit with n_k < 30 falling back to the pooled mean; constant series never fire; a calendar-cohort series with its factor applied does not fire on event days; **D4 reactivation:** a series regular for 20 days, dormant for 60, fires on its first restart day at ≥ min impact; a series with 3 active days in the window is not under the rule; a series dormant for 90 days after a regular month reaches `warning` (history taken before the gap, not before the window); a bursty series (< 50 % active pre-dormancy) restarting at 1 × its active-day mean yields `info`, at ≥ 10 × min and ≥ 3 × that mean reaches `warning`; a monthly job (2 active days per 56) restarting at 10 × reaches `warning` through the 112-day lookback, a quarterly one (≤ 2 in 112) gets `info`; precedence table exact | CUSUM on adaptive one-step residuals; re-anchor while `S⁺ > 0`; MAD floor removed; pooled floor removed; 28-day window; `commitment_expiry` classified as `commitment_effect`; precedence order swapped; z on the linear scale; σ(h) from errors after D − 1; calendar factor not applied to D2; weekly sums overlapping (rolling); D8 on the series' own MAD; clustering gate removed; hurdle variance without the −7q̂²m̂² term; aggregate scopes running D2; D6 on the empirical percentile; reactivation dormancy threshold 3 → 4 active days; reactivation history condition removed; history taken before the 56-day window instead of before the dormant stretch; size override without the 3 × relative test; prior-mean lookback not extended to 112 days; reactivation on a 2-day sum |
 | 16 | **5-2b** | Grouping steps 1–6 (provider-wide first), deterministic ids, merges, root causes, severity | one group per provider-wide, billing-account and account fan-in; same input ⇒ same groups and ids; merges only within ±1 day; root causes ranked by excess | provider-wide rule skipped; fan-in threshold off by one; random group ids; severity downgrade allowed; merge window unbounded |
 | 17 | **5-3** | `ratio-analytics detect` (daily + as-of replay from day 57, live from day 62), automatic open and resolve, restatement | thresholds tuned on **tuning-natural** (false positives: measured total ≤ 0.15/day, Garwood upper ≤ 0.30/day) and on tuning (recall side), frozen and committed before any evaluation seed is generated; replay uses only errors ≤ D − 1 (poisoned-future test); `restated` path via the `ci` daily-delivery replay; `new_region` on `ci` | detect on day D using day D data (leakage); auto-resolve after 1 day |
-| 18 | **5-4** | Evaluation harness (Python) + `fleet15k` acceptance: precision and AT-4 on the pooled natural seeds (cohorts included), recall and TTD on the enriched seed (individual series only) | matching with X = 30 %, k = 3; duplicates counted false; Wilson rules of §4.9; Garwood intervals on every false-positive rate; alert-fatigue outputs (mean, p95, max; `info` per day, hurdle-scored series' `info` signals and routes separately; `info`-signal recall of clustered intermittent series); per-cohort, first- and second-occurrence and calendar-event-day breakdowns; the calendar-jitter robustness run reported; folded labels reported; `new_region` and FT-8 marked "`full` only" | matcher accepts any day; matcher ignores the 30 % / top-3 rule; no-alert labels ignored; precision computed on the enriched seed; Wilson bound replaced by the point estimate; duplicates counted correct |
+| 18 | **5-4** | Evaluation harness (Python) + `fleet15k` acceptance: precision and AT-4 on the pooled natural seeds (cohorts included), recall and TTD on the enriched seed (individual series only) | matching with X = 30 %, k = 3; duplicates counted false; Wilson rules of §4.9; Garwood intervals on every false-positive rate (exact: bisection on the Poisson CDF, as `budget3.py`, never an approximation); alert-fatigue outputs (mean, p95, max; `info` per day, hurdle-scored series' `info` signals and routes separately; `info`-signal recall of clustered intermittent series); per-cohort, first- and second-occurrence and calendar-event-day breakdowns; the calendar-jitter robustness run reported; folded labels reported; `new_region` and FT-8 marked "`full` only" | matcher accepts any day; matcher ignores the 30 % / top-3 rule; no-alert labels ignored; precision computed on the enriched seed; Wilson bound replaced by the point estimate; duplicates counted correct |
 | 19 | **5-5** | API `anomalies`, `anomalies/{id}` (GET only); `ratio-native` CostSource adapter; `CostFinding` optional fields (D-18) | route test set; PointFive mapping unchanged (existing tests untouched); decimal string ↔ number display rounding; no non-GET handler | wrong status vocabulary; impact sign flipped |
 | 20 | **5-6** | UI: forecast panel, native anomalies in Findings with the R4 label (D-16, T2); latency run (§5.3) on `fleet15k` | component tests; SLOs measured | — |
 | — | *5-7 (deferred, D-15)* | status write endpoint + `ratio_triage` | not built until per-user identity exists | — |
