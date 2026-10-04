@@ -155,7 +155,7 @@ class ExpectedRowTests(unittest.TestCase):
 
     def test_one_row_maps_to_the_api_contract(self):
         data = csv_bytes(
-            '"2024-09-01 00:00:00","2024-10-01 00:00:00","2024-09-18 22:00:00","2024-09-18T23:00:00.5+02:00","USD",'
+            '"2024-09-01 00:00:00","2024-10-01 00:00:00","2024-09-18 22:00:00","2024-09-19T01:00:00.5+02:00","USD",'
             '007.50,-0.000,NULL,"","AWS","Amazon S3","","Usage","arn:x",NULL,"123",2.000,"Requests",9,"Other",'
             '1.5,"NULL","r1","{""a"": ""b""}",NULL',
             header=FULL_HEADER,
@@ -164,7 +164,7 @@ class ExpectedRowTests(unittest.TestCase):
         self.assertEqual(doc['rows'], [{
             'billingPeriod': '2024-09-01',
             'chargePeriodStart': '2024-09-18T22:00:00.000000Z',
-            'chargePeriodEnd': '2024-09-18T21:00:00.500000Z',
+            'chargePeriodEnd': '2024-09-18T23:00:00.500000Z',
             'billedCost': '7.50',
             'effectiveCost': '0.000',
             'listCost': None,
