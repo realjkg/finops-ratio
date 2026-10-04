@@ -36,7 +36,8 @@ ordinary commits and plain pushes (never a force-push).
 | 24 | `f3209ea` | Copilot's review 5407981134 of b9b2274 (3 High, 1 Medium) and the challenger's one Low on revision 23 (APPROVED, 0 High, 0 Medium), §3y: account-scope daily forecasts rebuilt on read with stored interval state, and a scope census (peak 5.24 GB); anomaly changes published in the detect run's success transaction; valid-sample rules for the log-scale detectors; a scale-aware zero week in `budget5.py` (outputs unchanged); a `repointed` event. |
 | 25 | `45b0088` | Copilot's review 5408081799 of f3209ea (1 High, 2 Medium, 2 Low) and the challenger's Low and nit on revision 24 (APPROVED, 0 High, 0 Medium), §3z: an `occurrence` in the anomaly dedup key for re-introduced restatements; bounded backtest retention with pins; the `bottom_up` summary for non-leaf scopes; `forecast_scope_state` arrays checked; stale scope counts; event-target foreign keys. |
 | 26 | `546e00b` | Copilot's review 5408165158 of 45b0088 (1 Medium, 1 Low) and the challenger's three Low items on revision 25 (APPROVED, 0 High, 0 Medium), §3aa: bounded shares (cold-start, committed, untagged), defined APE and interval width; the retention threat-model row and rollback text brought up to date; `backtest --pin` in the success transaction; `historyDays` from leaves' first usage day; "fresh replay". |
-| 27 | this revision | Copilot's review 5408199807 of 546e00b (2 High, 1 Medium), after the challenger APPROVED revision 26 without findings, §3ab: retention never removes anything a running run uses (shared/exclusive retention lock); every multi-transaction run captures its input runs once and reads them by id; billed month-end `B` removed from the contract and recorded as a gap; a share-test wording fix. |
+| 27 | `28f8970` | Copilot's review 5408199807 of 546e00b (2 High, 1 Medium), after the challenger APPROVED revision 26 without findings, §3ab: retention never removes anything a running run uses (shared/exclusive retention lock); every multi-transaction run captures its input runs once and reads them by id; billed month-end `B` removed from the contract and recorded as a gap; a share-test wording fix. |
+| 28 | branch `design/goal-differentiation` (after #70 merged) | The owner's correction of the goal (§6): differentiation, not parity. Goal paragraph, §0 (baseline-coverage statement and differentiation status), §1.5 (baseline checklist) and three goal phrases reworded; §1.8 (differentiation) and open owner decisions OD-1 to OD-3 added. No target, figure or script changed. |
 
 ## 2. Governance wording: reverted
 
@@ -717,3 +718,74 @@ above.
 That is the correct classification for this content; the PR goes through
 the restricted exception path. (Revision 2 at `461fbc2` classified `low`
 only because of the wording reverted in §2.)
+
+## 6. Revision 28: the owner's correction of the goal
+
+**The correction (2026-10-04).** PR #70 stated the goal as making FinOps
+Ratio "at par with today's FinOps tools". The owner:
+
+> "On PR#70, it listed we want to be at par with other FinOps tools, but
+> that's not the intent. The intent is differentiation, with an Agentic
+> interface and capabilities for private cloud and hybrid estates."
+
+Two clarifications followed, both used in DESIGN §1.8:
+
+> "We already had an MVP with an agentic interface, with Ratio, but that
+> was never advanced into product depth of coded capability and
+> end-to-end."
+
+> "Private cloud is enabled through connectors to Nutanix, MCP and others,
+> ie. Azure Local, Nvidia tracing local consumption."
+
+**What changed** (documents only):
+
+| File | Section | Change |
+|---|---|---|
+| DESIGN.md | header | Revision 28 noted |
+| DESIGN.md | Owner's goal | Restated: differentiation (agentic interface; private cloud and hybrid); the 15,000-account forecasting and detection are the baseline capabilities; dated correction note with the owner's words |
+| DESIGN.md | How to read this | Rows 0, 1 and 8 describe the new content |
+| DESIGN.md | §0 | "Parity statement" renamed **baseline-coverage statement**, every qualifier kept (notification delivery, D-15 partial lifecycle, idealised `fleet15k` arrival, "validate the implementation, not real-world parity"); **differentiation status** added |
+| DESIGN.md | §0 `fleet15k` bullet; §2.8 profile table; §3.2 calendar component | "proves the owner's goal" → "proves the baseline at the owner's scale"; "(the owner's goal)" → "(the baseline at the owner's scale)"; "a tool at par" → "a credible FinOps tool" |
+| DESIGN.md | §1.5 | Retitled **baseline checklist**; "P0 = required baseline"; P0/P1/P2 tables unchanged |
+| DESIGN.md | §1.8 (new) | D-x1 and D-x2: meaning, what the repository has (checked on `origin/main` at f35c383), the gap after Slices 3–5, hybrid behaviours (assumptions), candidate follow-on slices X1-a … X1-d and X2-a … X2-d (all proposed) |
+| DESIGN.md | §8 | **Open owner decisions** OD-1 (hybrid sources in the synthetic estate now or later), OD-2 (A-k or another agentic capability earlier), OD-3 (order of the differentiators), each with a recommendation and left open |
+| APPENDIX_A_EXTERNAL_TOOLS.md | "What is not published"; dependency table | "at par" → the baseline; "§1.5 parity checklists" → "§1.5 baseline checklists"; a §1.8 row (no external claim relied on) |
+| EVIDENCE.md | §1, §6 | Revision 28 row; this section |
+
+**Mentions of parity left as they are.** Where "parity" names a specific
+capability or comparison, not the goal: "lifecycle parity (A-g)" in §0,
+§4.6, D-15 and the known limits; "real-world parity" in §0; "parity with a
+vendor's forecast on real bills" in §3.10. This file's history (M4, M12,
+r4178656766) records earlier revisions and is not rewritten.
+
+**What did not change.** No numeric target, threshold, acceptance
+criterion, sizing figure, decision (D-01 … D-24) or script. A-k stays P2
+in §1.5, and the scope and plan of Slices 3–5 (§7) are unchanged; the
+scope questions are OD-1 to OD-3. `APPENDIX_B_SIZING.md`,
+`APPENDIX_C_GROUND_TRUTH.md` and `APPENDIX_D_SCHEMA_SKETCH.md` are
+byte-identical to `origin/main`. The 13 scripts embedded in Appendix B,
+re-hashed from the appendix text, match their 13 recorded SHA-256 values.
+
+**Repository facts checked for §1.8** (on `origin/main` at f35c383):
+- The chat agent (`src/ai/`, `pages/api/v1/ai/chat.ts`) makes no tool or
+  function calls; it answers from an injected context of seed data.
+- `src/ingest/focus/provider.ts` accepts `focus_file` sources in the AWS
+  Data Exports layout with provider `AWS` only (plus the synthetic names
+  under #62's opt-in).
+- `src/costsource/kubernetesConfig.ts` (`private_cloud`),
+  `src/costsource/nutanixConfig.ts` (`on_prem`), `AWS_S3_ENDPOINT` for
+  S3-compatible stores, and `src/costsource/PointFiveMcpTransport.ts`
+  (MCP, PointFive only) exist. Nothing under `src/` names Azure Local,
+  Azure Stack, HCI, NVIDIA or DCGM.
+
+**Governance classification.** `node scripts/governance/classify-risk.mjs
+--git origin/main...HEAD` on this revision's commit: `"risk":
+"restricted"`, class `retention`, two reasons:
+- `retention.mention` on `DESIGN.md`: §0's differentiation status names
+  the reviewed retention functions (D-12) as a governance trait;
+- `retention.mention` on this file: the revision-27 row of §1, whose
+  commit cell changed from "this revision" to `28f8970`, re-adds a line
+  that mentions retention, and this paragraph quotes the rule.
+
+The wording was not shaped to avoid either match (§2). The PR goes
+through the restricted exception path.

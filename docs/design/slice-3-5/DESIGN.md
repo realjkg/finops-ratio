@@ -42,12 +42,30 @@ it approved, and revision 26 Copilot's review of 45b0088 (1 Medium,
 approved, and revision 27 Copilot's review of 546e00b (2 High, 1 Medium)
 after the challenger approved revision 26 without findings;
 the revision history and the item-by-item responses are in
-[EVIDENCE.md](EVIDENCE.md).
+[EVIDENCE.md](EVIDENCE.md). **Revision 28** (branch
+`design/goal-differentiation`, after #70 merged) corrects the stated goal
+on the owner's word: it rewords the goal, §0, §1.5 and three phrases
+that called parity or the 15,000-account analysis the goal (§0's
+`fleet15k` bullet, §2.8's profile table, §3.2), and adds §1.8
+(differentiation) and three **open** owner decisions (§8). It changes
+no target, threshold, acceptance criterion, sizing figure or script
+(EVIDENCE.md §6).
 
-**Owner's goal.** Analyse cloud spend across **15,000 simulated accounts**,
-**predict expected costs** and **flag meaningful anomalies automatically**,
-so that FinOps Ratio is at par with today's FinOps tools on those
-capabilities.
+**Owner's goal.** The goal is **differentiation**: an **agentic interface**
+that platform and engineering teams control, and **capabilities for
+private-cloud and hybrid estates** (§1.8). Slices 3–5 analyse cloud spend
+across **15,000 simulated accounts**, **predict expected costs** and **flag
+meaningful anomalies automatically**. Those are the **baseline
+capabilities** that the differentiation builds on (§1.5), not the end goal.
+
+*Correction, 2026-10-04.* PR #70 stated the goal as making FinOps Ratio "at
+par with today's FinOps tools on those capabilities". The owner corrected
+it on 2026-10-04: "On PR#70, it listed we want to be at par with other
+FinOps tools, but that's not the intent. The intent is differentiation,
+with an Agentic interface and capabilities for private cloud and hybrid
+estates." Only the stated intent changes. The scope, plan and targets of
+Slices 3–5 are as #70 merged them; the scope questions the correction
+raises are open owner decisions (§8, OD-1 to OD-3).
 
 **Boundary (BOUNDARY v2, unchanged).** Local and ephemeral only. No
 production infrastructure, no hosting spend, no real billing data, no real
@@ -59,15 +77,15 @@ such. The production go-live sign-off stays the owner's non-delegable gate
 
 | § | Content |
 |---|---|
-| 0 | Summary and parity statement |
-| 1 | Gap analysis: what exists, what the reference tools do, what "at par" means, what is out of scope |
+| 0 | Summary, baseline-coverage statement and differentiation status |
+| 1 | Gap analysis: what exists, what the reference tools do, the baseline checklist every FinOps tool meets, what is out of scope, and the differentiators (§1.8) |
 | 2 | Slice 3: the synthetic FOCUS generator at 15,000 accounts, profiles, sizing and storage |
 | 3 | Slice 4: forecasting |
 | 4 | Slice 5: anomaly detection and its evaluation |
 | 5 | API and UI surface |
 | 6 | Security and governance |
 | 7 | Slicing plan: PRs in order, tests first |
-| 8 | Decision log (decided by the orchestrator, 2026-10-04) and owner actions |
+| 8 | Decision log (decided by the orchestrator, 2026-10-04), open owner decisions (rev. 28) and owner actions |
 | 9 | Tracked items (side findings), each with an owner |
 | 10 | Rollback |
 | [Appendix A](APPENDIX_A_EXTERNAL_TOOLS.md) | External tools: every claim, its source, verified or not |
@@ -87,8 +105,9 @@ like any other restricted PR.
 
 ## 0. Summary
 
-**Parity statement.** With Slices 3–5, FinOps Ratio is **at par for
-detection and forecasting, except notification delivery, human
+**Baseline-coverage statement** (rev. 28; until revision 27 the "parity
+statement"). With Slices 3–5, FinOps Ratio **covers the baseline checklist
+(§1.5) for detection and forecasting, except notification delivery, human
 acknowledge/feedback and a billed month-end forecast; data arrival
 idealised on `fleet15k`.** Notification
 delivery is a follow-up slice (D-17); the acknowledge/resolve write path is
@@ -97,7 +116,42 @@ deferred until per-user identity exists (D-15), so lifecycle parity (A-g) is
 month-to-date restatement are exercised on `ci` only (§2.7). The forecast
 and detection targets are measured on synthetic data generated from the
 models' own family, so they **validate the implementation, not real-world
-parity** (§3.10).
+parity** (§3.10). The baseline is what makes the differentiators credible;
+it is not the goal (Owner's goal, above).
+
+**Differentiation status** (rev. 28; detail in §1.8). What Slices 3–5
+already contribute toward the two differentiators:
+- **Accuracy shown, not claimed (F-f, P1).** A backtest report per scope
+  and the `forecasts/accuracy` endpoint (§3.8, §5.1). None of the cited
+  vendors publishes forecast accuracy (Appendix A). On synthetic data it
+  shows calibration, not real-world accuracy (§3.10).
+- **Analytics a team can inspect and control.** Transparent per-series
+  models (robust Holt-Winters, seasonal-naive; §3.2) fitted on each
+  account × service's own daily history, with pooled cohort scales and an
+  honest cold-start ladder (§3.4, §3.5); no external model service and no
+  LLM in the forecast or detection path (§3.11); local and ephemeral
+  operation (BOUNDARY v2, §6.5); thresholds frozen and committed before any
+  evaluation seed exists (§7, 5-3); the sizing and budget figures
+  reproducible from scripts kept with their SHA-256 (Appendix B), and each
+  assumption marked as one; tenant isolation by FORCE RLS (§6.3); removal
+  of derived data only through reviewed retention functions (D-12); and
+  every PR through the governance gate's restricted path (§6.4). An agent
+  built later reads governed, evidenced figures.
+
+What they do **not** yet contribute:
+- **Agentic interface (D-x1).** Ratio already has an agentic **MVP**
+  (a data-grounded chat agent over seed workloads with a server-side
+  provider choice, a peer-agent exchange, and a human gate on proposed
+  changes; §1.8). It answers questions; it takes no actions (no tool or
+  function calls), and it does not read published facts or anything
+  Slices 3–5 produce. Slices 3–5 add no agent capability, and AI-assisted
+  investigation (A-k) is out of scope (P2).
+- **Private cloud and hybrid (D-x2).** The synthetic estate is
+  public-cloud only (`SyntheticAWS`, `SyntheticAzure`, `SyntheticGCP`;
+  §2.2). The trusted ingestion path accepts one source layout and one real
+  provider name, so the private-cloud and on-prem connectors that exist in
+  `src/costsource/` cannot feed the published facts these slices analyse
+  (§1.8). No hybrid-specific behaviour (§1.8) is modelled.
 
 **Today** Ratio has a trusted ingestion path (FOCUS → worker → published
 facts → `GET /api/v1/costs/published`) but **no native forecasting over
@@ -117,7 +171,8 @@ derived from a seed rule (§1.1).
    stressors. It goes through the **real** worker and the **real** published
    view; there is no backdoor. Three profiles (§2.8):
    - **`ci`**: 150 accounts, 4 billing periods, full grain; runs in CI.
-   - **`fleet15k`: the profile that proves the owner's goal.** All
+   - **`fleet15k`: the profile that proves the baseline at the owner's
+     scale.** All
      **15,000 accounts**, account × service × day, minimal columns, **4
      billing periods (122 days)**. **Tail-service caveat:** accounts at or
      above median spend keep their top 2 services as individual series,
@@ -252,11 +307,16 @@ verification status in Appendix A).
 | **PointFive** | — (positioned on waste detection) | ML baseline, actual vs expected, usage-vs-price attribution, resource-level root cause, near-real-time claims [A18]. Ratio already imports these (§1.3). |
 | **FinOps Foundation** (framework, not a tool) | Forecast variance guidance: ≤ 20 % (Crawl), 15 % (Walk), **12 % (Run)** [A16]. | Anomaly lifecycle: record, notify, analyse, resolve; KPIs include mean time to detect and to notify [A19]. |
 
-### 1.5 What "at par" means here
+### 1.5 Baseline checklist
 
-Parity is judged on **capabilities a FinOps practitioner relies on**, not on
-vendor-specific features. P0 = required for "at par"; P1 = should have;
-P2 = later.
+The baseline is the set of capabilities every FinOps tool offers. Ratio
+must have them too, so that its differentiators (§1.8) are credible; the
+baseline is a precondition, not the goal (Owner's goal, above). It is
+judged on **capabilities a FinOps practitioner relies on**, not on
+vendor-specific features. P0 = required baseline; P1 = should have;
+P2 = later. (Until revision 27 this section was titled "What 'at par'
+means here" and P0 read "required for 'at par'". The tables below are
+unchanged.)
 
 **Forecasting**
 
@@ -306,6 +366,155 @@ monthly horizons (F-g); intra-day detection (A-j).
 | F4 | D-09's revisit trigger is "a real month above a few million rows". `full` has ≈ 6 M rows per month (synthetic, but the same load path). | D-09 must be reviewed with measurements. | D-06 (decided: keep the trigger; revisit if the `fleet15k` load exceeds 60 min); tracked as T6. |
 | F5 | `.obvious/obvious.md`'s anomaly rule (15 % over yesterday) is a workload-budget rule, not a fleet detector. | Two anomaly rule sets could confuse users. | D-19: keep both, name them differently. |
 | F6 | `cost_facts` has only its primary key `(tenant_id, batch_id, artifact_sha256, row_ordinal)`; Tags, region, charge frequency and pricing category live as strings in `extra_columns`. | Any per-account or per-tag query on facts scans a whole batch. | Rollups are built **once per published batch** (§2.9); nothing queries facts by account at request time. |
+
+### 1.8 Differentiation (rev. 28)
+
+The goal is differentiation on the two axes the owner named on
+2026-10-04: an **agentic interface** (D-x1) and **private-cloud and hybrid
+estates** (D-x2). For each, this section states what it means concretely,
+what the repository has today (`origin/main` at f35c383, checked in this
+revision), the gap after Slices 3–5, and candidate follow-on slices.
+**Every follow-on slice below is proposed. Its scope, order and priority
+are owner decisions (§8, OD-1 to OD-3).** Nothing here changes the scope,
+plan or targets of Slices 3–5.
+
+**The owner's use cases** (context the owner gave, not a specification),
+and where each stands:
+
+| Use case | Where it stands |
+|---|---|
+| Missing anomalies | Baseline: Slice 5 (A-a … A-h, §1.5). |
+| Cost alerts; budget-threshold alerts | Detection in Slice 5; delivery (A-i) is a follow-up slice (D-17); budgets are out of scope (§1.6). Today's budget thresholds and alerts cover AI workloads on seed data (README, "What's implemented"; `src/data/alerts.ts`). |
+| Replacement recommendations mapped to consumption patterns | Out of scope for Slices 3–5 (§1.6; rightsizing is imported from PointFive). Rule-based recommendations exist for AI workloads on seed data (`src/findings/recommendationMath.ts`). |
+| Budgeting consistency | Out of scope (§1.6). The month-end forecast (F-b) is an input. |
+| Cost attribution to the consumer account by user id, without tagging | Out of scope (cost allocation, §1.6). Not in the code; there is no per-user identity yet (D-15). |
+| E-mail, SMS and Slack alerting with OpenOps integration | Not in Slices 3–5 (A-i, D-17). The repository has no OpenOps or SMS code; Slack and e-mail report delivery are deferred (README, "Deferred to later waves"). |
+
+#### D-x1 Agentic interface
+
+**What it means.** Agents that platform and engineering teams **control**:
+which model runs and where (including inside the account whose data it
+reads), what it may read, what it may propose, and which actions need a
+person. The agent proposes; people decide. In the owner's words, "the
+creative judgment stays with the FinOps and Finance teams."
+
+**What the repository has today: an MVP.** The owner: "We already had an
+MVP with an agentic interface, with Ratio, but that was never advanced
+into product depth of coded capability and end-to-end." Checked on
+`origin/main`:
+
+| Piece | Where | What it does | Limits today |
+|---|---|---|---|
+| Data-grounded chat agent | `src/ai/` (`AIClient.ts`, `LiveAIClient.ts`, `MockAIClient.ts`), `src/ai/buildAIContext.ts`, `pages/api/v1/ai/chat.ts` | Answers cost questions from a snapshot of the initiative board and seed workloads, injected into the system prompt (README: "answers cost questions through a data-grounded agent") | **Answers only**: no tool or function calls in the route or in `src/ai/`, so it cannot act. Reads seed data, not published facts or any Slice 3–5 output. Non-streaming (a TODO in the route). |
+| Provider control | `AI_PROVIDER`, `src/ai/providers.ts`; README, "AI providers" | Chosen server-side, keys never in the browser; `mock` by default; `claude`, `openai`, `mistral`, `qwen`, and `openllm` (aliases `ollama`, `vllm`, `tgi`, `lmstudio`, `llama.cpp`) for **self-hosted open-weight models**; any live provider turns gateway auth on | One provider per deployment; nothing routes per account. "The live LLM path is built but inactive until `AI_PROVIDER` is set" (README). |
+| Peer-agent exchange (FinIO) | `src/finio/`, `pages/api/v1/a2a/handshake.ts`, `pages/api/v1/finio/` | Another agent authenticates (`X-FinIO-Peer-Token`), negotiates a FOCUS version and receives FOCUS-shaped rows | v1 excludes real auth infrastructure, persistence, multi-party fan-out, async push and a genuinely external counterpart (README). |
+| Human gate on proposed changes | `src/mission/adjustmentGate.ts`, `src/mission/AdjustmentCards.tsx` | A person proposes a change; the prediction seam scores it; at ≥ 99 % confidence it is "ready to apply", **never auto-applied**; below, it is queued at the Cost gate (Gate 3) or Scale gate (Gate 4) for human confirmation | Proposals come from the person and the rule-based `src/prediction`, not from the LLM agent. |
+| Change-management route | `pages/api/v1/cm/change.ts` | Creates, attaches and reads Jira or ServiceNow tickets for a finding (mock by default) | Not called by the agent. |
+
+`src/tokenomics/` (token-pipeline integrity metrics over a mock seed) and
+`src/findings/` (rule-based recommendations) sit beside the agent and are
+not part of it.
+
+**Gap after Slices 3–5.** Slices 3–5 add no agent capability. The agent
+cannot read forecasts, intervals, accuracy, anomalies or root causes; it
+cannot propose or take an action; A-k is out of scope (P2); nothing routes
+a model per account or accounts for tokens and cache per account.
+
+**What product depth, end to end, would add (all proposed; none of it is
+in the code):**
+1. **The agent reads Slices 3–5's outputs** as tools over the read API
+   (`costs/daily`, `forecasts`, `forecasts/accuracy`, `anomalies`,
+   `anomalies/{id}`, `freshness`; §5.1), under the same tenant binding and
+   reader login, and every figure it cites carries its interval,
+   "estimated" flag and backtest accuracy.
+2. **Anomaly investigation (A-k):** the agent walks an anomaly's root
+   causes (§4.5) and its history and proposes an explanation, labelled as
+   a proposal.
+3. **Recommendations gated by human approval:** the agent proposes; a
+   FinOps or Finance owner approves or rejects, following the adjustment
+   gate's pattern (never auto-applied).
+4. **Governed actions:** anything with an effect (a ticket through the
+   change-management route, a notification once D-17 exists, a budget
+   change) needs an explicit, recorded approval by a named person, so it
+   depends on per-user identity (D-15).
+5. **Per-account, self-hosted models:** `openllm` already lets an operator
+   point the agent at a self-hosted model. Proposed: a model endpoint per
+   production account, adapted on that account's own daily data, so
+   tokens, cache and what is learned stay inside the account (the owner's
+   framing). Not in the code: per-account routing, any training or
+   adaptation, per-account token and cache accounting.
+6. **Limits a team sets:** what the agent may read and propose, and a
+   token budget per account, so the agent knows when to stop.
+
+**Candidate follow-on slices (proposed, owner decision; OD-2, OD-3):**
+
+| Id | Slice | Depends on |
+|---|---|---|
+| X1-a | Read-only agent over the baseline (item 1); no actions | 4-5, 5-5 merged |
+| X1-b | Anomaly investigation, A-k (item 2) | X1-a; 5-4's measured precision |
+| X1-c | Approval-gated recommendations and governed actions (items 3, 4) | X1-a; per-user identity (D-15) |
+| X1-d | Per-account self-hosted models and token/cache accounting (items 5, 6) | X1-a; an owner decision on hosting (BOUNDARY v2 still applies) |
+
+#### D-x2 Private cloud and hybrid estates
+
+**What it means.** Analyse, forecast and detect over estates that mix
+public cloud with private cloud and on-prem infrastructure, in the same
+published model and with the same evidence as public cloud. The owner:
+"Private cloud is enabled through connectors to Nutanix, MCP and others,
+ie. Azure Local, Nvidia tracing local consumption."
+
+**Connectors named by the owner, and their status on `origin/main`:**
+
+| Connector | Status | Evidence |
+|---|---|---|
+| Nutanix | **exists** | `src/costsource/nutanixConfig.ts` (coverage `on_prem`): HTTPS GET of a Nutanix Cloud Manager FOCUS export endpoint (`src/costsource/transports/httpFocusTransport.ts`, key in `X-ntnx-api-key`); README, "Cost connectors" |
+| MCP | **exists for another use** | `src/costsource/PointFiveMcpTransport.ts`: OAuth 2.1, then MCP over SSE, for PointFive only; `src/costsource/focusExportConnectors.ts` keeps PointFive apart because it "speaks MCP/OAuth and has its own adapter". The file calls its SSE client scaffolding whose wire framing must still be validated against a live account. MCP is the connector protocol the owner names for private-cloud sources; **a general MCP connector for private-cloud consumption sources is not yet implemented (proposed).** |
+| Azure Local | **not yet implemented** | nothing under `src/` for "azure local", "azure stack" or "hci"; proposed |
+| NVIDIA, tracing local consumption | **not yet implemented** | nothing under `src/` for "nvidia" or "dcgm". Meaning: tracing locally run GPU and accelerator consumption. The telemetry mechanism is not chosen; NVIDIA DCGM is one candidate **(unverified)**. Proposed |
+
+Other private-cloud sources that exist:
+
+| Connector | Status | Evidence |
+|---|---|---|
+| Kubernetes (OpenCost / Kubecost FOCUS export) | **exists** | `src/costsource/kubernetesConfig.ts` (coverage `private_cloud`) |
+| S3-compatible stores (MinIO, Ceph RGW, StorageGRID) | **exists** | `AWS_S3_ENDPOINT` (`src/costsource/cloudConnectorConfig.ts`), path-style addressing (`src/costsource/transports/awsS3Transport.ts`); README, "Cost connectors" |
+
+`SourceCoverage` is `public_cloud | private_cloud | on_prem`
+(`src/costsource/CostSourceClient.ts`); there is no `hybrid` value. In
+this section a hybrid estate means a tenant whose sources span more than
+one coverage.
+
+**The gap that matters most.** These connectors feed the **CostSource
+seam** (`GET /api/costsource/rows`), not the **trusted ingestion path**
+(`src/ingest/**`) whose published facts Slices 3–5 analyse. That path
+accepts one source layout (`focus_file`, AWS Data Exports) and one real
+provider name, `AWS` (`SOURCE_TYPE_PROVIDERS` in
+`src/ingest/focus/provider.ts`); the source factory refuses any other
+source type before reading data. So no private-cloud or on-prem row can
+reach the published facts, the forecasts or the detector today, and the
+synthetic estate is public-cloud only (§2.2).
+
+**Hybrid-specific behaviours a differentiated tool must handle.** Each is
+**(assumption)**: ours, not checked against a source in this revision.
+
+| Behaviour | Why it matters | Slices 3–5 today |
+|---|---|---|
+| Amortised hardware and capacity-based cost | Cost is a daily share of a purchase (a depreciation schedule), not metered usage, so the series is flat whatever the load | Partly: the `constant_amortised` stressor (commitment-only series, §2.3) must raise no `warning` (AT-5); there is no hardware amortisation |
+| Step changes at hardware purchase, expansion or refresh, or at the end of a depreciation schedule | A planned step looks like a level shift; it should be an expected, labelled event, not an anomaly | No hardware-event input. Commitment start and expiry are the analogous expected events (§4.1) |
+| Shared-infrastructure allocation | A cluster's cost is split among consumers by a rule; a rule change or another consumer's load moves a consumer's cost without any change of its own | Allocation and Kubernetes cost splitting are out of scope (§1.6) |
+| Utilisation-driven cost | With fixed capacity the total is constant; the signal is utilisation and unit cost (idle capacity), not spend | Only `EffectiveCost` of usage is monitored (`M`, D-09); no utilisation measure |
+| No provider list prices | Private-cloud rates are internal rate cards set by the operator; a "price change" is a rate-card decision | `price_change` is a provider-wide unit-price stressor that must alert (§2.5); whether an internal rate-card change should alert is undecided |
+| GPU and accelerator consumption traced locally (NVIDIA-like) | Job-shaped, bursty, often intermittent usage costed through an internal rate | Intermittent series are scored weekly or by the hurdle statistic (D-24); not tested on GPU-shaped series |
+| Export shape and cadence | Private-cloud exports may be partial FOCUS, non-daily or late | The trusted path reads one layout; late data is exercised on `ci` only (§2.7) |
+
+**Candidate follow-on slices (proposed, owner decision; OD-1, OD-3):**
+
+| Id | Slice | Depends on |
+|---|---|---|
+| X2-a | Trusted-path source types for private-cloud exports (Nutanix and Kubernetes FOCUS exports first), each with its own provider policy as #62 did for synthetic names; restricted (ingestion, `financial_semantics`) | own design |
+| X2-b | A synthetic hybrid profile (candidate shapes: Nutanix-like on-prem capacity cost, Azure Local-like hybrid, NVIDIA-like GPU consumption) with ground truth for hardware events; its own sizing | X2-a, so the rows go through the real path (§2.1, principle 3) |
+| X2-c | Hybrid-aware forecasting and detection: expected-event inputs for hardware events, a utilisation measure, allocation-aware root cause | X2-b |
+| X2-d | A general MCP connector for private-cloud consumption sources (Azure Local, NVIDIA-like local consumption tracing) | X2-a |
 
 ## 2. Slice 3 — Synthetic FOCUS generator at scale
 
@@ -700,7 +909,7 @@ prior calendar cycle at the start of the evaluation window.
 
 | Capability or target | `ci` | `fleet15k` | `full` |
 |---|---|---|---|
-| All 15,000 accounts analysed, forecast and monitored (the owner's goal) | no (150) | **yes** (with the tail-service caveat) | yes |
+| All 15,000 accounts analysed, forecast and monitored (the baseline at the owner's scale) | no (150) | **yes** (with the tail-service caveat) | yes |
 | FT-1, FT-2 (tenant month-end, day 1 / 15) | smoke | yes; n = 8 each (2 months × 4 currencies), reported with n | yes |
 | FT-3 … FT-6 | smoke | yes; FT-4 and FT-5 on **individual** leaves (≈ 22.5 k), `Other services` reported separately | yes |
 | FT-7 (coverage on held-out data) | no | yes: calibrated as of each origin, scored from origins 93–114 | yes |
@@ -917,7 +1126,7 @@ both selected and scored on the same data (§3.8):
 
 **Calendar-event component (decided, D-22).** Real billing has strong
 month-start and month-end patterns (fees, commitment charges, batch jobs,
-billing runs), and a tool at par must not page on them. M0 and M1 are
+billing runs), and a credible FinOps tool must not page on them. M0 and M1 are
 multiplied by per-series factors for three fixed **event classes**:
 
 | Class | Days | Typical cause |
@@ -2663,6 +2872,19 @@ so that the decision log carries them.
   follow-up slice. Billed actuals stay in `costs/daily` (§3.1).
 - **The pointer guard trigger** protects against bugs, not against a
   compromised analytics login (Appendix D.1).
+
+### Open owner decisions (rev. 28)
+
+The owner's correction of the goal (§0) raises three scope questions.
+They are **open owner decisions**, not decided under the orchestrator's
+delegation like the rows above. Each carries a recommendation; nothing in
+Slices 3–5 changes until the owner decides.
+
+| Id | Question | Options | Recommendation (open) |
+|---|---|---|---|
+| OD-1 | Should the Slices 3–5 synthetic estate include private-cloud or hybrid sources **now**, or in a later slice? | (a) **Now**: add hybrid sources to the generator, which changes the generator, the `fleet15k` sizing (Appendix B) and possibly the targets, and reopens a design approved over 27 revisions. (b) **Later**: keep Slices 3–5 public-cloud only; build a synthetic hybrid profile in X2-b, after X2-a, with candidate shapes tied to the connectors the owner named: **Nutanix-like on-prem capacity cost** (amortised, with steps at refresh), **Azure Local-like hybrid** (one estate split between on-prem and public cloud), **NVIDIA-like GPU consumption** (job-shaped, intermittent). | **(b), later.** The trusted path accepts no private-cloud source type today (§1.8), so synthetic hybrid rows would need a backdoor, which §2.1 (principle 3) rules out; X2-a has to come first either way. Hybrid behaviours (§1.8) also break the model family the targets assume (§2.1, principle 6), so adding them now would mean new targets, and targets are the owner's decision. The cost of waiting: the baseline is proven on public-cloud-shaped data only, and hybrid detection may need changes later; the expected-event pattern already used for commitments (§4.1) is the likely hook. |
+| OD-2 | Should A-k (AI-assisted investigation), or another agentic capability, move from P2 into an earlier slice? | (a) Into Slices 3–5. (b) A follow-on agent slice right after 4-5 and 5-5: X1-a (read-only agent over the baseline), then X1-b (A-k). (c) Leave at P2 with no date. | **(b).** Keep A-k out of Slices 3–5, whose scope and targets are set. X1-a is small (it reads the merged read API) and turns the existing MVP into one that reads real outputs. A-k (X1-b) should follow 5-4's measured precision, since investigating anomalies of unmeasured quality would spread false positives. Governed actions (X1-c) wait for per-user identity (D-15), since an approval needs a named approver. A-k stays P2 in the §1.5 table until the owner decides. |
+| OD-3 | Priority and order of the differentiators | Agentic first, hybrid first, or interleaved | **Interleaved, agentic first:** X1-a, then X2-a and X2-b, then X1-b, then X1-c (after D-15), X2-c, X2-d, X1-d. X1-a is the smallest step that is visible to users and builds on merged work; X2-a is the precondition for any hybrid analytics and needs its own restricted design; X1-d raises hosting questions that need owner actions under BOUNDARY v2. Notification delivery (D-17) stays a separate follow-up and competes for the same slots. |
 
 ### Owner actions (not decisions)
 
