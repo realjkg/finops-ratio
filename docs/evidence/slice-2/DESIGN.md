@@ -20,7 +20,10 @@ infrastructure is provisioned. Slice 1's worker semantics do not change.
 the foundation manifest (9d83590: `src/ingest/db/foundationManifest.ts` and
 `privilegeModel.ts`, §7), made test-first. Nothing else under `src/ingest/db`
 changes; in particular `withTenantTransaction` (`tenant.ts`) is NOT changed
-(the REPEATABLE READ snapshot comes from the reader pool, §8). The read API *imports* Slice 0's
+(the REPEATABLE READ snapshot comes from the reader pool, §8). Outside
+`src/`, `vitest.db.serial.config.ts` gains one include entry,
+`scripts/local/*.serial.db.test.ts`, for the local bootstrap's real-PG16
+test (EVIDENCE §16). The read API *imports* Slice 0's
 `withTenantTransaction`, `isTenantId` and `REFUSED_PREDEFINED_ROLES`, and Slice 1's
 `inspectRole` / `roleProblems`. It does not copy them.
 
@@ -30,7 +33,7 @@ changes; in particular `withTenantTransaction` (`tenant.ts`) is NOT changed
 |---|---|
 | `docker-compose.local.yml` | The file's default project name is `ratio-local`, but `local.mjs` always passes `-p <project>`: `RATIO_LOCAL_PROJECT` (default `ratio-local`), or for `local:test` `RATIO_LOCAL_TEST_PROJECT` (default `ratio-local-test`). Services: `postgres` (PG16, pinned by digest) and `s3` (SeaweedFS, the digest CI already uses). Both are published on 127.0.0.1 only. Optional profiles: `app` (Next.js) and `worker` (a one-shot `sync`, `restart: "no"`). Named volumes are removed by `local:down -v`. |
 | `scripts/local/local.mjs` | Subcommands `up`, `migrate`, `seed`, `sync`, `down [-v]` and `test`. Every one is idempotent. State (generated local secrets, the tenant id) lives in `.ratio-local/<project>/env` (gitignored; directory 0700, file 0600). `down -v` deletes only its own project's directory. `test` uses its own project and ports (§3.2 settings table, §8). Every child process, network call and wait has a hard deadline (§11; inventory in EVIDENCE §13). |
-| `scripts/local/bootstrap.mjs` | The documented role bootstrap. It runs as the local superuser and creates the three NOLOGIN ratio roles, the migrator, worker and reader logins, and the database. Every statement is idempotent. |
+| `scripts/local/bootstrap.mjs` | The documented role bootstrap. It runs as the local superuser and creates the three NOLOGIN ratio roles, the migrator, worker and reader logins, and the database. Every statement is idempotent. It normalises existing logins and verifies the result, failing closed on any unexpected membership (§3.1). |
 | `.env.example` | Variable names only, for the new server-side settings. |
 | `src/server/costs/query.ts` | Pure: strict query-string validation and an opaque keyset cursor. No `pg`. |
 | `src/server/costs/readerLogin.ts` | The reader-login safety check. It is Slice 1's `inspectRole` + `roleProblems` plus a reader-specific membership rule. |
@@ -272,8 +275,9 @@ Every response of the route, whatever layer writes it, carries
 
 ### 3.1 Roles and logins (bootstrap, run by `local:up` as the container superuser)
 
-Every statement is idempotent: it creates the object only if it is missing,
-and resets the password with `ALTER ROLE … PASSWORD` when the role exists.
+Every statement is idempotent. It creates an object only if it is missing,
+normalises an existing login (item 5), and resets the password with
+`ALTER ROLE … PASSWORD` when the role exists.
 
 1. `ratio_owner`, `ratio_worker` and `ratio_reader` are created exactly as
    0001 would create them: `NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB
@@ -306,8 +310,26 @@ and resets the password with `ALTER ROLE … PASSWORD` when the role exists.
    `infinity`; a past or future date fails). It also requires no per-role
    setting in `pg_db_role_setting`, globally or in any database; settings are
    reported by key only. A NULL or missing value fails closed.
+6. **Every membership touching a managed role is checked, on either side,
+   and the bootstrap fails closed** (Copilot 4176878790, §14). The managed
+   roles are the 3 ratio roles and the 3 logins. `verifyBootstrap` reads every
+   `pg_auth_members` row whose member OR roleid is one of them. Only the three
+   expected edges (login → its ratio role) may exist, each exactly once,
+   granted by the bootstrap superuser, with the item-5 options. Anything else
+   fails:
+   - an unexpected member of a ratio role (`GRANT ratio_reader TO x` would
+     give x the reader's access);
+   - anything granted TO a login;
+   - a login or ratio role in any other role. A predefined `pg_*` role is
+     named as such, with Slice 0's reason from `REFUSED_PREDEFINED_ROLES`;
+   - an expected edge granted by another role, i.e. through ADMIN delegation.
+
+   The bootstrap never REVOKEs. It refuses with the full list and the remedy:
+   remove the membership yourself, or `local:down -v`.
 
 How the bootstrap is verified:
+- `runBootstrap` ends with `verifyBootstrap` (items 1–6) and throws on any
+  problem, so `local:up` fails before anything else runs.
 - `local:migrate` runs `migrate`, then `migrate --status --json`. That must
   exit 0 with `privilegeProblems: []`. The runner's catalog check therefore
   judges these exact logins against Slice 0's privilege model.
@@ -382,7 +404,8 @@ host: the scripts use `pg`, and the server is the pinned PG16 image.
 | Unpublished/staged/quarantined/superseded facts leak | view-only grant + view predicate | DB: ids and totals equal the ground truth of published batches only; none of the other batch ids appear |
 | API runs with a login that bypasses RLS or can escalate | per-request reader-login check (Slice 1 logic, Slice 0 list) | DB: superuser URL, `ratio_owner` member, `ratio_worker` member, reader+worker, a login with no ratio membership ⇒ 503 and no rows; serial DB: BYPASSRLS, a reachable SUPERUSER role, every `REFUSED_PREDEFINED_ROLES` role over INHERIT / SET-only / ADMIN-only edges ⇒ 503 |
 | SQL injection | every value bound (`$n`); identifiers fixed; params validated before use; the cursor is decoded into typed, regex-checked values | fast: hostile values ⇒ 400 with a fixed message; DB: hostile cursor ⇒ 400 |
-| Resource exhaustion | `limit` ≤ 500, keyset (no OFFSET), totals on the first page only, `statement_timeout` 10 s, pool max 4 | fast: limit bounds |
+| Resource exhaustion | `limit` ≤ 500, keyset (no OFFSET), totals on the first page only, `statement_timeout` 10 s, pool max 4; client-side `connectionTimeoutMillis` 5 s, `query_timeout` 12 s and a 20 s request deadline, a stuck client destroyed (§2.2) | fast: limit bounds; RD1–RD4; DB: D11, D12 |
+| A stray role holds a local ratio role or a local login (local stack) | `verifyBootstrap` judges every membership edge touching a managed role, on either side, and its grantor; the bootstrap fails closed and never revokes (§3.1 item 6) | fast: L21, L25; serial DB: D13 |
 | Error/info leakage | fixed messages for 4xx/503; 500 via the gateway envelope; reasons logged redacted | fast: no echo of input; DB: unsafe login ⇒ the body has no role names |
 | Ingestion/driver code in the browser | import boundary (allowlist) + import-closure test + `check:bundle` on `.next/static` | fast + CI |
 | SSRF | n/a: the route makes no outbound request; the DB URL is env only | — |
@@ -847,3 +870,32 @@ has started:
 - a child handed to `setApp` late is SIGKILLed and awaited;
 - `runLocalTest` waits, for at most 10 s, for the interrupted body to settle
   before returning to the final process-group sweep.
+
+## 14. Copilot reviews of 787824b and 5e4acf9 (local, not pushed)
+
+**4176705227 / 4176705245 (787824b; EVIDENCE §16).**
+- Existing logins are normalised and verified in full (§3.1 item 5).
+- `stopChild` stops a tracked leader's whole process group (§10).
+- A group stays tracked until it is empty (§11).
+
+**High 4176878790 (5e4acf9): unexpected memberships on either side.**
+- **Cause:** the membership query matched only edges whose MEMBER was a
+  managed role. `GRANT ratio_reader TO x` has `member = x`, so it was
+  invisible, and the bootstrap reported clean while x held reader access.
+  D13 reproduced this on PG16 at red.
+- **Fix:** every edge whose member OR roleid is a managed role is read,
+  with its grantor, and anything but the three expected edges fails
+  (§3.1 item 6). The sweep covers:
+  - **grantor:** PG16 records any superuser's grant as made by the
+    bootstrap superuser (oid 10), verified live, so any other grantor means
+    ADMIN delegation;
+  - **ADMIN on an expected edge:** already refused (item 5 options);
+  - **predefined roles:** membership of a managed role in any `pg_*` role,
+    named with Slice 0's reason. `bootstrap.mjs` is a plain node script and
+    cannot import the TypeScript list, so it keeps a mirror, and L25 fails
+    on any drift from `REFUSED_PREDEFINED_ROLES`.
+- **Decision: fail closed, never REVOKE.** A local cluster may share roles
+  with something else, and a membership the bootstrap did not create may be
+  intended there. Removing it is left to a person. `local:up` fails with
+  the full list and the remedy. Migration 0001 grants no role membership,
+  so a migrated cluster has exactly the three expected edges.

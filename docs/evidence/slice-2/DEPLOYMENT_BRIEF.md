@@ -308,6 +308,11 @@ Slice 2 reuses the existing API auth unchanged:
 - **Logins never get explicit grants.** Membership in exactly one ratio role
   is the whole privilege model. The catalog check refuses anything beyond the
   reviewed set.
+- **Audit every member of each ratio role, not only the intended logins.** A
+  stray `GRANT ratio_reader TO x` gives `x` the reader's access. The local
+  bootstrap refuses any membership edge touching a ratio role or one of its
+  logins beyond the expected three, and revokes nothing (DESIGN §3.1 item 6).
+  An operator should check the same thing on a production cluster.
 - **Down migrations are refused in production** by design. A production
   rollback of 0001 would drop all ingested data, which is a retention decision
   (D-03).

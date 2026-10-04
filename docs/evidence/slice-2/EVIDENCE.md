@@ -1,7 +1,23 @@
 # Slice 2 — evidence (local stack, published-costs read API, deployment brief)
 
 Branch `slice/02-local-env-brief`, from `origin/main` 6eac391. Local and
-ephemeral only. Nothing pushed, no GitHub comments.
+ephemeral only. The implementer never pushes or comments on GitHub; the
+coordinator pushes reviewed commits.
+
+**How to read this file.** It is a log, in order:
+- §1–§9 record the first implementation round;
+- each later section records one review round.
+
+Each section is accurate as of its own commits. Statements of their time
+are historical, not current claims; a later section supersedes them where
+noted:
+- test counts and gate results;
+- "local, not pushed";
+- "CI not run on GitHub";
+- transcripts.
+
+**The current state** is in DESIGN.md §1–§6 (kept current) and in the
+latest section's gates (§17).
 
 Isolation:
 - Every DB run used a private PG16 cluster: `initdb` as `postgres` (via
@@ -170,7 +186,7 @@ is now a CI step.
 | `npm run local:test` (CI command) | pass (§7) |
 | `npm audit --omit=dev` | 0 vulnerabilities |
 | `ps` / docker after the runs | no `next`, worker, vitest or `local.mjs` process; no `ratio-local*` container, volume or network; no `.ratio-local/`. (The only `weed` process is the pre-existing shared `ratio-s3` container.) |
-| `.github/workflows` | +13 lines (two steps after Build); the governance tests (`scripts/governance`, 397) pass. **Not executed in GitHub** (no push). |
+| `.github/workflows` | +13 lines (two steps after Build); the governance tests (`scripts/governance`, 397) pass. **Not executed in GitHub at the time** (no push). Historical: CI has since run on GitHub on the pushed commits (green on 787824b and 5e4acf9). |
 
 A `MaxListenersExceededWarning` in the DB suite is pre-existing: it also
 appears in the baseline run on origin/main.
@@ -191,7 +207,13 @@ appears in the baseline run on origin/main.
 | `local:down -- -v` | containers 0, volumes 0, networks 0, `.ratio-local/` gone |
 
 **`npm run local:test`** (up ×2 → migrate ×2 → seed ×2 → sync → sync → `next start`
-→ API → `down -v`):
+→ API → `down -v`).
+
+**This transcript is historical, from before the fix for Copilot 4176238961
+(§14).** Here `rowCount` is still a JSON number (`55`, `40`). Since dfc7d35
+it is the bigint's decimal string (`"55"`, `"40"`), and `local:test`
+compares it as an exact string (L8). For the current output, see the latest
+gates (§17, `npm run local:test`).
 ```
 {"type":"ratio.local-test","project":"ratio-local-s2a","steps":{"up":"ok (twice)",
  "migrate":{"currentVersion":"0001","privilegeProblems":[]},"seed":"ok (twice)",
@@ -202,8 +224,11 @@ appears in the baseline run on origin/main.
                   {"billingPeriod":"2026-08-01","billingCurrency":"USD","rowCount":40,"billedCost":"21.0978157665"}],
         "rows":95,"distinct":95},"down":"ok (-v)"},"pass":true}
 ```
-The reader totals equal `fixtures/focus-1.0-synthetic/control-totals.json`
-(`base`) **as exact strings**. 95 rows over 6 pages (limit 17), all distinct.
+At the time, the reader totals equalled
+`fixtures/focus-1.0-synthetic/control-totals.json` (`base`) as follows:
+`billedCost` as an exact string, and `rowCount` as the number shown above,
+so not "all exact strings". Today both are compared as exact strings (§14,
+L8). 95 rows over 6 pages (limit 17), all distinct.
 
 **Local findings.**
 - SeaweedFS's default `volume.max=8` cannot grow a second bucket: the first
@@ -245,9 +270,11 @@ The reader totals equal `fixtures/focus-1.0-synthetic/control-totals.json`
 - Pages are consistent per page, not across pages: a republish between page
   requests can mix revisions. Each row carries `batchId` and `publishedAt`.
 - `totals` scans the filter on every first page. That is fine at pilot size.
-- The CI steps have not run on GitHub (no push). Docker Compose v2 on
-  `ubuntu-latest` and the image pulls are expected to add about 1–2 min to a
-  job that currently runs about 3.5–4 min under a 10 min timeout.
+- (Historical.) The CI steps had not run on GitHub when this was written
+  (no push). They have since run green on the pushed commits (787824b,
+  5e4acf9). The estimate was that Docker Compose v2 on `ubuntu-latest` and
+  the image pulls would add about 1–2 min to a job of about 3.5–4 min under
+  a 10 min timeout.
 - The deployment brief records D-01..D-10 as DECIDED (owner delegation to the
   orchestrator, 2026-10-04). The production go-live sign-off is NOT delegated (non-delegable owner gate). Owner actions: (1) go-live sign-off, (2) hosting spend, (3) GitHub App, (4) real billing data, optional. The acceptance run uses the public FOCUS 1.0 Sample Data (CC BY 4.0) in a follow-up PR after #59.
 
@@ -929,10 +956,10 @@ No assertion was weakened.
 | **4176494757**: BEGIN and ROLLBACK anywhere in the enclosing function is no proof | High | b73ae23, cb29bbb | **Acceptance is now strict:**<ul><li>the same receiver for BEGIN, the call and the ROLLBACK;</li><li>BEGIN is an unconditional statement strictly before the call, in the same function (a nested function never counts);</li><li>nothing ends the transaction in between;</li><li>the ROLLBACK is unconditional after the call: first in the `finally` of an enclosing `try`, or straight-line with no `return`, `throw`, `break`, `continue` or `COMMIT` in between;</li><li>helpers (`inTxn`) are verified by the same rules for their callback call with that client, and the callback must not end the transaction itself.</li></ul>**Self-tests flag each bypass:** a different client; ROLLBACK before the GRANT; an unused nested function; a conditional BEGIN; a conditional ROLLBACK; plus an early exit, COMMIT or no ROLLBACK on a straight line, and 4 helper bypasses. **Slice 0/1 files:** unchanged and passing. Non-vacuity: memberPrivileges ≥ 6, privileges ≥ 6 and roles ≥ 2 proven rolled-back calls. Mutations G1–G7 |
 | **4176494775**: the raw-text prefilter skips SQL the AST would rebuild | High | b73ae23, cb29bbb | **The prefilter is gone:** every `.query(...)` call of every non-serial DB test file is scanned. **How the SQL is rebuilt:** from the AST, with a one-file TypeScript checker covering literals, templates, `+` concatenation, `const` bindings, `for…of` over array literals, parameters of functions only ever called directly, and SQL quote doubling (`.replace(/'/g, "''")`); dynamic values are placeholders. **Findings outside a proven transaction:** a bare variable, a call, an object, or a dynamic part in statement position (start of a statement, `EXECUTE`, `format('…`). Self-tests cover concatenation (`'GR' + 'ANT …'`, `'ALT' + 'ER ROLE …'`), the variable case, a call, a statement hole, an object, and the resolvable cases. **Reviewed allowlist: 3 entries,** all Slice 0 calls (file, SHA-256 of the call, reason; listed below); drift fails, with a self-test. Mutations G8–G11 |
 | **4176494809**: the API pool has no client-side deadline | Medium | b73ae23, de4d25a | **Bounds:**<ul><li>`query_timeout` 12 s, above the server's 10 s `statement_timeout`;</li><li>`connectionTimeoutMillis` 5 s;</li><li>`readWithDeadline` bounds the whole request at 20 s: tenant transaction, login check and reads.</li></ul>**A guarded client** that had a client-side failure (no SQLSTATE), or is still held at the deadline, is released with the error and its socket destroyed. Once poisoned, it refuses further queries, so the ROLLBACK doesn't queue behind the stuck one. Slice 0's `withTenantTransaction` is unchanged. **Tests:**<ul><li>RD1: the config;</li><li>RD2: a query that never answers, a poisoning timeout, a healthy release;</li><li>RD3: the route against a fake Postgres that accepts and never answers gives 500 within the connect deadline, and a connection stalled mid-request gives 500 at the deadline with the client destroyed;</li><li>D11, real Postgres behind a stall proxy with `max: 1`: 500 within the deadline (`query_timeout`, D11a; request deadline, D11b), 0 pooled clients, and the next request succeeds.</li></ul>Mutations Q1–Q5 |
-| **4176494789**: bootstrap ignores the PG16 membership options | Medium | b73ae23, 631888e | `verifyBootstrap` reads `admin_option`, `inherit_option` and `set_option`, and `membershipProblems` requires exactly one grant per login → ratio-role edge with `EXPECTED_MEMBERSHIP_OPTIONS` = {admin false, inherit true, set true} (what `CREATE ROLE … IN ROLE` gives on PG16). A NULL option fails closed. L21: each wrong option on each of the 3 edges, a NULL option, a duplicate grant, a missing edge, an extra edge, a ratio role as a member, and a static check. `local:test` ran the real bootstrap on PG16 and the verification passed. Mutations B1–B5 |
+| **4176494789**: bootstrap ignores the PG16 membership options | Medium | b73ae23, 631888e | `verifyBootstrap` reads `admin_option`, `inherit_option` and `set_option` (at the time only for edges whose MEMBER was a managed role; since §17, every edge with a managed role on either side, and its grantor), and `membershipProblems` requires exactly one grant per login → ratio-role edge with `EXPECTED_MEMBERSHIP_OPTIONS` = {admin false, inherit true, set true} (what `CREATE ROLE … IN ROLE` gives on PG16). A NULL option fails closed. L21: each wrong option on each of the 3 edges, a NULL option, a duplicate grant, a missing edge, an extra edge, a ratio role as a member, and a static check. `local:test` ran the real bootstrap on PG16 and the verification passed. Mutations B1–B5 |
 | **4176494798**: a late `startIfPortFree` can spawn after the cleanup | Medium | b73ae23, 5e2a232 | Once the cleanup has started (body done or interrupted):<ul><li>`spawnGuard` refuses to spawn, and `next start` is spawned through it;</li><li>a child handed to `setApp` late is SIGKILLed (its group) and awaited (`summary.lateChildren`);</li><li>`runLocalTest` waits for the interrupted body to settle, bounded by `bodySettleMs` (10 s), before the caller's final process-group sweep.</li></ul>L22 is deterministic, with an injected 400 ms delay after a 100 ms abort. Mutations S1–S4 |
 
-### The reviewed allowlist (3 entries, all in Slice 0 test files, which this PR may not edit)
+### The reviewed allowlist (3 entries, all in Slice 0 test files, which this PR may not edit; historical: 5 entries since §15a)
 
 | File | Call | Why it is safe |
 |---|---|---|
