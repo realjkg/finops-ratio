@@ -9,7 +9,8 @@
 //     output never depends on a database or role default (Copilot 4176238982;
 //     startup options take precedence over ALTER ROLE / ALTER DATABASE
 //     defaults, and publishedCosts.ts asserts them in every read).
-import { Pool } from 'pg';
+import { Pool, type PoolConfig } from 'pg';
+import { READ_TIMEOUTS } from './readDeadline';
 
 export const READER_SESSION_OPTIONS = [
   '-c search_path=pg_catalog,pg_temp',
@@ -29,20 +30,37 @@ export const READER_SESSION_OPTIONS = [
 
 const pools = new Map<string, Pool>();
 
+/**
+ * The reader pool's configuration. Client-side deadlines (Copilot 4176494809):
+ * query_timeout slightly above the server's statement_timeout, and a connect
+ * timeout; the request deadline and the destruction of a stuck client are in
+ * readDeadline.ts. `overrides` exist for tests only.
+ */
+export function readerPoolConfig(url: string, overrides: Partial<PoolConfig> = {}): PoolConfig {
+  return {
+    connectionString: url,
+    max: 4,
+    connectionTimeoutMillis: READ_TIMEOUTS.connectMs,
+    query_timeout: READ_TIMEOUTS.queryMs,
+    idleTimeoutMillis: 10_000,
+    application_name: 'ratio-reader-api',
+    options: READER_SESSION_OPTIONS,
+    ...overrides,
+  };
+}
+
+export function createReaderPool(url: string, overrides: Partial<PoolConfig> = {}): Pool {
+  const pool = new Pool(readerPoolConfig(url, overrides));
+  // An idle client's error (e.g. the server terminated it) must never crash
+  // the process; the next request simply gets a fresh connection.
+  pool.on('error', () => undefined);
+  return pool;
+}
+
 export function readerPool(url: string): Pool {
   let pool = pools.get(url);
   if (!pool) {
-    pool = new Pool({
-      connectionString: url,
-      max: 4,
-      connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 10_000,
-      application_name: 'ratio-reader-api',
-      options: READER_SESSION_OPTIONS,
-    });
-    // An idle client's error (e.g. the server terminated it) must never crash
-    // the process; the next request simply gets a fresh connection.
-    pool.on('error', () => undefined);
+    pool = createReaderPool(url);
     pools.set(url, pool);
   }
   return pool;

@@ -24,6 +24,7 @@ import type { SlidingWindowRateLimiter } from '@/server/gateway/rateLimit';
 import { parsePublishedCostsQuery } from './query';
 import { readPublishedCosts } from './publishedCosts';
 import { readerPool } from './readerPool';
+import { READ_TIMEOUTS, readWithDeadline } from './readDeadline';
 import { UnsafeReaderLoginError } from './readerLogin';
 
 export const ROUTE_MESSAGES = {
@@ -42,6 +43,8 @@ export interface PublishedCostsRouteDeps {
   logger?: (entry: GatewayLogEntry) => void;
   /** Gateway rate limiter override. */
   limiter?: SlidingWindowRateLimiter;
+  /** Whole-request deadline for the database read (tests shorten it). */
+  requestDeadlineMs?: number;
 }
 
 function sendAuthFailure(res: NextApiResponse, auth: Exclude<LiveAuthResult, { kind: 'ok' }>): void {
@@ -66,6 +69,7 @@ function sendAuthFailure(res: NextApiResponse, auth: Exclude<LiveAuthResult, { k
 export function createPublishedCostsRoute(deps: PublishedCostsRouteDeps = {}): NextApiHandler {
   const envOf = (): Env => deps.env ?? process.env;
   const poolFor = deps.poolFor ?? readerPool;
+  const deadlineMs = deps.requestDeadlineMs ?? READ_TIMEOUTS.requestMs;
 
   async function handler(req: NextApiRequest, res: NextApiResponse): Promise<void> {
     const config = publishedCostsConfig(envOf());
@@ -80,7 +84,9 @@ export function createPublishedCostsRoute(deps: PublishedCostsRouteDeps = {}): N
       return;
     }
     try {
-      const page = await readPublishedCosts(poolFor(readerUrl), tenantId, parsed.value);
+      // Bounded end to end (Copilot 4176494809): the tenant transaction, the
+      // login check and the reads; a stuck client is destroyed, not pooled.
+      const page = await readWithDeadline(poolFor(readerUrl), (p) => readPublishedCosts(p, tenantId, parsed.value), deadlineMs);
       res.status(200).json(page);
     } catch (err) {
       if (err instanceof UnsafeReaderLoginError) {
