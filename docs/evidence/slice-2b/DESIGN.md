@@ -372,6 +372,7 @@ worker or the expected side.
 | A6 | 〃 | each mutation changes the staged objects as §6 says; an unknown kind is refused |
 | A7 | 〃 | `verifyDatasetFile` / `fetchPinnedFile`: a size or hash mismatch is refused and leaves no file; a matching body is written atomically; a fetch is bounded by a deadline |
 | A8 | 〃 | `package.json` wires `local:acceptance` and `sample:fetch`; `.ratio-sample-data/` is gitignored; `NOTICE.md` names the licence, the source, the commit and the changes; the committed file's SHA-256 equals `dataset.json` |
+| A9 | 〃 (added with the wiring, 862e2be) | static: `local:acceptance` runs on its own settings, after the preflight, inside `runLocalTest` with the interrupt; the pin and the calculator are checked before any stack exists; the real worker CLI runs twice, with no fake source, test hook or manifest control; every comparison fails the run |
 | P1 | `scripts/acceptance/test_focus_control_totals.py` | the Python calculator: tokenizer, decimal sums (exact, max scale), NULL handling per column, the digest, fail-closed cases, `--expect-sha256` |
 | P2 | `scripts/acceptance/controlTotals.test.mjs` (vitest) | runs P1 (exit 0 required; python3 missing ⇒ **fail**, never skip), then runs the calculator on the committed 1k file and requires its output to equal the pinned `control-totals.json` |
 | E2E | `npm run local:acceptance` (CI) and `-- --dataset 10k` (on demand) | §5; mutation runs §6 |

@@ -1,0 +1,144 @@
+{
+  "type": "ratio.local-acceptance",
+  "dataset": "1k",
+  "mutation": "skip-null-conversion",
+  "project": "ratio-s2b-acc",
+  "steps": {
+    "timingsMs": {
+      "controlTotals": 174,
+      "stage": 126,
+      "up": 4357,
+      "migrate": 3995,
+      "seed": 565,
+      "sync": 534,
+      "total": 20340
+    },
+    "dataset": {
+      "key": "1k",
+      "file": "fixtures/focus-1.0-sample/focus_sample.csv",
+      "bytes": 755423,
+      "sha256": "e91e5ac7edf01ed2c9d926f37ef7dc1ae2aae97956fea8da6c9ee488b1c2839e",
+      "commit": "adbdd17a132984d6e8583c149c236d2199c3f5bc",
+      "licence": "CC BY 4.0"
+    },
+    "mutation": "skip-null-conversion",
+    "control": [
+      {
+        "billingPeriod": "2024-09-01",
+        "billingCurrency": "USD",
+        "rowCount": "999",
+        "billedCost": "20.28022672899",
+        "effectiveCost": "14.97651418586",
+        "effectiveCostNulls": "0",
+        "rowDigest": "704b8c4919c9c46e393173834c3878e8972cff1207af7b9b8833a42b77a52ee1"
+      },
+      {
+        "billingPeriod": "2024-10-01",
+        "billingCurrency": "USD",
+        "rowCount": "1",
+        "billedCost": "0.24000000000",
+        "effectiveCost": "0.00000000000",
+        "effectiveCostNulls": "0",
+        "rowDigest": "3ac9ffea540e79689c84e48af59b652872318ec2ebfe343745853f2f9ca634f3"
+      }
+    ],
+    "staging": {
+      "periods": [
+        {
+          "billingPeriod": "2024-09-01",
+          "records": 999,
+          "dataFiles": 1
+        },
+        {
+          "billingPeriod": "2024-10-01",
+          "records": 1,
+          "dataFiles": 1
+        }
+      ],
+      "objects": [
+        {
+          "key": "focus-sample/focus-1-0-sample/data/BILLING_PERIOD=2024-09/sample-e91e5ac7edf0/focus-1-0-sample-00001.csv.gz",
+          "bytes": 93484,
+          "sha256": "94a5eeb7ad8a7e53234ef2ad212449a1ee7b9f47782e971239c4f57db32367ca"
+        },
+        {
+          "key": "focus-sample/focus-1-0-sample/metadata/BILLING_PERIOD=2024-09/focus-1-0-sample-Manifest.json",
+          "bytes": 344,
+          "sha256": "168584e6d52c92e65bf03b70364251a0f5a223ac1a92e014b7aa0934e56638f2"
+        },
+        {
+          "key": "focus-sample/focus-1-0-sample/data/BILLING_PERIOD=2024-10/sample-e91e5ac7edf0/focus-1-0-sample-00001.csv.gz",
+          "bytes": 690,
+          "sha256": "404629573cea8813383d3a24aa6714ea087fe9dec9bba4cf4bf21ac0a34b5baf"
+        },
+        {
+          "key": "focus-sample/focus-1-0-sample/metadata/BILLING_PERIOD=2024-10/focus-1-0-sample-Manifest.json",
+          "bytes": 344,
+          "sha256": "1bf07eda57b41b08b41a49a69fd4aed0ae66ddc5688818833cf335de32c2ee4f"
+        }
+      ],
+      "nullTokensReplaced": {}
+    },
+    "migrate": {
+      "currentVersion": "0001",
+      "privilegeProblems": []
+    },
+    "seed": {
+      "objects": 4,
+      "source": "focus-sample"
+    },
+    "sync": {
+      "exit": 1,
+      "durationMs": 330,
+      "periods": [
+        {
+          "period": "2024-09-01",
+          "outcome": "quarantined",
+          "code": "VALIDATION_FAILED"
+        },
+        {
+          "period": "2024-10-01",
+          "outcome": "quarantined",
+          "code": "VALIDATION_FAILED"
+        }
+      ]
+    },
+    "catalog": {
+      "batches": [
+        {
+          "billing_period": "2024-09-01",
+          "status": "quarantined",
+          "reconciliation": "unverified",
+          "is_provisional": false,
+          "row_count": "0",
+          "loaded_billed_total": "0",
+          "validation_error_count": "7",
+          "quarantine_reason": "VALIDATION_FAILED: 7 validation error(s) (UNPARSEABLE_NUMBER x7)"
+        },
+        {
+          "billing_period": "2024-10-01",
+          "status": "quarantined",
+          "reconciliation": "unverified",
+          "is_provisional": false,
+          "row_count": "0",
+          "loaded_billed_total": "0",
+          "validation_error_count": "1",
+          "quarantine_reason": "VALIDATION_FAILED: 1 validation error(s) (UNPARSEABLE_NUMBER x1)"
+        }
+      ],
+      "facts": {
+        "rows": "0",
+        "avg_row_bytes": null,
+        "avg_extra_columns_bytes": null
+      }
+    },
+    "appStop": null,
+    "down": "ok (-v)"
+  },
+  "pass": false,
+  "failures": [
+    "first sync:\n  sync: the evidence record does not pass\n  sync 2024-09-01: quarantined VALIDATION_FAILED\n  sync 2024-09-01: rowCount undefined != control \"999\"\n  sync 2024-09-01: billedTotal undefined != control \"20.28022672899\"\n  sync 2024-09-01: reconciliation undefined, expected \"unverified\" (no control totals in the manifest)\n  sync 2024-10-01: quarantined VALIDATION_FAILED\n  sync 2024-10-01: rowCount undefined != control \"1\"\n  sync 2024-10-01: billedTotal undefined != control \"0.24000000000\"\n  sync 2024-10-01: reconciliation undefined, expected \"unverified\" (no control totals in the manifest)",
+    "next start was never started"
+  ],
+  "error": "first sync:\n  sync: the evidence record does not pass\n  sync 2024-09-01: quarantined VALIDATION_FAILED\n  sync 2024-09-01: rowCount undefined != control \"999\"\n  sync 2024-09-01: billedTotal undefined != control \"20.28022672899\"\n  sync 2024-09-01: reconciliation undefined, expected \"unverified\" (no control totals in the manifest)\n  sync 2024-10-01: quarantined VALIDATION_FAILED\n  sync 2024-10-01: rowCount undefined != control \"1\"\n  sync 2024-10-01: billedTotal undefined != control \"0.24000000000\"\n  sync 2024-10-01: reconciliation undefined, expected \"unverified\" (no control totals in the manifest)"
+}

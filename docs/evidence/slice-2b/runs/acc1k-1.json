@@ -1,0 +1,215 @@
+{
+  "type": "ratio.local-acceptance",
+  "dataset": "1k",
+  "mutation": null,
+  "project": "ratio-s2b-acc",
+  "steps": {
+    "timingsMs": {
+      "controlTotals": 136,
+      "stage": 118,
+      "up": 4228,
+      "migrate": 4254,
+      "seed": 592,
+      "sync": 624,
+      "syncAgain": 354,
+      "appStart": 586,
+      "apiRead": 149,
+      "evidenceRehash": 14,
+      "catalog": 16,
+      "total": 22126
+    },
+    "dataset": {
+      "key": "1k",
+      "file": "fixtures/focus-1.0-sample/focus_sample.csv",
+      "bytes": 755423,
+      "sha256": "e91e5ac7edf01ed2c9d926f37ef7dc1ae2aae97956fea8da6c9ee488b1c2839e",
+      "commit": "adbdd17a132984d6e8583c149c236d2199c3f5bc",
+      "licence": "CC BY 4.0"
+    },
+    "mutation": null,
+    "control": [
+      {
+        "billingPeriod": "2024-09-01",
+        "billingCurrency": "USD",
+        "rowCount": "999",
+        "billedCost": "20.28022672899",
+        "effectiveCost": "14.97651418586",
+        "effectiveCostNulls": "0",
+        "rowDigest": "704b8c4919c9c46e393173834c3878e8972cff1207af7b9b8833a42b77a52ee1"
+      },
+      {
+        "billingPeriod": "2024-10-01",
+        "billingCurrency": "USD",
+        "rowCount": "1",
+        "billedCost": "0.24000000000",
+        "effectiveCost": "0.00000000000",
+        "effectiveCostNulls": "0",
+        "rowDigest": "3ac9ffea540e79689c84e48af59b652872318ec2ebfe343745853f2f9ca634f3"
+      }
+    ],
+    "staging": {
+      "periods": [
+        {
+          "billingPeriod": "2024-09-01",
+          "records": 999,
+          "dataFiles": 1
+        },
+        {
+          "billingPeriod": "2024-10-01",
+          "records": 1,
+          "dataFiles": 1
+        }
+      ],
+      "objects": [
+        {
+          "key": "focus-sample/focus-1-0-sample/data/BILLING_PERIOD=2024-09/sample-e91e5ac7edf0/focus-1-0-sample-00001.csv.gz",
+          "bytes": 91715,
+          "sha256": "85301b485bd57b041eda6379261a6efd5d2dde1ef815ae1414a5ba025cba4590"
+        },
+        {
+          "key": "focus-sample/focus-1-0-sample/metadata/BILLING_PERIOD=2024-09/focus-1-0-sample-Manifest.json",
+          "bytes": 344,
+          "sha256": "168584e6d52c92e65bf03b70364251a0f5a223ac1a92e014b7aa0934e56638f2"
+        },
+        {
+          "key": "focus-sample/focus-1-0-sample/data/BILLING_PERIOD=2024-10/sample-e91e5ac7edf0/focus-1-0-sample-00001.csv.gz",
+          "bytes": 684,
+          "sha256": "2f3c58f1d5d5123cdc7e80e6ab7f262f055e0e9d4f6121d7cc7cbbbb3a6863fd"
+        },
+        {
+          "key": "focus-sample/focus-1-0-sample/metadata/BILLING_PERIOD=2024-10/focus-1-0-sample-Manifest.json",
+          "bytes": 344,
+          "sha256": "1bf07eda57b41b08b41a49a69fd4aed0ae66ddc5688818833cf335de32c2ee4f"
+        }
+      ],
+      "nullTokensReplaced": {
+        "AvailabilityZone": 893,
+        "ChargeClass": 1000,
+        "CommitmentDiscountCategory": 989,
+        "CommitmentDiscountId": 989,
+        "CommitmentDiscountName": 993,
+        "CommitmentDiscountStatus": 996,
+        "CommitmentDiscountType": 989,
+        "ResourceName": 942,
+        "ResourceType": 791,
+        "Tags": 289,
+        "ResourceId": 75,
+        "RegionName": 2,
+        "ConsumedQuantity": 1,
+        "ConsumedUnit": 1,
+        "ListUnitPrice": 1,
+        "SkuPriceId": 1,
+        "ContractedCost": 7,
+        "ContractedUnitPrice": 7,
+        "RegionId": 7
+      }
+    },
+    "migrate": {
+      "currentVersion": "0001",
+      "privilegeProblems": []
+    },
+    "seed": {
+      "objects": 4,
+      "source": "focus-sample"
+    },
+    "sync": {
+      "exit": 0,
+      "durationMs": 435,
+      "periods": [
+        {
+          "period": "2024-09-01",
+          "outcome": "published",
+          "rowCount": "999",
+          "billedTotal": "20.28022672899",
+          "reconciliation": "unverified"
+        },
+        {
+          "period": "2024-10-01",
+          "outcome": "published",
+          "rowCount": "1",
+          "billedTotal": "0.24000000000",
+          "reconciliation": "unverified"
+        }
+      ]
+    },
+    "syncAgain": {
+      "exit": 0,
+      "periods": [
+        {
+          "period": "2024-09-01",
+          "outcome": "skipped_unchanged"
+        },
+        {
+          "period": "2024-10-01",
+          "outcome": "skipped_unchanged"
+        }
+      ]
+    },
+    "appReady": "pid-verified",
+    "anonymous": 401,
+    "api": {
+      "totals": [
+        {
+          "billingPeriod": "2024-09-01",
+          "billingCurrency": "USD",
+          "rowCount": "999",
+          "billedCost": "20.28022672899"
+        },
+        {
+          "billingPeriod": "2024-10-01",
+          "billingCurrency": "USD",
+          "rowCount": "1",
+          "billedCost": "0.24000000000"
+        }
+      ],
+      "rows": 1000,
+      "pages": 2,
+      "limit": 500
+    },
+    "evidence": [
+      {
+        "sha256": "85301b485bd57b041eda6379261a6efd5d2dde1ef815ae1414a5ba025cba4590",
+        "rehash": "85301b485bd57b041eda6379261a6efd5d2dde1ef815ae1414a5ba025cba4590",
+        "bytes": 91715
+      },
+      {
+        "sha256": "2f3c58f1d5d5123cdc7e80e6ab7f262f055e0e9d4f6121d7cc7cbbbb3a6863fd",
+        "rehash": "2f3c58f1d5d5123cdc7e80e6ab7f262f055e0e9d4f6121d7cc7cbbbb3a6863fd",
+        "bytes": 684
+      }
+    ],
+    "catalog": {
+      "batches": [
+        {
+          "billing_period": "2024-09-01",
+          "status": "published",
+          "reconciliation": "unverified",
+          "is_provisional": false,
+          "row_count": "999",
+          "loaded_billed_total": "20.28022672899",
+          "validation_error_count": "0",
+          "quarantine_reason": null
+        },
+        {
+          "billing_period": "2024-10-01",
+          "status": "published",
+          "reconciliation": "unverified",
+          "is_provisional": false,
+          "row_count": "1",
+          "loaded_billed_total": "0.24000000000",
+          "validation_error_count": "0",
+          "quarantine_reason": null
+        }
+      ],
+      "facts": {
+        "rows": "1000",
+        "avg_row_bytes": "1033.5",
+        "avg_extra_columns_bytes": "670.9"
+      }
+    },
+    "appStop": "stopped",
+    "down": "ok (-v)"
+  },
+  "pass": true,
+  "failures": []
+}
