@@ -13,7 +13,7 @@ Status at the time of writing (branch `slice/02-local-env-brief`):
 | Slice 0: Postgres foundation (schema `ratio`, RLS, roles, migration runner, catalog privilege model) | merged |
 | Slice 1: FOCUS ingestion worker CLI (`ratio-ingest`: sync / backfill / replay / quarantine / doctor / replay-fixtures) | merged; **only the SYNTHETIC fixture has ever been ingested** |
 | Slice 2: local stack + `GET /api/v1/costs/published` + this brief | PR #59 |
-| Real-export acceptance run (ingestion-ops SKILL §9) | **NOT PERFORMED**: blocked on the owner granting read access to a real FOCUS export (owner action 1) |
+| Acceptance run (ingestion-ops SKILL §9) | **NOT PERFORMED**. Decided (D-02): it uses the FinOps Foundation's public FOCUS 1.0 Sample Data, so it is **no longer blocked on the owner**. It is a separate follow-up PR after #59 merges. |
 
 ## Decision log
 
@@ -23,7 +23,7 @@ Each decision below was **decided by the orchestrator under delegation,
 | ID | Decision | Rationale (one line) | Revisit when |
 |---|---|---|---|
 | D-01 | Snapshot / manifest artifacts are **unrestricted ONLY when the source encrypts them with strong encryption**: SSE-KMS, or an equivalent AES-256 at-rest scheme, with the encryption **verified from object metadata at ingest**. Anything else stays **restricted**, which is today's default. Foundation manifests (`src/ingest/db/migrations/*.manifest.json`) stay restricted review artefacts. Enforcement (checking the encryption metadata at ingest) is follow-up work (issue draft in Appendix A); until it lands, everything is treated as restricted, the safe subset. | The owner's rule, made checkable; restricted-by-default never under-protects. | A source cannot provide SSE-KMS / AES-256 metadata, or the follow-up issue lands. |
-| D-02 | **AWS Data Exports, FOCUS 1.0, read through a read-only IAM role** (option a: SDK default chain, no static keys; read-only on the export prefix). | Least standing privilege; no long-lived secret; the worker's only real source. | A second provider, or cross-account trust is not available. |
+| D-02 | **The acceptance run uses the FinOps Foundation's public "FOCUS 1.0 Sample Data"**: https://github.com/FinOps-Open-Cost-and-Usage-Spec/focus-sample-data at commit `adbdd17a132984d6e8583c149c236d2199c3f5bc`, files `focus_sample.csv` (1k rows) and `focus_sample_10000.csv` (10k rows). It is anonymized real-world data covering AWS, Google, Microsoft and Oracle. **Licence: CC BY 4.0 — attribution is required** wherever the data, or results derived from it, are committed or published (credit the FinOps Foundation / FOCUS project, link the repository and the licence, and state any changes made). The data is loaded into the local SeaweedFS bucket, ingested by the worker, and read back through `GET /api/v1/costs/published`. The run is **not blocked on the owner**. It is a separate follow-up PR after #59 merges; nothing of it is in #59. A real AWS (or Azure/GCP) billing connection becomes a later, **optional** owner action. When one is added, option (a) still applies: a read-only IAM role assumed via the SDK chain, with no static keys. | Real-world shape and multi-provider coverage with no account access, so ingestion is validated now. The licence permits reuse with attribution. | The owner connects real billing data, or the sample's layout differs from what the worker expects (the sample is a set of CSV files, not an AWS Data Exports bucket layout; staging them in the expected layout is part of the follow-up PR). |
 | D-03 | **Keep everything until a dedicated retention slice** (option a); a staging-only cleanup of `fixture-*` tenants comes first, as its own slice. | No purge path exists that respects the immutability triggers; keeping data is reversible, deleting is not. | Before the first non-pilot tenant, or storage cost becomes material. |
 | D-04 | **An admin pre-creates the three NOLOGIN ratio roles; the migrator is NOCREATEROLE from day one** (option a, the local model). | Role creation never sits on an app credential; proven locally by `migrate --status` with `privilegeProblems: []`. | The managed Postgres offering cannot pre-create roles. |
 | D-05 | **A separate monitoring login, a member of no ratio role, with SELECT on the ledger only** (option c). | Keeps the owner credential off worker hosts without changing the reviewed ratio privileges. | One more credential is judged too costly (fallback: option a). |
@@ -32,7 +32,7 @@ Each decision below was **decided by the orchestrator under delegation,
 | D-08 | **Stay on PostgreSQL 16** for the pilot; managed minor upgrades allowed; a major upgrade is a reviewed change. | Every test, baseline and pin is PG16; PG16 is supported to Nov 2028. | PG16 end of life approaches, or a needed feature is 17+. |
 | D-09 | **Keep the per-row staged-only trigger** (option a). | Proven and mutation-tested; cost is about 10–18 µs per row. | The acceptance run shows a real month above a few million rows. |
 | D-10 | **One API key per deployment** (option a), bound to its tenant by `RATIO_API_TENANT_ID`. | No new auth surface for the pilot. | Together with D-06, before multi-tenant production. |
-| Hosting | **The plan is AWS** (§4 first row): RDS / Aurora PostgreSQL 16, S3 with versioning + object lock + SSE-KMS for evidence, ECS Fargate for the app, EventBridge Scheduler → ECS RunTask for the one-shot worker. Provisioning and spend stay owner actions (owner action 3, when Slice 3 provisions). | Same cloud as the D-02 source (role assumption, no cross-cloud credential), native object lock and KMS. §4 listed options without naming one; this records AWS as the plan for that reason. | D-02's source moves off AWS, or the owner declines the spend. |
+| Hosting | **The plan is AWS** (§4 first row): RDS / Aurora PostgreSQL 16, S3 with versioning + object lock + SSE-KMS for evidence, ECS Fargate for the app, EventBridge Scheduler → ECS RunTask for the one-shot worker. Provisioning and spend stay owner actions (owner action 3, when Slice 3 provisions). | Native object lock and KMS (D-01, D-03); the worker's only real source type is AWS Data Exports, so a later AWS billing connection needs no cross-cloud credential. §4 listed options without naming one; this records AWS as the plan for those reasons. | Real billing data comes from another cloud, or the owner declines the spend. |
 
 ## 1. Decisions: option analysis (kept as the rationale)
 
@@ -73,16 +73,19 @@ encrypted by the source with strong encryption."* It is **unresolved** which
 | (b) Same export, read with an access key pair in the worker's secret store | Simpler to wire. A long-lived secret needs rotation. |
 | (c) Another provider's FOCUS export | Not supported by the worker yet; a new source = a new slice. |
 
-- **Recommended default (now DECIDED, see the Decision log):** (a). The role should be read-only (`s3:GetObject`,
-  `s3:ListBucket` on the export prefix), have no write or delete on the export
-  bucket, and be restricted by bucket policy to that role.
-- **Blocks:**
-  - **the acceptance run** (SKILL §9), so the ingestion layer cannot be called
-    "usable";
-  - verifying the real manifest's semantics (control totals are expected to be
-    absent, so batches are `unverified`; one or several manifests per period);
-  - D-09's measurement;
-  - production go.
+- **Decided (see the Decision log): the acceptance run uses the public
+  FinOps Foundation FOCUS 1.0 Sample Data (CC BY 4.0, attribution
+  required)**, a fourth option this analysis did not list. A real export is
+  now a later, optional owner action. When it is connected, (a) applies: the
+  role is read-only (`s3:GetObject`, `s3:ListBucket` on the export prefix),
+  has no write or delete on the export bucket, and is restricted by bucket
+  policy to that role.
+- **What the sample run settles and what it does not:**
+  - it validates parsing, validation, publication and the read path on real,
+    multi-provider FOCUS 1.0 data, and gives D-09 a real row-size measurement;
+  - it does **not** verify a real AWS Data Exports manifest's semantics
+    (control totals expected absent ⇒ `unverified`; one or several manifests
+    per period). That stays open until real billing data is connected.
 
 ### D-03: Retention windows and the purge path
 
@@ -363,10 +366,10 @@ Cross-cutting for every option:
 The decisions are made (Decision log). These are the actions only the owner
 can take:
 
-1. **Grant read access to a real FOCUS export:** the S3 bucket and prefix,
-   and a read-only IAM role ARN the worker may assume (D-02). **This blocks
-   the acceptance run** (SKILL §9), and with it calling the ingestion layer
-   "usable".
+1. **Connect real billing data later (optional).** When the owner wants it:
+   the S3 bucket and prefix of a real FOCUS export, and a read-only IAM role
+   ARN the worker may assume (D-02, option a). This does **not** block the
+   acceptance run, which uses the public FOCUS 1.0 Sample Data (D-02).
 2. **Install the GitHub App** for the governance gate (D-07 item 4, option b).
    It needs the owner's GitHub account.
 3. **Approve the hosting spend** when Slice 3 provisions the AWS plan (Decision
@@ -377,9 +380,13 @@ can take:
 These are verification steps, not decisions. Each is checked before the first
 production deploy:
 
-- [ ] **The acceptance run (SKILL §9) performed and signed off** on a real
-      FOCUS export (totals vs Billing console, row counts, provisional flag,
-      idempotent re-sync, evidence re-hash). Needs owner action 1.
+- [ ] **The acceptance run performed and signed off** on the FOCUS 1.0
+      Sample Data (D-02; separate follow-up PR after #59). Check: row counts
+      vs the CSV files, totals per period and currency vs totals computed
+      independently from the CSV, idempotent re-sync, evidence re-hash, read
+      back through the API, and the CC BY 4.0 attribution recorded. A real
+      billing comparison (vs the Billing console) follows only if the owner
+      connects real data (optional owner action 1).
 - [ ] D-09 reviewed against the acceptance run's size.
 - [ ] D-07 items 1–3 applied (protect-main, auto-merge for `low` only, Copilot
       review_on_push); the GitHub App installed (owner action 2).

@@ -92,6 +92,28 @@ manifest is still refused before connecting, because `loadMigrations` parses
 every manifest. Removing the difference would need a change outside the two
 approved files (the runner), so I left it and recorded it here.
 
+**Side effects on an UP-TO-DATE database (challenger L1, measured after
+approval).** Scratch `sideeffects.sh`: a database migrated to 0001, a tenant
+and a source, and the 0001 manifest removed from each build's `dist-worker`.
+Eager = origin/main's two files compiled in a scratch copy; lazy = HEAD.
+
+| Command (manifest missing) | Eager | Lazy |
+|---|---|---|
+| `migrate` (nothing pending, a no-op) | exit 1, crash on import | **exit 0** (nothing applied; the catalog check only runs when a migration runs) |
+| `migrate --status --json` | exit 1, crash on import | exit 1 (`"code":"UNKNOWN"`, "is missing from the migrations directory") |
+| `doctor --json` | exit 1, crash on import | exit 1 (same message) |
+| `sync` | exit 1, crash on import | **no crash on import**; exit 1 on its own terms here (`SOURCE_LIST_FAILED`: the test source endpoint is unreachable) |
+| `backfill` | exit 1, crash on import | **no crash on import**; exit 1 `SOURCE_LIST_FAILED` |
+| `replay --period` | exit 1, crash on import | **no crash on import**; exit 1 `SOURCE_LIST_FAILED` |
+
+So, with the manifest missing:
+- a no-op `migrate` exits 0 where it used to exit 1;
+- `sync`, `backfill` and `replay` no longer crash on import;
+- `--status`, `doctor` and any real apply still exit 1 (the fresh-database
+  case is in the table above this one).
+
+With the manifest present, every result is identical (requirement c).
+
 **Requirement (c): identical CLI results.** The scratch `cli-diff.sh` ran on a
 fresh fixture DB:
 - `migrate --status --json` (pending, exit 3);
@@ -227,4 +249,98 @@ The reader totals equal `fixtures/focus-1.0-synthetic/control-totals.json`
   `ubuntu-latest` and the image pulls are expected to add about 1–2 min to a
   job that currently runs about 3.5–4 min under a 10 min timeout.
 - The deployment brief records D-01..D-10 as DECIDED (owner delegation to the
-  orchestrator, 2026-10-04). Remaining owner actions: export access, GitHub App, hosting spend.
+  orchestrator, 2026-10-04). Remaining owner actions: connecting real billing data (optional), the GitHub App, hosting spend. The acceptance run uses the public FOCUS 1.0 Sample Data (CC BY 4.0) in a follow-up PR after #59.
+
+## 10. Challenger Lows and Copilot review of PR #59 (local batch on 323984e; not pushed)
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 03f6cf7 | tests for every item below | **red** (`red/red-lows-{fast,db,serial}.txt`: fast 23 failed / 83, DB 12 failed / 25, serial 54 failed / 57) |
+| 42b136f | API: NOLOGIN kill switch, distinct 503 event with requestId, one snapshot per page | green |
+| f94034d | local: per-project state, 0600 env file, isolated `local:test`, verified readiness | green |
+| 52d941d | test: a pool without the REPEATABLE READ default is refused (kills mutant S2) | test |
+| beb30b4 | docs: decisions recorded, kill switch corrected, DESIGN Slice 0 claims fixed, TEST_PLAN §D | docs |
+| (this commit) | docs: D-02 = public FOCUS sample data; this section | docs |
+
+Three tests closed gaps and passed on first run, as expected: C2, K2 (D9) and
+the per-request NOLOGIN case's 200 control. Their teeth are shown by the
+mutations below (C2, K2a, K2b).
+
+### Mapping
+
+| Finding | Commit(s) | Test(s) |
+|---|---|---|
+| Challenger L1: record the lazy-load side effects | beb30b4 (DESIGN §7), this commit (§4 table) | scratch `sideeffects.sh`, eager vs lazy (§4) |
+| Challenger L2: NOLOGIN does not end pooled sessions; refuse `rolcanlogin = false` | 42b136f, beb30b4 (brief §6) | `readerLogin.test.ts` LOGIN_DISABLED; DB D6 "a pooled login set NOLOGIN…" (session still alive ⇒ 503 ⇒ LOGIN ⇒ 200) |
+| Challenger L3: 503 logged as unhandled_error/500 | 42b136f | route R5; DB D6 log test; serial "codes only" test |
+| Challenger L4: page 1 and totals in one snapshot | 42b136f, 52d941d | DB D8 (publish injected between the queries; isolation; fail closed on a READ COMMITTED pool) |
+| Challenger L5: K2 (two sources, source_id tie-break) | 03f6cf7 | DB D9 |
+| Challenger L5: L3 (env file 0600) | f94034d | `local.test.mjs` L10 |
+| Challenger L5: C2 (startup log never echoes the tenant) | 03f6cf7 | `config.test.ts` C2 (six value shapes + the URL) |
+| Challenger L6: per-project `.ratio-local/<project>/`; readiness checks it is our server | f94034d | `local.test.mjs` L9, L11, L12; scratch `isolation-e2e.sh` |
+| Copilot 4175802603 (lib.mjs:8, per-project state) | f94034d | L9, L10; isolation e2e |
+| Copilot 4175802639 (local.mjs:292, stale listener) | f94034d | L11 preflight, L12 `/proc` ownership; isolation e2e (foreign server ⇒ refused; `appReady: pid-verified`) |
+| Copilot 4175802660 (publishedCosts.ts:98, tie-break untested) | 03f6cf7 | D9; mutations K2a (ORDER BY) and K2b (cursor predicate) both killed |
+| Copilot 4175802675 (publishedCosts.ts:113, REPEATABLE READ READ ONLY) | 42b136f, 52d941d | D8 (3 tests). **No Slice 0 change**: `withTenantTransaction` is untouched; the reader pool defaults to REPEATABLE READ and the read asserts it in-transaction (`transaction_isolation`, `transaction_read_only`). `SET TRANSACTION` inside the callback is impossible: the helper's `set_config` query has already fixed the isolation level |
+| Copilot 4175802693 (route.ts:88, 503 log + requestId) | 42b136f | R5; D6; serial |
+| Copilot 4175802721 (brief §6 kill switch) | 42b136f (code), beb30b4 (text) | D6 NOLOGIN test; brief §6 states what the code does (NOLOGIN stops new connections; the per-request `rolcanlogin` check refuses pooled sessions; `pg_terminate_backend` or a restart ends them) |
+| Copilot 4175802745 / 4175802771 (DESIGN.md "Slice 0 untouched") | beb30b4 | — (docs: DESIGN intro and §6 state the one Slice 0 touch, 9d83590) |
+
+**Not changed, on purpose:**
+- **No nonce route or header** for the readiness probe. It would add a
+  test-only endpoint to the production app. The port preflight, fail-fast on
+  child exit, and `/proc` listener ownership (on Linux) cover the stale-listener
+  case instead.
+- **Slice 0's `tenant.ts` not extended.** The pool-level default achieves the
+  snapshot without touching it.
+
+### Mutation checks (scratch `mutate2.sh`, `mutate3.sh`; each applied, run, restored; tree clean after)
+
+| ID | Mutation | Result |
+|---|---|---|
+| K2a | `source_id` dropped from the ORDER BY | **killed**: DB 1/25 (D9) |
+| K2b | `source_id` dropped from the cursor predicate | **killed**: DB 15/25 |
+| N1 | `rolcanlogin` rule removed | **killed**: unit 3/12, DB 1/25 |
+| E1 | 503 refusal logged through the generic `unhandled_error`/500 path | **killed**: route 1/13 |
+| E2 | `requestId` dropped from the 503 body | **killed**: route 1/13 |
+| E3 | problem texts (with role names) logged instead of codes | **killed**: route 1/13, serial 1/57 |
+| S1 | REPEATABLE READ session default removed | **killed**: DB 24/25 (the in-transaction assertion refuses every read) |
+| S2 | in-transaction isolation assertion removed (pool still RR) | survived at first (25/25); **killed** after 52d941d: DB 1/26 ("fails closed on a pool that does not start transactions at REPEATABLE READ") |
+| S1+S2 | both removed | **killed**: DB 3/26, including D8's publish-injection test on its own |
+| C2 | startup log includes the invalid tenant value | **killed**: config 1/9 |
+| L3 | env file not tightened to 0600 on rewrite | **killed**: local 1/34 |
+| L6a | `local:test` falls back to the developer project name | **killed**: local 1/34 |
+| L6b | `down -v` removes every project's state | **killed**: local 1/34 |
+| L6c | readiness accepts any socket of our process, not the listener | **killed**: local 1/34 |
+
+### End-to-end isolation (scratch `isolation-e2e.sh`)
+
+1. A developer stack runs (project `ratio-local-s2dev`): 2 containers; env
+   file mode 600, directory 700.
+2. `local:test` (project `ratio-local-s2t`) passes alongside it:
+   - `appReady: pid-verified`;
+   - exact control totals;
+   - `down -v` of its own project only;
+   - the developer stack is still running, and its env file is byte-identical
+     (same sha256).
+3. A foreign HTTP server on the test app port ⇒ `local:test` exits 1 with
+   "refuses to start (nothing was changed): port(s) already in use on
+   127.0.0.1: 3710". 0 test containers were created, and the developer stack
+   is untouched.
+4. The developer stack is taken down with `down -v`; no container, volume or
+   `.ratio-local/` is left.
+
+### Gates (HEAD beb30b4 + docs; fresh `npm ci`)
+
+| Gate | Result |
+|---|---|
+| `npm ci` / `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 / 0 |
+| `npm test` ×3 in parallel, while `test:db` ran | 99 files / **2238** passed ×3 |
+| `npm run test:db` ×5 (private PG16 at 55700 + S3 prefixes) | **594 + 161** passed ×5; 157 / 109 / 110 / 107 / 109 s |
+| `worker:build`; `next build` | 0; 0 (`tsconfig.json`/`next-env.d.ts` restored) |
+| `npm run check:bundle` | pass (116 client files, 91 server files) |
+| `npm run local:test` (default isolated settings: `ratio-local-test`, 54339/18353/3110) | pass; `appReady: pid-verified`; totals 55 / `30.8272954899`, 40 / `21.0978157665`; 95 distinct rows; `down -v` |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+| leftovers (`ps`, docker, `.ratio-local/`) | none |
