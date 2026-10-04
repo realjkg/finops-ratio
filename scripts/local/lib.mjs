@@ -7,6 +7,9 @@ import net from 'node:net';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { clearTimeout, setTimeout } from 'node:timers';
+import { URL } from 'node:url';
+
+const { AbortController } = globalThis;
 
 /**
  * Gitignored. Holds one directory PER COMPOSE PROJECT (`.ratio-local/<project>/env`),
@@ -161,7 +164,7 @@ export function preflightProblems({ stateExists, containers, busyPorts }) {
  * false when another process does or nothing listens; null when /proc is not
  * available (the caller relies on its pre-start port check instead).
  */
-export function ownsListeningSocket({ pid, port: p, procRoot = '/proc' }) {
+export function ownsListeningSocket({ pid, port: p, procRoot = '/proc', maxProcesses = 4096 }) {
   const tables = ['tcp', 'tcp6'].map((t) => path.join(procRoot, 'net', t)).filter((f) => fs.existsSync(f));
   if (tables.length === 0) return null;
   const listening = new Set();
@@ -180,6 +183,9 @@ export function ownsListeningSocket({ pid, port: p, procRoot = '/proc' }) {
   while (todo.length) {
     const cur = todo.pop();
     if (seen.has(cur)) continue;
+    // Bounded work (this walk is synchronous, so a timer cannot bound it):
+    // a tree larger than maxProcesses is not ours to vouch for, so refuse.
+    if (seen.size >= maxProcesses) return false;
     seen.add(cur);
     const fdDir = path.join(procRoot, cur, 'fd');
     let fds;
@@ -215,20 +221,29 @@ export function ownsListeningSocket({ pid, port: p, procRoot = '/proc' }) {
   return false;
 }
 
-/** True when something accepts TCP connections on host:port (default 127.0.0.1). */
-export function portInUse(p, host = '127.0.0.1') {
+/**
+ * True when something accepts TCP connections on host:port (default
+ * 127.0.0.1). Hard-bounded by timeoutMs: an attempt that has not settled by
+ * then counts as busy (fail closed: local:test then refuses to start).
+ */
+export function portInUse(p, { host = '127.0.0.1', timeoutMs = 2_000, connect = net.connect } = {}) {
   return new Promise((resolve) => {
-    const s = net.connect({ host, port: p });
-    s.setTimeout(1000);
-    s.once('connect', () => {
-      s.destroy();
-      resolve(true);
-    });
-    s.once('timeout', () => {
-      s.destroy();
-      resolve(true);
-    });
-    s.once('error', () => resolve(false));
+    let settled = false;
+    let timer = null;
+    let s = null;
+    const settle = (busy) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      s?.destroy();
+      resolve(busy);
+    };
+    timer = setTimeout(() => settle(true), timeoutMs);
+    s = connect({ host, port: p });
+    s.setTimeout(timeoutMs);
+    s.once('connect', () => settle(true));
+    s.once('timeout', () => settle(true));
+    s.once('error', () => settle(false));
   });
 }
 
@@ -255,18 +270,25 @@ export async function waitForOwnServer({
   probe,
   owns = ownsListeningSocket,
   now = Date.now,
-  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  sleep = defaultSleep,
   timeoutMs = 60_000,
+  attemptTimeoutMs = 5_000,
   intervalMs = 500,
 }) {
+  requireDeadline(timeoutMs, 'waitForOwnServer timeoutMs');
+  requireDeadline(attemptTimeoutMs, 'waitForOwnServer attemptTimeoutMs');
   const deadline = now() + timeoutMs;
   for (;;) {
-    if (child.exitCode !== null || child.signalCode !== null) {
+    if (childExited(child)) {
       throw new Error(`next start exited (code ${child.exitCode}, signal ${child.signalCode}) before it was ready`);
     }
+    const remaining = deadline - now();
+    if (remaining <= 0) throw new Error(`timed out waiting for next start after ${timeoutMs} ms`);
     let ok;
     try {
-      ok = await probe();
+      // Each attempt is aborted at its own deadline AND at the overall one:
+      // a server that accepts TCP and never answers cannot hold the wait.
+      ok = await withDeadline((signal) => probe(signal), Math.min(attemptTimeoutMs, remaining), 'next start readiness probe');
     } catch {
       ok = false;
     }
@@ -275,9 +297,90 @@ export async function waitForOwnServer({
       if (owned === false) throw new Error(`a process other than the next start we spawned answers on port ${p}`);
       return owned === true ? 'pid-verified' : 'port-preflight-only';
     }
-    if (now() > deadline) throw new Error('timed out waiting for next start');
-    await sleep(intervalMs);
+    const left = deadline - now();
+    if (left > 0) await sleep(Math.min(intervalMs, left));
   }
+}
+
+// --- deadlines: every network call and wait in scripts/local is bounded -------
+
+const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function requireDeadline(ms, what) {
+  if (!(typeof ms === 'number' && Number.isFinite(ms) && ms > 0)) throw new Error(`${what}: a positive deadline (ms) is required`);
+}
+
+/**
+ * Runs fn(signal) under a HARD deadline: at `ms` the signal is aborted (so
+ * fetch, the S3 SDK and our pg wrapper cancel their I/O) and the returned
+ * promise rejects, even if fn ignores the signal and never settles.
+ */
+export function withDeadline(fn, ms, what) {
+  try {
+    requireDeadline(ms, `withDeadline(${what})`);
+  } catch (e) {
+    return Promise.reject(e);
+  }
+  const ac = new AbortController();
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`${what} timed out after ${ms} ms`);
+      err.code = 'RATIO_LOCAL_DEADLINE';
+      ac.abort(err);
+      reject(err);
+    }, ms);
+  });
+  const work = Promise.resolve().then(() => fn(ac.signal));
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Polls probe(signal) until it returns true. Each attempt is bounded by
+ * attemptTimeoutMs AND by what is left of timeoutMs; the overall deadline is
+ * checked before every attempt and caps every sleep, so the wait ends by
+ * timeoutMs (plus at most one timer tick) whatever the probe does.
+ */
+export async function waitUntil({ what, probe, timeoutMs, attemptTimeoutMs, intervalMs = 1_000, now = Date.now, sleep = defaultSleep }) {
+  requireDeadline(timeoutMs, `waitUntil(${what}) timeoutMs`);
+  requireDeadline(attemptTimeoutMs, `waitUntil(${what}) attemptTimeoutMs`);
+  const deadline = now() + timeoutMs;
+  let last;
+  for (;;) {
+    const remaining = deadline - now();
+    if (remaining <= 0) throw new Error(`timed out waiting for ${what} after ${timeoutMs} ms${last ? `: ${last.message}` : ''}`);
+    try {
+      if (await withDeadline((signal) => probe(signal), Math.min(attemptTimeoutMs, remaining), `${what} (one attempt)`)) return;
+    } catch (e) {
+      last = e;
+    }
+    const left = deadline - now();
+    if (left > 0) await sleep(Math.min(intervalMs, left));
+  }
+}
+
+/**
+ * GET url as JSON under a hard deadline covering the headers AND the body
+ * (a body that stalls is a timeout, not a silently null body). Non-JSON
+ * bodies give body: null. Returns { status, body }.
+ */
+export function fetchJson(url, { token, timeoutMs, fetchFn = globalThis.fetch } = {}) {
+  const pathname = new URL(url).pathname;
+  return withDeadline(
+    async (signal) => {
+      const r = await fetchFn(url, { headers: token ? { authorization: `Bearer ${token}` } : {}, signal });
+      const text = await r.text();
+      let body;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = null;
+      }
+      return { status: r.status, body };
+    },
+    timeoutMs,
+    `GET ${pathname}`,
+  );
 }
 
 // --- child processes: every wait is bounded ------------------------------------
@@ -324,9 +427,11 @@ export async function stopChild(child, { graceMs = 10_000, killMs = 5_000 } = {}
 
 /**
  * local:test's cleanup: stop the app (bounded; errors recorded, not thrown),
- * then ALWAYS run `down` exactly once. Returns what happened, never throws.
+ * then ALWAYS run `down` exactly once, itself cut off at downTimeoutMs (the
+ * compose command under it has its own, shorter, timeout). Returns what
+ * happened, never throws.
  */
-export async function cleanupLocalTest({ app, down, stopOptions }) {
+export async function cleanupLocalTest({ app, down, stopOptions, downTimeoutMs = 330_000 }) {
   let appResult = null;
   if (app) {
     try {
@@ -337,7 +442,7 @@ export async function cleanupLocalTest({ app, down, stopOptions }) {
   }
   let downResult;
   try {
-    await down();
+    await withDeadline(() => down(), downTimeoutMs, 'down -v');
     downResult = 'ok';
   } catch (e) {
     downResult = `error: ${e?.message ?? e}`;
@@ -345,28 +450,83 @@ export async function cleanupLocalTest({ app, down, stopOptions }) {
   return { app: appResult, down: downResult };
 }
 
+/** App stop results that mean "we stopped the app we were still serving from". */
+const APP_STOP_PASS = new Set(['stopped', 'killed']);
+
 /**
- * Runs a command. With timeoutMs, a command still running after the deadline
+ * THE pass/fail decision of a local:test run (pure). It passes only when the
+ * body completed (no error), the app was still running and we stopped it
+ * ('stopped' or 'killed'), and `down -v` succeeded. Everything else fails,
+ * including app results this code does not know (fail closed). Every result
+ * is recorded either way.
+ */
+export function finalizeLocalTestSummary({ project, steps, error, cleanup }) {
+  const failures = [];
+  if (error !== null && error !== undefined) failures.push(String(error));
+  if (!APP_STOP_PASS.has(cleanup.app)) {
+    failures.push(
+      cleanup.app === null
+        ? 'next start was never started'
+        : cleanup.app === 'already-exited'
+          ? 'next start had already exited before cleanup (it should still have been serving)'
+          : `next start could not be stopped cleanly: ${cleanup.app}`,
+    );
+  }
+  if (cleanup.down !== 'ok') failures.push(`down -v failed: ${cleanup.down}`);
+  const summary = {
+    project,
+    steps: { ...steps, appStop: cleanup.app, down: cleanup.down === 'ok' ? 'ok (-v)' : cleanup.down },
+    pass: failures.length === 0,
+    failures,
+  };
+  if (error !== null && error !== undefined) summary.error = String(error);
+  return summary;
+}
+
+/**
+ * Runs local:test's body, then ALWAYS the bounded cleanup, then decides
+ * pass/fail with finalizeLocalTestSummary. The body reports the spawned app
+ * through setApp(child) as soon as it exists, so cleanup can stop it.
+ */
+export async function runLocalTest({ project, body, down, stopOptions, downTimeoutMs }) {
+  const steps = {};
+  let app = null;
+  let error = null;
+  try {
+    await body({
+      steps,
+      setApp: (child) => {
+        app = child;
+      },
+    });
+  } catch (e) {
+    error = e?.message ?? String(e);
+  }
+  const cleanup = await cleanupLocalTest({ app, down, stopOptions, downTimeoutMs });
+  return finalizeLocalTestSummary({ project, steps, error, cleanup });
+}
+
+/**
+ * Runs a command under a REQUIRED deadline: still running after timeoutMs it
  * is SIGKILLed and the promise rejects ("timed out"), so no caller can hang.
  */
 export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = false, timeoutMs, spawnFn = spawn } = {}) {
   return new Promise((resolve, reject) => {
+    requireDeadline(timeoutMs, `runProcess(${cmd} ${args[0] ?? ''}) timeoutMs`);
     const child = spawnFn(cmd, args, { cwd, env, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
     let out = '';
     let timedOut = false;
     if (capture) child.stdout.on('data', (d) => (out += d));
-    const timer = timeoutMs
-      ? setTimeout(() => {
-          timedOut = true;
-          child.kill('SIGKILL');
-        }, timeoutMs)
-      : null;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
     child.on('error', (e) => {
-      if (timer) clearTimeout(timer);
+      clearTimeout(timer);
       reject(e);
     });
     child.on('close', (code) => {
-      if (timer) clearTimeout(timer);
+      clearTimeout(timer);
       if (timedOut) reject(new Error(`${cmd} ${args[0] ?? ''} timed out after ${timeoutMs} ms (killed)`));
       else if (code !== 0 && !allowFail) reject(new Error(`${cmd} ${args[0] ?? ''} exited ${code}`));
       else resolve({ code, out });

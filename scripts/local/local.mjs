@@ -17,21 +17,25 @@
 // RATIO_LOCAL_TEST_PROJECT (ratio-local-test), RATIO_LOCAL_TEST_PG_PORT
 // (54339), RATIO_LOCAL_TEST_S3_PORT (18353), RATIO_LOCAL_TEST_APP_PORT (3110),
 // refusing any overlap with the developer stack. All ports bind 127.0.0.1 only.
+//
+// Every child process, network call and wait below has a HARD deadline (the
+// *_TIMEOUT_MS constants; the full inventory is in
+// docs/evidence/slice-2/EVIDENCE.md §13): nothing here can hang `local:up`,
+// and local:test always reaches its `down -v`.
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { setTimeout } from 'node:timers';
 
-const { fetch } = globalThis;
+const { AbortSignal, fetch } = globalThis;
 import {
   LOCAL_NAMES,
   apiEnv,
-  cleanupLocalTest,
   compareControlTotals,
   connectionUrl,
+  fetchJson,
   generateLocalSecrets,
   localSettings,
   localStatePaths,
@@ -40,9 +44,12 @@ import {
   parseEnvFile,
   preflightProblems,
   removeProjectState,
+  runLocalTest,
   runProcess,
   startIfPortFree,
   waitForOwnServer,
+  waitUntil,
+  withDeadline,
   workerEnv,
   writeEnvFileSecure,
 } from './lib.mjs';
@@ -71,10 +78,33 @@ function loadSecrets(settings, { create }) {
   return secrets;
 }
 
-// --- processes ---------------------------------------------------------------
+// --- deadlines (every wait in this file; EVIDENCE §13) --------------------------
 
-/** `docker compose down` during local:test's cleanup may not hang forever. */
+const DOCKER_PS_TIMEOUT_MS = 60_000;
+/** `compose up -d --wait` (includes a first image pull in CI). */
+const COMPOSE_UP_TIMEOUT_MS = 600_000;
 const DOWN_TIMEOUT_MS = 300_000;
+/** local:test's outer cut-off around `down -v` (the compose command's own timeout fires first). */
+const CLEANUP_DOWN_TIMEOUT_MS = DOWN_TIMEOUT_MS + 30_000;
+const WORKER_BUILD_TIMEOUT_MS = 300_000;
+const WORKER_CLI_TIMEOUT_MS = 600_000;
+const PG_CONNECT_TIMEOUT_MS = 5_000;
+/** Client-side (query_timeout) and server-side (statement_timeout) per statement. */
+const PG_QUERY_TIMEOUT_MS = 60_000;
+/** A whole withClient session: connect, every statement, disconnect. */
+const PG_SESSION_TIMEOUT_MS = 120_000;
+const PG_END_TIMEOUT_MS = 5_000;
+const READY_TIMEOUT_MS = 120_000;
+const READY_ATTEMPT_TIMEOUT_MS = 5_000;
+const BUCKET_WARM_TIMEOUT_MS = 60_000;
+const S3_REQUEST_TIMEOUT_MS = 30_000;
+const APP_READY_TIMEOUT_MS = 60_000;
+const APP_READY_ATTEMPT_TIMEOUT_MS = 5_000;
+/** Each API read: longer than the route's own 10 s DB statement_timeout (readerPool.ts). */
+const API_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_PAGES = 100;
+
+// --- processes ---------------------------------------------------------------
 
 function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs } = {}) {
   return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs });
@@ -92,29 +122,34 @@ function composeEnv(settings, secrets) {
 const compose = (settings, secrets, args, opts = {}) =>
   run('docker', ['compose', '-f', COMPOSE_FILE, '-p', settings.project, ...args], { ...opts, env: { ...composeEnv(settings, secrets), ...(opts.env ?? {}) } });
 
-async function withClient(url, fn) {
-  const c = new Client({ connectionString: url, connectionTimeoutMillis: 5000 });
-  c.on('error', () => undefined);
-  await c.connect();
-  try {
-    return await fn(c);
-  } finally {
-    await c.end().catch(() => undefined);
-  }
-}
-
-async function waitFor(what, probe, timeoutMs = 120_000) {
-  const deadline = Date.now() + timeoutMs;
-  let last;
-  for (;;) {
-    try {
-      if (await probe()) return;
-    } catch (e) {
-      last = e;
-    }
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}${last ? `: ${last.message}` : ''}`);
-    await new Promise((r) => setTimeout(r, 1000));
-  }
+/**
+ * One Postgres session, hard-bounded: connect (PG_CONNECT_TIMEOUT_MS), every
+ * statement (query_timeout client-side, statement_timeout server-side), the
+ * disconnect, and the whole session (PG_SESSION_TIMEOUT_MS). When the session
+ * deadline or the caller's signal fires, the socket is destroyed.
+ */
+function withClient(url, fn, { signal } = {}) {
+  return withDeadline(
+    async (deadlineSignal) => {
+      const c = new Client({ connectionString: url, connectionTimeoutMillis: PG_CONNECT_TIMEOUT_MS, query_timeout: PG_QUERY_TIMEOUT_MS, statement_timeout: PG_QUERY_TIMEOUT_MS });
+      c.on('error', () => undefined);
+      const aborted = signal ? AbortSignal.any([deadlineSignal, signal]) : deadlineSignal;
+      const kill = () => c.connection?.stream?.destroy();
+      aborted.addEventListener('abort', kill, { once: true });
+      try {
+        await c.connect();
+        try {
+          return await fn(c);
+        } finally {
+          await withDeadline(() => c.end(), PG_END_TIMEOUT_MS, 'postgres disconnect').catch(kill);
+        }
+      } finally {
+        aborted.removeEventListener('abort', kill);
+      }
+    },
+    PG_SESSION_TIMEOUT_MS,
+    'postgres session',
+  );
 }
 
 const superUrl = (settings, secrets) =>
@@ -124,11 +159,24 @@ const superUrl = (settings, secrets) =>
 
 async function up(settings) {
   const secrets = loadSecrets(settings, { create: true });
-  await compose(settings, secrets, ['up', '-d', '--wait', 'postgres', 's3']);
-  await waitFor('postgres', () => withClient(superUrl(settings, secrets), async (c) => (await c.query('SELECT 1')).rowCount === 1));
-  await waitFor('s3', async () => {
-    const r = await fetch(`http://127.0.0.1:${settings.s3Port}/`);
-    return r.status < 500;
+  await compose(settings, secrets, ['up', '-d', '--wait', 'postgres', 's3'], { timeoutMs: COMPOSE_UP_TIMEOUT_MS });
+  await waitUntil({
+    what: 'postgres',
+    timeoutMs: READY_TIMEOUT_MS,
+    attemptTimeoutMs: READY_ATTEMPT_TIMEOUT_MS,
+    probe: (signal) => withClient(superUrl(settings, secrets), async (c) => (await c.query('SELECT 1')).rowCount === 1, { signal }),
+  });
+  // Each attempt is aborted at READY_ATTEMPT_TIMEOUT_MS: an endpoint that
+  // accepts TCP but never answers cannot hang local:up (Copilot 4176117539).
+  await waitUntil({
+    what: 's3',
+    timeoutMs: READY_TIMEOUT_MS,
+    attemptTimeoutMs: READY_ATTEMPT_TIMEOUT_MS,
+    probe: async (signal) => {
+      const r = await fetch(`http://127.0.0.1:${settings.s3Port}/`, { signal });
+      await r.body?.cancel();
+      return r.status < 500;
+    },
   });
   await withClient(superUrl(settings, secrets), async (c) => {
     const v = await c.query(`SELECT current_setting('server_version_num') AS v`);
@@ -143,13 +191,13 @@ async function up(settings) {
 }
 
 async function workerCli(settings, secrets, args, opts = {}) {
-  if (!fs.existsSync(path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'))) await run('npm', ['run', '-s', 'worker:build']);
-  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets), capture: true, ...opts });
+  if (!fs.existsSync(path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'))) await run('npm', ['run', '-s', 'worker:build'], { timeoutMs: WORKER_BUILD_TIMEOUT_MS });
+  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets), capture: true, timeoutMs: WORKER_CLI_TIMEOUT_MS, ...opts });
 }
 
 async function migrate(settings) {
   const secrets = loadSecrets(settings, { create: false });
-  await run('npm', ['run', '-s', 'worker:build']);
+  await run('npm', ['run', '-s', 'worker:build'], { timeoutMs: WORKER_BUILD_TIMEOUT_MS });
   await workerCli(settings, secrets, ['migrate']);
   const status = await workerCli(settings, secrets, ['migrate', '--status', '--json'], { allowFail: true });
   const doc = JSON.parse(status.out);
@@ -174,6 +222,8 @@ function s3Client(settings, secrets) {
   const { S3Client } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
   return new S3Client({
     endpoint: `http://127.0.0.1:${settings.s3Port}`,
+    // Belt and braces: every send below also carries an abortSignal with a hard deadline.
+    requestHandler: { connectionTimeout: 5_000, requestTimeout: S3_REQUEST_TIMEOUT_MS },
     region: 'us-east-1',
     forcePathStyle: true,
     credentials: { accessKeyId: secrets.RATIO_LOCAL_S3_ACCESS_KEY_ID, secretAccessKey: secrets.RATIO_LOCAL_S3_SECRET_ACCESS_KEY },
@@ -189,23 +239,29 @@ async function seed(settings) {
   try {
     for (const Bucket of [LOCAL_NAMES.sourceBucket, LOCAL_NAMES.evidenceBucket]) {
       try {
-        await s3.send(new CreateBucketCommand({ Bucket }));
+        await withDeadline((signal) => s3.send(new CreateBucketCommand({ Bucket }), { abortSignal: signal }), S3_REQUEST_TIMEOUT_MS, `s3 create bucket ${Bucket}`);
       } catch (e) {
         if (e?.name !== 'BucketAlreadyOwnedByYou' && e?.name !== 'BucketAlreadyExists') throw e;
       }
       // A fresh SeaweedFS bucket answers 500 until its volumes are allocated:
       // warm it with a probe object so the worker's first evidence write does
       // not spend its bounded retries on that (seen locally: 2 retries).
-      await waitFor(`s3 bucket ${Bucket} writable`, async () => {
-        await s3.send(new PutObjectCommand({ Bucket, Key: '.ratio-local-warmup', Body: 'warmup' }));
-        await s3.send(new DeleteObjectCommand({ Bucket, Key: '.ratio-local-warmup' }));
-        return true;
-      }, 60_000);
+      await waitUntil({
+        what: `s3 bucket ${Bucket} writable`,
+        timeoutMs: BUCKET_WARM_TIMEOUT_MS,
+        attemptTimeoutMs: S3_REQUEST_TIMEOUT_MS,
+        probe: async (signal) => {
+          await s3.send(new PutObjectCommand({ Bucket, Key: '.ratio-local-warmup', Body: 'warmup' }), { abortSignal: signal });
+          await s3.send(new DeleteObjectCommand({ Bucket, Key: '.ratio-local-warmup' }), { abortSignal: signal });
+          return true;
+        },
+      });
     }
     const files = fixtureFiles(FIXTURE_BASE);
     for (const f of files) {
       const Key = path.relative(FIXTURE_BASE, f).split(path.sep).join('/');
-      await s3.send(new PutObjectCommand({ Bucket: LOCAL_NAMES.sourceBucket, Key, Body: fs.readFileSync(f) }));
+      const Body = fs.readFileSync(f);
+      await withDeadline((signal) => s3.send(new PutObjectCommand({ Bucket: LOCAL_NAMES.sourceBucket, Key, Body }), { abortSignal: signal }), S3_REQUEST_TIMEOUT_MS, `s3 put ${Key}`);
     }
     log('seed: SYNTHETIC fixture uploaded', { bucket: LOCAL_NAMES.sourceBucket, objects: files.length });
   } finally {
@@ -255,112 +311,115 @@ async function down(settings, { volumes, timeoutMs }) {
   log(volumes ? 'down: containers, network, volumes and local secrets removed' : 'down: containers and network removed (volumes kept)', { project: settings.project });
 }
 
-// --- end to end ----------------------------------------------------------------
 
-async function getJson(url, token) {
-  const r = await fetch(url, { headers: token ? { authorization: `Bearer ${token}` } : {} });
-  return { status: r.status, body: await r.json().catch(() => null) };
-}
+// --- end to end ----------------------------------------------------------------
 
 async function localTest() {
   if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
   // local:test owns its stack end to end (down -v at the end), so it uses its
   // OWN project and ports and refuses to start over anything already there.
   const settings = localTestSettings(process.env);
-  const containers = (await run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${settings.project}`], { capture: true })).out.split('\n').filter(Boolean).length;
+  const containers = (await run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${settings.project}`], { capture: true, timeoutMs: DOCKER_PS_TIMEOUT_MS })).out
+    .split('\n')
+    .filter(Boolean).length;
   const busyPorts = [];
   for (const p of [settings.pgPort, settings.s3Port, settings.appPort]) if (await portInUse(p)) busyPorts.push(p);
   const problems = preflightProblems({ stateExists: fs.existsSync(path.join(ROOT, localStatePaths(settings.project).dir)), containers, busyPorts });
   if (problems.length) throw new Error(`local:test refuses to start (nothing was changed):\n  ${problems.join('\n  ')}`);
-  const summary = { project: settings.project, steps: {} };
-  let app;
-  try {
-    await up(settings);
-    await up(settings); // idempotent
-    summary.steps.up = 'ok (twice)';
-    const status = await migrate(settings);
-    await migrate(settings); // idempotent
-    summary.steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
-    await seed(settings);
-    await seed(settings); // idempotent
-    summary.steps.seed = 'ok (twice)';
-    const first = await sync(settings);
-    const outcomes = (rec) => Object.fromEntries((rec.results?.periods ?? []).map((p) => [p.billingPeriod, p.outcome]));
-    summary.steps.sync = outcomes(first);
-    const second = await sync(settings);
-    summary.steps.syncAgain = outcomes(second);
-    if (Object.values(summary.steps.sync).some((o) => o !== 'published')) throw new Error(`first sync did not publish every period: ${JSON.stringify(summary.steps.sync)}`);
-    if (Object.values(summary.steps.syncAgain).some((o) => o !== 'skipped_unchanged')) throw new Error(`second sync was not a no-op: ${JSON.stringify(summary.steps.syncAgain)}`);
 
-    const secrets = loadSecrets(settings, { create: false });
-    const base = `http://127.0.0.1:${settings.appPort}`;
-    // Re-check the app port right before spawning (minutes after the preflight).
-    app = await startIfPortFree({
-      port: settings.appPort,
-      start: () =>
-        spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
-          cwd: ROOT,
-          env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
-          stdio: ['ignore', 'ignore', 'inherit'],
-        }),
-    });
-    summary.steps.appReady = await waitForOwnServer({
-      child: app,
-      port: settings.appPort,
-      probe: async () => (await fetch(`${base}/api/hello`)).status === 200,
-    });
+  // runLocalTest runs the body, then ALWAYS the bounded cleanup (stop the app,
+  // `down -v`), then decides pass/fail in one pure function
+  // (finalizeLocalTestSummary): a failed body, an app that could not be
+  // stopped cleanly, or a failed `down -v` each fail the run.
+  const summary = await runLocalTest({
+    project: settings.project,
+    down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
+    downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
+    body: async ({ steps, setApp }) => {
+      await up(settings);
+      await up(settings); // idempotent
+      steps.up = 'ok (twice)';
+      const status = await migrate(settings);
+      await migrate(settings); // idempotent
+      steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
+      await seed(settings);
+      await seed(settings); // idempotent
+      steps.seed = 'ok (twice)';
+      const first = await sync(settings);
+      const outcomes = (rec) => Object.fromEntries((rec.results?.periods ?? []).map((p) => [p.billingPeriod, p.outcome]));
+      steps.sync = outcomes(first);
+      const second = await sync(settings);
+      steps.syncAgain = outcomes(second);
+      if (Object.values(steps.sync).some((o) => o !== 'published')) throw new Error(`first sync did not publish every period: ${JSON.stringify(steps.sync)}`);
+      if (Object.values(steps.syncAgain).some((o) => o !== 'skipped_unchanged')) throw new Error(`second sync was not a no-op: ${JSON.stringify(steps.syncAgain)}`);
 
-    const anon = await getJson(`${base}/api/v1/costs/published`);
-    if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
-    summary.steps.anonymous = anon.status;
+      const secrets = loadSecrets(settings, { create: false });
+      const base = `http://127.0.0.1:${settings.appPort}`;
+      // Re-check the app port right before spawning (minutes after the preflight).
+      const app = await startIfPortFree({
+        port: settings.appPort,
+        start: () =>
+          spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
+            cwd: ROOT,
+            env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
+            stdio: ['ignore', 'ignore', 'inherit'],
+          }),
+      });
+      setApp(app);
+      steps.appReady = await waitForOwnServer({
+        child: app,
+        port: settings.appPort,
+        timeoutMs: APP_READY_TIMEOUT_MS,
+        attemptTimeoutMs: APP_READY_ATTEMPT_TIMEOUT_MS,
+        probe: async (signal) => {
+          const r = await fetch(`${base}/api/hello`, { signal });
+          await r.body?.cancel();
+          return r.status === 200;
+        },
+      });
 
-    const rows = [];
-    let totals = null;
-    let cursor = null;
-    for (let page = 0; page < 100; page += 1) {
-      const r = await getJson(`${base}/api/v1/costs/published?limit=17${cursor ? `&cursor=${cursor}` : ''}`, secrets.RATIO_LOCAL_API_TOKEN);
-      if (r.status !== 200) throw new Error(`API read answered ${r.status}: ${JSON.stringify(r.body)}`);
-      if (page === 0) totals = r.body.totals;
-      rows.push(...r.body.data);
-      cursor = r.body.page.nextCursor;
-      if (!cursor) break;
-    }
-    const control = JSON.parse(fs.readFileSync(CONTROL_TOTALS, 'utf8')).base;
-    const mismatches = compareControlTotals(totals ?? [], control);
-    const keys = new Set(rows.map((r) => `${r.batchId}/${r.artifactSha256}/${r.rowOrdinal}`));
-    const expectedRows = Object.values(control).reduce((n, c) => n + c.rowCount, 0);
-    if (rows.length !== expectedRows || keys.size !== expectedRows) mismatches.push(`rows over all pages: ${rows.length} (${keys.size} distinct), expected ${expectedRows}`);
-    if (rows.some((r) => typeof r.billedCost !== 'string')) mismatches.push('a billedCost is not a decimal string');
-    summary.steps.api = { totals, rows: rows.length, distinct: keys.size };
-    if (mismatches.length) throw new Error(`reader totals differ from the fixture control totals:\n  ${mismatches.join('\n  ')}`);
-    summary.pass = true;
-  } catch (e) {
-    summary.pass = false;
-    summary.error = e.message;
-  } finally {
-    // Bounded: an app already ended by a signal is recognised at once, a stuck
-    // one is SIGKILLed then given up on, and `down -v` always runs (itself
-    // bounded by DOWN_TIMEOUT_MS).
-    const cleanup = await cleanupLocalTest({ app, down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }) });
-    summary.steps.appStop = cleanup.app;
-    if (cleanup.down === 'ok') summary.steps.down = 'ok (-v)';
-    else {
-      summary.pass = false;
-      summary.downError = cleanup.down;
-    }
-  }
+      // Every API read is bounded (Copilot 4176117553): a next start that is
+      // alive but stuck fails the run instead of blocking the cleanup.
+      const anon = await fetchJson(`${base}/api/v1/costs/published`, { timeoutMs: API_REQUEST_TIMEOUT_MS });
+      if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
+      steps.anonymous = anon.status;
+
+      const rows = [];
+      let totals = null;
+      let cursor = null;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const r = await fetchJson(`${base}/api/v1/costs/published?limit=17${cursor ? `&cursor=${cursor}` : ''}`, { token: secrets.RATIO_LOCAL_API_TOKEN, timeoutMs: API_REQUEST_TIMEOUT_MS });
+        if (r.status !== 200) throw new Error(`API read answered ${r.status}: ${JSON.stringify(r.body)}`);
+        if (page === 0) totals = r.body.totals;
+        rows.push(...r.body.data);
+        cursor = r.body.page.nextCursor;
+        if (!cursor) break;
+      }
+      if (cursor) throw new Error(`more than ${MAX_PAGES} pages`);
+      const control = JSON.parse(fs.readFileSync(CONTROL_TOTALS, 'utf8')).base;
+      const mismatches = compareControlTotals(totals ?? [], control);
+      const keys = new Set(rows.map((r) => `${r.batchId}/${r.artifactSha256}/${r.rowOrdinal}`));
+      const expectedRows = Object.values(control).reduce((n, c) => n + c.rowCount, 0);
+      if (rows.length !== expectedRows || keys.size !== expectedRows) mismatches.push(`rows over all pages: ${rows.length} (${keys.size} distinct), expected ${expectedRows}`);
+      if (rows.some((r) => typeof r.billedCost !== 'string')) mismatches.push('a billedCost is not a decimal string');
+      steps.api = { totals, rows: rows.length, distinct: keys.size };
+      if (mismatches.length) throw new Error(`reader totals differ from the fixture control totals:\n  ${mismatches.join('\n  ')}`);
+    },
+  });
   process.stdout.write(`${JSON.stringify({ type: 'ratio.local-test', ...summary })}\n`);
-  if (!summary.pass) throw new Error(summary.error ?? summary.downError ?? 'local:test failed');
+  if (!summary.pass) log('local:test failed', { failures: summary.failures });
+  return summary.pass ? 0 : 1;
 }
 
 // --- main ----------------------------------------------------------------------
 
+const done = (p) => p.then(() => 0);
 const COMMANDS = {
-  up: (s) => up(s),
-  migrate: (s) => migrate(s),
-  seed: (s) => seed(s),
-  sync: (s) => sync(s),
-  down: (s, args) => down(s, { volumes: args.includes('-v') || args.includes('--volumes') }),
+  up: (s) => done(up(s)),
+  migrate: (s) => done(migrate(s)),
+  seed: (s) => done(seed(s)),
+  sync: (s) => done(sync(s)),
+  down: (s, args) => done(down(s, { volumes: args.includes('-v') || args.includes('--volumes'), timeoutMs: DOWN_TIMEOUT_MS })),
   test: () => localTest(),
 };
 
@@ -370,8 +429,7 @@ async function main(argv) {
     process.stderr.write(`usage: node scripts/local/local.mjs <${Object.keys(COMMANDS).join('|')}> [-v]\n`);
     return 2;
   }
-  await COMMANDS[cmd](localSettings(process.env), args);
-  return 0;
+  return (await COMMANDS[cmd](localSettings(process.env), args)) ?? 0;
 }
 
 main(process.argv.slice(2)).then(

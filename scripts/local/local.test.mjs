@@ -860,7 +860,7 @@ describe('L17 every wait in scripts/local has a hard deadline (Copilot 417611753
     expect(src).toMatch(/new Client\(\{[^}]*connectionTimeoutMillis[^}]*query_timeout[^}]*statement_timeout/);
     expect(src.match(/await fetchJson\(/g)?.length).toBeGreaterThanOrEqual(2); // anonymous + paginated
     expect(src.match(/await fetchJson\([^;]*timeoutMs: API_REQUEST_TIMEOUT_MS/g)?.length).toBe(src.match(/await fetchJson\(/g).length);
-    expect(read('scripts/local/lib.mjs').match(/\bfetchFn\(url, \{[^}]*signal/g)).toHaveLength(1);
+    expect(read('scripts/local/lib.mjs').match(/\bfetchFn\(url, \{[^\n]*, signal \}\)/g)).toHaveLength(1);
   });
 
   it("the API request deadline is longer than the route's own 10 s DB statement timeout", () => {
