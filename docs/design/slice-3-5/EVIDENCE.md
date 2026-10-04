@@ -25,7 +25,8 @@ ordinary commits and plain pushes (never a force-push).
 | 13 | `86c2c29` | The challenger's REQUEST CHANGES on revision 12 (2 Medium, 1 Low) and Copilot's review 5407430521 (r4178706470, High): rollup pointer semantics and a single lease-holding writer; exactly-once coverage with nulls; stable ids under null identity columns; pointer guard, sequence grants and per-batch atomicity; `rollup12.py` category count (§3j). |
 | 14 | `10cd9ce` | The challenger's REQUEST CHANGES on revision 13 (1 Medium, 3 Low), §3k: the high-water mark is the tenant's `max(batch_seq)`; the pointer trigger's scope stated; sentinel groups marked `attributed: false`; the negative-usage blind spot in the budget table and the limits. |
 | 15 | `dc43f4f`, `a268c0e` | The challenger's REQUEST CHANGES on revision 14 (1 Medium, 3 Low), §3l, and Copilot's review 5407477027 of 10cd9ce (16 findings), §3m: the high-water mark and the sequence allocation are defined on an empty tenant (`coalesce(max, 0)`, `NOT NULL`); the monotonicity reason corrected; the known-limits list made complete. |
-| 16 | `9e0d703` and the §5 refresh | The challenger's REQUEST CHANGES on revision 15 (2 Medium, 4 Low), §3n: the run row is closed for INSERT with terminal statuses and a unique `run_seq`; an effect window for every label kind; multi-day usage in the limits with a coverage share; leaf derivation enforced by FKs. |
+| 16 | `9e0d703`, `1ac82f7`, `6cad4cd` | The challenger's REQUEST CHANGES on revision 15 (2 Medium, 4 Low), §3n: the run row is closed for INSERT with terminal statuses and a unique `run_seq`; an effect window for every label kind; multi-day usage in the limits with a coverage share; leaf derivation enforced by FKs. |
+| 17 | this revision | Copilot's review 5407588631 of 6cad4cd (6 High, 4 Medium, 1 Low), §3o: one writer per tenant and job kind for `run_seq`; one day index `t` for every detector; fan-in before persistence with merge semantics; daily excess vs cumulative impact and `ρ` at expected 0; stale wording swept. |
 
 ## 2. Governance wording: reverted
 
@@ -330,6 +331,26 @@ remnant was made as well (last row).
 | **L4** `forecast_leaves` | **Valid.** Labelled insert-only and outside retention, and counted conservatively in every run's delta | App. D.1, B.5.12 |
 | Scripts | No embedded script changed; the 11 SHA-256s are those of revision 15 | App. B |
 
+## 3o. Revision 17: Copilot's review 5407588631 of 6cad4cd (6 High, 4 Medium, 1 Low)
+
+Each finding was checked against 6cad4cd; none was already fixed by
+revision 16, and all eleven are valid.
+
+| Thread | Disposition | Where |
+|---|---|---|
+| **r4178820383** (High) `run_seq` for other kinds | **Fixed.** Only rollups had a serialised lease. Now every analytics kind (rollup, forecast, detect, backtest) uses the lease pattern with a per-(tenant, kind) advisory lock, so `max(run_seq)` is read by one starter at a time. `UNIQUE (tenant_id, kind, run_seq)` is the backstop: a violation fails with `RUN_SEQ_CONFLICT`, not a silent retry. Tests: concurrent forecast, backtest and detect starts (4-4b, 5-3). Mutant: drop the per-kind lock | App. D.1; DESIGN §7 (4-4b, 5-3) |
+| **r4178820404** (High) "only where non-zero" | **Fixed.** DESIGN §2.9 now says every group with at least one fact row is retained, zero amounts included, matching D.1 and the 4-2 test. Sweep: no other "discard" or "only where non-zero" rule remains; the D.1 occurrence is the revision note quoting the old rule | DESIGN §2.9 |
+| **r4178820416** (High) day index | **Fixed.** One index, the scored day `t`: the run reads charge days ≤ t and calibrates on errors with forecast day ≤ t − 1. D8 uses `r_{t−1} + r_t`; D4's restart day is t, with the dormant window t − 56 … t − 1; D1 and D2 score `y_t`; D3 updates `S_t`. Swept: §3.8 replay, D1 row, D6 fit, the dormant stretch, persistence (t − 3), the 5-2a mutant, the 5-3 test and mutant. Appendix C's "data for day d available on d + 1" already matches | DESIGN §3.8, §4.2, §4.5, §7 |
+| **r4178820430** (High) persistence before fan-in | **Fixed.** Fan-in (steps 2–4) now runs first, over day t's candidates **plus** open narrower groups of the same service and category whose first day is within ±1 day. Persistence runs after (step 4b). Merge semantics: the survivor's first day is the earliest member's; each leaf-day belongs to one group; severity is the members' maximum; merged groups keep their ids and point to the survivor. 5-2b test with five accounts over two days; mutant "persistence before fan-in" | DESIGN §4.5, §7 (5-2b) |
+| **r4178820510** CLI seeds | **Fixed.** `--seed tuning|tuning-natural|natural-1|natural-2|natural-3|enriched` | DESIGN §2.7 |
+| **r4178820445** two vs three sequences | **Fixed.** The role row names the three identity sequences (`cost_accounts`, `forecast_leaves`, `cost_series`), matching D.5 | DESIGN §6.1 |
+| **r4178820552** 3-1b seeds | **Fixed.** `tuning-natural` added to 3-1b's scope | DESIGN §7 (3-1b) |
+| **r4178820538** impact vs severity | **Fixed.** The daily excess `x_t` and daily relative `ρ_t` drive the per-day severity rules. The cumulative impact (Σ `x_t`) is the API's `impact` and is used only in the cumulative clause. With expected ≤ 0, `ρ_t` is +∞ for an increase and 0 otherwise, so D4 candidates (new service or region, reactivation) are `warning` at x_t ≥ min and `critical` at ≥ 10 × min. D-13 clarified (thresholds unchanged). 5-2b test and mutants | DESIGN §4.4, §7 (5-2b), §8 D-13 |
+| **r4178820523** "series key" | **Fixed.** The backtest export names `leaf_id`; the grouping sort key also uses `leaf_id` (sweep) | DESIGN §3.8, §4.5 |
+| **r4178820566** storage per series | **Fixed.** "one row per **leaf** (`leaf_id`) per run" | App. D.3 |
+| **r4178820480** FT on tuning | **Fixed.** 4-4b runs FT-4/5/7 on **natural-1**; the tuning seeds never feed an acceptance figure | DESIGN §7 (4-4b) |
+| Scripts | No embedded script changed; the 11 SHA-256s are those of revision 15 | App. B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -368,8 +389,9 @@ Appendix B (B.4, B.5.6–B.5.12).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at `9e0d703` (revision 16). It gives the same risk and classes as every
-revision since 4, and **one more reason than before**: `retention.mention`
+at revision 17 (the commit that adds this line; the same eight reasons
+as at `9e0d703`, revision 16). Revision 16 gave the same risk and classes
+as every revision since 4, and **one more reason than before**: `retention.mention`
 on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is
 "outside retention" (rev. 16, L4). That is a statement about the D-12
 retention policy, so the rule is right to match it. Revisions 4–15 (`faeabb4`

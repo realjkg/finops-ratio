@@ -171,12 +171,22 @@ the pointer. Retention keeps a superseded batch's rows until its
 replacement's `batch_seq` is ≤ `batch_seq_hwm`, so nothing a view can
 return is ever removed.
 
-**One rollup writer per tenant (rev. 13).** Rollup runs use the worker's
-lease pattern (`src/ingest/worker/lease.ts`):
+**One writer per tenant and job kind (rev. 13 for rollups; every kind in
+rev. 17, Copilot r4178820383).** Every analytics run uses the worker's
+lease pattern (`src/ingest/worker/lease.ts`): rollup, forecast, detect and
+backtest alike. `run_seq` is strictly increasing per tenant and kind, and
+only one starter of a kind can be inside the allocation at a time.
 - **Acquiring the lease.** The job takes
-  `pg_advisory_xact_lock(hashtextextended('ratio.analytics.rollup:' || tenant_id, 0))`.
-  - If a `running` rollup run with a live lease exists, it refuses with
-    `ALREADY_RUNNING`.
+  `pg_advisory_xact_lock(hashtextextended('ratio.analytics.' || kind || ':' || tenant_id, 0))`
+  for its own kind.
+  - **Concurrency:** two starts of the same kind cannot both read
+    `max(run_seq)`; starts of different kinds do not contend, since they
+    have different counters.
+  - `UNIQUE (tenant_id, kind, run_seq)` (rev. 16) remains the backstop. A
+    violation can only mean the lock was bypassed, so the start fails with
+    `RUN_SEQ_CONFLICT` and commits nothing; it is not retried silently.
+  - If a `running` run of that kind with a live lease exists, it refuses
+    with `ALREADY_RUNNING`.
   - An expired one is marked `abandoned`.
   - It then inserts its own run with a fresh `lease_token`, a TTL, and the
     next `run_seq`.
@@ -357,7 +367,7 @@ A leaf forecast for day `t + h` is a pure function of its
 log form), with interval `level × q(bucket(h))`. The function lives in a
 shared module used by the job (to write aggregates and backtests) and by the
 API (to answer a leaf request), and a test asserts both give identical
-output for the same row. This keeps leaf storage at one row per series per
+output for the same row. This keeps leaf storage at one row per **leaf** (`leaf_id`) per
 run instead of 90.
 
 ## D.4 Migration 0004 — anomalies
