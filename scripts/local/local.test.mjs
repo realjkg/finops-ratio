@@ -587,6 +587,24 @@ describe('L16 stopping next start and cleaning up never hang', () => {
     expect(down).toHaveBeenCalledTimes(2);
   }, 5_000);
 
+  it('a stop whose exit wait cannot listen rejects at once and leaves no timer armed (no late unhandled error)', async () => {
+    // A leaked timer would call removeListener once graceMs has passed.
+    const removeListener = vi.fn();
+    const cannotListen = {
+      pid: 99997,
+      exitCode: null,
+      signalCode: null,
+      kill: () => true,
+      once: () => {
+        throw new Error('cannot listen');
+      },
+      removeListener,
+    };
+    await expect(stopChild(cannotListen, { graceMs: 100, killMs: 100 })).rejects.toThrow(/cannot listen/);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(removeListener).not.toHaveBeenCalled();
+  });
+
   it('cleanupLocalTest reports a failing down -v instead of throwing past the summary', async () => {
     const r = await cleanupLocalTest({ app: null, down: async () => Promise.reject(new Error('compose down failed')) });
     expect(r.down).toMatch(/compose down failed/);
