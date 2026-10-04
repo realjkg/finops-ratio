@@ -79,16 +79,18 @@ export async function readerLoginReport(client: Queryable): Promise<{ problems: 
        EXISTS (SELECT 1 FROM reach JOIN pg_catalog.pg_roles r ON r.oid = reach.oid WHERE r.rolname = 'ratio_worker') AS worker,
        COALESCE((SELECT rolcanlogin FROM pg_catalog.pg_roles WHERE rolname = session_user), false) AS can_login`,
   );
-  const row = r.rows[0];
-  if (!row.reader) {
+  // Fail closed on anything the catalog does not affirm: a missing row or a
+  // NULL counts as unsafe (strict === true / === false comparisons).
+  const row: { reader?: boolean | null; worker?: boolean | null; can_login?: boolean | null } = r.rows[0] ?? {};
+  if (row.reader !== true) {
     problems.push('connected role does not hold ratio_reader privileges (not an inheriting member)');
     reasons.push('NOT_READER_MEMBER');
   }
-  if (row.worker) {
+  if (row.worker !== false) {
     problems.push('connected role can reach ratio_worker (a reader login must not be able to write)');
     reasons.push('WORKER_REACHABLE');
   }
-  if (!row.can_login) {
+  if (row.can_login !== true) {
     problems.push('the login has been set NOLOGIN (its pooled sessions are refused too)');
     reasons.push('LOGIN_DISABLED');
   }

@@ -3,7 +3,9 @@
 // scripts/local/local.test.mjs. Nothing in this file is a production setting.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
+import { setTimeout } from 'node:timers';
 
 /**
  * Gitignored. Holds one directory PER COMPOSE PROJECT (`.ratio-local/<project>/env`),
@@ -210,6 +212,71 @@ export function ownsListeningSocket({ pid, port: p, procRoot = '/proc' }) {
     }
   }
   return false;
+}
+
+/** True when something accepts TCP connections on host:port (default 127.0.0.1). */
+export function portInUse(p, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const s = net.connect({ host, port: p });
+    s.setTimeout(1000);
+    s.once('connect', () => {
+      s.destroy();
+      resolve(true);
+    });
+    s.once('timeout', () => {
+      s.destroy();
+      resolve(true);
+    });
+    s.once('error', () => resolve(false));
+  });
+}
+
+/**
+ * Re-checks the port immediately before spawning (the preflight ran minutes
+ * earlier, before the stack came up). On platforms without /proc this is what
+ * keeps a foreign server from answering local:test's readiness probe.
+ */
+export async function startIfPortFree({ port: p, isBusy = portInUse, start }) {
+  if (await isBusy(p)) throw new Error(`port ${p} became busy before next start could be spawned: refusing`);
+  return start();
+}
+
+/**
+ * Waits until the spawned server answers AND is the process we spawned:
+ * fails fast if the child exits; when `owns` says another process holds the
+ * listener (false) it refuses; when ownership cannot be determined (null, no
+ * /proc) it relies on startIfPortFree's re-check. Returns 'pid-verified' or
+ * 'port-preflight-only'.
+ */
+export async function waitForOwnServer({
+  child,
+  port: p,
+  probe,
+  owns = ownsListeningSocket,
+  now = Date.now,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  timeoutMs = 60_000,
+  intervalMs = 500,
+}) {
+  const deadline = now() + timeoutMs;
+  for (;;) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`next start exited (code ${child.exitCode}, signal ${child.signalCode}) before it was ready`);
+    }
+    let ok;
+    try {
+      ok = await probe();
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      const owned = owns({ pid: child.pid, port: p });
+      if (owned === false) throw new Error(`a process other than the next start we spawned answers on port ${p}`);
+      return owned === true ? 'pid-verified' : 'port-preflight-only';
+    }
+    if (now() > deadline) throw new Error('timed out waiting for next start');
+    await sleep(intervalMs);
+  }
 }
 
 export function connectionUrl({ user, password, port: p, database }) {

@@ -29,7 +29,8 @@ describe('read API test seam', () => {
     const src = fs.readFileSync(path.join(__dirname, 'publishedCosts.ts'), 'utf8');
     const sig = /export async function readPublishedCosts\(([\s\S]*?)\): Promise/.exec(src)?.[1] ?? '';
     expect(sig).not.toMatch(/hook/i);
-    expect(sig.split(',').filter((p) => p.trim()).length).toBe(3);
+    // Count top-level parameters (generic arguments such as Pick<Pool, 'connect'> contain commas).
+    expect(sig.replace(/<[^<>]*>/g, '').split(',').filter((p) => p.trim()).length).toBe(3);
   });
 
   it('the seam is refused outside vitest', () => {

@@ -108,17 +108,18 @@ const TOTALS_SQL = `
    GROUP BY v.billing_period, v.billing_currency
    ORDER BY v.billing_period, v.billing_currency`;
 
-/** Test-only injection point (a publish between the page and the totals queries). */
-export interface ReadHooks {
-  afterPage?: () => Promise<void>;
+// TEST SEAM (D8 only): runs between the page query and the totals query, to
+// commit a publish inside an open read. Module-level, NOT a parameter of the
+// public read: no caller can pass it per request. The setter refuses to run
+// outside vitest, and testSeam.test.ts fails if any production file names it.
+let afterPageForTests: (() => Promise<void>) | null = null;
+
+export function setAfterPageHookForTests(fn: (() => Promise<void>) | null): void {
+  if (!process.env.VITEST) throw new Error('setAfterPageHookForTests is test-only (vitest)');
+  afterPageForTests = fn;
 }
 
-export async function readPublishedCosts(
-  pool: Pick<Pool, 'connect'>,
-  tenantId: string,
-  q: PublishedCostsQuery,
-  hooks: ReadHooks = {},
-): Promise<PublishedCostsPage> {
+export async function readPublishedCosts(pool: Pick<Pool, 'connect'>, tenantId: string, q: PublishedCostsQuery): Promise<PublishedCostsPage> {
   return withTenantTransaction(pool, tenantId, async (client) => {
     await client.query('SET TRANSACTION READ ONLY');
     // Page and totals must share one snapshot. The reader pool starts every
@@ -150,7 +151,7 @@ export async function readPublishedCosts(
         ? encodeCursor({ billingPeriod: last.billingPeriod, sourceId: last.sourceId, artifactSha256: last.artifactSha256, rowOrdinal: last.rowOrdinal })
         : null;
 
-    if (hooks.afterPage) await hooks.afterPage();
+    if (afterPageForTests) await afterPageForTests();
 
     let totals: PublishedCostsTotal[] | null = null;
     if (!c) {

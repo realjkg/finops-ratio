@@ -18,7 +18,6 @@
 // (54339), RATIO_LOCAL_TEST_S3_PORT (18353), RATIO_LOCAL_TEST_APP_PORT (3110),
 // refusing any overlap with the developer stack. All ports bind 127.0.0.1 only.
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
@@ -36,10 +35,12 @@ import {
   localSettings,
   localStatePaths,
   localTestSettings,
-  ownsListeningSocket,
+  portInUse,
   parseEnvFile,
   preflightProblems,
   removeProjectState,
+  startIfPortFree,
+  waitForOwnServer,
   workerEnv,
   writeEnvFileSecure,
 } from './lib.mjs';
@@ -269,49 +270,6 @@ async function getJson(url, token) {
   return { status: r.status, body: await r.json().catch(() => null) };
 }
 
-/** True when something accepts TCP connections on 127.0.0.1:port. */
-function portInUse(p) {
-  return new Promise((resolve) => {
-    const s = net.connect({ host: '127.0.0.1', port: p });
-    s.setTimeout(1000);
-    s.once('connect', () => {
-      s.destroy();
-      resolve(true);
-    });
-    s.once('timeout', () => {
-      s.destroy();
-      resolve(true);
-    });
-    s.once('error', () => resolve(false));
-  });
-}
-
-/**
- * Waits until `next start` answers AND the answering server is the process
- * we spawned: fails fast if the child exits; on Linux the listening socket
- * must belong to the child (or a descendant); without /proc the pre-start
- * port check is what guarantees no other server sits on the port.
- */
-async function waitForOwnServer(child, appPort, timeoutMs = 60_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`next start exited (code ${child.exitCode}, signal ${child.signalCode}) before it was ready`);
-    let ok;
-    try {
-      ok = (await fetch(`http://127.0.0.1:${appPort}/api/hello`)).status === 200;
-    } catch {
-      ok = false;
-    }
-    if (ok) {
-      const owned = ownsListeningSocket({ pid: child.pid, port: appPort });
-      if (owned === false) throw new Error(`a process other than the next start we spawned answers on port ${appPort}`);
-      return owned === true ? 'pid-verified' : 'port-preflight-only';
-    }
-    if (Date.now() > deadline) throw new Error('timed out waiting for next start');
-    await new Promise((r) => setTimeout(r, 500));
-  }
-}
-
 async function localTest() {
   if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
   // local:test owns its stack end to end (down -v at the end), so it uses its
@@ -344,12 +302,21 @@ async function localTest() {
 
     const secrets = loadSecrets(settings, { create: false });
     const base = `http://127.0.0.1:${settings.appPort}`;
-    app = spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
-      cwd: ROOT,
-      env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
-      stdio: ['ignore', 'ignore', 'inherit'],
+    // Re-check the app port right before spawning (minutes after the preflight).
+    app = await startIfPortFree({
+      port: settings.appPort,
+      start: () =>
+        spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
+          cwd: ROOT,
+          env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
+          stdio: ['ignore', 'ignore', 'inherit'],
+        }),
     });
-    summary.steps.appReady = await waitForOwnServer(app, settings.appPort);
+    summary.steps.appReady = await waitForOwnServer({
+      child: app,
+      port: settings.appPort,
+      probe: async () => (await fetch(`${base}/api/hello`)).status === 200,
+    });
 
     const anon = await getJson(`${base}/api/v1/costs/published`);
     if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);

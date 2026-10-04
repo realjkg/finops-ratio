@@ -81,7 +81,6 @@ export function createPublishedCostsRoute(deps: PublishedCostsRouteDeps = {}): N
     }
     try {
       const page = await readPublishedCosts(poolFor(readerUrl), tenantId, parsed.value);
-      res.setHeader('Cache-Control', 'no-store');
       res.status(200).json(page);
     } catch (err) {
       if (err instanceof UnsafeReaderLoginError) {
@@ -110,6 +109,9 @@ export function createPublishedCostsRoute(deps: PublishedCostsRouteDeps = {}): N
   }
 
   return async function publishedCostsRoute(req: NextApiRequest, res: NextApiResponse): Promise<void> {
+    // No response of this route may be cached, whichever layer writes it:
+    // auth failures here, the gateway's 405/413/429/500, our 400/503/200.
+    res.setHeader('Cache-Control', 'no-store');
     const env = envOf();
     // Live-data auth first: nothing else (not even the method) is evaluated for an unauthenticated caller.
     const auth = evaluateLiveDataAuth(req, { countAbsent: true }, env);
