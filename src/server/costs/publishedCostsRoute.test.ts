@@ -1,0 +1,154 @@
+// GET /api/v1/costs/published — everything decided BEFORE the database:
+// authentication (the repo's existing live-data Bearer auth), the server-side
+// tenant binding, configuration and input validation. The pool factory is a
+// spy that fails the test if it is ever called on these paths.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NextApiHandler } from 'next';
+import { createPublishedCostsRoute, ROUTE_MESSAGES } from './publishedCostsRoute';
+import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
+import routeFromPages from '../../../pages/api/v1/costs/published';
+
+const TENANT = '11111111-1111-4111-8111-111111111111';
+const READER_URL = 'postgres://reader@127.0.0.1:1/ratio';
+const BASE_ENV = { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_API_TENANT_ID: TENANT, RATIO_READER_DATABASE_URL: READER_URL };
+
+let poolFor: ReturnType<typeof vi.fn>;
+function route(env: Record<string, string | undefined> = BASE_ENV): NextApiHandler {
+  return createPublishedCostsRoute({ env, poolFor: poolFor as never, logger: () => undefined });
+}
+
+let addr = 0;
+/** A unique client address per request, so the shared failed-auth counter never throttles unrelated tests. */
+const ip = () => `10.77.${Math.floor(++addr / 250) % 250}.${addr % 250}`;
+
+beforeEach(() => {
+  poolFor = vi.fn(() => {
+    throw new Error('the database must not be touched on this path');
+  });
+  vi.spyOn(console, 'info').mockImplementation(() => {});
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+function errorCode(body: unknown): string | undefined {
+  return (body as { error?: { code?: string } })?.error?.code;
+}
+
+describe('R1 authentication is required (existing live-data Bearer auth, deny by default)', () => {
+  it('no RATIO_API_TOKEN configured ⇒ 401 even with a header, and no DB work', async () => {
+    const res = await call(route({ ...BASE_ENV, RATIO_API_TOKEN: undefined }), makeReq({ headers: bearer(), remoteAddress: ip() }));
+    expect(res.statusCode).toBe(401);
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+
+  it('no Authorization header ⇒ 401', async () => {
+    const res = await call(route(), makeReq({ remoteAddress: ip() }));
+    expect(res.statusCode).toBe(401);
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+
+  it('wrong token ⇒ 401; malformed scheme ⇒ 401', async () => {
+    for (const authorization of [`Bearer ${TEST_API_TOKEN}x`, `Bearer ${TEST_API_TOKEN.slice(1)}`, `Basic ${TEST_API_TOKEN}`, TEST_API_TOKEN, 'Bearer ']) {
+      const res = await call(route(), makeReq({ headers: { authorization }, remoteAddress: ip() }));
+      expect(res.statusCode, authorization).toBe(401);
+    }
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+
+  it('a token in the query string is not a credential (unknown param ⇒ never served)', async () => {
+    const res = await call(route(), makeReq({ query: { token: TEST_API_TOKEN }, remoteAddress: ip() }));
+    expect(res.statusCode).toBe(401);
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+
+  it('a weak configured token refuses cost data (503 weak_token), even when presented correctly', async () => {
+    const weak = 'short-token';
+    const res = await call(route({ ...BASE_ENV, RATIO_API_TOKEN: weak }), makeReq({ headers: bearer(weak), remoteAddress: ip() }));
+    expect(res.statusCode).toBe(503);
+    expect(errorCode(res.body)).toBe('weak_token');
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+
+  it('repeated failures from one client are throttled (429 + Retry-After); a valid token still passes', async () => {
+    const client = '10.250.250.250';
+    let last = 0;
+    for (let i = 0; i < 1001; i += 1) {
+      last = (await call(route(), makeReq({ headers: { authorization: 'Bearer wrong' }, remoteAddress: client }))).statusCode;
+    }
+    expect(last).toBe(429);
+    const throttled = await call(route(), makeReq({ headers: { authorization: 'Bearer wrong' }, remoteAddress: client }));
+    expect(throttled.statusCode).toBe(429);
+    expect(Number(throttled.headers['retry-after'])).toBeGreaterThan(0);
+    // The legitimate holder is never locked out: valid token, same client, gets past auth (here: to validation).
+    const valid = await call(route(), makeReq({ headers: bearer(), query: { limit: '0' }, remoteAddress: client }));
+    expect(valid.statusCode).toBe(400);
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+});
+
+describe('R2 method and configuration', () => {
+  it('only GET (405 + Allow: GET)', async () => {
+    for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
+      const res = await call(route(), makeReq({ method, headers: bearer(), remoteAddress: ip() }));
+      expect(res.statusCode, method).toBe(405);
+      expect(res.headers.allow).toBe('GET');
+    }
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+
+  it('no tenant binding ⇒ 503 not_configured (the tenant is never taken from the request)', async () => {
+    for (const RATIO_API_TENANT_ID of [undefined, '', 'tnt_abc123', 'not-a-uuid', `${TENANT} `, `{${TENANT}}`, '11111111111141118111111111111111']) {
+      const res = await call(route({ ...BASE_ENV, RATIO_API_TENANT_ID }), makeReq({ headers: bearer(), remoteAddress: ip() }));
+      expect(res.statusCode, String(RATIO_API_TENANT_ID)).toBe(503);
+      expect(errorCode(res.body)).toBe('not_configured');
+      expect(JSON.stringify(res.body)).toBe(JSON.stringify({ error: { code: 'not_configured', message: ROUTE_MESSAGES.notConfigured } }));
+    }
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+
+  it('no reader database URL ⇒ 503 not_configured', async () => {
+    for (const RATIO_READER_DATABASE_URL of [undefined, '', '   ']) {
+      const res = await call(route({ ...BASE_ENV, RATIO_READER_DATABASE_URL }), makeReq({ headers: bearer(), remoteAddress: ip() }));
+      expect(res.statusCode).toBe(503);
+      expect(errorCode(res.body)).toBe('not_configured');
+    }
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+});
+
+describe('R3 input validation through the route (400, fixed message, no DB work)', () => {
+  it('a tenant query parameter is refused, not honoured', async () => {
+    const res = await call(route(), makeReq({ headers: bearer(), query: { tenant: '22222222-2222-4222-8222-222222222222' }, remoteAddress: ip() }));
+    expect(res.statusCode).toBe(400);
+    expect(errorCode(res.body)).toBe('invalid_request');
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+
+  it('bad values ⇒ 400 and the body never echoes them', async () => {
+    const hostile = '<script>EVIL</script>';
+    for (const query of [{ limit: '0' }, { limit: '501' }, { period: hostile }, { from: '2026-08', to: '2026-07' }, { cursor: hostile }, { limit: ['1', '2'] }]) {
+      const res = await call(route(), makeReq({ headers: bearer(), query, remoteAddress: ip() }));
+      expect(res.statusCode, JSON.stringify(query)).toBe(400);
+      expect(errorCode(res.body)).toBe('invalid_request');
+      expect(JSON.stringify(res.body)).not.toContain('EVIL');
+    }
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+});
+
+describe('R4 the page route is the factory default', () => {
+  it('pages/api/v1/costs/published.ts exports a handler that refuses an anonymous request', async () => {
+    const saved = process.env.RATIO_API_TOKEN;
+    delete process.env.RATIO_API_TOKEN;
+    try {
+      const res = await call(routeFromPages, makeReq({ remoteAddress: ip() }));
+      expect(res.statusCode).toBe(401);
+    } finally {
+      if (saved === undefined) delete process.env.RATIO_API_TOKEN;
+      else process.env.RATIO_API_TOKEN = saved;
+    }
+  });
+});
