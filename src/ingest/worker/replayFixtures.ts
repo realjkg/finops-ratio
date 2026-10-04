@@ -237,12 +237,16 @@ export async function runReplayFixtures(opts: {
         release();
         return { pass: false, detail: { reachedPublish, zombie: await zombieOutcome } };
       }
-      const expired = await expireLease('fx-zombie');
+      // Every path after reachedPublish releases the zombie and waits for it to settle (Copilot F1):
+      // a failing expireLease or winner sync must not leave it blocked in beforePublish, heartbeating.
+      let expired: number;
       let winner: Awaited<ReturnType<typeof sync>>;
       try {
+        expired = await expireLease('fx-zombie');
         winner = await sync('fx-zombie');
       } finally {
         release();
+        await zombieOutcome;
       }
       const z = await zombieOutcome;
       const t = await totals('fx-zombie');
