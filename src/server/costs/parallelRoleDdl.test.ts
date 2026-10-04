@@ -11,37 +11,86 @@
 // root-caused by the challenger on 7142a86). Such tests belong in
 // *.serial.db.test.ts files, which run alone after the parallel phase.
 //
-// Rule, over every NON-serial *.db.test.ts in src/: a `.query(...)` call (SQL
-// executed directly on a pool or a client) whose SQL text (string pieces of its
-// arguments; dynamic parts are placeholders) contains a cluster-wide role
-// change must provably run inside BEGIN … ROLLBACK:
-//   - cluster-wide role changes:
-//       - GRANT <role> TO …;
-//       - REVOKE <role> FROM …;
-//       - GRANT/REVOKE … ON DATABASE | TABLESPACE | PARAMETER (shared catalogs);
-//       - ALTER ROLE | USER | GROUP <name> …, except ALTER ROLE <name>
-//         IN DATABASE … (a setting scoped to that test database);
-//     object privileges (GRANT … ON <table> TO) and the atomic
-//     CREATE ROLE … IN ROLE of createLogin are database-local or atomic, so
-//     they are not cluster-wide changes;
-//   - "provably inside BEGIN … ROLLBACK": the call is `<client>.query(...)` (not
-//     on a pool, which autocommits), AND an enclosing function issues both
-//     `query('BEGIN')` and `query('ROLLBACK')`, or the enclosing callback is
-//     passed to a function declared in the same file that issues both.
-// Like Slice 1's serialLogins.test.ts (this guard extends it to membership and
-// login changes on existing roles), it sees literal SQL only: a statement held
-// in a variable is a placeholder, and SQL handed to a helper (e.g. a migration
-// text for the runner, which runs it in its own transaction) or a test title
-// is not a `.query(...)` call.
+// Rule, over EVERY `.query(...)` call of every NON-serial *.db.test.ts in src/
+// (no raw-text prefilter: the AST decides, Copilot 4176494775):
+//   1. A call that provably runs inside BEGIN … ROLLBACK is fine, whatever its
+//      SQL. "Provably" is strict (Copilot 4176494757); anything else is not:
+//        - the receiver is a client identifier, never a pool (autocommit);
+//        - BEGIN on the SAME receiver is an unconditional statement (a direct
+//          statement of an enclosing block) strictly BEFORE the call, in the
+//          same function (a nested function never counts);
+//        - nothing ends the transaction on that receiver between the BEGIN
+//          and the call (ROLLBACK, COMMIT, END, ABORT, PREPARE TRANSACTION);
+//        - the ROLLBACK is unconditional after the call: the FIRST statement
+//          of the `finally` of a `try` whose block contains the call, or a
+//          later direct statement of an enclosing block with no return,
+//          throw, break or continue in between; and nothing commits in
+//          between;
+//        - or the call is in a callback, on the callback's client parameter,
+//          passed to a helper of the same file that itself meets these rules
+//          for its call of the callback with that client (e.g. `inTxn`), and
+//          the callback never ends the transaction itself.
+//   2. Any other call: its SQL is rebuilt from the AST (string literals,
+//      templates, `+` concatenation, `const` bindings and `for…of` over array
+//      literals); dynamic VALUES are placeholders. It is a finding when:
+//        - it contains a cluster-wide role change:
+//            - GRANT <role> TO …;
+//            - REVOKE <role> FROM …;
+//            - GRANT/REVOKE … ON DATABASE | TABLESPACE | PARAMETER (shared
+//              catalogs);
+//            - ALTER ROLE | USER | GROUP <name> …, except ALTER ROLE <name>
+//              IN DATABASE … (a setting scoped to that test database);
+//          object privileges (GRANT … ON <table> TO) and the atomic
+//          CREATE ROLE … IN ROLE of createLogin are database-local or atomic;
+//        - or it cannot be read: a bare variable, a call, an object, or a
+//          dynamic part in STATEMENT position (fail closed).
+//   3. A finding may only stay if it is on the reviewed ALLOWLIST below (file,
+//      SHA-256 of the call's text, reason); an allowlist entry that no longer
+//      matches a finding fails too (drift).
+// Test titles and SQL handed to a helper (e.g. a migration text for the
+// runner, which runs it in its own transaction) are not `.query(...)` calls.
 import { describe, expect, it } from 'vitest';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import ts from 'typescript';
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const SRC = path.join(ROOT, 'src');
+/** A dynamic VALUE inside SQL text. */
 const HOLE = '\u0000';
-const PREFILTER = /\bGRANT\b|\bREVOKE\b|\bALTER\s+(?:ROLE|USER|GROUP)\b/i;
+/** SQL the guard cannot read. */
+const UNREADABLE = '\u0001';
+const MAX_VARIANTS = 64;
+
+/**
+ * Reviewed exceptions: a `.query(...)` call the rules cannot prove harmless,
+ * kept after review. Key: file + SHA-256 of the call's text (whitespace
+ * collapsed). Any edit of the call, or its removal, fails the guard (drift).
+ */
+export const ALLOWLIST: ReadonlyArray<{ file: string; sha256: string; reason: string }> = [
+  {
+    file: 'src/ingest/db/commit.db.test.ts',
+    // real.query(sql as string, params as unknown[]) — inside a pass-through proxy object
+    sha256: 'f23679c5f808a7ccd9bdabc20bc0cce08aeedb9e962e21bfe1d0da8c53182af2',
+    reason:
+      "Slice 0. The proxy passes migrateUp's SQL (a copy of the repository's own migrations) to a scratch database, and turns every COMMIT into a ROLLBACK, so nothing it runs is committed. Migration 0001 changes no membership or attribute of an existing login.",
+  },
+  {
+    file: 'src/ingest/db/foundation.db.test.ts',
+    // c.query(sqlOverride && f.startsWith(version) ? sqlOverride : fs.readFileSync(...)) — writeManifest
+    sha256: '5e51cdf34ad9487dbcb8305cb9a37e9cc88d9ee6f5717a1e7ba9f080ca7999c9',
+    reason:
+      'Slice 0. Applies the repository migrations (or this file\'s 0002 override: ALTER TABLE ratio.sources … SET DEFAULT) to a fresh scratch database, as the manifest script does: the same SQL the runner applies to every test database. It creates the ratio roles only if missing and changes no membership or attribute of an existing login.',
+  },
+  {
+    file: 'src/ingest/db/immutability.db.test.ts',
+    // zombie.query(z.sql, z.params) — raceAgainstUncommittedPublish
+    sha256: '7f102be5081acc01d8c168ee0a5fcb2640132d490e5ef506fb137ae56668fbca',
+    reason:
+      "Slice 0. z.sql comes from this file's zombieSql callbacks: a DELETE FROM ratio.cost_facts and an UPDATE of ratio.ingest_artifacts, both database-local DML. The zombie client's BEGIN is issued in a loop (not provable statically), and the test rolls it back.",
+  },
+];
 
 function walk(dir: string, acc: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -51,16 +100,6 @@ function walk(dir: string, acc: string[] = []): string[] {
     } else if (e.name.endsWith('.db.test.ts')) acc.push(abs);
   }
   return acc;
-}
-
-/** The static text of an expression; every dynamic part becomes HOLE. */
-function pieces(n: ts.Expression): string {
-  if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return n.text;
-  if (ts.isTemplateExpression(n)) return n.head.text + n.templateSpans.map((s) => HOLE + s.literal.text).join('');
-  if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken) return pieces(n.left) + pieces(n.right);
-  if (ts.isParenthesizedExpression(n)) return pieces(n.expression);
-  if (ts.isArrayLiteralExpression(n)) return n.elements.map((e) => (ts.isExpression(e) ? pieces(e) : HOLE)).join(' ');
-  return HOLE;
 }
 
 /** Cluster-wide role changes in one SQL-ish text (dynamic parts are HOLE). */
@@ -83,64 +122,313 @@ export function clusterRoleChanges(raw: string): string[] {
   return out;
 }
 
-const isFn = (n: ts.Node): n is ts.FunctionLikeDeclaration =>
-  ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n);
+// --- transactions -------------------------------------------------------------
 
-/** True when `fn`'s body issues both query('BEGIN…') and query('ROLLBACK…'). */
-function beginsAndRollsBack(fn: ts.Node): boolean {
-  let begin = false;
-  let rollback = false;
+type Fn = ts.FunctionLikeDeclaration;
+const isFn = (n: ts.Node): n is Fn =>
+  ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n);
+const fnOf = (n: ts.Node): Fn | undefined => {
+  for (let p = n.parent; p; p = p.parent) if (isFn(p)) return p;
+  return undefined;
+};
+
+/** Strips `await`, parentheses and a trailing `.catch(...)`. */
+function core(e: ts.Expression): ts.Expression {
+  for (;;) {
+    if (ts.isAwaitExpression(e) || ts.isParenthesizedExpression(e)) e = e.expression;
+    else if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression) && e.expression.name.text === 'catch') e = e.expression.expression;
+    else return e;
+  }
+}
+
+type Ctl = 'BEGIN' | 'ROLLBACK' | 'END';
+function ctlKind(sql: string): Ctl | null {
+  const s = sql.trim().toUpperCase();
+  if (/^(BEGIN|START\s+TRANSACTION)\b/.test(s)) return 'BEGIN';
+  if (/^ROLLBACK\s+(TO|PREPARED)\b/.test(s)) return null;
+  if (/^(ROLLBACK|ABORT)\b/.test(s)) return 'ROLLBACK';
+  if (/^(COMMIT|END|PREPARE\s+TRANSACTION)\b/.test(s)) return 'END';
+  return null;
+}
+
+/** `<recv>.query('<literal>')` (await / .catch() stripped). */
+function literalQuery(e: ts.Expression): { recv: string; ctl: Ctl | null; node: ts.CallExpression } | null {
+  const c = core(e);
+  if (!ts.isCallExpression(c) || !ts.isPropertyAccessExpression(c.expression) || c.expression.name.text !== 'query' || !c.arguments.length) return null;
+  const a = c.arguments[0];
+  if (!ts.isStringLiteral(a) && !ts.isNoSubstitutionTemplateLiteral(a)) return null;
+  return { recv: c.expression.expression.getText(), ctl: ctlKind(a.text), node: c };
+}
+
+/** The transaction control a direct statement issues on `recv`, if any. */
+function stmtCtl(st: ts.Statement | undefined, recv: string): Ctl | null {
+  if (!st || !ts.isExpressionStatement(st)) return null;
+  const q = literalQuery(st.expression);
+  return q && q.recv === recv ? q.ctl : null;
+}
+
+/** Every transaction-control call on `recv` anywhere under `scope` (nested functions included: fail closed). */
+function controls(scope: ts.Node, recv: string): Array<{ pos: number; kind: Ctl }> {
+  const out: Array<{ pos: number; kind: Ctl }> = [];
   const visit = (n: ts.Node) => {
-    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'query' && n.arguments.length) {
-      const a = n.arguments[0];
-      if (ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a)) {
-        if (/^\s*BEGIN\b/i.test(a.text)) begin = true;
-        if (/^\s*ROLLBACK\b/i.test(a.text)) rollback = true;
-      }
+    if (ts.isCallExpression(n)) {
+      const q = literalQuery(n);
+      if (q && q.node === n && q.recv === recv && q.ctl) out.push({ pos: n.getStart(), kind: q.ctl });
     }
     ts.forEachChild(n, visit);
   };
-  visit(fn);
-  return begin && rollback;
-}
-
-/** Functions declared in the file (function declarations and const = arrow/function) that BEGIN and ROLLBACK. */
-function txnHelpers(sf: ts.SourceFile): Set<string> {
-  const out = new Set<string>();
-  const visit = (n: ts.Node) => {
-    if (ts.isFunctionDeclaration(n) && n.name && beginsAndRollsBack(n)) out.add(n.name.text);
-    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && isFn(n.initializer) && beginsAndRollsBack(n.initializer)) out.add(n.name.text);
-    ts.forEachChild(n, visit);
-  };
-  visit(sf);
+  visit(scope);
   return out;
 }
 
-/** Is this call provably inside BEGIN … ROLLBACK? */
-function inRolledBackTxn(call: ts.CallExpression, helpers: Set<string>): boolean {
-  const callee = call.expression;
-  if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== 'query') return false;
-  // A pool autocommits each statement.
-  if (/(^|\.)\w*pool$/i.test(callee.expression.getText())) return false;
-  for (let p: ts.Node | undefined = call.parent; p; p = p.parent) {
-    if (!isFn(p)) continue;
-    if (beginsAndRollsBack(p)) return true;
-    const outer = p.parent;
-    if (outer && ts.isCallExpression(outer) && outer.arguments.includes(p as ts.Expression) && ts.isIdentifier(outer.expression) && helpers.has(outer.expression.text)) return true;
+/** A return, throw, break or continue under `n` (not inside a nested function). */
+function hasEarlyExit(n: ts.Node): boolean {
+  let found = false;
+  const visit = (m: ts.Node) => {
+    if (found || (m !== n && isFn(m))) return;
+    if (ts.isReturnStatement(m) || ts.isThrowStatement(m) || ts.isBreakStatement(m) || ts.isContinueStatement(m)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(m, visit);
+  };
+  visit(n);
+  return found;
+}
+
+/** Is `call` (receiver `recv`) provably inside BEGIN … ROLLBACK on `recv`, within `fn` itself? */
+function rolledBackWithin(call: ts.Node, recv: string, fn: Fn | undefined): boolean {
+  if (!fn || !fn.body || !ts.isBlock(fn.body)) return false;
+  // The enclosing blocks of the call inside fn, innermost first, with the call's statement in each.
+  const chain: Array<{ block: ts.Block; stmt: ts.Statement }> = [];
+  for (let n: ts.Node = call; n !== fn; n = n.parent) {
+    if (n !== call && isFn(n)) return false; // inside a nested function: never
+    if (ts.isBlock(n.parent)) chain.push({ block: n.parent, stmt: n as ts.Statement });
+  }
+  const ctl = controls(fn.body, recv);
+  const at = call.getStart();
+  // 1. An unconditional BEGIN on recv strictly before the call.
+  let begin = -1;
+  for (const { block, stmt } of chain) {
+    for (const st of block.statements) {
+      if (st === stmt) break;
+      if (stmtCtl(st, recv) === 'BEGIN') begin = Math.max(begin, st.getStart());
+    }
+  }
+  if (begin < 0) return false;
+  // 2. Nothing ends the transaction between that BEGIN and the call.
+  if (ctl.some((c) => c.pos > begin && c.pos < at && c.kind !== 'BEGIN')) return false;
+  // 3a. The first statement of the finally of an enclosing try (call in its try block) is the ROLLBACK.
+  for (let n: ts.Node = call; n !== fn; n = n.parent) {
+    const p = n.parent;
+    if (ts.isTryStatement(p) && p.tryBlock === n && p.finallyBlock && stmtCtl(p.finallyBlock.statements[0], recv) === 'ROLLBACK') {
+      if (!ctl.some((c) => c.kind === 'END' && c.pos > at && c.pos < p.tryBlock.getEnd())) return true;
+    }
+  }
+  // 3b. Straight line: a later direct statement of an enclosing block is the ROLLBACK, no early exit or commit in between.
+  for (const { block, stmt } of chain) {
+    const i = block.statements.indexOf(stmt);
+    const after = block.statements.slice(i + 1);
+    const j = after.findIndex((st) => stmtCtl(st, recv) === 'ROLLBACK');
+    if (j < 0) continue;
+    if ([stmt, ...after.slice(0, j)].some(hasEarlyExit)) continue;
+    if (ctl.some((c) => c.kind === 'END' && c.pos > at && c.pos < after[j].getStart())) continue;
+    return true;
   }
   return false;
 }
 
-/** Every `.query(...)` call with a cluster-wide role change, and whether it is provably rolled back. */
-function roleChangeQueries(file: string, code: string): Array<{ line: number; changes: string[]; rolledBack: boolean }> {
-  if (!PREFILTER.test(code)) return [];
-  const sf = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true);
-  const helpers = txnHelpers(sf);
-  const out: Array<{ line: number; changes: string[]; rolledBack: boolean }> = [];
+/** Helpers of the file that call a callback parameter with a client inside a verified BEGIN … ROLLBACK: name → callback argument indexes. */
+function verifiedHelpers(sf: ts.SourceFile): Map<string, Set<number>> {
+  const out = new Map<string, Set<number>>();
+  const check = (name: string, fn: Fn) => {
+    for (const p of fn.parameters) {
+      if (!ts.isIdentifier(p.name)) continue;
+      const cb = p.name.text;
+      const calls: ts.CallExpression[] = [];
+      const visit = (n: ts.Node) => {
+        if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === cb) calls.push(n);
+        ts.forEachChild(n, visit);
+      };
+      if (fn.body) visit(fn.body);
+      if (!calls.length) continue;
+      const width = Math.max(...calls.map((c) => c.arguments.length));
+      for (let k = 0; k < width; k += 1) {
+        const ok = calls.every((c) => {
+          const a = c.arguments[k];
+          return a !== undefined && ts.isIdentifier(a) && rolledBackWithin(c, a.text, fn);
+        });
+        if (ok) {
+          if (!out.has(name)) out.set(name, new Set());
+          out.get(name)!.add(k);
+        }
+      }
+    }
+  };
   const visit = (n: ts.Node) => {
-    if (ts.isCallExpression(n) && n.arguments.length && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'query') {
-      const changes = clusterRoleChanges(n.arguments.map((a) => pieces(a)).join(' '));
-      if (changes.length) out.push({ line: sf.getLineAndCharacterOfPosition(n.getStart()).line + 1, changes: [...new Set(changes)], rolledBack: inRolledBackTxn(n, helpers) });
+    if (ts.isFunctionDeclaration(n) && n.name) check(n.name.text, n);
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && isFn(n.initializer)) check(n.name.text, n.initializer);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/** The call is on a callback's client parameter, inside a verified helper, and the callback never ends the transaction itself. */
+function viaHelper(call: ts.Node, recv: string, helpers: Map<string, Set<number>>): boolean {
+  const f = fnOf(call);
+  if (!f || !f.body) return false;
+  const k = f.parameters.findIndex((p) => ts.isIdentifier(p.name) && p.name.text === recv);
+  if (k < 0) return false;
+  const outer = f.parent;
+  if (!outer || !ts.isCallExpression(outer) || !outer.arguments.some((a) => a === f) || !ts.isIdentifier(outer.expression)) return false;
+  if (!helpers.get(outer.expression.text)?.has(k)) return false;
+  return !controls(f.body, recv).some((c) => c.kind !== 'BEGIN');
+}
+
+// --- SQL text ------------------------------------------------------------------
+
+/**
+ * Resolves an identifier to the expressions it can hold, with the TypeScript
+ * checker of a one-file program (imports are not followed: unreadable):
+ *   - a `const` with an initializer;
+ *   - a `for (const x of [a, b])` variable over an array literal (each element);
+ *   - a parameter of a named function whose EVERY reference in the file is a
+ *     direct call: the arguments at that position (a function passed around,
+ *     or a call that omits the argument, is unreadable).
+ * Anything else (let, imports, destructuring, properties) resolves to nothing.
+ */
+interface Resolver {
+  values(id: ts.Identifier): ts.Expression[] | null;
+}
+
+function resolverFor(file: string, sf: ts.SourceFile): Resolver {
+  const host: ts.CompilerHost = {
+    getSourceFile: (name) => (name === file ? sf : undefined),
+    getDefaultLibFileName: () => 'lib.d.ts',
+    writeFile: () => undefined,
+    getCurrentDirectory: () => '',
+    getCanonicalFileName: (f) => f,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => '\n',
+    fileExists: (name) => name === file,
+    readFile: () => undefined,
+  };
+  const checker = ts.createProgram({ rootNames: [file], options: { noResolve: true, noLib: true, types: [] }, host }).getTypeChecker();
+  return {
+    values(id) {
+      const sym = checker.getSymbolAtLocation(id);
+      const decl = sym?.valueDeclaration ?? sym?.declarations?.[0];
+      if (!decl) return null;
+      if (ts.isVariableDeclaration(decl)) {
+        const list = decl.parent;
+        if (!ts.isVariableDeclarationList(list) || !(list.flags & ts.NodeFlags.Const)) return null;
+        if (ts.isForOfStatement(list.parent)) {
+          const e = list.parent.expression;
+          if (!ts.isArrayLiteralExpression(e) || e.elements.some((x) => ts.isSpreadElement(x))) return null;
+          return [...e.elements] as ts.Expression[];
+        }
+        return decl.initializer ? [decl.initializer] : null;
+      }
+      if (ts.isParameter(decl) && isFn(decl.parent)) {
+        const fn = decl.parent;
+        const idx = fn.parameters.indexOf(decl);
+        const nameNode = ts.isFunctionDeclaration(fn) && fn.name ? fn.name : ts.isVariableDeclaration(fn.parent) && ts.isIdentifier(fn.parent.name) ? fn.parent.name : undefined;
+        const fsym = nameNode && checker.getSymbolAtLocation(nameNode);
+        if (!nameNode || !fsym) return null;
+        const args: ts.Expression[] = [];
+        let ok = true;
+        const visit = (n: ts.Node) => {
+          if (ts.isIdentifier(n) && n !== nameNode && checker.getSymbolAtLocation(n) === fsym) {
+            const p = n.parent;
+            if (ts.isCallExpression(p) && p.expression === n && p.arguments[idx]) args.push(p.arguments[idx]);
+            else ok = false;
+          }
+          ts.forEachChild(n, visit);
+        };
+        visit(sf);
+        return ok && args.length ? args : null;
+      }
+      return null;
+    },
+  };
+}
+
+/** `<x>.replace(/'/g, "''")`: SQL quote doubling (keywords unchanged), transparent for the scan. */
+function quoteDoubling(e: ts.Expression): ts.Expression | null {
+  if (!ts.isCallExpression(e) || !ts.isPropertyAccessExpression(e.expression) || e.expression.name.text !== 'replace' || e.arguments.length !== 2) return null;
+  const [re, by] = e.arguments;
+  return ts.isRegularExpressionLiteral(re) && re.text === "/'/g" && ts.isStringLiteral(by) && by.text === "''" ? e.expression.expression : null;
+}
+
+/** Every SQL text an expression can be (HOLE: a dynamic value; UNREADABLE: cannot be read). */
+function sqlTexts(e: ts.Expression, r: Resolver, depth = 0): string[] {
+  if (depth > 8) return [UNREADABLE];
+  if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return [e.text];
+  if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e)) return sqlTexts(e.expression, r, depth + 1);
+  const unquoted = quoteDoubling(e);
+  if (unquoted) return sqlTexts(unquoted, r, depth + 1);
+  const cross = (a: string[], b: string[]) => (a.length * b.length > MAX_VARIANTS ? [UNREADABLE] : a.flatMap((x) => b.map((y) => x + y)));
+  /** A part inside a larger text: resolved when possible, else a value placeholder. */
+  const part = (x: ts.Expression): string[] => {
+    const t = sqlTexts(x, r, depth + 1);
+    return t.some((s) => s.includes(UNREADABLE)) ? [HOLE] : t;
+  };
+  if (ts.isTemplateExpression(e)) {
+    let acc = [e.head.text];
+    for (const s of e.templateSpans) acc = cross(cross(acc, part(s.expression)), [s.literal.text]);
+    return acc;
+  }
+  if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.PlusToken) return cross(part(e.left), part(e.right));
+  if (ts.isIdentifier(e)) {
+    const v = r.values(e);
+    return v && v.length ? v.flatMap((x) => sqlTexts(x, r, depth + 1)) : [UNREADABLE];
+  }
+  return [UNREADABLE];
+}
+
+/** A HOLE where a whole statement could be (start of the text or of a statement, or inside EXECUTE / format('…')). */
+function statementHole(text: string): boolean {
+  for (let i = text.indexOf(HOLE); i >= 0; i = text.indexOf(HOLE, i + 1)) {
+    const seg = text.slice(0, i).split(/;|\$\$|\$[a-z_]*\$/i).pop() ?? '';
+    if (/^\s*$/.test(seg) || /\bEXECUTE\s*'?$/i.test(seg) || /\bformat\(\s*'$/i.test(seg)) return true;
+  }
+  return false;
+}
+
+// --- the scan --------------------------------------------------------------------
+
+export interface QueryFinding {
+  file: string;
+  line: number;
+  sha256: string;
+  problems: string[];
+}
+
+const callHash = (n: ts.Node) => crypto.createHash('sha256').update(n.getText().replace(/\s+/g, ' ').trim()).digest('hex');
+
+/** Every `.query(...)` call of a file, judged by the rules above: the findings (before the allowlist). */
+export function queryFindings(file: string, code: string): QueryFinding[] {
+  const sf = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true);
+  const helpers = verifiedHelpers(sf);
+  const resolver = resolverFor(file, sf);
+  const out: QueryFinding[] = [];
+  const visit = (n: ts.Node) => {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'query') {
+      const recv = n.expression.expression.getText();
+      const pool = /(^|\.)\w*pool$/i.test(recv);
+      const safe = !pool && (rolledBackWithin(n, recv, fnOf(n)) || viaHelper(n, recv, helpers));
+      if (!safe) {
+        const texts = n.arguments.length ? sqlTexts(n.arguments[0], resolver) : [UNREADABLE];
+        const problems = new Set<string>();
+        for (const t of texts) {
+          if (t.includes(UNREADABLE) || statementHole(t)) problems.add('SQL the guard cannot read');
+          else for (const c of clusterRoleChanges(t)) problems.add(c);
+        }
+        if (problems.size) {
+          out.push({ file, line: sf.getLineAndCharacterOfPosition(n.getStart()).line + 1, sha256: callHash(n), problems: [...problems] });
+        }
+      }
     }
     ts.forEachChild(n, visit);
   };
@@ -148,22 +436,47 @@ function roleChangeQueries(file: string, code: string): Array<{ line: number; ch
   return out;
 }
 
-/** Violations in one source text. */
+/** Findings as messages (the allowlist is applied by the repository scan, not here). */
 export function parallelRoleDdlViolations(file: string, code: string): string[] {
-  return roleChangeQueries(file, code)
-    .filter((q) => !q.rolledBack)
-    .flatMap((q) => q.changes.map((c) => `${file}:${q.line} ${c} outside BEGIN … ROLLBACK`));
+  return queryFindings(file, code).flatMap((f) => f.problems.map((p) => `${f.file}:${f.line} ${p} outside BEGIN … ROLLBACK`));
 }
 
-describe('cluster-wide role changes only in serial DB test files (static guard)', () => {
-  it('no non-serial *.db.test.ts commits a GRANT <role> TO, REVOKE <role> FROM or ALTER ROLE outside BEGIN … ROLLBACK', () => {
-    const files = walk(SRC).filter((f) => !f.endsWith('.serial.db.test.ts'));
-    expect(files.length).toBeGreaterThan(20);
-    const violations = files.flatMap((f) => parallelRoleDdlViolations(path.relative(ROOT, f), fs.readFileSync(f, 'utf8')));
-    expect(violations).toEqual([]);
-  }, 30_000);
+/** How many `.query(...)` calls in a file the rules accept as rolled back (for the non-vacuity check). */
+function rolledBackQueries(file: string, code: string): number {
+  const sf = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true);
+  const helpers = verifiedHelpers(sf);
+  let n = 0;
+  const visit = (m: ts.Node) => {
+    if (ts.isCallExpression(m) && ts.isPropertyAccessExpression(m.expression) && m.expression.name.text === 'query') {
+      const recv = m.expression.expression.getText();
+      if (!/(^|\.)\w*pool$/i.test(recv) && (rolledBackWithin(m, recv, fnOf(m)) || viaHelper(m, recv, helpers))) n += 1;
+    }
+    ts.forEachChild(m, visit);
+  };
+  visit(sf);
+  return n;
+}
 
-  it('the Slice 0/1 files with role DDL (rolled back, database-local or atomic) pass unchanged', () => {
+/** The repository scan: findings not on the allowlist, and allowlist entries that match nothing. */
+function repositoryScan(): { unlisted: QueryFinding[]; stale: typeof ALLOWLIST; all: QueryFinding[] } {
+  const files = walk(SRC).filter((f) => !f.endsWith('.serial.db.test.ts'));
+  const all = files.flatMap((f) => queryFindings(path.relative(ROOT, f), fs.readFileSync(f, 'utf8')));
+  const listed = (f: QueryFinding) => ALLOWLIST.some((a) => a.file === f.file && a.sha256 === f.sha256);
+  return {
+    all,
+    unlisted: all.filter((f) => !listed(f)),
+    stale: ALLOWLIST.filter((a) => !all.some((f) => f.file === a.file && f.sha256 === a.sha256)),
+  };
+}
+describe('cluster-wide role changes only in serial DB test files (static guard)', () => {
+  it('no non-serial *.db.test.ts runs a cluster-wide role change, or SQL the guard cannot read, outside a verified BEGIN … ROLLBACK (reviewed allowlist only; no drift)', () => {
+    const scan = repositoryScan();
+    expect(walk(SRC).filter((f) => !f.endsWith('.serial.db.test.ts')).length).toBeGreaterThan(20);
+    expect(scan.unlisted.map((f) => `${f.file}:${f.line} sha256 ${f.sha256} ${f.problems.join('; ')}`)).toEqual([]);
+    expect(scan.stale).toEqual([]);
+  }, 60_000);
+
+  it('the Slice 0/1 files with role DDL (rolled back, database-local or atomic) pass unchanged, non-vacuously', () => {
     for (const f of [
       'src/ingest/db/memberPrivileges.db.test.ts',
       'src/ingest/db/roles.db.test.ts',
@@ -172,16 +485,20 @@ describe('cluster-wide role changes only in serial DB test files (static guard)'
       'src/ingest/db/immutability.db.test.ts',
       'src/ingest/cli.db.test.ts',
     ]) {
-      expect(parallelRoleDdlViolations(f, fs.readFileSync(path.join(ROOT, f), 'utf8')), f).toEqual([]);
+      const code = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      const findings = queryFindings(f, code).filter((x) => !ALLOWLIST.some((a) => a.file === x.file && a.sha256 === x.sha256));
+      expect(findings, f).toEqual([]);
     }
-    // Not vacuous: these files DO run cluster-wide role changes, all recognised as rolled back.
-    const seen = (f: string) => roleChangeQueries(f, fs.readFileSync(path.join(ROOT, f), 'utf8'));
-    for (const f of ['src/ingest/db/memberPrivileges.db.test.ts', 'src/ingest/db/privileges.db.test.ts']) {
-      expect(seen(f).length, f).toBeGreaterThan(5);
-      expect(seen(f).every((q) => q.rolledBack), f).toBe(true);
+    // Not vacuous: these files DO run SQL inside BEGIN … ROLLBACK, recognised by the strict rules.
+    // (roles.db.test.ts: runUpAfter's `c.query(pre)` and `c.query(upSql)`, BEGIN in an outer try, ROLLBACK first in its finally.)
+    for (const [f, min] of [
+      ['src/ingest/db/memberPrivileges.db.test.ts', 6],
+      ['src/ingest/db/privileges.db.test.ts', 6],
+      ['src/ingest/db/roles.db.test.ts', 2],
+    ] as const) {
+      expect(rolledBackQueries(f, fs.readFileSync(path.join(ROOT, f), 'utf8')), f).toBeGreaterThanOrEqual(min);
     }
   });
-
   it('detector self-test: what is flagged and what is not', () => {
     const v = (code: string) => parallelRoleDdlViolations('x.db.test.ts', code);
     // Flagged: autocommit pool, membership and login changes.

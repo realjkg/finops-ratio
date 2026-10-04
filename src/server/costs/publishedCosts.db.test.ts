@@ -26,7 +26,6 @@ import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
 import { createPublishedCostsRoute, ROUTE_MESSAGES } from './publishedCostsRoute';
 import { closeReaderPools, createReaderPool, readerPool } from './readerPool';
 import { PUBLISHED_COSTS_SQL, readPublishedCosts, setAfterPageHookForTests } from './publishedCosts';
-import { withTenantTransaction } from '../../ingest/db/tenant';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
 
 interface Row {
@@ -491,13 +490,26 @@ describe('D10 output never depends on session settings (Copilot 4176238982)', ()
     // A plain pool: none of the reader pool's pinned options.
     const plain = new Pool({ connectionString: reader.url, max: 1 });
     try {
-      const run = (sets: Array<[string, string]>) =>
-        withTenantTransaction(plain, C.tenantId, async (c) => {
-          for (const [k, v] of sets) await c.query(`SELECT pg_catalog.set_config($1, $2, true)`, [k, v]);
-          const page = await c.query(PUBLISHED_COSTS_SQL.page, [null, null, null, null, null, null, 1000]);
-          const totals = await c.query(PUBLISHED_COSTS_SQL.totals, [null, null]);
-          return { page: page.rows, totals: totals.rows };
-        });
+      // A read-only transaction that is always rolled back (BEGIN … finally
+      // ROLLBACK on the same client, so parallelRoleDdl.test.ts can verify it;
+      // the API's SQL is imported, so the guard cannot read its text).
+      const run = async (sets: Array<[string, string]>) => {
+        const c = await plain.connect();
+        try {
+          await c.query('BEGIN');
+          try {
+            await c.query(`SELECT pg_catalog.set_config('ratio.tenant_id', $1, true)`, [C.tenantId]);
+            for (const [k, v] of sets) await c.query(`SELECT pg_catalog.set_config($1, $2, true)`, [k, v]);
+            const page = await c.query(PUBLISHED_COSTS_SQL.page, [null, null, null, null, null, null, 1000]);
+            const totals = await c.query(PUBLISHED_COSTS_SQL.totals, [null, null]);
+            return { page: page.rows, totals: totals.rows };
+          } finally {
+            await c.query('ROLLBACK');
+          }
+        } finally {
+          c.release();
+        }
+      };
       const base = await run([
         ['DateStyle', 'ISO, MDY'],
         ['TimeZone', 'UTC'],
