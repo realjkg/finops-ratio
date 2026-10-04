@@ -4,6 +4,12 @@ Branch `fix/62-provider-source-check`, from `origin/main` 827773f. Not pushed;
 no PR. Design: `DESIGN.md` (this directory). Restricted class (Slice 1 worker
 behaviour): needs a challenger review.
 
+**How to read this file.**
+- §1–§7 record the first round, at ae3c142. Superseded there: D1 put
+  `SyntheticCloud` on the AWS allowlist.
+- §8 records the orchestrator's decisions of 2026-10-04 and the gates after
+  them, at d480eec.
+
 **Isolation.** Other agents share this host and its Docker daemon. Every run
 used its own names and ports, and everything was removed afterwards:
 - `test:db`: a private PG16 cluster (`initdb` as `postgres` via `setpriv`,
@@ -183,3 +189,84 @@ The private cluster (`pg_ctl stop`, `/dev/shm/i62pg` removed), the
 projects (`down -v`, including their `.ratio-local/<project>/`) and all
 scratch files are gone. `.ratio-sample-data/` (the pinned 10k copy,
 gitignored) was left in this worktree.
+
+## 8. Orchestrator decisions (2026-10-04) and the second round
+
+The decisions are recorded in DESIGN §8 ("decided by orchestrator,
+2026-10-04"):
+- **D1 changed:** the synthetic providers are gated by
+  `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`. A later addition makes this a fixed
+  `SYNTHETIC_PROVIDERS` set of four names.
+- **D2, D3 and D5 accepted.** D2's revisit trigger is recorded.
+- **D4 accepted with a guard test.**
+
+### 8.1 Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 70a0ae0 | U1 rewritten for the opt-in; `syntheticProviders.test.ts` (S1); `sourceFactory.test.ts` (G1, D4 guard); D9/D10; local opt-in tests | **red** (`red/red-d1-fast.txt`: 12 failed / 105; `red/red-d1-db.txt`: 6 failed / 19. G1 passes at red: it pins existing factory behaviour) |
+| ca0378a | the opt-in: `config.ts`, `provider.ts`, pipeline, CLI log, `replay-fixtures` pass-through; harness: vitest DB configs `env`, `testS3Env()`, `local.mjs` / `lib.mjs`; DESIGN §8 | green |
+| 8e4abd6 | decision mutation record | docs |
+| 402b8e5 | the fixed `SYNTHETIC_PROVIDERS` set: U2 and a D9 case | **red** (`red/red-synthetic-set-fast.txt`: 6 failed / 21; `red/red-synthetic-set-db.txt`: 3 failed / 20) |
+| 642b5f3 | `SYNTHETIC_PROVIDERS` = `SyntheticCloud`, `SyntheticAWS`, `SyntheticAzure`, `SyntheticGCP` | green |
+| 59367d7 | D10: the startup log names no provider | **red** (`red/red-k1-log.txt`) |
+| d480eec | the startup log carries `syntheticProviderCount`, not the names | green |
+
+**Defect found by a Slice 1 test, fixed in code.** The first opt-in log
+listed the provider names. `cliWorker.db.test.ts` K1 refuses any
+`SyntheticCloud` in CLI output, because logs never carry row values. The
+D10 test had asserted the names. It was corrected to assert the opposite
+(count only, no names) and committed red. The code then changed. No Slice 1
+test was touched.
+
+**How the opt-in reaches the existing tests (no Slice 0/1 test file edited):**
+- the library DB tests: `env: { RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1' }` in
+  `vitest.db.config.ts` and `vitest.db.serial.config.ts`;
+- the in-process CLI tests (`cliWorker.db.test.ts`, `demo.db.test.ts`):
+  `testS3Env()` in `src/ingest/testing/s3.ts`. That is the harness helper
+  they already use to build the worker env, not a test file;
+- `local:sync` / `local:test`: `syncRecord(…, { syntheticProviders: true })`
+  for the SYNTHETIC fixture source only. `local:acceptance` runs with the
+  opt-in off (0 opt-in log lines in its run).
+
+### 8.2 Gates (at d480eec unless noted)
+
+| Gate | Result |
+|---|---|
+| lint, typecheck | exit 0 |
+| `npm test` | **2542 passed** (108 files) |
+| `npm run test:db` ×1 | parallel **617 passed** (35 files); serial **173 passed**; exit 0. At 642b5f3 the parallel phase failed K1 (the log defect above); d480eec fixes it |
+| `npm run local:test` | exit 0, `pass: true`; 55 / 40 rows as before; the opt-in logged once per worker start (2 syncs ⇒ 2 lines) (`runs/localtest-decisions.json`) |
+| `npm run local:acceptance` (1k) | exit 0, `pass: true`, 23.1 s. First sync exit 1: 2024-09 `published` 942 / `18.00663861840`, `excludedRows` 57; 2024-10 `quarantined` `PROVIDER_MISMATCH`. Catalog `{PROVIDER_MISMATCH: 57}` / `{PROVIDER_MISMATCH: 1}` (`runs/acc1k-decisions.json`) |
+
+### 8.3 Mutations (all killed)
+
+`runs/code-mutations-decisions.txt` covers M17–M20 plus re-checks of M1–M4b.
+`runs/code-mutations-synthetic-set.txt` covers M17 again, M21 and M22.
+
+| Id | Mutation | Killed by |
+|---|---|---|
+| M17 | synthetic providers always allowed (opt-in ignored) | U1 (5), D (5: D9 off cases, D10 off) |
+| M17b | `SyntheticCloud` back on the AWS base list | U1 (5), D (4) |
+| M17c | the CLI ignores its env and always opts in | S1 (4), D10 off |
+| M18a | default ON in `DEFAULT_SETTINGS` | S1 |
+| M18b | unset env means ON | S1, D9 library default |
+| M18c | a loose value (`true`) accepted | S1 |
+| M19 | the opt-in accepted in production | S1 |
+| M20 | the factory accepts `focus_file` without the AWS layout | G1 |
+| M20b | no startup log | D10 on |
+| M21 | the opt-in widens real names (`Microsoft` accepted when on) | U2, D9 synthetic set |
+| M22 | `SyntheticGCP` dropped from the set | U2, D9 synthetic set |
+| M1, M2, M3, M4b | check disabled, NULL accepted, case-insensitive, prefix | U1 and D, as in §5.1 |
+
+### 8.4 Notes for the orchestrator
+
+- `testS3Env()` (a Slice 1 harness helper) now carries the opt-in. If you
+  would rather keep it out of that helper, the in-process CLI tests in
+  `cliWorker.db.test.ts` and `demo.db.test.ts` cannot get the opt-in any
+  other way without editing those test files.
+- `replay-fixtures` in staging needs `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` for
+  that invocation (it ingests the synthetic fixture). Production refuses the
+  opt-in at config load.
+- `SYNTHETIC_PROVIDERS` is a frozen array, so it cannot be changed at
+  runtime (a frozen `Set` still accepts `add`). Exact, case-sensitive names.
