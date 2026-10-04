@@ -314,3 +314,60 @@ Out of scope, recorded in the brief:
 - **CI:** remove the two appended steps.
 - **Local:** `npm run local:down -- -v` removes the containers, network,
   volumes and `.ratio-local/`.
+
+## 7. Found during implementation; coordinator decisions
+
+**Next-start-only failure (found by the local e2e).**
+- Under `next build && next start`, every request to the route failed with a
+  500: `ENOENT: scandir '/ROOT/src/ingest/db/migrations'`.
+- Cause: Slice 0's `foundationManifest.ts` read the migrations directory at
+  module load (`FOUNDATION_0001`), and `privilegeModel.ts` derived
+  `REVIEWED_POLICY_SHAPES` from it at load too. The route imports
+  `privilegeModel` through Slice 1's `worker/db.ts` for
+  `REFUSED_PREDEFINED_ROLES`, and Turbopack rewrites `__dirname`.
+- vitest runs from source, so the unit and DB suites could not see it.
+- I stopped and reported it, as BOUNDARY v2 requires.
+
+**Q1, option 1 (approved): the manifest is loaded lazily**, test-first. This
+is the only `src/ingest/db` change.
+- `FOUNDATION_0001` and `REVIEWED_POLICY_SHAPES` become `lazyReadonlyArray`s:
+  computed on first use and memoised. A failure is not memoised.
+- Each is a read-only Proxy over the array, so every existing use is unchanged.
+- Importing `privilegeModel` / `foundationManifest` does no file I/O.
+- A missing directory (`ENOENT`), a missing 0001 manifest (same `Error`) or a
+  corrupt manifest (`MigrationError BAD_MANIFEST`) still fails closed, at first
+  use.
+- No existing Slice 0 test changed.
+- Migrate, status and doctor output is identical before and after (normalised
+  diff, EVIDENCE §4).
+- **Residual difference (for the challenger):** with the 0001 manifest
+  *missing* from a broken build, `migrate` now fails inside the 0001
+  transaction (rolled back, no `ratio` schema, 0 ledger rows) after the runner
+  has created the empty ledger table. The eager code crashed on load before
+  connecting. Exit code (1) and error message are the same.
+- `local:test` in CI is the regression test for this class: it calls the
+  route under a real `next start`.
+
+**Q2 (approved): the tenant binding.**
+- `RATIO_API_TENANT_ID` is validated as a canonical UUID **at startup**:
+  `instrumentation.ts` `register()` runs in the Node.js runtime only and imports
+  only the pure `src/server/costs/config.ts`; the boundary test asserts the
+  closure has no runtime `pg`. An invalid value gives one structured error
+  that names the variable, never its value. The check is silent when the
+  feature is unused, and it never stops the app starting.
+- It is validated again **per request**: missing or invalid ⇒ 503
+  `not_configured`.
+- A store of several keys, each bound to a tenant, is open decision **D-10** in
+  the brief.
+
+**Bundle check.**
+- The server-side rule judges reader *database code* (`cost_facts_published`,
+  `ratio.tenant_id`, `pg_auth_members`). The env-var name
+  `RATIO_READER_DATABASE_URL` is not code: the startup hook's pure config chunk
+  names it. That name is still forbidden in the client bundle.
+
+**Local SeaweedFS.**
+- The default `volume.max=8` cannot grow a second bucket (7 volumes per bucket
+  on first write). That is the "~2 buckets" limit Slice 1 saw.
+- The local compose runs `-volume.max=64 -master.volumeSizeLimitMB=64`.
+- `local:seed` warms each new bucket with a probe object.
