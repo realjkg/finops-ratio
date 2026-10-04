@@ -7,8 +7,10 @@
 // request deadline is DESTROYED (release(err)), never returned to the pool.
 import { EventEmitter } from 'events';
 import net from 'net';
+import fs from 'fs';
+import path from 'path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Pool } from 'pg';
+import { DatabaseError, type Pool } from 'pg';
 import { READ_TIMEOUTS, readWithDeadline } from './readDeadline';
 import { READER_SESSION_OPTIONS, createReaderPool, readerPoolConfig } from './readerPool';
 import { createPublishedCostsRoute } from './publishedCostsRoute';
@@ -172,5 +174,79 @@ describe('RD4 the stray-error listener is attached once per client, not per requ
     expect(client.listenerCount('error')).toBe(1);
     expect(client.release).toHaveBeenCalledTimes(50);
     expect(warnings).not.toContain('MaxListenersExceededWarning');
+  });
+});
+
+// --- Copilot 4176969214: a server SQL error is classified POSITIVELY (a pg
+// DatabaseError that leaves the session usable). Anything else poisons and
+// destroys the client: a Node system error such as EPIPE has a 5-letter
+// uppercase code too, and is NOT a SQLSTATE.
+describe('RD5 only a real, session-preserving SQL error keeps a client; everything else poisons it (Copilot 4176969214)', () => {
+  /** A Node system error, as net/stream raise them (code, errno, syscall). */
+  const sysErr = (code: string, errno: number, syscall = 'write') => Object.assign(new Error(`${syscall} ${code}`), { code, errno, syscall });
+  /** A real pg-protocol DatabaseError, as the parser builds it. */
+  const dbErr = (code: string, severity = 'ERROR') => Object.assign(new DatabaseError(`server says ${code}`, 0, 'error'), { code, severity });
+
+  /** One read whose first query fails with `err`; the catch path then sends a ROLLBACK, as withTenantTransaction does. */
+  async function readFailingWith(err: unknown) {
+    const c = fakeClient(async (sql) => {
+      if (sql === 'ROLLBACK') return {};
+      throw err;
+    });
+    await expect(readWithDeadline(poolOf(c), async (p) => {
+      const client = await p.connect();
+      try {
+        await client.query('SELECT 1').catch(async (e) => {
+          await client.query('ROLLBACK').catch(() => undefined);
+          throw e;
+        });
+      } finally {
+        client.release();
+      }
+    }, 5_000)).rejects.toBe(err);
+    return c;
+  }
+
+  it.each([
+    ['EPIPE (system error)', sysErr('EPIPE', -32)],
+    ['ECONNRESET (system error)', sysErr('ECONNRESET', -104, 'read')],
+    ['ETIMEDOUT (system error)', sysErr('ETIMEDOUT', -110, 'connect')],
+    ['EIO (system error)', sysErr('EIO', -5, 'read')],
+    ['a bare Error (no code)', new Error('boom')],
+    ['a pg query_timeout error', new Error('Query read timeout')],
+    ['"Connection terminated unexpectedly"', new Error('Connection terminated unexpectedly')],
+    ['a plain object with a SQLSTATE-shaped code (not a DatabaseError)', Object.assign(new Error('looks like SQL'), { code: '42P01' })],
+    ['a DatabaseError with severity FATAL (57P01, pg_terminate_backend)', dbErr('57P01', 'FATAL')],
+    ['a DatabaseError of class 08 (connection exception)', dbErr('08006')],
+    ['a DatabaseError 57P01 even if severity says ERROR', dbErr('57P01')],
+    ['a DatabaseError with a localized or missing severity', dbErr('42P01', 'FEHLER')],
+    ['a DatabaseError that also carries errno/syscall', Object.assign(dbErr('42P01'), { errno: -32, syscall: 'write' })],
+  ])('%s poisons the client: the ROLLBACK never reaches it, release gets the error, the socket is destroyed', async (_name, err) => {
+    const c = await readFailingWith(err);
+    expect(c.query).toHaveBeenCalledTimes(1);
+    expect(c.release).toHaveBeenCalledTimes(1);
+    expect(c.release.mock.calls[0][0]).toBe(err);
+    expect(c.destroy).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['42P01 undefined_table', '42P01'],
+    ['57014 query_canceled (statement_timeout)', '57014'],
+    ['42501 insufficient_privilege', '42501'],
+    ['40001 serialization_failure', '40001'],
+  ])('a real DatabaseError %s (severity ERROR) keeps the client: the ROLLBACK reaches it, release without an error, socket intact', async (_name, code) => {
+    const c = await readFailingWith(dbErr(code));
+    expect(c.query).toHaveBeenCalledTimes(2);
+    expect(c.query.mock.calls[1][0]).toBe('ROLLBACK');
+    expect(c.release).toHaveBeenCalledTimes(1);
+    expect(c.release.mock.calls[0][0]).toBeUndefined();
+    expect(c.destroy).not.toHaveBeenCalled();
+  });
+
+  it('the classifier is positive: it uses pg\'s DatabaseError and the severity, not a code-shape regex alone', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'readDeadline.ts'), 'utf8');
+    expect(src).toMatch(/import \{[^}]*\bDatabaseError\b[^}]*\} from 'pg'/);
+    expect(src).toMatch(/instanceof DatabaseError/);
+    expect(src).toMatch(/severity === 'ERROR'/);
   });
 });

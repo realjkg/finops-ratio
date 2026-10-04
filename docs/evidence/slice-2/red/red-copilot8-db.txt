@@ -1,0 +1,40 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+ ❯ src/server/costs/publishedCosts.db.test.ts (28 tests | 1 failed) 3476ms
+   ❯ D14 a reader backend terminated mid-request is destroyed at once (Copilot 4176969214) (1)
+     × pg_terminate_backend while the page query waits ⇒ 500; no query after the FATAL reaches that client; the slot is freed; the next request succeeds 75ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D14 a reader backend terminated mid-request is destroyed at once (Copilot 4176969214) > pg_terminate_backend while the page query waits ⇒ 500; no query after the FATAL reaches that client; the slot is freed; the next request succeeds
+AssertionError: [{"client":309972,"sql":"ROLLBACK","error":"no-code"}]: expected [ { client: 309972, …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "client": 309972,
++     "error": "no-code",
++     "sql": "ROLLBACK",
++   },
++ ]
+
+ ❯ src/server/costs/publishedCosts.db.test.ts:705:44
+    703|       expect(fatal, JSON.stringify(sent)).toBeGreaterThanOrEqual(0);
+    704|       const after = sent.slice(fatal + 1).filter((e) => e.client === s…
+    705|       expect(after, JSON.stringify(after)).toEqual([]);
+       |                                            ^
+    706|       // Destroyed, not pooled; the next request gets a fresh connecti…
+    707|       expect(pool.totalCount).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 27 passed (28)
+   Start at  09:40:21
+   Duration  4.94s (tests 80%, transform 14%, import 4%, setup 1%)
+
