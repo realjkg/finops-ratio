@@ -748,6 +748,48 @@ export function resyncProblems(record, control) {
 }
 
 /**
+ * One sync's verdict: the worker CLI's EXIT CODE (must be exactly 0) plus its
+ * evidence record (Copilot 4177490229 / 4177490261). The CLI runs with
+ * allowFail so that a failing sync's record, and its quarantine reasons, can
+ * still be read. The exit code is judged here, so a valid record with a
+ * non-zero exit never passes.
+ */
+function syncResultProblems(result, control, which) {
+  const label = which === 'first' ? 'sync' : 'second sync';
+  const problems = [];
+  if (result?.code !== 0) problems.push(`${label}: the worker CLI exited ${JSON.stringify(result?.code ?? null)} (expected 0)`);
+  if (!result?.record) {
+    problems.push(`${label}: the worker CLI printed no evidence record`);
+    return problems;
+  }
+  return [...problems, ...(which === 'first' ? syncProblems(result.record, control) : resyncProblems(result.record, control))];
+}
+
+/**
+ * The acceptance run's two worker syncs, with an injected runner
+ * (`sync(name)` ⇒ { code, record }). The first must publish every control
+ * period; the second must skip every one as unchanged; both must exit 0.
+ * `report(name, result)` records each result before it is judged.
+ * `beforeFail(problems)` runs diagnostics, such as the catalog's quarantine
+ * reasons, before a failed first sync throws. A failed first sync stops
+ * here: there is no second sync. Throws with every problem.
+ */
+export async function syncTwice({ sync, control, report = () => undefined, beforeFail = async () => undefined }) {
+  const first = await sync('sync');
+  report('sync', first);
+  const firstProblems = syncResultProblems(first, control, 'first');
+  if (firstProblems.length) {
+    await beforeFail(firstProblems);
+    throw new Error(`first sync:\n  ${firstProblems.join('\n  ')}`);
+  }
+  const second = await sync('syncAgain');
+  report('syncAgain', second);
+  const secondProblems = syncResultProblems(second, control, 'second');
+  if (secondProblems.length) throw new Error(`second sync:\n  ${secondProblems.join('\n  ')}`);
+  return { first, second };
+}
+
+/**
  * Catalog (ratio.ingest_batches of the sample tenant): exactly one batch per
  * control period, published, unverified, not provisional, with the control's
  * count and billed total; no other batch at all.

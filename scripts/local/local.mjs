@@ -79,9 +79,8 @@ import {
   localAcceptanceSettings,
   parseAcceptanceArgs,
   readDataset,
-  resyncProblems,
   stageFocusSample,
-  syncProblems,
+  syncTwice,
   verifyDatasetBytes,
 } from './acceptance.mjs';
 
@@ -365,7 +364,11 @@ async function seed(settings) {
   log('seed: tenant and source provisioned', { tenant: secrets.RATIO_LOCAL_TENANT_ID, source: LOCAL_NAMES.sourceKey });
 }
 
-/** One worker `sync` of a source; returns the exit code and the evidence record (stdout's last line). */
+/**
+ * One worker `sync` of a source; returns the exit code and the evidence record (stdout's last line).
+ * allowFail: a failing sync's record (its outcomes and quarantine codes) must still be readable.
+ * The exit code judged by every caller: sync() rejects r.code !== 0, syncTwice (acceptance.mjs) requires 0.
+ */
 async function syncRecord(settings, secrets, sourceKey) {
   const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', sourceKey], { allowFail: true });
   process.stdout.write(r.out);
@@ -679,18 +682,20 @@ async function acceptance(args) {
       });
       steps.seed = { objects: staged.objects.length, source: SAMPLE_NAMES.sourceKey };
 
-      // The real worker CLI, twice.
-      const first = await timed('sync', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
+      // The real worker CLI, twice, judged on its exit code AND its evidence
+      // record (syncTwice; Copilot 4177490229 / 4177490261).
       const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
-      steps.sync = { exit: first.code, durationMs: first.record?.durationMs, periods: outcomes(first.record) };
-      const syncIssues = syncProblems(first.record, control);
-      // Diagnostics before failing: the batches' quarantine reasons (codes and counts, never cell values).
-      if (syncIssues.length) steps.catalog = await catalogSnapshot(settings, secrets).catch((e) => ({ error: e.message }));
-      fail('first sync', syncIssues);
-      const second = await timed('syncAgain', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
-      steps.syncAgain = { exit: second.code, periods: outcomes(second.record) };
-      fail('second sync', resyncProblems(second.record, control));
-
+      await syncTwice({
+        control,
+        sync: (name) => timed(name, () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey)),
+        report: (name, r) => {
+          steps[name] = { exit: r.code, ...(name === 'sync' ? { durationMs: r.record?.durationMs } : {}), periods: outcomes(r.record) };
+        },
+        // Diagnostics before failing: the batches' quarantine reasons (codes and counts, never cell values).
+        beforeFail: async () => {
+          steps.catalog = await catalogSnapshot(settings, secrets).catch((e) => ({ error: e.message }));
+        },
+      });
       // The real route under next start.
       steps.appReady = await timed('appStart', () => startAppAndWait(settings, secrets, { setApp, spawnGuard }));
       const base = `http://127.0.0.1:${settings.appPort}`;
