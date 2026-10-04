@@ -12,14 +12,19 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
    difference is exactly the label's effect, inside the label's **effect
    window** and nowhere else (PR 3-1b). Each label has two windows (rev. 15,
    Copilot r4178753752):
-   - **Effect window** (`effectStart`, `effectEnd`): the days whose rows the
-     label changes. For most kinds it equals the scoring window. It is
-     wider for three:
-     - `level_shift`: from `start` to the end of the span (permanent);
-     - `gradual_drift`: from `start` to the end of the span (held after
-       the ramp);
-     - `dormant_reactivation`: from the first zero day of the gap to the
-       end of the span, since the gap is part of the injection.
+   - **Effect window** (`effectStart`, `effectEnd`; the catalogue's
+     **Effect window** column, rev. 16): the usage dates whose rows the
+     label changes. It is stated for **every** kind in C.2.
+     - **Permanent kinds** run from `start` to the end of the span. These
+       are the new-level and new-entity kinds and the fan-in kinds built on
+       them: `level_shift`, `gradual_drift` (held after its ramp),
+       `new_service`, `new_region`, `tagging_loss`, `commitment_expiry`,
+       `commitment_effect`, `price_change`, `offboarding`, `onboarding`, and
+       `shared_cause` / `provider_shared_cause` over a `level_shift`.
+     - `dormant_reactivation` runs from the first zero day of the gap.
+     - **Replay kinds** (`mtd_restatement`, `late_data`, `correction`)
+       change rows of *earlier* usage dates. Their effect window is the set
+       of affected usage dates, not the revision day.
    - **Scoring window** (`start`, `end`, the catalogue's Window column): the
      days a detection must fall in to match (C.4).
 
@@ -80,34 +85,34 @@ Part of [DESIGN.md](DESIGN.md) §2.5, §4.8 and §4.9 (revision 3).
 
 ## C.2 Catalogue
 
-| Kind | Expected | Entity | Injection (multiplicative on `M` unless stated) | Window | Notes for scoring |
-|---|---|---|---|---|---|
-| `spike` | alert | leaf series | × U(1.5, 6) for 1, 2 or 3 days (equally likely) | start … start + len − 1 | gated (AT-2, 0.90) |
-| `level_shift` | alert | leaf series | × m from start, permanent, with **log m ~ U(log 1.2, log 3.0)** (log-uniform; pinned in rev. 6, as `budget4.py` assumes) | start … start + 13 | gated (0.90); after 14 days the new level is normal (`new_baseline`) |
-| `gradual_drift` | alert | leaf series | extra linear slope reaching + U(30 %, 150 %) after U(14, 45) days, then held | start … start + ramp | gated (0.75); TTD also from the day cumulative excess crosses min impact |
-| `new_service` | alert | (account, service) never seen in the account | new series at ≥ min impact (meaningful class) | first day … + 2 | gated (0.90); account age ≥ 30 days |
-| `new_region` | alert | (account, service, region) | new region row for an existing service | first day … + 2 | `ci` and `full` only |
-| `runaway_resource` | alert | named `ResourceId` in a leaf series | additive excess growing linearly or × U(1.1, 1.4) per day for U(5, 20) days, then 0 | start … fix day | gated (0.90); the resource must be among the group's root causes for a top-k match |
-| `tagging_loss` | alert (category `tagging_loss`) | account | ≥ 50 % of the account's usage spend loses the `cost-center` tag from start; **`M` unchanged** | start … start + 6 | gated (0.75); a spend group on this account in the window does not qualify |
-| `commitment_expiry` | alert | leaf series with a commitment | the commitment ends without renewal: committed share falls ≥ 20 pp and effective cost rises + U(20 %, 60 %) | start … start + 6 | gated (0.75) |
-| `spend_drop` | alert at `info` (D-14) | leaf series | × U(0.1, 0.6) for ≥ 3 days | start … start + 6 | scored at ≥ `info`, not gated |
-| `new_account_runaway` | alert | new account | spend ≥ 10 × min impact and above its cohort's p99 for day k ≤ 14 | its days | gated (0.75); tests guardrail D6 |
-| `dormant_reactivation` (rev. 8; placement pinned in rev. 9; enriched and `ci` seeds only) | alert | **non-intermittent** individual leaf series, drawn by spend | the series is active every day up to its last active day a ≥ 16, then zero for a gap of **any length ≥ 56 days** (a uniform on 16 … r − 57), then restarts on day r uniform on 73–115 (`fleet15k`) at × U(0.5, 3) its earlier mean level (meaningful class only). Under D4's rule every such label reaches `warning` by construction (pass rate 1.000 in `reactivation.py`) | restart day … + 2 | scored by D4's reactivation rule (DESIGN §4.2) and reported against 0.90; gating is the orchestrator's decision; TTD reported |
-| `shared_cause` | alert (one group per currency) | (billing account, service) | the same `spike` or `level_shift` in the service in 5–20 accounts of one billing account on the same day | as the underlying kind | AT-6: exactly one group; `childEntities` lists the accounts |
-| `provider_shared_cause` | alert (one group per currency) | (provider, service) | the same `spike` or `level_shift` in the service across ≥ 2 billing accounts of one provider, ≥ 20 accounts, on the same day | as the underlying kind | AT-6 |
-| `price_change` | alert (one group per currency) | (provider, service) | stressor: every account using the service × U(0.8, 1.3) from the day (increases scored; decreases at `info`) | start … start + 6 | AT-6 |
-| `month_end_credit` | **no alert** | account | `Credit` rows, negative, on the last or first day | the day | AT-5 |
-| `usage_based_credit` | **no alert** | account | `Credit` row with `ChargeFrequency=Usage-Based` | the day | AT-5; also a rollup unit test: never in `M` |
-| `usage_based_tax` | **no alert** | account | `Tax` row with `ChargeFrequency=Usage-Based` | the day | AT-5; same unit test |
-| `commitment_purchase` | **no alert** | account | `Purchase` One-Time or Recurring, `EffectiveCost` 0 | the day | AT-5 |
-| `commitment_effect` | **no alert** at ≥ `warning` | leaf series | covered usage moves to `Committed`; `M` drops 10–40 % | start … + 6 | AT-5; an `info` `commitment_effect` group is correct |
-| `tax`, `recurring_fee` | **no alert** | account | monthly rows | the day | implicit labels (every account-month) |
-| `correction` | **no alert** | account | `ChargeClass=Correction` in a later period | the day | AT-5 |
-| `onboarding` | **no alert** | account | S-curve ramp over 10–40 days | ramp | AT-5 (D6 must not fire unless cohort p99 is exceeded) |
-| `offboarding` | **no alert** at ≥ `warning` | account | decay to 0 over 7–30 days | decay | `info` drop groups are correct |
-| `constant_amortised` | **no alert**, gated | leaf series | the same effective cost every day | whole span | AT-5 |
-| `month_end_batch`, `monthly_cycle`, `holiday`, `intermittent` | **no alert** (stressor cohorts) | account / series | DESIGN §2.3 | their days | detections at ≥ `warning` are **false** and count in AT-1 and AT-4 (no exclusion); AT-7 reports the per-cohort breakdown, including first and second occurrences of a calendar class. Calendar factors are **one per series and class**, constant across months and across the class's days (pinned in rev. 6); the generator's `--calendar-jitter 0.10` option draws each month's factor within ±10 % for a reported robustness run only. `intermittent` series with a zero share above 50 % are scored by the hurdle statistic; those whose active days are clustered (lag-1 autocorrelation ≥ 0.30) are `info` only, and `alert` labels on them are reported with their `info`-signal recall, never gated (D-24) |
-| `mtd_restatement`, `late_data` | **no alert** (`ci` only) | source / period | revised or late month-to-date rows | revision day | no group from a revision alone; `restated` resolution tested |
+| Kind | Expected | Entity | Injection (multiplicative on `M` unless stated) | Window (scoring) | Effect window (rev. 16) | Notes for scoring |
+|---|---|---|---|---|---|---|
+| `spike` | alert | leaf series | × U(1.5, 6) for 1, 2 or 3 days (equally likely) | start … start + len − 1 | start … start + len − 1 (= scoring) | gated (AT-2, 0.90) |
+| `level_shift` | alert | leaf series | × m from start, permanent, with **log m ~ U(log 1.2, log 3.0)** (log-uniform; pinned in rev. 6, as `budget4.py` assumes) | start … start + 13 | start → end of span | gated (0.90); after 14 days the new level is normal (`new_baseline`) |
+| `gradual_drift` | alert | leaf series | extra linear slope reaching + U(30 %, 150 %) after U(14, 45) days, then held | start … start + ramp | start → end of span (held after the ramp) | gated (0.75); TTD also from the day cumulative excess crosses min impact |
+| `new_service` | alert | (account, service) never seen in the account | new series at ≥ min impact (meaningful class) | first day … + 2 | first day → end of span | gated (0.90); account age ≥ 30 days |
+| `new_region` | alert | (account, service, region) | new region row for an existing service | first day … + 2 | first day → end of span | `ci` and `full` only |
+| `runaway_resource` | alert | named `ResourceId` in a leaf series | additive excess growing linearly or × U(1.1, 1.4) per day for U(5, 20) days, then 0 | start … fix day | start … fix day (= scoring) | gated (0.90); the resource must be among the group's root causes for a top-k match |
+| `tagging_loss` | alert (category `tagging_loss`) | account | ≥ 50 % of the account's usage spend loses the `cost-center` tag from start; **`M` unchanged** | start … start + 6 | start → end of span | gated (0.75); a spend group on this account in the window does not qualify |
+| `commitment_expiry` | alert | leaf series with a commitment | the commitment ends without renewal: committed share falls ≥ 20 pp and effective cost rises + U(20 %, 60 %) | start … start + 6 | start → end of span | gated (0.75) |
+| `spend_drop` | alert at `info` (D-14) | leaf series | × U(0.1, 0.6) for ≥ 3 days | start … start + 6 | start … start + len − 1 (the drop's days) | scored at ≥ `info`, not gated |
+| `new_account_runaway` | alert | new account | spend ≥ 10 × min impact and above its cohort's p99 for day k ≤ 14 | its days | its days (= scoring) | gated (0.75); tests guardrail D6 |
+| `dormant_reactivation` (rev. 8; placement pinned in rev. 9; enriched and `ci` seeds only) | alert | **non-intermittent** individual leaf series, drawn by spend | the series is active every day up to its last active day a ≥ 16, then zero for a gap of **any length ≥ 56 days** (a uniform on 16 … r − 57), then restarts on day r uniform on 73–115 (`fleet15k`) at × U(0.5, 3) its earlier mean level (meaningful class only). Under D4's rule every such label reaches `warning` by construction (pass rate 1.000 in `reactivation.py`) | restart day … + 2 | first gap day (a + 1) → end of span | scored by D4's reactivation rule (DESIGN §4.2) and reported against 0.90; gating is the orchestrator's decision; TTD reported |
+| `shared_cause` | alert (one group per currency) | (billing account, service) | the same `spike` or `level_shift` in the service in 5–20 accounts of one billing account on the same day | as the underlying kind | as the underlying kind (spike: its days; level_shift: start → end of span) | AT-6: exactly one group; `childEntities` lists the accounts |
+| `provider_shared_cause` | alert (one group per currency) | (provider, service) | the same `spike` or `level_shift` in the service across ≥ 2 billing accounts of one provider, ≥ 20 accounts, on the same day | as the underlying kind | as the underlying kind | AT-6 |
+| `price_change` | alert (one group per currency) | (provider, service) | stressor: every account using the service × U(0.8, 1.3) from the day (increases scored; decreases at `info`) | start … start + 6 | start → end of span | AT-6 |
+| `month_end_credit` | **no alert** | account | `Credit` rows, negative, on the last or first day | the day | the day | AT-5 |
+| `usage_based_credit` | **no alert** | account | `Credit` row with `ChargeFrequency=Usage-Based` | the day | the day | AT-5; also a rollup unit test: never in `M` |
+| `usage_based_tax` | **no alert** | account | `Tax` row with `ChargeFrequency=Usage-Based` | the day | the day | AT-5; same unit test |
+| `commitment_purchase` | **no alert** | account | `Purchase` One-Time or Recurring, `EffectiveCost` 0 | the day | the day | AT-5 |
+| `commitment_effect` | **no alert** at ≥ `warning` | leaf series | covered usage moves to `Committed`; `M` drops 10–40 % | start … + 6 | start → end of span (or the commitment's end) | AT-5; an `info` `commitment_effect` group is correct |
+| `tax`, `recurring_fee` | **no alert** | account | monthly rows | the day | the day of each monthly row | implicit labels (every account-month) |
+| `correction` | **no alert** | account | `ChargeClass=Correction` in a later period | the day | the corrected usage dates (rows carried in a later billing period) | AT-5 |
+| `onboarding` | **no alert** | account | S-curve ramp over 10–40 days | ramp | the account's first day → end of span | AT-5 (D6 must not fire unless cohort p99 is exceeded) |
+| `offboarding` | **no alert** at ≥ `warning` | account | decay to 0 over 7–30 days | decay | decay start → end of span (zero afterwards) | `info` drop groups are correct |
+| `constant_amortised` | **no alert**, gated | leaf series | the same effective cost every day | whole span | whole span | AT-5 |
+| `month_end_batch`, `monthly_cycle`, `holiday`, `intermittent` | **no alert** (stressor cohorts) | account / series | DESIGN §2.3 | their days | the cohort's event days (holiday: the day; intermittent: whole span) | detections at ≥ `warning` are **false** and count in AT-1 and AT-4 (no exclusion); AT-7 reports the per-cohort breakdown, including first and second occurrences of a calendar class. Calendar factors are **one per series and class**, constant across months and across the class's days (pinned in rev. 6); the generator's `--calendar-jitter 0.10` option draws each month's factor within ±10 % for a reported robustness run only. `intermittent` series with a zero share above 50 % are scored by the hurdle statistic; those whose active days are clustered (lag-1 autocorrelation ≥ 0.30) are `info` only, and `alert` labels on them are reported with their `info`-signal recall, never gated (D-24) |
+| `mtd_restatement`, `late_data` | **no alert** (`ci` only) | source / period | revised or late month-to-date rows | revision day | the usage dates whose rows are revised or first delivered late (the revision day is when they arrive, not what they change) | no group from a revision alone; `restated` resolution tested |
 
 ## C.3 Label format (`labels.jsonl`, one JSON object per line)
 

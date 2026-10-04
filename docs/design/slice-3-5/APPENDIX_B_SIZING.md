@@ -2448,7 +2448,10 @@ Revision 12 adds:
 
 Revision 15 adds `forecast_leaves` (account × service, regions summed; one
 row per leaf, ≈ 37 k on `fleet15k`, where the region is `''` everywhere)
-and an 8-byte `leaf_id` on every `cost_series` row.
+and an 8-byte `leaf_id` on every `cost_series` row. `forecast_leaves` is
+**insert-only** and outside retention, like `cost_series`. Each run is a
+separate `down -v` stack, so the table is rebuilt per run; the script
+counts it in every run's delta, which is conservative (rev. 16).
 
 The byte sizes are **assumptions** (150 B per narrow row, as for
 `billing_daily` in `budget.py`), measured in PR 3-4.

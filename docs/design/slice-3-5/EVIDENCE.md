@@ -24,7 +24,8 @@ ordinary commits and plain pushes (never a force-push).
 | 12 | `d691069` | Copilot's review 5407381989 of PR #70 at d6be584 (2 High, 2 Medium), each verified and fixed (§3i): one leaf identity everywhere (`series_id`), a billing rollup by charge category behind `costs/daily`'s billed totals, an exact Garwood interval, and a rollup pointer. |
 | 13 | `86c2c29` | The challenger's REQUEST CHANGES on revision 12 (2 Medium, 1 Low) and Copilot's review 5407430521 (r4178706470, High): rollup pointer semantics and a single lease-holding writer; exactly-once coverage with nulls; stable ids under null identity columns; pointer guard, sequence grants and per-batch atomicity; `rollup12.py` category count (§3j). |
 | 14 | `10cd9ce` | The challenger's REQUEST CHANGES on revision 13 (1 Medium, 3 Low), §3k: the high-water mark is the tenant's `max(batch_seq)`; the pointer trigger's scope stated; sentinel groups marked `attributed: false`; the negative-usage blind spot in the budget table and the limits. |
-| 15 | this revision | The challenger's REQUEST CHANGES on revision 14 (1 Medium, 3 Low), §3l, and Copilot's review 5407477027 of 10cd9ce (16 findings), §3m: the high-water mark and the sequence allocation are defined on an empty tenant (`coalesce(max, 0)`, `NOT NULL`); the monotonicity reason corrected; the known-limits list made complete. |
+| 15 | `dc43f4f`, `a268c0e` | The challenger's REQUEST CHANGES on revision 14 (1 Medium, 3 Low), §3l, and Copilot's review 5407477027 of 10cd9ce (16 findings), §3m: the high-water mark and the sequence allocation are defined on an empty tenant (`coalesce(max, 0)`, `NOT NULL`); the monotonicity reason corrected; the known-limits list made complete. |
+| 16 | this revision | The challenger's REQUEST CHANGES on revision 15 (2 Medium, 4 Low), §3n: the run row is closed for INSERT with terminal statuses and a unique `run_seq`; an effect window for every label kind; multi-day usage in the limits with a coverage share; leaf derivation enforced by FKs. |
 
 ## 2. Governance wording: reverted
 
@@ -317,6 +318,18 @@ remnant was made as well (last row).
 | Sweep | Also fixed: the `cost_daily` reader-view note in App. D.1 ("joins the current publication") and the 4-3 plan row (keyed by `series_id`). Checked and found current: D2's window, h, budget totals, D-24 wording, disk figures, and every remaining "publication" mention (the freshness endpoint and the worker's own publication) | App. D.1; DESIGN §7 |
 | Re-run | All 11 embedded scripts re-run; `rollup12.py` changed (forecast leaves), hash updated; every other output unchanged; peaks 5.182 / 5.222 GB (still 5.18 / 5.22) | App. B.5.12 |
 
+## 3n. Revision 16: the challenger's review of a268c0e
+
+| Item | Change | Where |
+|---|---|---|
+| **M1** run row writable by INSERT | **Valid.** `tg_analytics_run_success` ran only on UPDATE, and INSERT was unrestricted. A pre-`succeeded` row with any mark, `run_seq` or `as_of` passed the pointer guard. **Fix, both defences:** (1) the trigger is `BEFORE INSERT OR UPDATE`; on INSERT it requires `status = 'running'`, `batch_seq_hwm IS NULL` and `run_seq = coalesce(max, 0) + 1`; (2) the INSERT grant on `analytics_runs` is column-level and excludes `batch_seq_hwm` (and `finished_at`). `succeeded`, `failed` and `abandoned` are terminal, and `UNIQUE (tenant_id, kind, run_seq)` is added. 4-1 tests: a direct INSERT of a pre-succeeded run, an INSERT with a supplied mark, a duplicate `run_seq` and a re-succeed attempt, each with a mutant | App. D.1, D.5; DESIGN §7 (4-1) |
+| **M2** effect windows | **Valid.** Many kinds besides the three named have a wider effect window. **Fix:** C.2 has an **Effect window** column for every kind. Permanent kinds run "start → end of span": `level_shift`, `gradual_drift`, `new_service`, `new_region`, `tagging_loss`, `commitment_expiry`, `commitment_effect`, `price_change`, `onboarding`, `offboarding`, and the fan-in kinds over `level_shift`. `dormant_reactivation` runs from its first gap day. The replay kinds (`mtd_restatement`, `late_data`, `correction`) use the affected **usage dates**, not the revision day. 3-1b checks "outside its **effect** window", with a mutant that sets the effect window equal to the scoring window for a permanent kind | App. C.1, C.2; DESIGN §7 (3-1b) |
+| **L1** multi-day usage | **Valid.** Added to Known limits with the daily ↔ multi-day switching artefact, noting that `src/costsource/seed.ts` on main emits whole-month `Usage` rows (checked). `freshness` now reports the multi-day share of usage effective cost per period and per leaf | DESIGN §5.1, §8 |
+| **L2** "series" → "leaves" | **Valid.** ≈ 107 k **leaves** in `full` | DESIGN §3.1 |
+| **L3** leaf derivation | **Valid.** A second composite FK from `cost_series`' own (currency, provider, billing account, sub-account, service) to `forecast_leaves`' natural key. A composite FK `(tenant_id, series_id, leaf_id)` → `cost_series (tenant_id, id, leaf_id)` makes a root cause's series and leaf agree when both are set, without a trigger. Tests and mutants in 4-1 | App. D.0, D.1, D.4; DESIGN §7 (4-1) |
+| **L4** `forecast_leaves` | **Valid.** Labelled insert-only and outside retention, and counted conservatively in every run's delta | App. D.1, B.5.12 |
+| Scripts | No embedded script changed; the 11 SHA-256s are those of revision 15 | App. B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -355,8 +368,8 @@ Appendix B (B.4, B.5.6–B.5.12).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 15 (the commit that adds this line, PR #70's head when pushed;
-the same reasons as at `10cd9ce`, revision 14, `86c2c29`, revision 13, `d691069`, revision 12, `d6be584`, revision 11, at `bd440b5`, revision 10
+at revision 16 (the commit that adds this line, PR #70's head when pushed;
+the same reasons as at `a268c0e`, revision 15, `10cd9ce`, revision 14, `86c2c29`, revision 13, `d691069`, revision 12, `d6be584`, revision 11, at `bd440b5`, revision 10
 after merging `origin/main`, and at
 `9f1febb` before the merge, `bb4379c`, revision 9, `04e6cf8`, revision 8,
 `380e9a0`, revision 7,

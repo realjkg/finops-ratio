@@ -89,7 +89,10 @@ sub-account or billing account therefore always resolves to the same id.
   `forecast_leaves.id`**, with the same rules as `series_id`.
   - Every `cost_series` row carries its `leaf_id`: a composite FK, set when
     the series is allocated and never changed. A leaf's daily values are
-    the sum over its series.
+    the sum over its series. **Derivation is enforced in the schema (rev.
+    16):** a second composite FK from the series' own (currency, provider,
+    billing account, sub-account, service) to `forecast_leaves`' natural
+    key makes a series under the wrong leaf impossible.
   - `forecast_state`, `detector_state`, the `leaf` anomaly scope and the
     leaf part of a root cause key on `leaf_id`.
   - Revision 12 keyed them on `series_id`. A regional account × service
@@ -123,9 +126,9 @@ sub-account or billing account therefore always resolves to the same id.
 |---|---|---|---|
 | role `ratio_analytics` | NOLOGIN, no attributes, no membership (guarded like 0001's roles) | — | — |
 | view `publications_published` | tenant_id, source_id, billing_period, batch_id, published_at, row_count, loaded_billed_total, reconciliation, is_provisional — from `period_publications` ⋈ `ingest_batches` (`status = 'published'`) | — | analytics, reader (`freshness`) |
-| `analytics_runs` | **(tenant_id, id)**, kind ∈ {rollup, forecast, detect, backtest}, as_of date, status ∈ {running, succeeded, failed, abandoned}, **`run_seq bigint NOT NULL`** (per tenant and kind, allocated by the lease holder as `coalesce(max(run_seq), 0) + 1`, strictly increasing, starting at 1), **`lease_token uuid`, `lease_expires_at`, `heartbeat_at`** (rev. 13; the worker's `sync_runs` lease pattern), **`batch_seq_hwm integer`** (rollup runs only: set **by trigger** on the transition to `succeeded` to `coalesce(max(batch_seq), 0)` over the tenant's `rollup_batches`, then frozen; rev. 15), started_at, finished_at, code_version text, params jsonb, stats jsonb, error_code; `run_seq`, `kind`, `as_of` and `batch_seq_hwm` are not in the UPDATE grant | analytics | analytics |
-| `forecast_leaves` (rev. 15) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `leaf_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name), every component `NOT NULL` with the D.0 `''` sentinel; `account_id` (composite FK to `cost_accounts`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
-| `cost_series` | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `series_id` (D.0), `leaf_id` (composite FK to `forecast_leaves`, immutable), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name, region_key), every component `NOT NULL` with the D.0 `''` sentinel (`region_key` is `''` for global services and for every `fleet15k` series); `account_id` (composite FK to `cost_accounts`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
+| `analytics_runs` | **(tenant_id, id)**, kind ∈ {rollup, forecast, detect, backtest}, as_of date, status ∈ {running, succeeded, failed, abandoned}, **`run_seq bigint NOT NULL`** (per tenant and kind, allocated by the lease holder as `coalesce(max(run_seq), 0) + 1`, strictly increasing, starting at 1), **`lease_token uuid`, `lease_expires_at`, `heartbeat_at`** (rev. 13; the worker's `sync_runs` lease pattern), **`batch_seq_hwm integer`** (rollup runs only: NULL on INSERT, set **by trigger** on the transition to `succeeded` to `coalesce(max(batch_seq), 0)` over the tenant's `rollup_batches`, then frozen; rev. 15, rev. 16), `UNIQUE (tenant_id, kind, run_seq)` (rev. 16); `succeeded`, `failed`, `abandoned` terminal (rev. 16); started_at, finished_at, code_version text, params jsonb, stats jsonb, error_code; `run_seq`, `kind`, `as_of` and `batch_seq_hwm` are not in the UPDATE grant | analytics | analytics |
+| `forecast_leaves` (rev. 15; **insert-only**, outside retention, counted conservatively in every run's disk delta, B.5.12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `leaf_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name), every component `NOT NULL` with the D.0 `''` sentinel; `account_id` (composite FK to `cost_accounts`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
+| `cost_series` | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `series_id` (D.0), `leaf_id` (composite FK to `forecast_leaves`, immutable), and **a second composite FK `(tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name)` → `forecast_leaves`' unique natural key** (rev. 16), so a series can only belong to the leaf its own components name; `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id, service_name, region_key), every component `NOT NULL` with the D.0 `''` sentinel (`region_key` is `''` for global services and for every `fleet15k` series); `account_id` (composite FK to `cost_accounts`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
 | `cost_accounts` (rev. 12) | **(tenant_id, id bigint `GENERATED ALWAYS AS IDENTITY`)** = `account_id` (D.0), `UNIQUE NULLS NOT DISTINCT` (tenant_id, billing_currency, provider_name, billing_account_id, sub_account_id), every component `NOT NULL` with the D.0 `''` sentinel (a billing-account-level tax, credit, fee or purchase row with a null `SubAccountId` belongs to the account row with `sub_account_id = ''`); first_day, last_day | analytics (INSERT; UPDATE of last_day) | analytics |
 | `cost_daily` (narrow, usage only) | **(tenant_id, series_id, usage_date, batch_seq)**, `batch_seq integer` with a composite FK to `rollup_batches (tenant_id, batch_seq)`; `m_usage_effective` (`ChargeCategory = 'Usage'`, `ChargeFrequency = 'Usage-Based'`, no correction, and a charge period of **at most one day**: `ChargePeriodEnd − ChargePeriodStart ≤ 1 day`, rev. 15), `multi_day_usage_effective` (the `Usage` rows excluded by that last test, attributed to their start day), `billed_total`, `effective_total`, `committed_effective`, `untagged_usage_effective`, `row_count`; no other btree (217 B per row measured with a uuid batch key; ≈ 193 B estimated with `batch_seq`, Appendix B.5) | analytics (INSERT … SELECT from `cost_facts_published` per batch) | analytics; reader via `cost_daily_published` (the highest rolled-up batch ≤ the `rollup_pointer` mark per (source, period), D.1) |
 | `billing_daily` (sparse; re-keyed in rev. 12, routing fixed in rev. 13) | **(tenant_id, batch_seq, account_id, usage_date, charge_category, charge_frequency, is_correction)**, all `NOT NULL` with the D.0 sentinels: every row with **`ChargeCategory IS DISTINCT FROM 'Usage'`** (Purchase, Tax, Credit, Adjustment, and a null category as `''`, shown `(unknown)`), by FOCUS `ChargeCategory` and `ChargeFrequency` (`''` when null), corrections flagged; billed, effective, row_count, `tags_invalid_rows`; **a row for every group with at least one fact row, zero amounts included** (rev. 15: revision 12's "only where non-zero" dropped zero-valued non-usage rows and their `row_count`, which broke exactly-once). `cost_daily` takes exactly the rows with `ChargeCategory = 'Usage'` (all frequencies, corrections and negative amounts included) in its `billed_total` / `effective_total`. The two predicates are complements under SQL's three-valued logic, so every published row lands in exactly one table | analytics | analytics; reader via `billing_daily_published` |
@@ -249,14 +252,41 @@ enforced only by the job, and the id sequences had no stated grants.
   pointed at a succeeded run while supplying an unrelated larger `run_seq`
   or a future mark. That would expose batches early or block valid runs.
   Now every number on the pointer must equal the referenced run's own.
-- **The mark is recorded by the database.** A second trigger,
-  `ratio.tg_analytics_run_success()`, runs `BEFORE UPDATE` on
-  `analytics_runs`. On a rollup run's transition to `succeeded`, it sets
-  `batch_seq_hwm := coalesce(max(batch_seq), 0)` over the tenant's
-  `rollup_batches`, and it refuses any later change to `run_seq`, `kind`,
-  `as_of` or `batch_seq_hwm`. The job therefore never supplies the mark: it
-  reads it back and copies it to the pointer, and the pointer trigger
+- **The mark is recorded by the database (rev. 15; closed for INSERT in
+  rev. 16).** A second trigger, `ratio.tg_analytics_run_success()`, runs
+  **`BEFORE INSERT OR UPDATE`** on `analytics_runs`. The run row is
+  protected twice: by this trigger, and by an INSERT grant that excludes
+  `batch_seq_hwm`.
+  - **On INSERT** it requires `status = 'running'`, `batch_seq_hwm IS NULL`
+    and `run_seq = coalesce(max(run_seq), 0) + 1` for the tenant and kind.
+    The column-level INSERT grant also leaves out `batch_seq_hwm` and
+    `finished_at`.
+  - **On UPDATE** it allows only these status transitions: `running` →
+    `succeeded`, `running` → `failed`, `running` → `abandoned`.
+    **`succeeded`, `failed` and `abandoned` are terminal**: any change out
+    of them is refused, so succeeded → running → succeeded is impossible.
+  - On a rollup run's transition to `succeeded`, it sets
+    `batch_seq_hwm := coalesce(max(batch_seq), 0)` over the tenant's
+    `rollup_batches`.
+  - It refuses any change to `run_seq`, `kind`, `as_of` or
+    `batch_seq_hwm` after INSERT, other than that one assignment.
+  - `UNIQUE (tenant_id, kind, run_seq)` backs the sequence.
+
+  The job therefore never supplies the mark, on INSERT or on UPDATE: it
+  reads the mark back and copies it to the pointer, and the pointer trigger
   checks the copy.
+
+  Revision 15's trigger ran on UPDATE only. With an unrestricted INSERT
+  grant, the analytics login could insert a row already `succeeded` with
+  any mark, `run_seq` or `as_of`, and the pointer guard would have
+  accepted it.
+- **Direct-INSERT tests (4-1, rev. 16).** As the analytics login, each of
+  these is refused, each with a mutant that removes the guarding check:
+  - an `INSERT` into `analytics_runs` of a run already `succeeded`;
+  - an `INSERT` that supplies `batch_seq_hwm`, refused by the grant and by
+    the trigger;
+  - an `INSERT` with a duplicate or out-of-order `run_seq`;
+  - an attempt to re-succeed a run (succeeded → running → succeeded).
 - **Direct-UPDATE tests (4-1).** As the analytics login, run
   `UPDATE rollup_pointer` and `UPDATE analytics_runs` directly with each
   of these, and expect a rejection:
@@ -336,7 +366,7 @@ run instead of 90.
 |---|---|---|
 | `anomalies` | **(tenant_id, id uuid)**; dedup key unique (tenant_id, scope_kind, scope_key, billing_currency, category, first_day), with `scope_key` as defined in D.0; category, scope_kind ∈ {leaf, account, billing_account_service, provider_service, billing_account, business_unit, provider, tenant}, scope_key, billing_currency, first_day, last_day, severity, status, status_reason, impact, expected, actual, relative, detectors text[], basis_batch_seqs integer[], merged_into uuid (null unless status_reason = `merged`), first_detected_at, last_evaluated_at, run_id_first, run_id_last | INSERT by analytics; UPDATE of last_day, severity (upwards), impact/expected/actual/relative, status (automatic open → resolved only), status_reason, merged_into, last_evaluated_at, basis_batch_seqs by analytics. Ids are UUID v5 of the dedup key (DESIGN §4.5). No other writer in Slices 3–5 (D-15 deferred) |
 | `anomaly_days` | **(tenant_id, anomaly_id, day)**; actual, expected, lo80, hi80, lo95, hi95, z_mad, cusum | evidence for the detail view |
-| `anomaly_root_causes` | **(tenant_id, anomaly_id, rank)** rank 1..10; `account_id`, `leaf_id` (null for an account-level cause), `series_id` (null unless the cause is region-specific), `resource_id` (null unless a resource), excess, share | identities as in D.0; display names are joined from `cost_accounts` / `forecast_leaves` / `cost_series` |
+| `anomaly_root_causes` | **(tenant_id, anomaly_id, rank)** rank 1..10; `account_id`, `leaf_id` (null for an account-level cause), `series_id` (null unless the cause is region-specific), `resource_id` (null unless a resource), excess, share. **When both are set, the series' leaf must equal `leaf_id`** (rev. 16): a composite FK `(tenant_id, series_id, leaf_id)` → `cost_series (tenant_id, id, leaf_id)`, backed by a unique constraint on `cost_series (tenant_id, id, leaf_id)`, so no trigger is needed | identities as in D.0; display names are joined from `cost_accounts` / `forecast_leaves` / `cost_series` |
 | `anomaly_events` | **(tenant_id, anomaly_id, seq)**; at, from_status, to_status, reason, actor (`job` in Slices 3–5; a person's identity once D-15's deferral ends) | append-only: INSERT only, no UPDATE grant to anyone |
 | reader views | `anomalies_current`, `anomaly_days_published`, `anomaly_root_causes_published`, `anomaly_events_published` | tenant predicate; nothing else |
 
@@ -344,6 +374,6 @@ run instead of 90.
 
 | Role | Grants added |
 |---|---|
-| `ratio_analytics` | USAGE on schema `ratio`; SELECT on `cost_facts_published`, `publications_published`; SELECT, INSERT on every table above; UPDATE on the listed columns; USAGE on the identity sequences of `cost_accounts`, `forecast_leaves` and `cost_series` (no others exist: `batch_seq` and `run_seq` are allocated, not sequences); column-level UPDATE on the pointers and on `analytics_runs` as listed (never `run_seq`, `kind`, `as_of`, `batch_seq_hwm`); EXECUTE on `ratio.current_tenant_id()`, the secret-guard functions its CHECKs evaluate, and the two retention functions; **no DELETE on any table** (D-12) |
+| `ratio_analytics` | USAGE on schema `ratio`; SELECT on `cost_facts_published`, `publications_published`; SELECT, INSERT on every table above, **except `analytics_runs`, where INSERT is column-level and excludes `batch_seq_hwm` and `finished_at`** (rev. 16); UPDATE on the listed columns; USAGE on the identity sequences of `cost_accounts`, `forecast_leaves` and `cost_series` (no others exist: `batch_seq` and `run_seq` are allocated, not sequences); column-level UPDATE on the pointers and on `analytics_runs` as listed (never `run_seq`, `kind`, `as_of`, `batch_seq_hwm`); EXECUTE on `ratio.current_tenant_id()`, the secret-guard functions its CHECKs evaluate, and the two retention functions; **no DELETE on any table** (D-12) |
 | `ratio_reader` | SELECT on the new reader views only |
 | `ratio_worker` | none |
