@@ -33,7 +33,8 @@ ordinary commits and plain pushes (never a force-push).
 | 21 | `3aaa678`, `bddefe9` | Copilot's review 5407844545 of d4616a8 (2 High, 1 Medium) and the challenger's one Low on revision 20 (APPROVED, 0 High, 0 Medium), §3v: `block`, currency and segment in the backtest report's key; `n` = 0 origins left out of the totals calibration; month-end errors bucketed by remaining days; the backtest report published by a view on the latest succeeded backtest run; EVIDENCE §3u's section reference corrected. |
 | 22 | `c85079f` | Copilot's review 5407898631 of bddefe9 (3 High, 1 Medium, 1 Low) and the challenger's one Low on revision 21 (APPROVED, 0 High, 0 Medium), §3w: billed `B` only at scopes with a billing source; parent integrity of the anomaly tables; M1-log eligibility and its runtime fallback; the `cost_daily` row measured with its six measures (`rowsize3.sql`; peak 5.18 GB); D-21's provider names; backtest reads atomic per snapshot. |
 | 23 | `b9b2274` | Copilot's review 5407941028 of c85079f (1 High, 2 Medium) and the challenger's one Low on revision 22 (APPROVED, 0 High, 0 Medium), §3x: merge targets terminal, enforced by a locking trigger (`tg_anomaly_merge_guard`, `REVIEWED_TRIGGERS` 14 → 15) with re-pointing before a survivor is merged; M1-log eligibility over everything its fit and selection read; calendar factors from valid samples only; "never reopened". |
-| 24 | this revision | Copilot's review 5407981134 of b9b2274 (3 High, 1 Medium) and the challenger's one Low on revision 23 (APPROVED, 0 High, 0 Medium), §3y: account-scope daily forecasts rebuilt on read with stored interval state, and a scope census (peak 5.24 GB); anomaly changes published in the detect run's success transaction; valid-sample rules for the log-scale detectors; a scale-aware zero week in `budget5.py` (outputs unchanged); a `repointed` event. |
+| 24 | `f3209ea` | Copilot's review 5407981134 of b9b2274 (3 High, 1 Medium) and the challenger's one Low on revision 23 (APPROVED, 0 High, 0 Medium), §3y: account-scope daily forecasts rebuilt on read with stored interval state, and a scope census (peak 5.24 GB); anomaly changes published in the detect run's success transaction; valid-sample rules for the log-scale detectors; a scale-aware zero week in `budget5.py` (outputs unchanged); a `repointed` event. |
+| 25 | this revision | Copilot's review 5408081799 of f3209ea (1 High, 2 Medium, 2 Low) and the challenger's Low and nit on revision 24 (APPROVED, 0 High, 0 Medium), §3z: an `occurrence` in the anomaly dedup key for re-introduced restatements; bounded backtest retention with pins; the `bottom_up` summary for non-leaf scopes; `forecast_scope_state` arrays checked; stale scope counts; event-target foreign keys. |
 
 ## 2. Governance wording: reverted
 
@@ -544,6 +545,23 @@ The same census covers the rollup side (`cost_daily_scope`,
 `costs/daily` at account or leaf scope reads `cost_daily` and
 `billing_daily` directly (sized in B.5.3).
 
+## 3z. Revision 25: Copilot's review 5408081799 of f3209ea and the challenger's Low and nit on revision 24
+
+The challenger APPROVED revision 24 (0 High, 0 Medium, 1 Low, 1 nit). Its
+Low (stale scope counts) is the same finding as W5. Each item was checked
+against f3209ea and is valid. W1 and W6 were checked on a throwaway
+PostgreSQL 16.14 cluster (port 55801, removed afterwards).
+
+| Item | Change | Where |
+|---|---|---|
+| **W1 r4179229443** (High) restatement re-introduction | **Fixed with an occurrence discriminator.** `occurrence` (≥ 1) is part of the dedup key, its `UNIQUE` and the UUID v5 input. It is allocated in the detect run's success transaction under the per-(tenant, `detect`) lock: 1 for a new key, the highest resolved occurrence + 1 when a restatement brings a resolved group's first day back. An open row with the same key is extended, never duplicated. "Never reopened" and every CHECK stay intact; the merge guard, fan-in and events treat each occurrence as its own group. Probe: B1 → occurrence 1, resolved after B2, B3 → occurrence 2 with a new, deterministic id; the key without `occurrence` (mutant) fails 23505 on B3. 5-3 `ci` replay test (B1 detects, B2 resolves `restated`, B3 re-introduces; replayed twice with the same ids) and mutant | DESIGN §4.5, §4.7, §7 (5-3); App. D.4 |
+| **W2 r4179229471** backtest retention | **Fixed.** The forecast retention function now also removes the `forecast_backtests` and `forecast_backtest_points` rows of backtest runs that are neither among the 2 latest succeeded nor pinned, and never a `running` run's; the backtest command then deletes those runs' export files and keeps their SHA-256 manifest in `stats`. **Pinned** runs (new insert-only table `analytics_run_pins`, written when an acceptance run or a PR's evidence records the manifest) are archived, never deleted. D-12 and §6.1's lists are updated; revisions 3–24 exempted this output entirely. **Sizing unchanged:** on `fleet15k` each sequential run is its own stack with at most one backtest run, and the exports retained across runs are already in the peak (B.5.7); the bound is (2 + pinned) × (≈ 0.01 + ≈ 0.25) GB. 4-3 test (pinned, latest two, older, failed, running) and mutants. This is a retention change and the classifier's `retention` reasons cover it, as they should | DESIGN §3.8, §6.1, §6.2, §7 (4-3), §8 D-12; App. D.1, D.2 |
+| **W3 r4179229481** account-level fields | **Fixed.** Every non-leaf scope reports a `bottom_up` summary: `method = bottom_up`, its own `historyDays`, `leafCount`, and `coldStartShare` (the share of the window's expected `M` from leaves flagged `estimated`), written to its `forecast_totals` rows. Method, history and the cold-start flag stay per leaf. API row and 4-5 test (an account with one fitted and one estimated leaf) | DESIGN §3.6, §5.1, §7 (4-5); App. D.2 |
+| **W4 r4179229491** array checklist | **Fixed.** `forecast_scope_state`'s four quantile arrays and `q_source` join the fixed-length array list; 4-3 rejection tests and mutant | App. D.2; DESIGN §7 (4-3) |
+| **W5 r4179229499** / **challenger Low** stale scope counts | **Fixed.** §4.2 and §4.3 say 100 D3 scopes; the budget row says the budget counts 550 as an upper bound (100 actual) and keeps 0.0279 as the conservative figure (≈ 0.005 at 100); the rollup line says ≈ 820; `detector_scope_state` says 100, sized at 550. Sweep: the remaining "550" occurrences are the census's own comparison, `budget.py` / `budget5.py` (unchanged, as run) and historical evidence rows | DESIGN §2.9, §4.2, §4.3; App. D.2 |
+| **W6** (challenger nit) event-target FKs | **Fixed.** `(tenant_id, from_merged_into)` and `(tenant_id, to_merged_into)` → `anomalies (tenant_id, id)`, `ON DELETE RESTRICT`. Probe: a `repointed` event naming a nonexistent target fails 23503; one with the same old and new target fails 23514. 5-1 test and mutant | App. D.4; DESIGN §7 (5-1) |
+| Scripts | No script changed; all 13 hashes as in revision 24; no disk or budget figure changes | App. B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -585,8 +603,8 @@ Appendix B (B.4, B.5.6–B.5.14).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 24 (the commit that adds this line; the same eight reasons
-as at revision 23, `b9b2274`, revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
+at revision 25 (the commit that adds this line; the same eight reasons
+as at revision 24, `f3209ea`, revision 23, `b9b2274`, revision 22, `c85079f`, revision 21, `3aaa678` and `bddefe9`, revision 20, `d4616a8`, revision 19, `0dd6743`, revision 18,
 `ddbb6f0`, revision 17, `cc54e79`, and `9e0d703`, revision 16). Revision 16 gave the same risk and classes
 as every revision since 4, and **one more reason than before**: `retention.mention`
 on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is
