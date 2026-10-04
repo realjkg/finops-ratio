@@ -574,7 +574,8 @@ describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
 
   it('every comparison runs and fails the run', () => {
     for (const call of [
-      "fail('first sync', syncProblems(first.record, control))",
+      'const syncIssues = syncProblems(first.record, control);',
+      "fail('first sync', syncIssues)",
       "fail('second sync', resyncProblems(second.record, control))",
       'compareAcceptance({ control, apiTotals: totals, rows })',
       'artifactSetProblems(rows, dataShas)',

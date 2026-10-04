@@ -573,7 +573,8 @@ async function catalogSnapshot(settings, secrets) {
     try {
       const batches = await c.query(
         `SELECT to_char(billing_period, 'YYYY-MM-DD') AS billing_period, status, reconciliation, is_provisional,
-                row_count::text AS row_count, loaded_billed_total::text AS loaded_billed_total
+                row_count::text AS row_count, loaded_billed_total::text AS loaded_billed_total,
+                validation_error_count::text AS validation_error_count, quarantine_reason
            FROM ratio.ingest_batches WHERE tenant_id = $1 ORDER BY billing_period, status`,
         [secrets.RATIO_LOCAL_TENANT_ID],
       );
@@ -678,7 +679,10 @@ async function acceptance(args) {
       const first = await timed('sync', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
       const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
       steps.sync = { exit: first.code, durationMs: first.record?.durationMs, periods: outcomes(first.record) };
-      fail('first sync', syncProblems(first.record, control));
+      const syncIssues = syncProblems(first.record, control);
+      // Diagnostics before failing: the batches' quarantine reasons (codes and counts, never cell values).
+      if (syncIssues.length) steps.catalog = await catalogSnapshot(settings, secrets).catch((e) => ({ error: e.message }));
+      fail('first sync', syncIssues);
       const second = await timed('syncAgain', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
       steps.syncAgain = { exit: second.code, periods: outcomes(second.record) };
       fail('second sync', resyncProblems(second.record, control));
