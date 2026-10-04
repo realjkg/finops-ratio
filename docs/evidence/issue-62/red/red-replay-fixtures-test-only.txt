@@ -1,0 +1,57 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/replayFixturesEnv.test.ts (3 tests | 2 failed) 45ms
+   ❯ replay-fixtures is test-only (L3 decision) (3)
+     × RATIO_ENV=staging fails closed before any I/O: exit 2, REPLAY_FIXTURES_NOT_ALLOWED, the reason named 25ms
+     × every RATIO_ENV but test is refused the same way (development, production, unset, other casing) 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/replayFixturesEnv.test.ts > replay-fixtures is test-only (L3 decision) > RATIO_ENV=staging fails closed before any I/O: exit 2, REPLAY_FIXTURES_NOT_ALLOWED, the reason named
+AssertionError: {}: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ src/ingest/replayFixturesEnv.test.ts:27:45
+     25|     for (const extra of [{}, { RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1' },…
+     26|       const r = await run(['replay-fixtures', '--json'], { ...env, ...…
+     27|       expect(r.code, JSON.stringify(extra)).toBe(2);
+       |                                             ^
+     28|       const rec = JSON.parse(r.out[0]);
+     29|       expect(rec).toMatchObject({ command: 'replay-fixtures', pass: fa…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/ingest/replayFixturesEnv.test.ts > replay-fixtures is test-only (L3 decision) > every RATIO_ENV but test is refused the same way (development, production, unset, other casing)
+AssertionError: undefined: expected { …(2) } to deeply equal { …(2) }
+
+- Expected
++ Received
+
+  {
+    "code": "REPLAY_FIXTURES_NOT_ALLOWED",
+-   "message": "replay-fixtures runs only when RATIO_ENV is test: it ingests synthetic providers, which are allowed only in development/test (per-source synthetic markers are tracked as D-21 for Slice 3)",
++   "message": "replay-fixtures runs only when RATIO_ENV is staging or test",
+  }
+
+ ❯ src/ingest/replayFixturesEnv.test.ts:38:68
+     36|       const r = await run(['replay-fixtures', '--json'], { ...env, RAT…
+     37|       expect(r.code, String(ratioEnv)).toBe(2);
+     38|       expect(JSON.parse(r.out[0]).results.error, String(ratioEnv)).toE…
+       |                                                                    ^
+     39|       expect(r.all).not.toMatch(/ECONNREFUSED/);
+     40|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 1 passed (3)
+   Start at  15:23:56
+   Duration  1.37s (transform 71%, import 24%, tests 4%, worker 1%)
+
