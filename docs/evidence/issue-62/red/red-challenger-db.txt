@@ -1,0 +1,55 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts (26 tests | 2 failed) 1794ms
+   ❯ D9 synthetic providers need the explicit opt-in (orchestrator decision D1, 2026-10-04) (6)
+     × L3 library default: the process opt-in without an explicit development/test RATIO_ENV refuses the run 11ms
+   ❯ D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup (3)
+     × L3: the opt-in with RATIO_ENV staging, production or unset is refused at startup (config error), nothing ingested 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D9 synthetic providers need the explicit opt-in (orchestrator decision D1, 2026-10-04) > L3 library default: the process opt-in without an explicit development/test RATIO_ENV refuses the run
+AssertionError: expected undefined to be 'test' // Object.is equality
+
+- Expected:
+"test"
+
++ Received:
+undefined
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:407:35
+    405|
+    406|   it('L3 library default: the process opt-in without an explicit devel…
+    407|     expect(process.env.RATIO_ENV).toBe('test');
+       |                                   ^
+    408|     const prev = process.env.RATIO_ENV;
+    409|     for (const ratioEnv of [undefined, 'staging', 'production']) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/ingest/worker/providerCheck.db.test.ts > D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup > L3: the opt-in with RATIO_ENV staging, production or unset is refused at startup (config error), nothing ingested
+AssertionError: expected undefined to be 'development' // Object.is equality
+
+- Expected:
+"development"
+
++ Received:
+undefined
+
+ ❯ src/ingest/worker/providerCheck.db.test.ts:445:43
+    443|
+    444|   it('L3: the opt-in with RATIO_ENV staging, production or unset is re…
+    445|     expect(testS3Env(evidence).RATIO_ENV).toBe('development');
+       |                                           ^
+    446|     const s = await seedTenantSource(t.db.pool, { kind: 'fake', config…
+    447|     for (const ratioEnv of ['staging', 'production', undefined]) {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 24 passed (26)
+   Start at  15:08:03
+   Duration  3.34s (tests 66%, transform 27%, import 6%, setup 2%)
+

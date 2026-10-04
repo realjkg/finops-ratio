@@ -278,6 +278,42 @@ describe('D6 manifest controls that count the foreign rows', () => {
   });
 });
 
+describe('D11 which controls see the exclusions (challenger L1)', () => {
+  const mixed = () => csvGz([row('AWS', '1.00', 'a1'), row('Microsoft', '2.00', 'm1')]);
+
+  it('set-level controls (rowCount, billedTotal) count PUBLISHED rows: controls equal to the AWS subset reconcile', async () => {
+    const s = await awsSource();
+    const r = await sync(s, new FakeFocusSource([period([['run/x.csv.gz', mixed()]], { rowCount: 1, billedTotal: '1.00' })]));
+    expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCount: '1', billedTotal: '1.00', reconciliation: 'reconciled', excludedRows: '1' });
+  });
+
+  it('per-artifact artifactRowCounts count EVERY row seen, excluded rows included: a count of all records matches', async () => {
+    const s = await awsSource();
+    // Only one of two artifacts has a count, so no set-level row count is derived from them.
+    const r = await sync(
+      s,
+      new FakeFocusSource([period([['run/a.csv.gz', mixed()], ['run/b.csv.gz', csvGz([row('AWS', '3.00', 'a2')])]], { artifactRowCounts: { 'run/a.csv.gz': 2 } })]),
+    );
+    expect(r.periods[0]).toMatchObject({ outcome: 'published', rowCount: '2', billedTotal: '4.00', reconciliation: 'unverified', excludedRows: '1' });
+  });
+
+  it('per-artifact counts of the AWS rows only do NOT match (they must count every record)', async () => {
+    const s = await awsSource();
+    const r = await sync(
+      s,
+      new FakeFocusSource([period([['run/a.csv.gz', mixed()], ['run/b.csv.gz', csvGz([row('AWS', '3.00', 'a2')])]], { artifactRowCounts: { 'run/a.csv.gz': 1 } })]),
+    );
+    expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code: 'RECONCILIATION_VARIANCE' });
+  });
+
+  it('per-artifact counts covering EVERY artifact define the set-level row count (all records) ⇒ with exclusions, RECONCILIATION_VARIANCE', async () => {
+    const s = await awsSource();
+    const r = await sync(s, new FakeFocusSource([period([['run/x.csv.gz', mixed()]], { artifactRowCounts: { 'run/x.csv.gz': 2 } })]));
+    expect(r.periods[0]).toMatchObject({ outcome: 'quarantined', code: 'RECONCILIATION_VARIANCE', reconciliation: 'variance' });
+    expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({});
+  });
+});
+
 describe('D7 the fake (synthetic) source type', () => {
   it('excludes AWS rows: only the synthetic provider is allowed', async () => {
     const s = await seedTenantSource(t.db.pool, { kind: 'fake', config: { fixture: 'synthetic-base' } });
@@ -366,6 +402,25 @@ describe('D9 synthetic providers need the explicit opt-in (orchestrator decision
       process.env.RATIO_ALLOW_SYNTHETIC_PROVIDERS = prev;
     }
   });
+
+  it('L3 library default: the process opt-in without an explicit development/test RATIO_ENV refuses the run', async () => {
+    expect(process.env.RATIO_ENV).toBe('test');
+    const prev = process.env.RATIO_ENV;
+    for (const ratioEnv of [undefined, 'staging', 'production']) {
+      if (ratioEnv === undefined) delete process.env.RATIO_ENV;
+      else process.env.RATIO_ENV = ratioEnv;
+      try {
+        const s = await awsSource();
+        await expect(
+          runSync({ pool: t.pool, tenantId: s.tenantId, sourceKey: s.sourceKey, source: synthetic(), evidence: new MemoryEvidenceStore(), mode: 'sync', hooks: noSleep }),
+          String(ratioEnv),
+        ).rejects.toMatchObject({ code: 'SYNTHETIC_PROVIDERS_NOT_ALLOWED' });
+        expect(await batchesOf(t.db.pool, s.tenantId, s.sourceId), String(ratioEnv)).toEqual([]);
+      } finally {
+        process.env.RATIO_ENV = prev;
+      }
+    }
+  });
 });
 
 describe('D10 the worker CLI: the opt-in comes from its env only, and is logged once at startup', () => {
@@ -385,6 +440,18 @@ describe('D10 the worker CLI: the opt-in comes from its env only, and is logged 
     RATIO_ALLOW_SYNTHETIC_PROVIDERS: optIn,
   });
   const optInLogs = (err: string[]) => err.map((l) => JSON.parse(l)).filter((l) => l.event === 'config.synthetic_providers_allowed');
+
+  it('L3: the opt-in with RATIO_ENV staging, production or unset is refused at startup (config error), nothing ingested', async () => {
+    expect(testS3Env(evidence).RATIO_ENV).toBe('development');
+    const s = await seedTenantSource(t.db.pool, { kind: 'fake', config: { fixture: 'synthetic-base' } });
+    for (const ratioEnv of ['staging', 'production', undefined]) {
+      const env: Record<string, string | undefined> = { ...cliEnv('1'), RATIO_ENV: ratioEnv };
+      const r = await cli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], env);
+      expect(r.code, String(ratioEnv)).toBe(2);
+      expect(r.out.concat(r.err).join('\n'), String(ratioEnv)).toContain('SYNTHETIC_PROVIDERS_NOT_ALLOWED');
+    }
+    expect(await batchesOf(t.db.pool, s.tenantId, s.sourceId)).toEqual([]);
+  });
 
   it('OFF ("0"): the synthetic fixture is quarantined PROVIDER_MISMATCH, nothing is published, no opt-in log', async () => {
     const s = await seedTenantSource(t.db.pool, { kind: 'fake', config: { fixture: 'synthetic-base' } });

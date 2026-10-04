@@ -42,7 +42,7 @@ import {
   verifyDatasetBytes,
   verifyStagingLossless,
 } from './acceptance.mjs';
-import { LOCAL_NAMES, workerEnv } from './lib.mjs';
+import { LOCAL_NAMES, runProcess, workerEnv } from './lib.mjs';
 // The worker's OWN manifest parser and row validator (unchanged production code):
 // the staged objects must pass them before any stack is involved.
 import { parseManifest } from '../../src/ingest/sources/s3/layout';
@@ -593,7 +593,8 @@ describe('A11 both syncs are judged on the CLI exit code too (Copilot 4177490229
     const calls = [];
     const sync = async (name) => {
       calls.push(name);
-      return results[calls.length - 1];
+      // Challenger L2: every result carries the worker's captured stderr (no opt-in log here).
+      return { stderr: '', ...results[calls.length - 1] };
     };
     return { sync, calls };
   };
@@ -738,7 +739,7 @@ describe('A12 issue #62: foreign-provider rows are excluded by the worker, and t
   it('syncTwice: both syncs must exit exactly 1 here, with these records', async () => {
     const runner = (...results) => {
       let i = 0;
-      return async () => results[i++];
+      return async () => ({ stderr: '', ...results[i++] });
     };
     const ok = await syncTwice({ sync: runner({ code: 1, record: rec(firstGood, false) }, { code: 1, record: rec(secondGood, false) }), control });
     expect([ok.first.code, ok.second.code]).toEqual([1, 1]);
@@ -821,14 +822,51 @@ describe('A12 issue #62: foreign-provider rows are excluded by the worker, and t
   it('synthetic-provider opt-in (orchestrator D1): OFF in the worker env by default and for the acceptance run; ON only for the synthetic fixture sync', () => {
     const settings = { pgPort: 1, s3Port: 2, appPort: 3 };
     const secrets = { RATIO_LOCAL_WORKER_PASSWORD: 'w', RATIO_LOCAL_MIGRATOR_PASSWORD: 'm', RATIO_LOCAL_S3_ACCESS_KEY_ID: 'a', RATIO_LOCAL_S3_SECRET_ACCESS_KEY: 's' };
-    expect(workerEnv(settings, secrets)).not.toHaveProperty('RATIO_ALLOW_SYNTHETIC_PROVIDERS');
-    expect(workerEnv(settings, secrets, { syntheticProviders: false })).not.toHaveProperty('RATIO_ALLOW_SYNTHETIC_PROVIDERS');
+    // Challenger L2: OFF is explicit ('0'), so an opt-in exported in the operator's shell cannot leak in.
+    expect(workerEnv(settings, secrets).RATIO_ALLOW_SYNTHETIC_PROVIDERS).toBe('0');
+    expect(workerEnv(settings, secrets, { syntheticProviders: false }).RATIO_ALLOW_SYNTHETIC_PROVIDERS).toBe('0');
+    const inherited = { RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1', RATIO_ENV: 'staging' };
+    expect({ ...inherited, ...workerEnv(settings, secrets) }).toMatchObject({ RATIO_ALLOW_SYNTHETIC_PROVIDERS: '0', RATIO_ENV: 'development' });
+    // ...because local.mjs run() lays the command's env OVER the inherited one.
+    expect(read('scripts/local/local.mjs')).toMatch(/runProcess\(cmd, args, \{ cwd: ROOT, env: \{ \.\.\.process\.env, \.\.\.env \}/);
     expect(workerEnv(settings, secrets, { syntheticProviders: true }).RATIO_ALLOW_SYNTHETIC_PROVIDERS).toBe('1');
     const src = read('scripts/local/local.mjs');
     const body = src.slice(src.indexOf('async function acceptance('), src.indexOf('// --- main'));
     expect(body).not.toMatch(/syntheticProviders|RATIO_ALLOW_SYNTHETIC_PROVIDERS/);
     // The only opt-in in local.mjs is the synthetic fixture's sync (local:sync / local:test).
     expect(src.match(/syntheticProviders: true/g)).toHaveLength(1);
+  });
+
+  it('L2: the acceptance syncs are judged on the worker stderr too: the synthetic-provider opt-in log must be absent', async () => {
+    const runner = (...results) => {
+      let i = 0;
+      return async () => results[i++];
+    };
+    const first = { code: 1, record: rec(firstGood, false) };
+    const second = { code: 1, record: rec(secondGood, false) };
+    const LOG = '{"ts":"x","level":"warn","event":"config.synthetic_providers_allowed","syntheticProviderCount":4}\n';
+    await expect(syncTwice({ sync: runner({ ...first, stderr: '' }, { ...second, stderr: '' }), control })).resolves.toBeTruthy();
+    await expect(syncTwice({ sync: runner({ ...first, stderr: LOG }), control })).rejects.toThrow(
+      'first sync:\n  sync: the worker ran with the synthetic-provider opt-in (config.synthetic_providers_allowed logged); the acceptance run must have it off',
+    );
+    await expect(syncTwice({ sync: runner({ ...first, stderr: '' }, { ...second, stderr: LOG }), control })).rejects.toThrow(
+      'second sync:\n  second sync: the worker ran with the synthetic-provider opt-in (config.synthetic_providers_allowed logged); the acceptance run must have it off',
+    );
+    await expect(syncTwice({ sync: runner(first), control })).rejects.toThrow('first sync:\n  sync: the worker CLI stderr was not captured');
+  });
+
+  it('L2: runProcess can capture stderr (and still passes it through); local.mjs captures it for the worker syncs', async () => {
+    await expect(runProcess(process.execPath, ['-e', 'process.stdout.write("o"); process.stderr.write("e")'], { capture: true, captureErr: true, timeoutMs: 10_000 })).resolves.toEqual({
+      code: 0,
+      out: 'o',
+      err: 'e',
+    });
+    // Without captureErr the result shape is unchanged.
+    await expect(runProcess(process.execPath, ['-e', 'process.stdout.write("o")'], { capture: true, timeoutMs: 10_000 })).resolves.toEqual({ code: 0, out: 'o' });
+    const src = read('scripts/local/local.mjs');
+    const fn = src.slice(src.indexOf('async function syncRecord('), src.indexOf('async function sync(settings)'));
+    expect(fn).toMatch(/\{ allowFail: true, syntheticProviders, captureErr: true \}/);
+    expect(fn).toMatch(/return \{ code: r\.code, record, stderr: r\.err \};/);
   });
 
   it('local.mjs: the evidence of EVERY staged object is re-hashed; the API artifact set uses the published periods only; the pin covers the filter', () => {
