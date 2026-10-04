@@ -314,6 +314,29 @@ describe('D11 which controls see the exclusions (challenger L1)', () => {
   });
 });
 
+describe('D12 a batch published under an earlier policy is not re-checked (challenger L4; documents the gap)', () => {
+  it('identical bytes stay published after the policy tightens: sync skips, backfill and replay --period find the batch unchanged', async () => {
+    const s = await awsSource();
+    const source = new FakeFocusSource([period([['run/x.csv.gz', csvGz([row('SyntheticCloud', '1.00', 's1'), row('AWS', '2.00', 'a1')])]])]);
+    expect((await sync(s, source, { settings: { allowSyntheticProviders: true } })).periods[0]).toMatchObject({ outcome: 'published', rowCount: '2' });
+    const off = { settings: { allowSyntheticProviders: false } };
+    expect((await sync(s, source, off)).periods[0]).toMatchObject({ outcome: 'skipped_unchanged' });
+    expect((await sync(s, source, { ...off, mode: 'backfill', range: { from: P, to: P } })).periods[0]).toMatchObject({ outcome: 'unchanged' });
+    expect((await sync(s, source, { ...off, mode: 'replay_period', range: { from: P, to: P } })).periods[0]).toMatchObject({ outcome: 'unchanged' });
+    expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({ [P]: { rows: 2, total: '3.00' } });
+  });
+
+  it('new bytes for the period ARE checked under the current policy', async () => {
+    const s = await awsSource();
+    const source = new FakeFocusSource([period([['run1/x.csv.gz', csvGz([row('SyntheticCloud', '1.00', 's1'), row('AWS', '2.00', 'a1')])]])]);
+    await sync(s, source, { settings: { allowSyntheticProviders: true } });
+    // A re-delivered export: different bytes (the batch key is the data fingerprint, not the name).
+    source.setPeriods([period([['run2/x.csv.gz', csvGz([row('SyntheticCloud', '1.00', 's1-v2'), row('AWS', '2.00', 'a1')])]])]);
+    expect((await sync(s, source, { settings: { allowSyntheticProviders: false } })).periods[0]).toMatchObject({ outcome: 'published', rowCount: '1', excludedRows: '1' });
+    expect(await publishedTotals(t.db.pool, s.tenantId, s.sourceId)).toEqual({ [P]: { rows: 1, total: '2.00' } });
+  });
+});
+
 describe('D7 the fake (synthetic) source type', () => {
   it('excludes AWS rows: only the synthetic provider is allowed', async () => {
     const s = await seedTenantSource(t.db.pool, { kind: 'fake', config: { fixture: 'synthetic-base' } });

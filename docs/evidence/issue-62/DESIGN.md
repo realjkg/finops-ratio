@@ -131,13 +131,20 @@ exactly as today. The batch code comes from the other errors
 (`VALIDATION_FAILED`, `ROW_LIMIT_EXCEEDED`, `UNSUPPORTED_FORMAT`). The
 quarantine reason's code summary also lists `PROVIDER_MISMATCH xN`.
 
-**With manifest controls**, the controls describe the file, not the AWS
-subset. A set-level `rowCount` or `billedTotal` that includes the foreign
-rows therefore disagrees with the loaded batch, and the batch is quarantined
-`RECONCILIATION_VARIANCE`. That is deliberate: a provider-attested file
-that contains another provider's rows is suspicious, so the check fails
-closed. Per-artifact row counts still count every record in the file
-(unchanged).
+**Which controls see the exclusions** (challenger L1; pinned by the D11 and
+D6 tests):
+
+| Control | What it is compared with | With excluded rows |
+|---|---|---|
+| set-level `rowCount` | the **published** row count (`count(*)` of the loaded facts) | a count of every record in the file disagrees ⇒ `RECONCILIATION_VARIANCE`; a count of the AWS rows only matches |
+| set-level `billedTotal` | the **published** billed total | same: a total over every record disagrees; the AWS subset's total matches |
+| per-artifact `artifactRowCounts` | **every row seen** in that artifact (`ingest_artifacts.row_count`), excluded rows included | a count of every record matches; a count of the AWS rows only disagrees ⇒ `RECONCILIATION_VARIANCE` |
+| per-artifact counts covering **every** artifact of the set | they also define the set-level `rowCount` (their sum, Slice 1), compared with the **published** count | any exclusion ⇒ `RECONCILIATION_VARIANCE` |
+
+So a provider manifest that attests the whole file (every record) cannot
+reconcile once a row is excluded, and the batch is quarantined. That is
+deliberate: a provider-attested file that contains another provider's rows
+is suspicious, so the check fails closed.
 
 **Why exclude rather than quarantine the whole batch.** This is the issue's
 proposal ("A row outside that set is quarantined… A batch where every row
@@ -298,7 +305,11 @@ columns.
 | D8 | 〃 | an unrecognised type is not checked (D4) |
 | D9 | 〃 (D1 decision) | opt-in off ⇒ `SyntheticCloud` under `aws-data-exports` excluded `PROVIDER_MISMATCH` (and an all-synthetic batch quarantined); on ⇒ accepted; the whole synthetic set: off ⇒ each excluded, on ⇒ each accepted while `Microsoft` and `Amazon Web Services` stay excluded; a library caller follows the process env, unset ⇒ off |
 | U2 | `src/ingest/focus/provider.test.ts` (synthetic set) | the set is exactly the four names, frozen; off ⇒ none accepted by any type; on ⇒ each accepted by every type; on never changes the verdict for real names (`AWS` still refused by `fake`); the base lists hold no synthetic name |
-| D10 | 〃 (D1 decision) | the worker CLI: `'0'` ⇒ the synthetic fixture is quarantined, no opt-in log; `'1'` ⇒ published, the opt-in logged exactly once |
+| D10 | 〃 (D1 decision) | the worker CLI: `'0'` ⇒ the synthetic fixture is quarantined, no opt-in log; `'1'` ⇒ published, the opt-in logged exactly once (count only, no names); L3: `'1'` with `RATIO_ENV` staging / production / unset ⇒ exit 2 `SYNTHETIC_PROVIDERS_NOT_ALLOWED`, nothing ingested |
+| D11 | 〃 (challenger L1) | set-level controls equal to the AWS subset reconcile; per-artifact counts of every record match and of the AWS rows only do not; per-artifact counts covering every artifact ⇒ variance |
+| D12 | 〃 (challenger L4) | identical bytes stay published after the policy tightens (`skipped_unchanged`, then `unchanged` for backfill and `replay --period`); new bytes are checked |
+| S1-L3 | `src/ingest/syntheticProviders.test.ts` | the opt-in only with `RATIO_ENV` explicitly `development` / `test`; unset, empty, unknown, differently cased, staging and production refused; the refusal message names the rule |
+| A-L2 | `scripts/local/acceptance.test.mjs` | `workerEnv` sets the opt-in to `'0'` explicitly and wins over an inherited `'1'`; `syncTwice` fails on an opt-in log line or on uncaptured stderr; `runProcess` `captureErr` |
 | S1 | `src/ingest/syntheticProviders.test.ts` (D1 decision) | default off (`DEFAULT_SETTINGS`, `resolveSettings`, `loadWorkerConfig` for every `RATIO_ENV`); `'1'` on; other values refused; refused in production |
 | G1 | `src/ingest/worker/sourceFactory.test.ts` (D4 decision) | every source row without a provider policy is refused by the source factory (`SOURCE_CONFIG_INVALID`); every row it accepts has a policy |
 | A-tests | `scripts/local/acceptance.test.mjs`, `scripts/acceptance/*` | calculator `--provider` (exact; NULL refused), the new sync / re-sync / catalog / artifact-set checks with their exact problem lists, A9 static wiring (`--provider AWS` passed); the local opt-in: off in `workerEnv` by default and for `local:acceptance`, on only for the synthetic fixture's sync |
@@ -325,6 +336,14 @@ harness only:
 | M17 | synthetic providers always allowed (opt-in ignored) | U1, U2, D9, D10 |
 | M21 | the opt-in widens real names (`Microsoft` accepted when on) | U2, D9 |
 | M22 | a synthetic name dropped from the set (`SyntheticGCP`) | U2, D9 |
+| M23 | L3: staging accepted | S1-L3, D9/D10 L3 |
+| M24 | L3: unset `RATIO_ENV` accepted | S1-L3, D9/D10 L3 |
+| M25 | L3: only production refused (the previous rule) | S1-L3, D9/D10 L3 |
+| M26 | L3: `RATIO_ENV` matched case-insensitively | S1-L3 |
+| M27 | L2: `workerEnv` omits the opt-in when off | A-L2 |
+| M28 | L2: the acceptance ignores the opt-in log | A-L2 |
+| M29 | L2: the worker stderr is not captured for the syncs | A-L2 |
+| M30 | L2: `runProcess` drops the captured stderr | A-L2 |
 | M18 | opt-in default on (`DEFAULT_SETTINGS` / unset env) | S1, D9 |
 | M19 | opt-in accepted in production | S1 |
 | M20 | factory accepts `focus_file` without the AWS layout | G1 |
@@ -345,8 +364,12 @@ The first draft proposed each item below; the orchestrator decided them on
     type. The base lists hold only real providers, and the opt-in never
     widens real-provider acceptance (addition decided 2026-10-04).
   - The opt-in defaults to OFF. A production or default config never
-    accepts them: `RATIO_ENV=production` with the opt-in is refused at
-    config load (`SYNTHETIC_PROVIDERS_NOT_ALLOWED`).
+    accepts them. Challenger L3: the opt-in is refused at config load
+    (`SYNTHETIC_PROVIDERS_NOT_ALLOWED`, exit 2) unless `RATIO_ENV` is
+    **explicitly** `development` or `test`. Unset, empty, unknown (or
+    differently cased), `staging` and `production` are all refused. This is
+    checked first in `loadWorkerConfig`, and the library default path
+    (`runSync` without settings) applies the same rule.
   - The worker CLI logs once at startup when it is on.
   - The test and local harnesses turn it on (§6), not the Slice 0/1 test
     files. No Slice 1 test file needed an edit. testS3Env() placement
@@ -354,15 +377,32 @@ The first draft proposed each item below; the orchestrator decided them on
     preferred over editing Slice 1 test files.
   - `local:acceptance` runs with it OFF: the public sample is
     production-shaped.
-  - `replay-fixtures` (staging) needs the operator to set the opt-in for
-    that invocation, since it ingests the SYNTHETIC fixture.
+  - **Open item, escalated (L3):** `replay-fixtures` runs in staging (its
+    CLI allows `RATIO_ENV` staging or test; Slice 1 DESIGN §14). It ingests
+    the SYNTHETIC fixture, so in staging it can no longer get the opt-in. Its
+    scenarios would see every row excluded. The opt-in was deliberately
+    **not** widened to staging. A narrower path is needed and was escalated
+    to the orchestrator. One possibility is that `replay-fixtures` opts in
+    for its own runs only, in code, because it creates its own fresh
+    fixture tenant and SYNTHETIC-labelled sources. In `RATIO_ENV=test` it
+    still works with the opt-in set.
+  - **Tracked item (deferred to Slice 3, design D-21):** a per-source
+    synthetic marker, so the opt-in applies to the SYNTHETIC sources only,
+    not process-wide.
 - **D2: accepted, fail closed.** An empty or missing `ProviderName`
   quarantines the batch (§3). **Revisit trigger:** if a real AWS export
   shows null `ProviderName` rows (the documented conformance gap), revisit
   this policy using that evidence. Real exports are an owner action.
 - **D3: accepted.** Exclude the foreign rows, publish the rest, and
-  reconcile against the manifest controls. Controls that count the foreign
-  rows quarantine the batch `RECONCILIATION_VARIANCE` (D6 test).
+  reconcile against the manifest controls (challenger L1), as follows:
+  - set-level controls (`rowCount` and the billed total) are compared with
+    the **published** rows;
+  - per-artifact `artifactRowCounts` count **every row seen**, excluded ones
+    included;
+  - per-artifact counts that cover every artifact also define the set-level
+    `rowCount`.
+
+  §2.2 has the table. The D6 and D11 tests pin it.
 - **D4: accepted, with a guard.** An unrecognised source type is not
   checked. `src/ingest/worker/sourceFactory.test.ts` ("D4 guard") pins that
   the source factory refuses every such row, so the unchecked path stays
@@ -370,6 +410,35 @@ The first draft proposed each item below; the orchestrator decided them on
   comment naming that test.
 - **D5: accepted.** `AWS` only. `Amazon Web Services` is not allowed until
   a real export proves otherwise (§2.1).
+
+## 8a. Batches published before a policy change are not re-checked (challenger L4)
+
+The check runs when a batch is **loaded**.
+- A batch published before this change is not re-validated.
+- Neither is a batch published before a later change to the allowlist or
+  the synthetic opt-in.
+- An unchanged listing is `skipped_unchanged`, and an unchanged artifact set
+  is `unchanged`: both are matched by fingerprint, without reading rows.
+
+**Remedy, corrected against the code (D12 test):**
+- `replay --period` does **not** re-check identical bytes. It ignores the
+  checkpoint, but a batch is keyed on its data fingerprint, so the same
+  artifact set finds its published batch and returns `unchanged`. `backfill`
+  does the same.
+- What does re-check a period is **new bytes**: a re-delivered export, as
+  AWS Data Exports does on every refresh, is a new artifact set and is
+  validated under the current policy (D12, second case).
+- For identical bytes there is no re-check path today. This is the same
+  known Slice 1 gap ("quarantined batches with identical bytes are not
+  re-validated after a code fix; needs new bytes or an operator procedure",
+  Slice 1 DESIGN §12), and it applies to published batches too.
+- If a re-check of unchanged bytes is ever needed, it is an operator
+  procedure, or a `replay --period --revalidate` mode, which is not built.
+  This is escalated, not changed here.
+
+**Impact today: none.** No production data exists. Only the SYNTHETIC
+fixture and the public sample have ever been ingested, all locally and
+ephemerally (DEPLOYMENT_BRIEF status).
 
 ## 9. Rollback
 
