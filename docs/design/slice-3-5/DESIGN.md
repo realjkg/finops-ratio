@@ -471,8 +471,10 @@ for 3 and 5.7 GB for 2; and 2 periods (61 days) leave no fully held-out
 month after the 56 days that weekly seasonality needs. So `fleet15k` keeps
 **all 15,000 accounts** and reduces the **service axis**: each account's
 long tail of services is summed into one `Other services` series. This is
-stated in the dataset manifest and the generator's README; it is the only
-fidelity given up, and no account is dropped.
+stated in the dataset manifest and the generator's README, together with
+the other simplifications decided in D-01 (no region, pricing or tag
+splits; Appendix B.5.5 lists everything `fleet15k` gives up). No account is
+dropped.
 
 **Why 4 periods for `fleet15k` (D-02).** With periods of 31, 30, 31 and 30
 days (122 days):
