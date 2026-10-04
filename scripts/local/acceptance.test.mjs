@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { parse as parseCsvSync } from 'csv-parse/sync';

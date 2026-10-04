@@ -724,7 +724,7 @@ export function killLiveProcessGroups() {
  *   is settled exitGraceMs after 'exit' (the group is then killed and the
  *   pipe destroyed), still within the deadline.
  */
-export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = false, timeoutMs, exitGraceMs = 2_000, spawnFn = spawn, signal } = {}) {
+export function runProcess(cmd, args, { cwd, env, capture = false, captureErr = false, allowFail = false, timeoutMs, exitGraceMs = 2_000, spawnFn = spawn, signal } = {}) {
   return new Promise((resolve, reject) => {
     requireDeadline(timeoutMs, `runProcess(${cmd} ${args[0] ?? ''}) timeoutMs`);
     const label = `${cmd} ${args[0] ?? ''}`;
@@ -733,12 +733,14 @@ export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = f
       reject(new Error(`${label} not started: interrupted by ${signal.reason ?? 'interrupt'}`));
       return;
     }
-    const child = spawnFn(cmd, args, { cwd, env, detached: true, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
+    // captureErr: stderr is piped, kept, and still passed through to this process's stderr.
+    const child = spawnFn(cmd, args, { cwd, env, detached: true, stdio: ['ignore', capture ? 'pipe' : 'inherit', captureErr ? 'pipe' : 'inherit'] });
     if (child.pid) {
       GROUP_LEADERS.add(child);
       LIVE_GROUPS.add(child.pid);
     }
     let out = '';
+    let err = '';
     let settled = false;
     let graceTimer = null;
     const onAbort = () => {
@@ -758,13 +760,19 @@ export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = f
     };
     const byExit = (code, signal) => () => {
       if (code !== 0 && !allowFail) reject(new Error(`${label} exited ${code ?? `by ${signal}`}`));
-      else resolve({ code, out });
+      else resolve(captureErr ? { code, out, err } : { code, out });
     };
     const deadline = setTimeout(() => {
       killGroup(child, 'SIGKILL');
       finish(() => reject(new Error(`${label} timed out after ${timeoutMs} ms (killed)`)));
     }, timeoutMs);
     if (capture) child.stdout.on('data', (d) => (out += d));
+    if (captureErr) {
+      child.stderr.on('data', (d) => {
+        err += d;
+        process.stderr.write(d);
+      });
+    }
     signal?.addEventListener('abort', onAbort, { once: true });
     child.on('error', (e) => finish(() => reject(e)));
     child.on('exit', (code, signal) => {
@@ -784,13 +792,15 @@ export function connectionUrl({ user, password, port: p, database }) {
 
 /** Env for every worker CLI command against the local stack (source and evidence on the local SeaweedFS). */
 /**
- * Env for the worker CLI. `syntheticProviders: true` adds the synthetic-provider
- * opt-in (issue #62 D1), for the SYNTHETIC fixture source only; default off.
+ * Env for the worker CLI. `syntheticProviders: true` sets the synthetic-provider
+ * opt-in (issue #62 D1), for the SYNTHETIC fixture source only. Otherwise it is
+ * set to '0' EXPLICITLY, so an opt-in exported in the operator's shell never
+ * leaks into the worker (run() lays this env over process.env; challenger L2).
  */
 export function workerEnv(settings, secrets, { syntheticProviders = false } = {}) {
   const s3 = `http://127.0.0.1:${settings.s3Port}`;
   return {
-    ...(syntheticProviders === true ? { RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1' } : {}),
+    RATIO_ALLOW_SYNTHETIC_PROVIDERS: syntheticProviders === true ? '1' : '0',
     RATIO_ENV: 'development',
     RATIO_DATABASE_URL: connectionUrl({ user: LOCAL_NAMES.worker, password: secrets.RATIO_LOCAL_WORKER_PASSWORD, port: settings.pgPort, database: LOCAL_NAMES.database }),
     RATIO_MIGRATE_DATABASE_URL: connectionUrl({ user: LOCAL_NAMES.migrator, password: secrets.RATIO_LOCAL_MIGRATOR_PASSWORD, port: settings.pgPort, database: LOCAL_NAMES.database }),

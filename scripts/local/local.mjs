@@ -372,7 +372,8 @@ async function seed(settings) {
  * The exit code judged by every caller: sync() rejects r.code !== 0, syncTwice (acceptance.mjs) requires 0.
  */
 async function syncRecord(settings, secrets, sourceKey, { syntheticProviders = false } = {}) {
-  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', sourceKey], { allowFail: true, syntheticProviders });
+  // stderr captured too: local:acceptance requires the opt-in log line to be absent (challenger L2).
+  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', sourceKey], { allowFail: true, syntheticProviders, captureErr: true });
   process.stdout.write(r.out);
   let record = null;
   try {
@@ -380,7 +381,7 @@ async function syncRecord(settings, secrets, sourceKey, { syntheticProviders = f
   } catch {
     // no evidence record: judged by the caller
   }
-  return { code: r.code, record };
+  return { code: r.code, record, stderr: r.err };
 }
 
 async function sync(settings) {

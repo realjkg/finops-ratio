@@ -820,6 +820,11 @@ function syncResultProblems(result, control, which) {
   const problems = [];
   const exit = expectedSyncExit(control);
   if (result?.code !== exit) problems.push(`${label}: the worker CLI exited ${JSON.stringify(result?.code ?? null)} (expected ${exit})`);
+  // Challenger L2: the acceptance worker must run with the synthetic-provider opt-in OFF.
+  if (typeof result?.stderr !== 'string') problems.push(`${label}: the worker CLI stderr was not captured`);
+  else if (result.stderr.includes('config.synthetic_providers_allowed')) {
+    problems.push(`${label}: the worker ran with the synthetic-provider opt-in (config.synthetic_providers_allowed logged); the acceptance run must have it off`);
+  }
   if (!result?.record) {
     problems.push(`${label}: the worker CLI printed no evidence record`);
     return problems;

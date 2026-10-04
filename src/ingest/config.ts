@@ -167,15 +167,17 @@ export const DEFAULT_FIRST_PUBLISH_GRACE_HOURS = 48;
 
 /**
  * RATIO_ALLOW_SYNTHETIC_PROVIDERS (issue #62, orchestrator D1): unset, '' or
- * '0' ⇒ false; '1' ⇒ true; anything else ⇒ CONFIG_INVALID. Refused with
- * SYNTHETIC_PROVIDERS_NOT_ALLOWED when RATIO_ENV=production.
+ * '0' ⇒ false; '1' ⇒ true; anything else ⇒ CONFIG_INVALID. '1' is refused with
+ * SYNTHETIC_PROVIDERS_NOT_ALLOWED unless RATIO_ENV is EXPLICITLY `development`
+ * or `test` (challenger L3): unset, unknown, staging and production all refuse.
  */
 export function syntheticProvidersOptIn(env: Env): boolean {
   const raw = env.RATIO_ALLOW_SYNTHETIC_PROVIDERS;
   if (raw === undefined || raw === '' || raw === '0') return false;
   if (raw !== '1') fail("RATIO_ALLOW_SYNTHETIC_PROVIDERS must be '1' or '0'");
-  if ((env.RATIO_ENV ?? '').trim() === 'production') {
-    fail('RATIO_ALLOW_SYNTHETIC_PROVIDERS is refused when RATIO_ENV=production: synthetic provider names are never accepted in production', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED');
+  const ratioEnv = (env.RATIO_ENV ?? '').trim();
+  if (ratioEnv !== 'development' && ratioEnv !== 'test') {
+    fail('RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 is accepted only when RATIO_ENV is explicitly development or test', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED');
   }
   return true;
 }
@@ -184,6 +186,8 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
   const rawEnv = (env.RATIO_ENV ?? '').trim();
   const ratioEnv = (rawEnv === '' ? 'development' : rawEnv) as RatioEnv;
   if (!RATIO_ENVS.includes(ratioEnv)) fail(`RATIO_ENV must be one of ${RATIO_ENVS.join(', ')}`);
+  // Checked first, so a refused opt-in is reported as such (issue #62, challenger L3).
+  const allowSyntheticProviders = syntheticProvidersOptIn(env);
 
   // Test-only switches need NODE_ENV=test AND must never activate in a staging/production deployment.
   const isTestProcess = testSwitchesPermitted(env);
@@ -230,7 +234,7 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
       retryBaseMs,
       retryMaxMs,
       tmpDir: env.RATIO_TMP_DIR || DEFAULT_SETTINGS.tmpDir,
-      allowSyntheticProviders: syntheticProvidersOptIn(env),
+      allowSyntheticProviders,
       limits: {
         maxRowsPerBatch: int(env, 'RATIO_MAX_ROWS_PER_BATCH', DEFAULT_LIMITS.maxRowsPerBatch, 1, 1_000_000_000),
         maxArtifactBytes: int(env, 'RATIO_MAX_ARTIFACT_BYTES', DEFAULT_LIMITS.maxArtifactBytes, 1, Number.MAX_SAFE_INTEGER),
