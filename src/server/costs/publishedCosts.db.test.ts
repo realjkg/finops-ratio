@@ -23,6 +23,7 @@ import { MemoryEvidenceStore } from '../../ingest/evidence/MemoryEvidenceStore';
 import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
 import { createPublishedCostsRoute, ROUTE_MESSAGES } from './publishedCostsRoute';
 import { closeReaderPools, readerPool } from './readerPool';
+import { readPublishedCosts } from './publishedCosts';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
 
 interface Row {
@@ -301,8 +302,10 @@ describe('D6 the reader-login safety check refuses unsafe logins (503, nothing s
   async function refused(readerUrl: string) {
     const res = await get(seeded.a.tenantId, {}, { readerUrl });
     expect(res.statusCode).toBe(503);
-    expect(res.body).toEqual({ error: { code: 'unsafe_db_login', message: ROUTE_MESSAGES.unsafeLogin } });
+    expect(res.body).toEqual({ error: { code: 'unsafe_db_login', message: ROUTE_MESSAGES.unsafeLogin, requestId: expect.stringMatching(/^[0-9a-f-]{36}$/) } });
+    expect(res.headers['x-request-id']).toBe((res.body as { error: { requestId: string } }).error.requestId);
     expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|superuser/i);
+    return res;
   }
 
   it('a plain ratio_reader login is accepted (control)', async () => {
@@ -351,16 +354,106 @@ describe('D6 the reader-login safety check refuses unsafe logins (503, nothing s
     expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
   });
 
-  it('the reason is logged for the operator (redacted), never returned', async () => {
-    const errors: string[] = [];
-    vi.mocked(console.error).mockImplementation((line: unknown) => {
-      errors.push(String(line));
-    });
-    vi.mocked(console.warn).mockImplementation((line: unknown) => {
-      errors.push(String(line));
-    });
-    await refused(db.url);
-    expect(errors.join('\n')).toMatch(/superuser/i);
+  it('the reason is logged for the operator as a distinct unsafe_db_login event (codes, no role names), never returned', async () => {
+    const lines: string[] = [];
+    for (const f of ['error', 'warn'] as const) {
+      vi.mocked(console[f]).mockImplementation((line: unknown) => {
+        lines.push(String(line));
+      });
+    }
+    const owner = await login(['ratio_reader', 'ratio_owner']);
+    const res1 = await refused(db.url);
+    const res2 = await refused(owner.url);
+    const events = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(events.filter((e) => e.event === 'unhandled_error')).toEqual([]);
+    const ev = events.filter((e) => e.event === 'unsafe_db_login');
+    expect(ev).toHaveLength(2);
+    expect(ev[0]).toMatchObject({ status: 503, requestId: (res1.body as { error: { requestId: string } }).error.requestId });
+    expect(ev[0].reasons).toContain('SUPERUSER');
+    expect(ev[1]).toMatchObject({ status: 503, requestId: (res2.body as { error: { requestId: string } }).error.requestId, reasons: ['OWNER_MEMBER'] });
+    const text = lines.join('\n');
+    expect(text).not.toContain(owner.name);
+    expect(text).not.toMatch(/ratio_owner|ratio_reader|ratio_worker|postgres:/);
+  });
+
+  it('a pooled login set NOLOGIN is refused on the very next request (pooled sessions survive NOLOGIN); LOGIN again ⇒ served', async () => {
+    const l = await login(['ratio_reader']);
+    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
+    await db.pool.query(`ALTER ROLE ${l.name} NOLOGIN`);
+    // The pooled session is still connected: Postgres does not end it on NOLOGIN.
+    const alive = await db.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename = $1`, [l.name]);
+    expect(alive.rows[0].n).toBeGreaterThan(0);
+    await refused(l.url);
+    await db.pool.query(`ALTER ROLE ${l.name} LOGIN`);
+    expect((await get(seeded.a.tenantId, {}, { readerUrl: l.url })).statusCode).toBe(200);
+  });
+});
+
+describe('D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ ONLY)', () => {
+  it('a publish committed between the page query and the totals query cannot make them disagree', async () => {
+    const s = await seedTenantSource(db.pool, { sourceKey: 'snap' });
+    const source = new FakeFocusSource([{ billingPeriod: '2026-03-01', artifacts: [{ name: 'mar/a.csv.gz', bytes: csvGz(rowsOf('2026-03-01', 5, '1.00', 'old')) }] }]);
+    const pool = createWorkerPool(worker.url, { max: 2 });
+    const evidence = new MemoryEvidenceStore();
+    try {
+      await runSync({ pool, tenantId: s.tenantId, sourceKey: 'snap', source, evidence, mode: 'sync' });
+      let republished = false;
+      const page = await readPublishedCosts(readerPool(reader.url), s.tenantId, { from: null, to: null, limit: 100, cursor: null }, {
+        afterPage: async () => {
+          // A restatement is published and COMMITTED while the read transaction is open.
+          source.setPeriods([{ billingPeriod: '2026-03-01', artifacts: [{ name: 'mar/b.csv.gz', bytes: csvGz(rowsOf('2026-03-01', 7, '2.00', 'new')) }] }]);
+          const r = await runSync({ pool, tenantId: s.tenantId, sourceKey: 'snap', source, evidence, mode: 'sync' });
+          republished = r.periods[0].outcome === 'published';
+        },
+      });
+      expect(republished).toBe(true);
+      expect(page.data).toHaveLength(5);
+      expect(page.totals).toEqual([{ billingPeriod: '2026-03-01', billingCurrency: 'USD', rowCount: 5, billedCost: '5.00' }]);
+      expect(new Set(page.data.map((r) => r.batchId)).size).toBe(1);
+      // A fresh read sees the restatement, consistently.
+      const after = await readPublishedCosts(readerPool(reader.url), s.tenantId, { from: null, to: null, limit: 100, cursor: null });
+      expect(after.data).toHaveLength(7);
+      expect(after.totals).toEqual([{ billingPeriod: '2026-03-01', billingCurrency: 'USD', rowCount: 7, billedCost: '14.00' }]);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('the read transaction runs at REPEATABLE READ, read only', async () => {
+    const c = await readerPool(reader.url).connect();
+    try {
+      await c.query('BEGIN');
+      const r = await c.query(`SELECT current_setting('transaction_isolation') AS iso, current_setting('transaction_read_only') AS ro`);
+      expect(r.rows[0]).toEqual({ iso: 'repeatable read', ro: 'on' });
+    } finally {
+      await c.query('ROLLBACK');
+      c.release();
+    }
+  });
+});
+
+describe('D9 keyset tie-break on source_id (two sources, identical artifacts, one period)', () => {
+  it('limit 3 visits every row of both sources exactly once', async () => {
+    const tenantId = crypto.randomUUID();
+    const bytes = csvGz(rowsOf('2026-02-01', 5, '0.50', 'twin'));
+    const pool = createWorkerPool(worker.url, { max: 2 });
+    try {
+      for (const sourceKey of ['twin-a', 'twin-b']) {
+        await seedTenantSource(db.pool, { tenantId, sourceKey });
+        const source = new FakeFocusSource([{ billingPeriod: '2026-02-01', artifacts: [{ name: 'feb/a.csv.gz', bytes }] }]);
+        await runSync({ pool, tenantId, sourceKey, source, evidence: new MemoryEvidenceStore(), mode: 'sync' });
+      }
+    } finally {
+      await pool.end();
+    }
+    const { rows } = await all(tenantId, { limit: '3' });
+    expect(rows).toHaveLength(10);
+    // Same artifact sha256 and ordinals in both sources: only source_id tells the rows apart.
+    expect(new Set(rows.map((r) => r.artifactSha256)).size).toBe(1);
+    expect(new Set(rows.map((r) => `${r.sourceId}/${r.rowOrdinal}`)).size).toBe(10);
+    expect(new Set(rows.map((r) => r.sourceId)).size).toBe(2);
+    const keys = rows.map((r) => `${r.sourceId}|${r.rowOrdinal.padStart(20, '0')}`);
+    expect(keys).toEqual([...keys].sort());
   });
 });
 

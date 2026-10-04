@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextApiHandler } from 'next';
 import { createPublishedCostsRoute, ROUTE_MESSAGES } from './publishedCostsRoute';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
+import { UnsafeReaderLoginError } from './readerLogin';
 import routeFromPages from '../../../pages/api/v1/costs/published';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
@@ -137,6 +138,36 @@ describe('R3 input validation through the route (400, fixed message, no DB work)
       expect(JSON.stringify(res.body)).not.toContain('EVIL');
     }
     expect(poolFor).not.toHaveBeenCalled();
+  });
+});
+
+describe('R5 an unsafe database login is a distinct, logged 503 (challenger Low 3)', () => {
+  it('503 unsafe_db_login with a requestId (body + X-Request-Id); one unsafe_db_login event with reason codes, no role names; never logged as unhandled_error/500', async () => {
+    const err = vi.mocked(console.error);
+    const warn = vi.mocked(console.warn);
+    const unsafe = new UnsafeReaderLoginError(
+      ['connected role has unsafe capabilities: pg_monitor', 'connected role is a member of ratio_owner (could disable RLS)'],
+      ['REFUSED_PREDEFINED_ROLE', 'OWNER_MEMBER'],
+    );
+    const pool = { connect: vi.fn(async () => Promise.reject(unsafe)) };
+    const route = createPublishedCostsRoute({ env: BASE_ENV, poolFor: () => pool as never, logger: () => undefined });
+    const res = await call(route, makeReq({ headers: bearer(), remoteAddress: ip() }));
+    expect(res.statusCode).toBe(503);
+    const body = res.body as { error: { code: string; message: string; requestId: string } };
+    expect(body.error.code).toBe('unsafe_db_login');
+    expect(body.error.message).toBe(ROUTE_MESSAGES.unsafeLogin);
+    expect(body.error.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(res.headers['x-request-id']).toBe(body.error.requestId);
+    expect(Object.keys(body.error).sort()).toEqual(['code', 'message', 'requestId']);
+
+    const lines = [...err.mock.calls, ...warn.mock.calls].map((c) => String(c[0]));
+    const events = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(events.filter((e) => e.event === 'unhandled_error')).toEqual([]);
+    const ev = events.filter((e) => e.event === 'unsafe_db_login');
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ tag: 'published-costs', status: 503, requestId: body.error.requestId, reasons: ['REFUSED_PREDEFINED_ROLE', 'OWNER_MEMBER'] });
+    const text = lines.join('\n');
+    expect(text).not.toMatch(/pg_monitor|ratio_owner|ratio_reader|ratio_worker|postgres:/);
   });
 });
 

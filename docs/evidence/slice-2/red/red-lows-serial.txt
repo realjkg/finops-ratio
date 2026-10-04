@@ -1,0 +1,244 @@
+
+ RUN  v5.0.1 <repo>
+
+ ❯ src/server/costs/publishedCosts.serial.db.test.ts (57 tests | 54 failed) 1417ms
+   ❯ reader API refuses dangerous reader logins (serial) (57)
+     × refuses a ratio_reader login with BYPASSRLS 22ms
+     × refuses a ratio_reader login that can assume a BYPASSRLS role 16ms
+     × refuses a ratio_reader login with REPLICATION 18ms
+     × refuses a ratio_reader login that can assume a REPLICATION role 31ms
+     × refuses a ratio_reader login with CREATEROLE 18ms
+     × refuses a ratio_reader login that can assume a CREATEROLE role 29ms
+     × refuses a ratio_reader login with CREATEDB 27ms
+     × refuses a ratio_reader login that can assume a CREATEDB role 23ms
+     × refuses a ratio_reader login that can SET ROLE to a SUPERUSER role 28ms
+     × the log names a refused predefined role or an attribute by CODE only, never the role or the login 21ms
+     × refuses a ratio_reader login that reaches pg_read_server_files over an INHERIT edge 18ms
+     × refuses a ratio_reader login that reaches pg_read_server_files over a SET-only edge 10ms
+     × refuses a ratio_reader login that reaches pg_read_server_files over an ADMIN-only edge 9ms
+     × refuses a ratio_reader login that reaches pg_read_server_files over a transitive edge (login -> plain role -> predefined role) 10ms
+     × refuses a ratio_reader login that reaches pg_write_server_files over an INHERIT edge 23ms
+     × refuses a ratio_reader login that reaches pg_write_server_files over a SET-only edge 14ms
+     × refuses a ratio_reader login that reaches pg_write_server_files over an ADMIN-only edge 9ms
+     × refuses a ratio_reader login that reaches pg_write_server_files over a transitive edge (login -> plain role -> predefined role) 14ms
+     × refuses a ratio_reader login that reaches pg_execute_server_program over an INHERIT edge 16ms
+     × refuses a ratio_reader login that reaches pg_execute_server_program over a SET-only edge 15ms
+     × refuses a ratio_reader login that reaches pg_execute_server_program over an ADMIN-only edge 13ms
+     × refuses a ratio_reader login that reaches pg_execute_server_program over a transitive edge (login -> plain role -> predefined role) 10ms
+     × refuses a ratio_reader login that reaches pg_read_all_data over an INHERIT edge 10ms
+     × refuses a ratio_reader login that reaches pg_read_all_data over a SET-only edge 9ms
+     × refuses a ratio_reader login that reaches pg_read_all_data over an ADMIN-only edge 9ms
+     × refuses a ratio_reader login that reaches pg_read_all_data over a transitive edge (login -> plain role -> predefined role) 10ms
+     × refuses a ratio_reader login that reaches pg_write_all_data over an INHERIT edge 14ms
+     × refuses a ratio_reader login that reaches pg_write_all_data over a SET-only edge 13ms
+     × refuses a ratio_reader login that reaches pg_write_all_data over an ADMIN-only edge 13ms
+     × refuses a ratio_reader login that reaches pg_write_all_data over a transitive edge (login -> plain role -> predefined role) 17ms
+     × refuses a ratio_reader login that reaches pg_signal_backend over an INHERIT edge 9ms
+     × refuses a ratio_reader login that reaches pg_signal_backend over a SET-only edge 9ms
+     × refuses a ratio_reader login that reaches pg_signal_backend over an ADMIN-only edge 15ms
+     × refuses a ratio_reader login that reaches pg_signal_backend over a transitive edge (login -> plain role -> predefined role) 20ms
+     × refuses a ratio_reader login that reaches pg_create_subscription over an INHERIT edge 29ms
+     × refuses a ratio_reader login that reaches pg_create_subscription over a SET-only edge 18ms
+     × refuses a ratio_reader login that reaches pg_create_subscription over an ADMIN-only edge 13ms
+     × refuses a ratio_reader login that reaches pg_create_subscription over a transitive edge (login -> plain role -> predefined role) 13ms
+     × refuses a ratio_reader login that reaches pg_monitor over an INHERIT edge 42ms
+     × refuses a ratio_reader login that reaches pg_monitor over a SET-only edge 12ms
+     × refuses a ratio_reader login that reaches pg_monitor over an ADMIN-only edge 10ms
+     × refuses a ratio_reader login that reaches pg_monitor over a transitive edge (login -> plain role -> predefined role) 25ms
+     × refuses a ratio_reader login that reaches pg_read_all_stats over an INHERIT edge 15ms
+     × refuses a ratio_reader login that reaches pg_read_all_stats over a SET-only edge 16ms
+     × refuses a ratio_reader login that reaches pg_read_all_stats over an ADMIN-only edge 16ms
+     × refuses a ratio_reader login that reaches pg_read_all_stats over a transitive edge (login -> plain role -> predefined role) 10ms
+     × refuses a ratio_reader login that reaches pg_read_all_settings over an INHERIT edge 14ms
+     × refuses a ratio_reader login that reaches pg_read_all_settings over a SET-only edge 15ms
+     × refuses a ratio_reader login that reaches pg_read_all_settings over an ADMIN-only edge 18ms
+     × refuses a ratio_reader login that reaches pg_read_all_settings over a transitive edge (login -> plain role -> predefined role) 9ms
+     × refuses a ratio_reader login that reaches pg_stat_scan_tables over an INHERIT edge 13ms
+     × refuses a ratio_reader login that reaches pg_stat_scan_tables over a SET-only edge 16ms
+     × refuses a ratio_reader login that reaches pg_stat_scan_tables over an ADMIN-only edge 13ms
+     × refuses a ratio_reader login that reaches pg_stat_scan_tables over a transitive edge (login -> plain role -> predefined role) 21ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 54 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login with BYPASSRLS
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login with REPLICATION
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login with CREATEROLE
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login with CREATEDB
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ expectRefused src/server/costs/publishedCosts.serial.db.test.ts:60:18
+     58|   const r = await status(readerUrl);
+     59|   expect(r.status).toBe(503);
+     60|   expect(r.body).toEqual({ error: { code: 'unsafe_db_login', message: …
+       |                  ^
+     61| }
+     62|
+ ❯ src/server/costs/publishedCosts.serial.db.test.ts:96:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/54]⎯
+
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that can assume a BYPASSRLS role
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that can assume a REPLICATION role
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that can assume a CREATEROLE role
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that can assume a CREATEDB role
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ expectRefused src/server/costs/publishedCosts.serial.db.test.ts:60:18
+     58|   const r = await status(readerUrl);
+     59|   expect(r.status).toBe(503);
+     60|   expect(r.body).toEqual({ error: { code: 'unsafe_db_login', message: …
+       |                  ^
+     61| }
+     62|
+ ❯ src/server/costs/publishedCosts.serial.db.test.ts:103:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/54]⎯
+
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that can SET ROLE to a SUPERUSER role
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ expectRefused src/server/costs/publishedCosts.serial.db.test.ts:60:18
+     58|   const r = await status(readerUrl);
+     59|   expect(r.status).toBe(503);
+     60|   expect(r.body).toEqual({ error: { code: 'unsafe_db_login', message: …
+       |                  ^
+     61| }
+     62|
+ ❯ src/server/costs/publishedCosts.serial.db.test.ts:111:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/54]⎯
+
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > the log names a refused predefined role or an attribute by CODE only, never the role or the login
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ expectRefused src/server/costs/publishedCosts.serial.db.test.ts:60:18
+     58|   const r = await status(readerUrl);
+     59|   expect(r.status).toBe(503);
+     60|   expect(r.body).toEqual({ error: { code: 'unsafe_db_login', message: …
+       |                  ^
+     61| }
+     62|
+ ❯ src/server/costs/publishedCosts.serial.db.test.ts:140:7
+ ❯ unsafeEvents src/server/costs/publishedCosts.serial.db.test.ts:71:3
+ ❯ src/server/costs/publishedCosts.serial.db.test.ts:139:30
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/54]⎯
+
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_server_files over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_server_files over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_server_files over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_server_files over a transitive edge (login -> plain role -> predefined role)
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_write_server_files over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_write_server_files over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_write_server_files over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_write_server_files over a transitive edge (login -> plain role -> predefined role)
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_execute_server_program over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_execute_server_program over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_execute_server_program over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_execute_server_program over a transitive edge (login -> plain role -> predefined role)
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_data over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_data over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_data over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_data over a transitive edge (login -> plain role -> predefined role)
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_write_all_data over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_write_all_data over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_write_all_data over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_write_all_data over a transitive edge (login -> plain role -> predefined role)
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_signal_backend over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_signal_backend over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_signal_backend over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_signal_backend over a transitive edge (login -> plain role -> predefined role)
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_create_subscription over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_create_subscription over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_create_subscription over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_create_subscription over a transitive edge (login -> plain role -> predefined role)
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_monitor over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_monitor over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_monitor over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_monitor over a transitive edge (login -> plain role -> predefined role)
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_stats over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_stats over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_stats over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_stats over a transitive edge (login -> plain role -> predefined role)
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_settings over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_settings over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_settings over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_read_all_settings over a transitive edge (login -> plain role -> predefined role)
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_stat_scan_tables over an INHERIT edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_stat_scan_tables over a SET-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_stat_scan_tables over an ADMIN-only edge
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts > reader API refuses dangerous reader logins (serial) > refuses a ratio_reader login that reaches pg_stat_scan_tables over a transitive edge (login -> plain role -> predefined role)
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ expectRefused src/server/costs/publishedCosts.serial.db.test.ts:60:18
+     58|   const r = await status(readerUrl);
+     59|   expect(r.status).toBe(503);
+     60|   expect(r.body).toEqual({ error: { code: 'unsafe_db_login', message: …
+       |                  ^
+     61| }
+     62|
+ ❯ src/server/costs/publishedCosts.serial.db.test.ts:158:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/54]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  54 failed | 3 passed (57)
+   Start at  02:17:06
+   Duration  2.67s (tests 75%, transform 19%, setup 3%, import 3%)
+

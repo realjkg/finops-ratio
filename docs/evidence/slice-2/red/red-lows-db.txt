@@ -1,0 +1,313 @@
+
+ RUN  v5.0.1 <repo>
+
+ ❯ src/server/costs/publishedCosts.db.test.ts (25 tests | 12 failed) 1376ms
+   ❯ D6 the reader-login safety check refuses unsafe logins (503, nothing served) (11)
+     × the superuser connection is refused 29ms
+     × a member of ratio_owner is refused (could disable RLS) 15ms
+     × a ratio_worker login is refused (not a reader; could write) 19ms
+     × a reader that is also a ratio_worker member is refused 12ms
+     × a reader that can only SET ROLE ratio_worker (no inherit) is refused 21ms
+     × a login with no ratio membership is refused 22ms
+     × a reader holding ratio_reader only through SET (no inherited privileges) is refused 15ms
+     × the check runs on every request: a login made unsafe while pooled is refused at once, and served again when fixed 46ms
+     × the reason is logged for the operator as a distinct unsafe_db_login event (codes, no role names), never returned 11ms
+     × a pooled login set NOLOGIN is refused on the very next request (pooled sessions survive NOLOGIN); LOGIN again ⇒ served 36ms
+   ❯ D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ ONLY) (2)
+     × a publish committed between the page query and the totals query cannot make them disagree 76ms
+     × the read transaction runs at REPEATABLE READ, read only 6ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D6 the reader-login safety check refuses unsafe logins (503, nothing served) > the superuser connection is refused
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ refused src/server/costs/publishedCosts.db.test.ts:305:22
+    303|     const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    304|     expect(res.statusCode).toBe(503);
+    305|     expect(res.body).toEqual({ error: { code: 'unsafe_db_login', messa…
+       |                      ^
+    306|     expect(res.headers['x-request-id']).toBe((res.body as { error: { r…
+    307|     expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|supe…
+ ❯ src/server/costs/publishedCosts.db.test.ts:316:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D6 the reader-login safety check refuses unsafe logins (503, nothing served) > a member of ratio_owner is refused (could disable RLS)
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ refused src/server/costs/publishedCosts.db.test.ts:305:22
+    303|     const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    304|     expect(res.statusCode).toBe(503);
+    305|     expect(res.body).toEqual({ error: { code: 'unsafe_db_login', messa…
+       |                      ^
+    306|     expect(res.headers['x-request-id']).toBe((res.body as { error: { r…
+    307|     expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|supe…
+ ❯ src/server/costs/publishedCosts.db.test.ts:320:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D6 the reader-login safety check refuses unsafe logins (503, nothing served) > a ratio_worker login is refused (not a reader; could write)
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ refused src/server/costs/publishedCosts.db.test.ts:305:22
+    303|     const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    304|     expect(res.statusCode).toBe(503);
+    305|     expect(res.body).toEqual({ error: { code: 'unsafe_db_login', messa…
+       |                      ^
+    306|     expect(res.headers['x-request-id']).toBe((res.body as { error: { r…
+    307|     expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|supe…
+ ❯ src/server/costs/publishedCosts.db.test.ts:324:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D6 the reader-login safety check refuses unsafe logins (503, nothing served) > a reader that is also a ratio_worker member is refused
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ refused src/server/costs/publishedCosts.db.test.ts:305:22
+    303|     const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    304|     expect(res.statusCode).toBe(503);
+    305|     expect(res.body).toEqual({ error: { code: 'unsafe_db_login', messa…
+       |                      ^
+    306|     expect(res.headers['x-request-id']).toBe((res.body as { error: { r…
+    307|     expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|supe…
+ ❯ src/server/costs/publishedCosts.db.test.ts:328:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D6 the reader-login safety check refuses unsafe logins (503, nothing served) > a reader that can only SET ROLE ratio_worker (no inherit) is refused
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ refused src/server/costs/publishedCosts.db.test.ts:305:22
+    303|     const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    304|     expect(res.statusCode).toBe(503);
+    305|     expect(res.body).toEqual({ error: { code: 'unsafe_db_login', messa…
+       |                      ^
+    306|     expect(res.headers['x-request-id']).toBe((res.body as { error: { r…
+    307|     expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|supe…
+ ❯ src/server/costs/publishedCosts.db.test.ts:335:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D6 the reader-login safety check refuses unsafe logins (503, nothing served) > a login with no ratio membership is refused
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ refused src/server/costs/publishedCosts.db.test.ts:305:22
+    303|     const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    304|     expect(res.statusCode).toBe(503);
+    305|     expect(res.body).toEqual({ error: { code: 'unsafe_db_login', messa…
+       |                      ^
+    306|     expect(res.headers['x-request-id']).toBe((res.body as { error: { r…
+    307|     expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|supe…
+ ❯ src/server/costs/publishedCosts.db.test.ts:339:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D6 the reader-login safety check refuses unsafe logins (503, nothing served) > a reader holding ratio_reader only through SET (no inherited privileges) is refused
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ refused src/server/costs/publishedCosts.db.test.ts:305:22
+    303|     const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    304|     expect(res.statusCode).toBe(503);
+    305|     expect(res.body).toEqual({ error: { code: 'unsafe_db_login', messa…
+       |                      ^
+    306|     expect(res.headers['x-request-id']).toBe((res.body as { error: { r…
+    307|     expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|supe…
+ ❯ src/server/costs/publishedCosts.db.test.ts:345:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D6 the reader-login safety check refuses unsafe logins (503, nothing served) > the check runs on every request: a login made unsafe while pooled is refused at once, and served again when fixed
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ refused src/server/costs/publishedCosts.db.test.ts:305:22
+    303|     const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    304|     expect(res.statusCode).toBe(503);
+    305|     expect(res.body).toEqual({ error: { code: 'unsafe_db_login', messa…
+       |                      ^
+    306|     expect(res.headers['x-request-id']).toBe((res.body as { error: { r…
+    307|     expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|supe…
+ ❯ src/server/costs/publishedCosts.db.test.ts:352:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D6 the reader-login safety check refuses unsafe logins (503, nothing served) > the reason is logged for the operator as a distinct unsafe_db_login event (codes, no role names), never returned
+AssertionError: expected { error: { …(2) } } to deeply equal { error: { …(3) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+      "code": "unsafe_db_login",
+      "message": "Published cost data is unavailable: the server refused its database login",
+-     "requestId": StringMatching /^[0-9a-f-]{36}$/,
+    },
+  }
+
+ ❯ refused src/server/costs/publishedCosts.db.test.ts:305:22
+    303|     const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    304|     expect(res.statusCode).toBe(503);
+    305|     expect(res.body).toEqual({ error: { code: 'unsafe_db_login', messa…
+       |                      ^
+    306|     expect(res.headers['x-request-id']).toBe((res.body as { error: { r…
+    307|     expect(JSON.stringify(res.body)).not.toMatch(/ratio_|postgres|supe…
+ ❯ src/server/costs/publishedCosts.db.test.ts:365:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D6 the reader-login safety check refuses unsafe logins (503, nothing served) > a pooled login set NOLOGIN is refused on the very next request (pooled sessions survive NOLOGIN); LOGIN again ⇒ served
+AssertionError: expected 200 to be 503 // Object.is equality
+
+- Expected
++ Received
+
+- 503
++ 200
+
+ ❯ refused src/server/costs/publishedCosts.db.test.ts:304:28
+    302|   async function refused(readerUrl: string) {
+    303|     const res = await get(seeded.a.tenantId, {}, { readerUrl });
+    304|     expect(res.statusCode).toBe(503);
+       |                            ^
+    305|     expect(res.body).toEqual({ error: { code: 'unsafe_db_login', messa…
+    306|     expect(res.headers['x-request-id']).toBe((res.body as { error: { r…
+ ❯ src/server/costs/publishedCosts.db.test.ts:386:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ ONLY) > a publish committed between the page query and the totals query cannot make them disagree
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/server/costs/publishedCosts.db.test.ts:409:27
+    407|         },
+    408|       });
+    409|       expect(republished).toBe(true);
+       |                           ^
+    410|       expect(page.data).toHaveLength(5);
+    411|       expect(page.totals).toEqual([{ billingPeriod: '2026-03-01', bill…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/12]⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ ONLY) > the read transaction runs at REPEATABLE READ, read only
+AssertionError: expected { iso: 'read committed', ro: 'on' } to deeply equal { iso: 'repeatable read', ro: 'on' }
+
+- Expected
++ Received
+
+  {
+-   "iso": "repeatable read",
++   "iso": "read committed",
+    "ro": "on",
+  }
+
+ ❯ src/server/costs/publishedCosts.db.test.ts:427:25
+    425|       await c.query('BEGIN');
+    426|       const r = await c.query(`SELECT current_setting('transaction_iso…
+    427|       expect(r.rows[0]).toEqual({ iso: 'repeatable read', ro: 'on' });
+       |                         ^
+    428|     } finally {
+    429|       await c.query('ROLLBACK');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/12]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  12 failed | 13 passed (25)
+   Start at  02:17:02
+   Duration  3.17s (tests 54%, transform 33%, import 10%, setup 3%)
+

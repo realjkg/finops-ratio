@@ -57,7 +57,20 @@ async function status(readerUrl: string): Promise<{ status: number; body: unknow
 async function expectRefused(readerUrl: string) {
   const r = await status(readerUrl);
   expect(r.status).toBe(503);
-  expect(r.body).toEqual({ error: { code: 'unsafe_db_login', message: ROUTE_MESSAGES.unsafeLogin } });
+  expect(r.body).toEqual({ error: { code: 'unsafe_db_login', message: ROUTE_MESSAGES.unsafeLogin, requestId: expect.stringMatching(/^[0-9a-f-]{36}$/) } });
+}
+
+/** The unsafe_db_login log events written while fn runs. */
+async function unsafeEvents(fn: () => Promise<void>): Promise<{ events: Array<Record<string, unknown>>; text: string }> {
+  const lines: string[] = [];
+  for (const f of ['error', 'warn'] as const) {
+    vi.mocked(console[f]).mockImplementation((line: unknown) => {
+      lines.push(String(line));
+    });
+  }
+  await fn();
+  const events = lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((e) => e.event === 'unsafe_db_login');
+  return { events, text: lines.join('\n') };
 }
 
 async function readerLogin(attrs: string[] = []): Promise<Login> {
@@ -118,6 +131,20 @@ describe('reader API refuses dangerous reader logins (serial)', () => {
       },
     ],
   ];
+
+  it('the log names a refused predefined role or an attribute by CODE only, never the role or the login', async () => {
+    const l1 = await readerLogin();
+    await db.pool.query(`GRANT pg_monitor TO ${l1.name}`);
+    const l2 = await readerLogin(['CREATEDB']);
+    const { events, text } = await unsafeEvents(async () => {
+      await expectRefused(l1.url);
+      await expectRefused(l2.url);
+    });
+    expect(events.map((e) => e.reasons)).toEqual([['REFUSED_PREDEFINED_ROLE'], ['UNSAFE_ATTRIBUTE']]);
+    expect(text).not.toMatch(/pg_monitor|CREATEDB|ratio_reader/);
+    expect(text).not.toContain(l1.name);
+    expect(text).not.toContain(l2.name);
+  });
 
   it("iterates over Slice 0's list (non-empty)", () => {
     expect(Object.keys(REFUSED_PREDEFINED_ROLES).length).toBeGreaterThanOrEqual(11);

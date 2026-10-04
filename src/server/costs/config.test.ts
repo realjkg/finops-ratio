@@ -59,6 +59,19 @@ describe('C2 startup check (instrumentation register)', () => {
     expect(err).toHaveBeenCalledTimes(1);
   });
 
+  it('the startup log never includes the invalid tenant value (nor the reader URL), whatever its shape', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const values = ['tnt_LEAKCANARY_1', `LEAKCANARY-${'f'.repeat(8)}`, '11111111-1111-4111-8111-LEAKCANARY99', 'LEAKCANARY with spaces', '"LEAKCANARY"', `${TENANT}LEAKCANARY`];
+    for (const RATIO_API_TENANT_ID of values) {
+      expect(checkPublishedCostsStartup({ RATIO_API_TENANT_ID, RATIO_READER_DATABASE_URL: 'postgres://reader:URLCANARY@127.0.0.1:1/ratio' })).toBe(false);
+    }
+    expect(err).toHaveBeenCalledTimes(values.length);
+    const logged = err.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).not.toContain('LEAKCANARY');
+    expect(logged).not.toContain('URLCANARY');
+    expect(logged).toContain('RATIO_API_TENANT_ID');
+  });
+
   it('valid configuration ⇒ no error; feature not configured at all ⇒ silent', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(checkPublishedCostsStartup({ RATIO_API_TENANT_ID: TENANT, RATIO_READER_DATABASE_URL: URL_ })).toBe(true);

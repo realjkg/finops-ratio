@@ -3,10 +3,11 @@
 // bootstrap plan (no dangerous attribute or membership), the compose file
 // (loopback-only ports, digest-pinned images, no trust auth), .env.example
 // (names only) and the control-total comparison used by `local:test`.
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
+import os from 'node:os';
 import {
   LOCAL_NAMES,
   LOCAL_STATE_DIR,
@@ -14,8 +15,14 @@ import {
   connectionUrl,
   generateLocalSecrets,
   localSettings,
+  localStatePaths,
+  localTestSettings,
+  ownsListeningSocket,
   parseEnvFile,
+  preflightProblems,
+  removeProjectState,
   serializeEnvFile,
+  writeEnvFileSecure,
 } from './lib.mjs';
 import { bootstrapPlan } from './bootstrap.mjs';
 
@@ -250,5 +257,126 @@ describe('L8 control totals comparison (local:test acceptance)', () => {
   it('the committed fixture control totals are the ones the CI step asserts', () => {
     const committed = JSON.parse(read('fixtures/focus-1.0-synthetic/control-totals.json')).base;
     expect(committed).toEqual(control);
+  });
+});
+
+// --- challenger Lows (PR #59): per-project state, secure env file, isolated
+// local:test, and a readiness probe that checks the server is the one we started.
+const tmpDirs = [];
+const tmp = () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-local-test-'));
+  tmpDirs.push(d);
+  return d;
+};
+afterAll(() => {
+  for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+});
+
+describe('L9 state is per compose project', () => {
+  it('lives under .ratio-local/<project>/', () => {
+    expect(localStatePaths('ratio-local')).toEqual({ dir: '.ratio-local/ratio-local', envFile: '.ratio-local/ratio-local/env' });
+    expect(localStatePaths('ratio-local-test')).toEqual({ dir: '.ratio-local/ratio-local-test', envFile: '.ratio-local/ratio-local-test/env' });
+    for (const bad of ['', '../x', 'a/b', 'Ratio', '.']) expect(() => localStatePaths(bad), bad).toThrow();
+  });
+
+  it('removing one project’s state leaves another project’s state alone; the parent goes when empty', () => {
+    const root = tmp();
+    for (const p of ['ratio-local', 'ratio-local-test']) {
+      fs.mkdirSync(path.join(root, '.ratio-local', p), { recursive: true });
+      fs.writeFileSync(path.join(root, '.ratio-local', p, 'env'), 'X=1\n');
+    }
+    removeProjectState(root, 'ratio-local-test');
+    expect(fs.existsSync(path.join(root, '.ratio-local', 'ratio-local-test'))).toBe(false);
+    expect(fs.readFileSync(path.join(root, '.ratio-local', 'ratio-local', 'env'), 'utf8')).toBe('X=1\n');
+    removeProjectState(root, 'ratio-local');
+    expect(fs.existsSync(path.join(root, '.ratio-local'))).toBe(false);
+    expect(() => removeProjectState(root, '../evil')).toThrow();
+  });
+});
+
+describe('L10 the env file is written owner-only (0600, directory 0700)', () => {
+  it('creates and also tightens an existing file', () => {
+    const root = tmp();
+    const file = path.join(root, '.ratio-local', 'p1', 'env');
+    writeEnvFileSecure(file, { A: 'one' });
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+    expect(fs.readFileSync(file, 'utf8')).toBe('A=one\n');
+    fs.chmodSync(file, 0o644);
+    writeEnvFileSecure(file, { A: 'two' });
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(file, 'utf8')).toBe('A=two\n');
+  });
+});
+
+describe('L11 local:test is isolated from a developer stack', () => {
+  it('has its own project and ports, and never reads the developer settings', () => {
+    expect(localTestSettings({})).toEqual({ project: 'ratio-local-test', pgPort: 54339, s3Port: 18353, appPort: 3110 });
+    // A developer's RATIO_LOCAL_* do not redirect local:test onto their stack.
+    expect(localTestSettings({ RATIO_LOCAL_PROJECT: 'mine', RATIO_LOCAL_PG_PORT: '54320' })).toEqual({ project: 'ratio-local-test', pgPort: 54339, s3Port: 18353, appPort: 3110 });
+    expect(localTestSettings({ RATIO_LOCAL_TEST_PROJECT: 'ci-e2e', RATIO_LOCAL_TEST_PG_PORT: '55710', RATIO_LOCAL_TEST_S3_PORT: '18710', RATIO_LOCAL_TEST_APP_PORT: '3710' })).toEqual({
+      project: 'ci-e2e',
+      pgPort: 55710,
+      s3Port: 18710,
+      appPort: 3710,
+    });
+  });
+
+  it('refuses to share a project name or a port with the developer stack', () => {
+    expect(() => localTestSettings({ RATIO_LOCAL_TEST_PROJECT: 'ratio-local' })).toThrow();
+    expect(() => localTestSettings({ RATIO_LOCAL_PROJECT: 'mine', RATIO_LOCAL_TEST_PROJECT: 'mine' })).toThrow();
+    expect(() => localTestSettings({ RATIO_LOCAL_TEST_PG_PORT: '54329' })).toThrow();
+    expect(() => localTestSettings({ RATIO_LOCAL_APP_PORT: '3999', RATIO_LOCAL_TEST_APP_PORT: '3999' })).toThrow();
+  });
+
+  it('preflight refuses existing state, existing containers or a busy port', () => {
+    expect(preflightProblems({ stateExists: false, containers: 0, busyPorts: [] })).toEqual([]);
+    expect(preflightProblems({ stateExists: true, containers: 0, busyPorts: [] })).toHaveLength(1);
+    expect(preflightProblems({ stateExists: false, containers: 2, busyPorts: [] })).toHaveLength(1);
+    expect(preflightProblems({ stateExists: false, containers: 0, busyPorts: [3110] }).join(' ')).toContain('3110');
+  });
+});
+
+describe('L12 readiness: the responding server must be the one local:test started', () => {
+  /** A synthetic /proc: net/tcp(6) listeners, fd symlinks per pid, children lists. */
+  function proc({ tcp = [], tcp6 = [], fds = {}, children = {} }) {
+    const root = tmp();
+    const head = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n';
+    const line = (i, addr, st, inode) => `   ${i}: ${addr} 00000000:0000 ${st} 00000000:00000000 00:00000000 00000000     0        0 ${inode} 1 0000000000000000 100 0 0 10 0\n`;
+    fs.mkdirSync(path.join(root, 'net'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'net', 'tcp'), head + tcp.map(([a, st, ino], i) => line(i, a, st, ino)).join(''));
+    if (tcp6.length) fs.writeFileSync(path.join(root, 'net', 'tcp6'), head + tcp6.map(([a, st, ino], i) => line(i, a, st, ino)).join(''));
+    for (const [pid, inodes] of Object.entries(fds)) {
+      fs.mkdirSync(path.join(root, pid, 'fd'), { recursive: true });
+      inodes.forEach((ino, i) => fs.symlinkSync(`socket:[${ino}]`, path.join(root, pid, 'fd', String(i + 3))));
+      fs.mkdirSync(path.join(root, pid, 'task', pid), { recursive: true });
+      fs.writeFileSync(path.join(root, pid, 'task', pid, 'children'), (children[pid] ?? []).join(' '));
+    }
+    return root;
+  }
+  const P3110 = '0100007F:0C26'; // 127.0.0.1:3110
+
+  it('true when our pid holds the listening socket', () => {
+    const root = proc({ tcp: [[P3110, '0A', 777]], fds: { 100: [777] } });
+    expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root })).toBe(true);
+  });
+
+  it('true when a descendant of our pid holds it; IPv6 listeners count', () => {
+    const root = proc({ tcp6: [['00000000000000000000000000000000:0C26', '0A', 888]], fds: { 100: [5], 101: [888] }, children: { 100: [101] } });
+    expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root })).toBe(true);
+  });
+
+  it('false when another process listens on the port (a stale or foreign server answered)', () => {
+    const root = proc({ tcp: [[P3110, '0A', 999]], fds: { 100: [777], 200: [999] } });
+    expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root })).toBe(false);
+  });
+
+  it('false when the socket is not LISTENING or the port differs', () => {
+    expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: proc({ tcp: [[P3110, '01', 777]], fds: { 100: [777] } }) })).toBe(false);
+    expect(ownsListeningSocket({ pid: 100, port: 3111, procRoot: proc({ tcp: [[P3110, '0A', 777]], fds: { 100: [777] } }) })).toBe(false);
+  });
+
+  it('null (unknown) when /proc is not available, so the caller can fall back', () => {
+    expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: path.join(tmp(), 'missing') })).toBeNull();
   });
 });
