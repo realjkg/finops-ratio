@@ -111,8 +111,7 @@ host TZ. On a daylight-saving day it changes:
   bounds parse to the same instant.
 
 I reproduced this with plain `node`. It is not a budget-calendar bug and
-this PR does not change it. It is tracked in a follow-up issue (number
-pending from the coordinator).
+this PR does not change it. It is tracked in follow-up issue #64.
 
 **3. Local display formatting, deliberate, not calendar logic.** These render
 an instant for the person looking at the screen, in their own zone. They
