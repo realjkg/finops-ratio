@@ -41,7 +41,8 @@ is a follow-up PR on `design/slice-3-5-followups`, branched from
 | 26 | `546e00b` | Copilot's review 5408165158 of 45b0088 (1 Medium, 1 Low) and the challenger's three Low items on revision 25 (APPROVED, 0 High, 0 Medium), §3aa: bounded shares (cold-start, committed, untagged), defined APE and interval width; the retention threat-model row and rollback text brought up to date; `backtest --pin` in the success transaction; `historyDays` from leaves' first usage day; "fresh replay". |
 | 27 | `28f8970` (PR #70, merged as `f35c383`) | Copilot's review 5408199807 of 546e00b (2 High, 1 Medium), after the challenger APPROVED revision 26 without findings, §3ab: retention never removes anything a running run uses (shared/exclusive retention lock); every multi-transaction run captures its input runs once and reads them by id; billed month-end `B` removed from the contract and recorded as a gap; a share-test wording fix. |
 | 28 (follow-up to merged #70) | `0926b19` (PR #71) | Copilot's review 5408232490 of 28f8970 (1 High, 1 Low) and the challenger's four Low items on revision 27 (APPROVED, 0 High, 0 Medium), §3ac: the sizing scripts' commitment draw made once per account and the scripts re-run (37,033 leaves; false-positive total 0.102, 0.132 conservative; peak 5.242 GB unchanged); the last billed-`B` line removed; the retention functions' isolation, lock order and transaction placement, and the crashed-run growth, stated; the input high-water mark checked on INSERT. |
-| 29 (follow-up to merged #70) | this revision | Copilot's review 5408332571 of 0926b19 (3 High, 1 Medium, all on revision 28's crashed-run bound) and the challenger's one Low on revision 28 (APPROVED, 0 High, 0 Medium), §3ad: every start runs a retention cleanup pass after its acquisition commits, so crashed retries cannot accumulate; the bound restated (one left-over run per kind, ≈ 0.1 GB of state plus the superseded batches its mark pinned); `assertLease` on reading transactions too; the 4-3 test covers consecutive crashed replacements. |
+| 29 (follow-up to merged #70) | `7e49bfb` | Copilot's review 5408332571 of 0926b19 (3 High, 1 Medium, all on revision 28's crashed-run bound) and the challenger's one Low on revision 28 (APPROVED, 0 High, 0 Medium), §3ad: every start runs a retention cleanup pass after its acquisition commits, so crashed retries cannot accumulate; the bound restated (one left-over run per kind, ≈ 0.1 GB of state plus the superseded batches its mark pinned); `assertLease` on reading transactions too; the 4-3 test covers consecutive crashed replacements. |
+| 30 (follow-up to merged #70) | this revision | Copilot's review 5408381491 of 7e49bfb (1 Medium) and the challenger's three Low items on revision 29 (APPROVED, 0 High, 0 Medium), §3ae: every retention pass also deletes eligible backtest export files after its commit; read-only run transactions take the lease row `FOR SHARE`, and the TTL must exceed the longest transaction; pinned failed or abandoned runs are kept; the takeover's wait is bounded by a `lock_timeout`. |
 
 ## 2. Governance wording: reverted
 
@@ -704,6 +705,21 @@ answered with it.
 | **Challenger L1** on 0926b19: superseded batches | **Added to the bound.** The left-over run's size is ≈ 0.1 GB of state **plus the rollup rows of the superseded batches its captured mark pinned**: a restated period of `fleet15k`'s size is ≈ 1.1 M `cost_daily` rows × 180 B ≈ 0.2 GB, each restatement under the mark separately. The takeover's cleanup pass releases all of it. `fleet15k` has no restatements and each run is a fresh stack, so its peak is unaffected | App. D.1; DESIGN §6.1 |
 | Scripts, figures | No script changed; all 13 SHA-256s as in revision 28; no disk or budget figure changes | App. B |
 
+## 3ae. Revision 30: Copilot's review 5408381491 of 7e49bfb and the challenger's Lows on revision 29
+
+The challenger APPROVED revision 29 (0 High, 0 Medium, 3 Low). Copilot
+raised 1 Medium. All four are about the crashed-run cleanup of revision 29
+and were checked against 7e49bfb. All are valid.
+
+| Item | Change | Where |
+|---|---|---|
+| **BB1 r4179466023** (Medium) export files outside the bound | **Fixed by deleting export files in every pass.** A crashed or fenced backtest may already have written ≈ 0.2–0.25 GB of gzip exports, and only the backtest command deleted export files. A rollup, forecast or detect start's pass therefore reclaimed the rows but not the files. Now every pass that calls the forecast retention function deletes the files too: each run's post-success pass, of any kind, and every start's cleanup pass. **Eligibility** is the same as for the rows: the function also returns the ids of every terminal backtest run that is not kept, not pinned and not named by a running run. **Order:** files are deleted only after the function's transaction commits. A `deleted.json` with each file's name, size and SHA-256 stays in the run's directory. **Idempotent:** every eligible run is listed, not only those removed in this call, so an interrupted deletion finishes at the next pass. **Concurrent backtest:** a running run's id is never returned, and each run writes only under `backtest/<run_id>/`. A backtest moves each finished file into place only inside a transaction that holds its lease (`FOR SHARE`), so the takeover waits for the move, and a fenced writer's next move fails with `LEASE_LOST`. A staging file left by a dying writer is removed by the next pass. **Pins:** a later pin takes the shared retention lock and is refused with `RUN_NOT_KEPT` once the output is gone, so a pin cannot race the deletion. The bound now names the files. New 4-3 test: a crashed backtest's exports are deleted by the next detect start's pass, and pinned and running backtests' files are untouched. New mutants: export deletion only in the backtest command; deletion before the commit | App. D.1 ("Export files", "Crashed runs", pins row); DESIGN §3.8, §6.1, §7 (4-3), §10 |
+| **BB2** challenger L1: read-only transactions | **Changed to `FOR SHARE`.** A transaction that only reads takes the run row `FOR SHARE`, and one that writes takes it `FOR UPDATE`. Concurrent readers of one run, such as `full`'s 4 parallel workers, then do not wait for each other; the challenger's PG16 probe measured 1.7 s with `FOR UPDATE` and 0 s with `FOR SHARE`. The worker on `main` already uses `assertLease(…, 'SHARE')`. The takeover still waits for both kinds. **Stated:** the lease TTL must exceed the run's longest single transaction, since either lock blocks the run's own heartbeat. New 4-3 test (two readers share, and the takeover waits for both) and mutant (read-only `FOR UPDATE`) | App. D.1 ("Writing", "Acquiring the lease"); DESIGN §6.1, §7 (4-3) |
+| **BB3** challenger L2: pins | **Fixed.** Failed and abandoned runs are removable "unless pinned or named by a running run", as revision 25's pins require. New 4-3 test and mutant: a pinned failed run keeps its output | App. D.1; DESIGN §6.1, §7 (4-3) |
+| **BB4** challenger L3: takeover stall | **A `lock_timeout` on the takeover.** The `abandoned` update runs under `SET LOCAL lock_timeout` (5 s by default). On timeout (55P03) the acquisition transaction rolls back, releasing the per-kind lock and the shared retention lock and inserting nothing, and the start fails with a retryable `ALREADY_RUNNING`. Without it, a long stale transaction stalled every retention pass in the tenant. New 4-3 test: a retention pass started during the wait completes. New mutant: no `lock_timeout` | App. D.1 ("Acquiring the lease"); DESIGN §6.1, §7 (4-3) |
+| Sweep | DESIGN §3.8 (evidence directory and later pins), §6.1 (removal list, backtest output, crashed runs), §7 (4-3 test and mutants; revision 25's backtest test now deletes the files in the next pass) and §10 (rollback) all say the same; App. D's `analytics_run_pins` row states the pin rule | DESIGN; App. D |
+| Scripts, figures | No script changed; all 13 SHA-256s as in revision 28; no disk or budget figure changes | App. B |
+
 ## 4. Measurements used by the design
 
 | What | Value | How |
@@ -751,14 +767,15 @@ Appendix B (B.4, B.5.6–B.5.14).
 
 ## 5. Governance classification
 
-**Revisions 28 and 29, this follow-up PR.** `origin/main` is now
+**Revisions 28–30, this follow-up PR.** `origin/main` is now
 `f35c383`, which contains PR #70, so `node scripts/governance/classify-risk.mjs --git
-origin/main...HEAD` reads only this PR's diff. At revision 28 and again at
-revision 29 (the commit that changes this line) it gives:
+origin/main...HEAD` reads only this PR's diff. At revisions 28, 29 and
+30 (the commit that changes this line) it gives:
 - `"risk": "restricted"`, classes `retention` and `secrets`;
 - `retention.mention` on `APPENDIX_D_SCHEMA_SKETCH.md`, `DESIGN.md` and
   this file: the added lines say how the retention functions run (AA3–AA5)
-  and, in revision 29, the start's cleanup pass;
+  and, in revisions 29 and 30, the start's cleanup pass and the export
+  files;
 - `secrets.password-assignment` and `retention.delete-from` on this file
   only, because this paragraph quotes the two lines that matched those
   rules in PR #70: the `POSTGRES_PASSWORD=<throwaway>` run command
