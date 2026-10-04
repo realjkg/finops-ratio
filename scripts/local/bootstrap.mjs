@@ -61,6 +61,46 @@ export function bootstrapPlan(names) {
   return plan;
 }
 
+/**
+ * The exact PG16 shape of every bootstrap membership (login → its one ratio
+ * role), as `CREATE ROLE … IN ROLE` creates it on PG16:
+ *   - admin_option FALSE: the login cannot grant its ratio role to anyone;
+ *   - inherit_option TRUE: the login holds the role's privileges directly
+ *     (the reader reads the view, the worker writes, the migrator owns);
+ *   - set_option TRUE: PG16's default for IN ROLE; Slice 0's catalog check
+ *     reviews it with the rest of the closure.
+ */
+export const EXPECTED_MEMBERSHIP_OPTIONS = Object.freeze({ admin_option: false, inherit_option: true, set_option: true });
+
+/**
+ * Problems with the membership rows of the ratio roles and the logins: exactly
+ * one grant per expected login → ratio-role edge, each with exactly
+ * EXPECTED_MEMBERSHIP_OPTIONS (a missing option, e.g. NULL, fails closed), and
+ * no other edge.
+ */
+export function membershipProblems(rows, names) {
+  const problems = [];
+  const expected = new Map(loginMemberships(names).map(([l, p]) => [`${l}->${p}`, { member: l, parent: p }]));
+  const seen = new Map();
+  for (const r of rows) {
+    const key = `${r.member}->${r.parent}`;
+    if (!expected.has(key)) {
+      problems.push(`membership ${key} is not expected`);
+      continue;
+    }
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+    for (const [option, want] of Object.entries(EXPECTED_MEMBERSHIP_OPTIONS)) {
+      if (r[option] !== want) problems.push(`membership ${key}: ${option} is ${JSON.stringify(r[option] ?? null)}, expected ${want}`);
+    }
+  }
+  for (const key of expected.keys()) {
+    const n = seen.get(key) ?? 0;
+    if (n === 0) problems.push(`membership ${key} is missing`);
+    if (n > 1) problems.push(`membership ${key} has more than one grant (${n}, e.g. from another grantor)`);
+  }
+  return problems;
+}
+
 /** Runs the plan on a superuser client, then sets the login passwords (server-side quoting) and verifies. */
 export async function runBootstrap(client, names, passwords) {
   for (const sql of bootstrapPlan(names)) {
@@ -94,16 +134,15 @@ export async function verifyBootstrap(client, names) {
   };
   for (const r of RATIO_ROLES) expectRole(r, false);
   for (const [login] of loginMemberships(names)) expectRole(login, true);
+  // PG16: one row per grant, with its ADMIN / INHERIT / SET options (Copilot 4176494789).
   const edges = await client.query(
-    `SELECT m.rolname AS member, g.rolname AS parent
+    `SELECT m.rolname AS member, g.rolname AS parent, a.admin_option, a.inherit_option, a.set_option
        FROM pg_catalog.pg_auth_members a
        JOIN pg_catalog.pg_roles m ON m.oid = a.member JOIN pg_catalog.pg_roles g ON g.oid = a.roleid
       WHERE m.rolname = ANY ($1::text[]) ORDER BY 1, 2`,
     [[...RATIO_ROLES, ...loginMemberships(names).map(([l]) => l)]],
   );
-  const actual = edges.rows.map((e) => `${e.member}->${e.parent}`).sort();
-  const expected = loginMemberships(names).map(([l, p]) => `${l}->${p}`).sort();
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) problems.push(`memberships are ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
+  problems.push(...membershipProblems(edges.rows, names));
   const db = await client.query(
     `SELECT pg_catalog.pg_get_userbyid(datdba) AS owner FROM pg_catalog.pg_database WHERE datname = $1`,
     [ident(names.database)],
