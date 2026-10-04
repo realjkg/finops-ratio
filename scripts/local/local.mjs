@@ -150,8 +150,8 @@ const interrupt = new AbortController();
 
 // Every command is bound to the interrupt (killed when it fires, never started
 // after it), except `down`, which is the cleanup itself (signal: null).
-function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs, signal = interrupt.signal } = {}) {
-  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs, signal: signal ?? undefined });
+function run(cmd, args, { env = {}, capture = false, captureErr = false, allowFail = false, timeoutMs, signal = interrupt.signal } = {}) {
+  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, captureErr, allowFail, timeoutMs, signal: signal ?? undefined });
 }
 
 function composeEnv(settings, secrets) {
