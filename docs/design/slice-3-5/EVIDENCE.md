@@ -19,7 +19,7 @@ ordinary commits and plain pushes (never a force-push).
 | 7 | `380e9a0`, `801019a` | Revision 6 approved by the challenger (0 High, 0 Medium). D-24 decided by the orchestrator (option a): hurdle statistic with a clustering gate for intermittent series above 50 % zeros; the challenger's Low items L1–L4 answered (§3d); `budget5.py` (B.5.10). |
 | 8 | `04e6cf8`, `dbbd552` | Revision 7 approved by the challenger. The remaining Low, dormant series that reactivate, folded in by extending D4 (§3e); `reactivation.py` (B.5.11). |
 | 9 | `bb4379c`, `d70f074` | The challenger's REQUEST CHANGES on revision 8 (1 Medium): the reactivation history condition looked at the wrong days. History moved to the pre-dormancy period and a size override added, both decided by the orchestrator (§3f); `reactivation.py` updated (B.5.11). |
-| 10 | this revision, then a merge of `origin/main` | Revision 9 approved by the challenger. The three Low items (§3g): reactivation false positives under day clustering simulated on the chain (the independent-history approximation underestimated); the prior mean of the size override looks back up to 112 days; the D4 text made consistent. |
+| 10 | `9f1febb`; merge of `origin/main` `bd440b5`; this commit | Revision 9 approved by the challenger. The three Low items (§3g): reactivation false positives under day clustering simulated on the chain (the independent-history approximation underestimated); the prior mean of the size override looks back up to 112 days; the D4 text made consistent. `origin/main` merged (#65, #67, #68; no conflicts, no file under `docs/design/slice-3-5/` touched by main); DESIGN §0 and §7 note that PR 4-0 and #62 have landed. |
 
 ## 2. Governance wording: reverted
 
@@ -268,7 +268,8 @@ Appendix B (B.4, B.5.6–B.5.11).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at `bb4379c` (revision 9; the same reasons as at `04e6cf8`, revision 8,
+at `bd440b5` (revision 10 after merging `origin/main`; the same reasons as at
+`9f1febb` before the merge, `bb4379c`, revision 9, `04e6cf8`, revision 8,
 `380e9a0`, revision 7,
 `66a1fa2`, revision 6, `fc7ee66`, revision 5, and `faeabb4`, revision 4):
 

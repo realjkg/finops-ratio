@@ -161,7 +161,12 @@ synthetic ids), and records the #62 dependency. D-24 (intermittent series
 with more than 50 % zero days: a hurdle statistic with a clustering gate)
 was decided by the orchestrator in revision 7. The `full` profile needs
 owner action OA-1. The plan starts with the `daysInMonthOf` bug fix, and
-Slice 3 starts only after #62 merges (§7).
+Slice 3 starts only after #62 merges (§7). **Status when `origin/main` was
+merged into this branch (revision 10):** the bug fix has landed as PR 4-0
+(#65), and #62 has landed through #67 and #68. Its `SYNTHETIC_PROVIDERS`
+set is exactly `{SyntheticCloud, SyntheticAWS, SyntheticAzure,
+SyntheticGCP}`, behind `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`, as D-21
+assumes. Slice 3 can therefore start.
 
 ## 1. Gap analysis
 
@@ -1993,7 +1998,8 @@ each PR records them in its evidence.
 **Order (decided):** PR **4-0 comes first**, as an independent bug fix.
 **Slice 3 starts only after #62 merges** (its `SYNTHETIC_PROVIDERS` set
 and `RATIO_ALLOW_SYNTHETIC_PROVIDERS` opt-in are what the generator's
-output relies on; D-21). PR ids keep their slice numbers.
+output relies on; D-21). PR ids keep their slice numbers. **Status at
+revision 10:** 4-0 landed as #65; #62 landed through #67 and #68 (§0).
 
 | Order | PR | Scope | Tests-first acceptance criteria | Mutation targets |
 |---|---|---|---|---|
