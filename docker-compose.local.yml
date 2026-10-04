@@ -1,6 +1,8 @@
 # docker-compose.local.yml — the LOCAL, EPHEMERAL Ratio stack (Slice 2).
-# NOT a production artefact: production hosting is an owner decision
-# (docs/evidence/slice-2/DEPLOYMENT_BRIEF.md). Drive it with the npm scripts:
+# NOT a production artefact: the production hosting plan is in the Decision
+# log of docs/evidence/slice-2/DEPLOYMENT_BRIEF.md (provisioning and spend are
+# owner actions). Drive it with the npm scripts (they always pass -p <project>;
+# `name:` below is only the default):
 #   npm run local:up | local:migrate | local:seed | local:sync | local:down [-- -v] | local:test
 # They generate the secrets below into .ratio-local/<project>/env (gitignored) and pass
 # them in; running `docker compose` by hand without them fails fast.

@@ -137,7 +137,8 @@ jobs:
 
       # Slice 2: the local stack end to end under a real `next start`
       # (docker compose, PG16 + SeaweedFS pinned by digest on 127.0.0.1:54339 /
-      # 18353, its own project ratio-local-test, separate from the job's services): up -> migrate -> seed -> sync
+      # 18353, next start on 3110; its own project ratio-local-test, separate from
+      # the job's services; scripts/local/lib.mjs localTestSettings): up -> migrate -> seed -> sync
       # -> GET /api/v1/costs/published. Reader totals must equal the fixture's
       # control totals exactly. Always torn down with `down -v`.
       - name: Local stack end to end (local:test)

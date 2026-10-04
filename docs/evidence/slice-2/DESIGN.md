@@ -7,9 +7,10 @@ Slice 1 merged). The slice has three concerns:
    migrate → seed → sync);
 2. a **read API**, `GET /api/v1/costs/published`, that reads the published-facts
    view as a `ratio_reader` member;
-3. a **deployment decision brief**. It first recorded the decisions as open.
-   The owner then delegated D-01..D-10 to the orchestrator, and the brief now
-   records them as decided (§8). The **production go-live sign-off is not
+3. a **deployment decision brief**. Its first draft listed the decisions as
+   open; the owner then delegated D-01..D-10 to the orchestrator, and the brief
+   records them as decided (its Decision log; §1 keeps the option analysis
+   as historical rationale). The **production go-live sign-off is not
    delegated**: it stays a non-delegable owner gate, as do hosting spend, the
    GitHub App install and (optionally) connecting real billing data.
 
@@ -27,8 +28,8 @@ changes; in particular `withTenantTransaction` (`tenant.ts`) is NOT changed
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.local.yml` | Compose project `ratio-local`: `postgres` (PG16, pinned by digest) and `s3` (SeaweedFS, the digest CI already uses). Both are published on 127.0.0.1 only. Optional profiles: `app` (Next.js) and `worker` (a one-shot `sync`, `restart: "no"`). Named volumes are removed by `local:down -v`. |
-| `scripts/local/local.mjs` | Subcommands `up`, `migrate`, `seed`, `sync`, `down [-v]` and `test`. Every one is idempotent. State (generated local secrets, the tenant id) lives in `.ratio-local/<project>/env` (gitignored; directory 0700, file 0600). `down -v` deletes only its own project's directory. `test` uses its own project and ports (§8). |
+| `docker-compose.local.yml` | The file's default project name is `ratio-local`, but `local.mjs` always passes `-p <project>`: `RATIO_LOCAL_PROJECT` (default `ratio-local`), or for `local:test` `RATIO_LOCAL_TEST_PROJECT` (default `ratio-local-test`). Services: `postgres` (PG16, pinned by digest) and `s3` (SeaweedFS, the digest CI already uses). Both are published on 127.0.0.1 only. Optional profiles: `app` (Next.js) and `worker` (a one-shot `sync`, `restart: "no"`). Named volumes are removed by `local:down -v`. |
+| `scripts/local/local.mjs` | Subcommands `up`, `migrate`, `seed`, `sync`, `down [-v]` and `test`. Every one is idempotent. State (generated local secrets, the tenant id) lives in `.ratio-local/<project>/env` (gitignored; directory 0700, file 0600). `down -v` deletes only its own project's directory. `test` uses its own project and ports (§3.2 settings table, §8). Every child process, network call and wait has a hard deadline (§11; inventory in EVIDENCE §13). |
 | `scripts/local/bootstrap.mjs` | The documented role bootstrap. It runs as the local superuser and creates the three NOLOGIN ratio roles, the migrator, worker and reader logins, and the database. Every statement is idempotent. |
 | `.env.example` | Variable names only, for the new server-side settings. |
 | `src/server/costs/query.ts` | Pure: strict query-string validation and an opaque keyset cursor. No `pg`. |
@@ -273,7 +274,9 @@ local:seed     buckets ratio-local-source / ratio-local-evidence (idempotent)
                → PUT fixtures/focus-1.0-synthetic/base/** into the source bucket (same keys, same bytes)
                → provision tenant + source as the migrator (SKILL §2 SQL, ON CONFLICT DO NOTHING)
 local:sync     worker sync --tenant <local tenant> --source local-focus (as worker; S3 env → local SeaweedFS)
-local:test     requires an existing `next build`. It runs:
+local:test     requires an existing `next build`. Its OWN stack (localTestSettings:
+               project ratio-local-test on 127.0.0.1:54339 / 18353 / 3110, RATIO_LOCAL_TEST_*),
+               after a preflight that refuses existing state, containers or busy ports. It runs:
                up → migrate → seed → sync (both periods published)
                → sync again (both skipped_unchanged)
                → next start (reader URL, token, tenant binding)
@@ -282,14 +285,23 @@ local:test     requires an existing `next build`. It runs:
                  - totals == control-totals.json base (55 / 30.8272954899; 40 / 21.0978157665), as exact strings;
                  - row count over all pages == 95, no duplicates;
                  - no auth ⇒ 401;
-               → down -v (always)
-local:down     docker compose down [-v]; with -v also removes .ratio-local/
+               → stop next start, then down -v (always; every step has a hard deadline, §11)
+               → pass only if the body passed, next start was stopped (stopped/killed) and down -v succeeded
+local:down     docker compose down [-v]; with -v also removes .ratio-local/<project>/
+               (and .ratio-local/ itself once it is empty)
 ```
 
-Ports are `RATIO_LOCAL_PG_PORT` (default 54329), `RATIO_LOCAL_S3_PORT`
-(default 18343) and `RATIO_LOCAL_APP_PORT` (default 3100). All bind
-127.0.0.1. The project name is `RATIO_LOCAL_PROJECT` (default `ratio-local`).
-`local:test` asserts the server is version 16 (`server_version_num` 16xxxx).
+Settings (all ports bind 127.0.0.1 only; `localSettings` / `localTestSettings`
+in `scripts/local/lib.mjs`):
+
+| Used by | Project | Postgres | S3 | App |
+|---|---|---|---|---|
+| `local:up`, `local:migrate`, `local:seed`, `local:sync`, `local:down` (developer stack) | `RATIO_LOCAL_PROJECT`, default `ratio-local` | `RATIO_LOCAL_PG_PORT`, default 54329 | `RATIO_LOCAL_S3_PORT`, default 18343 | `RATIO_LOCAL_APP_PORT`, default 3100 |
+| `local:test` (and the CI step) | `RATIO_LOCAL_TEST_PROJECT`, default `ratio-local-test` | `RATIO_LOCAL_TEST_PG_PORT`, default 54339 | `RATIO_LOCAL_TEST_S3_PORT`, default 18353 | `RATIO_LOCAL_TEST_APP_PORT`, default 3110 |
+
+`local:test` refuses a project name or port shared with the developer
+settings. `local:up` (and so `local:test`) asserts the server is version 16
+(`server_version_num` 16xxxx).
 
 ### 3.3 CI
 
@@ -298,8 +310,11 @@ added, the workflow stays minimal, and the change is reviewed as restricted:
 1. `npm run check:bundle`.
 2. `npm run local:test`.
 
-The stack uses its own ports (54329/18343), so it does not collide with the
-job's service Postgres (5432) or the test SeaweedFS (8333). Docker Compose v2
+The CI step runs `local:test`, so it uses `localTestSettings`' defaults:
+project `ratio-local-test` on 127.0.0.1:54339 (Postgres), 18353 (S3) and 3110
+(app). It therefore collides neither with the job's service Postgres (5432)
+and test SeaweedFS (8333), nor with a developer stack's defaults
+(54329/18343/3100). Docker Compose v2
 is preinstalled on `ubuntu-latest`. No PG client tools are needed on the
 host: the scripts use `pg`, and the server is the pinned PG16 image.
 
@@ -554,3 +569,96 @@ in order:
 - The brief's opening states the governance state in three lines: D-01..D-10
   decided under delegation; production go-live a non-delegable owner gate;
   the acceptance run on public sample data in a follow-up PR.
+
+## 11. Copilot review of 551c16c (3 Medium, 2 Low; local, not pushed)
+
+**Medium (4176117539, 4176117553): every wait has a hard deadline.** These
+are closed as a class, not line by line.
+- `withDeadline(fn, ms, what)` (lib.mjs) runs `fn(signal)`. At `ms` it aborts
+  the signal, so fetch, the S3 SDK and our pg wrapper cancel their I/O. It
+  also rejects, even when `fn` ignores the signal.
+- `waitUntil` replaces local.mjs's `waitFor`, which checked its deadline only
+  after the probe resolved, so a stalled endpoint hung `local:up`.
+  - It is used for the postgres, s3 and bucket warm-up waits.
+  - Each attempt is bounded by `attemptTimeoutMs` AND by what is left of the
+    overall deadline.
+  - The overall deadline is checked before each attempt and caps each sleep.
+- `waitForOwnServer` (next start readiness) has the same structure.
+- `fetchJson` makes the API reads (anonymous and paginated).
+  - Its 30 s limit is longer than the route's 10 s `statement_timeout`.
+  - The limit covers headers and body: a stalled body is a timeout, not the
+    old silently-null body.
+- `runProcess` refuses to run without a deadline, so every docker, npm and
+  worker command carries one.
+- The pg sessions have a hard limit at every stage:
+  - connect timeout;
+  - `query_timeout` (client side);
+  - `statement_timeout` (server side);
+  - a bounded `end()`;
+  - an overall session cap, after which the socket is destroyed.
+- Every S3 `send` carries an `abortSignal`, and the client has handler
+  timeouts too.
+- `portInUse` has a hard timer: an attempt that has not settled counts as
+  busy, failing closed.
+- The synchronous `/proc` walk is bounded by work (`maxProcesses`): beyond
+  that limit it refuses.
+- EVIDENCE §13 lists every wait with its bound.
+
+**Medium (4176117561), plus challenger Lows 1 and 2: pass or fail is decided
+in one place.**
+- `runLocalTest` runs the body, then always the bounded cleanup.
+- The pure `finalizeLocalTestSummary` then decides. A run passes only if all
+  three hold:
+  - the body completed;
+  - the app stop was `stopped` or `killed`, meaning we stopped an app that was
+    still serving;
+  - `down -v` returned `ok`.
+- Every other outcome fails the run. That includes `unresponsive`, any
+  `error: …`, `already-exited`, never started (`null`), and any value the
+  code does not know (fail closed).
+- Every result is still recorded in the summary, and `down -v` always runs.
+- `local.mjs` exits 1 unless `summary.pass`. The summary's `failures` lists
+  every reason.
+- Mutation T1 from the last round (dropping `pass = false` when the down
+  fails) is now F1, and a unit test kills it.
+
+**Low (4176117574): the brief's option analysis is historical.**
+- §1 is retitled "Option analysis considered before the decisions
+  (historical rationale)", with a note saying it records no open question.
+- The D-01 "unresolved" sentence is in the past tense and names the
+  resolution.
+- "Recommended default (now DECIDED)" reads "Recommended, then adopted".
+- "Choose"/"Decide" wording is now labelled as revisit triggers.
+- "Blocks" reads "Depended on this decision".
+- The D-02 manifest-semantics item is a known test gap, not an open
+  decision.
+- Sweep: the brief, DESIGN, EVIDENCE and TEST_PLAN had no other
+  present-tense open-decision wording about D-01..D-10. Two Slice 2 files
+  called a decided item "an owner decision", and both are fixed:
+  - the `docker-compose.local.yml` header (hosting);
+  - the `bootstrap.mjs` header (D-04).
+
+**Low (4176117585): the documented ports, project names and paths match the
+code.**
+- DESIGN §3.2 has a settings table (developer stack and `local:test`) taken
+  from `localSettings` / `localTestSettings`.
+- §3.3 says CI runs `local:test` on `ratio-local-test` 54339/18353/3110.
+- The CI comment names the app port 3110.
+- The compose header says `name:` is only the default; the scripts always
+  pass `-p`.
+- TEST_PLAN separates the `ratio-local-s2a` run of the individual commands
+  from `local:test`'s defaults.
+- `local:down -v` removes `.ratio-local/<project>/`.
+- Sweep, scripted:
+  - every backticked repository path in the four Slice 2 docs exists;
+  - every `RATIO_*` name they mention occurs in code or configuration;
+  - every `npm run` script they name exists;
+  - every port they mention is a code default, the shared or private test
+    infrastructure, or the recorded `ratio-local-s2a` run.
+
+**Left as is (outside Slice 2, historical):**
+- Slice 0 and Slice 1 docs and tests still call some items "owner decision".
+  They record their time, and the Slice 0/1 tests may not change.
+- `.obvious/skills/ingestion-ops/SKILL.md` still calls retention (D-03) and
+  the ledger grant (D-05) "owner decisions". It is reported to the
+  coordinator rather than changed here.

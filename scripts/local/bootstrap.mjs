@@ -1,6 +1,7 @@
 // LOCAL role bootstrap for the Ratio stack (run by `npm run local:up`, as the
 // local container superuser). LOCAL AND EPHEMERAL ONLY: production role and
-// login provisioning is an owner decision (docs/evidence/slice-2/DEPLOYMENT_BRIEF.md, D-04).
+// login provisioning follows D-04 as decided (an admin pre-creates the roles;
+// docs/evidence/slice-2/DEPLOYMENT_BRIEF.md, Decision log).
 //
 // What it creates (every step idempotent; re-running changes nothing but the
 // passwords, which are re-set from .ratio-local/<project>/env):

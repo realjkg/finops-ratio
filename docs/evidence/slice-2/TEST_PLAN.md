@@ -21,8 +21,10 @@ Isolation:
   `/dev/shm/s2pg`, 127.0.0.1:55700. It was stopped and deleted afterwards.
 - S3 tests used the shared SeaweedFS (127.0.0.1:18333) with the existing
   per-run prefix helper.
-- The local stack used its own compose project (`ratio-local-s2a`) on ports
-  55710/18710/3710.
+- The individual `local:*` commands (X5) ran with their own compose project
+  (`RATIO_LOCAL_PROJECT=ratio-local-s2a`) on ports 55710/18710/3710.
+  `local:test` (X4) ran with its isolated defaults (`ratio-local-test` on
+  54339/18353/3110, `localTestSettings`), as it does in CI.
 
 ## A. Fast suite (new files)
 
@@ -61,7 +63,7 @@ Isolation:
 | X2 | fail-closed comparison of the eager vs lazy worker builds with a corrupt and with a missing 0001 manifest | scratch `failclosed.sh` (EVIDENCE §4) |
 | X3 | `.next` bundle check on the real production build | `npm run check:bundle` |
 | X4 | **full local flow under `next build && next start`** (also the regression test for the next-start-only failure class, now in CI): up ×2 → migrate ×2 (status matches, `privilegeProblems: []`) → seed ×2 → sync (both periods `published`) → sync (both `skipped_unchanged`) → anonymous GET 401 → paged GET (limit 17) → **totals == control totals exactly** (55 / `30.8272954899`, 40 / `21.0978157665`), 95 distinct rows → `down -v` | `npm run local:test` |
-| X5 | the individual commands, plus `down -v` leaving nothing behind (containers, volumes, network, `.ratio-local/`) | `npm run local:up / local:migrate / local:seed / local:sync / local:down -- -v` |
+| X5 | the individual commands, plus `down -v` leaving nothing behind (containers, volumes, network, `.ratio-local/<project>/`) | `npm run local:up / local:migrate / local:seed / local:sync / local:down -- -v` |
 | X6 | mutation checks for auth, tenant scope, unsafe-login refusal, the published-only read and the lazy load | scratch `mutate.sh` (EVIDENCE §5) |
 
 ## D. Challenger Lows and Copilot review of PR #59 (red: 03f6cf7)
@@ -91,4 +93,7 @@ Isolation:
 | L13 | `scripts/local/local.test.mjs` | `waitForOwnServer`: owned true ⇒ `pid-verified`; **false ⇒ refuse** (L6e); null ⇒ `port-preflight-only`; pid and port passed; an exited child fails fast; polls through connection errors; times out | L6e |
 | L14 | 〃 | an existing 0755 state directory is tightened to 0700 | L6f |
 | L15 | 〃 | `portInUse` against a real listener; `startIfPortFree` never spawns on a busy port; `local.mjs` spawns `next start` only through it | port re-check |
+| L16 | 〃 | `childExited` (exit code OR signal); `stopChild` never hangs (already signalled, real SIGKILLed child, SIGTERM-ignoring ⇒ `killed`, obeying ⇒ `stopped`, stuck ⇒ `unresponsive`); `cleanupLocalTest` always runs `down -v` once; `runProcess` timeout | Copilot 4176004971 |
+| L17 | 〃 | hard deadlines: `withDeadline` aborts and rejects; `waitUntil` and `waitForOwnServer` against a server that accepts TCP and never answers (and a probe ignoring its signal) fail within the deadline, every attempt aborted; `fetchJson` with no headers / a stalled body fails within the deadline; `runLocalTest` with a stalled readiness probe or API read fails and still runs `down -v` once; a never-settling `down` is cut off; `runProcess` refuses no deadline; `portInUse` hard timer; `/proc` walk cap and cycles; static: every fetch has a signal, every S3 send an `abortSignal`, pg timeouts, API deadline > 10 s statement timeout | Copilot 4176117539, 4176117553 |
+| L18 | 〃 | `finalizeLocalTestSummary` over all 28 (error × app stop × down) combinations; a failed `down -v`, an `unresponsive` or `error` stop each fail alone; `already-exited`/never started fail; `runLocalTest` end to end; static: `setApp` right after spawn, exit code from `summary.pass` | Copilot 4176117561, challenger Low 1/2 |
 | X10 | scratch `mutate4.sh` | 11 mutations, incl. D8 re-run through the seam (EVIDENCE §11) | all |
