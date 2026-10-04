@@ -27,7 +27,7 @@ ordinary commits and plain pushes (never a force-push).
 | 15 | `dc43f4f`, `a268c0e` | The challenger's REQUEST CHANGES on revision 14 (1 Medium, 3 Low), §3l, and Copilot's review 5407477027 of 10cd9ce (16 findings), §3m: the high-water mark and the sequence allocation are defined on an empty tenant (`coalesce(max, 0)`, `NOT NULL`); the monotonicity reason corrected; the known-limits list made complete. |
 | 16 | `9e0d703`, `1ac82f7`, `6cad4cd` | The challenger's REQUEST CHANGES on revision 15 (2 Medium, 4 Low), §3n: the run row is closed for INSERT with terminal statuses and a unique `run_seq`; an effect window for every label kind; multi-day usage in the limits with a coverage share; leaf derivation enforced by FKs. |
 | 17 | `77a2faf`, `f288d2f`, `cc54e79` | Copilot's review 5407588631 of 6cad4cd (6 High, 4 Medium, 1 Low), §3o: one writer per tenant and job kind for `run_seq`; one day index `t` for every detector; fan-in before persistence with merge semantics; daily excess vs cumulative impact and `ρ` at expected 0; stale wording swept. The challenger's REQUEST CHANGES on 6cad4cd (2 Medium, 4 Low), §3p: one composite FK binds a series to its leaf; separate grant, trigger and concurrent-UNIQUE tests; a CHECK for root causes without a leaf; paginated per-leaf coverage; §5 wording. Copilot's review 5407636005 of 6cad4cd (six new threads), §3q: one UPDATE column list per pointer; leaf totals stored for all three windows (disk delta +0.066 GB per run, peak 5.22 GB); the full leaf reconstruction formula; CHECKs on fixed-length arrays; "insert-only" replaced. |
-| 18 | this revision | The challenger's REQUEST CHANGES on cc54e79 (1 Medium, 5 Low), §3r: severity of a multi-day statistic on its window's mean (as the budget computed it), with the D3 episode and its restart stated; AT-3's drift target checked (`drift_ttd.py`, B.5.13: not infeasible by construction, at risk, unchanged under D-20); day-index leftovers; fan-in step 1 by the rule's own scope; root-cause leaf and account FKs; the 5.5 / 6 GB limits apply to the peak; D1's log quantile and the intermittent-interval wording. Copilot's review 5407703235 of cc54e79 (seven threads), §3s: accounts bound to their natural key; the complete M1 anchor state for D3; aggregate-scope detector state; `freshness` states its rollup snapshot and a bounded coverage share; per-bucket quantile sources; a working recall mutation. Disk delta +0.082 GB per run, peak 5.23 GB. |
+| 18 | `f1981c2`, this revision | The challenger's REQUEST CHANGES on cc54e79 (1 Medium, 5 Low), §3r: severity of a multi-day statistic on its window's mean (as the budget computed it), with the D3 episode and its restart stated; AT-3's drift target checked (`drift_ttd.py`, B.5.13: not infeasible by construction, at risk, unchanged under D-20); day-index leftovers; fan-in step 1 by the rule's own scope; root-cause leaf and account FKs; the 5.5 / 6 GB limits apply to the peak; D1's log quantile and the intermittent-interval wording. Copilot's review 5407703235 of cc54e79 (seven threads), §3s: accounts bound to their natural key; the complete M1 anchor state for D3; aggregate-scope detector state; `freshness` states its rollup snapshot and a bounded coverage share; per-bucket quantile sources; a working recall mutation. Disk delta +0.082 GB per run, peak 5.23 GB. |
 
 ## 2. Governance wording: reverted
 
@@ -454,8 +454,9 @@ Appendix B (B.4, B.5.6–B.5.13).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at revision 17 (the commit that adds this line; the same eight reasons
-as at `9e0d703`, revision 16). Revision 16 gave the same risk and classes
+at revision 18 (`f1981c2` and the commit that adds this line; the same
+eight reasons as at revision 17, `cc54e79`, and at `9e0d703`, revision
+16). Revision 16 gave the same risk and classes
 as every revision since 4, and **one more reason than before**: `retention.mention`
 on `APPENDIX_B_SIZING.md`. B.5.12 now says that `forecast_leaves` is
 "outside retention" (rev. 16, L4). That is a statement about the D-12
