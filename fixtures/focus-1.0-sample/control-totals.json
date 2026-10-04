@@ -1,0 +1,57 @@
+{
+  "$comment": "Expected control totals per (billing period, currency) for the FOCUS 1.0 Sample Data files pinned in dataset.json (CC BY 4.0, FinOps Foundation; see NOTICE.md). Pinned from a separate cross-check (Python csv + decimal, EVIDENCE); scripts/acceptance/focus_control_totals.py must reproduce them exactly, and the acceptance run compares the API with the calculator's live output. Money as exact decimal strings (sum scale = largest input scale, as Postgres sum(numeric)); rowDigest = SHA-256 of the sorted lines 'Id<TAB>BilledCost<TAB>EffectiveCost-or-\\N<LF>' (numeric::text form).",
+  "1k": {
+    "input": {
+      "sha256": "e91e5ac7edf01ed2c9d926f37ef7dc1ae2aae97956fea8da6c9ee488b1c2839e",
+      "bytes": 755423,
+      "dataRows": 1000
+    },
+    "totals": [
+      {
+        "billingPeriod": "2024-09-01",
+        "billingCurrency": "USD",
+        "rowCount": "999",
+        "billedCost": "20.28022672899",
+        "effectiveCost": "14.97651418586",
+        "effectiveCostNulls": "0",
+        "rowDigest": "704b8c4919c9c46e393173834c3878e8972cff1207af7b9b8833a42b77a52ee1"
+      },
+      {
+        "billingPeriod": "2024-10-01",
+        "billingCurrency": "USD",
+        "rowCount": "1",
+        "billedCost": "0.24000000000",
+        "effectiveCost": "0.00000000000",
+        "effectiveCostNulls": "0",
+        "rowDigest": "3ac9ffea540e79689c84e48af59b652872318ec2ebfe343745853f2f9ca634f3"
+      }
+    ]
+  },
+  "10k": {
+    "input": {
+      "sha256": "0bf58b73123294c4476b648e647cad842935036f67dc4e9a2cc4a6d7497cc2e3",
+      "bytes": 7529214,
+      "dataRows": 10000
+    },
+    "totals": [
+      {
+        "billingPeriod": "2024-09-01",
+        "billingCurrency": "USD",
+        "rowCount": "9998",
+        "billedCost": "151.41648035487",
+        "effectiveCost": "101.36188970754",
+        "effectiveCostNulls": "0",
+        "rowDigest": "06ddfbb50803cbe1832a48c22d764989732b184ab5c7b5cbf0458e41212a0885"
+      },
+      {
+        "billingPeriod": "2024-10-01",
+        "billingCurrency": "USD",
+        "rowCount": "2",
+        "billedCost": "0.01361088710",
+        "effectiveCost": "0.00000000000",
+        "effectiveCostNulls": "0",
+        "rowDigest": "5b5de31694ca8f7d38f581bdf33b3714f9440d8905a630390cde7878d916a6b1"
+      }
+    ]
+  }
+}
