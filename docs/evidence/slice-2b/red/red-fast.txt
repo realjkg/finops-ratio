@@ -1,0 +1,114 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435
+
+ ❯ scripts/acceptance/controlTotals.test.mjs (3 tests | 3 failed) 108ms
+   ❯ P2 independent control totals (Python) (3)
+     × P1: the calculator’s own unit tests pass 74ms
+     × reproduces the pinned control totals of the committed 1k file exactly 17ms
+     × refuses a file whose SHA-256 is not the pinned one (exit 2, no output) 15ms
+ ❯ scripts/local/acceptance.test.mjs (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/acceptance.test.mjs [ scripts/local/acceptance.test.mjs ]
+Error: Cannot find module './acceptance.mjs' imported from /home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/local/acceptance.test.mjs
+ ❯ scripts/local/acceptance.test.mjs:12:1
+     10| import { fileURLToPath } from 'node:url';
+     11| import { parse as parseCsvSync } from 'csv-parse/sync';
+     12| import {
+       | ^
+     13|   MUTATIONS,
+     14|   SAMPLE_NAMES,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > P1: the calculator’s own unit tests pass
+AssertionError: 
+E
+======================================================================
+ERROR: test_focus_control_totals (unittest.loader._FailedTest.test_focus_control_totals)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_focus_control_totals
+Traceback (most recent call last):
+  File "/usr/lib/python3.11/unittest/loader.py", line 419, in _find_test_path
+    module = self._get_module_from_name(name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/unittest/loader.py", line 362, in _get_module_from_name
+    __import__(name)
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/test_focus_control_totals.py", line 18, in <module>
+    import focus_control_totals as fct  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'focus_control_totals'
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)
+: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ scripts/acceptance/controlTotals.test.mjs:31:50
+     29|   it('P1: the calculator’s own unit tests pass', () => {
+     30|     const r = python(['-m', 'unittest', 'discover', '-s', 'scripts/acc…
+     31|     expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+       |                                                  ^
+     32|     expect(r.stderr).toMatch(/\nOK\b/);
+     33|   }, 120_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > reproduces the pinned control totals of the committed 1k file exactly
+AssertionError: python3: can't open file '/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/focus_control_totals.py': [Errno 2] No such file or directory
+: expected 2 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 2
+
+ ❯ scripts/acceptance/controlTotals.test.mjs:38:32
+     36|     const pin = DATASET.files['1k'];
+     37|     const r = python([CALC, '--expect-sha256', pin.sha256, path.join(R…
+     38|     expect(r.status, r.stderr).toBe(0);
+       |                                ^
+     39|     const doc = JSON.parse(r.stdout);
+     40|     expect(doc.type).toBe('ratio.focus-control-totals');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > refuses a file whose SHA-256 is not the pinned one (exit 2, no output)
+AssertionError: expected 'python3: can\'t open file \'/home/use…' to match /SHA-256 mismatch/
+
+- Expected:
+/SHA-256 mismatch/
+
++ Received:
+"python3: can't open file '/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/focus_control_totals.py': [Errno 2] No such file or directory
+"
+
+ ❯ scripts/acceptance/controlTotals.test.mjs:58:22
+     56|     expect(r.status).toBe(2);
+     57|     expect(r.stdout).toBe('');
+     58|     expect(r.stderr).toMatch(/SHA-256 mismatch/);
+       |                      ^
+     59|   }, 120_000);
+     60| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed (3)
+   Start at  10:26:29
+   Duration  497ms (tests 66%, transform 16%, worker 10%, import 8%)
+

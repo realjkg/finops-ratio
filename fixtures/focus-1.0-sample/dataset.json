@@ -1,0 +1,29 @@
+{
+  "$comment": "Pins for the public FOCUS 1.0 Sample Data used by the Slice 2b acceptance run (npm run local:acceptance). Every run and every fetch checks size and SHA-256 against these values before using a file. Licence: CC BY 4.0, see NOTICE.md.",
+  "title": "FOCUS 1.0 Sample Data",
+  "publisher": "FinOps Foundation (FOCUS project)",
+  "repository": "https://github.com/FinOps-Open-Cost-and-Usage-Spec/focus-sample-data",
+  "commit": "adbdd17a132984d6e8583c149c236d2199c3f5bc",
+  "licence": "CC BY 4.0",
+  "licenceUrl": "https://creativecommons.org/licenses/by/4.0/",
+  "files": {
+    "1k": {
+      "upstreamPath": "FOCUS-1.0/focus_sample.csv",
+      "localPath": "fixtures/focus-1.0-sample/focus_sample.csv",
+      "committed": true,
+      "bytes": 755423,
+      "sha256": "e91e5ac7edf01ed2c9d926f37ef7dc1ae2aae97956fea8da6c9ee488b1c2839e",
+      "gitBlob": "8d7568d2c024926d086b4d232010f9a0580657d2",
+      "dataRows": 1000
+    },
+    "10k": {
+      "upstreamPath": "FOCUS-1.0/focus_sample_10000.csv",
+      "localPath": ".ratio-sample-data/adbdd17a132984d6e8583c149c236d2199c3f5bc/focus_sample_10000.csv",
+      "committed": false,
+      "bytes": 7529214,
+      "sha256": "0bf58b73123294c4476b648e647cad842935036f67dc4e9a2cc4a6d7497cc2e3",
+      "gitBlob": "3315d4806a37642f4cff86e7977302adf089e486",
+      "dataRows": 10000
+    }
+  }
+}

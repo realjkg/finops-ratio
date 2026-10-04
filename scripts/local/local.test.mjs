@@ -1239,7 +1239,8 @@ describe('L20 an interrupted local:test still cleans up (Copilot 4176238924)', (
     const src = read('scripts/local/local.mjs');
     expect(src).toMatch(/start: spawnGuard\(\(\) =>\s*trackProcessGroup\(\s*spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'[\s\S]*?detached: true/);
     expect(src).toMatch(/installInterruptHandlers\(\{/);
-    expect(src).toMatch(/onFirst: \(sig\) => \{\s*if \(COMMAND === 'test'\) \{\s*[\s\S]{0,200}?interrupt\.abort\(sig\);\s*return;\s*\}\s*killLiveProcessGroups\(\);/);
+    // Slice 2b: local:acceptance runs on the same runLocalTest, so it takes the same abort-then-cleanup path.
+    expect(src).toMatch(/onFirst: \(sig\) => \{\s*if \(COMMAND === 'test' \|\| COMMAND === 'acceptance'\) \{\s*[\s\S]{0,200}?interrupt\.abort\(sig\);\s*return;\s*\}\s*killLiveProcessGroups\(\);/);
     expect(src).toMatch(/onForce: \(sig\) => \{\s*killLiveProcessGroups\(\);[\s\S]{0,200}?process\.exit\(exitCodeForSignal\(sig\)\);/);
     expect(src).toMatch(/runLocalTest\(\{[\s\S]*?signal: interrupt\.signal,/);
     expect(src).toMatch(/'down', '--remove-orphans', [^\n]*\], \{ timeoutMs, signal: null \}\)/);

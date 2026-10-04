@@ -5,8 +5,10 @@
 >    delegation (2026-10-04; Decision log below).
 > 2. **Production go-live remains a NON-DELEGABLE owner gate:** only the owner
 >    signs it off (§7, owner action 1). That decision is **not** delegated.
-> 3. **The acceptance run uses public sample data** (FOCUS 1.0 Sample Data,
->    D-02) **in a follow-up PR** after #59; it is not part of #59.
+> 3. **The acceptance run on public sample data is PERFORMED** (FOCUS 1.0
+>    Sample Data, D-02). It is in the follow-up PR to #59, Slice 2b:
+>    `docs/evidence/slice-2b/EVIDENCE.md`. It does not cover real billing
+>    data (D-02 limits).
 >
 > What stays with the owner (§7):
 > 1. the production go-live sign-off;
@@ -22,9 +24,9 @@ Status at the time of writing (branch `slice/02-local-env-brief`):
 | Piece | Where it stands |
 |---|---|
 | Slice 0: Postgres foundation (schema `ratio`, RLS, roles, migration runner, catalog privilege model) | merged |
-| Slice 1: FOCUS ingestion worker CLI (`ratio-ingest`: sync / backfill / replay / quarantine / doctor / replay-fixtures) | merged; **only the SYNTHETIC fixture has ever been ingested** |
+| Slice 1: FOCUS ingestion worker CLI (`ratio-ingest`: sync / backfill / replay / quarantine / doctor / replay-fixtures) | merged. Ingested so far, **all locally and ephemerally**: the SYNTHETIC fixture, and the public FOCUS 1.0 Sample Data (FinOps Foundation, CC BY 4.0; Slice 2b acceptance run). **No real billing data has ever been ingested.** |
 | Slice 2: local stack + `GET /api/v1/costs/published` + this brief | PR #59 |
-| Acceptance run (ingestion-ops SKILL §9) | **NOT PERFORMED**. Decided (D-02): it uses the FinOps Foundation's public FOCUS 1.0 Sample Data, so it is **no longer blocked on the owner**. It is a separate follow-up PR after #59 merges. |
+| Acceptance run (ingestion-ops SKILL §9) | **PERFORMED on public sample data** (updated by Slice 2b, branch `slice/02b-sample-acceptance`; evidence: `docs/evidence/slice-2b/EVIDENCE.md`). Dataset: FinOps Foundation FOCUS 1.0 Sample Data at commit `adbdd17a132984d6e8583c149c236d2199c3f5bc` (CC BY 4.0). Both files went through the real worker and the real API; the reader totals equal control totals computed independently from the CSVs, exactly: **1k file**: 2024-09 999 rows / BilledCost `20.28022672899`, 2024-10 1 row / `0.24000000000`; **10k file**: 2024-09 9998 rows / `151.41648035487`, 2024-10 2 rows / `0.01361088710` (all USD). It does **not** cover real billing data (D-02 limits). |
 
 ## Decision log
 
@@ -34,7 +36,7 @@ Each decision below was **decided by the orchestrator under delegation,
 | ID | Decision | Rationale (one line) | Revisit when |
 |---|---|---|---|
 | D-01 | Source snapshot / evidence artifacts are **unrestricted ONLY** when the source encrypts them so that holding read access to the object is **not** enough to read the plaintext, AND that boundary has been **reviewed**. Exactly two cases qualify. **(1) SSE-KMS whose `SSEKMSKeyId` is on an explicit, audited ALLOWLIST of customer-managed key (CMK) ARNs.** Each allowlist entry records: the key ARN; who reviewed the key policy; when; and a SHA-256 hash of the reviewed policy document. The allowlist is a reviewed, versioned file, and adding an entry is a restricted change. The match is on the full key ARN as reported in the object metadata. Optionally, the worker re-reads the key policy at ingest (`kms:GetKeyPolicy`) and compares its hash with the recorded one, **failing closed** (restricted) on any difference or error. **(2) Client-side encryption by the source** (the stored object is ciphertext and the worker is not given the key). **Everything else stays restricted**, explicitly including: **`ServerSideEncryption: AES256` (SSE-S3)**, which S3 applies to every object by default since January 2023; **SSE-KMS with the AWS-managed `aws/s3` key**, which, like SSE-S3, is transparent to anyone holding `s3:GetObject`; and **any customer-managed key NOT on the allowlist**. Object metadata can show which key was used, not that its policy is a real access boundary: a CMK with a broad `kms:Decrypt` grant would otherwise pass. Foundation manifests (`src/ingest/db/migrations/*.manifest.json`) stay restricted review artefacts regardless. Enforcement is follow-up work, tracked in **realjkg/finops-ratio#60** (Appendix A). Until it lands, everything is treated as restricted, the safe subset. | "Encrypted by the source with strong encryption" means something only if the encryption is an access-control boundary independent of the bucket **and someone has verified that boundary**. Default, AWS-managed and unreviewed customer keys give no such assurance. Restricted-by-default never under-protects. | A source can only offer SSE-S3 or `aws/s3`; a reviewed key's policy changes (its hash no longer matches); or #60 lands. |
-| D-02 | **The acceptance run uses the FinOps Foundation's public "FOCUS 1.0 Sample Data"**: https://github.com/FinOps-Open-Cost-and-Usage-Spec/focus-sample-data at commit `adbdd17a132984d6e8583c149c236d2199c3f5bc`, files `FOCUS-1.0/focus_sample.csv` (1k rows) and `FOCUS-1.0/focus_sample_10000.csv` (10k rows). `FOCUS-1.0/README.md` at that commit states that it is anonymized real-world FOCUS data. **The two files contain AWS, Microsoft and Oracle data only.** The upstream README also lists Google, but there is no Google data in these files, so Google coverage is NOT tested by this run. **Licence: CC BY 4.0 — attribution is required** wherever the data, or results derived from it, are committed or published (credit the FinOps Foundation / FOCUS project, link the repository and the licence, and state any changes made). The data is loaded into the local SeaweedFS bucket, ingested by the worker, and read back through `GET /api/v1/costs/published`. The run is **not blocked on the owner**. It is a separate follow-up PR after #59 merges; nothing of it is in #59. A real AWS (or Azure/GCP) billing connection becomes a later, **optional** owner action. When one is added, option (a) still applies: a read-only IAM role assumed via the SDK chain, with no static keys. | Real-world shape and three-provider coverage (AWS, Microsoft, Oracle) with no account access, so ingestion is validated now. The licence permits reuse with attribution. | The owner connects real billing data, or the sample's layout differs from what the worker expects (the sample is a set of CSV files, not an AWS Data Exports bucket layout; staging them in the expected layout is part of the follow-up PR). |
+| D-02 | **The acceptance run uses the FinOps Foundation's public "FOCUS 1.0 Sample Data"**: https://github.com/FinOps-Open-Cost-and-Usage-Spec/focus-sample-data at commit `adbdd17a132984d6e8583c149c236d2199c3f5bc`, files `FOCUS-1.0/focus_sample.csv` (1k rows) and `FOCUS-1.0/focus_sample_10000.csv` (10k rows). `FOCUS-1.0/README.md` at that commit states that it is anonymized real-world FOCUS data. **The two files contain AWS, Microsoft and Oracle data only.** The upstream README also lists Google, but there is no Google data in these files, so Google coverage is NOT tested by this run. **Licence: CC BY 4.0 — attribution is required** wherever the data, or results derived from it, are committed or published (credit the FinOps Foundation / FOCUS project, link the repository and the licence, and state any changes made). The data is loaded into the local SeaweedFS bucket, ingested by the worker, and read back through `GET /api/v1/costs/published`. The run is **not blocked on the owner**. It is a separate follow-up PR after #59 merges; nothing of it is in #59. **Status: PERFORMED on public sample data** (Slice 2b, `docs/evidence/slice-2b/EVIDENCE.md`; 1k: 999 / `20.28022672899` and 1 / `0.24000000000`; 10k: 9998 / `151.41648035487` and 2 / `0.01361088710`; USD, exact). **Still not covered**: a real AWS Data Exports manifest; how a real export writes nulls; Google data; real billing data. A real AWS (or Azure/GCP) billing connection becomes a later, **optional** owner action. When one is added, option (a) still applies: a read-only IAM role assumed via the SDK chain, with no static keys. | Real-world shape and three-provider coverage (AWS, Microsoft, Oracle) with no account access, so ingestion is validated now. The licence permits reuse with attribution. | The owner connects real billing data, or the sample's layout differs from what the worker expects (the sample is a set of CSV files, not an AWS Data Exports bucket layout; staging them in the expected layout is part of the follow-up PR). |
 | D-03 | **Keep everything until a dedicated retention slice** (option a); a staging-only cleanup of `fixture-*` tenants comes first, as its own slice. | No purge path exists that respects the immutability triggers; keeping data is reversible, deleting is not. | Before the first non-pilot tenant, or storage cost becomes material. |
 | D-04 | **An admin pre-creates the three NOLOGIN ratio roles; the migrator is NOCREATEROLE from day one** (option a, the local model). | Role creation never sits on an app credential; proven locally by `migrate --status` with `privilegeProblems: []`. | The managed Postgres offering cannot pre-create roles. |
 | D-05 | **A separate monitoring login, a member of no ratio role, with SELECT on the ledger only** (option c). | Keeps the owner credential off worker hosts without changing the reviewed ratio privileges. | One more credential is judged too costly (fallback: option a). |
@@ -120,6 +122,58 @@ below and in the Decision log). The two candidates considered were:
     (control totals expected absent ⇒ `unverified`; one or several manifests
     per period). That remains **unverified** (a known test gap, not an open
     decision) until real billing data is connected (optional owner action 4).
+- **Status: PERFORMED on public sample data** (Slice 2b, evidence update
+  under the orchestrator's delegation; `docs/evidence/slice-2b/EVIDENCE.md`).
+  - **Dataset:** commit `adbdd17a132984d6e8583c149c236d2199c3f5bc`, both files,
+    with SHA-256s pinned. The 1k file is committed verbatim with a CC BY 4.0
+    `NOTICE.md`.
+  - **What ran:** each file was staged as an AWS Data Exports layout. The
+    staging changes only the format: it maps the unquoted `NULL` token to an
+    empty field, splits the rows by period and gzips them, and it is proven
+    lossless. The real worker CLI synced each file twice (`published`, then
+    `skipped_unchanged`), and the data was read back through the real API.
+  - **Control totals** (computed independently in Python from the CSVs; all
+    USD; equal to the API, exactly):
+
+    | File | Period | Rows | BilledCost |
+    |---|---|---|---|
+    | 1k | 2024-09 | 999 | `20.28022672899` |
+    | 1k | 2024-10 | 1 | `0.24000000000` |
+    | 10k | 2024-09 | 9998 | `151.41648035487` |
+    | 10k | 2024-10 | 2 | `0.01361088710` |
+
+  - **Also checked:**
+    - **every API row against its upstream record, field by field**, keyed
+      by `Id`. The expected row comes from the upstream CSV via the
+      independent Python calculator, never from the staged copy. It covers
+      all 21 upstream-derived fields of the API row:
+      - billingPeriod (YYYY-MM-DD) and the two charge-period timestamps
+        (UTC, microseconds, as the API formats them);
+      - the four cost columns, usage and pricing quantities (decimal
+        strings, exact, scale included);
+      - currency, provider, service, service category, charge category,
+        resource, sub-account and billing-account ids, units;
+      - focusVersion;
+      - `extraColumns`, with the same keys and values as the upstream file.
+
+      An upstream `NULL` must be null or absent. The API row must have
+      exactly the route's 26 fields. The upstream column classification is
+      pinned: 19 mapped columns, 25 returned verbatim in `extraColumns`,
+      none dropped;
+    - per-group row digests, EffectiveCost sums and null counts;
+    - the evidence re-hash;
+    - the catalog (published, `unverified`, not provisional).
+  - **Mutations:** ten data mutations each fail the run, including six text
+    columns corrupted and ListCost + 1 in the last digit.
+  - **CI:** the 1k run is in CI.
+  - **Limits, unchanged:**
+    - a real AWS Data Exports manifest is **not** verified (the staged
+      manifest follows the worker's documented contract);
+    - how a real export writes nulls is **not** confirmed (the `NULL` token
+      is a property of this SQL-dump sample);
+    - **no Google data** is in these files;
+    - **real billing data** is not covered. That stays the optional owner
+      action 4.
 
 ### D-03: Retention windows and the purge path
 
@@ -428,13 +482,24 @@ take:
 These are verification steps, not decisions. Each is checked before the first
 production deploy:
 
-- [ ] **The acceptance run performed and signed off** on the FOCUS 1.0
-      Sample Data (D-02; separate follow-up PR after #59). Check: row counts
-      vs the CSV files, totals per period and currency vs totals computed
-      independently from the CSV, idempotent re-sync, evidence re-hash, read
-      back through the API, and the CC BY 4.0 attribution recorded. A real
-      billing comparison (vs the Billing console) follows only if the owner
-      connects real data (optional owner action 4).
+- [x] **The acceptance run performed on public sample data and signed off
+      by the orchestrator under the owner's delegation (Slice 2b PR)**: the
+      FOCUS 1.0 Sample Data (D-02), in the follow-up PR to #59
+      (`docs/evidence/slice-2b/EVIDENCE.md`). All of these were checked:
+      - row counts vs the CSV files;
+      - totals per period and currency vs totals computed independently from
+        the CSV, equal exactly;
+      - every API row equal to its upstream record, field by field;
+      - idempotent re-sync;
+      - evidence re-hash;
+      - read back through the API;
+      - the CC BY 4.0 attribution recorded.
+
+      This sign-off covers the acceptance run only. It is **not** the
+      production go-live sign-off, which stays the owner's non-delegable
+      gate (§7, owner action 1). A real billing comparison (vs the Billing
+      console) follows only if the owner connects real data (optional owner
+      action 4). It is **not** covered by this tick (D-02 limits).
 - [ ] D-09 reviewed against the acceptance run's size.
 - [ ] D-07 items 1–3 applied (protect-main, auto-merge for `low` only, Copilot
       review_on_push); the GitHub App installed (owner action 3).

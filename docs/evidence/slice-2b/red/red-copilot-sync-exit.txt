@@ -1,0 +1,245 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435
+
+ ❯ scripts/local/acceptance.test.mjs (66 tests | 8 failed) 2286ms
+   ❯ A11 both syncs are judged on the CLI exit code too (Copilot 4177490229 / 4177490261) (5)
+     × both exit 0 with valid records ⇒ passes, both results reported 13ms
+     × FIRST sync: a valid, passing record but exit code 1 ⇒ the run fails, the code is recorded, the diagnostics still run, no second sync 6ms
+     × FIRST sync: exit code 1 with a quarantine ⇒ both the exit code and the reasons are reported 1ms
+     × SECOND sync: a valid all-skipped record but exit code 1 ⇒ the run fails, the code is recorded 1ms
+     × a missing evidence record, a null exit code (killed by a signal) or a non-number code also fail 0ms
+   ❯ A9 local.mjs acceptance: the real path, no bypass (static) (5)
+     × uses the real worker CLI twice and the real route; no fake source, no test hook, no control in the manifest 6ms
+     × sweep: every allowFail command in scripts/local judges its exit code nearby, or says who does (Copilot 4177490229) 2ms
+     × every comparison runs and fails the run 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A11 both syncs are judged on the CLI exit code too (Copilot 4177490229 / 4177490261) > both exit 0 with valid records ⇒ passes, both results reported
+TypeError: syncTwice is not a function
+ ❯ scripts/local/acceptance.test.mjs:601:32
+    599|     const { sync, calls } = fakeRunner({ code: 0, record: published },…
+    600|     const reported = [];
+    601|     const out = await syncTwice({ sync, control, report: (name, r) => …
+       |                                ^
+    602|     expect(calls).toEqual(['sync', 'syncAgain']);
+    603|     expect(reported).toEqual([['sync', 0], ['syncAgain', 0]]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A11 both syncs are judged on the CLI exit code too (Copilot 4177490229 / 4177490261) > FIRST sync: a valid, passing record but exit code 1 ⇒ the run fails, the code is recorded, the diagnostics still run, no second sync
+TypeError: syncTwice is not a function
+ ❯ scripts/local/acceptance.test.mjs:613:16
+    611|     let diagnostics = null;
+    612|     await expect(
+    613|       syncTwice({ sync, control, report: (name, r) => reported.push([n…
+       |                ^
+    614|     ).rejects.toThrow('first sync:\n  sync: the worker CLI exited 1 (e…
+    615|     expect(calls).toEqual(['sync']);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A11 both syncs are judged on the CLI exit code too (Copilot 4177490229 / 4177490261) > FIRST sync: exit code 1 with a quarantine ⇒ both the exit code and the reasons are reported
+TypeError: syncTwice is not a function
+ ❯ scripts/local/acceptance.test.mjs:623:27
+    621|     const quarantined = { pass: false, results: { periods: [{ ...publi…
+    622|     const { sync } = fakeRunner({ code: 1, record: quarantined });
+    623|     await expect(syncTwice({ sync, control })).rejects.toThrow(
+       |                           ^
+    624|       'first sync:\n  sync: the worker CLI exited 1 (expected 0)\n  sy…
+    625|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A11 both syncs are judged on the CLI exit code too (Copilot 4177490229 / 4177490261) > SECOND sync: a valid all-skipped record but exit code 1 ⇒ the run fails, the code is recorded
+TypeError: syncTwice is not a function
+ ❯ scripts/local/acceptance.test.mjs:631:27
+    629|     const { sync, calls } = fakeRunner({ code: 0, record: published },…
+    630|     const reported = [];
+    631|     await expect(syncTwice({ sync, control, report: (name, r) => repor…
+       |                           ^
+    632|       'second sync:\n  second sync: the worker CLI exited 1 (expected …
+    633|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A11 both syncs are judged on the CLI exit code too (Copilot 4177490229 / 4177490261) > a missing evidence record, a null exit code (killed by a signal) or a non-number code also fail
+TypeError: syncTwice is not a function
+ ❯ scripts/local/acceptance.test.mjs:639:27
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A9 local.mjs acceptance: the real path, no bypass (static) > uses the real worker CLI twice and the real route; no fake source, no test hook, no control in the manifest
+AssertionError: expected [ …(2) ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ scripts/local/acceptance.test.mjs:835:85
+    833|   it('uses the real worker CLI twice and the real route; no fake sourc…
+    834|     // One runner, called twice by syncTwice (first sync, then the re-…
+    835|     expect(body.match(/syncRecord\(settings, secrets, SAMPLE_NAMES\.so…
+       |                                                                                     ^
+    836|     expect(body).toMatch(/await syncTwice\(\{\s*control,\s*sync: \(nam…
+    837|     expect(src).toMatch(/workerCli\(settings, secrets, \['sync', '--te…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A9 local.mjs acceptance: the real path, no bypass (static) > sweep: every allowFail command in scripts/local judges its exit code nearby, or says who does (Copilot 4177490229)
+AssertionError: scripts/local/local.mjs:370: const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', sourceKey], { allowFail: true });: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ scripts/local/acceptance.test.mjs:854:60
+    852|         const before = lines.slice(Math.max(0, i - 4), i).join('\n');
+    853|         const judged = /\.code !== 0/.test(after) || /exit code judged…
+    854|         expect(judged, `${file}:${i + 1}: ${line.trim()}`).toBe(true);
+       |                                                            ^
+    855|       });
+    856|     }
+ ❯ scripts/local/acceptance.test.mjs:849:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A9 local.mjs acceptance: the real path, no bypass (static) > every comparison runs and fails the run
+AssertionError: await syncTwice({: expected 'async function acceptance(args) {\n  …' to contain 'await syncTwice({'
+
+- Expected
++ Received
+
+- await syncTwice({
++ async function acceptance(args) {
++   const started = Date.now();
++   const opts = parseAcceptanceArgs(args);
++   if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
++   const settings = localAcceptanceSettings(process.env);
++
++   // 1. Before anything starts: the pinned file, the independent control, the staging.
++   const dataset = readDataset(ROOT);
++   const pin = dataset.files[opts.dataset];
++   const file = path.join(ROOT, pin.localPath);
++   if (!fs.existsSync(file)) throw new Error(`${pin.localPath} is missing: run \`npm run sample:fetch\` first (pinned download, SHA-256 checked)`);
++   const bytes = fs.readFileSync(file);
++   fail(`dataset ${opts.dataset} (${pin.localPath}) does not match dataset.json; re-run \`npm run sample:fetch\``, verifyDatasetBytes(bytes, pin));
++
++   const calcStarted = Date.now();
++   const calc = await run('python3', [CONTROL_CALCULATOR, '--rows', '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
++   if (calc.code !== 0) throw new Error(`the control-total calculator exited ${calc.code}`);
++   const control = JSON.parse(calc.out);
++   const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, SAMPLE_CONTROL_TOTALS_FILE), 'utf8'))[opts.dataset];
++   if (JSON.stringify({ input: control.input, columns: control.columns, totals: control.totals }) !== JSON.stringify(pinned)) {
++     throw new Error(`the calculator's output differs from the pinned ${SAMPLE_CONTROL_TOTALS_FILE} (${opts.dataset})`);
++   }
++   const calcMs = Date.now() - calcStarted;
++
++   const stageStarted = Date.now();
++   const staged = stageFocusSample(bytes, { mutation: opts.mutation }); // proves the clean plan lossless first
++   const stageMs = Date.now() - stageStarted;
++   const dataShas = staged.objects.filter((o) => o.kind === 'data').map((o) => o.sha256);
++   const totalRows = control.totals.reduce((n, t) => n + Number(t.rowCount), 0);
++
++   await preflight(settings, 'local:acceptance');
++
++   const summary = await runLocalTest({
++     project: settings.project,
++     down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
++     downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
++     signal: interrupt.signal,
++     body: async ({ steps, setApp, spawnGuard }) => {
++       const timed = timer(steps);
++       steps.timingsMs.controlTotals = calcMs;
++       steps.timingsMs.stage = stageMs;
++       steps.dataset = { key: opts.dataset, file: pin.localPath, bytes: pin.bytes, sha256: pin.sha256, commit: dataset.commit, licence: dataset.licence };
++       steps.mutation = opts.mutation;
++       steps.control = control.totals;
++       steps.staging = { periods: staged.periods, objects: staged.objects.map((o) => ({ key: o.key, bytes: o.body.length, sha256: o.sha256 })), nullTokensReplaced: staged.nullTokensReplaced };
++
++       await timed('up', () => up(settings));
++       const status = await timed('migrate', () => migrate(settings));
++       steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
++       const secrets = loadSecrets(settings, { create: false });
++
++       // Stage into the run's own SeaweedFS, then provision the sample source.
++       const sourceId = await timed('seed', async () => {
++         const s3 = s3Client(settings, secrets);
++         try {
++           await ensureBuckets(s3);
++           await putObjects(
++             s3,
++             staged.objects.map((o) => ({ Key: o.key, body: () => o.body })),
++           );
++         } finally {
++           s3.destroy();
++         }
++         return provisionSource(settings, secrets, SAMPLE_NAMES);
++       });
++       steps.seed = { objects: staged.objects.length, source: SAMPLE_NAMES.sourceKey };
++
++       // The real worker CLI, twice.
++       const first = await timed('sync', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
++       const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
++       steps.sync = { exit: first.code, durationMs: first.record?.durationMs, periods: outcomes(first.record) };
++       const syncIssues = syncProblems(first.record, control);
++       // Diagnostics before failing: the batches' quarantine reasons (codes and counts, never cell values).
++       if (syncIssues.length) steps.catalog = await catalogSnapshot(settings, secrets).catch((e) => ({ error: e.message }));
++       fail('first sync', syncIssues);
++       const second = await timed('syncAgain', () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey));
++       steps.syncAgain = { exit: second.code, periods: outcomes(second.record) };
++       fail('second sync', resyncProblems(second.record, control));
++
++       // The real route under next start.
++       steps.appReady = await timed('appStart', () => startAppAndWait(settings, secrets, { setApp, spawnGuard }));
++       const base = `http://127.0.0.1:${settings.appPort}`;
++       const anon = await fetchJson(`${base}/api/v1/costs/published`, { timeoutMs: API_REQUEST_TIMEOUT_MS });
++       if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
++       steps.anonymous = anon.status;
++       const maxPages = Math.ceil(totalRows / ACCEPTANCE_PAGE_LIMIT) + 1;
++       const { rows, totals, pages } = await timed('apiRead', () => readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: ACCEPTANCE_PAGE_LIMIT, maxPages }));
++       steps.api = { totals, rows: rows.length, pages, limit: ACCEPTANCE_PAGE_LIMIT };
++       fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, dataShas)]);
++       // Every API row against its UPSTREAM record (the calculator's --rows), every field (challenger M1).
++       fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control));
++       steps.rowsCompared = { rows: control.rows.length, fieldsPerRow: API_ROW_FIELDS_COMPARED, extraColumns: control.columns.extra.length };
++
++       // Evidence re-hash and the catalog.
++       const rehash = await timed('evidenceRehash', () => rehashEvidence(settings, secrets, sourceId, dataShas));
++       steps.evidence = rehash;
++       fail('evidence re-hash', rehash.filter((r) => r.rehash !== r.sha256).map((r) => `evidence ${r.sha256} re-hashes to ${r.rehash}`));
++       const catalog = await timed('catalog', () => catalogSnapshot(settings, secrets));
++       steps.catalog = catalog;
++       fail('catalog', batchProblems(catalog.batches, control));
++     },
++   });
++   killLiveProcessGroups();
++   summary.steps.timingsMs = { ...(summary.steps.timingsMs ?? {}), total: Date.now() - started };
++   process.stdout.write(`${JSON.stringify({ type: 'ratio.local-acceptance', dataset: opts.dataset, mutation: opts.mutation, ...summary })}\n`);
++   if (!summary.pass) log('local:acceptance failed', { mutation: opts.mutation, failures: summary.failures });
++   return localTestExitCode(summary);
++ }
++
++
+
+ ❯ scripts/local/acceptance.test.mjs:867:26
+    865|       "fail('catalog', batchProblems(catalog.batches, control))",
+    866|     ]) {
+    867|       expect(body, call).toContain(call);
+       |                          ^
+    868|     }
+    869|     expect(body).toMatch(/fail\('evidence re-hash', rehash\.filter\(\(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/8]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  8 failed | 58 passed (66)
+   Start at  12:11:47
+   Duration  4.04s (tests 63%, transform 26%, import 12%)
+

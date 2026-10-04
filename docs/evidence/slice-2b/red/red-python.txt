@@ -1,0 +1,19 @@
+E
+======================================================================
+ERROR: test_focus_control_totals (unittest.loader._FailedTest.test_focus_control_totals)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_focus_control_totals
+Traceback (most recent call last):
+  File "/usr/lib/python3.11/unittest/loader.py", line 162, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a817628ed572da435/scripts/acceptance/test_focus_control_totals.py", line 18, in <module>
+    import focus_control_totals as fct  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'focus_control_totals'
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)
