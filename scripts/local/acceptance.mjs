@@ -36,6 +36,15 @@ export const SAMPLE_NAMES = Object.freeze({
   displayName: 'FOCUS 1.0 Sample Data (FinOps Foundation, CC BY 4.0) - public sample, not tenant billing data',
 });
 
+/**
+ * Issue #62: the ProviderName values an AWS Data Exports source publishes. The
+ * independent calculator counts only these rows (exact match, `--provider`);
+ * the worker must exclude every other provider's rows. Written here, NOT
+ * imported from the worker's own allowlist, so a worker that accepts more
+ * (or matches loosely) disagrees with the control (A12 checks the independence).
+ */
+export const SAMPLE_PROVIDERS = Object.freeze(['AWS']);
+
 export const MUTATIONS = Object.freeze([
   'corrupt-billed',
   'corrupt-effective',
@@ -702,8 +711,40 @@ function controlByPeriod(control, problems) {
   return by;
 }
 
-function periodsOf(record, what, problems) {
-  if (record?.pass !== true) problems.push(`${what}: the evidence record does not pass`);
+/** Per period: the number of rows the worker must exclude (issue #62; the calculator's `excluded`). */
+function excludedByPeriod(control) {
+  return new Map((control.excluded ?? []).map((e) => [e.billingPeriod, Number(e.rowCount)]));
+}
+
+/** Periods whose every row is excluded: the worker quarantines them (PROVIDER_MISMATCH) and never publishes. */
+function allExcludedPeriods(control) {
+  const published = new Set(control.totals.map((t) => t.billingPeriod));
+  return [...excludedByPeriod(control).entries()].filter(([period, n]) => n > 0 && !published.has(period)).map(([period]) => period);
+}
+
+/** The worker CLI's expected exit code: 1 when a period is quarantined (every row excluded), else 0. */
+export function expectedSyncExit(control) {
+  return allExcludedPeriods(control).length > 0 ? 1 : 0;
+}
+
+/** The staged data objects of the periods the control expects to be PUBLISHED (the API's artifact set). */
+export function publishedDataShas(objects, control) {
+  const published = new Set(control.totals.map((t) => t.billingPeriod.slice(0, 7)));
+  return objects
+    .filter((o) => o.kind === 'data')
+    .filter((o) => {
+      const m = /\/BILLING_PERIOD=([0-9]{4}-[0-9]{2})\//.exec(o.key);
+      return m !== null && published.has(m[1]);
+    })
+    .map((o) => o.sha256);
+}
+
+const FAILED_RUN = 'expected a failed run (a period has every row excluded)';
+
+function periodsOf(record, what, problems, control) {
+  if (expectedSyncExit(control) === 0) {
+    if (record?.pass !== true) problems.push(`${what}: the evidence record does not pass`);
+  } else if (record?.pass !== false) problems.push(`${what}: the evidence record passes, ${FAILED_RUN}`);
   const periods = record?.results?.periods;
   if (!Array.isArray(periods)) {
     problems.push(`${what}: no periods in the evidence record`);
@@ -712,43 +753,63 @@ function periodsOf(record, what, problems) {
   return periods;
 }
 
-/** First sync: every control period `published` with the control's count and billed total, `unverified`; nothing else. */
+const outcomeText = (p) => `${p.outcome}${p.code ? ` ${p.code}` : ''}`;
+
+/**
+ * First sync: every control period `published` with the control's count and
+ * billed total, `unverified`, and `excludedRows` = the control's excluded count
+ * (absent when none); every period whose rows are all excluded `quarantined`
+ * `PROVIDER_MISMATCH` (issue #62); nothing else.
+ */
 export function syncProblems(record, control) {
   const problems = [];
   const expected = controlByPeriod(control, problems);
+  const excluded = excludedByPeriod(control);
+  const quarantined = new Set(allExcludedPeriods(control));
   const seen = new Set();
-  for (const p of periodsOf(record, 'sync', problems)) {
+  for (const p of periodsOf(record, 'sync', problems, control)) {
     const e = expected.get(p.billingPeriod);
-    if (!e || seen.has(p.billingPeriod)) {
+    if ((!e && !quarantined.has(p.billingPeriod)) || seen.has(p.billingPeriod)) {
       problems.push(`sync: unexpected period ${p.billingPeriod} (${p.outcome})`);
       continue;
     }
     seen.add(p.billingPeriod);
+    if (!e) {
+      if (p.outcome !== 'quarantined' || p.code !== 'PROVIDER_MISMATCH') problems.push(`sync ${p.billingPeriod}: ${outcomeText(p)}, expected quarantined PROVIDER_MISMATCH (every row excluded)`);
+      continue;
+    }
     if (p.outcome !== 'published') problems.push(`sync ${p.billingPeriod}: ${p.outcome}${p.code ? ` ${p.code}` : ''}${p.message ? `: ${p.message}` : ''}`);
     if (p.rowCount !== e.rowCount) problems.push(`sync ${p.billingPeriod}: rowCount ${JSON.stringify(p.rowCount)} != control "${e.rowCount}"`);
     if (p.billedTotal !== e.billedCost) problems.push(`sync ${p.billingPeriod}: billedTotal ${JSON.stringify(p.billedTotal)} != control "${e.billedCost}"`);
     if (p.reconciliation !== 'unverified') problems.push(`sync ${p.billingPeriod}: reconciliation ${JSON.stringify(p.reconciliation)}, expected "unverified" (no control totals in the manifest)`);
+    const n = excluded.get(p.billingPeriod) ?? 0;
+    const want = n > 0 ? String(n) : undefined;
+    if (p.excludedRows !== want) problems.push(`sync ${p.billingPeriod}: excludedRows ${JSON.stringify(p.excludedRows)} != control ${JSON.stringify(want)}`);
   }
-  for (const period of expected.keys()) if (!seen.has(period)) problems.push(`sync: control period ${period} was not synced`);
+  for (const period of [...expected.keys(), ...quarantined]) if (!seen.has(period)) problems.push(`sync: control period ${period} was not synced`);
   return problems;
 }
 
-/** Second sync: every control period `skipped_unchanged`; nothing else. */
+/** Second sync: every published control period `skipped_unchanged`, every quarantined one `failed` `BATCH_QUARANTINED`; nothing else. */
 export function resyncProblems(record, control) {
   const problems = [];
   const expected = controlByPeriod(control, problems);
+  const quarantined = new Set(allExcludedPeriods(control));
   const seen = new Set();
-  for (const p of periodsOf(record, 'second sync', problems)) {
-    if (!expected.has(p.billingPeriod) || seen.has(p.billingPeriod)) problems.push(`second sync: unexpected period ${p.billingPeriod} (${p.outcome})`);
-    else if (p.outcome !== 'skipped_unchanged') problems.push(`second sync ${p.billingPeriod}: ${p.outcome}, expected skipped_unchanged`);
+  for (const p of periodsOf(record, 'second sync', problems, control)) {
+    if ((!expected.has(p.billingPeriod) && !quarantined.has(p.billingPeriod)) || seen.has(p.billingPeriod)) problems.push(`second sync: unexpected period ${p.billingPeriod} (${p.outcome})`);
+    else if (quarantined.has(p.billingPeriod)) {
+      if (p.outcome !== 'failed' || p.code !== 'BATCH_QUARANTINED') problems.push(`second sync ${p.billingPeriod}: ${outcomeText(p)}, expected failed BATCH_QUARANTINED`);
+    } else if (p.outcome !== 'skipped_unchanged') problems.push(`second sync ${p.billingPeriod}: ${p.outcome}, expected skipped_unchanged`);
     seen.add(p.billingPeriod);
   }
-  for (const period of expected.keys()) if (!seen.has(period)) problems.push(`second sync: control period ${period} missing`);
+  for (const period of [...expected.keys(), ...quarantined]) if (!seen.has(period)) problems.push(`second sync: control period ${period} missing`);
   return problems;
 }
 
 /**
- * One sync's verdict: the worker CLI's EXIT CODE (must be exactly 0) plus its
+ * One sync's verdict: the worker CLI's EXIT CODE (exactly expectedSyncExit:
+ * 0, or 1 when the control expects a quarantined period) plus its
  * evidence record (Copilot 4177490229 / 4177490261). The CLI runs with
  * allowFail so that a failing sync's record, and its quarantine reasons, can
  * still be read. The exit code is judged here, so a valid record with a
@@ -757,7 +818,8 @@ export function resyncProblems(record, control) {
 function syncResultProblems(result, control, which) {
   const label = which === 'first' ? 'sync' : 'second sync';
   const problems = [];
-  if (result?.code !== 0) problems.push(`${label}: the worker CLI exited ${JSON.stringify(result?.code ?? null)} (expected 0)`);
+  const exit = expectedSyncExit(control);
+  if (result?.code !== exit) problems.push(`${label}: the worker CLI exited ${JSON.stringify(result?.code ?? null)} (expected ${exit})`);
   if (!result?.record) {
     problems.push(`${label}: the worker CLI printed no evidence record`);
     return problems;
@@ -789,34 +851,64 @@ export async function syncTwice({ sync, control, report = () => undefined, befor
   return { first, second };
 }
 
+/** The worker stores at most this many validation errors per batch (load.ts MAX_STORED_ERRORS). */
+const MAX_STORED_ERRORS = 1000;
+const sortedCodes = (o) => JSON.stringify(Object.fromEntries(Object.entries(o ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))));
+
 /**
  * Catalog (ratio.ingest_batches of the sample tenant): exactly one batch per
  * control period, published, unverified, not provisional, with the control's
- * count and billed total; no other batch at all.
+ * count and billed total; its stored errors are exactly the excluded rows
+ * (`PROVIDER_MISMATCH`, issue #62), none when nothing is excluded. Exactly one
+ * quarantined `PROVIDER_MISMATCH` batch, with no rows, per period whose every
+ * row is excluded. No other batch at all.
  */
 export function batchProblems(batches, control) {
   const problems = [];
   const expected = controlByPeriod(control, problems);
+  const excluded = excludedByPeriod(control);
+  const quarantined = allExcludedPeriods(control);
   const byPeriod = new Map();
   for (const b of batches) {
     if (!byPeriod.has(b.billing_period)) byPeriod.set(b.billing_period, []);
     byPeriod.get(b.billing_period).push(b);
   }
   for (const [period, list] of byPeriod) {
-    if (!expected.has(period)) problems.push(`catalog: unexpected batch(es) for ${period}: ${list.map((b) => b.status).join(', ')}`);
+    if (!expected.has(period) && !quarantined.includes(period)) problems.push(`catalog: unexpected batch(es) for ${period}: ${list.map((b) => b.status).join(', ')}`);
   }
-  for (const [period, e] of expected) {
+  const errorsProblems = (period, b) => {
+    const n = excluded.get(period) ?? 0;
+    if (b.validation_error_count !== String(n)) problems.push(`catalog ${period}: validation_error_count ${b.validation_error_count} != control ${n}`);
+    const want = sortedCodes(n > 0 ? { PROVIDER_MISMATCH: Math.min(n, MAX_STORED_ERRORS) } : {});
+    if (sortedCodes(b.error_codes) !== want) problems.push(`catalog ${period}: stored error codes ${sortedCodes(b.error_codes)} != ${want}`);
+  };
+  const one = (period) => {
     const list = byPeriod.get(period) ?? [];
     if (list.length !== 1) {
       problems.push(`catalog ${period}: ${list.length} batches (${list.map((b) => b.status).join(', ')}), expected exactly 1`);
-      continue;
+      return null;
     }
-    const [b] = list;
+    return list[0];
+  };
+  for (const [period, e] of expected) {
+    const b = one(period);
+    if (!b) continue;
     if (b.status !== 'published') problems.push(`catalog ${period}: status ${b.status}`);
     if (b.reconciliation !== 'unverified') problems.push(`catalog ${period}: reconciliation ${b.reconciliation}`);
     if (b.is_provisional !== false) problems.push(`catalog ${period}: is_provisional ${b.is_provisional}`);
     if (b.row_count !== e.rowCount) problems.push(`catalog ${period}: row_count ${b.row_count} != control ${e.rowCount}`);
     if (b.loaded_billed_total !== e.billedCost) problems.push(`catalog ${period}: loaded_billed_total ${b.loaded_billed_total} != control ${e.billedCost}`);
+    errorsProblems(period, b);
+  }
+  for (const period of quarantined) {
+    const b = one(period);
+    if (!b) continue;
+    if (b.status !== 'quarantined') problems.push(`catalog ${period}: status ${b.status}, expected quarantined`);
+    if (typeof b.quarantine_reason !== 'string' || !b.quarantine_reason.startsWith('PROVIDER_MISMATCH:')) {
+      problems.push(`catalog ${period}: quarantine_reason ${JSON.stringify(b.quarantine_reason)}, expected PROVIDER_MISMATCH`);
+    }
+    if (b.row_count !== '0') problems.push(`catalog ${period}: row_count ${b.row_count} != 0`);
+    errorsProblems(period, b);
   }
   return problems;
 }

@@ -157,19 +157,52 @@ async function setArtifactRowCounts(c: PoolClient, batchId: string, perArtifactR
   }
 }
 
-/** Staged batch: records totals, per-artifact row counts and the reconciliation verdict (still staged). */
+/** Stores validation errors (first MAX_STORED_ERRORS, ordinal 1..n) of a batch that is still staged. */
+async function insertValidationErrors(c: PoolClient, tenantId: string, batchId: string, errors: ValidationErrorRow[]): Promise<void> {
+  if (!errors.length) return;
+  await c.query(
+    `INSERT INTO ratio.ingest_validation_errors (tenant_id, batch_id, error_ordinal, artifact_sha256, row_ordinal, column_name, code, message)
+     SELECT $1, $2, u.ord, u.sha, u.row_ord, u.col, u.code, u.msg
+     FROM unnest($3::int[], $4::text[], $5::bigint[], $6::text[], $7::text[], $8::text[]) AS u(ord, sha, row_ord, col, code, msg)`,
+    [
+      tenantId,
+      batchId,
+      errors.map((_, i) => i + 1),
+      errors.map((e) => e.artifactSha256),
+      errors.map((e) => e.rowOrdinal),
+      errors.map((e) => (e.column === null ? null : redact(e.column).slice(0, 256))),
+      errors.map((e) => e.code),
+      errors.map((e) => redact(e.message).slice(0, 1000)),
+    ],
+  );
+}
+
+/**
+ * Staged batch: records totals, per-artifact row counts and the reconciliation
+ * verdict (still staged). `errors` / `errorCount`: rows excluded by the
+ * provider check (issue #62), stored with the batch that is about to publish.
+ */
 export async function finalizeStaged(
   pool: Pool,
   lease: Lease,
-  b: { batchId: string; rowCount: string; billedTotal: string; reconciliation: 'reconciled' | 'unverified'; perArtifactRows: Map<string, number> },
+  b: {
+    batchId: string;
+    rowCount: string;
+    billedTotal: string;
+    reconciliation: 'reconciled' | 'unverified';
+    perArtifactRows: Map<string, number>;
+    errors?: ValidationErrorRow[];
+    errorCount?: number;
+  },
 ): Promise<void> {
   await workerTransaction(pool, lease.tenantId, async (c) => {
     await assertLease(c, lease, 'SHARE');
     await setArtifactRowCounts(c, b.batchId, b.perArtifactRows);
+    await insertValidationErrors(c, lease.tenantId, b.batchId, b.errors ?? []);
     const r = await c.query(
-      `UPDATE ratio.ingest_batches SET row_count = $2::bigint, loaded_billed_total = $3::numeric, reconciliation = $4
+      `UPDATE ratio.ingest_batches SET row_count = $2::bigint, loaded_billed_total = $3::numeric, reconciliation = $4, validation_error_count = $5
        WHERE id = $1 AND status = 'staged'`,
-      [b.batchId, b.rowCount, b.billedTotal, b.reconciliation],
+      [b.batchId, b.rowCount, b.billedTotal, b.reconciliation, b.errorCount ?? 0],
     );
     if (r.rowCount !== 1) throw new IngestError('BATCH_STATE_CHANGED', 'staged batch disappeared before finalization');
   });
@@ -195,23 +228,7 @@ export async function quarantineBatch(
   await workerTransaction(pool, lease.tenantId, async (c) => {
     await assertLease(c, lease, 'UPDATE');
     await setArtifactRowCounts(c, q.batchId, q.perArtifactRows);
-    if (q.errors.length) {
-      await c.query(
-        `INSERT INTO ratio.ingest_validation_errors (tenant_id, batch_id, error_ordinal, artifact_sha256, row_ordinal, column_name, code, message)
-         SELECT $1, $2, u.ord, u.sha, u.row_ord, u.col, u.code, u.msg
-         FROM unnest($3::int[], $4::text[], $5::bigint[], $6::text[], $7::text[], $8::text[]) AS u(ord, sha, row_ord, col, code, msg)`,
-        [
-          lease.tenantId,
-          q.batchId,
-          q.errors.map((_, i) => i + 1),
-          q.errors.map((e) => e.artifactSha256),
-          q.errors.map((e) => e.rowOrdinal),
-          q.errors.map((e) => (e.column === null ? null : redact(e.column).slice(0, 256))),
-          q.errors.map((e) => e.code),
-          q.errors.map((e) => redact(e.message).slice(0, 1000)),
-        ],
-      );
-    }
+    await insertValidationErrors(c, lease.tenantId, q.batchId, q.errors);
     await c.query(`DELETE FROM ratio.cost_facts WHERE batch_id = $1`, [q.batchId]);
     const r = await c.query(
       `UPDATE ratio.ingest_batches SET status = 'quarantined', quarantine_reason = $2, validation_error_count = $3,

@@ -212,8 +212,11 @@ The control totals are recomputed for AWS rows only.
   correct only because the harness filtered it.
 - **The independent control stays honest.** The Python calculator still
   reads the upstream file and shares no code with the worker. It gets one
-  explicit, exact filter, `--provider AWS`. Rows of any other provider (and
-  NULL) are reported per period under `excluded`, never summed. The worker's
+  explicit, exact filter, `--provider AWS`. Rows of any other provider are
+  reported per period under `excluded`, never summed. A NULL or empty
+  ProviderName is refused (exit 1): the worker quarantines such a batch
+  instead of excluding the row, so the control cannot predict the result
+  row by row. The sample has none. The worker's
   allowlist and the calculator's filter are written separately: TS
   constant vs a CLI argument passed by `local.mjs`. So a worker that
   accepted `Microsoft`, or matched `aws` loosely, disagrees with the

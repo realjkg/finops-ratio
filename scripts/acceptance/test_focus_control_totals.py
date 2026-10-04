@@ -236,7 +236,7 @@ class ProviderFilterTests(unittest.TestCase):
             '"2024-10-01 00:00:00","USD",8,8,"Microsoft","m2"',
             header=PROVIDER_HEADER,
         )
-        doc = fct.compute(data, providers=['AWS'], rows=True)
+        doc = fct.compute(data, providers=['AWS'])
         self.assertEqual(doc['providerFilter'], ['AWS'])
         self.assertEqual([(t['billingPeriod'], t['rowCount'], t['billedCost'], t['effectiveCostNulls']) for t in doc['totals']], [('2024-09-01', '2', '1.35', '1')])
         lines = sorted(['a\t1.10\t1.00\n', 'b\t0.25\t\\N\n'], key=lambda s: s.encode())
@@ -245,9 +245,18 @@ class ProviderFilterTests(unittest.TestCase):
             {'billingPeriod': '2024-09-01', 'rowCount': '5', 'providers': {'AWS ': '1', 'Amazon Web Services': '1', 'Microsoft': '1', 'Oracle': '1', 'aws': '1'}},
             {'billingPeriod': '2024-10-01', 'rowCount': '2', 'providers': {'Microsoft': '1', 'Oracle': '1'}},
         ])
-        self.assertEqual([r['extraColumns']['Id'] for r in doc['rows']], ['a', 'b'])
         # The whole file is still described: every record was read and validated.
         self.assertEqual(doc['input']['dataRows'], 9)
+
+    def test_rows_hold_the_allowed_records_only(self):
+        ok = '"2024-09-01 00:00:00","2024-10-01 00:00:00","2024-09-18 22:00:00","2024-09-18 23:00:00","USD",1,1,1,1,"{p}","S","C","Usage","r","s","b",1,"u",1,"u",1,"u","{id}",NULL,NULL'
+        data = csv_bytes(ok.format(p='AWS', id='a'), ok.format(p='Microsoft', id='m'), ok.format(p='AWS', id='b'), header=FULL_HEADER)
+        doc = fct.compute(data, rows=True, providers=['AWS'])
+        self.assertEqual([r['extraColumns']['Id'] for r in doc['rows']], ['a', 'b'])
+        self.assertEqual({r['providerName'] for r in doc['rows']}, {'AWS'})
+        # Ids stay unique across the whole file, excluded records included.
+        with self.assertRaises(fct.ControlTotalsError):
+            fct.compute(csv_bytes(ok.format(p='AWS', id='a'), ok.format(p='Microsoft', id='a'), header=FULL_HEADER), rows=True, providers=['AWS'])
 
     def test_several_providers_may_be_allowed(self):
         data = csv_bytes('"2024-09-01 00:00:00","USD",1,1,"AWS","a"', '"2024-09-01 00:00:00","USD",2,2,"X","x"', '"2024-09-01 00:00:00","USD",4,4,"Y","y"', header=PROVIDER_HEADER)

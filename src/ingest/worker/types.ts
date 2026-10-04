@@ -51,6 +51,8 @@ export interface PeriodResult {
   billedTotal?: string;
   reconciliation?: 'reconciled' | 'unverified' | 'variance';
   artifactSetFingerprint?: string;
+  /** Rows excluded by the provider check (issue #62) of a published batch; omitted when none. */
+  excludedRows?: string;
 }
 
 export interface RunResult {

@@ -71,7 +71,9 @@ import { runBootstrap } from './bootstrap.mjs';
 import {
   CONTROL_TOTALS_FILE as SAMPLE_CONTROL_TOTALS_FILE,
   SAMPLE_NAMES,
+  SAMPLE_PROVIDERS,
   artifactSetProblems,
+  publishedDataShas,
   rowProblems,
   UPSTREAM_COMPARED_FIELDS,
   batchProblems,
@@ -581,8 +583,10 @@ async function catalogSnapshot(settings, secrets) {
       const batches = await c.query(
         `SELECT to_char(billing_period, 'YYYY-MM-DD') AS billing_period, status, reconciliation, is_provisional,
                 row_count::text AS row_count, loaded_billed_total::text AS loaded_billed_total,
-                validation_error_count::text AS validation_error_count, quarantine_reason
-           FROM ratio.ingest_batches WHERE tenant_id = $1 ORDER BY billing_period, status`,
+                validation_error_count::text AS validation_error_count, quarantine_reason,
+                (SELECT coalesce(jsonb_object_agg(e.code, e.n), '{}'::jsonb)
+                   FROM (SELECT code, count(*)::int AS n FROM ratio.ingest_validation_errors v WHERE v.batch_id = b.id GROUP BY code) e) AS error_codes
+           FROM ratio.ingest_batches b WHERE tenant_id = $1 ORDER BY billing_period, status`,
         [secrets.RATIO_LOCAL_TENANT_ID],
       );
       const facts = await c.query(
@@ -630,11 +634,12 @@ async function acceptance(args) {
   fail(`dataset ${opts.dataset} (${pin.localPath}) does not match dataset.json; re-run \`npm run sample:fetch\``, verifyDatasetBytes(bytes, pin));
 
   const calcStarted = Date.now();
-  const calc = await run('python3', [CONTROL_CALCULATOR, '--rows', '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
+  // Issue #62: the control counts the AWS rows only (exact match); the worker must exclude the rest.
+  const calc = await run('python3', [CONTROL_CALCULATOR, '--rows', ...SAMPLE_PROVIDERS.flatMap((p) => ['--provider', p]), '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
   if (calc.code !== 0) throw new Error(`the control-total calculator exited ${calc.code}`);
   const control = JSON.parse(calc.out);
   const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, SAMPLE_CONTROL_TOTALS_FILE), 'utf8'))[opts.dataset];
-  if (JSON.stringify({ input: control.input, columns: control.columns, totals: control.totals }) !== JSON.stringify(pinned)) {
+  if (JSON.stringify({ input: control.input, columns: control.columns, providerFilter: control.providerFilter, excluded: control.excluded, totals: control.totals }) !== JSON.stringify(pinned)) {
     throw new Error(`the calculator's output differs from the pinned ${SAMPLE_CONTROL_TOTALS_FILE} (${opts.dataset})`);
   }
   const calcMs = Date.now() - calcStarted;
@@ -643,6 +648,8 @@ async function acceptance(args) {
   const staged = stageFocusSample(bytes, { mutation: opts.mutation }); // proves the clean plan lossless first
   const stageMs = Date.now() - stageStarted;
   const dataShas = staged.objects.filter((o) => o.kind === 'data').map((o) => o.sha256);
+  // The API's artifact set: the data objects of the periods that publish (an all-foreign period is quarantined).
+  const publishedShas = publishedDataShas(staged.objects, control);
   const totalRows = control.totals.reduce((n, t) => n + Number(t.rowCount), 0);
 
   await preflight(settings, 'local:acceptance');
@@ -659,6 +666,7 @@ async function acceptance(args) {
       steps.dataset = { key: opts.dataset, file: pin.localPath, bytes: pin.bytes, sha256: pin.sha256, commit: dataset.commit, licence: dataset.licence };
       steps.mutation = opts.mutation;
       steps.control = control.totals;
+      steps.excluded = control.excluded;
       steps.staging = { periods: staged.periods, objects: staged.objects.map((o) => ({ key: o.key, bytes: o.body.length, sha256: o.sha256 })), nullTokensReplaced: staged.nullTokensReplaced };
 
       await timed('up', () => up(settings));
@@ -705,7 +713,7 @@ async function acceptance(args) {
       const maxPages = Math.ceil(totalRows / ACCEPTANCE_PAGE_LIMIT) + 1;
       const { rows, totals, pages } = await timed('apiRead', () => readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: ACCEPTANCE_PAGE_LIMIT, maxPages }));
       steps.api = { totals, rows: rows.length, pages, limit: ACCEPTANCE_PAGE_LIMIT };
-      fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, dataShas)]);
+      fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, publishedShas)]);
       // Every API row against its UPSTREAM record (the calculator's --rows), every field (challenger M1).
       fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control));
       steps.rowsCompared = { rows: control.rows.length, fieldsPerRow: API_ROW_FIELDS_COMPARED, extraColumns: control.columns.extra.length };
