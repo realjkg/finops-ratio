@@ -460,3 +460,110 @@ teeth are shown below (L6f, N3c).
 Slice 0 (`src/ingest/db`) and Slice 1 worker semantics are unchanged in this
 round. The pre-existing Slice 1 `periods.test.ts` timeout under extreme load
 (§11) still stands and is not addressed here.
+
+## 13. Copilot review of 551c16c (3 Medium, 2 Low); local, not pushed
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| feb9901 | L17 (deadlines) and L18 (summary finalisation) tests | **red** (`red/red-copilot3-fast.txt`: 52 failed / 106) |
+| 95f8786 | hard deadline on every wait; local:test fails on an unclean app stop | green |
+| 37b22c0 | brief §1 historical; documented ports, projects and paths match the code; DESIGN §11, TEST_PLAN L16–L18 | docs |
+| (this commit) | this section | docs |
+
+**Changes to tests after red (no assertion weakened):**
+- One static regex in L17 was wrong. `/\bfetchFn\(url, \{[^}]*signal/` stopped
+  at the first `}` inside the `headers` object, so it could never match. It
+  is now `/\bfetchFn\(url, \{[^\n]*, signal \}\)/`, which asserts the same
+  thing: `fetchJson` passes the deadline's signal to `fetch`.
+- L16's static check used to look for `await cleanupLocalTest({` in
+  `local.mjs`. Cleanup now goes through `runLocalTest` in `lib.mjs`, so the
+  check asserts that `local.mjs` calls `runLocalTest({` and that `lib.mjs`
+  calls `cleanupLocalTest({`. Every other L16 assertion is unchanged.
+
+### Mapping
+
+| Comment | Severity | Commit(s) | Test(s) / evidence |
+|---|---|---|---|
+| 4176117539: `waitFor` checks its deadline only after `fetch` resolves, so a stalled S3 or app endpoint hangs `local:up` (local.mjs:131, :310) | Medium | feb9901, 95f8786 | `waitFor` is removed and replaced by `waitUntil` (lib.mjs). Each attempt runs under `withDeadline(min(attemptTimeoutMs, remaining))`, which aborts the attempt's signal. The overall deadline is checked before every attempt and caps every sleep. `waitForOwnServer` (readiness, :310) has the same structure. L17 covers it with a real TCP server that accepts and never answers: `waitUntil` (s3) and `waitForOwnServer` each fail within their deadline and every attempt signal is aborted. They also fail when a probe ignores its signal, and when one attempt would outlast the overall deadline. Mutations W1–W4 and F9 killed |
+| 4176117553: the end-to-end API reads have no time limit, so a stuck `next start` blocks the `finally` teardown (local.mjs:263) | Medium | feb9901, 95f8786 | `fetchJson` bounds every read at `API_REQUEST_TIMEOUT_MS` = 30 s, longer than the route's 10 s `statement_timeout` (a static test reads both values from source). The limit covers the headers AND the body: a stalled body is now a timeout, where the old `r.json().catch(() => null)` silently returned null. L17 tests three cases: no headers, then a stalled body, both within the deadline; and `runLocalTest` with a stalled readiness probe or a stalled API read, where the run fails within its deadline and `down -v` still runs exactly once. **Sweep:** every wait in `scripts/local/*.mjs` has a hard deadline (inventory below). Mutations W5–W10 and F8 killed |
+| 4176117561: an `unresponsive` or `error` app stop must fail the run (local.mjs:353); with challenger Lows 1 and 2 | Medium | feb9901, 95f8786 | The pure function `finalizeLocalTestSummary` (lib.mjs) decides. A run passes only when the body completed, the app stop was `stopped` or `killed`, and `down -v` returned `ok`. Everything else fails, unknown values included (fail closed). Every result is still recorded. `runLocalTest` runs the body, then always the bounded cleanup, then the finalisation. `local.mjs` exits 1 unless `summary.pass`, and `summary.failures` lists the reasons. L18 covers all 28 combinations (body error × 7 app results × 2 down results), each of the three single failures alone, `already-exited` and never-started, `runLocalTest` end to end, and static checks: `setApp` right after the spawn, the exit code taken from `summary.pass`, and no `summary.pass =` in `local.mjs`. **Challenger T1** (dropping `pass = false` on a failed `down`) is now mutation F1, and it is killed. F2 and F3 kill the `unresponsive` and `error` variants. F4–F7 killed |
+| 4176117574: DEPLOYMENT_BRIEF.md:54 still calls D-01 unresolved | Low | 37b22c0 | Brief §1 changes: <ul><li>retitled "Option analysis considered before the decisions (historical rationale)", with a note that it records no open question;</li><li>the D-01 sentence is in the past tense and names the resolution;</li><li>every "Recommended default (now DECIDED)" reads "Recommended, then adopted (Decision log)";</li><li>"Choose / Decide" wording is labelled as revisit triggers;</li><li>"Blocks" reads "Depended on this decision";</li><li>the D-02 manifest-semantics item is labelled a known test gap, not an open decision.</li></ul> **Sweep** of the brief, DESIGN, EVIDENCE and TEST_PLAN (grep for unresolved, pending, open, owner must or decides, to be decided, recommended default, choose, decide, Blocks): nothing else open about D-01..D-10. DESIGN §1 no longer says the brief records the decisions in "§8"; it now points to the Decision log. Outside the four docs, two headers in Slice 2 files called decided items "owner decisions", and both are fixed: `docker-compose.local.yml` (hosting) and `scripts/local/bootstrap.mjs` (D-04) |
+| 4176117585: DESIGN.md:302 lists the developer ports, but CI runs `local:test` on 54339/18353/3110 | Low | 37b22c0 | DESIGN changes: <ul><li>§3.2 has a settings table for the developer stack and for `local:test`, taken from `localSettings` / `localTestSettings`;</li><li>the data flow names `local:test`'s own project, ports and preflight, and the pass rule;</li><li>`local:down -v` removes `.ratio-local/<project>/`;</li><li>§3.3: CI runs `local:test` on `ratio-local-test` 54339/18353/3110, clear of 5432/8333 and of the developer defaults;</li><li>the component row says `-p <project>` always overrides the compose file's `name: ratio-local`.</li></ul> The CI comment names the app port 3110, and the compose header notes `-p`. TEST_PLAN separates the `ratio-local-s2a` run of the individual commands from `local:test`'s defaults. **Sweep** (scripted, `check_names.py`): every backticked repository path in the four Slice 2 docs exists; every `RATIO_*` name occurs in code or configuration; every `npm run` script exists; every port mentioned is a code default, the shared SeaweedFS (18333), the private test cluster (55700), the shared cluster named only as avoided (55432), or the recorded `ratio-local-s2a` run (55710/18710/3710) |
+
+**Not changed, and why:** some Slice 0 and Slice 1 docs and tests still call
+items "owner decisions". They are historical, and the Slice 0/1 tests may not
+change. `.obvious/skills/ingestion-ops/SKILL.md` still calls retention (D-03)
+and the ledger grant (D-05) "owner decisions". It is outside Slice 2, so it is
+reported to the coordinator instead of changed here.
+
+### Deadline inventory: every wait in `scripts/local/*.mjs`
+
+| # | Wait | Where | Hard bound | On expiry |
+|---|---|---|---|---|
+| 1 | `docker ps` (preflight) | local.mjs `localTest` → `runProcess` | 60 s | SIGKILL, reject |
+| 2 | `docker compose up -d --wait` | `up` | 600 s (allows a first image pull in CI) | SIGKILL, reject |
+| 3 | `docker compose down [-v]` | `down` (developer `local:down` and local:test cleanup) | 300 s; local:test also wraps it in a 330 s `withDeadline` | SIGKILL, reject; the cleanup records `error: …` and the run fails |
+| 4 | `npm run worker:build` | `migrate`, `workerCli` | 300 s | SIGKILL, reject |
+| 5 | worker CLI `migrate`, `migrate --status`, `sync` | `workerCli` | 600 s each (the worker also has its own `RATIO_MAX_RUN_SECONDS` and stall timeouts) | SIGKILL, reject |
+| 6 | Postgres readiness | `up` → `waitUntil` | 120 s overall, 5 s per attempt | reject "timed out waiting for postgres" |
+| 7 | S3 readiness (`fetch` with `signal`, body cancelled) | `up` → `waitUntil` | 120 s overall, 5 s per attempt | attempt aborted; reject at overall |
+| 8 | every Postgres session (readiness probe; version check and bootstrap; seed provisioning) | `withClient` | connect 5 s; each statement 60 s (`query_timeout` client-side and `statement_timeout` server-side); `end()` 5 s; whole session 120 s | the socket is destroyed (also when the caller's signal aborts); reject |
+| 9 | S3 `CreateBucket` | `seed` | 30 s via `withDeadline` with `abortSignal`; client handler connect 5 s, request 30 s | request aborted; reject |
+| 10 | bucket warm-up (put + delete) | `seed` → `waitUntil` | 60 s overall, 30 s per attempt, both sends with `abortSignal` | reject |
+| 11 | fixture `PutObject` (one per file) | `seed` | 30 s each (`withDeadline` + `abortSignal`) | reject |
+| 12 | `portInUse` (preflight ×3, and the pre-spawn re-check) | lib.mjs | 2 s each (hard timer plus socket idle timeout) | counts as busy: refuse (fail closed) |
+| 13 | `next start` readiness (`fetch` with `signal`, body cancelled) | `waitForOwnServer` | 60 s overall, 5 s per attempt; fails at once if the child exits | reject; the run fails, cleanup runs |
+| 14 | `/proc` listener ownership | `ownsListeningSocket` | synchronous, so bounded by work: at most 4096 processes visited (`maxProcesses`); a seen-set ends cycles | refuse (`false`) |
+| 15 | anonymous API read | `fetchJson` | 30 s, headers and body | reject; the run fails, cleanup runs |
+| 16 | paginated API reads | `fetchJson` | 30 s each; at most 100 pages (`MAX_PAGES`; more ⇒ the run fails) | as 15 |
+| 17 | stopping `next start` | `stopChild` | SIGTERM, 10 s grace; SIGKILL, 5 s; then `unresponsive` | the run fails; `down -v` still runs |
+| 18 | `runProcess` without a deadline | lib.mjs | refused before spawning | reject |
+| 19 | `withDeadline` / `waitUntil` / `waitForOwnServer` without a positive deadline | lib.mjs | refused | reject |
+
+`bootstrap.mjs` makes no I/O of its own: it runs its statements on the client
+it is given (row 8). Local file reads (`fs.*Sync`) and log writes are not
+waits. Every network and process step is bounded, so a whole `local:test` run
+is bounded too.
+
+### Mutation checks (scratch `mutate6.sh`; each applied, run, restored; tree clean after; 0 orphan children)
+
+| ID | Mutation | Result |
+|---|---|---|
+| W1 | `waitUntil`: attempt not bounded (the reported bug) | **killed**: local 2/106 |
+| W2 | `waitUntil`: attempt bounded by `attemptTimeoutMs` only, not by what is left of the overall deadline | **killed**: 1/106 |
+| W3 | `waitForOwnServer`: probe not bounded (the bug reported at :310) | **killed**: 3/106 |
+| W4 | `withDeadline` does not abort the signal | **killed**: 3/106 |
+| W5 | `fetchJson` passes no signal to `fetch` | **killed**: 1/106 |
+| W6 | `fetchJson` deadline ignored (1 h) | **killed**: 4/106 |
+| W7 | cleanup: `down -v` unbounded | **killed**: 1/106 |
+| W8 | `runProcess` runs without a deadline | **killed**: 1/106 |
+| W9 | `portInUse`: no hard timer | **killed**: 1/106 |
+| W10 | `/proc` walk: no process cap | **killed**: 1/106 |
+| F1 | **challenger T1**: a failed `down -v` does not fail the run | **killed**: 3/106 |
+| F2 | an `unresponsive` app passes | **killed**: 3/106 |
+| F3 | an `error: …` app stop passes | **killed**: 2/106 |
+| F4 | a body error does not fail the run | **killed**: 4/106 |
+| F5 | `runLocalTest` rethrows a body error (skips the cleanup) | **killed**: 2/106 |
+| F6 | `local.mjs` exits 0 whatever `summary.pass` says | **killed**: 1/106 |
+| F7 | `local.mjs` never records the spawned app (no stop at cleanup) | **killed**: 1/106 |
+| F8 | `local.mjs` API reads without a deadline | **killed**: 1/106 |
+| F9 | `local.mjs` S3 readiness `fetch` without a signal | **killed**: 1/106 |
+
+### Gates (HEAD 37b22c0 + this file)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **2318 passed** (100 files), run concurrently with `test:db` |
+| `npm run test:db` ×2 (private PG16 at 55700 + S3 prefixes) | **595 + 161** passed ×2; 111 / 107 s |
+| `worker:build`; `next build` | 0; 0 (`tsconfig.json`/`next-env.d.ts` restored) |
+| `npm run check:bundle` | pass (116 client files, 91 server files) |
+| `npm run local:test` (`ratio-local-test`, 54339/18353/3110) | pass in 26 s; `appReady: pid-verified`; totals 55 / `30.8272954899`, 40 / `21.0978157665`; 95 distinct rows; `appStop: stopped`; `down: ok (-v)`; **`failures: []`** |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+| leftovers | none: private cluster stopped and deleted; no `ratio-local*` containers or volumes; no `.ratio-local/`; no sleeper children |
+
+Slice 0 (`src/ingest/db`) and Slice 1 worker semantics are unchanged in this
+round. The pre-existing Slice 1 `periods.test.ts` timeout under extreme load
+(§11) still stands and is not addressed here.
