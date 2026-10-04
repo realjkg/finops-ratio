@@ -397,12 +397,14 @@ describe('D10 the worker CLI: the opt-in comes from its env only, and is logged 
     expect(optInLogs(r.err)).toEqual([]);
   });
 
-  it('ON ("1"): published, and the opt-in is logged exactly once, naming the providers', async () => {
+  it('ON ("1"): published, and the opt-in is logged exactly once, with the size of the set but no provider name (Slice 1 K1: logs carry no row values)', async () => {
     const s = await seedTenantSource(t.db.pool, { kind: 'fake', config: { fixture: 'synthetic-base' } });
     const r = await cli(['sync', '--tenant', s.tenantId, '--source', s.sourceKey], cliEnv('1'));
     expect(r.code).toBe(0);
     const logs = optInLogs(r.err);
     expect(logs).toHaveLength(1);
-    expect(logs[0]).toMatchObject({ level: 'warn', providers: ['SyntheticCloud', 'SyntheticAWS', 'SyntheticAzure', 'SyntheticGCP'] });
+    expect(logs[0]).toMatchObject({ level: 'warn', syntheticProviderCount: 4 });
+    const all = r.out.concat(r.err).join('\n');
+    for (const name of ['SyntheticCloud', 'SyntheticAWS', 'SyntheticAzure', 'SyntheticGCP']) expect(all).not.toContain(name);
   });
 });
