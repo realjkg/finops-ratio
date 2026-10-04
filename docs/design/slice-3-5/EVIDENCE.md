@@ -18,7 +18,8 @@ ordinary commits and plain pushes (never a force-push).
 | 6 | `66a1fa2`, `472dbe3` | The challenger's review of 4492d2f..f5676d9 (1 High, 2 Medium, 4 Low), all answered (§3c): intermittent series on non-overlapping weekly sums or `info` only (D-24, proposed), calendar factors on raw `y` with a median estimator and a calendar-aware Hampel, estimation noise in every budget term, D8, h = 9.0, `budget4.py` (B.5.9). |
 | 7 | `380e9a0`, `801019a` | Revision 6 approved by the challenger (0 High, 0 Medium). D-24 decided by the orchestrator (option a): hurdle statistic with a clustering gate for intermittent series above 50 % zeros; the challenger's Low items L1–L4 answered (§3d); `budget5.py` (B.5.10). |
 | 8 | `04e6cf8`, `dbbd552` | Revision 7 approved by the challenger. The remaining Low, dormant series that reactivate, folded in by extending D4 (§3e); `reactivation.py` (B.5.11). |
-| 9 | `bb4379c` and the §5 refresh | The challenger's REQUEST CHANGES on revision 8 (1 Medium): the reactivation history condition looked at the wrong days. History moved to the pre-dormancy period and a size override added, both decided by the orchestrator (§3f); `reactivation.py` updated (B.5.11). |
+| 9 | `bb4379c`, `d70f074` | The challenger's REQUEST CHANGES on revision 8 (1 Medium): the reactivation history condition looked at the wrong days. History moved to the pre-dormancy period and a size override added, both decided by the orchestrator (§3f); `reactivation.py` updated (B.5.11). |
+| 10 | this revision, then a merge of `origin/main` | Revision 9 approved by the challenger. The three Low items (§3g): reactivation false positives under day clustering simulated on the chain (the independent-history approximation underestimated); the prior mean of the size override looks back up to 112 days; the D4 text made consistent. |
 
 ## 2. Governance wording: reverted
 
@@ -199,6 +200,8 @@ time `q̂` and `m̂` were inflated by the new regime.
 
 ## 3f. Revision 9: response to the challenger's review of 801019a..dbbd552
 
+The ρ > 0 figures below were corrected in revision 10 (§3g).
+
 The challenger confirmed that all 10 hashes, every `reactivation.py`
 figure, the AT-2 counting and the dormant window reproduce, and raised one
 Medium. **The history condition looked at the wrong days:** the ≥ 14 days
@@ -217,6 +220,17 @@ The orchestrator decided both (a) and (b).
 | False-positive cost | Union of (i) and (ii), per day: **1.4 × 10⁻⁵ under the generator** (5 × 10⁻⁶ by (i), 9 × 10⁻⁶ by (ii); worst case of 14 days of history 8.4 × 10⁻⁵); **0.00029 at ρ = 0.3**; **0.0079 at ρ = 0.6**. These are approximations for ρ > 0. The size-only bound without the relative test is 0.00033 / 0.0048 / 0.050, which matches the challenger's estimates; the relative test removes ≈ 97 % of it | DESIGN §4.2; Appendix B.5.11 |
 | Totals | **0.101 / 0.131** (conservative), + < 0.0001 from the reactivation line; ≤ 0.15 | DESIGN §4.2 |
 | Re-run | All 10 embedded SHA-256s match (9 unchanged, `reactivation.py` updated); every Python script re-run, unchanged outputs except `reactivation.py`'s new lines; `reactivation.py` identical on two runs. Peak disk 5.15 GB (5.19 GB with natural-3) | §4; Appendix B.5.11 |
+
+## 3g. Revision 10: the challenger's Low items on revision 9
+
+The challenger approved revision 9 (dbbd552..d70f074).
+
+| Item | Change | Where |
+|---|---|---|
+| **L1** clustered-day figures | Revision 9's ρ > 0 figures treated the history as independent of the dormant window, and that **underestimates**: a clustered series that has just gone quiet was usually in an active run before. `reactivation.py` now simulates the two-state chain (2,000,000 days per zero-share bin) and applies the real stretch, history and prior-mean definitions, scaled by the exact window probability at each leaf's zero share. Per day: **(i) 0.00083, (ii) 0.00012, union 0.00094 at ρ = 0.3; (i) 0.052, (ii) 0.0016, union 0.054 at ρ = 0.6** (revision 9: (i) 0.00015 and 0.0064). The challenger measured 0.00087, 0.050 and union 0.052. The generator (ρ = 0) is exact, so no gate moves; the figures are stated as the **real-data risk**: about a third of the design margin if real intermittent series cluster strongly | DESIGN §4.2 (D4 paragraph, budget line); Appendix B.5.11 |
+| **L2** monthly cadence | The prior mean of (ii) uses the active-day values in the 56 days ending at the last active day, extended back to up to 112 days (or all history) until there are ≥ 3. A monthly job (≈ 2 active days in 56) now gets a prior mean, and a 10 × restart reaches `warning`. Cost under the generator: 1.0 × 10⁻⁵ per day (was 9 × 10⁻⁶); at ρ = 0.3 / 0.6: 0.00012 / 0.0016. **Named limit: a quarterly job** (≤ 2 active days in 112) still has no prior mean and gets `info` unless (i) holds. The state is the last 3 active-day values per series, so peak disk is unchanged (5.15 GB; 5.19 GB with natural-3) | DESIGN §4.2, §4.3, §7 (5-2a); Appendix B.5.11, D.2 |
+| **L3** consistency | Revision 8's stale "False positives" bullet in §4.2 deleted. The worst case is named as **the union of (i) and (ii) with 14 days of history, 8.5 × 10⁻⁵**, in DESIGN, EVIDENCE and the B.5.11 table alike (it was 8.4 × 10⁻⁵ with the 56-day prior mean). The script prints (ii) at both history lengths instead of `nan` | DESIGN §4.2; Appendix B.5.11 |
+| Re-run | All 10 embedded SHA-256s match (9 unchanged, `reactivation.py` updated); every Python script re-run, outputs unchanged except `reactivation.py`; `reactivation.py` identical on two runs | §4 |
 
 ## 4. Measurements used by the design
 
@@ -243,7 +257,8 @@ The orchestrator decided both (a) and (b).
 | Hurdle routes under the generator | ≈ 114 of 115 leaves `warning`, ≈ 1 `info` only; ≈ 0.03 % of reachable spend outside AT-2 | `budget5.py` (B.5.10) |
 | Peak disk, rev. 7 | 5.15 GB (5.19 GB with natural-3) | `budget5.py` (B.5.10) |
 | D4 reactivation false positives (rev. 8) | 3 × 10⁻⁵/day with the history condition (generator); without it 0.0017 (generator), 0.32 (persistence 0.6) | `reactivation.py` as of revision 8 (superseded in B.5.11) |
-| D4 reactivation false positives (rev. 9) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` (B.5.11) |
+| D4 reactivation false positives (rev. 9; ρ > 0 underestimated, see rev. 10) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.4 × 10⁻⁵), 0.00029 (ρ 0.3), 0.0079 (ρ 0.6) | `reactivation.py` as of revision 9 |
+| D4 reactivation false positives (rev. 10, chain-simulated for ρ > 0) | union of (i) and (ii): 1.4 × 10⁻⁵/day (generator; worst case 8.5 × 10⁻⁵), 0.00094 (ρ 0.3), 0.054 (ρ 0.6) | `reactivation.py` (B.5.11) |
 | `dormant_reactivation` label pass rate (rev. 9) | 1.000 as specified (0.970 if placed on any individual series) | `reactivation.py` (B.5.11) |
 | Re-run of every embedded script (rev. 7) | all 9 SHA-256s match; Python outputs reproduce (`budget5.py` byte-identical twice, and from its Appendix B copy); SQL sizes reproduced on a fresh `postgres:16` container | §3d |
 

@@ -2114,68 +2114,95 @@ for runs in (['tuning', 'tuning-natural', 'natural-1', 'natural-2', 'enriched'],
     print("%d runs: peak %.2f GB, retained at end %.2f GB" % (len(runs), peak, retained))
 ```
 
-### B.5.11 Revisions 8 and 9: false positives of D4's reactivation rule, and the label pass rate
+### B.5.11 Revisions 8–10: false positives of D4's reactivation rule, and the label pass rate
 
-Computed by `reactivation.py` (below; standard library, < 10 s; two runs
+Computed by `reactivation.py` (below; standard library, ≈ 30 s; two runs
 give identical output). It rebuilds the leaf list and the intermittent
-flags of `budget5.py`. For each of the 1,884 intermittent leaves (all
-sizes; the other leaves are active every day and are never dormant outside
-a label), it computes the probability per day of ≤ 2 active days in the
-previous 56, followed by an active day whose value reaches the minimum
-impact. The dormant series' expected value is taken as 0, which overstates
-the excess. These window probabilities are exact for a two-state chain
-with lag-1 autocorrelation ρ (ρ = 0 is the generator); they count
-qualifying days, an upper bound on episodes.
+flags of `budget5.py`. The 1,884 intermittent leaves (all sizes) are the
+only ones that can meet the dormancy condition; every other leaf is active
+every day and is never dormant outside a label.
 
-Revision 9 rule (DESIGN §4.2, D4 (b)): `warning` if **(i)** the series
-was active on ≥ 50 % of the 28 days ending at its last active day before
-the dormant stretch (≥ 14 such days), or **(ii)** the restart day is
-≥ 10 × the min impact and ≥ 3 × the mean of its active-day values in the 56
-days ending there (≥ 3 active days).
-- (i) is exact for independent days: the history is independent of the
-  stretch apart from its last day, which is active.
-- (ii) samples the prior active-day mean, 2,000 fixed-seed draws per zero
-  share.
-- For ρ > 0 both treat the history as independent of the window, an
-  approximation.
+The rule (DESIGN §4.2, D4 (b)) applies to a day with ≤ 2 active days in
+the previous 56 and a value at ≥ the min impact; the dormant series'
+expected value is taken as 0, which overstates the excess. Such a day
+reaches `warning` if either condition holds:
+- **(i)** the series was active on ≥ 50 % of the 28 days ending at its
+  last active day before the dormant stretch, with ≥ 14 such days;
+- **(ii)** the restart day is ≥ 10 × the min impact and ≥ 3 × the prior
+  active-day mean. That mean uses the active-day values in the 56 days
+  ending at the last active day, extended back to up to 112 days until
+  there are ≥ 3 (revision 10).
+
+How each case is computed:
+- **Independent days (ρ = 0, the generator).**
+  - The window probability is exact.
+  - (i) is exact: the history is independent of the stretch apart from its
+    last day, which is active.
+  - (ii) samples the prior mean, 2,000 fixed-seed draws per zero share.
+- **Clustered days (ρ > 0, revision 10).**
+  - The per-leaf rate is the exact two-state-chain probability of a
+    qualifying day at the leaf's zero share, times the share of qualifying
+    days that pass at the leaf's size.
+  - That share comes from 2,000,000 simulated days per zero-share bin
+    (0.30 … 0.80), applying the real stretch, history and prior-mean
+    definitions.
+  - Revision 9's formula, which treated the history as independent of the
+    window, is printed only for comparison: it underestimates.
+
+All rates count qualifying days, an upper bound on episodes.
 
 | Case (candidates per day at ≥ `warning`) | ρ = 0 (generator) | ρ = 0.3 | ρ = 0.6 |
 |---|---|---|---|
 | No history condition (revision 8's first measurement) | 0.00169 | 0.0268 | 0.320 |
 | Size only, ≥ 10 × min, no relative test (bound) | 0.00033 | 0.00481 | 0.0503 |
-| **(i), 28 days of history** | **0.000005** | 0.000151 | 0.00635 |
-| **(ii), size override** | **0.000009** | 0.000141 | 0.00155 |
-| **(i) or (ii), union bound** | **0.000014** | **0.00029** | **0.0079** |
-| (i), worst case of 14 days of history | 0.000075 | 0.00155 | 0.0298 |
+| **(i), 28 days of history** | **0.000005** | **0.00083** | **0.0524** |
+| **(ii), size override, 112-day lookback** | **0.000010** | **0.00012** | **0.00161** |
+| **(i) or (ii)** | **0.000014** | **0.00094** | **0.0538** |
+| Worst case, (i) or (ii) with only 14 days of history | 0.000085 | — | — |
+| (i) by revision 9's independent-history formula (underestimates) | — | 0.00015 | 0.0064 |
+
+The challenger's independent chain simulation gave (i) ≈ 0.00087 at
+ρ = 0.3 and ≈ 0.050 at ρ = 0.6, union ≈ 0.052; it agrees with the table.
+The 112-day lookback moves (ii) from 9 × 10⁻⁶ to 1.0 × 10⁻⁵ under the
+generator.
 
 **Labels.** 20,000 `dormant_reactivation` labels were simulated per the
-specification: non-intermittent individual series drawn by spend, active
-every day up to a last active day a uniform on 16 … r − 57, restart day r
-uniform on 73–115, so the gap is free (≥ 56 days), at × U(0.5, 3) the
-earlier level, meaningful only. The rule fires on every label, and **every
-label reaches `warning` under (i): pass rate 1.000**. For comparison, with
-the labels placed on any individual series, intermittent ones with their
-own pattern: 0.970 under (i), 0.970 under (i) or (ii).
+specification:
+- non-intermittent individual series, drawn by spend;
+- active every day up to a last active day a, uniform on 16 … r − 57;
+- restart day r uniform on 73–115, so the gap is free (≥ 56 days);
+- restart at × U(0.5, 3) the earlier level, meaningful only.
 
-The rule adds < 0.0001 per day to `budget5.py`'s totals (0.101 and 0.131);
-no other figure changes. **Peak disk** is unchanged at 5.15 GB (5.19 GB
-with natural-3): the labels exist only on the enriched seed, and a dormant
-gap removes rows rather than adding them.
+The rule fires on every label, and **every label reaches `warning` under
+(i): pass rate 1.000**. For comparison, with labels placed on any
+individual series, intermittent ones with their own pattern, the pass
+rate is 0.970.
+
+The rule adds < 0.0001 per day to `budget5.py`'s totals under the generator
+(0.101 and 0.131); no other figure changes. **Peak disk** is unchanged at
+5.15 GB (5.19 GB with natural-3):
+- the labels exist only on the enriched seed, and a dormant gap removes
+  rows rather than adding them;
+- the reactivation state is a few numbers per series (the last 3
+  active-day values for the 112-day lookback).
 
 SHA-256 of `reactivation.py` as run:
-`256a37f5a489e9bea17cb8e4e2b9ebf686f787eed8401d8f6b9d0522ece8bb4b`.
+`4b79642027c68dc1293c04c881d3eafe8d32f379e19dcaa95665772032a28cce`.
 
 `reactivation.py`:
 
 ```python
 import random, math, bisect
-# fleet15k, revision 9: false positives of D4's reactivation rule and the pass rate of `dormant_reactivation`
+# fleet15k, revision 10 (final Lows on revision 9): false positives of D4's reactivation rule and the pass rate of `dormant_reactivation`
 # labels. Rule: a series with < 3 active days in the prior 56-day window has a day with M >= the min impact.
 # Dormant stretch = the longest run of days ending at D - 1 with at most 2 active days; t0 = its first day, so
 # day t0 - 1 is the last active day before it. `warning` if (a) the series was active on >= 50 % of the 28 days
 # ending at t0 - 1 (>= 14 such days required), or (b) the restart day is >= 10 x the min impact and >= 3 x the
-# mean of the active-day values in the 56 days ending at t0 - 1 (>= 3 active days); else `info`.
-# Window probabilities are exact (two-state chain); the size override and the label check use fixed-seed sampling.
+# prior active-day mean: the active-day values in the 56 days ending at t0 - 1, extended back to up to 112 days
+# (or all history) until there are >= 3; else `info`.
+# Independent days (the generator): exact window probabilities, sampled prior mean. Clustered days (rho > 0): a
+# simulated two-state chain with the real stretch, history and prior-mean definitions (the independent-history
+# formula underestimates there and is printed only for comparison). Fixed seeds throughout.
 # Account model, leaf list and intermittent flags as budget5.py; the calendar-cohort stream is drawn so that
 # the intermittent stream stays aligned. Standard library only.
 # Account model, seed and leaf list are those of budget.py / budget2.py / budget3.py (37,052 leaves).
@@ -2244,15 +2271,19 @@ for rho in (0.0, 0.3, 0.6):
 def p_hist_regular(p, n=28):
     pi = 1 - p; need = (n + 1) // 2 - 1                  # active days needed among the other n - 1 days
     return sum(math.comb(n - 1, k) * pi ** k * (1 - pi) ** (n - 1 - k) for k in range(max(0, need), n))
-# (b) size override: restart value X * mu_a against 3 x the sample mean of the active-day values in 56 days
-# (mu_a = true active-day mean = L / (1 - p); X ~ lognormal, mean 1, log sd 0.5). Ybar draws per zero share.
+# (b) size override: restart value X * mu_a against 3 x the prior active-day mean (mu_a = true active-day mean
+# = L / (1 - p); X ~ lognormal, mean 1, log sd 0.5). Prior mean: 56 days, extended to up to 112 for >= 3 values.
 rs = random.Random(53)
 def ybar_draws(p, k=2000):
     out = []
     while len(out) < k:
-        n = sum(1 for _ in range(56) if rs.random() >= p)
-        if n >= 3:
-            out.append(sum(math.exp(rs.gauss(0, 0.5) - 0.125) for _ in range(n)) / n)
+        pos = [d for d in range(112) if rs.random() >= p]         # active days, counted back from t0 - 1
+        vals = [math.exp(rs.gauss(0, 0.5) - 0.125) for _ in pos]
+        use = [v for d, v in zip(pos, vals) if d < 56]
+        if len(use) < 3:
+            use = vals[:3] if len(vals) >= 3 else []
+        if use:
+            out.append(sum(use) / len(use))
     return out
 YB = {round(q, 2): ybar_draws(q) for q in [0.30 + 0.05 * j for j in range(11)]}
 def p_override(L, p):
@@ -2262,14 +2293,70 @@ def p_size_only(L, p):
     return p_value_ge(L, p, 10 * MIN)
 PO = {i: p_override(leaves[i][0], inter[i][1]) for i in inter_idx}
 print()
+print("independent days (generator; exact window, sampled prior mean):")
+dm0 = [p_dormant_then_active(inter[i][1], 0.0) for i in inter_idx]
+b0 = sum(d * PO[i] for d, i in zip(dm0, inter_idx))
+so0 = sum(d * p_size_only(leaves[i][0], inter[i][1]) for d, i in zip(dm0, inter_idx))
 for n in (14, 28):
-    for rho in (0.0, 0.3, 0.6):
-        dm = [p_dormant_then_active(inter[i][1], rho) for i in inter_idx]
-        a_ = sum(d * p_value_ge(leaves[i][0], inter[i][1]) * p_hist_regular(inter[i][1], n) for d, i in zip(dm, inter_idx))
-        b_ = sum(d * PO[i] for d, i in zip(dm, inter_idx)) if n == 28 else float('nan')
-        so = sum(d * p_size_only(leaves[i][0], inter[i][1]) for d, i in zip(dm, inter_idx))
-        print("history %d days, rho %.1f%s: (a) history route %.6f | (b) size override %.6f (size-only bound, no relative test, %.5f) | union bound %.6f per day"
-              % (n, rho, "" if rho == 0 else " (history treated as independent of the window, approximation)", a_, b_, so, a_ + (b_ if b_ == b_ else 0.0)))
+    a0 = sum(d * p_value_ge(leaves[i][0], inter[i][1]) * p_hist_regular(inter[i][1], n) for d, i in zip(dm0, inter_idx))
+    print("   history %d days: (i) %.6f | (ii) %.6f | union bound %.6f per day (size-only bound, no relative test, %.5f)" % (n, a0, b0, a0 + b0, so0))
+print("for comparison only, rho > 0 with the history treated as independent of the window (underestimates):")
+for rho in (0.3, 0.6):
+    dm = [p_dormant_then_active(inter[i][1], rho) for i in inter_idx]
+    a_ = sum(d * p_value_ge(leaves[i][0], inter[i][1]) * p_hist_regular(inter[i][1], 28) for d, i in zip(dm, inter_idx))
+    print("   rho %.1f: (i) %.6f" % (rho, a_))
+# ---- clustered days: simulate the two-state chain and apply the rule as defined ----
+def chain_events(p, rho, days, seed):
+    r = random.Random(seed); pi = 1 - p
+    p11 = pi + rho * (1 - pi); p01 = pi * (1 - rho)
+    act = []; val = []; a = r.random() < pi; win = 0; ev = []
+    for d in range(days):
+        a = r.random() < (p11 if a else p01)
+        v = math.exp(r.gauss(0, 0.5) - 0.125) if a else 0.0
+        if a and d >= 112 + 56 and win <= 2:
+            k = 0; last = None                                  # dormant stretch: back from d - 1
+            for e in range(d - 1, -1, -1):
+                if act[e]:
+                    k += 1
+                    if k == 3:
+                        last = e; break
+            if last is not None and last >= 111:
+                hist = act[last - 27:last + 1]
+                hok = sum(hist) >= 14
+                use = [val[e] for e in range(last, last - 56, -1) if act[e]]
+                if len(use) < 3:
+                    use = [val[e] for e in range(last, last - 112, -1) if act[e]][:3]
+                yb = sum(use) / len(use) if len(use) >= 3 else None
+                ev.append((hok, v, yb))
+        act.append(a); val.append(v)
+        win += a
+        if d >= 56:
+            win -= act[d - 56]
+    return ev
+CH_DAYS = 2_000_000
+# Per leaf: (exact two-state-chain probability of a qualifying day at the leaf's own zero share) x (share of the
+# simulated qualifying days, in the nearest zero-share bin with >= 20 of them, that pass (i), (ii) or either at
+# the leaf's own size). This avoids the bias of rounding the steep window probability to a 0.05 bin.
+for rho in (0.3, 0.6):
+    EV = {}
+    for j in range(11):
+        q = round(0.30 + 0.05 * j, 2)
+        EV[q] = chain_events(q, rho, CH_DAYS, seed=700 + j + int(rho * 100))
+    good = [q for q in EV if len(EV[q]) >= 20]
+    ra = rb = ru = 0.0
+    for i in inter_idx:
+        L, p = leaves[i][0], inter[i][1]; mu = L / (1 - p)
+        q = min(good, key=lambda g: abs(g - p)); ev = EV[q]
+        fa = fb = fu = 0
+        for hok, v, yb in ev:
+            x = mu * v
+            f_a = hok and x >= MIN
+            f_b = yb is not None and x >= 10 * MIN and v >= 3 * yb
+            fa += f_a; fb += f_b; fu += f_a or f_b
+        dm = p_dormant_then_active(p, rho)
+        ra += dm * fa / len(ev); rb += dm * fb / len(ev); ru += dm * fu / len(ev)
+    print("simulated chain, rho %.1f (qualifying days per bin: %s): (i) %.5f | (ii) %.5f | union %.5f per day"
+          % (rho, ", ".join("%.2f: %d" % (q, len(EV[q])) for q in sorted(EV) if EV[q]), ra, rb, ru))
 # ---- `dormant_reactivation` labels: pass rate of the rule as specified (Appendix C.2) ----
 def label_pass(leaf, rl):
     L, s_, _a, _ind = leaves[leaf]
@@ -2294,6 +2381,8 @@ def label_pass(leaf, rl):
     hist = [act[d] for d in range(max(1, last - 27), last + 1)]
     ok_a = len(hist) >= 14 and sum(hist) >= 0.5 * len(hist)
     av = [val[d] for d in range(max(1, last - 55), last + 1) if act[d]]
+    if len(av) < 3:
+        av = [val[d] for d in range(last, max(0, last - 112), -1) if act[d]][:3]
     ok_b = len(av) >= 3 and x >= 10 * MIN and x >= 3 * sum(av) / len(av)
     return ok_a, ok_a or ok_b, x >= MIN
 rl = random.Random(61)

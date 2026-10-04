@@ -12,7 +12,8 @@ revision 7 the orchestrator's D-24 decision and the challenger's four Low
 items on revision 6 (approved, 0 High, 0 Medium), and revision 8 the one
 Low left on revision 7 (approved): dormant series that reactivate, and
 revision 9 the challenger's Medium on revision 8 (the history condition
-looked at the wrong days); the revision history and the item-by-item responses are in
+looked at the wrong days), and revision 10 the three Low items on
+revision 9 (approved); the revision history and the item-by-item responses are in
 [EVIDENCE.md](EVIDENCE.md).
 
 **Owner's goal.** Analyse cloud spend across **15,000 simulated accounts**,
@@ -1281,7 +1282,7 @@ the last 56 is not scored daily, so that bursts do not look like spikes:
 | D1 | **Residual vs interval** | `y > hi₉₉` (one-sided 99 % empirical quantile for h = 1, **calibrated as of D − 1**) or `y < lo₉₉` | spikes, drops, runaway onset |
 | D2 | **Robust z (floored MAD, log scale)** | `z = (log y − median₅₆ʷ(log y)) / σ`, `\|z\| ≥ z_T` with **z_T = 4.5** | spikes when the model is mis-fit |
 | D3 | **CUSUM on a frozen baseline** | see below | level shifts, gradual drift, runaway growth |
-| D4 | **New dimension, or reactivation** | (a) a (account, service) or (account, service, region) first seen with `M ≥` min impact on any of its first 3 days, in an account older than 30 days; (b) **reactivation (rev. 8; history fixed in rev. 9):** a series with **< 3 active days in the prior 56-day window** has a **day** with an excess over its expected value that passes the `warning` rules (§4.4), in an account older than 30 days. It reaches `warning` (or `critical`) if **(i)** the series was active on ≥ 50 % of the **28 days ending at its last active day before the dormant stretch** (≥ 14 such days required), or **(ii)** the restart day is ≥ 10 × the min impact **and** ≥ 3 × the mean of its active-day values in the 56 days ending at that last active day (≥ 3 active days required); otherwise `info` | new service, new region, dormant resource restarting |
+| D4 | **New dimension, or reactivation** | (a) a (account, service) or (account, service, region) first seen with `M ≥` min impact on any of its first 3 days, in an account older than 30 days; (b) **reactivation (rev. 8; history fixed in rev. 9):** a series with **< 3 active days in the prior 56-day window** has a **day** with an excess over its expected value that passes the `warning` rules (§4.4), in an account older than 30 days. It reaches `warning` (or `critical`) if **(i)** the series was active on ≥ 50 % of the **28 days ending at its last active day before the dormant stretch** (≥ 14 such days required), or **(ii)** the restart day is ≥ 10 × the min impact **and** ≥ 3 × its prior active-day mean: the active-day values in the 56 days ending at that last active day, extended back to up to 112 days (or all history) until there are ≥ 3; otherwise `info` | new service, new region, dormant resource restarting |
 | D5 | **Tag coverage** | the account's untagged share of `M` (key `cost-center`) rises ≥ 20 pp vs its trailing 28-day median and the untagged amount ≥ min impact | tagging loss (category `tagging_loss`) |
 | D6 | **Cold-start guardrail** | in an account's first 14 days, on **2 consecutive days**, the day-over-day growth of `M` above the **fitted** 99.9th percentile of its cohort's growth at the same day k (below), **and** `M` ≥ 10 × min impact. Growth rather than level, because a large account onboarding normally is not an anomaly | runaway in a new account |
 | D7 | **Commitment coverage** | the committed-share rules of §4.1 | `commitment_effect`, `commitment_expiry` |
@@ -1321,34 +1322,46 @@ would go unflagged until 3 active days entered the window, and by then
   tail of the burst-size distribution reaches 3 ×. Without it, a
   size-only rule would cost 0.00033 per day under the generator and 0.050
   at persistence 0.6. **Prior-mean window: the active-day values in the 56
-  days ending at the last active day, ≥ 3 of them.** It is the mean of
-  *active* days, not of all days, so a series that is usually zero is not
-  "3 ×" just by being active. It uses 56 days rather than 28 so that a
-  weekly batch contributes ≈ 8 values, not ≈ 4, and it matches the hurdle
-  statistic's window.
-- **False positives** (Appendix B.5.11). Under the generator the line is
-  **< 0.0001 per day**: 1.4 × 10⁻⁵ with 28 days of history (5 × 10⁻⁶ by
-  (i), 9 × 10⁻⁶ by (ii)), and 8.4 × 10⁻⁵ in the worst case of a series with
-  only 14 days of history. The generator has no unlabelled series that is
-  regular, goes dormant and restarts. The only route is an intermittent
-  series with ≈ 80 % zero days that by chance has ≤ 2 active days in a
-  window, and either a mostly active pre-dormancy month or an
-  outsized restart. With day clustering (an approximation that treats the
-  history as independent of the window), the union of (i) and (ii) is
-  0.0003 per day at persistence 0.3 and 0.008 at 0.6 (0.030 if every
-  series had only 14 days of history). **Real data may produce false
-  positives here**: seasonal or campaign workloads, quarterly jobs and
-  planned restarts look exactly like this rule's target. They are
-  measured on real data only; `tuning-natural` cannot show them.
-- **False positives.** Under the generator the line is **< 0.0001 per day,
-  effectively 0 by construction**: the generator has no unlabelled series
-  that is regular, goes dormant and restarts; the only route is an
+  days ending at the last active day; if there are fewer than 3, the
+  lookback extends to up to 112 days (or all available history) for the
+  3 most recent (rev. 10).** It is the mean of *active* days, not of all
+  days, so a series that is usually zero is not "3 ×" just by being
+  active. 56 days rather than 28 gives a weekly batch ≈ 8 values, not ≈ 4,
+  and matches the hurdle statistic's window. The extension covers a
+  **monthly** job (≈ 2 active days in 56, ≈ 4 in 112), which would
+  otherwise never have 3 values and reach only `info` even at 10 × its
+  size; it barely moves the cost, because the 3 × relative test does the
+  filtering (generator 1.0 × 10⁻⁵ per day, was 9 × 10⁻⁶). **Named limit:
+  a quarterly job** (≤ 2 active days in 112) still has no prior mean, so
+  (ii) does not apply and its restart is `info` unless (i) holds.
+  The extra state is a few numbers per series (the last 3 active-day
+  values), so peak disk is unchanged.
+- **False positives** (Appendix B.5.11). **Under the generator** the line
+  is **< 0.0001 per day**: 1.4 × 10⁻⁵ with 28 days of history (5 × 10⁻⁶ by
+  (i), 1.0 × 10⁻⁵ by (ii)); the **worst case, the union of (i) and (ii) for
+  a series with only 14 days of history, is 8.5 × 10⁻⁵**. These figures
+  are exact for independent days. The generator has no unlabelled series
+  that is regular, goes dormant and restarts. The only route is an
   intermittent series with ≈ 80 % zero days that by chance has ≤ 2 active
-  days in a window and ≥ 50 % active days before it. **Real data may
-  produce false positives here**: seasonal or campaign workloads,
-  quarterly jobs and planned restarts look exactly like this rule's
-  target. They are measured on real data only; `tuning-natural` cannot
-  show them.
+  days in a window, and either a mostly active pre-dormancy month or an
+  outsized restart.
+- **Real-data risk with clustered days (rev. 10, corrected).** Revision 9
+  treated the history as independent of the dormant window, and that
+  **underestimates** when days cluster: a clustered series that has just
+  gone quiet was usually in an active run before. Simulating the
+  two-state chain with the real stretch, history and prior-mean
+  definitions gives, per day across the intermittent leaves:
+  - at persistence ρ = 0.3: (i) 0.00083, (ii) 0.00012, union **0.00094**;
+  - at ρ = 0.6: (i) 0.052, (ii) 0.0016, union **0.054**.
+
+  Revision 9's figures were 0.00015 and 0.0064 for (i). The challenger's
+  independent simulation gives 0.00087 and 0.050, and a union of 0.052 at
+  ρ = 0.6. The generator's days are independent, so no gate moves. On
+  real data with strongly clustered intermittent series, though, route
+  (i) alone could take about a third of the 0.15 design margin.
+  Seasonal or campaign workloads, quarterly jobs and planned restarts
+  look like this rule's target too. They are measured on real data only;
+  `tuning-natural` cannot show them.
 - **Recall.** The natural and existing enriched seeds plant no
   reactivation, so the rule would never be scored. The enriched seed gains
   a label kind **`dormant_reactivation`** (§2.5, Appendix C.2): ≥ 100
@@ -1448,7 +1461,7 @@ bound on groups, since grouping only merges.
 | Calendar cohorts after the component (pinned factors; P3 and P4 events with 2 and 3 prior cycles, `month_start` with 1 and 2) | Monte Carlo of the median estimator and of D1 ∧ D2, D8 and D3 on the residual | **0.0012** (without the component: ≈ 7.0) |
 | First and second occurrences of a calendar class (cohort accounts onboarding in the span; no factor yet) | Monte Carlo, × onboarding probability | **0.0490** (≈ 3.0 groups per seed) |
 | D4 new dimension | the generator emits no unlabelled new service or region; measured on `tuning-natural` | **0** by construction |
-| D4 reactivation (rev. 9) | exact two-state-chain probability of ≤ 2 active days in 56, then an active day at ≥ min impact, with the pre-dormancy history condition (i) or the size override (ii) (Appendix B.5.11) | **< 0.0001** (1.4 × 10⁻⁵; worst case 8.4 × 10⁻⁵; `info` candidates ≈ 0.0017 per day). Real data may add false positives here |
+| D4 reactivation (rev. 9, 10) | exact two-state-chain probability of ≤ 2 active days in 56, then an active day at ≥ min impact, with the pre-dormancy history condition (i) or the size override (ii) (Appendix B.5.11) | **< 0.0001** (1.4 × 10⁻⁵; worst case, the union of (i) and (ii) with 14 days of history, 8.5 × 10⁻⁵; `info` candidates ≈ 0.0017 per day). Real data with clustered days: 0.00094 (ρ 0.3), 0.054 (ρ 0.6) |
 | D5 tag coverage | no unlabelled tag change; measured | **0** by construction |
 | D6 cold start | two consecutive days above the fitted 99.9th percentile, × onboardings | **< 0.0001** (4 × 10⁻⁵ if the tail is 10 × the fit) |
 | D7 commitment coverage | every commitment change is labelled (`commitment_effect` is `info`, `commitment_expiry` an alert) | **0** by construction |
@@ -1549,8 +1562,9 @@ of `log y` for D2, the previous day's one-step residual for D8, for
 intermittent series the last 8 weekly sums (zero share ≤ 50 %) or the
 hurdle's q̂, m̂, v̂ and r₁ (> 50 %), and the weekly `S⁺`; for D4's
 reactivation rule the active-day count over 56 days, the last active day
-before the dormant stretch, the active share of the 28 days and the
-active-day mean of the 56 days ending there; the
+before the dormant stretch, the active share of the 28 days ending there
+and its last 3 active-day values (for the prior mean of up to 112 days);
+the
 trailing committed and untagged shares for D5/D7, and the per-cohort as-of
 error buckets, including the 2-day sums for `s₂` (Appendix D,
 `detector_state`). D6's per-k growth fit is per cohort, recomputed daily
@@ -1999,7 +2013,7 @@ output relies on; D-21). PR ids keep their slice numbers.
 | 12 | **4-5** | API: `costs/daily`, `forecasts`, `forecasts/accuracy`, `freshness` | Slice 2 route test set (auth, 400s, keyset, tenant, unsafe login, no-store, decimal strings); latency check on `fleet15k` | read tenant from the query; OFFSET pagination; number instead of string |
 | 13 | **4-6** | Forecast acceptance on `fleet15k` (natural-1) + Python evaluator (own actuals from the bucket) | FT-1…FT-7, FT-9, FT-10 recorded with n; `Other services` reported separately; evaluator and job agree; FT-8 marked "`full` only, pending OA-1" | evaluator reading the job's rollups instead of the bucket; `Other services` included in the FT-4 gate |
 | 14 | **5-1** | Migration 0004 (anomaly tables, events, views; no `ratio_triage`) | as 4-1 | as 4-1 |
-| 15 | **5-2a** | Detectors D1–D8 (pure) on the **log scale**, calendar-adjusted: 56-day D2 window with the pooled floor, D8 on 2-day sums with the pooled `s₂`, frozen-baseline CUSUM with re-anchoring and as-of `σ(h)`, D6 on two-day growth with the fitted percentile, intermittent series on **non-overlapping** weekly sums (zero share ≤ 50 %) or the **hurdle statistic with the clustering gate** (> 50 %, D-24), aggregate scopes on D3 only, commitment rules, category precedence | unit cases per detector; a slow drift that an adaptive one-step CUSUM misses is caught; ARL₀ of D3 on simulated N(0,1) within ±15 % of Siegmund's value at h = 7.5 and 9.0; **per series-day rates of D1 ∧ D2 and D8 on simulated series with estimated median, MAD and pooled scale within ±25 % of `budget5.py`'s 4.3 × 10⁻⁵ and 1.5 × 10⁻⁵**; the weekly statistic's in-control rate within ±25 % of `budget5.py`'s per zero share; the hurdle statistic's mean and variance match the compound-binomial formula on simulated independent days (±5 %), its in-control rate is within a factor of 2 of `budget5.py`'s at zero shares 0.6–0.8, and a series with lag-1 persistence 0.6 is routed to `info` in ≥ 85 % of weeks while an independent one passes in ≥ 97 %; D8 fires by day 2 on a 4.9σ shift in ≥ 85 % of 2,000 trials; a hurdle-scored series whose r₁ ≥ 0.30 never yields `warning`; D6's threshold from a log-normal fit with n_k < 30 falling back to the pooled mean; constant series never fire; a calendar-cohort series with its factor applied does not fire on event days; **D4 reactivation:** a series regular for 20 days, dormant for 60, fires on its first restart day at ≥ min impact; a series with 3 active days in the window is not under the rule; a series dormant for 90 days after a regular month reaches `warning` (history taken before the gap, not before the window); a bursty series (< 50 % active pre-dormancy) restarting at 1 × its active-day mean yields `info`, at ≥ 10 × min and ≥ 3 × that mean reaches `warning`; precedence table exact | CUSUM on adaptive one-step residuals; re-anchor while `S⁺ > 0`; MAD floor removed; pooled floor removed; 28-day window; `commitment_expiry` classified as `commitment_effect`; precedence order swapped; z on the linear scale; σ(h) from errors after D − 1; calendar factor not applied to D2; weekly sums overlapping (rolling); D8 on the series' own MAD; clustering gate removed; hurdle variance without the −7q̂²m̂² term; aggregate scopes running D2; D6 on the empirical percentile; reactivation dormancy threshold 3 → 4 active days; reactivation history condition removed; history taken before the 56-day window instead of before the dormant stretch; size override without the 3 × relative test; reactivation on a 2-day sum |
+| 15 | **5-2a** | Detectors D1–D8 (pure) on the **log scale**, calendar-adjusted: 56-day D2 window with the pooled floor, D8 on 2-day sums with the pooled `s₂`, frozen-baseline CUSUM with re-anchoring and as-of `σ(h)`, D6 on two-day growth with the fitted percentile, intermittent series on **non-overlapping** weekly sums (zero share ≤ 50 %) or the **hurdle statistic with the clustering gate** (> 50 %, D-24), aggregate scopes on D3 only, commitment rules, category precedence | unit cases per detector; a slow drift that an adaptive one-step CUSUM misses is caught; ARL₀ of D3 on simulated N(0,1) within ±15 % of Siegmund's value at h = 7.5 and 9.0; **per series-day rates of D1 ∧ D2 and D8 on simulated series with estimated median, MAD and pooled scale within ±25 % of `budget5.py`'s 4.3 × 10⁻⁵ and 1.5 × 10⁻⁵**; the weekly statistic's in-control rate within ±25 % of `budget5.py`'s per zero share; the hurdle statistic's mean and variance match the compound-binomial formula on simulated independent days (±5 %), its in-control rate is within a factor of 2 of `budget5.py`'s at zero shares 0.6–0.8, and a series with lag-1 persistence 0.6 is routed to `info` in ≥ 85 % of weeks while an independent one passes in ≥ 97 %; D8 fires by day 2 on a 4.9σ shift in ≥ 85 % of 2,000 trials; a hurdle-scored series whose r₁ ≥ 0.30 never yields `warning`; D6's threshold from a log-normal fit with n_k < 30 falling back to the pooled mean; constant series never fire; a calendar-cohort series with its factor applied does not fire on event days; **D4 reactivation:** a series regular for 20 days, dormant for 60, fires on its first restart day at ≥ min impact; a series with 3 active days in the window is not under the rule; a series dormant for 90 days after a regular month reaches `warning` (history taken before the gap, not before the window); a bursty series (< 50 % active pre-dormancy) restarting at 1 × its active-day mean yields `info`, at ≥ 10 × min and ≥ 3 × that mean reaches `warning`; a monthly job (2 active days per 56) restarting at 10 × reaches `warning` through the 112-day lookback, a quarterly one (≤ 2 in 112) gets `info`; precedence table exact | CUSUM on adaptive one-step residuals; re-anchor while `S⁺ > 0`; MAD floor removed; pooled floor removed; 28-day window; `commitment_expiry` classified as `commitment_effect`; precedence order swapped; z on the linear scale; σ(h) from errors after D − 1; calendar factor not applied to D2; weekly sums overlapping (rolling); D8 on the series' own MAD; clustering gate removed; hurdle variance without the −7q̂²m̂² term; aggregate scopes running D2; D6 on the empirical percentile; reactivation dormancy threshold 3 → 4 active days; reactivation history condition removed; history taken before the 56-day window instead of before the dormant stretch; size override without the 3 × relative test; prior-mean lookback not extended to 112 days; reactivation on a 2-day sum |
 | 16 | **5-2b** | Grouping steps 1–6 (provider-wide first), deterministic ids, merges, root causes, severity | one group per provider-wide, billing-account and account fan-in; same input ⇒ same groups and ids; merges only within ±1 day; root causes ranked by excess | provider-wide rule skipped; fan-in threshold off by one; random group ids; severity downgrade allowed; merge window unbounded |
 | 17 | **5-3** | `ratio-analytics detect` (daily + as-of replay from day 57, live from day 62), automatic open and resolve, restatement | thresholds tuned on **tuning-natural** (false positives: measured total ≤ 0.15/day, Garwood upper ≤ 0.30/day) and on tuning (recall side), frozen and committed before any evaluation seed is generated; replay uses only errors ≤ D − 1 (poisoned-future test); `restated` path via the `ci` daily-delivery replay; `new_region` on `ci` | detect on day D using day D data (leakage); auto-resolve after 1 day |
 | 18 | **5-4** | Evaluation harness (Python) + `fleet15k` acceptance: precision and AT-4 on the pooled natural seeds (cohorts included), recall and TTD on the enriched seed (individual series only) | matching with X = 30 %, k = 3; duplicates counted false; Wilson rules of §4.9; Garwood intervals on every false-positive rate; alert-fatigue outputs (mean, p95, max; `info` per day, hurdle-scored series' `info` signals and routes separately; `info`-signal recall of clustered intermittent series); per-cohort, first- and second-occurrence and calendar-event-day breakdowns; the calendar-jitter robustness run reported; folded labels reported; `new_region` and FT-8 marked "`full` only" | matcher accepts any day; matcher ignores the 30 % / top-3 rule; no-alert labels ignored; precision computed on the enriched seed; Wilson bound replaced by the point estimate; duplicates counted correct |
