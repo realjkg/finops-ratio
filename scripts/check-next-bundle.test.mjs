@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
 import { checkNextBundle, CLIENT_FORBIDDEN, COSTS_ENTRY, READER_MARKERS, WORKER_ONLY } from './check-next-bundle.mjs';
 
 const dirs = [];
