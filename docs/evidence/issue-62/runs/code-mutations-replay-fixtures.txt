@@ -1,0 +1,4 @@
+{"mutation": "M31 replay-fixtures: staging re-allowed", "killed": true, "failed": ["RATIO_ENV=staging fails closed before any I/O: exit 2, REPLAY_FIXTURES_NOT_ALLOWED, the reason named 22ms"]}
+{"mutation": "M31b replay-fixtures: development allowed too", "killed": true, "failed": ["every RATIO_ENV but test is refused the same way (development, production, unset, other casing) 30ms", "replay-fixtures is refused unless RATIO_ENV is staging or test, before connecting 26ms"]}
+{"mutation": "M31c replay-fixtures: gate removed", "killed": true, "failed": ["RATIO_ENV=staging fails closed before any I/O: exit 2, REPLAY_FIXTURES_NOT_ALLOWED, the reason named 24ms", "every RATIO_ENV but test is refused the same way (development, production, unset, other casing) 8ms", "replay-fixtures is refused unless RATIO_ENV is staging or test, before connecting 17ms"]}
+ALL KILLED

@@ -1,0 +1,718 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/focus/provider.test.ts (0 test)
+ ❯ scripts/acceptance/controlTotals.test.mjs (5 tests | 3 failed) 407ms
+   ❯ P2 independent control totals (Python) (5)
+     × P1: the calculator’s own unit tests pass 107ms
+     × reproduces the pinned control totals of the committed 1k file exactly 50ms
+     × --rows: one expected API row per upstream record, keyed by Id; the first one checked by hand against the upstream line 54ms
+ ❯ scripts/local/acceptance.test.mjs (76 tests | 11 failed) 1953ms
+   ❯ A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that (9)
+     × the sample source expects exactly the AWS provider, a constant written independently of the worker 15ms
+     × the pinned control: AWS rows only in the totals, the foreign rows per period under excluded 1ms
+     × expected worker exit: 1 when some period has every row excluded (it is quarantined), else 0 1ms
+     × first sync: the mixed period published with excludedRows; the all-foreign period quarantined PROVIDER_MISMATCH; the record fails 5ms
+     × second sync: the published period skipped_unchanged, the quarantined one failed BATCH_QUARANTINED 2ms
+     × syncTwice: both syncs must exit exactly 1 here, with these records 14ms
+     × catalog: the published batch carries the exclusions as stored PROVIDER_MISMATCH errors; the all-foreign batch is quarantined 2ms
+     × the API artifact set is the staged data objects of the PUBLISHED periods only 1ms
+     × local.mjs: the evidence of EVERY staged object is re-hashed; the API artifact set uses the published periods only; the pin covers the filter 1ms
+   ❯ A9 local.mjs acceptance: the real path, no bypass (static) (6)
+     × checks the pin and runs the independent calculator before any stack exists 1ms
+     × every comparison runs and fails the run 12ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/focus/provider.test.ts [ src/ingest/focus/provider.test.ts ]
+Error: Cannot find module './provider' imported from /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/src/ingest/focus/provider.test.ts
+ ❯ src/ingest/focus/provider.test.ts:4:1
+      2| // PROVIDER_MISMATCH reason. Pure; no database. DESIGN: docs/evidence/…
+      3| import { describe, expect, it } from 'vitest';
+      4| import {
+       | ^
+      5|   PROVIDER_MISMATCH,
+      6|   SOURCE_TYPE_PROVIDERS,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/15]⎯
+
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > P1: the calculator’s own unit tests pass
+AssertionError: 
+.................EEEEEF.EE...
+======================================================================
+ERROR: test_a_period_with_no_allowed_row_has_no_totals_entry (test_focus_control_totals.ProviderFilterTests.test_a_period_with_no_allowed_row_has_no_totals_entry)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 267, in test_a_period_with_no_allowed_row_has_no_totals_entry
+    doc = fct.compute(data, providers=['AWS'])
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_fails_closed_under_a_filter (test_focus_control_totals.ProviderFilterTests.test_fails_closed_under_a_filter) (name='provider NULL')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 280, in test_fails_closed_under_a_filter
+    fct.compute(csv_bytes(row, header=PROVIDER_HEADER), providers=['AWS'])
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_fails_closed_under_a_filter (test_focus_control_totals.ProviderFilterTests.test_fails_closed_under_a_filter) (name='provider empty')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 280, in test_fails_closed_under_a_filter
+    fct.compute(csv_bytes(row, header=PROVIDER_HEADER), providers=['AWS'])
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_fails_closed_under_a_filter (test_focus_control_totals.ProviderFilterTests.test_fails_closed_under_a_filter) (name='foreign row with a bad BilledCost')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 280, in test_fails_closed_under_a_filter
+    fct.compute(csv_bytes(row, header=PROVIDER_HEADER), providers=['AWS'])
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_fails_closed_under_a_filter (test_focus_control_totals.ProviderFilterTests.test_fails_closed_under_a_filter)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 282, in test_fails_closed_under_a_filter
+    fct.compute(csv_bytes('"2024-09-01 00:00:00","USD",1,1,"a",""'), providers=['AWS'])  # no ProviderName column
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_only_exact_matches_are_counted_the_rest_is_reported_per_period (test_focus_control_totals.ProviderFilterTests.test_only_exact_matches_are_counted_the_rest_is_reported_per_period)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 239, in test_only_exact_matches_are_counted_the_rest_is_reported_per_period
+    doc = fct.compute(data, providers=['AWS'], rows=True)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+ERROR: test_several_providers_may_be_allowed (test_focus_control_totals.ProviderFilterTests.test_several_providers_may_be_allowed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 254, in test_several_providers_may_be_allowed
+    doc = fct.compute(data, providers=['AWS', 'X'])
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: compute() got an unexpected keyword argument 'providers'
+
+======================================================================
+FAIL: test_main_takes_repeatable_provider_arguments (test_focus_control_totals.ProviderFilterTests.test_main_takes_repeatable_provider_arguments)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/scripts/acceptance/test_focus_control_totals.py", line 295, in test_main_takes_repeatable_provider_arguments
+    self.assertEqual(code, 0, err.getvalue())
+AssertionError: 2 != 0 : usage: unrecognized arguments: --provider --provider X /tmp/tmpmf5u3mla/f.csv
+
+
+----------------------------------------------------------------------
+Ran 26 tests in 0.012s
+
+FAILED (failures=1, errors=7)
+: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ scripts/acceptance/controlTotals.test.mjs:32:50
+     30|   it('P1: the calculator’s own unit tests pass', () => {
+     31|     const r = python(['-m', 'unittest', 'discover', '-s', 'scripts/acc…
+     32|     expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+       |                                                  ^
+     33|     expect(r.stderr).toMatch(/\nOK\b/);
+     34|   }, 120_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/15]⎯
+
+ FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > reproduces the pinned control totals of the committed 1k file exactly
+AssertionError: usage: unrecognized arguments: --provider /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/fixtures/focus-1.0-sample/focus_sample.csv
+: expected 2 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 2
+
+ ❯ scripts/acceptance/controlTotals.test.mjs:40:32
+     38|     // Issue #62: the AWS Data Exports sample source publishes the AWS…
+     39|     const r = python([CALC, '--provider', 'AWS', '--expect-sha256', pi…
+     40|     expect(r.status, r.stderr).toBe(0);
+       |                                ^
+     41|     const doc = JSON.parse(r.stdout);
+     42|     expect(doc.type).toBe('ratio.focus-control-totals');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/15]⎯
+
+ FAIL  scripts/acceptance/controlTotals.test.mjs > P2 independent control totals (Python) > --rows: one expected API row per upstream record, keyed by Id; the first one checked by hand against the upstream line
+AssertionError: usage: unrecognized arguments: --provider /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb/fixtures/focus-1.0-sample/focus_sample.csv
+: expected 2 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 2
+
+ ❯ scripts/acceptance/controlTotals.test.mjs:61:32
+     59|     const pin = DATASET.files['1k'];
+     60|     const r = python([CALC, '--rows', '--provider', 'AWS', '--expect-s…
+     61|     expect(r.status, r.stderr).toBe(0);
+       |                                ^
+     62|     const doc = JSON.parse(r.stdout);
+     63|     expect({ input: doc.input, columns: doc.columns, providerFilter: d…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > the sample source expects exactly the AWS provider, a constant written independently of the worker
+AssertionError: expected undefined to deeply equal [ 'AWS' ]
+
+- Expected:
+[
+  "AWS",
+]
+
++ Received:
+undefined
+
+ ❯ scripts/local/acceptance.test.mjs:673:30
+    671|
+    672|   it('the sample source expects exactly the AWS provider, a constant w…
+    673|     expect(SAMPLE_PROVIDERS).toEqual(['AWS']);
+       |                              ^
+    674|     expect(Object.isFrozen(SAMPLE_PROVIDERS)).toBe(true);
+    675|     for (const file of ['scripts/local/acceptance.mjs', 'scripts/local…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > the pinned control: AWS rows only in the totals, the foreign rows per period under excluded
+AssertionError: expected undefined to deeply equal [ 'AWS' ]
+
+- Expected:
+[
+  "AWS",
+]
+
++ Received:
+undefined
+
+ ❯ scripts/local/acceptance.test.mjs:681:41
+    679|
+    680|   it('the pinned control: AWS rows only in the totals, the foreign row…
+    681|     expect(PINNED['1k'].providerFilter).toEqual(['AWS']);
+       |                                         ^
+    682|     expect(PINNED['1k'].totals.map((t) => [t.billingPeriod, t.rowCount…
+    683|     expect(PINNED['1k'].excluded).toEqual([
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > expected worker exit: 1 when some period has every row excluded (it is quarantined), else 0
+TypeError: expectedSyncExit is not a function
+ ❯ scripts/local/acceptance.test.mjs:696:28
+    694|
+    695|   it('expected worker exit: 1 when some period has every row excluded …
+    696|     expect(expectedSyncExit(control)).toBe(1);
+       |                            ^
+    697|     expect(expectedSyncExit({ ...control, excluded: [control.excluded[…
+    698|     expect(expectedSyncExit({ totals: control.totals })).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > first sync: the mixed period published with excludedRows; the all-foreign period quarantined PROVIDER_MISMATCH; the record fails
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "sync: the evidence record does not pass",
++   "sync: unexpected period 2024-10-01 (quarantined)",
++ ]
+
+ ❯ scripts/local/acceptance.test.mjs:703:58
+    701|
+    702|   it('first sync: the mixed period published with excludedRows; the al…
+    703|     expect(syncProblems(rec(firstGood, false), control)).toEqual([]);
+       |                                                          ^
+    704|     const bad = {
+    705|       'record passes': [rec(firstGood, true), ['sync: the evidence rec…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > second sync: the published period skipped_unchanged, the quarantined one failed BATCH_QUARANTINED
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "second sync: the evidence record does not pass",
++   "second sync: unexpected period 2024-10-01 (failed)",
++ ]
+
+ ❯ scripts/local/acceptance.test.mjs:729:61
+    727|
+    728|   it('second sync: the published period skipped_unchanged, the quarant…
+    729|     expect(resyncProblems(rec(secondGood, false), control)).toEqual([]…
+       |                                                             ^
+    730|     expectProblems(
+    731|       resyncProblems(rec([secondGood[0], { billingPeriod: '2024-10-01'…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > syncTwice: both syncs must exit exactly 1 here, with these records
+Error: first sync:
+  sync: the worker CLI exited 1 (expected 0)
+  sync: the evidence record does not pass
+  sync: unexpected period 2024-10-01 (quarantined)
+ ❯ syncTwice scripts/local/acceptance.mjs:783:11
+    781|   if (firstProblems.length) {
+    782|     await beforeFail(firstProblems);
+    783|     throw new Error(`first sync:\n  ${firstProblems.join('\n  ')}`);
+       |           ^
+    784|   }
+    785|   const second = await sync('syncAgain');
+ ❯ scripts/local/acceptance.test.mjs:743:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > catalog: the published batch carries the exclusions as stored PROVIDER_MISMATCH errors; the all-foreign batch is quarantined
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "catalog: unexpected batch(es) for 2024-10-01: quarantined",
++ ]
+
+ ❯ scripts/local/acceptance.test.mjs:774:49
+    772|       quarantine_reason: 'PROVIDER_MISMATCH: every data row (1) has a …
+    773|     };
+    774|     expect(batchProblems([pub, quar], control)).toEqual([]);
+       |                                                 ^
+    775|     const bad = {
+    776|       'published count of errors': [[{ ...pub, validation_error_count:…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > the API artifact set is the staged data objects of the PUBLISHED periods only
+TypeError: publishedDataShas is not a function
+ ❯ scripts/local/acceptance.test.mjs:812:29
+    810|       { kind: 'manifest', key: 'p/e/metadata/BILLING_PERIOD=2024-09/m-…
+    811|     ];
+    812|     expect(publishedDataShas(objects, control)).toEqual(['a'.repeat(64…
+       |                             ^
+    813|     const both = { totals: [...control.totals, { billingPeriod: '2024-…
+    814|     expect(publishedDataShas(objects, both)).toEqual(['a'.repeat(64), …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > local.mjs: the evidence of EVERY staged object is re-hashed; the API artifact set uses the published periods only; the pin covers the filter
+AssertionError: expected 'async function acceptance(args) {\n  …' to match /const publishedShas = publishedDataSh…/
+
+- Expected:
+/const publishedShas = publishedDataShas\(staged\.objects, control\);/
+
++ Received:
+"async function acceptance(args) {
+  const started = Date.now();
+  const opts = parseAcceptanceArgs(args);
+  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  const settings = localAcceptanceSettings(process.env);
+
+  // 1. Before anything starts: the pinned file, the independent control, the staging.
+  const dataset = readDataset(ROOT);
+  const pin = dataset.files[opts.dataset];
+  const file = path.join(ROOT, pin.localPath);
+  if (!fs.existsSync(file)) throw new Error(`${pin.localPath} is missing: run \\`npm run sample:fetch\\` first (pinned download, SHA-256 checked)`);
+  const bytes = fs.readFileSync(file);
+  fail(`dataset ${opts.dataset} (${pin.localPath}) does not match dataset.json; re-run \\`npm run sample:fetch\\``, verifyDatasetBytes(bytes, pin));
+
+  const calcStarted = Date.now();
+  const calc = await run('python3', [CONTROL_CALCULATOR, '--rows', '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
+  if (calc.code !== 0) throw new Error(`the control-total calculator exited ${calc.code}`);
+  const control = JSON.parse(calc.out);
+  const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, SAMPLE_CONTROL_TOTALS_FILE), 'utf8'))[opts.dataset];
+  if (JSON.stringify({ input: control.input, columns: control.columns, totals: control.totals }) !== JSON.stringify(pinned)) {
+    throw new Error(`the calculator's output differs from the pinned ${SAMPLE_CONTROL_TOTALS_FILE} (${opts.dataset})`);
+  }
+  const calcMs = Date.now() - calcStarted;
+
+  const stageStarted = Date.now();
+  const staged = stageFocusSample(bytes, { mutation: opts.mutation }); // proves the clean plan lossless first
+  const stageMs = Date.now() - stageStarted;
+  const dataShas = staged.objects.filter((o) => o.kind === 'data').map((o) => o.sha256);
+  const totalRows = control.totals.reduce((n, t) => n + Number(t.rowCount), 0);
+
+  await preflight(settings, 'local:acceptance');
+
+  const summary = await runLocalTest({
+    project: settings.project,
+    down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
+    downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
+    signal: interrupt.signal,
+    body: async ({ steps, setApp, spawnGuard }) => {
+      const timed = timer(steps);
+      steps.timingsMs.controlTotals = calcMs;
+      steps.timingsMs.stage = stageMs;
+      steps.dataset = { key: opts.dataset, file: pin.localPath, bytes: pin.bytes, sha256: pin.sha256, commit: dataset.commit, licence: dataset.licence };
+      steps.mutation = opts.mutation;
+      steps.control = control.totals;
+      steps.staging = { periods: staged.periods, objects: staged.objects.map((o) => ({ key: o.key, bytes: o.body.length, sha256: o.sha256 })), nullTokensReplaced: staged.nullTokensReplaced };
+
+      await timed('up', () => up(settings));
+      const status = await timed('migrate', () => migrate(settings));
+      steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
+      const secrets = loadSecrets(settings, { create: false });
+
+      // Stage into the run's own SeaweedFS, then provision the sample source.
+      const sourceId = await timed('seed', async () => {
+        const s3 = s3Client(settings, secrets);
+        try {
+          await ensureBuckets(s3);
+          await putObjects(
+            s3,
+            staged.objects.map((o) => ({ Key: o.key, body: () => o.body })),
+          );
+        } finally {
+          s3.destroy();
+        }
+        return provisionSource(settings, secrets, SAMPLE_NAMES);
+      });
+      steps.seed = { objects: staged.objects.length, source: SAMPLE_NAMES.sourceKey };
+
+      // The real worker CLI, twice, judged on its exit code AND its evidence
+      // record (syncTwice; Copilot 4177490229 / 4177490261).
+      const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
+      await syncTwice({
+        control,
+        sync: (name) => timed(name, () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey)),
+        report: (name, r) => {
+          steps[name] = { exit: r.code, ...(name === 'sync' ? { durationMs: r.record?.durationMs } : {}), periods: outcomes(r.record) };
+        },
+        // Diagnostics before failing: the batches' quarantine reasons (codes and counts, never cell values).
+        beforeFail: async () => {
+          steps.catalog = await catalogSnapshot(settings, secrets).catch((e) => ({ error: e.message }));
+        },
+      });
+      // The real route under next start.
+      steps.appReady = await timed('appStart', () => startAppAndWait(settings, secrets, { setApp, spawnGuard }));
+      const base = `http://127.0.0.1:${settings.appPort}`;
+      const anon = await fetchJson(`${base}/api/v1/costs/published`, { timeoutMs: API_REQUEST_TIMEOUT_MS });
+      if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
+      steps.anonymous = anon.status;
+      const maxPages = Math.ceil(totalRows / ACCEPTANCE_PAGE_LIMIT) + 1;
+      const { rows, totals, pages } = await timed('apiRead', () => readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: ACCEPTANCE_PAGE_LIMIT, maxPages }));
+      steps.api = { totals, rows: rows.length, pages, limit: ACCEPTANCE_PAGE_LIMIT };
+      fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, dataShas)]);
+      // Every API row against its UPSTREAM record (the calculator's --rows), every field (challenger M1).
+      fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control));
+      steps.rowsCompared = { rows: control.rows.length, fieldsPerRow: API_ROW_FIELDS_COMPARED, extraColumns: control.columns.extra.length };
+
+      // Evidence re-hash and the catalog.
+      const rehash = await timed('evidenceRehash', () => rehashEvidence(settings, secrets, sourceId, dataShas));
+      steps.evidence = rehash;
+      fail('evidence re-hash', rehash.filter((r) => r.rehash !== r.sha256).map((r) => `evidence ${r.sha256} re-hashes to ${r.rehash}`));
+      const catalog = await timed('catalog', () => catalogSnapshot(settings, secrets));
+      steps.catalog = catalog;
+      fail('catalog', batchProblems(catalog.batches, control));
+    },
+  });
+  killLiveProcessGroups();
+  summary.steps.timingsMs = { ...(summary.steps.timingsMs ?? {}), total: Date.now() - started };
+  process.stdout.write(`${JSON.stringify({ type: 'ratio.local-acceptance', dataset: opts.dataset, mutation: opts.mutation, ...summary })}\\n`);
+  if (!summary.pass) log('local:acceptance failed', { mutation: opts.mutation, failures: summary.failures });
+  return localTestExitCode(summary);
+}
+
+"
+
+ ❯ scripts/local/acceptance.test.mjs:825:18
+    823|     const body = src.slice(src.indexOf('async function acceptance('), …
+    824|     expect(body).toMatch(/const dataShas = staged\.objects\.filter\(\(…
+    825|     expect(body).toMatch(/const publishedShas = publishedDataShas\(sta…
+       |                  ^
+    826|     expect(body).toContain('rehashEvidence(settings, secrets, sourceId…
+    827|     expect(body).toContain(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A9 local.mjs acceptance: the real path, no bypass (static) > checks the pin and runs the independent calculator before any stack exists
+AssertionError: expected 'async function acceptance(args) {\n  …' to match /run\('python3', \[CONTROL_CALCULATOR,…/
+
+- Expected:
+/run\('python3', \[CONTROL_CALCULATOR, '--rows', \.\.\.SAMPLE_PROVIDERS\.flatMap\(\(p\) => \['--provider', p\]\), '--expect-sha256', pin\.sha256, file\]/
+
++ Received:
+"async function acceptance(args) {
+  const started = Date.now();
+  const opts = parseAcceptanceArgs(args);
+  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  const settings = localAcceptanceSettings(process.env);
+
+  // 1. Before anything starts: the pinned file, the independent control, the staging.
+  const dataset = readDataset(ROOT);
+  const pin = dataset.files[opts.dataset];
+  const file = path.join(ROOT, pin.localPath);
+  if (!fs.existsSync(file)) throw new Error(`${pin.localPath} is missing: run \\`npm run sample:fetch\\` first (pinned download, SHA-256 checked)`);
+  const bytes = fs.readFileSync(file);
+  fail(`dataset ${opts.dataset} (${pin.localPath}) does not match dataset.json; re-run \\`npm run sample:fetch\\``, verifyDatasetBytes(bytes, pin));
+
+  const calcStarted = Date.now();
+  const calc = await run('python3', [CONTROL_CALCULATOR, '--rows', '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
+  if (calc.code !== 0) throw new Error(`the control-total calculator exited ${calc.code}`);
+  const control = JSON.parse(calc.out);
+  const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, SAMPLE_CONTROL_TOTALS_FILE), 'utf8'))[opts.dataset];
+  if (JSON.stringify({ input: control.input, columns: control.columns, totals: control.totals }) !== JSON.stringify(pinned)) {
+    throw new Error(`the calculator's output differs from the pinned ${SAMPLE_CONTROL_TOTALS_FILE} (${opts.dataset})`);
+  }
+  const calcMs = Date.now() - calcStarted;
+
+  const stageStarted = Date.now();
+  const staged = stageFocusSample(bytes, { mutation: opts.mutation }); // proves the clean plan lossless first
+  const stageMs = Date.now() - stageStarted;
+  const dataShas = staged.objects.filter((o) => o.kind === 'data').map((o) => o.sha256);
+  const totalRows = control.totals.reduce((n, t) => n + Number(t.rowCount), 0);
+
+  await preflight(settings, 'local:acceptance');
+
+  const summary = await runLocalTest({
+    project: settings.project,
+    down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
+    downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
+    signal: interrupt.signal,
+    body: async ({ steps, setApp, spawnGuard }) => {
+      const timed = timer(steps);
+      steps.timingsMs.controlTotals = calcMs;
+      steps.timingsMs.stage = stageMs;
+      steps.dataset = { key: opts.dataset, file: pin.localPath, bytes: pin.bytes, sha256: pin.sha256, commit: dataset.commit, licence: dataset.licence };
+      steps.mutation = opts.mutation;
+      steps.control = control.totals;
+      steps.staging = { periods: staged.periods, objects: staged.objects.map((o) => ({ key: o.key, bytes: o.body.length, sha256: o.sha256 })), nullTokensReplaced: staged.nullTokensReplaced };
+
+      await timed('up', () => up(settings));
+      const status = await timed('migrate', () => migrate(settings));
+      steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
+      const secrets = loadSecrets(settings, { create: false });
+
+      // Stage into the run's own SeaweedFS, then provision the sample source.
+      const sourceId = await timed('seed', async () => {
+        const s3 = s3Client(settings, secrets);
+        try {
+          await ensureBuckets(s3);
+          await putObjects(
+            s3,
+            staged.objects.map((o) => ({ Key: o.key, body: () => o.body })),
+          );
+        } finally {
+          s3.destroy();
+        }
+        return provisionSource(settings, secrets, SAMPLE_NAMES);
+      });
+      steps.seed = { objects: staged.objects.length, source: SAMPLE_NAMES.sourceKey };
+
+      // The real worker CLI, twice, judged on its exit code AND its evidence
+      // record (syncTwice; Copilot 4177490229 / 4177490261).
+      const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
+      await syncTwice({
+        control,
+        sync: (name) => timed(name, () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey)),
+        report: (name, r) => {
+          steps[name] = { exit: r.code, ...(name === 'sync' ? { durationMs: r.record?.durationMs } : {}), periods: outcomes(r.record) };
+        },
+        // Diagnostics before failing: the batches' quarantine reasons (codes and counts, never cell values).
+        beforeFail: async () => {
+          steps.catalog = await catalogSnapshot(settings, secrets).catch((e) => ({ error: e.message }));
+        },
+      });
+      // The real route under next start.
+      steps.appReady = await timed('appStart', () => startAppAndWait(settings, secrets, { setApp, spawnGuard }));
+      const base = `http://127.0.0.1:${settings.appPort}`;
+      const anon = await fetchJson(`${base}/api/v1/costs/published`, { timeoutMs: API_REQUEST_TIMEOUT_MS });
+      if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
+      steps.anonymous = anon.status;
+      const maxPages = Math.ceil(totalRows / ACCEPTANCE_PAGE_LIMIT) + 1;
+      const { rows, totals, pages } = await timed('apiRead', () => readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: ACCEPTANCE_PAGE_LIMIT, maxPages }));
+      steps.api = { totals, rows: rows.length, pages, limit: ACCEPTANCE_PAGE_LIMIT };
+      fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, dataShas)]);
+      // Every API row against its UPSTREAM record (the calculator's --rows), every field (challenger M1).
+      fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control));
+      steps.rowsCompared = { rows: control.rows.length, fieldsPerRow: API_ROW_FIELDS_COMPARED, extraColumns: control.columns.extra.length };
+
+      // Evidence re-hash and the catalog.
+      const rehash = await timed('evidenceRehash', () => rehashEvidence(settings, secrets, sourceId, dataShas));
+      steps.evidence = rehash;
+      fail('evidence re-hash', rehash.filter((r) => r.rehash !== r.sha256).map((r) => `evidence ${r.sha256} re-hashes to ${r.rehash}`));
+      const catalog = await timed('catalog', () => catalogSnapshot(settings, secrets));
+      steps.catalog = catalog;
+      fail('catalog', batchProblems(catalog.batches, control));
+    },
+  });
+  killLiveProcessGroups();
+  summary.steps.timingsMs = { ...(summary.steps.timingsMs ?? {}), total: Date.now() - started };
+  process.stdout.write(`${JSON.stringify({ type: 'ratio.local-acceptance', dataset: opts.dataset, mutation: opts.mutation, ...summary })}\\n`);
+  if (!summary.pass) log('local:acceptance failed', { mutation: opts.mutation, failures: summary.failures });
+  return localTestExitCode(summary);
+}
+
+"
+
+ ❯ scripts/local/acceptance.test.mjs:1017:18
+    1015|     expect(body).toMatch(/verifyDatasetBytes\(bytes, pin\)/);
+    1016|     // Issue #62: the control counts the AWS Data Exports type's provi…
+    1017|     expect(body).toMatch(/run\('python3', \[CONTROL_CALCULATOR, '--row…
+       |                  ^
+    1018|     expect(body.indexOf("run('python3'")).toBeLessThan(body.indexOf('r…
+    1019|     expect(body.indexOf('stageFocusSample(bytes')).toBeLessThan(body.i…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/15]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A9 local.mjs acceptance: the real path, no bypass (static) > every comparison runs and fails the run
+AssertionError: artifactSetProblems(rows, publishedShas): expected 'async function acceptance(args) {\n  …' to contain 'artifactSetProblems(rows, publishedSh…'
+
+- Expected
++ Received
+
+- artifactSetProblems(rows, publishedShas)
++ async function acceptance(args) {
++   const started = Date.now();
++   const opts = parseAcceptanceArgs(args);
++   if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
++   const settings = localAcceptanceSettings(process.env);
++
++   // 1. Before anything starts: the pinned file, the independent control, the staging.
++   const dataset = readDataset(ROOT);
++   const pin = dataset.files[opts.dataset];
++   const file = path.join(ROOT, pin.localPath);
++   if (!fs.existsSync(file)) throw new Error(`${pin.localPath} is missing: run \`npm run sample:fetch\` first (pinned download, SHA-256 checked)`);
++   const bytes = fs.readFileSync(file);
++   fail(`dataset ${opts.dataset} (${pin.localPath}) does not match dataset.json; re-run \`npm run sample:fetch\``, verifyDatasetBytes(bytes, pin));
++
++   const calcStarted = Date.now();
++   const calc = await run('python3', [CONTROL_CALCULATOR, '--rows', '--expect-sha256', pin.sha256, file], { capture: true, allowFail: true, timeoutMs: CONTROL_CALCULATOR_TIMEOUT_MS });
++   if (calc.code !== 0) throw new Error(`the control-total calculator exited ${calc.code}`);
++   const control = JSON.parse(calc.out);
++   const pinned = JSON.parse(fs.readFileSync(path.join(ROOT, SAMPLE_CONTROL_TOTALS_FILE), 'utf8'))[opts.dataset];
++   if (JSON.stringify({ input: control.input, columns: control.columns, totals: control.totals }) !== JSON.stringify(pinned)) {
++     throw new Error(`the calculator's output differs from the pinned ${SAMPLE_CONTROL_TOTALS_FILE} (${opts.dataset})`);
++   }
++   const calcMs = Date.now() - calcStarted;
++
++   const stageStarted = Date.now();
++   const staged = stageFocusSample(bytes, { mutation: opts.mutation }); // proves the clean plan lossless first
++   const stageMs = Date.now() - stageStarted;
++   const dataShas = staged.objects.filter((o) => o.kind === 'data').map((o) => o.sha256);
++   const totalRows = control.totals.reduce((n, t) => n + Number(t.rowCount), 0);
++
++   await preflight(settings, 'local:acceptance');
++
++   const summary = await runLocalTest({
++     project: settings.project,
++     down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
++     downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
++     signal: interrupt.signal,
++     body: async ({ steps, setApp, spawnGuard }) => {
++       const timed = timer(steps);
++       steps.timingsMs.controlTotals = calcMs;
++       steps.timingsMs.stage = stageMs;
++       steps.dataset = { key: opts.dataset, file: pin.localPath, bytes: pin.bytes, sha256: pin.sha256, commit: dataset.commit, licence: dataset.licence };
++       steps.mutation = opts.mutation;
++       steps.control = control.totals;
++       steps.staging = { periods: staged.periods, objects: staged.objects.map((o) => ({ key: o.key, bytes: o.body.length, sha256: o.sha256 })), nullTokensReplaced: staged.nullTokensReplaced };
++
++       await timed('up', () => up(settings));
++       const status = await timed('migrate', () => migrate(settings));
++       steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
++       const secrets = loadSecrets(settings, { create: false });
++
++       // Stage into the run's own SeaweedFS, then provision the sample source.
++       const sourceId = await timed('seed', async () => {
++         const s3 = s3Client(settings, secrets);
++         try {
++           await ensureBuckets(s3);
++           await putObjects(
++             s3,
++             staged.objects.map((o) => ({ Key: o.key, body: () => o.body })),
++           );
++         } finally {
++           s3.destroy();
++         }
++         return provisionSource(settings, secrets, SAMPLE_NAMES);
++       });
++       steps.seed = { objects: staged.objects.length, source: SAMPLE_NAMES.sourceKey };
++
++       // The real worker CLI, twice, judged on its exit code AND its evidence
++       // record (syncTwice; Copilot 4177490229 / 4177490261).
++       const outcomes = (rec) => (rec?.results?.periods ?? []).map((p) => ({ period: p.billingPeriod, outcome: p.outcome, code: p.code, rowCount: p.rowCount, billedTotal: p.billedTotal, reconciliation: p.reconciliation }));
++       await syncTwice({
++         control,
++         sync: (name) => timed(name, () => syncRecord(settings, secrets, SAMPLE_NAMES.sourceKey)),
++         report: (name, r) => {
++           steps[name] = { exit: r.code, ...(name === 'sync' ? { durationMs: r.record?.durationMs } : {}), periods: outcomes(r.record) };
++         },
++         // Diagnostics before failing: the batches' quarantine reasons (codes and counts, never cell values).
++         beforeFail: async () => {
++           steps.catalog = await catalogSnapshot(settings, secrets).catch((e) => ({ error: e.message }));
++         },
++       });
++       // The real route under next start.
++       steps.appReady = await timed('appStart', () => startAppAndWait(settings, secrets, { setApp, spawnGuard }));
++       const base = `http://127.0.0.1:${settings.appPort}`;
++       const anon = await fetchJson(`${base}/api/v1/costs/published`, { timeoutMs: API_REQUEST_TIMEOUT_MS });
++       if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
++       steps.anonymous = anon.status;
++       const maxPages = Math.ceil(totalRows / ACCEPTANCE_PAGE_LIMIT) + 1;
++       const { rows, totals, pages } = await timed('apiRead', () => readPublished(base, secrets.RATIO_LOCAL_API_TOKEN, { limit: ACCEPTANCE_PAGE_LIMIT, maxPages }));
++       steps.api = { totals, rows: rows.length, pages, limit: ACCEPTANCE_PAGE_LIMIT };
++       fail('the API read differs from the independent control totals', [...compareAcceptance({ control, apiTotals: totals, rows }), ...artifactSetProblems(rows, dataShas)]);
++       // Every API row against its UPSTREAM record (the calculator's --rows), every field (challenger M1).
++       fail('the API rows differ from the upstream records (full-row comparison, keyed by Id)', rowProblems(rows, control));
++       steps.rowsCompared = { rows: control.rows.length, fieldsPerRow: API_ROW_FIELDS_COMPARED, extraColumns: control.columns.extra.length };
++
++       // Evidence re-hash and the catalog.
++       const rehash = await timed('evidenceRehash', () => rehashEvidence(settings, secrets, sourceId, dataShas));
++       steps.evidence = rehash;
++       fail('evidence re-hash', rehash.filter((r) => r.rehash !== r.sha256).map((r) => `evidence ${r.sha256} re-hashes to ${r.rehash}`));
++       const catalog = await timed('catalog', () => catalogSnapshot(settings, secrets));
++       steps.catalog = catalog;
++       fail('catalog', batchProblems(catalog.batches, control));
++     },
++   });
++   killLiveProcessGroups();
++   summary.steps.timingsMs = { ...(summary.steps.timingsMs ?? {}), total: Date.now() - started };
++   process.stdout.write(`${JSON.stringify({ type: 'ratio.local-acceptance', dataset: opts.dataset, mutation: opts.mutation, ...summary })}\n`);
++   if (!summary.pass) log('local:acceptance failed', { mutation: opts.mutation, failures: summary.failures });
++   return localTestExitCode(summary);
++ }
++
++
+
+ ❯ scripts/local/acceptance.test.mjs:1070:26
+    1068|       "fail('catalog', batchProblems(catalog.batches, control))",
+    1069|     ]) {
+    1070|       expect(body, call).toContain(call);
+       |                          ^
+    1071|     }
+    1072|     expect(body).toMatch(/fail\('evidence re-hash', rehash\.filter\(\(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/15]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  14 failed | 67 passed (81)
+   Start at  14:05:26
+   Duration  3.49s (tests 63%, transform 26%, import 11%, worker 1%)
+

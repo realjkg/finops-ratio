@@ -43,6 +43,7 @@ publishes it per billing period. Readers (`ratio_reader`) see only
 | `RATIO_INSERT_CHUNK_ROWS` (1000) · `RATIO_MAX_ROWS_PER_BATCH` (20M) · `RATIO_MAX_ARTIFACT_BYTES` (5 GiB) · `RATIO_MAX_BATCH_BYTES` (20 GiB) · `RATIO_MAX_ARTIFACTS_PER_SET` (1000) · `RATIO_TMP_DIR` | runs | limits (exceeding ⇒ failed/quarantined, never partial) |
 | `RATIO_DOCTOR_MAX_STALENESS_HOURS` (48) | doctor | freshness threshold |
 | `RATIO_REPLAY_FIXTURES_BUCKET` | replay-fixtures | bucket for synthetic source objects (source credentials need Put/List/Delete there) |
+| `RATIO_ALLOW_SYNTHETIC_PROVIDERS` (`0`) | sync/backfill/replay, replay-fixtures | `1` accepts the fixed synthetic provider set (`SyntheticCloud`, `SyntheticAWS`, `SyntheticAzure`, `SyntheticGCP`) for every checked source type; real provider names are still checked against the per-type allowlist (issue #62). Only `1` or `0`. `1` is **refused unless `RATIO_ENV` is explicitly `development` or `test`** (`SYNTHETIC_PROVIDERS_NOT_ALLOWED`, exit 2; unset, staging and production refuse). Logged once at startup when on. `replay-fixtures` requires it |
 | `RATIO_GIT_SHA` · `RATIO_ARTIFACT_DIGEST` (`sha256:<hex>`) · `RATIO_EVIDENCE_FILE` | all | evidence record metadata; JSONL copy of each record |
 
 Test-only (refused otherwise, and always refused when `RATIO_ENV` is `staging` or
@@ -145,6 +146,21 @@ and up to 1000 stored errors (artifact sha256, data-record ordinal (1-based),
 column, code, message — never the cell value); `validationErrorCount` is the
 true total. Raw bytes: evidence bucket, key `<RATIO_EVIDENCE_S3_PREFIX>/<evidence_key>`
 (`evidence/<tenant>/<source>/<sha256>`); verify with `sha256sum`.
+**Provider check (issue #62).** An AWS Data Exports source (`layout: aws-data-exports`)
+accepts only `ProviderName = AWS` (exact; the synthetic set only with
+`RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`). Results:
+- A row of any other provider is **excluded**: not loaded, stored as an
+  error with code `PROVIDER_MISMATCH` (column `ProviderName`, row ordinal, no
+  cell value). The rest of the batch is published.
+- A **published** batch can therefore carry excluded rows: a nonzero
+  `validation_error_count`, `PROVIDER_MISMATCH` errors in `quarantine show`,
+  and `excludedRows` in the run's period result.
+- A batch whose rows are all foreign is quarantined `PROVIDER_MISMATCH`.
+- An empty `ProviderName`, or a header without it, quarantines the batch
+  (`VALIDATION_FAILED`, `MISSING_VALUE` / `MISSING_REQUIRED_COLUMN`).
+- Set-level manifest controls are compared with the published rows;
+  per-artifact counts with every row seen (issue-62 DESIGN §2.2).
+
 Quarantined is terminal: fix the data at the provider and let a new export
 (new bytes) flow in; identical bytes with a DATA defect are never
 re-validated. Exception: a `RECONCILIATION_VARIANCE` quarantine records the
@@ -195,10 +211,11 @@ after it, a source with zero published periods fails. A source still
 unpublished after the window: check the export configuration and the
 source's `config` (bucket/prefix/exportName), then the last runs' outcomes.
 
-## 7. replay-fixtures (staging/test only)
+## 7. replay-fixtures (test only)
 
 ```bash
-RATIO_ENV=staging RATIO_DATABASE_URL=<worker url> RATIO_MIGRATE_DATABASE_URL=<owner url> \
+RATIO_ENV=test RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 \
+RATIO_DATABASE_URL=<worker url> RATIO_MIGRATE_DATABASE_URL=<owner url> \
 RATIO_REPLAY_FIXTURES_BUCKET=<scratch bucket> RATIO_EVIDENCE_S3_BUCKET=<evidence bucket> ... \
   npm run -s worker -- replay-fixtures --json
 ```
@@ -207,14 +224,20 @@ three sources whose display name says SYNTHETIC), uploads the SYNTHETIC export
 under `ratio-replay-fixtures/<tenant>/…` in `RATIO_REPLAY_FIXTURES_BUCKET`, and
 runs `clean_load`, `idempotent_rerun`, `restatement_supersession`,
 `reconciliation_variance_rejection`, `crash_mid_load_recovery`,
-`zombie_fencing`. Exit 0 only if all six pass. Refused unless `RATIO_ENV` is
-`staging` or `test`.
+`zombie_fencing`. Exit 0 only if all six pass. **Test-only** (issue #62): it is
+refused unless `RATIO_ENV=test`, with exit 2 `REPLAY_FIXTURES_NOT_ALLOWED`
+before any I/O. It ingests synthetic providers, which are allowed only in
+development/test with `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`. **`RATIO_ENV=test`
+without `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` is also refused**, with exit 2
+`REPLAY_FIXTURES_NOT_ALLOWED` before any I/O (the message names the opt-in).
+Without the opt-in every scenario would quarantine `PROVIDER_MISMATCH`.
+Staging returns with per-source synthetic markers (D-21, Slice 3).
 
 **Nothing is deleted** (no purge/delete path in this cycle — deletion is
 retention-class and owner-only). The tenant's rows, its evidence objects
 (`evidence/<tenant>/…` under the evidence prefix) and the synthetic source
 objects stay, and are listed in `results.retained` of the evidence record.
-Staging therefore accumulates one fixture tenant per run — measured locally
+A test database therefore accumulates one fixture tenant per run — measured locally
 (2026-10-03): 341 fact rows (~409 kB of row data), 8 batches, 8 sync runs, and
 38 objects / ~75 KB (synthetic source files + evidence) per run. Identify them with
 `SELECT id, slug FROM ratio.tenants WHERE slug LIKE 'fixture-%'`. Cleanup
@@ -230,10 +253,18 @@ Performed for Slice 1 (script and output: `docs/evidence/slice-1/EVIDENCE.md`). 
 3. Create a bucket and upload `fixtures/focus-1.0-synthetic/base/**` at its root.
 4. Provision tenant + source (section 2) with `prefix` `ratio-synthetic`,
    `exportName` `focus-export`.
-5. `sync` (both periods `published`, `reconciled`), `sync` again (both
-   `skipped_unchanged`), reader totals == `control-totals.json` (`base`),
-   re-hash every evidence object, `doctor --json` (exit 0),
-   `RATIO_ENV=test replay-fixtures --json` (6/6, fixture tenant retained).
+5. The fixture's provider is `SyntheticCloud`, so **every worker command in
+   this section runs with `RATIO_ENV=development` (or `test`) and
+   `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1`** (issue #62). Without the opt-in,
+   every row is excluded and every period quarantines `PROVIDER_MISMATCH`.
+   - `sync`: both periods `published`, `reconciled`;
+   - `sync` again: both `skipped_unchanged`;
+   - reader totals == `control-totals.json` (`base`);
+   - re-hash every evidence object;
+   - `doctor --json` (exit 0);
+   - `RATIO_ENV=test RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 replay-fixtures --json`:
+     6/6, fixture tenant retained. Without the opt-in it is refused at
+     startup (exit 2).
 6. Clean up the scratch database, logins and bucket (local scratch only).
 
 ## 9. Manual real-export acceptance procedure — **NOT YET PERFORMED**
@@ -273,6 +304,14 @@ Required before the ingestion layer may be called usable. Owner-run.
 - No control totals from real AWS manifests ⇒ real batches are `unverified`.
 - Quarantined batches are terminal; identical bytes are not re-validated
   after a code fix.
+- **Published batches are not re-checked after a policy change** (issue #62
+  D12; follow-up issue #66). This covers the `ProviderName` allowlist and the
+  synthetic opt-in.
+  - An unchanged artifact set is `skipped_unchanged`, or `unchanged` for
+    `backfill` and `replay --period`, by data fingerprint.
+  - `replay --batch` can re-publish a superseded batch loaded under an
+    earlier policy (e.g. a pre-#62 batch with foreign rows).
+  - New bytes (a re-delivered export) are checked under the current policy.
 - Temp capture files of a SIGKILLed process stay under `RATIO_TMP_DIR`.
 - Evidence objects are never deleted (retention is an owner decision); replay-fixtures leaves one fixture tenant (rows, evidence, synthetic source objects) per run.
 - A batch must have one billing currency (else quarantined); no cross-period

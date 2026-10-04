@@ -1,0 +1,30 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ scripts/local/local.test.mjs (161 tests | 1 failed | 158 skipped) 32ms
+   ❯ L18 superuser catalog queries are tenant-scoped (PR #67 review) (3)
+     × blind spots (challenger at ebbde12): a tautological self-binding, and reversed pairs sharing one binding, are flagged 23ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/local.test.mjs > L18 superuser catalog queries are tenant-scoped (PR #67 review) > blind spots (challenger at ebbde12): a tautological self-binding, and reversed pairs sharing one binding, are flagged
+AssertionError: `SELECT 1 FROM e b WHERE b.batch_id = b.id AND b.tenant_id = b.tenant_id`: expected [] to not deeply equal []
+
+Compared values have no visual difference.
+
+ ❯ scripts/local/local.test.mjs:1739:57
+    1737|       '`SELECT 1 FROM e v WHERE b.tenant_id = v.tenant_id AND b.id = v…
+    1738|     ]) {
+    1739|       expect(untenantedBatchCorrelations(bad), bad).not.toEqual([]);
+       |                                                         ^
+    1740|     }
+    1741|     for (const good of [
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed | 158 skipped (161)
+   Start at  17:02:27
+   Duration  693ms (transform 63%, import 28%, tests 8%, worker 1%)
+

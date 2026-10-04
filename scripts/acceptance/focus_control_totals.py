@@ -8,7 +8,8 @@ library only, and shares no code with the ingestion worker (TypeScript,
 csv-parse), the staging converter (JavaScript), Postgres or the API. It reads
 the UPSTREAM file, never the staged copy.
 
-  python3 focus_control_totals.py [--expect-sha256 HEX] [--row-id-column Id] [--rows] [--focus-version 1.0] FILE
+  python3 focus_control_totals.py [--expect-sha256 HEX] [--row-id-column Id] [--rows] [--focus-version 1.0]
+                                 [--provider NAME]... FILE
 
 Prints one JSON document. Per (billing period, currency) it reports:
 rowCount, billedCost, effectiveCost, effectiveCostNulls and rowDigest.
@@ -28,6 +29,14 @@ contract, publishedCosts.ts):
 - every other upstream column is in extraColumns, verbatim.
 
 The acceptance run compares every API row with this, keyed by the row id.
+
+With --provider NAME (repeatable; issue #62) only the records whose
+ProviderName is EXACTLY one of the names (case-sensitive, no trimming) are
+counted in `totals` and `rows`. Every other record is still read and
+validated, and counted per billing period under `excluded` (with a count
+per provider); `providerFilter` repeats the names. A NULL or empty
+ProviderName is refused under a filter: the worker quarantines such a
+batch, so its outcome is not a row-level exclusion the control could state.
 
 Exit codes: 0 ok; 1 the input is not what this tool accepts (nothing is
 printed); 2 usage error or SHA-256 mismatch.
@@ -257,10 +266,20 @@ def expected_row(rec, pos, header, period, focus_version, n):
     def first(*vals):
         return next((v for v in vals if v is not None), None)
 
+    # The worker's validateRow refuses a C0 control other than TAB/LF/CR in ANY value
+    # (INVALID_CHARACTER, validate.ts) and an end before the start (CHARGE_PERIOD_INVERTED).
+    # The batch then quarantines, so --rows must not predict a publication (Copilot F2).
+    for name, (text, _quoted) in zip(header, rec):
+        if any(ord(ch) < 0x20 and ch not in '\t\n\r' for ch in text):
+            raise ControlTotalsError(f'record {n}: {name} contains a control character (only TAB, CR and LF are allowed)')
+    start, end = ts('ChargePeriodStart'), ts('ChargePeriodEnd')
+    if end < start:  # both UTC, fixed-width YYYY-MM-DDTHH:MM:SS.ffffffZ: text order is time order
+        raise ControlTotalsError(f'record {n}: ChargePeriodEnd is before ChargePeriodStart')
+
     return {
         'billingPeriod': period,
-        'chargePeriodStart': ts('ChargePeriodStart'),
-        'chargePeriodEnd': ts('ChargePeriodEnd'),
+        'chargePeriodStart': start,
+        'chargePeriodEnd': end,
         'billedCost': dec('BilledCost'),
         'effectiveCost': dec('EffectiveCost'),
         'listCost': dec('ListCost'),
@@ -282,15 +301,21 @@ def expected_row(rec, pos, header, period, focus_version, n):
     }
 
 
-def compute(data, row_id_column='Id', rows=False, focus_version='1.0'):
+def compute(data, row_id_column='Id', rows=False, focus_version='1.0', providers=None):
     records = tokenize(data)
     header = [t for t, _ in records[0]]
     if len(set(header)) != len(header):
         raise ControlTotalsError('duplicate column name in the header')
     pos = {name: i for i, name in enumerate(header)}
-    for col in REQUIRED + (row_id_column,):
+    required = REQUIRED + (row_id_column,)
+    if providers is not None:
+        if not providers or any(not isinstance(p, str) or p == '' for p in providers):
+            raise ControlTotalsError('a provider filter needs non-empty provider names')
+        required = required + ('ProviderName',)
+    for col in required:
         if col not in pos:
             raise ControlTotalsError(f'required column {col} is missing')
+    excluded = {}
     data_rows = records[1:]
     if not data_rows:
         raise ControlTotalsError('no data rows')
@@ -337,6 +362,22 @@ def compute(data, row_id_column='Id', rows=False, focus_version='1.0'):
         if _is_null(id_field):
             raise ControlTotalsError(f'record {n}: {row_id_column} is null')
 
+        if providers is not None:
+            provider_field = rec[pos['ProviderName']]
+            if _is_null(provider_field) or provider_field[0] == '':
+                raise ControlTotalsError(f'record {n}: ProviderName is null or empty')
+            if provider_field[0] not in providers:
+                if rows:
+                    # The worker validates the whole row BEFORE the provider check (load.ts), so an
+                    # invalid foreign record is a validation error, not an exclusion (PR #67 review).
+                    expected_row(rec, pos, header, period, focus_version, n)
+                    if id_field[0] in seen_ids:
+                        raise ControlTotalsError(f'record {n}: {row_id_column} is not unique')
+                    seen_ids.add(id_field[0])
+                e = excluded.setdefault(period, {})
+                e[provider_field[0]] = e.get(provider_field[0], 0) + 1
+                continue
+
         g = groups.setdefault((period, currency), {'rows': 0, 'billed': [], 'effective': [], 'nulls': 0, 'lines': []})
         g['rows'] += 1
         g['billed'].append(billed)
@@ -373,6 +414,16 @@ def compute(data, row_id_column='Id', rows=False, focus_version='1.0'):
         'columns': classify_columns(header),
         'totals': totals,
     }
+    if providers is not None:
+        doc['providerFilter'] = list(providers)
+        doc['excluded'] = [
+            {
+                'billingPeriod': period,
+                'rowCount': str(sum(excluded[period].values())),
+                'providers': {name: str(count) for name, count in sorted(excluded[period].items())},
+            }
+            for period in sorted(excluded)
+        ]
     if rows:
         doc['rows'] = expected_rows
     return doc
@@ -389,6 +440,7 @@ def main(argv):
     parser.add_argument('--row-id-column', default='Id')
     parser.add_argument('--rows', action='store_true')
     parser.add_argument('--focus-version', default='1.0')
+    parser.add_argument('--provider', action='append', dest='providers')
     parser.add_argument('file')
     try:
         args = parser.parse_args(argv)
@@ -407,7 +459,7 @@ def main(argv):
             print(f'SHA-256 mismatch: expected {args.expect_sha256}, got {actual}', file=sys.stderr)
             return 2
     try:
-        doc = compute(data, row_id_column=args.row_id_column, rows=args.rows, focus_version=args.focus_version)
+        doc = compute(data, row_id_column=args.row_id_column, rows=args.rows, focus_version=args.focus_version, providers=args.providers)
     except ControlTotalsError as e:
         print(f'refused: {e}', file=sys.stderr)
         return 1

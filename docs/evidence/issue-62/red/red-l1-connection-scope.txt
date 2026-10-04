@@ -1,0 +1,34 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/worker/replayFixturesQuarantine.db.test.ts (2 tests | 1 failed) 1501ms
+   ❯ L-1 the connection count is scoped to this test database (no collision with K5 or any other database) (1)
+     × ignores an idle ratio-replay-fixtures session connected to a different database 21ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/worker/replayFixturesQuarantine.db.test.ts > L-1 the connection count is scoped to this test database (no collision with K5 or any other database) > ignores an idle ratio-replay-fixtures session connected to a different database
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ src/ingest/worker/replayFixturesQuarantine.db.test.ts:45:40
+     43|       const seen = await t.db.pool.query(`SELECT count(*)::int AS n FR…
+     44|       expect(seen.rows[0].n).toBeGreaterThanOrEqual(1);
+     45|       expect(await adminConnections()).toBe(0);
+       |                                        ^
+     46|     } finally {
+     47|       await other.end();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  16:18:56
+   Duration  3.62s (tests 52%, transform 35%, import 11%, setup 2%)
+

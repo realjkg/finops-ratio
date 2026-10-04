@@ -1,0 +1,156 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/focus/provider.test.ts (21 tests | 6 failed) 35ms
+   ❯ U1 the allowlist per source type (6)
+     × is exactly AWS for AWS Data Exports and nothing for fake; the synthetic providers are a separate, gated list 11ms
+     × resolves the source type from the source row (kind + config.layout); synthetic providers only with the opt-in 4ms
+   ❯ U1 checkProviderName (8)
+     × excludes a foreign provider with PROVIDER_MISMATCH on column ProviderName 4ms
+     × the fake type refuses AWS, and everything without the opt-in 1ms
+   ❯ U1 the fixed SYNTHETIC_PROVIDERS set under the opt-in (orchestrator, 2026-10-04) (4)
+     × opt-in ON: every one of them is accepted by every source type 3ms
+     × opt-in ON: the policy is exactly the per-type list followed by the synthetic set, and nothing else 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 the allowlist per source type > is exactly AWS for AWS Data Exports and nothing for fake; the synthetic providers are a separate, gated list
+AssertionError: expected undefined to deeply equal [ 'SyntheticCloud', …(3) ]
+
+- Expected:
+[
+  "SyntheticCloud",
+  "SyntheticAWS",
+  "SyntheticAzure",
+  "SyntheticGCP",
+]
+
++ Received:
+undefined
+
+ ❯ src/ingest/focus/provider.test.ts:37:33
+     35|     expect(PROVIDER_MISMATCH).toBe('PROVIDER_MISMATCH');
+     36|     expect(SOURCE_TYPE_PROVIDERS).toEqual({ 'aws-data-exports': ['AWS'…
+     37|     expect(SYNTHETIC_PROVIDERS).toEqual(['SyntheticCloud', 'SyntheticA…
+       |                                 ^
+     38|   });
+     39|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 the allowlist per source type > resolves the source type from the source row (kind + config.layout); synthetic providers only with the opt-in
+AssertionError: expected { Object (sourceType, allowed) } to deeply equal { Object (sourceType, allowed) }
+
+- Expected
++ Received
+
+  {
+    "allowed": [
+      "AWS",
+      "SyntheticCloud",
+-     "SyntheticAWS",
+-     "SyntheticAzure",
+-     "SyntheticGCP",
+    ],
+    "sourceType": "aws-data-exports",
+  }
+
+ ❯ src/ingest/focus/provider.test.ts:53:47
+     51|   it('resolves the source type from the source row (kind + config.layo…
+     52|     expect(providerPolicyFor(AWS_SOURCE, OFF)).toEqual({ sourceType: '…
+     53|     expect(providerPolicyFor(AWS_SOURCE, ON)).toEqual({ sourceType: 'a…
+       |                                               ^
+     54|     expect(providerPolicyFor({ kind: 'fake', config: { fixture: 'synth…
+     55|     expect(providerPolicyFor({ kind: 'fake', config: {} }, ON)).toEqua…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 checkProviderName > excludes a foreign provider with PROVIDER_MISMATCH on column ProviderName
+AssertionError: expected 'ProviderName is not allowed for sourc…' to be 'ProviderName is not allowed for sourc…' // Object.is equality
+
+Expected: "ProviderName is not allowed for source type aws-data-exports (allowed: AWS, SyntheticCloud, SyntheticAWS, SyntheticAzure, SyntheticGCP); row excluded"
+Received: "ProviderName is not allowed for source type aws-data-exports (allowed: AWS, SyntheticCloud); row excluded"
+
+ ❯ src/ingest/focus/provider.test.ts:106:33
+    104|         expect(r.error.code).toBe('PROVIDER_MISMATCH');
+    105|         expect(r.error.column).toBe('ProviderName');
+    106|         expect(r.error.message).toBe(`ProviderName is not allowed for …
+       |                                 ^
+    107|       }
+    108|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 checkProviderName > the fake type refuses AWS, and everything without the opt-in
+AssertionError: expected 'ProviderName is not allowed for sourc…' to be 'ProviderName is not allowed for sourc…' // Object.is equality
+
+Expected: "ProviderName is not allowed for source type fake (allowed: SyntheticCloud, SyntheticAWS, SyntheticAzure, SyntheticGCP); row excluded"
+Received: "ProviderName is not allowed for source type fake (allowed: SyntheticCloud); row excluded"
+
+ ❯ src/ingest/focus/provider.test.ts:126:31
+    124|     if (!r.ok) {
+    125|       expect(r.exclude).toBe(true);
+    126|       expect(r.error.message).toBe('ProviderName is not allowed for so…
+       |                               ^
+    127|     }
+    128|     const off = checkProviderName('SyntheticCloud', providerPolicyFor(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 the fixed SYNTHETIC_PROVIDERS set under the opt-in (orchestrator, 2026-10-04) > opt-in ON: every one of them is accepted by every source type
+AssertionError: aws-data-exports SyntheticAWS: expected { ok: false, exclude: true, …(1) } to deeply equal { ok: true }
+
+- Expected
++ Received
+
+  {
+-   "ok": true,
++   "error": {
++     "code": "PROVIDER_MISMATCH",
++     "column": "ProviderName",
++     "message": "ProviderName is not allowed for source type aws-data-exports (allowed: AWS, SyntheticCloud); row excluded",
++   },
++   "exclude": true,
++   "ok": false,
+  }
+
+ ❯ src/ingest/focus/provider.test.ts:179:91
+    177|     for (const [type, src] of SOURCES) {
+    178|       const p = providerPolicyFor(src, ON)!;
+    179|       for (const name of SYNTHETIC) expect(checkProviderName(name, p),…
+       |                                                                                           ^
+    180|     }
+    181|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  src/ingest/focus/provider.test.ts > U1 the fixed SYNTHETIC_PROVIDERS set under the opt-in (orchestrator, 2026-10-04) > opt-in ON: the policy is exactly the per-type list followed by the synthetic set, and nothing else
+AssertionError: aws-data-exports: expected [ 'AWS', 'SyntheticCloud' ] to deeply equal [ 'AWS', 'SyntheticCloud', …(3) ]
+
+- Expected
++ Received
+
+  [
+    "AWS",
+    "SyntheticCloud",
+-   "SyntheticAWS",
+-   "SyntheticAzure",
+-   "SyntheticGCP",
+  ]
+
+ ❯ src/ingest/focus/provider.test.ts:199:57
+    197|   it('opt-in ON: the policy is exactly the per-type list followed by t…
+    198|     for (const [type, src] of SOURCES) {
+    199|       expect(providerPolicyFor(src, ON)!.allowed, type).toEqual([...SO…
+       |                                                         ^
+    200|       expect(providerPolicyFor(src, OFF)!.allowed, type).toEqual([...S…
+    201|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 15 passed (21)
+   Start at  14:37:33
+   Duration  755ms (transform 71%, tests 14%, import 12%, worker 4%)
+

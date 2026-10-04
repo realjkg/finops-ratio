@@ -101,7 +101,7 @@ The worker's only real source is AWS Data Exports (Slice 1 DESIGN §3,
 | Rows of two billing periods in one file | rows of the other period ⇒ `PERIOD_MISMATCH` ⇒ batch quarantined | **staging** (split by `BillingPeriodStart`) |
 | Unquoted `NULL` in numeric columns | `UNPARSEABLE_NUMBER` ⇒ batch quarantined | **staging** (null token → empty) |
 | Unquoted `NULL` in text columns | stored as the text `"NULL"` (e.g. `ChargeClass: "NULL"`, `Tags: "NULL"`), which is wrong but not refused | **staging** (same rule, every column) |
-| AWS, Microsoft and Oracle rows in one "AWS" export | accepted: the worker does not constrain `ProviderName` | nothing (noted, §9) |
+| AWS, Microsoft and Oracle rows in one "AWS" export | accepted: the worker does not constrain `ProviderName` (**since #62: foreign rows excluded, `PROVIDER_MISMATCH`**) | nothing (noted, §9; fixed by #62) |
 | 44 columns incl. non-FOCUS `Id`, `Tags` | the required 5 present; the rest is mapped or kept in `extra_columns` | nothing |
 | FOCUS version | the worker takes it from `sources.declared_focus_version` (`1.0`); there is no in-file version | nothing (provisioned as `1.0`) |
 | Timestamps without offset | read as UTC (D-i) | nothing |
@@ -460,7 +460,9 @@ worker or the expected side.
   source type implies. An "AWS Data Exports" source carrying Microsoft and
   Oracle rows is accepted. For a real AWS export that cannot happen, but a
   misconfigured bucket could feed foreign rows. Tracked in
-  realjkg/finops-ratio#62.
+  realjkg/finops-ratio#62. **Fixed by #62** (`fix/62-provider-source-check`,
+  `docs/evidence/issue-62/DESIGN.md`): foreign rows are excluded as
+  `PROVIDER_MISMATCH`, and the acceptance run now expects the AWS rows only.
 - The `NULL` token is a sample-format artifact; how real exports write a
   null is confirmed only when a real export is connected (brief D-02,
   optional owner action).

@@ -1671,3 +1671,92 @@ describe('L25 every membership edge touching a managed role is judged, either si
     expect(bootstrapPlan(LOCAL_NAMES).join('\n')).not.toMatch(/\bREVOKE\b/);
   });
 });
+
+describe('L18 superuser catalog queries are tenant-scoped (PR #67 review)', () => {
+  // Batch ids are unique only within a tenant (PK (tenant_id, id)), and the catalog
+  // snapshot runs as the local superuser, which bypasses row-level security. Every
+  // correlation on a batch id must therefore bind the tenant in the SAME SQL text.
+  // Returns the batch-id correlations in `src` that lack a tenant binding between the
+  // same two aliases inside the same template literal. An unaliased batch_id counts as unscoped.
+  function untenantedBatchCorrelations(src) {
+    const problems = [];
+    for (const [sql] of src.matchAll(/`[^`]*`/g)) {
+      const pairs = [
+        ...[...sql.matchAll(/(?:\b(\w+)\.)?batch_id\s*=\s*(\w+)\.id\b/g)].map((m) => [m[1], m[2], m[0]]),
+        ...[...sql.matchAll(/\b(\w+)\.id\s*=\s*(?:\b(\w+)\.)?batch_id\b/g)].map((m) => [m[2], m[1], m[0]]),
+      ];
+      // Per UNORDERED alias pair: at least as many tenant bindings as batch-id correlations, in
+      // both directions together, so a second subquery that reuses already-scoped aliases is still
+      // flagged (challenger mutation C), and reversed pairs cannot share one binding (challenger at
+      // ebbde12, ii). Each binding is counted once; `x.tenant_id = x.tenant_id` binds nothing (i).
+      const pairKey = (a, b) => [a, b].sort().join('|');
+      const correlations = new Map();
+      for (const [child, parent, text] of pairs) {
+        if (child === undefined) {
+          problems.push(text);
+          continue;
+        }
+        const key = pairKey(child, parent);
+        correlations.set(key, [...(correlations.get(key) ?? []), text]);
+      }
+      const bindings = new Map();
+      for (const m of sql.matchAll(/\b(\w+)\.tenant_id\s*=\s*(\w+)\.tenant_id\b/g)) {
+        if (m[1] === m[2]) continue; // a tautology
+        const key = pairKey(m[1], m[2]);
+        bindings.set(key, (bindings.get(key) ?? 0) + 1);
+      }
+      for (const [key, texts] of correlations) {
+        const bound = bindings.get(key) ?? 0;
+        if (bound < texts.length) problems.push(...texts.slice(bound));
+      }
+    }
+    return problems;
+  }
+
+  it('the checker flags every unscoped form (the challenger mutations A-D) and accepts scoped ones', () => {
+    for (const bad of [
+      '`SELECT 1 FROM x v WHERE b.id = v.batch_id`',
+      '`SELECT 1 FROM x WHERE batch_id = b.id`',
+      '`SELECT (SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id), (SELECT 1 FROM ratio.ingest_artifacts a WHERE a.batch_id = b.id)`',
+      '`SELECT 1 FROM ratio.ingest_artifacts a WHERE b.id = a.batch_id`',
+      // Mutation C exactly as the challenger wrote it: a second subquery REUSING the scoped alias v.
+      '`SELECT (SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id), (SELECT count(*) FROM ratio.ingest_artifacts v WHERE v.batch_id = b.id)`',
+      '`SELECT 1 FROM e v WHERE v.batch_id = b.id` + `v.tenant_id = b.tenant_id`',
+    ]) {
+      expect(untenantedBatchCorrelations(bad), bad).not.toEqual([]);
+    }
+    for (const good of [
+      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id`',
+      '`SELECT 1 FROM e v WHERE b.id = v.batch_id AND b.tenant_id = v.tenant_id`',
+    ]) {
+      expect(untenantedBatchCorrelations(good), good).toEqual([]);
+    }
+  });
+
+  it('blind spots (challenger at ebbde12): a tautological self-binding, and reversed pairs sharing one binding, are flagged', () => {
+    for (const bad of [
+      // (i) child === parent: `b.tenant_id = b.tenant_id` is a tautology and binds nothing.
+      '`SELECT 1 FROM e b WHERE b.batch_id = b.id AND b.tenant_id = b.tenant_id`',
+      '`SELECT 1 FROM e b WHERE b.batch_id = b.id AND b.id = b.batch_id AND b.tenant_id = b.tenant_id`',
+      // (ii) reversed pairs: one binding between v and b, but two correlations (v→b and b→v).
+      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id AND b.batch_id = v.id`',
+      '`SELECT 1 FROM e v WHERE b.tenant_id = v.tenant_id AND b.id = v.batch_id AND v.id = b.batch_id`',
+    ]) {
+      expect(untenantedBatchCorrelations(bad), bad).not.toEqual([]);
+    }
+    for (const good of [
+      // Two correlations, two bindings (either direction) between the same unordered pair.
+      '`SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id AND b.tenant_id = v.tenant_id AND b.batch_id = v.id`',
+    ]) {
+      expect(untenantedBatchCorrelations(good), good).toEqual([]);
+    }
+  });
+
+  it('no batch-id correlation in scripts/local is missing its tenant binding', () => {
+    for (const file of ['scripts/local/local.mjs', 'scripts/local/acceptance.mjs']) {
+      expect(untenantedBatchCorrelations(read(file)), file).toEqual([]);
+    }
+    // The catalog query is still there (the check above is not vacuous).
+    expect(read('scripts/local/local.mjs')).toMatch(/v\.tenant_id = b\.tenant_id AND v\.batch_id = b\.id/);
+  });
+});

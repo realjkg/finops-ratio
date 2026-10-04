@@ -1,0 +1,38 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+e ❯ scripts/local/acceptance.test.mjs (79 tests | 1 failed) 2132ms
+   ❯ A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that (12)
+     × L2: runProcess can capture stderr (and still passes it through); local.mjs captures it for the worker syncs 107ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > L2: runProcess can capture stderr (and still passes it through); local.mjs captures it for the worker syncs
+AssertionError: expected 'function run(cmd, args, { env = {}, c…' to match /\{ env = \{\}, capture = false, captu…/
+
+- Expected:
+/\{ env = \{\}, capture = false, captureErr = false, allowFail = false,/
+
++ Received:
+"function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs, signal = interrupt.signal } = {}) {
+  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs, signal: signal ?? undefined });
+}
+
+"
+
+ ❯ scripts/local/acceptance.test.mjs:873:19
+    871|     // ...and run() forwards captureErr to runProcess (the first live …
+    872|     const runFn = src.slice(src.indexOf('function run(cmd, args'), src…
+    873|     expect(runFn).toMatch(/\{ env = \{\}, capture = false, captureErr …
+       |                   ^
+    874|     expect(runFn).toMatch(/runProcess\(cmd, args, \{ cwd: ROOT, env: \…
+    875|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 78 passed (79)
+   Start at  15:18:17
+   Duration  3.92s (tests 60%, transform 27%, import 13%)
+

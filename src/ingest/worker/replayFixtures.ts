@@ -9,7 +9,8 @@
 // deletion is retention-class). The tenant's rows, its evidence objects and the
 // uploaded synthetic source objects stay in place and are reported in the
 // result, so staging accumulates fixture tenants until an owner-approved
-// retention slice. Refused unless RATIO_ENV is staging/test (CLI checks first).
+// retention slice. Refused unless RATIO_ENV is test (CLI checks first; issue #62 L3:
+// it ingests synthetic providers, allowed only in development/test; staging returns with D-21).
 import crypto from 'crypto';
 import { Client, type Pool } from 'pg';
 import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
@@ -48,6 +49,10 @@ export async function runReplayFixtures(opts: {
   evidence: EvidenceStore;
   log?: LogFn;
   secrets?: readonly string[];
+  /** The synthetic-provider opt-in (issue #62 D1); omitted ⇒ runSync's default (this process's env). */
+  allowSyntheticProviders?: boolean;
+  /** Fault-injection seam for tests (library only; the CLI never passes it). Throwing fails that step. */
+  testHooks?: { beforeExpireLease?: (sourceKey: string) => void | Promise<void> };
 }): Promise<ReplayFixturesResult> {
   const log = opts.log ?? (() => undefined);
   const tenantId = crypto.randomUUID();
@@ -58,7 +63,6 @@ export async function runReplayFixtures(opts: {
   const scenarios: ScenarioResult[] = [];
   const admin = new Client({ connectionString: opts.adminUrl, application_name: 'ratio-replay-fixtures' });
   admin.on('error', () => undefined);
-  await admin.connect();
 
   const asTenant = async <T>(c: Client, fn: () => Promise<T>): Promise<T> => {
     await c.query('BEGIN');
@@ -100,8 +104,9 @@ export async function runReplayFixtures(opts: {
       );
       return r.rows.map((x) => `${x.p}:${x.status}:${x.reconciliation}`);
     });
-  const expireLease = (sourceKey: string) =>
-    workerTransaction(opts.workerPool, tenantId, async (c) => {
+  const expireLease = async (sourceKey: string) => {
+    await opts.testHooks?.beforeExpireLease?.(sourceKey);
+    return workerTransaction(opts.workerPool, tenantId, async (c) => {
       const r = await c.query(
         `UPDATE ratio.sync_runs r SET lease_expires_at = clock_timestamp() - interval '1 second'
          FROM ratio.sources s WHERE s.tenant_id = r.tenant_id AND s.id = r.source_id AND s.source_key = $1 AND r.status = 'running'`,
@@ -109,6 +114,7 @@ export async function runReplayFixtures(opts: {
       );
       return r.rowCount ?? 0;
     });
+  };
   const sync = (sourceKey: string, extra: Partial<Parameters<typeof runSync>[0]> = {}) =>
     runSync({
       pool: opts.workerPool,
@@ -120,6 +126,7 @@ export async function runReplayFixtures(opts: {
       log,
       secrets: opts.secrets,
       ...extra,
+      settings: { ...(opts.allowSyntheticProviders === undefined ? {} : { allowSyntheticProviders: opts.allowSyntheticProviders }), ...extra.settings },
     });
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -134,6 +141,8 @@ export async function runReplayFixtures(opts: {
   };
 
   try {
+    // Connected inside the try, so the finally always ends the client (challenger M-A).
+    await admin.connect();
     await asTenant(admin, async () => {
       await admin.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2)`, [tenantId, tenantSlug]);
       for (const key of SOURCES) {
@@ -221,14 +230,28 @@ export async function runReplayFixtures(opts: {
         () => 'completed',
         (e) => (e instanceof IngestError ? e.code : 'ERROR'),
       );
-      await atPublish;
-      const expired = await expireLease('fx-zombie');
-      const winner = await sync('fx-zombie');
-      release();
+      // Bounded (challenger M-A): if the zombie never reaches publish (e.g. every period is
+      // quarantined), it settles instead, and the scenario fails at once rather than hanging.
+      const reachedPublish = await Promise.race([atPublish.then(() => true), zombieOutcome.then(() => false)]);
+      if (!reachedPublish) {
+        release();
+        return { pass: false, detail: { reachedPublish, zombie: await zombieOutcome } };
+      }
+      // Every path after reachedPublish releases the zombie and waits for it to settle (Copilot F1):
+      // a failing expireLease or winner sync must not leave it blocked in beforePublish, heartbeating.
+      let expired: number;
+      let winner: Awaited<ReturnType<typeof sync>>;
+      try {
+        expired = await expireLease('fx-zombie');
+        winner = await sync('fx-zombie');
+      } finally {
+        release();
+        await zombieOutcome;
+      }
       const z = await zombieOutcome;
       const t = await totals('fx-zombie');
       const pass = expired === 1 && winner.status === 'succeeded' && z === 'LEASE_LOST' && same(t, expected('base'));
-      return { pass, detail: { zombie: z, winner: winner.status } };
+      return { pass, detail: { reachedPublish, zombie: z, winner: winner.status } };
     });
   } finally {
     await admin.end().catch(() => undefined);

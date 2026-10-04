@@ -1,0 +1,138 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a7171a9dab19d7afb
+
+ ❯ src/ingest/syntheticProviders.test.ts (9 tests | 4 failed) 23ms
+   ❯ RATIO_ALLOW_SYNTHETIC_PROVIDERS (9)
+     × L3: is refused when RATIO_ENV is unset or empty (the worker would default to development, but the opt-in needs it explicit) 4ms
+     × L3: is refused in staging 1ms
+     × L3: is refused for an unknown or differently-cased RATIO_ENV 1ms
+     × the refusal names the rule, not the value 6ms
+e ❯ scripts/local/acceptance.test.mjs (79 tests | 3 failed) 2091ms
+   ❯ A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that (12)
+     × synthetic-provider opt-in (orchestrator D1): OFF in the worker env by default and for the acceptance run; ON only for the synthetic fixture sync 17ms
+     × L2: the acceptance syncs are judged on the worker stderr too: the synthetic-provider opt-in log must be absent 8ms
+     × L2: runProcess can capture stderr (and still passes it through); local.mjs captures it for the worker syncs 50ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > synthetic-provider opt-in (orchestrator D1): OFF in the worker env by default and for the acceptance run; ON only for the synthetic fixture sync
+AssertionError: expected undefined to be '0' // Object.is equality
+
+- Expected:
+"0"
+
++ Received:
+undefined
+
+ ❯ scripts/local/acceptance.test.mjs:826:74
+    824|     const secrets = { RATIO_LOCAL_WORKER_PASSWORD: 'w', RATIO_LOCAL_MI…
+    825|     // Challenger L2: OFF is explicit ('0'), so an opt-in exported in …
+    826|     expect(workerEnv(settings, secrets).RATIO_ALLOW_SYNTHETIC_PROVIDER…
+       |                                                                          ^
+    827|     expect(workerEnv(settings, secrets, { syntheticProviders: false })…
+    828|     const inherited = { RATIO_ALLOW_SYNTHETIC_PROVIDERS: '1', RATIO_EN…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > L2: the acceptance syncs are judged on the worker stderr too: the synthetic-provider opt-in log must be absent
+AssertionError: expected [Function] to throw error including 'first sync:\n  sync: the worker ran w…' but got 'second sync:\n  second sync: the work…'
+
+- Expected
++ Received
+
+- first sync:
++ second sync:
+-   sync: the worker ran with the synthetic-provider opt-in (config.synthetic_providers_allowed logged); the acceptance run must have it off
++   second sync: the worker CLI exited null (expected 1)
++   second sync: the worker CLI printed no evidence record
+
+ ❯ scripts/local/acceptance.test.mjs:849:82
+    847|     const LOG = '{"ts":"x","level":"warn","event":"config.synthetic_pr…
+    848|     await expect(syncTwice({ sync: runner({ ...first, stderr: '' }, { …
+    849|     await expect(syncTwice({ sync: runner({ ...first, stderr: LOG }), …
+       |                                                                                  ^
+    850|       'first sync:\n  sync: the worker ran with the synthetic-provider…
+    851|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  scripts/local/acceptance.test.mjs > A12 issue #62: foreign-provider rows are excluded by the worker, and the acceptance expects exactly that > L2: runProcess can capture stderr (and still passes it through); local.mjs captures it for the worker syncs
+AssertionError: expected { code: +0, out: 'o' } to deeply equal { code: +0, out: 'o', err: 'e' }
+
+- Expected
++ Received
+
+  {
+    "code": 0,
+-   "err": "e",
+    "out": "o",
+  }
+
+ ❯ scripts/local/acceptance.test.mjs:859:167
+    857|
+    858|   it('L2: runProcess can capture stderr (and still passes it through);…
+    859|     await expect(runProcess(process.execPath, ['-e', 'process.stdout.w…
+       |                                                                                                                                                                       ^
+    860|       code: 0,
+    861|       out: 'o',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  src/ingest/syntheticProviders.test.ts > RATIO_ALLOW_SYNTHETIC_PROVIDERS > L3: is refused when RATIO_ENV is unset or empty (the worker would default to development, but the opt-in needs it explicit)
+AssertionError: expected function to throw an error, but it didn't
+ ❯ src/ingest/syntheticProviders.test.ts:56:56
+     54|
+     55|   it('L3: is refused when RATIO_ENV is unset or empty (the worker woul…
+     56|     expect(() => loadWorkerConfig({ ...base, ...ON })).toThrow(NOT_ALL…
+       |                                                        ^
+     57|     expect(() => syntheticProvidersOptIn({ ...ON })).toThrow(NOT_ALLOW…
+     58|     expect(() => loadWorkerConfig({ ...base, ...ON, RATIO_ENV: '' })).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  src/ingest/syntheticProviders.test.ts > RATIO_ALLOW_SYNTHETIC_PROVIDERS > L3: is refused in staging
+AssertionError: expected function to throw an error, but it didn't
+ ❯ src/ingest/syntheticProviders.test.ts:63:78
+     61|
+     62|   it('L3: is refused in staging', () => {
+     63|     expect(() => loadWorkerConfig({ ...base, ...ON, RATIO_ENV: 'stagin…
+       |                                                                              ^
+     64|     expect(() => syntheticProvidersOptIn({ ...ON, RATIO_ENV: 'staging'…
+     65|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  src/ingest/syntheticProviders.test.ts > RATIO_ALLOW_SYNTHETIC_PROVIDERS > L3: is refused for an unknown or differently-cased RATIO_ENV
+AssertionError: prod
+ ❯ src/ingest/syntheticProviders.test.ts:69:87
+     67|   it('L3: is refused for an unknown or differently-cased RATIO_ENV', (…
+     68|     for (const ratioEnv of ['prod', 'dev', 'TEST', 'Development', 'loc…
+     69|       expect(() => syntheticProvidersOptIn({ ...ON, RATIO_ENV: ratioEn…
+       |                                                                                       ^
+     70|     }
+     71|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  src/ingest/syntheticProviders.test.ts > RATIO_ALLOW_SYNTHETIC_PROVIDERS > the refusal names the rule, not the value
+AssertionError: expected 'expected a refusal' to be 'RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 is …' // Object.is equality
+
+Expected: "RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 is accepted only when RATIO_ENV is explicitly development or test"
+Received: "expected a refusal"
+
+ ❯ src/ingest/syntheticProviders.test.ts:78:36
+     76|       throw new Error('expected a refusal');
+     77|     } catch (e) {
+     78|       expect((e as Error).message).toBe('RATIO_ALLOW_SYNTHETIC_PROVIDE…
+       |                                    ^
+     79|     }
+     80|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  7 failed | 81 passed (88)
+   Start at  15:07:59
+   Duration  3.45s (tests 63%, transform 26%, import 11%)
+

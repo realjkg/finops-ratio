@@ -31,6 +31,12 @@ export interface WorkerSettings {
   retryMaxMs: number;
   tmpDir: string;
   limits: WorkerLimits;
+  /**
+   * Issue #62 (orchestrator D1): accept the synthetic fixtures' provider names
+   * (focus/provider.ts SYNTHETIC_PROVIDERS). RATIO_ALLOW_SYNTHETIC_PROVIDERS=1;
+   * default false; accepted only with RATIO_ENV explicitly development or test.
+   */
+  allowSyntheticProviders: boolean;
 }
 
 export const DEFAULT_LIMITS: WorkerLimits = {
@@ -51,6 +57,7 @@ export const DEFAULT_SETTINGS: WorkerSettings = {
   retryMaxMs: 30_000,
   tmpDir: os.tmpdir(),
   limits: DEFAULT_LIMITS,
+  allowSyntheticProviders: false,
 };
 
 export interface S3Settings {
@@ -158,7 +165,27 @@ export function testSwitchesPermitted(env: Env): boolean {
 /** Default first-publication grace for doctor's NEVER_PUBLISHED (hours). */
 export const DEFAULT_FIRST_PUBLISH_GRACE_HOURS = 48;
 
+/**
+ * RATIO_ALLOW_SYNTHETIC_PROVIDERS (issue #62, orchestrator D1): unset, '' or
+ * '0' ⇒ false; '1' ⇒ true; anything else ⇒ CONFIG_INVALID. '1' is refused with
+ * SYNTHETIC_PROVIDERS_NOT_ALLOWED unless RATIO_ENV is EXPLICITLY `development`
+ * or `test` (challenger L3): unset, unknown, staging and production all refuse.
+ */
+export function syntheticProvidersOptIn(env: Env): boolean {
+  const raw = env.RATIO_ALLOW_SYNTHETIC_PROVIDERS;
+  if (raw === undefined || raw === '' || raw === '0') return false;
+  if (raw !== '1') fail("RATIO_ALLOW_SYNTHETIC_PROVIDERS must be '1' or '0'");
+  const ratioEnv = (env.RATIO_ENV ?? '').trim();
+  if (ratioEnv !== 'development' && ratioEnv !== 'test') {
+    fail('RATIO_ALLOW_SYNTHETIC_PROVIDERS=1 is accepted only when RATIO_ENV is explicitly development or test', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED');
+  }
+  return true;
+}
+
 export function loadWorkerConfig(env: Env): WorkerConfig {
+  // Checked first, before RATIO_ENV is validated, so a refused opt-in is reported as
+  // SYNTHETIC_PROVIDERS_NOT_ALLOWED even for an unknown RATIO_ENV (issue #62, challenger L3; PR #67 review).
+  const allowSyntheticProviders = syntheticProvidersOptIn(env);
   const rawEnv = (env.RATIO_ENV ?? '').trim();
   const ratioEnv = (rawEnv === '' ? 'development' : rawEnv) as RatioEnv;
   if (!RATIO_ENVS.includes(ratioEnv)) fail(`RATIO_ENV must be one of ${RATIO_ENVS.join(', ')}`);
@@ -208,6 +235,7 @@ export function loadWorkerConfig(env: Env): WorkerConfig {
       retryBaseMs,
       retryMaxMs,
       tmpDir: env.RATIO_TMP_DIR || DEFAULT_SETTINGS.tmpDir,
+      allowSyntheticProviders,
       limits: {
         maxRowsPerBatch: int(env, 'RATIO_MAX_ROWS_PER_BATCH', DEFAULT_LIMITS.maxRowsPerBatch, 1, 1_000_000_000),
         maxArtifactBytes: int(env, 'RATIO_MAX_ARTIFACT_BYTES', DEFAULT_LIMITS.maxArtifactBytes, 1, Number.MAX_SAFE_INTEGER),

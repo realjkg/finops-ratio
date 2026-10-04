@@ -1,0 +1,7 @@
+
+> ratio@1.0.0 check:bundle
+> node scripts/check-next-bundle.mjs
+
+{"type":"ratio.bundle-check","pass":true,"stats":{"clientFiles":116,"serverFiles":91},"problems":[]}
+
+[exit code 0]

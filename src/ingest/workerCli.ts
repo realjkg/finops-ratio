@@ -7,13 +7,14 @@
 //   replay          --tenant <uuid> --source <key> (--batch <uuid> | --period YYYY-MM)
 //   quarantine show --tenant <uuid> --batch <uuid> [--json]
 //   doctor          [--tenant <uuid>]... [--json]          (read-only)
-//   replay-fixtures [--json]                               (RATIO_ENV staging|test only)
+//   replay-fixtures [--json]                               (RATIO_ENV=test only; issue #62 L3)
 //
 // Exit codes: 0 ok · 1 failure · 2 usage/configuration · 4 another run holds the lease.
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Pool } from 'pg';
 import type { CliIO } from './cli';
-import { loadWorkerConfig, type WorkerConfig } from './config';
+import { loadWorkerConfig, syntheticProvidersOptIn, type WorkerConfig } from './config';
+import { SYNTHETIC_PROVIDERS } from './focus/provider';
 import { IngestError, errorCodeOf, messageOf } from './errors';
 import { appendEvidenceFile, buildEvidenceRecord, resolveGitSha } from './evidenceRecord';
 import { jsonLineRedactorFor, redact, secretsFromEnv } from './redact';
@@ -41,7 +42,7 @@ const EXIT_OK = 0;
 const EXIT_FAIL = 1;
 const EXIT_USAGE = 2;
 const EXIT_BUSY = 4;
-const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH']);
+const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH']);
 
 function exitCodeFor(code: string): number {
   if (code === 'ALREADY_RUNNING' || code === 'LOCK_TIMEOUT') return EXIT_BUSY;
@@ -171,14 +172,31 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
   let args: Args;
   try {
     args = parseArgs(argv);
-    if (args.command === 'replay-fixtures' && env.RATIO_ENV !== 'staging' && env.RATIO_ENV !== 'test') {
-      throw new IngestError('REPLAY_FIXTURES_NOT_ALLOWED', 'replay-fixtures runs only when RATIO_ENV is staging or test');
+    // Test-only (issue #62, challenger L3 decision): it ingests the SYNTHETIC fixture, whose provider
+    // names are accepted only in development/test. No in-code opt-in bypass; staging returns with D-21.
+    if (args.command === 'replay-fixtures' && env.RATIO_ENV !== 'test') {
+      throw new IngestError(
+        'REPLAY_FIXTURES_NOT_ALLOWED',
+        'replay-fixtures runs only when RATIO_ENV is test: it ingests synthetic providers, which are allowed only in development/test (per-source synthetic markers are tracked as D-21 for Slice 3)',
+      );
+    }
+    // Fail fast (challenger M-A): without the opt-in every scenario would quarantine. A check, not a bypass.
+    if (args.command === 'replay-fixtures' && !syntheticProvidersOptIn(env)) {
+      throw new IngestError(
+        'REPLAY_FIXTURES_NOT_ALLOWED',
+        'replay-fixtures needs RATIO_ALLOW_SYNTHETIC_PROVIDERS=1: it ingests the SYNTHETIC fixture (provider SyntheticCloud), which is excluded without the opt-in, so every scenario would quarantine',
+      );
     }
     config = loadWorkerConfig(env);
   } catch (e) {
     return fail(e);
   }
   const cfg = config;
+  if (cfg.settings.allowSyntheticProviders) {
+    // Logged once per process start (issue #62 D1): synthetic provider names are accepted.
+    // Counts only: provider names are row values, and logs never carry row values (Slice 1 K1).
+    log('config.synthetic_providers_allowed', { level: 'warn', syntheticProviderCount: SYNTHETIC_PROVIDERS.length, detail: 'RATIO_ALLOW_SYNTHETIC_PROVIDERS=1: the fixed synthetic provider set (focus/provider.ts) is accepted; never set this for real billing data' });
+  }
 
   if (args.command === 'doctor') {
     try {
@@ -270,6 +288,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
           evidence: evidenceStore(),
           log,
           secrets,
+          allowSyntheticProviders: cfg.settings.allowSyntheticProviders,
         });
         return finish({ ...r }, r.pass, r.pass ? EXIT_OK : EXIT_FAIL);
       }

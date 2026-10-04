@@ -1,0 +1,427 @@
+Mutation M3b handles only Asia/Tokyo: local month end shifted by a hard-coded +9h
+- return daysInMonth(date.getUTCFullYear(), date.getUTCMonth() + 1);
++ return new Date(new Date(date.getUTCFullYear(), date.getUTCMonth() + 1, 0).getTime() + 9 * 3_600_000).getUTCDate();
+Run: TZ=UTC npx vitest run src/lib/forecast.calendar.test.ts
+exit code 1
+
+
+ RUN  v5.0.1 <repo>
+
+ ❯ src/lib/forecast.calendar.test.ts (47 tests | 3 failed) 1842ms
+   ❯ child process under TZ=Pacific/Kiritimati (3)
+     × daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case 16ms
+     × computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays) 1ms
+   ❯ every zone produces the identical BudgetStatus (1)
+     × the whole computeBudgetStatus output is TZ-independent 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Pacific/Kiritimati > daysInMonthOf and remainingWeekdaysInMonth match the oracle for every case
+AssertionError: expected [ { …(3) }, { …(3) }, { …(3) }, …(24) ] to deeply equal [ { …(3) }, { …(3) }, { …(3) }, …(24) ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "daysInMonth": 28,
++     "daysInMonth": 27,
+      "iso": "2026-02-10T12:00:00.000Z",
+      "remainingWeekdays": 13,
+    },
+    {
+-     "daysInMonth": 28,
++     "daysInMonth": 27,
+      "iso": "2026-02-26T18:00:00.000Z",
+      "remainingWeekdays": 1,
+    },
+    {
+-     "daysInMonth": 28,
++     "daysInMonth": 27,
+      "iso": "2026-02-28T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 29,
++     "daysInMonth": 28,
+      "iso": "2024-02-10T12:00:00.000Z",
+-     "remainingWeekdays": 14,
++     "remainingWeekdays": 13,
+    },
+    {
+-     "daysInMonth": 29,
++     "daysInMonth": 28,
+      "iso": "2024-02-29T00:00:00.000Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 29,
++     "daysInMonth": 28,
+      "iso": "2000-02-15T06:00:00.000Z",
+-     "remainingWeekdays": 10,
++     "remainingWeekdays": 9,
+    },
+    {
+-     "daysInMonth": 28,
++     "daysInMonth": 27,
+      "iso": "2100-02-15T06:00:00.000Z",
+      "remainingWeekdays": 9,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 29,
+      "iso": "2026-04-01T00:00:00.000Z",
+-     "remainingWeekdays": 21,
++     "remainingWeekdays": 20,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 29,
+      "iso": "2026-04-30T23:30:00.000Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 29,
+      "iso": "2026-06-25T17:42:00.000Z",
+-     "remainingWeekdays": 3,
++     "remainingWeekdays": 2,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 29,
+      "iso": "2026-06-29T20:00:00.000Z",
+-     "remainingWeekdays": 1,
++     "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 29,
+      "iso": "2026-09-15T14:00:00.000Z",
+-     "remainingWeekdays": 11,
++     "remainingWeekdays": 10,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-01-15T03:00:00.000Z",
+      "remainingWeekdays": 11,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-05-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-07-01T00:00:00.000Z",
+-     "remainingWeekdays": 22,
++     "remainingWeekdays": 21,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-08-31T12:00:00.000Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-03-08T10:00:00.000Z",
+-     "remainingWeekdays": 17,
++     "remainingWeekdays": 16,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-03-29T01:30:00.000Z",
+-     "remainingWeekdays": 2,
++     "remainingWeekdays": 1,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-03-30T22:00:00.000Z",
+-     "remainingWeekdays": 1,
++     "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-03-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-10-25T01:30:00.000Z",
+      "remainingWeekdays": 5,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 29,
+      "iso": "2026-11-01T09:30:00.000Z",
+-     "remainingWeekdays": 21,
++     "remainingWeekdays": 20,
+    },
+    {
+-     "daysInMonth": 30,
++     "daysInMonth": 29,
+      "iso": "2026-11-30T23:00:00.000Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2025-12-31T12:00:00.000Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2026-12-31T23:59:59.999Z",
+      "remainingWeekdays": 0,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2027-01-01T00:00:00.000Z",
+      "remainingWeekdays": 20,
+    },
+    {
+-     "daysInMonth": 31,
++     "daysInMonth": 30,
+      "iso": "2023-12-31T23:00:00.000Z",
+      "remainingWeekdays": 0,
+    },
+  ]
+
+ ❯ src/lib/forecast.calendar.test.ts:191:28
+    189|       remainingWeekdays,
+    190|     }));
+    191|     expect(probe.calendar).toEqual(expected);
+       |                            ^
+    192|   });
+    193|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > child process under TZ=Pacific/Kiritimati > computeBudgetStatus at DEMO_NOW uses the UTC month (30 days, 5 left, 3 weekdays)
+AssertionError: wl-support: expected 4 to be 5 // Object.is equality
+
+- Expected
++ Received
+
+- 5
++ 4
+
+ ❯ src/lib/forecast.calendar.test.ts:209:49
+    207|         remainingWeekdays: DEMO_REMAINING_WEEKDAYS,
+    208|       });
+    209|       expect(status!.monthly.remainingDays, id).toBe(5);
+       |                                                 ^
+    210|       expect(status!.monthly.projectedEom, id).toBe(round2(oracle.proj…
+    211|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/lib/forecast.calendar.test.ts > every zone produces the identical BudgetStatus > the whole computeBudgetStatus output is TZ-independent
+AssertionError: expected { tz: 'Pacific/Kiritimati', …(1) } to deeply equal { tz: 'Pacific/Kiritimati', …(1) }
+
+- Expected
++ Received
+
+@@ -14,19 +14,19 @@
+            "status": "soft",
+          },
+          "monthly": {
+            "avgDaily7d": 432.65,
+            "confidence": {
+-             "high": 13414.63,
+-             "low": 13204.49,
++             "high": 12912.79,
++             "low": 12724.83,
+            },
+            "daysUntilBreach": null,
+            "monthlyBudget": 15000,
+            "pctUsed": 0.75159,
+-           "projectedEom": 13309.56,
+-           "projectedPctOfBudget": 0.8873040000000001,
+-           "remainingDays": 5,
++           "projectedEom": 12818.81,
++           "projectedPctOfBudget": 0.8545873333333334,
++           "remainingDays": 4,
+            "spendMtd": 11273.85,
+            "status": "on_track",
+          },
+        },
+      },
+@@ -44,19 +44,19 @@
+            "status": "healthy",
+          },
+          "monthly": {
+            "avgDaily7d": 211.48,
+            "confidence": {
+-             "high": 6603.63,
+-             "low": 6456.87,
++             "high": 6351.08,
++             "low": 6219.82,
+            },
+            "daysUntilBreach": null,
+            "monthlyBudget": 8000,
+            "pctUsed": 0.68934875,
+-           "projectedEom": 6530.25,
+-           "projectedPctOfBudget": 0.8162812500000001,
+-           "remainingDays": 5,
++           "projectedEom": 6285.45,
++           "projectedPctOfBudget": 0.7856812500000001,
++           "remainingDays": 4,
+            "spendMtd": 5514.79,
+            "status": "on_track",
+          },
+        },
+      },
+@@ -74,19 +74,19 @@
+            "status": "soft",
+          },
+          "monthly": {
+            "avgDaily7d": 76.94,
+            "confidence": {
+-             "high": 2371.4,
+-             "low": 2341.8,
++             "high": 2283.44,
++             "low": 2256.96,
+            },
+            "daysUntilBreach": null,
+            "monthlyBudget": 3000,
+            "pctUsed": 0.6660666666666667,
+-           "projectedEom": 2356.6,
+-           "projectedPctOfBudget": 0.7855333333333333,
+-           "remainingDays": 5,
++           "projectedEom": 2270.2,
++           "projectedPctOfBudget": 0.7567333333333333,
++           "remainingDays": 4,
+            "spendMtd": 1998.2,
+            "status": "on_track",
+          },
+        },
+      },
+@@ -104,19 +104,19 @@
+            "status": "healthy",
+          },
+          "monthly": {
+            "avgDaily7d": 35.03,
+            "confidence": {
+-             "high": 1123.51,
+-             "low": 1091.61,
++             "high": 1080.43,
++             "low": 1051.89,
+            },
+            "daysUntilBreach": null,
+            "monthlyBudget": 1500,
+            "pctUsed": 0.62388,
+-           "projectedEom": 1107.56,
+-           "projectedPctOfBudget": 0.7383733333333333,
+-           "remainingDays": 5,
++           "projectedEom": 1066.16,
++           "projectedPctOfBudget": 0.7107733333333334,
++           "remainingDays": 4,
+            "spendMtd": 935.82,
+            "status": "on_track",
+          },
+        },
+      },
+@@ -134,19 +134,19 @@
+            "status": "healthy",
+          },
+          "monthly": {
+            "avgDaily7d": 146.14,
+            "confidence": {
+-             "high": 4847.67,
+-             "low": 4681.49,
++             "high": 4662.5,
++             "low": 4513.86,
+            },
+            "daysUntilBreach": 0,
+            "monthlyBudget": 4000,
+            "pctUsed": 1.00821,
+-           "projectedEom": 4764.58,
+-           "projectedPctOfBudget": 1.191145,
+-           "remainingDays": 5,
++           "projectedEom": 4588.18,
++           "projectedPctOfBudget": 1.147045,
++           "remainingDays": 4,
+            "spendMtd": 4032.84,
+            "status": "breach_projected",
+          },
+        },
+      },
+@@ -164,19 +164,19 @@
+            "status": "kill",
+          },
+          "monthly": {
+            "avgDaily7d": 129.28,
+            "confidence": {
+-             "high": 4347.31,
+-             "low": 4243.73,
++             "high": 4190.65,
++             "low": 4097.99,
+            },
+            "daysUntilBreach": null,
+            "monthlyBudget": 4500,
+            "pctUsed": 0.8151822222222223,
+-           "projectedEom": 4295.52,
+-           "projectedPctOfBudget": 0.9545600000000001,
+-           "remainingDays": 5,
++           "projectedEom": 4144.32,
++           "projectedPctOfBudget": 0.9209600000000001,
++           "remainingDays": 4,
+            "spendMtd": 3668.32,
+            "status": "at_risk",
+          },
+        },
+      },
+@@ -194,19 +194,19 @@
+            "status": "healthy",
+          },
+          "monthly": {
+            "avgDaily7d": 27.65,
+            "confidence": {
+-             "high": 850.49,
+-             "low": 834.21,
++             "high": 817.95,
++             "low": 803.39,
+            },
+            "daysUntilBreach": null,
+            "monthlyBudget": 1000,
+            "pctUsed": 0.71093,
+-           "projectedEom": 842.35,
+-           "projectedPctOfBudget": 0.8423499999999999,
+-           "remainingDays": 5,
++           "projectedEom": 810.67,
++           "projectedPctOfBudget": 0.81067,
++           "remainingDays": 4,
+            "spendMtd": 710.93,
+            "status": "on_track",
+          },
+        },
+      },
+
+ ❯ src/lib/forecast.calendar.test.ts:220:54
+    218|     const [first, ...rest] = outputs;
+    219|     for (const other of rest) {
+    220|       expect({ tz: other.tz, budget: other.budget }).toEqual({ tz: oth…
+       |                                                      ^
+    221|     }
+    222|   }, 60_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 44 passed (47)
+   Start at  14:32:23
+   Duration  2.43s (tests 89%, transform 9%, import 2%)
+
