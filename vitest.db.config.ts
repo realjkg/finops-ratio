@@ -10,6 +10,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.db.test.ts'],
+    // One shared S3 bucket per run (created/deleted here) when RATIO_TEST_S3_ENDPOINT is set.
+    globalSetup: ['src/ingest/testing/s3GlobalSetup.ts'],
+    // Runtime backstop: fails a file whose process leaves a dangerous ratio_test_* login (serial files excluded).
+    setupFiles: ['src/ingest/testing/dangerousLoginBackstopSetup.ts'],
     // *.serial.db.test.ts run afterwards, alone (vitest.db.serial.config.ts).
     exclude: ['**/node_modules/**', '**/.next/**', '**/.claude/**', '**/dist/**', '**/dist-worker/**', '**/*.serial.db.test.ts'],
     // Each test file (and each migration test case) creates, migrates and

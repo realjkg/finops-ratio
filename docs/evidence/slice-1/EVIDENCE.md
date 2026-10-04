@@ -1,0 +1,2377 @@
+# Slice 1 — operational evidence (trusted FOCUS ingestion worker)
+
+Branch `slice/01-focus-ingestion-worker`, created from
+`origin/slice/00-postgres-foundation` @ 2866556; amended Slice 0 merged in at
+47711ff (origin 446563e, round 2) and again at 614e1c6 (origin d75a152,
+round 3: tenant pinned at COMMIT, RT001 for missing/invisible parent batch,
+stricter migration classifier). Local commits only: nothing pushed, no PR, nothing
+merged elsewhere. **All data used is SYNTHETIC. No real provider export has
+been ingested; the manual real-export acceptance procedure is NOT YET
+PERFORMED** (`.obvious/skills/ingestion-ops/SKILL.md` §9).
+
+Raw outputs referenced below live next to the working copy of this file in the
+session scratchpad (`red-*.txt`, `v-*.txt`, `v-testdb-*.json`, `mutations.txt`,
+`v-e2e*.txt`); the essential lines are reproduced here.
+
+## 1. Commit order (audit trail)
+
+| # | Hash | Subject | Kind |
+|---|---|---|---|
+| 1 | 8a107f9 | chore(deps): add @aws-sdk/client-s3, csv-parse and tsx (dev) | deps |
+| 2 | 6ad3a3d | test(ingest): add failing Slice 1 tests | tests (red) |
+| 3 | 33ba912 | test(ingest): correct Slice 1 test defects found on first run | test fixes (still red at that commit: no impl committed) |
+| 4 | 843501d | feat(ingest): FOCUS validation, S3 source, evidence store, config, redaction | impl |
+| 5 | 19515c9 | feat(ingest): ingestion worker — leases, evidence first, staged load, quarantine, fenced publish | impl |
+| 6 | 88b2ea1 | feat(ingest): worker CLI commands with evidence records | impl |
+| 7 | fa5c558 | test(fixtures): committed SYNTHETIC FOCUS 1.0 export + generator script | fixture |
+| 8 | fdab613 | ci: S3 parts of the DB suite against a job-scoped SeaweedFS | CI |
+| 9 | 725836a | test: replay-fixtures keeps a fresh retained tenant (orchestrator decision) | test (red for #10) |
+| 10 | 374d48d | feat: replay-fixtures fresh retained tenant, no deletion | impl |
+| 11 | 8eb0b11 | test: background heartbeat / dead run stops heartbeating | test (red for #12) |
+| 12 | 1a73753 | fix: background lease heartbeat | impl |
+| 13 | 939be07 | test: zombie stopped at next chunk without takeover (P6) | test (mutation-driven, passes on #12) |
+| 14 | 47711ff | merge origin/slice/00-postgres-foundation (amended 0001) | merge |
+| 15 | 8ad9485 | test: align with amended 0001 (reconciliation CHECKs, expand allow-list) + W7b/W7c | tests (red for #16) |
+| 16 | 53e0282 | fix: reconciliation follows the amended 0001 CHECKs | impl |
+| 17 | edd65d8 | test: S3 test files fail at collection when RATIO_TEST_S3_ENDPOINT is unset | test hardening |
+| 18 | 1cc3406 | fix(build): keep src/ingest out of the Tailwind content scan | build fix |
+| 19 | 8e3019b | docs: ingestion-ops skill + Slice 1 design/test plan/evidence | docs |
+| 20 | 614e1c6 | merge origin/slice/00-postgres-foundation (round 3) — no Slice 1 code change needed | merge |
+| 21 | 83305f3 | docs: evidence refreshed for the round-3 merge | docs |
+| 22 | cd87483 | test: failing tests for challenger round 1 (M-1, M-2, L1–L3) | tests (red, `r2-red-*.txt`) |
+| 23 | da7101c | test: L2 test-defect fix (field name clashed with a private member; tsc only) | test fix |
+| 24 | 079eb0b | fix: M-2 — Postgres-rejected values quarantined, never leaked | impl |
+| 25 | 1bb100f | fix: L2 — recordRetry fenced on an unexpired lease | impl |
+| 26 | 8193b0d | fix: L3 — test-only switches refused in staging/production | impl |
+| 27 | f594ed3 | fix: M-1 — stall watchdogs, S3 timeouts, progress-gated heartbeat, max run duration | impl |
+| 28 | 20b79fc | docs: L11 skill wording + new settings; package.json description literal restored | docs |
+| 29 | 96c495a | docs: design/test plan/evidence for challenger round 1 | docs |
+| 30 | b94ae2b | test: M-3 slow-but-progressing runs survive (pass on current code; mutation-proven) | tests |
+| 31 | a687f09 | test: failing tests for round-3 lows L-b, L-c, L-e | tests (red, `r3-red-*.txt`) |
+| 32 | fd00bb2 | fix: L-e C1 / U+2028 / U+2029 refused in header names | impl |
+| 33 | 93553b1 | fix: L-b lock/idle/statement timeouts; blocked takeover fails LOCK_TIMEOUT | impl |
+| 34 | d5918fa | fix: L-c run past max duration aborts itself (MAX_RUN_EXCEEDED) | impl |
+| 35 | 81ab2f6 | docs: design/test plan/evidence for challenger round 3 (challenger-approved) | docs |
+| 36 | c02c6aa | merge origin/slice/00-postgres-foundation @ 453377e (final Slice 0: round 5 + origin/main) — clean, no conflicts | merge |
+| 37 | 774ff13 | test: test-only triggers dropped and proven not to linger past the runner's catalog check | test-only |
+| 38 | f732b36 | docs: evidence for the final Slice 0 merge | docs |
+| 39 | c1247b7 | merge origin/slice/00-postgres-foundation @ 19fdbed (Slice 0 round 6: migrate CLI redacts before serialization) — one conflict in `src/ingest/cli.ts` (`main` dispatch vs Slice 0's `jsonLineRedactor`), resolved by keeping the worker dispatch and using Slice 0's line redactor in `migrateMain` | merge |
+| 40 | 0d155a9 | test: worker CLI redact-before-serialize, process crash guards, malformed URL (red: 4 failed, `r4-red-fast.txt`); K7 integration | tests |
+| 41 | d634f6c | fix: `jsonLineRedactorFor` for every worker output line + evidence file; `installProcessGuards`; pool built inside try | impl |
+| 42 | 3745fc0 | test: redacted Errors are serialized, not dropped to `{}` (added while mutation-testing) | test |
+| 43 | 1f41db1 | docs: evidence for the redact-before-serialize round | docs |
+| 44 | cc17801 | merge origin/slice/00-postgres-foundation @ 17f07d7 (Slice 0 rounds 7-9 + origin/main #47/#49) — one conflict in `src/ingest/cli.ts` (Slice 0 `installProcessHandlers` vs Slice 1 `installProcessGuards`), resolved by keeping ONE handler (`installProcessHandlers`) extended with the worker-secret redaction pass; guard tests retargeted | merge |
+| 45 | 3541d6b | docs: evidence for the 17f07d7 merge (§14) | docs |
+| 46 | ce97fa5 | test: L-k worker line with BigInt/Buffer/toJSON (red: 1 failed, `r5-red-fast.txt`); L-j pre-escaped secret value (W2) and K7 `RATIO_EVIDENCE_FILE` assertion (W4) | tests |
+| 47 | 5a2056b | fix: worker `redactDeep` delegates to Slice 0's exported walker (one implementation) | impl |
+| 48 | 47c736c | test infra: one long-lived S3 test bucket with per-run prefixes; K5 deletes its replay-fixtures scratch | tests |
+| 49 | 770e333 | docs: evidence for the L-k/L-j round (§15) | docs |
+| 50 | c9e0490 | merge origin/slice/00-postgres-foundation @ 0ef880f (Slice 0 rounds 10-12) — one conflict in `.github/workflows/ci.yml`, resolved by keeping both the SeaweedFS step + `RATIO_TEST_S3_ENDPOINT` and the PG16 client-tools step + `RATIO_PG_DUMP`/`RATIO_PSQL` | merge |
+| 51 | 909ec1a | docs: evidence for the 0ef880f merge (§16) | docs |
+| 52 | fccebbd | merge origin/slice/00-postgres-foundation @ c016ffb (Slice 0 round 13: key-only setting diagnostics, system-schema ACL rule) — clean, no conflict | merge |
+| 53 | 0e80eff | docs: evidence for the c016ffb merge (§17); pushed to origin/slice/01-focus-ingestion-worker as instructed | docs |
+| 54 | 214b4e4 | test: redaction linearity guard (`redactLinear.test.ts`, child process, hard kill) and spawned > 2 MB crash-handler test (red: 5 failed, `r6-red.txt`) | tests |
+| 55 | 3d8f277 | fix: 16 KB input cap with delimiter cut + truncation marker; URL rules start a scheme only where no scheme character precedes; one cached literal-secret alternation | impl |
+| 56 | 845ee56 | docs: evidence for the redaction-performance round (§18) | docs |
+| 57 | 47e0507 | test: L-p/L-q cap near the kept length, straddle sweep, per-string budgets (red: 6 failed, `r7-red.txt`; also red at type-check: `capForRedaction` gains a secrets parameter) | tests |
+| 58 | 5362489 | fix: cap = MAX_REDACTED_LENGTH + 512, straddle-safe cut, linear URL query rule | impl |
+| 59 | 5ab5972 | test: COMMIT answered with ROLLBACK must fail the run — publish, checkpoint, run bookkeeping (red: 3 failed, `r8-red.txt`) | tests |
+| 60 | d92541f | test: the publish case compares state like P1 (a failed publish leaves the new batch staged; my first version compared the whole batch list — a test defect, still red on the unfixed code) | tests |
+| 61 | b8a78aa | fix: `workerTransaction` checks the COMMIT reply (`COMMIT_ROLLED_BACK`); every worker transaction uses it | impl |
+| 62 | e0a1057 | docs: evidence for L-p/L-q and the COMMIT-tag check (§19, §20) | docs |
+| 63 | 1ae3e2d | test: overlapping secrets (3 entry points), quarantine commit-tag (parametrized), uncapped query-rule linearity (red: 12 failed, `r9-red.txt`; the quarantine cases are green by design and proven by mutation) | tests |
+| 64 | 89e58fc | fix: covered-run literal redaction (overlapping secrets), `QUERY_RULE` exported | impl |
+| 65 | 6a1244b | test: query-rule scaling check at 48/16 KB with adaptive repetitions (the first version took 400 s to fail under R6) | test |
+| 66 | fc71471 | docs: evidence for the e0a1057 Lows (§21) | docs |
+| 67 | 826c40d | merge local slice/00-postgres-foundation @ 289db6a (rounds 14-15) — conflicts: `cli.ts` (Slice 0's round-14 entry), `vitest.db.config.ts` (S3 globalSetup + serial exclude), `package.json` (two-phase test:db + Slice 1 worker:build); serial config gets the S3 globalSetup | merge |
+| 68 | 9197e7a | test: guard — no non-serial DB test commits a dangerous login (red: auth.db.test.ts:29, :60) | tests |
+| 69 | ecba4de | test: dangerous A1 logins move to `auth.serial.db.test.ts` | tests |
+| 70 | 18bc70c | test: Slice 0 crash-process test asserts the capped-but-redacted line; > 2 MB pipe flush tested on `writeAllSync`; explicit timeout on the four-spawn case | tests |
+| 71 | e2b6e15 | test: spawned crash test measures the handler inside the child (fd 3) + deterministic size bound | tests |
+| 72 | 1c18bea | test: absolute child-process budgets (query rule uncapped 2 MB; self-similar secrets), cheaper straddle sweep, `abcabc` overlap case (red: 2 failed, `r10-red.txt`) | tests |
+| 73 | 4fb8636 | test: self-similar JSON-line budget case tuned (2250-char secret, 1000 x 4.5 KB; red 3.85 s) | tests |
+| 74 | a055ea3 | fix: KMP literal matching, O(n + m) per form, overlaps kept | impl |
+| 75 | 11f2a43 | docs: evidence for the rounds 14-15 merge and the fc71471 fixes (§22) | docs |
+| 76 | fc9ab87 | test: widened dangerous-login guard self-test (red: alias import not flagged, `r11-red-guard.txt`); runtime backstop self-test (red: module missing) | tests |
+| 77 | 0e2bbc0 | fix: widened static rule + runtime backstop (setup file of the parallel DB config) | impl |
+| 78 | 59b3477 | test: redaction budget children run as `node --import tsx` | tests |
+| 79 | 31b33ce | test: the CLI entry's fatal path writes synchronously (preloaded write spy; kills W9) | tests |
+| 80 | 68c8456 | merge origin/main (54458f5, #44 Slice 0 at 289db6a) — clean, no content change | merge |
+| 81 | 29409ac | docs: evidence for the backstop / entry write path round (§23) | docs |
+| 82 | dabd026 | merge origin/main (8ab78e7, #52 Slice 0 round 16) — one conflict in `cli.process.test.ts` (Slice 0's `SPAWN_TIMEOUT_MS` replaces my 60_000; my reconciliation stays) | merge |
+| 83 | 4ddc714 | test: backstop evasion (snapshot diff, ratio-role attributes/memberships), backstop wiring, spawned-child cleanup (red; tsc red at this commit) | tests |
+| 84 | e882980 | fix: backstop snapshot diff + ratio-role checks, serial afterAll backstop | impl |
+| 85 | e145094 | fix: tracked test children killed in afterAll; try/finally in demo 5+6 | impl |
+| 86 | c6c59c9 | docs: evidence for the round-16 merge / backstop round (§24) | docs |
+| 87 | e51ddc9 | test: spawn-cleanup fixture cannot leak a child (pid first, 120 s self-exit, detached group + env-marker reaping; interrupted-run case) | tests |
+| 88 | 1052a5d | test: PR #54 review findings H1, H2, M1-M4 (red: fast 2, DB 5 + X6) | tests |
+| 89 | 4398628 | test: M4 test lets the taken-over run's lease lapse before the second replay (still red on the old code) | tests |
+| 90 | bee19bf | fix: bounded streamed manifest read (H1); IfMatch-pinned artifact GET, SOURCE_CHANGED (H2) | impl |
+| 91 | 2f47fac | fix: re-list on SOURCE_CHANGED (H2), PERIOD_NOT_FOUND (M1), control-quarantine recovery (M2), replay pin + LEASE_LOST (M3, M4); ingestion-ops skill updated in the evidence commit | impl |
+| 92 | fffe3f1 | docs: evidence for the fixture orphan and PR #54 findings (§25), skill notes | docs |
+| 93 | b5299a9 | test: an un-keyed RECONCILIATION_VARIANCE quarantine stays quarantined (red) | tests |
+| 94 | 90101c5 | fix: no legacy branch for un-keyed control quarantines (challenger Low 1) | impl |
+| 95 | 04504d5 | docs: evidence for challenger Low 1 (§26) | docs |
+| 96 | e630523 | test: PR #54 second review H1, M1-M5 (red: DB 7, fast 2) | tests |
+| 97 | 3a95994 | test: H1, a failure finish on an expired lease is LEASE_LOST (runSync run-level, replay --batch) (red: 2) | tests |
+| 98 | d3f6eef | fix: finishRun fenced on expiry + LEASE_LOST everywhere (H1), re-listed manifest captured (M1), abortable listing (M3), captured-bytes cap (M4), per-artifact control check (M5) | impl |
+| 99 | 13bcaea | test: serial-login guard flags IN ROLE / IN GROUP / ROLE / ADMIN / USER targets (M2) | tests (guard) |
+| 100 | b5bba2b | test: M3 with a real SDK client and a real CLI process; between-page abort | tests |
+| 101 | f22f1f6 | docs: evidence for the second Copilot review (§27) | docs |
+| 102 | 2517b86 | test: challenger Lows L1-L4 (red: DB 4, fast 1) | tests |
+| 103 | 3a11d23 | fix: per-artifact control counts compared under the stored (redacted) name (L2) | impl |
+| 104 | 88e686d | fix: capture-time size rejections remembered by listing fingerprint and limits (L3) | impl |
+| 105 | a0c5bdd | test: serial-login guard covers CREATE GROUP and ALTER GROUP … ADD USER (L4) | tests (guard) |
+| 106 | 8bb1fed | fix: abandoned runs that committed work are LEASE_EXPIRED_AFTER_COMMIT (L1) | impl |
+| 107 | 43af649 | test: PR #54 third review H1, H2, M1-M5 (red: fast 10, DB 5) | tests |
+| 108 | 13cdb09 | fix: S3 source — truncated page without token, unversioned artifacts, abortable GET (H1, M1, M3) | impl |
+| 109 | 94ea281 | fix: period ranges iterate by ordinal and are bounded 2000-01..9999-12 (H2) | impl |
+| 110 | b350bf5 | fix: artifact names bounded by their stored (redacted) length, 1024 (M2) | impl |
+| 111 | 7db189a | fix: doctor NEVER_PUBLISHED (M4) | impl |
+| 112 | 63ce64f | fix: evidence open honours the run's abort signal (M5) | impl |
+| 113 | b223564 | test: open deadlines abort-aware with a transport that ignores the signal (M3c/M5c) | tests |
+| 114 | 6d0e96c | docs: evidence for the Lows and the third review (§28, §29), ingestion-ops skill | docs |
+| 115 | 3a20394 | test: redaction collisions, abortable evidence uploads, abortable backoff (red: fast 6, DB 6) | tests |
+| 116 | 1090505 | fix: redaction collisions refused (parser + pipeline); evidence uploads and retry backoff abort-aware | impl |
+| 117 | 8d46f17 | test: no retry is recorded once the run is aborted (kills R3b) | tests |
+| 118 | cb559df | docs: evidence for the audited gaps (§30) | docs |
+| 119 | ab523ce | test: second-round challenger Lows — replay vs memo, NEVER_PUBLISHED grace, memo-only abandon (red: DB 5, fast 2) | tests |
+| 120 | 61ba1d5 | fix: replay --period ignores the size-rejection memo (L1) | impl |
+| 121 | cd2defe | fix: memo-only abandoned runs stay LEASE_EXPIRED with "checkpoint written (rejection memo only)" (L3) | impl |
+| 122 | bc9c6d5 | fix: NEVER_PUBLISHED first-publication grace window, RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS (L2); skill | impl |
+| 123 | ecc3f82 | test: grace upper bound; memo + progress write still "after commit" (kills L2e, L3d) | tests |
+| 124 | 0d5c14d | test: fourth Copilot review M1-M3 (red: fast 5, DB 5) | tests |
+| 125 | 7e8b9e1 | fix: existing evidence verified by sha256 (M1); X4 now tampers after capture | impl |
+| 126 | 8638601 | fix: manifest GET pinned to its listed ETag (M2) | impl |
+| 127 | 368ce14 | fix: fake source keyed by period + name, pinned to version (M3) | impl |
+| 128 | 9b32cfb | docs: evidence for the second-round Lows and the fourth review (§31, §32) | docs |
+| 129 | a3be62f | test: reap() must return only after every reaped process has exited (red under load) | tests |
+| 130 | 5659b5a | fix(test): reap() confirms every killed process is dead (CI #54 red, run 37157034669) | test infra |
+| 131 | 5dd24f1 | test: fifth review H1/M1/M2/M3 (red) | tests |
+| 132 | 1af19e8 | fix: H1 (mine; reverted in 812b956 in favour of the Copilot agent's) | impl |
+| 133 | 61d96b1 | fix: M1 years 1-99, M2 __proto__ columns, M3 crash during replay | impl |
+| 134 | b4f7dd3 | test: challenger round 3 — verify progress/watchdog, metadata fast path (red) | tests |
+| 135 | 95f3638 | fix: verify under the idle watchdog with progress; HEAD-metadata fast path (artifacts only); load re-hashes every format; legacy clause removed | impl |
+| 136 | 2e4a58a | refactor: one progress source for the verify (kills L1a) | impl |
+| 137 | d467e1b | test: put() must not leave its upload stream behind (red) | tests |
+| 138 | 664b209 | fix: put() always closes its upload body stream | impl |
+| 139 | 6412756 | **Copilot coding agent**: reject unsafe worker login capabilities (H1) | impl (agent) |
+| 140 | 812b956 | revert of 1af19e8 (owner's decision: the agent fixes H1) | revert |
+| 141 | 286dfd7 | merge origin/slice/01-focus-ingestion-worker (6412756) | merge |
+| 142 | b9f9505 | test: sixth review — conditional create, chunk byte budget, run-wide retry counter (red) | tests |
+| 143 | 70c6af5 | fix: conditional evidence create, chunk byte budget, run-wide retry counter | impl |
+| 144 | 1c6f244 | test: exact chunk split (kills B1b) | tests |
+| 145 | 886c234 | docs: evidence for §33 | docs |
+| 146 | dfeff7a | merge origin/main (2066adc: Slice 0 rounds 17-19, #53 #55 #56); `src/ingest/db` identical to origin/main | merge |
+| 147 | 6c35fbc | test: every Slice 0 refused predefined role over every edge kind (red: 32) | tests (serial) |
+| 148 | db62ab8 | fix: worker refuses Slice 0's full REFUSED_PREDEFINED_ROLES over the closure (H1 completed) | impl |
+| 149 | 0c0aa7d | docs: evidence for §34 | docs |
+| 150 | 1294c94 | test: a 409 ConditionalRequestConflict on the conditional create is verified (challenger round 4 L1; kills Q3) | tests |
+| 151 | 1609ca1 | test: seventh review M1-M5 (red: fast 4, DB 4, serial 9) | tests |
+| 152 | 1107d58 | fix: ±14:00 offsets, metered upload, backstop from Slice 0's list, replay --batch freshness, listing progress | impl |
+| 153 | 2325a7f | test: stalled-upload fakes reject like the real SDK (kills M2c) | tests |
+| 154 | (final) | docs: evidence for this round (§35) | docs |
+
+Challenger round 3 red evidence (at a687f09): fast — `Tests 2 failed | 37
+passed (39)` (L-e header characters, L-b config); DB — `Tests 2 failed | 15
+passed (17)`: L-b (session settings were `0`) and L-c (the run streamed on for
+~10.5 s instead of aborting). The M-3 tests (b94ae2b) pass on the code they
+guard by design; they are proven by mutation (§6).
+
+Challenger round 1 red evidence (at cd87483): fast — `Tests 8 failed | 31
+passed (39)` (validator year-0/control chars, stall/L3 config, S3 timeouts;
+the S3 test reported "still hanging after 4 s"); DB — `Tests 12 failed | 51
+passed (63)`: 3 new W9 cases, M2-backstop, M2-generic, K6, L2, and all five
+M1 stall tests (each "run still in progress after 12000 ms" / lease still
+renewed). L1 passed already (the code was correct); it is proven by mutation
+(§6).
+
+Honest notes on order:
+- Commit 3 was written after the implementation existed in the working tree
+  (uncommitted); the first run against it exposed test/infrastructure defects
+  (details §3). It is test-only and precedes every implementation commit; no
+  assertion was weakened.
+- Until the merge (#14) the implementation needed a column grant that Slice 0
+  had not shipped yet (`UPDATE (row_count)` on `ingest_artifacts`). For local
+  runs before the merge I appended that GRANT to my working copy of 0001 and
+  reverted it every time (`git checkout`); it was never committed. All results
+  in §4–§6 are from the merged code with NO local modification.
+
+## 2. Red evidence (at 6ad3a3d, before any implementation)
+
+`npx vitest run src/ingest` → exit 1 (`red-fast.txt`): 8 Slice 1 files failed
+to load (`Cannot find module` `'./config'`, `'./decimal'`, `'./errors'`,
+`'./evidenceRecord'`, `'./layout'`, `'./redact'`, `'./syntheticFocus'`) and `cli.worker.test.ts` 6/7 failing (worker commands
+unknown ⇒ exit 2 without evidence record); `Test Files 8 failed | 7 passed (15)`,
+`Tests 6 failed | 37 passed (43)`. The passing files were Slice 0's plus
+`dependencyBoundary.test.ts` (a regression guard over existing code).
+
+`RATIO_TEST_DATABASE_URL=… RATIO_TEST_S3_ENDPOINT=… npm run test:db` → exit 1
+(`red-db.txt`): all 12 Slice 1 DB files failed with `Cannot find module`
+(`../sources/fake/FakeFocusSource`, `./db`, `./S3FocusExportSource`,
+`./fixtures/syntheticFocus`); `Test Files 12 failed | 6 passed (18)`, the 63
+Slice 0 tests passed.
+
+## 3. Test defects corrected (commit 33ba912 and later test commits)
+
+1. SeaweedFS (`server -s3`, default config) has 20 volume slots and grows 7
+   per bucket: a third bucket holding data fails with `InternalError`
+   (reproduced with a probe). Per-test buckets therefore could not work. The
+   suite now creates ONE bucket per run (vitest `globalSetup`, deleted at the
+   end) and every test works under its own unique key prefix; evidence goes
+   under that prefix via the new `RATIO_EVIDENCE_S3_PREFIX`.
+2. Demo tests seed the committed data files byte-for-byte; the committed
+   manifests list bucket-relative keys, so manifests are regenerated for the
+   relocated prefix (the fixture test proves they equal the committed ones).
+3. Fixture test summed with trailing-zero trimming; Postgres prints sums at the
+   inputs' scale (10) — the test now prints the exact BigInt sum at scale 10.
+4. BigInt literals (`10n`) are not allowed by the root tsconfig target
+   (ES2017) — replaced with `BigInt(…)`.
+5. Config test used bucket name `ev` (invalid: min 3 chars).
+6. Spawn env typing for `tsc`.
+7. After the merge: the doctor probe migration `SELECT 1` is not on the
+   amended expand allow-list (now a `CREATE TABLE`); W8 expectation follows the
+   amended reconciliation CHECK (orchestrator ruling).
+8. Without `RATIO_TEST_S3_ENDPOINT` the S3 files failed in `beforeAll`, which
+   vitest reports as "skipped" tests inside failed files (run still exit 1).
+   They now fail at collection (no skipped count at all).
+
+## 4. Verification (HEAD d5918fa + docs, after challenger round 3; worktree, no local modifications)
+
+| Command | Result |
+|---|---|
+| `npm ci` | exit 0. `npm audit --omit=dev`: **0 vulnerabilities** (dev-tree advisories pre-existing) |
+| `npm run lint` | exit 0 |
+| `rm -rf .next && npx tsc --noEmit` | exit 0 |
+| `npm test` | exit 0 — 39 files / 426 tests passed (Slice 1 fast files: 10 files / 106 tests) |
+| `RATIO_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres RATIO_TEST_S3_ENDPOINT=http://127.0.0.1:18333 npm run test:db` ×3 | exit 0 each: 21 files / **229 passed, 0 failed, 0 skipped, 0 todo** each run (55.4 s, 46.8 s, 46.8 s — the M-3 trickle tests add ~25 s by design). Slice 1 DB files: 13 files / 124 tests. No Slice 1 assertion needed changing for round 3 (none expects 42501 for a cross-tenant child-row insert; tenant-escape tests go through NOT_FOUND / RLS-filtered paths) |
+| `npm run test:db` with `RATIO_TEST_DATABASE_URL` unset | exit 1: "RATIO_TEST_DATABASE_URL is not set … refusing to run" |
+| `npm run test:db` with `RATIO_TEST_S3_ENDPOINT` unset | exit 1: 3 S3 files FAIL at collection ("RATIO_TEST_S3_ENDPOINT is not set"), 211 passed, nothing skipped |
+| `grep -rnE '\.(skip\|only\|todo\|fails)\b\|skipIf\|runIf' src/ingest` | no matches |
+| `npm run worker:build` | exit 0; `dist-worker/ingest/build-info.json` carries the git SHA; built CLI used for §5 |
+| `npm run build` | exit 0 (after commit 1cc3406 — before it, Tailwind's JIT scanned `src/ingest` and emitted an invalid class from a regex literal). Then `git checkout tsconfig.json next-env.d.ts`; no AGENTS.md/CLAUDE.md generated |
+| `grep -rlE 'pg-protocol\|ratio\.tenant_id\|schema_migrations\|S3FocusExportSource\|csv-parse\|ingest_artifacts' .next --include=*.js` | none — no ingestion code or driver in the Next bundles |
+| `git diff --name-only origin/slice/00-postgres-foundation -- pages src \| grep -v ^src/ingest/` | none — no existing page, route or src module changed |
+| Leftovers after the runs | 0 `ratio_test_login_%` roles, 0 `s1-` buckets. One stray database `ratio_test_23557_*` exists whose creating process is gone; two other agents were running DB suites concurrently in this cluster (PIDs 231xx–232xx at the time) and the count did not grow across my three final runs — not provably mine, so not dropped |
+| CI (`.github/workflows/ci.yml`) | edited, YAML parses; NOT executed (no push) |
+
+### Staged-only trigger cost (orchestrator request)
+
+S1 (200,000 rows, 1000-row chunks, each chunk its own lease-fenced txn), same
+machine, 3 runs each:
+- before the merge (local temp grant, no staged-only triggers): 7 660 / 8 004 / 7 825 ms
+- after the round-2 merge (per-row staged-only trigger with `FOR SHARE` on the batch): 9 465 / 11 505 / 10 712 ms
+- after the round-3 merge (HEAD 614e1c6): 9 851 / 9 930 / 10 286 ms
+- after challenger round 1 (watchdog + progress-gated heartbeat): 9 339 / 9 690 / 10 013 ms (no measurable cost from the watchdog); SIGKILL demo 0.92 / 0.94 / 1.05 s
+- after challenger round 3 (session timeouts, max-run abort): 10 768 / 10 458 / 12 168 ms; SIGKILL demo 1.20 / 1.18 / 1.24 s — measured while another agent's DB suite was running in the same cluster (PID 10356), so not comparable 1:1; the new code adds no per-row work
+
+≈ +2–3.7 s per 200k rows (≈ 10–18 µs per row, +25–45 % of the whole load
+including parse, gzip and evidence I/O). Acceptable for this slice; a
+statement-level trigger (one check per chunk) would remove most of it — a
+Slice 0 design choice, noted for the owner.
+
+## 5. Manual end-to-end (built CLI, merged code, `v-e2e.txt`)
+
+Run on HEAD d5918fa (after challenger round 3; identical results on 20b79fc, 614e1c6 and 1cc3406 before it).
+Script `e2e.sh` (scratch, not committed): scratch DB `ratio_s1_e2e_b008f434`,
+worker login `IN ROLE ratio_worker`, reader login `IN ROLE ratio_reader`,
+bucket `s1-e2e-b008f434` seeded with `fixtures/focus-1.0-synthetic/base/**`,
+tenant provisioned as in SKILL §2, source credentials from the AWS SDK default
+chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env).
+
+| Step | Result |
+|---|---|
+| `migrate --status --json` | exit 3, `problems:["PENDING"]` |
+| `migrate` / `--status --json` | exit 0 / exit 0, `matches:true` |
+| `worker sync` | exit 0; 2026-07 `published` 55 rows `30.8272954899` `reconciled`; 2026-08 `published` 40 rows `21.0978157665` `reconciled` |
+| `worker sync` again | both periods `skipped_unchanged` |
+| reader view totals vs `control-totals.json` (base) | `2026-07-01 55 30.8272954899`, `2026-08-01 40 21.0978157665` — **identical** |
+| batches | both `published/reconciled`, control = loaded exactly |
+| evidence re-hash (3 objects) | all `OK` (sha256 of the stored object = `ingest_artifacts.sha256`) |
+| `worker doctor --json --tenant …` | exit 0, all checks pass |
+| `RATIO_ENV=test worker replay-fixtures --json` | exit 0, 6/6 scenarios pass, tenant `fixture-20261003070324-6ac69c12` retained |
+| fixture tenant footprint | 341 fact rows (~409 kB), 8 batches, 8 runs, 38 objects / 75 458 bytes |
+| cleanup (scratch only) | bucket deleted, database and logins dropped |
+
+## 6. Mutation checks (run on the round-2 merge 53e0282+; the mutated lines are unchanged by round 3, `mutations.txt`)
+
+Each mutation applied to one line, the named tests run, the file restored
+byte-identically (`cmp`).
+
+| Mutation | Result |
+|---|---|
+| M1 publish without the lease fence (`lock_run`) | 1 test fails (P4; P3 is additionally caught by staged-batch deletion + fenced finish) |
+| M2 evidence not re-hashed on parse | 1 test fails (s3Source file: X4) |
+| M3 staged batches not deleted at acquisition | 1 test fails (lease/crash files) |
+| M4 reconciliation variance ignored | 6 tests fail (sync file: W7 variants) |
+| M5 no per-chunk lease check | **survived at first** (a takeover's staged-batch deletion also stopped the zombie) → added P6 (commit 939be07); now P6 fails |
+| M6 live lease not refused | 2 tests fail (lease/crash files) |
+| (heartbeat) background heartbeat not stopped on exit | L6 times out |
+
+### Challenger round 1 mutation proofs (`mutations2.txt`)
+
+| Mutation | Result |
+|---|---|
+| R1-M1a heartbeat renews without progress gating | 2 fail (M1-heartbeat, M1-maxrun) |
+| R1-M1b no idle watchdog on the source stream | 1 fails (M1-stream) |
+| R1-M1c no deadline on opening the source | 1 fails (M1-open) |
+| R1-M1d evidence watchdog disabled (timeout 1e9 ms) | 1 fails (M1-evidence). A first attempt that only unpiped the watchdog survived because the unpiped watchdog still fired — the mutation, not the test, was wrong |
+| R1-M1e S3 request timeout only warns | 1 fails (S3-timeout) |
+| R1-M2a no year floor | 1 fails (W9 year 0000) |
+| R1-M2b no control-character check in cells | 2 fail (W9 NUL mapped / extra) |
+| R1-M2c no class-22 backstop | 1 fails (M2-backstop) |
+| R1-M2d raw pg messages persisted | 2 fail (M2-generic, K6) |
+| R1-L1 staged cleanup across every source of the tenant | 1 fails (L1) |
+| R1-L2 retry recorded on an expired lease | 1 fails (L2) |
+| R1-L3 RATIO_ENV ignored by test switches | 1 fails (L3) |
+
+### Challenger round 3 mutation proofs (`mutations3.txt`, `mutations4.txt`)
+
+| Mutation | Killed by |
+|---|---|
+| N2 watchdog not re-armed when data arrives | M3-a (source path) and M3-b (evidence path) |
+| N10 capture never reports progress | M3-a (lease lost while trickling) |
+| N3 `touch()` is a no-op | M3-c (`EVIDENCE_STALLED`). A first version of M3-c (no slow insert, 0.8 s hook vs 1 s stall) let N3 survive: the stream buffers absorbed the file. M3-c now makes each insert slow (1 s statement trigger) and uses a 2 s stall with a 1.6 s hook, so only `touch()` bridges the ~2.6 s between evidence bytes |
+| Lb-1 no `lock_timeout` on worker sessions | L-b (fails at the session-settings assertion) |
+| Lb-2 lock timeout not mapped to LOCK_TIMEOUT | L-b (outcome `DB_55P03`) |
+| Lc-1 max-run abort timer never fires | L-c |
+| Lc-2 streams ignore the abort signal | L-c |
+| Le C1/U+2028 allowed in header names | V L-e |
+
+## 7. Owner acceptance demonstration ↔ tests (`src/ingest/demo.db.test.ts`, committed fixture, real S3, real LOGIN roles)
+
+| # | Check | Proven by |
+|---|---|---|
+| 1 | Fixture ingested; original bytes stored with hash | `demo 1` (re-hash every evidence object; bytes equal the committed files); also X2, X3, W1, e2e §5 |
+| 2 | Parser creates a staged revision | `demo 2` (batch `staged` with 10 fact rows, invisible to `ratio_reader`); C1 |
+| 3 | Validation passes, or inspectable quarantine | `demo 3` (reconciled + published; corrupt variant ⇒ quarantined, `quarantine show --json` lists sha256/row/column/code); W9 matrix, W11, K2 |
+| 4 | Reprocessing yields no duplicate published facts | `demo 4` (sync ×2, `replay --period`, backfill ⇒ one batch per period, totals = control); W2, R2 |
+| 5 | SIGKILL mid-run exposes no partial data | `demo 5 + 6` (≈0.9 s per run; real child process via tsx, paused by the NODE_ENV=test hook after ≥20 rows, `kill -9`, reader view = previous revision, checkpoint unchanged); C1, C1b |
+| 6 | Restart completes safely or fails visibly without advancing checkpoint | `demo 5 + 6` (immediate restart exit 4, checkpoint unchanged; after lease expiry exit 0, totals = restatement control, killed run `abandoned`, its staged batch gone); L3, L6 |
+| 7 | App reads latest accepted revision; staged/quarantined inaccessible to `ratio_reader` | `demo 7` (reader LOGIN sees exactly the published batches; 42501 on cost_facts, ingest_batches, ingest_validation_errors, ingest_artifacts, sync_runs, period_publications); demo 2 |
+| 8 | Tenant-bound access fails closed | `demo 8` (no tenant ⇒ 0 rows; tenant B ⇒ none of A; worker cannot update A from B; CLI B + A's source ⇒ SOURCE_NOT_FOUND; malformed tenant ⇒ exit 2); T1, T2 |
+
+## 8. Complete Slice 1 test list (final run; every test `passed`)
+
+### Fast suite (npm test)
+
+- `src/ingest/cli.worker.test.ts`
+  - passed: usage errors exit 2 and still print one evidence record
+  - passed: missing RATIO_DATABASE_URL is a configuration error (exit 2)
+  - passed: replay-fixtures is refused unless RATIO_ENV is staging or test, before connecting
+  - passed: the test kill hook outside NODE_ENV=test refuses to start (before connecting)
+  - passed: connection failures exit 1 and never echo the URL, user or password
+  - passed: doctor --json reports db_connectivity failure as a failed check
+  - passed: unknown commands still exit 2 (Slice 0 contract unchanged)
+
+- `src/ingest/config.test.ts`
+  - passed: applies safe defaults
+  - passed: refuses out-of-range or non-integer numbers
+  - passed: refuses an unknown RATIO_ENV
+  - passed: the test kill hook is impossible to enable outside NODE_ENV=test
+  - passed: fake source is allowed only with RATIO_ALLOW_FAKE_SOURCE=1 AND NODE_ENV=test
+  - passed: refuses S3 endpoints carrying credentials, query or fragment
+  - passed: refuses plain-http S3 endpoints in production, allows them elsewhere
+  - passed: requires both halves of a static S3 credential pair
+  - passed: enforces RATIO_ARTIFACT_DIGEST format
+  - passed: config errors never echo secret values
+  - passed: stall watchdog and maximum run duration have defaults and bounds (M-1)
+  - passed: L3: test-only switches refuse to activate when RATIO_ENV is staging or production, even with NODE_ENV=test
+  - passed: L-b: worker DB session timeouts have defaults and bounds
+
+- `src/ingest/dependencyBoundary.test.ts`
+  - passed: no file under pages/ or src/ (outside src/ingest) imports @aws-sdk/* or csv-parse
+  - passed: detector flags the forbidden specifiers (self-test)
+
+- `src/ingest/evidenceRecord.test.ts`
+  - passed: has the machine-readable shape the pipeline consumes
+  - passed: redacts secrets that reach results
+  - passed: git SHA precedence: env, then build-info, then null; invalid env values ignored
+
+- `src/ingest/fixtures/syntheticFocus.test.ts`
+  - passed: is deterministic
+  - passed: uses the AWS Data Exports layout under the given prefix/export name
+  - passed: control totals are the exact decimal sums of the generated rows
+  - passed: base contains duplicate legitimate rows within a file and across files
+  - passed: restatement re-exports 2026-07 under a new run with different totals; 2026-08 unchanged
+  - passed: manifests carry control totals (base/restatement), a wrong one (variance), none (nocontrol)
+  - passed: every row is labelled synthetic (never presented as a real provider)
+  - passed: the committed fixture equals the generator output and its README/control-totals match
+
+- `src/ingest/focus/validate.test.ts`
+  - passed: accepts plain, signed, fractional and exponent decimals
+  - passed: rejects non-decimals, NaN and Infinity
+  - passed: accepts ISO 8601 forms and normalizes offset-less values to UTC
+  - passed: rejects malformed and impossible timestamps
+  - passed: reports every missing required column
+  - passed: rejects control characters in header names (M-2)
+  - passed: rejects C1 controls and U+2028/U+2029 in header names (they become JSON keys) (L-e)
+  - passed: rejects duplicate column names
+  - passed: maps a valid FOCUS 1.0 row; money stays the exact source string
+  - passed: maps FOCUS 0.5 UsageQuantity/UsageUnit when ConsumedQuantity is absent
+  - passed: rejects empty BilledCost without echoing the cell value
+  - passed: rejects unparseable BilledCost without echoing the cell value
+  - passed: rejects NaN BilledCost without echoing the cell value
+  - passed: rejects Infinity EffectiveCost without echoing the cell value
+  - passed: rejects unparseable quantity without echoing the cell value
+  - passed: rejects unparseable ChargePeriodStart without echoing the cell value
+  - passed: rejects impossible ChargePeriodEnd without echoing the cell value
+  - passed: rejects BillingPeriodStart of another period without echoing the cell value
+  - passed: rejects BillingPeriodStart not at midnight without echoing the cell value
+  - passed: rejects ChargePeriodEnd before start without echoing the cell value
+  - passed: rejects lower-case currency without echoing the cell value
+  - passed: rejects empty currency without echoing the cell value
+  - passed: rejects year 0000 timestamps (Postgres cannot store them) (M-2)
+  - passed: rejects NUL and other C0 control characters in any cell; allows TAB, CR and LF (M-2)
+  - passed: accepts BillingPeriodStart expressed with an equivalent offset
+  - passed: rejects a row with the wrong number of cells
+
+- `src/ingest/redact.test.ts`
+  - passed: removes URL query string
+  - passed: removes presigned signature
+  - passed: removes bare sig=
+  - passed: removes bearer token
+  - passed: removes AWS access key id
+  - passed: removes AWS temp key id
+  - passed: removes AWS secret after name
+  - passed: removes security token
+  - passed: removes postgres URL credentials
+  - passed: removes password=
+  - passed: removes signature=
+  - passed: removes literal configured secrets anywhere
+  - passed: ignores empty/short configured secrets (no over-redaction)
+  - passed: leaves benign operational text unchanged
+  - passed: caps output at 4000 characters
+  - passed: secretsFromEnv collects credential env values and DB URL passwords
+
+- `src/ingest/retry.test.ts`
+  - passed: is full jitter within [0, min(cap, base * 2^(n-1))]
+  - passed: classifies transient errors
+  - passed: classifies permanent errors
+  - passed: retries transient errors and returns the eventual result
+  - passed: gives up after maxAttempts and rethrows the last error
+  - passed: never retries permanent errors
+  - passed: rejects a non-positive maxAttempts
+
+- `src/ingest/s3client.test.ts`
+  - passed: config exposes request/connect timeouts with defaults and bounds
+  - passed: a request to a server that never answers fails within the configured timeout
+
+- `src/ingest/sources/s3/layout.test.ts`
+  - passed: derives metadata and data prefixes
+  - passed: parses BILLING_PERIOD=YYYY-MM prefixes and filters by range
+  - passed: validates source config (bucket/prefix/exportName), failing closed
+  - passed: parses dataFiles given as bucket-relative keys, s3 URIs and objects with row counts
+  - passed: a manifest without control yields no control
+  - passed: refuses a manifest with not JSON
+  - passed: refuses a manifest with no dataFiles
+  - passed: refuses a manifest with another bucket
+  - passed: refuses a manifest with path traversal
+  - passed: refuses a manifest with dot segment
+  - passed: refuses a manifest with empty segment
+  - passed: refuses a manifest with query string
+  - passed: refuses a manifest with other period folder
+  - passed: refuses a manifest with outside the export
+  - passed: refuses a manifest with file not in listing
+  - passed: refuses a manifest with billingPeriod mismatch
+  - passed: refuses a manifest with non-integer control rowCount
+  - passed: refuses a manifest with non-decimal control total
+  - passed: refuses a manifest with NaN control total
+  - passed: refuses a manifest with duplicate data file
+  - passed: listing fingerprint is order-independent and changes with etag, size or manifest bytes
+  - passed: classifies artifact formats
+
+(106 tests)
+
+### DB suite (npm run test:db, final run 3)
+
+- `src/ingest/cliWorker.db.test.ts`
+  - passed: K1 sync prints one evidence record, logs JSON without row contents or secrets, and appends RATIO_EVIDENCE_FILE (also for migrate)
+  - passed: K2 backfill, replay --batch, replay --period and quarantine show via the CLI
+  - passed: K3 a fake source is refused by the CLI outside NODE_ENV=test + RATIO_ALLOW_FAKE_SOURCE=1
+  - passed: K4 exit 4 while another run holds a live lease; S3 failures exit 1 with secrets redacted everywhere
+  - passed: K5 doctor --json exits 0 when healthy and 1 when not; replay-fixtures --json runs all scenarios in a fresh, retained, synthetic-labelled tenant
+  - passed: K6 (M-2) rejected values never appear in the CLI evidence record, logs, error_detail or stats
+
+- `src/ingest/demo.db.test.ts`
+  - passed: demo 1: fixture ingested; original bytes stored with hash (re-hashing the evidence object)
+  - passed: demo 2: the parser creates a staged revision that nobody can read until it is published
+  - passed: demo 3: validation passes (reconciled) or yields an inspectable quarantine
+  - passed: demo 4: reprocessing the same artifacts yields no duplicate published facts
+  - passed: demo 5 + 6: SIGKILL mid-load exposes no partial data; restart fails visibly before lease expiry and completes after, without advancing the checkpoint in between
+  - passed: demo 7: the app (ratio_reader) reads the latest accepted revision; staged and quarantined data are inaccessible
+  - passed: demo 8: tenant-bound access fails closed
+
+- `src/ingest/sources/s3/s3Source.db.test.ts`
+  - passed: X1 lists periods, honours the range, reads manifests and refuses unsafe or ambiguous ones
+  - passed: X2 content-addressed put is idempotent; a size conflict is refused; objects re-hash to their key
+  - passed: X3 the synthetic gzip export is read end-to-end and totals equal its control totals
+  - passed: X4 a tampered evidence object (same size, different bytes) fails EVIDENCE_INTEGRITY and publishes nothing
+  - passed: X5 a parquet artifact is captured as evidence and the batch quarantined UNSUPPORTED_FORMAT
+
+- `src/ingest/worker/auth.db.test.ts`
+  - passed: A1 accepts a plain ratio_worker login
+  - passed: A1 refuses a superuser connection
+  - passed: A1 refuses a BYPASSRLS login even if it is a ratio_worker member
+  - passed: A1 refuses a login that can SET ROLE to a superuser role
+  - passed: A1 refuses a member of ratio_owner (could disable RLS)
+  - passed: A1 refuses a login that is not a ratio_worker member (e.g. the reader)
+  - passed: A1 the CLI refuses to sync as a superuser (exit 1, UNSAFE_DB_ROLE, nothing written)
+  - passed: A2 every worker entry point fails with permission denied as ratio_reader
+
+- `src/ingest/worker/crash.db.test.ts`
+  - passed: C1 crash after N rows: nothing visible, checkpoint untouched; restart before expiry refused; after expiry recovery equals a clean run
+  - passed: C1b crash during a restatement keeps the previous revision readable
+  - passed: C2 transient source errors are retried with backoff; attempts and retries are visible in sync_runs
+  - passed: C3 transient errors beyond the retry budget fail the period; checkpoint not advanced
+  - passed: C4 permanent (validation) errors are not retried
+
+- `src/ingest/worker/doctor.db.test.ts`
+  - passed: D1 healthy: every check passes
+  - passed: D1 superuser connection ⇒ role_safety fails
+  - passed: D1 schema behind the code ⇒ migration_version fails; ledger unavailable ⇒ fails (never skipped)
+  - passed: D1 last run failed, stale data, or never succeeded ⇒ source check fails; disabled source skipped
+
+- `src/ingest/worker/lease.db.test.ts`
+  - passed: L1 five workers started at once on the same source: exactly one runs, the rest are refused ALREADY_RUNNING
+  - passed: L2 two tenants run concurrently, both succeed, and each sees only its own facts
+  - passed: L3 acquiring after expiry marks the dead run abandoned (LEASE_EXPIRED) and deletes its staged batches
+  - passed: L5 a background heartbeat keeps a long-running run's lease alive
+  - passed: L6 a crashed (simulated dead) run stops heartbeating, so its lease expires
+  - passed: L1 (challenger) acquiring source X never deletes source Y's staged batch in the same tenant
+  - passed: L2 (challenger) a zombie whose lease expired cannot record a retry (attempt and retries unchanged)
+  - passed: L-b worker sessions carry lock/idle/statement timeouts; a takeover blocked by a held row lock fails LOCK_TIMEOUT within its bound
+
+- `src/ingest/worker/publish.db.test.ts`
+  - passed: publish steps are the documented, complete sequence
+  - passed: P1 failure injected at "lock_run" leaves view, publications, batches and checkpoint unchanged; a later run recovers
+  - passed: P1 failure injected at "lock_period" leaves view, publications, batches and checkpoint unchanged; a later run recovers
+  - passed: P1 failure injected at "supersede_prior" leaves view, publications, batches and checkpoint unchanged; a later run recovers
+  - passed: P1 failure injected at "mark_published" leaves view, publications, batches and checkpoint unchanged; a later run recovers
+  - passed: P1 failure injected at "upsert_publication" leaves view, publications, batches and checkpoint unchanged; a later run recovers
+  - passed: P1 failure injected at "advance_checkpoint" leaves view, publications, batches and checkpoint unchanged; a later run recovers
+  - passed: P1 failure injected at "commit" leaves view, publications, batches and checkpoint unchanged; a later run recovers
+  - passed: P2 failure inside the quarantine transaction leaves the batch staged (never published) and the view unchanged
+  - passed: P3 run A loses its lease, run B takes over and publishes, A then fails at publish and cannot touch its run row
+  - passed: P4 an expired lease without takeover still fails at publish; heartbeat cannot revive it
+  - passed: L4 heartbeat extends a live lease
+  - passed: P5 a zombie cannot insert further chunks after takeover
+  - passed: P6 an expired lease stops a zombie at its next chunk even without a takeover
+
+- `src/ingest/worker/replay.db.test.ts`
+  - passed: R1 rollback re-points the period at the retained batch, pins it against scheduled syncs, and rolls forward again
+  - passed: R2 replay --period re-ingests from the source ignoring the checkpoint and clears the pin
+  - passed: R3 quarantined and staged batches are not replayable; other sources/tenants batches are NOT_FOUND
+  - passed: R4 replay failure injected at "lock_run" changes nothing
+  - passed: R4 replay failure injected at "lock_period" changes nothing
+  - passed: R4 replay failure injected at "supersede_prior" changes nothing
+  - passed: R4 replay failure injected at "mark_published" changes nothing
+  - passed: R4 replay failure injected at "upsert_publication" changes nothing
+  - passed: R4 replay failure injected at "advance_checkpoint" changes nothing
+  - passed: R4 replay failure injected at "commit" changes nothing
+
+- `src/ingest/worker/stall.db.test.ts`
+  - passed: M1-stream: a source stream that never emits fails SOURCE_STALLED in bounded time; next sync succeeds
+  - passed: M1-open: a source open that never resolves fails SOURCE_STALLED in bounded time; next sync succeeds
+  - passed: M1-evidence: an evidence read that never emits fails EVIDENCE_STALLED in bounded time; nothing published
+  - passed: M1-heartbeat: a run that makes no progress stops renewing its lease, so another worker can take over
+  - passed: M1-maxrun: renewal also stops after the maximum run duration, even while progressing
+  - passed: M3-a: a source trickling one chunk every 0.7 s for ~10 s (stall 3 s, TTL 5 s) succeeds and holds its lease throughout
+  - passed: M3-b: an evidence read trickling one chunk every 0.7 s for ~10 s (stall 3 s, TTL 5 s) succeeds and holds its lease
+  - passed: M3-c: slow downstream inserts plus a 0.8 x stall hook per chunk are not mistaken for an evidence stall
+  - passed: L-c: a run past its maximum duration aborts itself (MAX_RUN_EXCEEDED) while still streaming, checkpoint untouched
+
+- `src/ingest/worker/streaming.db.test.ts`
+  - passed: S1 200,000 rows load in bounded chunks while the evidence stream is still being read
+
+- `src/ingest/worker/sync.db.test.ts`
+  - passed: W1 clean load publishes one batch; evidence stored and re-hashes; checkpoint records the fingerprint; logs carry no row contents
+  - passed: W2 idempotency: same input twice ⇒ one batch, identical totals, second run skips without downloading; backfill ⇒ unchanged
+  - passed: W3 duplicate legitimate rows (same file and across files) are all stored and summed
+  - passed: W4 restatement supersedes the period (no double count); W5 a revert re-publishes the retained batch
+  - passed: W12 provisional flag: current month true, previous month false
+  - passed: W13 incremental skips unchanged periods without opening them; backfill touches only the range
+  - passed: W14 a listing failure fails the run visibly, other periods still publish, failed period not checkpointed
+  - passed: W16 the worker runs against exactly the shipped schema version
+  - passed: W6 matching control ⇒ reconciled and published (numeric, not string, compare)
+  - passed: W8 no control ⇒ unverified and published; a partial (row-count only) agreeing control ⇒ reconciled
+  - passed: W7 row count mismatch ⇒ quarantined variance, prior publication and checkpoint untouched
+  - passed: W7 billed total mismatch ⇒ quarantined variance, prior publication and checkpoint untouched
+  - passed: W7 row count only mismatch ⇒ quarantined variance, prior publication and checkpoint untouched
+  - passed: W7 billed total only mismatch ⇒ quarantined variance, prior publication and checkpoint untouched
+  - passed: W7 per-artifact row count mismatch ⇒ quarantined variance, prior publication and checkpoint untouched
+  - passed: W7b a per-artifact count for only some artifacts that disagrees ⇒ quarantined (no set-level control to store, so reconciliation stays unverified)
+  - passed: W7c per-artifact counts covering every artifact become the set-level control row count
+  - passed: W15 same bytes but a disagreeing control ⇒ failed visibly, publication untouched
+  - passed: W9 missing column BilledCost ⇒ quarantined (MISSING_REQUIRED_COLUMN); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 missing column BillingCurrency ⇒ quarantined (MISSING_REQUIRED_COLUMN); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 missing column ChargePeriodStart ⇒ quarantined (MISSING_REQUIRED_COLUMN); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 missing column ChargePeriodEnd ⇒ quarantined (MISSING_REQUIRED_COLUMN); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 missing column BillingPeriodStart ⇒ quarantined (MISSING_REQUIRED_COLUMN); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 unparseable BilledCost ⇒ quarantined (UNPARSEABLE_NUMBER); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 NaN BilledCost ⇒ quarantined (UNPARSEABLE_NUMBER); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 unparseable date ⇒ quarantined (UNPARSEABLE_TIMESTAMP); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 impossible date ⇒ quarantined (UNPARSEABLE_TIMESTAMP); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 row of another billing period ⇒ quarantined (PERIOD_MISMATCH); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 inverted charge period ⇒ quarantined (CHARGE_PERIOD_INVERTED); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 bad currency ⇒ quarantined (INVALID_CURRENCY); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 year 0000 timestamp ⇒ quarantined (UNPARSEABLE_TIMESTAMP); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 NUL in a mapped column ⇒ quarantined (INVALID_CHARACTER); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 NUL in an extra column ⇒ quarantined (INVALID_CHARACTER); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 inconsistent column count ⇒ quarantined (CSV_PARSE_ERROR); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 invalid gzip ⇒ quarantined (INVALID_GZIP); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 parquet artifact ⇒ quarantined (UNSUPPORTED_FORMAT); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 row limit exceeded ⇒ quarantined (ROW_LIMIT_EXCEEDED); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 empty artifact set ⇒ quarantined (EMPTY_ARTIFACT_SET); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 zero data rows ⇒ quarantined (EMPTY_BATCH); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 mixed billing currencies ⇒ quarantined (MIXED_BILLING_CURRENCY); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W9 byte-identical duplicate artifacts ⇒ quarantined (DUPLICATE_ARTIFACT); prior publication, view and checkpoint untouched; no facts kept
+  - passed: W10 oversize artifact (by listing) ⇒ failed before download; nothing captured; checkpoint not advanced
+  - passed: W11 validation errors: 1000 stored, true total counted; quarantine show returns them inspectably
+  - passed: M2-backstop: a class-22 rejection by Postgres quarantines the batch with a code-only error; the value is never persisted
+  - passed: M2-generic: any other database error fails the period with a code and generic text only (no raw pg message anywhere)
+
+- `src/ingest/worker/tenantEscape.db.test.ts`
+  - passed: T1 B source keys, batch ids and quarantine reports are NOT_FOUND for tenant A; A syncs never change B
+  - passed: T2 malformed or missing tenant ids are refused before any query
+
+(124 tests)
+
+Slice 0 suites (unchanged by Slice 1, all passing in the same runs): see
+`docs/evidence/slice-0/`.
+
+## 9. Fixture provenance
+
+`fixtures/focus-1.0-synthetic/` — SYNTHETIC (provider `SyntheticCloud`,
+`syn-…` ids), generated by `npm run fixture:generate`
+(`scripts/generate-focus-fixture.ts` → `src/ingest/fixtures/syntheticFocus.ts`,
+BigInt money). Control totals (exact): base 2026-07 55 rows
+`30.8272954899`; base 2026-08 40 rows `21.0978157665`; restatement 2026-07
+56 rows `24.4997954899`; restatement 2026-08 40 rows `21.0978157665`.
+Deliberate duplicate legitimate rows: base 2026-07 file 00001 data line 4 ×3,
+and data line 8 repeated in file 00002. `syntheticFocus.test.ts` fails if the
+committed files, `control-totals.json` or the README drift from the generator.
+Other test data: hand-built synthetic CSVs (`src/ingest/testing/focusCsv.ts`).
+
+## 10. Rollback / replay procedure
+
+See SKILL §5. Data: `replay --batch <superseded>` (fenced, atomic, pins the
+period), `replay --batch <newer>` to roll forward, `replay --period` to
+re-ingest and unpin — tested (R1–R4, K2). Code: no Slice 1 migration, so
+reverting the Slice 1 commits needs no DB action; ingested rows stay in
+`ratio.*` (removing them is retention-class, owner-only).
+
+## 11. Known gaps
+
+- Real AWS manifest format/semantics unverified (acceptance NOT YET PERFORMED);
+  multiple manifests per period refused (`MANIFEST_AMBIGUOUS`); real manifests
+  expected to carry no control totals ⇒ `unverified`.
+- Quarantined batches are terminal; identical bytes are not re-validated
+  after a code fix.
+- Byte-identical data files inside one set are quarantined (`DUPLICATE_ARTIFACT`).
+- One billing currency per batch (else quarantined).
+- Temp capture files of a SIGKILLed process remain under `RATIO_TMP_DIR`.
+- Evidence objects and replay-fixtures tenants are never deleted (no deletion
+  path this cycle).
+- `doctor` needs the owner URL (read-only txn) or a ledger grant for its
+  migration check (delegated decision (b), DESIGN §15).
+- A stalled attempt costs up to `RATIO_STALL_TIMEOUT_SECONDS` and is retried
+  within the retry budget.
+- Deferred to an issue (orchestrator): L-a run-history accuracy when a publish
+  commit outlives its lease; L-d long DB steps do not count as progress (a
+  single statement longer than the stall limit stops lease renewal);
+  challenger L4–L10.
+- Leftover test objects in the shared cluster: `ratio_test_23557_*` (origin
+  gone) and login `ratio_test_login_1169_*` (origin gone) are not provably
+  mine and were not dropped; `ratio_test_10356_*` belonged to another agent's
+  run in progress at the time.
+- The S3 request timeout covers time-to-response only; body streaming is
+  guarded by the stall watchdog.
+- `quarantine show` exposes validation messages but never cell values; an
+  operator needs the evidence object to see the bad value.
+- The test kill hook and fake source ship in the build but are refused
+  unless `NODE_ENV=test` (fake also needs `RATIO_ALLOW_FAKE_SOURCE=1`).
+- CI change not executed (no push); local SeaweedFS volume limit means the
+  suite uses one long-lived bucket with per-run prefixes (§15).
+- One stray `ratio_test_23557_*` database in the shared local cluster of
+  unknown (gone) origin.
+
+## 12. Final Slice 0 merge (453377e) — re-verification
+
+Merged with a merge commit (c02c6aa), no conflicts. The merge brings Slice 0
+round 5 (runner + `migrate --status`/doctor catalog privilege check,
+`privilegeModel.ts`) and origin/main (governance workflow, costsource etc.).
+
+| Check | Result |
+|---|---|
+| `npm ci` / prod audit | exit 0 / 0 vulnerabilities |
+| lint, `rm -rf .next && tsc --noEmit` | exit 0 |
+| `npm test` | 68 files / 1189 passed (includes origin/main's suites) |
+| `test:db` ×3 (both env vars) | 22 files / **269 passed** each run (56.8 s, 46.9 s, 46.4 s), 0 skipped |
+| without `RATIO_TEST_DATABASE_URL` | exit 1 (refuses to run) |
+| without `RATIO_TEST_S3_ENDPOINT` | exit 1, 3 S3 files fail at collection, 251 passed, nothing skipped |
+| `.skip/.only/.todo/fails` grep | none |
+| `worker:build`, `next build` + restore | exit 0; no AGENTS.md/CLAUDE.md; no ingestion code in `.next`; no change outside `src/ingest` vs the Slice 0 branch |
+| targeted re-run: doctor D1 (4), M2-backstop, M2-generic, K6, M3-c | all pass. The D1 probe migration (`CREATE TABLE public.ratio_doctor_future_probe`) passes the classifier and is only reported as `PENDING` |
+| manual end-to-end (built CLI, DB `ratio_s1_e2e_90dbb1bf`) | status 3→migrate 0→status 0 (`problems: []`), sync published+reconciled, re-sync skipped_unchanged, reader totals = control totals, 3/3 evidence re-hash OK, doctor exit 0 (migration_version `problems: []`), replay-fixtures 6/6 (`fixture-20261003073233-da92a79c`), scratch cleaned up |
+
+**Finding (test-only, fixed in 774ff13):** the new catalog check reports any
+non-reviewed trigger as `PRIVILEGE_MODEL_VIOLATION`. The superuser-created
+test triggers in `sync.db` (M2-backstop/generic) and `cliWorker.db` (K6) were
+never dropped, so a later `migrate`/`doctor` in the same per-file database
+would have failed depending on test order (it did not in practice: they ran
+last). Both tests now assert the violation is reported while the trigger
+exists, drop it, and assert `migrate --status` (and doctor's
+`migration_version`) is clean afterwards. M3-c already dropped its trigger in
+`finally`. No production code path changed.
+
+Leftovers: login `ratio_test_login_6414_*` appeared during this session's
+window; an isolated re-run of `test:db` leaves zero new roles/databases, and
+PID 6414 is gone — not attributable to this suite, not dropped.
+
+## 13. Worker CLI redaction before serialization + process guards (after Slice 0 round 6, 19fdbed)
+
+**Was Slice 1's CLI already on the redact-before-serialize path?** Partly.
+The evidence record (`buildEvidenceRecord` → `redactDeep`) and `fail()`'s
+message (`clean(messageOf(e))`) were redacted before serialization, but the
+generic worker log line (`io.err(clean(JSON.stringify(...)))`), the stdout
+evidence line and the `RATIO_EVIDENCE_FILE` copy serialized first, and the
+secret list had no URL-encoded or JSON-escaped forms. Fixed test-first:
+
+- `jsonLineRedactorFor(env)` (redact.ts): redacts every string, object key and
+  Error (name/message/code/cause) BEFORE `JSON.stringify`, then a literal
+  backstop over the serialized text; secret forms = raw, URL-decoded,
+  URL-encoded and JSON-escaped (also `pass*` URL query params). No length cap
+  on the backstop. Used for every worker stderr line, the stdout evidence
+  record, the evidence-file copy (incl. migrate's) and the test pause signal.
+- `installProcessGuards(env, io)` (installed by the CLI entry): an
+  `uncaughtException`/`unhandledRejection` prints exactly one redacted JSON
+  line (`event: process.crash`, code, SQLSTATE-only/redacted message) and
+  exits 1.
+- The worker DB pool is constructed inside the `try` (S3 clients already
+  were), so a constructor failure is a reported failure with an evidence
+  record. (Slice 0's `migrate` client construction in `cli.ts` is Slice 0
+  code and was left as merged.)
+
+Tests: unit (`redact.test.ts`: password `pw"q\b%22x` in values, keys, nested
+Errors — no raw/decoded/encoded/JSON-escaped form survives; backstop never
+truncates; Errors serialized), guards (`cli.worker.test.ts`: both events, one
+redacted line, exit 1; malformed URL ⇒ exit 1 + evidence), integration K7
+(real Postgres: that password also used as a nonexistent DB name, for `sync`,
+`doctor --json`, `quarantine show --json` — nothing leaks in stdout/stderr).
+
+Mutation proofs (`mutations5.txt`):
+
+| Mutation | Result |
+|---|---|
+| MR1 no redaction before serialization | 1 fails (redacted Errors / forms test) |
+| MR2 guard does not exit | 2 fail |
+| MR3 guard prints raw `JSON.stringify(e.message)` | 2 fail |
+| MR4 `uncaughtException` guard not installed | 1 fails |
+| MR5a `messageOf` keeps raw pg text (one layer removed) | K7 still passes — the other layers redact (expected) |
+| MR5b all three layers removed (raw pg text + `fail()` without pre-redaction + serialize-then-redact with raw secrets only) | K7 fails (the secret leaks), so K7 has teeth |
+
+Not killable by a black-box test: the JSON-escaped forms in the serialized
+backstop alone (the pre-serialization pass already removes every literal) —
+kept as defense in depth.
+
+Re-verification on d634f6c/3745fc0: `npm ci` 0 (prod audit 0 vulns), lint 0,
+tsc 0, `npm test` 68 files / 1200 passed, `test:db` ×3 = 22 files / **271
+passed** each (57.5 s, 50.6 s, 46.7 s), no URL ⇒ exit 1, no S3 endpoint ⇒
+exit 1 with 3 files failing at collection and 252 passed (nothing skipped),
+no `.skip/.only/.todo`, `worker:build` 0, `next build` 0 (restored, no
+AGENTS.md/CLAUDE.md), no ingestion code in `.next`, no change outside
+`src/ingest` vs the Slice 0 branch. Manual end-to-end (built CLI,
+`ratio_s1_e2e_4746c231`): status 3→0→0, sync published+reconciled, re-sync
+skipped_unchanged, reader totals = control totals (55 / `30.8272954899`,
+40 / `21.0978157665`), 3/3 evidence re-hash OK, doctor exit 0,
+replay-fixtures 6/6 (`fixture-20261003075835-8e9aff14`), scratch cleaned up.
+Leftovers unchanged (`ratio_test_23557_*`, logins `_1169_`, `_6414_`; not
+attributable, not dropped).
+
+## 14. Slice 0 merge 17f07d7 (rounds 7-9 + origin/main #47/#49) — merge cc17801
+
+**Conflict resolution (one crash handler, not two).** `src/ingest/cli.ts`
+conflicted between Slice 0's `installProcessHandlers(proc, env, io, exit)`
+and Slice 1's `installProcessGuards(env, io)`. Kept Slice 0's
+`installProcessHandlers` as the single implementation and removed
+`installProcessGuards` from `workerCli.ts`. The kept handler's line function
+is Slice 0's `jsonLineRedactor(RATIO_MIGRATE_DATABASE_URL)` followed by the
+worker pass `jsonLineRedactorFor(env)` (worker DB URL, S3 keys, all forms);
+the result is re-parsed and, if anything throws or is not valid JSON, the
+fixed Slice 0 S11 fallback `{"error":"output redacted"}` is printed. Every
+event prints exactly one line and calls exit(1). The CLI entry installs it
+once, before `main`.
+
+Tests (`cli.worker.test.ts`, now importing `installProcessHandlers` from
+`./cli`): `uncaughtException` and `unhandledRejection` each print one JSON
+line with the worker DB password `pw"q\b%22x` (raw, JSON-escaped, URL-encoded)
+and an S3 secret key absent, then exit 1; a reason whose `toJSON` throws
+(carrying the secret) and a hostile Proxy whose `ownKeys` throws each yield
+exactly `{"error":"output redacted"}` and exit 1; malformed URL => exit 1 +
+evidence record. Slice 0's own handler tests pass unchanged. Mutation
+(`mutations6.txt`): dropping the worker pass => 2 tests fail.
+
+**`resetSession` / catalog checks.** Slice 1 never uses `ALTER ROLE ... SET`
+or `ALTER DATABASE ... SET`; worker timeouts (`lock_timeout`,
+`idle_in_transaction_session_timeout`, `statement_timeout`) are passed per
+connection via the pg `options` startup parameter (`-c ...`), which does not
+write `pg_db_role_setting`. After the test runs `pg_db_role_setting` had 0
+rows, and the new setting check reported no violation (doctor
+`migration_version` `problems: []` in the end-to-end). `resetSession` is used
+only by the migrate runner's own client; the worker pool is unaffected. The
+L-b test (session settings applied per worker connection) still passes.
+
+**Re-verification on cc17801** (worktree clean, no local modification):
+
+| Check | Result |
+|---|---|
+| `npm ci` | exit 0; prod audit 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 80 files / 1922 passed |
+| `test:db` x3 | 22 files / **295 passed** each (57.5 s, 49.3 s, 50.0 s) |
+| `test:db` without DB URL | exit 1 (fails, not skips) |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 276 passed, 0 skipped |
+| `pg_db_role_setting` rows after runs | 0 |
+| `.skip/.only/.todo/it.fails` grep | 0 |
+| `worker:build` | exit 0 |
+| `next build` | exit 0 (generated files restored; no AGENTS.md/CLAUDE.md) |
+| ingestion code in `.next` bundle | 0 matches |
+| change outside `src/ingest` (+ allowed files) vs Slice 0 branch | none |
+
+Manual end-to-end (built CLI, `ratio_s1_e2e_c4ad4fa2`): migrate status 3->0->0,
+sync published + reconciled, re-sync `skipped_unchanged`, reader totals =
+control totals (55 / `30.8272954899`, 40 / `21.0978157665`), 3/3 evidence
+re-hash OK, doctor exit 0 `problems: []`, replay-fixtures 6/6
+(`fixture-20261003093054-75800a71`), scratch database/roles/bucket prefix
+cleaned up. Leftovers in the shared cluster unchanged and not attributable to
+this suite (`ratio_test_23557_*`, logins `ratio_test_login_1169_*`,
+`ratio_test_login_6414_*`); not dropped.
+
+## 15. Lows L-k and L-j (after the final challenger APPROVE at 3541d6b)
+
+**L-k — one redaction walker.** `redactDeep` in `src/ingest/redact.ts` is now
+a thin adapter: it supplies the worker's secret-aware string redactor and
+delegates the walk to Slice 0's exported `redactDeep` in `cli.ts` (BigInt as
+exact decimal text — no JSON.stringify throw that would escalate into the
+crash handler; Buffers/typed arrays as `[binary]`, never index by index;
+`toJSON` honoured and its result redacted; Errors as name/message/code/cause;
+cycles as `[circular]`). The second walker is gone. `cli.ts` already imports
+`redact.ts`, so the import is a cycle; it is only dereferenced at call time
+(never while modules load) and works in vitest, `tsx` and the tsc CJS build
+(`worker:build`, `node dist-worker/ingest/cli.js doctor --json`, and
+`require('dist-worker/ingest/redact.js')` first, all checked). Slice 0's
+`cli.ts` is unchanged.
+
+**L-j — tests with teeth for W2/W4.** `redact.test.ts`: a value (and a key)
+that already contains the JSON-escaped secret form is redacted. K7 now sets
+`RATIO_EVIDENCE_FILE` for all its invocations, adds a fourth one whose
+`--source` argument is a second-order secret form (URL-encoded JSON-escaped;
+usage error, exit 2, record still written), and requires the file to hold
+exactly the 4 redacted stdout records with no secret form.
+
+Red (at ce97fa5, `r5-red-fast.txt`): `Tests 1 failed | 19 passed (20)` —
+"Do not know how to serialize a BigInt". The W2 test and the K7 extension
+pass on the code they guard by design; they are proven by mutation.
+
+| Mutation | Result |
+|---|---|
+| W2 `secretForms` drops the JSON-escaped forms | 1 fails (pre-escaped value test), on both the old and the fixed code (`mut-W2.txt`, `mut-W2-fixed.txt`) |
+| W4 evidence file written with plain `JSON.stringify` (no line redactor) | K7 fails: "evidence file leaks pw%5C%22q%5C%5Cb%2522x", on both (`mut-W4.txt`, `mut-W4-fixed.txt`) |
+| drop the BigInt branch in the (single) walker | 2 fail: the L-k test and Slice 0's round-7 numeric-redaction test (`mut-bigint.txt`) |
+
+**Test-infrastructure defect found and fixed (not hidden).** The first
+`test:db` of this round failed 18 tests (all S3-writing: K1–K6, demo 1–8,
+X1–X5) with SeaweedFS `InternalError` (HTTP 500) on PutObject, and runs 2–3
+passed. Reproduced deterministically (twice, 12 failures each) by starting a
+full run right after a short run had created and deleted its own bucket: the
+local SeaweedFS reclaims a deleted bucket's volumes lazily and a new bucket
+needs fresh volume slots. Fix (47c736c): the suite uses ONE long-lived bucket
+(`ratio-s1-test`, created if missing, never deleted) with a unique per-run
+key prefix deleted at the end; K5 deletes the replay-fixtures scratch it
+causes (the command itself retains it by design). No assertion, timeout or
+test was changed. The same reproduction sequence then passed 295/295 twice.
+Found while checking: `ListBuckets` on this SeaweedFS returns an empty list,
+so the earlier "s1-run buckets left: []" leftover check proved nothing; it now
+lists the objects in `ratio-s1-test` (0 after every run). The manual e2e
+script also uses that bucket (evidence under a unique `e2e-<rnd>/` prefix;
+source objects at the fixture's own `ratio-synthetic/` keys, which its
+manifests name absolutely), and deletes what it wrote.
+
+**Gates at 47c736c:**
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 80 files / 1924 passed |
+| `test:db` x3 | 22 files / **295 passed** each (60.0 s, 57.4 s, 57.6 s) |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 276 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails` grep | 0 |
+| `pg_db_role_setting` rows | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored; no AGENTS.md/CLAUDE.md) |
+| ingestion code in `.next` | 0 matches |
+| objects left in `ratio-s1-test` | 0 |
+
+Manual end-to-end (built CLI at 47c736c, `ratio_s1_e2e_45ef97de`): status
+3->0->0, sync published + reconciled, re-sync `skipped_unchanged`, reader
+totals = control totals (55 / `30.8272954899`, 40 / `21.0978157665`), 3/3
+evidence re-hash OK, doctor exit 0, replay-fixtures 6/6
+(`fixture-20261003100337-da42674f`), cleanup: 48 objects, database and
+logins dropped. (Two earlier e2e attempts in this round are recorded as they
+happened: the first, still creating its own bucket, hit the same SeaweedFS
+500; the second put the source objects under a prefix that the fixture
+manifests do not name and correctly failed MANIFEST_INVALID — a script error,
+fixed as above.) Other `ratio_test_*` databases seen during the round belong
+to a concurrent agent's checkout (live vitest processes there) and were left
+alone; `ratio_test_23557_*` and logins `_1169_`/`_6414_` are unchanged.
+
+## 16. Slice 0 merge 0ef880f (rounds 10-12) — merge c9e0490
+
+**Conflict.** `.github/workflows/ci.yml` only. Both sides were kept, in this
+order: "Start SeaweedFS", then "PostgreSQL 16 client tools", then the DB-test
+step with all four variables (`RATIO_TEST_DATABASE_URL`,
+`RATIO_TEST_S3_ENDPOINT`, `RATIO_PG_DUMP`, `RATIO_PSQL`). The YAML parses
+with js-yaml, and the step list and DB-step env were printed and checked.
+The fail-not-skip behaviour is kept:
+- Without `RATIO_TEST_DATABASE_URL`, test:db exits 1.
+- Without `RATIO_TEST_S3_ENDPOINT`, test:db exits 1 (3 files fail at
+  collection).
+- With `RATIO_PG_DUMP=/nonexistent/pg_dump`, the foundation round-trip test
+  fails (1 failed, 31 passed), and nothing is skipped.
+
+**Foundation / per-table RLS rule vs Slice 1.**
+- No Slice 1 code path, test, fixture or script creates a table, policy,
+  view or function in schema `ratio`. A grep of `src/ingest` outside `db/`
+  for CREATE TABLE/TRIGGER/POLICY/FUNCTION/INDEX/VIEW and ALTER TABLE finds
+  only the following.
+- **Test-only triggers.** Three tests add a trigger on `ratio.cost_facts`
+  that runs a `public.*` function, and drop both in a `finally` or `afterAll`:
+  - K6 (`s1_cli_poison`)
+  - the M2 poison test in `sync.db.test.ts` (`s1_poison`)
+  - the N3 stall test (`s1_slow_insert`)
+
+  K6 and the sync test assert that the catalog check reports
+  PRIVILEGE_MODEL_VIOLATION while the trigger exists, and a clean status
+  (exit 0 / `problems: []`, doctor `migration_version` pass) after it is
+  dropped. Both still pass with the new foundation, policy and table checks.
+- **Doctor D1.** The future-migration probe is a migration *file*
+  (`CREATE TABLE public.ratio_doctor_future_probe`) that is listed but never
+  applied, so it creates nothing in `ratio`. D1's checks pass.
+- **End-to-end.** migrate status, doctor and replay-fixtures report
+  `problems: []` against a freshly migrated database (new 0001 checksum
+  `078a5abe…`).
+
+**Gates at c9e0490:**
+
+| Check | Result |
+|---|---|
+| `npm ci` | exit 0 |
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 80 files / 1924 passed |
+| `test:db` x3 (with `RATIO_PG_DUMP`/`RATIO_PSQL` = PG16 tools, as in CI) | 23 files / **328 passed** each (72.6 s, 58.7 s, 61.0 s); 0 object-store errors (`InternalError` count 0 in all three logs) |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 309 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| `pg_db_role_setting` rows | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored; no AGENTS.md/CLAUDE.md) |
+| ingestion code in `.next` | 0 matches |
+| change outside the Slice 1 paths vs the Slice 0 branch | none |
+| leftovers | 0 `ratio_test_*` databases/roles; 0 objects in `ratio-s1-test` |
+
+**Manual end-to-end** (built CLI at c9e0490, database `ratio_s1_e2e_14530244`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0 with `problems: []`.
+- replay-fixtures passed 6/6 (`fixture-20261003114006-f8ec1a21`).
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 17. Slice 0 merge c016ffb (round 13) — merge fccebbd
+
+Clean merge (no conflict). The coordinator instructed that this reviewed merge
+be pushed to the already-published `origin/slice/01-focus-ingestion-worker`.
+
+**Doctor never prints setting values** (`settings-check.sh`, built CLI).
+Setup:
+- A scratch database migrated to 0001.
+- Three setting defaults whose VALUES carry a marker string:
+  - `ratio.tenant_id` for the worker login in that database;
+  - `search_path` for the whole database;
+  - `application_name` for `ratio_reader` in that database.
+
+Results:
+- doctor exited 1: `migration_version` fail, problems
+  `["PRIVILEGE_MODEL_VIOLATION"]`.
+- `migrate --status --json` exited 3, naming the three keys only:
+  - `setting ratio.tenant_id for role s1_set_worker_… in database …`
+  - `setting search_path for role ALL in database …`
+  - `setting application_name for role ratio_reader in database …`
+- The marker occurs **0 times** across doctor and status stdout+stderr.
+- Scratch database and login dropped; `pg_db_role_setting` back to 0 rows.
+
+**Gates at fccebbd:**
+
+| Check | Result |
+|---|---|
+| `npm ci` | exit 0 |
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 80 files / 1924 passed |
+| `test:db` x3 (PG16 `RATIO_PG_DUMP`/`RATIO_PSQL` as in CI) | 23 files / **340 passed** each (71.4 s, 62.5 s, 64.3 s); `InternalError` 0 in all three logs |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 321 passed, 0 skipped |
+| `RATIO_PG_DUMP=/nonexistent/pg_dump` | foundation round-trip fails (1 failed, 32 passed), not skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| change outside the Slice 1 paths vs the Slice 0 branch | none |
+| leftovers | 0 `ratio_test_*` databases/roles; 0 objects in `ratio-s1-test`; `pg_db_role_setting` 0 |
+
+**Manual end-to-end** (built CLI at fccebbd, database `ratio_s1_e2e_f916dac0`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6 (`fixture-20261003122309-fbe5c47d`).
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 18. Redaction performance (DoS on our own process) — linear, capped
+
+**Report.** On the Slice 0 round-14 compat build, `jsonLineRedactorFor` took
+0.9 s on a 20 KB message and 77 s on 200 KB. Any worker log line or crash
+handler carrying a large error could block the process for minutes.
+
+**Profile** (`profile-redact.ts`, `profile-patterns.js` in the scratchpad):
+- Time grew quadratically on a run of letters: `redact()` took 0.8 s at
+  20 KB, 3.4 s at 40 KB and 12.2 s at 80 KB.
+- `scrubLiterals`, the deep walk and the JSON-escape forms each stayed under
+  2 ms at those sizes. Words, secret prefixes and quote or backslash floods
+  were fast.
+- Per rule on 20 KB of letters, only the two URL rules were slow: about
+  370 ms each, against 0.2 ms or less for every other rule.
+- Root cause: in `[a-z][a-z0-9+.-]*:\/\/`, a failed match is retried from the
+  next position. Inside a run of scheme characters, each retry scans to the
+  end of the run, which is O(n²).
+
+**Fix (`3d8f277`, `src/ingest/redact.ts`):**
+- **Input cap.** Each string is capped at `MAX_REDACT_INPUT_CHARS` = 16 384
+  BEFORE any rule runs. This is the app redactor's approach from #47:
+  - the cut moves back to the last delimiter in `[\s,;&"'<>]`, so a secret
+    that straddles the cap is dropped whole;
+  - the marker `' …[TRUNCATED]'` is appended.
+
+  The existing 4000-character output cap is unchanged.
+- **URL rules.** They start a scheme only where no scheme character precedes
+  (a lookbehind), so a run of letters is scanned once.
+- **Literal secrets.** They form ONE escaped alternation per secrets array,
+  longest first, cached in a WeakMap. `redact()` and `scrubLiterals()` both
+  use it, so each is one linear pass and no regex is built per call.
+- **Measured** on the built `dist-worker` `jsonLineRedactorFor`, for letters,
+  `a://` repeated and words: 20 KB took ≤ 6.5 ms, 200 KB ≤ 1 ms, 2 MB ≤ 2.6 ms.
+  The 20 KB figure was the first call, with JIT warm-up.
+
+**Tests (`214b4e4`, red first).** The red run (`r6-red.txt`) had 5 failures:
+3 linearity cases and both spawned crashes, which were killed at 20 s.
+
+- **`src/ingest/redactLinear.test.ts`.** Each input runs in a tsx child
+  (`testing/redactLinearChild.ts`) under a hard SIGKILL.
+  - 14 adversarial inputs, each at 200 KB and 2 MB:
+    - a run of letters; scheme-like letters with dots and plus signs;
+    - `a://` repeated; a URL followed by a long path;
+    - secret-prefix fragments; repeated partial secrets (one character short),
+      URL-encoded and JSON-escaped;
+    - backslash, quote and `%`-encoding floods;
+    - `password="` repeated; `Bearer ` repeated;
+    - full secrets among fragments.
+  - Both entry points are timed: `redact()` and `jsonLineRedactorFor`, the
+    latter on a message, an Error and a nested key and array.
+  - Each call must finish in under 2 s, no secret form (raw, URL-encoded,
+    JSON-escaped) may survive, and `redact()` output stays ≤ 4000 characters.
+- **`cli.worker.test.ts`, spawned crash test.** A tsx child
+  (`testing/crashChild.ts`) wires `installProcessHandlers` the same way the
+  CLI entry does. It then crashes, by uncaughtException and by
+  unhandledRejection, with an Error of more than 2.1 MB. The message holds
+  secrets in every form, URL, quote, backslash and `%` fragments, and
+  40 000-letter runs. The test requires:
+  - exit 1, empty stdout;
+  - exactly one stderr line, which must be valid JSON with no secret form;
+  - crash handling that takes less than 2 s beyond a start-up baseline run.
+
+**Mutation proofs:**
+
+| Mutation | Result |
+|---|---|
+| Remove the input cap (`capForRedaction` returns the text) | guard fails: `a:// repeated` is killed. The query rule stays super-linear on that shape and the cap is what bounds it (`mut-nocap.txt`) |
+| Revert to the old algorithm (`redact.ts` from 214b4e4) | 7 fail: letters run, scheme-like run, `a://`, URL+long path, `password=` repeated, and both spawned crashes (`mut-oldalgo.txt`) |
+
+**Gates at 3d8f277:**
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 81 files / 1940 passed |
+| `test:db` x3 (PG16 tools as in CI) | 23 files / **340 passed** each; 0 object-store errors |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 321 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| change outside the Slice 1 paths vs the Slice 0 branch | none |
+| objects left in `ratio-s1-test` | 0 |
+
+The three test:db runs took 200 s, 212 s and 208 s, against about 60 s
+before. The host was heavily loaded: load average about 17, with another
+agent's vitest DB runs active. The four `ratio_test_*` databases seen
+afterwards belong to that checkout.
+
+**Manual end-to-end** (built CLI at 3d8f277, database `ratio_s1_e2e_fc6d77dd`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 19. L-p / L-q — cap just above the kept length, per-string budgets
+
+**L-p — the fix (`5362489`):**
+- **Cap lowered.** `MAX_REDACT_INPUT_CHARS = MAX_REDACTED_LENGTH + 512`
+  (4512, was 16 384). Only 4000 characters are ever kept, so no rule sees
+  more than about 4.5 KB per string.
+- **Straddle-safe cut.** The cut still backs up to a delimiter, and it now
+  also never lands inside an occurrence of a configured secret form. That
+  matters because a form's own characters can be delimiters: the quote in
+  `pw"q\b%22x`, and the full worker URL. A straddling secret is dropped
+  whole.
+- **Linear URL query rule.** The rule now consumes the whole URL whether or
+  not it has a query. A callback leaves a query-less URL unchanged, so the
+  scan resumes after the URL instead of retrying from every later scheme
+  start. `a://a://…` is no longer quadratic, even without the cap.
+
+**Sweep** (`redactCap.test.ts`, 1212 cases):
+- Every one of the 12 configured secret forms is placed at every offset
+  across the cut, with three fillers: no delimiters, spaces, and dense
+  `,;&<>`.
+- Either the form is kept whole or no prefix of 2 or more characters of it
+  remains.
+- `redact()` output contains no form in any case.
+
+**L-q — per-string budgets** (`redactCap.test.ts`, median of 9 runs after a
+warm-up). Shapes: `a://`, `x://y://`, `a.b://`, `http://`, `a://b?`, a run
+of letters, and scheme characters.
+- A string of exactly the cap length, so not truncated, must take < 25 ms.
+- A 2 MB string must take < 25 ms; the cap bounds the work.
+- A direct cap test checks that the cap is within MAX_REDACTED_LENGTH + 512,
+  that the cut lands on a delimiter, and that the marker is appended.
+
+Measured medians on the fixed code: at the cap ≤ 0.08 ms; at 2 MB ≤ 1.3 ms.
+At the old 16 KB cap these shapes took 64–119 ms; that was the red run.
+
+| Mutation | Result |
+|---|---|
+| R1: lookbehind removed | 2 fail: letters and scheme characters at the cap (median 107–120 ms; 67 / 44 ms standalone) (`mut-R1.txt`) |
+| R2: cap removed | 8 fail: the direct cap test (deterministic: length 999999 > 4525) and all seven 2 MB budgets (33–95 ms) (`mut-R2.txt`) |
+| R3: cut ignores secret forms | sweep fails: fragment `po` of the URL form left at the cut |
+
+The 2 MB budgets alone would be a marginal catch for R2 (15–53 ms
+standalone). The direct cap test is the deterministic one.
+
+## 20. COMMIT answered with ROLLBACK is a failure (Copilot finding on Slice 0's `tenant.ts`)
+
+**Where Slice 1 commits.** Every worker transaction went through Slice 0's
+`withTenantTransaction`, which ignored the COMMIT command tag:
+- lease: acquire, heartbeat, retry, finish;
+- load;
+- publish;
+- quarantine;
+- checkpoint refresh;
+- replay and replay-fixtures;
+- the pipeline's reads.
+
+Two places run their own BEGIN/COMMIT: replay-fixtures' admin `asTenant`
+and doctor's two read-only transactions. No Slice 1 code catches a
+statement error inside a transaction today, but nothing prevented it.
+
+**The bug, shown red (`5ab5972`).** A pool wrapper runs a failing statement
+right after a chosen statement inside the worker's transaction and swallows
+its error. Before the fix the worker reported success while PostgreSQL had
+discarded every write:
+- **publish path:** the run reported `succeeded`;
+- **checkpoint path** (backfill of an unchanged period → `refreshCheckpoint`):
+  `succeeded`, and the checkpoint did not actually advance;
+- **finishRun:** the run was reported `succeeded` while its row was still
+  `running`.
+
+**Fix (`b8a78aa`, `src/ingest/worker/tx.ts`).** `workerTransaction()` runs
+Slice 0's `withTenantTransaction`, so tenant handling stays in one place. It
+hands that helper clients whose COMMIT reply is checked: `assertCommitted`
+requires `result.command === 'COMMIT'` and otherwise throws `IngestError`
+`COMMIT_ROLLED_BACK`, which is not retryable. Slice 0's helper then issues
+ROLLBACK, a no-op, and rethrows.
+- All 20 worker call sites use `workerTransaction`.
+- replay-fixtures' admin transaction and doctor's read-only transactions call
+  `assertCommitted` on their COMMIT.
+- When Slice 0 round 15 makes its own helper check the tag, this wrapper is
+  redundant but harmless.
+
+**Tests** (`src/ingest/worker/commitTag.db.test.ts`):
+- **Publish path:** a caught error right after the checkpoint write. The run
+  fails with `COMMIT_ROLLED_BACK`. View, totals, publications and checkpoint
+  are unchanged, and pre-existing batches are unchanged; the newly loaded
+  batch stays only `staged`, as in P1. The run row is `failed` with
+  `COMMIT_ROLLED_BACK`, and a later clean run publishes normally.
+- **Checkpoint path:** the run fails with `COMMIT_ROLLED_BACK`; visible state
+  and checkpoint are unchanged.
+- **Run bookkeeping:** a caught error in `finishRun`'s transaction makes
+  `runSync` reject with `COMMIT_ROLLED_BACK`. The row stays `running` until
+  its lease expires and is then abandoned; it is never reported finished.
+
+| Mutation | Result |
+|---|---|
+| drop the check (`assertCommitted` never throws) | 3 fail (`mut-commit.txt`) |
+
+**Gates at b8a78aa:**
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 82 files / 1957 passed (run while test:db was running; the 25 ms medians held) |
+| `test:db` x3 (PG16 tools as in CI) | 24 files / **343 passed** each (214 s, 211 s, 205 s; host load average about 15–17 from other checkouts); 0 object-store errors |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 324 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| change outside `src/ingest` and `docs/evidence/slice-1` since 0e80eff | none |
+| objects left in `ratio-s1-test` | 0 |
+
+The one `ratio_test_*` database present afterwards belongs to another
+checkout's live vitest run.
+
+The L-p/L-q commit `5362489` also passed test:db x3 on its own: 23 files /
+340 each, plus the negatives.
+
+**Manual end-to-end** (built CLI at b8a78aa, database `ratio_s1_e2e_852ac99c`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 21. Challenger Lows on e0a1057 (overlapping secrets, quarantine commit tag, query-rule linearity)
+
+**Finding 1 — overlapping distinct secrets leaked.** This was a regression
+from 3d8f277. The single combined alternation matched leftmost: it consumed
+one secret and left the rest of an overlapping one behind. With secrets
+`admin;x` and `x;secret;pw`, the text `admin;x;secret;pw` became
+`[redacted];secret;pw` through `redact()`, `scrubLiterals()` and
+`jsonLineRedactorFor`.
+
+Fix (`89e58fc`, `src/ingest/redact.ts`):
+- Every `indexOf` hit of every secret form, including overlapping hits of
+  the same form, goes into a difference array.
+- Each maximal covered run is replaced exactly once, so every character
+  covered by any occurrence of any secret is redacted.
+- Cost is linear in text length times the number of forms. The redaction
+  linearity guard and the per-string budgets still pass.
+- The cap's straddle check uses the same covered runs. A chain of
+  overlapping secrets across the cut is followed step by step and dropped
+  whole.
+
+Tests (`redact.test.ts`): five cases, each run through all three entry
+points (15 tests):
+- two overlapping secrets, in both orders;
+- a three-way overlap (`one;two` / `two;three;four` / `four;five`);
+- a secret that is a substring of another;
+- self-overlapping occurrences.
+
+No 3-character substring of any secret may survive, in the raw line or in
+the parsed keys and values. Red: 9 failed. The substring and self-overlap
+cases already passed and are kept as coverage.
+
+**Finding 2 — quarantine transaction commit tag** (`commitTag.db.test.ts`,
+parametrized). A caught error is injected after each state-changing
+statement of the quarantine transaction:
+- the validation-error insert;
+- the fact deletion;
+- the staged → quarantined update.
+
+In every case the run fails, the batch stays `staged`, no validation errors
+are recorded, and view, publications and checkpoint are unchanged. After an
+earlier statement, the next statement already fails with SQLSTATE 25P02
+(transaction aborted). After the last statement, only the COMMIT reply
+shows the failure, and the run fails with `COMMIT_ROLLED_BACK`.
+
+**Finding 3 — the query rule is linear on its own** (`redactCap.test.ts`).
+`QUERY_RULE` is exported and is the same object `redact` uses. It is applied
+uncapped to `a://` repeated:
+- a sanity check that a query is redacted and a query-less URL is unchanged;
+- a 16 KB median under 25 ms;
+- a size-scaling check: the ratio of medians time(48 KB)/time(16 KB) must
+  stay under 6 (about 3 when linear, about 9 when quadratic). Repetitions
+  are sized for at least about 5 ms per sample. Fixed code measures 2.4–2.9.
+
+My first scaling version (64/16 KB, 20 fixed repetitions) took 400 s to fail
+under R6. `6a1244b` fixed that; under R6 it now fails in 23 s with a ratio
+of 7.5.
+
+| Mutation | Result |
+|---|---|
+| M-overlap: leftmost single-alternation replacement (the 3d8f277 algorithm) | 9 fail: every entry point × the two-overlap and three-way cases (`mut-overlap.txt`) |
+| drop the COMMIT check | 4 fail: publish, checkpoint, finishRun and quarantine (last statement). The two quarantine cases after earlier statements still fail visibly through 25P02, as they should (`mut-commit2.txt`) |
+| R6: restore the old quadratic query rule | 2 fail: 16 KB uncapped median 346 ms; scaling ratio 7.46 > 6 (`mut-R6.txt`) |
+
+**Gates at 6a1244b:**
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` | 82 files / 1975 passed |
+| `test:db` x3 (PG16 tools as in CI) | 24 files / **346 passed** each (235 s, 221 s, 227 s; load average about 16 from other checkouts); 0 object-store errors |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 327 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| change outside `src/ingest` and `docs/evidence/slice-1` since 0e80eff | none |
+| objects left in `ratio-s1-test` | 0 |
+
+The four `ratio_test_*` databases present afterwards belong to another live
+vitest run (a scratch compat checkout).
+
+**Manual end-to-end** (built CLI at 6a1244b, database `ratio_s1_e2e_5a6f8299`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 22. Slice 0 rounds 14-15 merge, dangerous test logins, challenger REQUEST_CHANGES on fc71471
+
+All DB tests in this round ran on a **private PostgreSQL 16 cluster**
+(`127.0.0.1:55600`). `initdb` refuses root, so the cluster runs as the
+unprivileged `postgres` user. Its data directory is on `/dev/shm/s1pg`,
+because the sandbox denies that uid file access under the scratchpad
+(initdb PANIC: could not open `global/pg_control`). The cluster was stopped
+and deleted at the end. The S3 store is still the shared SeaweedFS, isolated
+by per-run prefixes in `ratio-s1-test`.
+
+### Merge (`826c40d`)
+
+Local `slice/00-postgres-foundation` @ 289db6a (rounds 14-15) was merged.
+Conflicts:
+- **`cli.ts`:** took Slice 0's round-14 entry (synchronous `writeAllSync`
+  fatal path and the test crash hook). The single crash handler
+  (`installProcessHandlers` plus the worker pass) is unchanged.
+- **`vitest.db.config.ts`:** kept Slice 1's S3 globalSetup and added Slice 0's
+  `*.serial.db.test.ts` exclude.
+- **`package.json`:** took Slice 0's two-phase `test:db`, kept Slice 1's
+  `worker:build`.
+
+`vitest.db.serial.config.ts` also gets the S3 globalSetup, since serial files
+may need S3.
+
+### Dangerous test logins
+
+**The interference** (`d1-interference.sh`, private cluster): with a
+committed BYPASSRLS LOGIN member of `ratio_worker` present, which is what
+auth A1 used to create during the parallel phase, `doctor.db.test.ts` fails
+before D1 even runs. Its migration is refused with `PRIVILEGE_MODEL_VIOLATION:
+... role s1_interference_probe (member of ratio_worker) must not be
+BYPASSRLS`. Without that login it passes.
+
+**The fix:** the extra problem was purely interference, so the source was
+removed.
+- The two dangerous A1 cases moved to `src/ingest/worker/auth.serial.db.test.ts`
+  (serial phase, run alone; logins dropped and verified gone):
+  - a BYPASSRLS `ratio_worker` member;
+  - a member that can SET ROLE to a SUPERUSER role.
+- The rest of A1/A2 keeps only plain logins.
+- **D1 keeps its exact `problems: ['PENDING']` assertion.** No loosening is
+  needed once nothing in the parallel phase commits dangerous state.
+
+**Guard** (`src/ingest/serialLogins.test.ts`, static TS AST over every
+non-serial `*.db.test.ts`):
+- `createLogin` may take no attributes, or only a literal array of safe
+  ones.
+- In Slice 1's test files (outside `src/ingest/db/`), no role DDL literal may
+  carry SUPERUSER, BYPASSRLS, REPLICATION, CREATEROLE or CREATEDB. Slice 0's
+  `src/ingest/db/` tests use such DDL only inside rolled-back transactions.
+- A self-test covers both detectors. Red at 9197e7a on `auth.db.test.ts:29`
+  and `:60`.
+
+### Crash tests after the merge
+
+**Slice 0's built-CLI crash test** (`cli.process.test.ts`) expected a crash
+line over 2 MB. Slice 1's reviewed design caps every string before
+redaction, so both intents are now asserted separately:
+- **The crash line:** one JSON line under 16 KB, `error.message` marked
+  `…[TRUNCATED]`, `[redacted]` present, no form of the password.
+- **The flush:** a new case spawns node with the built `writeAllSync`
+  writing 2 100 001 bytes to fd 2, followed by `process.exit(1)`. Every byte
+  arrives.
+
+The refused-hook case (four sequential CLI spawns) timed out at the 5 s
+default under a loaded host. It now has an explicit 60 s timeout: this is
+start-up work, not a race. It is Slice 0's test, so Slice 0 should take the
+same change when it next merges.
+
+**`cli.worker.test.ts` spawned crash test** (failed at 2160 ms under load):
+the wall-time-versus-baseline check was replaced.
+- The child runs with `node --import tsx`, so fd 3 is inherited.
+- It reports on fd 3 the time from raising the crash to writing the
+  handler's line, which must be under 2 s; in practice it is milliseconds.
+- The line must be under 16 KB. This is a deterministic bound that follows
+  from the cap.
+- Old-algorithm mutation (`redact.ts` from 214b4e4): both cases are killed at
+  20 s (`mut-crash-oldalgo.txt`).
+
+### Challenger REQUEST_CHANGES on fc71471
+
+1. **Medium, flaky ratio test.** Removed. It is replaced by an absolute
+   budget in a child process under a hard kill
+   (`testing/redactBudgetChild.ts`, run from `redactLinear.test.ts`): the
+   uncapped `QUERY_RULE` on 2 MB of `a://` must finish in under 2 s. Fixed
+   code takes 12 ms; under R6 the child is killed at 10 s. No threshold was
+   loosened, and the 16 KB in-process median (< 25 ms) stays.
+2. **Low, slow straddle sweep.** Every form now runs at every offset with
+   the delimiter-free filler, which is the hardest case because the cut must
+   back up past the whole form. All three fillers, with the `redact()` check,
+   run at three critical offsets. That is 476 cases instead of 1212. The
+   timeout is unchanged.
+3. **Low, O(n·m) matching.** `coveredRuns` now uses a native `indexOf` to
+   find the first occurrence (most texts have none), then KMP with a cached
+   failure table, keeping overlapping occurrences: O(n + m) per form. Budget
+   cases run in a child under a hard kill, each under 2 s:
+
+   | Case | KMP | old indexOf loop |
+   |---|---|---|
+   | `scrubLiterals`, 4096-char `a` secret, 2 MB text | 88 ms | 7.7 s |
+   | `jsonLineRedactorFor`, 2250-char secret, 1000 × 4.5 KB strings | 184 ms | 3.85 s |
+
+   I first sized the JSON case at 4096 chars × 4000 strings, but the fixed
+   code took 440 ms there, mostly linear rule passes, which left too little
+   margin under load. 4fb8636 retuned it.
+4. **Low, mutation S3 survived.** Added the case `abcabc` in `abcabcabc`; a
+   non-overlapping scan would leave `abc`.
+
+| Mutation (`mutations22.txt`) | Result |
+|---|---|
+| R6: old quadratic query rule | 3 fail: 2 MB uncapped budget killed at 10 s; 16 KB median 1.78 s; at-cap `a://` median |
+| S3: no self-overlap (`k = 0` after a match) | 3 fail: `abcabc` case × 3 entry points |
+| S4: cap ignores secret forms | sweep fails |
+| K1: `indexOf(p, i + 1)` scan instead of KMP | 2 fail: both self-similar budgets killed |
+
+### Gates at a055ea3
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×10, run alongside test:db on the private cluster (load average 16.6–20.8) | **10/10**, 84 files / 1987 passed each; 0 failures in redactCap, redactLinear and cli.worker |
+| `test:db` ×5, private cluster, PG16 tools as in CI | **5/5**: parallel phase 25 files / 368 passed; serial phase 2 files / 3 passed |
+| two further `test:db` runs (load for the fast runs) | 2/2 |
+| `test:db` without DB URL | exit 1 |
+| `test:db` without S3 endpoint | exit 1; 3 files fail at collection, 349 passed, 0 skipped |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster after the runs | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| change outside the Slice 1 paths vs Slice 0 @ 289db6a | none |
+
+**Manual end-to-end** (built CLI at a055ea3, private cluster, database
+`ratio_s1_e2e_2823a7fe`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 23. Dangerous-login backstop, child spawning, entry write path; main (#44) merged
+
+All DB runs below used the private cluster (127.0.0.1:55600, data under
+`/dev/shm/s1pg`), which was stopped and deleted afterwards.
+
+### Static rule widened (`serialLogins.test.ts`)
+
+The rule covers every non-serial DB test file. Files without
+`createLogin|ROLE|USER|GRANT` text are skipped before parsing, and the test
+has an explicit 30 s timeout.
+
+**(a) `createLogin`.** Only direct calls, with no attributes or a literal
+array of safe ones. An alias import, a member call (`x.createLogin`) or
+passing the function around (`const f = createLogin`) is flagged.
+
+**(b) Role DDL, outside `src/ingest/db/`.** Applied to every call (the string
+pieces of all its arguments, with `+` concatenations and template parts
+joined and every dynamic part kept as a placeholder) and to every standalone
+literal:
+- `CREATE`/`ALTER` `ROLE`/`USER` with a dangerous attribute, or with a dynamic
+  part after the role name (an attribute could hide there);
+- `GRANT` of any role other than `ratio_worker`/`ratio_reader` to a login;
+- `DO` blocks that touch roles or users.
+
+The self-test lists 15 bypass shapes that must be flagged and 9 safe shapes
+that must pass. Red against the old detector (`r11-red-guard.txt`).
+
+### Runtime backstop: the real control
+
+`src/ingest/testing/dangerousLoginBackstop.ts` runs as a setup file of
+`vitest.db.config.ts` only; serial files are exempt by design. After every
+test and after the file, it fails the file if the cluster holds a
+`ratio_test_*` role carrying this process's pid that has SUPERUSER,
+BYPASSRLS, REPLICATION, CREATEROLE or CREATEDB, or that is (transitively) a
+member of a role with one.
+
+**Self-test** (`worker/backstop.serial.db.test.ts`, serial, 8 tests):
+- each of the 5 attributes is reported, then clears after the drop;
+- a plain login granted a SUPERUSER role is reported;
+- another pid's dangerous login is ignored;
+- a clean cluster passes.
+
+**Mutation B1** (`mut-backstop.txt`): an obfuscated BYPASSRLS login is built
+at runtime in `auth.db.test.ts` (`['BYPASS','RLS'].join('')`). The static
+rule cannot see it.
+- With the backstop: the file fails with "dangerous test login(s) committed
+  by a NON-serial DB test file: ratio_test_login_<pid>_b1".
+- Without the setup file: the file passes, 7/7.
+
+| Static-rule mutation (`mutations23.txt`) | Result |
+|---|---|
+| G1: GRANT-to-login rule removed | self-test fails |
+| G2: call pieces not joined (literal-only scan) | self-test fails |
+| G3: USER not covered | self-test fails |
+| G4: createLogin passed around / aliased not flagged | self-test fails |
+
+### Child processes run as `node --import tsx`
+
+`redactLinear.test.ts` now spawns both its child kinds as a single node
+process, like the spawned crash test. The tsx wrapper binary ran the script
+in a grandchild, so the SIGKILL on timeout hit only the wrapper.
+
+Evidence: 9 of this checkout's `redactLinearChild.ts` processes, left over
+from earlier mutation runs, were still running after about 4.2 hours at
+about 21% CPU each. I killed them, and the host load average fell from
+about 17 to about 7. After the change, R6 still fails (2 MB budget killed
+at 10 s) and leaves no new child behind.
+
+One `redactBudgetChild.ts` process from another checkout (`scratchpad/rev9`)
+was also running. It is not mine and I left it alone; whoever owns it
+should kill it.
+
+### The entry's fatal path writes synchronously (W9)
+
+`cli.worker.test.ts` runs the real entry (`cli.ts` as the main module under
+`node --import tsx`), with a preloaded spy (`testing/stderrWriteSpy.ts`)
+that replaces `process.stderr.write` and `process.stdout.write` with a
+synchronously written marker. The entry is then crashed through its
+test-only hook.
+- Required: one redacted JSON line, no async stream write attempted, exit 1.
+- A spy self-test shows that an async write is marked.
+
+Mutation W9 (the entry handler uses `process.stderr.write` instead of
+`writeAllSync(2, …)`) fails both cases (`mut-W9.txt`). Slice 0's
+`cli.process.test.ts` alone does not catch W9: on Linux a pipe write is
+synchronous, so nothing is truncated.
+
+### Merge of origin/main (`68c8456`)
+
+#44 brought Slice 0 into main as a merge commit (54458f5) whose content is
+identical to 289db6a. The merge was clean. `git diff origin/main..HEAD`
+touches only:
+- Slice 1 paths (`src/ingest/**` Slice 1 files, `docs/evidence/slice-1`,
+  `fixtures/focus-1.0-synthetic`, `scripts/generate-focus-fixture.ts`,
+  `.obvious/skills/ingestion-ops`);
+- Slice 1's integration lines in shared files: `ci.yml` (SeaweedFS step and
+  `RATIO_TEST_S3_ENDPOINT`), `package.json` and `package-lock.json` (the
+  three approved dependencies, `worker:build` with build-info,
+  `fixture:generate`), `tailwind.config.js` (excludes `src/ingest`), and the
+  DB vitest configs (S3 globalSetup, backstop setup file);
+- in Slice 0's files: `cli.ts` (worker dispatch and the worker redaction pass
+  in the one crash handler, as reviewed) and `cli.process.test.ts` (the
+  capped-line reconciliation, the writeAllSync flush case and the 60 s
+  timeout).
+
+Nothing under `src/ingest/db/` differs.
+
+### Gates at 68c8456
+
+| Check | Result |
+|---|---|
+| `npm ci` / prod audit | exit 0 / 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×10, alongside test:db (load average 6.7–13.6) | **10/10**, 1990 passed each; 0 failures in redactCap, redactLinear and cli.worker |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 25 files / 368 passed; serial 3 files / 11 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (3 files fail at collection, 349 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at 68c8456, private cluster, database
+`ratio_s1_e2e_0cee60c7`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 24. Slice 0 round 16 (#52) merged; backstop evasion and wiring; spawned-child cleanup
+
+All DB runs used the private cluster (127.0.0.1:55600), which was stopped
+and deleted afterwards.
+
+### Round 16 against Slice 1 (`dabd026`)
+
+Round 16 checks the whole membership closure of ratio-role members for any
+unreviewed privilege category and for a reachable SUPERUSER, BYPASSRLS,
+REPLICATION or server-file role, and its PUBLIC-revoke classifier is
+stricter. The first full run against Slice 1 found **nothing refused**:
+- test:db passed (26 + 4 files);
+- the manual end-to-end passed with its real worker and reader logins:
+  migrate status 3 -> 0 -> 0, doctor exit 0, `migration_version` pass;
+- Slice 1 adds no migration files.
+
+No Slice 0 check was touched.
+
+The one conflict was in `cli.process.test.ts`: Slice 0's `SPAWN_TIMEOUT_MS`
+replaces my explicit 60_000, and my reconciliation (the capped-but-redacted
+line and the writeAllSync > 2 MB flush case) stays, the latter now also with
+`SPAWN_TIMEOUT_MS`. Main still carries Slice 0's original `> 2_000_000`
+assertion, because Slice 1 is not in main yet; this branch's version is the
+reconciled one.
+
+### Backstop evasion (challenger Low 1)
+
+`testing/dangerousLoginBackstop.ts` now reports three things:
+1. **Snapshot diff, regardless of name or pid.** Any role that is dangerous
+   (SUPERUSER, BYPASSRLS, REPLICATION, CREATEROLE, CREATEDB, or one of the
+   server-file roles) or (transitively) a member of one, and was not in the
+   `beforeAll` snapshot.
+2. **This process's `ratio_test_*_<pid>_*` dangerous roles.** This catches one
+   that already existed when the snapshot was taken.
+3. **The ratio roles themselves.** Any attribute (SUPERUSER, BYPASSRLS,
+   REPLICATION, CREATEROLE, CREATEDB, LOGIN) and any membership in another
+   role. 0001 reviews none; checked on a fresh cluster.
+
+**Documented gap:** a role created and dropped within one test is not seen,
+because roles have no event triggers. Mitigations:
+- the static rule flags dangerous DDL and logins in non-serial files;
+- while such a role exists, Slice 0's catalog checks refuse any concurrent
+  file's migration or status, so it shows up as a failing neighbour;
+- tests that need dangerous roles run in the serial phase, alone.
+
+Self-tests (`worker/backstop.serial.db.test.ts`, 17 tests): a dangerous role
+with any name; a plain login in `pg_read_server_files`; each attribute on
+`ratio_worker`; `ratio_reader` granted another role.
+
+### Backstop wiring (challenger Low 2)
+
+- `vitest.db.config.ts` runs the backstop per test and per file.
+- `vitest.db.serial.config.ts` now runs it per file only
+  (`dangerousLoginBackstopSerialSetup.ts`): a serial file must leave nothing
+  behind.
+- `backstopWiring.test.ts` (fast, static) fails if either config stops
+  listing its setup file, or if a setup file does not install the backstop in
+  the right mode.
+
+### Spawned-child cleanup (challenger Low 3)
+
+- `testing/cli.ts` tracks every child spawned through `spawnCli` or
+  `trackChild`.
+- Every importing test file gets an `afterAll` that SIGKILLs whatever is
+  still running and waits for it to exit.
+- demo 5+6 also kills its paused worker in a `finally`.
+- `cli.spawnCleanup.test.ts` runs a fixture (`testing/spawnFixture`) in a
+  nested vitest. The fixture's assertion fails while its child is running;
+  the child's pid must be gone afterwards.
+
+| Mutation (`mutations24.txt`) | Result |
+|---|---|
+| M-snap: snapshot diff removed | 2 fail: any-name role; server-file member |
+| M-ratio: ratio-role check removed from the backstop | 1 fails: `ALTER ROLE ratio_worker LOGIN` (the other attributes are also caught by the snapshot diff) |
+| M-wire: serial config stops listing its setup file | wiring test fails |
+| M-spawn: `afterAll(killTrackedChildren)` removed | spawn-cleanup test fails (child outlived the file) |
+| B2: evasive BYPASSRLS role (no prefix, no pid) created at runtime in `auth.db.test.ts` | file fails: "new dangerous role since the file started: zz_evasive_…" |
+| B3: `ALTER ROLE ratio_reader CREATEDB` at runtime in `auth.db.test.ts` | file fails: the snapshot diff names ratio_reader and the dangerous logins it exposes |
+
+After the mutation runs: 0 `zz_*` or `ratio_test_*` roles left, and
+`ratio_reader` is NOCREATEDB again.
+
+### Gates at e145094
+
+| Check | Result |
+|---|---|
+| `npm ci` / prod audit | exit 0 / 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 8.6–10.9) | **3/3**, 2017 passed each; 0 failures in redactCap, redactLinear and cli.worker |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 26 files / 408 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (3 files fail at collection, 389 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at e145094, private cluster, database
+`ratio_s1_e2e_47662843`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 25. Spawn-fixture orphan; PR #54 Copilot findings (H1, H2, M1-M4)
+
+All DB runs used the private cluster (127.0.0.1:55600), which was stopped
+and deleted afterwards.
+
+### Fixture orphan (challenger)
+
+The orphan (pid 27601, `node -e setInterval(...)`, ppid 1, empty pid
+directory) came from the red run of `cli.spawnCleanup`. `trackChild` did not
+exist yet, so the fixture threw after `spawn()` and before writing the pid.
+
+Fix (`e51ddc9`):
+- The fixture writes the pid immediately after `spawn()`.
+- The fixture's child exits by itself after 120 s.
+- The parent runs the nested vitest detached (its own process group). Then,
+  whatever happened, it SIGKILLs that group and every process whose `/proc`
+  environment carries the run's `RATIO_ORPHAN_MARKER`.
+- New case: only the nested vitest **main** process is SIGKILLed mid-test.
+  No afterAll runs, and its worker and the child are orphaned; nothing with
+  the marker may remain afterwards. A zombie awaiting init counts as dead.
+
+Mutation M-reap (no group or marker reaping): the interrupted case fails,
+and the orphaned worker and child were found running (ppid 1 → worker →
+child). I killed them by hand (`mut-reap.txt`).
+
+### Copilot findings: verification, fix and tests
+
+| Finding | Verified? | Fix | Test (red first) | Mutation(s) killed |
+|---|---|---|---|---|
+| **H1** manifest limit checked after `transformToByteArray()` buffered everything | real | body streamed; read aborted and stream destroyed once more than 16 MiB has arrived; ContentLength only an early hint | `S3FocusExportSource.test.ts`, fake S3 client: no ContentLength, 64 MiB lazily produced body. Must refuse MANIFEST_INVALID after producing at most 16 MiB + 2 chunks, with the stream destroyed; a normal manifest still reads | H1a: buffer then check (64 MiB produced); H1b: trust ContentLength only |
+| **H2** artifact GET ignores the listed ETag | real: a replaced object was captured against the old manifest and controls | `IfMatch = ref.version`. 412 → `SOURCE_CHANGED` (retryable); the per-period retry re-lists that period | fake client: the GET carries IfMatch and a replaced object fails SOURCE_CHANGED. Pipeline (`reviewFindings.db.test.ts`, fake that enforces versions): re-listed, NEW bytes published. **SeaweedFS honours If-Match** (probe: matching → 200, stale → 412 PreconditionFailed). X6 runs the same race through the real store | H2a: no IfMatch (fake and X6 both fail); H2b: no re-list |
+| **M1** `replay --period` with an empty listing succeeds | real | `PERIOD_NOT_FOUND` for every requested period the source does not list | run `failed`, `errorCode` PERIOD_NOT_FOUND, period result and run row | M1 |
+| **M2** a control-only correction leaves the quarantine forever | real: quarantined batches are terminal and immutable, and batches are unique on the data fingerprint | see below; **no schema change** | wrong control → quarantined; same wrong control → BATCH_QUARANTINED with no new batch; corrected control → published (`reconciled`); re-run → unchanged, 2 batches. A data-defect quarantine stays BATCH_QUARANTINED whatever the controls | M2a: no re-reconcile; M2b: control key not recorded (duplicate batch); M2c: data defects also re-reconciled |
+| **M3** `replay --batch` on the current batch does not pin | real | `refreshCheckpoint(..., pinned: true)` before `already_current` | pinned entry, and a later sync is `skipped_pinned` with the published batch unchanged | M3 |
+| **M4** replay ignores `finishRun() == false` | real | `LEASE_LOST`, as in runSync | pool wrapper takes the run over (new lease token) just before replay's finishing UPDATE: LEASE_LOST for both the republish and the already-current outcome | M4 |
+
+All mutation results are in `mutations25.txt`.
+
+**Evidence still binds what was published (H2).** `capture` hashes the bytes
+it actually read and stores them content-addressed. The batch's artifact
+rows and fingerprint come from those hashes. X6 and the fake-source test
+check that the published artifact's sha256, and a re-hash of the evidence
+object, equal the NEW bytes.
+
+### M2 design (no Slice 0 change)
+
+- Batches stay keyed on their data (`artifact_set_fingerprint` = sha256 of
+  the artifact hashes), so unchanged and republish logic is untouched.
+- A quarantine caused by the controls (`RECONCILIATION_VARIANCE`) records the
+  control key it was judged against, first in the reason:
+  `RECONCILIATION_VARIANCE [controls:<16 hex>]: …`. Every other cause is a
+  data defect.
+- When the same data is listed again with a different control key, it is
+  re-reconciled in a new batch keyed on `sha256(data fingerprint, control
+  key)`. The new batch is re-loaded from evidence, reconciled and published,
+  or quarantined again.
+- That key is looked up first, so the same controls again, published or
+  quarantined, never create a third batch.
+- Quarantined batches are never modified, as Slice 0's lifecycle requires,
+  and the uniqueness and immutability rules are unchanged.
+- An older control quarantine recorded without a key may be re-reconciled
+  once. (Superseded by §26: this legacy branch was removed.)
+- The ingestion-ops skill documents the behaviour.
+
+### Gates at 2f47fac (skill update in the docs commit)
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 11.8–14.8) | **3/3**, 2021 passed each; 0 failures in redactCap, redactLinear and cli.worker |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 27 files / 415 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (3 files fail at collection, 395 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+| `ps` after the gates | no fixture child (`setTimeout(() => process.exit(0), 120000)`), no `spawnFixture` vitest, no redaction child, no stray vitest from this checkout |
+
+**Manual end-to-end** (built CLI at 2f47fac, private cluster, database
+`ratio_s1_e2e_979fb62d`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 26. Challenger Low 1 on fffe3f1: no legacy branch for un-keyed control quarantines
+
+Slice 1 never shipped, so every control quarantine records its key and no
+`RECONCILIATION_VARIANCE` quarantine without `[controls:<key>]` can exist.
+The legacy branch, which re-reconciled such a quarantine once, is removed
+(`90101c5`). `controlQuarantineKey` now returns a key only when the reason
+records one; anything else is terminal.
+
+**Test** (`reviewFindings.db.test.ts`, red at `b5299a9`): a control
+quarantine of the same data with an un-keyed reason is planted directly (as
+superuser). A sync with corrected controls must report `BATCH_QUARANTINED`
+naming that batch and create no new batch. Before the fix it re-reconciled
+and published.
+
+**Mutation M2d** (the legacy `''` branch restored) fails the test
+(`mut-M2d.txt`).
+
+Lows 2 and 3 are left for the follow-up issue, as agreed.
+
+**Gates at 90101c5:**
+- lint 0, tsc 0;
+- `npm test` 89 files / 2021 passed;
+- `test:db` ×2 on the private cluster: **2/2**, parallel 27 files / 416
+  passed and serial 4 files / 21 passed;
+- the fail-not-skip checks both exit 1;
+- leftovers 0;
+- `.skip`-style grep 0.
+
+## 27. PR #54 second Copilot review (fffe3f1): H1, M1-M5
+
+All DB runs used the private cluster (127.0.0.1:55600). The work sits on
+top of 04504d5 (challenger Low 1), which goes out in the same push.
+
+| Finding | Verified? | Fix (`d3f6eef`, guard `13bcaea`) | Test (red first unless noted) | Mutation(s) killed |
+|---|---|---|---|---|
+| **H1** `finishRun` not fenced on lease expiry | real: an expired run could still finish itself (failed or succeeded) | `AND lease_expires_at > clock_timestamp()` in `finishRun`. A `false` finish is `LEASE_LOST` in every path: the listing-failure finish, runSync's success finish, its run-level failure finish and replay `--batch`'s failure finish. A finish that cannot reach the DB still surfaces the original error | `reviewFindings2.db.test.ts`: the lease expires during an empty listing and during a failing listing (`e630523`). The lease expires during the listing and the checkpoint read then hits a failed connection (runSync run-level path). Replay `--batch`: the lease expires and a publish step fails (`3a95994`). Each test expects `LEASE_LOST`, the run row still `running`, and the next acquisition marks it `abandoned` / `LEASE_EXPIRED` (runSync cases: the next sync succeeds) | H1a (no expiry fence) fails all 4. H1b, H1c and H1d (each `false` finish ignored) each fail their path's test |
+| **M1** the re-listed manifest is not evidence | real: after `SOURCE_CHANGED` the batch was built from manifest B, but only A was captured | B is captured (`captureManifest`) and added to `manifestEvidence` before the batch is built from it. This also covers a re-listed period that is now invalid | fake versioned source with real manifest bytes: data **and** manifest replaced after the first listing. Expects A and B in `manifestEvidence`, B's evidence bytes carrying the control `{rowCount: 3}`, and published totals of 3 rows / `3.00`. **X6** (SeaweedFS) is extended the same way: manifest B with an `x-ratio-control` replaces A, and the run must reconcile, with B's evidence equal to B's bytes | M1 fails both the fake test and X6 |
+| **M2** guard: IN ROLE / IN GROUP / ROLE / ADMIN targets | real: `CREATE ROLE x LOGIN IN ROLE pg_read_server_files` passed the static rule | `sqlProblems` checks every `IN ROLE`, `IN GROUP`, `ROLE`, `ADMIN` and `USER` list in CREATE/ALTER ROLE/USER. Any name other than `ratio_worker` / `ratio_reader` (quoted or not, including a dynamic name) is flagged | 6 self-test cases (`IN ROLE pg_read_server_files`, `IN GROUP pg_write_server_files`, `IN ROLE ratio_worker, pg_signal_backend`, `ROLE ratio_owner`, `ADMIN postgres`, `CREATE USER … IN ROLE ratio_owner`). The ok cases (`IN ROLE ratio_reader`, `IN DATABASE`) stay clean, and no current DB test file is flagged | M2 (no target check) fails the self-test |
+| **M3** `MAX_RUN_SECONDS` does not bound the listing | real: the deadline aborted only the period work, so an endlessly paginating listing never returned | `FocusSource.listPeriods(range, { signal })`. The pipeline passes the run's abort signal to the listing and the re-list. The S3 source passes it to every request (`send(cmd, { abortSignal })`, which tears down the in-flight request) and checks it between pages and in its catch blocks (the reason, `MAX_RUN_EXCEEDED`, wins). The fake honours it | `reviewFindings2`: an endlessly paginating fake must fail `MAX_RUN_EXCEEDED` in under 10 s, with no pages after the run returns (red). `S3FocusExportSource.test.ts`: every request carries the signal and none is sent after the abort (red). Added after the fix (`b5bba2b`), against a local HTTP endpoint that is always truncated: (a) in-process with a real AWS SDK client, the request in flight at the deadline is never answered and must be **closed by the client**, the run fails `MAX_RUN_EXCEEDED` and nothing is sent afterwards; (b) the **worker CLI as an OS process** with `RATIO_MAX_RUN_SECONDS=60` (its configured floor, not lowered for tests) must fail `MAX_RUN_EXCEEDED` and **exit on its own** (exit 1, between 59 s and 100 s; the test timeout is 120 s), with no requests after the exit; (c) a transport that ignores the signal is still stopped by the check between pages | M3a (pipeline passes no signal) fails the fake test, (a) and (b). M3b (no `abortSignal`) fails the fake-client test and (a), the real SDK. M3c (no between-page check) survived the first tests (an abortable transport ends the loop by itself), so (c) was added and kills it. See `mutations27.txt` and `mutations27b.txt` |
+| **M4** `maxBatchBytes` checked on listed sizes only | real: a source under-reporting sizes could stage more than the cap | each capture is capped at `min(maxArtifactBytes, maxBatchBytes − captured so far)`. Overrunning the remaining allowance is `ARTIFACT_SET_TOO_LARGE`; an artifact over `maxArtifactBytes` on its own stays `ARTIFACT_TOO_LARGE` | listing reports 1 byte per artifact, and the cap is 75 % of A+B (each fits alone). Expects the period `failed` with `ARTIFACT_SET_TOO_LARGE`, no batch and nothing published | M4 (cap = `maxArtifactBytes`) fails |
+| **M5** "unchanged" ignores per-artifact control counts | real: swapping two artifacts' counts kept the set total and returned `unchanged` | `controlDisagrees` also compares every `artifactRowCounts` entry with the stored `ingest_artifacts.row_count` of the existing batch (for both the published and the superseded match) | counts `a:2, b:3` published, then `a:3, b:2` with the same data and total 5. The outcome must not be `unchanged`; expects `failed` with `CONTROL_VARIANCE_ON_UNCHANGED`, the published batch untouched and totals unchanged | M5 (per-artifact counts ignored) fails |
+
+**M5 deviates from the instruction.** The coordinator asked for the changed
+control to "re-reconcile and quarantine". Instead it fails the period with
+`CONTROL_VARIANCE_ON_UNCHANGED` and leaves the published batch untouched,
+exactly as the existing set-level check already treats changed set totals on
+unchanged data. Re-reconciling would mean creating a second batch of the
+same data keyed on the controls and then quarantining it, which is the
+quarantine-recovery mechanism (§25 M2) applied to a published batch. That
+is a behaviour change for the set-level case too. It is available if
+wanted: the alternative is to route a control mismatch on a
+published/superseded match into a control-keyed batch
+(`sha256(data fingerprint, control key)`), which reconcile() would then
+quarantine as `RECONCILIATION_VARIANCE [controls:<key>]`.
+
+**H1 goes beyond the two named paths.** The coordinator asked for LEASE_LOST
+"everywhere". Besides the listing-failure finish, two more failure finishes
+rethrew the original error when the finish matched no row: runSync's
+run-level catch and replay `--batch`'s catch. Both are now LEASE_LOST, with
+their own red tests (`3a95994`). The success finishes of runSync and replay
+were already LEASE_LOST, and with the expiry fence they now also cover
+expiry.
+
+### Gates at b5bba2b
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 4.5–7.0) | **3/3**, 89 files / 2023 passed each |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 29 files / 426 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (4 files fail at collection, 404 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at b5bba2b, private cluster, database
+`ratio_s1_e2e_0397dd8b`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 28. Challenger Lows on f22f1f6 (APPROVED): L1-L4
+
+All of these are prepared locally and not pushed. Red tests are in `2517b86`
+(`worker/reviewLows.db.test.ts`, `serialLogins.test.ts`).
+
+| Low | Fix | Test | Mutation(s) killed (`mutations28.txt`) |
+|---|---|---|---|
+| **L2** (real bug) the M5 per-artifact comparison looked up the raw control key, but `artifact_name` is stored redacted | `stored.get(redact(name))`, the same function `stageBatch` and `setArtifactRowCounts` use (`3a11d23`) | artifact `r/token=x.csv.gz` (stored as `r/token=[redacted]`) with a matching count: re-processing gives `unchanged`. Before the fix it gave CONTROL_VARIANCE_ON_UNCHANGED, which would have fired forever. A different count under that name is still caught | L2 (no redact) |
+| **L3** an unchanged under-reported listing re-downloaded up to the limit on every run | a capture-time ARTIFACT_SET_TOO_LARGE or ARTIFACT_TOO_LARGE is recorded in the period's checkpoint entry as `rejected: {listing fingerprint, code, maxArtifactBytes, maxBatchBytes}`, keeping the rest of the entry. The next run fails fast with the same code if the listing is identical and both limits are no higher. Any publication writes a fresh entry without it. Checkpoint periods are jsonb, so there is **no schema change** (`88e686d`) | both codes: the second sync of the unchanged listing **downloads 0 bytes** and fails the same way. Raised limits download again and publish (80 rows / `80.00`). A changed listing is downloaded again | L3a (not recorded), L3b (not consulted), L3c (limits ignored), L3d (fingerprint ignored) |
+| **L4** guard gaps: `ALTER GROUP <role> ADD USER`, `CREATE GROUP … <attr>` | CREATE GROUP gets the CREATE ROLE checks (attributes, dynamic part, membership clauses). ALTER GROUP g ADD USER is flagged unless g is ratio_worker or ratio_reader. GROUP is added to the prefilter (`a0c5bdd`) | 7 bad cases (literal, dynamic, WITH, IN ROLE) and 3 ok cases (ADD USER to ratio_reader, DROP USER, CREATE GROUP … NOLOGIN); no current file is flagged | L4a (CREATE GROUP unchecked), L4b (ALTER GROUP unchecked) |
+| **L1** work committed before a lease loss was indistinguishable from a real failure | when acquisition abandons an expired run, it counts what that run committed: batches it created that left `staged`, publications it made (a replay's included) and whether it wrote the checkpoint last. If anything, the run becomes `abandoned` / `LEASE_EXPIRED_AFTER_COMMIT` with `error_detail` such as `lease expired after the run committed work (1 batch published/superseded/quarantined, 1 publication, checkpoint written); that work stands; …`. Otherwise it stays `LEASE_EXPIRED`. These are existing text columns, so there is **no schema change** (`8bb1fed`) | P1 published, then the lease expires before P2 publishes: LEASE_LOST, and the next acquisition gives `LEASE_EXPIRED_AFTER_COMMIT` with "1 batch" and "1 publication" in the detail. A run that committed nothing stays `LEASE_EXPIRED`; all earlier LEASE_EXPIRED expectations (crash, publish, demo, lease tests) are unchanged | L1a (always LEASE_EXPIRED), L1b (always "after commit") |
+
+L3 and L1 interact: recording a rejection writes the checkpoint, so a run
+that lost its lease after only recording a rejection counts as having
+committed work ("checkpoint written").
+
+**Gates for the Lows at 8bb1fed:**
+- lint 0, tsc 0;
+- `npm test` ×3 under load: 3/3, 2023 passed each;
+- `test:db` ×3 on the private cluster: **3/3**, parallel 30 files / 432 passed
+  and serial 4 files / 21 passed;
+- the fail-not-skip checks both exit 1;
+- leftovers 0.
+
+## 29. PR #54 third Copilot review (f22f1f6): H1, H2, M1-M5
+
+Red tests are in `43af649`. tsc was red there, because the `opts` parameters
+did not exist yet.
+
+| Finding | Verified? | Fix | Test | Mutation(s) killed (`mutations29.txt`, `mutations29b.txt`) |
+|---|---|---|---|---|
+| **H1** a page with `IsTruncated: true` and no `NextContinuationToken` ended the listing silently, dropping later periods | real | `list()` throws `SOURCE_LISTING_INVALID` (non-retryable). This covers every paginated listing: the metadata folder, each period's metadata folder and data folder. The source's catch blocks pass it through instead of wrapping it as SOURCE_LIST_FAILED. The test helper `listKeys` refuses the same shape (`13cdb09`) | fake client truncating, without a token, the metadata-folder listing and a period's data-folder listing: the listing rejects `SOURCE_LISTING_INVALID`, `retryable: false` | H1a (check removed), H1b and H1c (each catch wraps it) |
+| **H2** `replay --period 9999-12` loops forever, synchronously | real: the child had to be killed after 20 s | `worker/periods.ts`: `periodsBetween` iterates by month ordinal. `assertPeriodRange` requires YYYY-MM-01 within 2000-01..9999-12 and from ≤ to, otherwise INVALID_RANGE. runSync validates before taking a lease, and the CLI refuses periods before 2000-01 when parsing (four-digit years cap at 9999) (`94ea281`) | the **CLI process** `replay --period 9999-12` exits 1 within 20 s with PERIOD_NOT_FOUND (killed by the test on regression). `periodsBetween` runs in a child under a hard kill: 9999-12 alone, 9999-10..9999-12, and across a year end; inverted, 1999-12, `10000-01`, day ≠ 01 and month 13 are INVALID_RANGE. runSync refuses those for backfill and replay_period with no run row; the CLI refuses `1999-12` and `0000-01` (exit 2) | H2a (string-compare loop in the pipeline), H2b (periodsBetween ending on string compare), H2c (no 2000 floor), H2d (runSync unvalidated), H2e (CLI unbounded) |
+| **M1** no ETag in the listing means a GET without If-Match | real | a period with an unversioned artifact is a period failure, `SOURCE_LISTING_INVALID`. `openArtifact` refuses a ref without a version (non-retryable) and always sends If-Match | ETag `''` in the listing gives that period `SOURCE_LISTING_INVALID`; `openArtifact` with `version: ''` rejects with no GET sent | M1a (listing accepts it), M1b (unconditional read) |
+| **M2** names up to 2048 characters accepted; the column allows 1024 | real | `parseManifest` refuses a name whose **stored (redacted) form** is longer than 1024 characters (code points, matching Postgres `length()`) with MANIFEST_INVALID, before anything is downloaded. The limit applies to the redacted form because that is what `artifact_name` stores, and redaction can lengthen a name (`…/token=x` → `…/token=[redacted]`) (`b350bf5`) | 1024 accepted; 1025 refused; 1021 raw characters that redact to 1030 refused | M2a (no bound), M2b (bound on the raw name) |
+| **M3** `openArtifact` ignored the run's signal, so at MAX_RUN_SECONDS a hanging open became SOURCE_STALLED | real: the red run took 18 s and reported a stall | `openArtifact(ref, { signal })`. The S3 GET carries the `abortSignal`, capture passes the run's signal, and `withDeadline` is abort-aware (it rejects with the signal's reason) | fake S3 client: the GET carries the signal, and an aborted open rejects with the reason. Pipeline: an open that never answers fails **MAX_RUN_EXCEEDED** in under 5 s (stall limit 6 s), and the source saw the signal. Added after the fix (`b223564`): a source that **ignores** the signal still fails MAX_RUN_EXCEEDED | M3a (no abortSignal), M3b (capture passes no signal), M3c (deadline not abort-aware; survived until the deaf-transport test) |
+| **M4** a source that never published reports healthy | real | doctor adds `NEVER_PUBLISHED` when an enabled source has 0 published periods (`7db189a`). **No fixture or e2e flow runs doctor before its first publish**: doctor.db D1 and cliWorker K-doctor publish first, and the e2e runs doctor after its sync | a successful empty run gives fail / NEVER_PUBLISHED (`publishedPeriods: 0`); after a publication the source passes | M4 |
+| **M5** `EvidenceStore.open` ignored the signal, so a hanging open became EVIDENCE_STALLED | real: the red run took 6 s and reported a stall | `open(key, { signal })`. The S3 store GET carries the `abortSignal`, the memory store honours it, and load passes the run's signal and uses the abort-aware deadline (`63ce64f`) | fake S3 client (new `S3EvidenceStore.test.ts`); pipeline: a hanging evidence open fails **MAX_RUN_EXCEEDED** in under 5 s. Added after the fix: a store that ignores the signal still fails MAX_RUN_EXCEEDED | M5a (no abortSignal), M5b (load passes no signal), M5c (deadline not abort-aware; survived until the deaf-store test) |
+
+### Signal audit (every S3 send and every await in the run path)
+
+S3 sends in `src/ingest` (non-test):
+
+| Call | Signal |
+|---|---|
+| `S3FocusExportSource.list` (ListObjectsV2, every page) | yes, plus a check between pages |
+| `S3FocusExportSource.getBytes` (manifest GET) | yes |
+| `S3FocusExportSource.openArtifact` (artifact GET, If-Match) | yes (M3) |
+| `S3EvidenceStore.open` (GET) | yes (M5) |
+| `S3EvidenceStore.existingSize` (HeadObject, before every put) | **no**: bounded by the client's request timeout (`RATIO_S3_REQUEST_TIMEOUT_MS`, 60 s) and SDK retries |
+| `S3EvidenceStore.put` (PutObject, artifact evidence: the largest transfer) | **no**: as above, bounded per request by the request timeout |
+| `S3EvidenceStore.putBytes` (PutObject, manifest evidence) | **no**: as above |
+| `replayFixtures` PutObject (operator fixture seeding, not a sync run) | no |
+
+Awaits in the run path without the signal:
+- `captureManifest` → `putBytes`, and `captureArtifact` → `evidence.put`
+  (see above).
+- `withRetry`'s backoff sleep: not abort-aware; it waits at most
+  `RATIO_RETRY_MAX_MS` (default 30 s) before the next attempt sees the
+  abort.
+- Every DB statement (lease, heartbeat, stage, load chunks, reconcile,
+  publish, finish): bounded by the session's `statement_timeout`,
+  `lock_timeout` and `idle_in_transaction_session_timeout`. The fact
+  stream itself stops on abort through the idle watchdog.
+
+(Closed in §30: the evidence uploads carry the signal and the retry
+backoff is abort-aware.)
+
+The other paginated listing in the repository, outside Slice 1, has the same
+truncated-without-token shape: `src/costsource/transports/awsS3Transport.ts`
+(`continuationToken: truncated ? (… ?? '') : ''`). It is not touched, because
+that code is not Slice 1's, and it is reported here instead.
+
+### Gates at b223564
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 4.0–5.5) | **3/3**, 91 files / 2033 passed each |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 31 files / 439 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 410 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at b223564, private cluster, database
+`ratio_s1_e2e_f5f574ef`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0, so NEVER_PUBLISHED did not fire: doctor runs after the
+  first publication.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 30. Closing the audited gaps: redaction collisions, abortable uploads, abortable backoff
+
+| Gap | Fix (`1090505`) | Test (red at `3a20394`) | Mutation(s) killed (`mutations30.txt`, `mutations30b.txt`) |
+|---|---|---|---|
+| **1. Redaction name collision** (real bug): names that redact alike (`token=x`, `token=y` → `token=[redacted]`) collided on the `ingest_artifacts` primary key at staging | `parseManifest` refuses the manifest with MANIFEST_INVALID; the message names no file. The pipeline applies the same guard before the size gate, for every source | `layout.test.ts`: `token=x` and `token=y` in one period are MANIFEST_INVALID, while one of them alone is accepted. Pipeline (fake source): MANIFEST_INVALID with **nothing opened** and nothing staged; before the fix it failed at staging | C1a (parser check), C1b (pipeline guard) |
+| **2. Evidence uploads ignored the signal** | `put` and `putBytes` take `{ signal }`. In S3EvidenceStore, HeadObject (`existingSize`) and PutObject carry the `abortSignal` and reject with the reason; the memory store honours it. capture and captureManifest pass the run's signal and wrap the call in `raceAbort`, so an abort ends the wait even if a store ignores the signal | `S3EvidenceStore.test.ts`: `put` (PutObject hanging, and HeadObject hanging) and `putBytes`: every request carries the signal and the abort rejects with the reason. Pipeline: an artifact upload and a manifest upload that never finish, one store honouring the signal and one ignoring it, each fail **MAX_RUN_EXCEEDED** in under 5 s (deadline 1 s) | E2a (HeadObject), E2b (artifact PutObject), E2c (manifest PutObject), E2d (capture passes no signal), E2e (put not raced), E2f (pipeline passes no signal to the manifest capture), E2g (putBytes not raced) |
+| **3. Retry backoff not abort-aware** | `RetryOptions.signal`. An attempt that fails after the abort is neither retried nor recorded. The default backoff sleep ends at once on abort and clears its timer, so no long timer keeps the process alive; a hook sleep is raced with the signal. The pipeline passes `runAbort.signal` | `retry.test.ts`: an abort during a 60 s backoff rejects with the reason in under 2 s, after 1 attempt. With the signal already aborted when an attempt fails: no retry and **no `onRetry`** (strengthened in `8d46f17` after R3b survived). Pipeline: a transient open failure with a 60 s backoff fails **MAX_RUN_EXCEEDED** in under 5 s, with no second open | R3a (plain sleep; unit and pipeline), R3b (no check before the retry decision; killed once `onRetry` was asserted), R3c (pipeline passes no signal) |
+
+### Signal audit after §30
+
+Every S3 request in the run path carries the run's abort signal:
+
+| Request | Code |
+|---|---|
+| ListObjectsV2, every page, plus a check between pages | `S3FocusExportSource.list` |
+| manifest GET | `getBytes` |
+| artifact GET with If-Match | `openArtifact` |
+| evidence HeadObject | `existingSize` |
+| evidence PutObject (artifact and manifest) | `put` / `putBytes` |
+| evidence GET | `open` |
+
+The only S3 call without the signal is `replayFixtures`' PutObject, which
+seeds operator fixtures and is not a sync run.
+
+Every other await in the run path either carries the signal or is bounded:
+
+| Await | How it is bounded |
+|---|---|
+| opens | `withDeadline` with the signal |
+| uploads | `raceAbort` |
+| artifact and evidence streams | the idle watchdog, which listens to the signal |
+| retry backoff | abortable sleep |
+| DB statements: lease, heartbeat, staging, fact chunks, reconcile, publish, checkpoint, finish | the session's `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout` |
+| temp-file `mkdtemp`, `rm` | local filesystem |
+
+### Gates at 8d46f17
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 4.4–6.6) | **3/3**, 91 files / 2039 passed each |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 31 files / 445 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 410 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at 8d46f17, private cluster, database
+`ratio_s1_e2e_57951b24`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 31. Second-round challenger Lows on cb559df (APPROVED): L1-L3
+
+Red tests are in `ab523ce` (`worker/reviewLows.db.test.ts`, `config.test.ts`).
+
+| Low | Fix | Test | Mutation(s) killed (`mutations31.txt`, `mutations31b.txt`) |
+|---|---|---|---|
+| **L1** `replay --period` obeyed the size-rejection memo, so the operator's re-ingest did not re-download | the memo gate is skipped in `replay_period` mode; sync and backfill still fail fast (`61ba1d5`) | sync is rejected (memo recorded). `replay --period` then **downloads again** and fails the same way, which re-records the memo. The next sync downloads 0 bytes | L1 (replay honours the memo) |
+| **L2** NEVER_PUBLISHED fired for a brand-new source | first-publication grace measured from `sources.created_at`: `RATIO_DOCTOR_FIRST_PUBLISH_GRACE_HOURS`, default **48 h** (AWS's first export can take up to 24 h), accepted range 0 to 24×366, where 0 disables the grace. Doctor has **no warning level**, so inside the window the finding is skipped: the check passes with `data.firstPublicationGrace: true`. Documented in the ingestion-ops skill (`bc9c6d5`) | 47 h under the default passes (grace true); 49 h fails NEVER_PUBLISHED (grace false). A 2 h-old source fails with a 1 h window and passes with 3 h; with 0 a fresh source fails. Config: default 48, 0 and 72 accepted; -1, 1.5 and 24×366+1 refused. The third-review M4 test now ages its source past the window | L2a (no window), L2b (window never ends), L2c (configured value ignored), L2d (default 0), L2e (upper bound widened; killed once 24×366+1 was added in `ecc3f82`). Lowering the minimum cannot be observed, because the parser refuses a sign before it checks the range |
+| **L3** an abandoned run whose only checkpoint write was a rejection memo counted as "after commit" | progress writes (publish, refresh, pin) are stamped with `writtenBy`, and a memo records its own `runId` without restamping the entry. A run with no batch, no publication and only memo writes is abandoned as `LEASE_EXPIRED` with "lease expired without committing data; checkpoint written (rejection memo only)". When data and memos are both present it is `LEASE_EXPIRED_AFTER_COMMIT`, with "checkpoint written and N rejection memo(s)". An older, unstamped write still counts as data. No schema change (jsonb) (`cd2defe`) | memo for P, lease lost before P2 publishes: LEASE_EXPIRED with the memo-only detail. Memo plus publication: AFTER_COMMIT with "1 publication". Memo plus an unchanged refresh with no publication: AFTER_COMMIT with "0 publications" and "checkpoint written and 1 rejection memo" (`ecc3f82`) | L3a (memo stamped like progress), L3b (old rule), L3c (memo detail dropped), L3d (any memo means memo-only; killed by the refresh-plus-memo test) |
+
+**Gates for the Lows:** fast suite 13/13 config tests; the DB files
+`reviewLows`, `reviewFindings3`, `doctor`, `lease`, `replay` and `cliWorker`
+pass. The full gates for this round are listed below §32.
+
+## 32. PR #54 fourth Copilot review (cb559df): M1-M3
+
+Red tests are in `0d5c14d`.
+
+| Finding | Verified? | Fix | Test | Mutation(s) killed (`mutations32.txt`) |
+|---|---|---|---|---|
+| **M1** an existing evidence object was accepted on byte length alone | real: a same-size forged object was accepted as `exists` for an artifact and for a manifest | before returning `exists`, `S3EvidenceStore.put` and `putBytes` **stream and hash** the stored object. The ETag is not used, because it is not a content hash for multipart uploads. A mismatch is `EVIDENCE_INTEGRITY_MISMATCH` (non-retryable) and **nothing is overwritten**. The memory store follows the same contract, and the verification GET carries the run's signal (`7e8b9e1`). Cost: re-capturing an artifact that is already in evidence reads it back once | fake S3 client: same bytes give `exists`; forged bytes give the error with no PutObject sent, for both `put` and `putBytes`. Memory-store pipeline: the period fails and the forged object stays. **X7** (SeaweedFS): a pre-seeded artifact and a pre-seeded manifest each fail `EVIDENCE_INTEGRITY_MISMATCH`, the object is unchanged and nothing is staged. **X4** (load-time `EVIDENCE_INTEGRITY`) now tampers with the object *after* a genuine put, so the load re-hash stays covered | M1a and M1b (put / putBytes on size alone; unit and X7), M1c (memory store) |
+| **M2** the manifest GET was unconditional | real: a manifest replaced between the metadata listing and its GET was read against the older data listing | the metadata listing's ETag is kept and sent as **If-Match**. A manifest without a listed ETag is `SOURCE_LISTING_INVALID` for that period, consistent with unversioned artifacts. A 412 is `SOURCE_CHANGED` (retryable) and is no longer re-wrapped, so the pipeline retries the listing (`8638601`) | fake client: the GET carries `If-Match: "m1"`; a manifest replaced just before its GET gives `SOURCE_CHANGED`, retryable; a manifest with no ETag gives a SOURCE_LISTING_INVALID period with no GET sent. **X6b** (SeaweedFS): the manifest is replaced just before its GET, the first GET (with If-Match) gets **412**, the retry gets 200, and the run publishes reconciled against the new manifest, whose bytes are the only manifest evidence | M2a (no If-Match; unit and X6b), M2b (412 not mapped), M2c (re-wrapped as SOURCE_READ_FAILED), M2d (unversioned manifest read anyway) |
+| **M3** the fake looked artifacts up by name across all periods | real (test-only code): the same name in two periods read the first period's bytes | a fake ref's key is `<period>/<name>`. `openArtifact` resolves it by that key and refuses a stale version with `SOURCE_CHANGED`, retryable, mirroring If-Match (`368ce14`) | the same `r/a.csv.gz` in 2026-07 and 2026-08 with different bytes publishes each period's own totals (2 / `2.00`, 3 / `6.00`). A ref made stale after `setPeriods` gives SOURCE_CHANGED | M3a (name-only lookup), M3b (version ignored) |
+
+### Gates at 368ce14
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 5.8–9.6) | **3/3**, 91 files / 2044 passed each |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 31 files / 457 passed; serial 4 files / 21 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 417 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at 368ce14, private cluster, database
+`ratio_s1_e2e_cdc8f681`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6. Its idempotent re-run exercises the new
+  evidence `exists` verification.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 33. CI-red spawnCleanup; challenger round 3 Lows; fifth and sixth Copilot reviews (with the Copilot agent's H1)
+
+### CI red on #54 at 9b32cfb (run 37157034669): root cause and fix
+
+`cli.spawnCleanup.test.ts:134` failed: `alive(pid)` was still true right
+after the interrupted nested run had been reaped.
+
+**Root cause:** SIGKILL is asynchronous. `reap()` sent the kills and
+returned at once, so the check could run before the kernel had scheduled
+the target's exit.
+
+**Reproduced:** with `repro_kill_race.js`, the orphaned grandchild still
+showed `R` immediately after a group SIGKILL in 197 of 200 checks on an
+idle machine, and in 99 of 200 under 8 CPU burners. The new self-test,
+"dead as soon as reap() returns", failed 2 of 20 rounds under 12 burners.
+
+**Other candidates, ruled out:**
+- zombies already counted as dead;
+- the group kill reaches the worker and its child (they share the detached
+  group);
+- the marker scan finds the child.
+
+**Fix (`5659b5a`):**
+- `reap()` is async. It kills the group and every marker-carrying process,
+  adds group members found through `/proc` pgrp, then re-kills and polls
+  until all are dead (gone, `Z` or `X`) or 5 s pass.
+- `runFixture` awaits it and both tests require `leftAfterReap` to be empty.
+
+Mutation: with `reap()` returning without confirming, the self-test fails
+under load.
+
+**Proof:** spawnCleanup ×20 under parallel load (6 burners plus test:db ×5)
+passed 20/20, three separate times: load 8.9–9.6 at 2e4a58a, 664b209 and
+1c6f244.
+
+### Challenger round 3 Lows (tests in `reviewLows.db.test.ts` "round 3", `S3EvidenceStore.test.ts`, X8)
+
+| Low | Fix | Test | Mutations killed |
+|---|---|---|---|
+| L1 verify without watchdog or progress | `verifyExisting` streams through `idleWatchdog(stallMs, EVIDENCE_STALLED)`, whose data callback feeds run progress. `put`/`putBytes` take `{signal, onProgress, stallMs}`, and capture and both manifest captures pass them | a slow verify (16 B every 250 ms, longer than stall 1 s plus TTL 2 s) keeps the lease and publishes; it was LEASE_LOST before. A stalled verify fails EVIDENCE_STALLED in under 6 s; it hung to MAX_RUN before | L1a (no progress; killed after `2e4a58a` removed a duplicate feed), L1b (no watchdog), L1c (capture passes nothing) |
+| L2 HEAD-metadata fast path | `ratio-sha256` is stored on every upload. **Artifacts only:** HEAD with matching size AND matching ratio-sha256 gives `exists` without a read; anything else gets the full re-hash. **Safe because** every artifact a new batch references is re-hashed at load, and `loadArtifact` now also re-hashes **unsupported formats** (a forged parquet would otherwise slip into a quarantined batch). Unchanged and superseded outcomes make no new claim. **Manifests never take the fast path**, because manifest evidence is not re-read at load | unit: metadata written; fast path with HEAD only; missing or different metadata does the full re-hash; putBytes always re-hashes. **X8** (SeaweedFS), forged bytes carrying a *copied* ratio-sha256: a csv artifact fails EVIDENCE_INTEGRITY at load, a parquet artifact fails EVIDENCE_INTEGRITY at load, and a manifest fails EVIDENCE_INTEGRITY_MISMATCH at capture; nothing is published | L2a–L2e |
+| note: legacy clause | `committedWorkOf`'s "an unstamped write counts as data" branch is removed (every write is stamped) | the existing L3 tests | — |
+
+**Found in this round's gates** (`d467e1b`, `664b209`):
+- `npm test` exited 1 with all tests passing, because of an **unhandled
+  ENOENT**. `put()` handed `fs.createReadStream` to PutObject. A PutObject
+  that never read the body (failed, aborted, or a fake) let the stream open
+  after capture had deleted the temp file.
+- In production a fast-failing PutObject would crash the worker the same
+  way.
+- `put()` now owns the stream: it has an error listener and is destroyed in
+  `finally`.
+- The test requires the body to be destroyed for a failing PutObject and
+  for one that never reads; the mutation is killed.
+
+### Fifth Copilot review: H1 by the Copilot coding agent, M1–M3 by me
+
+The owner decided that Copilot's coding agent fixes H1. Its commit
+**`6412756`** (copilot-swe-agent[bot]) is merged **unchanged** (`286dfd7`).
+My own H1 (`1af19e8`) was reverted first (`812b956`) and kept for
+comparison in the scratchpad (`my-h1-1af19e8.diff`).
+
+**Verification of the agent's H1:**
+- Its 9 serial tests fail on the pre-`6412756` `db.ts` (H1-agent: 9
+  failed).
+- The edge tests from `5dd24f1` (SET-only, ADMIN-only, transitive; each
+  attribute; pg_read_server_files over each edge; the harmless role still
+  passes) all pass against it.
+- Mutations: m1 (REPLICATION not collected): 6 failed. m2 (no closure walk):
+  20 failed. m3 (inherit edges only): 9 failed. m4 (a server-file role not
+  collected): 4 failed. m5 (capabilities not reported): 25 failed.
+- The tests are in the serial file, create committed logins and roles, drop
+  them, and verify they are gone in `afterAll`.
+- `src/ingest/db` is unchanged.
+
+**H1 is still incomplete: BLOCKED.** (Unblocked and completed in §34.) The agent's check hard-codes the 5
+attributes plus the 3 server-file roles. Slice 0's full
+`REFUSED_PREDEFINED_ROLES` (pg_read/write_all_data, pg_signal_backend,
+pg_create_subscription, the pg_monitor family, pg_stat_scan_tables) exists
+only on `origin/main` (Slice 0 rounds 17–19, #53/#55/#56). This branch does
+not have it, and Slice 0 rounds may not be merged unasked. Completing H1
+(reuse that map; tests for each role over each edge) needs `origin/main`
+merged into this branch.
+
+| Finding | Fix (`61d96b1`) | Test (red at `5dd24f1`) | Mutation |
+|---|---|---|---|
+| M1 years 1–99 (`Date.UTC` maps them to 1900–1999) | `utcMs` builds instants with `setUTCFullYear`, for epochMs and daysInMonth | 0001-01-01 = −62135596800000; 0099-12-31T23:00Z comes 1 h before 0100-01-01; a charge period across the boundary is not inverted while a really inverted one still is | Date.UTC restored: 3 failed |
+| M2 `__proto__` column dropped | `extraColumns` is `Object.create(null)` | `__proto__`, `constructor` and `prototype` columns are kept in the JSON; Object.prototype is untouched | plain `{}`: failed |
+| M3 SimulatedCrash recorded as failed | replay rethrows SimulatedCrash before `finishRun` | the replay run stays `running` and is later abandoned `LEASE_EXPIRED` | rethrow removed: failed |
+
+### Sixth Copilot review (re-review after 6412756)
+
+| Finding | Fix (`70c6af5`) | Test (red at `b9f9505`) | Mutations |
+|---|---|---|---|
+| **High** HEAD then unconditional PUT races (S3EvidenceStore.ts:86/105) | every evidence PUT sends `IfNoneMatch: '*'`. On 412/409 the winner is verified with the full re-hash: `exists`, or EVIDENCE_INTEGRITY_MISMATCH. Nothing is overwritten. **SeaweedFS honours If-None-Match: \* on PUT**: the probe's second create got 412 PreconditionFailed and the content stayed the first write's | fake client: every PUT is conditional; a competitor between HEAD and PUT gives `exists` (genuine) or MISMATCH (different), for put and putBytes. **X9** on SeaweedFS: a real 412, then the same outcomes, with the winner's bytes unchanged | C1a/C1b (unconditional PUT; unit and X9), C1c (412 not handled), C1d (lost race accepted without verifying; unit and X9) |
+| **Medium** chunks bounded by rows only (load.ts:215) | `maxChunkBytes` (estimated from record characters). `RATIO_MAX_CHUNK_BYTES` defaults to 32 MiB and is validated to 1 MiB–1 GiB. A chunk flushes at rows OR bytes | 20 × ~100 KB records with a 250 KB budget split exactly `[3,3,3,3,3,3,2]` and all load (memory bounded to the budget plus one record). Small records stay `[10,10,5]`. Config: default, override and three refusals | B1a (no budget), B1b (counter not reset; killed after `1c6f244` pinned the exact split), B1c (default 0), B1d (bounds widened) |
+| **Medium** attempt counter reset per withRetry (pipeline.ts:155) | one run-wide counter: every retry increments it, and the record and the result use it | 2 listing retries plus 1 artifact retry give `attempts` 4, retries `[2,3,4]` and `sync_runs.attempt` 4 | R1 (per-call counter) |
+
+Mutation logs: `mutations36.txt` (CI, Lows, M1–M3 and S1) and
+`mutations38.txt` (agent H1 and the sixth review).
+
+### Gates at 1c6f244
+
+| Check | Result |
+|---|---|
+| prod audit | 0 vulnerabilities |
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 4.5–7.0) | **3/3**, 92 files / 2062 passed each, 0 unhandled errors |
+| spawnCleanup ×20 under parallel load | **20/20** (load 9.1) |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 32 files / 465 passed; serial 4 files / 47 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 423 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at 1c6f244, private cluster, database
+`ratio_s1_e2e_93e36f4b`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 34. origin/main merged (Slice 0 rounds 17-19); H1 completed on Slice 0's REFUSED_PREDEFINED_ROLES
+
+**Merge (`dfeff7a`):**
+- `origin/main` 2066adc (#53, #55, #56) is merged, with no conflicts and no
+  rebase.
+- `git diff origin/main HEAD -- src/ingest/db` is **empty**: Slice 0 is
+  byte-for-byte origin/main's.
+- History is kept as it was, and the Copilot agent's 6412756 is untouched.
+- The local refs `wip/copilot-r5-paused` and `backup/slice01-before-r5-split`
+  were deleted after the merge was verified.
+
+**H1 completion:**
+- **Test** (`6c35fbc`, serial file, logins and helper roles dropped and
+  verified gone):
+  - for each of the 11 roles in Slice 0's `REFUSED_PREDEFINED_ROLES`
+    (server-file roles, pg_read_all_data, pg_write_all_data,
+    pg_signal_backend, pg_create_subscription, pg_monitor, pg_read_all_stats,
+    pg_read_all_settings, pg_stat_scan_tables), a ratio_worker login that
+    reaches it over an **INHERIT**, **SET-only**, **ADMIN-only** or
+    **transitive** (login → plain role → predefined role) edge must be
+    refused, `UNSAFE_DB_ROLE`, naming the role;
+  - the expected roles are written out in the test, and a drift test pins
+    them to `Object.keys(REFUSED_PREDEFINED_ROLES)`;
+  - red against 6412756: 32 failed (8 roles × 4 edges).
+- **Fix** (`db62ab8`):
+  - the worker's capability scan matches `rolname = ANY($1)` with
+    `Object.keys(REFUSED_PREDEFINED_ROLES)`, imported read-only from Slice 0;
+  - it covers the same full closure (every `pg_auth_members` edge) and keeps
+    the 5 attributes;
+  - the duplicated server-file list in `worker/db.ts` is removed.
+
+| Mutation (`mutations39.txt`, `mutations39b.txt`) | Result |
+|---|---|
+| P1 worker drops one role from Slice 0's list (pg_signal_backend) | 4 failed (that role over each edge) |
+| P2 one role removed from Slice 0's list itself (temporary, pg_monitor) | 5 failed (drift test + 4 edges) |
+| P3 predefined roles never matched (`$1` still bound) | 50 failed |
+| P4 inherit edges only | 42 failed |
+| P5 direct grants only (no transitive walk) | 12 failed |
+
+A first version of P3 dropped the `$1` reference altogether, so every query
+failed on an unbound parameter. That killed it for the wrong reason, and it
+was rewritten in the valid form above.
+
+### Gates at db62ab8
+
+| Check | Result |
+|---|---|
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 7.1–10.4) | **3/3**, 92 files / 2110 passed each, 0 unhandled errors |
+| spawnCleanup ×20 under parallel load | **20/20** (load 9.9) |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 32 files / 563 passed; serial 4 files / 92 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 521 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at db62ab8, private cluster, database
+`ratio_s1_e2e_8f0d2c44`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+
+## 35. Challenger round 4 L1; PR #54 seventh Copilot review (0c0aa7d), M1-M5
+
+**Challenger L1 (`1294c94`):** unit tests for a PutObject that throws
+`{ $metadata: { httpStatusCode: 409 } }`. The error has no name, so the
+status alone must route it. Covered for put and putBytes:
+- the genuine bytes in place: verified (GET), then `exists`;
+- different bytes in place: EVIDENCE_INTEGRITY_MISMATCH.
+
+Mutations: **Q3** (409 not treated as a lost race) fails 4 tests; Q3b (a
+lost race accepted without verifying) fails 2 (`mutations40.txt`).
+Challenger L2 (periodic evidence audit) and L3 (a non-deterministic reap
+race) go to the follow-up issue.
+
+| Finding | Verified? | Fix (`1107d58`) | Test (red at `1609ca1`) | Mutations killed (`mutations41.txt`) |
+|---|---|---|---|---|
+| **M1** timestamp.ts:48: `+14:59` accepted | real | hour 14 only as ±14:00 | +14:00, -14:00, +1400, +13:59, -12:45 accepted; +14:01, +14:59, -14:30, +1430 refused | M1 (`+14:mm` accepted) |
+| **M2** S3EvidenceStore.ts:133: a new-object upload ignored onProgress | real: an upload slower than stall + TTL lost the lease | the body is `file.pipe(meter)`. The meter is the idle watchdog's stream (EVIDENCE_STALLED) or a counting Transform, and each chunk the SDK pulls calls onProgress, with backpressure preserved. ContentLength and IfNoneMatch are unchanged, and both streams are destroyed in `finally` | unit: progress while the body is read, every byte arrives, ContentLength/IfNoneMatch intact; a stopped consumer gives EVIDENCE_STALLED. Pipeline (stall 1 s, TTL 2 s): an upload of about 600 KB at one 64 KiB chunk per 400 ms keeps the lease and publishes; a stalled upload fails EVIDENCE_STALLED in under 6 s (it hung to MAX_RUN before) | M2a (no progress; unit and pipeline), M2b (no watchdog), M2c (stall reported as EVIDENCE_STORE_FAILED; killed after `2325a7f` made the fakes reject with an SDK-like AbortError, as the real SDK does), M2d (raw file stream sent) |
+| **M3** dangerousLoginBackstop.ts:35: only the 3 server-file roles | real | the predicate binds `BACKSTOP_REFUSED_PREDEFINED = Object.keys(REFUSED_PREDEFINED_ROLES)` (Slice 0, read-only) as `$1` | serial self-test: a drift test against Slice 0's list and an explicit list. For each of the 11 roles, a login of this process that is a member is reported by the pid check and the snapshot diff, and dropping it clears the report | M3a (one role dropped: 2 failed), M3b (back to the server-file roles: 9 failed) |
+| **M4** doctor.ts:129: replay --batch refreshed freshness | real: after a rollback, a stale source looked fresh | both freshness subqueries exclude `run_kind = 'replay' AND stats ? 'replayBatch'`; replay --period still counts | stale source, then replay --batch: still STALE; then replay --period: passes | M4a (replay --batch counted), M4b (every replay excluded) |
+| **M5** pipeline.ts:165: an active listing never fed progress | real: a 4 s listing (stall 1 s, TTL 2 s) ended LEASE_LOST | `ListOptions.progress`. The S3 source calls it after every completed page and every manifest read, and the pipeline passes the run's progress to the listing and the re-list | unit: the exact sequence list/progress ×3, then get/progress. Pipeline: a 10 × 400 ms listing that reports each page publishes; an idle one still ends LEASE_LOST | M5a (pipeline passes none), M5b (no per-page progress), M5c (none after the manifest read) |
+
+### Gates at 2325a7f
+
+| Check | Result |
+|---|---|
+| lint / `tsc --noEmit` | exit 0 / exit 0 |
+| `npm test` ×3, alongside test:db (load average 3.1–6.7) | **3/3**, 92 files / 2119 passed each, 0 unhandled errors |
+| spawnCleanup ×20 under parallel load | **20/20** (load 10.1) |
+| `test:db` ×5, private cluster, PG16 tools | **5/5**: parallel 33 files / 568 passed; serial 4 files / 104 passed |
+| `test:db` without DB URL / without S3 endpoint | exit 1 / exit 1 (5 files fail at collection, 526 passed, 0 skipped) |
+| `.skip/.only/.todo/it.fails/skipIf/runIf` grep | 0 |
+| leftovers on the private cluster | 0 test databases, 0 test or probe roles, `pg_db_role_setting` 0; 0 objects in `ratio-s1-test` |
+| `worker:build` / `next build` | exit 0 / exit 0 (generated files restored) |
+| ingestion code in `.next` | 0 matches |
+
+**Manual end-to-end** (built CLI at 2325a7f, private cluster, database
+`ratio_s1_e2e_da56917a`):
+- migrate status went 3 -> 0 -> 0.
+- sync published and reconciled; the second sync reported `skipped_unchanged`.
+- Reader totals equal the control totals (55 / `30.8272954899`,
+  40 / `21.0978157665`).
+- 3 of 3 evidence objects re-hashed OK.
+- doctor exited 0.
+- replay-fixtures passed 6/6.
+- Cleanup deleted 48 objects and dropped the database and logins.
+

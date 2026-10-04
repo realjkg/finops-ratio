@@ -73,6 +73,20 @@ jobs:
           npm run test      & PID_TEST=$!
           wait $PID_LINT && wait $PID_TYPE && wait $PID_TEST
 
+      # S3-compatible store for the ingestion worker's S3 tests (Slice 1).
+      # Started as a step because service containers cannot take a command.
+      # Image pinned by digest; throwaway, job-scoped, any key pair accepted.
+      - name: Start SeaweedFS (S3-compatible, job-scoped)
+        run: |
+          docker run -d --name ratio-s3 -p 8333:8333 \
+            chrislusf/seaweedfs@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d \
+            server -s3 -dir=/data
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null http://localhost:8333/ && exit 0
+            sleep 2
+          done
+          docker logs ratio-s3; exit 1
+
       # PostgreSQL 16 client tools for the pg_dump -> restore round-trip test
       # (foundation.db.test.ts). Pinned by path; installed if the runner image
       # lacks them. The test itself fails (never skips) if they are missing or
@@ -86,10 +100,13 @@ jobs:
           /usr/lib/postgresql/16/bin/psql --version
 
       # DB integration suite. `npm run test:db` FAILS (never skips) if the
-      # URL is missing, so this step cannot go green without running.
-      - name: DB tests (Postgres 16)
+      # URL is missing, so this step cannot go green without running. The S3
+      # tests likewise fail (never skip) without RATIO_TEST_S3_ENDPOINT, and the
+      # pg_dump round-trip fails (never skips) without PG16 RATIO_PG_DUMP/RATIO_PSQL.
+      - name: DB tests (Postgres 16 + S3)
         env:
           RATIO_TEST_DATABASE_URL: postgres://postgres@localhost:5432/postgres
+          RATIO_TEST_S3_ENDPOINT: http://localhost:8333
           RATIO_PG_DUMP: /usr/lib/postgresql/16/bin/pg_dump
           RATIO_PSQL: /usr/lib/postgresql/16/bin/psql
         run: npm run test:db

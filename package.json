@@ -11,15 +11,18 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:db": "vitest run --config vitest.db.config.ts && vitest run --config vitest.db.serial.config.ts",
-    "worker:build": "node -e \"require('fs').rmSync('dist-worker',{recursive:true,force:true})\" && tsc -p tsconfig.worker.json && node -e \"require('fs').cpSync('src/ingest/db/migrations','dist-worker/ingest/db/migrations',{recursive:true})\"",
+    "worker:build": "node -e \"require('fs').rmSync('dist-worker',{recursive:true,force:true})\" && tsc -p tsconfig.worker.json && node -e \"require('fs').cpSync('src/ingest/db/migrations','dist-worker/ingest/db/migrations',{recursive:true})\" && node -e \"let sha=null;try{sha=require('child_process').execFileSync('git',['rev-parse','HEAD'],{stdio:['ignore','pipe','ignore']}).toString().trim()}catch(e){}require('fs').writeFileSync('dist-worker/ingest/build-info.json',JSON.stringify({gitSha:sha,builtAt:new Date().toISOString()})+'\\\\n')\"",
     "worker": "node dist-worker/ingest/cli.js",
-    "db:migrate": "npm run -s worker:build && node dist-worker/ingest/cli.js migrate"
+    "db:migrate": "npm run -s worker:build && node dist-worker/ingest/cli.js migrate",
+    "fixture:generate": "tsx scripts/generate-focus-fixture.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
+    "@aws-sdk/client-s3": "^3.1146.0",
     "@fontsource/instrument-sans": "^5.0.3",
     "@fontsource/jetbrains-mono": "^5.0.20",
     "@react-pdf/renderer": "^4.5.1",
+    "csv-parse": "^7.0.3",
     "exceljs": "^4.4.0",
     "framer-motion": "^11.18.2",
     "lottie-react": "^2.4.1",
@@ -45,6 +48,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "postcss": "^8.5.23",
     "tailwindcss": "^3.4.15",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.62.1",
     "vitest": "^5.0.1"

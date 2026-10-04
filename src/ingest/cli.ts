@@ -1,4 +1,6 @@
-// Ratio ingestion worker CLI. Slice 0 provides only the `migrate` command.
+// Ratio ingestion worker CLI. `migrate` (Slice 0) plus the worker commands
+// (Slice 1, implemented in workerCli.ts): sync, backfill, replay,
+// quarantine show, doctor, replay-fixtures.
 //
 //   migrate                     apply pending migrations (expand only)
 //   migrate --allow-contract    also apply pending contract migrations
@@ -14,6 +16,8 @@ import fs from 'fs';
 import { Client } from 'pg';
 import { MigrationError } from './db/migrationFiles';
 import { assertDownAllowed, migrateDown, migrateUp, migrationStatus } from './db/migrate';
+import { isWorkerCommand, recordMigrateEvidence, workerMain } from './workerCli';
+import { jsonLineRedactorFor } from './redact';
 
 export interface CliIO {
   out(line: string): void;
@@ -188,7 +192,20 @@ export function installProcessHandlers(
   io: Pick<CliIO, 'err'>,
   exit: (code: number) => void,
 ): void {
-  const line = jsonLineRedactor(env.RATIO_MIGRATE_DATABASE_URL);
+  // Slice 0's migrate-URL redaction first (it owns the S11 fixed fallback for a
+  // throwing toJSON), then the worker's redaction of every other configured
+  // secret (worker DB URL, S3 keys) on the already-safe plain JSON.
+  const migrateLine = jsonLineRedactor(env.RATIO_MIGRATE_DATABASE_URL);
+  const workerLine = jsonLineRedactorFor(env);
+  const line = (value: unknown): string => {
+    const out = workerLine(JSON.parse(migrateLine(value)));
+    try {
+      JSON.parse(out);
+      return out;
+    } catch {
+      return REDACTED_LINE;
+    }
+  };
   for (const event of ['uncaughtException', 'unhandledRejection']) {
     proc.on(event, (reason: unknown) => {
       let text = REDACTED_LINE;
@@ -204,6 +221,16 @@ export function installProcessHandlers(
 }
 
 export async function main(argv: string[], env: Env, io: CliIO): Promise<number> {
+  if (isWorkerCommand(argv[0])) return workerMain(argv, env, io);
+  const started = new Date();
+  const code = await migrateMain(argv, env, io);
+  // Evidence record for migrate goes only to RATIO_EVIDENCE_FILE, so the Slice 0
+  // stdout/stderr contract of `migrate` stays unchanged.
+  if (argv[0] === 'migrate') recordMigrateEvidence(argv.slice(1), env, started, code);
+  return code;
+}
+
+async function migrateMain(argv: string[], env: Env, io: CliIO): Promise<number> {
   const line = jsonLineRedactor(env.RATIO_MIGRATE_DATABASE_URL);
   const emit = (level: 'info' | 'error', event: string, fields: Record<string, unknown> = {}) => {
     const text = line({ ts: new Date().toISOString(), level, event, ...fields });
