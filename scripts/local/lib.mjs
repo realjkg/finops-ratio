@@ -5,7 +5,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { setTimeout } from 'node:timers';
+import { spawn } from 'node:child_process';
+import { clearTimeout, setTimeout } from 'node:timers';
 
 /**
  * Gitignored. Holds one directory PER COMPOSE PROJECT (`.ratio-local/<project>/env`),
@@ -277,6 +278,100 @@ export async function waitForOwnServer({
     if (now() > deadline) throw new Error('timed out waiting for next start');
     await sleep(intervalMs);
   }
+}
+
+// --- child processes: every wait is bounded ------------------------------------
+
+/**
+ * A child has exited when it has an exit code OR was ended by a signal.
+ * (A signalled child has exitCode === null: checking exitCode alone would
+ * wait for an 'exit' event that has already fired, forever.)
+ */
+export function childExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+/** Resolves true once the child has exited (immediately if it already has), false after timeoutMs. */
+function waitForExit(child, timeoutMs) {
+  if (childExited(child)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      child.removeListener('exit', onExit);
+      resolve(childExited(child));
+    }, timeoutMs);
+    child.once('exit', onExit);
+  });
+}
+
+/**
+ * Stops a child, never hanging: 'already-exited' (nothing sent), 'stopped'
+ * (exited within graceMs of SIGTERM), 'killed' (needed SIGKILL), or
+ * 'unresponsive' (still there killMs after SIGKILL: given up on, so the
+ * caller's cleanup can go on).
+ */
+export async function stopChild(child, { graceMs = 10_000, killMs = 5_000 } = {}) {
+  if (childExited(child)) return 'already-exited';
+  child.kill('SIGTERM');
+  if (await waitForExit(child, graceMs)) return 'stopped';
+  child.kill('SIGKILL');
+  if (await waitForExit(child, killMs)) return 'killed';
+  return 'unresponsive';
+}
+
+/**
+ * local:test's cleanup: stop the app (bounded; errors recorded, not thrown),
+ * then ALWAYS run `down` exactly once. Returns what happened, never throws.
+ */
+export async function cleanupLocalTest({ app, down, stopOptions }) {
+  let appResult = null;
+  if (app) {
+    try {
+      appResult = await stopChild(app, stopOptions);
+    } catch (e) {
+      appResult = `error: ${e?.message ?? e}`;
+    }
+  }
+  let downResult;
+  try {
+    await down();
+    downResult = 'ok';
+  } catch (e) {
+    downResult = `error: ${e?.message ?? e}`;
+  }
+  return { app: appResult, down: downResult };
+}
+
+/**
+ * Runs a command. With timeoutMs, a command still running after the deadline
+ * is SIGKILLed and the promise rejects ("timed out"), so no caller can hang.
+ */
+export function runProcess(cmd, args, { cwd, env, capture = false, allowFail = false, timeoutMs, spawnFn = spawn } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawnFn(cmd, args, { cwd, env, stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'] });
+    let out = '';
+    let timedOut = false;
+    if (capture) child.stdout.on('data', (d) => (out += d));
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGKILL');
+        }, timeoutMs)
+      : null;
+    child.on('error', (e) => {
+      if (timer) clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', (code) => {
+      if (timer) clearTimeout(timer);
+      if (timedOut) reject(new Error(`${cmd} ${args[0] ?? ''} timed out after ${timeoutMs} ms (killed)`));
+      else if (code !== 0 && !allowFail) reject(new Error(`${cmd} ${args[0] ?? ''} exited ${code}`));
+      else resolve({ code, out });
+    });
+  });
 }
 
 export function connectionUrl({ user, password, port: p, database }) {

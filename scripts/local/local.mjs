@@ -29,6 +29,7 @@ const { fetch } = globalThis;
 import {
   LOCAL_NAMES,
   apiEnv,
+  cleanupLocalTest,
   compareControlTotals,
   connectionUrl,
   generateLocalSecrets,
@@ -39,6 +40,7 @@ import {
   parseEnvFile,
   preflightProblems,
   removeProjectState,
+  runProcess,
   startIfPortFree,
   waitForOwnServer,
   workerEnv,
@@ -71,21 +73,11 @@ function loadSecrets(settings, { create }) {
 
 // --- processes ---------------------------------------------------------------
 
-function run(cmd, args, { env = {}, capture = false, allowFail = false } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
-      cwd: ROOT,
-      env: { ...process.env, ...env },
-      stdio: ['ignore', capture ? 'pipe' : 'inherit', 'inherit'],
-    });
-    let out = '';
-    if (capture) child.stdout.on('data', (d) => (out += d));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code !== 0 && !allowFail) reject(new Error(`${cmd} ${args[0] ?? ''} exited ${code}`));
-      else resolve({ code, out });
-    });
-  });
+/** `docker compose down` during local:test's cleanup may not hang forever. */
+const DOWN_TIMEOUT_MS = 300_000;
+
+function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs } = {}) {
+  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs });
 }
 
 function composeEnv(settings, secrets) {
@@ -254,11 +246,11 @@ async function sync(settings) {
   return JSON.parse(r.out.trim().split('\n').pop());
 }
 
-async function down(settings, { volumes }) {
+async function down(settings, { volumes, timeoutMs }) {
   // Compose interpolates the whole file even for `down`: give it the real or a placeholder password.
   const file = envFileOf(settings);
   const secrets = fs.existsSync(file) ? parseEnvFile(fs.readFileSync(file, 'utf8')) : { RATIO_LOCAL_PG_SUPERUSER_PASSWORD: 'unused-for-down' };
-  await compose(settings, secrets, ['--profile', 'app', '--profile', 'worker', 'down', '--remove-orphans', ...(volumes ? ['-v'] : [])]);
+  await compose(settings, secrets, ['--profile', 'app', '--profile', 'worker', 'down', '--remove-orphans', ...(volumes ? ['-v'] : [])], { timeoutMs });
   if (volumes) removeProjectState(ROOT, settings.project);
   log(volumes ? 'down: containers, network, volumes and local secrets removed' : 'down: containers and network removed (volumes kept)', { project: settings.project });
 }
@@ -346,16 +338,15 @@ async function localTest() {
     summary.pass = false;
     summary.error = e.message;
   } finally {
-    if (app) {
-      app.kill('SIGTERM');
-      await new Promise((r) => (app.exitCode !== null ? r() : app.once('exit', r)));
-    }
-    try {
-      await down(settings, { volumes: true });
-      summary.steps.down = 'ok (-v)';
-    } catch (e) {
+    // Bounded: an app already ended by a signal is recognised at once, a stuck
+    // one is SIGKILLed then given up on, and `down -v` always runs (itself
+    // bounded by DOWN_TIMEOUT_MS).
+    const cleanup = await cleanupLocalTest({ app, down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }) });
+    summary.steps.appStop = cleanup.app;
+    if (cleanup.down === 'ok') summary.steps.down = 'ok (-v)';
+    else {
       summary.pass = false;
-      summary.downError = e.message;
+      summary.downError = cleanup.down;
     }
   }
   process.stdout.write(`${JSON.stringify({ type: 'ratio.local-test', ...summary })}\n`);

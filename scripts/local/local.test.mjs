@@ -35,6 +35,7 @@ import net from 'node:net';
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import process from 'node:process';
+import { setTimeout } from 'node:timers';
 import { bootstrapPlan } from './bootstrap.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -569,7 +570,13 @@ describe('L16 stopping next start and cleaning up never hang', () => {
 
   it('runProcess has a bounded timeout: a hanging command is killed and rejected', async () => {
     const t0 = Date.now();
-    await expect(runProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeoutMs: 300 })).rejects.toThrow(/timed out/);
+    // The child is registered so the afterAll kills it even if the timeout is broken.
+    const tracked = (...a) => {
+      const c = spawn(...a);
+      spawned.push(c);
+      return c;
+    };
+    await expect(runProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeoutMs: 300, spawnFn: tracked })).rejects.toThrow(/timed out/);
     expect(Date.now() - t0).toBeLessThan(5_000);
     await expect(runProcess(process.execPath, ['-e', 'process.stdout.write("ok")'], { capture: true, timeoutMs: 10_000 })).resolves.toEqual({ code: 0, out: 'ok' });
     await expect(runProcess(process.execPath, ['-e', 'process.exit(3)'], { timeoutMs: 10_000 })).rejects.toThrow(/exited 3/);
