@@ -520,3 +520,30 @@ and SeaweedFS `i62-s3` on 127.0.0.1:55931; `/tmp/aidg_pg` not touched):**
 | `npm test` | 110 files / **2600 passed** |
 | `replayFixturesQuarantine.db.test.ts` + `cliWorker.db.test.ts`, run concurrently (vitest file parallelism) against one cluster, ×3 | **9 passed** each time (2 files), exit 0 ×3 |
 | `npm run test:db` ×1 | parallel 36 files / **627 passed**; serial 6 files / **173 passed**; exit 0 |
+
+## 12. PR #67 Copilot review: opt-in checked before RATIO_ENV validation
+
+Copilot (review 5407161031, thread r4178443590) found that the order was wrong.
+`loadWorkerConfig` validated `RATIO_ENV` membership before calling
+`syntheticProvidersOptIn`. So with `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` and an
+unknown or differently-cased `RATIO_ENV` (`prod`, `TEST`, `Production`), it
+failed with `CONFIG_INVALID` instead of the documented
+`SYNTHETIC_PROVIDERS_NOT_ALLOWED`. The direct helper tests did not cover the
+`loadWorkerConfig` path. The opt-in was still refused (it failed closed); only
+the reported code was wrong.
+
+| SHA | Commit | Kind |
+|---|---|---|
+| fd487d8 | `syntheticProviders.test.ts`: the opt-in with 9 unknown or wrongly-cased values through `loadWorkerConfig` must give `SYNTHETIC_PROVIDERS_NOT_ALLOWED`; without the opt-in, or with `'0'`, the error stays `CONFIG_INVALID` | **red** (`red/red-copilot-optin-order.txt`: 1 failed / 10, received `CONFIG_INVALID`) |
+| (this fix, after fd487d8) | `config.ts`: `syntheticProvidersOptIn(env)` moves above the `RATIO_ENVS` check | green |
+
+The red run doubles as the mutation check: restoring the old order fails the
+new test.
+
+**Gates after the fix:**
+- the targeted files: 14 passed;
+- `npm run lint` and `tsc --noEmit`: exit 0;
+- `npm test`: 110 files / **2601 passed**.
+
+No DB test depends on the old order. The only `CONFIG_INVALID` assertion on an
+unknown `RATIO_ENV` (`config.test.ts:49`) passes no opt-in.

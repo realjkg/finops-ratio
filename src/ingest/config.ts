@@ -183,11 +183,12 @@ export function syntheticProvidersOptIn(env: Env): boolean {
 }
 
 export function loadWorkerConfig(env: Env): WorkerConfig {
+  // Checked first, before RATIO_ENV is validated, so a refused opt-in is reported as
+  // SYNTHETIC_PROVIDERS_NOT_ALLOWED even for an unknown RATIO_ENV (issue #62, challenger L3; PR #67 review).
+  const allowSyntheticProviders = syntheticProvidersOptIn(env);
   const rawEnv = (env.RATIO_ENV ?? '').trim();
   const ratioEnv = (rawEnv === '' ? 'development' : rawEnv) as RatioEnv;
   if (!RATIO_ENVS.includes(ratioEnv)) fail(`RATIO_ENV must be one of ${RATIO_ENVS.join(', ')}`);
-  // Checked first, so a refused opt-in is reported as such (issue #62, challenger L3).
-  const allowSyntheticProviders = syntheticProvidersOptIn(env);
 
   // Test-only switches need NODE_ENV=test AND must never activate in a staging/production deployment.
   const isTestProcess = testSwitchesPermitted(env);
