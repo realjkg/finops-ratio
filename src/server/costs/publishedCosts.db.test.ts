@@ -13,6 +13,7 @@
 import crypto from 'crypto';
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import type { NextApiHandler } from 'next';
+import { Pool } from 'pg';
 import { createTestDatabase, type TestDatabase } from '../../ingest/db/testing/harness';
 import { seedTwoTenants, type Seeded } from '../../ingest/db/testing/fixtures';
 import { createLogin, seedTenantSource, publishedTotals, type Login } from '../../ingest/testing/db';
@@ -416,6 +417,16 @@ describe('D8 page 1 data and totals come from ONE snapshot (REPEATABLE READ READ
       expect(after.totals).toEqual([{ billingPeriod: '2026-03-01', billingCurrency: 'USD', rowCount: 7, billedCost: '14.00' }]);
     } finally {
       await pool.end();
+    }
+  });
+
+  it('fails closed on a pool that does not start transactions at REPEATABLE READ (no silent READ COMMITTED read)', async () => {
+    const plain = new Pool({ connectionString: reader.url, max: 1 });
+    plain.on('error', () => undefined);
+    try {
+      await expect(readPublishedCosts(plain, seeded.a.tenantId, { from: null, to: null, limit: 10, cursor: null })).rejects.toThrow(/REPEATABLE READ READ ONLY/);
+    } finally {
+      await plain.end();
     }
   });
 
