@@ -238,6 +238,13 @@ describe('A3 staging the committed 1k file as an AWS Data Exports layout', () =>
     expect(validate(stageFocusSample(UPSTREAM_1K, { mutation: 'skip-period-split' }), '2024-09')).toEqual(['PERIOD_MISMATCH']);
   });
 
+  it('only the UNQUOTED token is a null: a quoted "NULL" string and a quoted "" are kept byte for byte', () => {
+    const header = '"BillingPeriodStart","BilledCost","Note","Other"\n';
+    const plan = planStaging(Buffer.from(`${header}"2024-09-01 00:00:00",1,"NULL",NULL\n"2024-09-01 00:00:00",2,"",nULL\n`));
+    expect(plan.periods[0].files[0].records).toEqual(['"2024-09-01 00:00:00",1,"NULL",', '"2024-09-01 00:00:00",2,"",nULL']);
+    expect(plan.nullTokens).toEqual({ Other: 1 });
+  });
+
   it('fails closed on a ragged record, a missing column or a period that is not a first-of-month midnight', () => {
     const header = '"BillingPeriodStart","BillingPeriodEnd","BilledCost","EffectiveCost","Id"\n';
     const ok = '"2024-09-01 00:00:00","2024-10-01 00:00:00",1,1,"a"\n';
