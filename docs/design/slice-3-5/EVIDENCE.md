@@ -119,7 +119,7 @@ Appendix B (B.4, B.5.6).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-at `faeabb4` (revision 4):
+at `fc7ee66` (revision 5; the same reasons as at `faeabb4`, revision 4):
 
 - `"risk": "restricted"`, classes `retention` and `secrets`;
 - `secrets.password-assignment` on `APPENDIX_B_SIZING.md` (the
