@@ -19,6 +19,14 @@
 //      in `public` need it; Slice 0's REVIEWED_OWNER_PRIVILEGES allow it).
 // Nothing is GRANTed to any login on the database or on any object: an
 // explicit grant to a ratio-role member would exceed Slice 0's reviewed set.
+// The only GRANTs are the three membership re-grants (login -> its ratio role).
+// FAIL CLOSED on every other membership (Copilot 4176878790): any edge with a
+// managed role (the 3 ratio roles, the 3 logins) on EITHER side that is not
+// one of those three - an unexpected member of a ratio role, anything granted
+// TO a login, a login or ratio role in any other role (predefined pg_* roles
+// named as such), an expected edge from another grantor - fails
+// verification. The bootstrap never REVOKEs: a cluster may share roles with
+// something else, so removing an edge is left to a person.
 // Verification: verifyBootstrap() below, then `local:migrate` runs
 // `migrate --status --json`, whose catalog check (Slice 0's privilege model)
 // must report no privilege problem for these exact logins.
@@ -98,10 +106,34 @@ export function bootstrapPlan(names) {
 export const EXPECTED_MEMBERSHIP_OPTIONS = Object.freeze({ admin_option: false, inherit_option: true, set_option: true });
 
 /**
- * Problems with the membership rows of the ratio roles and the logins: exactly
- * one grant per expected login → ratio-role edge, each with exactly
- * EXPECTED_MEMBERSHIP_OPTIONS (a missing option, e.g. NULL, fails closed), and
- * no other edge.
+ * Why membership in a predefined role is refused: a mirror of Slice 0's
+ * REFUSED_PREDEFINED_ROLES (src/ingest/db/privilegeModel.ts, which this plain
+ * node script cannot import). L25 checks every Slice 0 entry against this
+ * mirror, so a drift fails. Any other pg_* role is refused too.
+ */
+const PREDEFINED_ROLE_REASONS = Object.freeze({
+  pg_read_server_files: 'reads server files',
+  pg_write_server_files: 'writes server files',
+  pg_execute_server_program: 'runs programs on the server',
+  pg_read_all_data: 'SELECT on every table, view and sequence',
+  pg_write_all_data: 'INSERT, UPDATE and DELETE on every table',
+  pg_signal_backend: 'cancels or terminates other sessions',
+  pg_create_subscription: 'creates logical-replication subscriptions',
+  pg_monitor: "reads every session's statements and every setting",
+  pg_read_all_stats: "reads every session's statement text (pg_stat_activity.query)",
+  pg_read_all_settings: 'reads every setting, including superuser-only ones',
+  pg_stat_scan_tables: 'runs monitoring functions that take ACCESS SHARE locks on any table',
+});
+
+const predefinedNote = (role) =>
+  typeof role === 'string' && role.startsWith('pg_') ? ` (predefined role${PREDEFINED_ROLE_REASONS[role] ? `: ${PREDEFINED_ROLE_REASONS[role]}` : ''})` : '';
+
+/**
+ * Problems with EVERY membership row that has a managed role (a ratio role or
+ * a login) on either side: exactly one grant per expected login → ratio-role
+ * edge, granted by the bootstrap superuser, with exactly
+ * EXPECTED_MEMBERSHIP_OPTIONS (a missing option or grantor, e.g. NULL, fails
+ * closed), and no other edge at all.
  */
 export function membershipProblems(rows, names) {
   const problems = [];
@@ -110,10 +142,12 @@ export function membershipProblems(rows, names) {
   for (const r of rows) {
     const key = `${r.member}->${r.parent}`;
     if (!expected.has(key)) {
-      problems.push(`membership ${key} is not expected`);
+      problems.push(`membership ${key} is not expected${predefinedNote(r.parent)}`);
       continue;
     }
     seen.set(key, (seen.get(key) ?? 0) + 1);
+    // PG16 records any superuser's grant as made by the bootstrap superuser; another grantor means ADMIN delegation.
+    if (r.grantor_is_bootstrap_superuser !== true) problems.push(`membership ${key}: granted by ${r.grantor ?? 'unknown'}, expected the bootstrap superuser`);
     for (const [option, want] of Object.entries(EXPECTED_MEMBERSHIP_OPTIONS)) {
       if (r[option] !== want) problems.push(`membership ${key}: ${option} is ${JSON.stringify(r[option] ?? null)}, expected ${want}`);
     }
@@ -171,7 +205,12 @@ export async function runBootstrap(client, names, passwords) {
     await client.query(f.rows[0].sql);
   }
   const problems = await verifyBootstrap(client, names);
-  if (problems.length) throw new Error(`bootstrap verification failed:\n  ${problems.join('\n  ')}`);
+  if (problems.length) {
+    throw new Error(
+      `bootstrap verification failed:\n  ${problems.join('\n  ')}\n` +
+        'The bootstrap fails closed and revokes nothing: review and remove any unexpected membership yourself, or start a fresh local project (local:down -v).',
+    );
+  }
 }
 
 /** The bootstrap's own invariants (Slice 0's catalog check is the authoritative one, run by local:migrate). */
@@ -207,12 +246,16 @@ export async function verifyBootstrap(client, names) {
     [loginMemberships(names).map(([l]) => l)],
   );
   problems.push(...loginAttributeProblems(logins.rows, settings.rows, names));
-  // PG16: one row per grant, with its ADMIN / INHERIT / SET options (Copilot 4176494789).
+  // PG16: one row per grant, with its grantor and ADMIN / INHERIT / SET options
+  // (Copilot 4176494789), for EVERY edge with a managed role on either side
+  // (Copilot 4176878790: a member-only query missed `GRANT ratio_reader TO x`).
+  // Grantor oid 10 is the bootstrap superuser (BOOTSTRAP_SUPERUSERID).
   const edges = await client.query(
-    `SELECT m.rolname AS member, g.rolname AS parent, a.admin_option, a.inherit_option, a.set_option
+    `SELECT m.rolname AS member, g.rolname AS parent, pg_catalog.pg_get_userbyid(a.grantor) AS grantor,
+            (a.grantor = 10) AS grantor_is_bootstrap_superuser, a.admin_option, a.inherit_option, a.set_option
        FROM pg_catalog.pg_auth_members a
        JOIN pg_catalog.pg_roles m ON m.oid = a.member JOIN pg_catalog.pg_roles g ON g.oid = a.roleid
-      WHERE m.rolname = ANY ($1::text[]) ORDER BY 1, 2`,
+      WHERE m.rolname = ANY ($1::text[]) OR g.rolname = ANY ($1::text[]) ORDER BY 1, 2`,
     [[...RATIO_ROLES, ...loginMemberships(names).map(([l]) => l)]],
   );
   problems.push(...membershipProblems(edges.rows, names));
