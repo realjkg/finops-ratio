@@ -310,9 +310,10 @@ only one starter of a kind can be inside the allocation at a time.
       m = 1 s, a largest budget of 4 s and a heartbeat every 1.7 s. At
       the top, TTL 3600 s gives m = 360 s, a largest budget of 3240 s and
       a heartbeat every 1200 s.
-    - The rule needs TTL > m + the longest budget. Since m ≥ 1 s, a TTL
-      below 2 s leaves no useful budget, so **the design requires TTL
-      ≥ 5 s**, the range's own minimum. The heartbeat interval does not
+    - The configuration already enforces **TTL ≥ 5 s**
+      (`src/ingest/config.ts:231`: `int(env, 'RATIO_LEASE_TTL_SECONDS',
+      …, 5, 3600)`), so at the smallest allowed TTL the largest budget is
+      4 s (rev. 33, the challenger's nit). The heartbeat interval does not
       enter the rule, because the check below guarantees the margin
       whenever a heartbeat is held up.
   - **The rule (rev. 32: renewal outside the work transaction; Copilot
@@ -334,14 +335,31 @@ only one starter of a kind can be inside the allocation at a time.
     2. **Begin the work transaction and lock the lease row**, `FOR SHARE`
        or `FOR UPDATE`, with the final check under that lock: the lease
        is live, and `lease_expires_at ≥ clock_timestamp() + b + m`.
-    3. **If the remaining-time check fails** while the lease is still
-       live, the transaction rolls back before doing anything, renews
-       (step 1), and retries step 2 **once**. A second failure is
-       `LEASE_LOST`. One failure can be a benign race: the lock wait in
-       step 2 can be held up behind a writer's `FOR UPDATE` transaction,
-       or a background heartbeat. Two in a row mean the run cannot keep
-       its lease, and it fails safe. If the lease is not live, the result
-       is `LEASE_LOST` at once.
+    3. **If the lease is not live** (expired or taken over),
+       the result is `LEASE_LOST` at once. That is fencing, and the run
+       stops.
+    4. **If only the remaining-time check fails**, the lease is live but
+       too short after the lock wait. The transaction rolls back before
+       doing anything, renews (step 1) and retries step 2 once. If that
+       retry also falls short, the result is **`LEASE_RETRY`** (rev. 33,
+       the challenger's L1 on 66205dd), a distinct retryable code, not
+       `LEASE_LOST`.
+       - The job retries a `LEASE_RETRY` transaction with jittered
+         backoff, from 100 ms doubling to 5 s, for as long as the lease
+         is live. Every retry renews first.
+       - The run's existing `maxRunSeconds` (`config.ts:233`, 6 h by
+         default) bounds the retries, as it bounds any run on `main`.
+       - **Why this option:** revision 32 mapped the second failure to
+         `LEASE_LOST`. A healthy run could then be fenced purely because
+         its lock waits were held up behind back-to-back writers of its
+         own (step 2's `FOR SHARE` queues behind each `FOR UPDATE`).
+       - Retrying "until a deadline" inside `assertLease` would hide that
+         wait from the job. "At most one writing transaction at a time"
+         would not prevent it: one writer after another can still delay
+         a reader past its margin.
+       - A distinct code keeps `LEASE_LOST` for a lease that really is
+         not live, and leaves the scheduling to the job, which can
+         back off.
 
     After step 2, the lease outlives the transaction's planned end by at
     least m. A heartbeat blocked behind the transaction runs at the
@@ -352,7 +370,8 @@ only one starter of a kind can be inside the allocation at a time.
     before expiry. At the defaults, **every transaction budget must be
     ≤ TTL − m = 270 s**. A transaction that overruns its budget by more
     than m can lose the lease. That fails safe: the run gets `LEASE_LOST`
-    and is retried, and nothing is half-written.
+    and is retried, and nothing is half-written. Contention alone, with
+    the lease live, never gives `LEASE_LOST` (step 4).
 - **`batch_seq`** is allocated only by the lease holder, inside its
   transaction, as **`coalesce(max(batch_seq), 0) + 1`** over the tenant's
   `rollup_batches`. It starts at 1 on an empty tenant (rev. 15; a bare
