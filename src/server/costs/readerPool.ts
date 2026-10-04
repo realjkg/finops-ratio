@@ -11,6 +11,11 @@ import { Pool } from 'pg';
 export const READER_SESSION_OPTIONS = [
   '-c search_path=pg_catalog,pg_temp',
   '-c default_transaction_read_only=on',
+  // Every transaction starts at REPEATABLE READ: page 1's rows and its totals
+  // come from ONE snapshot. A session default (not SET TRANSACTION) because
+  // Slice 0's withTenantTransaction runs set_config — a query, which fixes the
+  // isolation level — before the callback. The libpq escape keeps the space.
+  '-c default_transaction_isolation=repeatable\\ read',
   '-c statement_timeout=10000',
   '-c lock_timeout=5000',
   '-c idle_in_transaction_session_timeout=30000',

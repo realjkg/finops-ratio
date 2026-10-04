@@ -17,7 +17,8 @@ import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import type { Pool } from 'pg';
 import { publishedCostsConfig } from './config';
 import { sendError, withGateway, type GatewayLogEntry } from '@/server/gateway';
-import { logInternalError } from '@/server/gateway/internalError';
+import { randomUUID } from 'crypto';
+import { pathOnly } from '@/server/gateway/internalError';
 import { evaluateLiveDataAuth, THROTTLED_MESSAGE, WEAK_TOKEN_MESSAGE, type LiveAuthResult } from '@/server/gateway/liveDataAuth';
 import type { SlidingWindowRateLimiter } from '@/server/gateway/rateLimit';
 import { parsePublishedCostsQuery } from './query';
@@ -84,9 +85,24 @@ export function createPublishedCostsRoute(deps: PublishedCostsRouteDeps = {}): N
       res.status(200).json(page);
     } catch (err) {
       if (err instanceof UnsafeReaderLoginError) {
-        // The reasons (role names, attributes) go only to the operator log, redacted.
-        logInternalError(err, { method: req.method, path: req.url });
-        sendError(res, 503, 'unsafe_db_login', ROUTE_MESSAGES.unsafeLogin);
+        // A distinct, expected refusal (not an unhandled 500): one structured
+        // event with fixed reason CODES (the problem texts can name roles and
+        // are never logged or returned) and a correlation id the caller gets
+        // too, as on every other error path.
+        const requestId = randomUUID();
+        console.error(
+          JSON.stringify({
+            tag: 'published-costs',
+            event: 'unsafe_db_login',
+            requestId,
+            method: req.method ?? 'UNKNOWN',
+            path: pathOnly(req.url),
+            status: 503,
+            reasons: err.reasons,
+          }),
+        );
+        res.setHeader('X-Request-Id', requestId);
+        res.status(503).json({ error: { code: 'unsafe_db_login', message: ROUTE_MESSAGES.unsafeLogin, requestId } });
         return;
       }
       throw err; // the gateway answers a generic 500 with a requestId

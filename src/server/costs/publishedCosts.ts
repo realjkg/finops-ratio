@@ -108,9 +108,28 @@ const TOTALS_SQL = `
    GROUP BY v.billing_period, v.billing_currency
    ORDER BY v.billing_period, v.billing_currency`;
 
-export async function readPublishedCosts(pool: Pick<Pool, 'connect'>, tenantId: string, q: PublishedCostsQuery): Promise<PublishedCostsPage> {
+/** Test-only injection point (a publish between the page and the totals queries). */
+export interface ReadHooks {
+  afterPage?: () => Promise<void>;
+}
+
+export async function readPublishedCosts(
+  pool: Pick<Pool, 'connect'>,
+  tenantId: string,
+  q: PublishedCostsQuery,
+  hooks: ReadHooks = {},
+): Promise<PublishedCostsPage> {
   return withTenantTransaction(pool, tenantId, async (client) => {
     await client.query('SET TRANSACTION READ ONLY');
+    // Page and totals must share one snapshot. The reader pool starts every
+    // transaction at REPEATABLE READ (readerPool.ts); fail closed on any pool
+    // that does not, rather than return totals that can disagree with the page.
+    const tx = await client.query<{ iso: string; ro: string }>(
+      `SELECT pg_catalog.current_setting('transaction_isolation') AS iso, pg_catalog.current_setting('transaction_read_only') AS ro`,
+    );
+    if (tx.rows[0].iso !== 'repeatable read' || tx.rows[0].ro !== 'on') {
+      throw new Error(`published-costs read requires a REPEATABLE READ READ ONLY transaction (got ${tx.rows[0].iso}, read_only ${tx.rows[0].ro})`);
+    }
     await assertSafeReaderLogin(client);
 
     const c = q.cursor;
@@ -130,6 +149,8 @@ export async function readPublishedCosts(pool: Pick<Pool, 'connect'>, tenantId: 
       more && last
         ? encodeCursor({ billingPeriod: last.billingPeriod, sourceId: last.sourceId, artifactSha256: last.artifactSha256, rowOrdinal: last.rowOrdinal })
         : null;
+
+    if (hooks.afterPage) await hooks.afterPage();
 
     let totals: PublishedCostsTotal[] | null = null;
     if (!c) {
