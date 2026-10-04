@@ -1593,4 +1593,23 @@ describe('L24 bootstrap login attributes are normalised and verified in full (Co
     expect(src).toMatch(/pg_catalog\.pg_db_role_setting/);
     expect(src).toMatch(/problems\.push\(\.\.\.loginAttributeProblems\(/);
   });
+
+  it('the real-PG16 bootstrap test (D13, outside src/) runs in the serial DB phase only: not in the parallel phase, not in npm test', async () => {
+    const D13 = 'scripts/local/localBootstrap.serial.db.test.ts';
+    expect(fs.existsSync(path.join(ROOT, D13))).toBe(true);
+    const load = async (file) => {
+      const prev = process.env.RATIO_TEST_DATABASE_URL;
+      process.env.RATIO_TEST_DATABASE_URL = prev || 'postgres://config-load-only@127.0.0.1:1/x';
+      try {
+        return (await import(path.join(ROOT, file))).default.test;
+      } finally {
+        if (prev === undefined) delete process.env.RATIO_TEST_DATABASE_URL;
+        else process.env.RATIO_TEST_DATABASE_URL = prev;
+      }
+    };
+    const runs = (cfg) => (cfg.include ?? ['**/*.{test,spec}.?(c|m)[jt]s?(x)']).some((g) => path.matchesGlob(D13, g)) && !(cfg.exclude ?? []).some((g) => path.matchesGlob(D13, g));
+    expect(runs(await load('vitest.db.serial.config.ts'))).toBe(true);
+    expect(runs(await load('vitest.db.config.ts'))).toBe(false);
+    expect(runs(await load('vitest.config.ts'))).toBe(false);
+  });
 });

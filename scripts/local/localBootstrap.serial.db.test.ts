@@ -7,8 +7,8 @@
 import crypto from 'crypto';
 import { Client } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { requireTestDatabaseUrl } from '../ingest/db/testing/requireTestDatabaseUrl';
-import { runBootstrap, verifyBootstrap } from '../../scripts/local/bootstrap.mjs';
+import { requireTestDatabaseUrl } from '../../src/ingest/db/testing/requireTestDatabaseUrl';
+import { runBootstrap, verifyBootstrap } from './bootstrap.mjs';
 
 const sfx = crypto.randomBytes(4).toString('hex');
 const names = {

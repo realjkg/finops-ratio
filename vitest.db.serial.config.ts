@@ -12,7 +12,9 @@ requireTestDatabaseUrl(process.env);
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.serial.db.test.ts'],
+    // Slice 2: the local bootstrap's serial test lives next to scripts/local/bootstrap.mjs
+    // (outside src/, whose import boundary forbids pg in non-island files).
+    include: ['src/**/*.serial.db.test.ts', 'scripts/local/*.serial.db.test.ts'],
     // Serial files may need S3 too: same per-run prefix setup as the parallel phase.
     globalSetup: ['src/ingest/testing/s3GlobalSetup.ts'],
     // Backstop after each serial file: nothing dangerous may be left behind.
