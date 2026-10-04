@@ -1,0 +1,164 @@
+
+ RUN  v5.0.1 <repo>
+
+ ❯ src/server/costs/config.test.ts (0 test)
+ ❯ src/ingest/lazyFoundation.test.ts (9 tests | 7 failed) 389ms
+   ❯ lazy foundation manifest: no I/O on import (2)
+     × importing privilegeModel and foundationManifest reads nothing from the migrations directory 346ms
+     × importing (and Slice 1’s worker/db.ts) succeeds with the migrations directory unavailable 16ms
+   ❯ lazy foundation manifest: computed on first use, memoised, identical values (3)
+     × FOUNDATION_0001 equals the stored 0001 manifest; loaded once 5ms
+     × the lazy values behave like the read-only arrays they replace 6ms
+   ❯ lazy foundation manifest: still fails closed at first use, with the eager error (4)
+     × missing-dir: FOUNDATION_0001 and REVIEWED_POLICY_SHAPES throw on first use (ENOENT) 5ms
+     × missing-0001: FOUNDATION_0001 and REVIEWED_POLICY_SHAPES throw on first use (plain Error) 1ms
+     × corrupt: FOUNDATION_0001 and REVIEWED_POLICY_SHAPES throw on first use (BAD_MANIFEST) 2ms
+ ❯ src/ingest/importBoundary.test.ts (6 tests | 1 failed) 209ms
+   ❯ src/ingest import boundary (6)
+     × instrumentation.ts (Next startup hook) reaches only the pure costs config and Slice 0’s isTenantId: no runtime pg 8ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/config.test.ts [ src/server/costs/config.test.ts ]
+Error: Cannot find module './config' imported from <repo>/src/server/costs/config.test.ts
+ ❯ src/server/costs/config.test.ts:7:1
+      5| // silent when the feature is not configured at all (zero-env demo).
+      6| import { afterEach, describe, expect, it, vi } from 'vitest';
+      7| import { checkPublishedCostsStartup, publishedCostsConfig } from './co…
+       | ^
+      8| import { createPublishedCostsRoute } from './publishedCostsRoute';
+      9| import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/importBoundary.test.ts > src/ingest import boundary > instrumentation.ts (Next startup hook) reaches only the pure costs config and Slice 0’s isTenantId: no runtime pg
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/ingest/importBoundary.test.ts:218:44
+    216|   it('instrumentation.ts (Next startup hook) reaches only the pure cos…
+    217|     const instrumentation = path.join(REPO_ROOT, 'instrumentation.ts');
+    218|     expect(fs.existsSync(instrumentation)).toBe(true);
+       |                                            ^
+    219|     const { files, packages } = importClosure(instrumentation);
+    220|     const rel = [...files].map((f) => path.relative(REPO_ROOT, f).spli…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  src/ingest/lazyFoundation.test.ts > lazy foundation manifest: no I/O on import > importing privilegeModel and foundationManifest reads nothing from the migrations directory
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "readdir <repo>/src/ingest/db/migrations",
++   "read <repo>/src/ingest/db/migrations/0001_ratio_schema.manifest.json",
++ ]
+
+ ❯ src/ingest/lazyFoundation.test.ts:71:29
+     69|   it('importing privilegeModel and foundationManifest reads nothing fr…
+     70|     const { pm } = await load();
+     71|     expect(migrationsReads).toEqual([]);
+       |                             ^
+     72|     // What the read API needs is available without any I/O.
+     73|     expect(Object.keys(pm.REFUSED_PREDEFINED_ROLES)).toContain('pg_rea…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  src/ingest/lazyFoundation.test.ts > lazy foundation manifest: no I/O on import > importing (and Slice 1’s worker/db.ts) succeeds with the migrations directory unavailable
+ FAIL  src/ingest/lazyFoundation.test.ts > lazy foundation manifest: still fails closed at first use, with the eager error > missing-dir: FOUNDATION_0001 and REVIEWED_POLICY_SHAPES throw on first use (ENOENT)
+Error: ENOENT: no such file or directory, scandir '<repo>/src/ingest/db/migrations'
+ ❯ Object.<anonymous> src/ingest/lazyFoundation.test.ts:34:55
+     32|     if (inMigrations(p)) {
+     33|       migrationsReads.push(`readdir ${String(p)}`);
+     34|       if (mode === 'missing-dir') throw Object.assign(new Error(`ENOEN…
+       |                                                       ^
+     35|       if (mode === 'missing-0001') return [];
+     36|     }
+ ❯ loadManifests src/ingest/db/migrationFiles.ts:78:25
+ ❯ src/ingest/db/foundationManifest.ts:10:13
+ ❯ src/ingest/db/foundationManifest.ts:13:2
+ ❯ src/ingest/db/privilegeModel.ts:11:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  src/ingest/lazyFoundation.test.ts > lazy foundation manifest: computed on first use, memoised, identical values > FOUNDATION_0001 equals the stored 0001 manifest; loaded once
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "readdir <repo>/src/ingest/db/migrations",
++   "read <repo>/src/ingest/db/migrations/0001_ratio_schema.manifest.json",
++ ]
+
+ ❯ src/ingest/lazyFoundation.test.ts:89:29
+     87|   it('FOUNDATION_0001 equals the stored 0001 manifest; loaded once', a…
+     88|     const { fm, mf } = await load();
+     89|     expect(migrationsReads).toEqual([]);
+       |                             ^
+     90|     const expected = mf.loadManifests(MIGRATIONS_DIR)['0001'];
+     91|     migrationsReads = [];
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  src/ingest/lazyFoundation.test.ts > lazy foundation manifest: computed on first use, memoised, identical values > the lazy values behave like the read-only arrays they replace
+AssertionError: expected [Function] to throw an error
+ ❯ src/ingest/lazyFoundation.test.ts:124:8
+    122|     expect(() => {
+    123|       (v as string[]).push('x');
+    124|     }).toThrow();
+       |        ^
+    125|     expect(v).toEqual(expected);
+    126|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  src/ingest/lazyFoundation.test.ts > lazy foundation manifest: still fails closed at first use, with the eager error > missing-0001: FOUNDATION_0001 and REVIEWED_POLICY_SHAPES throw on first use (plain Error)
+Error: 0001_ratio_schema.manifest.json is missing from the migrations directory
+ ❯ src/ingest/db/foundationManifest.ts:11:17
+      9| export const FOUNDATION_0001: readonly string[] = (() => {
+     10|   const m = loadManifests(DEFAULT_MIGRATIONS_DIR)['0001'];
+     11|   if (!m) throw new Error('0001_ratio_schema.manifest.json is missing …
+       |                 ^
+     12|   return m;
+     13| })();
+ ❯ src/ingest/db/foundationManifest.ts:13:2
+ ❯ src/ingest/db/privilegeModel.ts:11:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  src/ingest/lazyFoundation.test.ts > lazy foundation manifest: still fails closed at first use, with the eager error > corrupt: FOUNDATION_0001 and REVIEWED_POLICY_SHAPES throw on first use (BAD_MANIFEST)
+MigrationError: BAD_MANIFEST: 0001_ratio_schema.manifest.json is not valid JSON
+ ❯ parseManifest src/ingest/db/migrationFiles.ts:67:11
+     65|     v = JSON.parse(text);
+     66|   } catch {
+     67|     throw new MigrationError('BAD_MANIFEST', `${file} is not valid JSO…
+       |           ^
+     68|   }
+     69|   if (!Array.isArray(v) || v.length === 0 || !v.every((e) => typeof e …
+ ❯ loadManifests src/ingest/db/migrationFiles.ts:80:24
+ ❯ src/ingest/db/foundationManifest.ts:10:13
+ ❯ src/ingest/db/foundationManifest.ts:13:2
+ ❯ src/ingest/db/privilegeModel.ts:11:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  8 failed | 7 passed (15)
+   Start at  01:11:36
+   Duration  1.41s (tests 39%, import 39%, transform 20%, worker 2%)
+

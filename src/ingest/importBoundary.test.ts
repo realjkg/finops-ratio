@@ -213,6 +213,20 @@ describe('src/ingest import boundary', () => {
     expect([...packages].filter((p) => p.startsWith('@aws-sdk/') || p === 'csv-parse' || p.startsWith('csv-parse/'))).toEqual([]);
   });
 
+  it('instrumentation.ts (Next startup hook) reaches only the pure costs config and Slice 0’s isTenantId: no runtime pg', () => {
+    const instrumentation = path.join(REPO_ROOT, 'instrumentation.ts');
+    expect(fs.existsSync(instrumentation)).toBe(true);
+    const { files, packages } = importClosure(instrumentation);
+    const rel = [...files].map((f) => path.relative(REPO_ROOT, f).split(path.sep).join('/')).sort();
+    expect(rel).toEqual(['instrumentation.ts', 'src/ingest/db/tenant.ts', 'src/server/costs/config.ts']);
+    expect([...packages].filter((p) => p.startsWith('@aws-sdk/') || p.startsWith('csv-parse'))).toEqual([]);
+    // tenant.ts names pg in a TYPE-ONLY import (erased at build); no file in the closure imports pg as a value.
+    for (const f of files) {
+      const pgImports = fs.readFileSync(f, 'utf8').split('\n').filter((l) => /from\s+'pg'|require\('pg'\)|import\('pg'\)/.test(l));
+      for (const l of pgImports) expect(l, path.relative(REPO_ROOT, f)).toMatch(/^import type /);
+    }
+  });
+
   it('detector ignores unrelated imports (self-test)', () => {
     const srcFile = path.join(REPO_ROOT, 'src', 'lib', 'fake.ts');
     const code = [
