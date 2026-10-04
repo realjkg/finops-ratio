@@ -843,14 +843,28 @@ describe('A9 local.mjs acceptance: the real path, no bypass (static)', () => {
     expect(lib).not.toMatch(/'x-ratio-control'\s*:/);
   });
 
+  it('local:sync / local:test path: sync() still rejects a non-zero worker exit and a missing record', () => {
+    const local = read('scripts/local/local.mjs');
+    const start = local.indexOf('async function sync(settings) {');
+    expect(start).toBeGreaterThan(0);
+    const fn = local.slice(start, local.indexOf('\n}\n', start) + 2);
+    expect(fn).toMatch(/const r = await syncRecord\(settings, secrets, LOCAL_NAMES\.sourceKey\);/);
+    expect(fn).toMatch(/if \(r\.code !== 0\) throw new Error\(`worker sync exited \$\{r\.code\}`\);/);
+    expect(fn).toMatch(/if \(r\.record === null\) throw new Error\('worker sync printed no evidence record'\);/);
+  });
+
   it('sweep: every allowFail command in scripts/local judges its exit code nearby, or says who does (Copilot 4177490229)', () => {
     for (const file of ['scripts/local/local.mjs', 'scripts/local/lib.mjs', 'scripts/local/bootstrap.mjs', 'scripts/local/acceptance.mjs']) {
       const lines = read(file).split('\n');
       lines.forEach((line, i) => {
-        if (!/allowFail: true/.test(line)) return;
-        const after = lines.slice(i, i + 4).join('\n');
-        const before = lines.slice(Math.max(0, i - 4), i).join('\n');
-        const judged = /\.code !== 0/.test(after) || /exit code judged by /.test(before);
+        // Any value, any spacing (`allowFail:true`, `allowFail : x`): every use must be judged.
+        if (!/allowFail\s*:/.test(line)) return;
+        // Judged = the result of THIS call (`const X = await …`) has `X.code !== 0` in the next 3 lines,
+        // or an "exit code judged by" comment sits within 4 lines. Any other call's `.code` check does not count.
+        const call = /const (\w+) = await /.exec(line);
+        const after = lines.slice(i + 1, i + 4).join('\n');
+        const near = lines.slice(Math.max(0, i - 4), i + 4).join('\n');
+        const judged = (call !== null && new RegExp(`\\b${call[1]}\\.code !== 0`).test(after)) || /exit code judged by /.test(near);
         expect(judged, `${file}:${i + 1}: ${line.trim()}`).toBe(true);
       });
     }
