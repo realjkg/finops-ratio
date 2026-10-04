@@ -409,3 +409,54 @@ teeth are shown below (L6f, N3c).
 | `npm run local:test` (`ratio-local-test`, 54339/18353/3110) | pass; `appReady: pid-verified`; totals 55 / `30.8272954899`, 40 / `21.0978157665`; 95 distinct rows; `down -v` |
 | `npm audit --omit=dev` | 0 vulnerabilities |
 | leftovers | none |
+
+## 12. Copilot review of 0e972ca (1 High, 1 Medium, 6 Low); local, not pushed
+
+### Commits
+
+| SHA | Commit | Kind |
+|---|---|---|
+| 4f6fea3 | L16 tests: stopping `next start` and cleanup never hang | **red** (`red/red-copilot2-fast.txt`: 11 failed / 55) |
+| 914f5bf | bounded child stop and cleanup in `lib.mjs`; `local.mjs` uses them | green |
+| bf8a442 | D-01 audited CMK allowlist; per-project state paths; the brief's opening states the governance state | docs |
+| (this commit) | this section | docs |
+
+### Mapping
+
+| Comment | Severity | Commit(s) | Test(s) / evidence |
+|---|---|---|---|
+| 4176004971: cleanup hangs if `next start` already ended by a signal (`exitCode` stays `null`) | **High** | 4f6fea3, 914f5bf | `local.test.mjs` L16 (11 tests): `childExited` treats `exitCode !== null \|\| signalCode !== null` as exited; an already-signalled child gives `already-exited` at once, with no kill; a REAL child SIGKILLed before the wait does not hang; a child that ignores SIGTERM is SIGKILLed (`killed`); a child that obeys gives `stopped`; one that never exits gives `unresponsive` after bounded waits; `cleanupLocalTest` runs `down -v` exactly once with an already-signalled app, when stopping throws, and with no app; a failing `down` is reported, not thrown; `runProcess` timeout kills and rejects; a static check that `local.mjs` cleans up only through `cleanupLocalTest`, has no `once('exit'`, delegates `run` to `runProcess`, and passes `timeoutMs: DOWN_TIMEOUT_MS` (300 s) to `down`. **Audit of every exit wait:** the cleanup in `local:test` was the only unbounded one. `run()` attaches its `close` listener at spawn, so it cannot miss an exit, and it now has an optional bounded timeout. `waitForOwnServer` already checked both fields. Mutations H1–H5 killed |
+| 4176004999: D-01 should use an audited CMK allowlist | Medium | bf8a442 | Docs: Decision log D-01, §1 and Appendix A (**#60**). "Unrestricted" now requires SSE-KMS under a key ARN on an audited allowlist. Each entry records `keyArn`, `policySha256`, `reviewedBy` and `reviewedAt`. An optional `kms:GetKeyPolicy` re-check compares the hash and fails closed. A customer-managed key that is not on the list is restricted. New Appendix A acceptance criteria (numbered 1–6): a non-allowlisted CMK, a hash mismatch, a KMS error, and an alias or key id that does not match an ARN all give restricted; an `aws/s3` entry is rejected; every malformed allowlist file gives restricted; `policySha256` is persisted with the classification. New mutations for each. DESIGN §9 and §10 |
+| 4176005021: `.env.example:168` stale `.ratio-local/env` | Low | bf8a442 | Now `.ratio-local/<project>/env`. The `RATIO_LOCAL_TEST_*` defaults are documented as names and comments only, with no secrets |
+| 4176005056: DESIGN.md:263-264 stale path | Low | bf8a442 | §3.1 names `.ratio-local/<project>/env` (directory 0700, file 0600) |
+| 4176005072: DESIGN.md:319 stale path | Low | bf8a442 | The threat-model line names the per-project path |
+| 4176005092: EVIDENCE.md:184 stale path | Low | bf8a442 | The historical run is kept as recorded, with a note: it predates per-project state (f94034d), and today's code writes `.ratio-local/ratio-local-s2a/env` for that run |
+| 4176005111: `bootstrap.mjs:6` stale comment | Low | bf8a442 | The comment now names `.ratio-local/<project>/env`. A repo-wide grep for `.ratio-local/env` finds only the annotated historical line (§7) and DESIGN §10's description of this fix |
+| 4176005032: the brief's opening should state the governance state | Low | bf8a442 | The brief now opens with "Governance state, in three lines": (1) D-01..D-10 were decided by the orchestrator under the owner's delegation; (2) production go-live remains a NON-DELEGABLE owner gate; (3) the acceptance run uses public sample data (FOCUS 1.0 sample, CC BY 4.0) in a follow-up PR, not #59. Owner actions 1–4 follow |
+
+### Mutation checks (scratch `mutate5.sh`; each applied, run, restored; tree clean after; no orphan children)
+
+| ID | Mutation | Result |
+|---|---|---|
+| H1 | `childExited` checks only `exitCode` (the reported bug) | **killed**: local 4/55 (`childExited`; already-signalled; REAL SIGKILLed child; cleanup with signalled app) |
+| H2 | cleanup skips `down` when stopping the app throws | **killed**: local 1/55 |
+| H3 | no SIGKILL escalation | **killed**: local 2/55 |
+| H4 | `runProcess` ignores `timeoutMs` | **killed**: local 1/55. The first run of H4 hung vitest: the untimed child was never killed. The test now spawns through a tracked `spawnFn` that `afterAll` SIGKILLs, and the re-run fails cleanly |
+| H5 | `waitForExit` unbounded (timer never resolves) | **killed**: local 2/55 |
+
+### Gates (HEAD bf8a442 + this file)
+
+| Gate | Result |
+|---|---|
+| `npm run lint` / `rm -rf .next && npx tsc --noEmit` | 0 / 0 |
+| `npm test` | **2267 passed** (100 files), run concurrently with `test:db` |
+| `npm run test:db` ×2 (private PG16 at 55700 + S3 prefixes) | **595 + 161** passed ×2; 110 / 107 s |
+| `worker:build`; `next build` | 0; 0 (`tsconfig.json`/`next-env.d.ts` restored) |
+| `npm run check:bundle` | pass (116 client files, 91 server files) |
+| `npm run local:test` (`ratio-local-test`, 54339/18353/3110) | pass; `appReady: pid-verified`; totals 55 / `30.8272954899`, 40 / `21.0978157665`; 95 distinct rows; **`appStop: stopped`**; `down: ok (-v)` |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+| leftovers | none (see final check below) |
+
+Slice 0 (`src/ingest/db`) and Slice 1 worker semantics are unchanged in this
+round. The pre-existing Slice 1 `periods.test.ts` timeout under extreme load
+(§11) still stands and is not addressed here.
