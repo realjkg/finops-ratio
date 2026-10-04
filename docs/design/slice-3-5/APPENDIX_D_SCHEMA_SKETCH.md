@@ -295,27 +295,64 @@ only one starter of a kind can be inside the allocation at a time.
     expiry passes meanwhile, the lease lapses under a healthy run.
   - **The numbers on `main`.** TTL `leaseTtlSeconds` = 300 s by default
     (`RATIO_LEASE_TTL_SECONDS`, 5–3600; `src/ingest/config.ts:52`,
-    `:231`). The heartbeat fires every TTL / 3 = 100 s, at least every 1 s
-    (`src/ingest/worker/pipeline.ts:131`, `:136`). The analytics jobs use
-    the same settings. Without a check, the safe limit for one transaction
-    is TTL − interval − margin = 300 − 100 − 30 = **170 s**, not 300 s.
-  - **The rule.** Every run transaction has a duration budget `b`, which
-    the job's chunking keeps it under; the margin is m = 30 s (TTL / 10).
-    Before taking the run-row lock, `assertLease` reads the remaining
-    lifetime `r = lease_expires_at − clock_timestamp()`.
-    - If `r < b + m`, it **renews first**, with the same live-only
-      heartbeat `UPDATE`, and checks again.
-    - If `b + m > TTL`, the transaction is refused before it starts
-      (`LEASE_BUDGET`, a chunking bug; it fails closed).
+    `:231`). The heartbeat fires every `max(1 s, TTL / 3)`, so 100 s at the
+    default (`src/ingest/worker/pipeline.ts:131`, `:136`). The analytics
+    jobs use the same settings. Without a check, the safe limit for one
+    transaction is TTL − interval − m = 300 − 100 − 30 = **170 s**, not
+    300 s.
+  - **The margin (rev. 32, Copilot r4179528066).** Revision 31 wrote
+    "m = 30 s (TTL / 10)", which is TTL / 10 only at the 300 s default,
+    while its own test used TTL 6 s with a 1 s margin. One rule now
+    applies everywhere: **m = max(1 s, TTL / 10)**.
+    - At TTL 300 s, m = 30 s and the largest budget is TTL − m = 270 s.
+    - At TTL 6 s (the 4-3 tests), m = 1 s and the largest budget is 5 s.
+    - At the bottom of `RATIO_LEASE_TTL_SECONDS`'s range, TTL 5 s gives
+      m = 1 s, a largest budget of 4 s and a heartbeat every 1.7 s. At
+      the top, TTL 3600 s gives m = 360 s, a largest budget of 3240 s and
+      a heartbeat every 1200 s.
+    - The rule needs TTL > m + the longest budget. Since m ≥ 1 s, a TTL
+      below 2 s leaves no useful budget, so **the design requires TTL
+      ≥ 5 s**, the range's own minimum. The heartbeat interval does not
+      enter the rule, because the check below guarantees the margin
+      whenever a heartbeat is held up.
+  - **The rule (rev. 32: renewal outside the work transaction; Copilot
+    r4179528051, the challenger's L1 on aeef207).** Every run transaction
+    has a duration budget `b`, which the job's chunking keeps it under.
+    If `b + m > TTL`, the transaction is refused before anything starts
+    (`LEASE_BUDGET`, a chunking bug; it fails closed). Otherwise:
+    1. **Renew, if needed, in its own short transaction.** The job reads
+       the remaining lifetime `r = lease_expires_at − clock_timestamp()`
+       without a lock. If `r < b + m`, it calls the live-only heartbeat,
+       which is `main`'s `heartbeat()`: its own transaction, committed at
+       once. Revision 31 put the renewal inside `assertLease`, which is
+       inside the work transaction. There the `UPDATE`'s row lock would
+       last until the work transaction committed, up to the whole
+       budget. It would block the other readers' `FOR SHARE`, so
+       parallel readers would run one at a time, and it would block the
+       heartbeat. (`main`'s `assertLease`, `lease.ts:151–159`, only
+       checks and locks; it never renews.)
+    2. **Begin the work transaction and lock the lease row**, `FOR SHARE`
+       or `FOR UPDATE`, with the final check under that lock: the lease
+       is live, and `lease_expires_at ≥ clock_timestamp() + b + m`.
+    3. **If the remaining-time check fails** while the lease is still
+       live, the transaction rolls back before doing anything, renews
+       (step 1), and retries step 2 **once**. A second failure is
+       `LEASE_LOST`. One failure can be a benign race: the lock wait in
+       step 2 can be held up behind a writer's `FOR UPDATE` transaction,
+       or a background heartbeat. Two in a row mean the run cannot keep
+       its lease, and it fails safe. If the lease is not live, the result
+       is `LEASE_LOST` at once.
 
-    After the check, the lease outlives the transaction's planned end by
-    at least m. A heartbeat blocked behind the transaction runs at the
+    After step 2, the lease outlives the transaction's planned end by at
+    least m. A heartbeat blocked behind the transaction runs at the
     latest when the transaction ends, while the lease is still live, so
     it renews. The same holds for parallel readers: each one checked its
-    own end before taking its lock. At the defaults, **every transaction
-    budget must be ≤ TTL − m = 270 s**. A transaction that overruns its
-    budget by more than m can lose the lease. That fails safe: the run
-    gets `LEASE_LOST` and is retried; nothing is half-written.
+    own end under its lock. A renewal `UPDATE` that waits behind a
+    reader's `FOR SHARE` ends by that reader's end, which is at least m
+    before expiry. At the defaults, **every transaction budget must be
+    ≤ TTL − m = 270 s**. A transaction that overruns its budget by more
+    than m can lose the lease. That fails safe: the run gets `LEASE_LOST`
+    and is retried, and nothing is half-written.
 - **`batch_seq`** is allocated only by the lease holder, inside its
   transaction, as **`coalesce(max(batch_seq), 0) + 1`** over the tenant's
   `rollup_batches`. It starts at 1 on an empty tenant (rev. 15; a bare
@@ -613,17 +650,33 @@ kind, and every start's cleanup pass.
   The file phase holds no database lock, keeping the rule that a pass
   holds no run-row or pointer lock (revision 28). It is serialized per
   directory instead.
+  - **Filesystem assumption (rev. 32, the challenger's L2).** This
+    protocol needs the evidence directory on a **local POSIX
+    filesystem**, where `rename(2)` within `backtest/` is atomic and a
+    rename of a missing source fails with `ENOENT`. That holds for the
+    local stack's volume. It does **not** hold on an object store, which
+    has no atomic directory rename, nor on some network filesystems. The
+    off-box artefact store that DESIGN §3.8 mentions for the future
+    therefore needs its own claim mechanism (for example a conditional
+    write of a claim object, or a database row) before cleanup may run
+    against it.
   - A pass claims `backtest/<run_id>/` by renaming it to
     `backtest/.deleting-<run_id>-<pass_id>/`. That is one `rename(2)` on
     one filesystem, so it is atomic and exactly one pass wins. A loser
     gets `ENOENT` and skips the run. A directory that holds only
     `deleted.json` is skipped without a claim.
   - In its claimed directory, the winner:
-    1. hashes every file except `deleted.json`;
-    2. writes `deleted.json`, the earlier entries plus the new ones, to a
-       temporary name and renames it into place, **before deleting
-       anything**;
-    3. deletes the listed files, treating `ENOENT` as done;
+    1. hashes every file except `deleted.json` and any temporary
+       manifest. A temporary manifest is exactly `deleted.json.tmp-<pass_id>`
+       (rev. 32, the challenger's nit). A re-claim between another
+       pass's temporary write and its rename carries such an orphan
+       along, and it is not an export file. It is never hashed or
+       listed, and step 3 deletes it;
+    2. writes `deleted.json`, the earlier entries plus the new ones, to
+       its own `deleted.json.tmp-<pass_id>` and renames it into place,
+       **before deleting anything**;
+    3. deletes the listed files and any orphaned `deleted.json.tmp-*`,
+       treating `ENOENT` as done;
     4. renames the directory back to `backtest/<run_id>/`.
   - If that name exists again, because a dying writer's staging file
     recreated it, the winner moves the merged `deleted.json` into it the
@@ -639,8 +692,15 @@ kind, and every start's cleanup pass.
     `.deleting-<run_id>-<pass_id>/`, again atomic with one winner, and
     resumes at step 1, merging `deleted.json`.
   - If the stalled pass wakes up, it finds its paths gone (`ENOENT`) and
-    stops. Every step works by name, and `deleted.json` is written before
-    any deletion, so no file is deleted without being recorded.
+    stops. `deleted.json` is written before any deletion, so no file is
+    deleted without being recorded.
+  - **Every step works by name** (rev. 32, the challenger's L2). Each
+    operation resolves a full path from `backtest/` afresh. No pass holds
+    a directory file descriptor across steps, uses `openat`/`unlinkat`
+    relative to one, or sets its working directory inside a claim.
+    Otherwise a stalled pass could keep working on a directory that was
+    re-claimed under another name, and the `ENOENT` stop above would not
+    happen.
 - **Idempotent.** The list holds every eligible run, not only those whose
   rows this call removed. A directory already cleaned costs one
   `readdir`, and a file left by an interrupted deletion is removed by a
