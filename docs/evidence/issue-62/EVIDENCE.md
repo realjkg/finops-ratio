@@ -677,10 +677,11 @@ worker's `validateRow`:
   need seconds, at most 6 fraction digits, and offsets as `±HH:MM`. So a
   foreign record that the worker would exclude can make the calculator stop
   with an error. This fails closed, and it was already true for AWS records.
-- **Does not check `CHARGE_PERIOD_INVERTED` or `INVALID_CHARACTER`.** That
-  gap was pre-existing and is symmetric for allowed records. An acceptance
-  run would catch a disagreement, because it compares the worker's outcome
-  with the calculator's.
+- ~~Does not check `CHARGE_PERIOD_INVERTED` or `INVALID_CHARACTER`.~~
+  **Now it does** (§17, Copilot F2, 3a030ac). With `--rows`, `expected_row`
+  refuses an end before the start (UTC) and a C0 control other than TAB, LF
+  or CR in any value. This applies to foreign and allowed records alike. The
+  "stricter on formats" note above still applies.
 
 Neither difference affects the upstream samples: every 1k and 10k record
 passes both validators.
@@ -688,3 +689,111 @@ passes both validators.
 **Gates:**
 - `scripts/local` unit tests, all passed;
 - lint, `tsc` and `npm test`, recorded at the head in the PR.
+
+## 17. Copilot review 5407245119 / 5407265538 (F1–F3) and the L18 blind spots
+
+**#67 was merged at ebbde12 (merge commit ad876ae) with F1–F3 still open.
+This branch, `fix/67-copilot-followups` (from the local commits on top of
+ebbde12, merged with `origin/main`), carries their fixes.** It does not push
+to `fix/62-provider-source-check`.
+
+| Item | Red commit | Fix commit |
+|---|---|---|
+| **F1** (High, r4178520620): zombie_fencing called `expireLease` before the `try`/`finally` that releases the zombie | e9fc779 (`red/red-f1-expire-lease.txt`: the zombie's run is left `running`) | 95e1be1 |
+| **F2** (Medium, r4178520633): with `--rows`, the calculator did not refuse `CHARGE_PERIOD_INVERTED` or `INVALID_CHARACTER` | cfb4258 (`red/red-f2-python.txt`: 11 failures) | 3a030ac |
+| **L18 blind spots** (challenger at ebbde12) | 6a7a554 (`red/red-l18-blind-spots.txt`; `red/red-l18-old-checker-probes.txt`: the ebbde12 checker **missed all four probes**) | 446c05b |
+| **F3** (High, r4178540607): `runSync({ settings: { allowSyntheticProviders: true } })` skipped the opt-in | d2b985b (`red/red-f3-runsync-optin.txt`: 2 failed / 5; an explicit `true` reached the pool) | 47ed672 |
+
+**F1.**
+- Seam: `testHooks.beforeExpireLease`. It is library-only and changes no
+  behaviour. It went in with the red test, which fails `expireLease` for
+  `fx-zombie` only.
+- Fix: `expireLease` moved inside the `try`. The `finally` releases the
+  zombie **and awaits `zombieOutcome`**, so nothing is left dangling. The
+  `try`/`finally` covers everything from the `reachedPublish` race to
+  `release()`: `expireLease` and the winner `sync`.
+- The test asserts:
+  - the other five scenarios pass;
+  - `zombie_fencing` reports the injected fault;
+  - no `fx-zombie` run is still `running`;
+  - `heartbeat_at` is unchanged 1.5 s later;
+  - the admin client is ended.
+- **The seam cannot be reached from the CLI.** A static test in
+  `replayFixturesEnv.test.ts` checks two things:
+  - `replayFixtures.ts` is the only non-test, non-`testing/` file under
+    `src/ingest` that mentions `testHooks`;
+  - the `runReplayFixtures({ … })` call in `workerCli.ts` passes
+    `allowSyntheticProviders` but never `testHooks` or `beforeExpireLease`.
+
+**F2.**
+- `expected_row` now refuses:
+  - any value with a C0 control other than TAB, LF or CR (every column,
+    extra columns included). The message names the column, never the value;
+  - `ChargePeriodEnd` before `ChargePeriodStart`, compared in UTC (equal is
+    allowed).
+- Both apply to foreign and allowed records.
+- One Slice 2b test fixture changed. `test_one_row_maps_to_the_api_contract`
+  had an inverted period: end `21:00:00.5Z` before start `22:00Z`, a row the
+  worker quarantines. Its end is now `23:00:00.5Z`; the mapping assertions
+  are otherwise unchanged.
+- Both upstream samples still pass (`--rows --provider AWS`, exit 0). §16 is
+  updated: the calculator now checks both rules.
+
+**L18.**
+- Bindings are counted **once per unordered alias pair**, and
+  `x.tenant_id = x.tenant_id` tautologies are ignored.
+- They are compared with the total correlations of that unordered pair, in
+  both directions.
+- Probes added to the self-test:
+  - (i) a self-correlation with only a tautological binding, twice;
+  - (ii) reversed pairs sharing one binding, both spellings;
+  - a good case with two correlations and two bindings.
+
+**F3.**
+- An explicit `false` is a pure override and needs no env.
+- The default, and an explicit `true`, are decided by **this process's**
+  validated opt-in: `syntheticProvidersOptIn(process.env)`, i.e.
+  `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` with `RATIO_ENV` explicitly
+  `development` or `test`.
+- An explicit `true` without it throws `SYNTHETIC_PROVIDERS_NOT_ALLOWED`
+  before any I/O. The test's pool throws on any use.
+- There is no injected env, because a caller could assert any env it likes.
+- Callers checked:
+  - the CLI passes its config value, and its process env is the same env;
+  - `replayFixtures` passes the CLI value;
+  - the DB tests pass explicit `true`. The DB vitest configs set the opt-in
+    and `RATIO_ENV=test`, so they pass;
+  - `testS3Env()` sets the opt-in and `RATIO_ENV=development` for the
+    in-process CLI;
+  - `local:test` spawns the worker with the opt-in in its own env.
+
+  All pass (gates below).
+
+**Mutations (`runs/code-mutations-copilot-followups.txt`; all killed):**
+- F1: `expireLease` back outside the `try`.
+- F2:
+  - the inverted-period check removed;
+  - the control-character check removed;
+  - the foreign path skips `expected_row`.
+- F3: an explicit `true` bypasses the opt-in.
+- L18:
+  - tautologies count again;
+  - ordered pair keys again.
+
+**Gates (at 47ed672, before the merge with `origin/main`):**
+
+Run on a private PG16 (`/dev/shm/i62pg`, 127.0.0.1:56530) and SeaweedFS
+`i62-s3` (127.0.0.1:56531). `/tmp/aidg_pg` and other sessions' containers
+were not touched.
+
+| Gate | Result |
+|---|---|
+| lint, tsc | exit 0 |
+| `npm test` | 111 files / **2610 passed** |
+| Python suite | 29 tests, OK |
+| `npm run test:db` ×1 | parallel 36 files / **628 passed**; serial 6 files / **173 passed**; exit 0 |
+| `local:acceptance` 1k | exit 0, `pass: true`, 23.1 s. 942 / `18.00663861840`, `excludedRows` 57; 2024-10 `quarantined` `PROVIDER_MISMATCH`; second sync exit 1 as expected. 942 rows compared (`runs/acc1k-copilot-followups.json`). Project `ratio-i62f-acc` on 56610/56611/56612. The first attempt on 56540 hit "address already in use" from another session, and its stack was torn down by the run |
+| `local:acceptance` 10k | exit 0, `pass: true`, 28.9 s. 9441 / `112.16617543240`, `excludedRows` 557; 2024-10 quarantined (`runs/acc10k-copilot-followups.json`) |
+
+The lint, tsc and `npm test` re-run after the merge with `origin/main` is
+in the commit that follows this record.
