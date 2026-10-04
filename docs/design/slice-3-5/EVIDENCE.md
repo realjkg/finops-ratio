@@ -95,16 +95,17 @@ Appendix B (B.4, B.5.6).
 ## 5. Governance classification
 
 `node scripts/governance/classify-risk.mjs --git origin/main...HEAD`,
-refreshed for revision 4 (the exact output at the revision-4 commit is
-quoted in the design agent's report):
+at `faeabb4` (revision 4):
 
 - `"risk": "restricted"`, classes `retention` and `secrets`;
 - `secrets.password-assignment` on `APPENDIX_B_SIZING.md` (the
-  `POSTGRES_PASSWORD=<throwaway>` run command, no secret value);
+  `POSTGRES_PASSWORD=<throwaway>` run command, no secret value) and on
+  this file (which quotes it);
 - `retention.mention` on `APPENDIX_D_SCHEMA_SKETCH.md`, `DESIGN.md` and
   this file;
 - `retention.delete-from` on `DESIGN.md` (the threat-model test that a
-  `DELETE FROM ratio.cost_daily` by the analytics login is refused).
+  `DELETE FROM ratio.cost_daily` by the analytics login is refused) and on
+  this file (which quotes it).
 
 That is the correct classification for this content; the PR goes through
 the restricted exception path. (Revision 2 at `461fbc2` classified `low`
