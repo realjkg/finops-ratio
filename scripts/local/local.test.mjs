@@ -21,6 +21,11 @@ import {
   parseEnvFile,
   cleanupLocalTest,
   childExited,
+  fetchJson,
+  finalizeLocalTestSummary,
+  runLocalTest,
+  waitUntil,
+  withDeadline,
   portInUse,
   preflightProblems,
   removeProjectState,
@@ -32,6 +37,7 @@ import {
   writeEnvFileSecure,
 } from './lib.mjs';
 import net from 'node:net';
+import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import process from 'node:process';
@@ -585,10 +591,363 @@ describe('L16 stopping next start and cleaning up never hang', () => {
 
   it('local.mjs cleans up only through cleanupLocalTest, with a bounded down; no unbounded exit wait remains', () => {
     const src = read('scripts/local/local.mjs');
-    expect(src).toMatch(/await cleanupLocalTest\(\{/);
+    // Cleanup now lives in lib.mjs's runLocalTest (Copilot 4176117561), which
+    // calls cleanupLocalTest; local.mjs only hands it the body and `down`.
+    expect(src).toMatch(/await runLocalTest\(\{/);
+    expect(read('scripts/local/lib.mjs')).toMatch(/await cleanupLocalTest\(\{/);
     expect(src).not.toMatch(/once\('exit'/);
     expect(src).not.toMatch(/\.exitCode !== null \? /);
     expect(src).toMatch(/function run\([^)]*\) \{\s*return runProcess\(/);
     expect(src).toMatch(/timeoutMs: DOWN_TIMEOUT_MS/);
+  });
+});
+
+// --- Copilot review of 551c16c: 4176117539 / 4176117553 (Medium) -------------
+// Every network call, child wait and promise in scripts/local/*.mjs has a hard
+// deadline. Fakes here ACCEPT the TCP connection and then never answer (or
+// send headers and stall the body): the classic "alive but stuck" endpoint.
+const D = { servers: [], sockets: new Set(), children: [] };
+afterAll(async () => {
+  for (const s of D.sockets) s.destroy();
+  await Promise.all(D.servers.map((srv) => new Promise((r) => srv.close(() => r()))));
+  for (const c of D.children) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
+});
+/** 'silent': accepts, reads, never writes. 'headers-only': sends 200 headers and part of the body, then stalls. */
+async function stalledServer(mode = 'silent') {
+  const srv = net.createServer((s) => {
+    D.sockets.add(s);
+    s.on('error', () => undefined);
+    if (mode === 'headers-only') {
+      s.once('data', () => s.write('HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n{"par'));
+    }
+  });
+  D.servers.push(srv);
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  return srv.address().port;
+}
+async function jsonServer(handler) {
+  const srv = http.createServer(handler);
+  D.servers.push(srv);
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  return srv.address().port;
+}
+const realSleeper = () => {
+  const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  D.children.push(c);
+  return c;
+};
+const elapsed = (t0) => Date.now() - t0;
+const hello = (port) => async (signal) => (await globalThis.fetch(`http://127.0.0.1:${port}/api/hello`, { signal })).status === 200;
+
+describe('L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553)', () => {
+  it('withDeadline: the value when in time; at the deadline a rejection AND an aborted signal, even if the work ignores the signal', async () => {
+    await expect(withDeadline(async () => 7, 1_000, 'x')).resolves.toBe(7);
+    let seen;
+    const t0 = Date.now();
+    await expect(
+      withDeadline((signal) => {
+        seen = signal;
+        return new Promise(() => undefined);
+      }, 100, 'stuck thing'),
+    ).rejects.toThrow(/stuck thing timed out after 100 ms/);
+    expect(elapsed(t0)).toBeLessThan(1_000);
+    expect(seen.aborted).toBe(true);
+    await expect(withDeadline(async () => 1, undefined, 'x')).rejects.toThrow(/positive deadline/);
+    await expect(withDeadline(async () => 1, 0, 'x')).rejects.toThrow(/positive deadline/);
+  }, 5_000);
+
+  it('waitUntil (local:up s3 readiness): a server that accepts TCP but never answers fails within the deadline; every attempt is aborted', async () => {
+    const port = await stalledServer('silent');
+    const signals = [];
+    const t0 = Date.now();
+    await expect(
+      waitUntil({
+        what: 's3',
+        timeoutMs: 800,
+        attemptTimeoutMs: 250,
+        intervalMs: 50,
+        probe: async (signal) => {
+          signals.push(signal);
+          return (await globalThis.fetch(`http://127.0.0.1:${port}/`, { signal })).status < 500;
+        },
+      }),
+    ).rejects.toThrow(/timed out waiting for s3/);
+    expect(elapsed(t0)).toBeLessThan(3_000);
+    expect(signals.length).toBeGreaterThanOrEqual(2);
+    expect(signals.every((s) => s.aborted)).toBe(true);
+  }, 10_000);
+
+  it('waitUntil: the overall deadline holds even when one attempt may take longer, and when the probe ignores its signal', async () => {
+    const t0 = Date.now();
+    await expect(waitUntil({ what: 'x', timeoutMs: 300, attemptTimeoutMs: 60_000, intervalMs: 10, probe: () => new Promise(() => undefined) })).rejects.toThrow(/timed out waiting for x/);
+    expect(elapsed(t0)).toBeLessThan(2_000);
+  }, 5_000);
+
+  it('waitUntil: keeps trying through errors and false, resolves on true; both deadlines are required', async () => {
+    let n = 0;
+    const probe = async () => {
+      n += 1;
+      if (n === 1) throw new Error('ECONNREFUSED');
+      return n >= 3;
+    };
+    await expect(waitUntil({ what: 'x', timeoutMs: 5_000, attemptTimeoutMs: 1_000, intervalMs: 10, probe })).resolves.toBeUndefined();
+    expect(n).toBe(3);
+    await expect(waitUntil({ what: 'x', timeoutMs: 5_000, intervalMs: 10, probe: async () => true })).rejects.toThrow(/attemptTimeoutMs/);
+    await expect(waitUntil({ what: 'x', attemptTimeoutMs: 5_000, intervalMs: 10, probe: async () => true })).rejects.toThrow(/timeoutMs/);
+  }, 10_000);
+
+  it('waitForOwnServer (next start readiness): alive but never answering fails within the deadline; every attempt is aborted', async () => {
+    const port = await stalledServer('silent');
+    const signals = [];
+    const t0 = Date.now();
+    await expect(
+      waitForOwnServer({
+        child: { pid: 1, exitCode: null, signalCode: null },
+        port,
+        owns: () => true,
+        timeoutMs: 800,
+        attemptTimeoutMs: 250,
+        intervalMs: 50,
+        probe: async (signal) => {
+          signals.push(signal);
+          return hello(port)(signal);
+        },
+      }),
+    ).rejects.toThrow(/timed out waiting for next start/);
+    expect(elapsed(t0)).toBeLessThan(3_000);
+    expect(signals.length).toBeGreaterThanOrEqual(2);
+    expect(signals.every((s) => s.aborted)).toBe(true);
+  }, 10_000);
+
+  it('waitForOwnServer: the overall deadline holds when the probe ignores its signal', async () => {
+    const t0 = Date.now();
+    await expect(
+      waitForOwnServer({ child: { pid: 1, exitCode: null, signalCode: null }, port: 1, owns: () => true, timeoutMs: 300, attemptTimeoutMs: 60_000, intervalMs: 10, probe: () => new Promise(() => undefined) }),
+    ).rejects.toThrow(/timed out/);
+    expect(elapsed(t0)).toBeLessThan(2_000);
+  }, 5_000);
+
+  it('fetchJson (the API reads): no headers ever ⇒ rejects within the request deadline', async () => {
+    const port = await stalledServer('silent');
+    const t0 = Date.now();
+    await expect(fetchJson(`http://127.0.0.1:${port}/api/v1/costs/published`, { token: 't', timeoutMs: 300 })).rejects.toThrow(/timed out after 300 ms/);
+    expect(elapsed(t0)).toBeLessThan(2_000);
+  }, 5_000);
+
+  it('fetchJson: headers then a stalled body ⇒ rejects within the deadline too (the body read is bounded, not swallowed)', async () => {
+    const port = await stalledServer('headers-only');
+    const t0 = Date.now();
+    await expect(fetchJson(`http://127.0.0.1:${port}/api/v1/costs/published`, { timeoutMs: 300 })).rejects.toThrow(/timed out after 300 ms/);
+    expect(elapsed(t0)).toBeLessThan(2_000);
+  }, 5_000);
+
+  it('fetchJson: status and parsed body; non-JSON ⇒ body null; the token goes in the Authorization header; a deadline is required', async () => {
+    const port = await jsonServer((req, res) => {
+      if (req.url === '/text') return res.end('not json');
+      res.setHeader('content-type', 'application/json');
+      res.statusCode = req.headers.authorization === 'Bearer tok' ? 200 : 401;
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await expect(fetchJson(`http://127.0.0.1:${port}/x`, { token: 'tok', timeoutMs: 5_000 })).resolves.toEqual({ status: 200, body: { ok: true } });
+    await expect(fetchJson(`http://127.0.0.1:${port}/x`, { timeoutMs: 5_000 })).resolves.toEqual({ status: 401, body: { ok: true } });
+    await expect(fetchJson(`http://127.0.0.1:${port}/text`, { timeoutMs: 5_000 })).resolves.toEqual({ status: 200, body: null });
+    await expect(fetchJson(`http://127.0.0.1:${port}/x`, {})).rejects.toThrow(/positive deadline/);
+  }, 10_000);
+
+  it('local:test, readiness against a stalled server: fails within its deadline AND down -v still runs, once', async () => {
+    const port = await stalledServer('silent');
+    const down = vi.fn(async () => undefined);
+    const t0 = Date.now();
+    const summary = await runLocalTest({
+      project: 'p',
+      down,
+      downTimeoutMs: 5_000,
+      stopOptions: { graceMs: 3_000, killMs: 3_000 },
+      body: async ({ steps, setApp }) => {
+        const app = realSleeper();
+        setApp(app);
+        steps.appReady = await waitForOwnServer({ child: app, port, owns: () => true, timeoutMs: 600, attemptTimeoutMs: 200, intervalMs: 50, probe: hello(port) });
+      },
+    });
+    expect(elapsed(t0)).toBeLessThan(6_000);
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(summary.pass).toBe(false);
+    expect(summary.error).toMatch(/timed out waiting for next start/);
+    expect(summary.steps.appStop).toBe('stopped');
+    expect(summary.steps.down).toBe('ok (-v)');
+  }, 15_000);
+
+  it('local:test, an API read against a stalled server: fails within its deadline AND down -v still runs, once', async () => {
+    const port = await stalledServer('silent');
+    const down = vi.fn(async () => undefined);
+    const t0 = Date.now();
+    const summary = await runLocalTest({
+      project: 'p',
+      down,
+      downTimeoutMs: 5_000,
+      stopOptions: { graceMs: 3_000, killMs: 3_000 },
+      body: async ({ steps, setApp }) => {
+        setApp(realSleeper());
+        steps.anonymous = (await fetchJson(`http://127.0.0.1:${port}/api/v1/costs/published`, { timeoutMs: 300 })).status;
+      },
+    });
+    expect(elapsed(t0)).toBeLessThan(6_000);
+    expect(down).toHaveBeenCalledTimes(1);
+    expect(summary.pass).toBe(false);
+    expect(summary.error).toMatch(/timed out after 300 ms/);
+    expect(summary.steps.anonymous).toBeUndefined();
+    expect(summary.steps.down).toBe('ok (-v)');
+  }, 15_000);
+
+  it('cleanupLocalTest: a down -v that never settles is cut off at its deadline (recorded as an error)', async () => {
+    const t0 = Date.now();
+    const r = await cleanupLocalTest({ app: null, down: () => new Promise(() => undefined), downTimeoutMs: 200 });
+    expect(elapsed(t0)).toBeLessThan(2_000);
+    expect(r.down).toMatch(/timed out after 200 ms/);
+  }, 5_000);
+
+  it('runProcess refuses to run without a deadline (nothing is spawned)', async () => {
+    const spawnFn = vi.fn();
+    await expect(runProcess(process.execPath, ['-e', ''], { spawnFn })).rejects.toThrow(/timeoutMs/);
+    await expect(runProcess(process.execPath, ['-e', ''], { spawnFn, timeoutMs: 0 })).rejects.toThrow(/timeoutMs/);
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
+
+  it('portInUse is bounded even when the connect attempt never settles (treated as busy: fail closed)', async () => {
+    let sock;
+    const connect = () => {
+      sock = Object.assign(new EventEmitter(), { setTimeout: () => undefined, destroy: vi.fn() });
+      return sock;
+    };
+    const t0 = Date.now();
+    await expect(portInUse(3110, { timeoutMs: 200, connect })).resolves.toBe(true);
+    expect(elapsed(t0)).toBeLessThan(2_000);
+    expect(sock.destroy).toHaveBeenCalled();
+  }, 5_000);
+
+  it('ownsListeningSocket is bounded: a process walk beyond maxProcesses stops and refuses (false); cycles end', () => {
+    const root = tmp();
+    const head = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n';
+    fs.mkdirSync(path.join(root, 'net'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'net', 'tcp'), `${head}   0: 0100007F:0C26 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 555 1 0000000000000000 100 0 0 10 0\n`);
+    // A chain 100 -> 101 -> ... -> 109; the listener is held by 109.
+    for (let pid = 100; pid <= 109; pid += 1) {
+      fs.mkdirSync(path.join(root, String(pid), 'fd'), { recursive: true });
+      fs.mkdirSync(path.join(root, String(pid), 'task', String(pid)), { recursive: true });
+      fs.writeFileSync(path.join(root, String(pid), 'task', String(pid), 'children'), pid < 109 ? String(pid + 1) : '');
+    }
+    fs.symlinkSync('socket:[555]', path.join(root, '109', 'fd', '3'));
+    expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root })).toBe(true);
+    expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root, maxProcesses: 5 })).toBe(false);
+    // A children cycle with no holder ends (false), it does not spin.
+    fs.writeFileSync(path.join(root, '109', 'task', '109', 'children'), '100');
+    fs.rmSync(path.join(root, '109', 'fd', '3'));
+    expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root })).toBe(false);
+  });
+
+  it('local.mjs: every fetch carries a signal, every S3 send an abortSignal, every pg Client its timeouts; waits go through waitUntil; API reads through fetchJson', () => {
+    const src = read('scripts/local/local.mjs');
+    expect(src).not.toMatch(/function waitFor\(/);
+    expect(src).not.toMatch(/function getJson\(/);
+    expect(src.match(/await waitUntil\(\{/g)?.length).toBeGreaterThanOrEqual(3); // postgres, s3, bucket warm-up
+    const fetches = src.match(/\bfetch\(/g) ?? [];
+    const signalled = src.match(/\bfetch\(`[^`]*`, \{ signal \}\)/g) ?? [];
+    expect(fetches.length).toBeGreaterThan(0);
+    expect(signalled.length).toBe(fetches.length);
+    const sends = src.match(/\.send\(/g) ?? [];
+    expect(sends.length).toBeGreaterThan(0);
+    expect((src.match(/\.send\(new \w+\(\{[^)]*\}\), \{ abortSignal: signal \}\)/g) ?? []).length).toBe(sends.length);
+    expect(src).toMatch(/new Client\(\{[^}]*connectionTimeoutMillis[^}]*query_timeout[^}]*statement_timeout/);
+    expect(src.match(/await fetchJson\(/g)?.length).toBeGreaterThanOrEqual(2); // anonymous + paginated
+    expect(src.match(/await fetchJson\([^;]*timeoutMs: API_REQUEST_TIMEOUT_MS/g)?.length).toBe(src.match(/await fetchJson\(/g).length);
+    expect(read('scripts/local/lib.mjs').match(/\bfetchFn\(url, \{[^}]*signal/g)).toHaveLength(1);
+  });
+
+  it("the API request deadline is longer than the route's own 10 s DB statement timeout", () => {
+    const pool = read('src/server/costs/readerPool.ts');
+    const statementMs = Number(/statement_timeout=(\d+)/.exec(pool)[1]);
+    const m = /const API_REQUEST_TIMEOUT_MS = ([\d_]+);/.exec(read('scripts/local/local.mjs'));
+    expect(m).not.toBeNull();
+    const apiMs = Number(m[1].replace(/_/g, ''));
+    expect(statementMs).toBe(10_000);
+    expect(apiMs).toBeGreaterThanOrEqual(30_000);
+    expect(apiMs).toBeGreaterThan(statementMs);
+  });
+});
+
+// --- Copilot 4176117561 (Medium) + challenger Low 1/Low 2: the pass/fail of a
+// local:test run is one pure function over (body error, app stop, down). -----
+describe('L18 local:test summary finalisation', () => {
+  const APP = [null, 'stopped', 'killed', 'already-exited', 'unresponsive', 'error: EPERM', 'something-new'];
+  const DOWN = ['ok', 'error: compose down failed'];
+  const ERR = [null, 'reader totals differ'];
+  const cases = ERR.flatMap((error) => APP.flatMap((app) => DOWN.map((down) => ({ error, app, down }))));
+
+  it.each(cases)('error=$error app=$app down=$down', ({ error, app, down }) => {
+    const s = finalizeLocalTestSummary({ project: 'p', steps: { up: 'ok' }, error, cleanup: { app, down } });
+    const expected = error === null && (app === 'stopped' || app === 'killed') && down === 'ok';
+    expect(s.pass).toBe(expected);
+    // Every result is recorded, pass or fail.
+    expect(s.project).toBe('p');
+    expect(s.steps.up).toBe('ok');
+    expect(s.steps.appStop).toBe(app);
+    expect(s.steps.down).toBe(down === 'ok' ? 'ok (-v)' : down);
+    if (error) expect(s.error).toBe(error);
+    if (expected) expect(s.failures).toEqual([]);
+    else expect(s.failures.length).toBeGreaterThan(0);
+  });
+
+  it('T1: a failing down -v alone fails the run', () => {
+    const s = finalizeLocalTestSummary({ project: 'p', steps: {}, error: null, cleanup: { app: 'stopped', down: 'error: compose down failed' } });
+    expect(s.pass).toBe(false);
+    expect(s.failures.join('\n')).toMatch(/down -v.*compose down failed/);
+  });
+
+  it('an unresponsive app alone fails the run (down still recorded ok)', () => {
+    const s = finalizeLocalTestSummary({ project: 'p', steps: {}, error: null, cleanup: { app: 'unresponsive', down: 'ok' } });
+    expect(s.pass).toBe(false);
+    expect(s.steps.down).toBe('ok (-v)');
+    expect(s.failures.join('\n')).toMatch(/next start.*unresponsive/);
+  });
+
+  it('an error stopping the app alone fails the run', () => {
+    const s = finalizeLocalTestSummary({ project: 'p', steps: {}, error: null, cleanup: { app: 'error: EPERM', down: 'ok' } });
+    expect(s.pass).toBe(false);
+    expect(s.failures.join('\n')).toMatch(/EPERM/);
+  });
+
+  it('an app that had already exited, or was never started, fails an otherwise passing run (it should still have been serving)', () => {
+    for (const app of ['already-exited', null]) {
+      expect(finalizeLocalTestSummary({ project: 'p', steps: {}, error: null, cleanup: { app, down: 'ok' } }).pass).toBe(false);
+    }
+  });
+
+  it('runLocalTest: a passing body with a clean stop and down passes; a stuck app fails it after down -v ran', async () => {
+    const down = vi.fn(async () => undefined);
+    const ok = await runLocalTest({
+      project: 'p',
+      down,
+      downTimeoutMs: 5_000,
+      stopOptions: { graceMs: 3_000, killMs: 3_000 },
+      body: async ({ steps, setApp }) => {
+        setApp(realSleeper());
+        steps.api = 'ok';
+      },
+    });
+    expect(ok).toMatchObject({ pass: true, failures: [], steps: { api: 'ok', appStop: 'stopped', down: 'ok (-v)' } });
+    const stuckApp = Object.assign(new EventEmitter(), { pid: 1, exitCode: null, signalCode: null, kill: () => true });
+    const bad = await runLocalTest({ project: 'p', down, downTimeoutMs: 5_000, stopOptions: { graceMs: 50, killMs: 50 }, body: async ({ setApp }) => setApp(stuckApp) });
+    expect(bad.pass).toBe(false);
+    expect(bad.steps.appStop).toBe('unresponsive');
+    expect(down).toHaveBeenCalledTimes(2);
+  }, 15_000);
+
+  it('local.mjs records the app right after spawning it, prints the summary and exits non-zero unless summary.pass', () => {
+    const src = read('scripts/local/local.mjs');
+    expect(src).toMatch(/const app = await startIfPortFree\(\{[\s\S]*?\}\);\s*setApp\(app\);/);
+    expect(src).toMatch(/process\.stdout\.write\(`\$\{JSON\.stringify\(\{ type: 'ratio\.local-test', \.\.\.summary \}\)\}\\n`\);/);
+    expect(src).toMatch(/return summary\.pass \? 0 : 1;/);
+    expect(src).toMatch(/return \(await COMMANDS\[cmd\]\(localSettings\(process\.env\), args\)\) \?\? 0;/);
+    expect(src).not.toMatch(/summary\.pass = /); // only finalizeLocalTestSummary decides
   });
 });

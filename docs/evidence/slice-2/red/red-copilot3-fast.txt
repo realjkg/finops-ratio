@@ -1,0 +1,1589 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+ ❯ scripts/local/local.test.mjs (106 tests | 52 failed) 21268ms
+   ❯ L16 stopping next start and cleaning up never hang (11)
+     × local.mjs cleans up only through cleanupLocalTest, with a bounded down; no unbounded exit wait remains 12ms
+   ❯ L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) (17)
+     × withDeadline: the value when in time; at the deadline a rejection AND an aborted signal, even if the work ignores the signal 1ms
+     × waitUntil (local:up s3 readiness): a server that accepts TCP but never answers fails within the deadline; every attempt is aborted 2ms
+     × waitUntil: the overall deadline holds even when one attempt may take longer, and when the probe ignores its signal 0ms
+     × waitUntil: keeps trying through errors and false, resolves on true; both deadlines are required 1ms
+     × waitForOwnServer (next start readiness): alive but never answering fails within the deadline; every attempt is aborted 10003ms
+     × waitForOwnServer: the overall deadline holds when the probe ignores its signal 5002ms
+     × fetchJson (the API reads): no headers ever ⇒ rejects within the request deadline 1ms
+     × fetchJson: headers then a stalled body ⇒ rejects within the deadline too (the body read is bounded, not swallowed) 1ms
+     × fetchJson: status and parsed body; non-JSON ⇒ body null; the token goes in the Authorization header; a deadline is required 1ms
+     × local:test, readiness against a stalled server: fails within its deadline AND down -v still runs, once 1ms
+     × local:test, an API read against a stalled server: fails within its deadline AND down -v still runs, once 2ms
+     × cleanupLocalTest: a down -v that never settles is cut off at its deadline (recorded as an error) 5002ms
+     × runProcess refuses to run without a deadline (nothing is spawned) 3ms
+     × portInUse is bounded even when the connect attempt never settles (treated as busy: fail closed) 7ms
+     × ownsListeningSocket is bounded: a process walk beyond maxProcesses stops and refuses (false); cycles end 6ms
+     × local.mjs: every fetch carries a signal, every S3 send an abortSignal, every pg Client its timeouts; waits go through waitUntil; API reads through fetchJson 1ms
+     × the API request deadline is longer than the route's own 10 s DB statement timeout 1ms
+   ❯ L18 local:test summary finalisation (34)
+     × error=null app=null down=ok 1ms
+     × error=null app=null down=error: compose down failed 0ms
+     × error=null app=stopped down=ok 0ms
+     × error=null app=stopped down=error: compose down failed 0ms
+     × error=null app=killed down=ok 0ms
+     × error=null app=killed down=error: compose down failed 0ms
+     × error=null app=already-exited down=ok 0ms
+     × error=null app=already-exited down=error: compose down failed 0ms
+     × error=null app=unresponsive down=ok 0ms
+     × error=null app=unresponsive down=error: compose down failed 1ms
+     × error=null app=error: EPERM down=ok 0ms
+     × error=null app=error: EPERM down=error: compose down failed 0ms
+     × error=null app=something-new down=ok 0ms
+     × error=null app=something-new down=error: compose down failed 0ms
+     × error=reader totals differ app=null down=ok 0ms
+     × error=reader totals differ app=null down=error: compose down failed 0ms
+     × error=reader totals differ app=stopped down=ok 0ms
+     × error=reader totals differ app=stopped down=error: compose down failed 1ms
+     × error=reader totals differ app=killed down=ok 0ms
+     × error=reader totals differ app=killed down=error: compose down failed 0ms
+     × error=reader totals differ app=already-exited down=ok 0ms
+     × error=reader totals differ app=already-exited down=error: compose down failed 0ms
+     × error=reader totals differ app=unresponsive down=ok 0ms
+     × error=reader totals differ app=unresponsive down=error: compose down failed 0ms
+     × error=reader totals differ app=error: EPERM down=ok 0ms
+     × error=reader totals differ app=error: EPERM down=error: compose down failed 1ms
+     × error=reader totals differ app=something-new down=ok 0ms
+     × error=reader totals differ app=something-new down=error: compose down failed 0ms
+     × T1: a failing down -v alone fails the run 0ms
+     × an unresponsive app alone fails the run (down still recorded ok) 0ms
+     × an error stopping the app alone fails the run 0ms
+     × an app that had already exited, or was never started, fails an otherwise passing run (it should still have been serving) 0ms
+     × runLocalTest: a passing body with a clean stop and down passes; a stuck app fails it after down -v ran 0ms
+     × local.mjs records the app right after spawning it, prints the summary and exits non-zero unless summary.pass 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 52 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/local.test.mjs > L16 stopping next start and cleaning up never hang > local.mjs cleans up only through cleanupLocalTest, with a bounded down; no unbounded exit wait remains
+AssertionError: expected '#!/usr/bin/env node\n// LOCAL, EPHEME…' to match /await runLocalTest\(\{/
+
+- Expected:
+/await runLocalTest\(\{/
+
++ Received:
+"#!/usr/bin/env node
+// LOCAL, EPHEMERAL Ratio stack (Slice 2). Not a production tool.
+//
+//   npm run local:up        docker compose up (Postgres 16 + SeaweedFS S3), then the role bootstrap
+//   npm run local:migrate   worker:build, migrate as the non-superuser migrator, status must match
+//   npm run local:seed      buckets, the committed SYNTHETIC FOCUS fixture, tenant + source
+//   npm run local:sync      worker sync as the ratio_worker login
+//   npm run local:down      docker compose down        (-- -v: also volumes and .ratio-local/<project>/)
+//   npm run local:test      its OWN stack: preflight → up → migrate → seed → sync → API read
+//                           under next start → assert control totals → down -v
+//
+// Every command is idempotent. Secrets are generated on the first `up` into
+// .ratio-local/<project>/env (gitignored; directory 0700, file 0600); nothing
+// secret is committed. Settings (env): RATIO_LOCAL_PROJECT (ratio-local),
+// RATIO_LOCAL_PG_PORT (54329), RATIO_LOCAL_S3_PORT (18343),
+// RATIO_LOCAL_APP_PORT (3100). local:test ignores those and uses
+// RATIO_LOCAL_TEST_PROJECT (ratio-local-test), RATIO_LOCAL_TEST_PG_PORT
+// (54339), RATIO_LOCAL_TEST_S3_PORT (18353), RATIO_LOCAL_TEST_APP_PORT (3110),
+// refusing any overlap with the developer stack. All ports bind 127.0.0.1 only.
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { setTimeout } from 'node:timers';
+
+const { fetch } = globalThis;
+import {
+  LOCAL_NAMES,
+  apiEnv,
+  cleanupLocalTest,
+  compareControlTotals,
+  connectionUrl,
+  generateLocalSecrets,
+  localSettings,
+  localStatePaths,
+  localTestSettings,
+  portInUse,
+  parseEnvFile,
+  preflightProblems,
+  removeProjectState,
+  runProcess,
+  startIfPortFree,
+  waitForOwnServer,
+  workerEnv,
+  writeEnvFileSecure,
+} from './lib.mjs';
+import { runBootstrap } from './bootstrap.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const require = createRequire(import.meta.url);
+const { Client } = require(path.join(ROOT, 'node_modules', 'pg'));
+const COMPOSE_FILE = path.join(ROOT, 'docker-compose.local.yml');
+const FIXTURE_BASE = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'base');
+const CONTROL_TOTALS = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'control-totals.json');
+
+const log = (msg, fields = {}) => process.stderr.write(`${JSON.stringify({ tag: 'ratio-local', msg, ...fields })}\\n`);
+
+// --- state (per compose project) ------------------------------------------------
+
+const envFileOf = (settings) => path.join(ROOT, localStatePaths(settings.project).envFile);
+
+function loadSecrets(settings, { create }) {
+  const file = envFileOf(settings);
+  if (fs.existsSync(file)) return parseEnvFile(fs.readFileSync(file, 'utf8'));
+  if (!create) throw new Error(`${localStatePaths(settings.project).envFile} not found: run npm run local:up first`);
+  const secrets = generateLocalSecrets();
+  writeEnvFileSecure(file, secrets);
+  log('generated local secrets', { file: localStatePaths(settings.project).envFile });
+  return secrets;
+}
+
+// --- processes ---------------------------------------------------------------
+
+/** `docker compose down` during local:test's cleanup may not hang forever. */
+const DOWN_TIMEOUT_MS = 300_000;
+
+function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs } = {}) {
+  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs });
+}
+
+function composeEnv(settings, secrets) {
+  return {
+    RATIO_LOCAL_PG_PORT: String(settings.pgPort),
+    RATIO_LOCAL_S3_PORT: String(settings.s3Port),
+    RATIO_LOCAL_APP_PORT: String(settings.appPort),
+    ...secrets,
+  };
+}
+
+const compose = (settings, secrets, args, opts = {}) =>
+  run('docker', ['compose', '-f', COMPOSE_FILE, '-p', settings.project, ...args], { ...opts, env: { ...composeEnv(settings, secrets), ...(opts.env ?? {}) } });
+
+async function withClient(url, fn) {
+  const c = new Client({ connectionString: url, connectionTimeoutMillis: 5000 });
+  c.on('error', () => undefined);
+  await c.connect();
+  try {
+    return await fn(c);
+  } finally {
+    await c.end().catch(() => undefined);
+  }
+}
+
+async function waitFor(what, probe, timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  for (;;) {
+    try {
+      if (await probe()) return;
+    } catch (e) {
+      last = e;
+    }
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}${last ? `: ${last.message}` : ''}`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+const superUrl = (settings, secrets) =>
+  connectionUrl({ user: 'postgres', password: secrets.RATIO_LOCAL_PG_SUPERUSER_PASSWORD, port: settings.pgPort, database: 'postgres' });
+
+// --- commands ----------------------------------------------------------------
+
+async function up(settings) {
+  const secrets = loadSecrets(settings, { create: true });
+  await compose(settings, secrets, ['up', '-d', '--wait', 'postgres', 's3']);
+  await waitFor('postgres', () => withClient(superUrl(settings, secrets), async (c) => (await c.query('SELECT 1')).rowCount === 1));
+  await waitFor('s3', async () => {
+    const r = await fetch(`http://127.0.0.1:${settings.s3Port}/`);
+    return r.status < 500;
+  });
+  await withClient(superUrl(settings, secrets), async (c) => {
+    const v = await c.query(`SELECT current_setting('server_version_num') AS v`);
+    if (!/^16\\d{4}$/.test(v.rows[0].v)) throw new Error(`the local Postgres is not version 16 (server_version_num ${v.rows[0].v})`);
+    await runBootstrap(c, LOCAL_NAMES, {
+      [LOCAL_NAMES.migrator]: secrets.RATIO_LOCAL_MIGRATOR_PASSWORD,
+      [LOCAL_NAMES.worker]: secrets.RATIO_LOCAL_WORKER_PASSWORD,
+      [LOCAL_NAMES.reader]: secrets.RATIO_LOCAL_READER_PASSWORD,
+    });
+  });
+  log('up: postgres 16 + s3 running, roles bootstrapped', { project: settings.project, pgPort: settings.pgPort, s3Port: settings.s3Port });
+}
+
+async function workerCli(settings, secrets, args, opts = {}) {
+  if (!fs.existsSync(path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'))) await run('npm', ['run', '-s', 'worker:build']);
+  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets), capture: true, ...opts });
+}
+
+async function migrate(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  await run('npm', ['run', '-s', 'worker:build']);
+  await workerCli(settings, secrets, ['migrate']);
+  const status = await workerCli(settings, secrets, ['migrate', '--status', '--json'], { allowFail: true });
+  const doc = JSON.parse(status.out);
+  // Slice 0's catalog check judged the bootstrapped logins: no privilege problem may be reported.
+  if (status.code !== 0 || !doc.matches || doc.privilegeProblems?.length) {
+    throw new Error(`migrate --status: exit ${status.code}, matches ${doc.matches}, privilegeProblems ${JSON.stringify(doc.privilegeProblems)}`);
+  }
+  log('migrate: schema current, Slice 0 privilege model satisfied', { currentVersion: doc.currentVersion, privilegeProblems: doc.privilegeProblems });
+  return doc;
+}
+
+function fixtureFiles(dir, acc = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, e.name);
+    if (e.isDirectory()) fixtureFiles(abs, acc);
+    else acc.push(abs);
+  }
+  return acc;
+}
+
+function s3Client(settings, secrets) {
+  const { S3Client } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+  return new S3Client({
+    endpoint: `http://127.0.0.1:${settings.s3Port}`,
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: secrets.RATIO_LOCAL_S3_ACCESS_KEY_ID, secretAccessKey: secrets.RATIO_LOCAL_S3_SECRET_ACCESS_KEY },
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  });
+}
+
+async function seed(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const { CreateBucketCommand, DeleteObjectCommand, PutObjectCommand } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+  const s3 = s3Client(settings, secrets);
+  try {
+    for (const Bucket of [LOCAL_NAMES.sourceBucket, LOCAL_NAMES.evidenceBucket]) {
+      try {
+        await s3.send(new CreateBucketCommand({ Bucket }));
+      } catch (e) {
+        if (e?.name !== 'BucketAlreadyOwnedByYou' && e?.name !== 'BucketAlreadyExists') throw e;
+      }
+      // A fresh SeaweedFS bucket answers 500 until its volumes are allocated:
+      // warm it with a probe object so the worker's first evidence write does
+      // not spend its bounded retries on that (seen locally: 2 retries).
+      await waitFor(`s3 bucket ${Bucket} writable`, async () => {
+        await s3.send(new PutObjectCommand({ Bucket, Key: '.ratio-local-warmup', Body: 'warmup' }));
+        await s3.send(new DeleteObjectCommand({ Bucket, Key: '.ratio-local-warmup' }));
+        return true;
+      }, 60_000);
+    }
+    const files = fixtureFiles(FIXTURE_BASE);
+    for (const f of files) {
+      const Key = path.relative(FIXTURE_BASE, f).split(path.sep).join('/');
+      await s3.send(new PutObjectCommand({ Bucket: LOCAL_NAMES.sourceBucket, Key, Body: fs.readFileSync(f) }));
+    }
+    log('seed: SYNTHETIC fixture uploaded', { bucket: LOCAL_NAMES.sourceBucket, objects: files.length });
+  } finally {
+    s3.destroy();
+  }
+  const migratorUrl = workerEnv(settings, secrets).RATIO_MIGRATE_DATABASE_URL;
+  await withClient(migratorUrl, async (c) => {
+    // Provisioning is an owner action (ingestion-ops SKILL §2); RLS applies to the owner too.
+    await c.query('BEGIN');
+    try {
+      await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [secrets.RATIO_LOCAL_TENANT_ID]);
+      await c.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, [secrets.RATIO_LOCAL_TENANT_ID, LOCAL_NAMES.tenantSlug]);
+      await c.query(
+        `INSERT INTO ratio.sources (tenant_id, id, source_key, kind, display_name, coverage, declared_focus_version, config)
+         VALUES ($1, gen_random_uuid(), $2, 'focus_file', 'SYNTHETIC local FOCUS fixture (not real data)', 'public_cloud', '1.0', $3::jsonb)
+         ON CONFLICT (tenant_id, source_key) DO NOTHING`,
+        [
+          secrets.RATIO_LOCAL_TENANT_ID,
+          LOCAL_NAMES.sourceKey,
+          JSON.stringify({ layout: 'aws-data-exports', bucket: LOCAL_NAMES.sourceBucket, prefix: LOCAL_NAMES.fixturePrefix, exportName: LOCAL_NAMES.fixtureExportName }),
+        ],
+      );
+      const commit = await c.query('COMMIT');
+      if (commit.command !== 'COMMIT') throw new Error('provisioning transaction was rolled back');
+    } catch (e) {
+      await c.query('ROLLBACK').catch(() => undefined);
+      throw e;
+    }
+  });
+  log('seed: tenant and source provisioned', { tenant: secrets.RATIO_LOCAL_TENANT_ID, source: LOCAL_NAMES.sourceKey });
+}
+
+async function sync(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', LOCAL_NAMES.sourceKey], { allowFail: true });
+  process.stdout.write(r.out);
+  if (r.code !== 0) throw new Error(`worker sync exited ${r.code}`);
+  return JSON.parse(r.out.trim().split('\\n').pop());
+}
+
+async function down(settings, { volumes, timeoutMs }) {
+  // Compose interpolates the whole file even for `down`: give it the real or a placeholder password.
+  const file = envFileOf(settings);
+  const secrets = fs.existsSync(file) ? parseEnvFile(fs.readFileSync(file, 'utf8')) : { RATIO_LOCAL_PG_SUPERUSER_PASSWORD: 'unused-for-down' };
+  await compose(settings, secrets, ['--profile', 'app', '--profile', 'worker', 'down', '--remove-orphans', ...(volumes ? ['-v'] : [])], { timeoutMs });
+  if (volumes) removeProjectState(ROOT, settings.project);
+  log(volumes ? 'down: containers, network, volumes and local secrets removed' : 'down: containers and network removed (volumes kept)', { project: settings.project });
+}
+
+// --- end to end ----------------------------------------------------------------
+
+async function getJson(url, token) {
+  const r = await fetch(url, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  return { status: r.status, body: await r.json().catch(() => null) };
+}
+
+async function localTest() {
+  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  // local:test owns its stack end to end (down -v at the end), so it uses its
+  // OWN project and ports and refuses to start over anything already there.
+  const settings = localTestSettings(process.env);
+  const containers = (await run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${settings.project}`], { capture: true })).out.split('\\n').filter(Boolean).length;
+  const busyPorts = [];
+  for (const p of [settings.pgPort, settings.s3Port, settings.appPort]) if (await portInUse(p)) busyPorts.push(p);
+  const problems = preflightProblems({ stateExists: fs.existsSync(path.join(ROOT, localStatePaths(settings.project).dir)), containers, busyPorts });
+  if (problems.length) throw new Error(`local:test refuses to start (nothing was changed):\\n  ${problems.join('\\n  ')}`);
+  const summary = { project: settings.project, steps: {} };
+  let app;
+  try {
+    await up(settings);
+    await up(settings); // idempotent
+    summary.steps.up = 'ok (twice)';
+    const status = await migrate(settings);
+    await migrate(settings); // idempotent
+    summary.steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
+    await seed(settings);
+    await seed(settings); // idempotent
+    summary.steps.seed = 'ok (twice)';
+    const first = await sync(settings);
+    const outcomes = (rec) => Object.fromEntries((rec.results?.periods ?? []).map((p) => [p.billingPeriod, p.outcome]));
+    summary.steps.sync = outcomes(first);
+    const second = await sync(settings);
+    summary.steps.syncAgain = outcomes(second);
+    if (Object.values(summary.steps.sync).some((o) => o !== 'published')) throw new Error(`first sync did not publish every period: ${JSON.stringify(summary.steps.sync)}`);
+    if (Object.values(summary.steps.syncAgain).some((o) => o !== 'skipped_unchanged')) throw new Error(`second sync was not a no-op: ${JSON.stringify(summary.steps.syncAgain)}`);
+
+    const secrets = loadSecrets(settings, { create: false });
+    const base = `http://127.0.0.1:${settings.appPort}`;
+    // Re-check the app port right before spawning (minutes after the preflight).
+    app = await startIfPortFree({
+      port: settings.appPort,
+      start: () =>
+        spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
+          cwd: ROOT,
+          env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
+          stdio: ['ignore', 'ignore', 'inherit'],
+        }),
+    });
+    summary.steps.appReady = await waitForOwnServer({
+      child: app,
+      port: settings.appPort,
+      probe: async () => (await fetch(`${base}/api/hello`)).status === 200,
+    });
+
+    const anon = await getJson(`${base}/api/v1/costs/published`);
+    if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
+    summary.steps.anonymous = anon.status;
+
+    const rows = [];
+    let totals = null;
+    let cursor = null;
+    for (let page = 0; page < 100; page += 1) {
+      const r = await getJson(`${base}/api/v1/costs/published?limit=17${cursor ? `&cursor=${cursor}` : ''}`, secrets.RATIO_LOCAL_API_TOKEN);
+      if (r.status !== 200) throw new Error(`API read answered ${r.status}: ${JSON.stringify(r.body)}`);
+      if (page === 0) totals = r.body.totals;
+      rows.push(...r.body.data);
+      cursor = r.body.page.nextCursor;
+      if (!cursor) break;
+    }
+    const control = JSON.parse(fs.readFileSync(CONTROL_TOTALS, 'utf8')).base;
+    const mismatches = compareControlTotals(totals ?? [], control);
+    const keys = new Set(rows.map((r) => `${r.batchId}/${r.artifactSha256}/${r.rowOrdinal}`));
+    const expectedRows = Object.values(control).reduce((n, c) => n + c.rowCount, 0);
+    if (rows.length !== expectedRows || keys.size !== expectedRows) mismatches.push(`rows over all pages: ${rows.length} (${keys.size} distinct), expected ${expectedRows}`);
+    if (rows.some((r) => typeof r.billedCost !== 'string')) mismatches.push('a billedCost is not a decimal string');
+    summary.steps.api = { totals, rows: rows.length, distinct: keys.size };
+    if (mismatches.length) throw new Error(`reader totals differ from the fixture control totals:\\n  ${mismatches.join('\\n  ')}`);
+    summary.pass = true;
+  } catch (e) {
+    summary.pass = false;
+    summary.error = e.message;
+  } finally {
+    // Bounded: an app already ended by a signal is recognised at once, a stuck
+    // one is SIGKILLed then given up on, and `down -v` always runs (itself
+    // bounded by DOWN_TIMEOUT_MS).
+    const cleanup = await cleanupLocalTest({ app, down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }) });
+    summary.steps.appStop = cleanup.app;
+    if (cleanup.down === 'ok') summary.steps.down = 'ok (-v)';
+    else {
+      summary.pass = false;
+      summary.downError = cleanup.down;
+    }
+  }
+  process.stdout.write(`${JSON.stringify({ type: 'ratio.local-test', ...summary })}\\n`);
+  if (!summary.pass) throw new Error(summary.error ?? summary.downError ?? 'local:test failed');
+}
+
+// --- main ----------------------------------------------------------------------
+
+const COMMANDS = {
+  up: (s) => up(s),
+  migrate: (s) => migrate(s),
+  seed: (s) => seed(s),
+  sync: (s) => sync(s),
+  down: (s, args) => down(s, { volumes: args.includes('-v') || args.includes('--volumes') }),
+  test: () => localTest(),
+};
+
+async function main(argv) {
+  const [cmd, ...args] = argv;
+  if (!COMMANDS[cmd]) {
+    process.stderr.write(`usage: node scripts/local/local.mjs <${Object.keys(COMMANDS).join('|')}> [-v]\\n`);
+    return 2;
+  }
+  await COMMANDS[cmd](localSettings(process.env), args);
+  return 0;
+}
+
+main(process.argv.slice(2)).then(
+  (code) => process.exit(code),
+  (e) => {
+    log('failed', { error: e.message });
+    process.exit(1);
+  },
+);
+"
+
+ ❯ scripts/local/local.test.mjs:596:17
+    594|     // Cleanup now lives in lib.mjs's runLocalTest (Copilot 4176117561…
+    595|     // calls cleanupLocalTest; local.mjs only hands it the body and `d…
+    596|     expect(src).toMatch(/await runLocalTest\(\{/);
+       |                 ^
+    597|     expect(read('scripts/local/lib.mjs')).toMatch(/await cleanupLocalT…
+    598|     expect(src).not.toMatch(/once\('exit'/);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > withDeadline: the value when in time; at the deadline a rejection AND an aborted signal, even if the work ignores the signal
+TypeError: withDeadline is not a function
+ ❯ scripts/local/local.test.mjs:644:30
+    642| describe('L17 every wait in scripts/local has a hard deadline (Copilot…
+    643|   it('withDeadline: the value when in time; at the deadline a rejectio…
+    644|     await expect(withDeadline(async () => 7, 1_000, 'x')).resolves.toB…
+       |                              ^
+    645|     let seen;
+    646|     const t0 = Date.now();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > waitUntil (local:up s3 readiness): a server that accepts TCP but never answers fails within the deadline; every attempt is aborted
+TypeError: waitUntil is not a function
+ ❯ scripts/local/local.test.mjs:664:16
+    662|     const t0 = Date.now();
+    663|     await expect(
+    664|       waitUntil({
+       |                ^
+    665|         what: 's3',
+    666|         timeoutMs: 800,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > waitUntil: the overall deadline holds even when one attempt may take longer, and when the probe ignores its signal
+TypeError: waitUntil is not a function
+ ❯ scripts/local/local.test.mjs:682:27
+    680|   it('waitUntil: the overall deadline holds even when one attempt may …
+    681|     const t0 = Date.now();
+    682|     await expect(waitUntil({ what: 'x', timeoutMs: 300, attemptTimeout…
+       |                           ^
+    683|     expect(elapsed(t0)).toBeLessThan(2_000);
+    684|   }, 5_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > waitUntil: keeps trying through errors and false, resolves on true; both deadlines are required
+TypeError: waitUntil is not a function
+ ❯ scripts/local/local.test.mjs:693:27
+    691|       return n >= 3;
+    692|     };
+    693|     await expect(waitUntil({ what: 'x', timeoutMs: 5_000, attemptTimeo…
+       |                           ^
+    694|     expect(n).toBe(3);
+    695|     await expect(waitUntil({ what: 'x', timeoutMs: 5_000, intervalMs: …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > waitForOwnServer (next start readiness): alive but never answering fails within the deadline; every attempt is aborted
+Error: Test timed out in 10000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/local/local.test.mjs:699:5
+    697|   }, 10_000);
+    698|
+    699|   it('waitForOwnServer (next start readiness): alive but never answeri…
+       |     ^
+    700|     const port = await stalledServer('silent');
+    701|     const signals = [];
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > waitForOwnServer: the overall deadline holds when the probe ignores its signal
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/local/local.test.mjs:722:5
+    720|   }, 10_000);
+    721|
+    722|   it('waitForOwnServer: the overall deadline holds when the probe igno…
+       |     ^
+    723|     const t0 = Date.now();
+    724|     await expect(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > fetchJson (the API reads): no headers ever ⇒ rejects within the request deadline
+TypeError: fetchJson is not a function
+ ❯ scripts/local/local.test.mjs:733:27
+    731|     const port = await stalledServer('silent');
+    732|     const t0 = Date.now();
+    733|     await expect(fetchJson(`http://127.0.0.1:${port}/api/v1/costs/publ…
+       |                           ^
+    734|     expect(elapsed(t0)).toBeLessThan(2_000);
+    735|   }, 5_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > fetchJson: headers then a stalled body ⇒ rejects within the deadline too (the body read is bounded, not swallowed)
+TypeError: fetchJson is not a function
+ ❯ scripts/local/local.test.mjs:740:27
+    738|     const port = await stalledServer('headers-only');
+    739|     const t0 = Date.now();
+    740|     await expect(fetchJson(`http://127.0.0.1:${port}/api/v1/costs/publ…
+       |                           ^
+    741|     expect(elapsed(t0)).toBeLessThan(2_000);
+    742|   }, 5_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > fetchJson: status and parsed body; non-JSON ⇒ body null; the token goes in the Authorization header; a deadline is required
+TypeError: fetchJson is not a function
+ ❯ scripts/local/local.test.mjs:751:27
+    749|       res.end(JSON.stringify({ ok: true }));
+    750|     });
+    751|     await expect(fetchJson(`http://127.0.0.1:${port}/x`, { token: 'tok…
+       |                           ^
+    752|     await expect(fetchJson(`http://127.0.0.1:${port}/x`, { timeoutMs: …
+    753|     await expect(fetchJson(`http://127.0.0.1:${port}/text`, { timeoutM…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > local:test, readiness against a stalled server: fails within its deadline AND down -v still runs, once
+TypeError: runLocalTest is not a function
+ ❯ scripts/local/local.test.mjs:761:39
+    759|     const down = vi.fn(async () => undefined);
+    760|     const t0 = Date.now();
+    761|     const summary = await runLocalTest({
+       |                                       ^
+    762|       project: 'p',
+    763|       down,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > local:test, an API read against a stalled server: fails within its deadline AND down -v still runs, once
+TypeError: runLocalTest is not a function
+ ❯ scripts/local/local.test.mjs:784:39
+    782|     const down = vi.fn(async () => undefined);
+    783|     const t0 = Date.now();
+    784|     const summary = await runLocalTest({
+       |                                       ^
+    785|       project: 'p',
+    786|       down,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > cleanupLocalTest: a down -v that never settles is cut off at its deadline (recorded as an error)
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/local/local.test.mjs:802:5
+    800|   }, 15_000);
+    801|
+    802|   it('cleanupLocalTest: a down -v that never settles is cut off at its…
+       |     ^
+    803|     const t0 = Date.now();
+    804|     const r = await cleanupLocalTest({ app: null, down: () => new Prom…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > runProcess refuses to run without a deadline (nothing is spawned)
+AssertionError: expected [Function] to throw error matching /timeoutMs/ but got 'Cannot read properties of undefined (…'
+
+- Expected:
+/timeoutMs/
+
++ Received:
+"Cannot read properties of undefined (reading 'on')"
+
+ ❯ scripts/local/local.test.mjs:811:72
+    809|   it('runProcess refuses to run without a deadline (nothing is spawned…
+    810|     const spawnFn = vi.fn();
+    811|     await expect(runProcess(process.execPath, ['-e', ''], { spawnFn })…
+       |                                                                        ^
+    812|     await expect(runProcess(process.execPath, ['-e', ''], { spawnFn, t…
+    813|     expect(spawnFn).not.toHaveBeenCalled();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > portInUse is bounded even when the connect attempt never settles (treated as busy: fail closed)
+AssertionError: promise rejected "TypeError: The "options.host" property mu… { code: '…' }" instead of resolving
+ ❯ scripts/local/local.test.mjs:823:63
+    821|     };
+    822|     const t0 = Date.now();
+    823|     await expect(portInUse(3110, { timeoutMs: 200, connect })).resolve…
+       |                                                               ^
+    824|     expect(elapsed(t0)).toBeLessThan(2_000);
+    825|     expect(sock.destroy).toHaveBeenCalled();
+
+Caused by: TypeError: The "options.host" property must be of type string. Received an instance of Object
+ ❯ scripts/local/lib.mjs:221:19
+ ❯ portInUse scripts/local/lib.mjs:220:10
+ ❯ scripts/local/local.test.mjs:823:27
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_INVALID_ARG_TYPE' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > ownsListeningSocket is bounded: a process walk beyond maxProcesses stops and refuses (false); cycles end
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ scripts/local/local.test.mjs:841:92
+    839|     fs.symlinkSync('socket:[555]', path.join(root, '109', 'fd', '3'));
+    840|     expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root …
+    841|     expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root,…
+       |                                                                                            ^
+    842|     // A children cycle with no holder ends (false), it does not spin.
+    843|     fs.writeFileSync(path.join(root, '109', 'task', '109', 'children')…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > local.mjs: every fetch carries a signal, every S3 send an abortSignal, every pg Client its timeouts; waits go through waitUntil; API reads through fetchJson
+AssertionError: expected '#!/usr/bin/env node\n// LOCAL, EPHEME…' not to match /function waitFor\(/
+
+- Expected:
+/function waitFor\(/
+
++ Received:
+"#!/usr/bin/env node
+// LOCAL, EPHEMERAL Ratio stack (Slice 2). Not a production tool.
+//
+//   npm run local:up        docker compose up (Postgres 16 + SeaweedFS S3), then the role bootstrap
+//   npm run local:migrate   worker:build, migrate as the non-superuser migrator, status must match
+//   npm run local:seed      buckets, the committed SYNTHETIC FOCUS fixture, tenant + source
+//   npm run local:sync      worker sync as the ratio_worker login
+//   npm run local:down      docker compose down        (-- -v: also volumes and .ratio-local/<project>/)
+//   npm run local:test      its OWN stack: preflight → up → migrate → seed → sync → API read
+//                           under next start → assert control totals → down -v
+//
+// Every command is idempotent. Secrets are generated on the first `up` into
+// .ratio-local/<project>/env (gitignored; directory 0700, file 0600); nothing
+// secret is committed. Settings (env): RATIO_LOCAL_PROJECT (ratio-local),
+// RATIO_LOCAL_PG_PORT (54329), RATIO_LOCAL_S3_PORT (18343),
+// RATIO_LOCAL_APP_PORT (3100). local:test ignores those and uses
+// RATIO_LOCAL_TEST_PROJECT (ratio-local-test), RATIO_LOCAL_TEST_PG_PORT
+// (54339), RATIO_LOCAL_TEST_S3_PORT (18353), RATIO_LOCAL_TEST_APP_PORT (3110),
+// refusing any overlap with the developer stack. All ports bind 127.0.0.1 only.
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { setTimeout } from 'node:timers';
+
+const { fetch } = globalThis;
+import {
+  LOCAL_NAMES,
+  apiEnv,
+  cleanupLocalTest,
+  compareControlTotals,
+  connectionUrl,
+  generateLocalSecrets,
+  localSettings,
+  localStatePaths,
+  localTestSettings,
+  portInUse,
+  parseEnvFile,
+  preflightProblems,
+  removeProjectState,
+  runProcess,
+  startIfPortFree,
+  waitForOwnServer,
+  workerEnv,
+  writeEnvFileSecure,
+} from './lib.mjs';
+import { runBootstrap } from './bootstrap.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const require = createRequire(import.meta.url);
+const { Client } = require(path.join(ROOT, 'node_modules', 'pg'));
+const COMPOSE_FILE = path.join(ROOT, 'docker-compose.local.yml');
+const FIXTURE_BASE = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'base');
+const CONTROL_TOTALS = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'control-totals.json');
+
+const log = (msg, fields = {}) => process.stderr.write(`${JSON.stringify({ tag: 'ratio-local', msg, ...fields })}\\n`);
+
+// --- state (per compose project) ------------------------------------------------
+
+const envFileOf = (settings) => path.join(ROOT, localStatePaths(settings.project).envFile);
+
+function loadSecrets(settings, { create }) {
+  const file = envFileOf(settings);
+  if (fs.existsSync(file)) return parseEnvFile(fs.readFileSync(file, 'utf8'));
+  if (!create) throw new Error(`${localStatePaths(settings.project).envFile} not found: run npm run local:up first`);
+  const secrets = generateLocalSecrets();
+  writeEnvFileSecure(file, secrets);
+  log('generated local secrets', { file: localStatePaths(settings.project).envFile });
+  return secrets;
+}
+
+// --- processes ---------------------------------------------------------------
+
+/** `docker compose down` during local:test's cleanup may not hang forever. */
+const DOWN_TIMEOUT_MS = 300_000;
+
+function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs } = {}) {
+  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs });
+}
+
+function composeEnv(settings, secrets) {
+  return {
+    RATIO_LOCAL_PG_PORT: String(settings.pgPort),
+    RATIO_LOCAL_S3_PORT: String(settings.s3Port),
+    RATIO_LOCAL_APP_PORT: String(settings.appPort),
+    ...secrets,
+  };
+}
+
+const compose = (settings, secrets, args, opts = {}) =>
+  run('docker', ['compose', '-f', COMPOSE_FILE, '-p', settings.project, ...args], { ...opts, env: { ...composeEnv(settings, secrets), ...(opts.env ?? {}) } });
+
+async function withClient(url, fn) {
+  const c = new Client({ connectionString: url, connectionTimeoutMillis: 5000 });
+  c.on('error', () => undefined);
+  await c.connect();
+  try {
+    return await fn(c);
+  } finally {
+    await c.end().catch(() => undefined);
+  }
+}
+
+async function waitFor(what, probe, timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  for (;;) {
+    try {
+      if (await probe()) return;
+    } catch (e) {
+      last = e;
+    }
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}${last ? `: ${last.message}` : ''}`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+const superUrl = (settings, secrets) =>
+  connectionUrl({ user: 'postgres', password: secrets.RATIO_LOCAL_PG_SUPERUSER_PASSWORD, port: settings.pgPort, database: 'postgres' });
+
+// --- commands ----------------------------------------------------------------
+
+async function up(settings) {
+  const secrets = loadSecrets(settings, { create: true });
+  await compose(settings, secrets, ['up', '-d', '--wait', 'postgres', 's3']);
+  await waitFor('postgres', () => withClient(superUrl(settings, secrets), async (c) => (await c.query('SELECT 1')).rowCount === 1));
+  await waitFor('s3', async () => {
+    const r = await fetch(`http://127.0.0.1:${settings.s3Port}/`);
+    return r.status < 500;
+  });
+  await withClient(superUrl(settings, secrets), async (c) => {
+    const v = await c.query(`SELECT current_setting('server_version_num') AS v`);
+    if (!/^16\\d{4}$/.test(v.rows[0].v)) throw new Error(`the local Postgres is not version 16 (server_version_num ${v.rows[0].v})`);
+    await runBootstrap(c, LOCAL_NAMES, {
+      [LOCAL_NAMES.migrator]: secrets.RATIO_LOCAL_MIGRATOR_PASSWORD,
+      [LOCAL_NAMES.worker]: secrets.RATIO_LOCAL_WORKER_PASSWORD,
+      [LOCAL_NAMES.reader]: secrets.RATIO_LOCAL_READER_PASSWORD,
+    });
+  });
+  log('up: postgres 16 + s3 running, roles bootstrapped', { project: settings.project, pgPort: settings.pgPort, s3Port: settings.s3Port });
+}
+
+async function workerCli(settings, secrets, args, opts = {}) {
+  if (!fs.existsSync(path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'))) await run('npm', ['run', '-s', 'worker:build']);
+  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets), capture: true, ...opts });
+}
+
+async function migrate(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  await run('npm', ['run', '-s', 'worker:build']);
+  await workerCli(settings, secrets, ['migrate']);
+  const status = await workerCli(settings, secrets, ['migrate', '--status', '--json'], { allowFail: true });
+  const doc = JSON.parse(status.out);
+  // Slice 0's catalog check judged the bootstrapped logins: no privilege problem may be reported.
+  if (status.code !== 0 || !doc.matches || doc.privilegeProblems?.length) {
+    throw new Error(`migrate --status: exit ${status.code}, matches ${doc.matches}, privilegeProblems ${JSON.stringify(doc.privilegeProblems)}`);
+  }
+  log('migrate: schema current, Slice 0 privilege model satisfied', { currentVersion: doc.currentVersion, privilegeProblems: doc.privilegeProblems });
+  return doc;
+}
+
+function fixtureFiles(dir, acc = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, e.name);
+    if (e.isDirectory()) fixtureFiles(abs, acc);
+    else acc.push(abs);
+  }
+  return acc;
+}
+
+function s3Client(settings, secrets) {
+  const { S3Client } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+  return new S3Client({
+    endpoint: `http://127.0.0.1:${settings.s3Port}`,
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: secrets.RATIO_LOCAL_S3_ACCESS_KEY_ID, secretAccessKey: secrets.RATIO_LOCAL_S3_SECRET_ACCESS_KEY },
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  });
+}
+
+async function seed(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const { CreateBucketCommand, DeleteObjectCommand, PutObjectCommand } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+  const s3 = s3Client(settings, secrets);
+  try {
+    for (const Bucket of [LOCAL_NAMES.sourceBucket, LOCAL_NAMES.evidenceBucket]) {
+      try {
+        await s3.send(new CreateBucketCommand({ Bucket }));
+      } catch (e) {
+        if (e?.name !== 'BucketAlreadyOwnedByYou' && e?.name !== 'BucketAlreadyExists') throw e;
+      }
+      // A fresh SeaweedFS bucket answers 500 until its volumes are allocated:
+      // warm it with a probe object so the worker's first evidence write does
+      // not spend its bounded retries on that (seen locally: 2 retries).
+      await waitFor(`s3 bucket ${Bucket} writable`, async () => {
+        await s3.send(new PutObjectCommand({ Bucket, Key: '.ratio-local-warmup', Body: 'warmup' }));
+        await s3.send(new DeleteObjectCommand({ Bucket, Key: '.ratio-local-warmup' }));
+        return true;
+      }, 60_000);
+    }
+    const files = fixtureFiles(FIXTURE_BASE);
+    for (const f of files) {
+      const Key = path.relative(FIXTURE_BASE, f).split(path.sep).join('/');
+      await s3.send(new PutObjectCommand({ Bucket: LOCAL_NAMES.sourceBucket, Key, Body: fs.readFileSync(f) }));
+    }
+    log('seed: SYNTHETIC fixture uploaded', { bucket: LOCAL_NAMES.sourceBucket, objects: files.length });
+  } finally {
+    s3.destroy();
+  }
+  const migratorUrl = workerEnv(settings, secrets).RATIO_MIGRATE_DATABASE_URL;
+  await withClient(migratorUrl, async (c) => {
+    // Provisioning is an owner action (ingestion-ops SKILL §2); RLS applies to the owner too.
+    await c.query('BEGIN');
+    try {
+      await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [secrets.RATIO_LOCAL_TENANT_ID]);
+      await c.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, [secrets.RATIO_LOCAL_TENANT_ID, LOCAL_NAMES.tenantSlug]);
+      await c.query(
+        `INSERT INTO ratio.sources (tenant_id, id, source_key, kind, display_name, coverage, declared_focus_version, config)
+         VALUES ($1, gen_random_uuid(), $2, 'focus_file', 'SYNTHETIC local FOCUS fixture (not real data)', 'public_cloud', '1.0', $3::jsonb)
+         ON CONFLICT (tenant_id, source_key) DO NOTHING`,
+        [
+          secrets.RATIO_LOCAL_TENANT_ID,
+          LOCAL_NAMES.sourceKey,
+          JSON.stringify({ layout: 'aws-data-exports', bucket: LOCAL_NAMES.sourceBucket, prefix: LOCAL_NAMES.fixturePrefix, exportName: LOCAL_NAMES.fixtureExportName }),
+        ],
+      );
+      const commit = await c.query('COMMIT');
+      if (commit.command !== 'COMMIT') throw new Error('provisioning transaction was rolled back');
+    } catch (e) {
+      await c.query('ROLLBACK').catch(() => undefined);
+      throw e;
+    }
+  });
+  log('seed: tenant and source provisioned', { tenant: secrets.RATIO_LOCAL_TENANT_ID, source: LOCAL_NAMES.sourceKey });
+}
+
+async function sync(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', LOCAL_NAMES.sourceKey], { allowFail: true });
+  process.stdout.write(r.out);
+  if (r.code !== 0) throw new Error(`worker sync exited ${r.code}`);
+  return JSON.parse(r.out.trim().split('\\n').pop());
+}
+
+async function down(settings, { volumes, timeoutMs }) {
+  // Compose interpolates the whole file even for `down`: give it the real or a placeholder password.
+  const file = envFileOf(settings);
+  const secrets = fs.existsSync(file) ? parseEnvFile(fs.readFileSync(file, 'utf8')) : { RATIO_LOCAL_PG_SUPERUSER_PASSWORD: 'unused-for-down' };
+  await compose(settings, secrets, ['--profile', 'app', '--profile', 'worker', 'down', '--remove-orphans', ...(volumes ? ['-v'] : [])], { timeoutMs });
+  if (volumes) removeProjectState(ROOT, settings.project);
+  log(volumes ? 'down: containers, network, volumes and local secrets removed' : 'down: containers and network removed (volumes kept)', { project: settings.project });
+}
+
+// --- end to end ----------------------------------------------------------------
+
+async function getJson(url, token) {
+  const r = await fetch(url, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  return { status: r.status, body: await r.json().catch(() => null) };
+}
+
+async function localTest() {
+  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  // local:test owns its stack end to end (down -v at the end), so it uses its
+  // OWN project and ports and refuses to start over anything already there.
+  const settings = localTestSettings(process.env);
+  const containers = (await run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${settings.project}`], { capture: true })).out.split('\\n').filter(Boolean).length;
+  const busyPorts = [];
+  for (const p of [settings.pgPort, settings.s3Port, settings.appPort]) if (await portInUse(p)) busyPorts.push(p);
+  const problems = preflightProblems({ stateExists: fs.existsSync(path.join(ROOT, localStatePaths(settings.project).dir)), containers, busyPorts });
+  if (problems.length) throw new Error(`local:test refuses to start (nothing was changed):\\n  ${problems.join('\\n  ')}`);
+  const summary = { project: settings.project, steps: {} };
+  let app;
+  try {
+    await up(settings);
+    await up(settings); // idempotent
+    summary.steps.up = 'ok (twice)';
+    const status = await migrate(settings);
+    await migrate(settings); // idempotent
+    summary.steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
+    await seed(settings);
+    await seed(settings); // idempotent
+    summary.steps.seed = 'ok (twice)';
+    const first = await sync(settings);
+    const outcomes = (rec) => Object.fromEntries((rec.results?.periods ?? []).map((p) => [p.billingPeriod, p.outcome]));
+    summary.steps.sync = outcomes(first);
+    const second = await sync(settings);
+    summary.steps.syncAgain = outcomes(second);
+    if (Object.values(summary.steps.sync).some((o) => o !== 'published')) throw new Error(`first sync did not publish every period: ${JSON.stringify(summary.steps.sync)}`);
+    if (Object.values(summary.steps.syncAgain).some((o) => o !== 'skipped_unchanged')) throw new Error(`second sync was not a no-op: ${JSON.stringify(summary.steps.syncAgain)}`);
+
+    const secrets = loadSecrets(settings, { create: false });
+    const base = `http://127.0.0.1:${settings.appPort}`;
+    // Re-check the app port right before spawning (minutes after the preflight).
+    app = await startIfPortFree({
+      port: settings.appPort,
+      start: () =>
+        spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
+          cwd: ROOT,
+          env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
+          stdio: ['ignore', 'ignore', 'inherit'],
+        }),
+    });
+    summary.steps.appReady = await waitForOwnServer({
+      child: app,
+      port: settings.appPort,
+      probe: async () => (await fetch(`${base}/api/hello`)).status === 200,
+    });
+
+    const anon = await getJson(`${base}/api/v1/costs/published`);
+    if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
+    summary.steps.anonymous = anon.status;
+
+    const rows = [];
+    let totals = null;
+    let cursor = null;
+    for (let page = 0; page < 100; page += 1) {
+      const r = await getJson(`${base}/api/v1/costs/published?limit=17${cursor ? `&cursor=${cursor}` : ''}`, secrets.RATIO_LOCAL_API_TOKEN);
+      if (r.status !== 200) throw new Error(`API read answered ${r.status}: ${JSON.stringify(r.body)}`);
+      if (page === 0) totals = r.body.totals;
+      rows.push(...r.body.data);
+      cursor = r.body.page.nextCursor;
+      if (!cursor) break;
+    }
+    const control = JSON.parse(fs.readFileSync(CONTROL_TOTALS, 'utf8')).base;
+    const mismatches = compareControlTotals(totals ?? [], control);
+    const keys = new Set(rows.map((r) => `${r.batchId}/${r.artifactSha256}/${r.rowOrdinal}`));
+    const expectedRows = Object.values(control).reduce((n, c) => n + c.rowCount, 0);
+    if (rows.length !== expectedRows || keys.size !== expectedRows) mismatches.push(`rows over all pages: ${rows.length} (${keys.size} distinct), expected ${expectedRows}`);
+    if (rows.some((r) => typeof r.billedCost !== 'string')) mismatches.push('a billedCost is not a decimal string');
+    summary.steps.api = { totals, rows: rows.length, distinct: keys.size };
+    if (mismatches.length) throw new Error(`reader totals differ from the fixture control totals:\\n  ${mismatches.join('\\n  ')}`);
+    summary.pass = true;
+  } catch (e) {
+    summary.pass = false;
+    summary.error = e.message;
+  } finally {
+    // Bounded: an app already ended by a signal is recognised at once, a stuck
+    // one is SIGKILLed then given up on, and `down -v` always runs (itself
+    // bounded by DOWN_TIMEOUT_MS).
+    const cleanup = await cleanupLocalTest({ app, down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }) });
+    summary.steps.appStop = cleanup.app;
+    if (cleanup.down === 'ok') summary.steps.down = 'ok (-v)';
+    else {
+      summary.pass = false;
+      summary.downError = cleanup.down;
+    }
+  }
+  process.stdout.write(`${JSON.stringify({ type: 'ratio.local-test', ...summary })}\\n`);
+  if (!summary.pass) throw new Error(summary.error ?? summary.downError ?? 'local:test failed');
+}
+
+// --- main ----------------------------------------------------------------------
+
+const COMMANDS = {
+  up: (s) => up(s),
+  migrate: (s) => migrate(s),
+  seed: (s) => seed(s),
+  sync: (s) => sync(s),
+  down: (s, args) => down(s, { volumes: args.includes('-v') || args.includes('--volumes') }),
+  test: () => localTest(),
+};
+
+async function main(argv) {
+  const [cmd, ...args] = argv;
+  if (!COMMANDS[cmd]) {
+    process.stderr.write(`usage: node scripts/local/local.mjs <${Object.keys(COMMANDS).join('|')}> [-v]\\n`);
+    return 2;
+  }
+  await COMMANDS[cmd](localSettings(process.env), args);
+  return 0;
+}
+
+main(process.argv.slice(2)).then(
+  (code) => process.exit(code),
+  (e) => {
+    log('failed', { error: e.message });
+    process.exit(1);
+  },
+);
+"
+
+ ❯ scripts/local/local.test.mjs:850:21
+    848|   it('local.mjs: every fetch carries a signal, every S3 send an abortS…
+    849|     const src = read('scripts/local/local.mjs');
+    850|     expect(src).not.toMatch(/function waitFor\(/);
+       |                     ^
+    851|     expect(src).not.toMatch(/function getJson\(/);
+    852|     expect(src.match(/await waitUntil\(\{/g)?.length).toBeGreaterThanO…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L17 every wait in scripts/local has a hard deadline (Copilot 4176117539, 4176117553) > the API request deadline is longer than the route's own 10 s DB statement timeout
+AssertionError: expected null not to be null
+ ❯ scripts/local/local.test.mjs:870:19
+    868|     const statementMs = Number(/statement_timeout=(\d+)/.exec(pool)[1]…
+    869|     const m = /const API_REQUEST_TIMEOUT_MS = ([\d_]+);/.exec(read('sc…
+    870|     expect(m).not.toBeNull();
+       |                   ^
+    871|     const apiMs = Number(m[1].replace(/_/g, ''));
+    872|     expect(statementMs).toBe(10_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=null down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=null down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=stopped down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=stopped down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=killed down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=killed down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=already-exited down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=already-exited down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=unresponsive down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=unresponsive down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=error: EPERM down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=error: EPERM down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=something-new down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=null app=something-new down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=null down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=null down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=stopped down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=stopped down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=killed down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=killed down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=already-exited down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=already-exited down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=unresponsive down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=unresponsive down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=error: EPERM down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=error: EPERM down=error: compose down failed
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=something-new down=ok
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > error=reader totals differ app=something-new down=error: compose down failed
+TypeError: finalizeLocalTestSummary is not a function
+ ❯ scripts/local/local.test.mjs:887:39
+    885|
+    886|   it.each(cases)('error=$error app=$app down=$down', ({ error, app, do…
+    887|     const s = finalizeLocalTestSummary({ project: 'p', steps: { up: 'o…
+       |                                       ^
+    888|     const expected = error === null && (app === 'stopped' || app === '…
+    889|     expect(s.pass).toBe(expected);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > T1: a failing down -v alone fails the run
+TypeError: finalizeLocalTestSummary is not a function
+ ❯ scripts/local/local.test.mjs:901:39
+    899|
+    900|   it('T1: a failing down -v alone fails the run', () => {
+    901|     const s = finalizeLocalTestSummary({ project: 'p', steps: {}, erro…
+       |                                       ^
+    902|     expect(s.pass).toBe(false);
+    903|     expect(s.failures.join('\n')).toMatch(/down -v.*compose down faile…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > an unresponsive app alone fails the run (down still recorded ok)
+TypeError: finalizeLocalTestSummary is not a function
+ ❯ scripts/local/local.test.mjs:907:39
+    905|
+    906|   it('an unresponsive app alone fails the run (down still recorded ok)…
+    907|     const s = finalizeLocalTestSummary({ project: 'p', steps: {}, erro…
+       |                                       ^
+    908|     expect(s.pass).toBe(false);
+    909|     expect(s.steps.down).toBe('ok (-v)');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > an error stopping the app alone fails the run
+TypeError: finalizeLocalTestSummary is not a function
+ ❯ scripts/local/local.test.mjs:914:39
+    912|
+    913|   it('an error stopping the app alone fails the run', () => {
+    914|     const s = finalizeLocalTestSummary({ project: 'p', steps: {}, erro…
+       |                                       ^
+    915|     expect(s.pass).toBe(false);
+    916|     expect(s.failures.join('\n')).toMatch(/EPERM/);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > an app that had already exited, or was never started, fails an otherwise passing run (it should still have been serving)
+TypeError: finalizeLocalTestSummary is not a function
+ ❯ scripts/local/local.test.mjs:921:38
+    919|   it('an app that had already exited, or was never started, fails an o…
+    920|     for (const app of ['already-exited', null]) {
+    921|       expect(finalizeLocalTestSummary({ project: 'p', steps: {}, error…
+       |                                      ^
+    922|     }
+    923|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > runLocalTest: a passing body with a clean stop and down passes; a stuck app fails it after down -v ran
+TypeError: runLocalTest is not a function
+ ❯ scripts/local/local.test.mjs:927:34
+    925|   it('runLocalTest: a passing body with a clean stop and down passes; …
+    926|     const down = vi.fn(async () => undefined);
+    927|     const ok = await runLocalTest({
+       |                                  ^
+    928|       project: 'p',
+    929|       down,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/52]⎯
+
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > local.mjs records the app right after spawning it, prints the summary and exits non-zero unless summary.pass
+AssertionError: expected '#!/usr/bin/env node\n// LOCAL, EPHEME…' to match /const app = await startIfPortFree\(\{…/
+
+- Expected:
+/const app = await startIfPortFree\(\{[\s\S]*?\}\);\s*setApp\(app\);/
+
++ Received:
+"#!/usr/bin/env node
+// LOCAL, EPHEMERAL Ratio stack (Slice 2). Not a production tool.
+//
+//   npm run local:up        docker compose up (Postgres 16 + SeaweedFS S3), then the role bootstrap
+//   npm run local:migrate   worker:build, migrate as the non-superuser migrator, status must match
+//   npm run local:seed      buckets, the committed SYNTHETIC FOCUS fixture, tenant + source
+//   npm run local:sync      worker sync as the ratio_worker login
+//   npm run local:down      docker compose down        (-- -v: also volumes and .ratio-local/<project>/)
+//   npm run local:test      its OWN stack: preflight → up → migrate → seed → sync → API read
+//                           under next start → assert control totals → down -v
+//
+// Every command is idempotent. Secrets are generated on the first `up` into
+// .ratio-local/<project>/env (gitignored; directory 0700, file 0600); nothing
+// secret is committed. Settings (env): RATIO_LOCAL_PROJECT (ratio-local),
+// RATIO_LOCAL_PG_PORT (54329), RATIO_LOCAL_S3_PORT (18343),
+// RATIO_LOCAL_APP_PORT (3100). local:test ignores those and uses
+// RATIO_LOCAL_TEST_PROJECT (ratio-local-test), RATIO_LOCAL_TEST_PG_PORT
+// (54339), RATIO_LOCAL_TEST_S3_PORT (18353), RATIO_LOCAL_TEST_APP_PORT (3110),
+// refusing any overlap with the developer stack. All ports bind 127.0.0.1 only.
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { setTimeout } from 'node:timers';
+
+const { fetch } = globalThis;
+import {
+  LOCAL_NAMES,
+  apiEnv,
+  cleanupLocalTest,
+  compareControlTotals,
+  connectionUrl,
+  generateLocalSecrets,
+  localSettings,
+  localStatePaths,
+  localTestSettings,
+  portInUse,
+  parseEnvFile,
+  preflightProblems,
+  removeProjectState,
+  runProcess,
+  startIfPortFree,
+  waitForOwnServer,
+  workerEnv,
+  writeEnvFileSecure,
+} from './lib.mjs';
+import { runBootstrap } from './bootstrap.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const require = createRequire(import.meta.url);
+const { Client } = require(path.join(ROOT, 'node_modules', 'pg'));
+const COMPOSE_FILE = path.join(ROOT, 'docker-compose.local.yml');
+const FIXTURE_BASE = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'base');
+const CONTROL_TOTALS = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'control-totals.json');
+
+const log = (msg, fields = {}) => process.stderr.write(`${JSON.stringify({ tag: 'ratio-local', msg, ...fields })}\\n`);
+
+// --- state (per compose project) ------------------------------------------------
+
+const envFileOf = (settings) => path.join(ROOT, localStatePaths(settings.project).envFile);
+
+function loadSecrets(settings, { create }) {
+  const file = envFileOf(settings);
+  if (fs.existsSync(file)) return parseEnvFile(fs.readFileSync(file, 'utf8'));
+  if (!create) throw new Error(`${localStatePaths(settings.project).envFile} not found: run npm run local:up first`);
+  const secrets = generateLocalSecrets();
+  writeEnvFileSecure(file, secrets);
+  log('generated local secrets', { file: localStatePaths(settings.project).envFile });
+  return secrets;
+}
+
+// --- processes ---------------------------------------------------------------
+
+/** `docker compose down` during local:test's cleanup may not hang forever. */
+const DOWN_TIMEOUT_MS = 300_000;
+
+function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs } = {}) {
+  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs });
+}
+
+function composeEnv(settings, secrets) {
+  return {
+    RATIO_LOCAL_PG_PORT: String(settings.pgPort),
+    RATIO_LOCAL_S3_PORT: String(settings.s3Port),
+    RATIO_LOCAL_APP_PORT: String(settings.appPort),
+    ...secrets,
+  };
+}
+
+const compose = (settings, secrets, args, opts = {}) =>
+  run('docker', ['compose', '-f', COMPOSE_FILE, '-p', settings.project, ...args], { ...opts, env: { ...composeEnv(settings, secrets), ...(opts.env ?? {}) } });
+
+async function withClient(url, fn) {
+  const c = new Client({ connectionString: url, connectionTimeoutMillis: 5000 });
+  c.on('error', () => undefined);
+  await c.connect();
+  try {
+    return await fn(c);
+  } finally {
+    await c.end().catch(() => undefined);
+  }
+}
+
+async function waitFor(what, probe, timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  for (;;) {
+    try {
+      if (await probe()) return;
+    } catch (e) {
+      last = e;
+    }
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}${last ? `: ${last.message}` : ''}`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+const superUrl = (settings, secrets) =>
+  connectionUrl({ user: 'postgres', password: secrets.RATIO_LOCAL_PG_SUPERUSER_PASSWORD, port: settings.pgPort, database: 'postgres' });
+
+// --- commands ----------------------------------------------------------------
+
+async function up(settings) {
+  const secrets = loadSecrets(settings, { create: true });
+  await compose(settings, secrets, ['up', '-d', '--wait', 'postgres', 's3']);
+  await waitFor('postgres', () => withClient(superUrl(settings, secrets), async (c) => (await c.query('SELECT 1')).rowCount === 1));
+  await waitFor('s3', async () => {
+    const r = await fetch(`http://127.0.0.1:${settings.s3Port}/`);
+    return r.status < 500;
+  });
+  await withClient(superUrl(settings, secrets), async (c) => {
+    const v = await c.query(`SELECT current_setting('server_version_num') AS v`);
+    if (!/^16\\d{4}$/.test(v.rows[0].v)) throw new Error(`the local Postgres is not version 16 (server_version_num ${v.rows[0].v})`);
+    await runBootstrap(c, LOCAL_NAMES, {
+      [LOCAL_NAMES.migrator]: secrets.RATIO_LOCAL_MIGRATOR_PASSWORD,
+      [LOCAL_NAMES.worker]: secrets.RATIO_LOCAL_WORKER_PASSWORD,
+      [LOCAL_NAMES.reader]: secrets.RATIO_LOCAL_READER_PASSWORD,
+    });
+  });
+  log('up: postgres 16 + s3 running, roles bootstrapped', { project: settings.project, pgPort: settings.pgPort, s3Port: settings.s3Port });
+}
+
+async function workerCli(settings, secrets, args, opts = {}) {
+  if (!fs.existsSync(path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'))) await run('npm', ['run', '-s', 'worker:build']);
+  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets), capture: true, ...opts });
+}
+
+async function migrate(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  await run('npm', ['run', '-s', 'worker:build']);
+  await workerCli(settings, secrets, ['migrate']);
+  const status = await workerCli(settings, secrets, ['migrate', '--status', '--json'], { allowFail: true });
+  const doc = JSON.parse(status.out);
+  // Slice 0's catalog check judged the bootstrapped logins: no privilege problem may be reported.
+  if (status.code !== 0 || !doc.matches || doc.privilegeProblems?.length) {
+    throw new Error(`migrate --status: exit ${status.code}, matches ${doc.matches}, privilegeProblems ${JSON.stringify(doc.privilegeProblems)}`);
+  }
+  log('migrate: schema current, Slice 0 privilege model satisfied', { currentVersion: doc.currentVersion, privilegeProblems: doc.privilegeProblems });
+  return doc;
+}
+
+function fixtureFiles(dir, acc = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, e.name);
+    if (e.isDirectory()) fixtureFiles(abs, acc);
+    else acc.push(abs);
+  }
+  return acc;
+}
+
+function s3Client(settings, secrets) {
+  const { S3Client } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+  return new S3Client({
+    endpoint: `http://127.0.0.1:${settings.s3Port}`,
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: secrets.RATIO_LOCAL_S3_ACCESS_KEY_ID, secretAccessKey: secrets.RATIO_LOCAL_S3_SECRET_ACCESS_KEY },
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  });
+}
+
+async function seed(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const { CreateBucketCommand, DeleteObjectCommand, PutObjectCommand } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+  const s3 = s3Client(settings, secrets);
+  try {
+    for (const Bucket of [LOCAL_NAMES.sourceBucket, LOCAL_NAMES.evidenceBucket]) {
+      try {
+        await s3.send(new CreateBucketCommand({ Bucket }));
+      } catch (e) {
+        if (e?.name !== 'BucketAlreadyOwnedByYou' && e?.name !== 'BucketAlreadyExists') throw e;
+      }
+      // A fresh SeaweedFS bucket answers 500 until its volumes are allocated:
+      // warm it with a probe object so the worker's first evidence write does
+      // not spend its bounded retries on that (seen locally: 2 retries).
+      await waitFor(`s3 bucket ${Bucket} writable`, async () => {
+        await s3.send(new PutObjectCommand({ Bucket, Key: '.ratio-local-warmup', Body: 'warmup' }));
+        await s3.send(new DeleteObjectCommand({ Bucket, Key: '.ratio-local-warmup' }));
+        return true;
+      }, 60_000);
+    }
+    const files = fixtureFiles(FIXTURE_BASE);
+    for (const f of files) {
+      const Key = path.relative(FIXTURE_BASE, f).split(path.sep).join('/');
+      await s3.send(new PutObjectCommand({ Bucket: LOCAL_NAMES.sourceBucket, Key, Body: fs.readFileSync(f) }));
+    }
+    log('seed: SYNTHETIC fixture uploaded', { bucket: LOCAL_NAMES.sourceBucket, objects: files.length });
+  } finally {
+    s3.destroy();
+  }
+  const migratorUrl = workerEnv(settings, secrets).RATIO_MIGRATE_DATABASE_URL;
+  await withClient(migratorUrl, async (c) => {
+    // Provisioning is an owner action (ingestion-ops SKILL §2); RLS applies to the owner too.
+    await c.query('BEGIN');
+    try {
+      await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [secrets.RATIO_LOCAL_TENANT_ID]);
+      await c.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, [secrets.RATIO_LOCAL_TENANT_ID, LOCAL_NAMES.tenantSlug]);
+      await c.query(
+        `INSERT INTO ratio.sources (tenant_id, id, source_key, kind, display_name, coverage, declared_focus_version, config)
+         VALUES ($1, gen_random_uuid(), $2, 'focus_file', 'SYNTHETIC local FOCUS fixture (not real data)', 'public_cloud', '1.0', $3::jsonb)
+         ON CONFLICT (tenant_id, source_key) DO NOTHING`,
+        [
+          secrets.RATIO_LOCAL_TENANT_ID,
+          LOCAL_NAMES.sourceKey,
+          JSON.stringify({ layout: 'aws-data-exports', bucket: LOCAL_NAMES.sourceBucket, prefix: LOCAL_NAMES.fixturePrefix, exportName: LOCAL_NAMES.fixtureExportName }),
+        ],
+      );
+      const commit = await c.query('COMMIT');
+      if (commit.command !== 'COMMIT') throw new Error('provisioning transaction was rolled back');
+    } catch (e) {
+      await c.query('ROLLBACK').catch(() => undefined);
+      throw e;
+    }
+  });
+  log('seed: tenant and source provisioned', { tenant: secrets.RATIO_LOCAL_TENANT_ID, source: LOCAL_NAMES.sourceKey });
+}
+
+async function sync(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', LOCAL_NAMES.sourceKey], { allowFail: true });
+  process.stdout.write(r.out);
+  if (r.code !== 0) throw new Error(`worker sync exited ${r.code}`);
+  return JSON.parse(r.out.trim().split('\\n').pop());
+}
+
+async function down(settings, { volumes, timeoutMs }) {
+  // Compose interpolates the whole file even for `down`: give it the real or a placeholder password.
+  const file = envFileOf(settings);
+  const secrets = fs.existsSync(file) ? parseEnvFile(fs.readFileSync(file, 'utf8')) : { RATIO_LOCAL_PG_SUPERUSER_PASSWORD: 'unused-for-down' };
+  await compose(settings, secrets, ['--profile', 'app', '--profile', 'worker', 'down', '--remove-orphans', ...(volumes ? ['-v'] : [])], { timeoutMs });
+  if (volumes) removeProjectState(ROOT, settings.project);
+  log(volumes ? 'down: containers, network, volumes and local secrets removed' : 'down: containers and network removed (volumes kept)', { project: settings.project });
+}
+
+// --- end to end ----------------------------------------------------------------
+
+async function getJson(url, token) {
+  const r = await fetch(url, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  return { status: r.status, body: await r.json().catch(() => null) };
+}
+
+async function localTest() {
+  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  // local:test owns its stack end to end (down -v at the end), so it uses its
+  // OWN project and ports and refuses to start over anything already there.
+  const settings = localTestSettings(process.env);
+  const containers = (await run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${settings.project}`], { capture: true })).out.split('\\n').filter(Boolean).length;
+  const busyPorts = [];
+  for (const p of [settings.pgPort, settings.s3Port, settings.appPort]) if (await portInUse(p)) busyPorts.push(p);
+  const problems = preflightProblems({ stateExists: fs.existsSync(path.join(ROOT, localStatePaths(settings.project).dir)), containers, busyPorts });
+  if (problems.length) throw new Error(`local:test refuses to start (nothing was changed):\\n  ${problems.join('\\n  ')}`);
+  const summary = { project: settings.project, steps: {} };
+  let app;
+  try {
+    await up(settings);
+    await up(settings); // idempotent
+    summary.steps.up = 'ok (twice)';
+    const status = await migrate(settings);
+    await migrate(settings); // idempotent
+    summary.steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
+    await seed(settings);
+    await seed(settings); // idempotent
+    summary.steps.seed = 'ok (twice)';
+    const first = await sync(settings);
+    const outcomes = (rec) => Object.fromEntries((rec.results?.periods ?? []).map((p) => [p.billingPeriod, p.outcome]));
+    summary.steps.sync = outcomes(first);
+    const second = await sync(settings);
+    summary.steps.syncAgain = outcomes(second);
+    if (Object.values(summary.steps.sync).some((o) => o !== 'published')) throw new Error(`first sync did not publish every period: ${JSON.stringify(summary.steps.sync)}`);
+    if (Object.values(summary.steps.syncAgain).some((o) => o !== 'skipped_unchanged')) throw new Error(`second sync was not a no-op: ${JSON.stringify(summary.steps.syncAgain)}`);
+
+    const secrets = loadSecrets(settings, { create: false });
+    const base = `http://127.0.0.1:${settings.appPort}`;
+    // Re-check the app port right before spawning (minutes after the preflight).
+    app = await startIfPortFree({
+      port: settings.appPort,
+      start: () =>
+        spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
+          cwd: ROOT,
+          env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
+          stdio: ['ignore', 'ignore', 'inherit'],
+        }),
+    });
+    summary.steps.appReady = await waitForOwnServer({
+      child: app,
+      port: settings.appPort,
+      probe: async () => (await fetch(`${base}/api/hello`)).status === 200,
+    });
+
+    const anon = await getJson(`${base}/api/v1/costs/published`);
+    if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
+    summary.steps.anonymous = anon.status;
+
+    const rows = [];
+    let totals = null;
+    let cursor = null;
+    for (let page = 0; page < 100; page += 1) {
+      const r = await getJson(`${base}/api/v1/costs/published?limit=17${cursor ? `&cursor=${cursor}` : ''}`, secrets.RATIO_LOCAL_API_TOKEN);
+      if (r.status !== 200) throw new Error(`API read answered ${r.status}: ${JSON.stringify(r.body)}`);
+      if (page === 0) totals = r.body.totals;
+      rows.push(...r.body.data);
+      cursor = r.body.page.nextCursor;
+      if (!cursor) break;
+    }
+    const control = JSON.parse(fs.readFileSync(CONTROL_TOTALS, 'utf8')).base;
+    const mismatches = compareControlTotals(totals ?? [], control);
+    const keys = new Set(rows.map((r) => `${r.batchId}/${r.artifactSha256}/${r.rowOrdinal}`));
+    const expectedRows = Object.values(control).reduce((n, c) => n + c.rowCount, 0);
+    if (rows.length !== expectedRows || keys.size !== expectedRows) mismatches.push(`rows over all pages: ${rows.length} (${keys.size} distinct), expected ${expectedRows}`);
+    if (rows.some((r) => typeof r.billedCost !== 'string')) mismatches.push('a billedCost is not a decimal string');
+    summary.steps.api = { totals, rows: rows.length, distinct: keys.size };
+    if (mismatches.length) throw new Error(`reader totals differ from the fixture control totals:\\n  ${mismatches.join('\\n  ')}`);
+    summary.pass = true;
+  } catch (e) {
+    summary.pass = false;
+    summary.error = e.message;
+  } finally {
+    // Bounded: an app already ended by a signal is recognised at once, a stuck
+    // one is SIGKILLed then given up on, and `down -v` always runs (itself
+    // bounded by DOWN_TIMEOUT_MS).
+    const cleanup = await cleanupLocalTest({ app, down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }) });
+    summary.steps.appStop = cleanup.app;
+    if (cleanup.down === 'ok') summary.steps.down = 'ok (-v)';
+    else {
+      summary.pass = false;
+      summary.downError = cleanup.down;
+    }
+  }
+  process.stdout.write(`${JSON.stringify({ type: 'ratio.local-test', ...summary })}\\n`);
+  if (!summary.pass) throw new Error(summary.error ?? summary.downError ?? 'local:test failed');
+}
+
+// --- main ----------------------------------------------------------------------
+
+const COMMANDS = {
+  up: (s) => up(s),
+  migrate: (s) => migrate(s),
+  seed: (s) => seed(s),
+  sync: (s) => sync(s),
+  down: (s, args) => down(s, { volumes: args.includes('-v') || args.includes('--volumes') }),
+  test: () => localTest(),
+};
+
+async function main(argv) {
+  const [cmd, ...args] = argv;
+  if (!COMMANDS[cmd]) {
+    process.stderr.write(`usage: node scripts/local/local.mjs <${Object.keys(COMMANDS).join('|')}> [-v]\\n`);
+    return 2;
+  }
+  await COMMANDS[cmd](localSettings(process.env), args);
+  return 0;
+}
+
+main(process.argv.slice(2)).then(
+  (code) => process.exit(code),
+  (e) => {
+    log('failed', { error: e.message });
+    process.exit(1);
+  },
+);
+"
+
+ ❯ scripts/local/local.test.mjs:947:17
+    945|   it('local.mjs records the app right after spawning it, prints the su…
+    946|     const src = read('scripts/local/local.mjs');
+    947|     expect(src).toMatch(/const app = await startIfPortFree\(\{[\s\S]*?…
+       |                 ^
+    948|     expect(src).toMatch(/process\.stdout\.write\(`\$\{JSON\.stringify\…
+    949|     expect(src).toMatch(/return summary\.pass \? 0 : 1;/);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/52]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  52 failed | 54 passed (106)
+   Start at  04:21:46
+   Duration  22.02s (tests 99%, transform 1%)
+
