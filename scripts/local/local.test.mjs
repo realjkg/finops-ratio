@@ -951,3 +951,91 @@ describe('L18 local:test summary finalisation', () => {
     expect(src).not.toMatch(/summary\.pass = /); // only finalizeLocalTestSummary decides
   });
 });
+
+// --- challenger Low 1 on b27f4ba: runProcess with capture: true settled only
+// on 'close', which never fires while a GRANDCHILD holds the stdout pipe, so
+// the deadline was not hard. Every case below must settle within its bound and
+// leave no process behind.
+describe('L19 runProcess deadline is hard even when a grandchild holds stdio (challenger Low 1)', () => {
+  /** pids whose cmdline contains `marker` (Linux /proc). */
+  const pidsWith = (marker) =>
+    fs
+      .readdirSync('/proc')
+      .filter((d) => /^\d+$/.test(d))
+      .filter((d) => {
+        try {
+          return fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').includes(marker);
+        } catch {
+          return false;
+        }
+      })
+      .map(Number);
+  const markers = [];
+  const marker = () => {
+    const m = `${30 + markers.length}.${Math.floor(Math.random() * 900) + 100}`;
+    markers.push(m);
+    return m;
+  };
+  afterAll(() => {
+    for (const m of markers) {
+      for (const pid of pidsWith(`sleep\0${m}`)) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // already gone
+        }
+      }
+    }
+  });
+  const gone = async (m) => {
+    for (let i = 0; i < 20; i += 1) {
+      if (pidsWith(`sleep\0${m}`).length === 0) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return false;
+  };
+
+  it('capture: a child and a grandchild both holding the pipe ⇒ rejects at the deadline; the whole group is killed', async () => {
+    const m = marker();
+    const t0 = Date.now();
+    await expect(runProcess('bash', ['-c', `(sleep ${m}) & sleep ${m}`], { capture: true, timeoutMs: 500 })).rejects.toThrow(/timed out after 500 ms/);
+    expect(elapsed(t0)).toBeLessThan(2_000);
+    expect(await gone(m)).toBe(true);
+  }, 10_000);
+
+  it('no capture (inherited stdio): the same holds', async () => {
+    const m = marker();
+    const t0 = Date.now();
+    await expect(runProcess('bash', ['-c', `(sleep ${m}) & sleep ${m}`], { timeoutMs: 500 })).rejects.toThrow(/timed out after 500 ms/);
+    expect(elapsed(t0)).toBeLessThan(2_000);
+    expect(await gone(m)).toBe(true);
+  }, 10_000);
+
+  it('capture: a child that exits at once but leaves a grandchild on the pipe settles after a short grace (its exit code), and the grandchild is killed', async () => {
+    const m = marker();
+    const t0 = Date.now();
+    await expect(runProcess('bash', ['-c', `echo hi; (sleep ${m}) & exit 0`], { capture: true, timeoutMs: 10_000, exitGraceMs: 300 })).resolves.toEqual({ code: 0, out: 'hi\n' });
+    expect(elapsed(t0)).toBeLessThan(3_000);
+    expect(await gone(m)).toBe(true);
+  }, 15_000);
+
+  it('capture: the same with a grace longer than the deadline ⇒ rejects at the deadline', async () => {
+    const m = marker();
+    const t0 = Date.now();
+    await expect(runProcess('bash', ['-c', `(sleep ${m}) & exit 0`], { capture: true, timeoutMs: 500, exitGraceMs: 60_000 })).rejects.toThrow(/timed out after 500 ms/);
+    expect(elapsed(t0)).toBeLessThan(2_000);
+    expect(await gone(m)).toBe(true);
+  }, 10_000);
+
+  it('a non-zero exit is still reported while the pipe is held (exit code, not a hang)', async () => {
+    const m = marker();
+    await expect(runProcess('bash', ['-c', `(sleep ${m}) & exit 4`], { capture: true, timeoutMs: 10_000, exitGraceMs: 300 })).rejects.toThrow(/exited 4/);
+    expect(await gone(m)).toBe(true);
+  }, 15_000);
+
+  it('local.mjs kills every live process group on SIGINT/SIGTERM (runProcess spawns each command in its own group)', () => {
+    const src = read('scripts/local/local.mjs');
+    expect(src).toMatch(/for \(const sig of \['SIGINT', 'SIGTERM'\]\)[\s\S]{0,200}killLiveProcessGroups\(\)/);
+    expect(read('scripts/local/lib.mjs')).toMatch(/detached: true/);
+  });
+});
