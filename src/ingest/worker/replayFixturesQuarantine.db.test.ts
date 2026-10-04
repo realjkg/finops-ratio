@@ -9,6 +9,8 @@ import { MemoryEvidenceStore } from '../evidence/MemoryEvidenceStore';
 import { runReplayFixtures } from './replayFixtures';
 import { workerTestDb, type WorkerTestDb } from '../testing/workerSetup';
 import { createTestBucket, requireTestS3Endpoint, type TestBucket } from '../testing/s3';
+import { requireTestDatabaseUrl } from '../db/testing/requireTestDatabaseUrl';
+import { Client } from 'pg';
 
 requireTestS3Endpoint();
 
@@ -29,6 +31,23 @@ async function adminConnections(): Promise<number> {
   const r = await t.db.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'ratio-replay-fixtures'`);
   return r.rows[0].n;
 }
+
+describe('L-1 the connection count is scoped to this test database (no collision with K5 or any other database)', () => {
+  it('ignores an idle ratio-replay-fixtures session connected to a different database', async () => {
+    // The challenger's reproduction: an idle session with the same application_name, in `postgres`.
+    const url = new URL(requireTestDatabaseUrl(process.env));
+    url.pathname = '/postgres';
+    const other = new Client({ connectionString: url.toString(), application_name: 'ratio-replay-fixtures' });
+    await other.connect();
+    try {
+      const seen = await t.db.pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = 'ratio-replay-fixtures' AND datname = 'postgres'`);
+      expect(seen.rows[0].n).toBeGreaterThanOrEqual(1);
+      expect(await adminConnections()).toBe(0);
+    } finally {
+      await other.end();
+    }
+  });
+});
 
 describe('M-A replay-fixtures under a policy that quarantines everything', () => {
   // The per-test timeout IS the bound: a hang fails this test instead of passing it.
