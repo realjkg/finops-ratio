@@ -348,7 +348,7 @@ async function localTest() {
     downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
     // SIGINT/SIGTERM abort this: the body ends, then the same cleanup runs.
     signal: interrupt.signal,
-    body: async ({ steps, setApp }) => {
+    body: async ({ steps, setApp, spawnGuard }) => {
       await up(settings);
       await up(settings); // idempotent
       steps.up = 'ok (twice)';
@@ -373,7 +373,8 @@ async function localTest() {
         port: settings.appPort,
         // Its own process group, tracked with the commands: a forced exit
         // (second signal) kills it too, never leaving an orphan next start.
-        start: () =>
+        // Refused once the cleanup has started (an interrupt during the port re-check).
+        start: spawnGuard(() =>
           trackProcessGroup(
             spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
               cwd: ROOT,
@@ -382,6 +383,7 @@ async function localTest() {
               detached: true,
             }),
           ),
+        ),
       });
       setApp(app);
       steps.appReady = await waitForOwnServer({

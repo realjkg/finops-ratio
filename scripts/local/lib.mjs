@@ -489,10 +489,38 @@ export function finalizeLocalTestSummary({ project, steps, error, cleanup }) {
  * pass/fail with finalizeLocalTestSummary. The body reports the spawned app
  * through setApp(child) as soon as it exists, so cleanup can stop it.
  */
-export async function runLocalTest({ project, body, down, stopOptions, downTimeoutMs, signal }) {
+export async function runLocalTest({ project, body, down, stopOptions, downTimeoutMs, signal, bodySettleMs = 10_000 }) {
   const steps = {};
   let app = null;
   let error = null;
+  // Once the cleanup has started (body done, or interrupted), nothing may be
+  // spawned and nothing may become `app` (Copilot 4176494798): spawnGuard
+  // refuses, and a child handed to setApp late is killed and awaited.
+  let closing = false;
+  const lateKills = [];
+  const killLate = (child) => {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // already gone
+      }
+    }
+    lateKills.push(waitForExit(child, 5_000));
+  };
+  const setApp = (child) => {
+    if (closing) {
+      killLate(child);
+      throw new Error('local:test cleanup has started: a late child was killed');
+    }
+    app = child;
+  };
+  const spawnGuard = (fn) => (...args) => {
+    if (closing) throw new Error('local:test cleanup has started: refusing to spawn');
+    return fn(...args);
+  };
   // An interrupt (SIGINT/SIGTERM in local.mjs aborts `signal` with the signal
   // name) ends the body at once, whatever it is awaiting, and goes through the
   // SAME bounded cleanup; its commands, bound to the signal, are killed. A
@@ -502,6 +530,7 @@ export async function runLocalTest({ project, body, down, stopOptions, downTimeo
   const aborted = new Promise((_, reject) => {
     onAbort = () => {
       interrupted = String(signal.reason ?? 'interrupt');
+      closing = true;
       reject(new Error(`interrupted by ${interrupted}`));
     };
   });
@@ -510,25 +539,22 @@ export async function runLocalTest({ project, body, down, stopOptions, downTimeo
     if (signal.aborted) onAbort();
     else signal.addEventListener('abort', onAbort, { once: true });
   }
+  const running = Promise.resolve().then(() => body({ steps, signal, setApp, spawnGuard }));
+  running.catch(() => undefined);
   try {
-    await Promise.race([
-      Promise.resolve().then(() =>
-        body({
-          steps,
-          signal,
-          setApp: (child) => {
-            app = child;
-          },
-        }),
-      ),
-      aborted,
-    ]);
+    await Promise.race([running, aborted]);
   } catch (e) {
     error = e?.message ?? String(e);
   }
+  closing = true;
   const cleanup = await cleanupLocalTest({ app, down, stopOptions, downTimeoutMs });
   signal?.removeEventListener('abort', onAbort);
+  // Let an interrupted body settle (bounded) so that any late child it hands
+  // over is killed before the caller's final process-group sweep.
+  await withDeadline(() => running.catch(() => undefined), bodySettleMs, 'interrupted body settling').catch(() => undefined);
+  await Promise.all(lateKills);
   const summary = finalizeLocalTestSummary({ project, steps, error, cleanup });
+  if (lateKills.length) summary.lateChildren = lateKills.length;
   if (interrupted) {
     summary.interrupted = interrupted;
     if (summary.pass) {

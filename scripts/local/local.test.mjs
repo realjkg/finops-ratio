@@ -491,7 +491,7 @@ describe('L15 the app port is re-checked right before next start is spawned (no 
 
   it('local.mjs spawns next start only through startIfPortFree and waits through waitForOwnServer', () => {
     const src = read('scripts/local/local.mjs');
-    expect(src).toMatch(/startIfPortFree\(\{[\s\S]*?start: \(\) =>\s*(trackProcessGroup\(\s*)?spawn\(/);
+    expect(src).toMatch(/startIfPortFree\(\{[\s\S]*?start: (spawnGuard\()?\(\) =>\s*(trackProcessGroup\(\s*)?spawn\(/);
     expect(src).toMatch(/waitForOwnServer\(\{/);
     expect(src.match(/spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'/g)).toHaveLength(1);
   });
@@ -1137,7 +1137,7 @@ describe('L20 an interrupted local:test still cleans up (Copilot 4176238924)', (
     const ac = new AbortController();
     const down = vi.fn(async () => undefined);
     setTimeout(() => ac.abort('SIGTERM'), 100);
-    const summary = await runLocalTest({ project: 'p', down, downTimeoutMs: 5_000, signal: ac.signal, body: () => new Promise(() => undefined) });
+    const summary = await runLocalTest({ project: 'p', down, downTimeoutMs: 5_000, signal: ac.signal, bodySettleMs: 200, body: () => new Promise(() => undefined) });
     expect(down).toHaveBeenCalledTimes(1);
     expect(summary.interrupted).toBe('SIGTERM');
     expect(localTestExitCode(summary)).toBe(143);
@@ -1211,7 +1211,7 @@ describe('L20 an interrupted local:test still cleans up (Copilot 4176238924)', (
 
   it('local.mjs: next start is detached and tracked; the first signal aborts local:test (cleanup), other commands kill and exit; a second signal forces; down ignores the interrupt', () => {
     const src = read('scripts/local/local.mjs');
-    expect(src).toMatch(/start: \(\) =>\s*trackProcessGroup\(\s*spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'[\s\S]*?detached: true/);
+    expect(src).toMatch(/start: spawnGuard\(\(\) =>\s*trackProcessGroup\(\s*spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'[\s\S]*?detached: true/);
     expect(src).toMatch(/installInterruptHandlers\(\{/);
     expect(src).toMatch(/onFirst: \(sig\) => \{\s*if \(COMMAND === 'test'\) \{\s*[\s\S]{0,200}?interrupt\.abort\(sig\);\s*return;\s*\}\s*killLiveProcessGroups\(\);/);
     expect(src).toMatch(/onForce: \(sig\) => \{\s*killLiveProcessGroups\(\);[\s\S]{0,200}?process\.exit\(exitCodeForSignal\(sig\)\);/);
