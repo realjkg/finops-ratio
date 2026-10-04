@@ -1685,12 +1685,23 @@ describe('L18 superuser catalog queries are tenant-scoped (PR #67 review)', () =
         ...[...sql.matchAll(/(?:\b(\w+)\.)?batch_id\s*=\s*(\w+)\.id\b/g)].map((m) => [m[1], m[2], m[0]]),
         ...[...sql.matchAll(/\b(\w+)\.id\s*=\s*(?:\b(\w+)\.)?batch_id\b/g)].map((m) => [m[2], m[1], m[0]]),
       ];
+      // Per alias pair: at least as many tenant bindings as batch-id correlations, so a second
+      // subquery that reuses already-scoped aliases is still flagged (challenger mutation C).
+      const correlations = new Map();
       for (const [child, parent, text] of pairs) {
-        const bound =
-          child !== undefined &&
-          (new RegExp(`\\b${child}\\.tenant_id\\s*=\\s*${parent}\\.tenant_id\\b`).test(sql) ||
-            new RegExp(`\\b${parent}\\.tenant_id\\s*=\\s*${child}\\.tenant_id\\b`).test(sql));
-        if (!bound) problems.push(text);
+        if (child === undefined) {
+          problems.push(text);
+          continue;
+        }
+        const key = `${child}|${parent}`;
+        correlations.set(key, [...(correlations.get(key) ?? []), text]);
+      }
+      for (const [key, texts] of correlations) {
+        const [child, parent] = key.split('|');
+        const bindings =
+          [...sql.matchAll(new RegExp(`\\b${child}\\.tenant_id\\s*=\\s*${parent}\\.tenant_id\\b`, 'g'))].length +
+          [...sql.matchAll(new RegExp(`\\b${parent}\\.tenant_id\\s*=\\s*${child}\\.tenant_id\\b`, 'g'))].length;
+        if (bindings < texts.length) problems.push(...texts.slice(bindings));
       }
     }
     return problems;
@@ -1702,6 +1713,8 @@ describe('L18 superuser catalog queries are tenant-scoped (PR #67 review)', () =
       '`SELECT 1 FROM x WHERE batch_id = b.id`',
       '`SELECT (SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id), (SELECT 1 FROM ratio.ingest_artifacts a WHERE a.batch_id = b.id)`',
       '`SELECT 1 FROM ratio.ingest_artifacts a WHERE b.id = a.batch_id`',
+      // Mutation C exactly as the challenger wrote it: a second subquery REUSING the scoped alias v.
+      '`SELECT (SELECT 1 FROM e v WHERE v.tenant_id = b.tenant_id AND v.batch_id = b.id), (SELECT count(*) FROM ratio.ingest_artifacts v WHERE v.batch_id = b.id)`',
       '`SELECT 1 FROM e v WHERE v.batch_id = b.id` + `v.tenant_id = b.tenant_id`',
     ]) {
       expect(untenantedBatchCorrelations(bad), bad).not.toEqual([]);

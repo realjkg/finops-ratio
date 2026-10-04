@@ -634,3 +634,57 @@ fails L18 (1 failed).
 **Gates:**
 - `scripts/local` unit tests: 239 passed;
 - lint: exit 0.
+
+## 16. Corrections to §14 and §15 (challenger Lows at d60ed4a)
+
+The challenger approved c0ff7d0..d60ed4a with 0 High and 0 Medium. Two
+Lows made earlier claims more exact.
+
+**§15 overstated.** "Mutations A–D … are all flagged" was **not true** for C
+as the challenger wrote it. Its C adds a second subquery that **reuses** the
+already-scoped alias `v`:
+
+```sql
+(SELECT count(*) FROM ratio.ingest_artifacts v WHERE v.batch_id = b.id)
+```
+
+The §15 self-test used alias `a` instead, and the §15 checker accepted the
+real C. The existing `v.tenant_id = b.tenant_id` in the same literal
+satisfied it. Verified: the §15 checker returns no problems for that text.
+
+The checker is now count-based. Per SQL literal and per alias pair, it
+requires at least as many `tenant_id` bindings as `batch_id` correlations.
+The self-test now includes C verbatim.
+
+**Mutation on the real file:** C applied to `local.mjs` now fails L18
+(1 failed). The §15 checker passed it.
+
+**Known remaining limits of L18.** It is a lint, not a SQL parser. It does not
+see:
+- `batch_id IN (SELECT …)` or `= ANY(…)`;
+- quoted identifiers;
+- a schema-qualified parent;
+- SQL in single-quoted strings;
+- correlations on other tenant-scoped keys, e.g. `source_id`.
+
+Every superuser query in `scripts/local` was reviewed by hand. Each filters
+by `tenant_id = $1` or binds the tenant (challenger, round at 1df6bdc).
+
+**§14 overstated.** "Validates excluded records like the worker" means *like
+the allowed records*. The calculator's rules are not identical to the
+worker's `validateRow`:
+- **Stricter on formats.** Decimals must match `-?\d+(\.\d+)?`. Timestamps
+  need seconds, at most 6 fraction digits, and offsets as `±HH:MM`. So a
+  foreign record that the worker would exclude can make the calculator stop
+  with an error. This fails closed, and it was already true for AWS records.
+- **Does not check `CHARGE_PERIOD_INVERTED` or `INVALID_CHARACTER`.** That
+  gap was pre-existing and is symmetric for allowed records. An acceptance
+  run would catch a disagreement, because it compares the worker's outcome
+  with the calculator's.
+
+Neither difference affects the upstream samples: every 1k and 10k record
+passes both validators.
+
+**Gates:**
+- `scripts/local` unit tests, all passed;
+- lint, `tsc` and `npm test`, recorded at the head in the PR.
