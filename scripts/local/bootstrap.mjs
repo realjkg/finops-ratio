@@ -3,7 +3,7 @@
 // login provisioning is an owner decision (docs/evidence/slice-2/DEPLOYMENT_BRIEF.md, D-04).
 //
 // What it creates (every step idempotent; re-running changes nothing but the
-// passwords, which are re-set from .ratio-local/env):
+// passwords, which are re-set from .ratio-local/<project>/env):
 //   1. ratio_owner, ratio_worker, ratio_reader — EXACTLY as migration 0001
 //      would (NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE, member
 //      of nothing). Pre-creating them means the migrator never needs

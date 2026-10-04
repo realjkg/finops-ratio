@@ -181,7 +181,7 @@ appears in the baseline run on origin/main.
 
 | Step | Result |
 |---|---|
-| `local:up` | secrets generated into `.ratio-local/env` (0600); PG16 asserted (`server_version_num` 16xxxx); bootstrap verified |
+| `local:up` | secrets generated (0600) into `.ratio-local/env`: this run predates per-project state (f94034d); with today's code the same run writes `.ratio-local/ratio-local-s2a/env`; PG16 asserted (`server_version_num` 16xxxx); bootstrap verified |
 | `local:migrate` | as the non-superuser `ratio_local_migrator` (member of `ratio_owner`, NOCREATEROLE); `currentVersion 0001`, **`privilegeProblems: []`** (Slice 0's catalog check judged the bootstrapped logins) |
 | `local:seed` | 5 SYNTHETIC fixture objects uploaded; tenant + source provisioned as the owner login |
 | `local:sync` | 2026-07-01 `published`, 2026-08-01 `published`, pass true (worker login accepted by Slice 1's startup check) |

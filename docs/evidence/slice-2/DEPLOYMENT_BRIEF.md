@@ -1,11 +1,14 @@
 # Ratio — deployment decision brief (Slice 2)
 
-> **PRODUCTION GO-LIVE IS A NON-DELEGABLE HUMAN GATE.** Only the owner signs
-> it off (§7, owner action 1). That decision is **not** delegated.
+> **Governance state, in three lines:**
+> 1. **D-01..D-10 are DECIDED** by the orchestrator under the owner's
+>    delegation (2026-10-04; Decision log below).
+> 2. **Production go-live remains a NON-DELEGABLE owner gate:** only the owner
+>    signs it off (§7, owner action 1). That decision is **not** delegated.
+> 3. **The acceptance run uses public sample data** (FOCUS 1.0 Sample Data,
+>    D-02) **in a follow-up PR** after #59; it is not part of #59.
 >
-> The owner has delegated the design decisions D-01..D-10 to the orchestrator;
-> they are recorded below as DECIDED (Decision log). What stays with the owner
-> (§7):
+> What stays with the owner (§7):
 > 1. the production go-live sign-off;
 > 2. approving hosting spend;
 > 3. installing the GitHub App;
@@ -30,7 +33,7 @@ Each decision below was **decided by the orchestrator under delegation,
 
 | ID | Decision | Rationale (one line) | Revisit when |
 |---|---|---|---|
-| D-01 | Source snapshot / evidence artifacts are **unrestricted ONLY** when the source encrypts them so that holding read access to the object is **not** enough to read the plaintext. That means either: **SSE-KMS with a customer-managed KMS key**, where the key id is **not** the AWS-managed `aws/s3` key (by alias or by ARN) and the key policy is the access control, verified from the object's metadata at ingest; or **client-side encryption by the source** (the stored object is ciphertext and the worker is not given the key). **Everything else stays restricted**, explicitly including **`ServerSideEncryption: AES256` (SSE-S3)**, which S3 applies to every object by default since January 2023, and **SSE-KMS with the AWS-managed `aws/s3` key**. Both are transparent to anyone holding `s3:GetObject`. Foundation manifests (`src/ingest/db/migrations/*.manifest.json`) stay restricted review artefacts regardless. Enforcement is follow-up work, tracked in **realjkg/finops-ratio#60** (Appendix A). Until it lands, everything is treated as restricted, the safe subset. | The owner's "encrypted by the source with strong encryption" only means something if the encryption is an access-control boundary independent of the bucket; default and AWS-managed encryption are not. Restricted-by-default never under-protects. | A source can only offer SSE-S3 or `aws/s3`, or #60 lands. |
+| D-01 | Source snapshot / evidence artifacts are **unrestricted ONLY** when the source encrypts them so that holding read access to the object is **not** enough to read the plaintext, AND that boundary has been **reviewed**. Exactly two cases qualify. **(1) SSE-KMS whose `SSEKMSKeyId` is on an explicit, audited ALLOWLIST of customer-managed key (CMK) ARNs.** Each allowlist entry records: the key ARN; who reviewed the key policy; when; and a SHA-256 hash of the reviewed policy document. The allowlist is a reviewed, versioned file, and adding an entry is a restricted change. The match is on the full key ARN as reported in the object metadata. Optionally, the worker re-reads the key policy at ingest (`kms:GetKeyPolicy`) and compares its hash with the recorded one, **failing closed** (restricted) on any difference or error. **(2) Client-side encryption by the source** (the stored object is ciphertext and the worker is not given the key). **Everything else stays restricted**, explicitly including: **`ServerSideEncryption: AES256` (SSE-S3)**, which S3 applies to every object by default since January 2023; **SSE-KMS with the AWS-managed `aws/s3` key**, which, like SSE-S3, is transparent to anyone holding `s3:GetObject`; and **any customer-managed key NOT on the allowlist**. Object metadata can show which key was used, not that its policy is a real access boundary: a CMK with a broad `kms:Decrypt` grant would otherwise pass. Foundation manifests (`src/ingest/db/migrations/*.manifest.json`) stay restricted review artefacts regardless. Enforcement is follow-up work, tracked in **realjkg/finops-ratio#60** (Appendix A). Until it lands, everything is treated as restricted, the safe subset. | "Encrypted by the source with strong encryption" means something only if the encryption is an access-control boundary independent of the bucket **and someone has verified that boundary**. Default, AWS-managed and unreviewed customer keys give no such assurance. Restricted-by-default never under-protects. | A source can only offer SSE-S3 or `aws/s3`; a reviewed key's policy changes (its hash no longer matches); or #60 lands. |
 | D-02 | **The acceptance run uses the FinOps Foundation's public "FOCUS 1.0 Sample Data"**: https://github.com/FinOps-Open-Cost-and-Usage-Spec/focus-sample-data at commit `adbdd17a132984d6e8583c149c236d2199c3f5bc`, files `FOCUS-1.0/focus_sample.csv` (1k rows) and `FOCUS-1.0/focus_sample_10000.csv` (10k rows). `FOCUS-1.0/README.md` at that commit states that it is anonymized real-world FOCUS data. **The two files contain AWS, Microsoft and Oracle data only.** The upstream README also lists Google, but there is no Google data in these files, so Google coverage is NOT tested by this run. **Licence: CC BY 4.0 — attribution is required** wherever the data, or results derived from it, are committed or published (credit the FinOps Foundation / FOCUS project, link the repository and the licence, and state any changes made). The data is loaded into the local SeaweedFS bucket, ingested by the worker, and read back through `GET /api/v1/costs/published`. The run is **not blocked on the owner**. It is a separate follow-up PR after #59 merges; nothing of it is in #59. A real AWS (or Azure/GCP) billing connection becomes a later, **optional** owner action. When one is added, option (a) still applies: a read-only IAM role assumed via the SDK chain, with no static keys. | Real-world shape and three-provider coverage (AWS, Microsoft, Oracle) with no account access, so ingestion is validated now. The licence permits reuse with attribution. | The owner connects real billing data, or the sample's layout differs from what the worker expects (the sample is a set of CSV files, not an AWS Data Exports bucket layout; staging them in the expected layout is part of the follow-up PR). |
 | D-03 | **Keep everything until a dedicated retention slice** (option a); a staging-only cleanup of `fixture-*` tenants comes first, as its own slice. | No purge path exists that respects the immutability triggers; keeping data is reversible, deleting is not. | Before the first non-pilot tenant, or storage cost becomes material. |
 | D-04 | **An admin pre-creates the three NOLOGIN ratio roles; the migrator is NOCREATEROLE from day one** (option a, the local model). | Role creation never sits on an app credential; proven locally by `migrate --status` with `privilegeProblems: []`. | The managed Postgres offering cannot pre-create roles. |
@@ -63,12 +66,20 @@ encrypted by the source with strong encryption."* It is **unresolved** which
 | (c) Both | Both of the above risks. |
 
 - **Decided (see the Decision log): option (a), with "strong encryption"
-  defined as an access-control boundary.** That means SSE-KMS with a
-  customer-managed key (never the AWS-managed `aws/s3` key) whose key policy is
-  the access control, or client-side encryption by the source. **SSE-S3
-  (`AES256`, S3's default for every object since January 2023) and SSE-KMS with
-  `aws/s3` stay restricted**: anyone with `s3:GetObject` reads them in
-  plaintext, so "encrypted at rest" alone says nothing about who can read.
+  defined as a REVIEWED access-control boundary.** That means either:
+  - SSE-KMS with a customer-managed key on an **audited allowlist of CMK ARNs**
+    (per entry: who reviewed the key policy, when, and the policy's SHA-256;
+    optionally re-checked at ingest with `kms:GetKeyPolicy`, failing closed);
+    or
+  - client-side encryption by the source.
+
+  What stays restricted:
+  - **SSE-S3** (`AES256`, S3's default for every object since January 2023)
+    and **SSE-KMS with `aws/s3`**: anyone with `s3:GetObject` reads them in
+    plaintext, so "encrypted at rest" alone says nothing about who can read;
+  - **a CMK that is not on the allowlist**: object metadata names the key but
+    cannot show that its policy restricts `kms:Decrypt`. A CMK with a broad
+    decrypt policy is no boundary.
   **Manifests stay restricted.** They live under `**/migrations/**`, which the
   governance gate already classifies as restricted, and a change to them is a
   reviewed security change. Enforcement: realjkg/finops-ratio#60.
@@ -436,36 +447,61 @@ restricted, the safe subset. The worker records no encryption metadata.
   from the S3 HEAD/GET response: `ServerSideEncryption`, `SSEKMSKeyId` and the
   bucket-key flag. If the source declares client-side encryption, it also reads
   the envelope's metadata.
+- **The CMK allowlist:** a reviewed, versioned file. It is part of the
+  restricted change class, so adding an entry needs restricted review. One
+  entry per key: `{ keyArn, policySha256, reviewedBy, reviewedAt }`. The
+  reviewer confirms that the key policy (and its grants) restricts
+  `kms:Decrypt` to the intended principals. `policySha256` is the SHA-256 of
+  the policy document as returned by `kms:GetKeyPolicy`, canonicalised
+  (JSON with sorted keys, no whitespace).
 - It records a classification per artifact. Exactly one of:
-  - `sse-kms-cmk`: `aws:kms` / `aws:kms:dsse` with a key id that is a
-    customer-managed key, i.e. not `alias/aws/s3` and not the account's
-    AWS-managed `aws/s3` key ARN;
+  - `sse-kms-allowlisted`: `aws:kms` / `aws:kms:dsse` whose `SSEKMSKeyId`
+    (the full key ARN) is an allowlist entry. If the optional runtime check
+    is enabled, `kms:GetKeyPolicy` must also return a policy whose hash equals
+    the entry's `policySha256`; a different hash or any KMS error ⇒
+    `restricted`;
   - `client-side`;
   - `restricted`: everything else, including `AES256` (SSE-S3), `aws/s3`
-    SSE-KMS, no header, an unknown value, or a metadata read that fails.
-- Only `sse-kms-cmk` and `client-side` may be classed "unrestricted".
+    SSE-KMS, **any CMK not on the allowlist**, no header, an unknown value, or
+    a metadata read that fails.
+- Only `sse-kms-allowlisted` and `client-side` may be classed
+  "unrestricted".
 - Foundation manifests stay restricted regardless.
 
 **Acceptance criteria (tests first: a red commit before the implementation):**
 1. **Unit, classification from header combinations:**
-   - `aws:kms` with a customer-managed key ARN ⇒ `sse-kms-cmk`;
+   - `aws:kms` with an allowlisted CMK ARN ⇒ `sse-kms-allowlisted`;
+   - **`aws:kms` with a customer-managed key ARN NOT on the allowlist (e.g. a
+     CMK whose policy grants broad `kms:Decrypt`) ⇒ `restricted`**;
+   - an allowlisted ARN whose current key policy hash differs from the
+     recorded `policySha256` (runtime check enabled) ⇒ `restricted`, and a
+     `kms:GetKeyPolicy` error ⇒ `restricted`;
+   - an alias, or a key id instead of the full ARN, does not match an ARN
+     entry ⇒ `restricted`;
    - `ServerSideEncryption: AES256` (SSE-S3, S3's default since January 2023)
      ⇒ **`restricted`**;
    - `aws:kms` with `SSEKMSKeyId` = `alias/aws/s3`, or the AWS-managed `aws/s3`
-     key ARN (resolved through the key's metadata: `KeyManager = AWS`) ⇒
-     **`restricted`**;
+     key ARN ⇒ **`restricted`** (it can never be on the allowlist: an
+     allowlist entry whose key has `KeyManager = AWS` is rejected when the
+     allowlist is loaded);
    - a missing, empty or unknown header ⇒ `restricted`;
    - a metadata or key-lookup error ⇒ `restricted`.
    - Nothing defaults to unrestricted.
-2. **S3 integration** (SeaweedFS, or a fake client where SeaweedFS lacks KMS):
-   objects with no header, `AES256`, `aws/s3` and a customer-managed key are
-   classified as above at capture.
-3. **Persistence:** the classification is stored with the artifact. If this
+2. **Allowlist file validation:** each entry needs a full ARN, a 64-hex
+   `policySha256`, `reviewedBy` and an ISO `reviewedAt`. A malformed file
+   makes **every** artifact `restricted` (fail closed), with an error logged.
+3. **S3 integration** (SeaweedFS, or a fake client where SeaweedFS lacks KMS):
+   objects with no header, `AES256`, `aws/s3`, a non-allowlisted CMK and an
+   allowlisted CMK are classified as above at capture.
+4. **Persistence:** the classification is stored with the artifact, together
+   with the allowlist entry's `policySha256` it was judged against. If this
    needs a schema change, it is an expand migration with its own reviewed
    manifest update.
-4. **Mutations, each of which must fail a test:**
+5. **Mutations, each of which must fail a test:**
    - classifying a missing header as encrypted;
    - classifying `AES256` as unrestricted;
-   - accepting the `aws/s3` key.
-5. **No behaviour change for consumers** until a reviewed consumer uses the
+   - accepting the `aws/s3` key;
+   - accepting any CMK that is not on the allowlist;
+   - ignoring a policy-hash mismatch (runtime check enabled).
+6. **No behaviour change for consumers** until a reviewed consumer uses the
    classification (default restricted).
