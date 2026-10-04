@@ -349,9 +349,9 @@ The first draft proposed each item below; the orchestrator decided them on
     config load (`SYNTHETIC_PROVIDERS_NOT_ALLOWED`).
   - The worker CLI logs once at startup when it is on.
   - The test and local harnesses turn it on (§6), not the Slice 0/1 test
-    files. No Slice 1 test file needed an edit. `testS3Env()` is a Slice 1
-    harness helper (not a test file), so the orchestrator should confirm it
-    is the right place.
+    files. No Slice 1 test file needed an edit. testS3Env() placement
+    confirmed by orchestrator, 2026-10-04: harness helper, not a test file;
+    preferred over editing Slice 1 test files.
   - `local:acceptance` runs with it OFF: the public sample is
     production-shaped.
   - `replay-fixtures` (staging) needs the operator to set the opt-in for

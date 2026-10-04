@@ -261,10 +261,10 @@ test was touched.
 
 ### 8.4 Notes for the orchestrator
 
-- `testS3Env()` (a Slice 1 harness helper) now carries the opt-in. If you
-  would rather keep it out of that helper, the in-process CLI tests in
-  `cliWorker.db.test.ts` and `demo.db.test.ts` cannot get the opt-in any
-  other way without editing those test files.
+- `testS3Env()` (a Slice 1 harness helper) carries the opt-in for the
+  in-process CLI tests in `cliWorker.db.test.ts` and `demo.db.test.ts`.
+  testS3Env() placement confirmed by orchestrator, 2026-10-04: harness
+  helper, not a test file; preferred over editing Slice 1 test files.
 - `replay-fixtures` in staging needs `RATIO_ALLOW_SYNTHETIC_PROVIDERS=1` for
   that invocation (it ingests the synthetic fixture). Production refuses the
   opt-in at config load.
