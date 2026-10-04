@@ -1,0 +1,36 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+(node:7703) MaxListenersExceededWarning: Possible EventEmitter memory leak detected. 11 error listeners added to [Client]. MaxListeners is 10. Use emitter.setMaxListeners() to increase limit
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/server/costs/publishedCosts.db.test.ts (27 tests | 1 failed | 26 skipped) 841ms
+   ❯ D12 a pooled reader client keeps a flat listener count across requests (1)
+     × 51 requests on a max: 1 pool: the client's error-listener count after the first request is the count after the last 378ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D12 a pooled reader client keeps a flat listener count across requests > 51 requests on a max: 1 pool: the client's error-listener count after the first request is the count after the last
+AssertionError: expected 51 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 51
+
+ ❯ src/server/costs/publishedCosts.db.test.ts:637:33
+    635|       for (let i = 0; i < 50; i += 1) expect((await call(route, makeRe…
+    636|       expect(pool.totalCount).toBe(1);
+    637|       expect(await listeners()).toBe(first);
+       |                                 ^
+    638|     } finally {
+    639|       await pool.end();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 26 skipped (27)
+   Start at  07:36:32
+   Duration  2.44s (tests 46%, transform 42%, import 10%, setup 2%)
+

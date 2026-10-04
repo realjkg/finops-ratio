@@ -1,0 +1,235 @@
+
+ RUN  v5.0.1 <repo>
+
+ ❯ scripts/local/local.test.mjs (34 tests | 10 failed) 67ms
+   ❯ L9 state is per compose project (2)
+     × lives under .ratio-local/<project>/ 14ms
+     × removing one project’s state leaves another project’s state alone; the parent goes when empty 1ms
+   ❯ L10 the env file is written owner-only (0600, directory 0700) (1)
+     × creates and also tightens an existing file 2ms
+   ❯ L11 local:test is isolated from a developer stack (3)
+     × has its own project and ports, and never reads the developer settings 1ms
+     × preflight refuses existing state, existing containers or a busy port 0ms
+   ❯ L12 readiness: the responding server must be the one local:test started (5)
+     × true when our pid holds the listening socket 1ms
+     × true when a descendant of our pid holds it; IPv6 listeners count 5ms
+     × false when another process listens on the port (a stale or foreign server answered) 4ms
+     × false when the socket is not LISTENING or the port differs 2ms
+     × null (unknown) when /proc is not available, so the caller can fall back 0ms
+ ❯ src/server/costs/readerLogin.test.ts (12 tests | 12 failed) 21ms
+   ❯ reader-login reason codes (12)
+     × a safe reader has no problem and no reason 4ms
+     × superuser ⇒ SUPERUSER 1ms
+     × BYPASSRLS ⇒ BYPASSRLS 0ms
+     × a reachable superuser role ⇒ PRIVILEGED_ROLE_REACHABLE 1ms
+     × REPLICATION / CREATEROLE / CREATEDB ⇒ UNSAFE_ATTRIBUTE 0ms
+     × a refused predefined role ⇒ REFUSED_PREDEFINED_ROLE 0ms
+     × ratio_owner member ⇒ OWNER_MEMBER 0ms
+     × not an inheriting reader ⇒ NOT_READER_MEMBER 0ms
+     × can reach ratio_worker ⇒ WORKER_REACHABLE 1ms
+     × LOGIN disabled (NOLOGIN) while pooled ⇒ LOGIN_DISABLED 0ms
+     × several problems ⇒ several codes, in a stable order 1ms
+     × assertSafeReaderLogin throws UnsafeReaderLoginError carrying problems and codes 9ms
+ ❯ src/server/costs/publishedCostsRoute.test.ts (13 tests | 1 failed) 76ms
+   ❯ R5 an unsafe database login is a distinct, logged 503 (challenger Low 3) (1)
+     × 503 unsafe_db_login with a requestId (body + X-Request-Id); one unsafe_db_login event with reason codes, no role names; never logged as unhandled_error/500 8ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 23 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/local.test.mjs > L9 state is per compose project > lives under .ratio-local/<project>/
+TypeError: localStatePaths is not a function
+ ❯ scripts/local/local.test.mjs:277:27
+    275| describe('L9 state is per compose project', () => {
+    276|   it('lives under .ratio-local/<project>/', () => {
+    277|     expect(localStatePaths('ratio-local')).toEqual({ dir: '.ratio-loca…
+       |                           ^
+    278|     expect(localStatePaths('ratio-local-test')).toEqual({ dir: '.ratio…
+    279|     for (const bad of ['', '../x', 'a/b', 'Ratio', '.']) expect(() => …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/23]⎯
+
+ FAIL  scripts/local/local.test.mjs > L9 state is per compose project > removing one project’s state leaves another project’s state alone; the parent goes when empty
+TypeError: removeProjectState is not a function
+ ❯ scripts/local/local.test.mjs:288:23
+    286|       fs.writeFileSync(path.join(root, '.ratio-local', p, 'env'), 'X=1…
+    287|     }
+    288|     removeProjectState(root, 'ratio-local-test');
+       |                       ^
+    289|     expect(fs.existsSync(path.join(root, '.ratio-local', 'ratio-local-…
+    290|     expect(fs.readFileSync(path.join(root, '.ratio-local', 'ratio-loca…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/23]⎯
+
+ FAIL  scripts/local/local.test.mjs > L10 the env file is written owner-only (0600, directory 0700) > creates and also tightens an existing file
+TypeError: writeEnvFileSecure is not a function
+ ❯ scripts/local/local.test.mjs:301:23
+    299|     const root = tmp();
+    300|     const file = path.join(root, '.ratio-local', 'p1', 'env');
+    301|     writeEnvFileSecure(file, { A: 'one' });
+       |                       ^
+    302|     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    303|     expect(fs.statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/23]⎯
+
+ FAIL  scripts/local/local.test.mjs > L11 local:test is isolated from a developer stack > has its own project and ports, and never reads the developer settings
+TypeError: localTestSettings is not a function
+ ❯ scripts/local/local.test.mjs:314:29
+    312| describe('L11 local:test is isolated from a developer stack', () => {
+    313|   it('has its own project and ports, and never reads the developer set…
+    314|     expect(localTestSettings({})).toEqual({ project: 'ratio-local-test…
+       |                             ^
+    315|     // A developer's RATIO_LOCAL_* do not redirect local:test onto the…
+    316|     expect(localTestSettings({ RATIO_LOCAL_PROJECT: 'mine', RATIO_LOCA…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/23]⎯
+
+ FAIL  scripts/local/local.test.mjs > L11 local:test is isolated from a developer stack > preflight refuses existing state, existing containers or a busy port
+TypeError: preflightProblems is not a function
+ ❯ scripts/local/local.test.mjs:333:29
+    331|
+    332|   it('preflight refuses existing state, existing containers or a busy …
+    333|     expect(preflightProblems({ stateExists: false, containers: 0, busy…
+       |                             ^
+    334|     expect(preflightProblems({ stateExists: true, containers: 0, busyP…
+    335|     expect(preflightProblems({ stateExists: false, containers: 2, busy…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/23]⎯
+
+ FAIL  scripts/local/local.test.mjs > L12 readiness: the responding server must be the one local:test started > true when our pid holds the listening socket
+TypeError: ownsListeningSocket is not a function
+ ❯ scripts/local/local.test.mjs:361:31
+    359|   it('true when our pid holds the listening socket', () => {
+    360|     const root = proc({ tcp: [[P3110, '0A', 777]], fds: { 100: [777] }…
+    361|     expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root …
+       |                               ^
+    362|   });
+    363|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/23]⎯
+
+ FAIL  scripts/local/local.test.mjs > L12 readiness: the responding server must be the one local:test started > true when a descendant of our pid holds it; IPv6 listeners count
+TypeError: ownsListeningSocket is not a function
+ ❯ scripts/local/local.test.mjs:366:31
+    364|   it('true when a descendant of our pid holds it; IPv6 listeners count…
+    365|     const root = proc({ tcp6: [['00000000000000000000000000000000:0C26…
+    366|     expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root …
+       |                               ^
+    367|   });
+    368|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/23]⎯
+
+ FAIL  scripts/local/local.test.mjs > L12 readiness: the responding server must be the one local:test started > false when another process listens on the port (a stale or foreign server answered)
+TypeError: ownsListeningSocket is not a function
+ ❯ scripts/local/local.test.mjs:371:31
+    369|   it('false when another process listens on the port (a stale or forei…
+    370|     const root = proc({ tcp: [[P3110, '0A', 999]], fds: { 100: [777], …
+    371|     expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: root …
+       |                               ^
+    372|   });
+    373|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/23]⎯
+
+ FAIL  scripts/local/local.test.mjs > L12 readiness: the responding server must be the one local:test started > false when the socket is not LISTENING or the port differs
+TypeError: ownsListeningSocket is not a function
+ ❯ scripts/local/local.test.mjs:375:31
+    373|
+    374|   it('false when the socket is not LISTENING or the port differs', () …
+    375|     expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: proc(…
+       |                               ^
+    376|     expect(ownsListeningSocket({ pid: 100, port: 3111, procRoot: proc(…
+    377|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/23]⎯
+
+ FAIL  scripts/local/local.test.mjs > L12 readiness: the responding server must be the one local:test started > null (unknown) when /proc is not available, so the caller can fall back
+TypeError: ownsListeningSocket is not a function
+ ❯ scripts/local/local.test.mjs:380:31
+    378|
+    379|   it('null (unknown) when /proc is not available, so the caller can fa…
+    380|     expect(ownsListeningSocket({ pid: 100, port: 3110, procRoot: path.…
+       |                               ^
+    381|   });
+    382| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/23]⎯
+
+ FAIL  src/server/costs/publishedCostsRoute.test.ts > R5 an unsafe database login is a distinct, logged 503 (challenger Low 3) > 503 unsafe_db_login with a requestId (body + X-Request-Id); one unsafe_db_login event with reason codes, no role names; never logged as unhandled_error/500
+TypeError: .toMatch() expects to receive a string, but got undefined
+ ❯ src/server/costs/publishedCostsRoute.test.ts:159:34
+    157|     expect(body.error.code).toBe('unsafe_db_login');
+    158|     expect(body.error.message).toBe(ROUTE_MESSAGES.unsafeLogin);
+    159|     expect(body.error.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0…
+       |                                  ^
+    160|     expect(res.headers['x-request-id']).toBe(body.error.requestId);
+    161|     expect(Object.keys(body.error).sort()).toEqual(['code', 'message',…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/23]⎯
+
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > a safe reader has no problem and no reason
+TypeError: readerLoginReport is not a function
+ ❯ src/server/costs/readerLogin.test.ts:46:18
+     44| describe('reader-login reason codes', () => {
+     45|   it('a safe reader has no problem and no reason', async () => {
+     46|     expect(await readerLoginReport(client({}))).toEqual({ problems: []…
+       |                  ^
+     47|   });
+     48|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/23]⎯
+
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > superuser ⇒ SUPERUSER
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > BYPASSRLS ⇒ BYPASSRLS
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > a reachable superuser role ⇒ PRIVILEGED_ROLE_REACHABLE
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > REPLICATION / CREATEROLE / CREATEDB ⇒ UNSAFE_ATTRIBUTE
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > a refused predefined role ⇒ REFUSED_PREDEFINED_ROLE
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > ratio_owner member ⇒ OWNER_MEMBER
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > not an inheriting reader ⇒ NOT_READER_MEMBER
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > can reach ratio_worker ⇒ WORKER_REACHABLE
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > LOGIN disabled (NOLOGIN) while pooled ⇒ LOGIN_DISABLED
+TypeError: readerLoginReport is not a function
+ ❯ src/server/costs/readerLogin.test.ts:62:23
+     60|   for (const [name, catalog, reasons] of cases) {
+     61|     it(`${name} ⇒ ${reasons.join(', ')}`, async () => {
+     62|       const r = await readerLoginReport(client(catalog));
+       |                       ^
+     63|       expect(r.reasons).toEqual(reasons);
+     64|       expect(r.problems.length).toBeGreaterThan(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/23]⎯
+
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > several problems ⇒ several codes, in a stable order
+TypeError: readerLoginReport is not a function
+ ❯ src/server/costs/readerLogin.test.ts:71:21
+     69|
+     70|   it('several problems ⇒ several codes, in a stable order', async () =…
+     71|     const r = await readerLoginReport(client({ owner: true, worker: tr…
+       |                     ^
+     72|     expect(r.reasons).toEqual(['REFUSED_PREDEFINED_ROLE', 'OWNER_MEMBE…
+     73|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/23]⎯
+
+ FAIL  src/server/costs/readerLogin.test.ts > reader-login reason codes > assertSafeReaderLogin throws UnsafeReaderLoginError carrying problems and codes
+AssertionError: expected null to be an instance of UnsafeReaderLoginError
+ ❯ src/server/costs/readerLogin.test.ts:80:15
+     78|       (x: unknown) => x,
+     79|     );
+     80|     expect(e).toBeInstanceOf(UnsafeReaderLoginError);
+       |               ^
+     81|     expect((e as UnsafeReaderLoginError).reasons).toEqual(['LOGIN_DISA…
+     82|     expect((e as UnsafeReaderLoginError).code).toBe('UNSAFE_DB_LOGIN');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/23]⎯
+
+
+ Test Files  3 failed | 2 passed (5)
+      Tests  23 failed | 60 passed (83)
+   Start at  02:17:00
+   Duration  1.68s (transform 65%, import 20%, tests 9%, worker 6%)
+
+    Isolate  5 workers spawned · ~437ms startup each (spawn + environment, per file)
+             at least ~292ms faster with isolate: false — reuses workers across files instead of one per file
+

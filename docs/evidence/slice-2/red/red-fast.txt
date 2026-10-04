@@ -1,0 +1,76 @@
+
+ RUN  v5.0.1 <repo>
+
+ ❯ src/server/costs/publishedCostsRoute.test.ts (0 test)
+ ❯ scripts/local/local.test.mjs (0 test)
+ ❯ src/server/costs/query.test.ts (0 test)
+ ❯ src/ingest/importBoundary.test.ts (5 tests | 1 failed) 167ms
+   ❯ src/ingest import boundary (5)
+     × the route's import closure reuses Slice 0/1 and reaches no worker-only code 7ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/local.test.mjs [ scripts/local/local.test.mjs ]
+Error: Cannot find module './lib.mjs' imported from <repo>/scripts/local/local.test.mjs
+ ❯ scripts/local/local.test.mjs:10:1
+      8| import path from 'node:path';
+      9| import { fileURLToPath } from 'node:url';
+     10| import {
+       | ^
+     11|   LOCAL_NAMES,
+     12|   LOCAL_STATE_DIR,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/server/costs/publishedCostsRoute.test.ts [ src/server/costs/publishedCostsRoute.test.ts ]
+Error: Cannot find module './publishedCostsRoute' imported from <repo>/src/server/costs/publishedCostsRoute.test.ts
+ ❯ src/server/costs/publishedCostsRoute.test.ts:7:1
+      5| import { afterEach, beforeEach, describe, expect, it, vi } from 'vites…
+      6| import type { NextApiHandler } from 'next';
+      7| import { createPublishedCostsRoute, ROUTE_MESSAGES } from './published…
+       | ^
+      8| import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
+      9| import routeFromPages from '../../../pages/api/v1/costs/published';
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/server/costs/query.test.ts [ src/server/costs/query.test.ts ]
+Error: Cannot find module './query' imported from <repo>/src/server/costs/query.test.ts
+ ❯ src/server/costs/query.test.ts:3:1
+      1| // Strict query validation for GET /api/v1/costs/published (pure, no D…
+      2| import { describe, expect, it } from 'vitest';
+      3| import {
+       | ^
+      4|   DEFAULT_LIMIT,
+      5|   MAX_CURSOR_CHARS,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingest/importBoundary.test.ts > src/ingest import boundary > the route's import closure reuses Slice 0/1 and reaches no worker-only code
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/ingest/importBoundary.test.ts:204:40
+    202|
+    203|   it("the route's import closure reuses Slice 0/1 and reaches no worke…
+    204|     expect(fs.existsSync(COSTS_ROUTE)).toBe(true);
+       |                                        ^
+    205|     const { files, packages } = importClosure(COSTS_ROUTE);
+    206|     const rel = [...files].map((f) => path.relative(REPO_ROOT, f).spli…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  4 failed (4)
+      Tests  1 failed | 4 passed (5)
+   Start at  00:52:13
+   Duration  1.17s (import 54%, transform 24%, tests 19%, worker 3%)
+

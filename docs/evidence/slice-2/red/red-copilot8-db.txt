@@ -1,0 +1,55 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+ ❯ src/server/costs/publishedCosts.db.test.ts (29 tests | 1 failed) 3571ms
+   ❯ D14 a reader backend terminated mid-request is destroyed at once (Copilot 4176969214) (2)
+     × readWithDeadline on the real pool: the FATAL 57P01 poisons the client; the ROLLBACK is refused with that same error (never sent to pg); release destroys the client 25ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/publishedCosts.db.test.ts > D14 a reader backend terminated mid-request is destroyed at once (Copilot 4176969214) > readWithDeadline on the real pool: the FATAL 57P01 poisons the client; the ROLLBACK is refused with that same error (never sent to pg); release destroys the client
+AssertionError: expected Error: Connection terminated unexpectedly to be error: terminating connection due to admi… { …(15) } // Object.is equality
+
+- Expected
++ Received
+
+- error {
+-   "message": "terminating connection due to administrator command",
+-   "length": 116,
+-   "name": "error",
+-   "severity": "FATAL",
+-   "code": "57P01",
+-   "detail": undefined,
+-   "hint": undefined,
+-   "position": undefined,
+-   "internalPosition": undefined,
+-   "internalQuery": undefined,
+-   "where": undefined,
+-   "schema": undefined,
+-   "table": undefined,
+-   "column": undefined,
+-   "dataType": undefined,
+-   "constraint": undefined,
+-   "file": "postgres.c",
+-   "line": "3328",
+-   "routine": "ProcessInterrupts",
++ Error {
++   "message": "Connection terminated unexpectedly",
+  }
+
+ ❯ src/server/costs/publishedCosts.db.test.ts:702:24
+    700|       expect(failure).toMatchObject({ severity: 'FATAL', code: '57P01'…
+    701|       // Refused by the guard with the poisoned error itself; pg would…
+    702|       expect(rollback).toBe(failure);
+       |                        ^
+    703|       expect(pool.totalCount).toBe(0);
+    704|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 28 passed (29)
+   Start at  09:41:50
+   Duration  5.44s (tests 75%, transform 20%, import 4%, setup 1%)
+

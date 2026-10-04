@@ -8,7 +8,7 @@
 // in the same change, so the widening is visible in code review.
 import type { ClientBase } from 'pg';
 import { MigrationError } from './migrationFiles';
-import { FOUNDATION_0001 } from './foundationManifest';
+import { FOUNDATION_0001, lazyReadonlyArray } from './foundationManifest';
 import { loadManifests } from './migrationFiles';
 import { SYSTEM_SCHEMAS as SYSTEM_SCHEMA_NAMES, systemBaselineViolations, type SystemBaseline } from './systemBaseline';
 
@@ -725,9 +725,9 @@ const policyShape = (entry: string) => entry.replace(/^policy:[^:]+:/, 'policy:'
  * tenant_id shape needs no column check: the expression cannot be created
  * unless the table has a uuid-comparable tenant_id column.
  */
-export const REVIEWED_POLICY_SHAPES: readonly string[] = [
+export const REVIEWED_POLICY_SHAPES: readonly string[] = lazyReadonlyArray(() => [
   ...new Set(FOUNDATION_0001.filter((e) => e.startsWith('policy:') && !e.startsWith('policy:ratio.tenants:')).map(policyShape)),
-];
+]);
 
 /** True when a rendered policy entry is reviewed (exact entry of the active manifest or of 0001, or a reviewed shape). */
 function isReviewedPolicy(entry: string, active: ReadonlySet<string>): boolean {

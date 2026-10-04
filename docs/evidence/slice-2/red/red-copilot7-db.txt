@@ -1,0 +1,91 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+ ❯ scripts/local/localBootstrap.serial.db.test.ts (6 tests | 4 failed) 165ms
+   ❯ memberships touching a managed role, on EITHER side, fail closed (Copilot 4176878790) (4)
+     × an unrelated login made a member of ratio_reader fails verification; the bootstrap refuses and revokes nothing 20ms
+     × an unrelated role made a member of the local reader login fails verification 9ms
+     × a local login made a member of pg_read_all_data fails verification, named as a predefined role 6ms
+     × the worker's edge granted through ADMIN delegation (grantor not the bootstrap superuser) fails, as does the delegate's own edge 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/localBootstrap.serial.db.test.ts > memberships touching a managed role, on EITHER side, fail closed (Copilot 4176878790) > an unrelated login made a member of ratio_reader fails verification; the bootstrap refuses and revokes nothing
+AssertionError: expected '' to contain 'membership ratio_bs_x_e01d762b->ratio…'
+
+- Expected
++ Received
+
+- membership ratio_bs_x_e01d762b->ratio_reader is not expected
+
+ ❯ expectFailClosed scripts/local/localBootstrap.serial.db.test.ts:127:56
+    125| /** Fail closed: verification names the problem, runBootstrap refuses,…
+    126| async function expectFailClosed(problem: string, planted: string, plan…
+    127|   expect((await verifyBootstrap(c, names)).join('\n')).toContain(probl…
+       |                                                        ^
+    128|   await expect(runBootstrap(c, names, { [names.migrator]: pw(), [names…
+    129|   expect(await edgesOf(plantedOn)).toContain(planted);
+ ❯ scripts/local/localBootstrap.serial.db.test.ts:137:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  scripts/local/localBootstrap.serial.db.test.ts > memberships touching a managed role, on EITHER side, fail closed (Copilot 4176878790) > an unrelated role made a member of the local reader login fails verification
+AssertionError: expected '' to contain 'membership ratio_bs_y_e01d762b->ratio…'
+
+- Expected
++ Received
+
+- membership ratio_bs_y_e01d762b->ratio_bs_r_e01d762b is not expected
+
+ ❯ expectFailClosed scripts/local/localBootstrap.serial.db.test.ts:127:56
+    125| /** Fail closed: verification names the problem, runBootstrap refuses,…
+    126| async function expectFailClosed(problem: string, planted: string, plan…
+    127|   expect((await verifyBootstrap(c, names)).join('\n')).toContain(probl…
+       |                                                        ^
+    128|   await expect(runBootstrap(c, names, { [names.migrator]: pw(), [names…
+    129|   expect(await edgesOf(plantedOn)).toContain(planted);
+ ❯ scripts/local/localBootstrap.serial.db.test.ts:148:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  scripts/local/localBootstrap.serial.db.test.ts > memberships touching a managed role, on EITHER side, fail closed (Copilot 4176878790) > a local login made a member of pg_read_all_data fails verification, named as a predefined role
+AssertionError: expected 'membership ratio_bs_r_e01d762b->pg_re…' to contain 'membership ratio_bs_r_e01d762b->pg_re…'
+
+Expected: "membership ratio_bs_r_e01d762b->pg_read_all_data is not expected (predefined role"
+Received: "membership ratio_bs_r_e01d762b->pg_read_all_data is not expected"
+
+ ❯ expectFailClosed scripts/local/localBootstrap.serial.db.test.ts:127:56
+    125| /** Fail closed: verification names the problem, runBootstrap refuses,…
+    126| async function expectFailClosed(problem: string, planted: string, plan…
+    127|   expect((await verifyBootstrap(c, names)).join('\n')).toContain(probl…
+       |                                                        ^
+    128|   await expect(runBootstrap(c, names, { [names.migrator]: pw(), [names…
+    129|   expect(await edgesOf(plantedOn)).toContain(planted);
+ ❯ scripts/local/localBootstrap.serial.db.test.ts:158:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  scripts/local/localBootstrap.serial.db.test.ts > memberships touching a managed role, on EITHER side, fail closed (Copilot 4176878790) > the worker's edge granted through ADMIN delegation (grantor not the bootstrap superuser) fails, as does the delegate's own edge
+AssertionError: expected '' to contain 'membership ratio_bs_d_e01d762b->ratio…'
+
+- Expected
++ Received
+
+- membership ratio_bs_d_e01d762b->ratio_worker is not expected
+
+ ❯ scripts/local/localBootstrap.serial.db.test.ts:177:24
+    175|     try {
+    176|       const problems = (await verifyBootstrap(c, names)).join('\n');
+    177|       expect(problems).toContain(`membership ${extra.delegate}->ratio_…
+       |                        ^
+    178|       await expectFailClosed(`membership ${names.worker}->ratio_worker…
+    179|     } finally {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 2 passed (6)
+   Start at  09:10:00
+   Duration  1.03s (transform 43%, tests 42%, setup 12%, import 2%, worker 1%)
+

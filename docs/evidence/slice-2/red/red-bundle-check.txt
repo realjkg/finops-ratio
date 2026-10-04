@@ -1,0 +1,25 @@
+
+ RUN  v5.0.1 <repo>
+
+ ❯ scripts/check-next-bundle.test.mjs (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/check-next-bundle.test.mjs [ scripts/check-next-bundle.test.mjs ]
+Error: Cannot find module './check-next-bundle.mjs' imported from <repo>/scripts/check-next-bundle.test.mjs
+ ❯ scripts/check-next-bundle.test.mjs:11:1
+      9| import os from 'node:os';
+     10| import path from 'node:path';
+     11| import { checkNextBundle, CLIENT_FORBIDDEN, COSTS_ENTRY, READER_MARKER…
+       | ^
+     12|
+     13| const dirs = [];
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  01:08:19
+   Duration  349ms (worker 97%, environment 3%)
+

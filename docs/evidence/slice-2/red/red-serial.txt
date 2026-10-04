@@ -1,0 +1,25 @@
+
+ RUN  v5.0.1 <repo>
+
+ ❯ src/server/costs/publishedCosts.serial.db.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/publishedCosts.serial.db.test.ts [ src/server/costs/publishedCosts.serial.db.test.ts ]
+Error: Cannot find module './publishedCostsRoute' imported from <repo>/src/server/costs/publishedCosts.serial.db.test.ts
+ ❯ src/server/costs/publishedCosts.serial.db.test.ts:18:1
+     16| import { createLogin, type Login } from '../../ingest/testing/db';
+     17| import { REFUSED_PREDEFINED_ROLES } from '../../ingest/db/privilegeMod…
+     18| import { createPublishedCostsRoute, ROUTE_MESSAGES } from './published…
+       | ^
+     19| import { closeReaderPools } from './readerPool';
+     20| import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  00:52:17
+   Duration  848ms (transform 77%, setup 21%, worker 2%)
+

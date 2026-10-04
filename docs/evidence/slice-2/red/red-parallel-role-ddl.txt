@@ -1,0 +1,42 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+ ❯ src/server/costs/parallelRoleDdl.test.ts (3 tests | 1 failed) 389ms
+   ❯ cluster-wide role changes only in serial DB test files (static guard) (3)
+     × no non-serial *.db.test.ts commits a GRANT <role> TO, REVOKE <role> FROM or ALTER ROLE outside BEGIN … ROLLBACK 235ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/costs/parallelRoleDdl.test.ts > cluster-wide role changes only in serial DB test files (static guard) > no non-serial *.db.test.ts commits a GRANT <role> TO, REVOKE <role> FROM or ALTER ROLE outside BEGIN … ROLLBACK
+AssertionError: expected [ …(7) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "src/server/costs/publishedCosts.db.test.ts:337 GRANT <role> TO (membership) outside BEGIN … ROLLBACK",
++   "src/server/costs/publishedCosts.db.test.ts:338 GRANT <role> TO (membership) outside BEGIN … ROLLBACK",
++   "src/server/costs/publishedCosts.db.test.ts:348 GRANT <role> TO (membership) outside BEGIN … ROLLBACK",
++   "src/server/costs/publishedCosts.db.test.ts:364 GRANT <role> TO (membership) outside BEGIN … ROLLBACK",
++   "src/server/costs/publishedCosts.db.test.ts:366 REVOKE <role> FROM (membership) outside BEGIN … ROLLBACK",
++   "src/server/costs/publishedCosts.db.test.ts:395 ALTER ROLE/USER/GROUP (cluster-wide) outside BEGIN … ROLLBACK",
++   "src/server/costs/publishedCosts.db.test.ts:400 ALTER ROLE/USER/GROUP (cluster-wide) outside BEGIN … ROLLBACK",
++ ]
+
+ ❯ src/server/costs/parallelRoleDdl.test.ts:163:24
+    161|     expect(files.length).toBeGreaterThan(20);
+    162|     const violations = files.flatMap((f) => parallelRoleDdlViolations(…
+    163|     expect(violations).toEqual([]);
+       |                        ^
+    164|   }, 30_000);
+    165|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  06:22:30
+   Duration  1.36s (import 44%, tests 37%, transform 19%)
+

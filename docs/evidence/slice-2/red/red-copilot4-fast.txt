@@ -1,0 +1,1259 @@
+
+ RUN  v5.0.1 /home/user/finops-ratio/.claude/worktrees/agent-a50f9c20a6b3933e7
+
+ ❯ src/server/costs/publishedCosts.test.ts (13 tests | 10 failed) 28ms
+   ❯ U1 rowCount is a decimal string, exact beyond 2^53 (Copilot 4176238961) (2)
+     × a count of '9007199254740993' (2^53 + 1) round-trips exactly, through JSON too 10ms
+     × the largest bigint count is exact too 1ms
+   ❯ U2 the read fails closed unless the session settings are the pinned ones (Copilot 4176238982) (8)
+     × DateStyle SQL, DMY ⇒ refused before any read 3ms
+     × DateStyle German ⇒ refused before any read 1ms
+     × IntervalStyle sql_standard ⇒ refused before any read 1ms
+     × TimeZone America/Sao_Paulo ⇒ refused before any read 1ms
+     × the reader pool pins DateStyle, IntervalStyle and TimeZone at connection start 3ms
+   ❯ U3 every returned or cursor-encoded value is formatted explicitly, independent of session settings (3)
+     × billing_period is formatted with to_char(…, 'YYYY-MM-DD'), never date::text, in the page and in the totals 1ms
+     × no date or timestamp column is cast to text (DateStyle/TimeZone-dependent); timestamps go through to_char at UTC 1ms
+     × counts are cast to text in SQL (int8out is setting-independent) and never converted to a JS number 0ms
+ ❯ scripts/local/local.test.mjs (120 tests | 11 failed) 17843ms
+   ❯ L8 control totals comparison (local:test acceptance) (3)
+     × equal totals ⇒ no mismatch 15ms
+     × exact strings: a different scale, a different value, a count, a missing or an extra period all mismatch 3ms
+   ❯ L18 local:test summary finalisation (34)
+     × local.mjs records the app right after spawning it, prints the summary and exits non-zero unless summary.pass 2ms
+   ❯ L20 an interrupted local:test still cleans up (Copilot 4176238924) (8)
+     × exit codes: SIGINT 130, SIGTERM 143; an interrupted run exits with them even if everything else passed 1ms
+     × SIGINT mid-body: the in-flight command is killed, the app is stopped, down -v runs exactly once, the run fails with interrupted=SIGINT (exit 130) 4ms
+     × SIGTERM while the body ignores every signal: cleanup still runs once (exit 143) 10003ms
+     × a signal that arrives during the cleanup is recorded (exit 130) and does not run the cleanup twice 52ms
+     × runProcess bound to an aborted signal never spawns; aborting mid-run kills the group and rejects at once 1ms
+     × installInterruptHandlers: the first signal calls onFirst once; a second one forces (onForce); dispose removes the listeners 1ms
+     × next start style children are tracked: killLiveProcessGroups kills them; an exited child leaves the set 10ms
+     × local.mjs: next start is detached and tracked; the first signal aborts local:test (cleanup), other commands kill and exit; a second signal forces; down ignores the interrupt 2ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 21 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  scripts/local/local.test.mjs > L8 control totals comparison (local:test acceptance) > equal totals ⇒ no mismatch
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "2026-07-01: rowCount 55 != control 55",
++   "2026-08-01: rowCount 40 != control 40",
++ ]
+
+ ❯ scripts/local/local.test.mjs:269:51
+    267|
+    268|   it('equal totals ⇒ no mismatch', () => {
+    269|     expect(compareControlTotals(totals, control)).toEqual([]);
+       |                                                   ^
+    270|   });
+    271|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L8 control totals comparison (local:test acceptance) > exact strings: a different scale, a different value, a count, a missing or an extra period all mismatch
+AssertionError: expected [ …(3) ] to have a length of 1 but got 3
+
+- Expected
++ Received
+
+- 1
++ 3
+
+ ❯ scripts/local/local.test.mjs:274:85
+    272|   it('exact strings: a different scale, a different value, a count, a …
+    273|     const mut = (i, patch) => totals.map((t, j) => (j === i ? { ...t, …
+    274|     expect(compareControlTotals(mut(0, { billedCost: '30.82729548990' …
+       |                                                                                     ^
+    275|     expect(compareControlTotals(mut(0, { billedCost: '30.8272954898' }…
+    276|     expect(compareControlTotals(mut(1, { rowCount: '39' }), control)).…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L18 local:test summary finalisation > local.mjs records the app right after spawning it, prints the summary and exits non-zero unless summary.pass
+AssertionError: expected '#!/usr/bin/env node\n// LOCAL, EPHEME…' to match /return localTestExitCode\(summary\);/
+
+- Expected:
+/return localTestExitCode\(summary\);/
+
++ Received:
+"#!/usr/bin/env node
+// LOCAL, EPHEMERAL Ratio stack (Slice 2). Not a production tool.
+//
+//   npm run local:up        docker compose up (Postgres 16 + SeaweedFS S3), then the role bootstrap
+//   npm run local:migrate   worker:build, migrate as the non-superuser migrator, status must match
+//   npm run local:seed      buckets, the committed SYNTHETIC FOCUS fixture, tenant + source
+//   npm run local:sync      worker sync as the ratio_worker login
+//   npm run local:down      docker compose down        (-- -v: also volumes and .ratio-local/<project>/)
+//   npm run local:test      its OWN stack: preflight → up → migrate → seed → sync → API read
+//                           under next start → assert control totals → down -v
+//
+// Every command is idempotent. Secrets are generated on the first `up` into
+// .ratio-local/<project>/env (gitignored; directory 0700, file 0600); nothing
+// secret is committed. Settings (env): RATIO_LOCAL_PROJECT (ratio-local),
+// RATIO_LOCAL_PG_PORT (54329), RATIO_LOCAL_S3_PORT (18343),
+// RATIO_LOCAL_APP_PORT (3100). local:test ignores those and uses
+// RATIO_LOCAL_TEST_PROJECT (ratio-local-test), RATIO_LOCAL_TEST_PG_PORT
+// (54339), RATIO_LOCAL_TEST_S3_PORT (18353), RATIO_LOCAL_TEST_APP_PORT (3110),
+// refusing any overlap with the developer stack. All ports bind 127.0.0.1 only.
+//
+// Every child process, network call and wait below has a HARD deadline (the
+// *_TIMEOUT_MS constants; the full inventory is in
+// docs/evidence/slice-2/EVIDENCE.md §13): nothing here can hang `local:up`,
+// and local:test always reaches its `down -v`.
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+
+const { AbortSignal, fetch } = globalThis;
+import {
+  LOCAL_NAMES,
+  apiEnv,
+  compareControlTotals,
+  connectionUrl,
+  fetchJson,
+  generateLocalSecrets,
+  killLiveProcessGroups,
+  localSettings,
+  localStatePaths,
+  localTestSettings,
+  portInUse,
+  parseEnvFile,
+  preflightProblems,
+  removeProjectState,
+  runLocalTest,
+  runProcess,
+  startIfPortFree,
+  waitForOwnServer,
+  waitUntil,
+  withDeadline,
+  workerEnv,
+  writeEnvFileSecure,
+} from './lib.mjs';
+import { runBootstrap } from './bootstrap.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const require = createRequire(import.meta.url);
+const { Client } = require(path.join(ROOT, 'node_modules', 'pg'));
+const COMPOSE_FILE = path.join(ROOT, 'docker-compose.local.yml');
+const FIXTURE_BASE = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'base');
+const CONTROL_TOTALS = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'control-totals.json');
+
+const log = (msg, fields = {}) => process.stderr.write(`${JSON.stringify({ tag: 'ratio-local', msg, ...fields })}\\n`);
+
+// --- state (per compose project) ------------------------------------------------
+
+const envFileOf = (settings) => path.join(ROOT, localStatePaths(settings.project).envFile);
+
+function loadSecrets(settings, { create }) {
+  const file = envFileOf(settings);
+  if (fs.existsSync(file)) return parseEnvFile(fs.readFileSync(file, 'utf8'));
+  if (!create) throw new Error(`${localStatePaths(settings.project).envFile} not found: run npm run local:up first`);
+  const secrets = generateLocalSecrets();
+  writeEnvFileSecure(file, secrets);
+  log('generated local secrets', { file: localStatePaths(settings.project).envFile });
+  return secrets;
+}
+
+// --- deadlines (every wait in this file; EVIDENCE §13) --------------------------
+
+const DOCKER_PS_TIMEOUT_MS = 60_000;
+/** `compose up -d --wait` (includes a first image pull in CI). */
+const COMPOSE_UP_TIMEOUT_MS = 600_000;
+const DOWN_TIMEOUT_MS = 300_000;
+/** local:test's outer cut-off around `down -v` (the compose command's own timeout fires first). */
+const CLEANUP_DOWN_TIMEOUT_MS = DOWN_TIMEOUT_MS + 30_000;
+const WORKER_BUILD_TIMEOUT_MS = 300_000;
+const WORKER_CLI_TIMEOUT_MS = 600_000;
+const PG_CONNECT_TIMEOUT_MS = 5_000;
+/** Client-side (query_timeout) and server-side (statement_timeout) per statement. */
+const PG_QUERY_TIMEOUT_MS = 60_000;
+/** A whole withClient session: connect, every statement, disconnect. */
+const PG_SESSION_TIMEOUT_MS = 120_000;
+const PG_END_TIMEOUT_MS = 5_000;
+const READY_TIMEOUT_MS = 120_000;
+const READY_ATTEMPT_TIMEOUT_MS = 5_000;
+const BUCKET_WARM_TIMEOUT_MS = 60_000;
+const S3_REQUEST_TIMEOUT_MS = 30_000;
+const APP_READY_TIMEOUT_MS = 60_000;
+const APP_READY_ATTEMPT_TIMEOUT_MS = 5_000;
+/** Each API read: longer than the route's own 10 s DB statement_timeout (readerPool.ts). */
+const API_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_PAGES = 100;
+
+// --- processes ---------------------------------------------------------------
+
+function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs } = {}) {
+  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs });
+}
+
+function composeEnv(settings, secrets) {
+  return {
+    RATIO_LOCAL_PG_PORT: String(settings.pgPort),
+    RATIO_LOCAL_S3_PORT: String(settings.s3Port),
+    RATIO_LOCAL_APP_PORT: String(settings.appPort),
+    ...secrets,
+  };
+}
+
+const compose = (settings, secrets, args, opts = {}) =>
+  run('docker', ['compose', '-f', COMPOSE_FILE, '-p', settings.project, ...args], { ...opts, env: { ...composeEnv(settings, secrets), ...(opts.env ?? {}) } });
+
+/**
+ * One Postgres session, hard-bounded: connect (PG_CONNECT_TIMEOUT_MS), every
+ * statement (query_timeout client-side, statement_timeout server-side), the
+ * disconnect, and the whole session (PG_SESSION_TIMEOUT_MS). When the session
+ * deadline or the caller's signal fires, the socket is destroyed.
+ */
+function withClient(url, fn, { signal } = {}) {
+  return withDeadline(
+    async (deadlineSignal) => {
+      const c = new Client({ connectionString: url, connectionTimeoutMillis: PG_CONNECT_TIMEOUT_MS, query_timeout: PG_QUERY_TIMEOUT_MS, statement_timeout: PG_QUERY_TIMEOUT_MS });
+      c.on('error', () => undefined);
+      const aborted = signal ? AbortSignal.any([deadlineSignal, signal]) : deadlineSignal;
+      const kill = () => c.connection?.stream?.destroy();
+      aborted.addEventListener('abort', kill, { once: true });
+      try {
+        await c.connect();
+        try {
+          return await fn(c);
+        } finally {
+          await withDeadline(() => c.end(), PG_END_TIMEOUT_MS, 'postgres disconnect').catch(kill);
+        }
+      } finally {
+        aborted.removeEventListener('abort', kill);
+      }
+    },
+    PG_SESSION_TIMEOUT_MS,
+    'postgres session',
+  );
+}
+
+const superUrl = (settings, secrets) =>
+  connectionUrl({ user: 'postgres', password: secrets.RATIO_LOCAL_PG_SUPERUSER_PASSWORD, port: settings.pgPort, database: 'postgres' });
+
+// --- commands ----------------------------------------------------------------
+
+async function up(settings) {
+  const secrets = loadSecrets(settings, { create: true });
+  await compose(settings, secrets, ['up', '-d', '--wait', 'postgres', 's3'], { timeoutMs: COMPOSE_UP_TIMEOUT_MS });
+  await waitUntil({
+    what: 'postgres',
+    timeoutMs: READY_TIMEOUT_MS,
+    attemptTimeoutMs: READY_ATTEMPT_TIMEOUT_MS,
+    probe: (signal) => withClient(superUrl(settings, secrets), async (c) => (await c.query('SELECT 1')).rowCount === 1, { signal }),
+  });
+  // Each attempt is aborted at READY_ATTEMPT_TIMEOUT_MS: an endpoint that
+  // accepts TCP but never answers cannot hang local:up (Copilot 4176117539).
+  await waitUntil({
+    what: 's3',
+    timeoutMs: READY_TIMEOUT_MS,
+    attemptTimeoutMs: READY_ATTEMPT_TIMEOUT_MS,
+    probe: async (signal) => {
+      const r = await fetch(`http://127.0.0.1:${settings.s3Port}/`, { signal });
+      await r.body?.cancel();
+      return r.status < 500;
+    },
+  });
+  await withClient(superUrl(settings, secrets), async (c) => {
+    const v = await c.query(`SELECT current_setting('server_version_num') AS v`);
+    if (!/^16\\d{4}$/.test(v.rows[0].v)) throw new Error(`the local Postgres is not version 16 (server_version_num ${v.rows[0].v})`);
+    await runBootstrap(c, LOCAL_NAMES, {
+      [LOCAL_NAMES.migrator]: secrets.RATIO_LOCAL_MIGRATOR_PASSWORD,
+      [LOCAL_NAMES.worker]: secrets.RATIO_LOCAL_WORKER_PASSWORD,
+      [LOCAL_NAMES.reader]: secrets.RATIO_LOCAL_READER_PASSWORD,
+    });
+  });
+  log('up: postgres 16 + s3 running, roles bootstrapped', { project: settings.project, pgPort: settings.pgPort, s3Port: settings.s3Port });
+}
+
+async function workerCli(settings, secrets, args, opts = {}) {
+  if (!fs.existsSync(path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'))) await run('npm', ['run', '-s', 'worker:build'], { timeoutMs: WORKER_BUILD_TIMEOUT_MS });
+  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets), capture: true, timeoutMs: WORKER_CLI_TIMEOUT_MS, ...opts });
+}
+
+async function migrate(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  await run('npm', ['run', '-s', 'worker:build'], { timeoutMs: WORKER_BUILD_TIMEOUT_MS });
+  await workerCli(settings, secrets, ['migrate']);
+  const status = await workerCli(settings, secrets, ['migrate', '--status', '--json'], { allowFail: true });
+  const doc = JSON.parse(status.out);
+  // Slice 0's catalog check judged the bootstrapped logins: no privilege problem may be reported.
+  if (status.code !== 0 || !doc.matches || doc.privilegeProblems?.length) {
+    throw new Error(`migrate --status: exit ${status.code}, matches ${doc.matches}, privilegeProblems ${JSON.stringify(doc.privilegeProblems)}`);
+  }
+  log('migrate: schema current, Slice 0 privilege model satisfied', { currentVersion: doc.currentVersion, privilegeProblems: doc.privilegeProblems });
+  return doc;
+}
+
+function fixtureFiles(dir, acc = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, e.name);
+    if (e.isDirectory()) fixtureFiles(abs, acc);
+    else acc.push(abs);
+  }
+  return acc;
+}
+
+function s3Client(settings, secrets) {
+  const { S3Client } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+  return new S3Client({
+    endpoint: `http://127.0.0.1:${settings.s3Port}`,
+    // Belt and braces: every send below also carries an abortSignal with a hard deadline.
+    requestHandler: { connectionTimeout: 5_000, requestTimeout: S3_REQUEST_TIMEOUT_MS },
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: secrets.RATIO_LOCAL_S3_ACCESS_KEY_ID, secretAccessKey: secrets.RATIO_LOCAL_S3_SECRET_ACCESS_KEY },
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  });
+}
+
+async function seed(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const { CreateBucketCommand, DeleteObjectCommand, PutObjectCommand } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+  const s3 = s3Client(settings, secrets);
+  try {
+    for (const Bucket of [LOCAL_NAMES.sourceBucket, LOCAL_NAMES.evidenceBucket]) {
+      try {
+        await withDeadline((signal) => s3.send(new CreateBucketCommand({ Bucket }), { abortSignal: signal }), S3_REQUEST_TIMEOUT_MS, `s3 create bucket ${Bucket}`);
+      } catch (e) {
+        if (e?.name !== 'BucketAlreadyOwnedByYou' && e?.name !== 'BucketAlreadyExists') throw e;
+      }
+      // A fresh SeaweedFS bucket answers 500 until its volumes are allocated:
+      // warm it with a probe object so the worker's first evidence write does
+      // not spend its bounded retries on that (seen locally: 2 retries).
+      await waitUntil({
+        what: `s3 bucket ${Bucket} writable`,
+        timeoutMs: BUCKET_WARM_TIMEOUT_MS,
+        attemptTimeoutMs: S3_REQUEST_TIMEOUT_MS,
+        probe: async (signal) => {
+          await s3.send(new PutObjectCommand({ Bucket, Key: '.ratio-local-warmup', Body: 'warmup' }), { abortSignal: signal });
+          await s3.send(new DeleteObjectCommand({ Bucket, Key: '.ratio-local-warmup' }), { abortSignal: signal });
+          return true;
+        },
+      });
+    }
+    const files = fixtureFiles(FIXTURE_BASE);
+    for (const f of files) {
+      const Key = path.relative(FIXTURE_BASE, f).split(path.sep).join('/');
+      const Body = fs.readFileSync(f);
+      await withDeadline((signal) => s3.send(new PutObjectCommand({ Bucket: LOCAL_NAMES.sourceBucket, Key, Body }), { abortSignal: signal }), S3_REQUEST_TIMEOUT_MS, `s3 put ${Key}`);
+    }
+    log('seed: SYNTHETIC fixture uploaded', { bucket: LOCAL_NAMES.sourceBucket, objects: files.length });
+  } finally {
+    s3.destroy();
+  }
+  const migratorUrl = workerEnv(settings, secrets).RATIO_MIGRATE_DATABASE_URL;
+  await withClient(migratorUrl, async (c) => {
+    // Provisioning is an owner action (ingestion-ops SKILL §2); RLS applies to the owner too.
+    await c.query('BEGIN');
+    try {
+      await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [secrets.RATIO_LOCAL_TENANT_ID]);
+      await c.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, [secrets.RATIO_LOCAL_TENANT_ID, LOCAL_NAMES.tenantSlug]);
+      await c.query(
+        `INSERT INTO ratio.sources (tenant_id, id, source_key, kind, display_name, coverage, declared_focus_version, config)
+         VALUES ($1, gen_random_uuid(), $2, 'focus_file', 'SYNTHETIC local FOCUS fixture (not real data)', 'public_cloud', '1.0', $3::jsonb)
+         ON CONFLICT (tenant_id, source_key) DO NOTHING`,
+        [
+          secrets.RATIO_LOCAL_TENANT_ID,
+          LOCAL_NAMES.sourceKey,
+          JSON.stringify({ layout: 'aws-data-exports', bucket: LOCAL_NAMES.sourceBucket, prefix: LOCAL_NAMES.fixturePrefix, exportName: LOCAL_NAMES.fixtureExportName }),
+        ],
+      );
+      const commit = await c.query('COMMIT');
+      if (commit.command !== 'COMMIT') throw new Error('provisioning transaction was rolled back');
+    } catch (e) {
+      await c.query('ROLLBACK').catch(() => undefined);
+      throw e;
+    }
+  });
+  log('seed: tenant and source provisioned', { tenant: secrets.RATIO_LOCAL_TENANT_ID, source: LOCAL_NAMES.sourceKey });
+}
+
+async function sync(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', LOCAL_NAMES.sourceKey], { allowFail: true });
+  process.stdout.write(r.out);
+  if (r.code !== 0) throw new Error(`worker sync exited ${r.code}`);
+  return JSON.parse(r.out.trim().split('\\n').pop());
+}
+
+async function down(settings, { volumes, timeoutMs }) {
+  // Compose interpolates the whole file even for `down`: give it the real or a placeholder password.
+  const file = envFileOf(settings);
+  const secrets = fs.existsSync(file) ? parseEnvFile(fs.readFileSync(file, 'utf8')) : { RATIO_LOCAL_PG_SUPERUSER_PASSWORD: 'unused-for-down' };
+  await compose(settings, secrets, ['--profile', 'app', '--profile', 'worker', 'down', '--remove-orphans', ...(volumes ? ['-v'] : [])], { timeoutMs });
+  if (volumes) removeProjectState(ROOT, settings.project);
+  log(volumes ? 'down: containers, network, volumes and local secrets removed' : 'down: containers and network removed (volumes kept)', { project: settings.project });
+}
+
+
+// --- end to end ----------------------------------------------------------------
+
+async function localTest() {
+  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  // local:test owns its stack end to end (down -v at the end), so it uses its
+  // OWN project and ports and refuses to start over anything already there.
+  const settings = localTestSettings(process.env);
+  const containers = (await run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${settings.project}`], { capture: true, timeoutMs: DOCKER_PS_TIMEOUT_MS })).out
+    .split('\\n')
+    .filter(Boolean).length;
+  const busyPorts = [];
+  for (const p of [settings.pgPort, settings.s3Port, settings.appPort]) if (await portInUse(p)) busyPorts.push(p);
+  const problems = preflightProblems({ stateExists: fs.existsSync(path.join(ROOT, localStatePaths(settings.project).dir)), containers, busyPorts });
+  if (problems.length) throw new Error(`local:test refuses to start (nothing was changed):\\n  ${problems.join('\\n  ')}`);
+
+  // runLocalTest runs the body, then ALWAYS the bounded cleanup (stop the app,
+  // `down -v`), then decides pass/fail in one pure function
+  // (finalizeLocalTestSummary): a failed body, an app that could not be
+  // stopped cleanly, or a failed `down -v` each fail the run.
+  const summary = await runLocalTest({
+    project: settings.project,
+    down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
+    downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
+    body: async ({ steps, setApp }) => {
+      await up(settings);
+      await up(settings); // idempotent
+      steps.up = 'ok (twice)';
+      const status = await migrate(settings);
+      await migrate(settings); // idempotent
+      steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
+      await seed(settings);
+      await seed(settings); // idempotent
+      steps.seed = 'ok (twice)';
+      const first = await sync(settings);
+      const outcomes = (rec) => Object.fromEntries((rec.results?.periods ?? []).map((p) => [p.billingPeriod, p.outcome]));
+      steps.sync = outcomes(first);
+      const second = await sync(settings);
+      steps.syncAgain = outcomes(second);
+      if (Object.values(steps.sync).some((o) => o !== 'published')) throw new Error(`first sync did not publish every period: ${JSON.stringify(steps.sync)}`);
+      if (Object.values(steps.syncAgain).some((o) => o !== 'skipped_unchanged')) throw new Error(`second sync was not a no-op: ${JSON.stringify(steps.syncAgain)}`);
+
+      const secrets = loadSecrets(settings, { create: false });
+      const base = `http://127.0.0.1:${settings.appPort}`;
+      // Re-check the app port right before spawning (minutes after the preflight).
+      const app = await startIfPortFree({
+        port: settings.appPort,
+        start: () =>
+          spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
+            cwd: ROOT,
+            env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
+            stdio: ['ignore', 'ignore', 'inherit'],
+          }),
+      });
+      setApp(app);
+      steps.appReady = await waitForOwnServer({
+        child: app,
+        port: settings.appPort,
+        timeoutMs: APP_READY_TIMEOUT_MS,
+        attemptTimeoutMs: APP_READY_ATTEMPT_TIMEOUT_MS,
+        probe: async (signal) => {
+          const r = await fetch(`${base}/api/hello`, { signal });
+          await r.body?.cancel();
+          return r.status === 200;
+        },
+      });
+
+      // Every API read is bounded (Copilot 4176117553): a next start that is
+      // alive but stuck fails the run instead of blocking the cleanup.
+      const anon = await fetchJson(`${base}/api/v1/costs/published`, { timeoutMs: API_REQUEST_TIMEOUT_MS });
+      if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
+      steps.anonymous = anon.status;
+
+      const rows = [];
+      let totals = null;
+      let cursor = null;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const r = await fetchJson(`${base}/api/v1/costs/published?limit=17${cursor ? `&cursor=${cursor}` : ''}`, { token: secrets.RATIO_LOCAL_API_TOKEN, timeoutMs: API_REQUEST_TIMEOUT_MS });
+        if (r.status !== 200) throw new Error(`API read answered ${r.status}: ${JSON.stringify(r.body)}`);
+        if (page === 0) totals = r.body.totals;
+        rows.push(...r.body.data);
+        cursor = r.body.page.nextCursor;
+        if (!cursor) break;
+      }
+      if (cursor) throw new Error(`more than ${MAX_PAGES} pages`);
+      const control = JSON.parse(fs.readFileSync(CONTROL_TOTALS, 'utf8')).base;
+      const mismatches = compareControlTotals(totals ?? [], control);
+      const keys = new Set(rows.map((r) => `${r.batchId}/${r.artifactSha256}/${r.rowOrdinal}`));
+      const expectedRows = Object.values(control).reduce((n, c) => n + c.rowCount, 0);
+      if (rows.length !== expectedRows || keys.size !== expectedRows) mismatches.push(`rows over all pages: ${rows.length} (${keys.size} distinct), expected ${expectedRows}`);
+      if (rows.some((r) => typeof r.billedCost !== 'string')) mismatches.push('a billedCost is not a decimal string');
+      steps.api = { totals, rows: rows.length, distinct: keys.size };
+      if (mismatches.length) throw new Error(`reader totals differ from the fixture control totals:\\n  ${mismatches.join('\\n  ')}`);
+    },
+  });
+  process.stdout.write(`${JSON.stringify({ type: 'ratio.local-test', ...summary })}\\n`);
+  if (!summary.pass) log('local:test failed', { failures: summary.failures });
+  return summary.pass ? 0 : 1;
+}
+
+// --- main ----------------------------------------------------------------------
+
+const done = (p) => p.then(() => 0);
+const COMMANDS = {
+  up: (s) => done(up(s)),
+  migrate: (s) => done(migrate(s)),
+  seed: (s) => done(seed(s)),
+  sync: (s) => done(sync(s)),
+  down: (s, args) => done(down(s, { volumes: args.includes('-v') || args.includes('--volumes'), timeoutMs: DOWN_TIMEOUT_MS })),
+  test: () => localTest(),
+};
+
+async function main(argv) {
+  const [cmd, ...args] = argv;
+  if (!COMMANDS[cmd]) {
+    process.stderr.write(`usage: node scripts/local/local.mjs <${Object.keys(COMMANDS).join('|')}> [-v]\\n`);
+    return 2;
+  }
+  return (await COMMANDS[cmd](localSettings(process.env), args)) ?? 0;
+}
+
+// runProcess runs each command in its own (detached) process group, so a
+// Ctrl-C or SIGTERM to this script would not reach them: kill them first.
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.once(sig, () => {
+    killLiveProcessGroups();
+    log('interrupted: child process groups killed', { signal: sig });
+    process.exit(sig === 'SIGINT' ? 130 : 143);
+  });
+}
+
+main(process.argv.slice(2)).then(
+  (code) => process.exit(code),
+  (e) => {
+    log('failed', { error: e.message });
+    process.exit(1);
+  },
+);
+"
+
+ ❯ scripts/local/local.test.mjs:960:17
+    958|     expect(src).toMatch(/process\.stdout\.write\(`\$\{JSON\.stringify\…
+    959|     // The exit code now also covers an interrupt (130/143): localTest…
+    960|     expect(src).toMatch(/return localTestExitCode\(summary\);/);
+       |                 ^
+    961|     expect(src).toMatch(/return \(await COMMANDS\[cmd\]\(localSettings…
+    962|     expect(src).not.toMatch(/summary\.pass = /); // only finalizeLocal…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L20 an interrupted local:test still cleans up (Copilot 4176238924) > exit codes: SIGINT 130, SIGTERM 143; an interrupted run exits with them even if everything else passed
+TypeError: exitCodeForSignal is not a function
+ ❯ scripts/local/local.test.mjs:1085:29
+    1083|
+    1084|   it('exit codes: SIGINT 130, SIGTERM 143; an interrupted run exits wi…
+    1085|     expect(exitCodeForSignal('SIGINT')).toBe(130);
+       |                             ^
+    1086|     expect(exitCodeForSignal('SIGTERM')).toBe(143);
+    1087|     expect(localTestExitCode({ pass: true, failures: [] })).toBe(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L20 an interrupted local:test still cleans up (Copilot 4176238924) > SIGINT mid-body: the in-flight command is killed, the app is stopped, down -v runs exactly once, the run fails with interrupted=SIGINT (exit 130)
+AssertionError: expected undefined to be 'SIGINT' // Object.is equality
+
+- Expected:
+"SIGINT"
+
++ Received:
+undefined
+
+ ❯ scripts/local/local.test.mjs:1125:33
+    1123|     expect(elapsed(t0)).toBeLessThan(5_000);
+    1124|     expect(down).toHaveBeenCalledTimes(1);
+    1125|     expect(summary.interrupted).toBe('SIGINT');
+       |                                 ^
+    1126|     expect(summary.pass).toBe(false);
+    1127|     expect(summary.error).toMatch(/interrupted by SIGINT/);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L20 an interrupted local:test still cleans up (Copilot 4176238924) > SIGTERM while the body ignores every signal: cleanup still runs once (exit 143)
+Error: Test timed out in 10000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ scripts/local/local.test.mjs:1135:5
+    1133|   }, 15_000);
+    1134|
+    1135|   it('SIGTERM while the body ignores every signal: cleanup still runs …
+       |     ^
+    1136|     const ac = new AbortController();
+    1137|     const down = vi.fn(async () => undefined);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L20 an interrupted local:test still cleans up (Copilot 4176238924) > a signal that arrives during the cleanup is recorded (exit 130) and does not run the cleanup twice
+AssertionError: expected undefined to be 'SIGINT' // Object.is equality
+
+- Expected:
+"SIGINT"
+
++ Received:
+undefined
+
+ ❯ scripts/local/local.test.mjs:1153:33
+    1151|     const summary = await runLocalTest({ project: 'p', down, downTimeo…
+    1152|     expect(down).toHaveBeenCalledTimes(1);
+    1153|     expect(summary.interrupted).toBe('SIGINT');
+       |                                 ^
+    1154|     expect(localTestExitCode(summary)).toBe(130);
+    1155|   }, 10_000);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L20 an interrupted local:test still cleans up (Copilot 4176238924) > runProcess bound to an aborted signal never spawns; aborting mid-run kills the group and rejects at once
+AssertionError: expected [Function] to throw error matching /interrupted/ but got 'Cannot read properties of undefined (…'
+
+- Expected:
+/interrupted/
+
++ Received:
+"Cannot read properties of undefined (reading 'pid')"
+
+ ❯ scripts/local/local.test.mjs:1161:110
+    1159|     const pre = new AbortController();
+    1160|     pre.abort('SIGINT');
+    1161|     await expect(runProcess(process.execPath, ['-e', ''], { timeoutMs:…
+       |                                                                                                              ^
+    1162|     expect(spawnFn).not.toHaveBeenCalled();
+    1163|     const ac = new AbortController();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L20 an interrupted local:test still cleans up (Copilot 4176238924) > installInterruptHandlers: the first signal calls onFirst once; a second one forces (onForce); dispose removes the listeners
+TypeError: installInterruptHandlers is not a function
+ ❯ scripts/local/local.test.mjs:1186:45
+    1184|     const onFirst = vi.fn();
+    1185|     const onForce = vi.fn();
+    1186|     const dispose = installInterruptHandlers({ proc, onFirst, onForce …
+       |                                             ^
+    1187|     proc.emit('SIGINT', 'SIGINT');
+    1188|     expect(onFirst).toHaveBeenCalledTimes(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L20 an interrupted local:test still cleans up (Copilot 4176238924) > next start style children are tracked: killLiveProcessGroups kills them; an exited child leaves the set
+TypeError: trackProcessGroup is not a function
+ ❯ trackedSleeper scripts/local/local.test.mjs:1072:29
+    1070|     const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10…
+    1071|     spawnedHere.push(c);
+    1072|     return trackProcessGroup(c);
+       |                             ^
+    1073|   };
+    1074|   const exitedWithin = (c, ms) =>
+ ❯ scripts/local/local.test.mjs:1200:15
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/21]⎯
+
+ FAIL  scripts/local/local.test.mjs > L20 an interrupted local:test still cleans up (Copilot 4176238924) > local.mjs: next start is detached and tracked; the first signal aborts local:test (cleanup), other commands kill and exit; a second signal forces; down ignores the interrupt
+AssertionError: expected '#!/usr/bin/env node\n// LOCAL, EPHEME…' to match /start: \(\) =>\s*trackProcessGroup\(\…/
+
+- Expected:
+/start: \(\) =>\s*trackProcessGroup\(\s*spawn\(process\.execPath, \[path\.join\(ROOT, 'node_modules', 'next'[\s\S]*?detached: true/
+
++ Received:
+"#!/usr/bin/env node
+// LOCAL, EPHEMERAL Ratio stack (Slice 2). Not a production tool.
+//
+//   npm run local:up        docker compose up (Postgres 16 + SeaweedFS S3), then the role bootstrap
+//   npm run local:migrate   worker:build, migrate as the non-superuser migrator, status must match
+//   npm run local:seed      buckets, the committed SYNTHETIC FOCUS fixture, tenant + source
+//   npm run local:sync      worker sync as the ratio_worker login
+//   npm run local:down      docker compose down        (-- -v: also volumes and .ratio-local/<project>/)
+//   npm run local:test      its OWN stack: preflight → up → migrate → seed → sync → API read
+//                           under next start → assert control totals → down -v
+//
+// Every command is idempotent. Secrets are generated on the first `up` into
+// .ratio-local/<project>/env (gitignored; directory 0700, file 0600); nothing
+// secret is committed. Settings (env): RATIO_LOCAL_PROJECT (ratio-local),
+// RATIO_LOCAL_PG_PORT (54329), RATIO_LOCAL_S3_PORT (18343),
+// RATIO_LOCAL_APP_PORT (3100). local:test ignores those and uses
+// RATIO_LOCAL_TEST_PROJECT (ratio-local-test), RATIO_LOCAL_TEST_PG_PORT
+// (54339), RATIO_LOCAL_TEST_S3_PORT (18353), RATIO_LOCAL_TEST_APP_PORT (3110),
+// refusing any overlap with the developer stack. All ports bind 127.0.0.1 only.
+//
+// Every child process, network call and wait below has a HARD deadline (the
+// *_TIMEOUT_MS constants; the full inventory is in
+// docs/evidence/slice-2/EVIDENCE.md §13): nothing here can hang `local:up`,
+// and local:test always reaches its `down -v`.
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+
+const { AbortSignal, fetch } = globalThis;
+import {
+  LOCAL_NAMES,
+  apiEnv,
+  compareControlTotals,
+  connectionUrl,
+  fetchJson,
+  generateLocalSecrets,
+  killLiveProcessGroups,
+  localSettings,
+  localStatePaths,
+  localTestSettings,
+  portInUse,
+  parseEnvFile,
+  preflightProblems,
+  removeProjectState,
+  runLocalTest,
+  runProcess,
+  startIfPortFree,
+  waitForOwnServer,
+  waitUntil,
+  withDeadline,
+  workerEnv,
+  writeEnvFileSecure,
+} from './lib.mjs';
+import { runBootstrap } from './bootstrap.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const require = createRequire(import.meta.url);
+const { Client } = require(path.join(ROOT, 'node_modules', 'pg'));
+const COMPOSE_FILE = path.join(ROOT, 'docker-compose.local.yml');
+const FIXTURE_BASE = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'base');
+const CONTROL_TOTALS = path.join(ROOT, 'fixtures', 'focus-1.0-synthetic', 'control-totals.json');
+
+const log = (msg, fields = {}) => process.stderr.write(`${JSON.stringify({ tag: 'ratio-local', msg, ...fields })}\\n`);
+
+// --- state (per compose project) ------------------------------------------------
+
+const envFileOf = (settings) => path.join(ROOT, localStatePaths(settings.project).envFile);
+
+function loadSecrets(settings, { create }) {
+  const file = envFileOf(settings);
+  if (fs.existsSync(file)) return parseEnvFile(fs.readFileSync(file, 'utf8'));
+  if (!create) throw new Error(`${localStatePaths(settings.project).envFile} not found: run npm run local:up first`);
+  const secrets = generateLocalSecrets();
+  writeEnvFileSecure(file, secrets);
+  log('generated local secrets', { file: localStatePaths(settings.project).envFile });
+  return secrets;
+}
+
+// --- deadlines (every wait in this file; EVIDENCE §13) --------------------------
+
+const DOCKER_PS_TIMEOUT_MS = 60_000;
+/** `compose up -d --wait` (includes a first image pull in CI). */
+const COMPOSE_UP_TIMEOUT_MS = 600_000;
+const DOWN_TIMEOUT_MS = 300_000;
+/** local:test's outer cut-off around `down -v` (the compose command's own timeout fires first). */
+const CLEANUP_DOWN_TIMEOUT_MS = DOWN_TIMEOUT_MS + 30_000;
+const WORKER_BUILD_TIMEOUT_MS = 300_000;
+const WORKER_CLI_TIMEOUT_MS = 600_000;
+const PG_CONNECT_TIMEOUT_MS = 5_000;
+/** Client-side (query_timeout) and server-side (statement_timeout) per statement. */
+const PG_QUERY_TIMEOUT_MS = 60_000;
+/** A whole withClient session: connect, every statement, disconnect. */
+const PG_SESSION_TIMEOUT_MS = 120_000;
+const PG_END_TIMEOUT_MS = 5_000;
+const READY_TIMEOUT_MS = 120_000;
+const READY_ATTEMPT_TIMEOUT_MS = 5_000;
+const BUCKET_WARM_TIMEOUT_MS = 60_000;
+const S3_REQUEST_TIMEOUT_MS = 30_000;
+const APP_READY_TIMEOUT_MS = 60_000;
+const APP_READY_ATTEMPT_TIMEOUT_MS = 5_000;
+/** Each API read: longer than the route's own 10 s DB statement_timeout (readerPool.ts). */
+const API_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_PAGES = 100;
+
+// --- processes ---------------------------------------------------------------
+
+function run(cmd, args, { env = {}, capture = false, allowFail = false, timeoutMs } = {}) {
+  return runProcess(cmd, args, { cwd: ROOT, env: { ...process.env, ...env }, capture, allowFail, timeoutMs });
+}
+
+function composeEnv(settings, secrets) {
+  return {
+    RATIO_LOCAL_PG_PORT: String(settings.pgPort),
+    RATIO_LOCAL_S3_PORT: String(settings.s3Port),
+    RATIO_LOCAL_APP_PORT: String(settings.appPort),
+    ...secrets,
+  };
+}
+
+const compose = (settings, secrets, args, opts = {}) =>
+  run('docker', ['compose', '-f', COMPOSE_FILE, '-p', settings.project, ...args], { ...opts, env: { ...composeEnv(settings, secrets), ...(opts.env ?? {}) } });
+
+/**
+ * One Postgres session, hard-bounded: connect (PG_CONNECT_TIMEOUT_MS), every
+ * statement (query_timeout client-side, statement_timeout server-side), the
+ * disconnect, and the whole session (PG_SESSION_TIMEOUT_MS). When the session
+ * deadline or the caller's signal fires, the socket is destroyed.
+ */
+function withClient(url, fn, { signal } = {}) {
+  return withDeadline(
+    async (deadlineSignal) => {
+      const c = new Client({ connectionString: url, connectionTimeoutMillis: PG_CONNECT_TIMEOUT_MS, query_timeout: PG_QUERY_TIMEOUT_MS, statement_timeout: PG_QUERY_TIMEOUT_MS });
+      c.on('error', () => undefined);
+      const aborted = signal ? AbortSignal.any([deadlineSignal, signal]) : deadlineSignal;
+      const kill = () => c.connection?.stream?.destroy();
+      aborted.addEventListener('abort', kill, { once: true });
+      try {
+        await c.connect();
+        try {
+          return await fn(c);
+        } finally {
+          await withDeadline(() => c.end(), PG_END_TIMEOUT_MS, 'postgres disconnect').catch(kill);
+        }
+      } finally {
+        aborted.removeEventListener('abort', kill);
+      }
+    },
+    PG_SESSION_TIMEOUT_MS,
+    'postgres session',
+  );
+}
+
+const superUrl = (settings, secrets) =>
+  connectionUrl({ user: 'postgres', password: secrets.RATIO_LOCAL_PG_SUPERUSER_PASSWORD, port: settings.pgPort, database: 'postgres' });
+
+// --- commands ----------------------------------------------------------------
+
+async function up(settings) {
+  const secrets = loadSecrets(settings, { create: true });
+  await compose(settings, secrets, ['up', '-d', '--wait', 'postgres', 's3'], { timeoutMs: COMPOSE_UP_TIMEOUT_MS });
+  await waitUntil({
+    what: 'postgres',
+    timeoutMs: READY_TIMEOUT_MS,
+    attemptTimeoutMs: READY_ATTEMPT_TIMEOUT_MS,
+    probe: (signal) => withClient(superUrl(settings, secrets), async (c) => (await c.query('SELECT 1')).rowCount === 1, { signal }),
+  });
+  // Each attempt is aborted at READY_ATTEMPT_TIMEOUT_MS: an endpoint that
+  // accepts TCP but never answers cannot hang local:up (Copilot 4176117539).
+  await waitUntil({
+    what: 's3',
+    timeoutMs: READY_TIMEOUT_MS,
+    attemptTimeoutMs: READY_ATTEMPT_TIMEOUT_MS,
+    probe: async (signal) => {
+      const r = await fetch(`http://127.0.0.1:${settings.s3Port}/`, { signal });
+      await r.body?.cancel();
+      return r.status < 500;
+    },
+  });
+  await withClient(superUrl(settings, secrets), async (c) => {
+    const v = await c.query(`SELECT current_setting('server_version_num') AS v`);
+    if (!/^16\\d{4}$/.test(v.rows[0].v)) throw new Error(`the local Postgres is not version 16 (server_version_num ${v.rows[0].v})`);
+    await runBootstrap(c, LOCAL_NAMES, {
+      [LOCAL_NAMES.migrator]: secrets.RATIO_LOCAL_MIGRATOR_PASSWORD,
+      [LOCAL_NAMES.worker]: secrets.RATIO_LOCAL_WORKER_PASSWORD,
+      [LOCAL_NAMES.reader]: secrets.RATIO_LOCAL_READER_PASSWORD,
+    });
+  });
+  log('up: postgres 16 + s3 running, roles bootstrapped', { project: settings.project, pgPort: settings.pgPort, s3Port: settings.s3Port });
+}
+
+async function workerCli(settings, secrets, args, opts = {}) {
+  if (!fs.existsSync(path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'))) await run('npm', ['run', '-s', 'worker:build'], { timeoutMs: WORKER_BUILD_TIMEOUT_MS });
+  return run(process.execPath, [path.join(ROOT, 'dist-worker', 'ingest', 'cli.js'), ...args], { env: workerEnv(settings, secrets), capture: true, timeoutMs: WORKER_CLI_TIMEOUT_MS, ...opts });
+}
+
+async function migrate(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  await run('npm', ['run', '-s', 'worker:build'], { timeoutMs: WORKER_BUILD_TIMEOUT_MS });
+  await workerCli(settings, secrets, ['migrate']);
+  const status = await workerCli(settings, secrets, ['migrate', '--status', '--json'], { allowFail: true });
+  const doc = JSON.parse(status.out);
+  // Slice 0's catalog check judged the bootstrapped logins: no privilege problem may be reported.
+  if (status.code !== 0 || !doc.matches || doc.privilegeProblems?.length) {
+    throw new Error(`migrate --status: exit ${status.code}, matches ${doc.matches}, privilegeProblems ${JSON.stringify(doc.privilegeProblems)}`);
+  }
+  log('migrate: schema current, Slice 0 privilege model satisfied', { currentVersion: doc.currentVersion, privilegeProblems: doc.privilegeProblems });
+  return doc;
+}
+
+function fixtureFiles(dir, acc = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const abs = path.join(dir, e.name);
+    if (e.isDirectory()) fixtureFiles(abs, acc);
+    else acc.push(abs);
+  }
+  return acc;
+}
+
+function s3Client(settings, secrets) {
+  const { S3Client } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+  return new S3Client({
+    endpoint: `http://127.0.0.1:${settings.s3Port}`,
+    // Belt and braces: every send below also carries an abortSignal with a hard deadline.
+    requestHandler: { connectionTimeout: 5_000, requestTimeout: S3_REQUEST_TIMEOUT_MS },
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: secrets.RATIO_LOCAL_S3_ACCESS_KEY_ID, secretAccessKey: secrets.RATIO_LOCAL_S3_SECRET_ACCESS_KEY },
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  });
+}
+
+async function seed(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const { CreateBucketCommand, DeleteObjectCommand, PutObjectCommand } = require(path.join(ROOT, 'node_modules', '@aws-sdk', 'client-s3'));
+  const s3 = s3Client(settings, secrets);
+  try {
+    for (const Bucket of [LOCAL_NAMES.sourceBucket, LOCAL_NAMES.evidenceBucket]) {
+      try {
+        await withDeadline((signal) => s3.send(new CreateBucketCommand({ Bucket }), { abortSignal: signal }), S3_REQUEST_TIMEOUT_MS, `s3 create bucket ${Bucket}`);
+      } catch (e) {
+        if (e?.name !== 'BucketAlreadyOwnedByYou' && e?.name !== 'BucketAlreadyExists') throw e;
+      }
+      // A fresh SeaweedFS bucket answers 500 until its volumes are allocated:
+      // warm it with a probe object so the worker's first evidence write does
+      // not spend its bounded retries on that (seen locally: 2 retries).
+      await waitUntil({
+        what: `s3 bucket ${Bucket} writable`,
+        timeoutMs: BUCKET_WARM_TIMEOUT_MS,
+        attemptTimeoutMs: S3_REQUEST_TIMEOUT_MS,
+        probe: async (signal) => {
+          await s3.send(new PutObjectCommand({ Bucket, Key: '.ratio-local-warmup', Body: 'warmup' }), { abortSignal: signal });
+          await s3.send(new DeleteObjectCommand({ Bucket, Key: '.ratio-local-warmup' }), { abortSignal: signal });
+          return true;
+        },
+      });
+    }
+    const files = fixtureFiles(FIXTURE_BASE);
+    for (const f of files) {
+      const Key = path.relative(FIXTURE_BASE, f).split(path.sep).join('/');
+      const Body = fs.readFileSync(f);
+      await withDeadline((signal) => s3.send(new PutObjectCommand({ Bucket: LOCAL_NAMES.sourceBucket, Key, Body }), { abortSignal: signal }), S3_REQUEST_TIMEOUT_MS, `s3 put ${Key}`);
+    }
+    log('seed: SYNTHETIC fixture uploaded', { bucket: LOCAL_NAMES.sourceBucket, objects: files.length });
+  } finally {
+    s3.destroy();
+  }
+  const migratorUrl = workerEnv(settings, secrets).RATIO_MIGRATE_DATABASE_URL;
+  await withClient(migratorUrl, async (c) => {
+    // Provisioning is an owner action (ingestion-ops SKILL §2); RLS applies to the owner too.
+    await c.query('BEGIN');
+    try {
+      await c.query(`SELECT set_config('ratio.tenant_id', $1, true)`, [secrets.RATIO_LOCAL_TENANT_ID]);
+      await c.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, [secrets.RATIO_LOCAL_TENANT_ID, LOCAL_NAMES.tenantSlug]);
+      await c.query(
+        `INSERT INTO ratio.sources (tenant_id, id, source_key, kind, display_name, coverage, declared_focus_version, config)
+         VALUES ($1, gen_random_uuid(), $2, 'focus_file', 'SYNTHETIC local FOCUS fixture (not real data)', 'public_cloud', '1.0', $3::jsonb)
+         ON CONFLICT (tenant_id, source_key) DO NOTHING`,
+        [
+          secrets.RATIO_LOCAL_TENANT_ID,
+          LOCAL_NAMES.sourceKey,
+          JSON.stringify({ layout: 'aws-data-exports', bucket: LOCAL_NAMES.sourceBucket, prefix: LOCAL_NAMES.fixturePrefix, exportName: LOCAL_NAMES.fixtureExportName }),
+        ],
+      );
+      const commit = await c.query('COMMIT');
+      if (commit.command !== 'COMMIT') throw new Error('provisioning transaction was rolled back');
+    } catch (e) {
+      await c.query('ROLLBACK').catch(() => undefined);
+      throw e;
+    }
+  });
+  log('seed: tenant and source provisioned', { tenant: secrets.RATIO_LOCAL_TENANT_ID, source: LOCAL_NAMES.sourceKey });
+}
+
+async function sync(settings) {
+  const secrets = loadSecrets(settings, { create: false });
+  const r = await workerCli(settings, secrets, ['sync', '--tenant', secrets.RATIO_LOCAL_TENANT_ID, '--source', LOCAL_NAMES.sourceKey], { allowFail: true });
+  process.stdout.write(r.out);
+  if (r.code !== 0) throw new Error(`worker sync exited ${r.code}`);
+  return JSON.parse(r.out.trim().split('\\n').pop());
+}
+
+async function down(settings, { volumes, timeoutMs }) {
+  // Compose interpolates the whole file even for `down`: give it the real or a placeholder password.
+  const file = envFileOf(settings);
+  const secrets = fs.existsSync(file) ? parseEnvFile(fs.readFileSync(file, 'utf8')) : { RATIO_LOCAL_PG_SUPERUSER_PASSWORD: 'unused-for-down' };
+  await compose(settings, secrets, ['--profile', 'app', '--profile', 'worker', 'down', '--remove-orphans', ...(volumes ? ['-v'] : [])], { timeoutMs });
+  if (volumes) removeProjectState(ROOT, settings.project);
+  log(volumes ? 'down: containers, network, volumes and local secrets removed' : 'down: containers and network removed (volumes kept)', { project: settings.project });
+}
+
+
+// --- end to end ----------------------------------------------------------------
+
+async function localTest() {
+  if (!fs.existsSync(path.join(ROOT, '.next', 'BUILD_ID'))) throw new Error('no Next.js build: run `npm run build` first');
+  // local:test owns its stack end to end (down -v at the end), so it uses its
+  // OWN project and ports and refuses to start over anything already there.
+  const settings = localTestSettings(process.env);
+  const containers = (await run('docker', ['ps', '-aq', '--filter', `label=com.docker.compose.project=${settings.project}`], { capture: true, timeoutMs: DOCKER_PS_TIMEOUT_MS })).out
+    .split('\\n')
+    .filter(Boolean).length;
+  const busyPorts = [];
+  for (const p of [settings.pgPort, settings.s3Port, settings.appPort]) if (await portInUse(p)) busyPorts.push(p);
+  const problems = preflightProblems({ stateExists: fs.existsSync(path.join(ROOT, localStatePaths(settings.project).dir)), containers, busyPorts });
+  if (problems.length) throw new Error(`local:test refuses to start (nothing was changed):\\n  ${problems.join('\\n  ')}`);
+
+  // runLocalTest runs the body, then ALWAYS the bounded cleanup (stop the app,
+  // `down -v`), then decides pass/fail in one pure function
+  // (finalizeLocalTestSummary): a failed body, an app that could not be
+  // stopped cleanly, or a failed `down -v` each fail the run.
+  const summary = await runLocalTest({
+    project: settings.project,
+    down: () => down(settings, { volumes: true, timeoutMs: DOWN_TIMEOUT_MS }),
+    downTimeoutMs: CLEANUP_DOWN_TIMEOUT_MS,
+    body: async ({ steps, setApp }) => {
+      await up(settings);
+      await up(settings); // idempotent
+      steps.up = 'ok (twice)';
+      const status = await migrate(settings);
+      await migrate(settings); // idempotent
+      steps.migrate = { currentVersion: status.currentVersion, privilegeProblems: status.privilegeProblems };
+      await seed(settings);
+      await seed(settings); // idempotent
+      steps.seed = 'ok (twice)';
+      const first = await sync(settings);
+      const outcomes = (rec) => Object.fromEntries((rec.results?.periods ?? []).map((p) => [p.billingPeriod, p.outcome]));
+      steps.sync = outcomes(first);
+      const second = await sync(settings);
+      steps.syncAgain = outcomes(second);
+      if (Object.values(steps.sync).some((o) => o !== 'published')) throw new Error(`first sync did not publish every period: ${JSON.stringify(steps.sync)}`);
+      if (Object.values(steps.syncAgain).some((o) => o !== 'skipped_unchanged')) throw new Error(`second sync was not a no-op: ${JSON.stringify(steps.syncAgain)}`);
+
+      const secrets = loadSecrets(settings, { create: false });
+      const base = `http://127.0.0.1:${settings.appPort}`;
+      // Re-check the app port right before spawning (minutes after the preflight).
+      const app = await startIfPortFree({
+        port: settings.appPort,
+        start: () =>
+          spawn(process.execPath, [path.join(ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(settings.appPort), '-H', '127.0.0.1'], {
+            cwd: ROOT,
+            env: { ...process.env, ...apiEnv(settings, secrets), NODE_ENV: 'production' },
+            stdio: ['ignore', 'ignore', 'inherit'],
+          }),
+      });
+      setApp(app);
+      steps.appReady = await waitForOwnServer({
+        child: app,
+        port: settings.appPort,
+        timeoutMs: APP_READY_TIMEOUT_MS,
+        attemptTimeoutMs: APP_READY_ATTEMPT_TIMEOUT_MS,
+        probe: async (signal) => {
+          const r = await fetch(`${base}/api/hello`, { signal });
+          await r.body?.cancel();
+          return r.status === 200;
+        },
+      });
+
+      // Every API read is bounded (Copilot 4176117553): a next start that is
+      // alive but stuck fails the run instead of blocking the cleanup.
+      const anon = await fetchJson(`${base}/api/v1/costs/published`, { timeoutMs: API_REQUEST_TIMEOUT_MS });
+      if (anon.status !== 401) throw new Error(`anonymous read answered ${anon.status}, expected 401`);
+      steps.anonymous = anon.status;
+
+      const rows = [];
+      let totals = null;
+      let cursor = null;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const r = await fetchJson(`${base}/api/v1/costs/published?limit=17${cursor ? `&cursor=${cursor}` : ''}`, { token: secrets.RATIO_LOCAL_API_TOKEN, timeoutMs: API_REQUEST_TIMEOUT_MS });
+        if (r.status !== 200) throw new Error(`API read answered ${r.status}: ${JSON.stringify(r.body)}`);
+        if (page === 0) totals = r.body.totals;
+        rows.push(...r.body.data);
+        cursor = r.body.page.nextCursor;
+        if (!cursor) break;
+      }
+      if (cursor) throw new Error(`more than ${MAX_PAGES} pages`);
+      const control = JSON.parse(fs.readFileSync(CONTROL_TOTALS, 'utf8')).base;
+      const mismatches = compareControlTotals(totals ?? [], control);
+      const keys = new Set(rows.map((r) => `${r.batchId}/${r.artifactSha256}/${r.rowOrdinal}`));
+      const expectedRows = Object.values(control).reduce((n, c) => n + c.rowCount, 0);
+      if (rows.length !== expectedRows || keys.size !== expectedRows) mismatches.push(`rows over all pages: ${rows.length} (${keys.size} distinct), expected ${expectedRows}`);
+      if (rows.some((r) => typeof r.billedCost !== 'string')) mismatches.push('a billedCost is not a decimal string');
+      steps.api = { totals, rows: rows.length, distinct: keys.size };
+      if (mismatches.length) throw new Error(`reader totals differ from the fixture control totals:\\n  ${mismatches.join('\\n  ')}`);
+    },
+  });
+  process.stdout.write(`${JSON.stringify({ type: 'ratio.local-test', ...summary })}\\n`);
+  if (!summary.pass) log('local:test failed', { failures: summary.failures });
+  return summary.pass ? 0 : 1;
+}
+
+// --- main ----------------------------------------------------------------------
+
+const done = (p) => p.then(() => 0);
+const COMMANDS = {
+  up: (s) => done(up(s)),
+  migrate: (s) => done(migrate(s)),
+  seed: (s) => done(seed(s)),
+  sync: (s) => done(sync(s)),
+  down: (s, args) => done(down(s, { volumes: args.includes('-v') || args.includes('--volumes'), timeoutMs: DOWN_TIMEOUT_MS })),
+  test: () => localTest(),
+};
+
+async function main(argv) {
+  const [cmd, ...args] = argv;
+  if (!COMMANDS[cmd]) {
+    process.stderr.write(`usage: node scripts/local/local.mjs <${Object.keys(COMMANDS).join('|')}> [-v]\\n`);
+    return 2;
+  }
+  return (await COMMANDS[cmd](localSettings(process.env), args)) ?? 0;
+}
+
+// runProcess runs each command in its own (detached) process group, so a
+// Ctrl-C or SIGTERM to this script would not reach them: kill them first.
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.once(sig, () => {
+    killLiveProcessGroups();
+    log('interrupted: child process groups killed', { signal: sig });
+    process.exit(sig === 'SIGINT' ? 130 : 143);
+  });
+}
+
+main(process.argv.slice(2)).then(
+  (code) => process.exit(code),
+  (e) => {
+    log('failed', { error: e.message });
+    process.exit(1);
+  },
+);
+"
+
+ ❯ scripts/local/local.test.mjs:1213:17
+    1211|   it('local.mjs: next start is detached and tracked; the first signal …
+    1212|     const src = read('scripts/local/local.mjs');
+    1213|     expect(src).toMatch(/start: \(\) =>\s*trackProcessGroup\(\s*spawn\…
+       |                 ^
+    1214|     expect(src).toMatch(/installInterruptHandlers\(\{/);
+    1215|     expect(src).toMatch(/onFirst: \(sig\) => \{\s*if \(COMMAND === 'te…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/21]⎯
+
+ FAIL  src/server/costs/publishedCosts.test.ts > U1 rowCount is a decimal string, exact beyond 2^53 (Copilot 4176238961) > a count of '9007199254740993' (2^53 + 1) round-trips exactly, through JSON too
+AssertionError: expected [ { …(4) } ] to deeply equal [ { …(4) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "billedCost": "1.50",
+      "billingCurrency": "USD",
+      "billingPeriod": "2026-07-01",
+-     "rowCount": "9007199254740993",
++     "rowCount": 9007199254740992,
+    },
+  ]
+
+ ❯ src/server/costs/publishedCosts.test.ts:50:25
+     48|     h.state.totals = [{ billingPeriod: '2026-07-01', billingCurrency: …
+     49|     const page = await readPublishedCosts(pool, TENANT, Q);
+     50|     expect(page.totals).toEqual([{ billingPeriod: '2026-07-01', billin…
+       |                         ^
+     51|     expect(typeof page.totals?.[0].rowCount).toBe('string');
+     52|     expect(JSON.stringify(page)).toContain('"rowCount":"90071992547409…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/21]⎯
+
+ FAIL  src/server/costs/publishedCosts.test.ts > U1 rowCount is a decimal string, exact beyond 2^53 (Copilot 4176238961) > the largest bigint count is exact too
+AssertionError: expected 9223372036854776000 to be '9223372036854775807' // Object.is equality
+
+- Expected:
+"9223372036854775807"
+
++ Received:
+9223372036854776000
+
+ ❯ src/server/costs/publishedCosts.test.ts:59:78
+     57|   it('the largest bigint count is exact too', async () => {
+     58|     h.state.totals = [{ billingPeriod: '2026-07-01', billingCurrency: …
+     59|     expect((await readPublishedCosts(pool, TENANT, Q)).totals?.[0].row…
+       |                                                                              ^
+     60|   });
+     61| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/21]⎯
+
+ FAIL  src/server/costs/publishedCosts.test.ts > U2 the read fails closed unless the session settings are the pinned ones (Copilot 4176238982) > DateStyle SQL, DMY ⇒ refused before any read
+ FAIL  src/server/costs/publishedCosts.test.ts > U2 the read fails closed unless the session settings are the pinned ones (Copilot 4176238982) > DateStyle German ⇒ refused before any read
+ FAIL  src/server/costs/publishedCosts.test.ts > U2 the read fails closed unless the session settings are the pinned ones (Copilot 4176238982) > IntervalStyle sql_standard ⇒ refused before any read
+ FAIL  src/server/costs/publishedCosts.test.ts > U2 the read fails closed unless the session settings are the pinned ones (Copilot 4176238982) > TimeZone America/Sao_Paulo ⇒ refused before any read
+AssertionError: promise resolved "{ data: [], …(2) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "data": [],
++   "page": {
++     "limit": 100,
++     "nextCursor": null,
++   },
++   "totals": [],
+  }
+
+ ❯ src/server/costs/publishedCosts.test.ts:74:54
+     72|   it.each(cases)('%s ⇒ refused before any read', async (_name, over) =…
+     73|     h.state.settings = { ...h.state.settings, ...over };
+     74|     await expect(readPublishedCosts(pool, TENANT, Q)).rejects.toThrow(…
+       |                                                      ^
+     75|     expect(h.state.queries.some((q) => /cost_facts_published/.test(q))…
+     76|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/21]⎯
+
+ FAIL  src/server/costs/publishedCosts.test.ts > U2 the read fails closed unless the session settings are the pinned ones (Copilot 4176238982) > the reader pool pins DateStyle, IntervalStyle and TimeZone at connection start
+AssertionError: expected '-c search_path=pg_catalog,pg_temp -c …' to contain '-c DateStyle=ISO,MDY'
+
+Expected: "-c DateStyle=ISO,MDY"
+Received: "-c search_path=pg_catalog,pg_temp -c default_transaction_read_only=on -c default_transaction_isolation=repeatable\ read -c statement_timeout=10000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=30000 -c timezone=UTC"
+
+ ❯ src/server/costs/publishedCosts.test.ts:83:36
+     81|
+     82|   it('the reader pool pins DateStyle, IntervalStyle and TimeZone at co…
+     83|     expect(READER_SESSION_OPTIONS).toContain('-c DateStyle=ISO,MDY');
+       |                                    ^
+     84|     expect(READER_SESSION_OPTIONS).toContain('-c IntervalStyle=postgre…
+     85|     expect(READER_SESSION_OPTIONS).toContain('-c TimeZone=UTC');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/21]⎯
+
+ FAIL  src/server/costs/publishedCosts.test.ts > U3 every returned or cursor-encoded value is formatted explicitly, independent of session settings > billing_period is formatted with to_char(…, 'YYYY-MM-DD'), never date::text, in the page and in the totals
+TypeError: Cannot read properties of undefined (reading 'page')
+ ❯ sqls src/server/costs/publishedCosts.test.ts:90:43
+     88|
+     89| describe('U3 every returned or cursor-encoded value is formatted expli…
+     90|   const sqls = () => [PUBLISHED_COSTS_SQL.page, PUBLISHED_COSTS_SQL.to…
+       |                                           ^
+     91|
+     92|   it("billing_period is formatted with to_char(…, 'YYYY-MM-DD'), never…
+ ❯ src/server/costs/publishedCosts.test.ts:93:23
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/21]⎯
+
+ FAIL  src/server/costs/publishedCosts.test.ts > U3 every returned or cursor-encoded value is formatted explicitly, independent of session settings > no date or timestamp column is cast to text (DateStyle/TimeZone-dependent); timestamps go through to_char at UTC
+TypeError: Cannot read properties of undefined (reading 'page')
+ ❯ src/server/costs/publishedCosts.test.ts:100:38
+     98|
+     99|   it('no date or timestamp column is cast to text (DateStyle/TimeZone-…
+    100|     const page = PUBLISHED_COSTS_SQL.page;
+       |                                      ^
+    101|     for (const col of ['charge_period_start', 'charge_period_end', 'pu…
+    102|       expect(page).not.toMatch(new RegExp(`${col}::`));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/21]⎯
+
+ FAIL  src/server/costs/publishedCosts.test.ts > U3 every returned or cursor-encoded value is formatted explicitly, independent of session settings > counts are cast to text in SQL (int8out is setting-independent) and never converted to a JS number
+TypeError: Cannot read properties of undefined (reading 'totals')
+ ❯ src/server/costs/publishedCosts.test.ts:108:32
+    106|
+    107|   it('counts are cast to text in SQL (int8out is setting-independent) …
+    108|     expect(PUBLISHED_COSTS_SQL.totals).toMatch(/pg_catalog\.count\(\*\…
+       |                                ^
+    109|   });
+    110| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/21]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  21 failed | 112 passed (133)
+   Start at  05:22:42
+   Duration  18.61s (tests 96%, transform 2%, import 1%)
+
