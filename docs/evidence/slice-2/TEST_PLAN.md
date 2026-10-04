@@ -63,3 +63,19 @@ Isolation:
 | X4 | **full local flow under `next build && next start`** (also the regression test for the next-start-only failure class, now in CI): up ×2 → migrate ×2 (status matches, `privilegeProblems: []`) → seed ×2 → sync (both periods `published`) → sync (both `skipped_unchanged`) → anonymous GET 401 → paged GET (limit 17) → **totals == control totals exactly** (55 / `30.8272954899`, 40 / `21.0978157665`), 95 distinct rows → `down -v` | `npm run local:test` |
 | X5 | the individual commands, plus `down -v` leaving nothing behind (containers, volumes, network, `.ratio-local/`) | `npm run local:up / local:migrate / local:seed / local:sync / local:down -- -v` |
 | X6 | mutation checks for auth, tenant scope, unsafe-login refusal, the published-only read and the lazy load | scratch `mutate.sh` (EVIDENCE §5) |
+
+## D. Challenger Lows and Copilot review of PR #59 (red: 03f6cf7)
+
+| ID | File | What it proves | Source |
+|---|---|---|---|
+| RL | `src/server/costs/readerLogin.test.ts` | refusal reason codes per finding (`SUPERUSER`, `BYPASSRLS`, `PRIVILEGED_ROLE_REACHABLE`, `UNSAFE_ATTRIBUTE`, `REFUSED_PREDEFINED_ROLE`, `OWNER_MEMBER`, `NOT_READER_MEMBER`, `WORKER_REACHABLE`, `LOGIN_DISABLED`), never containing role names; several problems ⇒ several codes in a stable order | L2, L3 |
+| R5 | `publishedCostsRoute.test.ts` | unsafe login ⇒ 503 with `requestId` in body and `X-Request-Id`; exactly one `unsafe_db_login` event (status 503, codes); no `unhandled_error` line; no role names in any log line | L3, Copilot 4175802693 |
+| D6+ | `publishedCosts.db.test.ts` | refusals carry `requestId`; the operator log is the distinct event with codes (superuser, owner member); a pooled login set `NOLOGIN` (its session still alive) is refused on the next request, and served again after `LOGIN` | L2, L3, Copilot 4175802721 |
+| D8 | 〃 | a restatement committed between the page query and the totals query (injection hook) cannot make page 1 and its totals disagree; a fresh read sees the restatement; the read transaction is REPEATABLE READ + read only; a pool without the REPEATABLE READ default is refused (fail closed) | L4, Copilot 4175802675 |
+| D9 | 〃 | two sources publish identical artifacts for one period (rows differ only by `source_id`); paging at limit 3 visits all 10 rows exactly once, in key order | L5 K2, Copilot 4175802660 |
+| S+ | `publishedCosts.serial.db.test.ts` | refusals carry `requestId`; a refused predefined role and an attribute are logged as codes only, never the role or the login name | L3 |
+| C2+ | `config.test.ts` | the startup log never contains the invalid tenant value (six shapes) nor the reader URL | L5 C2 |
+| L9–L12 | `scripts/local/local.test.mjs` | state per compose project and scoped removal; env file 0600 / directory 0700, also when rewritten; `local:test` settings isolated from the developer's, overlap refused, preflight refusals; listener ownership from a synthetic `/proc` (own pid, descendant, IPv6, foreign pid, not listening, no `/proc`) | L5 L3, L6, Copilot 4175802603 / 4175802639 |
+| X7 | scratch `isolation-e2e.sh` | a developer stack runs while `local:test` passes on its own project (readiness `pid-verified`); the developer stack and its env file are unchanged; a foreign server on the test app port ⇒ `local:test` refuses before creating anything | L6, Copilot 4175802603 / 4175802639 |
+| X8 | scratch `sideeffects.sh` | lazy-load side effects on an up-to-date DB with the manifest missing, eager vs lazy builds | L1 |
+| X9 | scratch `mutate2.sh`, `mutate3.sh` | mutation checks for every fix of this batch (EVIDENCE §11) | all |

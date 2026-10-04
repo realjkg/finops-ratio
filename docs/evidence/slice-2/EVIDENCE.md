@@ -226,5 +226,5 @@ The reader totals equal `fixtures/focus-1.0-synthetic/control-totals.json`
 - The CI steps have not run on GitHub (no push). Docker Compose v2 on
   `ubuntu-latest` and the image pulls are expected to add about 1–2 min to a
   job that currently runs about 3.5–4 min under a 10 min timeout.
-- Everything in the deployment brief (D-01..D-10) is open. Production is a
-  non-delegable human gate.
+- The deployment brief records D-01..D-10 as DECIDED (owner delegation to the
+  orchestrator, 2026-10-04). Remaining owner actions: export access, GitHub App, hosting spend.

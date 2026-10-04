@@ -1,11 +1,10 @@
 # Ratio — deployment decision brief (Slice 2)
 
-> **PRODUCTION IS A NON-DELEGABLE HUMAN GATE.** This brief is written for the
-> owner. It **decides nothing**. Each open decision below lists the options,
-> their trade-offs, a *recommended default* (a starting point for discussion,
-> not a decision), and what it blocks. No production infrastructure has been
-> chosen, provisioned or touched. Everything built so far is local and
-> ephemeral (BOUNDARY v2).
+> **The owner has delegated decisions D-01..D-10 to the orchestrator; they are
+> recorded below as DECIDED (Decision log).** What stays with the owner are
+> actions only the owner can take: granting account access, installing the
+> GitHub App, and approving hosting spend (§7). Nothing has been provisioned
+> or spent. Everything built so far is local and ephemeral (BOUNDARY v2).
 
 Status at the time of writing (branch `slice/02-local-env-brief`):
 
@@ -13,10 +12,29 @@ Status at the time of writing (branch `slice/02-local-env-brief`):
 |---|---|
 | Slice 0: Postgres foundation (schema `ratio`, RLS, roles, migration runner, catalog privilege model) | merged |
 | Slice 1: FOCUS ingestion worker CLI (`ratio-ingest`: sync / backfill / replay / quarantine / doctor / replay-fixtures) | merged; **only the SYNTHETIC fixture has ever been ingested** |
-| Slice 2: local stack + `GET /api/v1/costs/published` + this brief | this branch |
-| Real-export acceptance run (ingestion-ops SKILL §9) | **NOT PERFORMED** (blocked by D-02) |
+| Slice 2: local stack + `GET /api/v1/costs/published` + this brief | PR #59 |
+| Real-export acceptance run (ingestion-ops SKILL §9) | **NOT PERFORMED**: blocked on the owner granting read access to a real FOCUS export (owner action 1) |
 
-## 1. Open decisions
+## Decision log
+
+Each decision below was **decided by the orchestrator under delegation,
+2026-10-04**. The option analysis in §1 is kept as the rationale.
+
+| ID | Decision | Rationale (one line) | Revisit when |
+|---|---|---|---|
+| D-01 | Snapshot / manifest artifacts are **unrestricted ONLY when the source encrypts them with strong encryption**: SSE-KMS, or an equivalent AES-256 at-rest scheme, with the encryption **verified from object metadata at ingest**. Anything else stays **restricted**, which is today's default. Foundation manifests (`src/ingest/db/migrations/*.manifest.json`) stay restricted review artefacts. Enforcement (checking the encryption metadata at ingest) is follow-up work (issue draft in Appendix A); until it lands, everything is treated as restricted, the safe subset. | The owner's rule, made checkable; restricted-by-default never under-protects. | A source cannot provide SSE-KMS / AES-256 metadata, or the follow-up issue lands. |
+| D-02 | **AWS Data Exports, FOCUS 1.0, read through a read-only IAM role** (option a: SDK default chain, no static keys; read-only on the export prefix). | Least standing privilege; no long-lived secret; the worker's only real source. | A second provider, or cross-account trust is not available. |
+| D-03 | **Keep everything until a dedicated retention slice** (option a); a staging-only cleanup of `fixture-*` tenants comes first, as its own slice. | No purge path exists that respects the immutability triggers; keeping data is reversible, deleting is not. | Before the first non-pilot tenant, or storage cost becomes material. |
+| D-04 | **An admin pre-creates the three NOLOGIN ratio roles; the migrator is NOCREATEROLE from day one** (option a, the local model). | Role creation never sits on an app credential; proven locally by `migrate --status` with `privilegeProblems: []`. | The managed Postgres offering cannot pre-create roles. |
+| D-05 | **A separate monitoring login, a member of no ratio role, with SELECT on the ledger only** (option c). | Keeps the owner credential off worker hosts without changing the reviewed ratio privileges. | One more credential is judged too costly (fallback: option a). |
+| D-06 | **Session tenant** (option a): one reader and one worker login per deployment; the app binds the tenant. | Simple and pooled; right for a single-tenant pilot. | Before a second external tenant shares a cluster. |
+| D-07 | Items **1–3 now** (protect `main`, auto-merge for `low` only, Copilot `review_on_push`). For item 4, **option (b), a dedicated GitHub App** posting the gate's verdict as a check run. Installing it needs the owner's GitHub account (owner action 2). | Merge gating a workflow change cannot forge. | The plan gains required-workflow rulesets (option a), or the App is retired. |
+| D-08 | **Stay on PostgreSQL 16** for the pilot; managed minor upgrades allowed; a major upgrade is a reviewed change. | Every test, baseline and pin is PG16; PG16 is supported to Nov 2028. | PG16 end of life approaches, or a needed feature is 17+. |
+| D-09 | **Keep the per-row staged-only trigger** (option a). | Proven and mutation-tested; cost is about 10–18 µs per row. | The acceptance run shows a real month above a few million rows. |
+| D-10 | **One API key per deployment** (option a), bound to its tenant by `RATIO_API_TENANT_ID`. | No new auth surface for the pilot. | Together with D-06, before multi-tenant production. |
+| Hosting | **The plan is AWS** (§4 first row): RDS / Aurora PostgreSQL 16, S3 with versioning + object lock + SSE-KMS for evidence, ECS Fargate for the app, EventBridge Scheduler → ECS RunTask for the one-shot worker. Provisioning and spend stay owner actions (owner action 3, when Slice 3 provisions). | Same cloud as the D-02 source (role assumption, no cross-cloud credential), native object lock and KMS. §4 listed options without naming one; this records AWS as the plan for that reason. | D-02's source moves off AWS, or the owner declines the spend. |
+
+## 1. Decisions: option analysis (kept as the rationale)
 
 ### D-01: Scope of "snapshot files are unrestricted if encrypted by the source"
 
@@ -36,7 +54,9 @@ encrypted by the source with strong encryption."* It is **unresolved** which
 | (b) It means manifests | Manifests are not secret, but they ARE the reviewed security baseline. Treating them as unrestricted would let a baseline change through without restricted review. Not recommended. |
 | (c) Both | Both of the above risks. |
 
-- **Recommended default:** (a). **Keep manifests restricted.** They stay under
+- **Recommended default (DECIDED in a stricter, checkable form: unrestricted
+  only with source encryption verified from object metadata at ingest; see the
+  Decision log):** (a). **Keep manifests restricted.** They stay under
   `**/migrations/**`, which the governance gate already classifies as
   restricted, and a change to them is a reviewed security change. Evidence may
   be classed "unrestricted storage" only when it is encrypted at the source with
@@ -53,7 +73,7 @@ encrypted by the source with strong encryption."* It is **unresolved** which
 | (b) Same export, read with an access key pair in the worker's secret store | Simpler to wire. A long-lived secret needs rotation. |
 | (c) Another provider's FOCUS export | Not supported by the worker yet; a new source = a new slice. |
 
-- **Recommended default:** (a). The role should be read-only (`s3:GetObject`,
+- **Recommended default (now DECIDED, see the Decision log):** (a). The role should be read-only (`s3:GetObject`,
   `s3:ListBucket` on the export prefix), have no write or delete on the export
   bucket, and be restricted by bucket policy to that role.
 - **Blocks:**
@@ -83,7 +103,7 @@ owner-run procedure. A `DELETE` from the app cannot do it.
 | (b) Windows per class, e.g. evidence ≥ 13 months (an audit year plus a close), superseded batches 90 days after supersession, quarantine errors 1 year, staging fixture tenants 14 days | Bounded cost; needs a purge path that respects the triggers and the publication pointer, plus an evidence lifecycle rule that never deletes an object a retained batch references. |
 | (c) A legal-hold-aware policy (object lock in compliance mode, never shortened) | Strongest audit story; deletions become impossible inside the window, so the windows must be right. |
 
-- **Recommended default:** (a) for the pilot. Add a staging-only cleanup of
+- **Recommended default (now DECIDED, see the Decision log):** (a) for the pilot. Add a staging-only cleanup of
   `fixture-*` tenants first, as its own owner-approved slice. Choose (b) or (c)
   before the first non-pilot tenant.
 - **Blocks:** production storage sizing and cost, compliance sign-off, and
@@ -110,7 +130,7 @@ reports no privilege problem, verified by `local:test`).
 | (b) The migrator gets CREATEROLE for the first deploy only, then `ALTER ROLE … NOCREATEROLE` (Slice 0 round-16 note) | No separate admin step. A window in which an owner login could create roles and grant them `ratio_worker`/`ratio_reader`. |
 | (c) The platform's admin user migrates (e.g. RDS master) | **Not viable as is.** Managed "admin" users are members of roles such as `rds_superuser`, which can reach `pg_signal_backend` and others. The catalog check refuses owner-side members that can reach `REFUSED_PREDEFINED_ROLES`. |
 
-- **Recommended default:** (a). The admin credential is used once, by a human,
+- **Recommended default (now DECIDED, see the Decision log):** (a). The admin credential is used once, by a human,
   and is never stored in app or worker configuration.
 - **Blocks:** the first production migration.
 
@@ -127,7 +147,7 @@ is never skipped.
 | (b) Keep the owner URL in a READ ONLY transaction (current) | No schema change. The **owner credential sits on the worker host**, so a compromise of the worker host gives an owner login (which can disable RLS). |
 | (c) A separate monitoring login, a member of **no** ratio role, with SELECT on the ledger only | Owner credential stays off worker hosts; no change to the reviewed ratio privileges. One more credential to manage. Fits the Slice 0 monitoring note (§3). |
 
-- **Recommended default:** (c), with (a) as the fallback if one more credential
+- **Recommended default (now DECIDED, see the Decision log):** (c), with (a) as the fallback if one more credential
   is unwanted.
 - **Blocks:** running scheduled `doctor` in production without owner
   credentials on the worker host.
@@ -145,11 +165,11 @@ credential can set any tenant (Slice 0 threat model, round 2 M5).
 | (b) Per-tenant LOGIN roles; policy on `current_user` → tenant | A stolen credential reaches one tenant. Needs role provisioning per tenant, more connections (no shared pool), and a policy and catalog-check redesign (Slice 0 change). |
 | (c) A database (or cluster) per tenant | Strongest isolation; highest operating cost; the migration fan-out needs tooling. |
 
-- **Recommended default:** (a) for a single-tenant pilot. Decide between (b)
+- **Recommended default (now DECIDED, see the Decision log):** (a) for a single-tenant pilot. Decide between (b)
   and (c) before a second **external** tenant shares a cluster.
 - **Blocks:** multi-tenant production and D-10.
 
-### D-07: GitHub admin actions (owner only)
+### D-07: GitHub admin actions (applied by a repository admin)
 
 These need repository-admin rights that no agent holds:
 1. **Protect `main`** (`scripts/governance/protect-main.mjs` prepares it):
@@ -165,7 +185,7 @@ These need repository-admin rights that no agent holds:
    - **(b)** a **dedicated GitHub App** with `checks:write`, posting the
      gate's verdict as a check run a workflow change cannot forge.
 
-- **Recommended default:** 1–3 now. For 4, choose (b) if (a) is not
+- **Recommended default (now DECIDED, see the Decision log):** 1–3 now. For 4, choose (b) if (a) is not
   available on the plan.
 - **Blocks:** trustworthy merge gating; any autonomous merge.
 
@@ -182,7 +202,7 @@ Everything is pinned to PostgreSQL 16:
 | (a) Stay on 16 for the pilot; allow the managed provider's minor upgrades | Matches every test and baseline; PG16 community support runs to Nov 2028. |
 | (b) Move to 17 now | Newer features. Requires regenerating the system baseline and manifests (`scripts/ingest/generate-foundation-manifest.mjs`), re-running the privilege and drift suites, and a reviewed change. |
 
-- **Recommended default:** (a). A major upgrade is a reviewed change (regenerate,
+- **Recommended default (now DECIDED, see the Decision log):** (a). A major upgrade is a reviewed change (regenerate,
   review the diff, run the full DB suite on the new major).
 - **Blocks:** the choice of managed Postgres offering and version.
 
@@ -197,7 +217,7 @@ including parse, gzip and evidence I/O) at 200k rows. That is about +2–3.7 s p
 | (a) Keep the per-row trigger | Simple, proven, mutation-tested. Cost grows linearly. |
 | (b) A statement-level trigger (one check per chunk) | Removes most of the cost. A Slice 0 change (trigger, manifest, tests), so a reviewed migration. |
 
-- **Recommended default:** (a) until the acceptance run (D-02) measures a real
+- **Recommended default (now DECIDED, see the Decision log):** (a) until the acceptance run (D-02) measures a real
   export's size. Revisit if a real month exceeds a few million rows.
 - **Blocks:** nothing for the pilot; capacity planning for large tenants.
 
@@ -219,7 +239,7 @@ Slice 2 reuses the existing API auth unchanged:
 | (b) An owner-managed key table: high-entropy keys stored only as hashes, each bound to a tenant, with rotation and revocation, plus the existing throttling | Several tenants per deployment. New auth surface: needs its own design, threat model and review (key issuance, storage, audit log). |
 | (c) An external IdP (OAuth2 client credentials); a tenant claim mapped to a Ratio tenant | Standard and auditable. Adds an IdP dependency and token-validation code. |
 
-- **Recommended default:** (a) for the pilot. Choose (b) or (c) together with
+- **Recommended default (now DECIDED, see the Decision log):** (a) for the pilot. Choose (b) or (c) together with
   D-06 before multi-tenant production.
 - **Blocks:** serving more than one tenant from one deployment.
 
@@ -263,7 +283,7 @@ Slice 2 reuses the existing API auth unchanged:
 | Optional evidence audit job (issue #58, item 2) | not built | A periodic job that re-hashes evidence objects and compares them with `ingest_artifacts.sha256`, restoring continuous assurance on the fast paths above. Recommended before production if object lock is not used. |
 | `replay-fixtures` | refused outside `staging`/`test` | Leaves one fixture tenant per run (no purge, D-03). |
 
-## 4. Hosting options (no choice is made here)
+## 4. Hosting options (plan: AWS, see the Decision log; provisioning and spend are owner actions)
 
 The shape that follows from the code:
 - managed **Postgres 16**;
@@ -307,9 +327,24 @@ Cross-cutting for every option:
 - **App code:** redeploy the previous image or commit. Slice 2 adds **no
   migration**. Its only Slice 0 change is a behaviour-preserving lazy load of
   the manifest. So a code rollback needs no database action.
-- **Read API kill switch:** unset `RATIO_READER_DATABASE_URL` or
-  `RATIO_API_TENANT_ID` ⇒ the route answers 503 `not_configured`; nothing else
-  changes. Revoking the reader login (`ALTER ROLE … NOLOGIN`) also stops it.
+- **Read API kill switch.** What the code actually does:
+  - **Configuration:** unset `RATIO_READER_DATABASE_URL` or
+    `RATIO_API_TENANT_ID`, then restart the app ⇒ the route answers 503
+    `not_configured` and opens no database connection. The environment is read
+    per request, but most platforms change env only on a restart.
+  - **Database, no restart:** `ALTER ROLE <reader login> NOLOGIN`.
+    - NOLOGIN by itself stops only NEW connections; Postgres does **not** end
+      existing (pooled) sessions.
+    - The read API closes that gap: its per-request login check also refuses a
+      login whose `rolcanlogin` is false. The **very next request** on a pooled
+      connection gets 503 `unsafe_db_login` (reason `LOGIN_DISABLED`; tested
+      live in `publishedCosts.db.test.ts` D6).
+    - To also end the idle pooled sessions themselves:
+      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = '<reader login>'`,
+      or restart the app.
+    - `ALTER ROLE … LOGIN` re-enables serving; no restart is needed.
+  - Other tools holding a reader session (e.g. a psql shell) are not covered
+    by the API check: terminate them with `pg_terminate_backend`.
 - **Data:** `replay --batch <superseded batch>` re-points a period atomically
   and pins it; `replay --batch <newer>` rolls forward; `replay --period`
   re-ingests and unpins (Slice 1). Superseded batches and evidence are
@@ -323,19 +358,33 @@ Cross-cutting for every option:
 - **Worker schedule:** disable the scheduler. A running job finishes or aborts
   at `RATIO_MAX_RUN_SECONDS`. The lease and fencing make a later restart safe.
 
-## 7. Go / no-go checklist (owner)
+## 7. Owner actions (non-decision)
 
-Every item must be checked by a human before the first production deploy:
+The decisions are made (Decision log). These are the actions only the owner
+can take:
 
-- [ ] D-02 decided; **the acceptance run (SKILL §9) performed and signed off**
-      on a real FOCUS export (totals vs Billing console, row counts, provisional
-      flag, idempotent re-sync, evidence re-hash).
-- [ ] D-01, D-03, D-04, D-05, D-06, D-08, D-10 decided and recorded. D-09
-      reviewed against the acceptance run's size.
-- [ ] D-07 admin actions applied (protect-main, auto-merge policy, Copilot
-      review_on_push, governance gate protection).
-- [ ] Hosting chosen (§4); Postgres 16 provisioned with TLS; backups and
-      point-in-time recovery enabled and **a restore tested**.
+1. **Grant read access to a real FOCUS export:** the S3 bucket and prefix,
+   and a read-only IAM role ARN the worker may assume (D-02). **This blocks
+   the acceptance run** (SKILL §9), and with it calling the ingestion layer
+   "usable".
+2. **Install the GitHub App** for the governance gate (D-07 item 4, option b).
+   It needs the owner's GitHub account.
+3. **Approve the hosting spend** when Slice 3 provisions the AWS plan (Decision
+   log, Hosting).
+
+## 8. Release readiness checks (engineering; verified when Slice 3 provisions)
+
+These are verification steps, not decisions. Each is checked before the first
+production deploy:
+
+- [ ] **The acceptance run (SKILL §9) performed and signed off** on a real
+      FOCUS export (totals vs Billing console, row counts, provisional flag,
+      idempotent re-sync, evidence re-hash). Needs owner action 1.
+- [ ] D-09 reviewed against the acceptance run's size.
+- [ ] D-07 items 1–3 applied (protect-main, auto-merge for `low` only, Copilot
+      review_on_push); the GitHub App installed (owner action 2).
+- [ ] Postgres 16 provisioned on the hosting plan with TLS; backups and
+      point-in-time recovery enabled and **a restore tested** (owner action 3).
 - [ ] Roles created per D-04. `migrate`, then `migrate --status --json` exits 0
       with `privilegeProblems: []`. Owner `CREATE` on `public` removed (§2).
 - [ ] Worker and reader logins: one membership each. The API answers 200 (not
@@ -349,5 +398,40 @@ Every item must be checked by a human before the first production deploy:
       doctor scheduled with alerting on a non-zero exit.
 - [ ] Monitoring login separate from every ratio role (§2).
 - [ ] CI green on the release commit, including `check:bundle` and `local:test`.
-- [ ] Rollback plan (§6) rehearsed in staging.
-- [ ] **Owner sign-off recorded. Production is a non-delegable human gate.**
+- [ ] Rollback plan (§6) rehearsed in staging, including the NOLOGIN kill switch.
+
+## Appendix A: Issue draft for D-01 enforcement (not opened from this session)
+
+The D-01 decision needs enforcement code. This session does not write to
+GitHub (no push, no comments), so the issue is drafted here for the
+orchestrator to open.
+
+**Title:** Enforce D-01: treat snapshot / evidence artifacts as unrestricted
+only with verified source encryption
+
+**Context:** D-01 (decided 2026-10-04). Today every artifact is treated as
+restricted, the safe subset. The worker records no encryption metadata.
+
+**Scope:**
+- The worker reads the source object's encryption metadata at capture time,
+  from the S3 HEAD/GET response: `ServerSideEncryption`, `SSEKMSKeyId`, and
+  the bucket-key flag.
+- It records an encryption classification per artifact: `sse-kms`,
+  `aes256`, or `none/unknown`.
+- Only `sse-kms` or an equivalent AES-256 at-rest scheme may be classed
+  "unrestricted". Everything else stays restricted.
+- Foundation manifests stay restricted regardless.
+
+**Acceptance criteria (tests first, red commit before the implementation):**
+1. Unit: classification from header combinations — SSE-KMS with a key id ⇒
+   `sse-kms`; `AES256` ⇒ `aes256`; missing or unknown ⇒ restricted. A missing
+   header never yields "unrestricted".
+2. S3 integration (SeaweedFS, or a fake client where SeaweedFS lacks KMS):
+   objects with and without encryption headers are classified correctly
+   at capture.
+3. The classification is persisted with the artifact. If this needs a
+   schema change, it is an expand migration with its own reviewed manifest
+   update.
+4. Mutation: classifying a missing header as encrypted fails a test.
+5. No change in behaviour for consumers until a reviewed consumer uses the
+   classification (default restricted).

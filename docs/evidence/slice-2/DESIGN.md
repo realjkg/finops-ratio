@@ -7,12 +7,17 @@ Slice 1 merged). The slice has three concerns:
    migrate → seed → sync);
 2. a **read API**, `GET /api/v1/costs/published`, that reads the published-facts
    view as a `ratio_reader` member;
-3. a **deployment decision brief** for the owner. The brief records decisions.
-   It does not make them.
+3. a **deployment decision brief**. It first recorded the decisions as open.
+   The owner then delegated D-01..D-10 to the orchestrator, and the brief now
+   records them as decided (§8). Provisioning and spending remain owner actions.
 
 Boundary (BOUNDARY v2): local and ephemeral only. No production
-infrastructure is chosen. Nothing under `src/ingest/db` (Slice 0) changes, and
-Slice 1's worker semantics do not change. The read API *imports* Slice 0's
+infrastructure is provisioned. Slice 1's worker semantics do not change.
+**Slice 0 is touched exactly once:** the coordinator-approved lazy load of
+the foundation manifest (9d83590: `src/ingest/db/foundationManifest.ts` and
+`privilegeModel.ts`, §7), made test-first. Nothing else under `src/ingest/db`
+changes; in particular `withTenantTransaction` (`tenant.ts`) is NOT changed
+(the REPEATABLE READ snapshot comes from the reader pool, §8). The read API *imports* Slice 0's
 `withTenantTransaction`, `isTenantId` and `REFUSED_PREDEFINED_ROLES`, and Slice 1's
 `inspectRole` / `roleProblems`. It does not copy them.
 
@@ -21,7 +26,7 @@ Slice 1's worker semantics do not change. The read API *imports* Slice 0's
 | Path | Purpose |
 |---|---|
 | `docker-compose.local.yml` | Compose project `ratio-local`: `postgres` (PG16, pinned by digest) and `s3` (SeaweedFS, the digest CI already uses). Both are published on 127.0.0.1 only. Optional profiles: `app` (Next.js) and `worker` (a one-shot `sync`, `restart: "no"`). Named volumes are removed by `local:down -v`. |
-| `scripts/local/local.mjs` | Subcommands `up`, `migrate`, `seed`, `sync`, `down [-v]` and `test`. Every one is idempotent. State (generated local secrets, the tenant id) lives in `.ratio-local/env` (gitignored, mode 0600). `down -v` deletes it. |
+| `scripts/local/local.mjs` | Subcommands `up`, `migrate`, `seed`, `sync`, `down [-v]` and `test`. Every one is idempotent. State (generated local secrets, the tenant id) lives in `.ratio-local/<project>/env` (gitignored; directory 0700, file 0600). `down -v` deletes only its own project's directory. `test` uses its own project and ports (§8). |
 | `scripts/local/bootstrap.mjs` | The documented role bootstrap. It runs as the local superuser and creates the three NOLOGIN ratio roles, the migrator, worker and reader logins, and the database. Every statement is idempotent. |
 | `.env.example` | Variable names only, for the new server-side settings. |
 | `src/server/costs/query.ts` | Pure: strict query-string validation and an opaque keyset cursor. No `pg`. |
@@ -79,8 +84,8 @@ server-side binding to the `ratio.tenants.id` it belongs to:
 - A missing or malformed binding gives 503 `not_configured`, and no query runs.
 - Consequence: one deployment serves one tenant per configured key. The
   current mechanism has exactly one key. A per-tenant key store (several keys,
-  each bound to a tenant) does not exist in the repo. It is recorded as an
-  open owner decision (brief D-10) and is not built here.
+  each bound to a tenant) does not exist in the repo. Brief D-10 records the
+  decision (option a: one key per deployment for now); it is not built here.
 
 ### 2.2 Database identity and the unsafe-login refusal
 
@@ -289,9 +294,9 @@ host: the scripts use `pg`, and the server is the pinned PG16 image.
 | Local stack exposed on the network | ports bound to 127.0.0.1 | compose file |
 
 Out of scope, recorded in the brief:
-- per-tenant DB roles (D-06);
-- a multi-key tenant store (D-10);
-- production hosting (a non-delegable human gate).
+- per-tenant DB roles (D-06, decided: session tenant for now);
+- a multi-key tenant store (D-10, decided: one key per deployment for now);
+- production provisioning and spend (owner actions; hosting plan decided: AWS).
 
 ## 5. Failure cases
 
@@ -308,12 +313,13 @@ Out of scope, recorded in the brief:
 
 ## 6. Rollback
 
-- **Code:** the branch is unmerged. Reverting means not merging. No migration
-  is added and nothing in `src/ingest/db` changes, so no database action is
-  needed.
+- **Code:** revert the slice's commits. No migration is added. The one Slice 0
+  change (the lazy manifest load, §7) is code only and needs no database
+  action; reverting it restores the import-time read, which breaks the read
+  API under `next start` again (so revert it only together with the route).
 - **CI:** remove the two appended steps.
 - **Local:** `npm run local:down -- -v` removes the containers, network,
-  volumes and `.ratio-local/`.
+  volumes and `.ratio-local/<project>/`.
 
 ## 7. Found during implementation; coordinator decisions
 
@@ -340,11 +346,22 @@ is the only `src/ingest/db` change.
 - No existing Slice 0 test changed.
 - Migrate, status and doctor output is identical before and after (normalised
   diff, EVIDENCE §4).
-- **Residual difference (for the challenger):** with the 0001 manifest
-  *missing* from a broken build, `migrate` now fails inside the 0001
-  transaction (rolled back, no `ratio` schema, 0 ledger rows) after the runner
-  has created the empty ledger table. The eager code crashed on load before
-  connecting. Exit code (1) and error message are the same.
+- **Side effects of the lazy load** (measured with eager and lazy builds,
+  EVIDENCE §4). They apply only to a broken build whose 0001 manifest is
+  missing; every result with the manifest present is identical:
+  - **fresh database:** `migrate` now fails inside the 0001 transaction
+    (rolled back, no `ratio` schema, 0 ledger rows) after the runner has
+    created the empty ledger table. The eager code crashed while loading,
+    before connecting. Exit code (1) and message are the same.
+  - **up-to-date database:** a no-op `migrate` (nothing pending) now **exits
+    0**; the eager code exited 1. Nothing is applied either way; the catalog
+    check (which needs the manifest) only runs when a migration runs.
+  - `sync`, `backfill` and `replay` **no longer crash on import**: they run
+    and succeed or fail on their own terms (they never read the manifest).
+  - `migrate --status`, `doctor` and any real apply still **exit 1**
+    (the manifest is read on first use).
+  - Errors are now the CLI's structured JSON (`BAD_MANIFEST`, or `UNKNOWN`
+    for the codeless "missing" error) instead of an uncaught crash.
 - `local:test` in CI is the regression test for this class: it calls the
   route under a real `next start`.
 
@@ -357,8 +374,8 @@ is the only `src/ingest/db` change.
   feature is unused, and it never stops the app starting.
 - It is validated again **per request**: missing or invalid ⇒ 503
   `not_configured`.
-- A store of several keys, each bound to a tenant, is open decision **D-10** in
-  the brief.
+- A store of several keys, each bound to a tenant, is decision **D-10** in the
+  brief (decided: one key per deployment for now).
 
 **Bundle check.**
 - The server-side rule judges reader *database code* (`cost_facts_published`,
@@ -371,3 +388,69 @@ is the only `src/ingest/db` change.
   on first write). That is the "~2 buckets" limit Slice 1 saw.
 - The local compose runs `-volume.max=64 -master.volumeSizeLimitMB=64`.
 - `local:seed` warms each new bucket with a probe object.
+
+## 8. Challenger Lows and Copilot review of PR #59 (local batch, not pushed)
+
+**NOLOGIN as an immediate kill switch** (challenger L2; Copilot 4175802721).
+`ALTER ROLE … NOLOGIN` stops NEW connections only; pooled sessions survive
+(verified live). The per-request reader check now also refuses a login whose
+`rolcanlogin` is false (reason `LOGIN_DISABLED`), so the next request after
+NOLOGIN gets 503 even on a pooled connection. Brief §6 says exactly that.
+
+**Unsafe-login refusals are their own event** (challenger L3; Copilot
+4175802693).
+- The route logs one `{tag:'published-costs', event:'unsafe_db_login',
+  status:503, requestId, reasons:[…]}` line instead of the generic
+  `unhandled_error`/500 line.
+- `reasons` are fixed codes: `SUPERUSER`, `BYPASSRLS`,
+  `PRIVILEGED_ROLE_REACHABLE`, `UNSAFE_ATTRIBUTE`, `REFUSED_PREDEFINED_ROLE`,
+  `OWNER_MEMBER`, `NOT_READER_MEMBER`, `WORKER_REACHABLE`, `LOGIN_DISABLED`
+  (`UNCLASSIFIED` as a fallback). The problem texts, which can name roles,
+  are never logged or returned.
+- The decision itself is unchanged: Slice 1's `roleProblems` plus the reader
+  rules; the codes only classify it.
+- The 503 body and `X-Request-Id` carry the same `requestId`.
+
+**One snapshot for page 1 and its totals** (challenger L4; Copilot
+4175802675).
+- Every reader-pool session defaults to `REPEATABLE READ`
+  (`default_transaction_isolation`), plus `default_transaction_read_only=on`.
+- Slice 0's `withTenantTransaction` is **not** changed. `SET TRANSACTION
+  ISOLATION LEVEL` inside the callback is impossible: the helper's
+  `set_config` query has already fixed the isolation level by then.
+- The read asserts `transaction_isolation = 'repeatable read'` and
+  `transaction_read_only = on` inside its own transaction, and refuses
+  (500) on any pool that does not provide them.
+- Tested by committing a restatement between the page and the totals queries
+  (D8).
+
+**Keyset tie-break on `source_id`** (challenger L5 K2; Copilot 4175802660).
+- D9 publishes the same artifact bytes for two sources in one period, so
+  rows differ only by `source_id`.
+- Paging at limit 3 must visit all 10 rows once.
+- Dropping `source_id` from the ORDER BY or from the cursor predicate both
+  fail it.
+
+**Local stack per project** (challenger L6, L5 L3; Copilot 4175802603 /
+4175802639).
+- State is in `.ratio-local/<project>/` (directory 0700, env 0600, tightened
+  on every write). `down -v` removes only its own project's directory, and
+  `.ratio-local/` only when it is empty.
+- `local:test` runs its own stack: `RATIO_LOCAL_TEST_*`, default project
+  `ratio-local-test` on 54339/18353/3110. It refuses any project name or port
+  shared with the developer settings.
+- Before changing anything, it refuses existing state, existing containers or
+  a busy port.
+- Readiness fails fast if `next start` exits. On Linux the listening socket
+  must belong to the spawned process or a descendant (`/proc`), so a stale or
+  foreign listener is detected. Without `/proc`, the port preflight is the
+  guarantee.
+- No nonce route was added: that would mean a test-only endpoint in the
+  production app.
+
+**Startup log never echoes the tenant value** (challenger L5 C2): tested with
+several value shapes, the reader URL too.
+
+**Decisions** (owner delegation to the orchestrator, 2026-10-04): the brief
+now records D-01..D-10 as decided (Decision log at its top). Provisioning,
+spending and account access stay owner actions.
