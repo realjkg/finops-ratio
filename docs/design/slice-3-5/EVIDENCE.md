@@ -386,6 +386,20 @@ without it:
   `DELETE FROM ratio.cost_daily` by the analytics login is refused) and on
   this file (which quotes it).
 
+**The PR's governance report at `9e0d703`** (the same classifier, fed
+from the GitHub API's PR file list instead of `--git`) also lists
+`unclassified` / **`diff-unavailable`** for `DESIGN.md` and
+`APPENDIX_B_SIZING.md`.
+- **Why:** GitHub returned no patch for those two files; the API omits the
+  patch for very large diffs. `classify-risk.mjs` then fails closed for a
+  file whose added lines it cannot inspect (line 251: `patchUnavailable` →
+  `unclassified` / `diff-unavailable`).
+- **What it is not:** a content class. The local `--git` run above reads the
+  full diff of the same files and finds only the retention and secrets
+  reasons listed.
+- **Effect on the verdict:** none. The risk is `restricted` either way, and
+  the extra rows are recorded here as they appear rather than avoided.
+
 That is the correct classification for this content; the PR goes through
 the restricted exception path. (Revision 2 at `461fbc2` classified `low`
 only because of the wording reverted in §2.)
