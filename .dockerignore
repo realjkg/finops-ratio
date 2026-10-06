@@ -9,3 +9,6 @@ dist-worker
 *.sqlite-wal
 *.sqlite-shm
 .env*
+.ratio-local
+.ratio-build
+.ratio-sample-data

@@ -113,3 +113,26 @@ test('HTTP boundary: forged identities, CSRF, stale revision, live endpoint sepa
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Choose a simulated identity' })).toBeVisible();
 });
+
+test('a stale refresh failure cannot revoke the newly selected identity', async ({ page }) => {
+  await login(page, 'Alex');
+  let captured!: (route: import('@playwright/test').Route) => void;
+  const pending = new Promise<import('@playwright/test').Route>(resolve => { captured = resolve; });
+  let intercepted = false;
+  await page.route('**/api/v1/simulation/state', route => {
+    if (intercepted) return route.continue();
+    intercepted = true; captured(route);
+  });
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  const stale = await pending;
+  // Client-side back navigation preserves the provider and its pending refresh.
+  await page.goBack();
+  await page.getByRole('button', { name: 'Continue as Jordan', exact: true }).click();
+  await expect(page.getByText('Signed in as Jordan', { exact: false })).toBeVisible();
+  const finished = page.waitForResponse(response => response.url().endsWith('/api/v1/simulation/state') && response.status() === 401);
+  await stale.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'Old identity refresh failed' }) });
+  await finished;
+  await page.getByRole('link', { name: 'Open customer workflow' }).click();
+  await expect(page.getByText('acme · Jordan (simulated)', { exact: false })).toBeVisible();
+  await expect(page.getByText('Old identity refresh failed', { exact: true })).toHaveCount(0);
+});

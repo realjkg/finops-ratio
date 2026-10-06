@@ -134,7 +134,7 @@ export const useStore = create<AppState>((set, get) => ({
         if (error instanceof SimulationHttpError && error.status === 401) get().clearSimulation();
         set({ simulationError: error instanceof Error ? error.message : 'Save failed. Your changes have not been saved.' });
       }
-    } finally { set({ simulationBusy: false }); }
+    } finally { if (get().simulation?.session.csrf === current.session.csrf) set({ simulationBusy: false }); }
   },
   now: DEMO_NOW,
   workloads: WORKLOADS,
@@ -213,12 +213,12 @@ export const useStore = create<AppState>((set, get) => ({
       .map((m) => ({ role: m.role, content: m.content }));
     const context = buildAIContext(workloads, selectedId || null, now);
 
+    const sim = get().simulation;
     try {
-      const sim = get().simulation;
       const reply = sim
         ? await simulationRequest<import('@/ai/AIClient').AIResponse>('chat', { message: trimmed, workloadId: selectedId }, sim.session.csrf)
         : await aiClient.chat(history, context);
-      if (sim && get().simulation?.session.csrf !== sim.session.csrf) return;
+      if (get().simulation?.session.csrf !== sim?.session.csrf) return;
       const assistantMessage: AIChatMessage = {
         id: nextMessageId(),
         role: 'assistant',
@@ -232,6 +232,7 @@ export const useStore = create<AppState>((set, get) => ({
         aiThinking: false,
       }));
     } catch (error) {
+      if (get().simulation?.session.csrf !== sim?.session.csrf) return;
       // Never swallow the failure — surface it inline so the user can retry.
       const message = error instanceof Error ? error.message : 'Unknown error';
       const errorMessage: AIChatMessage = {

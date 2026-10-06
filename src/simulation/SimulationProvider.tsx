@@ -63,6 +63,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       if (useStore.getState().simulation?.session.csrf === current.session.csrf) useStore.getState().loadSimulation(current.session, state);
     }
     catch (e) {
+      if (useStore.getState().simulation?.session.csrf !== current.session.csrf) return;
       if (e instanceof SimulationHttpError && e.status === 401) useStore.getState().clearSimulation();
       setError(e instanceof Error ? e.message : 'Refresh failed.');
     }

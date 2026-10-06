@@ -7,6 +7,10 @@ import type { Command, SimIdentity, SimSession, Workspace } from '../types';
 import { seedOutcome } from '@/outcomes/model';
 import { assertWorkspaceLedger, executeCommand, seedWorkspace, WorkflowError } from './workflow';
 
+// Simulation quotas fail closed; no financial history or retry evidence is deleted.
+export const MAX_SIMULATION_COMMANDS = 1000;
+export const MAX_SIMULATION_RESPONSE_BYTES = 64 * 1024 * 1024;
+
 export class SimulationDatabase {
   private db: DatabaseSync;
   constructor(filename: string) {
@@ -84,9 +88,13 @@ export class SimulationDatabase {
         return response;
       }
       if (prior.revision !== revision) throw new WorkflowError(409, 'Workspace changed in another session. Reload and review before retrying.');
+      const usage = this.db.prepare('SELECT count(*) AS count, coalesce(sum(length(CAST(response AS BLOB))),0) AS bytes FROM commands WHERE tenant=?').get(actor.tenant)!;
+      if (Number(usage.count) >= MAX_SIMULATION_COMMANDS) throw new WorkflowError(507, 'Simulation command capacity reached. Export and archive this workspace before starting a new simulation.');
       const next = executeCommand(prior, actor, command);
-      this.db.prepare('UPDATE workspaces SET state=? WHERE tenant=?').run(JSON.stringify(next), actor.tenant);
-      this.db.prepare('INSERT INTO commands (tenant,id,fingerprint,response) VALUES (?,?,?,?)').run(actor.tenant, id, fingerprint, JSON.stringify(next));
+      const response = JSON.stringify(next);
+      if (Number(usage.bytes) + Buffer.byteLength(response) > MAX_SIMULATION_RESPONSE_BYTES) throw new WorkflowError(507, 'Simulation storage capacity reached. Export and archive this workspace before starting a new simulation.');
+      this.db.prepare('UPDATE workspaces SET state=? WHERE tenant=?').run(response, actor.tenant);
+      this.db.prepare('INSERT INTO commands (tenant,id,fingerprint,response) VALUES (?,?,?,?)').run(actor.tenant, id, fingerprint, response);
       this.db.exec('COMMIT');
       return next;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
