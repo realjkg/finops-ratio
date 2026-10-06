@@ -26,6 +26,7 @@
     "sample:fetch": "node scripts/acceptance/fetch-focus-sample.mjs",
     "simulation:start": "node scripts/simulation/start.mjs",
     "simulation:test": "playwright test --config playwright.simulation.config.ts",
+    "simulation:acceptance": "vitest run src/simulation/server/acceptance.test.ts src/simulation/server/boundaries.test.ts src/simulation/server/storage.test.ts src/simulation/server/worker.test.ts src/costsource/cloudConnectorConfig.test.ts src/costsource/cloudConnectorAdapter.test.ts src/costsource/connectorRoutes.test.ts src/costsource/transports/integrity.test.ts src/costsource/transports/listingCompleteness.test.ts",
     "simulation:worker": "node --import tsx scripts/simulation/worker.ts",
     "simulation:storage": "node scripts/simulation/storage.mjs",
     "build:verify": "node scripts/completion/run.mjs",
