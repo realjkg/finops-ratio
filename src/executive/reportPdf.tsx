@@ -17,6 +17,7 @@ import {
   renderToBuffer,
 } from '@react-pdf/renderer';
 import { formatRatio, formatUSD } from '@/lib/format';
+import { COST_CATEGORIES } from '@/outcomes/types';
 import { buildReportModel, type ReportModel, type ReportRow } from './reportModel';
 
 // Design tokens (durable, exact) reused for the print surface.
@@ -178,12 +179,21 @@ function ReportDocument({ model }: { model: ReportModel }) {
           Generated from Ratio Mission Control · Confidential · {model.generatedAt}
         </Text>
       </Page>
+      {model.outcomeReports && <Page size="A4" orientation="landscape" style={styles.page}>
+        <Text style={styles.title}>Initiative Outcome Accountability</Text><Text style={styles.subhead}>{model.periodLabel} · simulated evidence · benefit / full cost</Text>
+        <Text style={{ marginTop: 12, marginBottom: 12 }}>Measured returns require independently reviewed performance, financial evidence and complete costs. Quality and risk remain nonfinancial; assumed and projected benefits are excluded.</Text>
+        {model.outcomeReports.map(({ name, record, result, decisionStale }) => <View key={record.workloadId} wrap={false} style={{ borderBottomWidth: 1, borderColor: TOKEN.border, paddingVertical: 8 }}>
+          <Text style={{ fontFamily: 'Helvetica-Bold' }}>{name} · {record.owner}</Text>
+          <Text style={{ marginTop: 3 }}>{record.metric}: {record.baseline.value} → {record.observation.value} {record.unit} · target {record.target} · evidence {record.planRecordedBy ?? 'unattributed'} / {record.planVerified?.by ?? 'unverified'}</Text>
+          <Text style={{ marginTop: 3 }}>Full cost: {result.totalCostCents === null ? 'Incomplete' : formatUSD(result.totalCostCents / 100)} · benefit: {formatUSD(result.measuredBenefitCents / 100)} · return: {result.measuredRatio === null ? 'Not established' : formatRatio(result.measuredRatio)} · reviews value {record.measures.filter(m => m.status === 'measured' && m.verified).length}/{record.measures.filter(m => m.status === 'measured').length}, cost {COST_CATEGORIES.filter(k => record.costs[k].status === 'measured' && record.costs[k].verified).length}/{COST_CATEGORIES.filter(k => record.costs[k].status === 'measured').length} · decision {decisionStale ? 'renew' : result.recommendation}</Text>
+          <Text style={{ marginTop: 3 }}>Thresholds · stop below {record.thresholds.stopBelow}× · continue at {record.thresholds.continueAt}× · expand at {record.thresholds.expandAt}× with performance target met</Text>
+        </View>)}
+        <Text style={styles.footer} fixed>Generated from saved outcome evidence · {model.generatedAt}</Text>
+      </Page>}
     </Document>
   );
 }
 
-export function renderReportPdf(now: Date = new Date()): Promise<Buffer> {
-  const model = buildReportModel(now);
+export function renderReportPdf(now: Date = new Date(), model: ReportModel = buildReportModel(now)): Promise<Buffer> {
   return renderToBuffer(<ReportDocument model={model} />);
 }
-

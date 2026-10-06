@@ -22,11 +22,14 @@ import { SpendSummaryBar } from './SpendSummaryBar';
 // route renders un-embedded and keeps its page header.
 export function InitiativeDashboard({ embedded = false }: { embedded?: boolean } = {}) {
   const workloads = useStore((s) => s.workloads);
+  const budgets = useStore(s => s.budgets);
+  const alerts = useStore(s => s.alerts);
+  const now = useStore(s => s.now);
   const lang = useLanguage();
   const { persona } = usePersona();
   const { initiatives, summary } = useMemo(
-    () => buildInitiativeBoard(workloads),
-    [workloads],
+    () => buildInitiativeBoard(workloads, { budgets, alerts, now }),
+    [workloads, budgets, alerts, now],
   );
 
   // Matrixed lens is an executive-only annotation (not procurement).

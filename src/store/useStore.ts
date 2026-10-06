@@ -3,6 +3,8 @@
 // demand-shape changes, threshold edits, alert acknowledgement, and agent chat.
 
 import { create } from 'zustand';
+import type { Command, SimSession, Workspace } from '@/simulation/types';
+import { simulationRequest, SimulationHttpError } from '@/simulation/client';
 import type {
   Alert,
   BudgetProfile,
@@ -20,7 +22,7 @@ import { buildAIContext, createAIClient } from '@/ai';
 import type { AIMessage, AIProvider } from '@/ai';
 
 export type SecondaryMode = 'value' | 'cost' | 'unit';
-export type DetailTab = 'budget' | 'models' | 'governance' | 'demand' | 'unit' | 'alerts';
+export type DetailTab = 'budget' | 'models' | 'governance' | 'demand' | 'unit' | 'alerts' | 'outcomes';
 
 // Wave3b AI chat slice. Distinct from the Phase 1 agent slice above: multi-turn
 // history, server-proxied via the AIClient seam (no key in the browser).
@@ -74,6 +76,12 @@ function nextMessageId(): string {
 }
 
 interface AppState {
+  simulation: { session: SimSession; state: Workspace } | null;
+  simulationBusy: boolean;
+  simulationError: string | null;
+  loadSimulation: (session: SimSession, state: Workspace) => void;
+  clearSimulation: () => void;
+  simulationCommand: (command: Command) => Promise<void>;
   now: Date;
   workloads: Workload[];
   budgets: BudgetProfile[];
@@ -109,6 +117,25 @@ interface AppState {
 }
 
 export const useStore = create<AppState>((set, get) => ({
+  simulation: null,
+  simulationBusy: false,
+  simulationError: null,
+  loadSimulation: (session, state) => set({ simulation: { session, state }, workloads: state.workloads, budgets: state.budgets, alerts: state.alerts, now: new Date(state.asOf), simulationError: null }),
+  clearSimulation: () => set({ simulation: null, simulationBusy: false, simulationError: null, workloads: structuredClone(WORKLOADS), budgets: structuredClone(BUDGET_PROFILES), alerts: structuredClone(ALERTS), now: DEMO_NOW, aiMessages: [], aiThinking: false, aiPanelOpen: false }),
+  simulationCommand: async (command) => {
+    const current = get().simulation;
+    if (!current || get().simulationBusy) return;
+    set({ simulationBusy: true, simulationError: null });
+    try {
+      const state = await simulationRequest<Workspace>('command', { command, revision: current.state.revision, id: crypto.randomUUID() }, current.session.csrf);
+      if (get().simulation?.session.csrf === current.session.csrf) get().loadSimulation(current.session, state);
+    } catch (error) {
+      if (get().simulation?.session.csrf === current.session.csrf) {
+        if (error instanceof SimulationHttpError && error.status === 401) get().clearSimulation();
+        set({ simulationError: error instanceof Error ? error.message : 'Save failed. Your changes have not been saved.' });
+      }
+    } finally { if (get().simulation?.session.csrf === current.session.csrf) set({ simulationBusy: false }); }
+  },
   now: DEMO_NOW,
   workloads: WORKLOADS,
   budgets: BUDGET_PROFILES,
@@ -125,7 +152,7 @@ export const useStore = create<AppState>((set, get) => ({
       id: nextMessageId(),
       role: 'system',
       content:
-        'Ratio AI online. Ask about initiative risk, cost drivers, or savings — every answer is grounded in your live portfolio data.',
+        'Ask about initiative risk, cost drivers, or projected savings. This demo uses simulated portfolio data.',
       timestamp: DEMO_NOW.toISOString(),
     },
   ],
@@ -140,61 +167,30 @@ export const useStore = create<AppState>((set, get) => ({
     set((state) => ({ filters: { ...state.filters, [key]: value } })),
   resetFilters: () => set({ filters: { team: 'all', provider: 'all', environment: 'all' } }),
 
-  toggleGate: (workloadId, gate) =>
-    set((state) => ({
-      workloads: state.workloads.map((w) => {
-        if (w.id !== workloadId) return w;
-        const key = GATE_KEY[gate];
-        const idx = GATE_ORDER.indexOf(key);
-        const turningOn = !w.governance[key];
-        // Sequential enforcement: a gate can only turn on if all prior gates are
-        // on; turning a gate off cascades to every gate after it.
-        if (turningOn) {
-          const priorAllPassed = GATE_ORDER.slice(0, idx).every((k) => w.governance[k]);
-          if (!priorAllPassed) return w;
-        }
-        const nextGov = { ...w.governance };
-        if (turningOn) {
-          nextGov[key] = true;
-        } else {
-          for (let i = idx; i < GATE_ORDER.length; i += 1) {
-            nextGov[GATE_ORDER[i]] = false;
-          }
-        }
-        return { ...w, governance: nextGov };
-      }),
-    })),
-
-  setDemandShape: (workloadId, shape) =>
-    set((state) => ({
-      workloads: state.workloads.map((w) => {
-        if (w.id !== workloadId) return w;
-        // Spec §5.3: Always-On requires all gates; block the change otherwise.
-        if (shape === 'always_on' && !allGatesPassed(w)) return w;
-        return { ...w, demand_shape: shape };
-      }),
-    })),
-
-  updateThresholds: (workloadId, thresholds) =>
-    set((state) => ({
-      budgets: state.budgets.map((b) =>
-        b.workload_id === workloadId
-          ? {
-              ...b,
-              soft_threshold_pct: thresholds.soft,
-              hard_threshold_pct: thresholds.hard,
-              kill_threshold_pct: thresholds.kill,
-            }
-          : b,
-      ),
-    })),
-
-  acknowledgeAlert: (alertId) =>
-    set((state) => ({
-      alerts: state.alerts.map((a) =>
-        a.id === alertId ? { ...a, acknowledged: true, acknowledged_by: 'k.user' } : a,
-      ),
-    })),
+  toggleGate: (workloadId, gate) => {
+    if (get().simulation) { void get().simulationCommand({ type: 'gate', workloadId, gate }); return; }
+    set((state) => ({ workloads: state.workloads.map(w => {
+      if (w.id !== workloadId) return w;
+      const key = GATE_KEY[gate], idx = GATE_ORDER.indexOf(key), turningOn = !w.governance[key];
+      if (turningOn && !GATE_ORDER.slice(0, idx).every(k => w.governance[k])) return w;
+      const governance = { ...w.governance };
+      if (turningOn) governance[key] = true;
+      else GATE_ORDER.slice(idx).forEach(k => { governance[k] = false; });
+      return { ...w, governance };
+    }) }));
+  },
+  setDemandShape: (workloadId, shape) => {
+    if (get().simulation) { void get().simulationCommand({ type: 'shape', workloadId, shape }); return; }
+    set(state => ({ workloads: state.workloads.map(w => w.id !== workloadId || (shape === 'always_on' && !allGatesPassed(w)) ? w : { ...w, demand_shape: shape }) }));
+  },
+  updateThresholds: (workloadId, thresholds) => {
+    if (get().simulation) { void get().simulationCommand({ type: 'thresholds', workloadId, ...thresholds }); return; }
+    set(state => ({ budgets: state.budgets.map(b => b.workload_id !== workloadId ? b : { ...b, soft_threshold_pct: thresholds.soft, hard_threshold_pct: thresholds.hard, kill_threshold_pct: thresholds.kill }) }));
+  },
+  acknowledgeAlert: (alertId) => {
+    if (get().simulation) { void get().simulationCommand({ type: 'acknowledge-alert', alertId }); return; }
+    set(state => ({ alerts: state.alerts.map(a => a.id === alertId ? { ...a, acknowledged: true, acknowledged_by: 'demo-user' } : a) }));
+  },
 
   sendAIMessage: async (content) => {
     const trimmed = content.trim();
@@ -217,8 +213,12 @@ export const useStore = create<AppState>((set, get) => ({
       .map((m) => ({ role: m.role, content: m.content }));
     const context = buildAIContext(workloads, selectedId || null, now);
 
+    const sim = get().simulation;
     try {
-      const reply = await aiClient.chat(history, context);
+      const reply = sim
+        ? await simulationRequest<import('@/ai/AIClient').AIResponse>('chat', { message: trimmed, workloadId: selectedId }, sim.session.csrf)
+        : await aiClient.chat(history, context);
+      if (get().simulation?.session.csrf !== sim?.session.csrf) return;
       const assistantMessage: AIChatMessage = {
         id: nextMessageId(),
         role: 'assistant',
@@ -232,6 +232,7 @@ export const useStore = create<AppState>((set, get) => ({
         aiThinking: false,
       }));
     } catch (error) {
+      if (get().simulation?.session.csrf !== sim?.session.csrf) return;
       // Never swallow the failure — surface it inline so the user can retry.
       const message = error instanceof Error ? error.message : 'Unknown error';
       const errorMessage: AIChatMessage = {

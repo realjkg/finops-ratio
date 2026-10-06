@@ -22,7 +22,7 @@ export function WorkloadList() {
   }, [workloads, filters]);
 
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col border-r border-edge bg-deep">
+    <aside className="flex max-h-60 w-full shrink-0 flex-col md:max-h-none md:w-[280px] border-r border-edge bg-deep">
       <div className="flex items-center justify-between px-3 pt-3">
         <span className="text-[11px] font-bold uppercase tracking-wider text-sub">Workloads</span>
         <span className="font-mono text-[10px] text-dim">{visible.length} shown</span>

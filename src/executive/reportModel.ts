@@ -5,6 +5,10 @@
 // sources, then shapes the eight user-approved report columns. Both export
 // renderers (PDF, XLSX) read this single model so the two stay in lockstep.
 
+import { outcomeReportRows, type OutcomeReportRow } from '@/outcomes/report';
+import type { OutcomeRecord } from '@/outcomes/types';
+import type { CostEntry } from '@/simulation/types';
+import type { ProjectionContext } from '@/mission/missionModel';
 import { WORKLOADS } from '@/data/workloads';
 import { COST_SOURCES, findingsFor } from '@/costsource/seed';
 import type { Workload } from '@/types';
@@ -27,6 +31,7 @@ export interface ReportRow {
 }
 
 export interface ReportModel {
+  outcomeReports?: OutcomeReportRow[];
   generatedAt: string;
   periodLabel: string;
   summary: SpendSummary;
@@ -51,8 +56,10 @@ function savingsByWorkload(): Map<string, number> {
 export function buildReportModel(
   now: Date = new Date(),
   workloads: Workload[] = WORKLOADS,
+  context: ProjectionContext = {},
+  outcomes?: { records: Record<string, OutcomeRecord>; ledger: CostEntry[] },
 ): ReportModel {
-  const { initiatives, summary } = buildInitiativeBoard(workloads);
+  const { initiatives, summary } = buildInitiativeBoard(workloads, context);
   const savings = savingsByWorkload();
   const byId = new Map(workloads.map((w) => [w.id, w]));
 
@@ -73,6 +80,7 @@ export function buildReportModel(
   });
 
   return {
+    outcomeReports: outcomes ? outcomeReportRows(workloads, outcomes.records, outcomes.ledger) : undefined,
     generatedAt: now.toISOString(),
     periodLabel: now.toLocaleString('en-US', {
       month: 'long',

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "areas": [
+    {"id":"ui","title":"UI foundations","sources":["src/simulation/WorkspacePage.tsx","src/outcomes/OutcomesPanel.tsx","src/agent-workflows/FrankWorkspace.tsx","src/connectors/ConnectorCard.tsx"],"gates":["build","browser"],"remaining":"Browser acceptance for every persona, mobile layout and keyboard flows."},
+    {"id":"backend","title":"Backend foundations","sources":["src/simulation/server/database.ts","src/simulation/server/http.ts","scripts/simulation/storage.mjs","scripts/simulation/worker.ts"],"gates":["unit","containers","database"],"remaining":"Container restart/recovery, PostgreSQL/S3 acceptance and production durability."},
+    {"id":"connectors","title":"Connector adapters","sources":["src/costsource/cloudConnectorConfig.ts","src/costsource/kubernetesConfig.ts","src/costsource/nutanixConfig.ts","src/costsource/PointFiveLiveAdapter.ts","src/ingest/sources/s3/S3FocusExportSource.ts"],"gates":["database"],"remaining":"Reconcile authorized account data through configured AWS/Azure/GCP, Kubernetes, Nutanix and PointFive adapters; adapter presence is not a verified connection."},
+    {"id":"governance","title":"Governance and accountability","sources":["src/simulation/server/governance.test.ts","src/outcomes/commands.ts","src/agent-workflows/policy.ts"],"gates":["governance"],"remaining":"Revalidate controls with real identity, tenant permissions and live provider data."},
+    {"id":"identity","title":"Production identity","sources":["src/simulation/server/http.ts"],"gates":[],"remaining":"Simulation identities exist. Select and integrate a real identity provider, dev accounts and tenant mapping."},
+    {"id":"agent","title":"Frank agent operations","sources":["src/agent-workflows/engine.ts","src/agent-workflows/frank.ts"],"gates":["governance","browser"],"remaining":"Deterministic simulation is implemented. Live inference, metering and provider tool boundaries need separate acceptance."}
+  ]
+}

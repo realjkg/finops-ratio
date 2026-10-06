@@ -10,6 +10,7 @@ import {
   buildInitiativeBoard,
   INITIATIVE_STATUS_META,
 } from '@/executive/initiativeModel';
+import type { ProjectionContext } from '@/mission/missionModel';
 import type { Workload } from '@/types';
 import type {
   AIContext,
@@ -51,8 +52,9 @@ export function buildAIContext(
   workloads: Workload[],
   focusInitiativeId: string | null = null,
   asOf: Date = DEMO_NOW,
+  context: ProjectionContext = {},
 ): AIContext {
-  const { initiatives, summary } = buildInitiativeBoard(workloads);
+  const { initiatives, summary } = buildInitiativeBoard(workloads, { ...context, now: asOf });
   const savings = savingsByWorkload();
 
   const initiativeSnapshots: AIInitiativeSnapshot[] = initiatives.map((i) => ({

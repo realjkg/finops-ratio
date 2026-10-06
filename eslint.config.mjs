@@ -11,6 +11,9 @@ export default tseslint.config(
       'dist/**',
       'dist-worker/**',
       '.next/**',
+      '.next-simulation-*/**',
+      '.next-verified/**',
+      '.simulation-test-results/**',
       'eslint.config.js',
       '.eslintrc.cjs',   // legacy config file, not linted
       'next.config.js',

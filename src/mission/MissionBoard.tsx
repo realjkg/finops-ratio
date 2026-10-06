@@ -17,12 +17,15 @@ export function MissionBoard() {
   // Read workloads from the store so Mission Detail edits (demand shape, gates)
   // stay consistent with the board view-model — one source of truth.
   const workloads = useStore((s) => s.workloads);
+  const budgets = useStore(s => s.budgets);
+  const alerts = useStore(s => s.alerts);
+  const now = useStore(s => s.now);
   const [openMissionId, setOpenMissionId] = useState<string | null>(null);
   // Track the last-opened id so focus can be restored on close (WCAG 2.4.3).
   const lastOpenedIdRef = useRef<string | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const reducedMotion = useReducedMotion() ?? false;
-  const { missions, fleet } = useMemo(() => buildMissionBoard(workloads), [workloads]);
+  const { missions, fleet } = useMemo(() => buildMissionBoard(workloads, { budgets, alerts, now }), [workloads, budgets, alerts, now]);
 
   const handleOpen = useCallback((id: string) => {
     lastOpenedIdRef.current = id;

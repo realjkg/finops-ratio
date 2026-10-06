@@ -108,7 +108,7 @@ function help(): AIResponse {
     message: {
       role: 'assistant',
       content: [
-        "I'm the Ratio AI agent. I reason over your initiative portfolio — value ratios, budget status, and savings opportunities. Try:",
+        "I'm Frank Coster, your FinOps accountability partner. I reason over your initiative portfolio — value ratios, budget status, and savings opportunities. Try:",
         '• "Which initiatives are at risk?"',
         '• "What\'s driving cloud cost?"',
         '• "How much can we save?"',

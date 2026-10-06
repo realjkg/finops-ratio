@@ -4,6 +4,7 @@
 // auto-timestamped download, preserving the server's Content-Disposition
 // filename. Framer Motion fade-in honors prefers-reduced-motion. Pure client
 // glue: all report math + rendering lives server-side behind the API route.
+import { useStore } from '@/store/useStore';
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { TOKEN_HEX } from '@/lib/scales';
@@ -25,8 +26,8 @@ function filenameFromDisposition(header: string | null): string | null {
   return match?.[1] ?? null;
 }
 
-async function downloadReport(format: ReportFormat): Promise<void> {
-  const res = await fetch(withBasePath(`/api/report/snapshot?format=${format}`));
+async function downloadReport(format: ReportFormat, simulation: boolean): Promise<void> {
+  const res = await fetch(withBasePath(`/api/${simulation ? "v1/simulation/report" : "report/snapshot"}?format=${format}`), { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) throw new Error(`Snapshot failed: ${res.status}`);
 
   const blob = await res.blob();
@@ -45,6 +46,7 @@ async function downloadReport(format: ReportFormat): Promise<void> {
 }
 
 export function SnapshotButton() {
+  const simulation = useStore(s => Boolean(s.simulation));
   const reducedMotion = useReducedMotion() ?? false;
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<DownloadState>('idle');
@@ -70,7 +72,7 @@ export function SnapshotButton() {
   async function handleSelect(format: ReportFormat) {
     setState('working');
     try {
-      await downloadReport(format);
+      await downloadReport(format, simulation);
       setState('idle');
       setOpen(false);
     } catch (err) {

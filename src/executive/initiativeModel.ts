@@ -15,7 +15,7 @@ import { computeBudgetStatus } from '@/lib/budgetStatus';
 import { budgetColor, TOKEN_HEX } from '@/lib/scales';
 import type { Workload } from '@/types';
 import { COST_SOURCES, findingsFor } from '@/costsource/seed';
-import { toMissionView, type MissionStatus } from '@/mission/missionModel';
+import { toMissionView, type MissionStatus, type ProjectionContext } from '@/mission/missionModel';
 
 export type InitiativeStatus = 'on_track' | 'at_risk' | 'pending_approval';
 
@@ -57,14 +57,14 @@ export interface SpendSummary {
   pendingApproval: number;
 }
 
-export function toInitiativeView(workload: Workload): InitiativeView {
-  const budget = budgetFor(workload.id);
+export function toInitiativeView(workload: Workload, context: ProjectionContext = {}): InitiativeView {
+  const budget = context.budgets ? context.budgets.find(b => b.workload_id === workload.id) : budgetFor(workload.id);
   if (!budget) throw new Error(`No budget profile for workload ${workload.id}`);
 
   // Reuse the mission view-model so status + value coloring stay identical to
   // the technical surface (one source of truth, persona-projected).
-  const mission = toMissionView(workload);
-  const status = computeBudgetStatus(workload, budget, DEMO_NOW);
+  const mission = toMissionView(workload, context);
+  const status = computeBudgetStatus(workload, budget, context.now ?? DEMO_NOW);
   const consumedRatio = status.monthly.pctUsed;
 
   return {
@@ -92,8 +92,9 @@ function projectedSavingsFromFindings(): number {
 
 export function buildInitiativeBoard(
   workloads: Workload[] = WORKLOADS,
+  context: ProjectionContext = {},
 ): { initiatives: InitiativeView[]; summary: SpendSummary } {
-  const initiatives = workloads.map(toInitiativeView);
+  const initiatives = workloads.map(w => toInitiativeView(w, context));
 
   return {
     initiatives,

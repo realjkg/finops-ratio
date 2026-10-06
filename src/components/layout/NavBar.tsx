@@ -32,7 +32,7 @@ export function NavBar({
 }) {
   return (
     <nav
-      className="flex h-10 shrink-0 items-center gap-0.5 border-b border-edge bg-deep px-3"
+      className="flex min-h-10 shrink-0 flex-wrap items-center gap-0.5 py-2 border-b border-edge bg-deep px-3"
       aria-label="Main navigation"
     >
       {/* Logo mark */}
@@ -79,9 +79,9 @@ export function NavBar({
             style={{ background: 'var(--purple)' }}
             aria-hidden="true"
           >
-            R
+            F
           </span>
-          Ask Ratio AI
+          Ask Frank Coster
         </button>
       )}
     </nav>

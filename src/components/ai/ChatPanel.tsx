@@ -1,3 +1,5 @@
+import Link from 'next/link';
+import { FRANK } from '@/agent-workflows/frank';
 // ChatPanel (Wave3b) — collapsible AI chat drawer, anchored right. Closed: a
 // floating launcher button; open: a 340px panel with quick prompts, the scrolling
 // conversation, a thinking indicator, and the input. Rendered as a fixed overlay
@@ -42,6 +44,13 @@ export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = 
     void sendAIMessage(text);
   };
 
+  useEffect(() => {
+    if (!aiPanelOpen) return;
+    const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape') toggleAIPanel(); };
+    window.addEventListener('keydown', dismiss);
+    return () => window.removeEventListener('keydown', dismiss);
+  }, [aiPanelOpen, toggleAIPanel]);
+
   const offscreen = reduceMotion ? 0 : 360;
 
   return (
@@ -58,9 +67,9 @@ export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = 
             className="flex h-5 w-5 items-center justify-center rounded font-mono text-xs font-bold text-void"
             style={{ background: 'var(--purple)' }}
           >
-            R
+            F
           </span>
-          Ask Ratio AI
+          Ask Frank Coster
         </button>
       )}
 
@@ -73,7 +82,7 @@ export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = 
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: offscreen, opacity: reduceMotion ? 0 : 1 }}
             transition={{ duration: reduceMotion ? 0.15 : 0.25, ease: 'easeOut' }}
-            className="fixed bottom-0 right-0 top-0 z-50 flex w-[340px] flex-col border-l border-edge bg-deep font-body text-txt shadow-2xl"
+            className="fixed bottom-0 right-0 top-0 z-50 flex w-full max-w-[340px] flex-col border-l border-edge bg-deep font-body text-txt shadow-2xl"
           >
             <header className="flex items-center justify-between border-b border-edge px-4 py-3">
               <div className="flex items-center gap-2">
@@ -81,9 +90,9 @@ export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = 
                   className="flex h-5 w-5 items-center justify-center rounded font-mono text-xs font-bold text-void"
                   style={{ background: 'var(--purple)' }}
                 >
-                  R
+                  F
                 </span>
-                <span className="text-sm font-semibold text-txt">Ratio AI</span>
+                <span className="text-sm font-semibold text-txt">{FRANK.name}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10px] uppercase tracking-wider text-dim">
@@ -102,6 +111,7 @@ export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = 
               </div>
             </header>
 
+            <Link href="/agent-workflows" onClick={toggleAIPanel} className="border-b border-edge px-4 py-3 text-xs text-unit underline">Work through evidence and approvals with Frank</Link>
             <ChatQuickPrompts disabled={aiThinking} onSelect={submit} />
 
             <div
@@ -113,7 +123,7 @@ export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = 
                 <ChatMessage key={message.id} message={message} />
               ))}
               {aiThinking && (
-                <div className="animate-pulse font-mono text-xs text-purple">Ratio is thinking…</div>
+                <div className="animate-pulse font-mono text-xs text-purple">Frank is reviewing…</div>
               )}
             </div>
 

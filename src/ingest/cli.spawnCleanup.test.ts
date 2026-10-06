@@ -19,13 +19,36 @@ import { describe, expect, it } from 'vitest';
 const ROOT = path.resolve(__dirname, '..', '..');
 const FIXTURE_CONFIG = path.join(__dirname, 'testing', 'spawnFixture', 'vitest.config.ts');
 
+const pidNamespace = fs.readlinkSync('/proc/self/ns/pid');
+const namespaceDepth = fs.readFileSync('/proc/self/status', 'utf8').match(/^NSpid:\s+(.+)$/m)![1].trim().split(/\s+/).length - 1;
+type ProcIdentity = { proc: string; pid: number; group: number };
+/** Filter by the requested ID before inspecting namespaces of unrelated processes. */
+function matchingProcesses(matches: (entry: ProcIdentity) => boolean): ProcIdentity[] {
+  return fs.readdirSync('/proc').filter(d => /^\d+$/.test(d)).flatMap(proc => {
+    try {
+      const status = fs.readFileSync(`/proc/${proc}/status`, 'utf8');
+      const id = (name: string) => Number(status.match(new RegExp(`^${name}:\\s+(.+)$`, 'm'))?.[1].trim().split(/\s+/)[namespaceDepth]);
+      const entry = { proc, pid: id('NSpid'), group: id('NSpgid') };
+      if (!Number.isSafeInteger(entry.pid) || entry.pid <= 0 || !matches(entry)) return [];
+      if (fs.readlinkSync(`/proc/${proc}/ns/pid`) !== pidNamespace) return [];
+      return [entry];
+    } catch (error) {
+      if (['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '')) return [];
+      throw error;
+    }
+  });
+}
+
 /** /proc/<pid>/stat fields after the command name: [state, ppid, pgrp, ...]; null when the process is gone. */
 function statFields(pid: number): string[] | null {
   try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'latin1');
+    const entry = matchingProcesses(p => p.pid === pid)[0];
+    if (!entry) return null;
+    const stat = fs.readFileSync(`/proc/${entry.proc}/stat`, 'latin1');
     return stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-  } catch {
-    return null;
+  } catch (error) {
+    if (['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? '')) return null;
+    throw error;
   }
 }
 
@@ -41,10 +64,8 @@ function alive(pid: number): boolean {
 /** Live members of a process group (Linux /proc). */
 function pidsInGroup(pgid: number): number[] {
   const out: number[] = [];
-  for (const d of fs.readdirSync('/proc')) {
-    if (!/^\d+$/.test(d) || Number(d) === process.pid) continue;
-    const f = statFields(Number(d));
-    if (f && Number(f[2]) === pgid && alive(Number(d))) out.push(Number(d));
+  for (const p of matchingProcesses(p => p.group === pgid && p.pid !== process.pid)) {
+    if (alive(p.pid)) out.push(p.pid);
   }
   return out;
 }
@@ -54,11 +75,17 @@ export function pidsWithMarker(marker: string): number[] {
   const needle = `RATIO_ORPHAN_MARKER=${marker}`;
   const out: number[] = [];
   for (const d of fs.readdirSync('/proc')) {
-    if (!/^\d+$/.test(d) || Number(d) === process.pid) continue;
+    if (!/^\d+$/.test(d)) continue;
+    let marked = false;
     try {
-      if (fs.readFileSync(`/proc/${d}/environ`, 'latin1').split('\0').includes(needle)) out.push(Number(d));
-    } catch {
-      // gone or not ours
+      marked = fs.readFileSync(`/proc/${d}/environ`, 'latin1').split('\0').includes(needle);
+    } catch (error) {
+      if (!['ENOENT', 'ESRCH', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+    }
+    if (marked) {
+      for (const p of matchingProcesses(p => p.proc === d && p.pid !== process.pid)) {
+        if (alive(p.pid)) out.push(p.pid);
+      }
     }
   }
   return out;
@@ -77,6 +104,8 @@ export async function reap(groupLeader: number | undefined, marker: string, time
   const killed = new Set<number>();
   for (;;) {
     if (groupLeader) {
+      // Snapshot members before killing: exit must not hide an unobserved descendant.
+      for (const pid of pidsInGroup(groupLeader)) killed.add(pid);
       try {
         process.kill(-groupLeader, 'SIGKILL');
       } catch {
@@ -190,11 +219,18 @@ describe('reap() returns only once every reaped process has actually exited (CI 
       const marker = crypto.randomBytes(8).toString('hex');
       const mid = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'ignore'], detached: true, env: { ...process.env, RATIO_ORPHAN_MARKER: marker } });
       const grandchild = await new Promise<number>((resolve) => mid.stdout!.once('data', (d: Buffer) => resolve(Number(d.toString().trim()))));
-      const left = await reap(mid.pid, marker);
-      if (alive(grandchild) || alive(mid.pid!)) late.push(grandchild);
-      expect(left).toEqual([]);
+      try {
+        expect(alive(mid.pid!), 'leader is observable before cleanup').toBe(true);
+        expect(alive(grandchild), 'grandchild is observable before cleanup').toBe(true);
+        expect(pidsInGroup(mid.pid!)).toEqual(expect.arrayContaining([mid.pid, grandchild]));
+        expect(pidsWithMarker(marker)).toEqual(expect.arrayContaining([mid.pid, grandchild]));
+        const left = await reap(mid.pid, marker);
+        if (alive(grandchild) || alive(mid.pid!)) late.push(grandchild);
+        expect(left).toEqual([]);
+      } finally {
+        await reap(mid.pid, marker);
+      }
     }
     expect(late, 'processes still running right after reap() returned').toEqual([]);
   }, 60_000);
 });
-

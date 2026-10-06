@@ -9,6 +9,7 @@
 // Deliberately pure and dependency-free: the same function guards the export
 // route, the mock client, and the tests.
 
+import { parseIsoUtc } from '../costsource/transports/focusExport';
 import type { FocusRow } from './FinioClient';
 
 export type FocusRowValidation =
@@ -22,8 +23,7 @@ function isFiniteNumber(value: unknown): value is number {
 /** Parses an ISO 8601 timestamp, returning null when unparseable. */
 function parseIso(value: unknown): number | null {
   if (typeof value !== 'string' || value.length === 0) return null;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? null : ms;
+  return parseIsoUtc(value);
 }
 
 /**

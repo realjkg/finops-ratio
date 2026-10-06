@@ -49,6 +49,7 @@ export interface BudgetStatus {
 // Month-to-date spend reconstructed from the workload's run rate. Kept here so
 // both the daily and monthly views agree on the same MTD figure.
 export function spendMtdFor(workload: Workload, now: Date): number {
+  if (workload.costs.recorded_mtd !== undefined) return workload.costs.recorded_mtd;
   const priorFullDays = now.getUTCDate() - 1;
   const base = workload.costs.monthly_spend / 30;
   return round2(base * priorFullDays + workload.costs.daily_spend);

@@ -76,10 +76,9 @@ export function parseS3Listing(xml: string): { objects: ExportObject[]; continua
     size: Number(xmlValues(b, 'Size')[0] ?? 0),
   }));
   const truncated = xmlValues(xml, 'IsTruncated')[0] === 'true';
-  return {
-    objects,
-    continuationToken: truncated ? (xmlValues(xml, 'NextContinuationToken')[0] ?? '') : '',
-  };
+  const continuationToken = truncated ? (xmlValues(xml, 'NextContinuationToken')[0] ?? '') : '';
+  if (truncated && !continuationToken.trim()) throw new Error('Truncated S3 listing has no continuation token');
+  return { objects, continuationToken };
 }
 
 export function createAwsS3Transport(opts: AwsS3TransportOptions): FocusExportTransport {
