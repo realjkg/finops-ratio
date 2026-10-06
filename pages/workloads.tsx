@@ -11,7 +11,7 @@ import { Footer } from '@/components/layout/Footer';
 export default function Workloads() {
   return (
     <div className="flex h-full flex-col bg-void font-body text-txt">
-      <div className="flex min-h-0 flex-1">
+      <div className="workload-panes flex min-h-0 flex-1 flex-col overflow-auto md:flex-row md:overflow-hidden">
         <WorkloadList />
         <DetailPanel />
       </div>

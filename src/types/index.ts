@@ -26,6 +26,8 @@ export type CostTier = 'economy' | 'standard' | 'premium' | 'ultra';
 // --- Workload (§2.1) ---
 
 export interface WorkloadCosts {
+  /** Exact recorded MTD when a ledger supplies it; absent in the legacy run-rate demo. */
+  recorded_mtd?: number;
   inference_cost_per_call: number;
   monthly_spend: number;
   daily_spend: number;

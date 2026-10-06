@@ -15,6 +15,8 @@ export function DemandShapingTab({
   workload: Workload;
   budget: BudgetProfile;
 }) {
+  const sim = useStore(s => s.simulation);
+  const busy = useStore(s => s.simulationBusy);
   const setDemandShape = useStore((s) => s.setDemandShape);
   const updateThresholds = useStore((s) => s.updateThresholds);
   const projections = useMemo(() => shapeProjections(workload), [workload]);
@@ -45,7 +47,7 @@ export function DemandShapingTab({
               <button
                 key={p.shape}
                 type="button"
-                disabled={blocked}
+                disabled={blocked || busy || Boolean(sim && sim.session.identity.persona !== 'technical')}
                 onClick={() => setDemandShape(workload.id, p.shape as DemandShape)}
                 className={`flex w-full items-center gap-3 rounded-card border px-4 py-3 text-left transition-colors ${
                   active ? 'border-unit bg-unit/10' : 'border-edge bg-slab hover:border-sub'
@@ -144,6 +146,7 @@ function ThresholdSlider({
         </span>
       </div>
       <input
+        aria-label={label}
         type="range"
         min={min}
         max={max}

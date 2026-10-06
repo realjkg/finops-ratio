@@ -2,7 +2,8 @@
 // every registry model at today's volume. Cheaper = green, pricier = red, with a
 // value-ratio framing note and an A/B-test caveat.
 
-import { useMemo } from 'react';
+import { useStore } from '@/store/useStore';
+import { useMemo, useState } from 'react';
 import type { ModelEntry, Workload } from '@/types';
 import { compareModels, type ModelCostRow } from '@/lib/modelCompare';
 import { MODEL_QUALITY_NOTE } from '@/data/models';
@@ -16,6 +17,10 @@ export function MultiModelTab({
   workload: Workload;
   models: ModelEntry[];
 }) {
+  const simulation = useStore(s => s.simulation);
+  const busy = useStore(s => s.simulationBusy);
+  const run = useStore(s => s.simulationCommand);
+  const [choice, setChoice] = useState('');
   const volume = useMemo(() => {
     const calls = workload.outputs.daily_inferences;
     return {
@@ -54,6 +59,11 @@ export function MultiModelTab({
         ))}
       </div>
 
+      {simulation && <section className="rounded-card border border-edge p-3 text-xs text-sub">
+        <p>Simulate a prospective model switch after cost approval. Recorded charges stay unchanged; evaluate quality before using a new model.</p>
+        <label className="mt-3 block">Target model <select className="sim-input mt-2 max-w-full" value={choice} onChange={e => setChoice(e.target.value)}><option value="">Choose a model</option>{models.map(m => <option key={m.id} value={m.model_name}>{m.display_name}</option>)}</select></label>
+        <button className="sim-button mt-3" disabled={busy || !choice || !workload.governance.cost_approval || simulation.session.identity.persona !== 'technical'} onClick={() => void run({ type: 'model', workloadId: workload.id, model: choice })}>Simulate model switch</button>
+      </section>}
       {alt && current && (
         <div className="rounded-card border border-shape/40 bg-shape/5 p-3 text-xs text-sub">
           <span className="text-shape">⚠</span> Switching to{' '}

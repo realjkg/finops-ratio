@@ -44,3 +44,13 @@ __pycache__/
 # Public FOCUS sample data fetched on demand by `npm run sample:fetch` (pinned, SHA-256 checked; CC BY 4.0)
 .ratio-sample-data/
 
+
+# Customer simulation: durable local state, sessions, and browser test output
+.ratio-simulation/
+.simulation-test-results/
+
+.next-simulation-*/
+.next-verified/
+
+# Resumable build-loop evidence and locks
+.ratio-build/

@@ -624,6 +624,19 @@ export function groupAlive(pgid) {
   } catch (e) {
     return e?.code === 'EPERM';
   }
+  // procfs can expose host IDs while kill() accepts this PID namespace's IDs.
+  // NSpgid maps the group into our namespace; never compare IDs from a sibling.
+  let namespace = null;
+  let depth = 0;
+  try {
+    const selfPid = Number(fs.readFileSync('/proc/self/stat', 'utf8').split(' ')[0]);
+    if (selfPid !== process.pid) {
+      const ids = fs.readFileSync('/proc/self/status', 'utf8').match(/^NSpid:\s+(.+)$/m)?.[1].trim().split(/\s+/).map(Number);
+      if (!ids || ids.at(-1) !== process.pid) return true;
+      depth = ids.length - 1;
+      namespace = fs.readlinkSync('/proc/self/ns/pid');
+    }
+  } catch { return true; }
   let entries;
   try {
     entries = fs.readdirSync('/proc');
@@ -633,9 +646,15 @@ export function groupAlive(pgid) {
   for (const d of entries) {
     if (!/^\d+$/.test(d)) continue;
     try {
+      if (namespace && fs.readlinkSync(`/proc/${d}/ns/pid`) !== namespace) continue;
       const stat = fs.readFileSync(`/proc/${d}/stat`, 'utf8');
       const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-      if (Number(f[2]) === pgid && f[0] !== 'Z') return true;
+      if (f[0] === 'Z') continue;
+      const group = namespace
+        ? Number(fs.readFileSync(`/proc/${d}/status`, 'utf8').match(/^NSpgid:\s+(.+)$/m)?.[1].trim().split(/\s+/)[depth])
+        : Number(f[2]);
+      if (!Number.isInteger(group)) return true; // cannot prove this group empty
+      if (group === pgid) return true;
     } catch {
       // ended meanwhile
     }

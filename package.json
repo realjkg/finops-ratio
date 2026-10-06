@@ -2,7 +2,7 @@
   "name": "ratio",
   "private": true,
   "version": "1.0.0",
-  "description": "Ratio — AI-native FinOps platform that governs AI workload spend by measuring value, not just cost.",
+  "description": "Ratio \u2014 AI-native FinOps platform that governs AI workload spend by measuring value, not just cost.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -23,7 +23,15 @@
     "local:down": "node scripts/local/local.mjs down",
     "local:test": "node scripts/local/local.mjs test",
     "local:acceptance": "node scripts/local/local.mjs acceptance",
-    "sample:fetch": "node scripts/acceptance/fetch-focus-sample.mjs"
+    "sample:fetch": "node scripts/acceptance/fetch-focus-sample.mjs",
+    "simulation:start": "node scripts/simulation/start.mjs",
+    "simulation:test": "playwright test --config playwright.simulation.config.ts",
+    "simulation:worker": "node --import tsx scripts/simulation/worker.ts",
+    "simulation:storage": "node scripts/simulation/storage.mjs",
+    "build:verify": "node scripts/completion/run.mjs",
+    "build:continue": "node scripts/completion/run.mjs --implement",
+    "governance:test": "node scripts/completion/governance.mjs --test",
+    "readiness:check": "node scripts/completion/governance.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
@@ -45,6 +53,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
     "@types/react": "^18.3.12",

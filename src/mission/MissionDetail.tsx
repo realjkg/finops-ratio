@@ -62,6 +62,7 @@ export function MissionDetail({ missionId, onBack }: MissionDetailProps) {
   const budgets = useStore((s) => s.budgets);
   const models = useStore((s) => s.models);
   const now = useStore((s) => s.now);
+  const alerts = useStore(s => s.alerts);
 
   // Each mission detail keeps its own open section, defaulting to Fuel &
   // Trajectory (the spec’s default drill-down section).
@@ -120,7 +121,7 @@ export function MissionDetail({ missionId, onBack }: MissionDetailProps) {
 
   // Reuse the board view-model so the detail header reads the SAME status and
   // value the card showed — no divergent copy of the truth.
-  const view = toMissionView(workload);
+  const view = toMissionView(workload, { budgets, alerts, now });
   const meta = STATUS_META[view.status];
   const activeSection = SECTIONS.find((s) => s.tab === section);
 

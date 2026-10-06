@@ -1,5 +1,6 @@
 // Global CSS must be imported in _app — nowhere else in the Pages Router.
 import '../src/index.css';
+import { SimulationProvider } from '@/simulation/SimulationProvider';
 import type { AppProps } from 'next/app';
 import { useRouter } from 'next/router';
 import { PersonaProvider } from '@/components/PersonaProvider';
@@ -8,11 +9,11 @@ import { NAV_ITEMS } from '@/components/layout/NavBar';
 
 // The six north-star objects share one AppShell (nav + agent launcher + chat).
 // /demo also uses the shell so a self-service visitor gets the same navigation
-// and real Ratio AI launcher while trying the product. Other legacy/demo routes
-// (/mission, /finio, /hello, /tokenomics, /prediction, /costsource) remain bare.
+// and Ratio AI launcher while trying the product. Fixture sandboxes share
+// navigation; /mission and /hello remain legacy standalone routes.
 const SHELL_ROUTES = new Set<string>([
   ...NAV_ITEMS.map((item) => item.href),
-  '/demo',
+  '/demo', '/agent-workflows', '/workspace', '/outcomes', '/costsource', '/finio', '/finio/demo', '/prediction', '/tokenomics',
 ]);
 
 export default function RatioApp({ Component, pageProps }: AppProps) {
@@ -24,7 +25,9 @@ export default function RatioApp({ Component, pageProps }: AppProps) {
   // technical / procurement) is available app-wide.
   return (
     <PersonaProvider>
+      <SimulationProvider>
       {useShell ? <AppShell>{page}</AppShell> : page}
+    </SimulationProvider>
     </PersonaProvider>
   );
 }

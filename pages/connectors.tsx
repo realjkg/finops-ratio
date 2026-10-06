@@ -15,6 +15,8 @@
 // view stays, every connector honestly reads as available, and the probe is
 // hidden.
 
+import { SimulationConnectors } from '@/simulation/SimulationConnectors';
+import { useStore } from '@/store/useStore';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ConnectorCard } from '@/connectors/ConnectorCard';
@@ -31,7 +33,7 @@ const COVERAGE_LABEL: Record<SourceCoverage, string> = {
 
 const OFFLINE_SOURCES = sourcesForEnv({});
 
-export default function Connectors() {
+function ConnectorRegistry() {
   const [sources, setSources] = useState<CostSourceDescriptor[]>(OFFLINE_SOURCES);
   const [live, setLive] = useState(false);
   const client = useMemo(() => createCostSourceClient('live'), []);
@@ -200,3 +202,8 @@ export default function Connectors() {
   );
 }
 
+
+export default function Connectors() {
+ const sim = useStore(s => s.simulation);
+ return sim ? <SimulationConnectors /> : <ConnectorRegistry />;
+}

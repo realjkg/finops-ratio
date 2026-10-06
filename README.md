@@ -303,3 +303,115 @@ routine skills under `.obvious/skills/`. The full v1 design specification is
 preserved as an ephemeral Obvious artifact (point-in-time snapshot), not checked
 into the repo — see the `doc-authoring` skill for this workflow.
 
+
+## Saved customer workflow simulation
+
+Requires Node 22.13+ (built-in SQLite). Run `npm ci`, then `npm run simulation:start`,
+and open http://localhost:3000/simulation. Choose one of the six fixture identities
+across Acme and Northstar. Technical, procurement and executive permissions come
+from the server session; changing the view does not change permission.
+
+Each tenant receives a reconciled June 2026 cost ledger automatically. Import the
+AWS, Azure and GCP fixtures, inspect workloads and findings, request a change as
+Alex, approve and fund it as Jordan or Morgan, then apply it as Alex. Reload or
+restart the service to verify persistence. Reports, PDF/XLSX exports and mock AI
+use the saved tenant snapshot. Email/Slack delivery and provider changes are
+simulated; no messages or cloud actions are sent.
+
+SQLite state defaults to `.ratio-simulation/customer.sqlite`; override with
+`RATIO_SIMULATION_DB`. Back up this file with the service stopped. Remove it to
+reset the fixture. `PORT` changes the listening port; set
+`RATIO_SIMULATION_ORIGIN` to the exact browser origin when using a different host.
+Sessions expire after one hour. The endpoints require `RATIO_SIMULATION=1` and
+`RATIO_ENV=test` or `development`; the start script refuses a production environment.
+Never enable the mock identity selector on a customer deployment.
+
+For browser acceptance, run `npx playwright install chromium`, then
+`npm run simulation:test`. The suite builds and serves the app with simulation
+enabled, using isolated build output and a fresh database. `RATIO_TEST_PRODUCTION=0`
+selects a development server instead. The suite covers
+all three personas, saved imports and approvals, exports, mobile screens, session
+revocation, tenant boundaries, CSRF, stale writes and separation from live APIs.
+`RATIO_CHROMIUM_PATH` optionally selects an already installed Chromium binary.
+
+Before customer release, dev-mode acceptance must verify real OIDC identity and
+tenant/role mapping, real account ingestion and reconciliation, PostgreSQL-backed
+production persistence, live provider authorization/rollback, real report delivery
+and recovery. This SQLite simulation is a development workflow, not a production
+authentication or storage replacement. FinIO, Tokenomics, Prediction and CostSource
+remain separate fixture sandboxes; their experiments do not update the saved ledger.
+
+### Initiative outcome accountability
+
+Open **Measure initiative outcomes** from the saved customer workspace, or the
+**Outcomes** tab in Workloads. Each initiative stores an accountable owner and
+role, one primary performance metric, a pre-AI baseline, an AI observation,
+evidence references, a target and benefit/full-cost decision thresholds.
+
+Technical, Executive and Procurement identities can enter the foundation records.
+Executive or Procurement verifies measured value submitted by another identity
+and records business decisions. These permissions are provisional and can be
+refined independently of the calculation model.
+
+Revenue contribution is incremental revenue × contribution margin × AI attribution.
+Use contribution margin before the AI costs recorded in the full-cost breakdown.
+Cost savings are actual spending reductions × attribution. Quality and risk are
+nonfinancial evidence for the performance goal; they are never automatically
+converted to cash. Assumed and projected benefits stay separate from reviewed
+measured benefits. Reviewers must reconcile overlapping claims. References and
+methods are recorded metadata; external evidence is reviewed by the user.
+
+Full cost combines the observation-period model-usage ledger with infrastructure,
+implementation allocation, oversight and ongoing labor. Each supplemental category
+can be unknown, assumed, projected or measured. Unknown is not zero: confirmed
+zero needs an evidence reference. A return requires model-ledger coverage for
+every observation day, all cost categories recorded as measured and independently
+reviewed financial value. Pre-AI and AI periods must have equal duration.
+
+Net ROI is (reviewed financial benefit − full cost) / full cost. Decision thresholds
+use benefit / full cost: default stop below 0.5×, change below 1×, continue at 1×,
+and expand at 3× with the performance target met. Continue and expand enforce
+those requirements; expand also requires all four governance gates. A business
+decision records authorization and rationale; it does not execute a provider change.
+
+Editing value or its performance basis removes its verification. Changing observation
+dates clears period-specific supplemental costs. Changing evidence, cost, threshold
+or governance marks prior decisions for renewed review. Prior decisions retain
+their input snapshots. Existing simulation workspaces upgrade automatically while
+preserving imports, spend, budgets and revision numbers.
+
+Reports include the saved outcome summary. PDF adds an accountability appendix;
+XLSX adds Outcomes, Value Evidence, Full Costs and Decision History sheets. The
+original operating dashboard keeps its seeded value assumptions and labels them
+separately from measured full-cost returns. Run `npm run simulation:test` for
+customer and outcome persona journeys, including mobile entry and report checks.
+
+### Embedded agent workflow foundation
+
+Open **Customer workflow → Open agent workflows** to queue persisted outcome reviews, simulate processor interruptions, retry under bounded leases, and route proposals to an independent Executive/Procurement reviewer. The deterministic engine reads saved outcome evidence and proposes tasks; acceptance does not execute a financial or cloud change.
+
+`npm run simulation:worker` provides a bounded dedicated worker with explicit simulation environment and tenant configuration. `npm run simulation:storage -- backup|restore SOURCE DESTINATION` creates verified snapshots and restores to a new file with sessions invalidated. Optional local container scaffolding lives under `infrastructure/simulation`.
+
+See [the architecture controls, runbook and release prerequisites](docs/evidence/agent-infrastructure-foundation.md). This foundation remains simulated; production identity, cloud deployment, HA and live-provider validation are pending.
+
+### Frank Coster
+
+Frank Coster is Ratio’s FinOps accountability partner: calm, candid and grounded in evidence. Open **Ask Frank Coster → Work through evidence and approvals with Frank**, or **Customer workflow → Open agent workflows**.
+
+The guided workspace pairs questions with the owner/baseline, value evidence, full cost and decision path. **Review with Frank** creates a persisted proposal with role-specific next steps through a bounded server-side tool. Independent human review and existing financial decision permissions still apply. Operational controls are available below the guided interface.
+
+Simulation answers read the saved tenant workspace and show their source revision. Conversation does not execute approvals or provider actions. Frank has no provider credentials, shell access or external-message authority in this simulation; connecting a live model or provider requires the later dev validation.
+
+### Executable completion loop
+
+`npm run governance:test` runs a focused local governance suite: all six simulated identities, rejected-write atomicity, tenant separation, independent approvals, financial evidence, bounded Frank jobs, connector configuration/auth boundaries and recovery. It records source-fingerprinted results in `.ratio-build/governance.json`. It never starts GitHub Actions or accesses live accounts.
+
+`npm run readiness:check` evaluates `scripts/completion/checklist.json` and writes `.ratio-build/readiness.json`, covering UI, backend, connector adapters, governance, identity and Frank. It distinguishes source presence from passing checks and ignores evidence from a different source fingerprint. All real-identity, live-data, infrastructure and release acceptance requirements remain open; this local checklist cannot certify production readiness. Refresh the focused governance evidence after changing source.
+
+`npm run build:verify` executes lint, types, the full unit suite, build, bundle isolation and all customer/Frank browser workflows. It writes atomic gate results and the next unfinished task under `.ratio-build/`. A nonzero exit means the product is not complete, even when selected checks passed. `-- --gates=lint,types,unit` narrows a diagnosis without passing omitted gates. Evidence belongs to a source fingerprint; changing source invalidates previous passes.
+
+`npm run build:continue` performs up to three implement/verify iterations when `RATIO_BUILD_AGENT_ARGV` contains a configured coding agent's JSON argument array. The task and current evidence are passed on stdin with local-only authority. Without a coding executable it stops with an explicit blocker; a scheduled Codex turn can instead implement `.ratio-build/next-task.json` using native tools and rerun verification. The runner never silently installs or authenticates an agent. No-source-change, unavailable tools, timeouts and external prerequisites stop repetition.
+
+Locks use Linux `flock`, released by the kernel when their owning process exits, including a crash. Lock files remain as owner metadata (token, host, PID namespace, start time and release state); their presence is not evidence of a live owner. Never delete or rename these files: changing the inode can allow overlapping owners. If `flock` is unavailable the runner stops safely. For native coding turns, start `node scripts/completion/lock.mjs hold`, retain its running execution session and returned token throughout edits and verification, then run `node scripts/completion/lock.mjs release TOKEN` in a finally step and wait for the holder to exit. A busy lock means defer; do not edit concurrently. Reacquisition after a terminated holder requires no manual stale-file cleanup.
+
+`scripts/completion/plan.json` retains remaining storage/container, ingestion, real identity, live data, model runtime, production infrastructure and release acceptance work. External gates remain open until their chosen integration and evidence-backed acceptance can be implemented; they cannot be declared complete by simulated tests. CI now includes a dedicated customer/Frank browser-acceptance workflow on PRs, with retained evidence. GitHub execution begins only after the branch is authorized for publication.

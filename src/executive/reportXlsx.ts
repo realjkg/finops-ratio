@@ -5,7 +5,9 @@
 // external spreadsheet input.
 
 import ExcelJS from 'exceljs';
-import { buildReportModel, type ReportRow } from './reportModel';
+import { COST_CATEGORIES } from '@/outcomes/types';
+import { monetaryBenefit } from '@/outcomes/model';
+import { buildReportModel, type ReportRow, type ReportModel } from './reportModel';
 
 // Exact, user-approved column order. Exported so tests assert the header row.
 export const REPORT_COLUMNS = [
@@ -45,8 +47,8 @@ function autoWidths(records: ReportRecord[]): number[] {
   });
 }
 
-export async function buildReportWorkbook(now: Date = new Date()): Promise<Buffer> {
-  const { rows } = buildReportModel(now);
+export async function buildReportWorkbook(now: Date = new Date(), model: ReportModel = buildReportModel(now)): Promise<Buffer> {
+  const { rows } = model;
   const records = rows.map(toRecord);
   const widths = autoWidths(records);
 
@@ -65,6 +67,21 @@ export async function buildReportWorkbook(now: Date = new Date()): Promise<Buffe
     width: widths[i],
   }));
   sheet.addRows(records);
+  if (model.periodLabel.startsWith('SIMULATED')) {
+    const notes = book.addWorksheet('Context');
+    notes.addRows([['Report period', model.periodLabel], ['Generated', model.generatedAt], ['Savings', 'Projected opportunity, not realized savings']]);
+    notes.getColumn(1).width = 24; notes.getColumn(2).width = 100;
+  }
 
+  if (model.outcomeReports) {
+    const add = (name: string, headers: string[], rows: (string | number | null)[][]) => {
+      const s = book.addWorksheet(name); s.addRow(headers); s.addRows(rows); s.views = [{ state: 'frozen', ySplit: 1 }];
+      s.getRow(1).font = { bold: true }; headers.forEach((_, i) => { s.getColumn(i + 1).width = Math.min(55, Math.max(18, headers[i].length + 2)); });
+    };
+    add('Outcomes', ['Initiative', 'Owner', 'Owner role', 'Metric', 'Unit', 'Baseline', 'Baseline start', 'Baseline end', 'Baseline evidence', 'Observed', 'Observation start', 'Observation end', 'Observation evidence', 'Target', 'Direction', 'Performance recorded by', 'Performance verified by', 'Performance verified at', 'Full cost USD', 'Measured benefit USD', 'Measured benefit-cost ratio', 'Net ROI pct', 'Suggested decision', 'Stop below ratio', 'Continue at ratio', 'Expand at ratio', 'Decision stale'], model.outcomeReports.map(({ name, record: r, result: e, decisionStale }) => [name, r.owner, r.ownerRole, r.metric, r.unit, r.baseline.value, r.baseline.start, r.baseline.end, r.baseline.reference, r.observation.value, r.observation.start, r.observation.end, r.observation.reference, r.target, r.direction, r.planRecordedBy ?? '', r.planVerified?.by ?? '', r.planVerified?.at ?? '', e.totalCostCents === null ? null : e.totalCostCents / 100, e.measuredBenefitCents / 100, e.measuredRatio, e.netRoiPct, e.recommendation, r.thresholds.stopBelow, r.thresholds.continueAt, r.thresholds.expandAt, String(decisionStale)]));
+    add('Value Evidence', ['Initiative', 'Measure', 'Category', 'Status', 'Amount USD', 'Margin pct', 'Attribution pct', 'Attributed benefit USD', 'Evidence', 'Method', 'Recorded by', 'Verified by', 'Verified at'], model.outcomeReports.flatMap(({ name, record }) => record.measures.map(m => [name, m.title, m.category, m.status, m.amountCents === null ? null : m.amountCents / 100, m.contributionMarginPct, m.attributionPct, monetaryBenefit(m) / 100, m.reference, m.method, m.recordedBy, m.verified?.by ?? '', m.verified?.at ?? ''])));
+    add('Full Costs', ['Initiative', 'Category', 'Amount USD', 'Status', 'Evidence', 'Period start', 'Period end', 'Recorded by', 'Verified by', 'Verified at'], model.outcomeReports.flatMap(({ name, record, result }) => [[name, 'model_usage', result.modelCents / 100, 'recorded simulated ledger', 'Source ledger', record.observation.start, record.observation.end, 'Connector ledger', 'Source-controlled import', ''], ...COST_CATEGORIES.map(k => [name, k, record.costs[k].cents === null ? null : record.costs[k].cents! / 100, record.costs[k].status, record.costs[k].reference, record.observation.start, record.observation.end, record.costs[k].recordedBy ?? '', record.costs[k].verified?.by ?? '', record.costs[k].verified?.at ?? ''])]));
+    add('Decision History', ['Initiative', 'Decision', 'Rationale', 'Reviewer', 'Recorded at', 'Suggested decision at review'], model.outcomeReports.flatMap(({ name, record }) => record.decisions.map(d => [name, d.action, d.rationale, d.by, d.at, d.recommendation])));
+  }
   return Buffer.from(await book.xlsx.writeBuffer());
 }
