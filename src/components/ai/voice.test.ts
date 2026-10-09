@@ -4,7 +4,7 @@
 // stop-on-silence) is testable without a browser. Storage helpers degrade to
 // null/no-op when window is absent (node).
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   MIC_PERMISSION_DENIED,
   VOICE_INPUT_FAILED,
@@ -90,8 +90,16 @@ describe('recognitionLanguage', () => {
   });
 
   it('falls back to the navigator locale, never a hardcoded default', () => {
-    // node 20 has no navigator — the helper hands the choice to the browser.
-    expect(recognitionLanguage()).toBeUndefined();
+    // Stub the environment locale rather than assuming none: Node 20 has no
+    // navigator, Node 22 reports 'en-US', browsers report the user's locale.
+    // A distinctive non-en-US locale proves the helper mirrors the
+    // environment instead of any hardcoded default.
+    vi.stubGlobal('navigator', { language: 'pt-BR' });
+    try {
+      expect(recognitionLanguage()).toBe('pt-BR');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
