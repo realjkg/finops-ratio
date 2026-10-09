@@ -109,7 +109,11 @@ function rawRowFor(w: Workload, version: FocusVersion): RawSourceRow {
     ChargePeriodStart: period.start,
     ChargePeriodEnd: period.end,
     BillingAccountId: 'ratio-tenant-001',
-    SubAccountId: w.team,
+    // Billing sub-account identity — deliberately NOT the team. The team rides
+    // the x_RatioTeam extension (attached on normalization) so the billing
+    // identity and the org chart never share a column (retires the earlier
+    // SubAccountId=team repurposing).
+    SubAccountId: 'ratio-ai-sub-001',
     ServiceName: model?.display_name ?? w.model,
     ServiceCategory: 'AI and Machine Learning',
     ProviderName: providerName,
