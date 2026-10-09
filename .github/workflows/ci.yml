@@ -24,9 +24,13 @@ jobs:
 
     # Ephemeral Postgres for the ingestion DB suite (*.db.test.ts). Trust auth
     # inside the job-scoped container only: no credential is stored anywhere.
+    # Image from the ECR Public mirror of the same official library/postgres
+    # image: GitHub-hosted runners repeatedly timed out pulling from
+    # auth.docker.io (2026-10-09), and service containers pull before any step
+    # can retry. Swap back once Docker Hub egress is stable.
     services:
       postgres:
-        image: postgres:16
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
@@ -90,6 +94,14 @@ jobs:
       # Image pinned by digest; throwaway, job-scoped, any key pair accepted.
       - name: Start SeaweedFS (S3-compatible, job-scoped)
         run: |
+          # Pull with retries: runner egress to Docker Hub is flaky
+          # (2026-10-09). Same digest as before; job-scoped, any key pair
+          # accepted.
+          for i in 1 2 3; do
+            docker pull chrislusf/seaweedfs@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d && break
+            if [ "$i" -ge 3 ]; then exit 1; fi
+            sleep 15
+          done
           docker run -d --name ratio-s3 -p 8333:8333 \
             chrislusf/seaweedfs@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d \
             server -s3 -dir=/data

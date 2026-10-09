@@ -37,6 +37,8 @@ export const SAFE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   '`type` must be one of model_switch, demand_shape, scale, budget',
   'Unknown workload',
   'Unknown model',
+  // Attribution.
+  'dimension must be one of team, user',
   // AI chat: 422 provider_misconfigured (names the missing env var; fixed per
   // provider, no caller input) and the 400 body contract.
   'ANTHROPIC_API_KEY is required for AI_PROVIDER=claude',

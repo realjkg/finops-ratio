@@ -60,6 +60,7 @@ export interface FocusAddedV14 {
 // --- Ratio value extensions (the denominator) ---
 export interface RatioFocusExtensions {
   x_RatioWorkloadId: string;
+  x_RatioTeam: string; // owning team, resolved from the workload (org attribution; billing identity stays in SubAccountId)
   x_RatioValueRatio: number; // value.value_ratio
   x_RatioTotalValue: number; // value.total_value, in BillingCurrency
   x_RatioDemandShape: string; // DemandShape enum value

@@ -12,6 +12,7 @@ import { MockCostSourceClient } from '@/costsource/MockCostSourceClient';
 import { FocusFileAdapter } from '@/costsource/FocusFileAdapter';
 import { MockPredictionClient } from '@/prediction/MockPredictionClient';
 import { MockTokenomicsClient } from '@/tokenomics/MockTokenomicsClient';
+import { MockAttributionClient } from '@/attribution/MockAttributionClient';
 import rowsHandler from '../../pages/api/costsource/rows';
 import healthHandler from '../../pages/api/costsource/health';
 import findingsHandler from '../../pages/api/costsource/findings';
@@ -20,6 +21,7 @@ import ingestHandler from '../../pages/api/costsource/ingest';
 import predictHandler from '../../pages/api/prediction/predict';
 import accuracyHandler from '../../pages/api/prediction/accuracy';
 import tokenomicsHandler from '../../pages/api/tokenomics';
+import attributionHandler from '../../pages/api/attribution';
 import helloHandler from '../../pages/api/hello';
 
 const TOKEN = 'right-token-0123456789abcdef-0123456789';
@@ -121,6 +123,7 @@ const INGEST = ingestHandler;
 const PREDICT = predictHandler;
 const ACCURACY = accuracyHandler;
 const TOKENOMICS = tokenomicsHandler;
+const ATTRIBUTION = attributionHandler;
 const JUNE = { start: '2026-06-01T00:00:00Z', end: '2026-07-01T00:00:00Z' };
 
 function errorLog(): string {
@@ -194,6 +197,11 @@ describe('thrown internal errors never reach the caller', () => {
   it('tokenomics', async () => {
     vi.spyOn(MockTokenomicsClient.prototype, 'getTokenomicsReport').mockRejectedValue(new Error(SECRET_DETAIL));
     expectGeneric500(await run(TOKENOMICS, makeReq('GET')));
+  });
+
+  it('attribution', async () => {
+    vi.spyOn(MockAttributionClient.prototype, 'getAttributionReport').mockRejectedValue(new Error(SECRET_DETAIL));
+    expectGeneric500(await run(ATTRIBUTION, makeReq('GET', { query: { dimension: 'team' } })));
   });
 
   it('a thrown upstream message that merely contains "Unknown" is not a 404 that echoes it', async () => {
@@ -321,6 +329,39 @@ describe('4xx messages are fixed and never echo caller input', () => {
     expect(res.statusCode).toBe(404);
     expect(res.body).toEqual({ error: 'Unknown model' });
     expectNoEcho(res);
+  });
+
+  it('attribution: hostile / non-boolean dimension → 400 with the fixed message', async () => {
+    for (const dimension of [HOSTILE, 'portfolios', '']) {
+      const res = await run(ATTRIBUTION, makeReq('GET', { query: { dimension } }));
+      expect(res.statusCode).toBe(400);
+      expect(res.body).toEqual({ error: 'dimension must be one of team, user' });
+      expectNoEcho(res);
+    }
+  });
+});
+
+describe('attribution: GET-only route contract', () => {
+  it.each(['POST', 'PUT', 'DELETE'])('%s → 405 with Allow: GET', async (method) => {
+    const res = await run(ATTRIBUTION, makeReq(method));
+    expect(res.statusCode).toBe(405);
+    expect(res.body).toEqual({ error: 'Method not allowed' });
+    expect(res.headers['allow']).toBe('GET');
+  });
+
+  it('a valid dimension returns a value-agnostic report on the 200 wire', async () => {
+    const res = await run(ATTRIBUTION, makeReq('GET', { query: { dimension: 'team' } }));
+    expect(res.statusCode).toBe(200);
+    const body = res.body as { dimension: string; rows: unknown[] };
+    expect(body.dimension).toBe('team');
+    expect(body.rows.length).toBeGreaterThan(0);
+    expect(JSON.stringify(body)).not.toMatch(/valueRatio|value_ratio|total_value|credits/i);
+  });
+
+  it('an absent dimension defaults to team', async () => {
+    const res = await run(ATTRIBUTION, makeReq('GET'));
+    expect(res.statusCode).toBe(200);
+    expect((res.body as { dimension: string }).dimension).toBe('team');
   });
 });
 
