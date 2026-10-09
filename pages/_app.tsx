@@ -13,7 +13,7 @@ import { NAV_ITEMS } from '@/components/layout/NavBar';
 // navigation; /mission and /hello remain legacy standalone routes.
 const SHELL_ROUTES = new Set<string>([
   ...NAV_ITEMS.map((item) => item.href),
-  '/demo', '/agent-workflows', '/workspace', '/outcomes', '/costsource', '/finio', '/finio/demo', '/prediction', '/tokenomics',
+  '/demo', '/agent-workflows', '/workspace', '/outcomes', '/costsource', '/finio', '/finio/demo', '/prediction', '/tokenomics', '/attribution',
 ]);
 
 export default function RatioApp({ Component, pageProps }: AppProps) {

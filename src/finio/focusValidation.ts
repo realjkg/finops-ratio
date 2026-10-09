@@ -73,6 +73,9 @@ export function validateFocusRow(row: FocusRow): FocusRowValidation {
   if (typeof row.x_RatioWorkloadId !== 'string') {
     errors.push('x_RatioWorkloadId must be a string');
   }
+  if (typeof row.x_RatioTeam !== 'string') {
+    errors.push('x_RatioTeam must be a string');
+  }
   if (!isFiniteNumber(row.x_RatioValueRatio)) {
     errors.push('x_RatioValueRatio must be a finite number');
   }

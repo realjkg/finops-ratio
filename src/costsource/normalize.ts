@@ -47,6 +47,7 @@ export function attachRatioValue<T extends { ResourceId: string }>(
     return {
       ...cost,
       x_RatioWorkloadId: workloadId ?? '',
+      x_RatioTeam: '',
       x_RatioValueRatio: 0,
       x_RatioTotalValue: 0,
       x_RatioDemandShape: 'unmanaged',
@@ -59,6 +60,7 @@ export function attachRatioValue<T extends { ResourceId: string }>(
   return {
     ...cost,
     x_RatioWorkloadId: workload.id,
+    x_RatioTeam: workload.team,
     x_RatioValueRatio: workload.value.value_ratio,
     x_RatioTotalValue: workload.value.total_value,
     x_RatioDemandShape: workload.demand_shape,

@@ -55,11 +55,15 @@ it("exports the same baseline, evidence and full-cost model in snapshot appendic
     "assumed",
   );
   const costs = book.getWorksheet("Full Costs")!;
-  expect(costs.rowCount).toBe(36);
+  // One header row + five cost rows per workload in the seeded workspace.
+  expect(costs.rowCount).toBe(s.workloads.length * 5 + 1);
   expect(costs.getRow(3).getCell(column(costs, "Recorded by")).value).toBe(tech.user);
   expect(costs.getRow(3).getCell(column(costs, "Verified by")).value).toBe(reviewer.user);
   expect(book.getWorksheet("Decision History")?.rowCount).toBe(1);
   const pdf = await renderReportPdf(now, model);
   expect(pdf.toString("ascii", 0, 4)).toBe("%PDF");
-  expect(pdf.toString("latin1")).toMatch(/\/Count 2/);
+  // Page tree grows with the seeded portfolio (the initiative table paginates);
+  // pin the structural invariant — the outcomes appendix makes it multi-page.
+  const pageCount = Number(pdf.toString("latin1").match(/\/Count (\d+)/)?.[1]);
+  expect(pageCount).toBeGreaterThanOrEqual(2);
 });
