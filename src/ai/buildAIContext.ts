@@ -6,6 +6,7 @@
 
 import { COST_SOURCES, findingsFor } from '@/costsource/seed';
 import { DEMO_NOW } from '@/data/workloads';
+import { deriveCacheHitRate } from '@/lib/derive';
 import {
   buildInitiativeBoard,
   INITIATIVE_STATUS_META,
@@ -80,6 +81,10 @@ export function buildAIContext(
     demandShape: w.demand_shape,
     governanceGatesPassed: gatesPassed(w),
     costTrendPct: w.cost_trend_pct,
+    cacheHitRate: deriveCacheHitRate(
+      w.costs.tokens_cached_today,
+      w.costs.tokens_in_today,
+    ),
   }));
 
   return {

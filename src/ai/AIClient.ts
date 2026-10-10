@@ -79,6 +79,11 @@ export interface AIWorkloadSnapshot {
   demandShape: string;
   governanceGatesPassed: number; // 0–4
   costTrendPct: number;
+  /**
+   * Cache hit rate = cached ÷ (cached + uncached) input tokens (conformance A3).
+   * `null` when the workload used no input tokens today — never a fabricated 0%.
+   */
+  cacheHitRate: number | null;
 }
 
 /** The response from a chat() call. */

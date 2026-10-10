@@ -33,6 +33,7 @@ function makeWorkload(overrides: Partial<Workload> & { id: string; team: string;
       compute: 0,
       tokens_in_today: 0,
       tokens_out_today: 0,
+      tokens_cached_today: 0,
       tokens_in_mtd: 0,
       tokens_out_mtd: 0,
     },
