@@ -18,7 +18,7 @@ import { buildFindings, type FindingView } from './findingsModel';
 import { ValueRatioMeter } from './ValueRatioMeter';
 import { SpendToValueGraph } from './SpendToValueGraph';
 import { EvidenceMark } from '@/components/EvidenceMark';
-import { formatUSD, formatRatio } from '@/lib/format';
+import { formatUSD, formatRatio, formatPct, formatTokens } from '@/lib/format';
 import { TOKEN_HEX } from '@/lib/scales';
 import {
   createCMClient,
@@ -418,6 +418,29 @@ function RecommendationPane({
             color={TOKEN_HEX.cost}
           />
         </div>
+        {/* Cache-evidence chip (audit A3) — only where cache economics
+            materially shape the cost (findingsModel gates it); unit cyan
+            marks informational data. Quiet, no new signature component. */}
+        {finding.cacheEvidence && (
+          <div
+            className="mt-3 rounded-md border border-edge bg-slab p-3"
+            data-testid="cache-evidence-chip"
+          >
+            <p className="font-mono text-[10px]" style={{ color: TOKEN_HEX.unit }}>
+              Cache economics
+            </p>
+            <p className="mt-1 font-mono text-base font-bold" style={{ color: TOKEN_HEX.unit }}>
+              {formatPct(finding.cacheEvidence.hitRate, 1)} cache hit rate
+            </p>
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-dim">
+              {formatTokens(finding.cacheEvidence.cachedTokens)} of{' '}
+              {formatTokens(finding.cacheEvidence.totalInputTokens)} input tokens billed at the cached rate
+              (${finding.cacheEvidence.cachedRatePer1m}/1M vs ${finding.cacheEvidence.uncachedRatePer1m}/1M) —
+              holding today's input cost {formatUSD(finding.cacheEvidence.cacheDiscountDaily)}/day below
+              uncached pricing.
+            </p>
+          </div>
+        )}
         {/* Spend-to-value graph — portfolio context */}
         <div className="mt-4 rounded-md border border-edge bg-slab p-3">
           <p className="mb-3 font-mono text-[9px] uppercase tracking-wider text-dim">

@@ -6,6 +6,7 @@
 
 import { WORKLOADS } from '@/data/workloads';
 import { ratioColor } from '@/lib/scales';
+import { CACHE_HIT_RATE_MATERIAL, deriveCacheEconomics } from '@/lib/derive';
 import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import type { EvidenceStatus, Workload } from '@/types';
 import {
@@ -51,6 +52,20 @@ export interface FindingView {
   confidenceNote: string;
   /** True when ratio is below the Gate 3 configured minimum. */
   belowMinimum: boolean;
+  /**
+   * Cache-evidence chip data (audit A3) — populated ONLY where cache economics
+   * materially shape this workload's cost: hit rate ≥ CACHE_HIT_RATE_MATERIAL
+   * AND a nonzero cached-rate discount. Null elsewhere; the chip never states
+   * a claim the token counts and registry rates don't support.
+   */
+  cacheEvidence: {
+    hitRate: number;
+    cachedTokens: number;
+    totalInputTokens: number;
+    cachedRatePer1m: number;
+    uncachedRatePer1m: number;
+    cacheDiscountDaily: number;
+  } | null;
 }
 
 /** Build findings sorted worst value-ratio first. */
@@ -59,6 +74,21 @@ export function buildFindings(workloads: Workload[] = WORKLOADS): FindingView[] 
     .map((w): FindingView => {
       const ratio = w.value.value_ratio;
       const rec = recommendFor(w);
+
+      const econ = deriveCacheEconomics(w);
+      const cacheEvidence =
+        econ.hitRate !== null &&
+        econ.hitRate >= CACHE_HIT_RATE_MATERIAL &&
+        econ.cacheDiscountDaily > 0
+          ? {
+              hitRate: econ.hitRate,
+              cachedTokens: econ.cachedTokens,
+              totalInputTokens: econ.cachedTokens + econ.uncachedInputTokens,
+              cachedRatePer1m: econ.cachedRatePer1m,
+              uncachedRatePer1m: econ.uncachedRatePer1m,
+              cacheDiscountDaily: econ.cacheDiscountDaily,
+            }
+          : null;
 
       const problem =
         ratio < 1.0
@@ -82,6 +112,7 @@ export function buildFindings(workloads: Workload[] = WORKLOADS): FindingView[] 
         impactBasis: rec.basis,
         confidenceNote: rec.confidence,
         belowMinimum: ratio < VALUE_MINIMUM,
+        cacheEvidence,
       };
     })
     .sort((a, b) => a.valueRatio - b.valueRatio);

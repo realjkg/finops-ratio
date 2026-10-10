@@ -2,7 +2,8 @@
 // workload's stored costs/outputs they compute the numbers the UI never stores.
 // Cost is ALWAYS computed alongside its value context (spec R4).
 
-import type { UnitCosts, Workload } from '@/types';
+import { findModel } from '@/data/models';
+import type { ModelEntry, UnitCosts, Workload } from '@/types';
 
 function safeDiv(numerator: number, denominator: number): number {
   return denominator > 0 ? numerator / denominator : 0;
@@ -45,6 +46,78 @@ function outputTokenCost(workload: Workload): number {
   const weightedOut = tokens_out_today * 4;
   const total = weightedIn + weightedOut;
   return total > 0 ? daily_spend * (weightedOut / total) : 0;
+}
+
+// --- Cache economics (conformance audit A3 — the L3 cache-hit-rate number) ---
+
+/**
+ * Materiality gate for surfacing cache economics: below this hit rate the cache
+ * is not shaping a workload's cost story enough to earn UI space (calm register).
+ */
+export const CACHE_HIT_RATE_MATERIAL = 0.1;
+
+/**
+ * Cache-hit input rate for a registry model. Mirrors the seed's pricing rule:
+ * when a model publishes no cached rate, cached tokens bill at 25% of input.
+ */
+export function cachedInputRate(model: ModelEntry): number {
+  return model.pricing.cached_input_per_1m ?? model.pricing.input_per_1m * 0.25;
+}
+
+/**
+ * Cache hit rate = cached tokens ÷ (cached + uncached input tokens). Pure over
+ * token counts — a token fact, independent of pricing. `null` when the workload
+ * used no input tokens at all: nothing to divide, never a fabricated 0%.
+ */
+export function deriveCacheHitRate(
+  cachedTokens: number,
+  uncachedInputTokens: number,
+): number | null {
+  const totalInput = cachedTokens + uncachedInputTokens;
+  return totalInput > 0 ? cachedTokens / totalInput : null;
+}
+
+export interface CacheEconomics {
+  /** Cache-hit input tokens today (billed at the cached rate). */
+  cachedTokens: number;
+  /** Uncached input tokens today (billed at the full input rate). */
+  uncachedInputTokens: number;
+  /** cached ÷ (cached + uncached) input; null with no input tokens. */
+  hitRate: number | null;
+  /** Registry rates behind the dollar split, per 1M tokens. */
+  uncachedRatePer1m: number;
+  cachedRatePer1m: number;
+  /** Today's dollar split of the input tokens. */
+  uncachedInputCostDaily: number;
+  cachedCostDaily: number;
+  /** What the cached tokens would have cost at the uncached rate, minus what they cost. */
+  cacheDiscountDaily: number;
+}
+
+/**
+ * The full cache picture for a workload: token split + hit rate + the
+ * registry-priced dollars the seed's buildWorkload booked. Rates come from the
+ * same registry the seed priced from; an unknown model keeps the token split
+ * and reports zero rates rather than guessing one.
+ */
+export function deriveCacheEconomics(workload: Workload): CacheEconomics {
+  const cachedTokens = workload.costs.tokens_cached_today;
+  const uncachedInputTokens = workload.costs.tokens_in_today;
+  const model = findModel(workload.model);
+  const uncachedRatePer1m = model?.pricing.input_per_1m ?? 0;
+  const cachedRatePer1m = model ? cachedInputRate(model) : 0;
+  const uncachedInputCostDaily = (uncachedInputTokens / 1_000_000) * uncachedRatePer1m;
+  const cachedCostDaily = (cachedTokens / 1_000_000) * cachedRatePer1m;
+  return {
+    cachedTokens,
+    uncachedInputTokens,
+    hitRate: deriveCacheHitRate(cachedTokens, uncachedInputTokens),
+    uncachedRatePer1m,
+    cachedRatePer1m,
+    uncachedInputCostDaily,
+    cachedCostDaily,
+    cacheDiscountDaily: (cachedTokens / 1_000_000) * (uncachedRatePer1m - cachedRatePer1m),
+  };
 }
 
 // Portfolio value ratio (spec §14.2 /portfolio/ratio).
