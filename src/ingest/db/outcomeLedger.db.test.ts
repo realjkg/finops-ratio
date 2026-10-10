@@ -8,7 +8,7 @@
 // pure rules of `src/outcomes/durable.ts` — including the R4 line: an
 // unvalidated benefit can never produce a value-to-cost ratio.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { attempt, createTestDatabase, withRole, type TestDatabase } from './testing/harness';
 import { artifactSha, seedTwoTenants, type Seeded } from './testing/fixtures';
 import { evaluateBenefit, evaluateCost, successfulOutcomeCount, valueToCostRatio, type BenefitClaimRow, type SupplementalCostRow } from '@/outcomes/durable';
@@ -27,9 +27,12 @@ afterAll(async () => {
 
 const REGISTRATION_COLUMNS = `(tenant_id, id, project_id, use_case_pattern, outcome_unit_key, outcome_unit_label, metric, unit, direction, target, baseline, observation, quality_metric, quality_direction, quality_threshold, stop_below, continue_at, expand_at, status, requested_by)`;
 
+/** Either a pooled client (role-scoped transactions) or the pool itself (superuser plumbing). */
+type Queryable = Pool | PoolClient;
+
 /** Inserts a pending registration (the only INSERT the lifecycle trigger allows). */
 async function insertPending(
-  c: PoolClient,
+  c: Queryable,
   over: {
     tenantId: string;
     id: string;
@@ -62,7 +65,7 @@ async function insertPending(
 }
 
 /** Approves a pending registration as a different identity. */
-const approve = (c: PoolClient, tenantId: string, id: string, approvedBy: string) =>
+const approve = (c: Queryable, tenantId: string, id: string, approvedBy: string) =>
   c.query(`UPDATE ratio.outcome_unit_registrations SET status = 'approved', approved_by = $3, approved_at = now() WHERE tenant_id = $1 AND id = $2`, [tenantId, id, approvedBy]);
 
 const newId = (n: number, prefix = 'cccccccc'): string => `${prefix}-0000-4000-8000-${String(n).padStart(12, '0')}`;
