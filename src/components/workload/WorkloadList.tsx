@@ -35,7 +35,12 @@ export function WorkloadList() {
           </p>
         ) : (
           visible.map((w) => (
-            <div key={w.id} className="w-[82vw] max-w-sm shrink-0 md:w-auto md:max-w-none">
+            <div
+              key={w.id}
+              className={`w-[82vw] max-w-sm shrink-0 md:w-auto md:max-w-none ${
+                w.id === selectedId ? 'order-first md:order-none' : ''
+              }`}
+            >
               <WorkloadCard
                 workload={w}
                 selected={w.id === selectedId}
