@@ -1,0 +1,45 @@
+# CodeQL SAST (SOC 2 baseline control B5): JavaScript/TypeScript analysis on
+# every PR to main, on pushes to main, and a weekly sweep to catch new
+# advisory knowledge against the current head. Actions SHA-pinned per the
+# governance.yml convention.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '31 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Required to upload SARIF to the code-scanning database. Read-only
+      # otherwise; contents stays read.
+      security-events: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9f759ee644a3e7c15c1390abf49868036c00067b # v3
+        with:
+          languages: javascript-typescript
+
+      # JavaScript/TypeScript needs no build step: the query runs over the
+      # source tree directly (no autobuild for interpreted languages).
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@9f759ee644a3e7c15c1390abf49868036c00067b # v3
+        with:
+          category: '/language:javascript-typescript'
