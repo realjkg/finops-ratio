@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { WORKLOADS } from '@/data/workloads';
 import { governanceGatesPassed } from '@/lib/derive';
-import { FOCUS_VERSIONS, CANONICAL_FOCUS_VERSION } from '@/costsource/focusVersions';
+import { RATIFIED_FOCUS_VERSIONS, CANONICAL_FOCUS_VERSION } from '@/costsource/focusVersions';
 import { resolveWorkloadId } from '@/costsource/seed';
 import { FINIO_SOURCE_ID, type FocusRow } from './FinioClient';
 import { finioRowsForVersion } from './finioRows';
@@ -31,7 +31,7 @@ describe('validateFocusRow', () => {
   const good = (): FocusRow => finioRowsForVersion('1.4')[0];
 
   it('accepts every row the responder emits, at every supported version', () => {
-    for (const version of FOCUS_VERSIONS) {
+    for (const version of RATIFIED_FOCUS_VERSIONS) {
       const result = validateFocusRows(finioRowsForVersion(version));
       expect(result, `version ${version}`).toEqual({ ok: true });
     }
@@ -170,8 +170,8 @@ describe('finioRowsForVersion', () => {
 // ---------------------------------------------------------------------------
 
 describe('negotiateFocusVersion', () => {
-  it('accepts every version in the canonical v1.0-v1.4 range', () => {
-    for (const version of FOCUS_VERSIONS) {
+  it('accepts every ratified version in the canonical v1.0-v1.4 range', () => {
+    for (const version of RATIFIED_FOCUS_VERSIONS) {
       expect(negotiateFocusVersion(version)).toEqual({ ok: true, version });
     }
   });
@@ -186,6 +186,17 @@ describe('negotiateFocusVersion', () => {
       expect(result.failure.message).not.toContain(requested);
       expect(result.failure.supported).toEqual([...SUPPORTED_FOCUS_VERSIONS]);
     }
+  });
+
+  it('refuses the unratified 1.5 working draft like any other unsupported version', () => {
+    // FOCUS 1.5 ratifies 3 Dec 2026; until then the A2A handshake does not
+    // negotiate it — same fixed 409 shape, never a special draft path.
+    const result = negotiateFocusVersion('1.5');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.status).toBe(409);
+    expect(result.failure.message).toBe('focusVersion not supported; responder supports 1.0–1.4');
+    expect(result.failure.supported).toEqual([...SUPPORTED_FOCUS_VERSIONS]);
   });
 
   it('refuses a non-string version rather than coercing it', () => {
@@ -261,7 +272,7 @@ describe('sessionStore', () => {
   // themselves dotted ("1.4"), so a token split into four fields and EVERY
   // session read as malformed. Any version with a dot in it must round-trip.
   it('round-trips a dotted FOCUS version through the token', () => {
-    for (const version of FOCUS_VERSIONS) {
+    for (const version of RATIFIED_FOCUS_VERSIONS) {
       const session = createSession(version, env);
       expect(session.sessionId.split('-')).toHaveLength(3);
       expect(validateSession(session.sessionId, env)).toEqual({ ok: true, focusVersion: version });

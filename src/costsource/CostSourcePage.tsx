@@ -1,9 +1,10 @@
 // Standalone /costsource route — demonstrates the source-agnostic cost-ingest
 // seam with a mock/live toggle. Picks a source, runs healthCheck +
 // fetchCostRows + fetchFindings, then shows cost rows flowing from the source
-// through the FOCUS v1.0-v1.4 version shim into the v1.4 canonical model, and on
-// into a Ratio workload that displays value ratio, forecast, and gates — the
-// numerator/denominator composition. Isolated from the main app; no store.
+// through the FOCUS v1.0-v1.5 version shim (1.5 = working draft) into the v1.4
+// canonical model, and on into a Ratio workload that displays value ratio,
+// forecast, and gates — the numerator/denominator composition. Isolated from
+// the main app; no store.
 import { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { createCostSourceClient, composeRatioView } from './index';
@@ -15,7 +16,7 @@ import type {
   CanonicalFocusRow,
   FocusVersion,
 } from './index';
-import { FOCUS_VERSIONS } from './index';
+import { FOCUS_VERSIONS, isDraftVersion } from './index';
 import { LiveDataAuthError } from './LiveCostSourceClient';
 import { rawRowsForVersion } from './seed';
 import { formatUSD, formatMoney, formatRatio, formatPct } from '@/lib/format';
@@ -131,8 +132,8 @@ export function CostSourcePage() {
             Cost Source Ingest
           </h1>
           <p className="mt-1 text-sm text-sub">
-            Source-agnostic cost ingest — any source’s FOCUS export (v1.0–v1.4) is
-            upgraded to the{' '}
+            Source-agnostic cost ingest — any source’s FOCUS export (v1.0–v1.5;
+            1.5 = working draft, ratifies 3 Dec 2026) is upgraded to the{' '}
             <span className="font-mono text-value">v1.4 canonical</span> model, then
             given Ratio’s value denominator, forecast, and gates. PointFive is
             source #1, not the architecture.
@@ -282,7 +283,7 @@ type IngestState =
   | { status: 'success'; result: CostRowsResult };
 
 /**
- * Lets the user pick a FOCUS version (v1.0–v1.4) and POST sample rows
+ * Lets the user pick a FOCUS version (v1.0–v1.5; 1.5 = working draft) and POST sample rows
  * directly to the FocusFileAdapter ingest endpoint. Shows the backfill
  * audit and canonical output — demonstrating the adapter works with
  * arbitrary FOCUS exports, not just the mock seed.
@@ -348,7 +349,7 @@ function IngestFromFilePanel({ sourceId }: { sourceId: string }) {
                 : 'border-edge bg-raised text-sub hover:text-txt',
             ].join(' ')}
           >
-            v{v}
+            {isDraftVersion(v) ? `v${v} (draft)` : `v${v}`}
           </button>
         ))}
         <button
@@ -438,6 +439,19 @@ function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
           {rows.backfilledColumns.map((c) => (
             <Chip key={c}>{c}</Chip>
           ))}
+        </div>
+      )}
+      {rows.draftColumnsBackfilled.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs text-dim">
+            FOCUS 1.5 working-draft columns backfilled (ratifies 3 Dec 2026 —
+            optional, omitted values stay null):
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {rows.draftColumnsBackfilled.map((c) => (
+              <Chip key={c}>{c}</Chip>
+            ))}
+          </div>
         </div>
       )}
     </Card>

@@ -1,7 +1,7 @@
 // Tests for FocusFileAdapter — the second source adapter (PR F).
 //
 // Coverage:
-//   1. ingest() normalizes v1.0–v1.4 rows to canonical v1.4 (backfill correctness)
+//   1. ingest() normalizes v1.0–v1.5 rows (1.5 a working draft) to canonical v1.4 (backfill correctness)
 //   2. ingest() with a v1.4 source is a pass-through (no backfill)
 //   3. Value attachment is source-independent — same workload → same value ratio
 //   4. healthCheck() is always reachable (no credentials)
