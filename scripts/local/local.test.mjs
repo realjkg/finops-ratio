@@ -994,19 +994,27 @@ describe('L18 local:test summary finalisation', () => {
 // the deadline was not hard. Every case below must settle within its bound and
 // leave no process behind.
 describe('L19 runProcess deadline is hard even when a grandchild holds stdio (challenger Low 1)', () => {
-  /** pids whose cmdline contains `marker` (Linux /proc). */
-  const pidsWith = (marker) =>
-    fs
+  /** Return signalable IDs, not host procfs IDs, for this namespace only. */
+  const pidsWith = (marker) => {
+    const namespace = fs.readlinkSync('/proc/self/ns/pid');
+    const depth = fs.readFileSync('/proc/self/status', 'utf8').match(/^NSpid:\s+(.+)$/m)[1].trim().split(/\s+/).length - 1;
+    return fs
       .readdirSync('/proc')
       .filter((d) => /^\d+$/.test(d))
-      .filter((d) => {
+      .flatMap((d) => {
         try {
-          return fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').includes(marker);
-        } catch {
-          return false;
+          if (!fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').includes(marker)) return [];
+          if (fs.readlinkSync(`/proc/${d}/ns/pid`) !== namespace) return [];
+          const ids = fs.readFileSync(`/proc/${d}/status`, 'utf8').match(/^NSpid:\s+(.+)$/m)[1].trim().split(/\s+/);
+          const pid = Number(ids[depth]);
+          if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Cannot resolve signalable process ID.');
+          return [pid];
+        } catch (error) {
+          if (error.code === 'ENOENT' || error.code === 'ESRCH') return [];
+          throw error;
         }
-      })
-      .map(Number);
+      });
+  };
   const markers = [];
   const marker = () => {
     const m = `${30 + markers.length}.${Math.floor(Math.random() * 900) + 100}`;
@@ -1415,20 +1423,23 @@ describe('L23 the app is stopped as a process group; a group is tracked until em
       }
     }
   });
-  /** pids whose process group is pgid (Linux /proc/<pid>/stat field 5). */
-  const members = (pgid) =>
-    fs
-      .readdirSync('/proc')
-      .filter((d) => /^\d+$/.test(d))
-      .filter((d) => {
-        try {
-          const stat = fs.readFileSync(`/proc/${d}/stat`, 'utf8');
-          const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-          return Number(fields[2]) === pgid && fields[0] !== 'Z';
-        } catch {
-          return false;
-        }
-      });
+  /** Enumerate actual non-zombie members in the caller's PID namespace. */
+  const members = (pgid) => {
+    const ownNamespace = fs.readlinkSync('/proc/self/ns/pid');
+    const ownIds = fs.readFileSync('/proc/self/status', 'utf8').match(/^NSpid:\s+(.+)$/m)[1].trim().split(/\s+/);
+    const depth = ownIds.length - 1;
+    return fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).filter((d) => {
+      try {
+        const status = fs.readFileSync(`/proc/${d}/status`, 'utf8');
+        const groups = status.match(/^NSpgid:\s+(.+)$/m)[1].trim().split(/\s+/);
+        if (Number(groups[depth]) !== pgid || /^State:\s+Z/m.test(status)) return false;
+        return fs.readlinkSync(`/proc/${d}/ns/pid`) === ownNamespace;
+      } catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'ESRCH') return false;
+        throw error;
+      }
+    });
+  };
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   /**
    * An app double: the leader exits on SIGTERM; its child (same group)

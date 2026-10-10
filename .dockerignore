@@ -1,0 +1,14 @@
+node_modules
+.git
+.next*
+.ratio-simulation
+.simulation-test-results
+dist
+dist-worker
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env*
+.ratio-local
+.ratio-build
+.ratio-sample-data

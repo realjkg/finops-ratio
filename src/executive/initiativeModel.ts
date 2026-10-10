@@ -12,10 +12,11 @@
 import { budgetFor } from '@/data/budgets';
 import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
+import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import { budgetColor, TOKEN_HEX } from '@/lib/scales';
-import type { Workload } from '@/types';
+import type { EvidenceStatus, Workload } from '@/types';
 import { COST_SOURCES, findingsFor } from '@/costsource/seed';
-import { toMissionView, type MissionStatus } from '@/mission/missionModel';
+import { toMissionView, type MissionStatus, type ProjectionContext } from '@/mission/missionModel';
 
 export type InitiativeStatus = 'on_track' | 'at_risk' | 'pending_approval';
 
@@ -48,6 +49,8 @@ export interface InitiativeView {
   // Cost efficiency = value ratio (R4 — cost is always paired with value).
   valueRatio: number;
   valueColor: string;
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
+  valueEvidenceStatus?: EvidenceStatus;
 }
 
 export interface SpendSummary {
@@ -57,14 +60,14 @@ export interface SpendSummary {
   pendingApproval: number;
 }
 
-export function toInitiativeView(workload: Workload): InitiativeView {
-  const budget = budgetFor(workload.id);
+export function toInitiativeView(workload: Workload, context: ProjectionContext = {}): InitiativeView {
+  const budget = context.budgets ? context.budgets.find(b => b.workload_id === workload.id) : budgetFor(workload.id);
   if (!budget) throw new Error(`No budget profile for workload ${workload.id}`);
 
   // Reuse the mission view-model so status + value coloring stay identical to
   // the technical surface (one source of truth, persona-projected).
-  const mission = toMissionView(workload);
-  const status = computeBudgetStatus(workload, budget, DEMO_NOW);
+  const mission = toMissionView(workload, context);
+  const status = computeBudgetStatus(workload, budget, context.now ?? DEMO_NOW);
   const consumedRatio = status.monthly.pctUsed;
 
   return {
@@ -76,6 +79,7 @@ export function toInitiativeView(workload: Workload): InitiativeView {
     status: MISSION_TO_INITIATIVE[mission.status],
     valueRatio: mission.valueRatio,
     valueColor: mission.valueColor,
+    valueEvidenceStatus: headlineEvidenceStatus(workload.value),
   };
 }
 
@@ -92,8 +96,9 @@ function projectedSavingsFromFindings(): number {
 
 export function buildInitiativeBoard(
   workloads: Workload[] = WORKLOADS,
+  context: ProjectionContext = {},
 ): { initiatives: InitiativeView[]; summary: SpendSummary } {
-  const initiatives = workloads.map(toInitiativeView);
+  const initiatives = workloads.map(w => toInitiativeView(w, context));
 
   return {
     initiatives,

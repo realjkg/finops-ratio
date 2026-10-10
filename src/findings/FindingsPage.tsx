@@ -10,12 +10,16 @@
 // Verbs stay exactly: Select / Apply / Dismiss. Warm accent (‘shape’) on Apply CTA only.
 // No badges, confetti, streaks — quiet governance. Calm register throughout.
 
-import { useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/router';
+import { useCallback, useMemo, useState } from 'react';
 import { useStore } from '@/store/useStore';
+import { landedFindings } from '@/connectors/ingestLanding';
 import { buildFindings, type FindingView } from './findingsModel';
 import { ValueRatioMeter } from './ValueRatioMeter';
 import { SpendToValueGraph } from './SpendToValueGraph';
-import { formatUSD, formatRatio } from '@/lib/format';
+import { EvidenceMark } from '@/components/EvidenceMark';
+import { formatUSD, formatRatio, formatPct, formatTokens } from '@/lib/format';
 import { TOKEN_HEX } from '@/lib/scales';
 import {
   createCMClient,
@@ -40,16 +44,23 @@ const cmModeEnv = process.env.NEXT_PUBLIC_CM_MODE;
 
 export function FindingsPage() {
   const workloads = useStore((s) => s.workloads);
+  const ingestRuns = useStore((s) => s.ingestRuns);
+  const sim = useStore(s => s.simulation);
+  const simBusy = useStore(s => s.simulationBusy);
+  const run = useStore(s => s.simulationCommand);
   const findings = useMemo(() => buildFindings(workloads), [workloads]);
+  // Findings reported by a connected cost-source adapter (e.g. PointFive
+  // DeepWaste) from a landed ingest run — real connector output, attributed.
+  const connectorFindings = useMemo(() => landedFindings(ingestRuns), [ingestRuns]);
 
   // Auto-select the worst finding on first render.
   const [selectedId, setSelectedId] = useState<string | null>(
     () => findings[0]?.workloadId ?? null,
   );
-  const [dismissedIds, setDismissedIds] = useState<ReadonlySet<string>>(new Set());
+  const [localDismissedIds, setDismissedIds] = useState<ReadonlySet<string>>(new Set());
 
   // Governance state per finding, keyed by workloadId.
-  const [governanceMap, setGovernanceMap] = useState<
+  const [localGovernanceMap, setGovernanceMap] = useState<
     ReadonlyMap<string, FindingGovernanceState>
   >(new Map());
   const [applyingId, setApplyingId] = useState<string | null>(null);
@@ -63,6 +74,13 @@ export function FindingsPage() {
     () => createCMClient(cmModeEnv === 'live' ? 'live' : 'mock'),
     [],
   );
+
+  const dismissedIds = sim ? new Set(sim.state.dismissed) : localDismissedIds;
+  const governanceMap: ReadonlyMap<string, FindingGovernanceState> = useMemo(() => sim
+    ? new Map(Object.entries(sim.state.changes).map(([id, c]) => [id, {
+        status: c.status === 'applied' ? 'applied' as const : 'pending_cm' as const,
+        auditRecord: { provider: 'mock' as const, ticketRef: c.ref, url: '', createdAt: c.updatedAt },
+      }])) : localGovernanceMap, [sim, localGovernanceMap]);
 
   // Captured tally: only findings with a CM audit record count (governed changes only).
   const capturedCount = useMemo(
@@ -79,6 +97,7 @@ export function FindingsPage() {
 
   /** Normal ITSM path: creates a governed CM ticket; finding enters pending_cm. */
   async function handleApply(finding: FindingView) {
+    if (sim) { await run({ type: "request-change", workloadId: finding.workloadId }); return; }
     setApplyingId(finding.workloadId);
     setApplyError(null);
     try {
@@ -154,6 +173,7 @@ export function FindingsPage() {
   }
 
   function handleDismiss(id: string) {
+    if (sim) { void run({ type: "dismiss-finding", workloadId: id }); return; }
     setDismissedIds((prev) => new Set([...prev, id]));
     // Advance selection to the next visible finding.
     const idx = visible.findIndex((f) => f.workloadId === id);
@@ -180,11 +200,41 @@ export function FindingsPage() {
         </div>
       </header>
 
+      {sim && <div className="flex flex-wrap items-center gap-3 border-b border-edge px-4 py-3 text-sm text-sub"><span>Apply requests a simulated change. Approval and application are tracked in the customer workflow.</span><Link href="/workspace#decisions" className="text-unit underline">Review change decisions</Link>{sim.state.dismissed.length > 0 && <button disabled={simBusy} className="underline" onClick={() => void run({ type: 'restore-findings' })}>Restore dismissed findings</button>}</div>}
+
+      {/* Landed connector findings — only after an ingest brought some in. */}
+      {connectorFindings.length > 0 && (
+        <div className="border-b border-edge bg-deep/60 px-6 py-3">
+          <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-sub">
+            Connector findings — {connectorFindings.length} landed from cost-source adapters
+          </p>
+          <ul className="space-y-1">
+            {connectorFindings.map((f) => (
+              <li key={f.id} className="flex flex-wrap items-baseline gap-x-2 font-mono text-[11px]">
+                <span className="text-dim">{f.sourceName}</span>
+                <span
+                  className="font-bold"
+                  style={{ color: f.severity === 'critical' ? 'var(--cost)' : f.severity === 'warning' ? 'var(--shape)' : 'var(--unit)' }}
+                >
+                  {f.type === 'anomaly' ? '▲' : '◆'} {f.category}
+                </span>
+                <span className="text-txt">{f.title}</span>
+                <span className="text-dim">
+                  {f.type === 'anomaly'
+                    ? `delta ${f.observedSpendDelta >= 0 ? '+' : ''}$${f.observedSpendDelta.toFixed(0)}`
+                    : `est. $${f.estimatedMonthlySavings.toFixed(0)}/mo`}
+                </span>
+                <span className="text-dim">· {f.resourceId}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {/* Two-pane content */}
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto md:flex-row md:overflow-hidden">
         {/* Left: ranked findings list */}
         <aside
-          className="w-72 shrink-0 overflow-y-auto border-r border-edge lg:w-80"
+          className="max-h-60 w-full shrink-0 overflow-y-auto border-b border-edge md:max-h-none md:w-72 md:border-r lg:w-80"
           aria-label="Findings list"
         >
           {visible.length === 0 ? (
@@ -206,7 +256,7 @@ export function FindingsPage() {
         </aside>
 
         {/* Right: recommendation pane */}
-        <main className="flex-1 overflow-y-auto" aria-label="Recommendation">
+        <main className="min-w-0 flex-1 md:overflow-y-auto" aria-label="Recommendation">
           {selected ? (
             // key resets local pane state (ref form inputs) when the finding changes.
             <RecommendationPane
@@ -214,7 +264,8 @@ export function FindingsPage() {
               finding={selected}
               allWorkloads={workloads}
               governance={governanceMap.get(selected.workloadId)}
-              isApplying={applyingId === selected.workloadId}
+              simulation={Boolean(sim)}
+              isApplying={sim ? simBusy || sim.session.identity.persona !== 'technical' : applyingId === selected.workloadId}
               applyError={
                 applyError?.workloadId === selected.workloadId
                   ? applyError.message
@@ -279,7 +330,7 @@ function FindingRow({
             <span className="truncate font-body text-sm font-medium text-txt">
               {finding.workloadName}
             </span>
-            {/* Evidence: ratio + spend */}
+            {/* Evidence: ratio + provenance mark + spend */}
             <div className="flex shrink-0 items-center gap-2">
               <span
                 className="font-mono text-xs font-bold"
@@ -287,6 +338,7 @@ function FindingRow({
               >
                 {formatRatio(finding.valueRatio)}
               </span>
+              <EvidenceMark status={finding.valueEvidenceStatus} />
               <span className="font-mono text-[11px] text-dim">
                 {formatUSD(finding.monthlySpend, { compact: true })}/mo
               </span>
@@ -329,6 +381,7 @@ function RecommendationPane({
   onApply,
   onAttach,
   onDismiss,
+  simulation = false,
 }: {
   finding: FindingView;
   allWorkloads: Workload[];
@@ -338,11 +391,24 @@ function RecommendationPane({
   onApply: () => void;
   onAttach: (ticketRef: string, provider: CMProvider) => void;
   onDismiss: () => void;
+  simulation?: boolean;
 }) {
   // Pre-approved ref form local state — reset automatically via key={finding.workloadId}.
   const [showRefForm, setShowRefForm] = useState(false);
   const [refInput, setRefInput] = useState('');
   const [refProvider, setRefProvider] = useState<CMProvider>('jira');
+
+  // Dot click-through from the evidence graph: same workload-detail flow as
+  // the nav — select the workload, then open the /workloads detail surface.
+  const select = useStore((s) => s.select);
+  const router = useRouter();
+  const openWorkload = useCallback(
+    (id: string) => {
+      select(id);
+      router.push('/workloads');
+    },
+    [select, router],
+  );
 
   const hasAuditRecord = !!governance?.auditRecord;
 
@@ -353,7 +419,7 @@ function RecommendationPane({
   }
 
   return (
-    <div className="mx-auto max-w-xl space-y-6 px-8 py-8">
+    <div className="mx-auto max-w-xl space-y-6 px-4 py-6 sm:px-8 sm:py-8">
       {/* Workload name */}
       <div>
         <p className="font-mono text-[10px] uppercase tracking-wider text-dim">Finding</p>
@@ -363,8 +429,12 @@ function RecommendationPane({
         <p className="mt-1 text-sm text-sub">{finding.problem}</p>
       </div>
 
-      {/* Value-ratio meter — enlarged */}
-      <ValueRatioMeter ratio={finding.valueRatio} size="large" />
+      {/* Value-ratio meter — enlarged; provenance mark rides the headline ratio */}
+      <ValueRatioMeter
+        ratio={finding.valueRatio}
+        size="large"
+        evidenceStatus={finding.valueEvidenceStatus}
+      />
 
       {/* Evidence: two values */}
       <section aria-label="Evidence">
@@ -382,6 +452,29 @@ function RecommendationPane({
             color={TOKEN_HEX.cost}
           />
         </div>
+        {/* Cache-evidence chip (audit A3) — only where cache economics
+            materially shape the cost (findingsModel gates it); unit cyan
+            marks informational data. Quiet, no new signature component. */}
+        {finding.cacheEvidence && (
+          <div
+            className="mt-3 rounded-md border border-edge bg-slab p-3"
+            data-testid="cache-evidence-chip"
+          >
+            <p className="font-mono text-[10px]" style={{ color: TOKEN_HEX.unit }}>
+              Cache economics
+            </p>
+            <p className="mt-1 font-mono text-base font-bold" style={{ color: TOKEN_HEX.unit }}>
+              {formatPct(finding.cacheEvidence.hitRate, 1)} cache hit rate
+            </p>
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-dim">
+              {formatTokens(finding.cacheEvidence.cachedTokens)} of{' '}
+              {formatTokens(finding.cacheEvidence.totalInputTokens)} input tokens billed at the cached rate
+              (${finding.cacheEvidence.cachedRatePer1m}/1M vs ${finding.cacheEvidence.uncachedRatePer1m}/1M) —
+              holding today's input cost {formatUSD(finding.cacheEvidence.cacheDiscountDaily)}/day below
+              uncached pricing.
+            </p>
+          </div>
+        )}
         {/* Spend-to-value graph — portfolio context */}
         <div className="mt-4 rounded-md border border-edge bg-slab p-3">
           <p className="mb-3 font-mono text-[9px] uppercase tracking-wider text-dim">
@@ -391,6 +484,7 @@ function RecommendationPane({
             workloads={allWorkloads}
             selectedWorkloadId={finding.workloadId}
             size="large"
+            onOpenWorkload={openWorkload}
           />
         </div>
       </section>
@@ -473,7 +567,7 @@ function RecommendationPane({
                   color: '#05070b', // void — high contrast on amber
                 }}
               >
-                {isApplying && !showRefForm ? 'Creating ticket…' : 'Apply'}
+                {isApplying && !simulation && !showRefForm ? 'Creating ticket…' : 'Apply'}
               </button>
               <button
                 type="button"
@@ -485,8 +579,8 @@ function RecommendationPane({
               </button>
             </div>
 
-            {/* Pre-approved reference path */}
-            <div>
+            {/* Pre-approved references are verified separately; never bypass simulated approval. */}
+            {!simulation && <div>
               <button
                 type="button"
                 onClick={() => setShowRefForm((v) => !v)}
@@ -539,7 +633,7 @@ function RecommendationPane({
                   </div>
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* Inline error — never swallowed */}
             {applyError && (
@@ -572,7 +666,7 @@ function AuditChip({
   const isApplied = status === 'applied';
   const accentColor = isApplied ? TOKEN_HEX.value : TOKEN_HEX.gate;
   const statusLabel = isApplied
-    ? 'Applied — reference attached'
+    ? (record.provider === 'mock' ? 'Applied in simulation' : 'Applied — reference attached')
     : 'Governed — change ticket created';
   const providerLabel =
     record.provider === 'servicenow' ? 'ServiceNow' : record.provider.toUpperCase();

@@ -4,8 +4,16 @@
 // .obvious/skills/agent-prompt — cost is always paired with its value ratio.
 
 import type { AIClient, AIContext, AIMessage, AIResponse } from './AIClient';
+import { CACHE_HIT_RATE_MATERIAL } from '@/lib/derive';
+import type { EvidenceStatus } from '@/types';
 
 type Intent = 'at_risk' | 'cost_driver' | 'savings' | 'summary' | 'help';
+
+// Provenance suffix (audit C1/C2): every cited ratio states its evidence
+// status — the agent never presents an assumed value as measured.
+function evidenceNote(status?: EvidenceStatus): string {
+  return status ? ` (value evidence: ${status})` : '';
+}
 
 function classify(query: string): Intent {
   const q = query.toLowerCase();
@@ -30,7 +38,7 @@ function atRisk(ctx: AIContext): AIResponse {
   );
   const lines = risky.map(
     (i) =>
-      `• **${i.name}** — ${i.status}, ${formatUSD(i.monthlyCost)}/mo at ${i.valueRatio.toFixed(1)}× return` +
+      `• **${i.name}** — ${i.status}, ${formatUSD(i.monthlyCost)}/mo at ${i.valueRatio.toFixed(1)}× return${evidenceNote(i.valueEvidenceStatus)}` +
       (i.savingsOpportunity > 0
         ? `, ${formatUSD(i.savingsOpportunity)}/mo savings identified`
         : ''),
@@ -50,17 +58,29 @@ function atRisk(ctx: AIContext): AIResponse {
   };
 }
 
+// Grounded cache-economics line (conformance A3). Initiatives map 1:1 to
+// workloads by id (initiativeModel), so the workload snapshot joins safely;
+// mentioned only when the hit rate clears CACHE_HIT_RATE_MATERIAL, and typeof
+// guards wire data from older clients that omit the field.
+function cacheLine(initiativeId: string, ctx: AIContext): string {
+  const workload = ctx.workloads?.find((w) => w.id === initiativeId);
+  const rate = workload?.cacheHitRate;
+  if (typeof rate !== 'number' || rate < CACHE_HIT_RATE_MATERIAL) return '';
+  return `Cache hit rate: ${(rate * 100).toFixed(1)}% of its input tokens are billed at the cached rate.`;
+}
+
 function costDriver(ctx: AIContext): AIResponse {
   const top = [...ctx.initiatives].sort((a, b) => b.monthlyCost - a.monthlyCost)[0];
   if (!top) return help();
   const text = [
-    `The largest cost driver is **${top.name}** at ${formatUSD(top.monthlyCost)}/mo (${top.valueRatio.toFixed(1)}× return — R4: cost paired with value).`,
+    `The largest cost driver is **${top.name}** at ${formatUSD(top.monthlyCost)}/mo (${top.valueRatio.toFixed(1)}× return${evidenceNote(top.valueEvidenceStatus)} — R4: cost paired with value).`,
     top.status !== 'On Track'
       ? `It is currently **${top.status}** — consider a budget review.`
       : `Its value ratio justifies the spend; monitor budget consumption (${top.budgetConsumedPct}% consumed this period).`,
     top.savingsOpportunity > 0
       ? `${formatUSD(top.savingsOpportunity)}/mo in savings opportunities are identified for this initiative.`
       : '',
+    cacheLine(top.id, ctx),
   ]
     .filter(Boolean)
     .join(' ');
@@ -108,7 +128,7 @@ function help(): AIResponse {
     message: {
       role: 'assistant',
       content: [
-        "I'm the Ratio AI agent. I reason over your initiative portfolio — value ratios, budget status, and savings opportunities. Try:",
+        "I'm Frank Coster, your FinOps accountability partner. I reason over your initiative portfolio — value ratios, budget status, and savings opportunities. Try:",
         '• "Which initiatives are at risk?"',
         '• "What\'s driving cloud cost?"',
         '• "How much can we save?"',

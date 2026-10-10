@@ -10,6 +10,7 @@ import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import chatHandler from '../../pages/api/v1/ai/chat';
 import cmHandler from '../../pages/api/v1/cm/change';
 import snapshotHandler from '../../pages/api/report/snapshot';
+import attributionHandler from '../../pages/api/attribution';
 import { SAFE_ERROR_CODES, SAFE_ERROR_MESSAGES, describeHttpErrorBody } from './httpError';
 
 const ENV_KEYS = [
@@ -132,6 +133,12 @@ describe('fixed server messages are allow-listed (driven through the routes)', (
 
   it('report snapshot 400', async () => {
     const res = await call(snapshotHandler, 'GET', undefined, { format: 'docx' });
+    expect(res.statusCode).toBe(400);
+    expect(SAFE_ERROR_MESSAGES.has(messageOf(res.body)), messageOf(res.body)).toBe(true);
+  });
+
+  it('attribution 400 (invalid dimension)', async () => {
+    const res = await call(attributionHandler, 'GET', undefined, { dimension: 'nope' });
     expect(res.statusCode).toBe(400);
     expect(SAFE_ERROR_MESSAGES.has(messageOf(res.body)), messageOf(res.body)).toBe(true);
   });

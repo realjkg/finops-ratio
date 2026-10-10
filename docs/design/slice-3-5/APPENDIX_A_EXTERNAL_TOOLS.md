@@ -62,7 +62,7 @@ ground truth. The only external numeric yardstick for accuracy is the
 FinOps Foundation's variance guidance (A16), which is about budget-level
 forecasts, not daily series. The baseline is the precondition for Ratio's
 goal, not the goal itself: the goal is differentiation (DESIGN §1.8,
-revision 28).
+revision 36).
 
 ## Statements in DESIGN.md that depend on these sources
 
@@ -70,7 +70,7 @@ revision 28).
 |---|---|
 | §1.4 reference table | A1–A19 |
 | §1.5 baseline checklists | A1, A3, A4–A9, A10, A13, A14, A17 |
-| §1.8 differentiation (rev. 28) | none. Product names there come from the repository's code and README or from the owner's words; no vendor capability is relied on. NVIDIA DCGM is named only as a candidate mechanism, marked **(unverified)** |
+| §1.8 differentiation (rev. 36) | none. Product names there come from the repository's code and README or from the owner's words; no vendor capability is relied on. NVIDIA DCGM is named only as a candidate mechanism, marked **(unverified)** |
 | §2.1, §2.3, §2.4, §4.1 (FOCUS semantics) | A20 |
 | §2.9 (no materialised views), PR 4-2 (`pg_input_is_valid`) | A21 |
 | §3.2–§3.6, §4.2 (methods) | A22 |

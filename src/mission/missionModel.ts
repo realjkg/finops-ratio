@@ -17,8 +17,11 @@ import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
 import { derivePortfolioRatio } from '@/lib/derive';
 import type { ForecastStatus } from '@/lib/forecast';
+import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import { budgetColor, PROVIDER_LABEL, ratioColor } from '@/lib/scales';
-import type { AlertSeverity, Workload } from '@/types';
+import type { Alert, BudgetProfile, AlertSeverity, EvidenceStatus, Workload } from '@/types';
+
+export interface ProjectionContext { budgets?: BudgetProfile[]; alerts?: Alert[]; now?: Date }
 
 export type MissionStatus = 'nominal' | 'caution' | 'critical';
 
@@ -39,6 +42,8 @@ export interface MissionView {
   // Value badge (R4) — never rendered without the gauge.
   valueRatio: number;
   valueColor: string;
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
+  valueEvidenceStatus?: EvidenceStatus;
   // Trajectory (monthly forecast).
   status: MissionStatus;
   forecast: ForecastStatus;
@@ -84,8 +89,8 @@ function worst(...statuses: MissionStatus[]): MissionStatus {
   return statuses.reduce((a, b) => (STATUS_RANK[b] > STATUS_RANK[a] ? b : a), 'nominal');
 }
 
-function maxAlertSeverity(workloadId: string): { severity: AlertSeverity | null; count: number } {
-  const open = ALERTS.filter((a) => a.workload_id === workloadId && !a.acknowledged);
+function maxAlertSeverity(workloadId: string, alerts: Alert[] = ALERTS): { severity: AlertSeverity | null; count: number } {
+  const open = alerts.filter((a) => a.workload_id === workloadId && !a.acknowledged);
   let severity: AlertSeverity | null = null;
   for (const a of open) {
     if (a.severity === 'critical') severity = 'critical';
@@ -108,13 +113,13 @@ function trajectoryVerdict(forecast: ForecastStatus, projectedPct: number): stri
   }
 }
 
-export function toMissionView(workload: Workload): MissionView {
-  const budget = budgetFor(workload.id);
+export function toMissionView(workload: Workload, context: ProjectionContext = {}): MissionView {
+  const budget = context.budgets ? context.budgets.find(b => b.workload_id === workload.id) : budgetFor(workload.id);
   if (!budget) throw new Error(`No budget profile for workload ${workload.id}`);
 
-  const status = computeBudgetStatus(workload, budget, DEMO_NOW);
+  const status = computeBudgetStatus(workload, budget, context.now ?? DEMO_NOW);
   const fuelRatio = status.daily.pctUsed;
-  const { severity, count } = maxAlertSeverity(workload.id);
+  const { severity, count } = maxAlertSeverity(workload.id, context.alerts);
 
   return {
     id: workload.id,
@@ -130,6 +135,7 @@ export function toMissionView(workload: Workload): MissionView {
     remainingToday: status.daily.remaining,
     valueRatio: workload.value.value_ratio,
     valueColor: ratioColor(workload.value.value_ratio),
+    valueEvidenceStatus: headlineEvidenceStatus(workload.value),
     status: worst(fuelStatus(fuelRatio), forecastToStatus(status.monthly.status), alertToStatus(severity)),
     forecast: status.monthly.status,
     projectedPctOfBudget: status.monthly.projectedPctOfBudget,
@@ -141,8 +147,9 @@ export function toMissionView(workload: Workload): MissionView {
 
 export function buildMissionBoard(
   workloads: Workload[] = WORKLOADS,
+  context: ProjectionContext = {},
 ): { missions: MissionView[]; fleet: FleetSummary } {
-  const missions = workloads.map(toMissionView);
+  const missions = workloads.map(w => toMissionView(w, context));
 
   // Fleet fuel = aggregate daily budget consumed across the fleet, matching the
   // per-mission daily fuel gauge.

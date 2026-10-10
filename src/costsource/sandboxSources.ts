@@ -5,6 +5,7 @@
 export const OFFLINE_SANDBOX_SOURCE_IDS: ReadonlySet<string> = new Set([
   'pointfive-sandbox',
   'focus-file-sandbox',
+  'servicenow-sandbox',
 ]);
 
 export function isOfflineSandboxSource(sourceId: string): boolean {

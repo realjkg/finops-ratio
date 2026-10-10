@@ -8,6 +8,7 @@
 // routes render bare (still reachable by URL, just not in the nav).
 
 import type { ReactNode } from 'react';
+import { SimulationBar } from '@/simulation/SimulationBar';
 import { useRouter } from 'next/router';
 import { useStore } from '@/store/useStore';
 import { NavBar, NAV_ITEMS } from './NavBar';
@@ -24,7 +25,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen flex-col bg-void font-body text-txt">
       <NavBar active={active} onOpenAgent={toggleAIPanel} agentOpen={aiPanelOpen} />
-      <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+      <SimulationBar />
+      <main className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</main>
       {/* Launcher lives in the top bar; the panel itself is opened from there. */}
       <ChatPanel showLauncher={false} />
     </div>

@@ -65,6 +65,7 @@ export function MissionCard({ mission, onOpen }: MissionCardProps) {
         dailyBudget={mission.dailyBudget}
         valueRatio={mission.valueRatio}
         valueColor={mission.valueColor}
+        evidenceStatus={mission.valueEvidenceStatus}
       />
 
       {/* Trajectory verdict (monthly forecast, plain language) */}

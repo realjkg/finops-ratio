@@ -100,13 +100,16 @@ const INSERT_SQL = `
 INSERT INTO ratio.cost_facts (tenant_id, batch_id, source_id, artifact_sha256, row_ordinal, billing_period,
   charge_period_start, charge_period_end, billed_cost, effective_cost, list_cost, contracted_cost, billing_currency,
   provider_name, service_name, service_category, charge_category, resource_id, sub_account_id, billing_account_id,
-  usage_quantity, usage_unit, pricing_quantity, pricing_unit, focus_version, extra_columns)
+  usage_quantity, usage_unit, pricing_quantity, pricing_unit, focus_version, extra_columns,
+  project_id, business_unit, cost_center, accountable_owner, region, environment, direct_or_shared)
 SELECT $1, $2, $3, $4, u.ord, $5, u.cps, u.cpe, u.bc, u.ec, u.lc, u.cc, u.cur, u.pn, u.sn, u.sc, u.chc, u.rid, u.sub, u.ba,
-       u.uq, u.uu, u.pq, u.pu, $6, u.extra
+       u.uq, u.uu, u.pq, u.pu, $6, u.extra,
+       u.pj, u.bu, u.cc2, u.ow, u.rg, u.env, u.dos
 FROM unnest($7::bigint[], $8::timestamptz[], $9::timestamptz[], $10::numeric[], $11::numeric[], $12::numeric[], $13::numeric[],
             $14::text[], $15::text[], $16::text[], $17::text[], $18::text[], $19::text[], $20::text[], $21::text[],
-            $22::numeric[], $23::text[], $24::numeric[], $25::text[], $26::jsonb[])
-  AS u(ord, cps, cpe, bc, ec, lc, cc, cur, pn, sn, sc, chc, rid, sub, ba, uq, uu, pq, pu, extra)`;
+            $22::numeric[], $23::text[], $24::numeric[], $25::text[], $26::jsonb[],
+            $27::text[], $28::text[], $29::text[], $30::text[], $31::text[], $32::text[], $33::text[])
+  AS u(ord, cps, cpe, bc, ec, lc, cc, cur, pn, sn, sc, chc, rid, sub, ba, uq, uu, pq, pu, extra, pj, bu, cc2, ow, rg, env, dos)`;
 
 async function insertChunk(ctx: LoadContext, artifactSha256: string, rows: Array<{ ordinal: number; fact: FactRow }>): Promise<void> {
   const col = <K extends keyof FactRow>(k: K) => rows.map((r) => r.fact[k]);
@@ -139,6 +142,14 @@ async function insertChunk(ctx: LoadContext, artifactSha256: string, rows: Array
       col('pricingQuantity'),
       col('pricingUnit'),
       rows.map((r) => JSON.stringify(r.fact.extraColumns)),
+      // D1 org attribution (all nullable)
+      col('projectId'),
+      col('businessUnit'),
+      col('costCenter'),
+      col('owner'),
+      col('region'),
+      col('environment'),
+      col('directOrShared'),
     ]);
   });
 }

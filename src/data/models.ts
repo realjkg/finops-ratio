@@ -1,7 +1,7 @@
 // Model registry seed — spec §2.2, pricing from §3.4.2. Per-1M-token rates.
 // Cost tiers per §2.2: economy <$1/1M in | standard $1–5 | premium $5–20 | ultra >$20.
 
-import type { ModelEntry } from '@/types';
+import type { ModelEntry, ModelProvider } from '@/types';
 
 export const MODEL_REGISTRY: ModelEntry[] = [
   {
@@ -148,6 +148,72 @@ export const MODEL_REGISTRY: ModelEntry[] = [
 
 export function findModel(modelName: string): ModelEntry | undefined {
   return MODEL_REGISTRY.find((m) => m.model_name === modelName);
+}
+
+// --- FOCUS 1.5 model-identity mapping (working draft — ratifies 3 Dec 2026) ---
+// When a FOCUS export omits the draft's recommended model-identity properties
+// (ModelDeveloper/ModelFamily/ModelId/ModelVersion), the ingest seam derives
+// what the registry can honestly say and leaves the rest null — never a guessed
+// value. Derivations below read only registry facts.
+
+/** Provider enum -> model developer. null where the provider alone cannot say. */
+const MODEL_DEVELOPER_BY_PROVIDER: Record<ModelProvider, string | null> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  google: 'Google',
+  // Bedrock hosts models from many developers; the provider enum alone cannot
+  // attribute one, and inventing one would fabricate billing identity.
+  aws_bedrock: null,
+  // The Azure OpenAI Service serves OpenAI models exclusively.
+  azure_openai: 'OpenAI',
+  custom: null,
+};
+
+const MODEL_FAMILY_PREFIXES: readonly (readonly [prefix: string, family: string])[] = [
+  ['claude', 'Claude'],
+  ['gpt', 'GPT'],
+  ['gemini', 'Gemini'],
+];
+
+/** Model family from the registry model_name's family token (e.g. 'claude-*' -> 'Claude'). */
+function modelFamilyFor(modelName: string): string | null {
+  const name = modelName.toLowerCase();
+  const hit = MODEL_FAMILY_PREFIXES.find(([prefix]) => name.startsWith(prefix));
+  return hit ? hit[1] : null;
+}
+
+/**
+ * Model version from the developer's date-stamped snapshot segment (e.g.
+ * 'claude-sonnet-4-20250514' -> '20250514'). Model names without a snapshot
+ * segment stay null — the registry records no other version fact.
+ */
+function modelVersionFor(modelName: string): string | null {
+  return /(\d{8})$/.exec(modelName)?.[1] ?? null;
+}
+
+export interface FocusModelIdentity {
+  ModelDeveloper: string | null;
+  ModelFamily: string | null;
+  ModelId: string | null;
+  ModelVersion: string | null;
+}
+
+/**
+ * Registry-derived FOCUS 1.5 model identity for a cost row's ServiceName, or
+ * null when no registry entry matches. Resolves by the registry's model_name
+ * (what a provider-billed export usually carries) then its display_name (what
+ * the seam's own seed rows put in ServiceName).
+ */
+export function modelIdentityForService(serviceName: string): FocusModelIdentity | null {
+  const model =
+    findModel(serviceName) ?? MODEL_REGISTRY.find((m) => m.display_name === serviceName);
+  if (!model) return null;
+  return {
+    ModelDeveloper: MODEL_DEVELOPER_BY_PROVIDER[model.provider],
+    ModelFamily: modelFamilyFor(model.model_name),
+    ModelId: model.model_name,
+    ModelVersion: modelVersionFor(model.model_name),
+  };
 }
 
 // Lightweight quality hints used by the comparison view + agent responder.

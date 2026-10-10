@@ -1,0 +1,48 @@
+# Local simulation only. Mock identities are reachable solely through loopback.
+services:
+  web:
+    image: ratio-simulation:local
+    build:
+      context: ../..
+      dockerfile: infrastructure/simulation/Dockerfile
+    ports: ['127.0.0.1:3000:3000']
+    environment:
+      RATIO_SIMULATION_ORIGIN: http://localhost:3000
+    volumes: ['state:/app/state']
+    tmpfs: ['/tmp', '/app/.next/cache']
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    init: true
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    networks: [simulation]
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/api/v1/simulation/session').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+  worker:
+    image: ratio-simulation:local
+    profiles: [jobs]
+    command: ['npm', 'run', 'simulation:worker']
+    environment:
+      RATIO_WORKER_TENANT: ${RATIO_WORKER_TENANT:-acme}
+    volumes: ['state:/app/state']
+    tmpfs: ['/tmp']
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    init: true
+    mem_limit: 256m
+    cpus: 0.5
+    networks: [simulation]
+networks:
+  simulation:
+    internal: true
+volumes:
+  state:

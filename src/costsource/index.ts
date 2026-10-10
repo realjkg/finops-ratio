@@ -34,6 +34,7 @@ export {
   FOCUS_VERSIONS,
   COLUMNS_BY_VERSION,
   columnsAddedAfter,
+  isDraftVersion,
 } from './focusVersions';
 export type { ComposedRatioView } from './normalize';
 export { composeRatioView } from './normalize';
@@ -43,6 +44,7 @@ export { composeRatioView } from './normalize';
 // the engine and downstream views are unchanged regardless of which adapter
 // produced the rows.
 export { FocusFileAdapter } from './FocusFileAdapter';
+export { ServiceNowAdapter, SERVICENOW_SANDBOX_SOURCE_ID } from './ServiceNowAdapter';
 export {
   PointFiveLiveAdapter,
   mapOpportunityToFinding,

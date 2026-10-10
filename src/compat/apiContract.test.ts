@@ -233,6 +233,15 @@ async function captureAll(): Promise<Record<string, unknown>> {
 
   out['hello'] = shape(await call(import('../../pages/api/hello'), makeReq('GET')));
   out['tokenomics'] = shape(await call(import('../../pages/api/tokenomics'), makeReq('GET')));
+  out['attribution team'] = shape(
+    await call(import('../../pages/api/attribution'), makeReq('GET', { query: { dimension: 'team' } })),
+  );
+  out['attribution user'] = shape(
+    await call(import('../../pages/api/attribution'), makeReq('GET', { query: { dimension: 'user' } })),
+  );
+  out['attribution 400'] = shape(
+    await call(import('../../pages/api/attribution'), makeReq('GET', { query: { dimension: 'nope' } })),
+  );
   out['prediction/accuracy'] = shape(await call(import('../../pages/api/prediction/accuracy'), makeReq('GET')));
   out['prediction/predict 400'] = shape(
     await call(import('../../pages/api/prediction/predict'), makeReq('POST', { body: { nope: true } })),

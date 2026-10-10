@@ -234,7 +234,7 @@ export class PointFiveLiveAdapter {
     const validated = validateFocusRecords(billing, POINTFIVE_LIVE_SOURCE_ID);
     // Reuse the existing version-negotiation shim: PointFive's FOCUS v1.0 export
     // is upgraded to the v1.4 canonical model and given Ratio's value context.
-    const { rows, backfilledColumns } = normalizeRows(
+    const { rows, backfilledColumns, draftColumnsBackfilled } = normalizeRows(
       validated,
       POINTFIVE_LIVE_SOURCE_ID,
       POINTFIVE_FOCUS_VERSION,
@@ -244,6 +244,7 @@ export class PointFiveLiveAdapter {
       sourceVersion: POINTFIVE_FOCUS_VERSION,
       canonicalVersion: CANONICAL_FOCUS_VERSION,
       backfilledColumns,
+      draftColumnsBackfilled,
       window,
       generatedAt: new Date().toISOString(),
       rows,

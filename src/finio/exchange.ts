@@ -11,7 +11,7 @@
 // server layers signed sessions on top (sessionStore.ts); the mock layers an
 // in-memory map. The decisions themselves live here, once.
 
-import { FOCUS_VERSIONS, CANONICAL_FOCUS_VERSION, type FocusVersion } from '@/costsource/focusVersions';
+import { RATIFIED_FOCUS_VERSIONS, CANONICAL_FOCUS_VERSION, type FocusVersion } from '@/costsource/focusVersions';
 import { FINIO_OPERATIONS, type FinioExport, type HandshakeRequest } from './FinioClient';
 import { finioRowsForVersion } from './finioRows';
 
@@ -29,8 +29,11 @@ export function failureMessage(operation: 'handshake' | 'export', failure: Finio
   return `FinIO ${operation} error ${failure.status}: ${failure.message}`;
 }
 
-/** Versions this responder can shape rows to — the full canonical range. */
-export const SUPPORTED_FOCUS_VERSIONS: readonly FocusVersion[] = FOCUS_VERSIONS;
+/** Versions this responder can shape rows to — ratified versions only. FOCUS 1.5
+ * is a working draft until 3 Dec 2026; the A2A handshake does not negotiate
+ * unratified versions (a peer requesting 1.5 is rejected, as before this
+ * version existed). */
+export const SUPPORTED_FOCUS_VERSIONS: readonly FocusVersion[] = RATIFIED_FOCUS_VERSIONS;
 
 export const FOCUS_VERSION_UNSUPPORTED_MESSAGE =
   `focusVersion not supported; responder supports ${SUPPORTED_FOCUS_VERSIONS[0]}–${SUPPORTED_FOCUS_VERSIONS[SUPPORTED_FOCUS_VERSIONS.length - 1]}`;

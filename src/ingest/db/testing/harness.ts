@@ -4,7 +4,22 @@
 import crypto from 'crypto';
 import { Client, Pool, type PoolClient } from 'pg';
 import { migrateUp } from '../migrate';
+import { DEFAULT_MIGRATIONS_DIR, loadMigrations } from '../migrationFiles';
 import { requireTestDatabaseUrl } from './requireTestDatabaseUrl';
+
+/**
+ * Fixture migration versions just past the last real one, for tests that inject
+ * extra migrations into a copy of the migrations dir. Real migrations keep
+ * landing (0002 attribution, then the consumption/outcome/economics slices), so
+ * fixtures must never hardcode a version: a file that collides with a real
+ * version breaks the loader, and one that reuses a real version's number
+ * inherits that version's manifest requirements.
+ */
+export function fixtureMigrationVersions(count: number): string[] {
+  const max = loadMigrations(DEFAULT_MIGRATIONS_DIR).reduce((m, f) => (f.version > m ? f.version : m), '0000');
+  const base = Number(max) + 1;
+  return Array.from({ length: count }, (_, i) => String(base + i).padStart(4, '0'));
+}
 
 export interface TestDatabase {
   name: string;

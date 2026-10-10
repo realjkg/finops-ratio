@@ -106,6 +106,15 @@ describe('schema shape', () => {
         'ratio.period_publications(tenant_id,source_id,published_by_run_id) -> ratio.sync_runs(tenant_id,source_id,id)',
         'ratio.source_checkpoints(tenant_id,source_id) -> ratio.sources(tenant_id,id)',
         'ratio.source_checkpoints(tenant_id,source_id,last_run_id) -> ratio.sync_runs(tenant_id,source_id,id)',
+        'ratio.billing_scopes(tenant_id) -> ratio.tenants(id)',
+        'ratio.fx_rates(tenant_id) -> ratio.tenants(id)',
+        // 0004_outcome_ledger: outcome events are batch children (cost-facts
+        // provenance plus the approved registration), and the registry's
+        // supersede link is tenant-scoped self-reference.
+        'ratio.outcome_events(tenant_id,source_id,billing_period,batch_id) -> ratio.ingest_batches(tenant_id,source_id,billing_period,id)',
+        'ratio.outcome_events(tenant_id,batch_id,artifact_sha256) -> ratio.ingest_artifacts(tenant_id,batch_id,sha256)',
+        'ratio.outcome_events(tenant_id,registry_id) -> ratio.outcome_unit_registrations(tenant_id,id)',
+        'ratio.outcome_unit_registrations(tenant_id,supersedes_registration_id) -> ratio.outcome_unit_registrations(tenant_id,id)',
       ].sort(),
     );
   });

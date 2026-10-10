@@ -60,3 +60,11 @@ body {
 
 
 
+
+@layer components {
+  .sim-input { @apply max-w-full rounded border border-edge bg-raised px-3 py-2 text-sm text-txt; }
+  .sim-button { @apply rounded border border-gate/50 px-3 py-2 text-sm text-gate transition-colors hover:bg-gate/10 disabled:cursor-not-allowed disabled:opacity-40; }
+  .sim-table { @apply w-full text-left text-sm; }
+  .sim-table th { @apply whitespace-nowrap border-b border-edge bg-slab px-4 py-3 font-medium text-sub; }
+  .sim-table td { @apply border-b border-edge px-4 py-3; }
+}

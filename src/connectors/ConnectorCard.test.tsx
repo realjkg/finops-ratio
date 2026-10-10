@@ -38,3 +38,137 @@ describe('ConnectorCard — Test connection gating (H3)', () => {
     expect(html).toContain('GET /api/v1/connectors?probe=true');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Walk mode — connect → ingest → data-lands → disconnect
+// ---------------------------------------------------------------------------
+
+import { FocusFileAdapter, ServiceNowAdapter } from '@/costsource';
+import { currentMonthWindow, type ConnectorSession, type IngestRun } from './ingestLanding';
+import { rawRowsForVersion } from '@/costsource/seed';
+
+const noOp = () => {};
+
+function landedRun(sourceId = 'pointfive-sandbox'): IngestRun {
+  return {
+    sourceId,
+    sourceName: 'PointFive (sandbox)',
+    at: '2026-06-01T14:30:00.000Z',
+    result: FocusFileAdapter.ingest(
+      rawRowsForVersion('1.0'),
+      '1.0',
+      sourceId,
+      currentMonthWindow(),
+    ),
+    findings: [],
+  };
+}
+
+describe('ConnectorCard — walk mode', () => {
+  it('renders Connect for a closed session and drops the registry Test button', () => {
+    const html = renderToStaticMarkup(
+      <ConnectorCard source={sourceById('pointfive-sandbox')} onConnect={noOp} />,
+    );
+    expect(html).toContain('>Connect</button>');
+    expect(html).not.toContain('Test connection');
+  });
+
+  it('renders Ingest + Disconnect for an open session', () => {
+    const session: ConnectorSession = { state: 'open', openedAt: '2026-06-01T14:29:00.000Z' };
+    const html = renderToStaticMarkup(
+      <ConnectorCard
+        source={sourceById('pointfive-sandbox')}
+        session={session}
+        onConnect={noOp}
+        onIngest={noOp}
+        onDisconnect={noOp}
+      />,
+    );
+    expect(html).toContain('Ingest now');
+    expect(html).toContain('Disconnect');
+  });
+
+  it('renders Retry connect with the seam error verbatim after a failure', () => {
+    const session: ConnectorSession = {
+      state: 'error',
+      error: 'Adapter is not configured — no credentials in the environment',
+      openedAt: '2026-06-01T14:29:00.000Z',
+    };
+    const html = renderToStaticMarkup(
+      <ConnectorCard source={sourceById('pointfive-sandbox')} session={session} onConnect={noOp} />,
+    );
+    expect(html).toContain('Retry connect');
+    expect(html).toContain('Adapter is not configured — no credentials in the environment');
+  });
+
+  it('renders the landed-data verification with real ingested rows', () => {
+    const session: ConnectorSession = { state: 'open', openedAt: '2026-06-01T14:29:00.000Z' };
+    const html = renderToStaticMarkup(
+      <ConnectorCard
+        source={sourceById('pointfive-sandbox')}
+        session={session}
+        run={landedRun()}
+        onConnect={noOp}
+        onIngest={noOp}
+        onDisconnect={noOp}
+      />,
+    );
+    expect(html).toContain('Data landed');
+    expect(html).toContain('seeded demo');
+    // Re-ingest is offered once data has landed.
+    expect(html).toContain('Re-ingest');
+    expect(html).toContain('Disconnect');
+  });
+
+  it('renders the spend-by-source comparison once two sources have landed', () => {
+    const session: ConnectorSession = { state: 'open', openedAt: '2026-06-01T14:29:00.000Z' };
+    const runs: Record<string, IngestRun> = {
+      'pointfive-sandbox': landedRun('pointfive-sandbox'),
+      'servicenow-sandbox': {
+        sourceId: 'servicenow-sandbox',
+        sourceName: 'ServiceNow (synthetic demo data)',
+        at: '2026-06-01T14:31:00.000Z',
+        result: ServiceNowAdapter.ingest(
+          ServiceNowAdapter.seedRows(),
+          '1.2',
+          'servicenow-sandbox',
+          currentMonthWindow(),
+        ),
+        findings: [],
+      },
+    };
+    const html = renderToStaticMarkup(
+      <ConnectorCard
+        source={sourceById('servicenow-sandbox')}
+        session={session}
+        run={runs['servicenow-sandbox']}
+        allRuns={runs}
+        onConnect={noOp}
+        onIngest={noOp}
+        onDisconnect={noOp}
+      />,
+    );
+    expect(html).toContain('Spend by source');
+    expect(html).toContain('variance &gt; 5% flagged');
+    // The documented ITBM allocation delta shows as a flagged variance.
+    expect(html).toContain('(max−min)/min');
+    expect(html).toContain('⚠');
+  });
+
+  it('omits the spend-by-source readout while only one source has landed', () => {
+    const session: ConnectorSession = { state: 'open', openedAt: '2026-06-01T14:29:00.000Z' };
+    const html = renderToStaticMarkup(
+      <ConnectorCard
+        source={sourceById('pointfive-sandbox')}
+        session={session}
+        run={landedRun()}
+        allRuns={{ 'pointfive-sandbox': landedRun() }}
+        onConnect={noOp}
+        onIngest={noOp}
+        onDisconnect={noOp}
+      />,
+    );
+    expect(html).toContain('Data landed');
+    expect(html).not.toContain('Spend by source');
+  });
+});

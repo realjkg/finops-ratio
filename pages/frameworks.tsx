@@ -111,7 +111,7 @@ export default function Frameworks() {
             <h2 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-sub">
               Workload gate status
             </h2>
-            <div className="overflow-hidden rounded-card border border-edge">
+            <div className="overflow-x-auto rounded-card border border-edge">
               <table className="w-full text-left">
                 <thead>
                   <tr className="border-b border-edge bg-deep">

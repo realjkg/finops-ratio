@@ -47,7 +47,9 @@ describe('report view-model', () => {
   it('pairs every cost with a value-efficiency figure (R4)', () => {
     for (const row of model.rows) {
       expect(row.monthlyCost).toBeGreaterThan(0);
-      expect(row.costEfficiency).toBeGreaterThan(0);
+      // costEfficiency mirrors the defensible value ratio, which may be
+      // non-positive for a workload whose misses outweigh counted value.
+      expect(Number.isFinite(row.costEfficiency)).toBe(true);
       expect(row.savingsOpportunity).toBeGreaterThanOrEqual(0);
     }
   });

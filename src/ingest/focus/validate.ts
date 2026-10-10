@@ -26,9 +26,25 @@ const MAPPED = new Set<string>([
   'UsageUnit',
   'PricingQuantity',
   'PricingUnit',
+  // D1 org-attribution vendor extensions (FOCUS spec allows additional
+  // columns; these are promoted out of extra_columns onto dedicated
+  // cost_facts columns). Spellings mirror src/costsource/focusRows.ts
+  // (RatioAttributionExtensions) - the ingest worker does not import that
+  // module.
+  'x_RatioProjectId',
+  'x_RatioBusinessUnit',
+  'x_RatioCostCenter',
+  'x_RatioOwner',
+  'x_RatioRegion',
+  'x_RatioEnvironment',
+  'x_RatioDirectOrShared',
 ]);
 
 const OPTIONAL_NUMERIC = ['EffectiveCost', 'ListCost', 'ContractedCost', 'ConsumedQuantity', 'UsageQuantity', 'PricingQuantity'] as const;
+
+/** Values constrained by cost_facts CHECK constraints (migration 0002). */
+const ENVIRONMENTS = new Set(['prod', 'staging', 'dev', 'sandbox']);
+const DIRECT_OR_SHARED = new Set(['direct', 'shared']);
 
 export interface FieldError {
   column: string | null;
@@ -60,6 +76,14 @@ export interface FactRow {
   usageUnit: string | null;
   pricingQuantity: string | null;
   pricingUnit: string | null;
+  // D1 org attribution (nullable: absence stays unattributed, never imputed)
+  projectId: string | null;
+  businessUnit: string | null;
+  costCenter: string | null;
+  owner: string | null;
+  region: string | null;
+  environment: string | null;
+  directOrShared: string | null;
   extraColumns: Record<string, string>;
 }
 
@@ -169,6 +193,13 @@ export function validateRow(
   if (ts.ChargePeriodStart && ts.ChargePeriodEnd && ts.ChargePeriodEnd.epochUs < ts.ChargePeriodStart.epochUs) {
     errors.push({ column: 'ChargePeriodEnd', code: 'CHARGE_PERIOD_INVERTED', message: 'ChargePeriodEnd is before ChargePeriodStart' });
   }
+  for (const [col, allowed] of [
+    ['x_RatioEnvironment', ENVIRONMENTS],
+    ['x_RatioDirectOrShared', DIRECT_OR_SHARED],
+  ] as const) {
+    const v = optText(values, index, col);
+    if (v !== null && !allowed.has(v)) errors.push({ column: col, code: 'INVALID_VALUE', message: 'value is not one of the allowed values' });
+  }
   if (errors.length) return { ok: false, errors };
 
   // Null prototype: a column named __proto__ (or constructor/prototype) is an
@@ -199,6 +230,13 @@ export function validateRow(
       usageUnit: optText(values, index, 'ConsumedUnit') ?? optText(values, index, 'UsageUnit'),
       pricingQuantity: numeric.PricingQuantity,
       pricingUnit: optText(values, index, 'PricingUnit'),
+      projectId: optText(values, index, 'x_RatioProjectId'),
+      businessUnit: optText(values, index, 'x_RatioBusinessUnit'),
+      costCenter: optText(values, index, 'x_RatioCostCenter'),
+      owner: optText(values, index, 'x_RatioOwner'),
+      region: optText(values, index, 'x_RatioRegion'),
+      environment: optText(values, index, 'x_RatioEnvironment'),
+      directOrShared: optText(values, index, 'x_RatioDirectOrShared'),
       extraColumns,
     },
   };
