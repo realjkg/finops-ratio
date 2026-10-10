@@ -147,11 +147,11 @@ describe('coverage', () => {
 
 describe('distributeByWeight', () => {
   it('preserves the total including negative totals', () => {
-    expect(distributeByWeight(-5n, [1n, 1n, 1n])).toEqual([-2n, -2n, -1n]);
+    expect(distributeByWeight(-BigInt(5), [BigInt(1), BigInt(1), BigInt(1)])).toEqual([-BigInt(2), -BigInt(2), -BigInt(1)]);
   });
 
   it('returns zeros on zero weights', () => {
-    expect(distributeByWeight(10n, [0n, 0n])).toEqual([0n, 0n]);
+    expect(distributeByWeight(BigInt(10), [BigInt(0), BigInt(0)])).toEqual([BigInt(0), BigInt(0)]);
   });
 });
 

@@ -60,13 +60,12 @@ const scaling = (amount: string): number => {
 
 /** Exact decimal-string sum at the union of the inputs' scales. */
 function sumScaled(values: bigint[], scale: number): string {
-  if (values.length === 0) return (0n).toFixed(scale);
-  const total = values.reduce((acc, v) => acc + v, 0n);
-  const s = total < 0n ? -total : total;
+  const total = values.reduce((acc, v) => acc + v, BigInt(0));
+  const s = total < BigInt(0) ? -total : total;
   const digits = s.toString();
   const whole = digits.slice(0, digits.length - scale) || '0';
   const frac = scale > 0 ? '.' + digits.slice(digits.length - scale).padStart(scale, '0') : '';
-  return (total < 0n ? '-' : '') + whole + frac;
+  return (total < BigInt(0) ? '-' : '') + whole + frac;
 }
 
 function toScaled(amount: string, scale: number): bigint {
@@ -87,20 +86,20 @@ function toScaled(amount: string, scale: number): bigint {
 export function distributeByWeight(total: bigint, weights: bigint[]): bigint[] {
   const n = weights.length;
   if (n === 0) return [];
-  const sign = total < 0n ? -1n : 1n;
-  const magnitude = total < 0n ? -total : total;
-  const weightSum = weights.reduce((a, w) => a + w, 0n);
-  if (weightSum === 0n) return weights.map(() => 0n);
+  const sign = total < BigInt(0) ? -BigInt(1) : BigInt(1);
+  const magnitude = total < BigInt(0) ? -total : total;
+  const weightSum = weights.reduce((a, w) => a + w, BigInt(0));
+  if (weightSum === BigInt(0)) return weights.map(() => BigInt(0));
   const shares = weights.map((w) => (magnitude * w) / weightSum);
-  let remainderUnits = magnitude - shares.reduce((a, s) => a + s, 0n);
-  if (remainderUnits < 0n) remainderUnits = -remainderUnits;
+  let remainderUnits = magnitude - shares.reduce((a, s) => a + s, BigInt(0));
+  if (remainderUnits < BigInt(0)) remainderUnits = -remainderUnits;
   // Largest-remainder: order candidate indices by fractional remainder
   // (descending, stable by index) and hand them one unit each.
   const order = weights
     .map((w, i) => ({ i, rem: magnitude * w - shares[i] * weightSum }))
-    .filter(({ rem }) => rem > 0n)
+    .filter(({ rem }) => rem > BigInt(0))
     .sort((a, b) => (a.rem > b.rem ? -1 : a.rem < b.rem ? 1 : a.i - b.i));
-  for (let k = 0; k < Number(remainderUnits) && k < order.length; k++) shares[order[k].i] += 1n;
+  for (let k = 0; k < Number(remainderUnits) && k < order.length; k++) shares[order[k].i] += BigInt(1);
   return shares.map((s) => sign * s);
 }
 
@@ -118,15 +117,15 @@ function assertSingleCurrency(slice: AllocationSlice): void {
 }
 
 function result(slice: AllocationSlice, allocations: AllocationEntry[], unallocatedScaled: bigint, scale: number): AllocationResult {
-  const totalScaled = slice.rows.reduce((acc, r) => acc + toScaled(r.amount, scale), 0n);
-  const allocatedScaled = allocations.reduce((acc, a) => acc + toScaled(a.amount, scale), 0n);
+  const totalScaled = slice.rows.reduce((acc, r) => acc + toScaled(r.amount, scale), BigInt(0));
+  const allocatedScaled = allocations.reduce((acc, a) => acc + toScaled(a.amount, scale), BigInt(0));
   const attributed = slice.rows
     .filter((r) => r.directOrShared === 'direct' && r.projectId !== null)
-    .reduce((acc, r) => acc + toScaled(r.amount, scale), 0n) + allocatedScaled;
+    .reduce((acc, r) => acc + toScaled(r.amount, scale), BigInt(0)) + allocatedScaled;
   const fmt = (v: bigint): string => sumScaled([v], scale);
-  const totalAbs = totalScaled < 0n ? -totalScaled : totalScaled;
-  const attributedAbs = attributed < 0n ? -attributed : attributed;
-  const pct = totalAbs === 0n ? null : Math.floor(Number(attributedAbs * 1000n / totalAbs)) / 10;
+  const totalAbs = totalScaled < BigInt(0) ? -totalScaled : totalScaled;
+  const attributedAbs = attributed < BigInt(0) ? -attributed : attributed;
+  const pct = totalAbs === BigInt(0) ? null : Math.floor(Number(attributedAbs * BigInt(1000) / totalAbs)) / 10;
   return {
     allocations,
     unallocated: fmt(unallocatedScaled),
@@ -144,7 +143,7 @@ export function allocateSharedCost(slice: AllocationSlice, rule: AllocationRule)
   assertSingleCurrency(slice);
   const scale = slice.rows.reduce((m, r) => Math.max(m, scaling(r.amount)), 0);
   const allocations: AllocationEntry[] = [];
-  let unallocated = 0n;
+  let unallocated = BigInt(0);
 
   for (const row of slice.rows) {
     const amount = toScaled(row.amount, scale);
@@ -175,9 +174,9 @@ export function allocateSharedCost(slice: AllocationSlice, rule: AllocationRule)
         unallocated += amount;
         continue;
       }
-      const shares = distributeByWeight(amount, targets.map(() => 1n));
+      const shares = distributeByWeight(amount, targets.map(() => BigInt(1)));
       targets.forEach((projectId, i) => {
-        if (shares[i] !== 0n) allocations.push({ rowKey: row.rowKey, projectId, amount: sumScaled([shares[i]], scale), rule });
+        if (shares[i] !== BigInt(0)) allocations.push({ rowKey: row.rowKey, projectId, amount: sumScaled([shares[i]], scale), rule });
       });
       continue;
     }
@@ -191,23 +190,23 @@ export function allocateSharedCost(slice: AllocationSlice, rule: AllocationRule)
     const directByProject = new Map<string, bigint>();
     for (const r of slice.rows) {
       if (r.directOrShared === 'direct' && r.projectId !== null) {
-        directByProject.set(r.projectId, (directByProject.get(r.projectId) ?? 0n) + toScaled(r.amount, scale));
+        directByProject.set(r.projectId, (directByProject.get(r.projectId) ?? BigInt(0)) + toScaled(r.amount, scale));
       }
     }
     const projects = [...directByProject.keys()].sort();
-    const totalWeight = projects.reduce((a, p) => a + (directByProject.get(p) ?? 0n), 0n);
-    if (shared.length > 0 && totalWeight !== 0n) {
+    const totalWeight = projects.reduce((a, p) => a + (directByProject.get(p) ?? BigInt(0)), BigInt(0));
+    if (shared.length > 0 && totalWeight !== BigInt(0)) {
       for (const row of shared) {
         const amount = toScaled(row.amount, scale);
-        const shares = distributeByWeight(amount, projects.map((p) => directByProject.get(p) ?? 0n));
+        const shares = distributeByWeight(amount, projects.map((p) => directByProject.get(p) ?? BigInt(0)));
         projects.forEach((projectId, i) => {
-          if (shares[i] !== 0n) allocations.push({ rowKey: row.rowKey, projectId, amount: sumScaled([shares[i]], scale), rule });
+          if (shares[i] !== BigInt(0)) allocations.push({ rowKey: row.rowKey, projectId, amount: sumScaled([shares[i]], scale), rule });
         });
       }
       // The staged shared weight was fully allocated; remove it from unallocated.
-      unallocated -= shared.reduce((a, r) => a + toScaled(r.amount, scale), 0n);
+      unallocated -= shared.reduce((a, r) => a + toScaled(r.amount, scale), BigInt(0));
     }
-    // totalWeight === 0n: the zero-denominator guard — shared cost has no
+    // totalWeight === BigInt(0): the zero-denominator guard — shared cost has no
     // attributed base to allocate against and stays unallocated (reported).
   }
 
