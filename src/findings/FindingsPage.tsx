@@ -11,7 +11,8 @@
 // No badges, confetti, streaks — quiet governance. Calm register throughout.
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
+import { useCallback, useMemo, useState } from 'react';
 import { useStore } from '@/store/useStore';
 import { buildFindings, type FindingView } from './findingsModel';
 import { ValueRatioMeter } from './ValueRatioMeter';
@@ -363,6 +364,18 @@ function RecommendationPane({
   const [refInput, setRefInput] = useState('');
   const [refProvider, setRefProvider] = useState<CMProvider>('jira');
 
+  // Dot click-through from the evidence graph: same workload-detail flow as
+  // the nav — select the workload, then open the /workloads detail surface.
+  const select = useStore((s) => s.select);
+  const router = useRouter();
+  const openWorkload = useCallback(
+    (id: string) => {
+      select(id);
+      router.push('/workloads');
+    },
+    [select, router],
+  );
+
   const hasAuditRecord = !!governance?.auditRecord;
 
   function handleAttachSubmit() {
@@ -414,6 +427,7 @@ function RecommendationPane({
             workloads={allWorkloads}
             selectedWorkloadId={finding.workloadId}
             size="large"
+            onOpenWorkload={openWorkload}
           />
         </div>
       </section>

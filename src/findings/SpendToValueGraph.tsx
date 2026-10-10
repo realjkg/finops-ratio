@@ -5,8 +5,16 @@
 // emphasized against the portfolio cloud. Inline SVG — no charting dependency.
 // Two sizes mirroring the ValueRatioMeter: 'compact' and 'large'.
 
+// Hover-identify: every dot is focusable and hoverable — a calm token-styled
+// tooltip (name, monthly spend, band-colored value ratio) reveals which
+// workload lives where; the hovered dot gets a band-colored ring. Click (or
+// Enter/Space) opens that workload's detail via the onOpenWorkload callback,
+// matching the findings → /workloads flow. No persistent labels — the
+// tooltip is the only reveal.
+
+import { useState } from 'react';
 import { ratioColor } from '@/lib/scales';
-import { formatUSD } from '@/lib/format';
+import { formatUSD, formatRatio } from '@/lib/format';
 import { VALUE_MINIMUM } from './findingsModel';
 import type { Workload } from '@/types';
 
@@ -18,19 +26,36 @@ const C_EDGE = '#1a2235';
 const C_SUB  = '#8895ad';
 const C_DIM  = '#4d5a72';
 
+// Tooltip placement — keep the tooltip inside the figure: flip the anchor
+// horizontally near the plot edges, and drop below the dot when it hugs the top.
+function tooltipPlacement(cx: number, cy: number, vw: number, vh: number) {
+  const xFrac = cx / vw;
+  const yFrac = cy / vh;
+  const translateX = xFrac > 0.78 ? '-100%' : xFrac < 0.22 ? '0%' : '-50%';
+  const translateY = yFrac < 0.2 ? '14px' : 'calc(-100% - 10px)';
+  return { translateX, translateY };
+}
+
 interface SpendToValueGraphProps {
   workloads: Workload[];
   /** Highlighted workload ID — the finding under review. Omit for portfolio view. */
   selectedWorkloadId?: string | null;
   size?: 'compact' | 'large';
+  /** Click / Enter on a dot opens that workload's detail. Pages own the
+   *  navigation (select + router.push('/workloads')) so the shared component
+   *  stays router-free. Omit for static embeds — dots stay hoverable. */
+  onOpenWorkload?: (workloadId: string) => void;
 }
 
 export function SpendToValueGraph({
   workloads,
   selectedWorkloadId = null,
   size = 'large',
+  onOpenWorkload,
 }: SpendToValueGraphProps) {
   const isLarge = size === 'large';
+  // Hover OR keyboard focus — the same reveal either way.
+  const [revealedId, setRevealedId] = useState<string | null>(null);
 
   // ── SVG viewport ─────────────────────────────────────────────────────────
   const VW = 480;
@@ -69,12 +94,13 @@ export function SpendToValueGraph({
       className="w-full"
       aria-label="Spend-to-value portfolio scatter — workloads by monthly spend vs. value ratio"
     >
-      <svg
-        viewBox={`0 0 ${VW} ${VH}`}
-        width="100%"
-        aria-hidden="true"
-        style={{ display: 'block', overflow: 'visible' }}
-      >
+      <div className="relative">
+        <svg
+          viewBox={`0 0 ${VW} ${VH}`}
+          width="100%"
+          role="group"
+          style={{ display: 'block', overflow: 'visible' }}
+        >
         {/* ── Reference lines ─────────────────────────────────────────── */}
 
         {/* 1× break-even — the point where spend = value returned */}
@@ -190,9 +216,10 @@ export function SpendToValueGraph({
           const cy = yFor(w.value.value_ratio);
           const color = ratioColor(w.value.value_ratio);
           const isSelected = w.id === selectedWorkloadId;
+          const isRevealed = w.id === revealedId;
           // Below break-even: where value fails to come back.
           const isBelowBreakEven = w.value.value_ratio < 1.0;
-          const r = isSelected ? 7 : 5;
+          const r = isSelected || isRevealed ? 7 : 5;
 
           // Flip label to left if the point is in the right half of the plot.
           const nearRightEdge = cx > M.left + PW / 2;
@@ -202,8 +229,28 @@ export function SpendToValueGraph({
             ? `${w.name.slice(0, 17)}\u2026`
             : w.name;
 
+          const open = () => onOpenWorkload?.(w.id);
+
           return (
-            <g key={w.id}>
+            <g
+              key={w.id}
+              data-workload-id={w.id}
+              role="button"
+              tabIndex={0}
+              aria-label={`${w.name}: ${formatUSD(w.costs.monthly_spend)} per month, ${formatRatio(w.value.value_ratio)} value ratio`}
+              style={{ cursor: onOpenWorkload ? 'pointer' : 'default' }}
+              onMouseEnter={() => setRevealedId(w.id)}
+              onMouseLeave={() => setRevealedId((id) => (id === w.id ? null : id))}
+              onFocus={() => setRevealedId(w.id)}
+              onBlur={() => setRevealedId((id) => (id === w.id ? null : id))}
+              onClick={open}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  open();
+                }
+              }}
+            >
               {/* Below-break-even: quiet outer ring — visual emphasis without noise */}
               {isBelowBreakEven && (
                 <circle
@@ -227,12 +274,25 @@ export function SpendToValueGraph({
                   className="motion-safe:transition-all motion-safe:duration-300"
                 />
               )}
+              {/* Hovered/focused dot: same band-colored ring — the focus indicator
+                  doubles as the hover highlight, one visual language for both. */}
+              {isRevealed && !isSelected && (
+                <circle
+                  cx={cx} cy={cy}
+                  r={r + 4}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={1.5}
+                  opacity={0.6}
+                  className="motion-safe:transition-all motion-safe:duration-300"
+                />
+              )}
               {/* Main point */}
               <circle
                 cx={cx} cy={cy}
                 r={r}
                 fill={color}
-                opacity={isSelected ? 1.0 : 0.6}
+                opacity={isSelected || isRevealed ? 1.0 : 0.6}
                 className="motion-safe:transition-all motion-safe:duration-300"
               />
               {/* Name label — large variant, selected point only */}
@@ -253,6 +313,53 @@ export function SpendToValueGraph({
           );
         })}
       </svg>
+
+        {/* ── Hover-identify tooltip (positioned div over the SVG) ────── */}
+        {workloads.filter((w) => w.id === revealedId).map((w) => {
+          const cx = xFor(w.costs.monthly_spend);
+          const cy = yFor(w.value.value_ratio);
+          const color = ratioColor(w.value.value_ratio);
+          const placement = tooltipPlacement(cx, cy, VW, VH);
+          return (
+            <div
+              key={w.id}
+              role="tooltip"
+              data-testid="stv-tooltip"
+              className="pointer-events-none absolute z-10 w-max max-w-[220px] rounded-md border bg-raised px-3 py-2 shadow-lg"
+              style={{
+                left: `${(cx / VW) * 100}%`,
+                top: `${(cy / VH) * 100}%`,
+                borderColor: C_EDGE,
+                transform: `translate(${placement.translateX}, ${placement.translateY})`,
+              }}
+            >
+              <p className="font-body text-xs font-semibold text-txt">{w.name}</p>
+              <div className="mt-1.5 space-y-0.5">
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-dim">
+                    monthly spend
+                  </span>
+                  <span className="font-mono text-xs text-txt">
+                    {formatUSD(w.costs.monthly_spend)}
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-dim">
+                    value ratio
+                  </span>
+                  <span
+                    className="font-mono text-xs font-bold"
+                    style={{ color }}
+                    data-testid="stv-tooltip-ratio"
+                  >
+                    {formatRatio(w.value.value_ratio)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </figure>
   );
 }
