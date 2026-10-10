@@ -54,7 +54,7 @@ CREATE TABLE ratio.outcome_unit_registrations (
   tenant_id                   uuid NOT NULL,
   id                          uuid NOT NULL,
   project_id                  text NOT NULL CHECK (
-                                length(project_id) BETWEEN 1 AND 256
+                                length(project_id) >= 1 AND length(project_id) <= 256
                                 AND NOT ratio.text_looks_secret(project_id)
                               ),
   use_case_pattern            text NOT NULL CHECK (use_case_pattern IN (
@@ -63,18 +63,18 @@ CREATE TABLE ratio.outcome_unit_registrations (
                               )),
   outcome_unit_key            text NOT NULL CHECK (outcome_unit_key ~ '^[a-z][a-z0-9_]{0,99}$'),
   outcome_unit_label          text NOT NULL CHECK (
-                                length(outcome_unit_label) BETWEEN 1 AND 120
+                                length(outcome_unit_label) >= 1 AND length(outcome_unit_label) <= 120
                                 AND NOT ratio.text_looks_secret(outcome_unit_label)
                               ),
   -- The performance claim under review (ported from the outcome plan): what
   -- is measured, in which direction it is good, the approved target, and the
   -- baseline vs observation samples with their evidence references.
   metric                      text NOT NULL CHECK (
-                                length(metric) BETWEEN 1 AND 120
+                                length(metric) >= 1 AND length(metric) <= 120
                                 AND NOT ratio.text_looks_secret(metric)
                               ),
   unit                        text NOT NULL CHECK (
-                                length(unit) BETWEEN 1 AND 50
+                                length(unit) >= 1 AND length(unit) <= 50
                                 AND NOT ratio.text_looks_secret(unit)
                               ),
   direction                   text NOT NULL CHECK (direction IN ('higher', 'lower')),
@@ -92,7 +92,7 @@ CREATE TABLE ratio.outcome_unit_registrations (
   -- The quality condition: a completion is successful only when quality_result
   -- meets this threshold in quality_direction (deterministic derivation).
   quality_metric              text NOT NULL CHECK (
-                                length(quality_metric) BETWEEN 1 AND 120
+                                length(quality_metric) >= 1 AND length(quality_metric) <= 120
                                 AND NOT ratio.text_looks_secret(quality_metric)
                               ),
   quality_direction           text NOT NULL CHECK (quality_direction IN ('higher', 'lower')),
@@ -101,14 +101,14 @@ CREATE TABLE ratio.outcome_unit_registrations (
   stop_below                  numeric NOT NULL CHECK (abs(stop_below) < 'Infinity'::numeric),
   continue_at                 numeric NOT NULL CHECK (abs(continue_at) < 'Infinity'::numeric),
   expand_at                   numeric NOT NULL CHECK (abs(expand_at) < 'Infinity'::numeric),
-  status                      text NOT NULL CHECK (status IN ('pending', 'approved', 'revoked')),
+  status                      text NOT NULL CHECK (status IN ('pending', 'approved', 'superseded', 'revoked')),
   requested_by                text NOT NULL CHECK (
-                                length(requested_by) BETWEEN 1 AND 120
+                                length(requested_by) >= 1 AND length(requested_by) <= 120
                                 AND NOT ratio.text_looks_secret(requested_by)
                               ),
   approved_by                 text CHECK (
                                 approved_by IS NULL
-                                OR (length(approved_by) BETWEEN 1 AND 120 AND NOT ratio.text_looks_secret(approved_by))
+                                OR (length(approved_by) >= 1 AND length(approved_by) <= 120 AND NOT ratio.text_looks_secret(approved_by))
                               ),
   approved_at                 timestamptz,
   supersedes_registration_id  uuid,
@@ -163,7 +163,7 @@ CREATE TABLE ratio.outcome_events (
   row_ordinal               bigint NOT NULL CHECK (row_ordinal >= 0),
   billing_period            date NOT NULL CHECK (extract(day FROM billing_period) = 1),
   project_id                text NOT NULL CHECK (
-                              length(project_id) BETWEEN 1 AND 256
+                              length(project_id) >= 1 AND length(project_id) <= 256
                               AND NOT ratio.text_looks_secret(project_id)
                             ),
   -- The approved registration whose quality condition classified this event.
@@ -172,17 +172,17 @@ CREATE TABLE ratio.outcome_events (
   -- consumption ledger by project identity. Deliberately not a cross-migration
   -- foreign key: the consumption tables are migration 0003's.
   trace_id                  text NOT NULL CHECK (
-                              length(trace_id) BETWEEN 1 AND 128
+                              length(trace_id) >= 1 AND length(trace_id) <= 128
                               AND trace_id ~ '^[0-9a-zA-Z._:-]{1,128}$'
                               AND NOT ratio.text_looks_secret(trace_id)
                             ),
   agent_run_id              text NOT NULL CHECK (
-                              length(agent_run_id) BETWEEN 1 AND 128
+                              length(agent_run_id) >= 1 AND length(agent_run_id) <= 128
                               AND NOT ratio.text_looks_secret(agent_run_id)
                             ),
   request_id                text CHECK (
                               request_id IS NULL
-                              OR (length(request_id) BETWEEN 1 AND 128 AND NOT ratio.text_looks_secret(request_id))
+                              OR (length(request_id) >= 1 AND length(request_id) <= 128 AND NOT ratio.text_looks_secret(request_id))
                             ),
   -- Contract v1 outcome fields (enterprise conventions, cited as such):
   outcome_type              text NOT NULL CHECK (outcome_type ~ '^[a-z][a-z0-9_]{0,99}$'),
@@ -238,7 +238,7 @@ CREATE TABLE ratio.outcome_benefit_evidence (
   tenant_id               uuid NOT NULL,
   id                      uuid NOT NULL,
   project_id              text NOT NULL CHECK (
-                            length(project_id) BETWEEN 1 AND 256
+                            length(project_id) >= 1 AND length(project_id) <= 256
                             AND NOT ratio.text_looks_secret(project_id)
                           ),
   billing_period          date NOT NULL CHECK (extract(day FROM billing_period) = 1),
@@ -247,7 +247,7 @@ CREATE TABLE ratio.outcome_benefit_evidence (
                           )),
   category                text NOT NULL CHECK (category IN ('revenue', 'cost_savings', 'quality', 'risk')),
   title                   text NOT NULL CHECK (
-                            length(title) BETWEEN 1 AND 160
+                            length(title) >= 1 AND length(title) <= 160
                             AND NOT ratio.text_looks_secret(title)
                           ),
   -- Cash, for measured_financial rows only.
@@ -257,7 +257,7 @@ CREATE TABLE ratio.outcome_benefit_evidence (
   -- estimated_productivity rows only — never convertible to cash in this scope.
   unit_label              text CHECK (
                             unit_label IS NULL
-                            OR (length(unit_label) BETWEEN 1 AND 50 AND NOT ratio.text_looks_secret(unit_label))
+                            OR (length(unit_label) >= 1 AND length(unit_label) <= 50 AND NOT ratio.text_looks_secret(unit_label))
                           ),
   unit_amount             numeric CHECK (abs(unit_amount) < 'Infinity'::numeric),
   contribution_margin_pct numeric CHECK (contribution_margin_pct BETWEEN 0 AND 100),
@@ -265,12 +265,12 @@ CREATE TABLE ratio.outcome_benefit_evidence (
   method                  text CHECK (length(method) <= 500 AND NOT ratio.text_looks_secret(method)),
   reference               text CHECK (length(reference) <= 500 AND NOT ratio.text_looks_secret(reference)),
   recorded_by             text NOT NULL CHECK (
-                            length(recorded_by) BETWEEN 1 AND 120
+                            length(recorded_by) >= 1 AND length(recorded_by) <= 120
                             AND NOT ratio.text_looks_secret(recorded_by)
                           ),
   verified_by             text CHECK (
                             verified_by IS NULL
-                            OR (length(verified_by) BETWEEN 1 AND 120 AND NOT ratio.text_looks_secret(verified_by))
+                            OR (length(verified_by) >= 1 AND length(verified_by) <= 120 AND NOT ratio.text_looks_secret(verified_by))
                           ),
   verified_at             timestamptz,
   allocation_method       text NOT NULL CHECK (allocation_method IN (
@@ -311,7 +311,7 @@ CREATE TABLE ratio.outcome_supplemental_costs (
   tenant_id         uuid NOT NULL,
   id                uuid NOT NULL,
   project_id        text NOT NULL CHECK (
-                      length(project_id) BETWEEN 1 AND 256
+                      length(project_id) >= 1 AND length(project_id) <= 256
                       AND NOT ratio.text_looks_secret(project_id)
                     ),
   billing_period    date NOT NULL CHECK (extract(day FROM billing_period) = 1),
@@ -321,12 +321,12 @@ CREATE TABLE ratio.outcome_supplemental_costs (
   evidence_status   text NOT NULL CHECK (evidence_status IN ('measured', 'projected', 'assumed')),
   reference         text CHECK (length(reference) <= 500 AND NOT ratio.text_looks_secret(reference)),
   recorded_by       text NOT NULL CHECK (
-                      length(recorded_by) BETWEEN 1 AND 120
+                      length(recorded_by) >= 1 AND length(recorded_by) <= 120
                       AND NOT ratio.text_looks_secret(recorded_by)
                     ),
   verified_by       text CHECK (
                       verified_by IS NULL
-                      OR (length(verified_by) BETWEEN 1 AND 120 AND NOT ratio.text_looks_secret(verified_by))
+                      OR (length(verified_by) >= 1 AND length(verified_by) <= 120 AND NOT ratio.text_looks_secret(verified_by))
                     ),
   verified_at       timestamptz,
   allocation_method text NOT NULL CHECK (allocation_method IN (
@@ -374,23 +374,36 @@ BEGIN
   IF (NEW.tenant_id, NEW.id, NEW.project_id, NEW.use_case_pattern, NEW.outcome_unit_key,
       NEW.outcome_unit_label, NEW.metric, NEW.unit, NEW.direction, NEW.target, NEW.baseline,
       NEW.observation, NEW.quality_metric, NEW.quality_direction, NEW.quality_threshold,
-      NEW.stop_below, NEW.continue_at, NEW.expand_at, NEW.requested_by, NEW.supersedes_registration_id,
+      NEW.stop_below, NEW.continue_at, NEW.expand_at, NEW.requested_by,
       NEW.created_at)
      IS DISTINCT FROM
      (OLD.tenant_id, OLD.id, OLD.project_id, OLD.use_case_pattern, OLD.outcome_unit_key,
       OLD.outcome_unit_label, OLD.metric, OLD.unit, OLD.direction, OLD.target, OLD.baseline,
       OLD.observation, OLD.quality_metric, OLD.quality_direction, OLD.quality_threshold,
-      OLD.stop_below, OLD.continue_at, OLD.expand_at, OLD.requested_by, OLD.supersedes_registration_id,
+      OLD.stop_below, OLD.continue_at, OLD.expand_at, OLD.requested_by,
       OLD.created_at) THEN
     RAISE EXCEPTION USING ERRCODE = 'RT004',
       MESSAGE = 'registration definition columns are immutable; insert a superseding registration instead';
   END IF;
   IF OLD.status = 'pending' AND NEW.status = 'approved' THEN
+    -- Approving a challenger demotes the incumbent: the registry keeps at
+    -- most one approved registration per (tenant, project). The unique
+    -- index checks written rows only, so the demotion must happen here,
+    -- before the index sees the challenger's approved row.
+    UPDATE ratio.outcome_unit_registrations
+       SET status = 'superseded', supersedes_registration_id = NEW.id
+     WHERE tenant_id = NEW.tenant_id
+       AND project_id = NEW.project_id
+       AND status = 'approved'
+       AND id <> NEW.id;
     RETURN NEW; -- the approved_shape and approver_separate CHECKs pin the evidence
   END IF;
   IF (OLD.status = 'pending' AND NEW.status = 'revoked')
      OR (OLD.status = 'approved' AND NEW.status = 'revoked') THEN
     RETURN NEW;
+  END IF;
+  IF OLD.status = 'approved' AND NEW.status = 'superseded' AND pg_trigger_depth() > 1 THEN
+    RETURN NEW; -- the demotion this trigger performs on approving a challenger
   END IF;
   RAISE EXCEPTION USING ERRCODE = 'RT004',
     MESSAGE = format('illegal registration status transition %s -> %s', OLD.status, NEW.status);
@@ -549,10 +562,16 @@ GROUP BY tenant_id, project_id, billing_period, currency;
 
 -- 8. Grants (least privilege). Nothing is granted to PUBLIC; the widening is
 --    recorded in REVIEWED_PRIVILEGES in the same change.
+-- Trigger functions are system-invoked; no role and not even PUBLIC may call them directly
+-- (0001 does the same with REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA ratio FROM PUBLIC).
+REVOKE EXECUTE ON FUNCTION ratio.tg_outcome_claim_review() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION ratio.tg_outcome_registration_lifecycle() FROM PUBLIC;
+
 GRANT SELECT, INSERT, UPDATE ON ratio.outcome_unit_registrations TO ratio_worker;
 GRANT SELECT, INSERT, DELETE ON ratio.outcome_events TO ratio_worker;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ratio.outcome_benefit_evidence, ratio.outcome_supplemental_costs TO ratio_worker;
 GRANT SELECT ON ratio.outcome_events_published, ratio.outcome_period_counts TO ratio_worker;
 
 -- The reader sees the published outcome views and nothing else.
-GRANT SELECT ON ratio.outcome_events_published, ratio.outcome_period_counts TO ratio_reader;
+GRANT SELECT ON ratio.outcome_events_published TO ratio_reader;
+GRANT SELECT ON ratio.outcome_period_counts TO ratio_reader;

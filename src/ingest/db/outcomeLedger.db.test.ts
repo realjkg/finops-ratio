@@ -38,9 +38,11 @@ async function insertPending(
     requestedBy?: string;
     thresholds?: { stopBelow: number; continueAt: number; expandAt: number };
   },
+  /** Statement runner; inject `attempt` to observe a refusal without aborting the surrounding transaction. */
+  runner: (sql: string, params: unknown[]) => Promise<unknown> = (sql, params) => c.query(sql, params),
 ): Promise<void> {
   const t = over.thresholds ?? { stopBelow: 0.5, continueAt: 1, expandAt: 3 };
-  await c.query(
+  await runner(
     `INSERT INTO ratio.outcome_unit_registrations ${REGISTRATION_COLUMNS}
      VALUES ($1, $2, $3, 'support_assistant', 'resolved_ticket', 'Resolved tickets', 'resolution_quality', 'quality_result',
              'higher', 15, $4, $5, 'resolution_quality', 'higher', 0.9, $6, $7, $8, $9, $10)`,
@@ -124,7 +126,16 @@ describe('outcome-unit registry governance', () => {
     await withRole(db.pool, 'ratio_worker', seed.a.tenantId, async (c) => {
       const unordered = await attempt(c, `SELECT 1`, []);
       expect(unordered.ok).toBe(true);
-      await insertPending(c, { tenantId: seed.a.tenantId, id: newId(6), projectId: 'bad-ladder', thresholds: { stopBelow: 1, continueAt: 0.5, expandAt: 3 } });
+      let refusal: { ok: false; code: string; message: string } | null = null;
+      await insertPending(
+        c,
+        { tenantId: seed.a.tenantId, id: newId(6), projectId: 'bad-ladder', thresholds: { stopBelow: 1, continueAt: 0.5, expandAt: 3 } },
+        async (sql, params) => {
+          const r = await attempt(c, sql, params);
+          if (!r.ok) refusal = r;
+        },
+      );
+      expect(refusal).not.toBeNull(); // stop_below < continue_at < expand_at is data, not convention
       const invertedPeriod = await attempt(
         c,
         `INSERT INTO ratio.outcome_unit_registrations ${REGISTRATION_COLUMNS}
@@ -164,50 +175,68 @@ describe('outcome events join batch provenance and project identity', () => {
       [seed.a.tenantId],
     );
     expect(rows.rows).toHaveLength(2);
-    expect(rows.rows[0]).toMatchObject({ outcome_status: 'failed', quality_result: 0.55, project_id: 'fixture-support-copilot' });
-    expect(rows.rows[1]).toMatchObject({ outcome_status: 'successful', quality_result: 0.97, project_id: 'fixture-support-copilot' });
+    expect(rows.rows[0]).toMatchObject({ trace_id: 'tenant-a-trace-1', outcome_status: 'successful', project_id: 'fixture-support-copilot' });
+    expect(Number(rows.rows[0].quality_result)).toBeCloseTo(0.97, 6);
+    expect(rows.rows[1]).toMatchObject({ trace_id: 'tenant-a-trace-2', outcome_status: 'failed', project_id: 'fixture-support-copilot' });
+    expect(Number(rows.rows[1].quality_result)).toBeCloseTo(0.55, 6);
   });
 
   it('refuses duplicate trace identity within a batch (re-ingest never double counts)', async () => {
-    const c = db.pool;
-    const sha = artifactSha('tenant-a', seed.a.batchPublished);
-    const dupe = await attempt(
-      c,
-      `INSERT INTO ratio.outcome_events
+    await withRole(db.pool, 'ratio_worker', seed.a.tenantId, async (c) => {
+      // The seeded traces live on the published batch, whose events are no
+      // longer writable; dedup is exercised on the staged batch, where the
+      // same trace inserted twice must refuse the second row.
+      const sha = artifactSha('tenant-a', seed.a.batchStaged);
+      const insert = (ordinal: number) =>
+        attempt(
+          c,
+          `INSERT INTO ratio.outcome_events
          (tenant_id, source_id, batch_id, artifact_sha256, row_ordinal, billing_period, project_id, registry_id, trace_id, agent_run_id, request_id,
           outcome_type, outcome_status, quality_result, completion_latency, validated_benefit, benefit_validation_status, currency, allocation_method, data_as_of, occurred_at)
-       VALUES ($1, $2, $3, $4, 99, $5, 'fixture-support-copilot', $6, 'tenant-a-trace-1', 'run', 'req',
+       VALUES ($1, $2, $3, $4, $5, $6, 'fixture-support-copilot', $7, 'tenant-a-trace-1', 'run', 'req',
                'resolved_ticket', 'successful', 0.97, 1000, NULL, 'unvalidated', 'USD', 'direct', '2026-08-05T12:00:00Z', '2026-08-05T12:00:00Z')`,
-      [seed.a.tenantId, seed.a.sourceId, seed.a.batchPublished, sha, seed.a.period, seed.a.outcomeRegistryId],
-    );
-    expect(dupe.ok).toBe(false);
-    if (!dupe.ok) expect(dupe.code).toBe('23505');
+          [seed.a.tenantId, seed.a.sourceId, seed.a.batchStaged, sha, ordinal, seed.a.period, seed.a.outcomeRegistryId],
+        );
+      const first = await insert(310);
+      expect(first.ok).toBe(true); // the trace is new to this batch
+      const dupe = await insert(311); // the same trace identity again
+      expect(dupe.ok).toBe(false);
+      if (!dupe.ok) expect(dupe.code).toBe('23505');
+    });
   });
 
   it('enforces contract-v1 evidence shapes: quality on success, benefit buckets, allocation bounds, period month', async () => {
-    const c = db.pool;
-    const sha = artifactSha('tenant-a', seed.a.batchPublished);
-    const insert = (over: { ordinal: number; traceId: string; status: string; quality: number | null; validated: string | null; kind: string; allocation: string; pct: number | null; occurred: string }) =>
+    await withRole(db.pool, 'ratio_worker', seed.a.tenantId, async (c) => {
+    // The batch-child guard only accepts event writes on a staged batch.
+    const sha = artifactSha('tenant-a', seed.a.batchStaged);
+    const insert = (over: { ordinal: number; traceId: string; status: string; quality: number | null; validated: string | null; kind: string; allocation: string; occurred: string }) =>
       attempt(
         c,
         `INSERT INTO ratio.outcome_events
            (tenant_id, source_id, batch_id, artifact_sha256, row_ordinal, billing_period, project_id, registry_id, trace_id, agent_run_id, request_id,
-            outcome_type, outcome_status, quality_result, completion_latency, validated_benefit, benefit_validation_status, currency, allocation_method, allocation_pct, data_as_of, occurred_at)
-         VALUES ($1,$2,$3,$4,$5,$6,'fixture-support-copilot',$7,$8,'run','req','resolved_ticket',$9,$10,1000,$11,$12,'USD',$13,$14,'2026-08-05T12:00:00Z',$15)`,
-        [seed.a.tenantId, seed.a.sourceId, seed.a.batchPublished, sha, over.ordinal, seed.a.period, seed.a.outcomeRegistryId, over.traceId, over.status, over.quality, over.validated, over.kind, over.allocation, over.pct, over.occurred],
+            outcome_type, outcome_status, quality_result, completion_latency, validated_benefit, benefit_validation_status, currency, allocation_method, data_as_of, occurred_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'fixture-support-copilot',$7,$8,'run','req','resolved_ticket',$9,$10,1000,$11,$12,'USD',$13,'2026-08-05T12:00:00Z',$14)`,
+        [seed.a.tenantId, seed.a.sourceId, seed.a.batchStaged, sha, over.ordinal, seed.a.period, seed.a.outcomeRegistryId, over.traceId, over.status, over.quality, over.validated, over.kind, over.allocation, over.occurred],
       );
-    const successWithoutQuality = await insert({ ordinal: 200, traceId: 't-sq', status: 'successful', quality: null, validated: null, kind: 'unvalidated', allocation: 'direct', pct: null, occurred: '2026-08-05T12:00:00Z' });
+    const successWithoutQuality = await insert({ ordinal: 200, traceId: 't-sq', status: 'successful', quality: null, validated: null, kind: 'unvalidated', allocation: 'direct', occurred: '2026-08-05T12:00:00Z' });
     expect(successWithoutQuality.ok).toBe(false);
     if (!successWithoutQuality.ok) expect(successWithoutQuality.code).toBe('23514');
-    const unvalidatedWithBenefit = await insert({ ordinal: 201, traceId: 't-ub', status: 'failed', quality: null, validated: '500.00', kind: 'unvalidated', allocation: 'direct', pct: null, occurred: '2026-08-05T12:00:00Z' });
+    const unvalidatedWithBenefit = await insert({ ordinal: 201, traceId: 't-ub', status: 'failed', quality: null, validated: '500.00', kind: 'unvalidated', allocation: 'direct', occurred: '2026-08-05T12:00:00Z' });
     expect(unvalidatedWithBenefit.ok).toBe(false);
     if (!unvalidatedWithBenefit.ok) expect(unvalidatedWithBenefit.code).toBe('23514');
-    const overAllocated = await insert({ ordinal: 202, traceId: 't-oa', status: 'failed', quality: null, validated: null, kind: 'unvalidated', allocation: 'allocated', pct: 150, occurred: '2026-08-05T12:00:00Z' });
+    const overAllocated = await attempt(
+      c,
+      `INSERT INTO ratio.outcome_benefit_evidence
+         (tenant_id, id, project_id, billing_period, benefit_kind, category, title, amount, currency, unit_label, unit_amount, attribution_pct, method, reference, recorded_by, allocation_method, data_as_of)
+       VALUES ($1, $2, 'fixture-support-copilot', $3, 'measured_financial', 'cost_savings', 'Over-allocated claim', '100.00', 'USD', 'USD', '100.00', 150, 'ledger diff', 'fixture://over-allocated', 'fixture-bot', 'direct', '2026-08-31T00:00:00Z')`,
+      [seed.a.tenantId, newId(60), seed.a.period],
+    );
     expect(overAllocated.ok).toBe(false);
-    if (!overAllocated.ok) expect(overAllocated.code).toBe('23514');
-    const wrongMonth = await insert({ ordinal: 203, traceId: 't-wm', status: 'failed', quality: null, validated: null, kind: 'unvalidated', allocation: 'direct', pct: null, occurred: '2026-09-05T12:00:00Z' });
+    if (!overAllocated.ok) expect(overAllocated.code).toBe('23514'); // attribution_pct is bounded to 0-100
+    const wrongMonth = await insert({ ordinal: 203, traceId: 't-wm', status: 'failed', quality: null, validated: null, kind: 'unvalidated', allocation: 'direct', occurred: '2026-09-05T12:00:00Z' });
     expect(wrongMonth.ok).toBe(false);
     if (!wrongMonth.ok) expect(wrongMonth.code).toBe('23514');
+    });
   });
 
   it('exposes only the currently published batch through the published view, tenant-scoped', async () => {
@@ -238,15 +267,16 @@ describe('outcome events join batch provenance and project identity', () => {
     await withRole(db.pool, 'ratio_worker', seed.a.tenantId, async (c) => {
       const counts = await c.query(`SELECT * FROM ratio.outcome_period_counts WHERE tenant_id = $1`, [seed.a.tenantId]);
       expect(counts.rows).toHaveLength(1);
+      // pg returns bigint aggregates as text and DATE as a Date.
       expect(counts.rows[0]).toMatchObject({
         project_id: 'fixture-support-copilot',
-        billing_period: seed.a.period,
-        outcomes_total: 2,
-        successful_outcomes: 1,
-        failed_outcomes: 1,
-        validated_benefit_events: 0,
+        outcomes_total: '2',
+        successful_outcomes: '1',
+        failed_outcomes: '1',
+        validated_benefit_events: '0',
         validated_benefit_total: null,
       });
+      expect((counts.rows[0].billing_period as Date).toISOString().slice(0, 10)).toBe(seed.a.period);
     });
   });
 });
@@ -260,16 +290,22 @@ describe('quality-gated counts over durable rows (trace → outcome join)', () =
     const approvedRow = await db.pool.query(`SELECT quality_direction, quality_threshold FROM ratio.outcome_unit_registrations WHERE tenant_id = $1 AND project_id = 'fixture-support-copilot' AND status = 'approved'`, [seed.a.tenantId]);
     const condition = approvedRow.rows[0] ?? registration.rows[0];
     expect(condition).toBeTruthy();
-    const events = await db.pool.query(`SELECT trace_id, outcome_status, quality_result, occurred_at FROM ratio.outcome_events WHERE tenant_id = $1`, [seed.a.tenantId]);
+    // Count over the published view: a staged-only event is durably stored
+    // but never published, so it must not be counted. The view re-checks
+    // tenancy through current_tenant_id() even for a bypassing superuser,
+    // so the count runs through a tenanted reader.
+    const events = await withRole(db.pool, 'ratio_reader', seed.a.tenantId, (c) =>
+      c.query(`SELECT trace_id, outcome_status, quality_result, occurred_at FROM ratio.outcome_events_published WHERE tenant_id = $1 ORDER BY trace_id`, [seed.a.tenantId]),
+    );
     const rows = events.rows.map((r) => ({
       traceId: r.trace_id as string,
       outcomeStatus: r.outcome_status as 'successful' | 'failed' | 'partial',
-      qualityResult: r.quality_result as number | null,
+      qualityResult: r.quality_result === null ? null : Number(r.quality_result), // pg numeric arrives as text
       completionLatency: null,
       occurredAt: String(r.occurred_at).slice(0, 10),
     }));
     const successful = successfulOutcomeCount(rows, { qualityDirection: condition.quality_direction, qualityThreshold: Number(condition.quality_threshold) });
-    expect(successful).toBe(1); // trace-1 (0.97 ≥ 0.9, successful); trace-2 is failed despite meeting the bar
+    expect(successful).toBe(1); // trace-1 (0.97 ≥ 0.9, successful); trace-2 is failed with a quality miss (0.55 < 0.9)
   });
 });
 
@@ -316,22 +352,32 @@ describe('unvalidated benefit can never produce a ratio (durable rows → pure r
       approvedAt: '2026-08-01T00:00:00Z',
     };
     const observation = registration.observation;
-    const cost = evaluateCost(
-      {
-        // Synthetic model-usage coverage of the observation window (the cost
-        // ledger's day coverage is D4's engine input; here it isolates the
-        // benefit-side gating).
-        modelUsageDays: Array.from({ length: 31 }, (_, i) => ({ date: `2026-08-${String(i + 1).padStart(2, '0')}`, cents: 1000 })),
-        supplemental,
-      },
-      observation,
-    );
+    // Synthetic model-usage coverage of the observation window (the cost
+    // ledger's day coverage is D4's engine input; here it isolates the
+    // benefit-side gating).
+    const modelUsageDays = Array.from({ length: 31 }, (_, i) => ({ date: `2026-08-${String(i + 1).padStart(2, '0')}`, cents: 1000 }));
+    const cost = evaluateCost({ modelUsageDays, supplemental }, observation);
     const blocked = valueToCostRatio({ registration, benefit, cost });
     expect(blocked.ratio).toBeNull();
     expect(blocked.blockers).toContain('Measured benefit claims await evidence review.');
 
+    // The full-cost rule requires every supplemental category to carry an
+    // amount; the fixture records only labor. Record the remaining three as
+    // assumed zero (an amount is present, so the cost is complete; the
+    // evidence status owes no review), then have the separate reviewer
+    // verify the measured labor row and the financial claim.
+    for (const [i, category] of ['infrastructure', 'implementation', 'oversight'].entries()) {
+      await db.pool.query(
+        `INSERT INTO ratio.outcome_supplemental_costs
+           (tenant_id, id, project_id, billing_period, category, amount, currency, evidence_status, reference, recorded_by, allocation_method, data_as_of)
+         VALUES ($1, $2, 'fixture-support-copilot', $3, $4, '0.00', 'USD', 'assumed', 'fixture://assumed-zero/' || $4, 'fixture-bot', 'direct', '2026-08-31T00:00:00Z')`,
+        [seed.a.tenantId, newId(50 + i), seed.a.period, category],
+      );
+    }
+    await db.pool.query(`UPDATE ratio.outcome_supplemental_costs SET verified_by = 'e2e-reviewer', verified_at = now() WHERE tenant_id = $1 AND id = $2`, [seed.a.tenantId, seed.a.outcomeSupplementalId]);
     // A separate reviewer verifies the measured financial claim: the ratio
-    // then exists and is deterministic (500 USD attributed / (31000 + 250 USD)).
+    // then exists and is deterministic (500 USD attributed over 310 USD of
+    // model usage plus 250 USD of verified labor).
     await db.pool.query(`UPDATE ratio.outcome_benefit_evidence SET verified_by = 'e2e-reviewer', verified_at = now() WHERE tenant_id = $1 AND id = $2`, [seed.a.tenantId, seed.a.outcomeBenefitId]);
     const verifiedClaims = await db.pool.query(`SELECT id, benefit_kind, amount, unit_label, unit_amount, attribution_pct, currency, recorded_by, verified_by, verified_at FROM ratio.outcome_benefit_evidence WHERE tenant_id = $1`, [seed.a.tenantId]);
     const verified = evaluateBenefit(
@@ -348,10 +394,21 @@ describe('unvalidated benefit can never produce a ratio (durable rows → pure r
         verifiedAt: r.verified_at,
       })),
     );
-    const unblocked = valueToCostRatio({ registration, benefit: verified, cost });
+    // The cost evidence changed (categories recorded, labor verified): the
+    // earlier snapshot is stale by design — re-read it before judging the ratio.
+    const supplementalAfter = (await db.pool.query(`SELECT id, category, evidence_status, amount, verified_by, verified_at FROM ratio.outcome_supplemental_costs WHERE tenant_id = $1`, [seed.a.tenantId])).rows.map((r) => ({
+      id: r.id,
+      category: r.category,
+      evidenceStatus: r.evidence_status,
+      amount: r.amount,
+      verifiedBy: r.verified_by,
+      verifiedAt: r.verified_at,
+    }));
+    const costAfter = evaluateCost({ modelUsageDays, supplemental: supplementalAfter }, observation);
+    const unblocked = valueToCostRatio({ registration, benefit: verified, cost: costAfter });
     expect(unblocked.ratio).not.toBeNull();
     expect(unblocked.blockers).toEqual([]);
-    expect(unblocked.ratio).toBeCloseTo(50000 / 33500, 6); // 500.00 → 50000 cents over 33500 cents
+    expect(unblocked.ratio).toBeCloseTo(50000 / 56000, 6); // 50000 attributed cents over 31000 model + 25000 labor cents
   });
 
   it('keeps unverified measured claims out of the numerator even with other verified claims', async () => {

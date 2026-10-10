@@ -37,10 +37,13 @@ async function connect(db: TestDatabase): Promise<Client> {
   return c;
 }
 
-function migrationsWith(extra: Record<string, string>): string {
+function migrationsWith(extra: Record<string, string>, opts: { only?: string[] } = {}): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-foundation-'));
   cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
-  for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
+  for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) {
+    if (opts.only && !opts.only.some((v) => f.startsWith(`${v}_`))) continue;
+    fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
+  }
   for (const [name, body] of Object.entries(extra)) fs.writeFileSync(path.join(dir, name), body);
   return dir;
 }
@@ -70,8 +73,9 @@ const COST_FACTS_FK = `(SELECT conname FROM pg_catalog.pg_constraint WHERE conre
 describe('round 10: the manifest is generated from 0001 and cannot drift silently', () => {
   it('a fresh 0001 apply produces exactly FOUNDATION_0001 (the stored manifest)', async () => {
     const { FOUNDATION_0001, foundationSnapshot } = await foundation();
-    const db = await freshDb(true);
+    const db = await freshDb(false);
     const c = await connect(db);
+    expect(await migrateUp(c, { dir: migrationsWith({}, { only: ['0001'] }) })).toEqual({ applied: ['0001'] });
     expect(await foundationSnapshot(c)).toEqual([...FOUNDATION_0001].sort());
     // It covers every rule class the check relies on.
     for (const prefix of ['schema:', 'table:', 'column:', 'policy:', 'trigger:', 'function:', 'view:', 'constraint:', 'index:']) {
@@ -91,7 +95,7 @@ describe('round 10: the manifest is generated from 0001 and cannot drift silentl
     await assertReviewedPrivileges(c);
     expect((await migrationStatus(c)).privilegeProblems).toEqual([]);
     await migrateDown(c, { steps: 1, env: { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'test' } });
-    await assertReviewedPrivileges(c); // 0001 reverted: absence is fine
+    await assertReviewedPrivileges(c); // the last migration reverted: absence is fine
     expect((await migrationStatus(c)).privilegeProblems).toEqual([]);
   });
 });
@@ -198,7 +202,7 @@ describe('round 10: removing or weakening the reviewed foundation is refused (co
     const st = await migrationStatus(c);
     expect(st.matches).toBe(false);
     expect(st.problems).toContain('PRIVILEGE_MODEL_VIOLATION');
-    expect(st.privilegeProblems.join('\n')).toMatch(/required 0001 object missing or altered: schema:ratio:owner=ratio_owner/);
+    expect(st.privilegeProblems.join('\n')).toMatch(/required \d{4} object missing or altered: schema:ratio:owner=ratio_owner/);
   });
 });
 
@@ -248,7 +252,7 @@ describe('round 11 M1: extra policies on ratio tables are refused (policies are 
     // positive: the reviewed shape on a new table applies
     const db = await freshDb(false);
     const c = await connect(db);
-    expect(await migrateUp(c, { dir: migrationsWith({ '0002_notes.up.sql': newTable }) })).toEqual({ applied: ['0001', '0002'] });
+    expect(await migrateUp(c, { dir: migrationsWith({ '0002_notes.up.sql': newTable }, { only: ['0001'] }) })).toEqual({ applied: ['0001', '0002'] });
     // negative: an extra, non-standard policy on that new table
     await expectPolicyRefusal(
       "DO $$ BEGIN EXECUTE 'CREATE ' || 'POLICY notes_all ON ratio.notes USING (true)'; END $$;\n",
@@ -460,7 +464,9 @@ describe('round 14 M2: a later migration may change a 0001 object when it ships 
   });
 
   it('0001 → 0002 (alters a 0001 column default) with a 0002 manifest: both steps pass, and status is clean', async () => {
-    const dir = migrationsWith({ '0002_enabled_default.up.sql': SET_DEFAULT });
+    // The synthetic lineage is 0001 → 0002 only: later real migrations would fail their own
+    // manifests after 0002 pins the altered default, so this test scopes the directory to 0001.
+    const dir = migrationsWith({ '0002_enabled_default.up.sql': SET_DEFAULT }, { only: ['0001'] });
     await writeManifest(dir, '0002');
     const db = await freshDb(false);
     const c = await connect(db);

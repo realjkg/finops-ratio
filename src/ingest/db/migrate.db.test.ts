@@ -41,6 +41,17 @@ function copyMigrations(extra: Record<string, string> = {}, opts: { withDown?: b
   return dir;
 }
 
+/** Versions of the repo's real migration set, from the default directory. */
+function realVersions(): string[] {
+  return loadMigrations(DEFAULT_MIGRATIONS_DIR).map((f) => f.version);
+}
+
+/** Two version labels sorting after the real migration set, for pending synthetic probes. */
+function nextProbeVersions(): [string, string] {
+  const last = Number(realVersions().at(-1));
+  return [String(last + 1).padStart(4, '0'), String(last + 2).padStart(4, '0')];
+}
+
 function emptyDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-mig-empty-'));
   cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
@@ -87,6 +98,10 @@ const EXPECTED_TABLES = [
   'ingest_artifacts',
   'ingest_batches',
   'ingest_validation_errors',
+  'outcome_benefit_evidence',
+  'outcome_events',
+  'outcome_supplemental_costs',
+  'outcome_unit_registrations',
   'period_publications',
   'source_checkpoints',
   'sources',
@@ -177,11 +192,11 @@ describe('migration runner (real Postgres)', () => {
     const db = await freshDb();
     const c = await connect(db);
     const dir = copyMigrations({ '0003_third.up.sql': '-- ratio:phase expand\nCREATE TABLE public.third(x int);\n' });
-    expect((await migrateUp(c, { dir })).applied).toEqual(['0001', '0003']);
+    expect((await migrateUp(c, { dir })).applied).toEqual(['0001', '0003', ...realVersions().slice(1)]);
     fs.writeFileSync(path.join(dir, '0002_late.up.sql'), '-- ratio:phase expand\nCREATE TABLE public.late(x int);\n');
     await expect(migrateUp(c, { dir })).rejects.toMatchObject({ code: 'OUT_OF_ORDER' });
     expect(await relExists(c, 'public.late')).toBe(false);
-    expect((await ledger(c)).map((r) => r.version)).toEqual(['0001', '0003']);
+    expect((await ledger(c)).map((r) => r.version)).toEqual(['0001', '0003', ...realVersions().slice(1)]);
   });
 
   it('a failing migration is rolled back completely and stops the run', async () => {
@@ -216,16 +231,18 @@ describe('migration runner (real Postgres)', () => {
     const c = await connect(db);
     const dir = copyMigrations();
     await migrateUp(c, { dir });
-    fs.writeFileSync(path.join(dir, '0002_expand.up.sql'), '-- ratio:phase expand\nCREATE TABLE public.legacy(x int);\n');
-    fs.writeFileSync(path.join(dir, '0003_contract.up.sql'), '-- ratio:phase contract\nDROP TABLE public.legacy;\n');
+    // Probe versions must sort after the real migration set so they are pending, not out of order.
+    const [n1, n2] = nextProbeVersions();
+    fs.writeFileSync(path.join(dir, `${n1}_expand.up.sql`), '-- ratio:phase expand\nCREATE TABLE public.legacy(x int);\n');
+    fs.writeFileSync(path.join(dir, `${n2}_contract.up.sql`), '-- ratio:phase contract\nDROP TABLE public.legacy;\n');
 
     // Refused as a whole: the expand migration queued before it is not applied either.
     await expect(migrateUp(c, { dir })).rejects.toMatchObject({ code: 'CONTRACT_NOT_ALLOWED' });
-    expect((await ledger(c)).map((r) => r.version)).toEqual(['0001']);
+    expect((await ledger(c)).map((r) => r.version)).toEqual(realVersions());
     expect(await relExists(c, 'public.legacy')).toBe(false);
 
     const res = await migrateUp(c, { dir, allowContract: true });
-    expect(res.applied).toEqual(['0002', '0003']);
+    expect(res.applied).toEqual([n1, n2]);
     expect(await relExists(c, 'public.legacy')).toBe(false);
   });
 
@@ -261,9 +278,9 @@ describe('migration runner (real Postgres)', () => {
     const [resA, resB] = await Promise.all([runA, runB]);
 
     expect(sawBWaiting).toBe(true);
-    expect(resA.applied).toEqual(['0001']);
+    expect(resA.applied).toEqual(realVersions());
     expect(resB.applied).toEqual([]);
-    expect((await ledger(observer)).map((r) => r.version)).toEqual(['0001']);
+    expect((await ledger(observer)).map((r) => r.version)).toEqual(realVersions());
   });
 
   it('down 1 returns the database to its pre-migration catalog state, and up re-applies (up/down/up)', async () => {
@@ -274,14 +291,19 @@ describe('migration runner (real Postgres)', () => {
     const empty = await catalogSnapshot(c);
     expect(empty.namespaces).not.toContain('ratio');
 
+    // Capture the catalog after only the first migration has applied.
+    const firstOnly = copyMigrations();
+    for (const f of fs.readdirSync(firstOnly)) if (!f.startsWith('0001_')) fs.rmSync(path.join(firstOnly, f));
+    expect((await migrateUp(c, { dir: firstOnly })).applied).toEqual(['0001']);
+    const afterFirst = await catalogSnapshot(c);
+    expect(afterFirst.namespaces).toContain('ratio');
+
     await migrateUp(c);
-    expect((await catalogSnapshot(c)).namespaces).toContain('ratio');
-
     const down = await migrateDown(c, { steps: 1, env: ALLOW_DOWN });
-    expect(down.reverted).toEqual(['0001']);
-    expect(await catalogSnapshot(c)).toEqual(empty);
+    expect(down.reverted).toEqual([realVersions().at(-1)]);
+    expect(await catalogSnapshot(c)).toEqual(afterFirst);
 
-    expect((await migrateUp(c)).applied).toEqual(['0001']);
+    expect((await migrateUp(c)).applied).toEqual([realVersions().at(-1)]);
     expect(await relExists(c, 'ratio.cost_facts')).toBe(true);
   });
 
@@ -299,7 +321,7 @@ describe('migration runner (real Postgres)', () => {
       await expect(migrateDown(c, { steps: 1, env })).rejects.toMatchObject({ code: 'DOWN_NOT_ALLOWED' });
     }
     expect(await relExists(c, 'ratio.cost_facts')).toBe(true);
-    expect((await ledger(c)).map((r) => r.version)).toEqual(['0001']);
+    expect((await ledger(c)).map((r) => r.version)).toEqual(realVersions());
   });
 
   it('down is refused when a migration has no down file', async () => {
@@ -315,7 +337,7 @@ describe('migration runner (real Postgres)', () => {
     const db = await freshDb();
     const c = await connect(db);
     await migrateUp(c);
-    await expect(migrateDown(c, { steps: 2, env: ALLOW_DOWN })).rejects.toMatchObject({ code: 'INVALID_STEPS' });
+    await expect(migrateDown(c, { steps: realVersions().length + 1, env: ALLOW_DOWN })).rejects.toMatchObject({ code: 'INVALID_STEPS' });
     expect(await relExists(c, 'ratio.cost_facts')).toBe(true);
   });
 });
