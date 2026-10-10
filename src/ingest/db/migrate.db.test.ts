@@ -5,11 +5,16 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { Client } from 'pg';
-import { createTestDatabase, type TestDatabase } from './testing/harness';
+import { createTestDatabase, fixtureMigrationVersions, type TestDatabase } from './testing/harness';
 import { DEFAULT_MIGRATIONS_DIR, loadMigrations } from './migrationFiles';
 import { migrateDown, migrateUp } from './migrate';
 
 const ALLOW_DOWN = { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'test' };
+
+// Fixture versions just past the last real migration (injected fixture files must
+// never shadow a real version) and the full live sequence (from-empty assertions).
+const [V1, V2] = fixtureMigrationVersions(2);
+const REAL_VERSIONS = loadMigrations(DEFAULT_MIGRATIONS_DIR).map((f) => f.version);
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -35,6 +40,20 @@ function copyMigrations(extra: Record<string, string> = {}, opts: { withDown?: b
   cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
   for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) {
     if (opts.withDown === false && f.endsWith('.down.sql')) continue;
+    fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
+  }
+  for (const [name, body] of Object.entries(extra)) fs.writeFileSync(path.join(dir, name), body);
+  return dir;
+}
+
+/** 0001-foundation-only copy, for from-empty tests that inject fixture migrations: the
+ *  injected versions are then the only pending ones past 0001 (a full copy would add
+ *  the real later migrations — and their manifest requirements — to the sequence). */
+function foundationCopyMigrations(extra: Record<string, string> = {}): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-mig-foundation-'));
+  cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) {
+    if (!f.startsWith('0001_')) continue;
     fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
   }
   for (const [name, body] of Object.entries(extra)) fs.writeFileSync(path.join(dir, name), body);
@@ -83,7 +102,9 @@ async function catalogSnapshot(c: Client) {
 }
 
 const EXPECTED_TABLES = [
+  'billing_scopes',
   'cost_facts',
+  'fx_rates',
   'ingest_artifacts',
   'ingest_batches',
   'ingest_validation_errors',
@@ -138,7 +159,7 @@ describe('migration runner (real Postgres)', () => {
     const upFile = path.join(dir, fs.readdirSync(dir).find((f) => f.startsWith('0001_') && f.endsWith('.up.sql'))!);
     fs.appendFileSync(upFile, '\n-- tampered after apply\n');
     // A new pending migration must NOT be applied either.
-    fs.writeFileSync(path.join(dir, '0002_probe.up.sql'), '-- ratio:phase expand\nCREATE TABLE public.tamper_probe(x int);\n');
+    fs.writeFileSync(path.join(dir, `${V1}_probe.up.sql`), '-- ratio:phase expand\nCREATE TABLE public.tamper_probe(x int);\n');
 
     await expect(migrateUp(c, { dir })).rejects.toMatchObject({ code: 'CHECKSUM_MISMATCH' });
     expect(await ledger(c)).toEqual(before);
@@ -155,7 +176,7 @@ describe('migration runner (real Postgres)', () => {
       const downFile = path.join(dir, fs.readdirSync(dir).find((f) => f.startsWith('0001_') && f.endsWith('.down.sql'))!);
       if (mutate === 'edit') fs.appendFileSync(downFile, '\n-- tampered down after apply\n');
       else fs.rmSync(downFile);
-      fs.writeFileSync(path.join(dir, '0002_probe.up.sql'), '-- ratio:phase expand\nCREATE TABLE public.down_tamper_probe(x int);\n');
+      fs.writeFileSync(path.join(dir, `${V1}_probe.up.sql`), '-- ratio:phase expand\nCREATE TABLE public.down_tamper_probe(x int);\n');
       await expect(migrateUp(c, { dir }), mutate).rejects.toMatchObject({ code: 'CHECKSUM_MISMATCH' });
       expect(await ledger(c)).toEqual(before);
       expect(await relExists(c, 'public.down_tamper_probe')).toBe(false);
@@ -168,7 +189,7 @@ describe('migration runner (real Postgres)', () => {
     const dir = copyMigrations();
     await migrateUp(c, { dir });
     for (const f of fs.readdirSync(dir)) if (f.startsWith('0001_')) fs.rmSync(path.join(dir, f));
-    fs.writeFileSync(path.join(dir, '0002_probe.up.sql'), '-- ratio:phase expand\nCREATE TABLE public.missing_probe(x int);\n');
+    fs.writeFileSync(path.join(dir, `${V1}_probe.up.sql`), '-- ratio:phase expand\nCREATE TABLE public.missing_probe(x int);\n');
     await expect(migrateUp(c, { dir })).rejects.toMatchObject({ code: 'MISSING_FILE' });
     expect(await relExists(c, 'public.missing_probe')).toBe(false);
   });
@@ -176,21 +197,21 @@ describe('migration runner (real Postgres)', () => {
   it('refuses an out-of-order pending migration', async () => {
     const db = await freshDb();
     const c = await connect(db);
-    const dir = copyMigrations({ '0003_third.up.sql': '-- ratio:phase expand\nCREATE TABLE public.third(x int);\n' });
-    expect((await migrateUp(c, { dir })).applied).toEqual(['0001', '0003']);
-    fs.writeFileSync(path.join(dir, '0002_late.up.sql'), '-- ratio:phase expand\nCREATE TABLE public.late(x int);\n');
+    const dir = foundationCopyMigrations({ [`${V2}_third.up.sql`]: '-- ratio:phase expand\nCREATE TABLE public.third(x int);\n' });
+    expect((await migrateUp(c, { dir })).applied).toEqual(['0001', V2]);
+    fs.writeFileSync(path.join(dir, `${V1}_late.up.sql`), '-- ratio:phase expand\nCREATE TABLE public.late(x int);\n');
     await expect(migrateUp(c, { dir })).rejects.toMatchObject({ code: 'OUT_OF_ORDER' });
     expect(await relExists(c, 'public.late')).toBe(false);
-    expect((await ledger(c)).map((r) => r.version)).toEqual(['0001', '0003']);
+    expect((await ledger(c)).map((r) => r.version)).toEqual(['0001', V2]);
   });
 
   it('a failing migration is rolled back completely and stops the run', async () => {
     const db = await freshDb();
     const c = await connect(db);
-    const dir = copyMigrations({
+    const dir = foundationCopyMigrations({
       // contract: INSERT/SELECT are outside the expand allow-list.
-      '0002_broken.up.sql': '-- ratio:phase contract\nCREATE TABLE public.half_done(x int);\nINSERT INTO public.half_done VALUES (1);\nSELECT 1/0;\n',
-      '0003_after.up.sql': '-- ratio:phase expand\nCREATE TABLE public.after_broken(x int);\n',
+      [`${V1}_broken.up.sql`]: '-- ratio:phase contract\nCREATE TABLE public.half_done(x int);\nINSERT INTO public.half_done VALUES (1);\nSELECT 1/0;\n',
+      [`${V2}_after.up.sql`]: '-- ratio:phase expand\nCREATE TABLE public.after_broken(x int);\n',
     });
     await expect(migrateUp(c, { dir, allowContract: true })).rejects.toThrow(/division by zero/);
     expect((await ledger(c)).map((r) => r.version)).toEqual(['0001']);
@@ -205,7 +226,7 @@ describe('migration runner (real Postgres)', () => {
   it('an unmarked migration is refused and nothing is applied', async () => {
     const db = await freshDb();
     const c = await connect(db);
-    const dir = copyMigrations({ '0002_unmarked.up.sql': 'CREATE TABLE public.unmarked(x int);\n' });
+    const dir = foundationCopyMigrations({ [`${V1}_unmarked.up.sql`]: 'CREATE TABLE public.unmarked(x int);\n' });
     await expect(migrateUp(c, { dir })).rejects.toMatchObject({ code: 'MISSING_PHASE' });
     expect(await relExists(c, 'ratio.tenants')).toBe(false);
     expect(await relExists(c, 'public.unmarked')).toBe(false);
@@ -216,16 +237,16 @@ describe('migration runner (real Postgres)', () => {
     const c = await connect(db);
     const dir = copyMigrations();
     await migrateUp(c, { dir });
-    fs.writeFileSync(path.join(dir, '0002_expand.up.sql'), '-- ratio:phase expand\nCREATE TABLE public.legacy(x int);\n');
-    fs.writeFileSync(path.join(dir, '0003_contract.up.sql'), '-- ratio:phase contract\nDROP TABLE public.legacy;\n');
+    fs.writeFileSync(path.join(dir, `${V1}_expand.up.sql`), '-- ratio:phase expand\nCREATE TABLE public.legacy(x int);\n');
+    fs.writeFileSync(path.join(dir, `${V2}_contract.up.sql`), '-- ratio:phase contract\nDROP TABLE public.legacy;\n');
 
     // Refused as a whole: the expand migration queued before it is not applied either.
     await expect(migrateUp(c, { dir })).rejects.toMatchObject({ code: 'CONTRACT_NOT_ALLOWED' });
-    expect((await ledger(c)).map((r) => r.version)).toEqual(['0001']);
+    expect((await ledger(c)).map((r) => r.version)).toEqual(REAL_VERSIONS);
     expect(await relExists(c, 'public.legacy')).toBe(false);
 
     const res = await migrateUp(c, { dir, allowContract: true });
-    expect(res.applied).toEqual(['0002', '0003']);
+    expect(res.applied).toEqual([V1, V2]);
     expect(await relExists(c, 'public.legacy')).toBe(false);
   });
 
@@ -261,12 +282,12 @@ describe('migration runner (real Postgres)', () => {
     const [resA, resB] = await Promise.all([runA, runB]);
 
     expect(sawBWaiting).toBe(true);
-    expect(resA.applied).toEqual(['0001']);
+    expect(resA.applied).toEqual(REAL_VERSIONS);
     expect(resB.applied).toEqual([]);
-    expect((await ledger(observer)).map((r) => r.version)).toEqual(['0001']);
+    expect((await ledger(observer)).map((r) => r.version)).toEqual(REAL_VERSIONS);
   });
 
-  it('down 1 returns the database to its pre-migration catalog state, and up re-applies (up/down/up)', async () => {
+  it('down returns the database to its pre-migration catalog state, and up re-applies (up/down/up)', async () => {
     const db = await freshDb();
     const c = await connect(db);
     // Bootstrap only the ledger (no migrations) to capture the "empty" state.
@@ -277,11 +298,11 @@ describe('migration runner (real Postgres)', () => {
     await migrateUp(c);
     expect((await catalogSnapshot(c)).namespaces).toContain('ratio');
 
-    const down = await migrateDown(c, { steps: 1, env: ALLOW_DOWN });
-    expect(down.reverted).toEqual(['0001']);
+    const down = await migrateDown(c, { steps: REAL_VERSIONS.length, env: ALLOW_DOWN });
+    expect(down.reverted).toEqual([...REAL_VERSIONS].reverse());
     expect(await catalogSnapshot(c)).toEqual(empty);
 
-    expect((await migrateUp(c)).applied).toEqual(['0001']);
+    expect((await migrateUp(c)).applied).toEqual(REAL_VERSIONS);
     expect(await relExists(c, 'ratio.cost_facts')).toBe(true);
   });
 
@@ -299,7 +320,7 @@ describe('migration runner (real Postgres)', () => {
       await expect(migrateDown(c, { steps: 1, env })).rejects.toMatchObject({ code: 'DOWN_NOT_ALLOWED' });
     }
     expect(await relExists(c, 'ratio.cost_facts')).toBe(true);
-    expect((await ledger(c)).map((r) => r.version)).toEqual(['0001']);
+    expect((await ledger(c)).map((r) => r.version)).toEqual(REAL_VERSIONS);
   });
 
   it('down is refused when a migration has no down file', async () => {
@@ -315,7 +336,7 @@ describe('migration runner (real Postgres)', () => {
     const db = await freshDb();
     const c = await connect(db);
     await migrateUp(c);
-    await expect(migrateDown(c, { steps: 2, env: ALLOW_DOWN })).rejects.toMatchObject({ code: 'INVALID_STEPS' });
+    await expect(migrateDown(c, { steps: REAL_VERSIONS.length + 1, env: ALLOW_DOWN })).rejects.toMatchObject({ code: 'INVALID_STEPS' });
     expect(await relExists(c, 'ratio.cost_facts')).toBe(true);
   });
 });

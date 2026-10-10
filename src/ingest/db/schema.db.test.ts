@@ -106,6 +106,8 @@ describe('schema shape', () => {
         'ratio.period_publications(tenant_id,source_id,published_by_run_id) -> ratio.sync_runs(tenant_id,source_id,id)',
         'ratio.source_checkpoints(tenant_id,source_id) -> ratio.sources(tenant_id,id)',
         'ratio.source_checkpoints(tenant_id,source_id,last_run_id) -> ratio.sync_runs(tenant_id,source_id,id)',
+        'ratio.billing_scopes(tenant_id) -> ratio.tenants(id)',
+        'ratio.fx_rates(tenant_id) -> ratio.tenants(id)',
       ].sort(),
     );
   });

@@ -68,6 +68,9 @@ export const TENANT_TABLES: Array<{ table: string; tenantCol: string }> = [
   { table: 'cost_facts', tenantCol: 'tenant_id' },
   { table: 'period_publications', tenantCol: 'tenant_id' },
   { table: 'source_checkpoints', tenantCol: 'tenant_id' },
+  // 0002 org-attribution registries
+  { table: 'billing_scopes', tenantCol: 'tenant_id' },
+  { table: 'fx_rates', tenantCol: 'tenant_id' },
 ];
 
 async function seedOne(pool: Pool, t: ReturnType<typeof ids>): Promise<TenantFixture> {
@@ -84,6 +87,18 @@ async function seedOne(pool: Pool, t: ReturnType<typeof ids>): Promise<TenantFix
       `INSERT INTO ratio.sources (tenant_id, id, source_key, kind, display_name, coverage, declared_focus_version, enabled, config)
        VALUES ($1, $2, 'focus-main', 'focus_file', 'Synthetic FOCUS export', 'public_cloud', '1.0', true, '{"root":"synthetic"}')`,
       [t.tenantId, t.sourceId],
+    );
+    // Org-attribution registries: one billing authority + one approved FX rate
+    // per tenant, so every TENANT_TABLES entry has seeded rows for both tenants.
+    await q(
+      `INSERT INTO ratio.billing_scopes (tenant_id, id, display_name, provider_name, billing_account_id, workload_account_ids)
+       VALUES ($1, gen_random_uuid(), 'Synthetic billing authority', 'SyntheticCloud', 'synthetic-billing-1', ARRAY['synthetic-workload-1']::text[])`,
+      [t.tenantId],
+    );
+    await q(
+      `INSERT INTO ratio.fx_rates (tenant_id, id, currency, target_currency, effective_from, rate, source, approved_by)
+       VALUES ($1, gen_random_uuid(), 'EUR', 'USD', DATE '2026-08-01', 1.1, 'seed-fixture', 'seed-fixture')`,
+      [t.tenantId],
     );
     for (const run of [t.runOld, t.runNew]) {
       await q(
