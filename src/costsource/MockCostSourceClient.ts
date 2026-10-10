@@ -59,7 +59,7 @@ export class MockCostSourceClient implements CostSourceClient {
     if (!src.capabilities.includes('costRows')) {
       throw new Error(`Source '${sourceId}' does not provide cost rows`);
     }
-    const { rows, backfilledColumns } = normalizeRows(
+    const { rows, backfilledColumns, draftColumnsBackfilled } = normalizeRows(
       rawRowsForVersion(src.focusVersion),
       src.id,
       src.focusVersion,
@@ -69,6 +69,7 @@ export class MockCostSourceClient implements CostSourceClient {
       sourceVersion: src.focusVersion,
       canonicalVersion: CANONICAL_FOCUS_VERSION,
       backfilledColumns,
+      draftColumnsBackfilled,
       window,
       generatedAt: new Date().toISOString(),
       rows,

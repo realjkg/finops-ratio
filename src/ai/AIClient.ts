@@ -12,6 +12,7 @@
 // live exclusively inside pages/api/v1/ai/chat.ts.
 
 import type { AIProvider } from './providers';
+import type { EvidenceStatus } from '@/types';
 
 /** OpenAI-style role taxonomy for conversation turns. */
 export type AIRole = 'user' | 'assistant' | 'system';
@@ -53,6 +54,8 @@ export interface AIInitiativeSnapshot {
   budgetConsumedPct: number; // 0–100
   status: 'On Track' | 'At Risk' | 'Pending Approval';
   valueRatio: number; // R4: cost-efficiency denominator
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
+  valueEvidenceStatus?: EvidenceStatus;
   savingsOpportunity: number; // USD/mo from configured findings sources
 }
 
@@ -71,6 +74,8 @@ export interface AIWorkloadSnapshot {
   model: string;
   monthlySpend: number;
   valueRatio: number;
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
+  valueEvidenceStatus?: EvidenceStatus;
   demandShape: string;
   governanceGatesPassed: number; // 0–4
   costTrendPct: number;

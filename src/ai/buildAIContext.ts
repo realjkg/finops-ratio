@@ -11,6 +11,7 @@ import {
   INITIATIVE_STATUS_META,
 } from '@/executive/initiativeModel';
 import type { ProjectionContext } from '@/mission/missionModel';
+import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import type { Workload } from '@/types';
 import type {
   AIContext,
@@ -65,6 +66,7 @@ export function buildAIContext(
     budgetConsumedPct: i.budgetConsumedPct,
     status: INITIATIVE_STATUS_META[i.status].label as AIInitiativeSnapshot['status'],
     valueRatio: i.valueRatio,
+    valueEvidenceStatus: i.valueEvidenceStatus,
     savingsOpportunity: Math.round(savings.get(i.id) ?? 0),
   }));
 
@@ -74,6 +76,7 @@ export function buildAIContext(
     model: w.model,
     monthlySpend: w.costs.monthly_spend,
     valueRatio: w.value.value_ratio,
+    valueEvidenceStatus: headlineEvidenceStatus(w.value),
     demandShape: w.demand_shape,
     governanceGatesPassed: gatesPassed(w),
     costTrendPct: w.cost_trend_pct,

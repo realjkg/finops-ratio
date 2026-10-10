@@ -5,6 +5,7 @@ import {
   type OutcomeRecord,
   type ValueMeasure,
   type OutcomeAction,
+  type AdditionalCostCategory,
 } from "./types";
 
 export function seedOutcome(w: Workload): OutcomeRecord {
@@ -63,6 +64,109 @@ export function monetaryBenefit(m: ValueMeasure): number {
     ((m.amountCents * m.attributionPct) / 100) *
       (m.category === "revenue" ? m.contributionMarginPct / 100 : 1),
   );
+}
+
+// Canonical labels for the four full-cost categories (shared by the simulated
+// OutcomesPanel and the read-only TCA breakdown — one vocabulary).
+export const COST_LABELS: Record<AdditionalCostCategory, string> = {
+  infrastructure: "Infrastructure",
+  implementation: "Implementation allocation",
+  oversight: "Oversight",
+  labor: "Ongoing labor",
+};
+
+// --- Read-only Total Cost of AI estimate (audit C9) -----------------------
+//
+// The headline denominator (monthly_spend) covers inference plus the small
+// compute line; implementation, oversight, and labor are NOT in it. Outside a
+// customer workspace there is no outcome record or ledger, so the three
+// missing categories are estimated from default allocation rates and marked
+// `assumed` — real figures come from a workspace's outcome record
+// (OutcomesPanel). The estimate exists so the headline ratio is always paired
+// with what its denominator leaves out; it is never the measured number.
+
+/** Default allocation rates applied to monthly model spend (assumed estimates). */
+export const TCA_ESTIMATE_RATES: Record<
+  "implementation" | "oversight" | "labor",
+  number
+> = {
+  implementation: 0.2,
+  oversight: 0.1,
+  labor: 0.15,
+};
+
+export interface TcaLine {
+  category: "model_usage" | AdditionalCostCategory;
+  label: string;
+  cents: number;
+  status: "assumed" | "projected";
+  /** What the figure is computed from — shown as the row basis. */
+  basis: string;
+  /** True when this row is already inside the headline spend denominator. */
+  inHeadlineSpend: boolean;
+}
+
+export interface TcaEstimate {
+  lines: TcaLine[];
+  /** Full cost of AI: headline spend + the three estimated categories. */
+  fullCostCents: number;
+  /** Headline spend alone (model usage + infrastructure). */
+  headlineSpendCents: number;
+  /** Defensible numerator ÷ full cost — null when full cost is not positive. */
+  fullCostRatio: number | null;
+}
+
+export function estimateTca(workload: Workload): TcaEstimate {
+  const spendCents = Math.round(workload.costs.monthly_spend * 100);
+  // The workload's compute line is daily; the seed keeps it inside
+  // monthly_spend, so infrastructure is shown as its own already-counted row.
+  const infraCents = Math.min(
+    Math.round(workload.costs.compute * 30 * 100),
+    spendCents,
+  );
+  const inferenceCents = spendCents - infraCents;
+
+  const estimated = (category: "implementation" | "oversight" | "labor") =>
+    Math.round(spendCents * TCA_ESTIMATE_RATES[category]);
+
+  const lines: TcaLine[] = [
+    {
+      category: "model_usage",
+      label: "Model usage (inference)",
+      cents: inferenceCents,
+      status: "projected",
+      basis: "Monthly spend minus the compute line — run-rate estimate until a ledger records it",
+      inHeadlineSpend: true,
+    },
+    {
+      category: "infrastructure",
+      label: COST_LABELS.infrastructure,
+      cents: infraCents,
+      status: "projected",
+      basis: "Daily compute line × 30 — already inside the headline spend",
+      inHeadlineSpend: true,
+    },
+    ...(COST_CATEGORIES.filter((c) => c !== "infrastructure") as Array<
+      "implementation" | "oversight" | "labor"
+    >).map((category) => ({
+      category,
+      label: COST_LABELS[category],
+      cents: estimated(category),
+      status: "assumed" as const,
+      basis: `${Math.round(TCA_ESTIMATE_RATES[category] * 100)}% of monthly model spend — default estimate, record actuals in your customer workspace`,
+      inHeadlineSpend: false,
+    })),
+  ];
+
+  const fullCostCents =
+    spendCents +
+    lines
+      .filter((l) => !l.inHeadlineSpend)
+      .reduce((n, l) => n + l.cents, 0);
+  const fullCostRatio =
+    fullCostCents > 0 ? (workload.value.total_value * 100) / fullCostCents : null;
+
+  return { lines, fullCostCents, headlineSpendCents: spendCents, fullCostRatio };
 }
 export function evaluateOutcome(record: OutcomeRecord, ledger: CostEntry[]) {
   const performanceReviewed = Boolean(record.planVerified);
