@@ -1082,4 +1082,23 @@ forecast", "real-world parity") or quote the history (§1.5's note);
 none says parity is the program's goal. DESIGN's "approved over 27
 revisions" in OD-1 now reads 35.
 
-**Governance classification and the GitHub patch.** CLASSIFIER_RESULT_PLACEHOLDER
+**Governance classification and the GitHub patch.** `node scripts/governance/classify-risk.mjs --git
+origin/main...HEAD` on the merge commit (7575fcf) gives `"risk":
+"restricted"`, class `retention` only, two `retention.mention` reasons:
+- on `DESIGN.md`: §0's differentiation status names the reviewed
+  retention functions (D-12) as a governance trait;
+- on this file: the revision-35 and revision-36 rows and these paragraphs
+  mention retention or quote the rule.
+
+The class list is the same as for the branch before the merge (`retention`
+only); the merge added no `secrets` reason, because the added lines of
+this PR contain no secret-like line. The wording was not shaped to avoid
+any match (§2). The PR goes through the restricted exception path.
+
+**GitHub patch.** `DESIGN.md` changes by about 300 lines against `main`,
+more than the 228 lines at which §5 records that the GitHub API stops
+returning a patch. It is therefore **expected** that the PR's governance
+report lists `DESIGN.md` as `unclassified` / `diff-unavailable` instead of
+its `retention.mention`, as §5 describes for revisions 31–35; the report is
+then `restricted` for that reason as well. This was not observed, since no
+PR is open yet. The local verdict above is unchanged by it.
