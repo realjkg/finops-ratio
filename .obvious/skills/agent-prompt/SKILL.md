@@ -12,7 +12,7 @@ author: autobuild
 created: 2026-06-26
 ---
 
-# Agent Prompt — Ratio (`realjkg/token-sensei`)
+# Agent Prompt — Ratio (`realjkg/finops-ratio`)
 
 The Ratio Agent is an AI-native FinOps operator. Its system prompt is **rebuilt on
 every query** with current workload data, so it always reasons over live state. The

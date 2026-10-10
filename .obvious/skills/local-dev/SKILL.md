@@ -1,6 +1,6 @@
 ---
 name: local-dev
-description: Start and validate the local Ratio Next.js frontend in the token-sensei repo.
+description: Start and validate the local Ratio Next.js frontend in the finops-ratio repo.
 version: 1.0.0
 triggers:
   - local dev
@@ -11,7 +11,7 @@ author: autobuild-setup-worker
 created: 2026-06-25
 ---
 
-# Local Dev — Ratio (`realjkg/token-sensei`)
+# Local Dev — Ratio (`realjkg/finops-ratio`)
 
 ## Prerequisites
 

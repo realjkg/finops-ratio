@@ -1,6 +1,6 @@
 # .github/workflows/ci.yml
 #
-# CI pipeline for realjkg/token-sensei (Ratio v2)
+# CI pipeline for realjkg/finops-ratio (Ratio v2)
 # Target wall-clock: ≤3 min.
 #
 # Optimization strategy:
