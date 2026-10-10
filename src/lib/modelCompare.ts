@@ -52,6 +52,45 @@ export function compareModels(
   return rows.sort((a, b) => a.dailyCost - b.dailyCost);
 }
 
+// --- Daily-budget overshoot (Multi-Model Methodology Guardrail) -------------
+
+// obvious.md Multi-Model Methodology Guardrails: "If a selected model would
+// push daily spend over the daily budget, show a projected-overshoot warning."
+// This projection is the warning's only math; the UI renders it before Apply
+// and must not block on it — budgets/throttles are the enforcement layer.
+export interface OvershootProjection {
+  /** Projected daily spend on the candidate model at this volume. */
+  projectedDaily: number;
+  /** The workload's daily budget the projection is compared against. */
+  dailyBudget: number;
+  /** Dollars per day over the budget (> 0 by construction). */
+  overAmount: number;
+  /**
+   * Percent over budget (e.g. 25 = +25%), in the same units as
+   * `ModelCostRow.savingsPct`. `null` when the budget is zero — a percentage
+   * of zero is undefined; the amount still tells the story.
+   */
+  overPct: number | null;
+}
+
+// `null` while the projection stays at or under budget — at-budget is not
+// over, and no warning is invented for a switch that fits the budget.
+export function projectedOvershoot(
+  model: ModelEntry,
+  volume: VolumeProfile,
+  dailyBudget: number,
+): OvershootProjection | null {
+  const projectedDaily = modelDailyCost(model, volume).total;
+  if (projectedDaily <= dailyBudget) return null;
+  return {
+    projectedDaily,
+    dailyBudget,
+    overAmount: projectedDaily - dailyBudget,
+    overPct:
+      dailyBudget > 0 ? ((projectedDaily - dailyBudget) / dailyBudget) * 100 : null,
+  };
+}
+
 // Best cheaper alternative to the current model, used by the agent responder.
 export function cheapestAlternative(rows: ModelCostRow[]): ModelCostRow | null {
   const current = rows.find((r) => r.isCurrent);
