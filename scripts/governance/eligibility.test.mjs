@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { URL } from 'node:url';
 import {
   decideEligibility, decideMergeStatus, evaluateExceptionApproval, latestCheckRuns,
+  isTrustedActor, governanceGateTouched, outsiderReason, TRUSTED_ACTOR_LOGINS,
   DEFAULT_CONFIG, CI_CHECK_NAME, ELIGIBILITY_CONTEXT,
 } from './eligibility.mjs';
 
@@ -612,5 +613,158 @@ describe('latestCheckRuns', () => {
       { id: 2, name: 'b', status: 'completed', conclusion: 'success' },
     ]);
     expect(runs.map((r) => r.id).sort()).toEqual([2, 3, 4]);
+  });
+});
+
+// Trusted-actor QA bar: restricted PRs by trusted platform actors merge on the
+// standard computable gates; the governance-gate human rule and the fork rule
+// survive unchanged. The platform bot's app integration reports author
+// association CONTRIBUTOR — its LOGIN is what makes it trusted.
+describe('trusted-actor QA bar (restricted auto-merge)', () => {
+  const restrictedTrusted = (prOverrides = {}, overrides = {}) => state({
+    freshRisk: 'restricted',
+    changedFiles: ['src/app/page.tsx'],
+    ...overrides,
+    pr: {
+      labels: ['risk:restricted'],
+      authorAssociation: 'CONTRIBUTOR',
+      authorLogin: 'obvious-autobuild[bot]',
+      ...prOverrides,
+    },
+  });
+
+  it('a: trusted bot + risk:restricted + every computable gate green → eligible', () => {
+    expect(decideEligibility(restrictedTrusted())).toEqual({ eligible: true, reasons: [] });
+  });
+
+  it('b: trusted bot + PR touching .github/workflows/governance.yml → NOT eligible (exception required)', () => {
+    const d = decideEligibility(restrictedTrusted({}, { changedFiles: ['.github/workflows/governance.yml'] }));
+    expect(d.eligible).toBe(false);
+    expect(d.reasons.join('\n')).toMatch(/QA bar does not apply/);
+    expect(d.reasons.join('\n')).toMatch(/exception approval required/i);
+  });
+
+  it('b: trusted bot + PR touching scripts/governance/** → NOT eligible (exception required)', () => {
+    const d = decideEligibility(restrictedTrusted({}, { changedFiles: ['scripts/governance/eligibility.mjs'] }));
+    expect(d.eligible).toBe(false);
+    expect(d.reasons.join('\n')).toMatch(/QA bar does not apply/);
+  });
+
+  it('b: trusted bot + unknown/truncated change set → NOT eligible (fail closed)', () => {
+    const unknown = decideEligibility(restrictedTrusted({}, { changedFiles: undefined }));
+    expect(unknown.eligible).toBe(false);
+    expect(unknown.reasons.join('\n')).toMatch(/unknown or truncated/);
+    const truncated = decideEligibility(restrictedTrusted({}, { changedFiles: ['src/a.ts'], changedFilesTruncated: true }));
+    expect(truncated.eligible).toBe(false);
+    expect(truncated.reasons.join('\n')).toMatch(/QA bar does not apply/);
+  });
+
+  it('c: a fork PR is never eligible, even with a trusted login name', () => {
+    const d = decideEligibility(restrictedTrusted({ headRepo: 'mallory/finops-ratio', authorAssociation: 'NONE' }));
+    expect(d.eligible).toBe(false);
+    expect(d.reasons.join('\n')).toMatch(/[Ff]ork/);
+  });
+
+  it('c: a human non-trusted CONTRIBUTOR stays blocked, even on risk:low (unchanged)', () => {
+    expect(decideEligibility(restrictedTrusted({ authorLogin: 'random-contributor' })).eligible).toBe(false);
+    expect(decideEligibility(state({ pr: { authorAssociation: 'CONTRIBUTOR', authorLogin: 'random-contributor' } })).eligible).toBe(false);
+  });
+
+  it('d: human COLLABORATOR + risk:low + green → eligible (unchanged)', () => {
+    expect(decideEligibility(state({ pr: { authorAssociation: 'COLLABORATOR', authorLogin: 'human-dev' } })).eligible).toBe(true);
+  });
+
+  it('e: trusted bot + restricted + missing Copilot review → NOT eligible (fail closed)', () => {
+    expect(decideEligibility(restrictedTrusted({}, { reviews: [] })).eligible).toBe(false);
+  });
+
+  it('e: trusted bot + restricted + one failing check run → NOT eligible', () => {
+    const s = restrictedTrusted();
+    s.checkRuns = [...s.checkRuns, { id: 9, name: 'E2E', status: 'completed', conclusion: 'failure' }];
+    expect(decideEligibility(s).eligible).toBe(false);
+  });
+
+  it('e: trusted bot + restricted + unresolved review threads → NOT eligible', () => {
+    expect(decideEligibility(restrictedTrusted({}, { unresolvedThreads: 2 })).eligible).toBe(false);
+  });
+
+  it('the QA bar keys off the FRESH classification, not the label', () => {
+    // Stale risk:low label but fresh restricted classification → the bot's
+    // eligible path is the QA bar, not the low path.
+    expect(decideEligibility(restrictedTrusted({ labels: ['risk:low'] })).eligible).toBe(true);
+    // Fresh low classification but no risk:low label → the low path's label
+    // gate is unchanged; the QA bar does not apply.
+    const low = decideEligibility(state({
+      pr: { authorAssociation: 'CONTRIBUTOR', authorLogin: 'obvious-autobuild[bot]', labels: [] },
+      freshRisk: 'low',
+      changedFiles: ['src/x.ts'],
+    }));
+    expect(low.eligible).toBe(false);
+    expect(low.reasons.join('\n')).toMatch(/risk:low/);
+  });
+
+  it('b: a trusted bot PR touching the gate merges only via a valid exception approval (mode exception, never auto-merge)', () => {
+    // decideEligibility never flips eligible for a restricted PR — the
+    // exception shows up as a SUCCESS eligibility status (branch protection
+    // opens; a human merges manually).
+    const s = restrictedTrusted({}, { changedFiles: ['.github/workflows/governance.yml'], exception: { approved: true, approver: 'jkristian' } });
+    expect(decideMergeStatus(s)).toMatchObject({ state: 'success', mode: 'exception' });
+    expect(decideEligibility(s).eligible).toBe(false);
+    const noApproval = decideMergeStatus(restrictedTrusted({}, { changedFiles: ['.github/workflows/governance.yml'] }));
+    expect(noApproval.state).toBe('failure');
+    expect(noApproval.description).toMatch(/QA bar does not apply/);
+  });
+
+  it('decideMergeStatus reports mode trusted-qa-bar with a distinct description', () => {
+    expect(decideMergeStatus(restrictedTrusted())).toMatchObject({ state: 'success', mode: 'trusted-qa-bar' });
+    expect(decideMergeStatus(restrictedTrusted()).description).toMatch(/QA bar/i);
+    expect(decideMergeStatus(state())).toMatchObject({ state: 'success', mode: 'low' });
+  });
+
+  it('TRUSTED_ACTOR_LOGINS seeds the platform bot and is wired into DEFAULT_CONFIG', () => {
+    expect(TRUSTED_ACTOR_LOGINS).toContain('obvious-autobuild[bot]');
+    expect(DEFAULT_CONFIG.trustedActors).toEqual(TRUSTED_ACTOR_LOGINS);
+  });
+});
+
+describe('isTrustedActor', () => {
+  it('is true exactly for configured trusted logins, whatever the association reports', () => {
+    expect(isTrustedActor({ authorLogin: 'obvious-autobuild[bot]', authorAssociation: 'CONTRIBUTOR' })).toBe(true);
+    expect(isTrustedActor({ authorLogin: 'obvious-autobuild[bot]', authorAssociation: undefined })).toBe(true);
+    expect(isTrustedActor({ authorLogin: 'obvious-autobuild[bot]-imposter', authorAssociation: 'NONE' })).toBe(false);
+    expect(isTrustedActor({ authorLogin: 'someone-else', authorAssociation: 'CONTRIBUTOR' })).toBe(false);
+    expect(isTrustedActor({})).toBe(false);
+    expect(isTrustedActor(null)).toBe(false);
+  });
+
+  it('human OWNER/MEMBER/COLLABORATOR pass outsiderReason without being trusted actors', () => {
+    expect(isTrustedActor({ authorLogin: undefined, authorAssociation: 'OWNER' })).toBe(false);
+    expect(outsiderReason({ headRepo: 'o/r', baseRepo: 'o/r', authorAssociation: 'OWNER' })).toBeNull();
+    expect(outsiderReason({ headRepo: 'o/r', baseRepo: 'o/r', authorAssociation: 'MEMBER' })).toBeNull();
+    expect(outsiderReason({ headRepo: 'o/r', baseRepo: 'o/r', authorAssociation: 'COLLABORATOR' })).toBeNull();
+    expect(outsiderReason({ headRepo: 'o/r', baseRepo: 'o/r', authorAssociation: 'CONTRIBUTOR' })).toMatch(/trusted platform actor/);
+  });
+});
+
+describe('governanceGateTouched', () => {
+  it('is true only for the exact gate paths; nested or lookalike paths do not match', () => {
+    expect(governanceGateTouched({ changedFiles: ['.github/workflows/governance.yml'] })).toBe(true);
+    expect(governanceGateTouched({ changedFiles: ['scripts/governance/eligibility.mjs'] })).toBe(true);
+    expect(governanceGateTouched({ changedFiles: ['scripts/governance/nested/dir/x.mjs'] })).toBe(true);
+    expect(governanceGateTouched({ changedFiles: ['src/app/page.tsx'] })).toBe(false);
+    expect(governanceGateTouched({ changedFiles: ['.github/workflows/ci.yml'] })).toBe(false);
+    expect(governanceGateTouched({ changedFiles: ['foo/.github/workflows/governance.yml'] })).toBe(false);
+    expect(governanceGateTouched({ changedFiles: ['src/scripts/governance/readme.md'] })).toBe(false);
+    expect(governanceGateTouched({ changedFiles: ['scripts/governance'] })).toBe(false);
+  });
+
+  it('is truthy when the change set is absent, null, or truncated (fail closed)', () => {
+    expect(governanceGateTouched({})).toBe('unknown');
+    expect(governanceGateTouched({ changedFiles: null })).toBe('unknown');
+    expect(governanceGateTouched({ changedFiles: ['src/a.ts'], changedFilesTruncated: true })).toBe('unknown');
+    // Consumers treat 'unknown' as touching (truthy, !== false).
+    expect(governanceGateTouched({ changedFiles: ['src/a.ts'], changedFilesTruncated: true })).toBeTruthy();
+    expect(governanceGateTouched({ changedFiles: ['src/a.ts'], changedFilesTruncated: false })).toBe(false);
+    expect(governanceGateTouched({ changedFiles: ['src/a.ts'] })).toBe(false);
   });
 });

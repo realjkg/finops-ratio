@@ -5,7 +5,7 @@
 import { classify } from './classify-risk.mjs';
 import {
   decideEligibility, decideMergeStatus, evaluateExceptionApproval, parseExceptionCommand, outsiderReason, isApproverRole,
-  isGovernanceCandidateRun,
+  isGovernanceCandidateRun, isTrustedActor, governanceGateTouched,
   DEFAULT_CONFIG, ELIGIBILITY_CONTEXT, REVOKED_CONTEXT, ACTIONS_BOT_LOGIN,
 } from './eligibility.mjs';
 import { REPORT_MARKER, buildReport, desiredLabels, labelChanges } from './report.mjs';
@@ -135,10 +135,18 @@ async function disableAutoMerge(github, nodeId) {
   );
 }
 
+/** All paths a PR's change set touches (including rename previous paths), unique. */
+export function changedFilePaths(changeSet) {
+  return [...new Set((changeSet?.files ?? [])
+    .flatMap((f) => [f.path, f.previousPath])
+    .filter((p) => typeof p === 'string' && p.length > 0))];
+}
+
 const prIdentity = (pr) => ({
   headRepo: pr.head?.repo?.full_name ?? null,
   baseRepo: pr.base?.repo?.full_name ?? null,
   authorAssociation: pr.author_association,
+  authorLogin: pr.user?.login ?? null,
 });
 
 /** Job: classify the PR in the pull_request_target event. Never fails on risk. */
@@ -162,8 +170,22 @@ export async function runClassify({ github, context, core }) {
   }
 
   const protection = await mainProtection(github, repo);
-  const outsider = outsiderReason(prIdentity(pr));
-  const report = buildReport(result, { headSha: pr.head.sha, mainProtection: protection, outsider });
+  const identity = prIdentity(pr);
+  const outsider = outsiderReason(identity);
+  const report = buildReport(result, {
+    headSha: pr.head.sha,
+    mainProtection: protection,
+    outsider,
+    // Trusted-actor QA-bar context: decides whether the report directs the
+    // owner to the exception queue or states the QA-bar auto-merge policy.
+    // trustedAuthor carries the trusted LOGIN (or null) so the report can
+    // name the author it is trusting.
+    trustedAuthor: isTrustedActor(identity) ? identity.authorLogin : null,
+    touchesGovernanceGate: governanceGateTouched({
+      changedFiles: changedFilePaths(changeSet),
+      changedFilesTruncated: changeSet.truncated === true,
+    }),
+  });
   await core.summary.addRaw(report).write();
 
   // Label/comment/status writes failing is an operational error (reported red);
@@ -438,6 +460,8 @@ export async function gatherState(github, repo, number, { eventComment, core, ca
         ...prIdentity(pr),
       },
       freshRisk: fresh.risk,
+      changedFiles: changedFilePaths(changeSet),
+      changedFilesTruncated: changeSet.truncated === true,
       checkRuns: checkRuns.map((c) => ({
         id: c.id,
         name: c.name,
