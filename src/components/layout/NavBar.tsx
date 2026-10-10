@@ -72,6 +72,7 @@ export function NavBar({
           onClick={onOpenAgent}
           aria-expanded={agentOpen}
           aria-controls={AI_PANEL_ID}
+          aria-label="Ask Frank Coster"
           className="col-start-2 row-start-1 ml-auto flex items-center gap-1.5 rounded border border-purple/60 bg-purple/15 px-2.5 py-1 font-mono text-xs font-bold text-purple transition-colors hover:bg-purple/25 md:col-auto md:row-auto"
         >
           <span
