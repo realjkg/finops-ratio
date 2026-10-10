@@ -4,6 +4,8 @@
 // Motion and respects prefers-reduced-motion.
 import { motion, useReducedMotion } from 'framer-motion';
 import { formatRatio, formatUSD } from '@/lib/format';
+import { EvidenceMark } from '@/components/EvidenceMark';
+import type { EvidenceStatus } from '@/types';
 
 interface FuelAndValueProps {
   fuelPct: number;
@@ -12,6 +14,8 @@ interface FuelAndValueProps {
   dailyBudget: number;
   valueRatio: number;
   valueColor: string;
+  /** Provenance mark beside the badge (audit C1) — absent renders nothing. */
+  evidenceStatus?: EvidenceStatus;
 }
 
 export function FuelAndValue({
@@ -21,6 +25,7 @@ export function FuelAndValue({
   dailyBudget,
   valueRatio,
   valueColor,
+  evidenceStatus,
 }: FuelAndValueProps) {
   const reducedMotion = useReducedMotion() ?? false;
   const valueText = `${fuelPct}% of daily budget used — ${formatUSD(spentToday)} spent of ${formatUSD(
@@ -31,12 +36,16 @@ export function FuelAndValue({
     <div className="space-y-2">
       <div className="flex items-center justify-between text-xs">
         <span className="font-mono uppercase tracking-wider text-dim">Budget consumed</span>
-        {/* R4: the value badge is part of the same component as the gauge. */}
-        <span
-          className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-xs font-bold"
-          style={{ color: valueColor, backgroundColor: `${valueColor}1a` }}
-        >
-          {formatRatio(valueRatio)} return
+        {/* R4: the value badge is part of the same component as the gauge.
+            The provenance mark rides beside it — quiet, token-colored. */}
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-xs font-bold"
+            style={{ color: valueColor, backgroundColor: `${valueColor}1a` }}
+          >
+            {formatRatio(valueRatio)} return
+          </span>
+          <EvidenceMark status={evidenceStatus} />
         </span>
       </div>
 
