@@ -22,7 +22,7 @@ export function WorkloadList() {
   }, [workloads, filters]);
 
   return (
-    <aside className="flex w-full shrink-0 flex-col border-b border-edge bg-deep md:w-[280px] md:border-b-0 md:border-r">
+    <aside aria-label="Workload list" className="flex w-full shrink-0 flex-col border-b border-edge bg-deep md:w-[280px] md:border-b-0 md:border-r">
       <div className="flex items-center justify-between px-3 pt-3">
         <span className="text-[11px] font-bold uppercase tracking-wider text-sub">Workloads</span>
         <span className="font-mono text-[10px] text-dim">{visible.length} shown</span>
