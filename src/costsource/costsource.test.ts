@@ -1,5 +1,6 @@
-// Tests for the cost-ingest seam: the FOCUS v1.0-v1.4 version shim, value
-// attachment (numerator/denominator), and the mock client over offline seed.
+// Tests for the cost-ingest seam: the FOCUS v1.0-v1.5 version shim (1.5 a
+// working draft), value attachment (numerator/denominator), and the mock
+// client over offline seed.
 import { describe, it, expect } from 'vitest';
 import { CANONICAL_FOCUS_VERSION, columnsAddedAfter } from './focusVersions';
 import type { FocusCoreV10, RawSourceRow } from './focusRows';
