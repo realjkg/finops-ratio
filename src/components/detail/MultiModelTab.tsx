@@ -5,9 +5,14 @@
 import { useStore } from '@/store/useStore';
 import { useMemo, useState } from 'react';
 import type { ModelEntry, Workload } from '@/types';
-import { compareModels, type ModelCostRow } from '@/lib/modelCompare';
+import {
+  compareModels,
+  cheapestAlternative,
+  projectedOvershoot,
+  type ModelCostRow,
+  type OvershootProjection,
+} from '@/lib/modelCompare';
 import { MODEL_QUALITY_NOTE } from '@/data/models';
-import { cheapestAlternative } from '@/lib/modelCompare';
 import { formatRatio, formatSignedPct, formatUSD } from '@/lib/format';
 
 export function MultiModelTab({
@@ -37,6 +42,23 @@ export function MultiModelTab({
   const alt = useMemo(() => cheapestAlternative(rows), [rows]);
   const current = rows.find((r) => r.isCurrent);
 
+  // Multi-Model guardrail (obvious.md): candidates whose projected daily spend
+  // at this volume breaks the workload's daily budget. Rendered as a warning —
+  // never a block; the budget's throttle/pause thresholds enforce.
+  const dailyBudget = workload.costs.daily_budget;
+  const overshoots = useMemo(() => {
+    const found: Array<{ row: ModelCostRow; overshoot: OvershootProjection }> = [];
+    for (const row of rows) {
+      const overshoot = projectedOvershoot(row.model, volume, dailyBudget);
+      if (overshoot) found.push({ row, overshoot });
+    }
+    return found;
+  }, [rows, volume, dailyBudget]);
+  // Pre-apply warning for the model picked in the simulation select.
+  const selectedBreak = overshoots.find(
+    (x) => x.row.model.model_name === choice,
+  ) ?? null;
+
   return (
     <div className="space-y-4">
       <div className="text-xs text-sub">
@@ -59,9 +81,44 @@ export function MultiModelTab({
         ))}
       </div>
 
+      {overshoots.length > 0 && (
+        <div
+          role="alert"
+          className="rounded-card border border-cost/40 bg-cost/5 p-3 text-xs leading-relaxed text-sub"
+        >
+          <span className="font-bold text-cost">⚠ Projected overspend</span>
+          <span className="text-dim">
+            {' '}at today's volume — daily budget {formatUSD(dailyBudget)}:{' '}
+          </span>
+          {overshoots.map(({ row, overshoot }, i) => (
+            <span key={row.model.id}>
+              {i > 0 && ' · '}
+              <span className="font-mono text-txt">{row.model.display_name}</span>{' '}
+              <span className="font-mono text-txt">
+                {formatUSD(overshoot.projectedDaily)}/day,{' '}
+              </span>
+              <span className="font-mono text-cost">{overLabel(overshoot)}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
       {simulation && <section className="rounded-card border border-edge p-3 text-xs text-sub">
         <p>Simulate a prospective model switch after cost approval. Recorded charges stay unchanged; evaluate quality before using a new model.</p>
         <label className="mt-3 block">Target model <select className="sim-input mt-2 max-w-full" value={choice} onChange={e => setChoice(e.target.value)}><option value="">Choose a model</option>{models.map(m => <option key={m.id} value={m.model_name}>{m.display_name}</option>)}</select></label>
+        {selectedBreak && (
+          <p
+            role="alert"
+            className="mt-3 rounded-card border border-cost/40 bg-cost/5 p-3 leading-relaxed"
+          >
+            <span className="font-bold text-cost">⚠ Projected overspend:</span>{' '}
+            <span className="font-mono text-txt">{selectedBreak.row.model.display_name}</span> at this volume costs{' '}
+            <span className="font-mono text-cost">{formatUSD(selectedBreak.overshoot.projectedDaily)}/day</span> —{' '}
+            <span className="font-mono text-cost">{overLabel(selectedBreak.overshoot)}</span> the{' '}
+            <span className="font-mono text-txt">{formatUSD(dailyBudget)}</span> daily budget.{' '}
+            Applying is not blocked — the daily budget's throttle and pause thresholds remain the enforcement layer.
+          </p>
+        )}
         <button className="sim-button mt-3" disabled={busy || !choice || !workload.governance.cost_approval || simulation.session.identity.persona !== 'technical'} onClick={() => void run({ type: 'model', workloadId: workload.id, model: choice })}>Simulate model switch</button>
       </section>}
       {alt && current && (
@@ -79,6 +136,13 @@ export function MultiModelTab({
       )}
     </div>
   );
+}
+
+// "$677 (+423%) over" — the percent is omitted when the budget is zero and a
+// percentage is undefined (overPct null).
+function overLabel(o: OvershootProjection): string {
+  const pct = o.overPct === null ? '' : ` (${formatSignedPct(o.overPct)})`;
+  return `${formatUSD(o.overAmount)}${pct} over`;
 }
 
 function ModelRow({ row }: { row: ModelCostRow }) {
