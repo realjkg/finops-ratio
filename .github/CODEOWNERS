@@ -1,0 +1,4 @@
+# Default ownership: everything routes to the repository owner.
+# See the governance workflow (.github/workflows/governance.yml) for the
+# merge-eligibility gate layered on top of these review requirements.
+* @realjkg

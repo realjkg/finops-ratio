@@ -1,6 +1,6 @@
 # .github/workflows/ci.yml
 #
-# CI pipeline for realjkg/token-sensei (Ratio v2)
+# CI pipeline for realjkg/finops-ratio (Ratio v2)
 # Target wall-clock: ≤3 min.
 #
 # Optimization strategy:
@@ -15,6 +15,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+
+# Least-privilege token scope (governance.yml pattern): read-only at the
+# top level; no job in this workflow needs a write grant.
+permissions:
+  contents: read
 
 jobs:
   ci:
@@ -43,12 +48,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
 
       # cache: 'npm' stores ~/.npm between runs.
       # On a cache hit, npm ci reads from local archive rather than the network.
       - name: Setup Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: 'npm'
@@ -71,7 +78,7 @@ jobs:
       # Key on lockfile hash + source hash so the cache busts when
       # deps or source files change. Restore-keys allow partial hits.
       - name: Restore Next.js build cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .next/cache
           key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*.ts', 'src/**/*.tsx') }}
