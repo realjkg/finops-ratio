@@ -3,7 +3,7 @@
 
 import { OutcomesPanel } from '@/outcomes/OutcomesPanel';
 import { useStore, type DetailTab } from '@/store/useStore';
-import { formatInt, formatRatio } from '@/lib/format';
+import { formatInt, formatReturn } from '@/lib/format';
 import { ratioColor, PROVIDER_LABEL } from '@/lib/scales';
 import { KpiCards } from './KpiCards';
 import { BudgetProfileTab } from './BudgetProfileTab';
@@ -60,7 +60,7 @@ export function DetailPanel() {
               className="font-mono text-lg font-bold"
               style={{ color: ratioColor(workload.value.value_ratio) }}
             >
-              {formatRatio(workload.value.value_ratio)} return
+              {formatReturn(workload.value.value_ratio)}
             </div>
             <div className="font-mono text-xs text-sub">
               {formatInt(workload.outputs.daily_inferences)} calls/day

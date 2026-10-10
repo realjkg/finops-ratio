@@ -19,6 +19,17 @@ export function formatRatio(ratio: number): string {
   return `${ratio.toFixed(1)}\u00d7`;
 }
 
+/**
+ * Honest return label (audit C3/C4): a non-positive numerator renders as
+ * "no positive return" with the actual ratio in parentheses — never floored
+ * to a fake positive figure, never hidden.
+ */
+export function formatReturn(ratio: number): string {
+  return ratio > 0
+    ? `${formatRatio(ratio)} return`
+    : `no positive return (${formatRatio(ratio)})`;
+}
+
 export function formatPct(fraction: number, digits = 0): string {
   return `${(fraction * 100).toFixed(digits)}%`;
 }

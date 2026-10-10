@@ -76,6 +76,40 @@ describe('headlineEvidenceStatus', () => {
     };
     expect(headlineEvidenceStatus(legacy)).toBeUndefined();
   });
+
+  it('includes the harm and quality-floor inputs in the weakest-input roll-up (C3/C4)', () => {
+    const v: WorkloadValue = {
+      revenue_protected: 100,
+      cost_avoided: 50,
+      harm_from_misses: 10,
+      quality_floor_pass_rate: 0.9,
+      total_value: 130,
+      value_ratio: 2.6,
+      evidence: {
+        revenue_protected: 'measured',
+        cost_avoided: 'measured',
+        harm_from_misses: 'assumed',
+        quality_floor_pass_rate: 'projected',
+      },
+    };
+    // The two new inputs are the weakest links even though both original
+    // components are measured.
+    expect(headlineEvidenceStatus(v)).toBe('assumed');
+  });
+
+  it('unmarked harm and floor inputs do not vote (partial evidence blocks still roll up)', () => {
+    const v: WorkloadValue = {
+      revenue_protected: 100,
+      cost_avoided: 50,
+      total_value: 150,
+      value_ratio: 3.0,
+      evidence: {
+        revenue_protected: 'projected',
+        cost_avoided: 'measured',
+      },
+    };
+    expect(headlineEvidenceStatus(v)).toBe('projected');
+  });
 });
 
 describe('seed provenance (honesty: never measured)', () => {

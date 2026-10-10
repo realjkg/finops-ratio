@@ -34,15 +34,22 @@ export function weakestStatus(
 }
 
 /**
- * Headline evidence status for a workload value: the weakest input mark.
- * `undefined` when the value carries no evidence block (legacy shape) — the
- * UI renders that ratio unmarked rather than inventing a status.
+ * Headline evidence status for a workload value: the weakest input mark,
+ * including the defensible-value inputs (harm from misses, quality-floor pass
+ * rate — audit C3/C4). `undefined` when the value carries no evidence block
+ * (legacy shape) — the UI renders that ratio unmarked rather than inventing a
+ * status.
  */
 export function headlineEvidenceStatus(
   value: WorkloadValue,
 ): EvidenceStatus | undefined {
   if (!value.evidence) return undefined;
-  return weakestStatus([value.evidence.revenue_protected, value.evidence.cost_avoided]);
+  return weakestStatus([
+    value.evidence.revenue_protected,
+    value.evidence.cost_avoided,
+    value.evidence.harm_from_misses,
+    value.evidence.quality_floor_pass_rate,
+  ]);
 }
 
 /**
