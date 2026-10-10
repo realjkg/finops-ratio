@@ -1,6 +1,7 @@
 // Ratio data model — see `.obvious/obvious.md` Design Guidance (Data-Model Invariants).
 // Types are the contract between seed data, forecast math, and the UI.
 
+import type { EvidenceStatus } from '@/outcomes/types';
 export type ModelProvider =
   | 'openai'
   | 'anthropic'
@@ -52,11 +53,31 @@ export interface WorkloadOutputs {
   deflection_rate: number;
 }
 
+// Provenance of value figures (audit C1/C8). Ratio re-uses the outcomes
+// module's EvidenceStatus — one vocabulary for evidence rigor codebase-wide.
+export type { EvidenceStatus };
+
+/**
+ * Per-input provenance for the two value components (audit C1). The derived
+ * fields (`total_value`, `value_ratio`) carry no mark of their own — the
+ * headline inherits the weakest input's status (see `lib/valueEvidence.ts`).
+ */
+export interface WorkloadValueEvidence {
+  revenue_protected: EvidenceStatus;
+  cost_avoided: EvidenceStatus;
+}
+
 export interface WorkloadValue {
   revenue_protected: number;
   cost_avoided: number;
   total_value: number;
   value_ratio: number;
+  /**
+   * Evidence status of the value inputs. Absent on legacy shapes (values built
+   * before provenance tracking) — the UI renders such ratios unmarked rather
+   * than inventing a status.
+   */
+  evidence?: WorkloadValueEvidence;
 }
 
 export type GovernanceGateId = 'policy' | 'ethics' | 'cost' | 'scale';

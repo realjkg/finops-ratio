@@ -115,6 +115,10 @@ function buildWorkload(spec: WorkloadSeedSpec): Workload {
       cost_avoided: costAvoided,
       total_value: totalValue,
       value_ratio: round2(totalValue / spec.monthlySpend),
+      // Honesty (audit C1): seed values are asserted demo inputs, not ledger
+      // measurements — both components marked `assumed`; the headline inherits
+      // the weakest mark (never `measured` — no fabricated provenance).
+      evidence: { revenue_protected: 'assumed', cost_avoided: 'assumed' },
     },
     governance: spec.gates,
     demand_shape: spec.demand_shape,
