@@ -10,13 +10,18 @@ import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { Client } from 'pg';
-import { createTestDatabase, type TestDatabase } from './testing/harness';
+import { createTestDatabase, fixtureMigrationVersions, type TestDatabase } from './testing/harness';
 import { DEFAULT_MIGRATIONS_DIR } from './migrationFiles';
 import { migrateDown, migrateUp, migrationStatus } from './migrate';
 
 // Loaded lazily so each test reports its own failure while the module is missing.
 const foundation = () => import('./foundation');
 const model = () => import('./privilegeModel');
+
+// Fixture versions just past the last real migration: injected fixture files must
+// never shadow a real version, which would inherit that version's manifest
+// requirements (real 0003–0005 land with the consumption/outcome/economics slices).
+const [V1, V2] = fixtureMigrationVersions(2);
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -37,9 +42,12 @@ async function connect(db: TestDatabase): Promise<Client> {
   return c;
 }
 
-function migrationsWith(extra: Record<string, string>, opts: { only?: string[] } = {}): string {
+function migrationsWith(extra: Record<string, string>, opts: { only?: string[] } = { only: ['0001'] }): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-foundation-'));
   cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
+  // Foundation fixtures build on the 0001 foundation only: later real migrations
+  // are excluded so the injected fixture versions below are the only pending ones
+  // past 0001 and inherit no real version's manifest requirements.
   for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) {
     if (opts.only && !opts.only.some((v) => f.startsWith(`${v}_`))) continue;
     fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
@@ -50,11 +58,11 @@ function migrationsWith(extra: Record<string, string>, opts: { only?: string[] }
 
 const CONTRACT = '-- ratio:phase contract\n';
 
-/** A committed contract 0002 that the runner must refuse because a required 0001 object is missing or altered. */
+/** A committed contract migration that the runner must refuse because a required foundation object is missing or altered. */
 async function expectFoundationRefusal(sql: string, expectMessage: RegExp): Promise<Client> {
   const db = await freshDb(false);
   const c = await connect(db);
-  const dir = migrationsWith({ '0002_attack.up.sql': CONTRACT + sql });
+  const dir = migrationsWith({ [`${V1}_attack.up.sql`]: CONTRACT + sql });
   const err = await migrateUp(c, { dir, allowContract: true }).then(
     () => null,
     (e: Error & { code?: string }) => e,
@@ -75,7 +83,9 @@ describe('round 10: the manifest is generated from 0001 and cannot drift silentl
     const { FOUNDATION_0001, foundationSnapshot } = await foundation();
     const db = await freshDb(false);
     const c = await connect(db);
-    expect(await migrateUp(c, { dir: migrationsWith({}, { only: ['0001'] }) })).toEqual({ applied: ['0001'] });
+    // Apply ONLY the foundation: later real migrations legitimately extend the
+    // catalog, but the 0001 manifest pins the foundation's own objects exactly.
+    expect(await migrateUp(c, { dir: migrationsWith({}) }).then((r) => r.applied)).toEqual(['0001']);
     expect(await foundationSnapshot(c)).toEqual([...FOUNDATION_0001].sort());
     // It covers every rule class the check relies on.
     for (const prefix of ['schema:', 'table:', 'column:', 'policy:', 'trigger:', 'function:', 'view:', 'constraint:', 'index:']) {
@@ -214,7 +224,7 @@ describe('round 10: removing or weakening the reviewed foundation is refused (co
 async function expectPolicyRefusal(sql: string, expectMessage: RegExp, extra: Record<string, string> = {}): Promise<Client> {
   const db = await freshDb(false);
   const c = await connect(db);
-  const dir = migrationsWith({ ...extra, '0003_attack.up.sql': CONTRACT + sql });
+  const dir = migrationsWith({ ...extra, [`${V2}_attack.up.sql`]: CONTRACT + sql });
   const err = await migrateUp(c, { dir, allowContract: true }).then(
     () => null,
     (e: Error & { code?: string }) => e,
@@ -252,12 +262,12 @@ describe('round 11 M1: extra policies on ratio tables are refused (policies are 
     // positive: the reviewed shape on a new table applies
     const db = await freshDb(false);
     const c = await connect(db);
-    expect(await migrateUp(c, { dir: migrationsWith({ '0002_notes.up.sql': newTable }, { only: ['0001'] }) })).toEqual({ applied: ['0001', '0002'] });
+    expect(await migrateUp(c, { dir: migrationsWith({ [`${V1}_notes.up.sql`]: newTable }) })).toEqual({ applied: ['0001', V1] });
     // negative: an extra, non-standard policy on that new table
     await expectPolicyRefusal(
       "DO $$ BEGIN EXECUTE 'CREATE ' || 'POLICY notes_all ON ratio.notes USING (true)'; END $$;\n",
       /policy:ratio\.notes:notes_all:.* is not a reviewed policy/,
-      { '0002_notes.up.sql': newTable },
+      { [`${V1}_notes.up.sql`]: newTable },
     );
   });
 
@@ -381,7 +391,7 @@ describe('round 12 L1: every ratio table has RLS enabled + forced, a reviewed po
 
   it('ALTER TABLE … SET UNLOGGED on a new ratio table is refused (0001 tables cannot be UNLOGGED: their FKs forbid it)', async () => {
     await expectPolicyRefusal('ALTER TABLE ratio.notes SET UNLOGGED;\n', /table ratio\.notes must be a permanent \(logged\) table/, {
-      '0002_notes.up.sql': NOTES_TABLE,
+      [`${V1}_notes.up.sql`]: NOTES_TABLE,
     });
   });
 });
@@ -395,7 +405,7 @@ describe('round 12 L2/L4: reviewed policy shapes are exact (kills the surviving 
       "DO $$ BEGIN EXECUTE 'DROP ' || 'POLICY tenant_isolation ON ratio.notes'; END $$;\n" +
         onNotes('POLICY tenant_isolation ON ratio.notes USING (true) WITH CHECK (tenant_id = ratio.current_tenant_id())'),
       /policy:ratio\.notes:tenant_isolation:.* is not a reviewed policy/,
-      { '0002_notes.up.sql': NOTES_TABLE },
+      { [`${V1}_notes.up.sql`]: NOTES_TABLE },
     );
   });
 
@@ -405,7 +415,7 @@ describe('round 12 L2/L4: reviewed policy shapes are exact (kills the surviving 
       "DO $$ BEGIN EXECUTE 'DROP ' || 'POLICY tenant_isolation ON ratio.notes'; END $$;\n" +
         onNotes('POLICY tenant_isolation ON ratio.notes TO ratio_reader USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id())'),
       /policy:ratio\.notes:tenant_isolation:.*roles=ratio_reader:.* is not a reviewed policy/,
-      { '0002_notes.up.sql': NOTES_TABLE },
+      { [`${V1}_notes.up.sql`]: NOTES_TABLE },
     );
   });
 
@@ -413,7 +423,7 @@ describe('round 12 L2/L4: reviewed policy shapes are exact (kills the surviving 
     await expectPolicyRefusal(
       onNotes('POLICY tenant_scope ON ratio.notes USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id())'),
       /policy:ratio\.notes:tenant_scope:.* is not a reviewed policy/,
-      { '0002_notes.up.sql': NOTES_TABLE },
+      { [`${V1}_notes.up.sql`]: NOTES_TABLE },
     );
   });
 
@@ -463,28 +473,26 @@ describe('round 14 M2: a later migration may change a 0001 object when it ships 
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual([...FOUNDATION_0001]);
   });
 
-  it('0001 → 0002 (alters a 0001 column default) with a 0002 manifest: both steps pass, and status is clean', async () => {
-    // The synthetic lineage is 0001 → 0002 only: later real migrations would fail their own
-    // manifests after 0002 pins the altered default, so this test scopes the directory to 0001.
-    const dir = migrationsWith({ '0002_enabled_default.up.sql': SET_DEFAULT }, { only: ['0001'] });
-    await writeManifest(dir, '0002');
+  it('the next migration (alters a 0001 column default) with its own manifest: both steps pass, and status is clean', async () => {
+    const dir = migrationsWith({ [`${V1}_enabled_default.up.sql`]: SET_DEFAULT });
+    await writeManifest(dir, V1);
     const db = await freshDb(false);
     const c = await connect(db);
-    expect(await migrateUp(c, { dir, allowContract: true })).toEqual({ applied: ['0001', '0002'] });
+    expect(await migrateUp(c, { dir, allowContract: true })).toEqual({ applied: ['0001', V1] });
     const st = await migrationStatus(c, { dir });
     expect(st.privilegeProblems).toEqual([]);
     expect(st.matches).toBe(true);
   });
 
-  it('the same 0002 without a manifest is refused (the 0001 manifest still applies)', async () => {
+  it('the same migration without a manifest is refused (the 0001 manifest still applies)', async () => {
     await expectFoundationRefusal(SET_DEFAULT.replace(CONTRACT, ''), /column:ratio\.sources:enabled:boolean/);
   });
 
-  it('a 0002 whose SQL does more than its reviewed manifest is refused', async () => {
+  it('a migration whose SQL does more than its reviewed manifest is refused', async () => {
     const dir = migrationsWith({
-      '0002_enabled_default.up.sql': SET_DEFAULT + "ALTER TABLE ratio.sources ALTER COLUMN display_name SET DEFAULT 'x';\n",
+      [`${V1}_enabled_default.up.sql`]: SET_DEFAULT + "ALTER TABLE ratio.sources ALTER COLUMN display_name SET DEFAULT 'x';\n",
     });
-    await writeManifest(dir, '0002', SET_DEFAULT);
+    await writeManifest(dir, V1, SET_DEFAULT);
     const db = await freshDb(false);
     const c = await connect(db);
     const err = await migrateUp(c, { dir, allowContract: true }).then(
@@ -492,6 +500,6 @@ describe('round 14 M2: a later migration may change a 0001 object when it ships 
       (e: Error & { code?: string }) => e,
     );
     expect(err?.code).toBe('PRIVILEGE_MODEL_VIOLATION');
-    expect(err!.message).toMatch(/required 0002 object missing or altered: column:ratio\.sources:display_name/);
+    expect(err!.message).toMatch(/required \d{4} object missing or altered: column:ratio\.sources:display_name/);
   });
 });

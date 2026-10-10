@@ -13,12 +13,16 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { Client } from 'pg';
-import { createTestDatabase, type TestDatabase } from './testing/harness';
+import { createTestDatabase, fixtureMigrationVersions, type TestDatabase } from './testing/harness';
 import { seedTwoTenants } from './testing/fixtures';
-import { DEFAULT_MIGRATIONS_DIR, loadMigrations } from './migrationFiles';
+import { DEFAULT_MIGRATIONS_DIR } from './migrationFiles';
 import { migrateUp, migrationStatus } from './migrate';
 import { privilegeModelViolations } from './privilegeModel';
 import { requireTestDatabaseUrl } from './testing/requireTestDatabaseUrl';
+
+// Fixture version just past the last real migration: an injected fixture file must
+// never shadow a real version (real 0003–0005 land with the sibling slices).
+const [V1] = fixtureMigrationVersions(1);
 
 const created: string[] = [];
 afterAll(async () => {
@@ -64,13 +68,13 @@ describe('real LOGIN members with dangerous attributes (serial)', () => {
         const st = await migrationStatus(c);
         expect(st.problems).toContain('PRIVILEGE_MODEL_VIOLATION');
         expect(st.privilegeProblems.join('\n')).toMatch(new RegExp(`role ${login} .*BYPASSRLS`));
-        // Per-migration check: a harmless new migration is refused while the login exists.
+        // Per-migration check: a harmless extra migration is refused while the login exists.
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-member-'));
         try {
-          for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
-          // The probe must sort after the real migration set so it is pending, not out of order.
-          const probeVersion = String(Number(loadMigrations(DEFAULT_MIGRATIONS_DIR).at(-1)!.version) + 1).padStart(4, '0');
-          fs.writeFileSync(path.join(dir, `${probeVersion}_noop.up.sql`), '-- ratio:phase expand\nCOMMENT ON SCHEMA ratio IS \'ratio\';\n');
+          for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) {
+            fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
+          }
+          fs.writeFileSync(path.join(dir, `${V1}_noop.up.sql`), '-- ratio:phase expand\nCOMMENT ON SCHEMA ratio IS \'ratio\';\n');
           await expect(migrateUp(c, { dir })).rejects.toThrow(new RegExp(`role ${login} \\(member of ratio_worker\\) must not be BYPASSRLS`));
         } finally {
           fs.rmSync(dir, { recursive: true, force: true });

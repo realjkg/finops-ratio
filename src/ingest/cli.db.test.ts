@@ -234,6 +234,9 @@ describe('ingest CLI (real Postgres)', () => {
     const doc = onlyJson(r.out) as StatusDoc & { privilegeProblems?: string[] };
     expect(doc.matches).toBe(false);
     expect(doc.applied.every((a) => a.checksumMatches)).toBe(true);
+    // The status check reports the first required foundation object it finds
+    // missing or altered — after later migrations land, that is no longer
+    // always 0001, so match the class of problem, not a pinned version.
     expect(doc.privilegeProblems?.join('\n')).toMatch(/required \d{4} object missing or altered/);
   });
 
@@ -257,9 +260,12 @@ describe('ingest CLI (real Postgres)', () => {
     expect(refused.code).toBe(1);
     expect(refused.out.concat(refused.err).join('\n')).toContain('DOWN_NOT_ALLOWED');
 
-    // Reverting the whole applied set removes the schema; the step count follows the real migration list.
-    const steps = String(loadMigrations(DEFAULT_MIGRATIONS_DIR).length);
-    const ok = await run(['migrate', '--down', steps], { ...env, RATIO_ENV: 'test', RATIO_ALLOW_DOWN_MIGRATIONS: '1' });
+    // Down reverts every applied migration (the fixture database starts empty,
+    // so that is the full applied sequence) and leaves no schema behind.
+    const pre = await run(['migrate', '--status', '--json'], env);
+    const steps = onlyJson(pre.out).applied.length;
+    expect(steps).toBeGreaterThan(0);
+    const ok = await run(['migrate', '--down', String(steps)], { ...env, RATIO_ENV: 'test', RATIO_ALLOW_DOWN_MIGRATIONS: '1' });
     expect(ok.code).toBe(0);
     const ns = await db.pool.query(`SELECT to_regnamespace('ratio') AS n`);
     expect(ns.rows[0].n).toBeNull();
