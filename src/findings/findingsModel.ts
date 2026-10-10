@@ -6,7 +6,8 @@
 
 import { WORKLOADS } from '@/data/workloads';
 import { ratioColor } from '@/lib/scales';
-import type { Workload } from '@/types';
+import { headlineEvidenceStatus } from '@/lib/valueEvidence';
+import type { EvidenceStatus, Workload } from '@/types';
 import {
   recommendFor,
   VALUE_MINIMUM,
@@ -24,6 +25,12 @@ export interface FindingView {
   valueColor: string;
   /** Evidence #2: current monthly spend. */
   monthlySpend: number;
+  /**
+   * Provenance mark on the value ratio — the weakest value input's status
+   * (audit C1/C2). `undefined` when the value carries no evidence block; the
+   * UI then renders the ratio unmarked rather than inventing a status.
+   */
+  valueEvidenceStatus?: EvidenceStatus;
   /** One-line problem summary. */
   problem: string;
   /** Single recommended action, derived from real rules (recommendationMath). */
@@ -66,6 +73,7 @@ export function buildFindings(workloads: Workload[] = WORKLOADS): FindingView[] 
         valueRatio: ratio,
         valueColor: ratioColor(ratio),
         monthlySpend: w.costs.monthly_spend,
+        valueEvidenceStatus: headlineEvidenceStatus(w.value),
         problem,
         recommendedAction: rec.action,
         recommendationKind: rec.kind,

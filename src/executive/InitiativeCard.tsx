@@ -4,6 +4,7 @@
 // executive surface each card carries a matrixed-lens callout: one line per role
 // reading the same numbers differently.
 import { formatRatio, formatUSD } from '@/lib/format';
+import { EvidenceMark } from '@/components/EvidenceMark';
 import type { LanguageMap } from '@/lib/languageMap';
 import { INITIATIVE_STATUS_META, type InitiativeView } from './initiativeModel';
 
@@ -73,12 +74,13 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
         </div>
       </div>
 
-      {/* Cost efficiency (value ratio) — R4 pairing */}
+      {/* Cost efficiency (value ratio) — R4 pairing, with its provenance mark */}
       <p className="flex items-baseline gap-1.5 border-t border-exec-border pt-3 text-sm">
         <span className="text-exec-muted">{lang.valueRatioLabel}:</span>
         <span className="font-mono font-bold" style={{ color: initiative.valueColor }}>
           {formatRatio(initiative.valueRatio)}
         </span>
+        <EvidenceMark status={initiative.valueEvidenceStatus} />
       </p>
 
       {showLens && <MatrixedLens initiative={initiative} />}

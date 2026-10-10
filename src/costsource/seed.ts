@@ -2,14 +2,15 @@
 // PointFive-shaped findings are derived from the same WORKLOADS the rest of the
 // app uses, so the demo shows truthful numbers, not placeholders.
 //
-// Two configured sandbox sources exercise the version shim across the v1.0-v1.4
-// range (PointFive documents v1.0; a private-cloud FOCUS export at v1.2). A
-// third, unconfigured 'pointfive-live' descriptor represents the gated live
-// adapter (PR E) — it ships dark until real credentials exist. The live
-// PointFive and second-adapter implementations are PRs E and F, not this one.
+// Two configured sandbox sources exercise the version shim across the v1.0-v1.5
+// range (PointFive documents v1.0; a private-cloud FOCUS export at v1.2; 1.5 is
+// a working draft the shim also accepts). A third, unconfigured 'pointfive-live'
+// descriptor represents the gated live adapter (PR E) — it ships dark until real
+// credentials exist. The live PointFive and second-adapter implementations are
+// PRs E and F, not this one.
 
 import { WORKLOADS, DEMO_NOW } from '@/data/workloads';
-import { findModel } from '@/data/models';
+import { findModel, modelIdentityForService } from '@/data/models';
 import { currentBillingPeriod } from '@/lib/billingPeriod';
 import type { Workload } from '@/types';
 import type { CostSourceDescriptor, CostFinding } from './CostSourceClient';
@@ -159,6 +160,27 @@ function rawRowFor(w: Workload, version: FocusVersion): RawSourceRow {
   }
   if (isAtLeast(version, '1.4')) {
     row = { ...row, CapacityReservationId: null, CapacityReservationStatus: null };
+  }
+  if (isAtLeast(version, '1.5')) {
+    // WORKING DRAFT (ratifies 3 Dec 2026). Model identity is registry-derived
+    // (family 1 mapping); the token labels, requester identity, and SKU price
+    // join key stay null — this exporter does not emit token-level draft
+    // telemetry, and FR 2099's own rule is to omit rather than misdescribe a
+    // row that blends token kinds.
+    const identity = modelIdentityForService(core.ServiceName);
+    row = {
+      ...row,
+      ModelDeveloper: identity?.ModelDeveloper ?? null,
+      ModelFamily: identity?.ModelFamily ?? null,
+      ModelId: identity?.ModelId ?? null,
+      ModelVersion: identity?.ModelVersion ?? null,
+      TokenCacheAction: null,
+      TokenDirection: null,
+      PrincipalId: null,
+      CredentialId: null,
+      RequesterDetails: null,
+      SkuPriceId: null,
+    };
   }
   return row;
 }

@@ -41,12 +41,17 @@ export class ServiceNowAdapter {
     sourceId: string,
     window: CostWindow,
   ): CostRowsResult {
-    const { rows: canonicalRows, backfilledColumns } = normalizeRows(rows, sourceId, version);
+    const {
+      rows: canonicalRows,
+      backfilledColumns,
+      draftColumnsBackfilled,
+    } = normalizeRows(rows, sourceId, version);
     return {
       sourceId,
       sourceVersion: version,
       canonicalVersion: CANONICAL_FOCUS_VERSION,
       backfilledColumns,
+      draftColumnsBackfilled,
       window,
       generatedAt: new Date().toISOString(),
       rows: canonicalRows,

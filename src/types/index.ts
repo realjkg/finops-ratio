@@ -1,6 +1,7 @@
 // Ratio data model — see `.obvious/obvious.md` Design Guidance (Data-Model Invariants).
 // Types are the contract between seed data, forecast math, and the UI.
 
+import type { EvidenceStatus } from '@/outcomes/types';
 export type ModelProvider =
   | 'openai'
   | 'anthropic'
@@ -52,11 +53,48 @@ export interface WorkloadOutputs {
   deflection_rate: number;
 }
 
+// Provenance of value figures (audit C1/C8). Ratio re-uses the outcomes
+// module's EvidenceStatus — one vocabulary for evidence rigor codebase-wide.
+export type { EvidenceStatus };
+
+/**
+ * Per-input provenance for the value components (audit C1). The derived
+ * fields (`total_value`, `value_ratio`) carry no mark of their own — the
+ * headline inherits the weakest input's status (see `lib/valueEvidence.ts`).
+ * The harm and floor marks cover the defensible-value inputs (audit C3/C4).
+ */
+export interface WorkloadValueEvidence {
+  revenue_protected: EvidenceStatus;
+  cost_avoided: EvidenceStatus;
+  /** Provenance of the harm-from-misses input (audit C4). */
+  harm_from_misses?: EvidenceStatus;
+  /** Provenance of the quality-floor pass-rate input (audit C3). */
+  quality_floor_pass_rate?: EvidenceStatus;
+}
+
 export interface WorkloadValue {
   revenue_protected: number;
   cost_avoided: number;
+  /**
+   * Monthly harm caused by missed/failed outputs (audit C4) — refunds, rework,
+   * manual cleanup. Subtracted after the floor gate. Absent on legacy shapes
+   * (no harm accounting) — `lib/valueMath.ts` treats it as zero.
+   */
+  harm_from_misses?: number;
+  /**
+   * Share of outputs (0–1) meeting the workload's quality floor (audit C3).
+   * Outputs missing the floor contribute no value. Absent on legacy shapes —
+   * ungated, i.e. every output counted.
+   */
+  quality_floor_pass_rate?: number;
   total_value: number;
   value_ratio: number;
+  /**
+   * Evidence status of the value inputs. Absent on legacy shapes (values built
+   * before provenance tracking) — the UI renders such ratios unmarked rather
+   * than inventing a status.
+   */
+  evidence?: WorkloadValueEvidence;
 }
 
 export type GovernanceGateId = 'policy' | 'ethics' | 'cost' | 'scale';

@@ -4,8 +4,15 @@
 // .obvious/skills/agent-prompt — cost is always paired with its value ratio.
 
 import type { AIClient, AIContext, AIMessage, AIResponse } from './AIClient';
+import type { EvidenceStatus } from '@/types';
 
 type Intent = 'at_risk' | 'cost_driver' | 'savings' | 'summary' | 'help';
+
+// Provenance suffix (audit C1/C2): every cited ratio states its evidence
+// status — the agent never presents an assumed value as measured.
+function evidenceNote(status?: EvidenceStatus): string {
+  return status ? ` (value evidence: ${status})` : '';
+}
 
 function classify(query: string): Intent {
   const q = query.toLowerCase();
@@ -30,7 +37,7 @@ function atRisk(ctx: AIContext): AIResponse {
   );
   const lines = risky.map(
     (i) =>
-      `• **${i.name}** — ${i.status}, ${formatUSD(i.monthlyCost)}/mo at ${i.valueRatio.toFixed(1)}× return` +
+      `• **${i.name}** — ${i.status}, ${formatUSD(i.monthlyCost)}/mo at ${i.valueRatio.toFixed(1)}× return${evidenceNote(i.valueEvidenceStatus)}` +
       (i.savingsOpportunity > 0
         ? `, ${formatUSD(i.savingsOpportunity)}/mo savings identified`
         : ''),
@@ -54,7 +61,7 @@ function costDriver(ctx: AIContext): AIResponse {
   const top = [...ctx.initiatives].sort((a, b) => b.monthlyCost - a.monthlyCost)[0];
   if (!top) return help();
   const text = [
-    `The largest cost driver is **${top.name}** at ${formatUSD(top.monthlyCost)}/mo (${top.valueRatio.toFixed(1)}× return — R4: cost paired with value).`,
+    `The largest cost driver is **${top.name}** at ${formatUSD(top.monthlyCost)}/mo (${top.valueRatio.toFixed(1)}× return${evidenceNote(top.valueEvidenceStatus)} — R4: cost paired with value).`,
     top.status !== 'On Track'
       ? `It is currently **${top.status}** — consider a budget review.`
       : `Its value ratio justifies the spend; monitor budget consumption (${top.budgetConsumedPct}% consumed this period).`,

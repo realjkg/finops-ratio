@@ -12,10 +12,10 @@ import Link from 'next/link';
 import { useState, useCallback } from 'react';
 import { useStore } from '@/store/useStore';
 import { landingSummary } from '@/connectors/ingestLanding';
-import { formatTokens, formatUSD } from '@/lib/format';
 import { WORKLOADS } from '@/data/workloads';
 import { createAttributionClient } from './index';
-import type { AttributionDimension, AttributionReport, AttributionRow } from './index';
+import { LiveAccrualBoard } from './LiveAccrualBoard';
+import type { AttributionDimension, AttributionReport } from './index';
 
 type LoadState =
   | { status: 'idle' }
@@ -32,57 +32,10 @@ function portfolioValueRatio(): number {
 }
 
 // ---------------------------------------------------------------------------
-// Row rendering — a ranked list, not a new signature component
-// ---------------------------------------------------------------------------
-
-function LeaderboardRow({ row, rank }: { row: AttributionRow; rank: number }) {
-  const sharePct = `${(row.shareOfTotal * 100).toFixed(1)}%`;
-  return (
-    <li className="rounded-card border border-edge bg-slab p-4">
-      <div className="flex items-baseline justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-widest text-dim">#{rank} · {row.dimension}</p>
-          <h3 className="truncate text-base font-semibold text-txt">{row.key}</h3>
-        </div>
-        <div className="text-right">
-          <p className="font-mono text-lg font-bold text-cost">{formatUSD(row.inferenceCost)}</p>
-          <p className="text-xs text-sub">{sharePct} of burn</p>
-        </div>
-      </div>
-
-      {/* Share bar — share of TOTAL ABSOLUTE burn. Quiet: hairline track, cost fill. */}
-      <div className="mt-3 h-1.5 w-full rounded-full bg-raised" role="presentation">
-        <div
-          className="h-full rounded-full bg-cost"
-          style={{ width: `${Math.min(row.shareOfTotal * 100, 100)}%` }}
-        />
-      </div>
-
-      <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs">
-        <div className="flex items-baseline justify-between gap-2">
-          <dt className="text-sub">Tokens in (MTD)</dt>
-          <dd className="font-mono text-txt">{formatTokens(row.tokensIn)}</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-2">
-          <dt className="text-sub">Tokens out (MTD)</dt>
-          <dd className="font-mono text-txt">{formatTokens(row.tokensOut)}</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-2">
-          <dt className="text-sub">Workloads</dt>
-          <dd className="font-mono text-txt">{row.inputs.workloadIds.length}</dd>
-        </div>
-      </dl>
-
-      {/* The working, always shown (tokenomics honesty style). */}
-      <p className="mt-3 border-t border-edge pt-2 text-[11px] leading-relaxed text-dim">
-        <span className="font-mono">{row.formulaLabel}</span> · {row.basis}
-      </p>
-    </li>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Page
+// Page — the success view renders the LIVE leaderboard (LiveAccrualBoard):
+// ticking totals, animated share bars, a rolling accrual curve, and
+// framer-motion rank re-ordering. The static ranked list is gone; the base
+// report figures remain visible as each live row's base + working.
 // ---------------------------------------------------------------------------
 
 export function AttributionPage() {
@@ -224,25 +177,15 @@ export function AttributionPage() {
         {/* Success */}
         {loadState.status === 'success' && (
           <div className="space-y-4">
-            <div className="rounded-card border border-edge bg-deep px-4 py-3">
-              <p className="text-xs text-sub">
-                Portfolio burn {formatUSD(loadState.data.totalInferenceCost)} ·{' '}
-                {formatTokens(loadState.data.totalTokensIn)} tokens in ·{' '}
-                {formatTokens(loadState.data.totalTokensOut)} tokens out ·{' '}
-                {loadState.data.window}
-              </p>
-            </div>
-
             {loadState.data.rows.length === 0 ? (
               <p className="rounded-card border border-edge bg-slab p-6 text-center text-sm text-dim">
                 Nothing to rank — the report found no records for this dimension.
               </p>
             ) : (
-              <ol className="space-y-3">
-                {loadState.data.rows.map((row, i) => (
-                  <LeaderboardRow key={`${row.dimension}:${row.key}`} row={row} rank={i + 1} />
-                ))}
-              </ol>
+              <LiveAccrualBoard
+                key={`${clientMode}:${dimension}:${loadState.data.generatedAt}`}
+                report={loadState.data}
+              />
             )}
 
             <div className="rounded-card border border-edge bg-slab px-4 py-3">

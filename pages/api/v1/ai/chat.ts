@@ -267,6 +267,9 @@ export function buildSystemPrompt(ctx: AIContext): string {
     .map(
       (i) =>
         `- ${i.name}: ${fmt(i.monthlyCost)}/mo | Annual: ${fmt(i.annualRunRate)} | Budget: ${i.budgetConsumedPct}%\n  Status: ${i.status} | Value ratio: ${i.valueRatio.toFixed(1)}×` +
+        // Provenance rides the data line (audit C1/C2) — the agent never
+        // presents an assumed value as measured.
+        (i.valueEvidenceStatus ? ` (evidence: ${i.valueEvidenceStatus})` : '') +
         (i.savingsOpportunity > 0
           ? ` | Savings opportunity: ${fmt(i.savingsOpportunity)}/mo`
           : ''),
@@ -277,7 +280,9 @@ export function buildSystemPrompt(ctx: AIContext): string {
     ctx.workloads
       ?.map(
         (w) =>
-          `- ${w.name} (${w.model}): ${fmt(w.monthlySpend)}/mo | ${w.valueRatio.toFixed(1)}× return | shape: ${w.demandShape} | gates: ${w.governanceGatesPassed}/4`,
+          `- ${w.name} (${w.model}): ${fmt(w.monthlySpend)}/mo | ${w.valueRatio.toFixed(1)}× return` +
+          (w.valueEvidenceStatus ? ` (evidence: ${w.valueEvidenceStatus})` : '') +
+          ` | shape: ${w.demandShape} | gates: ${w.governanceGatesPassed}/4`,
       )
       .join('\n') ?? '';
 
