@@ -31,12 +31,10 @@ export function NavBar({
   agentOpen?: boolean;
 }) {
   return (
-    <nav
-      className="flex min-h-10 shrink-0 flex-wrap items-center gap-0.5 py-2 border-b border-edge bg-deep px-3"
-      aria-label="Main navigation"
-    >
+    <nav className="shrink-0 border-b border-edge bg-deep" aria-label="Main navigation">
+      <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 px-3 py-2 md:flex md:h-10 md:gap-0.5 md:py-0">
       {/* Logo mark */}
-      <span className="mr-4 flex items-center gap-1.5">
+      <span className="flex items-center gap-1.5 md:mr-4">
         <span
           className="flex h-5 w-5 items-center justify-center rounded font-mono text-xs font-bold"
           style={{ background: 'var(--gate)' }}
@@ -47,23 +45,25 @@ export function NavBar({
         <span className="font-mono text-sm font-bold tracking-tight text-txt">Ratio</span>
       </span>
 
-      {NAV_ITEMS.map((item) => {
-        const isActive = item.key === active;
-        return (
-          <Link
-            key={item.key}
-            href={item.href}
-            className={`rounded px-2.5 py-1 font-mono text-xs transition-colors ${
-              isActive
-                ? 'bg-raised text-txt'
-                : 'text-sub hover:bg-raised/60 hover:text-txt'
-            }`}
-            aria-current={isActive ? 'page' : undefined}
-          >
-            {item.label}
-          </Link>
-        );
-      })}
+      <div className="col-span-2 row-start-2 flex min-w-0 gap-0.5 overflow-x-auto pb-0.5 md:col-auto md:row-auto md:overflow-visible md:pb-0">
+        {NAV_ITEMS.map((item) => {
+          const isActive = item.key === active;
+          return (
+            <Link
+              key={item.key}
+              href={item.href}
+              className={`shrink-0 rounded px-2.5 py-1 font-mono text-xs transition-colors ${
+                isActive
+                  ? 'bg-raised text-txt'
+                  : 'text-sub hover:bg-raised/60 hover:text-txt'
+              }`}
+              aria-current={isActive ? 'page' : undefined}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
+      </div>
 
       {/* Single agent launcher — purple AI token, reserved warm accent untouched. */}
       {onOpenAgent && (
@@ -72,7 +72,7 @@ export function NavBar({
           onClick={onOpenAgent}
           aria-expanded={agentOpen}
           aria-controls={AI_PANEL_ID}
-          className="ml-auto flex items-center gap-1.5 rounded border border-purple/60 bg-purple/15 px-2.5 py-1 font-mono text-xs font-bold text-purple transition-colors hover:bg-purple/25"
+          className="col-start-2 row-start-1 ml-auto flex items-center gap-1.5 rounded border border-purple/60 bg-purple/15 px-2.5 py-1 font-mono text-xs font-bold text-purple transition-colors hover:bg-purple/25 md:col-auto md:row-auto"
         >
           <span
             className="flex h-4 w-4 items-center justify-center rounded font-mono text-[10px] font-bold text-void"
@@ -84,6 +84,7 @@ export function NavBar({
           Ask Frank Coster
         </button>
       )}
+      </div>
     </nav>
   );
 }
