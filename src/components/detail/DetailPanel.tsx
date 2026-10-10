@@ -68,7 +68,7 @@ export function DetailPanel() {
           </div>
         </div>
 
-        <nav className="-mx-4 mt-4 flex gap-1 overflow-x-auto px-4 sm:-mx-6 sm:px-6 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
+        <nav aria-label="Workload detail sections" className="-mx-4 mt-4 flex gap-1 overflow-x-auto px-4 sm:-mx-6 sm:px-6 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
           {TABS.map((tab) => (
             <button
               key={tab.id}
