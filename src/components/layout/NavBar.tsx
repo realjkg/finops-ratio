@@ -81,7 +81,8 @@ export function NavBar({
           >
             F
           </span>
-          Ask Frank Coster
+          <span className="md:hidden">Ask Frank</span>
+          <span className="hidden md:inline">Ask Frank Coster</span>
         </button>
       )}
       </div>
