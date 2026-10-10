@@ -10,6 +10,8 @@
 //     user = the sampled demo query log), and the UI renders it verbatim.
 import Link from 'next/link';
 import { useState, useCallback } from 'react';
+import { useStore } from '@/store/useStore';
+import { landingSummary } from '@/connectors/ingestLanding';
 import { WORKLOADS } from '@/data/workloads';
 import { createAttributionClient } from './index';
 import { LiveAccrualBoard } from './LiveAccrualBoard';
@@ -37,6 +39,10 @@ function portfolioValueRatio(): number {
 // ---------------------------------------------------------------------------
 
 export function AttributionPage() {
+  // Landed connector runs — provenance only; the report itself stays on the
+  // attribution seam (mock/live) and never mixes connector rows into its math.
+  const ingestRuns = useStore((s) => s.ingestRuns);
+  const landed = Object.values(ingestRuns).map(landingSummary);
   const [dimension, setDimension] = useState<AttributionDimension>('team');
   const [clientMode, setClientMode] = useState<'mock' | 'live'>('mock');
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' });
@@ -71,6 +77,27 @@ export function AttributionPage() {
             cost this month. This list ranks absolute burn only — value never sorts it.
           </p>
         </div>
+
+        {/* Landed connector data — provenance strip; additive, no seam change. */}
+        {landed.length > 0 && (
+          <div className="mb-6 rounded-card border border-value/30 bg-slab p-4">
+            <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-sub">
+              Landed via connectors
+            </p>
+            {landed.map((run) => (
+              <p key={run.sourceName + run.at} className="font-mono text-[11px] leading-relaxed text-sub">
+                <span style={{ color: 'var(--value)' }}>{run.sourceName}</span>
+                {' · '}{run.rows} canonical rows at {run.canonicalVersion}
+                {' · '}{run.workloadsResolved} workload{run.workloadsResolved !== 1 ? 's' : ''}
+                {run.teams.length > 0 ? ` · teams: ${run.teams.join(', ')}` : ''}
+                {' · '}{run.at.slice(11, 16)}Z
+              </p>
+            ))}
+            <Link href="/connectors" className="mt-1.5 inline-block font-mono text-[10px] text-dim underline">
+              Manage connectors
+            </Link>
+          </div>
+        )}
 
         {/* Controls */}
         <div className="mb-6 rounded-card border border-edge bg-slab p-6">

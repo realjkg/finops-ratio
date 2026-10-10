@@ -21,6 +21,7 @@ export interface CostWindow {
 export type SourceKind =
   | 'pointfive'
   | 'focus_file'
+  | 'servicenow' // synthetic CMDB/ITBM cost allocation (demo seed, no live integration)
   | 'mock'
   | 'cloud' // public-cloud FOCUS export (Azure / AWS / GCP)
   | 'kubernetes' // OpenCost / Kubecost FOCUS export

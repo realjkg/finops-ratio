@@ -3,6 +3,7 @@
 
 import { useMemo } from 'react';
 import { useStore } from '@/store/useStore';
+import { landedWorkloads } from '@/connectors/ingestLanding';
 import { Filters } from './Filters';
 import { WorkloadCard } from './WorkloadCard';
 
@@ -13,6 +14,8 @@ export function WorkloadList() {
   const selectedId = useStore((s) => s.selectedId);
   const select = useStore((s) => s.select);
 
+  const ingestRuns = useStore((s) => s.ingestRuns);
+
   const visible = useMemo(() => {
     return workloads
       .filter((w) => filters.team === 'all' || w.team === filters.team)
@@ -20,6 +23,9 @@ export function WorkloadList() {
       .filter((w) => filters.environment === 'all' || w.environment === filters.environment)
       .sort((a, b) => a.value.value_ratio - b.value.value_ratio);
   }, [workloads, filters]);
+
+  // Connector provenance: which workloads' cost rows landed in an ingest run.
+  const landed = useMemo(() => landedWorkloads(ingestRuns), [ingestRuns]);
 
   return (
     <aside aria-label="Workload list" className="flex w-full shrink-0 flex-col border-b border-edge bg-deep md:w-[280px] md:border-b-0 md:border-r">
@@ -46,6 +52,7 @@ export function WorkloadList() {
                 selected={w.id === selectedId}
                 secondaryMode={secondaryMode}
                 onSelect={select}
+                landedVia={landed.get(w.id)}
               />
             </div>
           ))
@@ -54,4 +61,3 @@ export function WorkloadList() {
     </aside>
   );
 }
-

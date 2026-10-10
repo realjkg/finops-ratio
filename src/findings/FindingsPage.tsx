@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useCallback, useMemo, useState } from 'react';
 import { useStore } from '@/store/useStore';
+import { landedFindings } from '@/connectors/ingestLanding';
 import { buildFindings, type FindingView } from './findingsModel';
 import { ValueRatioMeter } from './ValueRatioMeter';
 import { SpendToValueGraph } from './SpendToValueGraph';
@@ -43,10 +44,14 @@ const cmModeEnv = process.env.NEXT_PUBLIC_CM_MODE;
 
 export function FindingsPage() {
   const workloads = useStore((s) => s.workloads);
+  const ingestRuns = useStore((s) => s.ingestRuns);
   const sim = useStore(s => s.simulation);
   const simBusy = useStore(s => s.simulationBusy);
   const run = useStore(s => s.simulationCommand);
   const findings = useMemo(() => buildFindings(workloads), [workloads]);
+  // Findings reported by a connected cost-source adapter (e.g. PointFive
+  // DeepWaste) from a landed ingest run — real connector output, attributed.
+  const connectorFindings = useMemo(() => landedFindings(ingestRuns), [ingestRuns]);
 
   // Auto-select the worst finding on first render.
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -196,6 +201,35 @@ export function FindingsPage() {
       </header>
 
       {sim && <div className="flex flex-wrap items-center gap-3 border-b border-edge px-4 py-3 text-sm text-sub"><span>Apply requests a simulated change. Approval and application are tracked in the customer workflow.</span><Link href="/workspace#decisions" className="text-unit underline">Review change decisions</Link>{sim.state.dismissed.length > 0 && <button disabled={simBusy} className="underline" onClick={() => void run({ type: 'restore-findings' })}>Restore dismissed findings</button>}</div>}
+
+      {/* Landed connector findings — only after an ingest brought some in. */}
+      {connectorFindings.length > 0 && (
+        <div className="border-b border-edge bg-deep/60 px-6 py-3">
+          <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-sub">
+            Connector findings — {connectorFindings.length} landed from cost-source adapters
+          </p>
+          <ul className="space-y-1">
+            {connectorFindings.map((f) => (
+              <li key={f.id} className="flex flex-wrap items-baseline gap-x-2 font-mono text-[11px]">
+                <span className="text-dim">{f.sourceName}</span>
+                <span
+                  className="font-bold"
+                  style={{ color: f.severity === 'critical' ? 'var(--cost)' : f.severity === 'warning' ? 'var(--shape)' : 'var(--unit)' }}
+                >
+                  {f.type === 'anomaly' ? '▲' : '◆'} {f.category}
+                </span>
+                <span className="text-txt">{f.title}</span>
+                <span className="text-dim">
+                  {f.type === 'anomaly'
+                    ? `delta ${f.observedSpendDelta >= 0 ? '+' : ''}$${f.observedSpendDelta.toFixed(0)}`
+                    : `est. $${f.estimatedMonthlySavings.toFixed(0)}/mo`}
+                </span>
+                <span className="text-dim">· {f.resourceId}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {/* Two-pane content */}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto md:flex-row md:overflow-hidden">
         {/* Left: ranked findings list */}

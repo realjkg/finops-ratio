@@ -5,6 +5,13 @@
 import { create } from 'zustand';
 import type { Command, SimSession, Workspace } from '@/simulation/types';
 import { simulationRequest, SimulationHttpError } from '@/simulation/client';
+import type { CostSourceClient } from '@/costsource';
+import type {
+  ConnectorBusyPhase,
+  ConnectorSession,
+  IngestRun,
+} from '@/connectors/ingestLanding';
+import { currentMonthWindow, FOCUS_DOOR_WALK_ID } from '@/connectors/ingestLanding';
 import type {
   Alert,
   BudgetProfile,
@@ -82,6 +89,27 @@ interface AppState {
   loadSimulation: (session: SimSession, state: Workspace) => void;
   clearSimulation: () => void;
   simulationCommand: (command: Command) => Promise<void>;
+
+  // Connector walk (connectors E2E demo): per-source session state + the
+  // ingest runs whose data has landed in the connected surfaces. Sessions are
+  // demo-walk state only — registry status stays the env-derived truth.
+  connectorSessions: Record<string, ConnectorSession>;
+  ingestRuns: Record<string, IngestRun>;
+  connectorBusy: { sourceId: string; phase: ConnectorBusyPhase } | null;
+  /** Health-probe connect for seam adapters: open iff reachable && authed. */
+  connectConnector: (sourceId: string, client: CostSourceClient) => Promise<void>;
+  /** Immediate open for the direct-ingest door — no external dependency to probe. */
+  openConnectorSession: (sourceId: string) => void;
+  /** Ingest through the seam: fetchCostRows + fetchFindings, run lands or error. */
+  runConnectorIngest: (
+    sourceId: string,
+    sourceName: string,
+    client: CostSourceClient,
+  ) => Promise<void>;
+  /** Landed run for the direct-ingest door (pre-computed by FocusFileAdapter). */
+  recordDirectIngest: (walkId: string, run: IngestRun) => void;
+  /** Close the session and withdraw its landed data — clean disconnect. */
+  disconnectConnector: (sourceId: string) => void;
   now: Date;
   workloads: Workload[];
   budgets: BudgetProfile[];
@@ -120,8 +148,11 @@ export const useStore = create<AppState>((set, get) => ({
   simulation: null,
   simulationBusy: false,
   simulationError: null,
-  loadSimulation: (session, state) => set({ simulation: { session, state }, workloads: state.workloads, budgets: state.budgets, alerts: state.alerts, now: new Date(state.asOf), simulationError: null }),
-  clearSimulation: () => set({ simulation: null, simulationBusy: false, simulationError: null, workloads: structuredClone(WORKLOADS), budgets: structuredClone(BUDGET_PROFILES), alerts: structuredClone(ALERTS), now: DEMO_NOW, aiMessages: [], aiThinking: false, aiPanelOpen: false }),
+  connectorSessions: {},
+  ingestRuns: {},
+  connectorBusy: null,
+  loadSimulation: (session, state) => set({ simulation: { session, state }, workloads: state.workloads, budgets: state.budgets, alerts: state.alerts, now: new Date(state.asOf), simulationError: null, connectorSessions: {}, ingestRuns: {}, connectorBusy: null }),
+  clearSimulation: () => set({ simulation: null, simulationBusy: false, simulationError: null, workloads: structuredClone(WORKLOADS), budgets: structuredClone(BUDGET_PROFILES), alerts: structuredClone(ALERTS), now: DEMO_NOW, aiMessages: [], aiThinking: false, aiPanelOpen: false, connectorSessions: {}, ingestRuns: {}, connectorBusy: null }),
   simulationCommand: async (command) => {
     const current = get().simulation;
     if (!current || get().simulationBusy) return;
@@ -136,6 +167,105 @@ export const useStore = create<AppState>((set, get) => ({
       }
     } finally { if (get().simulation?.session.csrf === current.session.csrf) set({ simulationBusy: false }); }
   },
+
+  // -- Connector walk -------------------------------------------------------
+  // Connect runs the seam's own health probe; success iff reachable && authed.
+  // The seam's failure detail is stored verbatim — the demo shows the honest
+  // reason (ships dark, missing env, auth required), never a friendlier gloss.
+  connectConnector: async (sourceId, client) => {
+    if (get().connectorBusy) return;
+    set({ connectorBusy: { sourceId, phase: 'connecting' } });
+    const openedAt = new Date().toISOString();
+    try {
+      const health = await client.healthCheck(sourceId);
+      const session: ConnectorSession =
+        health.reachable && health.authed
+          ? { state: 'open', openedAt }
+          : { state: 'error', error: health.detail, openedAt };
+      set((state) => ({ connectorSessions: { ...state.connectorSessions, [sourceId]: session } }));
+    } catch (err) {
+      set((state) => ({
+        connectorSessions: {
+          ...state.connectorSessions,
+          [sourceId]: {
+            state: 'error',
+            error: err instanceof Error ? err.message : String(err),
+            openedAt,
+          },
+        },
+      }));
+    } finally {
+      set({ connectorBusy: null });
+    }
+  },
+
+  openConnectorSession: (sourceId) => {
+    set((state) => ({
+      connectorSessions: {
+        ...state.connectorSessions,
+        [sourceId]: { state: 'open', openedAt: new Date().toISOString() },
+      },
+    }));
+  },
+
+  runConnectorIngest: async (sourceId, sourceName, client) => {
+    if (get().connectorBusy) return;
+    const session = get().connectorSessions[sourceId];
+    if (!session || session.state !== 'open') return; // ingest requires an open session
+    set({ connectorBusy: { sourceId, phase: 'ingesting' } });
+    try {
+      const result = await client.fetchCostRows(sourceId, currentMonthWindow());
+      const findings = await client.fetchFindings(sourceId);
+      const run: IngestRun = {
+        sourceId,
+        sourceName,
+        at: new Date().toISOString(),
+        result,
+        findings,
+      };
+      set((state) => ({
+        ingestRuns: { ...state.ingestRuns, [sourceId]: run },
+        connectorSessions: { ...state.connectorSessions, [sourceId]: { state: 'open', openedAt: session.openedAt } },
+      }));
+    } catch (err) {
+      // Landed data stays put when a re-ingest fails; the session carries the
+      // seam's error verbatim so the demo can show the honest failure.
+      set((state) => ({
+        connectorSessions: {
+          ...state.connectorSessions,
+          [sourceId]: {
+            state: 'error',
+            error: err instanceof Error ? err.message : String(err),
+            openedAt: session.openedAt,
+          },
+        },
+      }));
+    } finally {
+      set({ connectorBusy: null });
+    }
+  },
+
+  recordDirectIngest: (walkId, run) => {
+    if (walkId !== FOCUS_DOOR_WALK_ID) return; // only the door may record direct ingests
+    set((state) => ({
+      ingestRuns: { ...state.ingestRuns, [walkId]: run },
+      connectorSessions: {
+        ...state.connectorSessions,
+        [walkId]: { state: 'open', openedAt: state.connectorSessions[walkId]?.openedAt ?? run.at },
+      },
+    }));
+  },
+
+  disconnectConnector: (sourceId) => {
+    set((state) => {
+      const sessions = { ...state.connectorSessions };
+      const runs = { ...state.ingestRuns };
+      delete sessions[sourceId];
+      delete runs[sourceId];
+      return { connectorSessions: sessions, ingestRuns: runs };
+    });
+  },
+
   now: DEMO_NOW,
   workloads: WORKLOADS,
   budgets: BUDGET_PROFILES,

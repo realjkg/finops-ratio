@@ -53,6 +53,7 @@ describe('M2 — sourcesForEnv is pure over the supplied env', () => {
     expect(polluted.filter((s) => s.configured).map((s) => s.id).sort()).toEqual([
       'focus-file-sandbox',
       'pointfive-sandbox',
+      'servicenow-sandbox',
     ]);
   });
 });
