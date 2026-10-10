@@ -14,6 +14,7 @@ import type {
   WorkloadGovernance,
 } from '@/types';
 import { findModel } from './models';
+import { cachedInputRate } from '@/lib/derive';
 import { deriveDefensibleValue } from '@/lib/valueMath';
 
 // Deterministic demo clock so forecasts + budget bars are stable across reloads.
@@ -72,7 +73,7 @@ function buildWorkload(spec: WorkloadSeedSpec): Workload {
   const inputCost = (spec.callsToday * spec.avgInputTokens) / 1_000_000 * model.pricing.input_per_1m;
   const outputCost =
     (spec.callsToday * spec.avgOutputTokens) / 1_000_000 * model.pricing.output_per_1m;
-  const cachedRate = model.pricing.cached_input_per_1m ?? model.pricing.input_per_1m * 0.25;
+  const cachedRate = cachedInputRate(model);
   const cachedCost = (spec.cachedTokensToday / 1_000_000) * cachedRate;
   const compute = (inputCost + outputCost) * 0.05; // small infra overhead
   const dailySpend = round2(inputCost + outputCost + cachedCost + compute);
@@ -119,6 +120,7 @@ function buildWorkload(spec: WorkloadSeedSpec): Workload {
       compute: round2(compute),
       tokens_in_today: tokensInToday,
       tokens_out_today: tokensOutToday,
+      tokens_cached_today: spec.cachedTokensToday,
       tokens_in_mtd: tokensInToday * CURRENT_DAY,
       tokens_out_mtd: tokensOutToday * CURRENT_DAY,
     },

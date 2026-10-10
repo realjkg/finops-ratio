@@ -52,6 +52,8 @@ export const REVIEWED_PRIVILEGES: Readonly<Record<CheckedRole, readonly string[]
     'schema:public:USAGE', // PostgreSQL 15+ default (PUBLIC); nothing in public is granted to the reader
     'schema:ratio:USAGE',
     'relation:ratio.cost_facts_published:SELECT',
+    'relation:ratio.outcome_events_published:SELECT',
+    'relation:ratio.outcome_period_counts:SELECT',
     'function:ratio.current_tenant_id()',
   ],
   ratio_worker: [
@@ -96,6 +98,22 @@ export const REVIEWED_PRIVILEGES: Readonly<Record<CheckedRole, readonly string[]
     'relation:ratio.fx_rates:UPDATE',
     'relation:ratio.fx_rates:DELETE',
     'relation:ratio.cost_facts_published_enriched:SELECT',
+    'relation:ratio.outcome_unit_registrations:SELECT',
+    'relation:ratio.outcome_unit_registrations:INSERT',
+    'relation:ratio.outcome_unit_registrations:UPDATE',
+    'relation:ratio.outcome_events:SELECT',
+    'relation:ratio.outcome_events:INSERT',
+    'relation:ratio.outcome_events:DELETE',
+    'relation:ratio.outcome_benefit_evidence:SELECT',
+    'relation:ratio.outcome_benefit_evidence:INSERT',
+    'relation:ratio.outcome_benefit_evidence:UPDATE',
+    'relation:ratio.outcome_benefit_evidence:DELETE',
+    'relation:ratio.outcome_supplemental_costs:SELECT',
+    'relation:ratio.outcome_supplemental_costs:INSERT',
+    'relation:ratio.outcome_supplemental_costs:UPDATE',
+    'relation:ratio.outcome_supplemental_costs:DELETE',
+    'relation:ratio.outcome_events_published:SELECT',
+    'relation:ratio.outcome_period_counts:SELECT',
     'function:ratio.current_tenant_id()',
     'function:ratio.text_looks_secret(text)',
     'function:ratio.jsonb_has_secret_like_key(jsonb)',
@@ -127,6 +145,17 @@ export const REVIEWED_TRIGGERS: readonly string[] = [
   'ratio.ingest_validation_errors:refuse_truncate:ratio.tg_refuse_truncate()',
   'ratio.period_publications:publication_consistency:ratio.tg_publication_consistency()',
   'ratio.period_publications:refuse_truncate:ratio.tg_refuse_truncate()',
+  // 0004_outcome_ledger: the outcome ledger's guards. Batch-child and truncate
+  // guards reuse the 0001 trigger functions; the registry and the two claim
+  // tables get their own lifecycle/review guards defined in 0004.
+  'ratio.outcome_events:child_of_staged_batch:ratio.tg_child_of_staged_batch()',
+  'ratio.outcome_events:refuse_truncate:ratio.tg_refuse_truncate()',
+  'ratio.outcome_unit_registrations:refuse_truncate:ratio.tg_refuse_truncate()',
+  'ratio.outcome_unit_registrations:registration_lifecycle:ratio.tg_outcome_registration_lifecycle()',
+  'ratio.outcome_benefit_evidence:claim_review:ratio.tg_outcome_claim_review()',
+  'ratio.outcome_benefit_evidence:refuse_truncate:ratio.tg_refuse_truncate()',
+  'ratio.outcome_supplemental_costs:claim_review:ratio.tg_outcome_claim_review()',
+  'ratio.outcome_supplemental_costs:refuse_truncate:ratio.tg_refuse_truncate()',
 ];
 
 /** Schemas in which PUBLIC must not hold EXECUTE on any function. */

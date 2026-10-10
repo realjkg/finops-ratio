@@ -42,14 +42,14 @@ async function connect(db: TestDatabase): Promise<Client> {
   return c;
 }
 
-function migrationsWith(extra: Record<string, string>): string {
+function migrationsWith(extra: Record<string, string>, opts: { only?: string[] } = { only: ['0001'] }): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-foundation-'));
   cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
   // Foundation fixtures build on the 0001 foundation only: later real migrations
   // are excluded so the injected fixture versions below are the only pending ones
   // past 0001 and inherit no real version's manifest requirements.
   for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) {
-    if (!f.startsWith('0001_')) continue;
+    if (opts.only && !opts.only.some((v) => f.startsWith(`${v}_`))) continue;
     fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
   }
   for (const [name, body] of Object.entries(extra)) fs.writeFileSync(path.join(dir, name), body);
@@ -105,7 +105,7 @@ describe('round 10: the manifest is generated from 0001 and cannot drift silentl
     await assertReviewedPrivileges(c);
     expect((await migrationStatus(c)).privilegeProblems).toEqual([]);
     await migrateDown(c, { steps: 1, env: { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'test' } });
-    await assertReviewedPrivileges(c); // 0001 reverted: absence is fine
+    await assertReviewedPrivileges(c); // the last migration reverted: absence is fine
     expect((await migrationStatus(c)).privilegeProblems).toEqual([]);
   });
 });

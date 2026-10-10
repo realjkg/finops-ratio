@@ -16,14 +16,16 @@ import { budgetFor } from '@/data/budgets';
 import { governanceGatesPassed } from '@/lib/derive';
 import { computeBudgetStatus, type BudgetStatus } from '@/lib/budgetStatus';
 import type { FocusVersion } from './focusVersions';
-import { columnsAddedAfter } from './focusVersions';
+import { columnsAddedAfter, draftColumnsAfter } from './focusVersions';
 import type {
+  CanonicalCostRow,
   CanonicalFocusRow,
   RatioFocusExtensions,
   RawSourceRow,
 } from './focusRows';
 import { upgradeToCanonicalCost } from './focusRows';
 import { resolveWorkloadId } from './seed';
+import { modelIdentityForService } from '@/data/models';
 
 /**
  * Stage 2: attach the Ratio value denominator to a cost row.
@@ -72,7 +74,29 @@ export function attachRatioValue<T extends { ResourceId: string }>(
 
 export interface NormalizedRows {
   rows: CanonicalFocusRow[];
+  /** Ratified columns the shim added to reach the canonical (v1.4) model. */
   backfilledColumns: string[];
+  /** FOCUS 1.5 working-draft columns backfilled onto every row (unratified — reported separately). */
+  draftColumnsBackfilled: string[];
+}
+
+/**
+ * FOCUS 1.5 model-identity backfill: when an exporter omits the draft's
+ * recommended identity properties, fill what the internal model registry can
+ * honestly derive from the row's ServiceName. Source-supplied values always
+ * win; anything the registry cannot say stays null (never a guessed value).
+ */
+function withRegistryModelIdentity(row: CanonicalCostRow): CanonicalCostRow {
+  if (row.ModelId && row.ModelDeveloper && row.ModelFamily) return row;
+  const identity = modelIdentityForService(row.ServiceName);
+  if (!identity) return row;
+  return {
+    ...row,
+    ModelDeveloper: row.ModelDeveloper ?? identity.ModelDeveloper,
+    ModelFamily: row.ModelFamily ?? identity.ModelFamily,
+    ModelId: row.ModelId ?? identity.ModelId,
+    ModelVersion: row.ModelVersion ?? identity.ModelVersion,
+  };
 }
 
 /** Full normalization: raw source rows -> canonical FOCUS rows + upgrade audit. */
@@ -82,8 +106,11 @@ export function normalizeRows(
   sourceVersion: FocusVersion,
 ): NormalizedRows {
   return {
-    rows: raws.map((raw) => attachRatioValue(upgradeToCanonicalCost(raw), sourceId, sourceVersion)),
+    rows: raws.map((raw) =>
+      attachRatioValue(withRegistryModelIdentity(upgradeToCanonicalCost(raw)), sourceId, sourceVersion),
+    ),
     backfilledColumns: columnsAddedAfter(sourceVersion),
+    draftColumnsBackfilled: draftColumnsAfter(sourceVersion),
   };
 }
 

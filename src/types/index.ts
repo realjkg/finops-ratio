@@ -37,6 +37,8 @@ export interface WorkloadCosts {
   compute: number;
   tokens_in_today: number;
   tokens_out_today: number;
+  /** Cache-hit input tokens today — billed at the registry's cached rate; uncached input is `tokens_in_today`. */
+  tokens_cached_today: number;
   tokens_in_mtd: number;
   tokens_out_mtd: number;
 }

@@ -21,6 +21,7 @@ export interface CostWindow {
 export type SourceKind =
   | 'pointfive'
   | 'focus_file'
+  | 'servicenow' // synthetic CMDB/ITBM cost allocation (demo seed, no live integration)
   | 'mock'
   | 'cloud' // public-cloud FOCUS export (Azure / AWS / GCP)
   | 'kubernetes' // OpenCost / Kubecost FOCUS export
@@ -59,7 +60,8 @@ export interface CostRowsResult {
   sourceId: string;
   sourceVersion: FocusVersion; // version the source exported
   canonicalVersion: FocusVersion; // always the v1.4 canonical target
-  backfilledColumns: string[]; // columns the shim added to reach canonical
+  backfilledColumns: string[]; // ratified columns the shim added to reach canonical
+  draftColumnsBackfilled: string[]; // FOCUS 1.5 working-draft columns backfilled (unratified)
   window: CostWindow;
   generatedAt: string; // ISO 8601
   rows: CanonicalFocusRow[];

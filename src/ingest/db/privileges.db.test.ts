@@ -59,8 +59,7 @@ function migrationsWith(extra: Record<string, string>): string {
   return dir;
 }
 
-/** Full real-migration copy, for tests that migrate ON TOP of an already-migrated
- *  database: verifyApplied must find every applied version's file in the fixture dir. */
+/** Full real-migration copy, for tests that migrate on top of an already-migrated database. */
 function fullMigrationsWith(extra: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-priv-full-'));
   cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
@@ -115,7 +114,11 @@ describe('runner catalog check: positive control', () => {
     expect(REVIEWED_PRIVILEGES.ratio_reader).toEqual(
       expect.arrayContaining(['relation:ratio.cost_facts_published:SELECT', 'function:ratio.current_tenant_id()', 'schema:ratio:USAGE']),
     );
-    expect(REVIEWED_PRIVILEGES.ratio_reader.filter((p) => p.startsWith('relation:'))).toEqual(['relation:ratio.cost_facts_published:SELECT']);
+    expect(REVIEWED_PRIVILEGES.ratio_reader.filter((p) => p.startsWith('relation:'))).toEqual([
+      'relation:ratio.cost_facts_published:SELECT',
+      'relation:ratio.outcome_events_published:SELECT',
+      'relation:ratio.outcome_period_counts:SELECT',
+    ]);
   });
 
   it('a legitimate marked expand migration (table, ratio function revoked from PUBLIC, ratio view, no new grants) still applies', async () => {
@@ -372,7 +375,7 @@ describe('round 5 M1: code that would run after the check (ledger / deferred tri
         WHERE NOT t.tgisinternal ORDER BY 1`,
     );
     expect(r.rows.map((x) => x.t)).toEqual([...REVIEWED_TRIGGERS].sort());
-    expect(REVIEWED_TRIGGERS).toHaveLength(11);
+    expect(REVIEWED_TRIGGERS).toHaveLength(19);
   });
 });
 

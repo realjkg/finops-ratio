@@ -108,6 +108,10 @@ const EXPECTED_TABLES = [
   'ingest_artifacts',
   'ingest_batches',
   'ingest_validation_errors',
+  'outcome_benefit_evidence',
+  'outcome_events',
+  'outcome_supplemental_costs',
+  'outcome_unit_registrations',
   'period_publications',
   'source_checkpoints',
   'sources',
@@ -295,8 +299,21 @@ describe('migration runner (real Postgres)', () => {
     const empty = await catalogSnapshot(c);
     expect(empty.namespaces).not.toContain('ratio');
 
+    // Capture the catalog after only the first migration has applied.
+    const firstOnly = copyMigrations();
+    for (const f of fs.readdirSync(firstOnly)) if (!f.startsWith('0001_')) fs.rmSync(path.join(firstOnly, f));
+    expect((await migrateUp(c, { dir: firstOnly })).applied).toEqual(['0001']);
+    const afterFirst = await catalogSnapshot(c);
+    expect(afterFirst.namespaces).toContain('ratio');
+
     await migrateUp(c);
     expect((await catalogSnapshot(c)).namespaces).toContain('ratio');
+
+    const latest = REAL_VERSIONS[REAL_VERSIONS.length - 1];
+    const lastDown = await migrateDown(c, { steps: 1, env: ALLOW_DOWN });
+    expect(lastDown.reverted).toEqual([latest]);
+    expect(await catalogSnapshot(c)).toEqual(afterFirst);
+    expect((await migrateUp(c)).applied).toEqual([latest]);
 
     const down = await migrateDown(c, { steps: REAL_VERSIONS.length, env: ALLOW_DOWN });
     expect(down.reverted).toEqual([...REAL_VERSIONS].reverse());

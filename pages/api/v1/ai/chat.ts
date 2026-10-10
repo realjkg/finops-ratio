@@ -282,7 +282,11 @@ export function buildSystemPrompt(ctx: AIContext): string {
         (w) =>
           `- ${w.name} (${w.model}): ${fmt(w.monthlySpend)}/mo | ${w.valueRatio.toFixed(1)}× return` +
           (w.valueEvidenceStatus ? ` (evidence: ${w.valueEvidenceStatus})` : '') +
-          ` | shape: ${w.demandShape} | gates: ${w.governanceGatesPassed}/4`,
+          ` | shape: ${w.demandShape} | gates: ${w.governanceGatesPassed}/4` +
+          // Defensive typeof: older clients may omit cacheHitRate on the wire.
+          (typeof w.cacheHitRate === 'number'
+            ? ` | cache hit: ${(w.cacheHitRate * 100).toFixed(1)}%`
+            : ' | cache hit: n/a'),
       )
       .join('\n') ?? '';
 

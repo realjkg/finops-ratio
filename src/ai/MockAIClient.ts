@@ -4,6 +4,7 @@
 // .obvious/skills/agent-prompt — cost is always paired with its value ratio.
 
 import type { AIClient, AIContext, AIMessage, AIResponse } from './AIClient';
+import { CACHE_HIT_RATE_MATERIAL } from '@/lib/derive';
 import type { EvidenceStatus } from '@/types';
 
 type Intent = 'at_risk' | 'cost_driver' | 'savings' | 'summary' | 'help';
@@ -57,6 +58,17 @@ function atRisk(ctx: AIContext): AIResponse {
   };
 }
 
+// Grounded cache-economics line (conformance A3). Initiatives map 1:1 to
+// workloads by id (initiativeModel), so the workload snapshot joins safely;
+// mentioned only when the hit rate clears CACHE_HIT_RATE_MATERIAL, and typeof
+// guards wire data from older clients that omit the field.
+function cacheLine(initiativeId: string, ctx: AIContext): string {
+  const workload = ctx.workloads?.find((w) => w.id === initiativeId);
+  const rate = workload?.cacheHitRate;
+  if (typeof rate !== 'number' || rate < CACHE_HIT_RATE_MATERIAL) return '';
+  return `Cache hit rate: ${(rate * 100).toFixed(1)}% of its input tokens are billed at the cached rate.`;
+}
+
 function costDriver(ctx: AIContext): AIResponse {
   const top = [...ctx.initiatives].sort((a, b) => b.monthlyCost - a.monthlyCost)[0];
   if (!top) return help();
@@ -68,6 +80,7 @@ function costDriver(ctx: AIContext): AIResponse {
     top.savingsOpportunity > 0
       ? `${formatUSD(top.savingsOpportunity)}/mo in savings opportunities are identified for this initiative.`
       : '',
+    cacheLine(top.id, ctx),
   ]
     .filter(Boolean)
     .join(' ');

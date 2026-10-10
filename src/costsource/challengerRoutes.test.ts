@@ -178,7 +178,12 @@ describe('#8 /api/costsource/sources hides live status from anonymous callers', 
     const list = res.body as Src[];
     expect(res.statusCode).toBe(200);
     for (const s of list) {
-      if (s.id === 'pointfive-sandbox' || s.id === 'focus-file-sandbox') continue;
+      if (
+        s.id === 'pointfive-sandbox' ||
+        s.id === 'focus-file-sandbox' ||
+        s.id === 'servicenow-sandbox'
+      )
+        continue;
       expect(s.configured).toBe(false);
       expect(s.connection).not.toBe('connected');
       expect(s).toEqual(neutral.find((n) => n.id === s.id));

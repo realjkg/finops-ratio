@@ -11,13 +11,15 @@
 // No badges, confetti, streaks — quiet governance. Calm register throughout.
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
+import { useCallback, useMemo, useState } from 'react';
 import { useStore } from '@/store/useStore';
+import { landedFindings } from '@/connectors/ingestLanding';
 import { buildFindings, type FindingView } from './findingsModel';
 import { ValueRatioMeter } from './ValueRatioMeter';
 import { SpendToValueGraph } from './SpendToValueGraph';
 import { EvidenceMark } from '@/components/EvidenceMark';
-import { formatUSD, formatRatio } from '@/lib/format';
+import { formatUSD, formatRatio, formatPct, formatTokens } from '@/lib/format';
 import { TOKEN_HEX } from '@/lib/scales';
 import {
   createCMClient,
@@ -42,10 +44,14 @@ const cmModeEnv = process.env.NEXT_PUBLIC_CM_MODE;
 
 export function FindingsPage() {
   const workloads = useStore((s) => s.workloads);
+  const ingestRuns = useStore((s) => s.ingestRuns);
   const sim = useStore(s => s.simulation);
   const simBusy = useStore(s => s.simulationBusy);
   const run = useStore(s => s.simulationCommand);
   const findings = useMemo(() => buildFindings(workloads), [workloads]);
+  // Findings reported by a connected cost-source adapter (e.g. PointFive
+  // DeepWaste) from a landed ingest run — real connector output, attributed.
+  const connectorFindings = useMemo(() => landedFindings(ingestRuns), [ingestRuns]);
 
   // Auto-select the worst finding on first render.
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -195,6 +201,35 @@ export function FindingsPage() {
       </header>
 
       {sim && <div className="flex flex-wrap items-center gap-3 border-b border-edge px-4 py-3 text-sm text-sub"><span>Apply requests a simulated change. Approval and application are tracked in the customer workflow.</span><Link href="/workspace#decisions" className="text-unit underline">Review change decisions</Link>{sim.state.dismissed.length > 0 && <button disabled={simBusy} className="underline" onClick={() => void run({ type: 'restore-findings' })}>Restore dismissed findings</button>}</div>}
+
+      {/* Landed connector findings — only after an ingest brought some in. */}
+      {connectorFindings.length > 0 && (
+        <div className="border-b border-edge bg-deep/60 px-6 py-3">
+          <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-sub">
+            Connector findings — {connectorFindings.length} landed from cost-source adapters
+          </p>
+          <ul className="space-y-1">
+            {connectorFindings.map((f) => (
+              <li key={f.id} className="flex flex-wrap items-baseline gap-x-2 font-mono text-[11px]">
+                <span className="text-dim">{f.sourceName}</span>
+                <span
+                  className="font-bold"
+                  style={{ color: f.severity === 'critical' ? 'var(--cost)' : f.severity === 'warning' ? 'var(--shape)' : 'var(--unit)' }}
+                >
+                  {f.type === 'anomaly' ? '▲' : '◆'} {f.category}
+                </span>
+                <span className="text-txt">{f.title}</span>
+                <span className="text-dim">
+                  {f.type === 'anomaly'
+                    ? `delta ${f.observedSpendDelta >= 0 ? '+' : ''}$${f.observedSpendDelta.toFixed(0)}`
+                    : `est. $${f.estimatedMonthlySavings.toFixed(0)}/mo`}
+                </span>
+                <span className="text-dim">· {f.resourceId}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {/* Two-pane content */}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto md:flex-row md:overflow-hidden">
         {/* Left: ranked findings list */}
@@ -363,6 +398,18 @@ function RecommendationPane({
   const [refInput, setRefInput] = useState('');
   const [refProvider, setRefProvider] = useState<CMProvider>('jira');
 
+  // Dot click-through from the evidence graph: same workload-detail flow as
+  // the nav — select the workload, then open the /workloads detail surface.
+  const select = useStore((s) => s.select);
+  const router = useRouter();
+  const openWorkload = useCallback(
+    (id: string) => {
+      select(id);
+      router.push('/workloads');
+    },
+    [select, router],
+  );
+
   const hasAuditRecord = !!governance?.auditRecord;
 
   function handleAttachSubmit() {
@@ -405,6 +452,29 @@ function RecommendationPane({
             color={TOKEN_HEX.cost}
           />
         </div>
+        {/* Cache-evidence chip (audit A3) — only where cache economics
+            materially shape the cost (findingsModel gates it); unit cyan
+            marks informational data. Quiet, no new signature component. */}
+        {finding.cacheEvidence && (
+          <div
+            className="mt-3 rounded-md border border-edge bg-slab p-3"
+            data-testid="cache-evidence-chip"
+          >
+            <p className="font-mono text-[10px]" style={{ color: TOKEN_HEX.unit }}>
+              Cache economics
+            </p>
+            <p className="mt-1 font-mono text-base font-bold" style={{ color: TOKEN_HEX.unit }}>
+              {formatPct(finding.cacheEvidence.hitRate, 1)} cache hit rate
+            </p>
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-dim">
+              {formatTokens(finding.cacheEvidence.cachedTokens)} of{' '}
+              {formatTokens(finding.cacheEvidence.totalInputTokens)} input tokens billed at the cached rate
+              (${finding.cacheEvidence.cachedRatePer1m}/1M vs ${finding.cacheEvidence.uncachedRatePer1m}/1M) —
+              holding today's input cost {formatUSD(finding.cacheEvidence.cacheDiscountDaily)}/day below
+              uncached pricing.
+            </p>
+          </div>
+        )}
         {/* Spend-to-value graph — portfolio context */}
         <div className="mt-4 rounded-md border border-edge bg-slab p-3">
           <p className="mb-3 font-mono text-[9px] uppercase tracking-wider text-dim">
@@ -414,6 +484,7 @@ function RecommendationPane({
             workloads={allWorkloads}
             selectedWorkloadId={finding.workloadId}
             size="large"
+            onOpenWorkload={openWorkload}
           />
         </div>
       </section>

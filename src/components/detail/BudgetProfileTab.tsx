@@ -7,6 +7,8 @@ import type { BudgetProfile, Workload } from '@/types';
 import { computeBudgetStatus, type BudgetStatus } from '@/lib/budgetStatus';
 import { findModel } from '@/data/models';
 import { formatPct, formatTokens, formatUSD } from '@/lib/format';
+import { TOKEN_HEX } from '@/lib/scales';
+import { deriveCacheEconomics } from '@/lib/derive';
 import { BudgetBar } from './BudgetBar';
 
 const STATUS_COPY: Record<string, { label: string; color: string }> = {
@@ -94,15 +96,50 @@ export function BudgetProfileTab({
 
       <Section title="Token consumption (today)">
         <div className="overflow-hidden rounded-card border border-edge">
-          <TokenRow label="Input" tokens={tokens.inputTokens} cost={tokens.inputCost} rate={tokens.inputRate} />
+          <TokenRow
+            label="Input (uncached)"
+            tokens={tokens.uncachedTokens}
+            cost={tokens.uncachedCost}
+            rate={tokens.uncachedRate}
+          />
+          <TokenRow
+            label="Cached input"
+            tokens={tokens.cachedTokens}
+            cost={tokens.cachedCost}
+            rate={tokens.cachedRate}
+          />
           <TokenRow label="Output" tokens={tokens.outputTokens} cost={tokens.outputCost} rate={tokens.outputRate} />
-          <TokenRow label="Cache + infra" tokens={null} cost={tokens.otherCost} rate={null} />
+          <TokenRow label="Infra + overhead" tokens={null} cost={tokens.infraCost} rate={null} />
+          {/* The L3 cache number (audit A3) — derived from seed token counts,
+              shown in unit cyan (informational). Absent when there is no input
+              to divide by: never a fabricated 0%. */}
+          {tokens.cacheHitRate !== null && (
+            <div className="flex items-center justify-between border-b border-edge bg-slab px-3 py-2 font-mono text-xs last:border-b-0">
+              <span className="font-bold" style={{ color: TOKEN_HEX.unit }}>
+                Cache hit rate
+              </span>
+              <span className="text-dim">
+                {formatTokens(tokens.cachedTokens)} of {formatTokens(tokens.cachedTokens + tokens.uncachedTokens)} input
+                tokens
+              </span>
+              <span />
+              <span className="font-bold" style={{ color: TOKEN_HEX.unit }}>
+                {formatPct(tokens.cacheHitRate, 1)}
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between bg-raised px-3 py-2 font-mono text-xs">
             <span className="font-bold text-txt">Total</span>
             <span className="text-sub">{formatTokens(tokens.totalTokens)} tokens</span>
             <span className="font-bold text-txt">{formatUSD(workload.costs.daily_spend)} so far</span>
           </div>
         </div>
+        {tokens.cacheHitRate !== null && tokens.cacheDiscountDaily > 0 && (
+          <p className="mt-1 text-[11px] text-dim">
+            Cached tokens bill at ${tokens.cachedRate}/1M vs ${tokens.uncachedRate}/1M uncached — holding today's
+            input cost {formatUSD(tokens.cacheDiscountDaily)}/day below uncached pricing.
+          </p>
+        )}
       </Section>
 
       <Section title="Thresholds">
@@ -118,32 +155,47 @@ export function BudgetProfileTab({
 }
 
 interface TokenBreakdown {
-  inputTokens: number;
+  uncachedTokens: number;
+  cachedTokens: number;
   outputTokens: number;
-  inputCost: number;
+  uncachedCost: number;
+  cachedCost: number;
   outputCost: number;
-  otherCost: number;
+  infraCost: number;
   totalTokens: number;
-  inputRate: number;
+  uncachedRate: number;
+  cachedRate: number;
   outputRate: number;
+  cacheHitRate: number | null;
+  cacheDiscountDaily: number;
 }
 
+// Token split + cache economics from deriveCacheEconomics — the same
+// derivation and registry rates the seed priced with, so the rows always
+// reconcile with daily_spend. The old flat "Cache + infra" line becomes the
+// cached-input dollars + the residual compute overhead.
 function tokenBreakdown(workload: Workload): TokenBreakdown {
-  const model = findModel(workload.model);
-  const inputRate = model?.pricing.input_per_1m ?? 0;
-  const outputRate = model?.pricing.output_per_1m ?? 0;
-  const inputCost = (workload.costs.tokens_in_today / 1_000_000) * inputRate;
+  const econ = deriveCacheEconomics(workload);
+  const outputRate = findModel(workload.model)?.pricing.output_per_1m ?? 0;
   const outputCost = (workload.costs.tokens_out_today / 1_000_000) * outputRate;
-  const otherCost = Math.max(workload.costs.daily_spend - inputCost - outputCost, 0);
+  const infraCost = Math.max(
+    workload.costs.daily_spend - econ.uncachedInputCostDaily - econ.cachedCostDaily - outputCost,
+    0,
+  );
   return {
-    inputTokens: workload.costs.tokens_in_today,
+    uncachedTokens: econ.uncachedInputTokens,
+    cachedTokens: econ.cachedTokens,
     outputTokens: workload.costs.tokens_out_today,
-    inputCost,
+    uncachedCost: econ.uncachedInputCostDaily,
+    cachedCost: econ.cachedCostDaily,
     outputCost,
-    otherCost,
-    totalTokens: workload.costs.tokens_in_today + workload.costs.tokens_out_today,
-    inputRate,
+    infraCost,
+    totalTokens: econ.cachedTokens + econ.uncachedInputTokens + workload.costs.tokens_out_today,
+    uncachedRate: econ.uncachedRatePer1m,
+    cachedRate: econ.cachedRatePer1m,
     outputRate,
+    cacheHitRate: econ.hitRate,
+    cacheDiscountDaily: econ.cacheDiscountDaily,
   };
 }
 

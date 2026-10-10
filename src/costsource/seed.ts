@@ -2,14 +2,15 @@
 // PointFive-shaped findings are derived from the same WORKLOADS the rest of the
 // app uses, so the demo shows truthful numbers, not placeholders.
 //
-// Two configured sandbox sources exercise the version shim across the v1.0-v1.4
-// range (PointFive documents v1.0; a private-cloud FOCUS export at v1.2). A
-// third, unconfigured 'pointfive-live' descriptor represents the gated live
-// adapter (PR E) — it ships dark until real credentials exist. The live
-// PointFive and second-adapter implementations are PRs E and F, not this one.
+// Two configured sandbox sources exercise the version shim across the v1.0-v1.5
+// range (PointFive documents v1.0; a private-cloud FOCUS export at v1.2; 1.5 is
+// a working draft the shim also accepts). A third, unconfigured 'pointfive-live'
+// descriptor represents the gated live adapter (PR E) — it ships dark until real
+// credentials exist. The live PointFive and second-adapter implementations are
+// PRs E and F, not this one.
 
 import { WORKLOADS, DEMO_NOW } from '@/data/workloads';
-import { findModel } from '@/data/models';
+import { findModel, modelIdentityForService } from '@/data/models';
 import { currentBillingPeriod } from '@/lib/billingPeriod';
 import type { Workload } from '@/types';
 import type { CostSourceDescriptor, CostFinding } from './CostSourceClient';
@@ -69,6 +70,20 @@ export function sourcesForEnv(env: Record<string, string | undefined>): CostSour
       capabilities: ['costRows'],
       configured: true,
       note: 'Offline seed standing in for an on-prem / private-cloud FOCUS export; the live adapter is PR F.',
+    },
+    {
+      // Synthetic ServiceNow CMDB/ITBM cost allocation. NOT a live ServiceNow
+      // integration: the name and note say so, and the demo card carries the
+      // honesty chip. Rows are derived from the same WORKLOADS the app uses —
+      // the ITBM allocation method is the only delta (see rawRowForServiceNow).
+      id: 'servicenow-sandbox',
+      name: 'ServiceNow (synthetic demo data)',
+      kind: 'servicenow',
+      focusVersion: '1.2',
+      coverage: 'on_prem',
+      capabilities: ['costRows', 'findings'],
+      configured: true,
+      note: 'Synthetic CMDB/ITBM cost allocation — CI-keyed service lines through the FOCUS v1.4 shim; not a live ServiceNow integration.',
     },
     // Live PointFive adapter (PR E). Its descriptor is computed from the feature
     // flag + OAuth env so `configured` honestly reflects whether the dark adapter
@@ -146,12 +161,69 @@ function rawRowFor(w: Workload, version: FocusVersion): RawSourceRow {
   if (isAtLeast(version, '1.4')) {
     row = { ...row, CapacityReservationId: null, CapacityReservationStatus: null };
   }
+  if (isAtLeast(version, '1.5')) {
+    // WORKING DRAFT (ratifies 3 Dec 2026). Model identity is registry-derived
+    // (family 1 mapping); the token labels, requester identity, and SKU price
+    // join key stay null — this exporter does not emit token-level draft
+    // telemetry, and FR 2099's own rule is to omit rather than misdescribe a
+    // row that blends token kinds.
+    const identity = modelIdentityForService(core.ServiceName);
+    row = {
+      ...row,
+      ModelDeveloper: identity?.ModelDeveloper ?? null,
+      ModelFamily: identity?.ModelFamily ?? null,
+      ModelId: identity?.ModelId ?? null,
+      ModelVersion: identity?.ModelVersion ?? null,
+      TokenCacheAction: null,
+      TokenDirection: null,
+      PrincipalId: null,
+      CredentialId: null,
+      RequesterDetails: null,
+      SkuPriceId: null,
+    };
+  }
   return row;
 }
 
 /** All workloads as raw source rows at the source's native FOCUS version. */
 export function rawRowsForVersion(version: FocusVersion): RawSourceRow[] {
   return WORKLOADS.map((w) => rawRowFor(w, version));
+}
+
+// ServiceNow CMDB/ITBM allocation method (synthetic, deterministic): ITBM
+// spreads a documented overhead allocation over critical services — their CMDB
+// service class carries 24/7 platform support, so the cost of record is 8.5%
+// above the billing export. Non-critical services reconcile exactly. The delta
+// is a fixed constant (traceable, not random) and is what the verification
+// step's source comparison flags against the 5% tolerance.
+export const ITBM_CRITICAL_SERVICE_ALLOCATION = 1.085;
+
+function rawRowForServiceNow(w: Workload): RawSourceRow {
+  const row = rawRowFor(w, '1.2');
+  const allocated =
+    w.priority === 'critical'
+      ? round2(w.costs.monthly_spend * ITBM_CRITICAL_SERVICE_ALLOCATION)
+      : w.costs.monthly_spend;
+  const ciKey = `CI00${w.id.replace(/[^a-z0-9]/gi, '').slice(0, 6).toUpperCase()}`;
+  return {
+    ...row,
+    // ITBM allocates the cost of record; the usage quantities are the same
+    // metering the billing export sees.
+    BilledCost: allocated,
+    EffectiveCost: allocated,
+    ListCost: allocated,
+    ContractedCost: allocated,
+    ServiceName: 'ServiceNow ITBM Cost Allocation',
+    ServiceSubcategory: 'IT Service Management',
+    ChargeDescription: `${w.name} · CMDB CI ${ciKey} · business service: ${w.name}`,
+    SkuMeter: 'itbm-allocation',
+    InvoiceIssuerName: 'servicenow',
+  };
+}
+
+/** ServiceNow CMDB-keyed allocation rows at the source's native v1.2. */
+export function rawRowsForServiceNow(): RawSourceRow[] {
+  return WORKLOADS.map(rawRowForServiceNow);
 }
 
 // Deterministic PointFive-style findings derived from real workload signals:
