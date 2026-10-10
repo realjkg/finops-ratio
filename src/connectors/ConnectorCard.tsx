@@ -10,6 +10,8 @@
 import { useState } from 'react';
 import type { CostSourceDescriptor, SourceHealth } from '@/costsource/CostSourceClient';
 import { isOfflineSandboxSource } from '@/costsource/sandboxSources';
+import type { ConnectorBusyPhase, ConnectorSession, IngestRun } from './ingestLanding';
+import { IngestVerification } from './IngestVerification';
 
 // Only the live PointFive adapter is a controlled-egress path: it routes through
 // PointFive's broker under OAuth 2.1. The sandbox mock is offline seed data.
@@ -65,17 +67,44 @@ export interface ConnectorCardProps {
   source: CostSourceDescriptor;
   /** Runs the server-side health probe. Absent → no test action (offline fallback). */
   onTest?: (sourceId: string) => Promise<SourceHealth>;
+
+  // -- Walk mode (connectors E2E demo) -------------------------------------
+  // Present when the page drives the connect → ingest → data-lands walk.
+  // Absent (all props below undefined) → legacy registry-only rendering.
+  session?: ConnectorSession;
+  /** The landed run for this source, if an ingest has completed. */
+  run?: IngestRun;
+  /** This connector's in-flight phase, when it owns the shared busy slot. */
+  busy?: ConnectorBusyPhase | null;
+  /** Runs the seam health probe and opens/errors the session. */
+  onConnect?: () => void;
+  /** Runs the ingest through the seam (session must be open). */
+  onIngest?: () => void;
+  /** Closes the session and withdraws landed data. */
+  onDisconnect?: () => void;
 }
 
-export function ConnectorCard({ source, onTest }: ConnectorCardProps) {
+export function ConnectorCard({
+  source,
+  onTest,
+  session,
+  run,
+  busy = null,
+  onConnect,
+  onIngest,
+  onDisconnect,
+}: ConnectorCardProps) {
   const state = connState(source);
   const isEgress = CONTROLLED_EGRESS_IDS.has(source.id);
+  const walk = onConnect !== undefined;
   const caps = source.capabilities.map((c) => CAPABILITY_LABEL[c] ?? c).join(' · ');
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; detail: string } | null>(null);
 
   const borderStyle: React.CSSProperties =
-    state === 'connected'
+    session?.state === 'open'
+      ? { borderColor: 'rgba(0,224,158,0.35)' }
+      : state === 'connected'
       ? { borderColor: 'rgba(0,224,158,0.2)' }
       : isEgress
       ? { borderColor: 'rgba(255,196,77,0.2)' }
@@ -181,8 +210,9 @@ export function ConnectorCard({ source, onTest }: ConnectorCardProps) {
         </div>
       )}
 
-      {/* Live probe result */}
-      {result && (
+      {/* Live probe result — registry mode only (walk mode surfaces the seam
+          verdicts through the session states below). */}
+      {result && !walk && (
         <p
           role="status"
           className="font-mono text-[11px] leading-relaxed"
@@ -201,30 +231,82 @@ export function ConnectorCard({ source, onTest }: ConnectorCardProps) {
         </p>
       )}
 
-      {/* Action — health probe for connected sandbox sources */}
-      <div className="mt-auto flex justify-end pt-1">
-        <button
-          type="button"
-          disabled={!canTest || testing}
-          onClick={test}
-          title={
-            canTest
-              ? 'Run a reachability probe against this sandbox source'
-              : liveProbeViaApi
-              ? 'Live connectors are probed via the authenticated API (GET /api/v1/connectors?probe=true)'
-              : state === 'disabled'
-              ? `Disabled by ${source.setup?.flagEnv ?? 'its kill-switch'}`
-              : 'Configure this connector to test it'
-          }
-          className={
-            canTest
-              ? 'rounded border border-value/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-value hover:bg-value/10 disabled:opacity-60'
-              : 'cursor-not-allowed rounded border border-edge px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-dim'
-          }
+      {/* Walk mode: honest failure — the seam's own reason, verbatim. */}
+      {walk && session?.state === 'error' && (
+        <p
+          role="status"
+          className="rounded border border-cost/40 bg-cost/10 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-cost"
         >
-          {testing ? 'Testing…' : 'Test connection'}
-        </button>
-      </div>
+          ✕ {session.error ?? 'Connection failed.'}
+        </p>
+      )}
+
+      {/* Walk mode: the landed-run proof. */}
+      {walk && run && <IngestVerification run={run} sandbox={isSandbox} />}
+
+      {/* Action row — walk mode: Connect / Ingest / Disconnect. */}
+      {walk ? (
+        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+          {session?.state === 'open' ? (
+            <>
+              <button
+                type="button"
+                onClick={onIngest}
+                disabled={busy !== null}
+                className="rounded border border-value/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-value hover:bg-value/10 disabled:opacity-60"
+              >
+                {busy === 'ingesting' ? 'Ingesting…' : run ? 'Re-ingest' : 'Ingest now'}
+              </button>
+              <button
+                type="button"
+                onClick={onDisconnect}
+                disabled={busy !== null}
+                className="rounded border border-edge px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-dim hover:text-sub disabled:opacity-60"
+              >
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onConnect}
+              disabled={busy !== null}
+              className="rounded border border-value/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-value hover:bg-value/10 disabled:opacity-60"
+            >
+              {busy === 'connecting'
+                ? 'Connecting…'
+                : session?.state === 'error'
+                  ? 'Retry connect'
+                  : 'Connect'}
+            </button>
+          )}
+        </div>
+      ) : (
+        /* Action — legacy registry mode: health probe for connected sandbox sources */
+        <div className="mt-auto flex justify-end pt-1">
+          <button
+            type="button"
+            disabled={!canTest || testing}
+            onClick={test}
+            title={
+              canTest
+                ? 'Run a reachability probe against this sandbox source'
+                : liveProbeViaApi
+                ? 'Live connectors are probed via the authenticated API (GET /api/v1/connectors?probe=true)'
+                : state === 'disabled'
+                ? `Disabled by ${source.setup?.flagEnv ?? 'its kill-switch'}`
+                : 'Configure this connector to test it'
+            }
+            className={
+              canTest
+                ? 'rounded border border-value/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-value hover:bg-value/10 disabled:opacity-60'
+                : 'cursor-not-allowed rounded border border-edge px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-dim'
+            }
+          >
+            {testing ? 'Testing…' : 'Test connection'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

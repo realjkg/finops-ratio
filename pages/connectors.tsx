@@ -20,6 +20,7 @@ import { useStore } from '@/store/useStore';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ConnectorCard } from '@/connectors/ConnectorCard';
+import { FocusDoorWalk } from '@/connectors/FocusDoorWalk';
 import { sourcesForEnv } from '@/costsource/seed';
 import { createCostSourceClient } from '@/costsource';
 import type { CostSourceDescriptor, SourceCoverage } from '@/costsource';
@@ -37,6 +38,17 @@ function ConnectorRegistry() {
   const [sources, setSources] = useState<CostSourceDescriptor[]>(OFFLINE_SOURCES);
   const [live, setLive] = useState(false);
   const client = useMemo(() => createCostSourceClient('live'), []);
+  // Offline fallback client for the walk: when the API never answers (static
+  // hosting), ingest runs through the in-process mock — the same bundled seed,
+  // still through the CostSourceClient seam.
+  const offlineClient = useMemo(() => createCostSourceClient('mock'), []);
+  const sessions = useStore((s) => s.connectorSessions);
+  const runs = useStore((s) => s.ingestRuns);
+  const busy = useStore((s) => s.connectorBusy);
+  const connectConnector = useStore((s) => s.connectConnector);
+  const runConnectorIngest = useStore((s) => s.runConnectorIngest);
+  const disconnectConnector = useStore((s) => s.disconnectConnector);
+  const ingestClient = live ? client : offlineClient;
 
   useEffect(() => {
     let cancelled = false;
@@ -101,23 +113,7 @@ function ConnectorRegistry() {
 
           {/* Two-ingest-doors model */}
           <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div
-              className="rounded-card border p-4"
-              style={{
-                borderColor: 'rgba(124,141,255,0.25)',
-                background: 'rgba(124,141,255,0.04)',
-              }}
-            >
-              <div className="mb-1 font-mono text-[10px] uppercase tracking-wider" style={{ color: 'var(--gate)' }}>
-                Door 1 · Direct ingest
-              </div>
-              <div className="font-mono text-sm font-bold text-txt">POST /ingest/focus</div>
-              <p className="mt-1.5 text-[12px] text-sub">
-                Any FOCUS-formatted billing export (v1.0–v1.4). Any cloud, any tool, any
-                normalizer — no custom integration. The version shim upgrades the export to
-                the v1.4 canonical model.
-              </p>
-            </div>
+            <FocusDoorWalk />
             <div
               className="rounded-card border p-4"
               style={{
@@ -171,7 +167,17 @@ function ConnectorRegistry() {
               </h2>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {connected.map((src) => (
-                  <ConnectorCard key={src.id} source={src} onTest={onTest} />
+                  <ConnectorCard
+                    key={src.id}
+                    source={src}
+                    onTest={onTest}
+                    session={sessions[src.id]}
+                    run={runs[src.id]}
+                    busy={busy?.sourceId === src.id ? busy.phase : null}
+                    onConnect={() => void connectConnector(src.id, ingestClient)}
+                    onIngest={() => void runConnectorIngest(src.id, src.name, ingestClient)}
+                    onDisconnect={() => disconnectConnector(src.id)}
+                  />
                 ))}
               </div>
             </section>
@@ -191,7 +197,17 @@ function ConnectorRegistry() {
               </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {available.map((src) => (
-                  <ConnectorCard key={src.id} source={src} onTest={onTest} />
+                  <ConnectorCard
+                    key={src.id}
+                    source={src}
+                    onTest={onTest}
+                    session={sessions[src.id]}
+                    run={runs[src.id]}
+                    busy={busy?.sourceId === src.id ? busy.phase : null}
+                    onConnect={() => void connectConnector(src.id, ingestClient)}
+                    onIngest={() => void runConnectorIngest(src.id, src.name, ingestClient)}
+                    onDisconnect={() => disconnectConnector(src.id)}
+                  />
                 ))}
               </div>
             </section>
