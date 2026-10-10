@@ -5,16 +5,13 @@ import type { AppProps } from 'next/app';
 import { useRouter } from 'next/router';
 import { PersonaProvider } from '@/components/PersonaProvider';
 import { AppShell } from '@/components/layout/AppShell';
-import { NAV_ITEMS } from '@/components/layout/NavBar';
+import { SHELL_ROUTES } from '@/lib/shellRoutes';
 
 // The six north-star objects share one AppShell (nav + agent launcher + chat).
 // /demo also uses the shell so a self-service visitor gets the same navigation
 // and Ratio AI launcher while trying the product. Fixture sandboxes share
-// navigation; /mission and /hello remain legacy standalone routes.
-const SHELL_ROUTES = new Set<string>([
-  ...NAV_ITEMS.map((item) => item.href),
-  '/demo', '/agent-workflows', '/workspace', '/outcomes', '/costsource', '/finio', '/finio/demo', '/prediction', '/tokenomics', '/attribution',
-]);
+// navigation; /mission and /hello remain legacy standalone routes, and
+// /tokenomics/embed is deliberately bare (iframe embedding).
 
 export default function RatioApp({ Component, pageProps }: AppProps) {
   const router = useRouter();
