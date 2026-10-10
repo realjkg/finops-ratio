@@ -55,7 +55,7 @@ for:
   vendor's forecast. AWS states the interval level (80 %), not its
   empirical coverage.
 
-So the baseline that every FinOps tool offers is defined by
+So the baseline, the capabilities the cited tools commonly offer, is defined by
 **capabilities** (DESIGN §1.5, the baseline checklist), and the numeric
 targets in DESIGN §3.10 and §4.9 are Ratio's own, measured on synthetic
 ground truth. The only external numeric yardstick for accuracy is the

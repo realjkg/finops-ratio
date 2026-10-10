@@ -7,7 +7,11 @@ not pushed by the design agent; from revision 5 the branch is on
 ordinary commits and plain pushes (never a force-push). PR #70 was merged
 at revision 27 (`28f8970`; merge commit `f35c383` on `main`). Revision 28
 is a follow-up PR on `design/slice-3-5-followups`, branched from
-`origin/main` at `f35c383`, under the same rules.
+`origin/main` at `f35c383`, under the same rules. The owner's correction
+of the goal (§6) is revision 36, on `design/goal-differentiation`
+(PR #91), branched from the same base and merged with `origin/main`
+at `895e952`; the commits that follow its merge are follow-ups within
+revision 36, not new revisions.
 
 ## 1. Revisions
 
@@ -1036,7 +1040,7 @@ revisions 27–35 unchanged and the revision-36 row added after them. (The
 branch had changed the revision-27 row's commit cell; main's version won.)
 
 **Repository facts checked for §1.8**, again on `origin/main` at
-895e952 (main moved from f35c383 by PRs #80–#89). DESIGN §1.8's table
+895e952 (main moved from f35c383 with PRs #71–#89, the merges listed by `git log --merges f35c383..895e952`). DESIGN §1.8's table
 "Repository facts re-checked" lists each; the result:
 - `src/ai/` and `pages/api/v1/ai/chat.ts` still make no tool or function
   call (no tool-call code in either). **Changed:** the persona is now
@@ -1063,16 +1067,28 @@ branch had changed the revision-27 row's commit cell; main's version won.)
   source. Nothing under `src/` names Azure Local, Azure Stack, HCI, NVIDIA
   or DCGM (grep).
 - **Changed:** the use case "cost attribution by user id without tagging"
-  is partly in the code on seed data (`src/attribution/`,
-  `allocation.ts`, migration `0002_cost_attribution`).
-- **Found, not fixed here:** `src/ingest/db/migrations/` now holds
-  `0002_cost_attribution` and `0004_outcome_ledger` (no `0003`). This
-  design plans migrations 0002–0004 for Slices 4–5 in about 20 places
-  (DESIGN §6.2, §7, Appendix D) and counts built on them
-  (`REVIEWED_TRIGGERS`, privilege model). Those numbers must be
-  renumbered before PR 4-1. That edits revisions 1–35 of the design, so it
-  is left as an owner and implementer decision (DESIGN §1.8 records it).
-  It does not change any target, figure or script.
+  has foundations on seed data (`src/attribution/`, a mock-backed route,
+  `allocateSharedCost` as a pure function with no production caller, and
+  migration `0002_cost_attribution`'s schema); no operational allocation
+  path.
+- **Found, not fixed here:** the migration numbers. On main,
+  `0002_cost_attribution` and `0004_outcome_ledger` exist, and 0003 and
+  0005 are reserved for other slices: `0004_outcome_ledger.up.sql` line 25
+  says "the consumption ledger is migration 0003 and may not exist yet",
+  line 173 "the consumption tables are migration 0003's", and
+  `src/ingest/db/foundation.db.test.ts:23` says "real 0003–0005 land with
+  the consumption/outcome/economics slices". So 0002–0005 are all taken or
+  reserved. This design's migrations (4-3 "Migration 0003", 5-1 "Migration
+  0004") cannot keep their numbers, and renumbering them to 0003 or 0005
+  would collide again; they must move past the economics slice's number
+  (0006 or later, or a number the owner coordinates). Until then D-07
+  ("0002–0004 as expand migrations") and Appendix D's header ("migrations
+  0002–0004"; DESIGN's how-to-read row for Appendix D) cannot be satisfied.
+  The renumbering touches about 20 DESIGN lines and 9 Appendix D lines
+  (counted on main), plus the `REVIEWED_TRIGGERS` and privilege-model
+  counts built on them, and must be done before PR 4-1. It edits revisions
+  1–35 and Appendix D, so it is not done in this PR. It changes no target,
+  figure or script.
 
 **Consistency checks.** Section numbering of this file after the merge:
 §1, §2, §3 … §3aj, §4, §5, §6, in order and without duplicates. Revision
@@ -1095,10 +1111,54 @@ only); the merge added no `secrets` reason, because the added lines of
 this PR contain no secret-like line. The wording was not shaped to avoid
 any match (§2). The PR goes through the restricted exception path.
 
-**GitHub patch.** `DESIGN.md` changes by about 300 lines against `main`,
-more than the 228 lines at which §5 records that the GitHub API stops
-returning a patch. It is therefore **expected** that the PR's governance
-report lists `DESIGN.md` as `unclassified` / `diff-unavailable` instead of
-its `retention.mention`, as §5 describes for revisions 31–35; the report is
-then `restricted` for that reason as well. This was not observed, since no
-PR is open yet. The local verdict above is unchanged by it.
+**GitHub governance report (observed on PR #91 at `88e3b1c`).** `Restricted
+classes: retention`; rows `docs/design/slice-3-5/DESIGN.md | retention |
+retention.mention` and `docs/design/slice-3-5/EVIDENCE.md | retention |
+retention.mention`. There is no `unclassified` / `diff-unavailable` row:
+the API returned `DESIGN.md`'s patch for this PR, so the report matches the
+local verdict above. (An earlier draft of this paragraph expected a missing
+patch from the file's size; that was wrong for this PR. §5 describes #70
+and #71 and is unchanged.)
+
+**Follow-up within revision 36 (challenger's REQUEST CHANGES on `88e3b1c`).**
+No new revision number: the correction stays "revision 36" and the commit
+after `88e3b1c` is a follow-up within it, since the design's text beyond
+the correction is unchanged. It sources the owner's statements (below),
+states the migration problem in full (above), softens "MCP is the
+connector protocol the owner names" to "lists MCP among the connectors",
+corrects the PR range, and (Copilot review 5481233360) says "capabilities the cited tools commonly offer" instead of "every FinOps tool", describes attribution and allocation as foundations (verified: no production caller of `allocateSharedCost`, `/api/attribution` creates the mock client, migration 0002 applies no rule), qualifies the optional FinIO peer token and the unvalidated Nutanix/Kubernetes endpoint scheme, records the observed governance report, drops "backdoor" from OD-1 (the synthetic opt-in in
+`src/ingest/focus/provider.ts` could be extended by a policy change the
+owner decides), marks vendor-shaped descriptions as assumptions, and words
+§0's differentiation status as attributes of the design.
+
+### Sources of the owner's statements
+
+The owner's statements are quoted in DESIGN from two messages that the
+owner sent to the orchestrator session on 2026-10-04. **Neither message is
+in the repository**; they are saved outside it. The first (vision message),
+verbatim in the parts DESIGN relies on:
+
+> "platform, development, IT and engineering all need AI that they can
+> control."
+
+> "Each production account can train on its own dailies, keeping the token
+> and cache consumption and the learning inside the production accounts."
+
+> "That means AI can help with: → Missing anomalies → Cost alerts →
+> focusing on recommending replacements based on mapping to consumption
+> patterns → Cost budgeting consistency → Cost attribution to consumer
+> account by user id (no tagging required), so this doesn't matter if cost
+> center is global or IT/engineering → Cost alerting - automated when
+> hitting a certain budget based threshold for account user awareness →
+> Email/SMS and Slack alerting with integration to OpenOps, and other
+> messaging capable platforms"
+
+> "But the creative judgment stays with the FinOps and Finance teams."
+
+The second message is the correction of the goal and the two clarifications
+quoted at the start of this section. "A model endpoint adapted on the
+account's own data" (DESIGN §1.8, item 5) is the author's design reading of
+the owner's "train on its own dailies", not the owner's wording. The
+message also contains the owner's remarks about building on Databricks
+with a proprietary dataset; DESIGN does not discuss that point and takes
+no position on it.
