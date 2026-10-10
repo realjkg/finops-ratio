@@ -15,6 +15,7 @@ import {
   currentMonthWindow,
   landedWorkloads,
   landingSummary,
+  sourceVarianceByWorkload,
   type IngestRun,
 } from './ingestLanding';
 
@@ -300,5 +301,123 @@ describe('walk state resets', () => {
     expect(useStore.getState().connectorSessions).toEqual({});
     expect(useStore.getState().ingestRuns).toEqual({});
     expect(useStore.getState().connectorBusy).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ServiceNow (synthetic demo data) — full walk
+// ---------------------------------------------------------------------------
+
+describe('ServiceNow (sandbox) — full walk', () => {
+  const SERVICE_NOW_NAME = 'ServiceNow (synthetic demo data)';
+
+  it('connects, ingests CMDB/ITBM rows through the seam to canonical v1.4, lands, disconnects clean', async () => {
+    const src = findSource('servicenow-sandbox');
+    expect(src?.configured).toBe(true);
+    // Honesty: the card says what the source is — synthetic, not a live integration.
+    expect(src?.name).toBe(SERVICE_NOW_NAME);
+
+    await useStore.getState().connectConnector('servicenow-sandbox', client);
+    expect(useStore.getState().connectorSessions['servicenow-sandbox']?.state).toBe('open');
+
+    await useStore.getState().runConnectorIngest('servicenow-sandbox', SERVICE_NOW_NAME, client);
+
+    const run = useStore.getState().ingestRuns['servicenow-sandbox'];
+    expect(run).toBeDefined();
+    expect(run!.result.sourceVersion).toBe('1.2');
+    expect(run!.result.canonicalVersion).toBe('1.4');
+    // The shim upgraded a v1.2 allocation export to v1.4 — backfill visible.
+    expect(run!.result.backfilledColumns.length).toBeGreaterThan(0);
+    // ServiceNow reports findings too (CMDB service class feeds the same rules).
+    expect(run!.findings.length).toBeGreaterThan(0);
+    expect(landedWorkloads(useStore.getState().ingestRuns).size).toBeGreaterThan(0);
+
+    useStore.getState().disconnectConnector('servicenow-sandbox');
+    expect(useStore.getState().connectorSessions['servicenow-sandbox']).toBeUndefined();
+    expect(useStore.getState().ingestRuns['servicenow-sandbox']).toBeUndefined();
+
+    // Reconnects clean — no stale session or run.
+    await useStore.getState().connectConnector('servicenow-sandbox', client);
+    expect(useStore.getState().connectorSessions['servicenow-sandbox']?.state).toBe('open');
+    expect(useStore.getState().ingestRuns['servicenow-sandbox']).toBeUndefined();
+  });
+
+  it('ingest failure keeps landed data and carries the error verbatim', async () => {
+    await useStore.getState().connectConnector('servicenow-sandbox', client);
+    await useStore.getState().runConnectorIngest('servicenow-sandbox', SERVICE_NOW_NAME, client);
+    const firstRun = useStore.getState().ingestRuns['servicenow-sandbox'];
+    expect(firstRun).toBeDefined();
+
+    const failing: CostSourceClient = {
+      mode: 'mock',
+      listSources: client.listSources,
+      fetchCostRows: async () => {
+        throw new Error('ServiceNow Table API rate limit — retry scheduled');
+      },
+      fetchFindings: client.fetchFindings,
+      healthCheck: client.healthCheck,
+    };
+    await useStore.getState().runConnectorIngest('servicenow-sandbox', SERVICE_NOW_NAME, failing);
+
+    const session = useStore.getState().connectorSessions['servicenow-sandbox'];
+    expect(session?.state).toBe('error');
+    expect(session?.error).toBe('ServiceNow Table API rate limit — retry scheduled');
+    expect(useStore.getState().ingestRuns['servicenow-sandbox']).toEqual(firstRun);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Source variance — the minimal cross-source comparison
+// ---------------------------------------------------------------------------
+
+describe('source variance (spend by source, per workload)', () => {
+  it('flags the ITBM allocation delta on critical workloads and stays quiet within tolerance', async () => {
+    // Land two sources over the same workloads: the FOCUS billing export
+    // (PointFive sandbox seed) and the synthetic ServiceNow ITBM allocation.
+    await useStore.getState().connectConnector('pointfive-sandbox', client);
+    await useStore.getState().runConnectorIngest('pointfive-sandbox', 'PointFive (sandbox)', client);
+    await useStore.getState().connectConnector('servicenow-sandbox', client);
+    await useStore.getState().runConnectorIngest('servicenow-sandbox', 'ServiceNow (synthetic demo data)', client);
+
+    const runs = useStore.getState().ingestRuns;
+    expect(Object.keys(runs).length).toBe(2);
+
+    const variance = sourceVarianceByWorkload(runs);
+    expect(variance.length).toBeGreaterThan(0);
+
+    const critical = WORKLOADS.filter((w) => w.priority === 'critical');
+    expect(critical.length).toBeGreaterThan(0);
+
+    // Critical workloads carry the documented ITBM overhead (+8.5%) — flagged.
+    for (const w of critical) {
+      const row = variance.find((v) => v.workloadId === w.id);
+      expect(row).toBeDefined();
+      expect(row!.flagged).toBe(true);
+      expect(row!.variancePct).toBeCloseTo(0.085, 2);
+      expect(row!.lines.length).toBe(2);
+    }
+
+    // Everything else reconciles exactly — no flag, zero variance.
+    const nonCritical = variance.filter(
+      (v) => !critical.some((w) => w.id === v.workloadId),
+    );
+    expect(nonCritical.length).toBeGreaterThan(0);
+    for (const row of nonCritical) {
+      expect(row.flagged).toBe(false);
+      expect(row.variancePct).toBe(0);
+    }
+  });
+
+  it('reports no variance while only one source has landed', async () => {
+    await useStore.getState().connectConnector('pointfive-sandbox', client);
+    await useStore.getState().runConnectorIngest('pointfive-sandbox', 'PointFive (sandbox)', client);
+
+    const variance = sourceVarianceByWorkload(useStore.getState().ingestRuns);
+    expect(variance.length).toBeGreaterThan(0);
+    for (const row of variance) {
+      expect(row.variancePct).toBeNull();
+      expect(row.flagged).toBe(false);
+      expect(row.lines.length).toBe(1);
+    }
   });
 });

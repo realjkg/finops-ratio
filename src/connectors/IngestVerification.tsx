@@ -3,10 +3,21 @@
 // FOCUS version-shim audit, resolved workloads and teams, cost per currency,
 // and findings. Quiet register: this is evidence, not a reward. Reused by the
 // ConnectorCard walk and the direct-ingest door card.
+//
+// When ≥2 sources have landed runs (allRuns), a compact per-workload
+// "spend by source" readout makes source variance visible — e.g. the FOCUS
+// billing export vs the synthetic ServiceNow ITBM allocation. Lines beyond
+// SOURCE_VARIANCE_TOLERANCE are flagged; a full comparison view is a
+// documented follow-up, not forced onto this panel.
 
 import Link from 'next/link';
 import type { IngestRun } from './ingestLanding';
-import { landingSummary } from './ingestLanding';
+import {
+  SOURCE_VARIANCE_TOLERANCE,
+  landingSummary,
+  sourceVarianceByWorkload,
+  type WorkloadSourceVariance,
+} from './ingestLanding';
 import { formatMoney } from '@/lib/format';
 
 function Verdict({ label, children }: { label: string; children: React.ReactNode }) {
@@ -18,9 +29,61 @@ function Verdict({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-export function IngestVerification({ run, sandbox }: { run: IngestRun; sandbox: boolean }) {
+/** Compact per-workload source comparison — visible only once ≥2 sources landed. */
+function SourceVariance({ rows }: { rows: WorkloadSourceVariance[] }) {
+  const comparable = rows.filter((r) => r.lines.length > 0);
+  if (comparable.length === 0) return null;
+  return (
+    <div className="mt-2 rounded border border-edge bg-slab px-2.5 py-2">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-dim">
+          Spend by source · per workload
+        </span>
+        <span className="font-mono text-[10px] text-dim">
+          variance &gt; {Math.round(SOURCE_VARIANCE_TOLERANCE * 100)}% flagged
+        </span>
+      </div>
+      <div className="flex flex-col gap-1">
+        {comparable.map((r) => (
+          <div
+            key={r.workloadId}
+            className="flex flex-wrap items-baseline gap-x-2 font-mono text-[11px]"
+          >
+            <span className="text-sub">{r.workloadId}</span>
+            {r.lines.map((line) => (
+              <span key={`${line.sourceName}:${line.currency}`} className="text-dim">
+                {formatMoney(line.amount, line.currency)} <span className="text-dim">{line.currency}</span>
+                {' · '}
+                {line.sourceName}
+              </span>
+            ))}
+            {r.variancePct !== null && (
+              <span className={r.flagged ? 'font-bold text-cost' : 'text-dim'}>
+                {r.flagged ? '⚠ ' : ''}
+                (max−min)/min {(r.variancePct * 100).toFixed(1)}%
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function IngestVerification({
+  run,
+  sandbox,
+  allRuns,
+}: {
+  run: IngestRun;
+  sandbox: boolean;
+  /** Every landed run — enables the per-workload source comparison (≥2 sources). */
+  allRuns?: Record<string, IngestRun>;
+}) {
   const s = landingSummary(run);
   const passthrough = s.backfilledColumns.length === 0;
+  const variance =
+    allRuns && Object.keys(allRuns).length >= 2 ? sourceVarianceByWorkload(allRuns) : [];
   return (
     <div
       role="status"
@@ -62,6 +125,8 @@ export function IngestVerification({ run, sandbox }: { run: IngestRun; sandbox: 
             : `backfilled ${s.backfilledColumns.length} column(s)`}
         </span>
       </div>
+
+      {variance.length > 0 && <SourceVariance rows={variance} />}
 
       <p className="mt-2 text-[11px] text-dim">
         Landed in{' '}

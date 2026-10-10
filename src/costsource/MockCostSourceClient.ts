@@ -15,6 +15,7 @@ import { COST_SOURCES, findSource, findingsFor, rawRowsForVersion } from './seed
 import { normalizeRows } from './normalize';
 import { PointFiveLiveAdapter } from './PointFiveLiveAdapter';
 import { POINTFIVE_LIVE_SOURCE_ID } from './pointfiveConfig';
+import { ServiceNowAdapter, SERVICENOW_SANDBOX_SOURCE_ID } from './ServiceNowAdapter';
 import { CloudConnectorAdapter } from './CloudConnectorAdapter';
 import { findConnectorSpec } from './focusExportConnectors';
 
@@ -59,6 +60,11 @@ export class MockCostSourceClient implements CostSourceClient {
     if (!src.capabilities.includes('costRows')) {
       throw new Error(`Source '${sourceId}' does not provide cost rows`);
     }
+    // Synthetic ServiceNow dispatches to its own adapter (CMDB/ITBM allocation
+    // shape) — same normalization shim, its own row emitter.
+    if (sourceId === SERVICENOW_SANDBOX_SOURCE_ID) {
+      return ServiceNowAdapter.ingest(ServiceNowAdapter.seedRows(), src.focusVersion, sourceId, window);
+    }
     const { rows, backfilledColumns } = normalizeRows(
       rawRowsForVersion(src.focusVersion),
       src.id,
@@ -89,6 +95,9 @@ export class MockCostSourceClient implements CostSourceClient {
     await delay(80);
     if (sourceId === POINTFIVE_LIVE_SOURCE_ID) {
       return new PointFiveLiveAdapter().healthCheck();
+    }
+    if (sourceId === SERVICENOW_SANDBOX_SOURCE_ID) {
+      return ServiceNowAdapter.healthCheck(sourceId);
     }
     const connectorSpec = findConnectorSpec(sourceId);
     if (connectorSpec) {

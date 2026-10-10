@@ -173,6 +173,7 @@ function ConnectorRegistry() {
                     onTest={onTest}
                     session={sessions[src.id]}
                     run={runs[src.id]}
+                    allRuns={runs}
                     busy={busy?.sourceId === src.id ? busy.phase : null}
                     onConnect={() => void connectConnector(src.id, ingestClient)}
                     onIngest={() => void runConnectorIngest(src.id, src.name, ingestClient)}
@@ -203,6 +204,7 @@ function ConnectorRegistry() {
                     onTest={onTest}
                     session={sessions[src.id]}
                     run={runs[src.id]}
+                    allRuns={runs}
                     busy={busy?.sourceId === src.id ? busy.phase : null}
                     onConnect={() => void connectConnector(src.id, ingestClient)}
                     onIngest={() => void runConnectorIngest(src.id, src.name, ingestClient)}

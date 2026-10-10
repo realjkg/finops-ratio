@@ -121,3 +121,88 @@ export function currentMonthWindow(): { start: string; end: string } {
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   return { start: start.toISOString(), end: end.toISOString() };
 }
+
+// --- Source variance (minimal cross-source comparison) ---
+
+/**
+ * Tolerance above which two sources' landed cost for the same workload counts
+ * as a disagreement worth flagging. 5% is deliberately loose: allocation
+ * methods (e.g. an ITBM overhead allocation vs a billing export) legitimately
+ * differ by small amounts; the flag exists to surface real method disagreement,
+ * not rounding.
+ */
+export const SOURCE_VARIANCE_TOLERANCE = 0.05;
+
+/** One source's landed cost line for a workload, in its own currency. */
+export interface WorkloadSourceLine {
+  sourceName: string;
+  currency: string;
+  amount: number;
+}
+
+/** Per-workload cross-source readout for the ingest verification step. */
+export interface WorkloadSourceVariance {
+  workloadId: string;
+  lines: WorkloadSourceLine[];
+  /**
+   * Largest same-currency spread across sources, (max-min)/min, when ≥2
+   * sources landed the workload; null when fewer than 2 sources landed it.
+   */
+  variancePct: number | null;
+  flagged: boolean;
+}
+
+/**
+ * Compare landed runs per workload across sources (EffectiveCost, per
+ * currency). Sources that land rows for a workload the others did not simply
+ * show as a single line — no variance to compute against.
+ */
+export function sourceVarianceByWorkload(
+  runs: Record<string, IngestRun>,
+): WorkloadSourceVariance[] {
+  // workloadId → currency → sourceName → summed EffectiveCost
+  const byWorkload = new Map<string, Map<string, Map<string, number>>>();
+  const namesBySource = new Map<string, string>();
+  for (const run of Object.values(runs)) {
+    namesBySource.set(run.sourceId, run.sourceName);
+    for (const row of run.result.rows) {
+      if (!row.x_RatioWorkloadId) continue;
+      const byCurrency = byWorkload.get(row.x_RatioWorkloadId) ?? new Map();
+      const bySource = byCurrency.get(row.BillingCurrency) ?? new Map();
+      bySource.set(
+        run.sourceId,
+        (bySource.get(run.sourceId) ?? 0) + row.EffectiveCost,
+      );
+      byCurrency.set(row.BillingCurrency, bySource);
+      byWorkload.set(row.x_RatioWorkloadId, byCurrency);
+    }
+  }
+
+  const out: WorkloadSourceVariance[] = [];
+  for (const [workloadId, byCurrency] of byWorkload) {
+    const lines: WorkloadSourceLine[] = [];
+    let worst: number | null = null;
+    for (const [currency, bySource] of byCurrency) {
+      for (const [sourceId, amount] of bySource) {
+        lines.push({ sourceName: namesBySource.get(sourceId) ?? sourceId, currency, amount });
+      }
+      if (bySource.size >= 2) {
+        const amounts = [...bySource.values()];
+        const min = Math.min(...amounts);
+        const max = Math.max(...amounts);
+        if (min > 0) {
+          const pct = (max - min) / min;
+          worst = worst === null ? pct : Math.max(worst, pct);
+        }
+      }
+    }
+    lines.sort((a, b) => a.sourceName.localeCompare(b.sourceName));
+    out.push({
+      workloadId,
+      lines,
+      variancePct: worst,
+      flagged: worst !== null && worst > SOURCE_VARIANCE_TOLERANCE,
+    });
+  }
+  return out.sort((a, b) => a.workloadId.localeCompare(b.workloadId));
+}

@@ -43,7 +43,7 @@ describe('ConnectorCard — Test connection gating (H3)', () => {
 // Walk mode — connect → ingest → data-lands → disconnect
 // ---------------------------------------------------------------------------
 
-import { FocusFileAdapter } from '@/costsource';
+import { FocusFileAdapter, ServiceNowAdapter } from '@/costsource';
 import { currentMonthWindow, type ConnectorSession, type IngestRun } from './ingestLanding';
 import { rawRowsForVersion } from '@/costsource/seed';
 
@@ -118,5 +118,57 @@ describe('ConnectorCard — walk mode', () => {
     // Re-ingest is offered once data has landed.
     expect(html).toContain('Re-ingest');
     expect(html).toContain('Disconnect');
+  });
+
+  it('renders the spend-by-source comparison once two sources have landed', () => {
+    const session: ConnectorSession = { state: 'open', openedAt: '2026-06-01T14:29:00.000Z' };
+    const runs: Record<string, IngestRun> = {
+      'pointfive-sandbox': landedRun('pointfive-sandbox'),
+      'servicenow-sandbox': {
+        sourceId: 'servicenow-sandbox',
+        sourceName: 'ServiceNow (synthetic demo data)',
+        at: '2026-06-01T14:31:00.000Z',
+        result: ServiceNowAdapter.ingest(
+          ServiceNowAdapter.seedRows(),
+          '1.2',
+          'servicenow-sandbox',
+          currentMonthWindow(),
+        ),
+        findings: [],
+      },
+    };
+    const html = renderToStaticMarkup(
+      <ConnectorCard
+        source={sourceById('servicenow-sandbox')}
+        session={session}
+        run={runs['servicenow-sandbox']}
+        allRuns={runs}
+        onConnect={noOp}
+        onIngest={noOp}
+        onDisconnect={noOp}
+      />,
+    );
+    expect(html).toContain('Spend by source');
+    expect(html).toContain('variance &gt; 5% flagged');
+    // The documented ITBM allocation delta shows as a flagged variance.
+    expect(html).toContain('(max−min)/min');
+    expect(html).toContain('⚠');
+  });
+
+  it('omits the spend-by-source readout while only one source has landed', () => {
+    const session: ConnectorSession = { state: 'open', openedAt: '2026-06-01T14:29:00.000Z' };
+    const html = renderToStaticMarkup(
+      <ConnectorCard
+        source={sourceById('pointfive-sandbox')}
+        session={session}
+        run={landedRun()}
+        allRuns={{ 'pointfive-sandbox': landedRun() }}
+        onConnect={noOp}
+        onIngest={noOp}
+        onDisconnect={noOp}
+      />,
+    );
+    expect(html).toContain('Data landed');
+    expect(html).not.toContain('Spend by source');
   });
 });

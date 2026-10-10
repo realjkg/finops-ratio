@@ -20,6 +20,7 @@ const CONTROLLED_EGRESS_IDS = new Set(['pointfive-live']);
 const KIND_LABEL: Record<string, string> = {
   pointfive: 'PointFive',
   focus_file: 'FOCUS file',
+  servicenow: 'ServiceNow · CMDB/ITBM',
   cloud: 'Cloud FOCUS',
   kubernetes: 'Kubernetes',
   nutanix: 'Nutanix',
@@ -74,6 +75,8 @@ export interface ConnectorCardProps {
   session?: ConnectorSession;
   /** The landed run for this source, if an ingest has completed. */
   run?: IngestRun;
+  /** Every landed run — enables the per-workload source comparison (≥2 sources). */
+  allRuns?: Record<string, IngestRun>;
   /** This connector's in-flight phase, when it owns the shared busy slot. */
   busy?: ConnectorBusyPhase | null;
   /** Runs the seam health probe and opens/errors the session. */
@@ -89,6 +92,7 @@ export function ConnectorCard({
   onTest,
   session,
   run,
+  allRuns,
   busy = null,
   onConnect,
   onIngest,
@@ -242,7 +246,7 @@ export function ConnectorCard({
       )}
 
       {/* Walk mode: the landed-run proof. */}
-      {walk && run && <IngestVerification run={run} sandbox={isSandbox} />}
+      {walk && run && <IngestVerification run={run} sandbox={isSandbox} allRuns={allRuns} />}
 
       {/* Action row — walk mode: Connect / Ingest / Disconnect. */}
       {walk ? (
