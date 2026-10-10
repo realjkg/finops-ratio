@@ -9,6 +9,8 @@
 
 import { ratioColor } from '@/lib/scales';
 import { formatRatio } from '@/lib/format';
+import { EvidenceMark } from '@/components/EvidenceMark';
+import type { EvidenceStatus } from '@/types';
 import { VALUE_MINIMUM } from './findingsModel';
 
 // Scale ceiling: ratios at or above this fill the bar completely.
@@ -19,9 +21,15 @@ const MIN_LINE_PCT = (VALUE_MINIMUM / CEILING) * 100; // 30% — Gate 3 floor
 interface ValueRatioMeterProps {
   ratio: number;
   size?: 'inline' | 'large';
+  /** Provenance mark rendered beside the enlarged ratio (large size only). */
+  evidenceStatus?: EvidenceStatus;
 }
 
-export function ValueRatioMeter({ ratio, size = 'inline' }: ValueRatioMeterProps) {
+export function ValueRatioMeter({
+  ratio,
+  size = 'inline',
+  evidenceStatus,
+}: ValueRatioMeterProps) {
   const color = ratioColor(ratio);
   const fillPct = Math.max(0, Math.min(ratio / CEILING, 1)) * 100;
   const isLarge = size === 'large';
@@ -37,6 +45,7 @@ export function ValueRatioMeter({ ratio, size = 'inline' }: ValueRatioMeterProps
           >
             {formatRatio(ratio)}
           </span>
+          <EvidenceMark status={evidenceStatus} className="self-center" />
           {ratio < VALUE_MINIMUM && (
             <span className="font-mono text-sm text-cost">
               {formatRatio(VALUE_MINIMUM - ratio)} below minimum

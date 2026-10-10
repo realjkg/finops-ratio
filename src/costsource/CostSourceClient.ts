@@ -59,7 +59,8 @@ export interface CostRowsResult {
   sourceId: string;
   sourceVersion: FocusVersion; // version the source exported
   canonicalVersion: FocusVersion; // always the v1.4 canonical target
-  backfilledColumns: string[]; // columns the shim added to reach canonical
+  backfilledColumns: string[]; // ratified columns the shim added to reach canonical
+  draftColumnsBackfilled: string[]; // FOCUS 1.5 working-draft columns backfilled (unratified)
   window: CostWindow;
   generatedAt: string; // ISO 8601
   rows: CanonicalFocusRow[];

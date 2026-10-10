@@ -14,6 +14,7 @@ import type {
   WorkloadGovernance,
 } from '@/types';
 import { findModel } from './models';
+import { deriveDefensibleValue } from '@/lib/valueMath';
 
 // Deterministic demo clock so forecasts + budget bars are stable across reloads.
 export const DEMO_NOW = new Date('2026-06-25T17:42:00Z');
@@ -45,6 +46,12 @@ interface WorkloadSeedSpec {
   // Value framing.
   valueRatio: number;
   revenueSplit: number; // fraction of total value that is revenue_protected
+  // Defensible value (audit C3/C4): `qualityFloorPassRate` is the share of
+  // outputs meeting the workload's quality floor (outputs below it contribute
+  // no value); `harmFromMisses` is monthly harm from missed outputs (refunds,
+  // rework, manual cleanup). Seeded inputs, marked `assumed` — never measured.
+  qualityFloorPassRate: number;
+  harmFromMisses: number;
   // Outputs.
   resolutionRate: number;
   activeUsersDaily: number;
@@ -76,6 +83,22 @@ function buildWorkload(spec: WorkloadSeedSpec): Workload {
   const totalValue = Math.round(spec.valueRatio * spec.monthlySpend);
   const revenueProtected = Math.round(totalValue * spec.revenueSplit);
   const costAvoided = totalValue - revenueProtected;
+
+  // Defensible headline (audit C3/C4): outputs missing the quality floor
+  // contribute no value, and harm from misses is subtracted. Computed by the
+  // same pure function every surface reads — the invariant holds by
+  // construction, and the seed's claimed `valueRatio` stays the gross
+  // (pre-gate) figure so the floor's effect stays visible.
+  const defensible = deriveDefensibleValue(
+    {
+      revenue_protected: revenueProtected,
+      cost_avoided: costAvoided,
+      harm_from_misses: spec.harmFromMisses,
+      quality_floor_pass_rate: spec.qualityFloorPassRate,
+    },
+    spec.monthlySpend,
+  );
+  const defensibleTotal = Math.round(defensible.total_value);
 
   const monthlyInferences = Math.round(spec.callsToday * 0.85 * CURRENT_DAY);
   const resolvedQueries = Math.round(spec.callsToday * spec.resolutionRate);
@@ -113,8 +136,19 @@ function buildWorkload(spec: WorkloadSeedSpec): Workload {
     value: {
       revenue_protected: revenueProtected,
       cost_avoided: costAvoided,
-      total_value: totalValue,
-      value_ratio: round2(totalValue / spec.monthlySpend),
+      harm_from_misses: spec.harmFromMisses,
+      quality_floor_pass_rate: spec.qualityFloorPassRate,
+      total_value: defensibleTotal,
+      value_ratio: round2(defensibleTotal / spec.monthlySpend),
+      // Honesty (audit C1/C3/C4): seed values are asserted demo inputs, not
+      // ledger measurements — every component marked `assumed`; the headline
+      // inherits the weakest mark (never `measured` — no fabricated provenance).
+      evidence: {
+        revenue_protected: 'assumed',
+        cost_avoided: 'assumed',
+        harm_from_misses: 'assumed',
+        quality_floor_pass_rate: 'assumed',
+      },
     },
     governance: spec.gates,
     demand_shape: spec.demand_shape,
@@ -179,6 +213,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 13632,
     valueRatio: 14.9,
     revenueSplit: 0.56,
+    qualityFloorPassRate: 0.94,
+    harmFromMisses: 2400,
     resolutionRate: 0.831,
     activeUsersDaily: 7400,
     activeUsersMonthly: 22100,
@@ -207,6 +243,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 6800,
     valueRatio: 8.4,
     revenueSplit: 0.78,
+    qualityFloorPassRate: 0.9,
+    harmFromMisses: 900,
     resolutionRate: 0.74,
     activeUsersDaily: 410,
     activeUsersMonthly: 1280,
@@ -235,6 +273,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 2400,
     valueRatio: 21.5,
     revenueSplit: 0.18,
+    qualityFloorPassRate: 0.97,
+    harmFromMisses: 150,
     resolutionRate: 0.91,
     activeUsersDaily: 320,
     activeUsersMonthly: 540,
@@ -263,6 +303,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 1150,
     valueRatio: 6.2,
     revenueSplit: 0.25,
+    qualityFloorPassRate: 0.88,
+    harmFromMisses: 120,
     resolutionRate: 0.88,
     activeUsersDaily: 95,
     activeUsersMonthly: 240,
@@ -291,6 +333,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 4900,
     valueRatio: 3.4,
     revenueSplit: 0.62,
+    qualityFloorPassRate: 0.72,
+    harmFromMisses: 800,
     resolutionRate: 0.69,
     activeUsersDaily: 64,
     activeUsersMonthly: 180,
@@ -319,6 +363,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 4200,
     valueRatio: 1.6,
     revenueSplit: 0.7,
+    qualityFloorPassRate: 0.58,
+    harmFromMisses: 4600,
     resolutionRate: 0.58,
     activeUsersDaily: 40,
     activeUsersMonthly: 95,
@@ -347,6 +393,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 880,
     valueRatio: 5.1,
     revenueSplit: 0.1,
+    qualityFloorPassRate: 0.91,
+    harmFromMisses: 90,
     resolutionRate: 0.79,
     activeUsersDaily: 230,
     activeUsersMonthly: 610,
@@ -379,6 +427,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 1440,
     valueRatio: 11.2,
     revenueSplit: 0.5,
+    qualityFloorPassRate: 0.95,
+    harmFromMisses: 180,
     resolutionRate: 0.86,
     activeUsersDaily: 7600,
     activeUsersMonthly: 21800,
@@ -407,6 +457,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 3120,
     valueRatio: 4.4,
     revenueSplit: 0.66,
+    qualityFloorPassRate: 0.9,
+    harmFromMisses: 400,
     resolutionRate: 0.77,
     activeUsersDaily: 22,
     activeUsersMonthly: 48,
@@ -435,6 +487,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 2050,
     valueRatio: 6.8,
     revenueSplit: 0.8,
+    qualityFloorPassRate: 0.87,
+    harmFromMisses: 250,
     resolutionRate: 0.72,
     activeUsersDaily: 18,
     activeUsersMonthly: 55,
@@ -463,6 +517,8 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     monthlySpend: 640,
     valueRatio: 7.7,
     revenueSplit: 0.12,
+    qualityFloorPassRate: 0.93,
+    harmFromMisses: 60,
     resolutionRate: 0.83,
     activeUsersDaily: 140,
     activeUsersMonthly: 380,

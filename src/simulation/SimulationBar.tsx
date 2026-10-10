@@ -11,7 +11,7 @@ export function SimulationBar() {
   const error = useStore(s => s.simulationError);
   const access = useSimulationAccess();
   return <div className="shrink-0 border-b border-edge bg-slab px-3 py-2 text-xs text-sub">
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+    <div className="flex flex-col items-start gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
       <strong className="text-unit">{sim ? 'Customer simulation' : 'Seeded demo'}</strong>
       {sim ? <>
         <span>{sim.session.identity.tenant} · {sim.session.identity.user} · {PERSONA_LABELS[sim.session.identity.persona]}</span>

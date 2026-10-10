@@ -51,8 +51,18 @@ describe('initiative view-model', () => {
   it('pairs every cost with a value ratio (R4)', () => {
     for (const initiative of initiatives) {
       expect(initiative.monthlyCost).toBeGreaterThan(0);
-      expect(initiative.valueRatio).toBeGreaterThan(0);
+      // The defensible numerator (quality floor + harm subtraction) may go
+      // non-positive; the pairing itself must stay finite and color-coded.
+      expect(Number.isFinite(initiative.valueRatio)).toBe(true);
       expect(initiative.valueColor).toMatch(/^#/);
+    }
+  });
+
+  it('renders the value-negative seed honestly (poor color, finite ratio)', () => {
+    const negative = initiatives.filter((i) => i.valueRatio <= 0);
+    expect(negative.length).toBeGreaterThan(0);
+    for (const initiative of negative) {
+      expect(initiative.valueColor).toBe('#ff5c72');
     }
   });
 

@@ -19,27 +19,51 @@ function byId(id: string): Workload {
 }
 
 describe('recommendationMath', () => {
-  it('value-critical workload (<2\u00d7) gets a capability-preserving model switch that lifts the ratio', () => {
-    const fraud = byId('wl-fraud'); // claude-opus, 1.6\u00d7
-    expect(fraud.value.value_ratio).toBeLessThan(VALUE_CRITICAL);
+  // Fraud Triage's revised defensible numerator is negative, so it exercises
+  // the value-review route. The switch-lift premise needs a positive numerator:
+  // build one from the fraud seed (same registry/token mix) with a small
+  // positive value below the 2× critical floor.
+  function valueCriticalPositive(): Workload {
+    const fraud = byId('wl-fraud');
+    return {
+      ...fraud,
+      value: { ...fraud.value, total_value: 5000, value_ratio: 1.2 },
+    };
+  }
 
-    const rec = recommendFor(fraud);
+  it('value-critical workload (<2\u00d7, positive value) gets a capability-preserving model switch that lifts the ratio', () => {
+    const w = valueCriticalPositive();
+    expect(w.value.value_ratio).toBeLessThan(VALUE_CRITICAL);
+
+    const rec = recommendFor(w);
     expect(rec.kind).toBe('model_switch');
     expect(rec.projectedMonthlyImpact).not.toBeNull();
     expect(rec.projectedMonthlyImpact!).toBeGreaterThan(0);
     // Switch must improve the ratio above the current value.
-    expect(rec.projectedRatio!).toBeGreaterThan(fraud.value.value_ratio);
+    expect(rec.projectedRatio!).toBeGreaterThan(w.value.value_ratio);
+  });
+
+  it('a non-positive defensible numerator routes to a value review, never a cost-side rescue (C3/C4)', () => {
+    const fraud = byId('wl-fraud');
+    expect(fraud.value.total_value).toBeLessThanOrEqual(0);
+
+    const rec = recommendFor(fraud);
+    // Cutting spend on negative value deepens the ratio — the honest
+    // recommendation fixes the value side instead.
+    expect(rec.kind).toBe('sunset_review');
+    expect(rec.projectedMonthlyImpact).toBeNull();
+    expect(rec.action).toContain('value review');
   });
 
   it('model-switch impact ties out to the value-ratio invariant', () => {
-    const fraud = byId('wl-fraud');
-    const rec = recommendFor(fraud);
+    const w = valueCriticalPositive();
+    const rec = recommendFor(w);
     expect(rec.kind).toBe('model_switch');
 
     // recomputed spend = current spend - projected saving
-    const newSpend = fraud.costs.monthly_spend - rec.projectedMonthlyImpact!;
+    const newSpend = w.costs.monthly_spend - rec.projectedMonthlyImpact!;
     // value-ratio invariant: total_value / recomputed spend === projected ratio
-    const invariantRatio = fraud.value.total_value / newSpend;
+    const invariantRatio = w.value.total_value / newSpend;
     expect(invariantRatio).toBeCloseTo(rec.projectedRatio!, 1);
   });
 

@@ -16,6 +16,7 @@ import { useStore } from '@/store/useStore';
 import { buildFindings, type FindingView } from './findingsModel';
 import { ValueRatioMeter } from './ValueRatioMeter';
 import { SpendToValueGraph } from './SpendToValueGraph';
+import { EvidenceMark } from '@/components/EvidenceMark';
 import { formatUSD, formatRatio } from '@/lib/format';
 import { TOKEN_HEX } from '@/lib/scales';
 import {
@@ -294,7 +295,7 @@ function FindingRow({
             <span className="truncate font-body text-sm font-medium text-txt">
               {finding.workloadName}
             </span>
-            {/* Evidence: ratio + spend */}
+            {/* Evidence: ratio + provenance mark + spend */}
             <div className="flex shrink-0 items-center gap-2">
               <span
                 className="font-mono text-xs font-bold"
@@ -302,6 +303,7 @@ function FindingRow({
               >
                 {formatRatio(finding.valueRatio)}
               </span>
+              <EvidenceMark status={finding.valueEvidenceStatus} />
               <span className="font-mono text-[11px] text-dim">
                 {formatUSD(finding.monthlySpend, { compact: true })}/mo
               </span>
@@ -380,8 +382,12 @@ function RecommendationPane({
         <p className="mt-1 text-sm text-sub">{finding.problem}</p>
       </div>
 
-      {/* Value-ratio meter — enlarged */}
-      <ValueRatioMeter ratio={finding.valueRatio} size="large" />
+      {/* Value-ratio meter — enlarged; provenance mark rides the headline ratio */}
+      <ValueRatioMeter
+        ratio={finding.valueRatio}
+        size="large"
+        evidenceStatus={finding.valueEvidenceStatus}
+      />
 
       {/* Evidence: two values */}
       <section aria-label="Evidence">

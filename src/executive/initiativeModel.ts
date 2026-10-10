@@ -12,8 +12,9 @@
 import { budgetFor } from '@/data/budgets';
 import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
+import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import { budgetColor, TOKEN_HEX } from '@/lib/scales';
-import type { Workload } from '@/types';
+import type { EvidenceStatus, Workload } from '@/types';
 import { COST_SOURCES, findingsFor } from '@/costsource/seed';
 import { toMissionView, type MissionStatus, type ProjectionContext } from '@/mission/missionModel';
 
@@ -48,6 +49,8 @@ export interface InitiativeView {
   // Cost efficiency = value ratio (R4 — cost is always paired with value).
   valueRatio: number;
   valueColor: string;
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
+  valueEvidenceStatus?: EvidenceStatus;
 }
 
 export interface SpendSummary {
@@ -76,6 +79,7 @@ export function toInitiativeView(workload: Workload, context: ProjectionContext 
     status: MISSION_TO_INITIATIVE[mission.status],
     valueRatio: mission.valueRatio,
     valueColor: mission.valueColor,
+    valueEvidenceStatus: headlineEvidenceStatus(workload.value),
   };
 }
 
