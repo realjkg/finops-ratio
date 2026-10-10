@@ -24,19 +24,25 @@ const WRITE_STATEMENTS = (table: string, tenantCol: string): string[] => [
 ];
 
 describe('ratio_reader', () => {
-  it('reader holds exactly one privilege: SELECT on cost_facts_published', async () => {
+  it('reader holds exactly the published-view SELECT grants (cost + outcome)', async () => {
     const rows = await db.pool.query(
       `SELECT table_name, privilege_type FROM information_schema.role_table_grants
        WHERE grantee = 'ratio_reader' AND table_schema = 'ratio' ORDER BY 1, 2`,
     );
-    expect(rows.rows).toEqual([{ table_name: 'cost_facts_published', privilege_type: 'SELECT' }]);
-    const view = await db.pool.query(
-      `SELECT has_table_privilege('ratio_reader', 'ratio.cost_facts_published', 'INSERT') AS i,
-              has_table_privilege('ratio_reader', 'ratio.cost_facts_published', 'UPDATE') AS u,
-              has_table_privilege('ratio_reader', 'ratio.cost_facts_published', 'DELETE') AS d,
-              has_table_privilege('ratio_reader', 'ratio.cost_facts_published', 'TRUNCATE') AS t`,
-    );
-    expect(view.rows[0]).toEqual({ i: false, u: false, d: false, t: false });
+    expect(rows.rows).toEqual([
+      { table_name: 'cost_facts_published', privilege_type: 'SELECT' },
+      { table_name: 'outcome_events_published', privilege_type: 'SELECT' },
+      { table_name: 'outcome_period_counts', privilege_type: 'SELECT' },
+    ]);
+    for (const view of ['cost_facts_published', 'outcome_events_published', 'outcome_period_counts']) {
+      const privs = await db.pool.query(
+        `SELECT has_table_privilege('ratio_reader', 'ratio.${view}', 'INSERT') AS i,
+                has_table_privilege('ratio_reader', 'ratio.${view}', 'UPDATE') AS u,
+                has_table_privilege('ratio_reader', 'ratio.${view}', 'DELETE') AS d,
+                has_table_privilege('ratio_reader', 'ratio.${view}', 'TRUNCATE') AS t`,
+      );
+      expect(privs.rows[0], view).toEqual({ i: false, u: false, d: false, t: false });
+    }
   });
 
   it('reader gets permission denied on every base table, including SELECT * FROM ratio.cost_facts', async () => {

@@ -234,7 +234,7 @@ describe('ingest CLI (real Postgres)', () => {
     const doc = onlyJson(r.out) as StatusDoc & { privilegeProblems?: string[] };
     expect(doc.matches).toBe(false);
     expect(doc.applied.every((a) => a.checksumMatches)).toBe(true);
-    expect(doc.privilegeProblems?.join('\n')).toMatch(/required 0001 object missing or altered/);
+    expect(doc.privilegeProblems?.join('\n')).toMatch(/required \d{4} object missing or altered/);
   });
 
   it('status --json prints exactly one JSON document; plain status logs one line', async () => {
@@ -257,7 +257,9 @@ describe('ingest CLI (real Postgres)', () => {
     expect(refused.code).toBe(1);
     expect(refused.out.concat(refused.err).join('\n')).toContain('DOWN_NOT_ALLOWED');
 
-    const ok = await run(['migrate', '--down', '1'], { ...env, RATIO_ENV: 'test', RATIO_ALLOW_DOWN_MIGRATIONS: '1' });
+    // Reverting the whole applied set removes the schema; the step count follows the real migration list.
+    const steps = String(loadMigrations(DEFAULT_MIGRATIONS_DIR).length);
+    const ok = await run(['migrate', '--down', steps], { ...env, RATIO_ENV: 'test', RATIO_ALLOW_DOWN_MIGRATIONS: '1' });
     expect(ok.code).toBe(0);
     const ns = await db.pool.query(`SELECT to_regnamespace('ratio') AS n`);
     expect(ns.rows[0].n).toBeNull();

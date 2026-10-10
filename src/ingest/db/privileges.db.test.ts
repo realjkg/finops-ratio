@@ -40,10 +40,18 @@ async function connect(db: TestDatabase): Promise<Client> {
   return c;
 }
 
-function migrationsWith(extra: Record<string, string>): string {
+function migrationsWith(extra: Record<string, string>, includeLater = false): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-priv-'));
   cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
-  for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
+  // Synthetic dirs pair 0001 with an injected migration. The repo's own
+  // later migrations stay out by default (refusal flows assert minimal
+  // applied sets); tests that re-run the runner over an already fully
+  // migrated database need them (includeLater).
+  const injected = new Set(Object.keys(extra).map((f) => f.slice(0, 4)));
+  for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) {
+    const v = f.slice(0, 4);
+    if (v < '0002' || (includeLater && !injected.has(v))) fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
+  }
   for (const [name, body] of Object.entries(extra)) fs.writeFileSync(path.join(dir, name), body);
   return dir;
 }
@@ -85,7 +93,7 @@ describe('runner catalog check: positive control', () => {
     const { REVIEWED_PRIVILEGES, assertReviewedPrivileges, effectivePrivileges } = await model();
     const db = await freshDb();
     const c = await connect(db);
-    expect(await migrateUp(c)).toEqual({ applied: ['0001'] });
+    expect(await migrateUp(c)).toEqual({ applied: loadMigrations().map((m) => m.version) });
     await assertReviewedPrivileges(c);
     const eff = await effectivePrivileges(c);
     for (const role of ['ratio_reader', 'ratio_worker'] as const) {
@@ -94,7 +102,11 @@ describe('runner catalog check: positive control', () => {
     expect(REVIEWED_PRIVILEGES.ratio_reader).toEqual(
       expect.arrayContaining(['relation:ratio.cost_facts_published:SELECT', 'function:ratio.current_tenant_id()', 'schema:ratio:USAGE']),
     );
-    expect(REVIEWED_PRIVILEGES.ratio_reader.filter((p) => p.startsWith('relation:'))).toEqual(['relation:ratio.cost_facts_published:SELECT']);
+    expect(REVIEWED_PRIVILEGES.ratio_reader.filter((p) => p.startsWith('relation:'))).toEqual([
+      'relation:ratio.cost_facts_published:SELECT',
+      'relation:ratio.outcome_events_published:SELECT',
+      'relation:ratio.outcome_period_counts:SELECT',
+    ]);
   });
 
   it('a legitimate marked expand migration (table, ratio function revoked from PUBLIC, ratio view, no new grants) still applies', async () => {
@@ -351,7 +363,7 @@ describe('round 5 M1: code that would run after the check (ledger / deferred tri
         WHERE NOT t.tgisinternal ORDER BY 1`,
     );
     expect(r.rows.map((x) => x.t)).toEqual([...REVIEWED_TRIGGERS].sort());
-    expect(REVIEWED_TRIGGERS).toHaveLength(11);
+    expect(REVIEWED_TRIGGERS).toHaveLength(19);
   });
 });
 
@@ -804,12 +816,15 @@ describe('round 8 L2 (S5): the runner resets a used caller connection before tak
     const c = await connect(db);
     await c.query('SET search_path = attacker, pg_catalog');
     await c.query('SET row_security = off');
-    const dir = migrationsWith({
-      '0002_probe.up.sql':
-        EXPAND +
-        "CREATE TABLE public.session_probe AS SELECT current_setting('search_path') AS sp, current_setting('row_security') AS rs, ('a'::name = 'a'::name) AS eq;\n",
-    });
-    expect(await migrateUp(c, { dir })).toEqual({ applied: ['0002'] });
+    const dir = migrationsWith(
+      {
+        '0005_probe.up.sql':
+          EXPAND +
+          "CREATE TABLE public.session_probe AS SELECT current_setting('search_path') AS sp, current_setting('row_security') AS rs, ('a'::name = 'a'::name) AS eq;\n",
+      },
+      true,
+    );
+    expect(await migrateUp(c, { dir })).toEqual({ applied: ['0005'] });
     expect((await db.pool.query(`SELECT sp, rs, eq FROM public.session_probe`)).rows[0]).toEqual({ sp: 'pg_catalog, pg_temp', rs: 'on', eq: true });
   });
 });
