@@ -79,6 +79,28 @@ export type CanonicalCostRow = FocusCoreV10 &
 /** The normalized internal model: v1.4 cost columns + Ratio value extensions. */
 export type CanonicalFocusRow = CanonicalCostRow & RatioFocusExtensions;
 
+/**
+ * Ratio org-attribution extensions (D1). Unlike the value extensions above,
+ * these MAY be carried by the source export (x_Ratio* columns in a FOCUS file
+ * are vendor extensions) and are mapped onto dedicated cost_facts columns at
+ * ingest (src/ingest/focus/validate.ts - keep the spellings in sync; the
+ * ingest worker deliberately does not import this module). Nullable
+ * everywhere: a row with no evidence of a dimension stays unattributed -
+ * absence is reported (allocation coverage), never imputed.
+ */
+export interface RatioAttributionExtensions {
+  x_RatioProjectId?: string | null; // stable project identity across providers - a billing account is NOT the project boundary
+  x_RatioBusinessUnit?: string | null; // financial boundary, not the project boundary
+  x_RatioCostCenter?: string | null;
+  x_RatioOwner?: string | null; // accountable owner
+  x_RatioRegion?: string | null;
+  x_RatioEnvironment?: string | null; // prod | staging | dev | sandbox
+  x_RatioDirectOrShared?: string | null; // direct = billed to the project; shared = needs allocation
+}
+
+/** A canonical row that also carries the org-attribution extensions (D1). */
+export type CanonicalAttributionRow = CanonicalFocusRow & RatioAttributionExtensions;
+
 /** What a source at a given version actually emits: core + any newer columns. */
 export type RawSourceRow = FocusCoreV10 &
   Partial<FocusAddedV11 & FocusAddedV12 & FocusAddedV13 & FocusAddedV14>;

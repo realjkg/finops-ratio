@@ -85,6 +85,17 @@ export const REVIEWED_PRIVILEGES: Readonly<Record<CheckedRole, readonly string[]
     'relation:ratio.cost_facts:INSERT',
     'relation:ratio.cost_facts:DELETE',
     'relation:ratio.cost_facts_published:SELECT',
+    // 0002 (cost attribution): the registry tables and the enriched published
+    // read path. The reader's grants are unchanged by 0002.
+    'relation:ratio.billing_scopes:SELECT',
+    'relation:ratio.billing_scopes:INSERT',
+    'relation:ratio.billing_scopes:UPDATE',
+    'relation:ratio.billing_scopes:DELETE',
+    'relation:ratio.fx_rates:SELECT',
+    'relation:ratio.fx_rates:INSERT',
+    'relation:ratio.fx_rates:UPDATE',
+    'relation:ratio.fx_rates:DELETE',
+    'relation:ratio.cost_facts_published_enriched:SELECT',
     'function:ratio.current_tenant_id()',
     'function:ratio.text_looks_secret(text)',
     'function:ratio.jsonb_has_secret_like_key(jsonb)',
