@@ -7,3 +7,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Language and editorial convention
+
+Use **U.S. English (en-US)** for all new or updated prose, UI text, documentation, tests, comments, customer copy, and agent-generated material. Prefer **color, behavior, optimize, analyze, organization, authorization, license, center, gray, canceled, modeled**, and **tire/tires** for Formula 1. Maintain natural, concise writing and review generated copy.
+
+Do not rename existing APIs, serialized fields, filenames, dependency identifiers, legal notices, trademarks, quotations, historical evidence, or generated artifacts solely for style. Preserve compatibility; migrate public contracts only in separate, tested changes.
