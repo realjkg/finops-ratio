@@ -18,7 +18,9 @@ challenger review requested changes and 16581c8 answered it; revision 5
 1ffb5fd and revision 7 (6f4c9f7) updated the review history; revision 8
 (6f82d26) answered the round-7 challenger's review of 6f4c9f7; revision 9
 (911b67c) answered the round-8 challenger's review of 6f82d26; revision 10
-answers the round-9 challenger's review of 911b67c.
+(90eee59) answered the round-9 challenger's review of 911b67c, with a splice
+error in DESIGN.md that revision 11 repairs; revision 11 answers the round-10
+challenger's review of 90eee59.
 
 ## 1. Method
 
@@ -72,6 +74,10 @@ answers the round-9 challenger's review of 911b67c.
   environment re-check was removed on the orchestrator's decision (a minor
   design decision); the evaluation rules, A20 and the key table were
   rewritten to match.
+- Revision 11 sources: no new code or external sources. DESIGN.md was rebuilt
+  from 911b67c plus the revision 10 edits (the 90eee59 splice came from a
+  string search that matched an earlier occurrence); the diff 911b67c..HEAD
+  was reviewed as a whole and the section and table checks below were run.
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -144,12 +150,17 @@ before this paragraph was written the diff contained no rule match and the
 result was `risk: low`; with a paragraph that names the rule, the result was
 `risk: restricted`, class `retention`, rule `retention.mention`, on
 `docs/design/frank-mcp/EVIDENCE.md` only. It was re-run at each later
-revision, through revision 10, with the same result: restricted, `retention`,
-`retention.mention`, on `EVIDENCE.md` only. Neither result proves the change
-safe (the gate's own README calls `low` heuristic). The classification is
-recorded in the pull request body at the final head; this file makes no claim
-about the title or body of the pull request beyond that. The wording of these
-documents was not shaped to avoid any rule.
+revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
+`EVIDENCE.md`: that `DESIGN.md` was the spliced file, whose rewrapped
+audit-retention sentence and decision-table row counted as added lines. At
+revision 11, with `DESIGN.md` rebuilt from 911b67c, the classifier was re-run
+at the final head and reports `risk: restricted`, class `retention`, rule
+`retention.mention`, on `EVIDENCE.md` only (this section names the rule).
+Neither result proves the change safe (the gate's own README calls `low`
+heuristic). The classification is recorded in the pull request body at the
+final head; this file makes no claim about the title or body of the pull
+request beyond that. The wording of these documents was not shaped to avoid
+any rule.
 
 Rollback: revert the two documents; reverse-applying the diff to origin/main
 gives the same tree as origin/main.
