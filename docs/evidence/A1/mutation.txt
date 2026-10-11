@@ -1,7 +1,7 @@
-baseline: 43 passed
+baseline: 49 passed
 | mutant | file | models | result | failing tests |
 |---|---|---|---|---|
-| no-principal-allows | src/rbac/authorize.ts | deny by default dropped | killed | 4 |
+| no-principal-allows | src/rbac/authorize.ts | deny by default dropped | killed | 6 |
 | unknown-role-allowed | src/rbac/authorize.ts | unknown role allowed | killed | 3 |
 | legacy-role-any-method | src/rbac/authorize.ts | legacy_service claimable by a token | killed | 1 |
 | empty-teams-has-scope | src/rbac/authorize.ts | empty teams treated as a scope | killed | 1 |
@@ -18,12 +18,16 @@ baseline: 43 passed
 | skip-impact-rule | src/rbac/authorize.ts | finance approves commitment changes | killed | 1 |
 | request-on-behalf | src/rbac/authorize.ts | request on behalf of another subject | killed | 1 |
 | self-approve | src/rbac/authorize.ts | requester can approve own change | killed | 1 |
-| no-ticket-ok | src/rbac/authorize.ts | prod apply without a bound ticket | killed | 2 |
+| no-ticket-ok | src/rbac/authorize.ts | prod apply without a bound ticket | killed | 3 |
 | unapproved-change-ok | src/rbac/authorize.ts | prod apply of an unapproved change | killed | 1 |
 | approver-equals-requester-ok | src/rbac/authorize.ts | approver equal to requester | killed | 2 |
 | ticket-not-approved-ok | src/rbac/authorize.ts | prod apply while ticket open | killed | 2 |
-| own-copy-dropped | src/rbac/authorize.ts | inherited principal and resource fields decide (review M1) | killed | 1 |
-| own-copy-keeps-inherited | src/rbac/authorize.ts | copy reads fields through the prototype chain (review M1) | killed | 1 |
+| own-copy-dropped | src/rbac/authorize.ts | inherited principal and resource fields decide (review M1) | killed | 3 |
+| own-copy-keeps-inherited | src/rbac/authorize.ts | copy reads fields through the prototype chain (review M1) | killed | 2 |
+| own-copy-array-passthrough | src/rbac/authorize.ts | array resource read through its prototype (delta review H) | killed | 1 |
+| own-elements-no-hasown | src/rbac/authorize.ts | inherited index fills a hole in teams or envs (delta review M-a) | killed | 1 |
+| own-copy-no-array-copy | src/rbac/authorize.ts | teams and envs used uncopied (delta review M-b) | killed | 1 |
+| own-copy-object-proto | src/rbac/authorize.ts | copy inherits Object.prototype (delta review M-c) | killed | 1 |
 | star-eng-lead-unteamed-ys | src/rbac/authorize.ts | Y* or A cell without a team for teams "*" (review L2) | killed | 1 |
 | scope-any-env-length | src/rbac/authorize.ts | invalid-only env claim counts as scope (review L2) | killed | 1 |
 | expires-not-finite | src/rbac/authorize.ts | non-finite expiresAt accepted (review L2) | killed | 1 |
@@ -39,7 +43,7 @@ baseline: 43 passed
 | matrix-mcp-write-finops | src/rbac/matrix.ts | MCP write granted to finops_lead | killed | 3 |
 | matrix-auditor-ingest | src/rbac/matrix.ts | auditor may write ingest rows | killed | 3 |
 | matrix-legacy-audit | src/rbac/matrix.ts | legacy token reads the audit log | killed | 3 |
-| matrix-eng-prod-apply-y | src/rbac/matrix.ts | prod apply without the ticket gate | killed | 6 |
+| matrix-eng-prod-apply-y | src/rbac/matrix.ts | prod apply without the ticket gate | killed | 7 |
 | matrix-finops-prod-approve | src/rbac/matrix.ts | finops lead approves in prod | killed | 3 |
 | matrix-cto-costsource | src/rbac/matrix.ts | CTO reads line-level cost sources | killed | 1 |
 | matrix-legacy-new-route | src/rbac/matrix.ts | legacy token reads a route this plan adds | killed | 2 |
@@ -49,4 +53,4 @@ baseline: 43 passed
 | matrix-drop-sync-row | src/rbac/matrix.ts | planned status-sync route without a matrix row | killed | 2 |
 | matrix-impact-dropped | src/rbac/matrix.ts | procurement approves any impact | killed | 2 |
 
-46 of 47 mutants killed; 1 equivalent; 0 survived
+50 of 51 mutants killed; 1 equivalent; 0 survived

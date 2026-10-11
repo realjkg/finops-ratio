@@ -43,7 +43,7 @@ const MUTANTS = [
   ['unapproved-change-ok', A, 'if (!isNonEmptyString(resource.approverSub)) return deny(409, DENY_REASONS.changeNotApproved);', '', 'prod apply of an unapproved change'],
   ['approver-equals-requester-ok', A, 'if (resource.approverSub === resource.requesterSub) return deny(403, DENY_REASONS.separationOfDuties);', '', 'approver equal to requester'],
   ['ticket-not-approved-ok', A, "if (ticket !== 'approved') return deny(409, DENY_REASONS.ticketNotApproved);", '', 'prod apply while ticket open'],
-  ['own-copy-dropped', A, "  if (!o || typeof o !== 'object' || Array.isArray(o)) return o;\n  const copy", "  return o;\n  const copy", 'inherited principal and resource fields decide (review M1)'],
+  ['own-copy-dropped', A, "  if (Array.isArray(o)) return undefined;\n  const copy", "  if (Array.isArray(o)) return undefined;\n  return o;\n  const copy", 'inherited principal and resource fields decide (review M1)'],
   ['own-copy-keeps-inherited', A, '    if (!Object.hasOwn(o, k)) continue;\n', '', 'copy reads fields through the prototype chain (review M1)'],
   ['own-copy-array-passthrough', A, '  if (Array.isArray(o)) return undefined;\n', '', 'array resource read through its prototype (delta review H)'],
   ['own-elements-no-hasown', A, 'if (Object.hasOwn(a, i)) out.push(a[i]);', 'out.push(a[i]);', 'inherited index fills a hole in teams or envs (delta review M-a)'],
