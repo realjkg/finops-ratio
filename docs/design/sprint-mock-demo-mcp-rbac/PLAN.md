@@ -50,10 +50,11 @@ routine in that skill.
    how to take a card without conflicting with the others.
 
 How hard is it to build with security-enabled APIs? Moderate overall, and hard
-in three specific places. See section 6: roughly 97 to 149 person-days for the
+in three specific places. See section 6: roughly 105 to 163 person-days for the
 whole mock-environment scope (the sum of the table there; revision 1 said 66
-to 105 and left out the browser session, page-data scoping, the data-provider
-seam and the remaining gateway routes), of which the
+to 105; revisions 2 and 3 added the browser session, page-data scoping, the
+data-provider seam, the remaining gateway routes, the page readers and the
+sign-in flow), of which the
 identity-and-roles retrofit across existing routes, webhook trust and the
 two-way ticket status sync carry most of the risk.
 
@@ -67,7 +68,7 @@ or incomplete is marked "corrected".
 |---|---|---|
 | F1 | One shared bearer token. `resolveGatewayAuth` turns enforcement on when `RATIO_API_TOKEN` is set, or when a live AI provider or a live change-management provider (`jira`, `servicenow`) is selected. With no token and the mock provider, enforcement is off and every caller is `anonymous`. | `src/server/gateway/auth.ts:36-43`, `:88` |
 | F2 | The tenant is a non-reversible hash of the token (djb2 to base36), used for rate limiting and logs. There is no user identity and no role. Token comparison is constant time (`tokensMatch`). | `src/server/gateway/auth.ts:55-61`, `:69` |
-| F3 | Seven API route files have no authentication check: `attribution`, `tokenomics`, `prediction/predict`, `prediction/accuracy` (two files), `report/snapshot`, `costsource/ingest` and `hello`. Six serve seeded data; `costsource/ingest` is a stateless POST that normalizes rows the caller supplies. They use only `withInternalErrorGuard`. Two more (`a2a/handshake`, `finio/export`) re-export their `v1` gateway-wrapped versions. | `pages/api/attribution.ts`, `pages/api/tokenomics.ts`, `pages/api/prediction/*.ts`, `pages/api/report/snapshot.ts`, `pages/api/costsource/ingest.ts`, `pages/api/hello.ts` |
+| F3 | Seven API route files have no authentication check: `attribution`, `tokenomics`, `prediction/predict`, `prediction/accuracy` (two files), `report/snapshot`, `costsource/ingest` and `hello`. Five serve seeded data (`attribution`, `tokenomics`, `prediction/predict`, `prediction/accuracy`, `report/snapshot`); `hello` is a liveness route; `costsource/ingest` is a stateless POST that normalizes rows the caller supplies. They use only `withInternalErrorGuard`. Two more (`a2a/handshake`, `finio/export`) re-export their `v1` gateway-wrapped versions. | `pages/api/attribution.ts`, `pages/api/tokenomics.ts`, `pages/api/prediction/*.ts`, `pages/api/report/snapshot.ts`, `pages/api/costsource/ingest.ts`, `pages/api/hello.ts` |
 | F4 | The persona (`executive`, `technical`, `procurement`) is a client-side value stored in the browser (`ratio_persona`). It is a lens, not an authorization boundary. No `getServerSideProps` or `getStaticProps` exists in any page, and there is no `middleware.ts`. | `src/lib/persona.ts:10`, `:18` |
 | F5 | Fixture identities exist only for the simulation: six users (acme and northstar, each with executive, technical and procurement), cookie session, CSRF check, 404 unless `RATIO_SIMULATION=1` and `RATIO_ENV` is `development` or `test`. | `src/simulation/server/http.ts:9-16`, `:17`, `:34`; `src/simulation/server/enabled.ts:5-7` |
 | F6 | The simulation has a per-action role table, an ordered governance gate check, and a three-state change record (`requested`, `approved`, `applied`). Request and apply are technical; approve is executive or procurement; the first two gates are technical, the rest are not. Every command is audited. | `src/simulation/server/workflow.ts:87-112`, `:163`, `:228`; `src/simulation/types.ts:7-9` |
@@ -131,6 +132,19 @@ Scope has two parts. The role fixes what kinds of things a principal may touch.
 The token's `teams` and `envs` claims fix which teams and environments. Both
 must allow the request.
 
+**Roles and lenses.** The browser has three lenses (`executive`, `technical`,
+`procurement`, F4) and the server six roles. A lens changes presentation only;
+data scope always comes from the principal. Allowed lenses, default first:
+
+| Role | Allowed lenses |
+|---|---|
+| `cto` | executive, technical |
+| `finops_lead` | executive, technical, procurement |
+| `finance` | executive, procurement |
+| `eng_lead` | technical |
+| `procurement` | procurement |
+| `auditor` | executive, technical, procurement |
+
 ### 4.2 The contract between cards
 
 Every card builds against this literal contract so the cards stay independent.
@@ -152,7 +166,7 @@ export interface Principal {
 }
 
 export type Action =
-  | 'view.read' | 'view.export' | 'view.configure'
+  | 'view.read' | 'view.export'
   | 'change.request' | 'change.approve' | 'change.apply'
   | 'ticket.create' | 'ticket.attach' | 'ticket.status'
   | 'mcp.read' | 'mcp.write'
@@ -223,7 +237,7 @@ identity source.
 | Today | Change | Card |
 |---|---|---|
 | `checkAuth` returns `{ok, tenant}` for one shared token (`auth.ts:84-112`) | Wrap: a new `authenticate()` tries the `TokenVerifier` first, then falls back to the legacy token and yields a `legacy-shared-token` principal with a fixed, narrow role grant | B1 |
-| `withGateway` step 3 calls `checkAuth` and passes only `{tenant}` to handlers (`withGateway.ts:163-170`, `:194`) | Replace the context with `{principal}` and keep `tenant` as a derived field so existing handlers compile; add the `requires` option (a route declares its action and resource in one place) and the `onVerdict` hook | B1 |
+| `withGateway` step 3 calls `checkAuth` and passes only `{tenant}` to handlers (`withGateway.ts:163-170`, `:194`) | Replace the context with `{principal}` and keep `tenant` as a derived field so existing handlers compile; add the `requires` option (a route declares its action and resource in one place) and the verdict helper `decide()` plus a fail-closed verdict sink | B1 |
 | `evaluateLiveDataAuth` and `gateSourceAccess` compare against `RATIO_API_TOKEN` (`liveDataAuth.ts:141-162`) | Wrap: accept a verified principal with a data-read grant; the failed-attempt accounting stays | B2 |
 | Seven unauthenticated route files (F3) | Six get authentication, `requires` and the scope; `hello` stays an explicit public liveness route | B3 |
 | `v1/ai/chat`, `v1/finio/export`, `v1/a2a/handshake`, `v1/costs/published` are gateway-wrapped but have no per-role check | Add `requires` and scope; chat builds its context from the caller's scope on the server | B9 |
@@ -264,6 +278,9 @@ deployment environment is rejected by another (the `aud` claim).
 | Published costs `/api/v1/costs/published`; A2A handshake `/api/v1/a2a/handshake` | - | D | D | - | - | D |
 | Change management `/api/v1/cm/change` | see 4.5 | see 4.5 | see 4.5 | see 4.5 | see 4.5 | see 4.5 |
 | Audit log (new page `/audit`; `/api/v1/audit/records`) | O | D | - | T | - | D |
+| Scoped data endpoint (new) `/api/v1/workloads` (workloads, budgets, alerts for the caller's scope) | O | D | D | T | O | D |
+| Session endpoints (new) `/api/v1/session/principal`, `/logout`: any authenticated principal; `/login`: `public_mock` (mock IdP only, 404 elsewhere); page `/sign-in`: `public` | any | any | any | any | any | any |
+| Webhook (new) `/api/v1/cm/webhook`: status `signed` (HMAC signature and replay check instead of a bearer; no role) | - | - | - | - | - | - |
 | Customer simulation `/simulation`, `/workspace`, `/api/v1/simulation/*` | dev and test only | dev and test only | dev and test only | dev and test only | dev and test only | dev and test only |
 
 Reconciliation rule (tested in 4.7): for any single underlying dataset, the
@@ -293,6 +310,8 @@ Proposed; owner ratifies (D2).
 | MCP tool that writes | n / n / n | n / n / n | n / n / n | n / n / n | n / n / n | n / n / n |
 | Edit budgets and thresholds | n / n / n | Y / Y / n | Y / Y / Y | n / n / n | Y / Y / Y | n / n / n |
 | Manage connectors and sources | n / n / n | Y / Y / Y | n / n / n | n / n / n | n / n / n | n / n / n |
+| Export a report snapshot (`view.export`; the export carries the caller's scope) | Y / Y / Y (roll-up) | Y / Y / Y | Y / Y / Y | Y* / Y* / Y* | Y / Y / Y (roll-up) | Y / Y / Y |
+| Write ingested cost rows (`ingest.write`) | n / n / n | Y / Y / Y | n / n / n | n / n / n | n / n / n | n / n / n |
 | Read the audit log | Y / Y / Y | Y / Y / Y | n / n / n | Y* / Y* / Y* | n / n / n | Y / Y / Y |
 
 Rules that hold across the table:
@@ -322,7 +341,7 @@ request -> authenticate(bearer or ratio_session cookie)
           -> authorize(principal, action, resource)               -> Verdict (pure, table-driven)
           -> scope filter (teams, envs) in the data-provider seam -> rows the caller may see
           -> handler
-          -> onVerdict hook                                       -> audit record (card C5)
+          -> decide() / verdict sink (fail closed)                 -> audit record (card C5)
 ```
 
 Who owns what. Card A2 owns the issuer and a raw-claims verifier. It signs and
@@ -368,6 +387,31 @@ are:
 8. **Browser matrix.** A Playwright spec signs in as each persona and checks
    navigation, page content and totals (card C1).
 
+### 4.8 Trace of one persona through the stack
+
+1. **Sign in.** The browser opens `/sign-in` (or is redirected there with a
+   `returnTo` path when a request returns 401). In the mock, the user picks a
+   persona; `POST /api/v1/session/login` sets the HttpOnly session cookie and
+   the readable CSRF cookie (card B7; page card B11). A real IdP replaces this
+   step (D1).
+2. **Principal.** `SessionProvider` (card B11) calls
+   `GET /api/v1/session/principal`. With `RATIO_RBAC` unset it returns
+   `{enforced:false}` and the offline seed stays (F1).
+3. **Hydrate.** When enforced, the provider calls the store's `hydrateScoped()`,
+   which fetches `/api/v1/workloads` and replaces workloads, budgets and alerts
+   together with the caller's scope. Triggers: mount, login, logout, role-change
+   refresh, and any 401 (store cleared). Before this, the store is empty under
+   the enforce build flag, so other teams' data never flashes.
+4. **Guard.** `ViewGuard` looks up the page's matrix row; a denied role sees a
+   403 state, not the page. The lens defaults and options come from the
+   role-to-lens table (section 4.1; card C2).
+5. **Pages and exports.** Pages read the store; the four pages that import the
+   seed directly are moved onto it (card B10). Export and API routes enforce the
+   same matrix through `requires` and scope their data through the B8 provider.
+6. **Actions.** Change operations call `decide()` with the stored requester,
+   approver and ticket state (card C3); every verdict reaches the audit sink
+   (card C5) or the request is denied.
+
 ## 5. Gap analysis
 
 ### 5.1 Role-based access control
@@ -380,7 +424,7 @@ are:
 | Permission matrix per action | Simulation only (F6) | Same table for real actions | A1, C3 |
 | Per-environment scoping | `RATIO_ENV` gates the simulation only (F5) | `envs` claim, `aud` check | A2, B1 |
 | Per-team scoping | `team` field exists on data (F16) | `teams` claim, scope filter before aggregation, through one data-provider seam | A3, B8, B3, B7 |
-| Audit | Simulation audit entries (F6); gateway request log with hashed tenant (F2) | Audit record for every decision through the `onVerdict` hook (B1), sink, read route and page (C5); no secrets | B1, C5 |
+| Audit | Simulation audit entries (F6); gateway request log with hashed tenant (F2) | Audit record for every decision through the verdict sink and `decide()` helper (B1) and the sink implementation, read route and page (C5); no secrets | B1, C5 |
 
 ### 5.2 MCP-connected access
 
@@ -392,8 +436,8 @@ needs and defers to that design for Frank.
 |---|---|---|---|
 | Generic client | PointFive-only scaffold (F12) | MCP client with `initialize`, `tools/list`, `tools/call` over HTTP | A5 (mock server), B5 (client) |
 | Read-only first | No allowlist | Operator-managed allowlist **file** pinning server, tool name, description hash and schema hash; read-only comes from the allowlist, never from the server's annotation; unknown tools denied | B5 |
-| Environment scoping | None | One endpoint registry keyed by environment; a dev token cannot reach a prod endpoint | B5 |
-| Per-role tool allowlist | None | Role to tool mapping, enforced by `authorize()` before any call | B5 |
+| Environment scoping | None | One allowlist file per deployment (dev, test, production), each reviewed separately, plus `environments[]` on entries; a dev deployment cannot read the production file or credentials | B5 |
+| Per-role tool allowlist | None | `roles[]` on entries mapped from `Principal.role`, enforced with `authorize()` before any call | B5 |
 | Per-team credentials | None | Credential reference per team and environment, resolved server-side, never returned | B5 |
 | No secrets in logs | Redacting logger exists (F20) | Reuse it; add a test that scans logs for a planted secret | B5 |
 | Fixture server for tests | None | Mock MCP server with fixture tools | A5 |
@@ -419,45 +463,66 @@ needs and defers to that design for Frank.
 
 ## 5a. Relation to docs/design/frank-mcp
 
-`docs/design/frank-mcp/DESIGN.md` (on main) is the design for Frank's use of
-an allowlisted, read-only MCP. This plan reuses its decisions and does not
-repeat them.
+`docs/design/frank-mcp/DESIGN.md` on main (read at `8caec87`) is the design for
+Frank's use of an allowlisted, read-only MCP. This plan reuses its decisions and
+does not repeat them. A newer revision is open as PR #98 (branch
+`docs/frank-mcp-proposal`, head `52de3cf`, read for this revision); the first
+two lists below describe main, the third what changes if #98 merges.
+
+**On main**
 
 - **B5 is the client half of its milestone M2** (MCP client, allowlist, audit),
-  limited here to HTTP transport and the A5 mock server, matching its open
-  recommendation OD-1 (HTTP only). One client serves Frank and every other
-  use; there is no second client. Frank's M0 and M1 (tool-calling seam,
-  in-process tools) and M3 (model certification) stay in that design.
-- **The allowlist is a file, not code.** It follows its section 3.1 (operator
-  file, no runtime edit path), section 3.2 and 3.3 (server pinning, and tool
-  pinning by name with `description_hash` and `schema_hash`), and 3.5. Read-only
-  comes from the operator's `read_only_via`, never from the server's own
-  annotation: a server that sets a read-only hint is still denied unless the
-  allowlist lists the tool. The revision-1 test names that assumed a server
-  annotation were replaced (A5: `write_capable_tool_declares_a_read_only_hint_and_still_mutates_state`;
-  B5: `read_only_comes_from_operator_allowlist_not_server_annotation`).
-- **Field names.** Frank's design does not fix field names for who may use a
-  tool. This plan proposes the same words as `Principal`: each tool entry has
-  `roles`, `envs` and `teams`. The names must be confirmed against Frank M2
-  before B5 starts; the permission side (allowlist entry) and the principal side
-  (token claims) then compare like with like.
-- **Tracked items it raises, handled here.** T-2 (the browser sends no
-  credential to the live chat path) is addressed for the mock path by B7. T-3
-  (the chat route trusts a browser-supplied snapshot) is addressed for the
-  enforced path by B9. Its threat rows T2 (rug pulls), T4 (out-of-allowlist
-  request), T5 (cross-tenant leakage) and T7 (secret exposure) map to B5 tests
-  (`description_hash_change_denies_the_tool`,
-  `unknown_tool_denied_before_any_network_call`,
-  `eng_lead_gets_only_own_team_rows_through_an_mcp_tool`,
-  `planted_secret_absent_from_logs_errors_and_audit`). Its T-6 (wrong project
-  instructions loaded) is not a code item and is not repeated.
-- **Identity.** Its section 3.4 says tool audit records the token-derived
-  tenant because per-user identity is deferred (slice-3-5 D-15). This sprint
-  introduces per-user `Principal.sub` for the mock IdP only; the real system
-  remains deferred (D1).
+  limited here to the A5 mock server, matching its open recommendation OD-1
+  (HTTP only). One client serves Frank and every other use; there is no second
+  client. Frank's M0 and M1 (tool-calling seam, in-process tools) and M3 (model
+  certification) stay in that design.
+- **The allowlist is a file, not code.** Sections 3.1 to 3.3 and 3.5: an
+  operator file with no runtime edit path, server pinning, tool pinning by name
+  with `description_hash` and `schema_hash`, and read-only by capability.
+  Read-only comes from the operator's `read_only_via`, never from the server's
+  own annotation.
+- **Tracked items and threats it raises.** T-2 (the browser sends no credential
+  to the live chat path) is addressed for the mock path by B7. T-3 (the chat
+  route trusts a browser-supplied snapshot) is addressed for the enforced path
+  by B9. Threat rows T2 (rug pulls), T4 (out-of-allowlist request), T5
+  (cross-tenant leakage) and T7 (secret exposure, a threat row there) map to B5
+  tests. On main its T-6 is the "wrong project instructions loaded" item; that
+  is not a code item.
+- **Identity.** Its section 3.4 says tool audit records the token-derived tenant
+  because per-user identity is deferred (slice-3-5 D-15). This sprint introduces
+  per-user `Principal.sub` for the mock IdP only; the real system remains
+  deferred (D1).
 - **Dependencies.** Frank M2 says it "likely adds an SDK dependency or a minimal
   client". This sprint takes the minimal hand-rolled client and adds no
   dependency. Whether to adopt an SDK later is owner decision D13.
+
+**If PR #98 merges** (the author of this plan read its sections 3.1 to 3.8,
+T-6, T-7, A18 and A19)
+
+- **Numbering.** T-6 becomes "reconcile with this sprint plan" and T-7 becomes
+  "per-role, per-team and per-environment tool allowlists". B5 delivers the
+  **mock path of T-7**: this sprint's mock IdP and `Principal` supply the caller
+  identity that T-7 says does not exist yet. Real identity stays D1.
+- **Field names are theirs.** The allowlist reserves `environments[]`,
+  `roles[]` and `teams[]` on server and tool entries. B5 uses exactly those
+  names and maps `Principal.role`, `Principal.teams` and the deployment's
+  `RATIO_ENV` onto them; it does not invent an `envs` allowlist field. The
+  token claims `teams` and `envs` stay on the `Principal` side only. Rules
+  adopted by B5 tests: a present field with an unknown caller value denies; an
+  empty array or null denies; unknown keys are rejected at load; one allowlist
+  file per deployment until real identity exists. Note that `environments[]`
+  uses the `RATIO_ENV` vocabulary (`development`, `test`, `staging`,
+  `production`), not `DeployEnv`; the map in section 4.2 converts.
+- **Server entries (3.2).** https plus a certificate pin or CA bundle, no
+  cross-host redirects, and a required `data_class`, `owner` and `purpose`.
+  The mock server is plain loopback http, so B5 has an explicit carve-out that
+  works only in the mock and cannot be enabled in production, with a test.
+- **Tool pinning (3.3).** The broker offers the allowlist's own description and
+  schema, not the server's live text (B5 test).
+- **Result secret scan (A19).** B5 rejects a result string carrying a
+  credential-shaped value before delivery (B5 test).
+- **Readonly stays advisory** (their T-6 point on a `readOnly` declaration):
+  already how this plan works (section 5.2 and B5).
 
 ## 6. Difficulty assessment
 
@@ -481,8 +546,10 @@ to 15. The total at the end is the sum of the ranges.
 | ITSM base-origin seam, host allowlist, timeouts, safe retries | B4 | M | 4-6 | Retrying a non-idempotent create causes duplicate tickets (never retried) | Moderate |
 | Generic MCP client with operator allowlist file, env and team scoping | B5 | M | 5-8 | Transport framing is unvalidated against a real server (F12); tool schemas drift | Moderate |
 | Other views follow the synthetic mapping | B6 | S | 1-3 | Low | Easy |
-| Browser session, principal endpoint, scoped workloads endpoint, credentials on every client | B7 | M | 6-8 | The store holds the whole seed today (F22); cookie plus CSRF handling | Hard part 1 continued |
-| Data-provider seam, scope-aware models, served-data oracle | B8 | L | 9-12 | About ten modules read the seed directly; float dollars versus cents; default output must stay identical | Hard part 1 continued |
+| Browser session API, scoped workloads endpoint (workloads, budgets, alerts), credentials on every client | B7 | M | 5-8 | Cookie plus CSRF handling; the cookie must work with the offline default off | Hard part 1 continued |
+| Page components that import the seed directly (four files) | B10 | M | 4-6 | Output must stay identical in the offline default; user-level events are personal data | Moderate |
+| Sign-in UI, session provider, store hydration, view guard | B11 | M | 5-8 | First-paint flash of other teams' data; 401 and role-change refresh triggers | Hard part 1 continued |
+| Data-provider seam (workloads, budgets, alerts), scope-aware models, served-data oracle | B8 | L | 9-12 | About ten modules read the seed directly; float dollars versus cents; default output must stay identical | Hard part 1 continued |
 | Remaining gateway routes: chat, FinOps export, handshake, published costs | B9 | M | 4-6 | Chat context must be built on the server; tenant binding for published costs must not change | Moderate |
 | Persona and navigation from the verified principal | C2 | S | 2-3 | Offline default must keep the executive default | Easy |
 | Browser persona matrix (Playwright) and local launcher | C1 | M | 4-8 | Playwright runs against a production build and is slow (see `playwright.simulation.config.ts`) | Moderate |
@@ -492,8 +559,7 @@ to 15. The total at the end is the sum of the ranges.
 | Audit sink, read route and page | C5 | M | 4-6 | Volume and secret leakage; role-scoped reads | Moderate |
 | OAuth2 client-credentials client behind an interface | C6 | M | 4-6 | Only provable against a real tenant; the mock proves the shape only | Moderate, partly deferred |
 | Promote durable rules and remove this directory | C7 | S | 1 | Low | Easy |
-
-Sum of the ranges in the table: 97 to 149 person-days (25 rows, one per card; every row's range sits inside the size scale above, which is checked when this table is edited). Parallel agents shorten calendar time because Sprint A cards run side by side, but the person-day total is what review capacity must absorb.
+Sum of the ranges in the table: 105 to 163 person-days (27 rows, one per card; every row's range sits inside the size scale above, checked by script when this table was edited). Parallel agents shorten calendar time because Sprint A cards run side by side, but the person-day total is what review capacity must absorb.
 
 What is hard and why:
 

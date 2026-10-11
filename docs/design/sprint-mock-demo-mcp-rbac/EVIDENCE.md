@@ -63,7 +63,13 @@ Each row gives the claim, the command, and the result.
 | Browser callers of those routes | `grep -rln "api/attribution\|api/tokenomics\|api/prediction\|report/snapshot\|costsource/ingest\|api/hello" src` | `LiveAttributionClient`, `LivePredictionClient`, `LiveTokenomicsClient`, `LiveHelloClient`, `SnapshotButton`, `CostSourcePage.tsx:299` (ingest), `FocusDoorWalk` and mission components |
 | `RATIO_ENV` vocabulary | `sed -n 11p src/ingest/config.ts`; `cat src/simulation/server/enabled.ts` | `development`, `test`, `staging`, `production`; the simulation checks `development` and `test` only |
 | Vitest picks up new Playwright specs | `sed -n 1,30p vitest.config.ts` | default include pattern applies; only `tests/simulation/**` is excluded |
-| Frank design cross-references | `grep -n "^### M\|^| T-[0-9]\|^| T[0-9]" docs/design/frank-mcp/DESIGN.md`; `grep -n "D-15" docs/design/slice-3-5/DESIGN.md` | milestones M0 to M4; tracked items T-1 to T-6 (no T-7); threat rows T1 to T11; D-15 defers per-user identity |
+| Frank design cross-references | `grep -n "^### M\|^| T-[0-9]\|^| T[0-9]" docs/design/frank-mcp/DESIGN.md`; `grep -n "D-15" docs/design/slice-3-5/DESIGN.md` | milestones M0 to M4; tracked items T-1 to T-6 (no T-7 **on main**; PR #98 adds one, see the next row); threat rows T1 to T11; D-15 defers per-user identity |
+| Open Frank revision (PR #98) | `git fetch origin docs/frank-mcp-proposal`; `git show origin/docs/frank-mcp-proposal:docs/design/frank-mcp/DESIGN.md` (head `52de3cf`, 927 lines); `grep -n "T-6\|T-7\|A18\|A19\|^### 3\." ` | 3.8 reserves `environments[]` (the `RATIO_ENV` vocabulary), `roles[]`, `teams[]` with deny-when-unknown, empty and null deny, unknown keys rejected, one allowlist file per deployment (3.8 rules 1-5); 3.2 https plus pin or CA bundle, no cross-host redirects, `data_class`; T-6 reconciles with this plan; T-7 is per-role, per-team, per-environment allowlists; A18 tests the reserved fields; A19 scans result strings for credential-shaped values. Not merged at the time of writing, so PLAN 5a keeps main and #98 separate |
+| Page components that bypass the store | `grep -n "WORKLOADS" src/attribution/AttributionPage.tsx src/attribution/LiveAccrualBoard.tsx src/prediction/PredictionPage.tsx src/data/userQueries.ts` | AttributionPage 15, 29-30; LiveAccrualBoard 15, 44; PredictionPage 16, 24, 84, 152; userQueries 15, 59, 71 |
+| Store budgets and alerts | `grep -n "BUDGET_PROFILES\|ALERTS" src/store/useStore.ts` | seeded at 24-25, reset at 155, initial state 271-272 |
+| PersonaProvider reads localStorage | `sed -n 1,30p src/components/PersonaProvider.tsx` | `readStoredPersona(window.localStorage)` after mount; mounted in `pages/_app.tsx` lines 6 and 27 |
+| Simulation CSRF is session-bound | `sed -n 30,40p src/simulation/server/http.ts` | `sameOrigin` compares `RATIO_SIMULATION_ORIGIN` (line 30-33); `requireCsrf(req, session)` compares with `session.csrf` (line 34-) |
+| Published costs route and live-data auth | `grep -n evaluateLiveDataAuth src/server/costs/publishedCostsRoute.ts` | import line 22, call line 123 |
 | Card governance classes | `node scripts/governance/classify-risk.mjs --paths-file <card file list>` per card | path-derived classes quoted in TASKS.md (for example A1: `auth_tenancy` x2, `unclassified` x6; A6: `financial_semantics` x9; B1: `auth_tenancy` x6); content-derived classes (`network_egress`, `secrets`) cannot be derived from paths and are marked "expected" |
 
 ## Governance classifier
@@ -81,9 +87,15 @@ phrases.
   `start`, `lint`, `typecheck`, `test`, `test:db`, and others; none for docs).
   `npm run lint` is `eslint .` and does not cover Markdown.
 - `git diff --check origin/main...HEAD`: see PR body for the result.
-- Effort figures in PLAN section 6 were summed from the table: 25 rows, low
-  ends 97, high ends 149, and each row was checked against the size scale (S 1-3,
-  M 4-8, L 9-15) by script when the table was written.
+- Plan consistency was checked by script on the final files (revision 3): the
+  ownership and dependency tables in TASKS.md were parsed; the dependency graph
+  is acyclic (27 cards); every file has one owner except four files edited in
+  sequence by a later card that depends on the earlier one
+  (`src/rbac/matrix.ts` A1 then C3, `src/costsource/CostSourcePage.tsx` A8 then
+  B7, `src/server/gateway/index.ts` B1 then C5, `pages/api/v1/cm/change.ts` B4
+  then C3); the PLAN section 6 rows match the card sets and each card's size
+  line; each range sits inside the size scale (S 1-3, M 4-8, L 9-15); the sum
+  is 105 to 163 person-days over 27 rows.
 
 ## Limits of this verification
 
