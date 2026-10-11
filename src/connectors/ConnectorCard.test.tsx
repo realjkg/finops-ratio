@@ -39,6 +39,23 @@ describe('ConnectorCard — Test connection gating (H3)', () => {
   });
 });
 
+describe('ConnectorCard — synthetic cloud chip (A6)', () => {
+  it('connector_card_shows_synthetic_chip_for_new_sources', () => {
+    for (const id of ['aws-sandbox', 'azure-sandbox', 'gcp-sandbox']) {
+      const src = sourceById(id);
+      expect(src.kind).toBe('synthetic_cloud');
+      const html = renderToStaticMarkup(<ConnectorCard source={src} onTest={onTest} />);
+      expect(html).toMatch(/>synthetic<\/span>/);
+      expect(testButton(html)).not.toMatch(/\sdisabled=""/);
+    }
+    // Live cloud connectors and the existing sandboxes do not carry the chip.
+    for (const id of ['aws-data-exports', 'pointfive-sandbox']) {
+      const html = renderToStaticMarkup(<ConnectorCard source={sourceById(id)} onTest={onTest} />);
+      expect(html).not.toMatch(/>synthetic<\/span>/);
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Walk mode — connect → ingest → data-lands → disconnect
 // ---------------------------------------------------------------------------
