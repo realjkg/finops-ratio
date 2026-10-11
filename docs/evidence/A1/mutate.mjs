@@ -2,6 +2,8 @@
 // Applies one mutation at a time in place, runs the A1 tests, restores the file.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import process from 'node:process';
+const log = (s) => process.stdout.write(`${s}\n`);
 const [A, S, M, E] = ['src/rbac/authorize.ts', 'src/identity/scope.ts', 'src/rbac/matrix.ts', 'src/identity/envMap.ts'];
 const MUTANTS = [ // id, file, exact text (once), replacement
   ['no-principal-allowed', A, 'if (!isPrincipal(p)) return deny(401', 'if (!p) return deny(401'],
@@ -50,10 +52,10 @@ for (const [id, file, find, repl] of todo) {
     writeFileSync(file, src.replace(find, repl));
     const ok = run() !== 0;
     killed += ok;
-    console.log(`${ok ? 'killed  ' : 'SURVIVED'} ${id}`);
+    log(`${ok ? 'killed  ' : 'SURVIVED'} ${id}`);
   } finally {
     writeFileSync(file, src);
   }
 }
-console.log(`${killed} of ${todo.length} mutants killed`);
+log(`${killed} of ${todo.length} mutants killed`);
 process.exit(killed === todo.length ? 0 : 1);
