@@ -66,6 +66,7 @@ const MUTANTS = [
   ['filter-inherited-index', S, 'const own = ownList(rows) as T[] | null;', 'const own = (Array.isArray(rows) ? rows : null) as T[] | null;', 'filterByScope visits an inherited index (Copilot review of 02a1376)'],
   ['filter-keyof-throws', S, '    } catch {\n      continue; // fail closed', '    } catch (e) {\n      throw e; // fail closed', 'a throwing keyOf propagates (Copilot review of 02a1376)'],
   ['ownlist-throws', S, '  } catch {\n    return null; // a revoked or throwing Proxy', '  } catch (e) {\n    throw e; // a revoked or throwing Proxy', 'a hostile array Proxy throws out of the scope helpers (Copilot review of fad46ce)'],
+  ['ownlist-array-guard', S, '    if (!Array.isArray(a)) return null;\n', '', 'array-like objects and strings read as lists (Opus final check L2)'],
   ['scope-widen-team-list', S, 'return ownList(teams)?.some((t) => t === team) ?? false;', 'return (ownList(teams)?.length ?? 0) > 0;', 'any team list covers every team'],
   ['scope-star-element-wildcard', S, "if (teams === '*') return true;", "if (teams === '*' || (Array.isArray(teams) && teams.includes('*'))) return true;", "['*'] treated as a wildcard"],
   ['scope-case-fold', S, 'ownList(teams)?.some((t) => t === team)', 'ownList(teams)?.some((t) => String(t).toLowerCase() === team.toLowerCase())', 'team match case-insensitive'],

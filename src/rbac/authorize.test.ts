@@ -896,6 +896,15 @@ describe('hostile array claims never throw (Copilot review of fad46ce)', () => {
   ];
   const TABLE = HOSTILE.flatMap(([hName, make]) => CALLS.map(([cName, call, expected]) => [`${cName}, ${hName}`, make, call, expected] as const));
 
+  it('array-like rows (an object with length and indexes) are not rows', () => {
+    const row = { team: CX, env: 'prod' as DeployEnv };
+    const arrayLike = { length: 2, 0: row, 1: row };
+    expect(filterByScope({ teams: '*', envs: ALL3 }, arrayLike as never, (r) => r as never)).toEqual([]);
+    // A string claim is not a list of teams either.
+    expect(hasRealTeam('Platform Eng')).toBe(false);
+    expect(envCovered('prod' as never, 'prod')).toBe(false);
+  });
+
   it.each(TABLE)('%s fails closed without throwing', (_name, make, call, expected) => {
     let result: unknown;
     expect(() => {
