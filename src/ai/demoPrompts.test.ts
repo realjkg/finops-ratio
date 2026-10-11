@@ -4,10 +4,15 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEMO_PROMPTS } from '@/ai/MockAIClient';
-import { CLARIFY_HEADER, UNSUPPORTED_HEADER } from '@/ai/mock/answersMeta';
 import { classifyIntent, classifyLegacy } from '@/ai/mock/intents';
-import { HELP_TEXT } from '@/ai/mock/legacy';
+import { help } from '@/ai/mock/legacy';
 import { chat, restoreClock, useFastClock } from '@/ai/mock/__testkit__/ask';
+
+// main (#102) made these module-private, so the test pins them here, as
+// src/ai/mock/regression.test.ts does for the help text.
+const HELP_TEXT = help().message.content;
+const UNSUPPORTED_HEADER = "**I can't answer that from the seeded data**";
+const CLARIFY_HEADER = '**Which one do you mean?**';
 
 beforeEach(useFastClock);
 afterEach(restoreClock);
