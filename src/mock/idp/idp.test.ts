@@ -23,7 +23,6 @@ import {
   publicJwks,
   redeemLoginToken,
   reissueSubject,
-  resetMockIdpStateForTests,
   retireSigningKey,
   revokeSubject,
   revokeToken,
@@ -31,6 +30,10 @@ import {
   verifyToken,
   type MockIdpErrorCode,
 } from './index';
+import * as idpIndex from './index';
+import { MAX_TOKEN_LENGTH, MAX_TOKEN_TTL_SECONDS, MAX_TRACKED_TOKENS } from './index';
+// The state reset helper is test-only and deliberately not on the public surface.
+import { resetMockIdpStateForTests } from './issuer';
 
 const ON = Object.freeze({ RATIO_MOCK_IDP: '1', RATIO_ENV: 'test' });
 const NOW = 1_800_000_000;
@@ -535,6 +538,7 @@ describe('mock identity provider (card A2)', () => {
   it('idp_state_is_shared_across_separately_loaded_module_instances', async () => {
     vi.resetModules();
     const first = await import('./index');
+    const firstIssuer = await import('./issuer');
     vi.resetModules();
     const second = await import('./index');
     expect(first.issueToken).not.toBe(second.issueToken);
@@ -549,7 +553,7 @@ describe('mock identity provider (card A2)', () => {
     second.redeemLoginToken(login.token, { now: NOW, deployEnv: 'test' }, ON);
     expect(codeOf(() => first.redeemLoginToken(login.token, { now: NOW, deployEnv: 'test' }, ON))).toBe('replayed');
     // The reset helper from one instance clears the state seen by the other.
-    first.resetMockIdpStateForTests();
+    firstIssuer.resetMockIdpStateForTests();
     expect(codeOf(() => second.verifyToken(issued.token, { now: NOW, deployEnv: 'test' }, ON))).toBe('unknown_kid');
     // The process-wide registration uses the agreed global symbol.
     expect(Object.getOwnPropertySymbols(globalThis).map(String)).toContain('Symbol(ratio.mockIdp)');
@@ -681,6 +685,103 @@ describe('mock identity provider (card A2)', () => {
       expect(JSON.stringify(publicJwks(ON))).not.toMatch(/"d"/);
       // Inspecting the issued result does not expose key objects.
       expect(inspect(issued, { depth: 5 })).not.toMatch(/KeyObject|privateKey/);
+    });
+  });
+
+  describe('review follow-ups (PR #104)', () => {
+    function trackedCount(): number {
+      const g = globalThis as unknown as Record<symbol, { issued: Map<string, string> }>;
+      return g[Symbol.for('ratio.mockIdp')].issued.size;
+    }
+    const team = (i: number) => `T${String(i).padStart(3, '0')}${'x'.repeat(124)}`;
+
+    it('issuer_refuses_a_token_over_the_shared_compact_limit_and_max_size_tokens_verify', () => {
+      // The claim parser allows 64 teams of 128 characters, which encodes to
+      // well over MAX_TOKEN_LENGTH. The issuer must refuse such a token (and
+      // not record it) rather than return one its own verifier rejects.
+      const widest = Array.from({ length: 64 }, (_, i) => team(i));
+      expect(codeOf(() => parseClaims({ ...decodeSegment(parts(issueToken(BASE, ON).token)[1]), teams: widest }))).toBe('no-throw');
+      const before = trackedCount();
+      expect(codeOf(() => issueToken({ ...BASE, teams: widest }, ON))).toBe('invalid_input');
+      expect(trackedCount()).toBe(before);
+
+      // The largest team list that still fits is issued and verifies, and one
+      // more team is refused: the limit is exact, not approximate.
+      let fits = -1;
+      for (let n = 64; n >= 0; n -= 1) {
+        const outcome = codeOf(() => issueToken({ ...BASE, teams: widest.slice(0, n) }, ON));
+        if (outcome === 'no-throw') {
+          fits = n;
+          break;
+        }
+        expect(outcome).toBe('invalid_input');
+      }
+      expect(fits).toBeGreaterThan(0);
+      expect(fits).toBeLessThan(64);
+      const max = issueToken({ ...BASE, teams: widest.slice(0, fits) }, ON);
+      expect(max.token.length).toBeLessThanOrEqual(MAX_TOKEN_LENGTH);
+      expect(max.token.length).toBeGreaterThan(MAX_TOKEN_LENGTH - 200);
+      expect(verifyToken(max.token, { now: NOW, deployEnv: 'test' }, ON).teams).toHaveLength(fits);
+    });
+
+    it('reissue_subject_with_invalid_input_is_invalid_input_and_old_token_still_verifies', () => {
+      const old = issuePersonaToken('eng-platform', { deployEnv: 'test', now: NOW }, ON);
+      const sub = BASE.sub;
+      const badInputs: unknown[] = [
+        { ...BASE, role: 'admin' },
+        { ...BASE, role: 'legacy_service' },
+        { ...BASE, teams: ['*'] },
+        { ...BASE, envs: [] },
+        { ...BASE, deployEnv: 'production' },
+        { ...BASE, ttlSeconds: MAX_TOKEN_TTL_SECONDS + 1 },
+        { ...BASE, teams: Array.from({ length: 64 }, (_, i) => team(i)) },
+        null,
+      ];
+      for (const input of badInputs) {
+        expect(codeOf(() => reissueSubject(sub, input as never, ON))).toBe('invalid_input');
+        expect(verifyCode(old.token)).toBe('no-throw');
+      }
+    });
+
+    it('parse_claims_rejects_ttl_over_max_by_one_and_padded_team_names', () => {
+      const ok = decodeSegment(parts(issueToken(BASE, ON).token)[1]);
+      const iat = ok.iat as number;
+      expect(codeOf(() => parseClaims({ ...ok, exp: iat + MAX_TOKEN_TTL_SECONDS }))).toBe('no-throw');
+      expect(codeOf(() => parseClaims({ ...ok, exp: iat + MAX_TOKEN_TTL_SECONDS + 1 }))).toBe('invalid_claims');
+      for (const padded of [' Platform Eng', 'Platform Eng ', '\tPlatform Eng', 'Platform Eng\n']) {
+        expect(codeOf(() => parseClaims({ ...ok, teams: [padded] }))).toBe('invalid_claims');
+        expect(codeOf(() => issueToken({ ...BASE, teams: [padded] }, ON))).toBe('invalid_input');
+      }
+    });
+
+    it('issuer_fails_closed_at_the_tracked_token_cap', () => {
+      expect(MAX_TRACKED_TOKENS).toBe(50_000);
+      const live = issueToken(BASE, ON);
+      // Fill the tracked set directly up to one below the cap (issuing 50,000
+      // real tokens would only slow the test down).
+      const g = globalThis as unknown as Record<symbol, { issued: Map<string, string> }>;
+      const issued = g[Symbol.for('ratio.mockIdp')].issued;
+      for (let i = 0; issued.size < MAX_TRACKED_TOKENS - 1; i += 1) issued.set(`filler-${i}`, 'mock-filler');
+      const last = issueToken(BASE, ON);
+      expect(trackedCount()).toBe(MAX_TRACKED_TOKENS);
+
+      expect(codeOf(() => issueToken(BASE, ON))).toBe('capacity');
+      expect(codeOf(() => issuePersonaToken('cto', { deployEnv: 'test', now: NOW }, ON))).toBe('capacity');
+      expect(codeOf(() => issueLoginToken('cto', { deployEnv: 'test', now: NOW }, ON))).toBe('capacity');
+      expect(codeOf(() => reissueSubject(BASE.sub, BASE, ON))).toBe('capacity');
+      // Nothing was evicted: earlier tokens still verify, and revocation of a
+      // tracked token still takes effect at the cap.
+      expect(trackedCount()).toBe(MAX_TRACKED_TOKENS);
+      expect(verifyCode(live.token)).toBe('no-throw');
+      expect(verifyCode(last.token)).toBe('no-throw');
+      revokeToken(live.jti, ON);
+      expect(verifyCode(live.token)).toBe('revoked');
+      expect(verifyCode(last.token)).toBe('no-throw');
+    });
+
+    it('index_does_not_export_the_state_reset_helper', () => {
+      expect(Object.keys(idpIndex)).not.toContain('resetMockIdpStateForTests');
+      expect(Object.keys(idpIndex).filter((k) => /reset|ForTests/i.test(k))).toEqual([]);
     });
   });
 });

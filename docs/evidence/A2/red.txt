@@ -46,3 +46,17 @@ $ npx vitest run src/mock/idp/idp.test.ts   (same tests against a throw-only stu
  FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > output hygiene > no_key_or_token_material_in_console_output
  Test Files  1 failed (1)
       Tests  18 failed (18)
+
+## PR #104 review follow-ups (tests first, against head 6995043)
+
+$ npx vitest run src/mock/idp/idp.test.ts
+       × issuer_refuses_a_token_over_the_shared_compact_limit_and_max_size_tokens_verify 6ms
+       × reissue_subject_with_invalid_input_is_invalid_input_and_old_token_still_verifies 4ms
+       × index_does_not_export_the_state_reset_helper 6ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected 'no-throw' to be 'invalid_input' // Object.is equality
+AssertionError: expected 'no-throw' to be 'invalid_input' // Object.is equality
+AssertionError: expected [ 'mockIdpEnabled', …(28) ] to not include 'resetMockIdpStateForTests'
+      Tests  3 failed | 20 passed (23)
+
+parse_claims_rejects_ttl_over_max_by_one_and_padded_team_names and issuer_fails_closed_at_the_tracked_token_cap pass on the current code: they pin behavior that already existed (challenger Low 2 and Low 3) and are regression tests, not red tests.
