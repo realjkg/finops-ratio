@@ -51,7 +51,7 @@ describe('loadAiSpendRatio (path switch)', () => {
   });
 
   it('Ingested unavailable: every source refused (unconfigured 409)', async () => {
-    stubRoutes((p) => (p === '/api/costsource/rows' ? json({ error: 'Source not configured' }, 409) : undefined));
+    stubRoutes((p) => (p === '/api/costsource/rows' ? json({ error: 'Cost source is not configured — live credentials required' }, 409) : undefined));
     const state = await loadAiSpendRatio('ingested', WINDOW);
     expect(state).toMatchObject({ status: 'unavailable', reason: 'No source returned cost rows' });
     if (state.status === 'unavailable') expect(state.errors?.[0].message).toMatch(/not configured/);

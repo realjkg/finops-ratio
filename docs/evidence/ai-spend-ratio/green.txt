@@ -1,0 +1,18 @@
+# GREEN: npx vitest run src/costsource (after implementation)
+Test Files  34 passed (34)
+Tests  714 passed (714)
+# New files only (aiSpendRatio.test.ts + aiSpendRatioCard.test.tsx): Tests  28 passed (28)
+# Test corrections after RED (expectations were wrong, not the code):
+#   huge-values ratio: expected 0.5 -> exact 100000000000.01 / 200000000000.03
+#   409 stub: uses the route's real fixed message (httpError only surfaces those)
+
+# Mutation spot checks (src/costsource/aiSpendRatio.ts, restored after each)
+M1 flip AI match (=== -> !==)            KILLED: 11 failed, e.g. "all AI", "no AI"
+M2 sum currencies together (key 'USD')   KILLED: "never sums mixed currencies; one ratio per BillingCurrency"
+M3 ratio for total >= 0 (was > 0)        KILLED: "zero total -> null"
+
+# Other checks
+eslint (5 changed files): exit 0
+git diff --check: clean
+tsc --noEmit: 0 errors in changed files (pre-existing missing-module errors only:
+  @playwright/test, @testing-library/react, @aws-sdk/client-s3, csv-parse not in shared node_modules)

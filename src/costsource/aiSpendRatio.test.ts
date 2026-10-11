@@ -34,7 +34,7 @@ describe('computeAiSpendRatio', () => {
     ['zero total -> null', [row(50), row(-50, 'Compute')], 0, 50, null],
     ['negative total -> null', [row(10), row(-40, 'Compute')], -30, 10, null],
     ['0.1 + 0.2 is exactly 0.3', [row(0.1), row(0.2)], 0.3, 0.3, 1],
-    ['huge values sum exactly', [row(100_000_000_000.01), row(100_000_000_000.02, 'Compute')], 200_000_000_000.03, 100_000_000_000.01, 0.5],
+    ['huge values sum exactly', [row(100_000_000_000.01), row(100_000_000_000.02, 'Compute')], 200_000_000_000.03, 100_000_000_000.01, 100_000_000_000.01 / 200_000_000_000.03],
   ])('%s', (_name, rows, total, ai, ratio) => {
     const r = usd(rows);
     expect(r.totalCost).toBe(total);
