@@ -12,6 +12,8 @@ import {
   VIEW_GROUPS,
   findRoute,
   type RouteRow,
+  READABLE_CODES,
+  ACTION_ROUTE_GROUPS,
 } from './matrix';
 import { authorize } from './authorize';
 import { ACTIONS, DEPLOY_ENVS, PERSONA_ROLES, ROLES, type Action, type Principal, type Role } from '@/identity/types';
@@ -330,5 +332,45 @@ describe('permission matrix', () => {
     expect(ACTION_MATRIX['change.request'].cells.eng_lead).toContain('Y*');
     expect(ACTION_MATRIX['change.apply'].cells.eng_lead).toContain('Y*');
     for (const r of ['cto', 'finance', 'procurement'] as const) expect(ACTION_MATRIX['change.approve'].cells[r]).toContain('Y');
+  });
+});
+
+describe('permission matrix immutability (Copilot review of 792039e)', () => {
+  function assertDeepFrozen(value: unknown, where: string, seen = new Set<unknown>()): void {
+    if (!value || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    expect(Object.isFrozen(value), where).toBe(true);
+    for (const [k, v] of Object.entries(value)) assertDeepFrozen(v, `${where}.${k}`, seen);
+  }
+
+  it('every exported policy object is deeply frozen', () => {
+    assertDeepFrozen(ACTION_MATRIX, 'ACTION_MATRIX');
+    assertDeepFrozen(VIEW_GROUPS, 'VIEW_GROUPS');
+    assertDeepFrozen(ROUTE_MATRIX, 'ROUTE_MATRIX');
+    assertDeepFrozen(ROUTE_STATUSES, 'ROUTE_STATUSES');
+    assertDeepFrozen(READABLE_CODES, 'READABLE_CODES');
+    assertDeepFrozen(ACTION_ROUTE_GROUPS, 'ACTION_ROUTE_GROUPS');
+  });
+
+  it('writing to an exported cell throws and does not change a decision', () => {
+    const finops: Principal = {
+      sub: 'f', role: 'finops_lead', teams: '*', envs: ['dev', 'test', 'prod'], tenant: 't', tokenId: 'j',
+      expiresAt: 4_102_444_800, authMethod: 'mock-idp',
+    };
+    const tool = { kind: 'mcp_tool', id: 'cost_summary', env: 'dev' } as const;
+    const cells = ACTION_MATRIX['mcp.write'].cells.finops_lead as unknown as string[];
+    expect(() => {
+      cells[0] = 'Y';
+    }).toThrow(TypeError);
+    // The rows share no mutable tuple: another row's "n" cells are untouched too.
+    const other = ACTION_MATRIX['change.request'].cells.cto as unknown as string[];
+    expect(() => {
+      other[0] = 'Y';
+    }).toThrow(TypeError);
+    expect(authorize(finops, 'mcp.write', tool).allow).toBe(false);
+    expect(ACTION_MATRIX['mcp.write'].cells.finops_lead).toEqual(['n', 'n', 'n']);
+    expect(() => {
+      (VIEW_GROUPS.costsource.codes as unknown as Record<string, string>).cto = 'D';
+    }).toThrow(TypeError);
   });
 });

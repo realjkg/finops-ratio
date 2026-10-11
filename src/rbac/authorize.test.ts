@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { authorize, DENY_REASONS } from './authorize';
 import { ACTION_MATRIX, ROUTE_MATRIX, VIEW_GROUPS } from './matrix';
-import { filterByScope, inScope } from '@/identity/scope';
+import { envCovered, filterByScope, inScope, teamCovered } from '@/identity/scope';
 import {
   ACTIONS,
   DEPLOY_ENVS,
@@ -738,5 +738,71 @@ describe('scope helper: inScope and filterByScope', () => {
     const out = filterByScope({ teams: '*', envs: ['dev', 'test', 'prod'] }, frozen, keyOf);
     expect(out.map((r) => r.id)).toEqual([1, 2, 3, 4, 5]);
     expect(out).not.toBe(frozen);
+  });
+});
+
+describe('scope helper and scope claims: inherited and placeholder values (Copilot review of 792039e)', () => {
+  const ALL3: DeployEnv[] = ['dev', 'test', 'prod'];
+
+  it('an inherited Array.prototype index never fills a hole in a teams or envs claim', () => {
+    const ap = Array.prototype as unknown as Record<string, unknown>;
+    try {
+      ap[0] = CX;
+      const holeyTeams = new Array<string>(1);
+      expect(teamCovered(holeyTeams, CX)).toBe(false);
+      expect(inScope({ teams: holeyTeams, envs: ALL3 }, { team: CX, env: 'prod' })).toBe(false);
+      expect(inScope({ teams: [PLATFORM, ...new Array<string>(1)], envs: ALL3 }, { team: CX, env: 'prod' })).toBe(false);
+      ap[0] = 'prod';
+      const holeyEnvs = new Array<DeployEnv>(1);
+      expect(envCovered(holeyEnvs, 'prod')).toBe(false);
+      expect(inScope({ teams: '*', envs: holeyEnvs }, { team: CX, env: 'prod' })).toBe(false);
+    } finally {
+      delete ap[0];
+    }
+  });
+
+  it('inherited principal claims are not claims', () => {
+    const inherited = Object.create({ teams: '*', envs: ['prod'] }) as Pick<Principal, 'teams' | 'envs'>;
+    expect(inherited.teams).toBe('*'); // the probe is live
+    expect(inScope(inherited, { team: CX, env: 'prod' })).toBe(false);
+    const halfOwn = Object.assign(Object.create({ teams: '*' }), { envs: ['prod'] }) as Pick<Principal, 'teams' | 'envs'>;
+    expect(inScope(halfOwn, { team: CX, env: 'prod' })).toBe(false);
+    expect(filterByScope(inherited, [{ team: CX, env: 'prod' as DeployEnv }], (r) => r)).toEqual([]);
+  });
+
+  it('inherited row scope keys are ignored (fail closed)', () => {
+    const limited = { teams: [PLATFORM], envs: ALL3 };
+    const row = Object.assign(Object.create({ team: PLATFORM }), { env: 'prod' });
+    expect(row.team).toBe(PLATFORM); // the probe is live
+    expect(inScope(limited, row)).toBe(false);
+    expect(filterByScope(limited, [row], (r) => r)).toEqual([]);
+    // An inherited env is unknown, so only a principal holding every env sees it.
+    const envRow = Object.assign(Object.create({ env: 'prod' }), { team: PLATFORM });
+    expect(inScope({ teams: [PLATFORM], envs: ['prod'] }, envRow)).toBe(false);
+    // Org-wide principals still see an unattributed row.
+    expect(inScope({ teams: '*', envs: ALL3 }, row)).toBe(true);
+  });
+
+  it('a teams claim holding only placeholders ("*" or "") grants nothing', () => {
+    for (const teams of [['*'], [''], ['*', '']]) {
+      const p = principal('cto', { teams });
+      for (const id of ['/tokenomics', '/demo', '/frameworks']) {
+        expectDeny(authorize(p, 'view.read', { kind: 'view', id, env: 'dev' }), 403, `${JSON.stringify(teams)} ${id}`);
+        expectDeny(authorize(p, 'view.read', { kind: 'view', id }), 403, `${JSON.stringify(teams)} ${id} no env`);
+      }
+      expectDeny(authorize(p, 'view.read', { kind: 'route', id: '/api/tokenomics', env: 'dev' }), 403);
+      expect(inScope({ teams, envs: ALL3 }, { env: 'prod' })).toBe(false);
+    }
+    // A real team next to a placeholder still counts.
+    expectAllow(authorize(principal('cto', { teams: ['*', PLATFORM] }), 'view.read', { kind: 'view', id: '/tokenomics', env: 'dev' }));
+  });
+
+  it('a revoked Proxy denies instead of throwing', () => {
+    const p = Proxy.revocable({}, {});
+    p.revoke();
+    expectDeny(authorize(p.proxy as unknown as Principal, 'view.read', { kind: 'view', id: '/', env: 'dev' }), 401);
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    expectDeny(authorize(principal('cto'), 'view.read', r.proxy as unknown as Resource), 403);
   });
 });

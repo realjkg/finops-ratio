@@ -1,0 +1,152 @@
+$ npx vitest run src/identity src/rbac   (Copilot review of 792039e: immutability, own-index scope, own claims and keys, placeholder teams, revoked Proxy; before the fix)
+
+ RUN  v5.0.1 /home/user/sprintA/A1
+
+ ❯ src/rbac/matrix.test.ts (9 tests | 2 failed) 76ms
+   ❯ permission matrix immutability (Copilot review of 792039e) (2)
+     × every exported policy object is deeply frozen 11ms
+     × writing to an exported cell throws and does not change a decision 2ms
+ ❯ src/rbac/authorize.test.ts (43 tests | 5 failed) 202ms
+   ❯ scope helper and scope claims: inherited and placeholder values (Copilot review of 792039e) (5)
+     × an inherited Array.prototype index never fills a hole in a teams or envs claim 17ms
+     × inherited principal claims are not claims 1ms
+     × inherited row scope keys are ignored (fail closed) 2ms
+     × a teams claim holding only placeholders ("*" or "") grants nothing 11ms
+     × a revoked Proxy denies instead of throwing 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/rbac/authorize.test.ts > scope helper and scope claims: inherited and placeholder values (Copilot review of 792039e) > an inherited Array.prototype index never fills a hole in a teams or envs claim
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/rbac/authorize.test.ts:752:43
+    750|       ap[0] = CX;
+    751|       const holeyTeams = new Array<string>(1);
+    752|       expect(teamCovered(holeyTeams, CX)).toBe(false);
+       |                                           ^
+    753|       expect(inScope({ teams: holeyTeams, envs: ALL3 }, { team: CX, en…
+    754|       expect(inScope({ teams: [PLATFORM, ...new Array<string>(1)], env…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/rbac/authorize.test.ts > scope helper and scope claims: inherited and placeholder values (Copilot review of 792039e) > inherited principal claims are not claims
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/rbac/authorize.test.ts:767:59
+    765|     const inherited = Object.create({ teams: '*', envs: ['prod'] }) as…
+    766|     expect(inherited.teams).toBe('*'); // the probe is live
+    767|     expect(inScope(inherited, { team: CX, env: 'prod' })).toBe(false);
+       |                                                           ^
+    768|     const halfOwn = Object.assign(Object.create({ teams: '*' }), { env…
+    769|     expect(inScope(halfOwn, { team: CX, env: 'prod' })).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/rbac/authorize.test.ts > scope helper and scope claims: inherited and placeholder values (Copilot review of 792039e) > inherited row scope keys are ignored (fail closed)
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/rbac/authorize.test.ts:777:35
+    775|     const row = Object.assign(Object.create({ team: PLATFORM }), { env…
+    776|     expect(row.team).toBe(PLATFORM); // the probe is live
+    777|     expect(inScope(limited, row)).toBe(false);
+       |                                   ^
+    778|     expect(filterByScope(limited, [row], (r) => r)).toEqual([]);
+    779|     // An inherited env is unknown, so only a principal holding every …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  src/rbac/authorize.test.ts > scope helper and scope claims: inherited and placeholder values (Copilot review of 792039e) > a teams claim holding only placeholders ("*" or "") grants nothing
+AssertionError: ["*"] /tokenomics: expected { allow: true } to match object { allow: false, status: 403 }
+
+- Expected
++ Received
+
+  {
+-   "allow": false,
+-   "status": 403,
++   "allow": true,
+  }
+
+ ❯ expectDeny src/rbac/authorize.test.ts:49:18
+     47|
+     48| function expectDeny(v: Verdict, status: 401 | 403 | 409, msg?: string)…
+     49|   expect(v, msg).toMatchObject({ allow: false, status });
+       |                  ^
+     50|   if (!v.allow) expect(Object.values(DENY_REASONS), msg).toContain(v.r…
+     51| }
+ ❯ src/rbac/authorize.test.ts:790:9
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  src/rbac/authorize.test.ts > scope helper and scope claims: inherited and placeholder values (Copilot review of 792039e) > a revoked Proxy denies instead of throwing
+TypeError: Cannot perform 'IsArray' on a proxy that has been revoked
+ ❯ ownCopy src/rbac/authorize.ts:93:13
+     91| function ownCopy<K extends string>(o: unknown, keys: readonly K[]): un…
+     92|   if (!o || typeof o !== 'object') return o;
+     93|   if (Array.isArray(o)) return undefined;
+       |             ^
+     94|   const copy = Object.create(null) as Record<K, unknown>;
+     95|   for (const k of keys) {
+ ❯ authorize src/rbac/authorize.ts:153:21
+ ❯ src/rbac/authorize.test.ts:803:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  src/rbac/matrix.test.ts > permission matrix immutability (Copilot review of 792039e) > every exported policy object is deeply frozen
+AssertionError: ACTION_MATRIX.change.request.cells.cto: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ assertDeepFrozen src/rbac/matrix.test.ts:342:43
+    340|     if (!value || typeof value !== 'object' || seen.has(value)) return;
+    341|     seen.add(value);
+    342|     expect(Object.isFrozen(value), where).toBe(true);
+       |                                           ^
+    343|     for (const [k, v] of Object.entries(value)) assertDeepFrozen(v, `$…
+    344|   }
+ ❯ assertDeepFrozen src/rbac/matrix.test.ts:343:49
+ ❯ assertDeepFrozen src/rbac/matrix.test.ts:343:49
+ ❯ assertDeepFrozen src/rbac/matrix.test.ts:343:49
+ ❯ src/rbac/matrix.test.ts:347:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  src/rbac/matrix.test.ts > permission matrix immutability (Copilot review of 792039e) > writing to an exported cell throws and does not change a decision
+AssertionError: expected function to throw an error, but it didn't
+ ❯ src/rbac/matrix.test.ts:364:8
+    362|     expect(() => {
+    363|       cells[0] = 'Y';
+    364|     }).toThrow(TypeError);
+       |        ^
+    365|     // The rows share no mutable tuple: another row's "n" cells are un…
+    366|     const other = ACTION_MATRIX['change.request'].cells.cto as unknown…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  7 failed | 49 passed (56)
+   Start at  13:50:46
+   Duration  1.13s (transform 70%, tests 20%, import 8%, worker 2%)
