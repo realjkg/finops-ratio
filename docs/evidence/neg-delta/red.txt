@@ -1,0 +1,24 @@
+$ npx vitest run src/costsource/signedSpendDelta.test.ts
+
+ RUN  v5.0.1 /home/user/neg-delta/repo
+
+ ❯ src/costsource/signedSpendDelta.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/costsource/signedSpendDelta.test.ts [ src/costsource/signedSpendDelta.test.ts ]
+Error: Cannot find module './signedSpendDelta' imported from /home/user/neg-delta/repo/src/costsource/signedSpendDelta.test.ts
+ ❯ src/costsource/signedSpendDelta.test.ts:2:1
+      1| import { describe, expect, it } from 'vitest';
+      2| import { formatSignedUSD } from './signedSpendDelta';
+       | ^
+      3|
+      4| describe('formatSignedUSD', () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  13:32:14
+   Duration  434ms (worker 98%, environment 2%)

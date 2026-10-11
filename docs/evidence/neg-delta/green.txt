@@ -1,0 +1,18 @@
+$ npx vitest run src/costsource/signedSpendDelta.test.ts
+
+ RUN  v5.0.1 /home/user/neg-delta/repo
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  13:32:23
+   Duration  458ms (transform 64%, import 15%, tests 14%, worker 7%)
+
+
+Mutation check: flipping the sign test in formatSignedUSD (value < 0 -> value > 0)
+makes 2 of 4 tests fail; reverted, 4 of 4 pass.
+
+$ npx vitest run src/costsource
+ Test Files  29 passed (29)
+      Tests  663 passed (663)
+(includes the 4 new tests)
