@@ -1,6 +1,6 @@
 # Sprint plan: mock-demo environment, MCP-connected access, and role-based access
 
-Status: proposal for owner review. Docs only. Base: `origin/main` at `8caec87` (revision 6 of this plan; main includes `docs/design/frank-mcp`, and its newer revision is open as PR #98).
+Status: proposal for owner review. Docs only. Base: `origin/main` at `8caec87` (revision 7 of this plan; main includes `docs/design/frank-mcp`, and its newer revision is open as PR #98).
 Companion files: [TASKS.md](./TASKS.md) (sprint backlog and agent runbook) and
 [EVIDENCE.md](./EVIDENCE.md) (how every fact below was verified).
 
@@ -44,7 +44,7 @@ routine in that skill.
      caller must invoke it, nothing links a ticket to an approval or an apply,
      and nothing listens for ticket changes (F9, F10).
 4. **Agents run these capabilities through sprint tasks, iteratively and in
-   parallel.** TASKS.md defines self-contained cards. Sprint A contains cards
+   parallel.** TASKS.md defines self-contained cards (sprint names: A, A2 for cards B1 to B11, whose IDs are kept, and C; Sprint B is reserved for the live connectors for ingest). Sprint A contains cards
    with disjoint file sets that can all run at once; each card has named red
    tests and a governance class. The runbook there tells an implementer agent
    how to take a card without conflicting with the others.
@@ -562,8 +562,8 @@ before starting B5.)
   `on_secret: redact` is **not implemented** in this sprint: it has known leak
   cases (a key-only hit must be replaced wholesale, map-key and non-string hits
   must reject, a URL with a `?` tail that breaks re-parsing must reject), so a
-  tool that asks for it is denied and never offered. Redaction moves to Frank
-  M2.
+  tool that asks for it is denied and never offered. Redaction moves to the
+  full Frank M2 broker.
 - **Deferred to Frank M2, on purpose.** Wiring B5's audit events to this
   sprint's C5 sink; stdio transports; per-tool budgets beyond the size and time
   limits; the kill switch, per-tenant disable and Frank's A20 cases about
@@ -571,6 +571,15 @@ before starting B5.)
   fail-only behavior and lock/CAS fail-closed. Reason: they need the Frank
   broker's runtime state, kill switch and audit design, which this sprint's
   client (the mock path) does not build. B5 covers the A20 startup subset.
+- **Model vendors.** The client, allowlist and audit are vendor-agnostic: Claude,
+  OpenAI, Mistral and open-weight or private models all go through the same
+  broker semantics (Frank design 2.6). Vendor-hosted MCP connectors that would
+  bypass the Ratio broker are rejected by default (Frank 2.6, threat T13, case
+  A21); allowing a specific one is that design's owner decision OD-13.
+- **Follow-ups for the Frank design.** B5 allows plain `http` to loopback in the
+  mock only, which departs from the design's 3.2 ("an https URL"); the Frank
+  design should record it as a mock-only waiver. Frank's M1 is a registry only
+  and the `in_process` file shape is M2; B5 parses but does not connect it.
 - **Read-only stays advisory** (their T-6 point on a `readOnly` declaration):
   already how this plan works (section 5.2 and B5).
 
@@ -683,6 +692,9 @@ real identity provider, any production deployment, and any migration.
   are file-disjoint with each other (TASKS.md).
 - **Change actions are API-only.** Request, approve and apply have no button or
   client method this sprint (card C3): their placement depends on D2 and D1.
+- **Shared test environments.** `RATIO_ENV=test` is also a plausible value on a
+  shared test deployment: `RATIO_MOCK_IDP` must stay unset on any deployment
+  that anyone other than the developer can reach.
 - **Mock routes ship in the bundle.** Every `pages/api` file is part of a
   production build, so the mock IdP routes (`login`, `mock-control`) are gated
   at runtime only, by one function (`mockIdpEnabled`: `RATIO_MOCK_IDP=1` and a
