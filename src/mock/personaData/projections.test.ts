@@ -321,13 +321,11 @@ describe('persona projections', () => {
     const big: Dataset = {
       ...DATASET,
       lines: [
-        // MAX_SAFE_INTEGER + 2 is not representable as a Number (it rounds to
-        // 2 ** 53), so use two exact 2 ** 53 amounts: the running total reaches
-        // 2 ** 54 before the negative lines bring the exact result back to 2.
-        { ...base, id: 'X1', cents: Number.MAX_SAFE_INTEGER + 1 },
-        { ...base, id: 'X2', cents: Number.MAX_SAFE_INTEGER + 1 },
+        // The running total reaches MAX_SAFE_INTEGER + 2, which a Number cannot
+        // hold (it rounds to 2 ** 53), so float accumulation returns 1, not 2.
+        { ...base, id: 'X1', cents: Number.MAX_SAFE_INTEGER },
+        { ...base, id: 'X2', cents: 2 },
         { ...base, id: 'X3', cents: -Number.MAX_SAFE_INTEGER },
-        { ...base, id: 'X4', cents: -Number.MAX_SAFE_INTEGER },
       ],
     };
     const scope: Scope = { teams: [base.team], envs: [base.env] };
@@ -339,6 +337,17 @@ describe('persona projections', () => {
     // A fractional amount is rejected.
     const frac: Dataset = { ...big, lines: [{ ...base, id: 'X6', cents: 1.5 }] };
     expect(() => project('cto', frac, scope)).toThrow(RangeError);
+  });
+
+  it('finance_variance_is_exact_or_rejected_never_rounded', () => {
+    // Platform actual becomes 12448723 - 9007199254740990 = -9007199242292267,
+    // so the exact variance 15000000 - actual = 9007199257292267 is above
+    // MAX_SAFE_INTEGER. A float subtraction would return ...268.
+    const edited = reviseDataset(DATASET, 'L01', -Number.MAX_SAFE_INTEGER + 1);
+    expect(() => project('finance', edited, engScope('Platform'))).toThrow(RangeError);
+    // An in-range variance on the same edited dataset is still exact.
+    const ok = project('finance', edited, engScope('Payments'));
+    expect(ok.budgets?.[0].varianceCents).toBe(100000000 - oracle.engLeads.Payments.totalCents);
   });
 
   it('invalid_page_requests_throw_and_projection_does_not_mutate_the_dataset', () => {
