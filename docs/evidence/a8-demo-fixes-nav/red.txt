@@ -1,96 +1,10 @@
-
- RUN  v5.0.1 /home/user/sprintA/A8
-
- ❯ src/ai/demoPrompts.test.ts (2 tests | 1 failed) 170ms
-   ❯ /demo prompts (2)
-     × every_demo_prompt_gets_a_non_help_mock_frank_reply 25ms
- ❯ src/simulation/SimulationBar.test.tsx (3 tests | 2 failed) 38ms
-   ❯ SimulationBar sign-in link (3)
-     × hides_sign_in_link_when_simulation_disabled 27ms
-     × hides_sign_in_link_when_no_provider_is_mounted 8ms
-stderr | src/costsource/findingsHeader.test.tsx > FindingsCard header > findings_header_names_servicenow_for_the_servicenow_source
-Warning: React.jsx: type is invalid -- expected a string (for built-in components) or a class/function (for composite components) but got: undefined. You likely forgot to export your component from the file it's defined in, or you might have mixed up default and named imports.
-
-Check your code at findingsHeader.test.tsx:40.
-
-stderr | src/costsource/findingsHeader.test.tsx > FindingsCard header > findings_header_keeps_pointfive_deepwaste_for_pointfive
-Warning: React.jsx: type is invalid -- expected a string (for built-in components) or a class/function (for composite components) but got: undefined. You likely forgot to export your component from the file it's defined in, or you might have mixed up default and named imports.
-
-Check your code at findingsHeader.test.tsx:47.
-
- ❯ src/costsource/findingsHeader.test.tsx (2 tests | 2 failed) 21ms
-   ❯ FindingsCard header (2)
-     × findings_header_names_servicenow_for_the_servicenow_source 18ms
-     × findings_header_keeps_pointfive_deepwaste_for_pointfive 1ms
-
-⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
-
- FAIL  src/ai/demoPrompts.test.ts > /demo prompts > every_demo_prompt_gets_a_non_help_mock_frank_reply
-TypeError: Cannot read properties of undefined (reading 'length')
- ❯ src/ai/demoPrompts.test.ts:21:25
-     19| describe('/demo prompts', () => {
-     20|   it('every_demo_prompt_gets_a_non_help_mock_frank_reply', async () =>…
-     21|     expect(DEMO_PROMPTS.length).toBeGreaterThanOrEqual(3);
-       |                         ^
-     22|     const texts: string[] = [];
-     23|     for (const prompt of DEMO_PROMPTS) {
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
-
- FAIL  src/costsource/findingsHeader.test.tsx > FindingsCard header > findings_header_names_servicenow_for_the_servicenow_source
- FAIL  src/costsource/findingsHeader.test.tsx > FindingsCard header > findings_header_keeps_pointfive_deepwaste_for_pointfive
-Error: Element type is invalid: expected a string (for built-in components) or a class/function (for composite components) but got: undefined. You likely forgot to export your component from the file it's defined in, or you might have mixed up default and named imports.
- ❯ renderElement ../../finops-ratio/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6058:9
- ❯ renderNodeDestructiveImpl ../../finops-ratio/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6119:11
- ❯ renderNodeDestructive ../../finops-ratio/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6091:14
- ❯ retryTask ../../finops-ratio/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6543:5
- ❯ performWork ../../finops-ratio/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6591:7
- ❯ ../../finops-ratio/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6915:12
- ❯ scheduleWork ../../finops-ratio/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:78:3
- ❯ startWork ../../finops-ratio/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6914:3
- ❯ renderToStringImpl ../../finops-ratio/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6988:3
- ❯ renderToStaticMarkup ../../finops-ratio/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:7084:10
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
-
- FAIL  src/simulation/SimulationBar.test.tsx > SimulationBar sign-in link > hides_sign_in_link_when_simulation_disabled
-AssertionError: expected '<div class="shrink-0 border-b border-…' not to contain 'Customer sign-in simulation'
-
-Expected: "Customer sign-in simulation"
-Received: "<div class="shrink-0 border-b border-edge bg-slab px-3 py-2 text-xs text-sub"><div class="flex flex-col items-start gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2"><strong class="text-unit">Seeded demo</strong><span>Simulated costs and business value</span><a class="underline" href="/simulation">Customer sign-in simulation</a></div></div>"
-
- ❯ src/simulation/SimulationBar.test.tsx:37:22
-     35|     const html = renderToStaticMarkup(<SimulationBar />);
-     36|     expect(html).toContain('Seeded demo');
-     37|     expect(html).not.toContain('Customer sign-in simulation');
-       |                      ^
-     38|     expect(html).not.toContain('href="/simulation"');
-     39|   });
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
-
- FAIL  src/simulation/SimulationBar.test.tsx > SimulationBar sign-in link > hides_sign_in_link_when_no_provider_is_mounted
-AssertionError: expected '<div class="shrink-0 border-b border-…' not to contain 'href="/simulation"'
-
-Expected: "href="/simulation""
-Received: "<div class="shrink-0 border-b border-edge bg-slab px-3 py-2 text-xs text-sub"><div class="flex flex-col items-start gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2"><strong class="text-unit">Seeded demo</strong><span>Simulated costs and business value</span><a class="underline" href="/simulation">Customer sign-in simulation</a></div></div>"
-
- ❯ src/simulation/SimulationBar.test.tsx:44:22
-     42|     access.current = null;
-     43|     const html = renderToStaticMarkup(<SimulationBar />);
-     44|     expect(html).not.toContain('href="/simulation"');
-       |                      ^
-     45|   });
-     46|
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
-
-
+# RED: the A8 tests at dde0921 run against origin/main 145565f code
+# npx vitest run src/ai/demoPrompts.test.ts src/costsource/findingsCard.test.tsx src/simulation/SimulationBar.test.tsx
+      Tests  3 failed | 1 passed (4)
+     × every_demo_prompt_gets_a_non_help_mock_frank_reply
+     × names_the_source_that_ran_the_ingest_even_after_the_picker_changes
+     × sign_in_link_shows_only_when_the_simulation_is_enabled
  Test Files  3 failed (3)
-      Tests  5 failed | 2 passed (7)
-   Start at  05:32:05
-   Duration  4.33s (transform 56%, import 39%, tests 3%, worker 2%)
-
-  Transform  transforming modules took 4.68s · 56% of tracked time, re-done on every run
-             persist transforms across runs with fsModuleCache: true
-             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+AssertionError: expected '<div class="shrink-0 border-b border-…' not to contain 'href="/simulation"'
+AssertionError: expected 'Findings — 5 (PointFive DeepWaste sha…' to match /^Findings — \d+ \(ServiceNow, synthet…/
+TypeError: DEMO_PROMPTS is not iterable

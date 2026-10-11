@@ -13,7 +13,7 @@ import { respond } from './mock';
  */
 export const DEMO_PROMPTS = [
   'Why is my spend spiking?',
-  'Which team has the weakest ROI?',
+  'Which workload has the worst value ratio?',
   'What if we moved Customer Support Agent to a private open model?',
 ] as const;
 

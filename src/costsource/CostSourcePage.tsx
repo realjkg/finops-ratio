@@ -34,6 +34,8 @@ type LoadState =
       health: SourceHealth;
       rows: CostRowsResult;
       findings: CostFinding[];
+      /** The source the ingest ran against, captured at start (the picker may change meanwhile). */
+      source?: FindingsSource;
     };
 
 /** Heading + message for a failed ingest; a live-data 401 gets its own readable copy. */
@@ -103,8 +105,11 @@ export function CostSourcePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientMode]);
 
+  const selected = sources.find((s) => s.id === sourceId);
+
   const runIngest = useCallback(async () => {
     const client = createCostSourceClient(clientMode);
+    const source = selected && { kind: selected.kind, name: selected.name };
     const window = currentWindow();
     try {
       setLoadState({ status: 'loading', phase: 'Checking adapter health…' });
@@ -116,13 +121,12 @@ export function CostSourcePage() {
       setLoadState({ status: 'loading', phase: 'Loading findings…' });
       const findings = await client.fetchFindings(sourceId);
 
-      setLoadState({ status: 'success', health, rows, findings });
+      setLoadState({ status: 'success', health, rows, findings, source });
     } catch (err) {
       setLoadState({ status: 'error', ...ingestErrorView(err) });
     }
-  }, [clientMode, sourceId]);
+  }, [clientMode, sourceId, selected]);
 
-  const selected = sources.find((s) => s.id === sourceId);
   const isLoading = loadState.status === 'loading';
 
   return (
@@ -256,7 +260,7 @@ export function CostSourcePage() {
             <UpgradeAuditCard rows={loadState.rows} />
             <CompositionCard rows={loadState.rows.rows} />
             <FocusRowsCard rows={loadState.rows.rows} />
-            <FindingsCard findings={loadState.findings} source={selected} />
+            <FindingsCard findings={loadState.findings} source={loadState.source} />
           </div>
         )}
 
@@ -593,9 +597,12 @@ export function FocusRowsCard({ rows }: { rows: CanonicalFocusRow[] }) {
   );
 }
 
+type FindingsSource = Pick<CostSourceDescriptor, 'kind' | 'name'>;
+
 /** Names the source the findings came from; PointFive keeps its DeepWaste shape label. */
-export function findingsTitle(count: number, source?: Pick<CostSourceDescriptor, 'kind' | 'name'>): string {
-  const label = !source || source.kind === 'pointfive' ? 'PointFive DeepWaste shape' : source.name;
+function findingsTitle(count: number, source?: FindingsSource): string {
+  // "ServiceNow (synthetic demo data)" -> "ServiceNow, synthetic demo data": no nested parentheses.
+  const label = !source || source.kind === 'pointfive' ? 'PointFive DeepWaste shape' : source.name.replace(/\s*\((.*)\)$/, ', $1');
   return `Findings — ${count} (${label})`;
 }
 
@@ -604,7 +611,7 @@ export function FindingsCard({
   source,
 }: {
   findings: CostFinding[];
-  source?: Pick<CostSourceDescriptor, 'kind' | 'name'>;
+  source?: FindingsSource;
 }) {
   if (findings.length === 0) {
     return (
