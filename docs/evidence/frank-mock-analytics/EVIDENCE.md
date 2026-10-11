@@ -238,3 +238,13 @@ route starting to validate `workloads` and `initiatives` entries (ranges and typ
 at which point these cases are rejected before the mock; or a real data source with unbounded
 values, in which case a lower bound and a savings and percent bound belong in `world.ts` next to
 the existing upper bounds.
+
+## 8. Copilot round on PR #102: one ingestion policy
+
+Root cause of most threads: numeric request context was validated site by site. The fix is one
+normalization step in `world.ts` and a table-driven test over every numeric field
+(`src/ai/mock/review3.test.ts`).
+
+RED (before the fixes), `npx vitest run src/ai/mock/review3.test.ts`: 29 failed, 17 passed (46
+tests). The 17 passing are the inclusive-boundary acceptance rows (the existing guards already
+accepted them) and the generic-phrase and no-conflict controls.
