@@ -5,6 +5,7 @@
 // from the configured cost-source findings and an optional workload drill-down.
 
 import { COST_SOURCES, findingsFor } from '@/costsource/seed';
+import { alertsFor } from '@/data/alerts';
 import { DEMO_NOW } from '@/data/workloads';
 import { deriveCacheHitRate } from '@/lib/derive';
 import {
@@ -85,6 +86,20 @@ export function buildAIContext(
       w.costs.tokens_cached_today,
       w.costs.tokens_in_today,
     ),
+    team: w.team,
+    provider: w.model_provider,
+    monthlyValue: w.value.total_value,
+    monthlyBudget: w.costs.monthly_budget,
+    dailyInferences: w.outputs.daily_inferences,
+    tokensInToday: w.costs.tokens_in_today,
+    tokensOutToday: w.costs.tokens_out_today,
+    tokensCachedToday: w.costs.tokens_cached_today,
+    alerts: alertsFor(w.id).map((a) => ({
+      type: a.type,
+      severity: a.severity,
+      message: a.message,
+      acknowledged: a.acknowledged,
+    })),
   }));
 
   return {

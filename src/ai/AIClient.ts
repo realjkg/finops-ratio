@@ -84,6 +84,31 @@ export interface AIWorkloadSnapshot {
    * `null` when the workload used no input tokens today — never a fabricated 0%.
    */
   cacheHitRate: number | null;
+  // --- Optional analytics fields (Frank mock). Older clients omit them; the
+  // mock then falls back to the bundled seed by workload id, and says so when
+  // a field is genuinely unavailable rather than guessing. ---
+  /** Owning team (Workload.team). */
+  team?: string;
+  /** Model provider enum value (Workload.model_provider). */
+  provider?: string;
+  /** Defensible monthly value in USD (Workload.value.total_value). */
+  monthlyValue?: number;
+  monthlyBudget?: number;
+  /** Volume so far today: calls and tokens (the seed's daily framing). */
+  dailyInferences?: number;
+  tokensInToday?: number;
+  tokensOutToday?: number;
+  tokensCachedToday?: number;
+  /** Seeded alerts for this workload, compact. */
+  alerts?: AIAlertSnapshot[];
+}
+
+/** Compact alert projection for drill-down answers. */
+export interface AIAlertSnapshot {
+  type: string;
+  severity: string;
+  message: string;
+  acknowledged: boolean;
 }
 
 /** The response from a chat() call. */
