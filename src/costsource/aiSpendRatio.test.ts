@@ -214,7 +214,7 @@ describe('fetchAiSpendRatio on the live path', () => {
 function fakeClient(sources: Partial<CostSourceDescriptor>[], failures: Record<string, Error> = {}) {
   const fetchCostRows = vi.fn(async (sourceId: string, window: CostWindow) => {
     if (failures[sourceId]) throw failures[sourceId];
-    return { sourceId, window, rows: [row(25), row(75, 'Compute')] } as never;
+    return { sourceId, window, rows: sourceId === 'empty' ? [] : [row(25), row(75, 'Compute')] } as never;
   });
   const client = {
     mode: 'live',
@@ -240,22 +240,40 @@ describe('fetchAiSpendRatio failure isolation', () => {
     ]);
   });
 
-  it('skips unconfigured or row-less sources by default; reports them when named', async () => {
+  it('skips unconfigured sources by default; named row-less sources go to errors', async () => {
     const { client, fetchCostRows } = fakeClient([
       { id: 'a' },
       { id: 'dark', configured: false },
       { id: 'findings-only', capabilities: ['findings'] },
+      { id: 'empty' },
     ]);
     const byDefault = await fetchAiSpendRatio(client, WINDOW);
-    expect(byDefault.perSource.map((s) => s.sourceId)).toEqual(['a']);
+    // Default discovery lists a zero-row source as a per-source row.
+    expect(byDefault.perSource.map((s) => s.sourceId)).toEqual(['a', 'empty']);
     expect(byDefault.errors).toEqual([]);
 
-    const named = await fetchAiSpendRatio(client, WINDOW, ['a', 'dark', 'missing']);
+    const named = await fetchAiSpendRatio(client, WINDOW, ['a', 'dark', 'missing', 'empty', 'a']);
     expect(named.perSource.map((s) => s.sourceId)).toEqual(['a']);
     expect(named.errors).toEqual([
       { sourceId: 'dark', message: 'Source is not configured' },
       { sourceId: 'missing', message: 'Unknown cost source' },
+      { sourceId: 'empty', message: 'Source returned no cost rows' },
     ]);
-    expect(fetchCostRows.mock.calls.map((c) => c[0])).toEqual(['a', 'a']);
+    expect(fetchCostRows.mock.calls.map((c) => c[0])).toEqual(['a', 'empty', 'a', 'empty']);
+  });
+
+  it('an empty first member never owns a repeated bill; duplicate ids never double count', async () => {
+    const mock = createCostSourceClient('mock');
+    const emptyPointfive: CostSourceClient = {
+      ...mock,
+      listSources: () => mock.listSources(),
+      fetchCostRows: async (id, w) => (id === 'pointfive-sandbox' ? { ...(await mock.fetchCostRows(id, w)), rows: [] } : mock.fetchCostRows(id, w)),
+    };
+    const report = await fetchAiSpendRatio(emptyPointfive, WINDOW, ['pointfive-sandbox', 'focus-file-sandbox']);
+    expect(report.perSource.map((s) => [s.sourceId, s.inHeadline])).toEqual([['focus-file-sandbox', true]]);
+    expect(Math.round(report.overall.byCurrency[0].totalCost * 100)).toBe(WORKLOAD_CENTS);
+    const dup = await fetchAiSpendRatio(mock, WINDOW, ['pointfive-sandbox', 'pointfive-sandbox']);
+    expect(dup.perSource).toHaveLength(1);
+    expect(Math.round(dup.overall.byCurrency[0].totalCost * 100)).toBe(WORKLOAD_CENTS);
   });
 });

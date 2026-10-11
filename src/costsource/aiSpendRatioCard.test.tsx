@@ -5,6 +5,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { AiSpendRatioCard, AiSpendRatioView, loadAiSpendRatio } from './AiSpendRatioCard';
 import type { AiSpendRatioReport } from './aiSpendRatio';
 import { createCostSourceClient } from './index';
+import { anonymousSourceView } from './sourceDisclosure';
+import { isOfflineSandboxSource } from './sandboxSources';
 
 const now = new Date();
 const WINDOW = {
@@ -12,7 +14,11 @@ const WINDOW = {
   end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString(),
 };
 
-/** A configured non-sandbox source, as an ingested connector would appear. */
+/**
+ * A configured non-sandbox source. SIMULATION: only an authenticated
+ * server-side caller sees configured connectors; an anonymous browser gets
+ * configured:false placeholders (anonymousSourceView).
+ */
 const INGESTED = { id: 'ingested-export', name: 'Ingested export', kind: 'cloud', configured: true, capabilities: ['costRows'] };
 
 /**
@@ -34,17 +40,25 @@ function stubRoutes(ingested: boolean, respond: (path: string) => Response | und
   });
 }
 const json = (body: unknown, status: number) => new Response(JSON.stringify(body), { status });
+const AUTH_REASON =
+  'Ingested data needs an authenticated connection; this browser session is anonymous and the live routes expose only offline sandbox sources here.';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('loadAiSpendRatio (path switch)', () => {
   it('Ingested never shows seed: sandbox-only live sources give the empty state', async () => {
     stubRoutes(false);
-    const state = await loadAiSpendRatio('ingested', WINDOW);
-    expect(state).toMatchObject({ status: 'unavailable' });
-    if (state.status === 'unavailable') expect(state.reason).toMatch(/^No ingested sources connected/);
+    expect(await loadAiSpendRatio('ingested', WINDOW)).toEqual({ status: 'unavailable', reason: AUTH_REASON });
   });
 
-  it('Ingested counts only non-sandbox sources; identical rows give identical results', async () => {
+  it('anonymous browser view (connectors as configured:false placeholders) gives the auth-required copy', async () => {
+    const all = (await createCostSourceClient('mock').listSources()).map((s) =>
+      isOfflineSandboxSource(s.id) ? s : { ...s, configured: true },
+    );
+    stubRoutes(false, (p) => (p === '/api/costsource/sources' ? json(anonymousSourceView(all), 200) : undefined));
+    expect(await loadAiSpendRatio('ingested', WINDOW)).toEqual({ status: 'unavailable', reason: AUTH_REASON });
+  });
+
+  it('SIMULATED authenticated server-side caller (not an anonymous browser): only non-sandbox sources count; identical rows give identical results', async () => {
     const seed = await loadAiSpendRatio('seed', WINDOW);
     stubRoutes(true);
     const ingested = await loadAiSpendRatio('ingested', WINDOW);
@@ -60,7 +74,7 @@ describe('loadAiSpendRatio (path switch)', () => {
   it.each([
     ['auth error (401)', () => json({ error: 'nope' }, 401), /authenticated API access/],
     ['route error (500)', () => json({ error: 'Internal error' }, 500), /Internal error/],
-    ['no sources', () => json([], 200), /No ingested sources connected/],
+    ['no sources', () => json([], 200), /authenticated connection/],
   ])('Ingested unavailable: %s', async (_name, sources, reason) => {
     stubRoutes(true, (p) => (p === '/api/costsource/sources' ? sources() : undefined));
     const state = await loadAiSpendRatio('ingested', WINDOW);
@@ -79,7 +93,8 @@ describe('loadAiSpendRatio (path switch)', () => {
     stubRoutes(true, (p) => (p === '/api/costsource/rows' ? json({ rows: [] }, 200) : undefined));
     expect(await loadAiSpendRatio('ingested', WINDOW)).toMatchObject({
       status: 'unavailable',
-      reason: 'Sources returned no cost rows for this window',
+      reason: 'No source returned cost rows',
+      errors: [{ sourceId: INGESTED.id, message: 'Source returned no cost rows' }],
     });
   });
 });

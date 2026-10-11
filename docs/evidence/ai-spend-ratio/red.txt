@@ -27,3 +27,13 @@ FAIL aiSpendRatio.test.ts > fetchAiSpendRatio on the mock path (sandbox + synthe
 Tests  3 failed | 25 passed (28)
 # New mounted-card tests (race guard, billing-period boundaries) pass on the old code;
 # they pin behavior: removing the cancelled guard fails the race test (see green.txt).
+
+# RED round 4 (Copilot 4243281675/4243281710 + 2 challenger Lows), tests only on top of 74b3490:
+FAIL aiSpendRatio.test.ts > fetchAiSpendRatio failure isolation > skips unconfigured sources by default; named row-less sources go to errors
+FAIL aiSpendRatio.test.ts > fetchAiSpendRatio failure isolation > an empty first member never owns a repeated bill; duplicate ids never double count
+FAIL aiSpendRatioCard.test.tsx > loadAiSpendRatio (path switch) > Ingested never shows seed: sandbox-only live sources give the empty state
+FAIL aiSpendRatioCard.test.tsx > loadAiSpendRatio (path switch) > anonymous browser view (connectors as configured:false placeholders) gives the auth-required copy
+FAIL aiSpendRatioCard.test.tsx > loadAiSpendRatio (path switch) > Ingested unavailable: no sources
+FAIL aiSpendRatioCard.test.tsx > loadAiSpendRatio (path switch) > Ingested unavailable: sources answer with zero rows
+Tests  6 failed | 37 passed (43)
+# The {path,state} keying test passes on the old code; mutation M10 proves it (green.txt).

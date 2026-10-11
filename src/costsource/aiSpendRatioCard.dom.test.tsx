@@ -53,6 +53,18 @@ describe('AiSpendRatioCard (mounted)', () => {
     expect(container.textContent).toContain('Path: Ingested');
   });
 
+  it('after switching, the old path\'s data renders as loading under the new label', async () => {
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify([{ id: 'ext', name: 'Ext', configured: true, capabilities: ['costRows'] }]), { status: 200 }));
+    mount();
+    await act(async () => calls[0].resolve(report('mock', 111)));
+    expect(container.textContent).toContain('$111');
+    const button = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Ingested')!;
+    act(() => button.click());
+    expect(container.textContent).toContain('Path: Ingested');
+    expect(container.textContent).toContain('Loading');
+    expect(container.textContent).not.toContain('$111');
+  });
+
   it.each([
     ['2026-12-31T23:59:59.999Z', '2026-12-01T00:00:00.000Z', '2027-01-01T00:00:00.000Z'],
     ['2027-01-01T00:00:00.000Z', '2027-01-01T00:00:00.000Z', '2027-02-01T00:00:00.000Z'],
