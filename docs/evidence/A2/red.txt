@@ -1,0 +1,48 @@
+# Card A2 RED evidence (base origin/main 7a9da43)
+
+$ npx vitest run src/mock/idp/idp.test.ts   (commit 1: tests only; no implementation file exists)
+ FAIL  src/mock/idp/idp.test.ts [ src/mock/idp/idp.test.ts ]
+Error: Cannot find module './index' imported from /home/user/sprintA/A2/src/mock/idp/idp.test.ts
+ Test Files  1 failed (1)
+      Tests  no tests
+
+$ npx vitest run src/mock/idp/idp.test.ts   (same tests against a throw-only stub index.ts that exports the API names; stub not committed)
+     × issues_token_with_role_team_env_tenant_claims 17ms
+     × verify_rejects_tampered_role_claim 1ms
+     × verify_rejects_expired_token 1ms
+     × verify_rejects_wrong_audience_env 1ms
+     × verify_rejects_alg_none_and_hs256_confusion 1ms
+     × verify_rejects_unknown_kid 9ms
+     × verify_rejects_revoked_jti 1ms
+     × single_use_token_replay_fails_second_time 1ms
+     × role_change_reissue_reflects_new_claims_and_old_token_is_revoked 1ms
+     × key_rotation_old_kid_rejected_after_retire 0ms
+     × mock_idp_enabled_table 2ms
+     × issuer_refuses_to_run_unless_mock_idp_enabled 1ms
+     × personas_module_has_no_imports_so_the_sign_in_page_can_import_it_alone 1ms
+     × issuer_requires_an_explicit_deploy_env_argument_and_sets_aud_to_it 9ms
+     × idp_state_is_shared_across_separately_loaded_module_instances 2ms
+     × persona_catalogue_has_two_eng_leads_on_distinct_real_team_names 5ms
+     × persona_catalogue_has_org_wide_principals_for_the_other_roles 4ms
+       × no_key_or_token_material_in_console_output 8ms
+⎯⎯⎯⎯⎯⎯ Failed Tests 18 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > issues_token_with_role_team_env_tenant_claims
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > verify_rejects_tampered_role_claim
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > verify_rejects_expired_token
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > verify_rejects_wrong_audience_env
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > verify_rejects_alg_none_and_hs256_confusion
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > verify_rejects_unknown_kid
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > verify_rejects_revoked_jti
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > single_use_token_replay_fails_second_time
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > role_change_reissue_reflects_new_claims_and_old_token_is_revoked
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > key_rotation_old_kid_rejected_after_retire
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > mock_idp_enabled_table
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > issuer_refuses_to_run_unless_mock_idp_enabled
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > personas_module_has_no_imports_so_the_sign_in_page_can_import_it_alone
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > issuer_requires_an_explicit_deploy_env_argument_and_sets_aud_to_it
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > idp_state_is_shared_across_separately_loaded_module_instances
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > persona_catalogue_has_two_eng_leads_on_distinct_real_team_names
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > persona_catalogue_has_org_wide_principals_for_the_other_roles
+ FAIL  src/mock/idp/idp.test.ts > mock identity provider (card A2) > output hygiene > no_key_or_token_material_in_console_output
+ Test Files  1 failed (1)
+      Tests  18 failed (18)
