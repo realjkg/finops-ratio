@@ -248,4 +248,17 @@ This proposal PR closed at revision 23. Further reviewer findings are
 recorded here, not as more revisions, unless a finding is a High with a traced
 concrete failure.
 
-(none yet)
+Revision 23 review (head 67a9a62), two threads, both triaged as not High (no
+traced concrete failure in the design; both are test-specification gaps):
+
+1. A20 (e) covers only two overlapping reloads. E4 also rejects a reload that
+   overlaps the start evaluation, so a broker with separate startup and reload
+   guards could pass the suite. Follow-up for the M0 test author: add a
+   deterministic start-evaluation/reload overlap case that requires the reload
+   to be rejected and the startup result to apply exactly once.
+2. A20 (m) describes the check as one that "never returns" and then has it
+   complete late, which cannot be implemented literally. It also asserts only
+   config state, so an implementation that blocks the stale install but still
+   emits `reload_applied` would pass. Follow-up: use a deferred check that
+   resolves after a newer reload completes, and assert both that the config is
+   unchanged and that no success audit event is emitted (only a debug note).
