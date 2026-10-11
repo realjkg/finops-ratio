@@ -1,0 +1,10 @@
+# RED: T1 tests committed before implementation (feat/ui-theme-tokens)
+# cmd: npx vitest run src/theme
+ FAIL  src/theme/contrast.test.ts [ src/theme/contrast.test.ts ]
+Error: Cannot find module './contrast' imported from /tmp/ratio-t1/src/theme/contrast.test.ts
+ FAIL  src/theme/tokens.test.ts [ src/theme/tokens.test.ts ]
+Error: Cannot find module './apply' imported from /tmp/ratio-t1/src/theme/tokens.test.ts
+ FAIL  src/theme/validate.test.ts [ src/theme/validate.test.ts ]
+Error: Cannot find module './themes' imported from /tmp/ratio-t1/src/theme/validate.test.ts
+ Test Files  3 failed (3)
+      Tests  no tests
