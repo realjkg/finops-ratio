@@ -1,0 +1,19 @@
+# GREEN run: commit 2 (projections.ts implemented)
+$ npx vitest run src/mock/personaData
+ ✓ src/mock/personaData/projections.test.ts > dataset and oracle sanity > dataset_is_integer_cents_only 3ms
+ ✓ src/mock/personaData/projections.test.ts > dataset and oracle sanity > dataset_exposes_float_error_in_a_naive_dollar_sum 1ms
+ ✓ src/mock/personaData/projections.test.ts > dataset and oracle sanity > oracle_agrees_with_an_independent_sum_of_the_dataset 0ms
+ ✓ src/mock/personaData/projections.test.ts > scope > empty_lists_select_nothing_and_star_selects_every_listed_env 0ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > cto_rollup_total_equals_finops_drilldown_total 1ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > finops_drilldown_total_equals_sum_of_team_views 1ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > finance_total_equals_cto_total_to_the_cent 2ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > each_persona_matches_committed_oracle 6ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > eng_lead_view_contains_no_other_team_rows_counts_or_totals 1ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > eng_lead_rollup_is_computed_after_the_scope_filter 1ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > dataset_revision_bump_changes_every_persona_view_together 1ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > env_scoped_view_excludes_out_of_scope_environments_and_totals_still_sum 10ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > empty_scope_returns_empty_not_everything 15ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > paged_rows_sum_to_the_total_for_every_persona 10ms
+ ✓ src/mock/personaData/projections.test.ts > persona projections > invalid_page_requests_throw_and_projection_does_not_mutate_the_dataset 1ms
+ Test Files  1 passed (1)
+      Tests  15 passed (15)
