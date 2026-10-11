@@ -306,13 +306,20 @@ describe('migration runner (real Postgres)', () => {
     const afterFirst = await catalogSnapshot(c);
     expect(afterFirst.namespaces).toContain('ratio');
 
+    // Capture the catalog with every migration but the latest applied: undoing only the latest
+    // must return exactly this state (it is the state after 0001 only when 0001 is the sole migration).
+    const latest = REAL_VERSIONS[REAL_VERSIONS.length - 1];
+    const butLatest = copyMigrations();
+    for (const f of fs.readdirSync(butLatest)) if (f.startsWith(`${latest}_`)) fs.rmSync(path.join(butLatest, f));
+    await migrateUp(c, { dir: butLatest });
+    const afterButLatest = await catalogSnapshot(c);
+
     await migrateUp(c);
     expect((await catalogSnapshot(c)).namespaces).toContain('ratio');
 
-    const latest = REAL_VERSIONS[REAL_VERSIONS.length - 1];
     const lastDown = await migrateDown(c, { steps: 1, env: ALLOW_DOWN });
     expect(lastDown.reverted).toEqual([latest]);
-    expect(await catalogSnapshot(c)).toEqual(afterFirst);
+    expect(await catalogSnapshot(c)).toEqual(afterButLatest);
     expect((await migrateUp(c)).applied).toEqual([latest]);
 
     const down = await migrateDown(c, { steps: REAL_VERSIONS.length, env: ALLOW_DOWN });

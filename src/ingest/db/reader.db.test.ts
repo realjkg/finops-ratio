@@ -36,10 +36,11 @@ describe('ratio_reader', () => {
     ]);
     for (const view of ['cost_facts_published', 'outcome_events_published', 'outcome_period_counts']) {
       const privs = await db.pool.query(
-        `SELECT has_table_privilege('ratio_reader', 'ratio.${view}', 'INSERT') AS i,
-                has_table_privilege('ratio_reader', 'ratio.${view}', 'UPDATE') AS u,
-                has_table_privilege('ratio_reader', 'ratio.${view}', 'DELETE') AS d,
-                has_table_privilege('ratio_reader', 'ratio.${view}', 'TRUNCATE') AS t`,
+        `SELECT has_table_privilege('ratio_reader', $1::text, 'INSERT') AS i,
+                has_table_privilege('ratio_reader', $1::text, 'UPDATE') AS u,
+                has_table_privilege('ratio_reader', $1::text, 'DELETE') AS d,
+                has_table_privilege('ratio_reader', $1::text, 'TRUNCATE') AS t`,
+        [`ratio.${view}`],
       );
       expect(privs.rows[0], view).toEqual({ i: false, u: false, d: false, t: false });
     }

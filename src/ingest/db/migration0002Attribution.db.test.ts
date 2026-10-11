@@ -151,7 +151,11 @@ describe('migration 0002: up/down round trip', () => {
           (await c.query(`SELECT count(*)::int AS n FROM information_schema.columns WHERE table_schema='ratio' AND table_name='cost_facts' AND column_name='project_id'`)).rows[0].n,
         ).toBe(1);
 
-        await migrateDown(c, { steps: 1, env: ALLOW_DOWN });
+        // Roll back to 0001 whatever newer migrations exist (later migrations sit on top of 0002).
+        const applied = (await c.query(`SELECT version FROM public.schema_migrations ORDER BY version`)).rows.map((r) => r.version);
+        expect(applied[0]).toBe('0001');
+        expect(applied).toContain('0002');
+        await migrateDown(c, { steps: applied.length - 1, env: ALLOW_DOWN });
 
         const afterDown = await c.query(
           `SELECT
@@ -169,7 +173,7 @@ describe('migration 0002: up/down round trip', () => {
           `SELECT count(*)::int AS n FROM information_schema.columns WHERE table_schema='ratio' AND table_name='cost_facts' AND column_name='project_id'`,
         );
         expect(afterUp.rows[0].n).toBe(1);
-        expect((await c.query(`SELECT version FROM public.schema_migrations ORDER BY version`)).rows.map((r) => r.version)).toEqual(['0001', '0002']);
+        expect((await c.query(`SELECT version FROM public.schema_migrations ORDER BY version`)).rows.map((r) => r.version)).toEqual(applied);
       } finally {
         await c.end();
       }

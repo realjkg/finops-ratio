@@ -8,7 +8,7 @@
 // pure rules of `src/outcomes/durable.ts` — including the R4 line: an
 // unvalidated benefit can never produce a value-to-cost ratio.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { attempt, createTestDatabase, withRole, type TestDatabase } from './testing/harness';
 import { artifactSha, seedTwoTenants, type Seeded } from './testing/fixtures';
 import { evaluateBenefit, evaluateCost, successfulOutcomeCount, valueToCostRatio, type BenefitClaimRow, type SupplementalCostRow } from '@/outcomes/durable';
@@ -25,44 +25,46 @@ afterAll(async () => {
   await db?.close();
 });
 
-const REGISTRATION_COLUMNS = `(tenant_id, id, project_id, use_case_pattern, outcome_unit_key, outcome_unit_label, metric, unit, direction, target, baseline, observation, quality_metric, quality_direction, quality_threshold, stop_below, continue_at, expand_at, status, requested_by)`;
+/** Either a pooled client (role-scoped transactions) or the pool itself (superuser plumbing). */
+type Queryable = Pool | PoolClient;
 
-/** Inserts a pending registration (the only INSERT the lifecycle trigger allows). */
-async function insertPending(
-  c: PoolClient,
-  over: {
-    tenantId: string;
-    id: string;
-    projectId: string;
-    status?: string;
-    requestedBy?: string;
-    thresholds?: { stopBelow: number; continueAt: number; expandAt: number };
-  },
-  /** Statement runner; inject `attempt` to observe a refusal without aborting the surrounding transaction. */
-  runner: (sql: string, params: unknown[]) => Promise<unknown> = (sql, params) => c.query(sql, params),
-): Promise<void> {
-  const t = over.thresholds ?? { stopBelow: 0.5, continueAt: 1, expandAt: 3 };
-  await runner(
-    `INSERT INTO ratio.outcome_unit_registrations ${REGISTRATION_COLUMNS}
+type PendingOver = {
+  tenantId: string;
+  id: string;
+  projectId: string;
+  status?: string;
+  requestedBy?: string;
+  thresholds?: { stopBelow: number; continueAt: number; expandAt: number };
+};
+
+/** The only INSERT the lifecycle trigger allows: a pending registration. */
+const PENDING_INSERT_SQL = `INSERT INTO ratio.outcome_unit_registrations (tenant_id, id, project_id, use_case_pattern, outcome_unit_key, outcome_unit_label, metric, unit, direction, target, baseline, observation, quality_metric, quality_direction, quality_threshold, stop_below, continue_at, expand_at, status, requested_by)
      VALUES ($1, $2, $3, 'support_assistant', 'resolved_ticket', 'Resolved tickets', 'resolution_quality', 'quality_result',
-             'higher', 15, $4, $5, 'resolution_quality', 'higher', 0.9, $6, $7, $8, $9, $10)`,
-    [
-      over.tenantId,
-      over.id,
-      over.projectId,
-      JSON.stringify({ start: '2026-07-01', end: '2026-07-31', value: 12.5 }),
-      JSON.stringify({ start: '2026-08-01', end: '2026-08-31', value: 15 }),
-      t.stopBelow,
-      t.continueAt,
-      t.expandAt,
-      over.status ?? 'pending',
-      over.requestedBy ?? 'reg-requester',
-    ],
-  );
+             'higher', 15, $4, $5, 'resolution_quality', 'higher', 0.9, $6, $7, $8, $9, $10)`;
+
+function pendingInsertParams(over: PendingOver): unknown[] {
+  const t = over.thresholds ?? { stopBelow: 0.5, continueAt: 1, expandAt: 3 };
+  return [
+    over.tenantId,
+    over.id,
+    over.projectId,
+    JSON.stringify({ start: '2026-07-01', end: '2026-07-31', value: 12.5 }),
+    JSON.stringify({ start: '2026-08-01', end: '2026-08-31', value: 15 }),
+    t.stopBelow,
+    t.continueAt,
+    t.expandAt,
+    over.status ?? 'pending',
+    over.requestedBy ?? 'reg-requester',
+  ];
+}
+
+/** Inserts a pending registration. Tests that need to observe a refusal run PENDING_INSERT_SQL through `attempt` instead. */
+async function insertPending(c: Queryable, over: PendingOver): Promise<void> {
+  await c.query(PENDING_INSERT_SQL, pendingInsertParams(over));
 }
 
 /** Approves a pending registration as a different identity. */
-const approve = (c: PoolClient, tenantId: string, id: string, approvedBy: string) =>
+const approve = (c: Queryable, tenantId: string, id: string, approvedBy: string) =>
   c.query(`UPDATE ratio.outcome_unit_registrations SET status = 'approved', approved_by = $3, approved_at = now() WHERE tenant_id = $1 AND id = $2`, [tenantId, id, approvedBy]);
 
 const newId = (n: number, prefix = 'cccccccc'): string => `${prefix}-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -74,7 +76,7 @@ describe('outcome-unit registry governance', () => {
       expect(r.ok).toBe(true);
       const direct = await attempt(
         c,
-        `INSERT INTO ratio.outcome_unit_registrations ${REGISTRATION_COLUMNS}
+        `INSERT INTO ratio.outcome_unit_registrations (tenant_id, id, project_id, use_case_pattern, outcome_unit_key, outcome_unit_label, metric, unit, direction, target, baseline, observation, quality_metric, quality_direction, quality_threshold, stop_below, continue_at, expand_at, status, requested_by)
          VALUES ($1, $2, 'governed-project', 'support_assistant', 'resolved_ticket', 'Resolved tickets', 'resolution_quality', 'quality_result',
                  'higher', 15, $3, $4, 'resolution_quality', 'higher', 0.9, 0.5, 1, 3, 'approved', 'reg-requester')`,
         [
@@ -127,18 +129,16 @@ describe('outcome-unit registry governance', () => {
       const unordered = await attempt(c, `SELECT 1`, []);
       expect(unordered.ok).toBe(true);
       let refusal: { ok: false; code: string; message: string } | null = null;
-      await insertPending(
+      const ladder = await attempt(
         c,
-        { tenantId: seed.a.tenantId, id: newId(6), projectId: 'bad-ladder', thresholds: { stopBelow: 1, continueAt: 0.5, expandAt: 3 } },
-        async (sql, params) => {
-          const r = await attempt(c, sql, params);
-          if (!r.ok) refusal = r;
-        },
+        PENDING_INSERT_SQL,
+        pendingInsertParams({ tenantId: seed.a.tenantId, id: newId(6), projectId: 'bad-ladder', thresholds: { stopBelow: 1, continueAt: 0.5, expandAt: 3 } }),
       );
+      if (!ladder.ok) refusal = ladder;
       expect(refusal).not.toBeNull(); // stop_below < continue_at < expand_at is data, not convention
       const invertedPeriod = await attempt(
         c,
-        `INSERT INTO ratio.outcome_unit_registrations ${REGISTRATION_COLUMNS}
+        `INSERT INTO ratio.outcome_unit_registrations (tenant_id, id, project_id, use_case_pattern, outcome_unit_key, outcome_unit_label, metric, unit, direction, target, baseline, observation, quality_metric, quality_direction, quality_threshold, stop_below, continue_at, expand_at, status, requested_by)
          VALUES ($1, $2, 'bad-periods', 'support_assistant', 'resolved_ticket', 'Resolved tickets', 'resolution_quality', 'quality_result',
                  'higher', 15, $3, $4, 'resolution_quality', 'higher', 0.9, 0.5, 1, 3, 'pending', 'reg-requester')`,
         [
@@ -151,7 +151,7 @@ describe('outcome-unit registry governance', () => {
       expect(invertedPeriod.ok).toBe(false);
       const overlapping = await attempt(
         c,
-        `INSERT INTO ratio.outcome_unit_registrations ${REGISTRATION_COLUMNS}
+        `INSERT INTO ratio.outcome_unit_registrations (tenant_id, id, project_id, use_case_pattern, outcome_unit_key, outcome_unit_label, metric, unit, direction, target, baseline, observation, quality_metric, quality_direction, quality_threshold, stop_below, continue_at, expand_at, status, requested_by)
          VALUES ($1, $2, 'bad-periods', 'support_assistant', 'resolved_ticket', 'Resolved tickets', 'resolution_quality', 'quality_result',
                  'higher', 15, $3, $4, 'resolution_quality', 'higher', 0.9, 0.5, 1, 3, 'pending', 'reg-requester')`,
         [
