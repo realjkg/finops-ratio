@@ -1,121 +1,67 @@
-// The shared scope helper (PLAN 4.2 and 4.6): one rule for "may this principal
-// see data owned by this team in this environment", used by authorize() and by
-// every data seam that filters rows (cards B2, B5, B8).
-//
-// Rules (fail closed):
-// - `teams: '*'` covers every real team; an array covers exactly its members
-//   (case-sensitive, no trimming). '*' inside an array is a literal team name,
-//   never a wildcard. An empty array covers nothing.
-// - A team value of '*' or '' is never a real team and is covered by no one.
-// - A row with no known team is visible only to an org-wide principal
-//   (`teams: '*'`): ownership cannot be shown to anyone narrower.
-// - A row's env must be a mapped `DeployEnv` listed in the principal's `envs`.
-//   `null` means the source value did not map (envMap returned null) and is
-//   visible to no one. An absent env (unknown) is visible only to a principal
-//   that holds every DeployEnv.
-import { DEPLOY_ENVS, isDeployEnv, type DeployEnv, type Principal } from './types';
+// The shared scope rule (PLAN 4.6) for authorize() and the data seams, fail closed:
+// teams '*' covers every real team, a list exactly its members and needs one real
+// team ('*' and '' are not teams); a row with no team is for '*' only, an
+// unmapped env (null) for no one, no env for holders of every env. Only OWN
+// fields and indexes count; arrays over a cap are invalid before any scan.
+import { DEPLOY_ENVS, isOneOf, type DeployEnv, type Principal } from './types';
+
+/** Upper bound for a teams or envs claim. */
+export const MAX_CLAIM = 256;
+/** Upper bound for the rows passed to filterByScope. */
+export const MAX_ROWS = 100_000;
+
+/** The own elements of an array no longer than `max`; null for anything else. */
+export function ownArray(a: unknown, max = MAX_CLAIM): unknown[] | null {
+  if (!Array.isArray(a) || a.length > max) return null;
+  const out: unknown[] = [];
+  for (let i = 0; i < a.length; i += 1) if (Object.hasOwn(a, i)) out.push(a[i]);
+  return out;
+}
+
+/**
+ * A null-prototype copy of the listed own fields of a non-array object, with
+ * array fields replaced by their ownArray copy; undefined for anything else.
+ */
+export function ownRecord<K extends string>(o: unknown, keys: readonly K[]): Partial<Record<K, unknown>> | undefined {
+  if (o === null || typeof o !== 'object' || Array.isArray(o)) return undefined;
+  const copy = Object.create(null) as Partial<Record<K, unknown>>;
+  for (const k of keys) {
+    if (!Object.hasOwn(o, k)) continue;
+    const v = (o as Record<K, unknown>)[k];
+    copy[k] = Array.isArray(v) ? ownArray(v) : v;
+  }
+  return copy;
+}
+
+const isRealTeam = (t: unknown): t is string => typeof t === 'string' && t !== '' && t !== '*';
+// Own, capped elements only; a hostile Proxy may throw here (inScope, filterByScope and authorize() catch).
+export const hasRealTeam = (teams: unknown): boolean => teams === '*' || !!ownArray(teams)?.some(isRealTeam);
+export const teamCovered = (teams: unknown, team: unknown): boolean => isRealTeam(team) && (teams === '*' || !!ownArray(teams)?.includes(team));
+export const envCovered = (envs: unknown, env: unknown): boolean => isOneOf(DEPLOY_ENVS, env) && !!ownArray(envs)?.includes(env);
 
 export interface ScopeKey {
   team?: string;
   env?: DeployEnv | null;
 }
 
-type ScopeOf = Pick<Principal, 'teams' | 'envs'>;
-
-function isRealTeam(team: unknown): team is string {
-  return typeof team === 'string' && team !== '' && team !== '*';
-}
-
-/** An array's own elements only: holes and inherited indexes are skipped (the
- * built-in iteration methods would read Array.prototype through a hole). The
- * result is a dense array built by push, so the array methods used on it
- * below (`some`) only ever see own elements. Every caller-supplied array in
- * this module goes through ownList or an own-index loop; DEPLOY_ENVS is a
- * frozen module constant. */
-function ownList(a: unknown): unknown[] | null {
+/** True when a row with this team and env is inside the principal's scope. Any throw is a deny. */
+export function inScope(principal: Pick<Principal, 'teams' | 'envs'>, key: ScopeKey): boolean {
   try {
-    if (!Array.isArray(a)) return null;
-    const out: unknown[] = [];
-    for (let i = 0; i < a.length; i += 1) if (Object.hasOwn(a, i)) out.push(a[i]);
-    return out;
-  } catch {
-    return null; // a revoked or throwing Proxy is an invalid claim, never an exception
-  }
-}
-
-/** An object's own field, never one inherited through the prototype chain. */
-function ownField(o: unknown, key: string): unknown {
-  return o !== null && typeof o === 'object' && Object.hasOwn(o, key) ? (o as Record<string, unknown>)[key] : undefined;
-}
-
-/** Whether the principal's team claim covers a known, real team. */
-export function teamCovered(teams: Principal['teams'], team: string): boolean {
-  if (!isRealTeam(team)) return false;
-  if (teams === '*') return true;
-  return ownList(teams)?.some((t) => t === team) ?? false;
-}
-
-/** Whether the principal's env claim covers a mapped DeployEnv. */
-export function envCovered(envs: Principal['envs'], env: unknown): boolean {
-  return isDeployEnv(env) && (ownList(envs)?.some((e) => e === env) ?? false);
-}
-
-/** Whether a teams claim covers at least one real team ("*", or a list with a real team name). */
-export function hasRealTeam(teams: unknown): boolean {
-  return teams === '*' || (ownList(teams)?.some(isRealTeam) ?? false);
-}
-
-/** Whether the principal holds every DeployEnv (needed for rows of unknown env). */
-function holdsEveryEnv(envs: Principal['envs']): boolean {
-  return DEPLOY_ENVS.every((e) => envCovered(envs, e));
-}
-
-/**
- * True when a row with this team and environment is inside the principal's
- * scope. Only OWN principal claims and OWN row keys count: an inherited claim
- * is no claim, and an inherited row key is treated as unknown (fail closed).
- * Any exception (for example a revoked Proxy) means out of scope.
- */
-export function inScope(principal: ScopeOf, key: ScopeKey): boolean {
-  try {
-    const teams = ownField(principal, 'teams') as Principal['teams'];
-    const envs = ownField(principal, 'envs') as Principal['envs'];
-    if (!hasRealTeam(teams)) return false;
-    if (!(ownList(envs)?.some((e) => isDeployEnv(e)) ?? false)) return false;
-
-    const team = ownField(key, 'team');
-    const env = ownField(key, 'env');
-    if (team === undefined) {
-      if (teams !== '*') return false;
-    } else if (typeof team !== 'string' || !teamCovered(teams, team)) {
-      return false;
-    }
-
-    if (env === undefined) return holdsEveryEnv(envs);
-    return envCovered(envs, env);
+    const p = ownRecord(principal, ['teams', 'envs'] as const);
+    const k = ownRecord(key, ['team', 'env'] as const);
+    if (!p || !k || !hasRealTeam(p.teams) || !DEPLOY_ENVS.some((e) => envCovered(p.envs, e))) return false;
+    if (k.team === undefined ? p.teams !== '*' : !teamCovered(p.teams, k.team)) return false;
+    return k.env === undefined ? DEPLOY_ENVS.every((e) => envCovered(p.envs, e)) : envCovered(p.envs, k.env);
   } catch {
     return false;
   }
 }
 
-/**
- * The rows inside the principal's scope, in their original order. Only the
- * array's own indexes are visited (Array.prototype.filter would also visit an
- * inherited index through a hole), and a row whose keyOf throws is excluded.
- */
-export function filterByScope<T>(principal: ScopeOf, rows: readonly T[], keyOf: (row: T) => ScopeKey): T[] {
-  const own = ownList(rows) as T[] | null; // own indexes only; null for a non-array or hostile Proxy
-  const out: T[] = [];
-  if (!own) return out;
-  for (let i = 0; i < own.length; i += 1) {
-    const row = own[i]; // dense own copy: no hole can reach Array.prototype
-    let key: ScopeKey;
-    try {
-      key = keyOf(row);
-    } catch {
-      continue; // fail closed: a row whose scope cannot be read is not shown
-    }
-    if (inScope(principal, key)) out.push(row);
+/** The rows inside the principal's scope, in order; [] for more than MAX_ROWS rows or on any throw. */
+export function filterByScope<T>(principal: Pick<Principal, 'teams' | 'envs'>, rows: readonly T[], keyOf: (row: T) => ScopeKey): T[] {
+  try {
+    return ((ownArray(rows, MAX_ROWS) ?? []) as T[]).filter((row) => inScope(principal, keyOf(row)));
+  } catch {
+    return [];
   }
-  return out;
 }
