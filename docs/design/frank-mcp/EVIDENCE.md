@@ -19,8 +19,10 @@ challenger review requested changes and 16581c8 answered it; revision 5
 (6f82d26) answered the round-7 challenger's review of 6f4c9f7; revision 9
 (911b67c) answered the round-8 challenger's review of 6f82d26; revision 10
 (90eee59) answered the round-9 challenger's review of 911b67c, with a splice
-error in DESIGN.md that revision 11 repairs; revision 11 answers the round-10
-challenger's review of 90eee59.
+error in DESIGN.md that revision 11 repairs; revision 11
+(10b18f8) answered the round-10 challenger's review of 90eee59; the round-11
+challenger approved 10b18f8, and revision 12 answers Copilot's open threads on
+it and the round-11 Lows.
 
 ## 1. Method
 
@@ -78,6 +80,10 @@ challenger's review of 90eee59.
   from 911b67c plus the revision 10 edits (the 90eee59 splice came from a
   string search that matched an earlier occurrence); the diff 911b67c..HEAD
   was reviewed as a whole and the section and table checks below were run.
+- Revision 12 sources: no new code or external sources. DESIGN.md was edited
+  hunk by hunk (no splice); the changes are key-table bodies and the
+  model-token budget key, evaluation-rule clarifications and new A20/A11/A3/A18
+  cases.
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -153,8 +159,9 @@ result was `risk: low`; with a paragraph that names the rule, the result was
 revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
 `EVIDENCE.md`: that `DESIGN.md` was the spliced file, whose rewrapped
 audit-retention sentence and decision-table row counted as added lines. At
-revision 11, with `DESIGN.md` rebuilt from 911b67c, the classifier was re-run
-at the final head and reports `risk: restricted`, class `retention`, rule
+revisions 11 and 12, with `DESIGN.md` rebuilt from 911b67c at revision 11 and
+edited hunk by hunk since, the classifier was re-run at the final head and
+reports `risk: restricted`, class `retention`, rule
 `retention.mention`, on `EVIDENCE.md` only (this section names the rule).
 Neither result proves the change safe (the gate's own README calls `low`
 heuristic). The classification is recorded in the pull request body at the
