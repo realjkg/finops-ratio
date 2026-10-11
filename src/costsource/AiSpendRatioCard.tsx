@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 import { createCostSourceClient } from './index';
 import { LiveDataAuthError } from './LiveCostSourceClient';
+import { isOfflineSandboxSource } from './sandboxSources';
 import { fetchAiSpendRatio } from './aiSpendRatio';
 import type { AiSpendRatio, AiSpendRatioReport } from './aiSpendRatio';
 import type { CostWindow } from './CostSourceClient';
@@ -20,13 +21,28 @@ type RatioState =
 const PATH_LABEL: Record<RatioPath, string> = { seed: 'Static seed', ingested: 'Ingested' };
 const PATH_DETAIL: Record<RatioPath, string> = {
   seed: 'mock client: offline sandbox + synthetic sources',
-  ingested: 'live client: /api/costsource routes',
+  ingested: 'live client: /api/costsource routes, non-sandbox sources only',
 };
 
 /** Load the ratio for one path; never throws (failures become 'unavailable'). */
 export async function loadAiSpendRatio(path: RatioPath, window: CostWindow): Promise<RatioState> {
   try {
-    const report = await fetchAiSpendRatio(createCostSourceClient(path === 'seed' ? 'mock' : 'live'), window);
+    const client = createCostSourceClient(path === 'seed' ? 'mock' : 'live');
+    let sourceIds: string[] | undefined;
+    if (path === 'ingested') {
+      // Offline sandbox sources serve seed data even over the live routes, so
+      // they never count as ingested.
+      sourceIds = (await client.listSources())
+        .filter((s) => s.configured && s.capabilities.includes('costRows') && !isOfflineSandboxSource(s.id))
+        .map((s) => s.id);
+      if (sourceIds.length === 0) {
+        return {
+          status: 'unavailable',
+          reason: 'No ingested sources connected: the live routes expose only offline sandbox (seed) sources here.',
+        };
+      }
+    }
+    const report = await fetchAiSpendRatio(client, window, sourceIds);
     if (report.perSource.length === 0) {
       const reason = report.errors.length ? 'No source returned cost rows' : 'No configured cost sources';
       return { status: 'unavailable', reason, errors: report.errors };
@@ -121,13 +137,16 @@ export function AiSpendRatioView({
       {state.status === 'ready' && (
         <div className="space-y-3">
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-dim">Overall (all sources)</p>
+            <p className="text-[10px] uppercase tracking-wider text-dim">Headline (non-overlapping sources)</p>
             <CurrencyLines result={state.report.overall} />
           </div>
           <ul className="space-y-1">
             {state.report.perSource.map((s) => (
               <li key={s.sourceId} className="flex flex-wrap justify-between gap-2 border-t border-edge pt-1">
-                <span className="text-xs text-txt">{s.name}</span>
+                <span className="text-xs text-txt">
+                  {s.name}
+                  {!s.inHeadline && <span className="text-dim"> (same workloads, not summed into the headline)</span>}
+                </span>
                 <span><CurrencyLines result={s.result} /></span>
               </li>
             ))}
@@ -140,9 +159,8 @@ export function AiSpendRatioView({
           ))}
           <p className="text-xs text-dim">
             Basis: EffectiveCost (amortized, credits net in). AI = ServiceCategory “AI and Machine
-            Learning”. Sources are summed as-is and not deduplicated: sources that describe the same
-            spend (the PointFive, FOCUS-file and ServiceNow sandboxes share one workload seed) are
-            counted once per source in the overall figure.
+            Learning”. The headline sums only sources that do not repeat another fetched source’s
+            bill; other sources are assumed not to overlap (no row-level dedupe).
           </p>
         </div>
       )}

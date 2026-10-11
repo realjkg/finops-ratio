@@ -107,11 +107,23 @@ export function computeAiSpendRatio(rows: CanonicalFocusRow[]): AiSpendRatio {
 export interface AiSpendRatioReport {
   mode: CostSourceClient['mode'];
   window: CostWindow;
-  perSource: { sourceId: string; name: string; result: AiSpendRatio }[];
-  /** All fetched rows together. Sources are assumed not to overlap (no dedupe). */
+  /** inHeadline false = repeats another fetched source's bill; not in `overall`. */
+  perSource: { sourceId: string; name: string; inHeadline: boolean; result: AiSpendRatio }[];
+  /** Rows of the inHeadline sources only, so overlapping sources are never summed. */
   overall: AiSpendRatio;
   errors: { sourceId: string; message: string }[];
 }
+
+/**
+ * Seed sources that repeat another source's bill: same BillingAccountId and
+ * ResourceIds (checked against the rows in aiSpendRatio.test.ts). They stay
+ * as per-source rows but join the headline only when the source they repeat
+ * was not fetched. The synthetic clouds bill their own accounts and count.
+ */
+const REPEATS_BILL_OF: Readonly<Record<string, string>> = {
+  'focus-file-sandbox': 'pointfive-sandbox',
+  'servicenow-sandbox': 'pointfive-sandbox',
+};
 
 /**
  * AI spend ratio across sources, through the CostSourceClient interface only,
@@ -142,8 +154,7 @@ export async function fetchAiSpendRatio(
     : sources.filter((s) => s.configured && s.capabilities.includes('costRows'));
 
   const settled = await Promise.allSettled(wanted.map((s) => client.fetchCostRows(s.id, window)));
-  const perSource: AiSpendRatioReport['perSource'] = [];
-  const allRows: CanonicalFocusRow[] = [];
+  const fetched: { sourceId: string; name: string; rows: CanonicalFocusRow[] }[] = [];
   settled.forEach((outcome, i) => {
     const { id, name } = wanted[i];
     if (outcome.status === 'rejected') {
@@ -151,9 +162,20 @@ export async function fetchAiSpendRatio(
       errors.push({ sourceId: id, message: err instanceof Error ? err.message : String(err) });
       return;
     }
-    const rows = Array.isArray(outcome.value?.rows) ? outcome.value.rows : [];
-    allRows.push(...rows);
-    perSource.push({ sourceId: id, name, result: computeAiSpendRatio(rows) });
+    fetched.push({ sourceId: id, name, rows: Array.isArray(outcome.value?.rows) ? outcome.value.rows : [] });
   });
-  return { mode: client.mode, window, perSource, overall: computeAiSpendRatio(allRows), errors };
+  const fetchedIds = new Set(fetched.map((f) => f.sourceId));
+  const perSource = fetched.map(({ sourceId, name, rows }) => ({
+    sourceId,
+    name,
+    inHeadline: !fetchedIds.has(REPEATS_BILL_OF[sourceId] ?? ''),
+    rows,
+  }));
+  return {
+    mode: client.mode,
+    window,
+    perSource: perSource.map(({ rows, ...s }) => ({ ...s, result: computeAiSpendRatio(rows) })),
+    overall: computeAiSpendRatio(perSource.filter((s) => s.inHeadline).flatMap((s) => s.rows)),
+    errors,
+  };
 }

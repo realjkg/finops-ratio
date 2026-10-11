@@ -1,7 +1,7 @@
 # GREEN: npx vitest run src/costsource (after implementation)
 Test Files  34 passed (34)
-Tests  714 passed (714)
-# New files only (aiSpendRatio.test.ts + aiSpendRatioCard.test.tsx): Tests  28 passed (28)
+Tests  718 passed (718)   (round 2; round 1 was 714)
+# New files only (aiSpendRatio.test.ts + aiSpendRatioCard.test.tsx): Tests  32 passed (32)
 # Test corrections after RED (expectations were wrong, not the code):
 #   huge-values ratio: expected 0.5 -> exact 100000000000.01 / 200000000000.03
 #   409 stub: uses the route's real fixed message (httpError only surfaces those)
@@ -10,6 +10,9 @@ Tests  714 passed (714)
 M1 flip AI match (=== -> !==)            KILLED: 11 failed, e.g. "all AI", "no AI"
 M2 sum currencies together (key 'USD')   KILLED: "never sums mixed currencies; one ratio per BillingCurrency"
 M3 ratio for total >= 0 (was > 0)        KILLED: "zero total -> null"
+Round 2 (AiSpendRatioCard.tsx / aiSpendRatio.ts):
+M4 Ingested keeps sandbox sources        KILLED: "Ingested never shows seed: sandbox-only live sources give the empty state"
+M5 headline sums every source            KILLED: "adding an overlapping source never changes the headline", oracle test
 
 # Other checks
 eslint (5 changed files): exit 0
