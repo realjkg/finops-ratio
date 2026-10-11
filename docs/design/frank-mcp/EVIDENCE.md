@@ -5,7 +5,7 @@ and what could not be checked. Base: `origin/main` at 62bd8ed (merge of #93) whe
 Nothing here was run against a live model, a live MCP server or a database;
 every code claim was verified by reading the file at that commit.
 
-Review history, as in DESIGN.md: revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested); revision 2 (6402ab3, 00523cf) answered it and a second challenger review of PR #98 requested changes; revision 3 (e050578, d997618) answered that and the round-3 challenger approved it; revision 4 answers Copilot's review of d997618.
+Review history, as in DESIGN.md: revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested); revision 2 (6402ab3, 00523cf) answered it and a second challenger review of PR #98 requested changes; revision 3 (e050578, d997618) answered that and the round-3 challenger approved it; Copilot then reviewed d997618 and revision 4 (52de3cf) answered it; a round-4 challenger review requested changes and 16581c8 answered it; revision 5 answers Copilot's next review and the round-5 challenger's review of 16581c8.
 
 ## 1. Method
 
@@ -36,6 +36,7 @@ Review history, as in DESIGN.md: revision 1 (c97852d, PR #96) was reviewed by a 
   `RATIO_ENV` vocabulary and the empty-value handling) and
   `src/costsource/transports/redact.ts:327-340` (the rules the result-value
   scan reuses; all re-read).
+- Revision 5 sources: `src/ingest/config.ts:189-190` (an empty `RATIO_ENV` becomes `development` in `loadWorkerConfig`); the four redaction sample outputs were reproduced by running `applyRedactionRules` from `src/costsource/transports/redact.ts` on the base code with Node's type stripping.
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
