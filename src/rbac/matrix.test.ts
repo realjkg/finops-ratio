@@ -144,7 +144,8 @@ describe('permission matrix', () => {
     }
 
     // Actions: exactly today's cm/change operations (create, attach, status)
-    // and the FinOps export; every other action is denied in every env.
+    // and view.export, which authorize() limits to the routes the legacy
+    // column can read (above); every other action is denied in every env.
     const allowed = ACTIONS.filter((a): a is Exclude<Action, 'view.read'> => a !== 'view.read').filter((a) => ACTION_MATRIX[a].cells.legacy_service.some((c) => c !== 'n'));
     expect(allowed.sort()).toEqual(['ticket.attach', 'ticket.create', 'ticket.status', 'view.export'].sort());
     for (const a of allowed) expect(ACTION_MATRIX[a].cells.legacy_service).toEqual(['Y', 'Y', 'Y']);

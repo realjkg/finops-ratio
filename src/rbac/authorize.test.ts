@@ -541,6 +541,70 @@ describe('authorize: full matrix sweeps', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Review findings on PR #103 (challenger M1 and L2).
+// ---------------------------------------------------------------------------
+
+describe('authorize: inherited fields and remaining mutants', () => {
+  it('ignores principal and resource fields inherited through the prototype chain', () => {
+    // A JSON "__proto__" key survives Object.assign as the object's prototype.
+    const resource = Object.assign(
+      {},
+      JSON.parse('{"kind":"change","id":"c","team":"Platform Eng","env":"prod","requesterSub":"r","__proto__":{"ticketState":"approved","approverSub":"a"}}'),
+    ) as Resource;
+    expect((resource as Resource).ticketState).toBe('approved'); // the probe is live
+    expect(Object.hasOwn(resource, 'ticketState')).toBe(false);
+    expectDeny(authorize(principal('eng_lead'), 'change.apply', resource), 403);
+
+    // A principal whose role and teams are only inherited is not a cto.
+    const own = principal('eng_lead');
+    const { role: _role, teams: _teams, ...rest } = own;
+    void _role; void _teams;
+    const inherited = Object.assign(Object.create({ role: 'cto', teams: '*' }), rest) as Principal;
+    expect(inherited.role).toBe('cto'); // the probe is live
+    const approve = change('prod', { impact: 'cost' });
+    expectDeny(authorize(inherited, 'change.approve', approve), 401);
+    expectAllow(authorize(principal('cto'), 'change.approve', approve));
+
+    // Every other inherited field is ignored too.
+    const protoResource = Object.create({ kind: 'view', id: '/', env: 'dev' }) as Resource;
+    expectDeny(authorize(principal('finops_lead'), 'view.read', protoResource), 403);
+    const protoTeam = Object.assign(Object.create({ team: PLATFORM }), { kind: 'ticket', id: 'X-1', env: 'dev' }) as Resource;
+    expectDeny(authorize(principal('eng_lead'), 'ticket.status', protoTeam), 403);
+  });
+
+  it('a Y* or A cell needs the owning team even for an eng lead with teams "*"', () => {
+    const wide = principal('eng_lead', { teams: '*' });
+    expectAllow(authorize(wide, 'ticket.create', { kind: 'ticket', id: 'X-1', team: CX, env: 'dev' }));
+    expectDeny(authorize(wide, 'ticket.create', { kind: 'ticket', id: 'X-1', env: 'dev' }), 403);
+    const { team: _t, ...noTeam } = change('prod', { requesterSub: 'r', approverSub: 'a', ticketState: 'approved' });
+    void _t;
+    expectDeny(authorize(wide, 'change.apply', noTeam), 403);
+  });
+
+  it('an env claim with no valid DeployEnv grants nothing, even an env-less read', () => {
+    for (const envs of [['production'], ['staging', '*'], ['']] as unknown as DeployEnv[][]) {
+      const p = principal('finops_lead', { envs });
+      expectDeny(authorize(p, 'view.read', { kind: 'view', id: '/demo' }), 403, String(envs));
+      expectDeny(authorize(p, 'view.read', { kind: 'view', id: '/workloads' }), 403, String(envs));
+    }
+  });
+
+  it('a non-finite expiresAt is not a verified principal', () => {
+    for (const expiresAt of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expectDeny(authorize(principal('cto', { expiresAt }), 'view.read', { kind: 'view', id: '/', env: 'dev' }), 401, String(expiresAt));
+    }
+  });
+
+  it('view.read with a non-view kind is denied even for an existing page id', () => {
+    for (const kind of ['change', 'ticket', 'mcp_tool', 'audit'] as const) {
+      for (const id of ['/workloads', '/demo', '/', '/sign-in']) {
+        expectDeny(authorize(principal('finops_lead'), 'view.read', { kind, id, env: 'dev' }), 403, `${kind} ${id}`);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The shared scope helper (src/identity/scope.ts), used by authorize() and by
 // every data seam that filters rows.
 // ---------------------------------------------------------------------------
