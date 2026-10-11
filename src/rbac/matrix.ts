@@ -17,8 +17,10 @@ import type { Action, ChangeImpact, DeployEnv, PersonaRole, Resource, Role } fro
  * R reference content; '-' no access. `any`: any authenticated principal
  * (session rows). `dev_test_only`: the simulation, which keeps its own session
  * model (RBAC never grants it). `see_4_5`: decided by the action matrix only.
+ * `Y` and `Y*`: an action route written in PLAN 4.5 cell codes (all teams, own
+ * teams); the route's `action` decides, and view.read on it stays denied.
  */
-export type ViewCode = 'O' | 'D' | 'T' | 'S' | 'R' | '-' | 'any' | 'dev_test_only' | 'see_4_5';
+export type ViewCode = 'O' | 'D' | 'T' | 'S' | 'R' | '-' | 'any' | 'dev_test_only' | 'see_4_5' | 'Y' | 'Y*';
 
 /** Codes that let a principal read a view (the scope is applied by the data seam). */
 export const READABLE_CODES: readonly ViewCode[] = Object.freeze(['O', 'D', 'T', 'S', 'R', 'any'] as const);
@@ -41,7 +43,7 @@ export type RouteStatus = Exclude<(typeof ROUTE_STATUSES)[number], 'deferred'> |
 export type ViewGroupId =
   | 'findings' | 'overview' | 'workloads' | 'connectors' | 'costsource' | 'attribution' | 'attribution_user'
   | 'prediction' | 'tokenomics' | 'frameworks' | 'reports' | 'finio_export' | 'outcomes' | 'frank' | 'demo'
-  | 'published' | 'cm_change' | 'audit' | 'scoped_data' | 'session' | 'webhook' | 'simulation';
+  | 'published' | 'cm_change' | 'audit' | 'scoped_data' | 'session' | 'webhook' | 'status_sync' | 'simulation';
 
 export interface ViewGroup {
   label: string; // the PLAN 4.4 row
@@ -79,6 +81,7 @@ export const VIEW_GROUPS: Readonly<Record<ViewGroupId, ViewGroup>> = Object.free
   scoped_data: group('Scoped data endpoint (workloads, budgets, alerts for the caller scope)', ['O', 'D', 'D', 'T', 'O', 'D']),
   session: group('Session endpoints and sign-in', ALL('any')),
   webhook: group('Inbound webhook (signature and replay check, no role)', ALL('-')),
+  status_sync: group('Status sync (action ticket.update per PLAN 4.5)', ['-', 'Y', '-', 'Y*', '-', '-']),
   simulation: group('Customer simulation (dev and test only, own session model)', ALL('dev_test_only')),
 });
 
@@ -96,6 +99,8 @@ export interface RouteRow {
   plannedBy?: CardId;
   /** For a facet: the route whose data it qualifies. */
   facetOf?: string;
+  /** For an action route: the PLAN 4.5 action that decides every operation on it. */
+  action?: MatrixAction;
   /**
    * The legacy_service column: exactly today's access through the shared
    * token to gateway-wrapped routes (withGateway or the live-data gate).
@@ -185,6 +190,7 @@ export const ROUTE_MATRIX: readonly RouteRow[] = Object.freeze([
   api('/api/v1/session/principal', 'session', 'B7', { plannedBy: 'B7' }),
   api('/api/v1/workloads', 'scoped_data', 'B7', { plannedBy: 'B7' }),
   api('/api/v1/cm/webhook', 'webhook', 'C4', { status: 'signed', plannedBy: 'C4' }),
+  api('/api/v1/cm/sync', 'status_sync', 'C8', { plannedBy: 'C8', action: 'ticket.update' }),
   api('/api/v1/audit/records', 'audit', 'C5', { plannedBy: 'C5' }),
 
   // Customer simulation: own session model, 404 unless enabled (F5).

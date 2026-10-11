@@ -61,6 +61,7 @@ const MUTANTS = [
   ['matrix-legacy-open-route', M, "api('/api/attribution', 'attribution', 'B3'),", "api('/api/attribution', 'attribution', 'B3', { legacyService: 'D' }),", 'legacy grant beyond gateway-wrapped routes'],
   ['matrix-webhook-public', M, "api('/api/v1/cm/webhook', 'webhook', 'C4', { status: 'signed', plannedBy: 'C4' }),", "api('/api/v1/cm/webhook', 'webhook', 'C4', { status: 'public', plannedBy: 'C4' }),", 'webhook made public'],
   ['matrix-drop-route', M, "  page('/tokenomics', 'tokenomics'),\n", '', 'a page without a matrix row'],
+  ['matrix-drop-sync-row', M, "  api('/api/v1/cm/sync', 'status_sync', 'C8', { plannedBy: 'C8', action: 'ticket.update' }),\n", '', 'planned status-sync route without a matrix row'],
   ['matrix-impact-dropped', M, "requiresImpact: Object.freeze({ finance: 'cost', procurement: 'commitment' }),", "requiresImpact: Object.freeze({ finance: 'cost' }),", 'procurement approves any impact'],
 ];
 
