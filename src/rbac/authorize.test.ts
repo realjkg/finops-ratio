@@ -751,13 +751,18 @@ describe('scope helper and scope claims: inherited and placeholder values (Copil
       const holeyTeams = new Array<string>(1);
       expect(teamCovered(holeyTeams, CX)).toBe(false);
       expect(inScope({ teams: holeyTeams, envs: ALL3 }, { team: CX, env: 'prod' })).toBe(false);
-      expect(inScope({ teams: [PLATFORM, ...new Array<string>(1)], envs: ALL3 }, { team: CX, env: 'prod' })).toBe(false);
+      const trailingHole = [PLATFORM];
+      trailingHole.length = 2; // index 1 is a hole; a spread would copy the inherited value
+      ap[1] = CX;
+      expect(inScope({ teams: trailingHole, envs: ALL3 }, { team: CX, env: 'prod' })).toBe(false);
+      delete ap[1];
       ap[0] = 'prod';
       const holeyEnvs = new Array<DeployEnv>(1);
       expect(envCovered(holeyEnvs, 'prod')).toBe(false);
       expect(inScope({ teams: '*', envs: holeyEnvs }, { team: CX, env: 'prod' })).toBe(false);
     } finally {
       delete ap[0];
+      delete ap[1];
     }
   });
 
@@ -804,5 +809,8 @@ describe('scope helper and scope claims: inherited and placeholder values (Copil
     const r = Proxy.revocable({}, {});
     r.revoke();
     expectDeny(authorize(principal('cto'), 'view.read', r.proxy as unknown as Resource), 403);
+    // The shared scope helper fails closed on it too.
+    expect(inScope(p.proxy as unknown as Principal, { team: PLATFORM, env: 'dev' })).toBe(false);
+    expect(inScope({ teams: '*', envs: ALL3 }, r.proxy as never)).toBe(false);
   });
 });

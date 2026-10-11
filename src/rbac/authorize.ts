@@ -24,7 +24,7 @@ import {
   type Role,
   type Verdict,
 } from '@/identity/types';
-import { envCovered, teamCovered } from '@/identity/scope';
+import { envCovered, hasRealTeam, teamCovered } from '@/identity/scope';
 import {
   ACTION_MATRIX,
   ACTION_ROUTE_GROUPS,
@@ -90,14 +90,19 @@ function ownElements(a: readonly unknown[]): unknown[] {
  */
 function ownCopy<K extends string>(o: unknown, keys: readonly K[]): unknown {
   if (!o || typeof o !== 'object') return o;
-  if (Array.isArray(o)) return undefined;
-  const copy = Object.create(null) as Record<K, unknown>;
-  for (const k of keys) {
-    if (!Object.hasOwn(o, k)) continue;
-    const v = (o as Record<K, unknown>)[k];
-    copy[k] = Array.isArray(v) ? ownElements(v) : v;
+  try {
+    if (Array.isArray(o)) return undefined;
+    const copy = Object.create(null) as Record<K, unknown>;
+    for (const k of keys) {
+      if (!Object.hasOwn(o, k)) continue;
+      const v = (o as Record<K, unknown>)[k];
+      copy[k] = Array.isArray(v) ? ownElements(v) : v;
+    }
+    return copy;
+  } catch {
+    // A revoked Proxy (or a throwing trap) is not a principal or a resource.
+    return undefined;
   }
-  return copy;
 }
 
 /** A verified principal's shape; anything else is treated as no principal (401). */
@@ -124,8 +129,7 @@ function roleMatchesAuthMethod(role: Role, method: Principal['authMethod']): boo
 }
 
 function hasAnyScope(p: Principal): boolean {
-  const teamsOk = p.teams === '*' || p.teams.length > 0;
-  return teamsOk && p.envs.some((e) => isDeployEnv(e));
+  return hasRealTeam(p.teams) && p.envs.some((e) => isDeployEnv(e));
 }
 
 function actionRow(action: Action): ActionRow | undefined {

@@ -232,16 +232,22 @@ export interface ActionRow {
 
 type Cells7 = [cto: EnvCells, finops_lead: EnvCells, finance: EnvCells, eng_lead: EnvCells, procurement: EnvCells, auditor: EnvCells, legacy_service: EnvCells];
 
-const N: EnvCells = ['n', 'n', 'n'];
-const Y: EnvCells = ['Y', 'Y', 'Y'];
-const YS: EnvCells = ['Y*', 'Y*', 'Y*'];
+const N: EnvCells = Object.freeze(['n', 'n', 'n'] as const);
+const Y: EnvCells = Object.freeze(['Y', 'Y', 'Y'] as const);
+const YS: EnvCells = Object.freeze(['Y*', 'Y*', 'Y*'] as const);
+
+/** A frozen copy per row, so no exported cell tuple is shared or writable. */
+const cellsOf = (e: EnvCells): EnvCells => Object.freeze([...e]) as unknown as EnvCells;
 
 function action(c: Cells7, kinds: readonly Resource['kind'][], extra: Omit<ActionRow, 'cells' | 'kinds'> = {}): ActionRow {
   const [cto, finops_lead, finance, eng_lead, procurement, auditor, legacy_service] = c;
   return Object.freeze({
     ...extra,
     kinds: Object.freeze([...kinds]),
-    cells: Object.freeze({ cto, finops_lead, finance, eng_lead, procurement, auditor, legacy_service }),
+    cells: Object.freeze({
+      cto: cellsOf(cto), finops_lead: cellsOf(finops_lead), finance: cellsOf(finance), eng_lead: cellsOf(eng_lead),
+      procurement: cellsOf(procurement), auditor: cellsOf(auditor), legacy_service: cellsOf(legacy_service),
+    }),
   });
 }
 
