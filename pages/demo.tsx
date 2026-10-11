@@ -1,16 +1,11 @@
 import { useMemo } from 'react';
 import Link from 'next/link';
+import { DEMO_PROMPTS } from '@/ai/MockAIClient';
 import { MissionSurface } from '@/executive/MissionSurface';
 import { SpendToValueGraph } from '@/findings/SpendToValueGraph';
 import { formatRatio, formatUSD } from '@/lib/format';
 import { TOKEN_HEX } from '@/lib/scales';
 import { useStore } from '@/store/useStore';
-
-const DEMO_PROMPTS = [
-  'Why is my spend spiking?',
-  'Which workload has the worst value ratio?',
-  'Which model should I switch to?',
-] as const;
 
 export default function Demo() {
   const workloads = useStore((s) => s.workloads);

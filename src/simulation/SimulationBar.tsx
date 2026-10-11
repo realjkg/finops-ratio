@@ -19,7 +19,11 @@ export function SimulationBar() {
         <Link className="underline" href="/workspace">Customer workflow</Link>
         <button className="underline" disabled={busy || access?.loading} onClick={() => void access?.refresh()}>Refresh</button>
         <button className="underline" disabled={busy || access?.loading} onClick={() => void access?.signOut()}>Sign out</button>
-      </> : <><span>Simulated costs and business value</span><Link className="underline" href="/simulation">Customer sign-in simulation</Link></>}
+      </> : <>
+        <span>Simulated costs and business value</span>
+        {/* Only offer sign-in when the status route reported the simulation enabled; otherwise /simulation is a dead end. */}
+        {access?.enabled && <Link className="underline" href="/simulation">Customer sign-in simulation</Link>}
+      </>}
     </div>
     {sim && sandbox && <p className="mt-2">Fixture sandbox: experiments on this screen do not update your saved customer cost ledger.</p>}
     {(error || access?.error) && <p role="alert" className="mt-2 text-cost">{error || access?.error}</p>}

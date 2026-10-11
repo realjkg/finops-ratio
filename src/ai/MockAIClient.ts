@@ -6,6 +6,17 @@
 import type { AIClient, AIContext, AIMessage, AIResponse } from './AIClient';
 import { respond } from './mock';
 
+/**
+ * The /demo page's suggested questions. Each one is answered by the mock Frank
+ * with real analytics (not the help text or a "cannot answer" reply); the
+ * demoPrompts test pins that against the current mock.
+ */
+export const DEMO_PROMPTS = [
+  'Why is my spend spiking?',
+  'Which team has the weakest ROI?',
+  'What if we moved Customer Support Agent to a private open model?',
+] as const;
+
 export class MockAIClient implements AIClient {
   readonly mode = 'mock' as const;
 

@@ -252,7 +252,7 @@ export function CostSourcePage() {
             <UpgradeAuditCard rows={loadState.rows} />
             <CompositionCard rows={loadState.rows.rows} />
             <FocusRowsCard rows={loadState.rows.rows} />
-            <FindingsCard findings={loadState.findings} />
+            <FindingsCard findings={loadState.findings} source={selected} />
           </div>
         )}
 
@@ -589,7 +589,19 @@ export function FocusRowsCard({ rows }: { rows: CanonicalFocusRow[] }) {
   );
 }
 
-function FindingsCard({ findings }: { findings: CostFinding[] }) {
+/** Names the source the findings came from; PointFive keeps its DeepWaste shape label. */
+export function findingsTitle(count: number, source?: Pick<CostSourceDescriptor, 'kind' | 'name'>): string {
+  const label = !source || source.kind === 'pointfive' ? 'PointFive DeepWaste shape' : source.name;
+  return `Findings — ${count} (${label})`;
+}
+
+export function FindingsCard({
+  findings,
+  source,
+}: {
+  findings: CostFinding[];
+  source?: Pick<CostSourceDescriptor, 'kind' | 'name'>;
+}) {
   if (findings.length === 0) {
     return (
       <Card title="Findings">
@@ -600,7 +612,7 @@ function FindingsCard({ findings }: { findings: CostFinding[] }) {
     );
   }
   return (
-    <Card title={`Findings — ${findings.length} (PointFive DeepWaste shape)`}>
+    <Card title={findingsTitle(findings.length, source)}>
       <ul className="space-y-2">
         {findings.map((f) => (
           <li
