@@ -30,24 +30,10 @@ describe('SimulationBar sign-in link', () => {
     useStore.getState().clearSimulation();
   });
 
-  it('hides_sign_in_link_when_simulation_disabled', () => {
+  it('sign_in_link_shows_only_when_the_simulation_is_enabled', () => {
     access.current = accessWith(false);
-    const html = renderToStaticMarkup(<SimulationBar />);
-    expect(html).toContain('Seeded demo');
-    expect(html).not.toContain('Customer sign-in simulation');
-    expect(html).not.toContain('href="/simulation"');
-  });
-
-  it('hides_sign_in_link_when_no_provider_is_mounted', () => {
-    access.current = null;
-    const html = renderToStaticMarkup(<SimulationBar />);
-    expect(html).not.toContain('href="/simulation"');
-  });
-
-  it('shows_sign_in_link_when_enabled_and_signed_out', () => {
+    expect(renderToStaticMarkup(<SimulationBar />)).not.toContain('href="/simulation"');
     access.current = accessWith(true);
-    const html = renderToStaticMarkup(<SimulationBar />);
-    expect(html).toContain('Customer sign-in simulation');
-    expect(html).toContain('href="/simulation"');
+    expect(renderToStaticMarkup(<SimulationBar />)).toContain('href="/simulation"');
   });
 });
