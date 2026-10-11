@@ -10,8 +10,8 @@ revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
 revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
 PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
 round-3 challenger approved it; revision 4 answers Copilot's review of
-d997618 (1 High, 2 Medium, 2 Low). Revisions 2 to 4 are in PR #98. The code citations were checked at 62bd8ed and there have been no
-code changes since: 8caec87 touches only `docs/design/frank-mcp`.
+d997618 (1 High, 2 Medium, 2 Low). Revisions 2 to 4 are in PR #98. The code citations were checked at
+62bd8ed and there have been no code changes since: 8caec87 touches only `docs/design/frank-mcp`.
 
 **Origin.** Both origin statements below were relayed to the author in the
 commissioning task; the source messages were not seen, so their exact wording
@@ -321,7 +321,11 @@ Within a server, the allowlist lists tools **by name**, each with:
 - `description_hash`: SHA-256 of the description text, because descriptions
   are model-visible instructions (the vector for tool poisoning);
 - budgets (section 3.6) and a `read_only_via` field naming the capability that
-  makes it read-only (section 3.5).
+  makes it read-only (section 3.5);
+- `on_secret`: `reject` or `redact`, default `reject`. It decides what the
+  broker does with a result that contains a secret-shaped value (T7): reject
+  the whole result, or replace only the matching values. Any other value
+  rejects the whole file when it is parsed (3.8 rule 3).
 
 The broker offers the model **its own** vetted description and schema for the
 tool, taken from the allowlist file, not the server's live text. The server's
@@ -440,11 +444,11 @@ Rules (all tested by A18):
      audited from the configuration evaluation (it needs no network), at load
      and reload.
    - A **denied tool entry** is never offered to the model and can never be
-     called, and its hashes are not checked for offering. Its **server may
+     called, and its hashes are not checked at all. Its **server may
      still be connected and listed**, because another, allowed tool of the
      same server may need it. A denied tool that the server lists raises **no**
      `unlisted_tool`, because an entry exists for it; a denied tool that
-     disappears raises no `tool_missing`. A `tool_denied` record is audited.
+     disappears raises no `tool_missing`. A `tool_denied` record is audited from the configuration evaluation, at load and reload, like `server_denied`.
    - By contrast, a tool entry with `enabled: false` (3.7, 6.3) **is**
      hash-checked, so a changed extra is still detected.
 5. Until identity exists, **per-environment separation is separate allowlist
@@ -557,7 +561,7 @@ control.
 | T4 | **Out-of-allowlist tool request** (model asks for a tool it was not offered, or a server offers an extra) | Broker rejects any name not in the turn's offered set; fixed error; audit record | A7, A15 | None beyond audit completeness. |
 | T5 | **Confused deputy and cross-tenant leakage** (model supplies another tenant's id; a shared server returns data from several tenants) | No tenant argument in any schema; scope from server binding (3.4); row security forced on the ledger tables; ids checked against the tenant's own set; one allowlist entry per tenant binding where a server is multi-tenant (**assumption**); the reserved-field deny rule (3.8) | A8, A18 | Today a single token maps to a single tenant by configuration and there is no per-user identity, so intra-tenant least privilege is absent (D-15). A server that ignores the scope it is handed is covered only by T1's controls. |
 | T6 | **Data exfiltration** through tool arguments (model puts data into an argument that a server forwards), or through model-chosen URLs | Arguments are schema-typed, short and enumerated where possible; no free-form URL or path argument exists in v1; no tool fetches a URL; HTTP servers may only reach their pinned host; the agent has no browsing tool; egress from stdio servers denied by default (3.5) | A9 | Free-text arguments (a search string) are a covert channel of low bandwidth. v1 has none; any future one needs review. Data sent to a hosted model endpoint is sent by design (OD-4). |
-| T7 | **Secret exposure** in prompts, tool results and logs | Servers receive references, never the values, in the allowlist file; credentials come from the deployment's secret store; logs go through the existing redaction (`src/costsource/transports/redact.ts:327-340`, `redactErrorText` `:371`, `logUpstreamError` `:412`); **Result-value scan before model delivery:** an output schema constrains names and types, not values, so the broker scans every string value in every tool result (recursively, including keys of free maps if any are allowed) with the repository's redaction rules (`applyRedactionRules`, `src/costsource/transports/redact.ts:327`; the rules cover bearer and basic credentials, JWTs, `sk-`-style keys, GitHub tokens, AWS key ids, PEM blocks, `password`/`secret`/`token`/`api_key` key-value forms, URL userinfo and signed-URL query strings). A value that the rules would change is **secret-shaped**. **Default: reject the whole result** (the model gets the fixed error, `result_status: secret_in_result`) and audit the rejection without the value; an operator may set a per-tool `on_secret: redact` fallback, which replaces only the matching values with the module's redaction markers, still audits, and delivers the rest; the scan runs before the result reaches the model and before any debug storage; the database already rejects secret-looking text in its tables (0004 header) already rejects secret-looking text in its tables (0004 header) | A10, A19 (both M0) | Detection is pattern-based and is **not complete**: the module's own comments describe the cases it covers, a novel secret format or a secret split across fields passes, and the URL rules can flag harmless URLs (false positives cause a rejection, which is the safe side). The module is applied to error and log text, and extending it to the audit record is a new use, tested in M0 (A10). A compromised server can still send a secret the patterns do not match; the data-class limit on each server (3.2) and reader-scoped credentials (3.5) bound what such a server can see in the first place. |
+| T7 | **Secret exposure** in prompts, tool results and logs | Servers receive references, never the values, in the allowlist file; credentials come from the deployment's secret store; logs go through the existing redaction (`src/costsource/transports/redact.ts:327-340`, `redactErrorText` `:371`, `logUpstreamError` `:412`); **Result-value scan before model delivery:** an output schema constrains names and types, not values, so the broker scans every string value in every tool result (recursively, including keys of free maps if any are allowed) with the repository's redaction rules (`applyRedactionRules`, `src/costsource/transports/redact.ts:327`; the rules cover bearer and basic credentials, JWTs, `sk-`-style keys, GitHub tokens, AWS key ids, PEM blocks, `password`/`secret`/`token`/`api_key` key-value forms, URL userinfo and URL userinfo, and any `?` or `#` tail of a URL up to the end of the line, not only signed-URL query strings). A value that the rules would change is **secret-shaped**. **Default: reject the whole result** (the model gets the fixed error, `result_status: secret_in_result`) and audit the rejection without the value; an operator may set a per-tool `on_secret: redact` fallback, which replaces only the matching values with the module's redaction markers, still audits, and delivers the rest; the scan runs before the result reaches the model and before any debug storage; the database already rejects secret-looking text in its tables (0004 header). **Scan scope:** each string value is scanned on its own, so the field name is not seen and the key-value forms (`password: ...`) fire only when they occur inside one string; the broker therefore also scans the serialized JSON of the result, where `"password": "..."` appears with its key | A10, A19 (both M0) | Detection is pattern-based and is **not complete**: the module's own comments describe the cases it covers, a novel secret format or a secret split across fields passes, and the rules also hit ordinary prose: a reviewer running them reports that `cost per token: 0.002` becomes `token: [REDACTED]`, `Secret: migration plan` becomes `Secret: [REDACTED] plan`, `GPU cluster pwd: shared` becomes `pwd: [REDACTED]`, and `https://example.com/docs?page=2` becomes `...?[REDACTED]` (reported, not re-run by the author). This false-positive class lands on free-text fields (names, notes, labels, titles); a rejection is the safe side, and the per-tool `on_secret: redact` fallback keeps the design workable for tools whose free text trips the rules. The module is applied to error and log text, and extending it to the audit record is a new use, tested in M0 (A10). A compromised server can still send a secret the patterns do not match; the data-class limit on each server (3.2) and reader-scoped credentials (3.5) bound what such a server can see in the first place. |
 | T8 | **Denial of service and cost runaway** (a loop of tool calls; large results; slow server) | Per-tool and per-turn call caps, byte caps, timeouts (3.6); per-turn token ceiling on top of `MAX_TOKENS`; the gateway's per-tenant rate limit, which is 1000 per minute per process (`src/server/gateway/withGateway.ts:173-180`) and so is **not** a cost control for model calls; a separate per-tenant model-token budget is new | A11 | The shared limiter is in-process (`withGateway.ts:96-98` comments); a multi-instance deployment needs a shared store. Spend on a hosted model is real money and needs the owner's budget (OD-7). |
 | T9 | **Supply chain for stdio servers** (a dependency of the server changes) | Hash of the executable and entry script; vendored or locked dependency tree owned by the server's `owner`; no auto-update; hashes updated only through allowlist review | A12 | Hashing the entry point does not cover every transitive file of an interpreted server unless the whole tree is hashed or the server is built as a single artifact (**assumption**: require a single artifact or a content hash of the tree). |
 | T10 | **Audit gaps** (a tool call that leaves no record; a record that leaks data) | Audit written by the broker, before the result is returned to the model; a failed audit write fails the call (fail closed); records hold hashes and sizes, not payloads (6.1) | A13 | Audit stored in the same trust domain as the app can be altered by anyone who owns it; external immutable storage is an operator decision. |
@@ -578,7 +582,7 @@ control.
 | `schema_hash` | the pinned input schema hash used |
 | `arg_hash` | SHA-256 of the canonical arguments; **not** the arguments |
 | `revision` | source revision returned |
-| `result_bytes`, `result_status` | `ok`, `schema_violation`, `over_budget`, `timeout`, `denied`, `error` |
+| `result_bytes`, `result_status` | `ok`, `schema_violation`, `over_budget`, `timeout`, `denied`, `secret_in_result`, `error`. `secret_in_result` is a rejected result (nothing delivered). A delivery under `on_secret: redact` is recorded as `ok` with `redacted: true` and `redacted_count` (the number of values replaced); the values themselves are never recorded. |
 | `duration_ms` | |
 | `evidence_status` | of the result |
 | `model_label` | the configured provider and the operator's label for the model, so a result can be tied to the model that asked |
@@ -618,6 +622,8 @@ owner decision; this proposal does not set one.
   only at start, so flipping it takes effect without a restart where the
   process environment can be changed (**assumption**; otherwise a restart).
 - **Per server and per tool:** setting `enabled: false` in the allowlist.
+- **Secret handling per tool:** `on_secret: reject` (default) or `redact`
+  (3.3); changing it is a reviewed allowlist change.
 - **Per tenant:** a tenant list in the allowlist file; a tenant not listed
   gets no tools.
 - **Database layer:** removing the reader login's login attribute stops every
@@ -736,7 +742,7 @@ by running the classifier on the real diff; a miss is reported, not argued.
   controls that must exist before any tool does: A7 (out-of-set request), A11
   (per-turn and per-call caps), A13 (audit write failure fails the call
   closed), A14 (startup refusal when tools are on and gateway auth is not
-  enforced), A10 (redaction applied to audit and log text), A19 (a credential-shaped value in a tool result is rejected before model delivery, with in-process fixtures), and the kill
+  enforced), A10 (redaction applied to audit and log text), A19 (a credential-shaped value in a tool result is rejected before model delivery; both halves, reject and redact, run in M0 against a fixture tool that the test registers through the broker's constructor, with `on_secret` passed as a broker option; the fixture exists only in the test file and the allowlist is still empty; parsing `on_secret` from the file is tested in M2), and the kill
   switch (6.3).
 - **Change:** `callWithTools` on each adapter; the broker with an empty
   allowlist, its call and turn caps, audit-before-return with fail-closed
@@ -778,9 +784,12 @@ by running the classifier on the real diff; a miss is reported, not argued.
 ### M2. MCP client, allowlist, audit
 
 - **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
-  (A5-A11, A13 and A14 re-run against the MCP path); allowlist parser tests
+  (A5-A11, A13, A14 and A19 re-run against the MCP path); allowlist parser tests
   (reject unknown keys, missing hashes); A18 (server vs tool denial, empty
-  array, null, unknown key, unset `RATIO_ENV`); mutation checks (8.4); audit shape tests; redaction applied to audit.
+  array, null, unknown key, unset `RATIO_ENV`); the `on_secret` parser cases (valid values,
+  default, unknown value rejects the file); mutation checks (8.4); audit shape
+  tests (including `secret_in_result` and the `redacted` flag); redaction
+  applied to audit.
 - **Change:** MCP client (after OD-1 and the specification check in section
   2.5), allowlist loader, pins, budgets, audit, kill switches. Likely adds an
   SDK dependency or a minimal client.

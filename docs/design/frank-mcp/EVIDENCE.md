@@ -111,7 +111,7 @@ result is `risk: restricted`, class `retention`, rule `retention.mention`, on
 holds for the final head. Neither result proves the change safe (the gate's
 own README calls `low` heuristic). The classification is recorded in the pull
 request body at the final head; this file makes no claim about the title or
-body of the pull request beyond that, which the orchestrator maintains. The
+body of the pull request beyond that. The
 wording of these documents was not shaped to avoid any rule.
 
 Rollback: revert the two documents; reverse-applying the diff to origin/main gives the same tree as origin/main.
