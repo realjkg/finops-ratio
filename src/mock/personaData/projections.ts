@@ -11,6 +11,7 @@
 // The projections only choose which rows a persona may see and at what
 // granularity: `rollup` rows carry no line items; `drilldown` rows are lines.
 
+import { validateDataset } from './dataset';
 import type { Dataset, LineItem } from './dataset';
 import { filterLines } from './scope';
 import type { Scope } from './scope';
@@ -182,6 +183,9 @@ export function project(
   page?: PageRequest,
 ): PersonaView {
   if (page) checkPage(page);
+  // One entry check for the whole class of unsafe-amount bugs: after this,
+  // every amount is a safe integer, so the exact (BigInt) sums below are valid.
+  validateDataset(dataset);
 
   // Scope first: everything below reads only `lines`.
   const lines = filterLines(dataset.lines, scope);

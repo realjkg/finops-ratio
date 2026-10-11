@@ -85,15 +85,26 @@ export const DATASET: Dataset = {
   lines: LINES,
 };
 
+/** Every stored amount must be a safe integer number of cents. */
+export function assertSafeCents(cents: number): void {
+  if (!Number.isSafeInteger(cents)) {
+    throw new RangeError('cents must be a safe integer');
+  }
+}
+
+/** Entry validation: every line amount and every team budget is a safe integer. */
+export function validateDataset(ds: Dataset): void {
+  for (const l of ds.lines) assertSafeCents(l.cents);
+  for (const b of ds.budgets) assertSafeCents(b.cents);
+}
+
 /**
  * Returns a new dataset in which one line has a new amount and the revision is
  * one higher. The input is never mutated. Throws on an unknown line or a
  * non-integer amount, so a bad edit cannot silently produce a float.
  */
 export function reviseDataset(base: Dataset, lineId: string, cents: number): Dataset {
-  if (!Number.isSafeInteger(cents)) {
-    throw new RangeError('cents must be a safe integer');
-  }
+  assertSafeCents(cents);
   if (!base.lines.some((l) => l.id === lineId)) {
     throw new RangeError('unknown line id');
   }
