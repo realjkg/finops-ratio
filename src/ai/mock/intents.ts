@@ -4,8 +4,6 @@
 // are tried LAST, so an old question without any new cue still lands on the
 // same answer byte for byte.
 
-export type Lens = 'activities' | 'tokens' | 'alerts' | 'outcomes';
-
 export type Intent =
   | 'migration'
   | 'ebitda'
@@ -21,7 +19,7 @@ export type Intent =
   | 'cost_driver'
   | 'legacy';
 
-export const RX = {
+const RX = {
   migration:
     /\b(?:migrat\w*|self[- ]?host\w*|on[- ]?prem\w*|payback|pay back|break[- ]?even|gpus?|cost to realized|cost to realised|realized savings|realised savings)\b|private(?:ly)?[- ](?:open[- ]?(?:source|weights?)?[- ]?)?(?:model|llm|deployment|hosting)|open[- ](?:source|weights?)\b|open model|public api|api provider/,
   ebitda: /\bebitda\b|\boperating (?:income|margin|profit)\b|\bmargin points?\b|\bprofit\w*/,
@@ -38,19 +36,20 @@ export const RX = {
   rankCue: /\b(?:which|who|what|rank\w*|top|highest|lowest|best|worst|most|least|biggest|largest|smallest|weakest|strongest|each|every|per|by)\b/,
   eachCue: /\b(?:each|every|per|all|by)\s+(?:team|group|department)s?\b|\bteams? (?:ranked|ranking)\b|\bby team\b/,
   forecast: /next (?:quarter|month|year|week)|\bforecast(?:ing|s)?\b|\bpredict\w*|\bwill (?:our|the|we|spend|cost)\b|\bgoing to (?:cost|spend)\b/,
+  predictWord: /\bpredict\w*|\bforecast(?:ing|s)?\b/,
   savings: /\bsav\w*|\bopportunit\w*|\breduc\w*|\bcuts?\b|\bwaste\w*|\boptimi[sz]\w*/,
   costWord: /cost|spend|expens|driv|spike|budget/,
 } as const;
 
 // Legacy regexes, verbatim from the original MockAIClient (substring matches).
-export const LEGACY = {
+const LEGACY = {
   at_risk: /(risk|approval|pending|caution)/,
   cost_driver: /(cost|driv|expensive|spike|spend)/,
   savings: /(sav|opportunit|reduc|cut)/,
   summary: /(summar|overview|report|portfolio)/,
 } as const;
 
-export type Metric = 'cost' | 'roi' | 'savings';
+type Metric = 'cost' | 'roi' | 'savings';
 
 export interface Ranking {
   metric: Metric;
@@ -67,7 +66,7 @@ export function rankingOf(lower: string): Ranking {
   return { metric, ascending };
 }
 
-export interface Cues {
+interface Cues {
   hasEntity: boolean;
   /** An explicit team is named (not merely the word "team"). */
   namesTeam: boolean;
@@ -77,7 +76,11 @@ export interface Cues {
 
 /** First matching intent in contract order. `legacy` = no new cue matched. */
 export function classifyIntent(lower: string, c: Cues): Intent {
-  if (RX.forecast.test(lower) && !c.hasEntity && !RX.migration.test(lower) && !RX.ebitda.test(lower)) return 'forecast';
+  if (!c.hasEntity && RX.forecast.test(lower)) {
+    // Finance questions legitimately say "next year"; only explicit prediction words refuse them.
+    const financial = RX.migration.test(lower) || RX.ebitda.test(lower);
+    if (!financial || RX.predictWord.test(lower)) return 'forecast';
+  }
   if (RX.migration.test(lower)) return 'migration';
   if (RX.ebitda.test(lower)) return 'ebitda';
   if (RX.capability.test(lower)) return 'capability';
@@ -101,7 +104,7 @@ export function classifyIntent(lower: string, c: Cues): Intent {
 }
 
 /** The original classify(), unchanged. */
-export type LegacyIntent = 'at_risk' | 'cost_driver' | 'savings' | 'summary' | 'help';
+type LegacyIntent = 'at_risk' | 'cost_driver' | 'savings' | 'summary' | 'help';
 export function classifyLegacy(query: string): LegacyIntent {
   const q = query.toLowerCase();
   if (LEGACY.at_risk.test(q)) return 'at_risk';

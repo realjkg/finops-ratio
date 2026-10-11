@@ -3,7 +3,7 @@
 // fact about revenue, EBITDA, hosting or open-model quality, because the seed
 // holds none of those.
 
-import { REALIZED_LINE, T, contextLine } from './answerKit';
+import { REALIZED_LINE, T, capRows, contextLine } from './answerKit';
 import { ebitdaEffect, impliedMonthlyChange, membersOf, migration, rollup, scopeLabel, type Migration } from './calc';
 import { SELF_HOST_ASSUMPTIONS, resolveAssumptions, type Overrides, type ResolvedAssumptions } from './assumptions';
 import { int, months, price, signedPct1, usd, usd2 } from './format';
@@ -28,7 +28,11 @@ function reductionSource(world: World, scope: Scope, red: Reduction): { source: 
   const r = rollup(members);
   const label = scopeLabel(world, scope);
   const notes: string[] = [];
-  if (red.ignored) notes.push(red.ignored);
+  if (red.ignored) {
+    notes.push(red.ignored);
+    notes.push(`There is no usable spend reduction for ${label}: tell me a positive amount, for example "spend went down $2,000 a month" or "spend went down 20%".`);
+    return { source: null, notes };
+  }
   if (red.monthlyUsd !== undefined) {
     return {
       source: {
@@ -90,11 +94,12 @@ export function ebitdaAnswer(world: World, scope: Scope, red: Reduction, base: B
   const assumptions: string[] = [];
   const ctxFirst = scope.kind === 'portfolio' ? 'the portfolio' : scope.kind === 'team' ? T(scope.team) : label;
 
-  body.push(...notes.filter((n) => !/^There is no spend reduction/.test(n)));
+  body.push(...notes.filter((n) => !/^There is no (usable )?spend reduction/.test(n)));
   body.push(...base.ignored);
   if (!source) {
-    body.push(notes.find((n) => /^There is no spend reduction/.test(n)) ?? '');
-    body.push('Tell me the amount, for example "spend went down $2,000 a month" or "spend went down 20%", and I will compute the EBITDA effect.');
+    const why = notes.find((n) => /^There is no (usable )?spend reduction/.test(n)) ?? '';
+    body.push(why);
+    if (!/tell me a positive amount/.test(why)) body.push('Tell me the amount, for example "spend went down $2,000 a month" or "spend went down 20%", and I will compute the EBITDA effect.');
     body.push(contextLine(world, scope));
     return {
       header: `**EBITDA impact — ${label}**`,
@@ -107,6 +112,10 @@ export function ebitdaAnswer(world: World, scope: Scope, red: Reduction, base: B
 
   const eff = ebitdaEffect(source.monthly, base);
   body.push(source.line);
+  const scopeSpend = rollup(members).spend;
+  if (scopeSpend > 0 && source.monthly > scopeSpend && red.percent === undefined) {
+    body.push(`Warning: the stated reduction (${usd(source.monthly)}/mo) exceeds ${label}'s entire current seeded spend (${usd(scopeSpend)}/mo). That is not possible from this data, so check the amount; I have not capped it.`);
+  }
   body.push(
     `EBITDA improves by ${usd(eff.annualImprovement)}/yr, pre-tax, one-for-one (assumption: the reduced spend is operating expense, so ΔEBITDA = −Δopex; capitalized spend would not move EBITDA).`,
   );
@@ -199,32 +208,43 @@ export function migrationAnswer(world: World, scope: Scope, o: Overrides, ignore
   const ok = res;
   const a = ok.a;
   body.push('Current (public API, registry list prices):');
-  for (const p of ok.parts) {
+  const partLines = ok.parts.map((p) => {
     const mdl = p.member.model ? findModel(p.member.model) : undefined;
-    body.push(`• ${p.member.name} — ${p.member.model}${p.member.provider ? ` (${p.member.provider})` : ''}: ${mdl ? `${price(mdl.pricing.input_per_1m)} in / ${price(mdl.pricing.output_per_1m)} out per 1M` : 'price n/a'} → ${usd(p.api)}/mo for ${int(p.tokens / 1e6)}M tokens`);
-  }
-  if (ok.unpriced.length > 0) body.push(`Not priced (model or volume missing): ${ok.unpriced.map((w) => w.name).join(', ')}.`);
+    return `• ${p.member.name} — ${p.member.model}${p.member.provider ? ` (${p.member.provider})` : ''}: ${mdl ? `${price(mdl.pricing.input_per_1m)} in / ${price(mdl.pricing.output_per_1m)} out per 1M` : 'price n/a'} → ${usd(p.api)}/mo for ${int(p.tokens / 1e6)}M tokens`;
+  });
+  body.push(...capRows(partLines, 10));
+  if (ok.unpriced.length > 0) body.push(`Not priced (model or volume missing): ${ok.unpriced.slice(0, 10).map((w) => w.name).join(', ')}.`);
   body.push(`Current API cost at list prices: ${usd(ok.api)}/mo (${usd2((ok.api / ok.tokens) * 1e6)} per 1M tokens blended). Seeded run-rate spend is ${usd(r.spend)}/mo, a different basis, so the comparison uses list prices on both sides.`);
   body.push(
-    `Projected private model: ${ok.gpus} GPUs × ${price(a.gpuHourlyUsd)} × ${int(a.hoursPerMonth)} h = ${usd(ok.gpuCost)}/mo, plus ${Math.round(a.opsOverheadPct * 100)}% ops = ${usd(ok.selfHost)}/mo (${usd2((ok.selfHost / ok.tokens) * 1e6)} per 1M tokens at this volume).`,
+    `Projected private model: ${ok.gpus} GPU${ok.gpus === 1 ? '' : 's'} × ${price(a.gpuHourlyUsd)} × ${int(a.hoursPerMonth)} h = ${usd(ok.gpuCost)}/mo, plus ${Math.round(a.opsOverheadPct * 100)}% ops = ${usd(ok.selfHost)}/mo (${usd2((ok.selfHost / ok.tokens) * 1e6)} per 1M tokens at this volume).`,
   );
   if (ok.coverage < 1) {
-    body.push(`Capacity warning: this cluster (${ok.gpus} GPU${ok.gpus === 1 ? '' : 's'}) covers ${Math.round(ok.coverage * 100)}% of the volume (each handles ${int(ok.perGpuTokens / 1e6)}M tokens/month); this needs ${ok.neededGpus} GPUs, so this is not a valid comparison.`);
+    body.push(`Capacity warning: this cluster (${ok.gpus} GPU${ok.gpus === 1 ? '' : 's'}) covers ${Math.round(ok.coverage * 100)}% of the volume (each handles ${int(ok.perGpuTokens / 1e6)}M tokens/month); this needs ${ok.neededGpus} GPU${ok.neededGpus === 1 ? '' : 's'}, so this is not a valid comparison.`);
   }
-  if (ok.saving > 0) {
-    body.push(`Projected recurring saving: ${usd(ok.saving)}/mo = ${usd(ok.saving * 12)}/yr (projected, rests on the assumptions below).`);
+  const valid = ok.coverage >= 1;
+  const runRate = r.spend;
+  if (!valid) {
+    body.push('Projected recurring saving: not shown \u2014 the cluster is too small for the volume, so any saving here would not be valid.');
+  } else if (ok.saving > 0) {
+    const share = runRate > 0 ? `${Math.round((ok.saving / runRate) * 100)}% of the seeded run-rate ${usd(runRate)}/mo; ` : '';
+    body.push(`Projected recurring saving: ${usd(ok.saving)}/mo = ${usd(ok.saving * 12)}/yr (${share}projected, rests on the assumptions below).`);
+    if (runRate > 0 && ok.saving > runRate) {
+      body.push(`Warning: the projected saving exceeds the seeded run-rate spend (${usd(runRate)}/mo) because the list-price volume cost (${usd(ok.api)}/mo) is above what the seed says is spent. Treat it as an upper bound, not a forecast; I have not capped it.`);
+    }
   } else {
-    body.push(`Projected recurring saving: none — self-hosting would cost ${usd(-ok.saving)}/mo more than the API at these assumptions (no recurring saving).`);
+    body.push(`Projected recurring saving: none \u2014 self-hosting would cost ${usd(-ok.saving)}/mo more than the API at these assumptions (no recurring saving).`);
   }
   body.push(`Break-even volume: ${int(ok.breakEvenTokens === null ? 0 : ok.breakEvenTokens / 1e6)}M tokens/month${ok.breakEvenTokens !== null ? ` (${Math.round((ok.breakEvenTokens / ok.tokens) * 100)}% of today’s ${int(ok.tokens / 1e6)}M); below it the API is cheaper at this cluster size` : ''}.`);
   body.push(
-    ok.payback !== null
+    !valid
+      ? 'Payback: not shown (the comparison is not valid at this cluster size).'
+      : ok.payback !== null
       ? `Payback: ${a.migrationOneTimeUsd === 0 ? '0.0 months (no one-time cost)' : months(ok.payback)} (one-time cost ÷ projected monthly saving).`
       : 'Payback: never (no recurring saving to repay the one-time cost).',
   );
   body.push('Cost to realized savings:');
   body.push(`• One-time cost: ${usd(ok.oneTime)} ${o.migrationOneTimeUsd !== undefined ? '(your override)' : '(assumption)'}`);
-  body.push(`• Projected recurring saving: ${ok.saving > 0 ? `${usd(ok.saving)}/mo (projected)` : 'none at these assumptions'}`);
+  body.push(`• Projected recurring saving: ${!valid ? 'not shown (invalid cluster size)' : ok.saving > 0 ? `${usd(ok.saving)}/mo (projected)` : 'none at these assumptions'}`);
   body.push(`• ${REALIZED_LINE} Until outcome evidence exists the saving stays projected, and the one-time cost is real spend.`);
   body.push(contextLine(world, scope));
   body.push(

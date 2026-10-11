@@ -8,11 +8,11 @@
 
 import type { AIContext, AIMessage, AIResponse } from '../AIClient';
 import { parseOverrides, parseReduction, parseBaselines } from './parse';
-import { capabilityAnswer, clarifyText, unsupportedText } from './answersMeta';
+import { capabilityAnswer, clarifyText, unknownNameText, unsupportedText } from './answersMeta';
 import { alertsAnswer, outcomesAnswer, tokensAnswer, workloadsAnswer } from './answersDrill';
 import { ebitdaAnswer, migrationAnswer } from './answersFinance';
 import { costDriverAnswer, roiAnswer, savingsAnswer, teamRankAnswer } from './answersRoi';
-import { MAX_TEXT, findMentions, namesTeam, pickSubject } from './entities';
+import { MAX_TEXT, findMentions, namesTeam, pickSubject, sameScope, unknownName, type Mention } from './entities';
 import { MAX_HISTORY, deriveFocus, detectReference, isElliptical, resolveReference } from './memory';
 import { classifyIntent, classifyLegacy, rankingOf, type Intent } from './intents';
 import { atRisk, costDriver, help, savings, summary } from './legacy';
@@ -27,10 +27,48 @@ function reply(content: string, referenced: string[] = []): AIResponse {
   return { message: { role: 'assistant', content }, initiativesReferenced: referenced, provider: 'mock' };
 }
 
-function done(a: Answer, world: World, note?: string): AIResponse {
-  const body = note ? [...a.body, note] : a.body;
-  return reply(render({ ...a, body }, world.asOf), a.referenced);
+const MAX_REPLY = 8000;
+
+/** Keep the header and the tail (basis, next questions); shorten the middle if it is huge. */
+function bound(text: string): string {
+  if (text.length <= MAX_REPLY) return text;
+  const lines = text.split('\n');
+  const tailAt = lines.findIndex((l) => l.startsWith('Basis:'));
+  const head = tailAt < 0 ? lines : lines.slice(0, tailAt);
+  const tail = tailAt < 0 ? [] : lines.slice(tailAt);
+  const kept: string[] = [];
+  let used = 0;
+  for (const l of head) {
+    if (used + l.length > MAX_REPLY - 1500) break;
+    kept.push(l);
+    used += l.length + 1;
+  }
+  return [...kept, '\u2026(answer shortened to fit; ask a narrower question for the rest)', ...tail].join('\n').slice(0, MAX_REPLY);
 }
+
+function done(a: Answer, world: World, note?: string): AIResponse {
+  const body = [...a.body];
+  if (note) body.push(note);
+  if (world.rejected.length > 0) {
+    body.push(`Note: figures for ${world.rejected.slice(0, 5).join(', ')} were out of range and ignored; they are excluded from every number above.`);
+  }
+  return reply(bound(render({ ...a, body }, world.asOf)), a.referenced);
+}
+
+/** Entities named in the question that the answer does not cover (other kinds too). */
+function alsoNamed(world: World, chosen: Scope, mentions: Mention[]): Scope[] {
+  const owner = chosen.kind === 'workload' ? world.workloads.find((w) => w.id === chosen.id) : undefined;
+  const out: Scope[] = [];
+  for (const m of mentions) {
+    const sc = m.scope;
+    if (sc.kind === 'portfolio' || sameScope(sc, chosen) || out.some((o) => sameScope(o, sc))) continue;
+    if (owner && ((sc.kind === 'team' && sc.team === owner.team) || (sc.kind === 'model' && sc.model === owner.model))) continue;
+    out.push(sc);
+  }
+  return out;
+}
+
+const NAMEABLE: ReadonlySet<Intent> = new Set(['roi', 'workloads', 'tokens', 'alerts', 'outcomes', 'ebitda', 'migration']);
 
 // Read-only intents a bare follow-up ("what about Revenue?") may carry over.
 const INHERITABLE: ReadonlySet<Intent> = new Set(['roi', 'workloads', 'tokens', 'alerts', 'outcomes', 'savings', 'cost_driver']);
@@ -105,10 +143,16 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
       else unresolved = res.wanted;
     }
   }
+  const others = subject && explicit ? alsoNamed(world, scope, mentions) : [];
   const note =
-    subject && subject.others.length > 0
-      ? `Note: you also named ${subject.others.map((o) => scopeLabel(world, o)).join(', ')}; I answered for ${scopeLabel(world, scope)} only — ask about the others separately.`
+    others.length > 0
+      ? `Note: you also named ${others.map((o) => scopeLabel(world, o)).join(', ')}; I answered for ${scopeLabel(world, scope)} only \u2014 ask about the others separately.`
       : undefined;
+
+  if (!subject && !backRef && (NAMEABLE.has(intent) || intent === 'team_rank')) {
+    const unknown = unknownName(text);
+    if (unknown && (intent !== 'team_rank' || unknown.team)) return reply(unknownNameText(world, unknown));
+  }
 
   const needsScope = intent !== 'forecast' && intent !== 'capability' && intent !== 'team_rank';
   if (needsScope && unresolved && intent !== 'legacy' && intent !== 'savings' && intent !== 'cost_driver') {

@@ -44,6 +44,24 @@ const MUTANTS = [
   ['gpu-count-validation-dropped', M + 'parse.ts', 'if (!Number.isInteger(v) || v < 1 || v > 100000)', 'if (!Number.isInteger(v) || v > 100000)', 'zero or negative GPUs accepted'],
   ['money-range-dropped', M + 'parse.ts', 'return Number.isFinite(v) && Math.abs(v) <= MAX_ABS_USD ? v : Number.NaN;', 'return v;', 'non-finite money accepted'],
   ['legacy-reordered', M + 'respond.ts', "case 'cost_driver':\n      return costDriver(context);", "case 'cost_driver':\n      return summary(context);", 'legacy cost-driver answer changed'],
+  // ---- challenger round (PR #99): the six surviving mutants, then new guards
+  ['other-entities-note-dropped', M + 'respond.ts', 'others.length > 0\n      ?', 'false\n      ?', 'the "you also named" note is dropped'],
+  ['payback-zero-onetime', M + 'answersFinance.ts', "${a.migrationOneTimeUsd === 0 ? '0.0 months (no one-time cost)' : months(ok.payback)}", '${months(ok.payback)}', 'zero one-time cost branch removed'],
+  ['ops-limit-loosened', M + 'parse.ts', 'v >= 0 && v <= 5)', 'v >= 0 && v <= 5000)', 'ops overhead limit loosened'],
+  ['negative-savings-allowed', M + 'world.ts', 'Math.max(0, num(i.savingsOpportunity) ?? 0)', '(num(i.savingsOpportunity) ?? 0)', 'negative wire savings not clamped'],
+  ['user-scan-widened', M + 'memory.ts', 'const USER_SCAN = 500;', 'const USER_SCAN = 50000;', 'user text scan cap widened'],
+  ['cached-priced-as-input', M + 'calc.ts', 'const cachedRate = cachedInputRate(model);', 'const cachedRate = model.pricing.input_per_1m;', 'cached tokens priced at the full input rate'],
+  ['plain-object-alias-lookup', M + 'entities.ts', 'return Object.hasOwn(table, key) ? table[key] : [];', 'return table[key] ?? [];', 'prototype keys reach alias tables'],
+  ['wire-range-dropped', M + 'world.ts', 'const MAX_USD = 1e12;', 'const MAX_USD = 1e308;', 'extreme wire figures accepted'],
+  ['control-chars-kept', M + 'world.ts', "out += c < 32 || (c >= 127 && c <= 159) || c === 0x2028 || c === 0x2029 ? ' ' : ch;", 'out += ch;', 'line breaks kept in wire strings'],
+  ['unknown-name-off', M + 'respond.ts', 'if (unknown && (intent', 'if (false && unknown && (intent', 'unknown names fall back silently'],
+  ['run-rate-warning-off', M + 'answersFinance.ts', 'if (runRate > 0 && ok.saving > runRate) {', 'if (false) {', 'saving above run-rate not flagged'],
+  ['ebitda-warning-off', M + 'answersFinance.ts', 'if (scopeSpend > 0 && source.monthly > scopeSpend && red.percent === undefined) {', 'if (false) {', 'reduction above scope spend not flagged'],
+  ['invalid-capacity-headline', M + 'answersFinance.ts', 'const valid = ok.coverage >= 1;', 'const valid = true;', 'saving headlined on an undersized cluster'],
+  ['reply-unbounded', M + 'respond.ts', 'if (text.length <= MAX_REPLY) return text;', 'return text;', 'reply size not capped'],
+  ['list-cap-off', M + 'answerKit.ts', 'return rows.length <= max ? rows :', 'return true ? rows :', 'list rows not capped'],
+  ['invalid-amount-fallback', M + 'answersFinance.ts', '    return { source: null, notes };\n  }\n  if (red.monthlyUsd !== undefined) {', '  }\n  if (red.monthlyUsd !== undefined) {', 'a refused amount falls back to a scenario'],
+  ['forecast-ebitda-exempt', M + 'intents.ts', "if (!financial || RX.predictWord.test(lower)) return 'forecast';", "if (!financial) return 'forecast';", 'EBITDA forecast phrasing not refused'],
 ];
 
 const only = process.argv.slice(2);

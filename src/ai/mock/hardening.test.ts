@@ -2,7 +2,7 @@
 // headlines, silent scope substitution, forged lines, unbounded output, and
 // the surviving mutants. Written before the fixes (committed RED).
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import type { AIContext } from '@/ai/AIClient';
 import handler from '../../../pages/api/v1/ai/chat';
@@ -31,7 +31,9 @@ async function viaRoute(context: AIContext, q: string): Promise<{ status: number
   const req = { method: 'POST', url: '/api/v1/ai/chat', headers: {}, body: { messages: [{ role: 'user', content: q }], context } } as unknown as NextApiRequest;
   const saved = process.env.AI_PROVIDER;
   delete process.env.AI_PROVIDER;
-  await handler(req, res as unknown as NextApiResponse);
+  const pending = handler(req, res as unknown as NextApiResponse);
+  await vi.advanceTimersByTimeAsync(300);
+  await pending;
   if (saved !== undefined) process.env.AI_PROVIDER = saved;
   const body = res.body as { message?: { content: string } };
   return { status: res.statusCode, text: body?.message?.content ?? JSON.stringify(res.body) };
@@ -131,6 +133,8 @@ describe('M4 surviving mutants', () => {
     const { text } = await chat([{ role: 'user', content: 'How much can we save in Marketing?' }], ctx);
     expect(text).toContain('no savings opportunities');
     expect(text).not.toContain('-$500');
+    const rank = await chat([{ role: 'user', content: 'Which team has the most savings opportunity?' }], ctx);
+    expect(rank.text).not.toContain('-$500');
   });
   it('(e) user text past 500 characters is not read as focus, text before it is', async () => {
     const far = `${'x '.repeat(300)}Legal team`;
@@ -216,8 +220,15 @@ describe('L4 control characters in wire strings cannot forge lines', () => {
     for (const q of ['Which team is driving the highest cost?', 'What is the ROI of the portfolio?']) {
       const { text } = await chat([{ role: 'user', content: q }], ctx);
       expect(text.split('\n').some((l) => l.startsWith('**Realized savings'))).toBe(false);
-      expect(text).not.toMatch(new RegExp('[\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f\\u2028\\u2029]'));
+      const odd = [...text].some((ch) => { const c = ch.charCodeAt(0); return (c < 32 && c !== 10) || (c >= 127 && c <= 159) || c === 0x2028 || c === 0x2029; });
+      expect(odd).toBe(false);
     }
+  });
+  it('other control characters are stripped too', async () => {
+    const ctx = withSnap(0, { team: 'Legal\u0001\u0007Ops' });
+    const { text } = await chat([{ role: 'user', content: 'Which team is driving the highest cost?' }], ctx);
+    expect(text).toContain('Legal Ops');
+    expect([...text].some((ch) => ch.charCodeAt(0) === 1 || ch.charCodeAt(0) === 7)).toBe(false);
   });
   it('wire names are capped in length', async () => {
     const ctx = withSnap(0, { team: 'T'.repeat(500) });

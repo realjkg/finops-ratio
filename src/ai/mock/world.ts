@@ -13,17 +13,32 @@ import type { EvidenceStatus } from '@/types';
 import type { World, WorkloadFacts } from './types';
 
 const MAX_ITEMS = 200;
-const MAX_STR = 120;
+const MAX_STR = 60;
 const MAX_MESSAGE = 400;
+/** Sane bounds for wire figures: USD per month, and counts per day. Beyond them a workload is excluded. */
+const MAX_USD = 1e12;
+const MAX_COUNT = 1e13;
 const SEED_BY_ID = new Map(WORKLOADS.map((w) => [w.id, w]));
 const STATUSES: ReadonlySet<string> = new Set(['assumed', 'projected', 'measured']);
 
 function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
-function str(v: unknown, max = MAX_STR): string | null {
-  return typeof v === 'string' && v.length > 0 ? v.slice(0, max) : null;
+/** Wire text -> one safe line: control characters and line breaks become spaces, length capped. */
+function clean(v: string, max: number): string {
+  let out = '';
+  for (const ch of v.slice(0, max * 2)) {
+    const c = ch.charCodeAt(0);
+    out += c < 32 || (c >= 127 && c <= 159) || c === 0x2028 || c === 0x2029 ? ' ' : ch;
+  }
+  return out.replace(/\s+/g, ' ').trim().slice(0, max);
 }
+function str(v: unknown, max = MAX_STR): string | null {
+  if (typeof v !== 'string') return null;
+  const t = clean(v, max);
+  return t.length > 0 ? t : null;
+}
+const inRange = (n: number | null, max: number): boolean => n === null || Math.abs(n) <= max;
 function evidence(v: unknown): EvidenceStatus | undefined {
   return typeof v === 'string' && STATUSES.has(v) ? (v as EvidenceStatus) : undefined;
 }
@@ -53,6 +68,7 @@ export function buildWorld(ctx: AIContext): World {
   const snaps = new Map(arr(c.workloads).map(rec).map((w) => [String(w.id), w]));
   const seen = new Set<string>();
   const rows: WorkloadFacts[] = [];
+  const rejected: string[] = [];
 
   const add = (id: string, init: Record<string, unknown> | undefined, snap: Record<string, unknown> | undefined) => {
     if (seen.has(id)) return;
@@ -64,11 +80,26 @@ export function buildWorld(ctx: AIContext): World {
     const wireRatio = num(s.valueRatio) ?? num(i.valueRatio);
     const wireValue = num(s.monthlyValue);
     const value = wireValue ?? (wireRatio !== null ? wireRatio * spend : 0);
+    const name = str(i.name) ?? str(s.name) ?? id;
+    const calls = num(s.dailyInferences) ?? seed?.outputs.daily_inferences ?? null;
+    const tokIn = num(s.tokensInToday) ?? seed?.costs.tokens_in_today ?? null;
+    const tokOut = num(s.tokensOutToday) ?? seed?.costs.tokens_out_today ?? null;
+    const tokCached = num(s.tokensCachedToday) ?? seed?.costs.tokens_cached_today ?? null;
+    if (
+      !inRange(spend, MAX_USD) || !inRange(value, MAX_USD) || !Number.isFinite(value) ||
+      ![calls, tokIn, tokOut, tokCached].every((n) => inRange(n, MAX_COUNT))
+    ) {
+      rejected.push(name);
+      return;
+    }
+    const trend = num(s.costTrendPct) ?? seed?.cost_trend_pct ?? null;
+    const budget = num(s.monthlyBudget) ?? seed?.costs.monthly_budget ?? null;
+    const cache = num(s.cacheHitRate);
     const status = evidence(s.valueEvidenceStatus) ?? evidence(i.valueEvidenceStatus);
     const gates = num(s.governanceGatesPassed);
     rows.push({
       id,
-      name: str(i.name) ?? str(s.name) ?? id,
+      name,
       team: str(s.team) ?? seed?.team ?? null,
       provider: str(s.provider) ?? seed?.model_provider ?? null,
       model: str(s.model) ?? seed?.model ?? null,
@@ -78,16 +109,16 @@ export function buildWorld(ctx: AIContext): World {
       evidence: status,
       status: str(i.status),
       budgetConsumedPct: num(i.budgetConsumedPct),
-      monthlyBudget: num(s.monthlyBudget) ?? seed?.costs.monthly_budget ?? null,
+      monthlyBudget: budget !== null && Math.abs(budget) <= MAX_USD ? budget : null,
       savings: Math.max(0, num(i.savingsOpportunity) ?? 0),
-      cacheHitRate: num(s.cacheHitRate),
-      costTrendPct: num(s.costTrendPct) ?? seed?.cost_trend_pct ?? null,
+      cacheHitRate: cache !== null && cache >= 0 && cache <= 1 ? cache : null,
+      costTrendPct: trend !== null && trend > -100 && trend < 1e6 ? trend : null,
       demandShape: str(s.demandShape),
       gatesPassed: gates,
-      calls: num(s.dailyInferences) ?? seed?.outputs.daily_inferences ?? null,
-      tokIn: num(s.tokensInToday) ?? seed?.costs.tokens_in_today ?? null,
-      tokOut: num(s.tokensOutToday) ?? seed?.costs.tokens_out_today ?? null,
-      tokCached: num(s.tokensCachedToday) ?? seed?.costs.tokens_cached_today ?? null,
+      calls,
+      tokIn,
+      tokOut,
+      tokCached,
       alerts: alertList(s.alerts) ?? (seed ? alertsFor(id).map((a) => ({
         type: a.type, severity: a.severity, message: a.message, acknowledged: a.acknowledged,
       })) : null),
@@ -99,5 +130,5 @@ export function buildWorld(ctx: AIContext): World {
 
   const teams: string[] = [];
   for (const w of rows) if (w.team && !teams.includes(w.team)) teams.push(w.team);
-  return { asOf: str(c.asOf) ?? '1970-01-01T00:00:00.000Z', workloads: rows, teams };
+  return { asOf: str(c.asOf) ?? '1970-01-01T00:00:00.000Z', workloads: rows, teams, rejected };
 }

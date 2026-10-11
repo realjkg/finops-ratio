@@ -89,3 +89,8 @@ export function ladder(world: World, scope: Scope, from: 'roi' | 'workloads' | '
     `What if we moved the ${m} workloads to a private open model?`,
   );
 }
+
+/** Cap a list of rows so one request cannot produce an unbounded reply. */
+export function capRows(rows: string[], max = 20): string[] {
+  return rows.length <= max ? rows : [...rows.slice(0, max), `\u2026and ${rows.length - max} more.`];
+}

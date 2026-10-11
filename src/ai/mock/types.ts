@@ -36,6 +36,8 @@ export interface World {
   workloads: WorkloadFacts[];
   /** Distinct team names, first-seen order; empty when no workload has a team. */
   teams: string[];
+  /** Names of workloads whose wire figures were out of range and are excluded. */
+  rejected: string[];
 }
 
 /** What the conversation is currently about. */

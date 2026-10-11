@@ -28,7 +28,7 @@ export function deriveFocus(history: AIMessage[], world: World): Scope | null {
   return null;
 }
 
-export type Reference =
+type Reference =
   | { kind: 'none' }
   | { kind: 'bare' } // it / its / they / there ...
   | { kind: 'team' | 'workload' | 'model' }; // "the same team", "that workload" ...
@@ -56,7 +56,7 @@ export function isElliptical(lower: string): boolean {
   return /^\s*(?:and|what about|how about|what of|then|ok(?:ay)?|so|also)\b/.test(lower);
 }
 
-export type Resolution =
+type Resolution =
   | { ok: true; scope: Scope }
   | { ok: false; wanted: 'team' | 'workload' | 'model' | 'any' };
 

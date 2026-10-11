@@ -52,6 +52,11 @@ const MODEL_ALIASES: Record<string, string[]> = {
 const TEAM_WORD = '(?:team|group|department|dept|org|organization|organisation|business unit)';
 const PREPOSITION = '(?:for|of|in|on|about|within|by|from|vs|versus|than|compare|and|the)';
 
+/** Own-property lookup: wire-derived keys such as "constructor" must never reach the prototype chain. */
+function aliasesOf(table: Record<string, string[]>, key: string): string[] {
+  return Object.hasOwn(table, key) ? table[key] : [];
+}
+
 export function esc(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -68,17 +73,17 @@ interface Candidate {
 function candidates(world: World): Candidate[] {
   const out: Candidate[] = [];
   for (const w of world.workloads) {
-    const names = [w.name.toLowerCase(), ...(WORKLOAD_ALIASES[w.id] ?? [])];
+    const names = [w.name.toLowerCase(), ...aliasesOf(WORKLOAD_ALIASES, w.id)];
     for (const alias of names) out.push({ scope: { kind: 'workload', id: w.id }, alias });
   }
   for (const m of MODEL_REGISTRY) {
-    const names = [m.model_name, m.display_name.toLowerCase(), ...(MODEL_ALIASES[m.model_name] ?? [])];
+    const names = [m.model_name, m.display_name.toLowerCase(), ...aliasesOf(MODEL_ALIASES, m.model_name)];
     for (const alias of names) out.push({ scope: { kind: 'model', model: m.model_name }, alias });
   }
   for (const team of world.teams) {
     const key = team.toLowerCase();
     if (key === 'it' || key === 'revenue') continue; // handled by stricter rules
-    for (const alias of [key, ...(TEAM_ALIASES[key] ?? [])]) {
+    for (const alias of [key, ...aliasesOf(TEAM_ALIASES, key)]) {
       out.push({ scope: { kind: 'team', team }, alias });
     }
   }
@@ -162,7 +167,7 @@ export function sameScope(a: Scope, b: Scope): boolean {
   return true;
 }
 
-export interface Subject {
+interface Subject {
   scope: Scope;
   /** Other distinct entities of the same kind that were also named. */
   others: Scope[];
@@ -186,4 +191,30 @@ export function pickSubject(mentions: Mention[]): Subject | null {
 /** Does the text name a specific team (not merely the word "team")? */
 export function namesTeam(mentions: Mention[]): boolean {
   return mentions.some((m) => m.scope.kind === 'team');
+}
+
+// Words that follow "of/for/in" without naming anything in the data.
+const NOT_A_NAME = new Set([
+  'the', 'a', 'an', 'this', 'that', 'these', 'those', 'it', 'them', 'us', 'we', 'you', 'me', 'all', 'any', 'each', 'every',
+  'everything', 'everyone', 'anything', 'our', 'my', 'your', 'its', 'their', 'next', 'last', 'now', 'today', 'more', 'less',
+  'portfolio', 'overall', 'company', 'month', 'year', 'quarter', 'week', 'cost', 'spend', 'value', 'roi', 'savings',
+]);
+
+const NAMED_TEAM_RX = /(?:^|\s)(?:for|of|in|on|about|within)\s+(?:the\s+)?([\p{L}&][\p{L}&' -]{0,40}?)\s+(?:team|group|department|dept)\b/iu;
+const TRAILING_NAME_RX = /(?:^|\s)(?:for|of|in|on|about)\s+(?:the\s+)?([\p{L}&'-]+(?:\s+[\p{L}&'-]+){0,3})\s*[?.!]*\s*$/u;
+
+/**
+ * A name the user gave ("the Finance team", "ROI of Lëgal") that matches nothing
+ * in the data, as a short sanitized label; null when the text names nothing
+ * unknown. Only called when no entity was recognized.
+ */
+export function unknownName(text: string): { name: string; team: boolean } | null {
+  const t = text.slice(0, MAX_TEXT);
+  const team = NAMED_TEAM_RX.exec(t);
+  const trail = team ? null : TRAILING_NAME_RX.exec(t);
+  const raw = (team ?? trail)?.[1]?.trim();
+  if (!raw) return null;
+  const first = raw.split(/\s+/)[0].toLowerCase();
+  if (NOT_A_NAME.has(first) || raw.length < 2) return null;
+  return { name: raw.slice(0, 40), team: team !== null };
 }

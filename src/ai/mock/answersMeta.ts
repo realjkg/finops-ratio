@@ -4,8 +4,8 @@ import { rollup } from './calc';
 import { basisLine, usd } from './format';
 import type { Answer, World } from './types';
 
-export const UNSUPPORTED_HEADER = "**I can't answer that from the seeded data**";
-export const CLARIFY_HEADER = '**Which one do you mean?**';
+const UNSUPPORTED_HEADER = "**I can't answer that from the seeded data**";
+const CLARIFY_HEADER = '**Which one do you mean?**';
 
 function sampleNames(world: World): { team: string; workload: string; model: string } {
   const top = [...world.workloads].sort((a, b) => b.monthlySpend - a.monthlySpend)[0];
@@ -17,7 +17,7 @@ function sampleNames(world: World): { team: string; workload: string; model: str
 }
 
 /** Questions Frank can always answer, built from the data in hand. */
-export function starterQuestions(world: World): string[] {
+function starterQuestions(world: World): string[] {
   const s = sampleNames(world);
   const qs = ['What is the ROI of the portfolio?'];
   if (world.teams.length > 0) qs.push('Which team is driving the highest cost?', `What is the ROI of the ${s.team} team?`);
@@ -72,5 +72,23 @@ export function clarifyText(world: World, wanted: 'team' | 'workload' | 'model' 
     'Name it and I will answer, for example:',
     ...starterQuestions(world).slice(0, 3).map((q) => `• "${q}"`),
     basisLine(world.asOf),
+  ].join('\n');
+}
+
+/** The user named something that is not in the data: say so, never fall back silently. */
+export function unknownNameText(world: World, u: { name: string; team: boolean }): string {
+  const head = u.team
+    ? `**I don't have a team called ${u.name}**`
+    : `**I don't have a team, workload or model called "${u.name}"**`;
+  const teams = world.teams.length > 0 ? `Teams are: ${world.teams.slice(0, 20).join(', ')}.` : 'No team data is present in this context.';
+  const wls = world.workloads.slice(0, 12).map((w) => w.name);
+  return [
+    head,
+    teams,
+    ...(wls.length > 0 ? [`Workloads include: ${wls.join(', ')}${world.workloads.length > 12 ? `, and ${world.workloads.length - 12} more` : ''}.`] : []),
+    'I did not substitute anything else for it; name one of these and I will answer.',
+    basisLine(world.asOf),
+    'Closest questions I can answer:',
+    ...starterQuestions(world).slice(0, 3).map((q) => `\u2022 "${q}"`),
   ].join('\n');
 }
