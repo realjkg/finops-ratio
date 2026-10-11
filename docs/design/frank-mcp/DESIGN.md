@@ -5,7 +5,7 @@ Branch `docs/frank-mcp-proposal`. Revision 1 was branched from `origin/main` at
 **Status: proposal. Design only: this branch adds documents and no code.
 Nothing in this proposal is implemented.** Every decision in section 10 is
 **open**: it is the owner's to make, with a recommendation attached. No
-decision is recorded here as made. This is revision 8. Review history:
+decision is recorded here as made. This is revision 9. Review history:
 revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
 revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
 PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
@@ -15,8 +15,9 @@ changes and a follow-up (16581c8) answered it; Copilot's next review and a
 round-5 challenger review of 16581c8 were answered by revision 5 (1ffb5fd); a
 round-6 challenger review of 1ffb5fd was answered by revision 6 (473aed0), and
 revision 7 (6f4c9f7) brought the review history up to date; a round-7
-challenger review of 6f4c9f7 (2 Medium, 5 Low) is answered by this revision 8.
-Revisions 2 to 8 are in PR #98. The code citations were checked at 62bd8ed and
+challenger review of 6f4c9f7 was answered by revision 8 (6f82d26); a round-8
+challenger review of 6f82d26 (1 Medium, 4 Low) is answered by this revision 9.
+Revisions 2 to 9 are in PR #98. The code citations were checked at 62bd8ed and
 there have been no code changes
 since: 8caec87 touches only `docs/design/frank-mcp`.
 
@@ -90,7 +91,8 @@ chosen by a model:
   composes text from `evaluateOutcome` with regular expressions over the
   question (`src/agent-workflows/frank.ts:36-129`), and `reviewWithFrank`
   runs a queue/lease/process state machine whose result is stamped
-  `engine: "deterministic-simulation-v1"` (`src/agent-workflows/engine.ts:135-143`,
+  `engine: "deterministic-simulation-v1"`
+  (`src/agent-workflows/engine.ts:135-143`,
   `src/agent-workflows/types.ts:13`). No model is involved.
 - **The chat Frank** (`POST /api/v1/ai/chat`) is one non-streaming model call
   per turn with a system prompt built from a portfolio snapshot
@@ -209,12 +211,17 @@ credentials; and the browser is untrusted input (its `context` is not
 authoritative, section 1.3).
 
 ```
-browser -> /api/v1/ai/chat (gateway: method, size, auth, rate limit, validation)
+browser -> /api/v1/ai/chat (gateway: method, size, auth, rate limit,
+                            validation)
             -> agent runtime (server)
-                 |-- builds system prompt (server-side snapshot, not browser context, once M1 lands)
-                 |-- provider adapter  <->  model endpoint (Claude | OpenAI | OpenAI-compatible)
-                 |-- tool broker: allowlist check -> budget check -> scope injection
-                 |       |-- in-process tools (M1): pure functions over governed reads
+                 |-- builds system prompt (server-side snapshot, not
+                 |   browser context, once M1 lands)
+                 |-- provider adapter <-> model endpoint
+                 |   (Claude | OpenAI | OpenAI-compatible)
+                 |-- tool broker: allowlist check -> budget check ->
+                 |   scope injection
+                 |       |-- in-process tools (M1): pure functions over
+                 |       |   governed reads
                  |       '-- MCP client (M2): pinned servers only
                  '-- audit record per tool call
 ```
@@ -330,8 +337,10 @@ Each entry pins:
 
 Within a server, the allowlist lists tools **by name**, each with:
 
-- `schema_hash`: SHA-256 of the canonicalized input JSON Schema, and of the
-  output schema where the server provides one;
+- `schema_hash`: SHA-256 of the canonicalized **input** JSON Schema;
+- `output_schema_hash`: SHA-256 of the output schema the broker parses
+  results against (3.3, 4.1); if the server declares an output schema, it
+  must hash to this value;
 - `description_hash`: SHA-256 of the description text, because descriptions
   are model-visible instructions (the vector for tool poisoning);
 - budgets (section 3.6) and a `read_only_via` field naming the capability that
@@ -347,8 +356,8 @@ rejects the whole file, 3.8 rule 3):
 | Level | Required keys | Optional keys (default) |
 |---|---|---|
 | File (top level) | `deployment_environment` (must equal the raw `RATIO_ENV`, 3.8 rule 0); `tenants` (the tenants that get tools, 6.3; an empty list means none); `servers` (may be empty) | `fallback`: `mock` or `no_tools` (default `mock`, 2.4, 7); `relist_interval_seconds` (default 300, **assumption**, 3.7); `max_tool_calls_per_turn` (default 5) and `max_tool_result_tokens_per_turn` (default 8000), the global per-turn caps (3.6; the OD-8 placeholders) |
-| Server | `name`; `owner`; `purpose`; `data_class`; transport pins: stdio `command`, `args`, `executable_sha256`, `entry_sha256`, `working_dir`; HTTP `url` and one of `tls_pin` or `ca_bundle`, plus `credential_ref`; `tools` | `enabled` (default `true`); `env` (default empty, nothing inherited); `environments`, `roles`, `teams` (reserved, 3.8; absent means unrestricted within the file's environment) |
-| Tool | `name`; `schema_hash`; `description_hash`; `read_only_via` | `enabled` (default `true`); `output_schema_hash` (default none: the broker's own output schema applies); budgets `max_calls_per_turn`, `max_calls_per_tenant_per_minute`, `max_arg_bytes`, `max_result_bytes`, `timeout_ms` (defaults are the OD-8 placeholders); `on_secret` (default `reject`); `environments`, `roles`, `teams` (reserved) |
+| Server | `name`; `transport` (`stdio` or `http`); `owner`; `purpose`; `data_class`; `tools`; **if `transport` is `stdio`:** `command`, `args`, `executable_sha256`, `entry_sha256`; **if `http`:** `url`, one of `tls_pin` or `ca_bundle`, `credential_ref` | `enabled` (default `true`); stdio only: `working_dir` (default a fixed empty directory), `env` (default empty, nothing inherited); `environments`, `roles`, `teams` (reserved, 3.8; absent means unrestricted within the file's environment) |
+| Tool | `name`; `schema_hash`; `output_schema_hash`; `description_hash`; `read_only_via` | `enabled` (default `true`); budgets `max_calls_per_turn` (5), `max_calls_per_tenant_per_minute` (20), `max_arg_bytes` (2 KB), `max_result_bytes` (32 KB), `timeout_ms` (5000), the OD-8 placeholders; `on_secret` (default `reject`); `environments`, `roles`, `teams` (reserved) |
 
 A missing required key rejects the whole file; a missing optional key takes
 the stated default. Defaults that are placeholders are not measurements.
@@ -483,27 +492,42 @@ gateway-auth check are evaluated together under the following rules.
 
 - **E1, the evaluation triggers (stated once).** Only three events can clear
   a latch: a **load** (start), a **reload**, and an **observed off-to-on flip
-  of `FRANK_TOOLS`**. The flip is detected at the per-request check, which
-  remembers the last `FRANK_TOOLS` value it saw; an observed change from off
-  to on runs the same evaluation. Each trigger re-reads the raw environment.
-- **E2, the per-request path can only latch.** On every request the broker
-  compares the raw `RATIO_ENV` with the baseline. A difference runs a
+  of `FRANK_TOOLS`**. A load initializes the flip detector's last-seen value
+  to the raw `FRANK_TOOLS` value, with unset counted as off; a load with
+  `FRANK_TOOLS` off performs no evaluation. On each request the broker reads
+  the raw `FRANK_TOOLS` and compares it with the last-seen value; an observed
+  change from off to on, **or from none to on**, starts an E1 evaluation (the
+  same evaluation as at load) **outside** the fail-only path of E2; this
+  evaluation is permitted to clear a latch and to set the baseline. Each
+  trigger re-reads the raw environment.
+- **E2, the per-request env check can only latch.** On every request the
+  broker compares the raw `RATIO_ENV` with the baseline. A difference runs a
   **fail-only re-check**: a failure latches "no tools"; a success changes
-  nothing and never clears a latch or sets the baseline.
+  nothing and never clears a latch or sets the baseline. The per-request
+  check never itself clears a latch.
 - **E3, baseline.** The baseline is the raw value of the last successful
   evaluation, and is **none until the first success**. Before the first
   success no tools are offered. A missing baseline counts as a difference, so
-  the per-request path evaluates and can only latch.
+  the per-request env check runs and can only latch.
 - **E4, snapshot and serialization.** Each evaluation reads the raw
   environment **once** into a snapshot, and every check of that evaluation
   (including each entry's `environments[]`) uses that snapshot, never the live
   environment. Evaluations run under one lock (or a compare-and-set on a
-  generation counter), so they are serialized. The latch is **monotonic within
-  a generation**: a success from an older generation cannot clear a latch set
-  by a newer failure, and a success racing a failure cannot clear it.
-- **E5, a latch is only cleared by a successful evaluation started by an E1
-  trigger.** The per-request kill-switch check (6.3) only reads the latch: it
-  can turn tools off and can never re-enable a refused broker.
+  generation counter), so they are serialized. A **generation** is an integer
+  incremented at the start of every evaluation (including fail-only
+  re-checks) and recorded on its result. A failure always latches. A success
+  applies (clears the latch, sets the baseline) only if its generation equals
+  the current generation when it completes, so a success from an older
+  generation, or one racing a newer failure, cannot clear a latch. If the
+  lock or compare-and-set fails or times out, the latch and the baseline are
+  unchanged and no tools are offered for that request (fail closed). A
+  request already in flight when an evaluation completes uses the state it
+  read once at its start.
+- **E5, only an E1 evaluation clears a latch.** The per-request kill-switch
+  check (6.3) reads the latch: it can turn tools off, and it never itself
+  re-enables a refused broker. Detecting a flip does not clear the latch by
+  itself; it starts the E1 evaluation, and only that evaluation's success
+  does.
 
 If the audit write for `startup_refused` fails, the
 refusal stands (a failed audit write never turns a refusal into an enable),
@@ -698,7 +722,8 @@ processing steps, `src/agent-workflows/engine.ts:196`; the Frank evidence doc
 describes the surrounding command as atomic:
 `docs/evidence/frank-coster-interface.md:13`); the
 gateway already writes a structured log line without secrets
-(`src/server/gateway/withGateway.ts:101-103`); the evidence docs record "responses identify
+(`src/server/gateway/withGateway.ts:101-103`); the evidence docs record
+"responses identify
 their saved revision" (`docs/evidence/frank-coster-interface.md:21`). The tool
 audit follows the same shapes: a structured line per call with a stable id,
 plus `revision`. Where to store durable audit and how long to keep it is
@@ -713,8 +738,8 @@ owner decision; this proposal does not set one.
   tools and the route behaves as it does today. Checked on every request, not
   only at start, so flipping it takes effect without a restart where the
   process environment can be changed (**assumption**; otherwise a restart).
-  An observed off-to-on flip re-runs the rule 0 and A14 checks (3.8 E1); a
-  latched refusal is never cleared by the per-request check (3.8 E2, E5).
+  An observed off-to-on flip starts the rule 0 and A14 evaluation (3.8 E1);
+  the per-request check itself never clears a latched refusal (3.8 E2, E5).
 - **Per server and per tool:** setting `enabled: false` in the allowlist.
 - **Secret handling per tool:** `on_secret: reject` (default) or `redact`
   (3.3); changing it is a reviewed allowlist change.
@@ -722,7 +747,8 @@ owner decision; this proposal does not set one.
   gets no tools.
 - **Database layer:** removing the reader login's login attribute stops every
   database-backed tool at the next request; the existing check already
-  treats that as an immediate kill switch (`src/server/costs/readerLogin.ts:10-14`).
+  treats that as an immediate kill switch
+  (`src/server/costs/readerLogin.ts:10-14`).
 - **Automatic trip:** repeated schema violations, hash mismatches or timeouts
   from one server within a window disable that server until an operator
   re-enables it.
@@ -797,7 +823,7 @@ Tests first, as in the rest of the program (Slices 3-5 design section 7).
 | A17 | Server certificate or key pin changes | connection refused; server unavailable |
 | A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e) rejects the whole file |
 | A19 | A tool result carries a credential-shaped value (bearer token, `sk-`-style key, JWT, AWS key id) in an ordinary string field that passes the output schema | not delivered to the model; fixed error; audit `secret_in_result` without the value; with `on_secret: redact` only the value is replaced and the audit still records it. Includes: a URL value whose `?` tail contains a quote (the serialized form does not re-parse, so the result is rejected); under `on_secret: redact`, a key-only secret such as `{"password":"abc def"}` (the value is replaced whole and nothing leaks); a hit on a map key (rejected); a located non-string value (rejected) |
-| A20 | Environment check, with the slice that first tests each case. **M0** (raw environment, a broker `reload()` and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) the raw environment changes to an unrecognized value after a successful start; (h3) `reload()` re-reads the raw environment, and clears a latch only if the evaluation succeeds; (i) the per-request kill-switch check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails; (k) latched, then the environment is fixed, then a plain request; (l) a success racing a failure cannot clear a latch (lock or compare-and-set); (n) the environment changes during an evaluation, and the entry checks use the snapshot. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g), (h1) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (h3) re-evaluates; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (k) still no tools until a load, a reload or an observed flip; (l) the latch holds; (n) the snapshot decides; (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
+| A20 | Environment check, with the slice that first tests each case. **M0** (raw environment, a broker `reload()` and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) the raw environment changes to an unrecognized value after a successful start; (h3) `reload()` re-reads the raw environment, and clears a latch only if the evaluation succeeds; (i) the per-request kill-switch check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails; (k) latched, then the environment is fixed, then a plain request; (l) a success racing a failure cannot clear a latch (lock or compare-and-set); (n) the environment changes during an evaluation, and the entry checks use the snapshot; (m1) start with `FRANK_TOOLS` off and a good environment, then observe it on; (m2) latched, environment fixed, then `FRANK_TOOLS` off, then on; (m3) `FRANK_TOOLS` unset at load (counted as off), then on; (p) the lock or compare-and-set fails or times out. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g), (h1) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (h3) re-evaluates; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (k) still no tools until a load, a reload or an observed flip; (l) the latch holds; (n) the snapshot decides; (m1) tools are offered and the baseline is set; (m2) the latch clears; (m3) an evaluation runs and tools are offered (none-to-on counts as a flip); (p) no tools, no change to the latch or baseline; (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
 
 ### 8.3 Pass criteria
 
@@ -822,11 +848,12 @@ tools, the pinned-tool-missing check, certificate/executable pin comparison,
 the raw-`RATIO_ENV` startup check (a mutant that reads the defaulted
 configuration instead of the raw value must be killed by A20 (c) in M0; one
 that skips the `deployment_environment` comparison, by A20 (e) in M2; one that
-does not re-evaluate on a flip, by A20 (g); one that does not re-evaluate on
+does not re-evaluate on an observed flip, by A20 (m1) and (m2) (not by (g),
+which a latching mutant also passes); one that does not re-evaluate on
 a reload, by A20 (h3) in M0 and (h2) in M2; one that lets the per-request
 path clear a latch, by A20 (i) and (k); one that reads the live environment
 instead of one snapshot, by A20 (n); one that drops the lock or
-compare-and-set, by A20 (l)), the reserved-field deny
+compare-and-set, by A20 (l) and (p)), the reserved-field deny
 rule: a mutant
 that deletes it, or that applies a tool-level deny to the server (or the
 reverse), must be killed by A18), and confirm at least one test fails
@@ -849,7 +876,7 @@ by running the classifier on the real diff; a miss is reported, not argued.
   controls that must exist before any tool does: A7 (out-of-set request), A11
   (per-turn and per-call caps), A13 (audit write failure fails the call
   closed), A14 (startup refusal when tools are on and gateway auth is not
-  enforced), A20 (b, c, d, g, h1, h3, i, j, k, l, n: the raw-`RATIO_ENV`
+  enforced), A20 (b, c, d, g, h1, h3, i, j, k, l, m, n, p: the raw-`RATIO_ENV`
   checks, run in the
   same
   evaluation as A14 and re-run on every reload and flip), A10 (redaction
@@ -905,7 +932,8 @@ by running the classifier on the real diff; a miss is reported, not argued.
 ### M2. MCP client, allowlist, audit
 
 - **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
-  (A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, i, j, k, l, n) re-run
+  (A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, i, j, k, l, m, n, p)
+  re-run
   against the MCP
   path); A20 (a, e, f, h2) with the file parser (`deployment_environment`,
   `environments[]`); allowlist parser tests
@@ -958,9 +986,9 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 | Slice | Cases |
 |---|---|
-| M0 | A7, A10, A11, A13, A14, A19, A20 (b, c, d, g, h1, h3, i, j, k, l, n) |
+| M0 | A7, A10, A11, A13, A14, A19, A20 (b, c, d, g, h1, h3, i, j, k, l, m, n, p) |
 | M1 | A1, A2 (in-process results), A5, A6 (fixtures), A8, A9 |
-| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (a, e, f, h2); A1, A2, A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, i, j, k, l, n) re-run against MCP servers |
+| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (a, e, f, h2); A1, A2, A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, i, j, k, l, m, n, p) re-run against MCP servers |
 | M3 | A5, A6 and the golden suite: per-model re-run |
 | M4 | the broker suite re-run against the server entry |
 
@@ -978,7 +1006,8 @@ whether it replaces or feeds X1-a (OD-10).
 Write and action tools. Such a proposal must include at least: a human
 approval gate before every action, modeled on `src/mission/adjustmentGate.ts`
 (confidence below a bar routes to a governance gate for human confirmation,
-and "NEVER auto-applied", line 7 and lines 51-65) and on the existing rule that a
+and "NEVER auto-applied", line 7 and lines 51-65) and on the existing rule
+that a
 different person must review an agent proposal
 (`src/agent-workflows/engine.ts:160-164`); per-action authority bound to a named
 approver, which needs per-user identity (D-15); an idempotent action contract
@@ -1005,7 +1034,7 @@ example "the model sees the allowlist's text, not the server's"), which are
 | OD-5 | Where do local MCP servers run, and who owns each? | per-server decision | Each allowlist entry names an owner (3.2); no entry without one. Servers run outside the app container, owned by the team that owns the data. |
 | OD-6 | Real data, real credentials, real model infrastructure, and use in dev, test and production under RBAC | when | The owner is relayed as requiring (source not seen, unverified) MCP to be usable in dev, test and production for any team under RBAC. **The design must support that, and the production go-live stays the owner's gate (OD-12).** Until the owner opens that gate, BOUNDARY v2 stands: this program uses only synthetic data and fakes, with no real credentials or spend. Production use is then a configuration and review step (a separate allowlist file per deployment, 3.8; the reader role, 3.5; the model endpoint choice, OD-4; identity and RBAC, T-7), not a redesign. |
 | OD-7 | Spend and infrastructure for self-hosted models (GPUs, operations) | owner action | Needs explicit approval and a budget under BOUNDARY v2; the what-if tool (4.3) can inform it but is not evidence for it. |
-| OD-8 | Budget defaults | author suggests: 5 tool calls and 20 per-tenant calls per minute, 32 KB result, 5 s timeout, 8,000 tool-result tokens per turn | The author has no measurements; treat as placeholders, set after M1 measures real result sizes. |
+| OD-8 | Budget defaults | author suggests: 5 tool calls and 20 per-tenant calls per minute, 2 KB of arguments, 32 KB result, 5 s timeout, 8,000 tool-result tokens per turn | The author has no measurements; treat as placeholders, set after M1 measures real result sizes. |
 | OD-9 | Audit storage and retention period | log pipeline / table; period | Log pipeline for M2; the owner sets the period. |
 | OD-10 | Relationship to X1-a | this feeds X1-a / replaces it / separate | **Feeds X1-a:** same read-only scope, one agent layer. |
 | OD-11 | May any live model be enabled on the hosted demo? | yes / no | **No.** The hosted demo stays on the mock; any live provider is behind sign-in. |
