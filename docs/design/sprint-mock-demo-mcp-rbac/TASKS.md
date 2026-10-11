@@ -2,7 +2,7 @@
 
 Read [PLAN.md](./PLAN.md) first. This file turns it into independent task
 cards. Facts are cited as F1 to F22 (PLAN section 2) and decisions as D1 to D13
-(PLAN section 8). Base: `origin/main` at `8caec87` (revision 4 re-checked against the open Frank design PR #98, branch `docs/frank-mcp-proposal`; cite its DESIGN section 3.3 key table and 3.8, or main once it merges).
+(PLAN section 8). Base: `origin/main` at `8caec87` (revision 5 re-checked against the open Frank design PR #98, branch `docs/frank-mcp-proposal`, which keeps moving: cite its DESIGN sections (3.3 key table, 3.8, A18 to A20), never a commit, and re-read the current tip before starting B5; or main once it merges).
 
 Boundary (v2): local and ephemeral only. No production infrastructure, no real
 data or credentials, no spend. No card adds a migration (issue #94) or a
@@ -56,27 +56,33 @@ dependency. Mocks bind to the loopback interface only.
   (`http.ts:30-33`).
 - Verdict sink. `src/server/gateway/verdictSink.ts` (card B1) keeps one
   registration on `globalThis[Symbol.for('ratio.verdictSink')]`, with
-  `registerVerdictSink` and `resetVerdictSinkForTests`. The `globalThis` guard
-  matters mainly under `next dev`, where route modules can be loaded as
-  separate instances; a production build shares one process-wide module cache.
-  Every `authorize()` outcome passes through `decide(principal, action,
-  resource)` (card B1), which calls the sink. **In enforce mode there is always
-  a sink**: B1 lazily registers a bounded in-memory default, so enforce mode
-  works from B1 onward; card C5 replaces it with the richer sink, registered in
-  the repository's existing `instrumentation.ts` `register()` hook (the one
-  deterministic server-start hook; routes are loaded lazily and many import
-  gateway files directly, so a side-effect import in a barrel file would not
-  reliably run). If enforce mode finds **no** sink (only possible after an
+  `registerVerdictSink`, `resetVerdictSinkForTests` and a **default-sink
+  factory**. Every `authorize()` outcome passes through `decide(principal,
+  action, resource)` (card B1), which calls the sink. **In enforce mode there
+  is always a sink**: the first enforced request lazily registers whatever the
+  factory returns, which is a bounded in-memory sink in B1 and the audit sink
+  after card C5 changes that one factory line (C5 edits `verdictSink.ts`,
+  sequenced after B1). Registration is therefore lazy but deterministic: every
+  enforced route passes through the gateway code that calls the factory. The
+  root `instrumentation.ts` is **not** touched: an existing test
+  (`src/ingest/importBoundary.test.ts`, lines 216-228) pins its import closure
+  to exactly three files. If enforce mode finds **no** sink (only after an
   explicit reset), the request is denied with a fixed 503 ("audit sink not
   configured"); if the sink throws, 503 as well (fail closed). With
   `RATIO_RBAC` unset nothing is audited and nothing changes (F1). Routes use
   `requires`; handlers that build a `Resource` late (card C3) call `decide`.
+  The `globalThis` guard matters mainly under `next dev`.
 - Mock state and run modes. The mock IdP key and revocation set (A2), change
   store (C3, shared with C4 and C8), replay store (C4) and audit store (C5) are
-  module state. They are supported in unit tests (one module graph) and in a
-  **production build** (`next build` then `next start`), which is how the
-  Playwright launcher runs (card C1). `next dev` is not a supported mode for
-  the mock state; the launcher refuses it.
+  process state. Each is held behind a `globalThis[Symbol.for('ratio.<name>')]`
+  accessor, the same pattern as the verdict sink, and each owning card has a
+  test `store_is_shared_across_separately_loaded_module_instances`. They are
+  supported in unit tests and in a **production build** (`next build` then
+  `next start`), which is how the Playwright launcher runs (card C1), which
+  adds an end-to-end test that state written through one route is visible to
+  another. `next dev` is not a supported mode; the launcher refuses it. The
+  Playwright process cannot touch that state directly, so card B7 provides a
+  mock-only control route (below).
 - Mock persona catalogue. Card A2 owns `src/mock/idp/personas.ts`: for each
   persona the `sub`, `role`, `teams`, `envs` and `tenant`. It includes two
   engineering leads on real seeded team names, `eng-platform` (teams
@@ -98,8 +104,9 @@ dependency. Mocks bind to the loopback interface only.
 |---|---|---|
 | A | A1, A2, A3, A4, A5, A6, A7, A8 | All start at once. No dependencies. File-disjoint. |
 | B, wave 1 | B1, B4, B5, B6, B8 | Start when their Sprint A dependencies merge. File-disjoint with each other. |
-| B, wave 2 | B2, B3, B7, B9, B10 | Start when B1 and B8 (where listed) merge. File-disjoint with each other. |
+| B, wave 2 | B2, B3, B7, B9 | Start when B1 and B8 (where listed) merge. File-disjoint with each other. |
 | B, wave 3 | B11 | Needs B7 and B8. |
+| B, wave 4 | B10 | Needs B8 and B11. |
 | C | C2, C3, C6 first; then C1, C4, C5; then C8; C7 last | See dependencies. C1 and C2 are not parallel. |
 
 ### Dependencies (machine-checked table)
@@ -114,9 +121,9 @@ dependency. Mocks bind to the loopback interface only.
 | B5 | A1, A5 |
 | B6 | A6 |
 | B7 | B1, A2, B8, A8 |
-| B8 | A1, A3 |
+| B8 | A1, A3, A2 |
 | B9 | B1, A1, B8 |
-| B10 | B8 |
+| B10 | B8, B11 |
 | B11 | B7, B8, A1 |
 | C1 | B3, B7, B9, B10, B11, C2, A2, A3, A4, A5 |
 | C2 | B11, A1 |
@@ -130,6 +137,7 @@ dependency. Mocks bind to the loopback interface only.
 Files that two cards edit, in sequence (the later card depends on the earlier):
 `src/costsource/CostSourcePage.tsx` A8 then B7; `pages/api/v1/cm/change.ts` B4
 then C3; `src/rbac/matrix.ts` A1 then C3 (the `cm/change` status flip);
+`src/server/gateway/verdictSink.ts` B1 then C5 (the default-sink factory line);
 `package.json` and `vitest.config.ts` C1 only; `src/store/useStore.ts` B11
 only. Ownership, acyclicity and the effort sum were re-checked by script when
 this file was revised (EVIDENCE.md).
@@ -150,10 +158,10 @@ this file was revised (EVIDENCE.md).
 | B2 | `src/server/gateway/liveDataAuth.ts`, `pages/api/costsource/rows.ts`, `pages/api/costsource/findings.ts`, `pages/api/costsource/health.ts`, `pages/api/costsource/sources.ts`, `pages/api/v1/connectors/index.ts`, `src/server/gateway/liveDataPrincipal.test.ts` |
 | B3 | `pages/api/attribution.ts`, `pages/api/tokenomics.ts`, `pages/api/prediction/predict.ts`, `pages/api/prediction/accuracy.ts`, `pages/api/report/snapshot.ts`, `pages/api/costsource/ingest.ts`, `src/server/routeMatrix.test.ts`, `src/server/openRoutesEnforced.test.ts` |
 | B4 | `pages/api/v1/cm/change.ts`, `src/cm/outbound.ts`, `src/cm/itsmStub.e2e.test.ts` |
-| B5 | `src/mcp/client.ts`, `src/mcp/allowlistFile.ts`, `src/mcp/credentials.ts`, `src/mcp/index.ts`, `src/mcp/fixtures/allowlist.dev.json`, `src/mcp/fixtures/allowlist.prod.json`, `src/mcp/mcp.client.test.ts` |
+| B5 | `src/mcp/client.ts`, `src/mcp/allowlistFile.ts`, `src/mcp/credentials.ts`, `src/mcp/index.ts`, `src/mcp/fixtures/allowlist.dev.json`, `src/mcp/fixtures/allowlist.prod.json`, `src/mcp/fixtures/allowlist.allkeys.json`, `src/mcp/mcp.client.test.ts` |
 | B6 | `src/connectors/ingestLanding.ts`, `src/connectors/IngestVerification.tsx`, `src/connectors/syntheticAttribution.test.tsx` |
-| B7 | `pages/api/v1/session/login.ts`, `pages/api/v1/session/logout.ts`, `pages/api/v1/session/principal.ts`, `pages/api/v1/workloads.ts`, `src/session/client.ts`, `src/session/session.test.ts`, `src/session/liveClients.test.ts`, `src/attribution/LiveAttributionClient.ts`, `src/prediction/LivePredictionClient.ts`, `src/tokenomics/LiveTokenomicsClient.ts`, `src/finio/LiveFinioClient.ts`, `src/ai/LiveAIClient.ts`, `src/cm/LiveCMClient.ts`, `src/costsource/LiveCostSourceClient.ts`, `src/hello/LiveHelloClient.ts`, `src/executive/SnapshotButton.tsx`, `src/costsource/CostSourcePage.tsx` |
-| B8 | `src/data/provider.ts`, `src/data/provider.test.ts`, `src/data/servedOracle.fixture.json`, `src/data/defaultScopeGolden.fixture.json`, `src/attribution/MockAttributionClient.ts`, `src/attribution/accrual.ts`, `src/attribution/aggregations.ts`, `src/prediction/MockPredictionClient.ts`, `src/executive/initiativeModel.ts`, `src/executive/reportModel.ts`, `src/findings/findingsModel.ts`, `src/mission/missionModel.ts`, `src/ai/buildAIContext.ts` |
+| B7 | `pages/api/v1/session/login.ts`, `pages/api/v1/session/logout.ts`, `pages/api/v1/session/principal.ts`, `pages/api/v1/session/mock-control.ts`, `pages/api/v1/workloads.ts`, `src/session/client.ts`, `src/session/session.test.ts`, `src/session/liveClients.test.ts`, `src/attribution/LiveAttributionClient.ts`, `src/prediction/LivePredictionClient.ts`, `src/tokenomics/LiveTokenomicsClient.ts`, `src/finio/LiveFinioClient.ts`, `src/ai/LiveAIClient.ts`, `src/cm/LiveCMClient.ts`, `src/costsource/LiveCostSourceClient.ts`, `src/hello/LiveHelloClient.ts`, `src/executive/SnapshotButton.tsx`, `src/costsource/CostSourcePage.tsx` |
+| B8 | `src/data/provider.ts`, `src/data/provider.test.ts`, `src/data/servedOracle.fixture.json`, `src/data/defaultScopeGolden.fixture.json`, `src/lib/budgetStatus.ts`, `src/lib/budgetStatus.rollup.test.ts`, `src/attribution/MockAttributionClient.ts`, `src/attribution/accrual.ts`, `src/attribution/aggregations.ts`, `src/prediction/MockPredictionClient.ts`, `src/executive/initiativeModel.ts`, `src/executive/reportModel.ts`, `src/findings/findingsModel.ts`, `src/mission/missionModel.ts`, `src/ai/buildAIContext.ts` |
 | B9 | `pages/api/v1/ai/chat.ts`, `pages/api/v1/finio/export.ts`, `pages/api/v1/a2a/handshake.ts`, `pages/api/v1/costs/published.ts`, `src/server/costs/publishedCostsRoute.ts`, `src/server/gatewayRoutesEnforced.test.ts` |
 | B10 | `src/attribution/AttributionPage.tsx`, `src/attribution/LiveAccrualBoard.tsx`, `src/prediction/PredictionPage.tsx`, `src/data/userQueries.ts`, `src/attribution/pageReaders.test.tsx`, `src/components/detail/DetailPanel.tsx`, `src/components/detail/DetailPanel.test.tsx` |
 | B11 | `pages/_app.tsx`, `pages/sign-in.tsx`, `src/session/SessionProvider.tsx`, `src/session/ViewGuard.tsx`, `src/session/Forbidden.tsx`, `src/session/ui.test.tsx`, `src/store/useStore.ts`, `src/store/hydrate.test.ts`, `src/store/configMismatch.test.tsx` |
@@ -161,7 +169,7 @@ this file was revised (EVIDENCE.md).
 | C2 | `src/lib/persona.ts`, `src/components/PersonaProvider.tsx`, `src/components/layout/NavBar.tsx`, `src/components/TechnicalViewToggle.tsx`, `src/lib/personaPrincipal.test.ts` |
 | C3 | `src/cm/lifecycle.ts`, `src/cm/changeStore.ts`, `pages/api/v1/cm/change.ts`, `src/rbac/matrix.ts`, `src/cm/lifecycle.test.ts` |
 | C4 | `pages/api/v1/cm/webhook.ts`, `src/cm/webhookSignature.ts`, `src/cm/replayStore.ts`, `src/cm/webhook.test.ts` |
-| C5 | `src/audit/sink.ts`, `src/audit/record.ts`, `src/audit/register.ts`, `src/audit/index.ts`, `src/audit/audit.test.ts`, `pages/api/v1/audit/records.ts`, `pages/audit.tsx`, `instrumentation.ts` |
+| C5 | `src/audit/sink.ts`, `src/audit/record.ts`, `src/audit/register.ts`, `src/audit/index.ts`, `src/audit/audit.test.ts`, `pages/api/v1/audit/records.ts`, `pages/audit.tsx`, `src/server/gateway/verdictSink.ts` |
 | C6 | `src/cm/tokenClient.ts`, `src/cm/tokenClient.test.ts`, `src/mock/tokenService/server.ts` |
 | C8 | `src/cm/statusSync.ts`, `src/cm/statusSync.test.ts` |
 | C7 | `.obvious/obvious.md` |
@@ -243,7 +251,10 @@ A card that needs a file it does not own stops and records the need on the card
   `single_use_token_replay_fails_second_time`,
   `role_change_reissue_reflects_new_claims_and_old_token_is_revoked`,
   `key_rotation_old_kid_rejected_after_retire`,
-  `issuer_refuses_to_run_when_RATIO_ENV_is_production`,
+  `issuer_refuses_to_run_when_RATIO_ENV_is_production` (a plain string
+  comparison; A2 imports nothing from A1),
+  `issuer_requires_an_explicit_deploy_env_argument_and_sets_aud_to_it`,
+  `idp_state_is_shared_across_separately_loaded_module_instances`,
   `persona_catalogue_has_two_eng_leads_on_distinct_real_team_names`,
   `persona_catalogue_has_org_wide_principals_for_the_other_roles`,
   `no_key_or_token_material_in_console_output`.
@@ -536,8 +547,8 @@ A card that needs a file it does not own stops and records the need on the card
   `eng_lead_live_rows_filtered_to_own_team_and_env`,
   `evaluateLiveDataAuth_and_gateSourceAccess_signatures_and_results_unchanged_for_existing_callers`,
   `existing_costsource_route_tests_pass_unchanged`.
-- **Governance class.** Path-derived: `auth_tenancy` (three paths), `routes`
-  (five paths).
+- **Governance class.** Path-derived: `auth_tenancy` (two paths: `liveDataAuth.ts` and
+  `liveDataPrincipal.test.ts`), `routes` (five paths).
 - **Parallel-safe.** Yes with B3, B7, B9. **Size.** M (4 to 6 days).
 
 ### B3. Authenticate and scope the six open routes; route-level matrix test
@@ -636,10 +647,15 @@ A card that needs a file it does not own stops and records the need on the card
     `deployment_environment`, which must equal the **raw** `RATIO_ENV`
     (unset, empty or unrecognized refuses to enable tools and records
     `startup_refused`). There is no "endpoint registry keyed by environment".
-  - The loader accepts exactly the keys in Frank's 3.3 key table (file:
-    `deployment_environment`, `tenants`, `servers`; server and tool keys as
-    listed there) and rejects any other key. Per-tool `on_secret` is `reject`
-    (default) or `redact`; any other value rejects the file.
+  - The loader accepts exactly **the Frank 3.3 key table as it stands when the
+    card is worked** (required keys, optional keys with their defaults, the
+    `transport` key with its conditional stdio and http keys, `output_schema_hash`,
+    `credential_ref`, `fallback`, `relist_interval_seconds`, the global and
+    per-tool budgets, `enabled`, `on_secret`) and rejects any other key. A missing
+    required key rejects the file; a missing optional key takes the stated
+    default. The key set is one constant; a committed fixture
+    `fixtures/allowlist.allkeys.json` is derived from the table and a test fails
+    if the loader rejects any key in it or accepts one that is not in it.
   - Server entries pin `owner`, `purpose` and `data_class` (required); https
     entries need a certificate pin or CA bundle and refuse cross-host
     redirects. Plain `http` to loopback is allowed **only in the mock** and
@@ -656,12 +672,21 @@ A card that needs a file it does not own stops and records the need on the card
     allowlist field.
   - `initialize` first, `tools/list` compared with pins, `tools/call` only for
     allowlisted tools the principal's role, environment and teams permit
-    through `decide()`. Per-team credentials are references resolved
+    through A1's `authorize()` (not B1's `decide()`, so B5 needs no gateway
+    code); each verdict and each broker event goes to an injected audit
+    callback. Per-team credentials are references resolved
     server-side and never returned. The PointFive scaffold is untouched (F12).
   - Audit events (`startup_refused`, `server_denied`, `tool_denied`,
-    `secret_in_result`) go to an injected callback in this sprint; wiring them
-    to the C5 sink is a follow-up in Frank M2.
-- **Files.** As listed in the ownership table. Tests run against the A5 mock
+    `secret_in_result`) go to the injected callback; wiring them to the C5 sink
+    is a follow-up in Frank M2.
+  - Deferred to Frank M2, with the reason in PLAN 5a: Frank's A20 cases about
+    re-evaluation on reload, the `FRANK_TOOLS` flip, the latch, per-request
+    fail-only behavior and lock/CAS fail-closed (they need the broker's runtime
+    state and kill switch). This card covers the A20 startup subset (entries
+    without `environments[]`, raw `RATIO_ENV` unset, empty or unrecognized, and
+    `deployment_environment` mismatch or missing).
+- **Files.** As listed in the ownership table (the fixtures include
+  `src/mcp/fixtures/allowlist.allkeys.json`). Tests run against the A5 mock
   server.
 - **Dependencies.** A1, A5.
 - **Red tests (`mcp.client.test.ts`).**
@@ -673,7 +698,10 @@ A card that needs a file it does not own stops and records the need on the card
   `schema_hash_change_denies_the_tool`,
   `broker_offers_the_allowlist_description_and_schema_not_the_servers_live_text`,
   `allowlist_is_loaded_from_the_file_named_by_env_and_has_no_runtime_edit_path`,
-  `key_table_keys_are_accepted_and_any_other_key_rejects_the_file`,
+  `all_keys_fixture_derived_from_the_3_3_table_loads_with_no_key_rejected`,
+  `any_key_outside_the_table_rejects_the_file`,
+  `missing_required_key_rejects_and_missing_optional_key_takes_its_default`,
+  `denied_server_entry_is_not_connected_but_a_denied_tool_leaves_its_server_connected`,
   `empty_arrays_and_null_in_reserved_fields_deny`,
   `deployment_environment_matching_raw_RATIO_ENV_loads`,
   `deployment_environment_mismatch_rejects_the_whole_file`,
@@ -741,6 +769,13 @@ A card that needs a file it does not own stops and records the need on the card
     envs, tenant, expiresAt}`, never the token; with `RATIO_RBAC` unset it
     returns `{enforced:false}` and the browser keeps the offline seed. A real
     IdP login flow replaces `login` (D1).
+  - `POST /api/v1/session/mock-control` (mock only: 404 unless the mock IdP is
+    enabled in `development` or `test`; same-origin and CSRF checked) lets the
+    Playwright process drive the in-process mock IdP state it cannot reach
+    directly: `issue-login-token {persona}` returns a one-time `loginToken`,
+    `expire-session {sub}`, `change-role {sub, persona}` (re-issues claims; the
+    old token is revoked) and `revoke {jti}`. It is the only way those states
+    are changed from outside the process.
   - `GET /api/v1/workloads` returns, from the B8 provider and for the caller's
     scope, `{shape, workloads, budgets, alerts, asOf}`. The **shape** is chosen
     server-side from the role (PLAN 4.4 note): `rollup` for `cto` and
@@ -770,6 +805,9 @@ A card that needs a file it does not own stops and records the need on the card
   `rollup_and_drilldown_totals_reconcile_to_the_cent`,
   `shape_cannot_be_chosen_by_query_parameter`,
   `one_time_login_token_second_use_is_401`,
+  `mock_control_is_404_when_mock_idp_disabled_or_in_production`,
+  `mock_control_issue_token_expire_session_change_role_and_revoke_take_effect`,
+  `mock_control_requires_same_origin_and_csrf`,
   `role_change_reissue_updates_the_principal_after_refresh`.
   `src/session/liveClients.test.ts`:
   `live_clients_send_credentials_same_origin_and_surface_401_and_403`,
@@ -795,17 +833,22 @@ A card that needs a file it does not own stops and records the need on the card
   output). Add a committed oracle for the **real seeded dataset** (11
   workloads, 7 teams, float dollars, F16), computed by an independent one-off
   script and checked by hand, and assert the A3 scope type is assignable to
-  the A1 scope. The provider also takes a **shape**: `drilldown` returns today's records;
-  `rollup` (for the roles whose maximum is the O code in PLAN 4.4) omits the
-  line-level fields (`budgets[].daily_spend_history`, `daily_allocation`, the
-  per-day cost and token counters) and adds a precomputed `forecast_summary`
-  produced by the existing forecast code, so a roll-up consumer still has the
-  month-end projection. Page components that import the seed directly are
+  the A1 scope. The provider returns a typed `ScopedData` (`{shape, workloads, budgets,
+  alerts, forecastSummaries}`; the type lives in `provider.ts` and is imported
+  by the store). The **shape** is `drilldown` (today's records) or `rollup` (for
+  the roles whose maximum is the O code in PLAN 4.4). A roll-up keeps every
+  record type-compatible and **empties only the daily series**
+  (`budgets[].daily_spend_history` becomes `[]`), adding a precomputed
+  `forecast_summary` per workload from the existing forecast code. Consumers
+  that read the series are made roll-up-safe in this card:
+  `src/lib/budgetStatus.ts` (used by `initiativeModel` and `missionModel`) uses
+  the forecast summary when the series is empty. `src/types/index.ts` is
+  unchanged. Page components that import the seed directly are
   card B10.
 - **Files.** As listed in the ownership table. The default-scope golden
   (`src/data/defaultScopeGolden.fixture.json`) is captured from main in the
   first (red) commit.
-- **Dependencies.** A1, A3.
+- **Dependencies.** A1, A3, A2 (the catalogue test imports A2's personas).
 - **Red tests (`provider.test.ts`).**
   `cto_rollup_equals_finops_drilldown_to_the_cent_on_the_seeded_dataset`,
   `finops_drilldown_equals_sum_of_every_team_view_on_the_seeded_dataset`,
@@ -819,11 +862,23 @@ A card that needs a file it does not own stops and records the need on the card
   `defaultScopeGolden.fixture.json`),
   `a3_scope_type_is_assignable_to_the_a1_scope`,
   `empty_scope_returns_empty_not_everything`,
-  `rollup_shape_omits_every_field_in_the_omitted_list`,
+  `rollup_shape_empties_the_daily_series_and_nothing_else`,
+  `budget_status_uses_the_forecast_summary_when_the_series_is_empty` (in
+  `src/lib/budgetStatus.rollup.test.ts`),
+  `budget_status_with_a_full_series_is_unchanged`,
+  `findings_for_an_eng_lead_exclude_other_teams`,
   `rollup_forecast_summary_equals_the_drilldown_forecast`,
   `rollup_and_drilldown_totals_reconcile_to_the_cent_for_every_scope`,
   `catalogue_team_names_exist_in_the_seeded_dataset`.
-- **Governance class.** Path-derived: `unclassified`.
+- **Out of scope, stated.** `src/findings/recommendationMath.ts`,
+  `src/costsource/normalize.ts` and `src/lib/calendarTzProbe.ts` also read the
+  seed. They compute per-workload outputs or validate rows, none is served to
+  the browser unscoped, and the covering models filter by scope after the
+  per-workload computation. Any cross-workload aggregate must come from the
+  provider; a test covers the findings case.
+- **Governance class.** Path-derived: `financial_semantics`
+  (`src/lib/budgetStatus.ts` and its test match `src/lib/budgetStatus*`),
+  `unclassified` for the rest.
 - **Parallel-safe.** Yes within wave 1. **Size.** L (10 to 14 days). Split by
   model family if review capacity is short.
 
@@ -872,7 +927,7 @@ A card that needs a file it does not own stops and records the need on the card
   `rollup` shape. In the offline default the store holds the seed, so output is
   unchanged.
 - **Files.** As listed in the ownership table.
-- **Dependencies.** B8.
+- **Dependencies.** B8, B11 (the store's `dataShape` field).
 - **Red tests (`src/attribution/pageReaders.test.tsx`).**
   `attribution_page_totals_come_from_the_store_not_the_seed`,
   `eng_lead_attribution_page_shows_only_own_team_totals`,
@@ -886,7 +941,7 @@ A card that needs a file it does not own stops and records the need on the card
   `offline_default_output_of_all_four_files_is_unchanged`.
 - **Governance class.** Path-derived: `unclassified` (four paths); the two
   `src/components/detail/**` paths match the low-risk UI rule.
-- **Parallel-safe.** Yes with B2, B3, B7, B9. **Size.** M (5 to 7 days).
+- **Parallel-safe.** No (wave 4, after B11). **Size.** M (5 to 7 days).
 
 ### B11. Sign-in UI, session provider, store hydration and view guard
 
@@ -910,15 +965,23 @@ A card that needs a file it does not own stops and records the need on the card
     `aiThinking`, `aiPanelOpen`, `connectorSessions`, `ingestRuns`,
     `connectorBusy` and `filters`. Logout and 401 are also a **hard
     navigation** to `/sign-in`, so no module state survives a sign-out.
+  - `useStore.ts` also gains `dataShape` (`'rollup' | 'drilldown'`, from the
+    `ScopedData` type that B8 defines), `hydrated` (false until the first
+    scoped load completes or the server reports unenforced) and `hydrateScoped()`
+    sets both. **`clearSimulation()` and `loadSimulation()` are enforce-aware**:
+    `clearSimulation` resets to the same enforce-aware initial values (empty
+    under the build flag), never to the seed; `loadSimulation` is a no-op in
+    enforce mode (simulation entry points are disabled when enforced). The
+    reset also clears `simulation`, `simulationBusy` and `simulationError`.
   - `src/session/ViewGuard.tsx` and `Forbidden.tsx`: when enforced, a page whose
     matrix row denies the principal's role shows a 403 state instead of the
-    page. The guard renders a loading state, never data, until the principal is
-    known, **whatever the build flag says**, so a mismatch cannot cause a
-    first-paint flash.
+    page. The guard renders a loading state, never data, until the store is
+    **hydrated** (`hydrated` is true), **whatever the build flag says**, so a
+    mismatch cannot cause a flash of the seed after the principal is known.
   - Build flag: `NEXT_PUBLIC_RATIO_RBAC=enforce` is inlined at build time and
     makes the store start empty; the server flag is `RATIO_RBAC`. They must
     agree. Server enforced and build flag unset: the guard still hides pages
-    until hydration. Server unenforced and build flag set: the provider
+    until hydration completes. Server unenforced and build flag set: the provider
     hydrates the bundled seed and shows a configuration notice, instead of
     leaving a blank app.
 - **Files.** As listed in the ownership table.
@@ -928,7 +991,7 @@ A card that needs a file it does not own stops and records the need on the card
   `expired_session_401_clears_the_store_and_hard_navigates`,
   `return_to_rejects_cross_origin_targets`,
   `forbidden_page_state_shown_for_a_role_the_matrix_denies`,
-  `loading_state_never_renders_data_before_the_principal_is_known`,
+  `loading_state_never_renders_data_until_hydration_completes`,
   `offline_default_does_nothing_and_keeps_the_seed`.
   `src/store/hydrate.test.ts`:
   `hydrate_replaces_workloads_budgets_and_alerts_together`,
@@ -942,7 +1005,10 @@ A card that needs a file it does not own stops and records the need on the card
   `logout_performs_a_hard_navigation`.
   `src/store/configMismatch.test.tsx`:
   `build_flag_set_and_server_unenforced_hydrates_the_seed_and_shows_a_configuration_notice`,
-  `build_flag_unset_and_server_enforced_never_renders_the_seed_before_the_principal`.
+  `build_flag_unset_and_server_enforced_never_renders_the_seed_before_hydration`,
+  `clear_simulation_in_enforce_mode_never_restores_the_seed`,
+  `load_simulation_in_enforce_mode_is_a_no_op`,
+  `principal_change_resets_simulation_fields`.
   Vitest note: the flag is read at store initialization, so these tests call
   `vi.resetModules()` and `vi.stubEnv()` before importing the store.
 - **Governance class.** Path-derived: `routes` (`_app.tsx`, `sign-in.tsx`),
@@ -976,9 +1042,10 @@ A card that needs a file it does not own stops and records the need on the card
   `eng_lead_sees_only_own_team_workloads`,
   `direct_url_to_a_forbidden_page_shows_a_403_state`,
   `unauthenticated_visit_redirects_to_sign_in`,
-  `expired_token_redirects_to_sign_in`,
-  `role_change_reissue_takes_effect_after_reload`,
-  `replayed_one_time_login_token_fails`.
+  `expired_token_redirects_to_sign_in` (uses `mock-control` `expire-session`),
+  `role_change_reissue_takes_effect_after_reload` (uses `mock-control` `change-role`),
+  `replayed_one_time_login_token_fails` (uses `mock-control` `issue-login-token`),
+  `mock_state_written_through_one_route_is_visible_to_another_in_the_production_build`.
   Unit tests outside the excluded folder: `src/server/vitestConfig.test.ts`:
   `npm_test_does_not_run_the_playwright_specs` (reads `vitest.config.ts`);
   `src/server/mockLauncher.test.ts`: `launcher_sets_both_rbac_flags`,
@@ -1021,7 +1088,9 @@ A card that needs a file it does not own stops and records the need on the card
   for `create` and `request`, from the B8 provider keyed by
   `finding.workloadId` (team and the workload environment mapped by A1's
   `envMap`; any client-supplied `env` is ignored); for `attach` and `status`,
-  from the stored change the `ticketRef` is bound to. A `ticketRef` that is not
+  from the stored change the `ticketRef` is bound to. `create` also records a binding of the new `ticketRef` to the workload's team
+  and environment and to the creator, so the creator can later attach and read
+  status. A `ticketRef` that is not
   bound to a stored change is allowed only to principals with `teams: '*'`; an
   Eng lead gets 403, because ownership cannot be shown.
 
@@ -1059,6 +1128,9 @@ A card that needs a file it does not own stops and records the need on the card
   `eng_lead_attach_to_an_unbound_ticket_is_403`,
   `eng_lead_status_of_another_teams_bound_ticket_is_403`,
   `client_supplied_env_and_team_are_ignored`,
+  `ticket_created_through_create_is_bound_to_the_creators_team_and_env`,
+  `eng_lead_can_attach_and_read_status_of_a_ticket_they_created`,
+  `change_store_is_shared_across_separately_loaded_module_instances`,
   `request_with_same_idempotency_key_returns_first_change_and_creates_one_upstream_ticket`,
   `same_key_with_different_payload_returns_409`,
   `request_requester_is_the_principal_not_a_body_field`,
@@ -1092,27 +1164,28 @@ A card that needs a file it does not own stops and records the need on the card
   `replayed_event_id_is_rejected_and_state_is_unchanged`,
   `event_for_unknown_ticket_is_ignored_without_creating_state`,
   `webhook_fails_closed_without_a_configured_secret`,
-  `webhook_secret_never_logged`.
+  `webhook_secret_never_logged`,
+  `replay_store_is_shared_across_separately_loaded_module_instances`.
 - **Governance class.** Path-derived: `routes`, `unclassified`. Content-derived
   possible: `secrets`.
 - **Parallel-safe.** Yes with C5, C6 (after C3). **Size.** M (4 to 6 days).
 
 ### C5. Audit sink, read route and page
 
-- **Goal.** Supply the sink behind B1's `decide()` and `requires`, replacing
-  B1's in-memory default. Registration is done in the repository's existing
-  `instrumentation.ts` `register()` hook (Node.js runtime only), which runs
-  once at server start; `src/audit/register.ts` holds the call and the sink
-  stays on B1's `globalThis` registration. Records written to the default sink
-  before registration are carried over. Every `authorize()` verdict and every
-  change step writes a record (who, action, environment, verdict, ticket
-  linkage) with no secrets, tokens or email addresses. In-memory sink behind
-  an interface (D8). A read route and an audit page, scoped by role and team
-  (PLAN 4.4 and 4.5). `instrumentation.ts` must keep passing its existing
-  import-boundary test.
-- **Files.** `src/audit/sink.ts`, `record.ts`, `register.ts`, `index.ts`,
-  `audit.test.ts`; `pages/api/v1/audit/records.ts`; `pages/audit.tsx` (all
-  new); `instrumentation.ts` (edited).
+- **Goal.** Supply the audit sink behind B1's `decide()` and `requires`,
+  replacing B1's in-memory default. C5 edits **one factory line** in
+  `src/server/gateway/verdictSink.ts` (sequenced after B1) so the default sink
+  factory returns the audit sink; registration stays lazy on the first enforced
+  request and on B1's `globalThis` registration. The root `instrumentation.ts`
+  and its pinned import closure (`src/ingest/importBoundary.test.ts`) are
+  **not** touched. Every `authorize()` verdict and every change step writes a
+  record (who, action, environment, verdict, ticket linkage) with no secrets,
+  tokens or email addresses. In-memory sink behind an interface (D8), held on
+  a `globalThis` accessor. A read route and an audit page, scoped by role and
+  team (PLAN 4.4 and 4.5).
+- **Files.** `src/audit/sink.ts`, `record.ts`, `index.ts`, `audit.test.ts`;
+  `pages/api/v1/audit/records.ts`; `pages/audit.tsx` (all new);
+  `src/server/gateway/verdictSink.ts` (one-line edit).
 - **Dependencies.** B1, C3.
 - **Red tests.** `every_authorize_decision_writes_an_audit_record`,
   `audit_record_has_no_secret_token_or_email`,
@@ -1121,11 +1194,11 @@ A card that needs a file it does not own stops and records the need on the card
   `audit_read_denied_for_finance_and_procurement`,
   `audit_sink_failure_denies_the_action` (exercises B1's fail-closed path with
   the real sink),
-  `instrumentation_register_installs_the_sink_before_any_route_runs`,
-  `records_written_before_registration_are_carried_over`,
-  `instrumentation_import_boundary_test_still_passes`.
-- **Governance class.** Path-derived: `routes` (two), `unclassified`
-  (`instrumentation.ts` matches no rule).
+  `default_sink_factory_resolves_to_the_audit_sink_on_first_enforced_request`,
+  `instrumentation_ts_is_unchanged_so_its_import_closure_test_still_passes`,
+  `audit_store_is_shared_across_separately_loaded_module_instances`.
+- **Governance class.** Path-derived: `routes` (two), `auth_tenancy`
+  (`verdictSink.ts`), `unclassified`.
 - **Parallel-safe.** Yes with C4, C6. **Size.** M (4 to 6 days).
 
 ### C6. OAuth2 client-credentials client behind an interface
@@ -1233,8 +1306,10 @@ Use this when you are an implementer agent taking a card.
      migrations. Use in-memory stores behind interfaces and list the durable
      store as D8.
    - Files edited by two cards in sequence: `pages/api/v1/cm/change.ts` (B4
-     then C3) and `src/costsource/CostSourcePage.tsx` (A8 then B7). Do not start
-     the later card before the earlier has merged.
+     then C3), `src/costsource/CostSourcePage.tsx` (A8 then B7),
+     `src/rbac/matrix.ts` (A1 then C3) and
+     `src/server/gateway/verdictSink.ts` (B1 then C5). Do not start the later
+     card before the earlier has merged.
    - `src/costsource/seed.ts`, `sandboxSources.ts`, `CostSourceClient.ts` and
      `MockCostSourceClient.ts` belong to A6 only.
 10. **Boundary reminders.** Loopback only, no real credentials, no real data,

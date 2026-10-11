@@ -13,8 +13,8 @@ A note on placement. `.obvious/skills/doc-authoring/SKILL.md` says design specs
 are ephemeral and are not checked in. The owner asked for these three files at
 this path, so they are checked in as a point-in-time sprint plan. The durable
 rules that come out of the sprint (the permission matrix, the MCP allowlist
-rules) should be promoted to `.obvious/obvious.md` by the cards that implement
-them, and this directory should then be removed, following the promotion
+rules) are promoted to `.obvious/obvious.md` by card C7, the only card that
+owns that file, and this directory is then removed, following the promotion
 routine in that skill.
 
 ## 1. Answers to the owner's four questions
@@ -282,18 +282,21 @@ deployment environment is rejected by another (the `aud` claim).
 | Change management `/api/v1/cm/change` | see 4.5 | see 4.5 | see 4.5 | see 4.5 | see 4.5 | see 4.5 |
 | Audit log (new page `/audit`; `/api/v1/audit/records`) | O | D | - | T | - | D |
 | Scoped data endpoint (new) `/api/v1/workloads` (workloads, budgets, alerts for the caller's scope) | O | D | D | T | O | D |
-| Session endpoints (new) `/api/v1/session/principal`, `/logout`: any authenticated principal; `/login`: `public_mock` (mock IdP only, 404 elsewhere); page `/sign-in`: `public` | any | any | any | any | any | any |
+| Session endpoints (new) `/api/v1/session/principal`, `/logout`: any authenticated principal; `/login` and `/mock-control`: `public_mock` (mock IdP only, 404 elsewhere); page `/sign-in`: `public` | any | any | any | any | any | any |
 | Webhook (new) `/api/v1/cm/webhook`: status `signed` (HMAC signature and replay check instead of a bearer; no role) | - | - | - | - | - | - |
 | Customer simulation `/simulation`, `/workspace`, `/api/v1/simulation/*` | dev and test only | dev and test only | dev and test only | dev and test only | dev and test only | dev and test only |
 
 **What O and D mean in data.** The scoped data endpoint serves each role the
 most detailed shape that role may see anywhere in section 4.4: `rollup` for
 `cto` and `procurement` (their codes never exceed O) and `drilldown` for the
-other four. A roll-up omits line-level fields (daily series, per-day counters,
-cost lines and per-user rows) and carries a precomputed month-end forecast, so
-the CTO view is accurate and distinct from the FinOps lead view by data, not
-only by lens (card B8 defines the omitted list; B7 serves it; the shape is
-chosen from the role, never by a request parameter). For `finops_lead`,
+other four. In the workloads data a roll-up keeps every record type-compatible and empties
+only the daily series (`budgets[].daily_spend_history`), carrying a
+precomputed month-end forecast per workload so the forecast-driven views still
+work; cost lines and per-user rows are separate routes that roll-up roles get
+only aggregated (cards B2 and B3). The CTO view is therefore accurate and
+distinct from the FinOps lead view by data, not only by lens (card B8 defines
+the shape and makes the budget-status code roll-up-safe; B7 serves it; the
+shape is chosen from the role, never by a request parameter). For `finops_lead`,
 `finance`, `eng_lead` and `auditor` an O cell on a page is presentational: a
 summary of data they may see in full. Tokenomics and prediction accuracy have
 no team dimension (they return org-level aggregates), so a T cell there means
@@ -417,7 +420,11 @@ are:
    which fetches `/api/v1/workloads` and replaces workloads, budgets and alerts
    together with the caller's scope. Triggers: mount, login, logout, role-change
    refresh, and any 401 (all session-visible state reset; logout and 401 are a hard navigation). Before this, the store is empty under
-   the enforce build flag, so other teams' data never flashes.
+   the enforce build flag, and the guard (step 4) waits for the store to be
+   **hydrated**, so other teams' data never flashes whatever the build flag says.
+   The simulation entry points that also reset the store (`clearSimulation`,
+   `loadSimulation`, called from the global simulation provider) are made
+   enforce-aware so they cannot restore the seed.
 4. **Guard.** `ViewGuard` looks up the page's matrix row; a denied role sees a
    403 state, not the page. The lens defaults and options come from the
    role-to-lens table (section 4.1; card C2).
@@ -529,14 +536,19 @@ before starting B5.)
   token claims `teams` and `envs` stay on the `Principal` side only.
   `environments[]` uses the `RATIO_ENV` vocabulary (`development`, `test`,
   `staging`, `production`), not `DeployEnv`; the map in section 4.2 converts.
-- **Key table and startup rules.** B5's loader accepts exactly the keys in the
-  3.3 key table and rejects any other: file level `deployment_environment`
-  (required, must equal the raw `RATIO_ENV`), `tenants`, `servers`; per-tool
-  `on_secret` (`reject` by default, or `redact`); server `owner`, `purpose`,
-  `data_class`, transport pins. An unset, empty or unrecognized raw `RATIO_ENV`
-  refuses to enable tools and records `startup_refused`; a missing or
-  mismatched `deployment_environment` rejects the whole file (their A20). One
-  allowlist file per deployment until real identity exists.
+- **Key table and startup rules.** B5's loader accepts exactly **the key table
+  of the Frank design's 3.3 as it stands when B5 is worked** and rejects any
+  other key: required and optional keys per level with their defaults, the
+  `transport` key with its conditional stdio and http keys,
+  `output_schema_hash`, `credential_ref`, the file-level `fallback`,
+  `relist_interval_seconds` and global per-turn caps, `enabled`, per-tool
+  budgets and `on_secret`. A fixture derived from the table fails the loader
+  test if any listed key is rejected. An unset, empty or unrecognized raw
+  `RATIO_ENV` refuses to enable tools and records `startup_refused`; a missing
+  or mismatched `deployment_environment` rejects the whole file. One allowlist
+  file per deployment until real identity exists. B5 also covers the A18 rule
+  that a denied server entry is not connected while a denied tool leaves its
+  server connected.
 - **Server entries (3.2).** https plus a certificate pin or CA bundle, no
   cross-host redirects, and a required `data_class`, `owner` and `purpose`.
   The mock server is plain loopback http, so B5 has an explicit carve-out that
@@ -547,9 +559,12 @@ before starting B5.)
   string carrying a credential-shaped value before delivery and records
   `secret_in_result`; `redact` replaces only the matching values (B5 tests).
 - **Deferred to Frank M2, on purpose.** Wiring B5's audit events to this
-  sprint's C5 sink, stdio transports, per-tool budgets beyond the size and time
-  limits, kill switches and per-tenant disable. Reason: they belong to the
-  Frank broker and its audit design, and this sprint's client is its mock path.
+  sprint's C5 sink; stdio transports; per-tool budgets beyond the size and time
+  limits; the kill switch, per-tenant disable and Frank's A20 cases about
+  re-evaluation on reload, the `FRANK_TOOLS` flip, the latch, per-request
+  fail-only behavior and lock/CAS fail-closed. Reason: they need the Frank
+  broker's runtime state, kill switch and audit design, which this sprint's
+  client (the mock path) does not build. B5 covers the A20 startup subset.
 - **Read-only stays advisory** (their T-6 point on a `readOnly` declaration):
   already how this plan works (section 5.2 and B5).
 
