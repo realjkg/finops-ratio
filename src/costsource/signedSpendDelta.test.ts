@@ -23,4 +23,16 @@ describe('formatSignedUSD', () => {
       expect(s).not.toMatch(/\+-|\+\$-|\$-/);
     }
   });
+
+  it('treats a displayed-zero magnitude like zero: no minus sign', () => {
+    expect(formatSignedUSD(-0.004)).toBe('+$0.00');
+    expect(formatSignedUSD(-5e-324)).toBe('+$0.00');
+    expect(formatSignedUSD(0.004)).toBe('+$0.00');
+  });
+
+  it('pins non-finite behavior', () => {
+    expect(formatSignedUSD(Number.NaN)).toBe('+$NaN');
+    expect(formatSignedUSD(Number.POSITIVE_INFINITY)).toBe('+$\u221e');
+    expect(formatSignedUSD(Number.NEGATIVE_INFINITY)).toBe('-$\u221e');
+  });
 });
