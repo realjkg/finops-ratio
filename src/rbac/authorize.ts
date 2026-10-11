@@ -1,7 +1,7 @@
 // The one pure decision (PLAN 4.2), deny by default: 401 no principal; 403 role,
 // team, env or resource not covered; 409 only for a prod apply of an unapproved
-// change or ticket. Only OWN fields count, arrays are never inputs, a throw is a
-// deny. eng_lead Y* on mcp.read, audit.read, view.export is a role check here;
+// change or ticket. Only OWN fields are copied (ownRecord, which fails closed on a
+// throwing Proxy); arrays are never inputs. eng_lead Y* on mcp.read, audit.read, view.export is a role check here;
 // the serving seam (B5, C5, B8) scopes the data.
 import { ACTIONS, DEPLOY_ENVS, ROLES, isOneOf, type Action, type Principal, type Resource, type Role, type Verdict } from '@/identity/types';
 import { envCovered, hasRealTeam, ownRecord, teamCovered } from '@/identity/scope';
@@ -51,7 +51,7 @@ function readView(role: Role, kind: string, id: string): Verdict {
   return READABLE_CODES.includes(code) ? ALLOW : deny(403, DENY_REASONS.role);
 }
 
-function decide(principalInput: unknown, action: unknown, resourceInput: unknown): Verdict {
+export function authorize(principalInput: Principal | null | undefined, action: Action, resourceInput: Resource): Verdict {
   const p = ownRecord(principalInput, PRINCIPAL_KEYS);
   if (!isPrincipal(p)) return deny(401, DENY_REASONS.noPrincipal);
   // legacy_service exists only for the shared token, and the shared token yields only legacy_service.
@@ -102,12 +102,4 @@ function decide(principalInput: unknown, action: unknown, resourceInput: unknown
     if (ticket !== 'approved') return deny(409, DENY_REASONS.ticketNotApproved);
   }
   return ALLOW;
-}
-
-export function authorize(principal: Principal | null | undefined, action: Action, resource: Resource): Verdict {
-  try {
-    return decide(principal, action, resource);
-  } catch {
-    return deny(403, DENY_REASONS.resource); // a thrown error is a deny
-  }
 }
