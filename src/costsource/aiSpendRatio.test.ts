@@ -122,12 +122,43 @@ describe('fetchAiSpendRatio on the mock path (sandbox + synthetic)', () => {
     }
     expect(usd('pointfive-sandbox').totalCost * 100).toBeCloseTo(WORKLOAD_CENTS, 6);
     expect(usd('servicenow-sandbox').ratio).toBe(1);
-    const overallCents = 2 * WORKLOAD_CENTS + SERVICENOW_CENTS + (9542 + 8287 + 6770) * 100;
-    const aiCents = 2 * WORKLOAD_CENTS + SERVICENOW_CENTS + (5400 + 4800 + 3900) * 100;
+    expect(report.perSource.filter((s) => !s.inHeadline).map((s) => s.sourceId).sort()).toEqual(
+      ['focus-file-sandbox', 'servicenow-sandbox'],
+    );
+    // Headline = the non-overlapping set only: one workload copy + the synthetic clouds.
     const overall = report.overall.byCurrency[0];
     expect(report.overall.byCurrency).toHaveLength(1);
-    expect(Math.round(overall.totalCost * 100)).toBe(overallCents);
-    expect(Math.round(overall.aiCost * 100)).toBe(aiCents);
+    expect(Math.round(overall.totalCost * 100)).toBe(WORKLOAD_CENTS + (9542 + 8287 + 6770) * 100);
+    expect(Math.round(overall.aiCost * 100)).toBe(WORKLOAD_CENTS + (5400 + 4800 + 3900) * 100);
+  });
+
+  it('the declared overlap matches the rows: same bill as pointfive-sandbox vs own accounts', async () => {
+    const client = createCostSourceClient('mock');
+    const keys = async (id: string) =>
+      new Set((await client.fetchCostRows(id, WINDOW)).rows.map((r) => `${r.BillingAccountId}|${r.ResourceId}`));
+    const accounts = async (id: string) =>
+      new Set((await client.fetchCostRows(id, WINDOW)).rows.map((r) => r.BillingAccountId));
+    const base = await keys('pointfive-sandbox');
+    for (const id of ['focus-file-sandbox', 'servicenow-sandbox']) expect(await keys(id)).toEqual(base);
+    const baseAccounts = await accounts('pointfive-sandbox');
+    for (const id of Object.keys(SYNTHETIC)) {
+      expect([...(await accounts(id))].filter((a) => baseAccounts.has(a))).toEqual([]);
+    }
+  });
+
+  it('adding an overlapping source never changes the headline', async () => {
+    const client = createCostSourceClient('mock');
+    const ids = ['pointfive-sandbox', ...Object.keys(SYNTHETIC)];
+    const without = await fetchAiSpendRatio(client, WINDOW, ids);
+    const withOverlap = await fetchAiSpendRatio(client, WINDOW, [...ids, 'focus-file-sandbox', 'servicenow-sandbox']);
+    expect(withOverlap.overall).toEqual(without.overall);
+    expect(withOverlap.perSource).toHaveLength(without.perSource.length + 2);
+  });
+
+  it('an overlapping source counts when the source covering it was not fetched', async () => {
+    const report = await fetchAiSpendRatio(createCostSourceClient('mock'), WINDOW, ['servicenow-sandbox']);
+    expect(report.perSource[0].inHeadline).toBe(true);
+    expect(Math.round(report.overall.byCurrency[0].totalCost * 100)).toBe(SERVICENOW_CENTS);
   });
 });
 

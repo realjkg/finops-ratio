@@ -6,3 +6,15 @@ Error: Cannot find module './aiSpendRatio' imported from src/costsource/aiSpendR
 Error: Cannot find module './AiSpendRatioCard' imported from src/costsource/aiSpendRatioCard.test.tsx
  Test Files  2 failed (2)
       Tests  no tests
+
+# RED round 2 (honesty fixes), tests only on top of 359d692:
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+FAIL aiSpendRatio.test.ts > fetchAiSpendRatio on the mock path (sandbox + synthetic) > matches the independent oracle per source and overall
+FAIL aiSpendRatio.test.ts > fetchAiSpendRatio on the mock path (sandbox + synthetic) > adding an overlapping source never changes the headline
+FAIL aiSpendRatio.test.ts > fetchAiSpendRatio on the mock path (sandbox + synthetic) > an overlapping source counts when the source covering it was not fetched
+FAIL aiSpendRatioCard.test.tsx > loadAiSpendRatio (path switch) > Ingested never shows seed: sandbox-only live sources give the empty state
+FAIL aiSpendRatioCard.test.tsx > loadAiSpendRatio (path switch) > Ingested counts only non-sandbox sources; identical rows give identical results
+FAIL aiSpendRatioCard.test.tsx > loadAiSpendRatio (path switch) > Ingested unavailable: no sources
+FAIL aiSpendRatioCard.test.tsx > AiSpendRatioView > shows headline, ratio, per-source and per-currency figures on the seed path
+Test Files  2 failed (2)
+Tests  7 failed | 25 passed (32)

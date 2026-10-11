@@ -12,16 +12,24 @@ const WINDOW = {
   end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString(),
 };
 
-/** Stub fetch for the /api/costsource routes; `respond` may override a path. */
-function stubRoutes(respond: (path: string) => Response | undefined = () => undefined) {
+/** A configured non-sandbox source, as an ingested connector would appear. */
+const INGESTED = { id: 'ingested-export', name: 'Ingested export', kind: 'cloud', configured: true, capabilities: ['costRows'] };
+
+/**
+ * Stub fetch for the /api/costsource routes, serving the offline seed. With
+ * `ingested`, the source list also carries INGESTED, whose rows are the
+ * aws-sandbox rows; `respond` may override a path.
+ */
+function stubRoutes(ingested: boolean, respond: (path: string) => Response | undefined = () => undefined) {
   const seed = createCostSourceClient('mock');
   vi.stubGlobal('fetch', async (input: string) => {
     const [pathname, query = ''] = input.split('?');
     const hit = respond(pathname);
     if (hit) return hit;
+    const id = new URLSearchParams(query).get('sourceId');
     const body = pathname === '/api/costsource/sources'
-      ? await seed.listSources()
-      : await seed.fetchCostRows(new URLSearchParams(query).get('sourceId')!, WINDOW);
+      ? [...(await seed.listSources()), ...(ingested ? [INGESTED] : [])]
+      : await seed.fetchCostRows(id === INGESTED.id ? 'aws-sandbox' : id!, WINDOW);
     return new Response(JSON.stringify(body), { status: 200 });
   });
 }
@@ -29,36 +37,46 @@ const json = (body: unknown, status: number) => new Response(JSON.stringify(body
 afterEach(() => vi.unstubAllGlobals());
 
 describe('loadAiSpendRatio (path switch)', () => {
-  it('switching paths changes only the client: identical rows give identical results', async () => {
+  it('Ingested never shows seed: sandbox-only live sources give the empty state', async () => {
+    stubRoutes(false);
+    const state = await loadAiSpendRatio('ingested', WINDOW);
+    expect(state).toMatchObject({ status: 'unavailable' });
+    if (state.status === 'unavailable') expect(state.reason).toMatch(/^No ingested sources connected/);
+  });
+
+  it('Ingested counts only non-sandbox sources; identical rows give identical results', async () => {
     const seed = await loadAiSpendRatio('seed', WINDOW);
-    stubRoutes();
+    stubRoutes(true);
     const ingested = await loadAiSpendRatio('ingested', WINDOW);
     if (seed.status !== 'ready' || ingested.status !== 'ready') throw new Error('expected ready');
     expect(seed.report.mode).toBe('mock');
     expect(ingested.report.mode).toBe('live');
-    expect({ ...ingested.report, mode: 'mock' }).toEqual(seed.report);
+    expect(ingested.report.perSource.map((s) => s.sourceId)).toEqual([INGESTED.id]);
+    const aws = seed.report.perSource.find((s) => s.sourceId === 'aws-sandbox')!.result;
+    expect(ingested.report.perSource[0].result).toEqual(aws);
+    expect(ingested.report.overall).toEqual(aws);
   });
 
   it.each([
     ['auth error (401)', () => json({ error: 'nope' }, 401), /authenticated API access/],
     ['route error (500)', () => json({ error: 'Internal error' }, 500), /Internal error/],
-    ['no sources', () => json([], 200), /No configured cost sources/],
+    ['no sources', () => json([], 200), /No ingested sources connected/],
   ])('Ingested unavailable: %s', async (_name, sources, reason) => {
-    stubRoutes((p) => (p === '/api/costsource/sources' ? sources() : undefined));
+    stubRoutes(true, (p) => (p === '/api/costsource/sources' ? sources() : undefined));
     const state = await loadAiSpendRatio('ingested', WINDOW);
     expect(state.status).toBe('unavailable');
     if (state.status === 'unavailable') expect(state.reason).toMatch(reason);
   });
 
   it('Ingested unavailable: every source refused (unconfigured 409)', async () => {
-    stubRoutes((p) => (p === '/api/costsource/rows' ? json({ error: 'Cost source is not configured — live credentials required' }, 409) : undefined));
+    stubRoutes(true, (p) => (p === '/api/costsource/rows' ? json({ error: 'Cost source is not configured — live credentials required' }, 409) : undefined));
     const state = await loadAiSpendRatio('ingested', WINDOW);
     expect(state).toMatchObject({ status: 'unavailable', reason: 'No source returned cost rows' });
     if (state.status === 'unavailable') expect(state.errors?.[0].message).toMatch(/not configured/);
   });
 
   it('Ingested unavailable: sources answer with zero rows', async () => {
-    stubRoutes((p) => (p === '/api/costsource/rows' ? json({ rows: [] }, 200) : undefined));
+    stubRoutes(true, (p) => (p === '/api/costsource/rows' ? json({ rows: [] }, 200) : undefined));
     expect(await loadAiSpendRatio('ingested', WINDOW)).toMatchObject({
       status: 'unavailable',
       reason: 'Sources returned no cost rows for this window',
@@ -73,7 +91,10 @@ function report(mode: 'mock' | 'live'): AiSpendRatioReport {
   return {
     mode,
     window: WINDOW,
-    perSource: [{ sourceId: 'aws-sandbox', name: 'AWS (synthetic sandbox)', result }],
+    perSource: [
+      { sourceId: 'aws-sandbox', name: 'AWS (synthetic sandbox)', inHeadline: true, result },
+      { sourceId: 'focus-file-sandbox', name: 'FOCUS file', inHeadline: false, result },
+    ],
     overall: result,
     errors: [{ sourceId: 'dark', message: 'Source is not configured' }],
   };
@@ -94,7 +115,8 @@ describe('AiSpendRatioView', () => {
     expect(html).not.toContain('€');
     expect(html).toContain('n/a');
     expect(html).toContain('dark: Source is not configured');
-    expect(html).toMatch(/not deduplicated/);
+    expect(html).toContain('same workloads, not summed into the headline');
+    expect(html.match(/not summed into the headline/g)).toHaveLength(1);
   });
 
   it('labels the ingested path', () => {
