@@ -11,6 +11,7 @@ import type { CostRowsResult, CostWindow, SourceHealth } from './CostSourceClien
 import { CANONICAL_FOCUS_VERSION } from './focusVersions';
 import type { RawSourceRow } from './focusRows';
 import { normalizeRows } from './normalize';
+import { inWindow } from './transports/focusExport';
 import { resourceIdFor } from './seed';
 import { mappedWorkloadId } from './syntheticCloudMapping';
 import {
@@ -136,7 +137,7 @@ export function syntheticCloudRows(sourceId: string, window: CostWindow): CostRo
   const descriptor = SYNTHETIC_CLOUD_DESCRIPTORS.find((d) => d.id === sourceId);
   if (!descriptor) throw new Error(`Unknown synthetic cloud source '${sourceId}'`);
   const { rows, backfilledColumns, draftColumnsBackfilled } = normalizeRows(
-    syntheticCloudRawRows(sourceId),
+    syntheticCloudRawRows(sourceId).filter((r) => inWindow(r, window)),
     sourceId,
     descriptor.focusVersion,
   );
