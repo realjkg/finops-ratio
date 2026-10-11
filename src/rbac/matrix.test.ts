@@ -335,6 +335,17 @@ describe('permission matrix', () => {
   });
 });
 
+describe('route metadata consistency (Copilot review of 8e49f70)', () => {
+  it('enforcedBy is null exactly for rows not enforced through authorize()', () => {
+    const NOT_AUTHORIZE = new Set(['signed', 'public', 'public_mock', 'sim_only']);
+    for (const row of ROUTE_MATRIX) {
+      if (NOT_AUTHORIZE.has(row.status)) expect(row.enforcedBy, `${row.path} (${row.status})`).toBeNull();
+      else expect(row.enforcedBy, `${row.path} (${row.status})`).toMatch(CARD_ID);
+    }
+    expect(findRoute('/api/v1/cm/webhook')?.enforcedBy).toBeNull();
+  });
+});
+
 describe('permission matrix immutability (Copilot review of 792039e)', () => {
   function assertDeepFrozen(value: unknown, where: string, seen = new Set<unknown>()): void {
     if (!value || typeof value !== 'object' || seen.has(value)) return;
