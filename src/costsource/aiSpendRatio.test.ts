@@ -43,6 +43,11 @@ describe('computeAiSpendRatio', () => {
     expect(r.rowCount).toBe(rows.length);
   });
 
+  it('keeps sub-micro costs: 1000 rows of 0.0000004 plus $1 is exactly 1.0004', () => {
+    const r = usd([row(1, 'Compute'), ...Array.from({ length: 1000 }, () => row(0.0000004))]);
+    expect(r).toMatchObject({ totalCost: 1.0004, aiCost: 0.0004 });
+  });
+
   it('is empty for no rows', () => {
     expect(computeAiSpendRatio([])).toEqual({ byCurrency: [], rowCount: 0, excludedRows: 0, notes: [] });
   });
@@ -159,6 +164,27 @@ describe('fetchAiSpendRatio on the mock path (sandbox + synthetic)', () => {
     const report = await fetchAiSpendRatio(createCostSourceClient('mock'), WINDOW, ['servicenow-sandbox']);
     expect(report.perSource[0].inHeadline).toBe(true);
     expect(Math.round(report.overall.byCurrency[0].totalCost * 100)).toBe(SERVICENOW_CENTS);
+  });
+
+  // One headline owner per repeated-bill group: pointfive-sandbox, else
+  // focus-file-sandbox, else servicenow-sandbox. Oracle: one workload copy.
+  const mock = createCostSourceClient('mock');
+  const pointfiveFails: CostSourceClient = {
+    ...mock,
+    mode: 'mock',
+    listSources: () => mock.listSources(),
+    fetchCostRows: (id, w) => (id === 'pointfive-sandbox' ? Promise.reject(new Error('down')) : mock.fetchCostRows(id, w)),
+  };
+  it.each([
+    ['pointfive-sandbox absent', mock, ['focus-file-sandbox', 'servicenow-sandbox']],
+    ['pointfive-sandbox failing', pointfiveFails, ['pointfive-sandbox', 'focus-file-sandbox', 'servicenow-sandbox']],
+  ])('never double-counts a repeated bill: %s', async (_name, client, ids) => {
+    const report = await fetchAiSpendRatio(client, WINDOW, ids);
+    expect(report.perSource.map((s) => [s.sourceId, s.inHeadline])).toEqual([
+      ['focus-file-sandbox', true],
+      ['servicenow-sandbox', false],
+    ]);
+    expect(Math.round(report.overall.byCurrency[0].totalCost * 100)).toBe(WORKLOAD_CENTS);
   });
 });
 

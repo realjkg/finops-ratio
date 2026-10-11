@@ -18,3 +18,12 @@ FAIL aiSpendRatioCard.test.tsx > loadAiSpendRatio (path switch) > Ingested unava
 FAIL aiSpendRatioCard.test.tsx > AiSpendRatioView > shows headline, ratio, per-source and per-currency figures on the seed path
 Test Files  2 failed (2)
 Tests  7 failed | 25 passed (32)
+
+# RED round 3 (Copilot High + challenger M1/L1/L3), tests only on top of 439b425:
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+FAIL aiSpendRatio.test.ts > computeAiSpendRatio > keeps sub-micro costs: 1000 rows of 0.0000004 plus $1 is exactly 1.0004
+FAIL aiSpendRatio.test.ts > fetchAiSpendRatio on the mock path (sandbox + synthetic) > never double-counts a repeated bill: pointfive-sandbox absent
+FAIL aiSpendRatio.test.ts > fetchAiSpendRatio on the mock path (sandbox + synthetic) > never double-counts a repeated bill: pointfive-sandbox failing
+Tests  3 failed | 25 passed (28)
+# New mounted-card tests (race guard, billing-period boundaries) pass on the old code;
+# they pin behavior: removing the cancelled guard fails the race test (see green.txt).
