@@ -183,3 +183,12 @@ Gates on the fixed tree: `npm run lint` clean, `npm run typecheck` clean, full `
 the challenger's six, and 11 guards for the new behavior). Two of the new mutants survived their
 first test and were killed after the tests were tightened (negative savings through the team
 ranking, and control characters other than line breaks).
+
+## 7. Second challenger round (PR #102): RED then GREEN
+
+`src/ai/mock/review2.test.ts`, written first. RED (before the fixes), `npx vitest run
+src/ai/mock/review2.test.ts`: 17 failed, 13 passed (30 tests). The 13 passing tests are the exact
+boundary assertions for guards that already existed (they exist to kill mutants, so they pass on
+correct code); the 17 failures are the quality-note prototype lookup (3), valid portfolio questions
+misread as unknown names (9), unknown teams under verb phrasing and follow-ups (3, plus the
+generic-phrase check), and notes cut by the reply cap (1).
