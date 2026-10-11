@@ -1,0 +1,8 @@
+# RED: npx vitest run src/costsource/aiSpendRatio.test.ts src/costsource/aiSpendRatioCard.test.tsx
+# base a90dda5, tests only, before any implementation
+ FAIL  src/costsource/aiSpendRatio.test.ts [ src/costsource/aiSpendRatio.test.ts ]
+Error: Cannot find module './aiSpendRatio' imported from src/costsource/aiSpendRatio.test.ts
+ FAIL  src/costsource/aiSpendRatioCard.test.tsx [ src/costsource/aiSpendRatioCard.test.tsx ]
+Error: Cannot find module './AiSpendRatioCard' imported from src/costsource/aiSpendRatioCard.test.tsx
+ Test Files  2 failed (2)
+      Tests  no tests
