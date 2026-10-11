@@ -178,6 +178,7 @@ describe('permission matrix', () => {
       ['/api/v1/session/mock-control', 'B7', 'public_mock'],
       ['/api/v1/workloads', 'B7', 'enforced'],
       ['/api/v1/cm/webhook', 'C4', 'signed'],
+      ['/api/v1/cm/sync', 'C8', 'enforced'],
       ['/api/v1/audit/records', 'C5', 'enforced'],
       ['/audit', 'C5', 'enforced'],
       ['/sign-in', 'B11', 'public'],
@@ -188,6 +189,9 @@ describe('permission matrix', () => {
       expect(row?.plannedBy, p).toBe(card);
       expect(row?.status, p).toBe(status);
     }
+    const sync = findRoute('/api/v1/cm/sync');
+    expect(sync?.legacyService).toBe('-');
+    expect(sync?.action).toBe('ticket.update');
     expect(VIEW_GROUPS[findRoute('/api/v1/cm/webhook')!.group].codes).toEqual(
       Object.fromEntries(PERSONA_ROLES.map((r) => [r, '-'])),
     );
@@ -217,6 +221,9 @@ describe('permission matrix', () => {
       ['scoped_data', 'O D D T O D', ['/api/v1/workloads']],
       ['session', 'any any any any any any', ['/api/v1/session/principal', '/api/v1/session/logout', '/api/v1/session/login', '/api/v1/session/mock-control', '/sign-in']],
       ['webhook', '- - - - - -', ['/api/v1/cm/webhook']],
+      // Plan revision 9: the status-sync route performs ticket.update (PLAN 4.5);
+      // its cells are written in action codes, so view.read on it stays denied.
+      ['status_sync', '- Y - Y* - -', ['/api/v1/cm/sync']],
       ['simulation', 'dev_test_only dev_test_only dev_test_only dev_test_only dev_test_only dev_test_only', [
         '/simulation', '/workspace', '/api/v1/simulation/chat', '/api/v1/simulation/command', '/api/v1/simulation/frank',
         '/api/v1/simulation/operations', '/api/v1/simulation/report', '/api/v1/simulation/session', '/api/v1/simulation/state',
