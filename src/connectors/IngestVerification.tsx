@@ -19,6 +19,7 @@ import {
   type WorkloadSourceVariance,
 } from './ingestLanding';
 import { formatMoney } from '@/lib/format';
+import { isPassthrough } from '@/costsource/focusVersions';
 
 function Verdict({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -81,7 +82,7 @@ export function IngestVerification({
   allRuns?: Record<string, IngestRun>;
 }) {
   const s = landingSummary(run);
-  const passthrough = s.backfilledColumns.length === 0;
+  const passthrough = isPassthrough(s);
   const variance =
     allRuns && Object.keys(allRuns).length >= 2 ? sourceVarianceByWorkload(allRuns) : [];
   return (

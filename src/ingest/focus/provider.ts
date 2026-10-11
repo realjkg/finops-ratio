@@ -68,8 +68,8 @@ export function providerPolicyFor(
 /**
  * Header check for a checked source type: ProviderName is a FOCUS 1.0 mandatory
  * column. FOCUS 1.3 deprecates and 1.4 removes it; its successor
- * ServiceProviderName satisfies the check, and validateRow reads it in its place
- * so the same allowlist still applies to every row.
+ * ServiceProviderName satisfies the check when ProviderName is absent from the
+ * header (providerColumn), so the same allowlist still applies to every row.
  */
 export function checkProviderHeader(index: HeaderIndex, p: ProviderPolicy): FieldError | null {
   if (index.pos.has('ProviderName') || index.pos.has('ServiceProviderName')) return null;
@@ -79,23 +79,25 @@ export function checkProviderHeader(index: HeaderIndex, p: ProviderPolicy): Fiel
 export type ProviderCheck = { ok: true } | { ok: false; exclude: boolean; error: FieldError };
 
 /**
- * Row check. `value` is the validated row's ProviderName (null when empty).
+ * Row check. `value` is the validated row's provider (null when empty), read from
+ * `column` (providerColumn: ProviderName, or ServiceProviderName when it is absent).
  * - allowed (exact match) ⇒ ok;
  * - null ⇒ a hard MISSING_VALUE error (the batch is quarantined: fail closed);
  * - anything else ⇒ PROVIDER_MISMATCH, and the row is excluded.
  */
-export function checkProviderName(value: string | null, p: ProviderPolicy): ProviderCheck {
+export function checkProviderName(value: string | null, p: ProviderPolicy, column: string = 'ProviderName'): ProviderCheck {
   if (value === null) {
-    return { ok: false, exclude: false, error: { column: 'ProviderName', code: 'MISSING_VALUE', message: 'required value is empty (FOCUS 1.0: ProviderName must not be null)' } };
+    const rule = column === 'ProviderName' ? 'FOCUS 1.0: ProviderName' : `FOCUS 1.3+: ${column}`;
+    return { ok: false, exclude: false, error: { column, code: 'MISSING_VALUE', message: `required value is empty (${rule} must not be null)` } };
   }
   if (p.allowed.some((a) => a === value)) return { ok: true };
   return {
     ok: false,
     exclude: true,
     error: {
-      column: 'ProviderName',
+      column,
       code: PROVIDER_MISMATCH,
-      message: `ProviderName is not allowed for source type ${p.sourceType} (allowed: ${p.allowed.length ? p.allowed.join(', ') : 'none'}); row excluded`,
+      message: `${column} is not allowed for source type ${p.sourceType} (allowed: ${p.allowed.length ? p.allowed.join(', ') : 'none'}); row excluded`,
     },
   };
 }

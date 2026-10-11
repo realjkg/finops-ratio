@@ -440,13 +440,10 @@ export function coerceFocusRecord(rec: Record<string, unknown>, opts: FocusRecor
   // derives it from BillingCurrency); never an explicit null.
   if (out.PricingCurrency === null) delete out.PricingCurrency;
 
-  // FOCUS 1.3 deprecates and 1.4 removes ProviderName; the spec names
-  // ServiceProviderName (then InvoiceIssuerName) as successors, so a 1.3/1.4
-  // export keeps its provider identity instead of an empty one.
-  if (isBlank(out.ProviderName)) {
-    const successor = [rec.ServiceProviderName, rec.InvoiceIssuerName].find((v) => !isBlank(v));
-    if (successor !== undefined) out.ProviderName = toStringValue(successor);
-  }
+  // FOCUS 1.3 deprecates and 1.4 removes ProviderName; its successor is
+  // ServiceProviderName. Nothing else is substituted (InvoiceIssuerName can be a
+  // reseller): with neither column the legacy provider stays empty.
+  if (isBlank(out.ProviderName) && !isBlank(rec.ServiceProviderName)) out.ProviderName = toStringValue(rec.ServiceProviderName);
   // FOCUS 1.0 renamed UsageQuantity / UsageUnit to ConsumedQuantity /
   // ConsumedUnit: the documented value also fills the legacy canonical field.
   if (out.UsageQuantity === undefined) out.UsageQuantity = out.ConsumedQuantity;

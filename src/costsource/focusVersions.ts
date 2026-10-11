@@ -59,9 +59,9 @@ export function isAtLeast(version: FocusVersion, min: FocusVersion): boolean {
 
 // Columns introduced by each FOCUS version, on top of the prior version. The
 // v1.0 entry is the 1.0 baseline (upgradeToCanonicalCost fills what a source
-// omits); later entries are purely additive. Used both to backfill older sources
-// and to report exactly which columns the version shim had to add to reach the
-// canonical model.
+// omits); later entries are purely additive. Normalization metadata only: the
+// backfill audit (normalize.ts) and the connector column filter. The FinIO wire
+// keeps its own frozen table (src/finio/wireColumns.ts).
 export const COLUMNS_BY_VERSION: Record<FocusVersion, readonly string[]> = {
   '1.0': [
     'BilledCost',
@@ -81,11 +81,11 @@ export const COLUMNS_BY_VERSION: Record<FocusVersion, readonly string[]> = {
     'ResourceId',
     'PricingQuantity',
     'PricingUnit',
+    'ListCost', // 1.0-preview
+    'ContractedCost',
     // FOCUS 1.0 renamed UsageQuantity / UsageUnit to these (LEGACY_COLUMNS).
     'ConsumedQuantity',
     'ConsumedUnit',
-    'ListCost', // 1.0-preview
-    'ContractedCost',
     'CommitmentDiscountStatus',
     'InvoiceIssuerName', // 0.5
   ],
@@ -128,21 +128,6 @@ export const COLUMNS_BY_VERSION: Record<FocusVersion, readonly string[]> = {
 export const LEGACY_COLUMNS = ['UsageQuantity', 'UsageUnit'] as const;
 
 /**
- * Columns introduced strictly after `version` and at or before the canonical
- * target — i.e. what the shim backfills to reach the canonical (v1.4) model.
- * Unratified (draft) columns are excluded; they are backfilled too, but are
- * reported separately via `draftColumnsAfter` so the upgrade audit keeps
- * ratified and draft provenance apart.
- */
-export function columnsAddedAfter(version: FocusVersion): string[] {
-  return FOCUS_VERSIONS.filter(
-    (v) =>
-      focusVersionRank(v) > focusVersionRank(version) &&
-      focusVersionRank(v) <= focusVersionRank(CANONICAL_FOCUS_VERSION),
-  ).flatMap((v) => [...COLUMNS_BY_VERSION[v]]);
-}
-
-/**
  * Working-draft columns introduced strictly after `version` — the 1.5 families
  * the shim backfills onto every canonical row while 1.5 is unratified.
  */
@@ -152,3 +137,12 @@ export function draftColumnsAfter(version: FocusVersion): string[] {
   );
 }
 
+/**
+ * True when a normalization was a pure pass-through: the source is at (or above)
+ * the canonical version AND the shim added no column. Decided from the versions
+ * first, so an older source is never shown as already canonical.
+ */
+export function isPassthrough(r: { sourceVersion: string; canonicalVersion: string; backfilledColumns: readonly string[] }): boolean {
+  const rank = (v: string) => focusVersionRank(v as FocusVersion);
+  return rank(r.sourceVersion) >= rank(r.canonicalVersion) && r.backfilledColumns.length === 0;
+}

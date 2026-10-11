@@ -17,7 +17,7 @@ import { IngestError } from '../errors';
 import { isTransientError } from '../retry';
 import { workerTransaction } from './tx';
 import type { EvidenceStore } from '../evidence/types';
-import { indexHeader, validateRow, type FactRow, type HeaderIndex } from '../focus/validate';
+import { indexHeader, providerColumn, validateRow, type FactRow, type HeaderIndex } from '../focus/validate';
 import { checkProviderHeader, checkProviderName, type ProviderPolicy } from '../focus/provider';
 import { assertLease, type Lease } from './lease';
 import type { WorkerHooks } from './types';
@@ -352,7 +352,7 @@ export async function loadArtifact(ctx: LoadContext, art: LoadArtifact, state: L
         continue;
       }
       if (ctx.providerPolicy) {
-        const p = checkProviderName(v.fact.providerName, ctx.providerPolicy);
+        const p = checkProviderName(v.fact.providerName, ctx.providerPolicy, providerColumn(header));
         if (!p.ok) {
           const e = { artifactSha256: art.sha256, rowOrdinal: ordinal, column: p.error.column, code: p.error.code, message: p.error.message };
           if (p.exclude) {

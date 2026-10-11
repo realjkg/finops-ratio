@@ -33,7 +33,6 @@ export {
   CANONICAL_FOCUS_VERSION,
   FOCUS_VERSIONS,
   COLUMNS_BY_VERSION,
-  columnsAddedAfter,
   isDraftVersion,
 } from './focusVersions';
 export type { ComposedRatioView } from './normalize';

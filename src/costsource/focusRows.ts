@@ -167,7 +167,7 @@ export type RawSourceRow = FocusCoreV10 &
  * by column presence: a v1.4 source (every ratified column present) passes
  * through unchanged for ratified columns; a v1.0 source (newer columns absent)
  * gets each later column filled. Callers report exactly which columns were
- * added via `columnsAddedAfter` (ratified) and `draftColumnsAfter` (draft).
+ * added (normalizeRows: the ratified columns a raw row lacked) and `draftColumnsAfter` (draft).
  *
  * Defaults are derived from columns the source DOES provide so the canonical row
  * stays internally consistent (e.g. ListCost defaults to BilledCost when the

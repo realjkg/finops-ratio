@@ -16,7 +16,7 @@ import { budgetFor } from '@/data/budgets';
 import { governanceGatesPassed } from '@/lib/derive';
 import { computeBudgetStatus, type BudgetStatus } from '@/lib/budgetStatus';
 import type { FocusVersion } from './focusVersions';
-import { columnsAddedAfter, draftColumnsAfter } from './focusVersions';
+import { CANONICAL_FOCUS_VERSION, COLUMNS_BY_VERSION, FOCUS_VERSIONS, draftColumnsAfter, isAtLeast } from './focusVersions';
 import type {
   CanonicalCostRow,
   CanonicalFocusRow,
@@ -99,6 +99,19 @@ function withRegistryModelIdentity(row: CanonicalCostRow): CanonicalCostRow {
   };
 }
 
+/** Ratified canonical columns (v1.0 .. canonical), in version-table order. */
+const RATIFIED_COLUMNS = FOCUS_VERSIONS.filter((v) => isAtLeast(CANONICAL_FOCUS_VERSION, v)).flatMap((v) => [
+  ...COLUMNS_BY_VERSION[v],
+]);
+
+/**
+ * The truthful upgrade audit: every ratified canonical column that at least one
+ * raw row lacks (so the shim had to add it), whatever version the source declared.
+ */
+function missingColumns(raws: RawSourceRow[]): string[] {
+  return RATIFIED_COLUMNS.filter((c) => raws.some((r) => (r as unknown as Record<string, unknown>)[c] === undefined));
+}
+
 /** Full normalization: raw source rows -> canonical FOCUS rows + upgrade audit. */
 export function normalizeRows(
   raws: RawSourceRow[],
@@ -109,7 +122,7 @@ export function normalizeRows(
     rows: raws.map((raw) =>
       attachRatioValue(withRegistryModelIdentity(upgradeToCanonicalCost(raw)), sourceId, sourceVersion),
     ),
-    backfilledColumns: columnsAddedAfter(sourceVersion),
+    backfilledColumns: missingColumns(raws),
     draftColumnsBackfilled: draftColumnsAfter(sourceVersion),
   };
 }
