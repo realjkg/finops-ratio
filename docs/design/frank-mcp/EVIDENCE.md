@@ -5,6 +5,8 @@ and what could not be checked. Base: `origin/main` at 62bd8ed (merge of #93) whe
 Nothing here was run against a live model, a live MCP server or a database;
 every code claim was verified by reading the file at that commit.
 
+Review history, as in DESIGN.md: revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested); revision 2 (6402ab3, 00523cf) answered it and a second challenger review of PR #98 requested changes; revision 3 (e050578, d997618) answered that and the round-3 challenger approved it; revision 4 answers Copilot's review of d997618.
+
 ## 1. Method
 
 - Fresh clone of `https://github.com/realjkg/finops-ratio`, `git fetch origin
@@ -27,6 +29,13 @@ every code claim was verified by reading the file at that commit.
   the citations it touched (`derive.ts:33-35`, `engine.ts:196`,
   `chat.ts:336-344`, `chatRoute.test.ts:150-154`, `LiveFinioClient.ts:5-11`)
   were re-read.
+- Revision 3 sources: the sprint plan `docs/design/sprint-mock-demo-mcp-rbac/PLAN.md`
+  on branch `docs/sprint-plan-mock-demo-mcp-rbac` at 7a7d51b (lines 127,
+  142-143, 160, 319), read for T-6; `src/lib/forecast.ts:118`.
+- Revision 4 sources: `src/ingest/config.ts:11`, `:161`, `:178` (the
+  `RATIO_ENV` vocabulary and the empty-value handling) and
+  `src/costsource/transports/redact.ts:327-340` (the rules the result-value
+  scan reuses; all re-read).
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -73,7 +82,7 @@ searched as a whole tree.
 | OpenRouter or any named local server behaving as an OpenAI-compatible tool-calling endpoint | No access; the repo has no test for it. The `openllm` path is verified only as text chat by reading. |
 | Any specific model's tool-calling quality | No model run; certification is a later milestone. |
 | In-app live chat actually returning 401 | The author read the code (no header sent, auth enforced) and did not run it. The challenger reports running a vitest that stubbed `fetch` against the real chat handler with `AI_PROVIDER=openllm` and a strong `RATIO_API_TOKEN`: `LiveAIClient` sent only `Content-Type` and the call was rejected (reported, not re-run by the author). Corroboration read: `src/ai/chatRoute.test.ts:150-154`; `src/finio/LiveFinioClient.ts:5-11` (the browser intentionally omits Authorization). |
-| The two origin statements ("Will Frank also work with a localized MCP and open router?", "Write up the allowlisted read-only MCP proposal first.") the relayed statement that MCP must be usable in dev, test and production under RBAC (DESIGN 3.8, OD-6), and the two relayed owner quotes ("Not replacing production with a prompt ..." and "FinOps and Governance is knowing when to stop.") and their exact date | Not in the repository; the source messages were not seen. The three other quotes are verbatim in `docs/design/slice-3-5/EVIDENCE.md` section 6. |
+| The two origin statements ("Will Frank also work with a localized MCP and open router?", "Write up the allowlisted read-only MCP proposal first."), the relayed statement that MCP must be usable in dev, test and production under RBAC (DESIGN 3.8, OD-6), and the two relayed owner quotes ("Not replacing production with a prompt ..." and "FinOps and Governance is knowing when to stop.") and their exact date | Not in the repository; the source messages were not seen. The three other quotes are verbatim in `docs/design/slice-3-5/EVIDENCE.md` section 6. |
 | Test suite status | Not run (docs-only change). |
 
 ## 5. Contradictions with what the owner was told
@@ -91,8 +100,18 @@ searched as a whole tree.
 
 ## 6. Governance classification and rollback
 
-Classifier result at the final head of revision 3 (re-run on the real diff
-against `origin/main` at 8caec87): `risk: restricted`, class `retention` only,
-rule `retention.mention`, on `docs/design/frank-mcp/EVIDENCE.md` only (this section's own text contains the word). `DESIGN.md` does not match against the 8caec87 base, because its added lines do not contain the word; on the first commit (c97852d, against 62bd8ed) it matched `DESIGN.md`. Recorded also in the pull request description (the classifier is run on the real diff, `node scripts/governance/classify-risk.mjs
---git origin/main...HEAD`; the result is reported as it came out, and the
-wording of these documents was not shaped to avoid any rule).
+Classifier history on the real diff against `origin/main`: revision 1
+(c97852d) was restricted, class `retention`, rule `retention.mention` on
+`DESIGN.md`; revisions 2 and 3 were restricted for the same class and rule, on
+`EVIDENCE.md` only at the end. At revision 4 the classifier was run twice:
+before this paragraph was written the diff contained no rule match and the
+result was `risk: low`; with this paragraph, which names the rule, the
+result is `risk: restricted`, class `retention`, rule `retention.mention`, on
+`docs/design/frank-mcp/EVIDENCE.md` only. The second result is the one that
+holds for the final head. Neither result proves the change safe (the gate's
+own README calls `low` heuristic). The classification is recorded in the pull
+request body at the final head; this file makes no claim about the title or
+body of the pull request beyond that, which the orchestrator maintains. The
+wording of these documents was not shaped to avoid any rule.
+
+Rollback: revert the two documents; reverse-applying the diff to origin/main gives the same tree as origin/main.
