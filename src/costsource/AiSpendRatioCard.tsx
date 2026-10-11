@@ -39,7 +39,10 @@ export async function loadAiSpendRatio(path: RatioPath, window: CostWindow): Pro
       if (sourceIds.length === 0) {
         return {
           status: 'unavailable',
-          reason: 'No ingested sources connected: the live routes expose only offline sandbox (seed) sources here.',
+          // The browser client sends no Authorization header, so the anonymous
+          // source list reports every connector as configured:false.
+          reason:
+            'Ingested data needs an authenticated connection; this browser session is anonymous and the live routes expose only offline sandbox sources here.',
         };
       }
     }

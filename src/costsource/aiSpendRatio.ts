@@ -139,7 +139,7 @@ export async function fetchAiSpendRatio(
   const sources = await client.listSources();
   const errors: AiSpendRatioReport['errors'] = [];
   const wanted = sourceIds
-    ? sourceIds.flatMap((id) => {
+    ? [...new Set(sourceIds)].flatMap((id) => {
         const s = sources.find((d) => d.id === id);
         const problem = !s
           ? 'Unknown cost source'
@@ -162,9 +162,16 @@ export async function fetchAiSpendRatio(
       errors.push({ sourceId: id, message: err instanceof Error ? err.message : String(err) });
       return;
     }
-    fetched.push({ sourceId: id, name, rows: Array.isArray(outcome.value?.rows) ? outcome.value.rows : [] });
+    const rows = outcome.value?.rows;
+    // Malformed, or zero rows for a named source: an error, never a bill owner.
+    if (!Array.isArray(rows) || (sourceIds && rows.length === 0)) {
+      errors.push({ sourceId: id, message: Array.isArray(rows) ? 'Source returned no cost rows' : 'Malformed cost rows' });
+      return;
+    }
+    fetched.push({ sourceId: id, name, rows });
   });
-  const fetchedIds = new Set(fetched.map((f) => f.sourceId));
+  // Only a source with rows can own a repeated bill.
+  const fetchedIds = new Set(fetched.filter((f) => f.rows.length > 0).map((f) => f.sourceId));
   const perSource = fetched.map(({ sourceId, name, rows }) => {
     const group = REPEATED_BILL_GROUPS.find((g) => g.includes(sourceId));
     return { sourceId, name, inHeadline: !group || group.find((id) => fetchedIds.has(id)) === sourceId, rows };
