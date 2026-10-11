@@ -24,6 +24,7 @@ export type SourceKind =
   | 'servicenow' // synthetic CMDB/ITBM cost allocation (demo seed, no live integration)
   | 'mock'
   | 'cloud' // public-cloud FOCUS export (Azure / AWS / GCP)
+  | 'synthetic_cloud' // offline synthetic AWS / Azure / GCP sandbox (demo seed, no live integration)
   | 'kubernetes' // OpenCost / Kubecost FOCUS export
   | 'nutanix'; // Nutanix Cloud Manager cost governance export
 export type SourceCoverage = 'public_cloud' | 'private_cloud' | 'on_prem';

@@ -1,0 +1,69 @@
+# RED evidence (A6): tests only, unchanged implementation at origin/main 7a9da43
+# command: npx vitest run src/costsource/syntheticCloudSandbox.test.ts src/costsource/sandboxAllowlist.test.ts src/costsource/sourcesForEnvPurity.test.ts src/connectors/ConnectorCard.test.tsx
+ ❯ src/costsource/sourcesForEnvPurity.test.ts (2 tests | 2 failed) 731ms
+   ❯ M2 — sourcesForEnv is pure over the supplied env (2)
+     × sourcesForEnv({}) is identical whether or not process.env is populated at module init 702ms
+     × sourcesForEnv_is_pure_with_six_sandbox_descriptors 27ms
+ ❯ src/connectors/ConnectorCard.test.tsx (9 tests | 1 failed) 205ms
+   ❯ ConnectorCard — synthetic cloud chip (A6) (1)
+     × connector_card_shows_synthetic_chip_for_new_sources 28ms
+ ❯ src/costsource/sandboxAllowlist.test.ts (6 tests | 3 failed) 28ms
+   ❯ A6 sandbox allowlist (6)
+     × allowlist_is_exactly_the_six_sandbox_ids 8ms
+     × isOfflineSandboxSource_true_for_aws_azure_gcp_sandbox 1ms
+     × gateSourceAccess_passes_new_sandbox_ids_without_a_token_and_still_401s_live_ids 14ms
+ ❯ src/costsource/syntheticCloudSandbox.test.ts (12 tests | 11 failed) 2485ms
+   ❯ A6 synthetic cloud sandbox sources (12)
+     × rows_use_synthetic_provider_names 216ms
+     × each_source_has_its_own_billing_account_subaccount_region_and_service_names 187ms
+     × mock_client_serves_distinct_rows_per_new_source_not_the_all_workload_fallthrough 370ms
+     × no_real_looking_account_ids_or_credentials_in_seed 182ms
+     × row_totals_match_committed_oracle_per_source 192ms
+     × mapping_is_explicit_every_row_maps_or_is_not_attributed 45ms
+     × unmapped_row_resolves_to_null_not_a_default_workload 181ms
+     × anonymousSourceView_leaves_new_sandbox_descriptors_unchanged 2ms
+     × health_for_new_sources_reports_synthetic_and_makes_no_network_call 102ms
+     × new_sources_return_no_findings 152ms
+     × sandbox_rows_route_serves_new_sources_anonymously_and_live_ids_still_401 54ms
+ ❯ sourceById src/connectors/ConnectorCard.test.tsx:17:19
+ ❯ src/connectors/ConnectorCard.test.tsx:45:19
+ ❯ src/costsource/sandboxAllowlist.test.ts:44:52
+ ❯ src/costsource/sandboxAllowlist.test.ts:49:62
+ ❯ src/costsource/sandboxAllowlist.test.ts:86:97
+ ❯ src/costsource/sourcesForEnvPurity.test.ts:62:74
+ ❯ src/costsource/sourcesForEnvPurity.test.ts:69:54
+ ❯ requireSource src/costsource/MockCostSourceClient.ts:29:19
+ ❯ MockCostSourceClient.fetchCostRows src/costsource/MockCostSourceClient.ts:56:17
+ ❯ rowsOf src/costsource/syntheticCloudSandbox.test.ts:60:15
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:73:20
+ ❯ requireSource src/costsource/MockCostSourceClient.ts:29:19
+ ❯ MockCostSourceClient.fetchCostRows src/costsource/MockCostSourceClient.ts:56:17
+ ❯ rowsOf src/costsource/syntheticCloudSandbox.test.ts:60:15
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:89:21
+ ❯ requireSource src/costsource/MockCostSourceClient.ts:29:19
+ ❯ MockCostSourceClient.fetchCostRows src/costsource/MockCostSourceClient.ts:56:17
+ ❯ rowsOf src/costsource/syntheticCloudSandbox.test.ts:60:15
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:122:20
+ ❯ requireSource src/costsource/MockCostSourceClient.ts:29:19
+ ❯ MockCostSourceClient.fetchCostRows src/costsource/MockCostSourceClient.ts:56:17
+ ❯ rowsOf src/costsource/syntheticCloudSandbox.test.ts:60:15
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:133:33
+ ❯ requireSource src/costsource/MockCostSourceClient.ts:29:19
+ ❯ MockCostSourceClient.fetchCostRows src/costsource/MockCostSourceClient.ts:56:17
+ ❯ rowsOf src/costsource/syntheticCloudSandbox.test.ts:60:15
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:149:20
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:164:21
+ ❯ requireSource src/costsource/MockCostSourceClient.ts:29:19
+ ❯ MockCostSourceClient.fetchCostRows src/costsource/MockCostSourceClient.ts:56:17
+ ❯ rowsOf src/costsource/syntheticCloudSandbox.test.ts:60:15
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:192:20
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:212:17
+ ❯ requireSource src/costsource/MockCostSourceClient.ts:29:19
+ ❯ MockCostSourceClient.healthCheck src/costsource/MockCostSourceClient.ts:107:17
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:225:17
+ ❯ requireSource src/costsource/MockCostSourceClient.ts:29:19
+ ❯ MockCostSourceClient.fetchFindings src/costsource/MockCostSourceClient.ts:90:17
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:237:14
+ ❯ src/costsource/syntheticCloudSandbox.test.ts:290:32
+ Test Files  4 failed (4)
+      Tests  17 failed | 12 passed (29)
