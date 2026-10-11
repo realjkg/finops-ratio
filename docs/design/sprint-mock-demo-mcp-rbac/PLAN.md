@@ -1,6 +1,6 @@
 # Sprint plan: mock-demo environment, MCP-connected access, and role-based access
 
-Status: proposal for owner review. Docs only. Base: `origin/main` at `8caec87` (revision 2; it includes `docs/design/frank-mcp`).
+Status: proposal for owner review. Docs only. Base: `origin/main` at `8caec87` (revision 6 of this plan; main includes `docs/design/frank-mcp`, and its newer revision is open as PR #98).
 Companion files: [TASKS.md](./TASKS.md) (sprint backlog and agent runbook) and
 [EVIDENCE.md](./EVIDENCE.md) (how every fact below was verified).
 
@@ -489,8 +489,9 @@ needs and defers to that design for Frank.
 `docs/design/frank-mcp/DESIGN.md` on main (read at `8caec87`) is the design for
 Frank's use of an allowlisted, read-only MCP. This plan reuses its decisions and
 does not repeat them. A newer revision is open as PR #98 (branch
-`docs/frank-mcp-proposal`, still moving, so no revision is pinned here); the first
-two lists below describe main, the third what changes if #98 merges.
+`docs/frank-mcp-proposal`, still moving, so no revision is pinned here). The part headed
+"On main" below describes what main contains; the part headed "If PR #98
+merges" describes what changes if the open revision merges.
 
 **On main**
 
@@ -556,8 +557,13 @@ before starting B5.)
 - **Tool pinning (3.3).** The broker offers the allowlist's own description and
   schema, not the server's live text (B5 test).
 - **Result secret handling (A19).** `on_secret: reject` rejects a result
-  string carrying a credential-shaped value before delivery and records
-  `secret_in_result`; `redact` replaces only the matching values (B5 tests).
+  carrying a credential-shaped value (in a string field, a map key or a
+  non-string value) before delivery and records `secret_in_result` (B5 tests).
+  `on_secret: redact` is **not implemented** in this sprint: it has known leak
+  cases (a key-only hit must be replaced wholesale, map-key and non-string hits
+  must reject, a URL with a `?` tail that breaks re-parsing must reject), so a
+  tool that asks for it is denied and never offered. Redaction moves to Frank
+  M2.
 - **Deferred to Frank M2, on purpose.** Wiring B5's audit events to this
   sprint's C5 sink; stdio transports; per-tool budgets beyond the size and time
   limits; the kill switch, per-tenant disable and Frank's A20 cases about
@@ -677,6 +683,12 @@ real identity provider, any production deployment, and any migration.
   are file-disjoint with each other (TASKS.md).
 - **Change actions are API-only.** Request, approve and apply have no button or
   client method this sprint (card C3): their placement depends on D2 and D1.
+- **Mock routes ship in the bundle.** Every `pages/api` file is part of a
+  production build, so the mock IdP routes (`login`, `mock-control`) are gated
+  at runtime only, by one function (`mockIdpEnabled`: `RATIO_MOCK_IDP=1` and a
+  raw `RATIO_ENV` of `development` or `test`), and `mock-control` also needs a
+  launcher-generated secret header and a loopback-only server. They are not
+  excluded from the bundle.
 - **Mock state and run modes.** The mock IdP key and revocation set, change
   store, replay store and audit store are module state: supported in unit
   tests and in a production build, not under `next dev` (card C1's launcher

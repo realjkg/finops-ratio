@@ -75,7 +75,7 @@ Each row gives the claim, the command, and the result.
 | PersonaProvider reads localStorage | `sed -n 1,30p src/components/PersonaProvider.tsx` | `readStoredPersona(window.localStorage)` after mount; mounted in `pages/_app.tsx` lines 6 and 27 |
 | Simulation CSRF is session-bound | `sed -n 30,40p src/simulation/server/http.ts` | `sameOrigin` compares `RATIO_SIMULATION_ORIGIN` (line 30-33); `requireCsrf(req, session)` compares with `session.csrf` (line 34-) |
 | Published costs route and live-data auth | `grep -n evaluateLiveDataAuth src/server/costs/publishedCostsRoute.ts` | import line 22, call line 123 |
-| Card governance classes | `node scripts/governance/classify-risk.mjs --paths-file <card file list>` per card | path-derived classes quoted in TASKS.md (for example A1: `auth_tenancy` x2, `unclassified` x6; A6: `financial_semantics` x9; B1: `auth_tenancy` x6); content-derived classes (`network_egress`, `secrets`) cannot be derived from paths and are marked "expected" |
+| Card governance classes | `node scripts/governance/classify-risk.mjs --paths-file <card file list>` per card | path-derived classes quoted in TASKS.md (distinct paths, test files that match the low-risk glob not counted: A1 `auth_tenancy` x2 and `unclassified` x4; A6 `financial_semantics` x9 and `unclassified` x1; B1 `auth_tenancy` x8 and `unclassified` x1; B2 `auth_tenancy` x2 and `routes` x5; B7 `routes` x5, `financial_semantics` x2, `unclassified` x9; B8 `financial_semantics` x2 and `unclassified` x12); content-derived classes (`network_egress`, `secrets`) cannot be derived from paths and are marked "expected" |
 
 ## Governance classifier
 
