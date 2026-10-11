@@ -19,6 +19,7 @@ import type {
 import { FOCUS_VERSIONS, isDraftVersion } from './index';
 import { LiveDataAuthError } from './LiveCostSourceClient';
 import { rawRowsForVersion } from './seed';
+import { formatSignedUSD } from './signedSpendDelta';
 import { formatUSD, formatMoney, formatRatio, formatPct } from '@/lib/format';
 import { ratioColor } from '@/lib/scales';
 import { withBasePath } from '@/lib/basePath';
@@ -589,7 +590,7 @@ export function FocusRowsCard({ rows }: { rows: CanonicalFocusRow[] }) {
   );
 }
 
-function FindingsCard({ findings }: { findings: CostFinding[] }) {
+export function FindingsCard({ findings }: { findings: CostFinding[] }) {
   if (findings.length === 0) {
     return (
       <Card title="Findings">
@@ -625,7 +626,7 @@ function FindingsCard({ findings }: { findings: CostFinding[] }) {
                   save {formatUSD(f.estimatedMonthlySavings)}/mo
                 </span>
               ) : (
-                <span className="text-cost">+{formatUSD(f.observedSpendDelta)}/mo</span>
+                <span className="text-cost">{formatSignedUSD(f.observedSpendDelta)}/mo</span>
               )}
             </div>
           </li>

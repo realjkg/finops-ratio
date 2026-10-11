@@ -1,0 +1,6 @@
+$ npx vitest run src/costsource/signedSpendDelta.test.ts src/costsource/findingsCard.test.tsx
+ Test Files  2 passed (2)
+      Tests  7 passed (7)
+$ npx vitest run src/costsource
+ Test Files  30 passed (30)
+      Tests  666 passed (666)
