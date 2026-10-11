@@ -1,11 +1,11 @@
 # Frank with an allowlisted, read-only MCP: design proposal
 
 Branch `docs/frank-mcp-proposal`. Revision 1 was branched from `origin/main` at
-62bd8ed; the base is now 8caec87 (the merge of PR #96).
+62bd8ed; the base is now 7a9da43 (the merge of PR #99).
 **Status: proposal. Design only: this branch adds documents and no code.
 Nothing in this proposal is implemented.** Every decision in section 10 is
 **open**: it is the owner's to make, with a recommendation attached. No
-decision is recorded here as made. This is revision 16. Review history:
+decision is recorded here as made. This is revision 17. Review history:
 revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
 revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
 PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
@@ -28,10 +28,17 @@ requirement (the design is model-vendor agnostic), was answered by revision 14
 (433b27f); a round-14 challenger review of 433b27f (2 Medium, 6 Low, under a
 scope freeze) was answered by revision 15 (86cf6fb); a round-15 challenger
 review of 86cf6fb (3 Medium, 7 Low, test specification only, under a scope
-freeze) is answered by this revision 16. Revisions 2 to 15 were in PR #98,
-which merged at 86cf6fb; revision 16 is a follow-up on the merged main
-(7a9da43). The code citations were checked at 62bd8ed and there have been no
-code changes since: 8caec87 touches only `docs/design/frank-mcp`.
+freeze) was answered by revision 16 (d8ab0c5, 4913734); a challenger review of
+4913734 in PR #101 (2 Medium, 3 Low, under a scope freeze) is answered by this
+revision 17. Revisions 2 to 15 were in PR #98, which merged at 86cf6fb;
+revisions 16 and 17 are follow-ups on the merged main (7a9da43). The code
+citations were checked at 62bd8ed and re-checked at 7a9da43. PR #99 (62bd8ed
+to 7a9da43) changed about 30 files under `src` and `pages`, including
+`src/ai/AIClient.ts`, `src/ai/buildAIContext.ts`, `src/ai/MockAIClient.ts` and
+`src/ai/index.ts`; `pages/api/v1/ai/chat.ts`, `src/ai/providers.ts` and
+`src/ai/LiveAIClient.ts` are unchanged, and `src/ai/AIClient.ts:71-80` still
+lands on `AIWorkloadSnapshot` (the additions begin after line 84). This
+document does not describe the new `AIClient` fields.
 
 **Origin.** Both origin statements below were relayed to the author in the
 commissioning task; the source messages were not seen, so their exact wording
@@ -118,7 +125,7 @@ tool-calling seam that does not exist.
 
 ### 1.3 What exists today (and what the owner was told)
 
-| Capability | Status at 62bd8ed | Evidence |
+| Capability | Status at 62bd8ed (re-checked at 7a9da43) | Evidence |
 |---|---|---|
 | Provider choice by `AI_PROVIDER`: `claude`, `openai`, `mistral`, `qwen`, `openllm`, `mock` | Exists | `src/ai/providers.ts:15`, `:58-85` |
 | OpenRouter or a local model server (vLLM, Ollama, ...) as a text-only chat provider | Exists by configuration: point `OPENLLM_BASE_URL` at an OpenAI-compatible endpoint. There is no OpenRouter preset and no test of it. | `src/ai/providers.ts:78-84`; `README.md:298-299` |
@@ -561,24 +568,26 @@ gateway-auth check are evaluated together under the following rules.
   is a flip, which sets last-seen to on and the pending marker to true
   (observation only; the observation checks nothing) and starts, or joins, an
   E1 evaluation. A reload with `FRANK_TOOLS` on runs an evaluation; with it
-  off it parses and checks nothing. **One rule for every evaluation (load,
-  reload, flip-triggered and retry).** Pending is kept **per flip**, each with
-  an observation sequence number. An evaluation completing with a determinate
-  result (success, or failure such as a bad value or a mismatched file) clears
-  every pending marker whose observation sequence number is before its
-  snapshot read, and sets last-seen to the `FRANK_TOOLS` value of its own
-  snapshot (E4) **only if no observation came after that read** (the sequence
-  number is compared at apply time); otherwise last-seen keeps the newer
-  observed value and the newer markers stay true. A flip that happens during a
-  reload therefore differs from the snapshot value at the next request and is
-  observed as a new flip. An evaluation that does not finish (lock wait
-  timeout or evaluation timeout) leaves pending true; the next request-level
-  observation retries, but not more often than every `evaluation_retry_ms`. An
-  evaluation whose own snapshot reads `FRANK_TOOLS` off applies the same rule
-  and only sets last-seen and clears the markers before its snapshot read. A
-  reload whose lock wait times out is not retried automatically: it reports
-  the timeout to the operator, changes nothing (the previous latch and
-  snapshot stand), and does not set pending; the operator repeats the reload.
+  off it applies the one rule below without evaluating (it sets last-seen and
+  clears the markers before its read, as a load does) and parses and checks
+  nothing. **One rule for every evaluation (load, reload, flip-triggered and
+  retry).** Pending is kept **per flip**, each with an observation sequence
+  number. An evaluation completing with a determinate result (success, or
+  failure such as a bad value or a mismatched file) clears every pending
+  marker whose observation sequence number is before its snapshot read, and
+  sets last-seen to the `FRANK_TOOLS` value of its own snapshot (E4) **only if
+  no observation came after that read** (the sequence number is compared at
+  apply time); otherwise last-seen keeps the newer observed value and the
+  newer markers stay true. A flip that happens during a reload therefore
+  differs from the snapshot value at the next request and is observed as a new
+  flip. An evaluation that does not finish (lock wait timeout or evaluation
+  timeout) leaves pending true; the next request-level observation retries,
+  but not more often than every `evaluation_retry_ms`. An evaluation whose own
+  snapshot reads `FRANK_TOOLS` off applies the same rule and only sets
+  last-seen and clears the markers before its snapshot read. A reload whose
+  lock wait times out is not retried automatically: it reports the timeout to
+  the operator, changes nothing (the previous latch and snapshot stand), and
+  does not set pending; the operator repeats the reload.
 - **E2, no per-request environment re-check.** The per-request check reads the
   latch and the kill switch and observes flips (E1). It does **not** compare
   or re-validate `RATIO_ENV`. **A change of `RATIO_ENV` in a running process
@@ -941,7 +950,7 @@ Tests first, as in the rest of the program (Slices 3-5 design section 7).
 | A17 | Server certificate or key pin changes | connection refused; server unavailable |
 | A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key; (f) a tool entry without `output_schema_hash`, or any other missing required key; (g) a tool entry with a missing body (`description`, `input_schema` or `output_schema`); (h) a body whose hash does not match its `*_hash` key; (i) an unknown key inside a tool entry (as in (e)), or a body that is not an object; (j) an `in_process` body that differs from the registry (M2); (k) `description` over `max_description_bytes` or a schema over `max_schema_bytes`; (l) an unknown keyword inside the schema content of `input_schema` or `output_schema`; (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e), (f), (g), (h), (i), (j), (k) reject the whole file; (l) is accepted: the keyword is kept in the body and covered by its hash (not stripped before hashing) |
 | A19 | A tool result carries a credential-shaped value (bearer token, `sk-`-style key, JWT, AWS key id) in an ordinary string field that passes the output schema | not delivered to the model; fixed error; audit `secret_in_result` without the value; with `on_secret: redact` only the value is replaced and the audit still records it. Includes: a URL value whose `?` tail contains a quote (the serialized form does not re-parse, so the result is rejected); under `on_secret: redact`, a key-only secret such as `{"password":"abc def"}` (the value is replaced whole and nothing leaks); a hit on a map key (rejected); a located non-string value (rejected) |
-| A20 | Environment check, with the slice that first tests each case. **M0** (raw environment, a broker `reload()` and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) `RATIO_ENV` changes at runtime without a reload (the snapshot of the last successful evaluation still governs, a documented residual), and a following `reload()` with the bad value refuses and latches; (h3) `reload()` re-reads the raw environment, clears a latch only if the evaluation succeeds, and updates last-seen; (h4) a reload concurrent with request traffic applies (no starvation); (i) the per-request check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails; (k) latched, then the environment is fixed, then a plain request; (l) two evaluations racing are serialized, a success cannot be discarded by a request-level observation, and generations are strictly monotonic and unique; (n) the environment changes during an evaluation, and the entry checks use the snapshot; (m1) start with `FRANK_TOOLS` off and a good environment, then observe it on; (m2) load with tools on and a bad environment (latched, last-seen on), environment fixed, then `FRANK_TOOLS` off with at least one request observed while off, then on, and the request after the on starts an evaluation; the same off-then-on cycle after a runtime `RATIO_ENV` change, when not latched, also starts one; (m3) `FRANK_TOOLS` unset at load (counted as off), then on; (o) `FRANK_TOOLS` parsing, fail-open direction: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (p) the lock wait times out; (q) N concurrent requests during a pending flip coalesce onto one evaluation (one `startup_refused` record, no retry loop); (r) an evaluation exceeding `evaluation_timeout_ms` (for example a hung audit write) is aborted, the latch is set, the lock is released and the next trigger retries; (r2) evaluation 1 hangs and times out, evaluation 2 fails and latches, then evaluation 1 completes late and must not clear the latch; (s) a flip observed after the running evaluation's snapshot read starts a new evaluation after the current one completes; (s2) `FRANK_TOOLS` is observed off during evaluation A (which has a snapshot of on), `RATIO_ENV` then goes bad, A completes, and then on is observed; (s3) off then on are observed during A, the joiner's lock wait times out while A holds the lock, and then A completes. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (h1) tools keep running under the old snapshot until the reload, which refuses; (h3) re-evaluates; (h4) the reload applies; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (k) still no tools until a load, a reload or an observed flip; (l) the evaluations run one after the other, the success stands, and the generations are 1, 2, 3, and so on; (n) the snapshot decides; (m1) tools are offered and the snapshot is stored; (m2) the evaluation runs and the latch clears; (m3) an evaluation runs and tools are offered; (o) only the documented value turns tools on; (p) no tools for that request, latch and snapshot unchanged, pending stays true, and the next request retries (not more often than `evaluation_retry_ms`); (q) one evaluation, one record, no loop; (r) fail closed with the latch set, then a retry; (r2) the late result is discarded and the latch holds; (s) a second evaluation runs and adopts the new value; (s2) A does not overwrite last-seen, so the later on is a flip and the new evaluation refuses and latches; (s3) the joiner's pending stays true, the retry refuses and latches; (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
+| A20 | Environment check, with the slice that first tests each case. **M0** (raw environment, a broker `reload()` and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) `RATIO_ENV` changes at runtime without a reload (the snapshot of the last successful evaluation still governs, a documented residual), and a following `reload()` with the bad value refuses and latches; (h3) `reload()` re-reads the raw environment, clears a latch only if the evaluation succeeds, and updates last-seen; (h4) a reload concurrent with request traffic applies (no starvation); (i) the per-request check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails; (k) latched, then the environment is fixed, then a plain request; (l) two evaluations racing are serialized, a success cannot be discarded by a request-level observation, and generations are strictly monotonic and unique; (n) the environment changes during an evaluation, and the entry checks use the snapshot; (m1) start with `FRANK_TOOLS` off and a good environment, then observe it on; (m2) load with tools on and a bad environment (latched, last-seen on), environment fixed, then `FRANK_TOOLS` off with at least one request observed while off, then on, and the request after the on starts an evaluation; the same off-then-on cycle after a runtime `RATIO_ENV` change, when not latched, also starts one; (m3) `FRANK_TOOLS` unset at load (counted as off), then on; (o) `FRANK_TOOLS` parsing, fail-open direction: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (p) the lock wait times out; (q) N concurrent requests during a pending flip coalesce onto one evaluation (one `startup_refused` record, no retry loop); (r) an evaluation exceeding `evaluation_timeout_ms` (for example a hung audit write) is aborted, the latch is set, the lock is released and the next trigger retries; (r2) evaluation 1 hangs and times out, evaluation 2 fails and latches, then evaluation 1 completes late and must not clear the latch; (s) a flip observed after the running evaluation's snapshot read starts a new evaluation after the current one completes; (s2) a good environment and an evaluation A that succeeds; `FRANK_TOOLS` is observed off during A (A's snapshot has it on), `RATIO_ENV` then goes bad, A completes, and then on is observed; (s3) A's snapshot has a good `RATIO_ENV`; off then on are observed during A, the joiner's lock wait times out while A holds the lock, `RATIO_ENV` then goes bad before A completes, and A then succeeds. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (h1) tools keep running under the old snapshot until the reload, which refuses; (h3) re-evaluates; (h4) the reload applies; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (k) still no tools until a load, a reload or an observed flip; (l) the evaluations run one after the other, the success stands, and the generations are 1, 2, 3, and so on; (n) the snapshot decides; (m1) tools are offered and the snapshot is stored; (m2) the evaluation runs and the latch clears; (m3) an evaluation runs and tools are offered; (o) only the documented value turns tools on; (p) no tools for that request, latch and snapshot unchanged, pending stays true, and the next request retries (not more often than `evaluation_retry_ms`); (q) one evaluation, one record, no loop; (r) fail closed with the latch set, then a retry; (r2) the late result is discarded and the latch holds; (s) a second evaluation runs and adopts the new value; (s2) A does not overwrite last-seen, so the later on is a flip and the new evaluation refuses and latches; (s3) the joiner's pending stays true, so the retry runs, refuses and latches (the pending-clear mutant has no retry and keeps offering tools under A's snapshot); (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
 | A21 | Per-adapter **closed-set** assertion (Claude, OpenAI, Mistral and other OpenAI-compatible), run with tools on and off over every registry, fixture and allowlisted (MCP-path) tool, including an `http`-transport entry (the M2 risk is an adapter mapping an allowlisted server into a vendor `mcp` tool entry or an `mcp_servers` body key). The test is an allowlist, not a denylist of parameter names. For the SDK adapters (Claude and OpenAI, `pages/api/v1/ai/chat.ts` near lines 100 and 134) it spies on the SDK create argument and the SDK method called, and injects a recording `fetch` into the SDK client so that header names, the URL path and the constructor and per-request options are captured too; for the raw-fetch adapters (Mistral, Qwen, `openllm`) it intercepts `fetch`. It asserts, per adapter, a closed set of top-level body keys, of `tools[]` element shapes (function type only), of header names, of SDK options, the SDK method (no beta namespace) and the URL path | any key, header name, tool type, option, method or path outside the set fails the test; a mutant that adds any such element, not a named parameter, is killed |
 
 ### 8.3 Pass criteria
@@ -1013,7 +1022,7 @@ by running the classifier on the real diff; a miss is reported, not argued.
   (per-turn and per-call caps, per-turn token ceiling, timeout, per-minute
   cap), A21 (per-adapter closed-set request assertion), A13 (audit write
   failure fails the call closed), A14 (startup refusal when tools are on and
-  gateway auth is not enforced), A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m,
+  gateway auth is not enforced), A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m1-m3,
   n, o, p, q, r, r2, s, s2, s3: the raw-`RATIO_ENV` checks, run in the same
   evaluation as A14, which runs on a load, a reload or a flip only while
   `FRANK_TOOLS` is on), A10 (redaction applied to audit and log text), A19 (a
@@ -1073,8 +1082,8 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 - **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
   (A5-A11, A13, A14, A19, A21 (over MCP-path tools) and A20 (b, c, d, g, h1,
-  h3, h4, i, j, k, l, m, n, o, p, q, r, r2, s, s2, s3) re-run against the MCP
-  path); A20 (a, e, f, h2) with the file parser (`deployment_environment`,
+  h3, h4, i, j, k, l, m1-m3, n, o, p, q, r, r2, s, s2, s3) re-run against the
+  MCP path); A20 (a, e, f, h2) with the file parser (`deployment_environment`,
   `environments[]`); allowlist parser tests (reject unknown keys, missing
   hashes); A18 (server vs tool denial, empty array, null, unknown key; bodies
   and hashes; the registry difference; the size caps; unknown keywords inside
@@ -1127,9 +1136,9 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 | Slice | Cases |
 |---|---|
-| M0 | A7, A10, A11, A13, A14, A19, A21, A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o, p, q, r, r2, s, s2, s3) |
+| M0 | A7, A10, A11, A13, A14, A19, A21, A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m1-m3, n, o, p, q, r, r2, s, s2, s3) |
 | M1 | A1, A2 (in-process results), A5, A6 (fixtures), A8, A9 |
-| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (a, e, f, h2), A21 (MCP-path tools); A1, A2, A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o, p, q, r, r2, s, s2, s3) re-run against MCP servers |
+| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (a, e, f, h2); A1, A2, A5-A11, A13, A14, A19, A21 (over MCP-path tools) and A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m1-m3, n, o, p, q, r, r2, s, s2, s3) re-run against MCP servers |
 | M3 | A5, A6 and the golden suite: per-model re-run |
 | M4 | the broker suite re-run against the server entry |
 

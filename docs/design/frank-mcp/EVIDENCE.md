@@ -2,8 +2,12 @@
 
 Companion to [DESIGN.md](DESIGN.md). It records what the author checked, how,
 and what could not be checked. Base: `origin/main` at 62bd8ed (merge of #93)
-when the citations were checked; the base is now 8caec87 (merge of PR #96),
-which touches only `docs/design/frank-mcp`, so the citations are unchanged.
+when the citations were checked; the base is now 7a9da43 (merge of PR #99).
+PR #99 changed about 30 files under `src` and `pages`, including
+`src/ai/{AIClient,buildAIContext,MockAIClient,index}.ts`; the cited lines were
+re-checked at 7a9da43 (`AIClient.ts:71-80` still lands on `AIWorkloadSnapshot`,
+additions begin after line 84; `chat.ts`, `providers.ts` and `LiveAIClient.ts`
+are unchanged).
 Nothing here was run against a live model, a live MCP server or a database;
 every code claim was verified by reading the file at that commit.
 
@@ -26,9 +30,10 @@ threads on it and the round-11 Lows; revision 13 answered the round-12
 challenger's review of 4e3734c; revision 14 answered the round-13
 challenger's review of 117f8e2 and the owner's vendor-agnostic requirement;
 revision 15 (86cf6fb) answered the round-14 challenger's review of 433b27f
-under a scope freeze; revision 16 answers the round-15 challenger's review of
-86cf6fb. PR #98 merged at 86cf6fb, so revision 16 is a follow-up on the merged
-main (7a9da43).
+under a scope freeze; revision 16 (d8ab0c5, 4913734) answered the round-15
+challenger's review of 86cf6fb; PR #98 merged at 86cf6fb, so revisions 16 and
+17 are follow-ups on the merged main (7a9da43). Revision 17 answers the PR
+#101 challenger's review of 4913734.
 
 ## 1. Method
 
@@ -100,9 +105,15 @@ main (7a9da43).
 - Revision 15 sources: no new code or external sources;
   `pages/api/v1/ai/chat.ts` lines near 100 and 134 (the Claude and OpenAI SDK
   create calls) were re-read for the A21 surface. Fixes only; no new features.
-- Revision 16 sources: no new code or external sources; test-specification
-  fixes only. The branch was fast-forwarded to the merged main (7a9da43)
-  before editing.
+- Revision 16 sources: test-specification fixes only. The branch was
+  fast-forwarded to the merged main (7a9da43) before editing. Main had moved
+  by PR #99, which changed `src/ai` files; the citation re-check is in the
+  Revision 17 bullet.
+- Revision 17 sources: `git diff --name-only 62bd8ed 7a9da43 -- src pages` was
+  read for the files these documents cite; `src/ai/AIClient.ts:71-80`,
+  `pages/api/v1/ai/chat.ts` (lines cited), `src/ai/providers.ts` and
+  `src/ai/LiveAIClient.ts` were re-read at 7a9da43. The earlier statement that
+  there had been no code changes since 62bd8ed was wrong after PR #99.
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -180,16 +191,16 @@ revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
 audit-retention sentence and decision-table row counted as added lines. At
 revisions 11 to 15 the classifier was re-run at each final head and reported
 `risk: restricted`, class `retention`, rule `retention.mention`, on
-`EVIDENCE.md` only (this section names the rule). Revision 16 is a follow-up
-on the merged main (7a9da43), where those lines are already present: a draft
-of this revision before this paragraph was written reported `risk: low` with
-no matches, and with this paragraph, which names the rule, the final head
-reports `risk: restricted`, class `retention`, rule `retention.mention`, on
-`EVIDENCE.md` only. Neither result proves the change safe (the gate's own
-README calls `low` heuristic). The classification is recorded in the pull
-request body at the final head; this file makes no claim about the title or
-body of the pull request beyond that. The wording of these documents was not
-shaped to avoid any rule.
+`EVIDENCE.md` only (this section names the rule). Revisions 16 and 17 are
+follow-ups on the merged main (7a9da43), where those lines are already
+present: a draft before this paragraph was written reported `risk: low` with
+no matches, and with this paragraph, which names the rule, the final head of
+revision 17 reports `risk: restricted`, class `retention`, rule
+`retention.mention`, on `EVIDENCE.md` only. Neither result proves the change
+safe (the gate's own README calls `low` heuristic). The classification is
+recorded in the pull request body at the final head; this file makes no claim
+about the title or body of the pull request beyond that. The wording of these
+documents was not shaped to avoid any rule.
 
 Rollback: revert the two documents; reverse-applying the diff to origin/main
 gives the same tree as origin/main.
