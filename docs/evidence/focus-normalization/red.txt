@@ -1,0 +1,58 @@
+# RED: the committed contract tests against unchanged production code (origin/main a90dda5).
+# Setup: fixtures/connector-formats + src/costsource/focusFormatFixtures.test.ts +
+# src/ingest/focus/provider.test.ts copied onto a worktree of origin/main.
+# Command: npx vitest run src/costsource/focusFormatFixtures.test.ts src/ingest/focus/provider.test.ts
+# Result: Test Files 2 failed (2) | Tests 7 failed | 21 passed (28)
+# Per failing test: the differing cells (- expected / + received, xN = repeated N times).
+# Table column order: BilledCost, ChargePeriodStart, BillingCurrency, ServiceCategory,
+# ServiceSubcategory, ConsumedQuantity, ConsumedUnit, UsageQuantity, UsageUnit.
+# A test stops at its first failing expectation (e.g. the AWS backfill-audit
+# assertion is not reached on main; on main it lists 11 columns incl. ListCost).
+FAIL src/costsource/focusFormatFixtures.test.ts > AWS Data Exports FOCUS 1.0 CSV via S3 manifest (gzip)
+    - ""   x3
+    + "Generative AI"   x3
+    - 1
+    - "Hrs"
+    + 0   x2
+    + ""   x2
+    - 0.1
+    - "GB-Mo"
+FAIL src/costsource/focusFormatFixtures.test.ts > GCP FOCUS 1.0 CSV view via the focus_file path keeps Tags and BigQuery text dates
+    - ""   x2
+    - 2342
+    - "seconds"
+    + "Generative AI"   x2
+    + 0   x2
+    + ""   x2
+    - 6075910000000
+    - "byte-seconds"
+FAIL src/costsource/focusFormatFixtures.test.ts > GCP BigQuery jobs.query f/v response via the live transport (epoch-second timestamps)
+    - ""   x2
+    - 2342
+    - "seconds"
+    + "Generative AI"   x2
+    + 0   x2
+    + ""   x2
+    - 6075910000000
+    - "byte-seconds"
+FAIL src/costsource/focusFormatFixtures.test.ts > Azure Cost Management azure-focus-1.0.csv via blob listing + manifest.json
+    - ""   x3
+    + "Generative AI"   x3
+    - 24
+    - "Hours"
+    + 0   x2
+    + ""   x2
+    - 1
+    - "Each"
+FAIL src/costsource/focusFormatFixtures.test.ts > Azure Cost Management azure-focus-1.2-preview.csv via blob listing + manifest.json
+    - 24
+    - "Hours"
+    + 0   x2
+    + ""   x2
+    - 1
+    - "Each"
+FAIL src/costsource/focusFormatFixtures.test.ts > derives ProviderName (removed in FOCUS 1.4) from ServiceProviderName, then InvoiceIssuerName (test-built rows)
+    - "AWS"
+    + ""   (ProviderName stays empty)
+FAIL src/ingest/focus/provider.test.ts > FOCUS 1.3+ ProviderName successor (ServiceProviderName; test-built rows, no vendor 1.4 export sourced) > accepts the successor header and checks its value against the same allowlist
+    AssertionError: expected { column: 'ProviderName', …(2) } to be null

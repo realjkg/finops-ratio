@@ -1,0 +1,38 @@
+{
+  "$comment": "Azure Cost Management export manifest.json. Top-level shape and blobs[].blobName [P] (MicrosoftDocs tutorial-improved-exports, ms.date 06/26/2025; that example is a ReservationRecommendations export). FOCUS-specific values [U]: exportConfig.type 'FocusCost' (FinOps toolkit dataset name), blobName including the month folder, the part_0_0001.csv name (docs say not to hardcode part names), runInfo values. Synthetic ids.",
+  "manifestVersion": "2024-04-01",
+  "byteCount": 2310,
+  "blobCount": 1,
+  "dataRowCount": 3,
+  "exportConfig": {
+    "exportName": "synthetic-focus-daily",
+    "resourceId": "/providers/Microsoft.Billing/billingAccounts/synthetic-ba-0001/providers/Microsoft.CostManagement/exports/synthetic-focus-daily",
+    "dataVersion": "1.2-preview",
+    "apiVersion": "2025-03-01",
+    "type": "FocusCost",
+    "timeFrame": "MonthToDate",
+    "granularity": null
+  },
+  "deliveryConfig": {
+    "partitionData": true,
+    "dataOverwriteBehavior": "OverwritePreviousReport",
+    "fileFormat": "Csv",
+    "compressionMode": "None",
+    "containerUri": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/synthetic-rg/providers/Microsoft.Storage/storageAccounts/syntheticstore",
+    "rootFolderPath": "focus"
+  },
+  "runInfo": {
+    "executionType": "Scheduled",
+    "submittedTime": "2026-10-11T04:00:06.5234447Z",
+    "runId": "00000000-0000-0000-0000-00000000a001",
+    "startDate": "2026-10-01T00:00:00",
+    "endDate": "2026-10-11T00:00:00Z"
+  },
+  "blobs": [
+    {
+      "blobName": "focus/synthetic-focus-daily/20261001-20261031/00000000-0000-0000-0000-00000000a001/part_0_0001.csv",
+      "byteCount": 2310,
+      "dataRowCount": 3
+    }
+  ]
+}

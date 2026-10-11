@@ -11,8 +11,8 @@ import {
   providerPolicyFor,
   type ProviderPolicy,
 } from './provider';
-import { indexHeader } from './validate';
-import { FOCUS_HEADER } from '../testing/focusCsv';
+import { indexHeader, validateRow } from './validate';
+import { FOCUS_HEADER, focusRow } from '../testing/focusCsv';
 
 const AWS_SOURCE = { kind: 'focus_file', config: { layout: 'aws-data-exports', bucket: 'b', prefix: '', exportName: 'x' } };
 const OFF = { allowSyntheticProviders: false };
@@ -217,5 +217,20 @@ describe('U1 checkProviderHeader', () => {
   it('is case-sensitive about the column name', () => {
     const cols = FOCUS_HEADER.map((c) => (c === 'ProviderName' ? 'providername' : c));
     expect(checkProviderHeader(headerIndex(cols), awsPolicy())?.code).toBe('MISSING_REQUIRED_COLUMN');
+  });
+});
+
+describe('FOCUS 1.3+ ProviderName successor (ServiceProviderName; test-built rows, no vendor 1.4 export sourced)', () => {
+  const cols = FOCUS_HEADER.map((c) => (c === 'ProviderName' ? 'ServiceProviderName' : c));
+  const fact = (provider: string) => {
+    const row = focusRow('2026-09-01', { ServiceProviderName: provider });
+    const v = validateRow(cols.map((c) => row[c] ?? ''), headerIndex(cols), '2026-09-01');
+    if (!v.ok) throw new Error('row should validate');
+    return v.fact;
+  };
+  it('accepts the successor header and checks its value against the same allowlist', () => {
+    expect(checkProviderHeader(headerIndex(cols), awsPolicy())).toBeNull();
+    expect(checkProviderName(fact('AWS').providerName, awsPolicy())).toEqual({ ok: true });
+    expect(checkProviderName(fact('Amazon Web Services').providerName, awsPolicy())).toMatchObject({ ok: false, exclude: true });
   });
 });
