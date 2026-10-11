@@ -1,0 +1,37 @@
+# GREEN: feat/ui-theme-tokens
+# cmd: npx vitest run src/theme
+ Test Files  3 passed (3)
+      Tests  49 passed (49)
+
+# cmd: npx vitest run (full suite)
+ Test Files  174 passed | 1 failed (175); Tests 3410 passed | 1 failed (3411)
+ the 1 failure: src/simulation/server/acceptance.test.ts (timing under full-suite load);
+ it passes in isolation on this branch (2/2) and on origin/main (2/2); untouched by this slice.
+# npx tsc --noEmit: clean; npx eslint src/theme: clean
+
+# Mutation spot checks (each reverted after the run)
+M1 validate.ts standard text min 4.5 -> 4.4: KILLED
+        × dark fails only the pinned legacy pairs 8ms
+        × rejects body text below 4.5:1 (#777 on white is 4.48) 6ms
+         Tests  2 failed | 47 passed (49)
+M2 themes.ts dark raised #141a26 -> #151a26: KILLED
+        × defines each built-in under :root[data-theme] and the default under :root 9ms
+        × honors prefers-color-scheme and prefers-contrast only when no theme is chosen 2ms
+        × resolves every original token to the original hex (themes.ts and both CSS blocks) 2ms
+         Tests  3 failed | 46 passed (49)
+
+# Rendered contrast audit (next dev + headless chromium via CDP; visible text nodes,
+# fg alpha/opacity composited over the ancestor background chain; 4.5/3 large; HC 7/4.5)
+# failing / audited text nodes
+page         light      dark       high-contrast
+/            26/127     49/127     26/127
+/overview    47/249     75/249     47/249
+/connectors  0/241      60/241     0/241
+/findings    404 (no such route; Findings lives at /)
+/workloads   16/279     100/279    16/279
+total        89/896     284/896    89/896
+light/HC: the top failing pairs on every page are dark-palette hex hard-coded outside the
+  tokens (src/lib/scales.ts TOKEN_HEX, inline styles), worst 1.58:1
+dark failures: dim text 2.5-2.9:1, exec-muted 4.46:1, same hard-coded accents on white exec cards
+initial theme, no data-theme: no pref -> dark; prefers-color-scheme light -> dark; dark -> dark;
+  prefers-contrast: more -> high-contrast (computed --c-txt = 0 0 0)

@@ -13,7 +13,7 @@ import { BUILT_IN_THEMES, DEFAULT_THEME, ROLES, type Theme } from './themes';
 
 const root = resolve(__dirname, '../..');
 const config = createRequire(import.meta.url)(join(root, 'tailwind.config.js'));
-const css = readFileSync(join(root, 'src/index.css'), 'utf8');
+const css = readFileSync(join(root, 'src/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
 // The colors as they were on main before the token layer (tailwind.config.js @ a90dda5).
 const ORIGINAL_DARK: Record<string, string> = {
@@ -38,7 +38,7 @@ const rest = css.replace(/@media \(([^)]+)\)\s*\{\s*:root:not\(\[data-theme\]\)\
   return '';
 });
 const blocks: Record<string, Block> = {};
-for (const m of rest.matchAll(/([^{}]+)\{([^{}]*--c-[^{}]*)\}/g)) {
+for (const m of rest.matchAll(/([^{};]+)\{([^{}]*--c-[a-z-]+:\s*\d[^{}]*)\}/g)) {
   for (const sel of m[1].split(',')) blocks[sel.trim()] = parseBlock(m[2]);
 }
 const expectBlock = (b: Block | undefined, t: Theme) => {
@@ -73,9 +73,10 @@ describe('index.css parity with themes.ts', () => {
   });
 
   it('honors prefers-color-scheme and prefers-contrast only when no theme is chosen', () => {
-    expectBlock(media['prefers-color-scheme: dark'], BUILT_IN_THEMES.dark);
+    // A media block is only needed when the default differs from the preferred theme.
+    expectBlock(media['prefers-color-scheme: dark'] ?? blocks[':root'], BUILT_IN_THEMES.dark);
     expectBlock(media['prefers-contrast: more'], BUILT_IN_THEMES['high-contrast']);
-    expect(css.indexOf('prefers-contrast: more')).toBeGreaterThan(css.indexOf('prefers-color-scheme: dark'));
+    expect(css.lastIndexOf('@media')).toBe(css.indexOf('prefers-contrast: more') - 8); // contrast wins, declared last
   });
 
   it('keeps the legacy --<token> aliases used by inline styles', () => {
@@ -99,7 +100,7 @@ describe('dark theme is the pre-existing look', () => {
     for (const [role, hex] of Object.entries(ORIGINAL_DARK)) {
       expect(BUILT_IN_THEMES.dark.colors[role as keyof Theme['colors']], role).toBe(hex);
       expect(blocks[":root[data-theme='dark']"].colors[role], role).toBe(hex);
-      expect(media['prefers-color-scheme: dark'].colors[role], role).toBe(hex);
+      expect((media['prefers-color-scheme: dark'] ?? blocks[':root']).colors[role], role).toBe(hex);
     }
   });
 });
@@ -141,15 +142,15 @@ describe('hard-coded color baseline (T4 migrates these; they may only shrink)', 
     for (const name of readdirSync(dir)) {
       const p = join(dir, name);
       if (statSync(p).isDirectory()) walk(p);
-      else if (p.endsWith('.tsx')) files.push(p);
+      else if (/\.tsx?$/.test(p) && !/\.test\.tsx?$/.test(p) && !p.includes('/src/theme/')) files.push(p);
     }
   };
   walk(join(root, 'src'));
   walk(join(root, 'pages'));
-  const count = (re: RegExp) => {
+  const count = (re: RegExp, list = files.filter((f) => f.endsWith('.tsx'))) => {
     let hits = 0;
     let hitFiles = 0;
-    for (const f of files) {
+    for (const f of list) {
       const n = (readFileSync(f, 'utf8').match(re) ?? []).length;
       hits += n;
       hitFiles += n > 0 ? 1 : 0;
@@ -167,5 +168,11 @@ describe('hard-coded color baseline (T4 migrates these; they may only shrink)', 
     const { hits, hitFiles } = count(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g);
     expect(hits).toBeLessThanOrEqual(19);
     expect(hitFiles).toBeLessThanOrEqual(7);
+  });
+
+  it('raw hex colors in non-test .ts do not grow past 6 (src/lib/scales.ts TOKEN_HEX)', () => {
+    const { hits, hitFiles } = count(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g, files.filter((f) => f.endsWith('.ts')));
+    expect(hits).toBeLessThanOrEqual(6);
+    expect(hitFiles).toBeLessThanOrEqual(1);
   });
 });
