@@ -36,8 +36,9 @@ challenger's review of 86cf6fb; PR #98 merged at 86cf6fb, so revisions 16 and
 the PR #101 challenger's review of 4913734. Revision 18 (dba0c64) simplified
 section 3.8 (start-and-reload evaluation only) on the decision recorded in
 section 6; revision 19 (98aa511) answered the challenger's review of revision
-18 and was approved; revision 20 answers Copilot's four open
-test-specification threads on it.
+18 and was approved; revision 20 (3ec58a3) answered Copilot's four open
+test-specification threads on it; revision 21 answers the challenger's review
+of 3ec58a3 (a formatting repair and two clarifications).
 
 ## 1. Method
 
@@ -209,27 +210,29 @@ is recorded in the pull request body at the final head; this file makes no
 claim about the title or body of the pull request beyond that. The wording of
 these documents was not shaped to avoid any rule.
 
-### Decision record for revision 18 Two independent agents, a proposer and a
-skeptic, converged: replace the section 3.8 evaluation machinery with
-start-and-reload evaluation only. Reasons, as recorded: (a) DESIGN.md 6.3
-itself marked a runtime change of `FRANK_TOOLS` as an unverified assumption,
-and `process.env` cannot be changed from outside the process, so the machinery
-protected a path the design said might not exist; (b) the design already
-conceded that a runtime `RATIO_ENV` change is not detected; (c) section 3.8
-grew from nothing to about 1,850 words and the A20 row from 88 to about 700
-words over 16 revisions, each later finding probing state added by the
-previous revision, and revisions 6 to 16 cite no new code; (d) no attack was
-found that the earlier design stopped and the simple one allows. The skeptic
-added requirements, all adopted: one reload at a time; a failed reload turns
-tools off and writes an audit record; no unauthenticated HTTP reload trigger;
-a "reload required" log when `FRANK_TOOLS=on` is seen without a reload; and
-about eight A20 cases. Process change: the review scope is frozen to changed
-text, and the review is closed after a round with no High or Medium findings.
-What would change the conclusion: a real mechanism that mutates `FRANK_TOOLS`
-in a running process, an owner requirement to turn tools on in under a minute
-without a reload, or a concrete attack on reload-only turn-on. After revision
-18 section 3.8 was about 1,210 words (counted from its heading to the next
-section heading) and the A20 row about 270; revision 20 adds four A20 cases.
+### Decision record for revision 18
+
+Two independent agents, a proposer and a skeptic, converged: replace the
+section 3.8 evaluation machinery with start-and-reload evaluation only.
+Reasons, as recorded: (a) DESIGN.md 6.3 itself marked a runtime change of
+`FRANK_TOOLS` as an unverified assumption, and `process.env` cannot be changed
+from outside the process, so the machinery protected a path the design said
+might not exist; (b) the design already conceded that a runtime `RATIO_ENV`
+change is not detected; (c) section 3.8 grew from nothing to about 1,850 words
+and the A20 row from 88 to about 700 words over 16 revisions, each later
+finding probing state added by the previous revision, and revisions 6 to 16
+cite no new code; (d) no attack was found that the earlier design stopped and
+the simple one allows. The skeptic added requirements, all adopted: one reload
+at a time; a failed reload turns tools off and writes an audit record; no
+unauthenticated HTTP reload trigger; a "reload required" log when
+`FRANK_TOOLS=on` is seen without a reload; and about eight A20 cases. Process
+change: the review scope is frozen to changed text, and the review is closed
+after a round with no High or Medium findings. What would change the
+conclusion: a real mechanism that mutates `FRANK_TOOLS` in a running process,
+an owner requirement to turn tools on in under a minute without a reload, or a
+concrete attack on reload-only turn-on. After revision 18 section 3.8 was
+about 1,210 words (counted from its heading to the next section heading);
+later revisions added test cases to the A20 row.
 
 Rollback: revert the two documents; reverse-applying the diff to origin/main
 gives the same tree as origin/main.
