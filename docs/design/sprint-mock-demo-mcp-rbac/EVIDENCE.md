@@ -1,20 +1,13 @@
 # Evidence: how the plan's facts were verified
 
-Verified on 2026-10-11 in a fresh clone at `/home/user/plan-sprint`, branch
-`docs/sprint-plan-mock-demo-mcp-rbac`, first based on `origin/main` at `62bd8ed`
-(revision 1) and merged with `origin/main` at `8caec87` (revision 2, which
-adds `docs/design/frank-mcp`). Facts F1 to F20 were read at `62bd8ed`; the
-revision-2 merge changed only documentation, confirmed by
-`git diff --stat 62bd8ed 8caec87`. F21 and F22 and the card file lists were
-checked at `8caec87`. The revision-1 base was read with
-(`git rev-parse origin/main` after `git fetch origin` against
-`https://github.com/realjkg/finops-ratio`). Nothing was run against a network
-service other than that fetch. Line numbers are from that commit.
-
-A correction first. The local source clone used to seed the fresh clone had a
-stale `main` (`827773f`, slice 2b). The branch was reset to the fetched
-`origin/main` (`62bd8ed`) before any fact was read, and `git rev-parse HEAD`
-returned `62bd8ed5cffc3f5b502403f355412cc7aa96db9a`.
+Facts F1 to F20 were read on 2026-10-11 at `origin/main` `62bd8ed`
+(`62bd8ed5cffc3f5b502403f355412cc7aa96db9a`, fetched from
+`https://github.com/realjkg/finops-ratio`); F21, F22 and the card file lists at
+`8caec87`, which differs from `62bd8ed` only by documentation
+(`git diff --stat 62bd8ed 8caec87`). Line numbers below are from those commits.
+The merged-card records and the corrections in the section "Re-checked against
+merged code" were checked at `origin/main` `c95be35` while folding this plan
+into PR #110 (A8).
 
 ## How to repeat
 
@@ -63,9 +56,9 @@ Each row gives the claim, the command, and the result.
 | Browser callers of those routes | `grep -rln "api/attribution\|api/tokenomics\|api/prediction\|report/snapshot\|costsource/ingest\|api/hello" src` | `LiveAttributionClient`, `LivePredictionClient`, `LiveTokenomicsClient`, `LiveHelloClient`, `SnapshotButton`, `CostSourcePage.tsx:299` (ingest), `FocusDoorWalk` and mission components |
 | `RATIO_ENV` vocabulary | `sed -n 11p src/ingest/config.ts`; `cat src/simulation/server/enabled.ts` | `development`, `test`, `staging`, `production`; the simulation checks `development` and `test` only |
 | Vitest picks up new Playwright specs | `sed -n 1,30p vitest.config.ts` | default include pattern applies; only `tests/simulation/**` is excluded |
-| Frank design cross-references | `grep -n "^### M\|^| T-[0-9]\|^| T[0-9]" docs/design/frank-mcp/DESIGN.md`; `grep -n "D-15" docs/design/slice-3-5/DESIGN.md` | milestones M0 to M4; tracked items T-1 to T-6 (no T-7 **on main**; PR #98 adds one, see the next row); threat rows T1 to T11; D-15 defers per-user identity |
-| Frank design (merged as PR #98; later revisions land through further PRs) | `git show origin/main:docs/design/frank-mcp/DESIGN.md`; `grep -n "Allowlist key table\|on_secret\|deployment_environment\|startup_refused\|A18\|A19\|A20\|T-6\|T-7"` | The branch keeps moving, so PLAN and TASKS cite sections and no revision. Re-read for plan revision 9 against the Frank design on main (cited by section; A21 is a per-adapter closed-set assertion): 2.6 (model-vendor agnostic broker; vendor-side connectors rejected by default, T13, A21, OD-13), 3.3 bodies and `*_hash` rules and the `max_description_bytes` / `max_schema_bytes` caps, `in_process` entries from M2 (M1 is registry only), and the per-tenant model-token budget removed from the design (its T-8). At the revision-5 reading: 3.3 has a key table with required keys and optional keys with defaults (file: `deployment_environment`, `tenants`, `servers`; `fallback`, `relist_interval_seconds`, per-turn caps; server: `transport` with conditional stdio and http keys, `owner`, `purpose`, `data_class`, `tools`; tool: `output_schema_hash`, hashes, `read_only_via`, budgets, `on_secret`); 3.8 rule 0 and A20 define the startup environment check and the reload, kill-switch, latch and lock cases; A18 covers server-versus-tool denial; A19 secrets in results; T-6 reconciles with this plan and T-7 is per-role/team/environment allowlists. Now on main (PR #98 merged after PR #97) |
-| Main moved after plan revision 7 | `git log --oneline 8caec87..origin/main`; `git diff --stat 8caec87 origin/main -- src pages` | PR #97 (this plan, at revision 7) and PR #98 (Frank design, revision 15) were merged, then PR #99 rewrote the mock Frank (`src/ai/mock/*` added; `MockAIClient.ts`, `AIClient.ts`, `buildAIContext.ts`, `index.ts` changed). Revision 8 re-checked the cited AI files: F19e and card A8 were updated, and B8 notes that `buildAIContext` now also reads alerts from the seed |
+| Frank design cross-references | `grep -n "^### M\|^| T-[0-9]\|^| T[0-9]" docs/design/frank-mcp/DESIGN.md`; `grep -n "D-15" docs/design/slice-3-5/DESIGN.md` | milestones M0 to M4; tracked items (now T-1 to T-9, section 11); threat rows; D-15 defers per-user identity |
+| Frank design cited by section | `grep -n "^### \|^| T-[0-9]" docs/design/frank-mcp/DESIGN.md` on `c95be35` | The design is on main and is still revised by later PRs (for example #101), so PLAN and TASKS cite its sections, never a revision, because section numbers stay stable across edits: 2.6 (vendor-agnostic broker; vendor-side connectors rejected by default, T13, A21, OD-13), 3.1 to 3.8 (3.3 key table with bodies, `*_hash` rules and size caps; 3.8 startup environment check), A18 to A21, and tracked items T-6 (reconcile with this plan), T-7 (per-role, team and environment allowlists) and T-8 (per-tenant model-token budget, outside the broker) in section 11 |
+| Mock Frank rewrite (PR #99) | `git diff --stat 8caec87 7a9da43 -- src/ai` | `src/ai/mock/*` added; `MockAIClient.ts` delegates to it; `buildAIContext` also reads alerts from the seed (card B8 covers it). F19e and card A8 were re-checked against it |
 | Instrumentation import closure is pinned | `sed -n 216,228p src/ingest/importBoundary.test.ts` | the closure of `instrumentation.ts` must equal exactly `instrumentation.ts`, `src/ingest/db/tenant.ts`, `src/server/costs/config.ts`; so the audit sink is registered through the gateway's `verdictSink.ts` default-sink factory (card C5), not through `instrumentation.ts` |
 | Simulation provider resets the store | `grep -n clearSimulation src/simulation/SimulationProvider.tsx src/store/useStore.ts` | provider calls `clearSimulation()` at lines 21, 61, 68, 70, 84; the store re-seeds workloads, budgets and alerts at `useStore.ts:155` |
 | Budget code reads the series | `grep -rn "daily_spend_history" src --include=*.ts --include=*.tsx -l`; `ls src/lib/budgetStatus.ts` | `src/types/index.ts:189` requires the field; `budgetStatus.ts` is under the `financial_semantics` glob `src/lib/budgetStatus*` |
@@ -77,6 +70,19 @@ Each row gives the claim, the command, and the result.
 | Simulation CSRF is session-bound | `sed -n 30,40p src/simulation/server/http.ts` | `sameOrigin` compares `RATIO_SIMULATION_ORIGIN` (line 30-33); `requireCsrf(req, session)` compares with `session.csrf` (line 34-) |
 | Published costs route and live-data auth | `grep -n evaluateLiveDataAuth src/server/costs/publishedCostsRoute.ts` | import line 22, call line 123 |
 | Card governance classes | `node scripts/governance/classify-risk.mjs --paths-file <card file list>` per card | path-derived classes quoted in TASKS.md (distinct paths, test files that match the low-risk glob not counted: A1 `auth_tenancy` x2 and `unclassified` x4; A6 `financial_semantics` x9 and `unclassified` x1; B1 `auth_tenancy` x8 and `unclassified` x1; B2 `auth_tenancy` x2 and `routes` x5; B7 `routes` x5, `financial_semantics` x2, `unclassified` x9; B8 `financial_semantics` x2 and `unclassified` x12); content-derived classes (`network_egress`, `secrets`) cannot be derived from paths and are marked "expected" |
+
+## Re-checked against merged code
+
+| Claim | Command | Result |
+|---|---|---|
+| Sprint A merge commits | `git log --oneline origin/main` | A1 #103 `0e097a2`, A2 #104 `de7e5b4`, A3 #105 `039e9b6`, A6 #108 `6acd2ba`, A7 #109 `a3c1437`; follow-up #111 `e184a44`; #99 `7a9da43`, #102 `a90dda5`, #101 `0ace878`, #112 `c95be35`. A4 #106, A5 #107 and A8 #110 are open |
+| Merged A1 contract | `sed -n 20,27p src/identity/types.ts`; `sed -n 115,137p src/rbac/matrix.ts` | `Action` has `ticket.bind` and `ticket.get`, no `change.read`; `ChangeImpact` is `cost`, `commitment`, `operational`; `requiresImpact` finance `cost`, procurement `commitment`; `/api/v1/cm/sync` row `status_sync` with `plannedBy: 'C8'` and action `ticket.update` |
+| Legacy grant | `sed -n 44,62p src/rbac/matrix.test.ts` | 11 legacy-readable routes derived from the source; legacy actions exactly `ticket.attach`, `ticket.create`, `ticket.status`, `view.export` (export is checked against the same route rows in `authorize.ts`) |
+| `eng_lead` on tokenomics and prediction | `grep -n "tokenomics:\|prediction:" src/rbac/matrix.ts` | `tokenomics: 'O D D T O D'`, `prediction: 'O D - T - D'` (shared by predict and accuracy): `T`, not the `-` PLAN 4.4 asks for; open item for B3 |
+| A2 loopback helper | `grep -rn isLoopbackRequest src` | no match: merged A2 has only `mockIdpEnabled` in `enabled.ts`; the helper moves to B7 |
+| A6 extra file | `git show --stat 6acd2ba` | `src/costsource/challengerRoutes.test.ts` edited (three ids added to a skip list) besides the listed files |
+| Roll-up cache leak (PR #100 review, High) | `sed -n 80,120p src/lib/derive.ts`; `sed -n 109,170p src/outcomes/model.ts` | `deriveCacheEconomics` returns `cachedTokens`, `uncachedInputTokens`, `uncachedRatePer1m`, `cachedRatePer1m`; `estimateTca`'s infrastructure line is `round(compute * 30 * 100)` cents. PLAN 4.4a now names minimized aggregates instead |
+| A8 prompts module | `grep -n DEMO_PROMPTS pages/demo.tsx src/ai/MockAIClient.ts src/ai/demoPrompts.test.ts` | exported from `MockAIClient.ts`, imported by the page and the test; no other card lists `MockAIClient.ts`, so it is back in A8's file list |
 
 ## Governance classifier
 
@@ -93,23 +99,24 @@ phrases.
   `start`, `lint`, `typecheck`, `test`, `test:db`, and others; none for docs).
   `npm run lint` is `eslint .` and does not cover Markdown.
 - `git diff --check origin/main...HEAD`: see PR body for the result.
-- Plan consistency was checked by script on the final files (revision 9): the
-  ownership and dependency tables in TASKS.md were parsed; the dependency graph
-  is acyclic (28 cards); every file has one owner except files edited in
+- Plan consistency was checked by script on the final files: the ownership
+  and dependency tables in TASKS.md were parsed; the dependency graph is
+  acyclic (28 cards); every file has one owner except the seven files edited in
   sequence by a later card that depends on the earlier one
   (`src/rbac/matrix.ts` A1 then C3, `src/costsource/CostSourcePage.tsx` A8 then
   B7, `src/server/gateway/verdictSink.ts` B1 then C5, `pages/api/v1/cm/change.ts`
-  B4 then C3); the PLAN section 6 rows match the card sets and each card's size
-  line; each range sits inside the size scale (S 1-3, M 4-8, L 9-15); the sum
-  is 114 to 175 person-days over 28 rows.
+  B4 then C3, `pages/api/v1/cm/webhook.ts` C4 then C8, and
+  `src/mission/missionModel.ts` and `src/findings/findingsModel.ts` B8 then
+  B12); the PLAN section 6 rows match the card sets; the sum is 114 to 175
+  person-days over 28 rows.
 
 ## Limits of this verification
 
 - Issue #94 could not be read: the GitHub GraphQL interface is blocked in this
   session. The migration-numbering fact rests on the repository text in F18.
   `docs/design/frank-mcp` was read from `origin/main` after the revision-2 merge.
-- No test suite was run. The plan changes no code, and `node_modules` is not
-  installed in the fresh clone.
+- The plan itself changes no code. It rides with A8 (#110), whose tests,
+  lint and typecheck results are in that PR.
 - Effort sizes are estimates, not measurements.
 - Nothing here was checked against real Jira, ServiceNow, an identity provider,
   or an MCP server. The wire contracts in the mocks come from what the adapters

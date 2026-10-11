@@ -1,6 +1,11 @@
 # Sprint plan: mock-demo environment, MCP-connected access, and role-based access
 
-Status: proposal for owner review. Docs only. Base: `origin/main` at `7a9da43` (revision 9 of this plan; main includes `docs/design/frank-mcp`, which keeps being revised, so it is cited by section).
+Status: the current plan, one text (earlier revisions are in git history, not
+repeated here). It rides with the first open code PR under it (A8), per the
+owner's rule of no docs-only PRs. Sprint A progress and the next slices are in
+[TASKS.md, "Status and next slices"](./TASKS.md#status-and-next-slices). The
+Frank design (`docs/design/frank-mcp`) keeps being revised, so it is cited by
+section, never by revision.
 Companion files: [TASKS.md](./TASKS.md) (sprint backlog and agent runbook) and
 [EVIDENCE.md](./EVIDENCE.md) (how every fact below was verified).
 
@@ -44,23 +49,22 @@ routine in that skill.
      caller must invoke it, nothing links a ticket to an approval or an apply,
      and nothing listens for ticket changes (F9, F10).
 4. **Agents run these capabilities through sprint tasks, iteratively and in
-   parallel.** TASKS.md defines self-contained cards (sprint names: A; A2 for cards B1 to B11, IDs kept; C for the portal UI, cards C1, C2, C5; D for the ITSM change lifecycle, cards C3, C4, C6, C8, C7 last; Sprint B is reserved for the live connectors for ingest and is drafted later). Sprint A contains cards
+   parallel.** TASKS.md defines self-contained cards (sprint names: A; A2 for cards B1 to B12, IDs kept; C for the portal UI, cards C1, C2, C5; D for the ITSM change lifecycle, cards C3, C4, C6, C8, C7 last; Sprint B is reserved for the live connectors for ingest, drafted with its first code slice). Sprint A contains cards
    with disjoint file sets that can all run at once; each card has named red
    tests and a governance class. The runbook there tells an implementer agent
    how to take a card without conflicting with the others.
 
 How hard is it to build with security-enabled APIs? Moderate overall, and hard
 in three specific places. See section 6: roughly 114 to 175 person-days for the
-whole mock-environment scope (the sum of the table there; revision 1 said 66
-to 105; revisions 2 and 3 added the browser session, page-data scoping, the
-data-provider seam, the remaining gateway routes, the page readers and the
-sign-in flow), of which the
+whole mock-environment scope (the sum of the table there), of which the
 identity-and-roles retrofit across existing routes, webhook trust and the
 two-way ticket status sync carry most of the risk.
 
 ## 2. Current-state facts (verified on main)
 
-Every row was checked against `origin/main` at `62bd8ed` (revision 1); rows F21 and F22 were added in revision 2 and checked at `8caec87`, which differs from `62bd8ed` only by documentation. EVIDENCE.md lists the
+Every row was checked against `origin/main` at `62bd8ed` (F21 and F22 at
+`8caec87`, which differs only by documentation). Where merged Sprint A code
+has since changed a fact, the row says so. EVIDENCE.md lists the
 command behind each. A lead from the owner's brief that turned out to be wrong
 or incomplete is marked "corrected".
 
@@ -79,14 +83,14 @@ or incomplete is marked "corrected".
 | F11 | `LiveCMClient` posts to the route with no `Authorization` header, so a deployment that sets a token cannot use the in-browser client as written. `MockCMClient` is idempotent under test. | `src/cm/LiveCMClient.ts:34-40`; `src/cm/MockCMClient.ts:4` |
 | F12 | MCP: one client scaffold for PointFive only. `SsePointFiveMcpClient` posts JSON-RPC `tools/call` with an OAuth bearer token; there is no `initialize` handshake, no `tools/list`, no allowlist, and its own comment says the wire framing is unvalidated. Tool names are three constants. No Frank MCP client exists. | `src/costsource/PointFiveMcpTransport.ts:73-77`, `:86-146` |
 | F13 | `ServiceNowAdapter` under `src/costsource` is a synthetic cost source (CMDB and ITBM allocation rows), not an ITSM client. Its own header says so. Do not confuse it with the class of the same name in the change route. | `src/costsource/ServiceNowAdapter.ts:1-14` |
-| F14 | Live-data gate: sandbox source ids are served anonymously; every other id needs a strong `RATIO_API_TOKEN` (32 or more characters, 10 or more distinct). Failed attempts are counted per client IP. Today three sandbox ids exist: `pointfive-sandbox`, `focus-file-sandbox`, `servicenow-sandbox`. | `src/costsource/sandboxSources.ts:5-9`; `src/server/gateway/liveDataAuth.ts:60`, `:123` |
+| F14 | Live-data gate: sandbox source ids are served anonymously; every other id needs a strong `RATIO_API_TOKEN` (32 or more characters, 10 or more distinct). Failed attempts are counted per client IP. At `62bd8ed` three sandbox ids existed: `pointfive-sandbox`, `focus-file-sandbox`, `servicenow-sandbox`; A6 (#108) added `aws-sandbox`, `azure-sandbox` and `gcp-sandbox`, so six exist now. | `src/costsource/sandboxSources.ts:5-9`; `src/server/gateway/liveDataAuth.ts:60`, `:123` |
 | F15 | A second tenant concept exists. The published-costs route binds a token to a tenant UUID through `RATIO_API_TENANT_ID`; the gateway derives its own hash tenant. They are not connected. | `src/server/costs/config.ts:5`, `:19` |
 | F16 | Workloads carry `team` and `environment` fields (`prod`, `staging`, `dev`, `sandbox`), which are the natural scoping keys. The seeded set has 11 workloads, 7 teams, and environments dev 1, staging 2, prod 8. | `src/types/index.ts:13`, `:128-129`; `src/data/workloads.ts` |
 | F17 | Governance classifier: path-based. `src/server/gateway/**` and any `src/` or `pages/api/` path matching `auth\|tenant\|rls\|role` are `auth_tenancy`; `src/costsource/**` and focus, normalize, reconcile names are `financial_semantics`; `pages/**` is `routes`; a path in no rule is `unclassified` and restricted (fail closed). Docs under `docs/**` with `.md` are low. | `scripts/governance/risk-rules.json` |
 | F18 | Migration numbering is unresolved: `0001`, `0002`, `0004` exist; `0003` and `0005` are reserved by comments elsewhere; issue #94 tracks it (see EVIDENCE.md for what could and could not be verified). Cards in this plan add no migrations. | `src/ingest/db/migrations/`; `docs/design/slice-3-5/DESIGN.md:561` |
-| F19 | Demo defects confirmed. (a) `formatUSD(-5)` returns `$-5.00` and `formatUSD(-1500)` returns `$-1,500`. (b) No favicon: no `public/` directory and no icon link in the document head. (c) The "Customer sign-in simulation" link renders whenever no simulation session exists, even when the simulation is disabled and the route would return 404. (d) The findings card is titled "(PointFive DeepWaste shape)" for every source, including ServiceNow. (e) At `62bd8ed`, two of the three `/demo` prompts fell through to the mock Frank help reply; since then PR #99 rewrote the mock Frank (`src/ai/mock/*`, `MockAIClient.ts` now only delegates), so A8 re-checks which prompts still do. | `src/lib/format.ts:4-12`; `pages/_document.tsx:8`; `src/simulation/SimulationBar.tsx:22`; `src/costsource/CostSourcePage.tsx:603`; `pages/demo.tsx:9-13`; the old classifier was at `src/ai/MockAIClient.ts:18-25` at `62bd8ed` and is now `src/ai/mock/intents.ts` |
+| F19 | Demo defects confirmed. (a) `formatUSD(-5)` returns `$-5.00` and `formatUSD(-1500)` returns `$-1,500`. (b) No favicon: no `public/` directory and no icon link in the document head. (c) The "Customer sign-in simulation" link renders whenever no simulation session exists, even when the simulation is disabled and the route would return 404. (d) The findings card is titled "(PointFive DeepWaste shape)" for every source, including ServiceNow. (e) At `62bd8ed`, two of the three `/demo` prompts fell through to the mock Frank help reply. PR #99 then rewrote the mock Frank (`src/ai/mock/*`); A8's re-check on `7a9da43` found one failing prompt (the third, which got the "cannot answer" reply, not help). Status: (a) and (b) fixed by A7 (#109, `a3c1437`); (c), (d) and (e) fixed by A8 (#110). | `src/lib/format.ts:4-12`; `pages/_document.tsx:8`; `src/simulation/SimulationBar.tsx:22`; `src/costsource/CostSourcePage.tsx:603`; `pages/demo.tsx:9-13`; the old classifier was at `src/ai/MockAIClient.ts:18-25` at `62bd8ed` and is now `src/ai/mock/intents.ts` |
 | F20 | Existing building blocks to reuse: bounded backoff with jitter and a transient-error classifier (ingest worker), a sliding-window rate limiter, a redacting error logger, and Playwright simulation specs. | `src/ingest/retry.ts:8-9`; `src/server/gateway/rateLimit.ts:20`; `tests/simulation/*.spec.ts` |
-| F21 | A cost row whose `ResourceId` does not start with `arn:ratio:workload/` normalizes with an empty `x_RatioWorkloadId`, an empty team and value 0 ("unknown, not hidden"). `MockCostSourceClient` returns the all-workload rows for any source id it does not dispatch specially, and `SourceKind` has no synthetic-cloud member. | `src/costsource/normalize.ts:46-58`; `src/costsource/MockCostSourceClient.ts:41-83`, `:95-120`; `src/costsource/seed.ts:189`; `src/costsource/CostSourceClient.ts:21` |
+| F21 | A cost row whose `ResourceId` does not start with `arn:ratio:workload/` normalizes with an empty `x_RatioWorkloadId`, an empty team and value 0 ("unknown, not hidden"). `MockCostSourceClient` returns the all-workload rows for any source id it does not dispatch specially, and `SourceKind` had no synthetic-cloud member (A6, #108, added `synthetic_cloud`). | `src/costsource/normalize.ts:46-58`; `src/costsource/MockCostSourceClient.ts:41-83`, `:95-120`; `src/costsource/seed.ts:189`; `src/costsource/CostSourceClient.ts:21` |
 | F22 | The browser store is initialized with the whole bundled seed (`workloads: WORKLOADS`) and `clearSimulation` resets to it, and the pages and components listed in EVIDENCE.md read `workloads` from it. So the data reaches every viewer's browser regardless of the API checks; scoping the views requires the store to load from a scoped endpoint when enforcement is on. | `src/store/useStore.ts:23`, `:155`, `:270`; grep of `.workloads` under `src` and `pages` (EVIDENCE.md) |
 
 Answer to the "is there a persona or role model" question in one line: three
@@ -147,8 +151,10 @@ data scope always comes from the principal. Allowed lenses, default first:
 
 ### 4.2 The contract between cards
 
-Every card builds against this literal contract so the cards stay independent.
-The contract is implemented by card A1 (`src/identity/`, `src/rbac/`).
+Every card builds against this contract so the cards stay independent. It is
+**merged** as card A1 (#103, `0e097a2`; `src/identity/types.ts`,
+`src/rbac/`), and the merged code is the reference. The block below is the
+merged `Action`, `ChangeImpact` and `Resource` shape.
 
 ```ts
 export type Role = 'cto' | 'finops_lead' | 'finance' | 'eng_lead' | 'procurement' | 'auditor'
@@ -169,12 +175,12 @@ export interface Principal {
 export type Action =
   | 'view.read' | 'view.export'
   | 'change.request' | 'change.approve' | 'change.apply'
-  | 'ticket.create' | 'ticket.attach' | 'ticket.update' | 'ticket.status'
-  | 'change.read'
+  | 'ticket.create' | 'ticket.attach' | 'ticket.status' | 'ticket.bind' | 'ticket.update' | 'ticket.get'
   | 'mcp.read' | 'mcp.write'
   | 'budget.edit' | 'connector.manage' | 'ingest.write' | 'audit.read';
 
 export type TicketState = 'none' | 'open' | 'approved' | 'rejected';
+export type ChangeImpact = 'cost' | 'commitment' | 'operational';  // set server-side, never from a request body
 
 export interface Resource {
   kind: 'view' | 'route' | 'change' | 'ticket' | 'mcp_tool' | 'audit';
@@ -184,7 +190,7 @@ export interface Resource {
   requesterSub?: string;       // change only: who requested it
   approverSub?: string;        // change only: who approved it, if anyone
   ticketState?: TicketState;   // change only: the live state of the bound ticket
-  impact?: 'cost' | 'commitment';  // change only: the impact class stored on the change at request time
+  impact?: ChangeImpact;       // change only: the impact class stored on the change at request time
 }
 
 export type Verdict =
@@ -196,7 +202,9 @@ export interface TokenVerifier {
 }
 ```
 
-`Resource.impact` is **never** chosen by the requester or read from the approval
+`ticket.get` is the read of a change record and its ticket (`get` in card
+C3); `ticket.bind` decides binding an existing, pre-approved ticket to a
+change (`request` with `existingTicketRef` in C3). `Resource.impact` is **never** chosen by the requester or read from the approval
 request: card C3 derives it on the server from the requested `action` through a
 fixed map (the requester cannot mark a commitment purchase as `cost`), stores
 it on the change record, and the approver cannot alter it. `authorize(principal, action, resource)` is pure. It returns 401 for no
@@ -233,17 +241,20 @@ verification on; unset, the offline default of F1 is unchanged.
 Mock-IdP token claims (card A2): `iss`, `aud` (the deployment environment),
 `sub`, `iat`, `exp`, `jti`, plus `role`, `teams`, `envs`, `tenant`. A real OIDC
 provider would supply the same claims through its own mapping; that swap is
-owner decision D1 and is not done here. The `legacy_service` role is **fail-closed** and its grant is this checked-in
-list, nothing else: `teams: '*'`, `envs` limited to the deployment's own
-`DeployEnv`; `view.read` on `/api/v1/ai/chat`, `/api/v1/connectors`,
-`/api/v1/costs/published`, `/api/v1/a2a/handshake`, `/api/v1/finio/export` and
-the four live-data routes `/api/costsource/{sources,rows,findings,health}`;
-`ticket.create`, `ticket.attach` and `ticket.status` on `/api/v1/cm/change`
-(the three operations that exist today). Everything else is denied for it:
-`change.*`, `ticket.update`, `change.read`, `view.export`, `ingest.write`,
-`connector.manage`, `budget.edit`, `mcp.*`, `audit.read`, and the six routes
-that are anonymous in the offline default (enforced, they need a persona).
-Card A1 has a matrix column for it and a test against the list. It is flagged
+owner decision D1 and is not done here. The `legacy_service` role is **fail-closed**: its grant is exactly
+today's shared-token access, nothing more. Merged A1 encodes it as the
+`legacyService` column of `ROUTE_MATRIX` and the `legacy_service` cells of
+`ACTION_MATRIX`: `view.read` (and `view.export`, which is checked against the
+same route rows) on the 11 API routes that call the gateway or the live-data
+gate today (`/api/v1/connectors`, `/api/costsource/{sources,rows,findings,health}`,
+`/api/v1/ai/chat`, `/api/v1/finio/export` and `/api/finio/export`,
+`/api/v1/costs/published`, `/api/v1/a2a/handshake` and `/api/a2a/handshake`),
+plus `ticket.create`, `ticket.attach` and `ticket.status` on `/api/v1/cm/change`.
+Everything else is denied for it (`change.*`, `ticket.bind`, `ticket.update`,
+`ticket.get`, `ingest.write`, `connector.manage`, `budget.edit`, `mcp.*`,
+`audit.read`, every page, and the six routes that are anonymous in the offline
+default). The test `legacy_service_column_grants_exactly_todays_gateway_access`
+derives the route list from the source and pins it. It is flagged
 in logs and its retirement is D9. Per-user `Principal.sub` is deferred
 for the real system in `docs/design/slice-3-5/DESIGN.md` (D-15); this sprint
 introduces it for the mock IdP only, so the shape is proven without a real
@@ -339,7 +350,12 @@ shape is chosen from the role, never by a request parameter). For `finops_lead`,
 summary of data they may see in full. Tokenomics and prediction accuracy return
 org-level aggregates with no team dimension, so a team-scoped role cannot be
 given a figure that excludes other teams (section 4.7, item 4): the `eng_lead`
-cells are `-` (403) until those aggregates are computed from filtered records.
+cells should be `-` (403) until those aggregates are computed from filtered
+records. **Open, before B3 starts:** merged A1 encodes `T` for `eng_lead` on
+tokenomics and on both prediction routes (they share one `prediction` group in
+`matrix.ts`). B3 resolves it with the owner (D2): either compute both
+aggregates after the scope filter, or change those cells to `-` in A1's data
+file (a one-line data edit with its matrix test, sequenced after A1).
 
 Reconciliation rule (tested in 4.7): for any single underlying dataset, the
 CTO roll-up total equals the FinOps lead drill-down total, equals the sum of
@@ -352,22 +368,33 @@ dollars (F16), so the oracle for served data is committed in card B8.
 ### 4.4a Roll-up pages: what each reads and where the figure comes from
 
 The roll-up roles (`cto`, `procurement`) must see the same portfolio-level
-numbers as the FinOps lead on every page the matrix gives them. Per workload
-the DTO adds these named aggregates: `fuel_ratio` (daily spend over daily
-budget), `cache_economics` (the output of `deriveCacheEconomics`), `tca` (the
-output of `estimateTca`: category amounts, full cost, headline spend and
-ratio), `gross_value` and `value_evidence_headline` (the readers in
-`valueMath.ts` and `valueEvidence.ts`), and `forecast_summary`. At portfolio
+numbers as the FinOps lead on every page the matrix gives them. Each named
+aggregate is a **minimized DTO of approved presentation values**, never the
+raw return object of a pure function (those objects carry the line-level
+inputs: `deriveCacheEconomics` in `src/lib/derive.ts` returns the raw
+`cachedTokens` and `uncachedInputTokens` counters and both per-1M unit rates,
+and `estimateTca` in `src/outcomes/model.ts` returns an infrastructure line
+equal to `compute` x 30). Per workload the DTO adds exactly: `fuel_ratio`
+(daily spend over daily budget, the ratio only); `cache_summary`
+`{hit_rate, cache_discount_daily}`; `tca` `{full_cost_cents,
+headline_spend_cents, full_cost_ratio, implementation_cents, oversight_cents,
+labor_cents}` (the three estimated categories are fixed rates of monthly spend;
+the model-usage versus infrastructure split is omitted because it reveals
+`compute`); `gross_value` and `value_evidence_headline` (the readers in
+`valueMath.ts` and `valueEvidence.ts`); and `forecast_summary`. At portfolio
 level it adds `portfolio_ratio` (`derivePortfolioRatio`), `monthly_spend_total`
-and `total_value_total`.
+and `total_value_total`. Tests (card B8): each aggregate has exactly its listed
+keys, and no number in a roll-up response equals a token counter, a unit rate
+or a `compute`-derived amount of the scoped records (the fixture is chosen so
+no approved value coincides with one).
 
 | O page | Line-level inputs it reads today | Roll-up source | Consumer change (card) |
 |---|---|---|---|
-| Findings `/` | token counters (cache economics in `src/lib/derive.ts`), value ratio, spend | `cache_economics`, `portfolio_ratio` | `derive.ts` reader (B12); `findingsModel.ts` scope parameter (B8) |
+| Findings `/` | token counters (cache economics in `src/lib/derive.ts`), value ratio, spend | `cache_summary` (hit rate and daily discount; the token-and-rate evidence line shows "not available for your role"), `portfolio_ratio` | `derive.ts` reader (B12); `findingsModel.ts` scope parameter (B8) |
 | Overview `/overview` | monthly spend, value, budget series | whitelist fields and `forecast_summary` | none beyond the B8 registry |
 | Workloads `/workloads` | `model` (WorkloadCard), unit costs | `model_provider` label only; detail panel unavailable | `WorkloadCard.tsx` (B12); `DetailPanel.tsx` (B10) |
 | Mission `/mission` | daily spend and daily budget (fuel gauge), `model` | `fuel_ratio`, `forecast_summary`, provider label | `missionModel.ts` (B12; scope parameter B8) |
-| Outcomes `/outcomes` | `costs.compute`, revenue and cost-avoided inputs, evidence marks | `tca`, `gross_value`, `value_evidence_headline` | `outcomes/model.ts`, `valueMath.ts`, `valueEvidence.ts` readers (B12) |
+| Outcomes `/outcomes` | `costs.compute`, revenue and cost-avoided inputs, evidence marks | `tca` (headline spend as one row, no model-usage versus infrastructure split), `gross_value`, `value_evidence_headline` | `outcomes/model.ts`, `valueMath.ts`, `valueEvidence.ts` readers (B12) |
 | Prediction `/prediction` | model, token counters, daily spend (predictors) | the page calls `/api/prediction/predict`, which computes on the server from the full scoped records | `PredictionPage.tsx` (B10) |
 | Attribution `/attribution` (team) | token counters | `/api/attribution` team aggregates from the server | `AttributionPage.tsx`, `LiveAccrualBoard.tsx` (B10) |
 | Reports `/reports` | all | `/api/report/snapshot` built on the server for the caller's scope and shape | none (B3) |
@@ -389,9 +416,9 @@ Proposed; owner ratifies (D2).
 | Approve a change | Y / Y / Y | Y / Y / n (prod: needs CTO or Finance) | Y / Y / Y (only when the stored `impact` is `cost`) | n / n / n | Y / Y / Y (only when the stored `impact` is `commitment`) | n / n / n |
 | Apply a change | n / n / n | n / n / n | n / n / n | Y* / Y* / A | n / n / n | n / n / n |
 | Create a ticket (outbound) | n / n / n | Y / Y / Y | n / n / n | Y* / Y* / Y* | n / n / n | n / n / n |
-| Attach a pre-approved ticket | n / n / n | Y / Y / Y | n / n / n | Y* / Y* / Y* | n / n / n | n / n / n |
+| Attach or bind a pre-approved ticket (`ticket.attach`, `ticket.bind`) | n / n / n | Y / Y / Y | n / n / n | Y* / Y* / Y* | n / n / n | n / n / n |
 | Update a ticket (comment, transition; `ticket.update`) | n / n / n | Y / Y / Y | n / n / n | Y* / Y* / Y* | n / n / n | n / n / n |
-| Read a change record (`change.read`) | Y / Y / Y | Y / Y / Y | Y / Y / Y | Y* / Y* / Y* | Y / Y / Y | Y / Y / Y |
+| Read a change record and its ticket (`ticket.get`) | Y / Y / Y | Y / Y / Y | Y / Y / Y | Y* / Y* / Y* | Y / Y / Y | Y / Y / Y |
 | Read ticket status | Y / Y / Y | Y / Y / Y | Y / Y / Y | Y* / Y* / Y* | Y / Y / Y | Y / Y / Y |
 | MCP read-only tool call (allowlisted) | Y / Y / Y (summary tools) | Y / Y / Y | Y / Y / Y (cost tools) | Y* / Y* / Y* | Y / Y / Y (commitment tools) | Y / Y / Y |
 | MCP tool that writes | n / n / n | n / n / n | n / n / n | n / n / n | n / n / n | n / n / n |
@@ -556,15 +583,12 @@ needs and defers to that design for Frank.
 
 ## 5a. Relation to docs/design/frank-mcp
 
-`docs/design/frank-mcp/DESIGN.md` on main (read at `8caec87`) is the design for
-Frank's use of an allowlisted, read-only MCP. This plan reuses its decisions and
-does not repeat them. The design is on main at revision 15 (the revisions made
-after this plan's first reading were merged as PR #98), so no revision is
-pinned here. The part headed "On main" describes the first reading; the part
-headed "Added by later Frank revisions (now on main)" describes what those
-revisions added.
+`docs/design/frank-mcp/DESIGN.md` on main is the design for Frank's use of an
+allowlisted, read-only MCP. This plan reuses its decisions and does not repeat
+them. It keeps being revised (for example PR #101), so it is cited by section
+only; read the current file before starting B5.
 
-**On main**
+**What this plan reuses**
 
 - **B5 is the client half of its milestone M2** (MCP client, allowlist, audit),
   limited here to the A5 mock server, matching its open recommendation OD-1
@@ -581,8 +605,7 @@ revisions added.
   route trusts a browser-supplied snapshot) is addressed for the enforced path
   by B9. Threat rows T2 (rug pulls), T4 (out-of-allowlist request), T5
   (cross-tenant leakage) and T7 (secret exposure, a threat row there) map to B5
-  tests. On main its T-6 is the "wrong project instructions loaded" item; that
-  is not a code item.
+  tests.
 - **Identity.** Its section 3.4 says tool audit records the token-derived tenant
   because per-user identity is deferred (slice-3-5 D-15). This sprint introduces
   per-user `Principal.sub` for the mock IdP only; the real system remains
@@ -591,15 +614,13 @@ revisions added.
   client". This sprint takes the minimal hand-rolled client and adds no
   dependency. Whether to adopt an SDK later is owner decision D13.
 
-**Added by later Frank revisions (now on main)** (read: its sections 2.6, 3.1 to
-3.8, the 3.3 key table, T-6, T-7, T13, A18 to A21; cite sections, not commits,
-and read the current file before starting B5.)
+**Further rules from the Frank design** (its sections 2.6, 3.1 to 3.8, the 3.3
+key table, tracked items T-6 and T-7, threat T13, cases A18 to A21.)
 
-- **Numbering.** T-6 becomes "reconcile with this sprint plan" and T-7 becomes
+- **Tracked items.** T-6 is "reconcile with this sprint plan" and T-7 is
   "per-role, per-team and per-environment tool allowlists". B5 delivers the
   **mock path of T-7**: this sprint's mock IdP and `Principal` supply the caller
-  identity that T-7 says does not exist yet. Real identity stays D1. On main
-  there is no T-7.
+  identity that T-7 says does not exist yet. Real identity stays D1.
 - **Field names are theirs.** The allowlist reserves `environments[]`,
   `roles[]` and `teams[]` on server and tool entries. B5 uses exactly those
   names and maps `Principal.role`, `Principal.teams` and the deployment's
@@ -754,6 +775,7 @@ real identity provider, any production deployment, and any migration.
 | D11 | Decide whether the real environments are named dev, test and prod, and how they map to workload environments `prod`, `staging`, `dev`, `sandbox` (F16) | Naming and mapping policy |
 | D12 | Approve spend, if any, for a hosted sandbox tenant of any of the above | Spend |
 | D13 | Adopt an MCP SDK dependency, or keep the hand-rolled minimal client (this sprint takes the minimal client; Frank M2 leaves the question open) | Dependency policy; needs the specification check in Frank T-1 |
+| D15 | **Pending.** MVP re-scope. Recommendation on record (not decided): cut A4 and A5 to what A1 needs; defer B-ACT, B-NOTICE, B-DELIVER, Sprint D, C9 and the alert stack; MVP = RBAC for three personas on A1, one live ingest connector with the A3 accuracy check, the AI-spend-versus-total ratio view, and a local deploy | Product scope; until the owner decides, no card in this plan is re-scoped, cut or started on the strength of the recommendation |
 | D14 | Make the seed data server-only in enforce mode and add a bundle test with a planted data sentinel (today the seed ships in client assets in every mode; accepted for the mock because it is fixture data; required before any real data) | Needs edits to the bundle check and seed files that no card owns; part of moving off fixture data |
 
 ## 9. Risks and open questions
@@ -777,10 +799,14 @@ real identity provider, any production deployment, and any migration.
   that anyone other than the developer can reach.
 - **Mock routes ship in the bundle.** Every `pages/api` file is part of a
   production build, so the mock IdP routes (`login`, `mock-control`) are gated
-  at runtime only, by one function (`mockIdpEnabled`: `RATIO_MOCK_IDP=1` and a
-  raw `RATIO_ENV` of `development` or `test`), and `mock-control` also needs a
-  launcher-generated secret header and a loopback-only server. They are not
-  excluded from the bundle.
+  at runtime only: by `mockIdpEnabled` (merged in A2: `RATIO_MOCK_IDP=1` and a
+  raw `RATIO_ENV` of `development` or `test`) **and**, for both routes, by a
+  peer-and-Host check (`isLoopbackRequest`, card B7: a loopback peer and a
+  `Host` of `127.0.0.1` or `localhost`; `X-Forwarded-*` ignored; 404
+  otherwise). `mock-control` also needs a launcher-generated secret header.
+  Residual: behind a reverse proxy on the same machine the peer is loopback,
+  so the mock must never run behind a proxy, and a user on the machine itself
+  can always reach it. The routes are not excluded from the bundle.
 - **Mock state and run modes.** The mock IdP key and revocation set, change
   store, replay store and audit store are module state: supported in unit
   tests and in a production build, not under `next dev` (card C1's launcher
@@ -795,11 +821,12 @@ real identity provider, any production deployment, and any migration.
 - **Issue #94.** Anything needing storage beyond memory (replay set,
   revocation, audit) is in memory in the mock and flagged for D8.
 
-## 10. Decisions since revision 7
+## 10. Owner direction recorded after the plan merged
 
-These are the owner's product decisions made after revision 7. They are
-recorded here as direction; the cards named below are drafted in later,
-separate documents and are **not** drafted in this plan.
+These are the owner's product decisions made after the plan first merged. They
+are recorded here as direction; the cards named below are drafted with the
+first code slice that implements them (no docs-only PRs) and are **not**
+drafted in this plan. D15 (pending) may defer several of them.
 
 - **Committee-style approval.** The FinOps leader guides a change, an executive
   decides it, and a quorum rule decides when it is approved. The quorum lives in
@@ -811,8 +838,7 @@ separate documents and are **not** drafted in this plan.
   decision packet for the deciding executive. It is reserved here and drafted
   separately.
 - **Sprint B (live connectors for ingest).** Three cards are reserved for it:
-  B-ACT, B-NOTICE and B-DELIVER. They are drafted in a follow-up documents PR
-  after this plan merges.
+  B-ACT, B-NOTICE and B-DELIVER. The D15 recommendation defers them.
 - **Recommender.** The product recommender is a generic `Recommender` interface
   with a mock implementation. It is never named after any vendor or model
   (in particular it is not named Fable), so a different recommender can replace
