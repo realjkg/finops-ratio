@@ -158,6 +158,14 @@ describe('mock identity provider (card A2)', () => {
     // token has exactly one accepted spelling.
     expect(verifyCode(`${h}.${p}.${s}=`)).toBe('malformed');
     expect(verifyCode(`${h}.${p}+.${s}`)).toBe('malformed');
+    // Same signature bytes, different spelling: a 64-byte value leaves 4
+    // unused bits in the last base64url character, and flipping one of them
+    // must not yield a second accepted token string.
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const last = alphabet.indexOf(s[s.length - 1]);
+    const respelled = `${s.slice(0, -1)}${alphabet[last ^ 0x01]}`;
+    expect(Buffer.from(respelled, 'base64url').equals(Buffer.from(s, 'base64url'))).toBe(true);
+    expect(verifyCode(`${h}.${p}.${respelled}`)).toBe('malformed');
 
     // The untouched token still verifies (the fixture itself is sound).
     expect(verifyCode(issued.token)).toBe('no-throw');
