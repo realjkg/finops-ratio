@@ -11,6 +11,7 @@ import { fetchAiSpendRatio } from './aiSpendRatio';
 import type { AiSpendRatio, AiSpendRatioReport } from './aiSpendRatio';
 import type { CostWindow } from './CostSourceClient';
 import { formatUSD } from '@/lib/format';
+import { currentBillingPeriod } from '@/lib/billingPeriod';
 
 type RatioPath = 'seed' | 'ingested';
 type RatioState =
@@ -160,7 +161,7 @@ export function AiSpendRatioView({
           <p className="text-xs text-dim">
             Basis: EffectiveCost (amortized, credits net in). AI = ServiceCategory “AI and Machine
             Learning”. The headline sums only sources that do not repeat another fetched source’s
-            bill; other sources are assumed not to overlap (no row-level dedupe).
+            bill; other sources are assumed not to overlap (no row-level dedupe). May undercount if exports file AI spend under other categories.
           </p>
         </div>
       )}
@@ -170,23 +171,19 @@ export function AiSpendRatioView({
 
 export function AiSpendRatioCard() {
   const [path, setPath] = useState<RatioPath>('seed');
-  const [state, setState] = useState<RatioState>({ status: 'loading' });
+  // Keyed by path: a result for another path renders as loading, never as data.
+  const [loaded, setLoaded] = useState<{ path: RatioPath; state: RatioState } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const now = new Date();
-    const window = {
-      start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString(),
-      end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString(),
-    };
-    setState({ status: 'loading' });
-    void loadAiSpendRatio(path, window).then((next) => {
-      if (!cancelled) setState(next);
+    void loadAiSpendRatio(path, currentBillingPeriod()).then((state) => {
+      if (!cancelled) setLoaded({ path, state });
     });
     return () => {
       cancelled = true;
     };
   }, [path]);
 
+  const state: RatioState = loaded?.path === path ? loaded.state : { status: 'loading' };
   return <AiSpendRatioView path={path} state={state} onSwitch={setPath} />;
 }

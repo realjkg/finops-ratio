@@ -1,21 +1,22 @@
-# GREEN: npx vitest run src/costsource (after implementation)
-Test Files  34 passed (34)
-Tests  718 passed (718)   (round 2; round 1 was 714)
-# New files only (aiSpendRatio.test.ts + aiSpendRatioCard.test.tsx): Tests  32 passed (32)
-# Test corrections after RED (expectations were wrong, not the code):
+# GREEN: npx vitest run src/costsource (round 3, head after fix)
+Test Files  35 passed (35) Tests  726 passed (726)   (round 1: 714, round 2: 718)
+# New test files only (aiSpendRatio, aiSpendRatioCard, aiSpendRatioCard.dom): Tests  40 passed (40)
+# Test corrections after round-1 RED (expectations were wrong, not the code):
 #   huge-values ratio: expected 0.5 -> exact 100000000000.01 / 200000000000.03
 #   409 stub: uses the route's real fixed message (httpError only surfaces those)
 
-# Mutation spot checks (src/costsource/aiSpendRatio.ts, restored after each)
-M1 flip AI match (=== -> !==)            KILLED: 11 failed, e.g. "all AI", "no AI"
-M2 sum currencies together (key 'USD')   KILLED: "never sums mixed currencies; one ratio per BillingCurrency"
-M3 ratio for total >= 0 (was > 0)        KILLED: "zero total -> null"
-Round 2 (AiSpendRatioCard.tsx / aiSpendRatio.ts):
-M4 Ingested keeps sandbox sources        KILLED: "Ingested never shows seed: sandbox-only live sources give the empty state"
-M5 headline sums every source            KILLED: "adding an overlapping source never changes the headline", oracle test
+# Mutation spot checks (each restored after the run); all KILLED
+M1 flip AI match (=== -> !==)                    11 failed, e.g. "all AI", "no AI"
+M2 sum currencies together (key 'USD')           "never sums mixed currencies; one ratio per BillingCurrency"
+M3 ratio for total >= 0 (was > 0)                "zero total -> null"
+M4 Ingested keeps sandbox sources                "Ingested never shows seed: sandbox-only live sources ..."
+M5 headline sums every source                    "adding an overlapping source never changes the headline"
+M6 drop the card's cancelled guard               "a slow Static-seed load cannot overwrite Ingested after rapid switching"
+M7 fallback owner = any member when canonical    "never double-counts a repeated bill: pointfive-sandbox absent / failing"
+   is missing (the Copilot High bug)
+M8 sum in micro-units again (toFixed(6))         "keeps sub-micro costs: 1000 rows of 0.0000004 plus $1 ..."
 
-# Other checks
-eslint (5 changed files): exit 0
+# Other checks (full npm ci in the scratch clone; happy-dom + @testing-library present)
+eslint (6 changed files): exit 0
+tsc --noEmit: 0 errors
 git diff --check: clean
-tsc --noEmit: 0 errors in changed files (pre-existing missing-module errors only:
-  @playwright/test, @testing-library/react, @aws-sdk/client-s3, csv-parse not in shared node_modules)

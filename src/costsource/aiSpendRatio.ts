@@ -6,7 +6,8 @@
 //   commitments), so prepaid commitments are not double-counted against usage.
 // - Credits and refunds (negative rows) net in.
 // - Currencies are never summed together: one result per BillingCurrency.
-// - Sums run in integer micro-units (BigInt), so 0.1 + 0.2 is exactly 0.3.
+// - Sums run in integer nano-units (BigInt), so 0.1 + 0.2 is exactly 0.3 and
+//   sub-micro costs (e.g. per-token prices) are kept.
 //   Invalid rows (non-finite or absurd cost, bad currency code) are counted
 //   as excluded, never thrown.
 import type { CanonicalFocusRow } from './focusRows';
@@ -16,7 +17,7 @@ const AI_SERVICE_CATEGORY = 'AI and Machine Learning';
 /** Largest per-row |cost| accepted; anything above is treated as corrupt input. */
 const MAX_ABS_COST = 1e12;
 // BigInt() calls, not literals: the tsconfig target predates ES2020.
-const MICROS = BigInt(1_000_000);
+const NANOS = BigInt(1_000_000_000);
 const ZERO = BigInt(0);
 
 export interface CurrencyAiSpend {
@@ -37,19 +38,19 @@ export interface AiSpendRatio {
   notes: string[];
 }
 
-/** Exact micro-units for a valid cost, or null (the single validation point). */
-function toMicros(value: unknown): bigint | null {
+/** Exact nano-units for a valid cost, or null (the single validation point). */
+function toNanos(value: unknown): bigint | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > MAX_ABS_COST) return null;
-  const [whole, frac = ''] = value.toFixed(6).split('.');
+  const [whole, frac = ''] = value.toFixed(9).split('.');
   const sign = BigInt(whole.startsWith('-') ? -1 : 1);
-  return BigInt(whole) * MICROS + sign * BigInt(frac.padEnd(6, '0'));
+  return BigInt(whole) * NANOS + sign * BigInt(frac.padEnd(9, '0'));
 }
 
 /** Nearest double to the exact decimal value (parsed from its decimal string). */
-function fromMicros(micros: bigint): number {
-  const abs = micros < ZERO ? -micros : micros;
-  const decimal = `${abs / MICROS}.${(abs % MICROS).toString().padStart(6, '0')}`;
-  return micros < ZERO ? -Number(decimal) : Number(decimal);
+function fromNanos(nanos: bigint): number {
+  const abs = nanos < ZERO ? -nanos : nanos;
+  const decimal = `${abs / NANOS}.${(abs % NANOS).toString().padStart(9, '0')}`;
+  return nanos < ZERO ? -Number(decimal) : Number(decimal);
 }
 
 interface Acc {
@@ -63,20 +64,20 @@ export function computeAiSpendRatio(rows: CanonicalFocusRow[]): AiSpendRatio {
   const byCurrency = new Map<string, Acc>();
   let excludedRows = 0;
   for (const row of rows) {
-    const micros = toMicros(row.EffectiveCost);
+    const nanos = toNanos(row.EffectiveCost);
     const currency = row.BillingCurrency;
-    if (micros === null || typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
+    if (nanos === null || typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
       excludedRows += 1;
       continue;
     }
     const acc = byCurrency.get(currency) ?? { total: ZERO, ai: ZERO, rows: 0, services: new Map() };
     byCurrency.set(currency, acc);
-    acc.total += micros;
+    acc.total += nanos;
     acc.rows += 1;
     if (row.ServiceCategory === AI_SERVICE_CATEGORY) {
-      acc.ai += micros;
+      acc.ai += nanos;
       const name = row.ServiceName || '(unnamed service)';
-      acc.services.set(name, (acc.services.get(name) ?? ZERO) + micros);
+      acc.services.set(name, (acc.services.get(name) ?? ZERO) + nanos);
     }
   }
 
@@ -84,12 +85,12 @@ export function computeAiSpendRatio(rows: CanonicalFocusRow[]): AiSpendRatio {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([currency, acc]) => ({
       currency,
-      totalCost: fromMicros(acc.total),
-      aiCost: fromMicros(acc.ai),
-      ratio: acc.total > ZERO ? fromMicros(acc.ai) / fromMicros(acc.total) : null,
+      totalCost: fromNanos(acc.total),
+      aiCost: fromNanos(acc.ai),
+      ratio: acc.total > ZERO ? fromNanos(acc.ai) / fromNanos(acc.total) : null,
       byService: [...acc.services.entries()]
         .sort(([na, a], [nb, b]) => (a === b ? na.localeCompare(nb) : a > b ? -1 : 1))
-        .map(([serviceName, cost]) => ({ serviceName, aiCost: fromMicros(cost) })),
+        .map(([serviceName, cost]) => ({ serviceName, aiCost: fromNanos(cost) })),
       rowCount: acc.rows,
     }));
 
@@ -107,7 +108,7 @@ export function computeAiSpendRatio(rows: CanonicalFocusRow[]): AiSpendRatio {
 export interface AiSpendRatioReport {
   mode: CostSourceClient['mode'];
   window: CostWindow;
-  /** inHeadline false = repeats another fetched source's bill; not in `overall`. */
+  /** inHeadline false = another fetched source owns this bill; not in `overall`. */
   perSource: { sourceId: string; name: string; inHeadline: boolean; result: AiSpendRatio }[];
   /** Rows of the inHeadline sources only, so overlapping sources are never summed. */
   overall: AiSpendRatio;
@@ -115,15 +116,14 @@ export interface AiSpendRatioReport {
 }
 
 /**
- * Seed sources that repeat another source's bill: same BillingAccountId and
- * ResourceIds (checked against the rows in aiSpendRatio.test.ts). They stay
- * as per-source rows but join the headline only when the source they repeat
- * was not fetched. The synthetic clouds bill their own accounts and count.
+ * Seed sources that repeat one bill: same BillingAccountId and ResourceIds
+ * (checked against the rows in aiSpendRatio.test.ts). Each group has exactly
+ * one headline owner, the first fetched id in this order; the rest stay as
+ * per-source rows only. The synthetic clouds bill their own accounts.
  */
-const REPEATS_BILL_OF: Readonly<Record<string, string>> = {
-  'focus-file-sandbox': 'pointfive-sandbox',
-  'servicenow-sandbox': 'pointfive-sandbox',
-};
+const REPEATED_BILL_GROUPS: readonly (readonly string[])[] = [
+  ['pointfive-sandbox', 'focus-file-sandbox', 'servicenow-sandbox'],
+];
 
 /**
  * AI spend ratio across sources, through the CostSourceClient interface only,
@@ -165,12 +165,10 @@ export async function fetchAiSpendRatio(
     fetched.push({ sourceId: id, name, rows: Array.isArray(outcome.value?.rows) ? outcome.value.rows : [] });
   });
   const fetchedIds = new Set(fetched.map((f) => f.sourceId));
-  const perSource = fetched.map(({ sourceId, name, rows }) => ({
-    sourceId,
-    name,
-    inHeadline: !fetchedIds.has(REPEATS_BILL_OF[sourceId] ?? ''),
-    rows,
-  }));
+  const perSource = fetched.map(({ sourceId, name, rows }) => {
+    const group = REPEATED_BILL_GROUPS.find((g) => g.includes(sourceId));
+    return { sourceId, name, inHeadline: !group || group.find((id) => fetchedIds.has(id)) === sourceId, rows };
+  });
   return {
     mode: client.mode,
     window,
