@@ -1,26 +1,32 @@
 // Theme gate for built-in and user-imported themes. Structure is checked first
 // (input is untrusted JSON); contrast is only checked once the shape is sound.
-import { contrastRatio } from './contrast';
+import { composite, contrastRatio } from './contrast';
 import { ROLES, type Role, type Theme } from './themes';
 
 export interface Violation {
   code: 'structure' | 'unknown-key' | 'forbidden-key' | 'unknown-role' | 'missing-role' | 'bad-color' | 'contrast' | 'unknown-theme';
   message: string;
   fg?: Role;
-  bg?: Role;
+  /** A surface role, or `<accent>/<percent>@<surface>` for an accent tint over it. */
+  bg?: string;
   ratio?: number;
   min?: number;
 }
 
-const SURFACES: Role[] = ['void', 'deep', 'slab', 'raised'];
-const EXEC_SURFACES: Role[] = ['exec-bg', 'exec-surface'];
+const MAIN: Role[] = ['void', 'deep', 'slab', 'raised'];
+const EXEC: Role[] = ['exec-bg', 'exec-surface', 'exec-hover'];
+const SURFACES = [...MAIN, ...EXEC];
+// Accent text sits on every surface (exec cards included) and on its own tint
+// (`text-value bg-value/10` badges). Alpha = the largest bg-<accent>/<n> in use.
+const TINT = { value: 0.1, cost: 0.1, shape: 0.1, gate: 0.2, unit: 0.2, purple: 0.3 } as const;
+const ACCENTS = Object.keys(TINT) as (keyof typeof TINT)[];
 // [foreground roles, surfaces they sit on, kind]
 const PAIRS: [Role[], Role[], 'text' | 'ui'][] = [
-  [['txt', 'sub', 'dim', 'value', 'cost', 'shape', 'gate', 'unit', 'purple'], SURFACES, 'text'],
-  [['exec-text', 'exec-muted'], EXEC_SURFACES, 'text'],
-  [['edge'], ['void', 'deep', 'slab'], 'ui'],
-  [['exec-border'], EXEC_SURFACES, 'ui'],
-  [['focus'], [...SURFACES, ...EXEC_SURFACES], 'ui'],
+  [['txt', 'sub', 'dim', ...ACCENTS], SURFACES, 'text'],
+  [['exec-text', 'exec-muted'], EXEC, 'text'],
+  [['edge'], MAIN, 'ui'],
+  [['exec-border'], EXEC, 'ui'],
+  [['focus'], SURFACES, 'ui'],
 ];
 const MIN = { standard: { text: 4.5, ui: 3 }, high: { text: 7, ui: 4.5 } } as const;
 
@@ -59,17 +65,15 @@ export function validateTheme(input: unknown): Violation[] {
   }
   if (out.length) return out;
 
-  const theme = input as unknown as Theme;
-  for (const [fgs, bgs, kind] of PAIRS) {
-    const min = MIN[theme.contrast][kind];
-    for (const fg of fgs) {
-      for (const bg of bgs) {
-        const ratio = contrastRatio(theme.colors[fg], theme.colors[bg]);
-        if (ratio < min) {
-          out.push({ code: 'contrast', fg, bg, ratio, min, message: `${fg} on ${bg} is ${ratio.toFixed(2)}:1, needs ${min}:1` });
-        }
-      }
-    }
+  const { colors: c, contrast: level } = input as unknown as Theme;
+  const check = (fg: Role, bg: string, bgHex: string, kind: 'text' | 'ui') => {
+    const min = MIN[level][kind];
+    const ratio = contrastRatio(c[fg], bgHex);
+    if (ratio < min) out.push({ code: 'contrast', fg, bg, ratio, min, message: `${fg} on ${bg} is ${ratio.toFixed(2)}:1, needs ${min}:1` });
+  };
+  for (const [fgs, bgs, kind] of PAIRS) for (const fg of fgs) for (const bg of bgs) check(fg, bg, c[bg], kind);
+  for (const accent of ACCENTS) {
+    for (const s of SURFACES) check(accent, `${accent}/${Math.round(TINT[accent] * 100)}@${s}`, composite(c[accent], TINT[accent], c[s]), 'text');
   }
   return out;
 }

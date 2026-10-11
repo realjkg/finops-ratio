@@ -25,6 +25,12 @@ export function contrastRatio(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** `fg` at `alpha` (0..1) over opaque `bg`, as Tailwind renders bg-<color>/<n>. */
+export function composite(fg: string, alpha: number, bg: string): string {
+  const [a, b] = [hexToRgb(fg), hexToRgb(bg)];
+  return toHex([0, 1, 2].map((i) => a[i] * alpha + b[i] * (1 - alpha)) as Rgb);
+}
+
 /** Black or white, whichever reads better on `bg`. */
 export function onColor(bg: string): '#000000' | '#ffffff' {
   return contrastRatio('#000000', bg) >= contrastRatio('#ffffff', bg) ? '#000000' : '#ffffff';
@@ -53,18 +59,20 @@ function fromHsl([h, s, l]: Rgb): Rgb {
 /**
  * Returns `fg` if it already meets `min` against `bg`; otherwise the color with the
  * same hue and saturation whose HSL lightness is closest to fg's (0.5% steps, in
- * either direction) that meets it; otherwise black/white via onColor(bg).
+ * either direction) that meets it. If no lightness reaches `min`, returns
+ * onColor(bg) with `ok: false`: callers must treat that as "target unreachable".
  */
-export function ensureContrast(fg: string, bg: string, min: number): string {
+export function ensureContrast(fg: string, bg: string, min: number): { color: string; ok: boolean } {
   const start = toHex(hexToRgb(fg));
-  if (contrastRatio(start, bg) >= min) return start;
+  if (contrastRatio(start, bg) >= min) return { color: start, ok: true };
   const [h, s, l] = toHsl(hexToRgb(fg));
   for (let step = 1; step <= 200; step++) {
     for (const dir of [1, -1]) {
       const lightness = Math.min(1, Math.max(0, l + dir * step * 0.005));
       const candidate = toHex(fromHsl([h, s, lightness]));
-      if (contrastRatio(candidate, bg) >= min) return candidate;
+      if (contrastRatio(candidate, bg) >= min) return { color: candidate, ok: true };
     }
   }
-  return onColor(bg);
+  const color = onColor(bg);
+  return { color, ok: contrastRatio(color, bg) >= min };
 }

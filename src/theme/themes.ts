@@ -33,10 +33,10 @@ export const BUILT_IN_THEMES: Readonly<Record<BuiltInThemeName, Theme>> = {
     colorScheme: 'light',
     contrast: 'standard',
     colors: {
-      void: '#ffffff', deep: '#f6f7f9', slab: '#ffffff', raised: '#eef0f3', edge: '#878e99',
+      void: '#ffffff', deep: '#f6f7f9', slab: '#ffffff', raised: '#eef0f3', edge: '#848b97',
       txt: '#111827', sub: '#4b5563', dim: '#5d6573',
-      value: '#047857', cost: '#be123c', shape: '#8a5a00', gate: '#4338ca', unit: '#0e7490', purple: '#7e22ce',
-      'exec-bg': '#f5f8fb', 'exec-surface': '#ffffff', 'exec-border': '#878e99', 'exec-hover': '#edf2f7',
+      value: '#047251', cost: '#be123c', shape: '#8a5a00', gate: '#4338ca', unit: '#0e607c', purple: '#681bb0',
+      'exec-bg': '#f5f8fb', 'exec-surface': '#ffffff', 'exec-border': '#848b97', 'exec-hover': '#edf2f7',
       'exec-text': '#0f172a', 'exec-muted': '#475569',
       focus: '#2563eb',
     },
@@ -48,7 +48,7 @@ export const BUILT_IN_THEMES: Readonly<Record<BuiltInThemeName, Theme>> = {
     colors: {
       void: '#ffffff', deep: '#ffffff', slab: '#ffffff', raised: '#f0f0f0', edge: '#4d4d4d',
       txt: '#000000', sub: '#1a1a1a', dim: '#333333',
-      value: '#00573a', cost: '#9e0020', shape: '#5c3d00', gate: '#2a2aa6', unit: '#004f63', purple: '#5a1a9c',
+      value: '#005136', cost: '#8c001c', shape: '#5c3d00', gate: '#252598', unit: '#003f4b', purple: '#371556',
       'exec-bg': '#ffffff', 'exec-surface': '#ffffff', 'exec-border': '#4d4d4d', 'exec-hover': '#f0f0f0',
       'exec-text': '#000000', 'exec-muted': '#333333',
       focus: '#0033cc',

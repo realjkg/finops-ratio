@@ -4,10 +4,13 @@ import { hexToRgb } from './contrast';
 import { BUILT_IN_THEMES, ROLES, type BuiltInThemeName, type Theme } from './themes';
 import { validateTheme, type Violation } from './validate';
 
-/** Returns the violations that blocked the change; an empty list means applied (or no document). */
+/**
+ * Returns the violations that blocked the change; an empty list means applied, or
+ * validated only when there is no document (`doc` null, or omitted during SSR).
+ */
 export function applyTheme(
   input: BuiltInThemeName | Theme,
-  doc: Document | undefined = typeof document === 'undefined' ? undefined : document,
+  doc: Document | null = typeof document === 'undefined' ? null : document,
 ): Violation[] {
   let theme: Theme;
   if (typeof input === 'string') {

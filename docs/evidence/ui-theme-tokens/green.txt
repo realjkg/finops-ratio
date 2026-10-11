@@ -1,28 +1,33 @@
-# GREEN: feat/ui-theme-tokens
-# cmd: npx vitest run src/theme
- Test Files  3 passed (3)
-      Tests  49 passed (49)
-
-# cmd: npx vitest run (full suite)
- Test Files  174 passed | 1 failed (175); Tests 3410 passed | 1 failed (3411)
- the 1 failure: src/simulation/server/acceptance.test.ts (timing under full-suite load);
- it passes in isolation on this branch (2/2) and on origin/main (2/2); untouched by this slice.
+# GREEN: feat/ui-theme-tokens (after review round 2)
+# cmd: npx vitest run src/theme -> Test Files 4 passed (4); Tests 56 passed (56)
+# cmd: npx vitest run -> Test Files 176 passed (176); Tests 3418 passed (3418)
 # npx tsc --noEmit: clean; npx eslint src/theme: clean
 
-# Mutation spot checks (each reverted after the run)
-M1 validate.ts standard text min 4.5 -> 4.4: KILLED
-        × dark fails only the pinned legacy pairs 8ms
-        × rejects body text below 4.5:1 (#777 on white is 4.48) 6ms
-         Tests  2 failed | 47 passed (49)
-M2 themes.ts dark raised #141a26 -> #151a26: KILLED
-        × defines each built-in under :root[data-theme] and the default under :root 9ms
-        × honors prefers-color-scheme and prefers-contrast only when no theme is chosen 2ms
-        × resolves every original token to the original hex (themes.ts and both CSS blocks) 2ms
-         Tests  3 failed | 46 passed (49)
+# Mutation spot checks (each reverted; all KILLED)
+M1 validate.ts standard text min 4.5 -> 4.4: 2 failed (dark pinned list, #777 on white)
+M2 themes.ts dark raised #141a26 -> #151a26: 3 failed (CSS parity x2, dark identity)
+M3 drop purple from the accent list: 2 failed (every-role coverage, dark pinned list)
+M4 skip composited tint pairs: 2 failed (tint test, dark pinned list)
+M5 drop raised from main surfaces: 4 failed (raised/exec, tint, HC, dark pinned list)
+M6 focus outline without !important: 1 failed (compiled CSS focus test)
+
+# Guard blind-spot proof: temp src/components/ZzGuardProbe.tsx (multi-line style={{ ... color: 'rgb(1, 2, 3)' }}), then removed
+       × inline style objects setting color/background (multi-line too) do not grow past 110 in 40 files 10ms
+       × rgb()/hsl() color literals in TSX do not grow past 20 in 6 files 4ms
+  AssertionError: expected 111 to be less than or equal to 110
+  AssertionError: expected 21 to be less than or equal to 20
+        Tests  2 failed | 11 passed (13)
+# New baselines: style objects with color/background 110 in 40 files (old line count 94/39);
+#   rgb()/hsl() in TSX 20 in 6 files; hex in TSX 19 in 7; hex in non-test .ts 6 in 1 (src/lib/scales.ts)
+
+# Validator: light and high-contrast 0 violations; dark 58 pinned pairs (explicit list in validate.test.ts)
+# Palette changes for the new pairs: light edge/exec-border #878e99 -> #848b97 (edge on raised was 2.89:1),
+#   value #047857 -> #047251, unit #0e7490 -> #0e607c, purple #7e22ce -> #681bb0 (accent on own tint);
+#   HC value #005136, cost #8c001c, gate #252598, unit #003f4b, purple #371556 (7:1 on own tint over raised)
 
 # Rendered contrast audit (next dev + headless chromium via CDP; visible text nodes,
 # fg alpha/opacity composited over the ancestor background chain; 4.5/3 large; HC 7/4.5)
-# failing / audited text nodes
+# failing / audited text nodes (re-run after this round: unchanged)
 page         light      dark       high-contrast
 /            26/127     49/127     26/127
 /overview    47/249     75/249     47/249
