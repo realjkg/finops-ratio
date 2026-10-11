@@ -1,4 +1,4 @@
-baseline: 57 passed
+baseline: 68 passed
 | mutant | file | models | result | failing tests |
 |---|---|---|---|---|
 | no-principal-allows | src/rbac/authorize.ts | deny by default dropped | killed | 7 |
@@ -22,11 +22,11 @@ baseline: 57 passed
 | unapproved-change-ok | src/rbac/authorize.ts | prod apply of an unapproved change | killed | 1 |
 | approver-equals-requester-ok | src/rbac/authorize.ts | approver equal to requester | killed | 2 |
 | ticket-not-approved-ok | src/rbac/authorize.ts | prod apply while ticket open | killed | 2 |
-| own-copy-dropped | src/rbac/authorize.ts | inherited principal and resource fields decide (review M1) | killed | 3 |
+| own-copy-dropped | src/rbac/authorize.ts | inherited principal and resource fields decide (review M1) | killed | 4 |
 | own-copy-keeps-inherited | src/rbac/authorize.ts | copy reads fields through the prototype chain (review M1) | killed | 2 |
 | own-copy-array-passthrough | src/rbac/authorize.ts | array resource read through its prototype (delta review H) | killed | 1 |
-| own-elements-no-hasown | src/rbac/authorize.ts | inherited index fills a hole in teams or envs (delta review M-a) | killed | 2 |
-| own-copy-no-array-copy | src/rbac/authorize.ts | teams and envs used uncopied (delta review M-b) | killed | 1 |
+| own-elements-no-hasown | src/rbac/authorize.ts | inherited index fills a hole in teams or envs (delta review M-a) | killed | 5 |
+| own-copy-no-array-copy | src/rbac/authorize.ts | teams and envs used uncopied (delta review M-b) | killed | 2 |
 | own-copy-object-proto | src/rbac/authorize.ts | copy inherits Object.prototype (delta review M-c) | killed | 1 |
 | star-eng-lead-unteamed-ys | src/rbac/authorize.ts | Y* or A cell without a team for teams "*" (review L2) | killed | 1 |
 | scope-any-env-length | src/rbac/authorize.ts | invalid-only env claim counts as scope (review L2) | killed | 1 |
@@ -34,14 +34,16 @@ baseline: 57 passed
 | readview-kind-guard | src/rbac/authorize.ts | view.read with a non-view kind (review L2) | killed | 1 |
 | matrix-cells-shared-unfrozen | src/rbac/matrix.ts | cell tuples shared and writable (Copilot 1) | killed | 1 |
 | matrix-cells-object-unfrozen | src/rbac/matrix.ts | cells object writable (Copilot 1) | killed | 1 |
-| scope-team-inherited-index | src/identity/scope.ts | inherited index fills a hole in teams (Copilot 2) | killed | 1 |
-| scope-env-inherited-index | src/identity/scope.ts | inherited index fills a hole in envs (Copilot 2) | killed | 1 |
+| scope-team-inherited-index | src/identity/scope.ts | inherited index fills a hole in teams (Copilot 2) | killed | 2 |
+| scope-env-inherited-index | src/identity/scope.ts | inherited index fills a hole in envs (Copilot 2) | killed | 2 |
 | scope-inherited-claims | src/identity/scope.ts | inherited teams claim counts (Copilot 3) | killed | 1 |
 | scope-inherited-row-team | src/identity/scope.ts | inherited row team counts (Copilot 3) | killed | 1 |
 | scope-placeholder-teams | src/identity/scope.ts | placeholder-only teams count as scope in inScope (Copilot 4) | killed | 1 |
 | authorize-placeholder-teams | src/rbac/authorize.ts | placeholder-only teams count as scope (Copilot 4) | killed | 1 |
 | own-copy-throws | src/rbac/authorize.ts | revoked Proxy throws out of authorize() | killed | 1 |
-| scope-throws | src/identity/scope.ts | revoked Proxy throws out of inScope() | killed | 1 |
+| scope-throws | src/identity/scope.ts | revoked Proxy throws out of inScope() | killed | 2 |
+| filter-inherited-index | src/identity/scope.ts | filterByScope visits an inherited index (Copilot review of 02a1376) | killed | 2 |
+| filter-keyof-throws | src/identity/scope.ts | a throwing keyOf propagates (Copilot review of 02a1376) | killed | 1 |
 | scope-widen-team-list | src/identity/scope.ts | any team list covers every team | killed | 9 |
 | scope-star-element-wildcard | src/identity/scope.ts | ['*'] treated as a wildcard | killed | 1 |
 | scope-case-fold | src/identity/scope.ts | team match case-insensitive | killed | 2 |
@@ -65,4 +67,4 @@ baseline: 57 passed
 | matrix-drop-sync-row | src/rbac/matrix.ts | planned status-sync route without a matrix row | killed | 2 |
 | matrix-impact-dropped | src/rbac/matrix.ts | procurement approves any impact | killed | 2 |
 
-62 of 63 mutants killed; 1 equivalent; 0 survived
+64 of 65 mutants killed; 1 equivalent; 0 survived
