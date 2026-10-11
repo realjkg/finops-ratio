@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { MockCostSourceClient } from './MockCostSourceClient';
 import { sourcesForEnv, resolveWorkloadId } from './seed';
+import { SYNTHETIC_CLOUD_WORKLOAD_MAPPING } from './syntheticCloudMapping';
+import { SYNTHETIC_CLOUD_LINES } from './syntheticCloudSeed';
 import { anonymousSourceView } from './sourceDisclosure';
 import type { CanonicalFocusRow } from './focusRows';
 import type { CostWindow } from './CostSourceClient';
@@ -134,7 +136,7 @@ describe('A6 synthetic cloud sandbox sources', () => {
     expect(blob).not.toMatch(/\b\d{12}\b/); // AWS account id shape
     expect(blob).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i); // Azure GUID shape
     expect(blob).not.toMatch(/AKIA[0-9A-Z]{16}/);
-    expect(blob).not.toMatch(/-----BEGIN/);
+    expect(blob).not.toMatch(/-{5}BEGIN/);
     expect(blob).not.toMatch(/https?:\/\//);
     expect(blob).not.toMatch(/secret|password|apikey|bearer|\btoken\b/i);
     for (const id of NEW_IDS) {
@@ -161,10 +163,8 @@ describe('A6 synthetic cloud sandbox sources', () => {
   });
 
   it('mapping_is_explicit_every_row_maps_or_is_not_attributed', async () => {
-    const mapping = await import('./syntheticCloudMapping');
-    const { SYNTHETIC_CLOUD_LINES } = await import('./syntheticCloudSeed');
     for (const id of NEW_IDS) {
-      const table = mapping.SYNTHETIC_CLOUD_WORKLOAD_MAPPING[id];
+      const table = SYNTHETIC_CLOUD_WORKLOAD_MAPPING[id];
       const lines = SYNTHETIC_CLOUD_LINES[id];
       expect(lines.length).toBe(ORACLE[id].rowCount);
       // Every line has an entry (a workload id or an explicit null), and no entry is orphaned.
