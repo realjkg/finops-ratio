@@ -73,10 +73,7 @@ const CASES: Case[] = [
     has: ['**Largest savings opportunity by team: Marketing**', usd(3136), 'projected'] },
   // ---- team ----
   { name: '08 Legal team ROI', turns: ['What is the ROI of the Legal team?'],
-    has: ['**ROI — Legal (team)**', usd(LEGAL.spend), usd(LEGAL.value), x1(LEGAL.ratio), roiPct(LEGAL.ratio), EVID,
-      'Strongest: Contract Redliner', 'Weakest: Document Summarizer'] .concat(
-      // the oracle decides strongest/weakest by workload ratio
-      []),
+    has: ['**ROI — Legal (team)**', usd(LEGAL.spend), usd(LEGAL.value), x1(LEGAL.ratio), roiPct(LEGAL.ratio), EVID],
     ordered: byValueDesc(LEGAL.members).map((w) => w.name) },
   { name: '09 CX Engineering ROI + contributors ranked by value', turns: ['ROI for CX Engineering'],
     has: ['**ROI — CX Engineering (team)**', usd(CX.value), x1(CX.ratio), ...wlLine('wl-support'), ...wlLine('wl-triage')],
