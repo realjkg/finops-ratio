@@ -93,7 +93,7 @@ export interface RouteRow {
   file: string | null;
   group: ViewGroupId;
   status: RouteStatus;
-  /** The card that wires the enforcement (null when nothing is wired: public, signed by its own card, sim_only). */
+  /** The card that wires authorize() enforcement; null for a row not enforced through authorize() (public, public_mock, signed, sim_only). */
   enforcedBy: CardId | null;
   /** Set when the file does not exist yet: the card that creates it. */
   plannedBy?: CardId;
@@ -184,12 +184,12 @@ export const ROUTE_MATRIX: readonly RouteRow[] = Object.freeze([
   api('/api/v1/cm/change', 'cm_change', 'C3', { status: 'deferred(C3)', legacyService: 'see_4_5' }),
 
   // Routes this plan adds.
-  api('/api/v1/session/login', 'session', 'B7', { status: 'public_mock', plannedBy: 'B7' }),
-  api('/api/v1/session/mock-control', 'session', 'B7', { status: 'public_mock', plannedBy: 'B7' }),
+  api('/api/v1/session/login', 'session', 'B7', { status: 'public_mock', enforcedBy: null, plannedBy: 'B7' }),
+  api('/api/v1/session/mock-control', 'session', 'B7', { status: 'public_mock', enforcedBy: null, plannedBy: 'B7' }),
   api('/api/v1/session/logout', 'session', 'B7', { plannedBy: 'B7' }),
   api('/api/v1/session/principal', 'session', 'B7', { plannedBy: 'B7' }),
   api('/api/v1/workloads', 'scoped_data', 'B7', { plannedBy: 'B7' }),
-  api('/api/v1/cm/webhook', 'webhook', 'C4', { status: 'signed', plannedBy: 'C4' }),
+  api('/api/v1/cm/webhook', 'webhook', 'C4', { status: 'signed', enforcedBy: null, plannedBy: 'C4' }),
   api('/api/v1/cm/sync', 'status_sync', 'C8', { plannedBy: 'C8', action: 'ticket.update' }),
   api('/api/v1/audit/records', 'audit', 'C5', { plannedBy: 'C5' }),
 
