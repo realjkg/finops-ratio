@@ -127,3 +127,15 @@ test; both were removed rather than argued with.) The PR needs the restricted re
 fields in `AIClient.ts`, their population in `buildAIContext.ts`, the re-export in `index.ts`,
 and `MockAIClient.ts` delegating to `src/ai/mock`. Reverting the merge restores the previous
 mock. No data, environment, flag, dependency or route change is involved.
+
+## 6. Challenger round (PR #99): RED then GREEN
+
+The challenger requested changes (0 High, 5 Medium, 6 Low). Tests were written first in
+`src/ai/mock/hardening.test.ts` and committed failing.
+
+Command: `npx vitest run src/ai/mock/hardening.test.ts`
+
+RED (before the fixes): 25 failed of 49 tests. The 24 that pass are the surviving-mutant tests (M4
+a to f, which pin existing behavior the earlier suite did not) and the pinned fallback (L3), so the
+failures are the crashes, missing warnings, silent substitutions, forged lines and unbounded
+output. The five route tests time out because the handler returns 500 for prototype-key wire strings.
