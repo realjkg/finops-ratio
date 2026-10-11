@@ -19,10 +19,12 @@ killed   array-as-record
 killed   record-inherits-object-prototype
 killed   inherited-index-read
 killed   claim-cap-removed
+killed   length-read-twice
 killed   row-cap-removed
 killed   ownArray-throws
 killed   ownRecord-throws
 killed   env-trimmed
+killed   inherited-ratio-env
 killed   unknown-env-is-dev
 killed   policy-not-frozen
 killed   mcp-write-finops
@@ -31,4 +33,4 @@ killed   legacy-reads-audit
 killed   legacy-on-open-route
 killed   webhook-public
 killed   sync-row-dropped
-33 of 33 mutants killed
+35 of 35 mutants killed
