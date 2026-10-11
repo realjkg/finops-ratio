@@ -6,7 +6,7 @@ Facts F1 to F20 were read on 2026-10-11 at `origin/main` `62bd8ed`
 `8caec87`, which differs from `62bd8ed` only by documentation
 (`git diff --stat 62bd8ed 8caec87`). Line numbers below are from those commits.
 The merged-card records and the corrections in the section "Re-checked against
-merged code" were checked at `origin/main` `c95be35` while folding this plan
+merged code" were checked at `origin/main` `145565f` while folding this plan
 into PR #110 (A8).
 
 ## How to repeat
@@ -75,7 +75,7 @@ Each row gives the claim, the command, and the result.
 
 | Claim | Command | Result |
 |---|---|---|
-| Sprint A merge commits | `git log --oneline origin/main` | A1 #103 `0e097a2`, A2 #104 `de7e5b4`, A3 #105 `039e9b6`, A6 #108 `6acd2ba`, A7 #109 `a3c1437`; follow-up #111 `e184a44`; #99 `7a9da43`, #102 `a90dda5`, #101 `0ace878`, #112 `c95be35`. A4 #106, A5 #107 and A8 #110 are open |
+| Sprint A merge commits | `git log --oneline origin/main` | A1 #103 `0e097a2`, A2 #104 `de7e5b4`, A3 #105 `039e9b6`, A6 #108 `6acd2ba`, A7 #109 `a3c1437`; follow-up #111 `e184a44`; #99 `7a9da43`, #102 `a90dda5`, #101 `0ace878`, #112 `c95be35`, T1 #113 `145565f`. A4 #106, A5 #107 and A8 #110 are open |
 | Merged A1 contract | `sed -n 20,27p src/identity/types.ts`; `sed -n 115,137p src/rbac/matrix.ts` | `Action` has `ticket.bind` and `ticket.get`, no `change.read`; `ChangeImpact` is `cost`, `commitment`, `operational`; `requiresImpact` finance `cost`, procurement `commitment`; `/api/v1/cm/sync` row `status_sync` with `plannedBy: 'C8'` and action `ticket.update` |
 | Legacy grant | `sed -n 44,62p src/rbac/matrix.test.ts` | 11 legacy-readable routes derived from the source; legacy actions exactly `ticket.attach`, `ticket.create`, `ticket.status`, `view.export` (export is checked against the same route rows in `authorize.ts`) |
 | `eng_lead` on tokenomics and prediction | `grep -n "tokenomics:\|prediction:" src/rbac/matrix.ts` | `tokenomics: 'O D D T O D'`, `prediction: 'O D - T - D'` (shared by predict and accuracy): `T`, not the `-` PLAN 4.4 asks for; open item for B3 |
