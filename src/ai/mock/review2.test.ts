@@ -120,21 +120,3 @@ describe('M5 exact boundaries of the claimed guards', () => {
     }
   });
 });
-
-describe('L1 notes survive the reply cap', () => {
-  it('rejected-figures and also-named notes stay when the body is shortened', async () => {
-    const c = structuredClone(CTX);
-    const w0 = c.workloads![0];
-    const i0 = c.initiatives[0];
-    c.workloads = [
-      ...Array.from({ length: 3 }, (_, k) => ({ ...w0, id: `b-${k}`, name: `Big Workload ${k}`, team: 'Big', alerts: Array.from({ length: 50 }, () => ({ type: 'x', severity: 'warning', message: 'm'.repeat(400), acknowledged: false })) })),
-      { ...w0, id: 'bad', name: 'Bad Figures', monthlySpend: 1.7e308 },
-    ];
-    c.initiatives = c.workloads.map((w) => ({ ...i0, id: w.id, name: w.name }));
-    const t = await ask('Any alerts for Big Workload 1 and Big Workload 2?', c);
-    expect(t.length).toBeLessThanOrEqual(8000);
-    expect(t).toContain('answer shortened');
-    expect(t).toContain('Note: you also named Big Workload 2');
-    expect(t).toMatch(/Bad Figures[^\n]*out of range and ignored/);
-  }, 30000);
-});

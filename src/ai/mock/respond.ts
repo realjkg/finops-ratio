@@ -37,7 +37,6 @@ function bound(text: string, notes: string[] = []): string {
   const lines = text.split('\n');
   const tailAt = lines.findIndex((l) => l.startsWith('Basis:'));
   const head = tailAt < 0 ? lines : lines.slice(0, tailAt);
-  // A long note keeps its start and its end (the meaning), never just a prefix.
   const safeNotes = notes.map((n) => (n.length > NOTE_MAX ? `${n.slice(0, NOTE_MAX / 2 - 1)}\u2026${n.slice(-NOTE_MAX / 2)}` : n));
   const tail = [...safeNotes, ...(tailAt < 0 ? [] : lines.slice(tailAt))];
   const full = [...head, ...tail].join('\n');

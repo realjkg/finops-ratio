@@ -331,7 +331,7 @@ function isValidBody(
     context?: unknown;
   };
   if (!Array.isArray(messages) || messages.length === 0) return false;
-  if (messages.length > MAX_MESSAGES) return false;
+  if (messages.length > MAX_MESSAGES || !messages.every((m) => typeof m === 'object' && m !== null)) return false;
   if (typeof context !== 'object' || context === null) return false;
   const { initiatives, summary, asOf } = context as {
     initiatives?: unknown;

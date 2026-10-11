@@ -92,9 +92,9 @@ function alertList(v: unknown): AIAlertSnapshot[] | null {
 
 export function buildWorld(ctx: AIContext): World {
   const c = rec(ctx);
-  const plain = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+  const plain = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && typeof rec(x).id === 'string'; // entries without a string id are malformed
   const initiatives = arr(c.initiatives).filter(plain);
-  const snaps = new Map(arr(c.workloads).filter(plain).map((w) => [String(w.id), w]));
+  const snaps = new Map(arr(c.workloads).filter(plain).map((w) => [w.id as string, w]));
   const seen = new Set<string>();
   const rows: WorkloadFacts[] = [];
   const rejected: string[] = [];
@@ -159,10 +159,10 @@ export function buildWorld(ctx: AIContext): World {
     });
   };
 
-  for (const i of initiatives) add(String(i.id), i, snaps.get(String(i.id)));
+  for (const i of initiatives) add(i.id as string, i, snaps.get(i.id as string));
   for (const [id, s] of snaps) add(id, undefined, s);
 
-  const dropped = arr(c.initiatives).filter((x) => !legacyInit(x) && !rejectedIds.includes(String(rec(x).id))).length + arr(c.workloads).filter((x) => !plain(x)).length; if (dropped) rejected.push(`${dropped} malformed entries`);
+  const dropped = arr(c.initiatives).filter((x) => !legacyInit(x) && !rejectedIds.includes(rec(x).id as string)).length + arr(c.workloads).filter((x) => !plain(x)).length; if (dropped) rejected.push(`${dropped} malformed entries`);
   const teams: string[] = [];
   for (const w of rows) if (w.team && !teams.includes(w.team)) teams.push(w.team);
   return { asOf: str(c.asOf) ?? '1970-01-01T00:00:00.000Z', workloads: rows, teams, rejected, rejectedIds };
@@ -175,18 +175,18 @@ function legacyInit(raw: unknown): AIContext['initiatives'][number] | null {
   const i = rec(raw);
   const nums = Object.entries(INIT_NUMBERS).map(([k, r]) => [k, typeof i[k] === 'number' && within(i[k], r) ? i[k] : null] as const);
   const [id, name] = [str(i.id), str(i.name)];
-  if (!id || !name || !STATUS_OK.has(String(i.status)) || nums.some(([, v]) => v === null)) return null;
+  if (!id || !name || !(typeof i.status === 'string' && STATUS_OK.has(i.status)) || nums.some(([, v]) => v === null)) return null;
   return { id, name, status: i.status, valueEvidenceStatus: evidence(i.valueEvidenceStatus), ...Object.fromEntries(nums) } as AIContext['initiatives'][number];
 }
 
 export function legacyContext(ctx: AIContext, world: World): AIContext {
   const drop = new Set(world.rejectedIds);
-  const initiatives = arr(ctx.initiatives).filter((x) => !drop.has(String(rec(x).id))).map(legacyInit).filter((i) => i !== null);
+  const initiatives = arr(ctx.initiatives).filter((x) => !drop.has(rec(x).id as string)).map(legacyInit).filter((i) => i !== null);
   const sum = (f: (i: (typeof initiatives)[number]) => number): number => initiatives.reduce((n, i) => n + f(i), 0);
   const sm = rec(ctx.summary);
   const pick = (key: string, range: Range, fallback: number): number => {
     const v = sm[key];
-    return drop.size === 0 && typeof v === 'number' && within(v, range) ? v : fallback;
+    return drop.size === 0 && initiatives.length === arr(ctx.initiatives).length && typeof v === 'number' && within(v, range) ? v : fallback;
   };
   return {
     initiatives,
