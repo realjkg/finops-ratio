@@ -605,6 +605,85 @@ describe('authorize: inherited fields and remaining mutants', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Delta review findings on PR #103 (head d004d1a): arrays, proxies and
+// polluted prototypes. Every prototype is restored in a finally block.
+// ---------------------------------------------------------------------------
+
+describe('authorize: array, proxy and polluted-prototype inputs', () => {
+  const OWN = { kind: 'change', id: 'c', team: PLATFORM, env: 'prod', requesterSub: 'r' };
+  const INHERITED = { ticketState: 'approved', approverSub: 'a' };
+
+  it('an array resource is not a resource, whatever its prototype carries', () => {
+    const proto = Object.assign(Object.create(Array.prototype), INHERITED);
+    const arr = Object.setPrototypeOf(Object.assign([], OWN), proto) as unknown as Resource;
+    expect((arr as Resource).ticketState).toBe('approved'); // the probe is live
+    expectDeny(authorize(principal('eng_lead'), 'change.apply', arr), 403);
+  });
+
+  it('an array resource is denied under a polluted Array.prototype', () => {
+    const ap = Array.prototype as unknown as Record<string, unknown>;
+    try {
+      Object.assign(ap, INHERITED);
+      const arr = Object.assign([], OWN) as unknown as Resource;
+      expect((arr as Resource).ticketState).toBe('approved');
+      expectDeny(authorize(principal('eng_lead'), 'change.apply', arr), 403);
+    } finally {
+      delete ap.ticketState;
+      delete ap.approverSub;
+    }
+  });
+
+  it('a Proxy over an array resource is denied', () => {
+    const target = Object.assign([], OWN) as unknown as Record<string | symbol, unknown>;
+    const proxy = new Proxy(target, {
+      get: (t, k) => (k === 'ticketState' ? 'approved' : k === 'approverSub' ? 'a' : t[k]),
+    }) as unknown as Resource;
+    expect(proxy.ticketState).toBe('approved');
+    expectDeny(authorize(principal('eng_lead'), 'change.apply', proxy), 403);
+  });
+
+  it('an array principal is no principal', () => {
+    expectDeny(authorize(Object.assign([], principal('cto')) as unknown as Principal, 'view.read', { kind: 'view', id: '/', env: 'dev' }), 401);
+    const proxied = new Proxy(Object.assign([], principal('cto')), {}) as unknown as Principal;
+    expectDeny(authorize(proxied, 'view.read', { kind: 'view', id: '/', env: 'dev' }), 401);
+  });
+
+  it('an inherited Array.prototype index never fills a hole in teams or envs', () => {
+    const ap = Array.prototype as unknown as Record<string, unknown>;
+    const cxTicket: Resource = { kind: 'ticket', id: 'X-1', team: CX, env: 'prod' };
+    try {
+      ap[0] = CX;
+      const holeyTeams = principal('eng_lead', { teams: new Array<string>(1) });
+      expectDeny(authorize(holeyTeams, 'ticket.create', cxTicket), 403);
+      ap[0] = 'prod';
+      const holeyEnvs = principal('finops_lead', { envs: new Array<DeployEnv>(1) });
+      expectDeny(authorize(holeyEnvs, 'ticket.create', cxTicket), 403);
+    } finally {
+      delete ap[0];
+    }
+  });
+
+  it('a polluted Object.prototype never supplies a missing field', () => {
+    const op = Object.prototype as Record<string, unknown>;
+    try {
+      Object.assign(op, INHERITED);
+      expectDeny(authorize(principal('eng_lead'), 'change.apply', { ...OWN } as Resource), 403);
+    } finally {
+      delete op.ticketState;
+      delete op.approverSub;
+    }
+    const { role: _r, ...noRole } = principal('cto');
+    void _r;
+    try {
+      op.role = 'cto';
+      expectDeny(authorize(noRole as Principal, 'change.approve', change('prod', { impact: 'cost' })), 401);
+    } finally {
+      delete op.role;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The shared scope helper (src/identity/scope.ts), used by authorize() and by
 // every data seam that filters rows.
 // ---------------------------------------------------------------------------
