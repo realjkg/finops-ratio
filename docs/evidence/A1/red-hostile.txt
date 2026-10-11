@@ -1,0 +1,74 @@
+$ npx vitest run src/identity src/rbac   (Copilot review of fad46ce: hostile array claims, before the fix)
+
+ RUN  v5.0.1 /home/user/sprintA/A1
+
+ ❯ src/rbac/authorize.test.ts (78 tests | 12 failed) 403ms
+   ❯ hostile array claims never throw (Copilot review of fad46ce) (24)
+     × teamCovered, revoked array Proxy fails closed without throwing 34ms
+     × envCovered, revoked array Proxy fails closed without throwing 2ms
+     × hasRealTeam, revoked array Proxy fails closed without throwing 6ms
+     × filterByScope rows, revoked array Proxy fails closed without throwing 6ms
+     × teamCovered, array Proxy whose every trap throws fails closed without throwing 2ms
+     × envCovered, array Proxy whose every trap throws fails closed without throwing 5ms
+     × hasRealTeam, array Proxy whose every trap throws fails closed without throwing 1ms
+     × filterByScope rows, array Proxy whose every trap throws fails closed without throwing 1ms
+     × teamCovered, array Proxy whose own-property check throws fails closed without throwing 1ms
+     × envCovered, array Proxy whose own-property check throws fails closed without throwing 1ms
+     × hasRealTeam, array Proxy whose own-property check throws fails closed without throwing 1ms
+     × filterByScope rows, array Proxy whose own-property check throws fails closed without throwing 1ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > teamCovered, revoked array Proxy fails closed without throwing
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > envCovered, revoked array Proxy fails closed without throwing
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > hasRealTeam, revoked array Proxy fails closed without throwing
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > filterByScope rows, revoked array Proxy fails closed without throwing
+AssertionError: expected [Function] to not throw an error but 'TypeError: Cannot perform \'IsArray\'…' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"TypeError: Cannot perform 'IsArray' on a proxy that has been revoked"
+
+ ❯ src/rbac/authorize.test.ts:903:12
+    901|     expect(() => {
+    902|       result = call(make() as never);
+    903|     }).not.toThrow();
+       |            ^
+    904|     expect(result).toEqual(expected);
+    905|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > teamCovered, array Proxy whose every trap throws fails closed without throwing
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > envCovered, array Proxy whose every trap throws fails closed without throwing
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > hasRealTeam, array Proxy whose every trap throws fails closed without throwing
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > filterByScope rows, array Proxy whose every trap throws fails closed without throwing
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > teamCovered, array Proxy whose own-property check throws fails closed without throwing
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > envCovered, array Proxy whose own-property check throws fails closed without throwing
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > hasRealTeam, array Proxy whose own-property check throws fails closed without throwing
+ FAIL  src/rbac/authorize.test.ts > hostile array claims never throw (Copilot review of fad46ce) > filterByScope rows, array Proxy whose own-property check throws fails closed without throwing
+AssertionError: expected [Function] to not throw an error but 'Error: trap' was thrown
+
+- Expected:
+undefined
+
++ Received:
+"Error: trap"
+
+ ❯ src/rbac/authorize.test.ts:903:12
+    901|     expect(() => {
+    902|       result = call(make() as never);
+    903|     }).not.toThrow();
+       |            ^
+    904|     expect(result).toEqual(expected);
+    905|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  12 failed | 80 passed (92)
+   Start at  14:25:56
+   Duration  2.11s (transform 62%, tests 29%, import 5%, worker 4%)

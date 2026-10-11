@@ -869,3 +869,38 @@ describe('array inputs: inherited indexes never grant (Copilot review of 02a1376
     expect(filterByScope(star, [a, b], (r) => (r === b ? throwingKey : r))).toEqual([a]);
   });
 });
+
+describe('hostile array claims never throw (Copilot review of fad46ce)', () => {
+  const ALL3: DeployEnv[] = ['dev', 'test', 'prod'];
+  const boom = () => {
+    throw new Error('trap');
+  };
+  const HOSTILE: Array<[string, () => unknown]> = [
+    ['revoked array Proxy', () => {
+      const r = Proxy.revocable([CX, 'prod'], {});
+      r.revoke();
+      return r.proxy;
+    }],
+    ['array Proxy whose every trap throws', () => new Proxy([CX, 'prod'], { get: boom, has: boom, getOwnPropertyDescriptor: boom, ownKeys: boom })],
+    ['array Proxy whose own-property check throws', () => new Proxy([CX, 'prod'], { getOwnPropertyDescriptor: boom })],
+  ];
+  const CALLS: Array<[string, (h: never) => unknown, unknown]> = [
+    ['teamCovered', (h) => teamCovered(h, CX), false],
+    ['envCovered', (h) => envCovered(h, 'prod'), false],
+    ['hasRealTeam', (h) => hasRealTeam(h), false],
+    ['inScope teams', (h) => inScope({ teams: h, envs: ALL3 }, { team: CX, env: 'prod' }), false],
+    ['inScope envs', (h) => inScope({ teams: '*', envs: h }, { team: CX, env: 'prod' }), false],
+    ['filterByScope rows', (h) => filterByScope({ teams: '*', envs: ALL3 }, h, (r) => r as never), []],
+    ['authorize teams', (h) => authorize(principal('eng_lead', { teams: h }), 'ticket.create', { kind: 'ticket', id: 'X-1', team: CX, env: 'prod' }).allow, false],
+    ['authorize envs', (h) => authorize(principal('finops_lead', { envs: h }), 'view.read', { kind: 'view', id: '/demo' }).allow, false],
+  ];
+  const TABLE = HOSTILE.flatMap(([hName, make]) => CALLS.map(([cName, call, expected]) => [`${cName}, ${hName}`, make, call, expected] as const));
+
+  it.each(TABLE)('%s fails closed without throwing', (_name, make, call, expected) => {
+    let result: unknown;
+    expect(() => {
+      result = call(make() as never);
+    }).not.toThrow();
+    expect(result).toEqual(expected);
+  });
+});
