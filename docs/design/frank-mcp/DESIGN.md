@@ -345,7 +345,7 @@ Each entry pins:
 
 Within a server, the allowlist lists tools **by name**, each with:
 
-- - `description`, `input_schema` and `output_schema`: the **bodies** the
+- `description`, `input_schema` and `output_schema`: the **bodies** the
   broker uses. The broker offers the model the allowlist's own `description`
   and `input_schema` (never the server's live text) and validates every result
   against `output_schema`. In M1 there is no allowlist file and no parser: the
@@ -1011,7 +1011,7 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 ### M2. MCP client, allowlist, audit
 
-- - **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
+- **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
   (A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o,
   p, q, r, r2) re-run against the MCP path); A20 (a, e, f, h2) with the file
   parser (`deployment_environment`, `environments[]`); allowlist parser tests
