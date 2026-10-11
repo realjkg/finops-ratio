@@ -1,0 +1,4 @@
+ × src/mock/personaData/projections.test.ts > persona projections > sum_is_exact_when_an_intermediate_total_exceeds_the_safe_integer_range 8ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  1 failed | 15 passed (16)
