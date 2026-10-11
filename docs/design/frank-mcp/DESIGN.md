@@ -5,7 +5,7 @@ Branch `docs/frank-mcp-proposal`. Revision 1 was branched from `origin/main` at
 **Status: proposal. Design only: this branch adds documents and no code.
 Nothing in this proposal is implemented.** Every decision in section 10 is
 **open**: it is the owner's to make, with a recommendation attached. No
-decision is recorded here as made. This is revision 19. Review history:
+decision is recorded here as made. This is revision 20. Review history:
 revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
 revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
 PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
@@ -34,16 +34,18 @@ revision 17 (9686368); the review was then closed in favor of a simplification
 (revision 18, below). Revision 18 replaced the section 3.8 evaluation
 machinery with start-and-reload evaluation only, on the conclusion in the
 decision record (EVIDENCE.md section 6); a challenger review of revision 18 (1
-Medium, 7 Low, under a scope freeze) is answered by this revision 19.
-Revisions 2 to 15 were in PR #98, which merged at 86cf6fb; revisions 16 to 19
-are follow-ups on the merged main (7a9da43). The code citations were checked
-at 62bd8ed and re-checked at 7a9da43. PR #99 (62bd8ed to 7a9da43) changed
-about 30 files under `src` and `pages`, including `src/ai/AIClient.ts`,
-`src/ai/buildAIContext.ts`, `src/ai/MockAIClient.ts` and `src/ai/index.ts`;
-`pages/api/v1/ai/chat.ts`, `src/ai/providers.ts` and `src/ai/LiveAIClient.ts`
-are unchanged, and `src/ai/AIClient.ts:71-80` still lands on
-`AIWorkloadSnapshot` (the additions begin after line 84). This document does
-not describe the new `AIClient` fields.
+Medium, 7 Low, under a scope freeze) was answered by revision 19 (98aa511),
+which the challenger approved; Copilot's four open test-specification threads
+on it are answered by this revision 20. Revisions 2 to 15 were in PR #98,
+which merged at 86cf6fb; revisions 16 to 20 are follow-ups on the merged main
+(7a9da43). The code citations were checked at 62bd8ed and re-checked at
+7a9da43. PR #99 (62bd8ed to 7a9da43) changed about 30 files under `src` and
+`pages`, including `src/ai/AIClient.ts`, `src/ai/buildAIContext.ts`,
+`src/ai/MockAIClient.ts` and `src/ai/index.ts`; `pages/api/v1/ai/chat.ts`,
+`src/ai/providers.ts` and `src/ai/LiveAIClient.ts` are unchanged, and
+`src/ai/AIClient.ts:71-80` still lands on `AIWorkloadSnapshot` (the additions
+begin after line 84). This document does not describe the new `AIClient`
+fields.
 
 **Origin.** Both origin statements below were relayed to the author in the
 commissioning task; the source messages were not seen, so their exact wording
@@ -614,8 +616,8 @@ the following rules.
   environment's file at start or reload, and the start and reload evaluation
   is the control for that.
 
-Rules 1 to 5 (all tested by A18; rule 0 and E3 to E5 by A20; E1 and E2 are
-design properties checked by review, E6 is T-9, and E7 is a stated residual):
+Rules 1 to 5 (all tested by A18; rule 0 and E2 to E7 by A20; E1 is a design
+property checked by review):
 
 1. A present field whose caller value is unknown **denies** the entry.
    Therefore any entry with `roles[]` or `teams[]` is denied until T-7 lands.
@@ -788,12 +790,13 @@ control.
 `tool_missing`, `server_unavailable`, `server_denied` and `tool_denied`
 (reserved-field denies, 3.8), `startup_refused` and `reload_refused` (an
 environment, `deployment_environment` or gateway-auth check failed at start or
-at reload), `reload_applied` and `alert_raised`. Fields: `at`, `server`,
-`tool` (if any), `allowlist_version`, the old and new hash, and
-`kill_switch_state`. They are written by the same fail-closed path as call
-records, with one rule for `startup_refused` and `reload_refused`: if the
-audit write fails the refusal still stands and is also emitted as a plain,
-redacted log line (A20 (g)).
+at reload), `reload_applied` (a reload passed and its config was installed)
+and `alert_raised`. Fields: `at`, `server`, `tool` (if any),
+`allowlist_version`, the old and new hash, and `kill_switch_state` (the pair
+{snapshot value, live value} of `FRANK_TOOLS`). They are written by the same
+fail-closed path as call records, with one rule for `startup_refused` and
+`reload_refused`: if the audit write fails the refusal still stands and is
+also emitted as a plain, redacted log line (A20 (g)).
 
 Argument values and results are not stored by default. An operator debug mode
 that stores them is a separate, time-limited setting, off by default, and
@@ -909,13 +912,13 @@ Tests first, as in the rest of the program (Slices 3-5 design section 7).
 | A11 | (a) Model loops on tool calls; (b) the per-turn tool-result token ceiling is exceeded; (c) a tool exceeds its timeout; (d) a tenant exceeds `max_calls_per_tenant_per_minute` | (a) stops at the per-turn cap; final answer states the cap was reached; (b) the tool result that would push the turn's cumulative tool-result tokens over the ceiling is rejected (the model gets the fixed error; the turn continues without it), as for the byte cap in 3.6; tokens are estimated as bytes divided by 4, rounded up (an **assumption**; the broker does not call a vendor tokenizer); (c) the call is aborted, audit `timeout`; (d) further calls are refused for the window, audit `over_budget` |
 | A12 | stdio executable hash differs | process not started |
 | A13 | Audit write fails | the call fails closed |
-| A14 | Tools enabled with gateway auth not enforced | startup refusal |
+| A14 | Tools enabled with gateway auth not enforced, at start or at reload | startup refusal (`startup_refused`) or reload refusal (`reload_refused`) |
 | A15 | Server adds a tool not in the allowlist | the tool is never offered or callable; `unlisted_tool` audit record; alert; server marked unavailable |
 | A16 | A pinned tool disappears from the server's list | server unavailable; alert; fallback |
 | A17 | Server certificate or key pin changes | connection refused; server unavailable |
 | A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key; (f) a tool entry without `output_schema_hash`, or any other missing required key; (g) a tool entry with a missing body (`description`, `input_schema` or `output_schema`); (h) a body whose hash does not match its `*_hash` key; (i) an unknown key inside a tool entry (as in (e)), or a body that is not an object; (j) an `in_process` body that differs from the registry (M2); (k) `description` over `max_description_bytes` or a schema over `max_schema_bytes`; (l) an unknown keyword inside the schema content of `input_schema` or `output_schema`; (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e), (f), (g), (h), (i), (j), (k) reject the whole file; (l) is accepted: the keyword is kept in the body and covered by its hash (not stripped before hashing) |
 | A19 | A tool result carries a credential-shaped value (bearer token, `sk-`-style key, JWT, AWS key id) in an ordinary string field that passes the output schema | not delivered to the model; fixed error; audit `secret_in_result` without the value; with `on_secret: redact` only the value is replaced and the audit still records it. Includes: a URL value whose `?` tail contains a quote (the serialized form does not re-parse, so the result is rejected); under `on_secret: redact`, a key-only secret such as `{"password":"abc def"}` (the value is replaced whole and nothing leaks); a hit on a map key (rejected); a located non-string value (rejected) |
-| A20 | Environment, kill switch and reload, with the slice that first tests each case. **M0** (raw environment, the broker's `reload()` option and a fixture config; no file parser): (a) raw `RATIO_ENV` unset, empty (not treated as `development`) or unrecognized, at start and at reload; (b) a reload with a changed environment is re-evaluated (both directions); (c) the kill switch, from both starting states: start with `FRANK_TOOLS` off, then live on, leaves tools off and logs "reload required" once; start with it on and a good environment, then live off, turns tools off immediately, and live on again resumes tools (the config was already validated); (d) `FRANK_TOOLS` parsing: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (e) overlapping reloads: the second is rejected and the first applies once; (f) a failed reload installs a refused (tools-off) config and writes `reload_refused`; it does not keep the old config; (g) a failed audit write does not enable tools, and a plain redacted log line is emitted. **M2** (needs the file parser): (b2) a reload with a changed file is re-evaluated; (h) `deployment_environment` mismatching the raw value, or missing, rejects the whole file and installs a refused config; an entry without `environments[]` is available in the file's own environment | (a) refuses, installs a refused config, writes `startup_refused` or `reload_refused`; (b), (b2) the decision follows the new value or file; (c) off-start: tools stay off until a reload; on-start: off turns tools off and on resumes them; (d) only the documented value turns tools on; (e) one reload applies; (f) tools are off and the old config is gone; (g) the refusal stands; (h) the whole file is rejected and tools are off |
+| A20 | Environment, kill switch and reload, with the slice that first tests each case. **M0** (raw environment, the broker's `reload()` option and a fixture config; no file parser): (a) raw `RATIO_ENV` unset, empty (not treated as `development`) or unrecognized, at start and at reload; (b) a reload with a changed environment is re-evaluated (both directions); (c) the kill switch, from both starting states: start with `FRANK_TOOLS` off, then live on, leaves tools off and logs "reload required" once; start with `FRANK_TOOLS` on and a good environment (the config passed and its snapshot was on), then live off, then live on again: tools turn off immediately and then **resume without a reload** (E3: that config was already validated, so this is accepted by design, not a gap); (d) `FRANK_TOOLS` parsing: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (e) overlapping reloads: the second is rejected and the first applies once; (f) a failed reload installs a refused (tools-off) config and writes `reload_refused`; it does not keep the old config; (g) a failed audit write does not enable tools, and a plain redacted log line is emitted; (i) start with gateway auth enforced and tools on, then remove enforcement and reload: the reload installs a refused config and writes `reload_refused` (the A14 check runs on reload); (j) E2: a request in flight when a reload swaps the config keeps the old config for the whole request, and the next request sees the new one; (k) E6: the local operator trigger (signal or command-line command) invokes a reload; (l) E7: changing `RATIO_ENV` alone does not alter the installed config until a reload. **M2** (needs the file parser): (b2) a reload with a changed file is re-evaluated; (h) `deployment_environment` mismatching the raw value, or missing, rejects the whole file and installs a refused config; an entry without `environments[]` is available in the file's own environment | (a) refuses, installs a refused config, writes `startup_refused` or `reload_refused`; (b), (b2) the decision follows the new value or file; (c) off-start: tools stay off until a reload; on-start: off turns tools off and on resumes them; (d) only the documented value turns tools on; (e) one reload applies; (f) tools are off and the old config is gone; (g) the refusal stands; (i) refused config and `reload_refused`; (j) the in-flight request is unaffected and the next request uses the new config; (k) the reload runs; (l) the installed config is unchanged; (h) the whole file is rejected and tools are off |
 | A21 | Per-adapter **closed-set** assertion (Claude, OpenAI, Mistral and other OpenAI-compatible), run with tools on and off over every registry, fixture and allowlisted (MCP-path) tool, including an `http`-transport entry (the M2 risk is an adapter mapping an allowlisted server into a vendor `mcp` tool entry or an `mcp_servers` body key). The test is an allowlist, not a denylist of parameter names. For the SDK adapters (Claude and OpenAI, `pages/api/v1/ai/chat.ts` near lines 100 and 134) it spies on the SDK create argument and the SDK method called, and injects a recording `fetch` into the SDK client so that header names, the URL path and the constructor and per-request options are captured too; for the raw-fetch adapters (Mistral, Qwen, `openllm`) it intercepts `fetch`. It asserts, per adapter, a closed set of top-level body keys, of `tools[]` element shapes (function type only), of header names, of SDK options, the SDK method (no beta namespace) and the URL path | any key, header name, tool type, option, method or path outside the set fails the test; a mutant that adds any such element, not a named parameter, is killed |
 
 ### 8.3 Pass criteria
@@ -945,21 +948,23 @@ comparison, by A20 (h) in M2; one whose per-request path turns tools on, by
 A20 (c); one whose failed reload keeps the old config, by A20 (f); one where
 concurrent reloads both apply, by A20 (e); one that does not re-evaluate on a
 reload, by A20 (b) in M0 and (b2) in M2; one that lets a failed audit write
-enable tools, by A20
-(g)), the reserved-field deny rule: a mutant that deletes it, or that applies
-a tool-level deny to the server (or the reverse), must be killed by A18; the
-body and hash checks, where a mutant that offers the server's live text, or
-skips the body/hash comparison, must be killed by A3 (c) and A18 (g, h); one
-that applies unknown-key rejection inside schema content, by A18 (l); one that
-skips the registry difference check, by A18 (j); one that skips the size caps,
-by A18 (k); one that skips the per-turn token ceiling, the timeout or the
-per-minute cap, by A11 (b), (c) and (d); one that adds any key, header, tool
-type, option, method or path outside the closed set, by A21; the `FRANK_TOOLS`
-parser, where a mutant that treats any truthy value as on must be killed by
-A20 (d)), and confirm at least one test fails per mutation. A surviving mutant
-blocks the PR. The repository already treats unfaithful tests as defects
-elsewhere (see the test-integrity entries in the Slices 3-5 evidence); this
-applies the same standard here.
+enable tools, by A20 (g); one that skips the gateway-auth check on reload, by
+A20 (i); one whose in-flight request switches config mid-request, by A20 (j);
+one where the operator trigger does not reload, by A20 (k); one that re-reads
+the live `RATIO_ENV` per request, by A20 (l)), the reserved-field deny rule: a
+mutant that deletes it, or that applies a tool-level deny to the server (or
+the reverse), must be killed by A18; the body and hash checks, where a mutant
+that offers the server's live text, or skips the body/hash comparison, must be
+killed by A3 (c) and A18 (g, h); one that applies unknown-key rejection inside
+schema content, by A18 (l); one that skips the registry difference check, by
+A18 (j); one that skips the size caps, by A18 (k); one that skips the per-turn
+token ceiling, the timeout or the per-minute cap, by A11 (b), (c) and (d); one
+that adds any key, header, tool type, option, method or path outside the
+closed set, by A21; the `FRANK_TOOLS` parser, where a mutant that treats any
+truthy value as on must be killed by A20 (d)), and confirm at least one test
+fails per mutation. A surviving mutant blocks the PR. The repository already
+treats unfaithful tests as defects elsewhere (see the test-integrity entries
+in the Slices 3-5 evidence); this applies the same standard here.
 
 ## 9. Slicing plan
 
@@ -977,7 +982,7 @@ by running the classifier on the real diff; a miss is reported, not argued.
   (per-turn and per-call caps, per-turn token ceiling, timeout, per-minute
   cap), A21 (per-adapter closed-set request assertion), A13 (audit write
   failure fails the call closed), A14 (startup refusal when tools are on and
-  gateway auth is not enforced), A20 (a-g: the raw-`RATIO_ENV`, kill-switch
+  gateway auth is not enforced), A20 (a-g, i-l: the raw-`RATIO_ENV`, kill-switch
   and reload checks, run in the same evaluation as A14, which runs at start
   and at reload only while `FRANK_TOOLS` is on), A10 (redaction applied to
   audit and log text), A19 (a credential-shaped value in a tool result is
@@ -1007,13 +1012,14 @@ by running the classifier on the real diff; a miss is reported, not argued.
 ### M1. In-process read-only tools over existing derivations
 
 - **Tests first:** the golden suite and oracle (section 8.1) against the mock
-  provider in a scripted tool-calling mode; schema tests for every tool;
-  A1 and A2 against in-process results; A5 and A6 with injected fixtures; A8
-  and A9 across the whole catalog; an import-graph test that no tool module
+  provider in a scripted tool-calling mode; schema tests for every tool; A1
+  and A2 against in-process results; A21 over the registry tools (the
+  per-adapter closed-set request assertion); A5 and A6 with injected fixtures;
+  A8 and A9 across the whole catalog; an import-graph test that no tool module
   imports a write path or a database writer; M1 refuses a non-mock tenant; the
   registry budget defaults and `on_secret: reject` are applied; the registry
-  hashes equal the committed constants. In-process tools are read-only
-  **by construction** (pure functions over values handed in) and by that
+  hashes equal the committed constants. In-process tools are read-only **by
+  construction** (pure functions over values handed in) and by that
   import-graph test, **not** by capability; the capability argument of 3.5
   applies from the first database-backed or remote tool.
 - **Data limit:** M1 runs only on the mock, synthetic seed data. It is never
@@ -1036,7 +1042,7 @@ by running the classifier on the real diff; a miss is reported, not argued.
 ### M2. MCP client, allowlist, audit
 
 - **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
-  (A5-A11, A13, A14, A19, A21 (over MCP-path tools) and A20 (a-g) re-run
+  (A5-A11, A13, A14, A19, A21 (over MCP-path tools) and A20 (a-g, i-l) re-run
   against the MCP path); A20 (b2, h) with the file parser
   (`deployment_environment`, `environments[]`); allowlist parser tests (reject
   unknown keys, missing hashes); A18 (server vs tool denial, empty array,
@@ -1090,9 +1096,9 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 | Slice | Cases |
 |---|---|
-| M0 | A7, A10, A11, A13, A14, A19, A21, A20 (a-g) |
-| M1 | A1, A2 (in-process results), A5, A6 (fixtures), A8, A9 |
-| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (b2, h); A1, A2, A5-A11, A13, A14, A19, A21 (over MCP-path tools) and A20 (a-g) re-run against MCP servers |
+| M0 | A7, A10, A11, A13, A14, A19, A21, A20 (a-g, i-l) |
+| M1 | A1, A2 (in-process results), A5, A6 (fixtures), A8, A9, A21 (over registry tools) |
+| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (b2, h); A1, A2, A5-A11, A13, A14, A19, A21 (over MCP-path tools) and A20 (a-g, i-l) re-run against MCP servers |
 | M3 | A5, A6 and the golden suite: per-model re-run |
 | M4 | the broker suite re-run against the server entry |
 
