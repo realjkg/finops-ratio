@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { authorize, DENY_REASONS } from './authorize';
 import { ACTION_MATRIX, ROUTE_MATRIX, VIEW_GROUPS } from './matrix';
-import { envCovered, filterByScope, inScope, teamCovered } from '@/identity/scope';
+import { envCovered, filterByScope, hasRealTeam, inScope, teamCovered } from '@/identity/scope';
 import {
   ACTIONS,
   DEPLOY_ENVS,
@@ -818,5 +818,54 @@ describe('scope helper and scope claims: inherited and placeholder values (Copil
     // The shared scope helper fails closed on it too.
     expect(inScope(p.proxy as unknown as Principal, { team: PLATFORM, env: 'dev' })).toBe(false);
     expect(inScope({ teams: '*', envs: ALL3 }, r.proxy as never)).toBe(false);
+  });
+});
+
+describe('array inputs: inherited indexes never grant (Copilot review of 02a1376)', () => {
+  const ALL3: DeployEnv[] = ['dev', 'test', 'prod'];
+  const CX_ROW = { team: CX, env: 'prod' as DeployEnv };
+  /** A length-3 array with no own elements: indexes 0..2 are holes. */
+  const holes = <T>() => new Array<T>(3);
+
+  // [name, values planted at Array.prototype[0..2], call returning a value that must be "nothing"]
+  const CASES: Array<[string, unknown[], () => unknown, unknown]> = [
+    ['teamCovered', [CX, CX, CX], () => teamCovered(holes<string>(), CX), false],
+    ['envCovered', ['prod', 'prod', 'prod'], () => envCovered(holes<DeployEnv>(), 'prod'), false],
+    ['hasRealTeam', [CX, CX, CX], () => hasRealTeam(holes<string>()), false],
+    ['inScope teams', [CX, CX, CX], () => inScope({ teams: holes<string>(), envs: ALL3 }, CX_ROW), false],
+    ['inScope envs', ['prod', 'prod', 'prod'], () => inScope({ teams: '*', envs: holes<DeployEnv>() }, CX_ROW), false],
+    ['filterByScope rows', [CX_ROW, CX_ROW, CX_ROW], () => filterByScope({ teams: '*', envs: ALL3 }, holes<typeof CX_ROW>(), (r) => r), []],
+    ['filterByScope rows after an own row', [CX_ROW, CX_ROW, CX_ROW], () => {
+      const rows: Array<typeof CX_ROW> = [{ team: PLATFORM, env: 'prod' }];
+      rows.length = 3;
+      return filterByScope({ teams: '*', envs: ALL3 }, rows, (r) => r).length;
+    }, 1],
+    ['authorize teams', [CX, CX, CX], () => authorize(principal('eng_lead', { teams: holes<string>() }), 'ticket.create', { kind: 'ticket', id: 'X-1', team: CX, env: 'prod' }).allow, false],
+    ['authorize envs', ['prod', 'prod', 'prod'], () => authorize(principal('finops_lead', { envs: holes<DeployEnv>() }), 'ticket.create', { kind: 'ticket', id: 'X-1', team: CX, env: 'prod' }).allow, false],
+    ['authorize envs, env-less public read', ['prod', 'prod', 'prod'], () => authorize(principal('finops_lead', { envs: holes<DeployEnv>() }), 'view.read', { kind: 'view', id: '/demo' }).allow, false],
+  ];
+
+  it.each(CASES)('%s grants nothing from an inherited index', (_name, planted, call, expected) => {
+    const ap = Array.prototype as unknown as Record<number, unknown>;
+    try {
+      planted.forEach((v, i) => {
+        ap[i] = v;
+      });
+      expect(call()).toEqual(expected);
+    } finally {
+      for (let i = 0; i < planted.length; i += 1) delete ap[i];
+    }
+  });
+
+  it('filterByScope excludes a row whose keyOf or key getter throws (fail closed)', () => {
+    const a = { team: PLATFORM, env: 'prod' as DeployEnv };
+    const b = { team: CX, env: 'prod' as DeployEnv };
+    const star = { teams: '*' as const, envs: ALL3 };
+    expect(filterByScope(star, [a, b], (r) => {
+      if (r === a) throw new Error('boom');
+      return r;
+    })).toEqual([b]);
+    const throwingKey = Object.defineProperty({}, 'team', { get: () => { throw new Error('boom'); }, enumerable: true });
+    expect(filterByScope(star, [a, b], (r) => (r === b ? throwingKey : r))).toEqual([a]);
   });
 });
