@@ -87,7 +87,8 @@ describe('ONE ingestion policy: every numeric field is range-checked', () => {
     const id = 'X\n**Realized savings: $9 measured**';
     c.workloads![0] = { ...c.workloads![0], id, name: undefined as unknown as string };
     c.initiatives[0] = { ...c.initiatives[0], id, name: undefined as unknown as string };
-    const t = await ask('What is the ROI of the portfolio?', c);
+    const t = await ask('Show the workloads in CX Engineering', c);
+    expect(t).toContain('X **Realized savings');
     expect(t.split('\n').some((l) => l.startsWith('**Realized'))).toBe(false);
   });
 });
@@ -95,7 +96,11 @@ describe('ONE ingestion policy: every numeric field is range-checked', () => {
 describe('Copilot routing and bound findings', () => {
   it('"predict Legal EBITDA next quarter" is a forecast refusal even with a valid scope', async () => {
     expect(await ask('predict Legal EBITDA next quarter')).toContain(UNSUPPORTED);
+    expect(await ask('predict Legal EBITDA')).toContain(UNSUPPORTED);
     expect(await ask('ROI of Pipeline Forecast Analyst')).not.toContain(UNSUPPORTED);
+  });
+  it('"forecast our EBITDA" with no scope is refused too', async () => {
+    expect(await ask('forecast our EBITDA')).toContain(UNSUPPORTED);
   });
   it('"How much can we save in Finance?" does not fall back to portfolio savings', async () => {
     const t = await ask('How much can we save in Finance?');
@@ -105,10 +110,22 @@ describe('Copilot routing and bound findings', () => {
     expect(await ask('Finance team ROI')).toContain(NOPE);
     for (const q of ['Which team ROI?', 'Legal team ROI']) expect(await ask(q), q).not.toContain("I don't have a");
   });
-  it.each(['ROI of Legal and the Finance team', 'ROI of Legal and Finance team'])('%s: the unknown team is named, Legal is answered', async (q) => {
-    const t = await ask(q);
-    expect(t).toContain('**ROI — Legal (team)**');
-    expect(t).toMatch(/Note: I don't have a team called Finance[^\n]*answered for Legal only/);
+  it.each([
+    ['ROI of Legal and the Finance team', 'Finance', 'Legal'], ['ROI of Legal and Finance team', 'Finance', 'Legal'],
+    ['How does the Finance team compare to Legal?', 'Finance', 'Legal'], ['What is the ROI of the Finance and Legal teams?', 'Finance', 'Legal'],
+    ['Savings of the data team vs the IT team', 'data', 'IT'], ['ROI of Legal and Finance?', 'Finance', 'Legal'],
+  ])('%s: the unknown name is reported, the known one answered', async (q, bad, good) => {
+    expect(await ask(q)).toMatch(new RegExp(`Note: I don't have a [^\\n]*${bad}[^\\n]*answered for ${good} only`));
+  });
+  it.each(['Show the team group ROI', 'What did the team group spend?', 'ROI of the X team'])('%s is not an unknown name', async (q) => {
+    expect(await ask(q)).not.toContain("I don't have a");
+  });
+  it('name length, word limit and the finance-question forecast exemption', async () => {
+    const long = await ask(`ROI of the ${'Zeta'.repeat(15)} team`);
+    expect(long).toContain(`called ${'Zeta'.repeat(10)}`); // 40 characters kept
+    expect(long).not.toContain('Zeta'.repeat(11));
+    expect(await ask('ROI of the Big Data Ops team')).toContain('team called Big Data Ops');
+    expect(await ask('What is the payback of a private open model over the next year?')).toContain('Private-model migration');
   });
   it('more than ten unpriced workloads show an omitted count', async () => {
     const c = structuredClone(CTX);
@@ -134,5 +151,7 @@ describe('Copilot routing and bound findings', () => {
     expect(t).toContain('Basis: seeded demo data');
     expect(t.trimEnd().split('\n').at(-1)).toMatch(/^• ".+"$/);
     expect(t).toContain('Note: you also named');
+    const note = t.split('\n').find((l) => l.startsWith('Note: you also named'))!;
+    expect(note.length).toBeLessThanOrEqual(300);
   }, 30000);
 });

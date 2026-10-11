@@ -36,6 +36,7 @@ const RX = {
   rankCue: /\b(?:which|who|what|rank\w*|top|highest|lowest|best|worst|most|least|biggest|largest|smallest|weakest|strongest|each|every|per|by)\b/,
   eachCue: /\b(?:each|every|per|all|by)\s+(?:team|group|department)s?\b|\bteams? (?:ranked|ranking)\b|\bby team\b/,
   forecast: /next (?:quarter|month|year|week)|\bforecast(?:ing|s)?\b|\bpredict\w*|\bwill (?:our|the|we|spend|cost)\b|\bgoing to (?:cost|spend)\b/,
+  nextPeriod: /next (?:quarter|month|year|week)/,
   predictWord: /\bpredict\w*|\bforecast(?:ing|s)?\b/,
   savings: /\bsav\w*|\bopportunit\w*|\breduc\w*|\bcuts?\b|\bwaste\w*|\boptimi[sz]\w*/,
   costWord: /cost|spend|expens|driv|spike|budget/,
@@ -76,6 +77,8 @@ interface Cues {
 
 /** First matching intent in contract order. `legacy` = no new cue matched. */
 export function classifyIntent(lower: string, c: Cues): Intent {
+  // Explicit prediction wording refuses even with a valid scope ("predict Legal EBITDA next quarter").
+  if (/\bpredict\w*/.test(lower) || (RX.predictWord.test(lower) && RX.nextPeriod.test(lower))) return 'forecast';
   if (!c.hasEntity && RX.forecast.test(lower)) {
     // Finance questions legitimately say "next year"; only explicit prediction words refuse them.
     const financial = RX.migration.test(lower) || RX.ebitda.test(lower);

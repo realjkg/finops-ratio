@@ -213,7 +213,7 @@ export function migrationAnswer(world: World, scope: Scope, o: Overrides, ignore
     return `• ${p.member.name} — ${p.member.model}${p.member.provider ? ` (${p.member.provider})` : ''}: ${mdl ? `${price(mdl.pricing.input_per_1m)} in / ${price(mdl.pricing.output_per_1m)} out per 1M` : 'price n/a'} → ${usd(p.api)}/mo for ${int(p.tokens / 1e6)}M tokens`;
   });
   body.push(...capRows(partLines, 10));
-  if (ok.unpriced.length > 0) body.push(`Not priced (model or volume missing): ${ok.unpriced.slice(0, 10).map((w) => w.name).join(', ')}.`);
+  if (ok.unpriced.length > 0) body.push(`Not priced (model or volume missing): ${ok.unpriced.slice(0, 10).map((w) => w.name).join(', ')}${ok.unpriced.length > 10 ? `, and ${ok.unpriced.length - 10} more` : ''}.`);
   body.push(`Current API cost at list prices: ${usd(ok.api)}/mo (${usd2((ok.api / ok.tokens) * 1e6)} per 1M tokens blended). Seeded run-rate spend is ${usd(r.spend)}/mo, a different basis, so the comparison uses list prices on both sides.`);
   body.push(
     `Projected private model: ${ok.gpus} GPU${ok.gpus === 1 ? '' : 's'} × ${price(a.gpuHourlyUsd)} × ${int(a.hoursPerMonth)} h = ${usd(ok.gpuCost)}/mo, plus ${Math.round(a.opsOverheadPct * 100)}% ops = ${usd(ok.selfHost)}/mo (${usd2((ok.selfHost / ok.tokens) * 1e6)} per 1M tokens at this volume).`,
@@ -221,8 +221,7 @@ export function migrationAnswer(world: World, scope: Scope, o: Overrides, ignore
   if (ok.coverage < 1) {
     body.push(`Capacity warning: this cluster (${ok.gpus} GPU${ok.gpus === 1 ? '' : 's'}) covers ${Math.round(ok.coverage * 100)}% of the volume (each handles ${int(ok.perGpuTokens / 1e6)}M tokens/month); this needs ${ok.neededGpus} GPU${ok.neededGpus === 1 ? '' : 's'}, so this is not a valid comparison.`);
   }
-  const valid = ok.coverage >= 1;
-  const runRate = r.spend;
+  const valid = ok.coverage >= 1, runRate = r.spend;
   if (!valid) {
     body.push('Projected recurring saving: not shown \u2014 the cluster is too small for the volume, so any saving here would not be valid.');
   } else if (ok.saving > 0) {

@@ -129,122 +129,41 @@ tokensOutToday, tokensCachedToday, alerts) in `AIClient.ts`, their population in
 and `MockAIClient.ts` delegating to `src/ai/mock`. Reverting the merge restores the previous
 mock. No data, environment, flag, dependency or route change is involved.
 
-## 6. Challenger round (PR #99): RED then GREEN
+## 6. Review rounds (PR #99, #102): RED then GREEN, mutation, ingestion policy
 
-The challenger requested changes (0 High, 5 Medium, 6 Low). Tests were written first in
-`src/ai/mock/hardening.test.ts` and committed failing.
+Each round was tests first, committed RED, then fixed (`hardening.test.ts`, `review2.test.ts`,
+`review3.test.ts`):
 
-Command: `npx vitest run src/ai/mock/hardening.test.ts`
+| Round | Tests | RED (before the fix) | GREEN |
+| --- | ---: | --- | --- |
+| Challenger 1 | 38 | 25 failed, 12 passed (six surviving-mutant tests, two fallback pins, four negative controls) | 38 of 38 |
+| Challenger 2 | 30 | 17 failed, 13 passed (exact-boundary assertions for guards that already existed) | 30 of 30 |
+| Copilot and re-check | 55 | 29 failed, 17 passed (table rows that accept the inclusive boundaries, plus generic-phrase controls) | 55 of 55 |
 
-RED (before the fixes): 25 failed, 12 passed (37 tests). The 12 that pass are six surviving-mutant
-tests (M4 a to f, which pin existing behavior the earlier suite did not), two pins of the new
-unmatched-question fallback (L3, one parameterized test with two cases) and four negative controls
-(M2 plausible reduction, M5 two no-conflict checks, L1 stated amount still answered), so the failures are the crashes, missing warnings, silent substitutions, forged lines and unbounded
-output. The five route tests time out because the handler returns 500 for prototype-key wire strings.
+Final tree: lint and typecheck clean, `npx vitest run` 165 files / 3252 tests passed, `npm run
+build` compiled successfully.
 
-GREEN after the fixes: `npx vitest run src/ai/mock/hardening.test.ts` 38 of 38 pass (the RED run
-above had 25 failing; the file later gained one test and one extended assertion that kill the last two mutants).
-Correction to the RED note: the five route tests failed there by timing out because the helper
-waited on a faked clock; the helper now advances the clock, and the route crash is covered by the
-`plain-object-alias-lookup` mutant, which the route tests kill.
+**Mutation:** `node docs/evidence/frank-mock-analytics/mutate.mjs --jobs=4` kills **77 of 77**
+mutants in one command (about 5.5 minutes; baseline 246 tests, 0 failing). The runner uses a fresh
+`mkdtemp` directory per run and one tree copy per worker, so concurrent runs cannot collide.
 
-Gates on the fixed tree: `npm run lint` clean, `npm run typecheck` clean, full `npx vitest run`
-159 files / 3117 tests passed, `npm run build` compiled successfully.
+**One ingestion policy (`world.ts`).** Every numeric field of the request context is range-checked in
+one place; a workload with any out-of-range field is excluded and listed as `Name (field)` in the
+"out of range and ignored" note (also on the unknown-name reply, and in the protected tail). NaN,
+Infinity and negatives are out of range for every field:
+`monthlySpend`, `monthlyCost`, `monthlyBudget`, `savingsOpportunity` 0 to 1e12 USD; `monthlyValue`
+-1e12 to 1e12; `annualRunRate` 0 to 1.2e13; `valueRatio` -1e6 to 1e6; calls and the three token
+counts 0 to 1e13; `costTrendPct` greater than -100 and less than 1e6; `cacheHitRate` 0 to 1;
+`budgetConsumedPct` 0 to 1e4; `governanceGatesPassed` 0 to 4; summary totals 0 to 2e14 and summary
+counts 0 to 1e6, recomputed from the kept initiatives when out of range. The five legacy answers
+read a context with rejected workloads dropped; for a valid context their text is unchanged. This
+closes the earlier deferred "absurd magnitude" gap (5e-324 run-rate, 1e-300 tokens, 1.7e308
+savings or budget percent): nothing is deferred.
 
-### What changed, by finding
-
-- M1: alias tables are read with an own-property check; wire strings such as `constructor` or
-  `__proto__` are just names (tested through `MockAIClient` and the real route handler).
-- M2: a migration saving above the seeded run-rate and an EBITDA reduction above the scope's
-  entire seeded spend each print a `Warning:` line next to the headline, uncapped; the migration
-  saving also shows its share of the run-rate.
-- M3: wire figures beyond 1e12 USD or 1e13 counts exclude that workload, and every answer says so;
-  trend, budget and cache rate outside their sane ranges become unknown. `roiLine`, GPU sizing and
-  break-even are guarded. Property test: 9 fields x 5 extreme values x 14 questions print no NaN,
-  Infinity or n/a.
-- M4: tests for all six survivors. For (f) the duplicated 25% cached-rate fallback was deleted;
-  the calculator now calls the shared `cachedInputRate` (every seeded model publishes a cached
-  price, so the branch was unreachable). The mutant now targets the cached price itself.
-- M5: an unrecognized named team or entity gets "I don't have a team called X" with the teams
-  listed, never a portfolio fallback; entities of different kinds that were named but not
-  answered are listed in the existing "you also named" note.
-- L1: a refused amount asks for a valid one (no fallback scenario); "predict" or "forecast" with
-  EBITDA or migration wording is a forecast refusal.
-- L2: an undersized cluster hides the headline saving and payback, and pluralizes GPU.
-- L3 (disclosure): the old catch-all for unmatched questions (help text) is now the honest
-  "I can't answer that from the seeded data" answer; the greeting and the five legacy intents are
-  unchanged. A test pins the new fallback.
-- L4: control characters and line breaks in wire strings become spaces, names are capped at 60.
-- L5: list rows are capped at 20 with "and N more", and a reply is capped at 8,000 characters.
-- L6: dead exports removed.
-
-### Mutation check, challenger round
-
-`node docs/evidence/frank-mock-analytics/mutate.mjs`: **42 of 42 mutants killed** (the original 25,
-the challenger's six, and 11 guards for the new behavior). Two of the new mutants survived their
-first test and were killed after the tests were tightened (negative savings through the team
-ranking, and control characters other than line breaks).
-
-## 7. Second challenger round (PR #102): RED then GREEN
-
-`src/ai/mock/review2.test.ts`, written first. RED (before the fixes), `npx vitest run
-src/ai/mock/review2.test.ts`: 17 failed, 13 passed (30 tests). The 13 passing tests are the exact
-boundary assertions for guards that already existed (they exist to kill mutants, so they pass on
-correct code); the 17 failures are the quality-note prototype lookup (3), valid portfolio questions
-misread as unknown names (9), unknown teams under verb phrasing and follow-ups (3, plus the
-generic-phrase check), and notes cut by the reply cap (1).
-
-### Fixes in this round
-
-- M1: both `MODEL_QUALITY_NOTE` lookups use an own-property check (reachable through "the same
-  model" when the remembered workload's wire model is `constructor`).
-- M2: the trailing-name check now fires only on a capitalized token that is not a short acronym
-  or a common word; lowercase phrases ("in total", "on average", "for agents") and acronyms
-  ("AI", "USD", "EUR") are never names. Known trade-off: a lowercase unknown name ("roi of
-  finance") is not caught by this trailing rule; it is caught when team-qualified ("the finance team").
-- M3: a team-qualified name ("the X team", "for X group", any verb before it) is checked before
-  back-reference resolution and for every intent except forecast and capability, so follow-ups,
-  "moved the Finance team", savings and cost-driver questions answer "I don't have a team called X".
-- M5: exact-boundary tests for the claimed guards (USD 1e12 and counts 1e13 inclusive, 20 rows,
-  8,000 characters with the tail kept, 60-character names, DEL/C1/U+2028/2029 handling, cache
-  rate in [0, 1], budget 1e12, trend in (-100, 1e6)); 16 more mutants registered. U+2028/2029 are
-  removed by the whitespace collapse, so the redundant explicit clause was deleted (a mutant there
-  would be equivalent).
-- L1: the "you also named" and "out of range and ignored" notes are placed in the protected tail
-  and are kept when a long body is shortened.
-- L4: explicit timeouts on the property test and the output-bound test.
-
-### Mutation check, second challenger round
-
-`node docs/evidence/frank-mock-analytics/mutate.mjs`: **58 of 58 registered mutants killed** (the first 43 in one run, the remaining 15 new boundary and
-lookup mutants in a second invocation of the same script). Baseline 191 tests, 0 failing.
-Gates on the fixed tree: lint and typecheck clean, full `npx vitest run` 161 files / 3172 tests
-passed, `npm run build` compiled successfully.
-
-### Known gap (deferred, not reachable from seeded data)
-
-Absurd-magnitude wire values that are finite and inside the range limits still print odd text.
-Observed:
-
-- run-rate spend 5e-324 with value 1: "Cost $0/mo · value $1/mo · return n/a (no spend)" (the
-  ratio is treated as "no spend" because the division is not a finite, meaningful number).
-- tokens 1e-300 per day: migration prints "$0/mo for 0M tokens" and "Infinity% of today's 0M".
-- `savingsOpportunity` 1.7e308: the savings line prints a 300-digit dollar figure.
-- `budgetConsumedPct` 1.7e308: prints "budget consumed 1.7e+308%".
-
-Why not fixed: the bundled seed and `buildAIContext` cannot produce them; they need a hand-crafted
-request body, and the answers are text only (no crash, no 500). What would change that: the chat
-route starting to validate `workloads` and `initiatives` entries (ranges and types) at the gateway,
-at which point these cases are rejected before the mock; or a real data source with unbounded
-values, in which case a lower bound and a savings and percent bound belong in `world.ts` next to
-the existing upper bounds.
-
-## 8. Copilot round on PR #102: one ingestion policy
-
-Root cause of most threads: numeric request context was validated site by site. The fix is one
-normalization step in `world.ts` and a table-driven test over every numeric field
-(`src/ai/mock/review3.test.ts`).
-
-RED (before the fixes), `npx vitest run src/ai/mock/review3.test.ts`: 29 failed, 17 passed (46
-tests). The 17 passing are the inclusive-boundary acceptance rows (the existing guards already
-accepted them) and the generic-phrase and no-conflict controls.
+**Other behavior fixed.** Own-property alias and quality-note lookups; warnings next to impossible
+headlines; unknown names (team-qualified at the start, after "and", in lists, or next to a known
+entity) are named in the answer, never silently substituted ("team" and "group" are not names);
+prediction wording refuses even with a scope; more than ten unpriced workloads print "and N more";
+notes are capped at 300 characters and the tail (notes, basis, next questions) is budgeted by its
+real length. Known trade-off: a lowercase unknown name without a team word ("roi of finance") is
+not caught; "the finance team" and "ROI of Finance" are.

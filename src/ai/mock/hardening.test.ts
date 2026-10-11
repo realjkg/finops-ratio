@@ -128,11 +128,11 @@ describe('M4 surviving mutants', () => {
     expect(t).toMatch(/Ops overhead ignored/);
     expect(t).toContain('25% ops overhead');
   });
-  it('(d) a negative savings opportunity on the wire is clamped to zero', async () => {
+  it('(d) a negative savings opportunity on the wire is rejected, not subtracted', async () => {
     const ctx = mod((c) => { c.initiatives.find((i) => i.id === 'wl-marketing')!.savingsOpportunity = -500; });
     const { text } = await chat([{ role: 'user', content: 'How much can we save in Marketing?' }], ctx);
-    expect(text).toContain('no savings opportunities');
     expect(text).not.toContain('-$500');
+    expect(text).toMatch(/Marketing Content Gen \(savingsOpportunity\)[^\n]*out of range/);
     const rank = await chat([{ role: 'user', content: 'Which team has the most savings opportunity?' }], ctx);
     expect(rank.text).not.toContain('-$500');
   });

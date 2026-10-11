@@ -75,18 +75,24 @@ export function clarifyText(world: World, wanted: 'team' | 'workload' | 'model' 
   ].join('\n');
 }
 
+/** Disclosure for workloads excluded because their wire figures were out of range; null when none. */
+export function rejectedNote(world: World): string | null {
+  if (world.rejected.length === 0) return null;
+  const names = world.rejected.slice(0, 5).map((r) => r.slice(0, 120)).join(', ');
+  return `Note: figures for ${names}${world.rejected.length > 5 ? `, and ${world.rejected.length - 5} more` : ''} were out of range and ignored; they are excluded from every number here.`;
+}
+
 /** The user named something that is not in the data: say so, never fall back silently. */
 export function unknownNameText(world: World, u: { name: string; team: boolean }): string {
   const head = u.team
     ? `**I don't have a team called ${u.name}**`
     : `**I don't have a team, workload or model called "${u.name}"**`;
   const teams = world.teams.length > 0 ? `Teams are: ${world.teams.slice(0, 20).join(', ')}.` : 'No team data is present in this context.';
-  const wls = world.workloads.slice(0, 12).map((w) => w.name);
   return [
     head,
     teams,
-    ...(wls.length > 0 ? [`Workloads include: ${wls.join(', ')}${world.workloads.length > 12 ? `, and ${world.workloads.length - 12} more` : ''}.`] : []),
     'I did not substitute anything else for it; name one of these and I will answer.',
+    ...(rejectedNote(world) ? [rejectedNote(world) as string] : []),
     basisLine(world.asOf),
     'Closest questions I can answer:',
     ...starterQuestions(world).slice(0, 3).map((q) => `\u2022 "${q}"`),

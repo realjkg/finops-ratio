@@ -8,17 +8,17 @@
 
 import type { AIContext, AIMessage, AIResponse } from '../AIClient';
 import { parseOverrides, parseReduction, parseBaselines } from './parse';
-import { capabilityAnswer, clarifyText, unknownNameText, unsupportedText } from './answersMeta';
+import { capabilityAnswer, clarifyText, rejectedNote, unknownNameText, unsupportedText } from './answersMeta';
 import { alertsAnswer, outcomesAnswer, tokensAnswer, workloadsAnswer } from './answersDrill';
 import { ebitdaAnswer, migrationAnswer } from './answersFinance';
 import { costDriverAnswer, roiAnswer, savingsAnswer, teamRankAnswer } from './answersRoi';
-import { MAX_TEXT, findMentions, namesTeam, pickSubject, sameScope, unknownCapitalized, unknownTeam, type Mention } from './entities';
+import { MAX_TEXT, findMentions, namesTeam, pickSubject, sameScope, unknownAlongside, unknownCapitalized, unknownTeam, type Mention } from './entities';
 import { MAX_HISTORY, deriveFocus, detectReference, isElliptical, resolveReference } from './memory';
 import { classifyIntent, classifyLegacy, rankingOf, type Intent } from './intents';
 import { atRisk, costDriver, help, savings, summary } from './legacy';
 import { render } from './format';
 import { scopeLabel } from './calc';
-import { buildWorld } from './world';
+import { buildWorld, legacyContext } from './world';
 import type { Answer, Scope, World } from './types';
 
 const GREETING = /^\s*(?:help|hi|hello|hey|\?)\W*$/;
@@ -29,30 +29,29 @@ function reply(content: string, referenced: string[] = []): AIResponse {
 
 const MAX_REPLY = 8000;
 
-/** Keep the header and the tail (basis, next questions); shorten the middle if it is huge. */
+const NOTE_MAX = 300;
+const MARKER = '\u2026(answer shortened to fit; ask a narrower question for the rest)';
+
+/** Keep the header and the tail (notes, basis, next questions); shorten the middle if it is huge. */
 function bound(text: string, notes: string[] = []): string {
   const lines = text.split('\n');
   const tailAt = lines.findIndex((l) => l.startsWith('Basis:'));
   const head = tailAt < 0 ? lines : lines.slice(0, tailAt);
-  const tail = [...notes, ...(tailAt < 0 ? [] : lines.slice(tailAt))];
-  if ([...head, ...tail].join('\n').length <= MAX_REPLY) return [...head, ...tail].join('\n');
+  const safeNotes = notes.map((n) => (n.length > NOTE_MAX ? `${n.slice(0, NOTE_MAX - 1)}\u2026` : n));
+  const tail = [...safeNotes, ...(tailAt < 0 ? [] : lines.slice(tailAt))];
+  const full = [...head, ...tail].join('\n');
+  if (full.length <= MAX_REPLY) return full;
+  // The tail (notes, basis, next questions) always survives: budget the head by its real length.
+  const budget = MAX_REPLY - tail.join('\n').length - MARKER.length - 2;
   const kept: string[] = [];
   let used = 0;
-  for (const l of head) {
-    if (used + l.length > MAX_REPLY - 1500) break;
-    kept.push(l);
-    used += l.length + 1;
-  }
-  return [...kept, '\u2026(answer shortened to fit; ask a narrower question for the rest)', ...tail].join('\n').slice(0, MAX_REPLY);
+  for (const l of head) if ((used += l.length + 1) <= budget) kept.push(l); else break;
+  return [...kept, MARKER, ...tail].join('\n');
 }
 
-function done(a: Answer, world: World, note?: string): AIResponse {
-  const notes: string[] = [];
-  if (note) notes.push(note);
-  if (world.rejected.length > 0) {
-    notes.push(`Note: figures for ${world.rejected.slice(0, 5).join(', ')} were out of range and ignored; they are excluded from every number above.`);
-  }
-  return reply(bound(render(a, world.asOf), notes), a.referenced);
+function done(a: Answer, world: World, notes: string[] = []): AIResponse {
+  const rejected = rejectedNote(world);
+  return reply(bound(render(a, world.asOf), rejected ? [...notes, rejected] : notes), a.referenced);
 }
 
 /** Entities named in the question that the answer does not cover (other kinds too). */
@@ -144,16 +143,20 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
     }
   }
   const others = subject && explicit ? alsoNamed(world, scope, mentions) : [];
-  const note =
-    others.length > 0
-      ? `Note: you also named ${others.map((o) => scopeLabel(world, o)).join(', ')}; I answered for ${scopeLabel(world, scope)} only \u2014 ask about the others separately.`
-      : undefined;
+  const notes: string[] = [];
+  if (others.length > 0) {
+    notes.push(`Note: you also named ${others.map((o) => scopeLabel(world, o)).join(', ')}; I answered for ${scopeLabel(world, scope)} only \u2014 ask about the others separately.`);
+  }
 
-  // An unrecognized named team is answered plainly, before any back-reference or default scope.
-  if (!explicit && intent !== 'forecast' && intent !== 'capability') {
-    const team = unknownTeam(text);
-    if (team) return reply(unknownNameText(world, { name: team, team: true }));
-    if (!subject && !backRef && NAMEABLE.has(intent)) {
+  // An unrecognized named team is reported plainly, before any back-reference or default scope,
+  // and also next to a recognized entity ("ROI of Legal and the Finance team").
+  if (intent !== 'forecast' && intent !== 'capability') {
+    const team = unknownTeam(text, mentions);
+    if (team && !explicit) return reply(unknownNameText(world, { name: team, team: true }));
+    const alongside = explicit && !team ? unknownAlongside(text, mentions) : null;
+    if (team) notes.push(`Note: I don't have a team called ${team}; I answered for ${scopeLabel(world, scope)} only.`);
+    else if (alongside) notes.push(`Note: I don't have a team, workload or model called "${alongside}"; I answered for ${scopeLabel(world, scope)} only.`);
+    else if (!subject && !backRef && (NAMEABLE.has(intent) || intent === 'legacy' || intent === 'savings' || intent === 'cost_driver')) {
       const name = unknownCapitalized(text);
       if (name) return reply(unknownNameText(world, { name, team: false }));
     }
@@ -171,16 +174,16 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
       return done(capabilityAnswer(world), world);
     case 'migration': {
       const { overrides, ignored } = parseOverrides(text);
-      return done(migrationAnswer(world, scope, overrides, ignored), world, note);
+      return done(migrationAnswer(world, scope, overrides, ignored), world, notes);
     }
     case 'ebitda':
-      return done(ebitdaAnswer(world, scope, parseReduction(text), parseBaselines(text)), world, note);
+      return done(ebitdaAnswer(world, scope, parseReduction(text), parseBaselines(text)), world, notes);
     case 'outcomes':
-      return done(outcomesAnswer(world, scope), world, note);
+      return done(outcomesAnswer(world, scope), world, notes);
     case 'alerts':
-      return done(alertsAnswer(world, scope), world, note);
+      return done(alertsAnswer(world, scope), world, notes);
     case 'tokens':
-      return done(tokensAnswer(world, scope), world, note);
+      return done(tokensAnswer(world, scope), world, notes);
     case 'team_rank': {
       if (world.teams.length === 0) {
         const a = costDriverAnswer(world, { kind: 'portfolio' });
@@ -194,14 +197,14 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
       return done(teamRankAnswer(world, metric, ascending), world);
     }
     case 'workloads':
-      return done(workloadsAnswer(world, scope), world, note);
+      return done(workloadsAnswer(world, scope), world, notes);
     case 'roi':
-      return done(roiAnswer(world, scope), world, note);
+      return done(roiAnswer(world, scope), world, notes);
     case 'savings':
-      if (!unresolved) return done(savingsAnswer(world, scope), world, note);
+      if (!unresolved) return done(savingsAnswer(world, scope), world, notes);
       break;
     case 'cost_driver':
-      if (!unresolved) return done(costDriverAnswer(world, scope), world, note);
+      if (!unresolved) return done(costDriverAnswer(world, scope), world, notes);
       break;
     default:
       break;
@@ -210,19 +213,19 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   // Legacy path: byte-identical answers for the original keyword questions.
   switch (classifyLegacy(text)) {
     case 'at_risk':
-      return atRisk(context);
+      return atRisk(legacyContext(context, world));
     case 'cost_driver':
-      return costDriver(context);
+      return costDriver(legacyContext(context, world));
     case 'savings':
-      return savings(context);
+      return savings(legacyContext(context, world));
     case 'summary':
-      return summary(context);
+      return summary(legacyContext(context, world));
     default:
       break;
   }
   // Nothing matched. A named or remembered subject gets its detail view;
   // anything else gets an honest "cannot answer" with the closest questions.
-  if (explicit || (backRef && !unresolved)) return done(workloadsAnswer(world, scope), world, note);
+  if (explicit || (backRef && !unresolved)) return done(workloadsAnswer(world, scope), world, notes);
   if (backRef && unresolved && ref.kind !== 'none') return reply(clarifyText(world, unresolved));
   return reply(unsupportedText(world));
 }

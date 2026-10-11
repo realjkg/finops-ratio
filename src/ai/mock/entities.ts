@@ -201,14 +201,25 @@ const NOT_A_NAME = new Set([
   'total', 'dollars', 'average', 'aggregate', 'agents', 'models', 'workloads', 'ai', 'llm', 'usd',
   'same', 'whole', 'entire', 'other', 'first', 'highest', 'lowest', 'best', 'worst', 'weakest', 'strongest', 'biggest',
   'largest', 'smallest', 'top', 'bottom', 'expensive', 'costly', 'cheapest', 'which', 'what', 'one',
+  'team', 'teams', 'group', 'groups', 'department', 'departments', 'dept', 'show', 'tell', 'give', 'list', 'rank', 'compare', 'explain', 'and', 'or', 'who', 'how', 'is', 'are',
 ]);
 
 const WORD = "(?!the\\b)[\\p{L}&'-]+";
-// "the X team", "our X group", "for X team": a team-qualified name, whatever the verb before it.
+// "the X team", "and X team", "for X group", any verb before it: a team-qualified name.
 const TEAM_QUALIFIED_RX = new RegExp(
-  `(?:\\b(?:the|our)|\\b(?:for|of|in|on|about|within|to))\\s+(${WORD}(?:\\s+${WORD}){0,2})\\s+(?:team|group|department|dept)\\b`,
+  `\\b(?:the|our|and|or|vs|versus|with|than|plus|for|of|in|on|about|within|to)\\s+(${WORD}(?:\\s+${WORD}){0,2})\\s+(?:teams?|groups?|departments?|dept)\\b`,
   'giu',
 );
+// A capitalized team name that opens the question: "Finance team ROI".
+const START_TEAM_RX = /^\s*(\p{Lu}[\p{L}&'-]*(?:\s+[\p{L}&'-]+){0,2})\s+(?:team|group|department|dept)\b/u;
+// "Finance and § teams": a coordinated list of teams ("§" marks a recognized entity).
+const LIST_ITEM = "(?!the\\b)[\\p{L}&'\u00a7-]+";
+const TEAM_LIST_RX = new RegExp(
+  `\\b(?:the|our|of|for|in|on|about|within|to|and|vs|versus|with)\\s+(${LIST_ITEM}(?:(?:\\s*,\\s*|\\s+)${LIST_ITEM}){0,5})\\s+(?:teams|groups|departments)\\b`,
+  'giu',
+);
+// "ROI of Legal and Finance?": a capitalized name coordinated with a recognized entity.
+const COORDINATED_RX = /(?:\band|\bor|\bvs|\bversus|&|,)\s+(\p{Lu}[\p{L}&'-]*(?:\s+[\p{L}&'-]+){0,2})\s*[?.!]*\s*$/u;
 const TRAILING_NAME_RX = /(?:^|\s)(?:for|of|in|on|about)\s+(?:the\s+)?([\p{L}&'-]+(?:\s+[\p{L}&'-]+){0,3})\s*[?.!]*\s*$/u;
 
 const plausible = (raw: string): boolean => {
@@ -216,14 +227,43 @@ const plausible = (raw: string): boolean => {
   return raw.length >= 2 && !NOT_A_NAME.has(first);
 };
 
-/** A team the user named ("the Finance team") that matches nothing in the data, else null. */
-export function unknownTeam(text: string): string | null {
-  const t = text.slice(0, MAX_TEXT);
+/** The text with each recognized entity replaced by a marker, so only unknown names remain. */
+function mask(text: string, mentions: Mention[]): string {
+  let t = text.slice(0, MAX_TEXT);
+  for (const m of [...mentions].sort((a, b) => b.start - a.start)) t = `${t.slice(0, m.start)}\u00a7${t.slice(m.end)}`;
+  return t;
+}
+
+/**
+ * A team the user named ("the Finance team", "Finance team ROI", "the Finance and Legal teams")
+ * that matches nothing in the data, else null. Recognized entities are masked first, so "Legal
+ * and the Finance team" reports Finance, and generic phrases ("which team", "team group") are
+ * rejected by `plausible`.
+ */
+export function unknownTeam(text: string, mentions: Mention[] = []): string | null {
+  const t = mask(text, mentions);
+  const start = START_TEAM_RX.exec(t)?.[1]?.trim();
+  if (start && plausible(start)) return start.slice(0, 40);
   for (const m of t.matchAll(TEAM_QUALIFIED_RX)) {
     const raw = m[1].trim();
     if (plausible(raw)) return raw.slice(0, 40);
   }
+  for (const m of t.matchAll(TEAM_LIST_RX)) {
+    for (const part of m[1].split(/\s*(?:,|\band\b|\bor\b|&|\bvs\b|\bversus\b)\s*/i)) {
+      const raw = part.replace(/^(?:the|our)\s+/i, '').trim();
+      if (raw && !raw.includes('\u00a7') && plausible(raw)) return raw.slice(0, 40);
+    }
+  }
   return null;
+}
+
+/** A capitalized name coordinated with a recognized entity ("Legal and Finance"), else null. */
+export function unknownAlongside(text: string, mentions: Mention[]): string | null {
+  if (mentions.length === 0) return null;
+  const raw = COORDINATED_RX.exec(mask(text, mentions))?.[1]?.trim();
+  if (!raw || !plausible(raw)) return null;
+  const first = raw.split(/\s+/)[0];
+  return first === first.toUpperCase() && first.length <= 4 ? null : raw.slice(0, 40);
 }
 
 /**
