@@ -50,7 +50,9 @@ describe('authorize: card A1 named tests', () => {
   it('denies_unknown_action_and_unknown_role', () => {
     const view: Resource = { kind: 'view', id: '/', env: 'dev' };
     for (const role of ['admin', 'CTO', 'cto ', '', '*', '__proto__', 'constructor', 'executive']) expectDeny(authorize(principal('cto', { role: role as Role }), 'view.read', view), 403, role);
-    for (const action of ['view.write', '*', 'VIEW.READ', '__proto__', 'toString', 'change.delete']) expectDeny(authorize(principal('finops_lead'), action as Action, view), 403, action);
+    for (const action of ['view.write', '*', 'VIEW.READ', '__proto__', 'toString', 'change.delete']) {
+      expect(authorize(principal('finops_lead'), action as Action, view), action).toEqual({ allow: false, status: 403, reason: DENY_REASONS.action }); // decided, not thrown
+    }
     for (const id of ['/admin', '', '__proto__', '/Overview', '/api/v1/simulation/*']) expectDeny(authorize(principal('finops_lead'), 'view.read', { kind: 'view', id }), 403, id);
     expectDeny(authorize(principal('finops_lead'), 'view.read', { kind: 'page', id: '/' } as unknown as Resource), 403);
     // legacy_service is bound to the shared token, and the shared token to legacy_service.
