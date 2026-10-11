@@ -35,7 +35,10 @@ export interface PageRequest {
 
 export interface ViewRow {
   key: string;
-  /** Integer cents. For every persona the rows sum to the view total. */
+  /**
+   * Integer cents. The complete (unpaged) row set sums to the view total; a
+   * paged view holds only the current page, while the total covers every row.
+   */
   cents: number;
   [field: string]: string | number;
 }
@@ -77,6 +80,16 @@ function sumCents(items: readonly { cents: number }[]): number {
   const result = Number(total);
   if (!Number.isSafeInteger(result) || BigInt(result) !== total) {
     throw new RangeError('total is outside the safe integer range');
+  }
+  return result;
+}
+
+/** a minus b, computed exactly; throws if the exact result is not a safe integer. */
+function exactDifference(a: number, b: number): number {
+  const exact = BigInt(a) - BigInt(b);
+  const result = Number(exact);
+  if (!Number.isSafeInteger(result) || BigInt(result) !== exact) {
+    throw new RangeError('difference is outside the safe integer range');
   }
   return result;
 }
@@ -148,7 +161,7 @@ function budgetLines(ds: Dataset, lines: readonly LineItem[]): BudgetLine[] {
     const own = lines.filter((l) => l.team === b.team);
     if (own.length === 0) continue;
     const actualCents = sumCents(own);
-    out.push({ team: b.team, budgetCents: b.cents, actualCents, varianceCents: b.cents - actualCents });
+    out.push({ team: b.team, budgetCents: b.cents, actualCents, varianceCents: exactDifference(b.cents, actualCents) });
   }
   return out;
 }
