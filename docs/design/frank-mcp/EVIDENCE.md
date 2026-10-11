@@ -1,11 +1,19 @@
 # Frank with an allowlisted, read-only MCP: evidence
 
 Companion to [DESIGN.md](DESIGN.md). It records what the author checked, how,
-and what could not be checked. Base: `origin/main` at 62bd8ed (merge of #93) when the citations were checked; the base is now 8caec87 (merge of PR #96), which touches only `docs/design/frank-mcp`, so the citations are unchanged.
+and what could not be checked. Base: `origin/main` at 62bd8ed (merge of #93)
+when the citations were checked; the base is now 8caec87 (merge of PR #96),
+which touches only `docs/design/frank-mcp`, so the citations are unchanged.
 Nothing here was run against a live model, a live MCP server or a database;
 every code claim was verified by reading the file at that commit.
 
-Review history, as in DESIGN.md: revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested); revision 2 (6402ab3, 00523cf) answered it and a second challenger review of PR #98 requested changes; revision 3 (e050578, d997618) answered that and the round-3 challenger approved it; Copilot then reviewed d997618 and revision 4 (52de3cf) answered it; a round-4 challenger review requested changes and 16581c8 answered it; revision 5 answers Copilot's next review and the round-5 challenger's review of 16581c8.
+Review history, as in DESIGN.md: revision 1 (c97852d, PR #96) was reviewed by
+a challenger (changes requested); revision 2 (6402ab3, 00523cf) answered it
+and a second challenger review of PR #98 requested changes; revision 3
+(e050578, d997618) answered that and the round-3 challenger approved it;
+Copilot then reviewed d997618 and revision 4 (52de3cf) answered it; a round-4
+challenger review requested changes and 16581c8 answered it; revision 5
+answers Copilot's next review and the round-5 challenger's review of 16581c8.
 
 ## 1. Method
 
@@ -16,7 +24,8 @@ Review history, as in DESIGN.md: revision 1 (c97852d, PR #96) was reviewed by a 
   `src/agent-workflows/{frank,engine,types,policy}.ts`,
   `docs/evidence/frank-coster-interface.md`,
   `src/costsource/{PointFiveMcpTransport,CostSourceClient}.ts` and the
-  `redact.ts` header and rules, `src/server/gateway/{auth,withGateway,liveDataAuth}.ts`,
+  `redact.ts` header and rules,
+  `src/server/gateway/{auth,withGateway,liveDataAuth}.ts`,
   `src/server/costs/{publishedCostsRoute,readerLogin}.ts`, migrations 0001,
   0002 (grants) and 0004 (header and grants), `src/lib/{derive,modelCompare,
   forecast,valueEvidence}.ts`, `src/mission/adjustmentGate.ts`,
@@ -29,14 +38,19 @@ Review history, as in DESIGN.md: revision 1 (c97852d, PR #96) was reviewed by a 
   the citations it touched (`derive.ts:33-35`, `engine.ts:196`,
   `chat.ts:336-344`, `chatRoute.test.ts:150-154`, `LiveFinioClient.ts:5-11`)
   were re-read.
-- Revision 3 sources: the sprint plan `docs/design/sprint-mock-demo-mcp-rbac/PLAN.md`
+- Revision 3 sources: the sprint plan
+  `docs/design/sprint-mock-demo-mcp-rbac/PLAN.md`
   on branch `docs/sprint-plan-mock-demo-mcp-rbac` at 7a7d51b (lines 127,
   142-143, 160, 319), read for T-6; `src/lib/forecast.ts:118`.
 - Revision 4 sources: `src/ingest/config.ts:11`, `:161`, `:178` (the
   `RATIO_ENV` vocabulary and the empty-value handling) and
   `src/costsource/transports/redact.ts:327-340` (the rules the result-value
   scan reuses; all re-read).
-- Revision 5 sources: `src/ingest/config.ts:189-190` (an empty `RATIO_ENV` becomes `development` in `loadWorkerConfig`); the four redaction sample outputs were reproduced by running `applyRedactionRules` from `src/costsource/transports/redact.ts` on the base code with Node's type stripping.
+- Revision 5 sources: `src/ingest/config.ts:189-190` (an empty `RATIO_ENV`
+  becomes `development` in `loadWorkerConfig`); the four redaction sample
+  outputs were reproduced by running `applyRedactionRules` from
+  `src/costsource/transports/redact.ts` on the base code with Node's type
+  stripping.
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -115,4 +129,5 @@ request body at the final head; this file makes no claim about the title or
 body of the pull request beyond that. The
 wording of these documents was not shaped to avoid any rule.
 
-Rollback: revert the two documents; reverse-applying the diff to origin/main gives the same tree as origin/main.
+Rollback: revert the two documents; reverse-applying the diff to origin/main
+gives the same tree as origin/main.
