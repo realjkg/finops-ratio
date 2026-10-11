@@ -86,29 +86,7 @@ describe('M2 impossible headlines carry a warning, uncapped', () => {
   });
 });
 
-describe('M3 extreme finite wire numbers never print NaN, Infinity or n/a', () => {
-  const FIELDS: (keyof Snap)[] = ['monthlySpend', 'monthlyValue', 'tokensInToday', 'tokensOutToday', 'tokensCachedToday', 'dailyInferences', 'monthlyBudget', 'costTrendPct', 'valueRatio'];
-  const VALUES = [1.7e308, -1.7e308, 1e300, 1e16, -1e16];
-  const QS = [
-    'What is the ROI of the portfolio?', 'ROI for CX Engineering', 'ROI of Customer Support Agent', 'Which team is driving the highest cost?',
-    'Show the workloads in CX Engineering', 'Show token and unit cost detail for Customer Support Agent', 'Any alerts for CX Engineering?',
-    'What if we moved Customer Support Agent to a private open model?', 'What if we moved the CX Engineering team to a private open model?',
-    'What if we moved the portfolio to a private open model?', 'EBITDA impact for CX Engineering if spend went down $2,000 a month, group EBITDA of $4.2M',
-    'How much can we save in CX Engineering?', "What's driving cost in CX Engineering?", 'Which team has the weakest ROI?',
-  ];
-  it('property: every field x every extreme x every question', async () => {
-    const jobs: Promise<{ text: string }>[] = [];
-    const tags: string[] = [];
-    for (const f of FIELDS) for (const v of VALUES) {
-      const ctx = withSnap(0, { [f]: v } as Partial<Snap>);
-      for (const q of QS) { tags.push(`${String(f)}=${v} :: ${q}`); jobs.push(chat([{ role: 'user', content: q }], ctx)); }
-    }
-    const out = await Promise.all(jobs);
-    out.forEach((r, i) => {
-      expect(r.text, tags[i]).not.toMatch(BAD);
-      expect(r.text, tags[i]).not.toContain('n/a');
-    });
-  }, 120000);
+describe('M3 rejected figures are disclosed', () => {
   it('says so when a workload’s figures are rejected', async () => {
     const ctx = withSnap(0, { monthlySpend: 1.7e308, monthlyValue: 1.7e308 });
     const { text } = await chat([{ role: 'user', content: 'What is the ROI of the portfolio?' }], ctx);

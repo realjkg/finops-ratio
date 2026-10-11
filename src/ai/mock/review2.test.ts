@@ -18,7 +18,6 @@ const withSnap = (patch: Partial<Snap>): AIContext => {
 };
 const ask = async (q: string, ctx: AIContext = CTX): Promise<string> => (await chat([{ role: 'user', content: q }], ctx)).text;
 const SUPPORT = 'ROI of Customer Support Agent';
-const REJECTED = /out of range and ignored/;
 
 describe('M1 quality-note lookup uses own properties', () => {
   it.each(['constructor', '__proto__', 'toString'])('wire model %s reached by "the same model"', async (m) => {
@@ -96,21 +95,6 @@ describe('M5 exact boundaries of the claimed guards', () => {
     return c;
   };
 
-  it('USD limit is 1e12 inclusive for spend and for value', async () => {
-    for (const f of ['monthlySpend', 'monthlyValue'] as const) {
-      const ok = await ask(SUPPORT, withSnap({ monthlySpend: 1e12, monthlyValue: 1e12, [f]: 1e12 }));
-      expect(ok, f).toContain('**ROI — Customer Support Agent (workload)**');
-      expect(ok, f).not.toMatch(REJECTED);
-      const bad = await ask('What is the ROI of the portfolio?', withSnap({ [f]: 1.0000001e12 }));
-      expect(bad, f).toMatch(REJECTED);
-    }
-  });
-  it('count limit is 1e13 inclusive for tokens and calls', async () => {
-    for (const f of ['tokensInToday', 'tokensOutToday', 'tokensCachedToday', 'dailyInferences'] as const) {
-      expect(await ask('What is the ROI of the portfolio?', withSnap({ [f]: 1e13 })), f).not.toMatch(REJECTED);
-      expect(await ask('What is the ROI of the portfolio?', withSnap({ [f]: 1.0000001e13 })), f).toMatch(REJECTED);
-    }
-  });
   it('list cap is 20 rows', async () => {
     expect(await ask('Show the workloads in Big', bigCtx(20))).not.toMatch(/and \d+ more/);
     expect(await ask('Show the workloads in Big', bigCtx(21))).toContain('…and 1 more.');
@@ -134,25 +118,6 @@ describe('M5 exact boundaries of the claimed guards', () => {
       const t = await ask('Which team is driving the highest cost?', withSnap({ team: `Aa${ch}Bb` }));
       expect(t, JSON.stringify(ch)).toContain('Aa Bb');
     }
-  });
-  it('cache-rate bounds are [0, 1]', async () => {
-    const q = 'Tell me about the Customer Support Agent';
-    expect(await ask(q, withSnap({ cacheHitRate: 1 }))).toContain('100.0%');
-    expect(await ask(q, withSnap({ cacheHitRate: 0 }))).toContain('Cache hit rate: 0.0%');
-    expect(await ask(q, withSnap({ cacheHitRate: 1.01 }))).not.toContain('Cache hit rate');
-    expect(await ask(q, withSnap({ cacheHitRate: -0.01 }))).not.toContain('Cache hit rate');
-  });
-  it('budget bound is 1e12 inclusive', async () => {
-    const q = 'Tell me about the Customer Support Agent';
-    expect(await ask(q, withSnap({ monthlyBudget: 1e12 }))).toContain('of $1,000,000,000,000/mo');
-    expect(await ask(q, withSnap({ monthlyBudget: 1.0000001e12 }))).not.toContain('of $1,0');
-  });
-  it('trend bounds are (-100, 1e6) exclusive', async () => {
-    const q = 'Tell me about the Customer Support Agent';
-    expect(await ask(q, withSnap({ costTrendPct: 999999 }))).toContain('MoM trend +999999.0%');
-    expect(await ask(q, withSnap({ costTrendPct: 1e6 }))).not.toContain('MoM trend');
-    expect(await ask(q, withSnap({ costTrendPct: -99 }))).toContain('MoM trend -99.0%');
-    expect(await ask(q, withSnap({ costTrendPct: -100 }))).not.toContain('MoM trend');
   });
 });
 

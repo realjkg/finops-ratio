@@ -43,9 +43,9 @@ const MUTANTS = [
   ['ebitda-negative-pct', M + 'calc.ts', 'out.ebitdaPct = base > 0 ? (annual / base) * 100 : null;', 'out.ebitdaPct = base !== 0 ? (annual / base) * 100 : null;', 'percent computed on a negative baseline'],
   ['gpu-count-validation-dropped', M + 'parse.ts', 'if (!Number.isInteger(v) || v < 1 || v > 100000)', 'if (!Number.isInteger(v) || v > 100000)', 'zero or negative GPUs accepted'],
   ['money-range-dropped', M + 'parse.ts', 'return Number.isFinite(v) && Math.abs(v) <= MAX_ABS_USD ? v : Number.NaN;', 'return v;', 'non-finite money accepted'],
-  ['legacy-reordered', M + 'respond.ts', "case 'cost_driver':\n      return costDriver(legacyContext(context, world));", "case 'cost_driver':\n      return summary(legacyContext(context, world));", 'legacy cost-driver answer changed'],
+  ['legacy-reordered', M + 'respond.ts', 'const LEGACY = { at_risk: atRisk, cost_driver: costDriver, savings, summary };', 'const LEGACY = { at_risk: atRisk, cost_driver: summary, savings, summary };', 'legacy cost-driver answer changed'],
   // ---- challenger round (PR #99): the six surviving mutants, then new guards
-  ['other-entities-note-dropped', M + 'respond.ts', 'if (others.length > 0) {', 'if (false) {', 'the "you also named" note is dropped'],
+  ['other-entities-note-dropped', M + 'respond.ts', 'const notes = others.length > 0 ?', 'const notes = false ?', 'the "you also named" note is dropped'],
   ['payback-zero-onetime', M + 'answersFinance.ts', "${a.migrationOneTimeUsd === 0 ? '0.0 months (no one-time cost)' : months(ok.payback)}", '${months(ok.payback)}', 'zero one-time cost branch removed'],
   ['ops-limit-loosened', M + 'parse.ts', 'v >= 0 && v <= 5)', 'v >= 0 && v <= 5000)', 'ops overhead limit loosened'],
   ['negative-savings-allowed', M + 'world.ts', "field(i, 'savingsOpportunity', RANGE.usd, bad)", "field(i, 'savingsOpportunity', RANGE.signedUsd, bad)", 'negative wire savings accepted'],
@@ -63,7 +63,7 @@ const MUTANTS = [
   ['invalid-amount-fallback', M + 'answersFinance.ts', '    return { source: null, notes };\n  }\n  if (red.monthlyUsd !== undefined) {', '  }\n  if (red.monthlyUsd !== undefined) {', 'a refused amount falls back to a scenario'],
   ['forecast-ebitda-exempt', M + 'intents.ts', "if (!financial || RX.predictWord.test(lower)) return 'forecast';", "if (!financial) return 'forecast';", 'EBITDA forecast phrasing not refused'],
   // ---- second challenger round (PR #102): boundary guards, notes, lookups
-  ['range-usd-strict', M + 'world.ts', '(r.exMax ? v < r.max : v <= r.max)', '(r.exMax ? v < r.max : v < r.max)', 'upper limits made exclusive'],
+  ['range-usd-strict', M + 'world.ts', '(r.exMax ? v >= r.max : v > r.max)', '(r.exMax ? v >= r.max : v >= r.max)', 'upper limits made exclusive'],
   ['range-count-wide', M + 'world.ts', 'const MAX_COUNT = 1e13;', 'const MAX_COUNT = 1e18;', 'count limit widened'],
   ['list-cap-wide', M + 'answerKit.ts', 'rows: string[], max = 20)', 'rows: string[], max = 25)', 'list cap widened'],
   ['reply-cap-wide', M + 'respond.ts', 'const MAX_REPLY = 8000;', 'const MAX_REPLY = 80000;', 'reply cap widened'],
@@ -77,32 +77,40 @@ const MUTANTS = [
   ['notes-unprotected', M + 'respond.ts', '[...safeNotes, ...(tailAt < 0 ? [] : lines.slice(tailAt))]', '(tailAt < 0 ? [] : lines.slice(tailAt))', 'notes dropped from the protected tail'],
   ['quality-note-plain-lookup', M + 'answersDrill.ts', 'Object.hasOwn(MODEL_QUALITY_NOTE, scope.model) ? MODEL_QUALITY_NOTE[scope.model] : undefined', 'MODEL_QUALITY_NOTE[scope.model]', 'prototype key reaches the quality notes'],
   ['unknown-team-check-off', M + 'respond.ts', "if (intent !== 'forecast' && intent !== 'capability') {", 'if (false) {', 'unknown names answered with a silent substitute'],
-  ['capitalized-rule-dropped', M + 'entities.ts', 'first[0] === first[0].toLowerCase() ||', 'false ||', 'lowercase words treated as names'],
-  ['acronym-rule-dropped', M + 'entities.ts', ' || (first === first.toUpperCase() && first.length <= 4)', '', 'short acronyms treated as names'],
+  ['capitalized-rule-dropped', M + 'entities.ts', 'raw[0] !== raw[0].toLowerCase()', 'true', 'lowercase words treated as names'],
+  ['legacy-strings-unsanitized', M + 'world.ts', "typeof v === 'string' ? clean(v, MAX_STR)", "typeof v === 'string' ? v", 'legacy answers read raw wire strings'],
   // ---- Copilot round on PR #102: one ingestion policy and routing fixes
   ['legacy-context-unsanitized', M + 'world.ts', 'const drop = new Set(world.rejectedIds);', 'const drop = new Set<string>();', 'legacy answers read rejected workloads'],
   ['summary-range-dropped', M + 'world.ts', "typeof v === 'number' && within(v, range) ? v : fallback", "typeof v === 'number' ? v : fallback", 'summary figures not range-checked'],
   ['field-range-dropped', M + 'world.ts', 'if (within(v, range)) return v;', 'return v;', 'numeric fields not range-checked'],
   ['nameless-id-unsanitized', M + 'world.ts', '?? clean(id, MAX_STR)', '?? id', 'workload id used raw as a display name'],
-  ['negative-count-allowed', M + 'world.ts', 'count: { min: 0, max: MAX_COUNT }', 'count: { min: -MAX_COUNT, max: MAX_COUNT }', 'negative counts accepted'],
+  ['negative-count-allowed', M + 'world.ts', 'count: { min: 0, max: MAX_COUNT, int: true }', 'count: { min: -MAX_COUNT, max: MAX_COUNT, int: true }', 'negative counts accepted'],
   ['predict-with-entity', M + 'intents.ts', 'if (/\\bpredict\\w*/.test(lower) || (', 'if (false || (', 'prediction wording ignored when a scope is named'],
-  ['start-team-off', M + 'entities.ts', 'if (start && plausible(start))', 'if (false)', 'team name at the start of a question not detected'],
+  ['start-team-off', M + 'entities.ts', 'for (const rx of [START_TEAM_RX, TEAM_QUALIFIED_RX])', 'for (const rx of [TEAM_QUALIFIED_RX])', 'team name at the start of a question not detected'],
   ['mentions-not-masked', M + 'entities.ts', 'for (const m of [...mentions].sort((a, b) => b.start - a.start)) t =', 'for (const m of [] as Mention[]) t =', 'recognized entities not masked before the unknown-team scan'],
   ['unpriced-suffix-dropped', M + 'answersFinance.ts', "${ok.unpriced.length > 10 ? `, and ${ok.unpriced.length - 10} more` : ''}", '', 'omitted unpriced count dropped'],
   ['note-cap-dropped', M + 'respond.ts', 'n.length > NOTE_MAX ?', 'false ?', 'oversized notes not bounded'],
   ['unknown-team-with-entity-off', M + 'respond.ts', 'if (team) notes.push(', 'if (false) notes.push(', 'unknown team next to a known entity dropped'],
   ['capital-unknown-legacy-off', M + 'respond.ts', "|| intent === 'legacy' || intent === 'savings'", "|| intent === 'savings'", 'legacy savings questions fall back to the portfolio'],
   ['forecast-financial-exemption-removed', M + 'intents.ts', 'if (!financial || RX.predictWord.test(lower)) return', 'if (true) return', 'finance questions with a time horizon are refused'],
-  ['name-slice-wide', M + 'entities.ts', 'if (plausible(raw)) return raw.slice(0, 40);', 'if (plausible(raw)) return raw.slice(0, 400);', 'unknown names not length-capped'],
-  ['team-word-limit', M + 'entities.ts', '(${WORD}(?:\\\\s+${WORD}){0,2})', '(${WORD}(?:\\\\s+${WORD}){0,0})', 'multi-word team names not matched'],
+  ['name-slice-wide', M + 'entities.ts', "!raw.includes('\\u00a7') && plausible(raw)) return raw.slice(0, 40);", "!raw.includes('\\u00a7') && plausible(raw)) return raw.slice(0, 400);", 'unknown names not length-capped'],
+  ['team-word-limit', M + 'entities.ts', '${WORD}(?:(?:\\\\s*,\\\\s*|\\\\s+)${WORD}){0,3})', '${WORD}(?:(?:\\\\s*,\\\\s*|\\\\s+)${WORD}){0,0})', 'multi-word team names not matched'],
   ['plausible-length-loose', M + 'entities.ts', 'return raw.length >= 2 &&', 'return raw.length >= 1 &&', 'single letters treated as names'],
-  ['alongside-note-off', M + 'respond.ts', 'else if (alongside) notes.push(', 'else if (false) notes.push(', 'unknown name next to a known one dropped'],
-  ['team-list-off', M + 'entities.ts', 'for (const m of t.matchAll(TEAM_LIST_RX)) {', 'for (const m of [] as RegExpMatchArray[]) {', 'coordinated team lists not scanned'],
-  ['team-word-stop-dropped', M + 'entities.ts', "'team', 'teams', 'group', 'groups', 'department', 'departments', 'dept', ", '', 'team words captured as names'],
+  ['alongside-note-off', M + 'respond.ts', 'else if (name && explicit) notes.push(', 'else if (false) notes.push(', 'unknown name next to a known one dropped'],
+  ['int-check-dropped', M + 'world.ts', '(!r.int || Number.isSafeInteger(v))', '(true)', 'fractional counts accepted'],
+  ['floor-dropped', M + 'world.ts', '(!r.floor || v === 0 || Math.abs(v) >= r.floor)', '(true)', 'tiny money values accepted'],
+  ['note-suffix-lost', M + 'respond.ts', '${n.slice(0, NOTE_MAX / 2 - 1)}\\u2026${n.slice(-NOTE_MAX / 2)}', '${n.slice(0, NOTE_MAX - 1)}\\u2026', 'a long note loses its meaning suffix'],
+  ['legacy-note-dropped', M + 'respond.ts', 'return note ? reply(`${r.message.content}\\n${note}`, r.initiativesReferenced) : r;', 'return r;', 'legacy answers hide rejected workloads'],
+  ['jobs-unvalidated', 'docs/evidence/frank-mock-analytics/mutate.mjs', 'jobs < 1) {\n  log(', 'jobs < 1 && false) {\n  log(', 'invalid --jobs accepted'],
+  ['team-word-stop-dropped', M + 'entities.ts', 'team teams group groups department departments dept show', 'show', 'team words captured as names'],
 ];
 
 const only = process.argv.slice(2).filter((a) => !a.startsWith('--jobs='));
 const jobs = Number(process.argv.find((a) => a.startsWith('--jobs='))?.slice(7) ?? 3);
+if (!Number.isSafeInteger(jobs) || jobs < 1) {
+  log('--jobs must be a positive integer');
+  process.exit(2);
+}
 const todo = only.length ? MUTANTS.filter((m) => only.includes(m[0])) : MUTANTS;
 // A fresh mkdtemp directory per run (under TMPDIR), one tree copy per worker: concurrent runs never collide.
 const work = mkdtempSync(join(tmpdir(), 'frank-mutants-'));

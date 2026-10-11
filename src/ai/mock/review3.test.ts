@@ -55,6 +55,7 @@ describe('ONE ingestion policy: every numeric field is range-checked', () => {
       for (const q of ['How much can we save?', 'Which initiatives are at risk?', "What's driving cloud cost?"]) {
         const l = await ask(q, ctx);
         expect(l, `${fd.f}=${bad} :: ${q}`).not.toMatch(/NaN|Infinity|∞|e\+\d/);
+        expect(l, `${fd.f}=${bad} :: ${q}`).toMatch(/out of range and ignored/);
       }
     }
   });
@@ -152,7 +153,7 @@ describe('Copilot routing and bound findings', () => {
   it.each([['ROI of Legal, Finance and IT', 'Finance'], ['Compare Legal with HR', 'HR']])('%s reports the unknown item', async (q, bad) => {
     expect(await ask(q)).toMatch(new RegExp(`Note: I don't have a [^\\n]*${bad}`));
   });
-  it.each(['Show the team group ROI', 'What did the team group spend?', 'ROI of the X team'])('%s is not an unknown name', async (q) => {
+  it.each(['Show the team group ROI', 'What did the team group spend?', 'ROI of the x team'])('%s is not an unknown name', async (q) => {
     expect(await ask(q)).not.toContain("I don't have a");
   });
   it('name length, word limit and the finance-question forecast exemption', async () => {

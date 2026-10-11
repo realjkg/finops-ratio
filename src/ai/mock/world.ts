@@ -37,30 +37,28 @@ function str(v: unknown, max = MAX_STR): string | null {
 }
 
 /** One range policy for every numeric field of the request context. */
-interface Range { min: number; max: number; exMin?: boolean; exMax?: boolean }
+interface Range { min: number; max: number; exMin?: boolean; exMax?: boolean; int?: boolean; floor?: number }
 const RANGE = {
-  usd: { min: 0, max: MAX_USD },
-  signedUsd: { min: -MAX_USD, max: MAX_USD },
-  runRate: { min: 0, max: 12 * MAX_USD },
+  usd: { min: 0, max: MAX_USD, floor: 0.01 },
+  signedUsd: { min: -MAX_USD, max: MAX_USD, floor: 0.01 },
+  runRate: { min: 0, max: 12 * MAX_USD, floor: 0.01 },
   ratio: { min: -1e6, max: 1e6 },
-  count: { min: 0, max: MAX_COUNT },
+  count: { min: 0, max: MAX_COUNT, int: true },
   trend: { min: -100, max: 1e6, exMin: true, exMax: true },
   rate: { min: 0, max: 1 },
-  pct: { min: 0, max: 1e4 },
-  gates: { min: 0, max: 4 },
-  total: { min: 0, max: 200 * MAX_USD },
-  items: { min: 0, max: 1e6 },
+  pct: { min: 0, max: 1e4, floor: 0.01 },
+  gates: { min: 0, max: 4, int: true },
+  total: { min: 0, max: 200 * MAX_USD, floor: 0.01 },
+  items: { min: 0, max: 1e6, int: true },
 } as const satisfies Record<string, Range>;
 
 function within(v: number, r: Range): boolean {
-  return Number.isFinite(v) && (r.exMin ? v > r.min : v >= r.min) && (r.exMax ? v < r.max : v <= r.max);
+  if (!Number.isFinite(v) || (r.exMin ? v <= r.min : v < r.min) || (r.exMax ? v >= r.max : v > r.max)) return false;
+  // Counts are whole numbers; money and percents are exactly 0 or at least a cent (no 1e-300 tails).
+  return (!r.int || Number.isSafeInteger(v)) && (!r.floor || v === 0 || Math.abs(v) >= r.floor);
 }
 
-/**
- * Read a numeric field. Absent or non-numeric types read as null (unknown). A number
- * that is non-finite or outside its range is recorded in `bad` and read as null: the
- * caller rejects the whole workload, so nothing out of range is ever computed with.
- */
+// Absent or non-numeric reads as null; an out-of-range number is recorded in `bad` (the workload is then rejected).
 function field(r: Record<string, unknown>, key: string, range: Range, bad: string[]): number | null {
   const v = r[key];
   if (typeof v !== 'number') return null;
@@ -108,11 +106,11 @@ export function buildWorld(ctx: AIContext): World {
     const i = init ?? {};
     const s = snap ?? {};
     const bad: string[] = [];
-    const spend = field(s, 'monthlySpend', RANGE.usd, bad) ?? field(i, 'monthlyCost', RANGE.usd, bad) ?? 0;
-    field(i, 'monthlyCost', RANGE.usd, bad);
+    const spendI = field(i, 'monthlyCost', RANGE.usd, bad);
+    const spend = field(s, 'monthlySpend', RANGE.usd, bad) ?? spendI ?? 0;
     field(i, 'annualRunRate', RANGE.runRate, bad);
-    const wireRatio = field(s, 'valueRatio', RANGE.ratio, bad) ?? field(i, 'valueRatio', RANGE.ratio, bad);
-    field(i, 'valueRatio', RANGE.ratio, bad);
+    const ratioI = field(i, 'valueRatio', RANGE.ratio, bad);
+    const wireRatio = field(s, 'valueRatio', RANGE.ratio, bad) ?? ratioI;
     const wireValue = field(s, 'monthlyValue', RANGE.signedUsd, bad);
     const value = wireValue ?? (wireRatio !== null ? wireRatio * spend : 0);
     if (!within(value, RANGE.signedUsd) && !bad.includes('valueRatio')) bad.push('valueRatio');
@@ -128,8 +126,7 @@ export function buildWorld(ctx: AIContext): World {
     const consumed = field(i, 'budgetConsumedPct', RANGE.pct, bad);
     const savings = field(i, 'savingsOpportunity', RANGE.usd, bad);
     if (bad.length > 0) {
-      rejected.push(`${name} (${bad.join(', ')})`);
-      rejectedIds.push(id);
+      rejected.push(`${name} (${bad.join(', ')})`); rejectedIds.push(id);
       return;
     }
     const status = evidence(s.valueEvidenceStatus) ?? evidence(i.valueEvidenceStatus);
@@ -169,16 +166,27 @@ export function buildWorld(ctx: AIContext): World {
   return { asOf: str(c.asOf) ?? '1970-01-01T00:00:00.000Z', workloads: rows, teams, rejected, rejectedIds };
 }
 
+const deep = (v: unknown): unknown =>
+  typeof v === 'string' ? clean(v, MAX_STR)
+  : Array.isArray(v) ? v.slice(0, MAX_ITEMS).map(deep)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).slice(0, 64).map(([k, x]) => [k, deep(x)]))
+  : v;
+const STATUS_OK: ReadonlySet<string> = new Set(['On Track', 'At Risk', 'Pending Approval']);
+
 /**
- * The context the five legacy answers may read: rejected workloads are dropped and any
- * out-of-range summary figure is recomputed from what remains. For a valid context this
- * is the same data, so the legacy text is unchanged.
+ * The context the five legacy answers may read, rebuilt from sanitized values only: every
+ * string is cleaned, enums are validated, rejected workloads are dropped and out-of-range
+ * summary figures are recomputed. For a valid context this is the same data, so the legacy
+ * text is unchanged.
  */
 export function legacyContext(ctx: AIContext, world: World): AIContext {
   const drop = new Set(world.rejectedIds);
-  const keep = <T extends { id: string }>(xs: T[] | undefined): T[] | undefined =>
-    xs?.filter((x) => !drop.has(String(x.id)));
-  const initiatives = keep(ctx.initiatives) ?? [];
+  const kept = (xs: unknown): unknown[] => arr(xs).filter((x) => !drop.has(String(rec(x).id)));
+  const initiatives = (deep(kept(ctx.initiatives)) as AIContext['initiatives']).map((i) => ({
+    ...i,
+    status: STATUS_OK.has(i.status) ? i.status : 'On Track',
+    valueEvidenceStatus: evidence(i.valueEvidenceStatus),
+  }));
   const sum = (f: (i: (typeof initiatives)[number]) => number): number =>
     initiatives.reduce((n, i) => n + (Number.isFinite(f(i)) ? f(i) : 0), 0);
   const sm = rec(ctx.summary);
@@ -187,9 +195,9 @@ export function legacyContext(ctx: AIContext, world: World): AIContext {
     return typeof v === 'number' && within(v, range) ? v : fallback;
   };
   return {
-    ...ctx,
     initiatives,
-    workloads: keep(ctx.workloads),
+    workloads: deep(kept(ctx.workloads)) as AIContext['workloads'],
+    asOf: str(rec(ctx).asOf) ?? '',
     summary: {
       totalMonthlySpend: pick('totalMonthlySpend', RANGE.total, Math.round(sum((i) => i.monthlyCost))),
       projectedSavings: pick('projectedSavings', RANGE.total, sum((i) => i.savingsOpportunity)),

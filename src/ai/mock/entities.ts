@@ -87,7 +87,8 @@ function candidates(world: World): Candidate[] {
       out.push({ scope: { kind: 'team', team }, alias });
     }
   }
-  return out;
+  const seen = new Set<string>(); // an alias shared by several entities resolves to the first one
+  return out.filter((c) => !seen.has(c.alias) && seen.add(c.alias));
 }
 
 function ambiguousTeams(world: World, text: string): Mention[] {
@@ -143,18 +144,10 @@ export function findMentions(text: string, world: World): Mention[] {
     found.push({ scope: { kind: 'portfolio' }, start: m.index, end: m.index + m[0].length });
   }
   PORTFOLIO_RX.lastIndex = 0;
-  // Drop any mention fully inside a longer one.
-  const kept = found.filter(
-    (a) =>
-      !found.some(
-        (b) =>
-          b !== a &&
-          b.start <= a.start &&
-          b.end >= a.end &&
-          (b.end - b.start > a.end - a.start || (b.end - b.start === a.end - a.start && found.indexOf(b) < found.indexOf(a))),
-      ),
-  );
-  return kept.sort((a, b) => a.start - b.start);
+  // Sweep: sorted by start (longest first), a mention ending inside the previous reach is contained.
+  found.sort((a, b) => a.start - b.start || b.end - a.end);
+  let reach = -1;
+  return found.filter((m) => m.end > reach && ((reach = m.end), true));
 }
 
 const KIND_RANK = { workload: 0, model: 1, team: 2, portfolio: 3 } as const;
@@ -167,25 +160,10 @@ export function sameScope(a: Scope, b: Scope): boolean {
   return true;
 }
 
-interface Subject {
-  scope: Scope;
-  /** Other distinct entities of the same kind that were also named. */
-  others: Scope[];
-}
-
 /** The most specific mention (workload > model > team > portfolio), first on ties. */
-export function pickSubject(mentions: Mention[]): Subject | null {
-  if (mentions.length === 0) return null;
-  const best = [...mentions].sort(
-    (a, b) => KIND_RANK[a.scope.kind] - KIND_RANK[b.scope.kind] || a.start - b.start,
-  )[0];
-  const others: Scope[] = [];
-  for (const m of mentions) {
-    if (m.scope.kind === best.scope.kind && !sameScope(m.scope, best.scope) && !others.some((o) => sameScope(o, m.scope))) {
-      others.push(m.scope);
-    }
-  }
-  return { scope: best.scope, others };
+export function pickSubject(mentions: Mention[]): { scope: Scope } | null {
+  const best = [...mentions].sort((a, b) => KIND_RANK[a.scope.kind] - KIND_RANK[b.scope.kind] || a.start - b.start)[0];
+  return best ? { scope: best.scope } : null;
 }
 
 /** Does the text name a specific team (not merely the word "team")? */
@@ -194,33 +172,21 @@ export function namesTeam(mentions: Mention[]): boolean {
 }
 
 // Words that follow "of/for/in/the" without naming anything in the data.
-const NOT_A_NAME = new Set([
-  'the', 'a', 'an', 'this', 'that', 'these', 'those', 'it', 'them', 'us', 'we', 'you', 'me', 'all', 'any', 'each', 'every',
-  'everything', 'everyone', 'anything', 'our', 'my', 'your', 'its', 'their', 'next', 'last', 'now', 'today', 'more', 'less',
-  'portfolio', 'overall', 'company', 'month', 'year', 'quarter', 'week', 'cost', 'spend', 'value', 'roi', 'savings',
-  'total', 'dollars', 'average', 'aggregate', 'agents', 'models', 'workloads', 'ai', 'llm', 'usd',
-  'same', 'whole', 'entire', 'other', 'first', 'highest', 'lowest', 'best', 'worst', 'weakest', 'strongest', 'biggest',
-  'largest', 'smallest', 'top', 'bottom', 'expensive', 'costly', 'cheapest', 'which', 'what', 'one',
-  'team', 'teams', 'group', 'groups', 'department', 'departments', 'dept', 'show', 'tell', 'give', 'list', 'rank', 'compare', 'explain', 'and', 'or', 'who', 'how', 'is', 'are',
-]);
+const NOT_A_NAME = new Set(
+  `the a an this that these those it them us we you me all any each every everything everyone anything our my your its their next last now today more less portfolio overall company month year quarter week cost spend value roi savings total dollars average aggregate agents models workloads ai llm usd nan infinity same whole entire other first highest lowest best worst weakest strongest biggest largest smallest top bottom expensive costly cheapest which what one team teams group groups department departments dept show tell give list rank compare explain and or who how is are`.split(' '),
+);
 
-const WORD = "(?!the\\b)[\\p{L}&'-]+";
+const WORD = "(?!the\\b)[\\p{L}&'\u00a7-]+";
 // "the X team", "and X team", "for X group", any verb before it: a team-qualified name.
 const TEAM_QUALIFIED_RX = new RegExp(
-  `\\b(?:the|our|and|or|vs|versus|with|than|plus|for|of|in|on|about|within|to)\\s+(${WORD}(?:\\s+${WORD}){0,2})\\s+(?:teams?|groups?|departments?|dept)\\b`,
+  `\\b(?:the|our|and|or|vs|versus|with|than|plus|for|of|in|on|about|within|to)\\s+(${WORD}(?:(?:\\s*,\\s*|\\s+)${WORD}){0,3})\\s+(?:teams?|groups?|departments?|dept)\\b`,
   'giu',
 );
-// A capitalized team name that opens the question: "Finance team ROI".
-const START_TEAM_RX = /^\s*(\p{Lu}[\p{L}&'-]*(?:\s+[\p{L}&'-]+){0,2})\s+(?:team|group|department|dept)\b/u;
-// "Finance and § teams": a coordinated list of teams ("§" marks a recognized entity).
-const LIST_ITEM = "(?!the\\b)[\\p{L}&'\u00a7-]+";
-const TEAM_LIST_RX = new RegExp(
-  `\\b(?:the|our|of|for|in|on|about|within|to|and|vs|versus|with)\\s+(${LIST_ITEM}(?:(?:\\s*,\\s*|\\s+)${LIST_ITEM}){0,5})\\s+(?:teams|groups|departments)\\b`,
-  'giu',
-);
-// "ROI of Legal and Finance?": a capitalized name coordinated with a recognized entity.
-const COORDINATED_RX = /(?:\band|\bor|\bvs|\bversus|&|,)\s+(\p{Lu}[\p{L}&'-]*(?:\s+[\p{L}&'-]+){0,2})\s*[?.!]*\s*$/u;
-const TRAILING_NAME_RX = /(?:^|\s)(?:for|of|in|on|about)\s+(?:the\s+)?([\p{L}&'-]+(?:\s+[\p{L}&'-]+){0,3})\s*[?.!]*\s*$/u;
+// A team name that opens the question: "Finance team ROI".
+const START_TEAM_RX = /^\s*(\p{L}[\p{L}&'-]*(?:\s+[\p{L}&'-]+){0,2})\s+(?:team|group|department|dept)\b/giu;
+// A capitalized name after a list separator ("ROI of Legal, Finance and IT", "Legal with HR").
+const LIST_NAME_RX = /(?:[,&]|\b(?:and|or|vs|versus|with)\b)\s*(\p{Lu}[\p{L}&'-]*(?:\s+(?!(?:and|or|vs|versus|with)\b)[\p{L}&'-]+){0,2})/gu;
+const TRAILING_NAME_RX = /(?:^|\s)(?:for|of|in|on|about)\s+(?:the\s+)?([\p{L}&'-]+(?:\s+[\p{L}&'-]+){0,3})\s*[?.!]*\s*$/gu;
 
 const plausible = (raw: string): boolean => {
   const first = raw.split(/\s+/)[0].toLowerCase();
@@ -241,40 +207,32 @@ function mask(text: string, mentions: Mention[]): string {
  * rejected by `plausible`.
  */
 export function unknownTeam(text: string, mentions: Mention[] = []): string | null {
-  const t = mask(text, mentions);
-  const start = START_TEAM_RX.exec(t)?.[1]?.trim();
-  if (start && plausible(start)) return start.slice(0, 40);
-  for (const m of t.matchAll(TEAM_QUALIFIED_RX)) {
-    const raw = m[1].trim();
-    if (plausible(raw)) return raw.slice(0, 40);
+  // "Sales team": a workload or model name used as a team name is a team that does not exist.
+  for (const m of mentions) {
+    if (m.scope.kind !== 'team' && m.scope.kind !== 'portfolio' && /^\s+(?:team|group|department|dept)\b/i.test(text.slice(m.end, m.end + 12))) return text.slice(m.start, m.end).slice(0, 40);
   }
-  for (const m of t.matchAll(TEAM_LIST_RX)) {
-    for (const part of m[1].split(/\s*(?:,|\band\b|\bor\b|&|\bvs\b|\bversus\b)\s*/i)) {
-      const raw = part.replace(/^(?:the|our)\s+/i, '').trim();
-      if (raw && !raw.includes('\u00a7') && plausible(raw)) return raw.slice(0, 40);
+  const t = mask(text, mentions);
+  for (const rx of [START_TEAM_RX, TEAM_QUALIFIED_RX]) {
+    for (const m of t.matchAll(rx)) {
+      for (const part of m[1].split(/\s*(?:,|\band\b|\bor\b|\s&\s|\bvs\b|\bversus\b)\s*/i)) {
+        const raw = part.replace(/^(?:the|our)\s+/i, '').trim();
+        if (raw && !raw.includes('\u00a7') && plausible(raw)) return raw.slice(0, 40);
+      }
     }
   }
   return null;
 }
 
-/** A capitalized name coordinated with a recognized entity ("Legal and Finance"), else null. */
-export function unknownAlongside(text: string, mentions: Mention[]): string | null {
-  if (mentions.length === 0) return null;
-  const raw = COORDINATED_RX.exec(mask(text, mentions))?.[1]?.trim();
-  if (!raw || !plausible(raw)) return null;
-  const first = raw.split(/\s+/)[0];
-  return first === first.toUpperCase() && first.length <= 4 ? null : raw.slice(0, 40);
-}
-
 /**
- * A trailing capitalized name ("ROI of Lëgal") that matches nothing in the data, else null.
- * Lowercase phrases ("in total", "on average", "for agents") and short acronyms ("USD", "AI") are
- * ordinary words, not names, so they never trigger this.
+ * A capitalized name that matches nothing in the data, else null: a trailing one ("ROI of
+ * Lëgal") when nothing was recognized, or one in a list next to a recognized entity ("Legal,
+ * Finance and IT"). Lowercase phrases ("in total", "on average") and the words USD, AI and LLM
+ * are ordinary words, not names.
  */
-export function unknownCapitalized(text: string): string | null {
-  const raw = TRAILING_NAME_RX.exec(text.slice(0, MAX_TEXT))?.[1]?.trim();
-  if (!raw || !plausible(raw)) return null;
-  const first = raw.split(/\s+/)[0];
-  if (first[0] === first[0].toLowerCase() || (first === first.toUpperCase() && first.length <= 4)) return null;
-  return raw.slice(0, 40);
+export function unknownCapitalized(text: string, mentions: Mention[] = []): string | null {
+  for (const m of mask(text, mentions).matchAll(mentions.length > 0 ? LIST_NAME_RX : TRAILING_NAME_RX)) {
+    const raw = m[1].trim();
+    if (plausible(raw) && raw[0] !== raw[0].toLowerCase()) return raw.slice(0, 40);
+  }
+  return null;
 }

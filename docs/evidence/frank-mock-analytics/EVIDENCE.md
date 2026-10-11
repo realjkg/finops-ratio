@@ -132,38 +132,29 @@ mock. No data, environment, flag, dependency or route change is involved.
 ## 6. Review rounds (PR #99, #102): RED then GREEN, mutation, ingestion policy
 
 Each round was tests first, committed RED, then fixed (`hardening.test.ts`, `review2.test.ts`,
-`review3.test.ts`):
+`review3.test.ts`, `robustness.test.ts`):
 
-| Round | Tests | RED (before the fix) | GREEN |
-| --- | ---: | --- | --- |
-| Challenger 1 | 38 | 25 failed, 12 passed (six surviving-mutant tests, two fallback pins, four negative controls) | 38 of 38 |
-| Challenger 2 | 30 | 17 failed, 13 passed (exact-boundary assertions for guards that already existed) | 30 of 30 |
-| Copilot and re-check | 55 | 29 failed, 17 passed (table rows that accept the inclusive boundaries, plus generic-phrase controls) | 55 of 55 |
+| Round | RED (before the fix) | GREEN |
+| --- | --- | --- |
+| Challenger 1 | 25 failed, 12 passed (surviving-mutant tests, fallback pins, controls) | all pass |
+| Challenger 2 | 17 failed, 13 passed (boundary assertions for guards that already existed) | all pass |
+| Copilot 3, 4 and re-check | 29 failed / 17 passed, then 32 failed / 137 passed | all pass |
 
-Final tree: lint and typecheck clean, `npx vitest run` 165 files / 3252 tests passed, `npm run
-build` compiled successfully.
+**Mutation:** `node docs/evidence/frank-mock-analytics/mutate.mjs --jobs=4` kills every registered
+mutant in one command (fresh `mkdtemp` per run, one tree copy per worker, `--jobs` a positive integer).
 
-**Mutation:** `node docs/evidence/frank-mock-analytics/mutate.mjs --jobs=4` kills **77 of 77**
-mutants in one command (about 5.5 minutes; baseline 246 tests, 0 failing). The runner uses a fresh
-`mkdtemp` directory per run and one tree copy per worker, so concurrent runs cannot collide.
+**One ingestion policy (`world.ts`).** Every numeric field of the request context is range-checked
+once; a workload with any out-of-range field is excluded and listed as `Name (field)` in the "out of
+range and ignored" note (also on the unknown-name reply, the legacy answers, and in the protected
+tail). NaN, Infinity and negatives are out of range everywhere. Money and percents are 0 or at
+least 0.01 (no 1e-300 tails); counts, gates and summary counts are safe integers. Ranges: spend,
+cost, budget, savings 0 to 1e12 USD; value -1e12 to 1e12; run rate 0 to 1.2e13; `valueRatio`
+-1e6 to 1e6; calls and tokens 0 to 1e13; trend above -100 and below 1e6; cache rate 0 to 1;
+budget consumed 0 to 1e4; gates 0 to 4; summary totals 0 to 2e14 (recomputed when bad). The legacy
+answers read a copy rebuilt only from sanitized values (strings cleaned, enums validated); for a
+valid context their text is unchanged. This closes the earlier "absurd magnitude" gap.
 
-**One ingestion policy (`world.ts`).** Every numeric field of the request context is range-checked in
-one place; a workload with any out-of-range field is excluded and listed as `Name (field)` in the
-"out of range and ignored" note (also on the unknown-name reply, and in the protected tail). NaN,
-Infinity and negatives are out of range for every field:
-`monthlySpend`, `monthlyCost`, `monthlyBudget`, `savingsOpportunity` 0 to 1e12 USD; `monthlyValue`
--1e12 to 1e12; `annualRunRate` 0 to 1.2e13; `valueRatio` -1e6 to 1e6; calls and the three token
-counts 0 to 1e13; `costTrendPct` greater than -100 and less than 1e6; `cacheHitRate` 0 to 1;
-`budgetConsumedPct` 0 to 1e4; `governanceGatesPassed` 0 to 4; summary totals 0 to 2e14 and summary
-counts 0 to 1e6, recomputed from the kept initiatives when out of range. The five legacy answers
-read a context with rejected workloads dropped; for a valid context their text is unchanged. This
-closes the earlier deferred "absurd magnitude" gap (5e-324 run-rate, 1e-300 tokens, 1.7e308
-savings or budget percent): nothing is deferred.
-
-**Other behavior fixed.** Own-property alias and quality-note lookups; warnings next to impossible
-headlines; unknown names (team-qualified at the start, after "and", in lists, or next to a known
-entity) are named in the answer, never silently substituted ("team" and "group" are not names);
-prediction wording refuses even with a scope; more than ten unpriced workloads print "and N more";
-notes are capped at 300 characters and the tail (notes, basis, next questions) is budgeted by its
-real length. Known trade-off: a lowercase unknown name without a team word ("roi of finance") is
-not caught; "the finance team" and "ROI of Finance" are.
+**Other behavior.** Own-property lookups; warnings next to impossible headlines; unknown names
+(any case, team-qualified, in lists, next to a known entity) are named, never substituted;
+prediction wording refuses with a scope; notes keep their meaning suffix. Trade-off: a lowercase
+unknown name with no team word ("roi of finance") is not caught.

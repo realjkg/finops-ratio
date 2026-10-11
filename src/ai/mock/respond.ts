@@ -12,7 +12,7 @@ import { capabilityAnswer, clarifyText, rejectedNote, unknownNameText, unsupport
 import { alertsAnswer, outcomesAnswer, tokensAnswer, workloadsAnswer } from './answersDrill';
 import { ebitdaAnswer, migrationAnswer } from './answersFinance';
 import { costDriverAnswer, roiAnswer, savingsAnswer, teamRankAnswer } from './answersRoi';
-import { MAX_TEXT, findMentions, namesTeam, pickSubject, sameScope, unknownAlongside, unknownCapitalized, unknownTeam, type Mention } from './entities';
+import { MAX_TEXT, findMentions, namesTeam, pickSubject, sameScope, unknownCapitalized, unknownTeam, type Mention } from './entities';
 import { MAX_HISTORY, deriveFocus, detectReference, isElliptical, resolveReference } from './memory';
 import { classifyIntent, classifyLegacy, rankingOf, type Intent } from './intents';
 import { atRisk, costDriver, help, savings, summary } from './legacy';
@@ -37,7 +37,8 @@ function bound(text: string, notes: string[] = []): string {
   const lines = text.split('\n');
   const tailAt = lines.findIndex((l) => l.startsWith('Basis:'));
   const head = tailAt < 0 ? lines : lines.slice(0, tailAt);
-  const safeNotes = notes.map((n) => (n.length > NOTE_MAX ? `${n.slice(0, NOTE_MAX - 1)}\u2026` : n));
+  // A long note keeps its start and its end (the meaning), never just a prefix.
+  const safeNotes = notes.map((n) => (n.length > NOTE_MAX ? `${n.slice(0, NOTE_MAX / 2 - 1)}\u2026${n.slice(-NOTE_MAX / 2)}` : n));
   const tail = [...safeNotes, ...(tailAt < 0 ? [] : lines.slice(tailAt))];
   const full = [...head, ...tail].join('\n');
   if (full.length <= MAX_REPLY) return full;
@@ -67,6 +68,7 @@ function alsoNamed(world: World, chosen: Scope, mentions: Mention[]): Scope[] {
   return out;
 }
 
+const LEGACY = { at_risk: atRisk, cost_driver: costDriver, savings, summary };
 const NAMEABLE: ReadonlySet<Intent> = new Set(['roi', 'workloads', 'tokens', 'alerts', 'outcomes', 'ebitda', 'migration']);
 
 // Read-only intents a bare follow-up ("what about Revenue?") may carry over.
@@ -96,6 +98,12 @@ function withoutPortfolio(text: string, ranges: { start: number; end: number }[]
   let out = text;
   for (const r of [...ranges].sort((a, b) => b.start - a.start)) out = out.slice(0, r.start) + ' ' + out.slice(r.end);
   return out;
+}
+
+/** Legacy answers must not silently skip rejected workloads; valid contexts add nothing. */
+function withRejected(r: AIResponse, world: World): AIResponse {
+  const note = rejectedNote(world);
+  return note ? reply(`${r.message.content}\n${note}`, r.initiativesReferenced) : r;
 }
 
 function lastUserIndex(messages: AIMessage[]): number {
@@ -143,23 +151,19 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
     }
   }
   const others = subject && explicit ? alsoNamed(world, scope, mentions) : [];
-  const notes: string[] = [];
-  if (others.length > 0) {
-    notes.push(`Note: you also named ${others.map((o) => scopeLabel(world, o)).join(', ')}; I answered for ${scopeLabel(world, scope)} only \u2014 ask about the others separately.`);
-  }
+  const only = `I answered for ${scopeLabel(world, scope)} only`;
+  const notes = others.length > 0 ? [`Note: you also named ${others.map((o) => scopeLabel(world, o)).join(', ')}; ${only} \u2014 ask about the others separately.`] : [];
 
-  // An unrecognized named team is reported plainly, before any back-reference or default scope,
-  // and also next to a recognized entity ("ROI of Legal and the Finance team").
+  // An unrecognized name is reported plainly (before any back-reference or default scope), also next
+  // to a recognized entity ("ROI of Legal and the Finance team"); it is never silently substituted.
   if (intent !== 'forecast' && intent !== 'capability') {
     const team = unknownTeam(text, mentions);
     if (team && !explicit) return reply(unknownNameText(world, { name: team, team: true }));
-    const alongside = explicit && !team ? unknownAlongside(text, mentions) : null;
-    if (team) notes.push(`Note: I don't have a team called ${team}; I answered for ${scopeLabel(world, scope)} only.`);
-    else if (alongside) notes.push(`Note: I don't have a team, workload or model called "${alongside}"; I answered for ${scopeLabel(world, scope)} only.`);
-    else if (!subject && !backRef && (NAMEABLE.has(intent) || intent === 'legacy' || intent === 'savings' || intent === 'cost_driver')) {
-      const name = unknownCapitalized(text);
-      if (name) return reply(unknownNameText(world, { name, team: false }));
-    }
+    const lone = !subject && !backRef && (NAMEABLE.has(intent) || intent === 'legacy' || intent === 'savings' || intent === 'cost_driver');
+    const name = team || !(explicit || lone) ? null : unknownCapitalized(text, explicit ? mentions : []);
+    if (team) notes.push(`Note: I don't have a team called ${team}; ${only}.`);
+    else if (name && explicit) notes.push(`Note: I don't have a team, workload or model called "${name}"; ${only}.`);
+    else if (name) return reply(unknownNameText(world, { name, team: false }));
   }
 
   const needsScope = intent !== 'forecast' && intent !== 'capability' && intent !== 'team_rank';
@@ -211,18 +215,8 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   }
 
   // Legacy path: byte-identical answers for the original keyword questions.
-  switch (classifyLegacy(text)) {
-    case 'at_risk':
-      return atRisk(legacyContext(context, world));
-    case 'cost_driver':
-      return costDriver(legacyContext(context, world));
-    case 'savings':
-      return savings(legacyContext(context, world));
-    case 'summary':
-      return summary(legacyContext(context, world));
-    default:
-      break;
-  }
+  const legacy = classifyLegacy(text);
+  if (legacy !== 'help') return withRejected(LEGACY[legacy](legacyContext(context, world)), world);
   // Nothing matched. A named or remembered subject gets its detail view;
   // anything else gets an honest "cannot answer" with the closest questions.
   if (explicit || (backRef && !unresolved)) return done(workloadsAnswer(world, scope), world, notes);

@@ -77,9 +77,10 @@ export function clarifyText(world: World, wanted: 'team' | 'workload' | 'model' 
 
 /** Disclosure for workloads excluded because their wire figures were out of range; null when none. */
 export function rejectedNote(world: World): string | null {
-  if (world.rejected.length === 0) return null;
-  const names = world.rejected.slice(0, 5).map((r) => r.slice(0, 120)).join(', ');
-  return `Note: figures for ${names}${world.rejected.length > 5 ? `, and ${world.rejected.length - 5} more` : ''} were out of range and ignored; they are excluded from every number here.`;
+  const n = world.rejected.length;
+  if (n === 0) return null;
+  const names = world.rejected.slice(0, 3).map((r) => r.slice(0, 70)).join(', ');
+  return `Note: figures for ${names}${n > 3 ? `, and ${n - 3} more` : ''} were out of range and ignored; they are excluded from every number here.`;
 }
 
 /** The user named something that is not in the data: say so, never fall back silently. */
