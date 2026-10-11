@@ -11,7 +11,7 @@ import {
   providerPolicyFor,
   type ProviderPolicy,
 } from './provider';
-import { indexHeader, validateRow } from './validate';
+import { indexHeader, providerColumn, validateRow } from './validate';
 import { FOCUS_HEADER, focusRow } from '../testing/focusCsv';
 
 const AWS_SOURCE = { kind: 'focus_file', config: { layout: 'aws-data-exports', bucket: 'b', prefix: '', exportName: 'x' } };
@@ -231,6 +231,13 @@ describe('FOCUS 1.3+ ProviderName successor (ServiceProviderName; test-built row
   it('accepts the successor header and checks its value against the same allowlist', () => {
     expect(checkProviderHeader(headerIndex(cols), awsPolicy())).toBeNull();
     expect(checkProviderName(fact('AWS').providerName, awsPolicy())).toEqual({ ok: true });
-    expect(checkProviderName(fact('Amazon Web Services').providerName, awsPolicy())).toMatchObject({ ok: false, exclude: true });
+    expect(checkProviderName(fact('Amazon Web Services').providerName, awsPolicy(), providerColumn(headerIndex(cols)))).toMatchObject({ ok: false, exclude: true, error: { column: 'ServiceProviderName' } });
+  });
+  it('does not fall back when ProviderName is present but empty: MISSING_VALUE quarantines the batch', () => {
+    const both = [...FOCUS_HEADER, 'ServiceProviderName'];
+    const row = focusRow('2026-09-01', { ProviderName: '', ServiceProviderName: 'AWS' });
+    const v = validateRow(both.map((c) => row[c] ?? ''), headerIndex(both), '2026-09-01');
+    if (!v.ok) throw new Error('row should validate');
+    expect(checkProviderName(v.fact.providerName, awsPolicy(), providerColumn(headerIndex(both)))).toMatchObject({ ok: false, exclude: false, error: { column: 'ProviderName', code: 'MISSING_VALUE' } });
   });
 });

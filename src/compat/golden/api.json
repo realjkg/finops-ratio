@@ -1,5 +1,5 @@
 {
-  "_generatedFrom": "feat/quality-floor-tca@daeadb3 + fix/focus-normalization-fixtures (C1: ServiceSubcategory default, FOCUS column history)",
+  "_generatedFrom": "feat/quality-floor-tca@daeadb3 + fix/focus-normalization-fixtures (C1: ServiceSubcategory default, truthful backfill audit)",
   "costsource/sources sandbox entries": {
     "status": 200,
     "body": [
@@ -37,6 +37,12 @@
       "sourceVersion": "1.0",
       "canonicalVersion": "1.4",
       "backfilledColumns": [
+        "ListCost",
+        "ContractedCost",
+        "ConsumedQuantity",
+        "ConsumedUnit",
+        "CommitmentDiscountStatus",
+        "InvoiceIssuerName",
         "ServiceSubcategory",
         "SkuMeter",
         "CapacityReservationId",
@@ -707,7 +713,12 @@
       "sourceId": "focus-file-sandbox",
       "sourceVersion": "1.2",
       "canonicalVersion": "1.4",
-      "backfilledColumns": [],
+      "backfilledColumns": [
+        "SkuMeter",
+        "CapacityReservationId",
+        "CapacityReservationStatus",
+        "PricingCurrency"
+      ],
       "draftColumnsBackfilled": [
         "ModelDeveloper",
         "ModelFamily",
@@ -1301,7 +1312,12 @@
       "sourceId": "focus-file-sandbox",
       "sourceVersion": "1.2",
       "canonicalVersion": "1.4",
-      "backfilledColumns": [],
+      "backfilledColumns": [
+        "SkuMeter",
+        "CapacityReservationId",
+        "CapacityReservationStatus",
+        "PricingCurrency"
+      ],
       "draftColumnsBackfilled": [
         "ModelDeveloper",
         "ModelFamily",

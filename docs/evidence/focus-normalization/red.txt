@@ -1,4 +1,4 @@
-# RED: the committed contract tests against unchanged production code (origin/main a90dda5).
+# RED round 1: the committed contract tests against unchanged production code (origin/main a90dda5).
 # Setup: fixtures/connector-formats + src/costsource/focusFormatFixtures.test.ts +
 # src/ingest/focus/provider.test.ts copied onto a worktree of origin/main.
 # Command: npx vitest run src/costsource/focusFormatFixtures.test.ts src/ingest/focus/provider.test.ts
@@ -56,3 +56,18 @@ FAIL src/costsource/focusFormatFixtures.test.ts > derives ProviderName (removed 
     + ""   (ProviderName stays empty)
 FAIL src/ingest/focus/provider.test.ts > FOCUS 1.3+ ProviderName successor (ServiceProviderName; test-built rows, no vendor 1.4 export sourced) > accepts the successor header and checks its value against the same allowlist
     AssertionError: expected { column: 'ProviderName', …(2) } to be null
+
+# RED round 2 (review fixes): updated tests + regenerated golden against the round-1
+# production code (625dc54). Same command over the 11 touched test files.
+# Result: Test Files 10 failed | 1 passed (11); Tests 19 failed | 117 passed (136)
+FAIL truthful audit (backfilledColumns from the columns a raw row lacks), 15 tests:
+    cloudConnectorAdapter x6, pointFiveLiveAdapter, focusFileAdapter (minimal v1.0 + seed v1.0..v1.3),
+    servicenowAdapter, connectorWalk, costsource "v1.2 row reports its missing columns, not passthrough"
+    e.g. expected [ 'ServiceSubcategory', ...(4) ] to deeply equal [ 'ListCost', 'ContractedCost', ...(9) ]
+         expected [] to deeply equal [ 'CapacityReservationId', 'CapacityReservationStatus', 'PricingCurrency' ]
+FAIL compat golden api.json (backfilledColumns order / truthful lists)
+FAIL finio.test.ts: Cannot find module './wireColumns' (frozen FinIO wire table not yet present)
+FAIL focusFormatFixtures > maps ProviderName ... never InvoiceIssuerName
+    expected 'Synthetic Reseller' to be ''
+FAIL provider.test > successor header test + "ProviderName present but empty => MISSING_VALUE"
+    TypeError: providerColumn is not a function

@@ -29,7 +29,6 @@ import type {
   PointFiveAnomaly,
   PointFiveFocusRow,
 } from './PointFiveMcpTransport';
-import { columnsAddedAfter } from './focusVersions';
 import { rawRowsForVersion, resourceIdFor } from './seed';
 
 const WINDOW = { start: '2026-06-01T00:00:00.000Z', end: '2026-07-01T00:00:00.000Z' };
@@ -184,7 +183,7 @@ describe('PointFiveLiveAdapter — fetchCostRows (configured)', () => {
     expect(result.sourceId).toBe(POINTFIVE_LIVE_SOURCE_ID);
     expect(result.sourceVersion).toBe('1.0');
     expect(result.canonicalVersion).toBe('1.4');
-    expect(result.backfilledColumns).toEqual(columnsAddedAfter('1.0'));
+    expect(result.backfilledColumns).toEqual(['ListCost', 'ContractedCost', 'ConsumedQuantity', 'ConsumedUnit', 'CommitmentDiscountStatus', 'InvoiceIssuerName', 'ServiceSubcategory', 'SkuMeter', 'CapacityReservationId', 'CapacityReservationStatus', 'PricingCurrency']); // every column the v1.0 rows lack
     expect(result.rows.length).toBeGreaterThan(0);
     expect(transportFactory).toHaveBeenCalledTimes(1);
 

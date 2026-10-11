@@ -78,9 +78,9 @@ it.each([['azure-focus-1.0.csv', ''], ['azure-focus-1.2-preview.csv', 'Virtual M
   ]);
 });
 
-it('derives ProviderName (removed in FOCUS 1.4) from ServiceProviderName, then InvoiceIssuerName (test-built rows)', () => {
+it('maps ProviderName (removed in FOCUS 1.4) from ServiceProviderName only, never InvoiceIssuerName (test-built rows)', () => {
   const base = { BilledCost: '1', BillingCurrency: 'USD', ChargePeriodStart: '2026-09-01T00:00:00Z' };
   expect(coerceFocusRecord({ ...base, ServiceProviderName: 'AWS', InvoiceIssuerName: 'Synthetic Reseller' }).ProviderName).toBe('AWS');
-  expect(coerceFocusRecord({ ...base, InvoiceIssuerName: 'Synthetic Issuer' }).ProviderName).toBe('Synthetic Issuer');
+  expect(coerceFocusRecord({ ...base, InvoiceIssuerName: 'Synthetic Reseller' }).ProviderName).toBe('');
   expect(coerceFocusRecord({ ...base, ProviderName: 'AWS', ServiceProviderName: 'Other' }).ProviderName).toBe('AWS');
 });

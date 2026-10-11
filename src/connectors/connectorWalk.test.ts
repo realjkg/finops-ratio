@@ -327,8 +327,8 @@ describe('ServiceNow (sandbox) — full walk', () => {
     expect(run).toBeDefined();
     expect(run!.result.sourceVersion).toBe('1.2');
     expect(run!.result.canonicalVersion).toBe('1.4');
-    // Version-based audit: no ratified column after 1.2 (FOCUS column history).
-    expect(run!.result.backfilledColumns).toEqual([]);
+    // Truthful audit: the three columns the v1.2 allocation rows lack.
+    expect(run!.result.backfilledColumns).toEqual(['CapacityReservationId', 'CapacityReservationStatus', 'PricingCurrency']);
     // ServiceNow reports findings too (CMDB service class feeds the same rules).
     expect(run!.findings.length).toBeGreaterThan(0);
     expect(landedWorkloads(useStore.getState().ingestRuns).size).toBeGreaterThan(0);

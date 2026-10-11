@@ -12,6 +12,7 @@ import { RATIFIED_FOCUS_VERSIONS, CANONICAL_FOCUS_VERSION } from '@/costsource/f
 import { resolveWorkloadId } from '@/costsource/seed';
 import { FINIO_SOURCE_ID, type FocusRow } from './FinioClient';
 import { finioRowsForVersion } from './finioRows';
+import { finioWireColumns } from './wireColumns';
 import { validateFocusRow, validateFocusRows } from './focusValidation';
 import {
   SUPPORTED_FOCUS_VERSIONS,
@@ -120,9 +121,14 @@ describe('finioRowsForVersion', () => {
 
   it('shapes rows to the requested version — additive columns appear only at or above their version', () => {
     const v10 = finioRowsForVersion('1.0')[0];
-    expect(v10.ListCost).toBeUndefined(); // v1.1 column
-    expect(v10.ServiceSubcategory).toBeUndefined(); // v1.2 column
-    expect(v10.CapacityReservationId).toBeUndefined(); // v1.4 column
+    // Versions per the FROZEN FinIO wire table (wireColumns.ts), not the spec history.
+    expect(v10.ListCost).toBeUndefined(); // wire v1.1 column
+    expect(v10.ServiceSubcategory).toBeUndefined(); // wire v1.2 column
+    expect(v10.CapacityReservationId).toBeUndefined(); // wire v1.4 column
+    for (const v of ['1.0', '1.2', '1.4'] as const) {
+      const keys = Object.keys(finioRowsForVersion(v)[0]).filter((k) => !k.startsWith('x_Ratio'));
+      expect(keys.every((k) => finioWireColumns(v).includes(k))).toBe(true); // the wire sends only the table
+    }
 
     const v12 = finioRowsForVersion('1.2')[0];
     expect(v12.ListCost).toBeTypeOf('number');
