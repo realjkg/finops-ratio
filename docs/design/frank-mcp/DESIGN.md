@@ -5,7 +5,7 @@ Branch `docs/frank-mcp-proposal`. Revision 1 was branched from `origin/main` at
 **Status: proposal. Design only: this branch adds documents and no code.
 Nothing in this proposal is implemented.** Every decision in section 10 is
 **open**: it is the owner's to make, with a recommendation attached. No
-decision is recorded here as made. This is revision 21. Review history:
+decision is recorded here as made. This is revision 22. Review history:
 revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
 revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
 PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
@@ -37,9 +37,10 @@ decision record (EVIDENCE.md section 6); a challenger review of revision 18 (1
 Medium, 7 Low, under a scope freeze) was answered by revision 19 (98aa511),
 which the challenger approved; Copilot's four open test-specification threads
 on it were answered by revision 20 (3ec58a3); a challenger review of 3ec58a3
-(1 Medium, 2 Low) is answered by this revision 21 (a formatting repair and two
-test-specification clarifications). Revisions 2 to 15 were in PR #98, which
-merged at 86cf6fb; revisions 16 to 20 are follow-ups on the merged main
+(1 Medium, 2 Low) was answered by revision 21 (4af297e); Copilot's two open
+threads on it (a reload timeout, and a revision-independent classification
+statement) are answered by this revision 22. Revisions 2 to 15 were in PR #98,
+which merged at 86cf6fb; revisions 16 to 22 are follow-ups on the merged main
 (7a9da43). The code citations were checked at 62bd8ed and re-checked at
 7a9da43. PR #99 (62bd8ed to 7a9da43) changed about 30 files under `src` and
 `pages`, including `src/ai/AIClient.ts`, `src/ai/buildAIContext.ts`,
@@ -592,17 +593,23 @@ the following rules.
   unset, empty and any unrecognized value are off.
 - **E4, one reload at a time.** A second reload that overlaps a running one,
   including one that overlaps the start evaluation, is rejected (reported to
-  the operator, nothing changes); the first completes and applies once. A hung
-  reload (for example a hung A14 check) leaves the previous config serving and
-  causes later reloads to be rejected; the recovery is a restart, and each
-  rejection is logged.
+  the operator, nothing changes); the first completes and applies once. The
+  reload guard is released when the reload completes, fails or times out (E5),
+  so a later reload can always run.
 - **E5, a failed reload refuses.** A **failed** reload (bad `RATIO_ENV`, a
   mismatched or invalid file, or a failed auth check) installs a **refused**
   (tools-off) config **before** it writes the `reload_refused` record
-  (`startup_refused` at start). It does **not** keep the old config. If the
-  audit write fails or hangs, the refusal still stands (a failed audit write
-  never turns a refusal into an enable), and the refusal is also emitted as a
-  plain, redacted log line.
+  (`startup_refused` at start). It does **not** keep the old config. A reload
+  also has a **bounded timeout**, the broker option `reload_timeout_seconds`
+  (default 30, a placeholder to confirm with the other placeholders in OD-8;
+  it is a broker option, not an allowlist key, because the reload that reads
+  the file cannot read it from the file). On a timeout (for example a hung A14
+  check) the reload is cancelled, a refused config is installed,
+  `reload_refused` is written with reason `timeout`, and the reload guard is
+  released; a hung reload therefore never leaves the previous config serving.
+  If the audit write fails or hangs, the refusal still stands (a failed audit
+  write never turns a refusal into an enable), and the refusal is also emitted
+  as a plain, redacted log line.
 - **E6, the reload trigger.** The reload trigger is **not** an
   unauthenticated HTTP endpoint. In M0 it is a local operator trigger (a
   signal or a command-line command) plus the broker's `reload()` option for
@@ -920,7 +927,7 @@ Tests first, as in the rest of the program (Slices 3-5 design section 7).
 | A17 | Server certificate or key pin changes | connection refused; server unavailable |
 | A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key; (f) a tool entry without `output_schema_hash`, or any other missing required key; (g) a tool entry with a missing body (`description`, `input_schema` or `output_schema`); (h) a body whose hash does not match its `*_hash` key; (i) an unknown key inside a tool entry (as in (e)), or a body that is not an object; (j) an `in_process` body that differs from the registry (M2); (k) `description` over `max_description_bytes` or a schema over `max_schema_bytes`; (l) an unknown keyword inside the schema content of `input_schema` or `output_schema`; (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e), (f), (g), (h), (i), (j), (k) reject the whole file; (l) is accepted: the keyword is kept in the body and covered by its hash (not stripped before hashing) |
 | A19 | A tool result carries a credential-shaped value (bearer token, `sk-`-style key, JWT, AWS key id) in an ordinary string field that passes the output schema | not delivered to the model; fixed error; audit `secret_in_result` without the value; with `on_secret: redact` only the value is replaced and the audit still records it. Includes: a URL value whose `?` tail contains a quote (the serialized form does not re-parse, so the result is rejected); under `on_secret: redact`, a key-only secret such as `{"password":"abc def"}` (the value is replaced whole and nothing leaks); a hit on a map key (rejected); a located non-string value (rejected) |
-| A20 | Environment, kill switch and reload, with the slice that first tests each case. **M0** (raw environment, the broker's `reload()` option and a fixture config; no file parser): (a) raw `RATIO_ENV` unset, empty (not treated as `development`) or unrecognized, at start and at reload; (b) a reload with a changed environment is re-evaluated (both directions); (c) the kill switch, from both starting states: start with `FRANK_TOOLS` off, then live on, leaves tools off and logs "reload required" once; start with `FRANK_TOOLS` on and a good environment (the config passed and its snapshot was on), then live off, then live on again: tools turn off immediately and then **resume without a reload** (E3: that config was already validated, so this is accepted by design, not a gap); (d) `FRANK_TOOLS` parsing: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (e) overlapping reloads: the second is rejected and the first applies once; (f) a failed reload installs a refused (tools-off) config and writes `reload_refused`; it does not keep the old config; (g) a failed audit write does not enable tools, and a plain redacted log line is emitted; (i) start with gateway auth enforced and tools on, then remove enforcement and reload: the reload installs a refused config and writes `reload_refused` (the A14 check runs on reload); (j) E2: a request in flight when a reload swaps the config keeps the old config for the whole request, and the next request sees the new one (made deterministic by a deferred promise held inside the in-flight request, so the swap happens at a known point); (k) E6: the local operator trigger invokes a reload; M0 tests the command-line trigger, and the signal handler calls the same reload entry point, which this test covers; (l) E7: changing `RATIO_ENV` alone does not alter the installed config until a reload. **M2** (needs the file parser): (b2) a reload with a changed file is re-evaluated; (h) `deployment_environment` mismatching the raw value, or missing, rejects the whole file and installs a refused config; an entry without `environments[]` is available in the file's own environment | (a) refuses, installs a refused config, writes `startup_refused` or `reload_refused`; (b), (b2) the decision follows the new value or file; (c) off-start: tools stay off until a reload; on-start: off turns tools off and on resumes them; (d) only the documented value turns tools on; (e) one reload applies; (f) tools are off and the old config is gone; (g) the refusal stands; (i) refused config and `reload_refused`; (j) the in-flight request is unaffected and the next request uses the new config; (k) the reload runs; (l) the installed config is unchanged; (h) the whole file is rejected and tools are off |
+| A20 | Environment, kill switch and reload, with the slice that first tests each case. **M0** (raw environment, the broker's `reload()` option and a fixture config; no file parser): (a) raw `RATIO_ENV` unset, empty (not treated as `development`) or unrecognized, at start and at reload; (b) a reload with a changed environment is re-evaluated (both directions); (c) the kill switch, from both starting states: start with `FRANK_TOOLS` off, then live on, leaves tools off and logs "reload required" once; start with `FRANK_TOOLS` on and a good environment (the config passed and its snapshot was on), then live off, then live on again: tools turn off immediately and then **resume without a reload** (E3: that config was already validated, so this is accepted by design, not a gap); (d) `FRANK_TOOLS` parsing: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (e) overlapping reloads: the second is rejected and the first applies once; (f) a failed reload installs a refused (tools-off) config and writes `reload_refused`; it does not keep the old config; (g) a failed audit write does not enable tools, and a plain redacted log line is emitted; (i) start with gateway auth enforced and tools on, then remove enforcement and reload: the reload installs a refused config and writes `reload_refused` (the A14 check runs on reload); (j) E2: a request in flight when a reload swaps the config keeps the old config for the whole request, and the next request sees the new one (made deterministic by a deferred promise held inside the in-flight request, so the swap happens at a known point); (k) E6: the local operator trigger invokes a reload; M0 tests the command-line trigger, and the signal handler calls the same reload entry point, which this test covers; (l) E7: changing `RATIO_ENV` alone does not alter the installed config until a reload; (m) a reload that exceeds `reload_timeout_seconds` (a fixture check that never returns) is cancelled, a refused config is installed, `reload_refused` is written with reason `timeout`, and a later reload can run. **M2** (needs the file parser): (b2) a reload with a changed file is re-evaluated; (h) `deployment_environment` mismatching the raw value, or missing, rejects the whole file and installs a refused config; an entry without `environments[]` is available in the file's own environment | (a) refuses, installs a refused config, writes `startup_refused` or `reload_refused`; (b), (b2) the decision follows the new value or file; (c) off-start: tools stay off until a reload; on-start: off turns tools off and on resumes them; (d) only the documented value turns tools on; (e) one reload applies; (f) tools are off and the old config is gone; (g) the refusal stands; (i) refused config and `reload_refused`; (j) the in-flight request is unaffected and the next request uses the new config; (k) the reload runs; (l) the installed config is unchanged; (m) tools are off, the old config is gone, and the guard is released; (h) the whole file is rejected and tools are off |
 | A21 | Per-adapter **closed-set** assertion (Claude, OpenAI, Mistral and other OpenAI-compatible), run with tools on and off over every registry, fixture and allowlisted (MCP-path) tool, including an `http`-transport entry (the M2 risk is an adapter mapping an allowlisted server into a vendor `mcp` tool entry or an `mcp_servers` body key). The test is an allowlist, not a denylist of parameter names. For the SDK adapters (Claude and OpenAI, `pages/api/v1/ai/chat.ts` near lines 100 and 134) it spies on the SDK create argument and the SDK method called, and injects a recording `fetch` into the SDK client so that header names, the URL path and the constructor and per-request options are captured too; for the raw-fetch adapters (Mistral, Qwen, `openllm`) it intercepts `fetch`. It asserts, per adapter, a closed set of top-level body keys, of `tools[]` element shapes (function type only), of header names, of SDK options, the SDK method (no beta namespace) and the URL path | any key, header name, tool type, option, method or path outside the set fails the test; a mutant that adds any such element, not a named parameter, is killed |
 
 ### 8.3 Pass criteria
@@ -953,7 +960,9 @@ reload, by A20 (b) in M0 and (b2) in M2; one that lets a failed audit write
 enable tools, by A20 (g); one that skips the gateway-auth check on reload, by
 A20 (i); one whose in-flight request switches config mid-request, by A20 (j);
 one where the operator trigger does not reload, by A20 (k); one that re-reads
-the live `RATIO_ENV` per request, by A20 (l)), the reserved-field deny rule: a
+the live `RATIO_ENV` per request, by A20 (l); one that leaves the old config
+serving after a reload timeout, by A20 (m); one that does not release the
+reload guard after a timeout, by A20 (m)), the reserved-field deny rule: a
 mutant that deletes it, or that applies a tool-level deny to the server (or
 the reverse), must be killed by A18; the body and hash checks, where a mutant
 that offers the server's live text, or skips the body/hash comparison, must be
@@ -984,7 +993,7 @@ by running the classifier on the real diff; a miss is reported, not argued.
   (per-turn and per-call caps, per-turn token ceiling, timeout, per-minute
   cap), A21 (per-adapter closed-set request assertion), A13 (audit write
   failure fails the call closed), A14 (startup refusal when tools are on and
-  gateway auth is not enforced), A20 (a-g, i-l: the raw-`RATIO_ENV`, kill-switch
+  gateway auth is not enforced), A20 (a-g, i-m: the raw-`RATIO_ENV`, kill-switch
   and reload checks, run in the same evaluation as A14, which runs at start
   and at reload only while `FRANK_TOOLS` is on), A10 (redaction applied to
   audit and log text), A19 (a credential-shaped value in a tool result is
@@ -1044,7 +1053,7 @@ by running the classifier on the real diff; a miss is reported, not argued.
 ### M2. MCP client, allowlist, audit
 
 - **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
-  (A5-A11, A13, A14, A19, A21 (over MCP-path tools) and A20 (a-g, i-l) re-run
+  (A5-A11, A13, A14, A19, A21 (over MCP-path tools) and A20 (a-g, i-m) re-run
   against the MCP path); A20 (b2, h) with the file parser
   (`deployment_environment`, `environments[]`); allowlist parser tests (reject
   unknown keys, missing hashes); A18 (server vs tool denial, empty array,
@@ -1098,9 +1107,9 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 | Slice | Cases |
 |---|---|
-| M0 | A7, A10, A11, A13, A14, A19, A21, A20 (a-g, i-l) |
+| M0 | A7, A10, A11, A13, A14, A19, A21, A20 (a-g, i-m) |
 | M1 | A1, A2 (in-process results), A5, A6 (fixtures), A8, A9, A21 (over registry tools) |
-| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (b2, h); A1, A2, A5-A11, A13, A14, A19, A21 (over MCP-path tools) and A20 (a-g, i-l) re-run against MCP servers |
+| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (b2, h); A1, A2, A5-A11, A13, A14, A19, A21 (over MCP-path tools) and A20 (a-g, i-m) re-run against MCP servers |
 | M3 | A5, A6 and the golden suite: per-model re-run |
 | M4 | the broker suite re-run against the server entry |
 
@@ -1146,7 +1155,7 @@ example "the model sees the allowlist's text, not the server's"), which are
 | OD-5 | Where do local MCP servers run, and who owns each? | per-server decision | Each allowlist entry names an owner (3.2); no entry without one. Servers run outside the app container, owned by the team that owns the data. |
 | OD-6 | Real data, real credentials, real model infrastructure, and use in dev, test and production under RBAC | when | The owner is relayed as requiring (source not seen, unverified) MCP to be usable in dev, test and production for any team under RBAC. **The design must support that, and the production go-live stays the owner's gate (OD-12).** Until the owner opens that gate, BOUNDARY v2 stands: this program uses only synthetic data and fakes, with no real credentials or spend. Production use is then a configuration and review step (a separate allowlist file per deployment, 3.8; the reader role, 3.5; the model endpoint choice, OD-4; identity and RBAC, T-7), not a redesign. |
 | OD-7 | Spend and infrastructure for self-hosted models (GPUs, operations) | owner action | Needs explicit approval and a budget under BOUNDARY v2; the what-if tool (4.3) can inform it but is not evidence for it. Also open: whether and how aggregate hosted-model spend is capped (T-8); nothing in this design does it. |
-| OD-8 | Budget defaults | author suggests: 5 tool calls and 20 per-tenant calls per minute, 2 KB of arguments, 32 KB result, 5 s timeout, 8,000 tool-result tokens per turn | The author has no measurements; treat as placeholders, set after M1 measures real result sizes. **Owner confirmation needed:** the 2 KB `max_arg_bytes`, and the `max_description_bytes` (2000) and `max_schema_bytes` (8000) caps of the 3.3 key table, are the author's placeholders only. |
+| OD-8 | Budget defaults | author suggests: 5 tool calls and 20 per-tenant calls per minute, 2 KB of arguments, 32 KB result, 5 s timeout, 8,000 tool-result tokens per turn | The author has no measurements; treat as placeholders, set after M1 measures real result sizes. **Owner confirmation needed:** the 2 KB `max_arg_bytes`, and the `max_description_bytes` (2000) and `max_schema_bytes` (8000) caps of the 3.3 key table, are the author's placeholders only, as is the 30 s `reload_timeout_seconds` broker option (3.8 E5). |
 | OD-9 | Audit storage and retention period | log pipeline / table; period | Log pipeline for M2; the owner sets the period. |
 | OD-10 | Relationship to X1-a | this feeds X1-a / replaces it / separate | **Feeds X1-a:** same read-only scope, one agent layer. |
 | OD-11 | May any live model be enabled on the hosted demo? | yes / no | **No.** The hosted demo stays on the mock; any live provider is behind sign-in. |

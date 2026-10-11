@@ -37,8 +37,9 @@ the PR #101 challenger's review of 4913734. Revision 18 (dba0c64) simplified
 section 3.8 (start-and-reload evaluation only) on the decision recorded in
 section 6; revision 19 (98aa511) answered the challenger's review of revision
 18 and was approved; revision 20 (3ec58a3) answered Copilot's four open
-test-specification threads on it; revision 21 answers the challenger's review
-of 3ec58a3 (a formatting repair and two clarifications).
+test-specification threads on it; revision 21 (4af297e) answered the
+challenger's review of 3ec58a3 (a formatting repair and two clarifications);
+revision 22 answers Copilot's two open threads on 4af297e.
 
 ## 1. Method
 
@@ -189,26 +190,27 @@ searched as a whole tree.
 
 Classifier history on the real diff against `origin/main`: revision 1
 (c97852d) was restricted, class `retention`, rule `retention.mention` on
-`DESIGN.md`; revisions 2 and 3 were restricted for the same class and rule, on
-`EVIDENCE.md` only at the end. At revision 4 the classifier was run twice:
-before this paragraph was written the diff contained no rule match and the
-result was `risk: low`; with a paragraph that names the rule, the result was
-`risk: restricted`, class `retention`, rule `retention.mention`, on
-`docs/design/frank-mcp/EVIDENCE.md` only. It was re-run at each later
+`DESIGN.md`; revisions 2 and 3 were restricted for the same class and rule,
+on `EVIDENCE.md` only at the end. At revision 4 the classifier was run
+twice: before this paragraph was written the diff contained no rule match
+and the result was `risk: low`; with a paragraph that names the rule, the
+result was `risk: restricted`, class `retention`, rule `retention.mention`,
+on `docs/design/frank-mcp/EVIDENCE.md` only. It was re-run at each later
 revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
 `EVIDENCE.md`: that `DESIGN.md` was the spliced file, whose rewrapped
 audit-retention sentence and decision-table row counted as added lines. At
-revisions 11 to 15 the classifier was re-run at each final head with the same
-restricted result, on `EVIDENCE.md` only (this section names the rule).
-Revisions 16 to 20 are follow-ups on the merged main (7a9da43), where those
-lines are already present: a draft before this paragraph was written reported
-`risk: low` with no matches, and with this paragraph, which names the rule,
-the final head of revision 20 reports `risk: restricted`, class `retention`,
-rule `retention.mention`, on `EVIDENCE.md` only. Neither result proves the
-change safe (the gate's own README calls `low` heuristic). The classification
-is recorded in the pull request body at the final head; this file makes no
-claim about the title or body of the pull request beyond that. The wording of
-these documents was not shaped to avoid any rule.
+revisions 11 to 15 the classifier was re-run at each final head with the
+same restricted result, on `EVIDENCE.md` only (this section names the rule).
+The later revisions are follow-ups on the merged main, where those lines are
+already present: a draft before this paragraph was written reports `risk:
+low` with no matches, and with this paragraph, which names the rule, a head
+reports `risk: restricted`, class `retention`, rule `retention.mention`, on
+`EVIDENCE.md` only. The classifier is re-run on each head and the pull
+request body records the result for that head. Neither result proves the
+change safe (the gate's own README calls `low` heuristic). The
+classification is recorded in the pull request body at the final head; this
+file makes no claim about the title or body of the pull request beyond that.
+The wording of these documents was not shaped to avoid any rule.
 
 ### Decision record for revision 18
 
