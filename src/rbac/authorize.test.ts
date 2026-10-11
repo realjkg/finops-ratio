@@ -220,6 +220,7 @@ describe('authorize: security properties', () => {
         expect(authorize(principal('eng_lead'), 'change.apply', make() as Resource).allow, name).toBe(false);
         expect(filterByScope({ teams: '*', envs: ALL }, make() as never, (r) => r as never), name).toEqual([]);
         if (name === 'array') return; // a plain array is a valid teams or envs claim
+        expect([teamCovered(make(), CX), envCovered(make(), 'prod'), hasRealTeam(make())], name).toEqual([false, false, false]);
         expect(authorize(principal('cto', { teams: make() as string[] }), 'view.read', { kind: 'view', id: '/demo' }).allow, name).toBe(false);
         expect(authorize(principal('cto', { envs: make() as DeployEnv[] }), 'view.read', { kind: 'view', id: '/demo' }).allow, name).toBe(false);
         expect(inScope({ teams: make() as string[], envs: ALL }, { team: CX, env: 'prod' }), name).toBe(false);

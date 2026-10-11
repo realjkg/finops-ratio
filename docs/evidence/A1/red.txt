@@ -1,12 +1,8 @@
-# RED: new lean tests against the previous implementation (d73e0c5)
+# RED (Copilot on 95e0f65): hostile array Proxies passed straight to teamCovered, envCovered, hasRealTeam
 $ npx vitest run src/identity src/rbac
-     × budget_edit_row_is_marked_deferred_with_no_enforcing_surface
      × array shapes: arrays, array-likes, strings and Proxies are never inputs, and nothing throws
-     × length caps: over-cap claims and rows are invalid before any scan; at the cap they work
-AssertionError: array: expected [Function] to not throw an error but 'AssertionError: array: expected [ \'C…' was thrown
-AssertionError: expected false to be true // Object.is equality
-AssertionError: expected { …(3) } to deeply equal { …(2) }
-⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
- Test Files  2 failed | 1 passed (3)
-      Tests  3 failed | 27 passed (30)
-# Earlier RED rounds are in git history: 22868e2, c520517, 3baa37d, 6971b97, f641e35, 8719d94, 232af80, dd6e29d.
+AssertionError: revoked Proxy: expected [Function] to not throw an error but 'TypeError: Cannot perform \'IsArray\'…' was thrown
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 29 passed (30)
+# Earlier RED rounds are in git history: 22868e2, c520517, 3baa37d, 6971b97, f641e35, 8719d94, 232af80, dd6e29d, 13705c7.
