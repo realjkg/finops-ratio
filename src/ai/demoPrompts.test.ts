@@ -17,6 +17,7 @@ describe('/demo prompts', () => {
       expect(text, prompt).not.toBe(helpText);
       expect(text, prompt).not.toContain(UNSUPPORTED);
       expect(text, prompt).not.toContain(CLARIFY);
+      expect(text, prompt).not.toBe("I can't process that context."); // MockAIClient's safety net
     }
   });
 });
