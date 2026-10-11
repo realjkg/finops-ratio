@@ -14,7 +14,9 @@ and a second challenger review of PR #98 requested changes; revision 3
 Copilot then reviewed d997618 and revision 4 (52de3cf) answered it; a round-4
 challenger review requested changes and 16581c8 answered it; revision 5
 (1ffb5fd) answered Copilot's next review and the round-5 challenger's review of
-16581c8; revision 6 answers the round-6 challenger's review of 1ffb5fd.
+16581c8; revision 6 (473aed0) answered the round-6 challenger's review of
+1ffb5fd and revision 7 (6f4c9f7) updated the review history; revision 8
+answers the round-7 challenger's review of 6f4c9f7.
 
 ## 1. Method
 
@@ -52,6 +54,15 @@ challenger review requested changes and 16581c8 answered it; revision 5
   outputs were reproduced by running `applyRedactionRules` from
   `src/costsource/transports/redact.ts` on the base code with Node's type
   stripping.
+- Revision 6 and 7 sources (reproductions by the author, running
+  `applyRedactionRules` from `src/costsource/transports/redact.ts` on the base
+  code with Node's type stripping):
+  - `JSON.stringify({url:'https://example.com/a?x=1&y="2"', z:1})` redacts to
+    `{"url":"https://example.com/a?[REDACTED]`, which does not parse (the URL
+    rule's `?` tail runs to the end of the one-line serialized JSON);
+  - `JSON.stringify({password:'abc def'})` redacts to
+    `{"password":"[REDACTED]"}`, while the bare value `abc def` is unchanged
+    (a key-only hit, so per-value redaction alone would leak it).
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -121,14 +132,15 @@ Classifier history on the real diff against `origin/main`: revision 1
 `DESIGN.md`; revisions 2 and 3 were restricted for the same class and rule, on
 `EVIDENCE.md` only at the end. At revision 4 the classifier was run twice:
 before this paragraph was written the diff contained no rule match and the
-result was `risk: low`; with this paragraph, which names the rule, the
-result is `risk: restricted`, class `retention`, rule `retention.mention`, on
-`docs/design/frank-mcp/EVIDENCE.md` only. The second result is the one that
-holds for the final head. Neither result proves the change safe (the gate's
-own README calls `low` heuristic). The classification is recorded in the pull
-request body at the final head; this file makes no claim about the title or
-body of the pull request beyond that. The
-wording of these documents was not shaped to avoid any rule.
+result was `risk: low`; with a paragraph that names the rule, the result was
+`risk: restricted`, class `retention`, rule `retention.mention`, on
+`docs/design/frank-mcp/EVIDENCE.md` only. It was re-run at each later
+revision, through revision 8, with the same result: restricted, `retention`,
+`retention.mention`, on `EVIDENCE.md` only. Neither result proves the change
+safe (the gate's own README calls `low` heuristic). The classification is
+recorded in the pull request body at the final head; this file makes no claim
+about the title or body of the pull request beyond that. The wording of these
+documents was not shaped to avoid any rule.
 
 Rollback: revert the two documents; reverse-applying the diff to origin/main
 gives the same tree as origin/main.

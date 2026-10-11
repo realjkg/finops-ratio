@@ -5,7 +5,7 @@ Branch `docs/frank-mcp-proposal`. Revision 1 was branched from `origin/main` at
 **Status: proposal. Design only: this branch adds documents and no code.
 Nothing in this proposal is implemented.** Every decision in section 10 is
 **open**: it is the owner's to make, with a recommendation attached. No
-decision is recorded here as made. This is revision 6. Review history:
+decision is recorded here as made. This is revision 8. Review history:
 revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
 revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
 PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
@@ -13,9 +13,11 @@ round-3 challenger approved it; Copilot then reviewed d997618 and revision 4
 (52de3cf) answered it; a round-4 challenger review of 52de3cf requested
 changes and a follow-up (16581c8) answered it; Copilot's next review and a
 round-5 challenger review of 16581c8 were answered by revision 5 (1ffb5fd); a
-round-6 challenger review of 1ffb5fd (3 Medium, 5 Low) is answered by this
-revision 6. Revisions 2 to 6 are in PR #98. The
-code citations were checked at 62bd8ed and there have been no code changes
+round-6 challenger review of 1ffb5fd was answered by revision 6 (473aed0), and
+revision 7 (6f4c9f7) brought the review history up to date; a round-7
+challenger review of 6f4c9f7 (2 Medium, 5 Low) is answered by this revision 8.
+Revisions 2 to 8 are in PR #98. The code citations were checked at 62bd8ed and
+there have been no code changes
 since: 8caec87 touches only `docs/design/frank-mcp`.
 
 **Origin.** Both origin statements below were relayed to the author in the
@@ -294,8 +296,8 @@ chosen SDK targets before M2 starts:
 
 ### 3.1 Operator-managed configuration only
 
-The allowlist is a file in the deployment (path from one env setting, proposed
-name `FRANK_TOOLS_ALLOWLIST`, owned and
+The allowlist is a file in the deployment (path from the `FRANK_TOOLS_ALLOWLIST`
+setting, 3.3, owned and
 reviewed like code), parsed at start and on an operator-triggered
 reload; every load and reload re-runs the environment and auth checks of
 3.8 rule 0. There is **no** API, UI field, chat command or tool that edits it,
@@ -342,15 +344,19 @@ Within a server, the allowlist lists tools **by name**, each with:
 **Allowlist key table** (key names are proposed; any key not in this table
 rejects the whole file, 3.8 rule 3):
 
-| Level | Keys |
-|---|---|
-| File (top level) | `deployment_environment` (required, must equal the raw `RATIO_ENV`, 3.8 rule 0); `tenants` (the tenants that get tools, 6.3); `fallback` (`mock` or `no_tools`, 2.4); `relist_interval_seconds` (the re-list timer, 3.7); `max_tool_calls_per_turn` and `max_tool_result_tokens_per_turn` (the global per-turn caps, 3.6); `servers` |
-| Server | `name`; `enabled`; `owner`; `purpose`; `data_class`; `environments`, `roles`, `teams` (reserved, 3.8); transport pins: stdio `command`, `args`, `executable_sha256`, `entry_sha256`, `working_dir`, `env`; HTTP `url`, `tls_pin` or `ca_bundle`, `credential_ref`; `tools` |
-| Tool | `name`; `enabled`; `schema_hash`; `output_schema_hash`; `description_hash`; `read_only_via`; budgets `max_calls_per_turn`, `max_calls_per_tenant_per_minute`, `max_arg_bytes`, `max_result_bytes`, `timeout_ms`; `on_secret`; `environments`, `roles`, `teams` (reserved) |
+| Level | Required keys | Optional keys (default) |
+|---|---|---|
+| File (top level) | `deployment_environment` (must equal the raw `RATIO_ENV`, 3.8 rule 0); `tenants` (the tenants that get tools, 6.3; an empty list means none); `servers` (may be empty) | `fallback`: `mock` or `no_tools` (default `mock`, 2.4, 7); `relist_interval_seconds` (default 300, **assumption**, 3.7); `max_tool_calls_per_turn` (default 5) and `max_tool_result_tokens_per_turn` (default 8000), the global per-turn caps (3.6; the OD-8 placeholders) |
+| Server | `name`; `owner`; `purpose`; `data_class`; transport pins: stdio `command`, `args`, `executable_sha256`, `entry_sha256`, `working_dir`; HTTP `url` and one of `tls_pin` or `ca_bundle`, plus `credential_ref`; `tools` | `enabled` (default `true`); `env` (default empty, nothing inherited); `environments`, `roles`, `teams` (reserved, 3.8; absent means unrestricted within the file's environment) |
+| Tool | `name`; `schema_hash`; `description_hash`; `read_only_via` | `enabled` (default `true`); `output_schema_hash` (default none: the broker's own output schema applies); budgets `max_calls_per_turn`, `max_calls_per_tenant_per_minute`, `max_arg_bytes`, `max_result_bytes`, `timeout_ms` (defaults are the OD-8 placeholders); `on_secret` (default `reject`); `environments`, `roles`, `teams` (reserved) |
+
+A missing required key rejects the whole file; a missing optional key takes
+the stated default. Defaults that are placeholders are not measurements.
 
 Environment settings (not allowlist keys): `FRANK_TOOLS` (the kill switch,
 6.3), `FRANK_TOOLS_ALLOWLIST` (the path of the one allowlist file; the broker
-loads exactly one file) and `RATIO_ENV` (3.8). Names are proposed.
+loads exactly one file) and `RATIO_ENV` (3.8). The names `FRANK_TOOLS` and
+`FRANK_TOOLS_ALLOWLIST` are proposed.
 
 The broker offers the model **its own** vetted description and schema for the
 tool, taken from the allowlist file, not the server's live text. The server's
@@ -473,15 +479,33 @@ a mismatch (or a missing key) rejects the **whole file**, so a production file
 cannot be loaded in development or the reverse. An entry **without**
 `environments[]` is therefore available in every recognized environment of its
 own deployment file, which is exactly one. This prerequisite and the A14
-gateway-auth check are evaluated together, and
-**on every load, every reload, and every `FRANK_TOOLS` off-to-on transition**,
-re-reading the raw environment each time, not only at process start. A failed
-evaluation **latches** the broker in a "no tools" state until the next
-successful evaluation. The per-request kill-switch check (6.3) only reads
-the latch: it can turn tools off, and it can never re-enable a refused
-broker. Each request also compares the raw `RATIO_ENV` with the value at the
-last successful evaluation; a difference forces a re-evaluation, which
-latches on failure. If the audit write for `startup_refused` fails, the
+gateway-auth check are evaluated together under the following rules.
+
+- **E1, the evaluation triggers (stated once).** Only three events can clear
+  a latch: a **load** (start), a **reload**, and an **observed off-to-on flip
+  of `FRANK_TOOLS`**. The flip is detected at the per-request check, which
+  remembers the last `FRANK_TOOLS` value it saw; an observed change from off
+  to on runs the same evaluation. Each trigger re-reads the raw environment.
+- **E2, the per-request path can only latch.** On every request the broker
+  compares the raw `RATIO_ENV` with the baseline. A difference runs a
+  **fail-only re-check**: a failure latches "no tools"; a success changes
+  nothing and never clears a latch or sets the baseline.
+- **E3, baseline.** The baseline is the raw value of the last successful
+  evaluation, and is **none until the first success**. Before the first
+  success no tools are offered. A missing baseline counts as a difference, so
+  the per-request path evaluates and can only latch.
+- **E4, snapshot and serialization.** Each evaluation reads the raw
+  environment **once** into a snapshot, and every check of that evaluation
+  (including each entry's `environments[]`) uses that snapshot, never the live
+  environment. Evaluations run under one lock (or a compare-and-set on a
+  generation counter), so they are serialized. The latch is **monotonic within
+  a generation**: a success from an older generation cannot clear a latch set
+  by a newer failure, and a success racing a failure cannot clear it.
+- **E5, a latch is only cleared by a successful evaluation started by an E1
+  trigger.** The per-request kill-switch check (6.3) only reads the latch: it
+  can turn tools off and can never re-enable a refused broker.
+
+If the audit write for `startup_refused` fails, the
 refusal stands (a failed audit write never turns a refusal into an enable),
 and the refusal is also emitted as a plain, redacted log line.
 
@@ -491,8 +515,7 @@ Rules 1 to 5 (all tested by A18; rule 0 by A20):
    Therefore any entry with `roles[]` or `teams[]` is denied until T-7 lands.
 2. **An empty array denies** and **null denies**. Neither ever means "no
    restriction"; an unrestricted entry omits the field (which, by rule 0,
-   still means
-   "this file's own environment only").
+   still means "this file's own environment only").
 3. **Unknown keys are rejected** when the allowlist is parsed (the file fails
    to load, rather than ignoring a misspelled restriction).
 4. **Server entry and tool entry are denied differently.**
@@ -624,7 +647,7 @@ control.
 | T4 | **Out-of-allowlist tool request** (model asks for a tool it was not offered, or a server offers an extra) | Broker rejects any name not in the turn's offered set; fixed error; audit record | A7, A15 | None beyond audit completeness. |
 | T5 | **Confused deputy and cross-tenant leakage** (model supplies another tenant's id; a shared server returns data from several tenants) | No tenant argument in any schema; scope from server binding (3.4); row security forced on the ledger tables; ids checked against the tenant's own set; one allowlist entry per tenant binding where a server is multi-tenant (**assumption**); the reserved-field deny rule (3.8) | A8, A18, A20 | Today a single token maps to a single tenant by configuration and there is no per-user identity, so intra-tenant least privilege is absent (D-15). A server that ignores the scope it is handed is covered only by T1's controls. |
 | T6 | **Data exfiltration** through tool arguments (model puts data into an argument that a server forwards), or through model-chosen URLs | Arguments are schema-typed, short and enumerated where possible; no free-form URL or path argument exists in v1; no tool fetches a URL; HTTP servers may only reach their pinned host; the agent has no browsing tool; egress from stdio servers denied by default (3.5) | A9 | Free-text arguments (a search string) are a covert channel of low bandwidth. v1 has none; any future one needs review. Data sent to a hosted model endpoint is sent by design (OD-4). |
-| T7 | **Secret exposure** in prompts, tool results and logs | Servers receive references, never the values, in the allowlist file; credentials come from the deployment's secret store; logs go through the existing redaction (`src/costsource/transports/redact.ts:327-340`, `redactErrorText` `:371`, `logUpstreamError` `:412`); **Result-value scan before model delivery:** an output schema constrains names and types, not values, so the broker scans every string value in every tool result (recursively, including keys of free maps if any are allowed) with the repository's redaction rules (`applyRedactionRules`, `src/costsource/transports/redact.ts:327`; the rules cover bearer and basic credentials, JWTs, `sk-`-style keys, GitHub tokens, AWS key ids, PEM blocks, `password`/`secret`/`token`/`api_key` key-value forms, URL userinfo, and any `?` or `#` tail of a URL up to the end of the line, not only signed-URL query strings). A value that the rules would change is **secret-shaped**. **Default: reject the whole result** (the model gets the fixed error, `result_status: secret_in_result`) and audit the rejection without the value; an operator may set a per-tool `on_secret: redact` fallback, which replaces only the matching values with the module's redaction markers, still audits, and delivers the rest; the scan runs before the result reaches the model and before any debug storage; the database already rejects secret-looking text in its tables (0004 header). **Scan scope:** each string value is scanned on its own, so the field name is not seen and the key-value forms (`password: ...`) fire only when they occur inside one string; the broker therefore also scans the serialized JSON of the result, where `"password": "..."` appears with its key. Redaction of the serialized form is used only to **detect and locate** a hit; it is never the delivered text. Delivery in `redact` mode is by redacting **each string value** on its own (a value that the rules change is replaced by its redacted text). A hit that appears only in the serialized form is located to its string value by path; if it cannot be mapped to one value, or any re-parse or output-schema check fails, the result is rejected. The URL rule's `?`/`#` tail runs to the end of the line, and serialized JSON is one line, so on `{"url":"https://example.com/a?x=1&y=\"2\"","z":1}` the serialized redaction yields `{"url":"https://example.com/a?[REDACTED]`, which does not parse (the author reproduced this); password, token, secret and API-key forms stay valid JSON. A result like that is therefore rejected, not repaired | A10, A19 (both M0) | Detection is pattern-based and is **not complete**: the module's own comments describe the cases it covers, a novel secret format or a secret split across fields passes, and the rules also hit ordinary prose: running them gives: `cost per token: 0.002` becomes `cost per token: [REDACTED]`, `Secret: migration plan` becomes `Secret: [REDACTED] plan`, `GPU cluster pwd: shared` becomes `GPU cluster pwd: [REDACTED]`, and `https://example.com/docs?page=2` becomes `https://example.com/docs?[REDACTED]` (the author reproduced these four outputs by running `applyRedactionRules` on the base code). This false-positive class lands on free-text fields (names, notes, labels, titles); a rejection is the safe side, and the per-tool `on_secret: redact` fallback keeps the design workable for tools whose free text trips the rules. The module is applied to error and log text, and extending it to the audit record is a new use, tested in M0 (A10). A compromised server can still send a secret the patterns do not match; the data-class limit on each server (3.2) and reader-scoped credentials (3.5) bound what such a server can see in the first place. |
+| T7 | **Secret exposure** in prompts, tool results and logs | Servers receive references, never the values, in the allowlist file; credentials come from the deployment's secret store; logs go through the existing redaction (`src/costsource/transports/redact.ts:327-340`, `redactErrorText` `:371`, `logUpstreamError` `:412`); **Result-value scan before model delivery:** an output schema constrains names and types, not values, so the broker scans every string value in every tool result (recursively, including keys of free maps if any are allowed) with the repository's redaction rules (`applyRedactionRules`, `src/costsource/transports/redact.ts:327`; the rules cover bearer and basic credentials, JWTs, `sk-`-style keys, GitHub tokens, AWS key ids, PEM blocks, `password`/`secret`/`token`/`api_key` key-value forms, URL userinfo, and any `?` or `#` tail of a URL up to the end of the line, not only signed-URL query strings). A value that the rules would change is **secret-shaped**. **Default: reject the whole result** (the model gets the fixed error, `result_status: secret_in_result`) and audit the rejection without the value; an operator may set a per-tool `on_secret: redact` fallback, which replaces only the matching values with the module's redaction markers, still audits, and delivers the rest; the scan runs before the result reaches the model and before any debug storage; the database already rejects secret-looking text in its tables (0004 header). **Scan scope:** each string value is scanned on its own, so the field name is not seen and the key-value forms (`password: ...`) fire only when they occur inside one string; the broker therefore also scans the serialized JSON of the result, where `"password": "..."` appears with its key. Redaction of the serialized form is used only to **detect and locate** a hit; it is never the delivered text. Delivery in `redact` mode is by redacting **each string value** on its own (a value that the rules change is replaced by its redacted text). A hit that appears only in the serialized form is located to its value by path, and that value is **replaced wholesale** by the module's marker, because a bare value can be unchanged while its key is what the rules matched (the author reproduced it: `{"password":"abc def"}` serializes to `{"password":"[REDACTED]"}`, while `abc def` alone is unchanged, so per-value redaction would leak it). A located non-string value, or a hit on a map **key**, cannot be mapped and **rejects** the result, as does any re-parse or output-schema failure. The URL rule's `?`/`#` tail runs to the end of the line, and serialized JSON is one line, so on `{"url":"https://example.com/a?x=1&y=\"2\"","z":1}` the serialized redaction yields `{"url":"https://example.com/a?[REDACTED]`, which does not parse (the author reproduced this), and such a result is rejected, not repaired | A10, A19 (both M0) | Detection is pattern-based and is **not complete**: the module's own comments describe the cases it covers, a novel secret format or a secret split across fields passes, and the rules also hit ordinary prose: running them gives: `cost per token: 0.002` becomes `cost per token: [REDACTED]`, `Secret: migration plan` becomes `Secret: [REDACTED] plan`, `GPU cluster pwd: shared` becomes `GPU cluster pwd: [REDACTED]`, and `https://example.com/docs?page=2` becomes `https://example.com/docs?[REDACTED]` (the author reproduced these four outputs by running `applyRedactionRules` on the base code). This false-positive class lands on free-text fields (names, notes, labels, titles); a rejection is the safe side, and the per-tool `on_secret: redact` fallback keeps the design workable for tools whose free text trips the rules. The module is applied to error and log text, and extending it to the audit record is a new use, tested in M0 (A10). A compromised server can still send a secret the patterns do not match; the data-class limit on each server (3.2) and reader-scoped credentials (3.5) bound what such a server can see in the first place. |
 | T8 | **Denial of service and cost runaway** (a loop of tool calls; large results; slow server) | Per-tool and per-turn call caps, byte caps, timeouts (3.6); per-turn token ceiling on top of `MAX_TOKENS`; the gateway's per-tenant rate limit, which is 1000 per minute per process (`src/server/gateway/withGateway.ts:173-180`) and so is **not** a cost control for model calls; a separate per-tenant model-token budget is new | A11 | The shared limiter is in-process (`withGateway.ts:96-98` comments); a multi-instance deployment needs a shared store. Spend on a hosted model is real money and needs the owner's budget (OD-7). |
 | T9 | **Supply chain for stdio servers** (a dependency of the server changes) | Hash of the executable and entry script; vendored or locked dependency tree owned by the server's `owner`; no auto-update; hashes updated only through allowlist review | A12 | Hashing the entry point does not cover every transitive file of an interpreted server unless the whole tree is hashed or the server is built as a single artifact (**assumption**: require a single artifact or a content hash of the tree). |
 | T10 | **Audit gaps** (a tool call that leaves no record; a record that leaks data) | Audit written by the broker, before the result is returned to the model; a failed audit write fails the call (fail closed); records hold hashes and sizes, not payloads (6.1) | A13 | Audit stored in the same trust domain as the app can be altered by anyone who owns it; external immutable storage is an operator decision. |
@@ -690,8 +713,8 @@ owner decision; this proposal does not set one.
   tools and the route behaves as it does today. Checked on every request, not
   only at start, so flipping it takes effect without a restart where the
   process environment can be changed (**assumption**; otherwise a restart).
-  Turning it from off to on re-runs the rule 0 and A14 checks (3.8); a
-  latched refusal is never cleared by this per-request check.
+  An observed off-to-on flip re-runs the rule 0 and A14 checks (3.8 E1); a
+  latched refusal is never cleared by the per-request check (3.8 E2, E5).
 - **Per server and per tool:** setting `enabled: false` in the allowlist.
 - **Secret handling per tool:** `on_secret: reject` (default) or `redact`
   (3.3); changing it is a reviewed allowlist change.
@@ -773,8 +796,8 @@ Tests first, as in the rest of the program (Slices 3-5 design section 7).
 | A16 | A pinned tool disappears from the server's list | server unavailable; alert; fallback |
 | A17 | Server certificate or key pin changes | connection refused; server unavailable |
 | A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e) rejects the whole file |
-| A19 | A tool result carries a credential-shaped value (bearer token, `sk-`-style key, JWT, AWS key id) in an ordinary string field that passes the output schema | not delivered to the model; fixed error; audit `secret_in_result` without the value; with `on_secret: redact` only the value is replaced and the audit still records it. Includes a URL value whose `?` tail contains a quote: the serialized form does not re-parse, so the result is rejected |
-| A20 | Environment startup check, with the slice that first tests each half. **M0** (raw environment and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) the raw environment changes between evaluations; (i) the per-request kill-switch check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g), (h1) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
+| A19 | A tool result carries a credential-shaped value (bearer token, `sk-`-style key, JWT, AWS key id) in an ordinary string field that passes the output schema | not delivered to the model; fixed error; audit `secret_in_result` without the value; with `on_secret: redact` only the value is replaced and the audit still records it. Includes: a URL value whose `?` tail contains a quote (the serialized form does not re-parse, so the result is rejected); under `on_secret: redact`, a key-only secret such as `{"password":"abc def"}` (the value is replaced whole and nothing leaks); a hit on a map key (rejected); a located non-string value (rejected) |
+| A20 | Environment check, with the slice that first tests each case. **M0** (raw environment, a broker `reload()` and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) the raw environment changes to an unrecognized value after a successful start; (h3) `reload()` re-reads the raw environment, and clears a latch only if the evaluation succeeds; (i) the per-request kill-switch check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails; (k) latched, then the environment is fixed, then a plain request; (l) a success racing a failure cannot clear a latch (lock or compare-and-set); (n) the environment changes during an evaluation, and the entry checks use the snapshot. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g), (h1) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (h3) re-evaluates; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (k) still no tools until a load, a reload or an observed flip; (l) the latch holds; (n) the snapshot decides; (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
 
 ### 8.3 Pass criteria
 
@@ -799,8 +822,11 @@ tools, the pinned-tool-missing check, certificate/executable pin comparison,
 the raw-`RATIO_ENV` startup check (a mutant that reads the defaulted
 configuration instead of the raw value must be killed by A20 (c) in M0; one
 that skips the `deployment_environment` comparison, by A20 (e) in M2; one that
-does not re-evaluate on a flip or reload, by A20 (g) and (h); one that lets
-the per-request check clear a latch, by A20 (i)), the reserved-field deny
+does not re-evaluate on a flip, by A20 (g); one that does not re-evaluate on
+a reload, by A20 (h3) in M0 and (h2) in M2; one that lets the per-request
+path clear a latch, by A20 (i) and (k); one that reads the live environment
+instead of one snapshot, by A20 (n); one that drops the lock or
+compare-and-set, by A20 (l)), the reserved-field deny
 rule: a mutant
 that deletes it, or that applies a tool-level deny to the server (or the
 reverse), must be killed by A18), and confirm at least one test fails
@@ -823,7 +849,8 @@ by running the classifier on the real diff; a miss is reported, not argued.
   controls that must exist before any tool does: A7 (out-of-set request), A11
   (per-turn and per-call caps), A13 (audit write failure fails the call
   closed), A14 (startup refusal when tools are on and gateway auth is not
-  enforced), A20 (b, c, d, g, h1, i, j: the raw-`RATIO_ENV` checks, run in the
+  enforced), A20 (b, c, d, g, h1, h3, i, j, k, l, n: the raw-`RATIO_ENV`
+  checks, run in the
   same
   evaluation as A14 and re-run on every reload and flip), A10 (redaction
   applied to
@@ -878,11 +905,12 @@ by running the classifier on the real diff; a miss is reported, not argued.
 ### M2. MCP client, allowlist, audit
 
 - **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
-  (A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, i, j) re-run against the MCP
+  (A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, i, j, k, l, n) re-run
+  against the MCP
   path); A20 (a, e, f, h2) with the file parser (`deployment_environment`,
   `environments[]`); allowlist parser tests
   (reject unknown keys, missing hashes); A18 (server vs tool denial, empty
-  array, null, unknown key, unset `RATIO_ENV`); the `on_secret` parser cases
+  array, null, unknown key); the `on_secret` parser cases
   (valid values,
   default, unknown value rejects the file); mutation checks (8.4); audit shape
   tests (including `secret_in_result` and the `redacted` flag); redaction
@@ -930,9 +958,9 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 | Slice | Cases |
 |---|---|
-| M0 | A7, A10, A11, A13, A14, A19, A20 (b, c, d, g, h1, i, j) |
+| M0 | A7, A10, A11, A13, A14, A19, A20 (b, c, d, g, h1, h3, i, j, k, l, n) |
 | M1 | A1, A2 (in-process results), A5, A6 (fixtures), A8, A9 |
-| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (a, e, f, h2); A1, A2, A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, i, j) re-run against MCP servers |
+| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (a, e, f, h2); A1, A2, A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, i, j, k, l, n) re-run against MCP servers |
 | M3 | A5, A6 and the golden suite: per-model re-run |
 | M4 | the broker suite re-run against the server entry |
 
