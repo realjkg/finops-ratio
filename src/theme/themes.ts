@@ -1,0 +1,81 @@
+// Built-in themes: named sets of semantic color roles. Every role is a Tailwind
+// color (tailwind.config.js) backed by a `--c-<role>` CSS variable (src/index.css,
+// kept equal to these values by src/theme/tokens.test.ts).
+
+export const ROLES = [
+  // Surfaces
+  'void', 'deep', 'slab', 'raised', 'edge',
+  // Text
+  'txt', 'sub', 'dim',
+  // Semantic accents (also used as text)
+  'value', 'cost', 'shape', 'gate', 'unit', 'purple',
+  // Executive surface
+  'exec-bg', 'exec-surface', 'exec-border', 'exec-hover', 'exec-text', 'exec-muted',
+  // Keyboard focus ring
+  'focus',
+] as const;
+
+export type Role = (typeof ROLES)[number];
+
+export interface Theme {
+  name: string;
+  colorScheme: 'light' | 'dark';
+  /** 'high' raises the targets to 7:1 for text and 4.5:1 for UI (see validate.ts). */
+  contrast: 'standard' | 'high';
+  colors: Record<Role, string>;
+}
+
+export type BuiltInThemeName = 'light' | 'high-contrast' | 'dark';
+
+export const BUILT_IN_THEMES: Readonly<Record<BuiltInThemeName, Theme>> = {
+  light: {
+    name: 'light',
+    colorScheme: 'light',
+    contrast: 'standard',
+    colors: {
+      void: '#ffffff', deep: '#f6f7f9', slab: '#ffffff', raised: '#eef0f3', edge: '#848b97',
+      txt: '#111827', sub: '#4b5563', dim: '#5d6573',
+      value: '#047251', cost: '#be123c', shape: '#8a5a00', gate: '#4338ca', unit: '#0e607c', purple: '#681bb0',
+      'exec-bg': '#f5f8fb', 'exec-surface': '#ffffff', 'exec-border': '#848b97', 'exec-hover': '#edf2f7',
+      'exec-text': '#0f172a', 'exec-muted': '#475569',
+      focus: '#2563eb',
+    },
+  },
+  'high-contrast': {
+    name: 'high-contrast',
+    colorScheme: 'light',
+    contrast: 'high',
+    colors: {
+      void: '#ffffff', deep: '#ffffff', slab: '#ffffff', raised: '#f0f0f0', edge: '#4d4d4d',
+      txt: '#000000', sub: '#1a1a1a', dim: '#333333',
+      value: '#005136', cost: '#8c001c', shape: '#5c3d00', gate: '#252598', unit: '#003f4b', purple: '#371556',
+      'exec-bg': '#ffffff', 'exec-surface': '#ffffff', 'exec-border': '#4d4d4d', 'exec-hover': '#f0f0f0',
+      'exec-text': '#000000', 'exec-muted': '#333333',
+      focus: '#0033cc',
+    },
+  },
+  // The pre-existing look, value for value. Its known shortfalls (dim text, faint
+  // borders, exec-muted) are pinned in validate.test.ts; changing them is an owner call.
+  dark: {
+    name: 'dark',
+    colorScheme: 'dark',
+    contrast: 'standard',
+    colors: {
+      void: '#05070b', deep: '#090c12', slab: '#0d1119', raised: '#141a26', edge: '#1a2235',
+      txt: '#d0d8ea', sub: '#8895ad', dim: '#4d5a72',
+      value: '#00e09e', cost: '#ff5c72', shape: '#ffc44d', gate: '#7c8dff', unit: '#00ccee', purple: '#b490ff',
+      'exec-bg': '#f5f8fb', 'exec-surface': '#ffffff', 'exec-border': '#d8e1ec', 'exec-hover': '#edf2f7',
+      'exec-text': '#0f172a', 'exec-muted': '#64748b',
+      focus: '#6b7cf5',
+    },
+  },
+};
+
+/**
+ * The theme used when the user has made no choice and the OS asks for no extra
+ * contrast; must match the `:root` block in src/index.css (tokens.test.ts).
+ * Light is the intended default, but it stays 'dark' until T4 moves the hard-coded
+ * neon accents (src/lib/scales.ts TOKEN_HEX, inline styles) onto tokens: on a
+ * white page they render at 1.6-3.0:1 on /, /overview and /workloads.
+ */
+export const DEFAULT_THEME: BuiltInThemeName = 'dark';

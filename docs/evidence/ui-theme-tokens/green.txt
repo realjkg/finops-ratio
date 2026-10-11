@@ -1,0 +1,42 @@
+# GREEN: feat/ui-theme-tokens (after review round 2)
+# cmd: npx vitest run src/theme -> Test Files 4 passed (4); Tests 56 passed (56)
+# cmd: npx vitest run -> Test Files 176 passed (176); Tests 3418 passed (3418)
+# npx tsc --noEmit: clean; npx eslint src/theme: clean
+
+# Mutation spot checks (each reverted; all KILLED)
+M1 validate.ts standard text min 4.5 -> 4.4: 2 failed (dark pinned list, #777 on white)
+M2 themes.ts dark raised #141a26 -> #151a26: 3 failed (CSS parity x2, dark identity)
+M3 drop purple from the accent list: 2 failed (every-role coverage, dark pinned list)
+M4 skip composited tint pairs: 2 failed (tint test, dark pinned list)
+M5 drop raised from main surfaces: 4 failed (raised/exec, tint, HC, dark pinned list)
+M6 focus outline without !important: 1 failed (compiled CSS focus test)
+
+# Guard blind-spot proof: temp src/components/ZzGuardProbe.tsx (multi-line style={{ ... color: 'rgb(1, 2, 3)' }}), then removed
+       × inline style objects setting color/background (multi-line too) do not grow past 110 in 40 files 10ms
+       × rgb()/hsl() color literals in TSX do not grow past 20 in 6 files 4ms
+  AssertionError: expected 111 to be less than or equal to 110
+  AssertionError: expected 21 to be less than or equal to 20
+        Tests  2 failed | 11 passed (13)
+# New baselines: style objects with color/background 110 in 40 files (old line count 94/39);
+#   rgb()/hsl() in TSX 20 in 6 files; hex in TSX 19 in 7; hex in non-test .ts 6 in 1 (src/lib/scales.ts)
+
+# Validator: light and high-contrast 0 violations; dark 58 pinned pairs (explicit list in validate.test.ts)
+# Palette changes for the new pairs: light edge/exec-border #878e99 -> #848b97 (edge on raised was 2.89:1),
+#   value #047857 -> #047251, unit #0e7490 -> #0e607c, purple #7e22ce -> #681bb0 (accent on own tint);
+#   HC value #005136, cost #8c001c, gate #252598, unit #003f4b, purple #371556 (7:1 on own tint over raised)
+
+# Rendered contrast audit (next dev + headless chromium via CDP; visible text nodes,
+# fg alpha/opacity composited over the ancestor background chain; 4.5/3 large; HC 7/4.5)
+# failing / audited text nodes (re-run after this round: unchanged)
+page         light      dark       high-contrast
+/            26/127     49/127     26/127
+/overview    47/249     75/249     47/249
+/connectors  0/241      60/241     0/241
+/findings    404 (no such route; Findings lives at /)
+/workloads   16/279     100/279    16/279
+total        89/896     284/896    89/896
+light/HC: the top failing pairs on every page are dark-palette hex hard-coded outside the
+  tokens (src/lib/scales.ts TOKEN_HEX, inline styles), worst 1.58:1
+dark failures: dim text 2.5-2.9:1, exec-muted 4.46:1, same hard-coded accents on white exec cards
+initial theme, no data-theme: no pref -> dark; prefers-color-scheme light -> dark; dark -> dark;
+  prefers-contrast: more -> high-contrast (computed --c-txt = 0 0 0)
