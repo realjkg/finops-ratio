@@ -1,4 +1,4 @@
-baseline: 56 passed
+baseline: 57 passed
 | mutant | file | models | result | failing tests |
 |---|---|---|---|---|
 | no-principal-allows | src/rbac/authorize.ts | deny by default dropped | killed | 7 |
@@ -58,9 +58,11 @@ baseline: 56 passed
 | matrix-cto-costsource | src/rbac/matrix.ts | CTO reads line-level cost sources | killed | 1 |
 | matrix-legacy-new-route | src/rbac/matrix.ts | legacy token reads a route this plan adds | killed | 2 |
 | matrix-legacy-open-route | src/rbac/matrix.ts | legacy grant beyond gateway-wrapped routes | killed | 2 |
+| matrix-webhook-enforcedby | src/rbac/matrix.ts | signed webhook claims authorize() enforcement by C4 (Copilot review of 8e49f70) | killed | 1 |
+| matrix-mock-login-enforcedby | src/rbac/matrix.ts | public_mock login claims authorize() enforcement (Copilot review of 8e49f70) | killed | 1 |
 | matrix-webhook-public | src/rbac/matrix.ts | webhook made public | killed | 3 |
 | matrix-drop-route | src/rbac/matrix.ts | a page without a matrix row | killed | 3 |
 | matrix-drop-sync-row | src/rbac/matrix.ts | planned status-sync route without a matrix row | killed | 2 |
 | matrix-impact-dropped | src/rbac/matrix.ts | procurement approves any impact | killed | 2 |
 
-60 of 61 mutants killed; 1 equivalent; 0 survived
+62 of 63 mutants killed; 1 equivalent; 0 survived
