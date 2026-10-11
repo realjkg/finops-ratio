@@ -1,7 +1,7 @@
 # Frank with an allowlisted, read-only MCP: evidence
 
 Companion to [DESIGN.md](DESIGN.md). It records what the author checked, how,
-and what could not be checked. Base: `origin/main` at 62bd8ed (merge of #93).
+and what could not be checked. Base: `origin/main` at 62bd8ed (merge of #93) when the citations were checked; the base is now 8caec87 (merge of PR #96), which touches only `docs/design/frank-mcp`, so the citations are unchanged.
 Nothing here was run against a live model, a live MCP server or a database;
 every code claim was verified by reading the file at that commit.
 
@@ -73,7 +73,7 @@ searched as a whole tree.
 | OpenRouter or any named local server behaving as an OpenAI-compatible tool-calling endpoint | No access; the repo has no test for it. The `openllm` path is verified only as text chat by reading. |
 | Any specific model's tool-calling quality | No model run; certification is a later milestone. |
 | In-app live chat actually returning 401 | The author read the code (no header sent, auth enforced) and did not run it. The challenger reports running a vitest that stubbed `fetch` against the real chat handler with `AI_PROVIDER=openllm` and a strong `RATIO_API_TOKEN`: `LiveAIClient` sent only `Content-Type` and the call was rejected (reported, not re-run by the author). Corroboration read: `src/ai/chatRoute.test.ts:150-154`; `src/finio/LiveFinioClient.ts:5-11` (the browser intentionally omits Authorization). |
-| The two origin statements ("Will Frank also work with a localized MCP and open router?", "Write up the allowlisted read-only MCP proposal first.") and the two relayed owner quotes ("Not replacing production with a prompt ..." and "FinOps and Governance is knowing when to stop.") and their exact date | Not in the repository; the source messages were not seen. The three other quotes are verbatim in `docs/design/slice-3-5/EVIDENCE.md` section 6. |
+| The two origin statements ("Will Frank also work with a localized MCP and open router?", "Write up the allowlisted read-only MCP proposal first.") the relayed statement that MCP must be usable in dev, test and production under RBAC (DESIGN 3.8, OD-6), and the two relayed owner quotes ("Not replacing production with a prompt ..." and "FinOps and Governance is knowing when to stop.") and their exact date | Not in the repository; the source messages were not seen. The three other quotes are verbatim in `docs/design/slice-3-5/EVIDENCE.md` section 6. |
 | Test suite status | Not run (docs-only change). |
 
 ## 5. Contradictions with what the owner was told
@@ -91,9 +91,11 @@ searched as a whole tree.
 
 ## 6. Governance classification and rollback
 
-Classifier result for the first commit (c97852d) and for the revision that
-follows it: `risk: restricted`, class `retention` only, rule
-`retention.mention` on `docs/design/frank-mcp/DESIGN.md` (the audit-retention
-discussion). Recorded also in the pull request description (the classifier is run on the real diff, `node scripts/governance/classify-risk.mjs
+Classifier result at the final head of revision 3 (re-run on the real diff
+against `origin/main` at 8caec87): `risk: restricted`, class `retention` only,
+rule `retention.mention`. On the first commit it fired on `DESIGN.md` (the
+audit-retention discussion); at the revision 3 head it fires on the files
+recorded in the pull request description and the report (this section's own
+text contains the word, so `EVIDENCE.md` matches too). Recorded also in the pull request description (the classifier is run on the real diff, `node scripts/governance/classify-risk.mjs
 --git origin/main...HEAD`; the result is reported as it came out, and the
 wording of these documents was not shaped to avoid any rule).
