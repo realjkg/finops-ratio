@@ -2,8 +2,14 @@
 
 Companion to [DESIGN.md](DESIGN.md). It records what the author checked, how,
 and what could not be checked. Base: `origin/main` at 62bd8ed (merge of #93)
-when the citations were checked; the base is now 8caec87 (merge of PR #96),
-which touches only `docs/design/frank-mcp`, so the citations are unchanged.
+when the citations were checked; the citation checkpoint is 7a9da43 (merge of
+PR #99; the code revision the line citations were checked against; main has
+moved since).
+PR #99 changed about 30 files under `src` and `pages`, including
+`src/ai/{AIClient,buildAIContext,MockAIClient,index}.ts`; the cited lines were
+re-checked at 7a9da43 (`AIClient.ts:71-80` still lands on `AIWorkloadSnapshot`,
+additions begin after line 84; `chat.ts`, `providers.ts` and `LiveAIClient.ts`
+are unchanged).
 Nothing here was run against a live model, a live MCP server or a database;
 every code claim was verified by reading the file at that commit.
 
@@ -22,11 +28,21 @@ challenger review requested changes and 16581c8 answered it; revision 5
 error in DESIGN.md that revision 11 repairs; revision 11
 (10b18f8) answered the round-10 challenger's review of 90eee59; the round-11
 challenger approved 10b18f8, and revision 12 (4e3734c) answered Copilot's open
-threads on it and the round-11 Lows; revision 13 answers the round-12
-challenger's review of 4e3734c; revision 14 (this one) answers the round-13
+threads on it and the round-11 Lows; revision 13 answered the round-12
+challenger's review of 4e3734c; revision 14 answered the round-13
 challenger's review of 117f8e2 and the owner's vendor-agnostic requirement;
-revision 15 answers the round-14
-challenger's review of 433b27f under a scope freeze.
+revision 15 (86cf6fb) answered the round-14 challenger's review of 433b27f
+under a scope freeze; revision 16 (d8ab0c5, 4913734) answered the round-15
+challenger's review of 86cf6fb; PR #98 merged at 86cf6fb, so revisions 16 and
+17 are follow-ups on the merged main. Revision 17 (9686368) answered the PR
+#101 challenger's review of 4913734. Revision 18 (dba0c64) simplified section
+3.8 (start-and-reload evaluation only) on the decision recorded in section 6;
+revision 19 (98aa511) answered the challenger's review of revision 18 and was
+approved; revision 20 (3ec58a3) answered Copilot's four open
+test-specification threads on it; revision 21 (4af297e) answered the
+challenger's review of 3ec58a3 (a formatting repair and two clarifications);
+revision 22 (33f3b55) answered Copilot's two open threads on 4af297e; revision
+23, the last revision of this PR, answers Copilot's open threads on 33f3b55.
 
 ## 1. Method
 
@@ -96,9 +112,21 @@ challenger's review of 433b27f under a scope freeze.
   preset). The vendor-side connector discussion (2.6) and the Mistral
   function-calling statement are **unverified** vendor-documentation claims.
 - Revision 15 sources: no new code or external sources;
-  `pages/api/v1/ai/chat.ts`
-  lines near 100 and 134 (the Claude and OpenAI SDK create calls) were re-read
-  for the A21 surface. Fixes only; no new features.
+  `pages/api/v1/ai/chat.ts` lines near 100 and 134 (the Claude and OpenAI SDK
+  create calls) were re-read for the A21 surface. Fixes only; no new features.
+- Revision 16 sources: test-specification fixes only. The branch was
+  fast-forwarded to the merged main (then at 7a9da43, the citation checkpoint)
+  before editing. Main had moved by PR #99, which changed `src/ai` files; the
+  citation re-check is in the Revision 17 bullet.
+- Revision 17 sources: `git diff --name-only 62bd8ed 7a9da43 -- src pages` was
+  read for the files these documents cite; `src/ai/AIClient.ts:71-80`,
+  `pages/api/v1/ai/chat.ts` (lines cited), `src/ai/providers.ts` and
+  `src/ai/LiveAIClient.ts` were re-read at 7a9da43. The earlier statement that
+  there had been no code changes since 62bd8ed was wrong after PR #99.
+- Revision 18 sources: a decision record kept outside the repository (the
+  snag conclusion summarized in section 6). No new code or external sources.
+  Earlier source bullets that mention the flip detector, generations or the
+  per-request re-check describe machinery that revision 18 removed.
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -165,24 +193,72 @@ searched as a whole tree.
 
 Classifier history on the real diff against `origin/main`: revision 1
 (c97852d) was restricted, class `retention`, rule `retention.mention` on
-`DESIGN.md`; revisions 2 and 3 were restricted for the same class and rule, on
-`EVIDENCE.md` only at the end. At revision 4 the classifier was run twice:
-before this paragraph was written the diff contained no rule match and the
-result was `risk: low`; with a paragraph that names the rule, the result was
-`risk: restricted`, class `retention`, rule `retention.mention`, on
-`docs/design/frank-mcp/EVIDENCE.md` only. It was re-run at each later
+`DESIGN.md`; revisions 2 and 3 were restricted for the same class and rule,
+on `EVIDENCE.md` only at the end. At revision 4 the classifier was run
+twice: before this paragraph was written the diff contained no rule match
+and the result was `risk: low`; with a paragraph that names the rule, the
+result was `risk: restricted`, class `retention`, rule `retention.mention`,
+on `docs/design/frank-mcp/EVIDENCE.md` only. It was re-run at each later
 revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
 `EVIDENCE.md`: that `DESIGN.md` was the spliced file, whose rewrapped
 audit-retention sentence and decision-table row counted as added lines. At
-revisions 11 to 15, with `DESIGN.md` rebuilt from 911b67c at revision 11 and
-edited hunk by hunk since, the classifier was re-run at the final head and
-reports `risk: restricted`, class `retention`, rule
-`retention.mention`, on `EVIDENCE.md` only (this section names the rule).
-Neither result proves the change safe (the gate's own README calls `low`
-heuristic). The classification is recorded in the pull request body at the
-final head; this file makes no claim about the title or body of the pull
-request beyond that. The wording of these documents was not shaped to avoid
-any rule.
+revisions 11 to 15 the classifier was re-run at each final head with the
+same restricted result, on `EVIDENCE.md` only (this section names the rule).
+The later revisions are follow-ups on the merged main, where those lines are
+already present: a draft before this paragraph was written reports `risk:
+low` with no matches, and with this paragraph, which names the rule, a head
+reports `risk: restricted`, class `retention`, rule `retention.mention`, on
+`EVIDENCE.md` only. The classifier is re-run on each head and the pull
+request body records the result for that head. Neither result proves the
+change safe (the gate's own README calls `low` heuristic). The
+classification is recorded in the pull request body at the final head; this
+file makes no claim about the title or body of the pull request beyond that.
+The wording of these documents was not shaped to avoid any rule.
+
+### Decision record for revision 18
+
+Two independent agents, a proposer and a skeptic, converged: replace the
+section 3.8 evaluation machinery with start-and-reload evaluation only.
+Reasons, as recorded: (a) DESIGN.md 6.3 itself marked a runtime change of
+`FRANK_TOOLS` as an unverified assumption, and `process.env` cannot be changed
+from outside the process, so the machinery protected a path the design said
+might not exist; (b) the design already conceded that a runtime `RATIO_ENV`
+change is not detected; (c) section 3.8 grew from nothing to about 1,850 words
+and the A20 row from 88 to about 700 words over 16 revisions, each later
+finding probing state added by the previous revision, and revisions 6 to 16
+cite no new code; (d) no attack was found that the earlier design stopped and
+the simple one allows. The skeptic added requirements, all adopted: one reload
+at a time; a failed reload turns tools off and writes an audit record; no
+unauthenticated HTTP reload trigger; a "reload required" log when
+`FRANK_TOOLS=on` is seen without a reload; and about eight A20 cases. Process
+change: the review scope is frozen to changed text, and the review is closed
+after a round with no High or Medium findings. What would change the
+conclusion: a real mechanism that mutates `FRANK_TOOLS` in a running process,
+an owner requirement to turn tools on in under a minute without a reload, or a
+concrete attack on reload-only turn-on. After revision 18 section 3.8 was
+about 1,210 words (counted from its heading to the next section heading);
+later revisions added test cases to the A20 row.
 
 Rollback: revert the two documents; reverse-applying the diff to origin/main
 gives the same tree as origin/main.
+
+## 7. Follow-up findings
+
+This proposal PR closed at revision 23. Further reviewer findings are
+recorded here, not as more revisions, unless a finding is a High with a traced
+concrete failure.
+
+Revision 23 review (head 67a9a62), two threads, both triaged as not High (no
+traced concrete failure in the design; both are test-specification gaps):
+
+1. A20 (e) covers only two overlapping reloads. E4 also rejects a reload that
+   overlaps the start evaluation, so a broker with separate startup and reload
+   guards could pass the suite. Follow-up for the M0 test author: add a
+   deterministic start-evaluation/reload overlap case that requires the reload
+   to be rejected and the startup result to apply exactly once.
+2. A20 (m) describes the check as one that "never returns" and then has it
+   complete late, which cannot be implemented literally. It also asserts only
+   config state, so an implementation that blocks the stale install but still
+   emits `reload_applied` would pass. Follow-up: use a deferred check that
+   resolves after a newer reload completes, and assert both that the config is
+   unchanged and that no success audit event is emitted (only a debug note).
