@@ -6,6 +6,7 @@ import { useRouter } from 'next/router';
 import { PersonaProvider } from '@/components/PersonaProvider';
 import { AppShell } from '@/components/layout/AppShell';
 import { NAV_ITEMS } from '@/components/layout/NavBar';
+import { Analytics } from '@vercel/analytics/next';
 
 // The six north-star objects share one AppShell (nav + agent launcher + chat).
 // /demo also uses the shell so a self-service visitor gets the same navigation
@@ -27,6 +28,7 @@ export default function RatioApp({ Component, pageProps }: AppProps) {
     <PersonaProvider>
       <SimulationProvider>
       {useShell ? <AppShell>{page}</AppShell> : page}
+      <Analytics />
     </SimulationProvider>
     </PersonaProvider>
   );
