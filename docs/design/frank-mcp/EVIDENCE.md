@@ -13,7 +13,8 @@ and a second challenger review of PR #98 requested changes; revision 3
 (e050578, d997618) answered that and the round-3 challenger approved it;
 Copilot then reviewed d997618 and revision 4 (52de3cf) answered it; a round-4
 challenger review requested changes and 16581c8 answered it; revision 5
-answers Copilot's next review and the round-5 challenger's review of 16581c8.
+(1ffb5fd) answered Copilot's next review and the round-5 challenger's review of
+16581c8; revision 6 answers the round-6 challenger's review of 1ffb5fd.
 
 ## 1. Method
 

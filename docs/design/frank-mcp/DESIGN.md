@@ -5,15 +5,16 @@ Branch `docs/frank-mcp-proposal`. Revision 1 was branched from `origin/main` at
 **Status: proposal. Design only: this branch adds documents and no code.
 Nothing in this proposal is implemented.** Every decision in section 10 is
 **open**: it is the owner's to make, with a recommendation attached. No
-decision is recorded here as made. This is revision 5. Review history:
+decision is recorded here as made. This is revision 6. Review history:
 revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
 revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
 PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
 round-3 challenger approved it; Copilot then reviewed d997618 and revision 4
 (52de3cf) answered it; a round-4 challenger review of 52de3cf requested
 changes and a follow-up (16581c8) answered it; Copilot's next review and a
-round-5 challenger review of 16581c8 are answered by this revision 5 (a High on
-the environment contract, and four Lows). Revisions 2 to 5 are in PR #98. The
+round-5 challenger review of 16581c8 were answered by revision 5 (1ffb5fd); a
+round-6 challenger review of 1ffb5fd (3 Medium, 5 Low) is answered by this
+revision 6. Revisions 2 to 6 are in PR #98. The
 code citations were checked at 62bd8ed and there have been no code changes
 since: 8caec87 touches only `docs/design/frank-mcp`.
 
