@@ -232,6 +232,28 @@ describe('A6 synthetic cloud sandbox sources', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('window_filters_rows_by_charge_period_start_half_open', async () => {
+    // Clock is pinned to 2026-06-15; every row's ChargePeriodStart is 2026-06-01T00:00:00.000Z.
+    const client = new MockCostSourceClient();
+    const count = async (id: string, start: string, end: string) =>
+      (await client.fetchCostRows(id, { start, end })).rows.length;
+    for (const id of NEW_IDS) {
+      const n = ORACLE[id].rowCount;
+      // Disjoint month: nothing.
+      expect(await count(id, '2026-05-01T00:00:00Z', '2026-05-31T00:00:00Z')).toBe(0);
+      expect(await count(id, '2026-07-01T00:00:00Z', '2026-08-01T00:00:00Z')).toBe(0);
+      // Start inclusive.
+      expect(await count(id, '2026-06-01T00:00:00Z', '2026-07-01T00:00:00Z')).toBe(n);
+      // End exclusive.
+      expect(await count(id, '2026-05-01T00:00:00Z', '2026-06-01T00:00:00Z')).toBe(0);
+      // Start one millisecond after the charge start excludes it.
+      expect(await count(id, '2026-06-01T00:00:00.001Z', '2026-07-01T00:00:00Z')).toBe(0);
+      // The echoed window is unchanged.
+      const res = await client.fetchCostRows(id, { start: '2026-05-01T00:00:00Z', end: '2026-05-31T00:00:00Z' });
+      expect(res.window).toEqual({ start: '2026-05-01T00:00:00Z', end: '2026-05-31T00:00:00Z' });
+    }
+  });
+
   it('new_sources_return_no_findings', async () => {
     for (const id of NEW_IDS) {
       expect(await new MockCostSourceClient().fetchFindings(id)).toEqual([]);
