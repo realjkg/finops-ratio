@@ -17,7 +17,8 @@ challenger review requested changes and 16581c8 answered it; revision 5
 16581c8; revision 6 (473aed0) answered the round-6 challenger's review of
 1ffb5fd and revision 7 (6f4c9f7) updated the review history; revision 8
 (6f82d26) answered the round-7 challenger's review of 6f4c9f7; revision 9
-answers the round-8 challenger's review of 6f82d26.
+(911b67c) answered the round-8 challenger's review of 6f82d26; revision 10
+answers the round-9 challenger's review of 911b67c.
 
 ## 1. Method
 
@@ -67,6 +68,10 @@ answers the round-8 challenger's review of 6f82d26.
 - Revision 8 and 9 sources: no new code or external sources. The changes are
   design rules (flip-detector initialization, the generation definition, case
   (m)), and the key table was reconciled with OD-8 and 3.3.
+- Revision 10 sources: no new code or external sources. The per-request
+  environment re-check was removed on the orchestrator's decision (a minor
+  design decision); the evaluation rules, A20 and the key table were
+  rewritten to match.
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -139,7 +144,7 @@ before this paragraph was written the diff contained no rule match and the
 result was `risk: low`; with a paragraph that names the rule, the result was
 `risk: restricted`, class `retention`, rule `retention.mention`, on
 `docs/design/frank-mcp/EVIDENCE.md` only. It was re-run at each later
-revision, through revision 9, with the same result: restricted, `retention`,
+revision, through revision 10, with the same result: restricted, `retention`,
 `retention.mention`, on `EVIDENCE.md` only. Neither result proves the change
 safe (the gate's own README calls `low` heuristic). The classification is
 recorded in the pull request body at the final head; this file makes no claim
