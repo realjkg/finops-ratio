@@ -321,18 +321,23 @@ describe('persona projections', () => {
     const big: Dataset = {
       ...DATASET,
       lines: [
-        { ...base, id: 'X1', cents: Number.MAX_SAFE_INTEGER + 2 },
-        { ...base, id: 'X2', cents: -Number.MAX_SAFE_INTEGER },
+        // MAX_SAFE_INTEGER + 2 is not representable as a Number (it rounds to
+        // 2 ** 53), so use two exact 2 ** 53 amounts: the running total reaches
+        // 2 ** 54 before the negative lines bring the exact result back to 2.
+        { ...base, id: 'X1', cents: Number.MAX_SAFE_INTEGER + 1 },
+        { ...base, id: 'X2', cents: Number.MAX_SAFE_INTEGER + 1 },
+        { ...base, id: 'X3', cents: -Number.MAX_SAFE_INTEGER },
+        { ...base, id: 'X4', cents: -Number.MAX_SAFE_INTEGER },
       ],
     };
     const scope: Scope = { teams: [base.team], envs: [base.env] };
     expect(project('cto', big, scope).totalCents).toBe(2);
     expect(project('cto', big, scope).rows.map((r) => r.cents)).toEqual([2]);
     // An exact result that is itself out of range is still rejected.
-    const tooBig: Dataset = { ...big, lines: [{ ...base, id: 'X3', cents: Number.MAX_SAFE_INTEGER + 2 }] };
+    const tooBig: Dataset = { ...big, lines: [{ ...base, id: 'X5', cents: Number.MAX_SAFE_INTEGER + 1 }] };
     expect(() => project('cto', tooBig, scope)).toThrow(RangeError);
     // A fractional amount is rejected.
-    const frac: Dataset = { ...big, lines: [{ ...base, id: 'X4', cents: 1.5 }] };
+    const frac: Dataset = { ...big, lines: [{ ...base, id: 'X6', cents: 1.5 }] };
     expect(() => project('cto', frac, scope)).toThrow(RangeError);
   });
 

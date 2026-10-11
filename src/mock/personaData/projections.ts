@@ -65,17 +65,20 @@ export interface PersonaView {
 }
 
 function sumCents(items: readonly { cents: number }[]): number {
-  let total = 0;
+  // Accumulate exactly: an intermediate total may leave the safe range even
+  // when the final result does not. Convert only after validating the result.
+  let total = BigInt(0);
   for (const item of items) {
-    if (!Number.isSafeInteger(item.cents)) {
+    if (!Number.isInteger(item.cents)) {
       throw new RangeError('amount is not an integer number of cents');
     }
-    total += item.cents;
+    total += BigInt(item.cents);
   }
-  if (!Number.isSafeInteger(total)) {
-    throw new RangeError('total exceeds the safe integer range');
+  const result = Number(total);
+  if (!Number.isSafeInteger(result) || BigInt(result) !== total) {
+    throw new RangeError('total is outside the safe integer range');
   }
-  return total;
+  return result;
 }
 
 function lineRow(l: LineItem): ViewRow {
