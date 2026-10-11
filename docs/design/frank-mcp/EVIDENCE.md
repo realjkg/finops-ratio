@@ -178,15 +178,18 @@ result was `risk: low`; with a paragraph that names the rule, the result was
 revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
 `EVIDENCE.md`: that `DESIGN.md` was the spliced file, whose rewrapped
 audit-retention sentence and decision-table row counted as added lines. At
-revisions 11 to 16, with `DESIGN.md` rebuilt from 911b67c at revision 11 and
-edited hunk by hunk since, the classifier was re-run at the final head and
-reports `risk: restricted`, class `retention`, rule
-`retention.mention`, on `EVIDENCE.md` only (this section names the rule).
-Neither result proves the change safe (the gate's own README calls `low`
-heuristic). The classification is recorded in the pull request body at the
-final head; this file makes no claim about the title or body of the pull
-request beyond that. The wording of these documents was not shaped to avoid
-any rule.
+revisions 11 to 15 the classifier was re-run at each final head and reported
+`risk: restricted`, class `retention`, rule `retention.mention`, on
+`EVIDENCE.md` only (this section names the rule). Revision 16 is a follow-up
+on the merged main (7a9da43), where those lines are already present: a draft
+of this revision before this paragraph was written reported `risk: low` with
+no matches, and with this paragraph, which names the rule, the final head
+reports `risk: restricted`, class `retention`, rule `retention.mention`, on
+`EVIDENCE.md` only. Neither result proves the change safe (the gate's own
+README calls `low` heuristic). The classification is recorded in the pull
+request body at the final head; this file makes no claim about the title or
+body of the pull request beyond that. The wording of these documents was not
+shaped to avoid any rule.
 
 Rollback: revert the two documents; reverse-applying the diff to origin/main
 gives the same tree as origin/main.
