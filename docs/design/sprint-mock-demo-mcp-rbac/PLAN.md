@@ -1,6 +1,6 @@
 # Sprint plan: mock-demo environment, MCP-connected access, and role-based access
 
-Status: proposal for owner review. Docs only. Base: `origin/main` at `8caec87` (revision 8 of this plan; main includes `docs/design/frank-mcp`, revision 15).
+Status: proposal for owner review. Docs only. Base: `origin/main` at `7a9da43` (revision 9 of this plan; main includes `docs/design/frank-mcp`, which keeps being revised, so it is cited by section).
 Companion files: [TASKS.md](./TASKS.md) (sprint backlog and agent runbook) and
 [EVIDENCE.md](./EVIDENCE.md) (how every fact below was verified).
 
@@ -44,13 +44,13 @@ routine in that skill.
      caller must invoke it, nothing links a ticket to an approval or an apply,
      and nothing listens for ticket changes (F9, F10).
 4. **Agents run these capabilities through sprint tasks, iteratively and in
-   parallel.** TASKS.md defines self-contained cards (sprint names: A, A2 for cards B1 to B11 (IDs kept), C for the portal UI (C1, C2, C5) and D for the ITSM change lifecycle (C3, C4, C6, C8, C7 last); Sprint B is reserved for the live connectors for ingest, drafted later); Sprint B is reserved for the live connectors for ingest). Sprint A contains cards
+   parallel.** TASKS.md defines self-contained cards (sprint names: A; A2 for cards B1 to B11, IDs kept; C for the portal UI, cards C1, C2, C5; D for the ITSM change lifecycle, cards C3, C4, C6, C8, C7 last; Sprint B is reserved for the live connectors for ingest and is drafted later). Sprint A contains cards
    with disjoint file sets that can all run at once; each card has named red
    tests and a governance class. The runbook there tells an implementer agent
    how to take a card without conflicting with the others.
 
 How hard is it to build with security-enabled APIs? Moderate overall, and hard
-in three specific places. See section 6: roughly 107 to 166 person-days for the
+in three specific places. See section 6: roughly 114 to 175 person-days for the
 whole mock-environment scope (the sum of the table there; revision 1 said 66
 to 105; revisions 2 and 3 added the browser session, page-data scoping, the
 data-provider seam, the remaining gateway routes, the page readers and the
@@ -196,9 +196,10 @@ export interface TokenVerifier {
 }
 ```
 
-`Resource.impact` is **never** read from the approval request: it is the value
-stored on the change record when the change was requested (card C3), and the
-approver cannot alter it. `authorize(principal, action, resource)` is pure. It returns 401 for no
+`Resource.impact` is **never** chosen by the requester or read from the approval
+request: card C3 derives it on the server from the requested `action` through a
+fixed map (the requester cannot mark a commitment purchase as `cost`), stores
+it on the change record, and the approver cannot alter it. `authorize(principal, action, resource)` is pure. It returns 401 for no
 principal, 403 for a role, team or environment the grant does not cover, and
 409 only for a state conflict on a change (apply while the ticket is not
 approved). The "A" cells of section 4.5 are therefore a pure verdict over
@@ -297,6 +298,7 @@ deployment environment is rejected by another (the `aud` claim).
 | Audit log (new page `/audit`; `/api/v1/audit/records`) | O | D | - | T | - | D |
 | Scoped data endpoint (new) `/api/v1/workloads` (workloads, budgets, alerts for the caller's scope) | O | D | D | T | O | D |
 | Session endpoints (new) `/api/v1/session/principal`, `/logout`: any authenticated principal; `/login` and `/mock-control`: `public_mock` (mock IdP only, 404 elsewhere); page `/sign-in`: `public` | any | any | any | any | any | any |
+| Status sync (new, plannedBy C8) `/api/v1/cm/sync`: status `enforced`, action `ticket.update` per section 4.5 | - | Y | - | Y* | - | - |
 | Webhook (new) `/api/v1/cm/webhook`: status `signed` (HMAC signature and replay check instead of a bearer; no role) | - | - | - | - | - | - |
 | Customer simulation `/simulation`, `/workspace`, `/api/v1/simulation/*` | dev and test only | dev and test only | dev and test only | dev and test only | dev and test only | dev and test only |
 
@@ -304,25 +306,32 @@ deployment environment is rejected by another (the `aud` claim).
 most detailed shape that role may see anywhere in section 4.4: `rollup` for
 `cto` and `procurement` (their codes never exceed O) and `drilldown` for the
 other four. A roll-up is a **separate response DTO**, not a trimmed record. Its
-workload entries have exactly these fields: `id`, `name`, `model_provider`,
+workload entries have exactly these fields (the named aggregates are listed
+after them): `id`, `name`, `model_provider`,
 `team`, `environment`, `demand_shape`, `priority`, `cost_trend_pct`,
 `monthly_spend`, `monthly_budget`, `recorded_mtd`, `total_value`,
 `value_ratio` and the four governance gate booleans; its budget entries have
 `workload_id`, `period`, `budget_amount` and the three threshold percentages;
 its alert entries have `id`, `workload_id`, `type`, `severity` and
 `acknowledged`; and it carries one precomputed month-end forecast summary per
-workload. It contains none of these line-level names anywhere in the JSON:
-`model`, `daily_spend`, `daily_budget`, every `tokens_*` counter, `outputs`
-and its members, `revenue_protected`, `cost_avoided`, `harm_from_misses`,
-`quality_floor_pass_rate`, `evidence`, `approved_by`, `last_reviewed`,
-`created_at`, `updated_at`, `daily_spend_history`, `daily_allocation`, the
-breach-action fields and alert `message`. Cost lines and per-user rows are
+workload and the **named aggregates** below, computed on the server by the
+existing pure functions over the full scoped records, so no page that the matrix
+gives O needs a line-level field. It contains none of these line-level names anywhere in the JSON:
+`model`, `daily_spend`, `daily_budget`, `compute`, `inference_cost_per_call`,
+every `tokens_*` counter, every unit-cost member (`cost_per_call` and its
+siblings), `outputs` and its members, `revenue_protected`, `cost_avoided`,
+`harm_from_misses`, `quality_floor_pass_rate`, `evidence`, `approved_by`,
+`last_reviewed`, `created_at`, `updated_at`, `daily_spend_history`,
+`daily_allocation`, `forecast_method`, the breach-action fields, `budgets[].id`,
+and the alert members `message`, `threshold_value`, `actual_value`,
+`triggered_at`, `acknowledged_by`, `action_taken` and `channel`. Cost lines and per-user rows are
 separate routes that roll-up roles get only aggregated (cards B2 and B3). The
-store keeps these figures in the roll-up shape and the pages the matrix gives
-O read only them; a client-side adapter fills the omitted members of the
+store keeps these figures in the roll-up shape; B11's `hydrateScoped` calls
+`rehydrateRollup()` (a client adapter that fills the omitted members of the
 existing record types with neutral placeholders so unchanged components still
-compile, and the drill-down surfaces show "not available for your role" (card
-B10). The placeholders are not data and never leave the browser. The CTO view is therefore accurate and
+compile) and registers the named aggregates in a small registry that the
+readers consult first. The placeholders are not data and never leave the
+browser. The drill-down surfaces show "not available for your role" (card B10). The CTO view is therefore accurate and
 distinct from the FinOps lead view by data, not only by lens (card B8 defines
 the shape and makes the budget-status code roll-up-safe; B7 serves it; the
 shape is chosen from the role, never by a request parameter). For `finops_lead`,
@@ -339,6 +348,33 @@ total. Money is summed in integer cents: each dollar value is converted once at 
 leaf (`Math.round(dollars * 100)`) and totals are formatted from cents (card
 B8; the display fix in card A7 is separate). The seeded data is in float
 dollars (F16), so the oracle for served data is committed in card B8.
+
+### 4.4a Roll-up pages: what each reads and where the figure comes from
+
+The roll-up roles (`cto`, `procurement`) must see the same portfolio-level
+numbers as the FinOps lead on every page the matrix gives them. Per workload
+the DTO adds these named aggregates: `fuel_ratio` (daily spend over daily
+budget), `cache_economics` (the output of `deriveCacheEconomics`), `tca` (the
+output of `estimateTca`: category amounts, full cost, headline spend and
+ratio), `gross_value` and `value_evidence_headline` (the readers in
+`valueMath.ts` and `valueEvidence.ts`), and `forecast_summary`. At portfolio
+level it adds `portfolio_ratio` (`derivePortfolioRatio`), `monthly_spend_total`
+and `total_value_total`.
+
+| O page | Line-level inputs it reads today | Roll-up source | Consumer change (card) |
+|---|---|---|---|
+| Findings `/` | token counters (cache economics in `src/lib/derive.ts`), value ratio, spend | `cache_economics`, `portfolio_ratio` | `derive.ts` reader (B12); `findingsModel.ts` scope parameter (B8) |
+| Overview `/overview` | monthly spend, value, budget series | whitelist fields and `forecast_summary` | none beyond the B8 registry |
+| Workloads `/workloads` | `model` (WorkloadCard), unit costs | `model_provider` label only; detail panel unavailable | `WorkloadCard.tsx` (B12); `DetailPanel.tsx` (B10) |
+| Mission `/mission` | daily spend and daily budget (fuel gauge), `model` | `fuel_ratio`, `forecast_summary`, provider label | `missionModel.ts` (B12; scope parameter B8) |
+| Outcomes `/outcomes` | `costs.compute`, revenue and cost-avoided inputs, evidence marks | `tca`, `gross_value`, `value_evidence_headline` | `outcomes/model.ts`, `valueMath.ts`, `valueEvidence.ts` readers (B12) |
+| Prediction `/prediction` | model, token counters, daily spend (predictors) | the page calls `/api/prediction/predict`, which computes on the server from the full scoped records | `PredictionPage.tsx` (B10) |
+| Attribution `/attribution` (team) | token counters | `/api/attribution` team aggregates from the server | `AttributionPage.tsx`, `LiveAccrualBoard.tsx` (B10) |
+| Reports `/reports` | all | `/api/report/snapshot` built on the server for the caller's scope and shape | none (B3) |
+| Frank `/agent-workflows` | all | chat context built on the server (B9) | none |
+
+Test, in B12 and again end to end in C1: for each O page the roll-up page
+figures equal the FinOps lead's figures for the same portfolio-level numbers.
 
 ### 4.5 Permission matrix: persona by action, per environment
 
@@ -641,9 +677,10 @@ to 15. The total at the end is the sum of the ranges.
 | Generic MCP client with operator allowlist file, env and team scoping | B5 | M | 5-8 | Transport framing is unvalidated against a real server (F12); tool schemas drift | Moderate |
 | Other views follow the synthetic mapping | B6 | S | 1-3 | Low | Easy |
 | Browser session API, scoped workloads endpoint (workloads, budgets, alerts), credentials on every client | B7 | M | 5-8 | Cookie plus CSRF handling; the cookie must work with the offline default off | Hard part 1 continued |
+| Roll-up readers: Mission, Findings, Outcomes, Workloads (named aggregates instead of line-level fields) | B12 | M | 5-8 | Several unowned readers (derive, valueMath, outcomes model, mission, workload card) must keep today's output when no aggregate is registered | Moderate |
 | Page components that import the seed directly (four files) and the drill-down panel | B10 | M | 5-7 | Output must stay identical in the offline default; user-level events are personal data | Moderate |
 | Sign-in UI, session provider, store hydration, view guard | B11 | M | 5-8 | First-paint flash of other teams' data; 401 and role-change refresh triggers | Hard part 1 continued |
-| Data-provider seam (workloads, budgets, alerts; roll-up and drill-down shapes), scope-aware models, served-data oracle | B8 | L | 10-14 | About ten modules read the seed directly; float dollars versus cents; default output must stay identical | Hard part 1 continued |
+| Data-provider seam (workloads, budgets, alerts; roll-up DTO with named aggregates and drill-down shapes), registry, scope-aware models, served-data oracle | B8 | L | 12-15 | About ten modules read the seed directly; float dollars versus cents; default output must stay identical | Hard part 1 continued |
 | Remaining gateway routes: chat, FinOps export, handshake, published costs | B9 | M | 4-6 | Chat context must be built on the server; tenant binding for published costs must not change | Moderate |
 | Persona and navigation from the verified principal | C2 | S | 2-3 | Offline default must keep the executive default | Easy |
 | Browser persona matrix (Playwright) and local launcher | C1 | M | 4-8 | Playwright runs against a production build and is slow (see `playwright.simulation.config.ts`) | Moderate |
@@ -653,7 +690,7 @@ to 15. The total at the end is the sum of the ranges.
 | Audit sink, read route and page | C5 | M | 4-6 | Volume and secret leakage; role-scoped reads | Moderate |
 | OAuth2 client-credentials client behind an interface | C6 | M | 4-6 | Only provable against a real tenant; the mock proves the shape only | Moderate, partly deferred |
 | Promote durable rules and remove this directory | C7 | S | 1 | Low | Easy |
-Sum of the ranges in the table: 107 to 166 person-days (27 rows, one per card; every row's range sits inside the size scale above, checked by script when this table was edited). Parallel agents shorten calendar time because Sprint A cards run side by side, but the person-day total is what review capacity must absorb.
+Sum of the ranges in the table: 114 to 175 person-days (28 rows, one per card; every row's range sits inside the size scale above, checked by script when this table was edited). Parallel agents shorten calendar time because Sprint A cards run side by side, but the person-day total is what review capacity must absorb.
 
 What is hard and why:
 
@@ -733,7 +770,8 @@ real identity provider, any production deployment, and any migration.
   from importing it. Making it server-only (with a planted-sentinel bundle test)
   is owner decision D14 and is required before any real data.
 - **Cross-sprint dependency.** C5 (Sprint C, portal UI) depends on C3 (Sprint D,
-  change lifecycle); the sprint labels changed, the dependencies did not.
+  change lifecycle), and C2 and C1 depend on C5, so Sprints C and D run as one
+  pool with C3 first; the labels changed, the dependencies did not.
 - **Shared test environments.** `RATIO_ENV=test` is also a plausible value on a
   shared test deployment: `RATIO_MOCK_IDP` must stay unset on any deployment
   that anyone other than the developer can reach.
@@ -756,3 +794,26 @@ real identity provider, any production deployment, and any migration.
   first real-tenant run (D3) is where drift shows up.
 - **Issue #94.** Anything needing storage beyond memory (replay set,
   revocation, audit) is in memory in the mock and flagged for D8.
+
+## 10. Decisions since revision 7
+
+These are the owner's product decisions made after revision 7. They are
+recorded here as direction; the cards named below are drafted in later,
+separate documents and are **not** drafted in this plan.
+
+- **Committee-style approval.** The FinOps leader guides a change, an executive
+  decides it, and a quorum rule decides when it is approved. The quorum lives in
+  **one data file beside the permission matrix** (the same pattern as the
+  matrix: data that tests can enumerate), so a change of quorum is a one-file,
+  reviewed edit. It extends the separation-of-duties rule of section 4.5 and
+  does not replace it.
+- **Decision Packet.** A new card, C9 (Sprint C, portal UI), will produce a
+  decision packet for the deciding executive. It is reserved here and drafted
+  separately.
+- **Sprint B (live connectors for ingest).** Three cards are reserved for it:
+  B-ACT, B-NOTICE and B-DELIVER. They are drafted in a follow-up documents PR
+  after this plan merges.
+- **Recommender.** The product recommender is a generic `Recommender` interface
+  with a mock implementation. It is never named after any vendor or model
+  (in particular it is not named Fable), so a different recommender can replace
+  the mock without renaming anything.
