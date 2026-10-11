@@ -1,0 +1,15 @@
+# RED (Copilot on 95e0f65): hostile array Proxies passed straight to teamCovered, envCovered, hasRealTeam
+$ npx vitest run src/identity src/rbac
+     × array shapes: arrays, array-likes, strings and Proxies are never inputs, and nothing throws
+AssertionError: revoked Proxy: expected [Function] to not throw an error but 'TypeError: Cannot perform \'IsArray\'…' was thrown
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 29 passed (30)
+# RED (Opus check L1): a Proxy whose length reads 1 then 5e6 must not be scanned past the first read
+$ npx vitest run src/identity src/rbac
+     × length caps: over-cap claims and rows are invalid before any scan; at the cap they work
+AssertionError: flipping length: expected 2232 to be less than 200
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed | 2 passed (3)
+      Tests  1 failed | 29 passed (30)
+# Earlier RED rounds are in git history: 22868e2, c520517, 3baa37d, 6971b97, f641e35, 8719d94, 232af80, dd6e29d, 13705c7, 4ec79aa.
