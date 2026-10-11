@@ -16,10 +16,10 @@ function anomaly(id: string, observedSpendDelta: number): CostFinding {
     workloadId: null,
     estimatedMonthlySavings: 0,
     observedSpendDelta,
-    severity: 'medium',
+    severity: 'warning',
     status: 'open',
     detectedAt: '2026-01-01T00:00:00Z',
-  } as CostFinding;
+  };
 }
 
 describe('FindingsCard anomaly delta', () => {

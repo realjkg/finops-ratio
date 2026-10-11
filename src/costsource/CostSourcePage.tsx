@@ -590,7 +590,7 @@ export function FocusRowsCard({ rows }: { rows: CanonicalFocusRow[] }) {
   );
 }
 
-function FindingsCard({ findings }: { findings: CostFinding[] }) {
+export function FindingsCard({ findings }: { findings: CostFinding[] }) {
   if (findings.length === 0) {
     return (
       <Card title="Findings">
