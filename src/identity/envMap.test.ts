@@ -12,6 +12,7 @@ describe('envMap (PLAN 4.2, exact match, fail closed)', () => {
     expect(['prod', 'dev', 'sandbox'].map(ratioEnvToDeployEnv)).toEqual([null, null, null]);
     expect(deployEnvFromProcess({ NODE_ENV: 'development', RATIO_ENV: 'production' })).toBe('prod');
     expect(deployEnvFromProcess({ NODE_ENV: 'production' })).toBeNull();
+    expect(deployEnvFromProcess(Object.create({ RATIO_ENV: 'production' }))).toBeNull(); // inherited, not set
     const saved = process.env.RATIO_ENV;
     try {
       process.env.RATIO_ENV = 'staging';

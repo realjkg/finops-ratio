@@ -243,6 +243,11 @@ describe('authorize: security properties', () => {
     expect(envCovered(atCap(MAX_CLAIM + 1, 'prod'), 'prod')).toBe(false);
     expectDeny(authorize(principal('eng_lead', { teams: atCap(MAX_CLAIM + 1, CX) }), 'ticket.create', ticket(CX)), 401);
     expect(filterByScope({ teams: '*', envs: ALL }, atCap(MAX_ROWS + 1, { team: CX, env: 'prod' }), (r) => r as never)).toEqual([]);
+    // A Proxy whose length reads 1 first and then huge: the length is read once, so no long scan.
+    const flip = () => { let reads = 0; return new Proxy([], { get: (t, k) => (k === 'length' ? (reads++ ? 5e6 : 1) : Reflect.get(t, k)) }); };
+    const t0 = Date.now();
+    expect(teamCovered(flip(), CX) || authorize(principal('eng_lead', { teams: flip() as string[] }), 'ticket.create', ticket(CX)).allow).toBe(false);
+    expect(Date.now() - t0, 'flipping length').toBeLessThan(200);
     for (const n of [2 ** 32 - 1, 1e9]) {
       const huge = <T>() => new Array<T>(n);
       const started = Date.now();
