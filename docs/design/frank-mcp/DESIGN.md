@@ -5,7 +5,7 @@ Branch `docs/frank-mcp-proposal`. Revision 1 was branched from `origin/main` at
 **Status: proposal. Design only: this branch adds documents and no code.
 Nothing in this proposal is implemented.** Every decision in section 10 is
 **open**: it is the owner's to make, with a recommendation attached. No
-decision is recorded here as made. This is revision 12. Review history:
+decision is recorded here as made. This is revision 13. Review history:
 revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
 revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
 PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
@@ -21,9 +21,11 @@ challenger review of 911b67c was answered by revision 10 (90eee59, whose
 DESIGN.md contained a splice error that this revision repairs); a round-10
 challenger review of 90eee59 was answered by revision 11 (10b18f8); the
 round-11 challenger approved 10b18f8, and Copilot's open threads on it (C1 to
-C3) with the round-11 Lows are answered by this revision 12. Revisions 2 to 12
-are in PR #98. The code citations were checked at 62bd8ed and there have been
-no code changes since: 8caec87 touches only `docs/design/frank-mcp`.
+C3) with the round-11 Lows were answered by revision 12 (4e3734c); a round-12
+challenger review of 4e3734c (3 Medium, several Low) is answered by this
+revision 13. Revisions 2 to 13 are in PR #98. The code citations were checked
+at 62bd8ed and there have been no code changes since: 8caec87 touches only
+`docs/design/frank-mcp`.
 
 **Origin.** Both origin statements below were relayed to the author in the
 commissioning task; the source messages were not seen, so their exact wording
@@ -343,14 +345,18 @@ Each entry pins:
 
 Within a server, the allowlist lists tools **by name**, each with:
 
-- `description`, `input_schema` and `output_schema`: the **bodies** the broker
-  uses. The broker offers the model the allowlist's own `description` and
-  `input_schema` (never the server's live text) and validates every result
-  against `output_schema`. For in-process tools (M1) the bodies come from the
-  same file, under a server entry with `transport: in_process`, so the file
-  shape is uniform; the built-in registry supplies the implementation and a
-  reference copy of each body, and a file body that differs from the registry
-  rejects the whole file;
+- - `description`, `input_schema` and `output_schema`: the **bodies** the
+  broker uses. The broker offers the model the allowlist's own `description`
+  and `input_schema` (never the server's live text) and validates every result
+  against `output_schema`. In M1 there is no allowlist file and no parser: the
+  built-in registry is the **only** source of in-process tool bodies. From M2,
+  the file shape is uniform: in-process tools appear under a server entry with
+  `transport: in_process` with the same body and hash keys, and a file body
+  that differs from the registry rejects the whole file. Descriptions are
+  trusted operator text, hash-pinned; the control is re-approval review by a
+  non-author (3.7), and a description is reviewed as untrusted-instruction
+  text. The caps `max_description_bytes` and `max_schema_bytes` (key table)
+  bound body size;
 - `schema_hash`: SHA-256 of the canonicalized `input_schema`;
 - `output_schema_hash`: SHA-256 of the canonicalized `output_schema` (4.1); if
   the server declares an output schema, it must hash to this value;
@@ -369,8 +375,8 @@ rejects the whole file, 3.8 rule 3):
 
 | Level | Required keys | Optional keys (default) |
 |---|---|---|
-| File (top level) | `deployment_environment` (must equal the raw `RATIO_ENV`, 3.8 rule 0); `tenants` (the tenants that get tools, 6.3; an empty list means none); `servers` (may be empty) | `fallback`: `mock` or `no_tools` (default `mock`, 2.4, 7); `relist_interval_seconds` (default 300, **assumption**, 3.7); `max_tool_calls_per_turn` (default 5) and `max_tool_result_tokens_per_turn` (default 8000), the global per-turn caps (3.6; the OD-8 placeholders); `max_model_tokens_per_tenant_per_day` (default 200000, a placeholder: the tokens, input plus output, of tool-enabled model calls per tenant per UTC day, counted from provider-reported usage where present, else estimated from request and response size; 3.6, T8); `evaluation_lock_wait_ms` (default 2000), `evaluation_timeout_ms` (default 10000) and `evaluation_retry_ms` (default 5000), the evaluation limits of 3.8 E1 and E4 (**assumptions**) |
-| Server | `name`; `transport` (`stdio`, `http`, or `in_process` for M1; an `in_process` entry has no pins); `owner`; `purpose`; `data_class`; `tools`; **if `transport` is `stdio`** (valid only if OD-1 allows it): `command`, `args`, `executable_sha256`, `entry_sha256`, `working_dir` (pinned, 3.2); **if `http`:** `url`, one of `tls_pin` or `ca_bundle`, `credential_ref` | `enabled` (default `true`); stdio only: `env` (default empty, nothing inherited); `environments`, `roles`, `teams` (reserved, 3.8; absent means unrestricted within the file's environment) |
+| File (top level) | `deployment_environment` (must equal the raw `RATIO_ENV`, 3.8 rule 0); `tenants` (the tenants that get tools, 6.3; an empty list means none); `servers` (may be empty) | `fallback`: `mock` or `no_tools` (default `mock`, 2.4, 7); `relist_interval_seconds` (default 300, **assumption**, 3.7); `max_tool_calls_per_turn` (default 5) and `max_tool_result_tokens_per_turn` (default 8000), the global per-turn caps (3.6; the OD-8 placeholders); `max_description_bytes` (default 2000) and `max_schema_bytes` (default 8000), placeholders (OD-8), above which the whole file is rejected; `evaluation_lock_wait_ms` (default 2000), `evaluation_timeout_ms` (default 10000) and `evaluation_retry_ms` (default 5000), the evaluation limits of 3.8 E1 and E4 (**assumptions**) |
+| Server | `name`; `transport` (`stdio`, `http`, or `in_process` from M2; an `in_process` entry has no pins); `owner`; `purpose`; `data_class`; `tools`; **if `transport` is `stdio`** (valid only if OD-1 allows it): `command`, `args`, `executable_sha256`, `entry_sha256`, `working_dir` (pinned, 3.2); **if `http`:** `url`, one of `tls_pin` or `ca_bundle`, `credential_ref` | `enabled` (default `true`); stdio only: `env` (default empty, nothing inherited); `environments`, `roles`, `teams` (reserved, 3.8; absent means unrestricted within the file's environment) |
 | Tool | `name`; `description`; `input_schema`; `output_schema`; `schema_hash`; `output_schema_hash`; `description_hash`; `read_only_via` | `enabled` (default `true`); budgets `max_calls_per_turn` (5), `max_calls_per_tenant_per_minute` (20), `max_arg_bytes` (2 KB), `max_result_bytes` (32 KB), `timeout_ms` (5000), the OD-8 placeholders; `on_secret` (default `reject`); `environments`, `roles`, `teams` (reserved) |
 
 A missing required key rejects the whole file; a missing optional key takes
@@ -444,7 +450,9 @@ table), and a hard timeout. A global per-turn cap on total tool calls and total
 tool-result tokens applies on top, and the existing `MAX_TOKENS` stays on
 each model call (`pages/api/v1/ai/chat.ts:45`). Suggested starting values are
 in section 10 as an open owner decision (OD-8); the author has no measurement
-to justify specific numbers (**assumption**).
+to justify specific numbers (**assumption**). These controls bound tool calls
+and per-turn tool-result tokens only; they do not bound aggregate model spend
+(T8, T-8).
 
 ### 3.7 Deny by default on change (rug pulls)
 
@@ -537,8 +545,9 @@ gateway-auth check are evaluated together under the following rules.
   latch and the kill switch and observes flips (E1). It does **not** compare
   or re-validate `RATIO_ENV`. **A change of `RATIO_ENV` in a running process
   is not an evaluation trigger:** changing it requires a reload or a restart
-  (or an off-then-on cycle of `FRANK_TOOLS`, which runs an evaluation and so
-  adopts the new value), and until then the broker keeps serving under the
+  (or an **observed** off-then-on cycle of `FRANK_TOOLS` (E1; an unobserved
+  cycle is not a flip), which runs an evaluation and so adopts the new
+  value), and until then the broker keeps serving under the
   snapshot of the last successful evaluation. Residual risk: a process whose
   environment is mutated at runtime keeps serving under the old snapshot.
   This narrows runtime protection; it is acceptable because mutating
@@ -729,7 +738,7 @@ control.
 | T5 | **Confused deputy and cross-tenant leakage** (model supplies another tenant's id; a shared server returns data from several tenants) | No tenant argument in any schema; scope from server binding (3.4); row security forced on the ledger tables; ids checked against the tenant's own set; one allowlist entry per tenant binding where a server is multi-tenant (**assumption**); the reserved-field deny rule (3.8) | A8, A18, A20 | Today a single token maps to a single tenant by configuration and there is no per-user identity, so intra-tenant least privilege is absent (D-15). A server that ignores the scope it is handed is covered only by T1's controls. |
 | T6 | **Data exfiltration** through tool arguments (model puts data into an argument that a server forwards), or through model-chosen URLs | Arguments are schema-typed, short and enumerated where possible; no free-form URL or path argument exists in v1; no tool fetches a URL; HTTP servers may only reach their pinned host; the agent has no browsing tool; egress from stdio servers denied by default (3.5) | A9 | Free-text arguments (a search string) are a covert channel of low bandwidth. v1 has none; any future one needs review. Data sent to a hosted model endpoint is sent by design (OD-4). |
 | T7 | **Secret exposure** in prompts, tool results and logs | Servers receive references, never the values, in the allowlist file; credentials come from the deployment's secret store; logs go through the existing redaction (`src/costsource/transports/redact.ts:327-340`, `redactErrorText` `:371`, `logUpstreamError` `:412`); **Result-value scan before model delivery:** an output schema constrains names and types, not values, so the broker scans every string value in every tool result (recursively, including keys of free maps if any are allowed) with the repository's redaction rules (`applyRedactionRules`, `src/costsource/transports/redact.ts:327`; the rules cover bearer and basic credentials, JWTs, `sk-`-style keys, GitHub tokens, AWS key ids, PEM blocks, `password`/`secret`/`token`/`api_key` key-value forms, URL userinfo, and any `?` or `#` tail of a URL up to the end of the line, not only signed-URL query strings). A value that the rules would change is **secret-shaped**. **Default: reject the whole result** (the model gets the fixed error, `result_status: secret_in_result`) and audit the rejection without the value; an operator may set a per-tool `on_secret: redact` fallback, which replaces only the matching values with the module's redaction markers, still audits, and delivers the rest; the scan runs before the result reaches the model and before any debug storage; the database already rejects secret-looking text in its tables (0004 header). **Scan scope:** each string value is scanned on its own, so the field name is not seen and the key-value forms (`password: ...`) fire only when they occur inside one string; the broker therefore also scans the serialized JSON of the result, where `"password": "..."` appears with its key. Redaction of the serialized form is used only to **detect and locate** a hit; it is never the delivered text. Delivery in `redact` mode is by redacting **each string value** on its own (a value that the rules change is replaced by its redacted text). A hit that appears only in the serialized form is located to its value by path, and that value is **replaced wholesale** by the module's marker, because a bare value can be unchanged while its key is what the rules matched (the author reproduced it: `{"password":"abc def"}` serializes to `{"password":"[REDACTED]"}`, while `abc def` alone is unchanged, so per-value redaction would leak it). A located non-string value, or a hit on a map **key**, cannot be mapped and **rejects** the result, as does any re-parse or output-schema failure. The URL rule's `?`/`#` tail runs to the end of the line, and serialized JSON is one line, so on `{"url":"https://example.com/a?x=1&y=\"2\"","z":1}` the serialized redaction yields `{"url":"https://example.com/a?[REDACTED]`, which does not parse (the author reproduced this), and such a result is rejected, not repaired | A10, A19 (both M0) | Detection is pattern-based and is **not complete**: the module's own comments describe the cases it covers, a novel secret format or a secret split across fields passes, and the rules also hit ordinary prose: running them gives: `cost per token: 0.002` becomes `cost per token: [REDACTED]`, `Secret: migration plan` becomes `Secret: [REDACTED] plan`, `GPU cluster pwd: shared` becomes `GPU cluster pwd: [REDACTED]`, and `https://example.com/docs?page=2` becomes `https://example.com/docs?[REDACTED]` (the author reproduced these four outputs by running `applyRedactionRules` on the base code). This false-positive class lands on free-text fields (names, notes, labels, titles); a rejection is the safe side, and the per-tool `on_secret: redact` fallback keeps the design workable for tools whose free text trips the rules. The module is applied to error and log text, and extending it to the audit record is a new use, tested in M0 (A10). A compromised server can still send a secret the patterns do not match; the data-class limit on each server (3.2) and reader-scoped credentials (3.5) bound what such a server can see in the first place. |
-| T8 | **Denial of service and cost runaway** (a loop of tool calls; large results; slow server) | Per-tool and per-turn call caps, byte caps, timeouts (3.6); per-turn token ceiling on top of `MAX_TOKENS`; the gateway's per-tenant rate limit, which is 1000 per minute per process (`src/server/gateway/withGateway.ts:173-180`) and so is **not** a cost control for model calls; a per-tenant daily model-token budget, `max_model_tokens_per_tenant_per_day` (3.3 key table), is enforced by the agent runtime and bounds aggregate model spend; the per-turn tool-result ceiling does not | A11 | The shared limiter is in-process (`withGateway.ts:96-98` comments); a multi-instance deployment needs a shared store. Spend on a hosted model is real money and needs the owner's budget (OD-7). |
+| T8 | **Denial of service and cost runaway** (a loop of tool calls; large results; slow server) | Per-tool and per-turn call caps, byte caps, timeouts (3.6); per-turn token ceiling on top of `MAX_TOKENS`; the gateway's per-tenant rate limit, which is 1000 per minute per process (`src/server/gateway/withGateway.ts:173-180`) and so is **not** a cost control for model calls; **these controls bound tool calls and per-turn tool-result tokens only; aggregate hosted-model spend is not bounded by this design** (tracked as T-8) | A11 | The shared limiter is in-process (`withGateway.ts:96-98` comments); a multi-instance deployment needs a shared store. Spend on a hosted model is real money, is not capped here, and needs the owner's decision (OD-7, T-8). |
 | T9 | **Supply chain for stdio servers** (a dependency of the server changes) | Hash of the executable and entry script; vendored or locked dependency tree owned by the server's `owner`; no auto-update; hashes updated only through allowlist review | A12 | Hashing the entry point does not cover every transitive file of an interpreted server unless the whole tree is hashed or the server is built as a single artifact (**assumption**: require a single artifact or a content hash of the tree). |
 | T10 | **Audit gaps** (a tool call that leaves no record; a record that leaks data) | Audit written by the broker, before the result is returned to the model; a failed audit write fails the call (fail closed); records hold hashes and sizes, not payloads (6.1) | A13 | Audit stored in the same trust domain as the app can be altered by anyone who owns it; external immutable storage is an operator decision. |
 | T11 | **Model chooses a wrong but allowed tool or misreads a result** | Evidence status in every result; golden-question suite per model (8); Frank's rule that a person verifies claims and authorizes decisions (`src/agent-workflows/frank.ts:11-12`) | the golden suite (8.1) | Wrong answers will occur. The control is that they are read-only and presented as evidence. |
@@ -875,14 +884,14 @@ Tests first, as in the rest of the program (Slices 3-5 design section 7).
 | A8 | Model supplies another tenant's id in an argument | schema has no such field; an unknown initiative id returns the same as a forbidden one |
 | A9 | Model puts data into a free-text argument | no free-text argument exists in v1; test asserts that |
 | A10 | Error text or a log line contains a secret-shaped string | redacted in logs and in the audit record |
-| A11 | (a) Model loops on tool calls; (b) a tenant's tool-enabled model calls exceed `max_model_tokens_per_tenant_per_day` | (a) stops at the per-turn cap; final answer states the cap was reached; (b) further tool-enabled turns that day fall back (2.4) with a `budget_exceeded` audit record and no model call is made |
+| A11 | Model loops on tool calls | stops at the per-turn cap; final answer states the cap was reached |
 | A12 | stdio executable hash differs | process not started |
 | A13 | Audit write fails | the call fails closed |
 | A14 | Tools enabled with gateway auth not enforced | startup refusal |
 | A15 | Server adds a tool not in the allowlist | the tool is never offered or callable; `unlisted_tool` audit record; alert; server marked unavailable |
 | A16 | A pinned tool disappears from the server's list | server unavailable; alert; fallback |
 | A17 | Server certificate or key pin changes | connection refused; server unavailable |
-| A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key; (f) a tool entry without `output_schema_hash`, or any other missing required key; (g) a tool entry with a missing body (`description`, `input_schema` or `output_schema`); (h) a body whose hash does not match its `*_hash` key; (i) an extra body key (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e), (f), (g), (h), (i) reject the whole file |
+| A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key; (f) a tool entry without `output_schema_hash`, or any other missing required key; (g) a tool entry with a missing body (`description`, `input_schema` or `output_schema`); (h) a body whose hash does not match its `*_hash` key; (i) an unknown key inside a tool entry (as in (e)), or a body that is not an object or exceeds the size caps; (j) an `in_process` body that differs from the registry (M2); (k) `description` over `max_description_bytes` or a schema over `max_schema_bytes` (an unknown keyword inside the JSON Schema content of `input_schema` or `output_schema` is allowed, because it is schema content) (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e), (f), (g), (h), (i), (j), (k) reject the whole file |
 | A19 | A tool result carries a credential-shaped value (bearer token, `sk-`-style key, JWT, AWS key id) in an ordinary string field that passes the output schema | not delivered to the model; fixed error; audit `secret_in_result` without the value; with `on_secret: redact` only the value is replaced and the audit still records it. Includes: a URL value whose `?` tail contains a quote (the serialized form does not re-parse, so the result is rejected); under `on_secret: redact`, a key-only secret such as `{"password":"abc def"}` (the value is replaced whole and nothing leaks); a hit on a map key (rejected); a located non-string value (rejected) |
 | A20 | Environment check, with the slice that first tests each case. **M0** (raw environment, a broker `reload()` and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) `RATIO_ENV` changes at runtime without a reload (the snapshot of the last successful evaluation still governs, a documented residual), and a following `reload()` with the bad value refuses and latches; (h3) `reload()` re-reads the raw environment, clears a latch only if the evaluation succeeds, and updates last-seen; (h4) a reload concurrent with request traffic applies (no starvation); (i) the per-request check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails; (k) latched, then the environment is fixed, then a plain request; (l) two evaluations racing are serialized, a success cannot be discarded by a request-level observation, and generations are strictly monotonic and unique; (n) the environment changes during an evaluation, and the entry checks use the snapshot; (m1) start with `FRANK_TOOLS` off and a good environment, then observe it on; (m2) load with tools on and a bad environment (latched, last-seen on), environment fixed, then `FRANK_TOOLS` off with at least one request observed while off, then on, and the request after the on starts an evaluation; the same off-then-on cycle after a runtime `RATIO_ENV` change, when not latched, also starts one; (m3) `FRANK_TOOLS` unset at load (counted as off), then on; (o) `FRANK_TOOLS` parsing, fail-open direction: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (p) the lock wait times out; (q) N concurrent requests during a pending flip coalesce onto one evaluation (one `startup_refused` record, no retry loop); (r) an evaluation exceeding `evaluation_timeout_ms` (for example a hung audit write) is aborted, the latch is set, the lock is released and the next trigger retries; (r2) evaluation 1 hangs and times out, evaluation 2 fails and latches, then evaluation 1 completes late and must not clear the latch. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (h1) tools keep running under the old snapshot until the reload, which refuses; (h3) re-evaluates; (h4) the reload applies; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (k) still no tools until a load, a reload or an observed flip; (l) the evaluations run one after the other, the success stands, and the generations are 1, 2, 3, and so on; (n) the snapshot decides; (m1) tools are offered and the snapshot is stored; (m2) the evaluation runs and the latch clears; (m3) an evaluation runs and tools are offered; (o) only the documented value turns tools on; (p) no tools for that request, latch and snapshot unchanged, pending stays true, and the next request retries (not more often than `evaluation_retry_ms`); (q) one evaluation, one record, no loop; (r) fail closed with the latch set, then a retry; (r2) the late result is discarded and the latch holds; (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
 
@@ -923,13 +932,14 @@ one that lets request traffic starve a reload, by A20 (h4)), the
 reserved-field deny rule: a mutant that deletes it, or that applies a
 tool-level deny to the server (or the reverse), must be killed by A18; the
 body and hash checks, where a mutant that offers the server's live text, or
-skips the body/hash comparison, must be killed by A3 (c) and A18 (g, h); the
-model-token budget, where a mutant that skips it must be killed by A11 (b);
-the `FRANK_TOOLS` parser, where a mutant that treats any truthy value as on
-must be killed by A20 (o)), and confirm at least one test fails per mutation.
-A surviving mutant blocks the PR. The repository already treats unfaithful
-tests as defects elsewhere (see the test-integrity entries in the Slices 3-5
-evidence); this applies the same standard here.
+skips the body/hash comparison, must be killed by A3 (c) and A18 (g, h); one
+that skips the registry difference check, by A18 (j); one that skips the size
+caps, by A18 (k); one that applies an aborted evaluation's late result, by A20
+(r2); the the `FRANK_TOOLS` parser, where a mutant that treats any truthy
+value as on must be killed by A20 (o)), and confirm at least one test fails
+per mutation. A surviving mutant blocks the PR. The repository already treats
+unfaithful tests as defects elsewhere (see the test-integrity entries in the
+Slices 3-5 evidence); this applies the same standard here.
 
 ## 9. Slicing plan
 
@@ -988,7 +998,10 @@ by running the classifier on the real diff; a miss is reported, not argued.
 - **Change:** tools from the catalog that need no new data: portfolio
   summary, workloads/teams, unit costs, token/cache economics, model price
   comparison, findings (sandbox sources), what-if. Server-side snapshot
-  replaces browser `context` when tools are on.
+  replaces browser `context` when tools are on. M1 has no allowlist file and
+  no parser (the allowlist stays empty or absent); the built-in registry is the
+  only source of the in-process tool bodies, and the `in_process` file shape
+  lands in M2.
 - **Expected class:** restricted (`routes`, `financial_semantics` if it
   touches `src/costsource/**` or `src/lib/forecast*`).
 - **Rollback:** flag off, then revert.
@@ -998,15 +1011,15 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 ### M2. MCP client, allowlist, audit
 
-- **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
-  (A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, p,
-  q, r) re-run against the MCP path); A20 (a, e, f, h2) with the file parser
-  (`deployment_environment`, `environments[]`); allowlist parser tests (reject
-  unknown keys, missing hashes); A18 (server vs tool denial, empty array,
-  null, unknown key); the `on_secret` parser cases (valid values, default,
-  unknown value rejects the file); mutation checks (8.4); audit shape tests
-  (including `secret_in_result` and the `redacted` flag); redaction applied to
-  audit.
+- - **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
+  (A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o,
+  p, q, r, r2) re-run against the MCP path); A20 (a, e, f, h2) with the file
+  parser (`deployment_environment`, `environments[]`); allowlist parser tests
+  (reject unknown keys, missing hashes); A18 (server vs tool denial, empty
+  array, null, unknown key; bodies and hashes; the registry difference; the
+  size caps); the `on_secret` parser cases (valid values, default, unknown
+  value rejects the file); mutation checks (8.4); audit shape tests (including
+  `secret_in_result` and the `redacted` flag); redaction applied to audit.
 - **Change:** MCP client (after OD-1 and the specification check in section
   2.5), allowlist loader, pins, budgets, audit, kill switches. Likely adds an
   SDK dependency or a minimal client.
@@ -1097,8 +1110,8 @@ example "the model sees the allowlist's text, not the server's"), which are
 | OD-4 | Is a hosted model endpoint acceptable for tool results, or must tool-enabled mode use only a model server the operator runs? | hosted allowed / local only | **Local-or-account-hosted only for any real data;** hosted allowed for synthetic data. This is what "keeping the learning inside the production accounts" asks for most directly. |
 | OD-5 | Where do local MCP servers run, and who owns each? | per-server decision | Each allowlist entry names an owner (3.2); no entry without one. Servers run outside the app container, owned by the team that owns the data. |
 | OD-6 | Real data, real credentials, real model infrastructure, and use in dev, test and production under RBAC | when | The owner is relayed as requiring (source not seen, unverified) MCP to be usable in dev, test and production for any team under RBAC. **The design must support that, and the production go-live stays the owner's gate (OD-12).** Until the owner opens that gate, BOUNDARY v2 stands: this program uses only synthetic data and fakes, with no real credentials or spend. Production use is then a configuration and review step (a separate allowlist file per deployment, 3.8; the reader role, 3.5; the model endpoint choice, OD-4; identity and RBAC, T-7), not a redesign. |
-| OD-7 | Spend and infrastructure for self-hosted models (GPUs, operations) | owner action | Needs explicit approval and a budget under BOUNDARY v2; the what-if tool (4.3) can inform it but is not evidence for it. |
-| OD-8 | Budget defaults | author suggests: 5 tool calls and 20 per-tenant calls per minute, 2 KB of arguments, 32 KB result, 5 s timeout, 8,000 tool-result tokens per turn | The author has no measurements; treat as placeholders, set after M1 measures real result sizes. **Owner confirmation needed:** the 2 KB `max_arg_bytes` and the 200000 `max_model_tokens_per_tenant_per_day` are the author's placeholders only. |
+| OD-7 | Spend and infrastructure for self-hosted models (GPUs, operations) | owner action | Needs explicit approval and a budget under BOUNDARY v2; the what-if tool (4.3) can inform it but is not evidence for it. Also open: whether and how aggregate hosted-model spend is capped (T-8); nothing in this design does it. |
+| OD-8 | Budget defaults | author suggests: 5 tool calls and 20 per-tenant calls per minute, 2 KB of arguments, 32 KB result, 5 s timeout, 8,000 tool-result tokens per turn | The author has no measurements; treat as placeholders, set after M1 measures real result sizes. **Owner confirmation needed:** the 2 KB `max_arg_bytes`, and the `max_description_bytes` (2000) and `max_schema_bytes` (8000) caps of the 3.3 key table, are the author's placeholders only. |
 | OD-9 | Audit storage and retention period | log pipeline / table; period | Log pipeline for M2; the owner sets the period. |
 | OD-10 | Relationship to X1-a | this feeds X1-a / replaces it / separate | **Feeds X1-a:** same read-only scope, one agent layer. |
 | OD-11 | May any live model be enabled on the hosted demo? | yes / no | **No.** The hosted demo stays on the mock; any live provider is behind sign-in. |
@@ -1114,6 +1127,7 @@ example "the model sees the allowlist's text, not the server's"), which are
 | T-4 | Durable outcome evidence has no read route and no reader grant beyond events and counts | dependency of the durable `ratio_outcome_evidence` |
 | T-5 | `allocateSharedCost` has no production caller; attribution tool is foundations only | dependency |
 | T-6 | The sprint plan on branch `docs/sprint-plan-mock-demo-mcp-rbac` (PR #97, `docs/design/sprint-mock-demo-mcp-rbac/PLAN.md`, read at 7a7d51b) uses token claims `teams` and `envs` (lines 127, 142-143, 160) and an allowlist with a `readOnly` declaration (line 319). Reconcile: field names (`environments[]` here vs `envs` there, and `roles[]`/`teams[]` vs the claims), and `readOnly` must stay **advisory** per 3.5: read-only is enforced by capability, never by the declaration | open |
+| T-8 | Per-tenant model-token budget: requires a defined tenant (D-15), a durable shared counter and a chat-route owner; not part of the tool broker. Until decided, aggregate hosted-model spend is not bounded by this design (T8) | open, owner decision (OD-7, OD-8) |
 | T-7 | Per-role, per-team and per-environment tool allowlists (RBAC for MCP in dev, test and production). Depends on per-user identity (D-15). Until then: reserved fields with deny-when-present-and-context-unknown, and a separate allowlist file per deployment (3.8) | open, not in M0-M2 |
 
 ## 12. Rollback

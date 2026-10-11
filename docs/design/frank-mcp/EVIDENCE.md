@@ -21,8 +21,9 @@ challenger review requested changes and 16581c8 answered it; revision 5
 (90eee59) answered the round-9 challenger's review of 911b67c, with a splice
 error in DESIGN.md that revision 11 repairs; revision 11
 (10b18f8) answered the round-10 challenger's review of 90eee59; the round-11
-challenger approved 10b18f8, and revision 12 answers Copilot's open threads on
-it and the round-11 Lows.
+challenger approved 10b18f8, and revision 12 (4e3734c) answered Copilot's open
+threads on it and the round-11 Lows; revision 13 answers the round-12
+challenger's review of 4e3734c.
 
 ## 1. Method
 
@@ -84,6 +85,9 @@ it and the round-11 Lows.
   hunk by hunk (no splice); the changes are key-table bodies and the
   model-token budget key, evaluation-rule clarifications and new A20/A11/A3/A18
   cases.
+- Revision 13 sources: no new code or external sources. Decisions by the
+  orchestrator, recorded here: remove the model-token budget key (T-8 tracks
+  it) and make the built-in registry the only M1 source of in-process bodies.
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -159,7 +163,7 @@ result was `risk: low`; with a paragraph that names the rule, the result was
 revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
 `EVIDENCE.md`: that `DESIGN.md` was the spliced file, whose rewrapped
 audit-retention sentence and decision-table row counted as added lines. At
-revisions 11 and 12, with `DESIGN.md` rebuilt from 911b67c at revision 11 and
+revisions 11 to 13, with `DESIGN.md` rebuilt from 911b67c at revision 11 and
 edited hunk by hunk since, the classifier was re-run at the final head and
 reports `risk: restricted`, class `retention`, rule
 `retention.mention`, on `EVIDENCE.md` only (this section names the rule).
