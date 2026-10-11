@@ -1,0 +1,10 @@
+$ npx vitest run src/identity src/rbac
+
+ RUN  v5.0.1 /home/user/sprintA/A1
+
+
+ Test Files  3 passed (3)
+      Tests  38 passed (38)
+   Start at  05:50:31
+   Duration  1.27s (transform 69%, tests 15%, import 12%, worker 4%)
+

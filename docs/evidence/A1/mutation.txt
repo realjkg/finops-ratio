@@ -1,0 +1,45 @@
+baseline: 38 passed
+| mutant | file | models | result | failing tests |
+|---|---|---|---|---|
+| no-principal-allows | src/rbac/authorize.ts | deny by default dropped | killed | 2 |
+| unknown-role-allowed | src/rbac/authorize.ts | unknown role allowed | killed | 3 |
+| legacy-role-any-method | src/rbac/authorize.ts | legacy_service claimable by a token | killed | 1 |
+| empty-teams-has-scope | src/rbac/authorize.ts | empty teams treated as a scope | killed | 1 |
+| skip-env-check | src/rbac/authorize.ts | token env claim ignored | killed | 2 |
+| skip-team-check | src/rbac/authorize.ts | team scope ignored | killed | 6 |
+| env-optional-for-actions | src/rbac/authorize.ts | missing resource env treated as dev | killed | 1 |
+| deferred-row-enforced | src/rbac/authorize.ts | deferred budget.edit row yields allows | killed | 2 |
+| skip-kind-binding | src/rbac/authorize.ts | action not bound to resource kind | killed | 1 |
+| page-route-confusion | src/rbac/authorize.ts | page id accepted as API route | killed | 1 |
+| sim-only-readable | src/rbac/authorize.ts | simulation status check dropped (codes still deny) | survived (equivalent: simulation rows carry dev_test_only codes, which READABLE_CODES excludes; the status check is defense in depth, pinned by matrix_view_codes_match_plan_section_4_4) | 0 |
+| matrix-sim-codes-readable | src/rbac/matrix.ts | simulation rows given readable codes | killed | 1 |
+| skip-route-group | src/rbac/authorize.ts | ingest.write allowed on any readable route | killed | 1 |
+| unteamed-change-for-anyone | src/rbac/authorize.ts | unbound ticket open to team-limited principals | killed | 1 |
+| skip-impact-rule | src/rbac/authorize.ts | finance approves commitment changes | killed | 1 |
+| request-on-behalf | src/rbac/authorize.ts | request on behalf of another subject | killed | 1 |
+| self-approve | src/rbac/authorize.ts | requester can approve own change | killed | 1 |
+| no-ticket-ok | src/rbac/authorize.ts | prod apply without a bound ticket | killed | 1 |
+| unapproved-change-ok | src/rbac/authorize.ts | prod apply of an unapproved change | killed | 1 |
+| approver-equals-requester-ok | src/rbac/authorize.ts | approver equal to requester | killed | 2 |
+| ticket-not-approved-ok | src/rbac/authorize.ts | prod apply while ticket open | killed | 2 |
+| scope-widen-team-list | src/identity/scope.ts | any team list covers every team | killed | 9 |
+| scope-star-element-wildcard | src/identity/scope.ts | ['*'] treated as a wildcard | killed | 2 |
+| scope-case-fold | src/identity/scope.ts | team match case-insensitive | killed | 2 |
+| scope-unattributed-visible | src/identity/scope.ts | unattributed rows visible to team-limited principals | killed | 2 |
+| scope-null-env-visible | src/identity/scope.ts | unmapped env treated as unknown | killed | 3 |
+| envmap-trim | src/identity/envMap.ts | RATIO_ENV trimmed and case-folded | killed | 1 |
+| envmap-staging-prod | src/identity/envMap.ts | workload staging mapped to prod | killed | 1 |
+| envmap-default-dev | src/identity/envMap.ts | unknown workload env maps to dev | killed | 2 |
+| matrix-mcp-write-finops | src/rbac/matrix.ts | MCP write granted to finops_lead | killed | 3 |
+| matrix-auditor-ingest | src/rbac/matrix.ts | auditor may write ingest rows | killed | 3 |
+| matrix-legacy-audit | src/rbac/matrix.ts | legacy token reads the audit log | killed | 3 |
+| matrix-eng-prod-apply-y | src/rbac/matrix.ts | prod apply without the ticket gate | killed | 5 |
+| matrix-finops-prod-approve | src/rbac/matrix.ts | finops lead approves in prod | killed | 3 |
+| matrix-cto-costsource | src/rbac/matrix.ts | CTO reads line-level cost sources | killed | 1 |
+| matrix-legacy-new-route | src/rbac/matrix.ts | legacy token reads a route this plan adds | killed | 2 |
+| matrix-legacy-open-route | src/rbac/matrix.ts | legacy grant beyond gateway-wrapped routes | killed | 2 |
+| matrix-webhook-public | src/rbac/matrix.ts | webhook made public | killed | 3 |
+| matrix-drop-route | src/rbac/matrix.ts | a page without a matrix row | killed | 2 |
+| matrix-impact-dropped | src/rbac/matrix.ts | procurement approves any impact | killed | 2 |
+
+39 of 40 mutants killed; 1 equivalent; 0 survived

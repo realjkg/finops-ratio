@@ -348,6 +348,13 @@ describe('authorize: named red tests', () => {
     // A ticket with no owning team is only for org-wide principals.
     expectAllow(authorize(star, 'ticket.status', { kind: 'ticket', id: 'X-1', env: 'dev' }));
     expectDeny(authorize(principal('eng_lead'), 'ticket.status', { kind: 'ticket', id: 'X-1', env: 'dev' }), 403);
+    // That holds for any team-limited principal, not only the eng lead's Y* cells.
+    for (const role of ['cto', 'finops_lead', 'finance', 'procurement', 'auditor'] as const) {
+      const limited = principal(role, { teams: [PLATFORM] });
+      expectDeny(authorize(limited, 'ticket.status', { kind: 'ticket', id: 'X-1', env: 'dev' }), 403, role);
+      expectDeny(authorize(limited, 'ticket.get', { kind: 'change', id: 'chg-1', env: 'dev' }), 403, role);
+      expectAllow(authorize(limited, 'ticket.status', { kind: 'ticket', id: 'X-1', env: 'dev', team: PLATFORM }), role);
+    }
   });
 });
 
