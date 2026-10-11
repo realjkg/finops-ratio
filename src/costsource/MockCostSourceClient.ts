@@ -18,6 +18,8 @@ import { POINTFIVE_LIVE_SOURCE_ID } from './pointfiveConfig';
 import { ServiceNowAdapter, SERVICENOW_SANDBOX_SOURCE_ID } from './ServiceNowAdapter';
 import { CloudConnectorAdapter } from './CloudConnectorAdapter';
 import { findConnectorSpec } from './focusExportConnectors';
+import { isSyntheticCloudSource } from './sandboxSources';
+import { syntheticCloudHealth, syntheticCloudRows } from './syntheticCloudSeed';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -60,6 +62,11 @@ export class MockCostSourceClient implements CostSourceClient {
     if (!src.capabilities.includes('costRows')) {
       throw new Error(`Source '${sourceId}' does not provide cost rows`);
     }
+    // Synthetic AWS / Azure / GCP sandboxes emit their own rows (never the
+    // all-workload fallthrough below).
+    if (isSyntheticCloudSource(sourceId)) {
+      return syntheticCloudRows(sourceId, window);
+    }
     // Synthetic ServiceNow dispatches to its own adapter (CMDB/ITBM allocation
     // shape) — same normalization shim, its own row emitter.
     if (sourceId === SERVICENOW_SANDBOX_SOURCE_ID) {
@@ -99,6 +106,9 @@ export class MockCostSourceClient implements CostSourceClient {
     }
     if (sourceId === SERVICENOW_SANDBOX_SOURCE_ID) {
       return ServiceNowAdapter.healthCheck(sourceId);
+    }
+    if (isSyntheticCloudSource(sourceId)) {
+      return syntheticCloudHealth(sourceId);
     }
     const connectorSpec = findConnectorSpec(sourceId);
     if (connectorSpec) {

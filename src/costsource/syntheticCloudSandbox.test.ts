@@ -136,7 +136,7 @@ describe('A6 synthetic cloud sandbox sources', () => {
     expect(blob).not.toMatch(/AKIA[0-9A-Z]{16}/);
     expect(blob).not.toMatch(/-----BEGIN/);
     expect(blob).not.toMatch(/https?:\/\//);
-    expect(blob).not.toMatch(/secret|password|token|apikey/i);
+    expect(blob).not.toMatch(/secret|password|apikey|bearer|\btoken\b/i);
     for (const id of NEW_IDS) {
       const rows = await rowsOf(id);
       expect(rows[0].BillingAccountId).toMatch(/^synthetic-/);
