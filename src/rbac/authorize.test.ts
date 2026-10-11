@@ -760,6 +760,8 @@ describe('scope helper and scope claims: inherited and placeholder values (Copil
       const holeyEnvs = new Array<DeployEnv>(1);
       expect(envCovered(holeyEnvs, 'prod')).toBe(false);
       expect(inScope({ teams: '*', envs: holeyEnvs }, { team: CX, env: 'prod' })).toBe(false);
+      // authorize() copies own elements, so an env-less public read is denied too.
+      expectDeny(authorize(principal('finops_lead', { envs: holeyEnvs }), 'view.read', { kind: 'view', id: '/demo' }), 403);
     } finally {
       delete ap[0];
       delete ap[1];
@@ -800,6 +802,10 @@ describe('scope helper and scope claims: inherited and placeholder values (Copil
     }
     // A real team next to a placeholder still counts.
     expectAllow(authorize(principal('cto', { teams: ['*', PLATFORM] }), 'view.read', { kind: 'view', id: '/tokenomics', env: 'dev' }));
+    // ...but the placeholder next to it is still never a wildcard.
+    const mixed = principal('eng_lead', { teams: ['*', PLATFORM] });
+    expectDeny(authorize(mixed, 'ticket.create', { kind: 'ticket', id: 'X-1', team: CX, env: 'dev' }), 403);
+    expect(inScope({ teams: ['*', PLATFORM], envs: ALL3 }, { team: CX, env: 'prod' })).toBe(false);
   });
 
   it('a revoked Proxy denies instead of throwing', () => {

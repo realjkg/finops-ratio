@@ -1,12 +1,12 @@
-baseline: 49 passed
+baseline: 56 passed
 | mutant | file | models | result | failing tests |
 |---|---|---|---|---|
-| no-principal-allows | src/rbac/authorize.ts | deny by default dropped | killed | 6 |
+| no-principal-allows | src/rbac/authorize.ts | deny by default dropped | killed | 7 |
 | unknown-role-allowed | src/rbac/authorize.ts | unknown role allowed | killed | 3 |
 | legacy-role-any-method | src/rbac/authorize.ts | legacy_service claimable by a token | killed | 1 |
-| empty-teams-has-scope | src/rbac/authorize.ts | empty teams treated as a scope | killed | 1 |
+| empty-teams-has-scope | src/rbac/authorize.ts | empty teams treated as a scope | killed | 2 |
 | skip-env-check | src/rbac/authorize.ts | token env claim ignored | killed | 2 |
-| skip-team-check | src/rbac/authorize.ts | team scope ignored | killed | 6 |
+| skip-team-check | src/rbac/authorize.ts | team scope ignored | killed | 7 |
 | env-optional-for-actions | src/rbac/authorize.ts | missing resource env treated as dev | killed | 1 |
 | deferred-row-enforced | src/rbac/authorize.ts | deferred budget.edit row yields allows | killed | 2 |
 | skip-kind-binding | src/rbac/authorize.ts | action not bound to resource kind | killed | 1 |
@@ -25,22 +25,32 @@ baseline: 49 passed
 | own-copy-dropped | src/rbac/authorize.ts | inherited principal and resource fields decide (review M1) | killed | 3 |
 | own-copy-keeps-inherited | src/rbac/authorize.ts | copy reads fields through the prototype chain (review M1) | killed | 2 |
 | own-copy-array-passthrough | src/rbac/authorize.ts | array resource read through its prototype (delta review H) | killed | 1 |
-| own-elements-no-hasown | src/rbac/authorize.ts | inherited index fills a hole in teams or envs (delta review M-a) | killed | 1 |
+| own-elements-no-hasown | src/rbac/authorize.ts | inherited index fills a hole in teams or envs (delta review M-a) | killed | 2 |
 | own-copy-no-array-copy | src/rbac/authorize.ts | teams and envs used uncopied (delta review M-b) | killed | 1 |
 | own-copy-object-proto | src/rbac/authorize.ts | copy inherits Object.prototype (delta review M-c) | killed | 1 |
 | star-eng-lead-unteamed-ys | src/rbac/authorize.ts | Y* or A cell without a team for teams "*" (review L2) | killed | 1 |
 | scope-any-env-length | src/rbac/authorize.ts | invalid-only env claim counts as scope (review L2) | killed | 1 |
 | expires-not-finite | src/rbac/authorize.ts | non-finite expiresAt accepted (review L2) | killed | 1 |
 | readview-kind-guard | src/rbac/authorize.ts | view.read with a non-view kind (review L2) | killed | 1 |
+| matrix-cells-shared-unfrozen | src/rbac/matrix.ts | cell tuples shared and writable (Copilot 1) | killed | 1 |
+| matrix-cells-object-unfrozen | src/rbac/matrix.ts | cells object writable (Copilot 1) | killed | 1 |
+| scope-team-inherited-index | src/identity/scope.ts | inherited index fills a hole in teams (Copilot 2) | killed | 1 |
+| scope-env-inherited-index | src/identity/scope.ts | inherited index fills a hole in envs (Copilot 2) | killed | 1 |
+| scope-inherited-claims | src/identity/scope.ts | inherited teams claim counts (Copilot 3) | killed | 1 |
+| scope-inherited-row-team | src/identity/scope.ts | inherited row team counts (Copilot 3) | killed | 1 |
+| scope-placeholder-teams | src/identity/scope.ts | placeholder-only teams count as scope in inScope (Copilot 4) | killed | 1 |
+| authorize-placeholder-teams | src/rbac/authorize.ts | placeholder-only teams count as scope (Copilot 4) | killed | 1 |
+| own-copy-throws | src/rbac/authorize.ts | revoked Proxy throws out of authorize() | killed | 1 |
+| scope-throws | src/identity/scope.ts | revoked Proxy throws out of inScope() | killed | 1 |
 | scope-widen-team-list | src/identity/scope.ts | any team list covers every team | killed | 9 |
-| scope-star-element-wildcard | src/identity/scope.ts | ['*'] treated as a wildcard | killed | 2 |
+| scope-star-element-wildcard | src/identity/scope.ts | ['*'] treated as a wildcard | killed | 1 |
 | scope-case-fold | src/identity/scope.ts | team match case-insensitive | killed | 2 |
 | scope-unattributed-visible | src/identity/scope.ts | unattributed rows visible to team-limited principals | killed | 2 |
 | scope-null-env-visible | src/identity/scope.ts | unmapped env treated as unknown | killed | 3 |
 | envmap-trim | src/identity/envMap.ts | RATIO_ENV trimmed and case-folded | killed | 1 |
 | envmap-staging-prod | src/identity/envMap.ts | workload staging mapped to prod | killed | 1 |
 | envmap-default-dev | src/identity/envMap.ts | unknown workload env maps to dev | killed | 2 |
-| matrix-mcp-write-finops | src/rbac/matrix.ts | MCP write granted to finops_lead | killed | 3 |
+| matrix-mcp-write-finops | src/rbac/matrix.ts | MCP write granted to finops_lead | killed | 4 |
 | matrix-auditor-ingest | src/rbac/matrix.ts | auditor may write ingest rows | killed | 3 |
 | matrix-legacy-audit | src/rbac/matrix.ts | legacy token reads the audit log | killed | 3 |
 | matrix-eng-prod-apply-y | src/rbac/matrix.ts | prod apply without the ticket gate | killed | 7 |
@@ -49,8 +59,8 @@ baseline: 49 passed
 | matrix-legacy-new-route | src/rbac/matrix.ts | legacy token reads a route this plan adds | killed | 2 |
 | matrix-legacy-open-route | src/rbac/matrix.ts | legacy grant beyond gateway-wrapped routes | killed | 2 |
 | matrix-webhook-public | src/rbac/matrix.ts | webhook made public | killed | 3 |
-| matrix-drop-route | src/rbac/matrix.ts | a page without a matrix row | killed | 2 |
+| matrix-drop-route | src/rbac/matrix.ts | a page without a matrix row | killed | 3 |
 | matrix-drop-sync-row | src/rbac/matrix.ts | planned status-sync route without a matrix row | killed | 2 |
 | matrix-impact-dropped | src/rbac/matrix.ts | procurement approves any impact | killed | 2 |
 
-50 of 51 mutants killed; 1 equivalent; 0 survived
+60 of 61 mutants killed; 1 equivalent; 0 survived

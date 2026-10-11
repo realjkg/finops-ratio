@@ -4,6 +4,6 @@ $ npx vitest run src/identity src/rbac
 
 
  Test Files  3 passed (3)
-      Tests  49 passed (49)
-   Start at  13:41:14
-   Duration  855ms (transform 69%, tests 19%, import 9%, worker 3%)
+      Tests  56 passed (56)
+   Start at  13:57:11
+   Duration  864ms (transform 72%, tests 19%, import 7%, worker 2%)
