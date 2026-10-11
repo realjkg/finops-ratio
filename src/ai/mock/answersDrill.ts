@@ -2,7 +2,7 @@
 // alerts, and outcome evidence. Everything is read from the seeded facts.
 
 import { MODEL_QUALITY_NOTE, findModel } from '@/data/models';
-import { contextLine, ladder, short, workloadRow } from './answerKit';
+import { capRows, contextLine, ladder, short, workloadRow } from './answerKit';
 import { bySpendDesc, membersOf, rollup, scopeLabel, scopeTitle } from './calc';
 import { evid, int, pct1, price, returnText, signedPct1, usd, usd2, x } from './format';
 import { teamRankAnswer } from './answersRoi';
@@ -72,7 +72,7 @@ function listAnswer(world: World, scope: Scope, word: string): Answer {
   if (members.length === 0) body.push('No workloads are in this scope in the data I was given.');
   else {
     body.push('Workloads, ranked by monthly cost:');
-    members.forEach((w, i) => body.push(activityRow(i, w)));
+    body.push(...capRows(members.map((w, i) => activityRow(i, w))));
   }
   if (scope.kind === 'model') body.push(`List price: ${modelPrices(scope.model)}.`);
   return { header: head, body, next: ladder(world, scope, 'workloads'), referenced: ids(members) };
@@ -116,12 +116,12 @@ export function tokensAnswer(world: World, scope: Scope): Answer {
     if (per1k !== null) body.push(`List-price unit cost: ${usd2(per1k)} per 1,000 calls (uncached input + output).`);
   } else if (scope.kind === 'model') {
     body.push(`List price: ${modelPrices(scope.model)}.`);
-    const note = MODEL_QUALITY_NOTE[scope.model];
+    const note = Object.hasOwn(MODEL_QUALITY_NOTE, scope.model) ? MODEL_QUALITY_NOTE[scope.model] : undefined;
     if (note) body.push(`Seeded quality hint: ${note}.`);
     if (members.length === 0) body.push('No workload in the data runs on this model.');
-    else body.push('Workloads on it:', ...[...members].sort(bySpendDesc).map((w, i) => tokenRow(i, w)));
+    else body.push('Workloads on it:', ...capRows([...members].sort(bySpendDesc).map((w, i) => tokenRow(i, w))));
   } else {
-    body.push('Workloads, ranked by monthly cost:', ...[...members].sort(bySpendDesc).map((w, i) => tokenRow(i, w)));
+    body.push('Workloads, ranked by monthly cost:', ...capRows([...members].sort(bySpendDesc).map((w, i) => tokenRow(i, w))));
     const used = [...new Set(members.map((w) => w.model).filter((m): m is string => Boolean(m)))];
     if (scope.kind === 'portfolio' && used.length > 0) {
       body.push('Registry list prices for the models in use:');

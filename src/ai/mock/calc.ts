@@ -4,6 +4,7 @@
 // members (a chain is as weak as its weakest link — audit C2).
 
 import { findModel } from '@/data/models';
+import { cachedInputRate } from '@/lib/derive';
 import { weakestStatus } from '@/lib/valueEvidence';
 import { DAYS_PER_MONTH, resolveAssumptions, type Overrides, type ResolvedAssumptions } from './assumptions';
 import type { Baselines } from './parse';
@@ -63,7 +64,7 @@ export function extremes(members: WorkloadFacts[]): { strongest: WorkloadFacts; 
   return { strongest: sorted[0], weakest: sorted[sorted.length - 1] };
 }
 
-export interface TeamRow {
+interface TeamRow {
   team: string;
   roll: Rollup;
   savings: number;
@@ -100,7 +101,7 @@ export function impliedMonthlyChange(members: WorkloadFacts[]): { change: number
   return { change, prior };
 }
 
-export interface EbitdaEffect {
+interface EbitdaEffect {
   annualImprovement: number;
   ebitdaBefore?: number;
   ebitdaAfter?: number;
@@ -142,7 +143,7 @@ export function ebitdaEffect(monthlyReduction: number, b: Baselines): EbitdaEffe
 
 // --------------------------------------------------------------- migration
 
-export interface MemberCost {
+interface MemberCost {
   member: WorkloadFacts;
   tokens: number;
   api: number;
@@ -168,7 +169,7 @@ export interface Migration {
   unpriced: WorkloadFacts[];
 }
 
-export type MigrationResult = Migration | { kind: 'no-volume'; unpriced: WorkloadFacts[] };
+type MigrationResult = Migration | { kind: 'no-volume'; unpriced: WorkloadFacts[] };
 
 /** Public-API list-price cost vs a pooled self-hosted cluster for the same tokens. */
 export function migration(members: WorkloadFacts[], overrides: Overrides = {}): MigrationResult {
@@ -184,7 +185,7 @@ export function migration(members: WorkloadFacts[], overrides: Overrides = {}): 
     const inT = w.tokIn * DAYS_PER_MONTH;
     const outT = w.tokOut * DAYS_PER_MONTH;
     const cT = w.tokCached * DAYS_PER_MONTH;
-    const cachedRate = model.pricing.cached_input_per_1m ?? model.pricing.input_per_1m * 0.25;
+    const cachedRate = cachedInputRate(model);
     const api =
       (inT / 1e6) * model.pricing.input_per_1m +
       (outT / 1e6) * model.pricing.output_per_1m +
@@ -193,10 +194,11 @@ export function migration(members: WorkloadFacts[], overrides: Overrides = {}): 
   }
   const tokens = parts.reduce((s, p) => s + p.tokens, 0);
   const api = parts.reduce((s, p) => s + p.api, 0);
-  if (!(tokens > 0)) return { kind: 'no-volume', unpriced };
+  if (!(tokens > 0) || !Number.isFinite(tokens) || !Number.isFinite(api)) return { kind: 'no-volume', unpriced };
 
   const perGpuTokens = a.tokensPerSecondPerGpu * a.utilisation * 3600 * a.hoursPerMonth;
   const neededGpus = Math.max(1, Math.ceil(tokens / perGpuTokens));
+  if (!Number.isFinite(neededGpus) || !Number.isFinite(perGpuTokens)) return { kind: 'no-volume', unpriced };
   const gpus = a.gpuCount ?? Math.max(a.minGpus, neededGpus);
   const gpuCost = gpus * a.gpuHourlyUsd * a.hoursPerMonth;
   const selfHost = gpuCost * (1 + a.opsOverheadPct);

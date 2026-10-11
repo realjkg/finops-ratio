@@ -1,0 +1,41 @@
+$ npx vitest run src/costsource/signedSpendDelta.test.ts src/costsource/findingsCard.test.tsx
+ RUN  v5.0.1 /home/user/neg-delta/repo
+ ❯ src/costsource/signedSpendDelta.test.ts (6 tests | 1 failed) 34ms
+   ❯ formatSignedUSD (6)
+     × treats a displayed-zero magnitude like zero: no minus sign 6ms
+stderr | src/costsource/findingsCard.test.tsx > FindingsCard anomaly delta > renders +$ for a positive delta and -$ for a negative delta
+Warning: React.jsx: type is invalid -- expected a string (for built-in components) or a class/function (for composite components) but got: undefined. You likely forgot to export your component from the file it's defined in, or you might have mixed up default and named imports.
+Check your code at findingsCard.test.tsx:28.
+ ❯ src/costsource/findingsCard.test.tsx (1 test | 1 failed) 10ms
+   ❯ FindingsCard anomaly delta (1)
+     × renders +$ for a positive delta and -$ for a negative delta 8ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/costsource/findingsCard.test.tsx > FindingsCard anomaly delta > renders +$ for a positive delta and -$ for a negative delta
+Error: Element type is invalid: expected a string (for built-in components) or a class/function (for composite components) but got: undefined. You likely forgot to export your component from the file it's defined in, or you might have mixed up default and named imports.
+ ❯ renderElement ../../sprintA/A7/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6058:9
+ ❯ renderNodeDestructiveImpl ../../sprintA/A7/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6119:11
+ ❯ renderNodeDestructive ../../sprintA/A7/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6091:14
+ ❯ retryTask ../../sprintA/A7/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6543:5
+ ❯ performWork ../../sprintA/A7/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6591:7
+ ❯ ../../sprintA/A7/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6915:12
+ ❯ scheduleWork ../../sprintA/A7/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:78:3
+ ❯ startWork ../../sprintA/A7/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6914:3
+ ❯ renderToStringImpl ../../sprintA/A7/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:6988:3
+ ❯ renderToStaticMarkup ../../sprintA/A7/node_modules/react-dom/cjs/react-dom-server-legacy.node.development.js:7084:10
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+ FAIL  src/costsource/signedSpendDelta.test.ts > formatSignedUSD > treats a displayed-zero magnitude like zero: no minus sign
+AssertionError: expected '-$0.00' to be '+$0.00' // Object.is equality
+Expected: "+$0.00"
+Received: "-$0.00"
+ ❯ src/costsource/signedSpendDelta.test.ts:28:37
+     26|
+     27|   it('treats a displayed-zero magnitude like zero: no minus sign', () …
+     28|     expect(formatSignedUSD(-0.004)).toBe('+$0.00');
+       |                                     ^
+     29|     expect(formatSignedUSD(-5e-324)).toBe('+$0.00');
+     30|     expect(formatSignedUSD(0.004)).toBe('+$0.00');
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+ Test Files  2 failed (2)
+      Tests  2 failed | 5 passed (7)
+   Start at  13:48:25
+   Duration  1.43s (transform 72%, import 21%, tests 5%, worker 3%)

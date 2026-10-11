@@ -1,0 +1,4 @@
+ × src/mock/personaData/projections.test.ts > persona projections > unsafe_line_amounts_and_budgets_are_rejected_at_entry 8ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  1 failed | 17 passed (18)

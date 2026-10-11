@@ -26,6 +26,15 @@ const SERVER_ENV: Record<string, string> = {
   POINTFIVE_OAUTH_TOKEN_URL: 'https://auth.example/token',
 };
 
+const SIX_SANDBOX_IDS = [
+  'aws-sandbox',
+  'azure-sandbox',
+  'focus-file-sandbox',
+  'gcp-sandbox',
+  'pointfive-sandbox',
+  'servicenow-sandbox',
+];
+
 async function freshSourcesForEnvEmpty(env: Record<string, string>) {
   const saved: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(env)) {
@@ -50,10 +59,22 @@ describe('M2 — sourcesForEnv is pure over the supplied env', () => {
     const polluted = await freshSourcesForEnvEmpty(SERVER_ENV);
     expect(polluted).toEqual(clean);
     // And with the server env in process.env, `{}` still reports nothing live.
-    expect(polluted.filter((s) => s.configured).map((s) => s.id).sort()).toEqual([
-      'focus-file-sandbox',
-      'pointfive-sandbox',
-      'servicenow-sandbox',
-    ]);
+    expect(polluted.filter((s) => s.configured).map((s) => s.id).sort()).toEqual(SIX_SANDBOX_IDS);
+  });
+
+  it('sourcesForEnv_is_pure_with_six_sandbox_descriptors', async () => {
+    const clean = await freshSourcesForEnvEmpty({});
+    const polluted = await freshSourcesForEnvEmpty(SERVER_ENV);
+    const sandboxes = (list: typeof clean) => list.filter((s) => SIX_SANDBOX_IDS.includes(s.id));
+    expect(sandboxes(clean).map((s) => s.id).sort()).toEqual(SIX_SANDBOX_IDS);
+    expect(sandboxes(polluted)).toEqual(sandboxes(clean));
+    for (const s of sandboxes(polluted)) expect(s.configured).toBe(true);
+    // The three new descriptors are synthetic_cloud and carry no env contract.
+    for (const id of ['aws-sandbox', 'azure-sandbox', 'gcp-sandbox']) {
+      const d = polluted.find((s) => s.id === id)!;
+      expect(d.kind).toBe('synthetic_cloud');
+      expect(d.setup).toBeUndefined();
+      expect(d.connection).toBeUndefined();
+    }
   });
 });
