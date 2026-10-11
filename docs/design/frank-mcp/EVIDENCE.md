@@ -23,7 +23,8 @@ error in DESIGN.md that revision 11 repairs; revision 11
 (10b18f8) answered the round-10 challenger's review of 90eee59; the round-11
 challenger approved 10b18f8, and revision 12 (4e3734c) answered Copilot's open
 threads on it and the round-11 Lows; revision 13 answers the round-12
-challenger's review of 4e3734c.
+challenger's review of 4e3734c; revision 14 (this one) answers the round-13
+challenger's review of 117f8e2 and the owner's vendor-agnostic requirement.
 
 ## 1. Method
 
@@ -88,6 +89,10 @@ challenger's review of 4e3734c.
 - Revision 13 sources: no new code or external sources. Decisions by the
   orchestrator, recorded here: remove the model-token budget key (T-8 tracks
   it) and make the built-in registry the only M1 source of in-process bodies.
+- Revision 14 sources: no new code or external sources. Code read for the
+  Mistral row: `src/ai/providers.ts:58-67` (the shared OpenAI-compatible
+  preset). The vendor-side connector discussion (2.6) and the Mistral
+  function-calling statement are **unverified** vendor-documentation claims.
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -130,7 +135,7 @@ searched as a whole tree.
 | Item | Why |
 |---|---|
 | Any statement about the MCP specification (section 2.5 of DESIGN) | `WebFetch` to modelcontextprotocol.io failed with a DNS error (`ENOTFOUND`); `curl` through the proxy returned a 403 on the tunnel. No page or specification version was read. Every MCP-spec reliance is marked unverified in DESIGN. |
-| Vendor tool-calling formats (Claude, OpenAI, OpenAI-compatible) | Not fetched; described from general knowledge and marked unverified. |
+| Vendor tool-calling formats (Claude, OpenAI, Mistral, OpenAI-compatible), and whether any vendor offers a hosted MCP connector and how it behaves | Not fetched; described from general knowledge and marked unverified. |
 | OpenRouter or any named local server behaving as an OpenAI-compatible tool-calling endpoint | No access; the repo has no test for it. The `openllm` path is verified only as text chat by reading. |
 | Any specific model's tool-calling quality | No model run; certification is a later milestone. |
 | In-app live chat actually returning 401 | The author read the code (no header sent, auth enforced) and did not run it. The challenger reports running a vitest that stubbed `fetch` against the real chat handler with `AI_PROVIDER=openllm` and a strong `RATIO_API_TOKEN`: `LiveAIClient` sent only `Content-Type` and the call was rejected (reported, not re-run by the author). Corroboration read: `src/ai/chatRoute.test.ts:150-154`; `src/finio/LiveFinioClient.ts:5-11` (the browser intentionally omits Authorization). |
@@ -163,7 +168,7 @@ result was `risk: low`; with a paragraph that names the rule, the result was
 revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
 `EVIDENCE.md`: that `DESIGN.md` was the spliced file, whose rewrapped
 audit-retention sentence and decision-table row counted as added lines. At
-revisions 11 to 13, with `DESIGN.md` rebuilt from 911b67c at revision 11 and
+revisions 11 to 14, with `DESIGN.md` rebuilt from 911b67c at revision 11 and
 edited hunk by hunk since, the classifier was re-run at the final head and
 reports `risk: restricted`, class `retention`, rule
 `retention.mention`, on `EVIDENCE.md` only (this section names the rule).

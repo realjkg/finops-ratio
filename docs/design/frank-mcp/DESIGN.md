@@ -5,7 +5,7 @@ Branch `docs/frank-mcp-proposal`. Revision 1 was branched from `origin/main` at
 **Status: proposal. Design only: this branch adds documents and no code.
 Nothing in this proposal is implemented.** Every decision in section 10 is
 **open**: it is the owner's to make, with a recommendation attached. No
-decision is recorded here as made. This is revision 13. Review history:
+decision is recorded here as made. This is revision 14. Review history:
 revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
 revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
 PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
@@ -22,8 +22,10 @@ DESIGN.md contained a splice error that this revision repairs); a round-10
 challenger review of 90eee59 was answered by revision 11 (10b18f8); the
 round-11 challenger approved 10b18f8, and Copilot's open threads on it (C1 to
 C3) with the round-11 Lows were answered by revision 12 (4e3734c); a round-12
-challenger review of 4e3734c (3 Medium, several Low) is answered by this
-revision 13. Revisions 2 to 13 are in PR #98. The code citations were checked
+challenger review of 4e3734c was answered by revision 13 (ad2d6b8, 117f8e2); a
+round-13 challenger review of 117f8e2 (1 Medium, 5 Low), with a new owner
+requirement (the design is model-vendor agnostic), is answered by this
+revision 14. Revisions 2 to 14 are in PR #98. The code citations were checked
 at 62bd8ed and there have been no code changes since: 8caec87 touches only
 `docs/design/frank-mcp`.
 
@@ -272,9 +274,11 @@ use the same broker, so the seam is proven before any server is trusted.
 |---|---|---|
 | Claude (`AI_PROVIDER=claude`) | The provider's native tool-use content blocks: tools in the request, tool-use blocks in the response, tool-result blocks in the next request. **(unverified against current vendor documentation; this session had no access to it)** | Adapter keeps `text` blocks only (`pages/api/v1/ai/chat.ts:108-111`) |
 | OpenAI (`openai`) | `tools` in the request, `tool_calls` in the response, `tool` role messages for results. **(unverified)** | Adapter reads `content` only (`:144`) |
-| OpenAI-compatible (`mistral`, `qwen`, `openllm`, so OpenRouter and local servers) | Same wire shape as OpenAI where the server implements it. Whether a given server and model implements `tools`/`tool_calls` correctly varies. **(unverified; must be certified per model, section 7)** | Raw fetch with `messages` only (`:168-177`) |
+| Mistral (`mistral`) | The repository routes it through the shared OpenAI-compatible adapter (`src/ai/providers.ts:58-67`), so it uses the OpenAI-compatible wire shape (`tools` / `tool_calls`) **where its API implements it**. Native function-calling support is **(unverified)**; it is certified per model like the rest (section 7). | Raw fetch with `messages` only (`:168-177`) |
+| Other OpenAI-compatible (`qwen`, `openllm`, so OpenRouter and local servers) | Same wire shape as OpenAI where the server implements it. Whether a given server and model implements `tools`/`tool_calls` correctly varies. **(unverified; must be certified per model, section 7)** | Raw fetch with `messages` only (`:168-177`) |
 
-Each adapter gains a second method (for example `callWithTools`) rather than a
+The wire shape differs by vendor but the broker does not (2.6). Each adapter
+gains a second method (for example `callWithTools`) rather than a
 changed `call`, so the existing path and its tests are untouched.
 
 **Fallback when a model has no tool calling (or fails certification).** The
@@ -304,6 +308,23 @@ chosen SDK targets before M2 starts:
 | Standard transports are stdio and an HTTP-based transport; the older standalone SSE transport may be superseded | **(unverified)**; PointFive's existing code uses an SSE URL (`src/costsource/pointfiveConfig.ts:22-23`), which says nothing about the standard |
 | Authorization for HTTP transports follows an OAuth-based profile | **(unverified)**; Ratio has an OAuth client-credentials seam for PointFive (`src/costsource/PointFiveOAuthClient.ts`) which is scaffolding |
 | Servers can be spoofed from a browser or local network, so local HTTP servers should bind to loopback and check the Origin header | **(unverified)**; listed as a requirement of this design (section 5, T1) regardless |
+
+### 2.6 Vendor-agnostic broker; vendor-side connectors
+
+Users may drive MCP tools with Claude, OpenAI or Mistral models, and with
+open-weight or private models. The design is therefore model-vendor agnostic:
+the **same** allowlist, broker, audit, scope injection and secret scan apply
+whichever vendor's model drives the tool loop; only the adapter's wire
+translation differs (2.4).
+
+Some vendors may offer a hosted "MCP connector" feature, in which the vendor's
+cloud calls an MCP server directly (**unverified** whether and how any vendor
+does). Such a connector is **outside the broker's control**: it would bypass
+allowlist pinning, scope injection, the result-value secret scan and the
+audit. **It is rejected by default: this design does not allow it unless the
+broker is the only MCP client.** The adapters never send a vendor-side
+connector parameter (A21). This is a recommendation and a residual risk, and
+whether to allow specific vendor-side connectors is an owner decision (OD-13).
 
 ## 3. Allowlist model (the core)
 
@@ -386,6 +407,13 @@ Environment settings (not allowlist keys): `FRANK_TOOLS` (the kill switch,
 6.3), `FRANK_TOOLS_ALLOWLIST` (the path of the one allowlist file; the broker
 loads exactly one file) and `RATIO_ENV` (3.8). The names `FRANK_TOOLS` and
 `FRANK_TOOLS_ALLOWLIST` are proposed.
+
+In M1, where there is no file, each registry tool supplies in code the same
+fields as the key table: the bodies; `read_only_via` as the pure-function
+marker; the key-table budget defaults; and `on_secret: reject`. Hashes are
+computed from the bodies and checked by a registry self-test. The enabled
+tools and the tenants come from a broker option (the mock tenant only) behind
+`FRANK_TOOLS`.
 
 The broker offers the model **its own** vetted `description` and
 `input_schema` for the tool, taken from the allowlist file, not the server's
@@ -589,7 +617,11 @@ gateway-auth check are evaluated together under the following rules.
   requests do not start more: they join the one evaluation or, if they do not
   wait for it, are served with no tools. One evaluation writes one
   `startup_refused` record (if it fails), not one per request, and a timed-out
-  evaluation is not retried in a loop (the retry spacing of E1).
+  evaluation is not retried in a loop (the retry spacing of E1). A joiner whose
+  flip was observed **after** the running evaluation read its snapshot does
+  not take that evaluation's result as its own: it starts a new evaluation
+  after the current one completes, so a `RATIO_ENV` change made together
+  with the cycle is adopted.
 - **E5, only an E1 evaluation clears a latch.** The per-request check reads the
   latch: it can turn tools off, and it never itself re-enables a refused
   broker. Observing a flip starts the E1 evaluation and does not clear the
@@ -607,7 +639,10 @@ Rules 1 to 5 (all tested by A18; rule 0 by A20):
    restriction"; an unrestricted entry omits the field (which, by rule 0,
    still means "this file's own environment only").
 3. **Unknown keys are rejected** when the allowlist is parsed (the file fails
-   to load, rather than ignoring a misspelled restriction).
+   to load, rather than ignoring a misspelled restriction). The exemption is
+   schema content: an unknown JSON Schema keyword inside `input_schema` or
+   `output_schema` is allowed, because it is schema content, not an
+   allowlist key.
 4. **Server entry and tool entry are denied differently.**
    - A **denied server entry** is not connected to: no egress, no process
      start, no listing call, no hash check. A `server_denied` record is
@@ -743,6 +778,7 @@ control.
 | T10 | **Audit gaps** (a tool call that leaves no record; a record that leaks data) | Audit written by the broker, before the result is returned to the model; a failed audit write fails the call (fail closed); records hold hashes and sizes, not payloads (6.1) | A13 | Audit stored in the same trust domain as the app can be altered by anyone who owns it; external immutable storage is an operator decision. |
 | T11 | **Model chooses a wrong but allowed tool or misreads a result** | Evidence status in every result; golden-question suite per model (8); Frank's rule that a person verifies claims and authorizes decisions (`src/agent-workflows/frank.ts:11-12`) | the golden suite (8.1) | Wrong answers will occur. The control is that they are read-only and presented as evidence. |
 | T12 | **Hosted-demo exposure** (a live model with tools reachable by anonymous visitors) | Hosted demo stays on the mock; tools require the live-provider gateway auth, which is forced for any live provider (`src/server/gateway/auth.ts:36-42`); a startup check refuses `tools` enabled when auth is not enforced, and another refuses them unless the raw `RATIO_ENV` is a recognized value and the allowlist file's `deployment_environment` equals it (3.8 rule 0) | A14, A20 | Relies on correct deployment configuration; a runtime change of `RATIO_ENV` is not detected until a reload or restart (3.8 E2). |
+| T13 | **Vendor-side MCP connector** (a vendor's cloud calls an MCP server directly, bypassing the broker) | Rejected by default (2.6): the broker is the only MCP client; the adapters never send a vendor-side connector parameter; the request builders are tested for it | A21 | Relies on correct adapter code and on no one enabling a vendor feature outside Ratio. Allowing specific connectors is an owner decision (OD-13). |
 
 ## 6. Audit and observability
 
@@ -825,13 +861,13 @@ owner decision; this proposal does not set one.
 
 ## 7. Models and providers
 
-- **Which paths can carry tools:** Claude, OpenAI, and any OpenAI-compatible
-  endpoint including OpenRouter and local servers **if** that endpoint and
-  that model implement tool calling. Support differs by model and by serving
-  software and sometimes by version; the author has not verified any specific
-  model's behavior **(unverified)**. The registry's `supports_tools` flag
-  (`src/types/index.ts:160`) describes hosted models and is hand-entered
-  metadata, not a certification.
+- **Which paths can carry tools:** Claude, OpenAI, Mistral, and any
+  OpenAI-compatible endpoint including OpenRouter and local servers **if**
+  that endpoint and that model implement tool calling. Support differs by
+  model and by serving software and sometimes by version; the author has not
+  verified any specific model's behavior **(unverified)**. The registry's
+  `supports_tools` flag (`src/types/index.ts:160`) describes hosted models and
+  is hand-entered metadata, not a certification.
 - **Certification per model.** A model is enabled for tools only after it
   passes the evaluation harness in section 8 under the exact serving setup
   (model label, endpoint, serving software, version) the operator runs. The
@@ -884,21 +920,22 @@ Tests first, as in the rest of the program (Slices 3-5 design section 7).
 | A8 | Model supplies another tenant's id in an argument | schema has no such field; an unknown initiative id returns the same as a forbidden one |
 | A9 | Model puts data into a free-text argument | no free-text argument exists in v1; test asserts that |
 | A10 | Error text or a log line contains a secret-shaped string | redacted in logs and in the audit record |
-| A11 | Model loops on tool calls | stops at the per-turn cap; final answer states the cap was reached |
+| A11 | (a) Model loops on tool calls; (b) the per-turn tool-result token ceiling is exceeded; (c) a tool exceeds its timeout; (d) a tenant exceeds `max_calls_per_tenant_per_minute` | (a) stops at the per-turn cap; final answer states the cap was reached; (b) the result is rejected or the turn ends with the ceiling stated; (c) the call is aborted, audit `timeout`; (d) further calls are refused for the window, audit `over_budget` |
 | A12 | stdio executable hash differs | process not started |
 | A13 | Audit write fails | the call fails closed |
 | A14 | Tools enabled with gateway auth not enforced | startup refusal |
 | A15 | Server adds a tool not in the allowlist | the tool is never offered or callable; `unlisted_tool` audit record; alert; server marked unavailable |
 | A16 | A pinned tool disappears from the server's list | server unavailable; alert; fallback |
 | A17 | Server certificate or key pin changes | connection refused; server unavailable |
-| A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key; (f) a tool entry without `output_schema_hash`, or any other missing required key; (g) a tool entry with a missing body (`description`, `input_schema` or `output_schema`); (h) a body whose hash does not match its `*_hash` key; (i) an unknown key inside a tool entry (as in (e)), or a body that is not an object or exceeds the size caps; (j) an `in_process` body that differs from the registry (M2); (k) `description` over `max_description_bytes` or a schema over `max_schema_bytes` (an unknown keyword inside the JSON Schema content of `input_schema` or `output_schema` is allowed, because it is schema content) (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e), (f), (g), (h), (i), (j), (k) reject the whole file |
+| A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key; (f) a tool entry without `output_schema_hash`, or any other missing required key; (g) a tool entry with a missing body (`description`, `input_schema` or `output_schema`); (h) a body whose hash does not match its `*_hash` key; (i) an unknown key inside a tool entry (as in (e)), or a body that is not an object; (j) an `in_process` body that differs from the registry (M2); (k) `description` over `max_description_bytes` or a schema over `max_schema_bytes`; (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e), (f), (g), (h), (i), (j), (k) reject the whole file |
 | A19 | A tool result carries a credential-shaped value (bearer token, `sk-`-style key, JWT, AWS key id) in an ordinary string field that passes the output schema | not delivered to the model; fixed error; audit `secret_in_result` without the value; with `on_secret: redact` only the value is replaced and the audit still records it. Includes: a URL value whose `?` tail contains a quote (the serialized form does not re-parse, so the result is rejected); under `on_secret: redact`, a key-only secret such as `{"password":"abc def"}` (the value is replaced whole and nothing leaks); a hit on a map key (rejected); a located non-string value (rejected) |
-| A20 | Environment check, with the slice that first tests each case. **M0** (raw environment, a broker `reload()` and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) `RATIO_ENV` changes at runtime without a reload (the snapshot of the last successful evaluation still governs, a documented residual), and a following `reload()` with the bad value refuses and latches; (h3) `reload()` re-reads the raw environment, clears a latch only if the evaluation succeeds, and updates last-seen; (h4) a reload concurrent with request traffic applies (no starvation); (i) the per-request check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails; (k) latched, then the environment is fixed, then a plain request; (l) two evaluations racing are serialized, a success cannot be discarded by a request-level observation, and generations are strictly monotonic and unique; (n) the environment changes during an evaluation, and the entry checks use the snapshot; (m1) start with `FRANK_TOOLS` off and a good environment, then observe it on; (m2) load with tools on and a bad environment (latched, last-seen on), environment fixed, then `FRANK_TOOLS` off with at least one request observed while off, then on, and the request after the on starts an evaluation; the same off-then-on cycle after a runtime `RATIO_ENV` change, when not latched, also starts one; (m3) `FRANK_TOOLS` unset at load (counted as off), then on; (o) `FRANK_TOOLS` parsing, fail-open direction: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (p) the lock wait times out; (q) N concurrent requests during a pending flip coalesce onto one evaluation (one `startup_refused` record, no retry loop); (r) an evaluation exceeding `evaluation_timeout_ms` (for example a hung audit write) is aborted, the latch is set, the lock is released and the next trigger retries; (r2) evaluation 1 hangs and times out, evaluation 2 fails and latches, then evaluation 1 completes late and must not clear the latch. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (h1) tools keep running under the old snapshot until the reload, which refuses; (h3) re-evaluates; (h4) the reload applies; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (k) still no tools until a load, a reload or an observed flip; (l) the evaluations run one after the other, the success stands, and the generations are 1, 2, 3, and so on; (n) the snapshot decides; (m1) tools are offered and the snapshot is stored; (m2) the evaluation runs and the latch clears; (m3) an evaluation runs and tools are offered; (o) only the documented value turns tools on; (p) no tools for that request, latch and snapshot unchanged, pending stays true, and the next request retries (not more often than `evaluation_retry_ms`); (q) one evaluation, one record, no loop; (r) fail closed with the latch set, then a retry; (r2) the late result is discarded and the latch holds; (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
+| A20 | Environment check, with the slice that first tests each case. **M0** (raw environment, a broker `reload()` and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) `RATIO_ENV` changes at runtime without a reload (the snapshot of the last successful evaluation still governs, a documented residual), and a following `reload()` with the bad value refuses and latches; (h3) `reload()` re-reads the raw environment, clears a latch only if the evaluation succeeds, and updates last-seen; (h4) a reload concurrent with request traffic applies (no starvation); (i) the per-request check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails; (k) latched, then the environment is fixed, then a plain request; (l) two evaluations racing are serialized, a success cannot be discarded by a request-level observation, and generations are strictly monotonic and unique; (n) the environment changes during an evaluation, and the entry checks use the snapshot; (m1) start with `FRANK_TOOLS` off and a good environment, then observe it on; (m2) load with tools on and a bad environment (latched, last-seen on), environment fixed, then `FRANK_TOOLS` off with at least one request observed while off, then on, and the request after the on starts an evaluation; the same off-then-on cycle after a runtime `RATIO_ENV` change, when not latched, also starts one; (m3) `FRANK_TOOLS` unset at load (counted as off), then on; (o) `FRANK_TOOLS` parsing, fail-open direction: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (p) the lock wait times out; (q) N concurrent requests during a pending flip coalesce onto one evaluation (one `startup_refused` record, no retry loop); (r) an evaluation exceeding `evaluation_timeout_ms` (for example a hung audit write) is aborted, the latch is set, the lock is released and the next trigger retries; (r2) evaluation 1 hangs and times out, evaluation 2 fails and latches, then evaluation 1 completes late and must not clear the latch; (s) a flip observed after the running evaluation's snapshot read starts a new evaluation after the current one completes. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (h1) tools keep running under the old snapshot until the reload, which refuses; (h3) re-evaluates; (h4) the reload applies; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (k) still no tools until a load, a reload or an observed flip; (l) the evaluations run one after the other, the success stands, and the generations are 1, 2, 3, and so on; (n) the snapshot decides; (m1) tools are offered and the snapshot is stored; (m2) the evaluation runs and the latch clears; (m3) an evaluation runs and tools are offered; (o) only the documented value turns tools on; (p) no tools for that request, latch and snapshot unchanged, pending stays true, and the next request retries (not more often than `evaluation_retry_ms`); (q) one evaluation, one record, no loop; (r) fail closed with the latch set, then a retry; (r2) the late result is discarded and the latch holds; (s) a second evaluation runs and adopts the new value; (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
+| A21 | Request-body inspection for each adapter (Claude, OpenAI, Mistral and other OpenAI-compatible) | no vendor-side MCP connector parameter is ever sent; a mutant that adds one is killed |
 
 ### 8.3 Pass criteria
 
 For a model to be certified: 100 percent on all adversarial cases that
-concern the broker: all of A1-A20 except the model-dependent A5 and A6; the
+concern the broker: all of A1-A21 except the model-dependent A5 and A6; the
 remaining cases are model-independent broker cases;
 for the model-dependent cases (A5, A6) and the golden suite, thresholds are an
 owner decision (OD-3) with the author's recommendation of **at least 95 percent
@@ -935,11 +972,15 @@ body and hash checks, where a mutant that offers the server's live text, or
 skips the body/hash comparison, must be killed by A3 (c) and A18 (g, h); one
 that skips the registry difference check, by A18 (j); one that skips the size
 caps, by A18 (k); one that applies an aborted evaluation's late result, by A20
-(r2); the the `FRANK_TOOLS` parser, where a mutant that treats any truthy
-value as on must be killed by A20 (o)), and confirm at least one test fails
-per mutation. A surviving mutant blocks the PR. The repository already treats
-unfaithful tests as defects elsewhere (see the test-integrity entries in the
-Slices 3-5 evidence); this applies the same standard here.
+(r2); one that skips the per-turn token ceiling, the timeout or the per-minute
+cap, by A11 (b), (c) and (d); one that adds a vendor-side connector parameter,
+by A21; one that does not start a new evaluation for a flip observed after the
+running evaluation's snapshot, by A20 (s); the `FRANK_TOOLS` parser, where a
+mutant that treats any truthy value as on must be killed by A20 (o)), and
+confirm at least one test fails per mutation. A surviving mutant blocks the
+PR. The repository already treats unfaithful tests as defects elsewhere (see
+the test-integrity entries in the Slices 3-5 evidence); this applies the same
+standard here.
 
 ## 9. Slicing plan
 
@@ -954,18 +995,19 @@ by running the classifier on the real diff; a miss is reported, not argued.
   for tool-use and `tool_calls` responses (no network); a test that with the
   flag off the request body is byte-identical to today's; and the broker
   controls that must exist before any tool does: A7 (out-of-set request), A11
-  (per-turn and per-call caps), A13 (audit write failure fails the call
-  closed), A14 (startup refusal when tools are on and gateway auth is not
-  enforced), A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o, p, q, r, r2: the
-  raw-`RATIO_ENV` checks, run in the same evaluation as A14, which runs on a
-  load, a reload or a flip only while `FRANK_TOOLS` is on), A10 (redaction
-  applied to audit and log text), A19
-  (a credential-shaped value in a tool result is rejected before model
-  delivery; both halves, reject and redact, run in M0 against a fixture tool
-  that the test registers through the broker's constructor, with `on_secret`
-  passed as a broker option; the fixture exists only in the test file and the
-  allowlist is still empty; parsing `on_secret` from the file is tested in
-  M2), and the kill switch (6.3).
+  (per-turn and per-call caps, per-turn token ceiling, timeout, per-minute
+  cap), A21 (no vendor-side connector parameter), A13 (audit write failure
+  fails the call closed), A14 (startup refusal when tools are on and gateway
+  auth is not enforced), A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o, p,
+  q, r, r2, s: the raw-`RATIO_ENV` checks, run in the same evaluation as A14,
+  which runs on a load, a reload or a flip only while `FRANK_TOOLS` is on),
+  A10 (redaction applied to audit and log text), A19 (a credential-shaped
+  value in a tool result is rejected before model delivery; both halves,
+  reject and redact, run in M0 against a fixture tool that the test registers
+  through the broker's constructor, with `on_secret` passed as a broker
+  option; the fixture exists only in the test file and the allowlist is still
+  empty; parsing `on_secret` from the file is tested in M2), and the kill
+  switch (6.3).
 - **Change:** `callWithTools` on each adapter; the broker with an empty
   allowlist, its call and turn caps, audit-before-return with fail-closed
   behavior, the kill switch and the startup auth check; the raw-`RATIO_ENV`
@@ -1005,15 +1047,15 @@ by running the classifier on the real diff; a miss is reported, not argued.
 - **Expected class:** restricted (`routes`, `financial_semantics` if it
   touches `src/costsource/**` or `src/lib/forecast*`).
 - **Rollback:** flag off, then revert.
-- **Must not:** read the browser `context` as authoritative for tools; return
-  a number without `evidence_status` and `revision`; add forecast or anomaly
-  tools (they depend on Slices 3-5).
+- **Must not:** add an allowlist file or parser; read the browser `context` as
+  authoritative for tools; return a number without `evidence_status` and
+  `revision`; add forecast or anomaly tools (they depend on Slices 3-5).
 
 ### M2. MCP client, allowlist, audit
 
 - **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
   (A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o,
-  p, q, r, r2) re-run against the MCP path); A20 (a, e, f, h2) with the file
+  p, q, r, r2, s) re-run against the MCP path); A20 (a, e, f, h2) with the file
   parser (`deployment_environment`, `environments[]`); allowlist parser tests
   (reject unknown keys, missing hashes); A18 (server vs tool denial, empty
   array, null, unknown key; bodies and hashes; the registry difference; the
@@ -1037,7 +1079,9 @@ by running the classifier on the real diff; a miss is reported, not argued.
   that misbehave in known ways (wrong arguments, extra tools, injection
   compliance).
 - **Change:** a command that runs the suite against a configured endpoint and
-  writes a certification record; no model is certified by this PR.
+  writes a certification record; no model is certified by this PR. The first
+  certifications are Claude, OpenAI and Mistral models plus one open-weight
+  model; the owner picks them (OD-3).
 - **Expected class:** restricted if it touches `scripts/**` that match a rule;
   the author expects `network_egress` patterns for a script with an endpoint.
 - **Rollback:** revert; certification records are data and can be deleted.
@@ -1063,9 +1107,9 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 | Slice | Cases |
 |---|---|
-| M0 | A7, A10, A11, A13, A14, A19, A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o, p, q, r, r2) |
+| M0 | A7, A10, A11, A13, A14, A19, A21, A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o, p, q, r, r2, s) |
 | M1 | A1, A2 (in-process results), A5, A6 (fixtures), A8, A9 |
-| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (a, e, f, h2); A1, A2, A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o, p, q, r, r2) re-run against MCP servers |
+| M2 | A3, A4, A12, A15, A16, A17, A18, A20 (a, e, f, h2); A1, A2, A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o, p, q, r, r2, s) re-run against MCP servers |
 | M3 | A5, A6 and the golden suite: per-model re-run |
 | M4 | the broker suite re-run against the server entry |
 
@@ -1106,7 +1150,7 @@ example "the model sees the allowlist's text, not the server's"), which are
 |---|---|---|---|
 | OD-1 | stdio or HTTP-only servers? | (a) stdio and HTTP; (b) HTTP only; (c) stdio only | **(b) HTTP only for v1.** A stdio server is a process on the app host: hash pinning, sandboxing and supply chain (T9) all become the operator's problem at once. HTTP servers can be run and owned elsewhere and pinned by certificate. Revisit stdio when a concrete local server needs it. Under (b), a `transport: stdio` entry rejects the whole file; the stdio keys in the 3.3 table are valid only if the owner decides (a) or (c). |
 | OD-2 | Should Ratio also be an MCP server (M4)? | yes, later / no | **Later, after M2.** It widens the surface; build it only when another agent actually needs it. |
-| OD-3 | Which models to certify first, and the pass thresholds | the owner's list | Certify **one hosted path and one local path** first, so the claim "works with a local server" has evidence. The author does not pick models (**unverified** capability claims either way). Thresholds as in 8.3. |
+| OD-3 | Which models to certify first, and the pass thresholds | the owner's list | Certify one model each for the **Claude, OpenAI and Mistral** paths, plus **one open-weight model** on a local server, first, so the claim "works with a local server" has evidence; the owner picks the models. The author does not pick models (**unverified** capability claims either way). Thresholds as in 8.3. |
 | OD-4 | Is a hosted model endpoint acceptable for tool results, or must tool-enabled mode use only a model server the operator runs? | hosted allowed / local only | **Local-or-account-hosted only for any real data;** hosted allowed for synthetic data. This is what "keeping the learning inside the production accounts" asks for most directly. |
 | OD-5 | Where do local MCP servers run, and who owns each? | per-server decision | Each allowlist entry names an owner (3.2); no entry without one. Servers run outside the app container, owned by the team that owns the data. |
 | OD-6 | Real data, real credentials, real model infrastructure, and use in dev, test and production under RBAC | when | The owner is relayed as requiring (source not seen, unverified) MCP to be usable in dev, test and production for any team under RBAC. **The design must support that, and the production go-live stays the owner's gate (OD-12).** Until the owner opens that gate, BOUNDARY v2 stands: this program uses only synthetic data and fakes, with no real credentials or spend. Production use is then a configuration and review step (a separate allowlist file per deployment, 3.8; the reader role, 3.5; the model endpoint choice, OD-4; identity and RBAC, T-7), not a redesign. |
@@ -1115,9 +1159,13 @@ example "the model sees the allowlist's text, not the server's"), which are
 | OD-9 | Audit storage and retention period | log pipeline / table; period | Log pipeline for M2; the owner sets the period. |
 | OD-10 | Relationship to X1-a | this feeds X1-a / replaces it / separate | **Feeds X1-a:** same read-only scope, one agent layer. |
 | OD-11 | May any live model be enabled on the hosted demo? | yes / no | **No.** The hosted demo stays on the mock; any live provider is behind sign-in. |
+| OD-13 | May any vendor-side MCP connector (a vendor's cloud calling an MCP server directly) be allowed? | no / specific ones | **No, rejected by default (2.6).** Such a connector bypasses the broker's allowlist pinning, scope injection, secret scan and audit. If the owner wants specific ones, each needs its own review and a statement of what is lost. |
 | OD-12 | Production go-live of the agent | the owner's gate | Unchanged: the owner's non-delegable gate. Author-proposed preconditions: T-7 landed (identity and RBAC), M0-M3 merged, a model certified for the chosen path (OD-3), and the audit storage decided (OD-9). |
 
 ## 11. Tracked items
+
+Do not confuse **T8** (a row of the threat table, section 5) with **T-8** (a
+tracked item below); the numbering is separate.
 
 | Id | Item | Status |
 |---|---|---|
@@ -1127,16 +1175,16 @@ example "the model sees the allowlist's text, not the server's"), which are
 | T-4 | Durable outcome evidence has no read route and no reader grant beyond events and counts | dependency of the durable `ratio_outcome_evidence` |
 | T-5 | `allocateSharedCost` has no production caller; attribution tool is foundations only | dependency |
 | T-6 | The sprint plan on branch `docs/sprint-plan-mock-demo-mcp-rbac` (PR #97, `docs/design/sprint-mock-demo-mcp-rbac/PLAN.md`, read at 7a7d51b) uses token claims `teams` and `envs` (lines 127, 142-143, 160) and an allowlist with a `readOnly` declaration (line 319). Reconcile: field names (`environments[]` here vs `envs` there, and `roles[]`/`teams[]` vs the claims), and `readOnly` must stay **advisory** per 3.5: read-only is enforced by capability, never by the declaration | open |
-| T-8 | Per-tenant model-token budget: requires a defined tenant (D-15), a durable shared counter and a chat-route owner; not part of the tool broker. Until decided, aggregate hosted-model spend is not bounded by this design (T8) | open, owner decision (OD-7, OD-8) |
 | T-7 | Per-role, per-team and per-environment tool allowlists (RBAC for MCP in dev, test and production). Depends on per-user identity (D-15). Until then: reserved fields with deny-when-present-and-context-unknown, and a separate allowlist file per deployment (3.8) | open, not in M0-M2 |
+| T-8 | Per-tenant model-token budget: requires a defined tenant (D-15), a durable shared counter and a chat-route owner; not part of the tool broker. Until decided, aggregate hosted-model spend is not bounded by this design (T8) | open, owner decision (OD-7, OD-8) |
 
 ## 12. Rollback
 
 - **This PR:** revert the two documents. Nothing else changes.
 - **Later code PRs:** each has its own rollback in section 9. Because the
-  tool layer is behind `FRANK_TOOLS` (default off) and an empty allowlist
-  offers no tools, turning the flag off restores today's behavior in every
-  milestone.
+  tool layer is behind `FRANK_TOOLS` (default off) and, with no allowlist and
+  no registered tools, the broker offers none, turning the flag off restores
+  today's behavior in every milestone.
 
 ## 13. Honesty section
 
