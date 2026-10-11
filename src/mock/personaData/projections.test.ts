@@ -53,11 +53,11 @@ describe('dataset and oracle sanity', () => {
   });
 
   it('oracle_agrees_with_an_independent_sum_of_the_dataset', () => {
-    let total = 0n;
+    let total = BigInt(0);
     for (const l of DATASET.lines) total += BigInt(l.cents);
     expect(total).toBe(BigInt(oracle.org.totalCents));
     for (const t of TEAMS) {
-      let s = 0n;
+      let s = BigInt(0);
       for (const l of DATASET.lines) if (l.team === t) s += BigInt(l.cents);
       expect(Number(s)).toBe(oracle.engLeads[t as keyof typeof oracle.engLeads].totalCents);
     }
