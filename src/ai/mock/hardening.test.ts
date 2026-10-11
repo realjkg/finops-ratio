@@ -58,6 +58,14 @@ describe('M1 prototype-key wire strings never crash', () => {
   });
 });
 
+describe('wrong-typed numbers through the real route', () => {
+  it('valueRatio "oops" is a 200 with the workload excluded, not a 500', async () => {
+    const r = await viaRoute(mod((c) => { (c.workloads![0] as unknown as Record<string, unknown>).valueRatio = 'oops'; (c.initiatives[0] as unknown as Record<string, unknown>).valueRatio = 'oops'; }), 'What is the ROI of the portfolio?');
+    expect(r.status).toBe(200);
+    expect(r.text).toMatch(/out of range and ignored/);
+  });
+});
+
 describe('M2 impossible headlines carry a warning, uncapped', () => {
   it('migration saving above the seeded run-rate (Fraud Triage Agent)', async () => {
     const o = migrate([wl('wl-fraud')]);
