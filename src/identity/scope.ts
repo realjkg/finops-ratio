@@ -33,10 +33,14 @@ function isRealTeam(team: unknown): team is string {
  * this module goes through ownList or an own-index loop; DEPLOY_ENVS is a
  * frozen module constant. */
 function ownList(a: unknown): unknown[] | null {
-  if (!Array.isArray(a)) return null;
-  const out: unknown[] = [];
-  for (let i = 0; i < a.length; i += 1) if (Object.hasOwn(a, i)) out.push(a[i]);
-  return out;
+  try {
+    if (!Array.isArray(a)) return null;
+    const out: unknown[] = [];
+    for (let i = 0; i < a.length; i += 1) if (Object.hasOwn(a, i)) out.push(a[i]);
+    return out;
+  } catch {
+    return null; // a revoked or throwing Proxy is an invalid claim, never an exception
+  }
 }
 
 /** An object's own field, never one inherited through the prototype chain. */
@@ -100,11 +104,11 @@ export function inScope(principal: ScopeOf, key: ScopeKey): boolean {
  * inherited index through a hole), and a row whose keyOf throws is excluded.
  */
 export function filterByScope<T>(principal: ScopeOf, rows: readonly T[], keyOf: (row: T) => ScopeKey): T[] {
+  const own = ownList(rows) as T[] | null; // own indexes only; null for a non-array or hostile Proxy
   const out: T[] = [];
-  if (!Array.isArray(rows)) return out;
-  for (let i = 0; i < rows.length; i += 1) {
-    if (!Object.hasOwn(rows, i)) continue;
-    const row = rows[i];
+  if (!own) return out;
+  for (let i = 0; i < own.length; i += 1) {
+    const row = own[i]; // dense own copy: no hole can reach Array.prototype
     let key: ScopeKey;
     try {
       key = keyOf(row);

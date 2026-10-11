@@ -72,7 +72,11 @@ const RESOURCE_KEYS = ['kind', 'id', 'team', 'env', 'requesterSub', 'approverSub
 /** An array's own elements only (holes and inherited indexes are skipped). */
 function ownElements(a: readonly unknown[]): unknown[] {
   const out: unknown[] = [];
-  for (let i = 0; i < a.length; i += 1) if (Object.hasOwn(a, i)) out.push(a[i]);
+  try {
+    for (let i = 0; i < a.length; i += 1) if (Object.hasOwn(a, i)) out.push(a[i]);
+  } catch {
+    return []; // a throwing Proxy is an empty (invalid) claim
+  }
   return out;
 }
 
