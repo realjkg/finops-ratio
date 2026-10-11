@@ -7,6 +7,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import type { AIContext } from '@/ai/AIClient';
 import handler from '../../../pages/api/v1/ai/chat';
 import { migrate, wl } from './__testkit__/oracle';
+import { respond } from '.';
 import { CTX, UNSUPPORTED, chat, last, restoreClock, useFastClock } from './__testkit__/ask';
 
 beforeAll(useFastClock);
@@ -22,13 +23,13 @@ const withSnap = (i: number, patch: Partial<Snap>): AIContext =>
   mod((c) => Object.assign(c.workloads![i], patch));
 const BAD = /NaN|Infinity|undefined|\[object/;
 
-async function viaRoute(context: AIContext, q: string): Promise<{ status: number; text: string }> {
+async function viaRoute(context: AIContext, q: string, messages: unknown = [{ role: 'user', content: q }]): Promise<{ status: number; text: string }> {
   const res = {
     statusCode: 200, body: undefined as unknown, headersSent: false, setHeader() {},
     status(c: number) { res.statusCode = c; return res; },
     json(p: unknown) { res.body = p; res.headersSent = true; return res; },
   };
-  const req = { method: 'POST', url: '/api/v1/ai/chat', headers: {}, body: { messages: [{ role: 'user', content: q }], context } } as unknown as NextApiRequest;
+  const req = { method: 'POST', url: '/api/v1/ai/chat', headers: {}, body: { messages, context } } as unknown as NextApiRequest;
   const saved = process.env.AI_PROVIDER;
   delete process.env.AI_PROVIDER;
   const pending = handler(req, res as unknown as NextApiResponse);
@@ -78,6 +79,20 @@ describe('malformed wire shapes never 500 and never reach a renderer', () => {
       const r = await viaRoute(c as unknown as AIContext, q);
       expect(r.status, q).toBe(200);
       expect(r.text, q).not.toMatch(/NaN|Infinity|undefined|\[object|can't process/);
+    }
+  });
+  it.each([[null], [1, 'x']])('messages %j is a 400, not a 500', async (...m) => {
+    expect((await viaRoute(CTX, 'x', m)).status).toBe(400);
+  });
+  it('summary totals are recomputed when an initiative is omitted as incomplete', async () => {
+    const { text } = await viaRoute(mod((c) => { delete (c.initiatives[0] as unknown as Record<string, unknown>).valueRatio; }), 'Summarize the portfolio');
+    expect(text).not.toMatch(/\$41,212\/mo|11 initiatives/);
+  });
+  it.each(['id', 'status'])('a wire %s that is {toString:1} or a 12,000-deep array is handled without the safety net', (k) => {
+    const deepArr = Array.from({ length: 12000 }).reduce<unknown>((o) => [o], []);
+    for (const v of [{ toString: 1 }, deepArr]) {
+      const c = mod((x) => { for (const o of [x.initiatives[0], x.workloads![0]]) Object.assign(o, { [k]: v }); });
+      for (const q of [...LEGACY_Q, 'Show the workloads in CX Engineering']) expect(() => respond([{ role: 'user', content: q }], c), q).not.toThrow();
     }
   });
   it('an omitted malformed entry is listed in the note', async () => {
