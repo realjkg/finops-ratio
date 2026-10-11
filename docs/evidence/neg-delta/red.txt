@@ -22,4 +22,3 @@ Error: Cannot find module './signedSpendDelta' imported from /home/user/neg-delt
       Tests  no tests
    Start at  13:32:14
    Duration  434ms (worker 98%, environment 2%)
-
