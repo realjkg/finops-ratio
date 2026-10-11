@@ -350,6 +350,35 @@ describe('persona projections', () => {
     expect(ok.budgets?.[0].varianceCents).toBe(100000000 - oracle.engLeads.Payments.totalCents);
   });
 
+  it('unsafe_line_amounts_and_budgets_are_rejected_at_entry', () => {
+    const base = DATASET.lines[0];
+    const scope: Scope = { teams: [base.team], envs: [base.env] };
+    // 2**53 and -(2**53)+2 are each outside the safe range but cancel to 2.
+    const cancel: Dataset = {
+      ...DATASET,
+      lines: [
+        { ...base, id: 'U1', cents: 2 ** 53 },
+        { ...base, id: 'U2', cents: -(2 ** 53) + 2 },
+      ],
+    };
+    for (const p of PERSONA_IDS) {
+      expect(() => project(p, cancel, scope)).toThrow(RangeError);
+    }
+    // An unsafe line outside the requested scope is still rejected.
+    expect(() => project('cto', cancel, { teams: [], envs: [] })).toThrow(RangeError);
+    // An unsafe budget is rejected even when the subtraction would be safe.
+    const unsafeBudget: Dataset = {
+      ...DATASET,
+      budgets: DATASET.budgets.map((b) => (b.team === 'Platform' ? { ...b, cents: 2 ** 53 + 2 } : b)),
+    };
+    expect(() => project('finance', unsafeBudget, engScope('Platform'))).toThrow(RangeError);
+    expect(() => project('cto', unsafeBudget, ALL)).toThrow(RangeError);
+    // reviseDataset rejects an unsafe amount too.
+    expect(() => reviseDataset(DATASET, 'L01', 2 ** 53)).toThrow(RangeError);
+    // The committed dataset is unaffected.
+    expect(project('cto', DATASET, ALL).totalCents).toBe(oracle.org.totalCents);
+  });
+
   it('invalid_page_requests_throw_and_projection_does_not_mutate_the_dataset', () => {
     const snapshot = JSON.stringify(DATASET);
     expect(() => project('cto', DATASET, ALL, { offset: -1, limit: 4 })).toThrow(RangeError);
