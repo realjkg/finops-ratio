@@ -71,7 +71,8 @@ describe('permission matrix', () => {
         expect(row.facetOf && existing.has(row.facetOf), `${row.path} facet of an existing route`).toBe(true);
         continue;
       }
-      expect(row.file, row.path).toBe(`pages${row.path === '/' ? '/index' : row.path}.${row.kind === 'api' ? 'ts' : 'tsx'}`);
+      const ext = row.kind === 'api' ? 'ts' : 'tsx';
+      expect([`pages${row.path === '/' ? '/index' : row.path}.${ext}`, `pages${row.path}/index.${ext}`], row.path).toContain(row.file);
       if (!existing.has(row.path)) {
         expect(row.plannedBy, `${row.path} has no file and no plannedBy`).toMatch(CARD_ID);
       }
@@ -112,10 +113,18 @@ describe('permission matrix', () => {
     const GATE = /\bwithGateway\s*\(|\bgateSourceAccess\s*\(|\bevaluateLiveDataAuth\s*\(/;
     const apiFiles = walkPages().filter(([r]) => r.startsWith('/api/'));
     const gated = new Set<string>();
+    // Follows a default re-export (`export { default } from '...'`) and a
+    // default export built by an imported factory (`export default createX()`).
+    const resolveSpec = (from: string, spec: string) =>
+      spec.startsWith('@/') ? path.join(REPO_ROOT, 'src', `${spec.slice(2)}.ts`) : path.resolve(path.dirname(from), `${spec}.ts`);
     for (const [route, file] of apiFiles) {
-      const src = fs.readFileSync(path.join(REPO_ROOT, file), 'utf8');
+      const abs = path.join(REPO_ROOT, file);
+      const src = fs.readFileSync(abs, 'utf8');
       const reexport = src.match(/export\s*\{\s*default\s*\}\s*from\s*'([^']+)'/);
-      const target = reexport ? fs.readFileSync(path.resolve(path.dirname(path.join(REPO_ROOT, file)), `${reexport[1]}.ts`), 'utf8') : src;
+      const factory = src.match(/export\s+default\s+(create\w+)\s*\(/);
+      const factoryImport = factory ? src.match(new RegExp(`import\\s*\\{[^}]*\\b${factory[1]}\\b[^}]*\\}\\s*from\\s*'([^']+)'`)) : null;
+      const delegate = reexport?.[1] ?? factoryImport?.[1];
+      const target = delegate ? fs.readFileSync(resolveSpec(abs, delegate), 'utf8') : src;
       if (GATE.test(target)) gated.add(route);
     }
     expect(gated.size).toBeGreaterThanOrEqual(12);
@@ -136,7 +145,7 @@ describe('permission matrix', () => {
 
     // Actions: exactly today's cm/change operations (create, attach, status)
     // and the FinOps export; every other action is denied in every env.
-    const allowed = ACTIONS.filter((a) => a !== 'view.read' && ACTION_MATRIX[a].cells.legacy_service.some((c) => c !== 'n'));
+    const allowed = ACTIONS.filter((a): a is Exclude<Action, 'view.read'> => a !== 'view.read').filter((a) => ACTION_MATRIX[a].cells.legacy_service.some((c) => c !== 'n'));
     expect(allowed.sort()).toEqual(['ticket.attach', 'ticket.create', 'ticket.status', 'view.export'].sort());
     for (const a of allowed) expect(ACTION_MATRIX[a].cells.legacy_service).toEqual(['Y', 'Y', 'Y']);
   });

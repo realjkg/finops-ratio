@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { authorize, DENY_REASONS } from './authorize';
 import { ACTION_MATRIX, ROUTE_MATRIX, VIEW_GROUPS } from './matrix';
+import { filterByScope, inScope } from '@/identity/scope';
 import {
   ACTIONS,
   DEPLOY_ENVS,
@@ -518,7 +519,7 @@ describe('authorize: full matrix sweeps', () => {
       [principal('eng_lead'), 'change.apply', change('prod', { id: canary, requesterSub: canary, approverSub: canary, ticketState: 'approved' })],
       [principal('eng_lead'), 'change.apply', change('prod', { id: canary, approverSub: canary, ticketState: 'open' })],
     ];
-    const fixed = new Set(Object.values(DENY_REASONS));
+    const fixed = new Set<string>(Object.values(DENY_REASONS));
     for (const [p, a, r] of inputs) {
       const v = authorize(p, a, r);
       expect(v.allow).toBe(false);
@@ -529,5 +530,63 @@ describe('authorize: full matrix sweeps', () => {
     }
     // 409 is used only for a change state conflict.
     for (const reason of Object.values(DENY_REASONS)) expect(typeof reason).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The shared scope helper (src/identity/scope.ts), used by authorize() and by
+// every data seam that filters rows.
+// ---------------------------------------------------------------------------
+
+describe('scope helper: inScope and filterByScope', () => {
+  const rows = [
+    { id: 1, team: PLATFORM, env: 'prod' as DeployEnv },
+    { id: 2, team: CX, env: 'prod' as DeployEnv },
+    { id: 3, team: PLATFORM, env: 'dev' as DeployEnv },
+    { id: 4, team: undefined, env: 'prod' as DeployEnv }, // unattributed (F21)
+    { id: 5, team: PLATFORM, env: undefined }, // environment unknown
+    { id: 6, team: PLATFORM, env: null }, // environment did not map: hidden from everyone
+    { id: 7, team: '*', env: 'prod' as DeployEnv },
+    { id: 8, team: '', env: 'prod' as DeployEnv },
+  ];
+  const keyOf = (r: (typeof rows)[number]) => ({ team: r.team, env: r.env });
+  const ids = (p: Pick<Principal, 'teams' | 'envs'>) => filterByScope(p, rows, keyOf).map((r) => r.id);
+
+  it('an eng lead sees only own-team rows in own envs; aggregates are computed after the filter', () => {
+    expect(ids({ teams: [PLATFORM], envs: ['prod'] })).toEqual([1]);
+    expect(ids({ teams: [PLATFORM], envs: ['dev', 'test', 'prod'] })).toEqual([1, 3, 5]);
+    expect(ids({ teams: [CX], envs: ['dev', 'test', 'prod'] })).toEqual([2]);
+  });
+
+  it('org-wide principals see every real team, unattributed rows only with teams "*"', () => {
+    expect(ids({ teams: '*', envs: ['dev', 'test', 'prod'] })).toEqual([1, 2, 3, 4, 5]);
+    expect(ids({ teams: '*', envs: ['prod'] })).toEqual([1, 2, 4]);
+  });
+
+  it('empty or malformed claims see nothing', () => {
+    expect(ids({ teams: [], envs: ['dev', 'test', 'prod'] })).toEqual([]);
+    expect(ids({ teams: '*', envs: [] })).toEqual([]);
+    expect(ids({ teams: ['*'], envs: ['dev', 'test', 'prod'] })).toEqual([]);
+    expect(ids({ teams: 'all' as never, envs: ['prod'] })).toEqual([]);
+    expect(ids({ teams: '*', envs: ['production'] as never })).toEqual([]);
+    expect(ids(null as never)).toEqual([]);
+  });
+
+  it('inScope matches teams exactly and rejects raw env values', () => {
+    const p = { teams: [PLATFORM], envs: ['dev', 'test', 'prod'] as DeployEnv[] };
+    expect(inScope(p, { team: PLATFORM, env: 'prod' })).toBe(true);
+    for (const team of ['platform eng', 'Platform Eng ', 'Platform', '*', '']) {
+      expect(inScope(p, { team, env: 'prod' }), team).toBe(false);
+    }
+    for (const env of ['production', 'staging', 'sandbox', 'PROD', '__proto__']) {
+      expect(inScope(p, { team: PLATFORM, env: env as DeployEnv }), env).toBe(false);
+    }
+  });
+
+  it('filterByScope keeps order and does not mutate its input', () => {
+    const frozen = Object.freeze(rows.map((r) => Object.freeze({ ...r })));
+    const out = filterByScope({ teams: '*', envs: ['dev', 'test', 'prod'] }, frozen, keyOf);
+    expect(out.map((r) => r.id)).toEqual([1, 2, 3, 4, 5]);
+    expect(out).not.toBe(frozen);
   });
 });
