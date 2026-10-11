@@ -1,0 +1,13 @@
+# RED (tests committed before implementation), base origin/main 8ce4f73
+$ npx vitest run src/costsource/simulatedConnectorClient.test.ts src/connectors/simulatedConnectors.dom.test.tsx
+ FAIL  src/costsource/simulatedConnectorClient.test.ts [ src/costsource/simulatedConnectorClient.test.ts ]
+Error: Cannot find module './SimulatedConnectorClient' imported from src/costsource/simulatedConnectorClient.test.ts
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/connectors/simulatedConnectors.dom.test.tsx > non-sandbox cards are simulated: chip, note, Simulate connect, no auth banner or Retry
+AssertionError: expected 'PointFivecontrolled-egressDarkPointFi…' to contain 'simulated'
+ FAIL  src/connectors/simulatedConnectors.dom.test.tsx > Simulate connect lands normalized fixture rows with zero network calls, even when repeated
+TypeError: Cannot read properties of undefined (reading 'click')
+ FAIL  src/connectors/simulatedConnectors.dom.test.tsx > a genuine LiveDataAuthError becomes a locked state with no Retry
+AssertionError: expected 'error' to be 'locked' // Object.is equality
+ Test Files  2 failed (2)
+      Tests  3 failed | 1 passed (4)
