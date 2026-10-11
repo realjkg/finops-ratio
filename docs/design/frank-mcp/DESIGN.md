@@ -7,7 +7,9 @@ Nothing in this proposal is implemented.** Every decision in section 10 is
 decision is recorded here as made. This is revision 1; it has had no
 Copilot or challenger review yet.
 
-**Origin.** The owner asked: "Will Frank also work with a localized MCP and
+**Origin.** Both origin statements below were relayed to the author in the
+commissioning task; the source messages were not seen, so their exact wording
+is **unverified**. The owner asked: "Will Frank also work with a localized MCP and
 open router?" The answer given was that OpenRouter and local model servers
 already work through `AI_PROVIDER=openllm` at the provider level (with the
 caveat in section 1.3), and that a local MCP does not, because Frank has no
@@ -25,7 +27,7 @@ could not be.
 | 1 | Problem, goals, non-goals, and what exists today |
 | 2 | Architecture |
 | 3 | Allowlist model (the core) |
-| 4 | v1 tool catalogue (all read-only) |
+| 4 | v1 tool catalog (all read-only) |
 | 5 | Threat model and mitigations |
 | 6 | Audit and observability; kill switch |
 | 7 | Models and providers |
@@ -54,7 +56,7 @@ themselves are not in the repository:
 
 > "But the creative judgment stays with the FinOps and Finance teams."
 
-Two further statements were relayed to the author in the task that
+Two further statements (like the two origin statements above) were relayed to the author in the task that
 commissioned this document, dated by that task 2026-10-04/05. They are **not**
 in the repository and the author did not see the source messages
 (**unverified** as to exact wording and date):
@@ -107,14 +109,24 @@ code adds an Authorization header (repo search, EVIDENCE.md section 3). So
 with a live provider and `NEXT_PUBLIC_AI_MODE=live`
 (`src/store/useStore.ts:75-77`) the in-app chat would, as far as the author
 could read, receive 401. The route works for a caller that sends the
-token (for example a script); the in-app live path is not wired for it. This
-was read, not run. A related fact: the Frank drawer's simulation chat route
+token (for example a script); the in-app live path is not wired for it. The
+author read this and did not run it. The challenger's review reports that it
+ran a test stubbing `fetch` against the real chat handler with
+`AI_PROVIDER=openllm` and a strong `RATIO_API_TOKEN`: `LiveAIClient` sent only
+`Content-Type` and the call was rejected (reported by the challenger; not
+re-run by the author). It is corroborated by `src/ai/chatRoute.test.ts:150-154`
+(a live provider without a token gives 401) and by
+`src/finio/LiveFinioClient.ts:5-11`, which says the browser omits the gateway
+Authorization header "exactly as LiveAIClient/LiveCMClient omit it", so the
+omission is intentional for the zero-config demo, not an oversight. A related fact: the Frank drawer's simulation chat route
 returns `provider: 'mock'` unconditionally
 (`pages/api/v1/simulation/chat.ts:17`), so it never reaches a live model.
 
 Also relevant to tenancy: the chat route's `context` (initiatives, workloads,
-summary) is **supplied by the browser** and only shape-checked
-(`pages/api/v1/ai/chat.ts:325-345`). The gateway's `tenant` value is passed to
+summary) is **supplied by the browser**. The validator checks only
+`initiatives` (an array of at most 100), `summary` and `asOf`
+(`pages/api/v1/ai/chat.ts:336-344`); the optional `workloads` array is not
+checked. The gateway's `tenant` value is passed to
 the handler but the handler ignores it (`:362-366`, parameter `_ctx`). In
 auth-off mode that tenant is the literal string `anonymous`
 (`src/server/gateway/auth.ts:88`); with auth on it is a non-reversible hash of
@@ -145,12 +157,15 @@ Tools must therefore never accept scope from the chat `context`.
    the redaction module) that other consumers use; it adds no parallel data
    path.
 6. **Knowing when to stop.** Per-turn and per-tenant budgets, a kill switch,
-   and fail-closed behaviour on any allowlist doubt (sections 3.7, 6.3).
+   and fail-closed behavior on any allowlist doubt (sections 3.7, 6.3).
 
 ### 1.5 Non-goals
 
 - No write or action tools, no autonomous remediation, no approvals by
   conversation. (Section 9.6 says what a later proposal for those must contain.)
+- No RBAC in M0-M2, tracked as T-7. (The design must still support
+  per-role, per-team and per-environment use in dev, test and production; see
+  section 3.8 and OD-6.)
 - No change to the hosted demo. It stays on the mock (`MockAIClient`,
   the default when `AI_PROVIDER` is unset or unknown:
   `src/ai/providers.ts:39-44`).
@@ -210,7 +225,7 @@ use the same broker, so the seam is proven before any server is trusted.
 3. The tool runs; its result is parsed against the pinned **output schema**
    (typed, bounded; strings length-capped; no markup type). A result that does
    not parse is replaced by a fixed error object, not passed through.
-4. The result is serialised as JSON inside a clearly delimited tool-result
+4. The result is serialized as JSON inside a clearly delimited tool-result
    message (the provider's native tool-result role), never concatenated into
    the system prompt. The system prompt states that tool results are data and
    never instructions; the extended `Treat evidence references and user
@@ -269,8 +284,11 @@ reviewed like code), parsed once at start and on an operator-triggered
 reload. There is **no** API, UI field, chat command or tool that edits it, no
 runtime discovery (no mDNS, no registry lookups, no "list servers"), and no
 user-supplied server addresses. A change to it is a reviewed change; it is
-classified like `scripts/governance/risk-rules.json`-adjacent policy
-(section 9, governance class).
+treated as policy. Today no rule in `scripts/governance/risk-rules.json`
+matches such a file (it would fall to `unclassified`, restricted by default or
+be low only if it were Markdown), so M2 needs a new path rule for it, and an
+edit to `risk-rules.json` is itself restricted (`deployment`, governance
+self-protection, `scripts/governance/**`).
 
 ### 3.2 Server pinning
 
@@ -292,7 +310,7 @@ Each entry pins:
 
 Within a server, the allowlist lists tools **by name**, each with:
 
-- `schema_hash`: SHA-256 of the canonicalised input JSON Schema, and of the
+- `schema_hash`: SHA-256 of the canonicalized input JSON Schema, and of the
   output schema where the server provides one;
 - `description_hash`: SHA-256 of the description text, because descriptions
   are model-visible instructions (the vector for tool poisoning);
@@ -370,8 +388,10 @@ At connect time and on a timer, the broker re-lists each server's tools and
 recomputes the hashes. Any of these makes that **server** unavailable (not
 just the one tool) until an operator re-approves by editing the allowlist:
 
-- a tool appears that is not in the allowlist (it is ignored and the event
-  alerts; the server stays usable only if the operator chose "ignore extras");
+- a tool appears that is not in the allowlist: that tool is **never offered
+  to the model and can never be called**, an `unlisted_tool` audit record is
+  written and an alert is raised on every re-list, and the server is marked
+  unavailable like any other change (there is no "ignore extras" option);
 - a pinned tool's schema or description hash changes;
 - a pinned tool disappears;
 - the executable or certificate pin changes.
@@ -381,7 +401,29 @@ who is not the author. The default for any parse error, missing hash, or
 unreachable server is "no tools from this server", and the turn proceeds
 without them or falls back (section 2.4).
 
-## 4. v1 tool catalogue (all read-only)
+### 3.8 Environments, roles and teams (reserved fields)
+
+The owner requires MCP to be usable in dev, test and production by any team
+under an RBAC model. Per-role and per-team scoping needs a caller identity the
+repository does not have yet (one token maps to one tenant; per-user identity is
+deferred: `docs/design/slice-3-5/DESIGN.md` D-15). This design therefore:
+
+- **Reserves** optional `environments[]` and `roles[]` / `teams[]` fields on
+  server and tool entries. The parser accepts them. **When any of these fields
+  is present and the caller context (environment, role, team) is unknown, the
+  entry is denied** (deny when present and context unknown), so an entry
+  written for finance-only use cannot become available to everyone because
+  identity is missing.
+- States that **until identity exists, per-environment separation is separate
+  allowlist files per deployment** (a dev file, a test file, a production
+  file), each reviewed separately, with different servers, hashes and
+  credentials. No environment can read another's file or credentials.
+- Defers implementing role/team evaluation to T-7. M0 to M2 contain no RBAC
+  logic beyond the reserved-field deny rule. A sprint plan on the branch
+  `docs/sprint-plan-mock-demo-mcp-rbac` is reported to cover the persona and
+  RBAC workstream and a mock identity provider (the author has not read it).
+
+## 4. v1 tool catalog (all read-only)
 
 ### 4.1 Conventions
 
@@ -403,7 +445,7 @@ a URL the model is expected to fetch.
 | `data_origin` | `synthetic_seed`, `synthetic_fleet`, or `tenant_published`; today only the first exists |
 | `truncated` | always `false`; over-cap results are errors (section 3.6) |
 
-### 4.2 Catalogue
+### 4.2 Catalog
 
 "Today" means in the repo at 62bd8ed. "In-process" means a new thin wrapper
 around existing code. **Dependency status** says whether the tool can be
@@ -414,7 +456,7 @@ built on what exists or needs something proposed.
 | `ratio_portfolio_summary` | none | totals (spend, projected savings, counts), initiatives with cost, value ratio, status, evidence status | `buildAIContext` projects the seed workloads into the same fields (`src/ai/buildAIContext.ts`); prompt lines at `pages/api/v1/ai/chat.ts:266-277` | Exists over **seed data only**. No durable workload or initiative table exists (the durable store holds cost facts, ingest bookkeeping and the outcome ledger: migrations 0001, 0002, 0004). Needs an owner decision on the real source (OD-6). |
 | `ratio_list_workloads`, `ratio_get_workload` | optional filter (team, status); `workload_id` | workload name, model, team, monthly spend, demand shape, gates passed (0-4) | `src/data/workloads.ts`; `AIWorkloadSnapshot` (`src/ai/AIClient.ts:71-80`) | Seed data only; same caveat |
 | `ratio_list_teams` | none | team names and spend | `src/attribution/aggregations.ts` through the attribution client; `GET /api/attribution?dimension=team` is mock-backed (`pages/api/attribution.ts`) | Exists, mock only |
-| `ratio_unit_costs` | `workload_id` | cost per call, per resolved, per user, per deflection, per 1k tokens in/out | `deriveUnitCosts` (`src/lib/derive.ts:12-24`); the token-cost split is labelled a display approximation (`src/lib/derive.ts:27-31`) | Exists; return the approximation flag |
+| `ratio_unit_costs` | `workload_id` | cost per call, per resolved, per user, per deflection, per 1k tokens in/out | `deriveUnitCosts` (`src/lib/derive.ts:12-24`); the token-cost split is labelled a display approximation (`src/lib/derive.ts:33-35`) | Exists; return the approximation flag |
 | `ratio_token_cache_economics` | `workload_id` | cached and uncached tokens, hit rate, rates per 1M, daily dollar split, cache discount | `deriveCacheEconomics` (`src/lib/derive.ts:80-120`); tokenomics metrics (`src/tokenomics/calculations.ts`) | Exists |
 | `ratio_model_price_comparison` | `workload_id` or an explicit volume (calls, average tokens in/out); optional model list | per-model daily/monthly cost and percent difference vs current | `compareModels`, `modelDailyCost` (`src/lib/modelCompare.ts:23-58`) | Exists. The registry holds hosted models only (`src/data/models.ts`); a self-hosted model has no price entry, so comparisons against it use the what-if tool. |
 | `ratio_findings` | `source_id`; optional type (`opportunity`, `anomaly`), severity | findings: category, title, savings or spend delta, severity, status, detected-at | `CostSourceClient.fetchFindings` (`src/costsource/CostSourceClient.ts:107-108`; `CostFinding`, lines 75-89); route `pages/api/costsource/findings.ts` | Exists for sandbox sources (offline seed). Anomalies there are **imported**, not detected natively (Slices 3-5 design section 1.3). Live sources need the deny-by-default token gate (`src/server/gateway/liveDataAuth.ts`). |
@@ -446,14 +488,17 @@ and not a recommendation. It reads nothing sensitive and writes nothing.
 | `utilization` | fraction of the hours the GPUs do useful work (0-1) |
 | `ops_monthly_cost` | people and platform cost the caller assumes (may be 0 only if stated) |
 | `migration_one_time_cost`, `amortize_months` | one-time cost spread over a period |
-| `quality_adjustment_note` (optional text, length-capped) | recorded, never computed on |
+
+There is **no free-text input**: every field is a number, a bounded integer or
+a name from the registry. (A note on quality or latency is a human's job in the
+answer, and the output always carries the fixed caveat below.)
 
 **Outputs:** `current_monthly_cost`, `hosted_monthly_cost` (with the
 components shown), `capacity_check` (whether the assumed throughput covers
 the volume, else `insufficient_capacity` and no savings figure),
 `projected_monthly_difference`, `break_even_months` or `null`, the full
 **assumptions echoed back**, `evidence_status: "projected"`, and a fixed
-caveat that quality parity, latency, and staffing are not modelled. If any
+caveat that quality parity, latency, and staffing are not modeled. If any
 assumption is missing, out of range, or zero where zero is nonsense, the tool
 returns an error naming the field, never a number.
 
@@ -510,8 +555,10 @@ every stored value passes the redaction module first.
 ### 6.2 Fit with existing patterns
 
 The simulation workspace already records audit entries as `{id, at, actor,
-persona, action, target}` inside its atomic storage command
-(`src/simulation/types.ts:12`, `src/agent-workflows/engine.ts:196`); the
+persona, action, target}` (`src/simulation/types.ts:12`; `reviewWithFrank` pushes the entries for the
+processing steps, `src/agent-workflows/engine.ts:196`; the Frank evidence doc
+describes the surrounding command as atomic:
+`docs/evidence/frank-coster-interface.md:13`); the
 gateway already writes a structured log line without secrets
 (`src/server/gateway/withGateway.ts:101-103`); the evidence docs record "responses identify
 their saved revision" (`docs/evidence/frank-coster-interface.md:21`). The tool
@@ -544,7 +591,7 @@ owner decision; this proposal does not set one.
   endpoint including OpenRouter and local servers **if** that endpoint and
   that model implement tool calling. Support differs by model and by serving
   software and sometimes by version; the author has not verified any specific
-  model's behaviour **(unverified)**. The registry's `supports_tools` flag
+  model's behavior **(unverified)**. The registry's `supports_tools` flag
   (`src/types/index.ts:160`) describes hosted models and is hand-entered
   metadata, not a certification.
 - **Certification per model.** A model is enabled for tools only after it
@@ -603,6 +650,9 @@ Tests first, as in the rest of the program (Slices 3-5 design section 7).
 | A12 | stdio executable hash differs | process not started |
 | A13 | Audit write fails | the call fails closed |
 | A14 | Tools enabled with gateway auth not enforced | startup refusal |
+| A15 | Server adds a tool not in the allowlist | the tool is never offered or callable; `unlisted_tool` audit record; alert; server marked unavailable |
+| A16 | A pinned tool disappears from the server's list | server unavailable; alert; fallback |
+| A17 | Server certificate or key pin changes | connection refused; server unavailable |
 
 ### 8.3 Pass criteria
 
@@ -620,7 +670,8 @@ measurement behind them.
 The broker's enforcement code must be mutation-tested: delete or invert, one at
 a time, each of the checks (name match, schema-hash compare, description-hash
 compare, budget caps, scope injection, output-schema parse, audit-before-return,
-kill switch, auth-required startup check), and confirm at least one test fails
+kill switch, auth-required startup check, the never-offer rule for unlisted
+tools, the pinned-tool-missing check, certificate/executable pin comparison), and confirm at least one test fails
 per mutation. A surviving mutant blocks the PR. The repository already treats
 unfaithful tests as defects elsewhere (see the test-integrity entries in the
 Slices 3-5 evidence); this applies the same standard here.
@@ -636,14 +687,21 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 - **Tests first:** adapter unit tests with recorded provider-shaped fixtures
   for tool-use and `tool_calls` responses (no network); a test that with the
-  flag off the request body is byte-identical to today's; a test that an
-  unknown tool request fails closed.
+  flag off the request body is byte-identical to today's; and the broker
+  controls that must exist before any tool does: A7 (out-of-set request), A11
+  (per-turn and per-call caps), A13 (audit write failure fails the call
+  closed), A14 (startup refusal when tools are on and gateway auth is not
+  enforced), A10 (redaction applied to audit and log text), and the kill
+  switch (6.3).
 - **Change:** `callWithTools` on each adapter; the broker with an empty
-  allowlist; `FRANK_TOOLS` flag.
-- **Expected class:** restricted: `routes` (`pages/**`), `network_egress`
-  patterns on any added `fetch(` or URL literal, and `auth_tenancy` by path
-  (`pages/api` file whose name matches the rule). Dependency class only if a
-  package is added.
+  allowlist, its call and turn caps, audit-before-return with fail-closed
+  behavior, the kill switch and the startup auth check; `FRANK_TOOLS` flag.
+- **Expected class:** restricted: `routes` (`pages/**`) and `network_egress`
+  patterns on any added `fetch(` or URL literal. `auth_tenancy` applies only
+  if a changed or new path matches `auth|tenant|rls|role` under `src/**` or
+  `pages/api/**` (for example a broker file named for tenants) or if the
+  startup check edits `src/server/gateway/**`; `pages/api/v1/ai/chat.ts` itself
+  matches none of those words. Dependency class only if a package is added.
 - **Rollback:** revert; the flag is off by default.
 - **Must not:** add any real tool, any MCP code, any provider call in tests,
   or change the default provider.
@@ -652,8 +710,16 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 - **Tests first:** the golden suite and oracle (section 8.1) against the mock
   provider in a scripted tool-calling mode; schema tests for every tool;
-  a test that no tool module imports a write path.
-- **Change:** tools from the catalogue that need no new data: portfolio
+  A1 and A2 against in-process results; A5 and A6 with injected fixtures; A8
+  and A9 across the whole catalog; an import-graph test that no tool module
+  imports a write path or a database writer. In-process tools are read-only
+  **by construction** (pure functions over values handed in) and by that
+  import-graph test, **not** by capability; the capability argument of 3.5
+  applies from the first database-backed or remote tool.
+- **Data limit:** M1 runs only on the mock, synthetic seed data. It is never
+  enabled against real data, and a live provider with tools is allowed on
+  synthetic data only (OD-4).
+- **Change:** tools from the catalog that need no new data: portfolio
   summary, workloads/teams, unit costs, token/cache economics, model price
   comparison, findings (sandbox sources), what-if. Server-side snapshot
   replaces browser `context` when tools are on.
@@ -666,15 +732,17 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 ### M2. MCP client, allowlist, audit
 
-- **Tests first:** fake in-memory servers for every adversarial case A1-A4,
-  A7, A12-A13; allowlist parser tests (reject unknown keys, missing hashes);
+- **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
+  (A5-A11, A13 and A14 re-run against the MCP path); allowlist parser tests
+  (including the reserved `environments[]`/`roles[]`/`teams[]` deny rule) (reject unknown keys, missing hashes);
   mutation checks (8.4); audit shape tests; redaction applied to audit.
 - **Change:** MCP client (after OD-1 and the specification check in section
   2.5), allowlist loader, pins, budgets, audit, kill switches. Likely adds an
   SDK dependency or a minimal client.
 - **Expected class:** restricted: `dependencies`, `network_egress`, `secrets`
-  (a secret-bearing config shape), `auth_tenancy`, and, if audit is a table,
-  `migrations`.
+  (a secret-bearing config shape), `auth_tenancy` only if paths or gateway
+  files match as for M0, a new `risk-rules.json` rule for the allowlist file
+  (itself restricted), and, if audit is a table, `migrations`.
 - **Rollback:** flag off; remove the allowlist; revert.
 - **Must not:** run any real third-party server; use real credentials; accept
   a server not in the file; call the network in tests.
@@ -699,12 +767,24 @@ by running the classifier on the real diff; a miss is reported, not argued.
   authentication and its own audit.
 - **Tests first:** the broker tests re-run against the server entry; a test
   that the server exposes exactly the allowlisted tools and no others.
-- **Expected class:** restricted (`routes`, `auth_tenancy`, `network_egress`).
+- **Expected class:** restricted (`routes`, `network_egress`; `auth_tenancy`
+  if its own authentication touches the gateway or matching paths).
 - **Rollback:** disable the route or process; revert.
 - **Must not:** expose write tools, accept unauthenticated clients, or expose
   the hosted demo.
 
-### 9.5 Order and dependencies
+### 9.5 Order, dependencies and where each adversarial case lands
+
+**Assignment of every A-case to a slice (first slice that must pass it):**
+
+| Slice | Cases |
+|---|---|
+| M0 | A7, A10, A11, A13, A14 |
+| M1 | A1, A2 (in-process results), A5, A6 (fixtures), A8, A9 |
+| M2 | A3, A4, A12, A15, A16, A17; A1, A2, A5-A11, A13, A14 re-run against MCP servers |
+| M3 | A5, A6 and the golden suite, per model |
+| M4 | the broker suite re-run against the server entry |
+
 
 M0 then M1 then M2 then M3. M4 is independent after M2. Forecast and anomaly
 tools join after Slices 3-5's read API merges (X1-a in the Slices 3-5 design
@@ -715,7 +795,7 @@ whether it replaces or feeds X1-a (OD-10).
 ### 9.6 Out of scope until a separate, owner-approved proposal
 
 Write and action tools. Such a proposal must include at least: a human
-approval gate before every action, modelled on `src/mission/adjustmentGate.ts`
+approval gate before every action, modeled on `src/mission/adjustmentGate.ts`
 (confidence below a bar routes to a governance gate for human confirmation,
 and "NEVER auto-applied", line 7 and lines 51-65) and on the existing rule that a
 different person must review an agent proposal
@@ -742,7 +822,7 @@ example "the model sees the allowlist's text, not the server's"), which are
 | OD-3 | Which models to certify first, and the pass thresholds | the owner's list | Certify **one hosted path and one local path** first, so the claim "works with a local server" has evidence. The author does not pick models (**unverified** capability claims either way). Thresholds as in 8.3. |
 | OD-4 | Is a hosted model endpoint acceptable for tool results, or must tool-enabled mode use only a model server the operator runs? | hosted allowed / local only | **Local-or-account-hosted only for any real data;** hosted allowed for synthetic data. This is what "keeping the learning inside the production accounts" asks for most directly. |
 | OD-5 | Where do local MCP servers run, and who owns each? | per-server decision | Each allowlist entry names an owner (3.2); no entry without one. Servers run outside the app container, owned by the team that owns the data. |
-| OD-6 | Real data, real credentials, real model infrastructure | when, if ever | **Not in this program.** BOUNDARY v2 stands; this proposal is exercised only on synthetic data and fakes. |
+| OD-6 | Real data, real credentials, real model infrastructure, and use in dev, test and production under RBAC | when | The owner requires MCP to be usable in dev, test and production for any team under RBAC. **The design must support that, and the production go-live stays the owner's gate (OD-12).** Until the owner opens that gate, BOUNDARY v2 stands: this program uses only synthetic data and fakes, with no real credentials or spend. Production use is then a configuration and review step (a separate allowlist file per deployment, 3.8; the reader role, 3.5; the model endpoint choice, OD-4; identity and RBAC, T-7), not a redesign. |
 | OD-7 | Spend and infrastructure for self-hosted models (GPUs, operations) | owner action | Needs explicit approval and a budget under BOUNDARY v2; the what-if tool (4.3) can inform it but is not evidence for it. |
 | OD-8 | Budget defaults | author suggests: 5 tool calls and 20 per-tenant calls per minute, 32 KB result, 5 s timeout, 8,000 tool-result tokens per turn | The author has no measurements; treat as placeholders, set after M1 measures real result sizes. |
 | OD-9 | Audit storage and retention period | log pipeline / table; period | Log pipeline for M2; the owner sets the period. |
@@ -759,14 +839,15 @@ example "the model sees the allowlist's text, not the server's"), which are
 | T-3 | The chat route trusts a browser-supplied snapshot; with tools on, the server must build it (M1) | designed here |
 | T-4 | Durable outcome evidence has no read route and no reader grant beyond events and counts | dependency of the durable `ratio_outcome_evidence` |
 | T-5 | `allocateSharedCost` has no production caller; attribution tool is foundations only | dependency |
-| T-6 | Wrong project instructions loaded for this session: `/home/user/adaptcloud/CLAUDE.md` describes an unrelated project ("Agnus Dei / Sage"); it was ignored (same item as T4 in the Slices 3-5 design) | report to whoever configures sessions |
+| T-6 | A sprint plan on branch `docs/sprint-plan-mock-demo-mcp-rbac` is reported to cover the persona/RBAC workstream and a mock identity provider; this proposal should be reconciled with it when both are reviewed (the author has not read that branch) | open |
+| T-7 | Per-role, per-team and per-environment tool allowlists (RBAC for MCP in dev, test and production). Depends on per-user identity (D-15). Until then: reserved fields with deny-when-present-and-context-unknown, and a separate allowlist file per deployment (3.8) | open, not in M0-M2 |
 
 ## 12. Rollback
 
 - **This PR:** revert the two documents. Nothing else changes.
 - **Later code PRs:** each has its own rollback in section 9. Because the
   tool layer is behind `FRANK_TOOLS` (default off) and an empty allowlist
-  offers no tools, turning the flag off restores today's behaviour in every
+  offers no tools, turning the flag off restores today's behavior in every
   milestone.
 
 ## 13. Honesty section
@@ -789,9 +870,9 @@ real source for workload and initiative data; per-user identity; a tool-calling
 adapter; an MCP client.
 
 **What the author could not verify:** the MCP specification (unreachable);
-any vendor's tool-calling behaviour, any named model's capability, and
+any vendor's tool-calling behavior, any named model's capability, and
 OpenRouter's compatibility (no network access to those sources; the repo has
-no test of OpenRouter); whether the in-app live path 401s (read, not run); the
+no test of OpenRouter); whether the in-app live path 401s (read by the author; the challenger reports running a stubbed-fetch test that was rejected, not re-run by the author); the
 exact wording and date of two relayed owner quotes. These are marked
 **(unverified)** where they appear.
 
