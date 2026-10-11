@@ -1,14 +1,25 @@
 // Formatting helpers — all currency/number display flows through here so the
 // UI stays consistent and the mock agent can reuse the same strings.
 
+/**
+ * Places the sign before the currency symbol (`-$702`, never `$-702`). Negative
+ * zero and values that round to zero (`-0.004`) render unsigned (`$0.00`).
+ * Negative infinity keeps its sign even though its magnitude has no digit.
+ */
+function signedUSD(value: number, magnitude: string): string {
+  const negative = value < 0 && (!Number.isFinite(value) || /[1-9]/.test(magnitude));
+  return `${negative ? '-' : ''}$${magnitude}`;
+}
+
 export function formatUSD(value: number, opts: { compact?: boolean } = {}): string {
-  if (opts.compact && Math.abs(value) >= 1000) {
-    return `$${(value / 1000).toFixed(1)}k`;
+  const abs = Math.abs(value);
+  if (opts.compact && abs >= 1000) {
+    return signedUSD(value, `${(abs / 1000).toFixed(1)}k`);
   }
-  if (Math.abs(value) >= 100) {
-    return `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  if (abs >= 100) {
+    return signedUSD(value, abs.toLocaleString('en-US', { maximumFractionDigits: 0 }));
   }
-  return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return signedUSD(value, abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 }
 
 export function formatCents(value: number): string {

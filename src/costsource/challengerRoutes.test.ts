@@ -181,7 +181,10 @@ describe('#8 /api/costsource/sources hides live status from anonymous callers', 
       if (
         s.id === 'pointfive-sandbox' ||
         s.id === 'focus-file-sandbox' ||
-        s.id === 'servicenow-sandbox'
+        s.id === 'servicenow-sandbox' ||
+        s.id === 'aws-sandbox' ||
+        s.id === 'azure-sandbox' ||
+        s.id === 'gcp-sandbox'
       )
         continue;
       expect(s.configured).toBe(false);

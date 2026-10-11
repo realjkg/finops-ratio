@@ -20,6 +20,7 @@ import type { FocusCoreV10, RawSourceRow } from './focusRows';
 import { pointFiveLiveDescriptor, resolvePointFiveStatus } from './pointfiveConfig';
 import { connectorDescriptor, resolveConnectorStatus } from './connectorConfig';
 import { FOCUS_EXPORT_CONNECTOR_SPECS } from './focusExportConnectors';
+import { SYNTHETIC_CLOUD_DESCRIPTORS } from './sandboxSources';
 
 const RESOURCE_PREFIX = 'arn:ratio:workload/';
 
@@ -85,6 +86,8 @@ export function sourcesForEnv(env: Record<string, string | undefined>): CostSour
       configured: true,
       note: 'Synthetic CMDB/ITBM cost allocation — CI-keyed service lines through the FOCUS v1.4 shim; not a live ServiceNow integration.',
     },
+    // Synthetic AWS / Azure / GCP sandboxes (card A6): static offline descriptors.
+    ...SYNTHETIC_CLOUD_DESCRIPTORS.map((d) => ({ ...d, capabilities: [...d.capabilities] })),
     // Live PointFive adapter (PR E). Its descriptor is computed from the feature
     // flag + OAuth env so `configured` honestly reflects whether the dark adapter
     // has been switched on. Default build: flag OFF → configured:false (ships dark).
