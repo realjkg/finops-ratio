@@ -93,9 +93,6 @@ searched as a whole tree.
 
 Classifier result at the final head of revision 3 (re-run on the real diff
 against `origin/main` at 8caec87): `risk: restricted`, class `retention` only,
-rule `retention.mention`. On the first commit it fired on `DESIGN.md` (the
-audit-retention discussion); at the revision 3 head it fires on the files
-recorded in the pull request description and the report (this section's own
-text contains the word, so `EVIDENCE.md` matches too). Recorded also in the pull request description (the classifier is run on the real diff, `node scripts/governance/classify-risk.mjs
+rule `retention.mention`, on `docs/design/frank-mcp/EVIDENCE.md` only (this section's own text contains the word). `DESIGN.md` does not match against the 8caec87 base, because its added lines do not contain the word; on the first commit (c97852d, against 62bd8ed) it matched `DESIGN.md`. Recorded also in the pull request description (the classifier is run on the real diff, `node scripts/governance/classify-risk.mjs
 --git origin/main...HEAD`; the result is reported as it came out, and the
 wording of these documents was not shaped to avoid any rule).
