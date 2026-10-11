@@ -1,6 +1,6 @@
 # Sprint plan: mock-demo environment, MCP-connected access, and role-based access
 
-Status: proposal for owner review. Docs only. Base: `origin/main` at `62bd8ed`.
+Status: proposal for owner review. Docs only. Base: `origin/main` at `8caec87` (revision 2; it includes `docs/design/frank-mcp`).
 Companion files: [TASKS.md](./TASKS.md) (sprint backlog and agent runbook) and
 [EVIDENCE.md](./EVIDENCE.md) (how every fact below was verified).
 
@@ -28,8 +28,8 @@ routine in that skill.
    only MCP code is a PointFive-specific client scaffold (F12). The plan adds a
    generic, allowlisted, read-only-first MCP client with a per-role tool
    allowlist, per-environment scoping (dev, test, prod) and per-team
-   credentials. The Frank MCP proposal on branch `docs/frank-mcp-proposal` is
-   written separately; this plan references it and does not duplicate it.
+   credentials. The Frank MCP design (`docs/design/frank-mcp`, now on main) is
+   referenced, not duplicated; section 5a states how the two fit.
 3. **Do authentication and roles exist for the views and for change management
    through ServiceNow and Jira, with automated ticketing?** Partly, and not in
    the form the question needs.
@@ -38,7 +38,7 @@ routine in that skill.
    - Roles exist only inside the dev/test customer simulation, as three
      fixture personas with server-side checks (F5, F6).
    - The page views have no server-side access control at all. Persona is a
-     browser setting (F4). Seven API routes serve seeded data anonymously (F3).
+     browser setting (F4). Seven API route files have no authentication check (F3).
    - Outbound ticketing exists: create, attach and status lookup for Jira and
      ServiceNow behind `POST /api/v1/cm/change` (F7). It is not automated: a
      caller must invoke it, nothing links a ticket to an approval or an apply,
@@ -50,14 +50,16 @@ routine in that skill.
    how to take a card without conflicting with the others.
 
 How hard is it to build with security-enabled APIs? Moderate overall, and hard
-in three specific places. See section 6: roughly 66 to 105 person-days for the
-whole mock-environment scope (the sum of the table there), of which the
+in three specific places. See section 6: roughly 97 to 149 person-days for the
+whole mock-environment scope (the sum of the table there; revision 1 said 66
+to 105 and left out the browser session, page-data scoping, the data-provider
+seam and the remaining gateway routes), of which the
 identity-and-roles retrofit across existing routes, webhook trust and the
 two-way ticket status sync carry most of the risk.
 
 ## 2. Current-state facts (verified on main)
 
-Every row was checked against `origin/main` at `62bd8ed`. EVIDENCE.md lists the
+Every row was checked against `origin/main` at `62bd8ed` (revision 1); rows F21 and F22 were added in revision 2 and checked at `8caec87`, which differs from `62bd8ed` only by documentation. EVIDENCE.md lists the
 command behind each. A lead from the owner's brief that turned out to be wrong
 or incomplete is marked "corrected".
 
@@ -65,7 +67,7 @@ or incomplete is marked "corrected".
 |---|---|---|
 | F1 | One shared bearer token. `resolveGatewayAuth` turns enforcement on when `RATIO_API_TOKEN` is set, or when a live AI provider or a live change-management provider (`jira`, `servicenow`) is selected. With no token and the mock provider, enforcement is off and every caller is `anonymous`. | `src/server/gateway/auth.ts:36-43`, `:88` |
 | F2 | The tenant is a non-reversible hash of the token (djb2 to base36), used for rate limiting and logs. There is no user identity and no role. Token comparison is constant time (`tokensMatch`). | `src/server/gateway/auth.ts:55-61`, `:69` |
-| F3 | Seven API routes have no authentication check and serve seeded data: `attribution`, `tokenomics`, `prediction/predict`, `prediction/accuracy`, `report/snapshot`, `costsource/ingest` and `hello`. They use only `withInternalErrorGuard`. Two more (`a2a/handshake`, `finio/export`) re-export their `v1` gateway-wrapped versions. | `pages/api/attribution.ts`, `pages/api/tokenomics.ts`, `pages/api/prediction/*.ts`, `pages/api/report/snapshot.ts`, `pages/api/costsource/ingest.ts`, `pages/api/hello.ts` |
+| F3 | Seven API route files have no authentication check: `attribution`, `tokenomics`, `prediction/predict`, `prediction/accuracy` (two files), `report/snapshot`, `costsource/ingest` and `hello`. Six serve seeded data; `costsource/ingest` is a stateless POST that normalizes rows the caller supplies. They use only `withInternalErrorGuard`. Two more (`a2a/handshake`, `finio/export`) re-export their `v1` gateway-wrapped versions. | `pages/api/attribution.ts`, `pages/api/tokenomics.ts`, `pages/api/prediction/*.ts`, `pages/api/report/snapshot.ts`, `pages/api/costsource/ingest.ts`, `pages/api/hello.ts` |
 | F4 | The persona (`executive`, `technical`, `procurement`) is a client-side value stored in the browser (`ratio_persona`). It is a lens, not an authorization boundary. No `getServerSideProps` or `getStaticProps` exists in any page, and there is no `middleware.ts`. | `src/lib/persona.ts:10`, `:18` |
 | F5 | Fixture identities exist only for the simulation: six users (acme and northstar, each with executive, technical and procurement), cookie session, CSRF check, 404 unless `RATIO_SIMULATION=1` and `RATIO_ENV` is `development` or `test`. | `src/simulation/server/http.ts:9-16`, `:17`, `:34`; `src/simulation/server/enabled.ts:5-7` |
 | F6 | The simulation has a per-action role table, an ordered governance gate check, and a three-state change record (`requested`, `approved`, `applied`). Request and apply are technical; approve is executive or procurement; the first two gates are technical, the rest are not. Every command is audited. | `src/simulation/server/workflow.ts:87-112`, `:163`, `:228`; `src/simulation/types.ts:7-9` |
@@ -83,6 +85,8 @@ or incomplete is marked "corrected".
 | F18 | Migration numbering is unresolved: `0001`, `0002`, `0004` exist; `0003` and `0005` are reserved by comments elsewhere; issue #94 tracks it (see EVIDENCE.md for what could and could not be verified). Cards in this plan add no migrations. | `src/ingest/db/migrations/`; `docs/design/slice-3-5/DESIGN.md:561` |
 | F19 | Demo defects confirmed. (a) `formatUSD(-5)` returns `$-5.00` and `formatUSD(-1500)` returns `$-1,500`. (b) No favicon: no `public/` directory and no icon link in the document head. (c) The "Customer sign-in simulation" link renders whenever no simulation session exists, even when the simulation is disabled and the route would return 404. (d) The findings card is titled "(PointFive DeepWaste shape)" for every source, including ServiceNow. (e) Two of the three `/demo` prompts fall through to the mock Frank help reply. | `src/lib/format.ts:4-12`; `pages/_document.tsx:8`; `src/simulation/SimulationBar.tsx:22`; `src/costsource/CostSourcePage.tsx:603`; `pages/demo.tsx:9-13` with `src/ai/MockAIClient.ts:18-25` |
 | F20 | Existing building blocks to reuse: bounded backoff with jitter and a transient-error classifier (ingest worker), a sliding-window rate limiter, a redacting error logger, and Playwright simulation specs. | `src/ingest/retry.ts:8-9`; `src/server/gateway/rateLimit.ts:20`; `tests/simulation/*.spec.ts` |
+| F21 | A cost row whose `ResourceId` does not start with `arn:ratio:workload/` normalizes with an empty `x_RatioWorkloadId`, an empty team and value 0 ("unknown, not hidden"). `MockCostSourceClient` returns the all-workload rows for any source id it does not dispatch specially, and `SourceKind` has no synthetic-cloud member. | `src/costsource/normalize.ts:46-58`; `src/costsource/MockCostSourceClient.ts:41-83`, `:95-120`; `src/costsource/seed.ts:189`; `src/costsource/CostSourceClient.ts:21` |
+| F22 | The browser store is initialized with the whole bundled seed (`workloads: WORKLOADS`) and `clearSimulation` resets to it, and the pages and components listed in EVIDENCE.md read `workloads` from it. So the data reaches every viewer's browser regardless of the API checks; scoping the views requires the store to load from a scoped endpoint when enforcement is on. | `src/store/useStore.ts:23`, `:155`, `:270`; grep of `.workloads` under `src` and `pages` (EVIDENCE.md) |
 
 Answer to the "is there a persona or role model" question in one line: three
 fixture personas exist in the simulation (F5, F6); none exists for the real
@@ -129,8 +133,8 @@ must allow the request.
 
 ### 4.2 The contract between cards
 
-Every Sprint A card builds against this literal contract so the cards stay
-independent. The contract is owned by card A1 (`src/identity/types.ts`).
+Every card builds against this literal contract so the cards stay independent.
+The contract is implemented by card A1 (`src/identity/`, `src/rbac/`).
 
 ```ts
 export type Role = 'cto' | 'finops_lead' | 'finance' | 'eng_lead' | 'procurement' | 'auditor';
@@ -147,29 +151,86 @@ export interface Principal {
   authMethod: 'mock-idp' | 'oidc' | 'legacy-shared-token';
 }
 
+export type Action =
+  | 'view.read' | 'view.export' | 'view.configure'
+  | 'change.request' | 'change.approve' | 'change.apply'
+  | 'ticket.create' | 'ticket.attach' | 'ticket.status'
+  | 'mcp.read' | 'mcp.write'
+  | 'budget.edit' | 'connector.manage' | 'ingest.write' | 'audit.read';
+
+export type TicketState = 'none' | 'open' | 'approved' | 'rejected';
+
+export interface Resource {
+  kind: 'view' | 'route' | 'change' | 'ticket' | 'mcp_tool' | 'audit';
+  id: string;                  // view or route id from the matrix, change id, or tool name
+  team?: string;               // owning team of the data or change
+  env?: DeployEnv;             // already mapped (see the table below)
+  requesterSub?: string;       // change only: who requested it
+  approverSub?: string;        // change only: who approved it, if anyone
+  ticketState?: TicketState;   // change only: the live state of the bound ticket
+}
+
 export type Verdict =
   | { allow: true }
-  | { allow: false; status: 401 | 403; reason: string };   // reason is fixed text, never echoes input
+  | { allow: false; status: 401 | 403 | 409; reason: string };  // fixed text, never echoes input
 
 export interface TokenVerifier {
   verify(bearer: string, ctx: { now: number; deployEnv: DeployEnv }): Promise<Principal>;  // throws on any failure
 }
 ```
 
+`authorize(principal, action, resource)` is pure. It returns 401 for no
+principal, 403 for a role, team or environment the grant does not cover, and
+409 only for a state conflict on a change (apply while the ticket is not
+approved). The "A" cells of section 4.5 are therefore a pure verdict over
+`Resource.requesterSub`, `approverSub` and `ticketState`; the caller (card C3)
+fills those fields from its change store and the live ticket status.
+
+**Environment vocabulary.** Three vocabularies exist today and do not match:
+the deployment environment the process runs in (`RATIO_ENV`: `development`,
+`test`, `staging`, `production`, in `src/ingest/config.ts:11`; the simulation
+only checks `development` and `test`, F5), the data's environment on each
+workload (`prod`, `staging`, `dev`, `sandbox`, F16), and the new
+`DeployEnv` (`dev`, `test`, `prod`). The interim mapping below is implemented
+once, in `src/identity/envMap.ts` (card A1), and is replaced by owner decision
+D11 if the owner chooses other names.
+
+| Source value | `DeployEnv` |
+|---|---|
+| `RATIO_ENV` = `development` | `dev` |
+| `RATIO_ENV` = `test` or `staging` | `test` |
+| `RATIO_ENV` = `production` | `prod` |
+| Workload `environment` = `dev` or `sandbox` | `dev` |
+| Workload `environment` = `staging` | `test` |
+| Workload `environment` = `prod` | `prod` |
+| Anything else or unset | no mapping: fail closed (deny) |
+
+The deployment's own `DeployEnv` (the value a token's `aud` must equal) is
+derived from `RATIO_ENV` by that function. The mock IdP refuses to run when
+`RATIO_ENV` is `production` (card A2). `RATIO_RBAC=enforce` switches
+verification on; unset, the offline default of F1 is unchanged.
+
 Mock-IdP token claims (card A2): `iss`, `aud` (the deployment environment),
 `sub`, `iat`, `exp`, `jti`, plus `role`, `teams`, `envs`, `tenant`. A real OIDC
 provider would supply the same claims through its own mapping; that swap is
-owner decision D1 and is not done here.
+owner decision D1 and is not done here. Per-user `Principal.sub` is deferred
+for the real system in `docs/design/slice-3-5/DESIGN.md` (D-15); this sprint
+introduces it for the mock IdP only, so the shape is proven without a real
+identity source.
 
 ### 4.3 Where today's shared token must be replaced or wrapped
 
 | Today | Change | Card |
 |---|---|---|
 | `checkAuth` returns `{ok, tenant}` for one shared token (`auth.ts:84-112`) | Wrap: a new `authenticate()` tries the `TokenVerifier` first, then falls back to the legacy token and yields a `legacy-shared-token` principal with a fixed, narrow role grant | B1 |
-| `withGateway` step 3 calls `checkAuth` and passes only `{tenant}` to handlers (`withGateway.ts:163-170`, `:194`) | Replace the context with `{principal}` and keep `tenant` as a derived field so existing handlers compile | B1 |
+| `withGateway` step 3 calls `checkAuth` and passes only `{tenant}` to handlers (`withGateway.ts:163-170`, `:194`) | Replace the context with `{principal}` and keep `tenant` as a derived field so existing handlers compile; add the `requires` option (a route declares its action and resource in one place) and the `onVerdict` hook | B1 |
 | `evaluateLiveDataAuth` and `gateSourceAccess` compare against `RATIO_API_TOKEN` (`liveDataAuth.ts:141-162`) | Wrap: accept a verified principal with a data-read grant; the failed-attempt accounting stays | B2 |
-| Seven unauthenticated routes (F3): six get authentication and a scope filter; `hello` stays an explicit public liveness route. Sandbox data stays reachable only where F14 says so | B3 |
-| Persona in `localStorage` (F4) | Derive the active persona from the verified principal on the server; the switcher becomes a lens over what the role already allows | C2 |
+| Seven unauthenticated route files (F3) | Six get authentication, `requires` and the scope; `hello` stays an explicit public liveness route | B3 |
+| `v1/ai/chat`, `v1/finio/export`, `v1/a2a/handshake`, `v1/costs/published` are gateway-wrapped but have no per-role check | Add `requires` and scope; chat builds its context from the caller's scope on the server | B9 |
+| `cm/change` has no per-role check | Add the lifecycle operations and `requires` | C3 |
+| The browser has no way to obtain or send a credential, and the store holds the whole seed (F11, F22) | Cookie session, principal endpoint, scoped workloads endpoint, credentials on every `Live*Client` | B7 |
+| The models read the seeded dataset directly | One data-provider seam that takes a scope | B8 |
+| Persona in `localStorage` (F4) | Derive the active persona from the verified principal; the switcher becomes a lens over what the role already allows | C2 |
 | Two tenant concepts (F15) | Use `Principal.tenant` for both | B1 |
 
 ### 4.4 Permission matrix: persona by view
@@ -198,16 +259,20 @@ deployment environment is rejected by another (the `aud` claim).
 | Reports `/reports`; `/api/report/snapshot` (export carries the caller's scope) | O | D | D | T | O | D |
 | FinOps export `/finio`; `/api/v1/finio/export` | - | D | D | - | - | D |
 | Outcomes and executive dashboard `/outcomes`, `/mission` | O | D | O | T | O | D |
-| Frank `/agent-workflows`; `/api/v1/ai/chat` (context is built from the caller's scope only) | O | D | O | T | O | D |
+| Frank `/agent-workflows`; `/api/v1/ai/chat` (context is built on the server from the caller's scope only) | O | D | O | T | O | D |
+| Demo pages `/demo`, `/hello`, `/finio/demo` (fixture data only; marked `public` in the matrix) | R | R | R | R | R | R |
+| Published costs `/api/v1/costs/published`; A2A handshake `/api/v1/a2a/handshake` | - | D | D | - | - | D |
 | Change management `/api/v1/cm/change` | see 4.5 | see 4.5 | see 4.5 | see 4.5 | see 4.5 | see 4.5 |
-| Audit log (new) | O | D | - | T | - | D |
+| Audit log (new page `/audit`; `/api/v1/audit/records`) | O | D | - | T | - | D |
 | Customer simulation `/simulation`, `/workspace`, `/api/v1/simulation/*` | dev and test only | dev and test only | dev and test only | dev and test only | dev and test only | dev and test only |
 
 Reconciliation rule (tested in 4.7): for any single underlying dataset, the
 CTO roll-up total equals the FinOps lead drill-down total, equals the sum of
 every Eng lead's team-scoped total across all teams, and equals the Finance
-total. Rounding is to the cent, applied once at the leaf (see the existing
-`formatUSD` fix in card A7 for display only).
+total. Money is summed in integer cents: each dollar value is converted once at the
+leaf (`Math.round(dollars * 100)`) and totals are formatted from cents (card
+B8; the display fix in card A7 is separate). The seeded data is in float
+dollars (F16), so the oracle for served data is committed in card B8.
 
 ### 4.5 Permission matrix: persona by action, per environment
 
@@ -232,6 +297,11 @@ Proposed; owner ratifies (D2).
 
 Rules that hold across the table:
 
+- The "A" cell is a pure `authorize()` verdict over `Resource.ticketState`,
+  `requesterSub` and `approverSub` (section 4.2): 403 when no ticket is bound
+  in prod, 409 when the ticket is not approved, 403 when the approver is the
+  requester.
+
 - Separation of duties: the approver of a change is never its requester.
 - Prod apply requires a bound ticket (card C3). A ticket that is not in an
   approved state blocks apply with 409.
@@ -246,19 +316,22 @@ Rules that hold across the table:
 ### 4.6 The enforcement layer, built so real OIDC can replace the mock
 
 ```
-request -> authenticate(bearer)
-             |-- TokenVerifier (mock-idp now; oidc later)  -> Principal
-             |-- legacy shared token                       -> Principal (narrow, flagged)
-          -> authorize(principal, action, resource)        -> Verdict  (pure, table-driven)
-          -> scope filter (teams, envs) on the data layer  -> rows the caller may see
-          -> handler -> audit record (who, what, which environment, verdict)
+request -> authenticate(bearer or ratio_session cookie)
+             |-- TokenVerifier (MockIdpVerifier now; oidc later) -> Principal
+             |-- legacy shared token                              -> Principal (narrow, flagged)
+          -> authorize(principal, action, resource)               -> Verdict (pure, table-driven)
+          -> scope filter (teams, envs) in the data-provider seam -> rows the caller may see
+          -> handler
+          -> onVerdict hook                                       -> audit record (card C5)
 ```
 
-Only the `TokenVerifier` implementation is mock-specific (`MockIdpVerifier`, card B1). The issuer and verifier in card A2 sign and
-verify test JWTs and return raw claims; card B1 maps them onto `Principal`. They use a generated local key (EdDSA or ES256 through
-`node:crypto`; no new dependency is needed for the mock). A real OIDC verifier
-would fetch the provider's signing keys, validate `iss`, `aud`, `exp` and `nbf`,
-and map provider claims onto `Principal`. That one verifier file is the only code that changes
+Who owns what. Card A2 owns the issuer and a raw-claims verifier. It signs and
+verifies test JWTs with a generated local key (EdDSA or ES256 through
+`node:crypto`; no new dependency) and does not know about `Principal`. Card B1
+owns `MockIdpVerifier`, the thin class that maps those claims onto `Principal`
+and implements `TokenVerifier`. A real OIDC verifier would fetch the
+provider's signing keys, validate `iss`, `aud`, `exp` and `nbf`, and map
+provider claims onto `Principal`; that one class is the only code that changes
 (D1).
 
 ### 4.7 Persona-accuracy and negative tests
@@ -270,7 +343,9 @@ are:
 1. **Same data, right numbers per persona.** CTO roll-up, FinOps lead
    drill-down, Finance and each Eng lead are computed from one dataset; each
    persona's figures match a committed oracle (hand-checked constants, not
-   recomputed by the code under test).
+   recomputed by the code under test). Two oracles: the synthetic dataset in
+   cards A3 (unit level), and the real seeded dataset the app serves in card B8
+   (float dollars converted to cents once at the leaf).
 2. **Reconciliation.** CTO total equals FinOps lead total equals the sum of Eng
    lead totals equals Finance total, to the cent.
 3. **No stale or partial figures.** A change to the dataset appears in every
@@ -301,22 +376,22 @@ are:
 |---|---|---|---|
 | Identity source | Shared token (F1); fixtures in simulation (F5) | `TokenVerifier` seam, mock IdP with signed JWTs, `Principal` | A1, A2, B1 |
 | Roles | Three fixture personas (F5) | Six roles, table-driven | A1 |
-| Permission matrix per view | None server-side (F4) | Data table plus `authorize()` | A1, B3 |
+| Permission matrix per view | None server-side (F4) | Data table plus `authorize()`; a browser session and a scoped workloads endpoint (F22) | A1, B3, B7, B9 |
 | Permission matrix per action | Simulation only (F6) | Same table for real actions | A1, C3 |
 | Per-environment scoping | `RATIO_ENV` gates the simulation only (F5) | `envs` claim, `aud` check | A2, B1 |
-| Per-team scoping | `team` field exists on data (F16) | `teams` claim, scope filter before aggregation | A3, B3 |
-| Audit | Simulation audit entries (F6); gateway request log with hashed tenant (F2) | Audit record for every decision, no secrets | C5 |
+| Per-team scoping | `team` field exists on data (F16) | `teams` claim, scope filter before aggregation, through one data-provider seam | A3, B8, B3, B7 |
+| Audit | Simulation audit entries (F6); gateway request log with hashed tenant (F2) | Audit record for every decision through the `onVerdict` hook (B1), sink, read route and page (C5); no secrets | B1, C5 |
 
 ### 5.2 MCP-connected access
 
-The Frank MCP proposal (branch `docs/frank-mcp-proposal`, being written by
-another agent) owns the Frank-specific design. This plan covers the
-platform pieces every MCP use needs and defers to that proposal for Frank.
+The Frank MCP design (`docs/design/frank-mcp`, section 5a) owns the
+Frank-specific design. This plan covers the platform pieces every MCP use
+needs and defers to that design for Frank.
 
 | Need | State today | What to build | Card |
 |---|---|---|---|
-| Generic client | PointFive-only scaffold (F12) | MCP client with `initialize`, `tools/list`, `tools/call` over one transport interface | A5 (mock server), B5 (client) |
-| Read-only first | No allowlist | Allowlist of tool names with a `readOnly` declaration; unknown tools denied | B5 |
+| Generic client | PointFive-only scaffold (F12) | MCP client with `initialize`, `tools/list`, `tools/call` over HTTP | A5 (mock server), B5 (client) |
+| Read-only first | No allowlist | Operator-managed allowlist **file** pinning server, tool name, description hash and schema hash; read-only comes from the allowlist, never from the server's annotation; unknown tools denied | B5 |
 | Environment scoping | None | One endpoint registry keyed by environment; a dev token cannot reach a prod endpoint | B5 |
 | Per-role tool allowlist | None | Role to tool mapping, enforced by `authorize()` before any call | B5 |
 | Per-team credentials | None | Credential reference per team and environment, resolved server-side, never returned | B5 |
@@ -328,10 +403,10 @@ platform pieces every MCP use needs and defers to that proposal for Frank.
 | Need | State today | What to build | Card |
 |---|---|---|---|
 | Outbound create, attach, status | Done (F7) | Keep; add a base-URL seam for ServiceNow (F8) | B4 |
-| Outbound update (comment, transition) | Missing | Add `update` operation | C3 |
+| Outbound update (comment, transition) | Missing | Add `update` operation (request, bind, approve, apply, update and get operations are specified in card C3) | C3 |
 | Inbound webhook | Missing (F10) | Route that verifies an HMAC signature over the raw body with a timestamp window, and rejects replays by event id | C4 |
 | Idempotency keys | Missing (F8) | Caller key stored with the result; a retry returns the first ticket | C3 |
-| Status sync | Missing (F10) | Poll fallback plus webhook; one state machine mapping provider statuses to `requested`, `approved`, `applied`, `rejected` | C4 |
+| Status sync | Missing (F10) | Poll fallback plus webhook; one state machine mapping provider statuses to `requested`, `approved`, `applied`, `rejected` | C8 |
 | Approval gating before apply | Simulation only (F6) | Apply checks the bound ticket state | C3 |
 | Ticket-to-change binding | Missing | Store `ticketRef` on the change; reject apply without it in prod | C3 |
 | Least-privilege service accounts | Single credentials per provider | One account per environment with create and read only; documented in the stub contract | B4, owner D3 |
@@ -340,7 +415,49 @@ platform pieces every MCP use needs and defers to that proposal for Frank.
 | Retries, backoff, timeouts | None on outbound calls (F8) | Reuse backoff helper (F20); timeout on every call; retry only safe operations | B4 |
 | Rate limits | 1,000 per minute per tenant (F20) | Add a per-provider outbound limit | C3 |
 | Audit trail | Not for tickets | Record request, ticket, approval and apply linkage | C5 |
-| SSRF and injection defense | Done for refs (F9) | Keep. Add: ServiceNow instance host must be on an allowlist, and outbound URLs may not target private ranges unless the mock flag is set | B4 |
+| SSRF and injection defense | Done for refs (F9) | Keep. Add: outbound hosts must be on a host allowlist (`CM_ALLOWED_HOSTS`), so a self-hosted on-prem Jira stays possible; loopback stubs are allowed only with `RATIO_MOCK_ITSM=1` in development or test | B4 |
+
+## 5a. Relation to docs/design/frank-mcp
+
+`docs/design/frank-mcp/DESIGN.md` (on main) is the design for Frank's use of
+an allowlisted, read-only MCP. This plan reuses its decisions and does not
+repeat them.
+
+- **B5 is the client half of its milestone M2** (MCP client, allowlist, audit),
+  limited here to HTTP transport and the A5 mock server, matching its open
+  recommendation OD-1 (HTTP only). One client serves Frank and every other
+  use; there is no second client. Frank's M0 and M1 (tool-calling seam,
+  in-process tools) and M3 (model certification) stay in that design.
+- **The allowlist is a file, not code.** It follows its section 3.1 (operator
+  file, no runtime edit path), section 3.2 and 3.3 (server pinning, and tool
+  pinning by name with `description_hash` and `schema_hash`), and 3.5. Read-only
+  comes from the operator's `read_only_via`, never from the server's own
+  annotation: a server that sets a read-only hint is still denied unless the
+  allowlist lists the tool. The revision-1 test names that assumed a server
+  annotation were replaced (A5: `write_capable_tool_declares_a_read_only_hint_and_still_mutates_state`;
+  B5: `read_only_comes_from_operator_allowlist_not_server_annotation`).
+- **Field names.** Frank's design does not fix field names for who may use a
+  tool. This plan proposes the same words as `Principal`: each tool entry has
+  `roles`, `envs` and `teams`. The names must be confirmed against Frank M2
+  before B5 starts; the permission side (allowlist entry) and the principal side
+  (token claims) then compare like with like.
+- **Tracked items it raises, handled here.** T-2 (the browser sends no
+  credential to the live chat path) is addressed for the mock path by B7. T-3
+  (the chat route trusts a browser-supplied snapshot) is addressed for the
+  enforced path by B9. Its threat rows T2 (rug pulls), T4 (out-of-allowlist
+  request), T5 (cross-tenant leakage) and T7 (secret exposure) map to B5 tests
+  (`description_hash_change_denies_the_tool`,
+  `unknown_tool_denied_before_any_network_call`,
+  `eng_lead_gets_only_own_team_rows_through_an_mcp_tool`,
+  `planted_secret_absent_from_logs_errors_and_audit`). Its T-6 (wrong project
+  instructions loaded) is not a code item and is not repeated.
+- **Identity.** Its section 3.4 says tool audit records the token-derived
+  tenant because per-user identity is deferred (slice-3-5 D-15). This sprint
+  introduces per-user `Principal.sub` for the mock IdP only; the real system
+  remains deferred (D1).
+- **Dependencies.** Frank M2 says it "likely adds an SDK dependency or a minimal
+  client". This sprint takes the minimal hand-rolled client and adds no
+  dependency. Whether to adopt an SDK later is owner decision D13.
 
 ## 6. Difficulty assessment
 
@@ -348,38 +465,45 @@ Effort is for one experienced engineer working with agents, in person-days,
 and is an estimate, not a measurement. S is 1 to 3 days, M is 4 to 8, L is 9
 to 15. The total at the end is the sum of the ranges.
 
-| Component | Size | Days | Main risk | Easy or hard |
-|---|---|---|---|---|
-| Permission matrix and `authorize()` as data | S | 2-3 | Getting owner agreement on the matrix | Easy once D2 is decided |
-| Mock IdP and token verifier (signed JWTs) | S | 2-3 | Subtle claim-validation gaps (`aud`, `exp`, algorithm confusion) | Easy to write, easy to get slightly wrong |
-| Shared dataset and persona-accuracy tests | M | 4-6 | Oracle design so tests do not recompute the code under test | Moderate |
-| Gateway retrofit: principal in context, legacy wrapper | M | 4-7 | Touches every gated route and the existing gateway tests; regressions | Hard part 1: retrofit across routes |
-| Scope filtering on seven open routes and the page data | L | 9-14 | Aggregates computed before filtering leak totals; client store holds all data today | Hard part 1 continued |
-| Route-level matrix test and Playwright persona spec | M | 4-7 | Playwright runs against a production build and is slow (see `playwright.simulation.config.ts`) | Moderate |
-| Mock Jira and mock ServiceNow stubs | M | 4-6 | Wire contract drift from the real products; keep to the subset the adapters use | Moderate |
-| ServiceNow base-URL seam and outbound hardening (timeout, retry, host allowlist) | S | 2-4 | Retrying non-idempotent create causes duplicate tickets | Easy if idempotency lands first |
-| Idempotency, approval gating, ticket binding | M | 4-7 | State machine edge cases (apply before approve, double approve) | Moderate |
-| Inbound webhook with HMAC, timestamp window, replay store | M | 4-6 | Raw-body handling in Next.js, constant-time compare, clock skew; replay store is in memory in the mock | Hard part 2: webhook trust |
-| Two-way status sync (poll plus webhook) | L | 8-12 | Out-of-order events, provider status vocabularies, loops when Ratio's own update triggers an event | Hard part 3 |
-| Generic MCP client, allowlist, env and team scoping | M | 5-8 | Transport framing is unvalidated against a real server (F12); tool schemas drift | Moderate |
-| Mock MCP server with fixture tools | S | 2-3 | Fixture realism | Easy |
-| OAuth2 client credentials / mTLS client behind an interface | M | 4-6 | Only provable against a real tenant; mock proves the shape only | Moderate, partly deferred |
-| Three synthetic cloud sandbox sources | M | 4-6 | Ingestion and financial-semantics review; must not disturb the existing three | Moderate |
-| Demo fixes (five items) | S | 2-3 | Low | Easy |
-| Audit records across decisions | S | 2-4 | Volume and secret leakage | Easy |
+| Component | Card | Size | Days | Main risk | Easy or hard |
+|---|---|---|---|---|---|
+| Permission matrix, environment mapping and `authorize()` as data | A1 | S | 2-3 | Getting owner agreement on the matrix and the interim environment mapping | Easy once D2 and D11 are decided |
+| Mock IdP: issuer and raw-claims verifier (signed JWTs) | A2 | S | 2-3 | Subtle claim-validation gaps (`aud`, `exp`, algorithm confusion) | Easy to write, easy to get slightly wrong |
+| Shared dataset and persona projections with oracle | A3 | M | 4-6 | Oracle design so tests do not recompute the code under test | Moderate |
+| Mock Jira and mock ServiceNow stubs | A4 | M | 4-6 | Wire contract drift from the real products; keep to the subset the adapters use | Moderate |
+| Mock MCP server with fixture tools (including a lying read-only hint) | A5 | S | 2-3 | Fixture realism | Easy |
+| Three synthetic cloud sandbox sources (client dispatch, kind, mapping, chip) | A6 | M | 5-8 | Financial-semantics review; the mock client falls through to all-workload rows for unknown ids (F21); must not disturb the existing three | Moderate |
+| Demo fixes: negative dollar sign and favicon | A7 | S | 1-2 | Low | Easy |
+| Demo fixes: dead link, findings header, `/demo` prompts | A8 | S | 1-3 | Low | Easy |
+| Gateway retrofit: principal in context, `requires`, verdict hook, cookie credential, legacy wrapper | B1 | M | 5-8 | Touches the gateway every gated route uses and its existing tests; regressions | Hard part 1: retrofit across routes |
+| Live-data gate accepts a principal; four costsource routes and connectors | B2 | M | 4-6 | Failed-attempt accounting and the weak-token refusal must not change | Moderate |
+| Six open routes: authentication, scope, route-level matrix test | B3 | M | 5-8 | Aggregates computed before filtering leak totals; seven existing test files must stay green | Hard part 1 continued |
+| ITSM base-origin seam, host allowlist, timeouts, safe retries | B4 | M | 4-6 | Retrying a non-idempotent create causes duplicate tickets (never retried) | Moderate |
+| Generic MCP client with operator allowlist file, env and team scoping | B5 | M | 5-8 | Transport framing is unvalidated against a real server (F12); tool schemas drift | Moderate |
+| Other views follow the synthetic mapping | B6 | S | 1-3 | Low | Easy |
+| Browser session, principal endpoint, scoped workloads endpoint, credentials on every client | B7 | M | 6-8 | The store holds the whole seed today (F22); cookie plus CSRF handling | Hard part 1 continued |
+| Data-provider seam, scope-aware models, served-data oracle | B8 | L | 9-12 | About ten modules read the seed directly; float dollars versus cents; default output must stay identical | Hard part 1 continued |
+| Remaining gateway routes: chat, FinOps export, handshake, published costs | B9 | M | 4-6 | Chat context must be built on the server; tenant binding for published costs must not change | Moderate |
+| Persona and navigation from the verified principal | C2 | S | 2-3 | Offline default must keep the executive default | Easy |
+| Browser persona matrix (Playwright) and local launcher | C1 | M | 4-8 | Playwright runs against a production build and is slow (see `playwright.simulation.config.ts`) | Moderate |
+| Change lifecycle: request, bind, approve, apply, update, idempotency | C3 | M | 5-8 | State machine edge cases (apply before approve, double approve) | Moderate |
+| Inbound webhook with HMAC, timestamp window, replay store | C4 | M | 4-6 | Raw-body handling in Next.js, constant-time compare, clock skew; replay store is in memory in the mock | Hard part 2: webhook trust |
+| Two-way status sync (poll plus webhook) | C8 | L | 9-12 | Out-of-order events, provider status vocabularies, loops when Ratio's own update triggers an event | Hard part 3 |
+| Audit sink, read route and page | C5 | M | 4-6 | Volume and secret leakage; role-scoped reads | Moderate |
+| OAuth2 client-credentials client behind an interface | C6 | M | 4-6 | Only provable against a real tenant; the mock proves the shape only | Moderate, partly deferred |
+| Promote durable rules and remove this directory | C7 | S | 1 | Low | Easy |
 
-Sum of the ranges in the table: 66 to 105 person-days (17 rows; low ends sum
-to 66, high ends to 105). Parallel agents shorten calendar time because Sprint A
-cards run side by side, but the person-day total is what review capacity must
-absorb.
+Sum of the ranges in the table: 97 to 149 person-days (25 rows, one per card; every row's range sits inside the size scale above, which is checked when this table is edited). Parallel agents shorten calendar time because Sprint A cards run side by side, but the person-day total is what review capacity must absorb.
 
 What is hard and why:
 
 - **Identity and roles retrofit.** The gateway hands every handler a tenant
-  string only (`withGateway.ts:22-25`). Seven routes have no check (F3), and the
-  UI loads all workloads into one client store, so scoping must also change the
-  data that reaches the page, not just the API. Every route, its tests, and the
-  persona switcher change.
+  string only (`withGateway.ts:22-25`). Seven route files have no check (F3),
+  four more gateway routes have no per-role check, and the browser store holds
+  the whole seed (F22), so scoping must also change the data that reaches the
+  page, not just the API, and the browser needs a session mechanism it does not
+  have (F11). Every route, its tests, the store, every client, and the persona
+  switcher change.
 - **Webhook trust.** An inbound endpoint is an open door by design. It needs
   signature verification over the exact bytes received, a freshness window, a
   replay store, and a fail-closed default. In production the replay store must
@@ -432,13 +556,14 @@ real identity provider, any production deployment, and any migration.
 | D10 | Decide the real tenant model (one tenant UUID versus the token hash, F15) | Data model |
 | D11 | Decide whether the real environments are named dev, test and prod, and how they map to workload environments `prod`, `staging`, `dev`, `sandbox` (F16) | Naming and mapping policy |
 | D12 | Approve spend, if any, for a hosted sandbox tenant of any of the above | Spend |
+| D13 | Adopt an MCP SDK dependency, or keep the hand-rolled minimal client (this sprint takes the minimal client; Frank M2 leaves the question open) | Dependency policy; needs the specification check in Frank T-1 |
 
 ## 9. Risks and open questions
 
 - **Matrix churn.** If D2 changes after cards land, the table-driven design
   confines the change to one data file and its generated tests.
-- **Gateway retrofit conflicts.** B1, B2 and B3 all touch gateway-adjacent
-  files. They are ordered, not parallel (TASKS.md).
+- **Gateway retrofit conflicts.** B1 comes first; B2, B3, B7 and B9 follow it and
+  are file-disjoint with each other (TASKS.md).
 - **Governance load.** Most auth, ingestion and route cards are restricted
   classes and need the full reviewer path; none is eligible for auto-merge.
 - **Mock fidelity.** A mock proves the adapter against the subset of the wire

@@ -1,7 +1,12 @@
 # Evidence: how the plan's facts were verified
 
 Verified on 2026-10-11 in a fresh clone at `/home/user/plan-sprint`, branch
-`docs/sprint-plan-mock-demo-mcp-rbac`, based on `origin/main` at `62bd8ed`
+`docs/sprint-plan-mock-demo-mcp-rbac`, first based on `origin/main` at `62bd8ed`
+(revision 1) and merged with `origin/main` at `8caec87` (revision 2, which
+adds `docs/design/frank-mcp`). Facts F1 to F20 were read at `62bd8ed`; the
+revision-2 merge changed only documentation, confirmed by
+`git diff --stat 62bd8ed 8caec87`. F21 and F22 and the card file lists were
+checked at `8caec87`. The revision-1 base was read with
 (`git rev-parse origin/main` after `git fetch origin` against
 `https://github.com/realjkg/finops-ratio`). Nothing was run against a network
 service other than that fetch. Line numbers are from that commit.
@@ -48,6 +53,18 @@ Each row gives the claim, the command, and the result.
 | Sandbox test already present | `ls src/costsource/sourcesForEnvPurity.test.ts` | exists; card A6 extends it |
 | Simulation sources in the workspace | `sed -n 22p src/simulation/types.ts` | `SIM_SOURCES = ['aws','azure','gcp']` are simulation connectors, separate from the cost-source sandboxes A6 adds |
 | Vitest scope | `sed -n 1,30p vitest.config.ts` | `tests/simulation/**` excluded; unit tests under `src` run by `npm test`. Persona browser specs therefore need their own folder and config (card C1) |
+| F21 unresolved rows | `sed -n 46,58p src/costsource/normalize.ts` | the `!workload` branch sets `x_RatioWorkloadId: workloadId ?? ''`, empty team, value 0 |
+| F21 mock client fallthrough | `sed -n 41,83p src/costsource/MockCostSourceClient.ts`; `sed -n 95,120p ...`; `sed -n 189p src/costsource/seed.ts` | special dispatch only for the live PointFive id, connector specs and `servicenow-sandbox`; every other id gets `rawRowsForVersion` (all workloads) |
+| F21 source kind | `sed -n 21,28p src/costsource/CostSourceClient.ts` | `SourceKind` has `pointfive`, `focus_file`, `servicenow`, `mock`, `cloud`, `kubernetes`, `nutanix`; no synthetic-cloud member. `src/costsource/index.ts` re-exports the type by name |
+| F22 store seeded from bundle | `grep -n "WORKLOADS" src/store/useStore.ts` | lines 23, 155, 270 |
+| F22 consumers | `grep -rln "s\.workloads\|state\.workloads\|\.workloads" src pages --include=*.ts --include=*.tsx` (tests excluded) | 6 pages (`agent-workflows`, `demo`, `frameworks`, `outcomes`, `overview`, `reports`) and the components under `src/{agent-workflows,attribution,components,connectors,executive,findings,mission,outcomes,simulation}` |
+| Seed consumers (card B8) | `grep -rln "from '@/data/workloads'" src pages` (tests excluded) | `attribution/{LiveAccrualBoard,MockAttributionClient,AttributionPage,accrual}`, `ai/buildAIContext`, `executive/{initiativeModel,reportModel}`, `findings/findingsModel`, `mission/missionModel`, `prediction/{MockPredictionClient,PredictionPage}`, `costsource/{seed,normalize}`, `store/useStore`, and others |
+| Tests that import the six open routes (card B3) | `grep -oE "pages/api/[a-z/]+" <file>` over the test files | `nonGatewayRoutes`, `apiContract`, `challengerRoutes`, `pointFiveHardening`, `snapshotApi`, `snapshotInternalError`, `safeMessagesSync` import one or more of them |
+| Browser callers of those routes | `grep -rln "api/attribution\|api/tokenomics\|api/prediction\|report/snapshot\|costsource/ingest\|api/hello" src` | `LiveAttributionClient`, `LivePredictionClient`, `LiveTokenomicsClient`, `LiveHelloClient`, `SnapshotButton`, `CostSourcePage.tsx:299` (ingest), `FocusDoorWalk` and mission components |
+| `RATIO_ENV` vocabulary | `sed -n 11p src/ingest/config.ts`; `cat src/simulation/server/enabled.ts` | `development`, `test`, `staging`, `production`; the simulation checks `development` and `test` only |
+| Vitest picks up new Playwright specs | `sed -n 1,30p vitest.config.ts` | default include pattern applies; only `tests/simulation/**` is excluded |
+| Frank design cross-references | `grep -n "^### M\|^| T-[0-9]\|^| T[0-9]" docs/design/frank-mcp/DESIGN.md`; `grep -n "D-15" docs/design/slice-3-5/DESIGN.md` | milestones M0 to M4; tracked items T-1 to T-6 (no T-7); threat rows T1 to T11; D-15 defers per-user identity |
+| Card governance classes | `node scripts/governance/classify-risk.mjs --paths-file <card file list>` per card | path-derived classes quoted in TASKS.md (for example A1: `auth_tenancy` x2, `unclassified` x6; A6: `financial_semantics` x9; B1: `auth_tenancy` x6); content-derived classes (`network_egress`, `secrets`) cannot be derived from paths and are marked "expected" |
 
 ## Governance classifier
 
@@ -64,15 +81,15 @@ phrases.
   `start`, `lint`, `typecheck`, `test`, `test:db`, and others; none for docs).
   `npm run lint` is `eslint .` and does not cover Markdown.
 - `git diff --check origin/main...HEAD`: see PR body for the result.
-- Effort figures in PLAN section 6 were summed from the table: 17 rows, low
-  ends 66, high ends 105.
+- Effort figures in PLAN section 6 were summed from the table: 25 rows, low
+  ends 97, high ends 149, and each row was checked against the size scale (S 1-3,
+  M 4-8, L 9-15) by script when the table was written.
 
 ## Limits of this verification
 
-- Issue #94 and the branch `docs/frank-mcp-proposal` could not be read: the
-  GitHub GraphQL interface is blocked in this session, and the branch is not on
-  `origin` yet (`git ls-remote origin 'refs/heads/docs/*'` lists three other
-  branches). The migration-numbering fact rests on the repository text in F18.
+- Issue #94 could not be read: the GitHub GraphQL interface is blocked in this
+  session. The migration-numbering fact rests on the repository text in F18.
+  `docs/design/frank-mcp` was read from `origin/main` after the revision-2 merge.
 - No test suite was run. The plan changes no code, and `node_modules` is not
   installed in the fresh clone.
 - Effort sizes are estimates, not measurements.
