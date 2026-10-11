@@ -54,3 +54,6 @@ __pycache__/
 
 # Resumable build-loop evidence and locks
 .ratio-build/
+
+# vitest local cache
+.vitest/
