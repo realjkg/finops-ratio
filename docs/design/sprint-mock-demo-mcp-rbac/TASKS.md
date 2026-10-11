@@ -225,7 +225,7 @@ this file was revised (EVIDENCE.md).
 | A5 | `src/mock/mcp/server.ts`, `src/mock/mcp/tools.ts`, `src/mock/mcp/protocol.ts`, `src/mock/mcp/index.ts`, `src/mock/mcp/mcp.test.ts` |
 | A6 | `src/costsource/sandboxSources.ts`, `src/costsource/seed.ts`, `src/costsource/CostSourceClient.ts`, `src/costsource/MockCostSourceClient.ts`, `src/costsource/syntheticCloudSeed.ts`, `src/costsource/syntheticCloudMapping.ts`, `src/costsource/sourcesForEnvPurity.test.ts`, `src/costsource/syntheticCloudSandbox.test.ts`, `src/costsource/sandboxAllowlist.test.ts`, `src/connectors/ConnectorCard.tsx`, `src/connectors/ConnectorCard.test.tsx` |
 | A7 | `src/lib/format.ts`, `src/lib/format.test.ts`, `src/lib/documentHead.test.ts`, `pages/_document.tsx`, `public/favicon.svg` |
-| A8 | `src/simulation/SimulationBar.tsx`, `src/simulation/SimulationBar.test.tsx`, `src/costsource/CostSourcePage.tsx`, `src/costsource/findingsHeader.test.tsx`, `pages/demo.tsx`, `src/ai/MockAIClient.ts`, `src/ai/demoPrompts.test.ts` |
+| A8 | `src/simulation/SimulationBar.tsx`, `src/simulation/SimulationBar.test.tsx`, `src/costsource/CostSourcePage.tsx`, `src/costsource/findingsCard.test.tsx`, `pages/demo.tsx`, `src/ai/MockAIClient.ts`, `src/ai/demoPrompts.test.ts` |
 | B1 | `src/server/gateway/principal.ts`, `src/server/gateway/auth.ts`, `src/server/gateway/withGateway.ts`, `src/server/gateway/withRbac.ts`, `src/server/gateway/index.ts`, `src/server/gateway/verdictSink.ts`, `src/server/gateway/csrf.ts`, `src/server/gateway/principal.test.ts`, `src/identity/mockIdpVerifier.ts` |
 | B2 | `src/server/gateway/liveDataAuth.ts`, `pages/api/costsource/rows.ts`, `pages/api/costsource/findings.ts`, `pages/api/costsource/health.ts`, `pages/api/costsource/sources.ts`, `pages/api/v1/connectors/index.ts`, `src/server/gateway/liveDataPrincipal.test.ts` |
 | B3 | `pages/api/attribution.ts`, `pages/api/tokenomics.ts`, `pages/api/prediction/predict.ts`, `pages/api/prediction/accuracy.ts`, `pages/api/report/snapshot.ts`, `pages/api/costsource/ingest.ts`, `src/server/routeMatrix.test.ts`, `src/server/openRoutesEnforced.test.ts` |
@@ -375,8 +375,10 @@ A card that needs a file it does not own stops and records the need on the card
 - **Goal.** (a) Hide "Customer sign-in simulation" when the simulation is
   disabled (`access.enabled` is false). (b) Name the actual source in the
   findings card title instead of always "PointFive DeepWaste shape", including
-  ServiceNow. (c) Make every `/demo` prompt produce a real mock Frank answer
-  by choosing prompts the current mock answers (its intents live in
+  ServiceNow (for example "Findings — N (ServiceNow, synthetic demo data)"),
+  taken from the source captured when the ingest started, not from the picker.
+  (c) Make every `/demo` prompt produce a real mock Frank answer
+  by replacing the one prompt the current mock cannot answer (its intents live in
   `src/ai/mock/intents.ts`, which this card does not edit). The prompt list is
   exported as `DEMO_PROMPTS` from `src/ai/MockAIClient.ts` and imported by
   `pages/demo.tsx` and the test: a Next.js page module should export only its
@@ -385,19 +387,14 @@ A card that needs a file it does not own stops and records the need on the card
   `ConnectorCard.tsx` (A6).
 - **Dependencies.** None.
 - **Red tests.** `SimulationBar.test.tsx`:
-  `hides_sign_in_link_when_simulation_disabled`,
-  `shows_sign_in_link_when_enabled_and_signed_out`.
-  `findingsHeader.test.tsx`:
-  `findings_header_names_servicenow_for_the_servicenow_source`,
-  `findings_header_keeps_pointfive_deepwaste_for_pointfive`.
-  `SimulationBar.test.tsx` also pins
-  `hides_sign_in_link_when_no_provider_is_mounted`.
+  `sign_in_link_shows_only_when_the_simulation_is_enabled`.
+  `findingsCard.test.tsx` (existing file, extended):
+  `names_the_source_that_ran_the_ingest_even_after_the_picker_changes`.
   `demoPrompts.test.ts`:
-  `every_demo_prompt_gets_a_non_help_mock_frank_reply` (no help text, no
-  "cannot answer" or clarifying reply, a dollar figure, distinct answers),
-  `help_reply_prompts_each_classify_to_a_distinct_intent`.
+  `every_demo_prompt_gets_a_non_help_mock_frank_reply` (not the help text,
+  and neither the "cannot answer" nor the clarifying reply).
 - **Governance class.** Path-derived: `financial_semantics`
-  (`CostSourcePage.tsx` and `findingsHeader.test.tsx` are under
+  (`CostSourcePage.tsx` and `findingsCard.test.tsx` are under
   `src/costsource/**`), `routes` (`pages/demo.tsx`), `unclassified` otherwise.
 - **Parallel-safe.** Yes. **Size.** S (1 to 3 days).
 - **Notes.** The re-check on `7a9da43` found one failing prompt, not two
@@ -508,9 +505,12 @@ A card that needs a file it does not own stops and records the need on the card
   rate limit) and the scope from the B8 provider. Tokenomics and prediction
   accuracy return org-level aggregates with no team dimension, so `eng_lead`
   should get 403 on both until they can be computed from filtered records
-  (PLAN 4.4 note). **Before starting:** merged A1 encodes `T` for `eng_lead`
-  there; settle it with the owner first (compute after the scope filter, or a
-  one-line A1 data edit; PLAN 4.4). `hello`
+  (PLAN 4.4 note). **Before starting:** merged A1 has `T` for `eng_lead` in
+  exactly two places, the `tokenomics` group and `/api/prediction/accuracy`
+  (which shares the `prediction` group with predict). Settle it with the owner
+  first: compute after the scope filter, or edit A1's data, where accuracy needs
+  a new group and a repointed route row, so `src/rbac/matrix.ts` and its test
+  join this card's files (PLAN 4.4). `hello`
   stays an explicit `public` liveness route in the matrix. Add the generated
   persona-by-route-by-environment test (PLAN 4.7, item 7). The matrix test
   asserts every route has a status and accepts both `deferred(C3)` and
@@ -670,7 +670,7 @@ A card that needs a file it does not own stops and records the need on the card
     redaction has known leak cases (a key-only hit must be replaced wholesale,
     map-key hits and non-string hits must reject, a URL `?` tail that breaks
     re-parsing must reject; Frank's A19). Only `reject` is delivered.
-  - Deferred to Frank M2, with the reason in PLAN 5a: Frank's A20 cases about
+  - Deferred to Frank M2 (PLAN 5a): Frank's A20 cases about
     re-evaluation on reload, the `FRANK_TOOLS` flip, the latch, per-request
     fail-only behavior and lock/CAS fail-closed (they need the broker's runtime
     state and kill switch). This card covers the A20 startup subset (entries
