@@ -327,8 +327,8 @@ describe('ServiceNow (sandbox) — full walk', () => {
     expect(run).toBeDefined();
     expect(run!.result.sourceVersion).toBe('1.2');
     expect(run!.result.canonicalVersion).toBe('1.4');
-    // The shim upgraded a v1.2 allocation export to v1.4 — backfill visible.
-    expect(run!.result.backfilledColumns.length).toBeGreaterThan(0);
+    // Truthful audit: the three columns the v1.2 allocation rows lack.
+    expect(run!.result.backfilledColumns).toEqual(['CapacityReservationId', 'CapacityReservationStatus', 'PricingCurrency']);
     // ServiceNow reports findings too (CMDB service class feeds the same rules).
     expect(run!.findings.length).toBeGreaterThan(0);
     expect(landedWorkloads(useStore.getState().ingestRuns).size).toBeGreaterThan(0);

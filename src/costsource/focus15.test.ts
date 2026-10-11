@@ -12,7 +12,6 @@ import {
   RATIFIED_FOCUS_VERSIONS,
   DRAFT_FOCUS_VERSIONS,
   FOCUS_15_RATIFICATION_DATE,
-  columnsAddedAfter,
   draftColumnsAfter,
   isDraftVersion,
 } from './focusVersions';
@@ -103,14 +102,14 @@ describe('draftColumnsAfter (additive draft deltas)', () => {
   });
 
   it('reports the draft columns for a v1.4 source (ratified backfill is empty there)', () => {
-    expect(columnsAddedAfter('1.4')).toEqual([]);
+    expect(normalizeRows(rawRowsForVersion('1.4'), 'focus-file-sandbox', '1.4').backfilledColumns).toEqual([]);
     expect(draftColumnsAfter('1.4').length).toBe(10);
   });
 
   it('reports nothing for a source already at 1.5', () => {
     expect(draftColumnsAfter('1.5')).toEqual([]);
     // The draft boundary must not leak into the ratified backfill audit.
-    expect(columnsAddedAfter('1.5')).toEqual([]);
+    expect(normalizeRows(rawRowsForVersion('1.5'), 'focus-file-sandbox', '1.5').backfilledColumns).toEqual([]);
   });
 });
 

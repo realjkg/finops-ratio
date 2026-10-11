@@ -11,10 +11,13 @@
 // version: its AI-cost column families ride the same additive-delta pattern, so
 // canonical rows already carry them and ratification needs no seam rework.
 //
-// NOTE: the per-version column assignment below is a representative model of the
-// additive FOCUS deltas. Exact per-version column parity (notably PointFive's
-// documented v1.0 -> v1.4 canonical) must be confirmed against a real export
-// during trial setup — see the v2 spec's Workstream 2 parity caveat.
+// NOTE: the per-version column assignment below follows the FOCUS spec
+// CHANGELOG "Columns History" table (FOCUS_Spec working_draft, read 2026-10-11)
+// for the columns Ratio models. Removals are not modeled: ProviderName is
+// deprecated in 1.3 and removed in 1.4 (successor ServiceProviderName; see
+// coerceFocusRecord). Exact parity with a vendor's export (notably PointFive's
+// documented v1.0 -> v1.4 canonical) must still be confirmed against a real
+// export during trial setup — see the v2 spec's Workstream 2 parity caveat.
 
 export type FocusVersion = '1.0' | '1.1' | '1.2' | '1.3' | '1.4' | '1.5';
 
@@ -55,9 +58,10 @@ export function isAtLeast(version: FocusVersion, min: FocusVersion): boolean {
 }
 
 // Columns introduced by each FOCUS version, on top of the prior version. The
-// v1.0 entry is the mandatory/core baseline every source must provide; later
-// entries are purely additive. Used both to backfill older sources and to report
-// exactly which columns the version shim had to add to reach the canonical model.
+// v1.0 entry is the 1.0 baseline (upgradeToCanonicalCost fills what a source
+// omits); later entries are purely additive. Normalization metadata only: the
+// backfill audit (normalize.ts) and the connector column filter. The FinIO wire
+// keeps its own frozen table (src/finio/wireColumns.ts).
 export const COLUMNS_BY_VERSION: Record<FocusVersion, readonly string[]> = {
   '1.0': [
     'BilledCost',
@@ -77,13 +81,18 @@ export const COLUMNS_BY_VERSION: Record<FocusVersion, readonly string[]> = {
     'ResourceId',
     'PricingQuantity',
     'PricingUnit',
-    'UsageQuantity',
-    'UsageUnit',
+    'ListCost', // 1.0-preview
+    'ContractedCost',
+    // FOCUS 1.0 renamed UsageQuantity / UsageUnit to these (LEGACY_COLUMNS).
+    'ConsumedQuantity',
+    'ConsumedUnit',
+    'CommitmentDiscountStatus',
+    'InvoiceIssuerName', // 0.5
   ],
-  '1.1': ['ListCost', 'ContractedCost', 'ConsumedQuantity', 'ConsumedUnit', 'CommitmentDiscountStatus'],
-  '1.2': ['ServiceSubcategory', 'InvoiceIssuerName'],
-  '1.3': ['SkuMeter', 'PricingCurrency'],
-  '1.4': ['CapacityReservationId', 'CapacityReservationStatus'],
+  '1.1': ['ServiceSubcategory', 'SkuMeter', 'CapacityReservationId', 'CapacityReservationStatus'],
+  '1.2': ['PricingCurrency'],
+  '1.3': [],
+  '1.4': [],
   // FOCUS 1.5 — WORKING DRAFT (ratifies 3 Dec 2026). The five AI-cost column
   // families. Family 4 (consumption currency) is a CurrencyFormat RULE change,
   // not a column: PricingCurrency may hold a provider-issued unit (platform
@@ -112,19 +121,11 @@ export const COLUMNS_BY_VERSION: Record<FocusVersion, readonly string[]> = {
 };
 
 /**
- * Columns introduced strictly after `version` and at or before the canonical
- * target — i.e. what the shim backfills to reach the canonical (v1.4) model.
- * Unratified (draft) columns are excluded; they are backfilled too, but are
- * reported separately via `draftColumnsAfter` so the upgrade audit keeps
- * ratified and draft provenance apart.
+ * Pre-1.0 names that FOCUS 1.0 renamed to ConsumedQuantity / ConsumedUnit. Still
+ * accepted from older exports and kept on canonical rows (Ratio's own seed and
+ * the ingest worker read them); coerceFocusRecord fills them from the 1.0 names.
  */
-export function columnsAddedAfter(version: FocusVersion): string[] {
-  return FOCUS_VERSIONS.filter(
-    (v) =>
-      focusVersionRank(v) > focusVersionRank(version) &&
-      focusVersionRank(v) <= focusVersionRank(CANONICAL_FOCUS_VERSION),
-  ).flatMap((v) => [...COLUMNS_BY_VERSION[v]]);
-}
+export const LEGACY_COLUMNS = ['UsageQuantity', 'UsageUnit'] as const;
 
 /**
  * Working-draft columns introduced strictly after `version` — the 1.5 families
@@ -136,3 +137,12 @@ export function draftColumnsAfter(version: FocusVersion): string[] {
   );
 }
 
+/**
+ * True when a normalization was a pure pass-through: the source is at (or above)
+ * the canonical version AND the shim added no column. Decided from the versions
+ * first, so an older source is never shown as already canonical.
+ */
+export function isPassthrough(r: { sourceVersion: string; canonicalVersion: string; backfilledColumns: readonly string[] }): boolean {
+  const rank = (v: string) => focusVersionRank(v as FocusVersion);
+  return rank(r.sourceVersion) >= rank(r.canonicalVersion) && r.backfilledColumns.length === 0;
+}

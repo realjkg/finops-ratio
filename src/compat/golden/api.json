@@ -1,5 +1,5 @@
 {
-  "_generatedFrom": "feat/quality-floor-tca@daeadb3",
+  "_generatedFrom": "feat/quality-floor-tca@daeadb3 + fix/focus-normalization-fixtures (C1: ServiceSubcategory default, truthful backfill audit)",
   "costsource/sources sandbox entries": {
     "status": 200,
     "body": [
@@ -42,12 +42,12 @@
         "ConsumedQuantity",
         "ConsumedUnit",
         "CommitmentDiscountStatus",
-        "ServiceSubcategory",
         "InvoiceIssuerName",
+        "ServiceSubcategory",
         "SkuMeter",
-        "PricingCurrency",
         "CapacityReservationId",
-        "CapacityReservationStatus"
+        "CapacityReservationStatus",
+        "PricingCurrency"
       ],
       "draftColumnsBackfilled": [
         "ModelDeveloper",
@@ -92,7 +92,7 @@
           "ConsumedQuantity": 61600000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "anthropic",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -142,7 +142,7 @@
           "ConsumedQuantity": 13524000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "openai",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -192,7 +192,7 @@
           "ConsumedQuantity": 54020000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "anthropic",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -242,7 +242,7 @@
           "ConsumedQuantity": 157300000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "google",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -292,7 +292,7 @@
           "ConsumedQuantity": 16000000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "openai",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -342,7 +342,7 @@
           "ConsumedQuantity": 8370000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "anthropic",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -392,7 +392,7 @@
           "ConsumedQuantity": 26696000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "openai",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -442,7 +442,7 @@
           "ConsumedQuantity": 55120000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "google",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -492,7 +492,7 @@
           "ConsumedQuantity": 9605000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "anthropic",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -542,7 +542,7 @@
           "ConsumedQuantity": 8400000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "openai",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -592,7 +592,7 @@
           "ConsumedQuantity": 17845000,
           "ConsumedUnit": "Tokens",
           "CommitmentDiscountStatus": null,
-          "ServiceSubcategory": "Generative AI",
+          "ServiceSubcategory": "",
           "InvoiceIssuerName": "openai",
           "SkuMeter": null,
           "PricingCurrency": "USD",
@@ -715,9 +715,9 @@
       "canonicalVersion": "1.4",
       "backfilledColumns": [
         "SkuMeter",
-        "PricingCurrency",
         "CapacityReservationId",
-        "CapacityReservationStatus"
+        "CapacityReservationStatus",
+        "PricingCurrency"
       ],
       "draftColumnsBackfilled": [
         "ModelDeveloper",
@@ -1314,9 +1314,9 @@
       "canonicalVersion": "1.4",
       "backfilledColumns": [
         "SkuMeter",
-        "PricingCurrency",
         "CapacityReservationId",
-        "CapacityReservationStatus"
+        "CapacityReservationStatus",
+        "PricingCurrency"
       ],
       "draftColumnsBackfilled": [
         "ModelDeveloper",

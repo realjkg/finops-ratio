@@ -17,6 +17,7 @@ import type {
   FocusVersion,
 } from './index';
 import { FOCUS_VERSIONS, isDraftVersion } from './index';
+import { isPassthrough } from './focusVersions';
 import { LiveDataAuthError } from './LiveCostSourceClient';
 import { AiSpendRatioCard } from './AiSpendRatioCard';
 import { rawRowsForVersion } from './seed';
@@ -425,7 +426,7 @@ function HealthCard({ health }: { health: SourceHealth }) {
 }
 
 function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
-  const passthrough = rows.backfilledColumns.length === 0;
+  const passthrough = isPassthrough(rows);
   return (
     <Card title="Version normalization">
       <p className="text-sm text-txt">

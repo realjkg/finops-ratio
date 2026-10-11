@@ -36,7 +36,8 @@ export interface FocusCoreV10 {
   UsageUnit: string;
 }
 
-// --- additive deltas by version ---
+// --- additive deltas (grouped by what a RawSourceRow may omit; the FOCUS
+// version that introduced each column is recorded in COLUMNS_BY_VERSION) ---
 export interface FocusAddedV11 {
   ListCost: number;
   ContractedCost: number;
@@ -166,7 +167,7 @@ export type RawSourceRow = FocusCoreV10 &
  * by column presence: a v1.4 source (every ratified column present) passes
  * through unchanged for ratified columns; a v1.0 source (newer columns absent)
  * gets each later column filled. Callers report exactly which columns were
- * added via `columnsAddedAfter` (ratified) and `draftColumnsAfter` (draft).
+ * added (normalizeRows: the ratified columns a raw row lacked) and `draftColumnsAfter` (draft).
  *
  * Defaults are derived from columns the source DOES provide so the canonical row
  * stays internally consistent (e.g. ListCost defaults to BilledCost when the
@@ -179,21 +180,22 @@ export type RawSourceRow = FocusCoreV10 &
 export function upgradeToCanonicalCost(raw: RawSourceRow): CanonicalCostRow {
   return {
     ...raw,
-    // v1.1 additive
+    // Key order is the wire order; the introducing FOCUS version of each
+    // column is in COLUMNS_BY_VERSION. ListCost .. CommitmentDiscountStatus and
+    // InvoiceIssuerName are 1.0 columns a (pre-1.0 style) source may omit.
     ListCost: raw.ListCost ?? raw.BilledCost,
     ContractedCost: raw.ContractedCost ?? raw.EffectiveCost,
     ConsumedQuantity: raw.ConsumedQuantity ?? raw.UsageQuantity,
     ConsumedUnit: raw.ConsumedUnit ?? raw.UsageUnit,
     CommitmentDiscountStatus: raw.CommitmentDiscountStatus ?? null,
-    // v1.2 additive
-    ServiceSubcategory: raw.ServiceSubcategory ?? 'Generative AI',
+    // 1.1: a 1.0 export has no subcategory and none can be derived, so it is
+    // empty (how coercion represents an absent string), never a guessed label.
+    ServiceSubcategory: raw.ServiceSubcategory ?? '',
     InvoiceIssuerName: raw.InvoiceIssuerName ?? raw.ProviderName,
-    // v1.3 additive
-    SkuMeter: raw.SkuMeter ?? null,
-    PricingCurrency: raw.PricingCurrency ?? raw.BillingCurrency,
-    // v1.4 additive
-    CapacityReservationId: raw.CapacityReservationId ?? null,
-    CapacityReservationStatus: raw.CapacityReservationStatus ?? null,
+    SkuMeter: raw.SkuMeter ?? null, // 1.1
+    PricingCurrency: raw.PricingCurrency ?? raw.BillingCurrency, // 1.2
+    CapacityReservationId: raw.CapacityReservationId ?? null, // 1.1
+    CapacityReservationStatus: raw.CapacityReservationStatus ?? null, // 1.1
     // v1.5 additive (working draft — ratification 3 Dec 2026): omitted draft
     // properties stay null. Requester identity in particular is never invented
     // from team attribution — the x_RatioTeam bridge note governs that mapping.

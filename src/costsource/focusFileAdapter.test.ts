@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { FocusFileAdapter } from './FocusFileAdapter';
 import { rawRowsForVersion, resourceIdFor } from './seed';
 import type { FocusCoreV10, RawSourceRow } from './focusRows';
-import { FOCUS_VERSIONS, columnsAddedAfter } from './focusVersions';
+import { FOCUS_VERSIONS } from './focusVersions';
 import type { FocusVersion } from './focusVersions';
 import { createCostSourceClient } from './index';
 
@@ -49,6 +49,10 @@ function minimalV10Row(workloadId: string): RawSourceRow {
   return core;
 }
 
+/** Truthful audit: the ratified columns a v1.0 row lacks (spec column-history order). */
+const V10_MISSING = ['ListCost', 'ContractedCost', 'ConsumedQuantity', 'ConsumedUnit', 'CommitmentDiscountStatus', 'InvoiceIssuerName', 'ServiceSubcategory', 'SkuMeter', 'CapacityReservationId', 'CapacityReservationStatus', 'PricingCurrency'];
+const SEED_MISSING: Record<string, string[]> = { '1.0': V10_MISSING, '1.1': V10_MISSING.slice(5), '1.2': V10_MISSING.slice(7), '1.3': ['CapacityReservationId', 'CapacityReservationStatus'], '1.4': [] };
+
 // ---------------------------------------------------------------------------
 // Version normalization
 // ---------------------------------------------------------------------------
@@ -59,8 +63,7 @@ describe('FocusFileAdapter.ingest — version normalization', () => {
 
     expect(result.sourceVersion).toBe('1.0');
     expect(result.canonicalVersion).toBe('1.4');
-    expect(result.backfilledColumns).toEqual(columnsAddedAfter('1.0'));
-    expect(result.backfilledColumns.length).toBeGreaterThan(0);
+    expect(result.backfilledColumns).toEqual(V10_MISSING);
 
     const [row] = result.rows;
     // v1.1 backfilled: derived from source columns present
@@ -69,7 +72,7 @@ describe('FocusFileAdapter.ingest — version normalization', () => {
     expect(row.ConsumedQuantity).toBe(5_000_000);
     expect(row.CommitmentDiscountStatus).toBeNull();
     // v1.2 backfilled
-    expect(row.ServiceSubcategory).toBe('Generative AI');
+    expect(row.ServiceSubcategory).toBe(''); // never a guessed label
     expect(row.InvoiceIssuerName).toBe('private-cloud');
     // v1.3 backfilled
     expect(row.SkuMeter).toBeNull();
@@ -79,14 +82,14 @@ describe('FocusFileAdapter.ingest — version normalization', () => {
     expect(row.CapacityReservationStatus).toBeNull();
   });
 
-  // Parametric: each sub-canonical version backfills exactly the columns
-  // introduced by later versions — additive only, nothing removed.
+  // Parametric: the audit is exactly the ratified columns each seed version lacks
+  // (the seed keeps the FinIO wire grouping, which predates the spec column history).
   it.each(FOCUS_VERSIONS.slice(0, -1) as FocusVersion[])(
     'backfills additive columns for v%s source; every row reaches canonical shape',
     (version) => {
       const rows = rawRowsForVersion(version);
       const result = FocusFileAdapter.ingest(rows, version, SOURCE_ID, WINDOW);
-      expect(result.backfilledColumns).toEqual(columnsAddedAfter(version));
+      expect(result.backfilledColumns).toEqual(SEED_MISSING[version]);
       for (const row of result.rows) {
         // Every post-v1.0 column is present (possibly null, never missing).
         expect(typeof row.CapacityReservationId !== 'undefined').toBe(true);

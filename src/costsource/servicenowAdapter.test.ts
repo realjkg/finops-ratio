@@ -29,8 +29,8 @@ describe('ServiceNowAdapter — synthetic CMDB/ITBM source', () => {
     expect(result.sourceId).toBe(SERVICENOW_SANDBOX_SOURCE_ID);
     expect(result.sourceVersion).toBe('1.2');
     expect(result.canonicalVersion).toBe(CANONICAL_FOCUS_VERSION);
-    // A v1.2 export is upgraded by the shim — the backfill audit is on the record.
-    expect(result.backfilledColumns.length).toBeGreaterThan(0);
+    // Truthful audit: the v1.2 rows lack these three, which the shim adds.
+    expect(result.backfilledColumns).toEqual(['CapacityReservationId', 'CapacityReservationStatus', 'PricingCurrency']);
     expect(result.rows.length).toBe(rawRowsForServiceNow().length);
   });
 

@@ -133,6 +133,15 @@ export function indexHeader(header: string[]): { ok: true; index: HeaderIndex } 
   return { ok: true, index: { columns: header, pos } };
 }
 
+/**
+ * The column that carries the provider: ProviderName, or its FOCUS 1.3+ successor
+ * ServiceProviderName ONLY when the header has no ProviderName at all (removed in
+ * 1.4). A present-but-empty ProviderName stays the column of record.
+ */
+export function providerColumn(index: HeaderIndex): 'ProviderName' | 'ServiceProviderName' {
+  return !index.pos.has('ProviderName') && index.pos.has('ServiceProviderName') ? 'ServiceProviderName' : 'ProviderName';
+}
+
 function cell(values: string[], index: HeaderIndex, col: string): string | null {
   const i = index.pos.get(col);
   if (i === undefined) return null;
@@ -219,7 +228,7 @@ export function validateRow(
       listCost: numeric.ListCost,
       contractedCost: numeric.ContractedCost,
       billingCurrency: currency,
-      providerName: optText(values, index, 'ProviderName'),
+      providerName: optText(values, index, providerColumn(index)),
       serviceName: optText(values, index, 'ServiceName'),
       serviceCategory: optText(values, index, 'ServiceCategory'),
       chargeCategory: optText(values, index, 'ChargeCategory'),

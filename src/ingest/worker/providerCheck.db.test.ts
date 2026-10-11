@@ -498,3 +498,23 @@ describe('D10 the worker CLI: the opt-in comes from its env only, and is logged 
     for (const name of ['SyntheticCloud', 'SyntheticAWS', 'SyntheticAzure', 'SyntheticGCP']) expect(all).not.toContain(name);
   });
 });
+
+describe('D13 the FOCUS 1.3+ successor ServiceProviderName through runSync/loadArtifact', () => {
+  const SPN_ONLY = FOCUS_HEADER.map((c) => (c === 'ProviderName' ? 'ServiceProviderName' : c));
+  const BOTH = [...FOCUS_HEADER, 'ServiceProviderName'];
+  const cases: Array<[string, readonly string[], FocusRow, object, Array<[string, string, string]>]> = [
+    ['successor only, AWS: published', SPN_ONLY, { ServiceProviderName: 'AWS' }, { outcome: 'published', rowCount: '1' }, []],
+    ['successor only, foreign: excluded, batch quarantined', SPN_ONLY, { ServiceProviderName: 'Evil' }, { outcome: 'quarantined', code: 'PROVIDER_MISMATCH' }, [['1', 'ServiceProviderName', 'PROVIDER_MISMATCH']]],
+    ['ProviderName present but empty: no fallback', BOTH, { ProviderName: '', ServiceProviderName: 'AWS' }, { outcome: 'quarantined', code: 'VALIDATION_FAILED' }, [['1', 'ProviderName', 'MISSING_VALUE']]],
+    ['successor only, empty', SPN_ONLY, { ServiceProviderName: '' }, { outcome: 'quarantined', code: 'VALIDATION_FAILED' }, [['1', 'ServiceProviderName', 'MISSING_VALUE']]],
+  ];
+  it.each(cases)('%s', async (_name, header, cells, outcome, errors) => {
+    const s = await awsSource();
+    const r = await sync(s, new FakeFocusSource([period([['run/x.csv.gz', csvGz([focusRow(P, { BilledCost: '1.25', ...cells })], header)]])]));
+    expect(r.periods[0]).toMatchObject(outcome);
+    const batchId = (await batchesOf(t.db.pool, s.tenantId, s.sourceId))[0].id;
+    const shown = await showBatch(t.pool, s.tenantId, batchId);
+    expect(shown.errors.map((e) => [e.rowOrdinal, e.column, e.code])).toEqual(errors);
+    expect((await factsOf(s, batchId)).map((f) => f[2])).toEqual(errors.length ? [] : ['AWS']); // persisted provider_name
+  });
+});
