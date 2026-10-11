@@ -100,7 +100,12 @@ const MUTANTS = [
   ['int-check-dropped', M + 'world.ts', '(!r.int || Number.isSafeInteger(v))', '(true)', 'fractional counts accepted'],
   ['floor-dropped', M + 'world.ts', '(!r.floor || v === 0 || Math.abs(v) >= r.floor)', '(true)', 'tiny money values accepted'],
   ['note-suffix-lost', M + 'respond.ts', '${n.slice(0, NOTE_MAX / 2 - 1)}\\u2026${n.slice(-NOTE_MAX / 2)}', '${n.slice(0, NOTE_MAX - 1)}\\u2026', 'a long note loses its meaning suffix'],
-  ['legacy-note-dropped', M + 'respond.ts', 'return note ? reply(`${r.message.content}\\n${note}`, r.initiativesReferenced) : r;', 'return r;', 'legacy answers hide rejected workloads'],
+  ['legacy-note-dropped', M + 'respond.ts', "[rejectedNote(world) ?? ''].filter(Boolean)", '[]', 'legacy answers hide rejected workloads'],
+  ['legacy-unbounded', M + 'respond.ts', 'return reply(bound(r.message.content, ', 'return reply(String(r.message.content) + String(', 'legacy answers skip the reply bound'],
+  ['wrong-type-as-absent', M + 'world.ts', 'if (v == null) return null; // absent', "if (typeof v !== 'number') return null;", 'a present non-number reads as absent'],
+  ['list-before-off', M + 'entities.ts', '[LIST_NAME_RX, LIST_BEFORE_RX]', '[LIST_NAME_RX]', 'a name before the separator is dropped'],
+  ['summary-trusted-on-reject', M + 'world.ts', 'return drop.size === 0 && typeof v', 'return typeof v', 'summary keeps rejected workloads'],
+  ['mock-prompt-built', 'pages/api/v1/ai/chat.ts', "adapter.provider === 'mock' ?", 'false ?', 'the mock route formats raw context first'],
   ['jobs-unvalidated', 'docs/evidence/frank-mock-analytics/mutate.mjs', 'jobs < 1) {\n  log(', 'jobs < 1 && false) {\n  log(', 'invalid --jobs accepted'],
   ['team-word-stop-dropped', M + 'entities.ts', 'team teams group groups department departments dept show', 'show', 'team words captured as names'],
 ];

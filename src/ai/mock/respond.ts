@@ -102,8 +102,7 @@ function withoutPortfolio(text: string, ranges: { start: number; end: number }[]
 
 /** Legacy answers must not silently skip rejected workloads; valid contexts add nothing. */
 function withRejected(r: AIResponse, world: World): AIResponse {
-  const note = rejectedNote(world);
-  return note ? reply(`${r.message.content}\n${note}`, r.initiativesReferenced) : r;
+  return reply(bound(r.message.content, [rejectedNote(world) ?? ''].filter(Boolean)), r.initiativesReferenced);
 }
 
 function lastUserIndex(messages: AIMessage[]): number {

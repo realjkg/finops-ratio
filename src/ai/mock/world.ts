@@ -58,11 +58,11 @@ function within(v: number, r: Range): boolean {
   return (!r.int || Number.isSafeInteger(v)) && (!r.floor || v === 0 || Math.abs(v) >= r.floor);
 }
 
-// Absent or non-numeric reads as null; an out-of-range number is recorded in `bad` (the workload is then rejected).
+// Absent reads as null; a present value that is not an in-range number is recorded in `bad` (the workload is then rejected).
 function field(r: Record<string, unknown>, key: string, range: Range, bad: string[]): number | null {
   const v = r[key];
-  if (typeof v !== 'number') return null;
-  if (within(v, range)) return v;
+  if (v == null) return null; // absent
+  if (typeof v === 'number' && within(v, range)) return v;
   if (!bad.includes(key)) bad.push(key);
   return null;
 }
@@ -192,7 +192,7 @@ export function legacyContext(ctx: AIContext, world: World): AIContext {
   const sm = rec(ctx.summary);
   const pick = (key: string, range: Range, fallback: number): number => {
     const v = sm[key];
-    return typeof v === 'number' && within(v, range) ? v : fallback;
+    return drop.size === 0 && typeof v === 'number' && within(v, range) ? v : fallback;
   };
   return {
     initiatives,

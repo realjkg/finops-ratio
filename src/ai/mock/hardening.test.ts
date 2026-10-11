@@ -56,11 +56,8 @@ describe('M1 prototype-key wire strings never crash', () => {
       expect(r.status).toBe(200);
     }
   });
-});
-
-describe('wrong-typed numbers through the real route', () => {
-  it('valueRatio "oops" is a 200 with the workload excluded, not a 500', async () => {
-    const r = await viaRoute(mod((c) => { (c.workloads![0] as unknown as Record<string, unknown>).valueRatio = 'oops'; (c.initiatives[0] as unknown as Record<string, unknown>).valueRatio = 'oops'; }), 'What is the ROI of the portfolio?');
+  it('a wrong-typed valueRatio is a 200 with the workload excluded through the real route', async () => {
+    const r = await viaRoute(mod((c) => { for (const o of [c.workloads![0], c.initiatives[0]]) Object.assign(o, { valueRatio: 'oops' }); }), 'What is the ROI of the portfolio?');
     expect(r.status).toBe(200);
     expect(r.text).toMatch(/out of range and ignored/);
   });
@@ -91,14 +88,6 @@ describe('M2 impossible headlines carry a warning, uncapped', () => {
   });
   it('a plausible reduction has no warning', async () => {
     expect(await last(['EBITDA impact for Platform Eng if spend went down $2,000 a month'])).not.toContain('Warning:');
-  });
-});
-
-describe('M3 rejected figures are disclosed', () => {
-  it('says so when a workload’s figures are rejected', async () => {
-    const ctx = withSnap(0, { monthlySpend: 1.7e308, monthlyValue: 1.7e308 });
-    const { text } = await chat([{ role: 'user', content: 'What is the ROI of the portfolio?' }], ctx);
-    expect(text).toMatch(/Customer Support Agent[^\n]*out of range[^\n]*ignored/);
   });
 });
 

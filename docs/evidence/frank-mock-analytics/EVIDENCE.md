@@ -134,11 +134,7 @@ mock. No data, environment, flag, dependency or route change is involved.
 Each round was tests first, committed RED, then fixed (`hardening.test.ts`, `review2.test.ts`,
 `review3.test.ts`, `robustness.test.ts`):
 
-| Round | RED (before the fix) | GREEN |
-| --- | --- | --- |
-| Challenger 1 | 25 failed, 12 passed (surviving-mutant tests, fallback pins, controls) | all pass |
-| Challenger 2 | 17 failed, 13 passed (boundary assertions for guards that already existed) | all pass |
-| Copilot 3, 4 and re-check | 29 failed / 17 passed, then 32 failed / 137 passed | all pass |
+RED/GREEN counts per round: challenger 1 25 failed / 12 passed; challenger 2 17 / 13; Copilot 3 to 5 29 / 17, 32 / 137, then 21 failed / 117 passed; every round ended all-pass.
 
 **Mutation:** `node docs/evidence/frank-mock-analytics/mutate.mjs --jobs=4` kills every registered
 mutant in one command (fresh `mkdtemp` per run, one tree copy per worker, `--jobs` a positive integer).
@@ -146,15 +142,15 @@ mutant in one command (fresh `mkdtemp` per run, one tree copy per worker, `--job
 **One ingestion policy (`world.ts`).** Every numeric field of the request context is range-checked
 once; a workload with any out-of-range field is excluded and listed as `Name (field)` in the "out of
 range and ignored" note (also on the unknown-name reply, the legacy answers, and in the protected
-tail). NaN, Infinity and negatives are out of range everywhere. Money and percents are 0 or at
-least 0.01 (no 1e-300 tails); counts, gates and summary counts are safe integers. Ranges: spend,
+tail). NaN, Infinity and a present non-numeric value are out of range everywhere; only unsigned fields
+reject negatives (value, `valueRatio` and trend are signed). Money fields and budget-consumed
+percentages are 0 or at least 0.01 (no 1e-300 tails); counts, gates and summary counts are safe integers. Ranges: spend,
 cost, budget, savings 0 to 1e12 USD; value -1e12 to 1e12; run rate 0 to 1.2e13; `valueRatio`
 -1e6 to 1e6; calls and tokens 0 to 1e13; trend above -100 and below 1e6; cache rate 0 to 1;
 budget consumed 0 to 1e4; gates 0 to 4; summary totals 0 to 2e14 (recomputed when bad). The legacy
 answers read a copy rebuilt only from sanitized values (strings cleaned, enums validated); for a
 valid context their text is unchanged. This closes the earlier "absurd magnitude" gap.
 
-**Other behavior.** Own-property lookups; warnings next to impossible headlines; unknown names
-(any case, team-qualified, in lists, next to a known entity) are named, never substituted;
-prediction wording refuses with a scope; notes keep their meaning suffix. Trade-off: a lowercase
-unknown name with no team word ("roi of finance") is not caught.
+**Other behavior.** Own-property lookups; unknown names (any case, team-qualified, in lists, either
+side of a separator, next to a known entity) are named, never substituted; every reply, legacy ones
+included, is bounded. Trade-off: a lowercase unknown name with no team word is not caught.

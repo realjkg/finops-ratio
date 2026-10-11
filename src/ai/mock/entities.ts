@@ -184,8 +184,8 @@ const TEAM_QUALIFIED_RX = new RegExp(
 );
 // A team name that opens the question: "Finance team ROI".
 const START_TEAM_RX = /^\s*(\p{L}[\p{L}&'-]*(?:\s+[\p{L}&'-]+){0,2})\s+(?:team|group|department|dept)\b/giu;
-// A capitalized name after a list separator ("ROI of Legal, Finance and IT", "Legal with HR").
 const LIST_NAME_RX = /(?:[,&]|\b(?:and|or|vs|versus|with)\b)\s*(\p{Lu}[\p{L}&'-]*(?:\s+(?!(?:and|or|vs|versus|with)\b)[\p{L}&'-]+){0,2})/gu;
+const LIST_BEFORE_RX = /\b(?:[Oo]f|[Ff]or|[Ii]n|[Oo]n|[Aa]bout|[Bb]etween|[Cc]ompare|[Tt]han|[Pp]lus)\s+(\p{Lu}[\p{L}&'-]*(?:\s+(?!(?:and|or|vs|versus|with)\b)[\p{L}&'-]+){0,2})\s*(?:[,&]|\b(?:and|or|vs|versus|with)\b)/gu;
 const TRAILING_NAME_RX = /(?:^|\s)(?:for|of|in|on|about)\s+(?:the\s+)?([\p{L}&'-]+(?:\s+[\p{L}&'-]+){0,3})\s*[?.!]*\s*$/gu;
 
 const plausible = (raw: string): boolean => {
@@ -230,7 +230,8 @@ export function unknownTeam(text: string, mentions: Mention[] = []): string | nu
  * are ordinary words, not names.
  */
 export function unknownCapitalized(text: string, mentions: Mention[] = []): string | null {
-  for (const m of mask(text, mentions).matchAll(mentions.length > 0 ? LIST_NAME_RX : TRAILING_NAME_RX)) {
+  const t = mask(text, mentions);
+  for (const m of (mentions.length > 0 ? [LIST_NAME_RX, LIST_BEFORE_RX] : [TRAILING_NAME_RX]).flatMap((rx) => [...t.matchAll(rx)])) {
     const raw = m[1].trim();
     if (plausible(raw) && raw[0] !== raw[0].toLowerCase()) return raw.slice(0, 40);
   }
