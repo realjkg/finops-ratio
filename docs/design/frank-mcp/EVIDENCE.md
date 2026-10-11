@@ -33,8 +33,9 @@ revision 15 (86cf6fb) answered the round-14 challenger's review of 433b27f
 under a scope freeze; revision 16 (d8ab0c5, 4913734) answered the round-15
 challenger's review of 86cf6fb; PR #98 merged at 86cf6fb, so revisions 16 and
 17 are follow-ups on the merged main (7a9da43). Revision 17 (9686368) answered
-the PR #101 challenger's review of 4913734. Revision 18 simplifies section 3.8
-(start-and-reload evaluation only) on the decision recorded in section 6.
+the PR #101 challenger's review of 4913734. Revision 18 (dba0c64) simplified
+section 3.8 (start-and-reload evaluation only) on the decision recorded in
+section 6; revision 19 answers the challenger's review of revision 18.
 
 ## 1. Method
 
@@ -194,34 +195,40 @@ result was `risk: low`; with a paragraph that names the rule, the result was
 revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
 `EVIDENCE.md`: that `DESIGN.md` was the spliced file, whose rewrapped
 audit-retention sentence and decision-table row counted as added lines. At
-revisions 11 to 15 the classifier was re-run at each final head and reported
-`risk: restricted`, class `retention`, rule `retention.mention`, on
-`EVIDENCE.md` only (this section names the rule). Revisions 16 to 18 are
-follow-ups on the merged main (7a9da43), where those lines are already
-present: a draft before this paragraph was written reported `risk: low` with
-no matches, and with this paragraph, which names the rule, the final head of
-revision 18 reports `risk: restricted`, class `retention`, rule
-`retention.mention`, on `EVIDENCE.md` only. Neither result proves the change
-safe (the gate's own README calls `low` heuristic). The classification is
-recorded in the pull request body at the final head; this file makes no claim
-about the title or body of the pull request beyond that. The wording of these
-documents was not shaped to avoid any rule.
+revisions 11 to 15 the classifier was re-run at each final head with the same
+restricted result, on `EVIDENCE.md` only (this section names the rule).
+Revisions 16 to 19 are follow-ups on the merged main (7a9da43), where those
+lines are already present: a draft before this paragraph was written reported
+`risk: low` with no matches, and with this paragraph, which names the rule,
+the final head of revision 19 reports `risk: restricted`, class `retention`,
+rule `retention.mention`, on `EVIDENCE.md` only. Neither result proves the
+change safe (the gate's own README calls `low` heuristic). The classification
+is recorded in the pull request body at the final head; this file makes no
+claim about the title or body of the pull request beyond that. The wording of
+these documents was not shaped to avoid any rule.
 
-Decision record for revision 18 (two independent agents, a proposer and a
-skeptic, converged): replace the section 3.8 evaluation machinery with
-start-and-reload evaluation only. Reasons, as recorded: (a) DESIGN.md 6.3
-itself marked a runtime change of `FRANK_TOOLS` as an unverified assumption,
-and `process.env` cannot be changed from outside the process, so the machinery
-protected a path the design said might not exist; (b) the design already
-conceded that a runtime `RATIO_ENV` change is not detected; (c) section 3.8
-grew from nothing to about 1,850 words and the A20 row from 88 to about 700
-words over 16 revisions, each later finding probing state added by the
-previous revision, and revisions 6 to 16 cite no new code; (d) no attack was
-found that the earlier design stopped and the simple one allows. What would
-change the conclusion: a real mechanism that mutates `FRANK_TOOLS` in a
-running process, an owner requirement to turn tools on in under a minute
-without a reload, or a concrete attack on reload-only turn-on. After the
-change section 3.8 is about 1,210 words and the A20 row about 270.
+### Decision record for revision 18
+
+Two independent agents, a proposer and a skeptic, converged: replace the
+section 3.8 evaluation machinery with start-and-reload evaluation only.
+Reasons, as recorded: (a) DESIGN.md 6.3 itself marked a runtime change of
+`FRANK_TOOLS` as an unverified assumption, and `process.env` cannot be changed
+from outside the process, so the machinery protected a path the design said
+might not exist; (b) the design already conceded that a runtime `RATIO_ENV`
+change is not detected; (c) section 3.8 grew from nothing to about 1,850 words
+and the A20 row from 88 to about 700 words over 16 revisions, each later
+finding probing state added by the previous revision, and revisions 6 to 16
+cite no new code; (d) no attack was found that the earlier design stopped and
+the simple one allows. The skeptic added requirements, all adopted: one reload
+at a time; a failed reload turns tools off and writes an audit record; no
+unauthenticated HTTP reload trigger; a "reload required" log when
+`FRANK_TOOLS=on` is seen without a reload; and about eight A20 cases. Process
+change: the review scope is frozen to changed text, and the review is closed
+after a round with no High or Medium findings. What would change the
+conclusion: a real mechanism that mutates `FRANK_TOOLS` in a running process,
+an owner requirement to turn tools on in under a minute without a reload, or a
+concrete attack on reload-only turn-on. After the change section 3.8 is about
+1,210 words and the A20 row about 270.
 
 Rollback: revert the two documents; reverse-applying the diff to origin/main
 gives the same tree as origin/main.
