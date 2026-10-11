@@ -12,7 +12,7 @@
 
 import type { CostWindow } from '../CostSourceClient';
 import type { RawSourceRow } from '../focusRows';
-import { COLUMNS_BY_VERSION } from '../focusVersions';
+import { COLUMNS_BY_VERSION, LEGACY_COLUMNS } from '../focusVersions';
 import { logUpstreamError, redactErrorText, statusReason } from './redact';
 
 // --- fetch ------------------------------------------------------------------
@@ -249,7 +249,18 @@ const NULLABLE_COLUMNS = new Set([
 /** Currency columns: ISO-4217-shaped three-letter codes. */
 const CURRENCY_COLUMNS = new Set(['BillingCurrency', 'PricingCurrency']);
 
-const KNOWN_COLUMNS = new Set(Object.values(COLUMNS_BY_VERSION).flat());
+const KNOWN_COLUMNS = new Set([...Object.values(COLUMNS_BY_VERSION).flat(), ...LEGACY_COLUMNS]);
+
+// 1.0 columns upgradeToCanonicalCost derives from other columns when a source
+// omits them; filling them with 0 / '' here would defeat that.
+const DERIVED_ON_UPGRADE = new Set([
+  'ListCost',
+  'ContractedCost',
+  'ConsumedQuantity',
+  'ConsumedUnit',
+  'CommitmentDiscountStatus',
+  'InvoiceIssuerName',
+]);
 
 /**
  * Columns a row must carry for its cost to be meaningful. A row missing any of
@@ -429,10 +440,22 @@ export function coerceFocusRecord(rec: Record<string, unknown>, opts: FocusRecor
   // derives it from BillingCurrency); never an explicit null.
   if (out.PricingCurrency === null) delete out.PricingCurrency;
 
-  // Fill the v1.0 core so the row satisfies the type even when the export left
-  // optional-in-practice columns out entirely.
-  for (const col of COLUMNS_BY_VERSION['1.0']) {
-    if (out[col] === undefined) out[col] = NUMERIC_COLUMNS.has(col) ? 0 : '';
+  // FOCUS 1.3 deprecates and 1.4 removes ProviderName; the spec names
+  // ServiceProviderName (then InvoiceIssuerName) as successors, so a 1.3/1.4
+  // export keeps its provider identity instead of an empty one.
+  if (isBlank(out.ProviderName)) {
+    const successor = [rec.ServiceProviderName, rec.InvoiceIssuerName].find((v) => !isBlank(v));
+    if (successor !== undefined) out.ProviderName = toStringValue(successor);
+  }
+  // FOCUS 1.0 renamed UsageQuantity / UsageUnit to ConsumedQuantity /
+  // ConsumedUnit: the documented value also fills the legacy canonical field.
+  if (out.UsageQuantity === undefined) out.UsageQuantity = out.ConsumedQuantity;
+  if (out.UsageUnit === undefined) out.UsageUnit = out.ConsumedUnit;
+
+  // Fill the rest of the v1.0 baseline so the row satisfies the type even when
+  // the export left optional-in-practice columns out entirely.
+  for (const col of [...COLUMNS_BY_VERSION['1.0'], ...LEGACY_COLUMNS]) {
+    if (out[col] === undefined && !DERIVED_ON_UPGRADE.has(col)) out[col] = NUMERIC_COLUMNS.has(col) ? 0 : '';
   }
   // EffectiveCost defaults to BilledCost ONLY when the source omitted it — a
   // present 0 (fully discounted / credited usage) is a real value and is kept.

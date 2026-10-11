@@ -1,0 +1,44 @@
+# GREEN: branch fix/focus-normalization-fixtures (fix commit on top of the RED commit)
+
+## New contract tests
+npx vitest run src/costsource/focusFormatFixtures.test.ts src/ingest/focus/provider.test.ts
+  Test Files 2 passed (2) | Tests 28 passed (28)
+
+## Suites (default vitest config; *.db.test.ts excluded by the config)
+npx vitest run src/costsource src/ingest
+  origin/main: Test Files 4 failed | 64 passed (68); Tests 28 failed | 1090 passed (1118)
+  branch:      Test Files 4 failed | 65 passed (69); Tests 28 failed | 1097 passed (1125)
+  The 28 failures are the same set on both (diffed by name): child-process tests
+  (cli.process, cli.worker, redactLinear) that need the `tsx` package, missing from
+  the shared node_modules in this sandbox. Not related to this change.
+
+## Whole repository (npx vitest run, JSON reporter, per-test diff against origin/main)
+  origin/main: 3353 tests, 3287 passed, 51 failed, 15 skipped
+  branch:      3360 tests, 3294 passed, 51 failed, 15 skipped
+  Same 51 failures (tsx / @testing-library/react / @playwright/test absent); 7 new
+  tests pass; no existing test changes status.
+  Tests updated because they pinned the old behavior (see PR "Regression analysis"):
+  costsource.test, focusFileAdapter.test ('Generative AI' default),
+  servicenowAdapter.test, connectorWalk.test (v1.2 audit now []),
+  syntheticCloudSandbox.test (pointfive-sandbox rows hash), compat golden api.json.
+
+## Database suites (throwaway Postgres 16 on 127.0.0.1:55432, no S3 endpoint)
+RATIO_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres
+  npx vitest run --config vitest.db.config.ts src/ingest
+    origin/main and branch identical: Tests 578 passed | 3 skipped (581);
+    7 files fail at setup: "RATIO_TEST_S3_ENDPOINT is not set" (no S3 in sandbox).
+  npx vitest run --config vitest.db.serial.config.ts
+    branch: Test Files 6 passed (6); Tests 173 passed (173)
+
+## Static checks
+npx tsc --noEmit -p tsconfig.json         26 errors on both origin/main and branch (missing test-only packages)
+npx tsc --noEmit -p tsconfig.worker.json  exit 0
+npx eslint <changed files>                exit 0
+
+## Mutation spot checks (each applied alone, then reverted)
+M1 restore `ServiceSubcategory: raw.ServiceSubcategory ?? 'Generative AI'` in focusRows.ts
+   focusFormatFixtures + costsource + focusFileAdapter tests: 6 failed | 23 passed -> KILLED
+M2 drop the ConsumedQuantity/ConsumedUnit -> UsageQuantity/UsageUnit mapping in coerceFocusRecord
+   focusFormatFixtures: 5 failed | 1 passed -> KILLED
+M3 drop the ServiceProviderName fallback in ingest validateRow
+   provider.test: 1 failed | 21 passed -> KILLED

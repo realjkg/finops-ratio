@@ -65,9 +65,14 @@ export function providerPolicyFor(
   return null;
 }
 
-/** Header check for a checked source type: ProviderName is a FOCUS 1.0 mandatory column. */
+/**
+ * Header check for a checked source type: ProviderName is a FOCUS 1.0 mandatory
+ * column. FOCUS 1.3 deprecates and 1.4 removes it; its successor
+ * ServiceProviderName satisfies the check, and validateRow reads it in its place
+ * so the same allowlist still applies to every row.
+ */
 export function checkProviderHeader(index: HeaderIndex, p: ProviderPolicy): FieldError | null {
-  if (index.pos.has('ProviderName')) return null;
+  if (index.pos.has('ProviderName') || index.pos.has('ServiceProviderName')) return null;
   return { column: 'ProviderName', code: 'MISSING_REQUIRED_COLUMN', message: `ProviderName is required for source type ${p.sourceType} (FOCUS 1.0 mandatory column)` };
 }
 

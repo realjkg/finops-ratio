@@ -29,8 +29,9 @@ describe('ServiceNowAdapter — synthetic CMDB/ITBM source', () => {
     expect(result.sourceId).toBe(SERVICENOW_SANDBOX_SOURCE_ID);
     expect(result.sourceVersion).toBe('1.2');
     expect(result.canonicalVersion).toBe(CANONICAL_FOCUS_VERSION);
-    // A v1.2 export is upgraded by the shim — the backfill audit is on the record.
-    expect(result.backfilledColumns.length).toBeGreaterThan(0);
+    // The audit is version-based: per the FOCUS column history nothing ratified
+    // after 1.2 is in the canonical (1.4) model, so it is empty.
+    expect(result.backfilledColumns).toEqual([]);
     expect(result.rows.length).toBe(rawRowsForServiceNow().length);
   });
 

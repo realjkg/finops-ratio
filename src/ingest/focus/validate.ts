@@ -219,7 +219,8 @@ export function validateRow(
       listCost: numeric.ListCost,
       contractedCost: numeric.ContractedCost,
       billingCurrency: currency,
-      providerName: optText(values, index, 'ProviderName'),
+      // FOCUS 1.3+ successor of ProviderName (removed in 1.4); checked by the same allowlist.
+      providerName: optText(values, index, 'ProviderName') ?? optText(values, index, 'ServiceProviderName'),
       serviceName: optText(values, index, 'ServiceName'),
       serviceCategory: optText(values, index, 'ServiceCategory'),
       chargeCategory: optText(values, index, 'ChargeCategory'),

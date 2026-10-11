@@ -69,7 +69,7 @@ describe('FocusFileAdapter.ingest — version normalization', () => {
     expect(row.ConsumedQuantity).toBe(5_000_000);
     expect(row.CommitmentDiscountStatus).toBeNull();
     // v1.2 backfilled
-    expect(row.ServiceSubcategory).toBe('Generative AI');
+    expect(row.ServiceSubcategory).toBe(''); // never a guessed label
     expect(row.InvoiceIssuerName).toBe('private-cloud');
     // v1.3 backfilled
     expect(row.SkuMeter).toBeNull();

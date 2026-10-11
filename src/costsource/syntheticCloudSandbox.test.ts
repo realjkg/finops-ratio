@@ -26,11 +26,12 @@ const ORACLE: Record<string, { provider: string; totalCents: number; mappedCents
 };
 
 // Golden SHA-256 of the existing three sources, captured on origin/main
-// (7a9da43) with the clock pinned to 2026-06-15T00:00:00Z.
+// (7a9da43) with the clock pinned to 2026-06-15T00:00:00Z. pointfive-sandbox
+// rows re-captured in C1: its v1.0 rows no longer get a guessed ServiceSubcategory.
 const GOLDEN: Record<string, { descriptor: string; rows: string; health: string }> = {
   'pointfive-sandbox': {
     descriptor: '6ca1033c4438a232b0b733ad650dfa95f6a9baeba7c1d837a3c985999a3fca3d',
-    rows: 'e47800a7792ca95947e68836747a98f3d750282efb4d3a7e55f6f19126842e1b',
+    rows: 'b361b5720379ae0df8a7d7aa046112b279e7dd2a8ed47b4241b8d5289bd20010',
     health: '10f1273e189cb81d0874ad9145a276b5a5141cdc876e5d6295ce4928f9662795',
   },
   'focus-file-sandbox': {

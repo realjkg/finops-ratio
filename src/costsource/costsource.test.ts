@@ -43,8 +43,8 @@ describe('upgradeToCanonicalCost (version shim)', () => {
     expect(canonical.ContractedCost).toBe(950); // defaults to EffectiveCost
     expect(canonical.ConsumedQuantity).toBe(1_000_000);
     expect(canonical.CommitmentDiscountStatus).toBeNull();
-    // v1.2 additive
-    expect(canonical.ServiceSubcategory).toBe('Generative AI');
+    // v1.1 additive: a 1.0 source has no subcategory, so none is guessed
+    expect(canonical.ServiceSubcategory).toBe('');
     expect(canonical.InvoiceIssuerName).toBe('anthropic');
     // v1.3 / v1.4 additive
     expect(canonical.PricingCurrency).toBe('USD');

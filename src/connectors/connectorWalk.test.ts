@@ -327,8 +327,8 @@ describe('ServiceNow (sandbox) — full walk', () => {
     expect(run).toBeDefined();
     expect(run!.result.sourceVersion).toBe('1.2');
     expect(run!.result.canonicalVersion).toBe('1.4');
-    // The shim upgraded a v1.2 allocation export to v1.4 — backfill visible.
-    expect(run!.result.backfilledColumns.length).toBeGreaterThan(0);
+    // Version-based audit: no ratified column after 1.2 (FOCUS column history).
+    expect(run!.result.backfilledColumns).toEqual([]);
     // ServiceNow reports findings too (CMDB service class feeds the same rules).
     expect(run!.findings.length).toBeGreaterThan(0);
     expect(landedWorkloads(useStore.getState().ingestRuns).size).toBeGreaterThan(0);
