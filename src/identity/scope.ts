@@ -27,7 +27,11 @@ function isRealTeam(team: unknown): team is string {
 }
 
 /** An array's own elements only: holes and inherited indexes are skipped (the
- * built-in iteration methods would read Array.prototype through a hole). */
+ * built-in iteration methods would read Array.prototype through a hole). The
+ * result is a dense array built by push, so the array methods used on it
+ * below (`some`) only ever see own elements. Every caller-supplied array in
+ * this module goes through ownList or an own-index loop; DEPLOY_ENVS is a
+ * frozen module constant. */
 function ownList(a: unknown): unknown[] | null {
   if (!Array.isArray(a)) return null;
   const out: unknown[] = [];
@@ -90,7 +94,24 @@ export function inScope(principal: ScopeOf, key: ScopeKey): boolean {
   }
 }
 
-/** The rows inside the principal's scope, in their original order. */
+/**
+ * The rows inside the principal's scope, in their original order. Only the
+ * array's own indexes are visited (Array.prototype.filter would also visit an
+ * inherited index through a hole), and a row whose keyOf throws is excluded.
+ */
 export function filterByScope<T>(principal: ScopeOf, rows: readonly T[], keyOf: (row: T) => ScopeKey): T[] {
-  return rows.filter((row) => inScope(principal, keyOf(row)));
+  const out: T[] = [];
+  if (!Array.isArray(rows)) return out;
+  for (let i = 0; i < rows.length; i += 1) {
+    if (!Object.hasOwn(rows, i)) continue;
+    const row = rows[i];
+    let key: ScopeKey;
+    try {
+      key = keyOf(row);
+    } catch {
+      continue; // fail closed: a row whose scope cannot be read is not shown
+    }
+    if (inScope(principal, key)) out.push(row);
+  }
+  return out;
 }

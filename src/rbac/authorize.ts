@@ -105,6 +105,11 @@ function ownCopy<K extends string>(o: unknown, keys: readonly K[]): unknown {
   }
 }
 
+// Array methods in this file run only on arrays that cannot reach an inherited
+// index: `o.teams` and `p.envs` are dense copies made by ownElements (via
+// ownCopy), and PRINCIPAL_KEYS, RESOURCE_KEYS, READABLE_CODES, row.kinds and
+// ACTION_ROUTE_GROUPS are frozen module constants.
+
 /** A verified principal's shape; anything else is treated as no principal (401). */
 function isPrincipalShape(p: unknown): p is Principal {
   if (!p || typeof p !== 'object' || Array.isArray(p)) return false;
