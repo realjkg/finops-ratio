@@ -2,7 +2,9 @@
 
 Companion to [DESIGN.md](DESIGN.md). It records what the author checked, how,
 and what could not be checked. Base: `origin/main` at 62bd8ed (merge of #93)
-when the citations were checked; the base is now 7a9da43 (merge of PR #99).
+when the citations were checked; the citation checkpoint is 7a9da43 (merge of
+PR #99; the code revision the line citations were checked against; main has
+moved since).
 PR #99 changed about 30 files under `src` and `pages`, including
 `src/ai/{AIClient,buildAIContext,MockAIClient,index}.ts`; the cited lines were
 re-checked at 7a9da43 (`AIClient.ts:71-80` still lands on `AIWorkloadSnapshot`,
@@ -32,14 +34,15 @@ challenger's review of 117f8e2 and the owner's vendor-agnostic requirement;
 revision 15 (86cf6fb) answered the round-14 challenger's review of 433b27f
 under a scope freeze; revision 16 (d8ab0c5, 4913734) answered the round-15
 challenger's review of 86cf6fb; PR #98 merged at 86cf6fb, so revisions 16 and
-17 are follow-ups on the merged main (7a9da43). Revision 17 (9686368) answered
-the PR #101 challenger's review of 4913734. Revision 18 (dba0c64) simplified
-section 3.8 (start-and-reload evaluation only) on the decision recorded in
-section 6; revision 19 (98aa511) answered the challenger's review of revision
-18 and was approved; revision 20 (3ec58a3) answered Copilot's four open
+17 are follow-ups on the merged main. Revision 17 (9686368) answered the PR
+#101 challenger's review of 4913734. Revision 18 (dba0c64) simplified section
+3.8 (start-and-reload evaluation only) on the decision recorded in section 6;
+revision 19 (98aa511) answered the challenger's review of revision 18 and was
+approved; revision 20 (3ec58a3) answered Copilot's four open
 test-specification threads on it; revision 21 (4af297e) answered the
 challenger's review of 3ec58a3 (a formatting repair and two clarifications);
-revision 22 answers Copilot's two open threads on 4af297e.
+revision 22 (33f3b55) answered Copilot's two open threads on 4af297e; revision
+23, the last revision of this PR, answers Copilot's open threads on 33f3b55.
 
 ## 1. Method
 
@@ -112,9 +115,9 @@ revision 22 answers Copilot's two open threads on 4af297e.
   `pages/api/v1/ai/chat.ts` lines near 100 and 134 (the Claude and OpenAI SDK
   create calls) were re-read for the A21 surface. Fixes only; no new features.
 - Revision 16 sources: test-specification fixes only. The branch was
-  fast-forwarded to the merged main (7a9da43) before editing. Main had moved
-  by PR #99, which changed `src/ai` files; the citation re-check is in the
-  Revision 17 bullet.
+  fast-forwarded to the merged main (then at 7a9da43, the citation checkpoint)
+  before editing. Main had moved by PR #99, which changed `src/ai` files; the
+  citation re-check is in the Revision 17 bullet.
 - Revision 17 sources: `git diff --name-only 62bd8ed 7a9da43 -- src pages` was
   read for the files these documents cite; `src/ai/AIClient.ts:71-80`,
   `pages/api/v1/ai/chat.ts` (lines cited), `src/ai/providers.ts` and
@@ -238,3 +241,11 @@ later revisions added test cases to the A20 row.
 
 Rollback: revert the two documents; reverse-applying the diff to origin/main
 gives the same tree as origin/main.
+
+## 7. Follow-up findings
+
+This proposal PR closed at revision 23. Further reviewer findings are
+recorded here, not as more revisions, unless a finding is a High with a traced
+concrete failure.
+
+(none yet)

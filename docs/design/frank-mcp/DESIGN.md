@@ -1,48 +1,55 @@
 # Frank with an allowlisted, read-only MCP: design proposal
 
 Branch `docs/frank-mcp-proposal`. Revision 1 was branched from `origin/main` at
-62bd8ed; the base is now 7a9da43 (the merge of PR #99).
+62bd8ed; the citation checkpoint is 7a9da43 (the code revision the line
+citations were checked against; main has moved since, and the branch is merged
+with it).
 **Status: proposal. Design only: this branch adds documents and no code.
 Nothing in this proposal is implemented.** Every decision in section 10 is
 **open**: it is the owner's to make, with a recommendation attached. No
-decision is recorded here as made. This is revision 22. Review history:
-revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
-revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
-PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
-round-3 challenger approved it; Copilot then reviewed d997618 and revision 4
-(52de3cf) answered it; a round-4 challenger review of 52de3cf requested
-changes and a follow-up (16581c8) answered it; Copilot's next review and a
-round-5 challenger review of 16581c8 were answered by revision 5 (1ffb5fd); a
-round-6 challenger review of 1ffb5fd was answered by revision 6 (473aed0), and
-revision 7 (6f4c9f7) brought the review history up to date; a round-7
-challenger review of 6f4c9f7 was answered by revision 8 (6f82d26); a round-8
-challenger review of 6f82d26 was answered by revision 9 (911b67c); a round-9
-challenger review of 911b67c was answered by revision 10 (90eee59, whose
-DESIGN.md contained a splice error that revision 11 repairs); a round-10
-challenger review of 90eee59 was answered by revision 11 (10b18f8); the
-round-11 challenger approved 10b18f8, and Copilot's open threads on it (C1 to
-C3) with the round-11 Lows were answered by revision 12 (4e3734c); a round-12
-challenger review of 4e3734c was answered by revision 13 (ad2d6b8, 117f8e2); a
-round-13 challenger review of 117f8e2 (1 Medium, 5 Low), with a new owner
-requirement (the design is model-vendor agnostic), was answered by revision 14
-(433b27f); a round-14 challenger review of 433b27f (2 Medium, 6 Low, under a
-scope freeze) was answered by revision 15 (86cf6fb); a round-15 challenger
-review of 86cf6fb (3 Medium, 7 Low, test specification only, under a scope
-freeze) was answered by revision 16 (d8ab0c5, 4913734); a challenger review of
-4913734 in PR #101 (2 Medium, 3 Low, under a scope freeze) was answered by
-revision 17 (9686368); the review was then closed in favor of a simplification
-(revision 18, below). Revision 18 replaced the section 3.8 evaluation
-machinery with start-and-reload evaluation only, on the conclusion in the
-decision record (EVIDENCE.md section 6); a challenger review of revision 18 (1
-Medium, 7 Low, under a scope freeze) was answered by revision 19 (98aa511),
-which the challenger approved; Copilot's four open test-specification threads
-on it were answered by revision 20 (3ec58a3); a challenger review of 3ec58a3
-(1 Medium, 2 Low) was answered by revision 21 (4af297e); Copilot's two open
-threads on it (a reload timeout, and a revision-independent classification
-statement) are answered by this revision 22. Revisions 2 to 15 were in PR #98,
-which merged at 86cf6fb; revisions 16 to 22 are follow-ups on the merged main
-(7a9da43). The code citations were checked at 62bd8ed and re-checked at
-7a9da43. PR #99 (62bd8ed to 7a9da43) changed about 30 files under `src` and
+decision is recorded here as made. This is revision 23, the last revision of
+this proposal PR. Review history: revision 1 (c97852d, PR #96) was reviewed by
+a challenger (changes requested); revision 2 (6402ab3, 00523cf) answered it,
+and a second challenger review of PR #98 requested changes; revision 3
+(e050578, d997618) answered that, and the round-3 challenger approved it;
+Copilot then reviewed d997618 and revision 4 (52de3cf) answered it; a round-4
+challenger review of 52de3cf requested changes and a follow-up (16581c8)
+answered it; Copilot's next review and a round-5 challenger review of 16581c8
+were answered by revision 5 (1ffb5fd); a round-6 challenger review of 1ffb5fd
+was answered by revision 6 (473aed0), and revision 7 (6f4c9f7) brought the
+review history up to date; a round-7 challenger review of 6f4c9f7 was answered
+by revision 8 (6f82d26); a round-8 challenger review of 6f82d26 was answered
+by revision 9 (911b67c); a round-9 challenger review of 911b67c was answered
+by revision 10 (90eee59, whose DESIGN.md contained a splice error that
+revision 11 repairs); a round-10 challenger review of 90eee59 was answered by
+revision 11 (10b18f8); the round-11 challenger approved 10b18f8, and Copilot's
+open threads on it (C1 to C3) with the round-11 Lows were answered by revision
+12 (4e3734c); a round-12 challenger review of 4e3734c was answered by revision
+13 (ad2d6b8, 117f8e2); a round-13 challenger review of 117f8e2 (1 Medium, 5
+Low), with a new owner requirement (the design is model-vendor agnostic), was
+answered by revision 14 (433b27f); a round-14 challenger review of 433b27f (2
+Medium, 6 Low, under a scope freeze) was answered by revision 15 (86cf6fb); a
+round-15 challenger review of 86cf6fb (3 Medium, 7 Low, test specification
+only, under a scope freeze) was answered by revision 16 (d8ab0c5, 4913734); a
+challenger review of 4913734 in PR #101 (2 Medium, 3 Low, under a scope
+freeze) was answered by revision 17 (9686368); the review was then closed in
+favor of a simplification (revision 18, below). Revision 18 replaced the
+section 3.8 evaluation machinery with start-and-reload evaluation only, on the
+conclusion in the decision record (EVIDENCE.md section 6); a challenger review
+of revision 18 (1 Medium, 7 Low, under a scope freeze) was answered by
+revision 19 (98aa511), which the challenger approved; Copilot's four open
+test-specification threads on it were answered by revision 20 (3ec58a3); a
+challenger review of 3ec58a3 (1 Medium, 2 Low) was answered by revision 21
+(4af297e); Copilot's two open threads on it (a reload timeout, and a
+revision-independent classification statement) were answered by revision 22
+(33f3b55); Copilot's open threads on it (a late reload result, the
+`reload_applied` assertion, and labeling of the citation checkpoint) are
+answered by this revision 23. Further reviewer findings go to the follow-up
+findings list at the end of EVIDENCE.md, not to more revisions, unless a High
+with a traced concrete failure. Revisions 2 to 15 were in PR #98, which merged
+at 86cf6fb; revisions 16 to 23 are follow-ups on the merged main. The code
+citations were checked at 62bd8ed and re-checked at 7a9da43, the citation
+checkpoint. PR #99 (62bd8ed to 7a9da43) changed about 30 files under `src` and
 `pages`, including `src/ai/AIClient.ts`, `src/ai/buildAIContext.ts`,
 `src/ai/MockAIClient.ts` and `src/ai/index.ts`; `pages/api/v1/ai/chat.ts`,
 `src/ai/providers.ts` and `src/ai/LiveAIClient.ts` are unchanged, and
@@ -604,12 +611,15 @@ the following rules.
   (default 30, a placeholder to confirm with the other placeholders in OD-8;
   it is a broker option, not an allowlist key, because the reload that reads
   the file cannot read it from the file). On a timeout (for example a hung A14
-  check) the reload is cancelled, a refused config is installed,
+  check) the reload is canceled, a refused config is installed,
   `reload_refused` is written with reason `timeout`, and the reload guard is
   released; a hung reload therefore never leaves the previous config serving.
-  If the audit write fails or hangs, the refusal still stands (a failed audit
-  write never turns a refusal into an enable), and the refusal is also emitted
-  as a plain, redacted log line.
+  **A reload that timed out or was canceled can never install:** its install
+  step is conditional on its still being the current, non-timed-out reload,
+  and a late result is discarded and writes nothing but a debug note. If the
+  audit write fails or hangs, the refusal still stands (a failed audit write
+  never turns a refusal into an enable), and the refusal is also emitted as a
+  plain, redacted log line.
 - **E6, the reload trigger.** The reload trigger is **not** an
   unauthenticated HTTP endpoint. In M0 it is a local operator trigger (a
   signal or a command-line command) plus the broker's `reload()` option for
@@ -927,7 +937,7 @@ Tests first, as in the rest of the program (Slices 3-5 design section 7).
 | A17 | Server certificate or key pin changes | connection refused; server unavailable |
 | A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key; (f) a tool entry without `output_schema_hash`, or any other missing required key; (g) a tool entry with a missing body (`description`, `input_schema` or `output_schema`); (h) a body whose hash does not match its `*_hash` key; (i) an unknown key inside a tool entry (as in (e)), or a body that is not an object; (j) an `in_process` body that differs from the registry (M2); (k) `description` over `max_description_bytes` or a schema over `max_schema_bytes`; (l) an unknown keyword inside the schema content of `input_schema` or `output_schema`; (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e), (f), (g), (h), (i), (j), (k) reject the whole file; (l) is accepted: the keyword is kept in the body and covered by its hash (not stripped before hashing) |
 | A19 | A tool result carries a credential-shaped value (bearer token, `sk-`-style key, JWT, AWS key id) in an ordinary string field that passes the output schema | not delivered to the model; fixed error; audit `secret_in_result` without the value; with `on_secret: redact` only the value is replaced and the audit still records it. Includes: a URL value whose `?` tail contains a quote (the serialized form does not re-parse, so the result is rejected); under `on_secret: redact`, a key-only secret such as `{"password":"abc def"}` (the value is replaced whole and nothing leaks); a hit on a map key (rejected); a located non-string value (rejected) |
-| A20 | Environment, kill switch and reload, with the slice that first tests each case. **M0** (raw environment, the broker's `reload()` option and a fixture config; no file parser): (a) raw `RATIO_ENV` unset, empty (not treated as `development`) or unrecognized, at start and at reload; (b) a reload with a changed environment is re-evaluated (both directions); (c) the kill switch, from both starting states: start with `FRANK_TOOLS` off, then live on, leaves tools off and logs "reload required" once; start with `FRANK_TOOLS` on and a good environment (the config passed and its snapshot was on), then live off, then live on again: tools turn off immediately and then **resume without a reload** (E3: that config was already validated, so this is accepted by design, not a gap); (d) `FRANK_TOOLS` parsing: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (e) overlapping reloads: the second is rejected and the first applies once; (f) a failed reload installs a refused (tools-off) config and writes `reload_refused`; it does not keep the old config; (g) a failed audit write does not enable tools, and a plain redacted log line is emitted; (i) start with gateway auth enforced and tools on, then remove enforcement and reload: the reload installs a refused config and writes `reload_refused` (the A14 check runs on reload); (j) E2: a request in flight when a reload swaps the config keeps the old config for the whole request, and the next request sees the new one (made deterministic by a deferred promise held inside the in-flight request, so the swap happens at a known point); (k) E6: the local operator trigger invokes a reload; M0 tests the command-line trigger, and the signal handler calls the same reload entry point, which this test covers; (l) E7: changing `RATIO_ENV` alone does not alter the installed config until a reload; (m) a reload that exceeds `reload_timeout_seconds` (a fixture check that never returns) is cancelled, a refused config is installed, `reload_refused` is written with reason `timeout`, and a later reload can run. **M2** (needs the file parser): (b2) a reload with a changed file is re-evaluated; (h) `deployment_environment` mismatching the raw value, or missing, rejects the whole file and installs a refused config; an entry without `environments[]` is available in the file's own environment | (a) refuses, installs a refused config, writes `startup_refused` or `reload_refused`; (b), (b2) the decision follows the new value or file; (c) off-start: tools stay off until a reload; on-start: off turns tools off and on resumes them; (d) only the documented value turns tools on; (e) one reload applies; (f) tools are off and the old config is gone; (g) the refusal stands; (i) refused config and `reload_refused`; (j) the in-flight request is unaffected and the next request uses the new config; (k) the reload runs; (l) the installed config is unchanged; (m) tools are off, the old config is gone, and the guard is released; (h) the whole file is rejected and tools are off |
+| A20 | Environment, kill switch and reload, with the slice that first tests each case. **M0** (raw environment, the broker's `reload()` option and a fixture config; no file parser): (a) raw `RATIO_ENV` unset, empty (not treated as `development`) or unrecognized, at start and at reload; (b) a reload with a changed environment is re-evaluated (both directions); (c) the kill switch, from both starting states: start with `FRANK_TOOLS` off, then live on, leaves tools off and logs "reload required" once; start with `FRANK_TOOLS` on and a good environment (the config passed and its snapshot was on), then live off, then live on again: tools turn off immediately and then **resume without a reload** (E3: that config was already validated, so this is accepted by design, not a gap); (d) `FRANK_TOOLS` parsing: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (e) overlapping reloads: the second is rejected and the first applies once; a successful reload emits exactly one `reload_applied` with the old and new config hashes and the `kill_switch_state` pair {snapshot, live}; (f) a failed reload installs a refused (tools-off) config and writes `reload_refused`; it does not keep the old config; (g) a failed audit write does not enable tools, and a plain redacted log line is emitted; (i) start with gateway auth enforced and tools on, then remove enforcement and reload: the reload installs a refused config and writes `reload_refused` (the A14 check runs on reload); (j) E2: a request in flight when a reload swaps the config keeps the old config for the whole request, and the next request sees the new one (made deterministic by a deferred promise held inside the in-flight request, so the swap happens at a known point); (k) E6: the local operator trigger invokes a reload; M0 tests the command-line trigger, and the signal handler calls the same reload entry point, which this test covers; (l) E7: changing `RATIO_ENV` alone does not alter the installed config until a reload; (m) a reload that exceeds `reload_timeout_seconds` (a fixture check that never returns) is canceled, a refused config is installed, `reload_refused` is written with reason `timeout`, and a later reload can run; the check then completes late, and that late completion installs nothing and does not overwrite a newer config. **M2** (needs the file parser): (b2) a reload with a changed file is re-evaluated; (h) `deployment_environment` mismatching the raw value, or missing, rejects the whole file and installs a refused config; an entry without `environments[]` is available in the file's own environment | (a) refuses, installs a refused config, writes `startup_refused` or `reload_refused`; (b), (b2) the decision follows the new value or file; (c) off-start: tools stay off until a reload; on-start: off turns tools off and on resumes them; (d) only the documented value turns tools on; (e) one reload applies and emits exactly one `reload_applied` with those hashes and values; (f) tools are off and the old config is gone; (g) the refusal stands; (i) refused config and `reload_refused`; (j) the in-flight request is unaffected and the next request uses the new config; (k) the reload runs; (l) the installed config is unchanged; (m) tools are off, the old config is gone, the guard is released, and the late completion changes nothing; (h) the whole file is rejected and tools are off |
 | A21 | Per-adapter **closed-set** assertion (Claude, OpenAI, Mistral and other OpenAI-compatible), run with tools on and off over every registry, fixture and allowlisted (MCP-path) tool, including an `http`-transport entry (the M2 risk is an adapter mapping an allowlisted server into a vendor `mcp` tool entry or an `mcp_servers` body key). The test is an allowlist, not a denylist of parameter names. For the SDK adapters (Claude and OpenAI, `pages/api/v1/ai/chat.ts` near lines 100 and 134) it spies on the SDK create argument and the SDK method called, and injects a recording `fetch` into the SDK client so that header names, the URL path and the constructor and per-request options are captured too; for the raw-fetch adapters (Mistral, Qwen, `openllm`) it intercepts `fetch`. It asserts, per adapter, a closed set of top-level body keys, of `tools[]` element shapes (function type only), of header names, of SDK options, the SDK method (no beta namespace) and the URL path | any key, header name, tool type, option, method or path outside the set fails the test; a mutant that adds any such element, not a named parameter, is killed |
 
 ### 8.3 Pass criteria
@@ -962,20 +972,22 @@ A20 (i); one whose in-flight request switches config mid-request, by A20 (j);
 one where the operator trigger does not reload, by A20 (k); one that re-reads
 the live `RATIO_ENV` per request, by A20 (l); one that leaves the old config
 serving after a reload timeout, by A20 (m); one that does not release the
-reload guard after a timeout, by A20 (m)), the reserved-field deny rule: a
-mutant that deletes it, or that applies a tool-level deny to the server (or
-the reverse), must be killed by A18; the body and hash checks, where a mutant
-that offers the server's live text, or skips the body/hash comparison, must be
-killed by A3 (c) and A18 (g, h); one that applies unknown-key rejection inside
-schema content, by A18 (l); one that skips the registry difference check, by
-A18 (j); one that skips the size caps, by A18 (k); one that skips the per-turn
-token ceiling, the timeout or the per-minute cap, by A11 (b), (c) and (d); one
-that adds any key, header, tool type, option, method or path outside the
-closed set, by A21; the `FRANK_TOOLS` parser, where a mutant that treats any
-truthy value as on must be killed by A20 (d)), and confirm at least one test
-fails per mutation. A surviving mutant blocks the PR. The repository already
-treats unfaithful tests as defects elsewhere (see the test-integrity entries
-in the Slices 3-5 evidence); this applies the same standard here.
+reload guard after a timeout, by A20 (m); one where a late result installs, by
+A20 (m); one that omits, duplicates or mis-hashes `reload_applied`, by A20
+(e)), the reserved-field deny rule: a mutant that deletes it, or that applies
+a tool-level deny to the server (or the reverse), must be killed by A18; the
+body and hash checks, where a mutant that offers the server's live text, or
+skips the body/hash comparison, must be killed by A3 (c) and A18 (g, h); one
+that applies unknown-key rejection inside schema content, by A18 (l); one that
+skips the registry difference check, by A18 (j); one that skips the size caps,
+by A18 (k); one that skips the per-turn token ceiling, the timeout or the
+per-minute cap, by A11 (b), (c) and (d); one that adds any key, header, tool
+type, option, method or path outside the closed set, by A21; the `FRANK_TOOLS`
+parser, where a mutant that treats any truthy value as on must be killed by
+A20 (d)), and confirm at least one test fails per mutation. A surviving mutant
+blocks the PR. The repository already treats unfaithful tests as defects
+elsewhere (see the test-integrity entries in the Slices 3-5 evidence); this
+applies the same standard here.
 
 ## 9. Slicing plan
 
