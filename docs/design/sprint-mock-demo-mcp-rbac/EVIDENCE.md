@@ -64,7 +64,9 @@ Each row gives the claim, the command, and the result.
 | `RATIO_ENV` vocabulary | `sed -n 11p src/ingest/config.ts`; `cat src/simulation/server/enabled.ts` | `development`, `test`, `staging`, `production`; the simulation checks `development` and `test` only |
 | Vitest picks up new Playwright specs | `sed -n 1,30p vitest.config.ts` | default include pattern applies; only `tests/simulation/**` is excluded |
 | Frank design cross-references | `grep -n "^### M\|^| T-[0-9]\|^| T[0-9]" docs/design/frank-mcp/DESIGN.md`; `grep -n "D-15" docs/design/slice-3-5/DESIGN.md` | milestones M0 to M4; tracked items T-1 to T-6 (no T-7 **on main**; PR #98 adds one, see the next row); threat rows T1 to T11; D-15 defers per-user identity |
-| Open Frank revision (PR #98) | `git fetch origin docs/frank-mcp-proposal`; `git show origin/docs/frank-mcp-proposal:docs/design/frank-mcp/DESIGN.md` (head `52de3cf`, 927 lines); `grep -n "T-6\|T-7\|A18\|A19\|^### 3\." ` | 3.8 reserves `environments[]` (the `RATIO_ENV` vocabulary), `roles[]`, `teams[]` with deny-when-unknown, empty and null deny, unknown keys rejected, one allowlist file per deployment (3.8 rules 1-5); 3.2 https plus pin or CA bundle, no cross-host redirects, `data_class`; T-6 reconciles with this plan; T-7 is per-role, per-team, per-environment allowlists; A18 tests the reserved fields; A19 scans result strings for credential-shaped values. Not merged at the time of writing, so PLAN 5a keeps main and #98 separate |
+| Open Frank revision (PR #98) | `git fetch origin docs/frank-mcp-proposal`; `git show origin/docs/frank-mcp-proposal:docs/design/frank-mcp/DESIGN.md`; `grep -n "on_secret\|deployment_environment\|startup_refused\|T-6\|T-7\|A18\|A19\|A20\|^### 3\."` | Re-read at the branch tip when revision 4 was written (the branch had moved since revision 3, so no revision is pinned in PLAN or TASKS). 3.3 has a key table: file `deployment_environment`, `tenants`, `servers`; per-tool `on_secret` (`reject` default or `redact`); 3.8 rule 0 requires the raw `RATIO_ENV` to be one of `development`, `test`, `staging`, `production` and the file's `deployment_environment` to equal it (A20), and rules 1-5 keep the reserved `environments[]`, `roles[]`, `teams[]` semantics (A18); A19 covers secrets in results; T-6 reconciles with this plan and T-7 is per-role/team/environment allowlists. Not on main yet (`git ls-tree origin/main docs/design/frank-mcp` shows only the earlier revision) |
+| Instrumentation hook | `cat instrumentation.ts` | `register()` runs once at Node.js server start and already dynamic-imports a startup check; this is the deterministic place to register the audit sink (card C5) |
+| Store reset surface | `sed -n 266,290p src/store/useStore.ts` | `selectedId: WORKLOADS[0]?.id` (275), `aiMessages`, `filters`, plus `connectorSessions` and `ingestRuns` reset in `clearSimulation` (155) |
 | Page components that bypass the store | `grep -n "WORKLOADS" src/attribution/AttributionPage.tsx src/attribution/LiveAccrualBoard.tsx src/prediction/PredictionPage.tsx src/data/userQueries.ts` | AttributionPage 15, 29-30; LiveAccrualBoard 15, 44; PredictionPage 16, 24, 84, 152; userQueries 15, 59, 71 |
 | Store budgets and alerts | `grep -n "BUDGET_PROFILES\|ALERTS" src/store/useStore.ts` | seeded at 24-25, reset at 155, initial state 271-272 |
 | PersonaProvider reads localStorage | `sed -n 1,30p src/components/PersonaProvider.tsx` | `readStoredPersona(window.localStorage)` after mount; mounted in `pages/_app.tsx` lines 6 and 27 |
@@ -95,7 +97,7 @@ phrases.
   B7, `src/server/gateway/index.ts` B1 then C5, `pages/api/v1/cm/change.ts` B4
   then C3); the PLAN section 6 rows match the card sets and each card's size
   line; each range sits inside the size scale (S 1-3, M 4-8, L 9-15); the sum
-  is 105 to 163 person-days over 27 rows.
+  is 107 to 166 person-days over 27 rows.
 
 ## Limits of this verification
 

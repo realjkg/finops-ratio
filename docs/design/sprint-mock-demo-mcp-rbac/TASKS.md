@@ -2,7 +2,7 @@
 
 Read [PLAN.md](./PLAN.md) first. This file turns it into independent task
 cards. Facts are cited as F1 to F22 (PLAN section 2) and decisions as D1 to D13
-(PLAN section 8). Base: `origin/main` at `8caec87` (revision 3 re-checked against the open Frank design PR #98, branch `docs/frank-mcp-proposal` at `52de3cf`).
+(PLAN section 8). Base: `origin/main` at `8caec87` (revision 4 re-checked against the open Frank design PR #98, branch `docs/frank-mcp-proposal`; cite its DESIGN section 3.3 key table and 3.8, or main once it merges).
 
 Boundary (v2): local and ephemeral only. No production infrastructure, no real
 data or credentials, no spend. No card adds a migration (issue #94) or a
@@ -54,14 +54,37 @@ dependency. Mocks bind to the loopback interface only.
   the simulation session (`src/simulation/server/http.ts:34`) and is not
   reused. The same-origin comparison follows the simulation's pattern
   (`http.ts:30-33`).
-- Verdict sink: `src/server/gateway/verdictSink.ts` (card B1) keeps one
-  registration on `globalThis[Symbol.for('ratio.verdictSink')]`, so separate
-  Next.js route bundles share it, with `registerVerdictSink` and
-  `resetVerdictSinkForTests`. Every `authorize()` outcome passes through
-  `decide(principal, action, resource)` (card B1), which calls the sink;
-  **if the sink throws, the request is denied (fail closed, 503, fixed
-  message)**. Routes use `requires`; handlers that build a `Resource` late
-  (card C3) call `decide`, so every verdict is audited.
+- Verdict sink. `src/server/gateway/verdictSink.ts` (card B1) keeps one
+  registration on `globalThis[Symbol.for('ratio.verdictSink')]`, with
+  `registerVerdictSink` and `resetVerdictSinkForTests`. The `globalThis` guard
+  matters mainly under `next dev`, where route modules can be loaded as
+  separate instances; a production build shares one process-wide module cache.
+  Every `authorize()` outcome passes through `decide(principal, action,
+  resource)` (card B1), which calls the sink. **In enforce mode there is always
+  a sink**: B1 lazily registers a bounded in-memory default, so enforce mode
+  works from B1 onward; card C5 replaces it with the richer sink, registered in
+  the repository's existing `instrumentation.ts` `register()` hook (the one
+  deterministic server-start hook; routes are loaded lazily and many import
+  gateway files directly, so a side-effect import in a barrel file would not
+  reliably run). If enforce mode finds **no** sink (only possible after an
+  explicit reset), the request is denied with a fixed 503 ("audit sink not
+  configured"); if the sink throws, 503 as well (fail closed). With
+  `RATIO_RBAC` unset nothing is audited and nothing changes (F1). Routes use
+  `requires`; handlers that build a `Resource` late (card C3) call `decide`.
+- Mock state and run modes. The mock IdP key and revocation set (A2), change
+  store (C3, shared with C4 and C8), replay store (C4) and audit store (C5) are
+  module state. They are supported in unit tests (one module graph) and in a
+  **production build** (`next build` then `next start`), which is how the
+  Playwright launcher runs (card C1). `next dev` is not a supported mode for
+  the mock state; the launcher refuses it.
+- Mock persona catalogue. Card A2 owns `src/mock/idp/personas.ts`: for each
+  persona the `sub`, `role`, `teams`, `envs` and `tenant`. It includes two
+  engineering leads on real seeded team names, `eng-platform` (teams
+  `['Platform Eng']`) and `eng-cx` (teams `['CX Engineering']`) (F16), and
+  org-wide principals (`teams: '*'`) for the other roles.
+- Legacy principal. The shared-token principal has role `legacy_service`, which
+  is not one of the six personas; the matrix has a `legacy_service` column that
+  grants exactly today's access to gateway-wrapped routes (card A1).
 - Roles and lenses. The browser has three lenses (`executive`, `technical`,
   `procurement`, F4) and the server six roles. A lens changes presentation
   only; data scope always comes from the principal. Allowed lenses (default
@@ -85,7 +108,7 @@ dependency. Mocks bind to the loopback interface only.
 |---|---|
 | A1 to A8 | none |
 | B1 | A1, A2 |
-| B2 | B1, A1 |
+| B2 | B1, A1, B8 |
 | B3 | B1, A1, B8 |
 | B4 | A4 |
 | B5 | A1, A5 |
@@ -95,9 +118,9 @@ dependency. Mocks bind to the loopback interface only.
 | B9 | B1, A1, B8 |
 | B10 | B8 |
 | B11 | B7, B8, A1 |
-| C1 | B3, B7, B9, B10, B11, C2, A2, A3 |
+| C1 | B3, B7, B9, B10, B11, C2, A2, A3, A4, A5 |
 | C2 | B11, A1 |
-| C3 | B4, B1, A1 |
+| C3 | B4, B1, A1, B8 |
 | C4 | C3, A4 |
 | C5 | B1, C3 |
 | C6 | B4, A4 |
@@ -107,7 +130,6 @@ dependency. Mocks bind to the loopback interface only.
 Files that two cards edit, in sequence (the later card depends on the earlier):
 `src/costsource/CostSourcePage.tsx` A8 then B7; `pages/api/v1/cm/change.ts` B4
 then C3; `src/rbac/matrix.ts` A1 then C3 (the `cm/change` status flip);
-`src/server/gateway/index.ts` B1 then C5 (one registration import);
 `package.json` and `vitest.config.ts` C1 only; `src/store/useStore.ts` B11
 only. Ownership, acyclicity and the effort sum were re-checked by script when
 this file was revised (EVIDENCE.md).
@@ -117,14 +139,14 @@ this file was revised (EVIDENCE.md).
 | Card | Owns |
 |---|---|
 | A1 | `src/identity/types.ts`, `src/identity/scope.ts`, `src/identity/envMap.ts`, `src/identity/envMap.test.ts`, `src/rbac/matrix.ts`, `src/rbac/authorize.ts`, `src/rbac/matrix.test.ts`, `src/rbac/authorize.test.ts` |
-| A2 | `src/mock/idp/issuer.ts`, `src/mock/idp/verifier.ts`, `src/mock/idp/claims.ts`, `src/mock/idp/index.ts`, `src/mock/idp/idp.test.ts` |
+| A2 | `src/mock/idp/issuer.ts`, `src/mock/idp/verifier.ts`, `src/mock/idp/claims.ts`, `src/mock/idp/personas.ts`, `src/mock/idp/index.ts`, `src/mock/idp/idp.test.ts` |
 | A3 | `src/mock/personaData/dataset.ts`, `src/mock/personaData/scope.ts`, `src/mock/personaData/projections.ts`, `src/mock/personaData/oracle.fixture.json`, `src/mock/personaData/projections.test.ts` |
 | A4 | `src/mock/itsm/jiraStub.ts`, `src/mock/itsm/serviceNowStub.ts`, `src/mock/itsm/state.ts`, `src/mock/itsm/index.ts`, `src/mock/itsm/itsm.test.ts` |
 | A5 | `src/mock/mcp/server.ts`, `src/mock/mcp/tools.ts`, `src/mock/mcp/protocol.ts`, `src/mock/mcp/index.ts`, `src/mock/mcp/mcp.test.ts` |
 | A6 | `src/costsource/sandboxSources.ts`, `src/costsource/seed.ts`, `src/costsource/CostSourceClient.ts`, `src/costsource/MockCostSourceClient.ts`, `src/costsource/syntheticCloudSeed.ts`, `src/costsource/syntheticCloudMapping.ts`, `src/costsource/sourcesForEnvPurity.test.ts`, `src/costsource/syntheticCloudSandbox.test.ts`, `src/costsource/sandboxAllowlist.test.ts`, `src/connectors/ConnectorCard.tsx`, `src/connectors/ConnectorCard.test.tsx` |
 | A7 | `src/lib/format.ts`, `src/lib/format.test.ts`, `src/lib/documentHead.test.ts`, `pages/_document.tsx`, `public/favicon.svg` |
 | A8 | `src/simulation/SimulationBar.tsx`, `src/simulation/SimulationBar.test.tsx`, `src/costsource/CostSourcePage.tsx`, `src/costsource/findingsHeader.test.tsx`, `pages/demo.tsx`, `src/ai/MockAIClient.ts`, `src/ai/demoPrompts.test.ts` |
-| B1 | `src/server/gateway/principal.ts`, `src/server/gateway/auth.ts`, `src/server/gateway/withGateway.ts`, `src/server/gateway/index.ts`, `src/server/gateway/verdictSink.ts`, `src/server/gateway/csrf.ts`, `src/server/gateway/principal.test.ts`, `src/identity/mockIdpVerifier.ts` |
+| B1 | `src/server/gateway/principal.ts`, `src/server/gateway/auth.ts`, `src/server/gateway/withGateway.ts`, `src/server/gateway/withRbac.ts`, `src/server/gateway/index.ts`, `src/server/gateway/verdictSink.ts`, `src/server/gateway/csrf.ts`, `src/server/gateway/principal.test.ts`, `src/identity/mockIdpVerifier.ts` |
 | B2 | `src/server/gateway/liveDataAuth.ts`, `pages/api/costsource/rows.ts`, `pages/api/costsource/findings.ts`, `pages/api/costsource/health.ts`, `pages/api/costsource/sources.ts`, `pages/api/v1/connectors/index.ts`, `src/server/gateway/liveDataPrincipal.test.ts` |
 | B3 | `pages/api/attribution.ts`, `pages/api/tokenomics.ts`, `pages/api/prediction/predict.ts`, `pages/api/prediction/accuracy.ts`, `pages/api/report/snapshot.ts`, `pages/api/costsource/ingest.ts`, `src/server/routeMatrix.test.ts`, `src/server/openRoutesEnforced.test.ts` |
 | B4 | `pages/api/v1/cm/change.ts`, `src/cm/outbound.ts`, `src/cm/itsmStub.e2e.test.ts` |
@@ -133,13 +155,13 @@ this file was revised (EVIDENCE.md).
 | B7 | `pages/api/v1/session/login.ts`, `pages/api/v1/session/logout.ts`, `pages/api/v1/session/principal.ts`, `pages/api/v1/workloads.ts`, `src/session/client.ts`, `src/session/session.test.ts`, `src/session/liveClients.test.ts`, `src/attribution/LiveAttributionClient.ts`, `src/prediction/LivePredictionClient.ts`, `src/tokenomics/LiveTokenomicsClient.ts`, `src/finio/LiveFinioClient.ts`, `src/ai/LiveAIClient.ts`, `src/cm/LiveCMClient.ts`, `src/costsource/LiveCostSourceClient.ts`, `src/hello/LiveHelloClient.ts`, `src/executive/SnapshotButton.tsx`, `src/costsource/CostSourcePage.tsx` |
 | B8 | `src/data/provider.ts`, `src/data/provider.test.ts`, `src/data/servedOracle.fixture.json`, `src/data/defaultScopeGolden.fixture.json`, `src/attribution/MockAttributionClient.ts`, `src/attribution/accrual.ts`, `src/attribution/aggregations.ts`, `src/prediction/MockPredictionClient.ts`, `src/executive/initiativeModel.ts`, `src/executive/reportModel.ts`, `src/findings/findingsModel.ts`, `src/mission/missionModel.ts`, `src/ai/buildAIContext.ts` |
 | B9 | `pages/api/v1/ai/chat.ts`, `pages/api/v1/finio/export.ts`, `pages/api/v1/a2a/handshake.ts`, `pages/api/v1/costs/published.ts`, `src/server/costs/publishedCostsRoute.ts`, `src/server/gatewayRoutesEnforced.test.ts` |
-| B10 | `src/attribution/AttributionPage.tsx`, `src/attribution/LiveAccrualBoard.tsx`, `src/prediction/PredictionPage.tsx`, `src/data/userQueries.ts`, `src/attribution/pageReaders.test.tsx` |
-| B11 | `pages/_app.tsx`, `pages/sign-in.tsx`, `src/session/SessionProvider.tsx`, `src/session/ViewGuard.tsx`, `src/session/Forbidden.tsx`, `src/session/ui.test.tsx`, `src/store/useStore.ts`, `src/store/hydrate.test.ts` |
-| C1 | `tests/personas/matrix.spec.ts`, `playwright.personas.config.ts`, `scripts/mock/start.mjs`, `package.json`, `vitest.config.ts`, `src/server/vitestConfig.test.ts` |
+| B10 | `src/attribution/AttributionPage.tsx`, `src/attribution/LiveAccrualBoard.tsx`, `src/prediction/PredictionPage.tsx`, `src/data/userQueries.ts`, `src/attribution/pageReaders.test.tsx`, `src/components/detail/DetailPanel.tsx`, `src/components/detail/DetailPanel.test.tsx` |
+| B11 | `pages/_app.tsx`, `pages/sign-in.tsx`, `src/session/SessionProvider.tsx`, `src/session/ViewGuard.tsx`, `src/session/Forbidden.tsx`, `src/session/ui.test.tsx`, `src/store/useStore.ts`, `src/store/hydrate.test.ts`, `src/store/configMismatch.test.tsx` |
+| C1 | `tests/personas/matrix.spec.ts`, `playwright.personas.config.ts`, `scripts/mock/start.mjs`, `package.json`, `vitest.config.ts`, `src/server/vitestConfig.test.ts`, `src/server/mockLauncher.test.ts` |
 | C2 | `src/lib/persona.ts`, `src/components/PersonaProvider.tsx`, `src/components/layout/NavBar.tsx`, `src/components/TechnicalViewToggle.tsx`, `src/lib/personaPrincipal.test.ts` |
 | C3 | `src/cm/lifecycle.ts`, `src/cm/changeStore.ts`, `pages/api/v1/cm/change.ts`, `src/rbac/matrix.ts`, `src/cm/lifecycle.test.ts` |
 | C4 | `pages/api/v1/cm/webhook.ts`, `src/cm/webhookSignature.ts`, `src/cm/replayStore.ts`, `src/cm/webhook.test.ts` |
-| C5 | `src/audit/sink.ts`, `src/audit/record.ts`, `src/audit/register.ts`, `src/audit/index.ts`, `src/audit/audit.test.ts`, `pages/api/v1/audit/records.ts`, `pages/audit.tsx`, `src/server/gateway/index.ts` |
+| C5 | `src/audit/sink.ts`, `src/audit/record.ts`, `src/audit/register.ts`, `src/audit/index.ts`, `src/audit/audit.test.ts`, `pages/api/v1/audit/records.ts`, `pages/audit.tsx`, `instrumentation.ts` |
 | C6 | `src/cm/tokenClient.ts`, `src/cm/tokenClient.test.ts`, `src/mock/tokenService/server.ts` |
 | C8 | `src/cm/statusSync.ts`, `src/cm/statusSync.test.ts` |
 | C7 | `.obvious/obvious.md` |
@@ -153,7 +175,7 @@ A card that needs a file it does not own stops and records the need on the card
 
 ### A1. Contract, permission matrix and the `authorize()` decision function
 
-- **Goal.** Implement PLAN 4.2 literally: `Role`, `DeployEnv`, `Principal`,
+- **Goal.** Implement PLAN 4.2 literally: `Role` (six personas plus the internal `legacy_service`), `DeployEnv`, `Principal`,
   `Action`, `Resource`, `Verdict` (401, 403 and 409), the shared scope helper
   (`inScope`, `filterByScope`), the environment mapping (`deployEnvFromProcess`,
   `dataEnvToDeployEnv`), the persona-by-view matrix (PLAN 4.4, including each
@@ -183,6 +205,8 @@ A card that needs a file it does not own stops and records the need on the card
     with `fs`; every existing route has a row with a status; a row without a
     file must carry `plannedBy`; `/demo`, `/hello`, `/finio/demo` and
     `/sign-in` are `public`),
+    `legacy_service_column_grants_exactly_todays_gateway_access`,
+    `budget_edit_row_is_marked_deferred_with_no_enforcing_surface`,
     `matrix_has_rows_for_every_route_planned_by_this_plan` (session login,
     logout and principal, `/api/v1/workloads`, `/api/v1/cm/webhook`,
     `/api/v1/audit/records`, `/audit`, `/sign-in`), `matrix_view_codes_match_plan_section_4_4`,
@@ -206,8 +230,8 @@ A card that needs a file it does not own stops and records the need on the card
   `exp`, plus revocation and key rotation. It returns raw claims and does not
   import A1; `MockIdpVerifier` (card B1) maps claims to `Principal`. A real
   OIDC verifier replaces `MockIdpVerifier` later (D1).
-- **Files.** `src/mock/idp/issuer.ts`, `verifier.ts`, `claims.ts`, `index.ts`,
-  `idp.test.ts` (all new). Use `node:crypto` with EdDSA or ES256 and JWK
+- **Files.** `src/mock/idp/issuer.ts`, `verifier.ts`, `claims.ts`, `personas.ts`,
+  `index.ts`, `idp.test.ts` (all new). Use `node:crypto` with EdDSA or ES256 and JWK
   export; do not write PEM blocks (a PEM header line triggers `secrets`).
 - **Dependencies.** None.
 - **Red tests (`idp.test.ts`).**
@@ -220,6 +244,8 @@ A card that needs a file it does not own stops and records the need on the card
   `role_change_reissue_reflects_new_claims_and_old_token_is_revoked`,
   `key_rotation_old_kid_rejected_after_retire`,
   `issuer_refuses_to_run_when_RATIO_ENV_is_production`,
+  `persona_catalogue_has_two_eng_leads_on_distinct_real_team_names`,
+  `persona_catalogue_has_org_wide_principals_for_the_other_roles`,
   `no_key_or_token_material_in_console_output`.
 - **Governance class.** Path-derived: `unclassified`.
 - **Parallel-safe.** Yes. **Size.** S (2 to 3 days).
@@ -428,18 +454,23 @@ A card that needs a file it does not own stops and records the need on the card
 - **Goal.** `withGateway` authenticates through a `TokenVerifier`
   (`MockIdpVerifier`, mapping A2 claims to the A1 `Principal`) when
   `RATIO_RBAC=enforce`, then falls back to the legacy shared token as a
-  `legacy-shared-token` principal with a narrow fixed grant. New option on
-  `withGateway`: `requires: { action: Action; resource?: (req) => Resource }`,
-  evaluated through `authorize()` after authentication and before the handler.
-  Also provides (see "Shared decisions"):
+  `legacy_service` principal with a fixed grant. New option on `withGateway`:
+  `requires: { action: Action; resource?: (req) => Resource }`, evaluated
+  through `authorize()` after authentication and before the handler. Also
+  provides (see "Shared decisions"):
+  - `withRbac(handler, {requires})` in `withRbac.ts`: authentication and
+    authorization **only**, with no method guard, rate limit or body-size
+    check, and a no-op when not enforced. Routes that keep their own method
+    guards and error envelopes (card B3) use it, so the offline default is
+    byte-identical;
   - `decide(principal, action, resource)`, the one helper that calls
-    `authorize()` and then the registered verdict sink, so a handler that
-    builds its `Resource` late (card C3) is audited the same way as a route
-    that uses `requires`;
-  - `verdictSink.ts`, a single registration on
-    `globalThis[Symbol.for('ratio.verdictSink')]` with `registerVerdictSink`
-    and `resetVerdictSinkForTests`; **fail closed**: if the sink throws, the
-    request is denied with a fixed 503;
+    `authorize()` and then the verdict sink, so a handler that builds its
+    `Resource` late (card C3) is audited the same way as a route that uses
+    `requires`;
+  - `verdictSink.ts`: the `globalThis` registration, a lazily registered
+    bounded in-memory default sink in enforce mode, `registerVerdictSink`,
+    `resetVerdictSinkForTests`, and fail-closed behavior (no sink or a throwing
+    sink gives a fixed 503);
   - `csrf.ts`, a new same-origin plus double-submit check for
     cookie-authenticated unsafe methods (the simulation's `requireCsrf` is
     bound to its own session and is not reused);
@@ -449,7 +480,7 @@ A card that needs a file it does not own stops and records the need on the card
 - **Dependencies.** A1, A2.
 - **Red tests (`principal.test.ts`).**
   `valid_mock_jwt_yields_principal_in_handler_context`,
-  `legacy_shared_token_passes_as_flagged_legacy_principal`,
+  `legacy_shared_token_passes_as_legacy_service_principal`,
   `legacy_principal_cannot_exceed_its_fixed_grant`,
   `jwt_with_prod_aud_is_rejected_by_a_test_deployment`,
   `offline_default_still_unenforced_with_no_token_and_mock_provider`,
@@ -458,8 +489,12 @@ A card that needs a file it does not own stops and records the need on the card
   `tampered_role_claim_returns_401_with_a_fixed_message`,
   `route_declaring_requires_gets_403_before_the_handler_runs`,
   `requires_resource_builder_receives_the_request_and_feeds_authorize`,
+  `with_rbac_leaves_method_guard_rate_limit_and_envelopes_untouched`,
+  `with_rbac_is_a_no_op_when_not_enforced`,
   `verdict_sink_is_called_for_allow_and_for_deny`,
   `verdict_sink_receives_no_token_or_secret`,
+  `enforce_mode_registers_the_in_memory_default_sink_lazily`,
+  `enforce_mode_with_sink_cleared_fails_closed_with_503`,
   `sink_throwing_denies_the_request_fail_closed_with_503`,
   `sink_registration_is_shared_across_separately_loaded_module_instances`,
   `reset_helper_clears_the_registered_sink`,
@@ -480,7 +515,7 @@ A card that needs a file it does not own stops and records the need on the card
   with a data-read grant in place of the shared token, and the four costsource
   routes and `v1/connectors` declare `requires`. Rows are filtered with the A1
   scope helper (team from `x_RatioTeam`; environment from the resolved
-  workload). Failed-attempt accounting, the weak-token refusal and sandbox
+  workload through the B8 provider). Failed-attempt accounting, the weak-token refusal and sandbox
   anonymity stay. The exported signatures and results of
   `evaluateLiveDataAuth` and `gateSourceAccess` stay unchanged (the principal
   path is additive), because `src/server/costs/publishedCostsRoute.ts` (card
@@ -489,7 +524,7 @@ A card that needs a file it does not own stops and records the need on the card
   `pages/api/costsource/{rows,findings,health,sources}.ts`,
   `pages/api/v1/connectors/index.ts`,
   `src/server/gateway/liveDataPrincipal.test.ts` (new).
-- **Dependencies.** B1, A1.
+- **Dependencies.** B1, A1, B8.
 - **Red tests.**
   `principal_with_cost_read_grant_passes_live_gate_without_the_shared_token`,
   `principal_without_grant_gets_403_not_401`,
@@ -509,7 +544,11 @@ A card that needs a file it does not own stops and records the need on the card
 
 - **Goal.** Put `attribution`, `tokenomics`, `prediction/predict`,
   `prediction/accuracy`, `report/snapshot` and `costsource/ingest` (F3) behind
-  authentication with `requires` and the scope from the B8 provider. `hello`
+  authentication with `requires` (through B1's `withRbac`, **not** `withGateway`,
+  so each route keeps its local method guard, its error envelope and no new
+  rate limit) and the scope from the B8 provider. Tokenomics and prediction
+  accuracy return org-level aggregates with no team dimension, so for them the
+  check is role-only (PLAN 4.4 note). `hello`
   stays an explicit `public` liveness route in the matrix. Add the generated
   persona-by-route-by-environment test (PLAN 4.7, item 7). The matrix test
   asserts every route has a status; `cm/change` is `deferred(C3)` and the
@@ -539,12 +578,15 @@ A card that needs a file it does not own stops and records the need on the card
   `user_dimension_attribution_denied_for_cto_finance_eng_procurement`,
   `auditor_post_to_ingest_returns_403`,
   `report_snapshot_export_is_scoped_to_the_caller`,
+  `predict_with_another_teams_workload_id_is_403_for_eng_lead`,
+  `offline_default_405_and_success_responses_are_byte_identical_for_the_six_routes`,
+  `tokenomics_and_prediction_accuracy_are_role_only_checks`,
   `query_param_cannot_override_team_or_env_scope`,
   `role_in_query_or_header_is_ignored`,
   `simulation_routes_return_404_when_simulation_disabled`.
 - **Governance class.** Path-derived: `routes` (six paths). Content-derived
-  expected: possibly `auth_tenancy` if added lines mention the gateway auth
-  words in a path; confirm on the diff.
+  expected: confirm on the diff (importing `withRbac` from the gateway folder
+  does not change the path-derived class).
 - **Parallel-safe.** Yes with B2, B7, B9. **Size.** M (5 to 8 days).
 
 ### B4. ITSM adapter seam and outbound hardening
@@ -585,30 +627,40 @@ A card that needs a file it does not own stops and records the need on the card
 - **Goal.** The client half of `docs/design/frank-mcp` (milestone M2 there),
   limited to the A5 mock server. Hand-rolled minimal client (JSON-RPC over
   HTTP); no SDK dependency (D13). It follows that design's allowlist rules
-  (section 3, and 3.8 in the open revision, PR #98; see PLAN 5a):
+  (section 3, including the 3.3 key table and 3.8, in PR #98 or on main once it
+  merges; see PLAN 5a). Re-read the current Frank design before starting; its
+  key names are still proposals.
   - The allowlist is a **file** named by one environment variable, parsed at
     start, never an editable code module, API or UI. **One file per
-    deployment** (a dev, a test and a production file); no environment reads
-    another's file or credentials. There is no "endpoint registry keyed by
-    environment".
-  - Each server entry pins the URL, `owner`, `purpose` and `data_class`
-    (required), and, for https, a certificate pin or named CA bundle and no
-    cross-host redirects. Plain `http` to loopback is allowed **only in the
-    mock** and cannot be enabled outside `development` or `test`.
+    deployment**, and the file declares its own top-level
+    `deployment_environment`, which must equal the **raw** `RATIO_ENV`
+    (unset, empty or unrecognized refuses to enable tools and records
+    `startup_refused`). There is no "endpoint registry keyed by environment".
+  - The loader accepts exactly the keys in Frank's 3.3 key table (file:
+    `deployment_environment`, `tenants`, `servers`; server and tool keys as
+    listed there) and rejects any other key. Per-tool `on_secret` is `reject`
+    (default) or `redact`; any other value rejects the file.
+  - Server entries pin `owner`, `purpose` and `data_class` (required); https
+    entries need a certificate pin or CA bundle and refuse cross-host
+    redirects. Plain `http` to loopback is allowed **only in the mock** and
+    cannot be enabled outside `development` or `test`. stdio entries are parsed
+    but not connected in this sprint (OD-1 recommends HTTP only).
   - Each tool entry pins name, `description_hash`, `schema_hash` and a
     `read_only_via` capability. **Read-only comes from the operator
     allowlist, never from the server's own annotation.** The broker offers the
     allowlist's own description and schema, not the server's live text.
-  - Reserved fields use Frank's names: `environments[]` (values in the
-    `RATIO_ENV` vocabulary, mapped from the deployment's environment),
-    `roles[]` (mapped from `Principal.role`) and `teams[]` (mapped from
-    `Principal.teams`). A present field with an unknown caller value denies;
-    an empty array or null denies; unknown keys are rejected at load. Do not
-    invent an `envs` allowlist field.
+  - Reserved fields use Frank's names: `environments[]` (`RATIO_ENV`
+    vocabulary), `roles[]` (mapped from `Principal.role`) and `teams[]`
+    (mapped from `Principal.teams`). A present field with an unknown caller
+    value denies; an empty array or null denies. Do not invent an `envs`
+    allowlist field.
   - `initialize` first, `tools/list` compared with pins, `tools/call` only for
     allowlisted tools the principal's role, environment and teams permit
-    through `authorize()`. Per-team credentials are references resolved
+    through `decide()`. Per-team credentials are references resolved
     server-side and never returned. The PointFive scaffold is untouched (F12).
+  - Audit events (`startup_refused`, `server_denied`, `tool_denied`,
+    `secret_in_result`) go to an injected callback in this sprint; wiring them
+    to the C5 sink is a follow-up in Frank M2.
 - **Files.** As listed in the ownership table. Tests run against the A5 mock
   server.
 - **Dependencies.** A1, A5.
@@ -621,19 +673,27 @@ A card that needs a file it does not own stops and records the need on the card
   `schema_hash_change_denies_the_tool`,
   `broker_offers_the_allowlist_description_and_schema_not_the_servers_live_text`,
   `allowlist_is_loaded_from_the_file_named_by_env_and_has_no_runtime_edit_path`,
-  `deployment_loads_only_its_own_allowlist_file`,
-  `unknown_keys_empty_arrays_and_null_in_allowlist_are_rejected_or_deny`,
+  `key_table_keys_are_accepted_and_any_other_key_rejects_the_file`,
+  `empty_arrays_and_null_in_reserved_fields_deny`,
+  `deployment_environment_matching_raw_RATIO_ENV_loads`,
+  `deployment_environment_mismatch_rejects_the_whole_file`,
+  `deployment_environment_missing_rejects_the_whole_file`,
+  `raw_RATIO_ENV_unset_empty_or_unrecognized_refuses_to_enable_tools_with_startup_refused`,
+  `empty_RATIO_ENV_is_not_treated_as_development`,
   `entry_whose_environments_exclude_the_deployment_is_denied`,
-  `unset_or_unknown_RATIO_ENV_denies_every_entry`,
   `entry_with_roles_or_teams_denies_when_caller_identity_is_unknown`,
+  `on_secret_defaults_to_reject`,
+  `on_secret_redact_replaces_only_matching_values_and_flags_the_result`,
+  `on_secret_invalid_value_rejects_the_file`,
+  `result_string_with_a_credential_shaped_value_is_rejected_before_delivery`,
   `https_entry_requires_a_pin_or_ca_bundle_and_refuses_cross_host_redirects`,
   `loopback_http_is_allowed_only_in_mock_and_cannot_be_enabled_in_production`,
   `server_entry_without_data_class_owner_or_purpose_is_rejected`,
+  `stdio_entries_are_parsed_but_never_connected`,
   `role_allowlist_blocks_a_tool_the_role_is_not_listed_for`,
   `team_credential_resolved_server_side_and_never_returned`,
   `eng_lead_gets_only_own_team_rows_through_an_mcp_tool`,
   `planted_secret_absent_from_logs_errors_and_audit`,
-  `result_string_with_a_credential_shaped_value_is_rejected_before_delivery`,
   `initialize_precedes_tools_call`,
   `tools_list_result_is_filtered_to_the_allowlist`,
   `response_size_and_time_limits_are_enforced`,
@@ -643,8 +703,9 @@ A card that needs a file it does not own stops and records the need on the card
   `network_egress`, possibly `secrets` (a secret-bearing config shape).
 - **Parallel-safe.** Yes within wave 1. **Size.** M (5 to 8 days).
 - **Notes.** Delivers the mock path of the Frank design's T-7 (per-role,
-  per-team, per-environment allowlists): the mock IdP and `Principal` supply
-  the caller identity that T-7 says is missing. Real identity stays D1.
+  per-team, per-environment allowlists). T-7 exists only in PR #98 until it
+  merges; on main there is no T-7. The mock IdP and `Principal` supply the
+  caller identity that T-7 says is missing. Real identity stays D1.
 
 ### B6. Other views follow the synthetic mapping
 
@@ -672,7 +733,8 @@ A card that needs a file it does not own stops and records the need on the card
 - **Goal.** Give the browser a server-side way to obtain, hold and send a
   credential.
   - `POST /api/v1/session/login` (mock IdP only; 404 unless the mock IdP is
-    enabled in `development` or `test`) accepts a persona and sets the
+    enabled in `development` or `test`) accepts a persona, or a one-time `loginToken` issued by the mock IdP (a second
+    use of the same token is 401), and sets the
     HttpOnly `ratio_session` cookie and the readable `ratio_csrf` cookie; the
     body never contains the token. `POST /api/v1/session/logout` revokes the
     `jti`. `GET /api/v1/session/principal` returns `{enforced, role, teams,
@@ -680,7 +742,10 @@ A card that needs a file it does not own stops and records the need on the card
     returns `{enforced:false}` and the browser keeps the offline seed. A real
     IdP login flow replaces `login` (D1).
   - `GET /api/v1/workloads` returns, from the B8 provider and for the caller's
-    scope, `{workloads, budgets, alerts, asOf}`. The bundled seed stays fixture
+    scope, `{shape, workloads, budgets, alerts, asOf}`. The **shape** is chosen
+    server-side from the role (PLAN 4.4 note): `rollup` for `cto` and
+    `procurement`, `drilldown` for the others; a query parameter cannot change
+    it. The bundled seed stays fixture
     data; the enforcement boundary is the API, and `npm run check:bundle` is the
     guard for any real data that arrives later.
   - Every `Live*Client`, `SnapshotButton` and the ingest panel in
@@ -699,6 +764,12 @@ A card that needs a file it does not own stops and records the need on the card
   `logout_revokes_the_jti`,
   `post_with_cookie_and_wrong_origin_is_403`,
   `workloads_endpoint_returns_only_in_scope_workloads_budgets_and_alerts`,
+  `cto_workloads_response_has_no_line_level_fields`,
+  `procurement_workloads_response_has_no_line_level_fields`,
+  `finops_lead_workloads_response_has_line_level_fields`,
+  `rollup_and_drilldown_totals_reconcile_to_the_cent`,
+  `shape_cannot_be_chosen_by_query_parameter`,
+  `one_time_login_token_second_use_is_401`,
   `role_change_reissue_updates_the_principal_after_refresh`.
   `src/session/liveClients.test.ts`:
   `live_clients_send_credentials_same_origin_and_surface_401_and_403`,
@@ -724,7 +795,13 @@ A card that needs a file it does not own stops and records the need on the card
   output). Add a committed oracle for the **real seeded dataset** (11
   workloads, 7 teams, float dollars, F16), computed by an independent one-off
   script and checked by hand, and assert the A3 scope type is assignable to
-  the A1 scope. Page components that import the seed directly are card B10.
+  the A1 scope. The provider also takes a **shape**: `drilldown` returns today's records;
+  `rollup` (for the roles whose maximum is the O code in PLAN 4.4) omits the
+  line-level fields (`budgets[].daily_spend_history`, `daily_allocation`, the
+  per-day cost and token counters) and adds a precomputed `forecast_summary`
+  produced by the existing forecast code, so a roll-up consumer still has the
+  month-end projection. Page components that import the seed directly are
+  card B10.
 - **Files.** As listed in the ownership table. The default-scope golden
   (`src/data/defaultScopeGolden.fixture.json`) is captured from main in the
   first (red) commit.
@@ -741,9 +818,13 @@ A card that needs a file it does not own stops and records the need on the card
   `default_scope_output_is_identical_to_main_for_every_model` (compares with
   `defaultScopeGolden.fixture.json`),
   `a3_scope_type_is_assignable_to_the_a1_scope`,
-  `empty_scope_returns_empty_not_everything`.
+  `empty_scope_returns_empty_not_everything`,
+  `rollup_shape_omits_every_field_in_the_omitted_list`,
+  `rollup_forecast_summary_equals_the_drilldown_forecast`,
+  `rollup_and_drilldown_totals_reconcile_to_the_cent_for_every_scope`,
+  `catalogue_team_names_exist_in_the_seeded_dataset`.
 - **Governance class.** Path-derived: `unclassified`.
-- **Parallel-safe.** Yes within wave 1. **Size.** L (9 to 12 days). Split by
+- **Parallel-safe.** Yes within wave 1. **Size.** L (10 to 14 days). Split by
   model family if review capacity is short.
 
 ### B9. Remaining gateway routes: chat, FinOps export, handshake, published costs
@@ -786,7 +867,9 @@ A card that needs a file it does not own stops and records the need on the card
   (lines 24, 84 and 152) and `src/data/userQueries.ts` (lines 59 and 71). They
   switch to the store (workloads) and to a scope-aware reader for user query
   events (`userQueryEventsFor(scope)`, user dimension restricted to the roles
-  in PLAN 4.4). In the offline default the store holds the seed, so output is
+  in PLAN 4.4). `DetailPanel.tsx` (the drill-down surface) shows an explicit
+  "Drill-down is not available for your role" state when the store holds the
+  `rollup` shape. In the offline default the store holds the seed, so output is
   unchanged.
 - **Files.** As listed in the ownership table.
 - **Dependencies.** B8.
@@ -798,9 +881,12 @@ A card that needs a file it does not own stops and records the need on the card
   `prediction_page_workload_list_and_default_come_from_the_store`,
   `eng_lead_prediction_page_lists_only_in_scope_workloads`,
   `user_query_events_are_filtered_by_scope`,
+  `cto_detail_panel_shows_drill_down_not_available` (in `DetailPanel.test.tsx`),
+  `finops_lead_detail_panel_renders_all_tabs`,
   `offline_default_output_of_all_four_files_is_unchanged`.
-- **Governance class.** Path-derived: `unclassified`.
-- **Parallel-safe.** Yes with B2, B3, B7, B9. **Size.** M (4 to 6 days).
+- **Governance class.** Path-derived: `unclassified` (four paths); the two
+  `src/components/detail/**` paths match the low-risk UI rule.
+- **Parallel-safe.** Yes with B2, B3, B7, B9. **Size.** M (5 to 7 days).
 
 ### B11. Sign-in UI, session provider, store hydration and view guard
 
@@ -810,25 +896,36 @@ A card that needs a file it does not own stops and records the need on the card
     B7's login; a real IdP redirect replaces it later (D1). It honors a
     `returnTo` parameter, restricted to same-origin paths.
   - `src/session/SessionProvider.tsx`, mounted in `pages/_app.tsx`: on mount it
-    calls `GET /api/v1/session/principal`. If `enforced` is false it does
-    nothing (offline default). If enforced and a principal is returned it calls
-    the store's `hydrateScoped()`, which fetches `/api/v1/workloads` and
-    replaces **workloads, budgets and alerts** together. Triggers: on mount,
-    after login, after logout (store cleared), after a role-change re-issue
-    (a refresh action), and on any 401 (store cleared, redirect to
-    `/sign-in?returnTo=...`).
+    calls `GET /api/v1/session/principal`. If `enforced` is false it hydrates
+    nothing and, when the build flag is set, shows a visible configuration
+    notice (see below). If enforced and a principal is returned it calls the
+    store's `hydrateScoped()`, which fetches `/api/v1/workloads` and replaces
+    **workloads, budgets and alerts** together. Triggers: on mount, after
+    login, after logout, after a role-change re-issue (a refresh action), and
+    on any 401.
+  - **Principal change resets everything the previous principal could have
+    seen.** `useStore.ts` gains `resetSessionState()`, called on logout, on 401
+    and on login: it clears workloads, budgets, alerts, sets `selectedId` to
+    the first in-scope workload (or empty), and clears `aiMessages`,
+    `aiThinking`, `aiPanelOpen`, `connectorSessions`, `ingestRuns`,
+    `connectorBusy` and `filters`. Logout and 401 are also a **hard
+    navigation** to `/sign-in`, so no module state survives a sign-out.
   - `src/session/ViewGuard.tsx` and `Forbidden.tsx`: when enforced, a page whose
     matrix row denies the principal's role shows a 403 state instead of the
-    page; until the principal is known a loading state shows, never data.
-  - `useStore.ts`: initial `workloads`, `budgets` and `alerts` are empty when
-    the build flag `NEXT_PUBLIC_RATIO_RBAC=enforce` is set (so there is no
-    first-paint flash of other teams' data) and the bundled seed otherwise;
-    `clearSimulation` resets to the same initial values.
+    page. The guard renders a loading state, never data, until the principal is
+    known, **whatever the build flag says**, so a mismatch cannot cause a
+    first-paint flash.
+  - Build flag: `NEXT_PUBLIC_RATIO_RBAC=enforce` is inlined at build time and
+    makes the store start empty; the server flag is `RATIO_RBAC`. They must
+    agree. Server enforced and build flag unset: the guard still hides pages
+    until hydration. Server unenforced and build flag set: the provider
+    hydrates the bundled seed and shows a configuration notice, instead of
+    leaving a blank app.
 - **Files.** As listed in the ownership table.
 - **Dependencies.** B7, B8, A1.
 - **Red tests.** `src/session/ui.test.tsx`:
   `unauthenticated_visit_when_enforced_redirects_to_sign_in_with_return_to`,
-  `expired_session_401_clears_the_store_and_redirects`,
+  `expired_session_401_clears_the_store_and_hard_navigates`,
   `return_to_rejects_cross_origin_targets`,
   `forbidden_page_state_shown_for_a_role_the_matrix_denies`,
   `loading_state_never_renders_data_before_the_principal_is_known`,
@@ -838,7 +935,16 @@ A card that needs a file it does not own stops and records the need on the card
   `eng_lead_store_never_holds_another_teams_workloads_budgets_or_alerts`,
   `store_initial_state_is_empty_under_the_enforce_build_flag`,
   `logout_and_401_clear_all_three_collections`,
-  `role_change_refresh_rehydrates_with_the_new_scope`.
+  `role_change_refresh_rehydrates_with_the_new_scope`,
+  `login_after_logout_resets_selected_id_to_the_first_in_scope_workload`,
+  `chat_messages_do_not_survive_a_principal_change`,
+  `connector_sessions_ingest_runs_and_filters_reset_on_principal_change`,
+  `logout_performs_a_hard_navigation`.
+  `src/store/configMismatch.test.tsx`:
+  `build_flag_set_and_server_unenforced_hydrates_the_seed_and_shows_a_configuration_notice`,
+  `build_flag_unset_and_server_enforced_never_renders_the_seed_before_the_principal`.
+  Vitest note: the flag is read at store initialization, so these tests call
+  `vi.resetModules()` and `vi.stubEnv()` before importing the store.
 - **Governance class.** Path-derived: `routes` (`_app.tsx`, `sign-in.tsx`),
   `unclassified` (the rest).
 - **Parallel-safe.** No (wave 3, after B7). **Size.** M (5 to 8 days).
@@ -848,16 +954,23 @@ A card that needs a file it does not own stops and records the need on the card
 ### C1. Browser persona matrix and local launcher
 
 - **Goal.** A Playwright spec that signs in as each persona through the B11
-  sign-in page and B7 login, and checks navigation, page content, totals, the
-  403 state and the sign-in redirect; a script that starts the app with the
-  mock IdP, ITSM stubs and MCP server. This card is the only one that edits
-  `package.json` (scripts only, no dependency) and `vitest.config.ts` (add
-  `tests/personas/**` to the exclude list, because the default include pattern
-  would otherwise run the Playwright spec under `npm test`).
+  sign-in page and B7 login, using the A2 catalogue (`eng-platform` is the
+  concrete Eng lead whose own team is `Platform Eng`), and checks navigation,
+  page content, totals, the 403 state and the sign-in redirect. A script
+  starts a **production build** of the app (the mock state is module state;
+  `next dev` is refused) with the mock IdP, ITSM stubs (A4) and MCP server
+  (A5), and sets **both** `RATIO_RBAC=enforce` and
+  `NEXT_PUBLIC_RATIO_RBAC=enforce` for the build and the server. This card is
+  the only one that edits `package.json` (scripts only, no dependency) and
+  `vitest.config.ts` (add `tests/personas/**` to the exclude list, because the
+  default include pattern would otherwise run the Playwright spec under
+  `npm test`).
 - **Files.** As listed in the ownership table.
-- **Dependencies.** B3, B7, B9, B10, B11, C2, A2, A3. Not parallel with C2.
+- **Dependencies.** B3, B7, B9, B10, B11, C2, A2, A3, A4, A5. Not parallel
+  with C2.
 - **Red tests.** `tests/personas/matrix.spec.ts`:
   `cto_and_finops_lead_see_reconciling_totals_on_overview`,
+  `cto_view_is_rollup_and_finops_lead_view_has_line_items`,
   `eng_lead_attribution_and_prediction_pages_show_only_own_team`,
   `each_persona_nav_shows_only_permitted_links`,
   `eng_lead_sees_only_own_team_workloads`,
@@ -865,10 +978,11 @@ A card that needs a file it does not own stops and records the need on the card
   `unauthenticated_visit_redirects_to_sign_in`,
   `expired_token_redirects_to_sign_in`,
   `role_change_reissue_takes_effect_after_reload`,
-  `replayed_single_use_token_fails`.
-  `src/server/vitestConfig.test.ts` (a unit test, outside the excluded
-  folder): `npm_test_does_not_run_the_playwright_specs` (reads
-  `vitest.config.ts` and asserts `tests/personas/**` is excluded).
+  `replayed_one_time_login_token_fails`.
+  Unit tests outside the excluded folder: `src/server/vitestConfig.test.ts`:
+  `npm_test_does_not_run_the_playwright_specs` (reads `vitest.config.ts`);
+  `src/server/mockLauncher.test.ts`: `launcher_sets_both_rbac_flags`,
+  `launcher_uses_a_production_build_and_refuses_next_dev`.
 - **Governance class.** Path-derived: `dependencies` (`package.json`),
   `unclassified` (the rest).
 - **Parallel-safe.** No (after C2). **Size.** M (4 to 8 days).
@@ -895,14 +1009,25 @@ A card that needs a file it does not own stops and records the need on the card
 
 ### C3. Change lifecycle: request, approve, apply, update, idempotency, binding
 
-- **Goal.** Extend `POST /api/v1/cm/change` (still POST only) with these
-  operations; the existing `create`, `attach` and `status` stay unchanged.
-  State is in memory behind an interface (D8). The requester is always the
-  verified `principal.sub`, never a body field.
+- **Goal.** Authorize **every** operation of `POST /api/v1/cm/change` (still
+  POST only) and add the lifecycle operations. The request and response shapes
+  of the existing `create`, `attach` and `status` operations stay unchanged;
+  what changes is that all of them now call B1's `decide()` with `ticket.create`,
+  `ticket.attach` and `ticket.status` (the lifecycle operations use
+  `change.request`, `change.approve`, `change.apply`), so every verdict reaches
+  the audit sink. State is in memory behind an interface (D8). The requester is
+  always the verified `principal.sub`, never a body field.
+  **Team and environment are derived server-side, never taken from the body:**
+  for `create` and `request`, from the B8 provider keyed by
+  `finding.workloadId` (team and the workload environment mapped by A1's
+  `envMap`; any client-supplied `env` is ignored); for `attach` and `status`,
+  from the stored change the `ticketRef` is bound to. A `ticketRef` that is not
+  bound to a stored change is allowed only to principals with `teams: '*'`; an
+  Eng lead gets 403, because ownership cannot be shown.
 
   | Operation | Request body | Success response | Errors |
   |---|---|---|---|
-  | `request` | `{operation, idempotencyKey, finding, action, env}` | `200 {changeId, state:'requested', requesterSub, ticket:{provider,ticketRef,url}, env, team, updatedAt}`; the ticket is created and bound at this step | 400 invalid; 403 not permitted; 409 same key with a different payload |
+  | `request` | `{operation, idempotencyKey, finding, action}` | `200 {changeId, state:'requested', requesterSub, ticket:{provider,ticketRef,url}, env, team, updatedAt}`; the ticket is created and bound at this step | 400 invalid; 403 not permitted; 409 same key with a different payload |
   | `bind` | `{operation, changeId, ticketRef}` | `200` change record with the pre-approved ticket bound | 404 unknown change; 409 already bound |
   | `approve` | `{operation, changeId}` | `200` record with `state:'approved'`, `approverSub` | 403 requester equals approver or role not permitted; 404; 409 wrong state |
   | `apply` | `{operation, changeId}` | `200` record with `state:'applied'` | 403 no bound ticket in prod; 404; 409 ticket not approved or change not approved |
@@ -912,14 +1037,28 @@ A card that needs a file it does not own stops and records the need on the card
   `apply` builds the `Resource` for `authorize()` from the stored change and
   the live ticket status (`requesterSub`, `approverSub`, `ticketState`), so the
   "A" cells of PLAN 4.5 are a pure verdict over those fields. Add a
-  per-provider outbound rate limit. Handlers build the `Resource` late, so every
-  step calls B1's `decide()` helper and its verdict reaches the audit sink.
-  Then edit `src/rbac/matrix.ts` (sequenced after A1) to switch the status of
-  `cm/change` from `deferred(C3)` to `enforced`.
-- **Files.** `src/cm/lifecycle.ts` (new), `changeStore.ts` (new),
-  `pages/api/v1/cm/change.ts`, `src/cm/lifecycle.test.ts` (new).
-- **Dependencies.** B4, B1, A1.
+  per-provider outbound rate limit. Then edit `src/rbac/matrix.ts` (sequenced
+  after A1) to switch the status of `cm/change` from `deferred(C3)` to
+  `enforced`.
+  **Change actions are API-only in this sprint.** `LiveCMClient` keeps
+  create, attach and status; request, approve and apply have no button or
+  client method. Reason: where the controls sit and who sees them depends on
+  the owner ratifying the matrix (D2) and on real identity (D1); the demo
+  exercises the lifecycle through the API and the Playwright request context.
+- **Files.** `src/cm/lifecycle.ts` (new), `src/cm/changeStore.ts` (new),
+  `pages/api/v1/cm/change.ts`, `src/rbac/matrix.ts` (sequenced after A1),
+  `src/cm/lifecycle.test.ts` (new).
+- **Dependencies.** B4, B1, A1, B8.
 - **Red tests.**
+  `cto_create_ticket_is_403`,
+  `cto_attach_ticket_is_403`,
+  `cto_status_read_is_allowed`,
+  `finops_lead_can_create_attach_and_read_status`,
+  `eng_lead_other_team_workload_request_is_403`,
+  `eng_lead_other_team_workload_create_ticket_is_403`,
+  `eng_lead_attach_to_an_unbound_ticket_is_403`,
+  `eng_lead_status_of_another_teams_bound_ticket_is_403`,
+  `client_supplied_env_and_team_are_ignored`,
   `request_with_same_idempotency_key_returns_first_change_and_creates_one_upstream_ticket`,
   `same_key_with_different_payload_returns_409`,
   `request_requester_is_the_principal_not_a_body_field`,
@@ -931,7 +1070,8 @@ A card that needs a file it does not own stops and records the need on the card
   `a_bound_ticket_cannot_be_rebound`,
   `update_operation_transitions_the_ticket_via_the_stub`,
   `outbound_rate_limit_returns_429_with_retry_after`,
-  `ticket_ref_grammar_still_enforced_on_all_new_operations`,
+  `ticket_ref_grammar_still_enforced_on_all_operations`,
+  `existing_create_attach_status_shapes_are_unchanged_in_the_offline_default`,
   `every_change_step_verdict_reaches_the_registered_sink`,
   `cm_change_matrix_status_is_enforced_and_no_deferred_route_remains`.
 - **Governance class.** Path-derived: `routes` (`change.ts`), `unclassified`.
@@ -959,18 +1099,20 @@ A card that needs a file it does not own stops and records the need on the card
 
 ### C5. Audit sink, read route and page
 
-- **Goal.** Register the sink that card B1's `decide()` helper and `requires`
-  option call (B1 owns the registration point and makes it fail closed). A
-  one-line side-effect import of `src/audit/register.ts` is added to
-  `src/server/gateway/index.ts` (sequenced after B1), and registration lives
-  on `globalThis` so separate route bundles share it; tests reset it with
-  `resetVerdictSinkForTests`. Every
-  `authorize()` verdict and every change step writes a record (who, action,
-  environment, verdict, ticket linkage) with no secrets, tokens or email
-  addresses. In-memory sink behind an interface (D8). A read route and an audit
-  page, scoped by role and team (PLAN 4.4 and 4.5).
-- **Files.** `src/audit/sink.ts`, `record.ts`, `index.ts`, `audit.test.ts`;
-  `pages/api/v1/audit/records.ts`; `pages/audit.tsx` (all new).
+- **Goal.** Supply the sink behind B1's `decide()` and `requires`, replacing
+  B1's in-memory default. Registration is done in the repository's existing
+  `instrumentation.ts` `register()` hook (Node.js runtime only), which runs
+  once at server start; `src/audit/register.ts` holds the call and the sink
+  stays on B1's `globalThis` registration. Records written to the default sink
+  before registration are carried over. Every `authorize()` verdict and every
+  change step writes a record (who, action, environment, verdict, ticket
+  linkage) with no secrets, tokens or email addresses. In-memory sink behind
+  an interface (D8). A read route and an audit page, scoped by role and team
+  (PLAN 4.4 and 4.5). `instrumentation.ts` must keep passing its existing
+  import-boundary test.
+- **Files.** `src/audit/sink.ts`, `record.ts`, `register.ts`, `index.ts`,
+  `audit.test.ts`; `pages/api/v1/audit/records.ts`; `pages/audit.tsx` (all
+  new); `instrumentation.ts` (edited).
 - **Dependencies.** B1, C3.
 - **Red tests.** `every_authorize_decision_writes_an_audit_record`,
   `audit_record_has_no_secret_token_or_email`,
@@ -979,8 +1121,11 @@ A card that needs a file it does not own stops and records the need on the card
   `audit_read_denied_for_finance_and_procurement`,
   `audit_sink_failure_denies_the_action` (exercises B1's fail-closed path with
   the real sink),
-  `registration_survives_separately_loaded_route_modules`.
-- **Governance class.** Path-derived: `routes` (two), `auth_tenancy` (`src/server/gateway/index.ts`), `unclassified`.
+  `instrumentation_register_installs_the_sink_before_any_route_runs`,
+  `records_written_before_registration_are_carried_over`,
+  `instrumentation_import_boundary_test_still_passes`.
+- **Governance class.** Path-derived: `routes` (two), `unclassified`
+  (`instrumentation.ts` matches no rule).
 - **Parallel-safe.** Yes with C4, C6. **Size.** M (4 to 6 days).
 
 ### C6. OAuth2 client-credentials client behind an interface
