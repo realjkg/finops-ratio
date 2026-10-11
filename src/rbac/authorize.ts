@@ -80,11 +80,17 @@ function ownElements(a: readonly unknown[]): unknown[] {
  * A null-prototype copy holding only the listed OWN properties of `o`, so a
  * field inherited through the prototype chain (for example a JSON "__proto__"
  * key merged with Object.assign, or an Object.create principal) never takes
- * part in a decision. Arrays are copied element by element the same way.
- * Non-objects and arrays pass through unchanged and fail the shape checks.
+ * part in a decision. Array-valued fields (teams, envs) are copied element
+ * by element the same way. Non-objects pass through unchanged and fail the
+ * shape checks. An array (including a Proxy over one, which Array.isArray
+ * sees through) is never a principal or a resource: it becomes undefined, so
+ * the caller gets 401 or 403. A Proxy over a plain object cannot be detected
+ * without a server-only module; each listed field is read once into the copy,
+ * so it can only state values its creator could have written directly.
  */
 function ownCopy<K extends string>(o: unknown, keys: readonly K[]): unknown {
-  if (!o || typeof o !== 'object' || Array.isArray(o)) return o;
+  if (!o || typeof o !== 'object') return o;
+  if (Array.isArray(o)) return undefined;
   const copy = Object.create(null) as Record<K, unknown>;
   for (const k of keys) {
     if (!Object.hasOwn(o, k)) continue;
