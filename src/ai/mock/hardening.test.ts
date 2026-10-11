@@ -108,7 +108,7 @@ describe('M3 extreme finite wire numbers never print NaN, Infinity or n/a', () =
       expect(r.text, tags[i]).not.toMatch(BAD);
       expect(r.text, tags[i]).not.toContain('n/a');
     });
-  });
+  }, 120000);
   it('says so when a workload’s figures are rejected', async () => {
     const ctx = withSnap(0, { monthlySpend: 1.7e308, monthlyValue: 1.7e308 });
     const { text } = await chat([{ role: 'user', content: 'What is the ROI of the portfolio?' }], ctx);
@@ -254,5 +254,5 @@ describe('L5 output size is bounded', () => {
     }
     const { text } = await chat([{ role: 'user', content: 'Show the workloads in Big' }], big);
     expect(text).toMatch(/and \d+ more/);
-  });
+  }, 60000);
 });

@@ -136,13 +136,14 @@ The challenger requested changes (0 High, 5 Medium, 6 Low). Tests were written f
 
 Command: `npx vitest run src/ai/mock/hardening.test.ts`
 
-RED (before the fixes): 25 failed, 12 passed (37 tests). The 12 that pass are the surviving-mutant tests (M4
-a to f, which pin existing behavior the earlier suite did not) and the pinned fallback (L3), so the
-failures are the crashes, missing warnings, silent substitutions, forged lines and unbounded
+RED (before the fixes): 25 failed, 12 passed (37 tests). The 12 that pass are six surviving-mutant
+tests (M4 a to f, which pin existing behavior the earlier suite did not), two pins of the new
+unmatched-question fallback (L3, one parameterized test with two cases) and four negative controls
+(M2 plausible reduction, M5 two no-conflict checks, L1 stated amount still answered), so the failures are the crashes, missing warnings, silent substitutions, forged lines and unbounded
 output. The five route tests time out because the handler returns 500 for prototype-key wire strings.
 
 GREEN after the fixes: `npx vitest run src/ai/mock/hardening.test.ts` 38 of 38 pass (the RED run
-above had 25 failing; the test file also gained two tests that kill the last two mutants).
+above had 25 failing; the file later gained one test and one extended assertion that kill the last two mutants).
 Correction to the RED note: the five route tests failed there by timing out because the helper
 waited on a faked clock; the helper now advances the clock, and the route crash is covered by the
 `plain-object-alias-lookup` mutant, which the route tests kill.
@@ -192,3 +193,48 @@ boundary assertions for guards that already existed (they exist to kill mutants,
 correct code); the 17 failures are the quality-note prototype lookup (3), valid portfolio questions
 misread as unknown names (9), unknown teams under verb phrasing and follow-ups (3, plus the
 generic-phrase check), and notes cut by the reply cap (1).
+
+### Fixes in this round
+
+- M1: both `MODEL_QUALITY_NOTE` lookups use an own-property check (reachable through "the same
+  model" when the remembered workload's wire model is `constructor`).
+- M2: the trailing-name check now fires only on a capitalized token that is not a short acronym
+  or a common word; lowercase phrases ("in total", "on average", "for agents") and acronyms
+  ("AI", "USD", "EUR") are never names. Known trade-off: a lowercase unknown name ("roi of
+  finance") is not caught by this trailing rule; it is caught when team-qualified ("the finance team").
+- M3: a team-qualified name ("the X team", "for X group", any verb before it) is checked before
+  back-reference resolution and for every intent except forecast and capability, so follow-ups,
+  "moved the Finance team", savings and cost-driver questions answer "I don't have a team called X".
+- M5: exact-boundary tests for the claimed guards (USD 1e12 and counts 1e13 inclusive, 20 rows,
+  8,000 characters with the tail kept, 60-character names, DEL/C1/U+2028/2029 handling, cache
+  rate in [0, 1], budget 1e12, trend in (-100, 1e6)); 16 more mutants registered. U+2028/2029 are
+  removed by the whitespace collapse, so the redundant explicit clause was deleted (a mutant there
+  would be equivalent).
+- L1: the "you also named" and "out of range and ignored" notes are placed in the protected tail
+  and are kept when a long body is shortened.
+- L4: explicit timeouts on the property test and the output-bound test.
+
+### Mutation check, second challenger round
+
+`node docs/evidence/frank-mock-analytics/mutate.mjs`: **58 of 58 registered mutants killed** (the first 43 in one run, the remaining 15 new boundary and
+lookup mutants in a second invocation of the same script). Baseline 191 tests, 0 failing.
+Gates on the fixed tree: lint and typecheck clean, full `npx vitest run` 161 files / 3172 tests
+passed, `npm run build` compiled successfully.
+
+### Known gap (deferred, not reachable from seeded data)
+
+Absurd-magnitude wire values that are finite and inside the range limits still print odd text.
+Observed:
+
+- run-rate spend 5e-324 with value 1: "Cost $0/mo · value $1/mo · return n/a (no spend)" (the
+  ratio is treated as "no spend" because the division is not a finite, meaningful number).
+- tokens 1e-300 per day: migration prints "$0/mo for 0M tokens" and "Infinity% of today's 0M".
+- `savingsOpportunity` 1.7e308: the savings line prints a 300-digit dollar figure.
+- `budgetConsumedPct` 1.7e308: prints "budget consumed 1.7e+308%".
+
+Why not fixed: the bundled seed and `buildAIContext` cannot produce them; they need a hand-crafted
+request body, and the answers are text only (no crash, no 500). What would change that: the chat
+route starting to validate `workloads` and `initiatives` entries (ranges and types) at the gateway,
+at which point these cases are rejected before the mock; or a real data source with unbounded
+values, in which case a lower bound and a savings and percent bound belong in `world.ts` next to
+the existing upper bounds.

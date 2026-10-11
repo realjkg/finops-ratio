@@ -29,7 +29,7 @@ function clean(v: string, max: number): string {
   let out = '';
   for (const ch of v.slice(0, max * 2)) {
     const c = ch.charCodeAt(0);
-    out += c < 32 || (c >= 127 && c <= 159) || c === 0x2028 || c === 0x2029 ? ' ' : ch;
+    out += c < 32 || (c >= 127 && c <= 159) ? ' ' : ch; // U+2028/2029 are caught by the whitespace collapse below
   }
   return out.replace(/\s+/g, ' ').trim().slice(0, max);
 }

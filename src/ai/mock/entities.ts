@@ -193,28 +193,48 @@ export function namesTeam(mentions: Mention[]): boolean {
   return mentions.some((m) => m.scope.kind === 'team');
 }
 
-// Words that follow "of/for/in" without naming anything in the data.
+// Words that follow "of/for/in/the" without naming anything in the data.
 const NOT_A_NAME = new Set([
   'the', 'a', 'an', 'this', 'that', 'these', 'those', 'it', 'them', 'us', 'we', 'you', 'me', 'all', 'any', 'each', 'every',
   'everything', 'everyone', 'anything', 'our', 'my', 'your', 'its', 'their', 'next', 'last', 'now', 'today', 'more', 'less',
   'portfolio', 'overall', 'company', 'month', 'year', 'quarter', 'week', 'cost', 'spend', 'value', 'roi', 'savings',
+  'total', 'dollars', 'average', 'aggregate', 'agents', 'models', 'workloads', 'ai', 'llm', 'usd',
+  'same', 'whole', 'entire', 'other', 'first', 'highest', 'lowest', 'best', 'worst', 'weakest', 'strongest', 'biggest',
+  'largest', 'smallest', 'top', 'bottom', 'expensive', 'costly', 'cheapest', 'which', 'what', 'one',
 ]);
 
-const NAMED_TEAM_RX = /(?:^|\s)(?:for|of|in|on|about|within)\s+(?:the\s+)?([\p{L}&][\p{L}&' -]{0,40}?)\s+(?:team|group|department|dept)\b/iu;
+const WORD = "(?!the\\b)[\\p{L}&'-]+";
+// "the X team", "our X group", "for X team": a team-qualified name, whatever the verb before it.
+const TEAM_QUALIFIED_RX = new RegExp(
+  `(?:\\b(?:the|our)|\\b(?:for|of|in|on|about|within|to))\\s+(${WORD}(?:\\s+${WORD}){0,2})\\s+(?:team|group|department|dept)\\b`,
+  'giu',
+);
 const TRAILING_NAME_RX = /(?:^|\s)(?:for|of|in|on|about)\s+(?:the\s+)?([\p{L}&'-]+(?:\s+[\p{L}&'-]+){0,3})\s*[?.!]*\s*$/u;
 
-/**
- * A name the user gave ("the Finance team", "ROI of Lëgal") that matches nothing
- * in the data, as a short sanitized label; null when the text names nothing
- * unknown. Only called when no entity was recognized.
- */
-export function unknownName(text: string): { name: string; team: boolean } | null {
-  const t = text.slice(0, MAX_TEXT);
-  const team = NAMED_TEAM_RX.exec(t);
-  const trail = team ? null : TRAILING_NAME_RX.exec(t);
-  const raw = (team ?? trail)?.[1]?.trim();
-  if (!raw) return null;
+const plausible = (raw: string): boolean => {
   const first = raw.split(/\s+/)[0].toLowerCase();
-  if (NOT_A_NAME.has(first) || raw.length < 2) return null;
-  return { name: raw.slice(0, 40), team: team !== null };
+  return raw.length >= 2 && !NOT_A_NAME.has(first);
+};
+
+/** A team the user named ("the Finance team") that matches nothing in the data, else null. */
+export function unknownTeam(text: string): string | null {
+  const t = text.slice(0, MAX_TEXT);
+  for (const m of t.matchAll(TEAM_QUALIFIED_RX)) {
+    const raw = m[1].trim();
+    if (plausible(raw)) return raw.slice(0, 40);
+  }
+  return null;
+}
+
+/**
+ * A trailing capitalized name ("ROI of Lëgal") that matches nothing in the data, else null.
+ * Lowercase phrases ("in total", "on average", "for agents") and short acronyms ("USD", "AI") are
+ * ordinary words, not names, so they never trigger this.
+ */
+export function unknownCapitalized(text: string): string | null {
+  const raw = TRAILING_NAME_RX.exec(text.slice(0, MAX_TEXT))?.[1]?.trim();
+  if (!raw || !plausible(raw)) return null;
+  const first = raw.split(/\s+/)[0];
+  if (first[0] === first[0].toLowerCase() || (first === first.toUpperCase() && first.length <= 4)) return null;
+  return raw.slice(0, 40);
 }

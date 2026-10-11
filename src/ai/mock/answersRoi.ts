@@ -49,7 +49,7 @@ export function roiAnswer(world: World, scope: Scope): Answer {
     const m = findModel(scope.model);
     if (m) {
       body.push(`Registry list price: ${price(m.pricing.input_per_1m)} in / ${price(m.pricing.output_per_1m)} out per 1M tokens.`);
-      const note = MODEL_QUALITY_NOTE[scope.model];
+      const note = Object.hasOwn(MODEL_QUALITY_NOTE, scope.model) ? MODEL_QUALITY_NOTE[scope.model] : undefined;
       if (note) body.push(`Seeded quality hint: ${note}.`);
     }
   }

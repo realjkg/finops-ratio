@@ -12,7 +12,7 @@ import { capabilityAnswer, clarifyText, unknownNameText, unsupportedText } from 
 import { alertsAnswer, outcomesAnswer, tokensAnswer, workloadsAnswer } from './answersDrill';
 import { ebitdaAnswer, migrationAnswer } from './answersFinance';
 import { costDriverAnswer, roiAnswer, savingsAnswer, teamRankAnswer } from './answersRoi';
-import { MAX_TEXT, findMentions, namesTeam, pickSubject, sameScope, unknownName, type Mention } from './entities';
+import { MAX_TEXT, findMentions, namesTeam, pickSubject, sameScope, unknownCapitalized, unknownTeam, type Mention } from './entities';
 import { MAX_HISTORY, deriveFocus, detectReference, isElliptical, resolveReference } from './memory';
 import { classifyIntent, classifyLegacy, rankingOf, type Intent } from './intents';
 import { atRisk, costDriver, help, savings, summary } from './legacy';
@@ -30,12 +30,12 @@ function reply(content: string, referenced: string[] = []): AIResponse {
 const MAX_REPLY = 8000;
 
 /** Keep the header and the tail (basis, next questions); shorten the middle if it is huge. */
-function bound(text: string): string {
-  if (text.length <= MAX_REPLY) return text;
+function bound(text: string, notes: string[] = []): string {
   const lines = text.split('\n');
   const tailAt = lines.findIndex((l) => l.startsWith('Basis:'));
   const head = tailAt < 0 ? lines : lines.slice(0, tailAt);
-  const tail = tailAt < 0 ? [] : lines.slice(tailAt);
+  const tail = [...notes, ...(tailAt < 0 ? [] : lines.slice(tailAt))];
+  if ([...head, ...tail].join('\n').length <= MAX_REPLY) return [...head, ...tail].join('\n');
   const kept: string[] = [];
   let used = 0;
   for (const l of head) {
@@ -47,12 +47,12 @@ function bound(text: string): string {
 }
 
 function done(a: Answer, world: World, note?: string): AIResponse {
-  const body = [...a.body];
-  if (note) body.push(note);
+  const notes: string[] = [];
+  if (note) notes.push(note);
   if (world.rejected.length > 0) {
-    body.push(`Note: figures for ${world.rejected.slice(0, 5).join(', ')} were out of range and ignored; they are excluded from every number above.`);
+    notes.push(`Note: figures for ${world.rejected.slice(0, 5).join(', ')} were out of range and ignored; they are excluded from every number above.`);
   }
-  return reply(bound(render({ ...a, body }, world.asOf)), a.referenced);
+  return reply(bound(render(a, world.asOf), notes), a.referenced);
 }
 
 /** Entities named in the question that the answer does not cover (other kinds too). */
@@ -149,9 +149,14 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
       ? `Note: you also named ${others.map((o) => scopeLabel(world, o)).join(', ')}; I answered for ${scopeLabel(world, scope)} only \u2014 ask about the others separately.`
       : undefined;
 
-  if (!subject && !backRef && (NAMEABLE.has(intent) || intent === 'team_rank')) {
-    const unknown = unknownName(text);
-    if (unknown && (intent !== 'team_rank' || unknown.team)) return reply(unknownNameText(world, unknown));
+  // An unrecognized named team is answered plainly, before any back-reference or default scope.
+  if (!explicit && intent !== 'forecast' && intent !== 'capability') {
+    const team = unknownTeam(text);
+    if (team) return reply(unknownNameText(world, { name: team, team: true }));
+    if (!subject && !backRef && NAMEABLE.has(intent)) {
+      const name = unknownCapitalized(text);
+      if (name) return reply(unknownNameText(world, { name, team: false }));
+    }
   }
 
   const needsScope = intent !== 'forecast' && intent !== 'capability' && intent !== 'team_rank';

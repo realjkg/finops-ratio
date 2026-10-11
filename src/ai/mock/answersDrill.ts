@@ -116,7 +116,7 @@ export function tokensAnswer(world: World, scope: Scope): Answer {
     if (per1k !== null) body.push(`List-price unit cost: ${usd2(per1k)} per 1,000 calls (uncached input + output).`);
   } else if (scope.kind === 'model') {
     body.push(`List price: ${modelPrices(scope.model)}.`);
-    const note = MODEL_QUALITY_NOTE[scope.model];
+    const note = Object.hasOwn(MODEL_QUALITY_NOTE, scope.model) ? MODEL_QUALITY_NOTE[scope.model] : undefined;
     if (note) body.push(`Seeded quality hint: ${note}.`);
     if (members.length === 0) body.push('No workload in the data runs on this model.');
     else body.push('Workloads on it:', ...capRows([...members].sort(bySpendDesc).map((w, i) => tokenRow(i, w))));
