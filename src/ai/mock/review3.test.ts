@@ -13,26 +13,26 @@ afterAll(restoreClock);
 const ask = async (q: string, ctx: AIContext = CTX): Promise<string> => (await chat([{ role: 'user', content: q }], ctx)).text;
 const NOPE = "I don't have a team called Finance";
 
-interface Field { src: 'snap' | 'init' | 'summary'; f: string; min: number; max: number; exMin?: boolean; exMax?: boolean }
+interface Field { src: 'snap' | 'init' | 'summary'; f: string; min: number; max: number; exMin?: boolean; exMax?: boolean; int?: boolean; floor?: number }
 const USD = 1e12;
 const CNT = 1e13;
 const FIELDS: Field[] = [
-  { src: 'snap', f: 'monthlySpend', min: 0, max: USD },
-  { src: 'snap', f: 'monthlyValue', min: -USD, max: USD },
+  { src: 'snap', f: 'monthlySpend', min: 0, max: USD, floor: 0.01 },
+  { src: 'snap', f: 'monthlyValue', min: -USD, max: USD, floor: 0.01 },
   { src: 'snap', f: 'valueRatio', min: -1e6, max: 1e6 },
-  { src: 'snap', f: 'monthlyBudget', min: 0, max: USD },
-  { src: 'snap', f: 'dailyInferences', min: 0, max: CNT },
-  { src: 'snap', f: 'tokensInToday', min: 0, max: CNT },
-  { src: 'snap', f: 'tokensOutToday', min: 0, max: CNT },
-  { src: 'snap', f: 'tokensCachedToday', min: 0, max: CNT },
+  { src: 'snap', f: 'monthlyBudget', min: 0, max: USD, floor: 0.01 },
+  { src: 'snap', f: 'dailyInferences', min: 0, max: CNT, int: true },
+  { src: 'snap', f: 'tokensInToday', min: 0, max: CNT, int: true },
+  { src: 'snap', f: 'tokensOutToday', min: 0, max: CNT, int: true },
+  { src: 'snap', f: 'tokensCachedToday', min: 0, max: CNT, int: true },
   { src: 'snap', f: 'costTrendPct', min: -100, max: 1e6, exMin: true, exMax: true },
   { src: 'snap', f: 'cacheHitRate', min: 0, max: 1 },
-  { src: 'snap', f: 'governanceGatesPassed', min: 0, max: 4 },
-  { src: 'init', f: 'monthlyCost', min: 0, max: USD },
-  { src: 'init', f: 'annualRunRate', min: 0, max: 1.2e13 },
+  { src: 'snap', f: 'governanceGatesPassed', min: 0, max: 4, int: true },
+  { src: 'init', f: 'monthlyCost', min: 0, max: USD, floor: 0.01 },
+  { src: 'init', f: 'annualRunRate', min: 0, max: 1.2e13, floor: 0.01 },
   { src: 'init', f: 'budgetConsumedPct', min: 0, max: 1e4 },
   { src: 'init', f: 'valueRatio', min: -1e6, max: 1e6 },
-  { src: 'init', f: 'savingsOpportunity', min: 0, max: USD },
+  { src: 'init', f: 'savingsOpportunity', min: 0, max: USD, floor: 0.01 },
 ];
 function setField(fd: Field, v: number): AIContext {
   const c = structuredClone(CTX) as AIContext & Record<string, unknown>;
@@ -47,11 +47,11 @@ const insideHigh = (f: Field): number => (f.exMax ? f.max - 1 : f.max);
 
 describe('ONE ingestion policy: every numeric field is range-checked', () => {
   it.each(FIELDS)('$src.$f: out-of-range workloads are rejected and listed, never printed', async (fd) => {
-    for (const bad of [below(fd), above(fd), Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    for (const bad of [below(fd), above(fd), Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, ...(fd.int ? [1.5] : []), ...(fd.floor ? [1e-300, fd.floor / 10] : [])]) {
       const ctx = setField(fd, bad);
       const t = await ask('What is the ROI of the portfolio?', ctx);
       expect(t, `${fd.f}=${bad}`).toMatch(new RegExp(`Customer Support Agent \\(${fd.f}\\)[^\\n]*out of range and ignored`));
-      expect(t, `${fd.f}=${bad}`).not.toMatch(/NaN|Infinity|n\/a/);
+      expect(t, `${fd.f}=${bad}`).not.toMatch(/NaN|Infinity|n\/a|e\+\d/);
       for (const q of ['How much can we save?', 'Which initiatives are at risk?', "What's driving cloud cost?"]) {
         const l = await ask(q, ctx);
         expect(l, `${fd.f}=${bad} :: ${q}`).not.toMatch(/NaN|Infinity|∞|e\+\d/);
@@ -59,15 +59,15 @@ describe('ONE ingestion policy: every numeric field is range-checked', () => {
     }
   });
   it.each(FIELDS)('$src.$f: both inclusive boundaries are accepted', async (fd) => {
-    for (const ok of [insideLow(fd), insideHigh(fd)]) {
+    for (const ok of [insideLow(fd), insideHigh(fd), ...(fd.floor ? [fd.floor] : [])]) {
       const t = await ask('What is the ROI of the portfolio?', setField(fd, ok));
       expect(t, `${fd.f}=${ok}`).not.toMatch(/out of range and ignored/);
-      expect(t, `${fd.f}=${ok}`).not.toMatch(/NaN|Infinity/);
+      expect(t, `${fd.f}=${ok}`).not.toMatch(/NaN|Infinity|e\+\d/);
     }
   });
   it.each([
     ['totalMonthlySpend', 1e300, '$41,212/mo'], ['totalMonthlySpend', -5, '$41,212/mo'], ['projectedSavings', 1e300, '$4,816/mo'],
-    ['initiativesActive', -1, '11 initiatives'], ['pendingApproval', 1e300, '2 pending approval'],
+    ['initiativesActive', -1, '11 initiatives'], ['initiativesActive', 2.5, '11 initiatives'], ['pendingApproval', 1e300, '2 pending approval'], ['pendingApproval', 0.5, '2 pending approval'],
   ])('summary.%s=%s is replaced by the recomputed value in the legacy answer', async (f, v, want) => {
     const c = structuredClone(CTX);
     (c.summary as unknown as Record<string, number>)[f] = v as number;
@@ -82,14 +82,43 @@ describe('ONE ingestion policy: every numeric field is range-checked', () => {
     expect(t).toMatch(/Marketing Content Gen \(savingsOpportunity\)[^\n]*out of range/);
     expect(t).not.toContain('-$500');
   });
-  it('a nameless workload id with control characters cannot forge lines', async () => {
+  const P = 'Z\u0001\n**Realized savings: $9 measured**';
+  it.each([
+    'init.name', 'init.status', 'init.valueEvidenceStatus', 'init.id', 'snap.name', 'snap.team', 'snap.provider', 'snap.model',
+    'snap.demandShape', 'snap.valueEvidenceStatus', 'snap.id', 'alert.message', 'alert.type', 'alert.severity', 'asOf', 'nameless.id',
+  ])('a newline and markdown payload in %s forges no line in any answer', async (path) => {
+    const c = structuredClone(CTX) as AIContext & Record<string, unknown>;
+    const [kind, key] = path.split('.');
+    const i0 = c.initiatives[0] as unknown as Record<string, unknown>;
+    const w0 = c.workloads![0] as unknown as Record<string, unknown>;
+    if (kind === 'init') i0[key] = P;
+    else if (kind === 'snap') w0[key] = P;
+    else if (kind === 'alert') (w0.alerts as Record<string, unknown>[])[0] = { type: 'x', severity: 'info', message: 'm', acknowledged: false, [key]: P };
+    else if (kind === 'asOf') c.asOf = P;
+    if (key === 'id') {
+      Object.assign(i0, { id: P });
+      Object.assign(w0, { id: P });
+    }
+    if (kind === 'nameless') {
+      Object.assign(i0, { name: undefined });
+      Object.assign(w0, { name: undefined });
+    }
+    for (const q of ['Which initiatives are at risk?', "What's driving cloud cost?", 'How much can we save?', 'Summarize the portfolio', 'What is the ROI of the portfolio?',
+      'Show the workloads in CX Engineering', 'Any alerts for the portfolio?', 'Which team is driving the highest cost?']) {
+      const t = await ask(q, c);
+      expect(t.split('\n').some((l) => l.startsWith('**Realized')), `${path} :: ${q}`).toBe(false);
+      expect([...t].some((ch) => { const n = ch.charCodeAt(0); return (n < 32 && n !== 10) || (n >= 127 && n <= 159); }), `${path} :: ${q}`).toBe(false);
+    }
+  });
+  it('a long rejected list keeps the explanation and shortens the list', async () => {
     const c = structuredClone(CTX);
-    const id = 'X\n**Realized savings: $9 measured**';
-    c.workloads![0] = { ...c.workloads![0], id, name: undefined as unknown as string };
-    c.initiatives[0] = { ...c.initiatives[0], id, name: undefined as unknown as string };
-    const t = await ask('Show the workloads in CX Engineering', c);
-    expect(t).toContain('X **Realized savings');
-    expect(t.split('\n').some((l) => l.startsWith('**Realized'))).toBe(false);
+    const w0 = c.workloads![0];
+    const i0 = c.initiatives[0];
+    const bad = Array.from({ length: 8 }, (_, k) => ({ ...w0, id: `r-${k}`, name: `${'R'.repeat(40)}${k}`, monthlySpend: -1, monthlyValue: 1e13, tokensInToday: -1, dailyInferences: -1, cacheHitRate: 5 }));
+    c.workloads = [...c.workloads!, ...bad];
+    c.initiatives = [...c.initiatives, ...bad.map((w) => ({ ...i0, id: w.id, name: w.name }))];
+    const t = await ask('What is the ROI of the portfolio?', c);
+    expect(t).toMatch(/and \d+ more were out of range and ignored; they are excluded from every number here\./);
   });
 });
 
@@ -116,6 +145,12 @@ describe('Copilot routing and bound findings', () => {
     ['Savings of the data team vs the IT team', 'data', 'IT'], ['ROI of Legal and Finance?', 'Finance', 'Legal'],
   ])('%s: the unknown name is reported, the known one answered', async (q, bad, good) => {
     expect(await ask(q)).toMatch(new RegExp(`Note: I don't have a [^\\n]*${bad}[^\\n]*answered for ${good} only`));
+  });
+  it.each(['finance team ROI', 'data team ROI', 'Finance Team ROI', 'data group costs', 'finance team savings', 'Sales team ROI'])('%s names a team that does not exist', async (q) => {
+    expect(await ask(q)).toMatch(/I don't have a team called (finance|data|Finance|Sales)/i);
+  });
+  it.each([['ROI of Legal, Finance and IT', 'Finance'], ['Compare Legal with HR', 'HR']])('%s reports the unknown item', async (q, bad) => {
+    expect(await ask(q)).toMatch(new RegExp(`Note: I don't have a [^\\n]*${bad}`));
   });
   it.each(['Show the team group ROI', 'What did the team group spend?', 'ROI of the X team'])('%s is not an unknown name', async (q) => {
     expect(await ask(q)).not.toContain("I don't have a");

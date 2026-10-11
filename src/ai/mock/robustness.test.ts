@@ -2,10 +2,12 @@
 // check that hostile input cannot make the mock slow (the 280 ms UX delay is
 // the only wait) and that no reply echoes huge input or leaks NaN/Infinity.
 
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import type { AIContext, AIMessage } from '@/ai/AIClient';
 import { MockAIClient } from '@/ai/MockAIClient';
 import { CTX } from './__testkit__/ask';
+import { respond } from '.';
 
 const client = new MockAIClient();
 const ask1 = async (content: unknown, ctx: AIContext = CTX, history: AIMessage[] = []): Promise<string> =>
@@ -199,5 +201,22 @@ describe('memory bounds', () => {
     ];
     const t = await ask1('what about its ROI for Revenue?', CTX, hist);
     expect(t).toContain('**ROI — Revenue (team)**');
+  });
+});
+
+describe('cost bounds', () => {
+  it('200 workloads all named "a" and a 2,000-character query stay fast', () => {
+    const c = structuredClone(CTX);
+    const w0 = c.workloads![0];
+    c.workloads = Array.from({ length: 200 }, (_, k) => ({ ...w0, id: `a-${k}`, name: 'a' }));
+    c.initiatives = c.workloads.map((w) => ({ ...c.initiatives[0], id: w.id, name: w.name }));
+    const t0 = performance.now();
+    respond([{ role: 'user', content: 'a '.repeat(1000) }], c);
+    expect(performance.now() - t0).toBeLessThan(200);
+  });
+  it.each(['abc', '0', '-2', '1.5', '1e999'])('the mutation runner refuses --jobs=%s before doing any work', (j) => {
+    const r = spawnSync('node', ['docs/evidence/frank-mock-analytics/mutate.mjs', `--jobs=${j}`], { encoding: 'utf8', timeout: 20000 });
+    expect(r.status).not.toBe(0);
+    expect(r.status).not.toBeNull();
   });
 });

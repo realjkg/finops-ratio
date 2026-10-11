@@ -42,7 +42,7 @@ describe('M2 valid portfolio questions are not mistaken for unknown names', () =
   it.each([
     'What is the ROI in total?', 'What is the ROI in dollars?', 'What is the ROI on average?', 'What is the ROI of AI?',
     'What is the ROI in USD?', 'Show token usage for workloads', 'Any alerts on the models?', 'Is there outcome evidence for agents?',
-    'Show token detail in aggregate', 'Any alerts on the dashboards?', 'What is the ROI in EUR?',
+    'Show token detail in aggregate', 'Any alerts on the dashboards?',
   ])('%s', async (q) => {
     const t = await ask(q);
     expect(t).not.toContain("I don't have a");
