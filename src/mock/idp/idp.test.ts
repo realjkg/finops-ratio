@@ -198,7 +198,8 @@ describe('mock identity provider (card A2)', () => {
     expect(codeOf(() => parseClaims(ok))).toBe('no-throw');
     expect(codeOf(() => parseClaims({ ...ok, aud: ['test', 'prod'] }))).toBe('invalid_claims');
     expect(codeOf(() => parseClaims({ ...ok, aud: 'production' }))).toBe('invalid_claims');
-    const { aud: _aud, ...noAud } = ok;
+    const noAud: Record<string, unknown> = { ...ok };
+    delete noAud.aud;
     expect(codeOf(() => parseClaims(noAud))).toBe('invalid_claims');
     expect(codeOf(() => parseClaims({ ...ok, iss: 'someone-else' }))).toBe('invalid_claims');
     expect(codeOf(() => parseClaims({ ...ok, extra: true }))).toBe('invalid_claims');
@@ -506,7 +507,8 @@ describe('mock identity provider (card A2)', () => {
   });
 
   it('issuer_requires_an_explicit_deploy_env_argument_and_sets_aud_to_it', () => {
-    const { deployEnv: _omit, ...noEnv } = BASE;
+    const noEnv: Record<string, unknown> = { ...BASE };
+    delete noEnv.deployEnv;
     expect(codeOf(() => issueToken(noEnv as never, ON))).toBe('invalid_input');
     expect(codeOf(() => issuePersonaToken('cto', {} as never, ON))).toBe('invalid_input');
     expect(codeOf(() => issueLoginToken('cto', {} as never, ON))).toBe('invalid_input');
