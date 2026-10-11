@@ -1,5 +1,5 @@
 // AI spend vs total spend: pure math (computeAiSpendRatio) and the
-// interface-only fetch (fetchAiSpendRatio) on the mock and live paths.
+// interface-only fetchAiSpendRatio on the mock and live paths.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { computeAiSpendRatio, fetchAiSpendRatio } from './aiSpendRatio';
 import type { CanonicalFocusRow } from './focusRows';
@@ -132,15 +132,13 @@ describe('fetchAiSpendRatio on the mock path (sandbox + synthetic)', () => {
 });
 
 /** Stub fetch that serves the /api/costsource routes from the offline seed. */
-function stubRoutes(override?: (path: string) => Response | undefined) {
+function stubRoutes() {
   const seed = createCostSourceClient('mock');
   vi.stubGlobal('fetch', async (input: string) => {
-    const url = new URL(input, 'http://localhost');
-    const hit = override?.(url.pathname);
-    if (hit) return hit;
-    const body = url.pathname === '/api/costsource/sources'
+    const [pathname, query = ''] = input.split('?');
+    const body = pathname === '/api/costsource/sources'
       ? await seed.listSources()
-      : await seed.fetchCostRows(url.searchParams.get('sourceId')!, WINDOW);
+      : await seed.fetchCostRows(new URLSearchParams(query).get('sourceId')!, WINDOW);
     return new Response(JSON.stringify(body), { status: 200 });
   });
 }

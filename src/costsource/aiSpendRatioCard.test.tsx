@@ -16,12 +16,12 @@ const WINDOW = {
 function stubRoutes(respond: (path: string) => Response | undefined = () => undefined) {
   const seed = createCostSourceClient('mock');
   vi.stubGlobal('fetch', async (input: string) => {
-    const url = new URL(input, 'http://localhost');
-    const hit = respond(url.pathname);
+    const [pathname, query = ''] = input.split('?');
+    const hit = respond(pathname);
     if (hit) return hit;
-    const body = url.pathname === '/api/costsource/sources'
+    const body = pathname === '/api/costsource/sources'
       ? await seed.listSources()
-      : await seed.fetchCostRows(url.searchParams.get('sourceId')!, WINDOW);
+      : await seed.fetchCostRows(new URLSearchParams(query).get('sourceId')!, WINDOW);
     return new Response(JSON.stringify(body), { status: 200 });
   });
 }
