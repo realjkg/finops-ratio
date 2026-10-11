@@ -9,6 +9,7 @@
 
 import { generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import {
+  MAX_TOKEN_LENGTH,
   MAX_TOKEN_TTL_SECONDS,
   MOCK_IDP_ALG,
   MOCK_IDP_ISSUER,
@@ -159,8 +160,11 @@ function issueClaims(input: IssueInput, once: boolean, defaultTtl: number): Issu
   const { kid, entry } = activeKey(s);
   const signingInput = `${encodeJson({ alg: MOCK_IDP_ALG, typ: 'JWT', kid })}.${encodeJson(claims)}`;
   const signature = sign(null, Buffer.from(signingInput, 'utf8'), entry.privateKey).toString('base64url');
+  const token = `${signingInput}.${signature}`;
+  // Never record or return a token the verifier would reject for its size.
+  if (token.length > MAX_TOKEN_LENGTH) throw new MockIdpError('invalid_input');
   s.issued.set(jti, claims.sub);
-  return { token: `${signingInput}.${signature}`, jti, kid, expiresAt: claims.exp };
+  return { token, jti, kid, expiresAt: claims.exp };
 }
 
 /** Issue a session token for an explicit claim set. */
@@ -257,7 +261,11 @@ export function publicJwks(env: MockIdpEnv = process.env): { keys: MockIdpJwk[] 
   return { keys };
 }
 
-/** Clear all process state in place (keys, revocations, redemptions). Tests only. */
+/**
+ * Clear all process state in place (keys, revocations, redemptions). Tests
+ * only: deliberately not re-exported from index.ts, so app code that imports
+ * the public surface cannot reach it.
+ */
 export function resetMockIdpStateForTests(): void {
   const s = state();
   s.keys.clear();

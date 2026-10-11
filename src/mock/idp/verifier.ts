@@ -10,7 +10,7 @@
 // The payload is not parsed as claims until the signature has verified.
 
 import { verify } from 'node:crypto';
-import { MOCK_IDP_ALG, MockIdpError, isMockDeployEnv, parseClaims, type MockIdpClaims } from './claims';
+import { MAX_TOKEN_LENGTH, MOCK_IDP_ALG, MockIdpError, isMockDeployEnv, parseClaims, type MockIdpClaims } from './claims';
 import { mockIdpEnabled, type MockIdpEnv } from './enabled';
 import { isRevokedJti, markRedeemed, verificationKeyForKid } from './issuer';
 import type { MockDeployEnv } from './personas';
@@ -21,9 +21,6 @@ export interface VerifyContext {
   /** This deployment's environment; the token's `aud` must equal it. */
   deployEnv: MockDeployEnv;
 }
-
-/** Longest compact token accepted, in characters. */
-export const MAX_TOKEN_LENGTH = 8192;
 
 const SEGMENT_RE = /^[A-Za-z0-9_-]+$/;
 const HEADER_KEYS: ReadonlySet<string> = new Set(['alg', 'typ', 'kid']);

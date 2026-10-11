@@ -14,6 +14,7 @@ export {
   type MockRole,
 } from './personas';
 export {
+  MAX_TOKEN_LENGTH,
   MAX_TOKEN_TTL_SECONDS,
   MOCK_IDP_ALG,
   MOCK_IDP_ISSUER,
@@ -33,7 +34,6 @@ export {
   issueToken,
   publicJwks,
   reissueSubject,
-  resetMockIdpStateForTests,
   retireSigningKey,
   revokeSubject,
   revokeToken,
@@ -43,4 +43,4 @@ export {
   type MockIdpJwk,
   type PersonaIssueOptions,
 } from './issuer';
-export { MAX_TOKEN_LENGTH, redeemLoginToken, verifyToken, type VerifyContext } from './verifier';
+export { redeemLoginToken, verifyToken, type VerifyContext } from './verifier';

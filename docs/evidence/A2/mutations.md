@@ -33,3 +33,12 @@ Each mutation was applied to one source file, `npx vitest run src/mock/idp/idp.t
 | M27 JWKS exports private scalar | killed | key_rotation_old_kid_rejected_after_retire, no_key_or_token_material_in_console_output |
 
 M15 survived on the first pass; the respelled-signature assertion in verify_rejects_tampered_role_claim was added to kill it. All 27 killed; `git diff` on the sources clean afterward.
+
+## PR #104 follow-ups
+
+| Mutation | Result | Killed by |
+|---|---|---|
+| M28 issuer size limit loosened to MAX_TOKEN_LENGTH + 4096 | killed | issuer_refuses_a_token_over_the_shared_compact_limit_and_max_size_tokens_verify, reissue_subject_with_invalid_input_is_invalid_input_and_old_token_still_verifies |
+| M29 tracked-token cap raised to 50,001 | killed | issuer_fails_closed_at_the_tracked_token_cap |
+
+After the follow-up fix: `npx vitest run src/mock/idp` gives 23 passed (23).

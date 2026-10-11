@@ -8,6 +8,12 @@ export const MOCK_IDP_ISSUER = 'urn:ratio:mock-idp';
 export const MOCK_IDP_ALG = 'EdDSA';
 /** Upper bound on any token lifetime, in seconds. */
 export const MAX_TOKEN_TTL_SECONDS = 12 * 60 * 60;
+/**
+ * Longest compact token accepted, in characters. Shared by the verifier
+ * (rejects anything longer) and the issuer (refuses to return anything
+ * longer), so every issued token is verifiable.
+ */
+export const MAX_TOKEN_LENGTH = 8192;
 
 export interface MockIdpClaims {
   iss: string;
