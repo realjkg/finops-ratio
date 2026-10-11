@@ -118,6 +118,11 @@ describe('persona projections', () => {
     expect(fn.totalCents).toBe(cto.totalCents);
     expect(fn.totalCents).toBe(oracle.org.totalCents);
     expect(sumCents(fn.rows)).toBe(cto.totalCents);
+    for (const r of fn.rows) {
+      expect(r).not.toHaveProperty('vendor');
+      expect(r).not.toHaveProperty('description');
+      expect(r).not.toHaveProperty('kind');
+    }
     expect(fn.budgets).toBeDefined();
     expect(sumCents((fn.budgets ?? []).map((b) => ({ cents: b.actualCents })))).toBe(cto.totalCents);
   });
@@ -309,6 +314,26 @@ describe('persona projections', () => {
     expect(finPages.map((v) => sumCents(v.rows))).toEqual(oracle.paging.finopsPageCents);
     const ctoPages = walk('cto', ALL, oracle.paging.ctoPageSize);
     expect(ctoPages.map((v) => sumCents(v.rows))).toEqual(oracle.paging.ctoPageCents);
+  });
+
+  it('sum_is_exact_when_an_intermediate_total_exceeds_the_safe_integer_range', () => {
+    const base = DATASET.lines[0];
+    const big: Dataset = {
+      ...DATASET,
+      lines: [
+        { ...base, id: 'X1', cents: Number.MAX_SAFE_INTEGER + 2 },
+        { ...base, id: 'X2', cents: -Number.MAX_SAFE_INTEGER },
+      ],
+    };
+    const scope: Scope = { teams: [base.team], envs: [base.env] };
+    expect(project('cto', big, scope).totalCents).toBe(2);
+    expect(project('cto', big, scope).rows.map((r) => r.cents)).toEqual([2]);
+    // An exact result that is itself out of range is still rejected.
+    const tooBig: Dataset = { ...big, lines: [{ ...base, id: 'X3', cents: Number.MAX_SAFE_INTEGER + 2 }] };
+    expect(() => project('cto', tooBig, scope)).toThrow(RangeError);
+    // A fractional amount is rejected.
+    const frac: Dataset = { ...big, lines: [{ ...base, id: 'X4', cents: 1.5 }] };
+    expect(() => project('cto', frac, scope)).toThrow(RangeError);
   });
 
   it('invalid_page_requests_throw_and_projection_does_not_mutate_the_dataset', () => {
