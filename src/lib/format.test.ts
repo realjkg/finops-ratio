@@ -27,6 +27,12 @@ describe('formatUSD', () => {
     expect(formatUSD(-0, { compact: true })).toBe('$0.00');
   });
 
+  it('formatUSD_negative_infinity_keeps_the_minus_sign', () => {
+    expect(formatUSD(-Infinity)).toBe('-$\u221e');
+    expect(formatUSD(-Infinity, { compact: true })).toBe('-$Infinityk');
+    expect(formatUSD(Infinity)).toBe('$\u221e');
+  });
+
   it('formatUSD_positive_output_matches_main_for_a_table_of_values', () => {
     const table: Array<[number, { compact?: boolean } | undefined, string]> = [
       [0, undefined, '$0.00'],

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Document from '../../pages/_document';
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -18,7 +18,27 @@ function findElements(node: ReactNode, type: string, found: ReactElement[] = [])
   return found;
 }
 
+function iconHref(): string {
+  const links = findElements(Document(), 'link').filter((link) =>
+    String((link.props as { rel?: string }).rel ?? '').split(' ').includes('icon'),
+  );
+  expect(links.length).toBeGreaterThan(0);
+  return String((links[0].props as { href?: string }).href ?? '');
+}
+
 describe('pages/_document head', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('document_head_links_an_icon_that_exists_in_public_under_a_mount_path', () => {
+    vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '/ratio');
+    const href = iconHref();
+    expect(href).toBe('/ratio/favicon.svg');
+    // Strip the mount prefix before looking in public/, as the disk check must.
+    const file = path.join(ROOT, 'public', href.slice('/ratio'.length).replace(/^\/+/, ''));
+    expect(existsSync(file), `missing ${file}`).toBe(true);
+    expect(readFileSync(file, 'utf8')).toContain('<svg');
+  });
+
   it('document_head_links_an_icon_that_exists_in_public', () => {
     const tree = Document();
     const links = findElements(tree, 'link').filter((link) =>
