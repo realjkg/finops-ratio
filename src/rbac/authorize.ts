@@ -66,6 +66,34 @@ function deny(status: 401 | 403 | 409, reason: Reason): Verdict {
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 
+const PRINCIPAL_KEYS = ['sub', 'role', 'teams', 'envs', 'tenant', 'tokenId', 'expiresAt', 'authMethod'] as const;
+const RESOURCE_KEYS = ['kind', 'id', 'team', 'env', 'requesterSub', 'approverSub', 'ticketState', 'impact'] as const;
+
+/** An array's own elements only (holes and inherited indexes are skipped). */
+function ownElements(a: readonly unknown[]): unknown[] {
+  const out: unknown[] = [];
+  for (let i = 0; i < a.length; i += 1) if (Object.hasOwn(a, i)) out.push(a[i]);
+  return out;
+}
+
+/**
+ * A null-prototype copy holding only the listed OWN properties of `o`, so a
+ * field inherited through the prototype chain (for example a JSON "__proto__"
+ * key merged with Object.assign, or an Object.create principal) never takes
+ * part in a decision. Arrays are copied element by element the same way.
+ * Non-objects and arrays pass through unchanged and fail the shape checks.
+ */
+function ownCopy<K extends string>(o: unknown, keys: readonly K[]): unknown {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return o;
+  const copy = Object.create(null) as Record<K, unknown>;
+  for (const k of keys) {
+    if (!Object.hasOwn(o, k)) continue;
+    const v = (o as Record<K, unknown>)[k];
+    copy[k] = Array.isArray(v) ? ownElements(v) : v;
+  }
+  return copy;
+}
+
 /** A verified principal's shape; anything else is treated as no principal (401). */
 function isPrincipalShape(p: unknown): p is Principal {
   if (!p || typeof p !== 'object' || Array.isArray(p)) return false;
@@ -110,7 +138,15 @@ function readView(role: Role, kind: Resource['kind'], id: string): Verdict {
   return READABLE_CODES.includes(code) ? ALLOW : deny(403, DENY_REASONS.viewNotPermitted);
 }
 
-export function authorize(principal: Principal | null | undefined, action: Action, resource: Resource): Verdict {
+export function authorize(
+  principalInput: Principal | null | undefined,
+  action: Action,
+  resourceInput: Resource,
+): Verdict {
+  // 0. Decide on own properties only (see ownCopy).
+  const principal = ownCopy(principalInput, PRINCIPAL_KEYS);
+  const resource = ownCopy(resourceInput, RESOURCE_KEYS) as Resource;
+
   // 1. Authentication: no verified principal, no access.
   if (!isPrincipalShape(principal)) return deny(401, DENY_REASONS.noPrincipal);
   const p = principal;
@@ -151,6 +187,10 @@ export function authorize(principal: Principal | null | undefined, action: Actio
 
   // A change or ticket must be shown to be the caller's: its owning team is
   // required unless the principal is org-wide, and always for a Y* cell.
+  // On mcp_tool, audit and view or route resources a Y* cell (eng_lead
+  // mcp.read, audit.read, view.export) is a role-level check here: team
+  // scoping of the returned data is deferred to the seams that serve it
+  // (B5 MCP client, C5 audit read, B8 data provider).
   if (kind === 'change' || kind === 'ticket') {
     if (team === undefined && (p.teams !== '*' || cell === 'Y*' || cell === 'A')) {
       return deny(403, DENY_REASONS.teamNotPermitted);
