@@ -4,9 +4,10 @@
 /**
  * Places the sign before the currency symbol (`-$702`, never `$-702`). Negative
  * zero and values that round to zero (`-0.004`) render unsigned (`$0.00`).
+ * Negative infinity keeps its sign even though its magnitude has no digit.
  */
 function signedUSD(value: number, magnitude: string): string {
-  const negative = value < 0 && /[1-9]/.test(magnitude);
+  const negative = value < 0 && (!Number.isFinite(value) || /[1-9]/.test(magnitude));
   return `${negative ? '-' : ''}$${magnitude}`;
 }
 
