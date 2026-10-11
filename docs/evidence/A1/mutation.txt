@@ -14,14 +14,14 @@ killed   self-approval
 killed   prod-apply-without-ticket
 killed   approver-equals-requester
 killed   ticket-not-approved-ok
-killed   throw-escapes-authorize
 killed   inherited-fields-read
 killed   array-as-record
 killed   record-inherits-object-prototype
 killed   inherited-index-read
 killed   claim-cap-removed
 killed   row-cap-removed
-killed   throw-escapes-inScope
+killed   ownArray-throws
+killed   ownRecord-throws
 killed   env-trimmed
 killed   unknown-env-is-dev
 killed   policy-not-frozen
