@@ -8,3 +8,20 @@ Error: Cannot find module './apply' imported from /tmp/ratio-t1/src/theme/tokens
 Error: Cannot find module './themes' imported from /tmp/ratio-t1/src/theme/validate.test.ts
  Test Files  3 failed (3)
       Tests  no tests
+
+# RED round 2 (review fixes): new tests on the previous implementation
+# cmd: npx vitest run src/theme
+     × dark fails only the pinned legacy pairs 16ms
+     × covers raised and exec-hover surfaces and accents on executive cards 3ms
+     × checks accent text over its own composited tint (bg-<accent>/<n> badges) 2ms
+     × returns a passing color unchanged (normalized) 19ms
+     × nudges #777 on white just past 4.5:1 with a minimal lightness change 4ms
+     × keeps the hue family when adjusting an accent 1ms
+     × property: every pair reaches the target, or falls back to black/white when impossible 6ms
+     × reports ok: false (with onColor(bg)) when the target is unreachable 4ms
+     × blends like Tailwind bg-<color>/<n> over an opaque surface 0ms
+     × honors prefers-color-scheme and prefers-contrast only when no theme is chosen 10ms
+     × draws a token focus ring that focus:outline-none / ring utilities cannot remove 151ms
+     × resolves every original token to the original hex (themes.ts and both CSS blocks) 1ms
+ Test Files  3 failed | 1 passed (4)
+      Tests  12 failed | 44 passed (56)

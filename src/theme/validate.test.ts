@@ -23,12 +23,18 @@ describe('built-in themes', () => {
   // Dark is the pre-existing look kept pixel-identical, so its known shortfalls are
   // pinned here: the list may shrink (T4 / owner decision) but can never grow.
   it('dark fails only the pinned legacy pairs', () => {
+    const tint = (a: string, pct: number, surfaces: string[]) => surfaces.map((x) => `${a}/${a}/${pct}@${x}`);
+    const EXEC = ['exec-bg', 'exec-surface', 'exec-hover'];
+    const onExec = (fgs: string[]) => fgs.flatMap((fg) => EXEC.map((bg) => `${fg}/${bg}`));
     expect(pairs(BUILT_IN_THEMES.dark).sort()).toEqual([
-      'dim/deep', 'dim/raised', 'dim/slab', 'dim/void',
-      'edge/deep', 'edge/slab', 'edge/void',
-      'exec-border/exec-bg', 'exec-border/exec-surface',
-      'exec-muted/exec-bg',
-    ]);
+      // Light-mode executive cards inside the dark app: dark-theme text and accents on white.
+      ...onExec(['txt', 'sub', 'value', 'cost', 'shape', 'gate', 'unit', 'purple', 'exec-border']),
+      'exec-muted/exec-bg', 'exec-muted/exec-hover',
+      'dim/void', 'dim/deep', 'dim/slab', 'dim/raised',
+      'edge/void', 'edge/deep', 'edge/slab', 'edge/raised',
+      ...tint('value', 10, EXEC), ...tint('cost', 10, EXEC), ...tint('shape', 10, EXEC),
+      ...tint('gate', 20, ['raised', ...EXEC]), ...tint('unit', 20, EXEC), ...tint('purple', 30, ['slab', 'raised', ...EXEC]),
+    ].sort()); // 58 pairs
     expect(codes(BUILT_IN_THEMES.dark).every((c) => c === 'contrast')).toBe(true);
   });
 });
@@ -79,6 +85,27 @@ describe('contrast', () => {
   it('rejects body text below 4.5:1 (#777 on white is 4.48)', () => {
     expect(pairs(withColor(light, 'txt', '#777777'))).toContain('txt/void');
     expect(pairs(withColor(light, 'txt', '#767676'))).not.toContain('txt/void');
+  });
+
+  it('checks every foreground role: each one set to its surface color is flagged', () => {
+    const fgs = ['txt', 'sub', 'dim', 'value', 'cost', 'shape', 'gate', 'unit', 'purple', 'exec-text', 'exec-muted', 'edge', 'exec-border', 'focus'];
+    for (const fg of fgs) {
+      const surface = fg.startsWith('exec') ? 'exec-surface' : 'slab';
+      const flagged = validateTheme(withColor(light, fg, light.colors[surface])).filter((v) => v.fg === fg);
+      expect(flagged.length, fg).toBeGreaterThan(0);
+    }
+  });
+
+  it('covers raised and exec-hover surfaces and accents on executive cards', () => {
+    expect(pairs(withColor(light, 'edge', '#878e99'))).toEqual(['edge/raised']); // 2.89:1
+    expect(pairs(withColor(light, 'exec-muted', '#64748b'))).toContain('exec-muted/exec-hover');
+    expect(pairs(withColor(light, 'gate', '#7c8dff'))).toContain('gate/exec-surface');
+  });
+
+  it('checks accent text over its own composited tint (bg-<accent>/<n> badges)', () => {
+    // #047857 passes on every plain surface but not on value/10 over raised.
+    expect(pairs(withColor(light, 'value', '#047857'))).toEqual(expect.arrayContaining(['value/value/10@raised']));
+    expect(pairs(withColor(light, 'value', '#047857')).every((p) => p.includes('@'))).toBe(true);
   });
 
   it('rejects semantic accents used as text below 4.5:1', () => {

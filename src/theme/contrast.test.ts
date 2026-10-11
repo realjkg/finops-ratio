@@ -1,7 +1,7 @@
 // WCAG 2.x contrast math, checked against published reference values, plus the
 // lightness-adjustment helper the theme validator and T2's importer rely on.
 import { describe, expect, it } from 'vitest';
-import { contrastRatio, ensureContrast, hexToRgb, onColor, relativeLuminance } from './contrast';
+import { composite, contrastRatio, ensureContrast, hexToRgb, onColor, relativeLuminance } from './contrast';
 
 describe('relativeLuminance / contrastRatio (WCAG 2.x)', () => {
   it('matches published reference ratios', () => {
@@ -35,17 +35,17 @@ describe('onColor', () => {
 
 describe('ensureContrast', () => {
   it('returns a passing color unchanged (normalized)', () => {
-    expect(ensureContrast('#111827', '#FFFFFF', 4.5)).toBe('#111827');
+    expect(ensureContrast('#111827', '#FFFFFF', 4.5)).toEqual({ color: '#111827', ok: true });
   });
 
   it('nudges #777 on white just past 4.5:1 with a minimal lightness change', () => {
-    const out = ensureContrast('#777777', '#ffffff', 4.5);
+    const out = ensureContrast('#777777', '#ffffff', 4.5).color;
     expect(contrastRatio(out, '#ffffff')).toBeGreaterThanOrEqual(4.5);
     expect(parseInt(out.slice(1, 3), 16)).toBeGreaterThanOrEqual(0x70);
   });
 
   it('keeps the hue family when adjusting an accent', () => {
-    const out = ensureContrast('#00e09e', '#ffffff', 4.5);
+    const out = ensureContrast('#00e09e', '#ffffff', 4.5).color;
     const [r, g, b] = hexToRgb(out);
     expect(contrastRatio(out, '#ffffff')).toBeGreaterThanOrEqual(4.5);
     expect(g).toBeGreaterThan(r);
@@ -57,17 +57,26 @@ describe('ensureContrast', () => {
     for (const fg of palette) {
       for (const bg of palette) {
         for (const min of [3, 4.5, 7]) {
-          const out = ensureContrast(fg, bg, min);
-          expect(out).toMatch(/^#[0-9a-f]{6}$/);
-          const ok = contrastRatio(out, bg) >= min;
-          const fallback = out === onColor(bg) && contrastRatio(onColor(bg), bg) < min;
-          expect(ok || fallback, `${fg} on ${bg} @${min} -> ${out}`).toBe(true);
+          const { color, ok } = ensureContrast(fg, bg, min);
+          expect(color).toMatch(/^#[0-9a-f]{6}$/);
+          expect(ok, `${fg} on ${bg} @${min} -> ${color}`).toBe(contrastRatio(color, bg) >= min);
+          if (!ok) expect(color).toBe(onColor(bg));
         }
       }
     }
   });
 
-  it('falls back to onColor(bg) when the target is unreachable', () => {
-    expect(ensureContrast('#777777', '#777777', 22)).toBe(onColor('#777777'));
+  it('reports ok: false (with onColor(bg)) when the target is unreachable', () => {
+    expect(ensureContrast('#777777', '#777777', 22)).toEqual({ color: onColor('#777777'), ok: false });
+    expect(ensureContrast('#777777', '#777777', 7)).toEqual({ color: onColor('#777777'), ok: false }); // best is 4.69
+  });
+});
+
+describe('composite', () => {
+  it('blends like Tailwind bg-<color>/<n> over an opaque surface', () => {
+    expect(composite('#000000', 0.5, '#ffffff')).toBe('#808080');
+    expect(composite('#00e09e', 0.1, '#ffffff')).toBe('#e6fcf5'); // value/10 badge as rendered
+    expect(composite('#123456', 1, '#ffffff')).toBe('#123456');
+    expect(composite('#123456', 0, '#abcdef')).toBe('#abcdef');
   });
 });

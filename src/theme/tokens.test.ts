@@ -8,7 +8,6 @@ import postcss from 'postcss';
 import tailwind from 'tailwindcss';
 import { describe, expect, it } from 'vitest';
 import { applyTheme } from './apply';
-import { hexToRgb } from './contrast';
 import { BUILT_IN_THEMES, DEFAULT_THEME, ROLES, type Theme } from './themes';
 
 const root = resolve(__dirname, '../..');
@@ -73,8 +72,8 @@ describe('index.css parity with themes.ts', () => {
   });
 
   it('honors prefers-color-scheme and prefers-contrast only when no theme is chosen', () => {
-    // A media block is only needed when the default differs from the preferred theme.
-    expectBlock(media['prefers-color-scheme: dark'] ?? blocks[':root'], BUILT_IN_THEMES.dark);
+    // Present even while the default is dark, so flipping DEFAULT_THEME only swaps :root.
+    expectBlock(media['prefers-color-scheme: dark'], BUILT_IN_THEMES.dark);
     expectBlock(media['prefers-contrast: more'], BUILT_IN_THEMES['high-contrast']);
     expect(css.lastIndexOf('@media')).toBe(css.indexOf('prefers-contrast: more') - 8); // contrast wins, declared last
   });
@@ -85,8 +84,16 @@ describe('index.css parity with themes.ts', () => {
     }
   });
 
-  it('draws a focus ring from the focus token', () => {
-    expect(css).toMatch(/:focus-visible\s*\{[^}]*outline:\s*2px solid rgb\(var\(--c-focus\)\)/);
+  it('draws a token focus ring that focus:outline-none / ring utilities cannot remove', async () => {
+    const raw = 'focus:outline-none focus-visible:outline-none outline-none focus:ring-2 focus:ring-gate';
+    const out = (await postcss([tailwind({ ...config, content: [{ raw }] })]).process(css, { from: undefined })).css;
+    const ring = /:focus-visible\s*\{([^}]*)\}/.exec(out)?.[1] ?? '';
+    expect(ring).toMatch(/outline:\s*2px solid rgb\(var\(--c-focus\)\)\s*!important/);
+    expect(ring).toMatch(/outline-offset:\s*2px\s*!important/);
+    // The utilities it must beat are plain declarations (important loses to nothing but important).
+    const utility = /\.focus\\:outline-none:focus\s*\{([^}]*)\}/.exec(out)?.[1] ?? '';
+    expect(utility).toContain('outline:');
+    expect(utility).not.toContain('!important');
   });
 
   it('no hex drift: theme hex lives only in themes.ts', () => {
@@ -100,39 +107,16 @@ describe('dark theme is the pre-existing look', () => {
     for (const [role, hex] of Object.entries(ORIGINAL_DARK)) {
       expect(BUILT_IN_THEMES.dark.colors[role as keyof Theme['colors']], role).toBe(hex);
       expect(blocks[":root[data-theme='dark']"].colors[role], role).toBe(hex);
-      expect((media['prefers-color-scheme: dark'] ?? blocks[':root']).colors[role], role).toBe(hex);
+      expect(media['prefers-color-scheme: dark'].colors[role], role).toBe(hex);
     }
   });
 });
 
-describe('applyTheme', () => {
-  const fakeDoc = () => {
-    const props: Record<string, string> = {};
-    const attrs: Record<string, string> = {};
-    const documentElement = { style: { setProperty: (k: string, v: string) => { props[k] = v; } }, setAttribute: (k: string, v: string) => { attrs[k] = v; } };
-    return { doc: { documentElement } as unknown as Document, props, attrs };
-  };
-
-  it('sets data-theme and every --c-* channel triplet', () => {
-    const { doc, props, attrs } = fakeDoc();
-    expect(applyTheme('dark', doc)).toEqual([]);
-    expect(attrs['data-theme']).toBe('dark');
-    expect(props['--c-void']).toBe('5 7 11');
-    expect(props['color-scheme']).toBe('dark');
-    for (const role of ROLES) expect(props[`--c-${role}`]).toBe(hexToRgb(BUILT_IN_THEMES.dark.colors[role]).join(' '));
-  });
-
-  it('refuses invalid or unknown themes without touching the document', () => {
-    const { doc, props, attrs } = fakeDoc();
-    const bad = { ...BUILT_IN_THEMES.light, name: 'mine', colors: { ...BUILT_IN_THEMES.light.colors, txt: '#eeeeee' } };
-    expect(applyTheme(bad, doc).length).toBeGreaterThan(0);
-    expect(applyTheme('__proto__' as never, doc).map((v) => v.code)).toEqual(['unknown-theme']);
-    expect(props).toEqual({});
-    expect(attrs).toEqual({});
-  });
-
-  it('is a no-op without a document (SSR)', () => {
-    expect(applyTheme('light', undefined)).toEqual([]);
+describe('applyTheme during SSR (this file runs in node: no document)', () => {
+  it('validates and returns without touching anything', () => {
+    expect(typeof document).toBe('undefined');
+    expect(applyTheme('light')).toEqual([]);
+    expect(applyTheme('nope' as never).map((v) => v.code)).toEqual(['unknown-theme']);
   });
 });
 
@@ -147,31 +131,40 @@ describe('hard-coded color baseline (T4 migrates these; they may only shrink)', 
   };
   walk(join(root, 'src'));
   walk(join(root, 'pages'));
-  const count = (re: RegExp, list = files.filter((f) => f.endsWith('.tsx'))) => {
+  const count = (hitsIn: (src: string) => number, list = files.filter((f) => f.endsWith('.tsx'))) => {
     let hits = 0;
     let hitFiles = 0;
     for (const f of list) {
-      const n = (readFileSync(f, 'utf8').match(re) ?? []).length;
+      const n = hitsIn(readFileSync(f, 'utf8'));
       hits += n;
       hitFiles += n > 0 ? 1 : 0;
     }
     return { hits, hitFiles };
   };
+  const matches = (re: RegExp) => (src: string) => (src.match(re) ?? []).length;
+  const HEX = /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g;
 
-  it('inline color/background style lines do not grow past 94 in 39 files', () => {
-    const { hits, hitFiles } = count(/^.*style=\{\{[^}\n]*\b(color|background).*$/gm);
-    expect(hits).toBeLessThanOrEqual(94);
-    expect(hitFiles).toBeLessThanOrEqual(39);
+  it('inline style objects setting color/background (multi-line too) do not grow past 110 in 40 files', () => {
+    const styleObjects = (src: string) => (src.match(/style=\{\{[\s\S]*?\}\}/g) ?? []).filter((m) => /\b(color|background)/.test(m)).length;
+    const { hits, hitFiles } = count(styleObjects);
+    expect(hits).toBeLessThanOrEqual(110);
+    expect(hitFiles).toBeLessThanOrEqual(40);
+  });
+
+  it('rgb()/hsl() color literals in TSX do not grow past 20 in 6 files', () => {
+    const { hits, hitFiles } = count(matches(/\b(rgba?|hsla?)\(/g));
+    expect(hits).toBeLessThanOrEqual(20);
+    expect(hitFiles).toBeLessThanOrEqual(6);
   });
 
   it('raw hex colors in TSX do not grow past 19 in 7 files', () => {
-    const { hits, hitFiles } = count(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g);
+    const { hits, hitFiles } = count(matches(HEX));
     expect(hits).toBeLessThanOrEqual(19);
     expect(hitFiles).toBeLessThanOrEqual(7);
   });
 
   it('raw hex colors in non-test .ts do not grow past 6 (src/lib/scales.ts TOKEN_HEX)', () => {
-    const { hits, hitFiles } = count(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g, files.filter((f) => f.endsWith('.ts')));
+    const { hits, hitFiles } = count(matches(HEX), files.filter((f) => f.endsWith('.ts')));
     expect(hits).toBeLessThanOrEqual(6);
     expect(hitFiles).toBeLessThanOrEqual(1);
   });
