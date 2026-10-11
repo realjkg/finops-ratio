@@ -123,8 +123,9 @@ test; both were removed rather than argued with.) The PR needs the restricted re
 
 `git diff origin/main HEAD` reverse-applied onto HEAD's tree in a scratch index yields exactly
 `origin/main^{tree}` (checked with a scratch `GIT_INDEX_FILE`, `git apply -R --cached`,
-`git write-tree`). The change is additive except for four small edits: three optional wire
-fields in `AIClient.ts`, their population in `buildAIContext.ts`, the re-export in `index.ts`,
+`git write-tree`). The change is additive except for four small edits: nine optional wire
+fields (team, provider, monthlyValue, monthlyBudget, dailyInferences, tokensInToday,
+tokensOutToday, tokensCachedToday, alerts) in `AIClient.ts`, their population in `buildAIContext.ts`, the re-export in `index.ts`,
 and `MockAIClient.ts` delegating to `src/ai/mock`. Reverting the merge restores the previous
 mock. No data, environment, flag, dependency or route change is involved.
 
@@ -135,7 +136,50 @@ The challenger requested changes (0 High, 5 Medium, 6 Low). Tests were written f
 
 Command: `npx vitest run src/ai/mock/hardening.test.ts`
 
-RED (before the fixes): 25 failed of 49 tests. The 24 that pass are the surviving-mutant tests (M4
+RED (before the fixes): 25 failed, 12 passed (37 tests). The 12 that pass are the surviving-mutant tests (M4
 a to f, which pin existing behavior the earlier suite did not) and the pinned fallback (L3), so the
 failures are the crashes, missing warnings, silent substitutions, forged lines and unbounded
 output. The five route tests time out because the handler returns 500 for prototype-key wire strings.
+
+GREEN after the fixes: `npx vitest run src/ai/mock/hardening.test.ts` 38 of 38 pass (the RED run
+above had 25 failing; the test file also gained two tests that kill the last two mutants).
+Correction to the RED note: the five route tests failed there by timing out because the helper
+waited on a faked clock; the helper now advances the clock, and the route crash is covered by the
+`plain-object-alias-lookup` mutant, which the route tests kill.
+
+Gates on the fixed tree: `npm run lint` clean, `npm run typecheck` clean, full `npx vitest run`
+159 files / 3117 tests passed, `npm run build` compiled successfully.
+
+### What changed, by finding
+
+- M1: alias tables are read with an own-property check; wire strings such as `constructor` or
+  `__proto__` are just names (tested through `MockAIClient` and the real route handler).
+- M2: a migration saving above the seeded run-rate and an EBITDA reduction above the scope's
+  entire seeded spend each print a `Warning:` line next to the headline, uncapped; the migration
+  saving also shows its share of the run-rate.
+- M3: wire figures beyond 1e12 USD or 1e13 counts exclude that workload, and every answer says so;
+  trend, budget and cache rate outside their sane ranges become unknown. `roiLine`, GPU sizing and
+  break-even are guarded. Property test: 9 fields x 5 extreme values x 14 questions print no NaN,
+  Infinity or n/a.
+- M4: tests for all six survivors. For (f) the duplicated 25% cached-rate fallback was deleted;
+  the calculator now calls the shared `cachedInputRate` (every seeded model publishes a cached
+  price, so the branch was unreachable). The mutant now targets the cached price itself.
+- M5: an unrecognized named team or entity gets "I don't have a team called X" with the teams
+  listed, never a portfolio fallback; entities of different kinds that were named but not
+  answered are listed in the existing "you also named" note.
+- L1: a refused amount asks for a valid one (no fallback scenario); "predict" or "forecast" with
+  EBITDA or migration wording is a forecast refusal.
+- L2: an undersized cluster hides the headline saving and payback, and pluralizes GPU.
+- L3 (disclosure): the old catch-all for unmatched questions (help text) is now the honest
+  "I can't answer that from the seeded data" answer; the greeting and the five legacy intents are
+  unchanged. A test pins the new fallback.
+- L4: control characters and line breaks in wire strings become spaces, names are capped at 60.
+- L5: list rows are capped at 20 with "and N more", and a reply is capped at 8,000 characters.
+- L6: dead exports removed.
+
+### Mutation check, challenger round
+
+`node docs/evidence/frank-mock-analytics/mutate.mjs`: **42 of 42 mutants killed** (the original 25,
+the challenger's six, and 11 guards for the new behavior). Two of the new mutants survived their
+first test and were killed after the tests were tightened (negative savings through the team
+ranking, and control characters other than line breaks).
