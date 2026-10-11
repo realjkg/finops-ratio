@@ -13,9 +13,11 @@ export const MAX_ROWS = 100_000;
 /** The own elements of an array no longer than `max`; null for anything else, including a throwing Proxy. */
 export function ownArray(a: unknown, max = MAX_CLAIM): unknown[] | null {
   try {
-    if (!Array.isArray(a) || a.length > max) return null;
+    if (!Array.isArray(a)) return null;
+    const n = a.length; // read once: a Proxy cannot change it mid-scan
+    if (!(n <= max)) return null;
     const out: unknown[] = [];
-    for (let i = 0; i < a.length; i += 1) if (Object.hasOwn(a, i)) out.push(a[i]);
+    for (let i = 0; i < n; i += 1) if (Object.hasOwn(a, i)) out.push(a[i]);
     return out;
   } catch {
     return null;
