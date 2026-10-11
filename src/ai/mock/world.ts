@@ -92,8 +92,9 @@ function alertList(v: unknown): AIAlertSnapshot[] | null {
 
 export function buildWorld(ctx: AIContext): World {
   const c = rec(ctx);
-  const initiatives = arr(c.initiatives).map(rec);
-  const snaps = new Map(arr(c.workloads).map(rec).map((w) => [String(w.id), w]));
+  const plain = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+  const initiatives = arr(c.initiatives).filter(plain);
+  const snaps = new Map(arr(c.workloads).filter(plain).map((w) => [String(w.id), w]));
   const seen = new Set<string>();
   const rows: WorkloadFacts[] = [];
   const rejected: string[] = [];
@@ -161,34 +162,27 @@ export function buildWorld(ctx: AIContext): World {
   for (const i of initiatives) add(String(i.id), i, snaps.get(String(i.id)));
   for (const [id, s] of snaps) add(id, undefined, s);
 
+  const dropped = arr(c.initiatives).filter((x) => !legacyInit(x) && !rejectedIds.includes(String(rec(x).id))).length + arr(c.workloads).filter((x) => !plain(x)).length; if (dropped) rejected.push(`${dropped} malformed entries`);
   const teams: string[] = [];
   for (const w of rows) if (w.team && !teams.includes(w.team)) teams.push(w.team);
   return { asOf: str(c.asOf) ?? '1970-01-01T00:00:00.000Z', workloads: rows, teams, rejected, rejectedIds };
 }
 
-const deep = (v: unknown): unknown =>
-  typeof v === 'string' ? clean(v, MAX_STR)
-  : Array.isArray(v) ? v.slice(0, MAX_ITEMS).map(deep)
-  : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).slice(0, 64).map(([k, x]) => [k, deep(x)]))
-  : v;
 const STATUS_OK: ReadonlySet<string> = new Set(['On Track', 'At Risk', 'Pending Approval']);
+const INIT_NUMBERS = { monthlyCost: RANGE.usd, annualRunRate: RANGE.runRate, budgetConsumedPct: RANGE.pct, valueRatio: RANGE.ratio, savingsOpportunity: RANGE.usd } as const;
 
-/**
- * The context the five legacy answers may read, rebuilt from sanitized values only: every
- * string is cleaned, enums are validated, rejected workloads are dropped and out-of-range
- * summary figures are recomputed. For a valid context this is the same data, so the legacy
- * text is unchanged.
- */
+function legacyInit(raw: unknown): AIContext['initiatives'][number] | null {
+  const i = rec(raw);
+  const nums = Object.entries(INIT_NUMBERS).map(([k, r]) => [k, typeof i[k] === 'number' && within(i[k], r) ? i[k] : null] as const);
+  const [id, name] = [str(i.id), str(i.name)];
+  if (!id || !name || !STATUS_OK.has(String(i.status)) || nums.some(([, v]) => v === null)) return null;
+  return { id, name, status: i.status, valueEvidenceStatus: evidence(i.valueEvidenceStatus), ...Object.fromEntries(nums) } as AIContext['initiatives'][number];
+}
+
 export function legacyContext(ctx: AIContext, world: World): AIContext {
   const drop = new Set(world.rejectedIds);
-  const kept = (xs: unknown): unknown[] => arr(xs).filter((x) => !drop.has(String(rec(x).id)));
-  const initiatives = (deep(kept(ctx.initiatives)) as AIContext['initiatives']).map((i) => ({
-    ...i,
-    status: STATUS_OK.has(i.status) ? i.status : 'On Track',
-    valueEvidenceStatus: evidence(i.valueEvidenceStatus),
-  }));
-  const sum = (f: (i: (typeof initiatives)[number]) => number): number =>
-    initiatives.reduce((n, i) => n + (Number.isFinite(f(i)) ? f(i) : 0), 0);
+  const initiatives = arr(ctx.initiatives).filter((x) => !drop.has(String(rec(x).id))).map(legacyInit).filter((i) => i !== null);
+  const sum = (f: (i: (typeof initiatives)[number]) => number): number => initiatives.reduce((n, i) => n + f(i), 0);
   const sm = rec(ctx.summary);
   const pick = (key: string, range: Range, fallback: number): number => {
     const v = sm[key];
@@ -196,7 +190,7 @@ export function legacyContext(ctx: AIContext, world: World): AIContext {
   };
   return {
     initiatives,
-    workloads: deep(kept(ctx.workloads)) as AIContext['workloads'],
+    workloads: world.workloads.map((w) => ({ id: w.id, cacheHitRate: w.cacheHitRate })) as unknown as AIContext['workloads'], // the only fields the legacy answers read
     asOf: str(rec(ctx).asOf) ?? '',
     summary: {
       totalMonthlySpend: pick('totalMonthlySpend', RANGE.total, Math.round(sum((i) => i.monthlyCost))),

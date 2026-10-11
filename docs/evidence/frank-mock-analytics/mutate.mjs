@@ -78,11 +78,11 @@ const MUTANTS = [
   ['quality-note-plain-lookup', M + 'answersDrill.ts', 'Object.hasOwn(MODEL_QUALITY_NOTE, scope.model) ? MODEL_QUALITY_NOTE[scope.model] : undefined', 'MODEL_QUALITY_NOTE[scope.model]', 'prototype key reaches the quality notes'],
   ['unknown-team-check-off', M + 'respond.ts', "if (intent !== 'forecast' && intent !== 'capability') {", 'if (false) {', 'unknown names answered with a silent substitute'],
   ['capitalized-rule-dropped', M + 'entities.ts', 'raw[0] !== raw[0].toLowerCase()', 'true', 'lowercase words treated as names'],
-  ['legacy-strings-unsanitized', M + 'world.ts', "typeof v === 'string' ? clean(v, MAX_STR)", "typeof v === 'string' ? v", 'legacy answers read raw wire strings'],
+  ['incomplete-initiative-kept', M + 'world.ts', 'nums.some(([, v]) => v === null)', 'false', 'initiatives missing a field reach the legacy renderers'],
   // ---- Copilot round on PR #102: one ingestion policy and routing fixes
   ['legacy-context-unsanitized', M + 'world.ts', 'const drop = new Set(world.rejectedIds);', 'const drop = new Set<string>();', 'legacy answers read rejected workloads'],
   ['summary-range-dropped', M + 'world.ts', "typeof v === 'number' && within(v, range) ? v : fallback", "typeof v === 'number' ? v : fallback", 'summary figures not range-checked'],
-  ['field-range-dropped', M + 'world.ts', 'if (within(v, range)) return v;', 'return v;', 'numeric fields not range-checked'],
+  ['field-range-dropped', M + 'world.ts', "if (typeof v === 'number' && within(v, range)) return v;", "if (typeof v === 'number') return v;", 'out-of-range numbers accepted'],
   ['nameless-id-unsanitized', M + 'world.ts', '?? clean(id, MAX_STR)', '?? id', 'workload id used raw as a display name'],
   ['negative-count-allowed', M + 'world.ts', 'count: { min: 0, max: MAX_COUNT, int: true }', 'count: { min: -MAX_COUNT, max: MAX_COUNT, int: true }', 'negative counts accepted'],
   ['predict-with-entity', M + 'intents.ts', 'if (/\\bpredict\\w*/.test(lower) || (', 'if (false || (', 'prediction wording ignored when a scope is named'],

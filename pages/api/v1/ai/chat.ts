@@ -387,7 +387,7 @@ async function chatHandler(
   // with only the message (no stack trace).
   const text = await adapter.call(systemPrompt, userMessages);
   const initiativesReferenced = context.initiatives
-    .filter((i) => text.toLowerCase().includes(String(i.name).toLowerCase()))
+    .filter((i) => typeof i?.name === 'string' && text.toLowerCase().includes(i.name.toLowerCase()))
     .map((i) => i.id);
 
   res.status(200).json({

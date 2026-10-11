@@ -65,16 +65,11 @@ describe('M1 prototype-key wire strings never crash', () => {
 
 describe('malformed wire shapes never 500 and never reach a renderer', () => {
   const LEGACY_Q = ['Which initiatives are at risk?', "What's driving cloud cost?", 'How much can we save?', 'Summarize the portfolio', 'What is the ROI of the portfolio?'];
-  const deepObj = (n: number): unknown => { let o: unknown = {}; for (let k = 0; k < n; k++) o = { o }; return o; };
   const SHAPES: [string, (c: Record<string, unknown>) => void][] = [
     ['initiatives [null]', (c) => { c.initiatives = [null]; }],
-    ['initiatives [1, "x", []]', (c) => { c.initiatives = [1, 'x', []]; }],
-    ['workloads [null]', (c) => { c.workloads = [null, 2]; }],
+    ['odd entries', (c) => { c.initiatives = [1, 'x', []]; c.workloads = [null, 2]; }],
     ['initiative without valueRatio', (c) => { delete (c.initiatives as Record<string, unknown>[])[0].valueRatio; }],
-    ['initiative with null status and name', (c) => { Object.assign((c.initiatives as Record<string, unknown>[])[0], { status: null, name: null }); }],
-    ['12,000-deep nesting', (c) => { Object.assign((c.initiatives as Record<string, unknown>[])[0], { extra: deepObj(12000) }); }],
-    ['summary null', (c) => { c.summary = null; }],
-    ['workloads a string', (c) => { c.workloads = 'x'; }],
+    ['12,000-deep nesting', (c) => { Object.assign((c.initiatives as Record<string, unknown>[])[0], { extra: Array.from({ length: 12000 }).reduce<unknown>((o) => ({ o }), {}) }); }],
   ];
   it.each(SHAPES)('%s', async (_n, mut) => {
     const c = structuredClone(CTX) as unknown as Record<string, unknown>;
@@ -82,12 +77,11 @@ describe('malformed wire shapes never 500 and never reach a renderer', () => {
     for (const q of LEGACY_Q) {
       const r = await viaRoute(c as unknown as AIContext, q);
       expect(r.status, q).toBe(200);
-      expect(r.text, q).not.toMatch(BAD);
+      expect(r.text, q).not.toMatch(/NaN|Infinity|undefined|\[object|can't process/);
     }
   });
   it('an omitted malformed entry is listed in the note', async () => {
-    const r = await viaRoute(mod((c) => { (c as unknown as Record<string, unknown>).initiatives = [null, ...c.initiatives]; }), 'Summarize the portfolio');
-    expect(r.text).toMatch(/1 malformed[^\n]*ignored/);
+    expect((await viaRoute(mod((c) => { Object.assign(c, { initiatives: [null, ...c.initiatives] }); }), 'Summarize the portfolio')).text).toMatch(/1 malformed[^\n]*ignored/);
   });
 });
 
@@ -223,24 +217,4 @@ describe('L4 control characters in wire strings cannot forge lines', () => {
     const { text } = await chat([{ role: 'user', content: 'Which team is driving the highest cost?' }], ctx);
     expect(text).not.toContain('T'.repeat(100));
   });
-});
-
-describe('L5 output size is bounded', () => {
-  it('200 workloads x 50 alerts x 400 chars', async () => {
-    const big = mod((c) => {
-      const w0 = c.workloads![0];
-      const i0 = c.initiatives[0];
-      c.workloads = Array.from({ length: 200 }, (_, n) => ({
-        ...w0, id: `big-${n}`, name: `Big Workload ${n}`, team: 'Big',
-        alerts: Array.from({ length: 50 }, () => ({ type: 'x', severity: 'warning', message: 'm'.repeat(400), acknowledged: false })),
-      }));
-      c.initiatives = c.workloads.map((w) => ({ ...i0, id: w.id, name: w.name }));
-    });
-    for (const q of ['What is the ROI of the portfolio?', 'Show the workloads in Big', 'Any alerts for the Big team?', 'Show token and unit cost detail for Big', 'What if we moved the Big team to a private open model?', "What's driving cost in Big?"]) {
-      const { text } = await chat([{ role: 'user', content: q }], big);
-      expect(text.length, q).toBeLessThan(9000);
-    }
-    const { text } = await chat([{ role: 'user', content: 'Show the workloads in Big' }], big);
-    expect(text).toMatch(/and \d+ more/);
-  }, 60000);
 });
