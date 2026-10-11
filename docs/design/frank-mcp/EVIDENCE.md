@@ -24,7 +24,9 @@ error in DESIGN.md that revision 11 repairs; revision 11
 challenger approved 10b18f8, and revision 12 (4e3734c) answered Copilot's open
 threads on it and the round-11 Lows; revision 13 answers the round-12
 challenger's review of 4e3734c; revision 14 (this one) answers the round-13
-challenger's review of 117f8e2 and the owner's vendor-agnostic requirement.
+challenger's review of 117f8e2 and the owner's vendor-agnostic requirement;
+revision 15 answers the round-14
+challenger's review of 433b27f under a scope freeze.
 
 ## 1. Method
 
@@ -93,6 +95,10 @@ challenger's review of 117f8e2 and the owner's vendor-agnostic requirement.
   Mistral row: `src/ai/providers.ts:58-67` (the shared OpenAI-compatible
   preset). The vendor-side connector discussion (2.6) and the Mistral
   function-calling statement are **unverified** vendor-documentation claims.
+- Revision 15 sources: no new code or external sources;
+  `pages/api/v1/ai/chat.ts`
+  lines near 100 and 134 (the Claude and OpenAI SDK create calls) were re-read
+  for the A21 surface. Fixes only; no new features.
 - Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
   drafting; four ranges were corrected at that point.
 
@@ -168,7 +174,7 @@ result was `risk: low`; with a paragraph that names the rule, the result was
 revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
 `EVIDENCE.md`: that `DESIGN.md` was the spliced file, whose rewrapped
 audit-retention sentence and decision-table row counted as added lines. At
-revisions 11 to 14, with `DESIGN.md` rebuilt from 911b67c at revision 11 and
+revisions 11 to 15, with `DESIGN.md` rebuilt from 911b67c at revision 11 and
 edited hunk by hunk since, the classifier was re-run at the final head and
 reports `risk: restricted`, class `retention`, rule
 `retention.mention`, on `EVIDENCE.md` only (this section names the rule).

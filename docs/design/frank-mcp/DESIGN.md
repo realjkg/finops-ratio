@@ -5,7 +5,7 @@ Branch `docs/frank-mcp-proposal`. Revision 1 was branched from `origin/main` at
 **Status: proposal. Design only: this branch adds documents and no code.
 Nothing in this proposal is implemented.** Every decision in section 10 is
 **open**: it is the owner's to make, with a recommendation attached. No
-decision is recorded here as made. This is revision 14. Review history:
+decision is recorded here as made. This is revision 15. Review history:
 revision 1 (c97852d, PR #96) was reviewed by a challenger (changes requested);
 revision 2 (6402ab3, 00523cf) answered it, and a second challenger review of
 PR #98 requested changes; revision 3 (e050578, d997618) answered that, and the
@@ -24,10 +24,11 @@ round-11 challenger approved 10b18f8, and Copilot's open threads on it (C1 to
 C3) with the round-11 Lows were answered by revision 12 (4e3734c); a round-12
 challenger review of 4e3734c was answered by revision 13 (ad2d6b8, 117f8e2); a
 round-13 challenger review of 117f8e2 (1 Medium, 5 Low), with a new owner
-requirement (the design is model-vendor agnostic), is answered by this
-revision 14. Revisions 2 to 14 are in PR #98. The code citations were checked
-at 62bd8ed and there have been no code changes since: 8caec87 touches only
-`docs/design/frank-mcp`.
+requirement (the design is model-vendor agnostic), was answered by revision 14
+(433b27f); a round-14 challenger review of 433b27f (2 Medium, 6 Low, under a
+scope freeze) is answered by this revision 15. Revisions 2 to 15 are in PR
+#98. The code citations were checked at 62bd8ed and there have been no code
+changes since: 8caec87 touches only `docs/design/frank-mcp`.
 
 **Origin.** Both origin statements below were relayed to the author in the
 commissioning task; the source messages were not seen, so their exact wording
@@ -321,9 +322,9 @@ Some vendors may offer a hosted "MCP connector" feature, in which the vendor's
 cloud calls an MCP server directly (**unverified** whether and how any vendor
 does). Such a connector is **outside the broker's control**: it would bypass
 allowlist pinning, scope injection, the result-value secret scan and the
-audit. **It is rejected by default: this design does not allow it unless the
-broker is the only MCP client.** The adapters never send a vendor-side
-connector parameter (A21). This is a recommendation and a residual risk, and
+audit. **This design assumes the broker is the only MCP client; a vendor-side
+connector is rejected.** The adapters send only a closed set of request
+elements (A21). This is a recommendation and a residual risk, and
 whether to allow specific vendor-side connectors is an owner decision (OD-13).
 
 ## 3. Allowlist model (the core)
@@ -411,7 +412,8 @@ loads exactly one file) and `RATIO_ENV` (3.8). The names `FRANK_TOOLS` and
 In M1, where there is no file, each registry tool supplies in code the same
 fields as the key table: the bodies; `read_only_via` as the pure-function
 marker; the key-table budget defaults; and `on_secret: reject`. Hashes are
-computed from the bodies and checked by a registry self-test. The enabled
+compared with **committed constants** by a registry self-test (a self-test
+that recomputes the expected hashes at test time proves nothing). The enabled
 tools and the tenants come from a broker option (the mock tenant only) behind
 `FRANK_TOOLS`.
 
@@ -540,35 +542,38 @@ cannot be loaded in development or the reverse. An entry **without**
 own deployment file, which is exactly one. This prerequisite and the A14
 gateway-auth check are evaluated together under the following rules.
 
-- **E1, the evaluation triggers (stated once).** Evaluations occur **only**
-  on a **load** (start), a **reload**, and an **observed off-to-on flip of
-  `FRANK_TOOLS`**; only an evaluation can clear a latch. The raw
-  `FRANK_TOOLS` value is parsed as: `on` (after trimming, case-insensitive)
-  is on; `off`, unset, empty and any unrecognized value are off. `FRANK_TOOLS`
-  is the **single setting that is mutable at runtime by design**; `RATIO_ENV`
-  is not (E2). An off-then-on that no request observed while off is not a
-  flip. The detector keeps a **last-seen** value and a separate
-  **pending** marker. A load sets last-seen to the parsed value of its
-  snapshot and clears pending; a load with `FRANK_TOOLS` on runs an
-  evaluation, and with it off runs none. On each request the broker reads the
-  raw `FRANK_TOOLS` once: an observed **off** sets last-seen to off (an
-  observation, not an evaluation); an observed **on** while last-seen is off
-  is a flip, which sets last-seen to on and the pending marker to true
-  (observation only; the observation checks nothing) and starts, or joins, an
-  E1 evaluation. A reload with `FRANK_TOOLS` on runs an evaluation; with it
-  off it parses and checks nothing. An evaluation completing with a
-  determinate result (success, or failure such as a bad value or a mismatched
-  file) clears pending and sets last-seen to the `FRANK_TOOLS` value in **its
-  own snapshot** (E4); a flip that happens during a reload therefore differs
-  from that value at the next request and is observed as a new flip. An
-  evaluation that does not finish (lock wait timeout or evaluation timeout)
-  leaves pending true; the next request-level observation retries, but not
-  more often than every `evaluation_retry_ms`. A flip-triggered or retry
-  evaluation whose own snapshot reads `FRANK_TOOLS` off only sets last-seen
-  and clears pending. A reload whose lock wait times out is not retried
-  automatically: it reports the timeout to the operator, changes nothing
-  (the previous latch and snapshot stand), and does not set pending; the
-  operator repeats the reload.
+- **E1, the evaluation triggers (stated once).** Evaluations occur **only** on
+  a **load** (start), a **reload**, and an **observed off-to-on flip of
+  `FRANK_TOOLS`**; only an evaluation can clear a latch. The raw `FRANK_TOOLS`
+  value is parsed as: `on` (after trimming, case-insensitive) is on; `off`,
+  unset, empty and any unrecognized value are off. `FRANK_TOOLS` is the
+  **single setting that is mutable at runtime by design**; `RATIO_ENV` is not
+  (E2). An off-then-on that no request observed while off is not a flip. The
+  detector keeps a **last-seen** value and a separate **pending** marker. A
+  load sets last-seen to the parsed value of its snapshot and clears pending;
+  a load with `FRANK_TOOLS` on runs an evaluation, and with it off runs none.
+  On each request the broker reads the raw `FRANK_TOOLS` once: an observed
+  **off** sets last-seen to off (an observation, not an evaluation); an
+  observed **on** while last-seen is off is a flip, which sets last-seen to on
+  and the pending marker to true (observation only; the observation checks
+  nothing) and starts, or joins, an E1 evaluation. A reload with `FRANK_TOOLS`
+  on runs an evaluation; with it off it parses and checks nothing. Pending is
+  kept **per flip**, with an observation sequence number. An evaluation
+  completing with a determinate result (success, or failure such as a bad
+  value or a mismatched file) clears **its own flip's** pending marker, and
+  sets last-seen to the `FRANK_TOOLS` value in **its own snapshot** (E4)
+  **only if no observation has occurred since it read that snapshot** (the
+  sequence number is compared at apply time); otherwise last-seen keeps the
+  newer observed value and the newer flips' pending markers stay true. A flip
+  that happens during a reload therefore differs from the snapshot value at
+  the next request and is observed as a new flip. An evaluation that does not
+  finish (lock wait timeout or evaluation timeout) leaves pending true; the
+  next request-level observation retries, but not more often than every
+  `evaluation_retry_ms`. A flip-triggered or retry evaluation whose own
+  snapshot reads `FRANK_TOOLS` off only sets last-seen and clears pending. A
+  reload whose lock wait times out is not retried automatically: it reports
+  the timeout to the operator, changes nothing (the previous latch and
+  snapshot stand), and does not set pending; the operator repeats the reload.
 - **E2, no per-request environment re-check.** The per-request check reads the
   latch and the kill switch and observes flips (E1). It does **not** compare
   or re-validate `RATIO_ENV`. **A change of `RATIO_ENV` in a running process
@@ -617,11 +622,13 @@ gateway-auth check are evaluated together under the following rules.
   requests do not start more: they join the one evaluation or, if they do not
   wait for it, are served with no tools. One evaluation writes one
   `startup_refused` record (if it fails), not one per request, and a timed-out
-  evaluation is not retried in a loop (the retry spacing of E1). A joiner whose
-  flip was observed **after** the running evaluation read its snapshot does
-  not take that evaluation's result as its own: it starts a new evaluation
-  after the current one completes, so a `RATIO_ENV` change made together
-  with the cycle is adopted.
+  evaluation is not retried in a loop (the retry spacing of E1). A joiner
+  whose flip was observed **after** the running evaluation read its snapshot
+  does not take that evaluation's result as its own: it starts a new
+  evaluation after the current one completes, so a `RATIO_ENV` change made
+  together with the cycle is adopted. That joiner's evaluation has its own
+  pending marker, which the earlier evaluation cannot clear; if the joiner's
+  lock wait times out, its pending stays true and is retried.
 - **E5, only an E1 evaluation clears a latch.** The per-request check reads the
   latch: it can turn tools off, and it never itself re-enables a refused
   broker. Observing a flip starts the E1 evaluation and does not clear the
@@ -778,7 +785,7 @@ control.
 | T10 | **Audit gaps** (a tool call that leaves no record; a record that leaks data) | Audit written by the broker, before the result is returned to the model; a failed audit write fails the call (fail closed); records hold hashes and sizes, not payloads (6.1) | A13 | Audit stored in the same trust domain as the app can be altered by anyone who owns it; external immutable storage is an operator decision. |
 | T11 | **Model chooses a wrong but allowed tool or misreads a result** | Evidence status in every result; golden-question suite per model (8); Frank's rule that a person verifies claims and authorizes decisions (`src/agent-workflows/frank.ts:11-12`) | the golden suite (8.1) | Wrong answers will occur. The control is that they are read-only and presented as evidence. |
 | T12 | **Hosted-demo exposure** (a live model with tools reachable by anonymous visitors) | Hosted demo stays on the mock; tools require the live-provider gateway auth, which is forced for any live provider (`src/server/gateway/auth.ts:36-42`); a startup check refuses `tools` enabled when auth is not enforced, and another refuses them unless the raw `RATIO_ENV` is a recognized value and the allowlist file's `deployment_environment` equals it (3.8 rule 0) | A14, A20 | Relies on correct deployment configuration; a runtime change of `RATIO_ENV` is not detected until a reload or restart (3.8 E2). |
-| T13 | **Vendor-side MCP connector** (a vendor's cloud calls an MCP server directly, bypassing the broker) | Rejected by default (2.6): the broker is the only MCP client; the adapters never send a vendor-side connector parameter; the request builders are tested for it | A21 | Relies on correct adapter code and on no one enabling a vendor feature outside Ratio. Allowing specific connectors is an owner decision (OD-13). |
+| T13 | **Vendor-side MCP connector** (a vendor's cloud calls an MCP server directly, bypassing the broker) | Rejected (2.6): the broker is the only MCP client; each adapter is held to a closed set of request elements, asserted by A21 (an allowlist, not a name denylist) | A21 | Relies on correct adapter code. Vendor-side or account-level configuration (an agent or workspace with attached connectors) applies without any request parameter and is undetectable by this test. Allowing specific connectors is an owner decision (OD-13). |
 
 ## 6. Audit and observability
 
@@ -920,17 +927,17 @@ Tests first, as in the rest of the program (Slices 3-5 design section 7).
 | A8 | Model supplies another tenant's id in an argument | schema has no such field; an unknown initiative id returns the same as a forbidden one |
 | A9 | Model puts data into a free-text argument | no free-text argument exists in v1; test asserts that |
 | A10 | Error text or a log line contains a secret-shaped string | redacted in logs and in the audit record |
-| A11 | (a) Model loops on tool calls; (b) the per-turn tool-result token ceiling is exceeded; (c) a tool exceeds its timeout; (d) a tenant exceeds `max_calls_per_tenant_per_minute` | (a) stops at the per-turn cap; final answer states the cap was reached; (b) the result is rejected or the turn ends with the ceiling stated; (c) the call is aborted, audit `timeout`; (d) further calls are refused for the window, audit `over_budget` |
+| A11 | (a) Model loops on tool calls; (b) the per-turn tool-result token ceiling is exceeded; (c) a tool exceeds its timeout; (d) a tenant exceeds `max_calls_per_tenant_per_minute` | (a) stops at the per-turn cap; final answer states the cap was reached; (b) the tool result that would push the turn's cumulative tool-result tokens over the ceiling is rejected (the model gets the fixed error; the turn continues without it), as for the byte cap in 3.6; tokens are estimated as bytes divided by 4, rounded up (an **assumption**; the broker does not call a vendor tokenizer); (c) the call is aborted, audit `timeout`; (d) further calls are refused for the window, audit `over_budget` |
 | A12 | stdio executable hash differs | process not started |
 | A13 | Audit write fails | the call fails closed |
 | A14 | Tools enabled with gateway auth not enforced | startup refusal |
 | A15 | Server adds a tool not in the allowlist | the tool is never offered or callable; `unlisted_tool` audit record; alert; server marked unavailable |
 | A16 | A pinned tool disappears from the server's list | server unavailable; alert; fallback |
 | A17 | Server certificate or key pin changes | connection refused; server unavailable |
-| A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key; (f) a tool entry without `output_schema_hash`, or any other missing required key; (g) a tool entry with a missing body (`description`, `input_schema` or `output_schema`); (h) a body whose hash does not match its `*_hash` key; (i) an unknown key inside a tool entry (as in (e)), or a body that is not an object; (j) an `in_process` body that differs from the registry (M2); (k) `description` over `max_description_bytes` or a schema over `max_schema_bytes`; (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e), (f), (g), (h), (i), (j), (k) reject the whole file |
+| A18 | (a) Server entry with `roles[]` or `teams[]` and no caller context; (b) tool entry with the same; (c) an empty array; (d) null; (e) an unknown key; (f) a tool entry without `output_schema_hash`, or any other missing required key; (g) a tool entry with a missing body (`description`, `input_schema` or `output_schema`); (h) a body whose hash does not match its `*_hash` key; (i) an unknown key inside a tool entry (as in (e)), or a body that is not an object; (j) an `in_process` body that differs from the registry (M2); (k) `description` over `max_description_bytes` or a schema over `max_schema_bytes`; (l) an unknown keyword inside the schema content of `input_schema` or `output_schema`; (an unset or unrecognized `RATIO_ENV` is refused at startup, see A20) | (a) server denied: not connected, not listed, not hash-checked; (b) tool denied: never offered or callable, its server still connected and listed, no `unlisted_tool` because an entry exists; (c), (d) deny; (e), (f), (g), (h), (i), (j), (k) reject the whole file; (l) is accepted and the hashes are unaffected |
 | A19 | A tool result carries a credential-shaped value (bearer token, `sk-`-style key, JWT, AWS key id) in an ordinary string field that passes the output schema | not delivered to the model; fixed error; audit `secret_in_result` without the value; with `on_secret: redact` only the value is replaced and the audit still records it. Includes: a URL value whose `?` tail contains a quote (the serialized form does not re-parse, so the result is rejected); under `on_secret: redact`, a key-only secret such as `{"password":"abc def"}` (the value is replaced whole and nothing leaks); a hit on a map key (rejected); a located non-string value (rejected) |
-| A20 | Environment check, with the slice that first tests each case. **M0** (raw environment, a broker `reload()` and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) `RATIO_ENV` changes at runtime without a reload (the snapshot of the last successful evaluation still governs, a documented residual), and a following `reload()` with the bad value refuses and latches; (h3) `reload()` re-reads the raw environment, clears a latch only if the evaluation succeeds, and updates last-seen; (h4) a reload concurrent with request traffic applies (no starvation); (i) the per-request check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails; (k) latched, then the environment is fixed, then a plain request; (l) two evaluations racing are serialized, a success cannot be discarded by a request-level observation, and generations are strictly monotonic and unique; (n) the environment changes during an evaluation, and the entry checks use the snapshot; (m1) start with `FRANK_TOOLS` off and a good environment, then observe it on; (m2) load with tools on and a bad environment (latched, last-seen on), environment fixed, then `FRANK_TOOLS` off with at least one request observed while off, then on, and the request after the on starts an evaluation; the same off-then-on cycle after a runtime `RATIO_ENV` change, when not latched, also starts one; (m3) `FRANK_TOOLS` unset at load (counted as off), then on; (o) `FRANK_TOOLS` parsing, fail-open direction: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (p) the lock wait times out; (q) N concurrent requests during a pending flip coalesce onto one evaluation (one `startup_refused` record, no retry loop); (r) an evaluation exceeding `evaluation_timeout_ms` (for example a hung audit write) is aborted, the latch is set, the lock is released and the next trigger retries; (r2) evaluation 1 hangs and times out, evaluation 2 fails and latches, then evaluation 1 completes late and must not clear the latch; (s) a flip observed after the running evaluation's snapshot read starts a new evaluation after the current one completes. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (h1) tools keep running under the old snapshot until the reload, which refuses; (h3) re-evaluates; (h4) the reload applies; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (k) still no tools until a load, a reload or an observed flip; (l) the evaluations run one after the other, the success stands, and the generations are 1, 2, 3, and so on; (n) the snapshot decides; (m1) tools are offered and the snapshot is stored; (m2) the evaluation runs and the latch clears; (m3) an evaluation runs and tools are offered; (o) only the documented value turns tools on; (p) no tools for that request, latch and snapshot unchanged, pending stays true, and the next request retries (not more often than `evaluation_retry_ms`); (q) one evaluation, one record, no loop; (r) fail closed with the latch set, then a retry; (r2) the late result is discarded and the latch holds; (s) a second evaluation runs and adopts the new value; (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
-| A21 | Request-body inspection for each adapter (Claude, OpenAI, Mistral and other OpenAI-compatible) | no vendor-side MCP connector parameter is ever sent; a mutant that adds one is killed |
+| A20 | Environment check, with the slice that first tests each case. **M0** (raw environment, a broker `reload()` and a broker option; no file parser): (b) raw `RATIO_ENV` unset; (c) raw `RATIO_ENV` an empty string; (d) an unrecognized value; (g) `FRANK_TOOLS` flipped on after start while the environment is bad; (h1) `RATIO_ENV` changes at runtime without a reload (the snapshot of the last successful evaluation still governs, a documented residual), and a following `reload()` with the bad value refuses and latches; (h3) `reload()` re-reads the raw environment, clears a latch only if the evaluation succeeds, and updates last-seen; (h4) a reload concurrent with request traffic applies (no starvation); (i) the per-request check cannot re-enable a latched refusal; (j) the `startup_refused` audit write fails; (k) latched, then the environment is fixed, then a plain request; (l) two evaluations racing are serialized, a success cannot be discarded by a request-level observation, and generations are strictly monotonic and unique; (n) the environment changes during an evaluation, and the entry checks use the snapshot; (m1) start with `FRANK_TOOLS` off and a good environment, then observe it on; (m2) load with tools on and a bad environment (latched, last-seen on), environment fixed, then `FRANK_TOOLS` off with at least one request observed while off, then on, and the request after the on starts an evaluation; the same off-then-on cycle after a runtime `RATIO_ENV` change, when not latched, also starts one; (m3) `FRANK_TOOLS` unset at load (counted as off), then on; (o) `FRANK_TOOLS` parsing, fail-open direction: `1`, `true`, `yes`, `enabled`, `onn` and an empty value are off, and only a trimmed, case-insensitive `on` (for example `on`, `ON`, ` On `) is on; (p) the lock wait times out; (q) N concurrent requests during a pending flip coalesce onto one evaluation (one `startup_refused` record, no retry loop); (r) an evaluation exceeding `evaluation_timeout_ms` (for example a hung audit write) is aborted, the latch is set, the lock is released and the next trigger retries; (r2) evaluation 1 hangs and times out, evaluation 2 fails and latches, then evaluation 1 completes late and must not clear the latch; (s) a flip observed after the running evaluation's snapshot read starts a new evaluation after the current one completes; (s2) `FRANK_TOOLS` is observed off during evaluation A (which has a snapshot of on), `RATIO_ENV` then changes to a bad value, A completes, and the operator sets on again; the joiner's evaluation times out on the lock once. **M2** (needs the file parser): (a) an entry with no `environments[]`; (e) a file whose `deployment_environment` mismatches the raw value; (f) a file with no `deployment_environment`; (h2) a reload with a file written for another environment | (b), (c), (d), (g) the broker refuses, offers no tools, writes `startup_refused`, and latches; (c) is not treated as `development`; (h1) tools keep running under the old snapshot until the reload, which refuses; (h3) re-evaluates; (h4) the reload applies; (i) tools stay off; (j) the refusal stands and a plain redacted log line is emitted; (k) still no tools until a load, a reload or an observed flip; (l) the evaluations run one after the other, the success stands, and the generations are 1, 2, 3, and so on; (n) the snapshot decides; (m1) tools are offered and the snapshot is stored; (m2) the evaluation runs and the latch clears; (m3) an evaluation runs and tools are offered; (o) only the documented value turns tools on; (p) no tools for that request, latch and snapshot unchanged, pending stays true, and the next request retries (not more often than `evaluation_retry_ms`); (q) one evaluation, one record, no loop; (r) fail closed with the latch set, then a retry; (r2) the late result is discarded and the latch holds; (s) a second evaluation runs and adopts the new value; (s2) A does not overwrite last-seen, so the later on is a flip, the new evaluation refuses and latches, and the timed-out joiner evaluation is retried; (a) available in the file's own environment; (e), (f), (h2) the whole file is rejected and the broker latches |
+| A21 | Per-adapter **closed-set** assertion (Claude, OpenAI, Mistral and other OpenAI-compatible), run with tools on and off over every registry and fixture tool. The test is an allowlist, not a denylist of parameter names. For the SDK adapters (Claude and OpenAI, `pages/api/v1/ai/chat.ts` near lines 100 and 134) it spies on the SDK create argument and the SDK method called; for the raw-fetch adapters (Mistral, Qwen, `openllm`) it intercepts `fetch`. It asserts, per adapter, a closed set of top-level body keys, of `tools[]` element shapes (function type only), of header names, of SDK options, the SDK method (no beta namespace) and the URL path | any key, header name, tool type, option, method or path outside the set fails the test; a mutant that adds any such element, not a named parameter, is killed |
 
 ### 8.3 Pass criteria
 
@@ -970,17 +977,19 @@ reserved-field deny rule: a mutant that deletes it, or that applies a
 tool-level deny to the server (or the reverse), must be killed by A18; the
 body and hash checks, where a mutant that offers the server's live text, or
 skips the body/hash comparison, must be killed by A3 (c) and A18 (g, h); one
-that skips the registry difference check, by A18 (j); one that skips the size
-caps, by A18 (k); one that applies an aborted evaluation's late result, by A20
-(r2); one that skips the per-turn token ceiling, the timeout or the per-minute
-cap, by A11 (b), (c) and (d); one that adds a vendor-side connector parameter,
-by A21; one that does not start a new evaluation for a flip observed after the
-running evaluation's snapshot, by A20 (s); the `FRANK_TOOLS` parser, where a
-mutant that treats any truthy value as on must be killed by A20 (o)), and
-confirm at least one test fails per mutation. A surviving mutant blocks the
-PR. The repository already treats unfaithful tests as defects elsewhere (see
-the test-integrity entries in the Slices 3-5 evidence); this applies the same
-standard here.
+that applies unknown-key rejection inside schema content, by A18 (l); one that
+skips the registry difference check, by A18 (j); one that skips the size caps,
+by A18 (k); one that applies an aborted evaluation's late result, by A20 (r2);
+one that skips the per-turn token ceiling, the timeout or the per-minute cap,
+by A11 (b), (c) and (d); one that adds any key, header, tool type or method
+outside the closed set, by A21; one that does not start a new evaluation for a
+flip observed after the running evaluation's snapshot, by A20 (s) and (s2);
+one that overwrites last-seen, or clears a newer flip's pending marker, on
+completion, by A20 (s2); the `FRANK_TOOLS` parser, where a mutant that treats
+any truthy value as on must be killed by A20 (o)), and confirm at least one
+test fails per mutation. A surviving mutant blocks the PR. The repository
+already treats unfaithful tests as defects elsewhere (see the test-integrity
+entries in the Slices 3-5 evidence); this applies the same standard here.
 
 ## 9. Slicing plan
 
@@ -1005,15 +1014,16 @@ by running the classifier on the real diff; a miss is reported, not argued.
   value in a tool result is rejected before model delivery; both halves,
   reject and redact, run in M0 against a fixture tool that the test registers
   through the broker's constructor, with `on_secret` passed as a broker
-  option; the fixture exists only in the test file and the allowlist is still
-  empty; parsing `on_secret` from the file is tested in M2), and the kill
-  switch (6.3).
-- **Change:** `callWithTools` on each adapter; the broker with an empty
-  allowlist, its call and turn caps, audit-before-return with fail-closed
-  behavior, the kill switch and the startup auth check; the raw-`RATIO_ENV`
-  check and latch (3.8 rule 0; the broker loads exactly one allowlist file,
-  and a `RATIO_ENV` such as `sandbox` or `prod` simply refuses tools until T-6
-  reconciles the vocabularies); `FRANK_TOOLS` flag.
+  option; the fixture exists only in the test file and there is no allowlist
+  file and no registered tool; parsing `on_secret` from the file is tested in
+  M2), and the kill switch (6.3).
+- **Change:** `callWithTools` on each adapter; the broker with no allowlist
+  file and no registered tools, its call and turn caps, audit-before-return
+  with fail-closed behavior, the kill switch and the startup auth check; the
+  raw-`RATIO_ENV` check and latch (3.8 rule 0; from M2 the broker loads
+  exactly one allowlist file, and a `RATIO_ENV` such as `sandbox` or `prod`
+  simply refuses tools until T-6 reconciles the vocabularies); `FRANK_TOOLS`
+  flag.
 - **Expected class:** restricted: `routes` (`pages/**`) and `network_egress`
   patterns on any added `fetch(` or URL literal. `auth_tenancy` applies only
   if a changed or new path matches `auth|tenant|rls|role` under `src/**` or
@@ -1030,20 +1040,22 @@ by running the classifier on the real diff; a miss is reported, not argued.
   provider in a scripted tool-calling mode; schema tests for every tool;
   A1 and A2 against in-process results; A5 and A6 with injected fixtures; A8
   and A9 across the whole catalog; an import-graph test that no tool module
-  imports a write path or a database writer. In-process tools are read-only
+  imports a write path or a database writer; M1 refuses a non-mock tenant; the
+  registry budget defaults and `on_secret: reject` are applied; the registry
+  hashes equal the committed constants. In-process tools are read-only
   **by construction** (pure functions over values handed in) and by that
   import-graph test, **not** by capability; the capability argument of 3.5
   applies from the first database-backed or remote tool.
 - **Data limit:** M1 runs only on the mock, synthetic seed data. It is never
   enabled against real data, and a live provider with tools is allowed on
   synthetic data only (OD-4).
-- **Change:** tools from the catalog that need no new data: portfolio
-  summary, workloads/teams, unit costs, token/cache economics, model price
-  comparison, findings (sandbox sources), what-if. Server-side snapshot
-  replaces browser `context` when tools are on. M1 has no allowlist file and
-  no parser (the allowlist stays empty or absent); the built-in registry is the
-  only source of the in-process tool bodies, and the `in_process` file shape
-  lands in M2.
+- **Change:** tools from the catalog that need no new data: portfolio summary,
+  workloads/teams, unit costs, token/cache economics, model price comparison,
+  findings (sandbox sources), what-if. Server-side snapshot replaces browser
+  `context` when tools are on. M1 has no allowlist file and no parser (there
+  is no allowlist file; the registry plus the broker option is the offered
+  set); the built-in registry is the only source of the in-process tool
+  bodies, and the `in_process` file shape lands in M2.
 - **Expected class:** restricted (`routes`, `financial_semantics` if it
   touches `src/costsource/**` or `src/lib/forecast*`).
 - **Rollback:** flag off, then revert.
@@ -1055,12 +1067,13 @@ by running the classifier on the real diff; a miss is reported, not argued.
 
 - **Tests first:** fake in-memory servers for A1-A4, A12, A15, A16 and A17
   (A5-A11, A13, A14, A19 and A20 (b, c, d, g, h1, h3, h4, i, j, k, l, m, n, o,
-  p, q, r, r2, s) re-run against the MCP path); A20 (a, e, f, h2) with the file
-  parser (`deployment_environment`, `environments[]`); allowlist parser tests
-  (reject unknown keys, missing hashes); A18 (server vs tool denial, empty
-  array, null, unknown key; bodies and hashes; the registry difference; the
-  size caps); the `on_secret` parser cases (valid values, default, unknown
-  value rejects the file); mutation checks (8.4); audit shape tests (including
+  p, q, r, r2, s) re-run against the MCP path); A20 (a, e, f, h2) with the
+  file parser (`deployment_environment`, `environments[]`); allowlist parser
+  tests (reject unknown keys, missing hashes); A18 (server vs tool denial,
+  empty array, null, unknown key; bodies and hashes; the registry difference;
+  the size caps; unknown keywords inside schema content are accepted); the
+  `on_secret` parser cases (valid values, default, unknown value rejects the
+  file); mutation checks (8.4); audit shape tests (including
   `secret_in_result` and the `redacted` flag); redaction applied to audit.
 - **Change:** MCP client (after OD-1 and the specification check in section
   2.5), allowlist loader, pins, budgets, audit, kill switches. Likely adds an
@@ -1159,8 +1172,8 @@ example "the model sees the allowlist's text, not the server's"), which are
 | OD-9 | Audit storage and retention period | log pipeline / table; period | Log pipeline for M2; the owner sets the period. |
 | OD-10 | Relationship to X1-a | this feeds X1-a / replaces it / separate | **Feeds X1-a:** same read-only scope, one agent layer. |
 | OD-11 | May any live model be enabled on the hosted demo? | yes / no | **No.** The hosted demo stays on the mock; any live provider is behind sign-in. |
-| OD-13 | May any vendor-side MCP connector (a vendor's cloud calling an MCP server directly) be allowed? | no / specific ones | **No, rejected by default (2.6).** Such a connector bypasses the broker's allowlist pinning, scope injection, secret scan and audit. If the owner wants specific ones, each needs its own review and a statement of what is lost. |
 | OD-12 | Production go-live of the agent | the owner's gate | Unchanged: the owner's non-delegable gate. Author-proposed preconditions: T-7 landed (identity and RBAC), M0-M3 merged, a model certified for the chosen path (OD-3), and the audit storage decided (OD-9). |
+| OD-13 | May any vendor-side MCP connector (a vendor's cloud calling an MCP server directly) be allowed? | no / specific ones | **No, rejected by default (2.6).** Such a connector bypasses the broker's allowlist pinning, scope injection, secret scan and audit. If the owner wants specific ones, each needs its own review and a statement of what is lost. |
 
 ## 11. Tracked items
 
