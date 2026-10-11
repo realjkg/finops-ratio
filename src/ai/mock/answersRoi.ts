@@ -2,7 +2,7 @@
 
 import { MODEL_QUALITY_NOTE } from '@/data/models';
 import { findModel } from '@/data/models';
-import { REALIZED_LINE, T, contextLine, ladder, short, workloadRow } from './answerKit';
+import { REALIZED_LINE, T, capRows, contextLine, ladder, short, workloadRow } from './answerKit';
 import {
   bySpendDesc, byValueDesc, extremes, membersOf, rankTeams, rollup, scopeLabel, scopeTitle, teamRows,
   type RankMetric,
@@ -34,7 +34,7 @@ export function roiAnswer(world: World, scope: Scope): Answer {
       );
   } else {
     body.push(scope.kind === 'portfolio' ? 'Workloads, ranked by value:' : 'Contributors, ranked by value:');
-    [...members].sort(byValueDesc).forEach((w, i) => body.push(workloadRow(i, w)));
+    body.push(...capRows([...members].sort(byValueDesc).map((w, i) => workloadRow(i, w))));
   }
 
   if (scope.kind === 'workload' && members[0]) {
@@ -49,7 +49,7 @@ export function roiAnswer(world: World, scope: Scope): Answer {
     const m = findModel(scope.model);
     if (m) {
       body.push(`Registry list price: ${price(m.pricing.input_per_1m)} in / ${price(m.pricing.output_per_1m)} out per 1M tokens.`);
-      const note = MODEL_QUALITY_NOTE[scope.model];
+      const note = Object.hasOwn(MODEL_QUALITY_NOTE, scope.model) ? MODEL_QUALITY_NOTE[scope.model] : undefined;
       if (note) body.push(`Seeded quality hint: ${note}.`);
     }
   }
@@ -93,14 +93,13 @@ export function teamRankAnswer(world: World, metric: RankMetric, ascending: bool
         : `${usd(lead.roll.spend)}/mo (${total.spend > 0 ? pct1((lead.roll.spend / total.spend) * 100) : 'n/a'} of ${usd(total.spend)} portfolio spend) at ${returnText(lead.roll.ratio)}${evid(lead.roll.evidence)} — ${lead.roll.members.length} workload(s)${top ? `; top workload ${top.name} at ${usd(top.monthlySpend)}/mo` : ''}.`,
     );
     body.push(`Teams ranked by ${metric === 'cost' ? 'monthly cost' : metric === 'roi' ? 'value ratio' : 'identified savings'}${ascending ? ' (lowest first)' : ''}:`);
-    rows.forEach((t, i) => {
+    const lines = rows.map((t, i) => {
       const share = total.spend > 0 ? ` (${pct1((t.roll.spend / total.spend) * 100)})` : '';
-      body.push(
-        metric === 'savings'
-          ? `${i + 1}. ${t.team} — ${usd(t.savings)}/mo identified · cost ${usd(t.roll.spend)}/mo · ${x(t.roll.ratio)} ${short(t.roll.evidence)}`
-          : `${i + 1}. ${t.team} — ${usd(t.roll.spend)}/mo${share} · ${returnText(t.roll.ratio)} ${short(t.roll.evidence)} · ${t.roll.members.length} workload(s)`,
-      );
+      return metric === 'savings'
+        ? `${i + 1}. ${t.team} — ${usd(t.savings)}/mo identified · cost ${usd(t.roll.spend)}/mo · ${x(t.roll.ratio)} ${short(t.roll.evidence)}`
+        : `${i + 1}. ${t.team} — ${usd(t.roll.spend)}/mo${share} · ${returnText(t.roll.ratio)} ${short(t.roll.evidence)} · ${t.roll.members.length} workload(s)`;
     });
+    body.push(...capRows(lines));
   } else {
     body.push('No teams are present in the data I was given.');
   }
@@ -132,7 +131,7 @@ export function costDriverAnswer(world: World, scope: Scope): Answer {
         '.',
     );
     body.push('Workloads, ranked by monthly cost:');
-    members.forEach((w, i) => body.push(workloadRow(i, w)));
+    body.push(...capRows(members.map((w, i) => workloadRow(i, w))));
   } else {
     body.push('No workloads are in this scope in the data I was given.');
   }

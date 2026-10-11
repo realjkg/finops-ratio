@@ -331,7 +331,7 @@ function isValidBody(
     context?: unknown;
   };
   if (!Array.isArray(messages) || messages.length === 0) return false;
-  if (messages.length > MAX_MESSAGES) return false;
+  if (messages.length > MAX_MESSAGES || !messages.every((m) => typeof m === 'object' && m !== null)) return false;
   if (typeof context !== 'object' || context === null) return false;
   const { initiatives, summary, asOf } = context as {
     initiatives?: unknown;
@@ -380,14 +380,14 @@ async function chatHandler(
     throw err; // unexpected — let the gateway convert to a 500 envelope.
   }
 
-  const systemPrompt = buildSystemPrompt(context);
+  const systemPrompt = adapter.provider === 'mock' ? /* mock sanitizes raw context itself */ '' : buildSystemPrompt(context);
   const userMessages = messages.filter((m) => m.role !== 'system');
 
   // A thrown LLM error propagates to the gateway, which returns a 500 envelope
   // with only the message (no stack trace).
   const text = await adapter.call(systemPrompt, userMessages);
   const initiativesReferenced = context.initiatives
-    .filter((i) => text.toLowerCase().includes(i.name.toLowerCase()))
+    .filter((i) => typeof i?.name === 'string' && text.toLowerCase().includes(i.name.toLowerCase()))
     .map((i) => i.id);
 
   res.status(200).json({

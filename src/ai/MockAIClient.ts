@@ -11,6 +11,8 @@ export class MockAIClient implements AIClient {
 
   async chat(messages: AIMessage[], context: AIContext): Promise<AIResponse> {
     await new Promise((resolve) => setTimeout(resolve, 280));
-    return respond(messages, context);
+    try { return respond(messages, context); } catch { // safety net: no malformed shape may surface as an error
+      return { message: { role: 'assistant', content: "I can't process that context." }, initiativesReferenced: [], provider: 'mock' };
+    }
   }
 }

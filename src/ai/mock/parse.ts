@@ -14,7 +14,7 @@ const MONEY = `(-)?\\s{0,2}\\$\\s{0,2}(-)?\\s{0,2}${NUM}\\s{0,2}${UNIT}?(?![a-z]
 const MULT: Record<string, number> = {
   k: 1e3, thousand: 1e3, m: 1e6, mm: 1e6, million: 1e6, b: 1e9, bn: 1e9, billion: 1e9,
 };
-export const MAX_ABS_USD = 1e15;
+const MAX_ABS_USD = 1e15;
 
 function toNumber(raw: string): number {
   return Number(raw.replace(/,/g, ''));
@@ -28,7 +28,7 @@ function moneyValue(g: (string | undefined)[]): number {
   return Number.isFinite(v) && Math.abs(v) <= MAX_ABS_USD ? v : Number.NaN;
 }
 
-export interface Found {
+interface Found {
   /** undefined = not mentioned. NaN-free: invalid values are reported in `ignored`. */
   value?: number;
   ignored?: string;
@@ -47,7 +47,7 @@ function firstMoney(text: string, pattern: string, label: string): Found {
 
 // ---------------------------------------------------------------- overrides
 
-export interface ParsedOverrides {
+interface ParsedOverrides {
   overrides: Overrides;
   /** Human-readable notes for every override that was refused. */
   ignored: string[];
