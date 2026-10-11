@@ -63,6 +63,34 @@ describe('M1 prototype-key wire strings never crash', () => {
   });
 });
 
+describe('malformed wire shapes never 500 and never reach a renderer', () => {
+  const LEGACY_Q = ['Which initiatives are at risk?', "What's driving cloud cost?", 'How much can we save?', 'Summarize the portfolio', 'What is the ROI of the portfolio?'];
+  const deepObj = (n: number): unknown => { let o: unknown = {}; for (let k = 0; k < n; k++) o = { o }; return o; };
+  const SHAPES: [string, (c: Record<string, unknown>) => void][] = [
+    ['initiatives [null]', (c) => { c.initiatives = [null]; }],
+    ['initiatives [1, "x", []]', (c) => { c.initiatives = [1, 'x', []]; }],
+    ['workloads [null]', (c) => { c.workloads = [null, 2]; }],
+    ['initiative without valueRatio', (c) => { delete (c.initiatives as Record<string, unknown>[])[0].valueRatio; }],
+    ['initiative with null status and name', (c) => { Object.assign((c.initiatives as Record<string, unknown>[])[0], { status: null, name: null }); }],
+    ['12,000-deep nesting', (c) => { Object.assign((c.initiatives as Record<string, unknown>[])[0], { extra: deepObj(12000) }); }],
+    ['summary null', (c) => { c.summary = null; }],
+    ['workloads a string', (c) => { c.workloads = 'x'; }],
+  ];
+  it.each(SHAPES)('%s', async (_n, mut) => {
+    const c = structuredClone(CTX) as unknown as Record<string, unknown>;
+    mut(c);
+    for (const q of LEGACY_Q) {
+      const r = await viaRoute(c as unknown as AIContext, q);
+      expect(r.status, q).toBe(200);
+      expect(r.text, q).not.toMatch(BAD);
+    }
+  });
+  it('an omitted malformed entry is listed in the note', async () => {
+    const r = await viaRoute(mod((c) => { (c as unknown as Record<string, unknown>).initiatives = [null, ...c.initiatives]; }), 'Summarize the portfolio');
+    expect(r.text).toMatch(/1 malformed[^\n]*ignored/);
+  });
+});
+
 describe('M2 impossible headlines carry a warning, uncapped', () => {
   it('migration saving above the seeded run-rate (Fraud Triage Agent)', async () => {
     const o = migrate([wl('wl-fraud')]);
