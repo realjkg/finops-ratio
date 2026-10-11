@@ -55,18 +55,22 @@ for:
   vendor's forecast. AWS states the interval level (80 %), not its
   empirical coverage.
 
-So "at par" is defined by **capabilities** (DESIGN §1.5), and the numeric
+So the baseline, the capabilities the cited tools commonly offer, is defined by
+**capabilities** (DESIGN §1.5, the baseline checklist), and the numeric
 targets in DESIGN §3.10 and §4.9 are Ratio's own, measured on synthetic
 ground truth. The only external numeric yardstick for accuracy is the
 FinOps Foundation's variance guidance (A16), which is about budget-level
-forecasts, not daily series.
+forecasts, not daily series. The baseline is the precondition for Ratio's
+goal, not the goal itself: the goal is differentiation (DESIGN §1.8,
+revision 36).
 
 ## Statements in DESIGN.md that depend on these sources
 
 | DESIGN section | Depends on |
 |---|---|
 | §1.4 reference table | A1–A19 |
-| §1.5 parity checklists | A1, A3, A4–A9, A10, A13, A14, A17 |
+| §1.5 baseline checklists | A1, A3, A4–A9, A10, A13, A14, A17 |
+| §1.8 differentiation (rev. 36) | none. Product names there come from the repository's code and README or from the owner's words; no vendor capability is relied on. NVIDIA DCGM is named only as a candidate mechanism, marked **(unverified)** |
 | §2.1, §2.3, §2.4, §4.1 (FOCUS semantics) | A20 |
 | §2.9 (no materialised views), PR 4-2 (`pg_input_is_valid`) | A21 |
 | §3.2–§3.6, §4.2 (methods) | A22 |

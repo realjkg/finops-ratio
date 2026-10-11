@@ -7,7 +7,11 @@ not pushed by the design agent; from revision 5 the branch is on
 ordinary commits and plain pushes (never a force-push). PR #70 was merged
 at revision 27 (`28f8970`; merge commit `f35c383` on `main`). Revision 28
 is a follow-up PR on `design/slice-3-5-followups`, branched from
-`origin/main` at `f35c383`, under the same rules.
+`origin/main` at `f35c383`, under the same rules. The owner's correction
+of the goal (§6) is revision 36, on `design/goal-differentiation`
+(PR #91), branched from the same base and merged with `origin/main`
+at `895e952`; the commits that follow its merge are follow-ups within
+revision 36, not new revisions.
 
 ## 1. Revisions
 
@@ -48,6 +52,7 @@ is a follow-up PR on `design/slice-3-5-followups`, branched from
 | 33 (follow-up to merged #70) | `8bee00e` | The challenger's REQUEST CHANGES on revision 32 (1 Medium, 1 Low, 1 nit), §3ah: a renewing overlapping-readers case that kills the in-transaction-renewal mutant; `LEASE_RETRY`, a retryable code for a live lease that stays short under contention, with `LEASE_LOST` kept for a lease that is not live; the TTL minimum cited from `config.ts:231`. |
 | 34 (follow-up to merged #70) | `644d1aa` | Copilot's review 5408520252 of 66205dd (2 Medium, both still open at 8bee00e), §3ai: a renewal-to-lock slack s = max(250 ms, TTL / 100), admitting only `b + m + s ≤ TTL` (largest budget 267 s at the default), so a maximal budget passes and `LEASE_RETRY` cannot loop on a budget that does not fit; `analytics_runs.export_files_state`, so a pass reads a constant number of directories instead of every historical backtest's, with staging moved to `backtest/.staging/`. |
 | 35 (follow-up to merged #70) | this revision | Copilot's review 5408560003 of 644d1aa (1 Medium, 1 Low) and the challenger's three Lows and nit on revisions 33–34 (APPROVED, 0 High, 0 Medium), §3aj: a backtest with no directory is marked cleaned instead of retried forever; the renewal-trigger wording; `LEASE_RETRY` counted as no progress, so starvation ends in `LEASE_STALLED` after `stallTimeoutSeconds`; a 100 ms injected delay with a retry-tolerant assertion; the tests that kill the no-slack mutant. |
+| 36 | branch `design/goal-differentiation` (after #71 merged) | The owner's correction of the goal (§6): differentiation, not parity. Goal paragraph, §0 (baseline-coverage statement and differentiation status), §1.5 (baseline checklist) and three goal phrases reworded; §1.8 (differentiation) and open owner decisions OD-1 to OD-3 added. No target, figure or script changed. |
 
 ## 2. Governance wording: reverted
 
@@ -970,3 +975,190 @@ above.
 That is the correct classification for this content; the PR goes through
 the restricted exception path. (Revision 2 at `461fbc2` classified `low`
 only because of the wording reverted in §2.)
+
+## 6. Revision 36: the owner's correction of the goal
+
+**The correction (2026-10-04).** PR #70 stated the goal as making FinOps
+Ratio "at par with today's FinOps tools". The owner:
+
+> "On PR#70, it listed we want to be at par with other FinOps tools, but
+> that's not the intent. The intent is differentiation, with an Agentic
+> interface and capabilities for private cloud and hybrid estates."
+
+Two clarifications followed, both used in DESIGN §1.8:
+
+> "We already had an MVP with an agentic interface, with Ratio, but that
+> was never advanced into product depth of coded capability and
+> end-to-end."
+
+> "Private cloud is enabled through connectors to Nutanix, MCP and others,
+> ie. Azure Local, Nvidia tracing local consumption."
+
+**What changed** (documents only):
+
+| File | Section | Change |
+|---|---|---|
+| DESIGN.md | header | Revision 36 noted |
+| DESIGN.md | Owner's goal | Restated: differentiation (agentic interface; private cloud and hybrid); the 15,000-account forecasting and detection are the baseline capabilities; dated correction note with the owner's words |
+| DESIGN.md | How to read this | Rows 0, 1 and 8 describe the new content |
+| DESIGN.md | §0 | "Parity statement" renamed **baseline-coverage statement**, every qualifier kept (notification delivery, D-15 partial lifecycle, idealised `fleet15k` arrival, "validate the implementation, not real-world parity"); **differentiation status** added |
+| DESIGN.md | §0 `fleet15k` bullet; §2.8 profile table; §3.2 calendar component | "proves the owner's goal" → "proves the baseline at the owner's scale"; "(the owner's goal)" → "(the baseline at the owner's scale)"; "a tool at par" → "a credible FinOps tool" |
+| DESIGN.md | §1.5 | Retitled **baseline checklist**; "P0 = required baseline"; P0/P1/P2 tables unchanged |
+| DESIGN.md | §1.8 (new) | D-x1 and D-x2: meaning, what the repository has (first checked on `origin/main` at f35c383, re-checked at 895e952 below), the gap after Slices 3–5, hybrid behaviours (assumptions), candidate follow-on slices X1-a … X1-d and X2-a … X2-d (all proposed) |
+| DESIGN.md | §8 | **Open owner decisions** OD-1 (hybrid sources in the synthetic estate now or later), OD-2 (A-k or another agentic capability earlier), OD-3 (order of the differentiators), each with a recommendation and left open |
+| APPENDIX_A_EXTERNAL_TOOLS.md | "What is not published"; dependency table | "at par" → the baseline; "§1.5 parity checklists" → "§1.5 baseline checklists"; a §1.8 row (no external claim relied on) |
+| DESIGN.md | §0 agentic bullet; §1.8 (rows for use cases, Frank workflow, repository facts re-checked); §8 OD-1 | Brought in line with `origin/main` at 895e952 (below); "approved over 27 revisions" → 35 |
+| EVIDENCE.md | §1, §6 | Revision 36 row; this section |
+
+**Mentions of parity left as they are.** Where "parity" names a specific
+capability or comparison, not the goal: "lifecycle parity (A-g)" in §0,
+§4.6, D-15 and the known limits; "real-world parity" in §0; "parity with a
+vendor's forecast on real bills" in §3.10. This file's history (M4, M12,
+r4178656766) records earlier revisions and is not rewritten.
+
+**What did not change.** No numeric target, threshold, acceptance
+criterion, sizing figure, decision (D-01 … D-24) or script. A-k stays P2
+in §1.5, and the scope and plan of Slices 3–5 (§7) are unchanged; the
+scope questions are OD-1 to OD-3. `APPENDIX_B_SIZING.md`,
+`APPENDIX_C_GROUND_TRUTH.md` and `APPENDIX_D_SCHEMA_SKETCH.md` are
+byte-identical to `origin/main`. The 13 scripts embedded in Appendix B,
+re-hashed from the appendix text, match their 13 recorded SHA-256 values.
+
+**Renumbering.** This correction was first written as revision 28, before
+PR #71 merged. Main's revisions 28–35 (PR #71) are a different change, so
+the correction is **revision 36**. Renumbered: the DESIGN header, the
+"How to read this" row 8, §0's two labels, the headings of §1.8 and of the
+open owner decisions, APPENDIX_A's two mentions, EVIDENCE §1's row, this
+heading and the table rows above. Mentions of the real revision 28 (the
+sizing re-run, the retention functions' run rules, the revision rows of
+#71) were not touched. Main's text was not changed: against `origin/main`
+this file only adds lines.
+
+**Merge.** `origin/main` (895e952) was merged into the branch. The one
+conflict was §1's revision table: both sides were kept, main's rows for
+revisions 27–35 unchanged and the revision-36 row added after them. (The
+branch had changed the revision-27 row's commit cell; main's version won.)
+
+**Repository facts checked for §1.8**, again on `origin/main` at
+895e952 (main moved from f35c383 with PRs #71–#89, the merges listed by `git log --merges f35c383..895e952`). DESIGN §1.8's table
+"Repository facts re-checked" lists each; the result:
+- `src/ai/` and `pages/api/v1/ai/chat.ts` still make no tool or function
+  call (no tool-call code in either). **Changed:** the persona is now
+  "Frank Coster" and cited ratios carry an evidence status.
+- **Changed:** a simulation-only deterministic engine,
+  `src/agent-workflows/` and `src/simulation/`, with
+  `pages/api/v1/simulation/chat.ts` and `frank.ts`, has one bounded
+  server-side tool (`reviewWithFrank` in `engine.ts`) that drafts persisted
+  review tasks. It uses no model inference and takes no provider or cloud
+  action (`docs/evidence/frank-coster-interface.md`). The first draft of
+  this correction said the agent "takes no actions" and that §1.8's agent
+  "answers only"; that is now true only of the LLM chat agent, and DESIGN
+  §0 and §1.8 were corrected.
+- `src/mission/adjustmentGate.ts` is unchanged.
+- `src/ingest/focus/provider.ts` is unchanged: `aws-data-exports` allows
+  `AWS`; `fake` allows none; the synthetic names only under #62's opt-in.
+  `src/ingest/worker/sourceFactory.ts` still refuses any kind other than
+  `focus_file` and `fake`.
+- `src/costsource/kubernetesConfig.ts` (`private_cloud`),
+  `nutanixConfig.ts` (`on_prem`), `AWS_S3_ENDPOINT` in
+  `cloudConnectorConfig.ts`, and `PointFiveMcpTransport.ts` (MCP, PointFive
+  only, scaffolding) are unchanged. New on main:
+  `ServiceNowAdapter.ts`, a synthetic demo source, not a private-cloud
+  source. Nothing under `src/` names Azure Local, Azure Stack, HCI, NVIDIA
+  or DCGM (grep).
+- **Changed:** the use case "cost attribution by user id without tagging"
+  has foundations on seed data (`src/attribution/`, a mock-backed route,
+  `allocateSharedCost` as a pure function with no production caller, and
+  migration `0002_cost_attribution`'s schema); no operational allocation
+  path.
+- **Found, not fixed here:** the migration numbers. On main,
+  `0002_cost_attribution` and `0004_outcome_ledger` exist, and 0003 and
+  0005 are reserved for other slices: `0004_outcome_ledger.up.sql` line 25
+  says "the consumption ledger is migration 0003 and may not exist yet",
+  line 173 "the consumption tables are migration 0003's", and
+  `src/ingest/db/foundation.db.test.ts:23` says "real 0003–0005 land with
+  the consumption/outcome/economics slices". So 0002–0005 are all taken or
+  reserved. This design's migrations (4-3 "Migration 0003", 5-1 "Migration
+  0004") cannot keep their numbers, and renumbering them to 0003 or 0005
+  would collide again; they must move past the economics slice's number
+  (0006 or later, or a number the owner coordinates). Until then D-07
+  ("0002–0004 as expand migrations") and Appendix D's header ("migrations
+  0002–0004"; DESIGN's how-to-read row for Appendix D) cannot be satisfied.
+  The renumbering touches about 20 DESIGN lines and 9 Appendix D lines
+  (counted on main), plus the `REVIEWED_TRIGGERS` and privilege-model
+  counts built on them, and must be done before PR 4-1. It edits revisions
+  1–35 and Appendix D, so it is not done in this PR. It changes no target,
+  figure or script.
+
+**Consistency checks.** Section numbering of this file after the merge:
+§1, §2, §3 … §3aj, §4, §5, §6, in order and without duplicates. Revision
+rows 1–36 are in order. Remaining "parity" mentions in DESIGN are
+capability-specific ("lifecycle parity (A-g)", "parity with a vendor's
+forecast", "real-world parity") or quote the history (§1.5's note);
+none says parity is the program's goal. DESIGN's "approved over 27
+revisions" in OD-1 now reads 35.
+
+**Governance classification and the GitHub patch.** `node scripts/governance/classify-risk.mjs --git
+origin/main...HEAD` on the merge commit (7575fcf) gives `"risk":
+"restricted"`, class `retention` only, two `retention.mention` reasons:
+- on `DESIGN.md`: §0's differentiation status names the reviewed
+  retention functions (D-12) as a governance trait;
+- on this file: the revision-35 and revision-36 rows and these paragraphs
+  mention retention or quote the rule.
+
+The class list is the same as for the branch before the merge (`retention`
+only); the merge added no `secrets` reason, because the added lines of
+this PR contain no secret-like line. The wording was not shaped to avoid
+any match (§2). The PR goes through the restricted exception path.
+
+**GitHub governance report (observed on PR #91 at `88e3b1c`).** `Restricted
+classes: retention`; rows `docs/design/slice-3-5/DESIGN.md | retention |
+retention.mention` and `docs/design/slice-3-5/EVIDENCE.md | retention |
+retention.mention`. There is no `unclassified` / `diff-unavailable` row:
+the API returned `DESIGN.md`'s patch for this PR, so the report matches the
+local verdict above. (An earlier draft of this paragraph expected a missing
+patch from the file's size; that was wrong for this PR. §5 describes #70
+and #71 and is unchanged.)
+
+**Follow-up within revision 36 (challenger's REQUEST CHANGES on `88e3b1c`).**
+No new revision number: the correction stays "revision 36" and the commit
+after `88e3b1c` is a follow-up within it, since the design's text beyond
+the correction is unchanged. It sources the owner's statements (below),
+states the migration problem in full (above), softens "MCP is the
+connector protocol the owner names" to "lists MCP among the connectors",
+corrects the PR range, and (Copilot review 5481233360) says "capabilities the cited tools commonly offer" instead of "every FinOps tool", describes attribution and allocation as foundations (verified: no production caller of `allocateSharedCost`, `/api/attribution` creates the mock client, migration 0002 applies no rule), qualifies the optional FinIO peer token and the unvalidated Nutanix/Kubernetes endpoint scheme, records the observed governance report, drops "backdoor" from OD-1 (the synthetic opt-in in
+`src/ingest/focus/provider.ts` could be extended by a policy change the
+owner decides), marks vendor-shaped descriptions as assumptions, and words
+§0's differentiation status as attributes of the design.
+
+### Sources of the owner's statements
+
+The owner's statements are quoted in DESIGN from two messages that the
+owner sent to the orchestrator session on 2026-10-04. **Neither message is
+in the repository**; they are saved outside it. The first (vision message),
+verbatim in the parts DESIGN relies on:
+
+> "platform, development, IT and engineering all need AI that they can
+> control."
+
+> "Each production account can train on its own dailies, keeping the token
+> and cache consumption and the learning inside the production accounts."
+
+> "That means AI can help with: → Missing anomalies → Cost alerts →
+> focusing on recommending replacements based on mapping to consumption
+> patterns → Cost budgeting consistency → Cost attribution to consumer
+> account by user id (no tagging required), so this doesn't matter if cost
+> center is global or IT/engineering → Cost alerting - automated when
+> hitting a certain budget based threshold for account user awareness →
+> Email/SMS and Slack alerting with integration to OpenOps, and other
+> messaging capable platforms"
+
+> "But the creative judgment stays with the FinOps and Finance teams."
+
+The second message is the correction of the goal and the two clarifications
+quoted at the start of this section. "A model endpoint adapted on the
+account's own data" (DESIGN §1.8, item 5) is the author's design reading of
+the owner's "train on its own dailies", not the owner's wording. The
+message also contains the owner's remarks about building on Databricks
+with a proprietary dataset; DESIGN does not discuss that point and takes
+no position on it.
