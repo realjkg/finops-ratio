@@ -10,7 +10,7 @@ lists how the facts and the merged-card records were checked.
 
 ## Status and next slices
 
-Checked against `origin/main` at `8ce4f73` on 2026-10-12.
+Checked against `origin/main` at `b6957ac` on 2026-10-12.
 
 | Card or slice | State |
 |---|---|
@@ -23,7 +23,7 @@ Checked against `origin/main` at `8ce4f73` on 2026-10-12.
 | A7 money sign and favicon | Merged, #109 (`a3c1437`); follow-up #111 (`e184a44`) |
 | A8 sign-in link, findings header, `/demo` prompts | Merged, #110 (`8ce4f73`) |
 | Outside the cards, merged | Frank mock analytics #99 and its hardening #102 (`a90dda5`); Frank MCP design revisions #101 (`0ace878`); AI-spend-versus-total ratio card #112 (`c95be35`); UI theme slice T1 #113 (`145565f`) |
-| Sprint A2, C and D cards | Not started. B1, B6 and B8 have all their dependencies merged; B4 and B5 wait for A4 and A5 (and D15); B7 waits for A8; the rest wait on earlier waves |
+| Sprint A2, C and D cards | Not started. B1, B6 and B8 have all their dependencies merged; B4 and B5 wait for A4 and A5 (and D15); B7 has A8 merged; the rest wait on earlier waves |
 
 **Pending owner decision D15 (MVP re-scope).** The recommendation is in PLAN
 section 8. Nothing below is re-scoped until the owner decides.
@@ -33,12 +33,21 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
 
 - Connector correctness, C1 to C5. C1 merged as #114 (`6f37afd`): FOCUS
   normalization by the specification's column history, with documented-format
-  fixtures in `fixtures/connector-formats/`. C3 is open as the simulated
-  connector cards PR: anonymous `/connectors` visitors get a labeled simulation
-  over those fixtures for the live connector ids instead of a 401 banner with
-  Retry (server policy unchanged). The live targets for Nutanix, Kubernetes
-  (OpenCost core has no FOCUS export) and PointFive remain unverified; their
-  simulated cards use illustrative payloads labeled "format not verified".
+  fixtures in `fixtures/connector-formats/`. C3 merged as #115 (`b6957ac`):
+  anonymous `/connectors` visitors get a labeled simulation over those fixtures
+  for the live connector ids instead of a 401 banner with Retry (server policy
+  unchanged). The live targets for Nutanix, Kubernetes (OpenCost core has no
+  FOCUS export) and PointFive remain unverified; their simulated cards use
+  illustrative payloads labeled "format not verified".
+- Workload attribution from cost-row tags (in this series): a non-simulated
+  row whose `Tags` column holds `ratio:workload` equal to the id of a loaded
+  workload resolves to it when `ResourceId` carries no workload identity
+  (`WORKLOAD_TAG_KEY` in `src/costsource/normalize.ts`; the key is exact and
+  case-sensitive, the value is trimmed, duplicate keys in a JSON string resolve
+  last-wins). An explicit `arn:ratio:workload/` ResourceId is never replaced by
+  a tag, even when it names an unloaded workload. Simulated rows (`synthetic:`
+  ResourceId) and unknown or malformed values stay unresolved. Only direct
+  ingest keeps `Tags`; the connector path drops it.
 - UI themes, T1 to T4: T1 token layer, built-in themes, contrast engine and
   validator (merged, #113); T2 theme switcher and user themes; T3 typography
   settings; T4 inline colors moved onto tokens, with a guard test.
@@ -370,7 +379,7 @@ A card that needs a file it does not own stops and records the need on the card
 
 ### A8. Demo fixes: dead link, findings header, `/demo` prompts
 
-- **Status.** Open, #110. It also carries this plan (folded from the closed
+- **Status. Merged** in #110 (`8ce4f73`). It also carried this plan (folded from the closed
   docs-only #100).
 - **Goal.** (a) Hide "Customer sign-in simulation" when the simulation is
   disabled (`access.enabled` is false). (b) Name the actual source in the
