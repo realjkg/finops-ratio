@@ -1,6 +1,7 @@
 # GREEN: same tests after the fix (main 9024bc1 + this branch)
  Test Files  4 passed (4)
       Tests  8 passed (8)
-# full suite: npx vitest run -> Test Files 193 passed (193); Tests 3576 passed (3576) (main: 190 files, 3570 tests, 1 timeout flake)
+# full suite: npx vitest run -> Test Files 193 passed (193); Tests 3577 passed (3577) (main: 190 files, 3570 tests, 1 timeout flake)
 # mutation checks (each reverted after): liveCount counts sandbox -> 2 failed; link removed -> 1 failed; hard-coded stamp date -> 1 failed; '(live)' label restored -> 1 failed; 'Active' heading restored -> 1 failed
 # tsc, eslint, next build, check:bundle pass; simulation:test 11 passed with chromium-1194 and with chromium_headless_shell-1194
+# ROUND 2 (M-1): subtitle test passes; full vitest 193 files / 3577 tests pass; tsc, eslint clean; build/bundle/simulation re-run (see PR body)
