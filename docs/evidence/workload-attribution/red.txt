@@ -1,0 +1,6 @@
+$ npx vitest run src/costsource/tagAttribution.test.ts   (review-fix tests against the previous head's normalize.ts)
+ FAIL  never replaces an explicit ResourceId identity, loaded or not
+ FAIL  trims values, ignores inherited keys, and takes the last duplicate key
+ Test Files  1 failed (1)
+      Tests  2 failed | 5 passed (7)
+(first round, against origin/main normalize.ts: 3 failed, 2 passed (guards) of 5)

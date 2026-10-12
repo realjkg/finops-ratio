@@ -22,7 +22,7 @@ import { connectorDescriptor, resolveConnectorStatus } from './connectorConfig';
 import { FOCUS_EXPORT_CONNECTOR_SPECS } from './focusExportConnectors';
 import { SYNTHETIC_CLOUD_DESCRIPTORS } from './sandboxSources';
 
-const RESOURCE_PREFIX = 'arn:ratio:workload/';
+export const RESOURCE_PREFIX = 'arn:ratio:workload/';
 
 /** FOCUS ResourceId carrying the Ratio workload identity (resolved on ingest). */
 export function resourceIdFor(workloadId: string): string {
