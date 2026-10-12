@@ -235,7 +235,7 @@ export function ConnectorCard({
           <ul className="flex flex-wrap gap-1">
             {missing.map((name) => (
               <li key={name}>
-                <code className="rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] text-txt">{name}</code>
+                <code className="break-all rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] text-txt">{name}</code>
               </li>
             ))}
           </ul>

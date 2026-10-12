@@ -67,7 +67,8 @@ export function NavBar({
         })}
       </div>
 
-      <div className="col-start-2 row-start-1 ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 md:col-auto md:row-auto">
+      {/* md:[&>div:first-child]:static: ThemeMenu's own md:relative would anchor its panel to the wrapping button group; anchoring both panels to the nav keeps them inside the viewport. */}
+      <div className="col-start-2 row-start-1 ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 md:col-auto md:row-auto md:[&>div:first-child]:static">
       <ThemeMenu />
       <TypographyMenu />
       {/* Single agent launcher — purple AI token, reserved warm accent untouched. */}

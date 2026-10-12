@@ -131,7 +131,7 @@ export function PredictionPage() {
 
       {/* Controls */}
       <section className="mb-6 flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1">
+        <label className="flex min-w-0 max-w-full flex-col gap-1">
           <span className="text-[11px] text-dim">Mode</span>
           <select
             className="rounded-md border border-edge bg-slab px-2 py-1"
@@ -142,7 +142,7 @@ export function PredictionPage() {
             <option value="live">live (/api)</option>
           </select>
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex min-w-0 max-w-full flex-col gap-1">
           <span className="text-[11px] text-dim">Mission</span>
           <select
             className="rounded-md border border-edge bg-slab px-2 py-1"
@@ -156,7 +156,7 @@ export function PredictionPage() {
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex min-w-0 max-w-full flex-col gap-1">
           <span className="text-[11px] text-dim">Proposed change</span>
           <select
             className="rounded-md border border-edge bg-slab px-2 py-1"

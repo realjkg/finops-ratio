@@ -17,3 +17,9 @@ footer at /workloads, 390 px, 130% measured 375 px (default family) and 458 px (
 Round 4 (review: 130% widened the page at 320-360 and 768 px). Spec widths 320, 360, 768, 1024 added before the fix; on round-3 code 4 of 8 cases failed:
   320, 360  "page scrolls horizontally" on every route (Theme + Text + Ask Frank row grew to 371 px; Ask Frank cut off); 320 also "scrolls horizontally: main" on /connectors
   768, 1024 overlap of nav links with the Theme label (the md top bar did not fit)
+
+Round 5 (CI `acceptance` failed on the Playwright headless shell; review: panels off-screen, sideways scroll outside the guard). Spec now includes /outcomes and /prediction
+and a test that opens the Theme editor and Text panel at 130% and 115% across 320..1024 px. Run on the headless shell against round-4 code, 5 of 9 cases failed:
+  /connectors 320: "scrolls horizontally: main" (unbreakable env-var chip, headless shell rendering)
+  /outcomes 320, 360, 390: "scrolls horizontally" (Workload detail link row); /prediction 320: "scrolls horizontally: main" (Proposed change select)
+  panels: #theme-editor spans x < 0 at 768 px / 130% (anchored to the button group, not the nav)

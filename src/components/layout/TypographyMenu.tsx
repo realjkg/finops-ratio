@@ -19,7 +19,7 @@ export function TypographyMenu() {
   };
 
   return (
-    <div className="md:relative">
+    <div>
       <button type="button" className={btn} aria-expanded={open} aria-controls="typography-panel" onClick={() => setOpen(!open)}>Text</button>
       <div className="absolute inset-x-2 top-full z-40 mt-1 text-xs text-txt md:inset-x-auto md:right-0 md:w-72">
         <p id="typography-status" role="status" className={note ? 'rounded border border-edge bg-slab p-2' : ''}>{note}</p>

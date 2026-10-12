@@ -1,4 +1,4 @@
-GREEN, round 4, branch feat/ui-typography merged with origin/main 9024bc1 (production build, Chromium)
+GREEN, round 5, branch feat/ui-typography merged with origin/main 9024bc1 (production build, Chromium)
 tsc 0 errors; eslint clean; vitest 191 files / 3572 tests; next build OK; check:bundle pass;
 Playwright simulation suite on a production build: 15 passed (customer 4, outcomes 2, theme-mobile 3, typography-layout 4, z-agent 1, zz-frank 1).
 
@@ -29,3 +29,8 @@ Guard run: 4 cases pass, including /workloads with the phone alerts collapsed (h
 Round 4: NavBar controls row wraps (min-w-0, flex-wrap, justify-end) and the md bar grows to two rows instead of overflowing (min-h-10, flex-wrap);
 ConnectorCard note breaks long tokens (a 2 px sideways scroll at 320 px). Guard now runs 8 cases (1440/390 default and system-mono, 320, 360, 768, 1024 default): all pass.
 One-off matrix (not committed): 130%, 115% and 100% x 320, 340, 360, 375, 390, 430, 767, 768, 1024, 1440 px, all routes: 30 of 30 passed.
+
+Round 5: env-var chip breaks anywhere; /outcomes link row wraps; /prediction labels shrink to the pane; Theme and Text panels anchor to the nav (not the button group),
+so they stay inside the viewport. Guard: 6 routes x 8 cases plus the panel test (9 cases) pass on the full Chromium AND the headless shell used by CI.
+Mutations (headless shell, all caught): chip without break-all; /outcomes nav without wrap; /prediction labels uncapped; panels anchored to the button group again
+(theme-editor x = -151.75 at 768 px / 130%).
