@@ -1,12 +1,13 @@
-# GREEN
-$ npx vitest run src/connectors/simulatedConnectors.dom.test.tsx src/costsource/simulatedConnectorClient.test.ts src/costsource/sandboxAllowlist.test.ts
- Test Files  3 passed (3)
-      Tests  19 passed (19)
+# GREEN (after the review round)
+$ npx vitest run src/connectors/simulatedConnectors.dom.test.tsx src/connectors/simulatedProvenance.dom.test.tsx src/costsource/simulatedConnectorClient.test.ts src/costsource/sandboxAllowlist.test.ts
+ Test Files  4 passed (4)
+      Tests  24 passed (24)
 $ npx vitest run (full suite)
-      Test Files  184 passed (184)
-      Tests  3485 passed (3485)
+      Test Files  185 passed (185)
+      Tests  3490 passed (3490)
 typecheck: pass; lint: pass; next build: pass; check:bundle: pass (clientFiles 134, problems [])
 sandboxAllowlist.test.ts (six ids) untouched and passing
+Note: the provenance test now mounts FindingsPage/AttributionPage on the client (SSR reads the store's initial state).
 
 # Mutation spot checks (each reverted after the run)
 M1 route every card back to the live client (pages/connectors.tsx: simulated = false)
@@ -20,3 +21,16 @@ M3 claim Nutanix is verified (SimulatedConnectorClient.ts)
  FAIL  src/connectors/simulatedConnectors.dom.test.tsx > non-sandbox cards are simulated: chip, note, Simulate connect, no auth banner or Retry
  FAIL  src/costsource/simulatedConnectorClient.test.ts > nutanix: illustrative payload goes through the real adapter and stays unverified
       Tests  2 failed | 11 passed (13)
+M4 isLiveDataRefusal always true (ingestLanding.ts)
+ FAIL  src/connectors/simulatedProvenance.dom.test.tsx > a plain Error stays an error with Retry; only LiveDataAuthError locks (connect and ingest)
+      Tests  1 failed | 17 passed (18)
+M5 drop the simulated run marker (useStore.ts)
+ FAIL  src/connectors/simulatedProvenance.dom.test.tsx > the run itself is marked simulated, so Findings, Attribution and the workload card all say so
+      Tests  1 failed | 17 passed (18)
+M6 put a simulated row back on the Ratio workload prefix (simulatedFixtures.ts)
+ FAIL  src/costsource/simulatedConnectorClient.test.ts > no simulated row or finding resolves to a Ratio workload (they land honestly unresolved)
+      Tests  1 failed | 17 passed (18)
+M7 flip the anomaly sign without relabeling (simulatedFixtures.ts)
+ FAIL  src/costsource/simulatedConnectorClient.test.ts > pointfive-live: illustrative payload goes through the real adapter and stays unverified
+ FAIL  src/costsource/simulatedConnectorClient.test.ts > every anomaly title states the direction its observedSpendDelta sign has (negative = drop)
+      Tests  2 failed | 16 passed (18)

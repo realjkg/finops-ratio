@@ -218,7 +218,7 @@ export const useStore = create<AppState>((set, get) => ({
       const findings = await client.fetchFindings(sourceId);
       const run: IngestRun = {
         sourceId,
-        sourceName,
+        sourceName: client.simulated ? `${sourceName} (simulated)` : sourceName,
         at: new Date().toISOString(),
         result,
         findings,

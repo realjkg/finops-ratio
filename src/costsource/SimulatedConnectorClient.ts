@@ -18,6 +18,7 @@ import { rowsFromExportText, rowsFromRecords } from './transports/focusExport';
 import { bqRowsToRecords } from './transports/gcpBigQueryTransport';
 
 export const SIMULATED_UNVERIFIED_LABEL = 'illustrative, format not verified';
+export const SIMULATED_VERIFIED_NOTE = 'documented-format sample: column names verified; values and encodings not';
 export const SIMULATED_LIVE_NOTE = 'Live connection requires the authenticated API';
 
 export interface SimulatedFixture {
@@ -84,6 +85,8 @@ function adapterFor(sourceId: string): CloudConnectorAdapter | PointFiveLiveAdap
 
 export class SimulatedConnectorClient implements CostSourceClient {
   readonly mode = 'mock' as const;
+  /** Marks landed runs so every provenance surface labels them simulated. */
+  readonly simulated = true;
 
   async listSources(): Promise<CostSourceDescriptor[]> {
     return sourcesForEnv({}).filter((s) => isSimulatedSource(s.id));
@@ -102,7 +105,7 @@ export class SimulatedConnectorClient implements CostSourceClient {
   async healthCheck(sourceId: string): Promise<SourceHealth> {
     const fx = fixtureFor(sourceId);
     const health = await adapterFor(sourceId).healthCheck();
-    const label = fx.verified ? 'documented-format sample' : SIMULATED_UNVERIFIED_LABEL;
+    const label = fx.verified ? SIMULATED_VERIFIED_NOTE : SIMULATED_UNVERIFIED_LABEL;
     return { ...health, detail: `Simulated connection: ${fx.format} (${label}); no network call, no credentials.` };
   }
 }

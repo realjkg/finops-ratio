@@ -10,7 +10,7 @@
 import { useState } from 'react';
 import type { CostSourceDescriptor, SourceHealth } from '@/costsource/CostSourceClient';
 import { isOfflineSandboxSource } from '@/costsource/sandboxSources';
-import { SIMULATED_LIVE_NOTE, SIMULATED_UNVERIFIED_LABEL, type SimulatedFixture } from '@/costsource/SimulatedConnectorClient';
+import { SIMULATED_LIVE_NOTE, SIMULATED_UNVERIFIED_LABEL, SIMULATED_VERIFIED_NOTE, type SimulatedFixture } from '@/costsource/SimulatedConnectorClient';
 import type { ConnectorBusyPhase, ConnectorSession, IngestRun } from './ingestLanding';
 import { IngestVerification } from './IngestVerification';
 
@@ -260,7 +260,7 @@ export function ConnectorCard({
 
       {walk && simulation && (
         <p className="font-mono text-[10px] leading-relaxed text-dim">
-          Simulated with the {simulation.format}. {SIMULATED_LIVE_NOTE}.
+          Simulated with the {simulation.format} ({simulation.verified ? SIMULATED_VERIFIED_NOTE : SIMULATED_UNVERIFIED_LABEL}). {SIMULATED_LIVE_NOTE}.
         </p>
       )}
 

@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 // A simulated run carries its label to every surface that shows landed provenance, and the store maps
 // ONLY a genuine LiveDataAuthError to `locked` (connect and ingest); any other error keeps Retry.
+import { act, type ReactElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, expect, it } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { AttributionPage } from '@/attribution/AttributionPage';
 import { WorkloadCard } from '@/components/workload/WorkloadCard';
 import { LiveDataAuthError, type CostSourceClient } from '@/costsource';
@@ -12,9 +14,25 @@ import { FindingsPage } from '@/findings/FindingsPage';
 import { useStore } from '@/store/useStore';
 import { ConnectorCard } from './ConnectorCard';
 
+vi.mock('next/router', () => ({ useRouter: () => ({ query: {}, pathname: '/', isReady: true, push: async () => true, replace: async () => true }) }));
+
 const P5 = sourcesForEnv({}).find((s) => s.id === 'pointfive-live')!;
 const AWS = sourcesForEnv({}).find((s) => s.id === 'aws-data-exports')!;
 beforeEach(() => useStore.setState({ connectorSessions: {}, ingestRuns: {}, connectorBusy: null, simulation: null }));
+
+declare global {
+  var IS_REACT_ACT_ENVIRONMENT: boolean;
+}
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+/** Client mount (SSR would read the store's initial state, not the landed run). */
+function mounted(el: ReactElement): string {
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  act(() => root.render(el));
+  const text = div.textContent ?? '';
+  act(() => root.unmount());
+  return text;
+}
 
 async function simulatedRun() {
   const sim = new SimulatedConnectorClient();
@@ -26,8 +44,8 @@ async function simulatedRun() {
 it('the run itself is marked simulated, so Findings, Attribution and the workload card all say so', async () => {
   const run = await simulatedRun();
   expect(run.sourceName).toBe(`${P5.name} (simulated)`);
-  expect(renderToStaticMarkup(<FindingsPage />)).toContain(`${P5.name} (simulated)`);
-  expect(renderToStaticMarkup(<AttributionPage />)).toContain(`${P5.name} (simulated)`);
+  expect(mounted(<FindingsPage />)).toContain(`${P5.name} (simulated)`);
+  expect(mounted(<AttributionPage />)).toContain(`${P5.name} (simulated)`);
   const workload = useStore.getState().workloads[0];
   const card = <WorkloadCard workload={workload} selected={false} secondaryMode={'value' as never} onSelect={() => {}} landedVia={{ sourceName: run.sourceName, at: run.at }} />;
   expect(renderToStaticMarkup(card)).toMatch(/landed via (<!-- -->)?PointFive.* \(simulated\)/);
