@@ -1568,13 +1568,16 @@ unwired probes that run on synthetic fixtures only (a report cannot claim more
 than `simulated` in this build).
 
 - `NutanixEvidenceProbe` classifies `nc2_on_public_cloud | onprem_ahv_prism |
-  cost_governance_saas | undetermined`. It needs two independent artifacts that
-  agree, otherwise `undetermined`; it flags NC2-style host charges that also
+  cost_governance_saas | undetermined`. It needs two distinct sources of distinct
+  families (copies and same-source artifacts count once) that agree, otherwise
+  `undetermined` with `evidence_not_independent`; it matches structured product
+  fields only, never descriptions or tags; it flags NC2-style host charges that also
   sit in the host cloud's bill as a double-count suspect.
 - `ServiceNowRoleProbe` reports PRESENT / ABSENT / unknown per record class
   (service and CI mapping, project and demand, license and asset, cost) with
   `authority: 'unknown'` until a human decides. `emitCostRows` refuses cost
-  rows unless a human confirmed the source as cost-bearing.
+  rows unless a module-branded decision bound to that source and record class
+  confirms it as cost-bearing; clones, spreads and literals fail.
 
 Unknown: the Nutanix deployment type and cost evidence; ServiceNow's role,
 modules in use, and authoritative records. Discovery questions for the owner:

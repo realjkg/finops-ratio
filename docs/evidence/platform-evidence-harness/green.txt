@@ -1,13 +1,13 @@
-$ npx vitest run src/evidence      -> Test Files 1 passed, Tests 15 passed
-$ npx vitest run (full, rerun)     -> Test Files 191 passed, Tests 3585 passed
-  (first full run: 3 failures in src/ingest/worker/periods.test.ts and
-   src/simulation/server/worker.test.ts under load; both files pass in isolation
-   on this branch and on a clean origin/main checkout; rerun fully green)
+Round 2 GREEN (review findings H1-H4, M1-M6).
+$ npx vitest run src/evidence      -> 1 file, 39 tests passed
+$ npx vitest run (full)            -> Test Files 191 passed, Tests 3609 passed (no timeouts this run)
 $ npx tsc --noEmit -> ok; npx eslint . -> ok; npx next build -> ok
 $ npm run check:bundle -> pass:true (clientFiles 134, serverFiles 130)
-Mutations (each reverted; each made >=1 test fail):
-  M1 classify on a single signal            -> 2 failed
-  M2 ServiceNow assumes cost present        -> 2 failed
-  M3 default maturity > simulated, no check -> 1 failed
-  M4 NC2 double-count never flagged         -> 1 failed
-  M5 emitCostRows ignores human confirmation-> 1 failed
+Mutations (each reverted, each failed >= 1 test; counts are failed tests of 39):
+  classify on one source 10 | drop family requirement 3 | ServiceNow assumes cost 3
+  maturity allow-list off 1 | maturity ceiling off 1 | double-count never flagged 1
+  emit ignores brand 1 | emit ignores record class 1 | emit ignores source id 1
+  on-prem ignores hypervisor 1 | high confidence at 2 sources 2 | loose nc2 substring 5
+  unknown hosting counts as cloud 1 | content dedupe off 1 | large-array spread 1
+  duplicate lines added twice 1 | credits folded into gross 1 | rowCount unvalidated 1
+  decidedBy unchecked 4 | inventory/sample conflict not surfaced 1
