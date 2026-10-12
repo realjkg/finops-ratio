@@ -1,0 +1,21 @@
+Round 1 GREEN (superseded counts), branch feat/ui-color-migration-1
+$ npx tsc --noEmit                      0 errors
+$ npx eslint .                          0 problems
+$ npx vitest run                        Test Files 190 passed (190)   Tests 3565 passed (3565)
+$ npx playwright test --config playwright.simulation.config.ts contrast-audit
+  light 0 (max 0) PASS | high-contrast 0 (max 0) PASS | dark 314 (max 314) PASS
+$ npx playwright test --config playwright.simulation.config.ts      (whole simulation suite)
+  14 passed (2.7m), includes next build of the production bundle
+Mutation checks (each restored afterwards):
+  M1 scales.ts value -> '#00e09e'            4 vitest failures (scales x2, initiativeModel, .ts hex guard)
+  M2 MissionCard tint() -> `${color}1a`      1 failure (hex-alpha guard)
+  M3 three hex literals back in SpendSummaryBar   1 failure (TSX hex 16 in 4 ratchet)
+  M4 ratioColor 'good' returns value         1 failure (scales rating test)
+  M5 scales.ts cost -> '#ff5c72' (rendered)  audit: Light 17 and High contrast 17 failing nodes, > max 0
+  M6 accentColor + '40' | M7 meta.color + "1A"   hex-alpha guard fails (both)
+  M8 C_SUB back to hex (vitest) hex ratchet 8 in 2 fails | M9 same (rendered) audit Light 2, High contrast 2
+Round 2 GREEN: tsc 0, eslint clean, vitest 190 files / 3566 tests, npm run build + check:bundle pass,
+  audit light 0, high-contrast 0 (SVG text included), dark 346; whole simulation suite 14 passed (1.7m)
+Round 3 GREEN: compositing cases 4 passed; audit light 0, high-contrast 0, dark 346 (unchanged by the correct group
+  compositing); mutation M10 (drop the group opacity in paint(): 3 fail; ignore text alpha: 1 fails) fails the compositing cases.
+  tsc, eslint, vitest (191 files, 3575 tests), next build, check:bundle: pass; whole simulation suite 18 passed (1.3m)

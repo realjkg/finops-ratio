@@ -52,8 +52,19 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   ingest keeps `Tags`; the connector path drops it.
 - UI themes, T1 to T4: T1 token layer, built-in themes, contrast engine and
   validator (merged, #113, `145565f`); T2 theme switcher, user themes and palette
-  editor (merged, #116, `6ac1335`), with its Medium review fixes open as #118; T3 typography
-  settings; T4 inline colors moved onto tokens, with a guard test.
+  editor (merged, #116, `6ac1335`; Medium review fixes merged, #118, `45a9ba2`); T3 typography
+  settings; T4 inline colors moved onto tokens, with a guard test, in slices.
+  T4 slice 1 (open, `feat/ui-color-migration-1`): the neon accents in
+  `src/lib/scales.ts` are theme variables, badge tints use `tint()` and the SVG chart
+  constants use theme variables; the rendered audit (`tests/simulation/contrast-audit.spec.ts`,
+  SVG text read via `fill`; evidence in `docs/evidence/ui-color-migration/`) goes from 92 to 0
+  failing text nodes for Light and High contrast on `/`, `/overview`, `/connectors` and
+  `/workloads`; Dark is unchanged at 346 (legacy look, not release-ready). Remaining, in
+  order: (2) flip `DEFAULT_THEME` to `light` and label Dark "(contrast incomplete)" in
+  the selector (`ThemeMenu.tsx` and its test must then stop assuming a dark default);
+  (3) the `rgba()` tints in connectors and frameworks; (4) audit more routes
+  (`/findings`, `/mission`, `/prediction`, `/outcomes`) and ratchet the style-object
+  baseline down; (5) Dark contrast, only if the owner decides to retune it.
 
 Boundary (v2): local and ephemeral only. No production infrastructure, no real
 data or credentials, no spend. No card adds a migration (issue #94) or a

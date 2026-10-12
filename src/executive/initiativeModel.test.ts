@@ -4,6 +4,7 @@
 // pairing, and a Spend Summary derived from the bundled seed. Pure — no DOM.
 import { describe, it, expect } from 'vitest';
 import { WORKLOADS } from '@/data/workloads';
+import { TOKEN_COLOR } from '@/lib/scales';
 import { buildMissionBoard } from '@/mission/missionModel';
 import {
   buildInitiativeBoard,
@@ -54,7 +55,7 @@ describe('initiative view-model', () => {
       // The defensible numerator (quality floor + harm subtraction) may go
       // non-positive; the pairing itself must stay finite and color-coded.
       expect(Number.isFinite(initiative.valueRatio)).toBe(true);
-      expect(initiative.valueColor).toMatch(/^#/);
+      expect(initiative.valueColor).toMatch(/^rgb\(var\(--c-[a-z]+\)\)$/);
     }
   });
 
@@ -62,7 +63,7 @@ describe('initiative view-model', () => {
     const negative = initiatives.filter((i) => i.valueRatio <= 0);
     expect(negative.length).toBeGreaterThan(0);
     for (const initiative of negative) {
-      expect(initiative.valueColor).toBe('#ff5c72');
+      expect(initiative.valueColor).toBe(TOKEN_COLOR.cost);
     }
   });
 
@@ -74,11 +75,11 @@ describe('initiative view-model', () => {
   });
 
   it('uses the locked status labels + token colors', () => {
-    expect(INITIATIVE_STATUS_META.on_track).toEqual({ label: 'On Track', color: '#00e09e' });
-    expect(INITIATIVE_STATUS_META.at_risk).toEqual({ label: 'At Risk', color: '#ffc44d' });
+    expect(INITIATIVE_STATUS_META.on_track).toEqual({ label: 'On Track', color: TOKEN_COLOR.value });
+    expect(INITIATIVE_STATUS_META.at_risk).toEqual({ label: 'At Risk', color: TOKEN_COLOR.shape });
     expect(INITIATIVE_STATUS_META.pending_approval).toEqual({
       label: 'Pending Approval',
-      color: '#7c8dff',
+      color: TOKEN_COLOR.gate,
     });
   });
 
