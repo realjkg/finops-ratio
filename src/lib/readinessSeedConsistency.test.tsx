@@ -57,8 +57,7 @@ describe('M5 delta value ratio is bounded for display', () => {
 
 describe('M5 the same bound applies on the /mission Proposed Changes card', () => {
   it.each(['wl-support', 'wl-codereview'])('%s model switch and a negative demand-shape delta', async (id) => {
-    const w = WORKLOADS.find((x) => x.id === id)!;
-    const p = await createPredictionClient('mock').predictChange({ type: 'model_switch', workloadId: id, fromModel: w.model, toModel: 'gemini-2.5-flash' });
+    const p = await createPredictionClient('mock').predictChange({ type: 'model_switch', workloadId: id, fromModel: WORKLOADS.find((x) => x.id === id)!.model, toModel: 'gemini-2.5-flash' });
     for (const delta of [p.impact.deltaValueRatio, -12.7]) {
       const html = renderToStaticMarkup(<PredictionResult prediction={{ ...p, impact: { ...p.impact, deltaValueRatio: delta } }} />);
       expect(html).toMatch(/&(gt|lt); [+-]10\.0/);
