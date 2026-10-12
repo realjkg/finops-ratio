@@ -23,7 +23,7 @@ function run(opts: { rows?: boolean; workloads?: boolean; findings?: number } = 
     result: {
       ...result,
       rows: rows
-        ? result.rows.map((r) => ({ ...r, x_RatioWorkloadId: workloads ? 'wl-1' : undefined }))
+        ? result.rows.map((r) => ({ ...r, x_RatioWorkloadId: workloads ? 'wl-1' : '' }))
         : [],
     },
     findings: Array.from({ length: findings }, (_, i) => ({ id: `f${i}` }) as CostFinding),

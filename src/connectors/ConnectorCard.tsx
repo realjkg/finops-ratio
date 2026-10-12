@@ -306,7 +306,19 @@ export function ConnectorCard({
                 Disconnect
               </button>
             </>
-          ) : session?.state === 'locked' ? null : (
+          ) : session?.state === 'locked' ? (
+            // No Retry (policy, not a failure), but landed data must stay withdrawable.
+            run && (
+              <button
+                type="button"
+                onClick={onDisconnect}
+                disabled={busy !== null}
+                className="rounded border border-edge px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-dim hover:text-sub disabled:opacity-60"
+              >
+                Disconnect
+              </button>
+            )
+          ) : (
             <button
               type="button"
               onClick={onConnect}
