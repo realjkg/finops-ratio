@@ -57,6 +57,18 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   130%; open, `feat/ui-typography`; long finding and initiative names now wrap instead of
   truncating, and the footer alert ticker collapses to one line on phones; both visible at 100%); T4 inline colors moved onto tokens,
   with a guard test.
+  T4 slice 1 (merged, #121): the neon accents in
+  `src/lib/scales.ts` are theme variables, badge tints use `tint()` and the SVG chart
+  constants use theme variables; the rendered audit (`tests/simulation/contrast-audit.spec.ts`,
+  SVG text read via `fill`; evidence in `docs/evidence/ui-color-migration/`) goes from 92 to 0
+  failing text nodes for Light and High contrast on `/`, `/overview`, `/connectors` and
+  `/workloads`; Dark is unchanged at 346 (legacy look, not release-ready). Remaining, in
+  order: (2) flip `DEFAULT_THEME` to `light` and label Dark "(contrast incomplete)" in
+  the selector (`ThemeMenu.tsx` and its test must then stop assuming a dark default);
+  (3) the `rgba()` tints in connectors and frameworks; (4) audit more routes
+  (`/findings`, `/mission`, `/prediction`, `/outcomes`) and ratchet the style-object
+  baseline down; (5) Dark contrast, only if the owner decides to retune it.
+
 
 Boundary (v2): local and ephemeral only. No production infrastructure, no real
 data or credentials, no spend. No card adds a migration (issue #94) or a
@@ -1563,3 +1575,31 @@ Use this when you are an implementer agent taking a card.
 11. **Report back.** In the PR, state which red tests you added, which
     mutations you tried, the classifier result, the regression analysis, and
     anything you found that changes PLAN facts or sizes.
+
+## Status: platform evidence harnesses (pilot slice P10)
+
+Maturity: **simulated**. `src/evidence/` holds two read-only, no-network,
+unwired probes that run on synthetic fixtures only (a report cannot claim more
+than `simulated` in this build).
+
+- `NutanixEvidenceProbe` classifies `nc2_on_public_cloud | onprem_ahv_prism |
+  cost_governance_saas | undetermined`. It needs two distinct sources of distinct
+  families (copies and same-source artifacts count once) that agree, otherwise
+  `undetermined` with `evidence_not_independent`; it matches structured product
+  fields only, never descriptions or tags; it flags NC2-style host charges that also
+  sit in the host cloud's bill as a double-count suspect.
+- `ServiceNowRoleProbe` reports PRESENT / ABSENT / unknown per record class
+  (service and CI mapping, project and demand, license and asset, cost) with
+  `authority: 'unknown'` until a human decides. `emitCostRows` refuses cost
+  rows unless a module-branded decision bound to that source and record class
+  confirms it as cost-bearing; clones, spreads and literals fail.
+
+Unknown: the Nutanix deployment type and cost evidence; ServiceNow's role,
+modules in use, and authoritative records. Discovery questions for the owner:
+which Nutanix deployment type applies, and who owns its cost evidence (showback,
+license invoices, depreciation)? Which ServiceNow modules are in use, who owns
+the authoritative service and CI records, and does it hold any cost?
+
+Follow-up for slice P0 (not done here, files are shared with in-flight work):
+the ServiceNow sandbox descriptor in `src/costsource/seed.ts` still emits
+"ITBM Cost Allocation" rows with no `roleConfirmed: false` label.

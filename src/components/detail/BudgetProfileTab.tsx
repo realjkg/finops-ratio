@@ -7,7 +7,7 @@ import type { BudgetProfile, Workload } from '@/types';
 import { computeBudgetStatus, type BudgetStatus } from '@/lib/budgetStatus';
 import { findModel } from '@/data/models';
 import { formatPct, formatTokens, formatUSD } from '@/lib/format';
-import { TOKEN_HEX } from '@/lib/scales';
+import { TOKEN_COLOR } from '@/lib/scales';
 import { deriveCacheEconomics } from '@/lib/derive';
 import { BudgetBar } from './BudgetBar';
 
@@ -115,7 +115,7 @@ export function BudgetProfileTab({
               to divide by: never a fabricated 0%. */}
           {tokens.cacheHitRate !== null && (
             <div className="flex items-center justify-between border-b border-edge bg-slab px-3 py-2 font-mono text-xs last:border-b-0">
-              <span className="font-bold" style={{ color: TOKEN_HEX.unit }}>
+              <span className="font-bold" style={{ color: TOKEN_COLOR.unit }}>
                 Cache hit rate
               </span>
               <span className="text-dim">
@@ -123,7 +123,7 @@ export function BudgetProfileTab({
                 tokens
               </span>
               <span />
-              <span className="font-bold" style={{ color: TOKEN_HEX.unit }}>
+              <span className="font-bold" style={{ color: TOKEN_COLOR.unit }}>
                 {formatPct(tokens.cacheHitRate, 1)}
               </span>
             </div>

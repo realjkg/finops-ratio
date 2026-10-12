@@ -21,10 +21,10 @@ import type { Workload } from '@/types';
 // Y-axis ceiling — matches ValueRatioMeter's CEILING constant.
 const CEILING = 10;
 
-// Design-token hex values (from obvious.md §Design Tokens).
-const C_EDGE = '#1a2235';
-const C_SUB  = '#8895ad';
-const C_DIM  = '#4d5a72';
+// Theme variables (src/index.css), so SVG strokes and labels follow the active theme.
+const C_EDGE = 'var(--edge)';
+const C_SUB  = 'var(--sub)';
+const C_DIM  = 'var(--dim)';
 
 // Tooltip placement — keep the tooltip inside the figure: flip the anchor
 // horizontally near the plot edges, and drop below the dot when it hugs the top.

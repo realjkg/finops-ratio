@@ -3,7 +3,7 @@
 // consumed. Aggregates trace to the same engine outputs the cards use.
 import { motion, useReducedMotion } from 'framer-motion';
 import { formatRatio } from '@/lib/format';
-import { TOKEN_HEX } from '@/lib/scales';
+import { TOKEN_COLOR } from '@/lib/scales';
 import type { FleetSummary } from './missionModel';
 
 interface FleetHeaderProps {
@@ -12,7 +12,7 @@ interface FleetHeaderProps {
 
 export function FleetHeader({ fleet }: FleetHeaderProps) {
   const reducedMotion = useReducedMotion() ?? false;
-  const attentionColor = fleet.needsAttention > 0 ? TOKEN_HEX.shape : TOKEN_HEX.value;
+  const attentionColor = fleet.needsAttention > 0 ? TOKEN_COLOR.shape : TOKEN_COLOR.value;
 
   return (
     <header className="rounded-card border border-edge bg-slab p-6">
@@ -29,7 +29,7 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
             <dt className="font-mono text-[10px] uppercase tracking-wider text-dim">
               Value returned
             </dt>
-            <dd className="font-mono text-2xl font-bold" style={{ color: TOKEN_HEX.value }}>
+            <dd className="font-mono text-2xl font-bold" style={{ color: TOKEN_COLOR.value }}>
               {formatRatio(fleet.valueReturned)}
             </dd>
           </div>

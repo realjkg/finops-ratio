@@ -389,3 +389,38 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
     }
   });
 });
+
+
+describe('editor dismissal and save feedback', () => {
+  it('closes explicitly and with Escape, returning focus to its opener', () => {
+    mount(); openEditor();
+    click(byLabel<HTMLButtonElement>('Close theme editor'));
+    expect(container.querySelector('#theme-editor')).toBeNull();
+    expect(document.activeElement).toBe(button('Customize'));
+    openEditor();
+    act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(container.querySelector('#theme-editor')).toBeNull();
+    expect(document.activeElement).toBe(button('Customize'));
+  });
+  it('dismisses on an outside pointer without applying unsaved edits or stealing focus', () => {
+    mount(); setValue(select(), 'light'); openEditor();
+    setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
+    const outside = document.createElement('button'); document.body.appendChild(outside); outside.focus();
+    act(() => outside.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(container.querySelector('#theme-editor')).toBeNull();
+    expect(document.activeElement).toBe(outside);
+    expect(html.getAttribute('data-theme')).toBe('light');
+    expect(localStorage.getItem(ACTIVE_KEY)).toBe('light');
+    outside.remove(); openEditor();
+    expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES.light.colors.txt);
+  });
+  it('keeps inside interactions open and confirms a saved theme', () => {
+    mount(); setValue(select(), 'light'); openEditor();
+    act(() => byLabel<HTMLInputElement>('txt hex').dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(container.querySelector('#theme-editor')).not.toBeNull();
+    setValue($<HTMLInputElement>('#theme-editor label input'), 'brownstone'); click(button('Save and apply'));
+    expect(html.getAttribute('data-theme')).toBe('brownstone');
+    expect(localStorage.getItem(ACTIVE_KEY)).toBe('brownstone');
+    expect(container.textContent).toContain('Saved and applied brownstone.');
+  });
+});

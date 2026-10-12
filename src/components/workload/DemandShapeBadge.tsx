@@ -2,6 +2,7 @@
 
 import type { DemandShape } from '@/types';
 import { SHAPE_LABEL } from '@/lib/demandShape';
+import { tint } from '@/lib/scales';
 
 const SHAPE_COLOR: Record<DemandShape, string> = {
   always_on: 'var(--value)',
@@ -17,7 +18,7 @@ export function DemandShapeBadge({ shape }: { shape: DemandShape }) {
   return (
     <span
       className="rounded px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider"
-      style={{ color, background: `${color}1a` }}
+      style={{ color, background: tint(color) }}
     >
       {SHAPE_LABEL[shape]}
     </span>
