@@ -151,16 +151,16 @@ describe('hard-coded color baseline (T4 migrates these; they may only shrink)', 
     expect(hitFiles).toBeLessThanOrEqual(40);
   });
 
-  it('rgb()/hsl() color literals in TSX do not grow past 20 in 6 files', () => {
+  it('rgb()/hsl() color literals in TSX do not grow past 19 in 6 files', () => {
     const { hits, hitFiles } = count(matches(/\b(rgba?|hsla?)\(/g));
-    expect(hits).toBeLessThanOrEqual(20);
+    expect(hits).toBeLessThanOrEqual(19);
     expect(hitFiles).toBeLessThanOrEqual(6);
   });
 
-  it('raw hex colors in TSX do not grow past 16 in 4 files', () => {
+  it('raw hex colors in TSX do not grow past 8 in 2 files', () => {
     const { hits, hitFiles } = count(matches(HEX));
-    expect(hits).toBeLessThanOrEqual(16);
-    expect(hitFiles).toBeLessThanOrEqual(4);
+    expect(hits).toBeLessThanOrEqual(8);
+    expect(hitFiles).toBeLessThanOrEqual(2);
   });
 
   it('non-test .ts has no raw hex colors (scales.ts accents are theme variables)', () => {
@@ -169,8 +169,15 @@ describe('hard-coded color baseline (T4 migrates these; they may only shrink)', 
     expect(hitFiles).toBe(0);
   });
 
+  // `${color}1a`, `color + '40'`, `tone + "1A"`: a hex alpha glued onto a value that may be a CSS variable.
+  const HEX_ALPHA = /\}[0-9a-f]{2}[`'"]|[\w$\])]\s*\+\s*['"][0-9a-f]{2}['"]/gi;
+
+  it('hex-alpha guard matches every concatenation form and no plain string', () => {
+    for (const bad of ['`${c}1a`', "accentColor + '40'", 'tone + "1A"', "meta.color+'1a'", "fn(x) + '40'", "`${a.b}FF`"]) expect(bad.match(HEX_ALPHA), bad).not.toBeNull();
+    for (const ok of ["'ab' + 'cd'", "x + 'abc'", "label + ' 40'", "`${n}px`", "a + 12", "`${id}-1`"]) expect(ok.match(HEX_ALPHA), ok).toBeNull();
+  });
+
   it('never builds a color by appending hex alpha to a value that may be a CSS variable', () => {
-    const { hits } = count(matches(/\}[0-9a-f]{2}[`'"]|color\s*\+\s*['"][0-9a-f]{2}['"]/g), files);
-    expect(hits).toBe(0);
+    expect(count(matches(HEX_ALPHA), files).hits).toBe(0);
   });
 });

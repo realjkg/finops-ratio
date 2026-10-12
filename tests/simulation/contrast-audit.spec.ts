@@ -39,8 +39,12 @@ const collect = (page: Page) => page.evaluate((): Raw[] => {
       return { c: [r0, g0, b0], a: a0 * op };
     });
     const cs = getComputedStyle(el);
+    // SVG text is painted with fill (and fill-opacity), not CSS color.
+    const svg = el instanceof SVGElement;
+    const fill = svg ? rgba(cs.fill) : rgba(cs.color);
+    if (svg) fill[3] *= Number(cs.fillOpacity);
     out.push({ text: node.textContent.trim().slice(0, 40), el: `${el.tagName.toLowerCase()}.${String(el.getAttribute('class') ?? '').split(/\s+/).slice(0, 3).join('.')}`,
-      fg: rgba(cs.color), size: parseFloat(cs.fontSize), bold: Number(cs.fontWeight) >= 700, layers, img, op });
+      fg: fill, size: parseFloat(cs.fontSize), bold: Number(cs.fontWeight) >= 700, layers, img, op });
   }
   return out;
 });
