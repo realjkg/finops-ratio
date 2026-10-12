@@ -1,0 +1,12 @@
+Command: npx vitest run src/components/layout/ThemeMenu.test.tsx
+Base: 9024bc124d0b257a241912d852cb541536b375d3
+Actual failing baseline output (verbose DOM dumps omitted; full log retained locally):
+ FAIL  src/components/layout/ThemeMenu.test.tsx > editor dismissal and save feedback > closes explicitly and with Escape, returning focus to its opener
+TypeError: Cannot read properties of undefined (reading 'click')
+ FAIL  src/components/layout/ThemeMenu.test.tsx > editor dismissal and save feedback > dismisses on an outside pointer without applying unsaved edits or stealing focus
+AssertionError: expected <section …(3)>…(9)</section> to be null
+ FAIL  src/components/layout/ThemeMenu.test.tsx > editor dismissal and save feedback > keeps inside interactions open and confirms a saved theme
+AssertionError: expected '%RatioFindingsOverviewWorkloadsConnec…' to contain 'Saved and applied brownstone.'
+ Test Files  1 failed (1)
+      Tests  3 failed | 27 passed (30)
+   Duration  4.62s (tests 84%, environment 7%, import 5%, transform 4%)

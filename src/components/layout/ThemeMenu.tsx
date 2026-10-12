@@ -1,7 +1,7 @@
 // Theme switcher and palette editor in the top bar. Every user theme (pasted,
 // file, sample or edited) goes through checkTheme before it can be applied, and
 // the readout shows each required contrast pair as the validator computes it.
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
 import { applyTheme } from '@/theme/apply';
 import { BUILT_IN_THEMES, DEFAULT_THEME, ROLES, type BuiltInThemeName, type Role, type Theme } from '@/theme/themes';
 import { contrastChecks, type Violation } from '@/theme/validate';
@@ -35,6 +35,21 @@ export function ThemeMenu() {
   const [active, setActive] = useState<string | null>(null);
   const [custom, setCustom] = useState<Theme[]>([]);
   const [open, setOpen] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
+  const opener = useRef<HTMLButtonElement | null>(null);
+  const close = () => { setOpen(false); opener.current?.focus(); };
+  useEffect(() => {
+    if (!open) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); setOpen(false); opener.current?.focus(); }
+    };
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !menu.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('keydown', escape);
+    document.addEventListener('pointerdown', outside);
+    return () => { document.removeEventListener('keydown', escape); document.removeEventListener('pointerdown', outside); };
+  }, [open]);
   const [draft, setDraft] = useState<Record<string, unknown>>({ ...BUILT_IN_THEMES[DEFAULT_THEME], name: 'my-theme' });
   const [paste, setPaste] = useState('');
   const [problems, setProblems] = useState<Violation[]>([]);
@@ -59,12 +74,12 @@ export function ThemeMenu() {
   }, []);
 
   const current: Theme = custom.find((t) => t.name === active) ?? BUILT_IN_THEMES[isBuiltIn(active) ? active : system];
-  const choose = (name: string, list = custom) => {
+  const choose = (name: string, list = custom, success = '') => {
     const theme = isBuiltIn(name) ? name : list.find((t) => t.name === name);
     if (theme) applyTheme(theme);
     else clearDocumentTheme();
     setActive(theme ? name : null);
-    setNote(saveThemes(theme ? name : null, list) ? '' : 'Storage is unavailable: this choice lasts until you leave the page.');
+    setNote(saveThemes(theme ? name : null, list) ? success : 'Storage is unavailable: this choice lasts until you leave the page.');
   };
 
   const checked = checkTheme(draft);
@@ -107,7 +122,7 @@ export function ThemeMenu() {
     const list = [...custom.filter((t) => t.name !== theme.name), theme];
     if (list.length > MAX_CUSTOM) return setNote(`You can keep ${MAX_CUSTOM} custom themes. Delete one first.`);
     setCustom(list);
-    choose(theme.name, list);
+    choose(theme.name, list, `Saved and applied ${theme.name}.`);
     replaceDraft({ ...theme });
   };
   const remove = () => {
@@ -126,7 +141,8 @@ export function ThemeMenu() {
   const exported = exportTheme(exportable);
   const checks = checked.theme ? contrastChecks(checked.theme) : [];
 
-  const toggle = () => {
+  const toggle = (event: MouseEvent<HTMLButtonElement>) => {
+    opener.current = event.currentTarget;
     if (!open) replaceDraft(draftOf(current));
     setOpen(!open);
   };
@@ -142,7 +158,7 @@ export function ThemeMenu() {
   );
 
   return (
-    <div className="md:relative">
+    <div ref={menu} className="md:relative">
       <div className="flex items-center gap-1.5 font-mono text-xs text-sub">
         {/* Phones get one "Theme" button; the switcher then sits at the top of the panel. */}
         <button type="button" className={`${btn} md:hidden`} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Theme</button>
@@ -157,6 +173,7 @@ export function ThemeMenu() {
         {open && (
         <section id="theme-editor" aria-label="Theme editor" className="max-h-[80vh] space-y-3 overflow-auto rounded border border-edge bg-slab p-3 shadow-lg">
           <div className="flex items-center gap-1.5 md:hidden">{switcher('theme-select-panel')}</div>
+          <div className="flex justify-end"><button type="button" className={btn} aria-label="Close theme editor" onClick={close}>Close</button></div>
           <label className="block">Name <input value={String(draft.name)} onChange={(e) => {
             setDirty(true);
             setProblems([]);
