@@ -6,7 +6,7 @@ npx vitest run                        191 files, 3569 tests passed (includes tok
 npx next build                        compiled successfully
 npx playwright test --config playwright.simulation.config.ts   (RATIO_TEST_NEXT_DIR=.next-simulation-3110 build)
                                       15 passed: customer(4) outcomes(2) theme-mobile(3) typography-layout(4) z-agent(1) zz-frank(1)
-                                      (the 3 new vitest files: 15 tests; the new spec: 4 layout cases at 130% x {default, system-mono} x {1440, 390})
+                                      (new: 2 vitest files, 8 tests; new spec: 4 layout cases at 130% x {default, system-mono} x {1440, 390})
 
 Layout defects found at 130% and fixed at the root (before the fix the spec listed them):
   src/findings/FindingsPage.tsx    finding names used `truncate` (ellipsis clip at 130%): now wrap (min-w-0 break-words)
