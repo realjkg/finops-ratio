@@ -12,7 +12,7 @@ async function problems(page: Page): Promise<string[]> {
     if (document.documentElement.scrollWidth > innerWidth) out.push('page scrolls horizontally');
     if (main && main.scrollWidth > main.clientWidth + 1) out.push('main scrolls horizontally');
     const label = (el: Element) => `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 40)}"`;
-    const boxes: { el: Element; r: DOMRect }[] = [];
+    const boxes: { el: Element; r: { left: number; right: number; top: number; bottom: number } }[] = [];
     for (const el of document.body.querySelectorAll('*')) {
       const cs = getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden' || cs.display === 'contents') continue;
@@ -24,7 +24,18 @@ async function problems(page: Page): Promise<string[]> {
       const range = document.createRange();
       for (const n of own) {
         range.selectNodeContents(n);
-        for (const r of range.getClientRects()) if (r.width > 2 && r.height > 2) boxes.push({ el, r });
+        for (const q of range.getClientRects()) {
+          // Only the part a scrolling or clipping ancestor shows can overlap anything.
+          let r: { left: number; right: number; top: number; bottom: number } | null = q;
+          for (let a = el.parentElement; a && r; a = a.parentElement) {
+            const o = getComputedStyle(a);
+            if (o.overflowX === 'visible' && o.overflowY === 'visible') continue;
+            const c = a.getBoundingClientRect();
+            r = { left: Math.max(r.left, c.left), right: Math.min(r.right, c.right), top: Math.max(r.top, c.top), bottom: Math.min(r.bottom, c.bottom) };
+            if (r.right - r.left <= 0 || r.bottom - r.top <= 0) r = null;
+          }
+          if (r && r.right - r.left > 2 && r.bottom - r.top > 2) boxes.push({ el, r });
+        }
       }
     }
     for (let i = 0; i < boxes.length; i++) {
@@ -33,23 +44,27 @@ async function problems(page: Page): Promise<string[]> {
         if (a.el === b.el || a.el.contains(b.el) || b.el.contains(a.el)) continue;
         const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
         const h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
-        if (w > 1 && h > 1 && (w * h) / Math.min(a.r.width * a.r.height, b.r.width * b.r.height) > 0.2) out.push(`overlap: ${label(a.el)} / ${label(b.el)}`);
+        if (w > 1 && h > 1 && (w * h) / Math.min(...[a, b].map(({ r }) => (r.right - r.left) * (r.bottom - r.top))) > 0.2) out.push(`overlap: ${label(a.el)} / ${label(b.el)}`);
       }
     }
     return [...new Set(out)];
   });
 }
 
-for (const width of [1440, 390]) {
-  test(`130% text has no overflow, clipping or overlap at ${width}px`, async ({ page }) => {
+// 'system-mono' is the widest family: the worst case for line breaks.
+for (const [width, family] of [[1440, 'default'], [390, 'default'], [1440, 'system-mono'], [390, 'system-mono']] as const) {
+  test(`130% text (${family}) has no overflow, clipping or overlap at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.addInitScript(() => localStorage.setItem('ratio.typography', JSON.stringify({ scale: 130, family: 'default' })));
+    await page.addInitScript((f) => localStorage.setItem('ratio.typography', JSON.stringify({ scale: 130, family: f })), family);
+    const found: Record<string, string[]> = {};
     for (const route of ROUTES) {
       await page.goto(route);
       await page.waitForLoadState('networkidle');
-      expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize), 'scale applied').toBe('20.8px');
-      expect(await problems(page), route).toEqual([]);
+      await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize), { message: 'scale applied' }).toBe('20.8px');
+      const list = await problems(page);
+      if (list.length) found[route] = list;
     }
+    expect(found).toEqual({});
   });
 }
 

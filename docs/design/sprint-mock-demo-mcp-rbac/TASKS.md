@@ -52,8 +52,9 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   ingest keeps `Tags`; the connector path drops it.
 - UI themes, T1 to T4: T1 token layer, built-in themes, contrast engine and
   validator (merged, #113, `145565f`); T2 theme switcher, user themes and palette
-  editor (open, #116); T3 typography
-  settings; T4 inline colors moved onto tokens, with a guard test.
+  editor (merged, #116); T3 typography settings (text size 90 to 130% and font
+  family, with a layout test at 130%; this branch, `feat/ui-typography`); T4 inline
+  colors moved onto tokens, with a guard test.
 
 Boundary (v2): local and ephemeral only. No production infrastructure, no real
 data or credentials, no spend. No card adds a migration (issue #94) or a

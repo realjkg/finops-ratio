@@ -21,8 +21,9 @@ module.exports = {
         gcp: '#4285f4',
       },
       fontFamily: {
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
-        body: ['"Instrument Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        // Variables (src/index.css) so the typography settings can swap the family.
+        mono: 'var(--font-mono)',
+        body: 'var(--font-body)',
       },
       borderRadius: {
         card: '6px',
