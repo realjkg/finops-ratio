@@ -1,0 +1,12 @@
+$ npx vitest run src/connectors/connectorCardHonesty.test.tsx  (tests only, base ff24ff3)
+     × offers Disconnect (not Retry or Ingest) while a landed run is still shown 35ms
+     × omits the Findings link when the run has no findings 4ms
+     × does not link Findings next to Workloads when there are none 3ms
+     × says no rows were returned for an empty window, never "Rows normalized" 3ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/connectors/connectorCardHonesty.test.tsx > ConnectorCard — locked session > offers Disconnect (not Retry or Ingest) while a landed run is still shown
+ FAIL  src/connectors/connectorCardHonesty.test.tsx > IngestVerification — provenance links > omits the Findings link when the run has no findings
+ FAIL  src/connectors/connectorCardHonesty.test.tsx > IngestVerification — provenance links > does not link Findings next to Workloads when there are none
+ FAIL  src/connectors/connectorCardHonesty.test.tsx > IngestVerification — provenance links > says no rows were returned for an empty window, never "Rows normalized"
+ Test Files  1 failed (1)
+      Tests  4 failed | 2 passed (6)
