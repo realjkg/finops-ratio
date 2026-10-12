@@ -190,7 +190,7 @@ export function ThemeMenu() {
             ) : (
               <button type="button" className={btn} disabled aria-describedby="theme-export-note">Export current theme</button>
             )}
-            {!canExport && <p id="theme-export-note" className="w-full">Fix contrast first to export an importable theme: this theme fails the import checks.</p>}
+            {!canExport && <p id="theme-export-note" className="w-full">Dark cannot be exported (it has pinned contrast exceptions). Choose Light or High contrast, or save a custom theme, to export.</p>}
             {!isBuiltIn(active) && active && <button type="button" className={btn} onClick={remove}>Delete {active}</button>}
           </div>
           <div role="status">

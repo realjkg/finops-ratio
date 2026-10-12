@@ -1,5 +1,5 @@
 GREEN: theme editor Medium fixes.
-npx vitest run src/theme src/components/layout -> 120 passed
+npx vitest run src/theme src/components/layout -> 118 passed (corrected in round 2: 120 was counted before the new tests were compacted from 5 to 3)
 Full suite: npx vitest run -> Test Files 188 passed (188); Tests 3560 passed (3560); tokens.test.ts 13 passed.
 npx tsc --noEmit and npx eslint . clean; next build succeeds (simulation webServer build).
 npx playwright test --config playwright.simulation.config.ts (Chromium 1194) -> 11 passed, incl. theme-mobile 320/390/430,
@@ -8,3 +8,7 @@ Mutation spot checks (each reverted):
 M1 background roles dropped from the per-role readout: killed, 1 failed | 26 passed
 M2 header cells as td without scope: killed, 1 failed | 26 passed
 M3 media-query listeners not removed on unmount: killed, 1 failed | 26 passed
+
+GREEN round 2: note now reads 'Dark cannot be exported (it has pinned contrast exceptions). Choose Light or High
+contrast, or save a custom theme, to export.' npx vitest run src/theme src/components/layout -> 118 passed;
+tsc and eslint clean.
