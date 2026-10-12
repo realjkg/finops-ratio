@@ -18,4 +18,4 @@ Round 2 GREEN: tsc 0, eslint clean, vitest 190 files / 3566 tests, npm run build
   audit light 0, high-contrast 0 (SVG text included), dark 346; whole simulation suite 14 passed (1.7m)
 Round 3 GREEN: compositing cases 4 passed; audit light 0, high-contrast 0, dark 346 (unchanged by the correct group
   compositing); mutation M10 (drop the group opacity in paint(): 3 fail; ignore text alpha: 1 fails) fails the compositing cases.
-  tsc, eslint, vitest, next build, check:bundle and the whole simulation suite: SUITE3
+  tsc, eslint, vitest (191 files, 3575 tests), next build, check:bundle: pass; whole simulation suite 18 passed (1.3m)
