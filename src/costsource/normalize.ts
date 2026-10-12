@@ -24,7 +24,7 @@ import type {
   RawSourceRow,
 } from './focusRows';
 import { upgradeToCanonicalCost } from './focusRows';
-import { resolveWorkloadId } from './seed';
+import { RESOURCE_PREFIX, resolveWorkloadId } from './seed';
 import { modelIdentityForService } from '@/data/models';
 
 /**
@@ -52,6 +52,7 @@ export function workloadIdFromTags(tags: unknown): string | null {
     }
   }
   if (typeof bag !== 'object' || bag === null || Array.isArray(bag)) return null;
+  if (!Object.hasOwn(bag, WORKLOAD_TAG_KEY)) return null;
   const value = (bag as Record<string, unknown>)[WORKLOAD_TAG_KEY];
   if (typeof value !== 'string') return null;
   const id = value.trim();
@@ -74,7 +75,9 @@ export function attachRatioValue<T extends { ResourceId: string }>(
 ): T & RatioFocusExtensions {
   let workloadId = resolveWorkloadId(cost.ResourceId);
   let workload = workloadId ? WORKLOADS.find((w) => w.id === workloadId) : undefined;
-  if (!workload && !cost.ResourceId.startsWith(SIMULATED_RESOURCE_PREFIX)) {
+  // An explicit ResourceId workload identity (loaded or not) is never replaced by a tag.
+  const explicit = cost.ResourceId.startsWith(RESOURCE_PREFIX);
+  if (!explicit && !cost.ResourceId.startsWith(SIMULATED_RESOURCE_PREFIX)) {
     const tagged = workloadIdFromTags((cost as { Tags?: unknown }).Tags);
     if (tagged) {
       workloadId = tagged;

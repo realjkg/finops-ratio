@@ -1,12 +1,14 @@
 $ npx vitest run src/costsource/tagAttribution.test.ts
  Test Files  1 passed (1)
-      Tests  5 passed (5)
+      Tests  7 passed (7)
 $ npx vitest run (full)
  Test Files  183 passed (183)
-      Tests  3481 passed (3481)
+      Tests  3479 passed (3479)
 $ npx tsc --noEmit: clean; npx eslint src/costsource: clean; npx next build: ok
 Mutations (each run against tagAttribution.test.ts, then reverted):
- M1 drop the synthetic: guard           -> 1 failed (killed)
- M2 accept ids not in WORKLOADS         -> 1 failed (killed)
- M3 tag overrides ResourceId identity   -> 1 failed (killed)
- M4 drop own-property check             -> survived; equivalent (key is not inherited), check removed
+ M1 drop the synthetic: guard              -> 1 failed (killed)
+ M2 accept ids not in WORKLOADS            -> 1 failed (killed)
+ M3 tag overrides a loaded ResourceId id   -> 1 failed (killed)
+ M5 gate on "workload loaded" not explicit -> 1 failed (killed)
+ M6 drop the own-property check            -> 1 failed (killed; inherited keys on non-JSON input)
+ M7 drop value trim                        -> 1 failed (killed)

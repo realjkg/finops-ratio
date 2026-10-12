@@ -36,7 +36,10 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   fixtures). Workload attribution from cost-row tags is a slice in this series:
   a non-simulated row whose `Tags` column holds `ratio:workload` equal to the id
   of a loaded workload resolves to it when `ResourceId` carries no workload
-  identity (`WORKLOAD_TAG_KEY` in `src/costsource/normalize.ts`). Simulated
+  identity (`WORKLOAD_TAG_KEY` in `src/costsource/normalize.ts`; the key is
+  exact and case-sensitive, the value is trimmed, duplicate keys in a JSON
+  string resolve last-wins). An explicit `arn:ratio:workload/` ResourceId is
+  never replaced by a tag, even when it names an unloaded workload. Simulated
   rows (`synthetic:` ResourceId) and unknown or malformed values stay
   unresolved. Only direct ingest keeps `Tags`; the connector path drops it.
   The connector research of 2026-10-11 found gaps in the AWS, Azure and GCP
