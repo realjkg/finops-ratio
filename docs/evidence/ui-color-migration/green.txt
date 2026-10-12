@@ -12,3 +12,7 @@ Mutation checks (each restored afterwards):
   M3 three hex literals back in SpendSummaryBar   1 failure (TSX hex 16 in 4 ratchet)
   M4 ratioColor 'good' returns value         1 failure (scales rating test)
   M5 scales.ts cost -> '#ff5c72' (rendered)  audit: Light 17 and High contrast 17 failing nodes, > max 0
+  M6 accentColor + '40' | M7 meta.color + "1A"   hex-alpha guard fails (both)
+  M8 C_SUB back to hex (vitest) hex ratchet 8 in 2 fails | M9 same (rendered) audit Light 2, High contrast 2
+Round 2 GREEN: tsc 0, eslint clean, vitest 190 files / 3566 tests, npm run build + check:bundle pass,
+  audit light 0, high-contrast 0 (SVG text included), dark 346; whole simulation suite 14 passed (1.7m)

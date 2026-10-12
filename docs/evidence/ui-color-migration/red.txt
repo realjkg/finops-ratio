@@ -9,3 +9,6 @@ $ RATIO_TEST_SKIP_BUILD=1 npx playwright test --config playwright.simulation.con
   high-contrast  Expected <= 0  Received 89   FAIL
   dark           Expected <= 314 (measured baseline)  PASS (314)
 All 89 Light/High contrast failures are scales.ts TOKEN_HEX neon accents (ratio/budget/status/evidence colors) on white.
+Round 2 RED (commit on top of d686056, tests only; SVG text read via fill, lower ratchets, hex-alpha forms)
+  audit: light 2 (max 0), high-contrast 2 (max 0), dark 346 (was pinned 314): '1x break-even' SVG label, / and /overview
+  vitest tokens.test.ts: rgb() 19 and TSX hex 8 in 2 ratchets fail (SVG constants still hex/rgba)

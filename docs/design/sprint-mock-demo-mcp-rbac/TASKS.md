@@ -57,13 +57,12 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   T4 slice 1 (open, `feat/ui-color-migration-1`): the neon accents in
   `src/lib/scales.ts` are theme variables and badge tints use `tint()`; the rendered
   audit (`tests/simulation/contrast-audit.spec.ts`, evidence in
-  `docs/evidence/ui-color-migration/`) goes from 89 to 0 failing text nodes for Light
+  `docs/evidence/ui-color-migration/`) goes from 91 to 0 failing text nodes (SVG text read via fill) for Light
   and High contrast on `/`, `/overview`, `/connectors` and `/workloads`; Dark is
-  unchanged at 314 (legacy look, not release-ready). Remaining, in order: (2) flip
+  unchanged at 346 (legacy look, not release-ready; includes SVG text). Remaining, in order: (2) flip
   `DEFAULT_THEME` to `light` and label Dark "(contrast incomplete)" in the selector
   once the theme menu PR merges, because `ThemeMenu.tsx` and its test assume a dark
-  default; (3) SVG chart constants in `LiveAccrualBoard.tsx` and `SpendToValueGraph.tsx`
-  and the `rgba()` tints in connectors and frameworks; (4) audit more routes
+  default; (3) the `rgba()` tints in connectors and frameworks (SVG chart constants moved in slice 1); (4) audit more routes
   (`/findings`, `/mission`, `/prediction`, `/outcomes`) and ratchet the style-object
   baseline down; (5) Dark contrast, only if the owner decides to retune it.
 
