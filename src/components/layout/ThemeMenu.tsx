@@ -95,9 +95,9 @@ export function ThemeMenu() {
     setFix(null);
     // Only imports that cannot fill the editor keep a snapshot; contrast problems come live from `checked`.
     setProblems(result.theme ? [] : result.violations);
+    setDirty(true); // any import attempt is an edit, a failed one included (its problems must survive OS changes)
     if (result.theme) {
       setDraft({ ...result.theme });
-      setDirty(true);
     }
     if (result.theme && !result.violations.length) save(result.theme);
   };
@@ -195,7 +195,7 @@ export function ThemeMenu() {
             <button type="button" className={btn} disabled={!checked.theme} onClick={() => {
               const f = fixContrast(checked.theme as Theme);
               replaceDraft({ ...f.theme }, f);
-              setDirty(true); // fixed colors are edits: an OS change must not overwrite them
+              setDirty(dirty || f.changes.length > 0); // changed colors are edits; "Nothing to change" is not
             }}>Fix contrast</button>
             <button type="button" className={btn} onClick={() => replaceDraft({ ...BUILT_IN_THEMES[isBuiltIn(active) ? active : system], name: draft.name })}>Reset to built-in</button>
             {canExport ? (

@@ -29,3 +29,9 @@ GREEN round 5: Fix contrast sets the dirty flag after replacing the draft (fixed
 still clears it (deliberate replacement; pinned). src/theme + src/components/layout -> 118 passed; tsc and eslint clean;
 next build succeeds; theme-mobile.spec.ts -> 3 passed.
 M8 Fix contrast clears dirty again: killed, 1 failed | 26 passed
+
+GREEN round 6: load() marks every import attempt as an edit (a failed one included); Fix contrast marks the draft
+edited only when it changed colors (dirty || f.changes.length > 0). src/theme + src/components/layout -> 118 passed;
+tsc and eslint clean; next build succeeds; theme-mobile.spec.ts -> 3 passed. (One test line folded after RED for the cap.)
+M9 a failed import does not mark the draft edited: killed, 1 failed | 26 passed
+M10 a no-op Fix contrast marks the draft edited: killed, 1 failed | 26 passed

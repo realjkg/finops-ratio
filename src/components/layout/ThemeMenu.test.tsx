@@ -343,8 +343,7 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
       setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
       flip(false); expect(txt()).toBe('#123456'); // case 2: an edited draft is kept
       click(button('Customize')); // case 4: closing is the cancel path; an OS change happens while closed
-      flip(true);
-      openEditor();
+      flip(true); openEditor();
       expect(txt()).toBe(hc.txt); // edits discarded, effective theme
       click(button('Fix contrast')); // "Nothing to change" is not an edit (re-review)
       flip(false); expect(txt()).toBe(dark.txt); // dirty was reset on reopen and the no-op fix left it clear: it follows
