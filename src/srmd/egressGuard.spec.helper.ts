@@ -1,8 +1,7 @@
-// Structural no-egress guard for src/srmd. It parses every code file with the
-// TypeScript parser and rejects any import outside this directory, dynamic
-// import, and any identifier or member name tied to network access, dynamic
-// code or global-object indexing. It is a guard against accidents and simple
-// tricks, not a sandbox: it cannot prove the absence of every escape.
+// Structural no-egress guard for src/srmd (TypeScript AST, not regex): only
+// relative imports inside the directory, no dynamic import, no network,
+// dynamic-code or global-object names. Guards against accidents and simple
+// tricks; it is not a sandbox.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import ts from 'typescript';

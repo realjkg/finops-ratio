@@ -1,8 +1,5 @@
-// Reusable contract suite. A future real adapter must pass the same checks
-// that the simulated one does; nothing here is specific to the simulation.
-// Real adapters must keep private helpers out of the adapter object (module
-// scope functions or #private fields): any other function-valued property,
-// including symbol-keyed ones, fails the read-only check.
+// Reusable contract suite a future real adapter must pass. Private helpers must
+// stay off the adapter object (module-scope functions or #private fields).
 import { describe, expect, it } from 'vitest';
 import {
   CAPABILITIES,
@@ -25,9 +22,8 @@ const ALLOWED_KEYS: readonly (string | symbol)[] = [...READ_METHODS, 'discoverCa
 const json = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === 'bigint' ? `${x}n` : x));
 
 export interface ContractOptions {
-  /** Provider-direct records that the adapter's SRMD view may overlap. */
   providerRecords: ProviderCostRecord[];
-  /** Highest maturity this adapter may claim. Enforced at runtime: anything above 'simulated' throws. */
+  /** Enforced at runtime: anything above 'simulated' throws. */
   maxMaturity?: Maturity;
 }
 
@@ -107,25 +103,25 @@ export function runSrmdContractTests(adapter: SrmdAdapter, opts: ContractOptions
 
   describe('SRMD contract: capability honesty', () => {
     it('reports every capability as supported, unsupported or unknown with a reason', async () => {
-      const report = await adapter.discoverCapabilities();
-      expect(Object.keys(report.capabilities).sort()).toEqual([...CAPABILITIES].sort());
+      const { capabilities } = await adapter.discoverCapabilities();
+      expect(Object.keys(capabilities).sort()).toEqual([...CAPABILITIES].sort());
       for (const c of CAPABILITIES) {
-        expect(['supported', 'unsupported', 'unknown']).toContain(report.capabilities[c].status);
-        expect(report.capabilities[c].reason.length).toBeGreaterThan(0);
+        expect(['supported', 'unsupported', 'unknown']).toContain(capabilities[c].status);
+        expect(capabilities[c].reason.length).toBeGreaterThan(0);
       }
     });
     it('returns unsupported (never data) for a method whose capability is not supported', async () => {
       const caps = (await adapter.discoverCapabilities()).capabilities;
-      const calls = {
-        cost_records: () => adapter.listCostRecords(),
-        tags: () => adapter.listTagTaxonomy(),
-        account_mapping: () => adapter.listAccountMappings(),
-        migrations: () => adapter.listMigrations(),
-        control_totals: () => adapter.getControlTotals(),
-      } as const;
-      for (const [cap, call] of Object.entries(calls)) {
+      const calls = [
+        ['cost_records', () => adapter.listCostRecords()],
+        ['tags', () => adapter.listTagTaxonomy()],
+        ['account_mapping', () => adapter.listAccountMappings()],
+        ['migrations', () => adapter.listMigrations()],
+        ['control_totals', () => adapter.getControlTotals()],
+      ] as const;
+      for (const [cap, call] of calls) {
         const r = await call();
-        expect(r.status === 'ok').toBe(caps[cap as keyof typeof calls].status === 'supported');
+        expect(r.status === 'ok').toBe(caps[cap].status === 'supported');
         if (r.status === 'unsupported') expect('data' in r).toBe(false);
       }
     });
@@ -171,16 +167,13 @@ export function runSrmdContractTests(adapter: SrmdAdapter, opts: ContractOptions
       expect(new Set(recs.map((r) => r.lineage.ratioRef)).size).toBe(recs.length);
       for (const r of recs) {
         const l = r.lineage;
-        expect(l.srmdRecordId).toBeTruthy();
-        expect(l.ratioRef).toContain(l.srmdRecordId);
-        expect(l.upstreamSystem).toBeTruthy();
+        expect([l.srmdRecordId, l.upstreamSystem].every(Boolean) && l.ratioRef.includes(l.srmdRecordId)).toBe(true);
         expect(l.providerRecordId === null || (typeof l.providerRecordId === 'string' && l.providerRecordId.length > 0)).toBe(true);
       }
     });
     it('keeps amounts exact (bigint nano units) and currency per record', async () => {
       for (const r of await records()) {
-        expect(typeof r.amountNanos).toBe('bigint');
-        expect(r.currency).toMatch(/^[A-Z]{3}$/);
+        expect([typeof r.amountNanos, r.currency]).toEqual(['bigint', expect.stringMatching(/^[A-Z]{3}$/)]);
         expect(parseNanos(formatNanos(r.amountNanos))).toBe(r.amountNanos);
       }
       for (const t of okData(await adapter.getControlTotals())) expect(typeof t.totalNanos).toBe('bigint');
