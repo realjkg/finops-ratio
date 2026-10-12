@@ -203,7 +203,7 @@ const STATE_TONE: Record<AdjustmentDisplayState, string> = {
   estimated_low_confidence: TOKEN_HEX.shape,
 };
 
-function PredictionResult({ prediction }: { prediction: ChangePrediction }) {
+export function PredictionResult({ prediction }: { prediction: ChangePrediction }) {
   const displayState = adjustmentDisplayState(prediction);
   const route = routeAdjustment(prediction);
   const tone = STATE_TONE[displayState];

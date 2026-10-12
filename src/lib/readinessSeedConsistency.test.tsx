@@ -12,6 +12,8 @@ import { fetchAiSpendRatio } from '@/costsource/aiSpendRatio';
 import { createCostSourceClient } from '@/costsource';
 import { ITBM_CRITICAL_SERVICE_ALLOCATION } from '@/costsource/seed';
 import { formatDeltaValueRatio } from '@/prediction/predictors';
+import { createPredictionClient } from '@/prediction';
+import { PredictionResult } from '@/mission/AdjustmentCards';
 
 const W = { start: '2026-06-01T00:00:00Z', end: '2026-07-01T00:00:00Z' };
 
@@ -50,5 +52,18 @@ describe('M5 delta value ratio is bounded for display', () => {
     expect(formatDeltaValueRatio(41.3)).toEqual({ text: '> +10.0×', capped: true });
     expect(formatDeltaValueRatio(-12.7)).toEqual({ text: '< -10.0×', capped: true });
     expect(formatDeltaValueRatio(3.5)).toEqual({ text: '+3.5×', capped: false });
+  });
+});
+
+describe('M5 the same bound applies on the /mission Proposed Changes card', () => {
+  it.each(['wl-support', 'wl-codereview'])('%s model switch and a negative demand-shape delta', async (id) => {
+    const w = WORKLOADS.find((x) => x.id === id)!;
+    const p = await createPredictionClient('mock').predictChange({ type: 'model_switch', workloadId: id, fromModel: w.model, toModel: 'gemini-2.5-flash' });
+    for (const delta of [p.impact.deltaValueRatio, -12.7]) {
+      const html = renderToStaticMarkup(<PredictionResult prediction={{ ...p, impact: { ...p.impact, deltaValueRatio: delta } }} />);
+      expect(html).toMatch(/&(gt|lt); [+-]10\.0/);
+      expect(html).toContain('Upper bound, not a forecast');
+      expect(html).not.toMatch(/(41\.3|115\.4|12\.7)/);
+    }
   });
 });

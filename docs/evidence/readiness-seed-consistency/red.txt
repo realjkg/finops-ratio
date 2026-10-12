@@ -17,3 +17,9 @@ FAIL B3b budget consumed names its basis in both views > Support Triage Router
 FAIL B3c costsource differences are explained > ServiceNow = billing export + ITBM allocation on critical services, and the card says so
 FAIL M5 delta value ratio is bounded for display > caps large estimates and keeps small ones exact
 ⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+# Round 2 RED (review M-1: same bound missing on /mission Proposed Changes), against head 64f8aca
+$ npx vitest run src/lib/readinessSeedConsistency.test.tsx
+      Tests  2 failed | 24 passed (26)
+ FAIL   M5 the same bound applies on the /mission Proposed Changes card > wl-codereview model switch and a negative demand-shape delta
+ FAIL   M5 the same bound applies on the /mission Proposed Changes card > wl-support model switch and a negative demand-shape delta
