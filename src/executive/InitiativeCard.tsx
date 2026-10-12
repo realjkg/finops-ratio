@@ -51,7 +51,7 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
       {/* Budget consumed bar */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-xs">
-          <span className="font-medium text-exec-muted">{lang.fuelLabel}</span>
+          <span className="font-medium text-exec-muted">{lang.fuelLabel} · month to date</span>
           <span className="font-mono font-semibold text-exec-text">
             {initiative.budgetConsumedPct}%
           </span>
@@ -62,7 +62,7 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
           aria-valuenow={initiative.budgetConsumedPct}
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-label={`${lang.fuelLabel}: ${initiative.budgetConsumedPct}%`}
+          aria-label={`${lang.fuelLabel}, month to date: ${initiative.budgetConsumedPct}%`}
         >
           <div
             className="h-full rounded-full"

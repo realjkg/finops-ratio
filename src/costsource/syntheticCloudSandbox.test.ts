@@ -26,22 +26,23 @@ const ORACLE: Record<string, { provider: string; totalCents: number; mappedCents
 };
 
 // Golden SHA-256 of the existing three sources, captured on origin/main
-// (7a9da43) with the clock pinned to 2026-06-15T00:00:00Z. pointfive-sandbox
+// (7a9da43) with the clock pinned to 2026-06-15T00:00:00Z; rows hashes re-captured for
+// fix/readiness-seed-consistency (only x_RatioGovernanceGates of Fraud Triage moved, 4 to 2). pointfive-sandbox
 // rows re-captured in C1: its v1.0 rows no longer get a guessed ServiceSubcategory.
 const GOLDEN: Record<string, { descriptor: string; rows: string; health: string }> = {
   'pointfive-sandbox': {
     descriptor: '6ca1033c4438a232b0b733ad650dfa95f6a9baeba7c1d837a3c985999a3fca3d',
-    rows: 'b361b5720379ae0df8a7d7aa046112b279e7dd2a8ed47b4241b8d5289bd20010',
+    rows: '51508ff639df0e5e7f03773da934cc9d0577e22306038863807b9ac06274a1eb',
     health: '10f1273e189cb81d0874ad9145a276b5a5141cdc876e5d6295ce4928f9662795',
   },
   'focus-file-sandbox': {
     descriptor: '228b412ca8e466fc9e792b0870fbc07243c11b22274885746d2839f9b565641e',
-    rows: '151db5aebb81d92249eccda632d1f01a6aef0fd146a2bc6ee698e2d6d7ed67d9',
+    rows: 'e6f23b3f769b9e43b3a40522cb93571e2cb812d8a95727f5b0de2424bb1a5155',
     health: '25c27e6c288090956eed7b8eb5c2c739435a7fe9d67f32aace5e9f5e91fcf401',
   },
   'servicenow-sandbox': {
     descriptor: 'c5b547a4ba1f88533c0c7a1c6e297eb13a9ab335287ce7761a188f5e39d8934b',
-    rows: 'bc535e964b8915ab33a90420dc9516985db38663c371512ee0f0afdb44c55bf7',
+    rows: 'ab93ff454cb5448566e5032bc447ed0a4b8537d0b5ee15c3ea7fdd2d569fbd78',
     health: '4a82d31d7f99e7b065c3959373a4be3aac8b367881a0ee532c8f5af89de1bc1a',
   },
 };

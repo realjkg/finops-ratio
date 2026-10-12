@@ -35,7 +35,7 @@ export function FuelAndValue({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-xs">
-        <span className="font-mono uppercase tracking-wider text-dim">Budget consumed</span>
+        <span className="font-mono uppercase tracking-wider text-dim">Budget consumed · today</span>
         {/* R4: the value badge is part of the same component as the gauge.
             The provenance mark rides beside it — quiet, token-colored. */}
         <span className="inline-flex items-center gap-1.5">

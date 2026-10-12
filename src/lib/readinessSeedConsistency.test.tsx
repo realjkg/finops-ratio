@@ -29,8 +29,8 @@ describe('B3b budget consumed names its basis in both views', () => {
     const m = toMissionView(w);
     const tech = renderToStaticMarkup(<FuelAndValue {...m} />);
     const exec = renderToStaticMarkup(<InitiativeCard initiative={toInitiativeView(w)} lang={LANGUAGE_MAP.executive} showLens={false} />);
-    expect(tech).toMatch(/Budget consumed[^<]*today/);
-    expect(exec).toMatch(/Budget consumed[^<]*month to date/);
+    expect(tech).toContain('>Budget consumed · today<');
+    expect(exec).toContain('>Budget consumed · month to date<');
   });
 });
 

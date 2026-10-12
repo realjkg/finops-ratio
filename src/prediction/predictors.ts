@@ -33,6 +33,21 @@ export interface PredictionContext {
   registry: ModelEntry[];
 }
 
+/** Beyond this magnitude a Δ value ratio is shown as a bound, not a point estimate. */
+export const DELTA_RATIO_DISPLAY_CAP = 10;
+
+/**
+ * Display form of a predicted Δ value ratio. The estimator holds total value
+ * constant while spend moves, so a large switch yields an extreme ratio that is
+ * an upper bound, not a forecast: past the cap it renders as "> +10.0×".
+ */
+export function formatDeltaValueRatio(delta: number): { text: string; capped: boolean } {
+  const cap = DELTA_RATIO_DISPLAY_CAP;
+  if (delta > cap) return { text: `> +${cap.toFixed(1)}\u00d7`, capped: true };
+  if (delta < -cap) return { text: `< -${cap.toFixed(1)}\u00d7`, capped: true };
+  return { text: `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}\u00d7`, capped: false };
+}
+
 /** Per-call token volume implied by the workload's current daily run rate. */
 function volumeOf(workload: Workload): VolumeProfile {
   const calls = workload.outputs.daily_inferences;
