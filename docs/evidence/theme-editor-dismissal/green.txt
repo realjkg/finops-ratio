@@ -1,0 +1,10 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+ RUN  v5.0.1 /workspace/scratch/090898785714/finops-ratio
+
+
+ Test Files  6 passed (6)
+      Tests  121 passed (121)
+   Start at  13:57:59
+   Duration  5.29s (tests 68%, environment 13%, transform 9%, import 9%, worker 1%)
+
