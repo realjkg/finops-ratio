@@ -6,6 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { isSimulatedSource, SIMULATED_FIXTURES, SimulatedConnectorClient } from './SimulatedConnectorClient';
 import { AWS_FOCUS_1_0_CSV, AZURE_FOCUS_1_0_CSV } from './simulatedFixtures';
+import { landingSummary } from '@/connectors/ingestLanding';
 import { normalizeRows } from './normalize';
 import { OFFLINE_SANDBOX_SOURCE_IDS } from './sandboxSources';
 import { sourcesForEnv } from './seed';
@@ -86,4 +87,23 @@ it('health is a simulated pass for every id and says so', async () => {
     expect(health.detail).toMatch(/^Simulated .*no network call/);
   }
   await expect(client.healthCheck('pointfive-sandbox')).rejects.toThrow(/not a simulated connector/);
+});
+
+it('no simulated row or finding resolves to a Ratio workload (they land honestly unresolved)', async () => {
+  for (const id of Object.keys(SIMULATED_FIXTURES)) {
+    const result = await client.fetchCostRows(id, ANY);
+    const findings = await client.fetchFindings(id);
+    expect(result.rows.map((r) => r.x_RatioWorkloadId ?? null).filter(Boolean)).toEqual([]);
+    expect(findings.map((f) => f.workloadId).filter(Boolean)).toEqual([]);
+    expect(landingSummary({ sourceId: id, sourceName: id, at: '', result, findings }).workloadsResolved).toBe(0);
+  }
+});
+
+it('every anomaly title states the direction its observedSpendDelta sign has (negative = drop)', async () => {
+  const anomalies = (await client.fetchFindings('pointfive-live')).filter((f) => f.type === 'anomaly');
+  expect(anomalies.length).toBeGreaterThan(0);
+  for (const a of anomalies) {
+    const text = `${a.category} ${a.title}`.toLowerCase();
+    expect([/spike|increase|rise/.test(text), /drop|decrease|fall/.test(text)]).toEqual([a.observedSpendDelta > 0, a.observedSpendDelta < 0]);
+  }
 });

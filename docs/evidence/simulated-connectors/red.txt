@@ -11,3 +11,18 @@ TypeError: Cannot read properties of undefined (reading 'click')
 AssertionError: expected 'error' to be 'locked' // Object.is equality
  Test Files  2 failed (2)
       Tests  3 failed | 1 passed (4)
+
+# RED, review round (Copilot 5486208160 + challenger M1/M2/L1), base 1bd93bc
+$ npx vitest run src/connectors/simulatedProvenance.dom.test.tsx src/costsource/simulatedConnectorClient.test.ts
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/connectors/simulatedProvenance.dom.test.tsx > the run itself is marked simulated, so Findings, Attribution and the workload card all say so
+AssertionError: expected 'PointFive (live)' to be 'PointFive (live) (simulated)' // Object.is equality
+ FAIL  src/connectors/simulatedProvenance.dom.test.tsx > documented-format cards say what is verified and what is not
+AssertionError: expected '<div class="flex flex-col gap-2.5 rou…' to contain 'column names verified; values and enc…'
+ FAIL  src/costsource/simulatedConnectorClient.test.ts > no simulated row or finding resolves to a Ratio workload (they land honestly unresolved)
+AssertionError: expected [ 'wl-demo-001' ] to deeply equal []
+ FAIL  src/costsource/simulatedConnectorClient.test.ts > every anomaly title states the direction its observedSpendDelta sign has (negative = drop)
+AssertionError: expected [ true, false ] to deeply equal [ false, true ]
+ Test Files  2 failed (2)
+      Tests  4 failed | 10 passed (14)
+(the locked/plain-Error store test passes already: it pins existing behavior for the M2 mutation)
