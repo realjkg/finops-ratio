@@ -22,3 +22,10 @@ $ playwright test tests/simulation/csp.spec.ts (production build of origin/main,
   5 failed
   2 passed (1.1m)
 (tests 5,6 pass before the change by design: they pin existing behavior that the policy must preserve; 1-4 and the mutation test fail without the header)
+
+# RED (round on review Medium: report-only lever is build-time)
+$ npx vitest run src/security
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/security/csp.test.ts > next.config.js headers > the image build stage passes RATIO_CSP_MODE through before `npm run build`
+AssertionError: expected -1 to be greater than -1
+      Tests  1 failed | 7 passed (8)

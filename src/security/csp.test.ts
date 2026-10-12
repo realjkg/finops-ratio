@@ -39,17 +39,28 @@ describe('policy', () => {
 
 describe('next.config.js headers', () => {
   afterEach(() => vi.unstubAllEnvs());
-  const header = async (mode: string) => {
+  // Next evaluates headers() once, during `next build` (routes-manifest.json); `next start` does not re-read env.
+  const keys = async (mode: string) => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('VERCEL_ENV', '');
     vi.stubEnv('RATIO_CSP_MODE', mode);
     const rules = (await nextConfig.headers?.()) ?? [];
     expect(rules.map((r) => r.source)).toEqual(['/:path*']);
-    return rules[0].headers[0];
+    expect(rules[0].headers[0].value).toBe(prod);
+    return rules[0].headers.map((h) => h.key);
   };
 
-  it('enforces on every path by default; RATIO_CSP_MODE=report-only only reports', async () => {
-    expect(await header('')).toEqual({ key: 'Content-Security-Policy', value: prod });
-    expect((await header('report-only')).key).toBe('Content-Security-Policy-Report-Only');
+  it('enforces by default and for any value other than exactly report-only', async () => {
+    for (const mode of ['', 'enforce', 'Report-Only', 'off', '1']) expect(await keys(mode), mode).toEqual(['Content-Security-Policy']);
+  });
+  it('RATIO_CSP_MODE=report-only at build time sends only the report-only header', async () => {
+    expect(await keys('report-only')).toEqual(['Content-Security-Policy-Report-Only']);
+  });
+  it('the image build stage passes RATIO_CSP_MODE through before `npm run build`', () => {
+    const docker = readFileSync('infrastructure/simulation/Dockerfile', 'utf8');
+    const at = (needle: string) => docker.indexOf(needle);
+    expect(at('ARG RATIO_CSP_MODE')).toBeGreaterThan(-1);
+    expect(at('ENV RATIO_CSP_MODE=$RATIO_CSP_MODE')).toBeGreaterThan(at('ARG RATIO_CSP_MODE'));
+    expect(at('RUN npm run build')).toBeGreaterThan(at('ENV RATIO_CSP_MODE'));
   });
 });
