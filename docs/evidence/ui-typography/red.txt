@@ -9,3 +9,7 @@ vertical scrollers that also scroll sideways) was committed BEFORE the fixes and
   /overview  overlap: text "0x" / text "$0.00"
   /workloads clipped: ticker spans "Spend up 23.6% MoM ...", "Value ratio fell to -0.2x ...", "Sales Copilot:" by footer / div.flex
   4 failed (4 cases: 2 widths x 2 families)
+
+Round 3 (review: same-element line boxes, phone footer height). Spec committed before the fixes: on round-2 code the collapsed phone
+footer at /workloads, 390 px, 130% measured 375 px (default family) and 458 px (system-mono) against the new <= 64 px bound; 2 of 4 cases failed
+(1440 cases passed). The per-line check itself has no RED on the current pages (zero false positives); its mutations are in green.txt.

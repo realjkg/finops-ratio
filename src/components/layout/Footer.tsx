@@ -2,7 +2,7 @@
 // recent unacknowledged alerts inline — no scrolling animation. Clicking an
 // alert navigates to that workload’s Alert History tab.
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '@/store/useStore';
 import { timeAgo } from '@/lib/format';
 import { DEMO_NOW } from '@/data/workloads';
@@ -25,6 +25,7 @@ export function Footer() {
   const workloads = useStore((s) => s.workloads);
   const select = useStore((s) => s.select);
   const setTab = useStore((s) => s.setTab);
+  const [open, setOpen] = useState(false); // phones: the alerts expand above the one-line bar
 
   // Most-recent three unacknowledged alerts, sorted descending by time.
   const top3 = useMemo(
@@ -45,30 +46,35 @@ export function Footer() {
 
   if (top3.length === 0) return null;
 
-  return (
-    <footer className="flex min-h-8 shrink-0 items-center gap-4 border-t border-edge bg-deep px-4 py-1">
-      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-dim">
-        Alerts
-      </span>
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-1">
-        {top3.map((alert) => (
-          <button
-            key={alert.id}
-            type="button"
-            onClick={() => onClick(alert)}
-            className="flex min-w-0 items-center gap-2 text-left text-xs text-sub transition-colors hover:text-txt"
-          >
-            <span style={{ color: SEVERITY_COLOR[alert.severity] }}>
-              {severityIcon(alert.severity)}
-            </span>
-            <span className="font-mono font-medium text-txt">{nameFor(alert.workload_id)}:</span>
-            <span className="min-w-0">{alert.message}</span>
-            <span className="text-dim">· {timeAgo(alert.triggered_at, DEMO_NOW)}</span>
-          </button>
-        ))}
+  const items = top3.map((alert) => (
+    <button
+      key={alert.id}
+      type="button"
+      onClick={() => onClick(alert)}
+      className="flex min-w-0 items-center gap-2 text-left text-xs text-sub transition-colors hover:text-txt"
+    >
+      <span style={{ color: SEVERITY_COLOR[alert.severity] }}>{severityIcon(alert.severity)}</span>
+      <span className="font-mono font-medium text-txt">{nameFor(alert.workload_id)}:</span>
+      <span className="min-w-0">{alert.message}</span>
+      <span className="text-dim">· {timeAgo(alert.triggered_at, DEMO_NOW)}</span>
+    </button>
+  ));
 
+  return (
+    <footer className="shrink-0 border-t border-edge bg-deep">
+      {open && (
+        <div id="footer-alerts" role="region" aria-label="Alerts" tabIndex={0} className="flex max-h-[45vh] flex-col gap-2 overflow-y-auto px-4 py-2 md:hidden">
+          {items}
+        </div>
+      )}
+      <div className="flex min-h-8 items-center gap-4 px-4 py-1">
+        <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-dim">Alerts</span>
+        {/* Phones: one compact line; the full alert text opens above it. */}
+        <button type="button" aria-expanded={open} aria-controls="footer-alerts" onClick={() => setOpen(!open)} className="text-xs text-sub underline md:hidden">
+          {open ? 'Hide' : 'Show'} alerts ({top3.length})
+        </button>
+        <div className="hidden min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-1 md:flex">{items}</div>
       </div>
     </footer>
   );
 }
-

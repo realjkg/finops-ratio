@@ -1,16 +1,19 @@
-GREEN, round 2, branch feat/ui-typography merged with origin/main 45a9ba2 (production build, Chromium)
+GREEN, round 3, branch feat/ui-typography merged with origin/main 9024bc1 (production build, Chromium)
 tsc 0 errors; eslint clean; vitest 191 files / 3572 tests; next build OK; check:bundle pass;
 Playwright simulation suite on a production build: 15 passed (customer 4, outcomes 2, theme-mobile 3, typography-layout 4, z-agent 1, zz-frank 1).
 
 Real defects found by the stronger guard and fixed at the root (no overflow hidden, no allowlist, zero false positives):
   ValueRatioMeter.tsx    axis label "1x value" now has its own row (collided with "0x" at 130%)
   SpendToValueGraph.tsx  first x tick is start-anchored; the selected point's name sits above it near the x axis (pre-existing at 100%)
-  Footer.tsx             alert ticker wraps (min-h, flex-wrap, no overflow-hidden/truncate) instead of cutting text (pre-existing at 100%)
+  Footer.tsx             was cut off (pre-existing at 100%). Round 3: >= 768 px keeps the full wrapped ticker (65 px at 100%, 84 px at 130%, 1440);
+                         phones show one compact line with a "Show alerts (n)" button (aria-expanded) that opens the full text above it
+                         (max 45vh, labeled scrollable region). Footer height at 390 x 844: collapsed 33 px (100%), 43 px (130%); expanded 193 / 313 px.
   FindingsPage.tsx, InitiativeCard.tsx   names wrap instead of truncating
 
 VISIBLE CHANGE AT 100% (not only at 130%): finding names that were ellipsis-truncated now wrap (review measured 10 of 11 names
 at 1440 px, rows about 59 -> 79 px, list roughly 220 px taller; evidence column aligned to the top of the row); initiative names wrap;
-the Findings meter gets a second label row; the footer ticker wraps and may be taller than 32 px. Neighbors reflow; no overlap.
+the Findings meter gets a second label row and its "1x value" label is no longer centered on the break-even line (starts at it);
+the footer is 33 px collapsed on phones and wraps on desktop (65 px at 1440). Neighbors reflow; no overlap.
 
 MUTATIONS (each applied, run on a production build, reverted; all caught)
 vitest: stored scale unvalidated; default leaves --ui-scale; pre-paint script edited; px override deleted; storage failure not reported
@@ -18,3 +21,7 @@ spec:   whitespace-nowrap on the finding-name span (scrolls horizontally); max-h
         whitespace-nowrap on the DetailPanel model line (390 px); -mt-1 on the Findings subtitle (overlap h1/p); -mt-3 on the InitiativeCard h3
         (below the fold on /overview); truncate restored on finding names; nav links -mr-12; Footer back to h-8 overflow-hidden;
         meter labels back on one row; html font-size rule removed
+
+Round 3 mutations (production builds, all caught): line-height 0.4 on the finding-name spans (390 px: "lines overlap"); line-height 0.8 on every <p> in main
+(1440 px, includes /connectors descriptions). The guard now also compares consecutive wrapped lines of one element (pitch < 75% of the glyph box).
+Guard run: 4 cases pass, including /workloads with the phone alerts collapsed (height <= 64 px) and opened by keyboard.

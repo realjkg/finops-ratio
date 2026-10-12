@@ -55,7 +55,7 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   editor (merged, #116, `6ac1335`; its Medium review fixes merged in #118, `45a9ba2`);
   T3 typography settings (text size 90 to 130% and font family, with a layout guard at
   130%; open, `feat/ui-typography`; long finding and initiative names now wrap instead of
-  truncating, which is visible at 100% on desktop); T4 inline colors moved onto tokens,
+  truncating, and the footer alert ticker collapses to one line on phones; both visible at 100%); T4 inline colors moved onto tokens,
   with a guard test.
 
 Boundary (v2): local and ephemeral only. No production infrastructure, no real
