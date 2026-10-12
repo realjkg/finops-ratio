@@ -68,7 +68,8 @@ const problems = (page: Page): Promise<string[]> =>
     return [...new Set(out)];
   });
 
-for (const [width, family] of [[1440, 'default'], [390, 'default'], [1440, 'system-mono'], [390, 'system-mono']] as const) {
+// 320, 360 and 768 (the md breakpoint) are where the top bar is tightest.
+for (const [width, family] of [[1440, 'default'], [390, 'default'], [1440, 'system-mono'], [390, 'system-mono'], [320, 'default'], [360, 'default'], [768, 'default'], [1024, 'default']] as const) {
   test(`130% text (${family}) has no overflow, clipping or overlap at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.addInitScript((f) => localStorage.setItem('ratio.typography', JSON.stringify({ scale: 130, family: f })), family);
