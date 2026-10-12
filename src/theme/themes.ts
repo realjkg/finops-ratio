@@ -76,7 +76,7 @@ export const BUILT_IN_THEMES: Readonly<Record<BuiltInThemeName, Theme>> = {
  * contrast; must match the `:root` block in src/index.css (tokens.test.ts).
  * Light is the intended default. The rendered audit (tests/simulation/contrast-audit.spec.ts)
  * now shows zero failing text nodes for Light and High contrast, so the flip is only
- * waiting on ThemeMenu.test.tsx, which assumes a dark default (owned by the open theme
- * menu PR); flip it there, never as a way to hide failures.
+ * waiting on ThemeMenu.test.tsx, which assumes a dark default; flip it with that test
+ * (next slice), never as a way to hide failures.
  */
 export const DEFAULT_THEME: BuiltInThemeName = 'dark';
