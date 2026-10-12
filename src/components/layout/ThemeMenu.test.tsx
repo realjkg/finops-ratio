@@ -342,6 +342,17 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
       setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
       act(() => { os.more = false; os.listeners.forEach((f) => f()); });
       expect(byLabel<HTMLInputElement>('txt hex').value).toBe('#123456'); // an edited draft is kept
+      click(button('Customize')); // case 4: closing is the cancel path; an OS change happens while closed
+      act(() => { os.more = true; os.listeners.forEach((f) => f()); });
+      openEditor();
+      expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES['high-contrast'].colors.txt); // edits discarded, effective theme
+      act(() => { os.more = false; os.listeners.forEach((f) => f()); });
+      expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES.dark.colors.txt); // dirty flag was reset, so it follows again
+      for (const name of ['light', 'dark'] as const) { // case 3: an explicit choice is not overridden (theme nor draft)
+        setValue(select(), name);
+        act(() => { os.more = !os.more; os.listeners.forEach((f) => f()); });
+        expect([html.getAttribute('data-theme'), byLabel<HTMLInputElement>('txt hex').value], name).toEqual([name, BUILT_IN_THEMES[name].colors.txt]);
+      }
       act(() => root?.unmount());
       expect(os.listeners.size).toBe(0);
     } finally {

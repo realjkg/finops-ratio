@@ -17,3 +17,10 @@ GREEN round 3: a dirty flag (set by color, name and import edits; cleared by rep
 refreshes the Default (system) draft when the OS preference changes. src/theme + src/components/layout -> 118 passed;
 tsc and eslint clean; theme-mobile.spec.ts (production build) -> 3 passed.
 M4 refresh ignores the dirty flag (clobbers edits): killed, 1 failed | 26 passed
+
+GREEN round 4 (no production change): src/theme + src/components/layout -> 118 passed. Full suite: Test Files 189 passed
+(189); Tests 3564 passed (3564). tsc and eslint clean; next build succeeds; theme-mobile.spec.ts -> 3 passed.
+The new assertions are live (each mutation reverted):
+MA reopening keeps the stale draft: killed, 1 failed | 26 passed
+MB the OS refresh ignores an explicit choice: killed, 1 failed | 26 passed
+MC replaceDraft keeps the dirty flag: killed, 1 failed | 26 passed

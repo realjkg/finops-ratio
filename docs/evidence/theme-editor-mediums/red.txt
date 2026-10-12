@@ -20,3 +20,9 @@ npx vitest run src/components/layout/ThemeMenu.test.tsx
      × Default (system) follows live OS changes and removes its listeners on unmount
 AssertionError: expected '#d0d8ea' to be '#000000' // Object.is equality
       Tests  1 failed | 26 passed (27)
+
+Round 4 (owner acceptance cases for the draft refresh), tests only, against eaeba05: no RED. The cases already pass:
+(1) Default, editor open, untouched draft follows an OS change; (2) an edited draft is kept (both pinned since round 3);
+(3) explicit Light / Dark: an OS change overrides neither the applied theme nor the draft;
+(4) closing the editor (the cancel path) and reopening after an OS change shows the effective theme, edits discarded,
+    dirty flag reset (the draft follows the next OS change again).
