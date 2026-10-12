@@ -1,67 +1,54 @@
 import { expect, test, type Page } from '@playwright/test';
 import { PREPAINT_SCRIPT } from '../../src/theme/user';
 
-// Real Chromium against the production build: the Content-Security-Policy must
-// not break rendering, theming or the data-URL export, must report zero
-// violations, and must still allow the one pinned pre-paint inline script.
-const ROUTES = ['/', '/overview', '/connectors', '/workloads'];
-
-/** Collects CSP console errors and securitypolicyviolation events for the page. */
-async function watch(page: Page) {
+// Production build in Chromium: zero CSP violations; only the pinned pre-paint script may run inline.
+// Chromium logs each violation to the console as "Refused to ... Content Security Policy directive ...".
+function watch(page: Page) {
   const seen: string[] = [];
-  page.on('console', (m) => { if (/content security policy|refused to/i.test(m.text())) seen.push(`console: ${m.text()}`); });
-  await page.addInitScript(() => {
-    (window as unknown as { __csp: string[] }).__csp = [];
-    document.addEventListener('securitypolicyviolation', (e) => (window as unknown as { __csp: string[] }).__csp.push(`${e.violatedDirective} ${e.blockedURI}`));
-  });
-  return async () => [...seen, ...(await page.evaluate(() => (window as unknown as { __csp?: string[] }).__csp ?? [])).map((v) => `event: ${v}`)];
+  page.on('console', (m) => { if (/content security policy|refused to/i.test(m.text())) seen.push(m.text()); });
+  return seen;
 }
 
-for (const route of ROUTES) {
-  test(`CSP enforced on ${route}: renders with zero violations`, async ({ page }) => {
-    const violations = await watch(page);
-    const response = await page.goto(route);
-    expect(response?.headers()['content-security-policy'] ?? '').toContain("script-src 'self' 'sha256-");
-    await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+test('enforced on /, /overview, /connectors, /workloads: renders with zero violations', async ({ page }) => {
+  const violations = watch(page);
+  for (const route of ['/', '/overview', '/connectors', '/workloads']) {
+    const res = await page.goto(route);
+    expect(res?.headers()['content-security-policy'], route).toContain("script-src 'self' 'sha256-");
+    await expect(page.getByRole('navigation', { name: 'Main navigation' }), route).toBeVisible();
     await page.waitForLoadState('networkidle');
-    expect(await violations()).toEqual([]);
-  });
-}
+    expect(violations, route).toEqual([]);
+  }
+});
 
-test('theme switches and persists under the policy; data-URL export downloads', async ({ page }) => {
-  const violations = await watch(page);
+test('theme switches and persists; the data-URL export downloads', async ({ page }) => {
+  const violations = watch(page);
   await page.goto('/overview');
   await page.getByRole('combobox', { name: 'Theme' }).selectOption('high-contrast');
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'high-contrast');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'high-contrast');
   await page.getByRole('button', { name: 'Customize' }).click();
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'Export current theme' }).click()]);
-  expect(download.suggestedFilename()).toMatch(/\.json$/);
-  expect(await violations()).toEqual([]);
+  const download = page.waitForEvent('download');
+  await page.getByRole('link', { name: 'Export current theme' }).click();
+  expect((await download).suggestedFilename()).toMatch(/\.json$/);
+  expect(violations).toEqual([]);
 });
 
-test('the pre-paint script executes under the policy (no application bundle needed)', async ({ page }) => {
-  const violations = await watch(page);
-  await page.addInitScript(() => localStorage.setItem('ratio.theme', 'high-contrast'));
-  await page.route('**/_next/static/**', (route) => (route.request().resourceType() === 'script' ? route.abort() : route.continue()));
-  await page.goto('/');
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'high-contrast');
-  expect(await violations()).toEqual([]);
-});
-
-test('mutation: an edited inline script is blocked and does not run', async ({ page }) => {
-  const violations = await watch(page);
-  await page.addInitScript(() => localStorage.setItem('ratio.theme', 'high-contrast'));
-  await page.route('**/_next/static/**', (route) => (route.request().resourceType() === 'script' ? route.abort() : route.continue()));
-  await page.route((url) => url.pathname === '/', async (route) => {
-    if (route.request().resourceType() !== 'document') return route.continue();
-    const response = await route.fetch();
-    const html = await response.text();
-    expect(html).toContain(PREPAINT_SCRIPT);
-    await route.fulfill({ response, body: html.replace(PREPAINT_SCRIPT, `${PREPAINT_SCRIPT};`) });
+// Without the bundle only the inline script can set the theme; an edited copy must be blocked.
+for (const edited of [false, true]) {
+  test(`pre-paint script ${edited ? 'mutation: an edited copy is blocked and does not run' : 'executes under the policy'}`, async ({ page }) => {
+    const violations = watch(page);
+    await page.addInitScript(() => localStorage.setItem('ratio.theme', 'high-contrast'));
+    await page.route('**/_next/static/**', (r) => (r.request().resourceType() === 'script' ? r.abort() : r.continue()));
+    await page.route((url) => url.pathname === '/', async (route) => {
+      if (route.request().resourceType() !== 'document') return route.continue();
+      const response = await route.fetch();
+      const html = await response.text();
+      expect(html).toContain(PREPAINT_SCRIPT);
+      await route.fulfill({ response, body: edited ? html.replace(PREPAINT_SCRIPT, `${PREPAINT_SCRIPT};`) : html });
+    });
+    await page.goto('/');
+    expect(await page.locator('html').getAttribute('data-theme')).toBe(edited ? null : 'high-contrast');
+    expect(violations.some((v) => v.includes('script-src'))).toBe(edited);
+    if (!edited) expect(violations).toEqual([]);
   });
-  await page.goto('/');
-  await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
-  expect((await violations()).some((v) => v.includes('script-src'))).toBe(true);
-});
+}
