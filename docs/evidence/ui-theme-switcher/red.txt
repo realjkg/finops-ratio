@@ -37,3 +37,8 @@ npx playwright test --config playwright.simulation.config.ts tests/simulation/th
   ✘  3 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 430px
   3 failed
   (each fails on '/': document scrollWidth > innerWidth; tests/simulation/customer.spec.ts:80 also fails at 390px on /demo, and passes with ThemeMenu removed)
+
+RED round 3 (Copilot 4244463561: live region must stay mounted while empty), against 5755d33:
+npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × L4: problems are announced politely, not as an alert on every keystroke
+      Tests  1 failed | 23 passed (24)

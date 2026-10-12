@@ -282,9 +282,7 @@ describe('challenger review of #116', () => {
     const config = createRequire(import.meta.url)(join(resolve(__dirname, '../../..'), 'tailwind.config.js'));
     const out = await postcss([tailwind({ ...config, content: [{ raw: label.className }], corePlugins: { preflight: false } })]).process('@tailwind utilities', { from: undefined });
     const rules = out.css.split('}').filter((r) => r.includes(':focus-within'));
-    expect(rules.some((r) => /outline-color: rgb\(var\(--c-focus\)/.test(r))).toBe(true);
-    expect(rules.some((r) => /outline-width: 2px/.test(r))).toBe(true);
-    expect(rules.some((r) => /outline-style: solid/.test(r))).toBe(true);
+    for (const re of [/outline-color: rgb\(var\(--c-focus\)/, /outline-width: 2px/, /outline-style: solid/]) expect(rules.some((r) => re.test(r)), String(re)).toBe(true);
   });
 
   it('L1: under Default (system) the editor and export start from the theme the CSS shows', () => {
@@ -305,11 +303,13 @@ describe('challenger review of #116', () => {
 
   it('L4: problems are announced politely, not as an alert on every keystroke', () => {
     mount();
+    setValue(select(), 'light');
     openEditor();
+    const list = byLabel<HTMLElement>('Theme problems'); // mounted while empty, so the first problem is announced
+    expect([list.textContent, list.getAttribute('aria-live')]).toEqual(['', 'polite']);
     setValue(byLabel<HTMLInputElement>('txt hex'), '#zzz');
-    const list = byLabel<HTMLElement>('Theme problems');
+    expect(byLabel<HTMLElement>('Theme problems')).toBe(list);
     expect(list.textContent).toMatch(/txt must be/);
-    expect(list.getAttribute('aria-live')).toBe('polite');
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 });
