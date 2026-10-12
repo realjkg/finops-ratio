@@ -17,9 +17,12 @@
 //    HTTPS is the host's job (HSTS at the edge).
 //  - No report-uri/report-to: the app has no collection endpoint, and tests run
 //    without network egress. Violations show in the browser console.
-// Rollout lever: RATIO_CSP_MODE=report-only (next.config.js) sends the same
-// policy as Content-Security-Policy-Report-Only; unset it to enforce. Changing the
-// pre-paint script or this list needs a matching change to PREPAINT_HASH.
+// Rollout lever (BUILD time): next.config.js headers() is evaluated by `next build`
+// and frozen into routes-manifest.json; `next start` never re-reads the env, so
+// changing RATIO_CSP_MODE needs a rebuild. Build with RATIO_CSP_MODE=report-only to
+// send the same policy as Content-Security-Policy-Report-Only; rebuild without it
+// to enforce. The same holds for VERCEL_ENV and NODE_ENV. Changing the pre-paint
+// script or this list needs a matching change to PREPAINT_HASH.
 const PREPAINT_HASH = "'sha256-j2+qMXrX/9a2DQN0Mdq5cwMIrCT8DZJHuAfbANm+YVA='";
 
 // Vercel's preview toolbar (comments, feedback) injects its own script, frame and

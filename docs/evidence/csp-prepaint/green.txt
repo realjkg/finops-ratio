@@ -20,3 +20,9 @@ default-src 'self'; script-src 'self' 'sha256-j2+qMXrX/9a2DQN0Mdq5cwMIrCT8DZJHuA
 2. Wrong PREPAINT_HASH in csp.config.js    -> browser: 6 of 7 csp tests FAILED (header check, theme persistence, pre-paint run)
 3. Edited inline script served to browser  -> blocked (script-src violation), data-theme not set (csp.spec mutation test passes)
 4. Remove style-src-attr (first run)       -> ~239 "Refused to apply inline style" violations on the four routes
+
+# GREEN (RATIO_CSP_MODE is build-time round)
+$ npx vitest run src/security -> 8 passed (unknown values enforce; report-only yields only the report-only key; Dockerfile ARG/ENV before npm run build)
+Real build check: RATIO_CSP_MODE=report-only next build, then next start with the env unset -> Content-Security-Policy-Report-Only still sent
+  (headers frozen at build; hence "rebuild with RATIO_CSP_MODE=report-only", Docker --build-arg RATIO_CSP_MODE=report-only)
+Gates: lint ok, tsc ok, vitest 190 files / 3569 passed, build ok, check:bundle pass, simulation 15 passed (port 3627)

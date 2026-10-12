@@ -9,7 +9,7 @@ const nextConfig = {
   // Development and Vercel preview builds get the small, documented relaxations there.
   async headers() {
     const policy = buildCsp({ dev: process.env.NODE_ENV === 'development', preview: process.env.VERCEL_ENV === 'preview' });
-    // RATIO_CSP_MODE=report-only is the rollout lever: browsers report but do not block.
+    // RATIO_CSP_MODE=report-only at BUILD time is the rollout lever (browsers report, do not block).
     const key = process.env.RATIO_CSP_MODE === 'report-only' ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy';
     return [{ source: '/:path*', headers: [{ key, value: policy }] }];
   },
