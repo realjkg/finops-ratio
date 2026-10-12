@@ -35,3 +35,7 @@ Unit: loosen frame-src to 'self' -> 3 failed | 5 passed; add https: to font-src 
 Browser: temporary inline <script> in pages/tokenomics.tsx, production build, `every page route` test ->
   FAILED at /tokenomics: "Refused to execute inline script ... script-src" + event "script-src-elem inline" (reverted)
 Scan self-check (injected inline script into one route's HTML) detects script-src violation: passes
+
+# RED (round 4: no 404 allowlist; preview style-src unsafe-inline)
+$ npx vitest run src/security -> 2 failed | 13 passed: preview exact-policy list (style-src now expects 'unsafe-inline'); custom 404 page test (pages/404.tsx missing)
+$ playwright csp.spec "every page route" (filter removed) -> FAILED at /__csp-unknown-route: Next's default 404 inline <style> blocked by style-src 'self'

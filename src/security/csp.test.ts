@@ -39,10 +39,16 @@ describe('policy (exact directives: loosening any one fails)', () => {
   });
   it('Vercel preview adds only the vercel.live hosts', () => {
     expect(parts({ dev: false, preview: true })).toEqual([
-      common[0], `script-src 'self' ${H} https://vercel.live`, "style-src 'self' https://vercel.live", common[1], "img-src 'self' data: blob: https://vercel.live https://vercel.com",
+      common[0], `script-src 'self' ${H} https://vercel.live`, "style-src 'self' 'unsafe-inline' https://vercel.live", common[1], "img-src 'self' data: blob: https://vercel.live https://vercel.com",
       "font-src 'self' https://vercel.live https://assets.vercel.com", "connect-src 'self' https://vercel.live wss://ws-us3.pusher.com", 'frame-src https://vercel.live', ...common.slice(3),
     ]);
   });
+});
+
+it('the custom 404 page has no inline styles and the browser scan has no allowlist', () => {
+  const page = readFileSync('pages/404.tsx', 'utf8');
+  expect(page).not.toMatch(/<style|style=|dangerouslySetInnerHTML/);
+  expect(readFileSync('tests/simulation/csp.spec.ts', 'utf8')).not.toContain('.filter(');
 });
 
 describe('next.config.js headers', () => {

@@ -26,14 +26,14 @@ function pageRoutes(dir = 'pages', prefix = ''): string[] {
   });
 }
 
-// Next's built-in 404 page ships an inline <style>; it is the one known violation (not app code), so only that page may report it.
+// pages/404.tsx is the app's own page, so even the 404 is scanned with no allowlist.
 const NEXT_404 = '/__csp-unknown-route';
 const scan = async (page: Page, route: string) => {
   const violations = await watch(page);
   const res = await page.goto(route);
   await page.waitForLoadState('networkidle');
   const found = await violations();
-  return { status: res?.status() ?? 0, header: res?.headers()['content-security-policy'] ?? '', found: route === NEXT_404 ? found.filter((v) => !/inline style|style-src/.test(v)) : found };
+  return { status: res?.status() ?? 0, header: res?.headers()['content-security-policy'] ?? '', found };
 };
 
 test('every page route is enforced, renders and reports zero violations', async ({ context }) => {
