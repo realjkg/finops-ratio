@@ -3,6 +3,9 @@ import '../src/index.css';
 import { SimulationProvider } from '@/simulation/SimulationProvider';
 import type { AppProps } from 'next/app';
 import { useRouter } from 'next/router';
+import { useEffect } from 'react';
+import { applyTheme } from '@/theme/apply';
+import { loadActiveTheme } from '@/theme/user';
 import { PersonaProvider } from '@/components/PersonaProvider';
 import { AppShell } from '@/components/layout/AppShell';
 import { NAV_ITEMS } from '@/components/layout/NavBar';
@@ -20,6 +23,11 @@ export default function RatioApp({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const useShell = SHELL_ROUTES.has(router.pathname);
   const page = <Component {...pageProps} />;
+  // Custom themes apply here; built-in choices are already set before paint (_document).
+  useEffect(() => {
+    const stored = loadActiveTheme();
+    if (stored) applyTheme(stored);
+  }, []);
 
   // Persona context wraps every page so the active lens (executive default /
   // technical / procurement) is available app-wide.

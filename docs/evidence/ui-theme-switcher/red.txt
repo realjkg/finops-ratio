@@ -1,0 +1,52 @@
+RED: T2 tests against origin/main production code (8ce4f73), tests + sample data only.
+Command: npx vitest run src/theme src/components/layout
+
+      Tests  5 failed | 55 passed (60)
+     × checks sub and dim text on every accent callout tint over the main surfaces 1ms
+     × checks text-cost/80 over slab and raised as the browser blends it 1ms
+     × composited pairs must clear the target by 0.05; plain pairs need only the target 1ms
+     × dark fails only the pinned legacy pairs 35ms
+     × light and high contrast were re-tuned to zero violations under the new rules 0ms
+ FAIL  src/components/layout/ThemeMenu.test.tsx [ src/components/layout/ThemeMenu.test.tsx ]
+ FAIL  src/theme/user.test.ts [ src/theme/user.test.ts ]
+ FAIL  src/theme/validate.test.ts > T2 follow-ups: composited pairs get a cushion, more real pairs are checked > checks sub and dim text on every accent callout tint over the main surfaces
+ FAIL  src/theme/validate.test.ts > T2 follow-ups: composited pairs get a cushion, more real pairs are checked > checks text-cost/80 over slab and raised as the browser blends it
+ FAIL  src/theme/validate.test.ts > T2 follow-ups: composited pairs get a cushion, more real pairs are checked > composited pairs must clear the target by 0.05; plain pairs need only the target
+ FAIL  src/theme/validate.test.ts > T2 follow-ups: composited pairs get a cushion, more real pairs are checked > light and high contrast were re-tuned to zero violations under the new rules
+ FAIL  src/theme/validate.test.ts > built-in themes > dark fails only the pinned legacy pairs
+ Test Files  3 failed | 3 passed (6)
+AssertionError: expected [ 'cost/cost/10@exec-bg', …(57) ] to deeply equal [ 'cost/cost/10@exec-bg', …(83) ]
+Error: Cannot find module './user' imported from /tmp/t2ui/repo/src/theme/user.test.ts
+Error: Failed to resolve import "@/theme/user" from "src/components/layout/ThemeMenu.test.tsx". Does the file exist?
+TypeError: contrastChecks is not a function
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+RED round 2 (CI acceptance, Copilot review 5486249526, challenger M1/L1/L3/L4), against b8e8bc3:
+npx vitest run src/theme src/components/layout
+     × returns stored themes normalized, so they apply as they validated
+     × drops a stored duplicate name (the first one wins)
+     × applies the normalized colors and the selector names the theme actually applied
+     × an imported failure disappears once the color is edited to pass, and Save then applies
+     × M1: the sr-only file input shows a token focus ring on its visible label
+     × L1: under Default (system) the editor and export start from the theme the CSS shows
+     × L4: problems are announced politely, not as an alert on every keystroke
+      Tests  7 failed | 109 passed (116)
+npx playwright test --config playwright.simulation.config.ts tests/simulation/theme-mobile.spec.ts
+  ✘  1 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 320px
+  ✘  2 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 390px
+  ✘  3 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 430px
+  3 failed
+  (each fails on '/': document scrollWidth > innerWidth; tests/simulation/customer.spec.ts:80 also fails at 390px on /demo, and passes with ThemeMenu removed)
+
+RED round 3 (Copilot 4244463561: live region must stay mounted while empty), against 5755d33:
+npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × L4: problems are announced politely, not as an alert on every keystroke
+      Tests  1 failed | 23 passed (24)
+
+RED round 4 (Copilot review 5486411111: 4244556890, 4244556948, 4244556908), against 1b24e02:
+npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × still applies the theme when storage is blocked, and says the choice will not persist
+     × replacing the draft (selector, reset, save) drops stale edits and import problems (Copilot 4244556890/948)
+AssertionError: expected undefined to be '' // Object.is equality
+AssertionError: expected '#123456' to be '#000000' // Object.is equality
+      Tests  2 failed | 23 passed (25)
