@@ -12,3 +12,8 @@ M3 media-query listeners not removed on unmount: killed, 1 failed | 26 passed
 GREEN round 2: note now reads 'Dark cannot be exported (it has pinned contrast exceptions). Choose Light or High
 contrast, or save a custom theme, to export.' npx vitest run src/theme src/components/layout -> 118 passed;
 tsc and eslint clean.
+
+GREEN round 3: a dirty flag (set by color, name and import edits; cleared by replaceDraft) gates an effect that
+refreshes the Default (system) draft when the OS preference changes. src/theme + src/components/layout -> 118 passed;
+tsc and eslint clean; theme-mobile.spec.ts (production build) -> 3 passed.
+M4 refresh ignores the dirty flag (clobbers edits): killed, 1 failed | 26 passed

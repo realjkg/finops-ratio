@@ -41,6 +41,7 @@ export function ThemeMenu() {
   const [fix, setFix] = useState<Fix | null>(null);
   const [note, setNote] = useState('');
   const [system, setSystem] = useState<BuiltInThemeName>(DEFAULT_THEME);
+  const [dirty, setDirty] = useState(false); // the draft has user edits (colors, name, import)
 
   useEffect(() => {
     const stored = loadActiveTheme();
@@ -71,6 +72,7 @@ export function ThemeMenu() {
   /** Every deliberate draft replacement also drops the transient editor state. */
   const replaceDraft = (next: Record<string, unknown>, fixed: Fix | null = null) => {
     setDraft(next);
+    setDirty(false);
     setProblems([]);
     setFix(fixed);
   };
@@ -79,7 +81,13 @@ export function ThemeMenu() {
     choose(name);
     replaceDraft(draftOf(custom.find((t) => t.name === name) ?? BUILT_IN_THEMES[isBuiltIn(name) ? name : system]));
   };
+  // Default (system) follows the OS: refresh the draft too, unless the user has edited it.
+  useEffect(() => {
+    if (active === null && !dirty) replaceDraft(draftOf(BUILT_IN_THEMES[system]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only an OS change should trigger this
+  }, [system]);
   const setColor = (role: Role) => (e: ChangeEvent<HTMLInputElement>) => {
+    setDirty(true);
     setProblems([]);
     setDraft({ ...draft, colors: { ...colors, [role]: e.target.value } });
   };
@@ -87,7 +95,10 @@ export function ThemeMenu() {
     setFix(null);
     // Only imports that cannot fill the editor keep a snapshot; contrast problems come live from `checked`.
     setProblems(result.theme ? [] : result.violations);
-    if (result.theme) setDraft({ ...result.theme });
+    if (result.theme) {
+      setDraft({ ...result.theme });
+      setDirty(true);
+    }
     if (result.theme && !result.violations.length) save(result.theme);
   };
   const save = (imported?: Theme) => {
@@ -147,6 +158,7 @@ export function ThemeMenu() {
         <section id="theme-editor" aria-label="Theme editor" className="max-h-[80vh] space-y-3 overflow-auto rounded border border-edge bg-slab p-3 shadow-lg">
           <div className="flex items-center gap-1.5 md:hidden">{switcher('theme-select-panel')}</div>
           <label className="block">Name <input value={String(draft.name)} onChange={(e) => {
+            setDirty(true);
             setProblems([]);
             setDraft({ ...draft, name: e.target.value });
           }} className="ml-1 rounded border border-edge bg-raised px-1 font-mono" /></label>
