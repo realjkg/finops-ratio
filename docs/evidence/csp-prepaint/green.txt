@@ -1,0 +1,41 @@
+# GREEN (node v22.22.0, own clone, npm ci on main's lockfile: next 16.3.6)
+$ npx vitest run src/security            -> 6 passed (csp.test.ts)
+$ npm test                               -> 190 files / 3569 tests passed (before final test trimming; csp.test.ts re-run: 6 passed)
+$ npm run lint; npm run typecheck        -> exit 0 / exit 0
+$ npm run build; npm run check:bundle    -> ok / pass (134 client, 129 server files)
+$ playwright test (simulation, production build, Chromium 1194, port 3467)
+  15 passed: 4 new csp.spec.ts + 11 existing (customer, outcomes, theme-mobile, agent-workflows, frank)
+  csp.spec.ts: /, /overview, /connectors, /workloads -> CSP header present, nav renders, 0 violations;
+  theme select -> data-theme persists across reload, data-URL export download fires, 0 violations;
+  pre-paint script runs with all _next/static scripts aborted (only the inline script can set data-theme), 0 violations.
+
+# Policy as served (production)
+default-src 'self'; script-src 'self' 'sha256-j2+qMXrX/9a2DQN0Mdq5cwMIrCT8DZJHuAfbANm+YVA='; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
+# Development (next dev, Chromium, /, /overview, /connectors, /workloads): 200 + nav on all four, 0 CSP console violations
+  (dev adds 'unsafe-eval' to script-src, 'unsafe-inline' to style-src, ws: to connect-src)
+
+# Mutation results
+1. Edit one character of PREPAINT_SCRIPT   -> csp.test.ts hash pin FAILS (1 failed | 5 passed)
+2. Wrong PREPAINT_HASH in csp.config.js    -> browser: 6 of 7 csp tests FAILED (header check, theme persistence, pre-paint run)
+3. Edited inline script served to browser  -> blocked (script-src violation), data-theme not set (csp.spec mutation test passes)
+4. Remove style-src-attr (first run)       -> ~239 "Refused to apply inline style" violations on the four routes
+
+# GREEN (RATIO_CSP_MODE is build-time round)
+$ npx vitest run src/security -> 8 passed (unknown values enforce; report-only yields only the report-only key; Dockerfile ARG/ENV before npm run build)
+Real build check: RATIO_CSP_MODE=report-only next build, then next start with the env unset -> Content-Security-Policy-Report-Only still sent
+  (headers frozen at build; hence "rebuild with RATIO_CSP_MODE=report-only", Docker --build-arg RATIO_CSP_MODE=report-only)
+Gates: lint ok, tsc ok, vitest 190 files / 3569 passed, build ok, check:bundle pass, simulation 15 passed (port 3627)
+
+# GREEN (round 3)
+$ npx vitest run src/security -> 8 passed (exact production/dev/preview directive lists)
+Route scan: all 19 page routes from pages/ plus Next's default 404 -> status ok, CSP header, 0 securitypolicyviolation events and 0 CSP console errors
+  (404 page: only Next's own inline <style> violation is filtered, nothing else)
+Gates: lint ok, tsc ok, vitest 190 files / 3569 passed, build ok, check:bundle pass, simulation 16 passed (port 3717)
+
+# GREEN (round 4, merged with main 9024bc1)
+$ npx vitest run src/security -> 15 passed (includes #120 floor tests); mutation: preview style-src unsafe-inline applied everywhere -> prod/dev exact-policy tests fail
+pages/_error.tsx replaces Next's default error page (own classes, no inline style element). Chosen over pages/404.tsx because the RBAC route matrix
+  requires a row for every page route and exempts _error. next start: /nope -> 404, 0 "<style" in HTML, CSP header present.
+Route scan: 19 page routes + 404 with NO filter/allowlist -> 0 violations. Gates: lint ok, tsc ok, vitest 191 files / 3580 passed,
+  build ok, check:bundle pass, simulation 16 passed (port 3827)

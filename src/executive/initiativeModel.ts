@@ -13,7 +13,7 @@ import { budgetFor } from '@/data/budgets';
 import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
 import { headlineEvidenceStatus } from '@/lib/valueEvidence';
-import { budgetColor, TOKEN_HEX } from '@/lib/scales';
+import { budgetColor, TOKEN_COLOR } from '@/lib/scales';
 import type { EvidenceStatus, Workload } from '@/types';
 import { COST_SOURCES, findingsFor } from '@/costsource/seed';
 import { toMissionView, type MissionStatus, type ProjectionContext } from '@/mission/missionModel';
@@ -26,9 +26,9 @@ export interface InitiativeStatusMeta {
 }
 
 export const INITIATIVE_STATUS_META: Record<InitiativeStatus, InitiativeStatusMeta> = {
-  on_track: { label: 'On Track', color: TOKEN_HEX.value },
-  at_risk: { label: 'At Risk', color: TOKEN_HEX.shape },
-  pending_approval: { label: 'Pending Approval', color: TOKEN_HEX.gate },
+  on_track: { label: 'On Track', color: TOKEN_COLOR.value },
+  at_risk: { label: 'At Risk', color: TOKEN_COLOR.shape },
+  pending_approval: { label: 'Pending Approval', color: TOKEN_COLOR.gate },
 };
 
 const MISSION_TO_INITIATIVE: Record<MissionStatus, InitiativeStatus> = {

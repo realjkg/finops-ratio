@@ -4,6 +4,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# Build-time CSP mode (see csp.config.js): --build-arg RATIO_CSP_MODE=report-only
+ARG RATIO_CSP_MODE=
+ENV RATIO_CSP_MODE=$RATIO_CSP_MODE
 RUN npm run build && mkdir -p /app/state && chown node:node /app/state
 
 FROM build AS simulation

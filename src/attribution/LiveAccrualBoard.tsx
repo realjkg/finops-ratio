@@ -10,6 +10,7 @@
 // is live ingest.
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { tint } from '@/lib/scales';
 import { formatCents, formatInt, formatTokens, formatUSD } from '@/lib/format';
 import { USER_QUERY_EVENTS } from '@/data/userQueries';
 import { WORKLOADS } from '@/data/workloads';
@@ -27,14 +28,13 @@ import {
 } from './accrual';
 import { useLiveSpend } from './useLiveSpend';
 
-// Design-token hex values (obvious.md §Design Tokens) — SVG can't read the
-// Tailwind theme, same precedent as SpendToValueGraph.
-const C_EDGE = '#1a2235';
-const C_RAISED = '#141a26';
-const C_SUB = '#8895ad';
-const C_DIM = '#4d5a72';
-const C_COST = '#ff5c72';
-const C_COST_FILL = 'rgba(255, 92, 114, 0.08)';
+// Theme variables (src/index.css), so SVG strokes, fills and labels follow the active theme.
+const C_EDGE = 'var(--edge)';
+const C_RAISED = 'var(--raised)';
+const C_SUB = 'var(--sub)';
+const C_DIM = 'var(--dim)';
+const C_COST = 'var(--cost)';
+const C_COST_FILL = tint(C_COST, 8);
 
 const MONO = "'JetBrains Mono', monospace";
 

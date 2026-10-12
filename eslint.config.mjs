@@ -17,6 +17,7 @@ export default tseslint.config(
       'eslint.config.js',
       '.eslintrc.cjs',   // legacy config file, not linted
       'next.config.js',
+      'csp.config.js',
       'next-env.d.ts',   // Next.js generated, not linted
       'postcss.config.js',
       'tailwind.config.js',
