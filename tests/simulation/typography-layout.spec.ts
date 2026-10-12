@@ -78,7 +78,7 @@ for (const [width, family] of [[1440, 'default'], [390, 'default'], [1440, 'syst
       await page.waitForLoadState('networkidle');
       await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize), { message: 'scale applied' }).toBe('20.8px');
       const phone = width < 768 && route === '/workloads'; // the alert ticker collapses to one line on phones
-      if (phone) expect((await page.getByRole('contentinfo').boundingBox())?.height, 'collapsed footer height').toBeLessThanOrEqual(64);
+      if (phone) expect((await page.locator('footer').boundingBox())?.height, 'collapsed footer height').toBeLessThanOrEqual(64);
       found[route] = await problems(page);
       if (phone) {
         const toggle = page.getByRole('button', { name: /^Show alerts/ });
