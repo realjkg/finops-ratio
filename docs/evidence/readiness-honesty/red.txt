@@ -1,0 +1,10 @@
+# RED: new tests against unmodified main (9024bc1)
+# cmd: npx vitest run src/executive/spendSummaryBar.honesty.test.tsx src/attribution/liveAccrualHonesty.test.tsx src/connectors/connectorsHonesty.dom.test.tsx
+ FAIL  src/attribution/liveAccrualHonesty.test.tsx > replayed token and burn labels say simulated, never live
+ FAIL  src/connectors/connectorsHonesty.dom.test.tsx > counts offline sandbox seeds as seeded and reports 0 live
+ FAIL  src/connectors/connectorsHonesty.dom.test.tsx > does not call the seeded sandbox section "Active"
+ FAIL  src/connectors/connectorsHonesty.dom.test.tsx > links /costsource and states that only the Static seed is shown anonymously
+ FAIL  src/executive/spendSummaryBar.honesty.test.tsx > stamps the seed as-of date derived from DEMO_NOW, never a relative freshness claim
+ FAIL  src/executive/spendSummaryBar.honesty.test.tsx > labels the spend as AI spend, not total cloud spend
+ Test Files  3 failed (3)
+      Tests  6 failed (6)
