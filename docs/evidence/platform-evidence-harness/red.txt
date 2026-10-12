@@ -1,5 +1,5 @@
-$ npx vitest run src/evidence   (RED: implementation modules do not exist yet)
- FAIL  src/evidence/evidence.test.ts [ src/evidence/evidence.test.ts ]
-Error: Cannot find module './report' imported from /tmp/p10/c/src/evidence/evidence.test.ts
- Test Files  1 failed (1)
-      Tests  no tests
+Round 2 RED (review findings H1-H4, M1-M6), tests committed before the fix.
+$ npx vitest run src/evidence
+  Without src/evidence/money.ts: Cannot find module './money' (no tests ran).
+  Against the round-1 implementation with a throwaway stub money.ts (not committed):
+  Test Files 1 failed; Tests 29 failed | 9 passed (38).
