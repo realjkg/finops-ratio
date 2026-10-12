@@ -1571,3 +1571,31 @@ Use this when you are an implementer agent taking a card.
 11. **Report back.** In the PR, state which red tests you added, which
     mutations you tried, the classifier result, the regression analysis, and
     anything you found that changes PLAN facts or sizes.
+
+## Status: platform evidence harnesses (pilot slice P10)
+
+Maturity: **simulated**. `src/evidence/` holds two read-only, no-network,
+unwired probes that run on synthetic fixtures only (a report cannot claim more
+than `simulated` in this build).
+
+- `NutanixEvidenceProbe` classifies `nc2_on_public_cloud | onprem_ahv_prism |
+  cost_governance_saas | undetermined`. It needs two distinct sources of distinct
+  families (copies and same-source artifacts count once) that agree, otherwise
+  `undetermined` with `evidence_not_independent`; it matches structured product
+  fields only, never descriptions or tags; it flags NC2-style host charges that also
+  sit in the host cloud's bill as a double-count suspect.
+- `ServiceNowRoleProbe` reports PRESENT / ABSENT / unknown per record class
+  (service and CI mapping, project and demand, license and asset, cost) with
+  `authority: 'unknown'` until a human decides. `emitCostRows` refuses cost
+  rows unless a module-branded decision bound to that source and record class
+  confirms it as cost-bearing; clones, spreads and literals fail.
+
+Unknown: the Nutanix deployment type and cost evidence; ServiceNow's role,
+modules in use, and authoritative records. Discovery questions for the owner:
+which Nutanix deployment type applies, and who owns its cost evidence (showback,
+license invoices, depreciation)? Which ServiceNow modules are in use, who owns
+the authoritative service and CI records, and does it hold any cost?
+
+Follow-up for slice P0 (not done here, files are shared with in-flight work):
+the ServiceNow sandbox descriptor in `src/costsource/seed.ts` still emits
+"ITBM Cost Allocation" rows with no `roleConfirmed: false` label.
