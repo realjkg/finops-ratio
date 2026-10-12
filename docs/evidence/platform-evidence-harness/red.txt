@@ -1,0 +1,5 @@
+$ npx vitest run src/evidence   (RED: implementation modules do not exist yet)
+ FAIL  src/evidence/evidence.test.ts [ src/evidence/evidence.test.ts ]
+Error: Cannot find module './report' imported from /tmp/p10/c/src/evidence/evidence.test.ts
+ Test Files  1 failed (1)
+      Tests  no tests
