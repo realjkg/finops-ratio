@@ -1,7 +1,6 @@
-$ npx vitest run src/costsource/tagAttribution.test.ts   (tests against origin/main normalize.ts)
- FAIL  uses the documented key
- FAIL  resolves JSON-string and object Tags to the workload, money untouched
- FAIL  never invents workloads and never throws on malformed values
+$ npx vitest run src/costsource/tagAttribution.test.ts   (review-fix tests against the previous head's normalize.ts)
+ FAIL  never replaces an explicit ResourceId identity, loaded or not
+ FAIL  trims values, ignores inherited keys, and takes the last duplicate key
  Test Files  1 failed (1)
-      Tests  3 failed | 2 passed (5)
-(the 2 passing tests are guards: simulated rows and ResourceId precedence already held)
+      Tests  2 failed | 5 passed (7)
+(first round, against origin/main normalize.ts: 3 failed, 2 passed (guards) of 5)

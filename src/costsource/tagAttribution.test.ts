@@ -52,4 +52,18 @@ describe('workload tag attribution', () => {
     const out = resolve(row(resourceIdFor(KNOWN), { [KEY]: WORKLOADS[1].id }));
     expect(out.x_RatioWorkloadId).toBe(KNOWN);
   });
+
+  it('never replaces an explicit ResourceId identity, loaded or not', () => {
+    for (const rid of ['arn:ratio:workload/wl-gone', 'arn:ratio:workload/']) {
+      const out = resolve(row(rid, { [KEY]: KNOWN }));
+      expect(out.x_RatioWorkloadId).toBe(rid.slice('arn:ratio:workload/'.length));
+      expect(out.x_RatioValueRatio).toBe(0);
+    }
+  });
+
+  it('trims values, ignores inherited keys, and takes the last duplicate key', () => {
+    expect(workloadIdFromTags({ [KEY]: `  ${KNOWN}\n` })).toBe(KNOWN);
+    expect(workloadIdFromTags(Object.create({ [KEY]: KNOWN }))).toBeNull();
+    expect(workloadIdFromTags(`{"${KEY}":"wl-nope","${KEY}":"${KNOWN}"}`)).toBe(KNOWN);
+  });
 });
