@@ -60,6 +60,17 @@ export function ThemeMenu() {
 
   const checked = checkTheme(draft);
   const colors = draft.colors as Record<Role, string>;
+  /** Every deliberate draft replacement also drops the transient editor state. */
+  const replaceDraft = (next: Record<string, unknown>, fixed: Fix | null = null) => {
+    setDraft(next);
+    setProblems([]);
+    setFix(fixed);
+  };
+  const draftOf = (t: Theme) => ({ ...t, name: isBuiltIn(t.name) ? 'my-theme' : t.name });
+  const pick = (name: string) => {
+    choose(name);
+    replaceDraft(draftOf(custom.find((t) => t.name === name) ?? BUILT_IN_THEMES[isBuiltIn(name) ? name : system]));
+  };
   const setColor = (role: Role) => (e: ChangeEvent<HTMLInputElement>) => {
     setProblems([]);
     setDraft({ ...draft, colors: { ...colors, [role]: e.target.value } });
@@ -78,6 +89,7 @@ export function ThemeMenu() {
     if (list.length > MAX_CUSTOM) return setNote(`You can keep ${MAX_CUSTOM} custom themes. Delete one first.`);
     setCustom(list);
     choose(theme.name, list);
+    replaceDraft({ ...theme });
   };
   const remove = () => {
     const list = custom.filter((t) => t.name !== active);
@@ -93,13 +105,13 @@ export function ThemeMenu() {
   const checks = checked.theme ? contrastChecks(checked.theme) : [];
 
   const toggle = () => {
-    if (!open) setDraft({ ...current, name: isBuiltIn(current.name) ? 'my-theme' : current.name });
+    if (!open) replaceDraft(draftOf(current));
     setOpen(!open);
   };
   const switcher = (id: string) => (
     <>
       <label htmlFor={id}>Theme</label>
-      <select id={id} value={active ?? ''} onChange={(e) => choose(e.target.value)} className="min-w-0 max-w-[11rem] rounded border border-edge bg-raised px-1 py-0.5 text-txt">
+      <select id={id} value={active ?? ''} onChange={(e) => pick(e.target.value)} className="min-w-0 max-w-[11rem] rounded border border-edge bg-raised px-1 py-0.5 text-txt">
         <option value="">Default (system)</option>
         {Object.keys(BUILT_IN_THEMES).map((n) => <option key={n} value={n}>{LABELS[n]}</option>)}
         {custom.map((t) => <option key={t.name} value={t.name}>Custom: {t.name}</option>)}
@@ -117,11 +129,12 @@ export function ThemeMenu() {
           <button type="button" className={btn} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Customize</button>
         </span>
       </div>
-      {note && !open && <p role="status" className="absolute right-2 top-full z-50 md:right-0 mt-1 w-64 rounded border border-edge bg-slab p-2 text-xs text-txt">{note}</p>}
-      {open && (
-        <section id="theme-editor" aria-label="Theme editor" className="absolute inset-x-2 top-full z-40 mt-1 max-h-[80vh] space-y-3 md:inset-x-auto md:right-0 md:w-[30rem] overflow-auto rounded border border-edge bg-slab p-3 text-xs text-txt shadow-lg">
+      <div className="absolute inset-x-2 top-full z-40 mt-1 space-y-1 text-xs text-txt md:inset-x-auto md:right-0 md:w-[30rem]">
+        {/* One status region, mounted while empty, so the storage note is announced. */}
+        <p role="status" className={note ? 'rounded border border-edge bg-slab p-2' : ''}>{note}</p>
+        {open && (
+        <section id="theme-editor" aria-label="Theme editor" className="max-h-[80vh] space-y-3 overflow-auto rounded border border-edge bg-slab p-3 shadow-lg">
           <div className="flex items-center gap-1.5 md:hidden">{switcher('theme-select-panel')}</div>
-          {note && <p role="status">{note}</p>}
           <label className="block">Name <input value={String(draft.name)} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="ml-1 rounded border border-edge bg-raised px-1 font-mono" /></label>
           <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
             {ROLES.map((role) => {
@@ -151,20 +164,16 @@ export function ThemeMenu() {
             <button type="button" className={btn} onClick={() => save()}>Save and apply</button>
             <button type="button" className={btn} disabled={!checked.theme} onClick={() => {
               const f = fixContrast(checked.theme as Theme);
-              setFix(f);
-              setDraft({ ...f.theme });
-              setProblems([]);
+              replaceDraft({ ...f.theme }, f);
             }}>Fix contrast</button>
-            <button type="button" className={btn} onClick={() => setDraft({ ...BUILT_IN_THEMES[isBuiltIn(active) ? active : system], name: draft.name })}>Reset to built-in</button>
+            <button type="button" className={btn} onClick={() => replaceDraft({ ...BUILT_IN_THEMES[isBuiltIn(active) ? active : system], name: draft.name })}>Reset to built-in</button>
             <a className={btn} download={`${JSON.parse(exported).name}.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(exported)}`}>Export current theme</a>
             {!isBuiltIn(active) && active && <button type="button" className={btn} onClick={remove}>Delete {active}</button>}
           </div>
-          {fix && (
-            <div role="status">
-              {fix.changes.length ? fix.changes.map((c) => <p key={c.role}>Changed {c.role}: {c.from} to {c.to}</p>) : <p>Nothing to change.</p>}
-              {fix.unreachable.length > 0 && <p className="text-cost">Could not reach the target for: {fix.unreachable.join(', ')}</p>}
-            </div>
-          )}
+          <div role="status">
+            {fix && (fix.changes.length ? fix.changes.map((c) => <p key={c.role}>Changed {c.role}: {c.from} to {c.to}</p>) : <p>Nothing to change.</p>)}
+            {fix && fix.unreachable.length > 0 && <p className="text-cost">Could not reach the target for: {fix.unreachable.join(', ')}</p>}
+          </div>
           {/* Always mounted (empty when clean) so the first problem is announced. */}
           <ul aria-live="polite" aria-label="Theme problems" className="list-disc pl-4 text-cost">
             {(problems.length ? problems : checked.violations).slice(0, 12).map((v, i) => <li key={i}>{v.message}</li>)}
@@ -178,7 +187,8 @@ export function ThemeMenu() {
             <label className={`${btn} focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus`}>From file <input type="file" accept="application/json,.json" onChange={readFile} className="sr-only" /></label>
           </div>
         </section>
-      )}
+        )}
+      </div>
     </div>
   );
 }

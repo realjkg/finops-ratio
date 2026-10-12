@@ -200,16 +200,6 @@ describe('contrast problems are live (Copilot 4244404600)', () => {
     expect(html.getAttribute('data-theme')).toBe('mine');
     expect(alertText()).toBe('');
   });
-
-  it('a reset after a failing import shows only the live problems (none for light)', () => {
-    mount();
-    setValue(select(), 'light');
-    openEditor();
-    importText(JSON.stringify({ ...mine, colors: { ...mine.colors, txt: '#aaaaaa' } }));
-    expect(alertText()).toMatch(/txt on void/);
-    click(button('Reset to built-in'));
-    expect(alertText()).toBe('');
-  });
 });
 
 describe('fix contrast', () => {

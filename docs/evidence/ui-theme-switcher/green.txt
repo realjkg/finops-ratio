@@ -26,3 +26,10 @@ M5 ThemeMenu keeps the import snapshot for contrast failures: survived the RED t
 GREEN round 3 (Copilot 4244463561): problems list always mounted, populated conditionally.
 npx vitest run src/theme src/components/layout -> 115 passed; tsc and eslint clean;
 theme-mobile.spec.ts (production build) -> 3 passed. Mutation: conditional mount (5755d33) = the RED run above, killed.
+
+GREEN round 4 (Copilot 4244556890/948/908): one replaceDraft() resets edits, import snapshot and fix report on every
+draft replacement (selector, open, reset, fix, save); one role=status region for the storage note, mounted while empty;
+the fix report region is always mounted inside the panel. src/theme + src/components/layout: 115 passed; tsc, eslint clean.
+Removed 'a reset after a failing import shows only the live problems' (superseded by the round-4 test; M5 is moot now
+that every replacement clears the snapshot). M6 replaceDraft keeps problems: killed (1 failed). M7 selector does not
+replace the draft: killed (1 failed).
