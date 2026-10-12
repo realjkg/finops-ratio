@@ -35,3 +35,8 @@ edited only when it changed colors (dirty || f.changes.length > 0). src/theme + 
 tsc and eslint clean; next build succeeds; theme-mobile.spec.ts -> 3 passed. (One test line folded after RED for the cap.)
 M9 a failed import does not mark the draft edited: killed, 1 failed | 26 passed
 M10 a no-op Fix contrast marks the draft edited: killed, 1 failed | 26 passed
+
+GREEN round 7: Reset to built-in sets dirty to (draft.name !== 'my-theme'): colors reset, a kept custom name stays an edit.
+src/theme + src/components/layout -> 118 passed; tsc and eslint clean; next build succeeds; theme-mobile.spec.ts -> 3 passed.
+M11 Reset always clears dirty: killed, 1 failed | 26 passed
+M12 Fix contrast uses setDirty(dirty) (drops the changes term): killed, 1 failed | 26 passed

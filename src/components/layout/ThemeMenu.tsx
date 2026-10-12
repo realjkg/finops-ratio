@@ -197,7 +197,10 @@ export function ThemeMenu() {
               replaceDraft({ ...f.theme }, f);
               setDirty(dirty || f.changes.length > 0); // changed colors are edits; "Nothing to change" is not
             }}>Fix contrast</button>
-            <button type="button" className={btn} onClick={() => replaceDraft({ ...BUILT_IN_THEMES[isBuiltIn(active) ? active : system], name: draft.name })}>Reset to built-in</button>
+            <button type="button" className={btn} onClick={() => {
+              replaceDraft({ ...BUILT_IN_THEMES[isBuiltIn(active) ? active : system], name: draft.name });
+              setDirty(draft.name !== 'my-theme'); // a kept custom name is still an edit
+            }}>Reset to built-in</button>
             {canExport ? (
               <a className={btn} download={`${exportable.name}.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(exported)}`}>Export current theme</a>
             ) : (
