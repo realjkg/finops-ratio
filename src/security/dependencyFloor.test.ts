@@ -15,15 +15,21 @@ const root = process.cwd();
 const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
-// Previous behavior (lenient): kept here only so the RED commit can show the new cases failing.
-function cmp(a: string, b: string): number {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
-  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] < pb[i] ? -1 : 1;
-  return 0;
+// Fail closed: only plain major.minor.patch counts. Prerelease/build suffixes,
+// incomplete or non-numeric versions are treated as below the floor.
+const PLAIN = /^(\d+)\.(\d+)\.(\d+)$/;
+function meetsFloor(version: string, floor: string): boolean {
+  const v = PLAIN.exec(version);
+  const f = PLAIN.exec(floor);
+  if (!v || !f) return false;
+  for (let i = 1; i <= 3; i++) if (Number(v[i]) !== Number(f[i])) return Number(v[i]) > Number(f[i]);
+  return true;
 }
-const meetsFloor = (version: string, floor: string) => cmp(version, floor) >= 0;
-const rangeMeetsFloor = (range: string, floor: string) => cmp(range.replace(/^[^\d]*/, ''), floor) >= 0;
+// Only one simple caret, tilde or exact range; '||', '*', '>=' and the like are rejected.
+const rangeMeetsFloor = (range: string, floor: string) => {
+  const m = /^[\^~]?(\d+\.\d+\.\d+)$/.exec(range.trim());
+  return m !== null && meetsFloor(m[1], floor);
+};
 
 describe('floor comparators fail closed', () => {
   it('accepts only plain major.minor.patch versions at or above the floor', () => {
