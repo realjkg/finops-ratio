@@ -1,0 +1,22 @@
+RED: T2 tests against origin/main production code (8ce4f73), tests + sample data only.
+Command: npx vitest run src/theme src/components/layout
+
+      Tests  5 failed | 55 passed (60)
+     × checks sub and dim text on every accent callout tint over the main surfaces 1ms
+     × checks text-cost/80 over slab and raised as the browser blends it 1ms
+     × composited pairs must clear the target by 0.05; plain pairs need only the target 1ms
+     × dark fails only the pinned legacy pairs 35ms
+     × light and high contrast were re-tuned to zero violations under the new rules 0ms
+ FAIL  src/components/layout/ThemeMenu.test.tsx [ src/components/layout/ThemeMenu.test.tsx ]
+ FAIL  src/theme/user.test.ts [ src/theme/user.test.ts ]
+ FAIL  src/theme/validate.test.ts > T2 follow-ups: composited pairs get a cushion, more real pairs are checked > checks sub and dim text on every accent callout tint over the main surfaces
+ FAIL  src/theme/validate.test.ts > T2 follow-ups: composited pairs get a cushion, more real pairs are checked > checks text-cost/80 over slab and raised as the browser blends it
+ FAIL  src/theme/validate.test.ts > T2 follow-ups: composited pairs get a cushion, more real pairs are checked > composited pairs must clear the target by 0.05; plain pairs need only the target
+ FAIL  src/theme/validate.test.ts > T2 follow-ups: composited pairs get a cushion, more real pairs are checked > light and high contrast were re-tuned to zero violations under the new rules
+ FAIL  src/theme/validate.test.ts > built-in themes > dark fails only the pinned legacy pairs
+ Test Files  3 failed | 3 passed (6)
+AssertionError: expected [ 'cost/cost/10@exec-bg', …(57) ] to deeply equal [ 'cost/cost/10@exec-bg', …(83) ]
+Error: Cannot find module './user' imported from /tmp/t2ui/repo/src/theme/user.test.ts
+Error: Failed to resolve import "@/theme/user" from "src/components/layout/ThemeMenu.test.tsx". Does the file exist?
+TypeError: contrastChecks is not a function
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯

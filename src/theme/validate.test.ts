@@ -2,7 +2,8 @@
 // structure first, then WCAG contrast for the role pairs the UI actually uses.
 import { describe, expect, it } from 'vitest';
 import { BUILT_IN_THEMES, type Theme } from './themes';
-import { validateTheme } from './validate';
+import { composite, contrastRatio } from './contrast';
+import { contrastChecks, validateTheme } from './validate';
 
 const light = BUILT_IN_THEMES.light;
 const clone = (t: Theme): Theme => JSON.parse(JSON.stringify(t));
@@ -25,6 +26,7 @@ describe('built-in themes', () => {
   it('dark fails only the pinned legacy pairs', () => {
     const tint = (a: string, pct: number, surfaces: string[]) => surfaces.map((x) => `${a}/${a}/${pct}@${x}`);
     const EXEC = ['exec-bg', 'exec-surface', 'exec-hover'];
+    const MAIN = ['void', 'deep', 'slab', 'raised'];
     const onExec = (fgs: string[]) => fgs.flatMap((fg) => EXEC.map((bg) => `${fg}/${bg}`));
     expect(pairs(BUILT_IN_THEMES.dark).sort()).toEqual([
       // Light-mode executive cards inside the dark app: dark-theme text and accents on white.
@@ -34,7 +36,11 @@ describe('built-in themes', () => {
       'edge/void', 'edge/deep', 'edge/slab', 'edge/raised',
       ...tint('value', 10, EXEC), ...tint('cost', 10, EXEC), ...tint('shape', 10, EXEC),
       ...tint('gate', 20, ['raised', ...EXEC]), ...tint('unit', 20, EXEC), ...tint('purple', 30, ['slab', 'raised', ...EXEC]),
-    ].sort()); // 58 pairs
+      // Added in T2 with the newly checked pairs (the 58 above are unchanged): dim text in
+      // accent callouts, and the translucent text-cost/80 on cards.
+      ...['value', 'cost', 'shape', 'gate', 'unit', 'purple'].flatMap((a) => MAIN.map((x) => `dim/${a}/10@${x}`)),
+      'cost/text/80@slab', 'cost/text/80@raised',
+    ].sort()); // 58 + 26 pairs
     expect(codes(BUILT_IN_THEMES.dark).every((c) => c === 'contrast')).toBe(true);
   });
 });
@@ -124,5 +130,41 @@ describe('contrast', () => {
     expect(pairs(withColor(hc, 'txt', '#595959'))).not.toContain('txt/void'); // 7.0
     expect(pairs(withColor(hc, 'focus', '#767676'))).toContain('focus/raised');
     expect(pairs(withColor(hc, 'edge', '#808080'))).toContain('edge/void'); // 3.9: fine for standard, not high
+  });
+});
+
+describe('T2 follow-ups: composited pairs get a cushion, more real pairs are checked', () => {
+  const hc = BUILT_IN_THEMES['high-contrast'];
+  const check = (t: Theme, key: string) => contrastChecks(t).find((c) => `${c.fg}/${c.bg}` === key);
+
+  it('composited pairs must clear the target by 0.05; plain pairs need only the target', () => {
+    expect(check(light, 'txt/void')?.min).toBe(4.5);
+    expect(check(light, 'value/value/10@raised')?.min).toBeCloseTo(4.55, 10);
+    expect(check(light, 'cost/text/80@slab')?.min).toBeCloseTo(4.55, 10);
+    expect(check(hc, 'gate/gate/20@raised')?.min).toBeCloseTo(7.05, 10);
+    // T1's light value: 4.528 on its tint over raised passed 4.5 but sits inside the cushion.
+    const old = withColor(light, 'value', '#047251') as unknown as Theme;
+    expect(check(old, 'value/value/10@raised')?.ratio).toBeGreaterThan(4.5);
+    expect(pairs(old)).toEqual(['value/value/10@raised']);
+  });
+
+  it('checks text-cost/80 over slab and raised as the browser blends it', () => {
+    const c = check(light, 'cost/text/80@raised');
+    expect(c?.ratio).toBeCloseTo(contrastRatio(composite(light.colors.cost, 0.8, light.colors.raised), light.colors.raised), 10);
+    expect(pairs(withColor(light, 'cost', '#be123c'))).toEqual(['cost/text/80@raised']); // T1 value: 4.26 blended
+  });
+
+  it('checks sub and dim text on every accent callout tint over the main surfaces', () => {
+    const keys = contrastChecks(light).map((c) => `${c.fg}/${c.bg}`);
+    for (const fg of ['sub', 'dim']) for (const a of ['value', 'cost', 'shape', 'gate', 'unit', 'purple']) {
+      for (const s of ['void', 'deep', 'slab', 'raised']) expect(keys).toContain(`${fg}/${a}/10@${s}`);
+    }
+    expect(pairs(withColor(light, 'dim', '#5d6573'))).toContain('dim/cost/10@raised'); // T1 value: 4.36
+  });
+
+  it('light and high contrast were re-tuned to zero violations under the new rules', () => {
+    expect(contrastChecks(light).every((c) => c.pass)).toBe(true);
+    expect(contrastChecks(hc).every((c) => c.pass)).toBe(true);
+    expect(contrastChecks(light)).toHaveLength(125 + 50); // T1 pairs + 48 callout + 2 translucent
   });
 });
