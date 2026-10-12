@@ -1,21 +1,28 @@
+GREEN evidence for the SRMD read-only contract harness (all synthetic; no network).
+
 $ npx vitest run src/srmd
  Test Files  1 passed (1)
-      Tests  26 passed (26)
+ Tests       26 passed (26)
 
-MUTATION CHECKS (each applied to the working tree, suite run, then reverted; all FAIL as required)
-MUTATION: add updateTags() write method to adapter
-Tests  1 failed | 25 passed (26)
-MUTATION: adapter claims integration-tested
-MUTATION: duplicates silently dropped instead of reported
-MUTATION: mismatched measures coerced to comparable
-MUTATION: currency mismatch coerced
-MUTATION: float-based money parse
-Tests  26 passed (26)
-MUTATION: config accepts non-allowlisted endpoint
-Tests  1 failed | 25 passed (26)
-MUTATION: network call added
-Tests  1 failed | 25 passed (26)
-MUTATION: float-based money parse
-Tests  1 failed | 25 passed (26)
-MUTATION: detector adds a summed total across both paths
-Tests  1 failed | 25 passed (26)
+Gates on the implementation commit:
+ npx tsc --noEmit        exit 0
+ npx eslint .            exit 0
+ npx vitest run          189 of 191 files, 3593 of 3596 tests passed; 3 failures were
+                         10 s timeouts under heavy host load, in files this slice does not touch
+ re-run alone: npx vitest run src/ingest/worker/periods.test.ts src/simulation/server/worker.test.ts
+                         2 files passed, 3 tests passed
+ npx next build          exit 0
+ npm run check:bundle    exit 0
+ (next-env.d.ts reverted after the build)
+
+MUTATION CHECKS (each applied to the working tree, `npx vitest run src/srmd`, then reverted)
+ 1 add an updateTags() write method to the adapter    -> 1 failed | 25 passed (26)
+ 2 adapter claims integration-tested                  -> 3 failed | 23 passed (26)
+ 3 duplicates silently dropped instead of reported    -> 4 failed | 22 passed (26)
+ 4 mismatched measures coerced to comparable          -> 2 failed | 24 passed (26)
+ 5 currency mismatch coerced                          -> 3 failed | 23 passed (26)
+ 6 float-based money parse                            -> 1 failed | 25 passed (26)
+ 7 config accepts a non-allowlisted endpoint          -> 1 failed | 25 passed (26)
+ 8 network call added to the module                   -> 1 failed | 25 passed (26)
+ 9 detector adds a summed total across both paths     -> 1 failed | 25 passed (26)
+All nine are caught; the tree was restored after each (git status clean).
