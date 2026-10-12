@@ -1,5 +1,3 @@
-$ npx vitest run src/srmd   (before implementation; modules missing)
- FAIL  src/srmd/srmd.test.ts [ src/srmd/srmd.test.ts ]
-Error: Cannot find module './index' imported from /tmp/srmd/c/src/srmd/srmd.test.ts
+$ npx vitest run src/srmd   (round 2 tests against the round 1 implementation)
  Test Files  1 failed (1)
-      Tests  no tests
+      Tests  14 failed | 44 passed (58)

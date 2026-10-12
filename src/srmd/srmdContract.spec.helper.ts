@@ -1,5 +1,8 @@
 // Reusable contract suite. A future real adapter must pass the same checks
 // that the simulated one does; nothing here is specific to the simulation.
+// Real adapters must keep private helpers out of the adapter object (module
+// scope functions or #private fields): any other function-valued property,
+// including symbol-keyed ones, fails the read-only check.
 import { describe, expect, it } from 'vitest';
 import {
   CAPABILITIES,
@@ -10,6 +13,7 @@ import {
   detectOverlap,
   formatNanos,
   parseNanos,
+  type Maturity,
   type ProviderCostRecord,
   type SrmdAdapter,
   type SrmdCostRecord,
@@ -17,20 +21,74 @@ import {
 } from './index';
 
 const WRITE_VERB = /^(create|update|delete|remove|put|post|patch|write|set|add|upsert|insert|save|send|push|apply|sync|assign|approve|import|tag|submit|execute)/i;
+const ALLOWED_KEYS: readonly (string | symbol)[] = [...READ_METHODS, 'discoverCapabilities'];
+const json = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === 'bigint' ? `${x}n` : x));
 
 export interface ContractOptions {
   /** Provider-direct records that the adapter's SRMD view may overlap. */
   providerRecords: ProviderCostRecord[];
-  /** Highest maturity this adapter may claim; defaults to the build ceiling. */
-  maxMaturity?: 'simulated';
+  /** Highest maturity this adapter may claim. Enforced at runtime: anything above 'simulated' throws. */
+  maxMaturity?: Maturity;
 }
 
-function methodNames(obj: object): string[] {
-  const names = new Set<string>();
-  for (let o: object | null = obj; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
-    for (const k of Object.getOwnPropertyNames(o)) if (k !== 'constructor') names.add(k);
+/** Function-valued keys (string and symbol, whole prototype chain) outside the read allowlist, plus Proxy probes. */
+export function readOnlyViolations(adapter: SrmdAdapter): string[] {
+  const out: string[] = [];
+  const names: (string | symbol)[] = [];
+  for (let o: object | null = adapter; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+    for (const k of Reflect.ownKeys(o)) {
+      if (k === 'constructor') continue;
+      const d = Object.getOwnPropertyDescriptor(o, k);
+      let fn = typeof d?.value === 'function';
+      if (d?.get) {
+        try {
+          fn = typeof d.get.call(adapter) === 'function';
+        } catch {
+          fn = true;
+        }
+      }
+      if (fn) names.push(k);
+    }
   }
-  return [...names].filter((k) => typeof (obj as Record<string, unknown>)[k] === 'function');
+  for (const k of names) {
+    if (!ALLOWED_KEYS.includes(k)) out.push(`unexpected method ${String(k)}`);
+    else if (typeof k === 'string' && WRITE_VERB.test(k)) out.push(`write verb ${k}`);
+  }
+  for (const k of ALLOWED_KEYS) if (!names.includes(k)) out.push(`missing ${String(k)}`);
+  const probe = adapter as unknown as Record<string | symbol, unknown>;
+  if (probe[`__probe_${Math.random().toString(36).slice(2)}`] !== undefined || probe[Symbol('probe')] !== undefined) {
+    out.push('answers unknown keys (proxy-like adapter)');
+  }
+  return out;
+}
+
+/** Every envelope the adapter produces (descriptor, capability report, each response, each record) must be labeled and capped. */
+export async function envelopeViolations(adapter: SrmdAdapter, max: Maturity = 'simulated'): Promise<string[]> {
+  if (MATURITY_ORDER.indexOf(max) < 0 || MATURITY_ORDER.indexOf(max) > MATURITY_ORDER.indexOf('simulated')) {
+    throw new Error(`maturity above 'simulated' is not allowed in this build (got ${String(max)})`);
+  }
+  const out: string[] = [];
+  const check = (where: string, e: Partial<Record<'maturity' | 'provenance' | 'label', unknown>> | null | undefined): void => {
+    if (!e) return void out.push(`${where}: no envelope`);
+    const i = MATURITY_ORDER.indexOf(e.maturity as Maturity);
+    if (i < 0) out.push(`${where}: maturity missing or unknown`);
+    else if (i > MATURITY_ORDER.indexOf(max)) out.push(`${where}: maturity ${String(e.maturity)} above ${max}`);
+    if (e.provenance !== 'simulated') out.push(`${where}: provenance ${String(e.provenance)}`);
+    if (e.label !== SRMD_LABEL) out.push(`${where}: label missing or wrong`);
+  };
+  check('descriptor', adapter.descriptor);
+  check('discoverCapabilities', await adapter.discoverCapabilities());
+  const responses: SrmdResult<unknown>[] = [
+    await adapter.listCostRecords(),
+    await adapter.listTagTaxonomy(),
+    await adapter.listAccountMappings(),
+    await adapter.listMigrations(),
+    await adapter.getControlTotals(),
+  ];
+  responses.forEach((r, i) => check(READ_METHODS[i], r));
+  const recs = responses[0];
+  if (recs.status === 'ok') (recs.data as SrmdCostRecord[]).forEach((r) => check(`record ${r?.lineage?.srmdRecordId}`, r));
+  return out;
 }
 
 function okData<T>(r: SrmdResult<T>): T {
@@ -39,14 +97,11 @@ function okData<T>(r: SrmdResult<T>): T {
 }
 
 export function runSrmdContractTests(adapter: SrmdAdapter, opts: ContractOptions): void {
-  const max = opts.maxMaturity ?? 'simulated';
   const records = async (): Promise<SrmdCostRecord[]> => okData(await adapter.listCostRecords());
 
   describe('SRMD contract: read-only', () => {
-    it('exposes exactly the declared read methods and no write verb', () => {
-      const names = methodNames(adapter).filter((n) => n !== 'discoverCapabilities');
-      expect([...names].sort()).toEqual([...READ_METHODS].sort());
-      expect(names.filter((n) => WRITE_VERB.test(n))).toEqual([]);
+    it('exposes exactly the declared read methods: no extra, symbol-keyed, proxied or write-verb member', () => {
+      expect(readOnlyViolations(adapter)).toEqual([]);
     });
   });
 
@@ -70,8 +125,7 @@ export function runSrmdContractTests(adapter: SrmdAdapter, opts: ContractOptions
       } as const;
       for (const [cap, call] of Object.entries(calls)) {
         const r = await call();
-        const status = caps[cap as keyof typeof calls].status;
-        expect(r.status === 'ok').toBe(status === 'supported');
+        expect(r.status === 'ok').toBe(caps[cap as keyof typeof calls].status === 'supported');
         if (r.status === 'unsupported') expect('data' in r).toBe(false);
       }
     });
@@ -85,43 +139,34 @@ export function runSrmdContractTests(adapter: SrmdAdapter, opts: ContractOptions
   });
 
   describe('SRMD contract: labeling and maturity', () => {
-    it('labels the descriptor and every response, and never claims more than the ceiling', async () => {
-      const responses = [
-        await adapter.listCostRecords(),
-        await adapter.listTagTaxonomy(),
-        await adapter.listAccountMappings(),
-        await adapter.listMigrations(),
-        await adapter.getControlTotals(),
-      ];
-      for (const r of [adapter.descriptor, ...responses]) {
-        expect(MATURITY_ORDER.indexOf(r.maturity)).toBeLessThanOrEqual(MATURITY_ORDER.indexOf(max));
-        if (r.provenance === 'simulated') {
-          expect(r.label).toBe(SRMD_LABEL);
-          expect(r.maturity).toBe('simulated');
-        }
-      }
-      for (const rec of await records()) {
-        expect(rec.provenance).toBe(adapter.descriptor.provenance);
-        expect(rec.label).toBe(adapter.descriptor.label);
-      }
+    it('labels and caps the descriptor, capability report, every response and every record', async () => {
+      expect(await envelopeViolations(adapter, opts.maxMaturity)).toEqual([]);
     });
   });
 
   describe('SRMD contract: reads', () => {
-    it('is idempotent and returns copies that callers cannot use to alter the source', async () => {
+    it('is idempotent and returns deep copies that callers cannot use to alter the source', async () => {
       const first = await records();
-      expect(await records()).toEqual(first);
-      first.forEach((r) => {
+      const snapshot = json(first);
+      const capSnap = json(await adapter.discoverCapabilities());
+      expect(json(await records())).toBe(snapshot);
+      for (const r of first) {
         r.amountNanos += parseNanos('1');
         r.currency = 'XXX';
-      });
+        r.measure.name = 'MUTATED';
+        r.lineage.ratioRef = 'MUTATED';
+        if (r.tags) r.tags.injected = 'x';
+        r.shared?.allocatedTo.push('x');
+      }
       first.length = 0;
-      expect((await records()).length).toBeGreaterThan(0);
-      expect(await adapter.getControlTotals()).toEqual(await adapter.getControlTotals());
+      expect(json(await records())).toBe(snapshot);
+      const caps = await adapter.discoverCapabilities();
+      caps.capabilities.cost_records.status = 'unknown';
+      expect(json(await adapter.discoverCapabilities())).toBe(capSnap);
+      expect(json(await adapter.getControlTotals())).toBe(json(await adapter.getControlTotals()));
     });
     it('keeps lineage: provider record id -> SRMD record id -> Ratio ref', async () => {
       const recs = await records();
-      const providerIds = new Set(opts.providerRecords.map((p) => p.providerRecordId));
       expect(new Set(recs.map((r) => r.lineage.srmdRecordId)).size).toBe(recs.length);
       expect(new Set(recs.map((r) => r.lineage.ratioRef)).size).toBe(recs.length);
       for (const r of recs) {
@@ -129,7 +174,7 @@ export function runSrmdContractTests(adapter: SrmdAdapter, opts: ContractOptions
         expect(l.srmdRecordId).toBeTruthy();
         expect(l.ratioRef).toContain(l.srmdRecordId);
         expect(l.upstreamSystem).toBeTruthy();
-        expect(l.providerRecordId === null || providerIds.has(l.providerRecordId)).toBe(true);
+        expect(l.providerRecordId === null || (typeof l.providerRecordId === 'string' && l.providerRecordId.length > 0)).toBe(true);
       }
     });
     it('keeps amounts exact (bigint nano units) and currency per record', async () => {
@@ -144,30 +189,29 @@ export function runSrmdContractTests(adapter: SrmdAdapter, opts: ContractOptions
 
   describe('SRMD contract: comparability and double counting', () => {
     it('reports not_comparable for differing measure or currency, with no coerced delta', async () => {
-      const recs = await records();
-      const out = detectOverlap(recs, opts.providerRecords);
-      const byId = new Map(recs.map((r) => [r.lineage.srmdRecordId, r]));
-      const prov = new Map(opts.providerRecords.map((p) => [p.providerRecordId, p]));
-      for (const c of out.candidates) {
-        const s = byId.get(c.srmdRecordId)!;
-        const p = prov.get(c.providerRecordId)!;
-        const differs = s.currency !== p.currency || !compareMeasures(s.measure, p.measure).comparable;
-        expect(c.status === 'not_comparable').toBe(differs);
-        if (differs) {
+      for (const c of detectOverlap(await records(), opts.providerRecords).candidates) {
+        const differs = c.srmd.currency !== c.provider.currency || !compareMeasures(c.srmd.measure, c.provider.measure).comparable;
+        if (c.basis === 'lineage_id') expect(c.status === 'not_comparable').toBe(differs);
+        if (c.status !== 'overlap_candidate') {
           expect(c.deltaNanos).toBeNull();
           expect(c.reasons.length).toBeGreaterThan(0);
         }
       }
     });
-    it('reports overlap candidates without summing, dropping or mutating inputs', async () => {
+    it('reports overlap candidates without summing, dropping or mutating inputs; every record lands in exactly one bucket', async () => {
       const recs = await records();
-      const before = JSON.stringify([recs, opts.providerRecords], (_k, v) => (typeof v === 'bigint' ? `${v}n` : v));
+      const before = json([recs, opts.providerRecords]);
       const out = detectOverlap(recs, opts.providerRecords);
       expect(out.candidates.length).toBeGreaterThan(0);
-      expect(Object.keys(out).sort()).toEqual(['candidates', 'providerUnmatched', 'srmdUnmatched']);
-      const seen = new Set([...out.candidates.map((c) => c.srmdRecordId), ...out.srmdUnmatched]);
-      expect(seen.size).toBe(recs.length);
-      expect(JSON.stringify([recs, opts.providerRecords], (_k, v) => (typeof v === 'bigint' ? `${v}n` : v))).toBe(before);
+      expect(Object.keys(out).sort()).toEqual(['candidates', 'duplicateSrmdIds', 'providerUnmatched', 'srmdUnmatched']);
+      const dup = out.duplicateSrmdIds.flatMap((d) => d.records);
+      const seenS = [...new Set(out.candidates.map((c) => c.srmd)), ...dup, ...out.srmdUnmatched];
+      expect(seenS.length).toBe(recs.length);
+      expect(new Set(seenS).size).toBe(recs.length);
+      const seenP = [...new Set(out.candidates.map((c) => c.provider)), ...out.providerUnmatched];
+      expect(new Set(seenP).size).toBe(opts.providerRecords.length);
+      expect(seenP.length).toBe(opts.providerRecords.length);
+      expect(json([recs, opts.providerRecords])).toBe(before);
     });
   });
 }
