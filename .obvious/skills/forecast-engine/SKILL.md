@@ -13,7 +13,7 @@ author: autobuild
 created: 2026-06-26
 ---
 
-# Forecast Engine — Ratio (`realjkg/token-sensei`)
+# Forecast Engine — Ratio (`realjkg/finops-ratio`)
 
 The forecast routine projects where spend will land and feeds the forecast-breach
 alerts defined in `.obvious/obvious.md` (Alert & Threshold Rules). Keep these

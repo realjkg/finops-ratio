@@ -16,7 +16,7 @@ author: autobuild
 created: 2026-06-26
 ---
 
-# Observability Deploy — Ratio (`realjkg/token-sensei`)
+# Observability Deploy — Ratio (`realjkg/finops-ratio`)
 
 Reference architecture for the case where the org runs **no COTS FinOps
 dashboard**: Ratio's value, cost, and governance signals are published as

@@ -13,7 +13,7 @@ author: autobuild
 created: 2026-06-26
 ---
 
-# Doc Authoring — Ratio (`realjkg/token-sensei`)
+# Doc Authoring — Ratio (`realjkg/finops-ratio`)
 
 The standing workflow for where documentation lives in this repo. It supersedes
 and embodies the obvious.md line "design specs are point-in-time, session-based
