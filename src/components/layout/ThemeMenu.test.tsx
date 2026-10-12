@@ -233,7 +233,7 @@ describe('palette editor', () => {
   it('reads out every required pair with the contrast engine numbers, live as colors change', () => {
     mount();
     openEditor();
-    const rows = () => [...container.querySelectorAll('[aria-label="Contrast readout"] tr')].map((r) => [...r.children].map((c) => c.textContent));
+    const rows = () => [...container.querySelectorAll('[aria-label="Contrast readout"] tbody tr')].map((r) => [...r.children].map((c) => c.textContent));
     const draft = BUILT_IN_THEMES.dark;
     expect(rows()).toEqual(contrastChecks({ ...draft, name: 'my-theme' }).map((c) => [`${c.fg} on ${c.bg}`, `${c.ratio.toFixed(2)}:1`, `needs ${c.min}`, c.pass ? 'Pass' : 'Fail']));
     setValue(byLabel<HTMLInputElement>('txt hex'), '#777');
@@ -326,3 +326,66 @@ describe('challenger review of #116', () => {
   });
 });
 
+
+describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921, ThemeMenu.tsx:92, :148)', () => {
+  it('Default (system) follows live OS changes and removes its listeners on unmount', () => {
+    const original = window.matchMedia;
+    const os = { more: false, listeners: new Set<() => void>() };
+    const mq = (q: string) => ({ get matches() { return q === '(prefers-contrast: more)' && os.more; }, addEventListener: (_: string, f: () => void) => os.listeners.add(f), removeEventListener: (_: string, f: () => void) => os.listeners.delete(f) });
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: mq });
+    try {
+      const flip = (more: boolean) => act(() => { os.more = more; os.listeners.forEach((f) => f()); });
+      const txt = () => byLabel<HTMLInputElement>('txt hex').value;
+      const [hc, dark] = [BUILT_IN_THEMES['high-contrast'].colors, BUILT_IN_THEMES.dark.colors];
+      mount();
+      openEditor();
+      flip(true); expect([txt(), button('Export current theme').getAttribute('download')]).toEqual([hc.txt, 'my-high-contrast.json']); // case 1: untouched draft follows
+      setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
+      flip(false); expect(txt()).toBe('#123456'); // case 2: an edited draft is kept
+      click(button('Customize')); // case 4: closing is the cancel path; an OS change happens while closed
+      flip(true); openEditor();
+      expect(txt()).toBe(hc.txt); // edits discarded, effective theme
+      click(button('Fix contrast')); // "Nothing to change" is not an edit (re-review)
+      flip(false); expect(txt()).toBe(dark.txt); // dirty was reset on reopen and the no-op fix left it clear: it follows
+      const name = () => $<HTMLInputElement>('#theme-editor label input');
+      click(button('Fix contrast')); // a Fix that changes colors (untouched Dark) is an edit
+      const fixed = txt();
+      flip(true); expect([txt(), byLabel<HTMLInputElement>('void hex').value]).toEqual([fixed, dark.void]);
+      click(button('Reset to built-in')); // Reset with the default name: unedited again, so it follows
+      importText('{oops'); // a failed import attempt counts as an edit (re-review)
+      flip(false); expect([txt(), alertText()]).toEqual([hc.txt, expect.stringMatching(/Not valid JSON/)]);
+      setValue(name(), 'acme'); click(button('Reset to built-in')); // Reset keeps a custom name, so the draft stays edited
+      flip(true); expect([name().value, txt()]).toEqual(['acme', dark.txt]);
+      setValue(name(), 'my-theme'); click(button('Reset to built-in'));
+      flip(false); expect(txt()).toBe(dark.txt);
+      for (const name of ['light', 'dark'] as const) { // case 3: an explicit choice is not overridden (theme nor draft)
+        setValue(select(), name);
+        flip(!os.more);
+        expect([html.getAttribute('data-theme'), txt()], name).toEqual([name, BUILT_IN_THEMES[name].colors.txt]);
+      }
+      act(() => root?.unmount()); expect(os.listeners.size).toBe(0);
+    } finally {
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: original });
+    }
+  });
+  it('editing the name clears a stale import-problems snapshot', () => {
+    mount();
+    openEditor();
+    importText('{oops');
+    setValue($<HTMLInputElement>('#theme-editor label input'), 'renamed');
+    expect(alertText()).not.toMatch(/Not valid JSON/);
+  });
+  it('background-only roles show their worst pair (pairs whose base surface is that role), export and headers', () => {
+    mount();
+    setValue(select(), 'dark');
+    openEditor();
+    expect([(button('Export current theme') as HTMLButtonElement).disabled, container.textContent]).toEqual([true, expect.stringMatching(/Dark cannot be exported \(it has pinned contrast exceptions\)\. Choose Light or High contrast, or save a custom theme, to export\./)]);
+    expect([...container.querySelectorAll('[aria-label="Contrast readout"] thead th')].map((h) => `${h.textContent}/${h.getAttribute('scope')}`)).toEqual(['Pair/col', 'Ratio/col', 'Threshold/col', 'Result/col']);
+    setValue(select(), 'light');
+    expect(button('Export current theme').tagName).toBe('A');
+    for (const role of ['void', 'deep', 'slab', 'raised', 'exec-bg', 'exec-surface', 'exec-hover']) {
+      const worst = contrastChecks({ ...BUILT_IN_THEMES.light, name: 'my-theme' }).filter((c) => c.bg.split('@').pop() === role).sort((a, b) => a.ratio / a.min - b.ratio / b.min)[0];
+      expect(byLabel<HTMLInputElement>(`${role} hex`).nextElementSibling?.textContent, role).toBe(`${role} ${worst.ratio.toFixed(2)} Pass`);
+    }
+  });
+});

@@ -10,7 +10,7 @@ lists how the facts and the merged-card records were checked.
 
 ## Status and next slices
 
-Checked against `origin/main` at `ff24ff3` on 2026-10-12.
+Checked against `origin/main` at `782a42f` on 2026-10-12.
 
 | Card or slice | State |
 |---|---|
@@ -22,7 +22,7 @@ Checked against `origin/main` at `ff24ff3` on 2026-10-12.
 | A6 synthetic cloud sandboxes | Merged, #108 (`6acd2ba`) |
 | A7 money sign and favicon | Merged, #109 (`a3c1437`); follow-up #111 (`e184a44`) |
 | A8 sign-in link, findings header, `/demo` prompts | Merged, #110 (`8ce4f73`) |
-| Outside the cards, merged | Frank mock analytics #99 and its hardening #102 (`a90dda5`); Frank MCP design revisions #101 (`0ace878`); AI-spend-versus-total ratio card #112 (`c95be35`); UI theme slice T1 #113 (`145565f`); connector slices C1 #114 (`6f37afd`) and C3 #115 (`b6957ac`); workload attribution from cost-row tags #117 (`ff24ff3`) |
+| Outside the cards, merged | Frank mock analytics #99 and its hardening #102 (`a90dda5`); Frank MCP design revisions #101 (`0ace878`); AI-spend-versus-total ratio card #112 (`c95be35`); UI theme slices T1 #113 (`145565f`) and T2 #116 (`6ac1335`); connector slices C1 #114 (`6f37afd`) and C3 #115 (`b6957ac`); workload attribution from cost-row tags #117 (`ff24ff3`); connector Disconnect and Findings-link fixes #119 (`782a42f`) |
 | Sprint A2, C and D cards | Not started. B1, B6 and B8 have all their dependencies merged; B4 and B5 wait for A4 and A5 (and D15); B7 now waits only for B1 and B8; the rest wait on earlier waves |
 
 **Pending owner decision D15 (MVP re-scope).** The recommendation is in PLAN
@@ -52,7 +52,7 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   ingest keeps `Tags`; the connector path drops it.
 - UI themes, T1 to T4: T1 token layer, built-in themes, contrast engine and
   validator (merged, #113, `145565f`); T2 theme switcher, user themes and palette
-  editor (open, #116); T3 typography
+  editor (merged, #116, `6ac1335`), with its Medium review fixes open as #118; T3 typography
   settings; T4 inline colors moved onto tokens, with a guard test.
 
 Boundary (v2): local and ephemeral only. No production infrastructure, no real
