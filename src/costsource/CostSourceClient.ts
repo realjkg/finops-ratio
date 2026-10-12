@@ -101,6 +101,8 @@ export interface SourceHealth {
 
 export interface CostSourceClient {
   readonly mode: 'mock' | 'live';
+  /** true: fixture-backed demo client; its landed runs are labeled simulated. */
+  readonly simulated?: boolean;
   /** Which adapters are configured. */
   listSources(): Promise<CostSourceDescriptor[]>;
   /** Normalized FOCUS-shaped internal cost rows for a source + window. */

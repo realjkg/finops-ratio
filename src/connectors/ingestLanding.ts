@@ -5,6 +5,7 @@
 // from sources the ingest didn't produce.
 
 import type { CostFinding, CostRowsResult } from '@/costsource/CostSourceClient';
+import { LiveDataAuthError } from '@/costsource/LiveCostSourceClient';
 
 /** One completed ingest through the CostSourceClient seam, keyed by source id. */
 export interface IngestRun {
@@ -22,10 +23,16 @@ export interface IngestRun {
  * the seam — never paraphrased into something friendlier.
  */
 export interface ConnectorSession {
-  state: 'open' | 'error';
+  /** `locked`: the live API refused for lack of auth (intended policy), not a failure to retry. */
+  state: 'open' | 'error' | 'locked';
   /** Set when state === 'error': the seam's own message. */
   error?: string;
   openedAt: string; // ISO 8601
+}
+
+/** A live call refused for lack of API auth (intended policy): a lock, never an error to retry. */
+export function isLiveDataRefusal(err: unknown): boolean {
+  return err instanceof LiveDataAuthError;
 }
 
 export type ConnectorBusyPhase = 'connecting' | 'ingesting';
