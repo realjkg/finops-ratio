@@ -1,0 +1,27 @@
+# RED: tests committed before the dependency bump (origin/main 782a42f lockfile)
+$ npx vitest run src/security
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/security/dependencyFloor.test.ts > security dependency floors > next resolves at or above 16.3.8 in every lockfile entry
+AssertionError: node_modules/next@16.3.6: expected -1 to be greater than or equal to 0
+ FAIL  src/security/dependencyFloor.test.ts > security dependency floors > sharp resolves at or above 0.35.5 in every lockfile entry
+AssertionError: node_modules/sharp@0.35.4: expected -1 to be greater than or equal to 0
+ FAIL  src/security/dependencyFloor.test.ts > security dependency floors > source-map-js resolves at or above 1.2.2 in every lockfile entry
+AssertionError: node_modules/source-map-js@1.2.1: expected -1 to be greater than or equal to 0
+ FAIL  src/security/dependencyFloor.test.ts > security dependency floors > package.json declares a patched next minimum
+AssertionError: expected -1 to be greater than or equal to 0
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+
+$ npm audit --omit=dev (before)
+next  16.0.0 - 16.3.7
+Severity: high
+sharp  <0.35.5
+Severity: high
+sharp : Vulnerability in librsvg dependency CVE-2026-96889 - https://github.com/advisories/GHSA-wq5f-xc86-pv6w
+source-map-js  1.0.0 - 1.2.1
+Severity: high
+source-map-js allows event-loop denial of service through indexed source-map section offsets - https://github.com/advisories/GHSA-68fv-2mgg-jv7q
+3 high severity vulnerabilities
+
+$ npm audit (full, before)
+{"info":0,"low":0,"moderate":2,"high":8,"critical":0,"total":10}
