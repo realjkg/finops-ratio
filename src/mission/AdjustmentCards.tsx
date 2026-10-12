@@ -11,7 +11,8 @@ import { useCallback, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { Workload } from '@/types';
 import type { ChangePrediction, ChangeType, ProposedChange } from '@/prediction';
-import { formatRatio, formatUSD } from '@/lib/format';
+import { formatUSD } from '@/lib/format';
+import { DELTA_RATIO_CAP_CAVEAT, formatDeltaValueRatio } from '@/prediction/predictors';
 import { TOKEN_HEX } from '@/lib/scales';
 import { SHAPE_LABEL } from '@/lib/demandShape';
 import { withBasePath } from '@/lib/basePath';
@@ -220,6 +221,7 @@ export function PredictionResult({ prediction }: { prediction: ChangePrediction 
     );
   }
 
+  const deltaRatio = formatDeltaValueRatio(paired.deltaValueRatio);
   const { confidence } = prediction;
   const bandFinite = Number.isFinite(confidence.low) && Number.isFinite(confidence.high);
 
@@ -247,10 +249,11 @@ export function PredictionResult({ prediction }: { prediction: ChangePrediction 
         <Metric label="Δ monthly" value={usdOrUncertain(paired.deltaMonthlySpend)} tone={TOKEN_HEX.cost} />
         <Metric
           label="Δ value ratio"
-          value={`${paired.deltaValueRatio >= 0 ? '+' : ''}${formatRatio(paired.deltaValueRatio)}`}
+          value={deltaRatio.text}
           tone={TOKEN_HEX.value}
         />
       </div>
+      {deltaRatio.capped && <p className="font-mono text-[11px] text-cost">{DELTA_RATIO_CAP_CAVEAT}</p>}
 
       {/* Confidence band (80%, z=1.28). */}
       <p className="font-mono text-[11px] text-sub">

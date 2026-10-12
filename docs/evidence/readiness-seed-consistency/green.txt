@@ -3,7 +3,7 @@ $ npx vitest run src/lib/readinessSeedConsistency.test.tsx
  Test Files  1 passed (1)
       Tests  24 passed (24)
 $ npx vitest run (full)
-Test Files  191 passed (191); Tests  3594 passed (3594)
+Test Files  191 passed (191); Tests  3596 passed (3596)
 $ tsc --noEmit: ok; eslint .: ok (exit 0); next build: ok; check:bundle: pass
 $ simulation suite (playwright, built app): 11 passed with chromium-1194 and 11 passed with chromium_headless_shell-1194
 # Mutations (each reverted; readinessSeedConsistency tests)
@@ -14,3 +14,7 @@ ServiceNow label removed: 1 failed
 synthetic-cloud sentence removed: 1 failed
 delta cap disabled: 1 failed
 ITBM applied to non-critical workloads: 1 failed
+# Round 2 (review M-1): bound and caveat on the /mission Proposed Changes card
+$ npx vitest run src/lib/readinessSeedConsistency.test.tsx -> Tests  26 passed (26)
+Full vitest 191 files, 3596 tests; tsc, eslint, next build, check:bundle pass; simulation 11/11 on both browsers.
+Mutation: AdjustmentCards shows the raw delta (2 failed); caveat removed (2 failed).

@@ -15,7 +15,7 @@ import type {
 } from './index';
 import { WORKLOADS } from '@/data/workloads';
 import { formatUSD, formatSignedPct } from '@/lib/format';
-import { formatDeltaValueRatio } from './predictors';
+import { DELTA_RATIO_CAP_CAVEAT, formatDeltaValueRatio } from './predictors';
 
 // A cheaper target model for the model-switch preset (falls back if equal).
 const SWITCH_TARGET = 'gemini-2.5-flash';
@@ -223,8 +223,7 @@ function PredictionCard({ prediction }: { prediction: ChangePrediction }) {
       </div>
       {deltaRatio.capped && (
         <p className="mt-2 font-sans text-[12px] text-cost">
-          Upper bound, not a forecast: assumes total value stays constant while spend moves, and
-          the cold-start ledger has no error history. A cheaper model may lower quality and value.
+          {DELTA_RATIO_CAP_CAVEAT}
         </p>
       )}
 

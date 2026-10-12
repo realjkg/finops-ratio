@@ -36,6 +36,10 @@ export interface PredictionContext {
 /** Beyond this magnitude a Δ value ratio is shown as a bound, not a point estimate. */
 export const DELTA_RATIO_DISPLAY_CAP = 10;
 
+/** Shown wherever a capped Δ value ratio renders. */
+export const DELTA_RATIO_CAP_CAVEAT =
+  'Upper bound, not a forecast: assumes total value stays constant while spend moves, and the cold-start ledger has no error history. A cheaper model may lower quality and value.';
+
 /**
  * Display form of a predicted Δ value ratio. The estimator holds total value
  * constant while spend moves, so a large switch yields an extreme ratio that is
