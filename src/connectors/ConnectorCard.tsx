@@ -224,7 +224,7 @@ export function ConnectorCard({
       </div>
 
       {/* Descriptor note */}
-      <p className="text-[11px] leading-relaxed text-dim">{source.note}</p>
+      <p className="break-words text-[11px] leading-relaxed text-dim">{source.note}</p>
 
       {/* Env contract — what to set to connect (names only) */}
       {source.setup && state !== 'connected' && state !== 'disabled' && missing.length > 0 && (

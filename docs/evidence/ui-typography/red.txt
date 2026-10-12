@@ -13,3 +13,7 @@ vertical scrollers that also scroll sideways) was committed BEFORE the fixes and
 Round 3 (review: same-element line boxes, phone footer height). Spec committed before the fixes: on round-2 code the collapsed phone
 footer at /workloads, 390 px, 130% measured 375 px (default family) and 458 px (system-mono) against the new <= 64 px bound; 2 of 4 cases failed
 (1440 cases passed). The per-line check itself has no RED on the current pages (zero false positives); its mutations are in green.txt.
+
+Round 4 (review: 130% widened the page at 320-360 and 768 px). Spec widths 320, 360, 768, 1024 added before the fix; on round-3 code 4 of 8 cases failed:
+  320, 360  "page scrolls horizontally" on every route (Theme + Text + Ask Frank row grew to 371 px; Ask Frank cut off); 320 also "scrolls horizontally: main" on /connectors
+  768, 1024 overlap of nav links with the Theme label (the md top bar did not fit)
