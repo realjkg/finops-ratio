@@ -26,7 +26,7 @@ function pageRoutes(dir = 'pages', prefix = ''): string[] {
   });
 }
 
-// pages/404.tsx is the app's own page, so even the 404 is scanned with no allowlist.
+// pages/_error.tsx is the app's own page, so even the 404 is scanned with no allowlist.
 const NEXT_404 = '/__csp-unknown-route';
 const scan = async (page: Page, route: string) => {
   const violations = await watch(page);

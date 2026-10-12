@@ -43,8 +43,9 @@ function buildCsp({ dev, preview }) {
     'default-src': ["'self'"],
     // Development needs eval for React's debugging features; production does not.
     'script-src': ["'self'", PREPAINT_HASH, ...(dev ? ["'unsafe-eval'"] : []), ...extra('script')],
-    // Development injects CSS as <style> elements (hot reload); production links files.
-    'style-src': ["'self'", ...(dev ? ["'unsafe-inline'"] : []), ...extra('style')],
+    // Development injects CSS as <style> elements (hot reload) and the Vercel preview
+    // toolbar needs them too (Vercel's guidance); production links files only.
+    'style-src': ["'self'", ...(dev || preview ? ["'unsafe-inline'"] : []), ...extra('style')],
     // Server-rendered style="..." attributes (43 components use them) are blocked
     // by style-src alone. This directive covers attributes only: <style> elements
     // stay restricted, and attribute styles cannot run script or load non-self URLs

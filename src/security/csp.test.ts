@@ -45,8 +45,8 @@ describe('policy (exact directives: loosening any one fails)', () => {
   });
 });
 
-it('the custom 404 page has no inline styles and the browser scan has no allowlist', () => {
-  const page = readFileSync('pages/404.tsx', 'utf8');
+it('the custom error page has no inline styles and the browser scan has no allowlist', () => {
+  const page = readFileSync('pages/_error.tsx', 'utf8');
   expect(page).not.toMatch(/<style|style=|dangerouslySetInnerHTML/);
   expect(readFileSync('tests/simulation/csp.spec.ts', 'utf8')).not.toContain('.filter(');
 });

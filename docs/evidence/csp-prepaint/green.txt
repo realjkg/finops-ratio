@@ -32,3 +32,10 @@ $ npx vitest run src/security -> 8 passed (exact production/dev/preview directiv
 Route scan: all 19 page routes from pages/ plus Next's default 404 -> status ok, CSP header, 0 securitypolicyviolation events and 0 CSP console errors
   (404 page: only Next's own inline <style> violation is filtered, nothing else)
 Gates: lint ok, tsc ok, vitest 190 files / 3569 passed, build ok, check:bundle pass, simulation 16 passed (port 3717)
+
+# GREEN (round 4, merged with main 9024bc1)
+$ npx vitest run src/security -> 15 passed (includes #120 floor tests); mutation: preview style-src unsafe-inline applied everywhere -> prod/dev exact-policy tests fail
+pages/_error.tsx replaces Next's default error page (own classes, no inline style element). Chosen over pages/404.tsx because the RBAC route matrix
+  requires a row for every page route and exempts _error. next start: /nope -> 404, 0 "<style" in HTML, CSP header present.
+Route scan: 19 page routes + 404 with NO filter/allowlist -> 0 violations. Gates: lint ok, tsc ok, vitest 191 files / 3580 passed,
+  build ok, check:bundle pass, simulation 16 passed (port 3827)
