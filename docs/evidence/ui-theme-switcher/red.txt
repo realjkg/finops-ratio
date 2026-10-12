@@ -42,3 +42,11 @@ RED round 3 (Copilot 4244463561: live region must stay mounted while empty), aga
 npx vitest run src/components/layout/ThemeMenu.test.tsx
      × L4: problems are announced politely, not as an alert on every keystroke
       Tests  1 failed | 23 passed (24)
+
+RED round 4 (Copilot review 5486411111: 4244556890, 4244556948, 4244556908), against 1b24e02:
+npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × still applies the theme when storage is blocked, and says the choice will not persist
+     × replacing the draft (selector, reset, save) drops stale edits and import problems (Copilot 4244556890/948)
+AssertionError: expected undefined to be '' // Object.is equality
+AssertionError: expected '#123456' to be '#000000' // Object.is equality
+      Tests  2 failed | 23 passed (25)

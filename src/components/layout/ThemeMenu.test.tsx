@@ -85,9 +85,31 @@ describe('switcher', () => {
   it('still applies the theme when storage is blocked, and says the choice will not persist', () => {
     Object.defineProperty(window, 'localStorage', { configurable: true, get: () => { throw new Error('SecurityError'); } });
     mount();
+    const status = $('[role="status"]'); // mounted while empty (Copilot 4244556908), so the note is announced
+    expect(status?.textContent).toBe('');
     setValue(select(), 'dark');
     expect(html.getAttribute('data-theme')).toBe('dark');
-    expect(container.querySelector('[role="status"]')?.textContent).toMatch(/Storage is unavailable/);
+    expect($('[role="status"]')).toBe(status);
+    expect(status.textContent).toMatch(/Storage is unavailable/);
+    openEditor();
+    expect(container.querySelectorAll('[role="status"]')[0]).toBe(status);
+  });
+
+  it('replacing the draft (selector, reset, save) drops stale edits and import problems (Copilot 4244556890/948)', () => {
+    mount();
+    openEditor();
+    setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
+    importText('{oops');
+    setValue(select(), 'high-contrast');
+    expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES['high-contrast'].colors.txt);
+    expect(alertText()).toBe('');
+    importText('{oops');
+    click(button('Reset to built-in'));
+    expect(alertText()).toBe('');
+    importText('{oops');
+    click(button('Save and apply'));
+    expect(html.getAttribute('data-theme')).toBe('my-theme');
+    expect(alertText()).toBe('');
   });
 
   it('lists stored custom themes after re-validating them; garbage falls back to the default', () => {
