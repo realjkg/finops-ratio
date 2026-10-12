@@ -70,7 +70,8 @@ describe('NutanixEvidenceProbe', () => {
     expect(ntnx.probe([fx.nc2Bill]).results.doubleCount.suspected).toBe(false);
   });
   it('never sums across currencies', () => {
-    const bill = { ...fx.nc2Bill, id: 'b', lines: [...(fx.nc2Bill as { lines: never[] }).lines, { lineId: 'L9', serviceName: 'NC2 host', description: '', billedCost: 5, billingCurrency: 'EUR' }] } as never;
+    const line = (lineId: string, billedCost: number, billingCurrency: string) => ({ lineId, serviceName: 'NC2 host', description: '', billedCost, billingCurrency });
+    const bill = { id: 'b', kind: 'cloud_bill_lines', hostProvider: 'aws', lines: [line('L1', 120.5, 'USD'), line('L9', 5, 'EUR')] } as const;
     expect(ntnx.probe([fx.nc2Inventory, bill]).results.doubleCount.amountsByCurrency).toEqual({ USD: 120.5, EUR: 5 });
   });
   it('does not mutate frozen input', () => {
