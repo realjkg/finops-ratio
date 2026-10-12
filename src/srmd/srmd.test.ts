@@ -40,7 +40,7 @@ describe('read-only by construction', () => {
   it('rejects a write method, a symbol-keyed method, a getter returning a function and a proxy', () => {
     class W extends SimulatedSrmdAdapter { async updateTags() {} }
     class Sym extends SimulatedSrmdAdapter { [Symbol.for('deleteAll')]() {} }
-    class Getter extends SimulatedSrmdAdapter { get purgeAll() { return () => 1; } }
+    class Getter extends SimulatedSrmdAdapter { get wipeAll() { return () => 1; } }
     const proxy = new Proxy(new SimulatedSrmdAdapter(), { get: (t, k, r) => (k in t ? Reflect.get(t, k, r) : () => 'write') });
     for (const bad of [new W(), new Sym(), new Getter(), proxy]) expect(readOnlyViolations(bad).length).toBeGreaterThan(0);
   });
