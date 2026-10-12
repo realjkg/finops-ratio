@@ -1,0 +1,50 @@
+RED: theme editor Medium fixes, tests only, against origin/main 6ac1335 (#116 merged).
+Command: npx vitest run src/components/layout/ThemeMenu.test.tsx
+(The readout-rows test now reads tbody rows, since the table gains a header row.)
+
+     × Default (system) follows live OS changes and removes its listeners on unmount
+     × editing the name clears a stale import-problems snapshot
+     × background-only roles show their worst pair (pairs whose base surface is that role), export and headers
+AssertionError: expected 'my-dark.json' to be 'my-high-contrast.json' // Object.is equality
+AssertionError: expected 'Not valid JSON' not to match /Not valid JSON/
+AssertionError: expected [ undefined, …(1) ] to deeply equal [ true, StringMatching{…} ]
+      Tests  3 failed | 24 passed (27)
+
+RED round 2 (review Medium: the disabled-Export note offered an impossible remedy), against 1bc42a2:
+npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × background-only roles show their worst pair (pairs whose base surface is that role), export and headers
+      Tests  1 failed | 26 passed (27)
+
+RED round 3 (Copilot 4244653107: OS theme change leaves the Default editor draft stale), against f3f57d4:
+npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × Default (system) follows live OS changes and removes its listeners on unmount
+AssertionError: expected '#d0d8ea' to be '#000000' // Object.is equality
+      Tests  1 failed | 26 passed (27)
+
+Round 4 (owner acceptance cases for the draft refresh), tests only, against eaeba05: no RED. The cases already pass:
+(1) Default, editor open, untouched draft follows an OS change; (2) an edited draft is kept (both pinned since round 3);
+(3) explicit Light / Dark: an OS change overrides neither the applied theme nor the draft;
+(4) closing the editor (the cancel path) and reopening after an OS change shows the effective theme, edits discarded,
+    dirty flag reset (the draft follows the next OS change again).
+
+RED round 5 (gate review Medium: Fix contrast cleared the dirty flag, so the next OS change overwrote an edited draft),
+against 443c27f: npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × Default (system) follows live OS changes and removes its listeners on unmount
+AssertionError: expected [ '#000000', '#ffffff' ] to deeply equal [ '#404040', '#05070b' ]
+      Tests  1 failed | 26 passed (27)
+
+RED round 6 (re-review: dirty flag wrong on two paths), against 4a2c757: npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × Default (system) follows live OS changes and removes its listeners on unmount
+AssertionError: expected '#000000' to be '#d0d8ea' // Object.is equality
+      Tests  1 failed | 26 passed (27)
+  (fails at the no-op Fix contrast step: the untouched hc draft stays #000000 instead of following to Dark;
+   the failed-import step follows it in the same test and is checked by mutation in GREEN)
+
+RED round 7 (exhaustive review: Reset clears dirty but keeps a typed name; the f.changes term was unpinned), against 94ff0c8:
+npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × Default (system) follows live OS changes and removes its listeners on unmount
+AssertionError: expected [ 'my-theme', '#000000' ] to deeply equal [ 'acme', '#d0d8ea' ]
+      Tests  1 failed | 26 passed (27)
+  (name 'acme' + Reset, then an OS change: the name was reset to my-theme)
+With the new untouched-Dark Fix contrast step, the formerly surviving mutant setDirty(dirty) now fails on 94ff0c8:
+  expected [ '#000000', '#ffffff' ] to deeply equal [ '#2f3f65', '#05070b' ]
