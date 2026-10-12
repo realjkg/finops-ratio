@@ -55,6 +55,27 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   editor (merged, #116, `6ac1335`), with its Medium review fixes open as #118; T3 typography
   settings; T4 inline colors moved onto tokens, with a guard test.
 
+- SRMD read-only contract harness (`src/srmd/`, branch `feat/srmd-contract-harness`):
+  **maturity `simulated`**, reported by `srmdMaturity()` and capped by tests. SRMD is
+  the pilot customer's multicloud SaaS connector platform. Nothing is assumed about the
+  real one: not its API, export format, schema, auth, per-field authority or any
+  write-back. `SimulatedSrmdAdapter` serves invented fixtures, labeled "simulated
+  counterpart, contract unverified" on the descriptor and every response. The
+  `SrmdAdapter` interface has no write methods (a type-level check and a test over the
+  adapter's method names), capability discovery answers `supported`, `unsupported` or
+  `unknown` per capability, and `resolveSrmdConfig` is disabled unless an allowlisted
+  simulated target is named. No network code exists in the module. A real adapter
+  would implement `SrmdAdapter`, pass `runSrmdContractTests` (in
+  `srmdContract.spec.helper.ts`) with its own authorized provider records, be added to
+  `srmdMaturity()` with its own evidence, and only then claim `integration-tested`.
+  Open discovery questions: whether SRMD is a data provider, normalizer, tagging source
+  or reporting view; what exports or APIs exist, with what auth, limits and versioning;
+  whether it carries the same provider spend Ratio ingests (upstream or parallel) and
+  which path is authoritative per bill identity; authority per field (amounts, tags,
+  account mapping, currency, credits, shared cost, migrations); how it represents
+  credits, shared cost and migrated workloads; which lineage ids exist; and whether any
+  write-back is wanted (default: none).
+
 Boundary (v2): local and ephemeral only. No production infrastructure, no real
 data or credentials, no spend. No card adds a migration (issue #94) or a
 dependency. Mocks bind to the loopback interface only.
