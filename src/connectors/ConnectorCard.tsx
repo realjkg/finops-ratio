@@ -122,6 +122,16 @@ export function ConnectorCard({
   const isSandbox = isOfflineSandboxSource(source.id);
   const canTest = Boolean(onTest) && state === 'connected' && isSandbox;
   const liveProbeViaApi = state === 'connected' && !isSandbox;
+  const disconnectButton = (
+    <button
+      type="button"
+      onClick={onDisconnect}
+      disabled={busy !== null}
+      className="rounded border border-edge px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-dim hover:text-sub disabled:opacity-60"
+    >
+      Disconnect
+    </button>
+  );
 
   async function test() {
     if (!onTest) return;
@@ -308,16 +318,7 @@ export function ConnectorCard({
             </>
           ) : session?.state === 'locked' ? (
             // No Retry (policy, not a failure), but landed data must stay withdrawable.
-            run && (
-              <button
-                type="button"
-                onClick={onDisconnect}
-                disabled={busy !== null}
-                className="rounded border border-edge px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-dim hover:text-sub disabled:opacity-60"
-              >
-                Disconnect
-              </button>
-            )
+            run && disconnectButton
           ) : (
             <button
               type="button"
@@ -334,6 +335,8 @@ export function ConnectorCard({
                     : 'Connect'}
             </button>
           )}
+          {/* A failed re-ingest keeps the earlier run on screen, so it stays withdrawable. */}
+          {session?.state === 'error' && run && disconnectButton}
         </div>
       ) : (
         /* Action — legacy registry mode: health probe for connected sandbox sources */
