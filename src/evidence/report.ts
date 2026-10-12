@@ -1,8 +1,8 @@
 // Shared EvidenceReport for the read-only discovery harnesses. No network, no
 // fetch, no product wiring: a harness only reads artifacts a human provides.
 
-export const MATURITY_LEVELS = ['implemented', 'simulated', 'integration-tested', 'customer-validated'] as const;
-export type Maturity = (typeof MATURITY_LEVELS)[number];
+export const MATURITY_LEVELS: readonly string[] = Object.freeze(['implemented', 'simulated', 'integration-tested', 'customer-validated']);
+export type Maturity = 'implemented' | 'simulated' | 'integration-tested' | 'customer-validated';
 /** Highest label this build may claim: everything here runs on synthetic fixtures. */
 export const MATURITY_CEILING: Maturity = 'simulated';
 
@@ -17,28 +17,43 @@ export interface EvidenceReport<R> {
   maturity: Maturity;
 }
 
-export function buildReport<R>(p: {
-  harness: string;
-  commands: string[];
-  inputs: { id: string; kind: string }[];
-  results: R;
-  limitations: string[];
-  revision?: string;
-  env?: string;
-  maturity?: Maturity;
-}): EvidenceReport<R> {
-  const maturity = p.maturity ?? 'simulated';
-  if (MATURITY_LEVELS.indexOf(maturity) > MATURITY_LEVELS.indexOf(MATURITY_CEILING)) {
-    throw new Error(`maturity '${maturity}' exceeds this build's ceiling '${MATURITY_CEILING}'`);
+export function deepFreeze<T>(v: T): T {
+  if (v && typeof v === 'object' && !Object.isFrozen(v)) {
+    Object.freeze(v);
+    for (const k of Object.keys(v)) deepFreeze((v as Record<string, unknown>)[k]);
   }
-  return {
+  return v;
+}
+
+const BUILT = new WeakSet<object>(); // reports minted by buildReport only
+
+function checkMaturity(m: unknown): asserts m is Maturity {
+  if (typeof m !== 'string' || !MATURITY_LEVELS.includes(m)) throw new Error(`unknown maturity label '${String(m)}'`);
+  if (MATURITY_LEVELS.indexOf(m) > MATURITY_LEVELS.indexOf(MATURITY_CEILING)) {
+    throw new Error(`maturity '${m}' exceeds this build's ceiling '${MATURITY_CEILING}'`);
+  }
+}
+
+/** The single validated factory: copies, deep-freezes and brands the report. */
+export function buildReport<R>(p: Omit<EvidenceReport<R>, 'revision' | 'env' | 'maturity'> & { revision?: string; env?: string; maturity?: unknown }): EvidenceReport<R> {
+  const maturity = p.maturity ?? 'simulated';
+  checkMaturity(maturity);
+  const report: EvidenceReport<R> = deepFreeze({
     harness: p.harness,
     revision: p.revision ?? 'placeholder: git revision not supplied',
     env: p.env ?? 'placeholder: environment not supplied',
-    commands: p.commands,
-    inputs: p.inputs,
+    commands: [...p.commands],
+    inputs: p.inputs.map((i) => ({ ...i })),
     results: p.results,
-    limitations: p.limitations,
+    limitations: [...p.limitations],
     maturity,
-  };
+  });
+  BUILT.add(report);
+  return report;
+}
+
+/** Consumers and tests call this: only reports from buildReport pass. */
+export function assertReport(r: EvidenceReport<unknown>): void {
+  if (!BUILT.has(r)) throw new Error('not a report produced by buildReport');
+  checkMaturity(r.maturity);
 }
