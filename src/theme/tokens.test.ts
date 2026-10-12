@@ -66,6 +66,11 @@ describe('Tailwind token mapping', () => {
 });
 
 describe('index.css parity with themes.ts', () => {
+  it('is Light by default, which is allowed only while the rendered audit shows zero Light and High contrast failures', () => {
+    expect(DEFAULT_THEME).toBe('light');
+    expect(media['prefers-color-scheme: dark']).toBeDefined(); // an OS dark preference is still honored
+  });
+
   it('defines each built-in under :root[data-theme] and the default under :root', () => {
     for (const [name, theme] of Object.entries(BUILT_IN_THEMES)) expectBlock(blocks[`:root[data-theme='${name}']`], theme);
     expectBlock(blocks[':root'], BUILT_IN_THEMES[DEFAULT_THEME]);
@@ -157,15 +162,20 @@ describe('hard-coded color baseline (T4 migrates these; they may only shrink)', 
     expect(hitFiles).toBeLessThanOrEqual(6);
   });
 
-  it('raw hex colors in TSX do not grow past 19 in 7 files', () => {
+  it('raw hex colors in TSX do not grow past 17 in 5 files', () => {
     const { hits, hitFiles } = count(matches(HEX));
-    expect(hits).toBeLessThanOrEqual(19);
-    expect(hitFiles).toBeLessThanOrEqual(7);
+    expect(hits).toBeLessThanOrEqual(17);
+    expect(hitFiles).toBeLessThanOrEqual(5);
   });
 
-  it('raw hex colors in non-test .ts do not grow past 6 (src/lib/scales.ts TOKEN_HEX)', () => {
+  it('non-test .ts has no raw hex colors (scales.ts accents are theme variables)', () => {
     const { hits, hitFiles } = count(matches(HEX), files.filter((f) => f.endsWith('.ts')));
-    expect(hits).toBeLessThanOrEqual(6);
-    expect(hitFiles).toBeLessThanOrEqual(1);
+    expect(hits).toBe(0);
+    expect(hitFiles).toBe(0);
+  });
+
+  it('never builds a color by appending hex alpha to a value that may be a CSS variable', () => {
+    const { hits } = count(matches(/\}[0-9a-f]{2}[`'"]|color\s*\+\s*['"][0-9a-f]{2}['"]/g), files);
+    expect(hits).toBe(0);
   });
 });

@@ -1,0 +1,11 @@
+RED at origin/main 782a42f + tests only (production build, 1440 px, WCAG AA text nodes)
+$ npx vitest run
+  Test Files  3 failed | 187 passed (190)   Tests  10 failed | 3556 passed (3566)
+  src/lib/scales.test.ts (3): TOKEN_COLOR/tint do not exist
+  src/executive/initiativeModel.test.ts (3): colors are hex, TOKEN_COLOR missing
+  src/theme/tokens.test.ts (4): default theme is dark; TSX hex 19 > 17; .ts hex 6 > 0; hex-alpha append found
+$ RATIO_TEST_SKIP_BUILD=1 npx playwright test --config playwright.simulation.config.ts contrast-audit
+  light          Expected <= 0  Received 89   FAIL
+  high-contrast  Expected <= 0  Received 89   FAIL
+  dark           Expected <= 314 (measured baseline)  PASS (314)
+All 89 Light/High contrast failures are scales.ts TOKEN_HEX neon accents (ratio/budget/status/evidence colors) on white.

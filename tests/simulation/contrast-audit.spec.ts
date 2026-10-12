@@ -1,0 +1,81 @@
+import { test, expect, type Page } from '@playwright/test';
+import { writeFileSync } from 'node:fs';
+import { contrastRatio } from '../../src/theme/contrast';
+
+// Rendered WCAG AA audit of every visible text node on the key pages, per built-in theme:
+// computed foreground and effective (ancestor-composited, opacity-aware) background.
+// Failures are open defects: MAX only ratchets DOWN as migration slices land; nothing is
+// exempted and the threshold is never lowered. AUDIT_OUT=<file> writes the table,
+// AUDIT_DUMP=<file> the failing nodes (JSON).
+export const MAX: Record<string, number> = { light: 0, 'high-contrast': 0, dark: 314 };
+const PAGES = ['/', '/overview', '/connectors', '/workloads'];
+
+type Raw = { text: string; el: string; fg: number[]; size: number; bold: boolean; layers: { c: number[]; a: number }[]; img: boolean; op: number };
+const collect = (page: Page) => page.evaluate((): Raw[] => {
+  const rgba = (s: string) => {
+    const n = (s.match(/[\d.]+/g) ?? ['0', '0', '0', '1']).map(Number);
+    return [n[0], n[1], n[2], s.includes('/') || n.length > 3 ? n[3] : 1];
+  };
+  const out: Raw[] = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const el = node.parentElement;
+    if (!el || !node.textContent?.trim() || /^(SCRIPT|STYLE|NOSCRIPT)$/.test(el.tagName)) continue;
+    if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const r = range.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) continue; // sr-only
+    const chain: Element[] = [];
+    for (let e: Element | null = el; e; e = e.parentElement) chain.unshift(e);
+    let op = 1;
+    let img = false;
+    const layers = chain.map((e) => {
+      const cs = getComputedStyle(e);
+      op *= Number(cs.opacity);
+      img ||= cs.backgroundImage !== 'none';
+      const [r0, g0, b0, a0] = rgba(cs.backgroundColor);
+      return { c: [r0, g0, b0], a: a0 * op };
+    });
+    const cs = getComputedStyle(el);
+    out.push({ text: node.textContent.trim().slice(0, 40), el: `${el.tagName.toLowerCase()}.${String(el.getAttribute('class') ?? '').split(/\s+/).slice(0, 3).join('.')}`,
+      fg: rgba(cs.color), size: parseFloat(cs.fontSize), bold: Number(cs.fontWeight) >= 700, layers, img, op });
+  }
+  return out;
+});
+
+const hex = (c: number[]) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+/** Effective colors of one node, then its ratio against the AA requirement. */
+export function evaluate(n: Raw) {
+  let bg = [255, 255, 255];
+  for (const l of n.layers) bg = bg.map((v, i) => l.c[i] * l.a + v * (1 - l.a));
+  const a = n.fg[3] * n.op;
+  const fg = n.fg.slice(0, 3).map((v, i) => v * a + bg[i] * (1 - a));
+  const large = n.size >= 24 || (n.size >= 18.66 && n.bold);
+  return { ratio: contrastRatio(hex(fg), hex(bg)), need: large ? 3 : 4.5, fg: hex(fg), bg: hex(bg) };
+}
+
+const rows: string[] = [];
+const dump: unknown[] = [];
+for (const theme of Object.keys(MAX)) {
+  test(`rendered contrast audit: ${theme}`, async ({ page }) => {
+    await page.addInitScript((t) => localStorage.setItem('ratio.theme', t), theme);
+    let failing = 0;
+    for (const route of PAGES) {
+      await page.goto(route);
+      await page.waitForLoadState('networkidle');
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      const nodes = await collect(page);
+      const bad = nodes.map((n) => ({ n, ...evaluate(n) })).filter((x) => x.ratio < x.need - 1e-9);
+      failing += bad.length;
+      rows.push(`${theme.padEnd(14)} ${route.padEnd(12)} ${String(bad.length).padStart(4)} / ${nodes.length}  (background images: ${nodes.filter((x) => x.img).length})`);
+      for (const x of bad) dump.push({ theme, route, el: x.n.el, text: x.n.text, fg: x.fg, bg: x.bg, ratio: +x.ratio.toFixed(2), need: x.need });
+    }
+    rows.push(`${theme.padEnd(14)} TOTAL        ${String(failing).padStart(4)} (max ${MAX[theme]})`);
+    expect(failing, `${theme}: failing text nodes (ratchet: may only go down)`).toBeLessThanOrEqual(MAX[theme]);
+  });
+}
+test.afterAll(() => {
+  if (process.env.AUDIT_OUT) writeFileSync(process.env.AUDIT_OUT, rows.join('\n') + '\n');
+  if (process.env.AUDIT_DUMP) writeFileSync(process.env.AUDIT_DUMP, JSON.stringify(dump));
+});
