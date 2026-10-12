@@ -195,6 +195,7 @@ export function ThemeMenu() {
             <button type="button" className={btn} disabled={!checked.theme} onClick={() => {
               const f = fixContrast(checked.theme as Theme);
               replaceDraft({ ...f.theme }, f);
+              setDirty(true); // fixed colors are edits: an OS change must not overwrite them
             }}>Fix contrast</button>
             <button type="button" className={btn} onClick={() => replaceDraft({ ...BUILT_IN_THEMES[isBuiltIn(active) ? active : system], name: draft.name })}>Reset to built-in</button>
             {canExport ? (

@@ -24,3 +24,8 @@ The new assertions are live (each mutation reverted):
 MA reopening keeps the stale draft: killed, 1 failed | 26 passed
 MB the OS refresh ignores an explicit choice: killed, 1 failed | 26 passed
 MC replaceDraft keeps the dirty flag: killed, 1 failed | 26 passed
+
+GREEN round 5: Fix contrast sets the dirty flag after replacing the draft (fixed colors are edits). Reset to built-in
+still clears it (deliberate replacement; pinned). src/theme + src/components/layout -> 118 passed; tsc and eslint clean;
+next build succeeds; theme-mobile.spec.ts -> 3 passed.
+M8 Fix contrast clears dirty again: killed, 1 failed | 26 passed
