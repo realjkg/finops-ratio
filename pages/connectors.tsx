@@ -27,6 +27,7 @@ import { FocusDoorWalk } from '@/connectors/FocusDoorWalk';
 import { sourcesForEnv } from '@/costsource/seed';
 import { createCostSourceClient } from '@/costsource';
 import type { CostSourceDescriptor, SourceCoverage } from '@/costsource';
+import { isOfflineSandboxSource } from '@/costsource/sandboxSources';
 import { isSimulatedSource, SIMULATED_FIXTURES, SimulatedConnectorClient } from '@/costsource/SimulatedConnectorClient';
 
 const COVERAGE_ORDER: SourceCoverage[] = ['public_cloud', 'private_cloud', 'on_prem'];
@@ -100,6 +101,9 @@ function ConnectorRegistry() {
   }, [client]);
 
   const connected = sources.filter((s) => s.configured);
+  // Only a configured source outside the offline sandbox set is genuinely live (0 anonymously).
+  const liveCount = (list: CostSourceDescriptor[]) => list.filter((s) => s.configured && !isOfflineSandboxSource(s.id)).length;
+  const seededCount = (list: CostSourceDescriptor[]) => list.filter((s) => s.configured && isOfflineSandboxSource(s.id)).length;
   const available = sources.filter((s) => !s.configured);
   const onTest = live ? (id: string) => client.healthCheck(id) : undefined;
 
@@ -117,13 +121,12 @@ function ConnectorRegistry() {
             <div className="mt-3 flex flex-wrap gap-2">
               {COVERAGE_ORDER.map((cov) => {
                 const all = sources.filter((s) => s.coverage === cov);
-                const on = all.filter((s) => s.configured).length;
                 return (
                   <span
                     key={cov}
                     className="rounded border border-edge bg-slab px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-sub"
                   >
-                    {COVERAGE_LABEL[cov]} · <span className="text-value">{on}</span>/{all.length} live
+                    {COVERAGE_LABEL[cov]} · {seededCount(all)} of {all.length} seeded · {liveCount(all)} live
                   </span>
                 );
               })}
@@ -141,6 +144,17 @@ function ConnectorRegistry() {
               )}
             </div>
           </div>
+
+          <Link
+            href="/costsource"
+            className="mb-8 block rounded-card border border-edge bg-slab p-4 transition-colors hover:border-value/40 hover:bg-raised/40"
+          >
+            <div className="font-mono text-sm font-bold text-txt">AI spend vs total cloud spend →</div>
+            <p className="mt-1.5 text-[12px] text-sub">
+              The AI share of total spend, computed from the connected sources. The Ingested path needs an
+              authenticated connection; only the Static seed is shown here.
+            </p>
+          </Link>
 
           {/* Two-ingest-doors model */}
           <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -194,7 +208,9 @@ function ConnectorRegistry() {
           {connected.length > 0 && (
             <section className="mb-8">
               <h2 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-sub">
-                Active — {connected.length} adapter{connected.length !== 1 ? 's' : ''}
+                {liveCount(connected) === 0
+                  ? `Offline sandbox — ${connected.length} seeded adapter${connected.length !== 1 ? 's' : ''}, none live`
+                  : `Configured — ${connected.length} adapters (${liveCount(connected)} live)`}
               </h2>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {connected.map(renderCard)}

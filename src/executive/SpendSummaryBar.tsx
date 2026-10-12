@@ -2,6 +2,7 @@
 // Initiative Dashboard — total spend, projected savings, active initiatives, and
 // pending approvals, all derived from the mock seed. Metrics use JetBrains Mono;
 // labels use Instrument Sans (body), per the design tokens.
+import { DEMO_NOW } from '@/data/workloads';
 import { formatInt, formatUSD } from '@/lib/format';
 import { TOKEN_HEX } from '@/lib/scales';
 import type { SpendSummary } from './initiativeModel';
@@ -14,7 +15,7 @@ interface Metric {
 
 export function SpendSummaryBar({ summary }: { summary: SpendSummary }) {
   const metrics: Metric[] = [
-    { label: 'Total cloud spend', value: `${formatUSD(summary.totalMonthlySpend, { compact: true })}/mo` },
+    { label: 'AI spend', value: `${formatUSD(summary.totalMonthlySpend, { compact: true })}/mo` },
     {
       label: 'Projected savings',
       value: formatUSD(summary.projectedSavings, { compact: true }),
@@ -48,7 +49,7 @@ export function SpendSummaryBar({ summary }: { summary: SpendSummary }) {
       ))}
       <div className="ml-auto flex items-center gap-2 text-xs text-exec-muted">
         <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: TOKEN_HEX.value }} />
-        Updated 2 min ago
+        Seeded dataset as of {DEMO_NOW.toISOString().slice(0, 10)}
       </div>
     </section>
   );

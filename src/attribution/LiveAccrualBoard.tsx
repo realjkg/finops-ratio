@@ -114,7 +114,7 @@ function LiveSpendBars({ rows }: { rows: LiveAttributionRow[] }) {
   const plotW = VW - labelW - valueW - 12;
 
   return (
-    <figure className="w-full" aria-label="Live share of burn by row — animated spend bars">
+    <figure className="w-full" aria-label="Simulated share of burn by row — animated spend bars">
       <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" aria-hidden="true" style={{ display: 'block' }}>
         {rows.map((r, i) => {
           const y = M.top + i * ROW_H;
@@ -178,11 +178,11 @@ function LiveLeaderboardRow({ row, rate }: { row: LiveAttributionRow; rate: Burn
 
       <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs">
         <div className="flex items-baseline justify-between gap-2">
-          <dt className="text-sub">Tokens in (live)</dt>
+          <dt className="text-sub">Tokens in (simulated)</dt>
           <dd className="font-mono text-txt">{formatTokens(row.liveTokensIn)}</dd>
         </div>
         <div className="flex items-baseline justify-between gap-2">
-          <dt className="text-sub">Tokens out (live)</dt>
+          <dt className="text-sub">Tokens out (simulated)</dt>
           <dd className="font-mono text-txt">{formatTokens(row.liveTokensOut)}</dd>
         </div>
         <div className="flex items-baseline justify-between gap-2">
@@ -246,7 +246,7 @@ export function LiveAccrualBoard({ report }: { report: AttributionReport }) {
       <div className="rounded-card border border-edge bg-deep px-4 py-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-xs text-sub">
-            Portfolio burn (live){' '}
+            Portfolio burn (simulated){' '}
             <span className="ml-1 font-mono text-lg font-bold text-cost" data-testid="live-portfolio-burn">
               {formatUSD(view.totalLiveUsd)}
             </span>
@@ -268,7 +268,7 @@ export function LiveAccrualBoard({ report }: { report: AttributionReport }) {
         <LiveAccrualCurve series={curve} />
       </div>
       <div className="rounded-card border border-edge bg-slab p-4">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-sub">Live share of burn</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-sub">Simulated share of burn</p>
         <LiveSpendBars rows={view.rows} />
       </div>
 
