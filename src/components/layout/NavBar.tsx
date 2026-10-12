@@ -6,6 +6,7 @@
 
 import Link from 'next/link';
 import { ThemeMenu } from './ThemeMenu';
+import { TypographyMenu } from './TypographyMenu';
 
 export const NAV_ITEMS = [
   { key: 'findings',   label: 'Findings',   href: '/' },
@@ -33,7 +34,7 @@ export function NavBar({
 }) {
   return (
     <nav className="relative shrink-0 border-b border-edge bg-deep" aria-label="Main navigation">
-      <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 px-3 py-2 md:flex md:h-10 md:gap-0.5 md:py-0">
+      <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 px-3 py-2 md:flex md:min-h-10 md:flex-wrap md:gap-y-1 md:gap-x-0.5 md:py-1">
       {/* Logo mark */}
       <span className="flex items-center gap-1.5 md:mr-4">
         <span
@@ -66,8 +67,10 @@ export function NavBar({
         })}
       </div>
 
-      <div className="col-start-2 row-start-1 ml-auto flex items-center gap-2 md:col-auto md:row-auto">
+      {/* md:[&>div:first-child]:static: ThemeMenu's own md:relative would anchor its panel to the wrapping button group; anchoring both panels to the nav keeps them inside the viewport. */}
+      <div className="col-start-2 row-start-1 ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 md:col-auto md:row-auto md:[&>div:first-child]:static">
       <ThemeMenu />
+      <TypographyMenu />
       {/* Single agent launcher — purple AI token, reserved warm accent untouched. */}
       {onOpenAgent && (
         <button

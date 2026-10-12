@@ -29,7 +29,7 @@ export default function Outcomes() {
           </label>
         </header>
         <OutcomesPanel key={selected} workloadId={selected} />
-        <nav className="flex gap-5 text-sm text-unit">
+        <nav className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-unit">
           <Link href="/workspace">Cost tracking workspace</Link>
           <Link href="/reports">Reports</Link>
           <Link href="/agent-workflows">Agent workflows</Link>

@@ -93,10 +93,10 @@ export function ValueRatioMeter({
 
       {/* Axis labels — large variant only */}
       {isLarge && (
-        <div className="relative h-3.5">
+        <div className="relative h-7">
           <span className="absolute left-0 font-mono text-[9px] text-dim">0×</span>
           <span
-            className="absolute -translate-x-1/2 font-mono text-[9px] text-sub"
+            className="absolute top-3.5 font-mono text-[9px] text-sub" /* own row: 0× and 1× value collided in narrow lists */
             style={{ left: `${VALUE_LINE_PCT}%` }}
           >
             1× value

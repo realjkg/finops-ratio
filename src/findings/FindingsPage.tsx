@@ -326,8 +326,8 @@ function FindingRow({
         </span>
 
         <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="truncate font-body text-sm font-medium text-txt">
+          <div className="flex items-start justify-between gap-2">
+            <span className="min-w-0 break-words font-body text-sm font-medium text-txt">
               {finding.workloadName}
             </span>
             {/* Evidence: ratio + provenance mark + spend */}

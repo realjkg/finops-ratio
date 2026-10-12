@@ -6,6 +6,7 @@ import { useRouter } from 'next/router';
 import { useEffect } from 'react';
 import { applyTheme } from '@/theme/apply';
 import { loadActiveTheme } from '@/theme/user';
+import { applyTypography, loadTypography } from '@/theme/typography';
 import { PersonaProvider } from '@/components/PersonaProvider';
 import { AppShell } from '@/components/layout/AppShell';
 import { NAV_ITEMS } from '@/components/layout/NavBar';
@@ -27,6 +28,7 @@ export default function RatioApp({ Component, pageProps }: AppProps) {
   useEffect(() => {
     const stored = loadActiveTheme();
     if (stored) applyTheme(stored);
+    applyTypography(loadTypography()); // after hydration: the pre-paint script stays constant
   }, []);
 
   // Persona context wraps every page so the active lens (executive default /
