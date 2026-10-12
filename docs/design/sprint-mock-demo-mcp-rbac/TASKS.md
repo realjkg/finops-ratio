@@ -39,6 +39,8 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   unchanged). The live targets for Nutanix, Kubernetes (OpenCost core has no
   FOCUS export) and PointFive remain unverified; their simulated cards use
   illustrative payloads labeled "format not verified".
+  A locked re-ingest keeps Disconnect while its earlier run is shown, and the
+  landed-data line links Findings only when the run has findings.
 - Workload attribution from cost-row tags (merged, #117, `ff24ff3`): a non-simulated
   row whose `Tags` column holds `ratio:workload` equal to the id of a loaded
   workload resolves to it when `ResourceId` carries no workload identity

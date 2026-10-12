@@ -140,12 +140,17 @@ export function IngestVerification({
             {' · '}
           </>
         ) : (
-          'Rows normalized; none matched a workload. Provenance in '
+          `${s.rows === 0 ? 'No rows returned for this window.' : 'Rows normalized; none matched a workload.'} Provenance in `
         )}
-        <Link href="/" className="text-unit underline decoration-edge hover:decoration-unit">
-          Findings
-        </Link>
-        {' · '}
+        {/* fetchFindings() is [] for most connectors; FindingsPage hides the section then. */}
+        {s.findings > 0 && (
+          <>
+            <Link href="/" className="text-unit underline decoration-edge hover:decoration-unit">
+              Findings
+            </Link>
+            {' · '}
+          </>
+        )}
         <Link
           href="/attribution"
           className="text-unit underline decoration-edge hover:decoration-unit"
