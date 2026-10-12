@@ -25,3 +25,12 @@ source-map-js allows event-loop denial of service through indexed source-map sec
 
 $ npm audit (full, before)
 {"info":0,"low":0,"moderate":2,"high":8,"critical":0,"total":10}
+
+# RED (round on Copilot Medium): strict-comparator cases fail against the lenient comparator
+$ npx vitest run src/security
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/security/dependencyFloor.test.ts > floor comparators fail closed > accepts only plain major.minor.patch versions at or above the floor
+AssertionError: 16.3.8-canary.0: expected true to be false // Object.is equality
+ FAIL  src/security/dependencyFloor.test.ts > floor comparators fail closed > accepts only a single caret, tilde or exact range whose minimum meets the floor
+AssertionError: ^16.3.6 || ^16.3.8: expected true to be false // Object.is equality
+      Tests  2 failed | 4 passed (6)
