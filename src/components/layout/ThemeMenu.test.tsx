@@ -347,14 +347,17 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
       expect(txt()).toBe(hc.txt); // edits discarded, effective theme
       click(button('Fix contrast')); // "Nothing to change" is not an edit (re-review)
       flip(false); expect(txt()).toBe(dark.txt); // dirty was reset on reopen and the no-op fix left it clear: it follows
-      importText('{oops'); // a failed import attempt counts as an edit (re-review)
-      flip(true); expect([txt(), alertText()]).toEqual([dark.txt, expect.stringMatching(/Not valid JSON/)]);
-      setValue(byLabel<HTMLInputElement>('txt hex'), '#fafafa'); // Fix contrast that changes colors keeps the draft edited
-      click(button('Fix contrast'));
+      const name = () => $<HTMLInputElement>('#theme-editor label input');
+      click(button('Fix contrast')); // a Fix that changes colors (untouched Dark) is an edit
       const fixed = txt();
-      flip(false); expect([txt(), byLabel<HTMLInputElement>('void hex').value]).toEqual([fixed, dark.void]);
-      click(button('Reset to built-in')); // Reset deliberately replaces the draft: unedited again, so it follows
-      flip(true); expect(txt()).toBe(hc.txt);
+      flip(true); expect([txt(), byLabel<HTMLInputElement>('void hex').value]).toEqual([fixed, dark.void]);
+      click(button('Reset to built-in')); // Reset with the default name: unedited again, so it follows
+      importText('{oops'); // a failed import attempt counts as an edit (re-review)
+      flip(false); expect([txt(), alertText()]).toEqual([hc.txt, expect.stringMatching(/Not valid JSON/)]);
+      setValue(name(), 'acme'); click(button('Reset to built-in')); // Reset keeps a custom name, so the draft stays edited
+      flip(true); expect([name().value, txt()]).toEqual(['acme', dark.txt]);
+      setValue(name(), 'my-theme'); click(button('Reset to built-in'));
+      flip(false); expect(txt()).toBe(dark.txt);
       for (const name of ['light', 'dark'] as const) { // case 3: an explicit choice is not overridden (theme nor draft)
         setValue(select(), name);
         flip(!os.more);
