@@ -18,22 +18,30 @@ it('_document.tsx inlines PREPAINT_SCRIPT and no other inline script', () => {
   expect(doc.match(/dangerouslySetInnerHTML/g)).toHaveLength(1);
   expect(doc).toContain('__html: PREPAINT_SCRIPT');
 });
-describe('policy', () => {
-  it('allows scripts only from self plus the pinned hash; no eval, no inline <style>', () => {
-    expect(directive(prod, 'script-src')).toBe(`script-src 'self' ${csp.PREPAINT_HASH}`);
-    expect(prod).not.toContain('unsafe-eval');
-    expect(directive(prod, 'style-src')).toBe("style-src 'self'");
-    expect(directive(prod, 'style-src-attr')).toBe("style-src-attr 'unsafe-inline'");
+describe('policy (exact directives: loosening any one fails)', () => {
+  const H = csp.PREPAINT_HASH;
+  const parts = (opts: { dev: boolean; preview: boolean }) => csp.buildCsp(opts).split('; ');
+  const common = ["default-src 'self'", "style-src-attr 'unsafe-inline'", "font-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'"];
+
+  it('production', () => {
+    expect(parts({ dev: false, preview: false })).toEqual([
+      "default-src 'self'", `script-src 'self' ${H}`, "style-src 'self'", "style-src-attr 'unsafe-inline'", "img-src 'self' data: blob:", "font-src 'self'",
+      "connect-src 'self'", "frame-src 'none'", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'",
+    ]);
+    expect(prod.match(/sha256-/g)).toHaveLength(1);
+    expect(prod).not.toMatch(/unsafe-eval|vercel|\*/);
+    expect(directive(prod, 'script-src')).not.toContain('unsafe-inline');
   });
-  it('locks down objects, base URI, forms, framing, images and connections', () => {
-    expect(prod.split('; ')).toEqual(expect.arrayContaining(["default-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'", "img-src 'self' data: blob:", "connect-src 'self'"]));
+  it('development adds only eval, <style> injection and ws:', () => {
+    expect(parts({ dev: true, preview: false })).toEqual([
+      common[0], `script-src 'self' ${H} 'unsafe-eval'`, "style-src 'self' 'unsafe-inline'", common[1], "img-src 'self' data: blob:", common[2], "connect-src 'self' ws:", "frame-src 'none'", ...common.slice(3),
+    ]);
   });
-  it('relaxes eval and <style> injection only in development, vercel.live only on previews', () => {
-    const dev = csp.buildCsp({ dev: true, preview: false });
-    expect(directive(dev, 'script-src')).toBe(`script-src 'self' ${csp.PREPAINT_HASH} 'unsafe-eval'`);
-    expect(directive(dev, 'style-src')).toContain("'unsafe-inline'");
-    expect(prod).not.toContain('vercel.live');
-    expect(directive(csp.buildCsp({ dev: false, preview: true }), 'script-src')).toContain('https://vercel.live');
+  it('Vercel preview adds only the vercel.live hosts', () => {
+    expect(parts({ dev: false, preview: true })).toEqual([
+      common[0], `script-src 'self' ${H} https://vercel.live`, "style-src 'self' https://vercel.live", common[1], "img-src 'self' data: blob: https://vercel.live https://vercel.com",
+      "font-src 'self' https://vercel.live https://assets.vercel.com", "connect-src 'self' https://vercel.live wss://ws-us3.pusher.com", 'frame-src https://vercel.live', ...common.slice(3),
+    ]);
   });
 });
 

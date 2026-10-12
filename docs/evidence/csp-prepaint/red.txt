@@ -29,3 +29,9 @@ $ npx vitest run src/security
  FAIL  src/security/csp.test.ts > next.config.js headers > the image build stage passes RATIO_CSP_MODE through before `npm run build`
 AssertionError: expected -1 to be greater than -1
       Tests  1 failed | 7 passed (8)
+
+# RED (round 3: exact directives + all-routes scan); the tests pass on the correct policy, so RED is shown by mutation
+Unit: loosen frame-src to 'self' -> 3 failed | 5 passed; add https: to font-src -> 3 failed; add https: to connect-src -> 3 failed
+Browser: temporary inline <script> in pages/tokenomics.tsx, production build, `every page route` test ->
+  FAILED at /tokenomics: "Refused to execute inline script ... script-src" + event "script-src-elem inline" (reverted)
+Scan self-check (injected inline script into one route's HTML) detects script-src violation: passes
