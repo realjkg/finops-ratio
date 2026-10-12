@@ -14,7 +14,7 @@ for (const width of [390, 1440]) {
     await expect(editor).toHaveCount(0); await expect(opener).toBeFocused();
     await opener.click(); await page.keyboard.press('Escape');
     await expect(editor).toHaveCount(0); await expect(opener).toBeFocused();
-    await opener.click(); await page.getByRole('heading', { name: 'Findings', exact: true }).click();
+    await opener.click(); await page.getByRole('navigation', { name: 'Main navigation' }).getByText('Ratio', { exact: true }).click();
     await expect(editor).toHaveCount(0);
     await page.reload(); await expect(page.locator('html')).toHaveAttribute('data-theme', 'brownstone');
   });
