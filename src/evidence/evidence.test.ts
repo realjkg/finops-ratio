@@ -85,6 +85,11 @@ describe('NutanixEvidenceProbe: independence (H1)', () => {
     expect(type([fx.nc2Inventory, fx.nc2Export, fx.nc2Bill]).confidence).toBe('high');
     expect(type([fx.nc2Inventory, fx.nc2Bill]).confidence).toBe('medium');
   });
+  it('a copy under a new source does not raise confidence', () => {
+    const r = ntnx.probe([fx.nc2Inventory, { ...fx.nc2Inventory, id: 'copy', source: 'other' } as NutanixArtifact, fx.nc2Bill]).results;
+    expect(r.confidence).toBe('medium');
+    expect(r.duplicateArtifacts).toEqual([{ id: 'copy', reason: 'duplicate_content' }]);
+  });
   it('on-prem needs AHV', () => {
     const esx = inv('e', 'pc-x', [{ name: 'c', hypervisor: 'ESXi', hostingProvider: 'on_prem' }], 'prism_inventory');
     undetermined([esx, fx.onpremCost]);

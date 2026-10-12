@@ -63,7 +63,7 @@ export function withHumanDecision(f: RoleFinding, d: HumanDecision): RoleFinding
 export function emitCostRows<T>(f: RoleFinding, rows: readonly T[], sourceId: string): T[] {
   const a = f.authority;
   const ok = BRANDED.has(f) && f.recordClass === 'cost_records' && f.presence === 'present' && f.sourceId === sourceId
-    && a !== 'unknown' && BRANDED.has(a) && a.decision === 'cost_bearing' && a.sourceId === sourceId && a.recordClass === 'cost_records' && a.decidedBy.trim() !== '';
+    && a !== 'unknown' && BRANDED.has(a) && a.decision === 'cost_bearing' && a.sourceId === f.sourceId && a.recordClass === f.recordClass && a.decidedBy.trim() !== '';
   if (!ok) throw new RoleNotConfirmedError('source role is not confirmed as cost-bearing; refusing to emit cost rows');
   return [...rows];
 }
