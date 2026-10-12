@@ -10,7 +10,7 @@ import { contrastRatio } from '../../src/theme/contrast';
 export const MAX: Record<string, number> = { light: 0, 'high-contrast': 0, dark: 346 };
 const PAGES = ['/', '/overview', '/connectors', '/workloads'];
 
-type Raw = { text: string; el: string; fg: number[]; size: number; bold: boolean; layers: { c: number[]; a: number }[]; img: boolean; op: number };
+type Raw = { text: string; el: string; fg: number[]; size: number; bold: boolean; layers: { c: number[]; a: number; o?: number }[]; img: boolean; op: number };
 const collect = (page: Page) => page.evaluate((): Raw[] => {
   const rgba = (s: string) => {
     const n = (s.match(/[\d.]+/g) ?? ['0', '0', '0', '1']).map(Number);
@@ -82,3 +82,27 @@ for (const theme of Object.keys(MAX)) {
     expect(failing, `${theme}: failing text nodes (ratchet: may only go down)`).toBeLessThanOrEqual(MAX[theme]);
   });
 }
+
+// CSS opacity composites an element and its descendants as one group. Layers are listed
+// outermost first: own background (c, a), own opacity (o); fg is the text color with alpha.
+const L = (c: number[], a: number, o = 1) => ({ c, a, o });
+const node = (layers: ReturnType<typeof L>[], fg: number[]): Raw => ({ text: '', el: '', fg, size: 16, bold: false, layers, img: false, op: 1 });
+test.describe('opacity group compositing', () => {
+  test('black text on an opaque white child at opacity .5 over black paints black on gray', () => {
+    const r = evaluate(node([L([0, 0, 0], 1), L([255, 255, 255], 1, 0.5)], [0, 0, 0, 1]));
+    expect([r.fg, r.bg]).toEqual(['#000000', '#808080']);
+    expect(r.ratio).toBeCloseTo(contrastRatio('#000000', '#808080'), 5);
+  });
+  test('nested opacities multiply on the text and leave the background alone', () => {
+    const r = evaluate(node([L([0, 0, 0], 0, 0.5), L([0, 0, 0], 0, 0.5)], [0, 0, 0, 1]));
+    expect([r.fg, r.bg]).toEqual(['#bfbfbf', '#ffffff']);
+  });
+  test('background alpha and fill-opacity composite over the canvas', () => {
+    expect(evaluate(node([L([0, 0, 0], 0.5)], [255, 255, 255, 1]))).toMatchObject({ fg: '#ffffff', bg: '#808080' });
+    expect(evaluate(node([L([255, 255, 255], 1)], [0, 0, 0, 0.5]))).toMatchObject({ fg: '#808080', bg: '#ffffff' });
+  });
+  test('a translucent child fades its text and background together over the parent', () => {
+    const r = evaluate(node([L([0, 0, 255], 1), L([255, 0, 0], 1, 0.5)], [255, 255, 255, 1]));
+    expect([r.fg, r.bg]).toEqual(['#8080ff', '#800080']);
+  });
+});
