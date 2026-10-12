@@ -1,0 +1,13 @@
+GREEN: T2 implementation (npm ci install in a fresh clone).
+Command: npx vitest run src/theme src/components/layout
+
+ Test Files  6 passed (6)
+      Tests  109 passed (109)
+
+Full suite: npx vitest run -> Test Files 184 passed (184); Tests 3525 passed (3525).
+npx tsc --noEmit: clean. npx eslint .: clean. npx next build: success.
+
+Mutation spot checks (each reverted after the run):
+M1 validate.ts CUSHION = 0 (no cushion on composited pairs): killed, 1 failed | 108 passed
+M2 user.ts loadCustomThemes stops re-validating stored themes: killed, 2 failed | 107 passed
+M3 user.ts 40-role import limit removed: killed, 1 failed | 108 passed

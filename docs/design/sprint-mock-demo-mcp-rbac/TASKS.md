@@ -10,7 +10,7 @@ lists how the facts and the merged-card records were checked.
 
 ## Status and next slices
 
-Checked against `origin/main` at `145565f` on 2026-10-11.
+Checked against `origin/main` at `8ce4f73` on 2026-10-12.
 
 | Card or slice | State |
 |---|---|
@@ -21,9 +21,9 @@ Checked against `origin/main` at `145565f` on 2026-10-11.
 | A5 mock MCP server | Open and held, #107 (same) |
 | A6 synthetic cloud sandboxes | Merged, #108 (`6acd2ba`) |
 | A7 money sign and favicon | Merged, #109 (`a3c1437`); follow-up #111 (`e184a44`) |
-| A8 sign-in link, findings header, `/demo` prompts | Open, #110; carries this plan |
-| Outside the cards, merged | Frank mock analytics #99 and its hardening #102 (`a90dda5`); Frank MCP design revisions #101 (`0ace878`); AI-spend-versus-total ratio card #112 (`c95be35`); UI theme slice T1 #113 (`145565f`) |
-| Sprint A2, C and D cards | Not started. B1, B6 and B8 have all their dependencies merged; B4 and B5 wait for A4 and A5 (and D15); B7 waits for A8; the rest wait on earlier waves |
+| A8 sign-in link, findings header, `/demo` prompts | Merged, #110 (`8ce4f73`); carried this plan |
+| Outside the cards, merged | Frank mock analytics #99 and its hardening #102 (`a90dda5`); Frank MCP design revisions #101 (`0ace878`); AI-spend-versus-total ratio card #112 (`c95be35`); UI theme slice T1 #113 (`145565f`); connector slice C1 #114 (`6f37afd`) |
+| Sprint A2, C and D cards | Not started. B1, B6 and B8 have all their dependencies merged; B4 and B5 wait for A4 and A5 (and D15); B7 now waits only for B1 and B8; the rest wait on earlier waves |
 
 **Pending owner decision D15 (MVP re-scope).** The recommendation is in PLAN
 section 8. Nothing below is re-scoped until the owner decides.
@@ -31,8 +31,8 @@ section 8. Nothing below is re-scoped until the owner decides.
 **Next slices outside this plan's card IDs.** Two in-flight series use their
 own labels; their `C` labels are **not** this plan's cards C1 to C8.
 
-- Connector correctness, C1 to C5. C1 is open as #114 (FOCUS normalization by
-  the specification's column history, with documented-format fixtures). The
+- Connector correctness, C1 to C5. C1 is merged as #114 (`6f37afd`; FOCUS
+  normalization by the specification's column history, with documented-format fixtures). The
   connector research of 2026-10-11 found gaps in the AWS, Azure and GCP FOCUS
   normalization (for example, a FOCUS 1.0 row without `ServiceSubcategory` is
   labeled Generative AI) and could not verify the live targets for Nutanix,
@@ -40,7 +40,8 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   vendor documentation was not reachable. Those live connectors stay
   unverified until a slice proves them against documented formats.
 - UI themes, T1 to T4: T1 token layer, built-in themes, contrast engine and
-  validator (merged, #113); T2 theme switcher and user themes; T3 typography
+  validator (merged, #113, `145565f`); T2 theme switcher, user themes and palette
+  editor (open, branch `feat/ui-theme-switcher`); T3 typography
   settings; T4 inline colors moved onto tokens, with a guard test.
 
 Boundary (v2): local and ephemeral only. No production infrastructure, no real

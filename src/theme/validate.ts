@@ -28,6 +28,8 @@ const PAIRS: [Role[], Role[], 'text' | 'ui'][] = [
   [['exec-border'], EXEC, 'ui'],
   [['focus'], SURFACES, 'ui'],
 ];
+const FADED: [Role, number][] = [['cost', 0.8]];
+const CUSHION = 0.05;
 const MIN = { standard: { text: 4.5, ui: 3 }, high: { text: 7, ui: 4.5 } } as const;
 
 const TOP_KEYS = new Set(['name', 'colorScheme', 'contrast', 'colors']);
@@ -65,15 +67,37 @@ export function validateTheme(input: unknown): Violation[] {
   }
   if (out.length) return out;
 
-  const { colors: c, contrast: level } = input as unknown as Theme;
-  const check = (fg: Role, bg: string, bgHex: string, kind: 'text' | 'ui') => {
-    const min = MIN[level][kind];
-    const ratio = contrastRatio(c[fg], bgHex);
-    if (ratio < min) out.push({ code: 'contrast', fg, bg, ratio, min, message: `${fg} on ${bg} is ${ratio.toFixed(2)}:1, needs ${min}:1` });
+  for (const r of contrastChecks(input as unknown as Theme)) {
+    if (!r.pass) out.push({ code: 'contrast', fg: r.fg, bg: r.bg, ratio: r.ratio, min: r.min, message: `${r.fg} on ${r.bg} is ${r.ratio.toFixed(2)}:1, needs ${r.min}:1` });
+  }
+  return out;
+}
+
+export interface Check { fg: Role; bg: string; bgHex: string; ratio: number; min: number; pass: boolean }
+
+/**
+ * Every required pair with its ratio (the palette editor's readout). Composited
+ * pairs (tints, translucent text) must clear the target by CUSHION so a 1-unit
+ * browser rounding of the blended color cannot push them under it.
+ */
+export function contrastChecks(theme: Theme): Check[] {
+  const { colors: c, contrast: level } = theme;
+  const out: Check[] = [];
+  const check = (fg: Role, bg: string, fgHex: string, bgHex: string, kind: 'text' | 'ui', cushion = 0) => {
+    const min = MIN[level][kind] + cushion;
+    const ratio = contrastRatio(fgHex, bgHex);
+    out.push({ fg, bg, bgHex, ratio, min, pass: ratio >= min });
   };
-  for (const [fgs, bgs, kind] of PAIRS) for (const fg of fgs) for (const bg of bgs) check(fg, bg, c[bg], kind);
+  for (const [fgs, bgs, kind] of PAIRS) for (const fg of fgs) for (const bg of bgs) check(fg, bg, c[fg], c[bg], kind);
   for (const accent of ACCENTS) {
-    for (const s of SURFACES) check(accent, `${accent}/${Math.round(TINT[accent] * 100)}@${s}`, composite(c[accent], TINT[accent], c[s]), 'text');
+    const pct = Math.round(TINT[accent] * 100);
+    for (const s of SURFACES) check(accent, `${accent}/${pct}@${s}`, c[accent], composite(c[accent], TINT[accent], c[s]), 'text', CUSHION);
+    // Secondary text inside tinted callouts (`bg-cost/5 text-sub`; none deeper than /10).
+    for (const fg of ['sub', 'dim'] as const) for (const s of MAIN) check(fg, `${accent}/10@${s}`, c[fg], composite(c[accent], 0.1, c[s]), 'text', CUSHION);
+  }
+  // Translucent text (`text-cost/80`, LiveAccrualBoard) over the cards it sits on.
+  for (const [fg, alpha] of FADED) for (const s of ['slab', 'raised'] as const) {
+    check(fg, `text/${alpha * 100}@${s}`, composite(c[fg], alpha, c[s]), c[s], 'text', CUSHION);
   }
   return out;
 }
