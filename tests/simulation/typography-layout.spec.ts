@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 // 130% (the largest size): nothing widens the page, clips its text or sits on other text. Vertical
 // scrollers are expanded to full content first, so text below the fold is checked too. Text cut by
 // hidden/clip or unscrollable ancestors is clipped. Fix the layout, never hide overflow.
-const ROUTES = ['/', '/overview', '/connectors', '/workloads'];
+const ROUTES = ['/', '/overview', '/connectors', '/workloads', '/outcomes', '/prediction'];
 const problems = (page: Page): Promise<string[]> =>
   page.evaluate(() => {
     type R = [number, number, number, number]; // left, top, right, bottom
@@ -92,3 +92,20 @@ for (const [width, family] of [[1440, 'default'], [390, 'default'], [1440, 'syst
     expect(Object.fromEntries(Object.entries(found).filter(([, v]) => v.length))).toEqual({});
   });
 }
+
+// The Theme editor and the Text panel open inside the viewport at every width where the bar wraps.
+test('both top-bar panels stay inside the viewport at 130% and 115%', async ({ page }) => {
+  await page.goto('/overview');
+  for (const scale of [130, 115]) {
+    for (const width of [320, 360, 390, 600, 768, 820, 912, 1024]) {
+      await page.evaluate((sc) => localStorage.setItem('ratio.typography', JSON.stringify({ scale: sc, family: 'default' })), scale);
+      await page.setViewportSize({ width, height: 900 });
+      await page.reload();
+      for (const id of ['theme-editor', 'typography-panel']) {
+        await page.locator(`button[aria-controls="${id}"]:visible`).click();
+        const box = await page.locator(`#${id}`).boundingBox();
+        expect(box && box.x >= 0 && box.x + box.width <= width + 0.5, `${id} at ${scale}% ${width}px: ${JSON.stringify(box)}`).toBe(true);
+      }
+    }
+  }
+});
