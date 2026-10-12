@@ -5,12 +5,17 @@
 // contrast engine's numbers.
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { createRequire } from 'node:module';
+import { join, resolve } from 'node:path';
+import postcss from 'postcss';
+import tailwind from 'tailwindcss';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Document from '../../../pages/_document';
 import { contrastRatio, hexToRgb } from '@/theme/contrast';
 import samples from '@/theme/sample-palettes.json';
 import { BUILT_IN_THEMES, type Theme } from '@/theme/themes';
-import { ACTIVE_KEY, PREPAINT_SCRIPT, parseTheme } from '@/theme/user';
+import { applyTheme } from '@/theme/apply';
+import { ACTIVE_KEY, PREPAINT_SCRIPT, loadActiveTheme, parseTheme } from '@/theme/user';
 import { contrastChecks } from '@/theme/validate';
 import { NavBar } from './NavBar';
 
@@ -49,7 +54,7 @@ const importText = (text: string) => {
   setValue(byLabel<HTMLTextAreaElement>('Theme JSON'), text);
   click(button('Import'));
 };
-const alertText = () => container.querySelector('[role="alert"]')?.textContent ?? '';
+const alertText = () => container.querySelector('[aria-label="Theme problems"]')?.textContent ?? '';
 const channel = (role: string) => html.style.getPropertyValue(`--c-${role}`);
 
 beforeEach(() => {
@@ -100,6 +105,20 @@ describe('switcher', () => {
   });
 });
 
+describe('reload of a stored theme with short or padded hex (Copilot 4244404619)', () => {
+  it('applies the normalized colors and the selector names the theme actually applied', () => {
+    localStorage.setItem(ACTIVE_KEY, 'mine');
+    localStorage.setItem('ratio.theme.custom', JSON.stringify([{ ...mine, colors: { ...mine.colors, void: '#FFF', focus: ' #2563EB ' } }]));
+    const stored = loadActiveTheme(); // what pages/_app.tsx applies after hydration
+    expect(stored && applyTheme(stored)).toEqual([]);
+    expect(html.getAttribute('data-theme')).toBe('mine');
+    expect(channel('void')).toBe('255 255 255');
+    expect(channel('focus')).toBe('37 99 235');
+    mount();
+    expect(select().value).toBe(html.getAttribute('data-theme'));
+  });
+});
+
 describe('import', () => {
   it('applies and saves a valid pasted theme, normalizing short hex', () => {
     mount();
@@ -145,6 +164,20 @@ describe('import', () => {
     importText(JSON.stringify(mine));
     expect(container.textContent).toMatch(/keep 5 custom themes/);
     expect(html.hasAttribute('data-theme')).toBe(false);
+  });
+});
+
+describe('contrast problems are live (Copilot 4244404600)', () => {
+  it('an imported failure disappears once the color is edited to pass, and Save then applies', () => {
+    mount();
+    openEditor();
+    importText(JSON.stringify({ ...mine, colors: { ...mine.colors, txt: '#aaaaaa' } }));
+    expect(alertText()).toMatch(/txt on void/);
+    setValue(byLabel<HTMLInputElement>('txt hex'), '#111827');
+    expect(alertText()).toBe('');
+    click(button('Save and apply'));
+    expect(html.getAttribute('data-theme')).toBe('mine');
+    expect(alertText()).toBe('');
   });
 });
 
@@ -235,3 +268,44 @@ it('the document applies a stored built-in before first paint', () => {
   expect(html.getAttribute('data-theme')).toBe('high-contrast');
   expect(samples).toHaveLength(3);
 });
+
+describe('challenger review of #116', () => {
+  it('M1: the sr-only file input shows a token focus ring on its visible label', async () => {
+    mount();
+    openEditor();
+    const label = $<HTMLInputElement>('input[type="file"]').closest('label') as HTMLLabelElement;
+    const config = createRequire(import.meta.url)(join(resolve(__dirname, '../../..'), 'tailwind.config.js'));
+    const out = await postcss([tailwind({ ...config, content: [{ raw: label.className }], corePlugins: { preflight: false } })]).process('@tailwind utilities', { from: undefined });
+    const rules = out.css.split('}').filter((r) => r.includes(':focus-within'));
+    expect(rules.some((r) => /outline-color: rgb\(var\(--c-focus\)/.test(r))).toBe(true);
+    expect(rules.some((r) => /outline-width: 2px/.test(r))).toBe(true);
+    expect(rules.some((r) => /outline-style: solid/.test(r))).toBe(true);
+  });
+
+  it('L1: under Default (system) the editor and export start from the theme the CSS shows', () => {
+    const matchMedia = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: (q: string) => ({ matches: q === '(prefers-contrast: more)', media: q }) });
+    try {
+      mount();
+      openEditor();
+      const hc = BUILT_IN_THEMES['high-contrast'];
+      expect(byLabel<HTMLInputElement>('txt hex').value).toBe(hc.colors.txt);
+      const link = button('Export current theme') as HTMLAnchorElement;
+      expect(link.getAttribute('download')).toBe('my-high-contrast.json');
+      expect(parseTheme(decodeURIComponent(link.href.split(',')[1]))).toEqual({ theme: { ...hc, name: 'my-high-contrast' }, violations: [] });
+    } finally {
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: matchMedia });
+    }
+  });
+
+  it('L4: problems are announced politely, not as an alert on every keystroke', () => {
+    mount();
+    openEditor();
+    setValue(byLabel<HTMLInputElement>('txt hex'), '#zzz');
+    const list = byLabel<HTMLElement>('Theme problems');
+    expect(list.textContent).toMatch(/txt must be/);
+    expect(list.getAttribute('aria-live')).toBe('polite');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+});
+

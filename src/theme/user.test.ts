@@ -152,6 +152,18 @@ describe('persistence', () => {
     expect(loadActiveTheme(memoryStore({ [ACTIVE_KEY]: 'mine', 'ratio.theme.custom': '{"name":"mine"}' }))).toBeNull();
   });
 
+  it('returns stored themes normalized, so they apply as they validated', () => {
+    const padded = { ...mine, colors: { ...mine.colors, void: '#FFF', txt: ' #111827 ' } };
+    const store = memoryStore({ [ACTIVE_KEY]: 'mine', 'ratio.theme.custom': json([padded]) });
+    expect(loadCustomThemes(store)).toEqual([mine]);
+    expect(loadActiveTheme(store)).toEqual(mine);
+  });
+
+  it('drops a stored duplicate name (the first one wins)', () => {
+    const twin = { ...mine, colors: { ...mine.colors, focus: '#1d4ed8' } };
+    expect(loadCustomThemes(memoryStore({ 'ratio.theme.custom': json([mine, twin]) }))).toEqual([mine]);
+  });
+
   it(`keeps at most ${MAX_CUSTOM} custom themes`, () => {
     const many = Array.from({ length: 7 }, (_, i) => ({ ...mine, name: `t${i}` }));
     const store = memoryStore();

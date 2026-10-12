@@ -20,3 +20,20 @@ Error: Cannot find module './user' imported from /tmp/t2ui/repo/src/theme/user.t
 Error: Failed to resolve import "@/theme/user" from "src/components/layout/ThemeMenu.test.tsx". Does the file exist?
 TypeError: contrastChecks is not a function
 ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+RED round 2 (CI acceptance, Copilot review 5486249526, challenger M1/L1/L3/L4), against b8e8bc3:
+npx vitest run src/theme src/components/layout
+     × returns stored themes normalized, so they apply as they validated
+     × drops a stored duplicate name (the first one wins)
+     × applies the normalized colors and the selector names the theme actually applied
+     × an imported failure disappears once the color is edited to pass, and Save then applies
+     × M1: the sr-only file input shows a token focus ring on its visible label
+     × L1: under Default (system) the editor and export start from the theme the CSS shows
+     × L4: problems are announced politely, not as an alert on every keystroke
+      Tests  7 failed | 109 passed (116)
+npx playwright test --config playwright.simulation.config.ts tests/simulation/theme-mobile.spec.ts
+  ✘  1 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 320px
+  ✘  2 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 390px
+  ✘  3 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 430px
+  3 failed
+  (each fails on '/': document scrollWidth > innerWidth; tests/simulation/customer.spec.ts:80 also fails at 390px on /demo, and passes with ThemeMenu removed)
