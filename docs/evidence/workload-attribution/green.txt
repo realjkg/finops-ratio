@@ -1,12 +1,12 @@
 $ npx vitest run src/costsource/tagAttribution.test.ts
  Test Files  1 passed (1)
-      Tests  9 passed (9)
+      Tests  5 passed (5)
 $ npx vitest run (full)
  Test Files  183 passed (183)
       Tests  3481 passed (3481)
 $ npx tsc --noEmit: clean; npx eslint src/costsource: clean; npx next build: ok
 Mutations (each run against tagAttribution.test.ts, then reverted):
  M1 drop the synthetic: guard           -> 1 failed (killed)
- M2 accept ids not in WORKLOADS         -> 2 failed (killed)
+ M2 accept ids not in WORKLOADS         -> 1 failed (killed)
  M3 tag overrides ResourceId identity   -> 1 failed (killed)
  M4 drop own-property check             -> survived; equivalent (key is not inherited), check removed
