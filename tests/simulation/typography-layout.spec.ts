@@ -30,7 +30,12 @@ const problems = (page: Page): Promise<string[]> =>
       for (const n of own) {
         const range = document.createRange();
         range.selectNodeContents(n);
-        for (const q of range.getClientRects()) {
+        const lines = [...range.getClientRects()];
+        lines.slice(1).forEach((q, k) => {
+          const p = lines[k]; // a wrapped line must clear the one above it (pitch at least 75% of the glyph box)
+          if (q.top > p.top + 0.3 * (p.bottom - p.top) && q.top - p.top < 0.75 * (p.bottom - p.top)) out.push(`lines overlap: ${label(el)}`);
+        });
+        for (const q of lines) {
           if (q.width < 2 || q.height < 2) continue;
           let shown: R | null = [q.left, q.top, q.right, q.bottom];
           let vis: R = [q.left, q.top, q.right, q.bottom]; // shown, except for what scrolling can reach
@@ -72,8 +77,17 @@ for (const [width, family] of [[1440, 'default'], [390, 'default'], [1440, 'syst
       await page.goto(route);
       await page.waitForLoadState('networkidle');
       await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize), { message: 'scale applied' }).toBe('20.8px');
+      const phone = width < 768 && route === '/workloads'; // the alert ticker collapses to one line on phones
+      if (phone) expect((await page.getByRole('contentinfo').boundingBox())?.height, 'collapsed footer height').toBeLessThanOrEqual(64);
       found[route] = await problems(page);
+      if (phone) {
+        const toggle = page.getByRole('button', { name: /^Show alerts/ });
+        await toggle.focus();
+        await page.keyboard.press('Enter');
+        await expect(page.getByRole('button', { name: /^Hide alerts/ })).toHaveAttribute('aria-expanded', 'true');
+        found[`${route} (alerts open)`] = await problems(page);
+      }
     }
-    expect(found).toEqual({ '/': [], '/overview': [], '/connectors': [], '/workloads': [] });
+    expect(Object.fromEntries(Object.entries(found).filter(([, v]) => v.length))).toEqual({});
   });
 }
