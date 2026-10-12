@@ -1,0 +1,41 @@
+# RED: tests committed before the implementation (origin/main 782a42f)
+$ npx vitest run src/security/csp.test.ts
+ FAIL  src/security/csp.test.ts [ src/security/csp.test.ts ]
+Error: Cannot find module '../../csp.config.js' imported from /tmp/secA/a/src/security/csp.test.ts
+ Test Files  1 failed (1)
+      Tests  no tests
+
+$ playwright test tests/simulation/csp.spec.ts (production build of origin/main, Chromium 1194; unit test file held aside because tsc needs csp.config.js)
+  ✘  1 tests/simulation/csp.spec.ts:21:7 › CSP enforced on /: renders with zero violations (823ms)
+  ✘  2 tests/simulation/csp.spec.ts:21:7 › CSP enforced on /overview: renders with zero violations (795ms)
+  ✘  3 tests/simulation/csp.spec.ts:21:7 › CSP enforced on /connectors: renders with zero violations (1.1s)
+  ✘  4 tests/simulation/csp.spec.ts:21:7 › CSP enforced on /workloads: renders with zero violations (906ms)
+  ✓  5 tests/simulation/csp.spec.ts:31:5 › theme switches and persists under the policy; data-URL export downloads (1.4s)
+  ✓  6 tests/simulation/csp.spec.ts:44:5 › the pre-paint script executes under the policy (no application bundle needed) (540ms)
+  ✘  7 tests/simulation/csp.spec.ts:53:5 › mutation: an edited inline script is blocked and does not run (20.7s)
+    .simulation-test-results/browser-3427/csp-CSP-enforced-on-renders-with-zero-violations/test-failed-1.png
+    .simulation-test-results/browser-3427/csp-CSP-enforced-on-overview-renders-with-zero-violations/test-failed-1.png
+    .simulation-test-results/browser-3427/csp-CSP-enforced-on-connectors-renders-with-zero-violations/test-failed-1.png
+    .simulation-test-results/browser-3427/csp-CSP-enforced-on-workloads-renders-with-zero-violations/test-failed-1.png
+    Error: expect(locator).not.toHaveAttribute(expected) failed
+    .simulation-test-results/browser-3427/csp-mutation-an-edited-inl-1b0d2-is-blocked-and-does-not-run/test-failed-1.png
+  5 failed
+  2 passed (1.1m)
+(tests 5,6 pass before the change by design: they pin existing behavior that the policy must preserve; 1-4 and the mutation test fail without the header)
+
+# RED (round on review Medium: report-only lever is build-time)
+$ npx vitest run src/security
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/security/csp.test.ts > next.config.js headers > the image build stage passes RATIO_CSP_MODE through before `npm run build`
+AssertionError: expected -1 to be greater than -1
+      Tests  1 failed | 7 passed (8)
+
+# RED (round 3: exact directives + all-routes scan); the tests pass on the correct policy, so RED is shown by mutation
+Unit: loosen frame-src to 'self' -> 3 failed | 5 passed; add https: to font-src -> 3 failed; add https: to connect-src -> 3 failed
+Browser: temporary inline <script> in pages/tokenomics.tsx, production build, `every page route` test ->
+  FAILED at /tokenomics: "Refused to execute inline script ... script-src" + event "script-src-elem inline" (reverted)
+Scan self-check (injected inline script into one route's HTML) detects script-src violation: passes
+
+# RED (round 4: no 404 allowlist; preview style-src unsafe-inline)
+$ npx vitest run src/security -> 2 failed | 13 passed: preview exact-policy list (style-src now expects 'unsafe-inline'); custom 404 page test (pages/404.tsx missing)
+$ playwright csp.spec "every page route" (filter removed) -> FAILED at /__csp-unknown-route: Next's default 404 inline <style> blocked by style-src 'self'
