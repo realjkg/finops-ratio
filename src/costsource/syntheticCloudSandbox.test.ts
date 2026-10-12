@@ -26,8 +26,7 @@ const ORACLE: Record<string, { provider: string; totalCents: number; mappedCents
 };
 
 // Golden SHA-256 of the existing three sources, captured on origin/main
-// (7a9da43) with the clock pinned to 2026-06-15T00:00:00Z; rows hashes re-captured for
-// fix/readiness-seed-consistency (only x_RatioGovernanceGates of Fraud Triage moved, 4 to 2). pointfive-sandbox
+// (7a9da43) with the clock pinned to 2026-06-15T00:00:00Z; rows re-captured for the Fraud gates seed fix. pointfive-sandbox
 // rows re-captured in C1: its v1.0 rows no longer get a guessed ServiceSubcategory.
 const GOLDEN: Record<string, { descriptor: string; rows: string; health: string }> = {
   'pointfive-sandbox': {
