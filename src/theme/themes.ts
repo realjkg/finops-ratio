@@ -74,8 +74,9 @@ export const BUILT_IN_THEMES: Readonly<Record<BuiltInThemeName, Theme>> = {
 /**
  * The theme used when the user has made no choice and the OS asks for no extra
  * contrast; must match the `:root` block in src/index.css (tokens.test.ts).
- * Light is the intended default, but it stays 'dark' until T4 moves the hard-coded
- * neon accents (src/lib/scales.ts TOKEN_HEX, inline styles) onto tokens: on a
- * white page they render at 1.6-3.0:1 on /, /overview and /workloads.
+ * Light is the intended default. The rendered audit (tests/simulation/contrast-audit.spec.ts)
+ * now shows zero failing text nodes for Light and High contrast, so the flip is only
+ * waiting on ThemeMenu.test.tsx, which assumes a dark default (owned by the open theme
+ * menu PR); flip it there, never as a way to hide failures.
  */
 export const DEFAULT_THEME: BuiltInThemeName = 'dark';

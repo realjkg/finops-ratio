@@ -1,0 +1,32 @@
+Rendered WCAG AA text audit (tests/simulation/contrast-audit.spec.ts)
+Production build, Chromium 1194, 1440 px, theme chosen via localStorage 'ratio.theme'.
+Unit: failing text nodes / visible text nodes. Fail = ratio < 4.5, or < 3 for large text (>= 24 px, or >= 18.66 px bold).
+Effective colors: computed text color and ancestor-composited background, both scaled by ancestor opacity.
+No node is skipped except zero-size or sr-only (< 2 px) and invisible ones; no background images were present (0 counted).
+
+BEFORE (origin/main 782a42f)             AFTER (this slice)
+theme          page          fail / total   fail / total
+light          /              26 / 129       0 / 129
+light          /overview      47 / 251       0 / 251
+light          /connectors     0 / 283       0 / 283
+light          /workloads     16 / 281       0 / 281
+light          TOTAL          89             0
+high-contrast  /              26 / 129       0 / 129
+high-contrast  /overview      47 / 251       0 / 251
+high-contrast  /connectors     0 / 283       0 / 283
+high-contrast  /workloads     16 / 281       0 / 281
+high-contrast  TOTAL          89             0
+dark           /              49 / 129      49 / 129
+dark           /overview      75 / 251      75 / 251
+dark           /connectors    90 / 283      90 / 283
+dark           /workloads    100 / 281     100 / 281
+dark           TOTAL         314            314   (legacy look, deliberately unchanged; still open)
+
+Note: the owner baseline quoted 904 nodes and Dark 284; this audit finds 944 nodes and Dark 314.
+Light and High contrast match the quoted 89 exactly. Dark is pinned at the measured 314.
+
+Baseline ranking, Light (same 89 in High contrast), by page and accent role (a production
+build does not expose component names): /overview gate 15, cost 12, value 9, shape 7, unit 4;
+/ gate 12, cost 4, unit 4, shape 3, value 3; /workloads unit 6, value 5, shape 3, cost 1, gate 1.
+All 89 are text colored by the fixed neon hex in src/lib/scales.ts (TOKEN_HEX) or by badge
+tints built from it ("assumed" evidence mark, ratio and status badges, KPI figures).

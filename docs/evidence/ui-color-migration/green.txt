@@ -1,0 +1,14 @@
+GREEN, branch feat/ui-color-migration-1 (production build, port 3147)
+$ npx tsc --noEmit                      0 errors
+$ npx eslint .                          0 problems
+$ npx vitest run                        Test Files 190 passed (190)   Tests 3565 passed (3565)
+$ npx playwright test --config playwright.simulation.config.ts contrast-audit
+  light 0 (max 0) PASS | high-contrast 0 (max 0) PASS | dark 314 (max 314) PASS
+$ npx playwright test --config playwright.simulation.config.ts      (whole simulation suite)
+  14 passed (2.7m), includes next build of the production bundle
+Mutation checks (each restored afterwards):
+  M1 scales.ts value -> '#00e09e'            4 vitest failures (scales x2, initiativeModel, .ts hex guard)
+  M2 MissionCard tint() -> `${color}1a`      1 failure (hex-alpha guard)
+  M3 three hex literals back in SpendSummaryBar   1 failure (TSX hex 16 in 4 ratchet)
+  M4 ratioColor 'good' returns value         1 failure (scales rating test)
+  M5 scales.ts cost -> '#ff5c72' (rendered)  audit: Light 17 and High contrast 17 failing nodes, > max 0

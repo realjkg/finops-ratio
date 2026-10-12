@@ -5,7 +5,7 @@
 // effects — so both the surfaces and the agent read the same roll-up.
 
 import type { EvidenceStatus, WorkloadValue } from '@/types';
-import { TOKEN_HEX } from '@/lib/scales';
+import { TOKEN_COLOR } from '@/lib/scales';
 
 // Higher rank = weaker evidence. `measured` (ledger-verified) beats `projected`
 // (forward-looking estimate) beats `assumed` (asserted, unverified).
@@ -64,17 +64,17 @@ export const EVIDENCE_META: Record<
 > = {
   measured: {
     label: 'measured',
-    color: TOKEN_HEX.value,
+    color: TOKEN_COLOR.value,
     title: 'Value evidence: measured from production data',
   },
   projected: {
     label: 'projected',
-    color: TOKEN_HEX.shape,
+    color: TOKEN_COLOR.shape,
     title: 'Value evidence: projected estimate, not yet measured',
   },
   assumed: {
     label: 'assumed',
-    color: TOKEN_HEX.gate,
+    color: TOKEN_COLOR.gate,
     title: 'Value evidence: assumed claim, not measured',
   },
 };
