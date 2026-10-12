@@ -26,3 +26,9 @@ $ npx vitest run src/security -> 8 passed (unknown values enforce; report-only y
 Real build check: RATIO_CSP_MODE=report-only next build, then next start with the env unset -> Content-Security-Policy-Report-Only still sent
   (headers frozen at build; hence "rebuild with RATIO_CSP_MODE=report-only", Docker --build-arg RATIO_CSP_MODE=report-only)
 Gates: lint ok, tsc ok, vitest 190 files / 3569 passed, build ok, check:bundle pass, simulation 15 passed (port 3627)
+
+# GREEN (round 3)
+$ npx vitest run src/security -> 8 passed (exact production/dev/preview directive lists)
+Route scan: all 19 page routes from pages/ plus Next's default 404 -> status ok, CSP header, 0 securitypolicyviolation events and 0 CSP console errors
+  (404 page: only Next's own inline <style> violation is filtered, nothing else)
+Gates: lint ok, tsc ok, vitest 190 files / 3569 passed, build ok, check:bundle pass, simulation 16 passed (port 3717)
