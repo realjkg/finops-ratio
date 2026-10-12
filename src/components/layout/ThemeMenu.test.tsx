@@ -338,6 +338,10 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
       openEditor();
       act(() => { os.more = true; os.listeners.forEach((f) => f()); });
       expect(button('Export current theme').getAttribute('download')).toBe('my-high-contrast.json');
+      expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES['high-contrast'].colors.txt); // unedited draft follows (Copilot 4244653107)
+      setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
+      act(() => { os.more = false; os.listeners.forEach((f) => f()); });
+      expect(byLabel<HTMLInputElement>('txt hex').value).toBe('#123456'); // an edited draft is kept
       act(() => root?.unmount());
       expect(os.listeners.size).toBe(0);
     } finally {

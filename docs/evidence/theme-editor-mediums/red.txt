@@ -14,3 +14,9 @@ RED round 2 (review Medium: the disabled-Export note offered an impossible remed
 npx vitest run src/components/layout/ThemeMenu.test.tsx
      × background-only roles show their worst pair (pairs whose base surface is that role), export and headers
       Tests  1 failed | 26 passed (27)
+
+RED round 3 (Copilot 4244653107: OS theme change leaves the Default editor draft stale), against f3f57d4:
+npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × Default (system) follows live OS changes and removes its listeners on unmount
+AssertionError: expected '#d0d8ea' to be '#000000' // Object.is equality
+      Tests  1 failed | 26 passed (27)
