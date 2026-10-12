@@ -20,7 +20,7 @@ import { ValueRatioMeter } from './ValueRatioMeter';
 import { SpendToValueGraph } from './SpendToValueGraph';
 import { EvidenceMark } from '@/components/EvidenceMark';
 import { formatUSD, formatRatio, formatPct, formatTokens } from '@/lib/format';
-import { TOKEN_HEX } from '@/lib/scales';
+import { TOKEN_COLOR, tint } from '@/lib/scales';
 import {
   createCMClient,
   type CMProvider,
@@ -355,8 +355,8 @@ function FindingRow({
               style={{
                 color:
                   governanceState.status === 'applied'
-                    ? TOKEN_HEX.value
-                    : TOKEN_HEX.gate,
+                    ? TOKEN_COLOR.value
+                    : TOKEN_COLOR.gate,
               }}
             >
               {governanceState.status === 'applied' ? 'applied' : 'governed'}
@@ -449,7 +449,7 @@ function RecommendationPane({
           <EvidenceCell
             label="Monthly spend"
             value={formatUSD(finding.monthlySpend)}
-            color={TOKEN_HEX.cost}
+            color={TOKEN_COLOR.cost}
           />
         </div>
         {/* Cache-evidence chip (audit A3) — only where cache economics
@@ -460,10 +460,10 @@ function RecommendationPane({
             className="mt-3 rounded-md border border-edge bg-slab p-3"
             data-testid="cache-evidence-chip"
           >
-            <p className="font-mono text-[10px]" style={{ color: TOKEN_HEX.unit }}>
+            <p className="font-mono text-[10px]" style={{ color: TOKEN_COLOR.unit }}>
               Cache economics
             </p>
-            <p className="mt-1 font-mono text-base font-bold" style={{ color: TOKEN_HEX.unit }}>
+            <p className="mt-1 font-mono text-base font-bold" style={{ color: TOKEN_COLOR.unit }}>
               {formatPct(finding.cacheEvidence.hitRate, 1)} cache hit rate
             </p>
             <p className="mt-1 font-mono text-[10px] leading-relaxed text-dim">
@@ -509,7 +509,7 @@ function RecommendationPane({
               {/* Bold hero per the visual register — value green. */}
               <span
                 className="font-mono text-3xl font-bold"
-                style={{ color: TOKEN_HEX.value }}
+                style={{ color: TOKEN_COLOR.value }}
               >
                 {formatUSD(finding.projectedMonthlyImpact)}
               </span>
@@ -563,8 +563,8 @@ function RecommendationPane({
                 disabled={isApplying}
                 className="rounded-md px-4 py-2 font-mono text-sm font-bold transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-shape/60 disabled:opacity-50"
                 style={{
-                  background: TOKEN_HEX.shape,
-                  color: '#05070b', // void — high contrast on amber
+                  background: TOKEN_COLOR.shape,
+                  color: 'var(--void)', // page background on amber
                 }}
               >
                 {isApplying && !simulation && !showRefForm ? 'Creating ticket…' : 'Apply'}
@@ -639,7 +639,7 @@ function RecommendationPane({
             {applyError && (
               <p
                 className="font-mono text-xs"
-                style={{ color: TOKEN_HEX.cost }}
+                style={{ color: TOKEN_COLOR.cost }}
                 role="alert"
               >
                 {applyError}
@@ -664,7 +664,7 @@ function AuditChip({
   status: FindingStatus;
 }) {
   const isApplied = status === 'applied';
-  const accentColor = isApplied ? TOKEN_HEX.value : TOKEN_HEX.gate;
+  const accentColor = isApplied ? TOKEN_COLOR.value : TOKEN_COLOR.gate;
   const statusLabel = isApplied
     ? (record.provider === 'mock' ? 'Applied in simulation' : 'Applied — reference attached')
     : 'Governed — change ticket created';
@@ -682,7 +682,7 @@ function AuditChip({
   return (
     <div
       className="rounded-md border p-3 space-y-1.5"
-      style={{ borderColor: accentColor + '40' }}
+      style={{ borderColor: tint(accentColor, 25) }}
     >
       <p
         className="font-mono text-[10px] uppercase tracking-wider font-bold"

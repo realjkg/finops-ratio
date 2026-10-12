@@ -1,0 +1,28 @@
+$ npx vitest run src/mock/mcp   (RED: placeholder index.ts throws "not implemented")
+     × initialize_returns_protocol_version_and_capabilities 12ms
+     × tools_list_returns_fixture_tools_with_descriptions_and_input_schemas 1ms
+     × write_capable_tool_declares_a_read_only_hint_and_still_mutates_state 1ms
+     × tools_call_portfolio_summary_returns_structured_content 1ms
+     × tools_call_unknown_tool_returns_jsonrpc_method_not_found 0ms
+     × tools_call_before_initialize_is_rejected 0ms
+     × team_credential_returns_only_that_teams_rows 0ms
+     × wrong_team_credential_gets_401 5ms
+     × description_can_be_changed_by_a_test_hook_to_simulate_a_rug_pull 1ms
+     × secret_never_appears_in_server_log_or_error_body 1ms
+     × server_binds_loopback_only 0ms
+     × browser_origin_that_is_not_loopback_is_rejected 0ms
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > initialize_returns_protocol_version_and_capabilities
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > tools_list_returns_fixture_tools_with_descriptions_and_input_schemas
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > write_capable_tool_declares_a_read_only_hint_and_still_mutates_state
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > tools_call_portfolio_summary_returns_structured_content
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > tools_call_unknown_tool_returns_jsonrpc_method_not_found
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > tools_call_before_initialize_is_rejected
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > team_credential_returns_only_that_teams_rows
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > wrong_team_credential_gets_401
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > description_can_be_changed_by_a_test_hook_to_simulate_a_rug_pull
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > secret_never_appears_in_server_log_or_error_body
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > server_binds_loopback_only
+ FAIL  src/mock/mcp/mcp.test.ts > mock MCP server > browser_origin_that_is_not_loopback_is_rejected
+ Test Files  1 failed (1)
+      Tests  12 failed (12)

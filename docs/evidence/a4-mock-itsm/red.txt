@@ -1,0 +1,14 @@
+$ npx vitest run src/mock/itsm   (tests against a throwing skeleton of src/mock/itsm/index.ts)
+      Tests  10 failed (10)
+ FAIL  src/mock/itsm/itsm.test.ts > mock Jira stub > jira_adapter_create_attach_status_end_to_end_against_stub
+ FAIL  src/mock/itsm/itsm.test.ts > mock Jira stub > jira_stub_issue_keys_match_JIRA_ISSUE_KEY
+ FAIL  src/mock/itsm/itsm.test.ts > mock Jira stub > jira_stub_rejects_missing_or_wrong_bearer_with_401
+ FAIL  src/mock/itsm/itsm.test.ts > mock ServiceNow stub > servicenow_stub_create_returns_result_number_matching_SERVICENOW_NUMBER
+ FAIL  src/mock/itsm/itsm.test.ts > mock ServiceNow stub > servicenow_stub_query_filters_by_number_and_honors_sysparm_fields_and_limit
+ FAIL  src/mock/itsm/itsm.test.ts > mock ServiceNow stub > servicenow_stub_rejects_wrong_basic_auth_with_401
+ FAIL  src/mock/itsm/itsm.test.ts > shared stub behavior > stub_failure_injection_401_429_500_and_slow_are_reproducible
+ FAIL  src/mock/itsm/itsm.test.ts > shared stub behavior > stub_status_transition_is_visible_to_next_status_call
+ FAIL  src/mock/itsm/itsm.test.ts > shared stub behavior > stubs_bind_loopback_only_and_refuse_a_non_loopback_host
+ FAIL  src/mock/itsm/itsm.test.ts > shared stub behavior > stubs_never_log_the_authorization_header
+ Test Files  1 failed (1)
+⎯⎯⎯⎯⎯⎯ Failed Tests 10 ⎯⎯⎯⎯⎯⎯⎯

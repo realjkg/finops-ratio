@@ -13,7 +13,7 @@ import type { Workload } from '@/types';
 import type { ChangePrediction, ChangeType, ProposedChange } from '@/prediction';
 import { formatUSD } from '@/lib/format';
 import { DELTA_RATIO_CAP_CAVEAT, formatDeltaValueRatio } from '@/prediction/predictors';
-import { TOKEN_HEX } from '@/lib/scales';
+import { TOKEN_COLOR, tint } from '@/lib/scales';
 import { SHAPE_LABEL } from '@/lib/demandShape';
 import { withBasePath } from '@/lib/basePath';
 import {
@@ -199,9 +199,9 @@ function AdjustmentTile({
 }
 
 const STATE_TONE: Record<AdjustmentDisplayState, string> = {
-  confident: TOKEN_HEX.value,
-  estimated_cold_start: TOKEN_HEX.shape,
-  estimated_low_confidence: TOKEN_HEX.shape,
+  confident: TOKEN_COLOR.value,
+  estimated_cold_start: TOKEN_COLOR.shape,
+  estimated_low_confidence: TOKEN_COLOR.shape,
 };
 
 export function PredictionResult({ prediction }: { prediction: ChangePrediction }) {
@@ -231,13 +231,13 @@ export function PredictionResult({ prediction }: { prediction: ChangePrediction 
       <div className="flex flex-wrap items-center gap-2">
         <span
           className="rounded-full px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider"
-          style={{ color: tone, backgroundColor: `${tone}1a` }}
+          style={{ color: tone, backgroundColor: tint(tone) }}
         >
           {DISPLAY_STATE_LABEL[displayState]}
         </span>
         <span
           className="rounded-md border px-2 py-0.5 font-mono text-[10px]"
-          style={{ borderColor: TOKEN_HEX.purple, color: TOKEN_HEX.purple }}
+          style={{ borderColor: TOKEN_COLOR.purple, color: TOKEN_COLOR.purple }}
         >
           source: {prediction.source}
         </span>
@@ -245,12 +245,12 @@ export function PredictionResult({ prediction }: { prediction: ChangePrediction 
 
       {/* R4: Δcost ALWAYS rendered beside its Δvalue-ratio effect. */}
       <div className="grid grid-cols-3 gap-2">
-        <Metric label="Δ daily" value={usdOrUncertain(paired.deltaDailySpend)} tone={TOKEN_HEX.cost} />
-        <Metric label="Δ monthly" value={usdOrUncertain(paired.deltaMonthlySpend)} tone={TOKEN_HEX.cost} />
+        <Metric label="Δ daily" value={usdOrUncertain(paired.deltaDailySpend)} tone={TOKEN_COLOR.cost} />
+        <Metric label="Δ monthly" value={usdOrUncertain(paired.deltaMonthlySpend)} tone={TOKEN_COLOR.cost} />
         <Metric
           label="Δ value ratio"
           value={deltaRatio.text}
-          tone={TOKEN_HEX.value}
+          tone={TOKEN_COLOR.value}
         />
       </div>
       {deltaRatio.capped && <p className="font-mono text-[11px] text-cost">{DELTA_RATIO_CAP_CAVEAT}</p>}
@@ -267,7 +267,7 @@ export function PredictionResult({ prediction }: { prediction: ChangePrediction 
       {route.kind === 'ready' ? (
         <div
           className="rounded-md border px-3 py-2 font-mono text-[11px]"
-          style={{ borderColor: TOKEN_HEX.value, color: TOKEN_HEX.value }}
+          style={{ borderColor: TOKEN_COLOR.value, color: TOKEN_COLOR.value }}
         >
           ✔ Confident — ready to apply. Review and apply manually; Ratio never
           auto-applies a change.
@@ -275,7 +275,7 @@ export function PredictionResult({ prediction }: { prediction: ChangePrediction 
       ) : (
         <div
           className="rounded-md border px-3 py-2 font-mono text-[11px]"
-          style={{ borderColor: TOKEN_HEX.gate, color: TOKEN_HEX.gate }}
+          style={{ borderColor: TOKEN_COLOR.gate, color: TOKEN_COLOR.gate }}
         >
           ⚠ Routed → {route.gateLabel}. {route.reason}
         </div>

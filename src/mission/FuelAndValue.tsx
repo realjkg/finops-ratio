@@ -6,6 +6,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { formatRatio, formatUSD } from '@/lib/format';
 import { EvidenceMark } from '@/components/EvidenceMark';
 import type { EvidenceStatus } from '@/types';
+import { tint } from '@/lib/scales';
 
 interface FuelAndValueProps {
   fuelPct: number;
@@ -41,7 +42,7 @@ export function FuelAndValue({
         <span className="inline-flex items-center gap-1.5">
           <span
             className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-xs font-bold"
-            style={{ color: valueColor, backgroundColor: `${valueColor}1a` }}
+            style={{ color: valueColor, backgroundColor: tint(valueColor) }}
           >
             {formatRatio(valueRatio)} return
           </span>
