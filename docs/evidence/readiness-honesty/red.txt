@@ -8,3 +8,8 @@
  FAIL  src/executive/spendSummaryBar.honesty.test.tsx > labels the spend as AI spend, not total cloud spend
  Test Files  3 failed (3)
       Tests  6 failed (6)
+
+# ROUND 2 RED (review M-1): dashboard subtitle still said "Cloud spend"
+# cmd: npx vitest run src/executive/spendSummaryBar.honesty.test.tsx
+#  FAIL  spendSummaryBar.honesty.test.tsx > the dashboard subtitle says AI spend, never Cloud spend
+# Tests  1 failed | 2 passed (3)
