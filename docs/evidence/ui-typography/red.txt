@@ -1,0 +1,13 @@
+RED (tests committed before any production code), base origin/main 782a42f
+
+$ npx vitest run src/theme/typography.test.ts src/components/layout/TypographyMenu.test.tsx
+ FAIL  src/theme/typography.test.ts  (Failed to resolve import "./typography")
+ FAIL  src/components/layout/TypographyMenu.test.tsx  (Failed to resolve import "@/theme/typography")
+ Test Files  2 failed (2)    Tests  no tests
+
+$ RATIO_TEST_NEXT_DIR=.next-simulation-3110 npx next build   (unit tests moved aside: they do not type-check yet)
+$ RATIO_TEST_SKIP_BUILD=1 npx playwright test --config playwright.simulation.config.ts typography-layout
+  1) 130% text has no overflow, clipping or overlap at 1440px   FAILED: "scale applied" expected 20.8px, got 16px
+  2) 130% text has no overflow, clipping or overlap at 390px    FAILED: "scale applied" expected 20.8px, got 16px
+  3) the Text control changes size from the keyboard and survives a reload  FAILED: no "Text" button
+  3 failed
