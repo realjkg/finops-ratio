@@ -334,31 +334,32 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
     const mq = (q: string) => ({ get matches() { return q === '(prefers-contrast: more)' && os.more; }, addEventListener: (_: string, f: () => void) => os.listeners.add(f), removeEventListener: (_: string, f: () => void) => os.listeners.delete(f) });
     Object.defineProperty(window, 'matchMedia', { configurable: true, value: mq });
     try {
+      const flip = (more: boolean) => act(() => { os.more = more; os.listeners.forEach((f) => f()); });
+      const txt = () => byLabel<HTMLInputElement>('txt hex').value;
+      const [hc, dark] = [BUILT_IN_THEMES['high-contrast'].colors, BUILT_IN_THEMES.dark.colors];
       mount();
       openEditor();
-      act(() => { os.more = true; os.listeners.forEach((f) => f()); });
-      expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES['high-contrast'].colors.txt); // unedited draft follows (Copilot 4244653107)
+      flip(true); expect([txt(), button('Export current theme').getAttribute('download')]).toEqual([hc.txt, 'my-high-contrast.json']); // case 1: untouched draft follows
       setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
-      act(() => { os.more = false; os.listeners.forEach((f) => f()); });
-      expect(byLabel<HTMLInputElement>('txt hex').value).toBe('#123456'); // an edited draft is kept
+      flip(false); expect(txt()).toBe('#123456'); // case 2: an edited draft is kept
       click(button('Customize')); // case 4: closing is the cancel path; an OS change happens while closed
-      act(() => { os.more = true; os.listeners.forEach((f) => f()); });
+      flip(true);
       openEditor();
-      expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES['high-contrast'].colors.txt); // edits discarded, effective theme
-      act(() => { os.more = false; os.listeners.forEach((f) => f()); });
-      expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES.dark.colors.txt); // dirty flag was reset, so it follows again
-      setValue(byLabel<HTMLInputElement>('txt hex'), '#fafafa'); // gate review: Fix contrast keeps an edited draft edited
+      expect(txt()).toBe(hc.txt); // edits discarded, effective theme
+      click(button('Fix contrast')); // "Nothing to change" is not an edit (re-review)
+      flip(false); expect(txt()).toBe(dark.txt); // dirty was reset on reopen and the no-op fix left it clear: it follows
+      importText('{oops'); // a failed import attempt counts as an edit (re-review)
+      flip(true); expect([txt(), alertText()]).toEqual([dark.txt, expect.stringMatching(/Not valid JSON/)]);
+      setValue(byLabel<HTMLInputElement>('txt hex'), '#fafafa'); // Fix contrast that changes colors keeps the draft edited
       click(button('Fix contrast'));
-      const fixed = byLabel<HTMLInputElement>('txt hex').value;
-      act(() => { os.more = true; os.listeners.forEach((f) => f()); });
-      expect([byLabel<HTMLInputElement>('txt hex').value, byLabel<HTMLInputElement>('void hex').value]).toEqual([fixed, BUILT_IN_THEMES.dark.colors.void]);
+      const fixed = txt();
+      flip(false); expect([txt(), byLabel<HTMLInputElement>('void hex').value]).toEqual([fixed, dark.void]);
       click(button('Reset to built-in')); // Reset deliberately replaces the draft: unedited again, so it follows
-      act(() => { os.more = false; os.listeners.forEach((f) => f()); });
-      expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES.dark.colors.txt);
+      flip(true); expect(txt()).toBe(hc.txt);
       for (const name of ['light', 'dark'] as const) { // case 3: an explicit choice is not overridden (theme nor draft)
         setValue(select(), name);
-        act(() => { os.more = !os.more; os.listeners.forEach((f) => f()); });
-        expect([html.getAttribute('data-theme'), byLabel<HTMLInputElement>('txt hex').value], name).toEqual([name, BUILT_IN_THEMES[name].colors.txt]);
+        flip(!os.more);
+        expect([html.getAttribute('data-theme'), txt()], name).toEqual([name, BUILT_IN_THEMES[name].colors.txt]);
       }
       act(() => root?.unmount()); expect(os.listeners.size).toBe(0);
     } finally {

@@ -32,3 +32,10 @@ against 443c27f: npx vitest run src/components/layout/ThemeMenu.test.tsx
      × Default (system) follows live OS changes and removes its listeners on unmount
 AssertionError: expected [ '#000000', '#ffffff' ] to deeply equal [ '#404040', '#05070b' ]
       Tests  1 failed | 26 passed (27)
+
+RED round 6 (re-review: dirty flag wrong on two paths), against 4a2c757: npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × Default (system) follows live OS changes and removes its listeners on unmount
+AssertionError: expected '#000000' to be '#d0d8ea' // Object.is equality
+      Tests  1 failed | 26 passed (27)
+  (fails at the no-op Fix contrast step: the untouched hc draft stays #000000 instead of following to Dark;
+   the failed-import step follows it in the same test and is checked by mutation in GREEN)
