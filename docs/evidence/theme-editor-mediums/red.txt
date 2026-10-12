@@ -9,3 +9,8 @@ AssertionError: expected 'my-dark.json' to be 'my-high-contrast.json' // Object.
 AssertionError: expected 'Not valid JSON' not to match /Not valid JSON/
 AssertionError: expected [ undefined, …(1) ] to deeply equal [ true, StringMatching{…} ]
       Tests  3 failed | 24 passed (27)
+
+RED round 2 (review Medium: the disabled-Export note offered an impossible remedy), against 1bc42a2:
+npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × background-only roles show their worst pair (pairs whose base surface is that role), export and headers
+      Tests  1 failed | 26 passed (27)

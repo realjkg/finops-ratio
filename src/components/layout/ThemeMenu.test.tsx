@@ -355,7 +355,7 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
     mount();
     setValue(select(), 'dark');
     openEditor();
-    expect([(button('Export current theme') as HTMLButtonElement).disabled, container.textContent]).toEqual([true, expect.stringMatching(/Fix contrast first to export an importable theme/)]);
+    expect([(button('Export current theme') as HTMLButtonElement).disabled, container.textContent]).toEqual([true, expect.stringMatching(/Dark cannot be exported \(it has pinned contrast exceptions\)\. Choose Light or High contrast, or save a custom theme, to export\./)]);
     expect([...container.querySelectorAll('[aria-label="Contrast readout"] thead th')].map((h) => `${h.textContent}/${h.getAttribute('scope')}`)).toEqual(['Pair/col', 'Ratio/col', 'Threshold/col', 'Result/col']);
     setValue(select(), 'light');
     expect(button('Export current theme').tagName).toBe('A');
