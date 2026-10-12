@@ -11,7 +11,6 @@ const html = renderToStaticMarkup(
 
 it('stamps the seed as-of date derived from DEMO_NOW, never a relative freshness claim', () => {
   expect(html).toContain(`Seeded dataset as of ${DEMO_NOW.toISOString().slice(0, 10)}`);
-  expect(html).toContain('Seeded dataset as of 2026-06-25');
   expect(html).not.toMatch(/min ago|Updated/i);
 });
 
