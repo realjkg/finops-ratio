@@ -1,0 +1,11 @@
+RED: theme editor Medium fixes, tests only, against origin/main 6ac1335 (#116 merged).
+Command: npx vitest run src/components/layout/ThemeMenu.test.tsx
+(The readout-rows test now reads tbody rows, since the table gains a header row.)
+
+     × Default (system) follows live OS changes and removes its listeners on unmount
+     × editing the name clears a stale import-problems snapshot
+     × background-only roles show their worst pair (pairs whose base surface is that role), export and headers
+AssertionError: expected 'my-dark.json' to be 'my-high-contrast.json' // Object.is equality
+AssertionError: expected 'Not valid JSON' not to match /Not valid JSON/
+AssertionError: expected [ undefined, …(1) ] to deeply equal [ true, StringMatching{…} ]
+      Tests  3 failed | 24 passed (27)
