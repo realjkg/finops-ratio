@@ -12,7 +12,6 @@ import tailwind from 'tailwindcss';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Document from '../../../pages/_document';
 import { contrastRatio, hexToRgb } from '@/theme/contrast';
-import samples from '@/theme/sample-palettes.json';
 import { BUILT_IN_THEMES, type Theme } from '@/theme/themes';
 import { applyTheme } from '@/theme/apply';
 import { ACTIVE_KEY, PREPAINT_SCRIPT, loadActiveTheme, parseTheme } from '@/theme/user';
@@ -179,6 +178,16 @@ describe('contrast problems are live (Copilot 4244404600)', () => {
     expect(html.getAttribute('data-theme')).toBe('mine');
     expect(alertText()).toBe('');
   });
+
+  it('a reset after a failing import shows only the live problems (none for light)', () => {
+    mount();
+    setValue(select(), 'light');
+    openEditor();
+    importText(JSON.stringify({ ...mine, colors: { ...mine.colors, txt: '#aaaaaa' } }));
+    expect(alertText()).toMatch(/txt on void/);
+    click(button('Reset to built-in'));
+    expect(alertText()).toBe('');
+  });
 });
 
 describe('fix contrast', () => {
@@ -255,7 +264,7 @@ describe('palette editor', () => {
   });
 });
 
-it('the document applies a stored built-in before first paint', () => {
+it('the document carries the pre-paint script (its behavior: user.test.ts)', () => {
   const find = (node: unknown): string[] => {
     if (Array.isArray(node)) return node.flatMap(find);
     if (!node || typeof node !== 'object' || !('props' in node)) return [];
@@ -263,10 +272,6 @@ it('the document applies a stored built-in before first paint', () => {
     return [...(type === 'script' && props.dangerouslySetInnerHTML ? [props.dangerouslySetInnerHTML.__html] : []), ...find(props.children)];
   };
   expect(find(Document())).toEqual([PREPAINT_SCRIPT]);
-  localStorage.setItem(ACTIVE_KEY, 'high-contrast');
-  new Function(PREPAINT_SCRIPT)();
-  expect(html.getAttribute('data-theme')).toBe('high-contrast');
-  expect(samples).toHaveLength(3);
 });
 
 describe('challenger review of #116', () => {

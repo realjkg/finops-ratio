@@ -95,7 +95,14 @@ export function loadCustomThemes(store = local()): Theme[] {
   try {
     const list: unknown = JSON.parse(store?.getItem(CUSTOM_KEY) ?? '[]');
     if (!Array.isArray(list)) return [];
-    return list.flatMap((t) => (checkTheme(t).violations.length ? [] : [t as Theme])).slice(0, MAX_CUSTOM);
+    // Keep the normalized theme checkTheme validated, not the stored original ('#FFF' stays unapplicable).
+    const names = new Set<string>();
+    return list.flatMap((t) => {
+      const { theme, violations } = checkTheme(t);
+      if (!theme || violations.length || names.has(theme.name)) return [];
+      names.add(theme.name);
+      return [theme];
+    }).slice(0, MAX_CUSTOM);
   } catch {
     return [];
   }

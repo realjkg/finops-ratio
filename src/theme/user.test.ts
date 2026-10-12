@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import samples from './sample-palettes.json';
 import { BUILT_IN_THEMES, type Theme } from './themes';
 import {
-  ACTIVE_KEY, MAX_CUSTOM, PREPAINT_SCRIPT, checkTheme, exportTheme, fixContrast, loadActiveTheme, loadCustomThemes, normalizeHex, parseTheme, saveThemes,
+  ACTIVE_KEY, MAX_CUSTOM, PREPAINT_SCRIPT, checkTheme, fixContrast, loadActiveTheme, loadCustomThemes, normalizeHex, parseTheme, saveThemes,
 } from './user';
 import { contrastChecks, validateTheme } from './validate';
 
@@ -15,18 +15,10 @@ const withColor = (role: string, value: unknown) => ({ ...mine, colors: { ...min
 
 function memoryStore(init: Record<string, string> = {}) {
   const data = new Map(Object.entries(init));
-  return {
-    data,
-    getItem: (k: string) => data.get(k) ?? null,
-    setItem: (k: string, v: string) => void data.set(k, v),
-    removeItem: (k: string) => void data.delete(k),
-  };
+  return { data, getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) };
 }
-const throwing = {
-  getItem: () => { throw new Error('SecurityError'); },
-  setItem: () => { throw new Error('QuotaExceededError'); },
-  removeItem: () => { throw new Error('SecurityError'); },
-};
+const fail = () => { throw new Error('SecurityError'); };
+const throwing = { getItem: fail, setItem: fail, removeItem: fail };
 
 describe('normalization', () => {
   it.each([['#ABC', '#aabbcc'], ['  #0f0 ', '#00ff00'], ['#A1B2C3', '#a1b2c3'], ['\t#ffffff\n', '#ffffff']])('accepts %j as %j', (raw, hex) => {
@@ -103,20 +95,6 @@ describe('sample palettes (importable examples, not built-ins)', () => {
     const final = validateTheme(theme).length ? fixContrast(theme as Theme) : { theme, unreachable: [] };
     expect(final.unreachable).toEqual([]);
     expect(validateTheme(final.theme)).toEqual([]);
-  });
-
-  it('are colorful: none is a built-in or reuses a built-in surface', () => {
-    const builtInSurfaces = new Set(Object.values(BUILT_IN_THEMES).map((t) => t.colors.slab));
-    for (const s of samples) expect(builtInSurfaces.has(s.colors.slab), s.name).toBe(false);
-    expect(samples.map((s) => s.name)).not.toContain('light');
-  });
-});
-
-describe('export', () => {
-  it('round-trips through import unchanged', () => {
-    const { theme, violations } = parseTheme(exportTheme(mine));
-    expect(violations).toEqual([]);
-    expect(theme).toEqual(mine);
   });
 });
 

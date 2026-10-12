@@ -32,7 +32,7 @@ export function NavBar({
   agentOpen?: boolean;
 }) {
   return (
-    <nav className="shrink-0 border-b border-edge bg-deep" aria-label="Main navigation">
+    <nav className="relative shrink-0 border-b border-edge bg-deep" aria-label="Main navigation">
       <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 px-3 py-2 md:flex md:h-10 md:gap-0.5 md:py-0">
       {/* Logo mark */}
       <span className="flex items-center gap-1.5 md:mr-4">

@@ -3,7 +3,7 @@
 // the readout shows each required contrast pair as the validator computes it.
 import { useEffect, useState, type ChangeEvent } from 'react';
 import { applyTheme } from '@/theme/apply';
-import { BUILT_IN_THEMES, DEFAULT_THEME, ROLES, type Role, type Theme } from '@/theme/themes';
+import { BUILT_IN_THEMES, DEFAULT_THEME, ROLES, type BuiltInThemeName, type Role, type Theme } from '@/theme/themes';
 import { contrastChecks, type Violation } from '@/theme/validate';
 import {
   MAX_CUSTOM, MAX_IMPORT_BYTES, checkTheme, exportTheme, fixContrast, isBuiltIn, loadActiveTheme, loadCustomThemes, normalizeHex, parseTheme, saveThemes, type Fix,
@@ -16,6 +16,12 @@ const swatch = (v: unknown, fallback: string) => {
   return typeof hex === 'string' && /^#[0-9a-f]{6}$/.test(hex) ? hex : fallback;
 };
 const btn = 'rounded border border-edge bg-raised px-2 py-1 font-mono text-xs text-txt hover:bg-slab';
+
+/** The built-in the CSS shows when there is no choice (same order as src/index.css). */
+function systemTheme(): BuiltInThemeName {
+  const matches = (q: string) => typeof window.matchMedia === 'function' && window.matchMedia(q).matches;
+  return matches('(prefers-contrast: more)') ? 'high-contrast' : matches('(prefers-color-scheme: dark)') ? 'dark' : DEFAULT_THEME;
+}
 
 /** Drops the user's choice: the CSS default (and the OS preference) applies again. */
 function clearDocumentTheme() {
@@ -34,14 +40,16 @@ export function ThemeMenu() {
   const [problems, setProblems] = useState<Violation[]>([]);
   const [fix, setFix] = useState<Fix | null>(null);
   const [note, setNote] = useState('');
+  const [system, setSystem] = useState<BuiltInThemeName>(DEFAULT_THEME);
 
   useEffect(() => {
     const stored = loadActiveTheme();
     setCustom(loadCustomThemes());
+    setSystem(systemTheme());
     setActive(stored === null ? null : typeof stored === 'string' ? stored : stored.name);
   }, []);
 
-  const current: Theme = custom.find((t) => t.name === active) ?? BUILT_IN_THEMES[isBuiltIn(active) ? active : DEFAULT_THEME];
+  const current: Theme = custom.find((t) => t.name === active) ?? BUILT_IN_THEMES[isBuiltIn(active) ? active : system];
   const choose = (name: string, list = custom) => {
     const theme = isBuiltIn(name) ? name : list.find((t) => t.name === name);
     if (theme) applyTheme(theme);
@@ -52,16 +60,20 @@ export function ThemeMenu() {
 
   const checked = checkTheme(draft);
   const colors = draft.colors as Record<Role, string>;
-  const setColor = (role: Role) => (e: ChangeEvent<HTMLInputElement>) => setDraft({ ...draft, colors: { ...colors, [role]: e.target.value } });
+  const setColor = (role: Role) => (e: ChangeEvent<HTMLInputElement>) => {
+    setProblems([]);
+    setDraft({ ...draft, colors: { ...colors, [role]: e.target.value } });
+  };
   const load = (result: { theme: Theme | null; violations: Violation[] }) => {
     setFix(null);
-    setProblems(result.violations);
+    // Only imports that cannot fill the editor keep a snapshot; contrast problems come live from `checked`.
+    setProblems(result.theme ? [] : result.violations);
     if (result.theme) setDraft({ ...result.theme });
     if (result.theme && !result.violations.length) save(result.theme);
   };
   const save = (imported?: Theme) => {
     const theme = imported ?? (checked.violations.length ? null : checked.theme);
-    if (!theme) return setProblems(checked.violations);
+    if (!theme) return;
     const list = [...custom.filter((t) => t.name !== theme.name), theme];
     if (list.length > MAX_CUSTOM) return setNote(`You can keep ${MAX_CUSTOM} custom themes. Delete one first.`);
     setCustom(list);
@@ -80,26 +92,38 @@ export function ThemeMenu() {
   const exported = exportTheme(isBuiltIn(current.name) ? { ...current, name: `my-${current.name}` } : current);
   const checks = checked.theme ? contrastChecks(checked.theme) : [];
 
+  const toggle = () => {
+    if (!open) setDraft({ ...current, name: isBuiltIn(current.name) ? 'my-theme' : current.name });
+    setOpen(!open);
+  };
+  const switcher = (id: string) => (
+    <>
+      <label htmlFor={id}>Theme</label>
+      <select id={id} value={active ?? ''} onChange={(e) => choose(e.target.value)} className="min-w-0 max-w-[11rem] rounded border border-edge bg-raised px-1 py-0.5 text-txt">
+        <option value="">Default (system)</option>
+        {Object.keys(BUILT_IN_THEMES).map((n) => <option key={n} value={n}>{LABELS[n]}</option>)}
+        {custom.map((t) => <option key={t.name} value={t.name}>Custom: {t.name}</option>)}
+      </select>
+    </>
+  );
+
   return (
-    <div className="relative">
+    <div className="md:relative">
       <div className="flex items-center gap-1.5 font-mono text-xs text-sub">
-        <label htmlFor="theme-select">Theme</label>
-        <select id="theme-select" value={active ?? ''} onChange={(e) => choose(e.target.value)} className="rounded border border-edge bg-raised px-1 py-0.5 text-txt">
-          <option value="">Default (system)</option>
-          {Object.keys(BUILT_IN_THEMES).map((n) => <option key={n} value={n}>{LABELS[n]}</option>)}
-          {custom.map((t) => <option key={t.name} value={t.name}>Custom: {t.name}</option>)}
-        </select>
-        <button type="button" className={btn} aria-expanded={open} aria-controls="theme-editor" onClick={() => {
-          if (!open) setDraft({ ...current, name: isBuiltIn(current.name) ? 'my-theme' : current.name });
-          setOpen(!open);
-        }}>Customize</button>
+        {/* Phones get one "Theme" button; the switcher then sits at the top of the panel. */}
+        <button type="button" className={`${btn} md:hidden`} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Theme</button>
+        <span className="hidden items-center gap-1.5 md:flex">
+          {switcher('theme-select')}
+          <button type="button" className={btn} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Customize</button>
+        </span>
       </div>
-      {note && !open && <p role="status" className="absolute right-0 top-full z-50 mt-1 w-64 rounded border border-edge bg-slab p-2 text-xs text-txt">{note}</p>}
+      {note && !open && <p role="status" className="absolute right-2 top-full z-50 md:right-0 mt-1 w-64 rounded border border-edge bg-slab p-2 text-xs text-txt">{note}</p>}
       {open && (
-        <section id="theme-editor" aria-label="Theme editor" className="absolute right-0 top-full z-40 mt-1 max-h-[80vh] w-[min(30rem,calc(100vw-2rem))] space-y-3 overflow-auto rounded border border-edge bg-slab p-3 text-xs text-txt shadow-lg">
+        <section id="theme-editor" aria-label="Theme editor" className="absolute inset-x-2 top-full z-40 mt-1 max-h-[80vh] space-y-3 md:inset-x-auto md:right-0 md:w-[30rem] overflow-auto rounded border border-edge bg-slab p-3 text-xs text-txt shadow-lg">
+          <div className="flex items-center gap-1.5 md:hidden">{switcher('theme-select-panel')}</div>
           {note && <p role="status">{note}</p>}
           <label className="block">Name <input value={String(draft.name)} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="ml-1 rounded border border-edge bg-raised px-1 font-mono" /></label>
-          <div className="grid grid-cols-2 gap-1">
+          <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
             {ROLES.map((role) => {
               const worst = checks.filter((c) => c.fg === role).sort((a, b) => a.ratio / a.min - b.ratio / b.min)[0];
               return (
@@ -131,7 +155,7 @@ export function ThemeMenu() {
               setDraft({ ...f.theme });
               setProblems([]);
             }}>Fix contrast</button>
-            <button type="button" className={btn} onClick={() => setDraft({ ...BUILT_IN_THEMES[isBuiltIn(active) ? active : DEFAULT_THEME], name: draft.name })}>Reset to built-in</button>
+            <button type="button" className={btn} onClick={() => setDraft({ ...BUILT_IN_THEMES[isBuiltIn(active) ? active : system], name: draft.name })}>Reset to built-in</button>
             <a className={btn} download={`${JSON.parse(exported).name}.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(exported)}`}>Export current theme</a>
             {!isBuiltIn(active) && active && <button type="button" className={btn} onClick={remove}>Delete {active}</button>}
           </div>
@@ -142,7 +166,7 @@ export function ThemeMenu() {
             </div>
           )}
           {(problems.length > 0 || checked.violations.length > 0) && (
-            <ul role="alert" aria-label="Theme problems" className="list-disc pl-4 text-cost">
+            <ul aria-live="polite" aria-label="Theme problems" className="list-disc pl-4 text-cost">
               {(problems.length ? problems : checked.violations).slice(0, 12).map((v, i) => <li key={i}>{v.message}</li>)}
             </ul>
           )}
@@ -152,7 +176,7 @@ export function ThemeMenu() {
           <div className="flex flex-wrap items-center gap-1">
             <button type="button" className={btn} onClick={() => load(parseTheme(paste))}>Import</button>
             {samples.map((s) => <button key={s.name} type="button" className={btn} onClick={() => setPaste(JSON.stringify(s, null, 2))}>Sample: {s.name}</button>)}
-            <label className={btn}>From file <input type="file" accept="application/json,.json" onChange={readFile} className="sr-only" /></label>
+            <label className={`${btn} focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus`}>From file <input type="file" accept="application/json,.json" onChange={readFile} className="sr-only" /></label>
           </div>
         </section>
       )}
