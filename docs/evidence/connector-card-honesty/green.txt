@@ -1,0 +1,6 @@
+$ npx vitest run src/connectors/connectorCardHonesty.test.tsx
+ Tests  4 passed (4)
+$ npx vitest run src/connectors src/costsource src/store: 45 files, 795 tests passed
+$ npx vitest run (full): Test Files  189 passed (189); Tests  3561 passed (3561), on main 6ac1335
+tsc --noEmit, eslint ., next build, check:bundle: pass
+mutations (each fails 1 test): locked Disconnect off; error Disconnect off; Findings link always on; empty-window text off
