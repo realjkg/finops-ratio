@@ -1,9 +1,9 @@
 $ npx vitest run src/costsource/tagAttribution.test.ts
  Test Files  1 passed (1)
       Tests  7 passed (7)
-$ npx vitest run (full)
- Test Files  183 passed (183)
-      Tests  3479 passed (3479)
+$ npx vitest run (full, after merging origin/main b6957ac)
+ Test Files  186 passed (186)
+      Tests  3498 passed (3498)
 $ npx tsc --noEmit: clean; npx eslint src/costsource: clean; npx next build: ok
 Mutations (each run against tagAttribution.test.ts, then reverted):
  M1 drop the synthetic: guard              -> 1 failed (killed)
