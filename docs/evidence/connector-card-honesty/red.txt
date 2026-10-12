@@ -9,3 +9,8 @@ $ npx vitest run src/connectors/connectorCardHonesty.test.tsx  (tests only, base
  Test Files  1 failed (1)
       Tests  3 failed (3)
 (tests condensed from 6 to 3 cases to fit the test:prod budget; same assertions)
+
+$ npx vitest run src/connectors/connectorCardHonesty.test.tsx  (tests only; round 2, review Medium: error state with a preserved run)
+   × error card with a landed run offers Retry connect and Disconnect; without one, Retry only 7ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  1 failed | 3 passed (4)

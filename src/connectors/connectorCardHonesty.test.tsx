@@ -13,14 +13,18 @@ const run = (o: { rows?: boolean; wl?: string; n?: number } = {}): IngestRun => 
   return { sourceId: source.id, sourceName: 'T', at: '2026-06-01T14:30:00.000Z', result: { ...r, rows },
     findings: Array.from({ length: o.n ?? 0 }, (_, i) => ({ id: `f${i}` }) as IngestRun['findings'][number]) };
 };
-const session = { state: 'locked' as const, error: 'auth', openedAt: '2026-06-01T14:29:00.000Z' };
-const card = (r?: IngestRun) =>
-  html(<ConnectorCard source={source} session={session} run={r} onConnect={() => {}} onIngest={() => {}} onDisconnect={() => {}} />);
+const session = (state: 'locked' | 'error') => ({ state, error: 'down', openedAt: '2026-06-01T14:29:00.000Z' });
+const card = (r?: IngestRun, st: 'locked' | 'error' = 'locked') =>
+  html(<ConnectorCard source={source} session={session(st)} run={r} onConnect={() => {}} onIngest={() => {}} onDisconnect={() => {}} />);
 const verdict = (r: IngestRun) => html(<IngestVerification run={r} sandbox={false} />);
 
 it('locked card keeps Disconnect (no Retry/Ingest) with a landed run, no button without one', () => {
   expect(card(run())).toMatch(/^(?!.*(Retry|Ingest now|Re-ingest|>Connect<)).*Disconnect/);
   expect(card()).not.toContain('<button');
+});
+it('error card with a landed run offers Retry connect and Disconnect; without one, Retry only', () => {
+  expect(card(run(), 'error')).toMatch(/Retry connect.*Disconnect/);
+  expect(card(undefined, 'error')).not.toContain('Disconnect');
 });
 it('links Findings only when the run has findings; Attribution stays', () => {
   for (const wl of ['', 'wl-1']) {
