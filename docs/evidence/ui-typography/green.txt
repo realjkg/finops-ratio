@@ -1,23 +1,20 @@
-GREEN, branch feat/ui-typography on origin/main 782a42f (production build, Chromium)
+GREEN, round 2, branch feat/ui-typography merged with origin/main 45a9ba2 (production build, Chromium)
+tsc 0 errors; eslint clean; vitest 191 files / 3572 tests; next build OK; check:bundle pass;
+Playwright simulation suite on a production build: 15 passed (customer 4, outcomes 2, theme-mobile 3, typography-layout 4, z-agent 1, zz-frank 1).
 
-npx tsc --noEmit                      0 errors
-npx eslint .                          0 problems
-npx vitest run                        191 files, 3569 tests passed (includes tokens.test.ts, ThemeMenu.test.tsx unchanged)
-npx next build                        compiled successfully
-npx playwright test --config playwright.simulation.config.ts   (RATIO_TEST_NEXT_DIR=.next-simulation-3110 build)
-                                      15 passed: customer(4) outcomes(2) theme-mobile(3) typography-layout(4) z-agent(1) zz-frank(1)
-                                      (new: 2 vitest files, 8 tests; new spec: 4 layout cases at 130% x {default, system-mono} x {1440, 390})
+Real defects found by the stronger guard and fixed at the root (no overflow hidden, no allowlist, zero false positives):
+  ValueRatioMeter.tsx    axis label "1x value" now has its own row (collided with "0x" at 130%)
+  SpendToValueGraph.tsx  first x tick is start-anchored; the selected point's name sits above it near the x axis (pre-existing at 100%)
+  Footer.tsx             alert ticker wraps (min-h, flex-wrap, no overflow-hidden/truncate) instead of cutting text (pre-existing at 100%)
+  FindingsPage.tsx, InitiativeCard.tsx   names wrap instead of truncating
 
-Layout defects found at 130% and fixed at the root (before the fix the spec listed them):
-  src/findings/FindingsPage.tsx    finding names used `truncate` (ellipsis clip at 130%): now wrap (min-w-0 break-words)
-  src/executive/InitiativeCard.tsx initiative names used `truncate` on /overview: now wrap (break-words)
+VISIBLE CHANGE AT 100% (not only at 130%): finding names that were ellipsis-truncated now wrap (review measured 10 of 11 names
+at 1440 px, rows about 59 -> 79 px, list roughly 220 px taller; evidence column aligned to the top of the row); initiative names wrap;
+the Findings meter gets a second label row; the footer ticker wraps and may be taller than 32 px. Neighbors reflow; no overlap.
 
-MUTATION CHECKS (each applied, run, reverted)
-vitest  M1 loadTypography stops validating the scale          1 failed (round-trips ... invalid)
-vitest  M2 default scale leaves --ui-scale behind             2 failed (applies ...; applies and persists ...)
-vitest  M3 PREPAINT_SCRIPT gains one statement                1 failed (byte-stable string)
-vitest  M4 the .text-[11px] scaled override is deleted        1 failed (every px text size scaled)
-vitest  M5 storage failure no longer reported                 2 failed (persists; blocked storage)
-spec    M6 `truncate` restored on finding names               4 failed: "clipped width: span Fraud Triage Agent" ...
-spec    M7 nav links given -mr-12 (text overlap)              4 failed: "overlap: a Findings / a Overview" ...
-spec    M8 html font-size rule removed                        4 failed: scale applied, expected 20.8px, received 16px
+MUTATIONS (each applied, run on a production build, reverted; all caught)
+vitest: stored scale unvalidated; default leaves --ui-scale; pre-paint script edited; px override deleted; storage failure not reported
+spec:   whitespace-nowrap on the finding-name span (scrolls horizontally); max-h-32 overflow-hidden on FocusDoorWalk (clipped by div.max-h-32);
+        whitespace-nowrap on the DetailPanel model line (390 px); -mt-1 on the Findings subtitle (overlap h1/p); -mt-3 on the InitiativeCard h3
+        (below the fold on /overview); truncate restored on finding names; nav links -mr-12; Footer back to h-8 overflow-hidden;
+        meter labels back on one row; html font-size rule removed

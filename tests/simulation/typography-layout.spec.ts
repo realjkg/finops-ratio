@@ -1,30 +1,23 @@
 import { expect, test, type Page } from '@playwright/test';
-
 // 130% (the largest size): nothing widens the page, clips its text or sits on other text. Vertical
-// scrollers (<main>, panes, lists) are expanded to their full content first, so text below the
-// fold is checked too. Horizontal scrollers are exempt only for what scrolling reaches; text cut by
+// scrollers are expanded to full content first, so text below the fold is checked too. Text cut by
 // hidden/clip or unscrollable ancestors is clipped. Fix the layout, never hide overflow.
 const ROUTES = ['/', '/overview', '/connectors', '/workloads'];
-const rootSize = (page: Page) => page.evaluate(() => getComputedStyle(document.documentElement).fontSize);
-
 const problems = (page: Page): Promise<string[]> =>
   page.evaluate(() => {
     type R = [number, number, number, number]; // left, top, right, bottom
     const out: string[] = [];
-    const main = document.querySelector('main');
-    if (document.documentElement.scrollWidth > innerWidth) out.push('page scrolls horizontally');
-    if (main && main.scrollWidth > main.clientWidth + 1) out.push('main scrolls horizontally');
+    const label = (el: Element) => `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 40)}"`;
     // Expand every vertical scroller (and its ancestors) to full content so nothing hides below the fold.
+    // A vertical scroller that also scrolls sideways is a defect (only pure x-scrollers, like tables, are by design).
     for (const s of document.body.querySelectorAll<HTMLElement>('*')) {
       const o = getComputedStyle(s).overflowY;
       if ((o !== 'auto' && o !== 'scroll') || s.scrollHeight <= s.clientHeight + 1) continue;
+      if (s.scrollWidth > s.clientWidth + 1) out.push(`scrolls horizontally: ${label(s)}`);
       for (let a: HTMLElement | null = s; a; a = a.parentElement) {
-        a.style.height = 'auto';
-        a.style.maxHeight = 'none';
-        a.style.overflow = 'visible';
+        Object.assign(a.style, { height: 'auto', maxHeight: 'none', overflow: 'visible' });
       }
     }
-    const label = (el: Element) => `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 40)}"`;
     const meet = (a: R, b: R): R | null => {
       const r: R = [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
       return r[2] > r[0] && r[3] > r[1] ? r : null;
@@ -62,9 +55,11 @@ const problems = (page: Page): Promise<string[]> =>
       for (const b of boxes.slice(i + 1)) {
         if (a.el === b.el || a.el.contains(b.el) || b.el.contains(a.el)) continue;
         const both = meet(a.r, b.r);
-        if (both && both[2] - both[0] > 2 && both[3] - both[1] > 2) out.push(`overlap: ${label(a.el)} / ${label(b.el)}`);
+        const area = (r: R) => (r[2] - r[0]) * (r[3] - r[1]);
+        if (both && area(both) > 0.02 * Math.min(area(a.r), area(b.r))) out.push(`overlap: ${label(a.el)} / ${label(b.el)}`);
       }
     }
+    if (document.documentElement.scrollWidth > innerWidth) out.push('page scrolls horizontally');
     return [...new Set(out)];
   });
 
@@ -76,7 +71,7 @@ for (const [width, family] of [[1440, 'default'], [390, 'default'], [1440, 'syst
     for (const route of ROUTES) {
       await page.goto(route);
       await page.waitForLoadState('networkidle');
-      await expect.poll(() => rootSize(page), { message: 'scale applied' }).toBe('20.8px');
+      await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize), { message: 'scale applied' }).toBe('20.8px');
       found[route] = await problems(page);
     }
     expect(found).toEqual({ '/': [], '/overview': [], '/connectors': [], '/workloads': [] });

@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-// Typography settings: validated storage, CSS variables, scaled px sizes, constant pre-paint script.
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

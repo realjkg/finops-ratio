@@ -46,23 +46,23 @@ export function Footer() {
   if (top3.length === 0) return null;
 
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-4 overflow-hidden border-t border-edge bg-deep px-4">
+    <footer className="flex min-h-8 shrink-0 items-center gap-4 border-t border-edge bg-deep px-4 py-1">
       <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-dim">
         Alerts
       </span>
-      <div className="flex min-w-0 flex-1 items-center gap-6 overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-1">
         {top3.map((alert) => (
           <button
             key={alert.id}
             type="button"
             onClick={() => onClick(alert)}
-            className="flex shrink-0 items-center gap-2 text-xs text-sub transition-colors hover:text-txt"
+            className="flex min-w-0 items-center gap-2 text-left text-xs text-sub transition-colors hover:text-txt"
           >
             <span style={{ color: SEVERITY_COLOR[alert.severity] }}>
               {severityIcon(alert.severity)}
             </span>
             <span className="font-mono font-medium text-txt">{nameFor(alert.workload_id)}:</span>
-            <span className="truncate">{alert.message}</span>
+            <span className="min-w-0">{alert.message}</span>
             <span className="text-dim">· {timeAgo(alert.triggered_at, DEMO_NOW)}</span>
           </button>
         ))}

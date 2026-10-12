@@ -179,7 +179,7 @@ export function SpendToValueGraph({
                 />
                 <text
                   x={xFor(v)} y={M.top + PH + 14}
-                  textAnchor="middle" fontSize={9} fill={C_DIM}
+                  textAnchor={i === 0 ? 'start' : 'middle'} fontSize={9} fill={C_DIM}
                   fontFamily="'JetBrains Mono', monospace"
                 >
                   {formatUSD(v, { compact: true })}
@@ -299,7 +299,7 @@ export function SpendToValueGraph({
               {isLarge && isSelected && (
                 <text
                   x={labelX}
-                  y={cy + 3.5}
+                  y={cy > M.top + PH - 8 ? cy - 8 : cy + 3.5} /* above the point near the x axis, clear of its tick labels */
                   textAnchor={labelAnchor}
                   fontSize={10}
                   fill={color}

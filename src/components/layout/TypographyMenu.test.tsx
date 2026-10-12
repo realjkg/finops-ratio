@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-// The typography control in the shared nav: labeled, applies and persists.
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
