@@ -1,4 +1,3 @@
-// Readiness seed consistency: the seeded demo must not contradict itself.
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { WORKLOADS } from '@/data/workloads';
