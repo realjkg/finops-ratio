@@ -1,0 +1,20 @@
+# GREEN: after next 16.3.8 (package.json floor), sharp 0.35.5, source-map-js 1.2.2 (lockfile)
+$ npx vitest run src/security
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+
+$ npm audit --omit=dev (after)
+found 0 vulnerabilities
+
+$ npm audit (full, after)
+{"info":0,"low":0,"moderate":2,"high":5,"critical":0,"total":7}
+remaining (all dev-only, tailwindcss@3 build chain): braces, chokidar, fast-glob, micromatch, postcss-nested, postcss-selector-parser, tailwindcss
+
+# clean-run gates (node v22.22.0, own clone, npm ci)
+eslint: exit 0 | tsc --noEmit: exit 0 | vitest: 190 files, 3565 tests passed | next build: ok | check:bundle: pass (134 client / 130 server files)
+simulation:test (Chromium 1194, production build, port 3417): 11 passed
+
+# GREEN (strict comparator round)
+$ npx vitest run src/security -> 6 passed (floor comparators fail closed: prerelease, rc, build suffix, incomplete, compound/wide ranges)
+Mutations: PLAIN regex without $ anchor -> 1 failed; range regex without $ -> 1 failed; lockfile next 16.3.8-canary.0 -> 1 failed
+Gates: lint ok, tsc ok, vitest 190 files / 3567 passed, build ok, check:bundle pass, simulation 11 passed (port 3517)
