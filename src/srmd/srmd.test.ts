@@ -67,6 +67,7 @@ describe('money', () => {
     expect(parseNanos('0.1') + parseNanos('0.2')).toBe(parseNanos('0.3'));
     expect(formatNanos(parseNanos('-12.5'))).toBe('-12.500000000');
     expect(parseNanos('0.000000001')).toBe(BigInt(1));
+    expect(parseNanos('9007199254.740993')).toBe(BigInt('9007199254740993000'));
   });
   it('rejects non-decimal input rather than guessing', () => {
     for (const bad of ['', '1e3', '1,5', '0.0000000001', 'abc']) expect(() => parseNanos(bad)).toThrow();

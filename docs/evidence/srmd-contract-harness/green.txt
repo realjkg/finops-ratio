@@ -1,0 +1,21 @@
+$ npx vitest run src/srmd
+ Test Files  1 passed (1)
+      Tests  26 passed (26)
+
+MUTATION CHECKS (each applied to the working tree, suite run, then reverted; all FAIL as required)
+MUTATION: add updateTags() write method to adapter
+Tests  1 failed | 25 passed (26)
+MUTATION: adapter claims integration-tested
+MUTATION: duplicates silently dropped instead of reported
+MUTATION: mismatched measures coerced to comparable
+MUTATION: currency mismatch coerced
+MUTATION: float-based money parse
+Tests  26 passed (26)
+MUTATION: config accepts non-allowlisted endpoint
+Tests  1 failed | 25 passed (26)
+MUTATION: network call added
+Tests  1 failed | 25 passed (26)
+MUTATION: float-based money parse
+Tests  1 failed | 25 passed (26)
+MUTATION: detector adds a summed total across both paths
+Tests  1 failed | 25 passed (26)
