@@ -48,6 +48,14 @@ export function ThemeMenu() {
     setSystem(systemTheme());
     setActive(stored === null ? null : typeof stored === 'string' ? stored : stored.name);
   }, []);
+  // Default (system) follows live OS changes, the same queries the CSS uses.
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const lists = ['(prefers-contrast: more)', '(prefers-color-scheme: dark)'].map((q) => window.matchMedia(q));
+    const update = () => setSystem(systemTheme());
+    lists.forEach((l) => l.addEventListener?.('change', update));
+    return () => lists.forEach((l) => l.removeEventListener?.('change', update));
+  }, []);
 
   const current: Theme = custom.find((t) => t.name === active) ?? BUILT_IN_THEMES[isBuiltIn(active) ? active : system];
   const choose = (name: string, list = custom) => {
@@ -101,7 +109,10 @@ export function ThemeMenu() {
     // Never read more than the limit; parseTheme rejects anything over it.
     if (file) load(parseTheme(await file.slice(0, MAX_IMPORT_BYTES + 1).text()));
   };
-  const exported = exportTheme(isBuiltIn(current.name) ? { ...current, name: `my-${current.name}` } : current);
+  const exportable = isBuiltIn(current.name) ? { ...current, name: `my-${current.name}` } : current;
+  // Dark keeps pinned exemptions that the user-theme gate (rightly) refuses: do not offer an export that cannot re-import.
+  const canExport = checkTheme(exportable).violations.length === 0;
+  const exported = exportTheme(exportable);
   const checks = checked.theme ? contrastChecks(checked.theme) : [];
 
   const toggle = () => {
@@ -135,10 +146,14 @@ export function ThemeMenu() {
         {open && (
         <section id="theme-editor" aria-label="Theme editor" className="max-h-[80vh] space-y-3 overflow-auto rounded border border-edge bg-slab p-3 shadow-lg">
           <div className="flex items-center gap-1.5 md:hidden">{switcher('theme-select-panel')}</div>
-          <label className="block">Name <input value={String(draft.name)} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="ml-1 rounded border border-edge bg-raised px-1 font-mono" /></label>
+          <label className="block">Name <input value={String(draft.name)} onChange={(e) => {
+            setProblems([]);
+            setDraft({ ...draft, name: e.target.value });
+          }} className="ml-1 rounded border border-edge bg-raised px-1 font-mono" /></label>
           <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
             {ROLES.map((role) => {
-              const worst = checks.filter((c) => c.fg === role).sort((a, b) => a.ratio / a.min - b.ratio / b.min)[0];
+              // Foreground roles, and surfaces as the base of a pair (`txt/void`, `value/value/10@raised`).
+              const worst = checks.filter((c) => c.fg === role || c.bg.split('@').pop() === role).sort((a, b) => a.ratio / a.min - b.ratio / b.min)[0];
               return (
                 <div key={role} className="flex items-center gap-1">
                   <input type="color" aria-label={`${role} color`} value={swatch(colors[role], current.colors[role])} onChange={setColor(role)} className="h-5 w-6" />
@@ -151,6 +166,9 @@ export function ThemeMenu() {
           <details>
             <summary>Contrast: {checks.filter((c) => c.pass).length} of {checks.length} required pairs pass</summary>
             <table className="mt-1 w-full font-mono" aria-label="Contrast readout">
+              <thead>
+                <tr><th scope="col">Pair</th><th scope="col">Ratio</th><th scope="col">Threshold</th><th scope="col">Result</th></tr>
+              </thead>
               <tbody>
                 {checks.map((c) => (
                   <tr key={`${c.fg}/${c.bg}`} className={c.pass ? 'text-sub' : 'text-cost'}>
@@ -167,7 +185,12 @@ export function ThemeMenu() {
               replaceDraft({ ...f.theme }, f);
             }}>Fix contrast</button>
             <button type="button" className={btn} onClick={() => replaceDraft({ ...BUILT_IN_THEMES[isBuiltIn(active) ? active : system], name: draft.name })}>Reset to built-in</button>
-            <a className={btn} download={`${JSON.parse(exported).name}.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(exported)}`}>Export current theme</a>
+            {canExport ? (
+              <a className={btn} download={`${exportable.name}.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(exported)}`}>Export current theme</a>
+            ) : (
+              <button type="button" className={btn} disabled aria-describedby="theme-export-note">Export current theme</button>
+            )}
+            {!canExport && <p id="theme-export-note" className="w-full">Fix contrast first to export an importable theme: this theme fails the import checks.</p>}
             {!isBuiltIn(active) && active && <button type="button" className={btn} onClick={remove}>Delete {active}</button>}
           </div>
           <div role="status">
