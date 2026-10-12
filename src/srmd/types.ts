@@ -53,6 +53,7 @@ export interface Lineage {
 interface CostFields {
   provider: string;
   billingAccountId: string;
+  resourceId?: string;
   billingPeriod: string; // YYYY-MM
   currency: string;
   /** Exact integer nano-units (same scale as src/costsource/aiSpendRatio.ts). */
@@ -69,6 +70,8 @@ export interface SrmdCostRecord extends CostFields, Envelope {
 }
 export interface ProviderCostRecord extends CostFields {
   providerRecordId: string;
+  /** Absent means 'usage'. */
+  kind?: SrmdCostRecord['kind'];
 }
 export interface TagKey {
   key: string;
@@ -88,7 +91,11 @@ export interface CostQuery {
 /** The ONLY read methods an adapter may have. discoverCapabilities is the sole other member. */
 export const READ_METHODS = ['listCostRecords', 'listTagTaxonomy', 'listAccountMappings', 'listMigrations', 'getControlTotals'] as const;
 
-/** Read-only by construction: no method creates, updates, deletes or syncs anything. */
+/**
+ * Read-only by construction: no method creates, updates, deletes or syncs anything.
+ * Private helpers must live outside the adapter object (module-scope functions or
+ * #private fields); the contract suite rejects any other function-valued member.
+ */
 export interface SrmdAdapter {
   readonly descriptor: Envelope & { id: string };
   discoverCapabilities(): Promise<CapabilityReport>;

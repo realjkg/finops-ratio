@@ -34,6 +34,7 @@ function toRecord(r: RawSrmd): SrmdCostRecord {
     kind: r.kind,
     provider: r.provider,
     billingAccountId: r.billingAccountId,
+    resourceId: r.resourceId,
     billingPeriod: r.billingPeriod,
     currency: r.currency,
     amountNanos: parseNanos(r.amount),

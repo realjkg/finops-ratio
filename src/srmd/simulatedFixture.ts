@@ -12,6 +12,11 @@ export const SIMULATED_PROVIDER_RECORDS: ProviderCostRecord[] = [
   { providerRecordId: 'prov-1001', ...acct, billingPeriod: '2026-09', currency: 'USD', amountNanos: parseNanos('120.5'), measure: EFFECTIVE },
   { providerRecordId: 'prov-1002', ...acct, billingPeriod: '2026-09', currency: 'USD', amountNanos: parseNanos('40.25'), measure: EFFECTIVE },
   { providerRecordId: 'prov-1003', ...acct, billingPeriod: '2026-09', currency: 'USD', amountNanos: parseNanos('9.99'), measure: EFFECTIVE },
+  { providerRecordId: 'prov-1004', ...acct, resourceId: 'res-1', billingPeriod: '2026-09', currency: 'USD', amountNanos: parseNanos('5.5'), measure: EFFECTIVE },
+  { providerRecordId: 'prov-1005', ...acct, billingPeriod: '2026-09', currency: 'USD', amountNanos: parseNanos('15'), measure: EFFECTIVE },
+  { providerRecordId: 'prov-1006', ...acct, billingPeriod: '2026-09', currency: 'USD', amountNanos: parseNanos('7.1'), measure: EFFECTIVE },
+  { providerRecordId: 'prov-1007', ...acct, billingPeriod: '2026-09', currency: 'USD', amountNanos: parseNanos('30'), measure: EFFECTIVE, kind: 'shared' },
+  { providerRecordId: 'prov-1008', ...acct, billingPeriod: '2026-09', currency: 'USD', amountNanos: parseNanos('2.2'), measure: EFFECTIVE },
   { providerRecordId: 'prov-2001', provider: 'cloud-b', billingAccountId: 'acct-0002', billingPeriod: '2026-09', currency: 'EUR', amountNanos: parseNanos('80'), measure: EFFECTIVE },
 ];
 
@@ -20,6 +25,7 @@ export interface RawSrmd {
   providerRecordId: string | null;
   provider: string;
   billingAccountId: string;
+  resourceId?: string;
   billingPeriod: string;
   currency: string;
   amount: string;
@@ -42,10 +48,15 @@ export const RAW_SRMD: RawSrmd[] = [
   { ...base, id: 'srmd-s4', providerRecordId: null, amount: '-15', kind: 'credit' },
   // Late arrival: observed after its period closed.
   { ...base, id: 'srmd-s5', providerRecordId: null, billingPeriod: '2026-08', amount: '7.1', late: true },
-  // Shared cost with an unspecified allocation rule.
-  { ...base, id: 'srmd-s6', providerRecordId: null, amount: '30', kind: 'shared' },
+  // Shared cost, split over two SRMD records that both point at one provider record.
+  { ...base, id: 'srmd-s6', providerRecordId: 'prov-1007', amount: '18', kind: 'shared' },
+  { ...base, id: 'srmd-s10', providerRecordId: 'prov-1007', amount: '12', kind: 'shared' },
   // Tags missing.
   { ...base, id: 'srmd-s7', providerRecordId: null, amount: '3.3', tags: null },
   // Currency mismatch against the linked provider record (USD vs EUR).
   { ...base, id: 'srmd-s8', providerRecordId: 'prov-2001', provider: 'cloud-b', billingAccountId: 'acct-0002', amount: '87.2' },
+  // Stale lineage id (no such provider record), recoverable by bill identity and resource.
+  { ...base, id: 'srmd-s9', providerRecordId: 'prov-stale-9', resourceId: 'res-1', amount: '5.5' },
+  // No id, equal amount, different measure definition: not comparable.
+  { ...base, id: 'srmd-s11', providerRecordId: null, amount: '2.2', measure: BILLED },
 ];
