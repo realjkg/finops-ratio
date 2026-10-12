@@ -22,7 +22,7 @@
 // changing RATIO_CSP_MODE needs a rebuild. Build with RATIO_CSP_MODE=report-only to
 // send the same policy as Content-Security-Policy-Report-Only; rebuild without it
 // to enforce. The same holds for VERCEL_ENV and NODE_ENV. Changing the pre-paint
-// script or this list needs a matching change to PREPAINT_HASH.
+// script requires a matching change to PREPAINT_HASH (other directives do not).
 const PREPAINT_HASH = "'sha256-j2+qMXrX/9a2DQN0Mdq5cwMIrCT8DZJHuAfbANm+YVA='";
 
 // Vercel's preview toolbar (comments, feedback) injects its own script, frame and
