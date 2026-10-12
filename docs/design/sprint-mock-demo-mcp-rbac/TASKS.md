@@ -57,7 +57,7 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   T4 slice 1 (open, `feat/ui-color-migration-1`): the neon accents in
   `src/lib/scales.ts` are theme variables, badge tints use `tint()` and the SVG chart
   constants use theme variables; the rendered audit (`tests/simulation/contrast-audit.spec.ts`,
-  SVG text read via `fill`; evidence in `docs/evidence/ui-color-migration/`) goes from 91 to 0
+  SVG text read via `fill`; evidence in `docs/evidence/ui-color-migration/`) goes from 92 to 0
   failing text nodes for Light and High contrast on `/`, `/overview`, `/connectors` and
   `/workloads`; Dark is unchanged at 346 (legacy look, not release-ready). Remaining, in
   order: (2) flip `DEFAULT_THEME` to `light` and label Dark "(contrast incomplete)" in

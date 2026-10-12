@@ -3,14 +3,14 @@ import { appendFileSync } from 'node:fs';
 import { contrastRatio } from '../../src/theme/contrast';
 
 // Rendered WCAG AA audit of every visible text node on the key pages, per built-in theme:
-// computed foreground and effective (ancestor-composited, opacity-aware) background.
+// the text pixel and the background pixel, composited group by group (see paint()).
 // Failures are open defects: MAX only ratchets DOWN as migration slices land; nothing is
 // exempted and the threshold is never lowered. AUDIT_OUT=<file> appends the table,
 // AUDIT_DUMP=<file> appends the failing nodes (JSON lines); delete both files before a run.
 export const MAX: Record<string, number> = { light: 0, 'high-contrast': 0, dark: 346 };
 const PAGES = ['/', '/overview', '/connectors', '/workloads'];
 
-type Raw = { text: string; el: string; fg: number[]; size: number; bold: boolean; layers: { c: number[]; a: number; o?: number }[]; img: boolean; op: number };
+type Raw = { text: string; el: string; fg: number[]; size: number; bold: boolean; layers: { c: number[]; a: number; o: number }[]; img: boolean };
 const collect = (page: Page) => page.evaluate((): Raw[] => {
   const rgba = (s: string) => {
     const n = (s.match(/[\d.]+/g) ?? ['0', '0', '0', '1']).map(Number);
@@ -29,14 +29,12 @@ const collect = (page: Page) => page.evaluate((): Raw[] => {
     if (r.width < 2 || r.height < 2) continue; // sr-only
     const chain: Element[] = [];
     for (let e: Element | null = el; e; e = e.parentElement) chain.unshift(e);
-    let op = 1;
     let img = false;
     const layers = chain.map((e) => {
       const cs = getComputedStyle(e);
-      op *= Number(cs.opacity);
       img ||= cs.backgroundImage !== 'none';
       const [r0, g0, b0, a0] = rgba(cs.backgroundColor);
-      return { c: [r0, g0, b0], a: a0 * op };
+      return { c: [r0, g0, b0], a: a0, o: Number(cs.opacity) };
     });
     const cs = getComputedStyle(el);
     // SVG text is painted with fill (and fill-opacity), not CSS color.
@@ -44,20 +42,35 @@ const collect = (page: Page) => page.evaluate((): Raw[] => {
     const fill = svg ? rgba(cs.fill) : rgba(cs.color);
     if (svg) fill[3] *= Number(cs.fillOpacity);
     out.push({ text: node.textContent.trim().slice(0, 40), el: `${el.tagName.toLowerCase()}.${String(el.getAttribute('class') ?? '').split(/\s+/).slice(0, 3).join('.')}`,
-      fg: fill, size: parseFloat(cs.fontSize), bold: Number(cs.fontWeight) >= 700, layers, img, op });
+      fg: fill, size: parseFloat(cs.fontSize), bold: Number(cs.fontWeight) >= 700, layers, img });
   }
   return out;
 });
 
 const hex = (c: number[]) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
-/** Effective colors of one node, then its ratio against the AA requirement. */
+type Px = { C: number[]; A: number }; // premultiplied color and alpha
+const over = (top: Px, under: Px): Px => ({ C: top.C.map((v, i) => v + under.C[i] * (1 - top.A)), A: top.A + under.A * (1 - top.A) });
+/**
+ * The pixel under one text node. Each element and its descendants render as a group that
+ * is then scaled by that element's opacity, so paint from the text outward: text over the
+ * element's own background, times its opacity, then over its parent's background, and so on
+ * down to the white canvas.
+ */
+function paint(layers: Raw['layers'], fg: number[]): string {
+  let g: Px = { C: fg.slice(0, 3).map((v) => v * fg[3]), A: fg[3] };
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const { c, a, o } = layers[i];
+    g = over(g, { C: c.map((v) => v * a), A: a });
+    g = { C: g.C.map((v) => v * o), A: g.A * o };
+  }
+  return hex(over(g, { C: [255, 255, 255], A: 1 }).C);
+}
+/** Effective colors of one node (text pixel vs the same pixel without the text), then its ratio against the AA requirement. */
 export function evaluate(n: Raw) {
-  let bg = [255, 255, 255];
-  for (const l of n.layers) bg = bg.map((v, i) => l.c[i] * l.a + v * (1 - l.a));
-  const a = n.fg[3] * n.op;
-  const fg = n.fg.slice(0, 3).map((v, i) => v * a + bg[i] * (1 - a));
+  const fg = paint(n.layers, n.fg);
+  const bg = paint(n.layers, [0, 0, 0, 0]);
   const large = n.size >= 24 || (n.size >= 18.66 && n.bold);
-  return { ratio: contrastRatio(hex(fg), hex(bg)), need: large ? 3 : 4.5, fg: hex(fg), bg: hex(bg) };
+  return { ratio: contrastRatio(fg, bg), need: large ? 3 : 4.5, fg, bg };
 }
 
 for (const theme of Object.keys(MAX)) {
@@ -86,7 +99,7 @@ for (const theme of Object.keys(MAX)) {
 // CSS opacity composites an element and its descendants as one group. Layers are listed
 // outermost first: own background (c, a), own opacity (o); fg is the text color with alpha.
 const L = (c: number[], a: number, o = 1) => ({ c, a, o });
-const node = (layers: ReturnType<typeof L>[], fg: number[]): Raw => ({ text: '', el: '', fg, size: 16, bold: false, layers, img: false, op: 1 });
+const node = (layers: ReturnType<typeof L>[], fg: number[]): Raw => ({ text: '', el: '', fg, size: 16, bold: false, layers, img: false });
 test.describe('opacity group compositing', () => {
   test('black text on an opaque white child at opacity .5 over black paints black on gray', () => {
     const r = evaluate(node([L([0, 0, 0], 1), L([255, 255, 255], 1, 0.5)], [0, 0, 0, 1]));

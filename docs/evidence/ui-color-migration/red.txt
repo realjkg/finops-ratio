@@ -1,4 +1,4 @@
-RED at origin/main 782a42f + tests only (production build, 1440 px, WCAG AA text nodes)
+Round 1 RED at origin/main 782a42f + tests only (production build, 1440 px, WCAG AA text nodes; round 1 audit, superseded counts)
 $ npx vitest run
   Test Files  3 failed | 187 passed (190)   Tests  10 failed | 3556 passed (3566)
   src/lib/scales.test.ts (3): TOKEN_COLOR/tint do not exist
@@ -12,3 +12,6 @@ All 89 Light/High contrast failures are scales.ts TOKEN_HEX neon accents (ratio/
 Round 2 RED (commit on top of d686056, tests only; SVG text read via fill, lower ratchets, hex-alpha forms)
   audit: light 2 (max 0), high-contrast 2 (max 0), dark 346 (was pinned 314): '1x break-even' SVG label, / and /overview
   vitest tokens.test.ts: rgb() 19 and TSX hex 8 in 2 ratchets fail (SVG constants still hex/rgba)
+Round 3 RED (tests only): opacity-group compositing cases in contrast-audit.spec.ts against the round 2 evaluate()
+  3 failed | 1 passed: white child at opacity .5 over black (gray on gray instead of black on gray), nested opacities,
+  translucent child over an opaque parent. Measured main 9024bc1 with the final audit: Light 92, High contrast 92, Dark 346.
