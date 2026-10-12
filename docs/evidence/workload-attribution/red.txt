@@ -1,0 +1,4 @@
+$ npx vitest run src/costsource/tagAttribution.test.ts  (before implementation)
+      Tests  4 failed | 5 passed (9)
+ FAIL  src/costsource/tagAttribution.test.ts > workload tag attribution > ignores prototype keys and different-case tag keys
+ Test Files  1 failed (1)
