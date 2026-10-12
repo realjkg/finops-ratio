@@ -1,0 +1,32 @@
+# GREEN (after review rounds 1-3)
+$ npx vitest run src/connectors/simulatedConnectors.dom.test.tsx src/connectors/simulatedProvenance.dom.test.tsx src/costsource/simulatedConnectorClient.test.ts src/costsource/sandboxAllowlist.test.ts
+ Test Files  4 passed (4)
+      Tests  25 passed (25)
+$ npx vitest run (full suite)
+      Test Files  185 passed (185)
+      Tests  3491 passed (3491)
+typecheck: pass; lint: pass; next build: pass; check:bundle: pass (clientFiles 134, problems [])
+sandboxAllowlist.test.ts (six ids) untouched and passing
+Notes: the provenance test mounts FindingsPage/AttributionPage on the client (SSR reads the store's initial state).
+M2 SURVIVED when rerun in round 3: round 2 put the unverified label in the card note too, so a text search missed a lost chip;
+the DOM test now asserts the chip span itself, and M2 is killed again below.
+
+# Mutation spot checks, all rerun on the final code (each reverted after the run)
+M1 every card back to the live client
+  failing tests: 2
+M4 isLiveDataRefusal always true
+  failing tests: 1
+M5 drop the simulated run marker
+  failing tests: 1
+M6 a row back on the Ratio workload prefix
+  failing tests: 1
+M7 flip the anomaly sign without relabel
+  failing tests: 2
+M2 drop the unverified chip (ConnectorCard.tsx), rerun after tightening the chip assertion
+  failing tests: 1
+M3 claim Nutanix is documented (SimulatedConnectorClient.ts)
+  failing tests: 3
+M8 claim Workloads unconditionally (IngestVerification.tsx)
+  failing tests: 1
+M9 GCP back to documented (SimulatedConnectorClient.ts)
+  failing tests: 3
