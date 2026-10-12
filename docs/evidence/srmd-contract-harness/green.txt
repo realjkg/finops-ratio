@@ -1,28 +1,49 @@
-GREEN evidence for the SRMD read-only contract harness (all synthetic; no network).
+GREEN evidence, round 2 (review fixes H1-H3, M1-M4). All synthetic; no network.
 
-$ npx vitest run src/srmd
- Test Files  1 passed (1)
- Tests       26 passed (26)
-
-Gates on the implementation commit:
+$ npx vitest run src/srmd          Test Files 1 passed; Tests 50 passed (50)
+Gates (run one at a time, foreground):
  npx tsc --noEmit        exit 0
  npx eslint .            exit 0
- npx vitest run          189 of 191 files, 3593 of 3596 tests passed; 3 failures were
-                         10 s timeouts under heavy host load, in files this slice does not touch
- re-run alone: npx vitest run src/ingest/worker/periods.test.ts src/simulation/server/worker.test.ts
-                         2 files passed, 3 tests passed
+ npx vitest run          191 files, 3620 tests, all passed (no timeouts this run)
  npx next build          exit 0
- npm run check:bundle    exit 0
- (next-env.d.ts reverted after the build)
+ npm run check:bundle    exit 0   (next-env.d.ts reverted afterwards)
 
-MUTATION CHECKS (each applied to the working tree, `npx vitest run src/srmd`, then reverted)
- 1 add an updateTags() write method to the adapter    -> 1 failed | 25 passed (26)
- 2 adapter claims integration-tested                  -> 3 failed | 23 passed (26)
- 3 duplicates silently dropped instead of reported    -> 4 failed | 22 passed (26)
- 4 mismatched measures coerced to comparable          -> 2 failed | 24 passed (26)
- 5 currency mismatch coerced                          -> 3 failed | 23 passed (26)
- 6 float-based money parse                            -> 1 failed | 25 passed (26)
- 7 config accepts a non-allowlisted endpoint          -> 1 failed | 25 passed (26)
- 8 network call added to the module                   -> 1 failed | 25 passed (26)
- 9 detector adds a summed total across both paths     -> 1 failed | 25 passed (26)
-All nine are caught; the tree was restored after each (git status clean).
+MUTATION CHECKS: each applied to the working tree, `npx vitest run src/srmd`, then reverted.
+Count = failed tests out of 50. Every one is caught.
+01 add updateTags() write method -> 2 failed
+02 add symbol-keyed method -> 2 failed
+03 adapter claims integration-tested everywhere -> 3 failed
+04 toRecord maturity customer-validated -> 2 failed
+05 discoverCapabilities maturity integration-tested -> 2 failed
+06 srmdMaturity reads descriptor only -> 1 failed
+07 candidates dropped (silently dropping duplicates) -> 9 failed
+08 lineage match coerces mismatched measures -> 2 failed
+09 lineage match coerces currency -> 3 failed
+10 float-based money parse -> 1 failed
+11 config startsWith instead of exact allowlist -> 1 failed
+12 config trims endpoint -> 1 failed
+13 whitespace-only credential treated as absent -> 1 failed
+14 config can throw -> 1 failed
+15 tags returned as shared reference -> 1 failed
+16 measure returned as shared reference -> 1 failed
+17 globalThis['fe'+'tch'] -> 1 failed
+18 new Function -> 1 failed
+19 import http (no node: prefix) -> 1 failed
+20 import node:net -> 1 failed
+21 import undici -> 1 failed
+22 EventSource (inside a function) -> 1 failed
+23 navigator.sendBeacon -> 1 failed
+24 new Image() (inside a function) -> 1 failed
+25 new file client2.ts calling fetch -> 1 failed
+26 new file http-client.ts calling fetch -> 1 failed
+27 new file net/c.ts calling fetch -> 1 failed
+28 new file live.test.ts calling fetch -> 1 failed
+29 provider ids collapsed (last write wins) -> 1 failed
+30 weak match ignores account -> 1 failed
+31 weak match ignores measure -> 2 failed
+32 providerUnmatched forced to [] -> 3 failed
+33 stale-id SRMD records silently dropped -> 1 failed
+34 weak match ignores kind -> 1 failed
+35 claimedByMultiple never set -> 2 failed
+36 duplicate SRMD ids not excluded from matching -> 2 failed
+37 weak match ignores resource -> 1 failed

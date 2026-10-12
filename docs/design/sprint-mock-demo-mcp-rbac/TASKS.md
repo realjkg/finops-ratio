@@ -55,18 +55,27 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   editor (merged, #116, `6ac1335`), with its Medium review fixes open as #118; T3 typography
   settings; T4 inline colors moved onto tokens, with a guard test.
 
-- SRMD read-only contract harness (`src/srmd/`, branch `feat/srmd-contract-harness`):
-  **maturity `simulated`**, reported by `srmdMaturity()` and capped by tests. SRMD is
-  the pilot customer's multicloud SaaS connector platform. Nothing is assumed about the
-  real one: not its API, export format, schema, auth, per-field authority or any
-  write-back. `SimulatedSrmdAdapter` serves invented fixtures, labeled "simulated
-  counterpart, contract unverified" on the descriptor and every response. The
-  `SrmdAdapter` interface has no write methods (a type-level check and a test over the
-  adapter's method names), capability discovery answers `supported`, `unsupported` or
-  `unknown` per capability, and `resolveSrmdConfig` is disabled unless an allowlisted
-  simulated target is named. No network code exists in the module. A real adapter
-  would implement `SrmdAdapter`, pass `runSrmdContractTests` (in
-  `srmdContract.spec.helper.ts`) with its own authorized provider records, be added to
+- SRMD read-only contract harness (`src/srmd/`): **maturity `simulated`**. SRMD is the
+  pilot customer's multicloud SaaS connector platform. Nothing is assumed about the real
+  one: not its API, export format, schema, auth, per-field authority or any write-back.
+  `SimulatedSrmdAdapter` serves invented fixtures, labeled "simulated counterpart,
+  contract unverified". `SrmdAdapter` has no write methods (a type-level check, plus a
+  runtime check over string and symbol keys and the prototype chain that also rejects
+  proxy-like adapters). Capability discovery answers `supported`, `unsupported` or
+  `unknown`. `resolveSrmdConfig` is disabled unless the exact allowlisted simulated
+  target is named, and never throws. A structural test (TypeScript AST) rejects any
+  non-relative import, dynamic import, and network or dynamic-code names in every file
+  under `src/srmd`; it is a guard, not a sandbox. Maturity: `srmdMaturity()` reports the
+  highest maturity found on the descriptor, the capability report, every response and
+  every record (missing reads as `unlabeled`), and the contract suite fails if any of
+  them exceeds `simulated` or lacks the label; `maxMaturity` above `simulated` throws.
+  This stops accidental over-claiming. It cannot tell fabricated "supported" data from
+  real data, so only evidence from an authorized Dev environment can raise the level.
+  `detectOverlap` reports candidates only (lineage id, weak match by bill identity,
+  offsets, restatements, many-to-one claims, duplicate SRMD ids); it never sums, drops
+  or merges, and weak matches are order-independent but not unique. A real adapter would
+  implement `SrmdAdapter` (private helpers outside the adapter object), pass
+  `runSrmdContractTests` with its own authorized provider records, be added to
   `srmdMaturity()` with its own evidence, and only then claim `integration-tested`.
   Open discovery questions: whether SRMD is a data provider, normalizer, tagging source
   or reporting view; what exports or APIs exist, with what auth, limits and versioning;
