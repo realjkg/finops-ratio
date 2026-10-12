@@ -1,0 +1,13 @@
+$ npx vitest run src/evidence      -> Test Files 1 passed, Tests 15 passed
+$ npx vitest run (full, rerun)     -> Test Files 191 passed, Tests 3585 passed
+  (first full run: 3 failures in src/ingest/worker/periods.test.ts and
+   src/simulation/server/worker.test.ts under load; both files pass in isolation
+   on this branch and on a clean origin/main checkout; rerun fully green)
+$ npx tsc --noEmit -> ok; npx eslint . -> ok; npx next build -> ok
+$ npm run check:bundle -> pass:true (clientFiles 134, serverFiles 130)
+Mutations (each reverted; each made >=1 test fail):
+  M1 classify on a single signal            -> 2 failed
+  M2 ServiceNow assumes cost present        -> 2 failed
+  M3 default maturity > simulated, no check -> 1 failed
+  M4 NC2 double-count never flagged         -> 1 failed
+  M5 emitCostRows ignores human confirmation-> 1 failed
