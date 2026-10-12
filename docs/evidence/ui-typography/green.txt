@@ -1,0 +1,23 @@
+GREEN, branch feat/ui-typography on origin/main 782a42f (production build, Chromium)
+
+npx tsc --noEmit                      0 errors
+npx eslint .                          0 problems
+npx vitest run                        191 files, 3569 tests passed (includes tokens.test.ts, ThemeMenu.test.tsx unchanged)
+npx next build                        compiled successfully
+npx playwright test --config playwright.simulation.config.ts   (RATIO_TEST_NEXT_DIR=.next-simulation-3110 build)
+                                      15 passed: customer(4) outcomes(2) theme-mobile(3) typography-layout(4) z-agent(1) zz-frank(1)
+                                      (the 3 new vitest files: 15 tests; the new spec: 4 layout cases at 130% x {default, system-mono} x {1440, 390})
+
+Layout defects found at 130% and fixed at the root (before the fix the spec listed them):
+  src/findings/FindingsPage.tsx    finding names used `truncate` (ellipsis clip at 130%): now wrap (min-w-0 break-words)
+  src/executive/InitiativeCard.tsx initiative names used `truncate` on /overview: now wrap (break-words)
+
+MUTATION CHECKS (each applied, run, reverted)
+vitest  M1 loadTypography stops validating the scale          1 failed (round-trips ... invalid)
+vitest  M2 default scale leaves --ui-scale behind             2 failed (applies ...; applies and persists ...)
+vitest  M3 PREPAINT_SCRIPT gains one statement                1 failed (byte-stable string)
+vitest  M4 the .text-[11px] scaled override is deleted        1 failed (every px text size scaled)
+vitest  M5 storage failure no longer reported                 2 failed (persists; blocked storage)
+spec    M6 `truncate` restored on finding names               4 failed: "clipped width: span Fraud Triage Agent" ...
+spec    M7 nav links given -mr-12 (text overlap)              4 failed: "overlap: a Findings / a Overview" ...
+spec    M8 html font-size rule removed                        4 failed: scale applied, expected 20.8px, received 16px

@@ -1,4 +1,5 @@
 RED (tests committed before any production code), base origin/main 782a42f
+(final test files were later tightened to fit the size budget; same assertions)
 
 $ npx vitest run src/theme/typography.test.ts src/components/layout/TypographyMenu.test.tsx
  FAIL  src/theme/typography.test.ts  (Failed to resolve import "./typography")

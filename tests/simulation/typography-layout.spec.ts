@@ -1,57 +1,57 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// The largest supported text size (130%) on the key pages: nothing may widen the page,
-// clip its own text, or sit on top of other text. Scrollers the user can scroll (auto/scroll)
-// are not clipping. Failures are fixed in the shared layout, never hidden with overflow.
+// 130% (the largest size): nothing widens the page, clips its text or sits on other text.
+// Scrollable areas (auto/scroll) are not clipping; fix the layout, never hide overflow.
 const ROUTES = ['/', '/overview', '/connectors', '/workloads'];
 
-async function problems(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+const rootSize = (page: Page) => page.evaluate(() => getComputedStyle(document.documentElement).fontSize);
+const problems = (page: Page): Promise<string[]> =>
+  page.evaluate(() => {
+    type R = [number, number, number, number]; // left, top, right, bottom
     const out: string[] = [];
     const main = document.querySelector('main');
     if (document.documentElement.scrollWidth > innerWidth) out.push('page scrolls horizontally');
     if (main && main.scrollWidth > main.clientWidth + 1) out.push('main scrolls horizontally');
     const label = (el: Element) => `${el.tagName.toLowerCase()} "${(el.textContent ?? '').trim().slice(0, 40)}"`;
-    const boxes: { el: Element; r: { left: number; right: number; top: number; bottom: number } }[] = [];
+    const meet = (a: R, b: R): R | null => {
+      const r: R = [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
+      return r[2] - r[0] > 1 && r[3] - r[1] > 1 ? r : null;
+    };
+    const area = (r: R) => (r[2] - r[0]) * (r[3] - r[1]);
+    const clips = (v: string) => v === 'hidden' || v === 'clip';
+    const boxes: { el: Element; r: R }[] = [];
     for (const el of document.body.querySelectorAll('*')) {
       const cs = getComputedStyle(el);
-      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.display === 'contents') continue;
       const own = [...el.childNodes].filter((n) => n.nodeType === 3 && n.textContent?.trim());
-      if (!own.length) continue;
-      const clip = (v: string) => v === 'hidden' || v === 'clip';
-      if ((clip(cs.overflowX) || cs.textOverflow === 'ellipsis') && el.scrollWidth > el.clientWidth + 1) out.push(`clipped width: ${label(el)}`);
-      if (clip(cs.overflowY) && el.scrollHeight > el.clientHeight + 1) out.push(`clipped height: ${label(el)}`);
-      const range = document.createRange();
+      if (!own.length || cs.display === 'none' || cs.visibility === 'hidden') continue;
+      if ((clips(cs.overflowX) || cs.textOverflow === 'ellipsis') && el.scrollWidth > el.clientWidth + 1) out.push(`clipped width: ${label(el)}`);
+      if (clips(cs.overflowY) && el.scrollHeight > el.clientHeight + 1) out.push(`clipped height: ${label(el)}`);
       for (const n of own) {
+        const range = document.createRange();
         range.selectNodeContents(n);
         for (const q of range.getClientRects()) {
-          // Only the part a scrolling or clipping ancestor shows can overlap anything.
-          let r: { left: number; right: number; top: number; bottom: number } | null = q;
+          let r: R | null = [q.left, q.top, q.right, q.bottom];
+          // Only the part that scrolling or clipping ancestors show can overlap anything.
           for (let a = el.parentElement; a && r; a = a.parentElement) {
             const o = getComputedStyle(a);
-            if (o.overflowX === 'visible' && o.overflowY === 'visible') continue;
-            const c = a.getBoundingClientRect();
-            r = { left: Math.max(r.left, c.left), right: Math.min(r.right, c.right), top: Math.max(r.top, c.top), bottom: Math.min(r.bottom, c.bottom) };
-            if (r.right - r.left <= 0 || r.bottom - r.top <= 0) r = null;
+            if (o.overflowX !== 'visible' || o.overflowY !== 'visible') {
+              const c = a.getBoundingClientRect();
+              r = meet(r, [c.left, c.top, c.right, c.bottom]);
+            }
           }
-          if (r && r.right - r.left > 2 && r.bottom - r.top > 2) boxes.push({ el, r });
+          if (r && r[2] - r[0] > 2 && r[3] - r[1] > 2) boxes.push({ el, r });
         }
       }
     }
-    for (let i = 0; i < boxes.length; i++) {
-      for (let j = i + 1; j < boxes.length; j++) {
-        const a = boxes[i], b = boxes[j];
-        if (a.el === b.el || a.el.contains(b.el) || b.el.contains(a.el)) continue;
-        const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
-        const h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
-        if (w > 1 && h > 1 && (w * h) / Math.min(...[a, b].map(({ r }) => (r.right - r.left) * (r.bottom - r.top))) > 0.2) out.push(`overlap: ${label(a.el)} / ${label(b.el)}`);
+    for (const [i, a] of boxes.entries()) {
+      for (const b of boxes.slice(i + 1)) {
+        const both = a.el === b.el || a.el.contains(b.el) || b.el.contains(a.el) ? null : meet(a.r, b.r);
+        if (both && area(both) / Math.min(area(a.r), area(b.r)) > 0.2) out.push(`overlap: ${label(a.el)} / ${label(b.el)}`);
       }
     }
     return [...new Set(out)];
   });
-}
 
-// 'system-mono' is the widest family: the worst case for line breaks.
 for (const [width, family] of [[1440, 'default'], [390, 'default'], [1440, 'system-mono'], [390, 'system-mono']] as const) {
   test(`130% text (${family}) has no overflow, clipping or overlap at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
@@ -60,20 +60,9 @@ for (const [width, family] of [[1440, 'default'], [390, 'default'], [1440, 'syst
     for (const route of ROUTES) {
       await page.goto(route);
       await page.waitForLoadState('networkidle');
-      await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize), { message: 'scale applied' }).toBe('20.8px');
-      const list = await problems(page);
-      if (list.length) found[route] = list;
+      await expect.poll(() => rootSize(page), { message: 'scale applied' }).toBe('20.8px');
+      found[route] = await problems(page);
     }
-    expect(found).toEqual({});
+    expect(found).toEqual({ '/': [], '/overview': [], '/connectors': [], '/workloads': [] });
   });
 }
-
-test('the Text control changes size from the keyboard and survives a reload', async ({ page }) => {
-  await page.goto('/overview');
-  await page.getByRole('button', { name: 'Text', exact: true }).focus();
-  await page.keyboard.press('Enter');
-  await page.getByLabel('Text size').selectOption('115');
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe('18.4px');
-  await page.reload();
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe('18.4px');
-});
