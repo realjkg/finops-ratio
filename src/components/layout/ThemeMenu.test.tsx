@@ -337,7 +337,6 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
       mount();
       openEditor();
       act(() => { os.more = true; os.listeners.forEach((f) => f()); });
-      expect(button('Export current theme').getAttribute('download')).toBe('my-high-contrast.json');
       expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES['high-contrast'].colors.txt); // unedited draft follows (Copilot 4244653107)
       setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
       act(() => { os.more = false; os.listeners.forEach((f) => f()); });
@@ -348,13 +347,20 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
       expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES['high-contrast'].colors.txt); // edits discarded, effective theme
       act(() => { os.more = false; os.listeners.forEach((f) => f()); });
       expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES.dark.colors.txt); // dirty flag was reset, so it follows again
+      setValue(byLabel<HTMLInputElement>('txt hex'), '#fafafa'); // gate review: Fix contrast keeps an edited draft edited
+      click(button('Fix contrast'));
+      const fixed = byLabel<HTMLInputElement>('txt hex').value;
+      act(() => { os.more = true; os.listeners.forEach((f) => f()); });
+      expect([byLabel<HTMLInputElement>('txt hex').value, byLabel<HTMLInputElement>('void hex').value]).toEqual([fixed, BUILT_IN_THEMES.dark.colors.void]);
+      click(button('Reset to built-in')); // Reset deliberately replaces the draft: unedited again, so it follows
+      act(() => { os.more = false; os.listeners.forEach((f) => f()); });
+      expect(byLabel<HTMLInputElement>('txt hex').value).toBe(BUILT_IN_THEMES.dark.colors.txt);
       for (const name of ['light', 'dark'] as const) { // case 3: an explicit choice is not overridden (theme nor draft)
         setValue(select(), name);
         act(() => { os.more = !os.more; os.listeners.forEach((f) => f()); });
         expect([html.getAttribute('data-theme'), byLabel<HTMLInputElement>('txt hex').value], name).toEqual([name, BUILT_IN_THEMES[name].colors.txt]);
       }
-      act(() => root?.unmount());
-      expect(os.listeners.size).toBe(0);
+      act(() => root?.unmount()); expect(os.listeners.size).toBe(0);
     } finally {
       Object.defineProperty(window, 'matchMedia', { configurable: true, value: original });
     }

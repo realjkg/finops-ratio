@@ -26,3 +26,9 @@ Round 4 (owner acceptance cases for the draft refresh), tests only, against eaeb
 (3) explicit Light / Dark: an OS change overrides neither the applied theme nor the draft;
 (4) closing the editor (the cancel path) and reopening after an OS change shows the effective theme, edits discarded,
     dirty flag reset (the draft follows the next OS change again).
+
+RED round 5 (gate review Medium: Fix contrast cleared the dirty flag, so the next OS change overwrote an edited draft),
+against 443c27f: npx vitest run src/components/layout/ThemeMenu.test.tsx
+     × Default (system) follows live OS changes and removes its listeners on unmount
+AssertionError: expected [ '#000000', '#ffffff' ] to deeply equal [ '#404040', '#05070b' ]
+      Tests  1 failed | 26 passed (27)
