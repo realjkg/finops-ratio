@@ -1,0 +1,35 @@
+GREEN: T2 implementation (npm ci install in a fresh clone).
+Command: npx vitest run src/theme src/components/layout
+
+ Test Files  6 passed (6)
+      Tests  109 passed (109)
+
+Full suite: npx vitest run -> Test Files 184 passed (184); Tests 3525 passed (3525).
+npx tsc --noEmit: clean. npx eslint .: clean. npx next build: success.
+
+Mutation spot checks (each reverted after the run):
+M1 validate.ts CUSHION = 0 (no cushion on composited pairs): killed, 1 failed | 108 passed
+M2 user.ts loadCustomThemes stops re-validating stored themes: killed, 2 failed | 107 passed
+M3 user.ts 40-role import limit removed: killed, 1 failed | 108 passed
+
+GREEN round 2 (mobile top bar, Copilot 4244404619/4244404600, challenger M1/L1/L3/L4):
+npx vitest run src/theme src/components/layout -> 6 files, 115 tests passed (2 duplicate tests trimmed for the size cap)
+Full suite: npx vitest run -> Test Files 184 passed (184); Tests 3531 passed (3531). tsc and eslint clean.
+npx playwright test --config playwright.simulation.config.ts (Chromium 1194, production build) -> 11 passed:
+  customer.spec.ts:17, :80 (mobile), :107, :127; outcomes.spec.ts:29, :161 (mobile);
+  theme-mobile.spec.ts at 320, 390, 430 px; z-agent-workflows.spec.ts:13; zz-frank.spec.ts:15
+Mutation spot checks:
+M4 user.ts loadCustomThemes returns the stored original instead of the normalized theme: killed, 2 failed | 114 passed
+M5 ThemeMenu keeps the import snapshot for contrast failures: survived the RED test (editing also clears it);
+   added 'a reset after a failing import shows only the live problems': killed, 1 failed | 116 passed (before the trim)
+
+GREEN round 3 (Copilot 4244463561): problems list always mounted, populated conditionally.
+npx vitest run src/theme src/components/layout -> 115 passed; tsc and eslint clean;
+theme-mobile.spec.ts (production build) -> 3 passed. Mutation: conditional mount (5755d33) = the RED run above, killed.
+
+GREEN round 4 (Copilot 4244556890/948/908): one replaceDraft() resets edits, import snapshot and fix report on every
+draft replacement (selector, open, reset, fix, save); one role=status region for the storage note, mounted while empty;
+the fix report region is always mounted inside the panel. src/theme + src/components/layout: 115 passed; tsc, eslint clean.
+Removed 'a reset after a failing import shows only the live problems' (superseded by the round-4 test; M5 is moot now
+that every replacement clears the snapshot). M6 replaceDraft keeps problems: killed (1 failed). M7 selector does not
+replace the draft: killed (1 failed).

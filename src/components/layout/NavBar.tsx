@@ -5,6 +5,7 @@
 // single agent affordance sits identically on every in-scope screen.
 
 import Link from 'next/link';
+import { ThemeMenu } from './ThemeMenu';
 
 export const NAV_ITEMS = [
   { key: 'findings',   label: 'Findings',   href: '/' },
@@ -31,7 +32,7 @@ export function NavBar({
   agentOpen?: boolean;
 }) {
   return (
-    <nav className="shrink-0 border-b border-edge bg-deep" aria-label="Main navigation">
+    <nav className="relative shrink-0 border-b border-edge bg-deep" aria-label="Main navigation">
       <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 px-3 py-2 md:flex md:h-10 md:gap-0.5 md:py-0">
       {/* Logo mark */}
       <span className="flex items-center gap-1.5 md:mr-4">
@@ -65,6 +66,8 @@ export function NavBar({
         })}
       </div>
 
+      <div className="col-start-2 row-start-1 ml-auto flex items-center gap-2 md:col-auto md:row-auto">
+      <ThemeMenu />
       {/* Single agent launcher — purple AI token, reserved warm accent untouched. */}
       {onOpenAgent && (
         <button
@@ -86,6 +89,7 @@ export function NavBar({
           <span className="hidden md:inline">Ask Frank Coster</span>
         </button>
       )}
+      </div>
       </div>
     </nav>
   );
