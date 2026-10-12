@@ -7,8 +7,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { AttributionPage } from '@/attribution/AttributionPage';
 import { WorkloadCard } from '@/components/workload/WorkloadCard';
-import { LiveDataAuthError, type CostSourceClient } from '@/costsource';
-import { SimulatedConnectorClient } from '@/costsource/SimulatedConnectorClient';
+import { createCostSourceClient, LiveDataAuthError, type CostSourceClient } from '@/costsource';
+import { SIMULATED_FIXTURES, SimulatedConnectorClient } from '@/costsource/SimulatedConnectorClient';
 import { sourcesForEnv } from '@/costsource/seed';
 import { FindingsPage } from '@/findings/FindingsPage';
 import { useStore } from '@/store/useStore';
@@ -75,6 +75,24 @@ it('a plain Error stays an error with Retry; only LiveDataAuthError locks (conne
 });
 
 it('documented-format cards say what is verified and what is not', () => {
-  const html = renderToStaticMarkup(<ConnectorCard source={AWS} onConnect={() => {}} simulation={{ verified: true, format: 'x' }} />);
+  const html = renderToStaticMarkup(<ConnectorCard source={AWS} onConnect={() => {}} simulation={SIMULATED_FIXTURES[AWS.id]} />);
   expect(html).toContain('column names verified; values and encodings not');
+  const gcp = sourcesForEnv({}).find((s) => s.id === 'gcp-bigquery-focus')!;
+  const gcpHtml = renderToStaticMarkup(<ConnectorCard source={gcp} onConnect={() => {}} simulation={SIMULATED_FIXTURES[gcp.id]} />);
+  expect(gcpHtml).not.toContain('column names verified');
+  expect(gcpHtml).toContain('partially verified: BigQuery wire shape only');
+});
+
+it('the landing line claims Workloads only when a workload resolved', async () => {
+  const open = { state: 'open' as const, openedAt: '' };
+  const sim = await simulatedRun();
+  const simText = mounted(<ConnectorCard source={P5} session={open} run={sim} onConnect={() => {}} simulation={SIMULATED_FIXTURES[P5.id]} />);
+  expect(simText).not.toContain('Landed in');
+  expect(simText).toContain('Rows normalized; none matched a workload');
+  const mock = createCostSourceClient('mock');
+  await useStore.getState().connectConnector('pointfive-sandbox', mock);
+  await useStore.getState().runConnectorIngest('pointfive-sandbox', 'PointFive (sandbox)', mock);
+  const sandbox = sourcesForEnv({}).find((s) => s.id === 'pointfive-sandbox')!;
+  const run = useStore.getState().ingestRuns[sandbox.id];
+  expect(mounted(<ConnectorCard source={sandbox} session={open} run={run} onConnect={() => {}} />)).toContain('Landed in Workloads · Findings · Attribution');
 });

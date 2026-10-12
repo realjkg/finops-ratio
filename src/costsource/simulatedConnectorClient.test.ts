@@ -62,7 +62,7 @@ it.each([
   expect(result.rows.map((r) => r.BilledCost)).toEqual(costs());
   expect(result.rows.length).toBeGreaterThan(1);
   expect(new Set(result.rows.map((r) => r.x_RatioSourceId))).toEqual(new Set([id]));
-  expect(SIMULATED_FIXTURES[id].verified).toBe(true);
+  expect(SIMULATED_FIXTURES[id].verification).toBe(id === 'gcp-bigquery-focus' ? 'partial' : 'documented');
   expect(await client.fetchFindings(id)).toEqual([]);
 });
 
@@ -77,7 +77,7 @@ it.each([
   expect(new Set(result.rows.map((r) => r.x_RatioSourceId))).toEqual(new Set([id]));
   const findings = await client.fetchFindings(id);
   expect(findings.map((f) => f.estimatedMonthlySavings || f.observedSpendDelta)).toEqual(findingAmounts);
-  expect(SIMULATED_FIXTURES[id].verified).toBe(false);
+  expect(SIMULATED_FIXTURES[id].verification).toBe('unverified');
 });
 
 it('health is a simulated pass for every id and says so', async () => {
@@ -85,6 +85,9 @@ it('health is a simulated pass for every id and says so', async () => {
     const health = await client.healthCheck(id);
     expect([health.sourceId, health.reachable, health.authed]).toEqual([id, true, true]);
     expect(health.detail).toMatch(/^Simulated .*no network call/);
+    // GCP's fixture verifies only the BigQuery wire shape, not the column set or types.
+    expect(health.detail.includes('column names verified')).toBe(['aws-data-exports', 'azure-cost-management'].includes(id));
+    expect(health.detail.includes('BigQuery wire shape only')).toBe(id === 'gcp-bigquery-focus');
   }
   await expect(client.healthCheck('pointfive-sandbox')).rejects.toThrow(/not a simulated connector/);
 });
