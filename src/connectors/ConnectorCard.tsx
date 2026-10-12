@@ -10,7 +10,7 @@
 import { useState } from 'react';
 import type { CostSourceDescriptor, SourceHealth } from '@/costsource/CostSourceClient';
 import { isOfflineSandboxSource } from '@/costsource/sandboxSources';
-import { SIMULATED_LIVE_NOTE, SIMULATED_UNVERIFIED_LABEL, SIMULATED_VERIFIED_NOTE, type SimulatedFixture } from '@/costsource/SimulatedConnectorClient';
+import { SIMULATED_LIVE_NOTE, SIMULATED_VERIFICATION_LABEL, type SimulatedFixture } from '@/costsource/SimulatedConnectorClient';
 import type { ConnectorBusyPhase, ConnectorSession, IngestRun } from './ingestLanding';
 import { IngestVerification } from './IngestVerification';
 
@@ -88,7 +88,7 @@ export interface ConnectorCardProps {
   /** Closes the session and withdraws landed data. */
   onDisconnect?: () => void;
   /** Anonymous demo: the walk runs over bundled fixtures (labeled), never the live API. */
-  simulation?: Pick<SimulatedFixture, 'verified' | 'format'>;
+  simulation?: Pick<SimulatedFixture, 'verification' | 'format'>;
 }
 
 export function ConnectorCard({
@@ -164,9 +164,9 @@ export function ConnectorCard({
               simulated
             </span>
           )}
-          {simulation && !simulation.verified && (
+          {simulation && simulation.verification !== 'documented' && (
             <span className="rounded border border-shape/40 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-shape">
-              {SIMULATED_UNVERIFIED_LABEL}
+              {SIMULATED_VERIFICATION_LABEL[simulation.verification]}
             </span>
           )}
           {isEgress && (
@@ -260,7 +260,7 @@ export function ConnectorCard({
 
       {walk && simulation && (
         <p className="font-mono text-[10px] leading-relaxed text-dim">
-          Simulated with the {simulation.format} ({simulation.verified ? SIMULATED_VERIFIED_NOTE : SIMULATED_UNVERIFIED_LABEL}). {SIMULATED_LIVE_NOTE}.
+          Simulated with the {simulation.format} ({SIMULATED_VERIFICATION_LABEL[simulation.verification]}). {SIMULATED_LIVE_NOTE}.
         </p>
       )}
 

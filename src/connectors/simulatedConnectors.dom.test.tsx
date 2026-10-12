@@ -55,7 +55,9 @@ it('non-sandbox cards are simulated: chip, note, Simulate connect, no auth banne
     expect(el.textContent).toContain('Live connection requires the authenticated API');
     expect(el.textContent).not.toContain('requires authenticated API access');
     expect(buttons(el)).toEqual(['Simulate connect']);
-    expect(el.textContent?.includes('illustrative, format not verified')).toBe(ILLUSTRATIVE.includes(src.id));
+    // The chip itself (the note repeats the label, so a text search alone would not catch a lost chip).
+    const chip = [...el.querySelectorAll('span')].some((c) => c.textContent === 'illustrative, format not verified');
+    expect(chip).toBe(ILLUSTRATIVE.includes(src.id));
   }
 });
 

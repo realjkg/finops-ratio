@@ -17,13 +17,17 @@ import * as data from './simulatedFixtures';
 import { rowsFromExportText, rowsFromRecords } from './transports/focusExport';
 import { bqRowsToRecords } from './transports/gcpBigQueryTransport';
 
-export const SIMULATED_UNVERIFIED_LABEL = 'illustrative, format not verified';
-export const SIMULATED_VERIFIED_NOTE = 'documented-format sample: column names verified; values and encodings not';
+/** What each fixture's provenance header supports claiming. */
+export const SIMULATED_VERIFICATION_LABEL = {
+  documented: 'documented-format sample: column names verified; values and encodings not',
+  partial: 'partially verified: BigQuery wire shape only; column set and types not',
+  unverified: 'illustrative, format not verified',
+} as const;
+export type SimulatedVerification = keyof typeof SIMULATED_VERIFICATION_LABEL;
 export const SIMULATED_LIVE_NOTE = 'Live connection requires the authenticated API';
 
 export interface SimulatedFixture {
-  /** true: a documented-format sample export (C1); false: illustrative, format not verified. */
-  verified: boolean;
+  verification: SimulatedVerification;
   format: string;
   /** The fixture's own billing window: rows outside the caller's window would otherwise vanish. */
   window: CostWindow;
@@ -36,17 +40,17 @@ const OCT = { start: '2026-10-01T00:00:00Z', end: '2026-11-01T00:00:00Z' };
 const text = (body: string, label: string) => (w: CostWindow) => rowsFromExportText(body, w, `simulated ${label}`);
 
 export const SIMULATED_FIXTURES: Record<string, SimulatedFixture> = {
-  'aws-data-exports': { verified: true, format: 'AWS Data Exports FOCUS 1.0 CSV sample', window: SEPT, rows: text(data.AWS_FOCUS_1_0_CSV, 'AWS export') },
-  'azure-cost-management': { verified: true, format: 'Azure Cost Management FOCUS 1.0 CSV sample', window: OCT, rows: text(data.AZURE_FOCUS_1_0_CSV, 'Azure export') },
+  'aws-data-exports': { verification: 'documented', format: 'AWS Data Exports FOCUS 1.0 CSV sample', window: SEPT, rows: text(data.AWS_FOCUS_1_0_CSV, 'AWS export') },
+  'azure-cost-management': { verification: 'documented', format: 'Azure Cost Management FOCUS 1.0 CSV sample', window: OCT, rows: text(data.AZURE_FOCUS_1_0_CSV, 'Azure export') },
   'gcp-bigquery-focus': {
-    verified: true,
+    verification: 'partial',
     format: 'GCP BigQuery jobs.query FOCUS 1.0 response sample',
     window: SEPT,
     rows: (w) => rowsFromRecords(bqRowsToRecords(gcpBigQueryResponse as unknown as Parameters<typeof bqRowsToRecords>[0]), w, 'simulated GCP query', { allowEpochSeconds: true }),
   },
-  kubernetes: { verified: false, format: 'OpenCost allocation mapped to FOCUS 1.0 JSON', window: OCT, rows: text(JSON.stringify(data.KUBERNETES_FOCUS_ROWS), 'Kubernetes endpoint') },
-  nutanix: { verified: false, format: 'assumed FOCUS 1.0 CSV', window: OCT, rows: text(data.NUTANIX_FOCUS_CSV, 'Nutanix endpoint') },
-  [POINTFIVE_LIVE_SOURCE_ID]: { verified: false, format: 'assumed PointFive MCP tool results', window: OCT },
+  kubernetes: { verification: 'unverified', format: 'OpenCost allocation mapped to FOCUS 1.0 JSON', window: OCT, rows: text(JSON.stringify(data.KUBERNETES_FOCUS_ROWS), 'Kubernetes endpoint') },
+  nutanix: { verification: 'unverified', format: 'assumed FOCUS 1.0 CSV', window: OCT, rows: text(data.NUTANIX_FOCUS_CSV, 'Nutanix endpoint') },
+  [POINTFIVE_LIVE_SOURCE_ID]: { verification: 'unverified', format: 'assumed PointFive MCP tool results', window: OCT },
 };
 
 export function isSimulatedSource(sourceId: string): boolean {
@@ -105,7 +109,7 @@ export class SimulatedConnectorClient implements CostSourceClient {
   async healthCheck(sourceId: string): Promise<SourceHealth> {
     const fx = fixtureFor(sourceId);
     const health = await adapterFor(sourceId).healthCheck();
-    const label = fx.verified ? SIMULATED_VERIFIED_NOTE : SIMULATED_UNVERIFIED_LABEL;
+    const label = SIMULATED_VERIFICATION_LABEL[fx.verification];
     return { ...health, detail: `Simulated connection: ${fx.format} (${label}); no network call, no credentials.` };
   }
 }

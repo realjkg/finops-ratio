@@ -130,11 +130,18 @@ export function IngestVerification({
       {variance.length > 0 && <SourceVariance rows={variance} />}
 
       <p className="mt-2 text-[11px] text-dim">
-        Landed in{' '}
-        <Link href="/workloads" className="text-unit underline decoration-edge hover:decoration-unit">
-          Workloads
-        </Link>
-        {' · '}
+        {/* Claim Workloads only when a row resolved to one (simulated rows never do). */}
+        {s.workloadsResolved > 0 ? (
+          <>
+            Landed in{' '}
+            <Link href="/workloads" className="text-unit underline decoration-edge hover:decoration-unit">
+              Workloads
+            </Link>
+            {' · '}
+          </>
+        ) : (
+          'Rows normalized; none matched a workload. Provenance in '
+        )}
         <Link href="/" className="text-unit underline decoration-edge hover:decoration-unit">
           Findings
         </Link>
