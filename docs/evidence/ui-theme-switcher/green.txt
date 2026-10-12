@@ -22,3 +22,7 @@ Mutation spot checks:
 M4 user.ts loadCustomThemes returns the stored original instead of the normalized theme: killed, 2 failed | 114 passed
 M5 ThemeMenu keeps the import snapshot for contrast failures: survived the RED test (editing also clears it);
    added 'a reset after a failing import shows only the live problems': killed, 1 failed | 116 passed (before the trim)
+
+GREEN round 3 (Copilot 4244463561): problems list always mounted, populated conditionally.
+npx vitest run src/theme src/components/layout -> 115 passed; tsc and eslint clean;
+theme-mobile.spec.ts (production build) -> 3 passed. Mutation: conditional mount (5755d33) = the RED run above, killed.

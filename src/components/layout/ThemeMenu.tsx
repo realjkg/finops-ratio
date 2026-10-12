@@ -165,11 +165,10 @@ export function ThemeMenu() {
               {fix.unreachable.length > 0 && <p className="text-cost">Could not reach the target for: {fix.unreachable.join(', ')}</p>}
             </div>
           )}
-          {(problems.length > 0 || checked.violations.length > 0) && (
-            <ul aria-live="polite" aria-label="Theme problems" className="list-disc pl-4 text-cost">
-              {(problems.length ? problems : checked.violations).slice(0, 12).map((v, i) => <li key={i}>{v.message}</li>)}
-            </ul>
-          )}
+          {/* Always mounted (empty when clean) so the first problem is announced. */}
+          <ul aria-live="polite" aria-label="Theme problems" className="list-disc pl-4 text-cost">
+            {(problems.length ? problems : checked.violations).slice(0, 12).map((v, i) => <li key={i}>{v.message}</li>)}
+          </ul>
           <label className="block">Import JSON
             <textarea aria-label="Theme JSON" value={paste} onChange={(e) => setPaste(e.target.value)} rows={3} className="mt-1 block w-full rounded border border-edge bg-raised p-1 font-mono" />
           </label>
