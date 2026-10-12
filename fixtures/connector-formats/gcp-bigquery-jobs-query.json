@@ -1,0 +1,18 @@
+{
+  "$comment": "BigQuery jobs.query REST response for the same two Google rows. Wire shape [P] (BigQuery discovery rev 20260922: rows[].f[].v strings, TIMESTAMP as float epoch seconds, null cells). Column TYPES for Google's FOCUS table are [U] (assumed). Values synthetic; ignored by the transport.",
+  "jobComplete": true,
+  "jobReference": { "projectId": "synthetic-gcp-project-0001", "jobId": "job_synthetic_0001", "location": "US" },
+  "schema": { "fields": [
+    {"name":"BilledCost","type":"NUMERIC"},{"name":"BillingAccountId","type":"STRING"},{"name":"BillingCurrency","type":"STRING"},
+    {"name":"BillingPeriodEnd","type":"TIMESTAMP"},{"name":"BillingPeriodStart","type":"TIMESTAMP"},
+    {"name":"ChargePeriodStart","type":"TIMESTAMP"},{"name":"ChargePeriodEnd","type":"TIMESTAMP"},
+    {"name":"ChargeCategory","type":"STRING"},{"name":"ConsumedQuantity","type":"NUMERIC"},{"name":"ConsumedUnit","type":"STRING"},
+    {"name":"EffectiveCost","type":"NUMERIC"},{"name":"ProviderName","type":"STRING"},{"name":"ServiceName","type":"STRING"},
+    {"name":"SubAccountId","type":"STRING"},{"name":"ResourceId","type":"STRING"}
+  ]},
+  "totalRows": "2",
+  "rows": [
+    {"f":[{"v":"0.0162630000"},{"v":"SYNTH0-GCPBIL-000001"},{"v":"USD"},{"v":"1.790838E9"},{"v":"1.788246E9"},{"v":"1.7893548E9"},{"v":"1.7893584E9"},{"v":"Usage"},{"v":"2342.0000000000"},{"v":"seconds"},{"v":"0.0162630000"},{"v":"Google Cloud"},{"v":"Networking"},{"v":"synthetic-gcp-project-0001"},{"v":"//compute.googleapis.com/projects/synthetic-gcp-project-0001/global/forwardingRules/synthetic-fr-1"}]},
+    {"f":[{"v":"0.0002100000"},{"v":"SYNTH0-GCPBIL-000001"},{"v":"USD"},{"v":"1.790838E9"},{"v":"1.788246E9"},{"v":"1.7893548E9"},{"v":"1.7893584E9"},{"v":"Usage"},{"v":"6075910000000.0000000000"},{"v":"byte-seconds"},{"v":"0.0000000000"},{"v":"Google Cloud"},{"v":"Artifact Registry"},{"v":"synthetic-gcp-project-0001"},{"v":null}]}
+  ]
+}

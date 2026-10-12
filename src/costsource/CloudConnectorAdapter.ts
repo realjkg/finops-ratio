@@ -131,12 +131,13 @@ export class CloudConnectorAdapter {
     }
     // Reuse the existing version-negotiation shim: the cloud's FOCUS export is
     // upgraded to the v1.4 canonical model and given Ratio's value context.
-    const { rows, backfilledColumns } = normalizeRows(exportRows, this.spec.id, this.spec.focusVersion);
+    const { rows, backfilledColumns, draftColumnsBackfilled } = normalizeRows(exportRows, this.spec.id, this.spec.focusVersion);
     return {
       sourceId: this.spec.id,
       sourceVersion: this.spec.focusVersion,
       canonicalVersion: CANONICAL_FOCUS_VERSION,
       backfilledColumns,
+      draftColumnsBackfilled,
       window,
       generatedAt: new Date().toISOString(),
       rows,

@@ -2,13 +2,13 @@
 // status using the durable semantic tokens. All three states render a static,
 // color-coded dot — no pulse rings, no Lottie. The size prop controls the outer
 // bounding box; the dot occupies 36% of that area, consistent with the card grid.
-import { TOKEN_HEX } from '@/lib/scales';
+import { TOKEN_COLOR } from '@/lib/scales';
 import type { MissionStatus } from './missionModel';
 
 const STATUS_COLOR: Record<MissionStatus, string> = {
-  nominal: TOKEN_HEX.value,
-  caution: TOKEN_HEX.shape,
-  critical: TOKEN_HEX.cost,
+  nominal: TOKEN_COLOR.value,
+  caution: TOKEN_COLOR.shape,
+  critical: TOKEN_COLOR.cost,
 };
 
 const STATUS_LABEL: Record<MissionStatus, string> = {

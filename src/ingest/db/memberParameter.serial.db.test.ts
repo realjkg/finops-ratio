@@ -15,12 +15,16 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { Client } from 'pg';
-import { createTestDatabase, type TestDatabase } from './testing/harness';
+import { createTestDatabase, fixtureMigrationVersions, type TestDatabase } from './testing/harness';
 import { seedTwoTenants } from './testing/fixtures';
 import { DEFAULT_MIGRATIONS_DIR } from './migrationFiles';
 import { migrateUp, migrationStatus } from './migrate';
 import { privilegeModelViolations } from './privilegeModel';
 import { requireTestDatabaseUrl } from './testing/requireTestDatabaseUrl';
+
+// Fixture version just past the last real migration: an injected fixture file must
+// never shadow a real version (real 0003–0005 land with the sibling slices).
+const [V1] = fixtureMigrationVersions(1);
 
 const created: string[] = [];
 afterAll(async () => {
@@ -93,8 +97,10 @@ describe('real LOGIN member of ratio_worker with SET on session_replication_role
         expect(st.privilegeProblems.join('\n')).toMatch(re);
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-srr-'));
         try {
-          for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
-          fs.writeFileSync(path.join(dir, '0002_noop.up.sql'), "-- ratio:phase expand\nCOMMENT ON SCHEMA ratio IS 'ratio';\n");
+          for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) {
+            fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
+          }
+          fs.writeFileSync(path.join(dir, `${V1}_noop.up.sql`), "-- ratio:phase expand\nCOMMENT ON SCHEMA ratio IS 'ratio';\n");
           await expect(migrateUp(c, { dir })).rejects.toThrow(re);
         } finally {
           fs.rmSync(dir, { recursive: true, force: true });

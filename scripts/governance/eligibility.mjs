@@ -15,6 +15,29 @@ export const ELIGIBILITY_CONTEXT = 'Governance · merge eligibility';
 export const REVOKED_CONTEXT = 'Governance · exception revoked';
 export const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
 /**
+ * Trusted platform actors: PR authors this repository's owner has directed to
+ * auto-merge at the QA bar (the owner's standing directive: "Auto merge PRs in
+ * this repository if they are QA'ed and properly tested without defects").
+ * Their PRs arrive with author_association CONTRIBUTOR (the app integration
+ * shows as a contributor, not a member), so authorship is recognised by login.
+ * Matched exactly, as the canonical login the GitHub API reports. Membership
+ * here widens WHO may author an auto-merged PR — never WHAT can merge without
+ * review: a restricted change set still needs every computable gate green, and
+ * a PR touching the governance gate's own files is always exception-required.
+ */
+export const TRUSTED_ACTOR_LOGINS = Object.freeze([
+  // The Obvious Autobuild platform bot (realjkg/finops-ratio PRs #74-#77).
+  'obvious-autobuild[bot]',
+]);
+/**
+ * The governance gate's own files: a PR touching any of these can never ride
+ * the trusted-actor QA bar, regardless of author — the QA bar must not be able
+ * to rewrite the gate that enforces it. Everything else about authorship
+ * (forks, unknown associations) still fails closed.
+ */
+export const GOVERNANCE_GATE_FILES = Object.freeze(['.github/workflows/governance.yml']);
+export const GOVERNANCE_GATE_PREFIXES = Object.freeze(['scripts/governance/']);
+/**
  * Exception path for restricted PRs: an unedited, non-bot PR comment whose
  * trimmed body is exactly `/exception-approve <40-hex head SHA>` (or
  * `/exception-revoke <sha>`) by an admin/maintain user.
@@ -70,6 +93,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   }),
   baseBranch: 'main',
   allowedAuthorAssociations: Object.freeze(['OWNER', 'MEMBER', 'COLLABORATOR']),
+  // PR authors whose restricted PRs may auto-merge at the QA bar (above).
+  trustedActors: TRUSTED_ACTOR_LOGINS,
 });
 
 /** A check run produced by OUR governance workflow (verified fields, never the name alone). */
@@ -123,14 +148,55 @@ export function latestCheckRuns(checkRuns) {
   return [...byKey.values()];
 }
 
+/** True when the PR author's login is a trusted platform actor (TRUSTED_ACTOR_LOGINS). */
+export function isTrustedActor(pr, config = DEFAULT_CONFIG) {
+  const login = pr?.authorLogin;
+  return typeof login === 'string' && config.trustedActors.includes(login);
+}
+
+/** True for a path inside the governance gate's own files. */
+export function touchesGovernanceGatePath(p) {
+  return GOVERNANCE_GATE_FILES.includes(p) || GOVERNANCE_GATE_PREFIXES.some((pre) => p.startsWith(pre));
+}
+
+/**
+ * Whether the PR's change set touches the governance gate's own files
+ * (.github/workflows/governance.yml, scripts/governance/**): true, false, or
+ * 'unknown' when the changed-file list is missing or was truncated by the API
+ * cap. Unknown counts as touching (fail closed): such a PR never rides the
+ * trusted-actor QA bar.
+ */
+export function governanceGateTouched(state) {
+  const files = state?.changedFiles;
+  if (!Array.isArray(files) || state?.changedFilesTruncated === true) return 'unknown';
+  return files.some((p) => typeof p === 'string' && touchesGovernanceGatePath(p));
+}
+
+/**
+ * The trusted-actor QA-bar acceptance for one PR state: a trusted platform
+ * author's freshly-classified risk:restricted change set is accepted as such
+ * (restricted classes themselves are not a blocker) when the change set
+ * provably avoids the governance gate's own files. Every other risk state —
+ * low, unknown, or a change set touching/possibly touching the gate — follows
+ * the ordinary rules.
+ */
+export function trustedQaBar(state, config = DEFAULT_CONFIG) {
+  return Boolean(isTrustedActor(state?.pr, config))
+    && governanceGateTouched(state) === false
+    && state?.freshRisk === 'restricted';
+}
+
 /** Why a PR from this author/repo can never be auto-merged, or null. */
 export function outsiderReason(pr, config = DEFAULT_CONFIG) {
   const reasons = [];
   if (!pr.headRepo || pr.headRepo !== pr.baseRepo) {
     reasons.push(`Fork PR (head repo ${pr.headRepo ?? 'unknown'} ≠ base repo ${pr.baseRepo ?? 'unknown'}).`);
   }
-  if (!config.allowedAuthorAssociations.includes(pr.authorAssociation)) {
-    reasons.push(`PR author association is ${pr.authorAssociation ?? 'unknown'} (must be ${config.allowedAuthorAssociations.join('/')}).`);
+  // Authorship passes for the usual associations PLUS trusted platform actors
+  // (their app integration shows as CONTRIBUTOR). Unknown logins and unknown
+  // associations still fail closed.
+  if (!config.allowedAuthorAssociations.includes(pr.authorAssociation) && !isTrustedActor(pr, config)) {
+    reasons.push(`PR author association is ${pr.authorAssociation ?? 'unknown'} (must be ${config.allowedAuthorAssociations.join('/')}, or the author must be a trusted platform actor).`);
   }
   return reasons.length ? reasons.join(' ') : null;
 }
@@ -138,8 +204,11 @@ export function outsiderReason(pr, config = DEFAULT_CONFIG) {
 /**
  * @param {{
  *   pr: { draft: boolean, baseRef: string, headSha: string, labels: string[],
- *         headRepo: string|null, baseRepo: string, authorAssociation: string },
+ *         headRepo: string|null, baseRepo: string, authorAssociation: string,
+ *         authorLogin: string|null },
  *   freshRisk?: 'low' | 'restricted',
+ *   changedFiles?: string[] | null,
+ *   changedFilesTruncated?: boolean,
  *   checkRuns: Array<{ id: number, name: string, status: string, conclusion: string|null,
  *                      appId?: number, workflowPath?: string }>,
  *   statuses?: Array<{ context: string, state: string }>,
@@ -169,10 +238,33 @@ function collectReasons(state, config) {
   const outsider = outsiderReason(pr, config);
   if (outsider) reasons.push(`Never auto-merge eligible: ${outsider}`);
 
-  if (!labels.has('risk:low')) riskReason('PR is not labelled risk:low.');
-  if (labels.has('risk:restricted')) riskReason('PR carries risk:restricted.');
-  if (state?.freshRisk !== 'low') {
-    riskReason(`Fresh classification of the current file list is "${state?.freshRisk ?? 'unknown'}", not low.`);
+  // Trusted platform actors merge at the QA bar: the owner's standing
+  // directive is that their PRs auto-merge once every computable gate is
+  // green, even when the fresh classification is risk:restricted — EXCEPT
+  // when the change set touches the governance gate's own files (or the
+  // change set is unknown/truncated, which counts as touching): the QA bar
+  // must not be able to rewrite the gate that enforces it.
+  const qaBar = trustedQaBar(state, config);
+  if (qaBar) {
+    // The fresh in-job classification (recomputed from the PR's actual file
+    // list at evaluation time) is the authoritative risk input on this path,
+    // so the label reasons that merely restate a restriction are waived.
+    // Every non-risk gate below still applies unchanged.
+  } else {
+    // Diagnosability for the trusted author whose PR does NOT ride the QA
+    // bar: say why (gate files touched, or the change set is unknown or
+    // truncated, which counts as touching). Tagged as a risk reason, so a
+    // valid exception approval can still merge a governance-file edit —
+    // the QA bar itself never can.
+    const gateState = governanceGateTouched(state);
+    if (isTrustedActor(pr, config) && state?.freshRisk === 'restricted' && gateState !== false) {
+      riskReason(`Trusted-author QA bar does not apply: the change set ${gateState === 'unknown' ? 'is unknown or truncated, so it may touch' : 'touches'} the governance gate's own files — exception approval required (the QA bar cannot rewrite its own gate).`);
+    }
+    if (!labels.has('risk:low')) riskReason('PR is not labelled risk:low.');
+    if (labels.has('risk:restricted')) riskReason('PR carries risk:restricted.');
+    if (state?.freshRisk !== 'low') {
+      riskReason(`Fresh classification of the current file list is "${state?.freshRisk ?? 'unknown'}", not low.`);
+    }
   }
   if (pr.draft !== false) reasons.push('PR is a draft (or draft state unknown).');
   if (pr.baseRef !== config.baseBranch) {
@@ -334,13 +426,25 @@ export function evaluateExceptionApproval({ comments, roles, headSha, revokedSta
 
 /**
  * The value of the required `Governance · merge eligibility` status.
- * success: eligible low PR, or restricted PR with a valid exception approval
+ * success: eligible low PR, a trusted-author restricted PR accepted at the QA
+ * bar (mode `trusted-qa-bar`; the change set provably avoids the governance
+ * gate's own files), or a restricted PR with a valid exception approval
  * and every non-risk condition met. failure otherwise, with the top reason.
  */
 export function decideMergeStatus(state, config = DEFAULT_CONFIG) {
   const tagged = collectReasons(state, config);
   const clip = (t) => (t.length > STATUS_DESCRIPTION_MAX ? `${t.slice(0, STATUS_DESCRIPTION_MAX - 1)}…` : t);
-  if (!tagged.length) return { state: 'success', mode: 'low', description: 'Eligible: risk:low and every gate passed.', reasons: [] };
+  if (!tagged.length) {
+    if (trustedQaBar(state, config)) {
+      return {
+        state: 'success',
+        mode: 'trusted-qa-bar',
+        description: 'Eligible: trusted platform author; risk:restricted accepted at the QA bar; every gate passed.',
+        reasons: [],
+      };
+    }
+    return { state: 'success', mode: 'low', description: 'Eligible: risk:low and every gate passed.', reasons: [] };
+  }
   const nonRisk = tagged.filter((r) => !r.risk);
   const exception = state?.exception;
   if (!nonRisk.length && exception?.approved) {

@@ -3,6 +3,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { SimIdentity, SimSession } from '../types';
 import { database } from './database';
+import { simulationEnabled } from './enabled';
 import { WorkflowError } from './workflow';
 
 export const IDENTITIES: Record<string, SimIdentity> = {
@@ -14,9 +15,7 @@ export const IDENTITIES: Record<string, SimIdentity> = {
   'northstar-procurement': { tenant: 'northstar', user: 'Taylor (simulated)', persona: 'procurement' },
 };
 const COOKIE = 'ratio_simulation';
-export function simulationEnabled(): boolean {
-  return process.env.RATIO_SIMULATION === '1' && ['development', 'test'].includes(process.env.RATIO_ENV ?? '');
-}
+export { simulationEnabled } from './enabled';
 export function tokenFrom(req: NextApiRequest): string { return req.cookies?.[COOKIE] ?? ''; }
 export function setCookie(res: NextApiResponse, token: string): void {
   const secure = (process.env.RATIO_SIMULATION_ORIGIN ?? '').startsWith('https://');

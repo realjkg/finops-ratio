@@ -2,15 +2,15 @@
 // workload rendered as a data tile: name, status dot, budget gauge + value badge
 // (R4), trajectory verdict, and a drill-down affordance. Left-border accent
 // replaces the gamified top-border + card-lift pattern.
-import { TOKEN_HEX } from '@/lib/scales';
+import { TOKEN_COLOR, tint } from '@/lib/scales';
 import { FuelAndValue } from './FuelAndValue';
 import type { MissionStatus, MissionView } from './missionModel';
 import { StatusPulse } from './StatusPulse';
 
 const STATUS_META: Record<MissionStatus, { label: string; color: string }> = {
-  nominal: { label: 'ON TRACK', color: TOKEN_HEX.value },
-  caution: { label: 'AT RISK', color: TOKEN_HEX.shape },
-  critical: { label: 'CRITICAL', color: TOKEN_HEX.cost },
+  nominal: { label: 'ON TRACK', color: TOKEN_COLOR.value },
+  caution: { label: 'AT RISK', color: TOKEN_COLOR.shape },
+  critical: { label: 'CRITICAL', color: TOKEN_COLOR.cost },
 };
 
 interface MissionCardProps {
@@ -46,7 +46,7 @@ export function MissionCard({ mission, onOpen }: MissionCardProps) {
       <div className="flex items-center gap-2">
         <span
           className="rounded-full px-2 py-0.5 font-mono text-[10px] font-bold tracking-widest"
-          style={{ color: meta.color, backgroundColor: `${meta.color}1a` }}
+          style={{ color: meta.color, backgroundColor: tint(meta.color) }}
         >
           {meta.label}
         </span>
@@ -65,6 +65,7 @@ export function MissionCard({ mission, onOpen }: MissionCardProps) {
         dailyBudget={mission.dailyBudget}
         valueRatio={mission.valueRatio}
         valueColor={mission.valueColor}
+        evidenceStatus={mission.valueEvidenceStatus}
       />
 
       {/* Trajectory verdict (monthly forecast, plain language) */}

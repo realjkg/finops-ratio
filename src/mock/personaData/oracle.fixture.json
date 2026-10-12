@@ -1,0 +1,1074 @@
+{
+  "comment": "Hand-checked oracle for the A3 synthetic dataset. Produced by a one-off independent script using plain integer arithmetic, not by projections.ts. All money is integer cents.",
+  "revision": 1,
+  "org": {
+    "totalCents": 120513817,
+    "lineCount": 27,
+    "byTeam": [
+      {
+        "team": "Platform",
+        "cents": 12448733
+      },
+      {
+        "team": "Payments",
+        "cents": 100258432
+      },
+      {
+        "team": "Analytics",
+        "cents": 7806652
+      }
+    ],
+    "byEnv": [
+      {
+        "env": "dev",
+        "cents": 445
+      },
+      {
+        "env": "test",
+        "cents": 17440
+      },
+      {
+        "env": "prod",
+        "cents": 120495932
+      }
+    ]
+  },
+  "byVendor": [
+    {
+      "vendor": "aws",
+      "cents": 20128624
+    },
+    {
+      "vendor": "azure",
+      "cents": 254746
+    },
+    {
+      "vendor": "gcp",
+      "cents": 22125
+    },
+    {
+      "vendor": "snowflake",
+      "cents": 100108322
+    }
+  ],
+  "fullScope": {
+    "cto": {
+      "shape": "rollup",
+      "totalCents": 120513817,
+      "rowCount": 9,
+      "rows": [
+        {
+          "key": "Platform/dev",
+          "cents": 59
+        },
+        {
+          "key": "Platform/test",
+          "cents": 992
+        },
+        {
+          "key": "Platform/prod",
+          "cents": 12447682
+        },
+        {
+          "key": "Payments/dev",
+          "cents": 341
+        },
+        {
+          "key": "Payments/test",
+          "cents": 8027
+        },
+        {
+          "key": "Payments/prod",
+          "cents": 100250064
+        },
+        {
+          "key": "Analytics/dev",
+          "cents": 45
+        },
+        {
+          "key": "Analytics/test",
+          "cents": 8421
+        },
+        {
+          "key": "Analytics/prod",
+          "cents": 7798186
+        }
+      ]
+    },
+    "finops_lead": {
+      "shape": "drilldown",
+      "totalCents": 120513817,
+      "rowCount": 27,
+      "rows": [
+        {
+          "key": "L01",
+          "cents": 10
+        },
+        {
+          "key": "L02",
+          "cents": 20
+        },
+        {
+          "key": "L03",
+          "cents": 29
+        },
+        {
+          "key": "L04",
+          "cents": 57
+        },
+        {
+          "key": "L05",
+          "cents": 115
+        },
+        {
+          "key": "L06",
+          "cents": 820
+        },
+        {
+          "key": "L07",
+          "cents": 1999
+        },
+        {
+          "key": "L08",
+          "cents": 100005
+        },
+        {
+          "key": "L09",
+          "cents": 12345678
+        },
+        {
+          "key": "L10",
+          "cents": 333
+        },
+        {
+          "key": "L11",
+          "cents": 7
+        },
+        {
+          "key": "L12",
+          "cents": 1
+        },
+        {
+          "key": "L13",
+          "cents": 4999
+        },
+        {
+          "key": "L14",
+          "cents": 2999
+        },
+        {
+          "key": "L15",
+          "cents": 29
+        },
+        {
+          "key": "L16",
+          "cents": 99999999
+        },
+        {
+          "key": "L17",
+          "cents": 15
+        },
+        {
+          "key": "L18",
+          "cents": 250050
+        },
+        {
+          "key": "L19",
+          "cents": 5
+        },
+        {
+          "key": "L20",
+          "cents": 10
+        },
+        {
+          "key": "L21",
+          "cents": 30
+        },
+        {
+          "key": "L22",
+          "cents": 114
+        },
+        {
+          "key": "L23",
+          "cents": 57
+        },
+        {
+          "key": "L24",
+          "cents": 8250
+        },
+        {
+          "key": "L25",
+          "cents": 7777777
+        },
+        {
+          "key": "L26",
+          "cents": 410
+        },
+        {
+          "key": "L27",
+          "cents": 19999
+        }
+      ]
+    },
+    "finance": {
+      "shape": "drilldown",
+      "totalCents": 120513817,
+      "rowCount": 27,
+      "rows": [
+        {
+          "key": "L01",
+          "cents": 10
+        },
+        {
+          "key": "L02",
+          "cents": 20
+        },
+        {
+          "key": "L03",
+          "cents": 29
+        },
+        {
+          "key": "L04",
+          "cents": 57
+        },
+        {
+          "key": "L05",
+          "cents": 115
+        },
+        {
+          "key": "L06",
+          "cents": 820
+        },
+        {
+          "key": "L07",
+          "cents": 1999
+        },
+        {
+          "key": "L08",
+          "cents": 100005
+        },
+        {
+          "key": "L09",
+          "cents": 12345678
+        },
+        {
+          "key": "L10",
+          "cents": 333
+        },
+        {
+          "key": "L11",
+          "cents": 7
+        },
+        {
+          "key": "L12",
+          "cents": 1
+        },
+        {
+          "key": "L13",
+          "cents": 4999
+        },
+        {
+          "key": "L14",
+          "cents": 2999
+        },
+        {
+          "key": "L15",
+          "cents": 29
+        },
+        {
+          "key": "L16",
+          "cents": 99999999
+        },
+        {
+          "key": "L17",
+          "cents": 15
+        },
+        {
+          "key": "L18",
+          "cents": 250050
+        },
+        {
+          "key": "L19",
+          "cents": 5
+        },
+        {
+          "key": "L20",
+          "cents": 10
+        },
+        {
+          "key": "L21",
+          "cents": 30
+        },
+        {
+          "key": "L22",
+          "cents": 114
+        },
+        {
+          "key": "L23",
+          "cents": 57
+        },
+        {
+          "key": "L24",
+          "cents": 8250
+        },
+        {
+          "key": "L25",
+          "cents": 7777777
+        },
+        {
+          "key": "L26",
+          "cents": 410
+        },
+        {
+          "key": "L27",
+          "cents": 19999
+        }
+      ],
+      "budgets": [
+        {
+          "team": "Platform",
+          "budgetCents": 15000000,
+          "actualCents": 12448733,
+          "varianceCents": 2551267
+        },
+        {
+          "team": "Payments",
+          "budgetCents": 100000000,
+          "actualCents": 100258432,
+          "varianceCents": -258432
+        },
+        {
+          "team": "Analytics",
+          "budgetCents": 8000000,
+          "actualCents": 7806652,
+          "varianceCents": 193348
+        }
+      ]
+    },
+    "procurement": {
+      "shape": "rollup",
+      "totalCents": 120513817,
+      "rowCount": 4,
+      "rows": [
+        {
+          "key": "aws",
+          "cents": 20128624,
+          "usageCents": 20128624,
+          "commitmentCents": 0,
+          "commitmentLines": 0
+        },
+        {
+          "key": "azure",
+          "cents": 254746,
+          "usageCents": 253926,
+          "commitmentCents": 820,
+          "commitmentLines": 1
+        },
+        {
+          "key": "gcp",
+          "cents": 22125,
+          "usageCents": 2126,
+          "commitmentCents": 19999,
+          "commitmentLines": 1
+        },
+        {
+          "key": "snowflake",
+          "cents": 100108322,
+          "usageCents": 8318,
+          "commitmentCents": 100100004,
+          "commitmentLines": 2
+        }
+      ]
+    },
+    "auditor": {
+      "shape": "drilldown",
+      "totalCents": 120513817,
+      "rowCount": 27,
+      "rows": [
+        {
+          "key": "L01",
+          "cents": 10
+        },
+        {
+          "key": "L02",
+          "cents": 20
+        },
+        {
+          "key": "L03",
+          "cents": 29
+        },
+        {
+          "key": "L04",
+          "cents": 57
+        },
+        {
+          "key": "L05",
+          "cents": 115
+        },
+        {
+          "key": "L06",
+          "cents": 820
+        },
+        {
+          "key": "L07",
+          "cents": 1999
+        },
+        {
+          "key": "L08",
+          "cents": 100005
+        },
+        {
+          "key": "L09",
+          "cents": 12345678
+        },
+        {
+          "key": "L10",
+          "cents": 333
+        },
+        {
+          "key": "L11",
+          "cents": 7
+        },
+        {
+          "key": "L12",
+          "cents": 1
+        },
+        {
+          "key": "L13",
+          "cents": 4999
+        },
+        {
+          "key": "L14",
+          "cents": 2999
+        },
+        {
+          "key": "L15",
+          "cents": 29
+        },
+        {
+          "key": "L16",
+          "cents": 99999999
+        },
+        {
+          "key": "L17",
+          "cents": 15
+        },
+        {
+          "key": "L18",
+          "cents": 250050
+        },
+        {
+          "key": "L19",
+          "cents": 5
+        },
+        {
+          "key": "L20",
+          "cents": 10
+        },
+        {
+          "key": "L21",
+          "cents": 30
+        },
+        {
+          "key": "L22",
+          "cents": 114
+        },
+        {
+          "key": "L23",
+          "cents": 57
+        },
+        {
+          "key": "L24",
+          "cents": 8250
+        },
+        {
+          "key": "L25",
+          "cents": 7777777
+        },
+        {
+          "key": "L26",
+          "cents": 410
+        },
+        {
+          "key": "L27",
+          "cents": 19999
+        }
+      ]
+    }
+  },
+  "engLeads": {
+    "Platform": {
+      "totalCents": 12448733,
+      "lineCount": 9,
+      "byTeam": [
+        {
+          "team": "Platform",
+          "cents": 12448733
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "dev",
+          "cents": 59
+        },
+        {
+          "env": "test",
+          "cents": 992
+        },
+        {
+          "env": "prod",
+          "cents": 12447682
+        }
+      ],
+      "rows": [
+        {
+          "key": "L01",
+          "cents": 10
+        },
+        {
+          "key": "L02",
+          "cents": 20
+        },
+        {
+          "key": "L03",
+          "cents": 29
+        },
+        {
+          "key": "L04",
+          "cents": 57
+        },
+        {
+          "key": "L05",
+          "cents": 115
+        },
+        {
+          "key": "L06",
+          "cents": 820
+        },
+        {
+          "key": "L07",
+          "cents": 1999
+        },
+        {
+          "key": "L08",
+          "cents": 100005
+        },
+        {
+          "key": "L09",
+          "cents": 12345678
+        }
+      ]
+    },
+    "Payments": {
+      "totalCents": 100258432,
+      "lineCount": 9,
+      "byTeam": [
+        {
+          "team": "Payments",
+          "cents": 100258432
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "dev",
+          "cents": 341
+        },
+        {
+          "env": "test",
+          "cents": 8027
+        },
+        {
+          "env": "prod",
+          "cents": 100250064
+        }
+      ],
+      "rows": [
+        {
+          "key": "L10",
+          "cents": 333
+        },
+        {
+          "key": "L11",
+          "cents": 7
+        },
+        {
+          "key": "L12",
+          "cents": 1
+        },
+        {
+          "key": "L13",
+          "cents": 4999
+        },
+        {
+          "key": "L14",
+          "cents": 2999
+        },
+        {
+          "key": "L15",
+          "cents": 29
+        },
+        {
+          "key": "L16",
+          "cents": 99999999
+        },
+        {
+          "key": "L17",
+          "cents": 15
+        },
+        {
+          "key": "L18",
+          "cents": 250050
+        }
+      ]
+    },
+    "Analytics": {
+      "totalCents": 7806652,
+      "lineCount": 9,
+      "byTeam": [
+        {
+          "team": "Analytics",
+          "cents": 7806652
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "dev",
+          "cents": 45
+        },
+        {
+          "env": "test",
+          "cents": 8421
+        },
+        {
+          "env": "prod",
+          "cents": 7798186
+        }
+      ],
+      "rows": [
+        {
+          "key": "L19",
+          "cents": 5
+        },
+        {
+          "key": "L20",
+          "cents": 10
+        },
+        {
+          "key": "L21",
+          "cents": 30
+        },
+        {
+          "key": "L22",
+          "cents": 114
+        },
+        {
+          "key": "L23",
+          "cents": 57
+        },
+        {
+          "key": "L24",
+          "cents": 8250
+        },
+        {
+          "key": "L25",
+          "cents": 7777777
+        },
+        {
+          "key": "L26",
+          "cents": 410
+        },
+        {
+          "key": "L27",
+          "cents": 19999
+        }
+      ]
+    }
+  },
+  "engLeadsDevTest": {
+    "Platform": {
+      "totalCents": 1051,
+      "lineCount": 6,
+      "byTeam": [
+        {
+          "team": "Platform",
+          "cents": 1051
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "dev",
+          "cents": 59
+        },
+        {
+          "env": "test",
+          "cents": 992
+        }
+      ],
+      "rows": [
+        {
+          "key": "L01",
+          "cents": 10
+        },
+        {
+          "key": "L02",
+          "cents": 20
+        },
+        {
+          "key": "L03",
+          "cents": 29
+        },
+        {
+          "key": "L04",
+          "cents": 57
+        },
+        {
+          "key": "L05",
+          "cents": 115
+        },
+        {
+          "key": "L06",
+          "cents": 820
+        }
+      ]
+    },
+    "Payments": {
+      "totalCents": 8368,
+      "lineCount": 6,
+      "byTeam": [
+        {
+          "team": "Payments",
+          "cents": 8368
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "dev",
+          "cents": 341
+        },
+        {
+          "env": "test",
+          "cents": 8027
+        }
+      ],
+      "rows": [
+        {
+          "key": "L10",
+          "cents": 333
+        },
+        {
+          "key": "L11",
+          "cents": 7
+        },
+        {
+          "key": "L12",
+          "cents": 1
+        },
+        {
+          "key": "L13",
+          "cents": 4999
+        },
+        {
+          "key": "L14",
+          "cents": 2999
+        },
+        {
+          "key": "L15",
+          "cents": 29
+        }
+      ]
+    },
+    "Analytics": {
+      "totalCents": 8466,
+      "lineCount": 6,
+      "byTeam": [
+        {
+          "team": "Analytics",
+          "cents": 8466
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "dev",
+          "cents": 45
+        },
+        {
+          "env": "test",
+          "cents": 8421
+        }
+      ],
+      "rows": [
+        {
+          "key": "L19",
+          "cents": 5
+        },
+        {
+          "key": "L20",
+          "cents": 10
+        },
+        {
+          "key": "L21",
+          "cents": 30
+        },
+        {
+          "key": "L22",
+          "cents": 114
+        },
+        {
+          "key": "L23",
+          "cents": 57
+        },
+        {
+          "key": "L24",
+          "cents": 8250
+        }
+      ]
+    }
+  },
+  "engLeadTwoTeams": {
+    "teams": [
+      "Platform",
+      "Analytics"
+    ],
+    "envs": [
+      "dev",
+      "test",
+      "prod"
+    ],
+    "totalCents": 20255385,
+    "lineCount": 18,
+    "byTeam": [
+      {
+        "team": "Platform",
+        "cents": 12448733
+      },
+      {
+        "team": "Analytics",
+        "cents": 7806652
+      }
+    ],
+    "byEnv": [
+      {
+        "env": "dev",
+        "cents": 104
+      },
+      {
+        "env": "test",
+        "cents": 9413
+      },
+      {
+        "env": "prod",
+        "cents": 20245868
+      }
+    ]
+  },
+  "envScoped": {
+    "dev": {
+      "envs": [
+        "dev"
+      ],
+      "totalCents": 445,
+      "lineCount": 9,
+      "byTeam": [
+        {
+          "team": "Platform",
+          "cents": 59
+        },
+        {
+          "team": "Payments",
+          "cents": 341
+        },
+        {
+          "team": "Analytics",
+          "cents": 45
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "dev",
+          "cents": 445
+        }
+      ]
+    },
+    "dev,test": {
+      "envs": [
+        "dev",
+        "test"
+      ],
+      "totalCents": 17885,
+      "lineCount": 18,
+      "byTeam": [
+        {
+          "team": "Platform",
+          "cents": 1051
+        },
+        {
+          "team": "Payments",
+          "cents": 8368
+        },
+        {
+          "team": "Analytics",
+          "cents": 8466
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "dev",
+          "cents": 445
+        },
+        {
+          "env": "test",
+          "cents": 17440
+        }
+      ]
+    },
+    "prod": {
+      "envs": [
+        "prod"
+      ],
+      "totalCents": 120495932,
+      "lineCount": 9,
+      "byTeam": [
+        {
+          "team": "Platform",
+          "cents": 12447682
+        },
+        {
+          "team": "Payments",
+          "cents": 100250064
+        },
+        {
+          "team": "Analytics",
+          "cents": 7798186
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "prod",
+          "cents": 120495932
+        }
+      ]
+    },
+    "test,prod": {
+      "envs": [
+        "test",
+        "prod"
+      ],
+      "totalCents": 120513372,
+      "lineCount": 18,
+      "byTeam": [
+        {
+          "team": "Platform",
+          "cents": 12448674
+        },
+        {
+          "team": "Payments",
+          "cents": 100258091
+        },
+        {
+          "team": "Analytics",
+          "cents": 7806607
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "test",
+          "cents": 17440
+        },
+        {
+          "env": "prod",
+          "cents": 120495932
+        }
+      ]
+    }
+  },
+  "paging": {
+    "pageSize": 4,
+    "finopsPageCents": [
+      116,
+      102939,
+      12346019,
+      100008026,
+      250080,
+      8451,
+      7798186
+    ],
+    "ctoPageSize": 2,
+    "ctoPageCents": [
+      1051,
+      12448023,
+      100258091,
+      8466,
+      7798186
+    ]
+  },
+  "revisionBump": {
+    "lineId": "L14",
+    "oldCents": 2999,
+    "newCents": 123457,
+    "revision": 2,
+    "org": {
+      "totalCents": 120634275,
+      "lineCount": 27,
+      "byTeam": [
+        {
+          "team": "Platform",
+          "cents": 12448733
+        },
+        {
+          "team": "Payments",
+          "cents": 100378890
+        },
+        {
+          "team": "Analytics",
+          "cents": 7806652
+        }
+      ],
+      "byEnv": [
+        {
+          "env": "dev",
+          "cents": 445
+        },
+        {
+          "env": "test",
+          "cents": 137898
+        },
+        {
+          "env": "prod",
+          "cents": 120495932
+        }
+      ]
+    },
+    "fullScope": {
+      "cto": {
+        "totalCents": 120634275,
+        "rowCount": 9
+      },
+      "finops_lead": {
+        "totalCents": 120634275,
+        "rowCount": 27
+      },
+      "finance": {
+        "totalCents": 120634275,
+        "rowCount": 27
+      },
+      "procurement": {
+        "totalCents": 120634275,
+        "rowCount": 4
+      },
+      "auditor": {
+        "totalCents": 120634275,
+        "rowCount": 27
+      }
+    },
+    "engLeadTotals": {
+      "Platform": 12448733,
+      "Payments": 100378890,
+      "Analytics": 7806652
+    }
+  },
+  "floatTrap": {
+    "note": "Summing cents/100 as binary floats drifts from the exact cents total for this dataset.",
+    "orgTotalCents": 120513817,
+    "orgTotalDollarsText": "1205138.17"
+  }
+}

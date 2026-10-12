@@ -1,16 +1,11 @@
 import { useMemo } from 'react';
 import Link from 'next/link';
+import { DEMO_PROMPTS } from '@/ai/MockAIClient';
 import { MissionSurface } from '@/executive/MissionSurface';
 import { SpendToValueGraph } from '@/findings/SpendToValueGraph';
 import { formatRatio, formatUSD } from '@/lib/format';
-import { TOKEN_HEX } from '@/lib/scales';
+import { TOKEN_COLOR } from '@/lib/scales';
 import { useStore } from '@/store/useStore';
-
-const DEMO_PROMPTS = [
-  'Why is my spend spiking?',
-  'Which workload has the worst value ratio?',
-  'Which model should I switch to?',
-] as const;
 
 export default function Demo() {
   const workloads = useStore((s) => s.workloads);
@@ -64,12 +59,12 @@ export default function Demo() {
             <Metric
               label="Portfolio value ratio"
               value={formatRatio(snapshot.portfolioRatio)}
-              valueColor={snapshot.portfolioRatio >= 3 ? TOKEN_HEX.value : TOKEN_HEX.gate}
+              valueColor={snapshot.portfolioRatio >= 3 ? TOKEN_COLOR.value : TOKEN_COLOR.gate}
             />
             <Metric
               label="Below 3x value gate"
               value={`${snapshot.belowGate} of ${workloads.length}`}
-              valueColor={snapshot.belowGate > 0 ? TOKEN_HEX.cost : TOKEN_HEX.value}
+              valueColor={snapshot.belowGate > 0 ? TOKEN_COLOR.cost : TOKEN_COLOR.value}
             />
           </div>
         </div>

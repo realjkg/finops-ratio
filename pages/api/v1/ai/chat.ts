@@ -267,6 +267,9 @@ export function buildSystemPrompt(ctx: AIContext): string {
     .map(
       (i) =>
         `- ${i.name}: ${fmt(i.monthlyCost)}/mo | Annual: ${fmt(i.annualRunRate)} | Budget: ${i.budgetConsumedPct}%\n  Status: ${i.status} | Value ratio: ${i.valueRatio.toFixed(1)}×` +
+        // Provenance rides the data line (audit C1/C2) — the agent never
+        // presents an assumed value as measured.
+        (i.valueEvidenceStatus ? ` (evidence: ${i.valueEvidenceStatus})` : '') +
         (i.savingsOpportunity > 0
           ? ` | Savings opportunity: ${fmt(i.savingsOpportunity)}/mo`
           : ''),
@@ -277,7 +280,13 @@ export function buildSystemPrompt(ctx: AIContext): string {
     ctx.workloads
       ?.map(
         (w) =>
-          `- ${w.name} (${w.model}): ${fmt(w.monthlySpend)}/mo | ${w.valueRatio.toFixed(1)}× return | shape: ${w.demandShape} | gates: ${w.governanceGatesPassed}/4`,
+          `- ${w.name} (${w.model}): ${fmt(w.monthlySpend)}/mo | ${w.valueRatio.toFixed(1)}× return` +
+          (w.valueEvidenceStatus ? ` (evidence: ${w.valueEvidenceStatus})` : '') +
+          ` | shape: ${w.demandShape} | gates: ${w.governanceGatesPassed}/4` +
+          // Defensive typeof: older clients may omit cacheHitRate on the wire.
+          (typeof w.cacheHitRate === 'number'
+            ? ` | cache hit: ${(w.cacheHitRate * 100).toFixed(1)}%`
+            : ' | cache hit: n/a'),
       )
       .join('\n') ?? '';
 
@@ -322,7 +331,7 @@ function isValidBody(
     context?: unknown;
   };
   if (!Array.isArray(messages) || messages.length === 0) return false;
-  if (messages.length > MAX_MESSAGES) return false;
+  if (messages.length > MAX_MESSAGES || !messages.every((m) => typeof m === 'object' && m !== null)) return false;
   if (typeof context !== 'object' || context === null) return false;
   const { initiatives, summary, asOf } = context as {
     initiatives?: unknown;
@@ -371,14 +380,14 @@ async function chatHandler(
     throw err; // unexpected — let the gateway convert to a 500 envelope.
   }
 
-  const systemPrompt = buildSystemPrompt(context);
+  const systemPrompt = adapter.provider === 'mock' ? /* mock sanitizes raw context itself */ '' : buildSystemPrompt(context);
   const userMessages = messages.filter((m) => m.role !== 'system');
 
   // A thrown LLM error propagates to the gateway, which returns a 500 envelope
   // with only the message (no stack trace).
   const text = await adapter.call(systemPrompt, userMessages);
   const initiativesReferenced = context.initiatives
-    .filter((i) => text.toLowerCase().includes(i.name.toLowerCase()))
+    .filter((i) => typeof i?.name === 'string' && text.toLowerCase().includes(i.name.toLowerCase()))
     .map((i) => i.id);
 
   res.status(200).json({

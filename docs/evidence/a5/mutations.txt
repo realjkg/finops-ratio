@@ -1,0 +1,20 @@
+== M1-widen-scope-filter:       Tests  1 failed | 11 passed (12)
+team_credential_returns_only_that_teams_rows
+== M2-write-tool-stops-mutating:       Tests  1 failed | 11 passed (12)
+write_capable_tool_declares_a_read_only_hint_and_still_mutates_state
+== M3-skip-credential-check:       Tests  1 failed | 11 passed (12)
+wrong_team_credential_gets_401
+== M4-log-authorization-header:       Tests  1 failed | 11 passed (12)
+secret_never_appears_in_server_log_or_error_body
+== M5-allow-non-loopback-host:       Tests  1 failed | 11 passed (12)
+server_binds_loopback_only
+== M6-skip-initialize-gate:       Tests  1 failed | 11 passed (12)
+tools_call_before_initialize_is_rejected
+== M7-drop-session-credential-binding:       Tests  1 failed | 11 passed (12)
+wrong_team_credential_gets_401
+== M8-drop-origin-check:       Tests  1 failed | 11 passed (12)
+browser_origin_that_is_not_loopback_is_rejected
+== M9-rug-pull-hook-noop:       Tests  1 failed | 11 passed (12)
+description_can_be_changed_by_a_test_hook_to_simulate_a_rug_pull
+== M10-read-only-hint-honest:       Tests  1 failed | 11 passed (12)
+write_capable_tool_declares_a_read_only_hint_and_still_mutates_state

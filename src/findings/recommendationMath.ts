@@ -115,6 +115,10 @@ export function cheaperSameCapabilityModel(
 }
 
 function modelSwitchCandidate(w: Workload): Recommendation | null {
+  // A non-positive numerator breaks the equal-value premise: with negative
+  // value, lower spend makes the ratio MORE negative — a switch cannot rescue
+  // the workload, so do not offer one (audit C3/C4).
+  if (w.value.total_value <= 0) return null;
   const current = findModel(w.model);
   const alt = cheaperSameCapabilityModel(w);
   if (!current || !alt) return null;
@@ -196,11 +200,16 @@ function governanceGateCandidate(w: Workload): Recommendation | null {
 // --- Sunset / monitor -----------------------------------------------------
 
 function sunsetCandidate(w: Workload): Recommendation {
+  const valueNegative = w.value.total_value <= 0;
   return {
     kind: 'sunset_review',
-    action: `Critical value review — sunset or renegotiate; ${formatRatio(
-      w.value.value_ratio,
-    )} is below the ${VALUE_CRITICAL}× floor`,
+    action: valueNegative
+      ? `Critical value review — sunset or renegotiate; counted value is ${formatUSD(
+          w.value.total_value,
+        )}/mo against ${formatUSD(w.costs.monthly_spend)} spend — misses and quality gaps outweigh claimed value`
+      : `Critical value review — sunset or renegotiate; ${formatRatio(
+          w.value.value_ratio,
+        )} is below the ${VALUE_CRITICAL}× floor`,
     projectedMonthlyImpact: null, // sunsetting removes spend AND its value
     projectedRatio: null,
     basis: `Value-ratio invariant: ${formatUSD(w.value.total_value)} value ÷ ${formatUSD(
@@ -237,6 +246,11 @@ export function recommendFor(w: Workload): Recommendation {
 
   const shapeRec = demandShapingCandidate(w);
   const switchRec = modelSwitchCandidate(w);
+
+  // 0. Non-positive defensible numerator (audit C3/C4): the workload destroys
+  //    value. No cost-side optimization rescues a negative numerator — cutting
+  //    spend only deepens a negative ratio — so fix the value side first.
+  if (w.value.total_value <= 0) return sunsetCandidate(w);
 
   // 1. Budget kill breach (spend ≥ 100% of budget) → throttle via demand shaping.
   if (killBreach && shapeRec) return shapeRec;

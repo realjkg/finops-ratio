@@ -1,7 +1,8 @@
-// Tests for the cost-ingest seam: the FOCUS v1.0-v1.4 version shim, value
-// attachment (numerator/denominator), and the mock client over offline seed.
+// Tests for the cost-ingest seam: the FOCUS v1.0-v1.5 version shim (1.5 a
+// working draft), value attachment (numerator/denominator), and the mock
+// client over offline seed.
 import { describe, it, expect } from 'vitest';
-import { CANONICAL_FOCUS_VERSION, columnsAddedAfter } from './focusVersions';
+import { CANONICAL_FOCUS_VERSION, isPassthrough } from './focusVersions';
 import type { FocusCoreV10, RawSourceRow } from './focusRows';
 import { upgradeToCanonicalCost } from './focusRows';
 import { resourceIdFor, resolveWorkloadId, rawRowsForVersion } from './seed';
@@ -42,8 +43,8 @@ describe('upgradeToCanonicalCost (version shim)', () => {
     expect(canonical.ContractedCost).toBe(950); // defaults to EffectiveCost
     expect(canonical.ConsumedQuantity).toBe(1_000_000);
     expect(canonical.CommitmentDiscountStatus).toBeNull();
-    // v1.2 additive
-    expect(canonical.ServiceSubcategory).toBe('Generative AI');
+    // v1.1 additive: a 1.0 source has no subcategory, so none is guessed
+    expect(canonical.ServiceSubcategory).toBe('');
     expect(canonical.InvoiceIssuerName).toBe('anthropic');
     // v1.3 / v1.4 additive
     expect(canonical.PricingCurrency).toBe('USD');
@@ -58,11 +59,14 @@ describe('upgradeToCanonicalCost (version shim)', () => {
   });
 });
 
-describe('columnsAddedAfter', () => {
-  it('reports all later columns for a v1.0 source and none for v1.4', () => {
-    expect(columnsAddedAfter('1.0')).toContain('ServiceSubcategory');
-    expect(columnsAddedAfter('1.0').length).toBeGreaterThan(0);
-    expect(columnsAddedAfter('1.4')).toEqual([]);
+describe('truthful backfill audit', () => {
+  it('reports the columns a v1.2 row lacks and is not a passthrough; a complete v1.4 row is', () => {
+    const v12 = normalizeRows(rawRowsForVersion('1.2'), 'focus-file-sandbox', '1.2');
+    expect(v12.backfilledColumns).toEqual(['SkuMeter', 'CapacityReservationId', 'CapacityReservationStatus', 'PricingCurrency']);
+    expect(isPassthrough({ ...v12, sourceVersion: '1.2', canonicalVersion: CANONICAL_FOCUS_VERSION })).toBe(false);
+    expect(isPassthrough({ sourceVersion: '1.2', canonicalVersion: '1.4', backfilledColumns: [] })).toBe(false); // versions decide
+    const v14 = normalizeRows(rawRowsForVersion('1.4'), 'focus-file-sandbox', '1.4');
+    expect(isPassthrough({ ...v14, sourceVersion: '1.4', canonicalVersion: CANONICAL_FOCUS_VERSION })).toBe(true);
   });
 });
 

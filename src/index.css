@@ -9,23 +9,67 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+/* Theme tokens. Values mirror src/theme/themes.ts (parity enforced by
+   src/theme/tokens.test.ts); Tailwind colors read the --c-* channel triplets.
+   No data-theme attribute = no user choice yet: DEFAULT_THEME (dark until Light becomes the default), or
+   what the OS asks for (more contrast wins over dark). applyTheme() sets data-theme. */
+:root,
+:root[data-theme='dark'] {
   color-scheme: dark;
-  /* Design tokens (spec §10.1) exposed as CSS vars for non-Tailwind use. */
-  --void: #05070b;
-  --deep: #090c12;
-  --slab: #0d1119;
-  --raised: #141a26;
-  --edge: #1a2235;
-  --txt: #d0d8ea;
-  --sub: #8895ad;
-  --dim: #4d5a72;
-  --value: #00e09e;
-  --cost: #ff5c72;
-  --shape: #ffc44d;
-  --gate: #7c8dff;
-  --unit: #00ccee;
-  --purple: #b490ff;
+  --c-void: 5 7 11; --c-deep: 9 12 18; --c-slab: 13 17 25; --c-raised: 20 26 38;
+  --c-edge: 26 34 53; --c-txt: 208 216 234; --c-sub: 136 149 173; --c-dim: 77 90 114;
+  --c-value: 0 224 158; --c-cost: 255 92 114; --c-shape: 255 196 77; --c-gate: 124 141 255;
+  --c-unit: 0 204 238; --c-purple: 180 144 255; --c-exec-bg: 245 248 251; --c-exec-surface: 255 255 255;
+  --c-exec-border: 216 225 236; --c-exec-hover: 237 242 247; --c-exec-text: 15 23 42; --c-exec-muted: 100 116 139;
+  --c-focus: 107 124 245;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --c-void: 255 255 255; --c-deep: 246 247 249; --c-slab: 255 255 255; --c-raised: 238 240 243;
+  --c-edge: 132 139 151; --c-txt: 17 24 39; --c-sub: 75 85 99; --c-dim: 88 95 108;
+  --c-value: 4 112 79; --c-cost: 178 18 57; --c-shape: 135 88 0; --c-gate: 67 56 202;
+  --c-unit: 14 96 124; --c-purple: 99 26 167; --c-exec-bg: 245 248 251; --c-exec-surface: 255 255 255;
+  --c-exec-border: 132 139 151; --c-exec-hover: 237 242 247; --c-exec-text: 15 23 42; --c-exec-muted: 71 85 105;
+  --c-focus: 37 99 235;
+}
+:root[data-theme='high-contrast'] {
+  color-scheme: light;
+  --c-void: 255 255 255; --c-deep: 255 255 255; --c-slab: 255 255 255; --c-raised: 240 240 240;
+  --c-edge: 77 77 77; --c-txt: 0 0 0; --c-sub: 26 26 26; --c-dim: 51 51 51;
+  --c-value: 0 78 52; --c-cost: 110 0 22; --c-shape: 92 61 0; --c-gate: 37 37 150;
+  --c-unit: 0 63 75; --c-purple: 54 20 84; --c-exec-bg: 255 255 255; --c-exec-surface: 255 255 255;
+  --c-exec-border: 77 77 77; --c-exec-hover: 240 240 240; --c-exec-text: 0 0 0; --c-exec-muted: 51 51 51;
+  --c-focus: 0 51 204;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --c-void: 5 7 11; --c-deep: 9 12 18; --c-slab: 13 17 25; --c-raised: 20 26 38;
+    --c-edge: 26 34 53; --c-txt: 208 216 234; --c-sub: 136 149 173; --c-dim: 77 90 114;
+    --c-value: 0 224 158; --c-cost: 255 92 114; --c-shape: 255 196 77; --c-gate: 124 141 255;
+    --c-unit: 0 204 238; --c-purple: 180 144 255; --c-exec-bg: 245 248 251; --c-exec-surface: 255 255 255;
+    --c-exec-border: 216 225 236; --c-exec-hover: 237 242 247; --c-exec-text: 15 23 42; --c-exec-muted: 100 116 139;
+    --c-focus: 107 124 245;
+  }
+}
+@media (prefers-contrast: more) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --c-void: 255 255 255; --c-deep: 255 255 255; --c-slab: 255 255 255; --c-raised: 240 240 240;
+    --c-edge: 77 77 77; --c-txt: 0 0 0; --c-sub: 26 26 26; --c-dim: 51 51 51;
+    --c-value: 0 78 52; --c-cost: 110 0 22; --c-shape: 92 61 0; --c-gate: 37 37 150;
+    --c-unit: 0 63 75; --c-purple: 54 20 84; --c-exec-bg: 255 255 255; --c-exec-surface: 255 255 255;
+    --c-exec-border: 77 77 77; --c-exec-hover: 240 240 240; --c-exec-text: 0 0 0; --c-exec-muted: 51 51 51;
+    --c-focus: 0 51 204;
+  }
+}
+
+:root {
+  /* Legacy names used by inline styles (var(--value) etc.). */
+  --void: rgb(var(--c-void)); --deep: rgb(var(--c-deep)); --slab: rgb(var(--c-slab)); --raised: rgb(var(--c-raised));
+  --edge: rgb(var(--c-edge)); --txt: rgb(var(--c-txt)); --sub: rgb(var(--c-sub)); --dim: rgb(var(--c-dim));
+  --value: rgb(var(--c-value)); --cost: rgb(var(--c-cost)); --shape: rgb(var(--c-shape));
+  --gate: rgb(var(--c-gate)); --unit: rgb(var(--c-unit)); --purple: rgb(var(--c-purple));
 }
 
 html,
@@ -58,8 +102,13 @@ body {
   background: #243049;
 }
 
-
-
+@layer base {
+  :focus-visible {
+    /* !important: must survive focus:outline-none utilities (higher specificity). */
+    outline: 2px solid rgb(var(--c-focus)) !important;
+    outline-offset: 2px !important;
+  }
+}
 
 @layer components {
   .sim-input { @apply max-w-full rounded border border-edge bg-raised px-3 py-2 text-sm text-txt; }

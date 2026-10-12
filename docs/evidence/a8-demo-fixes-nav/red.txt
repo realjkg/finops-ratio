@@ -1,0 +1,10 @@
+# RED: the A8 tests at dde0921 run against origin/main 145565f code
+# npx vitest run src/ai/demoPrompts.test.ts src/costsource/findingsCard.test.tsx src/simulation/SimulationBar.test.tsx
+      Tests  3 failed | 1 passed (4)
+     × every_demo_prompt_gets_a_non_help_mock_frank_reply
+     × names_the_source_that_ran_the_ingest_even_after_the_picker_changes
+     × sign_in_link_shows_only_when_the_simulation_is_enabled
+ Test Files  3 failed (3)
+AssertionError: expected '<div class="shrink-0 border-b border-…' not to contain 'href="/simulation"'
+AssertionError: expected 'Findings — 5 (PointFive DeepWaste sha…' to match /^Findings — \d+ \(ServiceNow, synthet…/
+TypeError: DEMO_PROMPTS is not iterable

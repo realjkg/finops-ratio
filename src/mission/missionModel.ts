@@ -17,8 +17,9 @@ import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
 import { derivePortfolioRatio } from '@/lib/derive';
 import type { ForecastStatus } from '@/lib/forecast';
+import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import { budgetColor, PROVIDER_LABEL, ratioColor } from '@/lib/scales';
-import type { Alert, BudgetProfile, AlertSeverity, Workload } from '@/types';
+import type { Alert, BudgetProfile, AlertSeverity, EvidenceStatus, Workload } from '@/types';
 
 export interface ProjectionContext { budgets?: BudgetProfile[]; alerts?: Alert[]; now?: Date }
 
@@ -41,6 +42,8 @@ export interface MissionView {
   // Value badge (R4) — never rendered without the gauge.
   valueRatio: number;
   valueColor: string;
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
+  valueEvidenceStatus?: EvidenceStatus;
   // Trajectory (monthly forecast).
   status: MissionStatus;
   forecast: ForecastStatus;
@@ -132,6 +135,7 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
     remainingToday: status.daily.remaining,
     valueRatio: workload.value.value_ratio,
     valueColor: ratioColor(workload.value.value_ratio),
+    valueEvidenceStatus: headlineEvidenceStatus(workload.value),
     status: worst(fuelStatus(fuelRatio), forecastToStatus(status.monthly.status), alertToStatus(severity)),
     forecast: status.monthly.status,
     projectedPctOfBudget: status.monthly.projectedPctOfBudget,

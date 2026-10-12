@@ -1,0 +1,60 @@
+# GREEN: branch fix/focus-normalization-fixtures after the review round
+# (round-2 fix commit on top of the round-2 RED commit; base origin/main a90dda5).
+
+## Touched tests (the 11 files of RED round 2)
+  Test Files 11 passed (11); Tests 178 passed (178)
+  (RED counted 136: finio.test.ts failed at import there, so its tests were not collected).
+
+## Suites (default vitest config; *.db.test.ts excluded by the config)
+npx vitest run src/costsource src/ingest
+  origin/main: Test Files 4 failed | 64 passed (68); Tests 28 failed | 1090 passed (1118)
+  branch:      Test Files 4 failed | 65 passed (69); Tests 28 failed | 1098 passed (1126)
+  Same 28 failures by name on both: child-process tests (cli.process, cli.worker,
+  redactLinear) need the `tsx` package, absent from this sandbox's node_modules.
+
+## Whole repository (JSON reporter, per-test diff against origin/main)
+  origin/main: 3353 tests, 3287 passed, 51 failed, 15 skipped
+  branch:      3361 tests, 3295 passed, 51 failed, 15 skipped
+  Same 51 environment failures (tsx, @testing-library/react, @playwright/test absent).
+  9 new tests pass; 1 removed (costsource.test "columnsAddedAfter", replaced by the
+  truthful-audit test when columnsAddedAfter was deleted); no other test changes status.
+  FinIO: finio.test / finioRoutes.test unchanged and passing (wire not changed).
+  compat golden api.json vs origin/main: ServiceSubcategory "" for the v1.0 seed
+  source (11 rows) and backfilledColumns ORDER only (same column sets as main).
+
+## Database suites (throwaway Postgres 16 on 127.0.0.1:55432, no S3 endpoint)
+RATIO_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres
+  npx vitest run --config vitest.db.config.ts src/ingest
+    Tests 578 passed | 3 skipped (581), identical to origin/main; 7 files fail at
+    setup on both: "RATIO_TEST_S3_ENDPOINT is not set".
+  npx vitest run --config vitest.db.serial.config.ts   Test Files 6 passed; Tests 173 passed
+
+## Static checks
+npx tsc --noEmit -p tsconfig.json         26 errors on both origin/main and branch (missing test-only packages)
+npx tsc --noEmit -p tsconfig.worker.json  exit 0
+npx eslint <changed files>                exit 0
+
+## Mutation spot checks (each applied alone, restored from a copy; suites:
+## src/costsource src/ingest/focus src/finio connectorWalk.test, 844 tests)
+M1 restore `ServiceSubcategory ?? 'Generative AI'` (focusRows.ts)            7 failed  KILLED
+M2 drop ConsumedQuantity -> UsageQuantity fill (focusExport.ts)             5 failed  KILLED
+M3 providerColumn prefers ServiceProviderName even when ProviderName is
+   in the header (validate.ts; present-but-empty must quarantine)          1 failed  KILLED
+M4 audit from the version-table diff instead of missing columns (normalize) 15 failed KILLED
+M5 isPassthrough decided by list emptiness alone (focusVersions.ts)         1 failed  KILLED
+M6 re-add the InvoiceIssuerName fallback for ProviderName (focusExport.ts)  1 failed  KILLED
+
+## Final round (review threads finio.test.ts:130, load.ts:355): test-only, no production change
+# No test could fail first: both were coverage gaps over behavior cb7faad already has,
+# so the RED step is the mutation runs below (each fails the new tests, then reverted).
+finio.test: complete ORDERED FOCUS key list of finioRowsForVersion(v) and of the seed
+  equals finioWireColumns(v) for every version; extra raw keys are cut to the table.
+providerCheck.db.test D13 (runSync -> loadArtifact, Postgres 16, 4-case table):
+  successor-only AWS published (provider_name 'AWS'); successor-only 'Evil' quarantined
+  PROVIDER_MISMATCH on ServiceProviderName; ProviderName '' + successor 'AWS' quarantined
+  MISSING_VALUE on ProviderName; successor-only '' MISSING_VALUE on ServiceProviderName.
+  db suite src/ingest: Tests 582 passed | 3 skipped (was 578; same 7 S3-setup file failures)
+  src/costsource src/ingest src/finio src/connectors: 1201 passed, same 28 tsx failures
+M7 finioRows keeps every raw key (no projection)            1 failed  KILLED
+M8 drop a wire column (UsageUnit) from the frozen table     2 failed  KILLED
+M9 load.ts drops the providerColumn(header) argument        2 failed  KILLED (DB suite)

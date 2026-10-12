@@ -595,6 +595,8 @@ function isUnsafePolicy(u: string): boolean {
 const unquote = (x: string) => x.replace(/"/g, '');
 const READER_GRANTS: Array<[RegExp, RegExp]> = [
   [/^SELECT$/, new RegExp(`^(TABLE )?${IN_RATIO}"?COST_FACTS_PUBLISHED"?$`)],
+  [/^SELECT$/, new RegExp(`^(TABLE )?${IN_RATIO}"?OUTCOME_EVENTS_PUBLISHED"?$`)],
+  [/^SELECT$/, new RegExp(`^(TABLE )?${IN_RATIO}"?OUTCOME_PERIOD_COUNTS"?$`)],
   [/^EXECUTE$/, new RegExp(`^FUNCTION ${IN_RATIO}"?CURRENT_TENANT_ID"? ?\\( ?\\)$`)],
   [/^USAGE$/, /^SCHEMA "?RATIO"?$/],
 ];

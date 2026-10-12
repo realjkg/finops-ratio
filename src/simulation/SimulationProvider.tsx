@@ -24,16 +24,33 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   }
   useEffect(() => {
     let active = true;
-    void simulationRequest<{ session: SimSession | null; identities: Record<string, SimIdentity> }>('session')
-      .then(async result => {
+    void (async () => {
+      try {
+        // Capability probe first: a demo deployment must not attempt session
+        // restore — the honest Seeded-demo chip is the only state a visitor sees.
+        const capability = await simulationRequest<{ enabled: boolean }>('status');
         if (!active) return;
-        setEnabled(true); setIdentities(result.identities);
-        if (result.session) {
-          const state = await simulationRequest<Workspace>('state');
-          if (active) { useStore.getState().loadSimulation(result.session, state); setPersona(result.session.identity.persona); }
+        if (!capability.enabled) return;
+        try {
+          const result = await simulationRequest<{ session: SimSession | null; identities: Record<string, SimIdentity> }>('session');
+          if (!active) return;
+          setEnabled(true); setIdentities(result.identities);
+          if (result.session) {
+            const state = await simulationRequest<Workspace>('state');
+            if (active) { useStore.getState().loadSimulation(result.session, state); setPersona(result.session.identity.persona); }
+          }
+        } catch (e) {
+          if (active && !(e instanceof SimulationHttpError && e.status === 404)) setError('Could not restore the saved simulation. Reload to retry.');
         }
-      }).catch(e => { if (active && !(e instanceof SimulationHttpError && e.status === 404)) setError('Could not restore the saved simulation. Reload to retry.'); })
-      .finally(() => { if (active) setLoading(false); });
+      } catch (e) {
+        // Probe failed: the simulation API surface is unreachable or broken — a
+        // real failure in an enabled deployment, so it surfaces (a probe 404 is
+        // a stale deployment artifact, suppressed like a 404 restore).
+        if (active && !(e instanceof SimulationHttpError && e.status === 404)) setError('Could not reach the simulation service. Reload to retry.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
     return () => { active = false; };
   }, [setPersona]);
   async function signIn(identity: string) {

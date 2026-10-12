@@ -86,6 +86,16 @@ test('mobile screens, keyboard chat dismissal and tenant separation', async ({ p
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), route).toBe(true);
   }
   await page.goto('/workloads');
+  const primaryNavTops = await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link').evaluateAll(
+    links => links.map(link => Math.round(link.getBoundingClientRect().top)),
+  );
+  expect(new Set(primaryNavTops).size).toBe(1);
+  const detailTabTops = await page.getByRole('navigation', { name: 'Workload detail sections' }).getByRole('button').evaluateAll(
+    tabs => tabs.map(tab => Math.round(tab.getBoundingClientRect().top)),
+  );
+  expect(new Set(detailTabTops).size).toBe(1);
+  const workloadListBox = await page.getByRole('complementary', { name: 'Workload list' }).boundingBox();
+  expect(workloadListBox?.width).toBeLessThanOrEqual(390);
   await page.getByRole('button', { name: 'Demand Shaping', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Demand shape', exact: true })).toBeVisible();
   await page.screenshot({ path: '.simulation-test-results/workloads-mobile.png', fullPage: true });

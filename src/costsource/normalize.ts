@@ -16,14 +16,48 @@ import { budgetFor } from '@/data/budgets';
 import { governanceGatesPassed } from '@/lib/derive';
 import { computeBudgetStatus, type BudgetStatus } from '@/lib/budgetStatus';
 import type { FocusVersion } from './focusVersions';
-import { columnsAddedAfter } from './focusVersions';
+import { CANONICAL_FOCUS_VERSION, COLUMNS_BY_VERSION, FOCUS_VERSIONS, draftColumnsAfter, isAtLeast } from './focusVersions';
 import type {
+  CanonicalCostRow,
   CanonicalFocusRow,
   RatioFocusExtensions,
   RawSourceRow,
 } from './focusRows';
 import { upgradeToCanonicalCost } from './focusRows';
-import { resolveWorkloadId } from './seed';
+import { RESOURCE_PREFIX, resolveWorkloadId } from './seed';
+import { modelIdentityForService } from '@/data/models';
+
+/**
+ * The one documented tag key that attributes a cost row to a Ratio workload.
+ * Its value must equal the id of a workload in the loaded set (WORKLOADS).
+ * Read from the FOCUS `Tags` column (an object, or the JSON string a file or
+ * BigQuery export carries); only the direct-ingest path keeps `Tags`.
+ */
+export const WORKLOAD_TAG_KEY = 'ratio:workload';
+
+/** ResourceId prefix of simulated sandbox rows: never attributed by tag. */
+const SIMULATED_RESOURCE_PREFIX = 'synthetic:';
+
+/**
+ * Resolve a Tags value to a loaded workload id, or null. Never throws; absent,
+ * malformed or unknown values all return null.
+ */
+export function workloadIdFromTags(tags: unknown): string | null {
+  let bag: unknown = tags;
+  if (typeof bag === 'string') {
+    try {
+      bag = JSON.parse(bag);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof bag !== 'object' || bag === null || Array.isArray(bag)) return null;
+  if (!Object.hasOwn(bag, WORKLOAD_TAG_KEY)) return null;
+  const value = (bag as Record<string, unknown>)[WORKLOAD_TAG_KEY];
+  if (typeof value !== 'string') return null;
+  const id = value.trim();
+  return WORKLOADS.some((w) => w.id === id) ? id : null;
+}
 
 /**
  * Stage 2: attach the Ratio value denominator to a cost row.
@@ -31,15 +65,25 @@ import { resolveWorkloadId } from './seed';
  * Generic over the cost shape so the same denominator logic serves both the
  * canonical v1.4 rows the ingest seam produces AND the version-pinned rows the
  * FinIO A2A seam emits for a peer that speaks an older FOCUS version. The only
- * column it needs is `ResourceId`, which carries the Ratio workload identity.
+ * column it needs is `ResourceId`, which carries the Ratio workload identity;
+ * a `Tags` entry with `WORKLOAD_TAG_KEY` is the fallback for non-simulated rows.
  */
 export function attachRatioValue<T extends { ResourceId: string }>(
   cost: T,
   sourceId: string,
   sourceVersion: FocusVersion,
 ): T & RatioFocusExtensions {
-  const workloadId = resolveWorkloadId(cost.ResourceId);
-  const workload = workloadId ? WORKLOADS.find((w) => w.id === workloadId) : undefined;
+  let workloadId = resolveWorkloadId(cost.ResourceId);
+  let workload = workloadId ? WORKLOADS.find((w) => w.id === workloadId) : undefined;
+  // An explicit ResourceId workload identity (loaded or not) is never replaced by a tag.
+  const explicit = cost.ResourceId.startsWith(RESOURCE_PREFIX);
+  if (!explicit && !cost.ResourceId.startsWith(SIMULATED_RESOURCE_PREFIX)) {
+    const tagged = workloadIdFromTags((cost as { Tags?: unknown }).Tags);
+    if (tagged) {
+      workloadId = tagged;
+      workload = WORKLOADS.find((w) => w.id === tagged);
+    }
+  }
 
   // An unresolved cost row still normalizes; its value is unknown (0) rather
   // than hidden — cost is never shown without a value context (R4).
@@ -72,7 +116,42 @@ export function attachRatioValue<T extends { ResourceId: string }>(
 
 export interface NormalizedRows {
   rows: CanonicalFocusRow[];
+  /** Ratified columns the shim added to reach the canonical (v1.4) model. */
   backfilledColumns: string[];
+  /** FOCUS 1.5 working-draft columns backfilled onto every row (unratified — reported separately). */
+  draftColumnsBackfilled: string[];
+}
+
+/**
+ * FOCUS 1.5 model-identity backfill: when an exporter omits the draft's
+ * recommended identity properties, fill what the internal model registry can
+ * honestly derive from the row's ServiceName. Source-supplied values always
+ * win; anything the registry cannot say stays null (never a guessed value).
+ */
+function withRegistryModelIdentity(row: CanonicalCostRow): CanonicalCostRow {
+  if (row.ModelId && row.ModelDeveloper && row.ModelFamily) return row;
+  const identity = modelIdentityForService(row.ServiceName);
+  if (!identity) return row;
+  return {
+    ...row,
+    ModelDeveloper: row.ModelDeveloper ?? identity.ModelDeveloper,
+    ModelFamily: row.ModelFamily ?? identity.ModelFamily,
+    ModelId: row.ModelId ?? identity.ModelId,
+    ModelVersion: row.ModelVersion ?? identity.ModelVersion,
+  };
+}
+
+/** Ratified canonical columns (v1.0 .. canonical), in version-table order. */
+const RATIFIED_COLUMNS = FOCUS_VERSIONS.filter((v) => isAtLeast(CANONICAL_FOCUS_VERSION, v)).flatMap((v) => [
+  ...COLUMNS_BY_VERSION[v],
+]);
+
+/**
+ * The truthful upgrade audit: every ratified canonical column that at least one
+ * raw row lacks (so the shim had to add it), whatever version the source declared.
+ */
+function missingColumns(raws: RawSourceRow[]): string[] {
+  return RATIFIED_COLUMNS.filter((c) => raws.some((r) => (r as unknown as Record<string, unknown>)[c] === undefined));
 }
 
 /** Full normalization: raw source rows -> canonical FOCUS rows + upgrade audit. */
@@ -82,8 +161,11 @@ export function normalizeRows(
   sourceVersion: FocusVersion,
 ): NormalizedRows {
   return {
-    rows: raws.map((raw) => attachRatioValue(upgradeToCanonicalCost(raw), sourceId, sourceVersion)),
-    backfilledColumns: columnsAddedAfter(sourceVersion),
+    rows: raws.map((raw) =>
+      attachRatioValue(withRegistryModelIdentity(upgradeToCanonicalCost(raw)), sourceId, sourceVersion),
+    ),
+    backfilledColumns: missingColumns(raws),
+    draftColumnsBackfilled: draftColumnsAfter(sourceVersion),
   };
 }
 

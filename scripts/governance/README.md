@@ -59,8 +59,23 @@ and `*.test.*` outside `pages/` and `src/pages/`. Everything under `pages/` and
 Auto-merge (squash, pinned to the evaluated head SHA) is enabled only when
 **all** hold, otherwise it is disabled and the job summary says why:
 
-- Same-repo PR (not a fork) by an `OWNER`, `MEMBER` or `COLLABORATOR`.
+- Same-repo PR (not a fork) by an `OWNER`, `MEMBER` or `COLLABORATOR`, or by a
+  **trusted platform actor** (`TRUSTED_ACTOR_LOGINS` in `eligibility.mjs`,
+  seeded with the platform bot `obvious-autobuild[bot]`, whose app integration
+  reports author association `CONTRIBUTOR`).
 - Label `risk:low` **and** a fresh low classification of the current files.
+  Exception: a trusted platform actor's PR whose fresh classification is
+  `risk:restricted` and whose change set provably touches none of the
+  governance gate's own files (`.github/workflows/governance.yml`,
+  `scripts/governance/**`) is also auto-merge eligible at the QA bar — the
+  restricted classes themselves are accepted for that author, and the label
+  reasons that merely restate a restriction are waived. The fresh in-job
+  classification is the authoritative input there; an unknown or truncated
+  change set counts as touching the gate (fail closed), and a trusted
+  low-classification PR still needs the `risk:low` label as before.
+  **A trusted-author PR that touches the gate's own files never auto-merges:
+  the QA bar cannot rewrite the gate that enforces it** — it follows the
+  exception queue below.
 - Not a draft; base is `main`.
 - CI, verified through the Actions jobs API:
   - The newest `pull_request` run of `.github/workflows/ci.yml` for the head
@@ -126,14 +141,15 @@ hand still cannot merge past the gate.
 
 | State | When |
 | --- | --- |
-| `success` | An eligible low-risk PR (all of the above), or a restricted PR with a valid exception approval (below). |
+| `success` | An eligible low-risk PR (all of the above), a trusted-author restricted PR accepted at the QA bar (mode `trusted-qa-bar`; change set clear of the gate's own files), or a restricted PR with a valid exception approval (below). |
 | `failure` | Otherwise. The description is the top blocking reason (≤140 characters). An evaluation error also posts `failure`. |
 | `pending` | The head moved during evaluation. The job turns auto-merge off and posts `pending` on the new head, then defers. |
 
 Our own previous eligibility status is ignored when evaluating, because it is
 an output, not an input.
 
-**Exception queue (restricted PRs).** The orchestrator or owner posts
+**Exception queue (restricted PRs).** For every restricted PR NOT already
+covered by the trusted-actor QA bar above, the orchestrator or owner posts
 `/exception-approve <sha>` after the independent review evidence is recorded.
 A restricted PR can only merge when both of the following hold:
 
@@ -150,14 +166,15 @@ A restricted PR can only merge when both of the following hold:
 - No revocation exists for that SHA (see "Sticky revocation" below).
 - Every non-risk condition holds: genuine CI on every qualifying run, a Copilot
   review on the head, zero unresolved threads, a same-repo PR by an
-  OWNER/MEMBER/COLLABORATOR, no other open PR with the same head, not a draft,
-  base `main`.
+  OWNER/MEMBER/COLLABORATOR or a trusted platform actor, no other open PR with
+  the same head, not a draft, base `main`.
 
 No timestamps are compared. The approval binds to content (the commit SHA),
 so a new head simply has no approval. A force-push back to a previously
 approved SHA is approved again, unless that SHA was revoked, because it is the
 same reviewed content. The workflow never enables auto-merge for restricted
-PRs; merge manually once the status is green.
+PRs that touch the governance gate's own files (by any author, trusted or not);
+merge manually once the status is green.
 
 **Sticky revocation.** Writers can edit or delete other users' comments, so a
 revoke comment alone is not durable. Each of these counts as a revocation of

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { useState, type ReactNode, type FormEvent } from "react";
 import { useStore } from "@/store/useStore";
 import { formatUSD, formatRatio } from "@/lib/format";
-import { evaluateOutcome, monetaryBenefit, outcomeBasis } from "./model";
+import { COST_LABELS, evaluateOutcome, monetaryBenefit, outcomeBasis } from "./model";
 import {
   COST_CATEGORIES,
   type OutcomeRecord,
@@ -12,12 +12,6 @@ import {
   type OutcomeAction,
 } from "./types";
 
-const COST_LABELS = {
-  infrastructure: "Infrastructure",
-  implementation: "Implementation allocation",
-  oversight: "Oversight",
-  labor: "Ongoing labor",
-};
 const CATEGORY_LABELS = {
   revenue: "Revenue contribution",
   cost_savings: "Realized cost savings",

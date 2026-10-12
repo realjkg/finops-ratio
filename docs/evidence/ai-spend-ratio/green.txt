@@ -1,0 +1,25 @@
+# GREEN: npx vitest run src/costsource (round 4, head after fix)
+Test Files  35 passed (35) Tests  729 passed (729)  (rounds 1-3: 714 / 718 / 726)
+# New test files only (aiSpendRatio, aiSpendRatioCard, aiSpendRatioCard.dom): Tests  43 passed (43)
+# Test corrections after round-1 RED (expectations were wrong, not the code):
+#   huge-values ratio: expected 0.5 -> exact 100000000000.01 / 200000000000.03
+#   409 stub: uses the route's real fixed message (httpError only surfaces those)
+
+# Mutation spot checks (each restored after the run); all KILLED
+M1 flip AI match (=== -> !==)                    11 failed, e.g. "all AI", "no AI"
+M2 sum currencies together (key 'USD')           "never sums mixed currencies; one ratio per BillingCurrency"
+M3 ratio for total >= 0 (was > 0)                "zero total -> null"
+M4 Ingested keeps sandbox sources                "Ingested never shows seed: sandbox-only live sources ..."
+M5 headline sums every source                    "adding an overlapping source never changes the headline"
+M6 drop the card's cancelled guard               "a slow Static-seed load cannot overwrite Ingested after rapid switching"
+M7 fallback owner = any member when canonical    "never double-counts a repeated bill: pointfive-sandbox absent / failing"
+   is missing (the Copilot High bug)
+M9 named zero-row source stays fetched/owner     "named row-less sources go to errors", "an empty first member never owns ..."
+M10 render loaded.state regardless of path       "after switching, the old path's data renders as loading under the new label"
+M11 no dedupe of named ids                       "an empty first member ...; duplicate ids never double count"
+M8 sum in micro-units again (toFixed(6))         "keeps sub-micro costs: 1000 rows of 0.0000004 plus $1 ..."
+
+# Other checks (full npm ci in the scratch clone; happy-dom + @testing-library present)
+eslint (6 changed files): exit 0
+tsc --noEmit: 0 errors
+git diff --check: clean

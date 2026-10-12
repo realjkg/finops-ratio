@@ -26,7 +26,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex h-screen flex-col bg-void font-body text-txt">
       <NavBar active={active} onOpenAgent={toggleAIPanel} agentOpen={aiPanelOpen} />
       <SimulationBar />
-      <main className="min-h-0 flex-1 overflow-auto">{children}</main>
+      <main className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</main>
       {/* Launcher lives in the top bar; the panel itself is opened from there. */}
       <ChatPanel showLauncher={false} />
     </div>

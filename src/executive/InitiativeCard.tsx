@@ -4,8 +4,10 @@
 // executive surface each card carries a matrixed-lens callout: one line per role
 // reading the same numbers differently.
 import { formatRatio, formatUSD } from '@/lib/format';
+import { EvidenceMark } from '@/components/EvidenceMark';
 import type { LanguageMap } from '@/lib/languageMap';
 import { INITIATIVE_STATUS_META, type InitiativeView } from './initiativeModel';
+import { tint, TOKEN_COLOR } from '@/lib/scales';
 
 interface InitiativeCardProps {
   initiative: InitiativeView;
@@ -33,7 +35,7 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
         </div>
         <span
           className="shrink-0 rounded-full px-2.5 py-0.5 font-mono text-[10px] font-bold tracking-wide"
-          style={{ color: meta.color, backgroundColor: `${meta.color}1a` }}
+          style={{ color: meta.color, backgroundColor: tint(meta.color) }}
         >
           {meta.label}
         </span>
@@ -41,7 +43,7 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
 
       {/* Headline monthly cost — large, mono, cost token */}
       <div>
-        <p className="font-mono text-3xl font-bold" style={{ color: TOKEN_COST }}>
+        <p className="font-mono text-3xl font-bold" style={{ color: TOKEN_COLOR.cost }}>
           {formatUSD(initiative.monthlyCost)}
           <span className="ml-1 text-sm font-medium text-exec-muted">/mo</span>
         </p>
@@ -73,12 +75,13 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
         </div>
       </div>
 
-      {/* Cost efficiency (value ratio) — R4 pairing */}
+      {/* Cost efficiency (value ratio) — R4 pairing, with its provenance mark */}
       <p className="flex items-baseline gap-1.5 border-t border-exec-border pt-3 text-sm">
         <span className="text-exec-muted">{lang.valueRatioLabel}:</span>
         <span className="font-mono font-bold" style={{ color: initiative.valueColor }}>
           {formatRatio(initiative.valueRatio)}
         </span>
+        <EvidenceMark status={initiative.valueEvidenceStatus} />
       </p>
 
       {showLens && <MatrixedLens initiative={initiative} />}
@@ -109,5 +112,4 @@ function MatrixedLens({ initiative }: { initiative: InitiativeView }) {
   );
 }
 
-const TOKEN_COST = '#ff5c72';
 

@@ -5,6 +5,9 @@ import { FRANK } from '@/agent-workflows/frank';
 // conversation, a thinking indicator, and the input. Rendered as a fixed overlay
 // so it sits identically over the executive (light) and technical (dark) surfaces,
 // using the shared dark surface + purple AI tokens — no per-surface theme logic.
+// Voice (Wave4): the input carries a dictation mic (see ChatInput) and the header
+// a spoken-replies toggle (see useSpokenReplies) — browser-native Web Speech, no
+// backend, no keys; hidden entirely where the API is unavailable.
 //
 // A11y (spec §7.4): <aside aria-label="AI Chat">, launcher aria-expanded /
 // aria-controls, aria-live="polite" message list, prefers-reduced-motion honored.
@@ -15,8 +18,32 @@ import { useStore } from '@/store/useStore';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { ChatQuickPrompts } from './ChatQuickPrompts';
+import { useSpokenReplies } from './useSpokenReplies';
 
 const PANEL_ID = 'ai-chat-panel';
+
+function SpeakerIcon({ muted, className = '' }: { muted: boolean; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M11 5 6 9H2v6h4l5 4z" />
+      {muted ? (
+        <line x1="23" y1="9" x2="17" y2="15" />
+      ) : (
+        <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+      )}
+      {muted && <line x1="17" y1="9" x2="23" y2="15" />}
+    </svg>
+  );
+}
 
 // `showLauncher` controls the floating bottom-right launcher. Inside the shared
 // AppShell the launcher lives in the top bar, so it is rendered with
@@ -28,6 +55,7 @@ export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = 
   const aiPanelOpen = useStore((s) => s.aiPanelOpen);
   const sendAIMessage = useStore((s) => s.sendAIMessage);
   const toggleAIPanel = useStore((s) => s.toggleAIPanel);
+  const spoken = useSpokenReplies(aiMessages, aiPanelOpen);
   const reduceMotion = useReducedMotion();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -98,6 +126,26 @@ export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = 
                 <span className="font-mono text-[10px] uppercase tracking-wider text-dim">
                   {aiMode}
                 </span>
+                {spoken.supported && (
+                  <button
+                    type="button"
+                    onClick={spoken.toggle}
+                    aria-pressed={spoken.enabled}
+                    aria-label={spoken.enabled ? 'Disable spoken replies' : 'Enable spoken replies'}
+                    title={
+                      spoken.enabled
+                        ? 'Spoken replies on — click to mute'
+                        : 'Spoken replies off — click to hear answers read aloud'
+                    }
+                    className={`rounded border px-2 py-0.5 transition-colors ${
+                      spoken.enabled
+                        ? 'border-purple bg-purple/20 text-purple'
+                        : 'border-edge text-sub hover:border-purple hover:text-txt'
+                    }`}
+                  >
+                    <SpeakerIcon muted={!spoken.enabled} className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={toggleAIPanel}

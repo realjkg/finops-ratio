@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AccuracyReport, PredictionSourceId } from '@/prediction';
 import { formatSignedPct } from '@/lib/format';
-import { TOKEN_HEX } from '@/lib/scales';
+import { TOKEN_COLOR, tint } from '@/lib/scales';
 import { withBasePath } from '@/lib/basePath';
 
 type LoadState =
@@ -105,14 +105,14 @@ function LedgerView({ report }: { report: AccuracyReport }) {
         {report.coldStart ? (
           <span
             className="rounded-full px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider"
-            style={{ color: TOKEN_HEX.shape, backgroundColor: `${TOKEN_HEX.shape}1a` }}
+            style={{ color: TOKEN_COLOR.shape, backgroundColor: tint(TOKEN_COLOR.shape) }}
           >
             COLD-START · {report.totalEntries} realized
           </span>
         ) : (
           <span
             className="rounded-full px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider"
-            style={{ color: TOKEN_HEX.value, backgroundColor: `${TOKEN_HEX.value}1a` }}
+            style={{ color: TOKEN_COLOR.value, backgroundColor: tint(TOKEN_COLOR.value) }}
           >
             {report.totalEntries} realized changes
           </span>
@@ -126,8 +126,8 @@ function LedgerView({ report }: { report: AccuracyReport }) {
       </p>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <Stat label="Overall p50" value={pct(overallP50)} tone={TOKEN_HEX.value} />
-        <Stat label="Overall p90" value={pct(overallP90)} tone={TOKEN_HEX.unit} />
+        <Stat label="Overall p50" value={pct(overallP50)} tone={TOKEN_COLOR.value} />
+        <Stat label="Overall p90" value={pct(overallP90)} tone={TOKEN_COLOR.unit} />
       </div>
 
       <table className="mt-3 w-full text-left font-mono text-[11px]">
@@ -159,8 +159,8 @@ function pct(value: number | null): string {
 }
 
 function accuracyTone(value: number | null): string {
-  if (value === null) return TOKEN_HEX.shape;
-  return value >= 0.99 ? TOKEN_HEX.value : TOKEN_HEX.shape;
+  if (value === null) return TOKEN_COLOR.shape;
+  return value >= 0.99 ? TOKEN_COLOR.value : TOKEN_COLOR.shape;
 }
 
 function Stat({ label, value, tone }: { label: string; value: string; tone: string }) {

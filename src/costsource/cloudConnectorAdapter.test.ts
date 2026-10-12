@@ -26,7 +26,8 @@ import {
 import { KUBERNETES_CONNECTOR_SPEC } from './kubernetesConfig';
 import { NUTANIX_CONNECTOR_SPEC } from './nutanixConfig';
 import type { ConnectorSpec } from './connectorConfig';
-import { columnsAddedAfter } from './focusVersions';
+// The truthful audit for these v1.0 rows: every ratified column they lack.
+const V10_BACKFILL = ['ListCost', 'ContractedCost', 'ConsumedQuantity', 'ConsumedUnit', 'CommitmentDiscountStatus', 'InvoiceIssuerName', 'ServiceSubcategory', 'SkuMeter', 'CapacityReservationId', 'CapacityReservationStatus', 'PricingCurrency'];
 import { rawRowsForVersion } from './seed';
 
 const WINDOW = { start: '2026-06-01T00:00:00.000Z', end: '2026-07-01T00:00:00.000Z' };
@@ -156,7 +157,7 @@ describe.each(SPECS)('CloudConnectorAdapter [$id] — fetchCostRows (configured)
     expect(result.sourceId).toBe(spec.id);
     expect(result.sourceVersion).toBe('1.0');
     expect(result.canonicalVersion).toBe('1.4');
-    expect(result.backfilledColumns).toEqual(columnsAddedAfter('1.0'));
+    expect(result.backfilledColumns).toEqual(V10_BACKFILL);
     expect(result.rows.length).toBeGreaterThan(0);
     expect(transportFactory).toHaveBeenCalledTimes(1);
 
@@ -247,7 +248,7 @@ describe('CloudConnectorAdapter — default live transport', () => {
     expect(result.rows[0].BilledCost).toBe(120.5);
     expect(result.rows[0].ListCost).toBe(120.5); // backfilled by the shim
     expect(result.rows[0].x_RatioWorkloadId).toBe('wl-001');
-    expect(result.backfilledColumns).toEqual(columnsAddedAfter('1.0'));
+    expect(result.backfilledColumns).toEqual(V10_BACKFILL);
   });
 
   it('reports an honest health failure when the live source rejects the credential', async () => {

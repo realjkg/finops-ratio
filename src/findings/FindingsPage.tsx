@@ -11,13 +11,16 @@
 // No badges, confetti, streaks — quiet governance. Calm register throughout.
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
+import { useCallback, useMemo, useState } from 'react';
 import { useStore } from '@/store/useStore';
+import { landedFindings } from '@/connectors/ingestLanding';
 import { buildFindings, type FindingView } from './findingsModel';
 import { ValueRatioMeter } from './ValueRatioMeter';
 import { SpendToValueGraph } from './SpendToValueGraph';
-import { formatUSD, formatRatio } from '@/lib/format';
-import { TOKEN_HEX } from '@/lib/scales';
+import { EvidenceMark } from '@/components/EvidenceMark';
+import { formatUSD, formatRatio, formatPct, formatTokens } from '@/lib/format';
+import { TOKEN_COLOR, tint } from '@/lib/scales';
 import {
   createCMClient,
   type CMProvider,
@@ -41,10 +44,14 @@ const cmModeEnv = process.env.NEXT_PUBLIC_CM_MODE;
 
 export function FindingsPage() {
   const workloads = useStore((s) => s.workloads);
+  const ingestRuns = useStore((s) => s.ingestRuns);
   const sim = useStore(s => s.simulation);
   const simBusy = useStore(s => s.simulationBusy);
   const run = useStore(s => s.simulationCommand);
   const findings = useMemo(() => buildFindings(workloads), [workloads]);
+  // Findings reported by a connected cost-source adapter (e.g. PointFive
+  // DeepWaste) from a landed ingest run — real connector output, attributed.
+  const connectorFindings = useMemo(() => landedFindings(ingestRuns), [ingestRuns]);
 
   // Auto-select the worst finding on first render.
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -194,6 +201,35 @@ export function FindingsPage() {
       </header>
 
       {sim && <div className="flex flex-wrap items-center gap-3 border-b border-edge px-4 py-3 text-sm text-sub"><span>Apply requests a simulated change. Approval and application are tracked in the customer workflow.</span><Link href="/workspace#decisions" className="text-unit underline">Review change decisions</Link>{sim.state.dismissed.length > 0 && <button disabled={simBusy} className="underline" onClick={() => void run({ type: 'restore-findings' })}>Restore dismissed findings</button>}</div>}
+
+      {/* Landed connector findings — only after an ingest brought some in. */}
+      {connectorFindings.length > 0 && (
+        <div className="border-b border-edge bg-deep/60 px-6 py-3">
+          <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-sub">
+            Connector findings — {connectorFindings.length} landed from cost-source adapters
+          </p>
+          <ul className="space-y-1">
+            {connectorFindings.map((f) => (
+              <li key={f.id} className="flex flex-wrap items-baseline gap-x-2 font-mono text-[11px]">
+                <span className="text-dim">{f.sourceName}</span>
+                <span
+                  className="font-bold"
+                  style={{ color: f.severity === 'critical' ? 'var(--cost)' : f.severity === 'warning' ? 'var(--shape)' : 'var(--unit)' }}
+                >
+                  {f.type === 'anomaly' ? '▲' : '◆'} {f.category}
+                </span>
+                <span className="text-txt">{f.title}</span>
+                <span className="text-dim">
+                  {f.type === 'anomaly'
+                    ? `delta ${f.observedSpendDelta >= 0 ? '+' : ''}$${f.observedSpendDelta.toFixed(0)}`
+                    : `est. $${f.estimatedMonthlySavings.toFixed(0)}/mo`}
+                </span>
+                <span className="text-dim">· {f.resourceId}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {/* Two-pane content */}
       <div className="flex min-h-0 flex-1 flex-col overflow-auto md:flex-row md:overflow-hidden">
         {/* Left: ranked findings list */}
@@ -294,7 +330,7 @@ function FindingRow({
             <span className="truncate font-body text-sm font-medium text-txt">
               {finding.workloadName}
             </span>
-            {/* Evidence: ratio + spend */}
+            {/* Evidence: ratio + provenance mark + spend */}
             <div className="flex shrink-0 items-center gap-2">
               <span
                 className="font-mono text-xs font-bold"
@@ -302,6 +338,7 @@ function FindingRow({
               >
                 {formatRatio(finding.valueRatio)}
               </span>
+              <EvidenceMark status={finding.valueEvidenceStatus} />
               <span className="font-mono text-[11px] text-dim">
                 {formatUSD(finding.monthlySpend, { compact: true })}/mo
               </span>
@@ -318,8 +355,8 @@ function FindingRow({
               style={{
                 color:
                   governanceState.status === 'applied'
-                    ? TOKEN_HEX.value
-                    : TOKEN_HEX.gate,
+                    ? TOKEN_COLOR.value
+                    : TOKEN_COLOR.gate,
               }}
             >
               {governanceState.status === 'applied' ? 'applied' : 'governed'}
@@ -361,6 +398,18 @@ function RecommendationPane({
   const [refInput, setRefInput] = useState('');
   const [refProvider, setRefProvider] = useState<CMProvider>('jira');
 
+  // Dot click-through from the evidence graph: same workload-detail flow as
+  // the nav — select the workload, then open the /workloads detail surface.
+  const select = useStore((s) => s.select);
+  const router = useRouter();
+  const openWorkload = useCallback(
+    (id: string) => {
+      select(id);
+      router.push('/workloads');
+    },
+    [select, router],
+  );
+
   const hasAuditRecord = !!governance?.auditRecord;
 
   function handleAttachSubmit() {
@@ -380,8 +429,12 @@ function RecommendationPane({
         <p className="mt-1 text-sm text-sub">{finding.problem}</p>
       </div>
 
-      {/* Value-ratio meter — enlarged */}
-      <ValueRatioMeter ratio={finding.valueRatio} size="large" />
+      {/* Value-ratio meter — enlarged; provenance mark rides the headline ratio */}
+      <ValueRatioMeter
+        ratio={finding.valueRatio}
+        size="large"
+        evidenceStatus={finding.valueEvidenceStatus}
+      />
 
       {/* Evidence: two values */}
       <section aria-label="Evidence">
@@ -396,9 +449,32 @@ function RecommendationPane({
           <EvidenceCell
             label="Monthly spend"
             value={formatUSD(finding.monthlySpend)}
-            color={TOKEN_HEX.cost}
+            color={TOKEN_COLOR.cost}
           />
         </div>
+        {/* Cache-evidence chip (audit A3) — only where cache economics
+            materially shape the cost (findingsModel gates it); unit cyan
+            marks informational data. Quiet, no new signature component. */}
+        {finding.cacheEvidence && (
+          <div
+            className="mt-3 rounded-md border border-edge bg-slab p-3"
+            data-testid="cache-evidence-chip"
+          >
+            <p className="font-mono text-[10px]" style={{ color: TOKEN_COLOR.unit }}>
+              Cache economics
+            </p>
+            <p className="mt-1 font-mono text-base font-bold" style={{ color: TOKEN_COLOR.unit }}>
+              {formatPct(finding.cacheEvidence.hitRate, 1)} cache hit rate
+            </p>
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-dim">
+              {formatTokens(finding.cacheEvidence.cachedTokens)} of{' '}
+              {formatTokens(finding.cacheEvidence.totalInputTokens)} input tokens billed at the cached rate
+              (${finding.cacheEvidence.cachedRatePer1m}/1M vs ${finding.cacheEvidence.uncachedRatePer1m}/1M) —
+              holding today's input cost {formatUSD(finding.cacheEvidence.cacheDiscountDaily)}/day below
+              uncached pricing.
+            </p>
+          </div>
+        )}
         {/* Spend-to-value graph — portfolio context */}
         <div className="mt-4 rounded-md border border-edge bg-slab p-3">
           <p className="mb-3 font-mono text-[9px] uppercase tracking-wider text-dim">
@@ -408,6 +484,7 @@ function RecommendationPane({
             workloads={allWorkloads}
             selectedWorkloadId={finding.workloadId}
             size="large"
+            onOpenWorkload={openWorkload}
           />
         </div>
       </section>
@@ -432,7 +509,7 @@ function RecommendationPane({
               {/* Bold hero per the visual register — value green. */}
               <span
                 className="font-mono text-3xl font-bold"
-                style={{ color: TOKEN_HEX.value }}
+                style={{ color: TOKEN_COLOR.value }}
               >
                 {formatUSD(finding.projectedMonthlyImpact)}
               </span>
@@ -486,8 +563,8 @@ function RecommendationPane({
                 disabled={isApplying}
                 className="rounded-md px-4 py-2 font-mono text-sm font-bold transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-shape/60 disabled:opacity-50"
                 style={{
-                  background: TOKEN_HEX.shape,
-                  color: '#05070b', // void — high contrast on amber
+                  background: TOKEN_COLOR.shape,
+                  color: 'var(--void)', // page background on amber
                 }}
               >
                 {isApplying && !simulation && !showRefForm ? 'Creating ticket…' : 'Apply'}
@@ -562,7 +639,7 @@ function RecommendationPane({
             {applyError && (
               <p
                 className="font-mono text-xs"
-                style={{ color: TOKEN_HEX.cost }}
+                style={{ color: TOKEN_COLOR.cost }}
                 role="alert"
               >
                 {applyError}
@@ -587,7 +664,7 @@ function AuditChip({
   status: FindingStatus;
 }) {
   const isApplied = status === 'applied';
-  const accentColor = isApplied ? TOKEN_HEX.value : TOKEN_HEX.gate;
+  const accentColor = isApplied ? TOKEN_COLOR.value : TOKEN_COLOR.gate;
   const statusLabel = isApplied
     ? (record.provider === 'mock' ? 'Applied in simulation' : 'Applied — reference attached')
     : 'Governed — change ticket created';
@@ -605,7 +682,7 @@ function AuditChip({
   return (
     <div
       className="rounded-md border p-3 space-y-1.5"
-      style={{ borderColor: accentColor + '40' }}
+      style={{ borderColor: tint(accentColor, 25) }}
     >
       <p
         className="font-mono text-[10px] uppercase tracking-wider font-bold"

@@ -1,3 +1,10 @@
+// Must list exactly ROLES from src/theme/themes.ts (checked by src/theme/tokens.test.ts).
+const THEMED = [
+  'void', 'deep', 'slab', 'raised', 'edge', 'txt', 'sub', 'dim',
+  'value', 'cost', 'shape', 'gate', 'unit', 'purple',
+  'exec-bg', 'exec-surface', 'exec-border', 'exec-hover', 'exec-text', 'exec-muted', 'focus',
+];
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   // Server-only ingestion code (src/ingest) has no UI and must never contribute classes to the client CSS.
@@ -5,35 +12,13 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Backgrounds (spec §10.1)
-        void: '#05070b',
-        deep: '#090c12',
-        slab: '#0d1119',
-        raised: '#141a26',
-        edge: '#1a2235',
-        // Text
-        txt: '#d0d8ea',
-        sub: '#8895ad',
-        dim: '#4d5a72',
-        // Semantic
-        value: '#00e09e',
-        cost: '#ff5c72',
-        shape: '#ffc44d',
-        gate: '#7c8dff',
-        unit: '#00ccee',
-        purple: '#b490ff',
-        // Cloud providers
+        // Theme roles (src/theme/themes.ts) resolve through `--c-<role>` channel
+        // triplets set in src/index.css, so opacity modifiers (bg-void/50) keep working.
+        ...Object.fromEntries(THEMED.map((role) => [role, `rgb(var(--c-${role}) / <alpha-value>)`])),
+        // Cloud provider brand colors stay fixed in every theme.
         aws: '#ff9900',
         azure: '#0078d4',
         gcp: '#4285f4',
-        // Executive light surface (Ratio v2 Wave 2). Token accents (value/cost/
-        // shape/gate/unit) are unchanged — they read on both backgrounds.
-        'exec-bg': '#f5f8fb',
-        'exec-surface': '#ffffff',
-        'exec-border': '#d8e1ec',
-        'exec-hover': '#edf2f7',
-        'exec-text': '#0f172a',
-        'exec-muted': '#64748b',
       },
       fontFamily: {
         mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],

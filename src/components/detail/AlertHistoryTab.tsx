@@ -7,6 +7,7 @@ import type { Alert, AlertSeverity } from '@/types';
 import { useStore } from '@/store/useStore';
 import { timeAgo } from '@/lib/format';
 import { DEMO_NOW } from '@/data/workloads';
+import { tint } from '@/lib/scales';
 
 const SEVERITY: Record<AlertSeverity, { color: string; label: string }> = {
   info: { color: 'var(--unit)', label: 'INFO' },
@@ -60,7 +61,7 @@ function AlertCard({
           <div className="flex items-center gap-2">
             <span
               className="rounded px-1.5 py-0.5 font-mono text-[9px] font-bold"
-              style={{ color: sev.color, background: `${sev.color}1a` }}
+              style={{ color: sev.color, background: tint(sev.color) }}
             >
               {sev.label}
             </span>

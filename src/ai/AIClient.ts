@@ -12,6 +12,7 @@
 // live exclusively inside pages/api/v1/ai/chat.ts.
 
 import type { AIProvider } from './providers';
+import type { EvidenceStatus } from '@/types';
 
 /** OpenAI-style role taxonomy for conversation turns. */
 export type AIRole = 'user' | 'assistant' | 'system';
@@ -53,6 +54,8 @@ export interface AIInitiativeSnapshot {
   budgetConsumedPct: number; // 0–100
   status: 'On Track' | 'At Risk' | 'Pending Approval';
   valueRatio: number; // R4: cost-efficiency denominator
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
+  valueEvidenceStatus?: EvidenceStatus;
   savingsOpportunity: number; // USD/mo from configured findings sources
 }
 
@@ -71,9 +74,41 @@ export interface AIWorkloadSnapshot {
   model: string;
   monthlySpend: number;
   valueRatio: number;
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
+  valueEvidenceStatus?: EvidenceStatus;
   demandShape: string;
   governanceGatesPassed: number; // 0–4
   costTrendPct: number;
+  /**
+   * Cache hit rate = cached ÷ (cached + uncached) input tokens (conformance A3).
+   * `null` when the workload used no input tokens today — never a fabricated 0%.
+   */
+  cacheHitRate: number | null;
+  // --- Optional analytics fields (Frank mock). Older clients omit them; the
+  // mock then falls back to the bundled seed by workload id, and says so when
+  // a field is genuinely unavailable rather than guessing. ---
+  /** Owning team (Workload.team). */
+  team?: string;
+  /** Model provider enum value (Workload.model_provider). */
+  provider?: string;
+  /** Defensible monthly value in USD (Workload.value.total_value). */
+  monthlyValue?: number;
+  monthlyBudget?: number;
+  /** Volume so far today: calls and tokens (the seed's daily framing). */
+  dailyInferences?: number;
+  tokensInToday?: number;
+  tokensOutToday?: number;
+  tokensCachedToday?: number;
+  /** Seeded alerts for this workload, compact. */
+  alerts?: AIAlertSnapshot[];
+}
+
+/** Compact alert projection for drill-down answers. */
+export interface AIAlertSnapshot {
+  type: string;
+  severity: string;
+  message: string;
+  acknowledged: boolean;
 }
 
 /** The response from a chat() call. */

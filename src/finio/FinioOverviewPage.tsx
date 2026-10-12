@@ -11,17 +11,17 @@
 // hairline borders, generous whitespace, and the warm accent ('shape') reserved
 // for the recommended-action CTA — nowhere else on the page.
 //
-// The FOCUS column list is read from the schema itself rather than retyped, so
-// the page cannot drift out of sync with what the exchange actually sends.
+// The FOCUS column list is read from the frozen wire table (wireColumns.ts) that
+// finioRowsForVersion also applies, so the page shows exactly what the exchange sends.
 
 import Link from 'next/link';
-import { COLUMNS_BY_VERSION } from '@/costsource/focusVersions';
+import { FINIO_WIRE_COLUMNS_BY_VERSION } from './wireColumns';
 import { SUPPORTED_FOCUS_VERSIONS } from './exchange';
 
 const DEMO_HREF = '/finio/demo';
 
 /** The mandatory FOCUS core every exchange carries, straight from the schema. */
-const FOCUS_CORE_COLUMNS = COLUMNS_BY_VERSION['1.0'];
+const FOCUS_CORE_COLUMNS = FINIO_WIRE_COLUMNS_BY_VERSION['1.0'];
 
 /** Ratio's value extensions. Each needs a human gloss, so these are annotated. */
 const RATIO_EXTENSION_COLUMNS: Array<{ name: string; gloss: string }> = [

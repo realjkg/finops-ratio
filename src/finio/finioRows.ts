@@ -15,7 +15,9 @@
 import { attachRatioValue } from '@/costsource/normalize';
 import { rawRowsForVersion } from '@/costsource/seed';
 import { CANONICAL_FOCUS_VERSION, type FocusVersion } from '@/costsource/focusVersions';
+import type { RawSourceRow } from '@/costsource/focusRows';
 import { FINIO_SOURCE_ID, type FocusRow } from './FinioClient';
+import { finioWireColumns } from './wireColumns';
 
 /**
  * All workloads as FOCUS rows shaped to `version`.
@@ -29,7 +31,10 @@ import { FINIO_SOURCE_ID, type FocusRow } from './FinioClient';
 export function finioRowsForVersion(
   version: FocusVersion = CANONICAL_FOCUS_VERSION,
 ): FocusRow[] {
-  return rawRowsForVersion(version).map((raw) =>
-    attachRatioValue(raw, FINIO_SOURCE_ID, version),
-  );
+  // Only the frozen wire columns for `version` cross the exchange.
+  const wire = new Set(finioWireColumns(version));
+  return rawRowsForVersion(version).map((raw) => {
+    const row = Object.fromEntries(Object.entries(raw).filter(([c]) => wire.has(c))) as unknown as RawSourceRow;
+    return attachRatioValue(row, FINIO_SOURCE_ID, version);
+  });
 }

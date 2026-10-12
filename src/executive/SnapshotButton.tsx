@@ -7,7 +7,7 @@
 import { useStore } from '@/store/useStore';
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { TOKEN_HEX } from '@/lib/scales';
+import { TOKEN_COLOR } from '@/lib/scales';
 import { withBasePath } from '@/lib/basePath';
 import type { ReportFormat } from './reportFilename';
 
@@ -91,7 +91,7 @@ export function SnapshotButton() {
         aria-expanded={open}
         disabled={state === 'working'}
         className="rounded-full border border-exec-border bg-exec-surface px-4 py-2 font-mono text-xs font-semibold tracking-wide shadow-sm transition-colors hover:bg-exec-bg focus:outline-none focus-visible:ring-2 disabled:opacity-60"
-        style={{ color: TOKEN_HEX.gate, ['--tw-ring-color' as string]: TOKEN_HEX.gate }}
+        style={{ color: TOKEN_COLOR.gate, ['--tw-ring-color' as string]: TOKEN_COLOR.gate }}
       >
         {state === 'working' ? 'Preparing…' : 'Snapshot ↓'}
       </button>
@@ -120,7 +120,7 @@ export function SnapshotButton() {
               </button>
             ))}
             {state === 'error' && (
-              <p className="px-4 py-2 font-body text-xs" style={{ color: TOKEN_HEX.cost }} role="alert">
+              <p className="px-4 py-2 font-body text-xs" style={{ color: TOKEN_COLOR.cost }} role="alert">
                 Export failed — please try again.
               </p>
             )}

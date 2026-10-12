@@ -1,7 +1,7 @@
 // Horizontal value-ratio bar — spec §3.3. Colored by the §10.3 ratio scale,
 // width scaled against a reference ceiling so excellent ratios visibly fill it.
 
-import { formatRatio } from '@/lib/format';
+import { formatReturn } from '@/lib/format';
 import { ratioColor } from '@/lib/scales';
 
 const REFERENCE_CEILING = 25; // ratios at/above this fill the bar
@@ -19,7 +19,7 @@ export function ValueRatioBar({
     <div className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between">
         <span className="font-mono text-xs font-bold" style={{ color }}>
-          {formatRatio(ratio)} return
+          {formatReturn(ratio)}
         </span>
         <span className="font-mono text-[11px] text-sub">{rightLabel}</span>
       </div>

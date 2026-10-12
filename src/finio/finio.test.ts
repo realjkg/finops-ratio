@@ -5,13 +5,20 @@
 // the repo checked — FinIO was the only client seam shipping with no tests while
 // costsource, tokenomics, prediction, ai, and the gateway all had them.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+// Pass-through spy (default = the real seed), so one test can feed the exporter extra raw keys.
+vi.mock('@/costsource/seed', async (importOriginal) => {
+  const m = await importOriginal<typeof import('@/costsource/seed')>();
+  return { ...m, rawRowsForVersion: vi.fn(m.rawRowsForVersion) };
+});
 import { WORKLOADS } from '@/data/workloads';
 import { governanceGatesPassed } from '@/lib/derive';
-import { FOCUS_VERSIONS, CANONICAL_FOCUS_VERSION } from '@/costsource/focusVersions';
-import { resolveWorkloadId } from '@/costsource/seed';
+import { FOCUS_VERSIONS, RATIFIED_FOCUS_VERSIONS, CANONICAL_FOCUS_VERSION } from '@/costsource/focusVersions';
+import { rawRowsForVersion, resolveWorkloadId } from '@/costsource/seed';
 import { FINIO_SOURCE_ID, type FocusRow } from './FinioClient';
 import { finioRowsForVersion } from './finioRows';
+import { finioWireColumns } from './wireColumns';
 import { validateFocusRow, validateFocusRows } from './focusValidation';
 import {
   SUPPORTED_FOCUS_VERSIONS,
@@ -31,7 +38,7 @@ describe('validateFocusRow', () => {
   const good = (): FocusRow => finioRowsForVersion('1.4')[0];
 
   it('accepts every row the responder emits, at every supported version', () => {
-    for (const version of FOCUS_VERSIONS) {
+    for (const version of RATIFIED_FOCUS_VERSIONS) {
       const result = validateFocusRows(finioRowsForVersion(version));
       expect(result, `version ${version}`).toEqual({ ok: true });
     }
@@ -120,9 +127,21 @@ describe('finioRowsForVersion', () => {
 
   it('shapes rows to the requested version — additive columns appear only at or above their version', () => {
     const v10 = finioRowsForVersion('1.0')[0];
-    expect(v10.ListCost).toBeUndefined(); // v1.1 column
-    expect(v10.ServiceSubcategory).toBeUndefined(); // v1.2 column
-    expect(v10.CapacityReservationId).toBeUndefined(); // v1.4 column
+    // Versions per the FROZEN FinIO wire table (wireColumns.ts), not the spec history.
+    expect(v10.ListCost).toBeUndefined(); // wire v1.1 column
+    expect(v10.ServiceSubcategory).toBeUndefined(); // wire v1.2 column
+    expect(v10.CapacityReservationId).toBeUndefined(); // wire v1.4 column
+    for (const v of FOCUS_VERSIONS) {
+      // The complete, ordered FOCUS key list on the wire IS the frozen table, and the
+      // seed emits exactly that (so no wire column is ever silently dropped).
+      const keys = (r: object) => Object.keys(r).filter((k) => !k.startsWith('x_Ratio'));
+      expect(keys(finioRowsForVersion(v)[0])).toEqual(finioWireColumns(v));
+      expect(keys(rawRowsForVersion(v)[0])).toEqual(finioWireColumns(v));
+    }
+    // A raw row carrying more than the wire version allows is cut back to the table.
+    const realRows = vi.mocked(rawRowsForVersion).getMockImplementation()!;
+    vi.mocked(rawRowsForVersion).mockImplementationOnce((v) => realRows(v).map((r) => ({ ...r, ListCost: 1, Bogus: 'x' })));
+    expect(Object.keys(finioRowsForVersion('1.0')[0]).filter((k) => !k.startsWith('x_Ratio'))).toEqual(finioWireColumns('1.0'));
 
     const v12 = finioRowsForVersion('1.2')[0];
     expect(v12.ListCost).toBeTypeOf('number');
@@ -170,8 +189,8 @@ describe('finioRowsForVersion', () => {
 // ---------------------------------------------------------------------------
 
 describe('negotiateFocusVersion', () => {
-  it('accepts every version in the canonical v1.0-v1.4 range', () => {
-    for (const version of FOCUS_VERSIONS) {
+  it('accepts every ratified version in the canonical v1.0-v1.4 range', () => {
+    for (const version of RATIFIED_FOCUS_VERSIONS) {
       expect(negotiateFocusVersion(version)).toEqual({ ok: true, version });
     }
   });
@@ -186,6 +205,17 @@ describe('negotiateFocusVersion', () => {
       expect(result.failure.message).not.toContain(requested);
       expect(result.failure.supported).toEqual([...SUPPORTED_FOCUS_VERSIONS]);
     }
+  });
+
+  it('refuses the unratified 1.5 working draft like any other unsupported version', () => {
+    // FOCUS 1.5 ratifies 3 Dec 2026; until then the A2A handshake does not
+    // negotiate it — same fixed 409 shape, never a special draft path.
+    const result = negotiateFocusVersion('1.5');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.status).toBe(409);
+    expect(result.failure.message).toBe('focusVersion not supported; responder supports 1.0–1.4');
+    expect(result.failure.supported).toEqual([...SUPPORTED_FOCUS_VERSIONS]);
   });
 
   it('refuses a non-string version rather than coercing it', () => {
@@ -261,7 +291,7 @@ describe('sessionStore', () => {
   // themselves dotted ("1.4"), so a token split into four fields and EVERY
   // session read as malformed. Any version with a dot in it must round-trip.
   it('round-trips a dotted FOCUS version through the token', () => {
-    for (const version of FOCUS_VERSIONS) {
+    for (const version of RATIFIED_FOCUS_VERSIONS) {
       const session = createSession(version, env);
       expect(session.sessionId.split('-')).toHaveLength(3);
       expect(validateSession(session.sessionId, env)).toEqual({ ok: true, focusVersion: version });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { seedWorkspace, executeCommand } from "@/simulation/server/workflow";
-import { evaluateOutcome, outcomeBasis } from "./model";
+import { estimateTca, evaluateOutcome, outcomeBasis, TCA_ESTIMATE_RATES } from "./model";
+import { WORKLOADS } from "@/data/workloads";
 const tech = { tenant: "acme", user: "Alex", persona: "technical" as const };
 const buyer = {
   tenant: "acme",
@@ -315,4 +316,73 @@ it("does not silently count missing model-cost coverage as zero expense", () => 
   expect(r.totalCostCents).toBeNull();
   expect(r.ledgerComplete).toBe(false);
   expect(r.recommendation).toBe("review");
+});
+
+describe("read-only TCA estimate (audit C9)", () => {
+  it("reuses the outcomes module's four cost categories plus model usage", () => {
+    const tca = estimateTca(WORKLOADS[0]);
+    expect(tca.lines.map((l) => l.category)).toEqual([
+      "model_usage",
+      "infrastructure",
+      "implementation",
+      "oversight",
+      "labor",
+    ]);
+  });
+
+  it("model usage + infrastructure reconstruct the headline spend (no double count)", () => {
+    const w = WORKLOADS[0];
+    const tca = estimateTca(w);
+    const inside = tca.lines
+      .filter((l) => l.inHeadlineSpend)
+      .reduce((n, l) => n + l.cents, 0);
+    expect(inside).toBe(Math.round(w.costs.monthly_spend * 100));
+    expect(tca.headlineSpendCents).toBe(Math.round(w.costs.monthly_spend * 100));
+  });
+
+  it("estimates the three missing categories at the default rates, marked assumed", () => {
+    const w = WORKLOADS[0];
+    const tca = estimateTca(w);
+    const spendCents = Math.round(w.costs.monthly_spend * 100);
+    for (const line of tca.lines) {
+      if (line.category === "model_usage" || line.category === "infrastructure") {
+        expect(line.status).toBe("projected");
+      } else {
+        expect(line.status).toBe("assumed");
+        expect(line.cents).toBe(Math.round(spendCents * TCA_ESTIMATE_RATES[line.category]));
+        expect(line.inHeadlineSpend).toBe(false);
+      }
+    }
+  });
+
+  it("full cost = headline spend + the three estimated categories", () => {
+    const w = WORKLOADS[0];
+    const tca = estimateTca(w);
+    const additions = tca.lines
+      .filter((l) => !l.inHeadlineSpend)
+      .reduce((n, l) => n + l.cents, 0);
+    expect(tca.fullCostCents).toBe(tca.headlineSpendCents + additions);
+  });
+
+  it("pairs the defensible numerator with the full cost — the C9 ratio", () => {
+    const w = WORKLOADS.find((x) => x.value.total_value > 0)!;
+    const tca = estimateTca(w);
+    expect(tca.fullCostRatio).not.toBeNull();
+    expect(tca.fullCostRatio!).toBeCloseTo(
+      (w.value.total_value * 100) / tca.fullCostCents,
+      6,
+    );
+    // Full cost exceeds the headline spend, so the full-cost return is strictly
+    // lower than the headline ratio — the pairing never flatters.
+    expect(tca.fullCostRatio!).toBeLessThan(
+      w.value.value_ratio === 0 ? Infinity : w.value.total_value / w.costs.monthly_spend,
+    );
+  });
+
+  it("never reports a positive full-cost ratio for a non-positive numerator", () => {
+    const negative = WORKLOADS.find((x) => x.value.total_value <= 0);
+    expect(negative).toBeDefined();
+    const tca = estimateTca(negative!);
+    expect(tca.fullCostRatio!).toBeLessThanOrEqual(0);
+  });
 });

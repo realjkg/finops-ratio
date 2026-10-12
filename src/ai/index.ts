@@ -14,6 +14,7 @@ export type {
   AIInitiativeSnapshot,
   AISpendSummary,
   AIWorkloadSnapshot,
+  AIAlertSnapshot,
   AIResponse,
 } from './AIClient';
 

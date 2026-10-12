@@ -2,15 +2,27 @@
 // (Wave 4 Slice 1). Served at /overview inside the shared AppShell, which owns
 // the top bar + agent launcher. Wave 4 Slice 2: portfolio spend-to-value graph
 // added as a secondary section above the executive surface.
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
+import { useRouter } from 'next/router';
 import { MissionSurface } from '@/executive/MissionSurface';
 import { SpendToValueGraph } from '@/findings/SpendToValueGraph';
 import { useStore } from '@/store/useStore';
 
 export default function Overview() {
   const workloads = useStore((s) => s.workloads);
+  const select = useStore((s) => s.select);
+  const router = useRouter();
   // Memoised so the graph doesn't re-render on unrelated store changes.
   const graphWorkloads = useMemo(() => workloads, [workloads]);
+  // Dot click-through: same findings → workload-detail flow as the nav —
+  // select the workload, then open the /workloads detail surface.
+  const openWorkload = useCallback(
+    (id: string) => {
+      select(id);
+      router.push('/workloads');
+    },
+    [select, router],
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -23,7 +35,11 @@ export default function Overview() {
           <p className="mb-4 text-xs text-sub">
             All workloads by monthly spend and value ratio. Reference lines mark break-even (1x) and the Gate 3 minimum (3x).
           </p>
-          <SpendToValueGraph workloads={graphWorkloads} size="large" />
+          <SpendToValueGraph
+            workloads={graphWorkloads}
+            size="large"
+            onOpenWorkload={openWorkload}
+          />
         </section>
 
         {/* Embedded: the shell owns the top bar + ChatPanel, so MissionSurface

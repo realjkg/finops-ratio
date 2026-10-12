@@ -1,9 +1,10 @@
 // Standalone /costsource route — demonstrates the source-agnostic cost-ingest
 // seam with a mock/live toggle. Picks a source, runs healthCheck +
 // fetchCostRows + fetchFindings, then shows cost rows flowing from the source
-// through the FOCUS v1.0-v1.4 version shim into the v1.4 canonical model, and on
-// into a Ratio workload that displays value ratio, forecast, and gates — the
-// numerator/denominator composition. Isolated from the main app; no store.
+// through the FOCUS v1.0-v1.5 version shim (1.5 = working draft) into the v1.4
+// canonical model, and on into a Ratio workload that displays value ratio,
+// forecast, and gates — the numerator/denominator composition. Isolated from
+// the main app; no store.
 import { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { createCostSourceClient, composeRatioView } from './index';
@@ -15,9 +16,12 @@ import type {
   CanonicalFocusRow,
   FocusVersion,
 } from './index';
-import { FOCUS_VERSIONS } from './index';
+import { FOCUS_VERSIONS, isDraftVersion } from './index';
+import { isPassthrough } from './focusVersions';
 import { LiveDataAuthError } from './LiveCostSourceClient';
+import { AiSpendRatioCard } from './AiSpendRatioCard';
 import { rawRowsForVersion } from './seed';
+import { formatSignedUSD } from './signedSpendDelta';
 import { formatUSD, formatMoney, formatRatio, formatPct } from '@/lib/format';
 import { ratioColor } from '@/lib/scales';
 import { withBasePath } from '@/lib/basePath';
@@ -31,6 +35,8 @@ type LoadState =
       health: SourceHealth;
       rows: CostRowsResult;
       findings: CostFinding[];
+      /** The source the ingest ran against, captured at start (the picker may change meanwhile). */
+      source?: FindingsSource;
     };
 
 /** Heading + message for a failed ingest; a live-data 401 gets its own readable copy. */
@@ -100,8 +106,11 @@ export function CostSourcePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientMode]);
 
+  const selected = sources.find((s) => s.id === sourceId);
+
   const runIngest = useCallback(async () => {
     const client = createCostSourceClient(clientMode);
+    const source = selected && { kind: selected.kind, name: selected.name };
     const window = currentWindow();
     try {
       setLoadState({ status: 'loading', phase: 'Checking adapter health…' });
@@ -113,13 +122,12 @@ export function CostSourcePage() {
       setLoadState({ status: 'loading', phase: 'Loading findings…' });
       const findings = await client.fetchFindings(sourceId);
 
-      setLoadState({ status: 'success', health, rows, findings });
+      setLoadState({ status: 'success', health, rows, findings, source });
     } catch (err) {
       setLoadState({ status: 'error', ...ingestErrorView(err) });
     }
-  }, [clientMode, sourceId]);
+  }, [clientMode, sourceId, selected]);
 
-  const selected = sources.find((s) => s.id === sourceId);
   const isLoading = loadState.status === 'loading';
 
   return (
@@ -131,13 +139,15 @@ export function CostSourcePage() {
             Cost Source Ingest
           </h1>
           <p className="mt-1 text-sm text-sub">
-            Source-agnostic cost ingest — any source’s FOCUS export (v1.0–v1.4) is
-            upgraded to the{' '}
+            Source-agnostic cost ingest — any source’s FOCUS export (v1.0–v1.5;
+            1.5 = working draft, ratifies 3 Dec 2026) is upgraded to the{' '}
             <span className="font-mono text-value">v1.4 canonical</span> model, then
             given Ratio’s value denominator, forecast, and gates. PointFive is
             source #1, not the architecture.
           </p>
         </div>
+
+        <AiSpendRatioCard />
 
         {/* Controls */}
         <div className="mb-6 rounded-card border border-edge bg-slab p-6">
@@ -251,7 +261,7 @@ export function CostSourcePage() {
             <UpgradeAuditCard rows={loadState.rows} />
             <CompositionCard rows={loadState.rows.rows} />
             <FocusRowsCard rows={loadState.rows.rows} />
-            <FindingsCard findings={loadState.findings} />
+            <FindingsCard findings={loadState.findings} source={loadState.source} />
           </div>
         )}
 
@@ -282,7 +292,7 @@ type IngestState =
   | { status: 'success'; result: CostRowsResult };
 
 /**
- * Lets the user pick a FOCUS version (v1.0–v1.4) and POST sample rows
+ * Lets the user pick a FOCUS version (v1.0–v1.5; 1.5 = working draft) and POST sample rows
  * directly to the FocusFileAdapter ingest endpoint. Shows the backfill
  * audit and canonical output — demonstrating the adapter works with
  * arbitrary FOCUS exports, not just the mock seed.
@@ -348,7 +358,7 @@ function IngestFromFilePanel({ sourceId }: { sourceId: string }) {
                 : 'border-edge bg-raised text-sub hover:text-txt',
             ].join(' ')}
           >
-            v{v}
+            {isDraftVersion(v) ? `v${v} (draft)` : `v${v}`}
           </button>
         ))}
         <button
@@ -420,7 +430,7 @@ function HealthCard({ health }: { health: SourceHealth }) {
 }
 
 function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
-  const passthrough = rows.backfilledColumns.length === 0;
+  const passthrough = isPassthrough(rows);
   return (
     <Card title="Version normalization">
       <p className="text-sm text-txt">
@@ -438,6 +448,19 @@ function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
           {rows.backfilledColumns.map((c) => (
             <Chip key={c}>{c}</Chip>
           ))}
+        </div>
+      )}
+      {rows.draftColumnsBackfilled.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs text-dim">
+            FOCUS 1.5 working-draft columns backfilled (ratifies 3 Dec 2026 —
+            optional, omitted values stay null):
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {rows.draftColumnsBackfilled.map((c) => (
+              <Chip key={c}>{c}</Chip>
+            ))}
+          </div>
         </div>
       )}
     </Card>
@@ -575,7 +598,22 @@ export function FocusRowsCard({ rows }: { rows: CanonicalFocusRow[] }) {
   );
 }
 
-function FindingsCard({ findings }: { findings: CostFinding[] }) {
+type FindingsSource = Pick<CostSourceDescriptor, 'kind' | 'name'>;
+
+/** Names the source the findings came from; PointFive keeps its DeepWaste shape label. */
+function findingsTitle(count: number, source?: FindingsSource): string {
+  // "ServiceNow (synthetic demo data)" -> "ServiceNow, synthetic demo data": no nested parentheses.
+  const label = !source || source.kind === 'pointfive' ? 'PointFive DeepWaste shape' : source.name.replace(/\s*\((.*)\)$/, ', $1');
+  return `Findings — ${count} (${label})`;
+}
+
+export function FindingsCard({
+  findings,
+  source,
+}: {
+  findings: CostFinding[];
+  source?: FindingsSource;
+}) {
   if (findings.length === 0) {
     return (
       <Card title="Findings">
@@ -586,7 +624,7 @@ function FindingsCard({ findings }: { findings: CostFinding[] }) {
     );
   }
   return (
-    <Card title={`Findings — ${findings.length} (PointFive DeepWaste shape)`}>
+    <Card title={findingsTitle(findings.length, source)}>
       <ul className="space-y-2">
         {findings.map((f) => (
           <li
@@ -611,7 +649,7 @@ function FindingsCard({ findings }: { findings: CostFinding[] }) {
                   save {formatUSD(f.estimatedMonthlySavings)}/mo
                 </span>
               ) : (
-                <span className="text-cost">+{formatUSD(f.observedSpendDelta)}/mo</span>
+                <span className="text-cost">{formatSignedUSD(f.observedSpendDelta)}/mo</span>
               )}
             </div>
           </li>

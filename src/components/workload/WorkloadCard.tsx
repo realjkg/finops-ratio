@@ -4,6 +4,7 @@
 
 import type { Workload } from '@/types';
 import type { SecondaryMode } from '@/store/useStore';
+import type { LandedProvenance } from '@/connectors/ingestLanding';
 import { deriveUnitCosts } from '@/lib/derive';
 import { formatCents, formatSignedPct, formatUSD } from '@/lib/format';
 import { PROVIDER_LABEL } from '@/lib/scales';
@@ -29,11 +30,14 @@ export function WorkloadCard({
   selected,
   secondaryMode,
   onSelect,
+  landedVia,
 }: {
   workload: Workload;
   selected: boolean;
   secondaryMode: SecondaryMode;
   onSelect: (id: string) => void;
+  /** Connector provenance: this workload's rows landed in an ingest run. */
+  landedVia?: LandedProvenance;
 }) {
   const trendUp = workload.cost_trend_pct > 0;
   return (
@@ -58,6 +62,17 @@ export function WorkloadCard({
       <div className="mb-2 font-mono text-[10px] text-dim">
         {workload.model} · {workload.team} · {PROVIDER_LABEL[workload.model_provider]}
       </div>
+
+      {landedVia && (
+        <div
+          className="mb-2 flex items-center gap-1.5 font-mono text-[10px]"
+          style={{ color: 'var(--value)' }}
+          title={`Cost rows for this workload landed from ${landedVia.sourceName} at ${landedVia.at}`}
+        >
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--value)' }} />
+          landed via {landedVia.sourceName}
+        </div>
+      )}
 
       <ValueRatioBar ratio={workload.value.value_ratio} rightLabel={secondaryLabel(workload, secondaryMode)} />
 

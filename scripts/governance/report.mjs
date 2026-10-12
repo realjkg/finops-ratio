@@ -59,24 +59,36 @@ export function buildReport(result, ctx = {}) {
 
   lines.push(`### Governance EXCEPTION REPORT — risk:restricted${sha}`, '');
   lines.push(`Restricted classes: ${result.classes.map((c) => `\`${c}\``).join(', ')}`, '');
-  lines.push('Auto-merge is disabled for this PR. This report replaces waiting for a human: the orchestrator may merge only once every item below is evidenced in the PR body.', '');
   lines.push('| Path | Class | Rule |', '| --- | --- | --- |');
   for (const r of result.reasons) {
     lines.push(`| \`${cell(r.path || '(change set)')}\` | \`${cell(r.class)}\` | \`${cell(r.rule)}\` |`);
   }
-  lines.push('', '#### Evidence required before merge (orchestrator charter)', '');
-  lines.push('- [ ] All gates green on the head SHA (lint, typecheck, unit + integration tests, migrations up/down where defined, build).');
-  lines.push('- [ ] Challenger re-review passed with zero open High findings.');
-  lines.push('- [ ] Operational evidence complete (exact commands, results, fixture provenance, known gaps).');
-  lines.push('- [ ] Rollback verified in test (procedure + result linked).');
-  lines.push('- [ ] Merge decision logged with reasoning in the PR body.');
-  const full = /^[0-9a-f]{40}$/i.test(String(ctx.headSha ?? '')) ? String(ctx.headSha).toLowerCase() : '<head-sha>';
-  lines.push('', '#### Exception queue', '');
-  lines.push('This PR can only merge through the exception path. The required status `Governance · merge eligibility` stays `failure` until both of the following hold:');
-  lines.push(`- A user with **admin or maintain** permission (the orchestrator or owner) posts a PR comment whose first line is exactly \`/exception-approve ${full}\`, after the independent challenger review evidence is recorded in the PR. Put a link to that challenger review evidence on the following lines: the gate reads only the first line, but the link is the audit trail.`);
-  lines.push('- Every non-risk gate passes: genuine CI on every run, a Copilot review on the head, zero unresolved threads, a same-repo PR, no shared head, not a draft, base `main`.');
-  lines.push('');
-  lines.push('The approval binds to that exact commit SHA. A new head needs a new approval. `/exception-revoke <sha>` revokes an approval, and so does editing or deleting an admin/maintain command comment. Revocation is permanent for that SHA: it is recorded as a `Governance · exception revoked` status, which cannot be deleted. The workflow never enables auto-merge for restricted PRs; merge manually once the status is green.');
+
+  // Trusted platform author + change set provably clear of the gate's own
+  // files: the QA bar is the merge gate, so this report must NOT send the
+  // owner to the exception queue. Gate files touched (or the change set
+  // unknown/truncated): the exception queue stays, for any author.
+  // ctx.trustedAuthor is the trusted LOGIN (or null/undefined).
+  if (ctx.trustedAuthor && ctx.touchesGovernanceGate === false) {
+    lines.push('', `#### Auto-merge at the QA bar (trusted platform author @${ctx.trustedAuthor})`, '');
+    lines.push(`Auto-merge is NOT blocked by the restricted classification for this PR: its author @${ctx.trustedAuthor} is a trusted platform actor (\`TRUSTED_ACTOR_LOGINS\` in \`scripts/governance/eligibility.mjs\`) and the change set does not touch the governance gate's own files (\`.github/workflows/governance.yml\`, \`scripts/governance/**\`). Per the owner's standing directive — auto-merge PRs that are QA'ed and properly tested without defects — the merge-eligibility job enables squash auto-merge once every computable gate is green: genuine CI on every qualifying run, a Copilot review on the head SHA, zero unresolved review threads, every other check run and commit status successful, same-repo PR, no shared head, not a draft, base \`main\`. No \`/exception-approve\` is needed on this path.`, '');
+    lines.push('Not verified mechanically by this workflow (the honest limit of the QA bar, accepted by policy for this author): challenger re-review evidence, operational evidence, and rollback verification are not gated here.', '');
+  } else {
+    lines.push('Auto-merge is disabled for this PR. This report replaces waiting for a human: the orchestrator may merge only once every item below is evidenced in the PR body.', '');
+    lines.push('#### Evidence required before merge (orchestrator charter)', '');
+    lines.push('- [ ] All gates green on the head SHA (lint, typecheck, unit + integration tests, migrations up/down where defined, build).');
+    lines.push('- [ ] Challenger re-review passed with zero open High findings.');
+    lines.push('- [ ] Operational evidence complete (exact commands, results, fixture provenance, known gaps).');
+    lines.push('- [ ] Rollback verified in test (procedure + result linked).');
+    lines.push('- [ ] Merge decision logged with reasoning in the PR body.');
+    const full = /^[0-9a-f]{40}$/i.test(String(ctx.headSha ?? '')) ? String(ctx.headSha).toLowerCase() : '<head-sha>';
+    lines.push('', '#### Exception queue', '');
+    lines.push('This PR can only merge through the exception path. The required status `Governance · merge eligibility` stays `failure` until both of the following hold:');
+    lines.push(`- A user with **admin or maintain** permission (the orchestrator or owner) posts a PR comment whose first line is exactly \`/exception-approve ${full}\`, after the independent challenger review evidence is recorded in the PR. Put a link to that challenger review evidence on the following lines: the gate reads only the first line, but the link is the audit trail.`);
+    lines.push('- Every non-risk gate passes: genuine CI on every run, a Copilot review on the head, zero unresolved threads, a same-repo PR, no shared head, not a draft, base `main`.');
+    lines.push('');
+    lines.push('The approval binds to that exact commit SHA. A new head needs a new approval. `/exception-revoke <sha>` revokes an approval, and so does editing or deleting an admin/maintain command comment. Revocation is permanent for that SHA: it is recorded as a `Governance · exception revoked` status, which cannot be deleted. The workflow never enables auto-merge for restricted PRs that touch the governance gate\'s own files; merge manually once the status is green.');
+  }
   lines.push('', '> The non-delegable human gate is the **production environment** (deploys, production data deletion), not this merge.');
   lines.push('', ...outsider, FRESH_REVIEW_NOTE, ...prot);
   return `${lines.join('\n')}\n`;

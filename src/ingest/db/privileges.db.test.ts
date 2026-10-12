@@ -13,13 +13,18 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { Client } from 'pg';
-import { createTestDatabase, type TestDatabase } from './testing/harness';
+import { createTestDatabase, fixtureMigrationVersions, type TestDatabase } from './testing/harness';
 import { seedTwoTenants } from './testing/fixtures';
 import { DEFAULT_MIGRATIONS_DIR, loadMigrations } from './migrationFiles';
 import { migrateDown, migrateUp, migrationStatus } from './migrate';
 
 // Loaded lazily so each test reports its own failure while the module is missing.
 const model = () => import('./privilegeModel');
+
+// Fixture versions just past the last real migration (injected fixture files must
+// never shadow a real version) and the full live sequence (from-empty assertions).
+const [V1, V2] = fixtureMigrationVersions(2);
+const REAL_VERSIONS = loadMigrations(DEFAULT_MIGRATIONS_DIR).map((f) => f.version);
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -43,6 +48,21 @@ async function connect(db: TestDatabase): Promise<Client> {
 function migrationsWith(extra: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-priv-'));
   cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
+  // Fixtures build on the reviewed 0001 foundation only: later real migrations
+  // (cost attribution, consumption, ...) are excluded so the injected
+  // adversarial versions below never collide with the live sequence.
+  for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) {
+    if (!f.startsWith('0001_')) continue;
+    fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
+  }
+  for (const [name, body] of Object.entries(extra)) fs.writeFileSync(path.join(dir, name), body);
+  return dir;
+}
+
+/** Full real-migration copy, for tests that migrate on top of an already-migrated database. */
+function fullMigrationsWith(extra: Record<string, string>): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-priv-full-'));
+  cleanups.push(async () => fs.rmSync(dir, { recursive: true, force: true }));
   for (const f of fs.readdirSync(DEFAULT_MIGRATIONS_DIR)) fs.copyFileSync(path.join(DEFAULT_MIGRATIONS_DIR, f), path.join(dir, f));
   for (const [name, body] of Object.entries(extra)) fs.writeFileSync(path.join(dir, name), body);
   return dir;
@@ -65,9 +85,9 @@ async function fnExists(c: Client, name: string): Promise<boolean> {
 async function expectRunnerRefuses(sql: string, expectMessage: RegExp, opts: { contract?: boolean } = {}): Promise<Client> {
   const db = await freshDb();
   const c = await connect(db);
-  const dir = migrationsWith({ '0002_extra.up.sql': (opts.contract ? CONTRACT : EXPAND) + sql });
+  const dir = migrationsWith({ [`${V1}_extra.up.sql`]: (opts.contract ? CONTRACT : EXPAND) + sql });
   // The classifier lets it through (marked); only the catalog check stands in the way.
-  expect(loadMigrations(dir).map((m) => m.version)).toEqual(['0001', '0002']);
+  expect(loadMigrations(dir).map((m) => m.version)).toEqual(['0001', V1]);
   const err = await migrateUp(c, { dir, allowContract: opts.contract === true }).then(
     () => null,
     (e: Error & { code?: string }) => e,
@@ -81,11 +101,11 @@ async function expectRunnerRefuses(sql: string, expectMessage: RegExp, opts: { c
 }
 
 describe('runner catalog check: positive control', () => {
-  it('0001 applies cleanly and the effective reader/worker privileges equal the reviewed allow-list exactly', async () => {
+  it('the full migration set applies cleanly and the effective reader/worker privileges equal the reviewed allow-list exactly', async () => {
     const { REVIEWED_PRIVILEGES, assertReviewedPrivileges, effectivePrivileges } = await model();
     const db = await freshDb();
     const c = await connect(db);
-    expect(await migrateUp(c)).toEqual({ applied: ['0001'] });
+    expect(await migrateUp(c)).toEqual({ applied: REAL_VERSIONS });
     await assertReviewedPrivileges(c);
     const eff = await effectivePrivileges(c);
     for (const role of ['ratio_reader', 'ratio_worker'] as const) {
@@ -94,14 +114,18 @@ describe('runner catalog check: positive control', () => {
     expect(REVIEWED_PRIVILEGES.ratio_reader).toEqual(
       expect.arrayContaining(['relation:ratio.cost_facts_published:SELECT', 'function:ratio.current_tenant_id()', 'schema:ratio:USAGE']),
     );
-    expect(REVIEWED_PRIVILEGES.ratio_reader.filter((p) => p.startsWith('relation:'))).toEqual(['relation:ratio.cost_facts_published:SELECT']);
+    expect(REVIEWED_PRIVILEGES.ratio_reader.filter((p) => p.startsWith('relation:'))).toEqual([
+      'relation:ratio.cost_facts_published:SELECT',
+      'relation:ratio.outcome_events_published:SELECT',
+      'relation:ratio.outcome_period_counts:SELECT',
+    ]);
   });
 
   it('a legitimate marked expand migration (table, ratio function revoked from PUBLIC, ratio view, no new grants) still applies', async () => {
     const db = await freshDb();
     const c = await connect(db);
     const dir = migrationsWith({
-      '0002_legit.up.sql':
+      [`${V1}_legit.up.sql`]:
         EXPAND +
         'SET LOCAL ROLE ratio_owner;\n' +
         'CREATE TABLE ratio.notes (tenant_id uuid NOT NULL, body text);\n' +
@@ -111,8 +135,8 @@ describe('runner catalog check: positive control', () => {
         'REVOKE EXECUTE ON FUNCTION ratio.add_one(int) FROM PUBLIC;\n' +
         '-- ratio:allow-view owner-only projection\nCREATE VIEW ratio.note_bodies AS SELECT body FROM ratio.notes;\n',
     });
-    expect(await migrateUp(c, { dir })).toEqual({ applied: ['0001', '0002'] });
-    expect(await versions(c)).toEqual(['0001', '0002']);
+    expect(await migrateUp(c, { dir })).toEqual({ applied: ['0001', V1] });
+    expect(await versions(c)).toEqual(['0001', V1]);
     await (await model()).assertReviewedPrivileges(c);
   });
 });
@@ -217,16 +241,16 @@ describe('runner catalog check refuses what the classifier cannot see', () => {
     const db = await freshDb();
     const c = await connect(db);
     const dir = migrationsWith({
-      '0002_extra.up.sql': EXPAND + 'CREATE TABLE public.scratch_priv (x int);\n',
-      '0002_extra.down.sql': 'DROP TABLE public.scratch_priv;\nGRANT TRUNCATE ON ratio.sync_runs TO ratio_worker;\n',
+      [`${V1}_extra.up.sql`]: EXPAND + 'CREATE TABLE public.scratch_priv (x int);\n',
+      [`${V1}_extra.down.sql`]: 'DROP TABLE public.scratch_priv;\nGRANT TRUNCATE ON ratio.sync_runs TO ratio_worker;\n',
     });
-    expect(await migrateUp(c, { dir })).toEqual({ applied: ['0001', '0002'] });
+    expect(await migrateUp(c, { dir })).toEqual({ applied: ['0001', V1] });
     const err = await migrateDown(c, { steps: 1, dir, env: { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'test' } }).then(
       () => null,
       (e: Error & { code?: string }) => e,
     );
     expect(err?.code).toBe('PRIVILEGE_MODEL_VIOLATION');
-    expect(await versions(c)).toEqual(['0001', '0002']);
+    expect(await versions(c)).toEqual(['0001', V1]);
     expect((await c.query(`SELECT to_regclass('public.scratch_priv') IS NOT NULL AS e`)).rows[0].e).toBe(true);
   });
 });
@@ -351,7 +375,7 @@ describe('round 5 M1: code that would run after the check (ledger / deferred tri
         WHERE NOT t.tgisinternal ORDER BY 1`,
     );
     expect(r.rows.map((x) => x.t)).toEqual([...REVIEWED_TRIGGERS].sort());
-    expect(REVIEWED_TRIGGERS).toHaveLength(11);
+    expect(REVIEWED_TRIGGERS).toHaveLength(19);
   });
 });
 
@@ -566,7 +590,7 @@ describe('round 5: tests added for mutations that survived the first table', () 
 // Round 7 (Copilot review of 19fdbed)
 // ---------------------------------------------------------------------------
 
-const HOSTILE_0002 =
+const HOSTILE =
   CONTRACT +
   'CREATE SCHEMA attacker;\n' +
   "CREATE FUNCTION attacker.name_eq_false(name, name) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select false';\n" +
@@ -581,12 +605,12 @@ describe('round 7 High A: session-scoped settings a migration plants do not surv
     const db = await freshDb();
     const c = await connect(db);
     const dir = migrationsWith({
-      '0002_hostile.up.sql': HOSTILE_0002,
-      '0003_probe.up.sql':
+      [`${V1}_hostile.up.sql`]: HOSTILE,
+      [`${V2}_probe.up.sql`]:
         EXPAND +
         "CREATE TABLE public.session_probe AS SELECT current_setting('search_path') AS sp, current_setting('row_security') AS rs, ('a'::name = 'a'::name) AS eq, current_user::text AS cu;\n",
     });
-    expect(await migrateUp(c, { dir, allowContract: true })).toEqual({ applied: ['0001', '0002', '0003'] });
+    expect(await migrateUp(c, { dir, allowContract: true })).toEqual({ applied: ['0001', V1, V2] });
     const probe = (await db.pool.query(`SELECT sp, rs, eq, cu FROM public.session_probe`)).rows[0];
     expect(probe).toEqual({ sp: 'pg_catalog, pg_temp', rs: 'on', eq: true, cu: 'postgres' });
     // ... and the runner leaves the caller's connection pinned, not hostile.
@@ -600,8 +624,8 @@ describe('round 7 High A: session-scoped settings a migration plants do not surv
     const db = await freshDb();
     const c = await connect(db);
     const dir = migrationsWith({
-      '0002_hostile.up.sql': HOSTILE_0002,
-      '0003_grant.up.sql': EXPAND + 'GRANT TRUNCATE ON ratio.cost_facts TO ratio_worker;\n',
+      [`${V1}_hostile.up.sql`]: HOSTILE,
+      [`${V2}_grant.up.sql`]: EXPAND + 'GRANT TRUNCATE ON ratio.cost_facts TO ratio_worker;\n',
     });
     const err = await migrateUp(c, { dir, allowContract: true }).then(
       () => null,
@@ -609,26 +633,26 @@ describe('round 7 High A: session-scoped settings a migration plants do not surv
     );
     expect(err?.code).toBe('PRIVILEGE_MODEL_VIOLATION');
     expect(err?.message).toMatch(/ratio_worker holds relation:ratio\.cost_facts:TRUNCATE/);
-    expect(await versions(c)).toEqual(['0001', '0002']);
+    expect(await versions(c)).toEqual(['0001', V1]);
   });
 
   it('down: a down file that plants a session search_path does not affect the next down step', async () => {
     const db = await freshDb();
     const c = await connect(db);
     const dir = migrationsWith({
-      '0002_attacker.up.sql':
+      [`${V1}_attacker.up.sql`]:
         CONTRACT +
         'CREATE SCHEMA attacker;\n' +
         "CREATE FUNCTION attacker.name_eq_false(name, name) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'select false';\n" +
         'CREATE OPERATOR attacker.= (LEFTARG = name, RIGHTARG = name, FUNCTION = attacker.name_eq_false);\n',
-      '0002_attacker.down.sql':
+      [`${V1}_attacker.down.sql`]:
         "CREATE TABLE public.down_probe AS SELECT pg_catalog.current_setting('search_path') AS sp, ('a'::name = 'a'::name) AS eq;\n" +
         'DROP SCHEMA attacker CASCADE;\n',
-      '0003_plant.up.sql': EXPAND + 'CREATE TABLE public.plant_marker (x int);\n',
-      '0003_plant.down.sql': 'DROP TABLE public.plant_marker;\nSET search_path = attacker, pg_catalog;\n',
+      [`${V2}_plant.up.sql`]: EXPAND + 'CREATE TABLE public.plant_marker (x int);\n',
+      [`${V2}_plant.down.sql`]: 'DROP TABLE public.plant_marker;\nSET search_path = attacker, pg_catalog;\n',
     });
-    expect(await migrateUp(c, { dir, allowContract: true })).toEqual({ applied: ['0001', '0002', '0003'] });
-    expect(await migrateDown(c, { steps: 2, dir, env: { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'test' } })).toEqual({ reverted: ['0003', '0002'] });
+    expect(await migrateUp(c, { dir, allowContract: true })).toEqual({ applied: ['0001', V1, V2] });
+    expect(await migrateDown(c, { steps: 2, dir, env: { RATIO_ALLOW_DOWN_MIGRATIONS: '1', RATIO_ENV: 'test' } })).toEqual({ reverted: [V2, V1] });
     expect((await db.pool.query(`SELECT sp, eq FROM public.down_probe`)).rows[0]).toEqual({ sp: 'pg_catalog, pg_temp', eq: true });
   });
 
@@ -804,12 +828,12 @@ describe('round 8 L2 (S5): the runner resets a used caller connection before tak
     const c = await connect(db);
     await c.query('SET search_path = attacker, pg_catalog');
     await c.query('SET row_security = off');
-    const dir = migrationsWith({
-      '0002_probe.up.sql':
+    const dir = fullMigrationsWith({
+      [V1 + '_probe.up.sql']:
         EXPAND +
         "CREATE TABLE public.session_probe AS SELECT current_setting('search_path') AS sp, current_setting('row_security') AS rs, ('a'::name = 'a'::name) AS eq;\n",
     });
-    expect(await migrateUp(c, { dir })).toEqual({ applied: ['0002'] });
+    expect(await migrateUp(c, { dir })).toEqual({ applied: [V1] });
     expect((await db.pool.query(`SELECT sp, rs, eq FROM public.session_probe`)).rows[0]).toEqual({ sp: 'pg_catalog, pg_temp', rs: 'on', eq: true });
   });
 });

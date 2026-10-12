@@ -37,7 +37,7 @@ export const GCP_LIVE_FLAG_ENV = 'COSTSOURCE_GCP_LIVE';
 
 // Public clouds publish FOCUS-certified exports at v1.0 (the documented baseline
 // AWS Data Exports advertises as "FOCUS 1.0 with AWS columns"). The shim covers
-// any v1.0–v1.4 export, so this is the conservative native version.
+// any v1.0–v1.5 export (1.5 a working draft), so this is the conservative native version.
 const CLOUD_FOCUS_VERSION = '1.0' as const;
 
 export const AZURE_CONNECTOR_SPEC: ConnectorSpec = {

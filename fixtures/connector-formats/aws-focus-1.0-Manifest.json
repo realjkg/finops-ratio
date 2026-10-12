@@ -1,0 +1,7 @@
+{
+  "$comment": "AWS Data Exports FOCUS 1.0 manifest (metadata/BILLING_PERIOD=2026-09/focus-v1-Manifest.json). Layout and 'dataFiles' are [S] (AWS delivery page not fetchable; third-party readers use dataFiles). Every other field name is [U]: this is the repo's own accepted shape, not a verified AWS manifest. Synthetic ids.",
+  "dataFiles": [
+    "s3://synthetic-focus-bucket/finops/focus-v1/data/BILLING_PERIOD=2026-09/20260914T060000Z-synthetic-run-0001/focus-v1-00001.csv.gz"
+  ],
+  "billingPeriod": { "start": "2026-09-01T00:00:00.000Z", "end": "2026-10-01T00:00:00.000Z" }
+}

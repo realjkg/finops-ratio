@@ -15,8 +15,11 @@ import { COST_SOURCES, findSource, findingsFor, rawRowsForVersion } from './seed
 import { normalizeRows } from './normalize';
 import { PointFiveLiveAdapter } from './PointFiveLiveAdapter';
 import { POINTFIVE_LIVE_SOURCE_ID } from './pointfiveConfig';
+import { ServiceNowAdapter, SERVICENOW_SANDBOX_SOURCE_ID } from './ServiceNowAdapter';
 import { CloudConnectorAdapter } from './CloudConnectorAdapter';
 import { findConnectorSpec } from './focusExportConnectors';
+import { isSyntheticCloudSource } from './sandboxSources';
+import { syntheticCloudHealth, syntheticCloudRows } from './syntheticCloudSeed';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -59,7 +62,17 @@ export class MockCostSourceClient implements CostSourceClient {
     if (!src.capabilities.includes('costRows')) {
       throw new Error(`Source '${sourceId}' does not provide cost rows`);
     }
-    const { rows, backfilledColumns } = normalizeRows(
+    // Synthetic AWS / Azure / GCP sandboxes emit their own rows (never the
+    // all-workload fallthrough below).
+    if (isSyntheticCloudSource(sourceId)) {
+      return syntheticCloudRows(sourceId, window);
+    }
+    // Synthetic ServiceNow dispatches to its own adapter (CMDB/ITBM allocation
+    // shape) — same normalization shim, its own row emitter.
+    if (sourceId === SERVICENOW_SANDBOX_SOURCE_ID) {
+      return ServiceNowAdapter.ingest(ServiceNowAdapter.seedRows(), src.focusVersion, sourceId, window);
+    }
+    const { rows, backfilledColumns, draftColumnsBackfilled } = normalizeRows(
       rawRowsForVersion(src.focusVersion),
       src.id,
       src.focusVersion,
@@ -69,6 +82,7 @@ export class MockCostSourceClient implements CostSourceClient {
       sourceVersion: src.focusVersion,
       canonicalVersion: CANONICAL_FOCUS_VERSION,
       backfilledColumns,
+      draftColumnsBackfilled,
       window,
       generatedAt: new Date().toISOString(),
       rows,
@@ -90,6 +104,12 @@ export class MockCostSourceClient implements CostSourceClient {
     if (sourceId === POINTFIVE_LIVE_SOURCE_ID) {
       return new PointFiveLiveAdapter().healthCheck();
     }
+    if (sourceId === SERVICENOW_SANDBOX_SOURCE_ID) {
+      return ServiceNowAdapter.healthCheck(sourceId);
+    }
+    if (isSyntheticCloudSource(sourceId)) {
+      return syntheticCloudHealth(sourceId);
+    }
     const connectorSpec = findConnectorSpec(sourceId);
     if (connectorSpec) {
       return new CloudConnectorAdapter(connectorSpec).healthCheck();
@@ -108,4 +128,3 @@ export class MockCostSourceClient implements CostSourceClient {
     };
   }
 }
-

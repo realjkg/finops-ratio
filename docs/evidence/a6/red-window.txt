@@ -1,0 +1,2 @@
+     × window_filters_rows_by_charge_period_start_half_open 230ms
+      Tests  1 failed | 12 passed (13)

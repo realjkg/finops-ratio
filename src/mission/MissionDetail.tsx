@@ -10,7 +10,7 @@
 import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import { useStore, type DetailTab } from '@/store/useStore';
 import { formatInt, formatRatio } from '@/lib/format';
-import { PROVIDER_LABEL, ratioColor, TOKEN_HEX } from '@/lib/scales';
+import { PROVIDER_LABEL, ratioColor, TOKEN_COLOR, tint } from '@/lib/scales';
 import { KpiCards } from '@/components/detail/KpiCards';
 import { BudgetProfileTab } from '@/components/detail/BudgetProfileTab';
 import { MultiModelTab } from '@/components/detail/MultiModelTab';
@@ -46,9 +46,9 @@ const SECTIONS: MissionSection[] = [
 ];
 
 const STATUS_META: Record<MissionStatus, { label: string; color: string }> = {
-  nominal: { label: 'ON TRACK', color: TOKEN_HEX.value },
-  caution: { label: 'AT RISK', color: TOKEN_HEX.shape },
-  critical: { label: 'CRITICAL', color: TOKEN_HEX.cost },
+  nominal: { label: 'ON TRACK', color: TOKEN_COLOR.value },
+  caution: { label: 'AT RISK', color: TOKEN_COLOR.shape },
+  critical: { label: 'CRITICAL', color: TOKEN_COLOR.cost },
 };
 
 interface MissionDetailProps {
@@ -145,7 +145,7 @@ export function MissionDetail({ missionId, onBack }: MissionDetailProps) {
               <div className="mt-3 flex items-center gap-2">
                 <span
                   className="rounded-full px-2 py-0.5 font-mono text-[10px] font-bold tracking-widest"
-                  style={{ color: meta.color, backgroundColor: `${meta.color}1a` }}
+                  style={{ color: meta.color, backgroundColor: tint(meta.color) }}
                 >
                   {meta.label}
                 </span>

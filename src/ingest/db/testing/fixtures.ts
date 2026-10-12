@@ -17,6 +17,12 @@ export interface TenantFixture {
   batchPublished: string;
   batchStaged: string;
   batchQuarantined: string;
+  /** approved outcome-unit registration row (0004) seeded for this tenant */
+  outcomeRegistryId: string;
+  /** measured-financial benefit evidence row (0004) seeded for this tenant */
+  outcomeBenefitId: string;
+  /** supplemental cost row (0004) seeded for this tenant */
+  outcomeSupplementalId: string;
   period: string;
   /** sum of billed_cost of the published batch, as Postgres numeric text */
   publishedTotal: string;
@@ -35,6 +41,9 @@ function ids(prefix: string, slug: string, publishedCosts: string[], otherCost: 
     batchPublished: u(6),
     batchStaged: u(7),
     batchQuarantined: u(8),
+    outcomeRegistryId: u(9),
+    outcomeBenefitId: u(10),
+    outcomeSupplementalId: u(11),
     period: '2026-08-01',
     publishedTotal: '',
     publishedRows: publishedCosts.length,
@@ -68,6 +77,14 @@ export const TENANT_TABLES: Array<{ table: string; tenantCol: string }> = [
   { table: 'cost_facts', tenantCol: 'tenant_id' },
   { table: 'period_publications', tenantCol: 'tenant_id' },
   { table: 'source_checkpoints', tenantCol: 'tenant_id' },
+  // 0002 org-attribution registries
+  { table: 'billing_scopes', tenantCol: 'tenant_id' },
+  { table: 'fx_rates', tenantCol: 'tenant_id' },
+  // 0004_outcome_ledger: the durable outcome accounting tables.
+  { table: 'outcome_unit_registrations', tenantCol: 'tenant_id' },
+  { table: 'outcome_events', tenantCol: 'tenant_id' },
+  { table: 'outcome_benefit_evidence', tenantCol: 'tenant_id' },
+  { table: 'outcome_supplemental_costs', tenantCol: 'tenant_id' },
 ];
 
 async function seedOne(pool: Pool, t: ReturnType<typeof ids>): Promise<TenantFixture> {
@@ -84,6 +101,18 @@ async function seedOne(pool: Pool, t: ReturnType<typeof ids>): Promise<TenantFix
       `INSERT INTO ratio.sources (tenant_id, id, source_key, kind, display_name, coverage, declared_focus_version, enabled, config)
        VALUES ($1, $2, 'focus-main', 'focus_file', 'Synthetic FOCUS export', 'public_cloud', '1.0', true, '{"root":"synthetic"}')`,
       [t.tenantId, t.sourceId],
+    );
+    // Org-attribution registries: one billing authority + one approved FX rate
+    // per tenant, so every TENANT_TABLES entry has seeded rows for both tenants.
+    await q(
+      `INSERT INTO ratio.billing_scopes (tenant_id, id, display_name, provider_name, billing_account_id, workload_account_ids)
+       VALUES ($1, gen_random_uuid(), 'Synthetic billing authority', 'SyntheticCloud', 'synthetic-billing-1', ARRAY['synthetic-workload-1']::text[])`,
+      [t.tenantId],
+    );
+    await q(
+      `INSERT INTO ratio.fx_rates (tenant_id, id, currency, target_currency, effective_from, rate, source, approved_by)
+       VALUES ($1, gen_random_uuid(), 'EUR', 'USD', DATE '2026-08-01', 1.1, 'seed-fixture', 'seed-fixture')`,
+      [t.tenantId],
     );
     for (const run of [t.runOld, t.runNew]) {
       await q(
@@ -143,6 +172,70 @@ async function seedOne(pool: Pool, t: ReturnType<typeof ids>): Promise<TenantFix
         );
       }
     }
+    // Outcome ledger rows (0004): one approved registration (inserted pending,
+    // then approved by a different identity — the lifecycle trigger refuses a
+    // directly-approved insert), two classified events on the published batch
+    // (which is still staged at write time — the batch-child guard requires
+    // it), one measured-financial benefit claim and one supplemental cost, all
+    // claims unverified (a claim starts unverified; verification is a
+    // separate reviewer's act).
+    const publishedSha = artifactSha(t.slug, t.batchPublished);
+    await q(
+      `INSERT INTO ratio.outcome_unit_registrations
+         (tenant_id, id, project_id, use_case_pattern, outcome_unit_key, outcome_unit_label,
+          metric, unit, direction, target, baseline, observation,
+          quality_metric, quality_direction, quality_threshold,
+          stop_below, continue_at, expand_at, status, requested_by)
+       VALUES ($1, $2, 'fixture-support-copilot', 'support_assistant', 'resolved_ticket', 'Resolved tickets',
+               'resolution_quality', 'quality_result', 'higher', 15, $3, $4,
+               'resolution_quality', 'higher', 0.9,
+               2, 3, 5, 'pending', 'fixture-bot')`,
+      [
+        t.tenantId,
+        t.outcomeRegistryId,
+        JSON.stringify({ start: '2026-07-01', end: '2026-07-31', value: 12.5 }),
+        JSON.stringify({ start: '2026-08-01', end: '2026-08-31', value: 15 }),
+      ],
+    );
+    await q(
+      `UPDATE ratio.outcome_unit_registrations SET status = 'approved', approved_by = 'fixture-reviewer', approved_at = now()
+       WHERE tenant_id = $1 AND id = $2`,
+      [t.tenantId, t.outcomeRegistryId],
+    );
+    for (const [i, ev] of [
+      { trace: `${t.slug}-trace-1`, status: 'successful', quality: 0.97, latency: 1200 },
+      { trace: `${t.slug}-trace-2`, status: 'failed', quality: 0.55, latency: 800 },
+    ].entries()) {
+      await q(
+        `INSERT INTO ratio.outcome_events
+           (tenant_id, source_id, batch_id, artifact_sha256, row_ordinal, billing_period, project_id,
+            registry_id, trace_id, agent_run_id, request_id, outcome_type, outcome_status,
+            quality_result, completion_latency, validated_benefit, benefit_validation_status,
+            currency, allocation_method, data_as_of, occurred_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'fixture-support-copilot', $7, $8, $8, $8 || '-r',
+                 'resolved_ticket', $9, $10, $11, NULL, 'unvalidated', 'USD', 'direct',
+                 '2026-08-05T12:00:00Z', '2026-08-05T12:00:00Z')`,
+        [t.tenantId, t.sourceId, t.batchPublished, publishedSha, i, t.period, t.outcomeRegistryId, ev.trace, ev.status, ev.quality, ev.latency],
+      );
+    }
+    await q(
+      `INSERT INTO ratio.outcome_benefit_evidence
+         (tenant_id, id, project_id, billing_period, benefit_kind, category, title,
+          amount, currency, unit_label, unit_amount, attribution_pct, method, reference,
+          recorded_by, allocation_method, data_as_of)
+       VALUES ($1, $2, 'fixture-support-copilot', $3, 'measured_financial', 'cost_savings',
+               'Verified refund avoidance (fixture)', 500, 'USD', NULL, NULL, 100,
+               'invoice diff', 'fixture://refund-avoidance/2026-08', 'fixture-bot', 'direct', '2026-08-31T00:00:00Z')`,
+      [t.tenantId, t.outcomeBenefitId, t.period],
+    );
+    await q(
+      `INSERT INTO ratio.outcome_supplemental_costs
+         (tenant_id, id, project_id, billing_period, category, amount, currency, evidence_status,
+          reference, recorded_by, allocation_method, data_as_of)
+       VALUES ($1, $2, 'fixture-support-copilot', $3, 'labor', 250, 'USD', 'measured',
+               'fixture://timesheet/2026-08', 'fixture-bot', 'direct', '2026-08-31T00:00:00Z')`,
+      [t.tenantId, t.outcomeSupplementalId, t.period],
+    );
     // Lifecycle: publish the old batch, then supersede it with the new one.
     await q(`UPDATE ratio.ingest_batches SET status = 'published', published_at = now() - interval '1 day' WHERE tenant_id = $1 AND id = $2`, [
       t.tenantId,

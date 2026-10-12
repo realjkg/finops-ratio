@@ -1,0 +1,264 @@
+# Frank with an allowlisted, read-only MCP: evidence
+
+Companion to [DESIGN.md](DESIGN.md). It records what the author checked, how,
+and what could not be checked. Base: `origin/main` at 62bd8ed (merge of #93)
+when the citations were checked; the citation checkpoint is 7a9da43 (merge of
+PR #99; the code revision the line citations were checked against; main has
+moved since).
+PR #99 changed about 30 files under `src` and `pages`, including
+`src/ai/{AIClient,buildAIContext,MockAIClient,index}.ts`; the cited lines were
+re-checked at 7a9da43 (`AIClient.ts:71-80` still lands on `AIWorkloadSnapshot`,
+additions begin after line 84; `chat.ts`, `providers.ts` and `LiveAIClient.ts`
+are unchanged).
+Nothing here was run against a live model, a live MCP server or a database;
+every code claim was verified by reading the file at that commit.
+
+Review history, as in DESIGN.md: revision 1 (c97852d, PR #96) was reviewed by
+a challenger (changes requested); revision 2 (6402ab3, 00523cf) answered it
+and a second challenger review of PR #98 requested changes; revision 3
+(e050578, d997618) answered that and the round-3 challenger approved it;
+Copilot then reviewed d997618 and revision 4 (52de3cf) answered it; a round-4
+challenger review requested changes and 16581c8 answered it; revision 5
+(1ffb5fd) answered Copilot's next review and the round-5 challenger's review of
+16581c8; revision 6 (473aed0) answered the round-6 challenger's review of
+1ffb5fd and revision 7 (6f4c9f7) updated the review history; revision 8
+(6f82d26) answered the round-7 challenger's review of 6f4c9f7; revision 9
+(911b67c) answered the round-8 challenger's review of 6f82d26; revision 10
+(90eee59) answered the round-9 challenger's review of 911b67c, with a splice
+error in DESIGN.md that revision 11 repairs; revision 11
+(10b18f8) answered the round-10 challenger's review of 90eee59; the round-11
+challenger approved 10b18f8, and revision 12 (4e3734c) answered Copilot's open
+threads on it and the round-11 Lows; revision 13 answered the round-12
+challenger's review of 4e3734c; revision 14 answered the round-13
+challenger's review of 117f8e2 and the owner's vendor-agnostic requirement;
+revision 15 (86cf6fb) answered the round-14 challenger's review of 433b27f
+under a scope freeze; revision 16 (d8ab0c5, 4913734) answered the round-15
+challenger's review of 86cf6fb; PR #98 merged at 86cf6fb, so revisions 16 and
+17 are follow-ups on the merged main. Revision 17 (9686368) answered the PR
+#101 challenger's review of 4913734. Revision 18 (dba0c64) simplified section
+3.8 (start-and-reload evaluation only) on the decision recorded in section 6;
+revision 19 (98aa511) answered the challenger's review of revision 18 and was
+approved; revision 20 (3ec58a3) answered Copilot's four open
+test-specification threads on it; revision 21 (4af297e) answered the
+challenger's review of 3ec58a3 (a formatting repair and two clarifications);
+revision 22 (33f3b55) answered Copilot's two open threads on 4af297e; revision
+23, the last revision of this PR, answers Copilot's open threads on 33f3b55.
+
+## 1. Method
+
+- Fresh clone of `https://github.com/realjkg/finops-ratio`, `git fetch origin
+  main`, branch `docs/frank-mcp-proposal` from `origin/main`.
+- Files read in full or in the cited ranges: `pages/api/v1/ai/chat.ts`,
+  `src/ai/{providers,AIClient,LiveAIClient,MockAIClient,index}.ts`,
+  `src/agent-workflows/{frank,engine,types,policy}.ts`,
+  `docs/evidence/frank-coster-interface.md`,
+  `src/costsource/{PointFiveMcpTransport,CostSourceClient}.ts` and the
+  `redact.ts` header and rules,
+  `src/server/gateway/{auth,withGateway,liveDataAuth}.ts`,
+  `src/server/costs/{publishedCostsRoute,readerLogin}.ts`, migrations 0001,
+  0002 (grants) and 0004 (header and grants), `src/lib/{derive,modelCompare,
+  forecast,valueEvidence}.ts`, `src/mission/adjustmentGate.ts`,
+  `src/attribution/{AttributionClient,allocation}.ts`,
+  `src/outcomes/{durable,types}.ts`, `scripts/governance/{README.md,
+  risk-rules.json}`, and `docs/design/slice-3-5/{DESIGN,EVIDENCE}.md` (status
+  header, decision log, open decisions, section 5.1, section 6 of the
+  evidence file).
+- Revision 2 addresses the challenger's review of c97852d (4 Medium, 6 Low);
+  the citations it touched (`derive.ts:33-35`, `engine.ts:196`,
+  `chat.ts:336-344`, `chatRoute.test.ts:150-154`, `LiveFinioClient.ts:5-11`)
+  were re-read.
+- Revision 3 sources: the sprint plan
+  `docs/design/sprint-mock-demo-mcp-rbac/PLAN.md`
+  on branch `docs/sprint-plan-mock-demo-mcp-rbac` at 7a7d51b (lines 127,
+  142-143, 160, 319), read for T-6; `src/lib/forecast.ts:118`.
+- Revision 4 sources: `src/ingest/config.ts:11`, `:161`, `:178` (the
+  `RATIO_ENV` vocabulary and the empty-value handling) and
+  `src/costsource/transports/redact.ts:327-340` (the rules the result-value
+  scan reuses; all re-read).
+- Revision 5 sources: `src/ingest/config.ts:189-190` (an empty `RATIO_ENV`
+  becomes `development` in `loadWorkerConfig`); the four redaction sample
+  outputs were reproduced by running `applyRedactionRules` from
+  `src/costsource/transports/redact.ts` on the base code with Node's type
+  stripping.
+- Revision 6 and 7 sources (reproductions by the author, running
+  `applyRedactionRules` from `src/costsource/transports/redact.ts` on the base
+  code with Node's type stripping):
+  - `JSON.stringify({url:'https://example.com/a?x=1&y="2"', z:1})` redacts to
+    `{"url":"https://example.com/a?[REDACTED]`, which does not parse (the URL
+    rule's `?` tail runs to the end of the one-line serialized JSON);
+  - `JSON.stringify({password:'abc def'})` redacts to
+    `{"password":"[REDACTED]"}`, while the bare value `abc def` is unchanged
+    (a key-only hit, so per-value redaction alone would leak it).
+- Revision 8 and 9 sources: no new code or external sources. The changes are
+  design rules (flip-detector initialization, the generation definition, case
+  (m)), and the key table was reconciled with OD-8 and 3.3.
+- Revision 10 sources: no new code or external sources. The per-request
+  environment re-check was removed on the orchestrator's decision (a minor
+  design decision); the evaluation rules, A20 and the key table were
+  rewritten to match.
+- Revision 11 sources: no new code or external sources. DESIGN.md was rebuilt
+  from 911b67c plus the revision 10 edits (the 90eee59 splice came from a
+  string search that matched an earlier occurrence); the diff 911b67c..HEAD
+  was reviewed as a whole and the section and table checks below were run.
+- Revision 12 sources: no new code or external sources. DESIGN.md was edited
+  hunk by hunk (no splice); the changes are key-table bodies and the
+  model-token budget key, evaluation-rule clarifications and new A20/A11/A3/A18
+  cases.
+- Revision 13 sources: no new code or external sources. Decisions by the
+  orchestrator, recorded here: remove the model-token budget key (T-8 tracks
+  it) and make the built-in registry the only M1 source of in-process bodies.
+- Revision 14 sources: no new code or external sources. Code read for the
+  Mistral row: `src/ai/providers.ts:58-67` (the shared OpenAI-compatible
+  preset). The vendor-side connector discussion (2.6) and the Mistral
+  function-calling statement are **unverified** vendor-documentation claims.
+- Revision 15 sources: no new code or external sources;
+  `pages/api/v1/ai/chat.ts` lines near 100 and 134 (the Claude and OpenAI SDK
+  create calls) were re-read for the A21 surface. Fixes only; no new features.
+- Revision 16 sources: test-specification fixes only. The branch was
+  fast-forwarded to the merged main (then at 7a9da43, the citation checkpoint)
+  before editing. Main had moved by PR #99, which changed `src/ai` files; the
+  citation re-check is in the Revision 17 bullet.
+- Revision 17 sources: `git diff --name-only 62bd8ed 7a9da43 -- src pages` was
+  read for the files these documents cite; `src/ai/AIClient.ts:71-80`,
+  `pages/api/v1/ai/chat.ts` (lines cited), `src/ai/providers.ts` and
+  `src/ai/LiveAIClient.ts` were re-read at 7a9da43. The earlier statement that
+  there had been no code changes since 62bd8ed was wrong after PR #99.
+- Revision 18 sources: a decision record kept outside the repository (the
+  snag conclusion summarized in section 6). No new code or external sources.
+  Earlier source bullets that mention the flip detector, generations or the
+  per-request re-check describe machinery that revision 18 removed.
+- Line numbers in DESIGN.md were re-checked with `grep -n` / `sed -n` after
+  drafting; four ranges were corrected at that point.
+
+## 2. Verified by reading (path:line in DESIGN.md)
+
+| Claim | Where |
+|---|---|
+| Providers `claude, openai, mistral, qwen, openllm, mock`; unset or unknown is `mock`; OpenAI-compatible presets; `openllm` key optional | `src/ai/providers.ts:15`, `:39-44`, `:58-85` |
+| Adapters send no tools and read text only | `pages/api/v1/ai/chat.ts:99-112`, `:133-145`, `:160-189` |
+| `MAX_MESSAGES` 50, `MAX_INITIATIVES` 100, `MAX_TOKENS` 1024; non-streaming | `pages/api/v1/ai/chat.ts:43-45`, `:21` |
+| System prompt built from a browser-supplied snapshot; handler ignores gateway tenant | `:258-321`, `:325-345`, `:362-366` |
+| Live provider forces gateway auth; no token configured then 401 | `src/server/gateway/auth.ts:36-42`, `:88-95` |
+| Browser client posts without Authorization | `src/ai/LiveAIClient.ts:17-21`; repo search for `Authorization`/`Bearer` found no browser-side adder |
+| Simulation chat returns `provider: 'mock'` | `pages/api/v1/simulation/chat.ts:17` |
+| Workflow Frank is deterministic | `src/agent-workflows/frank.ts:36-129`, `engine.ts:135-143`, `types.ts:13` |
+| Authority statement | `src/agent-workflows/frank.ts:11-12` |
+| "no credential discovery, MCP installation ..." | `docs/evidence/frank-coster-interface.md:19` |
+| Only MCP code is PointFive scaffolding | grep for `mcp` (case-insensitive) in `*.ts, *.tsx, *.mjs, *.json, *.md`: `src/costsource/*`, `src/connectors/ConnectorCard.tsx`, design docs, the Frank evidence doc; `package.json` has no MCP package |
+| Reader role is `SELECT`-only on published views; login check refuses writer-reachable logins | migration 0001:664-667; 0004:576-577; `readerLogin.ts:1-14` |
+| Durable store entities | `CREATE TABLE`/`CREATE VIEW` listing of migrations 0001, 0002, 0004: tenants, sources, ingest bookkeeping, `cost_facts`, publications, billing scopes, fx rates, outcome tables and views. No workload, team or initiative table. Migration 0003 is absent from the directory. |
+| `allocateSharedCost` has no non-test caller | `grep -rn allocateSharedCost src pages` excluding tests and `allocation.ts` returned nothing |
+| Forecast and anomaly APIs are proposed | `docs/design/slice-3-5/DESIGN.md:2536-2548` ("proposed", Slices 3-5 not built); this branch's base has no `forecasts` route under `pages/api` |
+| Redaction module functions | `src/costsource/transports/redact.ts:327`, `:371`, `:412` |
+
+## 3. Searches whose negative result the design relies on
+
+- No MCP server and no general MCP client: case-insensitive `mcp` across
+  source, pages, scripts and manifests (list above).
+- No tool calling: `tools`, `tool_use`, `tool_calls` do not appear in
+  `pages/api/v1/ai/chat.ts` or `src/ai/`.
+- No browser-side Authorization header for the chat route: search of `src/`
+  and `pages/` for `Authorization` and `Bearer` outside tests, redaction,
+  costsource, finio, ingest and the gateway.
+
+These are searches, not proofs of absence in unread files; the base commit was
+searched as a whole tree.
+
+## 4. Could not be verified
+
+| Item | Why |
+|---|---|
+| Any statement about the MCP specification (section 2.5 of DESIGN) | `WebFetch` to modelcontextprotocol.io failed with a DNS error (`ENOTFOUND`); `curl` through the proxy returned a 403 on the tunnel. No page or specification version was read. Every MCP-spec reliance is marked unverified in DESIGN. |
+| Vendor tool-calling formats (Claude, OpenAI, Mistral, OpenAI-compatible), and whether any vendor offers a hosted MCP connector and how it behaves | Not fetched; described from general knowledge and marked unverified. |
+| OpenRouter or any named local server behaving as an OpenAI-compatible tool-calling endpoint | No access; the repo has no test for it. The `openllm` path is verified only as text chat by reading. |
+| Any specific model's tool-calling quality | No model run; certification is a later milestone. |
+| In-app live chat actually returning 401 | The author read the code (no header sent, auth enforced) and did not run it. The challenger reports running a vitest that stubbed `fetch` against the real chat handler with `AI_PROVIDER=openllm` and a strong `RATIO_API_TOKEN`: `LiveAIClient` sent only `Content-Type` and the call was rejected (reported, not re-run by the author). Corroboration read: `src/ai/chatRoute.test.ts:150-154`; `src/finio/LiveFinioClient.ts:5-11` (the browser intentionally omits Authorization). |
+| The two origin statements ("Will Frank also work with a localized MCP and open router?", "Write up the allowlisted read-only MCP proposal first."), the relayed statement that MCP must be usable in dev, test and production under RBAC (DESIGN 3.8, OD-6), and the two relayed owner quotes ("Not replacing production with a prompt ..." and "FinOps and Governance is knowing when to stop.") and their exact date | Not in the repository; the source messages were not seen. The three other quotes are verbatim in `docs/design/slice-3-5/EVIDENCE.md` section 6. |
+| Test suite status | Not run (docs-only change). |
+
+## 5. Contradictions with what the owner was told
+
+1. "OpenRouter and local model servers already work through
+   `AI_PROVIDER=openllm`": true for the server route as a text-only chat path
+   (by reading), but there is no OpenRouter preset or test, and the in-app
+   browser client sends no Authorization header while a live provider forces
+   auth, so the in-app live chat would be refused as far as the code reads.
+2. "Frank has no tool calling": correct, and stronger: the workflow Frank is
+   not model-driven at all (`deterministic-simulation-v1`).
+3. Not a contradiction but relevant: the chat route's data is a
+   browser-supplied snapshot, so even text-only live chat is not grounded in
+   server-held tenant data.
+
+## 6. Governance classification and rollback
+
+Classifier history on the real diff against `origin/main`: revision 1
+(c97852d) was restricted, class `retention`, rule `retention.mention` on
+`DESIGN.md`; revisions 2 and 3 were restricted for the same class and rule,
+on `EVIDENCE.md` only at the end. At revision 4 the classifier was run
+twice: before this paragraph was written the diff contained no rule match
+and the result was `risk: low`; with a paragraph that names the rule, the
+result was `risk: restricted`, class `retention`, rule `retention.mention`,
+on `docs/design/frank-mcp/EVIDENCE.md` only. It was re-run at each later
+revision. At revision 10 (90eee59) it reported both `DESIGN.md` and
+`EVIDENCE.md`: that `DESIGN.md` was the spliced file, whose rewrapped
+audit-retention sentence and decision-table row counted as added lines. At
+revisions 11 to 15 the classifier was re-run at each final head with the
+same restricted result, on `EVIDENCE.md` only (this section names the rule).
+The later revisions are follow-ups on the merged main, where those lines are
+already present: a draft before this paragraph was written reports `risk:
+low` with no matches, and with this paragraph, which names the rule, a head
+reports `risk: restricted`, class `retention`, rule `retention.mention`, on
+`EVIDENCE.md` only. The classifier is re-run on each head and the pull
+request body records the result for that head. Neither result proves the
+change safe (the gate's own README calls `low` heuristic). The
+classification is recorded in the pull request body at the final head; this
+file makes no claim about the title or body of the pull request beyond that.
+The wording of these documents was not shaped to avoid any rule.
+
+### Decision record for revision 18
+
+Two independent agents, a proposer and a skeptic, converged: replace the
+section 3.8 evaluation machinery with start-and-reload evaluation only.
+Reasons, as recorded: (a) DESIGN.md 6.3 itself marked a runtime change of
+`FRANK_TOOLS` as an unverified assumption, and `process.env` cannot be changed
+from outside the process, so the machinery protected a path the design said
+might not exist; (b) the design already conceded that a runtime `RATIO_ENV`
+change is not detected; (c) section 3.8 grew from nothing to about 1,850 words
+and the A20 row from 88 to about 700 words over 16 revisions, each later
+finding probing state added by the previous revision, and revisions 6 to 16
+cite no new code; (d) no attack was found that the earlier design stopped and
+the simple one allows. The skeptic added requirements, all adopted: one reload
+at a time; a failed reload turns tools off and writes an audit record; no
+unauthenticated HTTP reload trigger; a "reload required" log when
+`FRANK_TOOLS=on` is seen without a reload; and about eight A20 cases. Process
+change: the review scope is frozen to changed text, and the review is closed
+after a round with no High or Medium findings. What would change the
+conclusion: a real mechanism that mutates `FRANK_TOOLS` in a running process,
+an owner requirement to turn tools on in under a minute without a reload, or a
+concrete attack on reload-only turn-on. After revision 18 section 3.8 was
+about 1,210 words (counted from its heading to the next section heading);
+later revisions added test cases to the A20 row.
+
+Rollback: revert the two documents; reverse-applying the diff to origin/main
+gives the same tree as origin/main.
+
+## 7. Follow-up findings
+
+This proposal PR closed at revision 23. Further reviewer findings are
+recorded here, not as more revisions, unless a finding is a High with a traced
+concrete failure.
+
+Revision 23 review (head 67a9a62), two threads, both triaged as not High (no
+traced concrete failure in the design; both are test-specification gaps):
+
+1. A20 (e) covers only two overlapping reloads. E4 also rejects a reload that
+   overlaps the start evaluation, so a broker with separate startup and reload
+   guards could pass the suite. Follow-up for the M0 test author: add a
+   deterministic start-evaluation/reload overlap case that requires the reload
+   to be rejected and the startup result to apply exactly once.
+2. A20 (m) describes the check as one that "never returns" and then has it
+   complete late, which cannot be implemented literally. It also asserts only
+   config state, so an implementation that blocks the stale install but still
+   emits `reload_applied` would pass. Follow-up: use a deferred check that
+   resolves after a newer reload completes, and assert both that the config is
+   unchanged and that no success audit event is emitted (only a debug note).

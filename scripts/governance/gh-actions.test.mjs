@@ -1184,3 +1184,88 @@ describe('runTargets', () => {
     expect(nums).toEqual([5]);
   });
 });
+
+// Trusted-actor QA-bar wiring: the classify report must not send the owner to
+// the exception queue for a trusted-bot restricted PR that provably does not
+// touch the governance gate's own files, and eligibility must enable
+// auto-merge there; gate-file edits keep the exception path for any author.
+describe('trusted-actor QA-bar wiring (report + eligibility)', () => {
+  const BOT = { user: { login: 'obvious-autobuild[bot]' } };
+  const MIGRATION = { filename: 'src/ingest/db/migrations/0002.up.sql', status: 'added', patch: '+create table x();', changes: 1 };
+  const GOV_FILE = { filename: '.github/workflows/governance.yml', status: 'modified', patch: '+x', changes: 1 };
+
+  it('runClassify: trusted bot + restricted + gate-clear → summary states the QA bar, no exception queue', async () => {
+    const { github, pr } = fakeGithub({
+      association: 'CONTRIBUTOR',
+      labels: [],
+      files: [MIGRATION],
+      pr: BOT,
+    });
+    const core = fakeCore();
+    const result = await runClassify({ github, core, context: prCtx(pr) });
+    expect(result.risk).toBe('restricted');
+    expect(core.out).toMatch(/Auto-merge at the QA bar/);
+    expect(core.out).toMatch(/obvious-autobuild\[bot\]/);
+    expect(core.out).not.toMatch(/Exception queue/);
+    expect(core.out).not.toMatch(/first line is exactly/);
+  });
+
+  it('runClassify: trusted bot touching the gate → summary keeps the exception queue', async () => {
+    const { github, pr } = fakeGithub({
+      association: 'CONTRIBUTOR',
+      labels: [],
+      files: [GOV_FILE],
+      pr: BOT,
+    });
+    const core = fakeCore();
+    const result = await runClassify({ github, core, context: prCtx(pr) });
+    expect(result.risk).toBe('restricted');
+    expect(core.out).toMatch(/Exception queue/);
+    expect(core.out).not.toMatch(/Auto-merge at the QA bar/);
+  });
+
+  it('runClassify: a non-trusted CONTRIBUTOR restricted PR still gets the exception queue (unchanged)', async () => {
+    const { github, pr } = fakeGithub({
+      association: 'CONTRIBUTOR',
+      labels: [],
+      files: [MIGRATION],
+      pr: { user: { login: 'random-contributor' } },
+    });
+    const core = fakeCore();
+    await runClassify({ github, core, context: prCtx(pr) });
+    expect(core.out).toMatch(/Exception queue/);
+    expect(core.out).not.toMatch(/Auto-merge at the QA bar/);
+  });
+
+  it('runEligibility: trusted bot + restricted + green gates → enables squash auto-merge, success status', async () => {
+    const { github, pr } = fakeGithub({
+      association: 'CONTRIBUTOR',
+      labels: ['risk:restricted'],
+      files: [MIGRATION],
+      pr: BOT,
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(gql(github, 'enablePullRequestAutoMerge')).toHaveLength(1);
+    expect(github.calls.find((c) => c.name === 'repos.createCommitStatus').params)
+      .toMatchObject({ sha: HEAD, state: 'success', context: 'Governance · merge eligibility' });
+  });
+
+  it('runEligibility: trusted bot touching the gate → disables auto-merge, failure status naming the QA bar', async () => {
+    const { github, pr } = fakeGithub({
+      association: 'CONTRIBUTOR',
+      labels: ['risk:restricted'],
+      files: [GOV_FILE],
+      autoMerge: { merge_method: 'squash' },
+      pr: BOT,
+    });
+    await runEligibility({ github, core: fakeCore(), context: prCtx(pr) });
+    expect(gql(github, 'disablePullRequestAutoMerge')).toHaveLength(1);
+    expect(gql(github, 'enablePullRequestAutoMerge')).toHaveLength(0);
+    expect(github.calls.find((c) => c.name === 'repos.createCommitStatus').params)
+      .toMatchObject({ sha: HEAD, state: 'failure', context: 'Governance · merge eligibility' });
+    // The failure description names the actionable next step: the exception
+    // path (the QA-bar-does-not-apply reason is in the decision's reason list).
+    expect(github.calls.find((c) => c.name === 'repos.createCommitStatus').params.description)
+      .toMatch(/exception-approve/);
+  });
+});
