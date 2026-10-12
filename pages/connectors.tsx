@@ -14,6 +14,9 @@
 // prerender exactly; if the API is unreachable (static hosting, offline) that
 // view stays, every connector honestly reads as available, and the probe is
 // hidden.
+//
+// Live (non-sandbox) connector cards run a labeled simulation over bundled
+// fixtures (SimulatedConnectorClient): anonymous visitors never hit the 401.
 
 import { SimulationConnectors } from '@/simulation/SimulationConnectors';
 import { useStore } from '@/store/useStore';
@@ -24,6 +27,7 @@ import { FocusDoorWalk } from '@/connectors/FocusDoorWalk';
 import { sourcesForEnv } from '@/costsource/seed';
 import { createCostSourceClient } from '@/costsource';
 import type { CostSourceDescriptor, SourceCoverage } from '@/costsource';
+import { isSimulatedSource, SIMULATED_FIXTURES, SimulatedConnectorClient } from '@/costsource/SimulatedConnectorClient';
 
 const COVERAGE_ORDER: SourceCoverage[] = ['public_cloud', 'private_cloud', 'on_prem'];
 const COVERAGE_LABEL: Record<SourceCoverage, string> = {
@@ -49,6 +53,33 @@ function ConnectorRegistry() {
   const runConnectorIngest = useStore((s) => s.runConnectorIngest);
   const disconnectConnector = useStore((s) => s.disconnectConnector);
   const ingestClient = live ? client : offlineClient;
+  // The browser never holds an API token, so every live connector id would get the
+  // intended 401 from /api/costsource/*. Those cards run a labeled simulation over
+  // bundled fixtures instead: no request, so no failed-auth count, and no Retry loop.
+  const simulatedClient = useMemo(() => new SimulatedConnectorClient(), []);
+  const simulateConnect = async (src: CostSourceDescriptor) => {
+    await connectConnector(src.id, simulatedClient);
+    await runConnectorIngest(src.id, src.name, simulatedClient);
+  };
+  const renderCard = (src: CostSourceDescriptor) => {
+    const simulated = isSimulatedSource(src.id);
+    const cardClient = simulated ? simulatedClient : ingestClient;
+    return (
+      <ConnectorCard
+        key={src.id}
+        source={src}
+        onTest={onTest}
+        session={sessions[src.id]}
+        run={runs[src.id]}
+        allRuns={runs}
+        busy={busy?.sourceId === src.id ? busy.phase : null}
+        simulation={simulated ? SIMULATED_FIXTURES[src.id] : undefined}
+        onConnect={simulated ? () => void simulateConnect(src) : () => void connectConnector(src.id, cardClient)}
+        onIngest={() => void runConnectorIngest(src.id, src.name, cardClient)}
+        onDisconnect={() => disconnectConnector(src.id)}
+      />
+    );
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -166,20 +197,7 @@ function ConnectorRegistry() {
                 Active — {connected.length} adapter{connected.length !== 1 ? 's' : ''}
               </h2>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {connected.map((src) => (
-                  <ConnectorCard
-                    key={src.id}
-                    source={src}
-                    onTest={onTest}
-                    session={sessions[src.id]}
-                    run={runs[src.id]}
-                    allRuns={runs}
-                    busy={busy?.sourceId === src.id ? busy.phase : null}
-                    onConnect={() => void connectConnector(src.id, ingestClient)}
-                    onIngest={() => void runConnectorIngest(src.id, src.name, ingestClient)}
-                    onDisconnect={() => disconnectConnector(src.id)}
-                  />
-                ))}
+                {connected.map(renderCard)}
               </div>
             </section>
           )}
@@ -197,20 +215,7 @@ function ConnectorRegistry() {
                 kill-switch to keep one off.
               </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {available.map((src) => (
-                  <ConnectorCard
-                    key={src.id}
-                    source={src}
-                    onTest={onTest}
-                    session={sessions[src.id]}
-                    run={runs[src.id]}
-                    allRuns={runs}
-                    busy={busy?.sourceId === src.id ? busy.phase : null}
-                    onConnect={() => void connectConnector(src.id, ingestClient)}
-                    onIngest={() => void runConnectorIngest(src.id, src.name, ingestClient)}
-                    onDisconnect={() => disconnectConnector(src.id)}
-                  />
-                ))}
+                {available.map(renderCard)}
               </div>
             </section>
           )}

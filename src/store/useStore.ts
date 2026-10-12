@@ -11,7 +11,7 @@ import type {
   ConnectorSession,
   IngestRun,
 } from '@/connectors/ingestLanding';
-import { currentMonthWindow, FOCUS_DOOR_WALK_ID } from '@/connectors/ingestLanding';
+import { currentMonthWindow, FOCUS_DOOR_WALK_ID, isLiveDataRefusal } from '@/connectors/ingestLanding';
 import type {
   Alert,
   BudgetProfile,
@@ -171,7 +171,7 @@ export const useStore = create<AppState>((set, get) => ({
   // -- Connector walk -------------------------------------------------------
   // Connect runs the seam's own health probe; success iff reachable && authed.
   // The seam's failure detail is stored verbatim — the demo shows the honest
-  // reason (ships dark, missing env, auth required), never a friendlier gloss.
+  // reason (ships dark, missing env), never a friendlier gloss; an auth refusal is `locked`.
   connectConnector: async (sourceId, client) => {
     if (get().connectorBusy) return;
     set({ connectorBusy: { sourceId, phase: 'connecting' } });
@@ -188,7 +188,7 @@ export const useStore = create<AppState>((set, get) => ({
         connectorSessions: {
           ...state.connectorSessions,
           [sourceId]: {
-            state: 'error',
+            state: isLiveDataRefusal(err) ? 'locked' : 'error',
             error: err instanceof Error ? err.message : String(err),
             openedAt,
           },
@@ -234,7 +234,7 @@ export const useStore = create<AppState>((set, get) => ({
         connectorSessions: {
           ...state.connectorSessions,
           [sourceId]: {
-            state: 'error',
+            state: isLiveDataRefusal(err) ? 'locked' : 'error',
             error: err instanceof Error ? err.message : String(err),
             openedAt: session.openedAt,
           },

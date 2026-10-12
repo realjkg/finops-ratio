@@ -1,0 +1,22 @@
+# GREEN
+$ npx vitest run src/connectors/simulatedConnectors.dom.test.tsx src/costsource/simulatedConnectorClient.test.ts src/costsource/sandboxAllowlist.test.ts
+ Test Files  3 passed (3)
+      Tests  19 passed (19)
+$ npx vitest run (full suite)
+      Test Files  184 passed (184)
+      Tests  3485 passed (3485)
+typecheck: pass; lint: pass; next build: pass; check:bundle: pass (clientFiles 134, problems [])
+sandboxAllowlist.test.ts (six ids) untouched and passing
+
+# Mutation spot checks (each reverted after the run)
+M1 route every card back to the live client (pages/connectors.tsx: simulated = false)
+ FAIL  src/connectors/simulatedConnectors.dom.test.tsx > non-sandbox cards are simulated: chip, note, Simulate connect, no auth banner or Retry
+ FAIL  src/connectors/simulatedConnectors.dom.test.tsx > Simulate connect lands normalized fixture rows with zero network calls, even when repeated
+      Tests  2 failed | 11 passed (13)
+M2 drop the unverified label (ConnectorCard.tsx: label condition = false)
+ FAIL  src/connectors/simulatedConnectors.dom.test.tsx > non-sandbox cards are simulated: chip, note, Simulate connect, no auth banner or Retry
+      Tests  1 failed | 12 passed (13)
+M3 claim Nutanix is verified (SimulatedConnectorClient.ts)
+ FAIL  src/connectors/simulatedConnectors.dom.test.tsx > non-sandbox cards are simulated: chip, note, Simulate connect, no auth banner or Retry
+ FAIL  src/costsource/simulatedConnectorClient.test.ts > nutanix: illustrative payload goes through the real adapter and stays unverified
+      Tests  2 failed | 11 passed (13)

@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import type { CostSourceDescriptor, SourceHealth } from '@/costsource/CostSourceClient';
 import { isOfflineSandboxSource } from '@/costsource/sandboxSources';
+import { SIMULATED_LIVE_NOTE, SIMULATED_UNVERIFIED_LABEL, type SimulatedFixture } from '@/costsource/SimulatedConnectorClient';
 import type { ConnectorBusyPhase, ConnectorSession, IngestRun } from './ingestLanding';
 import { IngestVerification } from './IngestVerification';
 
@@ -86,6 +87,8 @@ export interface ConnectorCardProps {
   onIngest?: () => void;
   /** Closes the session and withdraws landed data. */
   onDisconnect?: () => void;
+  /** Anonymous demo: the walk runs over bundled fixtures (labeled), never the live API. */
+  simulation?: Pick<SimulatedFixture, 'verified' | 'format'>;
 }
 
 export function ConnectorCard({
@@ -98,6 +101,7 @@ export function ConnectorCard({
   onConnect,
   onIngest,
   onDisconnect,
+  simulation,
 }: ConnectorCardProps) {
   const state = connState(source);
   const isEgress = CONTROLLED_EGRESS_IDS.has(source.id);
@@ -153,6 +157,16 @@ export function ConnectorCard({
               title="Invented data: no live cloud account, credential or network call"
             >
               synthetic
+            </span>
+          )}
+          {simulation && (
+            <span className="rounded border border-edge px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-sub" title="Bundled fixture data: no network call, no credentials">
+              simulated
+            </span>
+          )}
+          {simulation && !simulation.verified && (
+            <span className="rounded border border-shape/40 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-shape">
+              {SIMULATED_UNVERIFIED_LABEL}
             </span>
           )}
           {isEgress && (
@@ -244,6 +258,19 @@ export function ConnectorCard({
         </p>
       )}
 
+      {walk && simulation && (
+        <p className="font-mono text-[10px] leading-relaxed text-dim">
+          Simulated with the {simulation.format}. {SIMULATED_LIVE_NOTE}.
+        </p>
+      )}
+
+      {/* Walk mode: the live API refused for lack of auth (policy) — locked, nothing to retry. */}
+      {walk && session?.state === 'locked' && (
+        <p role="status" className="rounded border border-edge px-2.5 py-2 font-mono text-[11px] leading-relaxed text-sub">
+          Locked: needs authenticated API access
+        </p>
+      )}
+
       {/* Walk mode: honest failure — the seam's own reason, verbatim. */}
       {walk && session?.state === 'error' && (
         <p
@@ -255,7 +282,7 @@ export function ConnectorCard({
       )}
 
       {/* Walk mode: the landed-run proof. */}
-      {walk && run && <IngestVerification run={run} sandbox={isSandbox} allRuns={allRuns} />}
+      {walk && run && <IngestVerification run={run} sandbox={isSandbox || Boolean(simulation)} allRuns={allRuns} />}
 
       {/* Action row — walk mode: Connect / Ingest / Disconnect. */}
       {walk ? (
@@ -279,18 +306,20 @@ export function ConnectorCard({
                 Disconnect
               </button>
             </>
-          ) : (
+          ) : session?.state === 'locked' ? null : (
             <button
               type="button"
               onClick={onConnect}
               disabled={busy !== null}
               className="rounded border border-value/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-value hover:bg-value/10 disabled:opacity-60"
             >
-              {busy === 'connecting'
-                ? 'Connecting…'
-                : session?.state === 'error'
-                  ? 'Retry connect'
-                  : 'Connect'}
+              {simulation
+                ? busy === 'connecting' ? 'Simulating…' : 'Simulate connect'
+                : busy === 'connecting'
+                  ? 'Connecting…'
+                  : session?.state === 'error'
+                    ? 'Retry connect'
+                    : 'Connect'}
             </button>
           )}
         </div>
