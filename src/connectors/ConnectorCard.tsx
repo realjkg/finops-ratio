@@ -224,7 +224,7 @@ export function ConnectorCard({
       </div>
 
       {/* Descriptor note */}
-      <p className="text-[11px] leading-relaxed text-dim">{source.note}</p>
+      <p className="break-words text-[11px] leading-relaxed text-dim">{source.note}</p>
 
       {/* Env contract — what to set to connect (names only) */}
       {source.setup && state !== 'connected' && state !== 'disabled' && missing.length > 0 && (
@@ -235,7 +235,7 @@ export function ConnectorCard({
           <ul className="flex flex-wrap gap-1">
             {missing.map((name) => (
               <li key={name}>
-                <code className="rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] text-txt">{name}</code>
+                <code className="break-all rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] text-txt">{name}</code>
               </li>
             ))}
           </ul>

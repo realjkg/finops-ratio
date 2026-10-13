@@ -7,25 +7,46 @@ governance gates before scale, and answers cost questions through a data-grounde
 agent.
 
 This repository is **Phase 1**: a runnable, demo-ready app — a **React front-end +
-Node.js back-end, unified in Next.js 14 (Pages Router)** — driven by seed data,
+Node.js back-end, unified in Next.js 16 (Pages Router)** — driven by seed data,
 implementing the core acceptance criteria of the Ratio design spec. The front-end is
 React pages and components; the back-end is Node.js API routes (`pages/api/*`) running
 in the same Next.js process.
 
 ## Quick start
 
-```bash
-npm install
-npm run dev      # serves the 3-panel Ratio UI on http://localhost:3000
-```
+Requires **Node.js 22.13 or newer** (the simulation uses the built-in SQLite; CI runs Node 22 and 24).
+
+Anonymous seeded demo (no environment variables, no accounts; every number is simulated):
 
 ```bash
-npm run build    # production build (Next.js)
-npm run lint     # ESLint
+npm ci
+npm run build && npm start     # http://localhost:3000
+# or, for development with hot reload:
+npm run dev
+```
+
+Customer workflow simulation (server-enforced personas, saved workspaces) runs as a
+**second process**, in test mode only:
+
+```bash
+npm run simulation:start       # dev server on PORT (default 3000); sets RATIO_SIMULATION, RATIO_ENV=test and the origin for you
+# production build instead (run build and start with the same variables):
+export RATIO_SIMULATION=1 RATIO_ENV=test PORT=3110 \
+  RATIO_SIMULATION_ORIGIN=http://127.0.0.1:3110 RATIO_SIMULATION_DB=/tmp/ratio-demo.sqlite
+npm run build && npx next start -p 3110 --hostname 127.0.0.1
+```
+
+Local Postgres and S3-compatible storage (needs Docker): `npm run local:up`, then
+`local:migrate`, `local:seed`, `local:sync`, `local:test`, `local:down`; see
+`docs/evidence/slice-2/TEST_PLAN.md`. Not needed for either demo above.
+
+```bash
+npm run lint      # ESLint
 npm run typecheck # tsc --noEmit (also enforced in CI)
+npm test          # vitest (needs python3, see below)
 ```
 
-No external services, API keys, or auth are required to run the app — the Node.js
+No external services, API keys, or auth are required to run the app: the Node.js
 back-end runs in-process as Next.js API routes.
 
 **Development dependency: Python 3.10+ (`python3`, standard library only).**
@@ -37,18 +58,18 @@ public FOCUS 1.0 Sample Data (FinOps Foundation, CC BY 4.0) is described in
 
 ## Stack
 
-**React front-end + Node.js back-end, unified in Next.js 14 (Pages Router).** The
+**React front-end + Node.js back-end, unified in Next.js 16 (Pages Router).** The
 front-end is React 18 pages and components (`pages/`, `src/`); the back-end is Node.js
 API routes (`pages/api/*`) running in the same Next.js process — no separate server to
 deploy.
 
 - **React 18 + TypeScript** — front-end UI (pages + components)
 - **Node.js API routes** (`pages/api/*`) — back-end (e.g. `pages/api/hello.ts`)
-- **Next.js 14 (Pages Router)** — unifies front-end rendering and back-end routes
+- **Next.js 16 (Pages Router)** — unifies front-end rendering and back-end routes
 - **Tailwind CSS** — design tokens from the spec (§10) wired as theme colors + CSS vars
 - **Zustand** — lightweight state (workloads, budgets, alerts, chat)
 - **JetBrains Mono** (data/numbers) + **Instrument Sans** (prose) via `@fontsource`
-- Deterministic **JSON seed data** — 7 workloads, a 7-model registry, budgets, alerts
+- Deterministic **JSON seed data** — 11 workloads, a 7-model registry, budgets, alerts
 
 ## What's implemented (Phase 1)
 
@@ -306,7 +327,7 @@ into the repo — see the `doc-authoring` skill for this workflow.
 
 ## Saved customer workflow simulation
 
-Requires Node 22.13+ (built-in SQLite). Run `npm ci`, then `npm run simulation:start`,
+Requires Node 22.13+ (built-in SQLite; see Quick start). Run `npm ci`, then `npm run simulation:start`,
 and open http://localhost:3000/simulation. Choose one of the six fixture identities
 across Acme and Northstar. Technical, procurement and executive permissions come
 from the server session; changing the view does not change permission.

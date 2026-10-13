@@ -29,7 +29,7 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
           <p className="text-[10px] font-semibold uppercase tracking-widest text-exec-muted">
             {lang.itemLabel}
           </p>
-          <h3 className="mt-0.5 truncate font-body text-base font-semibold text-exec-text">
+          <h3 className="mt-0.5 break-words font-body text-base font-semibold text-exec-text">
             {initiative.name}
           </h3>
         </div>

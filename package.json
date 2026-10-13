@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "description": "Ratio — AI-native FinOps platform that governs AI workload spend by measuring value, not just cost.",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

@@ -22,7 +22,8 @@ Checked against `origin/main` at `9024bc1` on 2026-10-12.
 | A6 synthetic cloud sandboxes | Merged, #108 (`6acd2ba`) |
 | A7 money sign and favicon | Merged, #109 (`a3c1437`); follow-up #111 (`e184a44`) |
 | A8 sign-in link, findings header, `/demo` prompts | Merged, #110 (`8ce4f73`) |
-| Outside the cards, merged | Frank mock analytics #99 and its hardening #102 (`a90dda5`); Frank MCP design revisions #101 (`0ace878`); AI-spend-versus-total ratio card #112 (`c95be35`); UI theme slices T1 #113 (`145565f`) and T2 #116 (`6ac1335`); connector slices C1 #114 (`6f37afd`) and C3 #115 (`b6957ac`); workload attribution from cost-row tags #117 (`ff24ff3`); connector Disconnect and Findings-link fixes #119 (`782a42f`); patched Next 16.3.8 and dependency floor #120 (`9024bc1`); readiness seed consistency (Fraud Triage gates follow the value ratio, budget-basis labels, ServiceNow and synthetic-cloud explanations, bounded model-switch estimate), in review |
+| Outside the cards, merged | Frank mock analytics #99 and its hardening #102 (`a90dda5`); Frank MCP design revisions #101 (`0ace878`); AI-spend-versus-total ratio card #112 (`c95be35`); UI theme slices T1 #113 (`145565f`) and T2 #116 (`6ac1335`); connector slices C1 #114 (`6f37afd`) and C3 #115 (`b6957ac`); workload attribution from cost-row tags #117 (`ff24ff3`); connector Disconnect and Findings-link fixes #119 (`782a42f`); patched Next 16.3.8 and dependency-floor guard #120 (`9024bc1`); readiness seed consistency (Fraud Triage gates follow the value ratio, budget-basis labels, ServiceNow and synthetic-cloud explanations, bounded model-switch estimate), in review |
+| Readiness honesty fixes | Open: seeded-data stamp, sandbox connectors counted as seeded (not live), simulated labels on replayed data, `/costsource` link from `/connectors`, README and `engines` accuracy. Deferred: `/mission` has no inbound link; the CONNECTED chip on sandbox cards lives in `ConnectorCard.tsx`; seed contradictions (frameworks gates, budget bases) |
 | Sprint A2, C and D cards | Not started. B1, B6 and B8 have all their dependencies merged; B4 and B5 wait for A4 and A5 (and D15); B7 now waits only for B1 and B8; the rest wait on earlier waves |
 
 **Pending owner decision D15 (MVP re-scope).** The recommendation is in PLAN
@@ -52,9 +53,12 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   ingest keeps `Tags`; the connector path drops it.
 - UI themes, T1 to T4: T1 token layer, built-in themes, contrast engine and
   validator (merged, #113, `145565f`); T2 theme switcher, user themes and palette
-  editor (merged, #116, `6ac1335`; Medium review fixes merged, #118, `45a9ba2`); T3 typography
-  settings; T4 inline colors moved onto tokens, with a guard test, in slices.
-  T4 slice 1 (open, `feat/ui-color-migration-1`): the neon accents in
+  editor (merged, #116, `6ac1335`; its Medium review fixes merged in #118, `45a9ba2`);
+  T3 typography settings (text size 90 to 130% and font family, with a layout guard at
+  130%; open, `feat/ui-typography`; long finding and initiative names now wrap instead of
+  truncating, and the footer alert ticker collapses to one line on phones; both visible at 100%); T4 inline colors moved onto tokens,
+  with a guard test.
+  T4 slice 1 (merged, #121): the neon accents in
   `src/lib/scales.ts` are theme variables, badge tints use `tint()` and the SVG chart
   constants use theme variables; the rendered audit (`tests/simulation/contrast-audit.spec.ts`,
   SVG text read via `fill`; evidence in `docs/evidence/ui-color-migration/`) goes from 92 to 0
@@ -65,6 +69,7 @@ own labels; their `C` labels are **not** this plan's cards C1 to C8.
   (3) the `rgba()` tints in connectors and frameworks; (4) audit more routes
   (`/findings`, `/mission`, `/prediction`, `/outcomes`) and ratchet the style-object
   baseline down; (5) Dark contrast, only if the owner decides to retune it.
+
 
 Boundary (v2): local and ephemeral only. No production infrastructure, no real
 data or credentials, no spend. No card adds a migration (issue #94) or a

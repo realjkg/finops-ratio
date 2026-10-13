@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const MODULE = path.join(__dirname, 'periods.ts');
+// Each case spawns tsx child processes (about 1 s each, 5.4 s observed under full-suite load), so the 5 s default flaked.
+const CHILD_TEST_TIMEOUT_MS = 30_000;
 
 /** Evaluates `expr` (with `m` = the periods module) in a child; null when it had to be killed. */
 function inChild(expr: string): { value?: unknown; error?: { code?: string; message: string } } | null {
@@ -31,7 +33,7 @@ describe('periodsBetween terminates and is bounded', () => {
     expect(inChild(`m.periodsBetween('9999-12-01', '9999-12-01')`)).toEqual({ value: ['9999-12-01'] });
     expect(inChild(`m.periodsBetween('9999-10-01', '9999-12-01')`)).toEqual({ value: ['9999-10-01', '9999-11-01', '9999-12-01'] });
     expect(inChild(`m.periodsBetween('2026-11-01', '2027-02-01')`)).toEqual({ value: ['2026-11-01', '2026-12-01', '2027-01-01', '2027-02-01'] });
-  });
+  }, CHILD_TEST_TIMEOUT_MS);
 
   it('inverted, out-of-bounds (before 2000-01, five-digit year) or malformed ranges are INVALID_RANGE', () => {
     for (const [from, to] of [
@@ -44,5 +46,5 @@ describe('periodsBetween terminates and is bounded', () => {
       const r = inChild(`m.periodsBetween(${JSON.stringify(from)}, ${JSON.stringify(to)})`);
       expect(r, `${from}..${to}`).toMatchObject({ error: { code: 'INVALID_RANGE' } });
     }
-  });
+  }, CHILD_TEST_TIMEOUT_MS);
 });

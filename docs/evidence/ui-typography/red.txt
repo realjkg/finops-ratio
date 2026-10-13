@@ -1,0 +1,25 @@
+RED. Round 1 base origin/main 782a42f (commit 4b6ea33): vitest 2 files fail to import ./typography; the 4 spec cases fail
+("scale applied" expected 20.8px, received 16px; no "Text" button).
+
+Round 2 (review: guard missed defects). The strengthened guard in tests/simulation/typography-layout.spec.ts
+(expands vertical scrollers to full content, tests ancestor clipping per axis, overlap > 2% of the smaller text box,
+vertical scrollers that also scroll sideways) was committed BEFORE the fixes and failed on the round-1 code:
+  /          overlap: span "0x" / span "1x value" (ValueRatioMeter labels, 390 px, 130%)
+  /          overlap: text "0x" / text "$0.00"; text "$6.8k" / text "Fraud Triage Agent" (SpendToValueGraph, 1440 px; also at 100%)
+  /overview  overlap: text "0x" / text "$0.00"
+  /workloads clipped: ticker spans "Spend up 23.6% MoM ...", "Value ratio fell to -0.2x ...", "Sales Copilot:" by footer / div.flex
+  4 failed (4 cases: 2 widths x 2 families)
+
+Round 3 (review: same-element line boxes, phone footer height). Spec committed before the fixes: on round-2 code the collapsed phone
+footer at /workloads, 390 px, 130% measured 375 px (default family) and 458 px (system-mono) against the new <= 64 px bound; 2 of 4 cases failed
+(1440 cases passed). The per-line check itself has no RED on the current pages (zero false positives); its mutations are in green.txt.
+
+Round 4 (review: 130% widened the page at 320-360 and 768 px). Spec widths 320, 360, 768, 1024 added before the fix; on round-3 code 4 of 8 cases failed:
+  320, 360  "page scrolls horizontally" on every route (Theme + Text + Ask Frank row grew to 371 px; Ask Frank cut off); 320 also "scrolls horizontally: main" on /connectors
+  768, 1024 overlap of nav links with the Theme label (the md top bar did not fit)
+
+Round 5 (CI `acceptance` failed on the Playwright headless shell; review: panels off-screen, sideways scroll outside the guard). Spec now includes /outcomes and /prediction
+and a test that opens the Theme editor and Text panel at 130% and 115% across 320..1024 px. Run on the headless shell against round-4 code, 5 of 9 cases failed:
+  /connectors 320: "scrolls horizontally: main" (unbreakable env-var chip, headless shell rendering)
+  /outcomes 320, 360, 390: "scrolls horizontally" (Workload detail link row); /prediction 320: "scrolls horizontally: main" (Proposed change select)
+  panels: #theme-editor spans x < 0 at 768 px / 130% (anchored to the button group, not the nav)

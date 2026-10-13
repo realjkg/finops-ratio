@@ -139,7 +139,7 @@ function ReportDocument({ model }: { model: ReportModel }) {
         </Text>
 
         <View style={styles.kpiGrid}>
-          <KpiBox label="Total Cloud Spend" value={`${formatUSD(summary.totalMonthlySpend)}/mo`} color={TOKEN.cost} />
+          <KpiBox label="AI Spend" value={`${formatUSD(summary.totalMonthlySpend)}/mo`} color={TOKEN.cost} />
           <KpiBox label="Projected Savings" value={formatUSD(summary.projectedSavings)} color={TOKEN.value} />
           <KpiBox label="Initiatives Active" value={String(summary.initiativesActive)} />
           <KpiBox

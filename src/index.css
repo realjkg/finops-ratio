@@ -78,11 +78,24 @@ body,
   height: 100%;
 }
 
+/* Typography settings (src/theme/typography.ts): --ui-scale multiplies the root size, so every
+   rem-based size follows; the fixed-pixel text sizes below follow it too (pinned by typography.test.ts). */
+:root {
+  --font-body: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+html { font-size: calc(100% * var(--ui-scale, 1)); }
+.text-\[9px\] { font-size: calc(9px * var(--ui-scale, 1)); }
+.text-\[10px\] { font-size: calc(10px * var(--ui-scale, 1)); }
+.text-\[11px\] { font-size: calc(11px * var(--ui-scale, 1)); }
+.text-\[12px\] { font-size: calc(12px * var(--ui-scale, 1)); }
+.text-\[13px\] { font-size: calc(13px * var(--ui-scale, 1)); }
+
 body {
   margin: 0;
   background: var(--void);
   color: var(--txt);
-  font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
 
