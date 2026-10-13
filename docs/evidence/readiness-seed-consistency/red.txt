@@ -1,0 +1,25 @@
+# RED: tests committed before the fix (origin/main 9024bc1)
+$ npx vitest run src/lib/readinessSeedConsistency.test.tsx
+      Tests  14 failed | 10 passed (24)
+ Test Files  1 failed (1)
+FAIL B3a gates follow the value ratio > Fraud Triage Agent: Gate 3 passes only at >= 3x
+FAIL B3b budget consumed names its basis in both views > Code Review Bot
+FAIL B3b budget consumed names its basis in both views > Contract Redliner
+FAIL B3b budget consumed names its basis in both views > Customer Support Agent
+FAIL B3b budget consumed names its basis in both views > Document Summarizer
+FAIL B3b budget consumed names its basis in both views > Fraud Triage Agent
+FAIL B3b budget consumed names its basis in both views > Infra Runbook Assistant
+FAIL B3b budget consumed names its basis in both views > Internal Knowledge Bot
+FAIL B3b budget consumed names its basis in both views > Marketing Content Gen
+FAIL B3b budget consumed names its basis in both views > Pipeline Forecast Analyst
+FAIL B3b budget consumed names its basis in both views > Sales Copilot
+FAIL B3b budget consumed names its basis in both views > Support Triage Router
+FAIL B3c costsource differences are explained > ServiceNow = billing export + ITBM allocation on critical services, and the card says so
+FAIL M5 delta value ratio is bounded for display > caps large estimates and keeps small ones exact
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
+
+# Round 2 RED (review M-1: same bound missing on /mission Proposed Changes), against head 64f8aca
+$ npx vitest run src/lib/readinessSeedConsistency.test.tsx
+      Tests  2 failed | 24 passed (26)
+ FAIL   M5 the same bound applies on the /mission Proposed Changes card > wl-codereview model switch and a negative demand-shape delta
+ FAIL   M5 the same bound applies on the /mission Proposed Changes card > wl-support model switch and a negative demand-shape delta

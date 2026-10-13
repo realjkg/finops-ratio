@@ -14,7 +14,8 @@ import type {
   ChangeType,
 } from './index';
 import { WORKLOADS } from '@/data/workloads';
-import { formatUSD, formatRatio, formatSignedPct } from '@/lib/format';
+import { formatUSD, formatSignedPct } from '@/lib/format';
+import { DELTA_RATIO_CAP_CAVEAT, formatDeltaValueRatio } from './predictors';
 
 // A cheaper target model for the model-switch preset (falls back if equal).
 const SWITCH_TARGET = 'gemini-2.5-flash';
@@ -199,6 +200,7 @@ export function PredictionPage() {
 function PredictionCard({ prediction }: { prediction: ChangePrediction }) {
   const { impact, confidence, source, mode, estimated, rationale, clearsConfidenceGate } =
     prediction;
+  const deltaRatio = formatDeltaValueRatio(impact.deltaValueRatio);
   return (
     <section className="mb-8 rounded-lg border border-edge bg-slab p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -217,12 +219,13 @@ function PredictionCard({ prediction }: { prediction: ChangePrediction }) {
       <div className="grid grid-cols-3 gap-3">
         <Metric label="Δ daily spend" value={usdOrUncertain(impact.deltaDailySpend)} tone="cost" />
         <Metric label="Δ monthly spend" value={usdOrUncertain(impact.deltaMonthlySpend)} tone="cost" />
-        <Metric
-          label="Δ value ratio"
-          value={`${impact.deltaValueRatio >= 0 ? '+' : ''}${formatRatio(impact.deltaValueRatio)}`}
-          tone="value"
-        />
+        <Metric label="Δ value ratio" value={deltaRatio.text} tone="value" />
       </div>
+      {deltaRatio.capped && (
+        <p className="mt-2 font-sans text-[12px] text-cost">
+          {DELTA_RATIO_CAP_CAVEAT}
+        </p>
+      )}
 
       <dl className="mt-4 space-y-1 text-[12px] text-sub">
         <Row label="Confidence band (monthly Δ)">

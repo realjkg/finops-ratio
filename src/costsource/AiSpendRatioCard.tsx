@@ -12,6 +12,9 @@ import type { AiSpendRatio, AiSpendRatioReport } from './aiSpendRatio';
 import type { CostWindow } from './CostSourceClient';
 import { formatUSD } from '@/lib/format';
 import { currentBillingPeriod } from '@/lib/billingPeriod';
+import { ITBM_CRITICAL_SERVICE_ALLOCATION } from './seed';
+
+const SYNTHETIC_CLOUD_IDS = ['aws-sandbox', 'azure-sandbox', 'gcp-sandbox'];
 
 type RatioPath = 'seed' | 'ingested';
 type RatioState =
@@ -150,6 +153,9 @@ export function AiSpendRatioView({
                 <span className="text-xs text-txt">
                   {s.name}
                   {!s.inHeadline && <span className="text-dim"> (same workloads, not summed into the headline)</span>}
+                  {s.sourceId === 'servicenow-sandbox' && (
+                    <span className="text-dim"> · cost of record: +{+((ITBM_CRITICAL_SERVICE_ALLOCATION - 1) * 100).toFixed(1)}% ITBM allocation on critical services, so it exceeds the billing export</span>
+                  )}
                 </span>
                 <span><CurrencyLines result={s.result} /></span>
               </li>
@@ -165,6 +171,8 @@ export function AiSpendRatioView({
             Basis: EffectiveCost (amortized, credits net in). AI = ServiceCategory “AI and Machine
             Learning”. The headline sums only sources that do not repeat another fetched source’s
             bill; other sources are assumed not to overlap (no row-level dedupe). May undercount if exports file AI spend under other categories.
+            {state.report.perSource.some((s) => SYNTHETIC_CLOUD_IDS.includes(s.sourceId)) &&
+              ' The synthetic AWS/Azure/GCP sandboxes are their own bills, including charges no workload maps to; the signed-in workspace ledger is a different fixture that splits the workload totals across the three clouds, so the two do not match by design.'}
           </p>
         </div>
       )}

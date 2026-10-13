@@ -373,7 +373,9 @@ export const WORKLOAD_SEED_SPECS: WorkloadSeedSpec[] = [
     csat: null,
     avgHandleTimeSeconds: 210,
     deflectionRate: 0.0,
-    gates: gates(true, true, true, true, 'm.po', '2026-06-02T13:00:00Z'),
+    // Cost approval lapsed: the defensible value ratio is below the Gate 3 minimum
+    // (3x), so Cost and Scale (sequential) are not authorized. Gates follow the ratio.
+    gates: gates(true, true, false, false, 'm.po', '2026-06-02T13:00:00Z'),
     costTrendPct: 18.2,
     volatility: 0.8,
   },
