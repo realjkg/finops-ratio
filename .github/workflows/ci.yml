@@ -24,13 +24,13 @@ jobs:
 
     # Ephemeral Postgres for the ingestion DB suite (*.db.test.ts). Trust auth
     # inside the job-scoped container only: no credential is stored anywhere.
-    # Image from the ECR Public mirror of the same official library/postgres
-    # image: GitHub-hosted runners repeatedly timed out pulling from
-    # auth.docker.io (2026-10-09), and service containers pull before any step
-    # can retry. Swap back once Docker Hub egress is stable.
+    # Use the official Docker Hub image, pinned to the same digest as the
+    # local acceptance stack. The ECR Public mirror exhausted its anonymous
+    # transfer quota on 2026-10-21 before any CI step could run. Registry
+    # failures must remain failures; DB and recovery tests must never skip.
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:16
+        image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
         env:
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
