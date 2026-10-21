@@ -1,0 +1,14 @@
+# Dependabot: weekly dependency + action updates (SOC 2 baseline control B4).
+# npm covers the application lockfile; github-actions covers the workflow
+# actions in .github/workflows/ (bumps arrive as PRs, so the SHA pins get
+# refreshed through review instead of drifting silently).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

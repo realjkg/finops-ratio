@@ -12,7 +12,7 @@ author: autobuild
 created: 2026-06-26
 ---
 
-# Cost Reporting — Ratio (`realjkg/token-sensei`)
+# Cost Reporting — Ratio (`realjkg/finops-ratio`)
 
 Automated cost reports deliver the value/forecast/governance numbers into the
 channels each team already uses (Slack/email/webhook) — the publish-don't-aggregate
