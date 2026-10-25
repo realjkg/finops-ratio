@@ -77,8 +77,8 @@ describe('EBITDA impact', () => {
 
   it('no stated amount, spend rose but savings exist (Marketing): projected scenario, not "went down"', async () => {
     const t = await last(['EBITDA impact for Marketing after spending went down']);
-    expect(t).toContain(`${usd(3136)}/mo`);
-    expect(t).toContain(`${usd(3136 * 12)}/yr`);
+    expect(t).toContain(`${usd(1568)}/mo`);
+    expect(t).toContain(`${usd(1568 * 12)}/yr`);
     expect(t).toMatch(/projected/);
     expect(t).toMatch(/seeded trend shows (a rise|spend up)|spend rose/i);
   });

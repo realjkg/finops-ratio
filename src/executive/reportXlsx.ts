@@ -28,7 +28,7 @@ function toRecord(row: ReportRow): ReportRecord {
     'Initiative Name': row.name,
     'Monthly Cost ($)': row.monthlyCost,
     'Annual Run Rate ($)': row.annualRunRate,
-    'Budget Consumed (%)': row.budgetConsumedPct,
+    'Budget Consumed (%)': row.budgetConsumedPct ?? `N/A (${row.budgetConsumedNa})`,
     Status: row.status,
     'Cost Efficiency Score': Number(row.costEfficiency.toFixed(1)),
     'Savings Opportunity ($)': row.savingsOpportunity,

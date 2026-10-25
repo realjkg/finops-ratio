@@ -11,6 +11,7 @@ import type { CostEntry } from '@/simulation/types';
 import type { ProjectionContext } from '@/mission/missionModel';
 import { WORKLOADS } from '@/data/workloads';
 import { COST_SOURCES, findingsFor } from '@/costsource/seed';
+import { isHeadlineEligible } from '@/costsource/headline';
 import type { Workload } from '@/types';
 import {
   buildInitiativeBoard,
@@ -23,7 +24,8 @@ export interface ReportRow {
   name: string;
   monthlyCost: number;
   annualRunRate: number;
-  budgetConsumedPct: number;
+  budgetConsumedPct: number | null;
+  budgetConsumedNa: string | null;
   status: string;
   costEfficiency: number;
   savingsOpportunity: number;
@@ -43,7 +45,7 @@ export interface ReportModel {
 function savingsByWorkload(): Map<string, number> {
   const byWorkload = new Map<string, number>();
   for (const source of COST_SOURCES) {
-    if (!source.configured || !source.capabilities.includes('findings')) continue;
+    if (!source.configured || !isHeadlineEligible(source) || !source.capabilities.includes('findings')) continue;
     for (const finding of findingsFor(source.id)) {
       if (!finding.workloadId) continue;
       const prior = byWorkload.get(finding.workloadId) ?? 0;
@@ -71,6 +73,7 @@ export function buildReportModel(
       monthlyCost: Math.round(initiative.monthlyCost),
       annualRunRate: Math.round(initiative.monthlyCost * 12),
       budgetConsumedPct: initiative.budgetConsumedPct,
+      budgetConsumedNa: initiative.budgetConsumedNa,
       status: INITIATIVE_STATUS_META[initiative.status].label,
       costEfficiency: initiative.valueRatio,
       savingsOpportunity: Math.round(savings.get(initiative.id) ?? 0),

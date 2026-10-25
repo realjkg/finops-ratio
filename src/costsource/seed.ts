@@ -84,7 +84,8 @@ export function sourcesForEnv(env: Record<string, string | undefined>): CostSour
       coverage: 'on_prem',
       capabilities: ['costRows', 'findings'],
       configured: true,
-      note: 'Synthetic CMDB/ITBM cost allocation — CI-keyed service lines through the FOCUS v1.4 shim; not a live ServiceNow integration.',
+      roleConfirmed: false,
+      note: 'Synthetic CMDB/ITBM allocation lines, illustrative only. ServiceNow is not assumed to supply billing data (role unconfirmed), so these rows and findings are excluded from headline totals. Not a live integration.',
     },
     // Synthetic AWS / Azure / GCP sandboxes (card A6): static offline descriptors.
     ...SYNTHETIC_CLOUD_DESCRIPTORS.map((d) => ({ ...d, capabilities: [...d.capabilities] })),

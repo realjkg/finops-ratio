@@ -28,6 +28,7 @@ const ORACLE: Record<string, { provider: string; totalCents: number; mappedCents
 // Golden SHA-256 of the existing three sources, captured on origin/main
 // (7a9da43) with the clock pinned to 2026-06-15T00:00:00Z; rows re-captured for the Fraud gates seed fix. pointfive-sandbox
 // rows re-captured in C1: its v1.0 rows no longer get a guessed ServiceSubcategory.
+// servicenow-sandbox descriptor re-captured in pilot P0 (roleConfirmed:false + note); its rows and health are unchanged.
 const GOLDEN: Record<string, { descriptor: string; rows: string; health: string }> = {
   'pointfive-sandbox': {
     descriptor: '6ca1033c4438a232b0b733ad650dfa95f6a9baeba7c1d837a3c985999a3fca3d',
@@ -40,7 +41,7 @@ const GOLDEN: Record<string, { descriptor: string; rows: string; health: string 
     health: '25c27e6c288090956eed7b8eb5c2c739435a7fe9d67f32aace5e9f5e91fcf401',
   },
   'servicenow-sandbox': {
-    descriptor: 'c5b547a4ba1f88533c0c7a1c6e297eb13a9ab335287ce7761a188f5e39d8934b',
+    descriptor: 'a02b7fc7b3605fa657676d94aa3ce7db00d2d810f5af3131b823c8b9c637f96b',
     rows: 'ab93ff454cb5448566e5032bc447ed0a4b8537d0b5ee15c3ea7fdd2d569fbd78',
     health: '4a82d31d7f99e7b065c3959373a4be3aac8b367881a0ee532c8f5af89de1bc1a',
   },

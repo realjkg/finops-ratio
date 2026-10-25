@@ -29,3 +29,12 @@ describe('buildAIContext — cache hit rate injection', () => {
     expect(prompt).toContain('cache hit: 16.5%'); // wl-support
   });
 });
+
+describe('buildAIContext — N/A budget metric', () => {
+  it('omits an initiative with no valid approved budget instead of sending 0%', () => {
+    const [first, ...rest] = WORKLOADS;
+    const ctx = buildAIContext([{ ...first, costs: { ...first.costs, monthly_budget: 0 } }, ...rest]);
+    expect(ctx.initiatives.map((i) => i.id)).not.toContain(first.id);
+    expect(ctx.initiatives).toHaveLength(rest.length);
+  });
+});

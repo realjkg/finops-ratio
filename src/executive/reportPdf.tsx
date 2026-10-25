@@ -165,7 +165,7 @@ function ReportDocument({ model }: { model: ReportModel }) {
             <Cell width={COLS[0].width} align="left" mono={false}>{r.name}</Cell>
             <Cell width={COLS[1].width} align="right" mono color={TOKEN.cost}>{formatUSD(r.monthlyCost)}</Cell>
             <Cell width={COLS[2].width} align="right" mono>{formatUSD(r.annualRunRate)}</Cell>
-            <Cell width={COLS[3].width} align="right" mono>{`${r.budgetConsumedPct}%`}</Cell>
+            <Cell width={COLS[3].width} align="right" mono>{r.budgetConsumedPct === null ? 'N/A' : `${r.budgetConsumedPct}%`}</Cell>
             <Cell width={COLS[4].width} align="left" mono={false}>{r.status}</Cell>
             <Cell width={COLS[5].width} align="right" mono color={TOKEN.value}>{formatRatio(r.costEfficiency)}</Cell>
             <Cell width={COLS[6].width} align="right" mono color={r.savingsOpportunity > 0 ? TOKEN.value : TOKEN.text}>

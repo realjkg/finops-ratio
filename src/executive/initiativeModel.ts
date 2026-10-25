@@ -12,10 +12,12 @@
 import { budgetFor } from '@/data/budgets';
 import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
+import { budgetConsumed } from '@/lib/metricContracts';
 import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import { budgetColor, TOKEN_COLOR } from '@/lib/scales';
 import type { EvidenceStatus, Workload } from '@/types';
 import { COST_SOURCES, findingsFor } from '@/costsource/seed';
+import { isHeadlineEligible } from '@/costsource/headline';
 import { toMissionView, type MissionStatus, type ProjectionContext } from '@/mission/missionModel';
 
 export type InitiativeStatus = 'on_track' | 'at_risk' | 'pending_approval';
@@ -42,8 +44,10 @@ export interface InitiativeView {
   name: string;
   // Monthly run-rate cost — the headline number executives read first.
   monthlyCost: number;
-  // Month-to-date budget consumed (0..100, clamped) + its threshold color.
-  budgetConsumedPct: number;
+  // Month-to-date budget consumed (actual to date / approved budget, whole
+  // percent, not clamped) + its threshold color. null = N/A, with the reason.
+  budgetConsumedPct: number | null;
+  budgetConsumedNa: string | null;
   budgetConsumedColor: string;
   status: InitiativeStatus;
   // Cost efficiency = value ratio (R4 — cost is always paired with value).
@@ -68,14 +72,15 @@ export function toInitiativeView(workload: Workload, context: ProjectionContext 
   // the technical surface (one source of truth, persona-projected).
   const mission = toMissionView(workload, context);
   const status = computeBudgetStatus(workload, budget, context.now ?? DEMO_NOW);
-  const consumedRatio = status.monthly.pctUsed;
+  const consumed = budgetConsumed(status.monthly.spendMtd, status.monthly.monthlyBudget);
 
   return {
     id: workload.id,
     name: workload.name,
     monthlyCost: workload.costs.monthly_spend,
-    budgetConsumedPct: Math.min(Math.round(consumedRatio * 100), 100),
-    budgetConsumedColor: budgetColor(consumedRatio),
+    budgetConsumedPct: consumed.pct === null ? null : Math.round(consumed.pct),
+    budgetConsumedNa: consumed.naReason,
+    budgetConsumedColor: consumed.pct === null ? 'var(--sub)' : budgetColor(consumed.pct / 100),
     status: MISSION_TO_INITIATIVE[mission.status],
     valueRatio: mission.valueRatio,
     valueColor: mission.valueColor,
@@ -87,7 +92,7 @@ export function toInitiativeView(workload: Workload, context: ProjectionContext 
 // configured cost sources surface (the same seed the CostSource page reads).
 function projectedSavingsFromFindings(): number {
   const total = COST_SOURCES.filter(
-    (s) => s.configured && s.capabilities.includes('findings'),
+    (s) => s.configured && isHeadlineEligible(s) && s.capabilities.includes('findings'),
   )
     .flatMap((s) => findingsFor(s.id))
     .reduce((sum, f) => sum + f.estimatedMonthlySavings, 0);

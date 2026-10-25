@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { digest } from './core.mjs';
 import { acquireLock } from './lock.mjs';
+import { areaMaturity, pilotEntry } from './pilot.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const out = resolve(root, '.ratio-build');
@@ -35,8 +36,13 @@ try {
     checks: area.gates.map(gate => ({ gate, status: gates[gate]?.status ?? 'unverified' })),
     productionAccepted: false,
   }));
-  const report = { source, at: new Date().toISOString(), productionReady: false, areas, externalTasks: JSON.parse(fs.readFileSync(new URL('./plan.json', import.meta.url), 'utf8')).tasks.filter(t => t.kind === 'external') };
+  const exists = path => fs.existsSync(resolve(root, path));
+  const externalTasks = JSON.parse(fs.readFileSync(new URL('./plan.json', import.meta.url), 'utf8')).tasks.filter(t => t.kind === 'external');
+  const labeled = areas.map(a => ({ ...a, maturity: areaMaturity(a, exists).label }));
+  const pilot = pilotEntry(areas, externalTasks, exists);
+  const report = { source, at: new Date().toISOString(), productionReady: false, pilotEntryReady: pilot.pilotEntryReady, pilotGates: pilot.gates, areas: labeled, externalTasks };
   save('readiness.json', report);
-  process.stdout.write(areas.map(a => `${a.title}: ${a.missingSources.length ? 'missing source' : 'source present'}; ${a.checks.map(c => `${c.gate}=${c.status}`).join(', ') || 'external acceptance required'}\n  Remaining: ${a.remaining}`).join('\n') + '\n');
+  process.stdout.write(labeled.map(a => `${a.title} [${a.maturity}]: ${a.missingSources.length ? 'missing source' : 'source present'}; ${a.checks.map(c => `${c.gate}=${c.status}`).join(', ') || 'external acceptance required'}\n  Remaining: ${a.remaining}`).join('\n') + '\n');
+  process.stdout.write(`\nPilot gate: pilotEntryReady=${pilot.pilotEntryReady} productionReady=false (simulated data never satisfies a gate)\n${pilot.gates.map(g => `  unresolved ${g.id}: ${g.reason}`).join('\n')}\n`);
   if (process.argv.includes('--test') && gates.governance.status !== 'passed') process.exitCode = 1;
 } finally { lock.release(); }

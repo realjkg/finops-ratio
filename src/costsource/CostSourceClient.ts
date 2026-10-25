@@ -51,6 +51,8 @@ export interface CostSourceDescriptor {
   capabilities: SourceCapability[];
   configured: boolean; // false = specified but missing credentials (e.g. live PointFive)
   note: string;
+  /** false = the source's role is unconfirmed; it never counts in headline totals. */
+  roleConfirmed?: boolean;
   /** Config-driven connectors only: connection state + the env that connects it. */
   connection?: ConnectorConnection;
   setup?: ConnectorSetup;

@@ -14,6 +14,7 @@ import {
 } from '@/lib/modelCompare';
 import { MODEL_QUALITY_NOTE } from '@/data/models';
 import { formatRatio, formatSignedPct, formatUSD } from '@/lib/format';
+import { SCENARIO_REDUCTION_LABEL } from '@/lib/metricContracts';
 
 export function MultiModelTab({
   workload,
@@ -123,12 +124,12 @@ export function MultiModelTab({
       </section>}
       {alt && current && (
         <div className="rounded-card border border-shape/40 bg-shape/5 p-3 text-xs text-sub">
-          <span className="text-shape">⚠</span> Switching to{' '}
-          <span className="font-mono text-txt">{alt.model.display_name}</span> saves{' '}
+          <span className="text-shape">⚠</span> {SCENARIO_REDUCTION_LABEL}: switching to{' '}
+          <span className="font-mono text-txt">{alt.model.display_name}</span> would cut cost by{' '}
           <span className="font-mono text-value">
             {formatUSD(current.dailyCost - alt.dailyCost)}/day
           </span>{' '}
-          ({formatUSD((current.dailyCost - alt.dailyCost) * 30)}/mo). At the same value, that lifts
+          ({formatUSD((current.dailyCost - alt.dailyCost) * 30)}/mo) at today&apos;s volume. At the same value, that lifts
           the {formatRatio(workload.value.value_ratio)} ratio higher.{' '}
           {MODEL_QUALITY_NOTE[alt.model.model_name] ?? 'Quality may change.'} Run an A/B test on
           resolution rate before switching.

@@ -5,6 +5,7 @@
 // from the configured cost-source findings and an optional workload drill-down.
 
 import { COST_SOURCES, findingsFor } from '@/costsource/seed';
+import { isHeadlineEligible } from '@/costsource/headline';
 import { alertsFor } from '@/data/alerts';
 import { DEMO_NOW } from '@/data/workloads';
 import { deriveCacheHitRate } from '@/lib/derive';
@@ -39,7 +40,7 @@ function gatesPassed(workload: Workload): number {
 function savingsByWorkload(): Map<string, number> {
   const totals = new Map<string, number>();
   for (const source of COST_SOURCES) {
-    if (!source.configured || !source.capabilities.includes('findings')) continue;
+    if (!source.configured || !isHeadlineEligible(source) || !source.capabilities.includes('findings')) continue;
     for (const finding of findingsFor(source.id)) {
       if (!finding.workloadId) continue;
       totals.set(
@@ -60,7 +61,8 @@ export function buildAIContext(
   const { initiatives, summary } = buildInitiativeBoard(workloads, { ...context, now: asOf });
   const savings = savingsByWorkload();
 
-  const initiativeSnapshots: AIInitiativeSnapshot[] = initiatives.map((i) => ({
+  // The wire field is numeric; an N/A budget metric is left out rather than sent as 0 (follow-up: nullable wire field).
+  const initiativeSnapshots: AIInitiativeSnapshot[] = initiatives.flatMap((i) => i.budgetConsumedPct === null ? [] : [{
     id: i.id,
     name: i.name,
     monthlyCost: i.monthlyCost,
@@ -70,7 +72,7 @@ export function buildAIContext(
     valueRatio: i.valueRatio,
     valueEvidenceStatus: i.valueEvidenceStatus,
     savingsOpportunity: Math.round(savings.get(i.id) ?? 0),
-  }));
+  }]);
 
   const workloadSnapshots: AIWorkloadSnapshot[] = workloads.map((w) => ({
     id: w.id,

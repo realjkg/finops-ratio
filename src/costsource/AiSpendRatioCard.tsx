@@ -24,7 +24,7 @@ type RatioState =
 
 const PATH_LABEL: Record<RatioPath, string> = { seed: 'Static seed', ingested: 'Ingested' };
 const PATH_DETAIL: Record<RatioPath, string> = {
-  seed: 'mock client: offline sandbox + synthetic sources',
+  seed: 'simulated demo data: mock client, offline sandbox + synthetic sources',
   ingested: 'live client: /api/costsource routes, non-sandbox sources only',
 };
 
@@ -145,14 +145,16 @@ export function AiSpendRatioView({
         <div className="space-y-3">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-dim">Headline (non-overlapping sources)</p>
-            <CurrencyLines result={state.report.overall} />
+            {state.report.overall.byCurrency.length === 0
+              ? <span className="font-mono text-xs text-dim">N/A (no headline-eligible source returned rows)</span>
+              : <CurrencyLines result={state.report.overall} />}
           </div>
           <ul className="space-y-1">
             {state.report.perSource.map((s) => (
               <li key={s.sourceId} className="flex flex-wrap justify-between gap-2 border-t border-edge pt-1">
                 <span className="text-xs text-txt">
                   {s.name}
-                  {!s.inHeadline && <span className="text-dim"> (same workloads, not summed into the headline)</span>}
+                  {!s.inHeadline && <span className="text-dim"> ({s.exclusionReason ?? 'same workloads, not summed into the headline'})</span>}
                   {s.sourceId === 'servicenow-sandbox' && (
                     <span className="text-dim"> · cost of record: +{+((ITBM_CRITICAL_SERVICE_ALLOCATION - 1) * 100).toFixed(1)}% ITBM allocation on critical services, so it exceeds the billing export</span>
                   )}

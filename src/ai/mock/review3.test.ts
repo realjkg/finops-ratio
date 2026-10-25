@@ -67,7 +67,7 @@ describe('ONE ingestion policy: every numeric field is range-checked', () => {
     }
   });
   it.each([
-    ['totalMonthlySpend', 1e300, '$41,212/mo'], ['totalMonthlySpend', -5, '$41,212/mo'], ['projectedSavings', 1e300, '$4,816/mo'],
+    ['totalMonthlySpend', 1e300, '$41,212/mo'], ['totalMonthlySpend', -5, '$41,212/mo'], ['projectedSavings', 1e300, '$2,408/mo'],
     ['initiativesActive', -1, '11 initiatives'], ['initiativesActive', 2.5, '11 initiatives'], ['pendingApproval', 1e300, '2 pending approval'], ['pendingApproval', 0.5, '2 pending approval'],
   ])('summary.%s=%s is replaced by the recomputed value in the legacy answer', async (f, v, want) => {
     const c = structuredClone(CTX);
