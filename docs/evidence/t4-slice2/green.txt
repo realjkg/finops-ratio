@@ -1,0 +1,18 @@
+# GREEN on feat/t4-slice2-theme-contrast (19 page routes; Light, High contrast and Dark audited)
+# audit, full Chromium 1194 and headless shell 1194 give identical counts (9 passed each):
+light          TOTAL           0 (max 0)      [main: 30, all on /costsource]
+high-contrast  TOTAL           0 (max 0)      [main: 24, all on /costsource]
+dark           TOTAL         659 (max 659)    [main: 683; ratchet lowered by 24 (opacity-60 removed)]
+# guard specs csp, theme-dismissal, theme-mobile, typography-layout: 19 passed on each browser
+# gates, run sequentially in the foreground:
+#   1 npm run lint        exit 0
+#   2 npm run typecheck   exit 0
+#   3 npx vitest run      201 files, 3691 tests passed
+#   4 npm run build       exit 0
+# mutations (each fails the named tests, restored afterwards):
+#   DEFAULT_THEME -> 'dark'                     ThemeMenu.test + tokens.test: 5 failed | 42 passed
+#   label back to 'Dark'                        ThemeMenu.test: 1 failed | 30 passed
+#   drop '/workspace' from PAGES                audit "PAGES lists every page route": 1 failed
+#   restore opacity-60 on source cards          audit light 30 / high-contrast 24 (the RED run above)
+# CSP: PREPAINT_SCRIPT unchanged (it lists Object.keys(BUILT_IN_THEMES) and the storage key), so
+#   PREPAINT_HASH is unchanged; src/security/csp.test.ts passes (pin test).
