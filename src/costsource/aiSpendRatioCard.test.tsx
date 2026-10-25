@@ -189,7 +189,7 @@ describe('Forecast (EOM) in the composition card', () => {
       seed.costs.monthly_budget = b;
       try { return render(<CompositionCard rows={rows} />); } finally { seed.costs.monthly_budget = saved; }
     };
-    expect(html(0)).toContain('(N/A of budget)');
+    expect(html(0)).toMatch(/\(N\/A of budget: [^)]*approved budget/i);
     expect(html(0)).not.toContain('breaches budget');
     expect(html(0)).not.toMatch(/\(0% of budget\)/);
     expect(html(15000)).toMatch(/\(\d+% of budget\)/);

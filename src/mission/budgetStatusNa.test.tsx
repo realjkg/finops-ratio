@@ -6,6 +6,7 @@ import { WORKLOADS } from '@/data/workloads';
 import { budgetFor } from '@/data/budgets';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
 import { BudgetProfileTab } from '@/components/detail/BudgetProfileTab';
+import { buildAIContext } from '@/ai/buildAIContext';
 import { InitiativeCard } from '@/executive/InitiativeCard';
 import { buildInitiativeBoard, toInitiativeView } from '@/executive/initiativeModel';
 import { languageFor } from '@/lib/languageMap';
@@ -79,5 +80,58 @@ describe('/reports page', () => {
     expect(html).toMatch(/<td>N\/A \([^<]*approved budget[^<]*\)<\/td>/);
     expect(html).toContain('<td>Budget N/A</td>');
     expect(html).not.toMatch(/<td>%<\/td>/);
+  });
+});
+
+// Review round 4: N/A hides only what the invalid period implies; real alert-driven
+// and valid-period signals stay in statuses and counts.
+const fraud = WORKLOADS.find((x) => x.id === 'wl-fraud')!;
+const dailyZero = { ...fraud, costs: { ...fraud.costs, daily_budget: 0 } };
+const bothZero = { ...fraud, costs: { ...fraud.costs, daily_budget: 0, monthly_budget: 0 } };
+const others = WORKLOADS.filter((x) => x.id !== 'wl-fraud');
+
+describe('valid-period and alert signals survive an invalid budget', () => {
+  it('daily budget invalid, monthly valid, critical alert: still CRITICAL and counted', () => {
+    const m = toMissionView(dailyZero);
+    expect(m.status).toBe('critical');
+    expect(renderToStaticMarkup(<MissionCard mission={m} onOpen={() => {}} />)).toContain('CRITICAL');
+    expect(toInitiativeView(dailyZero).status).toBe('pending_approval');
+    expect(buildMissionBoard([dailyZero, ...others]).fleet.needsAttention).toBe(buildMissionBoard(WORKLOADS).fleet.needsAttention);
+    expect(buildInitiativeBoard([dailyZero, ...others]).summary.pendingApproval).toBe(buildInitiativeBoard(WORKLOADS).summary.pendingApproval);
+    expect(buildAIContext([dailyZero, ...others]).initiatives.map((i) => i.id)).toContain('wl-fraud');
+  });
+
+  it('both budgets invalid, critical alert: alert status still counts; the AI context says it is omitted', () => {
+    expect(toMissionView(bothZero).status).toBe('critical');
+    expect(buildMissionBoard([bothZero, ...others]).fleet.needsAttention).toBe(buildMissionBoard(WORKLOADS).fleet.needsAttention);
+    expect(buildInitiativeBoard([bothZero, ...others]).summary.pendingApproval).toBe(buildInitiativeBoard(WORKLOADS).summary.pendingApproval);
+    const ctx = buildAIContext([bothZero, ...others]);
+    expect(ctx.initiatives.map((i) => i.id)).not.toContain('wl-fraud');
+    expect(ctx.omitted).toEqual([{ id: 'wl-fraud', name: fraud.name, reason: expect.stringMatching(/approved budget/i) }]);
+  });
+
+  it('with nothing adverse left, an invalid budget is N/A, never on-track', () => {
+    expect(toMissionView(bothZero, { alerts: [] }).status).toBe('na');
+    expect(toMissionView(dailyZero, { alerts: [] }).status).not.toBe('nominal');
+  });
+});
+
+describe('figures derived from an invalid budget', () => {
+  it('Budget tab shows remaining N/A, not $0.00 remaining', () => {
+    const html = renderToStaticMarkup(<BudgetProfileTab workload={dailyZero} budget={budgetFor('wl-fraud')!} now={NOW} />);
+    expect(html).toContain('Remaining N/A');
+    expect(html).not.toContain('$0.00 remaining');
+  });
+
+  it('a sub-cent seeded budget is N/A everywhere, with the below-a-cent reason', () => {
+    const tiny = { ...first, costs: { ...first.costs, daily_budget: 0.004, monthly_budget: 0.004 } };
+    const m = toMissionView(tiny, { alerts: [] });
+    expect(m.fuelNa).toMatch(/below \$0\.01/);
+    expect(m.trajectoryVerdict).toMatch(/N\/A \(.*below \$0\.01/);
+    expect(m.status).toBe('na');
+    expect(toInitiativeView(tiny).budgetConsumedNa).toMatch(/below \$0\.01/);
+    const html = renderToStaticMarkup(<BudgetProfileTab workload={tiny} budget={budgetFor(first.id)!} now={NOW} />);
+    expect(html).toMatch(/N\/A \([^<]*below \$0\.01/);
+    expect(html).not.toMatch(/\d{5,}%/);
   });
 });

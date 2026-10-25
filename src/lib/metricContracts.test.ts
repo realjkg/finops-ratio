@@ -23,6 +23,13 @@ describe('budgetConsumed', () => {
     },
   );
 
+  it('treats a budget below one cent as invalid, with a reason that says so', () => {
+    const m = budgetConsumed(10, 0.0099);
+    expect(m.pct).toBeNull();
+    expect(m.naReason).toMatch(/below \$0\.01/);
+    expect(budgetConsumed(0.005, 0.01)).toEqual({ pct: 50, naReason: null });
+  });
+
   it.each([Number.NaN, null, undefined])('renders missing actual cost (%s) as N/A with a reason', (actual) => {
     const m = budgetConsumed(actual, 100);
     expect(m.pct).toBeNull();

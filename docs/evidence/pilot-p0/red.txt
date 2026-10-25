@@ -28,3 +28,9 @@ Command: npx vitest run src/mission/budgetStatusNa.test.tsx src/executive/report
 Result: Test Files 3 failed; Tests 8 failed | 21 passed (29).
 Failing: invalid budget still yields CRITICAL / Pending Approval / Healthy / Breach projected / "breach in ~0 days" /
 "Forecast breaches budget", is counted in needs-attention and pending-approval, and /reports prints a bare "%".
+
+Review round 4 RED (tests only, on the tree merged with main fe82833).
+Command: npx vitest run src/mission src/lib/metricContracts.test.ts src/costsource/aiSpendRatioCard.test.tsx
+Result: Tests 6 failed | 56 passed (62) (+ a type error: AIContext has no `omitted` yet).
+Failing: sub-cent budget treated as valid; N/A status replaces real alert/valid-period signals (CRITICAL becomes
+BUDGET N/A, dropped from counts and AI context); "$0.00 remaining" on the Budget tab; composition card N/A has no reason.
