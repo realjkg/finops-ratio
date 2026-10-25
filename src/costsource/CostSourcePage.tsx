@@ -469,7 +469,7 @@ function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
 
 // The numerator/denominator proof: the first ingested row, resolved to a Ratio
 // workload, shown with value ratio (denominator), forecast, and governance gates.
-function CompositionCard({ rows }: { rows: CanonicalFocusRow[] }) {
+export function CompositionCard({ rows }: { rows: CanonicalFocusRow[] }) {
   const featured = rows[0];
   const view = featured ? composeRatioView(featured) : null;
   if (!featured || !view) {

@@ -15,3 +15,10 @@ Result: Test Files 3 failed | 1 passed (4); Tests 6 failed | 38 passed (44).
 Failing: report N/A footnote/cell helpers missing; ServiceNow card copy still says "cost of record ... exceeds the
 billing export"; daily gauge and portfolio gauge show 0 / clamp at 100; budgetStatus has no N/A flag; Budget tab shows 0%.
 Already passing (new regression protection, kept): XLSX N/A cell, PDF renders, report savings rows sum to 2,408.
+
+Review round 2 RED (tests only), head 1a536a4.
+Command: npx vitest run src/mission src/costsource/aiSpendRatioCard.test.tsx src/executive/InitiativeCard.na.test.tsx
+Result: Test Files 1 failed | 3 passed (4); Tests 2 failed | 37 passed (39).
+Failing: trajectory verdict "Overrun — projected 0% of budget" for an invalid monthly budget; Budget tab bars still
+announce aria-valuenow. The other new visible-text, daily-vs-monthly and overspend tests pass already and are
+protection, proven by the mutation set in green.txt.

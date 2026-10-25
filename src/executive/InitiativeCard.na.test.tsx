@@ -16,7 +16,7 @@ const render = (budget: number) =>
 describe('InitiativeCard budget consumed', () => {
   it('shows N/A with the reason when the approved budget is invalid', () => {
     const html = render(0);
-    expect(html).toMatch(/N\/A/);
+    expect(html).toMatch(/text-exec-text">N\/A<\/span>/);
     expect(html).toMatch(/approved budget/i);
     expect(html).not.toContain('aria-valuenow="0"');
   });
