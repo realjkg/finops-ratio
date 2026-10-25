@@ -56,7 +56,7 @@ export function BudgetProfileTab({
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">
           <span className="text-txt">{daily.pctUsedNa ? `N/A (${daily.pctUsedNa})` : `${formatPct(daily.pctUsed)} of ${formatUSD(daily.dailyBudget)} daily`}</span>
           <span>{formatUSD(daily.spentToday)} spent</span>
-          <span>{formatUSD(daily.remaining)} remaining</span>
+          <span>{daily.pctUsedNa ? 'Remaining N/A' : `${formatUSD(daily.remaining)} remaining`}</span>
           <span>{daily.hoursRemaining} hrs left</span>
         </div>
         <p className="mt-2 text-xs text-sub">

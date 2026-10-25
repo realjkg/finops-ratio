@@ -82,7 +82,10 @@ describe('PDF savings explanation', () => {
 });
 
 describe('status of an invalid-budget initiative (report paths)', () => {
-  const rest0 = buildReportModel(FIXED, rest);
+  // No alerts: nothing adverse remains once the invalid period is set aside.
+  const noAlerts = { alerts: [] };
+  const rest0 = buildReportModel(FIXED, rest, noAlerts);
+  const model = buildReportModel(FIXED, [{ ...first, costs: { ...first.costs, monthly_budget: 0, daily_budget: 0 } }, ...rest], noAlerts);
 
   it('is "Budget N/A" in the row, XLSX cell and PDF tree, and not counted as pending', async () => {
     expect(model.rows[0].status).toBe('Budget N/A');

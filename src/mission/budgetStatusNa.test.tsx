@@ -132,6 +132,7 @@ describe('figures derived from an invalid budget', () => {
     expect(toInitiativeView(tiny).budgetConsumedNa).toMatch(/below \$0\.01/);
     const html = renderToStaticMarkup(<BudgetProfileTab workload={tiny} budget={budgetFor(first.id)!} now={NOW} />);
     expect(html).toMatch(/N\/A \([^<]*below \$0\.01/);
-    expect(html).not.toMatch(/\d{5,}%/);
+    expect(html).not.toMatch(/\d{5,}% of/);
+    expect(html).not.toContain('left:100%;width');
   });
 });

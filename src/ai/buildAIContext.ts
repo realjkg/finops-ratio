@@ -85,8 +85,13 @@ export function buildAIContext(
     })),
   }));
 
+  const omitted = initiatives
+    .filter((i) => i.budgetConsumedPct === null || i.status === 'budget_na')
+    .map((i) => ({ id: i.id, name: i.name, reason: i.budgetConsumedNa ?? i.statusNa ?? 'Budget N/A' }));
+
   return {
     initiatives: initiativeSnapshots,
+    ...(omitted.length ? { omitted } : {}),
     summary: {
       totalMonthlySpend: summary.totalMonthlySpend,
       projectedSavings: summary.projectedSavings,

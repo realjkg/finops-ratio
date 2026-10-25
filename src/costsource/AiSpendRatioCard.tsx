@@ -146,7 +146,7 @@ export function AiSpendRatioView({
           <div>
             <p className="text-[10px] uppercase tracking-wider text-dim">Headline (non-overlapping sources)</p>
             {state.report.overall.byCurrency.length === 0
-              ? <span className="font-mono text-xs text-dim">N/A (no headline-eligible source returned rows)</span>
+              ? <span className="font-mono text-xs text-sub">N/A (no headline-eligible source returned rows)</span>
               : <CurrencyLines result={state.report.overall} />}
           </div>
           <ul className="space-y-1">
@@ -154,9 +154,9 @@ export function AiSpendRatioView({
               <li key={s.sourceId} className="flex flex-wrap justify-between gap-2 border-t border-edge pt-1">
                 <span className="text-xs text-txt">
                   {s.name}
-                  {!s.inHeadline && <span className="text-dim"> ({s.exclusionReason ?? 'same workloads, not summed into the headline'})</span>}
+                  {!s.inHeadline && <span className="text-sub">{` (${s.exclusionReason ?? 'same workloads, not summed into the headline'})`}</span>}
                   {s.sourceId === 'servicenow-sandbox' && (
-                    <span className="text-dim"> · simulated, role unconfirmed, excluded from the headline: illustrative +{+((ITBM_CRITICAL_SERVICE_ALLOCATION - 1) * 100).toFixed(1)}% ITBM allocation on critical services</span>
+                    <span className="text-sub">{` · simulated, role unconfirmed, excluded from the headline: illustrative +${+((ITBM_CRITICAL_SERVICE_ALLOCATION - 1) * 100).toFixed(1)}% ITBM allocation on critical services`}</span>
                   )}
                 </span>
                 <span><CurrencyLines result={s.result} /></span>

@@ -18,6 +18,7 @@ const usable = (n: unknown): n is number => typeof n === 'number' && Number.isFi
  */
 export function budgetConsumed(actualToDate: number | null | undefined, approvedBudget: number | null | undefined): PctMetric {
   if (!usable(approvedBudget) || approvedBudget <= 0) return na('No valid approved budget for the period');
+  if (approvedBudget < 0.01) return na('Approved budget below $0.01');
   if (!usable(actualToDate)) return na('Actual cost to date is missing');
   return { pct: (actualToDate / approvedBudget) * 100, naReason: null };
 }

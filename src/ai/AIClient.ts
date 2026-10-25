@@ -43,6 +43,8 @@ export interface AIContext {
   focusInitiativeId?: string | null;
   /** ISO 8601 instant when the snapshot was taken (client's DEMO_NOW). */
   asOf: string;
+  /** Initiatives left out of `initiatives` because their budget metric is N/A, with the reason. */
+  omitted?: { id: string; name: string; reason: string }[];
 }
 
 /** Lean initiative projection — executive vocabulary, sufficient for most questions. */

@@ -49,6 +49,8 @@ export interface InitiativeView {
   // percent, not clamped) + its threshold color. null = N/A, with the reason.
   budgetConsumedPct: number | null;
   budgetConsumedNa: string | null;
+  /** Why `status` is Budget N/A (an invalid daily or monthly budget), else null. */
+  statusNa: string | null;
   budgetConsumedColor: string;
   status: InitiativeStatus;
   // Cost efficiency = value ratio (R4 — cost is always paired with value).
@@ -81,6 +83,7 @@ export function toInitiativeView(workload: Workload, context: ProjectionContext 
     monthlyCost: workload.costs.monthly_spend,
     budgetConsumedPct: consumed.pct === null ? null : Math.round(consumed.pct),
     budgetConsumedNa: consumed.naReason,
+    statusNa: mission.statusNa,
     budgetConsumedColor: consumed.pct === null ? 'var(--sub)' : budgetColor(consumed.pct / 100),
     status: MISSION_TO_INITIATIVE[mission.status],
     valueRatio: mission.valueRatio,

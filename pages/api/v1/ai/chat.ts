@@ -315,6 +315,7 @@ export function buildSystemPrompt(ctx: AIContext): string {
     '',
     'INITIATIVES:',
     initiativeLines,
+    ...(ctx.omitted?.length ? ['', `NOT REPORTED (budget N/A): ${ctx.omitted.map((o) => `${o.name} (${o.reason})`).join('; ')}`] : []),
     ...(workloadLines ? ['', 'WORKLOAD DETAIL:', workloadLines] : []),
     ...(focusedInitiative ? ['', `FOCUS: ${focusedInitiative}`] : []),
   ].join('\n');

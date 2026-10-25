@@ -502,7 +502,7 @@ export function CompositionCard({ rows }: { rows: CanonicalFocusRow[] }) {
             <span className="font-mono text-base font-bold text-txt">
               {formatUSD(monthly.projectedEom)}
               <span className="ml-1 text-xs text-sub">
-                ({monthly.pctUsedNa ? 'N/A' : formatPct(monthly.projectedPctOfBudget)} of budget)
+                ({monthly.pctUsedNa ? `N/A of budget: ${monthly.pctUsedNa}` : `${formatPct(monthly.projectedPctOfBudget)} of budget`})
               </span>
             </span>
           ) : (

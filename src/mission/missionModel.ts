@@ -132,6 +132,13 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
   const { severity, count } = maxAlertSeverity(workload.id, context.alerts);
   const fuel = budgetConsumed(status.daily.spentToday, status.daily.dailyBudget);
   const statusNa = status.daily.pctUsedNa ?? status.monthly.pctUsedNa;
+  // Only claims derived from an invalid period are dropped: alerts and the valid
+  // period still set the status. N/A shows only when nothing adverse remains.
+  const adverse = worst(
+    alertToStatus(severity),
+    ...(status.daily.pctUsedNa ? [] : [fuelStatus(fuelRatio)]),
+    ...(status.monthly.pctUsedNa ? [] : [forecastToStatus(status.monthly.status)]),
+  );
 
   return {
     id: workload.id,
@@ -149,7 +156,7 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
     valueRatio: workload.value.value_ratio,
     valueColor: ratioColor(workload.value.value_ratio),
     valueEvidenceStatus: headlineEvidenceStatus(workload.value),
-    status: statusNa ? 'na' : worst(fuelStatus(fuelRatio), forecastToStatus(status.monthly.status), alertToStatus(severity)),
+    status: statusNa && adverse === 'nominal' ? 'na' : adverse,
     statusNa,
     forecast: status.monthly.status,
     projectedPctOfBudget: status.monthly.projectedPctOfBudget,

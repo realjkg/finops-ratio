@@ -29,7 +29,7 @@ export function BudgetBar({
   const fillPct = Math.min(pctUsed, 1) * 100;
   const fillColor = budgetColor(pctUsed);
   // Overshoot = projected spend beyond 100%, drawn faint red past the fill.
-  const overshootPct = Math.max(Math.min(projectedPct, 1.4) - 1, 0) * 100;
+  const overshootPct = na ? 0 : Math.max(Math.min(projectedPct, 1.4) - 1, 0) * 100;
   const displayPct = Math.round(pctUsed * 100);
 
   return (
