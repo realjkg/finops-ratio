@@ -10,7 +10,7 @@ import {
 } from '@/theme/user';
 import samples from '@/theme/sample-palettes.json';
 
-const LABELS: Record<string, string> = { light: 'Light', 'high-contrast': 'High contrast', dark: 'Dark' };
+const LABELS: Record<string, string> = { light: 'Light', 'high-contrast': 'High contrast', dark: 'Dark (contrast incomplete)' };
 const swatch = (v: unknown, fallback: string) => {
   const hex = normalizeHex(v);
   return typeof hex === 'string' && /^#[0-9a-f]{6}$/.test(hex) ? hex : fallback;

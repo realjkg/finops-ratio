@@ -7,7 +7,7 @@ import { contrastRatio } from '../../src/theme/contrast';
 // Failures are open defects: MAX only ratchets DOWN as migration slices land; nothing is
 // exempted and the threshold is never lowered. AUDIT_OUT=<file> appends the table,
 // AUDIT_DUMP=<file> appends the failing nodes (JSON lines); delete both files before a run.
-export const MAX: Record<string, number> = { light: 0, 'high-contrast': 0, dark: 683 };
+export const MAX: Record<string, number> = { light: 0, 'high-contrast': 0, dark: 659 };
 // Every page route (pages/*.tsx and pages/*/*.tsx outside api/ and the _app/_document/_error shells).
 // pageRoutes() below fails the suite if a page is added or removed without updating this list.
 const PAGES = ['/', '/agent-workflows', '/attribution', '/connectors', '/costsource', '/demo', '/finio', '/finio/demo', '/frameworks', '/hello', '/mission', '/outcomes', '/overview', '/prediction', '/reports', '/simulation', '/tokenomics', '/workloads', '/workspace'];
