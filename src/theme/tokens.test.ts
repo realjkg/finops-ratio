@@ -72,10 +72,15 @@ describe('index.css parity with themes.ts', () => {
   });
 
   it('honors prefers-color-scheme and prefers-contrast only when no theme is chosen', () => {
-    // Present even while the default is dark, so flipping DEFAULT_THEME only swaps :root.
+    // The OS dark preference still selects Dark when no theme is chosen; the default is Light.
     expectBlock(media['prefers-color-scheme: dark'], BUILT_IN_THEMES.dark);
     expectBlock(media['prefers-contrast: more'], BUILT_IN_THEMES['high-contrast']);
     expect(css.lastIndexOf('@media')).toBe(css.indexOf('prefers-contrast: more') - 8); // contrast wins, declared last
+  });
+
+  it('Light is the default theme and the :root fallback', () => {
+    expect(DEFAULT_THEME).toBe('light');
+    expect(blocks[':root']?.colors.void).toBe('#ffffff');
   });
 
   it('keeps the legacy --<token> aliases used by inline styles', () => {

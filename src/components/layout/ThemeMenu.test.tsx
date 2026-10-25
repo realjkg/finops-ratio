@@ -71,7 +71,7 @@ describe('switcher', () => {
   it('is in the shared nav, labeled in words, and applies + persists the chosen built-in', () => {
     mount();
     expect(container.querySelector('label[for="theme-select"]')?.textContent).toBe('Theme');
-    expect([...select().options].map((o) => o.textContent)).toEqual(['Default (system)', 'Light', 'High contrast', 'Dark']);
+    expect([...select().options].map((o) => o.textContent)).toEqual(['Default (system)', 'Light', 'High contrast', 'Dark (contrast incomplete)']);
     setValue(select(), 'high-contrast');
     expect(html.getAttribute('data-theme')).toBe('high-contrast');
     expect(channel('txt')).toBe('0 0 0');
@@ -234,14 +234,14 @@ describe('palette editor', () => {
     mount();
     openEditor();
     const rows = () => [...container.querySelectorAll('[aria-label="Contrast readout"] tbody tr')].map((r) => [...r.children].map((c) => c.textContent));
-    const draft = BUILT_IN_THEMES.dark;
+    const draft = BUILT_IN_THEMES.light; // the default theme
     expect(rows()).toEqual(contrastChecks({ ...draft, name: 'my-theme' }).map((c) => [`${c.fg} on ${c.bg}`, `${c.ratio.toFixed(2)}:1`, `needs ${c.min}`, c.pass ? 'Pass' : 'Fail']));
-    setValue(byLabel<HTMLInputElement>('txt hex'), '#777');
+    setValue(byLabel<HTMLInputElement>('txt hex'), '#767676');
     const row = rows().find((r) => r[0] === 'txt on void');
-    expect(row).toEqual(['txt on void', `${contrastRatio('#777777', draft.colors.void).toFixed(2)}:1`, 'needs 4.5', 'Pass']);
-    setValue(byLabel<HTMLInputElement>('txt color'), '#0a0a0a');
+    expect(row).toEqual(['txt on void', `${contrastRatio('#767676', draft.colors.void).toFixed(2)}:1`, 'needs 4.5', 'Pass']);
+    setValue(byLabel<HTMLInputElement>('txt color'), '#fafafa');
     expect(rows().find((r) => r[0] === 'txt on void')?.[3]).toBe('Fail');
-    expect(byLabel<HTMLInputElement>('txt hex').value).toBe('#0a0a0a');
+    expect(byLabel<HTMLInputElement>('txt hex').value).toBe('#fafafa');
   });
 
   it('saves an edited palette, resets to the built-in, and exports what re-imports', () => {
@@ -258,7 +258,7 @@ describe('palette editor', () => {
     expect(exported.theme).toEqual({ ...BUILT_IN_THEMES.light, name: 'my-theme', colors: { ...BUILT_IN_THEMES.light.colors, focus: '#1d4ed8' } });
     expect(link.getAttribute('download')).toBe('my-theme.json');
     click(button('Reset to built-in'));
-    expect(byLabel<HTMLInputElement>('focus hex').value).toBe(BUILT_IN_THEMES.dark.colors.focus);
+    expect(byLabel<HTMLInputElement>('focus hex').value).toBe(BUILT_IN_THEMES.light.colors.focus);
   });
 
   it('every control is a native, named, keyboard-focusable element', () => {
@@ -330,8 +330,8 @@ describe('challenger review of #116', () => {
 describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921, ThemeMenu.tsx:92, :148)', () => {
   it('Default (system) follows live OS changes and removes its listeners on unmount', () => {
     const original = window.matchMedia;
-    const os = { more: false, listeners: new Set<() => void>() };
-    const mq = (q: string) => ({ get matches() { return q === '(prefers-contrast: more)' && os.more; }, addEventListener: (_: string, f: () => void) => os.listeners.add(f), removeEventListener: (_: string, f: () => void) => os.listeners.delete(f) });
+    const os = { more: false, dark: true, listeners: new Set<() => void>() };
+    const mq = (q: string) => ({ get matches() { return q === '(prefers-contrast: more)' ? os.more : q === '(prefers-color-scheme: dark)' && os.dark; }, addEventListener: (_: string, f: () => void) => os.listeners.add(f), removeEventListener: (_: string, f: () => void) => os.listeners.delete(f) });
     Object.defineProperty(window, 'matchMedia', { configurable: true, value: mq });
     try {
       const flip = (more: boolean) => act(() => { os.more = more; os.listeners.forEach((f) => f()); });
@@ -367,6 +367,11 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
     } finally {
       Object.defineProperty(window, 'matchMedia', { configurable: true, value: original });
     }
+  });
+  it('with no stored choice and no OS preference the default is Light (the selector, the draft and the CSS agree)', () => {
+    mount();
+    openEditor();
+    expect([select().value, byLabel<HTMLInputElement>('txt hex').value, button('Export current theme').getAttribute('download')]).toEqual(['', BUILT_IN_THEMES.light.colors.txt, 'my-light.json']);
   });
   it('editing the name clears a stale import-problems snapshot', () => {
     mount();

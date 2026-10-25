@@ -19,6 +19,11 @@ export function pageRoutes(dir = 'pages', prefix = ''): string[] {
     return [m[1] === 'index' ? prefix || '/' : `${prefix}/${m[1]}`];
   }).sort();
 }
+test('with no stored choice and no OS preference the pages render Light', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.*/);
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--c-void').trim())).toBe('255 255 255');
+});
 test('PAGES lists every page route', () => {
   expect([...PAGES].sort()).toEqual(pageRoutes());
 });
