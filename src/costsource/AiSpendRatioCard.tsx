@@ -156,7 +156,7 @@ export function AiSpendRatioView({
                   {s.name}
                   {!s.inHeadline && <span className="text-dim"> ({s.exclusionReason ?? 'same workloads, not summed into the headline'})</span>}
                   {s.sourceId === 'servicenow-sandbox' && (
-                    <span className="text-dim"> · cost of record: +{+((ITBM_CRITICAL_SERVICE_ALLOCATION - 1) * 100).toFixed(1)}% ITBM allocation on critical services, so it exceeds the billing export</span>
+                    <span className="text-dim"> · simulated, role unconfirmed, excluded from the headline: illustrative +{+((ITBM_CRITICAL_SERVICE_ALLOCATION - 1) * 100).toFixed(1)}% ITBM allocation on critical services</span>
                   )}
                 </span>
                 <span><CurrencyLines result={s.result} /></span>

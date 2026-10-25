@@ -15,12 +15,15 @@ import {
   type ConfidenceInterval,
   type ForecastStatus,
 } from './forecast';
+import { budgetConsumed } from './metricContracts';
 import { thresholdStatus, type ThresholdStatus } from './scales';
 
 export interface DailyStatus {
   spentToday: number;
   dailyBudget: number;
   pctUsed: number;
+  /** Reason `pctUsed` (and the projected %) is not meaningful; null when the budget is valid. */
+  pctUsedNa: string | null;
   remaining: number;
   hoursRemaining: number;
   projectedClose: number;
@@ -32,6 +35,8 @@ export interface MonthlyStatus {
   spendMtd: number;
   monthlyBudget: number;
   pctUsed: number;
+  /** Reason `pctUsed` (and the projected %) is not meaningful; null when the budget is valid. */
+  pctUsedNa: string | null;
   remainingDays: number;
   projectedEom: number;
   projectedPctOfBudget: number;
@@ -101,6 +106,7 @@ export function computeBudgetStatus(
       spentToday,
       dailyBudget,
       pctUsed: dailyPctUsed,
+      pctUsedNa: budgetConsumed(spentToday, dailyBudget).naReason,
       remaining: round2(Math.max(dailyBudget - spentToday, 0)),
       hoursRemaining: round1(Math.max(24 - hourOfDay, 0)),
       projectedClose: round2(daily.projectedDailySpend),
@@ -116,6 +122,7 @@ export function computeBudgetStatus(
       spendMtd,
       monthlyBudget,
       pctUsed: monthlyBudget > 0 ? spendMtd / monthlyBudget : 0,
+      pctUsedNa: budgetConsumed(spendMtd, monthlyBudget).naReason,
       remainingDays: monthly.remainingDays,
       projectedEom: round2(monthly.projectedEom),
       projectedPctOfBudget: monthlyBudget > 0 ? monthly.projectedEom / monthlyBudget : 0,

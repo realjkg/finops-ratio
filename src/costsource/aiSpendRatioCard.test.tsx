@@ -134,6 +134,13 @@ describe('AiSpendRatioView', () => {
     expect(html.match(/not summed into the headline/g)).toHaveLength(1);
   });
 
+  it('shows N/A with a reason when no headline-eligible source has rows', () => {
+    const r = report('mock');
+    r.overall = { ...r.overall, byCurrency: [] };
+    const html = render(<AiSpendRatioView path="seed" state={{ status: 'ready', report: r }} onSwitch={noop} />);
+    expect(html).toContain('N/A (no headline-eligible source returned rows)');
+  });
+
   it('labels the ingested path', () => {
     const html = render(<AiSpendRatioView path="ingested" state={{ status: 'ready', report: report('live') }} onSwitch={noop} />);
     expect(html).toContain('Ingested');

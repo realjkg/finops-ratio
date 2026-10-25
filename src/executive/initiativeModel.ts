@@ -16,8 +16,7 @@ import { budgetConsumed } from '@/lib/metricContracts';
 import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import { budgetColor, TOKEN_COLOR } from '@/lib/scales';
 import type { EvidenceStatus, Workload } from '@/types';
-import { COST_SOURCES, findingsFor } from '@/costsource/seed';
-import { isHeadlineEligible } from '@/costsource/headline';
+import { headlineFindings } from '@/costsource/headline';
 import { toMissionView, type MissionStatus, type ProjectionContext } from '@/mission/missionModel';
 
 export type InitiativeStatus = 'on_track' | 'at_risk' | 'pending_approval';
@@ -91,11 +90,7 @@ export function toInitiativeView(workload: Workload, context: ProjectionContext 
 // Projected savings = sum of estimated monthly savings across the findings the
 // configured cost sources surface (the same seed the CostSource page reads).
 function projectedSavingsFromFindings(): number {
-  const total = COST_SOURCES.filter(
-    (s) => s.configured && isHeadlineEligible(s) && s.capabilities.includes('findings'),
-  )
-    .flatMap((s) => findingsFor(s.id))
-    .reduce((sum, f) => sum + f.estimatedMonthlySavings, 0);
+  const total = headlineFindings().reduce((sum, f) => sum + f.estimatedMonthlySavings, 0);
   return Math.round(total);
 }
 

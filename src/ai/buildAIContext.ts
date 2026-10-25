@@ -4,8 +4,7 @@
 // (one source of truth, persona-projected), plus per-initiative savings drawn
 // from the configured cost-source findings and an optional workload drill-down.
 
-import { COST_SOURCES, findingsFor } from '@/costsource/seed';
-import { isHeadlineEligible } from '@/costsource/headline';
+import { savingsByWorkload } from '@/costsource/headline';
 import { alertsFor } from '@/data/alerts';
 import { DEMO_NOW } from '@/data/workloads';
 import { deriveCacheHitRate } from '@/lib/derive';
@@ -32,24 +31,6 @@ const GATE_FIELDS = [
 
 function gatesPassed(workload: Workload): number {
   return GATE_FIELDS.filter((field) => workload.governance[field]).length;
-}
-
-// Sum each configured findings source's monthly-savings estimates per workload.
-// Mirrors projectedSavingsFromFindings() in initiativeModel, but keeps the
-// per-initiative breakdown the agent needs to answer "how much can we save?".
-function savingsByWorkload(): Map<string, number> {
-  const totals = new Map<string, number>();
-  for (const source of COST_SOURCES) {
-    if (!source.configured || !isHeadlineEligible(source) || !source.capabilities.includes('findings')) continue;
-    for (const finding of findingsFor(source.id)) {
-      if (!finding.workloadId) continue;
-      totals.set(
-        finding.workloadId,
-        (totals.get(finding.workloadId) ?? 0) + finding.estimatedMonthlySavings,
-      );
-    }
-  }
-  return totals;
 }
 
 export function buildAIContext(

@@ -51,7 +51,7 @@ export interface AIInitiativeSnapshot {
   name: string;
   monthlyCost: number; // USD
   annualRunRate: number; // monthlyCost × 12
-  budgetConsumedPct: number; // 0–100
+  budgetConsumedPct: number; // whole percent of the approved budget; can exceed 100 (not clamped)
   status: 'On Track' | 'At Risk' | 'Pending Approval';
   valueRatio: number; // R4: cost-efficiency denominator
   /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */

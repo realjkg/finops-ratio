@@ -9,7 +9,9 @@ import type { EvidenceStatus } from '@/types';
 import { tint } from '@/lib/scales';
 
 interface FuelAndValueProps {
-  fuelPct: number;
+  fuelPct: number | null;
+  /** Reason shown when fuelPct is null (N/A). */
+  fuelNa?: string | null;
   fuelColor: string;
   spentToday: number;
   dailyBudget: number;
@@ -21,6 +23,7 @@ interface FuelAndValueProps {
 
 export function FuelAndValue({
   fuelPct,
+  fuelNa,
   fuelColor,
   spentToday,
   dailyBudget,
@@ -29,7 +32,8 @@ export function FuelAndValue({
   evidenceStatus,
 }: FuelAndValueProps) {
   const reducedMotion = useReducedMotion() ?? false;
-  const valueText = `${fuelPct}% of daily budget used — ${formatUSD(spentToday)} spent of ${formatUSD(
+  const shown = fuelPct === null ? 'N/A' : `${fuelPct}%`;
+  const valueText = `${fuelPct === null ? `N/A (${fuelNa ?? 'no evidence'})` : `${fuelPct}% of daily budget used`} — ${formatUSD(spentToday)} spent of ${formatUSD(
     dailyBudget,
   )}`;
 
@@ -52,7 +56,7 @@ export function FuelAndValue({
 
       <div
         role="progressbar"
-        aria-valuenow={fuelPct}
+        aria-valuenow={fuelPct === null ? undefined : Math.min(fuelPct, 100)}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuetext={valueText}
@@ -63,13 +67,13 @@ export function FuelAndValue({
           className="h-full rounded-full"
           style={{ backgroundColor: fuelColor }}
           initial={reducedMotion ? false : { width: 0 }}
-          animate={{ width: `${fuelPct}%` }}
+          animate={{ width: `${Math.min(fuelPct ?? 0, 100)}%` }}
           transition={reducedMotion ? { duration: 0 } : { duration: 0.8, ease: 'easeOut' }}
         />
       </div>
 
       <div className="flex items-center justify-between font-mono text-xs text-sub">
-        <span>{fuelPct}%</span>
+        <span>{shown}{fuelPct === null && fuelNa ? ` (${fuelNa})` : ''}</span>
         <span>
           {formatUSD(spentToday)} <span className="text-dim">/ {formatUSD(dailyBudget)}</span>
         </span>

@@ -51,14 +51,14 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
       <div className="mt-6">
         <div className="mb-1.5 flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-dim">
           <span>Portfolio budget consumed</span>
-          <span style={{ color: fleet.fleetFuelColor }}>{fleet.fleetFuelPct}%</span>
+          <span style={{ color: fleet.fleetFuelColor }}>{fleet.fleetFuelPct === null ? `N/A (${fleet.fleetFuelNa})` : `${fleet.fleetFuelPct}%`}</span>
         </div>
         <div
           role="progressbar"
-          aria-valuenow={fleet.fleetFuelPct}
+          aria-valuenow={fleet.fleetFuelPct === null ? undefined : Math.min(fleet.fleetFuelPct, 100)}
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuetext={`${fleet.fleetFuelPct}% of fleet daily budget consumed`}
+          aria-valuetext={fleet.fleetFuelPct === null ? 'N/A' : `${fleet.fleetFuelPct}% of fleet daily budget consumed`}
           aria-label="Portfolio budget consumed (aggregate daily budget)"
           className="h-1.5 w-full overflow-hidden rounded-full bg-raised"
         >
@@ -66,7 +66,7 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
             className="h-full rounded-full"
             style={{ backgroundColor: fleet.fleetFuelColor }}
             initial={reducedMotion ? false : { width: 0 }}
-            animate={{ width: `${fleet.fleetFuelPct}%` }}
+            animate={{ width: `${Math.min(fleet.fleetFuelPct ?? 0, 100)}%` }}
             transition={reducedMotion ? { duration: 0 } : { duration: 0.9, ease: 'easeOut' }}
           />
         </div>

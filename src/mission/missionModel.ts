@@ -16,6 +16,7 @@ import { budgetFor } from '@/data/budgets';
 import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
 import { derivePortfolioRatio } from '@/lib/derive';
+import { budgetConsumed } from '@/lib/metricContracts';
 import type { ForecastStatus } from '@/lib/forecast';
 import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import { budgetColor, PROVIDER_LABEL, ratioColor } from '@/lib/scales';
@@ -31,10 +32,12 @@ export interface MissionView {
   model: string;
   providerLabel: string;
   team: string;
-  // Fuel gauge = daily budget consumed ratio (0..1+). `fuelPct` is the clamped
-  // 0..100 display value; `fuelRatio` keeps the true (possibly >1) overrun.
+  // Fuel gauge = daily budget consumed (actual today / approved daily budget).
+  // `fuelPct` is the whole percent, not clamped; null = N/A with `fuelNa` as the
+  // reason. `fuelRatio` is the raw ratio (0 when N/A, so do not display it).
   fuelRatio: number;
-  fuelPct: number;
+  fuelPct: number | null;
+  fuelNa: string | null;
   fuelColor: string;
   spentToday: number;
   dailyBudget: number;
@@ -55,7 +58,8 @@ export interface MissionView {
 
 export interface FleetSummary {
   fleetFuelRatio: number;
-  fleetFuelPct: number;
+  fleetFuelPct: number | null;
+  fleetFuelNa: string | null;
   fleetFuelColor: string;
   valueReturned: number;
   missionCount: number;
@@ -120,6 +124,7 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
   const status = computeBudgetStatus(workload, budget, context.now ?? DEMO_NOW);
   const fuelRatio = status.daily.pctUsed;
   const { severity, count } = maxAlertSeverity(workload.id, context.alerts);
+  const fuel = budgetConsumed(status.daily.spentToday, status.daily.dailyBudget);
 
   return {
     id: workload.id,
@@ -128,7 +133,8 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
     providerLabel: PROVIDER_LABEL[workload.model_provider],
     team: workload.team,
     fuelRatio,
-    fuelPct: Math.min(Math.round(fuelRatio * 100), 100),
+    fuelPct: fuel.pct === null ? null : Math.round(fuel.pct),
+    fuelNa: fuel.naReason,
     fuelColor: budgetColor(fuelRatio),
     spentToday: status.daily.spentToday,
     dailyBudget: status.daily.dailyBudget,
@@ -156,6 +162,8 @@ export function buildMissionBoard(
   const totalSpentToday = missions.reduce((sum, m) => sum + m.spentToday, 0);
   const totalDailyBudget = missions.reduce((sum, m) => sum + m.dailyBudget, 0);
   const fleetFuelRatio = totalDailyBudget > 0 ? totalSpentToday / totalDailyBudget : 0;
+  // One invalid mission budget makes the aggregate meaningless: N/A, not a partial sum.
+  const fleetFuelNa = missions.find((m) => m.fuelNa)?.fuelNa ?? budgetConsumed(totalSpentToday, totalDailyBudget).naReason;
 
   const portfolio = derivePortfolioRatio(workloads);
   const needsAttention = missions.filter((m) => m.status !== 'nominal').length;
@@ -164,7 +172,8 @@ export function buildMissionBoard(
     missions,
     fleet: {
       fleetFuelRatio,
-      fleetFuelPct: Math.min(Math.round(fleetFuelRatio * 100), 100),
+      fleetFuelPct: fleetFuelNa ? null : Math.round(fleetFuelRatio * 100),
+      fleetFuelNa,
       fleetFuelColor: budgetColor(fleetFuelRatio),
       valueReturned: portfolio.portfolio_ratio,
       missionCount: missions.length,

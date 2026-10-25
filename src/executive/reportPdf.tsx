@@ -18,7 +18,7 @@ import {
 } from '@react-pdf/renderer';
 import { formatRatio, formatUSD } from '@/lib/format';
 import { COST_CATEGORIES } from '@/outcomes/types';
-import { buildReportModel, type ReportModel, type ReportRow } from './reportModel';
+import { budgetCellText, budgetNaFootnotes, buildReportModel, type ReportModel, type ReportRow } from './reportModel';
 
 // Design tokens (durable, exact) reused for the print surface.
 const TOKEN = {
@@ -128,7 +128,7 @@ function Cell({
   );
 }
 
-function ReportDocument({ model }: { model: ReportModel }) {
+export function ReportDocument({ model }: { model: ReportModel }) {
   const { summary } = model;
   return (
     <Document title="Ratio — Initiative Cost Report">
@@ -165,7 +165,7 @@ function ReportDocument({ model }: { model: ReportModel }) {
             <Cell width={COLS[0].width} align="left" mono={false}>{r.name}</Cell>
             <Cell width={COLS[1].width} align="right" mono color={TOKEN.cost}>{formatUSD(r.monthlyCost)}</Cell>
             <Cell width={COLS[2].width} align="right" mono>{formatUSD(r.annualRunRate)}</Cell>
-            <Cell width={COLS[3].width} align="right" mono>{r.budgetConsumedPct === null ? 'N/A' : `${r.budgetConsumedPct}%`}</Cell>
+            <Cell width={COLS[3].width} align="right" mono>{budgetCellText(r)}</Cell>
             <Cell width={COLS[4].width} align="left" mono={false}>{r.status}</Cell>
             <Cell width={COLS[5].width} align="right" mono color={TOKEN.value}>{formatRatio(r.costEfficiency)}</Cell>
             <Cell width={COLS[6].width} align="right" mono color={r.savingsOpportunity > 0 ? TOKEN.value : TOKEN.text}>
@@ -173,6 +173,11 @@ function ReportDocument({ model }: { model: ReportModel }) {
             </Cell>
             <Cell width={COLS[7].width} align="right" mono>{r.lastUpdated}</Cell>
           </View>
+        ))}
+
+        <Text style={styles.subhead}>Projected savings exclude findings from sources whose role is unconfirmed (simulated).</Text>
+        {budgetNaFootnotes(model.rows).map((note) => (
+          <Text key={note} style={styles.subhead}>{note}</Text>
         ))}
 
         <Text style={styles.footer} fixed>

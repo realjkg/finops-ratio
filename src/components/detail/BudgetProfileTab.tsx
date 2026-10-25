@@ -52,7 +52,7 @@ export function BudgetProfileTab({
           label="Daily budget consumption"
         />
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">
-          <span className="text-txt">{formatPct(daily.pctUsed)} of {formatUSD(daily.dailyBudget)} daily</span>
+          <span className="text-txt">{daily.pctUsedNa ? `N/A (${daily.pctUsedNa})` : `${formatPct(daily.pctUsed)} of ${formatUSD(daily.dailyBudget)} daily`}</span>
           <span>{formatUSD(daily.spentToday)} spent</span>
           <span>{formatUSD(daily.remaining)} remaining</span>
           <span>{daily.hoursRemaining} hrs left</span>
@@ -60,7 +60,7 @@ export function BudgetProfileTab({
         <p className="mt-2 text-xs text-sub">
           Projected daily close:{' '}
           <span className="font-mono text-txt">{formatUSD(daily.projectedClose)}</span>{' '}
-          ({formatPct(daily.projectedPctOfBudget)} of budget)
+          ({daily.pctUsedNa ? 'N/A' : formatPct(daily.projectedPctOfBudget)} of budget)
         </p>
       </Section>
 
@@ -74,14 +74,14 @@ export function BudgetProfileTab({
           label="Monthly budget consumption"
         />
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">
-          <span className="text-txt">{formatPct(monthly.pctUsed)} of {formatUSD(monthly.monthlyBudget)} monthly</span>
+          <span className="text-txt">{monthly.pctUsedNa ? `N/A (${monthly.pctUsedNa})` : `${formatPct(monthly.pctUsed)} of ${formatUSD(monthly.monthlyBudget)} monthly`}</span>
           <span>{formatUSD(monthly.spendMtd)} MTD</span>
           <span>{monthly.remainingDays} days remaining</span>
         </div>
         <p className="mt-2 text-xs text-sub">
           Projected month-end:{' '}
           <span className="font-mono text-txt">{formatUSD(monthly.projectedEom)}</span>{' '}
-          ({formatPct(monthly.projectedPctOfBudget)} of budget)
+          ({monthly.pctUsedNa ? 'N/A' : formatPct(monthly.projectedPctOfBudget)} of budget)
         </p>
         <p className="mt-1 text-xs text-sub">
           80% confidence:{' '}
