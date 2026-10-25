@@ -23,6 +23,20 @@ too large, truncated file list). A determined author can still write harmful
 code that matches no pattern. Low-risk auto-merge relies on CI, the independent
 review and resolved conversations as well, not on the classifier alone.
 
+## Classification by effect
+
+Rules with an `effect.` id in `risk-rules.json` protect files by what they do,
+not only by directory: financial calculations (`financial_semantics`), evidence
+integrity (`evidence_integrity`: `src/evidence/**`, evidence stores, and
+ingestion or evidence code under `src/srmd/**` while present), authorization
+(`auth_tenancy`: `src/rbac/**`, `src/identity/**`, reader credentials, and
+authority or grant code under `src/srmd/**`), allocation (`allocation`) and
+exports (`exports`, including any `src/**` or `pages/**` file named `*export*`
+or `*xlsx*`). These rules only add restricted matches. A mixed PR is
+restricted and reports every class it touches. Known limit: matching is by
+path name, so a protected function moved into an unlisted file is caught only
+by the fail-closed default.
+
 Examples the patterns do NOT catch (egress assembled at runtime or hidden in
 markup):
 

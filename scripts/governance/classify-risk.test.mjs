@@ -421,6 +421,7 @@ describe('rules file', () => {
     for (const c of [
       'migrations', 'auth_tenancy', 'secrets', 'network_egress', 'retention',
       'deployment', 'financial_semantics', 'dependencies', 'policy', 'routes',
+      'evidence_integrity', 'allocation', 'exports',
     ]) expect(declared.has(c), c).toBe(true);
     for (const r of rules.restricted) {
       expect(typeof r.id).toBe('string');
@@ -539,7 +540,12 @@ describe('effect-based classes: nothing is loosened', () => {
     for (const c of ['evidence_integrity', 'allocation', 'exports']) {
       expect(rules.restricted.some((r) => r.class === c), c).toBe(true);
     }
-    expect(rules.low.map((l) => l.id)).toEqual(['low.docs', 'low.markdown', 'low.ui-components', 'low.tests']);
+    expect(rules.low.map((l) => [l.id, l.patterns, l.except ?? null])).toEqual([
+      ['low.docs', ['docs/**/*.{md,png,svg}'], null],
+      ['low.markdown', ['*.md'], ['.*/**', '**/.*/**']],
+      ['low.ui-components', ['src/components/**/*.{ts,tsx,js,jsx,css}'], null],
+      ['low.tests', ['*.test.ts', '*.test.tsx', '*.test.js', '*.test.jsx', '*.test.mjs', '*.test.cjs'], ['pages/**', 'src/pages/**']],
+    ]);
   });
 });
 

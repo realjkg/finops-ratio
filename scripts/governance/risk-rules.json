@@ -1,5 +1,5 @@
 {
-  "$comment": "PR risk rules (governance track). Reviewed like code: any change to this file is itself restricted (deployment / self-protection). Globs without a '/' match the file's basename anywhere; globs with a '/' match the full repo-relative path. 'scope' limits a rule to paths matching any of the listed globs. 'added-line-regex' rules only look at lines ADDED by the diff. A path matching no restricted rule is low ONLY if it matches 'low' (and none of that entry's 'except' globs) and its diff was inspectable; everything else is restricted:unclassified (fail-closed). 'low' means HEURISTICALLY low, not proven safe.",
+  "$comment": "PR risk rules (governance track). Reviewed like code: any change to this file is itself restricted (deployment / self-protection). Globs without a '/' match the file's basename anywhere; globs with a '/' match the full repo-relative path. 'scope' limits a rule to paths matching any of the listed globs. 'added-line-regex' rules only look at lines ADDED by the diff. A path matching no restricted rule is low ONLY if it matches 'low' (and none of that entry's 'except' globs) and its diff was inspectable; everything else is restricted:unclassified (fail-closed). 'low' means HEURISTICALLY low, not proven safe. Rules with an 'effect.' id classify by EFFECT (financial calculations, evidence integrity, authorization, allocation, exports) rather than only by directory; they only add restricted matches.",
   "version": 1,
   "restricted": [
     { "id": "migrations.paths", "class": "migrations", "kind": "path-glob", "patterns": ["**/migrations/**", "*.sql"] },
@@ -28,6 +28,15 @@
 
     { "id": "financial_semantics.paths", "class": "financial_semantics", "kind": "path-glob", "patterns": ["src/costsource/**", "src/ingest/**", "src/lib/forecast*", "src/lib/budgetStatus*", "src/findings/recommendationMath*"] },
     { "id": "financial_semantics.focus-mapping", "class": "financial_semantics", "kind": "path-regex", "pattern": "(?:^|/)[^/]*(?:focus|normaliz|reconcil)[^/]*$", "flags": "i" },
+
+    { "id": "effect.evidence-integrity.paths", "class": "evidence_integrity", "kind": "path-glob", "patterns": ["src/evidence/**", "src/ingest/evidence/**", "src/ingest/evidenceRecord*", "src/lib/valueEvidence*"] },
+    { "id": "effect.srmd.ingestion-evidence", "class": "evidence_integrity", "kind": "path-regex", "pattern": "ingest|evidence|provenance", "flags": "i", "scope": ["src/srmd/**"] },
+    { "id": "effect.srmd.authority", "class": "auth_tenancy", "kind": "path-regex", "pattern": "authorit|grant|polic|permission|principal|credential", "flags": "i", "scope": ["src/srmd/**"] },
+    { "id": "effect.authorization.paths", "class": "auth_tenancy", "kind": "path-glob", "patterns": ["src/rbac/**", "src/identity/**", "src/server/costs/reader*"] },
+    { "id": "effect.allocation.paths", "class": "allocation", "kind": "path-glob", "patterns": ["src/attribution/allocation*", "src/attribution/accrual*", "src/attribution/aggregations*"] },
+    { "id": "effect.financial-calc.paths", "class": "financial_semantics", "kind": "path-glob", "patterns": ["src/lib/derive*", "src/lib/valueMath*", "src/lib/billingPeriod*", "src/tokenomics/calculations*"] },
+    { "id": "effect.exports.paths", "class": "exports", "kind": "path-glob", "patterns": ["src/executive/report*", "src/outcomes/report*", "src/prediction/report*", "src/evidence/report*", "src/finio/exchange*", "src/finio/wireColumns*", "src/finio/finioRows*", "pages/api/report/**", "pages/api/**/export*", "pages/api/v1/**/report*"] },
+    { "id": "effect.exports.name", "class": "exports", "kind": "path-regex", "pattern": "(?:^|/)[^/]*(?:export|xlsx)[^/]*$", "flags": "i", "scope": ["src/**", "pages/**"] },
 
     { "id": "dependencies.manifests", "class": "dependencies", "kind": "path-glob", "patterns": ["package.json", "package-lock.json", "npm-shrinkwrap.json"] },
 
