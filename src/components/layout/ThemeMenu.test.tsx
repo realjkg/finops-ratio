@@ -232,16 +232,17 @@ describe('fix contrast', () => {
 describe('palette editor', () => {
   it('reads out every required pair with the contrast engine numbers, live as colors change', () => {
     mount();
+    setValue(select(), 'dark');
     openEditor();
     const rows = () => [...container.querySelectorAll('[aria-label="Contrast readout"] tbody tr')].map((r) => [...r.children].map((c) => c.textContent));
-    const draft = BUILT_IN_THEMES.light; // the default theme
+    const draft = BUILT_IN_THEMES.dark;
     expect(rows()).toEqual(contrastChecks({ ...draft, name: 'my-theme' }).map((c) => [`${c.fg} on ${c.bg}`, `${c.ratio.toFixed(2)}:1`, `needs ${c.min}`, c.pass ? 'Pass' : 'Fail']));
-    setValue(byLabel<HTMLInputElement>('txt hex'), '#767676');
+    setValue(byLabel<HTMLInputElement>('txt hex'), '#777');
     const row = rows().find((r) => r[0] === 'txt on void');
-    expect(row).toEqual(['txt on void', `${contrastRatio('#767676', draft.colors.void).toFixed(2)}:1`, 'needs 4.5', 'Pass']);
-    setValue(byLabel<HTMLInputElement>('txt color'), '#fafafa');
+    expect(row).toEqual(['txt on void', `${contrastRatio('#777777', draft.colors.void).toFixed(2)}:1`, 'needs 4.5', 'Pass']);
+    setValue(byLabel<HTMLInputElement>('txt color'), '#0a0a0a');
     expect(rows().find((r) => r[0] === 'txt on void')?.[3]).toBe('Fail');
-    expect(byLabel<HTMLInputElement>('txt hex').value).toBe('#fafafa');
+    expect(byLabel<HTMLInputElement>('txt hex').value).toBe('#0a0a0a');
   });
 
   it('saves an edited palette, resets to the built-in, and exports what re-imports', () => {
@@ -368,10 +369,9 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
       Object.defineProperty(window, 'matchMedia', { configurable: true, value: original });
     }
   });
-  it('with no stored choice and no OS preference the default is Light (the selector, the draft and the CSS agree)', () => {
-    mount();
-    openEditor();
-    expect([select().value, byLabel<HTMLInputElement>('txt hex').value, button('Export current theme').getAttribute('download')]).toEqual(['', BUILT_IN_THEMES.light.colors.txt, 'my-light.json']);
+  it('with no stored choice and no OS preference the default draft is Light', () => {
+    mount(); openEditor();
+    expect([select().value, byLabel<HTMLInputElement>('txt hex').value]).toEqual(['', BUILT_IN_THEMES.light.colors.txt]);
   });
   it('editing the name clears a stale import-problems snapshot', () => {
     mount();

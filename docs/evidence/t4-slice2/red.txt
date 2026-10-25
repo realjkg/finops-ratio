@@ -9,6 +9,6 @@ dark           /costsource    43 / 140  (background images: 0)
 dark           TOTAL         683 (max 346)
 # only /costsource has failures in Light and High contrast; cause: opacity-60 on unconfigured source cards
 # sample failing nodes (light): DARK chip 2.74:1, FOCUS chip 2.66:1, source name 4.33:1 (need 4.5)
-# vitest on the same commit set: npx vitest run src/components/layout/ThemeMenu.test.tsx src/theme/tokens.test.ts
-# 5 failed | 42 passed: Light-is-default (tokens), switcher label (Dark (contrast incomplete)), editor readout/reset (Light default draft), default-is-Light (ThemeMenu)
-# playwright default-render test (no stored choice): Expected --c-void '255 255 255', Received '5 7 11' (1 failed)
+# vitest, new tests against main's prod files: npx vitest run src/components/layout src/theme
+# 3 failed | 129 passed: switcher label (Dark (contrast incomplete)), editor reset to the Light default,
+#   default draft is Light

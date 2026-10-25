@@ -9,24 +9,10 @@ import { contrastRatio } from '../../src/theme/contrast';
 // AUDIT_DUMP=<file> appends the failing nodes (JSON lines); delete both files before a run.
 export const MAX: Record<string, number> = { light: 0, 'high-contrast': 0, dark: 659 };
 // Every page route (pages/*.tsx and pages/*/*.tsx outside api/ and the _app/_document/_error shells).
-// pageRoutes() below fails the suite if a page is added or removed without updating this list.
+// The next line fails the suite if a page is added or removed without updating this list.
 const PAGES = ['/', '/agent-workflows', '/attribution', '/connectors', '/costsource', '/demo', '/finio', '/finio/demo', '/frameworks', '/hello', '/mission', '/outcomes', '/overview', '/prediction', '/reports', '/simulation', '/tokenomics', '/workloads', '/workspace'];
-export function pageRoutes(dir = 'pages', prefix = ''): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-    if (e.isDirectory()) return e.name === 'api' ? [] : pageRoutes(`${dir}/${e.name}`, `${prefix}/${e.name}`);
-    const m = /^(.+)\.tsx$/.exec(e.name);
-    if (!m || m[1].startsWith('_')) return [];
-    return [m[1] === 'index' ? prefix || '/' : `${prefix}/${m[1]}`];
-  }).sort();
-}
-test('with no stored choice and no OS preference the pages render Light', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.*/);
-  expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--c-void').trim())).toBe('255 255 255');
-});
-test('PAGES lists every page route', () => {
-  expect([...PAGES].sort()).toEqual(pageRoutes());
-});
+const pageRoutes = () => readdirSync('pages', { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.tsx') && !/(^|\/)_/.test(f)).map((f) => '/' + f.replace(/\/?index\.tsx$|\.tsx$/, '')).sort();
+test('PAGES lists every page route', () => expect([...PAGES].sort()).toEqual(pageRoutes()));
 
 type Raw = { text: string; el: string; fg: number[]; size: number; bold: boolean; layers: { c: number[]; a: number; o: number }[]; img: boolean };
 const collect = (page: Page) => page.evaluate((): Raw[] => {

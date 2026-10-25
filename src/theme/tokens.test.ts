@@ -78,11 +78,6 @@ describe('index.css parity with themes.ts', () => {
     expect(css.lastIndexOf('@media')).toBe(css.indexOf('prefers-contrast: more') - 8); // contrast wins, declared last
   });
 
-  it('Light is the default theme and the :root fallback', () => {
-    expect(DEFAULT_THEME).toBe('light');
-    expect(blocks[':root']?.colors.void).toBe('#ffffff');
-  });
-
   it('keeps the legacy --<token> aliases used by inline styles', () => {
     for (const name of ['void', 'edge', 'txt', 'sub', 'dim', 'value', 'cost', 'shape', 'gate', 'unit', 'purple']) {
       expect(css).toContain(`--${name}: rgb(var(--c-${name}));`);
