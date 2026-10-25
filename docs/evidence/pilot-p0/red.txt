@@ -8,3 +8,10 @@ Failing behavior (not just imports):
 - projectedSavings is 4816 vs the expected 2408: ServiceNow findings duplicate the PointFive findings
 - budgetConsumedPct is 0 (not N/A) for monthly_budget 0, -1, NaN; clamped to 100 when over budget
 - model-switch text says "saves", not "Estimated scenario cost reduction—not realized savings"
+
+Review round 1 RED (tests only, before the fixes), head 2a5b7a6.
+Command: npx vitest run src/executive/reportContracts.test.ts src/mission src/lib/readinessSeedConsistency.test.tsx
+Result: Test Files 3 failed | 1 passed (4); Tests 6 failed | 38 passed (44).
+Failing: report N/A footnote/cell helpers missing; ServiceNow card copy still says "cost of record ... exceeds the
+billing export"; daily gauge and portfolio gauge show 0 / clamp at 100; budgetStatus has no N/A flag; Budget tab shows 0%.
+Already passing (new regression protection, kept): XLSX N/A cell, PDF renders, report savings rows sum to 2,408.
