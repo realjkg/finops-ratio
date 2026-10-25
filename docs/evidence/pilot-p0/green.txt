@@ -1,4 +1,4 @@
-GREEN evidence after review round 3 (includes round 1 results) (base db4a1e2). Gates run sequentially in the foreground.
+GREEN evidence after review round 4 (merged with main fe82833) (includes round 1 results) (base db4a1e2). Gates run sequentially in the foreground.
 1 lint: exit 0
 2 typecheck: exit 0
 3 full vitest: Test Files 207 passed (207); Tests 3745 passed (3745)
@@ -24,3 +24,10 @@ Round 3 mutations (roots restored; each reverted, set re-run, every one killed):
  T4 mission status na removed 6 | T5 needs-attention counts na 1 | T6 Budget N/A count hidden 1
  T7 initiative na -> pending approval 4 | T8 /reports bare % 1 | T9 Budget tab na label Healthy 1
  T10 mission card label CRITICAL 1 | T11 AI context keeps Budget N/A initiative 1 | T12 verdict N/A removed 1
+Round 4 mutations (each reverted; every one killed):
+ U1 sub-cent budget valid 2 | U2 N/A replaces real alert/valid signals 2 | U3 alert ignored 5
+ U4a valid monthly forecast ignored 1 | U4b valid daily fuel ignored 5 | U5 AI omitted note removed 1
+ U6 "$0 remaining" restored 1 | U7 composition reason dropped 1 | U8 overshoot drawn for N/A 1 | U9 prompt "not reported" line removed 1
+Contrast audit on the merged tree, both browsers, source as pushed:
+ full Chromium (chromium-1194)       Light 0 / High 0 / Dark 654 (max 659)
+ headless shell (headless_shell-1194) Light 0 / High 0 / Dark 654 (max 659); ratchet not raised

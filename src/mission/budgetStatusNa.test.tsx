@@ -136,3 +136,16 @@ describe('figures derived from an invalid budget', () => {
     expect(html).not.toContain('left:100%;width');
   });
 });
+
+describe('each valid period still sets the status on its own', () => {
+  const mk = (id: string, costs: Record<string, number>) => {
+    const x = WORKLOADS.find((y) => y.id === id)!;
+    return { ...x, costs: { ...x.costs, ...costs } };
+  };
+  it('valid monthly forecast breach (daily invalid) stays critical', () => {
+    expect(toMissionView(mk('wl-marketing', { daily_budget: 0 }), { alerts: [] }).status).toBe('critical');
+  });
+  it('valid daily overspend (monthly invalid) stays critical', () => {
+    expect(toMissionView(mk('wl-support', { daily_budget: 1, monthly_budget: 0 }), { alerts: [] }).status).toBe('critical');
+  });
+});
