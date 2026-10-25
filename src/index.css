@@ -11,9 +11,8 @@
 
 /* Theme tokens. Values mirror src/theme/themes.ts (parity enforced by
    src/theme/tokens.test.ts); Tailwind colors read the --c-* channel triplets.
-   No data-theme attribute = no user choice yet: DEFAULT_THEME (dark until Light becomes the default), or
+   No data-theme attribute = no user choice yet: DEFAULT_THEME (Light), or
    what the OS asks for (more contrast wins over dark). applyTheme() sets data-theme. */
-:root,
 :root[data-theme='dark'] {
   color-scheme: dark;
   --c-void: 5 7 11; --c-deep: 9 12 18; --c-slab: 13 17 25; --c-raised: 20 26 38;
@@ -23,6 +22,7 @@
   --c-exec-border: 216 225 236; --c-exec-hover: 237 242 247; --c-exec-text: 15 23 42; --c-exec-muted: 100 116 139;
   --c-focus: 107 124 245;
 }
+:root,
 :root[data-theme='light'] {
   color-scheme: light;
   --c-void: 255 255 255; --c-deep: 246 247 249; --c-slab: 255 255 255; --c-raised: 238 240 243;

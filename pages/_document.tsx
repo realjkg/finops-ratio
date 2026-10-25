@@ -1,12 +1,11 @@
-// Custom HTML document — sets lang and dark-mode class, matching the
-// Tailwind dark-mode configuration (class strategy).
+// Custom HTML document: sets lang and inlines the theme pre-paint script.
 import { Html, Head, Main, NextScript } from 'next/document';
 import { withBasePath } from '@/lib/basePath';
 import { PREPAINT_SCRIPT } from '@/theme/user';
 
 export default function Document() {
   return (
-    <Html lang="en" className="dark">
+    <Html lang="en">
       <Head>
         <meta
           name="description"
