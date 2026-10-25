@@ -19,7 +19,7 @@ import type { EvidenceStatus, Workload } from '@/types';
 import { headlineFindings } from '@/costsource/headline';
 import { toMissionView, type MissionStatus, type ProjectionContext } from '@/mission/missionModel';
 
-export type InitiativeStatus = 'on_track' | 'at_risk' | 'pending_approval';
+export type InitiativeStatus = 'on_track' | 'at_risk' | 'pending_approval' | 'budget_na';
 
 export interface InitiativeStatusMeta {
   label: string;
@@ -30,12 +30,14 @@ export const INITIATIVE_STATUS_META: Record<InitiativeStatus, InitiativeStatusMe
   on_track: { label: 'On Track', color: TOKEN_COLOR.value },
   at_risk: { label: 'At Risk', color: TOKEN_COLOR.shape },
   pending_approval: { label: 'Pending Approval', color: TOKEN_COLOR.gate },
+  budget_na: { label: 'Budget N/A', color: 'var(--sub)' },
 };
 
 const MISSION_TO_INITIATIVE: Record<MissionStatus, InitiativeStatus> = {
   nominal: 'on_track',
   caution: 'at_risk',
   critical: 'pending_approval',
+  na: 'budget_na',
 };
 
 export interface InitiativeView {

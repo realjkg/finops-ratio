@@ -1,6 +1,6 @@
 // Pilot P0 (review round 3): an invalid budget gives a neutral "N/A" status, not
 // labels or counts derived from a zero budget. Valid budgets keep their statuses.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { WORKLOADS } from '@/data/workloads';
 import { budgetFor } from '@/data/budgets';
@@ -9,11 +9,16 @@ import { BudgetProfileTab } from '@/components/detail/BudgetProfileTab';
 import { InitiativeCard } from '@/executive/InitiativeCard';
 import { buildInitiativeBoard, toInitiativeView } from '@/executive/initiativeModel';
 import { languageFor } from '@/lib/languageMap';
-import { useStore } from '@/store/useStore';
+import { BUDGET_PROFILES } from '@/data/budgets';
 import Reports from '../../pages/reports';
 import { buildMissionBoard, toMissionView } from './missionModel';
 import { MissionCard } from './MissionCard';
 import { FleetHeader } from './FleetHeader';
+
+// zustand serves its initial state during server rendering, so the page is
+// rendered against a fake store holding the invalid-budget workload.
+const fake = vi.hoisted(() => ({ state: {} as Record<string, unknown> }));
+vi.mock('@/store/useStore', () => ({ useStore: (sel: (s: unknown) => unknown) => sel(fake.state) }));
 
 const [first, ...rest] = WORKLOADS;
 const zero = { ...first, costs: { ...first.costs, daily_budget: 0, monthly_budget: 0 } };
@@ -69,15 +74,10 @@ describe('/workloads Budget tab', () => {
 
 describe('/reports page', () => {
   it('shows N/A with the reason and Budget N/A status, not a bare %', () => {
-    const saved = useStore.getState().workloads;
-    useStore.setState({ workloads: [zero, ...saved.slice(1)] });
-    try {
-      const html = renderToStaticMarkup(<Reports />);
-      expect(html).toMatch(/<td>N\/A \([^<]*approved budget[^<]*\)<\/td>/);
-      expect(html).toContain('<td>Budget N/A</td>');
-      expect(html).not.toMatch(/<td>%<\/td>/);
-    } finally {
-      useStore.setState({ workloads: saved });
-    }
+    fake.state = { workloads: [zero, ...rest], budgets: BUDGET_PROFILES, alerts: [], now: NOW, simulation: null, simulationBusy: false };
+    const html = renderToStaticMarkup(<Reports />);
+    expect(html).toMatch(/<td>N\/A \([^<]*approved budget[^<]*\)<\/td>/);
+    expect(html).toContain('<td>Budget N/A</td>');
+    expect(html).not.toMatch(/<td>%<\/td>/);
   });
 });

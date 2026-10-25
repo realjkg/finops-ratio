@@ -42,6 +42,7 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
             <dd className="font-mono text-2xl font-bold" style={{ color: attentionColor }}>
               {fleet.needsAttention}
               <span className="ml-1 text-sm font-normal text-sub">/ {fleet.missionCount}</span>
+              {fleet.budgetNa > 0 && <span className="ml-2 text-xs font-normal text-sub">Budget N/A: {fleet.budgetNa}</span>}
             </dd>
           </div>
         </dl>

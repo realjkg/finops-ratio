@@ -37,4 +37,10 @@ describe('buildAIContext — N/A budget metric', () => {
     expect(ctx.initiatives.map((i) => i.id)).not.toContain(first.id);
     expect(ctx.initiatives).toHaveLength(rest.length);
   });
+
+  it('also omits one whose status is Budget N/A because only the daily budget is invalid', () => {
+    const [first, ...rest] = WORKLOADS;
+    const ctx = buildAIContext([{ ...first, costs: { ...first.costs, daily_budget: 0 } }, ...rest]);
+    expect(ctx.initiatives.map((i) => i.id)).not.toContain(first.id);
+  });
 });

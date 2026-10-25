@@ -43,7 +43,7 @@ export function buildAIContext(
   const savings = savingsByWorkload();
 
   // The wire field is numeric; an N/A budget metric is left out rather than sent as 0 (follow-up: nullable wire field).
-  const initiativeSnapshots: AIInitiativeSnapshot[] = initiatives.flatMap((i) => i.budgetConsumedPct === null ? [] : [{
+  const initiativeSnapshots: AIInitiativeSnapshot[] = initiatives.flatMap((i) => i.budgetConsumedPct === null || i.status === 'budget_na' ? [] : [{
     id: i.id,
     name: i.name,
     monthlyCost: i.monthlyCost,

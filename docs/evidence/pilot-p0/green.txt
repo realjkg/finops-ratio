@@ -1,4 +1,4 @@
-GREEN evidence after review round 2 (includes round 1 results) (base db4a1e2). Gates run sequentially in the foreground.
+GREEN evidence after review round 3 (includes round 1 results) (base db4a1e2). Gates run sequentially in the foreground.
 1 lint: exit 0
 2 typecheck: exit 0
 3 full vitest: Test Files 206 passed (206); Tests 3737 passed (3737)
@@ -19,3 +19,8 @@ Round 2 mutations (visible-span assertions; each reverted, set re-run, every one
  S6 daily N/A computed from monthly MTD/budget 3 | S7a Budget tab monthly projected N/A->0% 1 | S7b daily 1
  S8 cost-source Forecast (EOM) N/A->0% 1 | S9 per-source exclusion reason hidden 1 | S10 simulated path label removed 1
  S11 trajectory verdict N/A removed 1 | S12 Budget bar announces value again 1
+Round 3 mutations (roots restored; each reverted, set re-run, every one killed):
+ T1 daily thresholdStatus on zero budget 2 | T2 monthly forecastStatus on zero budget 2 | T3 daysUntilBreach restored 3
+ T4 mission status na removed 6 | T5 needs-attention counts na 1 | T6 Budget N/A count hidden 1
+ T7 initiative na -> pending approval 4 | T8 /reports bare % 1 | T9 Budget tab na label Healthy 1
+ T10 mission card label CRITICAL 1 | T11 AI context keeps Budget N/A initiative 1 | T12 verdict N/A removed 1

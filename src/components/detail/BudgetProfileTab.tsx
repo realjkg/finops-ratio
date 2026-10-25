@@ -19,6 +19,7 @@ const STATUS_COPY: Record<string, { label: string; color: string }> = {
   on_track: { label: 'On track', color: 'var(--value)' },
   at_risk: { label: 'At risk', color: 'var(--shape)' },
   breach_projected: { label: 'Breach projected', color: 'var(--cost)' },
+  na: { label: 'N/A', color: 'var(--sub)' },
 };
 
 export function BudgetProfileTab({

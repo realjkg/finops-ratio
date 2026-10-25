@@ -24,7 +24,8 @@ import type { Alert, BudgetProfile, AlertSeverity, EvidenceStatus, Workload } fr
 
 export interface ProjectionContext { budgets?: BudgetProfile[]; alerts?: Alert[]; now?: Date }
 
-export type MissionStatus = 'nominal' | 'caution' | 'critical';
+/** 'na' = the daily or monthly budget is invalid, so no health claim is made. */
+export type MissionStatus = 'nominal' | 'caution' | 'critical' | 'na';
 
 export interface MissionView {
   id: string;
@@ -49,7 +50,9 @@ export interface MissionView {
   valueEvidenceStatus?: EvidenceStatus;
   // Trajectory (monthly forecast).
   status: MissionStatus;
-  forecast: ForecastStatus;
+  forecast: ForecastStatus | 'na';
+  /** Reason `status` is 'na' (invalid daily or monthly budget), else null. */
+  statusNa: string | null;
   projectedPctOfBudget: number;
   trajectoryVerdict: string;
   daysUntilBreach: number | null;
@@ -64,9 +67,11 @@ export interface FleetSummary {
   valueReturned: number;
   missionCount: number;
   needsAttention: number;
+  /** Missions with an invalid budget: not counted as attention, shown separately. */
+  budgetNa: number;
 }
 
-const STATUS_RANK: Record<MissionStatus, number> = { nominal: 0, caution: 1, critical: 2 };
+const STATUS_RANK: Record<MissionStatus, number> = { nominal: 0, caution: 1, critical: 2, na: 0 };
 
 // Daily fuel threshold -> status, per the 70/90/100 budget thresholds (§4).
 function fuelStatus(fuelRatio: number): MissionStatus {
@@ -77,7 +82,7 @@ function fuelStatus(fuelRatio: number): MissionStatus {
 
 // Monthly forecast status -> mission status (a breach projection is critical even
 // when the partial day's fuel still reads low).
-function forecastToStatus(forecast: ForecastStatus): MissionStatus {
+function forecastToStatus(forecast: ForecastStatus | 'na'): MissionStatus {
   if (forecast === 'breach_projected') return 'critical';
   if (forecast === 'at_risk') return 'caution';
   return 'nominal';
@@ -105,8 +110,8 @@ function maxAlertSeverity(workloadId: string, alerts: Alert[] = ALERTS): { sever
 }
 
 // One-line, plain-language trajectory verdict keyed to the forecast status.
-function trajectoryVerdict(forecast: ForecastStatus, projectedPct: number, na: string | null): string {
-  if (na) return `Forecast vs budget N/A (${na})`;
+function trajectoryVerdict(forecast: ForecastStatus | 'na', projectedPct: number, na: string | null): string {
+  if (na || forecast === 'na') return `Forecast vs budget N/A (${na ?? 'no valid budget'})`;
   const pct = Math.round(projectedPct * 100);
   switch (forecast) {
     case 'on_track':
@@ -126,6 +131,7 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
   const fuelRatio = status.daily.pctUsed;
   const { severity, count } = maxAlertSeverity(workload.id, context.alerts);
   const fuel = budgetConsumed(status.daily.spentToday, status.daily.dailyBudget);
+  const statusNa = status.daily.pctUsedNa ?? status.monthly.pctUsedNa;
 
   return {
     id: workload.id,
@@ -143,7 +149,8 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
     valueRatio: workload.value.value_ratio,
     valueColor: ratioColor(workload.value.value_ratio),
     valueEvidenceStatus: headlineEvidenceStatus(workload.value),
-    status: worst(fuelStatus(fuelRatio), forecastToStatus(status.monthly.status), alertToStatus(severity)),
+    status: statusNa ? 'na' : worst(fuelStatus(fuelRatio), forecastToStatus(status.monthly.status), alertToStatus(severity)),
+    statusNa,
     forecast: status.monthly.status,
     projectedPctOfBudget: status.monthly.projectedPctOfBudget,
     trajectoryVerdict: trajectoryVerdict(status.monthly.status, status.monthly.projectedPctOfBudget, status.monthly.pctUsedNa),
@@ -167,7 +174,8 @@ export function buildMissionBoard(
   const fleetFuelNa = missions.find((m) => m.fuelNa)?.fuelNa ?? budgetConsumed(totalSpentToday, totalDailyBudget).naReason;
 
   const portfolio = derivePortfolioRatio(workloads);
-  const needsAttention = missions.filter((m) => m.status !== 'nominal').length;
+  const needsAttention = missions.filter((m) => m.status === 'caution' || m.status === 'critical').length;
+  const budgetNa = missions.filter((m) => m.status === 'na').length;
 
   return {
     missions,
@@ -179,6 +187,7 @@ export function buildMissionBoard(
       valueReturned: portfolio.portfolio_ratio,
       missionCount: missions.length,
       needsAttention,
+      budgetNa,
     },
   };
 }
