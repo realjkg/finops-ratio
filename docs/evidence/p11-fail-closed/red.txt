@@ -1,0 +1,18 @@
+# RED: command npx vitest run src/server/gateway/failClosed.test.ts (before implementation)
+FAIL  src/server/gateway/failClosed.test.ts > auth service failure > denies with 503 and never runs the handler when resolving auth throws
+FAIL  src/server/gateway/failClosed.test.ts > default is fail closed > a mock IdP flag alone does not switch to simulation (an outage is not a mode)
+FAIL  src/server/gateway/failClosed.test.ts > default is fail closed > refuses an unauthenticated request with an empty environment and never runs the handler
+FAIL  src/server/gateway/failClosed.test.ts > default is fail closed > resolves to enforcement with no token and no provider
+FAIL  src/server/gateway/failClosed.test.ts > default is fail closed > the FinIO peer check refuses when no peer token is configured
+FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > is off for RATIO_ENV=" test" RATIO_SIMULATION="1"
+FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > is off for RATIO_ENV="" RATIO_SIMULATION="1"
+FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > is off for RATIO_ENV="Test" RATIO_SIMULATION="1"
+FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > is off for RATIO_ENV="production" RATIO_SIMULATION="1"
+FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > is off for RATIO_ENV="staging" RATIO_SIMULATION="1"
+FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > is off for RATIO_ENV="test" RATIO_SIMULATION=" 1"
+FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > is off for RATIO_ENV="test" RATIO_SIMULATION="true"
+FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > is off when RATIO_ENV is unset
+FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > serves the fixture-only path when deliberately enabled, labeled as simulation
+FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > the FinIO peer check passes only in explicit simulation mode
+Test Files  1 failed (1)
+Tests  15 failed | 4 passed (19)
