@@ -46,12 +46,25 @@ export function resolveGatewayAuth(env: GatewayEnv): GatewayAuthConfig {
   return { enforce: !gatewaySimulationMode(env) || Boolean(token) || liveProvider, token };
 }
 
-/** Parse a `Bearer <token>` Authorization header. Returns null when absent/malformed. */
+/** Longest Authorization header value considered; anything longer is rejected. */
+export const MAX_AUTH_HEADER_LENGTH = 8192;
+
+/**
+ * Parse a `Bearer <token>` Authorization header. Returns null when absent,
+ * malformed, over the length cap, or containing a line break. Linear time: a
+ * prefix check and one forward scan, no backtracking pattern (CodeQL
+ * js/polynomial-redos on the former `/^Bearer\s+(.+)$/i`).
+ */
 export function extractBearer(header: string | string[] | undefined): string | null {
   const value = Array.isArray(header) ? header[0] : header;
-  if (typeof value !== 'string') return null;
-  const match = value.match(/^Bearer\s+(.+)$/i);
-  return match ? match[1].trim() : null;
+  if (typeof value !== 'string' || value.length > MAX_AUTH_HEADER_LENGTH) return null;
+  if (value.slice(0, 6).toLowerCase() !== 'bearer') return null;
+  let i = 6;
+  while (i < value.length && /\s/.test(value[i])) i += 1;
+  if (i === 6) return null; // a separator is required
+  const rest = value.slice(i);
+  if (/[\n\r\u2028\u2029]/.test(rest)) return null;
+  return rest.trim() || null;
 }
 
 // Stable, non-reversible tenant id derived from the token (djb2 → base36) so we

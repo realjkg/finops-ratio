@@ -12,3 +12,9 @@ M2 auth evaluation error allows (catch grants access)   -> 1 failed | 22 passed
 M3 FinIO peer check open when no token                  -> 2 failed | 21 passed
 M4 simulation gate ignores RATIO_ENV                    -> 7 failed | 16 passed
 # Pre-change impact: with the new default and no test edits, 62 tests in 15 files failed (all relied on the old default)
+
+# GREEN round 2 (extractBearer linear time, production refusal)
+npx vitest run src/server/gateway/extractBearer.test.ts src/server/gateway/failClosed.test.ts -> 51 passed (51)
+lint clean; typecheck clean; npx vitest run -> Test Files 203 passed; Tests 3740 passed (3740); npm run build -> exit 0
+Mutations: restore old regex /^Bearer\s+(.+)$/i without cap -> 4 failed; drop VERCEL_ENV refusal -> 1 failed; drop NODE_ENV refusal -> 1 failed
+CodeQL js/polynomial-redos: the only quantified-whitespace-then-.+ pattern is gone; remaining regexes are single-character tests (/\s/) or bounded

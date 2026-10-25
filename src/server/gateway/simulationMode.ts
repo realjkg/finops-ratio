@@ -18,6 +18,11 @@ function own(env: SimulationEnv, key: string): string | undefined {
 }
 
 export function gatewaySimulationMode(env: SimulationEnv = process.env): boolean {
+  // Never in a production deployment: Vercel production refuses outright, and
+  // NODE_ENV=production (which `next start` sets) needs the additional opt-in
+  // RATIO_SIMULATION_IMAGE=1, set only by infrastructure/simulation/Dockerfile.
+  if (own(env, 'VERCEL_ENV') === 'production') return false;
+  if (own(env, 'NODE_ENV') === 'production' && own(env, 'RATIO_SIMULATION_IMAGE') !== '1') return false;
   const ratioEnv = own(env, 'RATIO_ENV');
   return own(env, 'RATIO_SIMULATION') === '1' && typeof ratioEnv === 'string' && ALLOWED_RATIO_ENVS.includes(ratioEnv);
 }
