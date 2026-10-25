@@ -1,7 +1,7 @@
 GREEN evidence after review round 2 (includes round 1 results) (base db4a1e2). Gates run sequentially in the foreground.
 1 lint: exit 0
 2 typecheck: exit 0
-3 full vitest: see PR body (final counts)
+3 full vitest: Test Files 206 passed (206); Tests 3737 passed (3737)
 4 build: exit 0 (next-env.d.ts reverted, .next deleted)
 5 readiness:check: pilotEntryReady=false productionReady=false
 6 diff-budget: see PR body (ratio exceeds 1.5; exception requested, not granted)
