@@ -15,8 +15,8 @@ Each row gives the claim, the command, and the result.
 
 | Fact | Command | Result |
 |---|---|---|
-| F1 enforcement rule | `sed -n 33,43p src/server/gateway/auth.ts` | `enforce: Boolean(token) \|\| liveProvider`; live providers include `jira` and `servicenow` (line 33 set, 42 return) |
-| F1 anonymous when not enforced | `grep -n "anonymous" src/server/gateway/auth.ts` | `if (!config.enforce) return { ok: true, tenant: 'anonymous' }` at line 88 |
+| F1 enforcement rule (changed by P11) | `grep -n "enforce:" src/server/gateway/auth.ts` | `enforce: !gatewaySimulationMode(env) \|\| Boolean(token) \|\| liveProvider`: enforced by default; live providers include `jira` and `servicenow` |
+| F1 simulation when not enforced (changed by P11) | `grep -n "simulation" src/server/gateway/auth.ts` | `if (!config.enforce) return { ok: true, tenant: 'simulation' }`, reachable only with `RATIO_SIMULATION=1` and `RATIO_ENV` development or test |
 | F2 tenant hash, no identity | `sed -n 53,61p src/server/gateway/auth.ts` | djb2 over the token, `tnt_` plus base36; no user or role field in `AuthOutcome` (lines 21-23) |
 | F2 constant-time compare | `grep -n timingSafeEqual src/server/gateway/auth.ts` | lines 11 and 71 |
 | F3 open routes | loop over `find pages/api -name "*.ts"` testing for `withGateway\|gateSourceAccess\|evaluateLiveDataAuth\|requireLiveDataAuth\|publishedCostsRoute`, `simulationRoute\|sessionFor`, and the finio secret | no gateway or simulation guard in `attribution`, `tokenomics`, `prediction/predict`, `prediction/accuracy`, `report/snapshot`, `costsource/ingest`, `hello`; `a2a/handshake` and `finio/export` are one-line re-exports of `v1` routes (`head` of each file) |

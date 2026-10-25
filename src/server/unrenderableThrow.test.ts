@@ -10,6 +10,9 @@ import { SlidingWindowRateLimiter } from './gateway/rateLimit';
 import { MockCostSourceClient } from '@/costsource/MockCostSourceClient';
 import { redactErrorText } from '@/costsource/transports/redact';
 import rowsHandler from '../../pages/api/costsource/rows';
+import { SIMULATION_ENV, enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const FALLBACK = '[unrenderable thrown value]';
@@ -117,7 +120,7 @@ describe('withGateway: unrenderable throws still get the generic 500', () => {
       () => {
         throw make();
       },
-      { methods: ['GET'], env: {}, limiter: new SlidingWindowRateLimiter(), logger: () => {} },
+      { methods: ['GET'], env: SIMULATION_ENV, limiter: new SlidingWindowRateLimiter(), logger: () => {} },
     );
     const res = makeRes();
     await expect(handler(req(), res as unknown as NextApiResponse)).resolves.toBeUndefined();

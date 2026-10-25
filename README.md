@@ -318,6 +318,10 @@ not tied to any vendor.
 Any other hosted OpenAI-compatible service works through `openllm` by pointing
 `OPENLLM_BASE_URL` at it. Selecting any live provider turns gateway auth on
 (`RATIO_API_TOKEN`), so a paid model endpoint is never exposed unauthenticated.
+Gateway routes fail closed by default: with no token configured, or if the auth
+check itself fails, the answer is 401 or 503. Local fixture-only simulation needs
+`RATIO_SIMULATION=1` with `RATIO_ENV=development` or `test`; it never applies
+when a token or a live provider is configured.
 
 Durable design rules live in `.obvious/obvious.md` (Design Guidance) and the
 routine skills under `.obvious/skills/`. The full v1 design specification is

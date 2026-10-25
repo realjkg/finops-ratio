@@ -10,6 +10,9 @@ import legacyHandshakeHandler from '../../pages/api/a2a/handshake';
 import legacyExportHandler from '../../pages/api/finio/export';
 import { validateFocusRows } from './focusValidation';
 import type { FinioExport, HandshakeResult } from './FinioClient';
+import { enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 const ENV_KEYS = ['FINIO_PEER_TOKEN', 'FINIO_SESSION_SECRET', 'RATIO_API_TOKEN'] as const;
 

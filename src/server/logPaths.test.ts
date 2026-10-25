@@ -8,6 +8,9 @@ import { withGateway } from './gateway/withGateway';
 import { SlidingWindowRateLimiter } from './gateway/rateLimit';
 import { logClientErrorDetail, logInternalError, sendInternalError } from './gateway/internalError';
 import rowsHandler from '../../pages/api/costsource/rows';
+import { SIMULATION_ENV, enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 const QUERY = '?sessionId=SESSVALUE123&access_token=ATVALUE456&sig=SIGVALUE789&x=PLAINVALUE0';
 const VALUES = ['SESSVALUE123', 'ATVALUE456', 'SIGVALUE789', 'PLAINVALUE0'];
@@ -71,7 +74,7 @@ describe('logs never contain the query string', () => {
       () => {
         throw new Error('boom');
       },
-      { methods: ['GET'], env: {}, limiter: new SlidingWindowRateLimiter() },
+      { methods: ['GET'], env: SIMULATION_ENV, limiter: new SlidingWindowRateLimiter() },
     );
     const res = makeRes();
     await handler(req(`/api/v1/finio/export${QUERY}`), res as unknown as NextApiResponse);
@@ -86,7 +89,7 @@ describe('logs never contain the query string', () => {
       (_req, res) => {
         res.status(200).json({ ok: true });
       },
-      { methods: ['GET'], env: {}, limiter: new SlidingWindowRateLimiter() },
+      { methods: ['GET'], env: SIMULATION_ENV, limiter: new SlidingWindowRateLimiter() },
     );
     const res = makeRes();
     await handler(req(`/api/v1/finio/export${QUERY}`), res as unknown as NextApiResponse);

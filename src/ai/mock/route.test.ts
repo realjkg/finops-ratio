@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import handler from '../../../pages/api/v1/ai/chat';
 import { CTX } from './__testkit__/ask';
+import { enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 let saved: string | undefined;
 beforeEach(() => {

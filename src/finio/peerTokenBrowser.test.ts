@@ -16,6 +16,9 @@ import handshakeHandler from '../../pages/api/v1/a2a/handshake';
 import { LiveFinioClient, FinioPeerAuthError, FINIO_PEER_AUTH_MESSAGE } from './LiveFinioClient';
 import { finioErrorView } from './FinioPage';
 import { createFinioClient } from './index';
+import { enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 // Assembled at runtime so this file does not match its own scan.
 const BANNED = ['NEXT', 'PUBLIC', 'FINIO', 'PEER', 'TOKEN'].join('_');

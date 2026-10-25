@@ -4,7 +4,7 @@
 // enabled (RATIO_SIMULATION=1 with RATIO_ENV development or test), and never
 // as the automatic answer to an auth outage. Synthetic fixtures only.
 
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { withGateway } from './withGateway';
 import { SlidingWindowRateLimiter } from './rateLimit';
@@ -123,5 +123,22 @@ describe('explicit simulation mode', () => {
   it('the FinIO peer check passes only in explicit simulation mode', () => {
     expect(checkPeerToken(null, resolveFinioPeerAuth({ ...SIM })).ok).toBe(true);
     expect(checkPeerToken(null, resolveFinioPeerAuth({ RATIO_ENV: 'production', RATIO_SIMULATION: '1' })).ok).toBe(false);
+  });
+});
+
+describe('real gateway routes refuse by default', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it.each([
+    ['POST', '../../../pages/api/v1/ai/chat'],
+    ['POST', '../../../pages/api/v1/cm/change'],
+    ['POST', '../../../pages/api/v1/a2a/handshake'],
+    ['GET', '../../../pages/api/v1/finio/export'],
+  ])('%s %s answers 401 with no credentials and no simulation flag', async (method, mod) => {
+    for (const k of ['RATIO_API_TOKEN', 'RATIO_SIMULATION', 'RATIO_ENV', 'AI_PROVIDER', 'CM_PROVIDER']) vi.stubEnv(k, undefined);
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const route = (await import(/* @vite-ignore */ mod)).default;
+    const res = makeRes();
+    await route({ method, url: '/x', headers: {}, body: {}, query: {} } as unknown as NextApiRequest, res);
+    expect(res.statusCode).toBe(401);
   });
 });
