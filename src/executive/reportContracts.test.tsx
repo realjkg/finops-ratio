@@ -80,3 +80,17 @@ describe('PDF savings explanation', () => {
     expect(text).toContain('$2,408');
   });
 });
+
+describe('status of an invalid-budget initiative (report paths)', () => {
+  const rest0 = buildReportModel(FIXED, rest);
+
+  it('is "Budget N/A" in the row, XLSX cell and PDF tree, and not counted as pending', async () => {
+    expect(model.rows[0].status).toBe('Budget N/A');
+    expect(model.summary.pendingApproval).toBe(rest0.summary.pendingApproval);
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load((await buildReportWorkbook(FIXED, model)) as unknown as ArrayBuffer);
+    expect(book.getWorksheet('Initiatives')!.getCell('E2').value).toBe('Budget N/A');
+    const text = pdfText(<ReportDocument model={model} />);
+    expect(text).toContain('|Budget N/A|');
+  });
+});

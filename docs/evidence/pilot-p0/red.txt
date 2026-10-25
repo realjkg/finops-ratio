@@ -22,3 +22,9 @@ Result: Test Files 1 failed | 3 passed (4); Tests 2 failed | 37 passed (39).
 Failing: trajectory verdict "Overrun — projected 0% of budget" for an invalid monthly budget; Budget tab bars still
 announce aria-valuenow. The other new visible-text, daily-vs-monthly and overspend tests pass already and are
 protection, proven by the mutation set in green.txt.
+
+Review round 3 RED (tests only), head 49cfb8e.
+Command: npx vitest run src/mission/budgetStatusNa.test.tsx src/executive/reportContracts.test.tsx src/costsource/aiSpendRatioCard.test.tsx
+Result: Test Files 3 failed; Tests 8 failed | 21 passed (29).
+Failing: invalid budget still yields CRITICAL / Pending Approval / Healthy / Breach projected / "breach in ~0 days" /
+"Forecast breaches budget", is counted in needs-attention and pending-approval, and /reports prints a bare "%".
