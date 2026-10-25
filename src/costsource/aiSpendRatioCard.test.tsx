@@ -7,6 +7,8 @@ import type { AiSpendRatioReport } from './aiSpendRatio';
 import { createCostSourceClient } from './index';
 import { anonymousSourceView } from './sourceDisclosure';
 import { isOfflineSandboxSource } from './sandboxSources';
+import { CompositionCard } from './CostSourcePage';
+import { WORKLOADS } from '@/data/workloads';
 
 const now = new Date();
 const WINDOW = {
@@ -180,8 +182,6 @@ describe('AiSpendRatioView', () => {
 
 describe('Forecast (EOM) in the composition card', () => {
   it('shows N/A, not 0%, for an invalid monthly budget', async () => {
-    const { CompositionCard } = await import('./CostSourcePage');
-    const { WORKLOADS } = await import('@/data/workloads');
     const rows = (await createCostSourceClient('mock').fetchCostRows('pointfive-sandbox', WINDOW)).rows;
     const html = (b: number) => {
       const seed = WORKLOADS.find((x) => x.id === rows[0].ResourceId?.split('/').pop())!;
