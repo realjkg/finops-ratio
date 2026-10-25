@@ -9,6 +9,9 @@ import handler from '../../../pages/api/v1/ai/chat';
 import { migrate, wl } from './__testkit__/oracle';
 import { respond } from '.';
 import { CTX, UNSUPPORTED, chat, last, restoreClock, useFastClock } from './__testkit__/ask';
+import { enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 beforeAll(useFastClock);
 afterAll(restoreClock);

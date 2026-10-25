@@ -29,6 +29,9 @@ import {
 } from './exchange';
 import { createSession, validateSession } from './sessionStore';
 import { createFinioClient } from './index';
+import { enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 // ---------------------------------------------------------------------------
 // FOCUS conformance — the spec's stated row-validity rules

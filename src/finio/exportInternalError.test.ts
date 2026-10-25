@@ -3,6 +3,9 @@
 // the validator's per-row detail (that goes to the server log).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 vi.mock('./focusValidation', async (orig) => ({
   ...(await orig<typeof import('./focusValidation')>()),

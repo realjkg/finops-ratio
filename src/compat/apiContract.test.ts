@@ -32,6 +32,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { rawRowsForVersion } from '@/costsource/seed';
+import { enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 const GOLDEN = path.resolve(__dirname, 'golden/api.json');
 const WRITE = process.env.COMPAT_WRITE === '1';

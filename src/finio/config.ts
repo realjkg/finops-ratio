@@ -8,11 +8,12 @@
 // trust boundary the spec wanted to demonstrate did not actually exist. The
 // session-signing HMAC key was hardcoded in the same way.
 //
-// The offline-safe invariant matches src/server/gateway/auth.ts: with NO peer
-// token configured, the handshake does NOT enforce one, so the demo and CI stay
-// green with zero env. Enforcement turns on the moment FINIO_PEER_TOKEN is set.
+// Fail-closed (P11), matching src/server/gateway/auth.ts: with NO peer token
+// configured the handshake is refused, unless explicit local simulation mode is
+// on (RATIO_SIMULATION=1 with RATIO_ENV development or test).
 
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { gatewaySimulationMode } from '@/server/gateway/simulationMode';
 
 export interface FinioEnv {
   /** Shared secret a peer agent presents to open a FinIO session. */
@@ -33,7 +34,7 @@ export interface FinioPeerAuthConfig {
 /** Decide whether to enforce the A2A peer token from the server environment. */
 export function resolveFinioPeerAuth(env: FinioEnv = process.env): FinioPeerAuthConfig {
   const token = env.FINIO_PEER_TOKEN?.trim() || null;
-  return { enforce: Boolean(token), token };
+  return { enforce: Boolean(token) || !gatewaySimulationMode(env), token };
 }
 
 /**
@@ -49,7 +50,7 @@ export function secretsMatch(a: string, b: string): boolean {
 /**
  * Validate a presented peer token.
  *
- * Returns ok when enforcement is off (the zero-config demo path), when the
+ * Returns ok when enforcement is off (explicit simulation mode only), when the
  * presented token matches, and never otherwise.
  */
 export function checkPeerToken(

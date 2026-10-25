@@ -12,6 +12,9 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { pathOnly, NON_PATH_TARGET } from './gateway/internalError';
 import { withGateway } from './gateway/withGateway';
 import { SlidingWindowRateLimiter } from './gateway/rateLimit';
+import { SIMULATION_ENV, enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 const LEAKS = ['user', 'secret', 'example', 'evil', 'x=1', 'sig='];
 
@@ -101,7 +104,7 @@ function throwingGateway() {
     () => {
       throw new Error('boom');
     },
-    { methods: ['GET'], env: {}, limiter: new SlidingWindowRateLimiter() },
+    { methods: ['GET'], env: SIMULATION_ENV, limiter: new SlidingWindowRateLimiter() },
   );
 }
 
