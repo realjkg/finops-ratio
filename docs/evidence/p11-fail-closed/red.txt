@@ -16,3 +16,6 @@ FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > serves 
 FAIL  src/server/gateway/failClosed.test.ts > explicit simulation mode > the FinIO peer check passes only in explicit simulation mode
 Test Files  1 failed (1)
 Tests  15 failed | 4 passed (19)
+
+# RED round 2 (ReDoS + production refusal): npx vitest run src/server/gateway/extractBearer.test.ts src/server/gateway/failClosed.test.ts
+Tests  6 failed | 45 passed (51)  (old regex: 206 ms at n=8000, 670 ms at n=16000 vs 50 ms bound; VERCEL_ENV, NODE_ENV and Dockerfile opt-in cases fail)

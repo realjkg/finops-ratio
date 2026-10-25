@@ -9,6 +9,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { withGateway } from './withGateway';
 import { SlidingWindowRateLimiter } from './rateLimit';
 import { checkAuth, resolveGatewayAuth, type GatewayEnv } from './auth';
+import { gatewaySimulationMode } from './simulationMode';
 import { checkPeerToken, resolveFinioPeerAuth } from '@/finio/config';
 
 const SIM = { RATIO_SIMULATION: '1', RATIO_ENV: 'test' } as const;
@@ -140,5 +141,37 @@ describe('real gateway routes refuse by default', () => {
     const res = makeRes();
     await route({ method, url: '/x', headers: {}, body: {}, query: {} } as unknown as NextApiRequest, res);
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('simulation refuses in production', () => {
+  it('refuses when VERCEL_ENV is exactly production, even with both flags', async () => {
+    expect(gatewaySimulationMode({ ...SIM, VERCEL_ENV: 'production' })).toBe(false);
+    const { res, handler } = await call({ ...SIM, VERCEL_ENV: 'production' } as GatewayEnv);
+    expect(res.statusCode).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it.each(['preview', 'development', 'Production', ''])('does not treat VERCEL_ENV=%j as production', (v) => {
+    expect(gatewaySimulationMode({ ...SIM, VERCEL_ENV: v })).toBe(true);
+  });
+
+  it('refuses under NODE_ENV=production without the simulation-image opt-in', () => {
+    expect(gatewaySimulationMode({ ...SIM, NODE_ENV: 'production' })).toBe(false);
+    expect(gatewaySimulationMode({ ...SIM, NODE_ENV: 'production', RATIO_SIMULATION_IMAGE: 'true' })).toBe(false);
+  });
+
+  it('allows the simulation image: NODE_ENV=production with RATIO_SIMULATION_IMAGE=1', () => {
+    expect(gatewaySimulationMode({ ...SIM, RATIO_ENV: 'development', NODE_ENV: 'production', RATIO_SIMULATION_IMAGE: '1' })).toBe(true);
+  });
+
+  it('the image opt-in alone never enables simulation', () => {
+    expect(gatewaySimulationMode({ NODE_ENV: 'production', RATIO_SIMULATION_IMAGE: '1' })).toBe(false);
+    expect(gatewaySimulationMode({ RATIO_SIMULATION_IMAGE: '1', RATIO_ENV: 'development' })).toBe(false);
+  });
+
+  it('the Dockerfile for the simulation image sets the opt-in', async () => {
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync('infrastructure/simulation/Dockerfile', 'utf8')).toMatch(/RATIO_SIMULATION_IMAGE=1/);
   });
 });
