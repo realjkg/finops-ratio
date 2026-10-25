@@ -1,0 +1,10 @@
+RED evidence (tests only, before implementation), base db4a1e2.
+Command: npx vitest run src/lib/metricContracts.test.ts src/costsource/aiSpendRatio.test.ts \
+  src/executive src/components/detail/MultiModelTab.test.tsx scripts/completion
+Result: Test Files 7 failed | 7 passed (14); Tests 11 failed | 66 passed (77) (+2 suites that fail
+to import: src/lib/metricContracts.test.ts and scripts/completion/pilot.test.mjs, whose modules do not exist yet).
+Failing behavior (not just imports):
+- ServiceNow sandbox alone still lands in the headline (roleConfirmed absent; inHeadline true)
+- projectedSavings is 4816 vs the expected 2408: ServiceNow findings duplicate the PointFive findings
+- budgetConsumedPct is 0 (not N/A) for monthly_budget 0, -1, NaN; clamped to 100 when over budget
+- model-switch text says "saves", not "Estimated scenario cost reduction—not realized savings"

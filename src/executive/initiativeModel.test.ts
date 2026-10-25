@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { WORKLOADS } from '@/data/workloads';
 import { TOKEN_COLOR } from '@/lib/scales';
 import { buildMissionBoard } from '@/mission/missionModel';
+import { findingsFor } from '@/costsource/seed';
 import {
   buildInitiativeBoard,
   INITIATIVE_STATUS_META,
@@ -67,11 +68,32 @@ describe('initiative view-model', () => {
     }
   });
 
-  it('keeps budget consumed within 0..100', () => {
+  it('reports budget consumed as a non-negative percent for every seeded budget', () => {
     for (const initiative of initiatives) {
       expect(initiative.budgetConsumedPct).toBeGreaterThanOrEqual(0);
-      expect(initiative.budgetConsumedPct).toBeLessThanOrEqual(100);
+      expect(initiative.budgetConsumedNa).toBeNull();
     }
+  });
+
+  // Pilot P0 metric contract: actual period-to-date / approved full-period budget.
+  it('does not clamp an over-budget workload to 100%', () => {
+    const w = WORKLOADS[0];
+    const over = toInitiativeView({ ...w, costs: { ...w.costs, monthly_budget: 1 } });
+    expect(over.budgetConsumedPct).toBeGreaterThan(100);
+  });
+
+  it.each([0, -1, Number.NaN])('renders an invalid budget (%s) as N/A with a reason, never zero', (budget) => {
+    const w = WORKLOADS[0];
+    const view = toInitiativeView({ ...w, costs: { ...w.costs, monthly_budget: budget } });
+    expect(view.budgetConsumedPct).toBeNull();
+    expect(view.budgetConsumedNa).toMatch(/approved budget/i);
+  });
+
+  it('excludes the unconfirmed-role ServiceNow sandbox findings from projected savings', () => {
+    const only = (id: string) =>
+      findingsFor(id).reduce((sum, f) => sum + f.estimatedMonthlySavings, 0);
+    expect(only('servicenow-sandbox')).toBeGreaterThan(0);
+    expect(summary.projectedSavings).toBe(Math.round(only('pointfive-sandbox')));
   });
 
   it('uses the locked status labels + token colors', () => {

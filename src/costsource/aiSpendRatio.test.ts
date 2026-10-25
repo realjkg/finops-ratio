@@ -161,9 +161,29 @@ describe('fetchAiSpendRatio on the mock path (sandbox + synthetic)', () => {
   });
 
   it('an overlapping source counts when the source covering it was not fetched', async () => {
-    const report = await fetchAiSpendRatio(createCostSourceClient('mock'), WINDOW, ['servicenow-sandbox']);
+    const report = await fetchAiSpendRatio(createCostSourceClient('mock'), WINDOW, ['focus-file-sandbox']);
     expect(report.perSource[0].inHeadline).toBe(true);
-    expect(Math.round(report.overall.byCurrency[0].totalCost * 100)).toBe(SERVICENOW_CENTS);
+    expect(Math.round(report.overall.byCurrency[0].totalCost * 100)).toBe(WORKLOAD_CENTS);
+  });
+
+  // Pilot P0: the ServiceNow sandbox has an unconfirmed role (roleConfirmed:
+  // false), so it never reaches a headline total, even when it is the only
+  // source fetched. Its per-source row stays visible with the reason.
+  it('excludes the unconfirmed-role ServiceNow sandbox from the headline, even alone', async () => {
+    const report = await fetchAiSpendRatio(createCostSourceClient('mock'), WINDOW, ['servicenow-sandbox']);
+    expect(report.perSource[0]).toMatchObject({ sourceId: 'servicenow-sandbox', inHeadline: false });
+    expect(report.perSource[0].exclusionReason).toMatch(/role unconfirmed/i);
+    expect(report.perSource[0].result.rowCount).toBeGreaterThan(0);
+    expect(report.overall.byCurrency).toEqual([]);
+    expect(SERVICENOW_CENTS).toBeGreaterThan(0);
+  });
+
+  it('labels the ServiceNow descriptor as unconfirmed and not a billing-data source', async () => {
+    const sources = await createCostSourceClient('mock').listSources();
+    const sn = sources.find((s) => s.id === 'servicenow-sandbox')!;
+    expect(sn.roleConfirmed).toBe(false);
+    expect(sn.note).toMatch(/not assumed to supply billing data/i);
+    expect(sources.filter((s) => s.id !== 'servicenow-sandbox').every((s) => s.roleConfirmed !== false)).toBe(true);
   });
 
   // One headline owner per repeated-bill group: pointfive-sandbox, else
