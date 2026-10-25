@@ -1,0 +1,17 @@
+GREEN evidence, head after implementation (base db4a1e2). Gates run sequentially in the foreground.
+1 lint: npm run lint -> exit 0
+2 typecheck: npm run typecheck -> exit 0
+3 full vitest: npx vitest run -> Test Files 204 passed (204); Tests 3717 passed (3717)
+4 build: npm run build -> exit 0
+5 readiness: npm run readiness:check -> prints maturity per area and a "Pilot gate" section;
+  pilotEntryReady=false productionReady=false; 5 external + 6 area gates unresolved
+Targeted set (RED command): Tests 98 passed (98).
+Mutations (each reverted afterward; targeted set re-run, every one failed as required):
+ M1 headline ignores roleConfirmed        -> 1 failed
+ M2 savings sum includes unconfirmed role -> 1 failed
+ M3 invalid budget returns 0 not N/A      -> 12 failed
+ M4 100% clamp restored                   -> 1 failed
+ M5 scenario label dropped from UI        -> 1 failed
+ M6 pilotEntryReady forced true           -> 2 failed
+ M7 customer-validated claim unchecked    -> 1 failed
+ M8 AI context sends N/A budget as a row  -> 1 failed

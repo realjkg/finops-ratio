@@ -1601,6 +1601,6 @@ which Nutanix deployment type applies, and who owns its cost evidence (showback,
 license invoices, depreciation)? Which ServiceNow modules are in use, who owns
 the authoritative service and CI records, and does it hold any cost?
 
-Follow-up for slice P0 (not done here, files are shared with in-flight work):
-the ServiceNow sandbox descriptor in `src/costsource/seed.ts` still emits
-"ITBM Cost Allocation" rows with no `roleConfirmed: false` label.
+Done in pilot slice P0: the ServiceNow sandbox descriptor in `src/costsource/seed.ts`
+carries `roleConfirmed: false`, and sources with that flag are excluded from
+headline cost and savings totals (`src/costsource/headline.ts`).
