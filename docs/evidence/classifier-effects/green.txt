@@ -1,0 +1,24 @@
+# GREEN: same command after the effect.* rules (risk-rules.json)
+# command: npx vitest run scripts/governance/classify-risk.test.mjs
+ Test Files  1 passed (1)
+      Tests  178 passed (178)
+# governance suite: npx vitest run scripts/governance
+ Test Files  6 passed (6)
+      Tests  477 passed (477)
+# full suite: 201 files, 3746 tests passed; lint, typecheck, build exit 0
+
+# Mutation checks against the real rules file (each restored after the run)
+# M drop effect.evidence-integrity.paths: Tests  12 failed | 165 passed (177)
+# M drop effect.srmd.ingestion-evidence: Tests  3 failed | 174 passed (177)
+# M drop effect.srmd.authority: Tests  1 failed | 176 passed (177)
+# M drop effect.authorization.paths: Tests  5 failed | 172 passed (177)
+# M drop effect.allocation.paths: Tests  8 failed | 169 passed (177)
+# M drop effect.financial-calc.paths: Tests  4 failed | 173 passed (177)
+# M drop effect.exports.paths: Tests  9 failed | 168 passed (177)
+# M drop effect.exports.name: Tests  1 failed | 176 passed (177)
+# M rename class exports->export: Tests  15 failed | 163 passed (178)
+# M srmd scope narrowed: Tests  6 failed | 172 passed (178)
+# M loosen: low allow-list adds src/evidence/**: Tests  178 passed (178)
+# M loosen: low allow-list adds src/evidence/**: Tests  1 failed | 177 passed (178)
+# M loosen: low.markdown adds src/**/*.ts: Tests  5 failed | 173 passed (178)
+# M remove pre-existing financial_semantics.paths: Tests  7 failed | 171 passed (178)
