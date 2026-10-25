@@ -37,6 +37,15 @@ Reading the changes: #127 gains `evidence_integrity` and `exports` (it touched
   checks guarding authorization or evidence is no longer auto-low. It matches
   the existing rule that restricted rules win over the low test allow-list.
 
+## How the rules read
+
+Rules with an `effect.` id in `scripts/governance/risk-rules.json` are
+documented by its `$comment`; they only add restricted matches, and a mixed PR
+reports every class it touches. Classes: `evidence_integrity` (`src/evidence/**`,
+evidence stores, `src/srmd/**` ingestion or evidence code), `auth_tenancy`
+(`src/rbac/**`, `src/identity/**`, reader credentials, `src/srmd/**` authority
+code), `allocation`, `exports`, and more `financial_semantics` coverage.
+
 ## Not changed
 
 Merge-eligibility gate, workflows, required checks, the fail-closed default,
