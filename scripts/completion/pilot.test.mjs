@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { URL } from 'node:url';
 import { expect, it } from 'vitest';
 import { MATURITY, areaMaturity, pilotEntry } from './pilot.mjs';
 const read = name => JSON.parse(fs.readFileSync(new URL(`./${name}`, import.meta.url), 'utf8'));
