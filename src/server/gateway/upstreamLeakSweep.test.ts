@@ -11,6 +11,9 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { withGateway, type GatewayHandler } from './withGateway';
 import { SlidingWindowRateLimiter } from './rateLimit';
 import { fetchChecked } from '@/costsource/transports/focusExport';
+import { SIMULATION_ENV, enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 const MARKER = 'UPSTREAM-BODY-MARKER';
 const SECRET = 'Bearer leak.tok.SECRET-0123456789 at https://x.example/p?sig=SASSECRET';
@@ -100,7 +103,7 @@ describe('gateway 500 envelope is generic; the log is redacted', () => {
       throw new Error(`boom ${SECRET}`);
     };
     const handler = withGateway(throwing, {
-      env: {},
+      env: SIMULATION_ENV,
       logger: () => {},
       limiter: new SlidingWindowRateLimiter(),
       validateBody: () => ({ ok: true }),

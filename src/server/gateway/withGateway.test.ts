@@ -7,6 +7,9 @@ import { describe, it, expect, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { withGateway, type GatewayHandler } from './withGateway';
 import { SlidingWindowRateLimiter } from './rateLimit';
+import { SIMULATION_ENV, enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 interface FakeRes {
   statusCode: number;
@@ -65,7 +68,7 @@ describe('withGateway', () => {
   it('returns 405 on a disallowed method', async () => {
     const handler = withGateway(okHandler, {
       methods: ['POST'],
-      env: {},
+      env: SIMULATION_ENV,
       logger: noopLogger,
       limiter: new SlidingWindowRateLimiter(),
     });
@@ -78,7 +81,7 @@ describe('withGateway', () => {
 
   it('bypasses auth for the offline mock (no token, mock provider)', async () => {
     const handler = withGateway(okHandler, {
-      env: {}, // no RATIO_API_TOKEN, AI_PROVIDER unset → mock
+      env: SIMULATION_ENV, // no RATIO_API_TOKEN, AI_PROVIDER unset → mock
       logger: noopLogger,
       limiter: new SlidingWindowRateLimiter(),
       validateBody: acceptBody,
@@ -129,7 +132,7 @@ describe('withGateway', () => {
 
   it('returns 400 with a structured envelope on invalid body', async () => {
     const handler = withGateway(okHandler, {
-      env: {},
+      env: SIMULATION_ENV,
       logger: noopLogger,
       limiter: new SlidingWindowRateLimiter(),
       validateBody: (body) =>
@@ -146,7 +149,7 @@ describe('withGateway', () => {
 
   it('returns 429 with Retry-After once the rate limit is exceeded', async () => {
     const handler = withGateway(okHandler, {
-      env: {},
+      env: SIMULATION_ENV,
       logger: noopLogger,
       limiter: new SlidingWindowRateLimiter(1, 60_000, () => 1000),
       validateBody: acceptBody,
@@ -169,7 +172,7 @@ describe('withGateway', () => {
       throw new Error('boom');
     };
     const handler = withGateway(throwing, {
-      env: {},
+      env: SIMULATION_ENV,
       logger: noopLogger,
       limiter: new SlidingWindowRateLimiter(),
       validateBody: acceptBody,
@@ -195,7 +198,7 @@ describe('withGateway', () => {
       throw new Error('kaboom');
     };
     const handler = withGateway(throwing, {
-      env: {},
+      env: SIMULATION_ENV,
       logger: noopLogger,
       limiter: new SlidingWindowRateLimiter(),
       validateBody: acceptBody,
@@ -221,7 +224,7 @@ describe('withGateway', () => {
       throw new Error('upstream said Bearer abc.def.SECRETTOKEN123 at https://h.example/p?sig=SASSECRET');
     };
     const handler = withGateway(throwing, {
-      env: {},
+      env: SIMULATION_ENV,
       logger: noopLogger,
       limiter: new SlidingWindowRateLimiter(),
       validateBody: acceptBody,
@@ -244,7 +247,7 @@ describe('withGateway', () => {
       throw 'raw string detail';
     };
     const handler = withGateway(throwing, {
-      env: {},
+      env: SIMULATION_ENV,
       logger: noopLogger,
       limiter: new SlidingWindowRateLimiter(),
       validateBody: acceptBody,
@@ -261,7 +264,7 @@ describe('withGateway', () => {
 
   it('4xx envelopes produced by the gateway itself are unchanged (no requestId, no X-Request-Id)', async () => {
     const handler = withGateway(okHandler, {
-      env: {},
+      env: SIMULATION_ENV,
       logger: noopLogger,
       limiter: new SlidingWindowRateLimiter(),
       validateBody: () => ({ ok: false, message: 'Body must have x' }),

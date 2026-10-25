@@ -4,6 +4,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 const ENV_KEYS = [
   'RATIO_API_TOKEN',

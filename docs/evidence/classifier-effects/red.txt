@@ -1,0 +1,6 @@
+# RED: effect-based classifier tests against unchanged risk-rules.json (base db4a1e2)
+# command: npx vitest run scripts/governance/classify-risk.test.mjs
+⎯⎯⎯⎯⎯⎯ Failed Tests 43 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  43 failed | 127 passed (170)
+   Start at  19:29:55

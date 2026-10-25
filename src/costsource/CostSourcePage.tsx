@@ -200,7 +200,8 @@ export function CostSourcePage() {
                     sourceId === s.id
                       ? 'border-gate bg-gate/10'
                       : 'border-edge bg-raised hover:border-gate/50',
-                    isDark ? 'opacity-60' : '',
+                    // Not dimmed with opacity (that fades the text below AA); the dashed border, the status dot and the DARK chip carry the state.
+                    isDark ? 'border-dashed' : '',
                   ].join(' ')}
                 >
                   <div className="flex items-center justify-between">

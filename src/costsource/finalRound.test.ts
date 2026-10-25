@@ -12,6 +12,9 @@ import { createAzureBlobTransport } from './transports/azureBlobTransport';
 import { PointFiveLiveAdapter } from './PointFiveLiveAdapter';
 import type { PointFiveMcpClient, PointFiveOpportunity, PointFiveAnomaly } from './PointFiveMcpTransport';
 import { rawRowsForVersion, resourceIdFor } from './seed';
+import { enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 const ENV_KEYS = [
   'RATIO_API_TOKEN',

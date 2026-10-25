@@ -11,7 +11,7 @@
 // Middleware order: method → size → auth → rate-limit → validate → dispatch.
 
 import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
-import { checkAuth, isStrongToken, resolveGatewayAuth, type GatewayEnv } from './auth';
+import { checkAuth, isStrongToken, resolveGatewayAuth, type AuthOutcome, type GatewayEnv } from './auth';
 import { INTERNAL_ERROR_MESSAGE, logInternalError, pathOnly } from './internalError';
 import {
   SlidingWindowRateLimiter,
@@ -20,7 +20,7 @@ import {
 
 /** Per-request context handed to the wrapped handler. */
 export interface GatewayContext {
-  /** Tenant id derived from the API token, or 'anonymous' when auth is not enforced. */
+  /** Tenant id derived from the API token, or 'simulation' in explicit local simulation mode. */
   tenant: string;
 }
 
@@ -128,7 +128,6 @@ export function withGateway(
   const env = options.env ?? process.env;
 
   return async (req: NextApiRequest, res: NextApiResponse): Promise<void> => {
-    warnIfWeakToken(env);
     const start = Date.now();
     let tenant = 'anonymous';
     const finish = (status: number) =>
@@ -160,8 +159,17 @@ export function withGateway(
       return;
     }
 
-    // 3. Bearer auth (offline-safe: bypassed for mock + no token).
-    const auth = checkAuth(req.headers.authorization, resolveGatewayAuth(env));
+    // 3. Bearer auth. Fail closed: only explicit simulation mode bypasses it,
+    // and a failure to evaluate auth denies (503), never allows.
+    let auth: AuthOutcome;
+    try {
+      warnIfWeakToken(env);
+      auth = checkAuth(req.headers.authorization, resolveGatewayAuth(env));
+    } catch {
+      sendError(res, 503, 'auth_unavailable', 'Authentication is unavailable; access denied');
+      finish(503);
+      return;
+    }
     if (!auth.ok) {
       sendError(res, 401, auth.code, auth.message);
       finish(401);

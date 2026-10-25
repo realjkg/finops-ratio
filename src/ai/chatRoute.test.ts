@@ -5,6 +5,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import handler from '../../pages/api/v1/ai/chat';
+import { enableSimulationEnv } from '@/test/simulationEnv';
+
+enableSimulationEnv();
 
 const ENV_KEYS = [
   'AI_PROVIDER',
