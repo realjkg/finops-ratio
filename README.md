@@ -325,6 +325,10 @@ when a token or a live provider is configured, nor when `VERCEL_ENV` is
 `production`. Under `NODE_ENV=production` it also needs `RATIO_SIMULATION_IMAGE=1`,
 which only `infrastructure/simulation/Dockerfile` sets.
 
+Rule for production deployments: never set `RATIO_SIMULATION_IMAGE`,
+`RATIO_SIMULATION`, or a `development` or `test` `RATIO_ENV`. The image opt-in
+alone never enables simulation, and `VERCEL_ENV=production` always refuses.
+
 Durable design rules live in `.obvious/obvious.md` (Design Guidance) and the
 routine skills under `.obvious/skills/`. The full v1 design specification is
 preserved as an ephemeral Obvious artifact (point-in-time snapshot), not checked

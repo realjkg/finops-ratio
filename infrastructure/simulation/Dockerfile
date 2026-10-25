@@ -10,6 +10,7 @@ ENV RATIO_CSP_MODE=$RATIO_CSP_MODE
 RUN npm run build && mkdir -p /app/state && chown node:node /app/state
 
 FROM build AS simulation
+# Local simulation image only. Production deployments must never set RATIO_SIMULATION_IMAGE, RATIO_SIMULATION or a development/test RATIO_ENV.
 ENV NODE_ENV=production RATIO_ENV=development RATIO_SIMULATION=1 RATIO_SIMULATION_IMAGE=1 RATIO_SIMULATION_DB=/app/state/customer.sqlite
 USER node
 EXPOSE 3000
