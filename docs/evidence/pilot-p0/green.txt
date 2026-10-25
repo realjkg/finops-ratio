@@ -1,7 +1,7 @@
-GREEN evidence after review round 1 (base db4a1e2). Gates run sequentially in the foreground.
+GREEN evidence after review round 2 (includes round 1 results) (base db4a1e2). Gates run sequentially in the foreground.
 1 lint: exit 0
 2 typecheck: exit 0
-3 full vitest: Test Files 206 passed (206); Tests 3728 passed (3728)
+3 full vitest: see PR body (final counts)
 4 build: exit 0 (next-env.d.ts reverted, .next deleted)
 5 readiness:check: pilotEntryReady=false productionReady=false
 6 diff-budget: see PR body (ratio exceeds 1.5; exception requested, not granted)
@@ -13,3 +13,9 @@ Mutations (each reverted; targeted set re-run; every one killed):
  R6 card copy removed killed (1, after tightening the assertion; first pass survived)
  R7 PDF footnote removed killed (1) | R8 mission clamp killed (1) | R9 mission N/A -> 0 killed (1)
  R10 budgetStatus N/A flag dropped killed (2) | R11 PDF clamp killed (1) | R12 PDF savings note removed killed (1)
+Round 2 mutations (visible-span assertions; each reverted, set re-run, every one killed):
+ S1 initiative card visible N/A->0% 1 | S2 fleet visible N/A->0% 1 | S3 fuel visible N/A->0% 1
+ S4a fuel reason dropped 1 | S4b fleet reason dropped 1 | S5 fleet clamp restored 1
+ S6 daily N/A computed from monthly MTD/budget 3 | S7a Budget tab monthly projected N/A->0% 1 | S7b daily 1
+ S8 cost-source Forecast (EOM) N/A->0% 1 | S9 per-source exclusion reason hidden 1 | S10 simulated path label removed 1
+ S11 trajectory verdict N/A removed 1 | S12 Budget bar announces value again 1

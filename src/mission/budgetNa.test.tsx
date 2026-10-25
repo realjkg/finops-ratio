@@ -80,7 +80,7 @@ describe('visible N/A text', () => {
   ])('Budget tab marks only the %s projected percent N/A', (_n, costs) => {
     const html = renderToStaticMarkup(<BudgetProfileTab workload={bad(costs)} budget={budgetFor(w.id)!} now={NOW} />);
     expect(html.match(/\(N\/A of budget\)/g)).toHaveLength(1);
-    expect(html.match(/N\/A \([^<]*approved budget/g)).toHaveLength(1);
+    expect(html.match(/text-txt">N\/A \([^<]*approved budget/g)).toHaveLength(1);
   });
 });
 

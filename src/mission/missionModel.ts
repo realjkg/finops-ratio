@@ -105,7 +105,8 @@ function maxAlertSeverity(workloadId: string, alerts: Alert[] = ALERTS): { sever
 }
 
 // One-line, plain-language trajectory verdict keyed to the forecast status.
-function trajectoryVerdict(forecast: ForecastStatus, projectedPct: number): string {
+function trajectoryVerdict(forecast: ForecastStatus, projectedPct: number, na: string | null): string {
+  if (na) return `Forecast vs budget N/A (${na})`;
   const pct = Math.round(projectedPct * 100);
   switch (forecast) {
     case 'on_track':
@@ -145,7 +146,7 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
     status: worst(fuelStatus(fuelRatio), forecastToStatus(status.monthly.status), alertToStatus(severity)),
     forecast: status.monthly.status,
     projectedPctOfBudget: status.monthly.projectedPctOfBudget,
-    trajectoryVerdict: trajectoryVerdict(status.monthly.status, status.monthly.projectedPctOfBudget),
+    trajectoryVerdict: trajectoryVerdict(status.monthly.status, status.monthly.projectedPctOfBudget, status.monthly.pctUsedNa),
     daysUntilBreach: status.monthly.daysUntilBreach,
     alertCount: count,
   };

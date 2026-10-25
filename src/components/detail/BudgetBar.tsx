@@ -13,6 +13,7 @@ export function BudgetBar({
   hard,
   kill,
   label = 'Budget consumption',
+  na = null,
 }: {
   pctUsed: number;
   projectedPct: number;
@@ -21,6 +22,8 @@ export function BudgetBar({
   kill: number;
   /** Accessible label for the progressbar; defaults to 'Budget consumption'. */
   label?: string;
+  /** Reason the budget is invalid; the bar then announces N/A, not 0. */
+  na?: string | null;
 }) {
   const reducedMotion = useReducedMotion() ?? false;
   const fillPct = Math.min(pctUsed, 1) * 100;
@@ -32,10 +35,10 @@ export function BudgetBar({
   return (
     <div
       role="progressbar"
-      aria-valuenow={displayPct}
+      aria-valuenow={na ? undefined : displayPct}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuetext={`${displayPct}% of budget consumed`}
+      aria-valuetext={na ? `N/A (${na})` : `${displayPct}% of budget consumed`}
       aria-label={label}
       className="relative h-6 w-full overflow-hidden rounded bg-void"
     >

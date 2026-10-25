@@ -50,6 +50,7 @@ export function BudgetProfileTab({
           hard={budget.hard_threshold_pct}
           kill={budget.kill_threshold_pct}
           label="Daily budget consumption"
+          na={daily.pctUsedNa}
         />
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">
           <span className="text-txt">{daily.pctUsedNa ? `N/A (${daily.pctUsedNa})` : `${formatPct(daily.pctUsed)} of ${formatUSD(daily.dailyBudget)} daily`}</span>
@@ -72,6 +73,7 @@ export function BudgetProfileTab({
           hard={0.9}
           kill={1.0}
           label="Monthly budget consumption"
+          na={monthly.pctUsedNa}
         />
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">
           <span className="text-txt">{monthly.pctUsedNa ? `N/A (${monthly.pctUsedNa})` : `${formatPct(monthly.pctUsed)} of ${formatUSD(monthly.monthlyBudget)} monthly`}</span>
