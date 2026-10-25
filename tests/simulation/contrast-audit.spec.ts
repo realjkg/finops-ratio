@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readdirSync } from 'node:fs';
 import { contrastRatio } from '../../src/theme/contrast';
 
 // Rendered WCAG AA audit of every visible text node on the key pages, per built-in theme:
@@ -7,8 +7,21 @@ import { contrastRatio } from '../../src/theme/contrast';
 // Failures are open defects: MAX only ratchets DOWN as migration slices land; nothing is
 // exempted and the threshold is never lowered. AUDIT_OUT=<file> appends the table,
 // AUDIT_DUMP=<file> appends the failing nodes (JSON lines); delete both files before a run.
-export const MAX: Record<string, number> = { light: 0, 'high-contrast': 0, dark: 346 };
-const PAGES = ['/', '/overview', '/connectors', '/workloads'];
+export const MAX: Record<string, number> = { light: 0, 'high-contrast': 0, dark: 683 };
+// Every page route (pages/*.tsx and pages/*/*.tsx outside api/ and the _app/_document/_error shells).
+// pageRoutes() below fails the suite if a page is added or removed without updating this list.
+const PAGES = ['/', '/agent-workflows', '/attribution', '/connectors', '/costsource', '/demo', '/finio', '/finio/demo', '/frameworks', '/hello', '/mission', '/outcomes', '/overview', '/prediction', '/reports', '/simulation', '/tokenomics', '/workloads', '/workspace'];
+export function pageRoutes(dir = 'pages', prefix = ''): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    if (e.isDirectory()) return e.name === 'api' ? [] : pageRoutes(`${dir}/${e.name}`, `${prefix}/${e.name}`);
+    const m = /^(.+)\.tsx$/.exec(e.name);
+    if (!m || m[1].startsWith('_')) return [];
+    return [m[1] === 'index' ? prefix || '/' : `${prefix}/${m[1]}`];
+  }).sort();
+}
+test('PAGES lists every page route', () => {
+  expect([...PAGES].sort()).toEqual(pageRoutes());
+});
 
 type Raw = { text: string; el: string; fg: number[]; size: number; bold: boolean; layers: { c: number[]; a: number; o: number }[]; img: boolean };
 const collect = (page: Page) => page.evaluate((): Raw[] => {

@@ -1,0 +1,11 @@
+# RED: extended audit on main db4a1e2 (19 page routes), full Chromium 1194
+# cmd: AUDIT_OUT=out AUDIT_DUMP=dump RATIO_TEST_SKIP_BUILD=1 RATIO_TEST_NEXT_DIR=.next RATIO_CHROMIUM_PATH=<chrome> npx playwright test --config playwright.simulation.config.ts tests/simulation/contrast-audit.spec.ts
+# result: 3 failed, 5 passed (PAGES-lists-every-route and 4 opacity unit tests pass)
+light          /costsource    30 / 140  (background images: 0)
+light          TOTAL          30 (max 0)
+high-contrast  /costsource    24 / 140  (background images: 0)
+high-contrast  TOTAL          24 (max 0)
+dark           /costsource    43 / 140  (background images: 0)
+dark           TOTAL         683 (max 346)
+# only /costsource has failures in Light and High contrast; cause: opacity-60 on unconfigured source cards
+# sample failing nodes (light): DARK chip 2.74:1, FOCUS chip 2.66:1, source name 4.33:1 (need 4.5)
