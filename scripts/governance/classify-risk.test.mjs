@@ -2,6 +2,7 @@
 // Written before the implementation; every restricted class, the fail-closed
 // default, the self-protection rule and the low-risk allow-list are covered.
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
 import process from 'node:process';
 import { URL } from 'node:url';
 import { classify, globToRegExp, parseUnifiedDiff, binaryPathsInDiff, loadRules } from './classify-risk.mjs';
@@ -420,10 +421,166 @@ describe('rules file', () => {
     for (const c of [
       'migrations', 'auth_tenancy', 'secrets', 'network_egress', 'retention',
       'deployment', 'financial_semantics', 'dependencies', 'policy', 'routes',
+      'evidence_integrity', 'allocation', 'exports',
     ]) expect(declared.has(c), c).toBe(true);
     for (const r of rules.restricted) {
       expect(typeof r.id).toBe('string');
       expect(['path-glob', 'path-regex', 'added-line-regex']).toContain(r.kind);
     }
+  });
+});
+
+// Effect-based classification: files that change financial calculations,
+// evidence integrity, authorization, allocation or exports are protected by
+// what they do, not only by the directory name they happen to live in.
+describe('effect-based classes: path matching', () => {
+  const effects = [
+    ['evidence_integrity', 'src/evidence/money.ts'],
+    ['evidence_integrity', 'src/evidence/nutanix/probe.ts'],
+    ['evidence_integrity', 'src/evidence/evidence.test.ts'],
+    ['evidence_integrity', 'src/ingest/evidence/S3EvidenceStore.ts'],
+    ['evidence_integrity', 'src/ingest/evidenceRecord.ts'],
+    ['evidence_integrity', 'src/lib/valueEvidence.ts'],
+    ['evidence_integrity', 'src/srmd/ingest/loader.ts'],
+    ['evidence_integrity', 'src/srmd/evidenceStore.ts'],
+    ['evidence_integrity', 'src/srmd/deep/provenance.ts'],
+    ['auth_tenancy', 'src/srmd/authority.ts'],
+    ['auth_tenancy', 'src/srmd/policy/grants.ts'],
+    ['auth_tenancy', 'src/rbac/matrix.ts'],
+    ['auth_tenancy', 'src/rbac/authorize.test.ts'],
+    ['auth_tenancy', 'src/identity/scope.ts'],
+    ['auth_tenancy', 'src/identity/envMap.ts'],
+    ['auth_tenancy', 'src/server/costs/readerPool.ts'],
+    ['allocation', 'src/attribution/allocation.ts'],
+    ['allocation', 'src/attribution/accrual.ts'],
+    ['allocation', 'src/attribution/aggregations.ts'],
+    ['allocation', 'src/attribution/allocation.test.ts'],
+    ['financial_semantics', 'src/lib/derive.ts'],
+    ['financial_semantics', 'src/lib/valueMath.ts'],
+    ['financial_semantics', 'src/lib/billingPeriod.ts'],
+    ['financial_semantics', 'src/tokenomics/calculations.ts'],
+    ['exports', 'src/executive/reportXlsx.ts'],
+    ['exports', 'src/executive/reportPdf.tsx'],
+    ['exports', 'src/executive/reportModel.ts'],
+    ['exports', 'src/outcomes/report.ts'],
+    ['exports', 'src/prediction/report.ts'],
+    ['exports', 'src/evidence/report.ts'],
+    ['exports', 'src/finio/exchange.ts'],
+    ['exports', 'src/finio/wireColumns.ts'],
+    ['exports', 'src/finio/finioRows.ts'],
+    ['exports', 'src/components/ExportButton.tsx'],
+    ['exports', 'pages/api/report/snapshot.ts'],
+    ['exports', 'pages/api/v1/finio/export.ts'],
+  ];
+  for (const [cls, p] of effects) {
+    it(`${p} → restricted:${cls}`, () => {
+      const r = classify(paths(p));
+      expect(r.risk).toBe('restricted');
+      expect(classesOf(r)).toContain(cls);
+      expect(r.reasons.some((x) => x.path === p && x.class === cls && x.rule.length > 0)).toBe(true);
+    });
+  }
+  it('effect classes are named reasons, not the generic fail-closed default', () => {
+    const r = classify(paths('src/evidence/money.ts'));
+    expect(r.reasons.every((x) => x.rule !== 'fail-closed-default')).toBe(true);
+  });
+  it('unrelated neighbors are not swept in (no over-match)', () => {
+    for (const p of ['src/attribution/AttributionPage.tsx', 'src/executive/InitiativeCard.tsx', 'src/lib/format.ts']) {
+      const r = classify(paths(p));
+      for (const c of ['evidence_integrity', 'allocation', 'exports']) expect(classesOf(r), p).not.toContain(c);
+    }
+  });
+  it('a rename out of a protected path keeps the protected class', () => {
+    const r = classify({ files: [{ path: 'docs/notes.md', previousPath: 'src/evidence/money.ts' }] });
+    expect(r.risk).toBe('restricted');
+    expect(classesOf(r)).toContain('evidence_integrity');
+  });
+});
+
+describe('effect-based classes: mixed changes classify as the stricter class', () => {
+  it('low docs + protected evidence file → restricted, only the protected file is a reason', () => {
+    const r = classify(paths('README.md', 'docs/guide.md', 'src/evidence/money.ts'));
+    expect(r.risk).toBe('restricted');
+    expect(classesOf(r)).toEqual(['evidence_integrity']);
+    expect(r.reasons.every((x) => x.path === 'src/evidence/money.ts')).toBe(true);
+  });
+  it('unprotected UI + protected allocation → restricted:allocation', () => {
+    const r = classify(paths('src/components/Button.tsx', 'src/attribution/allocation.ts'));
+    expect(r.risk).toBe('restricted');
+    expect(classesOf(r)).toEqual(['allocation']);
+  });
+  it('a protected test file alongside a low test file stays restricted', () => {
+    const r = classify(paths('src/lib/format.test.ts', 'src/rbac/authorize.test.ts'));
+    expect(r.risk).toBe('restricted');
+    expect(classesOf(r)).toContain('auth_tenancy');
+  });
+  it('several effects at once report every class, sorted and unique', () => {
+    const r = classify(paths('src/evidence/money.ts', 'src/rbac/matrix.ts', 'src/executive/reportXlsx.ts', 'src/attribution/accrual.ts', 'README.md'));
+    expect(r.classes).toEqual(['allocation', 'auth_tenancy', 'evidence_integrity', 'exports']);
+  });
+  it('protected + unknown production file → both effect and fail-closed reasons', () => {
+    const r = classify(paths('src/lib/persona.ts', 'src/evidence/money.ts'));
+    expect(classesOf(r)).toEqual(['evidence_integrity', 'unclassified']);
+  });
+});
+
+describe('effect-based classes: nothing is loosened', () => {
+  it('the fail-closed default and existing classes still apply', () => {
+    expect(classesOf(classify(paths('src/lib/persona.ts')))).toEqual(['unclassified']);
+    expect(classesOf(classify(paths('src/costsource/normalize.ts')))).toContain('financial_semantics');
+    expect(classesOf(classify(paths('scripts/governance/risk-rules.json')))).toContain('deployment');
+  });
+  it('low paths stay low', () => {
+    expect(classify(paths('README.md')).risk).toBe('low');
+    expect(classify(paths('src/components/Button.tsx')).risk).toBe('low');
+    expect(classify(paths('src/lib/format.test.ts')).risk).toBe('low');
+  });
+  it('every effect rule is restricted-class and none is a low rule', () => {
+    const rules = loadRules();
+    for (const c of ['evidence_integrity', 'allocation', 'exports']) {
+      expect(rules.restricted.some((r) => r.class === c), c).toBe(true);
+    }
+    expect(rules.low.map((l) => [l.id, l.patterns, l.except ?? null])).toEqual([
+      ['low.docs', ['docs/**/*.{md,png,svg}'], null],
+      ['low.markdown', ['*.md'], ['.*/**', '**/.*/**']],
+      ['low.ui-components', ['src/components/**/*.{ts,tsx,js,jsx,css}'], null],
+      ['low.tests', ['*.test.ts', '*.test.tsx', '*.test.js', '*.test.jsx', '*.test.mjs', '*.test.cjs'], ['pages/**', 'src/pages/**']],
+    ]);
+  });
+});
+
+describe('effect-based classes: mutation checks', () => {
+  // Removing any effect rule must change at least one probe, proving each rule
+  // is exercised by a test (a rule no test notices is a rule nobody protects).
+  const raw = JSON.parse(fs.readFileSync(new URL('./risk-rules.json', import.meta.url), 'utf8'));
+  const effectRules = raw.restricted.filter((r) => r.id.startsWith('effect.'));
+  const probes = [
+    'src/evidence/money.ts', 'src/ingest/evidence/S3EvidenceStore.ts', 'src/lib/valueEvidence.ts',
+    'src/srmd/ingest/loader.ts', 'src/srmd/authority.ts', 'src/rbac/matrix.ts', 'src/identity/scope.ts',
+    'src/server/costs/readerPool.ts', 'src/attribution/allocation.ts', 'src/lib/derive.ts',
+    'src/tokenomics/calculations.ts', 'src/executive/reportXlsx.ts', 'src/finio/exchange.ts',
+    'src/components/ExportButton.tsx', 'pages/api/report/snapshot.ts',
+  ];
+  it('declares effect rules with the effect. id prefix', () => {
+    expect(effectRules.length).toBeGreaterThanOrEqual(6);
+  });
+  for (const rule of effectRules) {
+    it(`dropping ${rule.id} changes at least one probe`, () => {
+      const mutated = loadRules({ ...raw, restricted: raw.restricted.filter((r) => r.id !== rule.id) });
+      const changed = probes.filter(
+        (p) => JSON.stringify(classify(paths(p), mutated).reasons) !== JSON.stringify(classify(paths(p)).reasons),
+      );
+      expect(changed.length, rule.id).toBeGreaterThan(0);
+    });
+  }
+  it('narrowing a pattern to nothing is caught (src/evidence/** → src/evidenceX/**)', () => {
+    const mutated = loadRules({
+      ...raw,
+      restricted: raw.restricted.map((r) =>
+        r.id === 'effect.evidence-integrity.paths' ? { ...r, patterns: r.patterns.map((x) => x.replace('src/evidence/', 'src/evidenceX/')) } : r,
+      ),
+    });
+    expect(classesOf(classify(paths('src/evidence/money.ts'), mutated))).not.toContain('evidence_integrity');
+    expect(classesOf(classify(paths('src/evidence/money.ts')))).toContain('evidence_integrity');
   });
 });
