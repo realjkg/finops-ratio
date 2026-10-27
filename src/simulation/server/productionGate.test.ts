@@ -5,16 +5,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { readdirSync } from 'node:fs';
 import { simulationEnabled } from './enabled';
+import chat from '../../../pages/api/v1/simulation/chat';
+import command from '../../../pages/api/v1/simulation/command';
+import frank from '../../../pages/api/v1/simulation/frank';
+import operations from '../../../pages/api/v1/simulation/operations';
+import report from '../../../pages/api/v1/simulation/report';
+import session from '../../../pages/api/v1/simulation/session';
+import state from '../../../pages/api/v1/simulation/state';
+import status from '../../../pages/api/v1/simulation/status';
+
+const HANDLERS: Record<string, (req: NextApiRequest, res: NextApiResponse) => unknown> = { chat, command, frank, operations, report, session, state, status };
 
 afterEach(() => vi.unstubAllEnvs());
 const flags = () => { vi.stubEnv('RATIO_SIMULATION', '1'); vi.stubEnv('RATIO_ENV', 'development'); };
 const routes = readdirSync('pages/api/v1/simulation').filter((f) => f.endsWith('.ts')).map((f) => f.replace(/\.ts$/, ''));
 
 async function call(route: string, method: string): Promise<{ status: number; body: unknown }> {
-  const mod = await import(`../../../pages/api/v1/simulation/${route}.ts`);
   const out = { status: 200, body: undefined as unknown };
   const res = { setHeader() {}, status(c: number) { out.status = c; return res; }, json(b: unknown) { out.body = b; return res; } };
-  await mod.default({ method, headers: {}, body: {}, query: {} } as unknown as NextApiRequest, res as unknown as NextApiResponse);
+  await HANDLERS[route]({ method, headers: {}, body: {}, query: {} } as unknown as NextApiRequest, res as unknown as NextApiResponse);
   return out;
 }
 
