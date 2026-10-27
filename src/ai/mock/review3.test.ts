@@ -45,6 +45,15 @@ const above = (f: Field): number => (f.exMax ? f.max : f.max * 1.0000001);
 const insideLow = (f: Field): number => (f.exMin ? f.min + 1e-6 : f.min);
 const insideHigh = (f: Field): number => (f.exMax ? f.max - 1 : f.max);
 
+describe('a below-floor monthly budget is the N/A path, not a rejection', () => {
+  it.each([-1, 1e-300, 0.001, 0.0099, Number.POSITIVE_INFINITY])('monthlyBudget=%s keeps the workload and its dollars', async (bad) => {
+    const fd = FIELDS.find((f) => f.lowIsNA)!;
+    const t = await ask('What is the ROI of the portfolio?', setField(fd, bad));
+    expect(t).not.toMatch(/out of range and ignored/);
+    expect(t).toMatch(/Cost \$41,212\/mo/);
+  });
+});
+
 describe('ONE ingestion policy: every numeric field is range-checked', () => {
   it.each(FIELDS)('$src.$f: out-of-range workloads are rejected and listed, never printed', async (fd) => {
     // A monthly budget below the floor (negative, zero-ish, sub-cent, non-finite) is "budget N/A", not a rejected workload (release fix D1); only a too-large budget is rejected.
