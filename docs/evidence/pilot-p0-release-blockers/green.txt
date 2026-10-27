@@ -1,0 +1,6 @@
+GREEN evidence (base origin/main 874ef4f). Gates run sequentially in the foreground.
+Mutations (each reverted; targeted set re-run; every one killed):
+ W1 VERCEL_ENV check dropped from simulationEnabled 9 | W2 invalid monthly budget rejects the workload (D1) 6
+ W3 omitted savings not listed 5 | W4 omitted savings not sent 7 | W5 fuel text alternative prints currency budget 10
+ W6 fuel gauge prints the denominator 7 | W7 multi-model guardrail prints invalid budget 5
+ W8 savingsOpportunity validation removed 1 (after adding -1 and 'x' cases; it survived the first pass)

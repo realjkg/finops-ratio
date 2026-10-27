@@ -58,10 +58,11 @@ export function parseOmitted(raw: unknown): AIOmittedInitiative[] | null {
   const out: AIOmittedInitiative[] = [];
   for (const e of raw) {
     if (typeof e !== 'object' || e === null) return null;
-    const { id, name, status, reason } = e as Record<string, unknown>;
+    const { id, name, status, reason, savingsOpportunity } = e as Record<string, unknown>;
+    if (savingsOpportunity !== undefined && (typeof savingsOpportunity !== 'number' || !Number.isFinite(savingsOpportunity) || savingsOpportunity < 0 || savingsOpportunity > 1e9)) return null;
     if (typeof id !== 'string' || typeof name !== 'string' || typeof reason !== 'string') return null;
     if (!OMITTED_STATUSES.includes(status as AIOmittedInitiative['status'])) return null;
-    out.push({ id: clean(id, 64), name: clean(name, 120), status: status as AIOmittedInitiative['status'], reason: clean(reason, 200) });
+    out.push({ id: clean(id, 64), name: clean(name, 120), status: status as AIOmittedInitiative['status'], reason: clean(reason, 200), ...(savingsOpportunity === undefined ? {} : { savingsOpportunity: savingsOpportunity as number }) });
   }
   return out;
 }

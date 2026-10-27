@@ -17,11 +17,16 @@ function own(env: SimulationEnv, key: string): string | undefined {
   return Object.prototype.hasOwnProperty.call(env, key) ? (env as Record<string, string | undefined>)[key] : undefined;
 }
 
+/** True on a Vercel production deployment (exact string, own property only). Shared by every simulation gate. */
+export function isVercelProduction(env: SimulationEnv = process.env): boolean {
+  return own(env, 'VERCEL_ENV') === 'production';
+}
+
 export function gatewaySimulationMode(env: SimulationEnv = process.env): boolean {
   // Never in a production deployment: Vercel production refuses outright, and
   // NODE_ENV=production (which `next start` sets) needs the additional opt-in
   // RATIO_SIMULATION_IMAGE=1, set only by infrastructure/simulation/Dockerfile.
-  if (own(env, 'VERCEL_ENV') === 'production') return false;
+  if (isVercelProduction(env)) return false;
   if (own(env, 'NODE_ENV') === 'production' && own(env, 'RATIO_SIMULATION_IMAGE') !== '1') return false;
   const ratioEnv = own(env, 'RATIO_ENV');
   return own(env, 'RATIO_SIMULATION') === '1' && typeof ratioEnv === 'string' && ALLOWED_RATIO_ENVS.includes(ratioEnv);

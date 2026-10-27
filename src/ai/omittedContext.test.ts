@@ -24,7 +24,7 @@ const pendingLines = (prompt: string) => prompt.split('\n').filter((l) => /Statu
 describe('omitted carries the real status', () => {
   it('both budgets invalid + critical alert: Pending Approval, listed in the prompt, counts agree', () => {
     const ctx = buildAIContext([both, ...others]);
-    expect(ctx.omitted).toEqual([{ id: 'wl-fraud', name: fraud.name, status: 'Pending Approval', reason: expect.stringMatching(/approved budget/i) }]);
+    expect(ctx.omitted).toEqual([{ id: 'wl-fraud', name: fraud.name, status: 'Pending Approval', reason: expect.stringMatching(/approved budget/i), savingsOpportunity: 840 }]);
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toMatch(new RegExp(`${fraud.name}\\n  Status: Pending Approval \\| Budget N/A`));
     expect(pendingLines(prompt)).toBe(ctx.summary.pendingApproval);
@@ -67,7 +67,7 @@ describe('server validation and sanitizing of omitted', () => {
   const body = (omitted: unknown) => ({ messages: [{ role: 'user', content: 'hi' }], context: { ...base, omitted } });
   const entry = (n = 'A') => ({ id: 'a', name: n, status: 'Pending Approval', reason: 'r' });
 
-  it.each([['str'], [{ length: 2 }], [[null]], [[{ id: 1 }]], [[{ ...entry(), status: 'Hacked' }]], [[{ ...entry(), name: 1 }]], [[{ ...entry(), reason: 1 }]], [Array.from({ length: 51 }, () => entry())], [Array.from({ length: 5000 }, () => entry())]])(
+  it.each([['str'], [{ length: 2 }], [[null]], [[{ id: 1 }]], [[{ ...entry(), status: 'Hacked' }]], [[{ ...entry(), name: 1 }]], [[{ ...entry(), reason: 1 }]], [[{ ...entry(), savingsOpportunity: -1 }]], [[{ ...entry(), savingsOpportunity: 'x' }]], [Array.from({ length: 51 }, () => entry())], [Array.from({ length: 5000 }, () => entry())]])(
     'rejects malformed omitted %#',
     (omitted) => {
       expect(validateChatBody(body(omitted)).ok).toBe(false);

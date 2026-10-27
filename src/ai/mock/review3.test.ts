@@ -13,14 +13,14 @@ afterAll(restoreClock);
 const ask = async (q: string, ctx: AIContext = CTX): Promise<string> => (await chat([{ role: 'user', content: q }], ctx)).text;
 const NOPE = "I don't have a team called Finance";
 
-interface Field { src: 'snap' | 'init' | 'summary'; f: string; min: number; max: number; exMin?: boolean; exMax?: boolean; int?: boolean; floor?: number }
+interface Field { src: 'snap' | 'init' | 'summary'; f: string; min: number; max: number; exMin?: boolean; exMax?: boolean; int?: boolean; floor?: number; lowIsNA?: boolean }
 const USD = 1e12;
 const CNT = 1e13;
 const FIELDS: Field[] = [
   { src: 'snap', f: 'monthlySpend', min: 0, max: USD, floor: 0.01 },
   { src: 'snap', f: 'monthlyValue', min: -USD, max: USD, floor: 0.01 },
   { src: 'snap', f: 'valueRatio', min: -1e6, max: 1e6 },
-  { src: 'snap', f: 'monthlyBudget', min: 0, max: USD, floor: 0.01 },
+  { src: 'snap', f: 'monthlyBudget', min: 0, max: USD, floor: 0.01, lowIsNA: true },
   { src: 'snap', f: 'dailyInferences', min: 0, max: CNT, int: true },
   { src: 'snap', f: 'tokensInToday', min: 0, max: CNT, int: true },
   { src: 'snap', f: 'tokensOutToday', min: 0, max: CNT, int: true },
@@ -47,7 +47,9 @@ const insideHigh = (f: Field): number => (f.exMax ? f.max - 1 : f.max);
 
 describe('ONE ingestion policy: every numeric field is range-checked', () => {
   it.each(FIELDS)('$src.$f: out-of-range workloads are rejected and listed, never printed', async (fd) => {
-    for (const bad of [below(fd), above(fd), Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, ...(fd.int ? [1.5] : []), ...(fd.floor ? [1e-300, fd.floor / 10] : [])]) {
+    // A monthly budget below the floor (negative, zero-ish, sub-cent, non-finite) is "budget N/A", not a rejected workload (release fix D1); only a too-large budget is rejected.
+    const candidates = fd.lowIsNA ? [above(fd)] : [below(fd), above(fd), Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, ...(fd.int ? [1.5] : []), ...(fd.floor ? [1e-300, fd.floor / 10] : [])];
+    for (const bad of candidates) {
       const ctx = setField(fd, bad);
       const t = await ask('What is the ROI of the portfolio?', ctx);
       expect(t, `${fd.f}=${bad}`).toMatch(new RegExp(`Customer Support Agent \\(${fd.f}\\)[^\\n]*out of range and ignored`));

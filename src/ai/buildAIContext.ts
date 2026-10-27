@@ -88,7 +88,7 @@ export function buildAIContext(
 
   const omitted = initiatives
     .filter((i) => i.budgetConsumedPct === null || i.status === 'budget_na')
-    .map((i) => ({ id: i.id, name: i.name, status: INITIATIVE_STATUS_META[i.status].label as AIOmittedInitiative['status'], reason: i.budgetConsumedNa ?? i.statusNa ?? 'Budget N/A' }));
+    .map((i) => ({ id: i.id, name: i.name, status: INITIATIVE_STATUS_META[i.status].label as AIOmittedInitiative['status'], reason: i.budgetConsumedNa ?? i.statusNa ?? 'Budget N/A', savingsOpportunity: Math.round(savings.get(i.id) ?? 0) }));
 
   return {
     initiatives: initiativeSnapshots,

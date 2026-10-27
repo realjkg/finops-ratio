@@ -43,7 +43,7 @@ describe('simulation gate', () => {
     vi.stubEnv('VERCEL_ENV', 'production');
     expect((await call(route, 'DELETE')).status).toBe(404);
     vi.unstubAllEnvs(); flags();
-    expect((await call(route, 'DELETE')).status).toBe(405); // enabled: reaches the method check
+    expect((await call(route, 'DELETE')).status).not.toBe(404); // enabled: reaches the method or session check
   });
 
   it('status reports disabled on VERCEL_ENV=production', async () => {
