@@ -26,7 +26,7 @@ describe('omitted carries the real status', () => {
     const ctx = buildAIContext([both, ...others]);
     expect(ctx.omitted).toEqual([{ id: 'wl-fraud', name: fraud.name, status: 'Pending Approval', reason: expect.stringMatching(/approved budget/i) }]);
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toMatch(new RegExp(`${fraud.name}[^\\n]*Status: Pending Approval[^\\n]*Budget N/A`));
+    expect(prompt).toMatch(new RegExp(`${fraud.name}\\n  Status: Pending Approval \\| Budget N/A`));
     expect(pendingLines(prompt)).toBe(ctx.summary.pendingApproval);
   });
 
@@ -40,7 +40,7 @@ describe('omitted carries the real status', () => {
   it('invalid budgets and no alert: reported as Budget N/A, not pending', () => {
     const ctx = buildAIContext([both, ...others], null, DEMO_NOW, { alerts: [] });
     expect(ctx.omitted?.[0]).toMatchObject({ id: 'wl-fraud', status: 'Budget N/A' });
-    expect(buildSystemPrompt(ctx)).toMatch(new RegExp(`${fraud.name}[^\\n]*Status: Budget N/A`));
+    expect(buildSystemPrompt(ctx)).toMatch(new RegExp(`${fraud.name}\\n  Status: Budget N/A \\| Budget N/A`));
     expect(pendingLines(buildSystemPrompt(ctx))).toBe(ctx.summary.pendingApproval);
   });
 });

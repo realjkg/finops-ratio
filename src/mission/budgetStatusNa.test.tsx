@@ -110,7 +110,7 @@ describe('valid-period and alert signals survive an invalid budget', () => {
     expect(buildInitiativeBoard([bothZero, ...others]).summary.pendingApproval).toBe(buildInitiativeBoard(WORKLOADS).summary.pendingApproval);
     const ctx = buildAIContext([bothZero, ...others]);
     expect(ctx.initiatives.map((i) => i.id)).not.toContain('wl-fraud');
-    expect(ctx.omitted).toEqual([{ id: 'wl-fraud', name: fraud.name, reason: expect.stringMatching(/approved budget/i) }]);
+    expect(ctx.omitted).toEqual([{ id: 'wl-fraud', name: fraud.name, status: 'Pending Approval', reason: expect.stringMatching(/approved budget/i) }]);
   });
 
   it('with nothing adverse left, an invalid budget is N/A, never on-track', () => {
