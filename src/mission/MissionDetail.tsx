@@ -49,6 +49,7 @@ const STATUS_META: Record<MissionStatus, { label: string; color: string }> = {
   nominal: { label: 'ON TRACK', color: TOKEN_COLOR.value },
   caution: { label: 'AT RISK', color: TOKEN_COLOR.shape },
   critical: { label: 'CRITICAL', color: TOKEN_COLOR.cost },
+  na: { label: 'BUDGET N/A', color: 'var(--sub)' },
 };
 
 interface MissionDetailProps {

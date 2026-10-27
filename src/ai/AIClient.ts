@@ -43,6 +43,8 @@ export interface AIContext {
   focusInitiativeId?: string | null;
   /** ISO 8601 instant when the snapshot was taken (client's DEMO_NOW). */
   asOf: string;
+  /** Initiatives left out of `initiatives` because their budget metric is N/A, with the reason. */
+  omitted?: { id: string; name: string; reason: string }[];
 }
 
 /** Lean initiative projection — executive vocabulary, sufficient for most questions. */
@@ -51,7 +53,7 @@ export interface AIInitiativeSnapshot {
   name: string;
   monthlyCost: number; // USD
   annualRunRate: number; // monthlyCost × 12
-  budgetConsumedPct: number; // 0–100
+  budgetConsumedPct: number; // whole percent of the approved budget; can exceed 100 (not clamped)
   status: 'On Track' | 'At Risk' | 'Pending Approval';
   valueRatio: number; // R4: cost-efficiency denominator
   /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */

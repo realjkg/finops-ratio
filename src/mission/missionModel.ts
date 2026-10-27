@@ -16,6 +16,7 @@ import { budgetFor } from '@/data/budgets';
 import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
 import { derivePortfolioRatio } from '@/lib/derive';
+import { budgetConsumed } from '@/lib/metricContracts';
 import type { ForecastStatus } from '@/lib/forecast';
 import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import { budgetColor, PROVIDER_LABEL, ratioColor } from '@/lib/scales';
@@ -23,7 +24,8 @@ import type { Alert, BudgetProfile, AlertSeverity, EvidenceStatus, Workload } fr
 
 export interface ProjectionContext { budgets?: BudgetProfile[]; alerts?: Alert[]; now?: Date }
 
-export type MissionStatus = 'nominal' | 'caution' | 'critical';
+/** 'na' = the daily or monthly budget is invalid, so no health claim is made. */
+export type MissionStatus = 'nominal' | 'caution' | 'critical' | 'na';
 
 export interface MissionView {
   id: string;
@@ -31,10 +33,12 @@ export interface MissionView {
   model: string;
   providerLabel: string;
   team: string;
-  // Fuel gauge = daily budget consumed ratio (0..1+). `fuelPct` is the clamped
-  // 0..100 display value; `fuelRatio` keeps the true (possibly >1) overrun.
+  // Fuel gauge = daily budget consumed (actual today / approved daily budget).
+  // `fuelPct` is the whole percent, not clamped; null = N/A with `fuelNa` as the
+  // reason. `fuelRatio` is the raw ratio (0 when N/A, so do not display it).
   fuelRatio: number;
-  fuelPct: number;
+  fuelPct: number | null;
+  fuelNa: string | null;
   fuelColor: string;
   spentToday: number;
   dailyBudget: number;
@@ -46,7 +50,9 @@ export interface MissionView {
   valueEvidenceStatus?: EvidenceStatus;
   // Trajectory (monthly forecast).
   status: MissionStatus;
-  forecast: ForecastStatus;
+  forecast: ForecastStatus | 'na';
+  /** Reason `status` is 'na' (invalid daily or monthly budget), else null. */
+  statusNa: string | null;
   projectedPctOfBudget: number;
   trajectoryVerdict: string;
   daysUntilBreach: number | null;
@@ -55,14 +61,17 @@ export interface MissionView {
 
 export interface FleetSummary {
   fleetFuelRatio: number;
-  fleetFuelPct: number;
+  fleetFuelPct: number | null;
+  fleetFuelNa: string | null;
   fleetFuelColor: string;
   valueReturned: number;
   missionCount: number;
   needsAttention: number;
+  /** Missions with an invalid budget: not counted as attention, shown separately. */
+  budgetNa: number;
 }
 
-const STATUS_RANK: Record<MissionStatus, number> = { nominal: 0, caution: 1, critical: 2 };
+const STATUS_RANK: Record<MissionStatus, number> = { nominal: 0, caution: 1, critical: 2, na: 0 };
 
 // Daily fuel threshold -> status, per the 70/90/100 budget thresholds (§4).
 function fuelStatus(fuelRatio: number): MissionStatus {
@@ -73,7 +82,7 @@ function fuelStatus(fuelRatio: number): MissionStatus {
 
 // Monthly forecast status -> mission status (a breach projection is critical even
 // when the partial day's fuel still reads low).
-function forecastToStatus(forecast: ForecastStatus): MissionStatus {
+function forecastToStatus(forecast: ForecastStatus | 'na'): MissionStatus {
   if (forecast === 'breach_projected') return 'critical';
   if (forecast === 'at_risk') return 'caution';
   return 'nominal';
@@ -101,7 +110,8 @@ function maxAlertSeverity(workloadId: string, alerts: Alert[] = ALERTS): { sever
 }
 
 // One-line, plain-language trajectory verdict keyed to the forecast status.
-function trajectoryVerdict(forecast: ForecastStatus, projectedPct: number): string {
+function trajectoryVerdict(forecast: ForecastStatus | 'na', projectedPct: number, na: string | null): string {
+  if (na || forecast === 'na') return `Forecast vs budget N/A (${na ?? 'no valid budget'})`;
   const pct = Math.round(projectedPct * 100);
   switch (forecast) {
     case 'on_track':
@@ -120,6 +130,15 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
   const status = computeBudgetStatus(workload, budget, context.now ?? DEMO_NOW);
   const fuelRatio = status.daily.pctUsed;
   const { severity, count } = maxAlertSeverity(workload.id, context.alerts);
+  const fuel = budgetConsumed(status.daily.spentToday, status.daily.dailyBudget);
+  const statusNa = status.daily.pctUsedNa ?? status.monthly.pctUsedNa;
+  // Only claims derived from an invalid period are dropped: alerts and the valid
+  // period still set the status. N/A shows only when nothing adverse remains.
+  const adverse = worst(
+    alertToStatus(severity),
+    ...(status.daily.pctUsedNa ? [] : [fuelStatus(fuelRatio)]),
+    ...(status.monthly.pctUsedNa ? [] : [forecastToStatus(status.monthly.status)]),
+  );
 
   return {
     id: workload.id,
@@ -128,7 +147,8 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
     providerLabel: PROVIDER_LABEL[workload.model_provider],
     team: workload.team,
     fuelRatio,
-    fuelPct: Math.min(Math.round(fuelRatio * 100), 100),
+    fuelPct: fuel.pct === null ? null : Math.round(fuel.pct),
+    fuelNa: fuel.naReason,
     fuelColor: budgetColor(fuelRatio),
     spentToday: status.daily.spentToday,
     dailyBudget: status.daily.dailyBudget,
@@ -136,10 +156,11 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
     valueRatio: workload.value.value_ratio,
     valueColor: ratioColor(workload.value.value_ratio),
     valueEvidenceStatus: headlineEvidenceStatus(workload.value),
-    status: worst(fuelStatus(fuelRatio), forecastToStatus(status.monthly.status), alertToStatus(severity)),
+    status: statusNa && adverse === 'nominal' ? 'na' : adverse,
+    statusNa,
     forecast: status.monthly.status,
     projectedPctOfBudget: status.monthly.projectedPctOfBudget,
-    trajectoryVerdict: trajectoryVerdict(status.monthly.status, status.monthly.projectedPctOfBudget),
+    trajectoryVerdict: trajectoryVerdict(status.monthly.status, status.monthly.projectedPctOfBudget, status.monthly.pctUsedNa),
     daysUntilBreach: status.monthly.daysUntilBreach,
     alertCount: count,
   };
@@ -156,19 +177,24 @@ export function buildMissionBoard(
   const totalSpentToday = missions.reduce((sum, m) => sum + m.spentToday, 0);
   const totalDailyBudget = missions.reduce((sum, m) => sum + m.dailyBudget, 0);
   const fleetFuelRatio = totalDailyBudget > 0 ? totalSpentToday / totalDailyBudget : 0;
+  // One invalid mission budget makes the aggregate meaningless: N/A, not a partial sum.
+  const fleetFuelNa = missions.find((m) => m.fuelNa)?.fuelNa ?? budgetConsumed(totalSpentToday, totalDailyBudget).naReason;
 
   const portfolio = derivePortfolioRatio(workloads);
-  const needsAttention = missions.filter((m) => m.status !== 'nominal').length;
+  const needsAttention = missions.filter((m) => m.status === 'caution' || m.status === 'critical').length;
+  const budgetNa = missions.filter((m) => m.status === 'na').length;
 
   return {
     missions,
     fleet: {
       fleetFuelRatio,
-      fleetFuelPct: Math.min(Math.round(fleetFuelRatio * 100), 100),
+      fleetFuelPct: fleetFuelNa ? null : Math.round(fleetFuelRatio * 100),
+      fleetFuelNa,
       fleetFuelColor: budgetColor(fleetFuelRatio),
       valueReturned: portfolio.portfolio_ratio,
       missionCount: missions.length,
       needsAttention,
+      budgetNa,
     },
   };
 }

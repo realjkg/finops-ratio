@@ -470,7 +470,7 @@ function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
 
 // The numerator/denominator proof: the first ingested row, resolved to a Ratio
 // workload, shown with value ratio (denominator), forecast, and governance gates.
-function CompositionCard({ rows }: { rows: CanonicalFocusRow[] }) {
+export function CompositionCard({ rows }: { rows: CanonicalFocusRow[] }) {
   const featured = rows[0];
   const view = featured ? composeRatioView(featured) : null;
   if (!featured || !view) {
@@ -502,7 +502,7 @@ function CompositionCard({ rows }: { rows: CanonicalFocusRow[] }) {
             <span className="font-mono text-base font-bold text-txt">
               {formatUSD(monthly.projectedEom)}
               <span className="ml-1 text-xs text-sub">
-                ({formatPct(monthly.projectedPctOfBudget)} of budget)
+                ({monthly.pctUsedNa ? `N/A of budget: ${monthly.pctUsedNa}` : `${formatPct(monthly.projectedPctOfBudget)} of budget`})
               </span>
             </span>
           ) : (

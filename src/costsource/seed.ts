@@ -84,7 +84,8 @@ export function sourcesForEnv(env: Record<string, string | undefined>): CostSour
       coverage: 'on_prem',
       capabilities: ['costRows', 'findings'],
       configured: true,
-      note: 'Synthetic CMDB/ITBM cost allocation — CI-keyed service lines through the FOCUS v1.4 shim; not a live ServiceNow integration.',
+      roleConfirmed: false,
+      note: 'Synthetic CMDB/ITBM allocation lines, illustrative only. ServiceNow is not assumed to supply billing data (role unconfirmed), so these rows and findings are excluded from headline totals. Not a live integration.',
     },
     // Synthetic AWS / Azure / GCP sandboxes (card A6): static offline descriptors.
     ...SYNTHETIC_CLOUD_DESCRIPTORS.map((d) => ({ ...d, capabilities: [...d.capabilities] })),
@@ -193,12 +194,12 @@ export function rawRowsForVersion(version: FocusVersion): RawSourceRow[] {
   return WORKLOADS.map((w) => rawRowFor(w, version));
 }
 
-// ServiceNow CMDB/ITBM allocation method (synthetic, deterministic): ITBM
-// spreads a documented overhead allocation over critical services — their CMDB
-// service class carries 24/7 platform support, so the cost of record is 8.5%
-// above the billing export. Non-critical services reconcile exactly. The delta
-// is a fixed constant (traceable, not random) and is what the verification
-// step's source comparison flags against the 5% tolerance.
+// ServiceNow CMDB/ITBM allocation method (synthetic, illustrative, deterministic;
+// the source role is unconfirmed and it is excluded from headline totals): a
+// fixed 8.5% allocation on critical services, nothing more. Non-critical
+// services repeat the workload amount. The delta is a fixed constant (traceable,
+// not random) and is what the verification step's source comparison flags
+// against the 5% tolerance.
 export const ITBM_CRITICAL_SERVICE_ALLOCATION = 1.085;
 
 function rawRowForServiceNow(w: Workload): RawSourceRow {
@@ -210,8 +211,7 @@ function rawRowForServiceNow(w: Workload): RawSourceRow {
   const ciKey = `CI00${w.id.replace(/[^a-z0-9]/gi, '').slice(0, 6).toUpperCase()}`;
   return {
     ...row,
-    // ITBM allocates the cost of record; the usage quantities are the same
-    // metering the billing export sees.
+    // Illustrative ITBM allocation; the usage quantities repeat the workload metering.
     BilledCost: allocated,
     EffectiveCost: allocated,
     ListCost: allocated,

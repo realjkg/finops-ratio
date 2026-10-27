@@ -29,3 +29,24 @@ describe('buildAIContext — cache hit rate injection', () => {
     expect(prompt).toContain('cache hit: 16.5%'); // wl-support
   });
 });
+
+describe('buildAIContext — N/A budget metric', () => {
+  it('omits an initiative with no valid approved budget instead of sending 0%', () => {
+    const [first, ...rest] = WORKLOADS;
+    const ctx = buildAIContext([{ ...first, costs: { ...first.costs, monthly_budget: 0 } }, ...rest]);
+    expect(ctx.initiatives.map((i) => i.id)).not.toContain(first.id);
+    expect(ctx.initiatives).toHaveLength(rest.length);
+  });
+
+  it('also omits one whose status is Budget N/A because only the daily budget is invalid', () => {
+    const [first, ...rest] = WORKLOADS;
+    const ctx = buildAIContext([{ ...first, costs: { ...first.costs, daily_budget: 0 } }, ...rest]);
+    expect(ctx.initiatives.map((i) => i.id)).not.toContain(first.id);
+  });
+
+  it('tells the model which initiatives were not reported and why', () => {
+    const [first, ...rest] = WORKLOADS;
+    const ctx = buildAIContext([{ ...first, costs: { ...first.costs, monthly_budget: 0 } }, ...rest]);
+    expect(buildSystemPrompt(ctx)).toMatch(new RegExp(`NOT REPORTED \\(budget N/A\\): ${first.name} \\(.*approved budget`));
+  });
+});

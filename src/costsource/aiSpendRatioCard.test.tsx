@@ -7,6 +7,8 @@ import type { AiSpendRatioReport } from './aiSpendRatio';
 import { createCostSourceClient } from './index';
 import { anonymousSourceView } from './sourceDisclosure';
 import { isOfflineSandboxSource } from './sandboxSources';
+import { CompositionCard } from './CostSourcePage';
+import { WORKLOADS } from '@/data/workloads';
 
 const now = new Date();
 const WINDOW = {
@@ -134,6 +136,21 @@ describe('AiSpendRatioView', () => {
     expect(html.match(/not summed into the headline/g)).toHaveLength(1);
   });
 
+  it('shows N/A with a reason when no headline-eligible source has rows', () => {
+    const r = report('mock');
+    r.overall = { ...r.overall, byCurrency: [] };
+    const html = render(<AiSpendRatioView path="seed" state={{ status: 'ready', report: r }} onSwitch={noop} />);
+    expect(html).toContain('N/A (no headline-eligible source returned rows)');
+  });
+
+  it('names the seed path as simulated and shows each excluded source its reason', () => {
+    const r = report('mock');
+    r.perSource[1] = { ...r.perSource[1], exclusionReason: 'Source role unconfirmed; excluded from headline totals' };
+    const html = render(<AiSpendRatioView path="seed" state={{ status: 'ready', report: r }} onSwitch={noop} />);
+    expect(html).toContain('simulated demo data');
+    expect(html).toContain('(Source role unconfirmed; excluded from headline totals)');
+  });
+
   it('labels the ingested path', () => {
     const html = render(<AiSpendRatioView path="ingested" state={{ status: 'ready', report: report('live') }} onSwitch={noop} />);
     expect(html).toContain('Ingested');
@@ -160,5 +177,21 @@ describe('AiSpendRatioView', () => {
     const html = render(<AiSpendRatioCard />);
     expect(html).toContain('Static seed');
     expect(html).toContain('Loading');
+  });
+});
+
+describe('Forecast (EOM) in the composition card', () => {
+  it('shows N/A, not 0%, for an invalid monthly budget', async () => {
+    const rows = (await createCostSourceClient('mock').fetchCostRows('pointfive-sandbox', WINDOW)).rows;
+    const html = (b: number) => {
+      const seed = WORKLOADS.find((x) => x.id === rows[0].ResourceId?.split('/').pop())!;
+      const saved = seed.costs.monthly_budget;
+      seed.costs.monthly_budget = b;
+      try { return render(<CompositionCard rows={rows} />); } finally { seed.costs.monthly_budget = saved; }
+    };
+    expect(html(0)).toMatch(/\(N\/A of budget: [^)]*approved budget/i);
+    expect(html(0)).not.toContain('breaches budget');
+    expect(html(0)).not.toMatch(/\(0% of budget\)/);
+    expect(html(15000)).toMatch(/\(\d+% of budget\)/);
   });
 });

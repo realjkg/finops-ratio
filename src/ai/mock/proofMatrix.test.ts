@@ -70,7 +70,7 @@ const CASES: Case[] = [
   { name: '06 rank teams by spend', turns: ['Rank the teams by spend'],
     has: costRank.map((t) => `${usd(team(t).spend)}/mo`), ordered: costRank },
   { name: '07 savings by team', turns: ['Which team has the most savings opportunity?'],
-    has: ['**Largest savings opportunity by team: Marketing**', usd(3136), 'projected'] },
+    has: ['**Largest savings opportunity by team: Marketing**', usd(1568), 'projected'] },
   // ---- team ----
   { name: '08 Legal team ROI', turns: ['What is the ROI of the Legal team?'],
     has: ['**ROI — Legal (team)**', usd(LEGAL.spend), usd(LEGAL.value), x1(LEGAL.ratio), roiPct(LEGAL.ratio), EVID],
@@ -88,9 +88,9 @@ const CASES: Case[] = [
     has: ['**Cost drivers — Legal**', `${usd(3120)}/mo`, x1(wl('wl-redline').value.total_value / 3120), EVID],
     ordered: ['Contract Redliner', 'Document Summarizer'] },
   { name: '14 team savings', turns: ['How much can we save in Marketing?'],
-    has: ['**Savings — Marketing**', usd(3136), 'projected', 'Realized savings: $0'] },
+    has: ['**Savings — Marketing**', usd(1568), 'projected', 'Realized savings: $0'] },
   { name: '15 team with no savings says so', turns: ['How much can we save for Legal?'],
-    has: ['**Savings — Legal**', 'no savings opportunities'], not: ['$3,136'] },
+    has: ['**Savings — Legal**', 'no savings opportunities'], not: ['$1,568'] },
   { name: '16 IT single-workload team', turns: ['What is the ROI of the IT team?'],
     has: ['**ROI — IT (team)**', usd(IT.spend), x1(IT.ratio), 'Internal Knowledge Bot'] },
   // ---- workload ----
@@ -141,7 +141,7 @@ const CASES: Case[] = [
   { name: '37 portfolio word resets focus', turns: ['ROI of the Legal team', 'and for the whole portfolio?'],
     has: ['**ROI — Portfolio**', usd(P.value)] },
   { name: '38 elliptical savings follows the team', turns: ['Marketing team ROI', 'what about savings?'],
-    has: ['**Savings — Marketing**', usd(3136)] },
+    has: ['**Savings — Marketing**', usd(1568)] },
   // ---- meta ----
   { name: '39 unsupported question', turns: ['What will our spend be next quarter?'],
     has: [UNSUPPORTED, 'Closest questions I can answer'], not: ["I'm Frank Coster"] },

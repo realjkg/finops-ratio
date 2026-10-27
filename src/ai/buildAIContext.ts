@@ -4,7 +4,7 @@
 // (one source of truth, persona-projected), plus per-initiative savings drawn
 // from the configured cost-source findings and an optional workload drill-down.
 
-import { COST_SOURCES, findingsFor } from '@/costsource/seed';
+import { savingsByWorkload } from '@/costsource/headline';
 import { alertsFor } from '@/data/alerts';
 import { DEMO_NOW } from '@/data/workloads';
 import { deriveCacheHitRate } from '@/lib/derive';
@@ -33,24 +33,6 @@ function gatesPassed(workload: Workload): number {
   return GATE_FIELDS.filter((field) => workload.governance[field]).length;
 }
 
-// Sum each configured findings source's monthly-savings estimates per workload.
-// Mirrors projectedSavingsFromFindings() in initiativeModel, but keeps the
-// per-initiative breakdown the agent needs to answer "how much can we save?".
-function savingsByWorkload(): Map<string, number> {
-  const totals = new Map<string, number>();
-  for (const source of COST_SOURCES) {
-    if (!source.configured || !source.capabilities.includes('findings')) continue;
-    for (const finding of findingsFor(source.id)) {
-      if (!finding.workloadId) continue;
-      totals.set(
-        finding.workloadId,
-        (totals.get(finding.workloadId) ?? 0) + finding.estimatedMonthlySavings,
-      );
-    }
-  }
-  return totals;
-}
-
 export function buildAIContext(
   workloads: Workload[],
   focusInitiativeId: string | null = null,
@@ -60,7 +42,8 @@ export function buildAIContext(
   const { initiatives, summary } = buildInitiativeBoard(workloads, { ...context, now: asOf });
   const savings = savingsByWorkload();
 
-  const initiativeSnapshots: AIInitiativeSnapshot[] = initiatives.map((i) => ({
+  // The wire field is numeric; an N/A budget metric is left out rather than sent as 0 (follow-up: nullable wire field).
+  const initiativeSnapshots: AIInitiativeSnapshot[] = initiatives.flatMap((i) => i.budgetConsumedPct === null || i.status === 'budget_na' ? [] : [{
     id: i.id,
     name: i.name,
     monthlyCost: i.monthlyCost,
@@ -70,7 +53,7 @@ export function buildAIContext(
     valueRatio: i.valueRatio,
     valueEvidenceStatus: i.valueEvidenceStatus,
     savingsOpportunity: Math.round(savings.get(i.id) ?? 0),
-  }));
+  }]);
 
   const workloadSnapshots: AIWorkloadSnapshot[] = workloads.map((w) => ({
     id: w.id,
@@ -102,8 +85,13 @@ export function buildAIContext(
     })),
   }));
 
+  const omitted = initiatives
+    .filter((i) => i.budgetConsumedPct === null || i.status === 'budget_na')
+    .map((i) => ({ id: i.id, name: i.name, reason: i.budgetConsumedNa ?? i.statusNa ?? 'Budget N/A' }));
+
   return {
     initiatives: initiativeSnapshots,
+    ...(omitted.length ? { omitted } : {}),
     summary: {
       totalMonthlySpend: summary.totalMonthlySpend,
       projectedSavings: summary.projectedSavings,

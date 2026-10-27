@@ -23,8 +23,8 @@ const AT_RISK = [
   '• **Sales Copilot** — At Risk, $6,800/mo at 7.4× return (value evidence: assumed)',
   '• **Code Review Bot** — At Risk, $2,400/mo at 20.8× return (value evidence: assumed)',
   '• **Document Summarizer** — At Risk, $1,150/mo at 5.3× return (value evidence: assumed)',
-  '• **Marketing Content Gen** — Pending Approval, $4,900/mo at 2.3× return (value evidence: assumed), $3,136/mo savings identified',
-  '• **Fraud Triage Agent** — Pending Approval, $4,200/mo at -0.2× return (value evidence: assumed), $1,680/mo savings identified',
+  '• **Marketing Content Gen** — Pending Approval, $4,900/mo at 2.3× return (value evidence: assumed), $1,568/mo savings identified',
+  '• **Fraud Triage Agent** — Pending Approval, $4,200/mo at -0.2× return (value evidence: assumed), $840/mo savings identified',
   'Total portfolio: $41,212/mo across 11 initiatives.',
 ].join('\n');
 
@@ -32,17 +32,17 @@ const COST_DRIVER =
   'The largest cost driver is **Customer Support Agent** at $13,632/mo (13.8× return (value evidence: assumed) — R4: cost paired with value). It is currently **At Risk** — consider a budget review. Cache hit rate: 16.5% of its input tokens are billed at the cached rate.';
 
 const SAVINGS = [
-  'Projected savings across the portfolio: **$4,816/mo**.',
+  'Projected savings across the portfolio: **$2,408/mo**.',
   'Top opportunities by initiative:',
-  '• Marketing Content Gen: $3,136/mo',
-  '• Fraud Triage Agent: $1,680/mo',
+  '• Marketing Content Gen: $1,568/mo',
+  '• Fraud Triage Agent: $840/mo',
 ].join('\n');
 
 const SUMMARY = [
   '**Portfolio summary — 2026-06-25**',
   'Total spend: $41,212/mo across 11 initiatives.',
   'Status: 5 on track, 2 pending approval.',
-  'Projected savings: $4,816/mo.',
+  'Projected savings: $2,408/mo.',
 ].join('\n');
 
 describe('legacy intents are byte-identical for their example questions', () => {

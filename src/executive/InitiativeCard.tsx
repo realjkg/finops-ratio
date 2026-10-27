@@ -54,21 +54,25 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
         <div className="flex items-center justify-between text-xs">
           <span className="font-medium text-exec-muted">{lang.fuelLabel} · month to date</span>
           <span className="font-mono font-semibold text-exec-text">
-            {initiative.budgetConsumedPct}%
+            {initiative.budgetConsumedPct === null ? 'N/A' : `${initiative.budgetConsumedPct}%`}
           </span>
         </div>
+        {initiative.budgetConsumedPct === null && (
+          <p className="text-[11px] text-exec-muted">N/A: {initiative.budgetConsumedNa}</p>
+        )}
         <div
           className="h-2 w-full overflow-hidden rounded-full bg-exec-border"
           role="progressbar"
-          aria-valuenow={initiative.budgetConsumedPct}
+          aria-valuenow={initiative.budgetConsumedPct === null ? undefined : Math.min(initiative.budgetConsumedPct, 100)}
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-label={`${lang.fuelLabel}, month to date: ${initiative.budgetConsumedPct}%`}
+          aria-valuetext={initiative.budgetConsumedPct === null ? 'N/A' : `${initiative.budgetConsumedPct}%`}
+          aria-label={`${lang.fuelLabel}, month to date`}
         >
           <div
             className="h-full rounded-full"
             style={{
-              width: `${initiative.budgetConsumedPct}%`,
+              width: `${Math.min(initiative.budgetConsumedPct ?? 0, 100)}%`,
               backgroundColor: initiative.budgetConsumedColor,
             }}
           />

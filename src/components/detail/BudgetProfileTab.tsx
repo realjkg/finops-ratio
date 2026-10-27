@@ -19,6 +19,7 @@ const STATUS_COPY: Record<string, { label: string; color: string }> = {
   on_track: { label: 'On track', color: 'var(--value)' },
   at_risk: { label: 'At risk', color: 'var(--shape)' },
   breach_projected: { label: 'Breach projected', color: 'var(--cost)' },
+  na: { label: 'N/A', color: 'var(--sub)' },
 };
 
 export function BudgetProfileTab({
@@ -50,17 +51,18 @@ export function BudgetProfileTab({
           hard={budget.hard_threshold_pct}
           kill={budget.kill_threshold_pct}
           label="Daily budget consumption"
+          na={daily.pctUsedNa}
         />
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">
-          <span className="text-txt">{formatPct(daily.pctUsed)} of {formatUSD(daily.dailyBudget)} daily</span>
+          <span className="text-txt">{daily.pctUsedNa ? `N/A (${daily.pctUsedNa})` : `${formatPct(daily.pctUsed)} of ${formatUSD(daily.dailyBudget)} daily`}</span>
           <span>{formatUSD(daily.spentToday)} spent</span>
-          <span>{formatUSD(daily.remaining)} remaining</span>
+          <span>{daily.pctUsedNa ? 'Remaining N/A' : `${formatUSD(daily.remaining)} remaining`}</span>
           <span>{daily.hoursRemaining} hrs left</span>
         </div>
         <p className="mt-2 text-xs text-sub">
           Projected daily close:{' '}
           <span className="font-mono text-txt">{formatUSD(daily.projectedClose)}</span>{' '}
-          ({formatPct(daily.projectedPctOfBudget)} of budget)
+          ({daily.pctUsedNa ? 'N/A' : formatPct(daily.projectedPctOfBudget)} of budget)
         </p>
       </Section>
 
@@ -72,16 +74,17 @@ export function BudgetProfileTab({
           hard={0.9}
           kill={1.0}
           label="Monthly budget consumption"
+          na={monthly.pctUsedNa}
         />
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">
-          <span className="text-txt">{formatPct(monthly.pctUsed)} of {formatUSD(monthly.monthlyBudget)} monthly</span>
+          <span className="text-txt">{monthly.pctUsedNa ? `N/A (${monthly.pctUsedNa})` : `${formatPct(monthly.pctUsed)} of ${formatUSD(monthly.monthlyBudget)} monthly`}</span>
           <span>{formatUSD(monthly.spendMtd)} MTD</span>
           <span>{monthly.remainingDays} days remaining</span>
         </div>
         <p className="mt-2 text-xs text-sub">
           Projected month-end:{' '}
           <span className="font-mono text-txt">{formatUSD(monthly.projectedEom)}</span>{' '}
-          ({formatPct(monthly.projectedPctOfBudget)} of budget)
+          ({monthly.pctUsedNa ? 'N/A' : formatPct(monthly.projectedPctOfBudget)} of budget)
         </p>
         <p className="mt-1 text-xs text-sub">
           80% confidence:{' '}

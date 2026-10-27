@@ -12,6 +12,7 @@
 //   as excluded, never thrown.
 import type { CanonicalFocusRow } from './focusRows';
 import type { CostSourceClient, CostWindow } from './CostSourceClient';
+import { HEADLINE_EXCLUSION_REASON, isHeadlineEligible } from './headline';
 
 const AI_SERVICE_CATEGORY = 'AI and Machine Learning';
 /** Largest per-row |cost| accepted; anything above is treated as corrupt input. */
@@ -109,7 +110,7 @@ export interface AiSpendRatioReport {
   mode: CostSourceClient['mode'];
   window: CostWindow;
   /** inHeadline false = another fetched source owns this bill; not in `overall`. */
-  perSource: { sourceId: string; name: string; inHeadline: boolean; result: AiSpendRatio }[];
+  perSource: { sourceId: string; name: string; inHeadline: boolean; exclusionReason?: string; result: AiSpendRatio }[];
   /** Rows of the inHeadline sources only, so overlapping sources are never summed. */
   overall: AiSpendRatio;
   errors: { sourceId: string; message: string }[];
@@ -154,9 +155,10 @@ export async function fetchAiSpendRatio(
     : sources.filter((s) => s.configured && s.capabilities.includes('costRows'));
 
   const settled = await Promise.allSettled(wanted.map((s) => client.fetchCostRows(s.id, window)));
-  const fetched: { sourceId: string; name: string; rows: CanonicalFocusRow[] }[] = [];
+  const fetched: { sourceId: string; name: string; eligible: boolean; rows: CanonicalFocusRow[] }[] = [];
   settled.forEach((outcome, i) => {
     const { id, name } = wanted[i];
+    const eligible = isHeadlineEligible(wanted[i]);
     if (outcome.status === 'rejected') {
       const err = outcome.reason;
       errors.push({ sourceId: id, message: err instanceof Error ? err.message : String(err) });
@@ -168,13 +170,14 @@ export async function fetchAiSpendRatio(
       errors.push({ sourceId: id, message: Array.isArray(rows) ? 'Source returned no cost rows' : 'Malformed cost rows' });
       return;
     }
-    fetched.push({ sourceId: id, name, rows });
+    fetched.push({ sourceId: id, name, eligible, rows });
   });
-  // Only a source with rows can own a repeated bill.
-  const fetchedIds = new Set(fetched.filter((f) => f.rows.length > 0).map((f) => f.sourceId));
-  const perSource = fetched.map(({ sourceId, name, rows }) => {
+  // Only an eligible source with rows can own a repeated bill.
+  const fetchedIds = new Set(fetched.filter((f) => f.eligible && f.rows.length > 0).map((f) => f.sourceId));
+  const perSource = fetched.map(({ sourceId, name, eligible, rows }) => {
     const group = REPEATED_BILL_GROUPS.find((g) => g.includes(sourceId));
-    return { sourceId, name, inHeadline: !group || group.find((id) => fetchedIds.has(id)) === sourceId, rows };
+    const inHeadline = eligible && (!group || group.find((id) => fetchedIds.has(id)) === sourceId);
+    return { sourceId, name, inHeadline, ...(eligible ? {} : { exclusionReason: HEADLINE_EXCLUSION_REASON }), rows };
   });
   return {
     mode: client.mode,

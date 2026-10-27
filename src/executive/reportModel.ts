@@ -10,7 +10,7 @@ import type { OutcomeRecord } from '@/outcomes/types';
 import type { CostEntry } from '@/simulation/types';
 import type { ProjectionContext } from '@/mission/missionModel';
 import { WORKLOADS } from '@/data/workloads';
-import { COST_SOURCES, findingsFor } from '@/costsource/seed';
+import { savingsByWorkload } from '@/costsource/headline';
 import type { Workload } from '@/types';
 import {
   buildInitiativeBoard,
@@ -23,7 +23,8 @@ export interface ReportRow {
   name: string;
   monthlyCost: number;
   annualRunRate: number;
-  budgetConsumedPct: number;
+  budgetConsumedPct: number | null;
+  budgetConsumedNa: string | null;
   status: string;
   costEfficiency: number;
   savingsOpportunity: number;
@@ -38,19 +39,14 @@ export interface ReportModel {
   rows: ReportRow[];
 }
 
-// Sum the estimated monthly savings each configured findings source attributes
-// to a workload — the same seed the CostSource page + Spend Summary read.
-function savingsByWorkload(): Map<string, number> {
-  const byWorkload = new Map<string, number>();
-  for (const source of COST_SOURCES) {
-    if (!source.configured || !source.capabilities.includes('findings')) continue;
-    for (const finding of findingsFor(source.id)) {
-      if (!finding.workloadId) continue;
-      const prior = byWorkload.get(finding.workloadId) ?? 0;
-      byWorkload.set(finding.workloadId, prior + finding.estimatedMonthlySavings);
-    }
-  }
-  return byWorkload;
+/** Table/PDF cell text: whole percent, or "N/A" (the reason goes in a footnote). */
+export function budgetCellText(r: Pick<ReportRow, 'budgetConsumedPct'>): string {
+  return r.budgetConsumedPct === null ? 'N/A' : `${r.budgetConsumedPct}%`;
+}
+
+/** One footnote per N/A budget row, so the reason is never lost. */
+export function budgetNaFootnotes(rows: ReportRow[]): string[] {
+  return rows.filter((r) => r.budgetConsumedPct === null).map((r) => `${r.name}: Budget consumed N/A (${r.budgetConsumedNa})`);
 }
 
 export function buildReportModel(
@@ -71,6 +67,7 @@ export function buildReportModel(
       monthlyCost: Math.round(initiative.monthlyCost),
       annualRunRate: Math.round(initiative.monthlyCost * 12),
       budgetConsumedPct: initiative.budgetConsumedPct,
+      budgetConsumedNa: initiative.budgetConsumedNa,
       status: INITIATIVE_STATUS_META[initiative.status].label,
       costEfficiency: initiative.valueRatio,
       savingsOpportunity: Math.round(savings.get(initiative.id) ?? 0),

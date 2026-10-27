@@ -15,30 +15,37 @@ import {
   type ConfidenceInterval,
   type ForecastStatus,
 } from './forecast';
+import { budgetConsumed } from './metricContracts';
 import { thresholdStatus, type ThresholdStatus } from './scales';
 
 export interface DailyStatus {
   spentToday: number;
   dailyBudget: number;
   pctUsed: number;
+  /** Reason `pctUsed` (and the projected %) is not meaningful; null when the budget is valid. */
+  pctUsedNa: string | null;
   remaining: number;
   hoursRemaining: number;
   projectedClose: number;
   projectedPctOfBudget: number;
-  status: ThresholdStatus;
+  /** 'na' when the budget is invalid: no health claim is made from a zero budget. */
+  status: ThresholdStatus | 'na';
 }
 
 export interface MonthlyStatus {
   spendMtd: number;
   monthlyBudget: number;
   pctUsed: number;
+  /** Reason `pctUsed` (and the projected %) is not meaningful; null when the budget is valid. */
+  pctUsedNa: string | null;
   remainingDays: number;
   projectedEom: number;
   projectedPctOfBudget: number;
   confidence: ConfidenceInterval;
   daysUntilBreach: number | null;
   avgDaily7d: number;
-  status: ForecastStatus;
+  /** 'na' when the budget is invalid (no breach claim, no breach days). */
+  status: ForecastStatus | 'na';
 }
 
 export interface BudgetStatus {
@@ -71,8 +78,10 @@ export function computeBudgetStatus(
   });
   const dailyPctUsed = dailyBudget > 0 ? spentToday / dailyBudget : 0;
 
+  const dailyNa = budgetConsumed(spentToday, dailyBudget).naReason;
   const spendMtd = spendMtdFor(workload, now);
   const monthlyBudget = workload.costs.monthly_budget;
+  const monthlyNa = budgetConsumed(spendMtd, monthlyBudget).naReason;
   const daysInMonth = daysInMonthOf(now);
   const remainingWeekdays = remainingWeekdaysInMonth(now);
 
@@ -101,28 +110,32 @@ export function computeBudgetStatus(
       spentToday,
       dailyBudget,
       pctUsed: dailyPctUsed,
+      pctUsedNa: dailyNa,
       remaining: round2(Math.max(dailyBudget - spentToday, 0)),
       hoursRemaining: round1(Math.max(24 - hourOfDay, 0)),
       projectedClose: round2(daily.projectedDailySpend),
       projectedPctOfBudget: dailyBudget > 0 ? daily.projectedDailySpend / dailyBudget : 0,
-      status: thresholdStatus(
-        dailyPctUsed,
-        budget.soft_threshold_pct,
-        budget.hard_threshold_pct,
-        budget.kill_threshold_pct,
-      ),
+      status: dailyNa
+        ? 'na'
+        : thresholdStatus(
+            dailyPctUsed,
+            budget.soft_threshold_pct,
+            budget.hard_threshold_pct,
+            budget.kill_threshold_pct,
+          ),
     },
     monthly: {
       spendMtd,
       monthlyBudget,
       pctUsed: monthlyBudget > 0 ? spendMtd / monthlyBudget : 0,
+      pctUsedNa: monthlyNa,
       remainingDays: monthly.remainingDays,
       projectedEom: round2(monthly.projectedEom),
       projectedPctOfBudget: monthlyBudget > 0 ? monthly.projectedEom / monthlyBudget : 0,
       confidence: { low: round2(confidence.low), high: round2(confidence.high) },
-      daysUntilBreach: breach,
+      daysUntilBreach: monthlyNa ? null : breach,
       avgDaily7d: round2(monthly.avgDaily7d),
-      status: forecastStatus(monthly.projectedEom, monthlyBudget),
+      status: monthlyNa ? 'na' : forecastStatus(monthly.projectedEom, monthlyBudget),
     },
   };
 }

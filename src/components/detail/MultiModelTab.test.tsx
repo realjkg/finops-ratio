@@ -39,3 +39,13 @@ describe('MultiModelTab — projected-overshoot guardrail', () => {
     expect(html).not.toContain('Projected overspend');
   });
 });
+
+describe('MultiModelTab — model-switch forecast label', () => {
+  it('labels the cheapest-alternative figure as an estimate, not realized savings', () => {
+    const html = renderToStaticMarkup(
+      <MultiModelTab workload={byId('wl-fraud')} models={MODEL_REGISTRY} />,
+    );
+    expect(html).toContain('Estimated scenario cost reduction—not realized savings');
+    expect(html).not.toMatch(/ saves /);
+  });
+});

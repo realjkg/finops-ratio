@@ -43,6 +43,9 @@ describe('B3c costsource differences are explained', () => {
     expect(total('servicenow-sandbox') - total('pointfive-sandbox')).toBeCloseTo(critical * (ITBM_CRITICAL_SERVICE_ALLOCATION - 1), 0);
     const html = renderToStaticMarkup(<AiSpendRatioView path="seed" state={{ status: 'ready', report: r }} onSwitch={() => {}} />);
     expect(html).toContain('8.5% ITBM allocation');
+    // Pilot P0: the unconfirmed-role source is never described as a cost of record.
+    expect(html).toContain('simulated, role unconfirmed, excluded from the headline: illustrative +8.5% ITBM allocation');
+    expect(html).not.toMatch(/exceeds the billing export|cost of record/i);
     expect(html).toContain('own bills');
   });
 });

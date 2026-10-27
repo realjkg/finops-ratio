@@ -54,10 +54,10 @@ describe('report view-model', () => {
     }
   });
 
-  it('keeps budget consumed within 0..100', () => {
+  it('keeps budget consumed non-negative, with N/A carried as null plus a reason', () => {
     for (const row of model.rows) {
       expect(row.budgetConsumedPct).toBeGreaterThanOrEqual(0);
-      expect(row.budgetConsumedPct).toBeLessThanOrEqual(100);
+      expect(row.budgetConsumedNa).toBeNull();
     }
   });
 

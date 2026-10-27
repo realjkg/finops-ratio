@@ -1,0 +1,33 @@
+GREEN evidence after review round 4 (merged with main fe82833) (includes round 1 results) (base db4a1e2). Gates run sequentially in the foreground.
+1 lint: exit 0
+2 typecheck: exit 0
+3 full vitest (merged tree): Test Files 209 passed (209); Tests 3863 passed (3863)
+4 build: exit 0 (next-env.d.ts reverted, .next deleted)
+5 readiness:check: pilotEntryReady=false productionReady=false
+6 diff-budget: see PR body (ratio exceeds 1.5; exception requested, not granted)
+Mutations (each reverted; targeted set re-run; every one killed):
+ M1 headline ignores role 1 | M2 savings include unconfirmed 1 | M3 invalid budget -> 0 12 | M4 clamp restored 1
+ M5 scenario label dropped 1 | M6 pilotEntryReady true 2 | M7 customer-validated unchecked 1 | M8 AI omit removed 1
+ R1 XLSX N/A -> 0 killed (1) | R2 PDF N/A -> "0%" killed (2) | R3 reportModel ?? 0 killed (3)
+ R4 report savings re-include ServiceNow killed (4) | R5 card headline N/A -> 0 killed (1)
+ R6 card copy removed killed (1, after tightening the assertion; first pass survived)
+ R7 PDF footnote removed killed (1) | R8 mission clamp killed (1) | R9 mission N/A -> 0 killed (1)
+ R10 budgetStatus N/A flag dropped killed (2) | R11 PDF clamp killed (1) | R12 PDF savings note removed killed (1)
+Round 2 mutations (visible-span assertions; each reverted, set re-run, every one killed):
+ S1 initiative card visible N/A->0% 1 | S2 fleet visible N/A->0% 1 | S3 fuel visible N/A->0% 1
+ S4a fuel reason dropped 1 | S4b fleet reason dropped 1 | S5 fleet clamp restored 1
+ S6 daily N/A computed from monthly MTD/budget 3 | S7a Budget tab monthly projected N/A->0% 1 | S7b daily 1
+ S8 cost-source Forecast (EOM) N/A->0% 1 | S9 per-source exclusion reason hidden 1 | S10 simulated path label removed 1
+ S11 trajectory verdict N/A removed 1 | S12 Budget bar announces value again 1
+Round 3 mutations (roots restored; each reverted, set re-run, every one killed):
+ T1 daily thresholdStatus on zero budget 2 | T2 monthly forecastStatus on zero budget 2 | T3 daysUntilBreach restored 3
+ T4 mission status na removed 6 | T5 needs-attention counts na 1 | T6 Budget N/A count hidden 1
+ T7 initiative na -> pending approval 4 | T8 /reports bare % 1 | T9 Budget tab na label Healthy 1
+ T10 mission card label CRITICAL 1 | T11 AI context keeps Budget N/A initiative 1 | T12 verdict N/A removed 1
+Round 4 mutations (each reverted; every one killed):
+ U1 sub-cent budget valid 2 | U2 N/A replaces real alert/valid signals 2 | U3 alert ignored 5
+ U4a valid monthly forecast ignored 1 | U4b valid daily fuel ignored 5 | U5 AI omitted note removed 1
+ U6 "$0 remaining" restored 1 | U7 composition reason dropped 1 | U8 overshoot drawn for N/A 1 | U9 prompt "not reported" line removed 1
+Contrast audit on the merged tree, both browsers, source as pushed:
+ full Chromium (chromium-1194)       Light 0 / High 0 / Dark 654 (max 659)
+ headless shell (headless_shell-1194) Light 0 / High 0 / Dark 654 (max 659); ratchet not raised

@@ -1,0 +1,36 @@
+RED evidence (tests only, before implementation), base db4a1e2.
+Command: npx vitest run src/lib/metricContracts.test.ts src/costsource/aiSpendRatio.test.ts \
+  src/executive src/components/detail/MultiModelTab.test.tsx scripts/completion
+Result: Test Files 7 failed | 7 passed (14); Tests 11 failed | 66 passed (77) (+2 suites that fail
+to import: src/lib/metricContracts.test.ts and scripts/completion/pilot.test.mjs, whose modules do not exist yet).
+Failing behavior (not just imports):
+- ServiceNow sandbox alone still lands in the headline (roleConfirmed absent; inHeadline true)
+- projectedSavings is 4816 vs the expected 2408: ServiceNow findings duplicate the PointFive findings
+- budgetConsumedPct is 0 (not N/A) for monthly_budget 0, -1, NaN; clamped to 100 when over budget
+- model-switch text says "saves", not "Estimated scenario cost reduction—not realized savings"
+
+Review round 1 RED (tests only, before the fixes), head 2a5b7a6.
+Command: npx vitest run src/executive/reportContracts.test.ts src/mission src/lib/readinessSeedConsistency.test.tsx
+Result: Test Files 3 failed | 1 passed (4); Tests 6 failed | 38 passed (44).
+Failing: report N/A footnote/cell helpers missing; ServiceNow card copy still says "cost of record ... exceeds the
+billing export"; daily gauge and portfolio gauge show 0 / clamp at 100; budgetStatus has no N/A flag; Budget tab shows 0%.
+Already passing (new regression protection, kept): XLSX N/A cell, PDF renders, report savings rows sum to 2,408.
+
+Review round 2 RED (tests only), head 1a536a4.
+Command: npx vitest run src/mission src/costsource/aiSpendRatioCard.test.tsx src/executive/InitiativeCard.na.test.tsx
+Result: Test Files 1 failed | 3 passed (4); Tests 2 failed | 37 passed (39).
+Failing: trajectory verdict "Overrun — projected 0% of budget" for an invalid monthly budget; Budget tab bars still
+announce aria-valuenow. The other new visible-text, daily-vs-monthly and overspend tests pass already and are
+protection, proven by the mutation set in green.txt.
+
+Review round 3 RED (tests only), head 49cfb8e.
+Command: npx vitest run src/mission/budgetStatusNa.test.tsx src/executive/reportContracts.test.tsx src/costsource/aiSpendRatioCard.test.tsx
+Result: Test Files 3 failed; Tests 8 failed | 21 passed (29).
+Failing: invalid budget still yields CRITICAL / Pending Approval / Healthy / Breach projected / "breach in ~0 days" /
+"Forecast breaches budget", is counted in needs-attention and pending-approval, and /reports prints a bare "%".
+
+Review round 4 RED (tests only, on the tree merged with main fe82833).
+Command: npx vitest run src/mission src/lib/metricContracts.test.ts src/costsource/aiSpendRatioCard.test.tsx
+Result: Tests 6 failed | 56 passed (62) (+ a type error: AIContext has no `omitted` yet).
+Failing: sub-cent budget treated as valid; N/A status replaces real alert/valid-period signals (CRITICAL becomes
+BUDGET N/A, dropped from counts and AI context); "$0.00 remaining" on the Budget tab; composition card N/A has no reason.

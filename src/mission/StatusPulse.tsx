@@ -9,12 +9,14 @@ const STATUS_COLOR: Record<MissionStatus, string> = {
   nominal: TOKEN_COLOR.value,
   caution: TOKEN_COLOR.shape,
   critical: TOKEN_COLOR.cost,
+  na: 'var(--sub)',
 };
 
 const STATUS_LABEL: Record<MissionStatus, string> = {
   nominal: 'On track',
   caution: 'At risk',
   critical: 'Critical',
+  na: 'Budget N/A',
 };
 
 interface StatusPulseProps {
