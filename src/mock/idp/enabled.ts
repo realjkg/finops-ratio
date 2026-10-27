@@ -6,7 +6,7 @@
 // trimming and no case folding, so unset, empty, 'staging', 'production',
 // 'prod', 'Production' and padded values are all disabled. The Node build
 // mode plays no part. Only own properties count, so a polluted prototype
-// cannot switch the gate on. Same shape as simulationEnabled() in
+// cannot switch the gate on. Similar shape to simulationEnabled() in
 // src/simulation/server/enabled.ts.
 
 export type MockIdpEnv = Readonly<Record<string, string | undefined>>;

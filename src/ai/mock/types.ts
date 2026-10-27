@@ -19,6 +19,8 @@ export interface WorkloadFacts {
   status: string | null;
   budgetConsumedPct: number | null;
   monthlyBudget: number | null;
+  /** True when the request context lists this workload as budget N/A (`omitted`). */
+  budgetNa: boolean;
   savings: number;
   cacheHitRate: number | null;
   costTrendPct: number | null;

@@ -340,7 +340,7 @@ export function buildSystemPrompt(ctx: AIContext): string {
     'INITIATIVES:',
     initiativeLines,
     ...(ctx.omitted?.length
-      ? ['', 'INITIATIVES WITH BUDGET N/A (status still applies):', ...ctx.omitted.map((o) => `- ${o.name}\n  Status: ${o.status} | Budget N/A (${o.reason})`)]
+      ? ['', 'INITIATIVES WITH BUDGET N/A (status still applies):', ...ctx.omitted.map((o) => `- ${o.name}\n  Status: ${o.status} | Budget N/A (${o.reason})${o.savingsOpportunity ? ` | Savings opportunity: ${fmt(o.savingsOpportunity)}/mo` : ''}`)]
       : []),
     ...(workloadLines ? ['', 'WORKLOAD DETAIL:', workloadLines] : []),
     ...(focusedInitiative ? ['', `FOCUS: ${focusedInitiative}`] : []),

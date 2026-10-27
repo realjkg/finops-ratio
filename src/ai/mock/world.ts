@@ -105,6 +105,7 @@ export function buildWorld(ctx: AIContext): World {
   const snaps = new Map(arr(c.workloads).filter(plain).map((w) => [w.id as string, w]));
   const seen = new Set<string>();
   const rows: WorkloadFacts[] = [];
+  const omittedIds = new Set(omittedList(c.omitted).map((o) => o.id));
   const rejected: string[] = [];
   const rejectedIds: string[] = [];
 
@@ -133,7 +134,9 @@ export function buildWorld(ctx: AIContext): World {
     // the workload's dollars still count; only budget-percent claims are withheld.
     const rawBudget = s.monthlyBudget;
     const budgetInvalid = typeof rawBudget === 'number' && (!Number.isFinite(rawBudget) || rawBudget < 0.01);
-    const budget = budgetInvalid ? null : field(s, 'monthlyBudget', RANGE.usd, bad) ?? seed?.costs.monthly_budget ?? null;
+    // No seed fallback when the wire says the budget is N/A: the id is in `omitted`, or the field is present as null (NaN over JSON).
+    const budgetNa = budgetInvalid || omittedIds.has(id) || rawBudget === null;
+    const budget = budgetNa ? null : field(s, 'monthlyBudget', RANGE.usd, bad) ?? seed?.costs.monthly_budget ?? null;
     const cache = field(s, 'cacheHitRate', RANGE.rate, bad);
     const gates = field(s, 'governanceGatesPassed', RANGE.gates, bad);
     const consumed = field(i, 'budgetConsumedPct', RANGE.pct, bad);
@@ -156,6 +159,7 @@ export function buildWorld(ctx: AIContext): World {
       status: str(i.status),
       budgetConsumedPct: consumed,
       monthlyBudget: budget,
+      budgetNa: omittedIds.has(id),
       savings: savings ?? 0,
       cacheHitRate: cache,
       costTrendPct: trend,

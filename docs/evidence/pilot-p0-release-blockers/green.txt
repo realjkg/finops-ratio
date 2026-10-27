@@ -7,3 +7,7 @@ Mutations (each reverted; targeted set re-run; every one killed):
 1 lint 0 | 2 typecheck 0 | 3 full vitest: Test Files 213 passed (213); Tests 3923 passed (3923)
 4 build 0 | 5 check:bundle pass (136 client / 134 server) | 6 readiness:check pilotEntryReady=false productionReady=false
 7 contrast audit: full Chromium Light 0 / High 0 / Dark 654; headless shell Light 0 / High 0 / Dark 654 (max 659)
+Review round 1 mutations (each reverted; targeted set src/ai + workspace test; every one killed):
+ Y1 prompt drops omitted savings 1 | Y2 sanitizer drops savingsOpportunity 1 (survived with 840 because Fraud's own initiative line
+ also shows $840; killed after the route test used 777) | Y3 seed budget fallback restored 2 | Y4 detail "budget N/A" text removed 2
+ Y5 Workspace monthly budget fix reverted 3 | Y6 below-floor budget rejects the workload 5

@@ -321,7 +321,7 @@ Any other hosted OpenAI-compatible service works through `openllm` by pointing
 Gateway routes fail closed by default: with no token configured, or if the auth
 check itself fails, the answer is 401 or 503. Local fixture-only simulation needs
 `RATIO_SIMULATION=1` with `RATIO_ENV=development` or `test`; it never applies
-when a token or a live provider is configured. Two gates use this switch:
+when a token or a live provider is configured (that part covers the gateway gate only; the simulation routes do not look at the token). Two gates use this switch:
 
 - Gateway routes (`src/server/gateway/simulationMode.ts`): refuse when
   `VERCEL_ENV=production`; under `NODE_ENV=production` they also need

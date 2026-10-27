@@ -17,7 +17,7 @@ function own(env: SimulationEnv, key: string): string | undefined {
   return Object.prototype.hasOwnProperty.call(env, key) ? (env as Record<string, string | undefined>)[key] : undefined;
 }
 
-/** True on a Vercel production deployment (exact string, own property only). Shared by every simulation gate. */
+/** True on a Vercel production deployment (exact string, own property only). Used by the gateway gate and by simulationEnabled(). */
 export function isVercelProduction(env: SimulationEnv = process.env): boolean {
   return own(env, 'VERCEL_ENV') === 'production';
 }
