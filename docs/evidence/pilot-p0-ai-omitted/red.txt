@@ -1,0 +1,7 @@
+RED evidence (tests only), base origin/main ebbfd8f (contains merged #133).
+Command: npx vitest run src/ai/omittedContext.test.ts src/mission/budgetStatusNa.test.tsx
+Result: 12 failed (omittedContext) before the label-test fix; label/aria assertions in budgetStatusNa already pass
+and are regression protection (MissionDetail BUDGET N/A / CRITICAL, StatusPulse aria label, MissionCard aria-label).
+Failing behavior: `omitted` has no status; the prompt does not list Fraud (Pending Approval) while the summary counts
+it; the mock "pending approval" answer and the Fraud detail omit the real status; validateChatBody accepts malformed
+`omitted` ('str', {length:2}, [null], bad status, 51 and 5000 entries); newline injection in omitted reaches the prompt.
