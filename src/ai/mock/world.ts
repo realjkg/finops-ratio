@@ -6,7 +6,7 @@
 // from the wire's own numbers. Anything still unknown stays null and the
 // answers say so instead of guessing.
 
-import type { AIAlertSnapshot, AIContext } from '../AIClient';
+import { OMITTED_STATUSES, type AIAlertSnapshot, type AIContext, type AIOmittedInitiative } from '../AIClient';
 import { alertsFor } from '@/data/alerts';
 import { WORKLOADS } from '@/data/workloads';
 import type { EvidenceStatus } from '@/types';
@@ -90,6 +90,14 @@ function alertList(v: unknown): AIAlertSnapshot[] | null {
   });
 }
 
+/** The valid entries of the optional `omitted` list (status + reason of N/A-budget initiatives). */
+export function omittedList(v: unknown): AIOmittedInitiative[] {
+  return arr(v).filter((x): x is AIOmittedInitiative => {
+    const r = rec(x);
+    return typeof r.id === 'string' && typeof r.name === 'string' && typeof r.reason === 'string' && OMITTED_STATUSES.includes(r.status as AIOmittedInitiative['status']);
+  });
+}
+
 export function buildWorld(ctx: AIContext): World {
   const c = rec(ctx);
   const plain = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && typeof rec(x).id === 'string'; // entries without a string id are malformed
@@ -160,6 +168,7 @@ export function buildWorld(ctx: AIContext): World {
   };
 
   for (const i of initiatives) add(i.id as string, i, snaps.get(i.id as string));
+  for (const o of omittedList(c.omitted)) add(o.id, { name: o.name, status: o.status }, snaps.get(o.id));
   for (const [id, s] of snaps) add(id, undefined, s);
 
   const dropped = arr(c.initiatives).filter((x) => !legacyInit(x) && !rejectedIds.includes(rec(x).id as string)).length + arr(c.workloads).filter((x) => !plain(x)).length; if (dropped) rejected.push(`${dropped} malformed entries`);
@@ -190,6 +199,7 @@ export function legacyContext(ctx: AIContext, world: World): AIContext {
   };
   return {
     initiatives,
+    omitted: omittedList(ctx.omitted),
     workloads: world.workloads.map((w) => ({ id: w.id, cacheHitRate: w.cacheHitRate })) as unknown as AIContext['workloads'], // the only fields the legacy answers read
     asOf: str(rec(ctx).asOf) ?? '',
     summary: {

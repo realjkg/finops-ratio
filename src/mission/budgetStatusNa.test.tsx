@@ -11,9 +11,12 @@ import { InitiativeCard } from '@/executive/InitiativeCard';
 import { buildInitiativeBoard, toInitiativeView } from '@/executive/initiativeModel';
 import { languageFor } from '@/lib/languageMap';
 import { BUDGET_PROFILES } from '@/data/budgets';
+import { ALERTS } from '@/data/alerts';
 import Reports from '../../pages/reports';
 import { buildMissionBoard, toMissionView } from './missionModel';
 import { MissionCard } from './MissionCard';
+import { MissionDetail } from './MissionDetail';
+import { StatusPulse } from './StatusPulse';
 import { FleetHeader } from './FleetHeader';
 
 // zustand serves its initial state during server rendering, so the page is
@@ -107,7 +110,7 @@ describe('valid-period and alert signals survive an invalid budget', () => {
     expect(buildInitiativeBoard([bothZero, ...others]).summary.pendingApproval).toBe(buildInitiativeBoard(WORKLOADS).summary.pendingApproval);
     const ctx = buildAIContext([bothZero, ...others]);
     expect(ctx.initiatives.map((i) => i.id)).not.toContain('wl-fraud');
-    expect(ctx.omitted).toEqual([{ id: 'wl-fraud', name: fraud.name, reason: expect.stringMatching(/approved budget/i) }]);
+    expect(ctx.omitted).toEqual([{ id: 'wl-fraud', name: fraud.name, status: 'Pending Approval', reason: expect.stringMatching(/approved budget/i) }]);
   });
 
   it('with nothing adverse left, an invalid budget is N/A, never on-track', () => {
@@ -147,5 +150,27 @@ describe('each valid period still sets the status on its own', () => {
   });
   it('valid daily overspend (monthly invalid) stays critical', () => {
     expect(toMissionView(mk('wl-support', { daily_budget: 1, monthly_budget: 0 }), { alerts: [] }).status).toBe('critical');
+  });
+});
+
+describe('status labels of an invalid-budget mission (detail, pulse, card aria)', () => {
+  const detail = (w: typeof zero, alerts: unknown[]) => {
+    fake.state = { workloads: [w], budgets: BUDGET_PROFILES, alerts, now: NOW, models: [], simulation: null, simulationBusy: false };
+    return renderToStaticMarkup(<MissionDetail missionId={w.id} onBack={() => {}} />);
+  };
+  it('detail header says BUDGET N/A (never ON TRACK) when nothing adverse remains', () => {
+    const html = detail(zero, []);
+    expect(html).toContain('>BUDGET N/A<');
+    expect(html).not.toContain('ON TRACK');
+  });
+  it('detail header keeps CRITICAL for a critical alert', () => {
+    expect(detail(bothZero, ALERTS)).toContain('>CRITICAL<');
+  });
+  it('status pulse and card aria label say Budget N/A, never "null%"', () => {
+    expect(renderToStaticMarkup(<StatusPulse status="na" />)).toContain('aria-label="Budget N/A status"');
+    const m = toMissionView(zero, { alerts: [] });
+    const html = renderToStaticMarkup(<MissionCard mission={m} onOpen={() => {}} />);
+    expect(html).toContain('budget consumed N/A');
+    expect(html).not.toContain('null%');
   });
 });

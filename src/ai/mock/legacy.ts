@@ -16,17 +16,20 @@ function formatUSD(n: number): string {
 
 export function atRisk(ctx: AIContext): AIResponse {
   const risky = ctx.initiatives.filter((i) => i.status === 'At Risk' || i.status === 'Pending Approval');
+  // Initiatives whose budget metric is N/A keep their real status: they are listed too.
+  const naRisky = (ctx.omitted ?? []).filter((o) => o.status === 'At Risk' || o.status === 'Pending Approval');
   const lines = risky.map(
     (i) =>
       `• **${i.name}** — ${i.status}, ${formatUSD(i.monthlyCost)}/mo at ${i.valueRatio.toFixed(1)}× return${evidenceNote(i.valueEvidenceStatus)}` +
       (i.savingsOpportunity > 0 ? `, ${formatUSD(i.savingsOpportunity)}/mo savings identified` : ''),
   );
   const text =
-    risky.length === 0
+    risky.length + naRisky.length === 0
       ? `All ${ctx.summary.initiativesActive} initiatives are on track. Portfolio spend: ${formatUSD(ctx.summary.totalMonthlySpend)}/mo.`
       : [
-          `${risky.length} initiative(s) need attention:`,
+          `${risky.length + naRisky.length} initiative(s) need attention:`,
           ...lines,
+          ...naRisky.map((o) => `• **${o.name}** — ${o.status}, budget N/A (${o.reason})`),
           `Total portfolio: ${formatUSD(ctx.summary.totalMonthlySpend)}/mo across ${ctx.summary.initiativesActive} initiatives.`,
         ].join('\n');
   return { message: { role: 'assistant', content: text }, initiativesReferenced: risky.map((i) => i.id), provider: 'mock' };

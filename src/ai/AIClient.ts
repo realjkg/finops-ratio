@@ -44,7 +44,16 @@ export interface AIContext {
   /** ISO 8601 instant when the snapshot was taken (client's DEMO_NOW). */
   asOf: string;
   /** Initiatives left out of `initiatives` because their budget metric is N/A, with the reason. */
-  omitted?: { id: string; name: string; reason: string }[];
+  omitted?: AIOmittedInitiative[];
+}
+
+/** Real status of an initiative whose budget metric is N/A, plus the N/A reason. */
+export const OMITTED_STATUSES = ['On Track', 'At Risk', 'Pending Approval', 'Budget N/A'] as const;
+export interface AIOmittedInitiative {
+  id: string;
+  name: string;
+  status: (typeof OMITTED_STATUSES)[number];
+  reason: string;
 }
 
 /** Lean initiative projection — executive vocabulary, sufficient for most questions. */

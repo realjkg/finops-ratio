@@ -1,0 +1,14 @@
+GREEN evidence, follow-up to #133 (base origin/main ebbfd8f). Gates run sequentially in the foreground.
+Mutations (each reverted; targeted set src/ai + src/mission re-run; every one killed):
+ V1 omitted status always "Budget N/A" 5 | V2 prompt omitted lines removed 4 | V3 control chars not stripped 1
+ V4 entry cap removed 2 | V5 handler skips sanitizing 1 | V6 validateChatBody ignores omitted 7
+ V7 status enum check removed 1 | V8 mock world ignores omitted 1 | V9 mock at-risk list ignores omitted 1
+ V10 reason length cap removed 1
+ AL MissionDetail "BUDGET N/A" -> ON TRACK 1 | F MissionDetail CRITICAL label 1 | U StatusPulse aria label 1
+ Z MissionCard aria "null%" 1
+1 lint 0 | 2 typecheck 0 | 3 full vitest: Test Files 210 passed (210); Tests 3880 passed (3880)
+4 build 0 | 5 check:bundle pass (136 client / 130 server) | 6 readiness:check pilotEntryReady=false productionReady=false
+7 contrast audit: full Chromium Light 0 / High 0 / Dark 654; headless shell Light 0 / High 0 / Dark 654 (max 659, not raised)
+Review follow-up (tests only, no production change); each mutation reverted and killed (omittedContext set, 1 failure each):
+ X1 U+2028/U+2029 not stripped | X2 C1 (U+0080-U+009F, incl. U+0085) not stripped | X15a name type check removed
+ X15b reason type check removed | X16 section header changed | X3 name cap (120) removed

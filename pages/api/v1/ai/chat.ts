@@ -23,7 +23,7 @@ import { FRANK } from '@/agent-workflows/frank';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import type { AIContext, AIMessage } from '@/ai/AIClient';
+import { OMITTED_STATUSES, type AIContext, type AIMessage, type AIOmittedInitiative } from '@/ai/AIClient';
 import { logUpstreamError, readJsonBody, renderThrown, statusReason } from '@/costsource/transports/redact';
 import { MockAIClient } from '@/ai/MockAIClient';
 import {
@@ -42,6 +42,29 @@ import {
 // Context-size budget (spec §8.6) — keep prompt + history well under truncation.
 const MAX_MESSAGES = 50;
 const MAX_INITIATIVES = 100;
+const MAX_OMITTED = 50;
+
+/**
+ * Validate and sanitize the optional `omitted` list. null = malformed (the body is
+ * rejected with a 400); undefined/absent = empty. Control characters and newlines
+ * become spaces so no entry can start a prompt line; strings are length-capped.
+ */
+export function parseOmitted(raw: unknown): AIOmittedInitiative[] | null {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.length > MAX_OMITTED) return null;
+  const clean = (v: string, max: number) =>
+    Array.from(v, (ch) => { const c = ch.codePointAt(0) ?? 0; return c < 32 || (c >= 127 && c <= 159) || c === 0x2028 || c === 0x2029 ? ' ' : ch; })
+      .join('').replace(/ {2,}/g, ' ').trim().slice(0, max);
+  const out: AIOmittedInitiative[] = [];
+  for (const e of raw) {
+    if (typeof e !== 'object' || e === null) return null;
+    const { id, name, status, reason } = e as Record<string, unknown>;
+    if (typeof id !== 'string' || typeof name !== 'string' || typeof reason !== 'string') return null;
+    if (!OMITTED_STATUSES.includes(status as AIOmittedInitiative['status'])) return null;
+    out.push({ id: clean(id, 64), name: clean(name, 120), status: status as AIOmittedInitiative['status'], reason: clean(reason, 200) });
+  }
+  return out;
+}
 const MAX_TOKENS = 1024;
 
 // --- Server-only provider adapters ------------------------------------------
@@ -315,7 +338,9 @@ export function buildSystemPrompt(ctx: AIContext): string {
     '',
     'INITIATIVES:',
     initiativeLines,
-    ...(ctx.omitted?.length ? ['', `NOT REPORTED (budget N/A): ${ctx.omitted.map((o) => `${o.name} (${o.reason})`).join('; ')}`] : []),
+    ...(ctx.omitted?.length
+      ? ['', 'INITIATIVES WITH BUDGET N/A (status still applies):', ...ctx.omitted.map((o) => `- ${o.name}\n  Status: ${o.status} | Budget N/A (${o.reason})`)]
+      : []),
     ...(workloadLines ? ['', 'WORKLOAD DETAIL:', workloadLines] : []),
     ...(focusedInitiative ? ['', `FOCUS: ${focusedInitiative}`] : []),
   ].join('\n');
@@ -342,6 +367,7 @@ function isValidBody(
   if (!Array.isArray(initiatives) || initiatives.length > MAX_INITIATIVES) return false;
   if (typeof summary !== 'object' || summary === null) return false;
   if (typeof asOf !== 'string') return false;
+  if (parseOmitted((context as { omitted?: unknown }).omitted) === null) return false;
   return true;
 }
 
@@ -369,6 +395,11 @@ async function chatHandler(
     messages: AIMessage[];
     context: AIContext;
   };
+
+  // Validated by the gateway; replace with the sanitized copy before any use.
+  const omitted = parseOmitted(context.omitted) ?? [];
+  if (omitted.length) context.omitted = omitted;
+  else delete context.omitted;
 
   let adapter: AIAdapter;
   try {

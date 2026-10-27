@@ -44,9 +44,9 @@ describe('buildAIContext — N/A budget metric', () => {
     expect(ctx.initiatives.map((i) => i.id)).not.toContain(first.id);
   });
 
-  it('tells the model which initiatives were not reported and why', () => {
+  it('lists an N/A-budget initiative with its real status and the reason', () => {
     const [first, ...rest] = WORKLOADS;
     const ctx = buildAIContext([{ ...first, costs: { ...first.costs, monthly_budget: 0 } }, ...rest]);
-    expect(buildSystemPrompt(ctx)).toMatch(new RegExp(`NOT REPORTED \\(budget N/A\\): ${first.name} \\(.*approved budget`));
+    expect(buildSystemPrompt(ctx)).toMatch(new RegExp(`${first.name}\\n  Status: [A-Za-z ]+ \\| Budget N/A \\(.*approved budget`));
   });
 });

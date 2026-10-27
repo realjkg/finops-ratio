@@ -18,6 +18,7 @@ import type { Workload } from '@/types';
 import type {
   AIContext,
   AIInitiativeSnapshot,
+  AIOmittedInitiative,
   AIWorkloadSnapshot,
 } from './AIClient';
 
@@ -87,7 +88,7 @@ export function buildAIContext(
 
   const omitted = initiatives
     .filter((i) => i.budgetConsumedPct === null || i.status === 'budget_na')
-    .map((i) => ({ id: i.id, name: i.name, reason: i.budgetConsumedNa ?? i.statusNa ?? 'Budget N/A' }));
+    .map((i) => ({ id: i.id, name: i.name, status: INITIATIVE_STATUS_META[i.status].label as AIOmittedInitiative['status'], reason: i.budgetConsumedNa ?? i.statusNa ?? 'Budget N/A' }));
 
   return {
     initiatives: initiativeSnapshots,
