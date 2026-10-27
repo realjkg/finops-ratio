@@ -52,7 +52,9 @@ const MAX_OMITTED = 50;
 export function parseOmitted(raw: unknown): AIOmittedInitiative[] | null {
   if (raw === undefined) return [];
   if (!Array.isArray(raw) || raw.length > MAX_OMITTED) return null;
-  const clean = (v: string, max: number) => v.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').trim().slice(0, max);
+  const clean = (v: string, max: number) =>
+    Array.from(v, (ch) => { const c = ch.codePointAt(0) ?? 0; return c < 32 || (c >= 127 && c <= 159) || c === 0x2028 || c === 0x2029 ? ' ' : ch; })
+      .join('').replace(/ {2,}/g, ' ').trim().slice(0, max);
   const out: AIOmittedInitiative[] = [];
   for (const e of raw) {
     if (typeof e !== 'object' || e === null) return null;
