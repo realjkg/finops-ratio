@@ -4,3 +4,6 @@ Mutations (each reverted; targeted set re-run; every one killed):
  W3 omitted savings not listed 5 | W4 omitted savings not sent 7 | W5 fuel text alternative prints currency budget 10
  W6 fuel gauge prints the denominator 7 | W7 multi-model guardrail prints invalid budget 5
  W8 savingsOpportunity validation removed 1 (after adding -1 and 'x' cases; it survived the first pass)
+1 lint 0 | 2 typecheck 0 | 3 full vitest: Test Files 213 passed (213); Tests 3923 passed (3923)
+4 build 0 | 5 check:bundle pass (136 client / 134 server) | 6 readiness:check pilotEntryReady=false productionReady=false
+7 contrast audit: full Chromium Light 0 / High 0 / Dark 654; headless shell Light 0 / High 0 / Dark 654 (max 659)
