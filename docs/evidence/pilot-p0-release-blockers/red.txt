@@ -1,0 +1,8 @@
+RED evidence (tests only), base origin/main 874ef4f.
+Command: npx vitest run src/simulation/server/productionGate.test.ts src/ai/mock/invalidBudgetTotals.test.ts src/mission/budgetText.test.tsx
+Result: 32+ failing assertions (output truncated at 50 lines when captured).
+(1) simulation routes answer 405 (enabled) instead of 404 under VERCEL_ENV=production; simulationEnabled() true.
+(2) mock AI: negative / 0.0099 / 0.004 monthly budget -> totals $37,012 across 10 initiatives and $1,568 savings;
+    NaN and zero -> Fraud missing from the opportunities list.
+(3) invalid daily budget printed as "/ $0.00", "$NaN", "-$5.00", "$0.01"; no "budget N/A"; Multi-Model guardrail
+    prints "daily budget $..." for an invalid budget.
