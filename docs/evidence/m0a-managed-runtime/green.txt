@@ -1,0 +1,20 @@
+M0a managed retrieval runtime, secrets and staged health -- GREEN
+Head: feat/m0a-managed-runtime = M0b (#148) + M0a, merged with origin/main 8776fef (#145 landed),
+workerCli.ts commit last. Gates run sequentially, in the foreground:
+  npm run lint -> exit 0
+  npm run typecheck -> exit 0;  npx tsc -p tsconfig.worker.json --noEmit -> exit 0
+  npx vitest run -> Test Files 233 passed (233); Tests 4257 passed (4257)
+  npm run build -> exit 0 (next-env.d.ts unchanged);  npm run check:bundle -> pass
+  npm run worker:build -> exit 0 (dist-worker includes connectors/managed; `fetch` without --source
+    prints the usage evidence record, exit 2); dist-worker removed afterwards
+  npm run test:db (own Postgres 16 and SeaweedFS from the CI image digests on 127.0.0.1:55461 / 18461,
+    -volume.max=64 -master.volumeSizeLimitMB=64) -> Test Files 43 passed (43), Tests 702 passed (702);
+    serial: Test Files 6 passed (6), Tests 173 passed (173). Includes src/ingest/managedFetch.db.test.ts (3).
+Mutations, unit (scripted, each reverted; tests: src/connectors/managed): 20/20 killed
+  secrets: permissions, env fallback, link escape, '..' segments, size, toJSON leak, scrub no-op;
+  health: ordering, connected on 3 stages, throwing probe treated as verified, details not scrubbed;
+  state: live without record, simulated upgrades; runtime: no capture, incomplete staged, foreign error
+  text kept, secret not scrubbed, refused counted ok, non-managed spec accepted (killed after adding a
+  case; it survived the first round); registry duplicate allowed.
+Mutations, db (manual, reverted): delivery period not passed to staging -> killed (2024-10 staged);
+  originals store replaced by a no-op in workerCli -> killed (original missing from the evidence bucket).
