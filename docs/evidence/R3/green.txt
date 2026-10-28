@@ -34,3 +34,19 @@ Review round 1 (PR #143) GREEN, after merging the reviewed #142 branch (origin/m
   data, 1 GiB gzip members, collect copies again, cap doubled, preview over all providers, preview scale
   ignored, preview NULL as zero; stageFile re-run on the byte tokenizer: 14 KILLED, 1 equivalent
   (quoted-NULL flag: a quoted field is 6 bytes, so the 4-byte length check already excludes it).
+
+Review round 2 (PR #143) GREEN, branch merged with origin/main (#142 squash 5bb8c21):
+  importRace.db.test.ts 6/6, importFile.db.test.ts 18/18, cli.worker.test.ts 19/19, stageFile.test.ts 27/27.
+  Gates (sequential): lint 0; tsc app 0; tsc worker 0; full vitest 224 files / 4196 tests; build 0
+  (next-env.d.ts reverted); npm run test:db (Postgres 16 + SeaweedFS, CI digests, non-default ports)
+  41 files / 683 + serial 6 / 173.
+  Race repro (two concurrent CLI processes, part 1 = 500 records, part 2 = 442 AWS rows of 2024-09,
+  never-published period), before: 4 of 6 runs exit 0 reporting the other process's rows, the other
+  exit 4, the loser's retry `unchanged` exit 0 (one part's data lost). After: 8 of 8 runs exit 0 with
+  the winner's own rows, the loser exit 4 ALREADY_RUNNING with nothing written, and the loser's retry
+  exit 3 PERIOD_ALREADY_PUBLISHED; published = the winner's rows.
+  Mutations (each alone, reverted), all KILLED: import lock not taken, lock key unique per call,
+  expectManifests not passed, listing manifest check off, re-list manifest check off, unlisted expected
+  period ignored, manifest hash ignored; glob positional message, invalid values copied into the record,
+  unknown flag echoed, --flag=value hint removed, positional echoed, unrecognized arguments copied;
+  stageFile `blank = r.count === 0` (comma-free line skipped).
