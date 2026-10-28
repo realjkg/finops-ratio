@@ -16,3 +16,21 @@ Mutations (each applied alone, then reverted; importFile.db.test.ts must fail):
   M3 source add accepts a changed declaration          -> 1 failed
   M4 normalization report not carried in the manifest  -> 1 failed
   M5 duplicate guard checks the same source            -> 4 failed
+
+Review round 1 (PR #143) GREEN, after merging the reviewed #142 branch (origin/main 3fa927b):
+  stageFile.test.ts 26/26, normalizer.test.ts 4/4, importFile.db.test.ts 18/18.
+  Gates: lint 0; tsc app 0; tsc worker 0; full vitest 217 files / 3997 tests; build 0;
+  npm run test:db (Postgres 16 + SeaweedFS, CI digests, non-default ports) 40 files / 677 + serial 6 / 173.
+  Memory (B2), peak RSS, synthetic file of repeated public-sample records:
+    old staging, 64 MiB CSV: 582 MiB (and heap OOM under --max-old-space-size=96);
+    new staging at the 128 MiB cap, heap 96 MiB: .csv 254 MiB, .csv.gz 295 MiB (budget 336 MiB);
+    new full import-file path at the cap (CLI child, heap 192 MiB, real Postgres + S3): .csv 299 MiB
+    (budget 384 MiB = 75% of the worker mem_limit 512m, unchanged). Over the cap: exit 5 before any read.
+  Mutations (each alone, reverted), all KILLED: refusal disabled, content compare always equal, --restate
+  ignored, only the last --file kept, applied flag false, overlap ignores providers, overlap never refuses,
+  rows-only accepted, unchanged-controls note dropped, restateControls not passed, pipeline re-key removed,
+  superseded-to-current mapping removed, file path echoed, size pre-check removed, exit 5 removed, gunzip
+  unbounded, ISIZE pre-check removed, stream bound removed, gunzipSync double buffer restored, growth drops
+  data, 1 GiB gzip members, collect copies again, cap doubled, preview over all providers, preview scale
+  ignored, preview NULL as zero; stageFile re-run on the byte tokenizer: 14 KILLED, 1 equivalent
+  (quoted-NULL flag: a quoted field is 6 bytes, so the 4-byte length check already excludes it).
