@@ -87,7 +87,7 @@ describe('R3 stageFile: the manifest carries the operator controls', () => {
   });
 
   it('refuses controls that cannot be scoped to exactly one period of the file', () => {
-    expect(() => stageFile(SAMPLE, { location: LOC, control: { rowCount: 942 } })).toThrow(expect.objectContaining({ code: 'IMPORT_CONTROL_SCOPE' }));
+    expect(() => stageFile(SAMPLE, { location: LOC, providers: ['AWS'], control: { rowCount: 942 } })).toThrow(expect.objectContaining({ code: 'IMPORT_CONTROL_SCOPE' }));
   });
 
   it('refuses a billed control without its currency, and a currency the declared providers rows do not bill in', () => {
