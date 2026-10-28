@@ -204,36 +204,6 @@ These need live services or secrets and are out of Phase 1 scope:
 - Slack/email report delivery (§9)
 - Auth + team scoping (§11 Sprint 3+)
 
-## Engagement mode
-
-One instance serves exactly one engagement. `RATIO_MODE=engagement` turns it on and
-`RATIO_ENGAGEMENT_CONFIG=/absolute/path/engagement.json` names the config (mount it
-read-only). The server validates the file at startup and, on any invalid or missing
-key, logs one `engagement_config_invalid` line naming the keys (for example
-`budgets[0].monthly`), never the values, and **the process exits with code 1**. Any
-other `RATIO_MODE` value is also an error (startup reports it; it does not exit the
-process). Outside engagement mode nothing changes.
-
-The file declares: `engagementId`, `tenantId` (the single tenant the published-costs
-reader is bound to; in engagement mode `RATIO_API_TENANT_ID` must not be set),
-`displayName`, `currency`, `sources[]` (id, FOCUS `providers`, `layout`, and a typed
-`metadata` block: provenance, scope and period, delivery, financial control totals,
-overlap), `allocation` (workload and owner tag keys, sub-account map, workload
-owners, shared-cost rules named after `src/attribution/allocation.ts`), `budgets[]`
-(monthly decimal string per workload, at least one cent), `scenarios[]` (current and
-candidate model from the registry plus assumptions) and an optional `outcomesFile`.
-Metadata fields are all required; `unknown` and `not_available` are valid explicit
-values and a blank is never defaulted. Each source may carry a `retrieval` block
-(`file-drop`, the default, or `managed` with a connector name, `params` and a
-`secretRef` that is the NAME of a secret, never a value). The schema accepts every
-documented value, but `SUPPORTED_IN_THIS_BUILD` in `src/engagement/config.ts` lists
-what this build runs (file-drop, CSV or CSV gzip); anything else stops startup with
-`<key>: not implemented in this build`.
-
-`loadEngagementConfig(path)` returns the config plus the sha256 of the file bytes so
-reports can stamp which configuration produced them. A SYNTHETIC example for the
-public FOCUS 1.0 sample is `fixtures/engagement/example/engagement.json`.
-
 ## Cost connectors — on-prem, private cloud, public cloud
 
 Native cost-source connectors are wired into the cost-ingest seam
@@ -376,13 +346,39 @@ into the repo — see the `doc-authoring` skill for this workflow.
 
 ## Engagement mode
 
-Ratio 1.0 is being packaged as a single-customer engagement tool: an operator imports authorized billing **files**,
-reviewers will sign in as named users and read cost, coverage and reconciliation. This section covers packaging
-(row R12). Other behavior arrives with other rows and is labeled below.
+Ratio 1.0 is being packaged as a single-customer engagement tool: one instance serves exactly one engagement. After R3
+an operator will import authorized billing **files**; after R2 reviewers will sign in as named users and read cost,
+coverage and reconciliation. Each statement below is labeled with what works today and which row the rest needs.
 
-- Works today: the image, the compose stack, Postgres and the object store, database migrations, and the existing worker commands.
-- After R1: `RATIO_MODE=engagement` and the read-only config file `RATIO_ENGAGEMENT_CONFIG` (schema in `src/engagement/config.ts`) take effect, and the instance will refuse to start on an invalid config, naming the offending key and never its value. Until then both variables are set in the image but nothing reads them.
+- Works today: the image, the compose stack, Postgres and the object store, database migrations, the existing worker
+  commands, and the engagement config check (row R1, described under *Engagement config*).
 - After R2: named users and sign-in. After R3: file import. After R11: init, backup, restore, reset.
+
+### Engagement config
+
+Works today (R1): `RATIO_MODE=engagement` selects engagement mode and `RATIO_ENGAGEMENT_CONFIG=/absolute/path/engagement.json`
+names the config (mount it read-only). Works today: the app server validates the file at startup and, on any invalid
+or missing key, logs one `engagement_config_invalid` line naming the keys (for example `budgets[0].monthly`), never
+the values, and the app refuses to start today: **the process exits with code 1**. Any other `RATIO_MODE` value is
+also an error (startup reports it; it does not exit the process). Outside engagement mode nothing changes. Under the
+compose stack below, `restart: unless-stopped` restarts an app that exits, so check `$C logs app`. The worker and
+migrator receive the same variables but do not read the config yet.
+
+The file declares: `engagementId`, `tenantId` (the single tenant the published-costs reader is bound to; in
+engagement mode `RATIO_API_TENANT_ID` must not be set), `displayName`, `currency`, `sources[]` (id, FOCUS
+`providers`, `layout`, and a typed `metadata` block: provenance, scope and period, delivery, financial control
+totals, overlap), `allocation` (workload and owner tag keys, sub-account map, workload owners, shared-cost rules
+named after `src/attribution/allocation.ts`), `budgets[]` (monthly decimal string per workload, at least one cent),
+`scenarios[]` (current and candidate model from the registry plus assumptions) and an optional `outcomesFile`.
+Metadata fields are all required; `unknown` and `not_available` are valid explicit values and a blank is never
+defaulted. Each source may carry a `retrieval` block (`file-drop`, the default, or `managed` with a connector name,
+`params` and a `secretRef` that is the NAME of a secret, never a value). The schema accepts every documented value,
+but `SUPPORTED_IN_THIS_BUILD` in `src/engagement/config.ts` lists what this build accepts today (file-drop,
+CSV or CSV gzip); anything else stops startup with `<key>: not implemented in this build`.
+
+`loadEngagementConfig(path)` returns the config plus the sha256 of the file bytes so reports can stamp which
+configuration produced them. A SYNTHETIC example for the public FOCUS 1.0 sample is
+`fixtures/engagement/example/engagement.json`.
 
 ### Install
 
@@ -400,14 +396,14 @@ $C --profile jobs run --rm migrator               # works today once the roles e
 # Evidence bucket `ratio-engagement-evidence` (R11 init will create it). Until then create it with any S3 client on the
 # internal network; the S3 SDK in the image can do it. This one-liner was not run in the release pipeline.
 $C --profile jobs run --rm --entrypoint node worker -e "const s=require('@aws-sdk/client-s3');new s.S3Client({endpoint:'http://s3:8333',region:'us-east-1',forcePathStyle:true,credentials:{accessKeyId:process.env.RATIO_EVIDENCE_S3_ACCESS_KEY_ID,secretAccessKey:process.env.RATIO_EVIDENCE_S3_SECRET_ACCESS_KEY}}).send(new s.CreateBucketCommand({Bucket:'ratio-engagement-evidence'}))"
-$C up -d --build app                              # http://127.0.0.1:3100; the config check needs R1, sign-in needs R2
+$C up -d --build app                              # http://127.0.0.1:3100; the config check works today, sign-in needs R2
 $C --profile jobs run --rm worker doctor          # works today; any worker command runs the same way
 ```
 
 ### Configure
 
-`RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config, read after R1) and `RATIO_ENGAGEMENT_USERS_FILE` (named users,
-after R2) are mounted read-only at `/config/`. The container reads them at start, so after editing run
+`RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config, read by the app today) and `RATIO_ENGAGEMENT_USERS_FILE` (named
+users, after R2) are mounted read-only at `/config/`. The container reads them at start, so after editing run
 `$C restart app`. Editors that replace the file (a new inode) break a single-file bind mount: keep editing in place,
 or mount a directory instead, and restart the container.
 
@@ -422,7 +418,7 @@ View: after R2, open the app on the loopback port and sign in. The existing work
 
 ### Known limitations
 
-- File import only: there are no live provider connectors in this release.
+- File import only (the import command arrives after R3): there are no live provider connectors in this release.
 - One engagement per instance: run a second instance for a second customer.
 - FOCUS parsing is verified on real exports for 1.0 only; FOCUS 1.1 to 1.4 have synthetic fixtures only.
 - The base image tag is not pinned by digest (shared with the simulation image); the Postgres and SeaweedFS images are.
@@ -432,10 +428,9 @@ View: after R2, open the app on the loopback port and sign in. The existing work
 
 To be filled in by those rows; the commands do not exist yet.
 
-- Import a billing file (operator CLI, row R3).
-- Init, backup, restore and reset (operator lifecycle command, row R11), including database role and bucket creation.
+- Import a billing file (operator CLI; R3 is pending).
+- Init, backup, restore and reset (operator lifecycle command; R11 is pending), including database role and bucket creation.
 - Named users file format and sign-in (row R2 is pending).
-- Config loading and fail-closed start (row R1).
 
 ## Saved customer workflow simulation
 

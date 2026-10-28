@@ -208,16 +208,18 @@ describe('engagement docs and smoke prerequisite', () => {
     expect(section).toMatch(/### Coming from other rows/);
   });
 
-  it('does not state unbuilt behavior in the present tense (R1/R2/R3/R11 are labeled)', () => {
+  it('does not state unbuilt behavior in the present tense (R1 today; R2/R3/R11 are labeled)', () => {
     const readme = read('README.md');
     const section = readme.slice(readme.indexOf('## Engagement mode'), readme.indexOf('## Saved customer workflow simulation'));
+    expect(readme.indexOf('## Engagement mode')).toBe(readme.lastIndexOf('## Engagement mode'));
     for (const line of section.split('\n')) {
-      if (/refuses to start|RATIO_MODE=engagement|src\/engagement\/config\.ts|named users|sign in/i.test(line) && !/^```/.test(line)) {
+      if (/refuses to start|RATIO_MODE=engagement|src\/engagement\/config\.ts|named users|sign in|\bimports?\b|backup|restore/i.test(line) && !/^```/.test(line)) {
         expect(line, line).toMatch(/after R[0-9]+|will|once R[0-9]+|R[0-9]+ (is|owns|pending)|not (yet )?(implemented|available)|today/i);
       }
     }
     expect(section).toMatch(/Works today/);
-    expect(section).toMatch(/After R1/);
+    expect(section).toMatch(/After R2/);
+    expect(section).not.toMatch(/after R1\b|needs R1\b|once R1\b/i);
     expect(section).toMatch(/restart app/);
     expect(section).not.toMatch(/up -d app\s*;? the container reads/);
     expect(section).toMatch(/directory|inode/i);
