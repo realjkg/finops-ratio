@@ -61,7 +61,11 @@ export function costDriver(ctx: AIContext): AIResponse {
 }
 
 export function savings(ctx: AIContext): AIResponse {
-  const opportunities = ctx.initiatives.filter((i) => i.savingsOpportunity > 0);
+  // N/A-budget initiatives keep their dollar opportunities (only budget-percent claims are withheld).
+  const opportunities = [
+    ...ctx.initiatives.filter((i) => i.savingsOpportunity > 0),
+    ...(ctx.omitted ?? []).filter((o) => (o.savingsOpportunity ?? 0) > 0).map((o) => ({ id: o.id, name: o.name, savingsOpportunity: o.savingsOpportunity as number })),
+  ];
   const text = [
     `Projected savings across the portfolio: **${formatUSD(ctx.summary.projectedSavings)}/mo**.`,
     `Top opportunities by initiative:`,

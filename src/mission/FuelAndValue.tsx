@@ -33,9 +33,10 @@ export function FuelAndValue({
 }: FuelAndValueProps) {
   const reducedMotion = useReducedMotion() ?? false;
   const shown = fuelPct === null ? 'N/A' : `${fuelPct}%`;
-  const valueText = `${fuelPct === null ? `N/A (${fuelNa ?? 'no evidence'})` : `${fuelPct}% of daily budget used`} — ${formatUSD(spentToday)} spent of ${formatUSD(
-    dailyBudget,
-  )}`;
+  // An invalid budget is never printed as currency or as a denominator.
+  const valueText = fuelPct === null
+    ? `N/A (${fuelNa ?? 'no evidence'}) — ${formatUSD(spentToday)} spent, budget N/A`
+    : `${fuelPct}% of daily budget used — ${formatUSD(spentToday)} spent of ${formatUSD(dailyBudget)}`;
 
   return (
     <div className="space-y-2">
@@ -75,7 +76,8 @@ export function FuelAndValue({
       <div className="flex items-center justify-between font-mono text-xs text-sub">
         <span>{shown}{fuelPct === null && fuelNa ? ` (${fuelNa})` : ''}</span>
         <span>
-          {formatUSD(spentToday)} <span className="text-dim">/ {formatUSD(dailyBudget)}</span>
+          {formatUSD(spentToday)}{' '}
+          {fuelPct === null ? <span className="text-sub">budget N/A</span> : <span className="text-dim">/ {formatUSD(dailyBudget)}</span>}
         </span>
       </div>
     </div>

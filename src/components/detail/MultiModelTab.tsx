@@ -14,7 +14,7 @@ import {
 } from '@/lib/modelCompare';
 import { MODEL_QUALITY_NOTE } from '@/data/models';
 import { formatRatio, formatSignedPct, formatUSD } from '@/lib/format';
-import { SCENARIO_REDUCTION_LABEL } from '@/lib/metricContracts';
+import { budgetConsumed, SCENARIO_REDUCTION_LABEL } from '@/lib/metricContracts';
 
 export function MultiModelTab({
   workload,
@@ -47,14 +47,16 @@ export function MultiModelTab({
   // at this volume breaks the workload's daily budget. Rendered as a warning —
   // never a block; the budget's throttle/pause thresholds enforce.
   const dailyBudget = workload.costs.daily_budget;
+  const dailyBudgetNa = budgetConsumed(0, dailyBudget).naReason;
   const overshoots = useMemo(() => {
     const found: Array<{ row: ModelCostRow; overshoot: OvershootProjection }> = [];
+    if (dailyBudgetNa) return found; // no valid budget to overshoot
     for (const row of rows) {
       const overshoot = projectedOvershoot(row.model, volume, dailyBudget);
       if (overshoot) found.push({ row, overshoot });
     }
     return found;
-  }, [rows, volume, dailyBudget]);
+  }, [rows, volume, dailyBudget, dailyBudgetNa]);
   // Pre-apply warning for the model picked in the simulation select.
   const selectedBreak = overshoots.find(
     (x) => x.row.model.model_name === choice,
@@ -81,6 +83,10 @@ export function MultiModelTab({
           <ModelRow key={row.model.id} row={row} />
         ))}
       </div>
+
+      {dailyBudgetNa && (
+        <p className="text-xs text-sub">Daily budget N/A ({dailyBudgetNa}): the overspend check is unavailable.</p>
+      )}
 
       {overshoots.length > 0 && (
         <div

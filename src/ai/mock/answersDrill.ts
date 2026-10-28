@@ -32,6 +32,7 @@ function workloadDetail(world: World, w: WorkloadFacts): Answer {
     `Cost ${usd(w.monthlySpend)}/mo · value ${usd(w.monthlyValue)}/mo · ${returnText(w.ratio)}${evid(w.evidence)}`,
     `Team: ${w.team ?? 'not present in this context'} · model: ${w.model ?? 'unknown'}${w.provider ? ` (${w.provider})` : ''}`,
     `Status: ${w.status ?? 'n/a'}` +
+      (w.budgetNa ? ' · budget N/A' : '') +
       (w.budgetConsumedPct !== null ? ` · budget consumed ${w.budgetConsumedPct}%` : '') +
       (w.monthlyBudget !== null ? ` of ${usd(w.monthlyBudget)}/mo` : '') +
       (w.costTrendPct !== null ? ` · MoM trend ${signedPct1(w.costTrendPct)}` : ''),

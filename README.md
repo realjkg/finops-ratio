@@ -321,13 +321,22 @@ Any other hosted OpenAI-compatible service works through `openllm` by pointing
 Gateway routes fail closed by default: with no token configured, or if the auth
 check itself fails, the answer is 401 or 503. Local fixture-only simulation needs
 `RATIO_SIMULATION=1` with `RATIO_ENV=development` or `test`; it never applies
-when a token or a live provider is configured, nor when `VERCEL_ENV` is
-`production`. Under `NODE_ENV=production` it also needs `RATIO_SIMULATION_IMAGE=1`,
-which only `infrastructure/simulation/Dockerfile` sets.
+when a token or a live provider is configured (that part covers the gateway gate only; the simulation routes do not look at the token). Two gates use this switch:
+
+- Gateway routes (`src/server/gateway/simulationMode.ts`): refuse when
+  `VERCEL_ENV=production`; under `NODE_ENV=production` they also need
+  `RATIO_SIMULATION_IMAGE=1`, which only `infrastructure/simulation/Dockerfile` sets.
+- Simulation routes (`/api/v1/simulation/*`, `src/simulation/server/enabled.ts`):
+  refuse when `VERCEL_ENV=production`. They do NOT look at `NODE_ENV` and do not need
+  `RATIO_SIMULATION_IMAGE` (CI acceptance and the local image run `next start`).
+
+Known limitation, security-sprint item: the two gates differ under
+`NODE_ENV=production` (the gateway needs the image opt-in, the simulation routes do not).
+`VERCEL_ENV` is matched exactly (`Production` or ` production` do not match).
 
 Rule for production deployments: never set `RATIO_SIMULATION_IMAGE`,
 `RATIO_SIMULATION`, or a `development` or `test` `RATIO_ENV`. The image opt-in
-alone never enables simulation, and `VERCEL_ENV=production` always refuses.
+alone never enables simulation, and `VERCEL_ENV=production` always refuses both gates.
 
 Durable design rules live in `.obvious/obvious.md` (Design Guidance) and the
 routine skills under `.obvious/skills/`. The full v1 design specification is

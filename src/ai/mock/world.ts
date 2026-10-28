@@ -94,7 +94,7 @@ function alertList(v: unknown): AIAlertSnapshot[] | null {
 export function omittedList(v: unknown): AIOmittedInitiative[] {
   return arr(v).filter((x): x is AIOmittedInitiative => {
     const r = rec(x);
-    return typeof r.id === 'string' && typeof r.name === 'string' && typeof r.reason === 'string' && OMITTED_STATUSES.includes(r.status as AIOmittedInitiative['status']);
+    return typeof r.id === 'string' && typeof r.name === 'string' && typeof r.reason === 'string' && OMITTED_STATUSES.includes(r.status as AIOmittedInitiative['status']) && (r.savingsOpportunity === undefined || (typeof r.savingsOpportunity === 'number' && within(r.savingsOpportunity, RANGE.usd)));
   });
 }
 
@@ -105,6 +105,7 @@ export function buildWorld(ctx: AIContext): World {
   const snaps = new Map(arr(c.workloads).filter(plain).map((w) => [w.id as string, w]));
   const seen = new Set<string>();
   const rows: WorkloadFacts[] = [];
+  const omittedIds = new Set(omittedList(c.omitted).map((o) => o.id));
   const rejected: string[] = [];
   const rejectedIds: string[] = [];
 
@@ -129,7 +130,13 @@ export function buildWorld(ctx: AIContext): World {
     const tokOut = field(s, 'tokensOutToday', RANGE.count, bad) ?? seed?.costs.tokens_out_today ?? null;
     const tokCached = field(s, 'tokensCachedToday', RANGE.count, bad) ?? seed?.costs.tokens_cached_today ?? null;
     const trend = field(s, 'costTrendPct', RANGE.trend, bad) ?? seed?.cost_trend_pct ?? null;
-    const budget = field(s, 'monthlyBudget', RANGE.usd, bad) ?? seed?.costs.monthly_budget ?? null;
+    // An invalid budget (zero, negative, sub-cent, non-finite) means "no usable budget", not a bad workload:
+    // the workload's dollars still count; only budget-percent claims are withheld.
+    const rawBudget = s.monthlyBudget;
+    const budgetInvalid = typeof rawBudget === 'number' && (!Number.isFinite(rawBudget) || rawBudget < 0.01);
+    // No seed fallback when the wire says the budget is N/A: the id is in `omitted`, or the field is present as null (NaN over JSON).
+    const budgetNa = budgetInvalid || omittedIds.has(id) || rawBudget === null;
+    const budget = budgetNa ? null : field(s, 'monthlyBudget', RANGE.usd, bad) ?? seed?.costs.monthly_budget ?? null;
     const cache = field(s, 'cacheHitRate', RANGE.rate, bad);
     const gates = field(s, 'governanceGatesPassed', RANGE.gates, bad);
     const consumed = field(i, 'budgetConsumedPct', RANGE.pct, bad);
@@ -152,6 +159,7 @@ export function buildWorld(ctx: AIContext): World {
       status: str(i.status),
       budgetConsumedPct: consumed,
       monthlyBudget: budget,
+      budgetNa: omittedIds.has(id),
       savings: savings ?? 0,
       cacheHitRate: cache,
       costTrendPct: trend,
@@ -168,7 +176,7 @@ export function buildWorld(ctx: AIContext): World {
   };
 
   for (const i of initiatives) add(i.id as string, i, snaps.get(i.id as string));
-  for (const o of omittedList(c.omitted)) add(o.id, { name: o.name, status: o.status }, snaps.get(o.id));
+  for (const o of omittedList(c.omitted)) add(o.id, { name: o.name, status: o.status, savingsOpportunity: o.savingsOpportunity }, snaps.get(o.id));
   for (const [id, s] of snaps) add(id, undefined, s);
 
   const dropped = arr(c.initiatives).filter((x) => !legacyInit(x) && !rejectedIds.includes(rec(x).id as string)).length + arr(c.workloads).filter((x) => !plain(x)).length; if (dropped) rejected.push(`${dropped} malformed entries`);

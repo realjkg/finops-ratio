@@ -54,6 +54,8 @@ export interface AIOmittedInitiative {
   name: string;
   status: (typeof OMITTED_STATUSES)[number];
   reason: string;
+  /** Projected monthly savings of this initiative (USD), so opportunity lists stay complete. */
+  savingsOpportunity?: number;
 }
 
 /** Lean initiative projection — executive vocabulary, sufficient for most questions. */
