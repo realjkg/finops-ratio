@@ -1,0 +1,3 @@
+R1 green: npx vitest run -> Test Files 216 passed, Tests 4026 passed (src/engagement/config.test.ts + src/server/costs/engagementTenant.test.ts new).
+lint, typecheck, build: clean. Mutations (each made a test fail, then reverted): drop one-cent rule, drop start<end, hash of re-serialized JSON,
+remove instrumentation call, allow RATIO_API_TENANT_ID in engagement mode, skip related_source resolution, skip release policy.
