@@ -217,7 +217,7 @@ describe('engagement docs and smoke prerequisite', () => {
       }
     }
     expect(section).toMatch(/Works today/);
-    expect(section).toMatch(/Needs R1/);
+    expect(section).toMatch(/After R1/);
     expect(section).toMatch(/restart app/);
     expect(section).not.toMatch(/up -d app\s*;? the container reads/);
     expect(section).toMatch(/directory|inode/i);

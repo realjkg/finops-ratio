@@ -94,6 +94,10 @@ services:
     restart: 'no'
     command: ['node', 'dist-worker/ingest/cli.js', 'doctor']
     environment:
+      # `staging`, not the image's `production`: src/ingest/config.ts refuses an http S3 endpoint under production, and
+      # the object store here is http on the internal network only. `staging` still refuses synthetic providers, test
+      # hooks and down migrations and enables no simulation (those need development or test).
+      RATIO_ENV: staging
       RATIO_MODE: engagement
       RATIO_ENGAGEMENT_CONFIG: /config/engagement.json
       RATIO_DATABASE_URL: postgres://ratio_engagement_worker:${RATIO_ENGAGEMENT_WORKER_PASSWORD:?set in .env.engagement}@postgres:5432/ratio
