@@ -1,10 +1,13 @@
-M9a PointFive MCP protocol client -- RED (tests committed before the implementation)
-Base: origin/main d71bb84
-Command: npx vitest run src/connectors/managed/pointfive
-Result: Test Files 1 failed (1); Tests: no tests -- ./mcpClient and ./sse do not exist yet
-(Failed to resolve import "./mcpClient"). The suite covers: initialize first, notifications/initialized,
-MCP-Protocol-Version + Mcp-Session-Id headers, Accept header, incrementing ids, version refusal,
-legacy-endpoint refusal, session-expiry re-initialize, 401/403 mapping with redaction, JSON-RPC errors,
-429/5xx bounded retry, timeout + notifications/cancelled, caller cancellation, malformed SSE,
-truncated stream, non-JSON, content type, id mismatch, oversized body, tools/list pagination and bounds.
-All servers in the suite are the SYNTHETIC local MCP server on 127.0.0.1.
+M9a PointFive MCP -- RED (tests committed before each implementation)
+PR 1 (protocol client), base origin/main d71bb84, commit 7054e5d:
+  npx vitest run src/connectors/managed/pointfive -> Test Files 1 failed; no tests
+  (./mcpClient and ./sse did not exist). Covers lifecycle, headers, ids, version and legacy refusal,
+  session expiry, 401/403, JSON-RPC errors, retry, timeout + cancel, malformed/truncated SSE,
+  oversized body, pagination. All against the SYNTHETIC local MCP server on 127.0.0.1.
+PR 2 (discovery, health, adapter), stacked on PR 1:
+  npx vitest run src/connectors/managed src/costsource/pointFive
+  -> Test Files 3 failed | 2 passed (5); Tests 3 failed | 51 passed (54)
+  health.test.ts: suite fails to load (./discovery, ./health, StreamableHttpPointFiveMcpClient missing);
+  pointFiveLiveAdapter.test.ts: ping-only health must report verification 'auth-verified' and must not say
+  "MCP reachable"; pointFiveUpstreamErrors.test.ts: the new client initializes first, so the fixed
+  messages name initialize.
