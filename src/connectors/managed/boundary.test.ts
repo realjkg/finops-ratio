@@ -62,7 +62,9 @@ function reachesWorkerOnly(entry: string): string | null {
 
 describe('managed connector boundary', () => {
   it('no pages/** file and no app module outside src/ingest and the managed tree reaches the worker-only managed modules', () => {
-    const entries = [...walk(path.join(ROOT, 'pages')), ...walk(path.join(ROOT, 'src')).filter((f) => !f.startsWith(path.join(ROOT, 'src', 'ingest') + path.sep) && !f.startsWith(MANAGED + path.sep)), path.join(ROOT, 'instrumentation.ts')];
+    // Test files are not web code (some drive the worker CLI through the ingest test harness).
+    const app = (f: string) => !/\.test\.tsx?$/.test(f) && !f.startsWith(path.join(ROOT, 'src', 'ingest') + path.sep) && !f.startsWith(MANAGED + path.sep);
+    const entries = [...walk(path.join(ROOT, 'pages')).filter((f) => !/\.test\.tsx?$/.test(f)), ...walk(path.join(ROOT, 'src')).filter(app), path.join(ROOT, 'instrumentation.ts')];
     expect(entries.length).toBeGreaterThan(100);
     const hits = entries.flatMap((f) => {
       const r = reachesWorkerOnly(f);

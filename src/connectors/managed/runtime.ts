@@ -50,7 +50,8 @@ export interface FetchOptions {
   tenantId: string;
   sourceKey: string;
   sourceId: string;
-  spec: ManagedSpec;
+  /** The spec, or a function reading it (its errors become a failed result with their code). */
+  spec: ManagedSpec | (() => ManagedSpec);
   range?: { from: string; to: string };
   registry?: RetrieverRegistry;
   resolveSecret: (ref: string) => SecretValue;
@@ -123,17 +124,24 @@ export function managedSpecFromEngagementFile(file: string | undefined, sourceId
 }
 
 export async function runManagedFetch(o: FetchOptions): Promise<FetchResult> {
-  const base = { connector: o.spec.connector, sourceKey: o.sourceKey };
   const secrets: string[] = [];
+  const base = { connector: 'unknown', sourceKey: o.sourceKey };
   const failed = (e: unknown, fallback: string, fixed: string): FetchResult => ({ status: 'failed', ...base, deliveries: [], error: { code: codeOf(e, fallback), message: messageOf(e, fixed, secrets) } });
-  const factory = (o.registry ?? managedRegistry).factory(o.spec.connector);
-  if (!factory) return failed(new ManagedError('CONNECTOR_NOT_REGISTERED', `no retriever is registered for connector ${o.spec.connector} in this build`), '', '');
+  let spec: ManagedSpec;
+  try {
+    spec = typeof o.spec === 'function' ? o.spec() : o.spec;
+  } catch (e) {
+    return failed(e, 'SPEC_UNAVAILABLE', 'the managed retrieval spec could not be read');
+  }
+  base.connector = spec.connector;
+  const factory = (o.registry ?? managedRegistry).factory(spec.connector);
+  if (!factory) return failed(new ManagedError('CONNECTOR_NOT_REGISTERED', `no retriever is registered for connector ${spec.connector} in this build`), '', '');
   let retriever: ManagedRetriever;
   let deliveries: Delivery[];
   try {
-    const secret = o.spec.secretRef ? o.resolveSecret(o.spec.secretRef) : undefined;
+    const secret = spec.secretRef ? o.resolveSecret(spec.secretRef) : undefined;
     if (secret) secrets.push(secret.reveal());
-    retriever = factory({ params: o.spec.params, secret });
+    retriever = factory({ params: spec.params, secret });
     deliveries = await retriever.listDeliveries(o.range);
   } catch (e) {
     return failed(e, 'RETRIEVAL_FAILED', 'the connector failed before listing deliveries');

@@ -125,6 +125,9 @@ describe('runManagedFetch', () => {
     const b = setup(factory, { resolveSecret: () => { throw Object.assign(new Error('secret fake/key is missing'), { code: 'SECRET_MISSING' }); } });
     expect(await runManagedFetch(b.opts)).toMatchObject({ status: 'failed', error: { code: 'SECRET_MISSING', message: 'secret fake/key is missing' } });
     expect(b.stage).not.toHaveBeenCalled();
+    const s = setup(factory, { spec: () => { throw new ManagedError('SOURCE_NOT_IN_ENGAGEMENT_CONFIG', 'the engagement config has no source managed-src'); } });
+    expect(await runManagedFetch(s.opts)).toMatchObject({ status: 'failed', connector: 'unknown', error: { code: 'SOURCE_NOT_IN_ENGAGEMENT_CONFIG' } });
+    expect(s.stage).not.toHaveBeenCalled();
     const c = setup(fake([]).factory);
     expect(await runManagedFetch(c.opts)).toMatchObject({ status: 'succeeded', deliveries: [], note: 'the connector listed no deliveries for the range' });
   });
