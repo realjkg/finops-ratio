@@ -33,3 +33,18 @@ $ npx vitest run src/ingest/cli.worker.test.ts
 $ npx vitest run src/ingest/import/stageFile.test.ts
   The new comma-free-line test passes on the current tokenizer and fails with the surviving mutant
   `blank = r.count === 0` (1 failed | 26 passed), so it is pinned.
+
+Review round 3 (PR #143) RED, on c737d78 (Postgres 16 + SeaweedFS, CI image digests):
+$ npx vitest run --config vitest.db.config.ts src/ingest/import/importRace.db.test.ts
+  Tests 4 failed | 7 passed (11):
+  - another run holds a live lease (taken with acquireRun, never finished): `import-file --file part2
+    --restate` exits 4 ALREADY_RUNNING, but S3 holds 3 objects instead of 2 (its data and manifest were
+    staged). With that assertion disabled, the deterministic repro continues: after the lease expires
+    a plain `sync` exits 0 with period 2024-09 `published`, rowCount 442 (part 2's rows), replacing A;
+  - a plain sync started while the import stages ran (it should be refused ALREADY_RUNNING);
+  - staging that fails leaves no finished run (the lease is not taken before staging yet);
+  - a failed listing (no manifest bytes) of the staged period is reported IMPORT_MANIFEST_REPLACED
+    instead of its own code (MANIFEST_INVALID).
+$ npx vitest run src/ingest/cli.worker.test.ts
+  Tests 1 failed | 19 passed (20): `import-file --prefix /home/... --bucket ... --display-name ...`
+  copied all three values into the record's args (expected: counted as 6 unrecognized arguments).
