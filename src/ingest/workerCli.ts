@@ -26,8 +26,9 @@
 // IMPORT_TOO_LARGE). Overlap with another source's published periods is only reported (overlapNotice).
 //
 // Exit codes: 0 ok · 1 failure · 2 usage/configuration · 3 import refused (would restate published
-// data; nothing written) · 4 another run holds the lease, or another import of the source is in
-// progress (nothing written; run it again afterwards) · 5 import larger than the cap.
+// data; nothing written) · 4 another run holds the lease (or its lock timed out), or another import of
+// the source is in progress; for import-file both are checked before anything is staged, so nothing
+// was written (run it again afterwards) · 5 import larger than the cap.
 import fs from 'fs';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Pool } from 'pg';
@@ -243,11 +244,14 @@ const RECORDED: Record<string, (v: string) => boolean> = {
   'control-rows': (v) => /^[0-9]{1,15}$/.test(v),
   'control-billed': isDecimalString,
   currency: (v) => /^[A-Z]{3}$/.test(v),
-  // Operator-chosen names (not row values), bounded as before.
+  // Operator-chosen names (not row values), bounded as before; recorded for `source add` only.
   bucket: () => true,
   prefix: () => true,
   'display-name': () => true,
 };
+
+/** Free-form values recorded only for `source add`, the one command that takes them (review round 3). */
+const SOURCE_ADD_ONLY = new Set(['bucket', 'prefix', 'display-name']);
 
 function argsForRecord(argv: string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -264,7 +268,7 @@ function argsForRecord(argv: string[]): Record<string, unknown> {
     } else if (key === 'metadata') {
       out.metadata = 'supplied';
       if (hasValue) i++;
-    } else if (Object.hasOwn(RECORDED, key)) {
+    } else if (Object.hasOwn(RECORDED, key) && ((argv[0] === 'source' && argv[1] === 'add') || !SOURCE_ADD_ONLY.has(key))) {
       if (hasValue) {
         const v = String(argv[++i]);
         out[key] = RECORDED[key](v) ? v.slice(0, 80) : '[invalid]';

@@ -63,7 +63,7 @@ values (`files`), and a count of anything unrecognized (`unrecognizedArguments`)
 | 1 | failure, including a quarantined or failed period |
 | 2 | usage or configuration error |
 | 3 | **depends on the command**: `migrate --status` = the database does not match the code (pending migrations); `import-file` = refused, `PERIOD_ALREADY_PUBLISHED` (the delivery would change an already-published period; nothing was written) |
-| 4 | busy: another run holds the source's lease (`ALREADY_RUNNING`), its lock timed out (`LOCK_TIMEOUT`), or, for `import-file`, another import of the source is in progress (`ALREADY_RUNNING`, nothing written) |
+| 4 | busy: another run holds the source's lease (`ALREADY_RUNNING`), its lock timed out (`LOCK_TIMEOUT`), or, for `import-file`, another import of the source is in progress (`ALREADY_RUNNING`); `import-file` checks both before it stages anything, so nothing was written |
 | 5 | `import-file` only: the delivery is larger than the cap (`IMPORT_TOO_LARGE`, 128 MiB decompressed, all files together), refused before it is read |
 
 ## 1. Migrate
@@ -180,7 +180,12 @@ npm run -s worker -- import-file --tenant <uuid> --source focus-aws --file <a.cs
 - One import of a source at a time: the import holds a lock on the source from
   before the restatement check until its sync ends. A second import meanwhile
   exits 4 (`ALREADY_RUNNING`) having written nothing; run it again afterwards
-  (it then sees the first import's published content). A period whose staged
+  (it then sees the first import's published content). The import also takes
+  the source's run lease before it stages anything and its sync runs under it:
+  while another run (a sync, a backfill, a replay, or a crashed one until its
+  lease expires) holds a live lease, the import exits 4 (`ALREADY_RUNNING`)
+  with nothing written to S3, so a later `sync` has nothing of it to publish;
+  a `sync` started while the import stages is refused (exit 4). A period whose staged
   manifest was replaced by another writer fails `IMPORT_MANIFEST_REPLACED`
   (exit 1, nothing published for it); an import never reports `published` for
   data it did not stage.

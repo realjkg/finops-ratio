@@ -60,7 +60,14 @@ export interface RunSyncOptions {
    * that is not listed, fails IMPORT_MANIFEST_REPLACED and nothing is published for it.
    */
   expectManifests?: ReadonlyMap<string, string>;
+  /**
+   * `import-file` (R3 review round 3): the run lease, already taken with acquireRun BEFORE the delivery was
+   * staged, so a refused import writes nothing. The run then uses it instead of acquiring one.
+   */
+  acquired?: AcquiredRun;
 }
+
+export type AcquiredRun = Awaited<ReturnType<typeof acquireRun>>;
 
 export const MANIFEST_REPLACED = 'IMPORT_MANIFEST_REPLACED';
 const MANIFEST_REPLACED_MESSAGE =
@@ -103,13 +110,15 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   const secrets = opts.secrets ?? [];
   const clean = (s: string) => redact(s, secrets);
 
-  const { lease, source: sourceRow, abandoned, discardedBatches } = await acquireRun(opts.pool, tenantId, opts.sourceKey, {
-    kind: RUN_KIND[opts.mode],
-    ttlSeconds: settings.leaseTtlSeconds,
-    periodFrom: opts.range?.from,
-    periodTo: opts.range?.to,
-  });
-  log('run.started', { runId: lease.runId, mode: opts.mode, abandonedRuns: abandoned.length, discardedStagedBatches: discardedBatches });
+  const { lease, source: sourceRow, abandoned, discardedBatches } =
+    opts.acquired ??
+    (await acquireRun(opts.pool, tenantId, opts.sourceKey, {
+      kind: RUN_KIND[opts.mode],
+      ttlSeconds: settings.leaseTtlSeconds,
+      periodFrom: opts.range?.from,
+      periodTo: opts.range?.to,
+    }));
+  if (!opts.acquired) log('run.started', { runId: lease.runId, mode: opts.mode, abandonedRuns: abandoned.length, discardedStagedBatches: discardedBatches });
 
   // Background heartbeat so a long capture/parse of one large artifact cannot
   // outlive the lease — but ONLY while the run makes progress (bytes read, rows
@@ -241,18 +250,19 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
             continue;
           }
         }
-        if (notStagedHere(period, manifest)) {
-          periods.push({ billingPeriod: period, outcome: 'failed', code: MANIFEST_REPLACED, message: MANIFEST_REPLACED_MESSAGE });
-          log('period.failed', { runId: lease.runId, period, code: MANIFEST_REPLACED });
-          continue;
-        }
         if (runAbort.signal.aborted) {
         periods.push({ billingPeriod: period, outcome: 'failed', code: 'MAX_RUN_EXCEEDED', message: messageOf(runAbort.signal.reason) });
         continue;
       }
+      // A failed listing reports its own code (review round 3), also for a period this import staged.
       if (!listing.ok) {
           periods.push({ billingPeriod: period, outcome: 'failed', code: listing.code, message: clean(listing.message) });
           log('period.failed', { runId: lease.runId, period, code: listing.code });
+          continue;
+        }
+        if (notStagedHere(period, manifest)) {
+          periods.push({ billingPeriod: period, outcome: 'failed', code: MANIFEST_REPLACED, message: MANIFEST_REPLACED_MESSAGE });
+          log('period.failed', { runId: lease.runId, period, code: MANIFEST_REPLACED });
           continue;
         }
         const prev = checkpoint[period];
@@ -282,8 +292,8 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
                   // The re-listed manifest is what the batch will be built from: evidence first (review M1).
                   const freshManifest = fresh.ok ? fresh.set.manifest : fresh.manifest;
                   if (freshManifest) manifestEvidence.push(await captureManifest(opts.evidence, lease.tenantId, lease.sourceId, freshManifest.bytes, runAbort.signal, manifestWatch));
-                  if (notStagedHere(period, freshManifest)) throw new IngestError(MANIFEST_REPLACED, MANIFEST_REPLACED_MESSAGE);
                   if (!fresh.ok) throw new IngestError(fresh.code, clean(fresh.message));
+                  if (notStagedHere(period, freshManifest)) throw new IngestError(MANIFEST_REPLACED, MANIFEST_REPLACED_MESSAGE);
                   set = fresh.set;
                   log('period.relisted', { runId: lease.runId, period });
                 }

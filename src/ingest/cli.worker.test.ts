@@ -96,6 +96,20 @@ describe('worker CLI (no database)', () => {
     expect(g.out.concat(g.err).join('\n')).not.toContain('SECRET');
   });
 
+  it('--bucket, --prefix and --display-name are recorded only for source add; on any other command they are counted, never copied', async () => {
+    const i = await run(['import-file', '--tenant', T, '--source', 'focus-main', '--file', '/a.csv', '--prefix', '/home/SECRET/x', '--bucket', 'SECRET-b', '--display-name', 'SECRET n'], { ...env, RATIO_ENV: 'test' });
+    expect(i.code).toBe(2);
+    expect(JSON.parse(i.out[0]).args).toEqual({ tenant: T, source: 'focus-main', files: 1, unrecognizedArguments: 6 });
+    const s = await run(['sync', '--tenant', T, '--source', 'focus-main', '--prefix', '/home/SECRET/x'], { ...env, RATIO_ENV: 'test' });
+    expect(s.code).toBe(2);
+    expect(JSON.parse(s.out[0]).args).toEqual({ tenant: T, source: 'focus-main', unrecognizedArguments: 2 });
+    for (const r of [i, s]) expect(r.out.concat(r.err).join('\n')).not.toContain('SECRET');
+    // source add keeps them (operator-chosen names), as before.
+    const a = await run(['source', 'add', '--tenant', T, '--key', 'focus-aws', '--providers', 'AWS', '--bucket', 'drop-b', '--prefix', 'p/q', '--display-name', 'Drop', '--bogus'], { ...env, RATIO_ENV: 'test' });
+    expect(a.code).toBe(2);
+    expect(JSON.parse(a.out[0]).args).toEqual({ tenant: T, key: 'focus-aws', providers: 'AWS', bucket: 'drop-b', prefix: 'p/q', 'display-name': 'Drop', unrecognizedArguments: 1 });
+  });
+
   it('missing RATIO_DATABASE_URL is a configuration error (exit 2)', async () => {
     const r = await run(['sync', '--tenant', T, '--source', 'focus-main'], {});
     expect(r.code).toBe(2);
