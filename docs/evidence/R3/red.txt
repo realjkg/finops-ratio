@@ -1,8 +1,7 @@
-R3 part 1 (staging + declared providers) RED, 2026-10-28, base origin/main d71bb84.
-Tests committed before the implementation.
+R3 part 2 (source add, import-file, stageAndSync, normalizer seam) RED, 2026-10-28,
+on top of R3 part 1 (feat/r3-file-import-staging). Tests committed before the implementation.
 
-$ npx vitest run src/ingest/focus/provider.test.ts src/ingest/worker/sourceFactory.test.ts src/ingest/import/stageFile.test.ts
-  Test Files 3 failed (3); Tests 5 failed | 34 passed (39)
-  stageFile.test.ts does not load: ./stageFile does not exist (11 tests not collected).
-  provider.test.ts: 4 new R3 cases fail (no KNOWN_FILE_DROP_PROVIDERS, no ratio-file-drop policy).
-  sourceFactory.test.ts: 1 new R3 case fails (the factory refuses layout ratio-file-drop).
+$ npx vitest run src/ingest/import/normalizer.test.ts
+  Test Files 1 failed (1): ./normalizer does not exist (4 tests not collected).
+$ npx vitest run --config vitest.db.config.ts src/ingest/import/importFile.db.test.ts   (local Postgres 16 + SeaweedFS)
+  Test Files 1 failed (1); Tests 9 failed (9): `source add` and `import-file` are unknown commands.
