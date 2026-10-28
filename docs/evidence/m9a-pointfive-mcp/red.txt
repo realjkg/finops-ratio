@@ -1,0 +1,23 @@
+M9a PointFive MCP protocol client -- RED (tests committed before the implementation)
+Base: origin/main d71bb84
+Command: npx vitest run src/connectors/managed/pointfive
+Result: Test Files 1 failed (1); Tests: no tests -- ./mcpClient and ./sse do not exist yet
+(Failed to resolve import "./mcpClient"). The suite covers: initialize first, notifications/initialized,
+MCP-Protocol-Version + Mcp-Session-Id headers, Accept header, incrementing ids, version refusal,
+legacy-endpoint refusal, session-expiry re-initialize, 401/403 mapping with redaction, JSON-RPC errors,
+429/5xx bounded retry, timeout + notifications/cancelled, caller cancellation, malformed SSE,
+truncated stream, non-JSON, content type, id mismatch, oversized body, tools/list pagination and bounds.
+All servers in the suite are the SYNTHETIC local MCP server on 127.0.0.1.
+
+--- Review fixes on #144 (M3/M4), RED ---
+Base: feat/m9a-pointfive-mcp-protocol after merging origin/main 3fa927b.
+Command: npx vitest run src/connectors/managed/pointfive
+Result: Tests 3 failed | 37 passed (40). Failing (M3, behavior not implemented yet):
+  - Retry-After of 60 s (above the 10 s cap) must fail with RETRY_AFTER_TOO_LONG and not retry early
+    (the old code capped the wait to 10 s and retried).
+  - Retry-After as an HTTP-date must be parsed (the old code fell back to 250 ms backoff).
+  - HTTP-date beyond the cap fails; a date in the past retries at once.
+The other new tests (M4) pass on the old code by design: they exist to kill mutations that
+survived the review (404 without a session, initialize never cancelled, CR/LF split across
+chunks, server request reusing our id, session-id characters, timer cleared on completion,
+single re-initialize). Typecheck is RED too: the `now` clock option does not exist yet.
