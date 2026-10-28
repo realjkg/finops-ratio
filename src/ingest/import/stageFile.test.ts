@@ -176,6 +176,19 @@ describe('R3 stageFile review: input forms the worker accepts', () => {
     }
   });
 
+  // Review round 2 (surviving mutant): only an EMPTY line is skipped; a non-empty line without a comma
+  // is a one-field record and is refused (the worker would refuse it too), never silently dropped.
+  it('a non-empty line without a comma is a ragged record (LF and CRLF, one input and several), never skipped as blank', () => {
+    const lf = mini(['2024-09-01,AWS,USD,1', 'x', '2024-09-01,AWS,USD,2']);
+    const crlf = Buffer.from(lf.toString('utf8').replaceAll('\n', '\r\n'));
+    for (const b of [lf, crlf]) {
+      expect(() => stageFile(b, { location: LOC })).toThrow(/^the file, record 3 has 1 fields, the header has 4$/);
+      expect(() => stageFile([{ name: 'a', bytes: mini(['2024-09-01,AWS,USD,1']) }, { name: 'b', bytes: b }], { location: LOC })).toThrow(/^file 2, record 3 has 1 fields/);
+    }
+    // A comma-free last line without a line ending, too.
+    expect(() => stageFile(Buffer.from(`${MINI_HEADER}\n2024-09-01,AWS,USD,1\nx`), { location: LOC })).toThrow(/^the file, record 3 has 1 fields/);
+  });
+
   it('messages read "the file, record N" (one input) and "file K, record N" (several inputs)', () => {
     const ragged = mini(['2024-09-01,AWS,USD']);
     let err: unknown;
