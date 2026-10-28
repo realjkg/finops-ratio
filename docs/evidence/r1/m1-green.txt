@@ -1,0 +1,8 @@
+R1 review fix M1 (GREEN)
+npx vitest run -> Test Files 216 passed, Tests 4054 passed. lint, typecheck, build: clean (no Edge-runtime warning; register() body is under a positive NEXT_RUNTIME === 'nodejs' check).
+End to end (SYNTHETIC config, tenantId replaced by a marker string):
+  RATIO_MODE=engagement RATIO_ENGAGEMENT_CONFIG=<bad> next start -> exit code 1, one line:
+    {"event":"engagement_config_invalid","problems":["tenantId: must be a canonical UUID"]}   (marker string not in output)
+  same with the valid example config -> keeps running (stopped by timeout, 124).
+Mutations (each made a test fail, then reverted): drop process.exit(1); exit(0); log the config file contents;
+log the config path; drop the log line; allow related_source naming its own source; MAX_BYTES + 1; UUID_RE drift from src/ingest/db/tenant.ts.
