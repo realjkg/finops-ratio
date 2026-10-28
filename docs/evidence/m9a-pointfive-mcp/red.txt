@@ -1,0 +1,42 @@
+M9a PointFive MCP -- RED (tests committed before each implementation)
+PR 1 (protocol client), base origin/main d71bb84, commit 7054e5d:
+  npx vitest run src/connectors/managed/pointfive -> Test Files 1 failed; no tests
+  (./mcpClient and ./sse did not exist). Covers lifecycle, headers, ids, version and legacy refusal,
+  session expiry, 401/403, JSON-RPC errors, retry, timeout + cancel, malformed/truncated SSE,
+  oversized body, pagination. All against the SYNTHETIC local MCP server on 127.0.0.1.
+PR 2 (discovery, health, adapter), stacked on PR 1:
+  npx vitest run src/connectors/managed src/costsource/pointFive
+  -> Test Files 3 failed | 2 passed (5); Tests 3 failed | 51 passed (54)
+  health.test.ts: suite fails to load (./discovery, ./health, StreamableHttpPointFiveMcpClient missing);
+  pointFiveLiveAdapter.test.ts: ping-only health must report verification 'auth-verified' and must not say
+  "MCP reachable"; pointFiveUpstreamErrors.test.ts: the new client initializes first, so the fixed
+  messages name initialize.
+
+--- Review fixes on #144 (M3/M4), RED ---
+Base: feat/m9a-pointfive-mcp-protocol after merging origin/main 3fa927b.
+Command: npx vitest run src/connectors/managed/pointfive
+Result: Tests 3 failed | 37 passed (40). Failing (M3, behavior not implemented yet):
+  - Retry-After of 60 s (above the 10 s cap) must fail with RETRY_AFTER_TOO_LONG and not retry early
+    (the old code capped the wait to 10 s and retried).
+  - Retry-After as an HTTP-date must be parsed (the old code fell back to 250 ms backoff).
+  - HTTP-date beyond the cap fails; a date in the past retries at once.
+The other new tests (M4) pass on the old code by design: they exist to kill mutations that
+survived the review (404 without a session, initialize never cancelled, CR/LF split across
+chunks, server request reusing our id, session-id characters, timer cleared on completion,
+single re-initialize). Typecheck is RED too: the `now` clock option does not exist yet.
+
+--- Review fixes on #146 (B1/M1/M2), RED ---
+Base: feat/m9a-pointfive-health after merging the #144 review fixes.
+Command: npx vitest run src/connectors src/costsource
+Result: Test Files 3 failed | 47 passed (50); Tests 17 failed | 861 passed (878). Failing:
+  - B1 pointFiveBillingRole.test.ts (4): POINTFIVE_BILLING_ROLE_CONFIRMED missing, descriptor not
+    roleConfirmed:false, transport billing not refused, and fetchAiSpendRatio counted pointfive-live
+    rows from a SYNTHETIC server in overall/headline.
+  - M1 health.test.ts (4): a 401/403 on initialize was 'auth-verified'; now configured-not-verified
+    with a reason (the old test asserting 'auth-verified' is updated, not weakened: it now asserts the
+    stricter state and the reason). 405 on initialize lacked an actionable stage message.
+  - M2 pointFiveVerificationGate.dom.test.tsx (9): sessionStateForHealth missing; the store opened a
+    session on reachable && authed even for auth-verified/degraded; no degraded session state in the UI.
+Pass on the old code by design (mutation killers): tools-capability check (M5), invalid
+POINTFIVE_MCP_TOOL_MAP fails closed (M14). The billing-window argument test moved to
+pointFiveBillingOptIn.test.ts (runs with the opt-in constant flipped by a module mock).

@@ -1,0 +1,83 @@
+{
+  "engagementId": "example-focus-sample",
+  "tenantId": "5f0c1a7e-2b3d-4c5e-8f60-71829a3b4c5d",
+  "displayName": "SYNTHETIC example engagement (public FOCUS 1.0 sample)",
+  "currency": "USD",
+  "sources": [
+    {
+      "id": "aws-focus-sample",
+      "providers": ["AWS"],
+      "layout": "single-file",
+      "metadata": {
+        "provider": "AWS",
+        "source_kind": "focus-export",
+        "schema_version": "1.0",
+        "cost_basis": "focus-native",
+        "dataset": "FinOps Foundation FOCUS 1.0 sample data, AWS rows (CSV)",
+        "source_role": "authoritative",
+        "versions": {
+          "provider_product": "unknown",
+          "api_version": "unknown",
+          "export_schema_version": "unknown",
+          "schema_snapshot_hash": "unknown",
+          "focus_version": "1.0",
+          "mapping_version": "unknown",
+          "canonical_model_version": "unknown"
+        },
+        "provenance": "official-example",
+        "sanitization": "SYNTHETIC example. Public FinOps Foundation FOCUS 1.0 sample data (CC BY 4.0), used as published; no customer data.",
+        "scope": {
+          "accounts": "pseudonymized-identifiers",
+          "period_start": "2024-09-01T00:00:00Z",
+          "period_end": "2024-10-01T00:00:00Z",
+          "period_end_semantics": "exclusive",
+          "timezone": "UTC",
+          "completeness": "explicit-subset",
+          "subset_description": "AWS rows of the 1,000-row extract of the public sample (focus_sample.csv); not a complete provider invoice."
+        },
+        "delivery": {
+          "format": "csv",
+          "compression": "none",
+          "manifest": "not-provided",
+          "refresh_behavior": "unknown"
+        },
+        "financial": {
+          "currencies": ["USD"],
+          "billed_cost_total": { "USD": "18.00663861840" },
+          "effective_cost_total": { "USD": "13.00000000000" },
+          "credits_coverage": "included",
+          "tax_coverage": "unknown",
+          "control_total_source": "export-query",
+          "known_differences": "Totals computed over the exact supplied file for AWS rows (fixtures/focus-1.0-sample/control-totals.json). The extract contains one AWS Credit row."
+        },
+        "overlap": {
+          "also_present_in_other_source": "no",
+          "related_source": "none"
+        }
+      }
+    }
+  ],
+  "allocation": {
+    "workloadTagKey": "application",
+    "ownerTagKey": "business_unit",
+    "subAccountMap": { "11353890204": "BrightPathMatrix" },
+    "workloads": [
+      { "id": "BrightPathMatrix", "owner": "PeoriaData" },
+      { "id": "ZoomMapMax", "owner": "TempeAI" }
+    ],
+    "sharedCostRules": [{ "id": "split-untagged", "rule": "proportional_to_attributed" }]
+  },
+  "budgets": [
+    { "workload": "BrightPathMatrix", "monthly": "20.00" },
+    { "workload": "ZoomMapMax", "monthly": "5.00" }
+  ],
+  "scenarios": [
+    {
+      "id": "bright-path-haiku",
+      "workload": "BrightPathMatrix",
+      "currentModel": "mdl-claude-sonnet",
+      "candidateModel": "mdl-claude-haiku",
+      "assumptions": { "inputTokensPerMonth": 50000000, "outputTokensPerMonth": 10000000 }
+    }
+  ]
+}

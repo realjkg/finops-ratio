@@ -8,6 +8,7 @@
 //
 // Validated at startup (instrumentation register) and on every request.
 // Missing or invalid ⇒ the route fails closed (503 not_configured).
+import { engagementConfigFromEnv, engagementMode } from '@/engagement/config';
 import { isTenantId } from '@/ingest/db/tenant';
 
 type Env = Record<string, string | undefined>;
@@ -16,8 +17,20 @@ export type PublishedCostsConfig = { ok: true; tenantId: string; readerUrl: stri
 
 export function publishedCostsConfig(env: Env): PublishedCostsConfig {
   const problems: string[] = [];
-  const tenant = env.RATIO_API_TENANT_ID ?? '';
-  if (!isTenantId(tenant)) problems.push('RATIO_API_TENANT_ID is missing or not a canonical UUID');
+  let tenant = env.RATIO_API_TENANT_ID ?? '';
+  let engagement = false;
+  try {
+    engagement = engagementMode(env);
+  } catch {
+    problems.push('RATIO_MODE is invalid');
+  }
+  if (engagement) {
+    // Engagement mode: the tenant comes from the engagement config, never from a separate variable.
+    if (tenant.trim() !== '') problems.push('RATIO_API_TENANT_ID must not be set in engagement mode (the tenant comes from the engagement config)');
+    const e = engagementConfigFromEnv(env);
+    if (e.ok) tenant = e.config.tenantId;
+    else problems.push(...e.problems);
+  } else if (!isTenantId(tenant)) problems.push('RATIO_API_TENANT_ID is missing or not a canonical UUID');
   const readerUrl = env.RATIO_READER_DATABASE_URL?.trim() ?? '';
   if (readerUrl === '') problems.push('RATIO_READER_DATABASE_URL is missing');
   return problems.length ? { ok: false, problems } : { ok: true, tenantId: tenant.toLowerCase(), readerUrl };
@@ -30,7 +43,13 @@ export function publishedCostsConfig(env: Env): PublishedCostsConfig {
  * route will answer 503; the app itself keeps starting. Returns validity.
  */
 export function checkPublishedCostsStartup(env: Env): boolean {
-  const configured = Boolean(env.RATIO_API_TENANT_ID?.trim() || env.RATIO_READER_DATABASE_URL?.trim());
+  let engagement: boolean;
+  try {
+    engagement = engagementMode(env);
+  } catch {
+    engagement = true; // an invalid RATIO_MODE is never silent
+  }
+  const configured = engagement || Boolean(env.RATIO_API_TENANT_ID?.trim() || env.RATIO_READER_DATABASE_URL?.trim());
   if (!configured) return true;
   const c = publishedCostsConfig(env);
   if (c.ok) return true;

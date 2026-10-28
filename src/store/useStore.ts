@@ -11,7 +11,7 @@ import type {
   ConnectorSession,
   IngestRun,
 } from '@/connectors/ingestLanding';
-import { currentMonthWindow, FOCUS_DOOR_WALK_ID, isLiveDataRefusal } from '@/connectors/ingestLanding';
+import { currentMonthWindow, FOCUS_DOOR_WALK_ID, isLiveDataRefusal, sessionStateForHealth } from '@/connectors/ingestLanding';
 import type {
   Alert,
   BudgetProfile,
@@ -96,7 +96,7 @@ interface AppState {
   connectorSessions: Record<string, ConnectorSession>;
   ingestRuns: Record<string, IngestRun>;
   connectorBusy: { sourceId: string; phase: ConnectorBusyPhase } | null;
-  /** Health-probe connect for seam adapters: open iff reachable && authed. */
+  /** Health-probe connect: open only when the health check earns it (sessionStateForHealth). */
   connectConnector: (sourceId: string, client: CostSourceClient) => Promise<void>;
   /** Immediate open for the direct-ingest door — no external dependency to probe. */
   openConnectorSession: (sourceId: string) => void;
@@ -169,7 +169,9 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // -- Connector walk -------------------------------------------------------
-  // Connect runs the seam's own health probe; success iff reachable && authed.
+  // Connect runs the seam's own health probe. It opens only when the probe earns
+  // it (sessionStateForHealth): a verification-bearing connector must report
+  // source-access-verified, and `degraded` is shown as degraded, never open.
   // The seam's failure detail is stored verbatim — the demo shows the honest
   // reason (ships dark, missing env), never a friendlier gloss; an auth refusal is `locked`.
   connectConnector: async (sourceId, client) => {
@@ -178,10 +180,9 @@ export const useStore = create<AppState>((set, get) => ({
     const openedAt = new Date().toISOString();
     try {
       const health = await client.healthCheck(sourceId);
+      const state = sessionStateForHealth(health, { simulated: client.simulated === true });
       const session: ConnectorSession =
-        health.reachable && health.authed
-          ? { state: 'open', openedAt }
-          : { state: 'error', error: health.detail, openedAt };
+        state === 'open' ? { state, openedAt } : { state, error: health.detail, openedAt };
       set((state) => ({ connectorSessions: { ...state.connectorSessions, [sourceId]: session } }));
     } catch (err) {
       set((state) => ({
