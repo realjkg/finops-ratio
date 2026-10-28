@@ -49,7 +49,29 @@ export interface RunSyncOptions {
   log?: LogFn;
   /** Extra literal secrets to redact from anything persisted. */
   secrets?: readonly string[];
+  /**
+   * `import-file --restate` (R3 review M3): an UNVERIFIED published batch whose data is unchanged is
+   * re-reconciled against the listing's set-level controls in a new batch keyed on (data, controls).
+   */
+  restateControls?: boolean;
+  /**
+   * `import-file` (R3 review round 2 B1): billing period -> sha256 of the manifest this import staged. A
+   * listed period whose manifest is not that one (another import replaced it at the period's one key), or
+   * that is not listed, fails IMPORT_MANIFEST_REPLACED and nothing is published for it.
+   */
+  expectManifests?: ReadonlyMap<string, string>;
+  /**
+   * `import-file` (R3 review round 3): the run lease, already taken with acquireRun BEFORE the delivery was
+   * staged, so a refused import writes nothing. The run then uses it instead of acquiring one.
+   */
+  acquired?: AcquiredRun;
 }
+
+export type AcquiredRun = Awaited<ReturnType<typeof acquireRun>>;
+
+export const MANIFEST_REPLACED = 'IMPORT_MANIFEST_REPLACED';
+const MANIFEST_REPLACED_MESSAGE =
+  "the period's manifest is not the one this import staged (another import of this source replaced it); nothing of this import was published for this period";
 
 const SOURCE_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 
@@ -88,13 +110,15 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
   const secrets = opts.secrets ?? [];
   const clean = (s: string) => redact(s, secrets);
 
-  const { lease, source: sourceRow, abandoned, discardedBatches } = await acquireRun(opts.pool, tenantId, opts.sourceKey, {
-    kind: RUN_KIND[opts.mode],
-    ttlSeconds: settings.leaseTtlSeconds,
-    periodFrom: opts.range?.from,
-    periodTo: opts.range?.to,
-  });
-  log('run.started', { runId: lease.runId, mode: opts.mode, abandonedRuns: abandoned.length, discardedStagedBatches: discardedBatches });
+  const { lease, source: sourceRow, abandoned, discardedBatches } =
+    opts.acquired ??
+    (await acquireRun(opts.pool, tenantId, opts.sourceKey, {
+      kind: RUN_KIND[opts.mode],
+      ttlSeconds: settings.leaseTtlSeconds,
+      periodFrom: opts.range?.from,
+      periodTo: opts.range?.to,
+    }));
+  if (!opts.acquired) log('run.started', { runId: lease.runId, mode: opts.mode, abandonedRuns: abandoned.length, discardedStagedBatches: discardedBatches });
 
   // Background heartbeat so a long capture/parse of one large artifact cannot
   // outlive the lease — but ONLY while the run makes progress (bytes read, rows
@@ -203,6 +227,17 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         }
       }
 
+      const notStagedHere = (period: string, m: { bytes: Buffer } | undefined) => {
+        const want = opts.expectManifests?.get(period);
+        return want !== undefined && (!m || crypto.createHash('sha256').update(m.bytes).digest('hex') !== want);
+      };
+      for (const period of opts.expectManifests?.keys() ?? []) {
+        if (!listings.some((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod) === period)) {
+          periods.push({ billingPeriod: period, outcome: 'failed', code: MANIFEST_REPLACED, message: MANIFEST_REPLACED_MESSAGE });
+          log('period.failed', { runId: lease.runId, period, code: MANIFEST_REPLACED });
+        }
+      }
+
       for (const listing of listings) {
         const period = listing.ok ? listing.set.billingPeriod : listing.billingPeriod;
         const manifest = listing.ok ? listing.set.manifest : listing.manifest;
@@ -219,9 +254,15 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         periods.push({ billingPeriod: period, outcome: 'failed', code: 'MAX_RUN_EXCEEDED', message: messageOf(runAbort.signal.reason) });
         continue;
       }
+      // A failed listing reports its own code (review round 3), also for a period this import staged.
       if (!listing.ok) {
           periods.push({ billingPeriod: period, outcome: 'failed', code: listing.code, message: clean(listing.message) });
           log('period.failed', { runId: lease.runId, period, code: listing.code });
+          continue;
+        }
+        if (notStagedHere(period, manifest)) {
+          periods.push({ billingPeriod: period, outcome: 'failed', code: MANIFEST_REPLACED, message: MANIFEST_REPLACED_MESSAGE });
+          log('period.failed', { runId: lease.runId, period, code: MANIFEST_REPLACED });
           continue;
         }
         const prev = checkpoint[period];
@@ -243,7 +284,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
           const result = await withRetry(
             async () => {
               try {
-                return await processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow, rejected: prev?.rejected });
+                return await processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow, rejected: prev?.rejected, restateControls: opts.restateControls === true });
               } catch (e) {
                 if (e instanceof IngestError && e.code === 'SOURCE_CHANGED') {
                   const fresh = (await source.listPeriods({ from: period, to: period }, { signal: runAbort.signal, progress })).find((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod) === period);
@@ -252,6 +293,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
                   const freshManifest = fresh.ok ? fresh.set.manifest : fresh.manifest;
                   if (freshManifest) manifestEvidence.push(await captureManifest(opts.evidence, lease.tenantId, lease.sourceId, freshManifest.bytes, runAbort.signal, manifestWatch));
                   if (!fresh.ok) throw new IngestError(fresh.code, clean(fresh.message));
+                  if (notStagedHere(period, freshManifest)) throw new IngestError(MANIFEST_REPLACED, MANIFEST_REPLACED_MESSAGE);
                   set = fresh.set;
                   log('period.relisted', { runId: lease.runId, period });
                 }
@@ -320,7 +362,10 @@ interface PeriodCtx {
   sourceRow: SourceRow;
   /** The period's checkpointed capture-time rejection, if any (challenger L3). */
   rejected?: RejectedListing;
+  restateControls?: boolean;
 }
+
+type BatchRow = { id: string; status: string; row_count: string; total: string; reconciliation: string; quarantine_reason: string | null; fingerprint: string };
 
 /** The one quarantine cause that depends on the CONTROLS rather than the data. */
 const CONTROL_QUARANTINE_CODE = 'RECONCILIATION_VARIANCE';
@@ -424,11 +469,11 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   const findBatch = (fp: string) =>
     workerTransaction(ctx.pool, lease.tenantId, async (c) => {
       const r = await c.query(
-        `SELECT id::text, status, row_count::text AS row_count, loaded_billed_total::text AS total, reconciliation, quarantine_reason
+        `SELECT id::text, status, row_count::text AS row_count, loaded_billed_total::text AS total, reconciliation, quarantine_reason, artifact_set_fingerprint AS fingerprint
          FROM ratio.ingest_batches WHERE source_id = $1 AND billing_period = $2 AND artifact_set_fingerprint = $3`,
         [lease.sourceId, period, fp],
       );
-      return r.rows[0] as { id: string; status: string; row_count: string; total: string; reconciliation: string; quarantine_reason: string | null } | undefined;
+      return r.rows[0] as BatchRow | undefined;
     });
 
   // Existing batch for exactly this artifact set? A batch is keyed on its DATA
@@ -449,6 +494,29 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
       existing = await findBatch(fingerprint);
       ctx.log('period.rereconcile', { runId: lease.runId, period, quarantinedBatchId });
     }
+  }
+  // R3 review M3. A batch re-keyed on (data, controls) by `import-file --restate` supersedes the plain-data
+  // batch: a later plain re-delivery of the same data stays with it (unchanged), never republishes the old one.
+  if (existing?.status === 'superseded') {
+    const shas = [...new Set(captured.map((c) => c.sha256))].sort();
+    const current = await workerTransaction(ctx.pool, lease.tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT b.id::text, b.status, b.row_count::text AS row_count, b.loaded_billed_total::text AS total, b.reconciliation, b.quarantine_reason, b.artifact_set_fingerprint AS fingerprint
+         FROM ratio.ingest_batches b WHERE b.source_id = $1 AND b.billing_period = $2 AND b.status = 'published'
+           AND (SELECT array_agg(DISTINCT a.sha256 ORDER BY a.sha256) FROM ratio.ingest_artifacts a WHERE a.tenant_id = b.tenant_id AND a.batch_id = b.id) = $3::text[]`,
+        [lease.sourceId, period, shas],
+      );
+      return r.rows[0] as BatchRow | undefined;
+    });
+    if (current) {
+      existing = current;
+      fingerprint = current.fingerprint;
+    }
+  }
+  if (ctx.restateControls && existing?.status === 'published' && existing.reconciliation !== 'reconciled' && hasSetControl(control)) {
+    fingerprint = crypto.createHash('sha256').update(`${dataFingerprint}\ncontrols:${currentControls}`).digest('hex');
+    existing = await findBatch(fingerprint);
+    ctx.log('period.restate_controls', { runId: lease.runId, period });
   }
   const entry = (batchId: string) => (): CheckpointEntry => ({ fingerprint, listing: set.listingFingerprint, batchId, pinned: false });
 

@@ -59,6 +59,57 @@ describe('worker CLI (no database)', () => {
     }
   });
 
+  // R3 review round 2 (M4): a usage error names the flag, never an argument value (paths, typos, globs).
+  it('import-file usage errors never echo argument values: stray positionals, --flag=value, bad --period', async () => {
+    const P = '/home/operator/SECRET-DIR/b-SECRET-NAME.csv';
+    const base = ['import-file', '--tenant', T, '--source', 'focus-main'];
+    const cases: Array<[string[], RegExp]> = [
+      // A shell glob after --file expands to several positionals: only the first is the --file value.
+      [[...base, '--file', '/home/operator/SECRET-DIR/a.csv', P], /each file needs its own --file/],
+      [[...base, `--file=${P}`], /--file/],
+      [[...base, '--file', '/x.csv', '--period', P], /--period must be YYYY-MM/],
+      [[...base, '--file', '/x.csv', `--SECRET-NAME=${P}`], /unknown or unsupported argument/],
+      [[...base, '--file', '/x.csv', '--period', '2024-09', P], /unexpected argument/],
+    ];
+    for (const [argv, message] of cases) {
+      const r = await run(argv, { ...env, RATIO_ENV: 'test' });
+      expect(r.code, argv.join(' ')).toBe(2);
+      expect(r.out).toHaveLength(1);
+      const rec = JSON.parse(r.out[0]);
+      expect(rec.results.error.code).toBe('USAGE');
+      expect(rec.results.error.message, argv.join(' ')).toMatch(message);
+      const printed = r.out.concat(r.err).join('\n');
+      expect(printed, argv.join(' ')).not.toContain('SECRET');
+      expect(printed, argv.join(' ')).not.toContain('/home/operator');
+    }
+  });
+
+  it('the evidence record keeps only validated argument values (an invalid value is marked, not copied)', async () => {
+    const r = await run(['import-file', '--tenant', T, '--source', 'focus-main', '--file', '/a.csv', '--file', '/b.csv', '--period', '/SECRET/x.csv'], { ...env, RATIO_ENV: 'test' });
+    expect(r.code).toBe(2);
+    const rec = JSON.parse(r.out[0]);
+    expect(rec.args).toEqual({ tenant: T, source: 'focus-main', files: 2, period: '[invalid]' });
+    // Positionals, unknown flags and --flag=value are counted, never copied.
+    const g = await run(['import-file', '--tenant', T, '--source', 'focus-main', '--file', '/a.csv', '/SECRET/b.csv', '--bogus', 'SECRET-v', '--file=/SECRET/c.csv'], { ...env, RATIO_ENV: 'test' });
+    expect(g.code).toBe(2);
+    expect(JSON.parse(g.out[0]).args).toEqual({ tenant: T, source: 'focus-main', files: 1, unrecognizedArguments: 4 });
+    expect(g.out.concat(g.err).join('\n')).not.toContain('SECRET');
+  });
+
+  it('--bucket, --prefix and --display-name are recorded only for source add; on any other command they are counted, never copied', async () => {
+    const i = await run(['import-file', '--tenant', T, '--source', 'focus-main', '--file', '/a.csv', '--prefix', '/home/SECRET/x', '--bucket', 'SECRET-b', '--display-name', 'SECRET n'], { ...env, RATIO_ENV: 'test' });
+    expect(i.code).toBe(2);
+    expect(JSON.parse(i.out[0]).args).toEqual({ tenant: T, source: 'focus-main', files: 1, unrecognizedArguments: 6 });
+    const s = await run(['sync', '--tenant', T, '--source', 'focus-main', '--prefix', '/home/SECRET/x'], { ...env, RATIO_ENV: 'test' });
+    expect(s.code).toBe(2);
+    expect(JSON.parse(s.out[0]).args).toEqual({ tenant: T, source: 'focus-main', unrecognizedArguments: 2 });
+    for (const r of [i, s]) expect(r.out.concat(r.err).join('\n')).not.toContain('SECRET');
+    // source add keeps them (operator-chosen names), as before.
+    const a = await run(['source', 'add', '--tenant', T, '--key', 'focus-aws', '--providers', 'AWS', '--bucket', 'drop-b', '--prefix', 'p/q', '--display-name', 'Drop', '--bogus'], { ...env, RATIO_ENV: 'test' });
+    expect(a.code).toBe(2);
+    expect(JSON.parse(a.out[0]).args).toEqual({ tenant: T, key: 'focus-aws', providers: 'AWS', bucket: 'drop-b', prefix: 'p/q', 'display-name': 'Drop', unrecognizedArguments: 1 });
+  });
+
   it('missing RATIO_DATABASE_URL is a configuration error (exit 2)', async () => {
     const r = await run(['sync', '--tenant', T, '--source', 'focus-main'], {});
     expect(r.code).toBe(2);

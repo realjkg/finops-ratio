@@ -8,8 +8,25 @@
 //   quarantine show --tenant <uuid> --batch <uuid> [--json]
 //   doctor          [--tenant <uuid>]... [--json]          (read-only)
 //   replay-fixtures [--json]                               (RATIO_ENV=test only; issue #62 L3)
+//   source add      --tenant <uuid> --key <key> --providers AWS[,Microsoft,Google Cloud,Oracle] --bucket <name>
+//                   [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>]   (R3; owner login)
+//   import-file     --tenant <uuid> --source <key> --file <path.csv|path.csv.gz> [--file <path>]... [--period YYYY-MM]
+//                   [--control-billed D --currency CCC [--control-rows N]] [--restate]   (R3)
 //
-// Exit codes: 0 ok · 1 failure · 2 usage/configuration · 4 another run holds the lease.
+// import-file: all --file values form ONE delivery, which is the complete content of every billing
+// period it contains (deliver the parts of a split period together). A delivery that would change an
+// already-published period (a later part alone, stray rows of an earlier period, a corrected file) is
+// refused before anything is written (exit 3, PERIOD_ALREADY_PUBLISHED); --restate supersedes the
+// published batch instead (it stays retained, excluded from totals). Both print `restatements`: the
+// published and the staged row count and billed total of each such period. An identical re-import is
+// `unchanged`; controls given with unchanged data are reported (not recorded) until --restate.
+// --control-rows needs --control-billed. Deliveries above MAX_IMPORT_BYTES (decompressed, all files
+// together; src/ingest/import/stageFile.ts) are refused before they are read (exit 5, IMPORT_TOO_LARGE).
+//
+// Exit codes: 0 ok · 1 failure · 2 usage/configuration · 3 import refused (would restate published
+// data; nothing written) · 4 another run holds the lease (or its lock timed out), or another import of
+// the source is in progress; for import-file both are checked before anything is staged, so nothing
+// was written (run it again afterwards) · 5 import larger than the cap.
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Pool } from 'pg';
 import type { CliIO } from './cli';
@@ -30,10 +47,14 @@ import { runReplayFixtures } from './worker/replayFixtures';
 import { makeSourceFactory } from './worker/sourceFactory';
 import type { WorkerHooks } from './worker/types';
 import { MIN_PERIOD_YEAR } from './worker/periods';
+import { isDecimalString } from './focus/decimal';
+import { KNOWN_FILE_DROP_PROVIDERS } from './focus/provider';
+import { importFile } from './import/importFile';
+import { provisionSource } from './import/provisionSource';
 
 type Env = Record<string, string | undefined>;
 
-const WORKER_COMMANDS = new Set(['sync', 'backfill', 'replay', 'quarantine', 'doctor', 'replay-fixtures']);
+const WORKER_COMMANDS = new Set(['sync', 'backfill', 'replay', 'quarantine', 'doctor', 'replay-fixtures', 'source', 'import-file']);
 export function isWorkerCommand(c: string | undefined): boolean {
   return c !== undefined && WORKER_COMMANDS.has(c);
 }
@@ -41,11 +62,14 @@ export function isWorkerCommand(c: string | undefined): boolean {
 const EXIT_OK = 0;
 const EXIT_FAIL = 1;
 const EXIT_USAGE = 2;
+const EXIT_REFUSED = 3;
 const EXIT_BUSY = 4;
-const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH']);
+const EXIT_TOO_LARGE = 5;
+const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH', 'IMPORT_CONTROL_INVALID', 'IMPORT_CONTROL_SCOPE']);
 
 function exitCodeFor(code: string): number {
   if (code === 'ALREADY_RUNNING' || code === 'LOCK_TIMEOUT') return EXIT_BUSY;
+  if (code === 'IMPORT_TOO_LARGE') return EXIT_TOO_LARGE;
   if (USAGE_CODES.has(code)) return EXIT_USAGE;
   return EXIT_FAIL;
 }
@@ -59,6 +83,17 @@ interface Args {
   batch?: string;
   period?: string;
   json: boolean;
+  key?: string;
+  providers?: string[];
+  bucket?: string;
+  prefix?: string;
+  displayName?: string;
+  tenantSlug?: string;
+  files: string[];
+  restate: boolean;
+  controlRows?: number;
+  controlBilled?: string;
+  currency?: string;
 }
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -74,8 +109,12 @@ function parseArgs(argv: string[]): Args {
     if (rest[0] !== 'show') usage('usage: quarantine show --tenant <uuid> --batch <uuid> [--json]');
     command = 'quarantine show';
     rest = rest.slice(1);
+  } else if (command === 'source') {
+    if (rest[0] !== 'add') usage('usage: source add --tenant <uuid> --key <key> --providers <list> --bucket <name> [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>]');
+    command = 'source add';
+    rest = rest.slice(1);
   }
-  const a: Args = { command, tenants: [], json: false };
+  const a: Args = { command, tenants: [], json: false, files: [], restate: false };
   const allowed: Record<string, string[]> = {
     sync: ['--tenant', '--source', '--json'],
     backfill: ['--tenant', '--source', '--from', '--to', '--json'],
@@ -83,16 +122,34 @@ function parseArgs(argv: string[]): Args {
     'quarantine show': ['--tenant', '--batch', '--json'],
     doctor: ['--tenant', '--json'],
     'replay-fixtures': ['--json'],
+    'source add': ['--tenant', '--key', '--providers', '--bucket', '--prefix', '--display-name', '--tenant-slug', '--json'],
+    'import-file': ['--tenant', '--source', '--file', '--period', '--control-rows', '--control-billed', '--currency', '--restate', '--json'],
   };
+  // Review round 2 (M4): a usage error names the flag, never an argument value (a path, a glob, a typo).
+  let lastValueOf: string | undefined;
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
-    if (!allowed[command].includes(flag)) usage(`unknown or unsupported argument for ${command}: ${flag.slice(0, 40)}`);
+    if (!flag.startsWith('--')) {
+      if (lastValueOf === '--file') usage('each file needs its own --file (a shell glob expands to several paths: write --file before every path)');
+      usage(`unexpected argument for ${command} (argument ${i + 1} is not a flag; each value follows its own flag)`);
+    }
+    if (!allowed[command].includes(flag)) {
+      const name = flag.split('=')[0];
+      if (flag.includes('=') && allowed[command].includes(name)) usage(`${name} takes its value as the next argument (${name} <value>), not ${name}=<value>`);
+      usage(`unknown or unsupported argument for ${command}${/^--[a-z][a-z0-9-]{0,30}$/.test(flag) ? `: ${flag}` : ` (argument ${i + 1})`}`);
+    }
+    lastValueOf = undefined;
     if (flag === '--json') {
       a.json = true;
       continue;
     }
+    if (flag === '--restate') {
+      a.restate = true;
+      continue;
+    }
     const v = rest[++i];
     if (v === undefined || v.startsWith('--')) usage(`${flag} needs a value`);
+    lastValueOf = flag;
     if (flag === '--tenant') {
       if (!isTenantId(v)) usage('--tenant must be a UUID');
       a.tenants.push(v.toLowerCase());
@@ -106,13 +163,47 @@ function parseArgs(argv: string[]): Args {
     } else if (flag === '--batch') {
       if (!isTenantId(v)) usage('--batch must be a UUID');
       a.batch = v.toLowerCase();
+    } else if (flag === '--key') {
+      if (!SOURCE_KEY_RE.test(v)) usage('--key must be a source key ([a-z0-9][a-z0-9_-]*)');
+      a.key = v;
+    } else if (flag === '--providers') {
+      const list = v.split(',').map((p) => p.trim());
+      if (list.some((p) => !KNOWN_FILE_DROP_PROVIDERS.includes(p)) || new Set(list).size !== list.length) {
+        usage(`--providers must list known providers, each once (${KNOWN_FILE_DROP_PROVIDERS.join(', ')})`);
+      }
+      a.providers = list;
+    } else if (flag === '--bucket') a.bucket = v;
+    else if (flag === '--prefix') a.prefix = v;
+    else if (flag === '--display-name') {
+      if (v.length < 1 || v.length > 200) usage('--display-name must be 1 to 200 characters');
+      a.displayName = v;
+    } else if (flag === '--tenant-slug') {
+      if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(v)) usage('--tenant-slug must match [a-z0-9][a-z0-9-]*');
+      a.tenantSlug = v;
+    } else if (flag === '--file') a.files.push(v);
+    else if (flag === '--control-rows') {
+      if (!/^[0-9]{1,15}$/.test(v)) usage('--control-rows must be a non-negative integer');
+      a.controlRows = Number(v);
+    } else if (flag === '--control-billed') {
+      if (!isDecimalString(v)) usage('--control-billed must be a plain decimal (e.g. 1234.56)');
+      a.controlBilled = v;
+    } else if (flag === '--currency') {
+      if (!/^[A-Z]{3}$/.test(v)) usage('--currency must be an ISO 4217 code (three upper-case letters)');
+      a.currency = v;
     }
   }
   const needs = (cond: boolean, m: string) => {
     if (!cond) usage(m);
   };
   if (command !== 'doctor' && command !== 'replay-fixtures') needs(a.tenants.length === 1, '--tenant <uuid> is required exactly once');
-  if (['sync', 'backfill', 'replay'].includes(command)) needs(!!a.source, '--source <key> is required');
+  if (['sync', 'backfill', 'replay', 'import-file'].includes(command)) needs(!!a.source, '--source <key> is required');
+  if (command === 'source add') needs(!!a.key && !!a.providers && !!a.bucket, '--key, --providers and --bucket are required');
+  if (command === 'import-file') {
+    needs(a.files.length > 0, '--file <path> is required (repeat it for the files of one delivery)');
+    needs(a.controlRows === undefined || a.controlBilled !== undefined, '--control-rows needs --control-billed and --currency: a row count alone cannot reconcile a period');
+    needs(a.controlBilled === undefined || a.currency !== undefined, '--control-billed needs --currency');
+    needs(a.currency === undefined || a.controlBilled !== undefined, '--currency is only valid with --control-billed');
+  }
   if (command === 'backfill') {
     needs(!!a.from && !!a.to, '--from and --to are required');
     needs(a.from! <= a.to!, '--from must not be after --to');
@@ -122,15 +213,51 @@ function parseArgs(argv: string[]): Args {
   return a;
 }
 
+const month = (v: string) => MONTH_RE.test(v);
+const sourceKey = (v: string) => SOURCE_KEY_RE.test(v);
+/** Flags whose value the record may carry, each only when it is valid (else '[invalid]'). */
+const RECORDED: Record<string, (v: string) => boolean> = {
+  tenant: isTenantId,
+  source: sourceKey,
+  from: month,
+  to: month,
+  period: month,
+  batch: isTenantId,
+  key: sourceKey,
+  providers: (v) => v.split(',').every((p) => KNOWN_FILE_DROP_PROVIDERS.includes(p.trim())),
+  'tenant-slug': (v) => /^[a-z0-9][a-z0-9-]{0,62}$/.test(v),
+  'control-rows': (v) => /^[0-9]{1,15}$/.test(v),
+  'control-billed': isDecimalString,
+  currency: (v) => /^[A-Z]{3}$/.test(v),
+  // Operator-chosen names (not row values), bounded as before; recorded for `source add` only.
+  bucket: () => true,
+  prefix: () => true,
+  'display-name': () => true,
+};
+
+/** Free-form values recorded only for `source add`, the one command that takes them (review round 3). */
+const SOURCE_ADD_ONLY = new Set(['bucket', 'prefix', 'display-name']);
+
 function argsForRecord(argv: string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (let i = 1; i < argv.length; i++) {
+  let unrecognized = 0;
+  for (let i = argv[0] === 'quarantine' || argv[0] === 'source' ? 2 : 1; i < argv.length; i++) {
     const f = argv[i];
-    if (!f.startsWith('--')) continue;
-    const key = f.slice(2);
-    if (key === 'json') out.json = true;
-    else if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) out[key] = String(argv[++i]).slice(0, 80);
+    const key = f.startsWith('--') ? f.slice(2) : '';
+    const hasValue = i + 1 < argv.length && !argv[i + 1].startsWith('--');
+    if (key === 'json' || key === 'restate') out[key] = true;
+    // Review M4: file paths and names never reach the evidence record, only how many were given.
+    else if (key === 'file') {
+      out.files = (typeof out.files === 'number' ? out.files : 0) + 1;
+      if (hasValue) i++;
+    } else if (Object.hasOwn(RECORDED, key) && ((argv[0] === 'source' && argv[1] === 'add') || !SOURCE_ADD_ONLY.has(key))) {
+      if (hasValue) {
+        const v = String(argv[++i]);
+        out[key] = RECORDED[key](v) ? v.slice(0, 80) : '[invalid]';
+      }
+    } else unrecognized++; // positionals, unknown flags, --flag=value: counted, never copied (round 2 M4)
   }
+  if (unrecognized) out.unrecognizedArguments = unrecognized;
   return out;
 }
 
@@ -143,7 +270,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
   const log = (event: string, fields: Record<string, unknown> = {}) => {
     io.err(line({ ts: new Date().toISOString(), level: event.endsWith('failed') || event === 'cli.error' || fields.status === 'fail' ? 'error' : 'info', event, ...fields }));
   };
-  const command = argv[0] === 'quarantine' ? 'quarantine show' : argv[0];
+  const command = argv[0] === 'quarantine' ? 'quarantine show' : argv[0] === 'source' ? 'source add' : argv[0];
   let config: WorkerConfig | null = null;
   const finish = (results: Record<string, unknown>, pass: boolean, exitCode: number): number => {
     const record = buildEvidenceRecord({
@@ -215,6 +342,26 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
     }
   }
 
+  if (args.command === 'source add') {
+    // Provisioning writes tenants/sources: the migrator/owner login, never the worker login.
+    if (!cfg.migrateDatabaseUrl) return fail(new IngestError('CONFIG_INVALID', 'RATIO_MIGRATE_DATABASE_URL (the owner login) is required for source add'));
+    try {
+      const r = await provisionSource(cfg.migrateDatabaseUrl, {
+        tenantId: args.tenants[0],
+        tenantSlug: args.tenantSlug ?? `engagement-${args.tenants[0].slice(0, 8)}`,
+        sourceKey: args.key!,
+        displayName: args.displayName ?? `Operator file import: ${args.key}`,
+        providers: args.providers!,
+        bucket: args.bucket!,
+        prefix: args.prefix ?? 'ratio-file-drop',
+      });
+      log('source.provisioned', { sourceKey: r.sourceKey, outcome: r.outcome, providers: r.providers.length });
+      return finish({ ...r }, true, EXIT_OK);
+    } catch (e) {
+      return fail(e);
+    }
+  }
+
   if (!cfg.databaseUrl) return fail(new IngestError('CONFIG_INVALID', 'RATIO_DATABASE_URL is not set'));
   // Clients are constructed inside the try below, so a constructor failure is a
   // reported (redacted) failure, never a throw out of main.
@@ -270,6 +417,31 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
           log,
           secrets,
         });
+        const ok = r.status === 'succeeded';
+        return finish({ ...r }, ok, ok ? EXIT_OK : EXIT_FAIL);
+      }
+      case 'import-file': {
+        const control = args.controlRows !== undefined || args.controlBilled !== undefined ? { rowCount: args.controlRows, billedTotal: args.controlBilled, currency: args.currency } : undefined;
+        const r = await importFile({
+          pool,
+          tenantId,
+          sourceKey: args.source!,
+          filePaths: args.files,
+          period: args.period,
+          control,
+          restate: args.restate,
+          sourceClient: () => s3('source'),
+          source: makeSourceFactory(env, () => s3('source')),
+          evidence: evidenceStore(),
+          settings: cfg.settings,
+          hooks,
+          log,
+          secrets,
+        });
+        if (r.status === 'refused') {
+          log('import.refused', { code: r.error.code, periods: r.restatements.length });
+          return finish({ ...r }, false, EXIT_REFUSED);
+        }
         const ok = r.status === 'succeeded';
         return finish({ ...r }, ok, ok ? EXIT_OK : EXIT_FAIL);
       }
