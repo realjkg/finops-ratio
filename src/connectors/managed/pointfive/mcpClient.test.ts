@@ -114,7 +114,7 @@ describe('McpClient errors, bounds and retries', () => {
   it('maps 401 and 403 to auth codes and keeps the body and token out of the error', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bad = await setup({}, { tokenProvider: { getAccessToken: async () => 'wrong-token-0123456789abcdef' } });
-    const e = await bad.c.initialize().catch((x: McpProtocolError) => x);
+    const e = (await bad.c.initialize().catch((x: unknown) => x)) as McpProtocolError;
     expect(e.code).toBe('AUTH_REJECTED');
     expect(e.resourceMetadataAdvertised).toBe(true);
     expect(e.message).toBe('PointFive MCP initialize returned 401 (unauthorized)');
@@ -127,7 +127,7 @@ describe('McpClient errors, bounds and retries', () => {
 
   it('maps a JSON-RPC error to a fixed message without the server text', async () => {
     const { c } = await setup({ tools: [TOOL('t1')], onCall: () => ({ rpcError: { code: -32603, message: 'LEAK-MARKER' } }) });
-    const e = await c.callTool('t1', {}).catch((x: McpProtocolError) => x);
+    const e = (await c.callTool('t1', {}).catch((x: unknown) => x)) as McpProtocolError;
     expect([e.code, e.rpcCode]).toEqual(['JSONRPC_ERROR', -32603]);
     expect(e.message).not.toContain('LEAK-MARKER');
   });

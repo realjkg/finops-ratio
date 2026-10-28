@@ -1,0 +1,9 @@
+M9a PointFive MCP -- GREEN
+PR 1 (protocol client), base origin/main d71bb84
+  npx vitest run src/connectors/managed/pointfive -> 25 passed (25)
+  Full suite: Test Files 215 passed (215); Tests 3961 passed (3961). lint, typecheck, build: pass.
+  Mutations (13/13 killed): drop MCP-Protocol-Version header (12 fail), drop Mcp-Session-Id (11),
+  drop notifications/initialized (4), Accept text/event-stream only (13), skip version check (1),
+  skip notifications/cancelled (2), no page bound (1), fixed id (2), no size bound (1), no retry (1),
+  no session re-init (1), no truncation check (1), ignore nextCursor (2).
+  Post-RED test edits: two type casts on caught errors (typecheck), no assertion changed.

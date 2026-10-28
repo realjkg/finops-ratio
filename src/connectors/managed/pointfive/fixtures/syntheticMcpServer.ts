@@ -79,7 +79,7 @@ export async function startSyntheticMcpServer(opts: SyntheticServerOptions = {})
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', async () => {
       const raw = Buffer.concat(chunks).toString('utf8');
-      let body: Record<string, unknown> | null = null;
+      let body: Record<string, unknown> | null;
       try {
         body = raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
       } catch {
