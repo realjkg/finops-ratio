@@ -1,0 +1,36 @@
+{
+  "provider": "AWS",
+  "source_kind": "focus-export",
+  "schema_version": "1.0",
+  "provenance": "official-example",
+  "sanitization": "public FOCUS 1.0 Sample Data (FinOps Foundation, CC BY 4.0, see NOTICE.md); published upstream as sample data, not altered here",
+  "cost_basis": "focus-native",
+  "dataset": "FOCUS 1.0 Sample Data, focus_sample.csv (1000 rows), AWS rows",
+  "scope": {
+    "accounts": ["1234567890123"],
+    "period_start": "2024-09-01",
+    "period_end": "2024-10-01",
+    "period_end_semantics": "exclusive",
+    "timezone": "UTC",
+    "completeness": "explicit-subset"
+  },
+  "delivery": {
+    "format": "csv",
+    "compression": "none",
+    "manifest": "not-provided",
+    "refresh_behavior": "static file pinned to an upstream commit (dataset.json); never refreshed"
+  },
+  "financial": {
+    "currencies": ["USD"],
+    "billed_cost_total": { "USD": "18.00663861840" },
+    "effective_cost_total": { "USD": "13.00000000000" },
+    "credits_coverage": "included (the AWS rows contain 1 ChargeCategory Credit row)",
+    "tax_coverage": "unknown",
+    "control_total_source": "export-query",
+    "known_differences": "totals are for the 942 AWS rows of this exact extract (BillingPeriodStart 2024-09), computed by scripts/acceptance/focus_control_totals.py (control-totals.json 1k); the file also holds 51 Microsoft and 7 Oracle rows that an AWS source excludes; not a full monthly bill"
+  },
+  "overlap": {
+    "also_present_in_other_source": "no",
+    "related_source": null
+  }
+}

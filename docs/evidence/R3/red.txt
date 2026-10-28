@@ -1,7 +1,7 @@
-R3 part 2 (source add, import-file, stageAndSync, normalizer seam) RED, 2026-10-28,
-on top of R3 part 1 (feat/r3-file-import-staging). Tests committed before the implementation.
+R3 part 3 (implementation-metadata record, declared scope, overlap) RED, 2026-10-28,
+on top of R3 part 2 (feat/r3-import-file-cli). Tests committed before the implementation.
 
-$ npx vitest run src/ingest/import/normalizer.test.ts
-  Test Files 1 failed (1): ./normalizer does not exist (4 tests not collected).
-$ npx vitest run --config vitest.db.config.ts src/ingest/import/importFile.db.test.ts   (local Postgres 16 + SeaweedFS)
-  Test Files 1 failed (1); Tests 9 failed (9): `source add` and `import-file` are unknown commands.
+$ npx vitest run src/ingest/import/metadata.test.ts
+  Test Files 1 failed (1): ./metadata does not exist (tests not collected).
+$ npx vitest run --config vitest.db.config.ts src/ingest/import/importMetadata.db.test.ts   (local Postgres 16 + SeaweedFS)
+  Test Files 1 failed (1); Tests 8 failed (8): --metadata is an unknown argument.
