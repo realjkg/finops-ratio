@@ -1,0 +1,3 @@
+R12 RED: npx vitest run infrastructure/engagement/compose.test.mjs
+Before implementation compose.yaml, .env.engagement.example, the engagement Dockerfile stages,
+the README section and smoke.mjs do not exist: the suite fails to load (ENOENT compose.yaml).
