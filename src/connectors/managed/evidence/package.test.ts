@@ -56,7 +56,7 @@ describe('Connector Evidence Record', () => {
     expect(text).not.toMatch(/abcdefghijklmnop|AKIAABCDEFGHIJKLMNOP|BEGIN PRIVATE|hunter2|SYNTHETICSIG/);
     expect(r.redactions).toBe(5);
     // Hashes and the secretRef NAME stay.
-    expect(text).toContain(r.upstream.versions.observedSchema.sha256);
+    expect(text).toContain((r.upstream.versions.observedSchema as { sha256: string }).sha256);
     expect(r.authorization.secretRef).toBe('aws/focus-reader');
   });
 
@@ -89,6 +89,10 @@ describe('Connector Evidence Record', () => {
     const j = input();
     j.release.status = 'live verified';
     expect(() => buildEvidenceRecord(j)).toThrow(/LIVE_CLAIM_UNSUPPORTED/);
+    const o = input();
+    o.fixture = { ...o.fixture, fixtureClass: 'original' };
+    o.readiness = { ...o.readiness, F: 'live' };
+    expect(() => buildEvidenceRecord(o)).toThrow(/LIVE_CLAIM_UNSUPPORTED/); // original, but no customer validation
     const k = input();
     k.fixture = { ...k.fixture, fixtureClass: 'original' };
     k.release.customerValidation = 'validated';

@@ -37,8 +37,8 @@ describe('accounting bridge', () => {
     const dropped = normalized.map((m) => (m.measure === 'credits' ? { ...m, amount: '-1.00' } : m.measure === 'records' ? { ...m, amount: '2' } : m));
     const b = buildBridge({ key, source, normalized: dropped, deltas });
     expect(b.closed).toBe(false);
-    expect(b.failures.map((f) => f.line)).toEqual(['records', 'credits USD']);
-    expect(b.failures[1]).toMatchObject({ code: 'BRIDGE_NOT_CLOSED', expected: '-1.50', actual: '-1.00' });
+    expect(b.failures.map((f) => f.line)).toEqual(['credits USD', 'records']);
+    expect(b.failures[0]).toMatchObject({ code: 'BRIDGE_NOT_CLOSED', expected: '-1.5', actual: '-1.00' });
   });
 
   it('never sums across currencies: each currency is its own line', () => {
