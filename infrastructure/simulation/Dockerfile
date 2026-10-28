@@ -15,3 +15,16 @@ ENV NODE_ENV=production RATIO_ENV=development RATIO_SIMULATION=1 RATIO_SIMULATIO
 USER node
 EXPOSE 3000
 CMD ["node", "node_modules/next/dist/bin/next", "start", "--hostname", "0.0.0.0", "-p", "3000"]
+
+# Customer engagement artifact (R12). Same build stage plus the worker CLI (dist-worker, also the migrator), dev
+# dependencies pruned. Production mode, engagement mode, NO simulation variable. The compose file adds the read-only
+# root filesystem, the dropped capabilities and the read-only config mounts; /state is the only writable path.
+FROM build AS engagement-build
+RUN npm run worker:build && npm prune --omit=dev && mkdir -p /state && chown node:node /state
+
+FROM engagement-build AS engagement
+ENV NODE_ENV=production RATIO_MODE=engagement RATIO_ENGAGEMENT_CONFIG=/config/engagement.json RATIO_ENV=production
+VOLUME ["/state"]
+USER node
+EXPOSE 3000
+CMD ["node", "node_modules/next/dist/bin/next", "start", "--hostname", "0.0.0.0", "-p", "3000"]
