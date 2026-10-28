@@ -10,10 +10,21 @@
 //   replay-fixtures [--json]                               (RATIO_ENV=test only; issue #62 L3)
 //   source add      --tenant <uuid> --key <key> --providers AWS[,Microsoft,Google Cloud,Oracle] --bucket <name>
 //                   [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>] [--metadata <file.json>]   (R3; owner login)
-//   import-file     --tenant <uuid> --source <key> --file <path.csv|path.csv.gz> [--period YYYY-MM]
-//                   [--control-rows N] [--control-billed D --currency CCC] [--metadata <file.json>]   (R3)
+//   import-file     --tenant <uuid> --source <key> --file <path.csv|path.csv.gz> [--file <path>]... [--period YYYY-MM]
+//                   [--control-billed D --currency CCC [--control-rows N]] [--metadata <file.json>] [--restate]   (R3)
 //
-// Exit codes: 0 ok · 1 failure · 2 usage/configuration · 4 another run holds the lease.
+// import-file: all --file values form ONE delivery, which is the complete content of every billing
+// period it contains (deliver the parts of a split period together). A delivery that would change an
+// already-published period (a later part alone, stray rows of an earlier period, a corrected file) is
+// refused before anything is written (exit 3, PERIOD_ALREADY_PUBLISHED); --restate supersedes the
+// published batch instead (it stays retained, excluded from totals). Both print `restatements`: the
+// published and the staged row count and billed total of each such period. An identical re-import is
+// `unchanged`; controls given with unchanged data are reported (not recorded) until --restate.
+// --control-rows needs --control-billed. Deliveries above MAX_IMPORT_BYTES (decompressed, all files
+// together; src/ingest/import/stageFile.ts) are refused before they are read (exit 5, IMPORT_TOO_LARGE).
+//
+// Exit codes: 0 ok · 1 failure · 2 usage/configuration · 3 import refused (would restate published
+// data; nothing written) · 4 another run holds the lease · 5 import larger than the cap.
 import fs from 'fs';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Pool } from 'pg';
@@ -60,11 +71,14 @@ export function isWorkerCommand(c: string | undefined): boolean {
 const EXIT_OK = 0;
 const EXIT_FAIL = 1;
 const EXIT_USAGE = 2;
+const EXIT_REFUSED = 3;
 const EXIT_BUSY = 4;
+const EXIT_TOO_LARGE = 5;
 const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH', 'IMPORT_CONTROL_INVALID', 'IMPORT_CONTROL_SCOPE', 'IMPORT_CONTROL_CONFLICT', 'METADATA_INVALID', 'METADATA_MISMATCH']);
 
 function exitCodeFor(code: string): number {
   if (code === 'ALREADY_RUNNING' || code === 'LOCK_TIMEOUT') return EXIT_BUSY;
+  if (code === 'IMPORT_TOO_LARGE') return EXIT_TOO_LARGE;
   if (USAGE_CODES.has(code)) return EXIT_USAGE;
   return EXIT_FAIL;
 }
@@ -84,7 +98,8 @@ interface Args {
   prefix?: string;
   displayName?: string;
   tenantSlug?: string;
-  file?: string;
+  files: string[];
+  restate: boolean;
   controlRows?: number;
   controlBilled?: string;
   currency?: string;
@@ -109,7 +124,7 @@ function parseArgs(argv: string[]): Args {
     command = 'source add';
     rest = rest.slice(1);
   }
-  const a: Args = { command, tenants: [], json: false };
+  const a: Args = { command, tenants: [], json: false, files: [], restate: false };
   const allowed: Record<string, string[]> = {
     sync: ['--tenant', '--source', '--json'],
     backfill: ['--tenant', '--source', '--from', '--to', '--json'],
@@ -118,13 +133,17 @@ function parseArgs(argv: string[]): Args {
     doctor: ['--tenant', '--json'],
     'replay-fixtures': ['--json'],
     'source add': ['--tenant', '--key', '--providers', '--bucket', '--prefix', '--display-name', '--tenant-slug', '--metadata', '--json'],
-    'import-file': ['--tenant', '--source', '--file', '--period', '--control-rows', '--control-billed', '--currency', '--metadata', '--json'],
+    'import-file': ['--tenant', '--source', '--file', '--period', '--control-rows', '--control-billed', '--currency', '--metadata', '--restate', '--json'],
   };
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
     if (!allowed[command].includes(flag)) usage(`unknown or unsupported argument for ${command}: ${flag.slice(0, 40)}`);
     if (flag === '--json') {
       a.json = true;
+      continue;
+    }
+    if (flag === '--restate') {
+      a.restate = true;
       continue;
     }
     const v = rest[++i];
@@ -159,7 +178,7 @@ function parseArgs(argv: string[]): Args {
     } else if (flag === '--tenant-slug') {
       if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(v)) usage('--tenant-slug must match [a-z0-9][a-z0-9-]*');
       a.tenantSlug = v;
-    } else if (flag === '--file') a.file = v;
+    } else if (flag === '--file') a.files.push(v);
     else if (flag === '--metadata') a.metadata = v;
     else if (flag === '--control-rows') {
       if (!/^[0-9]{1,15}$/.test(v)) usage('--control-rows must be a non-negative integer');
@@ -179,7 +198,8 @@ function parseArgs(argv: string[]): Args {
   if (['sync', 'backfill', 'replay', 'import-file'].includes(command)) needs(!!a.source, '--source <key> is required');
   if (command === 'source add') needs(!!a.key && !!a.providers && !!a.bucket, '--key, --providers and --bucket are required');
   if (command === 'import-file') {
-    needs(!!a.file, '--file <path> is required');
+    needs(a.files.length > 0, '--file <path> is required (repeat it for the files of one delivery)');
+    needs(a.controlRows === undefined || a.controlBilled !== undefined, '--control-rows needs --control-billed and --currency: a row count alone cannot reconcile a period');
     needs(a.controlBilled === undefined || a.currency !== undefined, '--control-billed needs --currency');
     needs(a.currency === undefined || a.controlBilled !== undefined, '--currency is only valid with --control-billed');
   }
@@ -198,7 +218,16 @@ function argsForRecord(argv: string[]): Record<string, unknown> {
     const f = argv[i];
     if (!f.startsWith('--')) continue;
     const key = f.slice(2);
-    if (key === 'json') out.json = true;
+    if (key === 'json' || key === 'restate') out[key] = true;
+    // Review M4: file paths and names never reach the evidence record, only how many were given.
+    else if (key === 'file') {
+      out.files = (typeof out.files === 'number' ? out.files : 0) + 1;
+      i++;
+    }
+    else if (key === 'metadata') {
+      out.metadata = 'supplied';
+      i++;
+    }
     else if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) out[key] = String(argv[++i]).slice(0, 80);
   }
   return out;
@@ -377,10 +406,11 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
           pool,
           tenantId,
           sourceKey: args.source!,
-          filePath: args.file!,
+          filePaths: args.files,
           period: args.period,
           control,
           metadata,
+          restate: args.restate,
           sourceClient: () => s3('source'),
           source: makeSourceFactory(env, () => s3('source')),
           evidence: evidenceStore(),
@@ -389,6 +419,10 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
           log,
           secrets,
         });
+        if (r.status === 'refused') {
+          log('import.refused', { code: r.error.code, periods: r.restatements.length });
+          return finish({ ...r }, false, EXIT_REFUSED);
+        }
         const ok = r.status === 'succeeded';
         return finish({ ...r }, ok, ok ? EXIT_OK : EXIT_FAIL);
       }

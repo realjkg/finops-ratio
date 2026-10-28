@@ -2,14 +2,16 @@
 // layout (split by billing period, NULL token mapped to empty, one manifest per
 // period carrying the operator's controls). Pure; no database, no S3.
 // Fixture: the public FOCUS 1.0 Sample Data (fixtures/focus-1.0-sample, CC BY 4.0).
+import { spawnSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import zlib from 'zlib';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 // The acceptance run's own lossless proof (scripts/local/acceptance.mjs), reused unchanged.
 import { verifyStagingLossless } from '../../../scripts/local/acceptance.mjs';
 import { dataPrefix, parseManifest, periodMetadataPrefix, type ListingEntry } from '../sources/s3/layout';
-import { decodeImportFile, stageFile, type StagedFile } from './stageFile';
+import { MAX_IMPORT_BYTES, IMPORT_RSS_BUDGET_BYTES, STAGE_RSS_BUDGET_BYTES, decodeImportFile, stageFile, type StagedFile } from './stageFile';
 
 const SAMPLE = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'fixtures', 'focus-1.0-sample', 'focus_sample.csv'));
 const CONTROLS = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'fixtures', 'focus-1.0-sample', 'control-totals.json'), 'utf8'))['1k'];
@@ -33,7 +35,7 @@ describe('R3 stageFile: the public 1000-row sample', () => {
     ]);
     expect(staged.periods.reduce((n, p) => n + p.records, 0)).toBe(CONTROLS.input.dataRows);
     expect(verifyStagingLossless(SAMPLE, staged.plan)).toEqual([]);
-    expect(staged.files).toEqual([{ name: 'file', sha256: CONTROLS.input.sha256, dataRows: 1000 }]);
+    expect(staged.files).toEqual([{ name: 'file', sha256: CONTROLS.input.sha256, dataRows: 1000, bytes: SAMPLE.length }]);
     expect(Object.values(staged.nullTokensReplaced).reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
     // The uploaded objects are exactly the verified plan (header + that period's records), gzipped.
     for (const o of staged.objects.filter((x) => x.kind === 'data')) {
@@ -56,12 +58,16 @@ describe('R3 stageFile: the public 1000-row sample', () => {
     expect(b.objects.map((o) => [o.key, o.body.toString('base64')])).toEqual(a.objects.map((o) => [o.key, o.body.toString('base64')]));
   });
 
-  it('reads a .csv.gz file to the same staging as the plain file', () => {
+  it('reads a .csv.gz file to the same staging as the plain file', async () => {
     const gz = zlib.gzipSync(SAMPLE);
-    expect(decodeImportFile(gz, 'export.csv.gz').equals(SAMPLE)).toBe(true);
-    expect(decodeImportFile(SAMPLE, 'export.csv').equals(SAMPLE)).toBe(true);
-    expect(() => decodeImportFile(SAMPLE, 'export.csv.gz')).toThrow(expect.objectContaining({ code: 'IMPORT_FILE_INVALID' }));
-    expect(() => decodeImportFile(SAMPLE, 'export.xlsx')).toThrow(expect.objectContaining({ code: 'IMPORT_FILE_INVALID' }));
+    expect((await decodeImportFile(gz, 'export.csv.gz')).equals(SAMPLE)).toBe(true);
+    expect((await decodeImportFile(SAMPLE, 'export.csv')).equals(SAMPLE)).toBe(true);
+    await expect(decodeImportFile(SAMPLE, 'export.csv.gz')).rejects.toMatchObject({ code: 'IMPORT_FILE_INVALID' });
+    await expect(decodeImportFile(SAMPLE, 'export.xlsx')).rejects.toMatchObject({ code: 'IMPORT_FILE_INVALID' });
+    await expect(decodeImportFile(Buffer.concat([gz.subarray(0, 100), Buffer.alloc(20)]), 'export.csv.gz')).rejects.toMatchObject({ code: 'IMPORT_FILE_INVALID' });
+    // A multi-member gzip (RFC 1952) decodes completely, also when the last member is the smallest.
+    const multi = Buffer.concat([zlib.gzipSync(SAMPLE.subarray(0, 700_000)), zlib.gzipSync(SAMPLE.subarray(700_000))]);
+    expect((await decodeImportFile(multi, 'export.csv.gz')).equals(SAMPLE)).toBe(true);
   });
 });
 
@@ -87,7 +93,7 @@ describe('R3 stageFile: the manifest carries the operator controls', () => {
   });
 
   it('refuses controls that cannot be scoped to exactly one period of the file', () => {
-    expect(() => stageFile(SAMPLE, { location: LOC, control: { rowCount: 942 } })).toThrow(expect.objectContaining({ code: 'IMPORT_CONTROL_SCOPE' }));
+    expect(() => stageFile(SAMPLE, { location: LOC, providers: ['AWS'], control: { rowCount: 942 } })).toThrow(expect.objectContaining({ code: 'IMPORT_CONTROL_SCOPE' }));
   });
 
   it('refuses a billed control without its currency, and a currency the declared providers rows do not bill in', () => {
@@ -136,4 +142,194 @@ describe('R3 stageFile: operator-clear failures that never echo cell values', ()
     ];
     for (const c of cases) expect(() => stageFile(Buffer.isBuffer(c) ? c : Buffer.from(c), { location: LOC })).toThrow(expect.objectContaining({ code: 'IMPORT_FILE_INVALID' }));
   });
+});
+
+// Review round 1. SYNTHETIC rows built in the test (not billing data): the header is a
+// minimal FOCUS-shaped subset, enough for the staging layer, which does not validate FOCUS.
+const MINI_HEADER = 'BillingPeriodStart,ProviderName,BillingCurrency,BilledCost';
+const mini = (rows: string[], header = MINI_HEADER) => Buffer.from(`${[header, ...rows].join('\n')}\n`);
+const dataBodies = (s: StagedFile) => s.objects.filter((o) => o.kind === 'data').map((o) => zlib.gunzipSync(o.body).toString('utf8'));
+const codeOf = (fn: () => unknown): unknown => {
+  try {
+    fn();
+  } catch (e) {
+    return (e as { code?: unknown }).code;
+  }
+  return 'no error';
+};
+
+describe('R3 stageFile review: input forms the worker accepts', () => {
+  it('strips exactly one leading U+FEFF (the worker parses with bom: true), also when BillingPeriodStart is the first column', () => {
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    expect(dataBodies(stageFile(Buffer.concat([bom, SAMPLE]), { location: LOC }))).toEqual(dataBodies(stageFile(SAMPLE, { location: LOC })));
+    const first = mini(['2024-09-01,AWS,USD,1.5']);
+    const staged = stageFile(Buffer.concat([bom, first]), { location: LOC });
+    expect(staged.periods).toEqual([{ billingPeriod: '2024-09-01', records: 1 }]);
+    expect(staged.plan.columns[0]).toBe('BillingPeriodStart');
+    expect(dataBodies(staged)).toEqual([first.toString('utf8')]);
+    expect(codeOf(() => stageFile(Buffer.concat([bom, bom, first]), { location: LOC }))).toBe('IMPORT_FILE_INVALID');
+  });
+
+  it('accepts trailing blank lines like the worker (skip_empty_lines) and stages the same records', () => {
+    for (const tail of ['\n', '\n\n', '\r\n', '\r\n\r\n']) {
+      expect(dataBodies(stageFile(Buffer.concat([SAMPLE, Buffer.from(tail)]), { location: LOC }))).toEqual(dataBodies(stageFile(SAMPLE, { location: LOC })));
+    }
+  });
+
+  it('messages read "the file, record N" (one input) and "file K, record N" (several inputs)', () => {
+    const ragged = mini(['2024-09-01,AWS,USD']);
+    let err: unknown;
+    try {
+      stageFile(ragged, { location: LOC });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as Error).message).toMatch(/^the file, record 2 has 3 fields, the header has 4$/);
+    err = undefined;
+    try {
+      stageFile([{ name: 'a', bytes: mini(['2024-09-01,AWS,USD,1']) }, { name: 'b', bytes: ragged }], { location: LOC });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as Error).message).toMatch(/^file 2, record 2 has 3 fields/);
+    err = undefined;
+    try {
+      stageFile(Buffer.from(`${MINI_HEADER}\r\n2024-09-01,AWS,USD,1\r\n2024-09-01,AWS,USD\r\n`), { location: LOC });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as Error).message).toMatch(/^the file, record 3 has 3 fields/);
+  });
+
+  it('refuses the same bytes supplied twice in one delivery, before staging anything', () => {
+    const f = mini(['2024-09-01,AWS,USD,1']);
+    expect(codeOf(() => stageFile([{ name: 'a', bytes: f }, { name: 'b', bytes: Buffer.from(f) }], { location: LOC }))).toBe('IMPORT_FILE_DUPLICATE');
+  });
+});
+
+describe('R3 stageFile review: record and control checks that must bite', () => {
+  it('BillingPeriodStart must be day 01 at midnight', () => {
+    for (const v of ['2024-09-15', '2024-09-15 00:00:00', '2024-09-01 00:00:01', '2024-09-01T12:00:00Z', '2024-13-01']) {
+      expect(codeOf(() => stageFile(mini([`${v},AWS,USD,1`]), { location: LOC }))).toBe('IMPORT_FILE_INVALID');
+    }
+    for (const v of ['2024-09-01', '2024-09-01 00:00:00', '2024-09-01T00:00:00Z', '2024-09-01T00:00:00.000+00:00']) {
+      expect(stageFile(mini([`${v},AWS,USD,1`]), { location: LOC }).periods).toEqual([{ billingPeriod: '2024-09-01', records: 1 }]);
+    }
+  });
+
+  it('refuses a negative or fractional control row count and a non-decimal billed total', () => {
+    const at = (control: Record<string, unknown>) => codeOf(() => stageFile(mini(['2024-09-01,AWS,USD,1']), { location: LOC, providers: ['AWS'], control }));
+    for (const rowCount of [-1, 1.5, Number.NaN]) expect(at({ rowCount })).toBe('IMPORT_CONTROL_INVALID');
+    for (const billedTotal of ['12,5', '1.2.3', '', ' 1', 'NaN']) expect(at({ billedTotal, currency: 'USD' })).toBe('IMPORT_CONTROL_INVALID');
+    expect(at({ rowCount: 1, billedTotal: '1', currency: 'USD' })).toBe('no error');
+  });
+
+  it('requires the declared providers whenever a control is given', () => {
+    const f = mini(['2024-09-01,AWS,USD,1']);
+    expect(codeOf(() => stageFile(f, { location: LOC, control: { billedTotal: '1', currency: 'USD' } }))).toBe('IMPORT_CONTROL_INVALID');
+    expect(codeOf(() => stageFile(f, { location: LOC, control: { rowCount: 1 } }))).toBe('IMPORT_CONTROL_INVALID');
+  });
+
+  it('empties only the UNQUOTED NULL token; a quoted "NULL" is data and stays byte-equal', () => {
+    const staged = stageFile(mini(['2024-09-01,AWS,USD,NULL', '2024-09-01,"NULL",USD,1']), { location: LOC });
+    expect(dataBodies(staged)).toEqual([`${MINI_HEADER}\n2024-09-01,AWS,USD,\n2024-09-01,"NULL",USD,1\n`]);
+    expect(staged.nullTokensReplaced).toEqual({ BilledCost: 1 });
+  });
+
+  it('checks the control currency on the declared providers rows only', () => {
+    const f = mini(['2024-09-01,AWS,USD,1', '2024-09-01,Microsoft,EUR,2']);
+    const control = { billedTotal: '1', currency: 'USD' };
+    expect(codeOf(() => stageFile(f, { location: LOC, providers: ['AWS'], control }))).toBe('no error');
+    expect(codeOf(() => stageFile(f, { location: LOC, providers: ['AWS', 'Microsoft'], control }))).toBe('IMPORT_CONTROL_CURRENCY_MISMATCH');
+  });
+
+  it('refuses a header with a duplicate column name', () => {
+    expect(codeOf(() => stageFile(mini(['2024-09-01,AWS,USD,1'], 'BillingPeriodStart,ProviderName,BillingCurrency,ProviderName'), { location: LOC }))).toBe('IMPORT_FILE_INVALID');
+  });
+});
+
+// Review round 1, PR #143 (B1 report, B2 memory).
+describe('R3 stageFile review: a preview of the declared providers rows per staged period', () => {
+  it('counts and sums (exactly, per currency) the declared providers rows, for the restatement report', () => {
+    const staged = stageFile(SAMPLE, { location: LOC, providers: ['AWS'] });
+    expect(staged.preview).toEqual([
+      { billingPeriod: '2024-09-01', rows: Number(CONTROLS.totals[0].rowCount), billed: { USD: CONTROLS.totals[0].billedCost } },
+      { billingPeriod: '2024-10-01', rows: 0, billed: {} },
+    ]);
+    const f = mini(['2024-09-01,AWS,USD,0.20', '2024-09-01,AWS,USD,0.1', '2024-09-01,AWS,USD,1e1', '2024-09-01,AWS,EUR,-1e-2', '2024-09-01,AWS,EUR,NULL', '2024-09-01,Microsoft,USD,5']);
+    expect(stageFile(f, { location: LOC, providers: ['AWS'] }).preview).toEqual([{ billingPeriod: '2024-09-01', rows: 5, billed: { USD: '10.30', EUR: null } }]);
+  });
+});
+
+describe('R3 stageFile review: bounded memory', () => {
+  it('writes each period as gzip members of bounded size that the worker decompressor (zlib.createGunzip) reads back exactly', async () => {
+    const one = stageFile(SAMPLE, { location: LOC });
+    const many = stageFile(SAMPLE, { location: LOC, gzipMemberBytes: 4096 });
+    const gunzipStream = (b: Buffer) =>
+      new Promise<string>((resolve, reject) => {
+        const parts: Buffer[] = [];
+        const g = zlib.createGunzip();
+        g.on('data', (d: Buffer) => parts.push(d)).on('end', () => resolve(Buffer.concat(parts).toString('utf8'))).on('error', reject);
+        g.end(b);
+      });
+    const sep = many.objects.find((o) => o.kind === 'data' && o.billingPeriod === '2024-09-01')!;
+    let members = 0;
+    for (let i = 0; i + 1 < sep.body.length; i++) if (sep.body[i] === 0x1f && sep.body[i + 1] === 0x8b && sep.body[i + 2] === 8) members++;
+    expect(members).toBeGreaterThan(100);
+    expect(await Promise.all(many.objects.filter((o) => o.kind === 'data').map((o) => gunzipStream(o.body)))).toEqual(dataBodies(one));
+    expect(verifyStagingLossless(SAMPLE, many.plan)).toEqual([]);
+  });
+
+  it('decodeImportFile refuses more than the cap with IMPORT_TOO_LARGE, also for a gzip that inflates past it', async () => {
+    await expect(decodeImportFile(Buffer.alloc(1001, 0x41), 'x.csv', 1000)).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE' });
+    await expect(decodeImportFile(zlib.gzipSync(Buffer.alloc(1001, 0x41)), 'x.csv.gz', 1000)).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE' });
+    // A single-member gzip whose trailer (ISIZE) says it inflates past the cap is refused before inflating.
+    const inflate = vi.spyOn(zlib, 'createGunzip');
+    await expect(decodeImportFile(zlib.gzipSync(Buffer.alloc(1001, 0x41)), 'x.csv.gz', 1000)).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE' });
+    expect(inflate).not.toHaveBeenCalled();
+    inflate.mockRestore();
+    const twoMembers = Buffer.concat([zlib.gzipSync(Buffer.alloc(900, 0x41)), zlib.gzipSync(Buffer.alloc(200, 0x41))]);
+    await expect(decodeImportFile(twoMembers, 'x.csv.gz', 1000)).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE' });
+    expect((await decodeImportFile(zlib.gzipSync(Buffer.alloc(1000, 0x41)), 'x.csv.gz', 1000)).length).toBe(1000);
+  });
+
+  it('the RSS budget leaves a quarter of the worker container limit (compose.yaml) as margin', () => {
+    const compose = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'infrastructure', 'engagement', 'compose.yaml'), 'utf8');
+    const worker = compose.slice(compose.indexOf('\n  worker:'));
+    const m = /\n {4}mem_limit: ([0-9]+)m\n/.exec(worker)!;
+    expect(IMPORT_RSS_BUDGET_BYTES).toBeLessThanOrEqual(Number(m[1]) * 1024 * 1024 * 0.75);
+    expect(STAGE_RSS_BUDGET_BYTES).toBeLessThan(IMPORT_RSS_BUDGET_BYTES);
+    expect(MAX_IMPORT_BYTES).toBeLessThan(STAGE_RSS_BUDGET_BYTES);
+  });
+
+  // The real staging path (read, decode, stage) on a SYNTHETIC file just under the cap, built by repeating the
+  // public sample's records, in a child process with a constrained V8 heap. Its peak RSS must leave the worker
+  // container (infrastructure/engagement/compose.yaml mem_limit) the margin the cap was derived from.
+  it(
+    'stages a .csv and a .csv.gz just under the cap with --max-old-space-size=96 and a peak RSS inside the container budget',
+    () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-stage-mem-'));
+      try {
+        const file = path.join(dir, 'near-cap.csv');
+        const header = SAMPLE.subarray(0, SAMPLE.indexOf(10) + 1);
+        const body = SAMPLE.subarray(SAMPLE.indexOf(10) + 1);
+        const fd = fs.openSync(file, 'w');
+        let size = fs.writeSync(fd, header);
+        while (size + body.length <= MAX_IMPORT_BYTES - 1024) size += fs.writeSync(fd, body);
+        fs.closeSync(fd);
+        fs.writeFileSync(`${file}.gz`, zlib.gzipSync(fs.readFileSync(file), { level: 1 }));
+        const child = path.resolve(__dirname, '..', 'testing', 'stageMemoryChild.ts');
+        for (const f of [file, `${file}.gz`]) {
+          const r = spawnSync(process.execPath, ['--max-old-space-size=96', '--import', 'tsx', child, f], { encoding: 'utf8', timeout: 170_000 });
+          expect(r.status, r.stderr.slice(-2000)).toBe(0);
+          const out = JSON.parse(r.stdout.trim().split('\n').pop()!);
+          expect(out.bytes).toBe(size);
+          expect(out.maxRssBytes, f).toBeLessThanOrEqual(STAGE_RSS_BUDGET_BYTES);
+        }
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    300_000,
+  );
 });

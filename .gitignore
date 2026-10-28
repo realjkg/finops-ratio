@@ -54,3 +54,4 @@ __pycache__/
 
 # Resumable build-loop evidence and locks
 .ratio-build/
+.env.engagement
