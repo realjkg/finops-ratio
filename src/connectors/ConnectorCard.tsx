@@ -4,7 +4,7 @@
 // carries no API token, so it only probes OFFLINE sandbox sources; live
 // connectors are probed through the authenticated API
 // (GET /api/v1/connectors?probe=true). Env var NAMES only — never values.
-// Controlled-egress paths (live PointFive OAuth 2.1 → MCP SSE broker) carry
+// Controlled-egress paths (live PointFive OAuth 2.1 → MCP Streamable HTTP) carry
 // the reserved warm accent (#ffc44d / shape token).
 
 import { useState } from 'react';

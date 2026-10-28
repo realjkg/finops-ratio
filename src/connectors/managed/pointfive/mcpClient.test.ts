@@ -233,3 +233,169 @@ describe('SseDecoder', () => {
     expect(() => new SseDecoder(16).push('data: ' + 'z'.repeat(32))).toThrow(McpProtocolError);
   });
 });
+
+// --- Review findings on #144 (M3/M4) -------------------------------------
+// Scripted in-process fetch: deterministic chunk boundaries and no sockets, so
+// fake timers can observe the request timer. SYNTHETIC responses only.
+type Rpc = { id?: number; method: string; params?: Record<string, unknown> };
+const INIT_RESULT = { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'synthetic', version: '0' } };
+const enc = new TextEncoder();
+const streamOf = (chunks: string[], contentType = 'text/event-stream', headers: Record<string, string> = {}) =>
+  new Response(
+    new ReadableStream<Uint8Array>({
+      start(ctl) {
+        for (const ch of chunks) ctl.enqueue(enc.encode(ch));
+        ctl.close();
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': contentType, ...headers } },
+  );
+const jsonOf = (msg: unknown, headers: Record<string, string> = {}) => streamOf([JSON.stringify(msg)], 'application/json', headers);
+function scripted(handler: (rpc: Rpc) => Response | undefined) {
+  const calls: Rpc[] = [];
+  const f = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const rpc = JSON.parse(String(init?.body)) as Rpc;
+    calls.push(rpc);
+    const out = handler(rpc);
+    if (out) return out;
+    if (rpc.method === 'initialize') return jsonOf({ jsonrpc: '2.0', id: rpc.id, result: INIT_RESULT }, { 'Mcp-Session-Id': 'scripted-1' });
+    return new Response(null, { status: 202 });
+  }) as typeof fetch;
+  const client = (o: Partial<McpClientOptions> = {}) =>
+    new McpClient({ endpoint: 'http://synthetic.invalid/mcp', tokenProvider: { getAccessToken: async () => TOKEN }, fetch: f, sleep: async () => {}, ...o });
+  return { calls, client, methods: () => calls.map((r) => r.method) };
+}
+
+describe('McpClient Retry-After (M3)', () => {
+  const limited = (status: number, retryAfter: string, times = 1) => {
+    let left = times;
+    return scripted((rpc) => (rpc.method === 'initialize' && left-- > 0 ? new Response(null, { status, headers: { 'Retry-After': retryAfter } }) : undefined));
+  };
+
+  it('stops and fails when Retry-After (seconds) is longer than the cap, without retrying early', async () => {
+    const sleeps: number[] = [];
+    const s = limited(429, '60');
+    const e = (await s.client({ sleep: async (ms) => void sleeps.push(ms) }).initialize().catch((x: unknown) => x)) as McpProtocolError;
+    expect(e).toBeInstanceOf(McpProtocolError);
+    expect([e.code, e.httpStatus]).toEqual(['RETRY_AFTER_TOO_LONG', 429]);
+    expect(sleeps).toEqual([]);
+    expect(s.methods()).toEqual(['initialize']);
+  });
+
+  it('parses the HTTP-date form against the injected clock', async () => {
+    const now = Date.UTC(2026, 9, 28, 12, 0, 0);
+    const sleeps: number[] = [];
+    const s = limited(503, new Date(now + 3_000).toUTCString());
+    await s.client({ sleep: async (ms) => void sleeps.push(ms), now: () => now }).initialize();
+    expect(sleeps).toEqual([3_000]);
+    expect(s.methods().slice(0, 2)).toEqual(['initialize', 'initialize']);
+  });
+
+  it('fails on an HTTP-date beyond the cap and retries at once on a date in the past', async () => {
+    const now = Date.UTC(2026, 9, 28, 12, 0, 0);
+    const far = limited(429, new Date(now + 60_000).toUTCString());
+    expect(await codeOf(far.client({ now: () => now }).initialize())).toBe('RETRY_AFTER_TOO_LONG');
+    expect(far.methods()).toEqual(['initialize']);
+    const sleeps: number[] = [];
+    const past = limited(429, new Date(now - 60_000).toUTCString());
+    await past.client({ sleep: async (ms) => void sleeps.push(ms), now: () => now }).initialize();
+    expect(sleeps).toEqual([0]);
+  });
+
+  it('accepts a Retry-After exactly at the cap and falls back to backoff on an unparseable value', async () => {
+    const sleeps: number[] = [];
+    await limited(429, '10').client({ sleep: async (ms) => void sleeps.push(ms) }).initialize();
+    await limited(429, 'soon').client({ sleep: async (ms) => void sleeps.push(ms), backoffMs: 7 }).initialize();
+    expect(sleeps).toEqual([10_000, 7]);
+  });
+});
+
+describe('McpClient review mutations (M4)', () => {
+  it('does not treat a 404 without a session as session expiry', async () => {
+    const { c, s } = await setup({
+      sessionId: null,
+      tools: [TOOL('t1')],
+      override: (r, res) => (r.body?.method === 'tools/call' ? (res.writeHead(404).end(), true) : false),
+    });
+    const e = (await c.callTool('t1', {}).catch((x: unknown) => x)) as McpProtocolError;
+    expect([e.code, e.httpStatus]).toEqual(['HTTP_STATUS', 404]);
+    expect(s.methods()).toEqual(['initialize', 'notifications/initialized', 'tools/call']);
+  });
+
+  it('re-initializes only once when the new session also expires', async () => {
+    const { c, s } = await setup({
+      tools: [TOOL('t1')],
+      override: (r, res) => (r.body?.method === 'tools/call' ? (res.writeHead(404).end(), true) : false),
+    });
+    expect(await codeOf(c.callTool('t1', {}))).toBe('SESSION_EXPIRED');
+    expect(s.methods().filter((m) => m === 'initialize')).toHaveLength(2);
+    expect(s.methods().filter((m) => m === 'tools/call')).toHaveLength(2);
+  });
+
+  it.each([
+    ['timeout', { timeoutMs: 100 }, 'TIMEOUT'],
+    ['caller abort', {}, 'CANCELLED'],
+  ] as const)('never sends notifications/cancelled for initialize (%s)', async (_n, opts, code) => {
+    const { c, s } = await setup({ override: (r) => r.body?.method === 'initialize' /* never answers */ }, opts);
+    const ac = new AbortController();
+    if (code === 'CANCELLED') setTimeout(() => ac.abort(), 50);
+    expect(await codeOf(c.initialize(ac.signal))).toBe(code);
+    expect(s.methods()).toEqual(['initialize']);
+  });
+
+  it('decodes a response whose CRLF between data lines is split across two network chunks', async () => {
+    const push = vi.spyOn(SseDecoder.prototype, 'push');
+    const s = scripted((rpc) =>
+      rpc.method === 'tools/list'
+        ? streamOf([`data: {"jsonrpc":"2.0",\r`, `\ndata: "id":${rpc.id},"result":{"tools":[]}}\r\n\r\n`])
+        : undefined,
+    );
+    await expect(s.client().listTools()).resolves.toEqual([]);
+    // The path under test really ran: one chunk ended on the lone CR.
+    expect(push.mock.calls.some(([t]) => t.endsWith('\r'))).toBe(true);
+  });
+
+  it('does not accept a server-to-client request that reuses our id as the response', async () => {
+    const s = scripted((rpc) =>
+      rpc.method === 'tools/list'
+        ? streamOf([
+            `data: ${JSON.stringify({ jsonrpc: '2.0', id: rpc.id, method: 'sampling/createMessage', params: {} })}\n\n`,
+            `data: ${JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { tools: [TOOL('real')] } })}\n\n`,
+          ])
+        : undefined,
+    );
+    expect((await s.client().listTools()).map((t) => t.name)).toEqual(['real']);
+  });
+
+  it.each([
+    ['a space', 'bad id'],
+    ['a non-ASCII character', 'badéid'],
+    ['more than 512 characters', 'x'.repeat(513)],
+  ])('refuses a session id containing %s', async (_n, sid) => {
+    const s = scripted((rpc) =>
+      rpc.method === 'initialize' ? jsonOf({ jsonrpc: '2.0', id: rpc.id, result: INIT_RESULT }, { 'Mcp-Session-Id': sid }) : undefined,
+    );
+    expect(await codeOf(s.client().initialize())).toBe('MALFORMED_RESPONSE');
+    expect(s.methods()).toEqual(['initialize']); // no notifications/initialized on a bad session
+  });
+
+  it('accepts a session id of visible ASCII up to 512 characters', async () => {
+    const sid = '~!' + 'a'.repeat(510);
+    const s = scripted((rpc) =>
+      rpc.method === 'initialize' ? jsonOf({ jsonrpc: '2.0', id: rpc.id, result: INIT_RESULT }, { 'Mcp-Session-Id': sid }) : undefined,
+    );
+    await s.client().initialize();
+    expect(s.methods()).toEqual(['initialize', 'notifications/initialized']);
+  });
+
+  it('clears the request timer when a request completes', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const s = scripted(() => undefined);
+      await s.client({ timeoutMs: 30_000 }).initialize();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

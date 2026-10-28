@@ -3,12 +3,14 @@
 // and tool payloads never appear in them.
 
 // AUTH_REJECTED = HTTP 401, FORBIDDEN = 403 (scope), HTTP_STATUS = other non-2xx
-// after bounded retries, ENDPOINT_NOT_STREAMABLE_HTTP = 404/405 on initialize.
+// after bounded retries, ENDPOINT_NOT_STREAMABLE_HTTP = 404/405 on initialize,
+// RETRY_AFTER_TOO_LONG = 429/5xx whose Retry-After exceeds the client's wait cap.
 export type McpErrorCode =
   | 'AUTH_REJECTED' | 'FORBIDDEN' | 'HTTP_STATUS' | 'NETWORK' | 'TIMEOUT' | 'CANCELLED'
   | 'ENDPOINT_NOT_STREAMABLE_HTTP' | 'PROTOCOL_VERSION_UNSUPPORTED' | 'SESSION_EXPIRED' | 'JSONRPC_ERROR'
   | 'MALFORMED_RESPONSE' | 'MALFORMED_SSE' | 'TRUNCATED_STREAM' | 'RESPONSE_TOO_LARGE' | 'PAGINATION_LIMIT'
-  | 'TOOL_EXECUTION_ERROR' | 'TOOL_NOT_DISCOVERED' | 'TOOL_SCHEMA_MISMATCH' | 'PAYLOAD_SCHEMA_MISMATCH';
+  | 'TOOL_EXECUTION_ERROR' | 'RETRY_AFTER_TOO_LONG'
+  | 'TOOL_NOT_DISCOVERED' | 'TOOL_SCHEMA_MISMATCH' | 'PAYLOAD_SCHEMA_MISMATCH';
 
 export interface McpErrorDetails {
   httpStatus?: number;

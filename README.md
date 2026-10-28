@@ -344,6 +344,69 @@ preserved as an ephemeral Obvious artifact (point-in-time snapshot), not checked
 into the repo — see the `doc-authoring` skill for this workflow.
 
 
+## Engagement mode
+
+Ratio 1.0 is being packaged as a single-customer engagement tool: an operator imports authorized billing **files**,
+reviewers will sign in as named users and read cost, coverage and reconciliation. This section covers packaging
+(row R12). Other behavior arrives with other rows and is labeled below.
+
+- Works today: the image, the compose stack, Postgres and the object store, database migrations, and the existing worker commands.
+- After R1: `RATIO_MODE=engagement` and the read-only config file `RATIO_ENGAGEMENT_CONFIG` (schema in `src/engagement/config.ts`) take effect, and the instance will refuse to start on an invalid config, naming the offending key and never its value. Until then both variables are set in the image but nothing reads them.
+- After R2: named users and sign-in. After R3: file import. After R11: init, backup, restore, reset.
+
+### Install
+
+Requires Docker with the Compose plugin. Everything runs from one image (`infrastructure/simulation/Dockerfile`,
+target `engagement`: production mode, non-root, read-only root filesystem, all capabilities dropped, `/state` the
+only writable volume). Postgres 16 and SeaweedFS are pinned by digest. The app listens on `127.0.0.1` only.
+Run the steps in this order; `C` is the compose command.
+
+```bash
+cp .env.engagement.example .env.engagement        # fill in URL-safe passwords and the two file paths
+export C="docker compose --env-file .env.engagement -f infrastructure/engagement/compose.yaml"
+$C up -d postgres s3                              # works today
+# Database roles and logins: create them before the first migration (needs R11 init; no command exists yet).
+$C --profile jobs run --rm migrator               # works today once the roles exist
+# Evidence bucket `ratio-engagement-evidence` (R11 init will create it). Until then create it with any S3 client on the
+# internal network; the S3 SDK in the image can do it. This one-liner was not run in the release pipeline.
+$C --profile jobs run --rm --entrypoint node worker -e "const s=require('@aws-sdk/client-s3');new s.S3Client({endpoint:'http://s3:8333',region:'us-east-1',forcePathStyle:true,credentials:{accessKeyId:process.env.RATIO_EVIDENCE_S3_ACCESS_KEY_ID,secretAccessKey:process.env.RATIO_EVIDENCE_S3_SECRET_ACCESS_KEY}}).send(new s.CreateBucketCommand({Bucket:'ratio-engagement-evidence'}))"
+$C up -d --build app                              # http://127.0.0.1:3100; the config check needs R1, sign-in needs R2
+$C --profile jobs run --rm worker doctor          # works today; any worker command runs the same way
+```
+
+### Configure
+
+`RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config, read after R1) and `RATIO_ENGAGEMENT_USERS_FILE` (named users,
+after R2) are mounted read-only at `/config/`. The container reads them at start, so after editing run
+`$C restart app`. Editors that replace the file (a new inode) break a single-file bind mount: keep editing in place,
+or mount a directory instead, and restart the container.
+
+The worker runs with `RATIO_ENV=staging` (the app and migrator with `production`): the worker's S3 settings refuse
+`http` endpoints under `production`, and the bundled object store is `http` on the internal network. `staging`
+enables no simulation, synthetic provider or test hook.
+
+### Use
+
+View: after R2, open the app on the loopback port and sign in. The existing worker commands (`sync`, `replay`,
+`quarantine show`, `doctor`) run through `$C --profile jobs run --rm worker <command>`.
+
+### Known limitations
+
+- File import only: there are no live provider connectors in this release.
+- One engagement per instance: run a second instance for a second customer.
+- FOCUS parsing is verified on real exports for 1.0 only; FOCUS 1.1 to 1.4 have synthetic fixtures only.
+- The base image tag is not pinned by digest (shared with the simulation image); the Postgres and SeaweedFS images are.
+- The bundled object store has no access control and is reachable only from the internal compose network.
+
+### Coming from other rows
+
+To be filled in by those rows; the commands do not exist yet.
+
+- Import a billing file (operator CLI, row R3).
+- Init, backup, restore and reset (operator lifecycle command, row R11), including database role and bucket creation.
+- Named users file format and sign-in (row R2 is pending).
+- Config loading and fail-closed start (row R1).
+
 ## Saved customer workflow simulation
 
 Requires Node 22.13+ (built-in SQLite; see Quick start). Run `npm ci`, then `npm run simulation:start`,

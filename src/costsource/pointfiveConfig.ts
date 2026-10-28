@@ -1,5 +1,5 @@
 // PointFive live-adapter configuration (PR E) — feature flag + credential
-// resolution for the gated live MCP SSE path.
+// resolution for the gated live MCP path (Streamable HTTP, protocol 2025-06-18).
 //
 // The live PointFive adapter SHIPS DARK: the COSTSOURCE_POINTFIVE_LIVE flag is
 // OFF by default, and even when ON the adapter only goes live if OAuth 2.1
@@ -20,8 +20,18 @@ export const POINTFIVE_LIVE_SOURCE_ID = 'pointfive-live';
 /** Feature flag env var. OFF unless explicitly set to a truthy value. */
 export const POINTFIVE_LIVE_FLAG_ENV = 'COSTSOURCE_POINTFIVE_LIVE';
 
-/** Documented public PointFive MCP SSE endpoint (art_gvr7b5Ne §2). */
+/**
+ * ASSUMED / UNVERIFIED default PointFive MCP endpoint (from external research,
+ * art_gvr7b5Ne §2). No PointFive transcript has been captured. The `/sse` path is
+ * the conventional path of the LEGACY HTTP+SSE transport (2024-11-05), which the
+ * Streamable HTTP client does not speak: if the vendor serves only that transport
+ * here, `initialize` fails with ENDPOINT_NOT_STREAMABLE_HTTP and the health check
+ * names it. Override with POINTFIVE_MCP_URL once the vendor endpoint is confirmed.
+ */
 export const DEFAULT_POINTFIVE_MCP_URL = 'https://mcp.pointfive.co/sse';
+
+/** The default endpoint above has not been verified against the vendor. */
+export const DEFAULT_POINTFIVE_MCP_URL_VERIFIED = false as const;
 
 /** PointFive documents FOCUS v1.0 cross-cloud exports (art_gvr7b5Ne §2). */
 export const POINTFIVE_FOCUS_VERSION = '1.0' as const;
@@ -49,7 +59,7 @@ export type PointFiveStatus =
   | { state: 'configured'; credentials: PointFiveCredentials };
 
 // Env var names for the required OAuth 2.1 credentials. mcpUrl is optional and
-// falls back to the documented public endpoint; the OAuth secrets are not
+// falls back to the ASSUMED default endpoint (unverified); the OAuth secrets are not
 // public and must be supplied once a PointFive subscription exists.
 const REQUIRED_OAUTH_ENV = {
   oauthClientId: 'POINTFIVE_OAUTH_CLIENT_ID',
@@ -114,11 +124,16 @@ export function resolvePointFiveStatus(env: EnvRecord): PointFiveStatus {
 export function pointFiveStatusNote(status: PointFiveStatus): string {
   switch (status.state) {
     case 'disabled':
-      return `Live MCP SSE + OAuth 2.1 adapter — feature flag ${POINTFIVE_LIVE_FLAG_ENV} is OFF; ships dark, no network calls (PR E).`;
+      return `Live MCP (Streamable HTTP) + OAuth 2.1 adapter — feature flag ${POINTFIVE_LIVE_FLAG_ENV} is OFF; ships dark, no network calls (PR E).`;
     case 'unconfigured':
       return `Feature flag ON but OAuth credentials missing (${status.missing.join(', ')}); no network calls until configured.`;
     case 'configured':
-      return 'Live PointFive MCP adapter configured (OAuth 2.1); not verified until the four-stage health check passes.';
+      return (
+        'Live PointFive MCP (Streamable HTTP) adapter configured (OAuth 2.1); not verified until the four-stage health check passes.' +
+        (status.credentials.mcpUrl === DEFAULT_POINTFIVE_MCP_URL
+          ? ` Endpoint is the ASSUMED default (unverified); set ${POINTFIVE_MCP_URL_ENV} once the vendor endpoint is confirmed.`
+          : '')
+      );
   }
 }
 

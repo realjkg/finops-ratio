@@ -5,7 +5,9 @@
 // initialize -> notifications/initialized; negotiated MCP-Protocol-Version and
 // Mcp-Session-Id on every later request; a 404 on a session re-initializes once.
 // Timeouts (30 s) and caller cancellation send notifications/cancelled; 429/5xx/
-// network errors retry with bounded backoff; bodies and pages are bounded. The
+// network errors retry with bounded backoff; a Retry-After (seconds or HTTP-date)
+// longer than 10 s stops with RETRY_AFTER_TOO_LONG instead of retrying early;
+// bodies and pages are bounded. The
 // legacy HTTP+SSE transport (2024-11-05) is not defined by 2025-06-18 and is not
 // implemented: a 404/405 on initialize is ENDPOINT_NOT_STREAMABLE_HTTP. The token
 // is fetched per request and never logged or put in an error.
@@ -29,6 +31,8 @@ export type McpClientOptions = Partial<typeof DEFAULTS> & {
   tokenProvider: TokenProvider;
   fetch?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
+  /** Clock for Retry-After HTTP-dates (ms since epoch). Default Date.now. */
+  now?: () => number;
 };
 export interface McpSession { protocolVersion: string; capabilities: Obj; serverInfo: { name: string; version: string } }
 export interface McpTool { name: string; inputSchema: Obj; outputSchema?: Obj }
@@ -36,6 +40,20 @@ export interface McpToolResult { content: unknown[]; structuredContent?: unknown
 
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 const short = (v: unknown) => (typeof v === 'string' ? v.slice(0, 100) : '');
+/**
+ * Retry-After (RFC 9110 section 10.2.3) in ms: delay-seconds or an HTTP-date
+ * relative to `now` (a past date is 0). Null when absent or unparseable.
+ */
+export function parseRetryAfter(value: string | null, now: number): number | null {
+  if (value === null) return null;
+  const v = value.trim();
+  if (/^\d+$/.test(v)) return Number(v) * 1000;
+  // HTTP-date forms (IMF-fixdate, RFC 850, asctime) all start with a day name.
+  if (!/^[A-Za-z]{3,9},? /.test(v)) return null;
+  const at = Date.parse(v);
+  return Number.isNaN(at) ? null : Math.max(0, at - now);
+}
+
 const fail = (code: ConstructorParameters<typeof McpProtocolError>[0], method: string, what: string) =>
   new McpProtocolError(code, `PointFive MCP ${method} ${what}`);
 
@@ -50,7 +68,7 @@ export class McpClient {
   constructor(opts: McpClientOptions) {
     const given = Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined));
     const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-    this.o = { ...DEFAULTS, fetch: (i, init) => fetch(i, init), sleep, ...given } as typeof this.o;
+    this.o = { ...DEFAULTS, fetch: (i, init) => fetch(i, init), sleep, now: () => Date.now(), ...given } as typeof this.o;
   }
 
   /** The negotiated session, or null before a successful initialize. */
@@ -176,8 +194,16 @@ export class McpClient {
         }
         if ((res.status === 429 || res.status >= 500) && attempt < this.o.maxRetries) {
           await res.body?.cancel().catch(() => undefined);
-          const after = Number(res.headers.get('retry-after'));
-          retryDelay = Number.isFinite(after) && after > 0 ? Math.min(after * 1000, MAX_RETRY_AFTER_MS) : this.o.backoffMs * 2 ** attempt;
+          const after = parseRetryAfter(res.headers.get('retry-after'), this.o.now());
+          if (after !== null && after > MAX_RETRY_AFTER_MS) {
+            // Retrying before the server's stated time would be early; stop instead.
+            throw new McpProtocolError(
+              'RETRY_AFTER_TOO_LONG',
+              `PointFive MCP ${method} returned ${res.status} (${statusReason(res.status)}) and asked to retry after more than ${MAX_RETRY_AFTER_MS / 1000} s`,
+              { httpStatus: res.status },
+            );
+          }
+          retryDelay = after ?? this.o.backoffMs * 2 ** attempt;
         } else {
           throw await this.httpError(method, res, hadSession);
         }
