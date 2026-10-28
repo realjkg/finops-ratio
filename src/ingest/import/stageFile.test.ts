@@ -188,6 +188,13 @@ describe('R3 stageFile review: input forms the worker accepts', () => {
       err = e;
     }
     expect((err as Error).message).toMatch(/^file 2, record 2 has 3 fields/);
+    err = undefined;
+    try {
+      stageFile(Buffer.from(`${MINI_HEADER}\r\n2024-09-01,AWS,USD,1\r\n2024-09-01,AWS,USD\r\n`), { location: LOC });
+    } catch (e) {
+      err = e;
+    }
+    expect((err as Error).message).toMatch(/^the file, record 3 has 3 fields/);
   });
 
   it('refuses the same bytes supplied twice in one delivery, before staging anything', () => {
@@ -245,8 +252,8 @@ describe('R3 stageFile review: a preview of the declared providers rows per stag
       { billingPeriod: '2024-09-01', rows: Number(CONTROLS.totals[0].rowCount), billed: { USD: CONTROLS.totals[0].billedCost } },
       { billingPeriod: '2024-10-01', rows: 0, billed: {} },
     ]);
-    const f = mini(['2024-09-01,AWS,USD,0.1', '2024-09-01,AWS,USD,0.20', '2024-09-01,AWS,EUR,-1e-2', '2024-09-01,AWS,EUR,NULL', '2024-09-01,Microsoft,USD,5']);
-    expect(stageFile(f, { location: LOC, providers: ['AWS'] }).preview).toEqual([{ billingPeriod: '2024-09-01', rows: 4, billed: { USD: '0.30', EUR: null } }]);
+    const f = mini(['2024-09-01,AWS,USD,0.20', '2024-09-01,AWS,USD,0.1', '2024-09-01,AWS,USD,1e1', '2024-09-01,AWS,EUR,-1e-2', '2024-09-01,AWS,EUR,NULL', '2024-09-01,Microsoft,USD,5']);
+    expect(stageFile(f, { location: LOC, providers: ['AWS'] }).preview).toEqual([{ billingPeriod: '2024-09-01', rows: 5, billed: { USD: '10.30', EUR: null } }]);
   });
 });
 
