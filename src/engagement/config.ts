@@ -31,10 +31,21 @@ export type Tri = 'included' | 'excluded' | 'unknown';
 /** Per-currency exact decimal strings, or the explicit 'not_available'. */
 export type CurrencyTotals = Record<string, string> | 'not_available';
 
+export const VERSION_FIELDS = ['provider_product', 'api_version', 'export_schema_version', 'schema_snapshot_hash', 'focus_version', 'mapping_version', 'canonical_model_version'] as const;
+export type SourceVersions = Record<(typeof VERSION_FIELDS)[number], string>;
+
 export interface SourceMetadata {
   provider: 'AWS' | 'Azure' | 'GCP' | 'OCI' | 'other';
   source_kind: 'focus-export' | 'native-export' | 'api';
   schema_version: string;
+  /** Which cost basis the source carries; bases are never silently combined. */
+  cost_basis: 'billed' | 'effective' | 'actual' | 'amortized' | 'focus-native' | 'unknown';
+  /** Free text naming the dataset, or 'unknown'. */
+  dataset: string;
+  /** An allocated source is never added on top of the underlying billed cost (enforced by the read model). */
+  source_role: 'authoritative' | 'allocated' | 'enrichment' | 'recommendation' | 'change-management' | 'unknown';
+  /** Separate version facts, each a string or 'unknown'; never merged into one. schema_version stays the observed version of the delivered file. */
+  versions: SourceVersions;
   provenance: 'authorized-real-export' | 'official-example';
   sanitization: string;
   scope: {
@@ -67,10 +78,39 @@ export interface SourceMetadata {
   };
 }
 
+export const MANAGED_CONNECTORS = ['aws-data-exports', 'azure-cost-export', 'gcp-bigquery-export', 'oci-cost-report', 'nutanix', 'servicenow', 'pointfive', 'opencost', 'openai-usage', 'anthropic-usage'] as const;
+export type ManagedConnector = (typeof MANAGED_CONNECTORS)[number];
+export const RETRIEVAL_KINDS = ['file-drop', 'managed'] as const;
+export type RetrievalKind = (typeof RETRIEVAL_KINDS)[number];
+
+/** A connector parameter: scalar or list of strings; nested objects (depth 2) hold the same. Validated per connector later. */
+export type ParamLeaf = string | number | boolean | string[];
+export type ParamValue = ParamLeaf | Record<string, ParamLeaf>;
+
+/**
+ * How the source's data arrives. `file-drop` (the default) is the operator
+ * file import. `managed` names a connector; its `params` are validated per
+ * connector by that connector's row. `secretRef` is the NAME of a secret in
+ * the environment or secret store, never a secret value.
+ */
+export type Retrieval = { kind: 'file-drop' } | { kind: 'managed'; connector: ManagedConnector; params: Record<string, ParamValue>; secretRef?: string };
+
+/**
+ * The ONE place that says what this build can actually run. Enabling a
+ * connector or format later is a one-line change here. Anything else is
+ * schema-valid but refused at startup, naming the key.
+ */
+export const SUPPORTED_IN_THIS_BUILD = {
+  retrievalKinds: ['file-drop'] as readonly RetrievalKind[],
+  sourceKinds: ['focus-export', 'native-export'] as readonly SourceMetadata['source_kind'][],
+  deliveryFormats: ['csv', 'csv-gzip'] as readonly SourceMetadata['delivery']['format'][],
+};
+
 export interface EngagementSource {
   id: string;
   providers: FocusProviderName[];
   layout: SourceLayout;
+  retrieval: Retrieval;
   metadata: SourceMetadata;
 }
 
@@ -228,7 +268,7 @@ function atLeastOneCent(v: string): boolean {
 }
 
 const PROVIDER_VALUES = ['AWS', 'Azure', 'GCP', 'OCI', 'other'] as const;
-const META_KEYS = ['provider', 'source_kind', 'schema_version', 'provenance', 'sanitization', 'scope', 'delivery', 'financial', 'overlap'] as const;
+const META_KEYS = ['provider', 'source_kind', 'schema_version', 'cost_basis', 'dataset', 'source_role', 'versions', 'provenance', 'sanitization', 'scope', 'delivery', 'financial', 'overlap'] as const;
 const TRI = ['included', 'excluded', 'unknown'] as const;
 
 function currencyTotals(c: Ctx, o: Obj, parent: string, k: string, currencies: string[]): CurrencyTotals | null {
@@ -256,6 +296,21 @@ function metadata(c: Ctx, v: unknown, key: string, sourceIds: Set<string>, selfI
   const provider = oneOf(c, m, key, 'provider', PROVIDER_VALUES);
   const source_kind = oneOf(c, m, key, 'source_kind', ['focus-export', 'native-export', 'api'] as const);
   const schema_version = text(c, m, key, 'schema_version', 32);
+  const cost_basis = oneOf(c, m, key, 'cost_basis', ['billed', 'effective', 'actual', 'amortized', 'focus-native', 'unknown'] as const);
+  const dataset = text(c, m, key, 'dataset', 200);
+  const source_role = oneOf(c, m, key, 'source_role', ['authoritative', 'allocated', 'enrichment', 'recommendation', 'change-management', 'unknown'] as const);
+  const vk = at(key, 'versions');
+  const vo = object(c, m.versions, vk, VERSION_FIELDS) ?? {};
+  const versions = {} as SourceVersions;
+  for (const f of VERSION_FIELDS) {
+    if (f === 'schema_snapshot_hash') {
+      if (typeof vo[f] === 'string' && (vo[f] === 'unknown' || /^[0-9a-f]{64}$/.test(vo[f] as string))) versions[f] = vo[f] as string;
+      else c.bad(at(vk, f), "must be a lowercase sha256 hex string or 'unknown'");
+    } else {
+      const t = text(c, vo, vk, f, 200);
+      if (t !== null) versions[f] = t;
+    }
+  }
   const provenance = oneOf(c, m, key, 'provenance', ['authorized-real-export', 'official-example'] as const);
   const sanitization = text(c, m, key, 'sanitization', 500);
 
@@ -330,12 +385,88 @@ function metadata(c: Ctx, v: unknown, key: string, sourceIds: Set<string>, selfI
 
   if (c.problems.length > before) return null;
   return {
-    provider: provider!, source_kind: source_kind!, schema_version: schema_version!, provenance: provenance!, sanitization: sanitization!,
+    provider: provider!, source_kind: source_kind!, schema_version: schema_version!, cost_basis: cost_basis!, dataset: dataset!, source_role: source_role!, versions, provenance: provenance!, sanitization: sanitization!,
     scope: { accounts: accounts!, period_start: s.period_start as string, period_end: s.period_end as string, period_end_semantics: period_end_semantics!, timezone: timezone!, completeness: completeness!, ...(subset_description ? { subset_description } : {}) },
     delivery: { format: format!, compression: compression!, manifest: manifest!, refresh_behavior: refresh_behavior! },
     financial: { currencies, billed_cost_total: billed!, effective_cost_total: effective!, credits_coverage: credits_coverage!, tax_coverage: tax_coverage!, control_total_source: control_total_source!, known_differences: known_differences! },
     overlap: { also_present_in_other_source: also!, related_source: related! },
   };
+}
+
+const CREDENTIAL_RE = [/-----BEGIN [A-Z ]*-----/, /^eyJ[\w-]{8,}\.[\w-]{8,}\.?[\w-]*$/, /^(AKIA|ASIA)[A-Z0-9]{16}$/, /^[A-Za-z0-9+/_=-]{40,}$/];
+const looksLikeCredential = (v: string) => CREDENTIAL_RE.some((r) => r.test(v));
+const SECRET_REF_RE = /^[A-Za-z_][A-Za-z0-9_./-]{0,127}$/;
+
+function paramLeaf(c: Ctx, v: unknown, key: string): ParamLeaf | null {
+  if (typeof v === 'string') {
+    if (v.length > 1000 || CONTROL_RE.test(v)) c.bad(key, 'must be a single-line string of at most 1000 characters');
+    else if (looksLikeCredential(v)) c.bad(key, 'looks like a credential value; reference a secret by name with secretRef');
+    else return v;
+    return null;
+  }
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'boolean') return v;
+  if (Array.isArray(v) && v.length <= 1000) {
+    const out: string[] = [];
+    let ok = true;
+    v.forEach((x, i) => {
+      if (typeof x !== 'string' || x.length > 1000 || CONTROL_RE.test(x)) {
+        c.bad(`${key}[${i}]`, 'must be a single-line string');
+        ok = false;
+      } else if (looksLikeCredential(x)) {
+        c.bad(`${key}[${i}]`, 'looks like a credential value; reference a secret by name with secretRef');
+        ok = false;
+      } else out.push(x);
+    });
+    return ok ? out : null;
+  }
+  c.bad(key, 'must be a string, number, boolean or array of strings');
+  return null;
+}
+
+function retrievalBlock(c: Ctx, v: unknown, key: string): Retrieval | null {
+  if (v === undefined) return { kind: 'file-drop' };
+  const o = object(c, v, key, ['kind', 'connector', 'params', 'secretRef']);
+  if (!o) return null;
+  const kind = oneOf(c, o, key, 'kind', RETRIEVAL_KINDS);
+  if (kind === 'file-drop') {
+    for (const k of ['connector', 'params', 'secretRef']) if (has(o, k)) c.bad(at(key, k), 'only allowed with kind managed');
+    return Object.keys(o).length === 1 ? { kind } : null;
+  }
+  if (kind !== 'managed') return null;
+  const before = c.problems.length;
+  const connector = oneOf(c, o, key, 'connector', MANAGED_CONNECTORS);
+  const params: Record<string, ParamValue> = {};
+  if (has(o, 'params')) {
+    const pk = at(key, 'params');
+    if (!isObj(o.params) || Object.keys(o.params).length > 100) c.bad(pk, 'must be an object of at most 100 entries');
+    else
+      for (const [name, val] of Object.entries(o.params)) {
+        const k = `${pk}.${safeKey(name)}`;
+        if (isObj(val)) {
+          const inner: Record<string, ParamLeaf> = {};
+          for (const [n2, v2] of Object.entries(val)) {
+            if (isObj(v2)) c.bad(`${k}.${safeKey(n2)}`, 'nesting deeper than 2 levels is not allowed');
+            else {
+              const leaf = paramLeaf(c, v2, `${k}.${safeKey(n2)}`);
+              if (leaf !== null) inner[n2] = leaf;
+            }
+          }
+          params[name] = inner;
+        } else {
+          const leaf = paramLeaf(c, val, k);
+          if (leaf !== null) params[name] = leaf;
+        }
+      }
+  }
+  let secretRef: string | undefined;
+  if (has(o, 'secretRef')) {
+    const r = o.secretRef;
+    if (typeof r === 'string' && SECRET_REF_RE.test(r) && !looksLikeCredential(r)) secretRef = r;
+    else c.bad(at(key, 'secretRef'), 'must be the NAME of a secret (letters, digits, underscore, dot, slash, hyphen), not a secret value');
+  }
+  if (c.problems.length > before || !connector) return null;
+  return { kind: 'managed', connector, params, ...(secretRef ? { secretRef } : {}) };
 }
 
 const TOP_KEYS = ['engagementId', 'tenantId', 'displayName', 'currency', 'sources', 'allocation', 'budgets', 'scenarios', 'outcomesFile'] as const;
@@ -365,7 +496,7 @@ export function validateEngagementConfig(input: unknown): ValidateResult {
     const seen = new Set<string>();
     srcRaw.forEach((s, i) => {
       const k = `sources[${i}]`;
-      const o = object(c, s, k, ['id', 'providers', 'layout', 'metadata']);
+      const o = object(c, s, k, ['id', 'providers', 'layout', 'retrieval', 'metadata']);
       if (!o) return;
       const idOk = typeof o.id === 'string' && SOURCE_ID_RE.test(o.id);
       if (!idOk) c.bad(`${k}.id`, 'must be 1 to 63 characters of lowercase letters, digits, dot, underscore and hyphen');
@@ -379,8 +510,9 @@ export function validateEngagementConfig(input: unknown): ValidateResult {
       });
       if (provs && new Set(providers).size !== providers.length) c.bad(`${k}.providers`, 'must not repeat a provider');
       const layout = oneOf(c, o, k, 'layout', SOURCE_LAYOUTS);
+      const retrieval = retrievalBlock(c, o.retrieval, `${k}.retrieval`);
       const md = metadata(c, o.metadata, `${k}.metadata`, ids, idOk ? (o.id as string) : null);
-      if (idOk && layout && md && provs) sources.push({ id: o.id as string, providers, layout, metadata: md });
+      if (idOk && layout && md && provs && retrieval) sources.push({ id: o.id as string, providers, layout, retrieval, metadata: md });
     });
   }
 
@@ -512,13 +644,16 @@ export function validateEngagementConfig(input: unknown): ValidateResult {
   };
 }
 
-/** What this release can actually import (file import of CSV only). */
-function releasePolicy(config: EngagementConfig): string[] {
+const NOT_IMPLEMENTED = 'not implemented in this build';
+
+/** Refuses schema-valid values that SUPPORTED_IN_THIS_BUILD does not list (names the key, never the value). */
+function supportedInThisBuild(config: EngagementConfig): string[] {
   const p: string[] = [];
   config.sources.forEach((s, i) => {
-    const k = `sources[${i}].metadata`;
-    if (s.metadata.source_kind === 'api') p.push(`${k}.source_kind: api sources are not supported in this release (file import only)`);
-    if (s.metadata.delivery.format !== 'csv' && s.metadata.delivery.format !== 'csv-gzip') p.push(`${k}.delivery.format: not supported in this release (csv, csv-gzip only)`);
+    const k = `sources[${i}]`;
+    if (!SUPPORTED_IN_THIS_BUILD.retrievalKinds.includes(s.retrieval.kind)) p.push(`${k}.retrieval.kind: ${NOT_IMPLEMENTED}`);
+    if (!SUPPORTED_IN_THIS_BUILD.sourceKinds.includes(s.metadata.source_kind)) p.push(`${k}.metadata.source_kind: ${NOT_IMPLEMENTED}`);
+    if (!SUPPORTED_IN_THIS_BUILD.deliveryFormats.includes(s.metadata.delivery.format)) p.push(`${k}.metadata.delivery.format: ${NOT_IMPLEMENTED}`);
   });
   return p;
 }
@@ -543,7 +678,7 @@ export function loadEngagementConfig(file: string): LoadResult {
   }
   const v = validateEngagementConfig(parsed);
   if (!v.ok) return v;
-  const policy = releasePolicy(v.config);
+  const policy = supportedInThisBuild(v.config);
   if (policy.length) return { ok: false, problems: policy };
   return { ok: true, config: v.config, sha256: createHash('sha256').update(bytes).digest('hex') };
 }
@@ -593,6 +728,16 @@ export function describeSourceMetadata(m: SourceMetadata): MetadataRow[] {
     { label: 'Provider', value: m.provider },
     { label: 'Source kind', value: m.source_kind },
     { label: 'Schema version', value: m.schema_version },
+    { label: 'Cost basis', value: m.cost_basis },
+    { label: 'Dataset', value: m.dataset },
+    { label: 'Source role', value: m.source_role },
+    { label: 'Provider product', value: m.versions.provider_product },
+    { label: 'API version', value: m.versions.api_version },
+    { label: 'Export schema version', value: m.versions.export_schema_version },
+    { label: 'Schema snapshot hash', value: m.versions.schema_snapshot_hash },
+    { label: 'FOCUS version', value: m.versions.focus_version },
+    { label: 'Mapping version', value: m.versions.mapping_version },
+    { label: 'Canonical model version', value: m.versions.canonical_model_version },
     { label: 'Provenance', value: m.provenance },
     { label: 'Sanitization', value: m.sanitization },
     { label: 'Accounts', value: Array.isArray(a) ? `${a.length} listed` : a },

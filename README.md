@@ -222,9 +222,12 @@ owners, shared-cost rules named after `src/attribution/allocation.ts`), `budgets
 (monthly decimal string per workload, at least one cent), `scenarios[]` (current and
 candidate model from the registry plus assumptions) and an optional `outcomesFile`.
 Metadata fields are all required; `unknown` and `not_available` are valid explicit
-values and a blank is never defaulted. This release imports billing files only: a
-source with `source_kind: api` or a delivery format other than `csv` / `csv-gzip` is
-refused by key name.
+values and a blank is never defaulted. Each source may carry a `retrieval` block
+(`file-drop`, the default, or `managed` with a connector name, `params` and a
+`secretRef` that is the NAME of a secret, never a value). The schema accepts every
+documented value, but `SUPPORTED_IN_THIS_BUILD` in `src/engagement/config.ts` lists
+what this build runs (file-drop, CSV or CSV gzip); anything else stops startup with
+`<key>: not implemented in this build`.
 
 `loadEngagementConfig(path)` returns the config plus the sha256 of the file bytes so
 reports can stamp which configuration produced them. A SYNTHETIC example for the

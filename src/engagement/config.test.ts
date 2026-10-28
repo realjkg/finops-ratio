@@ -127,6 +127,16 @@ describe('source metadata', () => {
   const cases: Array<[string, string, (c: any) => void]> = [
     ['missing provenance', 'sources[0].metadata.provenance', (c) => delete meta(c).provenance],
     ['bad provider', 'sources[0].metadata.provider', (c) => (meta(c).provider = SECRET)],
+    ['bad cost_basis', 'sources[0].metadata.cost_basis', (c) => (meta(c).cost_basis = SECRET)],
+    ['missing cost_basis', 'sources[0].metadata.cost_basis', (c) => delete meta(c).cost_basis],
+    ['dataset over 200 chars', 'sources[0].metadata.dataset', (c) => (meta(c).dataset = 'x'.repeat(201))],
+    ['missing dataset', 'sources[0].metadata.dataset', (c) => delete meta(c).dataset],
+    ['bad source_role', 'sources[0].metadata.source_role', (c) => (meta(c).source_role = SECRET)],
+    ['missing source_role', 'sources[0].metadata.source_role', (c) => delete meta(c).source_role],
+    ['missing versions', 'sources[0].metadata.versions', (c) => delete meta(c).versions],
+    ['missing version field', 'sources[0].metadata.versions.api_version', (c) => delete meta(c).versions.api_version],
+    ['bad snapshot hash', 'sources[0].metadata.versions.schema_snapshot_hash', (c) => (meta(c).versions.schema_snapshot_hash = SECRET)],
+    ['unknown versions key', 'sources[0].metadata.versions.version', (c) => (meta(c).versions.version = SECRET)],
     ['bad source_kind', 'sources[0].metadata.source_kind', (c) => (meta(c).source_kind = SECRET)],
     ['blank schema_version', 'sources[0].metadata.schema_version', (c) => (meta(c).schema_version = ' ')],
     ['sanitization over 500 chars', 'sources[0].metadata.sanitization', (c) => (meta(c).sanitization = 'x'.repeat(501))],
@@ -192,6 +202,11 @@ describe('source metadata', () => {
       expect(row.value).not.toBe('');
     }
     const get = (l: string) => rows.find((x) => x.label === l)?.value;
+    expect(get('Cost basis')).toBe('focus-native');
+    expect(get('Dataset')).toContain('FOCUS 1.0');
+    expect(get('Source role')).toBe('authoritative');
+    expect(get('FOCUS version')).toBe('1.0');
+    expect(get('Schema snapshot hash')).toBe('unknown');
     expect(get('Provenance')).toBe('official-example');
     expect(get('Billed cost total')).toBe('USD 18.00663861840');
     expect(get('Period end semantics')).toBe('exclusive');
@@ -200,7 +215,7 @@ describe('source metadata', () => {
 });
 
 describe('release policy (loader)', () => {
-  it('source_kind api is schema-valid but refused by the loader with a clear message', () => {
+  it('source_kind api is schema-valid but not implemented in this build (names the key)', () => {
     const c = raw();
     c.sources[0].metadata.source_kind = 'api';
     expect(validateEngagementConfig(c).ok).toBe(true);
@@ -208,7 +223,7 @@ describe('release policy (loader)', () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.problems.join(' ')).toContain('sources[0].metadata.source_kind');
-    expect(r.problems.join(' ')).toMatch(/not supported in this release/);
+    expect(r.problems.join(' ')).toMatch(/not implemented in this build/);
   });
 
   it.each(['parquet', 'ndjson'])('delivery.format %s is schema-valid but rejected by the loader by key name', (fmt) => {
@@ -240,6 +255,55 @@ describe('release policy (loader)', () => {
   it('rejects a config file with duplicate-looking oversize input (over 1 MiB)', () => {
     const r = loadEngagementConfig(writeTmp(Buffer.alloc(1024 * 1024 + 1, 0x20)));
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('retrieval', () => {
+  const withRetrieval = (r: unknown) => mutated((c) => (c.sources[0].retrieval = r));
+  const managed = (extra: any = {}) => ({ kind: 'managed', connector: 'aws-data-exports', params: { bucket: 'b', prefixes: ['a', 'b'], nested: { n: 1 } }, secretRef: 'AWS_READER_SECRET', ...extra });
+
+  it('defaults to file-drop when absent', () => {
+    const r = validateEngagementConfig(raw());
+    if (!r.ok) throw new Error('expected ok');
+    expect(r.config.sources[0].retrieval).toEqual({ kind: 'file-drop' });
+  });
+
+  it('managed retrieval is schema-valid but not implemented in this build (single place)', () => {
+    const c = raw();
+    c.sources[0].retrieval = managed();
+    expect(validateEngagementConfig(c).ok).toBe(true);
+    const r = loadEngagementConfig(writeTmp(JSON.stringify(c)));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problems.join(' ')).toMatch(/sources\[0\]\.retrieval\.kind: not implemented in this build/);
+  });
+
+  it('every connector name is accepted by the schema', () => {
+    for (const connector of ['aws-data-exports', 'azure-cost-export', 'gcp-bigquery-export', 'oci-cost-report', 'nutanix', 'servicenow', 'pointfive', 'opencost', 'openai-usage', 'anthropic-usage'])
+      expect(validateEngagementConfig(withRetrieval(managed({ connector }))).ok, connector).toBe(true);
+  });
+
+  const bad: Array<[string, string, unknown]> = [
+    ['unknown kind', 'sources[0].retrieval.kind', { kind: SECRET }],
+    ['unknown connector', 'sources[0].retrieval.connector', managed({ connector: SECRET })],
+    ['unknown block key', 'sources[0].retrieval.surprise', managed({ surprise: 1 })],
+    ['file-drop with connector', 'sources[0].retrieval.connector', { kind: 'file-drop', connector: 'nutanix' }],
+    ['params not an object', 'sources[0].retrieval.params', managed({ params: 'x' })],
+    ['params value of wrong type', 'sources[0].retrieval.params.bad', managed({ params: { bad: null } })],
+    ['params nested too deep', 'sources[0].retrieval.params.a.b', managed({ params: { a: { b: { c: 1 } } } })],
+    ['secretRef holding a value', 'sources[0].retrieval.secretRef', managed({ secretRef: 'x'.repeat(48) })],
+    ['secretRef with spaces', 'sources[0].retrieval.secretRef', managed({ secretRef: `has space ${SECRET}` })],
+    ['PEM in params', 'sources[0].retrieval.params.key', managed({ params: { key: `-----BEGIN PRIVATE KEY-----${SECRET}` } })],
+    ['JWT in params', 'sources[0].retrieval.params.t', managed({ params: { t: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc-def_ghi' } })],
+    ['long hex in params list', 'sources[0].retrieval.params.l[0]', managed({ params: { l: ['a'.repeat(64)] } })],
+    ['access key id in params', 'sources[0].retrieval.params.k', managed({ params: { k: 'AKIAABCDEFGHIJKLMNOP' } })],
+  ];
+  it.each(bad)('%s -> %s', (_n, key, r) => {
+    const problems = problemsOf(withRetrieval(r));
+    expect(problems.some((p) => p.includes(key)), problems.join(' | ')).toBe(true);
+    const all = problems.join(' ');
+    expect(all).not.toContain(SECRET);
+    expect(all).not.toContain('AKIAABCDEFGHIJKLMNOP');
+    expect(all).not.toContain('eyJhbGci');
   });
 });
 

@@ -12,6 +12,18 @@
         "provider": "AWS",
         "source_kind": "focus-export",
         "schema_version": "1.0",
+        "cost_basis": "focus-native",
+        "dataset": "FinOps Foundation FOCUS 1.0 sample data, AWS rows (CSV)",
+        "source_role": "authoritative",
+        "versions": {
+          "provider_product": "unknown",
+          "api_version": "unknown",
+          "export_schema_version": "unknown",
+          "schema_snapshot_hash": "unknown",
+          "focus_version": "1.0",
+          "mapping_version": "unknown",
+          "canonical_model_version": "unknown"
+        },
         "provenance": "official-example",
         "sanitization": "SYNTHETIC example. Public FinOps Foundation FOCUS 1.0 sample data (CC BY 4.0), used as published; no customer data.",
         "scope": {
