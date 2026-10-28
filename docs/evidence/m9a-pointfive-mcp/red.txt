@@ -24,3 +24,19 @@ The other new tests (M4) pass on the old code by design: they exist to kill muta
 survived the review (404 without a session, initialize never cancelled, CR/LF split across
 chunks, server request reusing our id, session-id characters, timer cleared on completion,
 single re-initialize). Typecheck is RED too: the `now` clock option does not exist yet.
+
+--- Review fixes on #146 (B1/M1/M2), RED ---
+Base: feat/m9a-pointfive-health after merging the #144 review fixes.
+Command: npx vitest run src/connectors src/costsource
+Result: Test Files 3 failed | 47 passed (50); Tests 17 failed | 861 passed (878). Failing:
+  - B1 pointFiveBillingRole.test.ts (4): POINTFIVE_BILLING_ROLE_CONFIRMED missing, descriptor not
+    roleConfirmed:false, transport billing not refused, and fetchAiSpendRatio counted pointfive-live
+    rows from a SYNTHETIC server in overall/headline.
+  - M1 health.test.ts (4): a 401/403 on initialize was 'auth-verified'; now configured-not-verified
+    with a reason (the old test asserting 'auth-verified' is updated, not weakened: it now asserts the
+    stricter state and the reason). 405 on initialize lacked an actionable stage message.
+  - M2 pointFiveVerificationGate.dom.test.tsx (9): sessionStateForHealth missing; the store opened a
+    session on reachable && authed even for auth-verified/degraded; no degraded session state in the UI.
+Pass on the old code by design (mutation killers): tools-capability check (M5), invalid
+POINTFIVE_MCP_TOOL_MAP fails closed (M14). The billing-window argument test moved to
+pointFiveBillingOptIn.test.ts (runs with the opt-in constant flipped by a module mock).

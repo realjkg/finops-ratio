@@ -10,6 +10,7 @@ import { startSyntheticMcpServer, type SyntheticServer, type SyntheticServerOpti
 import { StreamableHttpPointFiveMcpClient } from '../../../costsource/PointFiveMcpTransport';
 import { PointFiveLiveAdapter, validateOpportunity } from '../../../costsource/PointFiveLiveAdapter';
 import type { HttpFetch } from '../../../costsource/PointFiveOAuthClient';
+import { resolvePointFiveStatus } from '../../../costsource/pointfiveConfig';
 
 const TOKEN = 'synthetic-token-0123456789abcdef';
 const SECRET = 'synthetic-client-secret-0123456789';
@@ -54,6 +55,28 @@ describe('tool mapping (ASSUMED names, configurable)', () => {
     expect(() => parseToolMapping('billing=bad name!')).toThrow(/billing/);
   });
 
+  it('an invalid POINTFIVE_MCP_TOOL_MAP fails closed: unconfigured, naming the key, never the value, no network', async () => {
+    const bad = {
+      COSTSOURCE_POINTFIVE_LIVE: 'true',
+      POINTFIVE_OAUTH_CLIENT_ID: 'id',
+      POINTFIVE_OAUTH_CLIENT_SECRET: SECRET,
+      POINTFIVE_OAUTH_TOKEN_URL: 'http://token.invalid/token',
+      POINTFIVE_MCP_TOOL_MAP: 'billing=VALUE-MARKER bad!',
+    };
+    const status = resolvePointFiveStatus(bad);
+    expect(status).toEqual({ state: 'unconfigured', missing: ['POINTFIVE_MCP_TOOL_MAP'] });
+    const httpFetch = vi.fn();
+    const transportFactory = vi.fn();
+    const adapter = new PointFiveLiveAdapter({ env: bad, httpFetch, transportFactory });
+    const h = await adapter.healthCheck();
+    expect(h.verification).toBe('not-configured');
+    expect(adapter.describe().configured).toBe(false);
+    expect(JSON.stringify([status, h, adapter.describe()])).not.toContain('VALUE-MARKER');
+    expect(h.detail).toContain('POINTFIVE_MCP_TOOL_MAP');
+    expect(httpFetch).not.toHaveBeenCalled();
+    expect(transportFactory).not.toHaveBeenCalled();
+  });
+
   it('require() fails with TOOL_NOT_DISCOVERED for a configured tool absent from tools/list', () => {
     const d = new DiscoveredTools([ALL_TOOLS[1]], ASSUMED_POINTFIVE_TOOL_NAMES);
     expect(d.missing()).toEqual(['billing', 'anomalies']);
@@ -83,11 +106,52 @@ describe('probePointFive: four separate stages', () => {
     expect(JSON.stringify(r)).not.toContain(SECRET);
   });
 
-  it('a token the MCP server rejects (401) passes auth only: auth-verified, never data', async () => {
+  it('a token the MCP server rejects (401) is configured-not-verified with a reason, never auth-verified', async () => {
     const r = await probe(await serve({ acceptToken: 'another-token-0123456789abcdef' }));
-    expect(r.state).toBe('auth-verified');
+    expect(r.state).toBe('configured-not-verified');
+    expect(r.reason).toMatch(/rejected the access token/i);
     expect(r.stages.session).toMatchObject({ ok: false, code: 'AUTH_REJECTED' });
     expect(r.stages.data.ok).toBeNull();
+    expect(JSON.stringify(r)).not.toContain(TOKEN);
+  });
+
+  it('a 403 on initialize (scope) is configured-not-verified with a reason', async () => {
+    const r = await probe(await serve({ override: (rq, res) => (rq.body?.method === 'initialize' ? (res.writeHead(403).end(), true) : false) }));
+    expect(r.state).toBe('configured-not-verified');
+    expect(r.reason).toMatch(/refused the access token/i);
+    expect(r.stages.session).toMatchObject({ ok: false, code: 'FORBIDDEN' });
+  });
+
+  it('a session failure that is not an auth refusal stays auth-verified (token obtained, no session)', async () => {
+    const r = await probe(await serve({ override: (rq, res) => (rq.body?.method === 'initialize' ? (res.writeHead(500).end(), true) : false) }));
+    expect(r.state).toBe('auth-verified');
+    expect(r.stages.session).toMatchObject({ ok: false, code: 'HTTP_STATUS' });
+  });
+
+  it('a server that does not declare the tools capability fails the session stage', async () => {
+    const r = await probe(await serve({
+      override: (rq, res, rpc) => {
+        if (rq.body?.method === 'notifications/initialized') return (res.writeHead(202).end(), true);
+        if (rq.body?.method !== 'initialize') return false;
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': 'synthetic-session-1' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 's', version: '0' } } }));
+        return true;
+      },
+    }));
+    expect(r.stages.session).toMatchObject({ ok: false, code: 'MALFORMED_RESPONSE' });
+    expect(r.stages.session.detail).toMatch(/tools capability/);
+    expect(r.state).not.toBe('source-access-verified');
+    expect(r.stages.tools.ok).toBeNull();
+  });
+
+  it('a legacy or wrong endpoint (405 on initialize) gives a specific, actionable stage message without secrets', async () => {
+    const r = await probe(await serve({ override: (_rq, res) => (res.writeHead(405).end(), true) }));
+    expect(r.state).toBe('auth-verified');
+    expect(r.stages.session.code).toBe('ENDPOINT_NOT_STREAMABLE_HTTP');
+    expect(r.stages.session.detail).toMatch(/Streamable HTTP/);
+    expect(r.stages.session.detail).toMatch(/legacy HTTP\+SSE/);
+    expect(r.stages.session.detail).toContain('POINTFIVE_MCP_URL');
+    expect(r.stages.session.detail).not.toContain('127.0.0.1');
     expect(JSON.stringify(r)).not.toContain(TOKEN);
   });
 
@@ -130,12 +194,8 @@ describe('StreamableHttpPointFiveMcpClient', () => {
     expect(s.methods().indexOf('tools/list')).toBeLessThan(s.methods().indexOf('tools/call'));
   });
 
-  it('passes the billing window as tool arguments', async () => {
-    const onCall = vi.fn(() => items([]));
-    const s = await serve({ onCall });
-    await new StreamableHttpPointFiveMcpClient(creds(s.url), oauth).fetchBillingRows({ start: '2026-06-01T00:00:00Z', end: '2026-07-01T00:00:00Z' });
-    expect(onCall).toHaveBeenCalledWith('billing_data', { start: '2026-06-01T00:00:00Z', end: '2026-07-01T00:00:00Z' });
-  });
+  // The billing-window argument test lives in costsource/pointFiveBillingOptIn.test.ts:
+  // billing is refused (BILLING_ROLE_UNDECIDED) unless the opt-in constant is flipped.
 
   it('ping() is true only when an MCP session is established, not on token alone', async () => {
     const s = await serve({ acceptToken: 'another-token-0123456789abcdef' });
@@ -167,7 +227,9 @@ describe('PointFiveLiveAdapter.healthCheck with the real protocol client', () =>
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const s = await serve({ acceptToken: 'another-token-0123456789abcdef' });
     const h = await new PointFiveLiveAdapter({ env: env(s.url), httpFetch: tokenEndpoint }).healthCheck();
-    expect(h).toMatchObject({ reachable: false, authed: false, verification: 'auth-verified' });
+    expect(h).toMatchObject({ reachable: false, authed: false, verification: 'configured-not-verified' });
+    expect(h.detail).toMatch(/rejected the access token/i);
+    expect(h.detail).not.toMatch(/no access token/i);
     expect(h.detail).not.toMatch(/MCP reachable|connected/i);
     const out = JSON.stringify(h) + JSON.stringify(warn.mock.calls);
     expect(out).not.toContain(TOKEN);
