@@ -6,7 +6,7 @@
 //
 // PointFive is source #1, not the architecture. The engine only ever sees
 // normalized canonical FOCUS rows — only the adapter (auth, fetch, identity)
-// is source-specific. Live PointFive (OAuth 2.1 / MCP SSE) and a second
+// is source-specific. Live PointFive (OAuth 2.1 / MCP Streamable HTTP) and a second
 // private-cloud adapter are later PRs (E and F); this PR is mock only.
 
 import type { FocusVersion } from './focusVersions';
