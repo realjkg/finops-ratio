@@ -1,0 +1,14 @@
+M0a managed retrieval runtime, secrets and staged health -- RED (tests committed before the implementation)
+Base: feat/m0b-connector-evidence 08aff1d (M0b, PR #148) on origin/main 6d348d9.
+Command: npx vitest run src/connectors/managed
+Result: Test Files 5 failed | 5 passed (10); Tests 80 passed (80) -- the 5 new suites fail to load
+(./registry, ./runtime, ./health and ./secrets/resolve do not exist); the 80 passing tests are the
+existing pointfive and M0b evidence suites.
+Covers: secretRef NAME resolution from RATIO_SECRETS_DIR only (0600, 64 KiB, no traversal, no link
+out of the dir, never env), secret values never serialize, scrubbing; four-stage health (token OK +
+listing 403 -> scope false, not connected; later stages never count after a failed one); the
+connector state ladder (live verified only with a live evidence record; simulated never upgrades);
+runtime (originals captured, then staged exactly once; retriever error -> code, nothing staged, no
+fallback; incomplete delivery quarantined; unregistered connector / missing secret refused);
+registry; boundary (no web code reaches the worker-only managed modules; no demo parser).
+All data SYNTHETIC.
