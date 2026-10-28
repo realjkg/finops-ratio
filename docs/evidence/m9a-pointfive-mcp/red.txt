@@ -1,0 +1,10 @@
+M9a PointFive MCP protocol client -- RED (tests committed before the implementation)
+Base: origin/main d71bb84
+Command: npx vitest run src/connectors/managed/pointfive
+Result: Test Files 1 failed (1); Tests: no tests -- ./mcpClient and ./sse do not exist yet
+(Failed to resolve import "./mcpClient"). The suite covers: initialize first, notifications/initialized,
+MCP-Protocol-Version + Mcp-Session-Id headers, Accept header, incrementing ids, version refusal,
+legacy-endpoint refusal, session-expiry re-initialize, 401/403 mapping with redaction, JSON-RPC errors,
+429/5xx bounded retry, timeout + notifications/cancelled, caller cancellation, malformed SSE,
+truncated stream, non-JSON, content type, id mismatch, oversized body, tools/list pagination and bounds.
+All servers in the suite are the SYNTHETIC local MCP server on 127.0.0.1.
