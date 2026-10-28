@@ -72,6 +72,8 @@ export class PointFiveOAuthClient {
       grant_type: 'client_credentials',
       client_id: this.credentials.oauthClientId,
       client_secret: this.credentials.oauthClientSecret,
+      // RFC 8707 resource indicator: required by the MCP authorization spec (2025-06-18).
+      resource: this.credentials.mcpUrl,
     }).toString();
 
     let res: Awaited<ReturnType<HttpFetch>>;

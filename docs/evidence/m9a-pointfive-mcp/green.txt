@@ -7,3 +7,10 @@ PR 1 (protocol client), base origin/main d71bb84
   skip notifications/cancelled (2), no page bound (1), fixed id (2), no size bound (1), no retry (1),
   no session re-init (1), no truncation check (1), ignore nextCursor (2).
   Post-RED test edits: two type casts on caught errors (typecheck), no assertion changed.
+PR 2 (discovery, four-stage health, adapter), stacked on PR 1
+  npx vitest run src/connectors/managed src/costsource/pointFive -> 5 files, 72 passed (72)
+  Full suite: Test Files 216 passed (216); Tests 3979 passed (3979). lint, typecheck, build: pass.
+  Mutations (10 killed, 1 equivalent rewritten and killed): data stage skips validation (1 fail),
+  token-only marks verified (5), failed session marks verified (2), ping() = token only (1),
+  no discovery gate (2), no input-schema check (1), accept a bare array payload (1), adapter
+  reachable from token (1), ping-only transport marks verified (1), no RFC 8707 resource (2).

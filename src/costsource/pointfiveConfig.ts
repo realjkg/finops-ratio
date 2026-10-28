@@ -12,6 +12,7 @@
 // process.env or the network.
 
 import type { CostSourceDescriptor } from './CostSourceClient';
+import { parseToolMapping, type ToolMapping } from '../connectors/managed/pointfive/discovery';
 
 /** Canonical id of the live PointFive source across the seam. */
 export const POINTFIVE_LIVE_SOURCE_ID = 'pointfive-live';
@@ -31,6 +32,8 @@ export interface PointFiveCredentials {
   oauthClientId: string;
   oauthClientSecret: string;
   oauthTokenUrl: string;
+  /** Capability -> tool name; defaults are ASSUMED (see discovery.ts). */
+  toolMapping?: ToolMapping;
 }
 
 /**
@@ -55,6 +58,8 @@ const REQUIRED_OAUTH_ENV = {
 } as const;
 
 export const POINTFIVE_MCP_URL_ENV = 'POINTFIVE_MCP_URL';
+/** Optional `capability=tool,...` override of the ASSUMED tool names. */
+export const POINTFIVE_MCP_TOOL_MAP_ENV = 'POINTFIVE_MCP_TOOL_MAP';
 
 type EnvRecord = Record<string, string | undefined>;
 
@@ -85,6 +90,12 @@ export function resolvePointFiveStatus(env: EnvRecord): PointFiveStatus {
     else resolved[key] = value;
   }
 
+  let toolMapping: ToolMapping | undefined;
+  try {
+    toolMapping = parseToolMapping(env[POINTFIVE_MCP_TOOL_MAP_ENV]);
+  } catch {
+    missing.push(POINTFIVE_MCP_TOOL_MAP_ENV); // invalid: named, never echoed
+  }
   if (missing.length > 0) return { state: 'unconfigured', missing };
 
   return {
@@ -94,6 +105,7 @@ export function resolvePointFiveStatus(env: EnvRecord): PointFiveStatus {
       oauthClientId: resolved.oauthClientId!,
       oauthClientSecret: resolved.oauthClientSecret!,
       oauthTokenUrl: resolved.oauthTokenUrl!,
+      toolMapping,
     },
   };
 }
@@ -106,7 +118,7 @@ export function pointFiveStatusNote(status: PointFiveStatus): string {
     case 'unconfigured':
       return `Feature flag ON but OAuth credentials missing (${status.missing.join(', ')}); no network calls until configured.`;
     case 'configured':
-      return 'Live PointFive MCP SSE adapter configured (OAuth 2.1); cost rows + Opportunities/Anomalies findings.';
+      return 'Live PointFive MCP adapter configured (OAuth 2.1); not verified until the four-stage health check passes.';
   }
 }
 
