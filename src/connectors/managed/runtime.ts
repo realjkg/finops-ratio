@@ -55,7 +55,7 @@ export interface FetchOptions {
   registry?: RetrieverRegistry;
   resolveSecret: (ref: string) => SecretValue;
   originals: OriginalsStore;
-  stage: (r: StageRequest) => Promise<{ status: string; error?: { code: string } } & Record<string, unknown>>;
+  stage: (r: StageRequest) => Promise<{ status: string; error?: { code: string } }>;
   log?: (event: string, fields?: Record<string, unknown>) => void;
   now?: () => Date;
 }
@@ -68,7 +68,7 @@ export interface DeliveryOutcome {
   outcome: 'staged' | 'refused' | 'quarantined' | 'failed';
   code?: string;
   message?: string;
-  result?: Record<string, unknown>;
+  result?: object;
 }
 
 export interface FetchResult {
