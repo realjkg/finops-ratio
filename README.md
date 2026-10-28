@@ -204,6 +204,32 @@ These need live services or secrets and are out of Phase 1 scope:
 - Slack/email report delivery (§9)
 - Auth + team scoping (§11 Sprint 3+)
 
+## Engagement mode
+
+One instance serves exactly one engagement. `RATIO_MODE=engagement` turns it on and
+`RATIO_ENGAGEMENT_CONFIG=/absolute/path/engagement.json` names the config (mount it
+read-only). The server validates the file at startup and **refuses to start** on any
+invalid or missing key; the error names the key (for example `budgets[0].monthly`),
+never the value. Any other `RATIO_MODE` value is also an error. Outside engagement
+mode nothing changes.
+
+The file declares: `engagementId`, `tenantId` (the single tenant the published-costs
+reader is bound to; in engagement mode `RATIO_API_TENANT_ID` must not be set),
+`displayName`, `currency`, `sources[]` (id, FOCUS `providers`, `layout`, and a typed
+`metadata` block: provenance, scope and period, delivery, financial control totals,
+overlap), `allocation` (workload and owner tag keys, sub-account map, workload
+owners, shared-cost rules named after `src/attribution/allocation.ts`), `budgets[]`
+(monthly decimal string per workload, at least one cent), `scenarios[]` (current and
+candidate model from the registry plus assumptions) and an optional `outcomesFile`.
+Metadata fields are all required; `unknown` and `not_available` are valid explicit
+values and a blank is never defaulted. This release imports billing files only: a
+source with `source_kind: api` or a delivery format other than `csv` / `csv-gzip` is
+refused by key name.
+
+`loadEngagementConfig(path)` returns the config plus the sha256 of the file bytes so
+reports can stamp which configuration produced them. A SYNTHETIC example for the
+public FOCUS 1.0 sample is `fixtures/engagement/example/engagement.json`.
+
 ## Cost connectors — on-prem, private cloud, public cloud
 
 Native cost-source connectors are wired into the cost-ingest seam
