@@ -34,13 +34,29 @@ export const SOURCE_TYPE_PROVIDERS: Readonly<Record<string, readonly string[]>> 
  */
 export const SYNTHETIC_PROVIDERS: readonly string[] = Object.freeze(['SyntheticCloud', 'SyntheticAWS', 'SyntheticAzure', 'SyntheticGCP']);
 
+/**
+ * R3: the real ProviderName values an operator file-drop source (layout
+ * `ratio-file-drop`) may DECLARE. A source's policy is its declared list, which
+ * must be a non-empty, duplicate-free subset of this frozen list; anything else
+ * resolves no policy and the source factory refuses the row (D4 guard). Exact
+ * FOCUS values, as in the public FOCUS 1.0 sample.
+ */
+export const KNOWN_FILE_DROP_PROVIDERS: readonly string[] = Object.freeze(['AWS', 'Microsoft', 'Google Cloud', 'Oracle']);
+
+/** The declared providers of a ratio-file-drop config (own property only), or null when invalid. */
+export function declaredProviders(config: Record<string, unknown>): readonly string[] | null {
+  const p = Object.prototype.hasOwnProperty.call(config, 'providers') ? config.providers : undefined;
+  if (!Array.isArray(p) || p.length === 0 || new Set(p).size !== p.length) return null;
+  if (!p.every((v) => typeof v === 'string' && KNOWN_FILE_DROP_PROVIDERS.includes(v))) return null;
+  return Object.freeze([...(p as string[])]);
+}
+
 export interface ProviderPolicy {
   readonly sourceType: string;
   readonly allowed: readonly string[];
 }
 
-function policy(sourceType: 'aws-data-exports' | 'fake', allowSynthetic: boolean): ProviderPolicy {
-  const base = SOURCE_TYPE_PROVIDERS[sourceType];
+function policy(sourceType: string, allowSynthetic: boolean, base: readonly string[] = SOURCE_TYPE_PROVIDERS[sourceType]): ProviderPolicy {
   return Object.freeze({ sourceType, allowed: allowSynthetic ? Object.freeze([...base, ...SYNTHETIC_PROVIDERS]) : base });
 }
 
@@ -58,6 +74,10 @@ export function providerPolicyFor(
   const config = source.config;
   if (source.kind === 'focus_file' && config !== null && typeof config === 'object' && Object.prototype.hasOwnProperty.call(config, 'layout') && config.layout === 'aws-data-exports') {
     return policy('aws-data-exports', allowSynthetic);
+  }
+  if (source.kind === 'focus_file' && config !== null && typeof config === 'object' && Object.prototype.hasOwnProperty.call(config, 'layout') && config.layout === 'ratio-file-drop') {
+    const declared = declaredProviders(config);
+    return declared ? policy('ratio-file-drop', allowSynthetic, declared) : null;
   }
   // Unrecognised type ⇒ not checked (DESIGN §8 D4). Unreachable from the CLI:
   // the source factory refuses every such row before any data is read, pinned

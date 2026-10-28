@@ -1,0 +1,15 @@
+R3 part 1 (staging + declared providers) GREEN, 2026-10-28.
+
+$ npx vitest run src/ingest/focus/provider.test.ts src/ingest/worker/sourceFactory.test.ts src/ingest/import/stageFile.test.ts
+  Test Files 3 passed (3); Tests 50 passed (50)
+Gates (sequential, foreground): lint 0; tsc --noEmit 0; tsc -p tsconfig.worker.json 0;
+  full vitest 215 files / 3956 tests passed; next build 0 (next-env.d.ts reverted);
+  npm run test:db (local Postgres 16 + SeaweedFS, CI digests): 39 files / 659 tests + serial 6 files / 173 tests passed.
+
+Mutations (each applied alone, then reverted; the R3 tests above must fail):
+  M1 provider.ts: duplicate declared providers accepted        -> 2 failed
+  M2 provider.ts: declared list not intersected with known list -> 2 failed
+  M3 stageFile.ts: NULL token not mapped to empty               -> 1 failed
+  M4 stageFile.ts: per-file rowCount written into dataFiles     -> 2 failed (self-derived control)
+  M5 stageFile.ts: controls accepted for a multi-period file    -> 1 failed
+  M6 stageFile.ts: control currency not checked                 -> 1 failed
