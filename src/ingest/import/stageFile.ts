@@ -96,8 +96,11 @@ interface Field {
   quoted: boolean;
 }
 
-/** RFC 4180 records with each field's raw text (the acceptance tokenizer; CRLF accepted as a record end). */
-function* csvRecords(text: string): Generator<Field[]> {
+/**
+ * RFC 4180 records with each field's raw text and record number (the acceptance tokenizer; CRLF accepted
+ * as a record end). Empty lines are skipped, as the worker's parser does (skip_empty_lines).
+ */
+function* csvRecords(text: string, where: string): Generator<[Field[], number]> {
   let rec: Field[] = [];
   let start = 0;
   let quoted = false;
@@ -126,24 +129,25 @@ function* csvRecords(text: string): Generator<Field[]> {
       end(i);
       start = i + 1;
     } else if (c === '\n' || (c === '\r' && text[i + 1] === '\n')) {
+      const blank = rec.length === 0 && i === start;
       end(i);
-      yield rec;
+      if (!blank) yield [rec, n];
       rec = [];
       n++;
       if (c === '\r') i++;
       start = i + 1;
-    } else if (c === '\r') invalid(`record ${n}: a carriage return outside a line ending`);
-    else if (afterQuote) invalid(`record ${n}: characters after a closing quote`);
+    } else if (c === '\r') invalid(`${where}, record ${n}: a carriage return outside a line ending`);
+    else if (afterQuote) invalid(`${where}, record ${n}: characters after a closing quote`);
     else if (c === '"') {
-      if (i !== start) invalid(`record ${n}: a stray quote inside an unquoted field`);
+      if (i !== start) invalid(`${where}, record ${n}: a stray quote inside an unquoted field`);
       inQuotes = true;
       quoted = true;
     }
   }
-  if (inQuotes) invalid(`record ${n}: unterminated quoted field at the end of the file`);
+  if (inQuotes) invalid(`${where}, record ${n}: unterminated quoted field at the end of the file`);
   if (start < text.length || rec.length) {
     end(text.length);
-    yield rec;
+    yield [rec, n];
   }
 }
 
@@ -168,35 +172,37 @@ interface ParsedFile {
   currencyMismatches: number;
 }
 
-function parseFile(bytes: Buffer, opts: StageOptions, control: StageControl | undefined, nullTokens: Record<string, number>, label: string): ParsedFile {
+function parseFile(bytes: Buffer, opts: StageOptions, control: StageControl | undefined, nullTokens: Record<string, number>, where: string): ParsedFile {
   let text = '';
   try {
     text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
-    invalid(`${label}is not valid UTF-8`);
+    invalid(`${where} is not valid UTF-8`);
   }
-  if (text.length === 0) invalid(`${label}is empty`);
+  // One leading byte order mark, as the worker's parser accepts it (bom: true); it is not staged.
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  if (text.length === 0) invalid(`${where} is empty`);
   const out: ParsedFile = { header: '', columns: [], byPeriod: new Map(), dataRows: 0, currencyMismatches: 0 };
   let iStart = -1;
   let iProvider = -1;
   let iCurrency = -1;
-  let r = 0;
-  for (const rec of csvRecords(text)) {
-    r++;
-    if (r === 1) {
+  let first = true;
+  for (const [rec, r] of csvRecords(text, where)) {
+    if (first) {
+      first = false;
       out.columns = rec.map((f) => f.value);
       out.header = rec.map((f) => f.raw).join(',');
-      if (new Set(out.columns).size !== out.columns.length) invalid(`${label}header has a duplicate column name`);
+      if (new Set(out.columns).size !== out.columns.length) invalid(`${where}: the header has a duplicate column name`);
       iStart = out.columns.indexOf('BillingPeriodStart');
-      if (iStart < 0) invalid(`${label}header lacks the required column BillingPeriodStart`);
+      if (iStart < 0) invalid(`${where}: the header lacks the required column BillingPeriodStart`);
       iProvider = out.columns.includes('ProviderName') ? out.columns.indexOf('ProviderName') : out.columns.indexOf('ServiceProviderName');
       iCurrency = out.columns.indexOf('BillingCurrency');
       continue;
     }
-    if (rec.length !== out.columns.length) invalid(`${label}record ${r} has ${rec.length} fields, the header has ${out.columns.length}`);
+    if (rec.length !== out.columns.length) invalid(`${where}, record ${r} has ${rec.length} fields, the header has ${out.columns.length}`);
     out.dataRows++;
     const m = isNullToken(rec[iStart]) ? null : PERIOD_RE.exec(rec[iStart].value);
-    if (!m) invalid(`${label}record ${r}: BillingPeriodStart is not the first of a month at midnight`);
+    if (!m) invalid(`${where}, record ${r}: BillingPeriodStart is not the first of a month at midnight`);
     const ym = `${m![1]}-${m![2]}`;
     if (opts.period !== undefined && `${ym}-01` !== opts.period) continue;
     if (control?.currency !== undefined && opts.providers && iProvider >= 0 && iCurrency >= 0 && opts.providers.includes(rec[iProvider].value) && rec[iCurrency].value !== control.currency) {
@@ -212,7 +218,7 @@ function parseFile(bytes: Buffer, opts: StageOptions, control: StageControl | un
     if (!out.byPeriod.has(ym)) out.byPeriod.set(ym, []);
     out.byPeriod.get(ym)!.push(line);
   }
-  if (out.dataRows === 0) invalid(`${label}has a header but no data rows`);
+  if (out.dataRows === 0) invalid(`${where} has a header but no data rows`);
   return out;
 }
 
@@ -233,8 +239,14 @@ export function stageFile(input: Buffer | StageInput[], opts: StageOptions & { p
   if (inputs.length === 0) invalid('nothing to import');
   const control = opts.control && Object.values(opts.control).some((v) => v !== undefined) ? opts.control : undefined;
   if (control) checkControl(control);
+  if (control && !opts.providers?.length) {
+    throw new IngestError('IMPORT_CONTROL_INVALID', "controls apply to the source's declared providers, and none were given");
+  }
+  const fileShas = inputs.map((f) => sha256(f.bytes));
+  const twin = fileShas.findIndex((s, i) => fileShas.indexOf(s) !== i);
+  if (twin >= 0) throw new IngestError('IMPORT_FILE_DUPLICATE', `file ${twin + 1} has the same bytes as file ${fileShas.indexOf(fileShas[twin]) + 1}; supply each file of a delivery once`);
   const nullTokens: Record<string, number> = {};
-  const parsed = inputs.map((f, i) => parseFile(f.bytes, opts, control, nullTokens, inputs.length > 1 ? `file ${i + 1}: ` : 'the file '));
+  const parsed = inputs.map((f, i) => parseFile(f.bytes, opts, control, nullTokens, inputs.length > 1 ? `file ${i + 1}` : 'the file'));
   const yms = [...new Set(parsed.flatMap((p) => [...p.byPeriod.keys()]))].sort();
   if (yms.length === 0) throw new IngestError('IMPORT_PERIOD_NOT_IN_FILE', `the file has no rows for billing period ${opts.period?.slice(0, 7)}`);
   if (control && yms.length !== 1) {
@@ -245,7 +257,6 @@ export function stageFile(input: Buffer | StageInput[], opts: StageOptions & { p
     throw new IngestError('IMPORT_CONTROL_CURRENCY_MISMATCH', `${mismatches} row(s) of the declared providers in this period bill in a currency other than the control currency`);
   }
 
-  const fileShas = inputs.map((f) => sha256(f.bytes));
   const executionId = `import-${sha256(Buffer.from(fileShas.join('\n'))).slice(0, 12)}`;
   const { bucket, exportName } = opts.location;
   const plan: StagePlan = { header: parsed[0].header, columns: parsed[0].columns, periods: [], nullTokens, nullToEmpty: true, splitByPeriod: true };

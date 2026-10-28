@@ -1,0 +1,129 @@
+# Ratio engagement instance (R12): one engagement per instance, billing files imported by an operator.
+# Usage and the variables: README "Engagement mode" and .env.engagement.example.
+#   docker compose --env-file .env.engagement -f infrastructure/engagement/compose.yaml up -d --build
+#   docker compose ... --profile jobs run --rm migrator
+#   docker compose ... --profile jobs run --rm worker <command>
+# - The app is published on 127.0.0.1 only; put your own TLS proxy in front of it.
+# - Postgres and the object store are reachable only on the internal `backend` network. SeaweedFS runs without S3
+#   identities (any key pair is accepted), which is acceptable only because nothing outside this stack can reach it.
+# - Images of third parties are pinned by digest (the same digests as docker-compose.local.yml and CI).
+# - App, worker and migrator share one image (target `engagement`): non-root, read-only root filesystem, every
+#   capability dropped, /state the only writable volume. The config and users files are mounted read-only.
+name: ratio-engagement
+
+x-engagement: &engagement
+  image: ratio-engagement:${RATIO_ENGAGEMENT_TAG:-local}
+  build:
+    context: ../..
+    dockerfile: infrastructure/simulation/Dockerfile
+    target: engagement
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+  tmpfs: ['/tmp', '/app/.next/cache']
+  init: true
+  volumes:
+    - state:/state
+    - ${RATIO_ENGAGEMENT_CONFIG_FILE:?path of the engagement config JSON}:/config/engagement.json:ro
+    - ${RATIO_ENGAGEMENT_USERS_FILE:?path of the users JSON}:/config/users.json:ro
+  logging:
+    driver: json-file
+    options: {max-size: '10m', max-file: '3'}
+
+services:
+  postgres:
+    image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${RATIO_ENGAGEMENT_PG_SUPERUSER_PASSWORD:?set in .env.engagement}
+    volumes: ['pg-data:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -h 127.0.0.1 -p 5432']
+      interval: 2s
+      timeout: 5s
+      retries: 60
+    restart: unless-stopped
+    networks: [backend]
+
+  s3:
+    image: chrislusf/seaweedfs@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d
+    command: ['server', '-s3', '-dir=/data', '-volume.max=64', '-master.volumeSizeLimitMB=64']
+    volumes: ['s3-data:/data']
+    restart: unless-stopped
+    networks: [backend]
+
+  app:
+    <<: *engagement
+    environment:
+      RATIO_MODE: engagement
+      RATIO_ENGAGEMENT_CONFIG: /config/engagement.json
+      RATIO_ENGAGEMENT_USERS: /config/users.json
+      RATIO_READER_DATABASE_URL: postgres://ratio_engagement_reader:${RATIO_ENGAGEMENT_READER_PASSWORD:?set in .env.engagement}@postgres:5432/ratio
+    ports: ['127.0.0.1:${RATIO_ENGAGEMENT_APP_PORT:-3100}:3000']
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ['CMD', 'node', '-e', "require('net').connect(3000,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    networks: [frontend, backend]
+
+  migrator:
+    <<: *engagement
+    profiles: [jobs]
+    restart: 'no'
+    command: ['node', 'dist-worker/ingest/cli.js', 'migrate']
+    environment:
+      RATIO_MODE: engagement
+      RATIO_ENGAGEMENT_CONFIG: /config/engagement.json
+      RATIO_MIGRATE_DATABASE_URL: postgres://ratio_engagement_migrator:${RATIO_ENGAGEMENT_MIGRATOR_PASSWORD:?set in .env.engagement}@postgres:5432/ratio
+    depends_on:
+      postgres: {condition: service_healthy}
+    mem_limit: 256m
+    cpus: 0.5
+    networks: [backend]
+
+  worker:
+    <<: *engagement
+    profiles: [jobs]
+    restart: 'no'
+    command: ['node', 'dist-worker/ingest/cli.js', 'doctor']
+    environment:
+      # `staging`, not the image's `production`: src/ingest/config.ts refuses an http S3 endpoint under production, and
+      # the object store here is http on the internal network only. `staging` still refuses synthetic providers, test
+      # hooks and down migrations and enables no simulation (those need development or test).
+      RATIO_ENV: staging
+      RATIO_MODE: engagement
+      RATIO_ENGAGEMENT_CONFIG: /config/engagement.json
+      RATIO_DATABASE_URL: postgres://ratio_engagement_worker:${RATIO_ENGAGEMENT_WORKER_PASSWORD:?set in .env.engagement}@postgres:5432/ratio
+      RATIO_SOURCE_S3_ENDPOINT: http://s3:8333
+      RATIO_SOURCE_S3_REGION: us-east-1
+      RATIO_SOURCE_S3_FORCE_PATH_STYLE: '1'
+      RATIO_SOURCE_S3_ACCESS_KEY_ID: ${RATIO_ENGAGEMENT_S3_ACCESS_KEY_ID:?set in .env.engagement}
+      RATIO_SOURCE_S3_SECRET_ACCESS_KEY: ${RATIO_ENGAGEMENT_S3_SECRET_ACCESS_KEY:?set in .env.engagement}
+      RATIO_EVIDENCE_S3_ENDPOINT: http://s3:8333
+      RATIO_EVIDENCE_S3_REGION: us-east-1
+      RATIO_EVIDENCE_S3_BUCKET: ratio-engagement-evidence
+      RATIO_EVIDENCE_S3_ACCESS_KEY_ID: ${RATIO_ENGAGEMENT_S3_ACCESS_KEY_ID:?set in .env.engagement}
+      RATIO_EVIDENCE_S3_SECRET_ACCESS_KEY: ${RATIO_ENGAGEMENT_S3_SECRET_ACCESS_KEY:?set in .env.engagement}
+    depends_on:
+      postgres: {condition: service_healthy}
+      s3: {condition: service_started}
+    mem_limit: 512m
+    cpus: 1.0
+    networks: [backend]
+
+networks:
+  frontend: {}
+  backend:
+    internal: true
+
+volumes:
+  state:
+  pg-data:
+  s3-data:
