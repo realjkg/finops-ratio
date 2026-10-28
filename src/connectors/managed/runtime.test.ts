@@ -131,7 +131,7 @@ describe('managedSpecFrom', () => {
   it('reads the retrieval block of a source config, refusing anything that is not managed', () => {
     expect(managedSpecFrom({ layout: 'ratio-file-drop', retrieval: { kind: 'managed', connector: 'aws-data-exports', params: { a: 1 }, secretRef: 'aws/x' } })).toEqual({ connector: 'aws-data-exports', params: { a: 1 }, secretRef: 'aws/x' });
     expect(managedSpecFrom({ retrieval: { kind: 'managed', connector: 'opencost' } })).toEqual({ connector: 'opencost', params: {} });
-    for (const bad of [{}, { retrieval: { kind: 'file-drop' } }, { retrieval: { kind: 'managed' } }, { retrieval: { kind: 'managed', connector: 'x', secretRef: 7 } }, null]) {
+    for (const bad of [{}, { retrieval: { kind: 'file-drop' } }, { retrieval: { kind: 'file-drop', connector: 'opencost' } }, { retrieval: { kind: 'managed' } }, { retrieval: { kind: 'managed', connector: 'x', secretRef: 7 } }, null]) {
       expect(() => managedSpecFrom(bad)).toThrow(ManagedError);
     }
   });
