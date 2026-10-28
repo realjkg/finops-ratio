@@ -1,0 +1,11 @@
+M0b connector evidence capture -- RED (tests committed before the implementation)
+Base: origin/main 6d348d9.
+Command: npx vitest run src/connectors/managed/evidence
+Result: Test Files 3 failed (3); no tests (./bridge, ./capture and ./package do not exist yet).
+Covers: originals stored unmodified (sha256 of stored bytes = received), identity params redacted,
+page-sequence completion (gap, repeat, page after terminal, no terminal), separate version facts
+(unknown, never invented; snapshot hash checked), bridge closes per line and currency (split
+transform; dropped credit names the line; one-sided measure is not a zero), aggregate controls
+compared but never completeness proof, exact decimals, evidence record redaction, fixture class
+vs reconciliation proof, no live claim without original evidence, sanitization/coverage notes.
+All inputs SYNTHETIC.
