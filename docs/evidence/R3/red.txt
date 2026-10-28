@@ -6,3 +6,9 @@ $ npx vitest run src/ingest/focus/provider.test.ts src/ingest/worker/sourceFacto
   stageFile.test.ts does not load: ./stageFile does not exist (11 tests not collected).
   provider.test.ts: 4 new R3 cases fail (no KNOWN_FILE_DROP_PROVIDERS, no ratio-file-drop policy).
   sourceFactory.test.ts: 1 new R3 case fails (the factory refuses layout ratio-file-drop).
+
+Review round 1 (PR #142) RED, after merging origin/main 3fa927b:
+$ npx vitest run src/ingest/import/stageFile.test.ts
+  Tests 5 failed | 16 passed (21): one leading BOM, trailing blank lines, "the file, record N" spacing,
+  duplicate input bytes refused, providers required with a control. The 5 mutation-killing cases
+  (period day-of-month, control validation, quoted "NULL", provider-scoped currency, duplicate header) pass on the old code.
