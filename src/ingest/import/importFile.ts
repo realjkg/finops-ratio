@@ -14,6 +14,14 @@
 // `restate` is set; both outcomes report the published and the staged row
 // counts and billed totals per period. Deliver the parts of one period together
 // (several files form one delivery).
+//
+// Concurrency (review round 2 B1): the whole check + stage + sync of one import holds a session advisory
+// lock on (tenant, source) taken BEFORE the restatement guard and before anything is staged. A second
+// import of the same source meanwhile exits ALREADY_RUNNING (exit 4) having written nothing; its retry
+// then sees the first import's published content (PERIOD_ALREADY_PUBLISHED, exit 3, or `unchanged`).
+// Every period's manifest lives at one key, so the sync is also told the sha256 of each manifest this
+// import staged: a period whose listed manifest is not this import's fails IMPORT_MANIFEST_REPLACED and
+// publishes nothing, so an import never reports `published` for data it did not stage.
 // importFile (`cli import-file`) is a thin wrapper that reads local files.
 import fs from 'fs';
 import { Readable } from 'stream';
@@ -127,6 +135,48 @@ export async function stageAndSync(o: StageAndSyncOptions): Promise<StageAndSync
   if (control && control.rowCount !== undefined && control.billedTotal === undefined) {
     fail('IMPORT_CONTROL_INVALID', 'a control row count needs the control billed total (--control-billed with --currency): a row count alone cannot reconcile a period');
   }
+  const lock = await lockImport(o.pool, row);
+  try {
+    return await stageAndSyncLocked(o, row, location, providers, control);
+  } finally {
+    await lock.release();
+  }
+}
+
+/** Session advisory lock (tenant, source) for one import, or ALREADY_RUNNING without waiting. */
+async function lockImport(pool: Pool, row: SourceRow): Promise<{ release(): Promise<void> }> {
+  const key = `ratio.import:${row.tenantId}:${row.id}`;
+  const c = await pool.connect();
+  let ok: boolean;
+  try {
+    ok = (await c.query(`SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS ok`, [key])).rows[0].ok === true;
+  } catch (e) {
+    c.release(e as Error);
+    throw e;
+  }
+  if (!ok) {
+    c.release();
+    throw new IngestError('ALREADY_RUNNING', 'another import of this source is in progress; nothing was written (run this import again when it has finished)');
+  }
+  return {
+    async release() {
+      try {
+        await c.query(`SELECT pg_advisory_unlock(hashtextextended($1, 0))`, [key]);
+        c.release();
+      } catch (e) {
+        c.release(e as Error); // a broken session drops its locks with it
+      }
+    },
+  };
+}
+
+async function stageAndSyncLocked(
+  o: StageAndSyncOptions,
+  row: SourceRow,
+  location: ReturnType<typeof validateLocation>,
+  providers: readonly string[],
+  control: StageControl | undefined,
+): Promise<StageAndSyncResult | ImportRefusal> {
 
   const normalizer = normalizerFor(o.sourceKind ?? 'focus-export', o.schemaVersion ?? '1.0');
   const inputs: StageInput[] = [];
@@ -212,6 +262,7 @@ export async function stageAndSync(o: StageAndSyncOptions): Promise<StageAndSync
   }
   o.log?.('import.staged', { periods: staged.periods.length, objects: staged.objects.length, restatements: restatements.length });
   const out = common(staged);
+  const expectManifests = new Map(staged.objects.filter((x) => x.kind === 'manifest').map((x) => [x.billingPeriod, x.sha256]));
   const range = { from: staged.periods[0].billingPeriod, to: staged.periods[staged.periods.length - 1].billingPeriod };
   staged = null;
 
@@ -228,6 +279,7 @@ export async function stageAndSync(o: StageAndSyncOptions): Promise<StageAndSync
     log: o.log,
     secrets: o.secrets,
     restateControls: o.restate === true,
+    expectManifests,
   });
   for (const x of restatements) x.applied = run.periods.some((p) => p.billingPeriod === x.billingPeriod && p.outcome === 'published');
   return {

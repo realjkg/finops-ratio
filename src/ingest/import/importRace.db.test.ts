@@ -11,13 +11,14 @@ import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { workerTestDb, type WorkerTestDb } from '../testing/workerSetup';
 import { createLogin, publishedTotals, type Login } from '../testing/db';
 import { createTestBucket, requireTestS3Endpoint, testS3Client, testS3Env, type TestBucket } from '../testing/s3';
 import { cli, CLI_SOURCE } from '../testing/cli';
 import { S3EvidenceStore } from '../evidence/S3EvidenceStore';
+import { IngestError } from '../errors';
 import { makeSourceFactory } from '../worker/sourceFactory';
 import { localDelivery, stageAndSync, stageLocalFiles, type ImportRefusal, type StageAndSyncResult } from './importFile';
 
@@ -171,6 +172,83 @@ describe('R3 review round 2 B1: concurrent imports of one source and period', ()
     expect(res.status).toBe('failed');
     expect(res.periods).toEqual([expect.objectContaining({ billingPeriod: PERIOD, outcome: 'failed', code: 'IMPORT_MANIFEST_REPLACED' })]);
     expect(res.periods.some((p) => p.outcome === 'published')).toBe(false);
+    expect(await publishedTotals(t.db.pool, tenant, sid)).toEqual({});
+  });
+
+  it('a period whose staged manifest is gone before the sync lists it fails IMPORT_MANIFEST_REPLACED, never an empty success', async () => {
+    const { tenant, sid } = await newSource();
+    const r = await importVia(
+      tenant,
+      part1,
+      hooked({
+        afterManifestPut: async () => {
+          const key = (await src.keys(`${src.at(tenant)}/`)).find((k) => k.endsWith('-Manifest.json'))!;
+          await s3.send(new DeleteObjectCommand({ Bucket: src.name, Key: key }));
+        },
+      }),
+    );
+    const res = (r as { ok: StageAndSyncResult }).ok;
+    expect(res.status).toBe('failed');
+    expect(res.periods).toEqual([expect.objectContaining({ billingPeriod: PERIOD, outcome: 'failed', code: 'IMPORT_MANIFEST_REPLACED' })]);
+    expect(await publishedTotals(t.db.pool, tenant, sid)).toEqual({});
+  });
+
+  it('a staged period the source does not list at all (on S3 the metadata prefix of a deleted manifest disappears; SeaweedFS keeps it, so the listing is filtered here) fails IMPORT_MANIFEST_REPLACED', async () => {
+    const { tenant, sid } = await newSource();
+    const real = makeSourceFactory({}, () => s3);
+    const r = await stageAndSync({
+      pool: t.pool,
+      tenantId: tenant,
+      sourceKey: 'focus-aws',
+      objects: localDelivery([part1]),
+      period: PERIOD,
+      sourceClient: () => s3,
+      source: (row) => {
+        const inner = real(row);
+        return { kind: inner.kind, listPeriods: async () => [], openArtifact: (ref, opts) => inner.openArtifact(ref, opts) };
+      },
+      evidence: new S3EvidenceStore({ client: s3, bucket: evidence.name, prefix: evidence.root }),
+    });
+    expect(r.status).toBe('failed');
+    expect((r as StageAndSyncResult).periods).toEqual([expect.objectContaining({ billingPeriod: PERIOD, outcome: 'failed', code: 'IMPORT_MANIFEST_REPLACED' })]);
+    expect(await publishedTotals(t.db.pool, tenant, sid)).toEqual({});
+  });
+
+  it('a manifest replaced while the period is being read (SOURCE_CHANGED, re-listed) also fails IMPORT_MANIFEST_REPLACED and publishes nothing', async () => {
+    const { tenant, sid } = await newSource();
+    const theirs = await stagedBy(part2, tenant);
+    const real = makeSourceFactory({}, () => s3);
+    let first = true;
+    const r = await stageAndSync({
+      pool: t.pool,
+      tenantId: tenant,
+      sourceKey: 'focus-aws',
+      objects: localDelivery([part1]),
+      period: PERIOD,
+      sourceClient: () => s3,
+      source: (row) => {
+        const inner = real(row);
+        return {
+          kind: inner.kind,
+          listPeriods: (range, opts) => inner.listPeriods(range, opts),
+          async openArtifact(ref, opts) {
+            if (first) {
+              first = false;
+              for (const o of [...theirs.objects.filter((x) => x.kind === 'data'), ...theirs.objects.filter((x) => x.kind === 'manifest')]) {
+                await s3.send(new PutObjectCommand({ Bucket: src.name, Key: o.key, Body: o.body }));
+              }
+              throw new IngestError('SOURCE_CHANGED', 'changed since listed (test)', { retryable: true });
+            }
+            return inner.openArtifact(ref, opts);
+          },
+        };
+      },
+      evidence: new S3EvidenceStore({ client: s3, bucket: evidence.name, prefix: evidence.root }),
+      hooks: { sleep: async () => undefined },
+    });
+    expect(first).toBe(false);
+    expect(r.status).toBe('failed');
+    expect((r as StageAndSyncResult).periods).toEqual([expect.objectContaining({ billingPeriod: PERIOD, outcome: 'failed', code: 'IMPORT_MANIFEST_REPLACED' })]);
     expect(await publishedTotals(t.db.pool, tenant, sid)).toEqual({});
   });
 

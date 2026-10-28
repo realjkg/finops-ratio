@@ -89,6 +89,11 @@ describe('worker CLI (no database)', () => {
     expect(r.code).toBe(2);
     const rec = JSON.parse(r.out[0]);
     expect(rec.args).toEqual({ tenant: T, source: 'focus-main', files: 2, period: '[invalid]' });
+    // Positionals, unknown flags and --flag=value are counted, never copied.
+    const g = await run(['import-file', '--tenant', T, '--source', 'focus-main', '--file', '/a.csv', '/SECRET/b.csv', '--bogus', 'SECRET-v', '--file=/SECRET/c.csv'], { ...env, RATIO_ENV: 'test' });
+    expect(g.code).toBe(2);
+    expect(JSON.parse(g.out[0]).args).toEqual({ tenant: T, source: 'focus-main', files: 1, unrecognizedArguments: 4 });
+    expect(g.out.concat(g.err).join('\n')).not.toContain('SECRET');
   });
 
   it('missing RATIO_DATABASE_URL is a configuration error (exit 2)', async () => {
