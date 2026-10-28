@@ -19,7 +19,8 @@ on:
 jobs:
   ci:
     name: Lint · Typecheck · Test · Build
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which has no postgresql-client-16 package.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     # Ephemeral Postgres for the ingestion DB suite (*.db.test.ts). Trust auth
