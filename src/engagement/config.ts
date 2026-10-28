@@ -702,7 +702,7 @@ export function engagementConfigFromEnv(env: Env): LoadResult {
 /**
  * Startup check (instrumentation). null outside engagement mode; in engagement
  * mode returns the config plus its sha256 or THROWS EngagementConfigError
- * (keys only), so the server refuses to start.
+ * (keys only); instrumentation register() then exits the process with code 1.
  */
 export function checkEngagementStartup(env: Env): { config: EngagementConfig; sha256: string } | null {
   if (!engagementMode(env)) return null;

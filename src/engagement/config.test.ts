@@ -344,6 +344,7 @@ describe('mode and startup', () => {
 
   it('engagement mode without RATIO_ENGAGEMENT_CONFIG throws naming the variable', () => {
     expect(() => checkEngagementStartup({ RATIO_MODE: 'engagement' })).toThrow(/RATIO_ENGAGEMENT_CONFIG/);
+    expect(() => checkEngagementStartup({ RATIO_MODE: 'engagement' })).toThrow(EngagementConfigError);
   });
 
   it('engagement mode with an invalid config: register() logs only the problem keys and exits non-zero', async () => {

@@ -1,6 +1,6 @@
 // R1: in engagement mode the reader's tenant comes from the engagement config
 // (not from RATIO_API_TENANT_ID); non-engagement behavior is unchanged.
-// Lives in the costs island because src/engagement must not be imported with src/server/costs.
+// Lives in the costs island next to the reader config it exercises (costs/config.ts imports src/engagement).
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { checkPublishedCostsStartup, publishedCostsConfig } from './config';

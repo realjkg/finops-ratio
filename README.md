@@ -208,10 +208,11 @@ These need live services or secrets and are out of Phase 1 scope:
 
 One instance serves exactly one engagement. `RATIO_MODE=engagement` turns it on and
 `RATIO_ENGAGEMENT_CONFIG=/absolute/path/engagement.json` names the config (mount it
-read-only). The server validates the file at startup and **refuses to start** on any
-invalid or missing key; the error names the key (for example `budgets[0].monthly`),
-never the value. Any other `RATIO_MODE` value is also an error. Outside engagement
-mode nothing changes.
+read-only). The server validates the file at startup and, on any invalid or missing
+key, logs one `engagement_config_invalid` line naming the keys (for example
+`budgets[0].monthly`), never the values, and **the process exits with code 1**. Any
+other `RATIO_MODE` value is also an error (startup reports it; it does not exit the
+process). Outside engagement mode nothing changes.
 
 The file declares: `engagementId`, `tenantId` (the single tenant the published-costs
 reader is bound to; in engagement mode `RATIO_API_TENANT_ID` must not be set),
