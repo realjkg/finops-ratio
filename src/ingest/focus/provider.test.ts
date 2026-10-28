@@ -6,6 +6,7 @@ import {
   PROVIDER_MISMATCH,
   SOURCE_TYPE_PROVIDERS,
   SYNTHETIC_PROVIDERS,
+  KNOWN_FILE_DROP_PROVIDERS,
   checkProviderHeader,
   checkProviderName,
   providerPolicyFor,
@@ -239,5 +240,60 @@ describe('FOCUS 1.3+ ProviderName successor (ServiceProviderName; test-built row
     const v = validateRow(both.map((c) => row[c] ?? ''), headerIndex(both), '2026-09-01');
     if (!v.ok) throw new Error('row should validate');
     expect(checkProviderName(v.fact.providerName, awsPolicy(), providerColumn(headerIndex(both)))).toMatchObject({ ok: false, exclude: false, error: { column: 'ProviderName', code: 'MISSING_VALUE' } });
+  });
+});
+
+// R3: an operator file-drop source (layout ratio-file-drop) checks rows against the providers
+// the operator DECLARED for that source, intersected with a frozen known list. Every other
+// provider's rows stay excluded, and the synthetic opt-in rules are unchanged.
+describe('R3 ratio-file-drop: the declared provider list per source', () => {
+  const drop = (providers: unknown) => ({ kind: 'focus_file', config: { layout: 'ratio-file-drop', bucket: 'b', prefix: 'p', exportName: 'x', providers } });
+
+  it('the known list is frozen and exactly AWS, Microsoft, Google Cloud, Oracle', () => {
+    expect(KNOWN_FILE_DROP_PROVIDERS).toEqual(['AWS', 'Microsoft', 'Google Cloud', 'Oracle']);
+    expect(Object.isFrozen(KNOWN_FILE_DROP_PROVIDERS)).toBe(true);
+  });
+
+  it('a source declared [Microsoft] accepts Microsoft rows and excludes AWS, Oracle and every undeclared provider', () => {
+    const p = providerPolicyFor(drop(['Microsoft']), OFF);
+    expect(p).toEqual({ sourceType: 'ratio-file-drop', allowed: ['Microsoft'] });
+    expect(checkProviderName('Microsoft', p!)).toEqual({ ok: true });
+    for (const other of ['AWS', 'Oracle', 'Google Cloud', 'microsoft', 'Microsoft ', 'Microsoft Azure']) {
+      const r = checkProviderName(other, p!);
+      expect(r).toMatchObject({ ok: false, exclude: true, error: { code: PROVIDER_MISMATCH, column: 'ProviderName' } });
+      if (!r.ok) expect(r.error.message).not.toContain(other);
+    }
+  });
+
+  it('a source declared [AWS, Oracle] accepts both and still excludes Microsoft', () => {
+    const p = providerPolicyFor(drop(['AWS', 'Oracle']), OFF)!;
+    expect(p.allowed).toEqual(['AWS', 'Oracle']);
+    expect(checkProviderName('Oracle', p)).toEqual({ ok: true });
+    expect(checkProviderName('Microsoft', p)).toMatchObject({ ok: false, exclude: true });
+  });
+
+  it('resolves NO policy (the factory refuses the row) for a missing, empty, duplicated or unknown declaration', () => {
+    for (const bad of [undefined, null, [], 'AWS', ['AWS', 'AWS'], ['Amazon Web Services'], ['aws'], ['SyntheticCloud'], [1], ['AWS', 'Other']]) {
+      expect(providerPolicyFor(drop(bad), ON)).toBeNull();
+    }
+  });
+
+  it('the synthetic opt-in adds only the fixed synthetic set and never widens real providers', () => {
+    const on = providerPolicyFor(drop(['Microsoft']), ON)!;
+    expect(on.allowed).toEqual(['Microsoft', ...SYNTHETIC_PROVIDERS]);
+    expect(checkProviderName('AWS', on)).toMatchObject({ ok: false, exclude: true });
+    const off = providerPolicyFor(drop(['Microsoft']), OFF)!;
+    for (const s of SYNTHETIC_PROVIDERS) expect(checkProviderName(s, off)).toMatchObject({ ok: false, exclude: true });
+  });
+
+  it('the AWS Data Exports policy is unchanged by a providers key on its config', () => {
+    const p = providerPolicyFor({ kind: 'focus_file', config: { ...AWS_SOURCE.config, providers: ['Microsoft'] } }, OFF)!;
+    expect(p).toEqual({ sourceType: 'aws-data-exports', allowed: ['AWS'] });
+  });
+
+  it('reads the declaration from own properties only', () => {
+    const config = Object.create({ providers: ['AWS'] }) as Record<string, unknown>;
+    Object.assign(config, { layout: 'ratio-file-drop', bucket: 'b', prefix: 'p', exportName: 'x' });
+    expect(providerPolicyFor({ kind: 'focus_file', config }, OFF)).toBeNull();
   });
 });
