@@ -128,6 +128,7 @@ describe('R3 import-file (public FOCUS 1.0 sample)', () => {
     const r = await cli(args, env());
     expect(r.code).toBe(0);
     expect(periodsOf(r)).toEqual([expect.objectContaining({ billingPeriod: '2024-09-01', outcome: 'published', reconciliation: 'reconciled', rowCount: AWS_SEP.rowCount, billedTotal: AWS_SEP.billedCost })]);
+    expect(periodsOf(r)[0].reconciliationNote).toBeUndefined();
     const sid = await sourceId(tenant, 'focus-aws');
     const before = await batchesOf(t.db.pool, tenant, sid);
     expect(before.map((b) => [b.period, b.status, b.reconciliation, b.control_rows, b.control_total])).toEqual([['2024-09-01', 'published', 'reconciled', AWS_SEP.rowCount, AWS_SEP.billedCost]]);

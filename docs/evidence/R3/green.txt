@@ -1,15 +1,18 @@
-R3 part 1 (staging + declared providers) GREEN, 2026-10-28.
+R3 part 2 (source add, import-file, stageAndSync, normalizer seam) GREEN, 2026-10-28.
 
-$ npx vitest run src/ingest/focus/provider.test.ts src/ingest/worker/sourceFactory.test.ts src/ingest/import/stageFile.test.ts
-  Test Files 3 passed (3); Tests 50 passed (50)
+$ npx vitest run src/ingest/import/normalizer.test.ts            -> 4 passed
+$ npx vitest run --config vitest.db.config.ts src/ingest/import/importFile.db.test.ts -> 9 passed
+  (public FOCUS 1.0 sample: [AWS] 2024-09 = 942 rows / 18.00663861840 USD as control-totals.json "1k",
+   57 rows excluded, 2024-10 quarantined PROVIDER_MISMATCH; re-import unchanged, no new batch;
+   [Microsoft] 2024-09 = 51 rows; exact-file controls reconcile, a wrong control is a variance;
+   DUPLICATE_ARTIFACT across sources; SYNTHETIC base -> restatement supersedes 2026-07)
 Gates (sequential, foreground): lint 0; tsc --noEmit 0; tsc -p tsconfig.worker.json 0;
-  full vitest 215 files / 3956 tests passed; next build 0 (next-env.d.ts reverted);
-  npm run test:db (local Postgres 16 + SeaweedFS, CI digests): 39 files / 659 tests + serial 6 files / 173 tests passed.
+  full vitest 216 files / 3960 tests passed; next build 0 (next-env.d.ts reverted);
+  npm run test:db (local Postgres 16 + SeaweedFS, CI digests): 40 files / 668 tests + serial 6 / 173 passed.
 
-Mutations (each applied alone, then reverted; the R3 tests above must fail):
-  M1 provider.ts: duplicate declared providers accepted        -> 2 failed
-  M2 provider.ts: declared list not intersected with known list -> 2 failed
-  M3 stageFile.ts: NULL token not mapped to empty               -> 1 failed
-  M4 stageFile.ts: per-file rowCount written into dataFiles     -> 2 failed (self-derived control)
-  M5 stageFile.ts: controls accepted for a multi-period file    -> 1 failed
-  M6 stageFile.ts: control currency not checked                 -> 1 failed
+Mutations (each applied alone, then reverted; importFile.db.test.ts must fail):
+  M1 duplicate guard disabled                          -> 1 failed
+  M2 "no control" note added even with controls        -> 1 failed
+  M3 source add accepts a changed declaration          -> 1 failed
+  M4 normalization report not carried in the manifest  -> 1 failed
+  M5 duplicate guard checks the same source            -> 4 failed

@@ -8,6 +8,10 @@
 //   quarantine show --tenant <uuid> --batch <uuid> [--json]
 //   doctor          [--tenant <uuid>]... [--json]          (read-only)
 //   replay-fixtures [--json]                               (RATIO_ENV=test only; issue #62 L3)
+//   source add      --tenant <uuid> --key <key> --providers AWS[,Microsoft,Google Cloud,Oracle] --bucket <name>
+//                   [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>]   (R3; owner login)
+//   import-file     --tenant <uuid> --source <key> --file <path.csv|path.csv.gz> [--period YYYY-MM]
+//                   [--control-rows N] [--control-billed D --currency CCC]          (R3)
 //
 // Exit codes: 0 ok · 1 failure · 2 usage/configuration · 4 another run holds the lease.
 import type { S3Client } from '@aws-sdk/client-s3';
@@ -30,10 +34,14 @@ import { runReplayFixtures } from './worker/replayFixtures';
 import { makeSourceFactory } from './worker/sourceFactory';
 import type { WorkerHooks } from './worker/types';
 import { MIN_PERIOD_YEAR } from './worker/periods';
+import { isDecimalString } from './focus/decimal';
+import { KNOWN_FILE_DROP_PROVIDERS } from './focus/provider';
+import { importFile } from './import/importFile';
+import { provisionSource } from './import/provisionSource';
 
 type Env = Record<string, string | undefined>;
 
-const WORKER_COMMANDS = new Set(['sync', 'backfill', 'replay', 'quarantine', 'doctor', 'replay-fixtures']);
+const WORKER_COMMANDS = new Set(['sync', 'backfill', 'replay', 'quarantine', 'doctor', 'replay-fixtures', 'source', 'import-file']);
 export function isWorkerCommand(c: string | undefined): boolean {
   return c !== undefined && WORKER_COMMANDS.has(c);
 }
@@ -42,7 +50,7 @@ const EXIT_OK = 0;
 const EXIT_FAIL = 1;
 const EXIT_USAGE = 2;
 const EXIT_BUSY = 4;
-const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH']);
+const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH', 'IMPORT_CONTROL_INVALID', 'IMPORT_CONTROL_SCOPE']);
 
 function exitCodeFor(code: string): number {
   if (code === 'ALREADY_RUNNING' || code === 'LOCK_TIMEOUT') return EXIT_BUSY;
@@ -59,6 +67,16 @@ interface Args {
   batch?: string;
   period?: string;
   json: boolean;
+  key?: string;
+  providers?: string[];
+  bucket?: string;
+  prefix?: string;
+  displayName?: string;
+  tenantSlug?: string;
+  file?: string;
+  controlRows?: number;
+  controlBilled?: string;
+  currency?: string;
 }
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -74,6 +92,10 @@ function parseArgs(argv: string[]): Args {
     if (rest[0] !== 'show') usage('usage: quarantine show --tenant <uuid> --batch <uuid> [--json]');
     command = 'quarantine show';
     rest = rest.slice(1);
+  } else if (command === 'source') {
+    if (rest[0] !== 'add') usage('usage: source add --tenant <uuid> --key <key> --providers <list> --bucket <name> [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>]');
+    command = 'source add';
+    rest = rest.slice(1);
   }
   const a: Args = { command, tenants: [], json: false };
   const allowed: Record<string, string[]> = {
@@ -83,6 +105,8 @@ function parseArgs(argv: string[]): Args {
     'quarantine show': ['--tenant', '--batch', '--json'],
     doctor: ['--tenant', '--json'],
     'replay-fixtures': ['--json'],
+    'source add': ['--tenant', '--key', '--providers', '--bucket', '--prefix', '--display-name', '--tenant-slug', '--json'],
+    'import-file': ['--tenant', '--source', '--file', '--period', '--control-rows', '--control-billed', '--currency', '--json'],
   };
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
@@ -106,13 +130,46 @@ function parseArgs(argv: string[]): Args {
     } else if (flag === '--batch') {
       if (!isTenantId(v)) usage('--batch must be a UUID');
       a.batch = v.toLowerCase();
+    } else if (flag === '--key') {
+      if (!SOURCE_KEY_RE.test(v)) usage('--key must be a source key ([a-z0-9][a-z0-9_-]*)');
+      a.key = v;
+    } else if (flag === '--providers') {
+      const list = v.split(',').map((p) => p.trim());
+      if (list.some((p) => !KNOWN_FILE_DROP_PROVIDERS.includes(p)) || new Set(list).size !== list.length) {
+        usage(`--providers must list known providers, each once (${KNOWN_FILE_DROP_PROVIDERS.join(', ')})`);
+      }
+      a.providers = list;
+    } else if (flag === '--bucket') a.bucket = v;
+    else if (flag === '--prefix') a.prefix = v;
+    else if (flag === '--display-name') {
+      if (v.length < 1 || v.length > 200) usage('--display-name must be 1 to 200 characters');
+      a.displayName = v;
+    } else if (flag === '--tenant-slug') {
+      if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(v)) usage('--tenant-slug must match [a-z0-9][a-z0-9-]*');
+      a.tenantSlug = v;
+    } else if (flag === '--file') a.file = v;
+    else if (flag === '--control-rows') {
+      if (!/^[0-9]{1,15}$/.test(v)) usage('--control-rows must be a non-negative integer');
+      a.controlRows = Number(v);
+    } else if (flag === '--control-billed') {
+      if (!isDecimalString(v)) usage('--control-billed must be a plain decimal (e.g. 1234.56)');
+      a.controlBilled = v;
+    } else if (flag === '--currency') {
+      if (!/^[A-Z]{3}$/.test(v)) usage('--currency must be an ISO 4217 code (three upper-case letters)');
+      a.currency = v;
     }
   }
   const needs = (cond: boolean, m: string) => {
     if (!cond) usage(m);
   };
   if (command !== 'doctor' && command !== 'replay-fixtures') needs(a.tenants.length === 1, '--tenant <uuid> is required exactly once');
-  if (['sync', 'backfill', 'replay'].includes(command)) needs(!!a.source, '--source <key> is required');
+  if (['sync', 'backfill', 'replay', 'import-file'].includes(command)) needs(!!a.source, '--source <key> is required');
+  if (command === 'source add') needs(!!a.key && !!a.providers && !!a.bucket, '--key, --providers and --bucket are required');
+  if (command === 'import-file') {
+    needs(!!a.file, '--file <path> is required');
+    needs(a.controlBilled === undefined || a.currency !== undefined, '--control-billed needs --currency');
+    needs(a.currency === undefined || a.controlBilled !== undefined, '--currency is only valid with --control-billed');
+  }
   if (command === 'backfill') {
     needs(!!a.from && !!a.to, '--from and --to are required');
     needs(a.from! <= a.to!, '--from must not be after --to');
@@ -143,7 +200,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
   const log = (event: string, fields: Record<string, unknown> = {}) => {
     io.err(line({ ts: new Date().toISOString(), level: event.endsWith('failed') || event === 'cli.error' || fields.status === 'fail' ? 'error' : 'info', event, ...fields }));
   };
-  const command = argv[0] === 'quarantine' ? 'quarantine show' : argv[0];
+  const command = argv[0] === 'quarantine' ? 'quarantine show' : argv[0] === 'source' ? 'source add' : argv[0];
   let config: WorkerConfig | null = null;
   const finish = (results: Record<string, unknown>, pass: boolean, exitCode: number): number => {
     const record = buildEvidenceRecord({
@@ -215,6 +272,26 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
     }
   }
 
+  if (args.command === 'source add') {
+    // Provisioning writes tenants/sources: the migrator/owner login, never the worker login.
+    if (!cfg.migrateDatabaseUrl) return fail(new IngestError('CONFIG_INVALID', 'RATIO_MIGRATE_DATABASE_URL (the owner login) is required for source add'));
+    try {
+      const r = await provisionSource(cfg.migrateDatabaseUrl, {
+        tenantId: args.tenants[0],
+        tenantSlug: args.tenantSlug ?? `engagement-${args.tenants[0].slice(0, 8)}`,
+        sourceKey: args.key!,
+        displayName: args.displayName ?? `Operator file import: ${args.key}`,
+        providers: args.providers!,
+        bucket: args.bucket!,
+        prefix: args.prefix ?? 'ratio-file-drop',
+      });
+      log('source.provisioned', { sourceKey: r.sourceKey, outcome: r.outcome, providers: r.providers.length });
+      return finish({ ...r }, true, EXIT_OK);
+    } catch (e) {
+      return fail(e);
+    }
+  }
+
   if (!cfg.databaseUrl) return fail(new IngestError('CONFIG_INVALID', 'RATIO_DATABASE_URL is not set'));
   // Clients are constructed inside the try below, so a constructor failure is a
   // reported (redacted) failure, never a throw out of main.
@@ -265,6 +342,26 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
           evidence: evidenceStore(),
           mode,
           range,
+          settings: cfg.settings,
+          hooks,
+          log,
+          secrets,
+        });
+        const ok = r.status === 'succeeded';
+        return finish({ ...r }, ok, ok ? EXIT_OK : EXIT_FAIL);
+      }
+      case 'import-file': {
+        const control = args.controlRows !== undefined || args.controlBilled !== undefined ? { rowCount: args.controlRows, billedTotal: args.controlBilled, currency: args.currency } : undefined;
+        const r = await importFile({
+          pool,
+          tenantId,
+          sourceKey: args.source!,
+          filePath: args.file!,
+          period: args.period,
+          control,
+          sourceClient: () => s3('source'),
+          source: makeSourceFactory(env, () => s3('source')),
+          evidence: evidenceStore(),
           settings: cfg.settings,
           hooks,
           log,
