@@ -20,8 +20,10 @@
 // published batch instead (it stays retained, excluded from totals). Both print `restatements`: the
 // published and the staged row count and billed total of each such period. An identical re-import is
 // `unchanged`; controls given with unchanged data are reported (not recorded) until --restate.
-// --control-rows needs --control-billed. Deliveries above MAX_IMPORT_BYTES (decompressed, all files
-// together; src/ingest/import/stageFile.ts) are refused before they are read (exit 5, IMPORT_TOO_LARGE).
+// --control-rows needs --control-billed, or --metadata whose one-period billed total is merged in
+// (IMPORT_CONTROL_CONFLICT when that total cannot apply). Deliveries above MAX_IMPORT_BYTES (decompressed,
+// all files together; src/ingest/import/stageFile.ts) are refused before they are read (exit 5,
+// IMPORT_TOO_LARGE). Overlap with another source's published periods is only reported (overlapNotice).
 //
 // Exit codes: 0 ok · 1 failure · 2 usage/configuration · 3 import refused (would restate published
 // data; nothing written) · 4 another run holds the lease · 5 import larger than the cap.
@@ -199,7 +201,7 @@ function parseArgs(argv: string[]): Args {
   if (command === 'source add') needs(!!a.key && !!a.providers && !!a.bucket, '--key, --providers and --bucket are required');
   if (command === 'import-file') {
     needs(a.files.length > 0, '--file <path> is required (repeat it for the files of one delivery)');
-    needs(a.controlRows === undefined || a.controlBilled !== undefined, '--control-rows needs --control-billed and --currency: a row count alone cannot reconcile a period');
+    needs(a.controlRows === undefined || a.controlBilled !== undefined || a.metadata !== undefined, '--control-rows needs --control-billed and --currency (or a --metadata billed total): a row count alone cannot reconcile a period');
     needs(a.controlBilled === undefined || a.currency !== undefined, '--control-billed needs --currency');
     needs(a.currency === undefined || a.controlBilled !== undefined, '--currency is only valid with --control-billed');
   }

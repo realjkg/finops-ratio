@@ -152,7 +152,7 @@ export async function stageAndSync(o: StageAndSyncOptions): Promise<StageAndSync
   const location = validateLocation(row.config);
   const providers = declaredProviders(row.config);
   if (!providers) throw new IngestError('SOURCE_CONFIG_INVALID', 'source config providers must be a non-empty list of known providers');
-  const control = o.control && Object.values(o.control).some((v) => v !== undefined) ? o.control : undefined;
+  let control = o.control && Object.values(o.control).some((v) => v !== undefined) ? o.control : undefined;
 
   const stored = row.config.metadata;
   const meta = o.metadata ?? (stored !== undefined ? { metadata: checkImportMetadata(stored), sha256: String(row.config.metadataSha256) } : undefined);
@@ -168,6 +168,12 @@ export async function stageAndSync(o: StageAndSyncOptions): Promise<StageAndSync
       const relRow = rel === o.sourceKey ? null : await workerTransaction(o.pool, o.tenantId, (c) => loadSource(c, rel)).catch(() => null);
       if (!relRow) fail('IMPORT_RELATED_SOURCE_NOT_FOUND', 'metadata overlap.related_source must name another registered source of this tenant');
       provenance.overlap = { alsoPresentInOtherSource: 'yes', relatedSource: rel, relatedSourceId: relRow!.id };
+    }
+    // Review B3: a rows-only flag control never stands in for the record's billed total. It is merged
+    // with the record's one-period billed total, or refused when the record has one that cannot apply.
+    if (control && control.billedTotal === undefined && m.financial.billed_cost_total !== 'unknown') {
+      if (!fromMeta.control) fail('IMPORT_CONTROL_CONFLICT', 'a --control-rows count cannot be combined with the metadata billed total, which does not apply to exactly one billing period of one provider; supply --control-billed');
+      control = { ...control, ...fromMeta.control };
     }
   }
   // Review M2: a row count alone would make the worker report `reconciled` with the billed total unchecked.
