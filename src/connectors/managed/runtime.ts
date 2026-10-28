@@ -7,6 +7,8 @@
 // Failures carry a code and never fall back to sample or simulated data. Error
 // text from foreign code is replaced by fixed text (it may carry payload values);
 // ManagedError text (connector-authored) is kept with secret values scrubbed.
+import fs from 'fs';
+import path from 'path';
 import { captureOriginal, type OriginalsStore } from './evidence/capture';
 import type { CapturedOriginal, ObjectIdentity } from './evidence/types';
 import { managedRegistry, type RetrieverRegistry } from './registry';
@@ -41,7 +43,8 @@ export class ManagedError extends Error {
   }
 }
 
-export interface StageRequest { objects: Array<{ name: string; bytes: Buffer }>; sourceKind: string; schemaVersion: string; provenance: Record<string, unknown>; secrets: string[] }
+/** `period` ('YYYY-MM-01') stages only the delivery's billing period. */
+export interface StageRequest { objects: Array<{ name: string; bytes: Buffer }>; sourceKind: string; schemaVersion: string; period?: string; provenance: Record<string, unknown>; secrets: string[] }
 
 export interface FetchOptions {
   tenantId: string;
@@ -86,14 +89,37 @@ const codeOf = (e: unknown, fallback: string) => {
 const messageOf = (e: unknown, fixed: string, secrets: string[]) =>
   e instanceof Error && codeOf(e, '') !== '' ? scrubSecrets(e.message, secrets).slice(0, 500) : fixed;
 
-/** The retrieval block of a source's config jsonb (E4: kind stays focus_file; connector identity in config). */
-export function managedSpecFrom(config: unknown): ManagedSpec {
-  const r = (config as { retrieval?: Record<string, unknown> } | null)?.retrieval;
+// A secretRef must be a NAME; a credential-looking value is refused without being echoed.
+const LOOKS_LIKE_CREDENTIAL = [/-----BEGIN /, /^eyJ[\w-]{8,}\./, /(AKIA|ASIA)[A-Z0-9]{16}/, /[A-Za-z0-9+/_=-]{40,}/];
+
+/**
+ * The managed retrieval of one engagement-config source (R1 `sources[].retrieval`). The source row's
+ * config jsonb cannot carry it: its CHECKs refuse keys such as secretRef and connector.
+ */
+export function managedSpecFrom(source: unknown): ManagedSpec {
+  const r = (source as { retrieval?: Record<string, unknown> } | null)?.retrieval;
   const bad = () => new ManagedError('SOURCE_NOT_MANAGED', 'the source config has no valid managed retrieval block (kind managed, connector, optional params and secretRef)');
   if (!r || r.kind !== 'managed' || typeof r.connector !== 'string') throw bad();
   if (r.params !== undefined && (typeof r.params !== 'object' || r.params === null || Array.isArray(r.params))) throw bad();
-  if (r.secretRef !== undefined && typeof r.secretRef !== 'string') throw bad();
+  if (r.secretRef !== undefined && (typeof r.secretRef !== 'string' || r.secretRef.length > 128 || LOOKS_LIKE_CREDENTIAL.some((x) => x.test(r.secretRef as string)))) throw bad();
   return { connector: r.connector, params: (r.params as Record<string, unknown>) ?? {}, ...(r.secretRef ? { secretRef: r.secretRef } : {}) };
+}
+
+/** Reads RATIO_ENGAGEMENT_CONFIG (absolute, at most 1 MiB) and returns the managed retrieval of source `sourceId`. */
+export function managedSpecFromEngagementFile(file: string | undefined, sourceId: string): ManagedSpec {
+  const invalid = (m: string) => new ManagedError('ENGAGEMENT_CONFIG_INVALID', `RATIO_ENGAGEMENT_CONFIG: ${m}`);
+  if (!file || !path.isAbsolute(file)) throw invalid('must be the absolute path of the engagement config');
+  let parsed: unknown;
+  try {
+    if (fs.statSync(file).size > 1024 * 1024) throw invalid('file is larger than 1 MiB');
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    throw e instanceof ManagedError ? e : invalid('file is missing, unreadable or not valid JSON');
+  }
+  const sources = (parsed as { sources?: unknown } | null)?.sources;
+  const found = Array.isArray(sources) ? sources.find((x) => (x as { id?: unknown })?.id === sourceId) : undefined;
+  if (!found) throw new ManagedError('SOURCE_NOT_IN_ENGAGEMENT_CONFIG', `the engagement config has no source ${sourceId}`);
+  return managedSpecFrom(found);
 }
 
 export async function runManagedFetch(o: FetchOptions): Promise<FetchResult> {
@@ -134,7 +160,7 @@ export async function runManagedFetch(o: FetchOptions): Promise<FetchResult> {
     }
     try {
       const provenance = { connector: d.connector, dataset: d.dataset, delivery: dl.id, originals: out.originals.map((c) => ({ sha256: c.sha256, key: c.key, identity: c.identity, retrievedAt: c.retrievedAt })) };
-      const r = await o.stage({ objects, sourceKind: d.sourceKind, schemaVersion: d.schemaVersion, provenance, secrets: [...secrets] });
+      const r = await o.stage({ objects, sourceKind: d.sourceKind, schemaVersion: d.schemaVersion, ...(dl.billingPeriod ? { period: dl.billingPeriod } : {}), provenance, secrets: [...secrets] });
       out.result = scrubSecrets(r, secrets);
       if (r.status === 'succeeded') out.outcome = 'staged';
       else Object.assign(out, { outcome: r.status === 'refused' ? 'refused' : 'failed', code: r.error?.code ?? 'STAGE_FAILED' });
