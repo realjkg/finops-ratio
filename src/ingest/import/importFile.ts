@@ -19,6 +19,10 @@
 // lock on (tenant, source) taken BEFORE the restatement guard and before anything is staged. A second
 // import of the same source meanwhile exits ALREADY_RUNNING (exit 4) having written nothing; its retry
 // then sees the first import's published content (PERIOD_ALREADY_PUBLISHED, exit 3, or `unchanged`).
+// The source's RUN LEASE (review round 3) is taken after the guard and BEFORE the first object is put, and
+// the sync runs under it: while any other run (a sync, a backfill, a replay) holds a live lease the import
+// exits ALREADY_RUNNING (exit 4) having written nothing to S3, and a sync started while the import stages
+// is itself refused, so it never publishes a half-staged delivery. A staging failure finishes the run.
 // Every period's manifest lives at one key, so the sync is also told the sha256 of each manifest this
 // import staged: a period whose listed manifest is not this import's fails IMPORT_MANIFEST_REPLACED and
 // publishes nothing, so an import never reports `published` for data it did not stage.
@@ -27,15 +31,17 @@ import fs from 'fs';
 import { Readable } from 'stream';
 import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import type { Pool } from 'pg';
-import { IngestError } from '../errors';
 import type { EvidenceStore } from '../evidence/types';
 import { declaredProviders } from '../focus/provider';
 import { validateLocation } from '../sources/s3/layout';
 import type { FocusSource } from '../sources/types';
-import { loadSource, type SourceRow } from '../worker/lease';
+import { resolveSettings } from '../config';
+import { IngestError, errorCodeOf, messageOf } from '../errors';
+import { redact } from '../redact';
+import { acquireRun, finishRun, loadSource, type SourceRow } from '../worker/lease';
 import { runSync, type LogFn, type RunSyncOptions } from '../worker/pipeline';
 import { workerTransaction } from '../worker/tx';
-import type { PeriodResult, RunResult } from '../worker/types';
+import { SimulatedCrash, type PeriodResult, type RunResult } from '../worker/types';
 import { collect, normalizerFor, type MappingReport } from './normalizer';
 import { MAX_IMPORT_BYTES, decodeImportFile, stageFile, tooLarge, type PeriodPreview, type StageControl, type StageInput, type StageOptions, type StagedFile } from './stageFile';
 
@@ -255,32 +261,49 @@ async function stageAndSyncLocked(
     };
   }
 
-  // Data first, manifests last: a manifest never names an object that is not there yet.
-  const client = o.sourceClient();
-  for (const obj of [...staged.objects.filter((x) => x.kind === 'data'), ...staged.objects.filter((x) => x.kind === 'manifest')]) {
-    await client.send(new PutObjectCommand({ Bucket: location.bucket, Key: obj.key, Body: obj.body, ContentType: obj.kind === 'data' ? 'application/gzip' : 'application/json' }));
-  }
-  o.log?.('import.staged', { periods: staged.periods.length, objects: staged.objects.length, restatements: restatements.length });
-  const out = common(staged);
-  const expectManifests = new Map(staged.objects.filter((x) => x.kind === 'manifest').map((x) => [x.billingPeriod, x.sha256]));
+  // Review round 3: the run lease is taken BEFORE anything is staged, so an import refused because another
+  // run holds it (ALREADY_RUNNING / LOCK_TIMEOUT, exit 4) has written nothing to S3, and no sync can list
+  // (and publish) a half-staged delivery while this import stages. The sync below runs under this lease.
   const range = { from: staged.periods[0].billingPeriod, to: staged.periods[staged.periods.length - 1].billingPeriod };
-  staged = null;
+  const acquired = await acquireRun(o.pool, o.tenantId, o.sourceKey, { kind: 'backfill', ttlSeconds: resolveSettings(o.settings).leaseTtlSeconds, periodFrom: range.from, periodTo: range.to });
+  o.log?.('run.started', { runId: acquired.lease.runId, mode: 'backfill', abandonedRuns: acquired.abandoned.length, discardedStagedBatches: acquired.discardedBatches });
+  let run: RunResult;
+  let out: Common;
+  try {
+    // Data first, manifests last: a manifest never names an object that is not there yet.
+    const client = o.sourceClient();
+    for (const obj of [...staged.objects.filter((x) => x.kind === 'data'), ...staged.objects.filter((x) => x.kind === 'manifest')]) {
+      await client.send(new PutObjectCommand({ Bucket: location.bucket, Key: obj.key, Body: obj.body, ContentType: obj.kind === 'data' ? 'application/gzip' : 'application/json' }));
+    }
+    o.log?.('import.staged', { periods: staged.periods.length, objects: staged.objects.length, restatements: restatements.length });
+    out = common(staged);
+    const expectManifests = new Map(staged.objects.filter((x) => x.kind === 'manifest').map((x) => [x.billingPeriod, x.sha256]));
+    staged = null;
 
-  const run = await runSync({
-    pool: o.pool,
-    tenantId: o.tenantId,
-    sourceKey: o.sourceKey,
-    source: o.source,
-    evidence: o.evidence,
-    mode: 'backfill',
-    range,
-    settings: o.settings,
-    hooks: o.hooks,
-    log: o.log,
-    secrets: o.secrets,
-    restateControls: o.restate === true,
-    expectManifests,
-  });
+    run = await runSync({
+      pool: o.pool,
+      tenantId: o.tenantId,
+      sourceKey: o.sourceKey,
+      source: o.source,
+      evidence: o.evidence,
+      mode: 'backfill',
+      range,
+      settings: o.settings,
+      hooks: o.hooks,
+      log: o.log,
+      secrets: o.secrets,
+      restateControls: o.restate === true,
+      expectManifests,
+      acquired,
+    });
+  } catch (e) {
+    // Staging (or a check before the run started) failed: release the lease. Fenced like every lease write,
+    // so a run that already finished, or was taken over, is left as it is.
+    if (!(e instanceof SimulatedCrash)) {
+      await finishRun(o.pool, acquired.lease, { status: 'failed', errorCode: errorCodeOf(e), errorDetail: redact(messageOf(e), o.secrets ?? []).slice(0, 1000), stats: { mode: 'backfill', import: true } }).catch(() => false);
+    }
+    throw e;
+  }
   for (const x of restatements) x.applied = run.periods.some((p) => p.billingPeriod === x.billingPeriod && p.outcome === 'published');
   return {
     ...run,

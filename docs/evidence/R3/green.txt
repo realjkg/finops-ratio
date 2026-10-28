@@ -50,3 +50,20 @@ Review round 2 (PR #143) GREEN, branch merged with origin/main (#142 squash 5bb8
   period ignored, manifest hash ignored; glob positional message, invalid values copied into the record,
   unknown flag echoed, --flag=value hint removed, positional echoed, unrecognized arguments copied;
   stageFile `blank = r.count === 0` (comma-free line skipped).
+
+Review round 3 (PR #143) GREEN, on c737d78 + the round 3 RED commit:
+  importRace.db.test.ts 11/11, all of src/ingest/import (db) 29/29, cli.worker.test.ts 20/20.
+  The existing "staged manifest is gone" test now expects the listing's own code MANIFEST_MISSING
+  (it expected IMPORT_MANIFEST_REPLACED, which is the reported NIT); still failed, nothing published.
+  Gates (sequential): lint 0; tsc app 0; tsc worker 0; full vitest 224 files / 4197 tests; build 0
+  (next-env.d.ts reverted); npm run test:db (Postgres 16 + SeaweedFS, CI digests, non-default ports)
+  41 files / 688 + serial 6 / 173.
+  Lease repro (deterministic, in importRace.db.test.ts): A published; a run lease taken and never
+  finished; `import-file --file part2 --restate` exits 4 ALREADY_RUNNING with the S3 keys unchanged;
+  after the lease expires a plain `sync` exits 0 with no period published, published stays A (before:
+  `published` 442 = part 2's rows). The reviewer's process harness (SIGKILLed sync holding the lease,
+  RATIO_LEASE_TTL_SECONDS=15): import exit 4, published A; after the TTL a plain sync is
+  `skipped_unchanged`, published stays A (before: B's 442 rows published).
+  Mutations (each alone, reverted), all KILLED: staging before the lease, no finishRun on a staging
+  failure, runSync ignores the pre-acquired lease, manifest check before the listing error, bucket /
+  prefix / display-name recorded on every command, never recorded (also for source add).

@@ -177,7 +177,9 @@ describe('R3 review round 2 B1: concurrent imports of one source and period', ()
     expect(await publishedTotals(t.db.pool, tenant, sid)).toEqual({});
   });
 
-  it('a period whose staged manifest is gone before the sync lists it fails IMPORT_MANIFEST_REPLACED, never an empty success', async () => {
+  // Review round 3 (NIT): the listing of a period whose manifest is gone fails MANIFEST_MISSING, and that
+  // listing's own code is reported (it was reported as IMPORT_MANIFEST_REPLACED before).
+  it('a period whose staged manifest is gone before the sync lists it fails with the listing code MANIFEST_MISSING, never an empty success', async () => {
     const { tenant, sid } = await newSource();
     const r = await importVia(
       tenant,
@@ -191,7 +193,7 @@ describe('R3 review round 2 B1: concurrent imports of one source and period', ()
     );
     const res = (r as { ok: StageAndSyncResult }).ok;
     expect(res.status).toBe('failed');
-    expect(res.periods).toEqual([expect.objectContaining({ billingPeriod: PERIOD, outcome: 'failed', code: 'IMPORT_MANIFEST_REPLACED' })]);
+    expect(res.periods).toEqual([expect.objectContaining({ billingPeriod: PERIOD, outcome: 'failed', code: 'MANIFEST_MISSING' })]);
     expect(await publishedTotals(t.db.pool, tenant, sid)).toEqual({});
   });
 
