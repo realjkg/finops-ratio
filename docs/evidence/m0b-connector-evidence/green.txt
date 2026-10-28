@@ -1,0 +1,16 @@
+M0b connector evidence capture -- GREEN
+Head: feat/m0b-connector-evidence on origin/main 6d348d9 (sequential, foreground).
+  npx vitest run src/connectors/managed/evidence -> 18 passed (18)
+  npm run lint -> exit 0
+  npm run typecheck -> exit 0;  npx tsc -p tsconfig.worker.json --noEmit -> exit 0
+  npx vitest run -> Test Files 227 passed (227); Tests 4215 passed (4215)
+  npm run build -> exit 0 (next-env.d.ts unchanged);  npm run check:bundle -> pass
+  test:db not run: nothing here touches the database or S3 (the evidence store is passed in).
+Mutations (scripted, each reverted; tests: src/connectors/managed/evidence): 11/11 killed
+  every bridge line closes; missing side as zero; currency dropped from the line key; float math;
+  page terminal check removed; identity params not redacted; snapshot hash unchecked; sanitized
+  fixture accepted as proof; live without customer validation (killed after adding an assertion;
+  it survived the first round); arrays not redacted; input status passed through.
+Test adjustments after RED: two expectations corrected to the implemented, documented order and
+normalization (bridge failures are sorted by line name; expected totals are normalized decimals,
+'-1.5' not '-1.50'); a type narrowing in package.test.ts.
