@@ -5,3 +5,12 @@ $ npx vitest run src/ingest/import/normalizer.test.ts
   Test Files 1 failed (1): ./normalizer does not exist (4 tests not collected).
 $ npx vitest run --config vitest.db.config.ts src/ingest/import/importFile.db.test.ts   (local Postgres 16 + SeaweedFS)
   Test Files 1 failed (1); Tests 9 failed (9): `source add` and `import-file` are unknown commands.
+
+Review round 1 (PR #143) RED, after merging the reviewed #142 branch (and origin/main 3fa927b):
+$ npx vitest run src/ingest/import/stageFile.test.ts
+  Tests 5 failed | 21 passed (26): declared-provider preview, bounded gzip members, IMPORT_TOO_LARGE cap,
+  RSS budget vs the worker mem_limit, near-cap staging under --max-old-space-size=96.
+$ npx vitest run --config vitest.db.config.ts src/ingest/import/importFile.db.test.ts
+  Tests 10 failed | 7 passed (17): B1 several --file as one delivery, part-by-part refusal + --restate report,
+  stray earlier-period rows, restatement needs --restate; M1 disjoint providers allowed; M2 rows-only usage;
+  M3 controls on unchanged data; M4 no file names in the record; B2 over-cap refused (exit 5).

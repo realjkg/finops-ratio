@@ -2,14 +2,16 @@
 // layout (split by billing period, NULL token mapped to empty, one manifest per
 // period carrying the operator's controls). Pure; no database, no S3.
 // Fixture: the public FOCUS 1.0 Sample Data (fixtures/focus-1.0-sample, CC BY 4.0).
+import { spawnSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import zlib from 'zlib';
 import { describe, expect, it } from 'vitest';
 // The acceptance run's own lossless proof (scripts/local/acceptance.mjs), reused unchanged.
 import { verifyStagingLossless } from '../../../scripts/local/acceptance.mjs';
 import { dataPrefix, parseManifest, periodMetadataPrefix, type ListingEntry } from '../sources/s3/layout';
-import { decodeImportFile, stageFile, type StagedFile } from './stageFile';
+import { MAX_IMPORT_BYTES, STAGE_RSS_BUDGET_BYTES, decodeImportFile, stageFile, type StagedFile } from './stageFile';
 
 const SAMPLE = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'fixtures', 'focus-1.0-sample', 'focus_sample.csv'));
 const CONTROLS = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'fixtures', 'focus-1.0-sample', 'control-totals.json'), 'utf8'))['1k'];
@@ -233,4 +235,79 @@ describe('R3 stageFile review: record and control checks that must bite', () => 
   it('refuses a header with a duplicate column name', () => {
     expect(codeOf(() => stageFile(mini(['2024-09-01,AWS,USD,1'], 'BillingPeriodStart,ProviderName,BillingCurrency,ProviderName'), { location: LOC }))).toBe('IMPORT_FILE_INVALID');
   });
+});
+
+// Review round 1, PR #143 (B1 report, B2 memory).
+describe('R3 stageFile review: a preview of the declared providers rows per staged period', () => {
+  it('counts and sums (exactly, per currency) the declared providers rows, for the restatement report', () => {
+    const staged = stageFile(SAMPLE, { location: LOC, providers: ['AWS'] });
+    expect(staged.preview).toEqual([
+      { billingPeriod: '2024-09-01', rows: Number(CONTROLS.totals[0].rowCount), billed: { USD: CONTROLS.totals[0].billedCost } },
+      { billingPeriod: '2024-10-01', rows: 0, billed: {} },
+    ]);
+    const f = mini(['2024-09-01,AWS,USD,0.1', '2024-09-01,AWS,USD,0.20', '2024-09-01,AWS,EUR,-1e-2', '2024-09-01,AWS,EUR,NULL', '2024-09-01,Microsoft,USD,5']);
+    expect(stageFile(f, { location: LOC, providers: ['AWS'] }).preview).toEqual([{ billingPeriod: '2024-09-01', rows: 4, billed: { USD: '0.30', EUR: null } }]);
+  });
+});
+
+describe('R3 stageFile review: bounded memory', () => {
+  it('writes each period as gzip members of bounded size that the worker decompressor (zlib.createGunzip) reads back exactly', async () => {
+    const one = stageFile(SAMPLE, { location: LOC });
+    const many = stageFile(SAMPLE, { location: LOC, gzipMemberBytes: 4096 });
+    const gunzipStream = (b: Buffer) =>
+      new Promise<string>((resolve, reject) => {
+        const parts: Buffer[] = [];
+        const g = zlib.createGunzip();
+        g.on('data', (d: Buffer) => parts.push(d)).on('end', () => resolve(Buffer.concat(parts).toString('utf8'))).on('error', reject);
+        g.end(b);
+      });
+    const sep = many.objects.find((o) => o.kind === 'data' && o.billingPeriod === '2024-09-01')!;
+    let members = 0;
+    for (let i = 0; i + 1 < sep.body.length; i++) if (sep.body[i] === 0x1f && sep.body[i + 1] === 0x8b && sep.body[i + 2] === 8) members++;
+    expect(members).toBeGreaterThan(100);
+    expect(await Promise.all(many.objects.filter((o) => o.kind === 'data').map((o) => gunzipStream(o.body)))).toEqual(dataBodies(one));
+    expect(verifyStagingLossless(SAMPLE, many.plan)).toEqual([]);
+  });
+
+  it('decodeImportFile refuses more than the cap with IMPORT_TOO_LARGE, also for a gzip that inflates past it', () => {
+    expect(codeOf(() => decodeImportFile(Buffer.alloc(1001, 0x41), 'x.csv', 1000))).toBe('IMPORT_TOO_LARGE');
+    expect(codeOf(() => decodeImportFile(zlib.gzipSync(Buffer.alloc(1001, 0x41)), 'x.csv.gz', 1000))).toBe('IMPORT_TOO_LARGE');
+    expect(decodeImportFile(zlib.gzipSync(Buffer.alloc(1000, 0x41)), 'x.csv.gz', 1000).length).toBe(1000);
+  });
+
+  it('the RSS budget leaves a quarter of the worker container limit (compose.yaml) as margin', () => {
+    const compose = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'infrastructure', 'engagement', 'compose.yaml'), 'utf8');
+    const worker = compose.slice(compose.indexOf('\n  worker:'));
+    const m = /\n    mem_limit: ([0-9]+)m\n/.exec(worker)!;
+    expect(STAGE_RSS_BUDGET_BYTES).toBeLessThanOrEqual(Number(m[1]) * 1024 * 1024 * 0.75);
+    expect(MAX_IMPORT_BYTES).toBeLessThan(STAGE_RSS_BUDGET_BYTES);
+  });
+
+  // The real staging path (read, decode, stage) on a SYNTHETIC file just under the cap, built by repeating the
+  // public sample's records, in a child process with a constrained V8 heap. Its peak RSS must leave the worker
+  // container (infrastructure/engagement/compose.yaml mem_limit) the margin the cap was derived from.
+  it(
+    'stages a file just under the cap with --max-old-space-size=96 and a peak RSS inside the container budget',
+    () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-stage-mem-'));
+      try {
+        const file = path.join(dir, 'near-cap.csv');
+        const header = SAMPLE.subarray(0, SAMPLE.indexOf(10) + 1);
+        const body = SAMPLE.subarray(SAMPLE.indexOf(10) + 1);
+        const fd = fs.openSync(file, 'w');
+        let size = fs.writeSync(fd, header);
+        while (size + body.length <= MAX_IMPORT_BYTES - 1024) size += fs.writeSync(fd, body);
+        fs.closeSync(fd);
+        const child = path.resolve(__dirname, '..', 'testing', 'stageMemoryChild.ts');
+        const r = spawnSync(process.execPath, ['--max-old-space-size=96', '--import', 'tsx', child, file], { encoding: 'utf8', timeout: 170_000 });
+        expect(r.status, r.stderr.slice(-2000)).toBe(0);
+        const out = JSON.parse(r.stdout.trim().split('\n').pop()!);
+        expect(out.bytes).toBe(size);
+        expect(out.maxRssBytes).toBeLessThanOrEqual(STAGE_RSS_BUDGET_BYTES);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
 });
