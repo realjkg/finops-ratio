@@ -167,6 +167,8 @@ describe('source metadata', () => {
     ['yes with related_source none', 'sources[0].metadata.overlap.related_source', (c) => (meta(c).overlap = { also_present_in_other_source: 'yes', related_source: 'none' })],
     ['related_source not resolving', 'sources[0].metadata.overlap.related_source', (c) => (meta(c).overlap = { also_present_in_other_source: 'yes', related_source: SECRET })],
     ['missing related_source', 'sources[0].metadata.overlap.related_source', (c) => delete meta(c).overlap.related_source],
+    ['yes with related_source naming its own source', 'sources[0].metadata.overlap.related_source', (c) => (meta(c).overlap = { also_present_in_other_source: 'yes', related_source: c.sources[0].id })],
+    ['no with related_source naming its own source', 'sources[0].metadata.overlap.related_source', (c) => (meta(c).overlap = { also_present_in_other_source: 'no', related_source: c.sources[0].id })],
   ];
   it.each(cases)('%s -> %s', (_n, key, mutate) => {
     const problems = problemsOf(mutated(mutate));
@@ -252,9 +254,21 @@ describe('release policy (loader)', () => {
     if (!rel.ok) expect(rel.problems.join(' ')).toContain('RATIO_ENGAGEMENT_CONFIG');
   });
 
-  it('rejects a config file with duplicate-looking oversize input (over 1 MiB)', () => {
-    const r = loadEngagementConfig(writeTmp(Buffer.alloc(1024 * 1024 + 1, 0x20)));
+  it('rejects an otherwise valid config file over 1 MiB (valid-JSON whitespace padding), naming the size limit', () => {
+    const json = JSON.stringify(raw());
+    expect(loadEngagementConfig(writeTmp(json)).ok).toBe(true);
+    const padded = json + ' '.repeat(1024 * 1024 + 1 - Buffer.byteLength(json));
+    expect(Buffer.byteLength(padded)).toBe(1024 * 1024 + 1);
+    expect(() => JSON.parse(padded)).not.toThrow();
+    expect(validateEngagementConfig(JSON.parse(padded)).ok).toBe(true);
+    const r = loadEngagementConfig(writeTmp(padded));
     expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.problems).toEqual(['RATIO_ENGAGEMENT_CONFIG: file is larger than 1 MiB']);
+  });
+
+  it('a config file of exactly 1 MiB (valid-JSON padding) is accepted', () => {
+    const json = JSON.stringify(raw());
+    expect(loadEngagementConfig(writeTmp(json + ' '.repeat(1024 * 1024 - Buffer.byteLength(json)))).ok).toBe(true);
   });
 });
 
@@ -332,7 +346,7 @@ describe('mode and startup', () => {
     expect(() => checkEngagementStartup({ RATIO_MODE: 'engagement' })).toThrow(/RATIO_ENGAGEMENT_CONFIG/);
   });
 
-  it('engagement mode with an invalid config makes register() throw, naming keys, not values', async () => {
+  it('engagement mode with an invalid config: register() logs only the problem keys and exits non-zero', async () => {
     const c = raw();
     c.tenantId = SECRET;
     c.budgets[0].monthly = '-1';
@@ -340,38 +354,91 @@ describe('mode and startup', () => {
     vi.stubEnv('NEXT_RUNTIME', 'nodejs');
     vi.stubEnv('RATIO_MODE', 'engagement');
     vi.stubEnv('RATIO_ENGAGEMENT_CONFIG', p);
+    // Injected exit: the real process.exit would end the test worker.
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const logged: string[] = [];
+    const capture = (...a: unknown[]) => void logged.push(a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' '));
+    vi.spyOn(console, 'error').mockImplementation(capture);
+    vi.spyOn(console, 'warn').mockImplementation(capture);
+    vi.spyOn(console, 'log').mockImplementation(capture);
     try {
       await register();
-      throw new Error('register() did not throw');
-    } catch (e) {
-      expect(e).toBeInstanceOf(EngagementConfigError);
-      const m = (e as Error).message;
-      expect(m).toContain('tenantId');
-      expect(m).toContain('budgets[0].monthly');
-      expect(m).not.toContain(SECRET);
     } finally {
       vi.unstubAllEnvs();
     }
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(1);
+    const all = logged.join('\n');
+    expect(all).toContain('tenantId');
+    expect(all).toContain('budgets[0].monthly');
+    expect(all).not.toContain(SECRET);
+    expect(all).not.toContain('-1');
+    expect(all).not.toContain(p);
   });
 
   it('register() with a valid engagement config resolves', async () => {
     vi.stubEnv('NEXT_RUNTIME', 'nodejs');
     vi.stubEnv('RATIO_MODE', 'engagement');
     vi.stubEnv('RATIO_ENGAGEMENT_CONFIG', FIXTURE);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       await expect(register()).resolves.toBeUndefined();
     } finally {
       vi.unstubAllEnvs();
     }
+    expect(exit).not.toHaveBeenCalled();
   });
 
   it('register() outside engagement mode is unchanged (no throw even with a bad config path)', async () => {
     vi.stubEnv('NEXT_RUNTIME', 'nodejs');
     vi.stubEnv('RATIO_ENGAGEMENT_CONFIG', '/nonexistent');
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     try {
       await expect(register()).resolves.toBeUndefined();
     } finally {
       vi.unstubAllEnvs();
+    }
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it('register() with an invalid RATIO_MODE is unchanged: it rejects, it does not exit', async () => {
+    vi.stubEnv('NEXT_RUNTIME', 'nodejs');
+    vi.stubEnv('RATIO_MODE', 'Engagement');
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    try {
+      await expect(register()).rejects.toThrow(/RATIO_MODE/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(exit).not.toHaveBeenCalled();
+  });
+});
+
+describe('tenant UUID rule', () => {
+  // config.ts duplicates the canonical-UUID regex of src/ingest/db/tenant.ts (it may not
+  // import src/ingest). This guards the copy against drift.
+  const literal = (rel: string): string => {
+    const src = fs.readFileSync(path.resolve(__dirname, '../..', rel), 'utf8');
+    const m = src.match(/^const UUID_RE = (\/.+\/[a-z]*);$/m);
+    if (!m) throw new Error(`UUID_RE literal not found in ${rel}`);
+    return m[1];
+  };
+
+  it('the engagement UUID_RE is identical to src/ingest/db/tenant.ts', () => {
+    expect(literal('src/engagement/config.ts')).toBe(literal('src/ingest/db/tenant.ts'));
+  });
+
+  it('the validator accepts and rejects the same tenant ids as the tenant.ts rule', () => {
+    // Built from tenant.ts's source text: importing src/ingest here would break the import boundary.
+    const lit = literal('src/ingest/db/tenant.ts');
+    const re = new RegExp(lit.slice(1, lit.lastIndexOf('/')), lit.slice(lit.lastIndexOf('/') + 1));
+    const isTenantId = (v: string) => re.test(v);
+    const samples = ['5f0c1a7e-2b3d-4c5e-8f60-71829a3b4c5d', '5F0C1A7E-2B3D-4C5E-8F60-71829A3B4C5D', '5f0c1a7e2b3d4c5e8f6071829a3b4c5d', ' 5f0c1a7e-2b3d-4c5e-8f60-71829a3b4c5d', '5f0c1a7e-2b3d-4c5e-8f60-71829a3b4c5g', ''];
+    for (const t of samples) {
+      const c = raw();
+      c.tenantId = t;
+      expect(validateEngagementConfig(c).ok, t).toBe(isTenantId(t));
     }
   });
 });
