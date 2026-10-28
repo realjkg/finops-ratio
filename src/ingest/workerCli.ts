@@ -12,6 +12,8 @@
 //                   [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>] [--metadata <file.json>]   (R3; owner login)
 //   import-file     --tenant <uuid> --source <key> --file <path.csv|path.csv.gz> [--file <path>]... [--period YYYY-MM]
 //                   [--control-billed D --currency CCC [--control-rows N]] [--metadata <file.json>] [--restate]   (R3)
+//   fetch           --tenant <uuid> --source <key> [--from YYYY-MM --to YYYY-MM] [--restate]   (M0a; managed connector,
+//                   spec from RATIO_ENGAGEMENT_CONFIG sources[].retrieval, secret from RATIO_SECRETS_DIR; src/connectors/managed)
 //
 // import-file: all --file values form ONE delivery, which is the complete content of every billing
 // period it contains (deliver the parts of a split period together). A delivery that would change an
@@ -52,9 +54,13 @@ import type { WorkerHooks } from './worker/types';
 import { MIN_PERIOD_YEAR } from './worker/periods';
 import { isDecimalString } from './focus/decimal';
 import { KNOWN_FILE_DROP_PROVIDERS } from './focus/provider';
-import { importFile } from './import/importFile';
+import { importFile, stageAndSync } from './import/importFile';
 import { provisionSource } from './import/provisionSource';
 import { parseImportMetadata } from './import/metadata';
+import { loadSource } from './worker/lease';
+import { workerTransaction } from './worker/tx';
+import { managedSpecFromEngagementFile, runManagedFetch } from '../connectors/managed/runtime';
+import { resolveSecret } from '../connectors/managed/secrets/resolve';
 
 function readMetadataFile(p: string): Buffer {
   try {
@@ -67,7 +73,7 @@ function readMetadataFile(p: string): Buffer {
 
 type Env = Record<string, string | undefined>;
 
-const WORKER_COMMANDS = new Set(['sync', 'backfill', 'replay', 'quarantine', 'doctor', 'replay-fixtures', 'source', 'import-file']);
+const WORKER_COMMANDS = new Set(['sync', 'backfill', 'replay', 'quarantine', 'doctor', 'replay-fixtures', 'source', 'import-file', 'fetch']);
 export function isWorkerCommand(c: string | undefined): boolean {
   return c !== undefined && WORKER_COMMANDS.has(c);
 }
@@ -138,6 +144,7 @@ function parseArgs(argv: string[]): Args {
     'replay-fixtures': ['--json'],
     'source add': ['--tenant', '--key', '--providers', '--bucket', '--prefix', '--display-name', '--tenant-slug', '--metadata', '--json'],
     'import-file': ['--tenant', '--source', '--file', '--period', '--control-rows', '--control-billed', '--currency', '--metadata', '--restate', '--json'],
+    fetch: ['--tenant', '--source', '--from', '--to', '--restate', '--json'],
   };
   // Review round 2 (M4): a usage error names the flag, never an argument value (a path, a glob, a typo).
   let lastValueOf: string | undefined;
@@ -211,7 +218,8 @@ function parseArgs(argv: string[]): Args {
     if (!cond) usage(m);
   };
   if (command !== 'doctor' && command !== 'replay-fixtures') needs(a.tenants.length === 1, '--tenant <uuid> is required exactly once');
-  if (['sync', 'backfill', 'replay', 'import-file'].includes(command)) needs(!!a.source, '--source <key> is required');
+  if (['sync', 'backfill', 'replay', 'import-file', 'fetch'].includes(command)) needs(!!a.source, '--source <key> is required');
+  if (command === 'fetch') needs(!a.from === !a.to && (!a.from || a.from <= a.to!), '--from and --to go together, --from not after --to');
   if (command === 'source add') needs(!!a.key && !!a.providers && !!a.bucket, '--key, --providers and --bucket are required');
   if (command === 'import-file') {
     needs(a.files.length > 0, '--file <path> is required (repeat it for the files of one delivery)');
@@ -471,6 +479,15 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
         }
         const ok = r.status === 'succeeded';
         return finish({ ...r }, ok, ok ? EXIT_OK : EXIT_FAIL);
+      }
+      case 'fetch': {
+        const row = await workerTransaction(pool, tenantId, (c) => loadSource(c, args.source!));
+        const r = await runManagedFetch({
+          tenantId, sourceKey: args.source!, sourceId: row.id, spec: () => managedSpecFromEngagementFile(env.RATIO_ENGAGEMENT_CONFIG, args.source!),
+          range: args.from ? { from: args.from, to: args.to! } : undefined, resolveSecret: (ref) => resolveSecret(ref, env), originals: evidenceStore(), log,
+          stage: (o) => stageAndSync({ pool: pool!, tenantId, sourceKey: args.source!, ...o, restate: args.restate, sourceClient: () => s3('source'), source: makeSourceFactory(env, () => s3('source')), evidence: evidenceStore(), settings: cfg.settings, hooks, log, secrets: [...secrets, ...o.secrets] }),
+        });
+        return finish({ ...r }, r.status === 'succeeded', r.status === 'succeeded' ? EXIT_OK : EXIT_FAIL);
       }
       case 'quarantine show': {
         const r = await showBatch(pool, tenantId, args.batch!);
