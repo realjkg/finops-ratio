@@ -3,10 +3,13 @@
 // pipeline (stageAndSync, injected here as a fake). Failures carry a code and
 // never fall back to sample or simulated data. SYNTHETIC data only.
 import { createHash } from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import type { OriginalsStore } from './evidence/capture';
 import { RetrieverRegistry } from './registry';
-import { ManagedError, managedSpecFrom, runManagedFetch, type Delivery, type FetchOptions, type ManagedRetriever, type RetrieverFactory } from './runtime';
+import { ManagedError, managedSpecFrom, managedSpecFromEngagementFile, runManagedFetch, type Delivery, type FetchOptions, type ManagedRetriever, type RetrieverFactory } from './runtime';
 import { SecretValue } from './secrets/resolve';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
@@ -133,6 +136,43 @@ describe('managedSpecFrom', () => {
     expect(managedSpecFrom({ retrieval: { kind: 'managed', connector: 'opencost' } })).toEqual({ connector: 'opencost', params: {} });
     for (const bad of [{}, { retrieval: { kind: 'file-drop' } }, { retrieval: { kind: 'file-drop', connector: 'opencost' } }, { retrieval: { kind: 'managed' } }, { retrieval: { kind: 'managed', connector: 'x', secretRef: 7 } }, null]) {
       expect(() => managedSpecFrom(bad)).toThrow(ManagedError);
+    }
+  });
+});
+
+describe('managedSpecFromEngagementFile', () => {
+  // The source row's config cannot hold the retrieval block (its CHECKs refuse keys such as
+  // secretRef and connector), so the worker reads it from the engagement config (R1), by source id.
+  const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-eng-'));
+  const write = (dir: string, v: unknown) => {
+    const f = path.join(dir, 'engagement.json');
+    fs.writeFileSync(f, typeof v === 'string' ? v : JSON.stringify(v));
+    return f;
+  };
+  const codeOf = (fn: () => unknown) => {
+    try {
+      fn();
+    } catch (e) {
+      expect(String((e as Error).message)).not.toContain(SECRET);
+      return (e as ManagedError).code;
+    }
+    return 'NO_ERROR';
+  };
+
+  it('returns the managed retrieval of the source with that id', () => {
+    const d = tmp();
+    try {
+      const f = write(d, { sources: [{ id: 'other', retrieval: { kind: 'file-drop' } }, { id: 'managed-src', retrieval: { kind: 'managed', connector: 'opencost', params: { window: '1d' }, secretRef: 'k8s/opencost' } }] });
+      expect(managedSpecFromEngagementFile(f, 'managed-src')).toEqual({ connector: 'opencost', params: { window: '1d' }, secretRef: 'k8s/opencost' });
+      expect(codeOf(() => managedSpecFromEngagementFile(f, 'other'))).toBe('SOURCE_NOT_MANAGED');
+      expect(codeOf(() => managedSpecFromEngagementFile(f, 'missing'))).toBe('SOURCE_NOT_IN_ENGAGEMENT_CONFIG');
+      expect(codeOf(() => managedSpecFromEngagementFile(write(d, `{"sources": [${SECRET}`), 'managed-src'))).toBe('ENGAGEMENT_CONFIG_INVALID');
+      expect(codeOf(() => managedSpecFromEngagementFile(write(d, { sources: [{ id: 'managed-src', retrieval: { kind: 'managed', connector: 'opencost', secretRef: 'A'.repeat(48) } }] }), 'managed-src'))).toBe('SOURCE_NOT_MANAGED');
+      expect(codeOf(() => managedSpecFromEngagementFile('relative.json', 'managed-src'))).toBe('ENGAGEMENT_CONFIG_INVALID');
+      expect(codeOf(() => managedSpecFromEngagementFile(undefined, 'managed-src'))).toBe('ENGAGEMENT_CONFIG_INVALID');
+      expect(codeOf(() => managedSpecFromEngagementFile(path.join(d, 'nope.json'), 'managed-src'))).toBe('ENGAGEMENT_CONFIG_INVALID');
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
     }
   });
 });
