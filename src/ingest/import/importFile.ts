@@ -44,7 +44,7 @@ export interface DeliveryObject {
   bytes?: Buffer;
   stream?: Readable;
   /** Loads the bytes when the delivery is staged (so the caller holds no copy). */
-  load?: () => Buffer;
+  load?: () => Promise<Buffer>;
 }
 
 export interface StageAndSyncOptions {
@@ -133,7 +133,7 @@ export async function stageAndSync(o: StageAndSyncOptions): Promise<StageAndSync
   const normalization: MappingReport[] = [];
   let used = 0;
   for (const obj of o.objects) {
-    const raw = obj.load ? obj.load() : obj.bytes;
+    const raw = obj.load ? await obj.load() : obj.bytes;
     const { csv, report } = await normalizer.normalize(obj.stream ?? Readable.from(raw ?? Buffer.alloc(0)));
     const bytes = await collect(csv, MAX_IMPORT_BYTES - used);
     used += bytes.length;
@@ -267,15 +267,15 @@ export function localDelivery(filePaths: readonly string[], max: number = MAX_IM
   let used = 0;
   return filePaths.map((p, i) => ({
     name: `file ${i + 1}`,
-    load: () => {
+    load: async () => {
       let raw: Buffer;
       try {
-        raw = fs.readFileSync(p);
+        raw = await fs.promises.readFile(p);
       } catch (e) {
         const code = (e as { code?: unknown }).code;
         throw new IngestError('IMPORT_FILE_UNREADABLE', `file ${i + 1} could not be read (${typeof code === 'string' ? code : 'error'})`);
       }
-      const bytes = decodeImportFile(raw, p, max - used);
+      const bytes = await decodeImportFile(raw, p, max - used);
       used += bytes.length;
       return bytes;
     },
@@ -283,11 +283,10 @@ export function localDelivery(filePaths: readonly string[], max: number = MAX_IM
 }
 
 /** The staging part of `import-file` alone (no database, no S3): the memory test's real path. */
-export function stageLocalFiles(filePaths: readonly string[], opts: StageOptions): StagedFile {
-  return stageFile(
-    localDelivery(filePaths).map((d) => ({ name: d.name, bytes: d.load!() })),
-    opts,
-  );
+export async function stageLocalFiles(filePaths: readonly string[], opts: StageOptions): Promise<StagedFile> {
+  const inputs: StageInput[] = [];
+  for (const d of localDelivery(filePaths)) inputs.push({ name: d.name, bytes: await d.load!() });
+  return stageFile(inputs, opts);
 }
 
 /** `cli import-file`: local FOCUS .csv / .csv.gz files, ONE delivery, through stageAndSync. */

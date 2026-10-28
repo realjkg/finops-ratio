@@ -35,8 +35,13 @@ const MiB = 1024 * 1024;
  * before they are read. Pinned by stageFile.test.ts and importFile.db.test.ts.
  */
 export const MAX_IMPORT_BYTES = 128 * MiB;
-/** Peak RSS the import path must stay within at MAX_IMPORT_BYTES. */
+/** Peak RSS the whole import path must stay within at MAX_IMPORT_BYTES. */
 export const IMPORT_RSS_BUDGET_BYTES = 384 * MiB;
+/**
+ * Peak RSS of the staging step alone (read, decode, stage) at MAX_IMPORT_BYTES: measured 254 MiB (.csv)
+ * and 295 MiB (.csv.gz); a decoder that holds its output twice measured 384 MiB.
+ */
+export const STAGE_RSS_BUDGET_BYTES = 336 * MiB;
 const GZIP_MEMBER_BYTES = 1 * MiB;
 const GZIP_LEVEL = 6;
 const PERIOD_RE = /^([0-9]{4})-(0[1-9]|1[0-2])-01(?:[ T]00:00:00(?:\.0+)?(?:Z|[+-]00:?00)?)?$/;
@@ -108,26 +113,52 @@ export interface StagedFile {
 const invalid = (m: string): never => {
   throw new IngestError('IMPORT_FILE_INVALID', m);
 };
+const tooLargeMessage = (max: number) =>
+  `the delivery is larger than the import cap of ${max} bytes (decompressed CSV, all files together); split it into smaller files by billing period`;
 /** IMPORT_TOO_LARGE (CLI exit 5): refused before more than `max` bytes are held. */
 export const tooLarge = (max: number): never => {
-  throw new IngestError('IMPORT_TOO_LARGE', `the delivery is larger than the import cap of ${max} bytes (decompressed CSV, all files together); split it into smaller files by billing period`);
+  throw new IngestError('IMPORT_TOO_LARGE', tooLargeMessage(max));
 };
 
-/** The CSV bytes of an import file: `.csv` as is, `.csv.gz` decompressed, both bounded by `max`. */
-export function decodeImportFile(bytes: Buffer, fileName: string, max: number = MAX_IMPORT_BYTES): Buffer {
+/**
+ * The CSV bytes of an import file: `.csv` as is, `.csv.gz` decompressed, both bounded by `max`.
+ * Decompression streams into ONE buffer sized from the gzip trailer (ISIZE: the exact size of a
+ * single-member file; a larger file is refused before inflating) and grown only for multi-member
+ * files, so the output is never held twice (review B2).
+ */
+export async function decodeImportFile(bytes: Buffer, fileName: string, max: number = MAX_IMPORT_BYTES): Promise<Buffer> {
   const n = fileName.toLowerCase();
-  if (n.endsWith('.csv.gz')) {
-    if (bytes.length < 2 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) invalid('the file is named .csv.gz but is not gzip data');
-    try {
-      return zlib.gunzipSync(bytes, { maxOutputLength: Math.max(1, max) });
-    } catch (e) {
-      if ((e as { code?: unknown }).code === 'ERR_BUFFER_TOO_LARGE') return tooLarge(max);
-      return invalid('the file could not be decompressed (corrupt gzip)');
-    }
+  if (!n.endsWith('.csv.gz')) {
+    if (!n.endsWith('.csv')) invalid('the file must be a FOCUS .csv or .csv.gz file');
+    if (bytes.length > max) tooLarge(max);
+    return bytes;
   }
-  if (!n.endsWith('.csv')) invalid('the file must be a FOCUS .csv or .csv.gz file');
-  if (bytes.length > max) tooLarge(max);
-  return bytes;
+  if (bytes.length < 18 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) invalid('the file is named .csv.gz but is not gzip data');
+  const isize = bytes.readUInt32LE(bytes.length - 4);
+  if (isize > max) tooLarge(max);
+  let out = Buffer.allocUnsafe(Math.max(isize, 64 * 1024));
+  let size = 0;
+  await new Promise<void>((resolve, reject) => {
+    const g = zlib.createGunzip();
+    g.on('data', (chunk: Buffer) => {
+      if (size + chunk.length > max) {
+        g.destroy();
+        reject(new IngestError('IMPORT_TOO_LARGE', tooLargeMessage(max)));
+        return;
+      }
+      if (size + chunk.length > out.length) {
+        const grown = Buffer.allocUnsafe(Math.min(max, Math.max(out.length * 2, size + chunk.length)));
+        out.copy(grown, 0, 0, size);
+        out = grown;
+      }
+      chunk.copy(out, size);
+      size += chunk.length;
+    });
+    g.on('error', () => reject(new IngestError('IMPORT_FILE_INVALID', 'the file could not be decompressed (corrupt gzip)')));
+    g.on('end', resolve);
+    g.end(bytes);
+  });
+  return out.subarray(0, size);
 }
 
 /** One record as byte offsets into the input (reused between records). */

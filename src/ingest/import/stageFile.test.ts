@@ -7,11 +7,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import zlib from 'zlib';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 // The acceptance run's own lossless proof (scripts/local/acceptance.mjs), reused unchanged.
 import { verifyStagingLossless } from '../../../scripts/local/acceptance.mjs';
 import { dataPrefix, parseManifest, periodMetadataPrefix, type ListingEntry } from '../sources/s3/layout';
-import { MAX_IMPORT_BYTES, IMPORT_RSS_BUDGET_BYTES, decodeImportFile, stageFile, type StagedFile } from './stageFile';
+import { MAX_IMPORT_BYTES, IMPORT_RSS_BUDGET_BYTES, STAGE_RSS_BUDGET_BYTES, decodeImportFile, stageFile, type StagedFile } from './stageFile';
 
 const SAMPLE = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'fixtures', 'focus-1.0-sample', 'focus_sample.csv'));
 const CONTROLS = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'fixtures', 'focus-1.0-sample', 'control-totals.json'), 'utf8'))['1k'];
@@ -283,6 +283,11 @@ describe('R3 stageFile review: bounded memory', () => {
   it('decodeImportFile refuses more than the cap with IMPORT_TOO_LARGE, also for a gzip that inflates past it', async () => {
     await expect(decodeImportFile(Buffer.alloc(1001, 0x41), 'x.csv', 1000)).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE' });
     await expect(decodeImportFile(zlib.gzipSync(Buffer.alloc(1001, 0x41)), 'x.csv.gz', 1000)).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE' });
+    // A single-member gzip whose trailer (ISIZE) says it inflates past the cap is refused before inflating.
+    const inflate = vi.spyOn(zlib, 'createGunzip');
+    await expect(decodeImportFile(zlib.gzipSync(Buffer.alloc(1001, 0x41)), 'x.csv.gz', 1000)).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE' });
+    expect(inflate).not.toHaveBeenCalled();
+    inflate.mockRestore();
     const twoMembers = Buffer.concat([zlib.gzipSync(Buffer.alloc(900, 0x41)), zlib.gzipSync(Buffer.alloc(200, 0x41))]);
     await expect(decodeImportFile(twoMembers, 'x.csv.gz', 1000)).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE' });
     expect((await decodeImportFile(zlib.gzipSync(Buffer.alloc(1000, 0x41)), 'x.csv.gz', 1000)).length).toBe(1000);
@@ -293,7 +298,8 @@ describe('R3 stageFile review: bounded memory', () => {
     const worker = compose.slice(compose.indexOf('\n  worker:'));
     const m = /\n {4}mem_limit: ([0-9]+)m\n/.exec(worker)!;
     expect(IMPORT_RSS_BUDGET_BYTES).toBeLessThanOrEqual(Number(m[1]) * 1024 * 1024 * 0.75);
-    expect(MAX_IMPORT_BYTES).toBeLessThan(IMPORT_RSS_BUDGET_BYTES);
+    expect(STAGE_RSS_BUDGET_BYTES).toBeLessThan(IMPORT_RSS_BUDGET_BYTES);
+    expect(MAX_IMPORT_BYTES).toBeLessThan(STAGE_RSS_BUDGET_BYTES);
   });
 
   // The real staging path (read, decode, stage) on a SYNTHETIC file just under the cap, built by repeating the
@@ -318,7 +324,7 @@ describe('R3 stageFile review: bounded memory', () => {
           expect(r.status, r.stderr.slice(-2000)).toBe(0);
           const out = JSON.parse(r.stdout.trim().split('\n').pop()!);
           expect(out.bytes).toBe(size);
-          expect(out.maxRssBytes, f).toBeLessThanOrEqual(IMPORT_RSS_BUDGET_BYTES);
+          expect(out.maxRssBytes, f).toBeLessThanOrEqual(STAGE_RSS_BUDGET_BYTES);
         }
       } finally {
         fs.rmSync(dir, { recursive: true, force: true });

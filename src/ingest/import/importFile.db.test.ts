@@ -386,10 +386,12 @@ describe('R3 import-file (public FOCUS 1.0 sample)', () => {
     const big = path.join(tmp, `sparse-${tenant}.csv`);
     fs.closeSync(fs.openSync(big, 'w'));
     fs.truncateSync(big, MAX_IMPORT_BYTES + 1); // sparse: no disk blocks, and never read
-    const read = vi.spyOn(fs, 'readFileSync');
+    const read = vi.spyOn(fs.promises, 'readFile');
+    const readSync = vi.spyOn(fs, 'readFileSync');
     const r = await cli(['import-file', '--tenant', tenant, '--source', 'focus-aws', '--file', big], env());
-    expect(read.mock.calls.filter((c) => c[0] === big)).toEqual([]);
+    expect([...read.mock.calls, ...readSync.mock.calls].filter((c) => c[0] === big)).toEqual([]);
     read.mockRestore();
+    readSync.mockRestore();
     expect(r.code).toBe(5);
     expect(r.record.results).toMatchObject({ error: { code: 'IMPORT_TOO_LARGE' } });
     expect((r.record.results as { error: { message: string } }).error.message).toContain(String(MAX_IMPORT_BYTES));
@@ -410,18 +412,23 @@ describe('R3 import-file (public FOCUS 1.0 sample)', () => {
       for (; size + body.length <= MAX_IMPORT_BYTES - 1024; copies++) size += fs.writeSync(fd, body);
       fs.closeSync(fd);
       try {
+        fs.writeFileSync(`${file}.gz`, zlib.gzipSync(fs.readFileSync(file), { level: 1 }));
         const child = path.resolve(__dirname, '..', 'testing', 'rssCli.ts');
-        const argv = ['import-file', '--tenant', tenant, '--source', 'focus-aws', '--file', file, '--period', '2024-09'];
-        const r = spawnSync(process.execPath, ['--max-old-space-size=192', '--import', 'tsx', child, ...argv], { env: { ...process.env, ...env() }, encoding: 'utf8', timeout: 280_000, maxBuffer: 64 * 1024 * 1024 });
-        const rss = JSON.parse(/RSS (\{.*\})/.exec(r.stderr)?.[1] ?? 'null');
-        expect(rss, r.stderr.slice(-2000)).toMatchObject({ code: 0 });
-        const record = JSON.parse(r.stdout.trim().split('\n').pop()!);
-        expect(record.results.periods).toEqual([expect.objectContaining({ billingPeriod: '2024-09-01', outcome: 'published', rowCount: String(Number(AWS_SEP.rowCount) * copies) })]);
-        expect(rss.maxRssBytes).toBeLessThanOrEqual(IMPORT_RSS_BUDGET_BYTES);
+        // The .csv publishes; the .csv.gz is the same delivery content, so it is unchanged (still the whole path).
+        for (const [f, outcome] of [[file, 'published'], [`${file}.gz`, 'unchanged']]) {
+          const argv = ['import-file', '--tenant', tenant, '--source', 'focus-aws', '--file', f, '--period', '2024-09'];
+          const r = spawnSync(process.execPath, ['--max-old-space-size=192', '--import', 'tsx', child, ...argv], { env: { ...process.env, ...env() }, encoding: 'utf8', timeout: 280_000, maxBuffer: 64 * 1024 * 1024 });
+          const rss = JSON.parse(/RSS (\{.*\})/.exec(r.stderr)?.[1] ?? 'null');
+          expect(rss, r.stderr.slice(-2000)).toMatchObject({ code: 0 });
+          const record = JSON.parse(r.stdout.trim().split('\n').pop()!);
+          expect(record.results.periods).toEqual([expect.objectContaining({ billingPeriod: '2024-09-01', outcome, rowCount: String(Number(AWS_SEP.rowCount) * copies) })]);
+          expect(rss.maxRssBytes, f).toBeLessThanOrEqual(IMPORT_RSS_BUDGET_BYTES);
+        }
       } finally {
         fs.rmSync(file, { force: true });
+        fs.rmSync(`${file}.gz`, { force: true });
       }
     },
-    300_000,
+    600_000,
   );
 });
