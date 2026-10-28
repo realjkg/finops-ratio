@@ -1,0 +1,6 @@
+R1 review fix M1 (RED, before the instrumentation change)
+npx vitest run src/engagement src/server/costs
+  Tests  1 failed | 232 passed (233)
+  FAIL mode and startup > engagement mode with an invalid config: register() logs only the problem keys and exits non-zero
+       EngagementConfigError escapes register() (Next logs "Failed to prepare server" and keeps serving 500s); process.exit is never called.
+New guards passing already (code already behaves): related_source naming its own source (yes/no), >1 MiB valid-JSON padding, UUID_RE equality with src/ingest/db/tenant.ts.
