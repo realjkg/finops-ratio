@@ -11,7 +11,7 @@ import { useState } from 'react';
 import type { CostSourceDescriptor, SourceHealth } from '@/costsource/CostSourceClient';
 import { isOfflineSandboxSource } from '@/costsource/sandboxSources';
 import { SIMULATED_LIVE_NOTE, SIMULATED_VERIFICATION_LABEL, type SimulatedFixture } from '@/costsource/SimulatedConnectorClient';
-import type { ConnectorBusyPhase, ConnectorSession, IngestRun } from './ingestLanding';
+import { sessionStateForHealth, type ConnectorBusyPhase, type ConnectorSession, type IngestRun } from './ingestLanding';
 import { IngestVerification } from './IngestVerification';
 
 // Only the live PointFive adapter is a controlled-egress path: it routes through
@@ -139,7 +139,7 @@ export function ConnectorCard({
     setResult(null);
     try {
       const health = await onTest(source.id);
-      setResult({ ok: health.reachable && health.authed, detail: health.detail });
+      setResult({ ok: sessionStateForHealth(health) === 'open', detail: health.detail });
     } catch (err) {
       setResult({ ok: false, detail: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -281,6 +281,13 @@ export function ConnectorCard({
         </p>
       )}
 
+      {/* Walk mode: degraded — the source answered but tools or data did not verify; no ingest. */}
+      {walk && session?.state === 'degraded' && (
+        <p role="status" className="rounded border border-edge px-2.5 py-2 font-mono text-[11px] leading-relaxed text-sub">
+          Degraded: {session.error ?? 'tools or data not verified.'}
+        </p>
+      )}
+
       {/* Walk mode: honest failure — the seam's own reason, verbatim. */}
       {walk && session?.state === 'error' && (
         <p
@@ -330,13 +337,13 @@ export function ConnectorCard({
                 ? busy === 'connecting' ? 'Simulating…' : 'Simulate connect'
                 : busy === 'connecting'
                   ? 'Connecting…'
-                  : session?.state === 'error'
+                  : session?.state === 'error' || session?.state === 'degraded'
                     ? 'Retry connect'
                     : 'Connect'}
             </button>
           )}
           {/* A failed re-ingest keeps the earlier run on screen, so it stays withdrawable. */}
-          {session?.state === 'error' && run && disconnectButton}
+          {(session?.state === 'error' || session?.state === 'degraded') && run && disconnectButton}
         </div>
       ) : (
         /* Action — legacy registry mode: health probe for connected sandbox sources */

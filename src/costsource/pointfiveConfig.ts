@@ -33,6 +33,17 @@ export const DEFAULT_POINTFIVE_MCP_URL = 'https://mcp.pointfive.co/sse';
 /** The default endpoint above has not been verified against the vendor. */
 export const DEFAULT_POINTFIVE_MCP_URL_VERIFIED = false as const;
 
+/**
+ * Deliberate opt-in for PointFive billing rows. The PointFive billing role is
+ * UNDECIDED (M0c/M9b: no vendor contract says whether PointFive's billing tool is
+ * the system of record or repeats another bill). While false:
+ *   - the live descriptor is roleConfirmed:false, so its rows never count in a
+ *     headline total (headline.ts), and
+ *   - the MCP transport refuses fetchBillingRows with BILLING_ROLE_UNDECIDED.
+ * Flip only in a reviewed change that records the billing-role decision.
+ */
+export const POINTFIVE_BILLING_ROLE_CONFIRMED: boolean = false;
+
 /** PointFive documents FOCUS v1.0 cross-cloud exports (art_gvr7b5Ne §2). */
 export const POINTFIVE_FOCUS_VERSION = '1.0' as const;
 
@@ -151,6 +162,7 @@ export function pointFiveLiveDescriptor(status: PointFiveStatus): CostSourceDesc
     coverage: 'public_cloud',
     capabilities: ['costRows', 'findings'],
     configured: status.state === 'configured',
+    roleConfirmed: POINTFIVE_BILLING_ROLE_CONFIRMED,
     note: pointFiveStatusNote(status),
   };
 }

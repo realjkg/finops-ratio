@@ -59,12 +59,21 @@ describe('StreamableHttpPointFiveMcpClient — no upstream body in errors', () =
   it('a non-2xx tool response throws status + fixed reason and logs the redacted body', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn(async () => new Response(`${MARKER} at https://x.example/p?sig=leak`, { status: 403 })));
-    const err = await new StreamableHttpPointFiveMcpClient(CREDS, oauth).fetchBillingRows(WINDOW).catch((e: unknown) => e);
+    // Billing is refused before any request (BILLING_ROLE_UNDECIDED), so a findings tool carries this check.
+    const err = await new StreamableHttpPointFiveMcpClient(CREDS, oauth).listOpportunities().catch((e: unknown) => e);
     // MCP lifecycle: initialize is the first request, so the 403 surfaces there.
     expect((err as Error).message).toBe('PointFive MCP initialize returned 403 (forbidden)');
     const logged = String(warn.mock.calls[0][0]);
     expect(logged).toContain(MARKER);
     expect(logged).not.toContain('sig=leak');
+  });
+
+  it('billing is refused before any request while the billing role is undecided', async () => {
+    const f = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    const err = await new StreamableHttpPointFiveMcpClient(CREDS, oauth).fetchBillingRows(WINDOW).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'BILLING_ROLE_UNDECIDED' });
+    expect(f).not.toHaveBeenCalled();
   });
 
   it('a non-JSON tool body throws a fixed message, not the body', async () => {

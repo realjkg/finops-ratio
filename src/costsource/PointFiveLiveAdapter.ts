@@ -169,8 +169,8 @@ export type PointFiveSourceHealth = SourceHealth & {
 
 const STATE_TEXT: Record<VerificationState, string> = {
   'not-configured': 'not configured',
-  'configured-not-verified': 'configured, not verified (no access token)',
-  'auth-verified': 'access token obtained; MCP session not established',
+  'configured-not-verified': 'configured, not verified',
+  'auth-verified': 'access token obtained and not rejected; MCP session not established',
   degraded: 'MCP session established; tools or data not verified',
   'source-access-verified': 'source access verified (auth, session, tools, data)',
 };
@@ -223,7 +223,8 @@ export class PointFiveLiveAdapter {
       if (transport.probe) {
         const r = await transport.probe(validateOpportunity);
         const session = r.stages.session.ok === true;
-        const detail = `PointFive MCP ${STATE_TEXT[r.state]}. ${stageSummary(r)}`;
+        const why = r.reason ? ` (${r.reason})` : '';
+        const detail = `PointFive MCP ${STATE_TEXT[r.state]}${why}. ${stageSummary(r)}`;
         return { ...base, reachable: session, authed: session, detail: redactErrorText(detail), verification: r.state, stages: r.stages };
       }
       // A ping-only transport proves an MCP session at most, never source access.

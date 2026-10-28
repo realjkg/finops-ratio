@@ -4,7 +4,7 @@
 // CostFinding payloads the seam returned: no invented numbers, no recomputation
 // from sources the ingest didn't produce.
 
-import type { CostFinding, CostRowsResult } from '@/costsource/CostSourceClient';
+import type { CostFinding, CostRowsResult, SourceHealth } from '@/costsource/CostSourceClient';
 import { LiveDataAuthError } from '@/costsource/LiveCostSourceClient';
 
 /** One completed ingest through the CostSourceClient seam, keyed by source id. */
@@ -23,11 +23,33 @@ export interface IngestRun {
  * the seam — never paraphrased into something friendlier.
  */
 export interface ConnectorSession {
-  /** `locked`: the live API refused for lack of auth (intended policy), not a failure to retry. */
-  state: 'open' | 'error' | 'locked';
-  /** Set when state === 'error': the seam's own message. */
+  /**
+   * `locked`: the live API refused for lack of auth (intended policy), not a failure to retry.
+   * `degraded`: the connector reached its source but tools or data did not verify; no ingest.
+   */
+  state: 'open' | 'error' | 'locked' | 'degraded';
+  /** Set when state is 'error' or 'degraded': the seam's own message. */
   error?: string;
   openedAt: string; // ISO 8601
+}
+
+/**
+ * Session state a health check earns. A health check that carries a
+ * `verification` (verification-bearing connectors such as live PointFive) opens
+ * ONLY on `source-access-verified` with reachable && authed; `degraded` stays
+ * degraded; anything less is an error. Without a `verification` field (sandbox
+ * and config-driven sources) the reachable && authed rule applies. A simulated
+ * (fixture, no-network) client also uses that rule: its runs are labeled
+ * simulated everywhere and its health is not a verification claim.
+ */
+export function sessionStateForHealth(
+  health: SourceHealth & { verification?: unknown },
+  opts: { simulated?: boolean } = {},
+): 'open' | 'degraded' | 'error' {
+  const ok = health.reachable === true && health.authed === true;
+  if (opts.simulated || health.verification === undefined) return ok ? 'open' : 'error';
+  if (health.verification === 'source-access-verified') return ok ? 'open' : 'error';
+  return health.verification === 'degraded' ? 'degraded' : 'error';
 }
 
 /** A live call refused for lack of API auth (intended policy): a lock, never an error to retry. */

@@ -1,6 +1,7 @@
 // Four-stage PointFive health probe. Each stage is reported separately and a
 // later stage runs only when the stages it depends on passed:
-//   auth    - an access token was obtained from the OAuth client
+//   auth    - an access token was obtained from the OAuth client (a token the
+//             MCP server then rejects, 401/403, is configured-not-verified)
 //   session - MCP initialize succeeded and the server declared `tools`
 //   tools   - tools/list contains every configured tool, schema-compatible
 //   data    - one bounded read call on the findings tool returned a list in
@@ -15,8 +16,8 @@ import type { McpClient, TokenProvider } from './mcpClient';
 
 export type VerificationState =
   | 'not-configured'
-  | 'configured-not-verified' // configured, but no token
-  | 'auth-verified' // token obtained; no MCP session
+  | 'configured-not-verified' // configured, but no token, or the MCP server rejected it
+  | 'auth-verified' // token obtained and not rejected; no MCP session
   | 'degraded' // session established; tools or data failed
   | 'source-access-verified'; // all four stages passed
 
@@ -26,16 +27,34 @@ export interface StageResult { ok: boolean | null; code?: string; detail: string
 
 export interface PointFiveHealthReport {
   state: VerificationState;
+  /** Why the state is configured-not-verified (fixed text). */
+  reason?: string;
   stages: Record<StageName, StageResult>;
   session?: { protocolVersion: string; serverName: string };
 }
 
 const SKIPPED: StageResult = { ok: null, detail: 'not run' };
+// Fixed, actionable text for an endpoint that does not speak Streamable HTTP.
+// It names the env var, never the URL, token or response body.
+export const ENDPOINT_NOT_STREAMABLE_HTTP_DETAIL =
+  'PointFive MCP endpoint refused the Streamable HTTP initialize (404/405). It may serve only the legacy HTTP+SSE ' +
+  'transport (2024-11-05), which this client does not implement; the default .../sse URL is ASSUMED and unverified. ' +
+  'Set POINTFIVE_MCP_URL to the vendor\'s Streamable HTTP endpoint (protocol 2025-06-18).';
+
 const failed = (err: unknown): StageResult => ({
   ok: false,
   code: err instanceof McpProtocolError ? err.code : 'ERROR',
-  detail: err instanceof McpProtocolError ? err.message : redactErrorText(err),
+  detail:
+    err instanceof McpProtocolError
+      ? err.code === 'ENDPOINT_NOT_STREAMABLE_HTTP' ? ENDPOINT_NOT_STREAMABLE_HTTP_DETAIL : err.message
+      : redactErrorText(err),
 });
+
+// The MCP server refused the token: it is not verified at any level.
+const TOKEN_REFUSED: Partial<Record<string, string>> = {
+  AUTH_REJECTED: 'the MCP server rejected the access token (401)',
+  FORBIDDEN: 'the MCP server refused the access token (403: scope or permission)',
+};
 
 export async function probePointFive(deps: {
   tokenProvider: TokenProvider;
@@ -51,7 +70,7 @@ export async function probePointFive(deps: {
   } catch {
     // Fixed text: a token-endpoint failure may carry credential material.
     stages.auth = { ok: false, code: 'TOKEN_UNAVAILABLE', detail: 'access token not obtained' };
-    return report('configured-not-verified');
+    return report('configured-not-verified', { reason: 'no access token obtained' });
   }
   let session;
   try {
@@ -63,7 +82,8 @@ export async function probePointFive(deps: {
     stages.session = { ok: true, detail: `initialized, protocol ${s.protocolVersion}` };
   } catch (err) {
     stages.session = failed(err);
-    return report('auth-verified');
+    const refused = err instanceof McpProtocolError ? TOKEN_REFUSED[err.code] : undefined;
+    return refused ? report('configured-not-verified', { reason: refused }) : report('auth-verified');
   }
   let tools: DiscoveredTools;
   try {

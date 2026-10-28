@@ -12,7 +12,8 @@
 
 import type { CostWindow } from './CostSourceClient';
 import type { RawSourceRow } from './focusRows';
-import type { PointFiveCredentials } from './pointfiveConfig';
+import { POINTFIVE_BILLING_ROLE_CONFIRMED, type PointFiveCredentials } from './pointfiveConfig';
+import { McpProtocolError } from '../connectors/managed/pointfive/errors';
 import type { PointFiveOAuthClient } from './PointFiveOAuthClient';
 import { McpClient, type McpClientOptions, type TokenProvider } from '../connectors/managed/pointfive/mcpClient';
 import {
@@ -106,7 +107,14 @@ export class StreamableHttpPointFiveMcpClient implements PointFiveMcpClient {
     return probePointFive({ tokenProvider: this.oauth, client: this.mcp, mapping: this.mapping, validateDataItem });
   }
 
+  /** Refused (BILLING_ROLE_UNDECIDED, no network) until POINTFIVE_BILLING_ROLE_CONFIRMED is flipped. */
   async fetchBillingRows(window: CostWindow): Promise<PointFiveFocusRow[]> {
+    if (!POINTFIVE_BILLING_ROLE_CONFIRMED) {
+      throw new McpProtocolError(
+        'BILLING_ROLE_UNDECIDED',
+        'PointFive billing rows refused: the PointFive billing role is undecided, so its rows cannot count in any total',
+      );
+    }
     return (await this.call('billing', { start: window.start, end: window.end })) as PointFiveFocusRow[];
   }
 

@@ -32,3 +32,28 @@ Mutations (harness as the reviewer's mut.mjs; scope src/connectors/managed src/c
   M17 ASSUMED default-endpoint label dropped ............. killed 1
   M3b (cap the wait and retry early) survives as an EQUIVALENT mutant: the RETRY_AFTER_TOO_LONG
       guard runs first, so the clamp is unreachable; M3a covers removing that guard.
+
+--- Review fixes on #146 (B1/M1/M2), GREEN ---
+PointFive + connectors + costsource + store suites pass; full suite 220 files, 4036 tests passed.
+lint, typecheck, build pass.
+Mutations (reviewer harness, scope src/connectors src/costsource src/store), all killed:
+  M1  session failure -> degraded (2)          M1a token refused stays auth-verified (3)
+  M1b 403 not treated as refused (1)           M1c endpoint stage message generic (1)
+  M5  no tools-capability check (1; survived before)
+  M8  probe reachable always (1)               M11 data items not validated (1)
+  M12 auth stage skips the token call (1)      M13 missing tool still ok (1)
+  M14 invalid POINTFIVE_MCP_TOOL_MAP ignored (1; survived before)
+  M16 RFC 8707 resource dropped (2)
+  B1a descriptor roleConfirmed dropped (3)     B1b transport billing guard removed (3)
+  B1c opt-in constant flipped to true (6)
+  M2a store opens on reachable && authed (4)   M2b auth-verified opens (2)
+  M2c degraded shown as error (2)              M2d degraded opens (2)
+  M2e verified ignores reachable/authed (1)    M2f UI degraded block removed (1)
+  M2g degraded session gets no Retry label (1)
+  The #144 mutations rerun in this tree: all killed; M3b is the equivalent mutant noted above.
+Changed existing tests (deliberate behavior change, not weakened):
+  - aiSpendRatio.test.ts: pointfive-live is now asserted roleConfirmed:false alongside ServiceNow;
+    every other source is still asserted confirmed.
+  - pointFiveUpstreamErrors.test.ts: the 403 redaction check runs on a findings tool (billing is
+    refused before any request); a new test asserts billing makes no fetch call.
+  - health.test.ts: the 401 case now asserts configured-not-verified with a reason (was auth-verified).
