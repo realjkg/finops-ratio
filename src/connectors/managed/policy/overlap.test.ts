@@ -58,7 +58,7 @@ describe('evaluateSourcePolicy', () => {
     expect(ok.headline).toEqual({ billed: ['az-actual'], effective: ['az-amortized'] });
     // Two sources feeding the same measure cannot use basis-per-measure.
     const both = evaluateSourcePolicy([src('a', { costBasis: 'actual' }), src('b', { costBasis: 'billed' })], [{ kind: 'basis-per-measure', sources: ['a', 'b'] }]);
-    expect(both.problems.map((p) => p.code)).toEqual(['POLICY_INVALID']);
+    expect(both.problems.map((p) => p.code)).toEqual(['POLICY_INVALID', 'OVERLAP_UNRESOLVED']);
   });
 
   it('a direct AI provider cost report + a cloud bill that also carries that provider (marketplace) is refused without a policy', () => {
@@ -87,11 +87,11 @@ describe('evaluateSourcePolicy', () => {
     expect(evaluateSourcePolicy(s).ok).toBe(false);
     const split: DedupPolicy = { kind: 'split-by', sources: ['cur', 'focus'], subAccounts: { cur: ['SYNTHETIC-1'], focus: ['SYNTHETIC-2'] } };
     // focus declares SYNTHETIC-1 too: its list does not cover it.
-    expect(evaluateSourcePolicy(s, [split]).problems.map((p) => p.code)).toEqual(['POLICY_INVALID']);
+    expect(evaluateSourcePolicy(s, [split]).problems.map((p) => p.code)).toEqual(['POLICY_INVALID', 'OVERLAP_UNRESOLVED']);
     const s2 = [s[0], src('focus', { accounts: ['SYNTHETIC-2'], alsoPresentInOtherSource: 'unknown' })];
     expect(evaluateSourcePolicy(s2, [split]).ok).toBe(true);
     const overlapping: DedupPolicy = { kind: 'split-by', sources: ['cur', 'focus'], subAccounts: { cur: ['SYNTHETIC-1'], focus: ['SYNTHETIC-1', 'SYNTHETIC-2'] } };
-    expect(evaluateSourcePolicy(s, [overlapping]).problems.map((p) => p.code)).toEqual(['POLICY_INVALID']);
+    expect(evaluateSourcePolicy(s, [overlapping]).problems.map((p) => p.code)).toEqual(['POLICY_INVALID', 'OVERLAP_UNRESOLVED']);
   });
 
   it('a policy naming an unknown source, or a prefer naming neither side, is invalid', () => {

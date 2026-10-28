@@ -242,7 +242,7 @@ function fakeClient(sources: Partial<CostSourceDescriptor>[], failures: Record<s
   const client = {
     mode: 'live',
     listSources: async () =>
-      sources.map((s) => ({ capabilities: ['costRows'], configured: true, name: s.id, ...s })) as CostSourceDescriptor[],
+      sources.map((s) => ({ capabilities: ['costRows'], configured: true, kind: 'cloud', name: s.id, ...s })) as CostSourceDescriptor[], // M0c: headline eligibility needs a billing-export kind
     fetchCostRows,
   } as unknown as CostSourceClient;
   return { client, fetchCostRows };
