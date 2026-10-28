@@ -273,6 +273,9 @@ describe('PointFiveLiveAdapter — healthCheck (configured)', () => {
     expect(health.reachable).toBe(true);
     expect(health.authed).toBe(true);
     expect(transportFactory).toHaveBeenCalledTimes(1);
+    // A ping-only transport proves an MCP session at most: never source access.
+    expect(health.verification).toBe('auth-verified');
+    expect(health.detail).not.toMatch(/MCP reachable|connected/i);
   });
 
   it('degrades to an honest unreachable state when the transport throws', async () => {
