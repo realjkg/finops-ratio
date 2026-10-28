@@ -42,12 +42,14 @@ import { acquireRun, finishRun, loadSource, type SourceRow } from '../worker/lea
 import { runSync, type LogFn, type RunSyncOptions } from '../worker/pipeline';
 import { workerTransaction } from '../worker/tx';
 import { SimulatedCrash, type PeriodResult, type RunResult } from '../worker/types';
+import { checkImportMetadata, sameDecimal, scopeWindow, type ImportMetadata } from './metadata';
 import { collect, normalizerFor, type MappingReport } from './normalizer';
 import { MAX_IMPORT_BYTES, decodeImportFile, stageFile, tooLarge, type PeriodPreview, type StageControl, type StageInput, type StageOptions, type StagedFile } from './stageFile';
 
 export const NO_CONTROL_NOTE = 'unverified (no control total supplied)';
 export const VARIANCE_NOTE =
   'not published: the supplied control totals do not match the rows of the declared providers in this file (a partial or different delivery); see: cli quarantine show --batch <batchId>';
+export const OVERLAP_MESSAGE = 'another source already published this billing period for an overlapping provider; both are COUNTED TWICE until the R4 exclusion policy applies';
 export const UNCHANGED_CONTROL_NOTE =
   'unverified: the data is unchanged and its published batch was published without these controls, so they are not recorded on it; re-import with --restate to reconcile it against them';
 export const UNCHANGED_VARIANCE_NOTE =
@@ -76,6 +78,8 @@ export interface StageAndSyncOptions {
   restate?: boolean;
   /** Carried verbatim in every staged manifest's x-ratio-import. */
   provenance?: Record<string, unknown>;
+  /** The implementation-metadata record (metadata.ts); default: the one stored on the source. */
+  metadata?: { metadata: ImportMetadata; sha256: string };
   sourceClient: () => S3Client;
   source: (row: SourceRow) => FocusSource;
   evidence: EvidenceStore;
@@ -85,7 +89,7 @@ export interface StageAndSyncOptions {
   secrets?: readonly string[];
 }
 
-export type ImportPeriodResult = PeriodResult & { reconciliationNote?: string };
+export type ImportPeriodResult = PeriodResult & { reconciliationNote?: string; overlapWarning?: string };
 
 /** An already-published period whose content the delivery changes. */
 export interface Restatement {
@@ -103,6 +107,14 @@ interface Common {
   normalization: MappingReport[];
   staged: Array<{ billingPeriod: string; records: number }>;
   restatements: Restatement[];
+  metadataSha256: string | null;
+  /**
+   * OVERLAP (R4 dependency): staged periods another source already published for an overlapping
+   * provider with other bytes. Both are counted until R4's exclusion policy exists; this CLI output
+   * (overlapNotice, overlapWarnings, the period's overlapWarning, a warn log line) is the only record.
+   */
+  overlapNotice: string | null;
+  overlapWarnings: Array<{ billingPeriod: string; otherSource: string; message: string }>;
 }
 
 export interface StageAndSyncResult extends Omit<RunResult, 'periods'>, Common {
@@ -117,6 +129,24 @@ export interface ImportRefusal extends Common {
 const fail = (code: string, m: string): never => {
   throw new IngestError(code, m);
 };
+
+/** The metadata record's control for one billing month, or a note why it cannot be one. */
+export function metadataControl(m: ImportMetadata, providers: readonly string[], flags: StageControl | undefined): { period?: string; control?: StageControl; note?: string } {
+  const bt = m.financial.billed_cost_total;
+  if (bt === 'unknown') return {};
+  if (flags?.billedTotal !== undefined && (bt[flags.currency!] === undefined || !sameDecimal(bt[flags.currency!], flags.billedTotal))) {
+    fail('IMPORT_CONTROL_CONFLICT', 'the --control-billed/--currency flags disagree with the metadata financial.billed_cost_total');
+  }
+  const entries = Object.entries(bt);
+  if (entries.length !== 1 || providers.length !== 1) return { note: 'unverified (the metadata control total spans several currencies or providers; supply per-period controls with --control-billed)' };
+  const end = scopeWindow(m.scope).endMs;
+  const ym = m.scope.period_start.slice(0, 7);
+  const [y, mo] = ym.split('-').map(Number);
+  if (end > Date.UTC(mo === 12 ? y + 1 : y, mo === 12 ? 0 : mo, 1) + 14 * 3600_000) {
+    return { note: 'unverified (the metadata control total covers more than one billing month; supply per-period controls with --control-billed)' };
+  }
+  return { period: `${ym}-01`, control: { billedTotal: entries[0][1], currency: entries[0][0] }, note: `unverified (the metadata control total applies to billing period ${ym} alone; import it with --period ${ym} to reconcile)` };
+}
 
 interface PublishedBatch {
   period: string;
@@ -136,14 +166,37 @@ export async function stageAndSync(o: StageAndSyncOptions): Promise<StageAndSync
   const location = validateLocation(row.config);
   const providers = declaredProviders(row.config);
   if (!providers) throw new IngestError('SOURCE_CONFIG_INVALID', 'source config providers must be a non-empty list of known providers');
-  const control = o.control && Object.values(o.control).some((v) => v !== undefined) ? o.control : undefined;
+  let control = o.control && Object.values(o.control).some((v) => v !== undefined) ? o.control : undefined;
+
+  const stored = row.config.metadata;
+  const meta = o.metadata ?? (stored !== undefined ? { metadata: checkImportMetadata(stored), sha256: String(row.config.metadataSha256) } : undefined);
+  const provenance: Record<string, unknown> = { ...o.provenance };
+  let fromMeta: ReturnType<typeof metadataControl> = {};
+  if (meta) {
+    const m = meta.metadata;
+    if (!providers.includes(m.provider)) fail('METADATA_MISMATCH', 'the metadata provider is not one of the providers this source declares');
+    fromMeta = metadataControl(m, providers, control);
+    Object.assign(provenance, { metadata: m, metadataSha256: meta.sha256 });
+    if (m.overlap.also_present_in_other_source === 'yes') {
+      const rel = m.overlap.related_source!;
+      const relRow = rel === o.sourceKey ? null : await workerTransaction(o.pool, o.tenantId, (c) => loadSource(c, rel)).catch(() => null);
+      if (!relRow) fail('IMPORT_RELATED_SOURCE_NOT_FOUND', 'metadata overlap.related_source must name another registered source of this tenant');
+      provenance.overlap = { alsoPresentInOtherSource: 'yes', relatedSource: rel, relatedSourceId: relRow!.id };
+    }
+    // Review B3: a rows-only flag control never stands in for the record's billed total. It is merged
+    // with the record's one-period billed total, or refused when the record has one that cannot apply.
+    if (control && control.billedTotal === undefined && m.financial.billed_cost_total !== 'unknown') {
+      if (!fromMeta.control) fail('IMPORT_CONTROL_CONFLICT', 'a --control-rows count cannot be combined with the metadata billed total, which does not apply to exactly one billing period of one provider; supply --control-billed');
+      control = { ...control, ...fromMeta.control };
+    }
+  }
   // Review M2: a row count alone would make the worker report `reconciled` with the billed total unchecked.
   if (control && control.rowCount !== undefined && control.billedTotal === undefined) {
     fail('IMPORT_CONTROL_INVALID', 'a control row count needs the control billed total (--control-billed with --currency): a row count alone cannot reconcile a period');
   }
   const lock = await lockImport(o.pool, row);
   try {
-    return await stageAndSyncLocked(o, row, location, providers, control);
+    return await stageAndSyncLocked(o, row, location, providers, control, { meta, fromMeta, provenance });
   } finally {
     await lock.release();
   }
@@ -182,6 +235,7 @@ async function stageAndSyncLocked(
   location: ReturnType<typeof validateLocation>,
   providers: readonly string[],
   control: StageControl | undefined,
+  { meta, fromMeta, provenance }: { meta: { metadata: ImportMetadata; sha256: string } | undefined; fromMeta: ReturnType<typeof metadataControl>; provenance: Record<string, unknown> },
 ): Promise<StageAndSyncResult | ImportRefusal> {
 
   const normalizer = normalizerFor(o.sourceKind ?? 'focus-export', o.schemaVersion ?? '1.0');
@@ -196,7 +250,15 @@ async function stageAndSyncLocked(
     inputs.push({ name: obj.name, bytes });
     normalization.push(report);
   }
-  let staged: StagedFile | null = stageFile(inputs, { location, period: o.period, control, providers, provenance: { ...o.provenance, normalization } });
+  let staged: StagedFile | null = stageFile(inputs, {
+    location,
+    period: o.period,
+    control,
+    providers,
+    provenance: { ...provenance, normalization },
+    controlIfSinglePeriod: fromMeta.control && { period: fromMeta.period!, control: fromMeta.control },
+    scope: meta && scopeWindow(meta.metadata.scope),
+  });
   inputs.length = 0; // review B2: the delivery bytes are not held past staging
   const dataOf = (period: string) => [...new Set(staged!.objects.filter((x) => x.kind === 'data' && x.billingPeriod === period).map((x) => x.sha256))].sort();
 
@@ -220,6 +282,24 @@ async function stageAndSyncLocked(
     ),
   );
   if (dup.rowCount) throw new IngestError('DUPLICATE_ARTIFACT', 'this file (or a billing period of it) is already imported under another source of this tenant with an overlapping provider; refused to avoid double counting');
+
+  // Same periods already published by another source for an overlapping provider, with other bytes:
+  // reported, never silently deduplicated (the exclusion policy belongs to R4).
+  const overlaps = await workerTransaction(o.pool, o.tenantId, (c) =>
+    c.query(
+      `SELECT DISTINCT s.source_key, b.billing_period::text AS period FROM ratio.ingest_batches b
+       JOIN ratio.sources s ON s.tenant_id = b.tenant_id AND s.id = b.source_id
+       WHERE b.status = 'published' AND b.source_id <> $1 AND b.billing_period = ANY($2::date[])
+         AND ((s.config -> 'providers') ?| $3::text[] OR (s.config ->> 'layout' = 'aws-data-exports' AND 'AWS' = ANY($3::text[])))
+       ORDER BY 2, 1`,
+      [row.id, staged!.periods.map((p) => p.billingPeriod), providers],
+    ),
+  );
+  const overlapWarnings = overlaps.rows.map((x: { source_key: string; period: string }) => ({
+    billingPeriod: x.period,
+    otherSource: x.source_key,
+    message: OVERLAP_MESSAGE,
+  }));
 
   // Review B1: the published batch of every staged period, with its artifact set.
   const published = await workerTransaction(o.pool, o.tenantId, async (c) => {
@@ -248,6 +328,11 @@ async function stageAndSyncLocked(
     normalization,
     staged: s.periods,
     restatements,
+    metadataSha256: meta?.sha256 ?? null,
+    overlapNotice: overlapWarnings.length
+      ? `OVERLAP: ${overlapWarnings.length} billing period/source pair(s) are also published by another source for an overlapping provider and are COUNTED TWICE until the R4 exclusion policy exists (this output is the only record); see overlapWarnings`
+      : null,
+    overlapWarnings,
   });
   if (restatements.length && !o.restate) {
     const list = restatements.map((x) => x.billingPeriod.slice(0, 7)).join(', ');
@@ -264,6 +349,7 @@ async function stageAndSyncLocked(
   // Review round 3: the run lease is taken BEFORE anything is staged, so an import refused because another
   // run holds it (ALREADY_RUNNING / LOCK_TIMEOUT, exit 4) has written nothing to S3, and no sync can list
   // (and publish) a half-staged delivery while this import stages. The sync below runs under this lease.
+  const hasControl = staged.controlApplied;
   const range = { from: staged.periods[0].billingPeriod, to: staged.periods[staged.periods.length - 1].billingPeriod };
   const acquired = await acquireRun(o.pool, o.tenantId, o.sourceKey, { kind: 'backfill', ttlSeconds: resolveSettings(o.settings).leaseTtlSeconds, periodFrom: range.from, periodTo: range.to });
   o.log?.('run.started', { runId: acquired.lease.runId, mode: 'backfill', abandonedRuns: acquired.abandoned.length, discardedStagedBatches: acquired.discardedBatches });
@@ -276,6 +362,7 @@ async function stageAndSyncLocked(
       await client.send(new PutObjectCommand({ Bucket: location.bucket, Key: obj.key, Body: obj.body, ContentType: obj.kind === 'data' ? 'application/gzip' : 'application/json' }));
     }
     o.log?.('import.staged', { periods: staged.periods.length, objects: staged.objects.length, restatements: restatements.length });
+    if (overlapWarnings.length) o.log?.('import.overlap', { level: 'warn', pairs: overlapWarnings.length, detail: 'counted twice until the R4 exclusion policy exists' });
     out = common(staged);
     const expectManifests = new Map(staged.objects.filter((x) => x.kind === 'manifest').map((x) => [x.billingPeriod, x.sha256]));
     staged = null;
@@ -311,12 +398,12 @@ async function stageAndSyncLocked(
       if (p.outcome === 'quarantined' && p.code === 'RECONCILIATION_VARIANCE') return { ...p, reconciliationNote: VARIANCE_NOTE };
       const prev = published.get(p.billingPeriod);
       // Review M3: controls on unchanged data are never silently dropped.
-      if (control && p.outcome === 'failed' && p.code === 'CONTROL_VARIANCE_ON_UNCHANGED') return { ...p, reconciliation: 'unverified', reconciliationNote: UNCHANGED_VARIANCE_NOTE };
-      if (control && p.outcome === 'unchanged' && prev && prev.batch_id === p.batchId && prev.reconciliation !== 'reconciled') {
+      if (hasControl && p.outcome === 'failed' && p.code === 'CONTROL_VARIANCE_ON_UNCHANGED') return { ...p, reconciliation: 'unverified', reconciliationNote: UNCHANGED_VARIANCE_NOTE };
+      if (hasControl && p.outcome === 'unchanged' && prev && prev.batch_id === p.batchId && prev.reconciliation !== 'reconciled') {
         return { ...p, reconciliation: 'unverified', reconciliationNote: UNCHANGED_CONTROL_NOTE };
       }
-      return p.reconciliation === 'unverified' && !control ? { ...p, reconciliationNote: NO_CONTROL_NOTE } : p;
-    }),
+      return p.reconciliation === 'unverified' && !hasControl ? { ...p, reconciliationNote: fromMeta.note ?? NO_CONTROL_NOTE } : p;
+    }).map((p) => (overlapWarnings.some((w) => w.billingPeriod === p.billingPeriod) ? { ...p, overlapWarning: OVERLAP_MESSAGE } : p)),
     ...out,
   };
 }

@@ -24,6 +24,7 @@ import crypto from 'crypto';
 import zlib from 'zlib';
 import { IngestError } from '../errors';
 import { isDecimalString } from '../focus/decimal';
+import { parseFocusTimestamp } from '../focus/timestamp';
 import { dataPrefix, periodMetadataPrefix, type ExportLocation } from '../sources/s3/layout';
 
 const MiB = 1024 * 1024;
@@ -69,6 +70,10 @@ export interface StageOptions {
   providers?: readonly string[];
   /** Largest uncompressed size of one gzip member (default 1 MiB; tests use small values). */
   gzipMemberBytes?: number;
+  /** A control (e.g. from the metadata record) applied only when exactly this one period is staged. */
+  controlIfSinglePeriod?: { period: string; control: StageControl };
+  /** Declared scope (metadata.ts scopeWindow): every staged row's charge period must lie inside it. */
+  scope?: { startMs: number; endMs: number };
 }
 
 export interface StagedObject {
@@ -99,6 +104,8 @@ export interface PeriodPreview {
 }
 
 export interface StagedFile {
+  /** Whether a control was written into the manifest. */
+  controlApplied: boolean;
   /** Per input: name, sha256 of its CSV bytes (after decompression), data rows, CSV bytes. */
   files: Array<{ name: string; sha256: string; dataRows: number; bytes: number }>;
   /** Rebuilt on access from the staged data objects (tests and the lossless check only). */
@@ -326,6 +333,7 @@ interface ParsedFile {
   writers: Map<string, GzipMembers>;
   dataRows: number;
   currencyMismatches: number;
+  outOfScope: number;
 }
 
 interface Shared {
@@ -339,7 +347,9 @@ function parseFile(b: Buffer, opts: StageOptions, control: StageControl | undefi
   const from = b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf ? 3 : 0;
   if (b.length === from) invalid(`${where} is empty`);
   const memberBytes = opts.gzipMemberBytes ?? GZIP_MEMBER_BYTES;
-  const out: ParsedFile = { header: Buffer.alloc(0), columns: [], writers: new Map(), dataRows: 0, currencyMismatches: 0 };
+  const out: ParsedFile = { header: Buffer.alloc(0), columns: [], writers: new Map(), dataRows: 0, currencyMismatches: 0, outOfScope: 0 };
+  let iChargeStart = -1;
+  let iChargeEnd = -1;
   let first = true;
   let iStart = -1;
   let iProvider = -1;
@@ -356,6 +366,8 @@ function parseFile(b: Buffer, opts: StageOptions, control: StageControl | undefi
       iProvider = out.columns.includes('ProviderName') ? out.columns.indexOf('ProviderName') : out.columns.indexOf('ServiceProviderName');
       iCurrency = out.columns.indexOf('BillingCurrency');
       iBilled = out.columns.indexOf('BilledCost');
+      iChargeStart = out.columns.indexOf('ChargePeriodStart');
+      iChargeEnd = out.columns.indexOf('ChargePeriodEnd');
       return;
     }
     if (rec.count !== out.columns.length) invalid(`${where}, record ${rec.n} has ${rec.count} fields, the header has ${out.columns.length}`);
@@ -364,6 +376,12 @@ function parseFile(b: Buffer, opts: StageOptions, control: StageControl | undefi
     if (!m) invalid(`${where}, record ${rec.n}: BillingPeriodStart is not the first of a month at midnight`);
     const ym = `${m![1]}-${m![2]}`;
     if (opts.period !== undefined && `${ym}-01` !== opts.period) return;
+    if (opts.scope && iChargeStart >= 0 && iChargeEnd >= 0) {
+      // Unparsable timestamps are left to the worker's validator (a hard error there).
+      const cs = parseFocusTimestamp(valueOf(b, rec, iChargeStart));
+      const ce = parseFocusTimestamp(valueOf(b, rec, iChargeEnd));
+      if ((cs && cs.epochMs < opts.scope.startMs) || (ce && ce.epochMs > opts.scope.endMs)) out.outOfScope++;
+    }
     if (opts.providers && iProvider >= 0) {
       const p = shared.preview.get(ym) ?? { rows: 0, billed: new Map() };
       shared.preview.set(ym, p);
@@ -426,22 +444,29 @@ export interface StageInput {
 export function stageFile(input: Buffer | StageInput[], opts: StageOptions & { provenance?: Record<string, unknown> }): StagedFile {
   const inputs = Buffer.isBuffer(input) ? [{ name: 'file', bytes: input }] : input;
   if (inputs.length === 0) invalid('nothing to import');
-  const control = opts.control && Object.values(opts.control).some((v) => v !== undefined) ? opts.control : undefined;
-  if (control) checkControl(control);
-  if (control && !opts.providers?.length) {
+  const given = (c?: StageControl) => (c && Object.values(c).some((v) => v !== undefined) ? c : undefined);
+  const candidate = given(opts.control) ?? given(opts.controlIfSinglePeriod?.control);
+  if (candidate) checkControl(candidate);
+  if (candidate && !opts.providers?.length) {
     throw new IngestError('IMPORT_CONTROL_INVALID', "controls apply to the source's declared providers, and none were given");
   }
   const fileShas = inputs.map((f) => sha256(f.bytes));
   const twin = fileShas.findIndex((s, i) => fileShas.indexOf(s) !== i);
   if (twin >= 0) throw new IngestError('IMPORT_FILE_DUPLICATE', `file ${twin + 1} has the same bytes as file ${fileShas.indexOf(fileShas[twin]) + 1}; supply each file of a delivery once`);
   const shared: Shared = { nullTokens: {}, preview: new Map() };
-  const parsed = inputs.map((f, i) => parseFile(f.bytes, opts, control, shared, inputs.length > 1 ? `file ${i + 1}` : 'the file'));
+  const parsed = inputs.map((f, i) => parseFile(f.bytes, opts, candidate, shared, inputs.length > 1 ? `file ${i + 1}` : 'the file'));
+  const outOfScope = parsed.reduce((n, p) => n + p.outOfScope, 0);
+  if (outOfScope > 0) {
+    throw new IngestError('IMPORT_SCOPE_VIOLATION', `${outOfScope} row(s) have a charge period outside the declared scope (metadata scope.period_start..period_end, its end semantics and time zone); nothing was imported`);
+  }
   const yms = [...new Set(parsed.flatMap((p) => [...p.writers.keys()]))].sort();
+  const single = opts.controlIfSinglePeriod;
+  const control = given(opts.control) ?? (single && yms.length === 1 && `${yms[0]}-01` === single.period ? given(single.control) : undefined);
   if (yms.length === 0) throw new IngestError('IMPORT_PERIOD_NOT_IN_FILE', `the file has no rows for billing period ${opts.period?.slice(0, 7)}`);
   if (control && yms.length !== 1) {
     throw new IngestError('IMPORT_CONTROL_SCOPE', `the file covers ${yms.length} billing periods: controls apply to one period, so name it with --period YYYY-MM`);
   }
-  const mismatches = parsed.reduce((n, p) => n + p.currencyMismatches, 0);
+  const mismatches = control ? parsed.reduce((n, p) => n + p.currencyMismatches, 0) : 0;
   if (mismatches > 0) {
     throw new IngestError('IMPORT_CONTROL_CURRENCY_MISMATCH', `${mismatches} row(s) of the declared providers in this period bill in a currency other than the control currency`);
   }
@@ -481,6 +506,7 @@ export function stageFile(input: Buffer | StageInput[], opts: StageOptions & { p
   const columns = parsed[0].columns;
   const nullTokens = shared.nullTokens;
   return {
+    controlApplied: !!control,
     files: inputs.map((f, i) => ({ name: f.name, sha256: fileShas[i], dataRows: parsed[i].dataRows, bytes: f.bytes.length })),
     get plan(): StagePlan {
       return {
