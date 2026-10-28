@@ -26,7 +26,8 @@
 // IMPORT_TOO_LARGE). Overlap with another source's published periods is only reported (overlapNotice).
 //
 // Exit codes: 0 ok · 1 failure · 2 usage/configuration · 3 import refused (would restate published
-// data; nothing written) · 4 another run holds the lease · 5 import larger than the cap.
+// data; nothing written) · 4 another run holds the lease, or another import of the source is in
+// progress (nothing written; run it again afterwards) · 5 import larger than the cap.
 import fs from 'fs';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Pool } from 'pg';
@@ -137,9 +138,20 @@ function parseArgs(argv: string[]): Args {
     'source add': ['--tenant', '--key', '--providers', '--bucket', '--prefix', '--display-name', '--tenant-slug', '--metadata', '--json'],
     'import-file': ['--tenant', '--source', '--file', '--period', '--control-rows', '--control-billed', '--currency', '--metadata', '--restate', '--json'],
   };
+  // Review round 2 (M4): a usage error names the flag, never an argument value (a path, a glob, a typo).
+  let lastValueOf: string | undefined;
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
-    if (!allowed[command].includes(flag)) usage(`unknown or unsupported argument for ${command}: ${flag.slice(0, 40)}`);
+    if (!flag.startsWith('--')) {
+      if (lastValueOf === '--file') usage('each file needs its own --file (a shell glob expands to several paths: write --file before every path)');
+      usage(`unexpected argument for ${command} (argument ${i + 1} is not a flag; each value follows its own flag)`);
+    }
+    if (!allowed[command].includes(flag)) {
+      const name = flag.split('=')[0];
+      if (flag.includes('=') && allowed[command].includes(name)) usage(`${name} takes its value as the next argument (${name} <value>), not ${name}=<value>`);
+      usage(`unknown or unsupported argument for ${command}${/^--[a-z][a-z0-9-]{0,30}$/.test(flag) ? `: ${flag}` : ` (argument ${i + 1})`}`);
+    }
+    lastValueOf = undefined;
     if (flag === '--json') {
       a.json = true;
       continue;
@@ -150,6 +162,7 @@ function parseArgs(argv: string[]): Args {
     }
     const v = rest[++i];
     if (v === undefined || v.startsWith('--')) usage(`${flag} needs a value`);
+    lastValueOf = flag;
     if (flag === '--tenant') {
       if (!isTenantId(v)) usage('--tenant must be a UUID');
       a.tenants.push(v.toLowerCase());
@@ -214,24 +227,51 @@ function parseArgs(argv: string[]): Args {
   return a;
 }
 
+const month = (v: string) => MONTH_RE.test(v);
+const sourceKey = (v: string) => SOURCE_KEY_RE.test(v);
+/** Flags whose value the record may carry, each only when it is valid (else '[invalid]'). */
+const RECORDED: Record<string, (v: string) => boolean> = {
+  tenant: isTenantId,
+  source: sourceKey,
+  from: month,
+  to: month,
+  period: month,
+  batch: isTenantId,
+  key: sourceKey,
+  providers: (v) => v.split(',').every((p) => KNOWN_FILE_DROP_PROVIDERS.includes(p.trim())),
+  'tenant-slug': (v) => /^[a-z0-9][a-z0-9-]{0,62}$/.test(v),
+  'control-rows': (v) => /^[0-9]{1,15}$/.test(v),
+  'control-billed': isDecimalString,
+  currency: (v) => /^[A-Z]{3}$/.test(v),
+  // Operator-chosen names (not row values), bounded as before.
+  bucket: () => true,
+  prefix: () => true,
+  'display-name': () => true,
+};
+
 function argsForRecord(argv: string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (let i = 1; i < argv.length; i++) {
+  let unrecognized = 0;
+  for (let i = argv[0] === 'quarantine' || argv[0] === 'source' ? 2 : 1; i < argv.length; i++) {
     const f = argv[i];
-    if (!f.startsWith('--')) continue;
-    const key = f.slice(2);
+    const key = f.startsWith('--') ? f.slice(2) : '';
+    const hasValue = i + 1 < argv.length && !argv[i + 1].startsWith('--');
     if (key === 'json' || key === 'restate') out[key] = true;
     // Review M4: file paths and names never reach the evidence record, only how many were given.
     else if (key === 'file') {
       out.files = (typeof out.files === 'number' ? out.files : 0) + 1;
-      i++;
-    }
-    else if (key === 'metadata') {
+      if (hasValue) i++;
+    } else if (key === 'metadata') {
       out.metadata = 'supplied';
-      i++;
-    }
-    else if (i + 1 < argv.length && !argv[i + 1].startsWith('--')) out[key] = String(argv[++i]).slice(0, 80);
+      if (hasValue) i++;
+    } else if (Object.hasOwn(RECORDED, key)) {
+      if (hasValue) {
+        const v = String(argv[++i]);
+        out[key] = RECORDED[key](v) ? v.slice(0, 80) : '[invalid]';
+      }
+    } else unrecognized++; // positionals, unknown flags, --flag=value: counted, never copied (round 2 M4)
   }
+  if (unrecognized) out.unrecognizedArguments = unrecognized;
   return out;
 }
 

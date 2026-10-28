@@ -183,7 +183,10 @@ describe('fetchAiSpendRatio on the mock path (sandbox + synthetic)', () => {
     const sn = sources.find((s) => s.id === 'servicenow-sandbox')!;
     expect(sn.roleConfirmed).toBe(false);
     expect(sn.note).toMatch(/not assumed to supply billing data/i);
-    expect(sources.filter((s) => s.id !== 'servicenow-sandbox').every((s) => s.roleConfirmed !== false)).toBe(true);
+    // Live PointFive is also unconfirmed while its billing role is undecided (B1, pointFiveBillingRole.test.ts).
+    expect(sources.find((s) => s.id === 'pointfive-live')!.roleConfirmed).toBe(false);
+    const unconfirmed = new Set(['servicenow-sandbox', 'pointfive-live']);
+    expect(sources.filter((s) => !unconfirmed.has(s.id)).every((s) => s.roleConfirmed !== false)).toBe(true);
   });
 
   // One headline owner per repeated-bill group: pointfive-sandbox, else

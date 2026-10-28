@@ -4,7 +4,8 @@
 // fetch rejection or silent undefined.
 //
 // In this PR the routes serve the same offline seed (no external PointFive). The
-// live PointFive adapter — MCP SSE + OAuth 2.1 against mcp.pointfive.co — is PR E.
+// live PointFive adapter — MCP over Streamable HTTP + OAuth 2.1 (endpoint ASSUMED,
+// unverified; see DEFAULT_POINTFIVE_MCP_URL) — is PR E.
 import type {
   CostSourceClient,
   CostSourceDescriptor,

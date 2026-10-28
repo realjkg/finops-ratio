@@ -22,6 +22,8 @@ import {
   resolvePointFiveStatus,
   isPointFiveLiveEnabled,
   POINTFIVE_LIVE_SOURCE_ID,
+  DEFAULT_POINTFIVE_MCP_URL_VERIFIED,
+  pointFiveStatusNote,
 } from './pointfiveConfig';
 import type {
   PointFiveMcpClient,
@@ -101,8 +103,20 @@ describe('resolvePointFiveStatus', () => {
     expect(status.state).toBe('configured');
     if (status.state === 'configured') {
       expect(status.credentials.oauthClientId).toBe('client-id');
-      expect(status.credentials.mcpUrl).toBe('https://mcp.pointfive.co/sse'); // documented default
+      expect(status.credentials.mcpUrl).toBe('https://mcp.pointfive.co/sse'); // ASSUMED default
     }
+  });
+
+  it('labels the default endpoint ASSUMED and unverified, and drops the label for an explicit endpoint', () => {
+    expect(DEFAULT_POINTFIVE_MCP_URL_VERIFIED).toBe(false);
+    const dflt = pointFiveStatusNote(resolvePointFiveStatus(CONFIGURED_ENV));
+    expect(dflt).toMatch(/Streamable HTTP/);
+    expect(dflt).toMatch(/ASSUMED default \(unverified\)/);
+    expect(dflt).toContain('POINTFIVE_MCP_URL');
+    expect(dflt).not.toMatch(/MCP SSE/);
+    const explicit = pointFiveStatusNote(resolvePointFiveStatus({ ...CONFIGURED_ENV, POINTFIVE_MCP_URL: 'https://mcp.example.invalid/mcp' }));
+    expect(explicit).not.toMatch(/ASSUMED/);
+    expect(pointFiveStatusNote({ state: 'disabled' })).not.toMatch(/MCP SSE/);
   });
 });
 
@@ -259,6 +273,9 @@ describe('PointFiveLiveAdapter — healthCheck (configured)', () => {
     expect(health.reachable).toBe(true);
     expect(health.authed).toBe(true);
     expect(transportFactory).toHaveBeenCalledTimes(1);
+    // A ping-only transport proves an MCP session at most: never source access.
+    expect(health.verification).toBe('auth-verified');
+    expect(health.detail).not.toMatch(/MCP reachable|connected/i);
   });
 
   it('degrades to an honest unreachable state when the transport throws', async () => {

@@ -39,8 +39,9 @@ import {
   type PointFiveStatus,
 } from './pointfiveConfig';
 import { PointFiveOAuthClient, type HttpFetch } from './PointFiveOAuthClient';
+import type { PointFiveHealthReport, VerificationState } from '../connectors/managed/pointfive/health';
 import {
-  SsePointFiveMcpClient,
+  StreamableHttpPointFiveMcpClient,
   type PointFiveAnomaly,
   type PointFiveMcpClient,
   type PointFiveMcpClientFactory,
@@ -158,7 +159,27 @@ export interface PointFiveLiveAdapterDeps {
 // configured path; the dark build never reaches it.
 const defaultHttpFetch: HttpFetch = (input, init) => fetch(input, init);
 const defaultTransportFactory: PointFiveMcpClientFactory = (creds, oauth) =>
-  new SsePointFiveMcpClient(creds, oauth);
+  new StreamableHttpPointFiveMcpClient(creds, oauth);
+
+/** SourceHealth plus the connector verification vocabulary and per-stage results. */
+export type PointFiveSourceHealth = SourceHealth & {
+  verification: VerificationState;
+  stages?: PointFiveHealthReport['stages'];
+};
+
+const STATE_TEXT: Record<VerificationState, string> = {
+  'not-configured': 'not configured',
+  'configured-not-verified': 'configured, not verified',
+  'auth-verified': 'access token obtained and not rejected; MCP session not established',
+  degraded: 'MCP session established; tools or data not verified',
+  'source-access-verified': 'source access verified (auth, session, tools, data)',
+};
+
+function stageSummary(r: PointFiveHealthReport): string {
+  return Object.entries(r.stages)
+    .map(([name, s]) => `${name}: ${s.ok === null ? 'not run' : s.ok ? 'ok' : `failed (${s.code})`}`)
+    .join('; ');
+}
 
 export class PointFiveLiveAdapter {
   private readonly status: PointFiveStatus;
@@ -183,7 +204,7 @@ export class PointFiveLiveAdapter {
     return this.status.state === 'configured';
   }
 
-  async healthCheck(): Promise<SourceHealth> {
+  async healthCheck(): Promise<PointFiveSourceHealth> {
     const base = {
       sourceId: POINTFIVE_LIVE_SOURCE_ID,
       sourceVersion: POINTFIVE_FOCUS_VERSION,
@@ -193,19 +214,26 @@ export class PointFiveLiveAdapter {
 
     // Dark / unconfigured: honest state, no network call.
     if (this.status.state !== 'configured') {
-      return { ...base, reachable: false, authed: false, detail: pointFiveStatusNote(this.status) };
+      const detail = pointFiveStatusNote(this.status);
+      return { ...base, reachable: false, authed: false, detail, verification: 'not-configured' };
     }
 
     try {
-      const reachable = await this.buildTransport(this.status.credentials).ping();
-      return {
-        ...base,
-        reachable,
-        authed: reachable,
-        detail: reachable
-          ? 'PointFive MCP reachable; OAuth 2.1 authenticated.'
-          : 'PointFive MCP did not respond to the health probe.',
-      };
+      const transport = this.buildTransport(this.status.credentials);
+      if (transport.probe) {
+        const r = await transport.probe(validateOpportunity);
+        const session = r.stages.session.ok === true;
+        const why = r.reason ? ` (${r.reason})` : '';
+        const detail = `PointFive MCP ${STATE_TEXT[r.state]}${why}. ${stageSummary(r)}`;
+        return { ...base, reachable: session, authed: session, detail: redactErrorText(detail), verification: r.state, stages: r.stages };
+      }
+      // A ping-only transport proves an MCP session at most, never source access.
+      const session = await transport.ping();
+      const state: VerificationState = session ? 'auth-verified' : 'configured-not-verified';
+      const detail = session
+        ? 'PointFive MCP session initialized; tools and data stages not verified.'
+        : 'PointFive MCP session not established.';
+      return { ...base, reachable: session, authed: session, detail, verification: state };
     } catch (err) {
       // Never hang, never crash: a live failure becomes an honest health state.
       return {
@@ -213,6 +241,7 @@ export class PointFiveLiveAdapter {
         reachable: false,
         authed: false,
         detail: `PointFive MCP health check failed: ${redactErrorText(err)}`,
+        verification: 'configured-not-verified',
       };
     }
   }

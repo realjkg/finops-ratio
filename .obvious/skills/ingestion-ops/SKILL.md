@@ -1,6 +1,6 @@
 ---
 name: ingestion-ops
-description: Operate Ratio's trusted FOCUS ingestion worker (src/ingest) — migrate, provision a tenant/source, sync, backfill, replay/rollback, inspect runs and quarantine, doctor, replay-fixtures, and the manual real-export acceptance procedure (NOT YET PERFORMED). Local + ephemeral integration only.
+description: Operate Ratio's trusted FOCUS ingestion worker (src/ingest) — migrate, provision a tenant/source (SQL or `source add`), import an operator FOCUS file (`import-file`), sync, backfill, replay/rollback, inspect runs and quarantine, doctor, replay-fixtures, and the manual real-export acceptance procedure (NOT YET PERFORMED). Local + ephemeral integration only.
 version: 1.0.0
 triggers:
   - ingestion
@@ -12,6 +12,8 @@ triggers:
   - quarantine
   - worker doctor
   - replay-fixtures
+  - import-file
+  - source add
 author: slice-1-implementer
 created: 2026-10-03
 ---
@@ -51,8 +53,18 @@ Test-only (refused otherwise, and always refused when `RATIO_ENV` is `staging` o
 `RATIO_TEST_PAUSE_AFTER_ROWS` (only with `NODE_ENV=test`).
 
 Every command prints ONE evidence record on stdout (`{"type":"ratio.evidence", command, gitSha, artifactDigest, startedAt, finishedAt, results, pass, exitCode}`)
-and JSON logs on stderr. Exit codes: 0 ok · 1 failure (incl. quarantine) ·
-2 usage/config · 3 migrate status mismatch · 4 another run holds the lease (or its lock: `LOCK_TIMEOUT`).
+and JSON logs on stderr. Usage errors name the flag, never an argument value, and the
+record's `args` carry only validated values (`[invalid]` otherwise), a count of `--file`
+values (`files`), and a count of anything unrecognized (`unrecognizedArguments`).
+
+| Exit | Meaning |
+|---|---|
+| 0 | ok |
+| 1 | failure, including a quarantined or failed period |
+| 2 | usage or configuration error |
+| 3 | **depends on the command**: `migrate --status` = the database does not match the code (pending migrations); `import-file` = refused, `PERIOD_ALREADY_PUBLISHED` (the delivery would change an already-published period; nothing was written) |
+| 4 | busy: another run holds the source's lease (`ALREADY_RUNNING`), its lock timed out (`LOCK_TIMEOUT`), or, for `import-file`, another import of the source is in progress (`ALREADY_RUNNING`, nothing written) |
+| 5 | `import-file` only: the delivery is larger than the cap (`IMPORT_TOO_LARGE`, 128 MiB decompressed, all files together), refused before it is read |
 
 ## 1. Migrate
 
@@ -89,6 +101,20 @@ Expected bucket layout (AWS Data Exports, FOCUS 1.0, CSV + gzip):
 ```
 Exactly one `*Manifest.json` per period (more ⇒ `MANIFEST_AMBIGUOUS`); its
 `dataFiles` must stay inside that period's data folder of the same bucket.
+
+### 2a. `source add` (R3, operator file import)
+
+```bash
+RATIO_MIGRATE_DATABASE_URL=<owner url> npm run -s worker -- source add --tenant <uuid> --key focus-aws \
+  --providers AWS[,Microsoft,Google Cloud,Oracle] --bucket <bucket> [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>]
+```
+Runs as the owner login (the worker login cannot write tenants or sources). It
+creates the tenant if missing (slug `engagement-<first 8 hex>` unless
+`--tenant-slug`) and a `focus_file` source with layout `ratio-file-drop`
+(default prefix `ratio-file-drop`, export name = the key) and the declared
+providers (exact names, each once; others exit 2). Idempotent: the same
+declaration again is `unchanged` (exit 0); a different declaration for an
+existing key is refused `SOURCE_EXISTS_DIFFERENT` (exit 1).
 
 ## 3. Sync, backfill
 
@@ -127,6 +153,41 @@ npm run -s worker -- backfill --tenant <uuid> --source aws-focus --from 2026-01 
   again (an explicit re-ingest ignores the memo).
 - `RATIO_MAX_RUN_SECONDS` bounds the whole run, listing and every open
   included: a run past it fails `MAX_RUN_EXCEEDED`.
+
+## 3a. `import-file` (R3, operator FOCUS files)
+
+```bash
+npm run -s worker -- import-file --tenant <uuid> --source focus-aws --file <a.csv|a.csv.gz> [--file <b.csv>]... \
+  [--period YYYY-MM] [--control-billed <decimal> --currency <ISO 4217> [--control-rows <n>]] [--restate]
+```
+- All `--file` values form ONE delivery: the complete content of every billing
+  period it contains. Give every file its own `--file` (a shell glob after one
+  `--file` is a usage error, exit 2). `--period` stages only that month.
+- The files are staged into the source's `ratio-file-drop` layout and run
+  through the same pipeline as `backfill` (evidence, validation, declared-provider
+  check, quarantine, reconciliation, publish/supersede). Rows of providers the
+  source does not declare are excluded (`PROVIDER_MISMATCH`).
+- Identical re-import: `unchanged` (exit 0, no new batch).
+- A delivery that would change an already-published period (a later part of a
+  split file alone, stray rows of an earlier month, a corrected file) is refused
+  before anything is written: exit 3, `PERIOD_ALREADY_PUBLISHED`, with
+  `restatements` (published and staged row counts and billed totals). `--restate`
+  supersedes the published batch instead (retained, excluded from totals).
+- Without controls a period is `unverified` ("no control total supplied").
+  `--control-rows` needs `--control-billed`, which needs `--currency`; a
+  mismatch quarantines the period (`RECONCILIATION_VARIANCE`, exit 1). Controls
+  given with unchanged data are reported, and recorded only with `--restate`.
+- One import of a source at a time: the import holds a lock on the source from
+  before the restatement check until its sync ends. A second import meanwhile
+  exits 4 (`ALREADY_RUNNING`) having written nothing; run it again afterwards
+  (it then sees the first import's published content). A period whose staged
+  manifest was replaced by another writer fails `IMPORT_MANIFEST_REPLACED`
+  (exit 1, nothing published for it); an import never reports `published` for
+  data it did not stage.
+- The same bytes already imported under another source of the tenant with an
+  overlapping provider declaration: `DUPLICATE_ARTIFACT` (exit 1).
+- Over the cap: exit 5 before anything is read. File paths and names never
+  reach the record or the logs (only `files: <count>`).
 
 ## 4. Inspect runs, batches, quarantine
 

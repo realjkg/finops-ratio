@@ -59,6 +59,43 @@ describe('worker CLI (no database)', () => {
     }
   });
 
+  // R3 review round 2 (M4): a usage error names the flag, never an argument value (paths, typos, globs).
+  it('import-file usage errors never echo argument values: stray positionals, --flag=value, bad --period', async () => {
+    const P = '/home/operator/SECRET-DIR/b-SECRET-NAME.csv';
+    const base = ['import-file', '--tenant', T, '--source', 'focus-main'];
+    const cases: Array<[string[], RegExp]> = [
+      // A shell glob after --file expands to several positionals: only the first is the --file value.
+      [[...base, '--file', '/home/operator/SECRET-DIR/a.csv', P], /each file needs its own --file/],
+      [[...base, `--file=${P}`], /--file/],
+      [[...base, '--file', '/x.csv', '--period', P], /--period must be YYYY-MM/],
+      [[...base, '--file', '/x.csv', `--SECRET-NAME=${P}`], /unknown or unsupported argument/],
+      [[...base, '--file', '/x.csv', '--period', '2024-09', P], /unexpected argument/],
+    ];
+    for (const [argv, message] of cases) {
+      const r = await run(argv, { ...env, RATIO_ENV: 'test' });
+      expect(r.code, argv.join(' ')).toBe(2);
+      expect(r.out).toHaveLength(1);
+      const rec = JSON.parse(r.out[0]);
+      expect(rec.results.error.code).toBe('USAGE');
+      expect(rec.results.error.message, argv.join(' ')).toMatch(message);
+      const printed = r.out.concat(r.err).join('\n');
+      expect(printed, argv.join(' ')).not.toContain('SECRET');
+      expect(printed, argv.join(' ')).not.toContain('/home/operator');
+    }
+  });
+
+  it('the evidence record keeps only validated argument values (an invalid value is marked, not copied)', async () => {
+    const r = await run(['import-file', '--tenant', T, '--source', 'focus-main', '--file', '/a.csv', '--file', '/b.csv', '--period', '/SECRET/x.csv'], { ...env, RATIO_ENV: 'test' });
+    expect(r.code).toBe(2);
+    const rec = JSON.parse(r.out[0]);
+    expect(rec.args).toEqual({ tenant: T, source: 'focus-main', files: 2, period: '[invalid]' });
+    // Positionals, unknown flags and --flag=value are counted, never copied.
+    const g = await run(['import-file', '--tenant', T, '--source', 'focus-main', '--file', '/a.csv', '/SECRET/b.csv', '--bogus', 'SECRET-v', '--file=/SECRET/c.csv'], { ...env, RATIO_ENV: 'test' });
+    expect(g.code).toBe(2);
+    expect(JSON.parse(g.out[0]).args).toEqual({ tenant: T, source: 'focus-main', files: 1, unrecognizedArguments: 4 });
+    expect(g.out.concat(g.err).join('\n')).not.toContain('SECRET');
+  });
+
   it('missing RATIO_DATABASE_URL is a configuration error (exit 2)', async () => {
     const r = await run(['sync', '--tenant', T, '--source', 'focus-main'], {});
     expect(r.code).toBe(2);

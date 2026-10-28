@@ -54,7 +54,17 @@ export interface RunSyncOptions {
    * re-reconciled against the listing's set-level controls in a new batch keyed on (data, controls).
    */
   restateControls?: boolean;
+  /**
+   * `import-file` (R3 review round 2 B1): billing period -> sha256 of the manifest this import staged. A
+   * listed period whose manifest is not that one (another import replaced it at the period's one key), or
+   * that is not listed, fails IMPORT_MANIFEST_REPLACED and nothing is published for it.
+   */
+  expectManifests?: ReadonlyMap<string, string>;
 }
+
+export const MANIFEST_REPLACED = 'IMPORT_MANIFEST_REPLACED';
+const MANIFEST_REPLACED_MESSAGE =
+  "the period's manifest is not the one this import staged (another import of this source replaced it); nothing of this import was published for this period";
 
 const SOURCE_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 
@@ -208,6 +218,17 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
         }
       }
 
+      const notStagedHere = (period: string, m: { bytes: Buffer } | undefined) => {
+        const want = opts.expectManifests?.get(period);
+        return want !== undefined && (!m || crypto.createHash('sha256').update(m.bytes).digest('hex') !== want);
+      };
+      for (const period of opts.expectManifests?.keys() ?? []) {
+        if (!listings.some((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod) === period)) {
+          periods.push({ billingPeriod: period, outcome: 'failed', code: MANIFEST_REPLACED, message: MANIFEST_REPLACED_MESSAGE });
+          log('period.failed', { runId: lease.runId, period, code: MANIFEST_REPLACED });
+        }
+      }
+
       for (const listing of listings) {
         const period = listing.ok ? listing.set.billingPeriod : listing.billingPeriod;
         const manifest = listing.ok ? listing.set.manifest : listing.manifest;
@@ -219,6 +240,11 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
             periods.push({ billingPeriod: period, outcome: 'failed', code: errorCodeOf(e), message: clean(messageOf(e)) });
             continue;
           }
+        }
+        if (notStagedHere(period, manifest)) {
+          periods.push({ billingPeriod: period, outcome: 'failed', code: MANIFEST_REPLACED, message: MANIFEST_REPLACED_MESSAGE });
+          log('period.failed', { runId: lease.runId, period, code: MANIFEST_REPLACED });
+          continue;
         }
         if (runAbort.signal.aborted) {
         periods.push({ billingPeriod: period, outcome: 'failed', code: 'MAX_RUN_EXCEEDED', message: messageOf(runAbort.signal.reason) });
@@ -256,6 +282,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
                   // The re-listed manifest is what the batch will be built from: evidence first (review M1).
                   const freshManifest = fresh.ok ? fresh.set.manifest : fresh.manifest;
                   if (freshManifest) manifestEvidence.push(await captureManifest(opts.evidence, lease.tenantId, lease.sourceId, freshManifest.bytes, runAbort.signal, manifestWatch));
+                  if (notStagedHere(period, freshManifest)) throw new IngestError(MANIFEST_REPLACED, MANIFEST_REPLACED_MESSAGE);
                   if (!fresh.ok) throw new IngestError(fresh.code, clean(fresh.message));
                   set = fresh.set;
                   log('period.relisted', { runId: lease.runId, period });
