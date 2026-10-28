@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 // The acceptance run's own lossless proof (scripts/local/acceptance.mjs), reused unchanged.
 import { verifyStagingLossless } from '../../../scripts/local/acceptance.mjs';
 import { dataPrefix, parseManifest, periodMetadataPrefix, type ListingEntry } from '../sources/s3/layout';
-import { MAX_IMPORT_BYTES, STAGE_RSS_BUDGET_BYTES, decodeImportFile, stageFile, type StagedFile } from './stageFile';
+import { MAX_IMPORT_BYTES, IMPORT_RSS_BUDGET_BYTES, decodeImportFile, stageFile, type StagedFile } from './stageFile';
 
 const SAMPLE = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'fixtures', 'focus-1.0-sample', 'focus_sample.csv'));
 const CONTROLS = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'fixtures', 'focus-1.0-sample', 'control-totals.json'), 'utf8'))['1k'];
@@ -35,7 +35,7 @@ describe('R3 stageFile: the public 1000-row sample', () => {
     ]);
     expect(staged.periods.reduce((n, p) => n + p.records, 0)).toBe(CONTROLS.input.dataRows);
     expect(verifyStagingLossless(SAMPLE, staged.plan)).toEqual([]);
-    expect(staged.files).toEqual([{ name: 'file', sha256: CONTROLS.input.sha256, dataRows: 1000 }]);
+    expect(staged.files).toEqual([{ name: 'file', sha256: CONTROLS.input.sha256, dataRows: 1000, bytes: SAMPLE.length }]);
     expect(Object.values(staged.nullTokensReplaced).reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
     // The uploaded objects are exactly the verified plan (header + that period's records), gzipped.
     for (const o of staged.objects.filter((x) => x.kind === 'data')) {
@@ -278,9 +278,9 @@ describe('R3 stageFile review: bounded memory', () => {
   it('the RSS budget leaves a quarter of the worker container limit (compose.yaml) as margin', () => {
     const compose = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'infrastructure', 'engagement', 'compose.yaml'), 'utf8');
     const worker = compose.slice(compose.indexOf('\n  worker:'));
-    const m = /\n    mem_limit: ([0-9]+)m\n/.exec(worker)!;
-    expect(STAGE_RSS_BUDGET_BYTES).toBeLessThanOrEqual(Number(m[1]) * 1024 * 1024 * 0.75);
-    expect(MAX_IMPORT_BYTES).toBeLessThan(STAGE_RSS_BUDGET_BYTES);
+    const m = /\n {4}mem_limit: ([0-9]+)m\n/.exec(worker)!;
+    expect(IMPORT_RSS_BUDGET_BYTES).toBeLessThanOrEqual(Number(m[1]) * 1024 * 1024 * 0.75);
+    expect(MAX_IMPORT_BYTES).toBeLessThan(IMPORT_RSS_BUDGET_BYTES);
   });
 
   // The real staging path (read, decode, stage) on a SYNTHETIC file just under the cap, built by repeating the
@@ -303,7 +303,7 @@ describe('R3 stageFile review: bounded memory', () => {
         expect(r.status, r.stderr.slice(-2000)).toBe(0);
         const out = JSON.parse(r.stdout.trim().split('\n').pop()!);
         expect(out.bytes).toBe(size);
-        expect(out.maxRssBytes).toBeLessThanOrEqual(STAGE_RSS_BUDGET_BYTES);
+        expect(out.maxRssBytes).toBeLessThanOrEqual(IMPORT_RSS_BUDGET_BYTES);
       } finally {
         fs.rmSync(dir, { recursive: true, force: true });
       }

@@ -51,15 +51,15 @@ export function normalizerFor(sourceKind: string, schemaVersion: string): Native
   return n;
 }
 
-/** Collects a stream, refusing more than `max` bytes. */
+/** Collects a stream, refusing more than `max` bytes; a single chunk is returned without a copy (review B2). */
 export async function collect(stream: Readable, max: number): Promise<Buffer> {
   const parts: Buffer[] = [];
   let n = 0;
   for await (const chunk of stream) {
     const b = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     n += b.length;
-    if (n > max) throw new IngestError('IMPORT_FILE_INVALID', `the delivery is larger than ${max} bytes`);
+    if (n > max) throw new IngestError('IMPORT_TOO_LARGE', `the delivery is larger than the import cap of ${max} bytes`);
     parts.push(b);
   }
-  return Buffer.concat(parts);
+  return parts.length === 1 ? parts[0] : Buffer.concat(parts, n);
 }

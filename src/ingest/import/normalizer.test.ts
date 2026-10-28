@@ -27,6 +27,6 @@ describe('R3 NativeNormalizer registry', () => {
   });
 
   it('collect refuses a stream over its byte cap', async () => {
-    await expect(collect(Readable.from([Buffer.alloc(60), Buffer.alloc(60)]), 100)).rejects.toMatchObject({ code: 'IMPORT_FILE_INVALID' });
+    await expect(collect(Readable.from([Buffer.alloc(60), Buffer.alloc(60)]), 100)).rejects.toMatchObject({ code: 'IMPORT_TOO_LARGE' });
   });
 });

@@ -3,18 +3,19 @@
 // real S3 (SeaweedFS). Fixture: the public FOCUS 1.0 Sample Data. The sample is
 // an EXTRACT: its totals are reconciled only against the control totals computed
 // for this exact file (control-totals.json "1k"), never against an assumed bill.
+import { spawnSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import zlib from 'zlib';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { workerTestDb, type WorkerTestDb } from '../testing/workerSetup';
 import { batchesOf, createLogin, publishedTotals, type Login } from '../testing/db';
 import { createTestBucket, requireTestS3Endpoint, testS3Env, type TestBucket } from '../testing/s3';
 import { cli } from '../testing/cli';
 import { generateSyntheticExport } from '../fixtures/syntheticFocus';
-import { MAX_IMPORT_BYTES } from './stageFile';
+import { IMPORT_RSS_BUDGET_BYTES, MAX_IMPORT_BYTES } from './stageFile';
 
 requireTestS3Endpoint();
 
@@ -249,7 +250,7 @@ describe('R3 import-file (public FOCUS 1.0 sample)', () => {
     const l = lines();
     const a = path.join(tmp, `part1-${crypto.randomUUID()}.csv`);
     const b = path.join(tmp, `part2-${crypto.randomUUID()}.csv`);
-    fs.writeFileSync(a, `${[l[0], ...l.slice(2, 500)].join('\n')}\n`);
+    fs.writeFileSync(a, `${[l[0], ...l.slice(1, 500)].join('\n')}\n`);
     fs.writeFileSync(b, `${[l[0], ...l.slice(500)].join('\n')}\n`);
     return [a, b];
   }
@@ -262,7 +263,7 @@ describe('R3 import-file (public FOCUS 1.0 sample)', () => {
     const [a, b] = parts();
     const ctl = ['--control-rows', AWS_SEP.rowCount, '--control-billed', AWS_SEP.billedCost, '--currency', 'USD'];
     const r = await cli(['import-file', '--tenant', tenant, '--source', 'focus-aws', '--file', a, '--file', b, '--period', '2024-09', ...ctl], env());
-    expect(r.code).toBe(0);
+    expect(r.code, JSON.stringify(r.record.results).slice(0, 2000)).toBe(0);
     expect(periodsOf(r)).toEqual([expect.objectContaining({ billingPeriod: '2024-09-01', outcome: 'published', reconciliation: 'reconciled', rowCount: AWS_SEP.rowCount, billedTotal: AWS_SEP.billedCost })]);
     expect((r.record.results as { files: unknown[] }).files).toHaveLength(2);
     expect(await publishedTotals(t.db.pool, tenant, await sourceId(tenant, 'focus-aws'))).toEqual({ '2024-09-01': { rows: Number(AWS_SEP.rowCount), total: AWS_SEP.billedCost } });
@@ -306,7 +307,10 @@ describe('R3 import-file (public FOCUS 1.0 sample)', () => {
     const before = await publishedTotals(t.db.pool, tenant, sid);
     const l = lines();
     const stray = path.join(tmp, `stray-${tenant}.csv`);
-    fs.writeFileSync(stray, `${[l[0], l[1], l[2]].join('\n')}\n`);
+    // Two September rows plus the one October row (the only record whose BillingPeriodEnd is 2024-11-01).
+    const october = l.findIndex((x) => x.includes('"2024-11-01 00:00:00"'));
+    expect(october).toBeGreaterThan(0);
+    fs.writeFileSync(stray, `${[l[0], ...l.slice(1, 3).filter((_, i) => i + 1 !== october), l[october]].join('\n')}\n`);
     const r = await cli(['import-file', '--tenant', tenant, '--source', 'focus-ao', '--file', stray], env());
     expect(r.code).toBe(3);
     expect(restatementsOf(r).map((x) => x.billingPeriod)).toEqual(['2024-09-01']);
@@ -382,9 +386,42 @@ describe('R3 import-file (public FOCUS 1.0 sample)', () => {
     const big = path.join(tmp, `sparse-${tenant}.csv`);
     fs.closeSync(fs.openSync(big, 'w'));
     fs.truncateSync(big, MAX_IMPORT_BYTES + 1); // sparse: no disk blocks, and never read
+    const read = vi.spyOn(fs, 'readFileSync');
     const r = await cli(['import-file', '--tenant', tenant, '--source', 'focus-aws', '--file', big], env());
+    expect(read.mock.calls.filter((c) => c[0] === big)).toEqual([]);
+    read.mockRestore();
     expect(r.code).toBe(5);
     expect(r.record.results).toMatchObject({ error: { code: 'IMPORT_TOO_LARGE' } });
     expect((r.record.results as { error: { message: string } }).error.message).toContain(String(MAX_IMPORT_BYTES));
   });
+
+  it(
+    'B2: the real import-file path just under the cap fits the worker container: a child with --max-old-space-size=192 stays within the RSS budget',
+    async () => {
+      const tenant = newTenant();
+      expect((await addSource(tenant, 'focus-aws', 'AWS')).code).toBe(0);
+      // SYNTHETIC: the public sample's records repeated (row values unchanged) up to the cap.
+      const sample = fs.readFileSync(SAMPLE_FILE);
+      const body = sample.subarray(sample.indexOf(10) + 1);
+      const file = path.join(tmp, `near-cap-${tenant}.csv`);
+      const fd = fs.openSync(file, 'w');
+      let size = fs.writeSync(fd, sample.subarray(0, sample.indexOf(10) + 1));
+      let copies = 0;
+      for (; size + body.length <= MAX_IMPORT_BYTES - 1024; copies++) size += fs.writeSync(fd, body);
+      fs.closeSync(fd);
+      try {
+        const child = path.resolve(__dirname, '..', 'testing', 'rssCli.ts');
+        const argv = ['import-file', '--tenant', tenant, '--source', 'focus-aws', '--file', file, '--period', '2024-09'];
+        const r = spawnSync(process.execPath, ['--max-old-space-size=192', '--import', 'tsx', child, ...argv], { env: { ...process.env, ...env() }, encoding: 'utf8', timeout: 280_000, maxBuffer: 64 * 1024 * 1024 });
+        const rss = JSON.parse(/RSS (\{.*\})/.exec(r.stderr)?.[1] ?? 'null');
+        expect(rss, r.stderr.slice(-2000)).toMatchObject({ code: 0 });
+        const record = JSON.parse(r.stdout.trim().split('\n').pop()!);
+        expect(record.results.periods).toEqual([expect.objectContaining({ billingPeriod: '2024-09-01', outcome: 'published', rowCount: String(Number(AWS_SEP.rowCount) * copies) })]);
+        expect(rss.maxRssBytes).toBeLessThanOrEqual(IMPORT_RSS_BUDGET_BYTES);
+      } finally {
+        fs.rmSync(file, { force: true });
+      }
+    },
+    300_000,
+  );
 });

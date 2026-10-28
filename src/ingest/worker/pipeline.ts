@@ -49,6 +49,11 @@ export interface RunSyncOptions {
   log?: LogFn;
   /** Extra literal secrets to redact from anything persisted. */
   secrets?: readonly string[];
+  /**
+   * `import-file --restate` (R3 review M3): an UNVERIFIED published batch whose data is unchanged is
+   * re-reconciled against the listing's set-level controls in a new batch keyed on (data, controls).
+   */
+  restateControls?: boolean;
 }
 
 const SOURCE_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
@@ -243,7 +248,7 @@ export async function runSync(opts: RunSyncOptions): Promise<RunResult> {
           const result = await withRetry(
             async () => {
               try {
-                return await processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow, rejected: prev?.rejected });
+                return await processPeriod({ pool: opts.pool, lease, source, evidence: opts.evidence, set, settings, hooks, log, mode: opts.mode, maybeHeartbeat, progress, signal: runAbort.signal, clean, sourceRow, rejected: prev?.rejected, restateControls: opts.restateControls === true });
               } catch (e) {
                 if (e instanceof IngestError && e.code === 'SOURCE_CHANGED') {
                   const fresh = (await source.listPeriods({ from: period, to: period }, { signal: runAbort.signal, progress })).find((l) => (l.ok ? l.set.billingPeriod : l.billingPeriod) === period);
@@ -320,7 +325,10 @@ interface PeriodCtx {
   sourceRow: SourceRow;
   /** The period's checkpointed capture-time rejection, if any (challenger L3). */
   rejected?: RejectedListing;
+  restateControls?: boolean;
 }
+
+type BatchRow = { id: string; status: string; row_count: string; total: string; reconciliation: string; quarantine_reason: string | null; fingerprint: string };
 
 /** The one quarantine cause that depends on the CONTROLS rather than the data. */
 const CONTROL_QUARANTINE_CODE = 'RECONCILIATION_VARIANCE';
@@ -424,11 +432,11 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
   const findBatch = (fp: string) =>
     workerTransaction(ctx.pool, lease.tenantId, async (c) => {
       const r = await c.query(
-        `SELECT id::text, status, row_count::text AS row_count, loaded_billed_total::text AS total, reconciliation, quarantine_reason
+        `SELECT id::text, status, row_count::text AS row_count, loaded_billed_total::text AS total, reconciliation, quarantine_reason, artifact_set_fingerprint AS fingerprint
          FROM ratio.ingest_batches WHERE source_id = $1 AND billing_period = $2 AND artifact_set_fingerprint = $3`,
         [lease.sourceId, period, fp],
       );
-      return r.rows[0] as { id: string; status: string; row_count: string; total: string; reconciliation: string; quarantine_reason: string | null } | undefined;
+      return r.rows[0] as BatchRow | undefined;
     });
 
   // Existing batch for exactly this artifact set? A batch is keyed on its DATA
@@ -449,6 +457,29 @@ async function processPeriod(ctx: PeriodCtx): Promise<PeriodResult> {
       existing = await findBatch(fingerprint);
       ctx.log('period.rereconcile', { runId: lease.runId, period, quarantinedBatchId });
     }
+  }
+  // R3 review M3. A batch re-keyed on (data, controls) by `import-file --restate` supersedes the plain-data
+  // batch: a later plain re-delivery of the same data stays with it (unchanged), never republishes the old one.
+  if (existing?.status === 'superseded') {
+    const shas = [...new Set(captured.map((c) => c.sha256))].sort();
+    const current = await workerTransaction(ctx.pool, lease.tenantId, async (c) => {
+      const r = await c.query(
+        `SELECT b.id::text, b.status, b.row_count::text AS row_count, b.loaded_billed_total::text AS total, b.reconciliation, b.quarantine_reason, b.artifact_set_fingerprint AS fingerprint
+         FROM ratio.ingest_batches b WHERE b.source_id = $1 AND b.billing_period = $2 AND b.status = 'published'
+           AND (SELECT array_agg(DISTINCT a.sha256 ORDER BY a.sha256) FROM ratio.ingest_artifacts a WHERE a.tenant_id = b.tenant_id AND a.batch_id = b.id) = $3::text[]`,
+        [lease.sourceId, period, shas],
+      );
+      return r.rows[0] as BatchRow | undefined;
+    });
+    if (current) {
+      existing = current;
+      fingerprint = current.fingerprint;
+    }
+  }
+  if (ctx.restateControls && existing?.status === 'published' && existing.reconciliation !== 'reconciled' && hasSetControl(control)) {
+    fingerprint = crypto.createHash('sha256').update(`${dataFingerprint}\ncontrols:${currentControls}`).digest('hex');
+    existing = await findBatch(fingerprint);
+    ctx.log('period.restate_controls', { runId: lease.runId, period });
   }
   const entry = (batchId: string) => (): CheckpointEntry => ({ fingerprint, listing: set.listingFingerprint, batchId, pinned: false });
 
