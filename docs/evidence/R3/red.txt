@@ -14,3 +14,5 @@ $ npx vitest run --config vitest.db.config.ts src/ingest/import/importFile.db.te
   Tests 10 failed | 7 passed (17): B1 several --file as one delivery, part-by-part refusal + --restate report,
   stray earlier-period rows, restatement needs --restate; M1 disjoint providers allowed; M2 rows-only usage;
   M3 controls on unchanged data; M4 no file names in the record; B2 over-cap refused (exit 5).
+  Then (gzip path): near-cap .csv.gz staging peaked at 403009536 bytes RSS (> 402653184 budget): gunzipSync
+  holds its output chunks and their concatenation at once. RED test added before the fix.

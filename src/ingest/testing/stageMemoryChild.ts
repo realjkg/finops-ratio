@@ -4,6 +4,7 @@
 import { stageLocalFiles } from '../import/importFile';
 
 const file = process.argv[2];
-const staged = stageLocalFiles([file], { location: { bucket: 'ratio-mem-test', prefix: 'mem', exportName: 'mem' }, providers: ['AWS'] });
-const bytes = staged.files.reduce((n, f) => n + f.bytes, 0);
-process.stdout.write(`${JSON.stringify({ bytes, periods: staged.periods.length, maxRssBytes: process.resourceUsage().maxRSS * 1024 })}\n`);
+void Promise.resolve(stageLocalFiles([file], { location: { bucket: 'ratio-mem-test', prefix: 'mem', exportName: 'mem' }, providers: ['AWS'] })).then((staged) => {
+  const bytes = staged.files.reduce((n, f) => n + f.bytes, 0);
+  process.stdout.write(`${JSON.stringify({ bytes, periods: staged.periods.length, maxRssBytes: process.resourceUsage().maxRSS * 1024 })}\n`);
+});
