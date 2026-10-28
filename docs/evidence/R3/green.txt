@@ -18,3 +18,15 @@ Mutations (each applied alone, then reverted):
   M4 metadata control applied to any staged period set    -> 1 db failed
   M5 flag/record control conflict not checked             -> 1 db failed
   M6 overlap related_source not required to exist         -> 1 db failed
+
+Review round 1 (PR #145) GREEN, after merging the reviewed #143 branch (conflicts in stageFile.ts, importFile.ts
+and workerCli.ts resolved by re-applying the metadata record, scope check, metadata control and overlap on top):
+  metadata.test.ts 14/14, importMetadata.db.test.ts 11/11, importFile.db.test.ts 18/18.
+  Gates: lint 0; tsc app 0; tsc worker 0; full vitest 218 files / 4011 tests; build 0;
+  npm run test:db (Postgres 16 + SeaweedFS, CI digests, non-default ports) 41 files / 688 + serial 6 / 173.
+  B3 repro (record billed_cost_total 99.00 USD + --control-rows 942, 2024-09): quarantined RECONCILIATION_VARIANCE
+  with controls 942 / 99.00 recorded, never reconciled. Overlap stays CLI output only (R4 dependency), marked
+  by overlapNotice "OVERLAP: ... COUNTED TWICE", the period's overlapWarning and a warn log line.
+  Mutations (each alone, reverted), all KILLED: providers.length guard, one-month slack, overlap includes the
+  importing source, B3 merge removed, B3 conflict removed, B3 block removed (old behavior), overlapNotice
+  dropped, metadata path echoed.
