@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { parse as parseCsv } from 'csv-parse/sync';
 import { parseImportMetadata, sameDecimal, scopeWindow } from './metadata';
 import { stageFile } from './stageFile';
+import { metadataControl } from './importFile';
 
 const DIR = path.resolve(__dirname, '..', '..', '..', 'fixtures', 'focus-1.0-sample');
 const META_BYTES = fs.readFileSync(path.join(DIR, 'metadata.json'));
@@ -147,5 +148,26 @@ describe('R3 declared scope: charge periods must fall inside period_start..perio
   it('honors the declared timezone: midnight in New York starts four hours after midnight UTC', () => {
     expect(scope({ timezone: 'America/New_York' }).startMs - scope({}).startMs).toBe(4 * 3600_000);
     expect(() => stageFile(SAMPLE, { location: LOC, scope: scope({ timezone: 'America/New_York' }) })).toThrow(expect.objectContaining({ code: 'IMPORT_SCOPE_VIOLATION' }));
+  });
+});
+
+// Review round 1 (PR #145): the record's billed total is a control for exactly one billing month of ONE provider.
+describe('R3 metadataControl', () => {
+  const scope = (s: Record<string, unknown>) => ({ ...META, scope: { ...META.scope, ...s } });
+  it('applies to one month, allowing a zone offset of up to 14 hours past the month end', () => {
+    // Inclusive 2024-09-30 in UTC-12 ends 2024-10-01T12:00Z: still one billing month.
+    const west = metadataControl(scope({ period_end: '2024-09-30', period_end_semantics: 'inclusive', timezone: 'Etc/GMT+12' }), ['AWS'], undefined);
+    expect(west).toMatchObject({ period: '2024-09-01', control: { billedTotal: META.financial.billed_cost_total.USD, currency: 'USD' } });
+    // One more day is a second month: no control, a reason.
+    const longer = metadataControl(scope({ period_end: '2024-10-01', period_end_semantics: 'inclusive' }), ['AWS'], undefined);
+    expect(longer.control).toBeUndefined();
+    expect(longer.note).toMatch(/more than one billing month/);
+  });
+
+  it('never applies when the source declares more than one provider (the total covers the record provider only)', () => {
+    const r = metadataControl(META, ['AWS', 'Microsoft'], undefined);
+    expect(r.control).toBeUndefined();
+    expect(r.note).toMatch(/several currencies or providers/);
+    expect(metadataControl(META, ['AWS'], undefined).control).toBeDefined();
   });
 });

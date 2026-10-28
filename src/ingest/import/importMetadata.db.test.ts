@@ -146,4 +146,50 @@ describe('R3 import-file --metadata', () => {
     const r = await cli(importArgs(tenant, 'focus-aws', ['--period', '2024-09']), env());
     expect(results(r).periods[0]).toMatchObject({ reconciliation: 'reconciled' });
   });
+
+  // Review round 1 (PR #145).
+  it('B3: a rows-only flag control never overrides the record billed total: 99.00 + --control-rows 942 is NOT reconciled', async () => {
+    const tenant = crypto.randomUUID();
+    expect((await addSource(tenant, 'focus-aws', 'AWS')).code).toBe(0);
+    const wrong = writeMeta({ ...META, financial: { ...META.financial, billed_cost_total: { USD: '99.00' } } });
+    const r = await cli(importArgs(tenant, 'focus-aws', ['--period', '2024-09', '--metadata', wrong, '--control-rows', '942']), env());
+    expect(r.code).toBe(1);
+    expect(results(r).periods).toEqual([expect.objectContaining({ billingPeriod: '2024-09-01', outcome: 'quarantined', code: 'RECONCILIATION_VARIANCE', reconciliation: 'variance' })]);
+    const sid = (await t.db.pool.query(`SELECT id::text FROM ratio.sources WHERE tenant_id = $1`, [tenant])).rows[0].id;
+    expect((await batchesOf(t.db.pool, tenant, sid)).map((b) => [b.status, b.control_rows, b.control_total])).toEqual([['quarantined', '942', '99.00']]);
+  });
+
+  it('B3: rows-only flags merge with a matching record billed total (both recorded, reconciled); a record total that cannot apply is IMPORT_CONTROL_CONFLICT', async () => {
+    const tenant = crypto.randomUUID();
+    expect((await addSource(tenant, 'focus-aws', 'AWS')).code).toBe(0);
+    const ok = await cli(importArgs(tenant, 'focus-aws', ['--period', '2024-09', '--metadata', META_FILE, '--control-rows', '942']), env());
+    expect(ok.code).toBe(0);
+    expect(results(ok).periods[0]).toMatchObject({ outcome: 'published', reconciliation: 'reconciled' });
+    const sid = (await t.db.pool.query(`SELECT id::text FROM ratio.sources WHERE tenant_id = $1`, [tenant])).rows[0].id;
+    expect((await batchesOf(t.db.pool, tenant, sid)).map((b) => [b.control_rows, b.control_total])).toEqual([['942', META.financial.billed_cost_total.USD]]);
+    const twoMonths = writeMeta({ ...META, scope: { ...META.scope, period_end: '2024-11-01' } });
+    const conflict = await cli(importArgs(tenant, 'focus-aws', ['--period', '2024-09', '--metadata', twoMonths, '--control-rows', '942']), env());
+    expect([conflict.code, results(conflict).error?.code]).toEqual([2, 'IMPORT_CONTROL_CONFLICT']);
+  });
+
+  it('overlap: marked prominently (overlapNotice, the period, a warn log line) and never names the importing source itself', async () => {
+    const tenant = crypto.randomUUID();
+    expect((await addSource(tenant, 'focus-a', 'AWS')).code).toBe(0);
+    expect((await addSource(tenant, 'focus-b', 'AWS')).code).toBe(0);
+    expect((await cli(importArgs(tenant, 'focus-a', ['--period', '2024-09']), env())).code).toBe(0);
+    const lines = fs.readFileSync(SAMPLE_FILE, 'utf8').split('\n');
+    const msRow = lines.findIndex((l) => l.includes(',"Microsoft",'));
+    const other = path.join(tmp, `other-${tenant}.csv`);
+    fs.writeFileSync(other, lines.filter((_, i) => i !== msRow).join('\n'));
+    // The importing source's own published batch is not an overlap (restating focus-a with other bytes).
+    const self = await cli(importArgs(tenant, 'focus-a', ['--period', '2024-09', '--restate'], other), env());
+    expect(self.code).toBe(0);
+    expect(results(self).overlapWarnings).toEqual([]);
+    expect((self.record.results as { overlapNotice: unknown }).overlapNotice).toBeNull();
+    const b = await cli(importArgs(tenant, 'focus-b', ['--period', '2024-09']), env());
+    expect(b.code).toBe(0);
+    expect((b.record.results as { overlapNotice: string }).overlapNotice).toMatch(/^OVERLAP: 1 .*COUNTED TWICE/);
+    expect(results(b).periods[0]).toMatchObject({ overlapWarning: expect.stringContaining('COUNTED TWICE') });
+    expect(b.err.some((l) => JSON.parse(l).event === 'import.overlap' && JSON.parse(l).level === 'warn')).toBe(true);
+  });
 });

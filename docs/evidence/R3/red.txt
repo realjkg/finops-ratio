@@ -5,3 +5,10 @@ $ npx vitest run src/ingest/import/metadata.test.ts
   Test Files 1 failed (1): ./metadata does not exist (tests not collected).
 $ npx vitest run --config vitest.db.config.ts src/ingest/import/importMetadata.db.test.ts   (local Postgres 16 + SeaweedFS)
   Test Files 1 failed (1); Tests 8 failed (8): --metadata is an unknown argument.
+
+Review round 1 (PR #145) RED, after merging the reviewed #143 branch:
+$ npx vitest run --config vitest.db.config.ts src/ingest/import/importMetadata.db.test.ts
+  Tests 2 failed | 9 passed (11): B3 rows-only flag control + record billed total 99.00 must not reconcile
+  (now refused as usage by the M2 rule instead of reconciling as on the old head), and the matching merge.
+  metadata.test.ts 14/14: the providers.length and one-month-slack cases pass on the old code (mutation killers);
+  the overlap self-exclusion/prominence case passes on the merge (the notice came with the conflict resolution).

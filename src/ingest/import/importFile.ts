@@ -117,7 +117,7 @@ const fail = (code: string, m: string): never => {
 };
 
 /** The metadata record's control for one billing month, or a note why it cannot be one. */
-function metadataControl(m: ImportMetadata, providers: readonly string[], flags: StageControl | undefined): { period?: string; control?: StageControl; note?: string } {
+export function metadataControl(m: ImportMetadata, providers: readonly string[], flags: StageControl | undefined): { period?: string; control?: StageControl; note?: string } {
   const bt = m.financial.billed_cost_total;
   if (bt === 'unknown') return {};
   if (flags?.billedTotal !== undefined && (bt[flags.currency!] === undefined || !sameDecimal(bt[flags.currency!], flags.billedTotal))) {
