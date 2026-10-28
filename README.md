@@ -344,6 +344,57 @@ preserved as an ephemeral Obvious artifact (point-in-time snapshot), not checked
 into the repo — see the `doc-authoring` skill for this workflow.
 
 
+## Engagement mode
+
+Ratio 1.0 as a single-customer engagement tool: an operator imports authorized billing **files**, reviewers
+sign in as named users and read cost, coverage and reconciliation. Engagement mode is selected with
+`RATIO_MODE=engagement` and one read-only JSON file, `RATIO_ENGAGEMENT_CONFIG` (schema: `src/engagement/config.ts`).
+The instance refuses to start on an invalid config and names the offending key, never its value.
+
+### Install
+
+Requires Docker with the Compose plugin. Everything runs from one image (`infrastructure/simulation/Dockerfile`,
+target `engagement`: production mode, non-root, read-only root filesystem, all capabilities dropped, `/state` the
+only writable volume). Postgres 16 and SeaweedFS are pinned by digest. The app listens on `127.0.0.1` only.
+
+```bash
+cp .env.engagement.example .env.engagement        # fill in URL-safe passwords and the two file paths
+export C="docker compose --env-file .env.engagement -f infrastructure/engagement/compose.yaml"
+$C up -d postgres s3
+$C --profile jobs run --rm migrator               # applies the database migrations
+$C up -d --build app                              # http://127.0.0.1:3100
+$C --profile jobs run --rm worker doctor          # worker health check; any worker command works the same way
+```
+
+The database roles (`ratio_owner`, `ratio_worker`, `ratio_reader`) and the three logins named in
+`infrastructure/engagement/compose.yaml` must exist before the first migration; see "Coming from other rows".
+
+### Configure
+
+`RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config) and `RATIO_ENGAGEMENT_USERS_FILE` (named users) are
+mounted read-only at `/config/`. Edit them on the host and run `$C up -d app`; the container reads them at start.
+
+### Use
+
+View: open the app on the loopback port and sign in. Import a billing file: see "Coming from other rows".
+The existing worker commands (`sync`, `replay`, `quarantine show`, `doctor`) run through `$C --profile jobs run --rm worker <command>`.
+
+### Known limitations
+
+- File import only: there are no live provider connectors in this release.
+- One engagement per instance: run a second instance for a second customer.
+- FOCUS parsing is verified on real exports for 1.0 only; FOCUS 1.1 to 1.4 have synthetic fixtures only.
+- The base image tag is not pinned by digest (shared with the simulation image); the Postgres and SeaweedFS images are.
+- The bundled object store has no access control and is reachable only from the internal compose network.
+
+### Coming from other rows
+
+To be filled in by those rows; the commands do not exist yet.
+
+- Import a billing file (operator CLI, row R3).
+- Init, backup, restore and reset (operator lifecycle command, row R11), including database role creation.
+- Named users file format and sign-in (row R2).
+
 ## Saved customer workflow simulation
 
 Requires Node 22.13+ (built-in SQLite; see Quick start). Run `npm ci`, then `npm run simulation:start`,

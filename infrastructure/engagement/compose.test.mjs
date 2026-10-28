@@ -102,7 +102,7 @@ describe('engagement compose', () => {
   it('requires secrets from the environment and holds no literal credential', () => {
     const text = read('infrastructure/engagement/compose.yaml');
     expect(text).toMatch(/\$\{RATIO_ENGAGEMENT_PG_SUPERUSER_PASSWORD:\?/);
-    expect(text).not.toMatch(/PASSWORD:\s*[^$\s"']/);
+    expect(text).not.toMatch(/PASSWORD:\s+[^$\s"']/);
     expect(text).not.toMatch(/POSTGRES_HOST_AUTH_METHOD/);
   });
 
@@ -159,7 +159,7 @@ describe('engagement docs and smoke prerequisite', () => {
     expect(section).toMatch(/file import only/i);
     expect(section).toMatch(/one engagement per instance/i);
     expect(section).toMatch(/FOCUS.*verified.*real exports.*1\.0 only/is);
-    expect(section).toMatch(/synthetic fixtures.*1\.1.*1\.4/is);
+    expect(section).toMatch(/FOCUS 1\.1 to 1\.4 have synthetic fixtures only/);
     expect(section).toMatch(/### Coming from other rows/);
   });
 

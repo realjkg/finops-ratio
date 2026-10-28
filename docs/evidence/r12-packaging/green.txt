@@ -1,0 +1,1 @@
+GREEN: npx vitest run infrastructure/engagement -> 16 passed. Mutations (unpinned image, public port, writable rootfs, simulation var, missing worker:build, partial cap_drop) each fail the suite.
