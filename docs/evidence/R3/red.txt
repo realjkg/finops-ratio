@@ -1,50 +1,14 @@
-R3 part 2 (source add, import-file, stageAndSync, normalizer seam) RED, 2026-10-28,
-on top of R3 part 1 (feat/r3-file-import-staging). Tests committed before the implementation.
+R3 part 3 (implementation-metadata record, declared scope, overlap) RED, 2026-10-28,
+on top of R3 part 2 (feat/r3-import-file-cli). Tests committed before the implementation.
 
-$ npx vitest run src/ingest/import/normalizer.test.ts
-  Test Files 1 failed (1): ./normalizer does not exist (4 tests not collected).
-$ npx vitest run --config vitest.db.config.ts src/ingest/import/importFile.db.test.ts   (local Postgres 16 + SeaweedFS)
-  Test Files 1 failed (1); Tests 9 failed (9): `source add` and `import-file` are unknown commands.
+$ npx vitest run src/ingest/import/metadata.test.ts
+  Test Files 1 failed (1): ./metadata does not exist (tests not collected).
+$ npx vitest run --config vitest.db.config.ts src/ingest/import/importMetadata.db.test.ts   (local Postgres 16 + SeaweedFS)
+  Test Files 1 failed (1); Tests 8 failed (8): --metadata is an unknown argument.
 
-Review round 1 (PR #143) RED, after merging the reviewed #142 branch (and origin/main 3fa927b):
-$ npx vitest run src/ingest/import/stageFile.test.ts
-  Tests 5 failed | 21 passed (26): declared-provider preview, bounded gzip members, IMPORT_TOO_LARGE cap,
-  RSS budget vs the worker mem_limit, near-cap staging under --max-old-space-size=96.
-$ npx vitest run --config vitest.db.config.ts src/ingest/import/importFile.db.test.ts
-  Tests 10 failed | 7 passed (17): B1 several --file as one delivery, part-by-part refusal + --restate report,
-  stray earlier-period rows, restatement needs --restate; M1 disjoint providers allowed; M2 rows-only usage;
-  M3 controls on unchanged data; M4 no file names in the record; B2 over-cap refused (exit 5).
-  Then (gzip path): near-cap .csv.gz staging peaked at 403009536 bytes RSS (> 402653184 budget): gunzipSync
-  holds its output chunks and their concatenation at once. RED test added before the fix.
-
-Review round 2 (PR #143) RED, after merging origin/main (#142 squash 5bb8c21) into the branch:
-$ npx vitest run --config vitest.db.config.ts src/ingest/import/importRace.db.test.ts   (Postgres 16 + SeaweedFS)
-  Tests 3 failed (3), part 1 = sample records 1..500, part 2 = 501..1000, period 2024-09, never published:
-  - second import while the first stages: it passed the guard, staged and published (status succeeded),
-    instead of ALREADY_RUNNING with nothing written; the first then replaced it without a refusal;
-  - manifest replaced after staging: the import reported `succeeded` / `published` for the other data;
-  - two concurrent CLI processes: an exit-0 process reported "published 500" for the 442-row part
-    (another import's rows; its own data lost).
-  Separate repro (6 runs of two concurrent CLI processes): 4 of 6 runs end with exit 0 reporting the
-  other process's rows, exit 4 for the other, and the retry of the loser `unchanged` exit 0 (data lost).
-$ npx vitest run src/ingest/cli.worker.test.ts
-  Tests 2 failed: `--file a.csv b.csv` printed "unknown or unsupported argument for import-file: <path>";
-  `--file=<path>` printed the path; an invalid --period value was copied into the record's args.
-$ npx vitest run src/ingest/import/stageFile.test.ts
-  The new comma-free-line test passes on the current tokenizer and fails with the surviving mutant
-  `blank = r.count === 0` (1 failed | 26 passed), so it is pinned.
-
-Review round 3 (PR #143) RED, on c737d78 (Postgres 16 + SeaweedFS, CI image digests):
-$ npx vitest run --config vitest.db.config.ts src/ingest/import/importRace.db.test.ts
-  Tests 4 failed | 7 passed (11):
-  - another run holds a live lease (taken with acquireRun, never finished): `import-file --file part2
-    --restate` exits 4 ALREADY_RUNNING, but S3 holds 3 objects instead of 2 (its data and manifest were
-    staged). With that assertion disabled, the deterministic repro continues: after the lease expires
-    a plain `sync` exits 0 with period 2024-09 `published`, rowCount 442 (part 2's rows), replacing A;
-  - a plain sync started while the import stages ran (it should be refused ALREADY_RUNNING);
-  - staging that fails leaves no finished run (the lease is not taken before staging yet);
-  - a failed listing (no manifest bytes) of the staged period is reported IMPORT_MANIFEST_REPLACED
-    instead of its own code (MANIFEST_INVALID).
-$ npx vitest run src/ingest/cli.worker.test.ts
-  Tests 1 failed | 19 passed (20): `import-file --prefix /home/... --bucket ... --display-name ...`
-  copied all three values into the record's args (expected: counted as 6 unrecognized arguments).
+Review round 1 (PR #145) RED, after merging the reviewed #143 branch:
+$ npx vitest run --config vitest.db.config.ts src/ingest/import/importMetadata.db.test.ts
+  Tests 2 failed | 9 passed (11): B3 rows-only flag control + record billed total 99.00 must not reconcile
+  (now refused as usage by the M2 rule instead of reconciling as on the old head), and the matching merge.
+  metadata.test.ts 14/14: the providers.length and one-month-slack cases pass on the old code (mutation killers);
+  the overlap self-exclusion/prominence case passes on the merge (the notice came with the conflict resolution).
