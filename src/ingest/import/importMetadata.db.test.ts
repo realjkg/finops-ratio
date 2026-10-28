@@ -165,6 +165,9 @@ describe('R3 import-file --metadata', () => {
     const ok = await cli(importArgs(tenant, 'focus-aws', ['--period', '2024-09', '--metadata', META_FILE, '--control-rows', '942']), env());
     expect(ok.code).toBe(0);
     expect(results(ok).periods[0]).toMatchObject({ outcome: 'published', reconciliation: 'reconciled' });
+    // Review M4: the metadata path is never echoed, only that a record was supplied.
+    expect(ok.record.args).toMatchObject({ metadata: 'supplied' });
+    expect(ok.out.concat(ok.err).join('\n')).not.toContain(path.basename(META_FILE));
     const sid = (await t.db.pool.query(`SELECT id::text FROM ratio.sources WHERE tenant_id = $1`, [tenant])).rows[0].id;
     expect((await batchesOf(t.db.pool, tenant, sid)).map((b) => [b.control_rows, b.control_total])).toEqual([['942', META.financial.billed_cost_total.USD]]);
     const twoMonths = writeMeta({ ...META, scope: { ...META.scope, period_end: '2024-11-01' } });
