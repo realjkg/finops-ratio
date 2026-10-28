@@ -9,9 +9,9 @@
 //   doctor          [--tenant <uuid>]... [--json]          (read-only)
 //   replay-fixtures [--json]                               (RATIO_ENV=test only; issue #62 L3)
 //   source add      --tenant <uuid> --key <key> --providers AWS[,Microsoft,Google Cloud,Oracle] --bucket <name>
-//                   [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>]   (R3; owner login)
+//                   [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>] [--metadata <file.json>]   (R3; owner login)
 //   import-file     --tenant <uuid> --source <key> --file <path.csv|path.csv.gz> [--file <path>]... [--period YYYY-MM]
-//                   [--control-billed D --currency CCC [--control-rows N]] [--restate]   (R3)
+//                   [--control-billed D --currency CCC [--control-rows N]] [--metadata <file.json>] [--restate]   (R3)
 //
 // import-file: all --file values form ONE delivery, which is the complete content of every billing
 // period it contains (deliver the parts of a split period together). A delivery that would change an
@@ -20,13 +20,16 @@
 // published batch instead (it stays retained, excluded from totals). Both print `restatements`: the
 // published and the staged row count and billed total of each such period. An identical re-import is
 // `unchanged`; controls given with unchanged data are reported (not recorded) until --restate.
-// --control-rows needs --control-billed. Deliveries above MAX_IMPORT_BYTES (decompressed, all files
-// together; src/ingest/import/stageFile.ts) are refused before they are read (exit 5, IMPORT_TOO_LARGE).
+// --control-rows needs --control-billed, or --metadata whose one-period billed total is merged in
+// (IMPORT_CONTROL_CONFLICT when that total cannot apply). Deliveries above MAX_IMPORT_BYTES (decompressed,
+// all files together; src/ingest/import/stageFile.ts) are refused before they are read (exit 5,
+// IMPORT_TOO_LARGE). Overlap with another source's published periods is only reported (overlapNotice).
 //
 // Exit codes: 0 ok · 1 failure · 2 usage/configuration · 3 import refused (would restate published
 // data; nothing written) · 4 another run holds the lease (or its lock timed out), or another import of
 // the source is in progress; for import-file both are checked before anything is staged, so nothing
 // was written (run it again afterwards) · 5 import larger than the cap.
+import fs from 'fs';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Pool } from 'pg';
 import type { CliIO } from './cli';
@@ -51,6 +54,16 @@ import { isDecimalString } from './focus/decimal';
 import { KNOWN_FILE_DROP_PROVIDERS } from './focus/provider';
 import { importFile } from './import/importFile';
 import { provisionSource } from './import/provisionSource';
+import { parseImportMetadata } from './import/metadata';
+
+function readMetadataFile(p: string): Buffer {
+  try {
+    return fs.readFileSync(p);
+  } catch (e) {
+    const code = (e as { code?: unknown }).code;
+    throw new IngestError('METADATA_UNREADABLE', `the --metadata file could not be read (${typeof code === 'string' ? code : 'error'})`);
+  }
+}
 
 type Env = Record<string, string | undefined>;
 
@@ -65,7 +78,7 @@ const EXIT_USAGE = 2;
 const EXIT_REFUSED = 3;
 const EXIT_BUSY = 4;
 const EXIT_TOO_LARGE = 5;
-const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH', 'IMPORT_CONTROL_INVALID', 'IMPORT_CONTROL_SCOPE']);
+const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH', 'IMPORT_CONTROL_INVALID', 'IMPORT_CONTROL_SCOPE', 'IMPORT_CONTROL_CONFLICT', 'METADATA_INVALID', 'METADATA_MISMATCH']);
 
 function exitCodeFor(code: string): number {
   if (code === 'ALREADY_RUNNING' || code === 'LOCK_TIMEOUT') return EXIT_BUSY;
@@ -94,6 +107,7 @@ interface Args {
   controlRows?: number;
   controlBilled?: string;
   currency?: string;
+  metadata?: string;
 }
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -122,8 +136,8 @@ function parseArgs(argv: string[]): Args {
     'quarantine show': ['--tenant', '--batch', '--json'],
     doctor: ['--tenant', '--json'],
     'replay-fixtures': ['--json'],
-    'source add': ['--tenant', '--key', '--providers', '--bucket', '--prefix', '--display-name', '--tenant-slug', '--json'],
-    'import-file': ['--tenant', '--source', '--file', '--period', '--control-rows', '--control-billed', '--currency', '--restate', '--json'],
+    'source add': ['--tenant', '--key', '--providers', '--bucket', '--prefix', '--display-name', '--tenant-slug', '--metadata', '--json'],
+    'import-file': ['--tenant', '--source', '--file', '--period', '--control-rows', '--control-billed', '--currency', '--metadata', '--restate', '--json'],
   };
   // Review round 2 (M4): a usage error names the flag, never an argument value (a path, a glob, a typo).
   let lastValueOf: string | undefined;
@@ -181,6 +195,7 @@ function parseArgs(argv: string[]): Args {
       if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(v)) usage('--tenant-slug must match [a-z0-9][a-z0-9-]*');
       a.tenantSlug = v;
     } else if (flag === '--file') a.files.push(v);
+    else if (flag === '--metadata') a.metadata = v;
     else if (flag === '--control-rows') {
       if (!/^[0-9]{1,15}$/.test(v)) usage('--control-rows must be a non-negative integer');
       a.controlRows = Number(v);
@@ -200,7 +215,7 @@ function parseArgs(argv: string[]): Args {
   if (command === 'source add') needs(!!a.key && !!a.providers && !!a.bucket, '--key, --providers and --bucket are required');
   if (command === 'import-file') {
     needs(a.files.length > 0, '--file <path> is required (repeat it for the files of one delivery)');
-    needs(a.controlRows === undefined || a.controlBilled !== undefined, '--control-rows needs --control-billed and --currency: a row count alone cannot reconcile a period');
+    needs(a.controlRows === undefined || a.controlBilled !== undefined || a.metadata !== undefined, '--control-rows needs --control-billed and --currency (or a --metadata billed total): a row count alone cannot reconcile a period');
     needs(a.controlBilled === undefined || a.currency !== undefined, '--control-billed needs --currency');
     needs(a.currency === undefined || a.controlBilled !== undefined, '--currency is only valid with --control-billed');
   }
@@ -249,6 +264,9 @@ function argsForRecord(argv: string[]): Record<string, unknown> {
     // Review M4: file paths and names never reach the evidence record, only how many were given.
     else if (key === 'file') {
       out.files = (typeof out.files === 'number' ? out.files : 0) + 1;
+      if (hasValue) i++;
+    } else if (key === 'metadata') {
+      out.metadata = 'supplied';
       if (hasValue) i++;
     } else if (Object.hasOwn(RECORDED, key) && ((argv[0] === 'source' && argv[1] === 'add') || !SOURCE_ADD_ONLY.has(key))) {
       if (hasValue) {
@@ -342,6 +360,13 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
     }
   }
 
+  let metadata: ReturnType<typeof parseImportMetadata> | undefined;
+  try {
+    if (args.metadata !== undefined) metadata = parseImportMetadata(readMetadataFile(args.metadata));
+  } catch (e) {
+    return fail(e);
+  }
+
   if (args.command === 'source add') {
     // Provisioning writes tenants/sources: the migrator/owner login, never the worker login.
     if (!cfg.migrateDatabaseUrl) return fail(new IngestError('CONFIG_INVALID', 'RATIO_MIGRATE_DATABASE_URL (the owner login) is required for source add'));
@@ -354,6 +379,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
         providers: args.providers!,
         bucket: args.bucket!,
         prefix: args.prefix ?? 'ratio-file-drop',
+        metadata,
       });
       log('source.provisioned', { sourceKey: r.sourceKey, outcome: r.outcome, providers: r.providers.length });
       return finish({ ...r }, true, EXIT_OK);
@@ -429,6 +455,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
           filePaths: args.files,
           period: args.period,
           control,
+          metadata,
           restate: args.restate,
           sourceClient: () => s3('source'),
           source: makeSourceFactory(env, () => s3('source')),

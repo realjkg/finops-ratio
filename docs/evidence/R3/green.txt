@@ -1,69 +1,39 @@
-R3 part 2 (source add, import-file, stageAndSync, normalizer seam) GREEN, 2026-10-28.
+R3 part 3 (implementation-metadata record, declared scope, overlap) GREEN, 2026-10-28.
 
-$ npx vitest run src/ingest/import/normalizer.test.ts            -> 4 passed
-$ npx vitest run --config vitest.db.config.ts src/ingest/import/importFile.db.test.ts -> 9 passed
-  (public FOCUS 1.0 sample: [AWS] 2024-09 = 942 rows / 18.00663861840 USD as control-totals.json "1k",
-   57 rows excluded, 2024-10 quarantined PROVIDER_MISMATCH; re-import unchanged, no new batch;
-   [Microsoft] 2024-09 = 51 rows; exact-file controls reconcile, a wrong control is a variance;
-   DUPLICATE_ARTIFACT across sources; SYNTHETIC base -> restatement supersedes 2026-07)
+$ npx vitest run src/ingest/import/metadata.test.ts src/ingest/import/stageFile.test.ts -> 23 passed
+$ npx vitest run --config vitest.db.config.ts src/ingest/import                      -> 2 files, 17 passed
+  (fixtures/focus-1.0-sample/metadata.json: control = billed_cost_total USD 18.00663861840 for the
+   exact file's AWS rows; one-period import reconciled; multi-period import unverified with the reason;
+   'unknown' total -> "unverified (no control total supplied)"; flag/record conflict refused;
+   out-of-scope charge periods refused before any write; overlap yes needs a registered related source;
+   same-period overlap with other bytes reported in overlapWarnings; source add stores the record)
 Gates (sequential, foreground): lint 0; tsc --noEmit 0; tsc -p tsconfig.worker.json 0;
-  full vitest 216 files / 3960 tests passed; next build 0 (next-env.d.ts reverted);
-  npm run test:db (local Postgres 16 + SeaweedFS, CI digests): 40 files / 668 tests + serial 6 / 173 passed.
+  full vitest 217 files / 3972 tests passed; next build 0 (next-env.d.ts reverted);
+  npm run test:db (local Postgres 16 + SeaweedFS, CI digests): 41 files / 676 tests + serial 6 / 173 passed.
 
-Mutations (each applied alone, then reverted; importFile.db.test.ts must fail):
-  M1 duplicate guard disabled                          -> 1 failed
-  M2 "no control" note added even with controls        -> 1 failed
-  M3 source add accepts a changed declaration          -> 1 failed
-  M4 normalization report not carried in the manifest  -> 1 failed
-  M5 duplicate guard checks the same source            -> 4 failed
+Mutations (each applied alone, then reverted):
+  M1 unknown metadata keys accepted                       -> 1 unit + 1 db failed
+  M2 declared-scope check disabled                        -> 2 unit + 1 db failed
+  M3 declared time zone ignored                           -> 1 unit failed
+  M4 metadata control applied to any staged period set    -> 1 db failed
+  M5 flag/record control conflict not checked             -> 1 db failed
+  M6 overlap related_source not required to exist         -> 1 db failed
 
-Review round 1 (PR #143) GREEN, after merging the reviewed #142 branch (origin/main 3fa927b):
-  stageFile.test.ts 26/26, normalizer.test.ts 4/4, importFile.db.test.ts 18/18.
-  Gates: lint 0; tsc app 0; tsc worker 0; full vitest 217 files / 3997 tests; build 0;
-  npm run test:db (Postgres 16 + SeaweedFS, CI digests, non-default ports) 40 files / 677 + serial 6 / 173.
-  Memory (B2), peak RSS, synthetic file of repeated public-sample records:
-    old staging, 64 MiB CSV: 582 MiB (and heap OOM under --max-old-space-size=96);
-    new staging at the 128 MiB cap, heap 96 MiB: .csv 254 MiB, .csv.gz 295 MiB (budget 336 MiB);
-    new full import-file path at the cap (CLI child, heap 192 MiB, real Postgres + S3): .csv 299 MiB
-    (budget 384 MiB = 75% of the worker mem_limit 512m, unchanged). Over the cap: exit 5 before any read.
-  Mutations (each alone, reverted), all KILLED: refusal disabled, content compare always equal, --restate
-  ignored, only the last --file kept, applied flag false, overlap ignores providers, overlap never refuses,
-  rows-only accepted, unchanged-controls note dropped, restateControls not passed, pipeline re-key removed,
-  superseded-to-current mapping removed, file path echoed, size pre-check removed, exit 5 removed, gunzip
-  unbounded, ISIZE pre-check removed, stream bound removed, gunzipSync double buffer restored, growth drops
-  data, 1 GiB gzip members, collect copies again, cap doubled, preview over all providers, preview scale
-  ignored, preview NULL as zero; stageFile re-run on the byte tokenizer: 14 KILLED, 1 equivalent
-  (quoted-NULL flag: a quoted field is 6 bytes, so the 4-byte length check already excludes it).
+Review round 1 (PR #145) GREEN, after merging the reviewed #143 branch (conflicts in stageFile.ts, importFile.ts
+and workerCli.ts resolved by re-applying the metadata record, scope check, metadata control and overlap on top):
+  metadata.test.ts 14/14, importMetadata.db.test.ts 11/11, importFile.db.test.ts 18/18.
+  Gates: lint 0; tsc app 0; tsc worker 0; full vitest 218 files / 4011 tests; build 0;
+  npm run test:db (Postgres 16 + SeaweedFS, CI digests, non-default ports) 41 files / 688 + serial 6 / 173.
+  B3 repro (record billed_cost_total 99.00 USD + --control-rows 942, 2024-09): quarantined RECONCILIATION_VARIANCE
+  with controls 942 / 99.00 recorded, never reconciled. Overlap stays CLI output only (R4 dependency), marked
+  by overlapNotice "OVERLAP: ... COUNTED TWICE", the period's overlapWarning and a warn log line.
+  Mutations (each alone, reverted), all KILLED: providers.length guard, one-month slack, overlap includes the
+  importing source, B3 merge removed, B3 conflict removed, B3 block removed (old behavior), overlapNotice
+  dropped, metadata path echoed.
 
-Review round 2 (PR #143) GREEN, branch merged with origin/main (#142 squash 5bb8c21):
-  importRace.db.test.ts 6/6, importFile.db.test.ts 18/18, cli.worker.test.ts 19/19, stageFile.test.ts 27/27.
-  Gates (sequential): lint 0; tsc app 0; tsc worker 0; full vitest 224 files / 4196 tests; build 0
-  (next-env.d.ts reverted); npm run test:db (Postgres 16 + SeaweedFS, CI digests, non-default ports)
-  41 files / 683 + serial 6 / 173.
-  Race repro (two concurrent CLI processes, part 1 = 500 records, part 2 = 442 AWS rows of 2024-09,
-  never-published period), before: 4 of 6 runs exit 0 reporting the other process's rows, the other
-  exit 4, the loser's retry `unchanged` exit 0 (one part's data lost). After: 8 of 8 runs exit 0 with
-  the winner's own rows, the loser exit 4 ALREADY_RUNNING with nothing written, and the loser's retry
-  exit 3 PERIOD_ALREADY_PUBLISHED; published = the winner's rows.
-  Mutations (each alone, reverted), all KILLED: import lock not taken, lock key unique per call,
-  expectManifests not passed, listing manifest check off, re-list manifest check off, unlisted expected
-  period ignored, manifest hash ignored; glob positional message, invalid values copied into the record,
-  unknown flag echoed, --flag=value hint removed, positional echoed, unrecognized arguments copied;
-  stageFile `blank = r.count === 0` (comma-free line skipped).
-
-Review round 3 (PR #143) GREEN, on c737d78 + the round 3 RED commit:
-  importRace.db.test.ts 11/11, all of src/ingest/import (db) 29/29, cli.worker.test.ts 20/20.
-  The existing "staged manifest is gone" test now expects the listing's own code MANIFEST_MISSING
-  (it expected IMPORT_MANIFEST_REPLACED, which is the reported NIT); still failed, nothing published.
-  Gates (sequential): lint 0; tsc app 0; tsc worker 0; full vitest 224 files / 4197 tests; build 0
-  (next-env.d.ts reverted); npm run test:db (Postgres 16 + SeaweedFS, CI digests, non-default ports)
-  41 files / 688 + serial 6 / 173.
-  Lease repro (deterministic, in importRace.db.test.ts): A published; a run lease taken and never
-  finished; `import-file --file part2 --restate` exits 4 ALREADY_RUNNING with the S3 keys unchanged;
-  after the lease expires a plain `sync` exits 0 with no period published, published stays A (before:
-  `published` 442 = part 2's rows). The reviewer's process harness (SIGKILLed sync holding the lease,
-  RATIO_LEASE_TTL_SECONDS=15): import exit 4, published A; after the TTL a plain sync is
-  `skipped_unchanged`, published stays A (before: B's 442 rows published).
-  Mutations (each alone, reverted), all KILLED: staging before the lease, no finishRun on a staging
-  failure, runSync ignores the pre-acquired lease, manifest check before the listing error, bucket /
-  prefix / display-name recorded on every command, never recorded (also for source add).
+After merging the #143 review-round-2 head (c737d78: import lock, IMPORT_MANIFEST_REPLACED, usage errors
+and records without argument values) as merge 25f47c3: git diff c737d78 HEAD touches the same 10 files as
+git diff ec99fd9 6b3a44f, 6 of them byte-identical; importFile.ts and workerCli.ts differ only by the
+adaptation lines (metadata context passed into the locked staging step; the record's --metadata branch).
+  Gates (sequential): lint 0; tsc app 0; tsc worker 0; full vitest 225 files / 4210 tests; build 0;
+  npm run test:db (Postgres 16 + SeaweedFS, CI digests, non-default ports) 42 files / 694 + serial 6 / 173.

@@ -9,6 +9,7 @@ import { Client } from 'pg';
 import { IngestError } from '../errors';
 import { validateLocation } from '../sources/s3/layout';
 import { declaredProviders } from '../focus/provider';
+import type { ImportMetadata } from './metadata';
 
 export interface ProvisionOptions {
   tenantId: string;
@@ -18,6 +19,8 @@ export interface ProvisionOptions {
   providers: readonly string[];
   bucket: string;
   prefix: string;
+  /** The implementation-metadata record (metadata.ts), stored on the source with its sha256. */
+  metadata?: { metadata: ImportMetadata; sha256: string };
 }
 
 export interface ProvisionResult {
@@ -29,7 +32,15 @@ export interface ProvisionResult {
 }
 
 export async function provisionSource(adminUrl: string, o: ProvisionOptions): Promise<ProvisionResult> {
-  const config = { layout: 'ratio-file-drop', bucket: o.bucket, prefix: o.prefix, exportName: o.sourceKey, providers: [...o.providers] };
+  const config = {
+    layout: 'ratio-file-drop',
+    bucket: o.bucket,
+    prefix: o.prefix,
+    exportName: o.sourceKey,
+    providers: [...o.providers],
+    ...(o.metadata ? { metadata: o.metadata.metadata, metadataSha256: o.metadata.sha256 } : {}),
+  };
+  if (o.metadata && !o.providers.includes(o.metadata.metadata.provider)) throw new IngestError('METADATA_MISMATCH', 'the metadata provider is not one of --providers');
   validateLocation(config);
   if (!declaredProviders(config)) throw new IngestError('USAGE', '--providers must list known providers (AWS, Microsoft, Google Cloud, Oracle), each once');
   const c = new Client({ connectionString: adminUrl, application_name: 'ratio-source-add' });
