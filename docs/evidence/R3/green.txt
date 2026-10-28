@@ -1,18 +1,20 @@
-R3 part 2 (source add, import-file, stageAndSync, normalizer seam) GREEN, 2026-10-28.
+R3 part 3 (implementation-metadata record, declared scope, overlap) GREEN, 2026-10-28.
 
-$ npx vitest run src/ingest/import/normalizer.test.ts            -> 4 passed
-$ npx vitest run --config vitest.db.config.ts src/ingest/import/importFile.db.test.ts -> 9 passed
-  (public FOCUS 1.0 sample: [AWS] 2024-09 = 942 rows / 18.00663861840 USD as control-totals.json "1k",
-   57 rows excluded, 2024-10 quarantined PROVIDER_MISMATCH; re-import unchanged, no new batch;
-   [Microsoft] 2024-09 = 51 rows; exact-file controls reconcile, a wrong control is a variance;
-   DUPLICATE_ARTIFACT across sources; SYNTHETIC base -> restatement supersedes 2026-07)
+$ npx vitest run src/ingest/import/metadata.test.ts src/ingest/import/stageFile.test.ts -> 23 passed
+$ npx vitest run --config vitest.db.config.ts src/ingest/import                      -> 2 files, 17 passed
+  (fixtures/focus-1.0-sample/metadata.json: control = billed_cost_total USD 18.00663861840 for the
+   exact file's AWS rows; one-period import reconciled; multi-period import unverified with the reason;
+   'unknown' total -> "unverified (no control total supplied)"; flag/record conflict refused;
+   out-of-scope charge periods refused before any write; overlap yes needs a registered related source;
+   same-period overlap with other bytes reported in overlapWarnings; source add stores the record)
 Gates (sequential, foreground): lint 0; tsc --noEmit 0; tsc -p tsconfig.worker.json 0;
-  full vitest 216 files / 3960 tests passed; next build 0 (next-env.d.ts reverted);
-  npm run test:db (local Postgres 16 + SeaweedFS, CI digests): 40 files / 668 tests + serial 6 / 173 passed.
+  full vitest 217 files / 3972 tests passed; next build 0 (next-env.d.ts reverted);
+  npm run test:db (local Postgres 16 + SeaweedFS, CI digests): 41 files / 676 tests + serial 6 / 173 passed.
 
-Mutations (each applied alone, then reverted; importFile.db.test.ts must fail):
-  M1 duplicate guard disabled                          -> 1 failed
-  M2 "no control" note added even with controls        -> 1 failed
-  M3 source add accepts a changed declaration          -> 1 failed
-  M4 normalization report not carried in the manifest  -> 1 failed
-  M5 duplicate guard checks the same source            -> 4 failed
+Mutations (each applied alone, then reverted):
+  M1 unknown metadata keys accepted                       -> 1 unit + 1 db failed
+  M2 declared-scope check disabled                        -> 2 unit + 1 db failed
+  M3 declared time zone ignored                           -> 1 unit failed
+  M4 metadata control applied to any staged period set    -> 1 db failed
+  M5 flag/record control conflict not checked             -> 1 db failed
+  M6 overlap related_source not required to exist         -> 1 db failed

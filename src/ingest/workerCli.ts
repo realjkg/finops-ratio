@@ -9,11 +9,12 @@
 //   doctor          [--tenant <uuid>]... [--json]          (read-only)
 //   replay-fixtures [--json]                               (RATIO_ENV=test only; issue #62 L3)
 //   source add      --tenant <uuid> --key <key> --providers AWS[,Microsoft,Google Cloud,Oracle] --bucket <name>
-//                   [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>]   (R3; owner login)
+//                   [--prefix <p>] [--display-name <text>] [--tenant-slug <slug>] [--metadata <file.json>]   (R3; owner login)
 //   import-file     --tenant <uuid> --source <key> --file <path.csv|path.csv.gz> [--period YYYY-MM]
-//                   [--control-rows N] [--control-billed D --currency CCC]          (R3)
+//                   [--control-rows N] [--control-billed D --currency CCC] [--metadata <file.json>]   (R3)
 //
 // Exit codes: 0 ok · 1 failure · 2 usage/configuration · 4 another run holds the lease.
+import fs from 'fs';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Pool } from 'pg';
 import type { CliIO } from './cli';
@@ -38,6 +39,16 @@ import { isDecimalString } from './focus/decimal';
 import { KNOWN_FILE_DROP_PROVIDERS } from './focus/provider';
 import { importFile } from './import/importFile';
 import { provisionSource } from './import/provisionSource';
+import { parseImportMetadata } from './import/metadata';
+
+function readMetadataFile(p: string): Buffer {
+  try {
+    return fs.readFileSync(p);
+  } catch (e) {
+    const code = (e as { code?: unknown }).code;
+    throw new IngestError('METADATA_UNREADABLE', `the --metadata file could not be read (${typeof code === 'string' ? code : 'error'})`);
+  }
+}
 
 type Env = Record<string, string | undefined>;
 
@@ -50,7 +61,7 @@ const EXIT_OK = 0;
 const EXIT_FAIL = 1;
 const EXIT_USAGE = 2;
 const EXIT_BUSY = 4;
-const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH', 'IMPORT_CONTROL_INVALID', 'IMPORT_CONTROL_SCOPE']);
+const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH', 'IMPORT_CONTROL_INVALID', 'IMPORT_CONTROL_SCOPE', 'IMPORT_CONTROL_CONFLICT', 'METADATA_INVALID', 'METADATA_MISMATCH']);
 
 function exitCodeFor(code: string): number {
   if (code === 'ALREADY_RUNNING' || code === 'LOCK_TIMEOUT') return EXIT_BUSY;
@@ -77,6 +88,7 @@ interface Args {
   controlRows?: number;
   controlBilled?: string;
   currency?: string;
+  metadata?: string;
 }
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -105,8 +117,8 @@ function parseArgs(argv: string[]): Args {
     'quarantine show': ['--tenant', '--batch', '--json'],
     doctor: ['--tenant', '--json'],
     'replay-fixtures': ['--json'],
-    'source add': ['--tenant', '--key', '--providers', '--bucket', '--prefix', '--display-name', '--tenant-slug', '--json'],
-    'import-file': ['--tenant', '--source', '--file', '--period', '--control-rows', '--control-billed', '--currency', '--json'],
+    'source add': ['--tenant', '--key', '--providers', '--bucket', '--prefix', '--display-name', '--tenant-slug', '--metadata', '--json'],
+    'import-file': ['--tenant', '--source', '--file', '--period', '--control-rows', '--control-billed', '--currency', '--metadata', '--json'],
   };
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
@@ -148,6 +160,7 @@ function parseArgs(argv: string[]): Args {
       if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(v)) usage('--tenant-slug must match [a-z0-9][a-z0-9-]*');
       a.tenantSlug = v;
     } else if (flag === '--file') a.file = v;
+    else if (flag === '--metadata') a.metadata = v;
     else if (flag === '--control-rows') {
       if (!/^[0-9]{1,15}$/.test(v)) usage('--control-rows must be a non-negative integer');
       a.controlRows = Number(v);
@@ -272,6 +285,13 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
     }
   }
 
+  let metadata: ReturnType<typeof parseImportMetadata> | undefined;
+  try {
+    if (args.metadata !== undefined) metadata = parseImportMetadata(readMetadataFile(args.metadata));
+  } catch (e) {
+    return fail(e);
+  }
+
   if (args.command === 'source add') {
     // Provisioning writes tenants/sources: the migrator/owner login, never the worker login.
     if (!cfg.migrateDatabaseUrl) return fail(new IngestError('CONFIG_INVALID', 'RATIO_MIGRATE_DATABASE_URL (the owner login) is required for source add'));
@@ -284,6 +304,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
         providers: args.providers!,
         bucket: args.bucket!,
         prefix: args.prefix ?? 'ratio-file-drop',
+        metadata,
       });
       log('source.provisioned', { sourceKey: r.sourceKey, outcome: r.outcome, providers: r.providers.length });
       return finish({ ...r }, true, EXIT_OK);
@@ -359,6 +380,7 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
           filePath: args.file!,
           period: args.period,
           control,
+          metadata,
           sourceClient: () => s3('source'),
           source: makeSourceFactory(env, () => s3('source')),
           evidence: evidenceStore(),

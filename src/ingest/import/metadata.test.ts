@@ -4,7 +4,8 @@
 import fs from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
-import { parseImportMetadata, scopeWindow } from './metadata';
+import { parse as parseCsv } from 'csv-parse/sync';
+import { parseImportMetadata, sameDecimal, scopeWindow } from './metadata';
 import { stageFile } from './stageFile';
 
 const DIR = path.resolve(__dirname, '..', '..', '..', 'fixtures', 'focus-1.0-sample');
@@ -89,6 +90,16 @@ describe('R3 metadata guard', () => {
   });
 });
 
+describe('R3 sameDecimal', () => {
+  it('compares plain decimals exactly, independent of trailing zeros', () => {
+    expect(sameDecimal('18.0066386184', '18.00663861840')).toBe(true);
+    expect(sameDecimal('-0.10', '-0.1')).toBe(true);
+    expect(sameDecimal('18.0066386184', '18.0066386185')).toBe(false);
+    expect(sameDecimal('1', '-1')).toBe(false);
+    expect(sameDecimal('1e3', '1000')).toBe(false);
+  });
+});
+
 describe('R3 the sample record is accurate to the exact file (nothing invented)', () => {
   it('control totals and scope equal the independently computed controls for this file', () => {
     const aws = CONTROLS.totals.find((t: { billingPeriod: string }) => t.billingPeriod === '2024-09-01');
@@ -101,11 +112,9 @@ describe('R3 the sample record is accurate to the exact file (nothing invented)'
   });
 
   it('accounts and credit presence are read from the AWS rows of the file', () => {
-    const lines = SAMPLE.toString('utf8').trim().split('\n');
-    const cols = JSON.parse(`[${lines[0]}]`) as string[];
-    const at = (l: string, c: string) => l.split(',')[cols.indexOf(c)].replace(/^"|"$/g, '');
-    // The columns read here precede any quoted comma in the sample's records.
-    const aws = lines.slice(1).filter((l) => l.includes(',"AWS","Amazon Web Services, Inc.",'));
+    const rows = parseCsv(SAMPLE, { columns: true }) as Array<Record<string, string>>;
+    const aws = rows.filter((x) => x.ProviderName === 'AWS');
+    const at = (x: Record<string, string>, c: string) => x[c];
     expect(aws).toHaveLength(942);
     expect([...new Set(aws.map((l) => at(l, 'BillingAccountId')))]).toEqual(META.scope.accounts);
     expect(aws.filter((l) => at(l, 'ChargeCategory') === 'Credit')).toHaveLength(1);

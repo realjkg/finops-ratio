@@ -86,7 +86,7 @@ describe('R3 import-file --metadata', () => {
     const tenant = crypto.randomUUID();
     expect((await addSource(tenant, 'focus-aws', 'AWS')).code).toBe(0);
     const r = await cli(importArgs(tenant, 'focus-aws', ['--metadata', META_FILE]), env());
-    expect(results(r).periods[0]).toMatchObject({ billingPeriod: '2024-09-01', outcome: 'published', reconciliation: 'unverified', reconciliationNote: expect.stringContaining('several billing periods') });
+    expect(results(r).periods[0]).toMatchObject({ billingPeriod: '2024-09-01', outcome: 'published', reconciliation: 'unverified', reconciliationNote: expect.stringContaining('import it with --period 2024-09') });
   });
 
   it("a record without a billed total ('unknown') leaves the period unverified (no control total supplied)", async () => {
