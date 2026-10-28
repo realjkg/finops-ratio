@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
+import { loadWorkerConfig } from '../../src/ingest/config';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -106,6 +107,13 @@ describe('engagement compose', () => {
     expect(text).not.toMatch(/POSTGRES_HOST_AUTH_METHOD/);
   });
 
+  it('gives no secret variable a default value', () => {
+    const text = read('infrastructure/engagement/compose.yaml');
+    const withDefault = [...text.matchAll(/\$\{([A-Z0-9_]+):-[^}]*\}/g)].map((m) => m[1]);
+    expect(withDefault.filter((n) => /PASSWORD|SECRET|KEY|TOKEN/.test(n))).toEqual([]);
+    expect(text).not.toMatch(/\$\{[A-Z0-9_]*(PASSWORD|SECRET|KEY|TOKEN)[A-Z0-9_]*-/);
+  });
+
   it('keeps the database network internal', () => {
     expect(compose.networks.backend.internal).toBe(true);
     expect(services.postgres.networks).toEqual(['backend']);
@@ -123,6 +131,42 @@ describe('engagement compose', () => {
   });
 });
 
+describe('worker configuration inside the engagement stack', () => {
+  const dockerfile = read('infrastructure/simulation/Dockerfile');
+  const imageEnv = Object.fromEntries(
+    [...stage(dockerfile, 'engagement').matchAll(/^ENV (.+)$/gm)].flatMap((m) => m[1].trim().split(/\s+/).map((kv) => kv.split(/=(.*)/s).slice(0, 2))),
+  );
+  const resolve = (v) => String(v).replace(/\$\{([A-Z0-9_]+)(?::[-?][^}]*)?\}/g, 'dummy-value');
+  const effective = (name, patch = {}) => ({
+    ...imageEnv,
+    ...Object.fromEntries(Object.entries(services[name].environment).map(([k, v]) => [k, resolve(v)])),
+    ...patch,
+  });
+
+  it('accepts the compose worker environment on top of the image environment', () => {
+    const cfg = loadWorkerConfig(effective('worker'));
+    expect(cfg.sourceS3.endpoint).toBe('http://s3:8333');
+    expect(cfg.evidenceS3.endpoint).toBe('http://s3:8333');
+  });
+
+  it('would reject the internal http endpoints under RATIO_ENV=production (why the worker runs as staging)', () => {
+    expect(imageEnv.RATIO_ENV).toBe('production');
+    expect(() => loadWorkerConfig(effective('worker', { RATIO_ENV: 'production' }))).toThrow(/https/);
+  });
+
+  it('never gives the worker a development or test environment or a test switch', () => {
+    const env = effective('worker');
+    expect(['staging', 'production']).toContain(env.RATIO_ENV);
+    for (const k of ['RATIO_ALLOW_SYNTHETIC_PROVIDERS', 'RATIO_ALLOW_FAKE_SOURCE', 'RATIO_TEST_PAUSE_AFTER_ROWS', 'RATIO_ALLOW_DOWN_MIGRATIONS']) expect(env[k], k).toBeUndefined();
+    expect(env.NODE_ENV).toBe('production');
+  });
+
+  it('keeps the app and migrator on production', () => {
+    expect(effective('app').RATIO_ENV).toBe('production');
+    expect(effective('migrator').RATIO_ENV).toBe('production');
+  });
+});
+
 describe('engagement Dockerfile target', () => {
   const dockerfile = read('infrastructure/simulation/Dockerfile');
 
@@ -130,6 +174,7 @@ describe('engagement Dockerfile target', () => {
     const buildStage = stage(dockerfile, 'engagement-build');
     expect(buildStage).toMatch(/^FROM build AS engagement-build/);
     expect(buildStage).toMatch(/RUN npm run worker:build/);
+    expect(buildStage).toMatch(/npm prune --omit=dev/);
     expect(stage(dockerfile, 'engagement')).toMatch(/^FROM engagement-build AS engagement/);
   });
 
@@ -161,6 +206,22 @@ describe('engagement docs and smoke prerequisite', () => {
     expect(section).toMatch(/FOCUS.*verified.*real exports.*1\.0 only/is);
     expect(section).toMatch(/FOCUS 1\.1 to 1\.4 have synthetic fixtures only/);
     expect(section).toMatch(/### Coming from other rows/);
+  });
+
+  it('does not state unbuilt behavior in the present tense (R1/R2/R3/R11 are labeled)', () => {
+    const readme = read('README.md');
+    const section = readme.slice(readme.indexOf('## Engagement mode'), readme.indexOf('## Saved customer workflow simulation'));
+    for (const line of section.split('\n')) {
+      if (/refuses to start|RATIO_MODE=engagement|src\/engagement\/config\.ts|named users|sign in/i.test(line) && !/^```/.test(line)) {
+        expect(line, line).toMatch(/after R[0-9]+|will|once R[0-9]+|R[0-9]+ (is|owns|pending)|not (yet )?(implemented|available)|today/i);
+      }
+    }
+    expect(section).toMatch(/Works today/);
+    expect(section).toMatch(/Needs R1/);
+    expect(section).toMatch(/restart app/);
+    expect(section).not.toMatch(/up -d app\s*;? the container reads/);
+    expect(section).toMatch(/directory|inode/i);
+    expect(section).toMatch(/ratio-engagement-evidence/);
   });
 
   it('ships a smoke script that fails, never skips, when its prerequisites are absent', () => {
