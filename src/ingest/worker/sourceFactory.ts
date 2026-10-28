@@ -1,6 +1,6 @@
 // Resolves the FocusSource for a (RLS-visible) source row. focus_file ⇒ the
-// S3 AWS Data Exports source (location from sources.config, connection from
-// env). fake ⇒ refused unless NODE_ENV=test AND RATIO_ALLOW_FAKE_SOURCE=1.
+// S3 export source (layout aws-data-exports or ratio-file-drop; location from
+// sources.config, connection from env). fake ⇒ refused unless NODE_ENV=test AND RATIO_ALLOW_FAKE_SOURCE=1.
 import type { S3Client } from '@aws-sdk/client-s3';
 import { IngestError } from '../errors';
 import { FakeFocusSource, assertFakeSourceAllowed, type FakePeriod } from '../sources/fake/FakeFocusSource';
@@ -8,6 +8,7 @@ import { S3FocusExportSource } from '../sources/s3/S3FocusExportSource';
 import { dataPrefix, validateLocation } from '../sources/s3/layout';
 import { FIXTURE_LOCATION, generateSyntheticExport } from '../fixtures/syntheticFocus';
 import type { FocusSource } from '../sources/types';
+import { declaredProviders } from '../focus/provider';
 import type { SourceRow } from './lease';
 
 export function makeSourceFactory(env: Record<string, string | undefined>, s3: () => S3Client): (row: SourceRow) => FocusSource {
@@ -16,6 +17,10 @@ export function makeSourceFactory(env: Record<string, string | undefined>, s3: (
       assertFakeSourceAllowed(env);
       if (row.config.fixture !== 'synthetic-base') throw new IngestError('SOURCE_CONFIG_INVALID', 'fake source config.fixture must be "synthetic-base"');
       return fakeFromSynthetic();
+    }
+    // R3: an operator file-drop source must declare known providers; otherwise it has no provider policy (D4).
+    if (row.kind === 'focus_file' && row.config.layout === 'ratio-file-drop' && !declaredProviders(row.config)) {
+      throw new IngestError('SOURCE_CONFIG_INVALID', 'source config providers must be a non-empty list of known providers (AWS, Microsoft, Google Cloud, Oracle)');
     }
     if (row.kind === 'focus_file') return new S3FocusExportSource({ client: s3(), location: validateLocation(row.config) });
     throw new IngestError('SOURCE_CONFIG_INVALID', 'unsupported source kind');

@@ -46,3 +46,21 @@ describe('D4 guard: the source factory refuses every source the provider check d
     }
   });
 });
+
+describe('R3 ratio-file-drop sources keep the D4 guard', () => {
+  const drop = (providers: unknown) => row('focus_file', { layout: 'ratio-file-drop', ...awsLocation, providers });
+
+  it('a declared, known provider list is accepted and always has a provider policy', () => {
+    for (const providers of [['AWS'], ['Microsoft'], ['AWS', 'Microsoft', 'Google Cloud', 'Oracle']]) {
+      expect(() => makeSourceFactory({}, fakeS3)(drop(providers))).not.toThrow();
+      expect(providerPolicyFor(drop(providers), { allowSyntheticProviders: false })).not.toBeNull();
+    }
+  });
+
+  it('a missing, empty or unknown declaration has no policy AND is refused before any data is read', () => {
+    for (const providers of [undefined, [], ['Amazon Web Services'], ['AWS', 'AWS'], 'AWS']) {
+      expect(providerPolicyFor(drop(providers), { allowSyntheticProviders: true })).toBeNull();
+      expect(() => makeSourceFactory({}, fakeS3)(drop(providers))).toThrow(expect.objectContaining({ code: 'SOURCE_CONFIG_INVALID' }));
+    }
+  });
+});

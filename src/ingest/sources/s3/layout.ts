@@ -37,7 +37,8 @@ export function validateLocation(config: unknown): ExportLocation {
   };
   if (!config || typeof config !== 'object') bad('source config must be an object');
   const c = config as Record<string, unknown>;
-  if (c.layout !== 'aws-data-exports') bad('source config layout must be "aws-data-exports"');
+  // R3: ratio-file-drop is the same object layout, staged by `import-file` (src/ingest/import).
+  if (c.layout !== 'aws-data-exports' && c.layout !== 'ratio-file-drop') bad('source config layout must be "aws-data-exports" or "ratio-file-drop"');
   if (typeof c.bucket !== 'string') bad('source config bucket is required');
   try {
     validateBucketName(c.bucket as string, 'source bucket');
