@@ -3,7 +3,7 @@
 // reconciliation proof and nothing claims "live" without original evidence.
 import { createHash } from 'crypto';
 import { describe, expect, it } from 'vitest';
-import { buildBridge } from './bridge';
+import { buildBridge, type Bridge } from './bridge';
 import { observeSchema, versionFacts } from './capture';
 import { LIVE_STATUS, PRE_ROLLOUT_STATUS, buildEvidenceRecord, type EvidenceRecordInput } from './package';
 import type { CapturedOriginal } from './types';
@@ -199,5 +199,34 @@ describe('Connector Evidence Record: review round (#148)', () => {
     expect(r.proof.originals[1].identity).toEqual({ kind: 'page', endpoint: azure, method: 'POST', params: { pageToken: tok, sortKey: 'UsageDate', api_key: '[redacted]' }, pageIndex: 0, pageToken: tok });
     expect((r.proof.originals[2].identity as { key: string }).key).toBe(longKey);
     expect(r.proof.exclusions).toEqual([`see ${T} and ${hex}`, `skipped prefix ${path}`]);
+  });
+});
+
+describe('Connector Evidence Record: review round 2 (#148)', () => {
+  const proofInput = (b: Bridge, o: CapturedOriginal[] = [captured()]) => {
+    const i = input();
+    i.fixture = { ...i.fixture, fixtureClass: 'original', use: 'reconciliation-proof' };
+    i.proof.originals = o;
+    i.proof.bridge = b;
+    return i;
+  };
+
+  it('re-verifies the bridge arithmetic, not only its flags', () => {
+    const line = { measure: 'billed', currency: 'USD', source: '100', deltas: [], normalized: '1', closes: true };
+    const forged: Bridge = { ...bridge, lines: [line], failures: [], closed: true };
+    expect(() => buildEvidenceRecord(proofInput(forged))).toThrow(/PROOF_INCOMPLETE/);
+    expect(buildEvidenceRecord(proofInput({ ...forged, lines: [{ ...line, deltas: [{ amount: '-99', reason: 'split' }] }] })).fixture.use).toBe('reconciliation-proof');
+  });
+
+  it('a count measure tagged with a currency is not a money line', () => {
+    const rows = buildBridge({ key: bridge.key, source: [{ measure: 'rows', currency: 'USD', amount: '3' }], normalized: [{ measure: 'rows', currency: 'USD', amount: '3' }], deltas: [] });
+    expect(rows.failures.map((f) => f.code)).toEqual(['BRIDGE_NO_MONEY_LINE', 'BRIDGE_CURRENCY_UNCOVERED']);
+    expect(() => buildEvidenceRecord(proofInput({ ...rows, failures: [], closed: true }))).toThrow(/PROOF_INCOMPLETE/);
+  });
+
+  it('an original key must be connector-originals/<uuid>/<uuid>/<sha256>', () => {
+    for (const key of [`connector-originals//${HEX}`, `connector-originals/x/y/${HEX}`, `connector-originals/11111111-1111-4111-8111-111111111111/${HEX}`]) {
+      expect(() => buildEvidenceRecord(proofInput(bridge, [{ ...captured(), key }]))).toThrow(/PROOF_INCOMPLETE/);
+    }
   });
 });

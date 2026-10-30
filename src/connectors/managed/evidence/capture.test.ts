@@ -102,3 +102,31 @@ describe('captureOriginal identity: review round (#148)', () => {
     expect((await captureOriginal(store, { tenantId: TENANT, sourceId: SOURCE }, Buffer.from('y'), obj)).identity).toEqual(obj);
   });
 });
+
+describe('PageSequence: review round 2 (#148)', () => {
+  type P = [number, string?, string?]; // [pageIndex, requestToken, nextPageToken]
+  const seq = (ps: P[]) => {
+    const s = new PageSequence();
+    for (const [pageIndex, requestToken, nextPageToken] of ps) s.add({ pageIndex, requestToken, nextPageToken });
+    return s.completion();
+  };
+
+  it('is complete only when each page was requested with the previous next token and the chain ends', () => {
+    expect(seq([[0, undefined, 'a'], [1, 'a', 'b'], [2, 'b']])).toBe('complete');
+    expect(seq([[0], [1, undefined]])).toBe('incomplete');
+    expect(seq([[0]])).toBe('complete');
+    expect(seq([[0, undefined, 'a'], [1, 'a', '']])).toBe('complete');
+  });
+
+  it('a repeated or looping token, a mismatched or missing request token, a gap, a duplicate or out-of-order index, or no terminal page is incomplete', () => {
+    expect(seq([[0, undefined, 'a'], [1, 'a', 'a'], [2, 'a']])).toBe('incomplete'); // repeated token
+    expect(seq([[0, undefined, 'a'], [1, 'a', 'b'], [2, 'b', 'a'], [3, 'a']])).toBe('incomplete'); // cycle a,b,a
+    expect(seq([[0, undefined, 'a'], [1, 'x']])).toBe('incomplete'); // request token mismatch
+    expect(seq([[0, undefined, 'a'], [1]])).toBe('incomplete'); // request token missing
+    expect(seq([[0, 'z', 'a'], [1, 'a']])).toBe('incomplete'); // first page requested with a token
+    expect(seq([[0, undefined, 'a'], [2, 'a']])).toBe('incomplete'); // gap
+    expect(seq([[0, undefined, 'a'], [0, 'a']])).toBe('incomplete'); // duplicate index
+    expect(seq([[1, undefined, 'a'], [0, 'a']])).toBe('incomplete'); // out of order
+    expect(seq([[0, undefined, 'a'], [1, 'a', 'b']])).toBe('incomplete'); // no terminal page
+  });
+});

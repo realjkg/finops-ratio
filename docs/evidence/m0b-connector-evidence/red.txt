@@ -17,3 +17,10 @@ New failing cases: live claim with no captured original; empty / control-only br
 orphan deltas dropped; monetary measure without currency; concatenated line keys collide; no residual
 field; secrets missed (underscore-prefixed names, header form, JSON keys, URL userinfo, client_assertion,
 code); locators destroyed (original keys, object keys, endpoint paths, pagination params).
+
+Review round 2 (#148), RED tests committed before the fixes. Base: b6491e9 merged with origin/main a10e4b4.
+Command: npx vitest run src/connectors/managed/evidence -t '^(?!.*hostile).*'
+Result: Test Files 3 failed | 1 passed (4); Tests 5 failed | 28 passed | 1 skipped (34).
+The 1 MB hostile-input test (redact.test.ts) did not finish within 300 s (quadratic regexes), so it is
+run separately. Failing: looping or mismatched page tokens; forged bridge arithmetic; count measure as
+money line; original key shape; cookies, short bearer, unterminated/escaped quotes, userinfo with '@'.
