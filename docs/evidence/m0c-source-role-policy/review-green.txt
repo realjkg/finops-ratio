@@ -1,0 +1,26 @@
+M0c review fixes (PR #147) -- GREEN
+RED: 8d9f441 (review-red.txt): 15 failed | 10 passed in policy/overlap.test.ts.
+Gates (sequential): lint exit 0; typecheck app exit 0; typecheck worker exit 0;
+  full vitest: 227 files, 4239 tests passed; build exit 0 (next-env.d.ts unchanged); check:bundle pass.
+Reviewer probe P1..P10: P1/P1b now OVERLAP_UNRESOLVED (were combined, ok:true); P2 no false overlap;
+  P3 PREFER_UNDERCOUNTS; P4 reason names a and b; P5 POLICY_INVALID cycle; P6 MEASURE_SCOPE_DIFFERS warning;
+  P7 RELATED_SOURCE_MISSING; P8 bare-amount calls now N/A (Money with currency required); P9/P10 unchanged.
+Mutations (npx vitest run src/connectors/managed/policy), 17 of 17 killed:
+  M1 every period pair treated as overlapping KILLED (3 failing tests)
+  M2 ignore end semantics (always inclusive) KILLED (2 failing tests)
+  M3 invalid period treated as disjoint KILLED (1 failing test)
+  M4 no PERIOD_INVALID KILLED (1 failing test)
+  M5 prefer coverage never exceeds KILLED (1 failing test)
+  M6 unproven prefer silent KILLED (1 failing test)
+  M7 cycle detection off KILLED (1 failing test)
+  M8 reason names first winner only KILLED (1 failing test)
+  M9 no measure-scope disclosure KILLED (2 failing tests)
+  M10 measure scope ignores accounts KILLED (2 failing tests)
+  M11 cross-currency allowed KILLED (1 failing test)
+  M12 related_source not checked KILLED (1 failing test)
+  M13 inclusive date-only end not whole day KILLED (1 failing test)
+  M14 lax parse (Date.parse only) KILLED (1 failing test)
+  M15 calendar check off KILLED (1 failing test)
+  M16 endSemantics not mapped from R1 KILLED (2 failing tests)
+  M17 periods compared as raw strings KILLED (3 failing tests)
+All identifiers SYNTHETIC.

@@ -26,17 +26,22 @@ const scaled = (s: string, scale: number) => {
   return s.startsWith('-') ? -n : n;
 };
 
+const CURRENCY_RE = /^[A-Z]{3}$/;
+export interface Money { amount: string; currency: string }
+
 /**
  * Share of the underlying (authoritative) cost an allocated dataset covers, as a
  * percentage with two decimals (truncated), from exact decimal strings. 'N/A'
- * when either side is not a decimal or the underlying total is zero.
+ * when either side is not a decimal, the currencies are not the same ISO 4217
+ * code (never computed across currencies), or the underlying total is zero.
  */
-export function allocationCoverage(allocated: string, underlying: string): string {
-  if (!DEC_RE.test(allocated) || !DEC_RE.test(underlying)) return 'N/A';
+export function allocationCoverage(allocated: Money, underlying: Money): string {
+  if (!CURRENCY_RE.test(allocated.currency) || allocated.currency !== underlying.currency) return 'N/A';
+  if (!DEC_RE.test(allocated.amount) || !DEC_RE.test(underlying.amount)) return 'N/A';
   const scale = 12;
-  const u = scaled(underlying, scale);
+  const u = scaled(underlying.amount, scale);
   if (u === ZERO) return 'N/A';
-  const bp = (scaled(allocated, scale) * BP) / u; // basis points of a percent
+  const bp = (scaled(allocated.amount, scale) * BP) / u; // basis points of a percent
   const neg = bp < ZERO;
   const a = neg ? -bp : bp;
   return `${neg ? '-' : ''}${a / HUNDRED}.${(a % HUNDRED).toString().padStart(2, '0')}`;

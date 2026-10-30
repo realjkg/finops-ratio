@@ -10,6 +10,13 @@ import { COST_SOURCES, findingsFor } from './seed';
 
 export const HEADLINE_EXCLUSION_REASON = 'Source role unconfirmed; excluded from headline totals';
 
+// Deviation from the plan's D5 wording (literal `roleConfirmed === true`), stated
+// on purpose: `pointfive` stays a billing-export kind here, so the offline
+// pointfive-sandbox seed (no roleConfirmed) keeps counting in the demo headline.
+// Setting roleConfirmed:true on that seed instead would change the public
+// /api/costsource/sources golden (src/compat/golden/api.json). The live PointFive
+// descriptor is roleConfirmed:false (pointfiveConfig.ts), so live PointFive rows
+// never reach a headline total; the explicit false wins over the kind.
 const BILLING_EXPORT_KINDS: ReadonlySet<string> = new Set(['cloud', 'synthetic_cloud', 'focus_file', 'pointfive']);
 
 export function isHeadlineEligible(source: Pick<CostSourceDescriptor, 'roleConfirmed'> & { kind?: string }): boolean {
