@@ -36,7 +36,7 @@ proxy/middleware/instrumentation, app/pages and src scanned (static, dynamic, re
 Gates, sequential, on the fixed tree: lint 0; typecheck app 0 and worker 0; vitest 234 files, 4301 tests
 passed; test:db (own Postgres 16 + SeaweedFS, CI digests, ports 55449/18349) 43 files 706 tests, serial
 6 files 173 tests passed; worker:build 0; build 0; check:bundle pass.
-Mutations: 40 targeted mutants of the new code, 39 killed at first run; the survivor E3 (depth check;
+Mutations: 40 targeted mutants of the new code, 38 killed at first run; the survivor E3 (depth check;
 the deeper object still failed as a non-leaf) is killed by a test pinning the problem text to R1's. The
 reviewer's three survivors are killed by their new-code equivalents (S1 whole-result scrub, P1 period not
 passed, B1 boundary skipping pages/). The reviewer's mut.sh rerun: every applicable mutant killed (M8 after a
