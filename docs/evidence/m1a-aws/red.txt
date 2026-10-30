@@ -1,0 +1,18 @@
+M1a AWS Data Exports FOCUS retrieval (managed, S3, manifest-driven) -- RED (tests committed before the implementation)
+Base: origin/main bdf6d15 (M0a #149, M0b #148, M0c #147, R3 #142/#143/#145).
+Command: npx vitest run src/connectors/managed
+Result: Test Files 2 failed | 13 passed (15); Tests 198 passed (198) -- the 2 new suites fail to load
+(./aws/focusRetriever and ./aws/s3ClientFromSecret do not exist); the 198 passing tests are the existing
+M0a/M0b/M0c/M9a suites.
+src/connectors/managed/aws/focusRetriever.db.test.ts (new, RED by construction: no aws-data-exports retriever
+is registered; runs under npm run test:db with Postgres 16 + SeaweedFS).
+Covers: credentials ONLY from the secret file (static key pair, or sts:AssumeRole with ExternalId; AWS_* env,
+profile and configured endpoint URLs ignored; SigV4 against the documented example and the SDK signer);
+manifest-driven deliveries (every listed file once, If-Match, sizes declared; files outside the manifest never
+read); MANIFEST_AMBIGUOUS by default, latest-complete only with recorded evidence; MANIFEST_INVALID,
+LAYOUT_CASE_MISMATCH, EXPORT_EMPTY, PERIOD_NOT_DELIVERED, FORMAT_UNSUPPORTED (Parquet/ZIP), FOCUS_TABLE_MISMATCH;
+gzip originals captured, decompressed at staging; FOCUS 1.0 vs 1.2 detected from the header and recorded
+separately from the declared table (FOCUS_VERSION_MISMATCH, HEADER_CASE_MISMATCH); manifest controls as
+aggregate only; four-stage probe (auth, scope, data, contract); end to end through cli fetch (publish,
+unchanged re-run, restatement refused then superseded with --restate).
+Data: the public FOCUS 1.0 sample (CC BY 4.0) and SYNTHETIC files/credentials; an in-process fake S3; no network.

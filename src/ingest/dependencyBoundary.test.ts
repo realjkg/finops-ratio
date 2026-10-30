@@ -8,6 +8,9 @@ import ts from 'typescript';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const INGEST_DIR = path.join(REPO_ROOT, 'src', 'ingest');
+// M1a: the AWS managed connector builds its own S3 client. The subtree is worker-only
+// (src/connectors/managed/boundary.test.ts proves no file Next bundles reaches it).
+const AWS_CONNECTOR_DIR = path.join(REPO_ROOT, 'src', 'connectors', 'managed', 'aws');
 const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 const FORBIDDEN = (spec: string) => spec.startsWith('@aws-sdk/') || spec === 'csv-parse' || spec.startsWith('csv-parse/');
 
@@ -16,7 +19,7 @@ function walk(dir: string, acc: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const abs = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || path.resolve(abs) === path.resolve(INGEST_DIR)) continue;
+      if (entry.name === 'node_modules' || [INGEST_DIR, AWS_CONNECTOR_DIR].includes(path.resolve(abs))) continue;
       walk(abs, acc);
     } else if (SOURCE_EXT.test(entry.name)) acc.push(abs);
   }

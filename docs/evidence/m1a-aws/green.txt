@@ -1,0 +1,28 @@
+M1a AWS Data Exports FOCUS retrieval -- GREEN (after the implementation)
+Base: origin/main bdf6d15. Gates run sequentially in the foreground:
+- npm run lint: pass (exit 0)
+- npm run typecheck (app) and npx tsc --noEmit -p tsconfig.worker.json (worker): pass
+- npx vitest run: Test Files 239 passed (239); Tests 4377 passed (4377)
+  (new: s3ClientFromSecret.test.ts 8, focusRetriever.test.ts 18; registry.test.ts updated to the shipped set)
+- npm run test:db (own Postgres 16 postgres@sha256:1a6ab3f5... on :25432, SeaweedFS chrislusf/seaweedfs@sha256:4e61d15f...
+  on :28333 with -volume.max=64 -master.volumeSizeLimitMB=64 -volume.minFreeSpace=300MiB; containers removed afterwards):
+  Test Files 44 passed (44), Tests 712 passed (712); serial: Test Files 6 passed (6), Tests 173 passed (173)
+  (new: src/connectors/managed/aws/focusRetriever.db.test.ts 2)
+- npm run worker:build: pass; the built registry lists [aws-data-exports] and normalizerFor(aws-focus-export, 1.2) resolves
+- npm run build: pass; npm run check:bundle: pass (clientFiles 137, serverFiles 133, no problems)
+
+Mutations (each applied alone, npx vitest run src/connectors/managed/aws, then reverted):
+- M1 lowercase partition ignored: KILLED (Tests  1 failed | 24 passed (25))
+- M2 configured endpoint URLs honored: SURVIVED at first (an explicit endpoint bypasses them); a test for the no-endpoint case was added, then KILLED (Tests 1 failed | 25 passed (26))
+- M3 latest-complete picks the oldest: KILLED (Tests  1 failed | 24 passed (25))
+- M4 1.2 columns not detected: KILLED (Tests  1 failed | 24 passed (25))
+- M5 Parquet/ZIP names not refused: KILLED (Tests  1 failed | 24 passed (25))
+- M6 latest-complete without evidence: KILLED (Tests  1 failed | 24 passed (25))
+- M7 STS ExternalId dropped: KILLED (Tests  1 failed | 24 passed (25))
+- M8 session cache never refreshes: KILLED (Tests  1 failed | 24 passed (25))
+- M9 AccessDenied counted as auth failure: KILLED (Tests  1 failed | 24 passed (25))
+- M10 SDK default credential chain used (no explicit credentials): KILLED (Tests 2 failed | 24 passed (26))
+
+Finding (db test): R1's credential heuristic /^[A-Za-z0-9+/_=-]{40,}$/ refuses a params value of 40+ such
+characters, so the per-run test root could not be the export prefix; the db test uses a short prefix of its own.
+Data: the public FOCUS 1.0 sample (CC BY 4.0) and SYNTHETIC files/credentials only; no network to AWS.
