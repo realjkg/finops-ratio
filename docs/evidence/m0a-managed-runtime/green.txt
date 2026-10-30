@@ -43,3 +43,6 @@ passed, B1 boundary skipping pages/). The reviewer's mut.sh rerun: every applica
 cap-straddling test). Equivalent: W6 (CLI-level redaction of managed secrets off) survives, because the
 runtime already scrubs everything it returns, logs or stages; it is kept as defense in depth.
 All data SYNTHETIC.
+Merged origin/feat/m0b-connector-evidence b6491e9 (the #148 review fixes; no conflicts), gates rerun on the
+merged tree, sequentially: lint 0; typecheck app 0 and worker 0; vitest 234 files, 4310 tests passed;
+test:db 43 files 706 tests, serial 6 files 173 tests passed; worker:build 0; build 0; check:bundle pass.
