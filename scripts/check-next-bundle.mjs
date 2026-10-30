@@ -34,6 +34,11 @@ export const WORKER_ONLY = [
   'MANIFEST_AMBIGUOUS',
   'EVIDENCE_CONFLICT',
   'replay-fixtures',
+  // M0a managed connector runtime (src/connectors/managed, worker-only).
+  'CONNECTOR_NOT_REGISTERED',
+  'RATIO_SECRETS_DIR',
+  'connector-originals',
+  'DELIVERY_INCOMPLETE',
 ];
 // Database code of the read API (an env-var NAME is not code: the startup hook's pure config names it).
 export const READER_MARKERS = ['cost_facts_published', 'ratio.tenant_id', 'pg_auth_members'];

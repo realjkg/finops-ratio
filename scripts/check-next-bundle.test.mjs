@@ -58,6 +58,15 @@ describe('B1 a clean build passes', () => {
     for (const m of ['S3FocusExportSource', 'csv-parse', '@aws-sdk/client-s3']) expect(WORKER_ONLY).toContain(m);
     for (const m of ['cost_facts_published', 'ratio.tenant_id', 'pg_auth_members']) expect(READER_MARKERS).toContain(m);
   });
+
+  it('managed connector runtime markers (M0a) are worker-only: a server chunk carrying one fails', () => {
+    for (const m of ['CONNECTOR_NOT_REGISTERED', 'RATIO_SECRETS_DIR', 'connector-originals', 'DELIVERY_INCOMPLETE']) {
+      expect(WORKER_ONLY).toContain(m);
+      const root = cleanTree();
+      write(root, 'server/chunks/shared._.js', `export const e = "${m}"`);
+      expect(checkNextBundle(root).problems.join('\n')).toContain(m);
+    }
+  });
 });
 
 describe('B2 the client bundle never contains ingestion or driver code', () => {

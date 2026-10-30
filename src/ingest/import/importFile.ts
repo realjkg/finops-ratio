@@ -157,12 +157,17 @@ interface PublishedBatch {
   shas: string[];
 }
 
+/** A source that can be imported into: a file-drop source (cli source add) that is enabled. */
+export function assertImportableSource(row: SourceRow): void {
+  if (row.kind !== 'focus_file' || row.config.layout !== 'ratio-file-drop') {
+    throw new IngestError('IMPORT_SOURCE_NOT_FILE_DROP', `source ${row.sourceKey} is not a file-import source (register one with: cli source add)`);
+  }
+  if (!row.enabled) throw new IngestError('SOURCE_DISABLED', `source ${row.sourceKey} is disabled`);
+}
+
 export async function stageAndSync(o: StageAndSyncOptions): Promise<StageAndSyncResult | ImportRefusal> {
   const row = await workerTransaction(o.pool, o.tenantId, (c) => loadSource(c, o.sourceKey));
-  if (row.kind !== 'focus_file' || row.config.layout !== 'ratio-file-drop') {
-    throw new IngestError('IMPORT_SOURCE_NOT_FILE_DROP', `source ${o.sourceKey} is not a file-import source (register one with: cli source add)`);
-  }
-  if (!row.enabled) throw new IngestError('SOURCE_DISABLED', `source ${o.sourceKey} is disabled`);
+  assertImportableSource(row);
   const location = validateLocation(row.config);
   const providers = declaredProviders(row.config);
   if (!providers) throw new IngestError('SOURCE_CONFIG_INVALID', 'source config providers must be a non-empty list of known providers');

@@ -1,0 +1,51 @@
+M0a managed retrieval runtime, secrets and staged health -- RED (tests committed before the implementation)
+Base: feat/m0b-connector-evidence 08aff1d (M0b, PR #148) on origin/main 6d348d9.
+Command: npx vitest run src/connectors/managed
+Result: Test Files 5 failed | 5 passed (10); Tests 80 passed (80) -- the 5 new suites fail to load
+(./registry, ./runtime, ./health and ./secrets/resolve do not exist); the 80 passing tests are the
+existing pointfive and M0b evidence suites.
+Covers: secretRef NAME resolution from RATIO_SECRETS_DIR only (0600, 64 KiB, no traversal, no link
+out of the dir, never env), secret values never serialize, scrubbing; four-stage health (token OK +
+listing 403 -> scope false, not connected; later stages never count after a failed one); the
+connector state ladder (live verified only with a live evidence record; simulated never upgrades);
+runtime (originals captured, then staged exactly once; retriever error -> code, nothing staged, no
+fallback; incomplete delivery quarantined; unregistered connector / missing secret refused);
+registry; boundary (no web code reaches the worker-only managed modules; no demo parser).
+All data SYNTHETIC.
+
+--- Second RED (engagement-config spec source and the worker command), after the first GREEN ---
+Finding: the source row cannot hold the retrieval block: ratio.sources CHECK
+sources_config_no_secrets refuses keys matching (token|secret|key|...|conn), i.e. both
+`secretRef` and `connector`. The worker therefore reads the managed retrieval of a source from the
+engagement config (R1 schema, sources[].id = source key), by NAME only.
+Command: npx vitest run src/connectors/managed/runtime.test.ts
+Result: Tests 1 failed | 6 passed (7) -- managedSpecFromEngagementFile is not exported yet.
+src/ingest/managedFetch.db.test.ts (new, RED by construction: the `fetch` worker command does not
+exist yet; it runs under npm run test:db with Postgres 16 + SeaweedFS).
+
+--- Third RED: independent review of PR #149 (rv149), tests before the fixes, head 6c6f352 ---
+Command: npx vitest run src/connectors/managed scripts/check-next-bundle.test.mjs
+Result: Test Files 5 failed | 7 passed (12); Tests 12 failed | 131 passed (143); engagementSpec.test.ts
+fails to load (the worker-safe engagement-config check does not exist yet).
+Failing: secret scrubbed from the whole result, logs and staged provenance (delivery id, identity,
+describe); structured secret components and connector-registered derived secrets; describe() throwing
+escapes runManagedFetch; --from/--to not enforced (out-of-range, period-less, duplicate-period
+deliveries staged); rows outside the delivery period not reported; partial multi-delivery failure does
+not say what was staged; no size cap before staging; secretScrubTargets missing; object keys and
+URL-encoded/JSON-escaped forms not scrubbed; check:bundle lacks managed markers; boundary detector misses
+template-literal import().
+Command: npx vitest run --config vitest.db.config.ts src/ingest/managedFetch.db.test.ts (own Postgres 16 +
+SeaweedFS, CI digests, non-default ports)
+Result: Tests 5 failed | 2 passed (7): source missing from the config exits 1 (want 2); a disabled
+source still contacts the provider; a config naming another tenant publishes (want exit 2, nothing
+staged); the secret in a delivery id reaches the staged manifest; an import in progress exits 1 (want 4).
+All data SYNTHETIC.
+
+--- Fourth RED: delta review of 3d5a035 (rv149b), tests before the fix ---
+BLOCKER: the CLI stored --from/--to as YYYY-MM-01 while the runtime compared YYYY-MM, so the --from month was
+refused DELIVERY_OUT_OF_RANGE. Command: npx vitest run --config vitest.db.config.ts src/ingest/managedFetch.db.test.ts
+Result: Tests 3 failed | 8 passed (11): single-month range, multi-month edges, --restate with a range.
+Command: npx vitest run src/connectors/managed/runtime.test.ts
+Result: Tests 4 failed | 15 passed (19): an over-cap delivery keeps an earlier object's original; a declared
+size above the cap is not refused before open(); a malformed range is not refused; a period-less delivery
+next to labeled ones is staged (possible duplicate month). All data SYNTHETIC.

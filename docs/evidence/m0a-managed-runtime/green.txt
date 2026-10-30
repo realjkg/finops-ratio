@@ -1,0 +1,62 @@
+M0a managed retrieval runtime, secrets and staged health -- GREEN
+Head: feat/m0a-managed-runtime = M0b (#148) + M0a, merged with origin/main 8776fef (#145 landed),
+workerCli.ts commit last. Gates run sequentially, in the foreground:
+  npm run lint -> exit 0
+  npm run typecheck -> exit 0;  npx tsc -p tsconfig.worker.json --noEmit -> exit 0
+  npx vitest run -> Test Files 233 passed (233); Tests 4257 passed (4257)
+  npm run build -> exit 0 (next-env.d.ts unchanged);  npm run check:bundle -> pass
+  npm run worker:build -> exit 0 (dist-worker includes connectors/managed; `fetch` without --source
+    prints the usage evidence record, exit 2); dist-worker removed afterwards
+  npm run test:db (own Postgres 16 and SeaweedFS from the CI image digests on 127.0.0.1:55461 / 18461,
+    -volume.max=64 -master.volumeSizeLimitMB=64) -> Test Files 43 passed (43), Tests 702 passed (702);
+    serial: Test Files 6 passed (6), Tests 173 passed (173). Includes src/ingest/managedFetch.db.test.ts (3).
+Mutations, unit (scripted, each reverted; tests: src/connectors/managed): 20/20 killed
+  secrets: permissions, env fallback, link escape, '..' segments, size, toJSON leak, scrub no-op;
+  health: ordering, connected on 3 stages, throwing probe treated as verified, details not scrubbed;
+  state: live without record, simulated upgrades; runtime: no capture, incomplete staged, foreign error
+  text kept, secret not scrubbed, refused counted ok, non-managed spec accepted (killed after adding a
+  case; it survived the first round); registry duplicate allowed.
+Mutations, db (manual, reverted): delivery period not passed to staging -> killed (2024-10 staged);
+  originals store replaced by a no-op in workerCli -> killed (original missing from the evidence bucket).
+
+--- GREEN after the independent review of PR #149 (rv149) ---
+Fixes: the whole fetch result, every managed log line and the staged provenance are scrubbed (delivery
+ids, periods, object identity, describe()); structured secret files register each field/component, and a
+connector registers derived secrets (ctx.registerSecret); the worker CLI redacts its log lines, errors and
+evidence record with them too; describe() runs inside the guarded block. Worker-safe engagement-config
+check (engagementSpec.ts) pinned to R1 by a shared accept/reject table run through both validators and by
+R1's constants and source text; tenantId bound to --tenant (ENGAGEMENT_TENANT_MISMATCH). A disabled or
+non-file-drop source is refused before the connector runs. fetch exit codes as import-file (3/4/5/2/1).
+--from/--to enforced in the runtime; duplicate, malformed, period-less (with a range) and empty
+deliveries refused unopened; rows outside the delivery period counted (rowsOutsidePeriod); a partial
+failure lists what was staged and published; deliveries above MAX_IMPORT_BYTES refused before staging.
+Boundary: all of src/connectors/managed/** is worker-only except the named PointFive client carve-out;
+proxy/middleware/instrumentation, app/pages and src scanned (static, dynamic, require, template literal,
+@/ and src/ baseUrl, .mts/.cts), each root non-empty. check:bundle worker-only markers extended.
+Gates, sequential, on the fixed tree: lint 0; typecheck app 0 and worker 0; vitest 234 files, 4301 tests
+passed; test:db (own Postgres 16 + SeaweedFS, CI digests, ports 55449/18349) 43 files 706 tests, serial
+6 files 173 tests passed; worker:build 0; build 0; check:bundle pass.
+Mutations: 40 targeted mutants of the new code, 38 killed at first run; the survivor E3 (depth check;
+the deeper object still failed as a non-leaf) is killed by a test pinning the problem text to R1's. The
+reviewer's three survivors are killed by their new-code equivalents (S1 whole-result scrub, P1 period not
+passed, B1 boundary skipping pages/). The reviewer's mut.sh rerun: every applicable mutant killed (M8 after a
+cap-straddling test). Equivalent: W6 (CLI-level redaction of managed secrets off) survives, because the
+runtime already scrubs everything it returns, logs or stages; it is kept as defense in depth.
+All data SYNTHETIC.
+Merged origin/feat/m0b-connector-evidence b6491e9 (the #148 review fixes; no conflicts), gates rerun on the
+merged tree, sequentially: lint 0; typecheck app 0 and worker 0; vitest 234 files, 4310 tests passed;
+test:db 43 files 706 tests, serial 6 files 173 tests passed; worker:build 0; build 0; check:bundle pass.
+
+--- GREEN after the delta review of 3d5a035 (rv149b) ---
+Fix: the CLI passes --from/--to to the runtime and the retriever as 'YYYY-MM' (as FetchOptions.range documents);
+the runtime refuses a malformed or inverted range (INVALID_RANGE) before the connector runs. The --from and
+--to months are both in range. The cap is checked on declared object sizes before open(), then on the opened
+bytes, and originals are captured only once the whole delivery is within the cap (an over-cap delivery keeps
+no original). A period-less delivery listed next to others is refused unopened (DELIVERY_PERIOD_DUPLICATE).
+The CLI range tests provision the source with the sample's three providers (2024-10 holds one Oracle row).
+Gates, sequential: lint 0; typecheck app 0 and worker 0; vitest 234 files, 4313 tests passed; test:db (own
+Postgres 16 + SeaweedFS, CI digests, non-default ports) 43 files 710 tests, serial 6 files 173 tests passed;
+worker:build 0; build 0; check:bundle pass.
+Mutations: 9 of 9 killed, among them the restored off-by-one (CLI passes 'YYYY-MM-01'; killed by the db
+suite), the --from month excluded in the runtime, the range left unvalidated, the declared size ignored, the
+opened size ignored, originals captured while opening, and the period-less duplicate allowed.

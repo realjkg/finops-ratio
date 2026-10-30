@@ -1,6 +1,6 @@
 ---
 name: ingestion-ops
-description: Operate Ratio's trusted FOCUS ingestion worker (src/ingest) — migrate, provision a tenant/source (SQL or `source add`), import an operator FOCUS file (`import-file`), sync, backfill, replay/rollback, inspect runs and quarantine, doctor, replay-fixtures, and the manual real-export acceptance procedure (NOT YET PERFORMED). Local + ephemeral integration only.
+description: Operate Ratio's trusted FOCUS ingestion worker (src/ingest) — migrate, provision a tenant/source (SQL or `source add`), import an operator FOCUS file (`import-file`), fetch from a managed connector (`fetch`), sync, backfill, replay/rollback, inspect runs and quarantine, doctor, replay-fixtures, and the manual real-export acceptance procedure (NOT YET PERFORMED). Local + ephemeral integration only.
 version: 1.0.0
 triggers:
   - ingestion
@@ -14,6 +14,8 @@ triggers:
   - replay-fixtures
   - import-file
   - source add
+  - fetch
+  - managed connector
 author: slice-1-implementer
 created: 2026-10-03
 ---
@@ -46,6 +48,8 @@ publishes it per billing period. Readers (`ratio_reader`) see only
 | `RATIO_DOCTOR_MAX_STALENESS_HOURS` (48) | doctor | freshness threshold |
 | `RATIO_REPLAY_FIXTURES_BUCKET` | replay-fixtures | bucket for synthetic source objects (source credentials need Put/List/Delete there) |
 | `RATIO_ALLOW_SYNTHETIC_PROVIDERS` (`0`) | sync/backfill/replay, replay-fixtures | `1` accepts the fixed synthetic provider set (`SyntheticCloud`, `SyntheticAWS`, `SyntheticAzure`, `SyntheticGCP`) for every checked source type; real provider names are still checked against the per-type allowlist (issue #62). Only `1` or `0`. `1` is **refused unless `RATIO_ENV` is explicitly `development` or `test`** (`SYNTHETIC_PROVIDERS_NOT_ALLOWED`, exit 2; unset, staging and production refuse). Logged once at startup when on. `replay-fixtures` requires it |
+| `RATIO_ENGAGEMENT_CONFIG` | `fetch` | absolute path of the engagement config (R1 schema, at most 1 MiB). `fetch` reads the source's `sources[].retrieval` (`kind: managed`, `connector`, `params`, `secretRef`) by source id = `--source`. Its `tenantId` must be the `--tenant` of the run (`ENGAGEMENT_TENANT_MISMATCH`, exit 2). The worker checks, as R1 does: unknown keys, source ids (format, no duplicates), connector one of R1's `MANAGED_CONNECTORS`, params at most 100 entries and 2 levels deep, no credential-looking value (AWS key id, PEM, JWT, long opaque base64), `secretRef` a NAME (`ENGAGEMENT_CONFIG_INVALID`, exit 2, naming the key, never the value) |
+| `RATIO_SECRETS_DIR` | `fetch` | absolute path of the read-only secrets mount. `secretRef` names a file in it (links may not leave it), mode 0600 or stricter, at most 64 KiB. Never read from the env or the config. The value, and each field of a structured secret file (JSON fields, `key=value;...` values, `id:secret` parts), is redacted from every printed line, the evidence record and the staged manifest |
 | `RATIO_GIT_SHA` · `RATIO_ARTIFACT_DIGEST` (`sha256:<hex>`) · `RATIO_EVIDENCE_FILE` | all | evidence record metadata; JSONL copy of each record |
 
 Test-only (refused otherwise, and always refused when `RATIO_ENV` is `staging` or
@@ -62,9 +66,9 @@ values (`files`), and a count of anything unrecognized (`unrecognizedArguments`)
 | 0 | ok |
 | 1 | failure, including a quarantined or failed period |
 | 2 | usage or configuration error |
-| 3 | **depends on the command**: `migrate --status` = the database does not match the code (pending migrations); `import-file` = refused, `PERIOD_ALREADY_PUBLISHED` (the delivery would change an already-published period; nothing was written) |
-| 4 | busy: another run holds the source's lease (`ALREADY_RUNNING`), its lock timed out (`LOCK_TIMEOUT`), or, for `import-file`, another import of the source is in progress (`ALREADY_RUNNING`); `import-file` checks both before it stages anything, so nothing was written |
-| 5 | `import-file` only: the delivery is larger than the cap (`IMPORT_TOO_LARGE`, 128 MiB decompressed, all files together), refused before it is read |
+| 3 | **depends on the command**: `migrate --status` = the database does not match the code (pending migrations); `import-file` and `fetch` = refused, `PERIOD_ALREADY_PUBLISHED` (the delivery would change an already-published period; nothing was written for it) |
+| 4 | busy: another run holds the source's lease (`ALREADY_RUNNING`), its lock timed out (`LOCK_TIMEOUT`), or, for `import-file` and `fetch`, another import of the source is in progress (`ALREADY_RUNNING`); `import-file` checks both before it stages anything, so nothing was written |
+| 5 | `import-file` and `fetch`: the delivery is larger than the cap (`IMPORT_TOO_LARGE`, 128 MiB, all files together), refused before it is staged |
 
 ## 1. Migrate
 
@@ -193,6 +197,34 @@ npm run -s worker -- import-file --tenant <uuid> --source focus-aws --file <a.cs
   overlapping provider declaration: `DUPLICATE_ARTIFACT` (exit 1).
 - Over the cap: exit 5 before anything is read. File paths and names never
   reach the record or the logs (only `files: <count>`).
+
+## 3b. `fetch` (M0a, managed connector; worker only)
+
+```bash
+RATIO_ENGAGEMENT_CONFIG=/abs/engagement.json RATIO_SECRETS_DIR=/run/secrets/ratio \
+npm run -s worker -- fetch --tenant <uuid> --source <key> [--from YYYY-MM --to YYYY-MM] [--restate]
+```
+
+- The source must be registered with `source add` (file-drop layout) and enabled; otherwise the
+  connector is never run (`IMPORT_SOURCE_NOT_FILE_DROP` / `SOURCE_DISABLED`, exit 1, no provider
+  call, no original written).
+- The connector lists deliveries; the ORIGINAL bytes of each object are stored in the evidence
+  bucket (`connector-originals/<tenant>/<source>/<sha256>`), then each complete delivery is staged
+  once through the `import-file` pipeline, for its own billing period only. Rows of other periods in
+  the delivery are left out and counted (`rowsOutsidePeriod`).
+- Refused unopened: a delivery outside `--from/--to` (`DELIVERY_OUT_OF_RANGE`), without a period
+  when a range is given (`DELIVERY_PERIOD_UNKNOWN`), two deliveries for one period
+  (`DELIVERY_PERIOD_DUPLICATE`, also a period-less delivery listed next to others), a malformed
+  period (`DELIVERY_PERIOD_INVALID`) or no objects (`DELIVERY_EMPTY`). `--from`/`--to` are inclusive
+  months: `--from 2024-09 --to 2024-09 --restate` restates 2024-09 alone. A delivery above the cap
+  (declared sizes first, then the bytes opened) is refused before any of its originals is kept. An incomplete delivery is quarantined (`DELIVERY_INCOMPLETE`): originals kept,
+  nothing staged.
+- No connector is registered in this build: every source fails `CONNECTOR_NOT_REGISTERED` (exit 1).
+- Exit codes as `import-file` (table above); configuration problems (`ENGAGEMENT_CONFIG_INVALID`,
+  `ENGAGEMENT_TENANT_MISMATCH`, `SOURCE_NOT_IN_ENGAGEMENT_CONFIG`, `SOURCE_NOT_MANAGED`,
+  `SECRETS_DIR_UNSET`, `SECRET_REF_INVALID`) exit 2. With several deliveries the first one that
+  was not staged decides the code; a failed fetch that staged some deliveries first lists them, with
+  the periods they published, in `results.partial` (those stand; re-run `fetch` for the rest).
 
 ## 4. Inspect runs, batches, quarantine
 
