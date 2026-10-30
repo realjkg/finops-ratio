@@ -1,0 +1,13 @@
+RED (tests only, before the fix): npx vitest run src/connectors/managed/aws/focusRetriever.test.ts
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > a data file in another bucket in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > a data file outside the export data folder in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > malformed JSON in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > a ../ path in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > a billing period of another folder in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > an unsupported scheme in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > an invalid manifest with the same LastModified as the newest complete one cannot be ordered: MANIFEST_INVALID
+listDeliveries and open > a range-less fetch skipping a missing middle month warns with the gap months (not a failure); a contiguous or ranged fetch does not
+ Test Files  1 failed (1)
+      Tests  8 failed | 20 passed (28)
+Guards that pass before and after: newer manifest with files not landed -> older published; invalid OLDER manifest does not block a newer complete one.

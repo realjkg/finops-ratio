@@ -169,6 +169,84 @@ describe('listDeliveries and open', () => {
     expect(r.deliveries).toMatchObject([{ outcome: 'failed', code: 'MANIFEST_AMBIGUOUS' }]);
   });
 
+  describe('latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped', () => {
+    const proven = { manifestSelection: 'latest-complete', manifestSelectionEvidence: `sha256:${'b'.repeat(64)}` };
+    const OLD = new Date('2026-10-01T00:00:00Z');
+    const NEW = new Date('2026-10-02T00:00:00Z');
+    const goodKey = dataKey('2024-09', 'part-00001.csv.gz', 'run-new');
+    const withFiles = (files: unknown[], extra: Record<string, unknown> = {}) => JSON.stringify({ billingPeriod: { start: '2024-09-01T00:00:00.000Z' }, dataFiles: files, ...extra });
+    const invalid: Array<[string, () => string]> = [
+      ['a data file in another bucket', () => withFiles([`s3://other-bucket/${goodKey}`])],
+      ['a data file outside the export data folder', () => withFiles([`s3://${BUCKET}/some-other-export/data/BILLING_PERIOD=2024-09/part.csv.gz`])],
+      ['malformed JSON', () => '{"dataFiles": ['],
+      ['a ../ path', () => withFiles([`s3://${BUCKET}/${ROOT}data/BILLING_PERIOD=2024-09/run-new/../run-1/part-00001.csv.gz`])],
+      ['a billing period of another folder', () => withFiles([`s3://${BUCKET}/${goodKey}`], { billingPeriod: { start: '2024-08-01T00:00:00.000Z' } })],
+      ['an unsupported scheme', () => withFiles([`https://example.test/${goodKey}`])],
+    ];
+    const seed = () => {
+      deliver('2024-09', undefined, { manifest: 'a/Manifest.json', run: 'run-1', at: OLD });
+      s3.put(goodKey, zlib.gzipSync(SAMPLE.subarray(0, 4000)), NEW);
+    };
+
+    it.each(invalid)('%s in the newer manifest: MANIFEST_INVALID, never the older manifest', async (_n, body) => {
+      seed();
+      s3.put(manifestKey('2024-09', 'b/Manifest.json'), body(), NEW);
+      const { r, staged, stored } = await fetchAll(proven);
+      expect(r.status).toBe('failed');
+      expect(r.deliveries).toMatchObject([{ billingPeriod: '2024-09-01', outcome: 'failed', code: 'MANIFEST_INVALID', originals: [] }]);
+      expect(r.deliveries[0].message).not.toContain('other-bucket');
+      expect(staged).toEqual([]);
+      expect(stored.size).toBe(0);
+      expect(s3.gets().filter((k) => k.includes('/data/'))).toEqual([]);
+      expect(retriever(proven).deliveryEvidence('x')).toBeUndefined();
+    });
+
+    it('an invalid manifest with the same LastModified as the newest complete one cannot be ordered: MANIFEST_INVALID', async () => {
+      seed();
+      s3.put(manifestKey('2024-09', 'b/Manifest.json'), '{"dataFiles": [', OLD);
+      expect((await fetchAll(proven)).r.deliveries).toMatchObject([{ outcome: 'failed', code: 'MANIFEST_INVALID' }]);
+    });
+
+    it('a newer manifest whose listed files have not landed yet is skipped: the older complete one is published', async () => {
+      seed();
+      s3.put(manifestKey('2024-09', 'b/Manifest.json'), withFiles([`s3://${BUCKET}/${dataKey('2024-09', 'not-yet.csv.gz', 'run-pending')}`]), NEW);
+      const { r, staged } = await fetchAll(proven);
+      expect(r.status).toBe('succeeded');
+      expect(staged).toHaveLength(1);
+      expect(staged[0].objects[0].bytes.equals(SAMPLE_GZ)).toBe(true);
+    });
+
+    it('an invalid OLDER manifest does not block a newer complete one', async () => {
+      deliver('2024-09', undefined, { manifest: 'a/Manifest.json', run: 'run-1', at: NEW });
+      s3.put(manifestKey('2024-09', 'old/Manifest.json'), '{"dataFiles": [', OLD);
+      const { r, staged } = await fetchAll(proven);
+      expect(r.status).toBe('succeeded');
+      expect(staged).toHaveLength(1);
+    });
+  });
+
+  it('a range-less fetch skipping a missing middle month warns with the gap months (not a failure); a contiguous or ranged fetch does not', async () => {
+    deliver('2024-07');
+    deliver('2024-10');
+    const gap = await fetchAll();
+    expect(gap.r.status).toBe('succeeded');
+    expect(gap.staged.map((x) => x.period)).toEqual(['2024-07-01', '2024-10-01']);
+    expect(gap.r.warnings).toHaveLength(1);
+    expect(gap.r.warnings![0]).toContain('2024-08');
+    expect(gap.r.warnings![0]).toContain('2024-09');
+    expect(gap.r.warnings![0]).not.toContain('2024-07');
+    expect(gap.r.warnings![0]).not.toContain('2024-10');
+    deliver('2024-08');
+    deliver('2024-09');
+    expect((await fetchAll()).r).not.toHaveProperty('warnings');
+    s3.objects.clear();
+    deliver('2024-07');
+    deliver('2024-10');
+    const ranged = await fetchAll({}, { from: '2024-07', to: '2024-10' });
+    expect(ranged.r.deliveries.map((d) => d.code)).toEqual([undefined, 'PERIOD_NOT_DELIVERED', 'PERIOD_NOT_DELIVERED', undefined]);
+    expect(ranged.r).not.toHaveProperty('warnings');
+  });
+
   it('a manifest naming a missing file is MANIFEST_INVALID: nothing published', async () => {
     deliver('2024-09', [{ name: 'part-00001.csv.gz', bytes: SAMPLE_GZ }, { name: 'missing.csv.gz' }]);
     const { r, staged } = await fetchAll();
