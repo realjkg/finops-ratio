@@ -38,6 +38,10 @@ describe('redactString: review round 3 (#148)', () => {
     expect(red('run --token=abcdefg')).toBe('run --token=[redacted]');
     for (const s of ['-password=abc', '_password=abc', '1password=abc', 'a/.token=abc', '?.password=abc', 'x.password=abc']) expect(red(s)).toBe(s.replace('abc', '[redacted]'));
     expect(red('-eyJabcdefgh.abcdefghi.sig')).toBe('-[redacted]');
+    expect(red('x-eyJabcdefgh.abcdefghi.sig')).toBe('x-[redacted]');
+    expect(red('clone --https://u:pw@host.example.test/r')).toBe('clone --https://[redacted]@host.example.test/r');
+    // Known limit (documented): a key name longer than 64 chars is not matched as a whole, and a start inside it is blocked.
+    for (const j of ['_', '-', '.']) expect(red(`${'k'.repeat(70)}${j}secret=abc`)).toBe(`${'k'.repeat(70)}${j}secret=abc`);
     expect(red('apiKeyId=k1 secretRef=aws/x')).toBe('apiKeyId=k1 secretRef=aws/x'); // reference names still kept
   });
 
@@ -51,7 +55,7 @@ describe('redactString: review round 3 (#148)', () => {
 
   it('stays linear on the dash/dot-prefixed hostile shapes', () => {
     const MB = 1 << 20;
-    for (const unit of ['--a', '.-a', '-.a=', '--eyJ-', '-eyJaaaaaaaa.', '--a://', ' -a', 'a ', '"\\', '-----BEGIN ', '-----BEGIN A', 'password="', '_a=', '1a:', 'Bearer  ']) {
+    for (const unit of ['eyJ', 'aeyJ', '--a', '.-a', '-.a=', '--eyJ-', '-eyJaaaaaaaa.', '--a://', ' -a', 'a ', '"\\', '-----BEGIN ', '-----BEGIN A', 'password="', '_a=', '1a:', 'Bearer  ']) {
       const s = unit.repeat(Math.ceil(MB / unit.length));
       const t = Date.now();
       red(s);

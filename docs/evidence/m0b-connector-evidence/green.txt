@@ -43,3 +43,14 @@ Mutations (scripted, each reverted, 150 s cap counts as killed): 15/17 killed --
   (timeout). Survivors: the KV bound alone and the KV lookbehind alone -- each guard by itself keeps
   the scan linear (defense in depth); removing both is killed by the 1 MB test.
 Older PageSequence tests now pass the request token so each case fails for its own reason.
+
+Review round 3 (#148) -- GREEN (sequential, foreground; base bdadc92)
+  npx vitest run src/connectors/managed/evidence -> 37 passed (37); 1 MB hostile shapes worst ~280 ms locally
+  npm run lint, npm run typecheck, npx tsc -p tsconfig.worker.json --noEmit -> exit 0
+  npx vitest run -> Test Files 231 passed (231); Tests 4276 passed (4276)
+  npm run build -> exit 0 (next-env.d.ts unchanged); npm run check:bundle -> pass
+Mutations (scripted, each reverted, 150 s cap counts as killed): 13/13 killed -- KV lookbehind back to
+  round 2; KV mid-key alternative removed; KV lookbehind removed; KV name cannot start with _ or a digit;
+  JWT lookbehind back to round 2; JWT lookbehind removed (timeout); JWT header allows dashes (timeout);
+  userinfo lookbehind back to round 2; quoted value capped; userinfo capped; PEM label capped; Bearer
+  spacing capped; KV spacing capped.
