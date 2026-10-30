@@ -216,7 +216,7 @@ describe('listDeliveries and open', () => {
     const ev = r.deliveryEvidence(d.id)!;
     expect(ev.versions).toMatchObject({ provider: 'AWS', dataset: 'FOCUS_1_2_AWS', exportSchemaVersion: '1.2', sourceFocusVersion: 'unknown', observedSchema: 'unknown', apiVersion: 'unknown' });
     expect(ev.inventory).toMatchObject({ billingPeriod: '2024-09-01', completion: 'complete', revision: expect.stringMatching(/^manifest-sha256:[0-9a-f]{64}$/) });
-    expect(ev.manifest).toMatchObject({ key: manifestKey('2024-09'), selection: 'single', etag: expect.any(String) });
+    expect(ev.manifest).toEqual({ key: manifestKey('2024-09'), selection: 'single', sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(ev.aggregateControls).toEqual({ control: 'aggregate', proof: false, rowCount: 7 });
   });
 });
@@ -262,7 +262,7 @@ describe('probe (auth -> scope -> data -> contract)', () => {
     // The contract stage reads only the head of one data file (a ranged GET), never a whole month.
     const ranged = s3.requests.filter((q) => q.headers.range);
     expect(ranged).toHaveLength(1);
-    expect(ranged[0].path).toContain('BILLING_PERIOD=2024-09');
+    expect(decodeURIComponent(ranged[0].path)).toContain('BILLING_PERIOD=2024-09/');
   });
 
   it('listing denied: auth passes, scope fails, not connected', async () => {

@@ -40,6 +40,11 @@ function resolvesIntoIngest(fileAbs: string, spec: string): boolean {
 const COSTS_DIR = path.join(REPO_ROOT, 'src', 'server', 'costs');
 const COSTS_ROUTE = path.join(REPO_ROOT, 'pages', 'api', 'v1', 'costs', 'published.ts');
 
+// M1a: the AWS managed connector wraps the durable S3 source and the import seam. Its subtree is
+// worker-only: src/connectors/managed/boundary.test.ts proves no file Next bundles reaches it.
+// It may import src/ingest (never pg).
+const AWS_CONNECTOR_DIR = path.join(REPO_ROOT, 'src', 'connectors', 'managed', 'aws');
+
 /** The only src/ingest modules the read API may import (reuse, never copies). */
 const READER_ALLOWED_INGEST = ['db/tenant', 'worker/db', 'db/privilegeModel'];
 
@@ -78,7 +83,7 @@ function findForbiddenImports(fileAbs: string, source: string): Violation[] {
   for (const imp of info.importedFiles) {
     const spec = imp.fileName;
     const ingest = ingestModule(fileAbs, spec);
-    const allowed = costsTest || (inCosts && (spec === 'pg' || (ingest !== null && READER_ALLOWED_INGEST.includes(ingest))));
+    const allowed = costsTest || (inCosts && (spec === 'pg' || (ingest !== null && READER_ALLOWED_INGEST.includes(ingest)))) || (inside(AWS_CONNECTOR_DIR, fileAbs) && ingest !== null);
     if (!allowed && (isPgSpecifier(spec) || resolvesIntoIngest(fileAbs, spec))) {
       out.push({ file: path.relative(REPO_ROOT, fileAbs), specifier: spec });
     }
@@ -191,6 +196,10 @@ describe('src/ingest import boundary', () => {
     // The island's test files may use the test harness; its non-test files may not.
     expect(flagged(path.join(COSTS_DIR, 'x.db.test.ts'), `import { createTestDatabase } from '../../ingest/db/testing/harness';`)).toEqual([]);
     expect(flagged(path.join(COSTS_DIR, 'testing', 'http.ts'), `import x from '../../../ingest/db/testing/harness';`)).toEqual(['../../../ingest/db/testing/harness']);
+    // The worker-only AWS connector subtree may import src/ingest, never pg; its siblings may not.
+    expect(flagged(path.join(AWS_CONNECTOR_DIR, 'focusRetriever.ts'), `import x from '../../../ingest/sources/s3/layout';`)).toEqual([]);
+    expect(flagged(path.join(AWS_CONNECTOR_DIR, 'focusRetriever.ts'), `import { Pool } from 'pg';`)).toEqual(['pg']);
+    expect(flagged(path.join(REPO_ROOT, 'src', 'connectors', 'managed', 'runtime.ts'), `import x from '../../ingest/sources/s3/layout';`)).toEqual(['../../ingest/sources/s3/layout']);
     // Only the route file may import the island.
     expect(flagged(COSTS_ROUTE, `import { createPublishedCostsRoute } from '@/server/costs/publishedCostsRoute';`)).toEqual([]);
     expect(flagged(otherPage, `import { readerPool } from '@/server/costs/readerPool';`)).toEqual(['@/server/costs/readerPool']);

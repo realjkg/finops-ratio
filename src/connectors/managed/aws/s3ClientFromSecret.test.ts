@@ -18,15 +18,19 @@ const ROLE = {
 /** Node's sha256 / HMAC-sha256 in the SDK's hash-constructor shape (test oracle only). */
 class Sha256 {
   private readonly h: crypto.Hash | crypto.Hmac;
-  constructor(key?: string | Uint8Array) {
-    this.h = key === undefined ? crypto.createHash('sha256') : crypto.createHmac('sha256', Buffer.from(key));
+  constructor(key?: string | ArrayBuffer | ArrayBufferView) {
+    this.h = key === undefined ? crypto.createHash('sha256') : crypto.createHmac('sha256', bytes(key));
   }
-  update(d: string | Uint8Array): void {
-    this.h.update(typeof d === 'string' ? Buffer.from(d, 'utf8') : Buffer.from(d));
+  update(d: string | ArrayBuffer | ArrayBufferView): void {
+    this.h.update(bytes(d));
   }
   async digest(): Promise<Uint8Array> {
     return new Uint8Array(this.h.digest());
   }
+}
+function bytes(d: string | ArrayBuffer | ArrayBufferView): Buffer {
+  if (typeof d === 'string') return Buffer.from(d, 'utf8');
+  return ArrayBuffer.isView(d) ? Buffer.from(d.buffer, d.byteOffset, d.byteLength) : Buffer.from(d);
 }
 const secret = (v: unknown) => new SecretValue('aws/focus', typeof v === 'string' ? v : JSON.stringify(v));
 const codeOf = (f: () => unknown) => {
@@ -122,6 +126,23 @@ describe('s3ClientFromSecret', () => {
     client.destroy();
   });
 
+  it('without params.endpoint, AWS_ENDPOINT_URL(_S3) is ignored: the request is addressed to the regional AWS endpoint (stopped before sending)', async () => {
+    Object.assign(process.env, { AWS_ENDPOINT_URL: s3.endpoint, AWS_ENDPOINT_URL_S3: s3.endpoint });
+    const { client } = s3ClientFromSecret({ secret: secret(STATIC), region: 'eu-west-1', registerSecret: () => undefined });
+    let host = '';
+    client.middlewareStack.add(
+      () => async (args) => {
+        host = (args.request as { hostname: string }).hostname;
+        throw new Error('stopped before sending');
+      },
+      { step: 'finalizeRequest' },
+    );
+    await expect(client.send(new ListObjectsV2Command({ Bucket: 'synthetic-export-bucket' }))).rejects.toThrow('stopped before sending');
+    expect(host).toBe('synthetic-export-bucket.s3.eu-west-1.amazonaws.com');
+    expect(s3.requests).toHaveLength(0);
+    client.destroy();
+  });
+
   it('assume-role: signs sts:AssumeRole with the secret key pair and ExternalId, uses only the returned session, caches it until near expiry', async () => {
     process.env.AWS_ACCESS_KEY_ID = 'AKIAENVIRONMENTKEY01';
     const calls: Array<{ url: string; body: string; headers: Record<string, string> }> = [];
@@ -135,7 +156,7 @@ describe('s3ClientFromSecret', () => {
       );
     }) as unknown as typeof fetch;
     const registered: string[] = [];
-    const { client, kind } = s3ClientFromSecret({ secret: secret(ROLE), region: 'eu-west-1', endpoint: s3.endpoint, registerSecret: (v) => registered.push(v), fetch: fetchFake, now: () => now });
+    const { client, kind, credentials } = s3ClientFromSecret({ secret: secret(ROLE), region: 'eu-west-1', endpoint: s3.endpoint, registerSecret: (v) => registered.push(v), fetch: fetchFake, now: () => now });
     expect(kind).toBe('assume-role');
     await client.send(new ListObjectsV2Command({ Bucket: 'synthetic-export-bucket', Prefix: 'x/' }));
     expect(calls).toHaveLength(1);
@@ -147,13 +168,13 @@ describe('s3ClientFromSecret', () => {
     expect(auth).toContain('Credential=ASIASYNTHETIC00001/');
     expect(s3.requests[0].headers['x-amz-security-token']).toBe('SYNTHETIC-session-token-1');
     expect(registered).toEqual(expect.arrayContaining(['SYNTHETIC-session-secret-1', 'SYNTHETIC-session-token-1']));
+    // The provider's own cache (the SDK adds its own on top, on the real clock).
     now = new Date('2026-10-30T10:30:00Z');
-    await client.send(new ListObjectsV2Command({ Bucket: 'synthetic-export-bucket', Prefix: 'x/' }));
+    expect(await credentials()).toMatchObject({ accessKeyId: 'ASIASYNTHETIC00001' });
     expect(calls).toHaveLength(1);
     now = new Date('2026-10-30T10:56:00Z'); // within 5 minutes of expiry: refreshed
-    await client.send(new ListObjectsV2Command({ Bucket: 'synthetic-export-bucket', Prefix: 'x/' }));
+    expect(await credentials()).toMatchObject({ accessKeyId: 'ASIASYNTHETIC00002', sessionToken: 'SYNTHETIC-session-token-2' });
     expect(calls).toHaveLength(2);
-    expect(String(s3.requests[2].headers.authorization)).toContain('Credential=ASIASYNTHETIC00002/');
     client.destroy();
   });
 

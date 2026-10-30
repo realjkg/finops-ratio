@@ -11,7 +11,8 @@ import zlib from 'zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cli } from '../../../ingest/testing/cli';
 import { batchesOf, createLogin, publishedTotals, type Login } from '../../../ingest/testing/db';
-import { createTestBucket, requireTestS3Endpoint, testS3Env, TEST_S3_ACCESS_KEY_ID, TEST_S3_SECRET_ACCESS_KEY, type TestBucket } from '../../../ingest/testing/s3';
+import { DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { createTestBucket, listKeys, requireTestS3Endpoint, testS3Env, TEST_S3_ACCESS_KEY_ID, TEST_S3_SECRET_ACCESS_KEY, type TestBucket } from '../../../ingest/testing/s3';
 import { workerTestDb, type WorkerTestDb } from '../../../ingest/testing/workerSetup';
 
 const endpoint = requireTestS3Endpoint();
@@ -20,6 +21,10 @@ const SAMPLE = fs.readFileSync(path.join(FIXTURE_DIR, 'focus_sample.csv'));
 const AWS_SEP = JSON.parse(fs.readFileSync(path.join(FIXTURE_DIR, 'control-totals.json'), 'utf8'))['1k'].totals.find((x: { billingPeriod: string }) => x.billingPeriod === '2024-09-01');
 const EXPORT = 'focus-synthetic';
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
+// A SHORT export prefix of its own in the shared test bucket (deleted in afterAll): R1's credential
+// heuristic refuses any params value of 40+ characters of [A-Za-z0-9+/_=-], which the per-run test
+// root exceeds (a compatibility risk for real S3 prefixes; see the PR).
+const EXPORT_ROOT = `m1a-${crypto.randomBytes(4).toString('hex')}`;
 
 let t: WorkerTestDb;
 let owner: Login;
@@ -42,10 +47,11 @@ afterAll(async () => {
   await owner?.drop();
   await t?.close();
   for (const b of [evidence, staging, exports]) await b?.destroy();
+  if (exports) for (const k of await listKeys(exports.client, exports.name, `${EXPORT_ROOT}/`)) await exports.client.send(new DeleteObjectCommand({ Bucket: exports.name, Key: k }));
   if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-const exportPrefix = (tenant: string) => exports.at(`${tenant}/exports`);
+const exportPrefix = (tenant: string) => `${EXPORT_ROOT}/${tenant.slice(0, 8)}`;
 const root = (tenant: string) => `${exportPrefix(tenant)}/${EXPORT}`;
 async function deliver(tenant: string, ym: string, files: Array<{ name: string; bytes?: Buffer }>, partition = 'BILLING_PERIOD') {
   const keys = files.map((f) => `${root(tenant)}/data/${partition}=${ym}/run-1/${f.name}`);

@@ -18,7 +18,7 @@ describe('RetrieverRegistry', () => {
     expect(r.connectors()).toEqual(['aws-data-exports']);
   });
 
-  it('ships no connector in this build (connector rows register theirs)', () => {
-    expect(managedRegistry.connectors()).toEqual([]);
+  it('ships exactly the connectors whose rows have landed (M1a: aws-data-exports)', () => {
+    expect(managedRegistry.connectors()).toEqual(['aws-data-exports']);
   });
 });
