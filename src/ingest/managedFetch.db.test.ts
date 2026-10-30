@@ -83,8 +83,8 @@ const env = (config: string) => ({
   RATIO_DATABASE_URL: t.login.url, RATIO_MIGRATE_DATABASE_URL: owner.url, ...testS3Env(evidence), RATIO_ENGAGEMENT_CONFIG: config, RATIO_SECRETS_DIR: path.join(tmp, 'secrets'),
 });
 
-async function provision(tenant: string) {
-  const r = await cli(['source', 'add', '--tenant', tenant, '--key', 'managed-aws', '--providers', 'AWS', '--bucket', src.name, '--prefix', src.at(tenant)], env(engagementFile(tenant)));
+async function provision(tenant: string, providers = 'AWS') {
+  const r = await cli(['source', 'add', '--tenant', tenant, '--key', 'managed-aws', '--providers', providers, '--bucket', src.name, '--prefix', src.at(tenant)], env(engagementFile(tenant)));
   expect(r.code).toBe(0);
   return (await t.db.pool.query(`SELECT id::text FROM ratio.sources WHERE tenant_id = $1 AND source_key = 'managed-aws'`, [tenant])).rows[0].id as string;
 }
@@ -243,6 +243,8 @@ describe('managed fetch (worker command)', () => {
       { id: 'sep', period: '2024-09-01', ref: 'sep', bytes: bytes.sep ?? SAMPLE },
       { id: 'oct', period: '2024-10-01', ref: 'oct', bytes: bytes.oct ?? SAMPLE },
     ];
+    // The sample's providers: 2024-09 holds AWS, Microsoft and Oracle rows, 2024-10 one Oracle row.
+    const ALL = 'AWS,Microsoft,Oracle';
     const fetchRange = (tenant: string, extra: string[]) => cli(['fetch', '--tenant', tenant, '--source', 'managed-aws', ...extra], env(engagementFile(tenant)));
     const outcomes = (r: { record: { results: Record<string, unknown> } }) => ((r.record.results as { deliveries?: Array<{ delivery: string; outcome: string; code?: string }> }).deliveries ?? []).map((d) => `${d.delivery}:${d.outcome}:${d.code ?? ''}`);
     const reset = () => {
@@ -252,7 +254,7 @@ describe('managed fetch (worker command)', () => {
 
     it('a single-month range (--from X --to X) stages that month and opens nothing else', async () => {
       const tenant = crypto.randomUUID();
-      const sid = await provision(tenant);
+      const sid = await provision(tenant, ALL);
       serve.list = list();
       reset();
       try {
@@ -269,7 +271,7 @@ describe('managed fetch (worker command)', () => {
 
     it('a multi-month range stages both edge months and refuses the month outside', async () => {
       const tenant = crypto.randomUUID();
-      const sid = await provision(tenant);
+      const sid = await provision(tenant, ALL);
       serve.list = list();
       reset();
       try {
@@ -289,7 +291,7 @@ describe('managed fetch (worker command)', () => {
 
     it('an inverted or malformed range is a usage error (exit 2) and the connector never runs', async () => {
       const tenant = crypto.randomUUID();
-      await provision(tenant);
+      await provision(tenant, ALL);
       reset();
       const before = seen.opened;
       for (const flags of [['--from', '2024-10', '--to', '2024-09'], ['--from', '2024-9', '--to', '2024-10'], ['--from', '2024-13', '--to', '2024-13'], ['--from', '2024-09-01', '--to', '2024-09'], ['--to', '2024-09']]) {
@@ -302,7 +304,7 @@ describe('managed fetch (worker command)', () => {
 
     it('--restate with a range supersedes only the range: nothing outside it is opened or superseded', async () => {
       const tenant = crypto.randomUUID();
-      const sid = await provision(tenant);
+      const sid = await provision(tenant, ALL);
       serve.list = list().filter((d) => d.id !== 'aug');
       try {
         expect((await fetchRange(tenant, [])).code).toBe(0);

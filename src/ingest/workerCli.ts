@@ -504,7 +504,8 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
         assertImportableSource(row);
         const r = await runManagedFetch({
           tenantId, sourceKey: args.source!, sourceId: row.id, spec: () => managedSpecFromEngagementFile(env.RATIO_ENGAGEMENT_CONFIG, args.source!, tenantId),
-          range: args.from ? { from: args.from, to: args.to! } : undefined, resolveSecret: (ref) => resolveSecret(ref, env), originals: evidenceStore(), log, onSecrets: addSecrets, maxDeliveryBytes: MAX_IMPORT_BYTES,
+          // --from/--to are stored as 'YYYY-MM-01'; the runtime and retrievers take 'YYYY-MM' months.
+          range: args.from ? { from: args.from.slice(0, 7), to: args.to!.slice(0, 7) } : undefined, resolveSecret: (ref) => resolveSecret(ref, env), originals: evidenceStore(), log, onSecrets: addSecrets, maxDeliveryBytes: MAX_IMPORT_BYTES,
           stage: (o) => stageAndSync({ pool: pool!, tenantId, sourceKey: args.source!, ...o, restate: args.restate, sourceClient: () => s3('source'), source: makeSourceFactory(env, () => s3('source')), evidence: evidenceStore(), settings: cfg.settings, hooks, log, secrets: [...secrets, ...o.secrets] }),
         });
         if (r.status === 'succeeded') return finish({ ...r }, true, EXIT_OK);

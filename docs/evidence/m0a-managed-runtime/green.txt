@@ -46,3 +46,17 @@ All data SYNTHETIC.
 Merged origin/feat/m0b-connector-evidence b6491e9 (the #148 review fixes; no conflicts), gates rerun on the
 merged tree, sequentially: lint 0; typecheck app 0 and worker 0; vitest 234 files, 4310 tests passed;
 test:db 43 files 706 tests, serial 6 files 173 tests passed; worker:build 0; build 0; check:bundle pass.
+
+--- GREEN after the delta review of 3d5a035 (rv149b) ---
+Fix: the CLI passes --from/--to to the runtime and the retriever as 'YYYY-MM' (as FetchOptions.range documents);
+the runtime refuses a malformed or inverted range (INVALID_RANGE) before the connector runs. The --from and
+--to months are both in range. The cap is checked on declared object sizes before open(), then on the opened
+bytes, and originals are captured only once the whole delivery is within the cap (an over-cap delivery keeps
+no original). A period-less delivery listed next to others is refused unopened (DELIVERY_PERIOD_DUPLICATE).
+The CLI range tests provision the source with the sample's three providers (2024-10 holds one Oracle row).
+Gates, sequential: lint 0; typecheck app 0 and worker 0; vitest 234 files, 4313 tests passed; test:db (own
+Postgres 16 + SeaweedFS, CI digests, non-default ports) 43 files 710 tests, serial 6 files 173 tests passed;
+worker:build 0; build 0; check:bundle pass.
+Mutations: 9 of 9 killed, among them the restored off-by-one (CLI passes 'YYYY-MM-01'; killed by the db
+suite), the --from month excluded in the runtime, the range left unvalidated, the declared size ignored, the
+opened size ignored, originals captured while opening, and the period-less duplicate allowed.

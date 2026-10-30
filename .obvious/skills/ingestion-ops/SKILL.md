@@ -214,8 +214,10 @@ npm run -s worker -- fetch --tenant <uuid> --source <key> [--from YYYY-MM --to Y
   the delivery are left out and counted (`rowsOutsidePeriod`).
 - Refused unopened: a delivery outside `--from/--to` (`DELIVERY_OUT_OF_RANGE`), without a period
   when a range is given (`DELIVERY_PERIOD_UNKNOWN`), two deliveries for one period
-  (`DELIVERY_PERIOD_DUPLICATE`), a malformed period (`DELIVERY_PERIOD_INVALID`) or no objects
-  (`DELIVERY_EMPTY`). An incomplete delivery is quarantined (`DELIVERY_INCOMPLETE`): originals kept,
+  (`DELIVERY_PERIOD_DUPLICATE`, also a period-less delivery listed next to others), a malformed
+  period (`DELIVERY_PERIOD_INVALID`) or no objects (`DELIVERY_EMPTY`). `--from`/`--to` are inclusive
+  months: `--from 2024-09 --to 2024-09 --restate` restates 2024-09 alone. A delivery above the cap
+  (declared sizes first, then the bytes opened) is refused before any of its originals is kept. An incomplete delivery is quarantined (`DELIVERY_INCOMPLETE`): originals kept,
   nothing staged.
 - No connector is registered in this build: every source fails `CONNECTOR_NOT_REGISTERED` (exit 1).
 - Exit codes as `import-file` (table above); configuration problems (`ENGAGEMENT_CONFIG_INVALID`,

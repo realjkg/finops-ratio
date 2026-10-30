@@ -21,7 +21,8 @@ export interface Delivery {
   billingPeriod?: string;
   /** complete: the provider's manifest is present and lists these objects, or every page was consumed. */
   completion: 'complete' | 'incomplete';
-  objects: Array<{ name: string; ref: unknown }>;
+  /** `size`: the byte size the provider declares, when it does; checked against the cap before anything is opened. */
+  objects: Array<{ name: string; ref: unknown; size?: number }>;
 }
 
 export interface ManagedRetriever {
@@ -48,7 +49,11 @@ export interface FetchOptions {
   sourceId: string;
   /** The spec, or a function reading it (its errors become a failed result with their code). */
   spec: ManagedSpec | (() => ManagedSpec);
-  /** Inclusive 'YYYY-MM' range: deliveries outside it (or without a period) are refused unopened. */
+  /**
+   * Inclusive range of billing months, both 'YYYY-MM' (from <= to); the retriever receives it in the
+   * same form. Deliveries outside it (or without a period) are refused unopened; a malformed range
+   * fails the fetch (INVALID_RANGE) before the connector runs.
+   */
   range?: { from: string; to: string };
   registry?: RetrieverRegistry;
   resolveSecret: (ref: string) => SecretValue;
@@ -88,6 +93,7 @@ export interface FetchResult {
 
 const CODE_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
 const PERIOD_RE = /^(\d{4})-(0[1-9]|1[0-2])-01$/;
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const codeOf = (e: unknown, fallback: string) => {
   const c = (e as { code?: unknown })?.code;
   return typeof c === 'string' && CODE_RE.test(c) ? c : fallback;
@@ -97,11 +103,12 @@ const messageOf = (e: unknown, fixed: string, secrets: string[]) =>
   e instanceof Error && codeOf(e, '') !== '' ? scrubSecrets(e.message, secrets).slice(0, 500) : fixed;
 
 /** Why a listed delivery is refused before it is opened, or null. */
-function refusalOf(dl: Delivery, range: FetchOptions['range'], periodCount: Map<string, number>): { code: string; message: string } | null {
+function refusalOf(dl: Delivery, range: FetchOptions['range'], periodCount: Map<string, number>, listed: number): { code: string; message: string } | null {
   if (!Array.isArray(dl.objects) || dl.objects.length === 0) return { code: 'DELIVERY_EMPTY', message: 'the delivery lists no objects; nothing to stage' };
   if (dl.billingPeriod !== undefined && !PERIOD_RE.test(dl.billingPeriod)) return { code: 'DELIVERY_PERIOD_INVALID', message: "the delivery's billing period is not 'YYYY-MM-01'" };
   if (dl.billingPeriod !== undefined && (periodCount.get(dl.billingPeriod) ?? 0) > 1) return { code: 'DELIVERY_PERIOD_DUPLICATE', message: 'the connector listed several deliveries for this billing period; none of them is staged' };
   if (range && dl.billingPeriod === undefined) return { code: 'DELIVERY_PERIOD_UNKNOWN', message: 'the delivery names no billing period, so it cannot be held to --from/--to' };
+  if (dl.billingPeriod === undefined && listed > 1) return { code: 'DELIVERY_PERIOD_DUPLICATE', message: 'the delivery names no billing period and others were listed with it, so it may duplicate their months; it was not opened' };
   if (range && dl.billingPeriod !== undefined && (dl.billingPeriod.slice(0, 7) < range.from || dl.billingPeriod.slice(0, 7) > range.to)) return { code: 'DELIVERY_OUT_OF_RANGE', message: 'the delivery is outside --from/--to; it was not opened' };
   return null;
 }
@@ -140,6 +147,9 @@ export async function runManagedFetch(o: FetchOptions): Promise<FetchResult> {
     return failed(e, 'SPEC_UNAVAILABLE', 'the managed retrieval spec could not be read');
   }
   base.connector = spec.connector;
+  if (o.range && !(MONTH_RE.test(o.range.from) && MONTH_RE.test(o.range.to) && o.range.from <= o.range.to)) {
+    return failed(new ManagedError('INVALID_RANGE', "the fetch range must be two 'YYYY-MM' months, from not after to"), '', '');
+  }
   const factory = (o.registry ?? managedRegistry).factory(spec.connector);
   if (!factory) return failed(new ManagedError('CONNECTOR_NOT_REGISTERED', `no retriever is registered for connector ${spec.connector} in this build`), '', '');
   let retriever: ManagedRetriever;
@@ -161,21 +171,31 @@ export async function runManagedFetch(o: FetchOptions): Promise<FetchResult> {
   for (const dl of deliveries) {
     const out: DeliveryOutcome = { delivery: String(dl.id), ...(dl.billingPeriod !== undefined ? { billingPeriod: dl.billingPeriod } : {}), completion: dl.completion, originals: [], outcome: 'failed' };
     outcomes.push(out);
-    const refused = refusalOf(dl, o.range, periodCount);
+    const refused = refusalOf(dl, o.range, periodCount, deliveries.length);
     if (refused) {
       Object.assign(out, { outcome: 'refused', ...refused });
       log('managed.delivery', { delivery: out.delivery, outcome: out.outcome, code: out.code, originals: 0 });
       continue;
     }
     const objects: StageRequest['objects'] = [];
-    let bytesSoFar = 0;
     try {
+      // The cap is checked on the declared sizes before anything is opened, then on the bytes as each
+      // object is opened; originals are captured only once the whole delivery is within the cap, so an
+      // over-cap delivery leaves no original behind.
+      const tooLarge = () => new ManagedError('IMPORT_TOO_LARGE', `the delivery is larger than the import cap of ${max} bytes; nothing of it was kept or staged`);
+      const declared = dl.objects.reduce((n, x) => n + (typeof x.size === 'number' && Number.isFinite(x.size) && x.size > 0 ? x.size : 0), 0);
+      if (declared > max) throw tooLarge();
+      const opened: Array<{ name: string; bytes: Buffer; identity: ObjectIdentity }> = [];
+      let bytesSoFar = 0;
       for (const obj of dl.objects) {
         const { bytes, identity } = await retriever.open(obj.ref);
         bytesSoFar += bytes.length;
-        if (bytesSoFar > max) throw new ManagedError('IMPORT_TOO_LARGE', `the delivery is larger than the import cap of ${max} bytes; nothing of it was staged`);
-        out.originals.push(await captureOriginal(o.originals, { tenantId: o.tenantId, sourceId: o.sourceId }, bytes, identity, o.now?.()));
-        objects.push({ name: obj.name, bytes });
+        if (bytesSoFar > max) throw tooLarge();
+        opened.push({ name: obj.name, bytes, identity });
+      }
+      for (const x of opened) {
+        out.originals.push(await captureOriginal(o.originals, { tenantId: o.tenantId, sourceId: o.sourceId }, x.bytes, x.identity, o.now?.()));
+        objects.push({ name: x.name, bytes: x.bytes });
       }
     } catch (e) {
       const code = codeOf(e, 'RETRIEVAL_FAILED');
