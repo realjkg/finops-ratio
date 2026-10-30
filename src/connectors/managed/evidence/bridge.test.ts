@@ -63,7 +63,7 @@ describe('accounting bridge', () => {
   it('a measure present on one side only fails (never an invented zero)', () => {
     const b = buildBridge({ key, source: [{ measure: 'billed', currency: 'USD', amount: '1' }], normalized: [{ measure: 'billed', currency: 'USD', amount: '1' }, { measure: 'tax', currency: 'USD', amount: '0.10' }], deltas: [] });
     expect(b.closed).toBe(false);
-    expect(b.failures).toEqual([{ line: 'tax USD', code: 'BRIDGE_SIDE_MISSING', side: 'source' }]);
+    expect(b.failures).toEqual([{ line: 'tax USD', measure: 'tax', currency: 'USD', code: 'BRIDGE_SIDE_MISSING', side: 'source' }]);
   });
 
   it('a delta without a reason, a duplicate measure or a non-decimal amount is refused', () => {

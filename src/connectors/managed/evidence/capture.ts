@@ -4,12 +4,12 @@
 // The store is the worker's EvidenceStore (src/ingest/evidence), passed in
 // structurally so this module never imports src/ingest.
 import { createHash } from 'crypto';
+import { hashValue, redactDeep } from './redact';
 import type { CapturedOriginal, ObjectIdentity, SchemaSnapshot, VersionFacts } from './types';
 
 export interface OriginalsStore { putBytes(key: string, bytes: Buffer): Promise<'stored' | 'exists'> }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const SECRET_PARAM_RE = /(key|token|secret|signature|sig|password|passwd|authorization|credential|sas)/i;
 const sha256 = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
 
 /** connector-originals/<tenant>/<source>/<sha256>: separate from the parsed-artifact evidence keys. */
@@ -18,12 +18,11 @@ export function originalKey(tenantId: string, sourceId: string, hash: string): s
   return `connector-originals/${tenantId}/${sourceId}/${hash}`;
 }
 
-/** Identity without credential material: secret-looking params are redacted, query strings dropped from endpoints. */
+/** Identity without credential material: params redacted by name (pagination tokens kept as a sha256), userinfo, query and fragment dropped from endpoints. */
 function safeIdentity(id: ObjectIdentity): ObjectIdentity {
   if (id.kind === 'object') return { ...id };
-  const params: Record<string, string> = {};
-  for (const [k, v] of Object.entries(id.params)) params[k] = SECRET_PARAM_RE.test(k) ? '[redacted]' : v;
-  return { ...id, endpoint: id.endpoint.split(/[?#]/)[0], params };
+  const { pageToken, ...rest } = id;
+  return { ...rest, endpoint: id.endpoint.split(/[?#]/)[0].replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, '$1'), params: redactDeep(id.params, { n: 0 }, { isParams: true }), ...(pageToken === undefined ? {} : { pageToken: hashValue(pageToken) }) };
 }
 
 export async function captureOriginal(

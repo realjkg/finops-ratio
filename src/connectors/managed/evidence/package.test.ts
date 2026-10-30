@@ -15,6 +15,9 @@ const bridge = buildBridge({
   deltas: [],
 });
 
+const HEX = 'cd'.repeat(32);
+const captured = (): CapturedOriginal => ({ sha256: HEX, byteSize: 1, key: `connector-originals/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/${HEX}`, identity: { kind: 'object', bucket: 'b', key: 'k' }, retrievedAt: '2026-10-28T12:00:00.000Z', stored: 'stored' });
+
 const input = (): EvidenceRecordInput => ({
   identity: { connector: 'aws-data-exports', sourceKey: 'aws-focus', dataset: 'FOCUS 1.2 export' },
   upstream: {
@@ -70,16 +73,19 @@ describe('Connector Evidence Record', () => {
     }
     const i = input();
     i.fixture = { ...i.fixture, fixtureClass: 'original', use: 'reconciliation-proof' };
+    i.proof.originals = [captured()];
     expect(buildEvidenceRecord(i).fixture.use).toBe('reconciliation-proof');
   });
 
   it('a reconciliation proof needs a closed bridge and a complete delivery', () => {
     const i = input();
     i.fixture = { ...i.fixture, fixtureClass: 'original', use: 'reconciliation-proof' };
+    i.proof.originals = [captured()];
     i.proof.delivery = { ...i.proof.delivery, completion: 'incomplete' };
     expect(() => buildEvidenceRecord(i)).toThrow(/PROOF_INCOMPLETE/);
     const j = input();
     j.fixture = { ...j.fixture, fixtureClass: 'original', use: 'reconciliation-proof' };
+    j.proof.originals = [captured()];
     j.proof.bridge = { ...bridge, closed: false };
     expect(() => buildEvidenceRecord(j)).toThrow(/PROOF_INCOMPLETE/);
   });
@@ -94,11 +100,13 @@ describe('Connector Evidence Record', () => {
     const o = input();
     o.fixture = { ...o.fixture, fixtureClass: 'original' };
     o.readiness = { ...o.readiness, F: 'live' };
+    o.proof.originals = [captured()];
     expect(() => buildEvidenceRecord(o)).toThrow(/LIVE_CLAIM_UNSUPPORTED/); // original, but no customer validation
     const k = input();
     k.fixture = { ...k.fixture, fixtureClass: 'original' };
     k.release.customerValidation = 'validated';
     k.readiness = { ...k.readiness, T: 'live' };
+    k.proof.originals = [captured()];
     expect(buildEvidenceRecord(k).readiness.T).toBe('live');
   });
 
@@ -180,15 +188,16 @@ describe('Connector Evidence Record: review round (#148)', () => {
     const i = input();
     const azure = `https://management.azure.com/subscriptions/${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}/providers/Microsoft.CostManagement/query`;
     const page = original({ identity: { kind: 'page', endpoint: azure, method: 'POST', params: { pageToken: 'opaque-tok', sortKey: 'UsageDate', api_key: 'k-1' }, pageIndex: 0, pageToken: 'opaque-tok' } });
-    const longKey = 'exports/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGh/part-1.csv';
+    const longKey = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGh'; // an opaque object key is still a locator
+    const path = 'exports/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGh/part-1';
     i.proof.originals = [original(), page, original({ identity: { kind: 'object', bucket: 'b', key: longKey } })];
-    i.proof.exclusions = [`see ${T} and ${hex}`];
+    i.proof.exclusions = [`see ${T} and ${hex}`, `skipped prefix ${path}`];
     const r = buildEvidenceRecord(i);
     expect(r.proof.originals[0]).toEqual(original());
     expect(r.proof.originals[1].key).toBe(`connector-originals/${T}/${S}/${hex}`);
     const tok = `sha256:${createHash('sha256').update('opaque-tok').digest('hex')}`;
     expect(r.proof.originals[1].identity).toEqual({ kind: 'page', endpoint: azure, method: 'POST', params: { pageToken: tok, sortKey: 'UsageDate', api_key: '[redacted]' }, pageIndex: 0, pageToken: tok });
     expect((r.proof.originals[2].identity as { key: string }).key).toBe(longKey);
-    expect(r.proof.exclusions).toEqual([`see ${T} and ${hex}`]);
+    expect(r.proof.exclusions).toEqual([`see ${T} and ${hex}`, `skipped prefix ${path}`]);
   });
 });
