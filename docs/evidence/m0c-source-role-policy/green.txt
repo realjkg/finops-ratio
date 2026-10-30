@@ -1,0 +1,15 @@
+M0c source-role, overlap and headline policy -- GREEN
+Head: feat/m0c-source-role-policy on origin/main 6d348d9 (sequential, foreground).
+  npx vitest run src/connectors/managed/policy src/costsource/headline.test.ts -> 16 passed (16)
+  npm run lint -> exit 0
+  npm run typecheck -> exit 0;  npx tsc -p tsconfig.worker.json --noEmit -> exit 0
+  npx vitest run -> Test Files 226 passed (226); Tests 4213 passed (4213)
+  npm run build -> exit 0 (next-env.d.ts unchanged);  npm run check:bundle -> pass
+  test:db not run: no database or S3 behavior is touched.
+Mutations (scripted, each reverted; tests: policy + headline.test.ts): 14/14 killed
+  headline fail-open; explicit false ignored; unknown overlap declaration ignored; unknown accounts
+  treated as disjoint; period ignored; allocated pairs skipped; headline filled despite problems;
+  prefer drops nothing; split-by without disjointness; basis-per-measure with one measure;
+  allocated in headline; unknown cost basis eligible; focus-native billed only; coverage 0 not N/A.
+Existing-test change: src/costsource/aiSpendRatio.test.ts fakeClient sources now default to
+  kind 'cloud' (a billing-export kind); before, kind was absent and the fail-open rule counted them.
