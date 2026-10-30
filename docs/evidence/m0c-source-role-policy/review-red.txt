@@ -1,0 +1,21 @@
+M0c review fixes (PR #147) -- RED (tests committed before the fixes)
+Base: 944aa43 (origin/main 8776fef already merged; nothing new to merge).
+Command: npx vitest run src/connectors/managed/policy/overlap.test.ts
+     × allocation coverage is exact, and N/A (never 0) without an underlying total
+     × allocation coverage is never computed across currencies (review #147)
+     × maps an R1 source (accounts lists only; anything else is unknown)
+     × returns the headline sources, or throws naming source ids and codes only
+     × P1: periods are compared as instants, so mixed UTC offsets that overlap by hours are refused
+     × P1: an unparseable or impossible period is never ok; it is reported and treated as overlapping
+     × P2: R1 period_end_semantics is honored: adjacent exclusive months do not overlap, adjacent inclusive ones touching an instant do
+     × P2: fromEngagementSource carries period_end_semantics from the R1 config
+     × P3: prefer whose loser declares accounts or a period the winner does not cover is refused, never silent
+     × P3: prefer whose coverage cannot be proven (unknown accounts, different providers) carries a visible warning
+     × P4: the exclusion reason names the winners that actually dropped the source
+     × P5: a prefer cycle is POLICY_INVALID, never ok with an emptied headline
+     × P6: billed and effective headlines over different scopes are disclosed
+     × P7: a related_source that is not configured is reported
+     × headlineEligibleSources returns the warnings with the headline
+⎯⎯⎯⎯⎯⎯ Failed Tests 15 ⎯⎯⎯⎯⎯⎯⎯
+      Tests  15 failed | 10 passed (25)
+All identifiers SYNTHETIC.
