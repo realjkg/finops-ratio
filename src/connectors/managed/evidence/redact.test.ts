@@ -30,3 +30,32 @@ describe('redactString', () => {
     expect(red('requestId 7f3a9B2c4D6e8F0a1B3c5D7e9F1a3B5c7D9e1F3a')).toBe('requestId 7f3a9B2c4D6e8F0a1B3c5D7e9F1a3B5c7D9e1F3a'); // hex ids stay
   });
 });
+
+describe('redactString: review round 3 (#148)', () => {
+  it('redacts names preceded by -, ., _ or a digit (CLI flags, dotted and prefixed keys), and a JWT after a dash', () => {
+    expect(red('cmd --password=hunter2')).toBe('cmd --password=[redacted]');
+    expect(red('cmd --client-secret=hunter2hunter2')).toBe('cmd --client-secret=[redacted]');
+    expect(red('run --token=abcdefg')).toBe('run --token=[redacted]');
+    for (const s of ['-password=abc', '_password=abc', '1password=abc', 'a/.token=abc', '?.password=abc', 'x.password=abc']) expect(red(s)).toBe(s.replace('abc', '[redacted]'));
+    expect(red('-eyJabcdefgh.abcdefghi.sig')).toBe('-[redacted]');
+    expect(red('apiKeyId=k1 secretRef=aws/x')).toBe('apiKeyId=k1 secretRef=aws/x'); // reference names still kept
+  });
+
+  it('closes the length-bound leaks: long quoted values, long userinfo, long PEM labels, wide spacing', () => {
+    expect(red(`{"password":"${'p'.repeat(9000)}"}`)).toBe('{"password":"[redacted]"}');
+    expect(red(`https://${'u'.repeat(300)}:pw@host.example.test/x`)).toBe('https://[redacted]@host.example.test/x');
+    expect(red(`-----BEGIN ${'A'.repeat(70)}-----\nSECRETDATA\n-----END X-----`)).toBe('[redacted]');
+    expect(red(`Bearer${' '.repeat(10)}abcdefghijkl`)).toBe('[redacted]');
+    expect(red(`password${' '.repeat(20)}=${' '.repeat(20)}hunter2`)).not.toContain('hunter2');
+  });
+
+  it('stays linear on the dash/dot-prefixed hostile shapes', () => {
+    const MB = 1 << 20;
+    for (const unit of ['--a', '.-a', '-.a=', '--eyJ-', '-eyJaaaaaaaa.', '--a://', ' -a', 'a ', '"\\', '-----BEGIN ', '-----BEGIN A', 'password="', '_a=', '1a:', 'Bearer  ']) {
+      const s = unit.repeat(Math.ceil(MB / unit.length));
+      const t = Date.now();
+      red(s);
+      expect([unit, Date.now() - t < 1000]).toEqual([unit, true]);
+    }
+  });
+});
