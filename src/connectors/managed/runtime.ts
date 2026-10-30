@@ -30,6 +30,8 @@ export interface ManagedRetriever {
   /** auth (credential accepted), scope (listing or metadata allowed), data (one object or page read), contract (schema hash = pinned). */
   probe(): Promise<ProbeStages>;
   listDeliveries(range?: { from: string; to: string }): Promise<Delivery[]>;
+  /** Optional: visible, non-failing notes about the last listDeliveries (e.g. billing months the export skips); fixed text, no customer values. */
+  warnings?(): string[];
   open(ref: unknown): Promise<{ bytes: Buffer; identity: ObjectIdentity }>;
 }
 
@@ -87,6 +89,8 @@ export interface FetchResult {
   deliveries: DeliveryOutcome[];
   error?: { code: string; message: string };
   note?: string;
+  /** Non-failing notes from the connector (see ManagedRetriever.warnings); absent when there are none. */
+  warnings?: string[];
   /** A failed fetch that staged some deliveries first: which, and the periods they published. */
   partial?: { staged: Array<{ delivery: string; billingPeriod?: string; published: string[] }>; message: string };
 }
@@ -154,6 +158,7 @@ export async function runManagedFetch(o: FetchOptions): Promise<FetchResult> {
   if (!factory) return failed(new ManagedError('CONNECTOR_NOT_REGISTERED', `no retriever is registered for connector ${spec.connector} in this build`), '', '');
   let retriever: ManagedRetriever;
   let deliveries: Delivery[];
+  let warnings: string[] = [];
   let d: ReturnType<ManagedRetriever['describe']>;
   try {
     const secret = spec.secretRef ? o.resolveSecret(spec.secretRef) : undefined;
@@ -161,6 +166,7 @@ export async function runManagedFetch(o: FetchOptions): Promise<FetchResult> {
     retriever = factory({ params: spec.params, secret, registerSecret: (v) => register(secretScrubTargets(v)) });
     d = retriever.describe();
     deliveries = await retriever.listDeliveries(o.range);
+    warnings = retriever.warnings?.() ?? [];
   } catch (e) {
     return failed(e, 'RETRIEVAL_FAILED', 'the connector failed before listing deliveries');
   }
@@ -225,5 +231,5 @@ export async function runManagedFetch(o: FetchOptions): Promise<FetchResult> {
   const partial = !ok && staged.length
     ? { staged: staged.map((x) => ({ delivery: x.delivery, ...(x.billingPeriod !== undefined ? { billingPeriod: x.billingPeriod } : {}), published: publishedOf(x.result) })), message: `${staged.length} of ${outcomes.length} deliveries were staged before others failed; their published periods stand (re-run fetch for the rest)` }
     : undefined;
-  return done({ status: ok ? 'succeeded' : 'failed', ...base, deliveries: outcomes, ...(deliveries.length ? {} : { note: 'the connector listed no deliveries for the range' }), ...(partial ? { partial } : {}) });
+  return done({ status: ok ? 'succeeded' : 'failed', ...base, deliveries: outcomes, ...(deliveries.length ? {} : { note: 'the connector listed no deliveries for the range' }), ...(warnings.length ? { warnings } : {}), ...(partial ? { partial } : {}) });
 }
