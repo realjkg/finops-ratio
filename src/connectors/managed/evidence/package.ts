@@ -4,11 +4,13 @@
 // material is replaced (and counted); only secret NAMES (secretRef) appear.
 // Honesty rules, enforced here:
 //   - a sanitized or synthetic fixture is never a reconciliation proof;
-//   - a reconciliation proof needs a closed bridge and a complete delivery;
-//   - "live" readiness needs original evidence and a recorded customer validation;
+//   - a reconciliation proof needs captured originals, a complete delivery and a
+//     closed bridge with a money line (aggregate controls are never proof);
+//   - "live" readiness needs captured originals and a recorded customer validation;
 //   - the status says "live verified" only when all four dimensions are live,
 //     otherwise it is the pre-rollout wording below.
 import type { Bridge } from './bridge';
+import { redactDeep } from './redact';
 import type { CapturedOriginal, DeliveryInventory, FixtureClass, FixtureUse, ReadinessDimensions, VersionFacts } from './types';
 
 export const PRE_ROLLOUT_STATUS = 'Implemented and pre-release validated; live verification scheduled for MVP rollout';
@@ -37,33 +39,10 @@ export class EvidenceRecordError extends Error {
   }
 }
 
-const SECRET_PATTERNS: RegExp[] = [
-  /-----BEGIN [A-Z ]*-----[\s\S]*?(-----END [A-Z ]*-----|$)/g,
-  /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/g,
-  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
-  /\beyJ[\w-]{8,}\.[\w-]{8,}\.?[\w-]*/g,
-  /\b(password|passwd|pwd|secret|token|api_key|apikey|sig|signature|sas)\s*[=:]\s*[^\s&;,]+/gi,
-];
-// Long opaque runs, but not hex digests (sha256, ETags), which the record must keep.
-const OPAQUE = /\b(?![0-9a-f]+\b)[A-Za-z0-9+/_=-]{40,}/g;
-
-function redactString(s: string, count: { n: number }): string {
-  let out = s;
-  for (const re of [...SECRET_PATTERNS, OPAQUE]) {
-    out = out.replace(re, () => {
-      count.n += 1;
-      return '[redacted]';
-    });
-  }
-  return out;
-}
-
-function redactDeep<T>(v: T, count: { n: number }): T {
-  if (typeof v === 'string') return redactString(v, count) as T;
-  if (Array.isArray(v)) return v.map((x) => redactDeep(x, count)) as T;
-  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactDeep(x, count)])) as T;
-  return v;
-}
+// At least one original, each with a hex sha256 and its content-addressed key; the bridge is re-checked, not trusted.
+const originalsCaptured = (os: readonly CapturedOriginal[]) =>
+  os.length > 0 && os.every((o) => /^[0-9a-f]{64}$/.test(o?.sha256) && typeof o.key === 'string' && o.key.startsWith('connector-originals/') && o.key.endsWith(`/${o.sha256}`));
+const bridgeProves = (b: Bridge) => b.closed && b.failures.length === 0 && b.lines.length > 0 && b.lines.every((l) => l.closes) && b.lines.some((l) => !!l.currency);
 
 export function buildEvidenceRecord(input: EvidenceRecordInput): EvidenceRecord {
   const { fixture, proof, release, readiness } = input;
@@ -72,11 +51,13 @@ export function buildEvidenceRecord(input: EvidenceRecordInput): EvidenceRecord 
   }
   if (fixture.use === 'reconciliation-proof') {
     if (fixture.fixtureClass !== 'original') throw new EvidenceRecordError('FIXTURE_NOT_PROOF', `a ${fixture.fixtureClass} fixture cannot be a reconciliation proof`);
-    if (!proof.bridge.closed || proof.delivery.completion !== 'complete') throw new EvidenceRecordError('PROOF_INCOMPLETE', 'a reconciliation proof needs a closed bridge and a complete delivery');
+    if (!bridgeProves(proof.bridge) || proof.delivery.completion !== 'complete' || !originalsCaptured(proof.originals)) {
+      throw new EvidenceRecordError('PROOF_INCOMPLETE', 'a reconciliation proof needs captured originals, a complete delivery and a closed bridge with a money line (aggregate controls are never proof)');
+    }
   }
   const dims = Object.values(readiness);
-  const liveBacked = fixture.fixtureClass === 'original' && release.customerValidation === 'validated';
-  if (dims.includes('live') && !liveBacked) throw new EvidenceRecordError('LIVE_CLAIM_UNSUPPORTED', 'live readiness needs original evidence and a recorded customer validation');
+  const liveBacked = fixture.fixtureClass === 'original' && release.customerValidation === 'validated' && originalsCaptured(proof.originals);
+  if (dims.includes('live') && !liveBacked) throw new EvidenceRecordError('LIVE_CLAIM_UNSUPPORTED', 'live readiness needs captured originals (sha256 and key) and a recorded customer validation');
   const allLive = dims.every((d) => d === 'live');
   if (release.status.trim().toLowerCase() === LIVE_STATUS && !allLive) throw new EvidenceRecordError('LIVE_CLAIM_UNSUPPORTED', 'the status cannot say live verified before all four dimensions are live');
   const count = { n: 0 };

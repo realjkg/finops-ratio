@@ -14,3 +14,18 @@ Mutations (scripted, each reverted; tests: src/connectors/managed/evidence): 11/
 Test adjustments after RED: two expectations corrected to the implemented, documented order and
 normalization (bridge failures are sorted by line name; expected totals are normalized decimals,
 '-1.5' not '-1.50'); a type narrowing in package.test.ts.
+
+Review round (#148) -- GREEN (sequential, foreground; base 0eaed0b, origin/main has no newer commits)
+  npx vitest run src/connectors/managed/evidence -> 27 passed (27)
+  npm run lint -> exit 0; npm run typecheck -> exit 0; npx tsc -p tsconfig.worker.json --noEmit -> exit 0
+  npx vitest run -> Test Files 228 passed (228); Tests 4238 passed (4238)
+  npm run build -> exit 0 (next-env.d.ts unchanged); npm run check:bundle -> pass
+Mutations (scripted, each reverted): 19/19 killed -- live claim or proof without originals; bridge
+  closed flag trusted; orphan deltas dropped; empty bridge closes; currency coverage off; money without
+  currency; concatenated line key; wrong residual; secret names matched only at the start; no header or
+  JSON separator; URL userinfo kept (record, capture); pagination identity dropped; opaque rule applied
+  to originals; opaque rule applied inside paths; reference names (secretRef) redacted; auth code kept;
+  bare `key` param kept. Two first-round survivors (locator layers) were killed after adding cases.
+Older tests adjusted to the new rules: originals added where a test expects a live or proof record to
+  be accepted (and to the refusal cases so each fails for its own reason); the side-missing failure now
+  also carries the structured measure/currency fields.

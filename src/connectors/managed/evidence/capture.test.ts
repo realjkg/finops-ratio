@@ -84,3 +84,21 @@ describe('version facts', () => {
     expect(() => versionFacts({ provider: 'AWS', dataset: 'x', mappingVersion: 'm', canonicalModelVersion: 'c', observedSchema: { columns: ['a'], sha256: 'f'.repeat(64) } })).toThrow(/observedSchema/);
   });
 });
+
+describe('captureOriginal identity: review round (#148)', () => {
+  it('drops URL userinfo, redacts secret params by name anywhere in it, keeps pagination identity as a sha256', async () => {
+    const store = memoryStore();
+    const tokHash = `sha256:${sha(Buffer.from('tok-2'))}`;
+    const c = await captureOriginal(store, { tenantId: TENANT, sourceId: SOURCE }, Buffer.from('x'), {
+      kind: 'page', endpoint: 'https://user:p4ss@api.example.test/v1/costs?api_key=zzz', method: 'GET', pageIndex: 1, pageToken: 'tok-2',
+      params: { client_assertion: 'eyJhbGciOi.x.y', code: 'authcode123', client_secret: 'cs-1', access_token: 'at-1', 'X-Api-Key': 'xk-1', aws_session_token: 'st-1', key: 'gk-1', 'Ocp-Apim-Subscription-Key': 'sk-1', pageToken: 'tok-2', sortKey: 'date', start_time: '1', client_assertion_type: 'jwt-bearer', secretRef: 'aws/x' },
+    });
+    expect(c.identity).toEqual({
+      kind: 'page', endpoint: 'https://api.example.test/v1/costs', method: 'GET', pageIndex: 1, pageToken: tokHash,
+      params: { client_assertion: '[redacted]', code: '[redacted]', client_secret: '[redacted]', access_token: '[redacted]', 'X-Api-Key': '[redacted]', aws_session_token: '[redacted]', key: '[redacted]', 'Ocp-Apim-Subscription-Key': '[redacted]', pageToken: tokHash, sortKey: 'date', start_time: '1', client_assertion_type: 'jwt-bearer', secretRef: 'aws/x' },
+    });
+    expect(JSON.stringify(c)).not.toMatch(/p4ss|zzz|eyJhbGciOi|authcode123|cs-1|at-1|xk-1|st-1|gk-1|sk-1|tok-2/);
+    const obj = { kind: 'object' as const, bucket: 'b', key: 'exports/focus/data/BILLING_PERIOD=2026-09/part-00001-of-00004.csv.gz', etag: 'a'.repeat(32) };
+    expect((await captureOriginal(store, { tenantId: TENANT, sourceId: SOURCE }, Buffer.from('y'), obj)).identity).toEqual(obj);
+  });
+});

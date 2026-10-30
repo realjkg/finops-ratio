@@ -63,7 +63,7 @@ describe('accounting bridge', () => {
   it('a measure present on one side only fails (never an invented zero)', () => {
     const b = buildBridge({ key, source: [{ measure: 'billed', currency: 'USD', amount: '1' }], normalized: [{ measure: 'billed', currency: 'USD', amount: '1' }, { measure: 'tax', currency: 'USD', amount: '0.10' }], deltas: [] });
     expect(b.closed).toBe(false);
-    expect(b.failures).toEqual([{ line: 'tax USD', code: 'BRIDGE_SIDE_MISSING', side: 'source' }]);
+    expect(b.failures).toEqual([{ line: 'tax USD', measure: 'tax', currency: 'USD', code: 'BRIDGE_SIDE_MISSING', side: 'source' }]);
   });
 
   it('a delta without a reason, a duplicate measure or a non-decimal amount is refused', () => {
@@ -86,5 +86,44 @@ describe('accounting bridge', () => {
     expect(addDecimal('0.1', '0.2')).toBe('0.3');
     expect(addDecimal('123456789012345678.000001', '-0.000001')).toBe('123456789012345678');
     expect(addDecimal('-1.50', '1.5')).toBe('0');
+  });
+});
+
+describe('accounting bridge: review round (#148)', () => {
+  const usd = (amount: string) => [{ measure: 'billed', currency: 'USD', amount }];
+
+  it('an orphan delta (no matching line) fails and names its line', () => {
+    const b = buildBridge({ key, source: usd('100'), normalized: usd('100'), deltas: [{ measure: 'billed', currency: 'EUR', amount: '-5', reason: 'dropped rows' }, { measure: 'bileld', currency: 'USD', amount: '-7', reason: 'typo' }] });
+    expect(b.closed).toBe(false);
+    expect(b.failures).toEqual([
+      { line: 'billed EUR', measure: 'billed', currency: 'EUR', code: 'BRIDGE_ORPHAN_DELTA', amount: '-5', reason: 'dropped rows' },
+      { line: 'bileld USD', measure: 'bileld', currency: 'USD', code: 'BRIDGE_ORPHAN_DELTA', amount: '-7', reason: 'typo' },
+    ]);
+  });
+
+  it('an empty bridge, or one without a money line, never closes; every declared currency needs a money line', () => {
+    expect(buildBridge({ key, source: [], normalized: [], deltas: [] })).toMatchObject({ closed: false, failures: [{ code: 'BRIDGE_NO_MONEY_LINE' }] });
+    expect(buildBridge({ key, source: [{ measure: 'records', amount: '1' }], normalized: [{ measure: 'records', amount: '1' }], deltas: [] }).closed).toBe(false);
+    const ctl = buildBridge({ key, source: [], normalized: [], deltas: [], controls: [{ measure: 'billed', currency: 'USD', amount: '5', origin: 'provider aggregate query' }] });
+    expect(ctl.closed).toBe(false);
+    expect(ctl.failures.map((f) => f.code)).toEqual(['BRIDGE_NO_MONEY_LINE', 'BRIDGE_CURRENCY_UNCOVERED']);
+    const decl = buildBridge({ key, currencies: ['USD', 'EUR'], source: usd('1'), normalized: usd('1'), deltas: [] });
+    expect(decl.failures).toEqual([{ line: 'EUR', currency: 'EUR', code: 'BRIDGE_CURRENCY_UNCOVERED' }]);
+  });
+
+  it('a monetary measure without an ISO currency is refused; line keys are structured, not concatenated', () => {
+    for (const measure of ['billed', 'effective', 'credits', 'tax', 'listCost']) {
+      expect(() => buildBridge({ key, source: [{ measure, amount: '10' }], normalized: [{ measure, amount: '10' }], deltas: [] })).toThrow(/currency/);
+    }
+    expect(() => buildBridge({ key, source: [{ measure: 'billed', currency: 'usd', amount: '1' }], normalized: usd('1'), deltas: [] })).toThrow(/currency/);
+    expect(() => buildBridge({ key, source: [{ measure: 'billed USD', amount: '10' }], normalized: usd('10'), deltas: [] })).toThrow(/measure/);
+    const b = buildBridge({ key, source: [...usd('1'), { measure: 'usage', unit: 'USD', amount: '10' }], normalized: [...usd('1'), { measure: 'usage', currency: 'USD', amount: '10' }], deltas: [] });
+    expect(b.closed).toBe(false);
+    expect(b.failures.map((f) => [f.code, f.line])).toEqual([['BRIDGE_SIDE_MISSING', 'usage USD'], ['BRIDGE_SIDE_MISSING', 'usage [USD]']]);
+  });
+
+  it('a bridge that does not close reports the residual (normalized - expected) explicitly', () => {
+    const b = buildBridge({ key, source: usd('100.00'), normalized: usd('99.99'), deltas: [{ measure: 'billed', currency: 'USD', amount: '-0.005', reason: 'rounding' }] });
+    expect(b.failures).toEqual([{ line: 'billed USD', measure: 'billed', currency: 'USD', code: 'BRIDGE_NOT_CLOSED', expected: '99.995', actual: '99.99', residual: '-0.005' }]);
   });
 });
