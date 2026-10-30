@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import util from 'util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MAX_SECRET_BYTES, SecretError, resolveSecret, scrubSecrets } from './resolve';
+import { MAX_SECRET_BYTES, SecretError, resolveSecret, scrubSecrets, secretScrubTargets } from './resolve';
 
 const VALUE = 'SYNTHETIC-secret-value-7f3a';
 let dir: string;
@@ -105,5 +105,30 @@ describe('scrubSecrets', () => {
     expect(scrubSecrets(`token ${VALUE} and again ${VALUE}`, [VALUE])).toBe('token [redacted] and again [redacted]');
     expect(scrubSecrets({ a: [`x${VALUE}`], b: { c: VALUE }, n: 1 }, [VALUE])).toEqual({ a: ['x[redacted]'], b: { c: '[redacted]' }, n: 1 });
     expect(scrubSecrets('abc', ['', 'ab'])).toBe('abc'); // values shorter than 4 are not treated as secrets
+  });
+});
+
+describe('scrub targets of structured secret files (review M1)', () => {
+  it('a JSON secret registers every string field value, and each line of a multi-line one', () => {
+    const json = JSON.stringify({ client_id: 'SYNTHETIC-client-4411', private_key: '-----BEGIN PRIVATE KEY-----\nSYNTHETICKEYLINEaaaaaaaaaaaaaaaa\n-----END PRIVATE KEY-----\n', nested: { token: 'SYNTHETIC-nested-tok' }, n: 12 });
+    const t = secretScrubTargets(json);
+    for (const v of [json, 'SYNTHETIC-client-4411', 'SYNTHETIC-nested-tok', 'SYNTHETICKEYLINEaaaaaaaaaaaaaaaa']) expect(t).toContain(v);
+    expect(scrubSecrets('rejected client SYNTHETIC-client-4411', t)).toBe('rejected client [redacted]');
+  });
+
+  it('an id:secret or key=value;... secret registers its components (never the key names)', () => {
+    const a = secretScrubTargets('SYNTHETIC-user:SYNTHETIC-pass-99');
+    expect(a).toEqual(expect.arrayContaining(['SYNTHETIC-user:SYNTHETIC-pass-99', 'SYNTHETIC-user', 'SYNTHETIC-pass-99']));
+    const b = secretScrubTargets('client_id=abcd1;private_key=PK-SYNTHETIC-123');
+    expect(b).toEqual(expect.arrayContaining(['abcd1', 'PK-SYNTHETIC-123']));
+    expect(b).not.toContain('private_key');
+    expect(b).not.toContain('client_id');
+  });
+
+  it('scrubs object keys and the URL-encoded and JSON-escaped forms too', () => {
+    const s = 'SYNTHETIC+a/b=c"d';
+    expect(scrubSecrets({ [s]: 1 }, [s])).toEqual({ '[redacted]': 1 });
+    expect(scrubSecrets(`q=${encodeURIComponent(s)}`, [s])).toBe('q=[redacted]');
+    expect(scrubSecrets(JSON.stringify({ v: s }), [s])).toBe('{"v":"[redacted]"}');
   });
 });

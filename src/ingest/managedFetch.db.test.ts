@@ -26,16 +26,20 @@ const SECRET = 'SYNTHETIC-managed-secret-41d9e2';
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
 
 const seen: { secret?: string; opened: number } = { opened: 0 };
-// SYNTHETIC fixture retriever: serves the sample file as one complete delivery for 2024-09.
-managedRegistry.register('synthetic-fixture', ({ secret }) => {
+const serve: { bytes: Buffer; delivery: string; key: string } = { bytes: SAMPLE, delivery: 'sample-2024-09', key: 'focus_sample.csv' };
+// SYNTHETIC fixture retriever, registered in this test process only (never shipped) under an id R1
+// names (the worker refuses connectors outside MANAGED_CONNECTORS, like R1): serves the sample file
+// as one complete delivery for 2024-09.
+const FIXTURE_CONNECTOR = 'opencost';
+managedRegistry.register(FIXTURE_CONNECTOR, ({ secret }) => {
   seen.secret = secret?.reveal();
   const r: ManagedRetriever = {
-    describe: () => ({ connector: 'synthetic-fixture', sourceKind: 'focus-export', schemaVersion: '1.0', dataset: 'FOCUS 1.0 sample (public)' }),
+    describe: () => ({ connector: FIXTURE_CONNECTOR, sourceKind: 'focus-export', schemaVersion: '1.0', dataset: 'FOCUS 1.0 sample (public)' }),
     probe: async () => ({}),
-    listDeliveries: async () => [{ id: 'sample-2024-09', billingPeriod: '2024-09-01', completion: 'complete', objects: [{ name: 'part-1', ref: 'focus_sample.csv' }] }],
+    listDeliveries: async () => [{ id: serve.delivery, billingPeriod: '2024-09-01', completion: 'complete', objects: [{ name: 'part-1', ref: serve.key }] }],
     open: async (ref) => {
       seen.opened += 1;
-      return { bytes: SAMPLE, identity: { kind: 'object', bucket: 'synthetic-provider-bucket', key: String(ref), etag: 'synthetic-etag' } };
+      return { bytes: serve.bytes, identity: { kind: 'object', bucket: 'synthetic-provider-bucket', key: String(ref), etag: 'synthetic-etag' } };
     },
   };
   return r;
@@ -63,9 +67,9 @@ afterAll(async () => {
   if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-function engagementFile(connector: string, secretRef = 'synthetic/key'): string {
+function engagementFile(tenantId: string, connector: string = FIXTURE_CONNECTOR, secretRef = 'synthetic/key', sourceId = 'managed-aws'): string {
   const f = path.join(tmp, `engagement-${crypto.randomBytes(4).toString('hex')}.json`);
-  fs.writeFileSync(f, JSON.stringify({ sources: [{ id: 'managed-aws', retrieval: { kind: 'managed', connector, params: {}, secretRef } }] }));
+  fs.writeFileSync(f, JSON.stringify({ tenantId, sources: [{ id: sourceId, retrieval: { kind: 'managed', connector, params: {}, secretRef } }] }));
   return f;
 }
 const env = (config: string) => ({
@@ -73,7 +77,7 @@ const env = (config: string) => ({
 });
 
 async function provision(tenant: string) {
-  const r = await cli(['source', 'add', '--tenant', tenant, '--key', 'managed-aws', '--providers', 'AWS', '--bucket', src.name, '--prefix', src.at(tenant)], env(engagementFile('synthetic-fixture')));
+  const r = await cli(['source', 'add', '--tenant', tenant, '--key', 'managed-aws', '--providers', 'AWS', '--bucket', src.name, '--prefix', src.at(tenant)], env(engagementFile(tenant)));
   expect(r.code).toBe(0);
   return (await t.db.pool.query(`SELECT id::text FROM ratio.sources WHERE tenant_id = $1 AND source_key = 'managed-aws'`, [tenant])).rows[0].id as string;
 }
@@ -82,11 +86,11 @@ describe('managed fetch (worker command)', () => {
   it('captures the original, stages it through the import pipeline and publishes the period; a re-fetch is unchanged', async () => {
     const tenant = crypto.randomUUID();
     const sid = await provision(tenant);
-    const e = env(engagementFile('synthetic-fixture'));
+    const e = env(engagementFile(tenant));
     const r = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], e);
     expect(r.code).toBe(0);
     expect(seen.secret).toBe(SECRET);
-    expect(r.record).toMatchObject({ command: 'fetch', pass: true, results: { status: 'succeeded', connector: 'synthetic-fixture', sourceKey: 'managed-aws' } });
+    expect(r.record).toMatchObject({ command: 'fetch', pass: true, results: { status: 'succeeded', connector: FIXTURE_CONNECTOR, sourceKey: 'managed-aws' } });
     const d = (r.record.results as { deliveries: Array<Record<string, unknown>> }).deliveries;
     expect(d).toHaveLength(1);
     expect(d[0]).toMatchObject({ delivery: 'sample-2024-09', outcome: 'staged', completion: 'complete', originals: [{ sha256: sha(SAMPLE), byteSize: SAMPLE.length, stored: 'stored' }] });
@@ -99,7 +103,7 @@ describe('managed fetch (worker command)', () => {
     expect(sha(await evidence.get(originalKey!))).toBe(sha(SAMPLE));
     // The staged manifest carries the retrieval provenance.
     const manifestKey = (await src.keys(`${src.at(tenant)}/`)).find((k) => k.includes('/metadata/BILLING_PERIOD=2024-09/'))!;
-    expect(JSON.parse((await src.get(manifestKey)).toString('utf8'))['x-ratio-import']).toMatchObject({ connector: 'synthetic-fixture', delivery: 'sample-2024-09', originals: [{ sha256: sha(SAMPLE) }], period: '2024-09-01' });
+    expect(JSON.parse((await src.get(manifestKey)).toString('utf8'))['x-ratio-import']).toMatchObject({ connector: FIXTURE_CONNECTOR, delivery: 'sample-2024-09', originals: [{ sha256: sha(SAMPLE) }], period: '2024-09-01' });
     // Only the delivery's period was staged.
     expect((await src.keys(`${src.at(tenant)}/`)).some((k) => k.includes('BILLING_PERIOD=2024-10'))).toBe(false);
 
@@ -113,25 +117,102 @@ describe('managed fetch (worker command)', () => {
     const tenant = crypto.randomUUID();
     await provision(tenant);
     const before = seen.opened;
-    const a = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile('opencost')));
+    const a = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant, 'nutanix')));
     expect(a.code).toBe(1);
     expect(a.record).toMatchObject({ pass: false, results: { status: 'failed', error: { code: 'CONNECTOR_NOT_REGISTERED' } } });
-    const b = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile('synthetic-fixture', 'synthetic/absent')));
+    const b = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant, FIXTURE_CONNECTOR, 'synthetic/absent')));
     expect(b.code).toBe(1);
     expect(b.record).toMatchObject({ results: { status: 'failed', error: { code: 'SECRET_MISSING' } } });
     expect(seen.opened).toBe(before);
     expect(await src.keys(`${src.at(tenant)}/`)).toEqual([]);
   });
 
-  it('usage: --from needs --to; a source missing from the engagement config fails', async () => {
+  it('usage: --from needs --to (exit 2); a source missing from the engagement config is a configuration error (exit 2)', async () => {
     const tenant = crypto.randomUUID();
-    const u = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws', '--from', '2024-09'], env(engagementFile('synthetic-fixture')));
+    const u = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws', '--from', '2024-09'], env(engagementFile(tenant)));
     expect(u.code).toBe(2);
     await provision(tenant);
-    const f = path.join(tmp, 'empty.json');
-    fs.writeFileSync(f, JSON.stringify({ sources: [] }));
-    const m = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(f));
-    expect(m.code).toBe(1);
+    const m = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant, FIXTURE_CONNECTOR, 'synthetic/key', 'some-other-source')));
+    expect(m.code).toBe(2);
     expect(m.record).toMatchObject({ results: { error: { code: 'SOURCE_NOT_IN_ENGAGEMENT_CONFIG' } } });
+  });
+
+  // Review rv149 (M3): a disabled source never contacts the provider: no retriever opened, no original written.
+  it('a disabled source is refused before the connector runs', async () => {
+    const tenant = crypto.randomUUID();
+    const sid = await provision(tenant);
+    await t.db.pool.query(`UPDATE ratio.sources SET enabled = false WHERE id = $1`, [sid]);
+    const before = seen.opened;
+    const r = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant)));
+    expect(r.code).toBe(1);
+    expect(r.record).toMatchObject({ pass: false, results: { error: { code: 'SOURCE_DISABLED' } } });
+    expect(seen.opened).toBe(before);
+    expect((await evidence.keys()).filter((k) => k.includes(`connector-originals/${tenant}/`))).toEqual([]);
+  });
+
+  // Review rv149 (M2): the config is bound to the tenant it names; a mismatch publishes nothing anywhere.
+  it('an engagement config naming another tenant is refused (exit 2) before the connector runs', async () => {
+    const tenant = crypto.randomUUID();
+    await provision(tenant);
+    const before = seen.opened;
+    const r = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(crypto.randomUUID())));
+    expect(r.code).toBe(2);
+    expect(r.record).toMatchObject({ results: { status: 'failed', error: { code: 'ENGAGEMENT_TENANT_MISMATCH' } } });
+    expect(seen.opened).toBe(before);
+    expect(await src.keys(`${src.at(tenant)}/`)).toEqual([]);
+  });
+
+  // Review rv149 (M1): the secret (and each component of a structured secret) never reaches stdout,
+  // stderr or the staged manifest, even when the connector puts it in a delivery id or object key.
+  it('a secret in a delivery id or object key is redacted everywhere it is printed or stored', async () => {
+    const tenant = crypto.randomUUID();
+    await provision(tenant);
+    const structured = JSON.stringify({ client_id: 'SYNTHETIC-client-7c21', private_key: SECRET });
+    fs.writeFileSync(path.join(tmp, 'secrets', 'synthetic', 'json'), structured, { mode: 0o600 });
+    Object.assign(serve, { delivery: `d-${SECRET}-SYNTHETIC-client-7c21`, key: `k?token=${SECRET}` });
+    try {
+      const r = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant, FIXTURE_CONNECTOR, 'synthetic/json')));
+      expect(r.code).toBe(0);
+      const manifestKey = (await src.keys(`${src.at(tenant)}/`)).find((k) => k.includes('/metadata/BILLING_PERIOD=2024-09/'))!;
+      const manifest = (await src.get(manifestKey)).toString('utf8');
+      expect(manifest).toContain('[redacted]');
+      for (const text of [...r.out, ...r.err, manifest]) {
+        expect(text).not.toContain(SECRET);
+        expect(text).not.toContain('SYNTHETIC-client-7c21');
+      }
+    } finally {
+      Object.assign(serve, { delivery: 'sample-2024-09', key: 'focus_sample.csv' });
+    }
+  });
+
+  // Review rv149 (M5): fetch maps failures to the same exit codes as import-file.
+  it('exit codes: another import in progress is 4; a changed published period is 3 (refused, nothing written)', async () => {
+    const tenant = crypto.randomUUID();
+    const sid = await provision(tenant);
+    const c = await t.db.pool.connect();
+    await c.query(`SELECT pg_advisory_lock(hashtextextended($1, 0))`, [`ratio.import:${tenant}:${sid}`]);
+    try {
+      const busy = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant)));
+      expect(busy.code).toBe(4);
+      expect(busy.record).toMatchObject({ exitCode: 4, results: { deliveries: [{ code: 'ALREADY_RUNNING' }] } });
+    } finally {
+      await c.query('SELECT pg_advisory_unlock_all()');
+      c.release();
+    }
+    expect((await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant)))).code).toBe(0);
+    // Drop one 2024-09 row: the delivery now changes the published period.
+    const lines = SAMPLE.toString('utf8').split('\n');
+    const header = lines[0].split(',');
+    const iStart = header.indexOf('BillingPeriodStart');
+    const drop = lines.findIndex((l, i) => i > 0 && l.split(',').length === header.length && l.split(',')[iStart].startsWith('2024-09-01'));
+    expect(drop).toBeGreaterThan(0);
+    serve.bytes = Buffer.from(lines.filter((_, i) => i !== drop).join('\n'), 'utf8');
+    try {
+      const refused = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant)));
+      expect(refused.code).toBe(3);
+      expect(refused.record).toMatchObject({ exitCode: 3, results: { deliveries: [{ outcome: 'refused', code: 'PERIOD_ALREADY_PUBLISHED' }] } });
+    } finally {
+      serve.bytes = SAMPLE;
+    }
   });
 });

@@ -179,3 +179,116 @@ describe('managedSpecFromEngagementFile', () => {
     }
   });
 });
+
+describe('runManagedFetch: review round (rv149)', () => {
+  const withSecretIn = (s: string) => `x-${s}-y`;
+
+  it('scrubs the secret from the WHOLE result, the logs and the staged provenance (ids, period, identity, describe)', async () => {
+    const logs: unknown[] = [];
+    const { factory } = fake([{ id: withSecretIn(SECRET), completion: 'complete', objects: [{ name: 'part-1', ref: 'r' }] }], {
+      describe: () => ({ connector: 'fake-connector', sourceKind: 'focus-export', schemaVersion: '1.0', dataset: withSecretIn(SECRET) }),
+      open: async () => ({ bytes: CSV, identity: { kind: 'object', bucket: withSecretIn(SECRET), key: `k?token=${SECRET}`, etag: SECRET } }),
+    });
+    const { opts, stage } = setup(factory, { log: (e, f) => logs.push([e, f]) });
+    stage.mockResolvedValueOnce({ status: 'succeeded', note: `echo ${SECRET}` } as never);
+    const r = await runManagedFetch(opts);
+    expect(r.status).toBe('succeeded');
+    const arg = (stage.mock.calls[0] as unknown[])[0] as { provenance: unknown };
+    expect(JSON.stringify(arg.provenance)).not.toContain(SECRET);
+    expect(JSON.stringify(arg.provenance)).toContain('[redacted]');
+    expect(JSON.stringify(r)).not.toContain(SECRET);
+    expect(JSON.stringify(r.deliveries[0].result)).toContain('[redacted]');
+    expect(logs.length).toBeGreaterThan(0);
+    expect(JSON.stringify(logs)).not.toContain(SECRET);
+  });
+
+  it('a structured secret (key=value;...) is scrubbed by component; a connector can register derived secrets', async () => {
+    const structured = 'client_id=SYNTHETIC-cid-1;private_key=PK-SYNTHETIC-SECRET-123';
+    const derived = 'SYNTHETIC-derived-session-token';
+    const seenValues: string[] = [];
+    const factory: RetrieverFactory = (ctx) => {
+      ctx.registerSecret(derived);
+      return {
+        describe: () => ({ connector: 'fake-connector', sourceKind: 'focus-export', schemaVersion: '1.0', dataset: 'd' }),
+        probe: async () => ({}),
+        listDeliveries: async () => {
+          throw new ManagedError('AUTH_FAILED', `key PK-SYNTHETIC-SECRET-123 rejected; session ${derived}`);
+        },
+        open: async () => ({ bytes: CSV, identity: { kind: 'object', bucket: 'b', key: 'k' } }),
+      };
+    };
+    const { opts } = setup(factory, { resolveSecret: (ref) => new SecretValue(ref, structured), onSecrets: (v) => seenValues.push(...v) });
+    const r = await runManagedFetch(opts);
+    expect(r.error).toEqual({ code: 'AUTH_FAILED', message: 'key [redacted] rejected; session [redacted]' });
+    expect(seenValues).toEqual(expect.arrayContaining([structured, 'PK-SYNTHETIC-SECRET-123', derived]));
+  });
+
+  it('a retriever whose describe() throws is a failed result with a code, never a throw', async () => {
+    const { factory } = fake([complete()], { describe: () => { throw new Error(`x ${SECRET}`); } });
+    const { opts, stage } = setup(factory);
+    const r = await runManagedFetch(opts);
+    expect(r).toMatchObject({ status: 'failed', error: { code: 'RETRIEVAL_FAILED' } });
+    expect(JSON.stringify(r)).not.toContain(SECRET);
+    expect(stage).not.toHaveBeenCalled();
+  });
+
+  it('enforces --from/--to: out-of-range, period-less and duplicate-period deliveries are refused unopened', async () => {
+    const opened: unknown[] = [];
+    const { factory } = fake(
+      [
+        { id: 'old', billingPeriod: '2023-01-01', completion: 'complete', objects: [{ name: 'o', ref: 'old' }] },
+        { id: 'none', completion: 'complete', objects: [{ name: 'o', ref: 'none' }] },
+        { id: 'dupA', billingPeriod: '2026-09-01', completion: 'complete', objects: [{ name: 'o', ref: 'dupA' }] },
+        { id: 'dupB', billingPeriod: '2026-09-01', completion: 'complete', objects: [{ name: 'o', ref: 'dupB' }] },
+        { id: 'bad', billingPeriod: '2026-09-15', completion: 'complete', objects: [{ name: 'o', ref: 'bad' }] },
+        { id: 'ok', billingPeriod: '2026-10-01', completion: 'complete', objects: [{ name: 'o', ref: 'ok' }] },
+      ],
+      { open: async (ref) => (opened.push(ref), { bytes: CSV, identity: { kind: 'object', bucket: 'b', key: String(ref) } }) },
+    );
+    const { opts, stage } = setup(factory, { range: { from: '2026-09', to: '2026-10' } });
+    const r = await runManagedFetch(opts);
+    expect(r.status).toBe('failed');
+    expect(r.deliveries.map((d) => [d.delivery, d.outcome, d.code ?? null])).toEqual([
+      ['old', 'refused', 'DELIVERY_OUT_OF_RANGE'],
+      ['none', 'refused', 'DELIVERY_PERIOD_UNKNOWN'],
+      ['dupA', 'refused', 'DELIVERY_PERIOD_DUPLICATE'],
+      ['dupB', 'refused', 'DELIVERY_PERIOD_DUPLICATE'],
+      ['bad', 'refused', 'DELIVERY_PERIOD_INVALID'],
+      ['ok', 'staged', null],
+    ]);
+    expect(opened).toEqual(['ok']);
+    expect(stage).toHaveBeenCalledTimes(1);
+    expect((stage.mock.calls[0] as unknown[])[0]).toMatchObject({ period: '2026-10-01' });
+  });
+
+  it('passes the delivery period to staging and reports rows of other periods it left out', async () => {
+    const { factory } = fake([complete()]);
+    const { opts, stage } = setup(factory);
+    stage.mockResolvedValueOnce({ status: 'succeeded', files: [{ dataRows: 10 }], staged: [{ billingPeriod: '2026-09-01', records: 7 }] } as never);
+    const r = await runManagedFetch(opts);
+    expect((stage.mock.calls[0] as unknown[])[0]).toMatchObject({ period: '2026-09-01' });
+    expect(r.deliveries[0]).toMatchObject({ outcome: 'staged', rowsOutsidePeriod: 3 });
+  });
+
+  it('a fetch that stages some deliveries and then fails says which were staged and published', async () => {
+    const { factory } = fake([complete('d1'), { ...complete('d2'), billingPeriod: '2026-10-01' }]);
+    const { opts, stage } = setup(factory);
+    stage.mockResolvedValueOnce({ status: 'succeeded', periods: [{ billingPeriod: '2026-09-01', outcome: 'published' }] } as never);
+    stage.mockRejectedValueOnce(Object.assign(new Error('x'), { code: 'STAGE_BROKE' }));
+    const r = await runManagedFetch(opts);
+    expect(r.status).toBe('failed');
+    expect(r.partial).toEqual({
+      staged: [{ delivery: 'd1', billingPeriod: '2026-09-01', published: ['2026-09-01'] }],
+      message: '1 of 2 deliveries were staged before others failed; their published periods stand (re-run fetch for the rest)',
+    });
+  });
+
+  it('refuses a delivery above the size cap before it is staged (no normalization)', async () => {
+    const { factory } = fake([{ ...complete(), objects: [{ name: 'a', ref: 'a' }, { name: 'b', ref: 'b' }] }]);
+    const { opts, stage, originals } = setup(factory, { maxDeliveryBytes: CSV.length + 1 });
+    const r = await runManagedFetch(opts);
+    expect(r.deliveries[0]).toMatchObject({ outcome: 'refused', code: 'IMPORT_TOO_LARGE' });
+    expect(originals.keys).toHaveLength(1);
+    expect(stage).not.toHaveBeenCalled();
+  });
+});

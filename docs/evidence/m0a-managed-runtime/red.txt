@@ -22,3 +22,21 @@ Command: npx vitest run src/connectors/managed/runtime.test.ts
 Result: Tests 1 failed | 6 passed (7) -- managedSpecFromEngagementFile is not exported yet.
 src/ingest/managedFetch.db.test.ts (new, RED by construction: the `fetch` worker command does not
 exist yet; it runs under npm run test:db with Postgres 16 + SeaweedFS).
+
+--- Third RED: independent review of PR #149 (rv149), tests before the fixes, head 6c6f352 ---
+Command: npx vitest run src/connectors/managed scripts/check-next-bundle.test.mjs
+Result: Test Files 5 failed | 7 passed (12); Tests 12 failed | 131 passed (143); engagementSpec.test.ts
+fails to load (the worker-safe engagement-config check does not exist yet).
+Failing: secret scrubbed from the whole result, logs and staged provenance (delivery id, identity,
+describe); structured secret components and connector-registered derived secrets; describe() throwing
+escapes runManagedFetch; --from/--to not enforced (out-of-range, period-less, duplicate-period
+deliveries staged); rows outside the delivery period not reported; partial multi-delivery failure does
+not say what was staged; no size cap before staging; secretScrubTargets missing; object keys and
+URL-encoded/JSON-escaped forms not scrubbed; check:bundle lacks managed markers; boundary detector misses
+template-literal import().
+Command: npx vitest run --config vitest.db.config.ts src/ingest/managedFetch.db.test.ts (own Postgres 16 +
+SeaweedFS, CI digests, non-default ports)
+Result: Tests 5 failed | 2 passed (7): source missing from the config exits 1 (want 2); a disabled
+source still contacts the provider; a config naming another tenant publishes (want exit 2, nothing
+staged); the secret in a delivery id reaches the staged manifest; an import in progress exits 1 (want 4).
+All data SYNTHETIC.
