@@ -202,9 +202,11 @@ describe('managed fetch (worker command)', () => {
     expect((await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant)))).code).toBe(0);
     // Drop one 2024-09 row: the delivery now changes the published period.
     const lines = SAMPLE.toString('utf8').split('\n');
-    const header = lines[0].split(',');
+    const unq = (v: string) => v.replace(/^"|"$/g, '');
+    const header = lines[0].split(',').map(unq);
     const iStart = header.indexOf('BillingPeriodStart');
-    const drop = lines.findIndex((l, i) => i > 0 && l.split(',').length === header.length && l.split(',')[iStart].startsWith('2024-09-01'));
+    expect(iStart).toBeGreaterThanOrEqual(0);
+    const drop = lines.findIndex((l, i) => i > 0 && l.split(',').length === header.length && unq(l.split(',')[iStart]).startsWith('2024-09-01'));
     expect(drop).toBeGreaterThan(0);
     serve.bytes = Buffer.from(lines.filter((_, i) => i !== drop).join('\n'), 'utf8');
     try {

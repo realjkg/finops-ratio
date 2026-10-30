@@ -66,13 +66,62 @@ export function resolveSecret(ref: string, env: { RATIO_SECRETS_DIR?: string }):
   return new SecretValue(ref, value);
 }
 
-/** Replaces every occurrence of each secret value (4+ characters) in strings, deep. */
+/**
+ * Every string worth scrubbing for one secret value: the value itself and, for a structured secret
+ * file, each component an error or identity could echo on its own: every string field of a JSON
+ * secret (and each line of a multi-line one, e.g. a PEM body), the values of `key=value;...` pairs
+ * (never the key names), and the parts of `id:secret`.
+ */
+export function secretScrubTargets(value: string): string[] {
+  const out = new Set<string>([value]);
+  const lines = (s: string) => {
+    for (const l of s.split(/\r?\n/)) {
+      const t = l.trim();
+      if (t && !/^-----(BEGIN|END) /.test(t)) out.add(t);
+    }
+  };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed !== null && typeof parsed === 'object') {
+    const walk = (x: unknown): void => {
+      if (typeof x === 'string') {
+        out.add(x);
+        lines(x);
+      } else if (x && typeof x === 'object') Object.values(x).forEach(walk);
+    };
+    walk(parsed);
+  } else {
+    lines(value);
+    for (const l of value.split(/\r?\n/)) {
+      if (l.includes('=')) {
+        for (const pair of l.split(/[;&]/)) {
+          const i = pair.indexOf('=');
+          if (i >= 0) out.add(pair.slice(i + 1).trim());
+        }
+      } else if (l.includes(':')) for (const part of l.split(':')) out.add(part.trim());
+    }
+  }
+  return [...out].filter((s) => s.length >= 4);
+}
+
+/** The value and the encoded forms it can take in a URL or a JSON string. */
+function encodedForms(s: string): string[] {
+  const forms = new Set([s, encodeURIComponent(s), JSON.stringify(s).slice(1, -1)]);
+  return [...forms];
+}
+
+/** Replaces every occurrence of each secret value (4+ characters, also URL-encoded or JSON-escaped) in strings and object keys, deep. */
 export function scrubSecrets<T>(v: T, secrets: readonly string[]): T {
-  const vals = secrets.filter((s) => typeof s === 'string' && s.length >= 4).sort((a, b) => b.length - a.length);
+  const vals = [...new Set(secrets.filter((s) => typeof s === 'string' && s.length >= 4).flatMap(encodedForms))].sort((a, b) => b.length - a.length);
+  const str = (x: string) => vals.reduce((acc, s) => acc.split(s).join('[redacted]'), x);
   const walk = (x: unknown): unknown => {
-    if (typeof x === 'string') return vals.reduce((acc, s) => acc.split(s).join('[redacted]'), x);
+    if (typeof x === 'string') return str(x);
     if (Array.isArray(x)) return x.map(walk);
-    if (x && typeof x === 'object' && !(x instanceof Buffer) && !(x instanceof Date)) return Object.fromEntries(Object.entries(x).map(([k, y]) => [k, walk(y)]));
+    if (x && typeof x === 'object' && !(x instanceof Buffer) && !(x instanceof Date)) return Object.fromEntries(Object.entries(x).map(([k, y]) => [str(k), walk(y)]));
     return x;
   };
   return walk(v) as T;

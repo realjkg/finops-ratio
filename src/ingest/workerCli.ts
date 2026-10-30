@@ -39,7 +39,7 @@ import { loadWorkerConfig, syntheticProvidersOptIn, type WorkerConfig } from './
 import { SYNTHETIC_PROVIDERS } from './focus/provider';
 import { IngestError, errorCodeOf, messageOf } from './errors';
 import { appendEvidenceFile, buildEvidenceRecord, resolveGitSha } from './evidenceRecord';
-import { jsonLineRedactorFor, redact, secretsFromEnv } from './redact';
+import { jsonLineRedactorFor, redact, secretForms, secretsFromEnv } from './redact';
 import { isTenantId } from './db/tenant';
 import { makeS3Client } from './s3client';
 import { S3EvidenceStore } from './evidence/S3EvidenceStore';
@@ -54,7 +54,8 @@ import type { WorkerHooks } from './worker/types';
 import { MIN_PERIOD_YEAR } from './worker/periods';
 import { isDecimalString } from './focus/decimal';
 import { KNOWN_FILE_DROP_PROVIDERS } from './focus/provider';
-import { importFile, stageAndSync } from './import/importFile';
+import { assertImportableSource, importFile, stageAndSync } from './import/importFile';
+import { MAX_IMPORT_BYTES } from './import/stageFile';
 import { provisionSource } from './import/provisionSource';
 import { parseImportMetadata } from './import/metadata';
 import { loadSource } from './worker/lease';
@@ -85,6 +86,15 @@ const EXIT_REFUSED = 3;
 const EXIT_BUSY = 4;
 const EXIT_TOO_LARGE = 5;
 const USAGE_CODES = new Set(['USAGE', 'CONFIG_INVALID', 'INVALID_TENANT', 'TEST_HOOK_NOT_ALLOWED', 'REPLAY_FIXTURES_NOT_ALLOWED', 'SYNTHETIC_PROVIDERS_NOT_ALLOWED', 'INVALID_SOURCE_KEY', 'INVALID_RANGE', 'INVALID_BATCH', 'IMPORT_CONTROL_INVALID', 'IMPORT_CONTROL_SCOPE', 'IMPORT_CONTROL_CONFLICT', 'METADATA_INVALID', 'METADATA_MISMATCH']);
+
+// fetch: configuration problems of the managed retrieval (engagement config, secrets mount) are exit 2.
+const FETCH_CONFIG_CODES = new Set(['ENGAGEMENT_CONFIG_INVALID', 'ENGAGEMENT_TENANT_MISMATCH', 'SOURCE_NOT_IN_ENGAGEMENT_CONFIG', 'SOURCE_NOT_MANAGED', 'SECRETS_DIR_UNSET', 'SECRET_REF_INVALID']);
+/** fetch maps failures like import-file: 3 refused (would restate), 4 busy, 5 too large, 2 usage/configuration, else 1. */
+function fetchExitCode(code: string): number {
+  if (code === 'PERIOD_ALREADY_PUBLISHED') return EXIT_REFUSED;
+  if (FETCH_CONFIG_CODES.has(code)) return EXIT_USAGE;
+  return exitCodeFor(code);
+}
 
 function exitCodeFor(code: string): number {
   if (code === 'ALREADY_RUNNING' || code === 'LOCK_TIMEOUT') return EXIT_BUSY;
@@ -289,9 +299,17 @@ function argsForRecord(argv: string[]): Record<string, unknown> {
 
 export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<number> {
   const started = new Date();
-  const secrets = secretsFromEnv(env);
+  let secrets = secretsFromEnv(env);
   // Every printed line is redacted BEFORE serialization (then a literal backstop).
-  const line = jsonLineRedactorFor(env);
+  let line = jsonLineRedactorFor(env);
+  // Managed connector secrets (fetch) are only known at run time: from then on every log line,
+  // error and the evidence record are redacted with them too (new arrays: redact caches per array).
+  const managedSecrets: string[] = [];
+  const addSecrets = (values: string[]) => {
+    managedSecrets.push(...values);
+    secrets = secretForms([...secrets, ...values]);
+    line = jsonLineRedactorFor(env, managedSecrets);
+  };
   const clean = (s: string) => redact(s, secrets);
   const log = (event: string, fields: Record<string, unknown> = {}) => {
     io.err(line({ ts: new Date().toISOString(), level: event.endsWith('failed') || event === 'cli.error' || fields.status === 'fail' ? 'error' : 'info', event, ...fields }));
@@ -482,12 +500,17 @@ export async function workerMain(argv: string[], env: Env, io: CliIO): Promise<n
       }
       case 'fetch': {
         const row = await workerTransaction(pool, tenantId, (c) => loadSource(c, args.source!));
+        // A disabled or non-file-drop source never reaches the connector: no provider call, no original.
+        assertImportableSource(row);
         const r = await runManagedFetch({
-          tenantId, sourceKey: args.source!, sourceId: row.id, spec: () => managedSpecFromEngagementFile(env.RATIO_ENGAGEMENT_CONFIG, args.source!),
-          range: args.from ? { from: args.from, to: args.to! } : undefined, resolveSecret: (ref) => resolveSecret(ref, env), originals: evidenceStore(), log,
+          tenantId, sourceKey: args.source!, sourceId: row.id, spec: () => managedSpecFromEngagementFile(env.RATIO_ENGAGEMENT_CONFIG, args.source!, tenantId),
+          range: args.from ? { from: args.from, to: args.to! } : undefined, resolveSecret: (ref) => resolveSecret(ref, env), originals: evidenceStore(), log, onSecrets: addSecrets, maxDeliveryBytes: MAX_IMPORT_BYTES,
           stage: (o) => stageAndSync({ pool: pool!, tenantId, sourceKey: args.source!, ...o, restate: args.restate, sourceClient: () => s3('source'), source: makeSourceFactory(env, () => s3('source')), evidence: evidenceStore(), settings: cfg.settings, hooks, log, secrets: [...secrets, ...o.secrets] }),
         });
-        return finish({ ...r }, r.status === 'succeeded', r.status === 'succeeded' ? EXIT_OK : EXIT_FAIL);
+        if (r.status === 'succeeded') return finish({ ...r }, true, EXIT_OK);
+        const code = r.error?.code ?? r.deliveries.find((x) => x.outcome !== 'staged')?.code ?? 'FETCH_FAILED';
+        if (r.partial) log('fetch.partial', { staged: r.partial.staged.length, deliveries: r.deliveries.length });
+        return finish({ ...r }, false, fetchExitCode(code));
       }
       case 'quarantine show': {
         const r = await showBatch(pool, tenantId, args.batch!);

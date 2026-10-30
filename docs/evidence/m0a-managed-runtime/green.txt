@@ -18,3 +18,28 @@ Mutations, unit (scripted, each reverted; tests: src/connectors/managed): 20/20 
   case; it survived the first round); registry duplicate allowed.
 Mutations, db (manual, reverted): delivery period not passed to staging -> killed (2024-10 staged);
   originals store replaced by a no-op in workerCli -> killed (original missing from the evidence bucket).
+
+--- GREEN after the independent review of PR #149 (rv149) ---
+Fixes: the whole fetch result, every managed log line and the staged provenance are scrubbed (delivery
+ids, periods, object identity, describe()); structured secret files register each field/component, and a
+connector registers derived secrets (ctx.registerSecret); the worker CLI redacts its log lines, errors and
+evidence record with them too; describe() runs inside the guarded block. Worker-safe engagement-config
+check (engagementSpec.ts) pinned to R1 by a shared accept/reject table run through both validators and by
+R1's constants and source text; tenantId bound to --tenant (ENGAGEMENT_TENANT_MISMATCH). A disabled or
+non-file-drop source is refused before the connector runs. fetch exit codes as import-file (3/4/5/2/1).
+--from/--to enforced in the runtime; duplicate, malformed, period-less (with a range) and empty
+deliveries refused unopened; rows outside the delivery period counted (rowsOutsidePeriod); a partial
+failure lists what was staged and published; deliveries above MAX_IMPORT_BYTES refused before staging.
+Boundary: all of src/connectors/managed/** is worker-only except the named PointFive client carve-out;
+proxy/middleware/instrumentation, app/pages and src scanned (static, dynamic, require, template literal,
+@/ and src/ baseUrl, .mts/.cts), each root non-empty. check:bundle worker-only markers extended.
+Gates, sequential, on the fixed tree: lint 0; typecheck app 0 and worker 0; vitest 234 files, 4301 tests
+passed; test:db (own Postgres 16 + SeaweedFS, CI digests, ports 55449/18349) 43 files 706 tests, serial
+6 files 173 tests passed; worker:build 0; build 0; check:bundle pass.
+Mutations: 40 targeted mutants of the new code, 39 killed at first run; the survivor E3 (depth check;
+the deeper object still failed as a non-leaf) is killed by a test pinning the problem text to R1's. The
+reviewer's three survivors are killed by their new-code equivalents (S1 whole-result scrub, P1 period not
+passed, B1 boundary skipping pages/). The reviewer's mut.sh rerun: every applicable mutant killed (M8 after a
+cap-straddling test). Equivalent: W6 (CLI-level redaction of managed secrets off) survives, because the
+runtime already scrubs everything it returns, logs or stages; it is kept as defense in depth.
+All data SYNTHETIC.

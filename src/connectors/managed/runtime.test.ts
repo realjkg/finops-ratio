@@ -98,7 +98,7 @@ describe('runManagedFetch', () => {
   });
 
   it('an incomplete delivery is quarantined: originals kept as evidence, nothing staged', async () => {
-    const { factory } = fake([{ ...complete(), completion: 'incomplete' }, complete('d2')]);
+    const { factory } = fake([{ ...complete(), completion: 'incomplete' }, { ...complete('d2'), billingPeriod: '2026-10-01' }]);
     const { opts, originals, stage } = setup(factory);
     const r = await runManagedFetch(opts);
     expect(r.status).toBe('failed');
@@ -108,7 +108,7 @@ describe('runManagedFetch', () => {
   });
 
   it('staging outcomes are reported per delivery (refused, failed with its code)', async () => {
-    const { factory } = fake([complete('d1'), complete('d2')]);
+    const { factory } = fake([complete('d1'), { ...complete('d2'), billingPeriod: '2026-10-01' }]);
     const { opts, stage } = setup(factory);
     stage.mockResolvedValueOnce({ status: 'refused', error: { code: 'PERIOD_ALREADY_PUBLISHED' } } as never);
     stage.mockRejectedValueOnce(Object.assign(new Error(`bad ${SECRET}`), { code: 'DUPLICATE_ARTIFACT' }));
@@ -165,15 +165,16 @@ describe('managedSpecFromEngagementFile', () => {
   it('returns the managed retrieval of the source with that id', () => {
     const d = tmp();
     try {
-      const f = write(d, { sources: [{ id: 'other', retrieval: { kind: 'file-drop' } }, { id: 'managed-src', retrieval: { kind: 'managed', connector: 'opencost', params: { window: '1d' }, secretRef: 'k8s/opencost' } }] });
-      expect(managedSpecFromEngagementFile(f, 'managed-src')).toEqual({ connector: 'opencost', params: { window: '1d' }, secretRef: 'k8s/opencost' });
-      expect(codeOf(() => managedSpecFromEngagementFile(f, 'other'))).toBe('SOURCE_NOT_MANAGED');
-      expect(codeOf(() => managedSpecFromEngagementFile(f, 'missing'))).toBe('SOURCE_NOT_IN_ENGAGEMENT_CONFIG');
-      expect(codeOf(() => managedSpecFromEngagementFile(write(d, `{"sources": [${SECRET}`), 'managed-src'))).toBe('ENGAGEMENT_CONFIG_INVALID');
-      expect(codeOf(() => managedSpecFromEngagementFile(write(d, { sources: [{ id: 'managed-src', retrieval: { kind: 'managed', connector: 'opencost', secretRef: 'A'.repeat(48) } }] }), 'managed-src'))).toBe('SOURCE_NOT_MANAGED');
-      expect(codeOf(() => managedSpecFromEngagementFile('relative.json', 'managed-src'))).toBe('ENGAGEMENT_CONFIG_INVALID');
-      expect(codeOf(() => managedSpecFromEngagementFile(undefined, 'managed-src'))).toBe('ENGAGEMENT_CONFIG_INVALID');
-      expect(codeOf(() => managedSpecFromEngagementFile(path.join(d, 'nope.json'), 'managed-src'))).toBe('ENGAGEMENT_CONFIG_INVALID');
+      const f = write(d, { tenantId: TENANT, sources: [{ id: 'other', retrieval: { kind: 'file-drop' } }, { id: 'managed-src', retrieval: { kind: 'managed', connector: 'opencost', params: { window: '1d' }, secretRef: 'k8s/opencost' } }] });
+      expect(managedSpecFromEngagementFile(f, 'managed-src', TENANT)).toEqual({ connector: 'opencost', params: { window: '1d' }, secretRef: 'k8s/opencost' });
+      expect(codeOf(() => managedSpecFromEngagementFile(f, 'other', TENANT))).toBe('SOURCE_NOT_MANAGED');
+      expect(codeOf(() => managedSpecFromEngagementFile(f, 'missing', TENANT))).toBe('SOURCE_NOT_IN_ENGAGEMENT_CONFIG');
+      expect(codeOf(() => managedSpecFromEngagementFile(write(d, `{"sources": [${SECRET}`), 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
+      // A credential-looking secretRef is refused by the whole-config check (review rv149: as R1 does).
+      expect(codeOf(() => managedSpecFromEngagementFile(write(d, { tenantId: TENANT, sources: [{ id: 'managed-src', retrieval: { kind: 'managed', connector: 'opencost', secretRef: 'A'.repeat(48) } }] }), 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
+      expect(codeOf(() => managedSpecFromEngagementFile('relative.json', 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
+      expect(codeOf(() => managedSpecFromEngagementFile(undefined, 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
+      expect(codeOf(() => managedSpecFromEngagementFile(path.join(d, 'nope.json'), 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
     } finally {
       fs.rmSync(d, { recursive: true, force: true });
     }
@@ -223,6 +224,13 @@ describe('runManagedFetch: review round (rv149)', () => {
     expect(seenValues).toEqual(expect.arrayContaining([structured, 'PK-SYNTHETIC-SECRET-123', derived]));
   });
 
+  it('a secret straddling the message length cap is scrubbed before the cut (no fragment left)', async () => {
+    const { factory } = fake([], { listDeliveries: async () => { throw new ManagedError('AUTH_FAILED', `${'x'.repeat(490)}${SECRET}`); } });
+    const r = await runManagedFetch(setup(factory).opts);
+    expect(r.error?.code).toBe('AUTH_FAILED');
+    expect(r.error?.message).not.toContain(SECRET.slice(0, 8));
+  });
+
   it('a retriever whose describe() throws is a failed result with a code, never a throw', async () => {
     const { factory } = fake([complete()], { describe: () => { throw new Error(`x ${SECRET}`); } });
     const { opts, stage } = setup(factory);
@@ -259,6 +267,14 @@ describe('runManagedFetch: review round (rv149)', () => {
     expect(opened).toEqual(['ok']);
     expect(stage).toHaveBeenCalledTimes(1);
     expect((stage.mock.calls[0] as unknown[])[0]).toMatchObject({ period: '2026-10-01' });
+  });
+
+  it('a delivery listing no objects is refused, never staged as empty', async () => {
+    const { factory } = fake([{ ...complete(), objects: [] }]);
+    const { opts, stage } = setup(factory);
+    const r = await runManagedFetch(opts);
+    expect(r.deliveries[0]).toMatchObject({ outcome: 'refused', code: 'DELIVERY_EMPTY' });
+    expect(stage).not.toHaveBeenCalled();
   });
 
   it('passes the delivery period to staging and reports rows of other periods it left out', async () => {

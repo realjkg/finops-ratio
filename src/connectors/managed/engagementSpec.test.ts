@@ -64,6 +64,18 @@ describe('worker engagement-config check (parity with R1)', () => {
     });
   }
 
+  it('names the same key and reason as R1 for nesting, credentials and duplicates', () => {
+    const c = example();
+    c.sources[0].retrieval = { kind: 'managed', connector: 'opencost', params: { a: { b: { c: 1 } }, k: 'AKIAABCDEFGHIJKLMNOP' } };
+    c.sources.push({ ...c.sources[0] });
+    const r1 = validateEngagementConfig(c);
+    const mine = engagementProblems(c);
+    for (const want of ['sources[0].retrieval.params.a.b: nesting deeper than 2 levels is not allowed', 'sources[0].retrieval.params.k: looks like a credential value; reference a secret by name with secretRef', 'sources[1].id: duplicate source id']) {
+      expect(r1.ok ? [] : r1.problems).toContain(want);
+      expect(mine).toContain(want);
+    }
+  });
+
   it("pins the worker's constants to R1's exports and source text", () => {
     expect([...MANAGED_CONNECTORS]).toEqual([...R1_CONNECTORS]);
     for (const re of CREDENTIAL_RE) expect(R1_TEXT).toContain(re.source);

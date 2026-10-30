@@ -65,7 +65,7 @@ const isWorkerOnly = (f: string) => (f === MANAGED || f.startsWith(`${MANAGED}${
 function templateReach(from: string, spec: string): string | null {
   const base = spec.startsWith('@/') ? path.join(ROOT, 'src', spec.slice(2)) : spec.startsWith('src/') ? path.join(ROOT, spec) : spec.startsWith('.') ? path.resolve(path.dirname(from), spec) : null;
   if (!base) return null;
-  const dir = spec.endsWith('/') ? base : path.dirname(base);
+  const dir = spec.endsWith('/') ? path.resolve(base) : path.dirname(base);
   return dir === MANAGED || dir.startsWith(`${MANAGED}${path.sep}`) || `${MANAGED}${path.sep}`.startsWith(`${dir}${path.sep}`) ? dir : null;
 }
 
@@ -140,9 +140,9 @@ describe('managed connector boundary', () => {
         expect(reachesWorkerOnly(fakePage), lib).toBe(want);
       }
       // A .mts module is followed too.
-      const mts = path.join(ROOT, 'src', 'lib', '__boundary_probe__.mts');
+      const mts = path.join(ROOT, 'src', 'lib', '__boundary_probe_m__.mts');
       VFS.set(mts, `export * from '../connectors/managed/runtime';\n`);
-      VFS.set(fakePage, `export * from '../src/lib/__boundary_probe__.mjs';\n`);
+      VFS.set(fakePage, `export * from '../src/lib/__boundary_probe_m__.mjs';\n`);
       expect(reachesWorkerOnly(fakePage)).toBe(path.join(MANAGED, 'runtime.ts'));
       // The carve-out is not a reach; anything else under the managed tree is.
       VFS.set(fakePage, `export * from '../src/connectors/managed/pointfive/mcpClient';\n`);
