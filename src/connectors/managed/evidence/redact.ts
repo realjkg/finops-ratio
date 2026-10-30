@@ -22,18 +22,24 @@ export function classifyName(name: string, inParams = false): 'secret' | 'pagina
 
 export const hashValue = (v: string) => (/^sha256:[0-9a-f]{64}$/.test(v) ? v : `sha256:${createHash('sha256').update(v).digest('hex')}`);
 
+// Every pattern is bounded or starts at a literal or behind a lookbehind, so redaction stays linear on hostile input.
 const VALUE_PATTERNS: Array<[RegExp, string]> = [
   [/-----BEGIN [A-Z ]*-----[\s\S]*?(?:-----END [A-Z ]*-----|$)/g, REDACTED],
   [/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/g, REDACTED],
   [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, REDACTED],
-  [/\beyJ[\w-]{8,}\.[\w-]{8,}\.?[\w-]*/g, REDACTED],
-  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]+@/gi, `$1${REDACTED}@`],
+  [/(?<!\w)eyJ\w{8,}\.[\w-]{8,}\.?[\w-]*/g, REDACTED],
+  [/(?<![a-z0-9])([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#]+@/gi, `$1${REDACTED}@`],
 ];
-const KV = /(["']?)([A-Za-z$][\w.$-]*)\1(\s*[=:]\s*)(["']?)/g;
+// A name starts at a word char that is not inside a key: not after a word char, and not after '-' or '.'
+// that follows one (so --password=, -token=, a/.token= and ?.password= are names; a-b-c is one key).
+const KV = /(?<![\w$]|[\w$][.-])(["']?)([\w$][\w.$-]{0,63})\1(\s*[=:]\s*)(["']?)/g;
+const VALUE = /(?:(?:Digest|SharedKey|Token|AWS4-HMAC-SHA256)\s+)?[^\s&;,"'<>)}\]]*/y;
+const LINE = /[^\r\n]*/y; // a whole Authorization or Cookie header value
+const QUOTED: Record<string, RegExp> = { '"': /(?:\\[\s\S]|[^"\\]){0,8192}/y, "'": /(?:\\[\s\S]|[^'\\]){0,8192}/y };
 // 40+ chars, no '.' and not touching '/' or '.': a path, file name or host is never a candidate.
 const RUN = /(^|[^A-Za-z0-9+/=_.-])([A-Za-z0-9+/=_-]{40,})(?![A-Za-z0-9+/=_.-])/g;
 const WORDLIKE = /^(?:[a-z0-9]+(?:[-_=][a-z0-9]+)*|[A-Z][a-z]+)$/;
-const opaque = (r: string) => /[A-Z]/.test(r) && /[a-z]/.test(r) && /\d/.test(r) && !r.split('/').some((seg) => WORDLIKE.test(seg) || LOCATOR_RE.test(seg));
+const opaque = (r: string) => /[A-Z]/.test(r) && /[a-z]/.test(r) && /\d/.test(r) && !/^[0-9a-fA-F]+$/.test(r) && !r.split('/').some((seg) => WORDLIKE.test(seg) || LOCATOR_RE.test(seg));
 
 /** Name-based redaction of key=value / "key":"value" / Header: value pairs. */
 function redactPairs(s: string, count: { n: number }): string {
@@ -42,11 +48,14 @@ function redactPairs(s: string, count: { n: number }): string {
   KV.lastIndex = 0;
   for (let m = KV.exec(s); m; m = KV.exec(s)) {
     const kind = classifyName(m[2]);
-    if (kind === 'keep') continue;
     const start = m.index + m[0].length;
-    const rest = s.slice(start);
-    const v = (m[4] ? rest.slice(0, Math.max(0, rest.indexOf(m[4]))) : (/^(?:(?:Digest|SharedKey|Token|AWS4-HMAC-SHA256)\s+)?[^\s&;,"'<>)}\]]+/.exec(rest) ?? [''])[0]);
-    if (v === '' || v === REDACTED || v.startsWith(`${REDACTED}@`) || (kind === 'pagination' && hashValue(v) === v)) continue;
+    if (kind === 'keep' || s.startsWith(REDACTED, start)) continue;
+    const re = m[4] ? QUOTED[m[4]] : /authori[sz]ation|cookie/i.test(m[2]) && m[3].includes(':') ? LINE : VALUE;
+    re.lastIndex = start;
+    let v = re.exec(s)?.[0] ?? '';
+    const close = m[4] && s[start + v.length] !== m[4] ? s.indexOf(m[4], start + v.length) : -2; // past the cap, or unterminated
+    if (close !== -2) v = s.slice(start, close < 0 ? s.length : close);
+    if (v === '' || (kind === 'pagination' && hashValue(v) === v)) continue;
     count.n += 1;
     out += s.slice(last, start) + (kind === 'secret' ? REDACTED : hashValue(v));
     last = start + v.length;

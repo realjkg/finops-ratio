@@ -38,20 +38,20 @@ export async function captureOriginal(
   return { sha256: hash, byteSize: bytes.length, key, identity: safeIdentity(identity), retrievedAt: now.toISOString(), stored };
 }
 
-/** Tracks a paged response: complete only for pages 0..n-1 in order whose last page has no next token. */
+/** Complete only for pages 0..n-1 in order, each requested with the previous page's next token, no token repeated, ending on a page without one. */
 export class PageSequence {
-  private seen: Array<{ pageIndex: number; nextPageToken?: string }> = [];
-  add(p: { pageIndex: number; nextPageToken?: string }): void {
-    this.seen.push({ pageIndex: p.pageIndex, nextPageToken: p.nextPageToken });
+  private seen: Array<{ pageIndex: number; requestToken?: string; nextPageToken?: string }> = [];
+  add(p: { pageIndex: number; requestToken?: string; nextPageToken?: string }): void {
+    this.seen.push({ pageIndex: p.pageIndex, requestToken: p.requestToken || undefined, nextPageToken: p.nextPageToken || undefined });
   }
   get pages(): number {
     return this.seen.length;
   }
   completion(): 'complete' | 'incomplete' {
-    if (this.seen.length === 0) return 'incomplete';
-    const ordered = this.seen.every((p, i) => p.pageIndex === i);
-    const terminalOnlyLast = this.seen.every((p, i) => (i === this.seen.length - 1 ? !p.nextPageToken : !!p.nextPageToken));
-    return ordered && terminalOnlyLast ? 'complete' : 'incomplete';
+    const last = this.seen.length - 1;
+    const tokens = this.seen.map((p) => p.nextPageToken).filter((t) => t !== undefined);
+    const chained = this.seen.every((p, i) => p.pageIndex === i && p.requestToken === this.seen[i - 1]?.nextPageToken && (i === last) === !p.nextPageToken);
+    return last >= 0 && chained && new Set(tokens).size === tokens.length ? 'complete' : 'incomplete';
   }
 }
 

@@ -60,6 +60,8 @@ const neg = (a: string) => (a.startsWith('-') ? a.slice(1) : `-${a}`);
 const eq = (a: string, b: string) => addDecimal(a, neg(b)) === '0';
 type LineId = { measure: string; currency?: string; unit?: string };
 const MONETARY_RE = /billed|effective|list|contracted|cost|credit|refund|adjust|tax|amortiz|charge|fee|discount|spend|saving|price|amount/i;
+/** A money line: a monetary measure with its currency (a count tagged with a currency is not one). */
+export const isMoneyLine = (l: LineId) => !!l.currency && MONETARY_RE.test(l.measure);
 const lineName = (m: LineId) => `${m.measure}${m.currency ? ` ${m.currency}` : ''}${m.unit ? ` [${m.unit}]` : ''}`;
 const lineKey = (m: LineId) => JSON.stringify([m.measure, m.currency ?? null, m.unit ?? null]);
 const ref = (m: LineId): LineRef => ({ line: lineName(m), measure: m.measure, ...(m.currency ? { currency: m.currency } : {}), ...(m.unit ? { unit: m.unit } : {}) });
@@ -109,7 +111,7 @@ export function buildBridge(o: { key: BridgeKey; source: readonly Measure[]; nor
   for (const d of o.deltas) {
     if (!src.has(lineKey(d)) && !norm.has(lineKey(d))) failures.push({ ...ref(d), code: 'BRIDGE_ORPHAN_DELTA', amount: d.amount, reason: d.reason });
   }
-  const money = new Set(lines.filter((l) => l.currency).map((l) => l.currency));
+  const money = new Set(lines.filter(isMoneyLine).map((l) => l.currency));
   if (money.size === 0) failures.push({ line: 'money', code: 'BRIDGE_NO_MONEY_LINE' });
   const currencies = [...(o.currencies ?? []), ...[...o.source, ...o.normalized, ...(o.controls ?? [])].map((m) => m.currency)];
   for (const c of [...new Set(currencies)].sort()) {

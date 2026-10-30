@@ -9,7 +9,8 @@
 //   - "live" readiness needs captured originals and a recorded customer validation;
 //   - the status says "live verified" only when all four dimensions are live,
 //     otherwise it is the pre-rollout wording below.
-import type { Bridge } from './bridge';
+import { addDecimal, isMoneyLine, type Bridge } from './bridge';
+import { originalKey } from './capture';
 import { redactDeep } from './redact';
 import type { CapturedOriginal, DeliveryInventory, FixtureClass, FixtureUse, ReadinessDimensions, VersionFacts } from './types';
 
@@ -39,10 +40,14 @@ export class EvidenceRecordError extends Error {
   }
 }
 
-// At least one original, each with a hex sha256 and its content-addressed key; the bridge is re-checked, not trusted.
+const attempt = (f: () => boolean) => { try { return f(); } catch { return false; } };
+// At least one original, each with a hex sha256 and its key connector-originals/<uuid>/<uuid>/<sha256>.
 const originalsCaptured = (os: readonly CapturedOriginal[]) =>
-  os.length > 0 && os.every((o) => /^[0-9a-f]{64}$/.test(o?.sha256) && typeof o.key === 'string' && o.key.startsWith('connector-originals/') && o.key.endsWith(`/${o.sha256}`));
-const bridgeProves = (b: Bridge) => b.closed && b.failures.length === 0 && b.lines.length > 0 && b.lines.every((l) => l.closes) && b.lines.some((l) => !!l.currency);
+  os.length > 0 && os.every((o) => attempt(() => { const [, t, src] = o.key.split('/'); return originalKey(t, src, o.sha256) === o.key; }));
+// The bridge is re-checked, flags and arithmetic: no failures, every line sums, at least one money line.
+const bridgeProves = (b: Bridge) =>
+  b.closed && b.failures.length === 0 && b.lines.length > 0 && b.lines.some(isMoneyLine) &&
+  b.lines.every((l) => l.closes && attempt(() => addDecimal(l.source, ...l.deltas.map((d) => d.amount)) === addDecimal(l.normalized)));
 
 export function buildEvidenceRecord(input: EvidenceRecordInput): EvidenceRecord {
   const { fixture, proof, release, readiness } = input;
