@@ -9,3 +9,11 @@ transform; dropped credit names the line; one-sided measure is not a zero), aggr
 compared but never completeness proof, exact decimals, evidence record redaction, fixture class
 vs reconciliation proof, no live claim without original evidence, sanitization/coverage notes.
 All inputs SYNTHETIC.
+
+Review round (#148), RED tests committed before the fixes. Base: 0eaed0b (origin/main has no newer commits).
+Command: npx vitest run src/connectors/managed/evidence
+Result: Test Files 3 failed (3); Tests 9 failed | 18 passed (27).
+New failing cases: live claim with no captured original; empty / control-only bridge accepted as proof;
+orphan deltas dropped; monetary measure without currency; concatenated line keys collide; no residual
+field; secrets missed (underscore-prefixed names, header form, JSON keys, URL userinfo, client_assertion,
+code); locators destroyed (original keys, object keys, endpoint paths, pagination params).
