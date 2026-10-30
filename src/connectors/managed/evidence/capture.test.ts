@@ -48,9 +48,9 @@ describe('PageSequence', () => {
   it('is complete only when indices are contiguous from 0 and the last page has no next token', () => {
     const s = new PageSequence();
     s.add({ pageIndex: 0, nextPageToken: 't1' });
-    s.add({ pageIndex: 1, nextPageToken: 't2' });
+    s.add({ pageIndex: 1, requestToken: 't1', nextPageToken: 't2' });
     expect(s.completion()).toBe('incomplete'); // no terminal page
-    s.add({ pageIndex: 2 });
+    s.add({ pageIndex: 2, requestToken: 't2' });
     expect(s.completion()).toBe('complete');
     expect(s.pages).toBe(3);
   });
@@ -58,11 +58,11 @@ describe('PageSequence', () => {
   it('a gap, a repeated index or a page after the terminal page is incomplete', () => {
     const gap = new PageSequence();
     gap.add({ pageIndex: 0, nextPageToken: 'a' });
-    gap.add({ pageIndex: 2 });
+    gap.add({ pageIndex: 2, requestToken: 'a' });
     expect(gap.completion()).toBe('incomplete');
     const rep = new PageSequence();
     rep.add({ pageIndex: 0, nextPageToken: 'a' });
-    rep.add({ pageIndex: 0 });
+    rep.add({ pageIndex: 0, requestToken: 'a' });
     expect(rep.completion()).toBe('incomplete');
     const after = new PageSequence();
     after.add({ pageIndex: 0 });

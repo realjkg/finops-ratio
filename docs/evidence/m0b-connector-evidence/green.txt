@@ -29,3 +29,17 @@ Mutations (scripted, each reverted): 19/19 killed -- live claim or proof without
 Older tests adjusted to the new rules: originals added where a test expects a live or proof record to
   be accepted (and to the refusal cases so each fails for its own reason); the side-missing failure now
   also carries the structured measure/currency fields.
+
+Review round 2 (#148) -- GREEN (sequential, foreground; branch merged with origin/main a10e4b4)
+  npx vitest run src/connectors/managed/evidence -> 34 passed (34); 1 MB hostile inputs each < 1 s
+  npm run lint -> exit 0; npm run typecheck -> exit 0; npx tsc -p tsconfig.worker.json --noEmit -> exit 0
+  npx vitest run -> Test Files 231 passed (231); Tests 4273 passed (4273)
+  npm run build -> exit 0 (next-env.d.ts unchanged); npm run check:bundle -> pass
+Mutations (scripted, each reverted, 150 s cap counts as killed): 15/17 killed -- request token not
+  chained; repeated token allowed; index order unchecked; terminal unchecked; JWT lookbehind removed
+  (timeout); userinfo scheme unbounded (timeout); header line mode off; escaped quote ends value;
+  double redaction; userinfo stops at first '@'; hex ids redacted; count measure as money line;
+  arithmetic not re-verified; loose original key shape; KV name unbounded AND lookbehind removed
+  (timeout). Survivors: the KV bound alone and the KV lookbehind alone -- each guard by itself keeps
+  the scan linear (defense in depth); removing both is killed by the 1 MB test.
+Older PageSequence tests now pass the request token so each case fails for its own reason.
