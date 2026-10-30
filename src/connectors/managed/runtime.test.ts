@@ -303,8 +303,47 @@ describe('runManagedFetch: review round (rv149)', () => {
     const { factory } = fake([{ ...complete(), objects: [{ name: 'a', ref: 'a' }, { name: 'b', ref: 'b' }] }]);
     const { opts, stage, originals } = setup(factory, { maxDeliveryBytes: CSV.length + 1 });
     const r = await runManagedFetch(opts);
-    expect(r.deliveries[0]).toMatchObject({ outcome: 'refused', code: 'IMPORT_TOO_LARGE' });
-    expect(originals.keys).toHaveLength(1);
+    expect(r.deliveries[0]).toMatchObject({ outcome: 'refused', code: 'IMPORT_TOO_LARGE', originals: [] });
+    // Delta review: no original of an over-cap delivery is kept (all objects are opened and sized first).
+    expect(originals.keys).toHaveLength(0);
     expect(stage).not.toHaveBeenCalled();
+  });
+
+  it('refuses a delivery whose retriever-declared size is above the cap before opening anything', async () => {
+    const opened: unknown[] = [];
+    const { factory } = fake([{ ...complete(), objects: [{ name: 'a', ref: 'a', size: 10 }, { name: 'b', ref: 'b', size: 2 ** 40 }] }], { open: async (ref) => (opened.push(ref), { bytes: CSV, identity: { kind: 'object', bucket: 'b', key: String(ref) } }) });
+    const { opts, stage, originals } = setup(factory, { maxDeliveryBytes: 1024 });
+    const r = await runManagedFetch(opts);
+    expect(r.deliveries[0]).toMatchObject({ outcome: 'refused', code: 'IMPORT_TOO_LARGE' });
+    expect(opened).toEqual([]);
+    expect(originals.keys).toHaveLength(0);
+    expect(stage).not.toHaveBeenCalled();
+  });
+
+  it('a range must be YYYY-MM (from <= to); anything else fails before the connector lists', async () => {
+    for (const range of [{ from: '2026-09-01', to: '2026-09-01' }, { from: '2026-10', to: '2026-09' }, { from: '2026-9', to: '2026-10' }, { from: '2026-13', to: '2026-13' }]) {
+      const list = vi.fn(async () => [complete()]);
+      const { factory } = fake([], { listDeliveries: list });
+      const r = await runManagedFetch(setup(factory, { range }).opts);
+      expect(r, JSON.stringify(range)).toMatchObject({ status: 'failed', error: { code: 'INVALID_RANGE' } });
+      expect(list).not.toHaveBeenCalled();
+    }
+    // The --from month and the --to month are both in range.
+    const { factory } = fake([complete('s'), { ...complete('o'), billingPeriod: '2026-10-01' }]);
+    const r = await runManagedFetch(setup(factory, { range: { from: '2026-09', to: '2026-10' } }).opts);
+    expect(r.deliveries.map((d) => d.outcome)).toEqual(['staged', 'staged']);
+  });
+
+  it('a period-less delivery listed alongside others may duplicate their months: refused unopened', async () => {
+    const opened: unknown[] = [];
+    const { factory } = fake([complete('labeled'), { id: 'unlabeled', completion: 'complete', objects: [{ name: 'o', ref: 'u' }] }], { open: async (ref) => (opened.push(ref), { bytes: CSV, identity: { kind: 'object', bucket: 'b', key: String(ref) } }) });
+    const { opts, stage } = setup(factory);
+    const r = await runManagedFetch(opts);
+    expect(r.deliveries.map((d) => [d.delivery, d.outcome, d.code ?? null])).toEqual([['labeled', 'staged', null], ['unlabeled', 'refused', 'DELIVERY_PERIOD_DUPLICATE']]);
+    expect(opened).toEqual(['data/part-1.csv']);
+    expect(stage).toHaveBeenCalledTimes(1);
+    // Alone, a period-less delivery (no range) is staged for every period it holds.
+    const solo = setup(fake([{ id: 'unlabeled', completion: 'complete', objects: [{ name: 'o', ref: 'u' }] }]).factory);
+    expect((await runManagedFetch(solo.opts)).deliveries[0].outcome).toBe('staged');
   });
 });

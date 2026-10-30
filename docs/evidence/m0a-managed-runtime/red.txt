@@ -40,3 +40,12 @@ Result: Tests 5 failed | 2 passed (7): source missing from the config exits 1 (w
 source still contacts the provider; a config naming another tenant publishes (want exit 2, nothing
 staged); the secret in a delivery id reaches the staged manifest; an import in progress exits 1 (want 4).
 All data SYNTHETIC.
+
+--- Fourth RED: delta review of 3d5a035 (rv149b), tests before the fix ---
+BLOCKER: the CLI stored --from/--to as YYYY-MM-01 while the runtime compared YYYY-MM, so the --from month was
+refused DELIVERY_OUT_OF_RANGE. Command: npx vitest run --config vitest.db.config.ts src/ingest/managedFetch.db.test.ts
+Result: Tests 3 failed | 8 passed (11): single-month range, multi-month edges, --restate with a range.
+Command: npx vitest run src/connectors/managed/runtime.test.ts
+Result: Tests 4 failed | 15 passed (19): an over-cap delivery keeps an earlier object's original; a declared
+size above the cap is not refused before open(); a malformed range is not refused; a period-less delivery
+next to labeled ones is staged (possible duplicate month). All data SYNTHETIC.

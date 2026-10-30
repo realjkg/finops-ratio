@@ -25,8 +25,8 @@ const AWS_SEP = CONTROLS.totals.find((t: { billingPeriod: string }) => t.billing
 const SECRET = 'SYNTHETIC-managed-secret-41d9e2';
 const sha = (b: Buffer) => crypto.createHash('sha256').update(b).digest('hex');
 
-const seen: { secret?: string; opened: number } = { opened: 0 };
-const serve: { bytes: Buffer; delivery: string; key: string } = { bytes: SAMPLE, delivery: 'sample-2024-09', key: 'focus_sample.csv' };
+const seen: { secret?: string; opened: number; refs: string[]; range?: unknown } = { opened: 0, refs: [] };
+const serve: { bytes: Buffer; delivery: string; key: string; list?: Array<{ id: string; period: string; ref: string; bytes: Buffer }>; honorRange?: boolean } = { bytes: SAMPLE, delivery: 'sample-2024-09', key: 'focus_sample.csv' };
 // SYNTHETIC fixture retriever, registered in this test process only (never shipped) under an id R1
 // names (the worker refuses connectors outside MANAGED_CONNECTORS, like R1): serves the sample file
 // as one complete delivery for 2024-09.
@@ -36,10 +36,17 @@ managedRegistry.register(FIXTURE_CONNECTOR, ({ secret }) => {
   const r: ManagedRetriever = {
     describe: () => ({ connector: FIXTURE_CONNECTOR, sourceKind: 'focus-export', schemaVersion: '1.0', dataset: 'FOCUS 1.0 sample (public)' }),
     probe: async () => ({}),
-    listDeliveries: async () => [{ id: serve.delivery, billingPeriod: '2024-09-01', completion: 'complete', objects: [{ name: 'part-1', ref: serve.key }] }],
+    listDeliveries: async (range) => {
+      seen.range = range;
+      return serve.list
+        ? serve.list.filter((d) => !serve.honorRange || !range || (d.period.slice(0, 7) >= range.from && d.period.slice(0, 7) <= range.to)).map((d) => ({ id: d.id, billingPeriod: d.period, completion: 'complete' as const, objects: [{ name: 'part-1', ref: d.ref }] }))
+        : [{ id: serve.delivery, billingPeriod: '2024-09-01', completion: 'complete', objects: [{ name: 'part-1', ref: serve.key }] }];
+    },
     open: async (ref) => {
       seen.opened += 1;
-      return { bytes: serve.bytes, identity: { kind: 'object', bucket: 'synthetic-provider-bucket', key: String(ref), etag: 'synthetic-etag' } };
+      seen.refs.push(String(ref));
+      const bytes = serve.list?.find((d) => d.ref === ref)?.bytes ?? serve.bytes;
+      return { bytes, identity: { kind: 'object', bucket: 'synthetic-provider-bucket', key: String(ref), etag: 'synthetic-etag' } };
     },
   };
   return r;
@@ -216,5 +223,108 @@ describe('managed fetch (worker command)', () => {
     } finally {
       serve.bytes = SAMPLE;
     }
+  });
+
+  // Delta review (rv149b BLOCKER): --from/--to reach the runtime and the retriever as 'YYYY-MM', so the
+  // --from month itself is in range (it was refused DELIVERY_OUT_OF_RANGE when compared with 'YYYY-MM-01').
+  describe('--from/--to through the CLI', () => {
+    const sepRows = (drop: boolean) => {
+      // The sample with one 2024-09 row removed: a changed delivery for an already-published period.
+      if (!drop) return SAMPLE;
+      const lines = SAMPLE.toString('utf8').split('\n');
+      const unq = (v: string) => v.replace(/^"|"$/g, '');
+      const header = lines[0].split(',').map(unq);
+      const i = header.indexOf('BillingPeriodStart');
+      const d = lines.findIndex((l, n) => n > 0 && l.split(',').length === header.length && unq(l.split(',')[i]).startsWith('2024-09-01'));
+      return Buffer.from(lines.filter((_, n) => n !== d).join('\n'), 'utf8');
+    };
+    const list = (bytes: { aug?: Buffer; sep?: Buffer; oct?: Buffer } = {}) => [
+      { id: 'aug', period: '2024-08-01', ref: 'aug', bytes: bytes.aug ?? SAMPLE },
+      { id: 'sep', period: '2024-09-01', ref: 'sep', bytes: bytes.sep ?? SAMPLE },
+      { id: 'oct', period: '2024-10-01', ref: 'oct', bytes: bytes.oct ?? SAMPLE },
+    ];
+    const fetchRange = (tenant: string, extra: string[]) => cli(['fetch', '--tenant', tenant, '--source', 'managed-aws', ...extra], env(engagementFile(tenant)));
+    const outcomes = (r: { record: { results: Record<string, unknown> } }) => ((r.record.results as { deliveries?: Array<{ delivery: string; outcome: string; code?: string }> }).deliveries ?? []).map((d) => `${d.delivery}:${d.outcome}:${d.code ?? ''}`);
+    const reset = () => {
+      seen.refs = [];
+      seen.range = undefined;
+    };
+
+    it('a single-month range (--from X --to X) stages that month and opens nothing else', async () => {
+      const tenant = crypto.randomUUID();
+      const sid = await provision(tenant);
+      serve.list = list();
+      reset();
+      try {
+        const r = await fetchRange(tenant, ['--from', '2024-09', '--to', '2024-09']);
+        expect(outcomes(r)).toEqual(['aug:refused:DELIVERY_OUT_OF_RANGE', 'sep:staged:', 'oct:refused:DELIVERY_OUT_OF_RANGE']);
+        expect(seen.range).toEqual({ from: '2024-09', to: '2024-09' });
+        expect(seen.refs).toEqual(['sep']);
+        expect(Object.keys(await publishedTotals(t.db.pool, tenant, sid))).toEqual(['2024-09-01']);
+        expect(r.code).toBe(1); // the two refused deliveries make the run fail; nothing outside the range was opened
+      } finally {
+        serve.list = undefined;
+      }
+    });
+
+    it('a multi-month range stages both edge months and refuses the month outside', async () => {
+      const tenant = crypto.randomUUID();
+      const sid = await provision(tenant);
+      serve.list = list();
+      reset();
+      try {
+        const r = await fetchRange(tenant, ['--from', '2024-09', '--to', '2024-10']);
+        expect(outcomes(r)).toEqual(['aug:refused:DELIVERY_OUT_OF_RANGE', 'sep:staged:', 'oct:staged:']);
+        expect(seen.refs).toEqual(['sep', 'oct']);
+        expect(Object.keys(await publishedTotals(t.db.pool, tenant, sid)).sort()).toEqual(['2024-09-01', '2024-10-01']);
+        serve.list = list().filter((d) => d.id !== 'aug');
+        reset();
+        const ok = await fetchRange(tenant, ['--from', '2024-09', '--to', '2024-10']);
+        expect(ok.code).toBe(0);
+        expect(outcomes(ok)).toEqual(['sep:staged:', 'oct:staged:']);
+      } finally {
+        serve.list = undefined;
+      }
+    });
+
+    it('an inverted or malformed range is a usage error (exit 2) and the connector never runs', async () => {
+      const tenant = crypto.randomUUID();
+      await provision(tenant);
+      reset();
+      const before = seen.opened;
+      for (const flags of [['--from', '2024-10', '--to', '2024-09'], ['--from', '2024-9', '--to', '2024-10'], ['--from', '2024-13', '--to', '2024-13'], ['--from', '2024-09-01', '--to', '2024-09'], ['--to', '2024-09']]) {
+        const r = await fetchRange(tenant, flags);
+        expect(r.code, flags.join(' ')).toBe(2);
+      }
+      expect(seen.opened).toBe(before);
+      expect(seen.range).toBeUndefined();
+    });
+
+    it('--restate with a range supersedes only the range: nothing outside it is opened or superseded', async () => {
+      const tenant = crypto.randomUUID();
+      const sid = await provision(tenant);
+      serve.list = list().filter((d) => d.id !== 'aug');
+      try {
+        expect((await fetchRange(tenant, [])).code).toBe(0);
+        const before = await publishedTotals(t.db.pool, tenant, sid);
+        // Every month changes upstream; only 2024-09 is restated. A retriever that honors the range
+        // lists only 2024-09, so the run succeeds.
+        serve.list = list({ aug: sepRows(true), sep: sepRows(true), oct: sepRows(true) });
+        serve.honorRange = true;
+        reset();
+        const r = await fetchRange(tenant, ['--from', '2024-09', '--to', '2024-09', '--restate']);
+        expect(r.code).toBe(0);
+        expect(outcomes(r)).toEqual(['sep:staged:']);
+        expect(seen.refs).toEqual(['sep']);
+        const after = await publishedTotals(t.db.pool, tenant, sid);
+        expect(after['2024-09-01'].rows).toBe(before['2024-09-01'].rows - 1);
+        expect(after['2024-10-01']).toEqual(before['2024-10-01']);
+        const superseded = await t.db.pool.query(`SELECT billing_period::text AS p FROM ratio.ingest_batches WHERE source_id = $1 AND status = 'superseded'`, [sid]);
+        expect(superseded.rows.map((x) => String(x.p).slice(0, 7))).toEqual(['2024-09']);
+      } finally {
+        serve.list = undefined;
+        serve.honorRange = false;
+      }
+    });
   });
 });
