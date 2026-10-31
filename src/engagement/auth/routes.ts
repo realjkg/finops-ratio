@@ -32,7 +32,7 @@ export const AUTH_MESSAGES = Object.freeze({
   unavailable: 'Sign-in is temporarily unavailable',
 });
 export interface AuthAuditEvent {
-  event: 'auth'; action: 'login' | 'logout' | 'session'; outcome: 'success' | 'denied'; status: number;
+  event: 'auth'; action: 'login' | 'logout' | 'session' | 'oidc_start' | 'oidc_callback'; outcome: 'success' | 'denied'; status: number;
   principalKind: 'user' | 'none'; principalId: string | null; tenantId: string; engagementId: string;
 }
 const WINDOW_MS = 15 * 60_000;
