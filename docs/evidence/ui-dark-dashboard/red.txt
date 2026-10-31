@@ -1,0 +1,11 @@
+RED on origin/main 8bbff4b517d0340e8f2fedd1934ec12a0a230028: npx vitest run src/executive/darkDashboard.test.tsx
+     × exec-* resolve to deep / slab / raised / edge / txt / sub 9ms
+     × the text and accents the dashboard draws pass AA on every executive surface 3ms
+     × the dashboard follows the document color scheme instead of forcing light 43ms
+     × draws the monthly spend in the normal text color, never the danger color 2ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: expected { 'exec-bg': '#f5f8fb', …(5) } to deeply equal { 'exec-bg': '#090c12', …(5) }
+AssertionError: expected [ 'txt/exec-bg 1.34', …(25) ] to deeply equal []
+AssertionError: expected '<div class="min-h-screen bg-exec-bg p…' not to match /color-scheme:\s*light/
+AssertionError: expected '<p class="font-mono text-3xl font-bol…' to match /class="[^"]*text-exec-text/
+      Tests  4 failed | 2 passed (6)
