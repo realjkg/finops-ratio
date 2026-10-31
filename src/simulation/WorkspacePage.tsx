@@ -8,6 +8,7 @@ import { budgetConsumed } from '@/lib/metricContracts';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
 import { SnapshotButton } from '@/executive/SnapshotButton';
 import { useSimulationAccess } from './SimulationProvider';
+import { SignInRequired } from './SignInRequired';
 
 export function WorkspacePage() {
   const sim = useStore(s => s.simulation);
@@ -19,7 +20,7 @@ export function WorkspacePage() {
   const [chosen, setChosen] = useState('');
   const [amount, setAmount] = useState('');
   const [source, setSource] = useState('all');
-  if (!sim) return <div className="p-8"><h1 className="text-2xl">Customer workflow</h1><p className="mt-3 text-sub">{access?.loading ? 'Restoring your workspace…' : 'Sign in with a simulated customer identity to continue.'}</p><Link href="/simulation" className="mt-5 inline-block text-unit underline">Choose a simulated identity</Link></div>;
+  if (!sim) return <SignInRequired title="Customer workflow" loading={access?.loading} detail="Track recorded cost against assumed business value, fund budgets, decide on proposed changes and share reports, each in a saved workspace per simulated customer." />;
   const { state, session } = sim;
   const identity = session.identity;
   const technical = identity.persona === 'technical';

@@ -40,7 +40,7 @@ export default function Demo() {
               <p className="mt-2 max-w-2xl text-sm leading-6 text-sub">
                 This is a working FinOps environment built from business requirements, not a slideshow.
                 Inspect seeded AI workloads, compare spend to value, test governance and budget controls,
-                and ask Ratio AI questions against the same dataset.
+                and ask Frank Coster, the Ratio assistant, questions about the same dataset.
               </p>
             </div>
 
@@ -92,13 +92,13 @@ export default function Demo() {
               href="/workloads"
               cta="Open Workloads"
             />
-            <div className="rounded-md border border-edge bg-deep p-4">
+            <div className="flex flex-col rounded-md border border-edge bg-deep p-4">
               <p className="font-mono text-[10px] text-dim">03</p>
               <h3 className="mt-3 text-sm font-semibold text-txt">Ask the FinOps question directly</h3>
               <p className="mt-2 text-xs leading-5 text-sub">
-                Open Ratio AI and ask a business question. The offline demo answers from current workload data rather than returning canned prose.
+                Open Frank Coster and ask a business question. The offline demo answers from current workload data rather than returning canned prose.
               </p>
-              <div className="mt-3 space-y-1.5">
+              <div className="mb-4 mt-3 space-y-1.5">
                 {DEMO_PROMPTS.map((prompt) => (
                   <p key={prompt} className="font-mono text-[10px] text-dim">
                     “{prompt}”
@@ -108,9 +108,9 @@ export default function Demo() {
               <button
                 type="button"
                 onClick={toggleAIPanel}
-                className="mt-4 rounded border border-purple/60 bg-purple/15 px-3 py-1.5 font-mono text-[11px] font-bold text-purple transition-colors hover:bg-purple/25"
+                className="mt-auto self-start rounded border border-purple/60 bg-purple/15 px-3 py-1.5 font-mono text-[11px] font-bold text-purple transition-colors hover:bg-purple/25"
               >
-                Ask Ratio AI
+                Ask Frank Coster
               </button>
             </div>
           </div>
@@ -169,13 +169,13 @@ function DemoStep({
   cta: string;
 }) {
   return (
-    <div className="rounded-md border border-edge bg-deep p-4">
+    <div className="flex flex-col rounded-md border border-edge bg-deep p-4">
       <p className="font-mono text-[10px] text-dim">{number}</p>
       <h3 className="mt-3 text-sm font-semibold text-txt">{title}</h3>
-      <p className="mt-2 text-xs leading-5 text-sub">{body}</p>
+      <p className="mb-4 mt-2 text-xs leading-5 text-sub">{body}</p>
       <Link
         href={href}
-        className="mt-4 inline-flex rounded border border-edge bg-raised px-3 py-1.5 font-mono text-[11px] font-bold text-txt transition-colors hover:border-dim"
+        className="mt-auto inline-flex self-start rounded border border-edge bg-raised px-3 py-1.5 font-mono text-[11px] font-bold text-txt transition-colors hover:border-dim"
       >
         {cta}
       </Link>

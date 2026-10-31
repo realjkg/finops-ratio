@@ -56,6 +56,13 @@ const CHANGE_LABEL: Record<ChangeType, string> = {
   budget: 'Raise monthly budget +20%',
 };
 
+const LEDGER_LABEL: Record<ChangeType, string> = {
+  model_switch: 'Model switch',
+  demand_shape: 'Demand shape',
+  scale: 'Scale',
+  budget: 'Budget',
+};
+
 type LoadState =
   | { status: 'idle' }
   | { status: 'loading' }
@@ -121,10 +128,10 @@ export function PredictionPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-10 font-mono text-sm text-txt">
       <header className="mb-8">
-        <h1 className="text-lg text-txt">Ratio — Change-Impact Prediction</h1>
+        <h1 className="font-body text-2xl font-semibold tracking-tight text-txt">Change-impact prediction</h1>
         <p className="mt-1 max-w-prose font-sans text-sub">
           Predict a proposed change&apos;s cost impact, pick the lowest-error source for
-          its change type, and show the result with its value-ratio effect (R4). The
+          its change type, and show the result beside its value-ratio effect. The
           ledger is cold-start by design — no synthetic back-test is seeded — so every
           prediction here is an honest estimate until realized changes accumulate.
         </p>
@@ -139,8 +146,8 @@ export function PredictionPage() {
             value={clientMode}
             onChange={(e) => setClientMode(e.target.value as 'mock' | 'live')}
           >
-            <option value="mock">mock (offline)</option>
-            <option value="live">live (/api)</option>
+            <option value="mock">Mock (offline)</option>
+            <option value="live">Live API</option>
           </select>
         </label>
         <label className="flex min-w-0 max-w-full flex-col gap-1">
@@ -281,7 +288,7 @@ function AccuracyPanel({ report }: { report: AccuracyReport }) {
               p50 === null ? 'var(--dim)' : s.meetsTarget ? 'var(--value)' : 'var(--shape)';
             return (
               <tr key={ct} className="border-t border-edge">
-                <td className="py-1">{ct}</td>
+                <td className="py-1">{LEDGER_LABEL[ct] ?? ct}</td>
                 <td className="py-1">{s.scoredCount}</td>
                 <td className="py-1" style={{ color: p50Color }}>
                   {p50 !== null ? formatSignedPct(p50 * 100, 2) : '—'}

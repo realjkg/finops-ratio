@@ -2,6 +2,7 @@ import { FrankWorkspace } from "@/agent-workflows/FrankWorkspace";
 import Link from "next/link";
 import { useState } from "react";
 import { useStore } from "@/store/useStore";
+import { SignInRequired } from "@/simulation/SignInRequired";
 export default function AgentWorkflows() {
   const sim = useStore((s) => s.simulation);
   const run = useStore((s) => s.simulationCommand);
@@ -11,12 +12,10 @@ export default function AgentWorkflows() {
   const [rationale, setRationale] = useState("");
   if (!sim)
     return (
-      <div className="p-8">
-        <h1 className="text-2xl">Agent workflows</h1>
-        <Link href="/simulation" className="mt-4 block text-unit underline">
-          Choose a simulated identity
-        </Link>
-      </div>
+      <SignInRequired
+        title="Agent workflows"
+        detail="Queue an evidence review for an initiative, let the simulated agent process it, and accept or dismiss its proposed next steps."
+      />
     );
   const { state, session } = sim;
   const tech = session.identity.persona === "technical";

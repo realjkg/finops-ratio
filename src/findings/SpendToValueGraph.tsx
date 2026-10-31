@@ -91,7 +91,9 @@ export function SpendToValueGraph({
 
   return (
     <figure
-      className="w-full"
+      // Large charts stop growing at max-w-2xl so axis text stays near body size on wide
+      // screens; on phones the labels are set larger in viewBox units to stay legible.
+      className={isLarge ? 'mx-auto w-full max-w-2xl' : 'w-full'}
       aria-label="Spend-to-value portfolio scatter — workloads by monthly spend vs. value ratio"
     >
       <div className="relative">
@@ -99,6 +101,7 @@ export function SpendToValueGraph({
           viewBox={`0 0 ${VW} ${VH}`}
           width="100%"
           role="group"
+          className={isLarge ? 'max-sm:[&_text]:text-[11px]' : undefined}
           style={{ display: 'block', overflow: 'visible' }}
         >
         {/* ── Reference lines ─────────────────────────────────────────── */}

@@ -11,6 +11,16 @@ import { TOKEN_COLOR } from '@/lib/scales';
 import { deriveCacheEconomics } from '@/lib/derive';
 import { BudgetBar } from './BudgetBar';
 
+// Configured breach actions, in words (the stored values are config ids).
+const BREACH_ACTION: Record<BudgetProfile['on_hard_breach'] | BudgetProfile['on_kill_breach'], string> = {
+  alert_escalate: 'Alert and escalate',
+  throttle_50pct: 'Throttle 50%',
+  throttle_75pct: 'Throttle 75%',
+  throttle_90pct: 'Throttle 90%',
+  pause_workload: 'Pause workload',
+  alert_only: 'Alert only',
+};
+
 const STATUS_COPY: Record<string, { label: string; color: string }> = {
   healthy: { label: 'Healthy', color: 'var(--value)' },
   soft: { label: 'Soft breach', color: 'var(--shape)' },
@@ -148,8 +158,8 @@ export function BudgetProfileTab({
       <Section title="Thresholds">
         <div className="space-y-1.5 font-mono text-xs">
           <ThresholdRow pct={budget.soft_threshold_pct} label="Soft alert" action="Slack + email" color="var(--value)" />
-          <ThresholdRow pct={budget.hard_threshold_pct} label="Hard alert" action={`Escalate · ${budget.on_hard_breach}`} color="var(--shape)" />
-          <ThresholdRow pct={budget.kill_threshold_pct} label="Kill switch" action={budget.on_kill_breach} color="var(--cost)" />
+          <ThresholdRow pct={budget.hard_threshold_pct} label="Hard alert" action={`Escalate · ${BREACH_ACTION[budget.on_hard_breach]}`} color="var(--shape)" />
+          <ThresholdRow pct={budget.kill_threshold_pct} label="Kill switch" action={BREACH_ACTION[budget.on_kill_breach]} color="var(--cost)" />
         </div>
         <p className="mt-2 text-[11px] text-dim">Edit these in the Demand Shaping tab's threshold controls.</p>
       </Section>
