@@ -1,0 +1,4 @@
+R2 slice E RED evidence (tests committed before the implementation)
+$ npx vitest run --cache=false src/engagement/auth/usersCli.test.ts
+  -> FAIL: Cannot find module './usersCli' (no operator users command exists; `cli.js users` is a usage error).
+GREEN counts, the compiled dist-worker run and mutation results are in the PR body.
