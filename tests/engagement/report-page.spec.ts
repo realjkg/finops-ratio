@@ -15,7 +15,8 @@ test('anonymous: 401, no-store, Vary: Cookie, CSP enforced with no violation, on
   const csp: string[] = [];
   page.on('console', (m) => { if (/content security policy|refused to/i.test(m.text())) csp.push(m.text()); });
   const res = await page.goto('/engagement');
-  expect([res?.status(), res?.headers()['cache-control'], res?.headers().vary]).toEqual([401, 'no-store', 'Cookie']);
+  expect([res?.status(), res?.headers()['cache-control']]).toEqual([401, 'no-store']);
+  expect(res?.headers().vary).toMatch(/(^|, )Cookie(,|$)/); // Next adds Accept-Encoding
   expect(res?.headers()['content-security-policy']).toContain("script-src 'self' 'sha256-");
   await page.waitForLoadState('networkidle');
   expect(csp).toEqual([]);
@@ -28,6 +29,7 @@ test('analyst: report table and both exports; the real route is reached with the
   await page.goto('/engagement');
   await expect(page.getByRole('status')).toHaveText(/unavailable/); // 500 from the real route: authorized, no database here
   await page.route('**/api/v1/reports/engagement?*format=json', (r) => r.fulfill({ json: MODEL }));
+  await page.getByLabel('Billing month').fill('2024-09');
   await page.getByRole('button', { name: 'Load report' }).click();
   await expect(page.getByText('12345.67000000000')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Download XLSX' })).toHaveAttribute('href', '/api/v1/reports/engagement?period=2024-09&format=xlsx');
