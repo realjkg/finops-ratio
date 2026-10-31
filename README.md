@@ -347,8 +347,8 @@ into the repo — see the `doc-authoring` skill for this workflow.
 ## Engagement mode
 
 Ratio 1.0 is being packaged as a single-customer engagement tool: one instance serves exactly one engagement. After R3
-an operator will import authorized billing **files**; after R2 reviewers will sign in as named users and read cost,
-coverage and reconciliation. Each statement below is labeled with what works today and which row the rest needs.
+an operator will import authorized billing **files**; today (R2) reviewers sign in as named users and read the
+engagement report, whose cost, coverage and reconciliation content grows with the later rows. Each statement below is labeled with what works today and which row the rest needs.
 
 - Works today: the image, the compose stack, Postgres and the object store, database migrations, the existing worker
   commands, and the engagement config check (row R1, described under *Engagement config*).
@@ -399,25 +399,31 @@ $C --profile jobs run --rm migrator               # works today once the roles e
 # Evidence bucket `ratio-engagement-evidence` (R11 init will create it). Until then create it with any S3 client on the
 # internal network; the S3 SDK in the image can do it. This one-liner was not run in the release pipeline.
 $C --profile jobs run --rm --entrypoint node worker -e "const s=require('@aws-sdk/client-s3');new s.S3Client({endpoint:'http://s3:8333',region:'us-east-1',forcePathStyle:true,credentials:{accessKeyId:process.env.RATIO_EVIDENCE_S3_ACCESS_KEY_ID,secretAccessKey:process.env.RATIO_EVIDENCE_S3_SECRET_ACCESS_KEY}}).send(new s.CreateBucketCommand({Bucket:'ratio-engagement-evidence'}))"
-$C up -d --build app                              # http://127.0.0.1:3100; the config check works today, sign-in needs R2
+$C up -d --build app                              # http://127.0.0.1:3100 behind your TLS proxy; config check and sign-in work today
 $C --profile jobs run --rm worker doctor          # works today; any worker command runs the same way
 ```
 
 ### Configure
 
-`RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config, read by the app today) and `RATIO_ENGAGEMENT_USERS_FILE` (named
-users, after R2) are mounted read-only at `/config/`. The container reads them at start, so after editing run
-`$C restart app`. Editors that replace the file (a new inode) break a single-file bind mount: keep editing in place,
-or mount a directory instead, and restart the container. Today the app validates the users directory at start, and
-the session API (`/api/auth/login`, `/api/auth/logout`, `/api/auth/session`, local credentials only) reads it again on
-each request; under a single-file mount a file saved as a new inode stays invisible until `$C restart app`, so a
-suspension or role change can lag until that restart. Edit `/config/users.json` in place or mount `/config` as a
-directory; the R2 operator command (slice E) will write in place. Today a suspended user's session is refused on the
-next request but stays in the store until it expires; the slice-E command will also delete it. The session API needs
-`RATIO_ENGAGEMENT_ORIGIN` (the https origin of your TLS proxy), `RATIO_ENGAGEMENT_STATE` (a file under `/state`) and
-`RATIO_TRUSTED_PROXY_HOPS` (0 to 5: how many proxies append to `X-Forwarded-For`, 1 behind a single TLS proxy, so
-failed sign-ins are counted per client and not for everyone at once); the compose file does not set them today (R12 is
-pending), and without them the session API answers 503. No sign-in page or report page exists yet (after R2).
+`RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config, read by the app today) is mounted read-only at
+`/config/engagement.json`; the container reads it at start, so after editing run `$C restart app`.
+`RATIO_ENGAGEMENT_USERS_DIR` names a host directory that holds only `users.json` (the users directory, today). Create it
+owned by uid 1000 (the image's user) with mode 0700, e.g. `mkdir -m 0700 /srv/ratio/users && sudo chown 1000:1000
+/srv/ratio/users`. Today it is mounted as a directory at `/config/users`: read-only for the app, writable only for the
+`users` job, which replaces `users.json` crash-atomically (temp file, fsync, rename, fsync of the directory) and keeps
+its lock `.users.lock` there. The app validates the directory at start and the session API reads it again on each
+request, so a role change, suspension or binding change applies to the next request without a restart. Today `users
+suspend` also deletes the user's sessions; a session of a user suspended by hand is refused on the next request and
+stays stored until it expires. A lock left by a crashed job is reported as stale after 10 minutes: check that no
+`users` job runs, then delete `.users.lock` in that directory.
+
+The compose file sets, today, `RATIO_ENGAGEMENT_STATE` (`/state/sessions.sqlite`, on the `state` volume: keep that
+volume dedicated to this instance), requires `RATIO_ENGAGEMENT_ORIGIN` (exactly `https://host[:port]`, the origin users
+open through your TLS proxy, with no path and no trailing slash; any other form makes the sign-in routes answer 503)
+and takes `RATIO_TRUSTED_PROXY_HOPS` (default 1: one TLS proxy appends to `X-Forwarded-For`, so failed sign-ins are
+counted per client) and `RATIO_OIDC_CLIENT_SECRET_PRIMARY` from `.env.engagement`; add one line per further identity
+connection under the NAME its `clientSecretRef` gives. Compose interpolates the whole file for every command, so even
+the `users` job needs every required variable of `.env.engagement` set (database and S3 passwords included).
 
 The worker runs with `RATIO_ENV=staging` (the app and migrator with `production`): the worker's S3 settings refuse
 `http` endpoints under `production`, and the bundled object store is `http` on the internal network. `staging`
@@ -425,8 +431,41 @@ enables no simulation, synthetic provider or test hook.
 
 ### Use
 
-View: after R2, open the app on the loopback port and sign in. The existing worker commands (`sync`, `replay`,
-`quarantine show`, `doctor`) run through `$C --profile jobs run --rm worker <command>`.
+View: today open `<RATIO_ENGAGEMENT_ORIGIN>/engagement` through your TLS proxy and use the "Sign in with <connection>"
+link. The existing worker commands (`sync`, `replay`, `quarantine show`, `doctor`) run through
+`$C --profile jobs run --rm worker <command>`.
+
+Users (works today): `$C --profile jobs run --rm -T users list`, then `add --id <id> --name <name> --role
+<viewer|analyst|connector_manager|tenant_admin> --by <admin id or operator>`, `set-role`, `set-password`, `suspend`,
+`unsuspend`, `revoke-sessions`, `bind --id <id> --connection <connection id> --subject <IdP subject>` and `unbind`.
+`--by` is an audit label, not authentication: it must be `operator` or an active tenant_admin, nobody may act on
+themselves, and the last active tenant_admin can be demoted or suspended only with `--by operator --force`. Whoever can
+run this job controls the users directory. Passwords (for `add --password-stdin` and `set-password --password-stdin`)
+are read from the first line of stdin: pipe them, never type them at a terminal, and keep `-T` so compose passes the
+pipe (e.g. `printf '%s\n' "$PW" | $C --profile jobs run --rm -T users set-password --id alice --password-stdin --by
+operator`). There is no password page today: local credentials work only through the `POST /api/auth/login` API (JSON,
+same-origin `Origin` header), meant for recovery and automation; today people use the browser through an OIDC
+connection, so configure one and bind each person.
+
+Every changing command takes `--by` (works today; `U="$C --profile jobs run --rm -T users"`):
+
+```sh
+$U list
+$U add --id <id> --name <name> --role <viewer|analyst|connector_manager|tenant_admin> --by <admin id|operator> [--password-stdin]
+$U set-role --id <id> --role <role> --by <admin id|operator> [--force]
+printf '%s\n' "$PW" | $U set-password --id <id> --password-stdin --by <admin id|operator>
+$U suspend --id <id> --by <admin id|operator> [--force]
+$U unsuspend --id <id> --by <admin id|operator>
+$U revoke-sessions --id <id> --by <admin id|operator>
+$U bind --id <id> --connection <connection id> --subject <IdP subject> --by <admin id|operator>
+$U unbind --connection <connection id> --subject <IdP subject> --by <admin id|operator>
+```
+
+If the users directory is owned by root or another uid than 1000, or its mode lets the job not write it, the app's
+sign-in routes answer 503 and the `users` job fails with `users.lock_failed` or `users.read_failed` (`EACCES`): fix it
+with `chown 1000:1000 <dir>` and `chmod 0700 <dir>`. In this release pipeline the `users` job has not been run end to end
+through `compose run` (Docker was not run); the compiled CLI is exercised today by a compile-and-run smoke test under a
+read-only parent directory.
 
 Today the OIDC routes (`/api/auth/oidc/start?connection=<id>` and `/api/auth/oidc/callback`) work for an enabled
 `identityConnections` entry: register `<RATIO_ENGAGEMENT_ORIGIN>/api/auth/oidc/callback` exactly at the IdP, put the client
@@ -458,7 +497,6 @@ To be filled in by those rows; the commands do not exist yet.
 
 - Import a billing file (operator CLI; R3 is pending).
 - Init, backup, restore and reset (operator lifecycle command; R11 is pending), including database role and bucket creation.
-- Named users file format and sign-in (row R2 is pending).
 
 ## Saved customer workflow simulation
 

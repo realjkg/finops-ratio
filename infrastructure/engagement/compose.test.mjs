@@ -12,7 +12,7 @@ const root = path.resolve(here, '../..');
 const read = (...p) => fs.readFileSync(path.join(root, ...p), 'utf8');
 const compose = yaml.load(read('infrastructure/engagement/compose.yaml'));
 const services = compose.services;
-const APP_SERVICES = ['app', 'worker', 'migrator'];
+const APP_SERVICES = ['app', 'worker', 'migrator', 'users'];
 const DIGEST = /@sha256:[0-9a-f]{64}$/;
 
 const stage = (dockerfile, name) => {
@@ -21,8 +21,34 @@ const stage = (dockerfile, name) => {
 };
 
 describe('engagement compose', () => {
+  it('R2 sign-in settings: the app gets an https origin, a session file under /state, the proxy hop count and the OIDC secret by NAME', () => {
+    const env = services.app.environment;
+    expect(env.RATIO_ENGAGEMENT_ORIGIN).toMatch(/^\$\{RATIO_ENGAGEMENT_ORIGIN:\?/); // required, no default
+    expect(env.RATIO_ENGAGEMENT_STATE).toBe('/state/sessions.sqlite');
+    expect(env.RATIO_TRUSTED_PROXY_HOPS).toBe('${RATIO_TRUSTED_PROXY_HOPS:-1}');
+    expect(env.RATIO_OIDC_CLIENT_SECRET_PRIMARY).toBe('${RATIO_OIDC_CLIENT_SECRET_PRIMARY}');
+    expect(Object.keys(services.worker.environment).filter((k) => k.startsWith('RATIO_OIDC'))).toEqual([]);
+    const example = read('.env.engagement.example');
+    for (const k of ['RATIO_ENGAGEMENT_ORIGIN', 'RATIO_TRUSTED_PROXY_HOPS', 'RATIO_OIDC_CLIENT_SECRET_PRIMARY']) expect(example).toMatch(new RegExp(`^${k}=`, 'm'));
+    expect(example).not.toMatch(/^RATIO_OIDC_CLIENT_SECRET_PRIMARY=\S/m); // names only
+  });
+
+  it('users.json lives in its own DIRECTORY mount: writable only in the users job (crash-atomic rename and lock there), read-only elsewhere', () => {
+    const u = services.users;
+    const DIR_MOUNT = '${RATIO_ENGAGEMENT_USERS_DIR:?host directory holding users.json (owned by uid 1000, mode 0700)}:/config/users';
+    expect([u.profiles, u.entrypoint, u.environment.RATIO_ENGAGEMENT_USERS, u.environment.RATIO_ENGAGEMENT_STATE])
+      .toEqual([['jobs'], ['node', 'dist-worker/ingest/cli.js', 'users'], '/config/users/users.json', '/state/sessions.sqlite']);
+    expect(u.volumes.filter((v) => v.includes(':/config/users'))).toEqual([DIR_MOUNT]);
+    expect(u.network_mode).toBe('none');
+    expect(services.app.environment.RATIO_ENGAGEMENT_USERS).toBe('/config/users/users.json');
+    for (const name of ['app', 'worker', 'migrator']) expect(services[name].volumes.filter((v) => v.includes(':/config/users')), name).toEqual([`${DIR_MOUNT}:ro`]);
+    const text = read('infrastructure/engagement/compose.yaml') + read('.env.engagement.example');
+    expect(text).not.toMatch(/RATIO_ENGAGEMENT_USERS_FILE|:\/config\/users\.json/); // no single-file mount left
+    expect(read('.env.engagement.example')).toMatch(/^RATIO_ENGAGEMENT_USERS_DIR=$/m);
+  });
+
   it('declares postgres, s3 and the three image-based services', () => {
-    expect(Object.keys(services).sort()).toEqual(['app', 'migrator', 'postgres', 's3', 'worker']);
+    expect(Object.keys(services).sort()).toEqual(['app', 'migrator', 'postgres', 's3', 'users', 'worker']);
   });
 
   it('pins every third-party image by digest, equal to the digests the local stack and CI use', () => {
@@ -82,7 +108,8 @@ describe('engagement compose', () => {
       expect(s.environment.RATIO_MODE, name).toBe('engagement');
       expect(s.environment.RATIO_ENGAGEMENT_CONFIG, name).toBe('/config/engagement.json');
       expect(s.volumes.filter((v) => v.includes(':/config/')), name).toHaveLength(2);
-      for (const v of s.volumes.filter((v) => v.includes(':/config/'))) expect(v, v).toMatch(/:ro$/);
+      // The one exception: the users job's users DIRECTORY (operator users command), asserted separately above.
+      for (const v of s.volumes.filter((v) => v.includes(':/config/') && !(name === 'users' && v.endsWith(':/config/users')))) expect(v, v).toMatch(/:ro$/);
     }
   });
 
