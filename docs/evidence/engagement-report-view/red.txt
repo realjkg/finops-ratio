@@ -2,3 +2,9 @@ Engagement report view + UI/XLSX/PDF agreement (1.0, report-facts PR 3b): RED be
 (stacked on PR 3a, feat/engagement-report-pdf 9455ef8).
 Command: npx vitest run src/reports/engagementReportAgreement.test.tsx
 Result: the file cannot load: Failed to resolve import "./EngagementReportView".
+
+After #159 merged (main fc83459), the merge of main into this branch (all #159-owned files taken from main; this
+PR's own delta byte-identical to the reviewed 993a3ce..1862cd1 diff), RED for the cap-aware expectation:
+Command: npx vitest run src/reports/engagementReportAgreement.test.tsx
+Result: Tests 1 failed | 5 passed (6): "hostile text": the PDF now caps the 40,000-character Charge category (a DATA
+cell) at 2,000 characters with a marker and adds a page-1 truncation note; the old expectation was uncapped.

@@ -1,0 +1,8 @@
+Unified FinOps view, slice S1 (pure semantic core): RED before the implementation (base cf7c5d3).
+Command: npx vitest run src/finops
+Result: Test Files 4 failed (4); Tests 1 failed | 2 passed (3), plus 3 files that cannot load:
+- decimal.test.ts, query.test.ts, reconcile.test.ts: modules ./decimal, ./query, ./reconcile missing
+- boundary.test.ts: the four production modules (decimal, views, query, reconcile) do not exist
+  (its two hygiene cases pass vacuously until the modules exist; they bite once they do)
+Fixture: src/finops/semantic/fixtures/syntheticAllocation.ts (SYNTHETIC BU-A/B/C split of the public
+FOCUS 1.0 sample's AWS 2024-09 facts: billed 18.00663861840, effective 13.00000000000, 942 rows).

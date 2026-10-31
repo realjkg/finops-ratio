@@ -22,7 +22,7 @@ import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
 import ExcelJS from 'exceljs';
 import { createReportFactsRoute } from './reportFactsRoute';
 import { createEngagementReportRoute } from './engagementReportRoute';
-import type { EngagementReportModel } from '../../reports/engagementReportModel';
+import { buildEngagementReportModel, type EngagementReportModel } from '../../reports/engagementReportModel';
 import { pdfShownStrings } from '../../reports/fixtures/pdfText';
 import { closeReaderPools } from './readerPool';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
@@ -214,6 +214,12 @@ describe('engagement report XLSX (GET /api/v1/reports/engagement) over the impor
     };
     const json = await get('json');
     const model = json.body as EngagementReportModel;
+    // Exactly the model, nothing else (no tenant id or other server fields): rebuilt from the facts route.
+    expect(Object.keys(model).sort()).toEqual(['generatedAt', 'period', 'schema', 'sections', 'title']);
+    const factsRoute = createReportFactsRoute({ env: { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_READER_DATABASE_URL: reader.url, ...engagementEnv }, logger: () => undefined, now: () => NOW });
+    const facts = (await call(factsRoute, makeReq({ headers: bearer(), query: { period: '2024-09' } }))).body as ReportFacts;
+    const cfg = JSON.parse(fs.readFileSync(ENGAGEMENT_CONFIG, 'utf8'));
+    expect(model).toEqual(buildEngagementReportModel(facts, { id: cfg.engagementId, displayName: cfg.displayName }));
     const { rows } = await workbook(engagementEnv, '2024-09');
     expect(rows('Totals by currency')).toEqual([model.sections[1].columns, ...model.sections[1].rows].map((r) => (r.at(-1) === '' ? r.slice(0, -1) : r)));
     const pdf = await get('pdf');

@@ -571,16 +571,21 @@ describe('mode and startup', () => {
     expect(all).not.toContain(p);
   });
 
-  it('register() with a valid engagement config resolves', async () => {
+  it('register() with a valid engagement config (and, since R2, a valid users file) resolves', async () => {
+    const users = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'r1-users-')), 'users.json');
+    fs.writeFileSync(users, JSON.stringify({ version: 1, users: [{ id: 'viewer', displayName: 'SYNTHETIC viewer', status: 'active' }],
+      memberships: [{ userId: 'viewer', tenantId: raw().tenantId, engagementId: raw().engagementId, role: 'viewer', status: 'active' }] }));
     vi.stubEnv('NEXT_RUNTIME', 'nodejs');
     vi.stubEnv('RATIO_MODE', 'engagement');
     vi.stubEnv('RATIO_ENGAGEMENT_CONFIG', FIXTURE);
+    vi.stubEnv('RATIO_ENGAGEMENT_USERS', users);
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       await expect(register()).resolves.toBeUndefined();
     } finally {
       vi.unstubAllEnvs();
+      fs.rmSync(path.dirname(users), { recursive: true, force: true });
     }
     expect(exit).not.toHaveBeenCalled();
   });
