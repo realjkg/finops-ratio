@@ -100,7 +100,7 @@ export default function Demo() {
               </p>
               <div className="mb-4 mt-3 space-y-1.5">
                 {DEMO_PROMPTS.map((prompt) => (
-                  <p key={prompt} className="font-mono text-[10px] text-dim">
+                  <p key={prompt} className="text-xs text-dim">
                     “{prompt}”
                   </p>
                 ))}
