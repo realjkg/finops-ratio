@@ -9,10 +9,11 @@ import { afterAll, expect, it } from 'vitest';
 
 const REPO = path.resolve(__dirname, '../../..');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'r2-users-smoke-'));
-afterAll(() => { fs.chmodSync(root, 0o755); fs.rmSync(root, { recursive: true, force: true }); });
+// Compiled inside the repo so `pg` and the other runtime packages resolve from node_modules, as in the image.
+const out = path.join(REPO, 'node_modules', '.cache', `r2-users-smoke-${process.pid}`);
+afterAll(() => { fs.chmodSync(root, 0o755); fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(out, { recursive: true, force: true }); });
 
 it('the compiled `cli.js users` writes users.json atomically in its directory and revokes sessions under a read-only parent', () => {
-  const out = path.join(root, 'dist');
   const tsc = spawnSync(process.execPath, [path.join(REPO, 'node_modules/typescript/bin/tsc'), '-p', path.join(REPO, 'tsconfig.worker.json'), '--outDir', out], { encoding: 'utf8' });
   expect(tsc.status, tsc.stdout + tsc.stderr).toBe(0);
   const [users, state] = [path.join(root, 'config', 'users'), path.join(root, 'state')];

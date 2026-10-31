@@ -1,19 +1,17 @@
 // R2 slice E: the operator users command, compiled into dist-worker and run as
-// `node dist-worker/ingest/cli.js users <command> [--flag value ...]`.
-//   list                                               ids, names, status, role; never a hash
-//   add --id --name --role --by [--password-stdin]      user + active membership (+ local credential from stdin)
-//   set-role --id --role --by | suspend --id --by | unsuspend --id --by | revoke-sessions --id --by
-//   bind --id --connection --subject --by | unbind --connection --subject --by
-// Rules: nobody changes their own role, status or bindings (--by must differ
-// from --id); a password is read only from stdin, never argv; the result must
-// pass validateDirectory or nothing is written; one writer at a time (a .lock
-// file) and the file must be unchanged since it was read; the file is rewritten
-// IN PLACE (same inode: a single-file bind mount sees it). A concurrent reader
-// sees the old file, the new file, or a strict prefix of it (invalid JSON:
-// the app then fails closed for that request). suspend and revoke-sessions
-// delete the user's sessions in RATIO_ENGAGEMENT_STATE. One audit line per
-// command on stdout: action, target, actor, outcome; no secrets. SERVER-ONLY.
-import { createHash } from 'node:crypto';
+// `node dist-worker/ingest/cli.js users <command> [--flag value ...]` (compose: the `users` job, as the app's uid 1000).
+// Commands: list | add | set-role | set-password | suspend | unsuspend | revoke-sessions | bind | unbind.
+// --by is NOT authentication: it is an audit label the operator types. It must be the literal `operator` or the exact
+// id of an ACTIVE tenant_admin, and nobody acts on themselves (add, role, password, status, bindings). Whoever can run
+// this job controls the directory; protect the host accordingly.
+// Passwords: --password-stdin only; pipe the password, never type it at a terminal (echo). First line only.
+// Writes are crash-atomic: users.json lives in its own directory (mounted as a directory); the new content goes to a
+// temp file there, fsync, rename over users.json, fsync the directory. One writer at a time: the lock file
+// `.users.lock` in the same directory (pid + time; older than 10 minutes is reported as stale, to be removed by hand).
+// Nothing is written unless the result passes validateDirectory and fits 512 KiB, or if the file changed since it was
+// read. Session revocation (suspend, revoke-sessions, unbind) opens the store before writing; a revocation that fails
+// after the write is audited as `partial`. One audit line per command: stdout on success or partial, stderr on refusal.
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadEngagementConfig } from '../config';
@@ -24,111 +22,191 @@ import { EngagementSessionStore } from './session';
 
 type Env = Record<string, string | undefined>;
 type IO = { out(l: string): void; err(l: string): void };
-type Doc = { users: Array<Record<string, unknown>>; memberships?: Array<Record<string, unknown>>; localCredentials?: Array<Record<string, unknown>>;
-  bindings?: Array<Record<string, unknown>>; identityConnections?: Array<Record<string, unknown>> } & Record<string, unknown>;
-class Refused extends Error {}
+type Rec = Record<string, unknown>;
+type Doc = { users: Rec[]; memberships?: Rec[]; localCredentials?: Rec[]; bindings?: Rec[]; identityConnections?: Rec[] } & Rec;
+export interface UsersDeps { readStdin?: () => string; beforeWrite?: () => void; writeSync?: typeof fs.writeSync; revoke?: (store: EngagementSessionStore, userId: string) => number }
+class Refused extends Error {
+  constructor(code: string, readonly extra: Rec = {}) { super(code); }
+}
 
-const FLAGS = new Set(['id', 'name', 'role', 'by', 'connection', 'subject', 'password-stdin']);
+export const USAGE = 'users list | add --id --name --role --by [--password-stdin] | set-role --id --role --by [--force] | set-password --id --by --password-stdin '
+  + '| suspend --id --by [--force] | unsuspend --id --by | revoke-sessions --id --by | bind --id --connection --subject --by | unbind --connection --subject --by. '
+  + '--by is an audit label (`operator` or an active tenant_admin), not authentication. Pipe passwords on stdin; never type them.';
+const FLAGS = new Set(['id', 'name', 'role', 'by', 'connection', 'subject', 'password-stdin', 'force']);
+const BOOL = new Set(['password-stdin', 'force']);
+const LOCK = '.users.lock';
+const STALE_MS = 10 * 60_000;
+const MAX_BYTES = 512 * 1024;
+
 function parse(args: string[]): Map<string, string> | null {
   const m = new Map<string, string>();
   for (let i = 0; i < args.length; i += 1) {
     const k = args[i].startsWith('--') ? args[i].slice(2) : '';
     if (!FLAGS.has(k)) return null; // unknown flags (including --password) are refused
-    if (k === 'password-stdin') m.set(k, '1');
+    if (BOOL.has(k)) m.set(k, '1');
     else if (i + 1 < args.length) m.set(k, args[(i += 1)]);
     else return null;
   }
   return m;
 }
 const same = (a: unknown, b: unknown) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
+const parseDoc = (b: Buffer) => JSON.parse(b.subarray(b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf ? 3 : 0).toString('utf8')) as Doc;
+const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
-export async function usersMain(argv: string[], env: Env, io: IO, readStdin = () => fs.readFileSync(0, 'utf8'), beforeWrite = () => {}): Promise<number> {
+function lock(dir: string): () => void {
+  const file = path.join(dir, LOCK);
+  let fd: number;
+  try {
+    fd = fs.openSync(file, 'wx', 0o600);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw new Refused('users.lock_failed', { cause: (e as NodeJS.ErrnoException).code ?? 'unknown' });
+    let age = 0;
+    try { age = Date.now() - fs.statSync(file).mtimeMs; } catch { /* removed meanwhile */ }
+    throw new Refused(age > STALE_MS ? 'users.lock_stale' : 'users.locked', age > STALE_MS ? { recovery: `no users command running? then delete ${LOCK} in the users directory` } : {});
+  }
+  fs.writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+  fs.closeSync(fd);
+  return () => fs.rmSync(file, { force: true });
+}
+
+/** Temp file in the same directory, written to completion, fsync, rename over the target, fsync the directory. */
+function writeAtomic(file: string, data: Buffer, deps: UsersDeps): void {
+  const dir = path.dirname(file);
+  const st = fs.statSync(file);
+  const tmp = path.join(dir, `.users.json.${process.pid}.${randomBytes(4).toString('hex')}.tmp`);
+  const fd = fs.openSync(tmp, 'wx', st.mode & 0o777);
+  try {
+    try {
+      for (let off = 0; off < data.length;) off += (deps.writeSync ?? fs.writeSync)(fd, data, off, data.length - off, off);
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    if (process.getuid?.() === 0) fs.chownSync(tmp, st.uid, st.gid); // keep the owner when run as root
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
+  const d = fs.openSync(dir, 'r');
+  try { fs.fsyncSync(d); } finally { fs.closeSync(d); }
+}
+
+export async function usersMain(argv: string[], env: Env, io: IO, deps: UsersDeps = {}): Promise<number> {
   const [cmd, ...rest] = argv;
   const f = parse(rest);
-  const fail = (code: string, extra: Record<string, unknown> = {}, exit = 1) => { io.err(JSON.stringify({ event: 'users_admin', outcome: 'refused', code, ...extra })); return exit; };
-  if (!f || !cmd) return fail('users.usage', { message: 'users list | add | set-role | suspend | unsuspend | revoke-sessions | bind | unbind (see src/engagement/auth/usersCli.ts)' }, 2);
+  const base: Rec = { event: 'users_admin', action: cmd ?? null };
+  const refuse = (code: string, extra: Rec = {}, exit = 1) => { io.err(JSON.stringify({ ...base, outcome: 'refused', code, ...extra })); return exit; };
+  if (!f || !cmd) return refuse('users.usage', { message: USAGE }, 2);
   const cfg = loadEngagementConfig(env.RATIO_ENGAGEMENT_CONFIG ?? '');
   const file = env.RATIO_ENGAGEMENT_USERS ?? '';
-  if (!cfg.ok) return fail('users.config_invalid', { problems: cfg.problems }, 2);
-  if (!path.isAbsolute(file)) return fail('users.file_invalid', { problems: ['RATIO_ENGAGEMENT_USERS: must be an absolute path'] }, 2);
+  if (!cfg.ok) return refuse('users.config_invalid', { problems: cfg.problems }, 2);
+  if (!path.isAbsolute(file)) return refuse('users.file_invalid', { problems: ['RATIO_ENGAGEMENT_USERS: must be an absolute path'] }, 2);
   const instance = { tenantId: cfg.config.tenantId, engagementId: cfg.config.engagementId };
-  const read = () => fs.readFileSync(file);
-  const parseDoc = (b: Buffer) => JSON.parse(b.subarray(b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf ? 3 : 0).toString('utf8')) as Doc;
   if (cmd === 'list') {
-    const d = parseDoc(read());
-    const role = (id: unknown) => d.memberships?.find((m) => same(m.userId, id))?.role ?? null;
-    io.out(JSON.stringify({ users: d.users.map((u) => ({ id: u.id, displayName: u.displayName, status: u.status, role: role(u.id),
-      localCredential: !!d.localCredentials?.some((c) => same(c.userId, u.id)), bindings: d.bindings?.filter((b) => same(b.userId, u.id)).length ?? 0 })) }));
-    return 0;
+    try {
+      const d = parseDoc(fs.readFileSync(file));
+      const role = (id: unknown) => d.memberships?.find((m) => same(m.userId, id))?.role ?? null;
+      io.out(JSON.stringify({ users: d.users.map((u) => ({ id: u.id, displayName: u.displayName, status: u.status, role: role(u.id),
+        localCredential: !!d.localCredentials?.some((c) => same(c.userId, u.id)), bindings: d.bindings?.filter((b) => same(b.userId, u.id)).length ?? 0 })) }));
+      return 0;
+    } catch { return refuse('users.read_failed'); }
   }
-  const id = f.get('id');
-  const by = f.get('by');
-  if (!by || (cmd !== 'unbind' && !id)) return fail('users.usage', { message: '--by (and --id) are required' }, 2);
-  if (id && same(id, by) && cmd !== 'add') return fail('users.self_change_refused');
-  const lock = `${file}.lock`;
-  let fd: number;
-  try { fd = fs.openSync(lock, 'wx', 0o600); } catch { return fail('users.locked'); }
+  let unlock: (() => void) | undefined;
+  let store: EngagementSessionStore | undefined;
   try {
-    const original = read();
+    unlock = lock(path.dirname(file));
+    const original = fs.readFileSync(file);
     const doc = parseDoc(original);
+    const by = f.get('by') ?? '';
+    const userOf = (id: unknown) => doc.users.find((u) => same(u.id, id));
+    const memberOf = (id: unknown) => doc.memberships?.find((m) => same(m.userId, id));
+    const activeAdmin = (u: Rec | undefined) => !!u && u.status === 'active' && memberOf(u.id)?.status === 'active' && memberOf(u.id)?.role === 'tenant_admin';
+    // The actor label: `operator`, or the exact (canonical, untrimmed) id of an active tenant_admin.
+    const actor = by === 'operator' ? 'operator' : activeAdmin(userOf(by)) && by === by.trim() ? (userOf(by)!.id as string) : null;
+    base.actor = actor ?? null;
+    if (!actor) throw new Refused('users.actor_invalid');
+    let target = f.get('id');
+    const binding = cmd === 'unbind' ? doc.bindings?.find((b) => b.connectionId === f.get('connection') && b.subject === f.get('subject')) : undefined;
+    if (cmd === 'unbind') {
+      if (!binding) throw new Refused('users.unknown_binding');
+      target = binding.userId as string;
+    }
+    base.target = target ?? null;
+    if (!target) throw new Refused('users.usage', { message: USAGE });
+    if (same(target, actor)) throw new Refused('users.self_change_refused');
+    const admins = () => doc.users.filter((u) => activeAdmin(u)).length;
+    const guardLastAdmin = (before: number) => {
+      if (before > 0 && admins() === 0 && !(actor === 'operator' && f.has('force'))) throw new Refused('users.last_admin', { message: 'the last active tenant_admin; only --by operator --force may do this' });
+    };
+    const password = async () => {
+      if (!f.has('password-stdin')) throw new Refused('users.usage', { message: USAGE });
+      const pwd = (deps.readStdin ?? (() => fs.readFileSync(0, 'utf8')))().split(/\r\n|\r|\n/)[0];
+      try { return await hashPassword(pwd); } catch { throw new Refused('users.password_invalid'); }
+    };
+    const extra: Rec = {};
     let revoke = false;
-    const user = () => doc.users.find((u) => same(u.id, id));
-    const member = () => doc.memberships?.find((m) => same(m.userId, id));
+    const adminsBefore = admins();
     if (cmd === 'add') {
       const role = f.get('role');
       if (!role || !Object.hasOwn(ROLE_PERMISSIONS, role)) throw new Refused('users.role_invalid');
-      doc.users.push({ id, displayName: f.get('name') ?? '', status: 'active' });
-      (doc.memberships ??= []).push({ userId: id, ...instance, role, status: 'active' });
-      if (f.has('password-stdin')) {
-        const pwd = readStdin().split(/\r?\n/)[0];
-        let passwordHash: string;
-        try { passwordHash = await hashPassword(pwd); } catch { throw new Refused('users.password_invalid'); }
-        (doc.localCredentials ??= []).push({ userId: id, passwordHash });
-      }
+      doc.users.push({ id: target, displayName: f.get('name') ?? '', status: 'active' });
+      (doc.memberships ??= []).push({ userId: target, ...instance, role, status: 'active' });
+      if (f.has('password-stdin')) (doc.localCredentials ??= []).push({ userId: target, passwordHash: await password() });
+      extra.role = role;
     } else if (cmd === 'set-role') {
-      const m = member();
+      const m = memberOf(target);
       if (!m) throw new Refused('users.unknown_user');
       m.role = f.get('role');
+      extra.role = m.role;
+    } else if (cmd === 'set-password') {
+      if (!userOf(target)) throw new Refused('users.unknown_user');
+      const hash = await password();
+      const c = doc.localCredentials?.find((x) => same(x.userId, target));
+      if (c) c.passwordHash = hash; else (doc.localCredentials ??= []).push({ userId: userOf(target)!.id, passwordHash: hash });
     } else if (cmd === 'suspend' || cmd === 'unsuspend') {
-      const u = user();
+      const u = userOf(target);
       if (!u) throw new Refused('users.unknown_user');
       u.status = cmd === 'suspend' ? 'suspended' : 'active';
       revoke = cmd === 'suspend';
     } else if (cmd === 'revoke-sessions') {
-      if (!user()) throw new Refused('users.unknown_user');
+      if (!userOf(target)) throw new Refused('users.unknown_user');
       revoke = true;
     } else if (cmd === 'bind') {
       const conn = doc.identityConnections?.find((c) => c.id === f.get('connection'));
-      (doc.bindings ??= []).push({ connectionId: f.get('connection'), issuer: conn?.issuer ?? '', subject: f.get('subject'), userId: id, approvedBy: by, approvedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') });
+      (doc.bindings ??= []).push({ connectionId: f.get('connection'), issuer: conn?.issuer ?? '', subject: f.get('subject'), userId: target, approvedBy: actor, approvedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') });
+      Object.assign(extra, { connection: f.get('connection'), subject: f.get('subject') });
     } else if (cmd === 'unbind') {
-      const before = doc.bindings?.length ?? 0;
-      doc.bindings = (doc.bindings ?? []).filter((b) => !(b.connectionId === f.get('connection') && b.subject === f.get('subject')));
-      if (doc.bindings.length === before) throw new Refused('users.unknown_binding');
-    } else return fail('users.usage', { message: `unknown command ${JSON.stringify(cmd).slice(0, 40)}` }, 2);
+      doc.bindings = doc.bindings!.filter((b) => b !== binding);
+      Object.assign(extra, { connection: f.get('connection'), subject: f.get('subject') });
+      revoke = true;
+    } else throw new Refused('users.usage', { message: USAGE });
+    guardLastAdmin(adminsBefore);
     const v = validateDirectory(doc, instance);
-    if (!v.ok) throw new Refused('users.invalid_result', { cause: v.problems });
+    if (!v.ok) throw new Refused('users.invalid_result', { problems: v.problems });
     const next = Buffer.from(`${JSON.stringify(doc, null, 2)}\n`);
-    beforeWrite();
-    const digest = (b: Buffer) => createHash('sha256').update(b).digest('hex');
-    if (digest(read()) !== digest(original)) throw new Refused('users.changed_concurrently');
-    if (cmd !== 'revoke-sessions') {
-      const w = fs.openSync(file, 'r+'); // in place: same inode
-      try { fs.ftruncateSync(w, 0); fs.writeSync(w, next, 0, next.length, 0); fs.fsyncSync(w); } finally { fs.closeSync(w); }
-    }
-    let sessionsRevoked: number | undefined;
+    if (next.length > MAX_BYTES) throw new Refused('users.too_large');
     if (revoke) {
       const state = env.RATIO_ENGAGEMENT_STATE ?? '';
       if (!path.isAbsolute(state)) throw new Refused('users.state_missing');
-      const store = new EngagementSessionStore(state);
-      try { sessionsRevoked = store.revokeUser(user()!.id as string); } finally { store.close(); }
+      try { store = new EngagementSessionStore(state); } catch { throw new Refused('users.state_unavailable'); }
     }
-    io.out(JSON.stringify({ event: 'users_admin', action: cmd, target: id ?? null, actor: by, outcome: 'success', ...(sessionsRevoked !== undefined ? { sessionsRevoked } : {}) }));
+    (deps.beforeWrite ?? (() => {}))();
+    if (sha(fs.readFileSync(file)) !== sha(original)) throw new Refused('users.changed_concurrently');
+    if (cmd !== 'revoke-sessions') {
+      try { writeAtomic(file, next, deps); } catch (e) { throw new Refused('users.write_failed', { cause: (e as NodeJS.ErrnoException).code ?? 'unknown' }); }
+    }
+    if (store) {
+      try { extra.sessionsRevoked = (deps.revoke ?? ((s, id) => s.revokeUser(id)))(store, userOf(target)!.id as string); } catch {
+        io.out(JSON.stringify({ ...base, ...extra, outcome: 'partial', code: 'users.revoke_failed' }));
+        return 1;
+      }
+    }
+    io.out(JSON.stringify({ ...base, ...extra, outcome: 'success' }));
     return 0;
   } catch (e) {
-    if (e instanceof Refused) return fail(e.message, e.cause ? { problems: e.cause } : {});
-    return fail('users.failed');
+    if (e instanceof Refused) return refuse(e.message, e.extra);
+    return refuse('users.failed');
   } finally {
-    fs.closeSync(fd);
-    fs.rmSync(lock, { force: true });
+    try { store?.close(); } catch { /* closing a failed store */ }
+    unlock?.();
   }
 }
