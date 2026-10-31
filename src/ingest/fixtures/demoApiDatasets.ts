@@ -11,28 +11,8 @@ import { COLUMNS, formatUnits, rng } from './syntheticFocus';
 
 /** The FOCUS 1.0 columns of the repo's synthetic export, without the AWS-specific x_ extensions. */
 export const DATASET_COLUMNS: string[] = COLUMNS.filter((c) => !c.startsWith('x_'));
-export type ConnectionType = 'public_cloud' | 'private_cloud' | 'on_premise';
-
-export interface CurrencyTotals { rows: number; billed: string; effective: string; naBilled: number; naEffective: number }
-export interface DatasetMeta {
-  id: string;
-  name: string;
-  connectionType: ConnectionType;
-  apiStyle: string;
-  provider: string;
-  currency: string;
-  /** A fixed, simulated time: this is a fixture, nothing ran. */
-  lastImport: string;
-  billingPeriod: string;
-  rowCount: number;
-  controlTotals: Record<string, CurrencyTotals>;
-  /** Why a column is empty in this dataset (an empty cell is N/A, never 0). */
-  naReasons: Record<string, string>;
-  /** Why BilledCost is a true zero (not missing) on some rows. */
-  zeroBilledReason?: string;
-  synthetic: true;
-}
-export interface Dataset { meta: DatasetMeta; columns: string[]; rows: string[][] }
+import type { CurrencyTotals, Dataset } from '../../demo/apiDatasets/types';
+export type { ConnectionType, CurrencyTotals, Dataset, DatasetMeta } from '../../demo/apiDatasets/types';
 
 const U = BigInt('10000000000'); // 1 currency unit
 const cents = (c: number) => (BigInt(c) * U) / BigInt(100);
