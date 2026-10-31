@@ -1,5 +1,13 @@
-$ npx vitest run src/components/SegmentedControl.test.tsx  (tests only, before the implementation)
- FAIL  src/components/SegmentedControl.test.tsx [ src/components/SegmentedControl.test.tsx ]
-Error: Failed to resolve import "./SegmentedControl" from "src/components/SegmentedControl.test.tsx". Does the file exist?
- Test Files  1 failed (1)
-      Tests  no tests
+$ npx vitest run src/components/SegmentedControl.test.tsx  (review round: new tests before the fix)
+     × client mode and other SegmentedControl groups 11ms
+     × workload detail tabs 20ms
+     × workload card metric switch 7ms
+     × rovingKeyDown itself (cost source picker and any other caller) 2ms
+     × brings a selection made elsewhere into view, but never scrolls under a pointer click 71ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: altKey+ArrowLeft default: expected true to be false // Object.is equality
+AssertionError: altKey+ArrowLeft default: expected true to be false // Object.is equality
+AssertionError: altKey+ArrowLeft default: expected true to be false // Object.is equality
+AssertionError: expected true to be false // Object.is equality
+AssertionError: expected 1192 to be +0 // Object.is equality
+      Tests  5 failed | 6 passed (11)
