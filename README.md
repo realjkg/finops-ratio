@@ -428,6 +428,11 @@ enables no simulation, synthetic provider or test hook.
 View: after R2, open the app on the loopback port and sign in. The existing worker commands (`sync`, `replay`,
 `quarantine show`, `doctor`) run through `$C --profile jobs run --rm worker <command>`.
 
+Today the OIDC routes (`/api/auth/oidc/start?connection=<id>` and `/api/auth/oidc/callback`) work for an enabled
+`identityConnections` entry: register `<RATIO_ENGAGEMENT_ORIGIN>/api/auth/oidc/callback` exactly at the IdP, put the client
+secret in the environment variable named by `clientSecretRef`, and bind each person explicitly (`bindings`); an
+unbound account gets "not provisioned" and no session. The app must reach the IdP over https on a public address.
+
 ### Known limitations
 
 - File import only for verified data (the import command arrives after R3): there are no live-verified provider

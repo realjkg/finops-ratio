@@ -1,0 +1,5 @@
+R2 slice B (OIDC) RED evidence (tests committed before the implementation)
+$ npx vitest run --cache=false src/engagement/auth src/rbac  (commit d4fca04)
+  -> FAIL safeFetch.test.ts and oidc.test.ts (./safeFetch, ./oidc and pages/api/auth/oidc/* do not exist yet)
+  -> FAIL matrix_view_codes_match_plan_section_4_4 (rows for /api/auth/oidc/start and /callback missing).
+GREEN counts and mutation results are in the PR body.
