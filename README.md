@@ -412,9 +412,12 @@ or mount a directory instead, and restart the container. Today the app validates
 the session API (`/api/auth/login`, `/api/auth/logout`, `/api/auth/session`, local credentials only) reads it again on
 each request; under a single-file mount a file saved as a new inode stays invisible until `$C restart app`, so a
 suspension or role change can lag until that restart. Edit `/config/users.json` in place or mount `/config` as a
-directory; the R2 operator command (slice E) will write in place. The session API needs `RATIO_ENGAGEMENT_ORIGIN` (the
-https origin of your TLS proxy) and `RATIO_ENGAGEMENT_STATE` (a file under `/state`); the compose file does not set them
-today (R12 is pending), and without them the session API answers 503. No sign-in page or report page exists yet (after R2).
+directory; the R2 operator command (slice E) will write in place. Today a suspended user's session is refused on the
+next request but stays in the store until it expires; the slice-E command will also delete it. The session API needs
+`RATIO_ENGAGEMENT_ORIGIN` (the https origin of your TLS proxy), `RATIO_ENGAGEMENT_STATE` (a file under `/state`) and
+`RATIO_TRUSTED_PROXY_HOPS` (0 to 5: how many proxies append to `X-Forwarded-For`, 1 behind a single TLS proxy, so
+failed sign-ins are counted per client and not for everyone at once); the compose file does not set them today (R12 is
+pending), and without them the session API answers 503. No sign-in page or report page exists yet (after R2).
 
 The worker runs with `RATIO_ENV=staging` (the app and migrator with `production`): the worker's S3 settings refuse
 `http` endpoints under `production`, and the bundled object store is `http` on the internal network. `staging`

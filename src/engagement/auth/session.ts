@@ -9,7 +9,7 @@
 // node:sqlite needs Node >= 22.13 without flags (package.json engines; the
 // image is node:24). SERVER-ONLY.
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync, mkdirSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -39,14 +39,24 @@ export class EngagementSessionStore {
   private lastPurge = 0;
   constructor(filename: string) {
     guarded(() => {
-      if (filename !== ':memory:') mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
+      if (filename !== ':memory:') {
+        const dir = dirname(filename);
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        // An existing directory wider than 0700 is narrowed when it is ours; otherwise refuse (fail closed).
+        const st = statSync(dir);
+        if (st.mode & 0o077) {
+          if (st.uid !== process.getuid?.()) throw new Error('state directory not owned');
+          chmodSync(dir, 0o700);
+        }
+        if (!existsSync(filename)) closeSync(openSync(filename, 'a', 0o600));
+      }
       this.db = new DatabaseSync(filename);
       // WAL lets concurrent readers proceed; busy_timeout waits for a concurrent writer instead of failing.
       this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS engagement_sessions (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
           engagement_id TEXT NOT NULL, created INTEGER NOT NULL, last_seen INTEGER NOT NULL, expires INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS engagement_sessions_user ON engagement_sessions (user_id);`);
-      if (filename !== ':memory:') chmodSync(filename, 0o600);
+      if (filename !== ':memory:') for (const f of [filename, `${filename}-wal`, `${filename}-shm`]) if (existsSync(f)) chmodSync(f, 0o600);
     });
   }
   close(): void { guarded(() => this.db.close()); }

@@ -1,9 +1,7 @@
 R2 RED evidence (tests committed before each implementation)
-PR A (#161, merged): dc9e82e, e8cbba6, 3dc848a (see #161).
-A2a:
-1. 09e7b12  npx vitest run src/engagement/auth -> Tests 1 failed | 24 passed (async audit hook rejection).
-2. session store + cookie/CSRF library: npx vitest run src/engagement/auth
-   -> FAIL session.test.ts and http.test.ts (./session and ./http do not exist yet); the other suites pass.
+PR A (#161) and A2 (#163): see those PRs.
+A3 hardening: npx vitest run --cache=false src/engagement/auth -> Test Files 2 failed | 4 passed; Tests 7 failed | 54 passed:
+  required RATIO_TRUSTED_PROXY_HOPS (0..5), Nth-from-right XFF client with IPv6 /64 keys, per-client buckets behind
+  one proxy, identical 401x5 -> 429 for unknown and real names with a normalized user key, no eviction of blocked keys
+  (fail closed when full), a 4-login scrypt concurrency cap, 0600 -wal/-shm and a 0700 state directory.
 GREEN counts and mutation results are in the PR body.
-3. routes (POST /api/auth/login, POST /api/auth/logout, GET /api/auth/session): npx vitest run src/engagement/auth src/rbac
-   -> FAIL routes.test.ts (./routes and pages/api/auth/* do not exist) and matrix_view_codes_match_plan_section_4_4 (rows missing).
