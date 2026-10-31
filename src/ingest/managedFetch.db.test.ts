@@ -120,13 +120,14 @@ describe('managed fetch (worker command)', () => {
     for (const line of [...r.out, ...r.err, ...again.out, ...again.err]) expect(line).not.toContain(SECRET);
   });
 
-  it('an unregistered connector or a missing secret fails with its code and stages nothing', async () => {
+  it('an unapproved connector or a missing secret fails with its code and stages nothing', async () => {
     const tenant = crypto.randomUUID();
     await provision(tenant);
     const before = seen.opened;
+    // Not registered in this worker, so not approved: refused by the config check (as R1 startup refuses it), exit 2.
     const a = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant, 'nutanix')));
-    expect(a.code).toBe(1);
-    expect(a.record).toMatchObject({ pass: false, results: { status: 'failed', error: { code: 'CONNECTOR_NOT_REGISTERED' } } });
+    expect(a.code).toBe(2);
+    expect(a.record).toMatchObject({ pass: false, results: { status: 'failed', error: { code: 'ENGAGEMENT_CONFIG_INVALID', message: expect.stringContaining('sources[0].retrieval.connector: not implemented in this build') } } });
     const b = await cli(['fetch', '--tenant', tenant, '--source', 'managed-aws'], env(engagementFile(tenant, FIXTURE_CONNECTOR, 'synthetic/absent')));
     expect(b.code).toBe(1);
     expect(b.record).toMatchObject({ results: { status: 'failed', error: { code: 'SECRET_MISSING' } } });

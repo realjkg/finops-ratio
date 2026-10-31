@@ -361,8 +361,8 @@ names the config (mount it read-only). Works today: the app server validates the
 or missing key, logs one `engagement_config_invalid` line naming the keys (for example `budgets[0].monthly`), never
 the values, and the app refuses to start today: **the process exits with code 1**. Any other `RATIO_MODE` value is
 also an error (startup reports it; it does not exit the process). Outside engagement mode nothing changes. Under the
-compose stack below, `restart: unless-stopped` restarts an app that exits, so check `$C logs app`. The worker and
-migrator receive the same variables but do not read the config yet.
+compose stack below, `restart: unless-stopped` restarts an app that exits, so check `$C logs app`. The worker reads
+the config today only for `fetch` (managed retrieval); the migrator does not read it.
 
 The file declares: `engagementId`, `tenantId` (the single tenant the published-costs reader is bound to; in
 engagement mode `RATIO_API_TENANT_ID` must not be set), `displayName`, `currency`, `sources[]` (id, FOCUS
@@ -373,8 +373,11 @@ named after `src/attribution/allocation.ts`), `budgets[]` (monthly decimal strin
 Metadata fields are all required; `unknown` and `not_available` are valid explicit values and a blank is never
 defaulted. Each source may carry a `retrieval` block (`file-drop`, the default, or `managed` with a connector name,
 `params` and a `secretRef` that is the NAME of a secret, never a value). The schema accepts every documented value,
-but `SUPPORTED_IN_THIS_BUILD` in `src/engagement/config.ts` lists what this build accepts today (file-drop,
-CSV or CSV gzip); anything else stops startup with `<key>: not implemented in this build`.
+but `SUPPORTED_IN_THIS_BUILD` in `src/engagement/config.ts` lists what this build accepts today (file-drop, managed
+for the approved connector `aws-data-exports` only, CSV or CSV gzip); anything else stops startup with
+`<key>: not implemented in this build`. Accepting a managed source starts nothing in the app: only the worker `fetch`
+command retrieves, and it is NOT VERIFIED against a real AWS export (`docs/connectors/aws.md`, which also lists the
+`bucket`, `prefix` and `exportName` rules).
 
 `loadEngagementConfig(path)` returns the config plus the sha256 of the file bytes so reports can stamp which
 configuration produced them. A SYNTHETIC example for the public FOCUS 1.0 sample is
@@ -418,7 +421,8 @@ View: after R2, open the app on the loopback port and sign in. The existing work
 
 ### Known limitations
 
-- File import only (the import command arrives after R3): there are no live provider connectors in this release.
+- File import only for verified data (the import command arrives after R3): there are no live-verified provider
+  connectors in this release; the AWS Data Exports managed retrieval is built but NOT VERIFIED against a real export.
 - One engagement per instance: run a second instance for a second customer.
 - FOCUS parsing is verified on real exports for 1.0 only; FOCUS 1.1 to 1.4 have synthetic fixtures only.
 - The base image tag is not pinned by digest (shared with the simulation image); the Postgres and SeaweedFS images are.

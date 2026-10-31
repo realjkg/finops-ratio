@@ -7,7 +7,7 @@
 // Failures carry a code and never fall back to sample or simulated data. Error
 // text from foreign code is replaced by fixed text (it may carry payload values);
 // ManagedError text (connector-authored) is kept with secret values scrubbed.
-import { ManagedError, type ManagedSpec } from './engagementSpec';
+import { ManagedError, managedSpecFromEngagementFile as specFromEngagementFile, type ManagedSpec } from './engagementSpec';
 import { captureOriginal, type OriginalsStore } from './evidence/capture';
 import type { CapturedOriginal, ObjectIdentity } from './evidence/types';
 import { managedRegistry, type RetrieverRegistry } from './registry';
@@ -40,7 +40,12 @@ export interface ManagedRetriever {
  * header) so it is scrubbed like the resolved secret from every result, log line and provenance.
  */
 export type RetrieverFactory = (ctx: { params: Record<string, unknown>; secret?: SecretValue; registerSecret: (value: string) => void }) => ManagedRetriever;
-export { ManagedError, managedSpecFrom, managedSpecFromEngagementFile, type ManagedSpec } from './engagementSpec';
+export { ManagedError, managedSpecFrom, type ManagedSpec } from './engagementSpec';
+
+/** The worker's entry: the engagement config is checked against the connectors this worker registers (its approved list). */
+export function managedSpecFromEngagementFile(file: string | undefined, sourceId: string, tenantId: string): ManagedSpec {
+  return specFromEngagementFile(file, sourceId, tenantId, managedRegistry.connectors());
+}
 
 /** `period` ('YYYY-MM-01') stages only the delivery's billing period. */
 export interface StageRequest { objects: Array<{ name: string; bytes: Buffer }>; sourceKind: string; schemaVersion: string; period?: string; provenance: Record<string, unknown>; secrets: string[] }

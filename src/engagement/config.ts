@@ -89,19 +89,25 @@ export type ParamValue = ParamLeaf | Record<string, ParamLeaf>;
 
 /**
  * How the source's data arrives. `file-drop` (the default) is the operator
- * file import. `managed` names a connector; its `params` are validated per
- * connector by that connector's row. `secretRef` is the NAME of a secret in
- * the environment or secret store, never a secret value.
+ * file import. `managed` names a connector run by the worker `fetch` command
+ * (never by the app); its `params` are validated in full by that connector,
+ * and here generically except aws-data-exports' bucket, prefix and exportName
+ * (field rules below). `secretRef` is the NAME of a secret in the environment
+ * or secret store, never a secret value.
  */
 export type Retrieval = { kind: 'file-drop' } | { kind: 'managed'; connector: ManagedConnector; params: Record<string, ParamValue>; secretRef?: string };
 
 /**
  * The ONE place that says what this build can actually run. Enabling a
  * connector or format later is a one-line change here. Anything else is
- * schema-valid but refused at startup, naming the key.
+ * schema-valid but refused at startup, naming the key. `managedConnectors` is
+ * the server-controlled approved list; it must equal the connectors registered
+ * in the worker (src/connectors/managed/registry.ts, pinned by a test), and
+ * accepting one grants no network access: only the worker `fetch` retrieves.
  */
 export const SUPPORTED_IN_THIS_BUILD = {
-  retrievalKinds: ['file-drop'] as readonly RetrievalKind[],
+  retrievalKinds: ['file-drop', 'managed'] as readonly RetrievalKind[],
+  managedConnectors: ['aws-data-exports'] as readonly ManagedConnector[],
   sourceKinds: ['focus-export', 'native-export'] as readonly SourceMetadata['source_kind'][],
   deliveryFormats: ['csv', 'csv-gzip'] as readonly SourceMetadata['delivery']['format'][],
 };
@@ -395,6 +401,58 @@ function metadata(c: Ctx, v: unknown, key: string, sourceIds: Set<string>, selfI
 
 const CREDENTIAL_RE = [/-----BEGIN [A-Z ]*-----/, /^eyJ[\w-]{8,}\.[\w-]{8,}\.?[\w-]*$/, /^(AKIA|ASIA)[A-Z0-9]{16}$/, /^[A-Za-z0-9+/_=-]{40,}$/];
 const looksLikeCredential = (v: string) => CREDENTIAL_RE.some((r) => r.test(v));
+
+// Owner-approved schema change (2026-10-30): at the exact paths params.bucket, params.prefix and
+// params.exportName of connector aws-data-exports, field rules replace the generic 40-character
+// rule; the structured credential patterns stay. No entropy test (legitimate generated names).
+// The worker copy is src/connectors/managed/engagementSpec.ts (kept identical, parity-tested).
+const AWS_LOCATION_PARAMS = ['bucket', 'prefix', 'exportName'];
+// S3 general purpose bucket naming; the reserved prefixes and suffixes are from the AWS rules (NOT VERIFIED in this repo).
+const AWS_BUCKET_RE = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
+const AWS_BUCKET_RESERVED_RE = /\.\.|^\d{1,3}(\.\d{1,3}){3}$|^(xn--|sthree-|amzn-s3-demo-)|(-s3alias|--ol-s3|\.mrap|--x-s3|--table-s3)$/;
+// Data Exports export Name: 1 to 128 of [0-9A-Za-z_-] (bcm-data-exports API model).
+const AWS_EXPORT_NAME_RE = /^[0-9A-Za-z_-]{1,128}$/;
+// Credential shapes refused ANYWHERE inside these fields (no word boundaries, unanchored), also after NFKC
+// folding (fullwidth lookalikes): key ids, JWTs, private keys, key=value or key: value forms, URL userinfo.
+const AWS_KEY_ID_RE = /(AKIA|ASIA)[A-Z0-9]{16}/;
+const AWS_JWT_RE = /eyJ[\w-]{8,512}\.[\w-]{8,512}/;
+const AWS_INLINE_CREDENTIAL_RE = /(secret|password|passwd|token|credential|signature|api[_-]?key|access[_-]?key)\s*[=:]/i;
+/** URL userinfo: a ':' and then an '@' within one prefix segment (a linear scan, no backtracking). */
+const hasUserinfo = (v: string) => v.split('/').some((seg) => seg.includes(':') && seg.indexOf('@', seg.indexOf(':')) >= 0);
+const AWS_CREDENTIAL_RES = [CREDENTIAL_RE[0], AWS_KEY_ID_RE, AWS_JWT_RE, AWS_INLINE_CREDENTIAL_RE];
+// S3 limits the WHOLE object key. The retriever (src/ingest/sources/s3/layout.ts) reads keys under
+// `<prefix>/<exportName>/metadata/BILLING_PERIOD=YYYY-MM/` (its longest fixed part) plus a part AWS
+// names (run folder and file or manifest name; lengths NOT VERIFIED), reserved below.
+const S3_KEY_MAX_BYTES = 1024;
+const AWS_FILE_PART_RESERVE_BYTES = 256;
+// Hard caps checked FIRST, before any pattern and before NFKC (bounded work on hostile input). A prefix longer than
+// the key limit in characters is over it in UTF-8 bytes too; the NFKC form gets the same cap (it can expand).
+const AWS_FIELD_MAX_CHARS: Record<string, number> = { bucket: 63, exportName: 128, prefix: S3_KEY_MAX_BYTES };
+// eslint-disable-next-line no-control-regex
+const C0_C1_RE = /[\u0000-\u001f\u007f-\u009f]/;
+
+/** The problem (never the value) of one AWS location param, or null. */
+function awsLocationProblem(name: string, v: unknown, params: Record<string, unknown>): string | null {
+  if (typeof v !== 'string') return 'must be a string';
+  const bucketRule = 'must be an S3 general purpose bucket name (3 to 63 lowercase letters, digits, dots and hyphens; letter or digit at both ends; no consecutive dots, IP address form or reserved prefix or suffix)';
+  const exportNameRule = 'must be a Data Exports export name (1 to 128 letters, digits, underscores and hyphens)';
+  const tooLong = name === 'bucket' ? bucketRule : name === 'exportName' ? exportNameRule : `must be at most ${S3_KEY_MAX_BYTES} characters, also after NFKC normalization (the S3 key limit)`;
+  if (v.length > AWS_FIELD_MAX_CHARS[name]) return tooLong;
+  const folded = v.normalize('NFKC');
+  if (folded.length > AWS_FIELD_MAX_CHARS[name]) return tooLong;
+  if ([v, folded].some((x) => hasUserinfo(x) || AWS_CREDENTIAL_RES.some((r) => r.test(x)))) return 'looks like a credential value; reference a secret by name with secretRef';
+  if (name === 'bucket') return AWS_BUCKET_RE.test(v) && !AWS_BUCKET_RESERVED_RE.test(v) ? null : bucketRule;
+  if (name === 'exportName') return AWS_EXPORT_NAME_RE.test(v) ? null : exportNameRule;
+  if (v === '') return null;
+  if (C0_C1_RE.test(v) || v.includes('\ufffd') || Buffer.from(v, 'utf8').toString('utf8') !== v || v.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')) {
+    return 'must be valid UTF-8 without control characters, leading or trailing slash, or empty, . or .. segments';
+  }
+  const exportName = typeof params.exportName === 'string' ? params.exportName : '';
+  if (Buffer.byteLength(`${v}/${exportName}/metadata/BILLING_PERIOD=YYYY-MM/`) + AWS_FILE_PART_RESERVE_BYTES > S3_KEY_MAX_BYTES) {
+    return `with exportName, the longest object key the AWS retriever builds would exceed the ${S3_KEY_MAX_BYTES}-byte S3 key limit (${AWS_FILE_PART_RESERVE_BYTES} bytes reserved for the file part)`;
+  }
+  return null;
+}
 const SECRET_REF_RE = /^[A-Za-z_][A-Za-z0-9_./-]{0,127}$/;
 
 function paramLeaf(c: Ctx, v: unknown, key: string): ParamLeaf | null {
@@ -443,7 +501,11 @@ function retrievalBlock(c: Ctx, v: unknown, key: string): Retrieval | null {
     else
       for (const [name, val] of Object.entries(o.params)) {
         const k = `${pk}.${safeKey(name)}`;
-        if (isObj(val)) {
+        if (connector === 'aws-data-exports' && AWS_LOCATION_PARAMS.includes(name)) {
+          const why = awsLocationProblem(name, val, o.params);
+          if (why) c.bad(k, why);
+          else params[name] = val as string;
+        } else if (isObj(val)) {
           const inner: Record<string, ParamLeaf> = {};
           for (const [n2, v2] of Object.entries(val)) {
             if (isObj(v2)) c.bad(`${k}.${safeKey(n2)}`, 'nesting deeper than 2 levels is not allowed');
@@ -652,10 +714,19 @@ function supportedInThisBuild(config: EngagementConfig): string[] {
   config.sources.forEach((s, i) => {
     const k = `sources[${i}]`;
     if (!SUPPORTED_IN_THIS_BUILD.retrievalKinds.includes(s.retrieval.kind)) p.push(`${k}.retrieval.kind: ${NOT_IMPLEMENTED}`);
+    else if (s.retrieval.kind === 'managed' && !SUPPORTED_IN_THIS_BUILD.managedConnectors.includes(s.retrieval.connector)) p.push(`${k}.retrieval.connector: ${NOT_IMPLEMENTED}`);
     if (!SUPPORTED_IN_THIS_BUILD.sourceKinds.includes(s.metadata.source_kind)) p.push(`${k}.metadata.source_kind: ${NOT_IMPLEMENTED}`);
     if (!SUPPORTED_IN_THIS_BUILD.deliveryFormats.includes(s.metadata.delivery.format)) p.push(`${k}.metadata.delivery.format: ${NOT_IMPLEMENTED}`);
   });
   return p;
+}
+
+/** The startup verdict of a parsed value: the schema, then the release policy (SUPPORTED_IN_THIS_BUILD). */
+export function checkEngagementConfig(input: unknown): ValidateResult {
+  const v = validateEngagementConfig(input);
+  if (!v.ok) return v;
+  const policy = supportedInThisBuild(v.config);
+  return policy.length ? { ok: false, problems: policy } : v;
 }
 
 /** Reads, hashes and validates the config file, then applies the release policy. */
@@ -676,10 +747,8 @@ export function loadEngagementConfig(file: string): LoadResult {
   } catch {
     return { ok: false, problems: [`${V}: file is not valid JSON`] };
   }
-  const v = validateEngagementConfig(parsed);
+  const v = checkEngagementConfig(parsed);
   if (!v.ok) return v;
-  const policy = supportedInThisBuild(v.config);
-  if (policy.length) return { ok: false, problems: policy };
   return { ok: true, config: v.config, sha256: createHash('sha256').update(bytes).digest('hex') };
 }
 
