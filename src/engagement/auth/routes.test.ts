@@ -141,6 +141,12 @@ describe('POST /api/auth/login', () => {
     const t = new LoginThrottle(100);
     for (let i = 0; i < 1000; i += 1) t.fail([`ip:${i}`], T0);
     expect(t.size()).toBeLessThanOrEqual(100);
+    const u = ['u:k'];
+    for (let round = 0; round < 2; round += 1) { // a new window starts after the old one ends, and blocks again
+      const start = T0 + round * 15 * 60_000;
+      for (let i = 0; i < 5; i += 1) t.fail(u, start + i);
+      expect(t.blocked(u, start + 10), String(round)).toBeGreaterThan(0);
+    }
   });
 
   it('session fixation: a presented session is revoked and a new one minted', async () => {
@@ -203,5 +209,15 @@ describe('GET /api/auth/session and POST /api/auth/logout', () => {
     expect(r.statusCode).toBe(200);
     const s = await call(createSessionRoute({ ...deps(), audit: async () => { throw new Error('SINK'); } }), req({ token: tokenOf(r) }));
     expect(s.statusCode).toBe(200);
+    const unhandled: unknown[] = [];
+    const on = (x: unknown) => { unhandled.push(x); };
+    process.on('unhandledRejection', on);
+    try {
+      const sink = { ...deps(), audit: async () => { throw new Error('SINK'); } };
+      expect((await call(createSessionRoute(sink), req())).statusCode).toBe(401);
+      expect((await call(createLoginRoute(sink), req({ method: 'POST', body: { username: 'v', password: 'wrong-password-123' } }))).statusCode).toBe(401);
+      await new Promise((res) => setTimeout(res, 20));
+      expect(unhandled).toEqual([]);
+    } finally { process.off('unhandledRejection', on); }
   });
 });
