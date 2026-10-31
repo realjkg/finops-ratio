@@ -97,12 +97,23 @@ const AMOUNT_COLUMNS = ['Rows', 'Billed cost', 'Effective cost', 'Credits rows',
 const part = (f: Fact<Amounts>): Cell[] => (f.status === 'available' ? [t(f.value.rowCount), t(f.value.billedCost), eff(f.value.effectiveCost)] : [na(f.reason), na(f.reason), na(f.reason)]);
 const amountCells = (c: CurrencyFacts): Cell[] => [t(c.rowCount), t(c.billedCost), eff(c.effectiveCost), ...part(c.credits), ...part(c.adjustments)];
 
+// The cells that carry imported or configured free text (renderers that must bound their work, like the PDF,
+// cap only these). Every other cell is model-authored (labels, headers, reasons, warnings) or bounded by
+// construction (ids, codes, amounts, timestamps, counts).
+const DATA_ITEMS = { engagement: 'Engagement', declaredBasis: 'Declared cost basis', declaredCredits: 'Declared credits coverage' } as const;
+const CHARGE_CATEGORY = 'Charge category';
+const DECLARED_COLUMNS = ['Source id (config)', 'Provider', 'Cost basis', 'Credits coverage', 'Completeness', 'Control total source'];
+export const DATA_TEXT_CELLS = {
+  summaryItems: Object.values(DATA_ITEMS) as readonly string[],
+  columns: { chargeCategories: [CHARGE_CATEGORY], imports: ['Providers', 'FOCUS versions'], declaredSources: DECLARED_COLUMNS } as Readonly<Record<string, readonly string[]>>,
+};
+
 const STAGED_COLUMN = 'Staged artifact sha256 (per-period file the import wrote, not the operator file)';
 
 export function buildEngagementReportModel(f: ReportFacts, engagement: EngagementLabel | null): EngagementReportModel {
   const p = f.period;
   const summary: Array<[string, Cell]> = [
-    ['Engagement', engagement ? t(`${engagement.displayName} (${engagement.id})`) : na(NA_REASONS.noEngagement)],
+    [DATA_ITEMS.engagement, engagement ? t(`${engagement.displayName} (${engagement.id})`) : na(NA_REASONS.noEngagement)],
     ['Reporting period', t(`${p.month} (${p.start} to ${p.endExclusive}, end exclusive)`)],
     ['Period state', t(p.state)],
     ['Period completeness', fact(p.completeness)],
@@ -115,9 +126,9 @@ export function buildEngagementReportModel(f: ReportFacts, engagement: Engagemen
     ['Scope', t(f.scope)],
     ['Billed cost basis', t(f.costBasis.billed)],
     ['Effective cost basis', t(f.costBasis.effective)],
-    ['Declared cost basis', list(f.costBasis.declared, (d) => `${d.sourceId}: ${d.costBasis}`, NA_REASONS.noEngagement)],
+    [DATA_ITEMS.declaredBasis, list(f.costBasis.declared, (d) => `${d.sourceId}: ${d.costBasis}`, NA_REASONS.noEngagement)],
     ['Credits policy', t(f.creditsPolicy.treatment)],
-    ['Declared credits coverage', list(f.creditsPolicy.declared, (d) => `${d.sourceId}: ${d.creditsCoverage}`, NA_REASONS.noEngagement)],
+    [DATA_ITEMS.declaredCredits, list(f.creditsPolicy.declared, (d) => `${d.sourceId}: ${d.creditsCoverage}`, NA_REASONS.noEngagement)],
   ];
 
   const totals =
@@ -134,8 +145,8 @@ export function buildEngagementReportModel(f: ReportFacts, engagement: Engagemen
       ]),
     ),
   );
-  const importColumns = ['Source id', 'Source key', 'Providers', 'FOCUS versions', 'Batch id', 'Batch status', 'Published at', STAGED_COLUMN, 'Staged artifact rows', 'Operator file sha256', 'Reconciliation', 'Control totals'];
-  const declaredColumns = ['Source id (config)', 'Provider', 'Cost basis', 'Credits coverage', 'Completeness', 'Control total source'];
+  const importColumns = ['Source id', 'Source key', ...DATA_TEXT_CELLS.columns.imports, 'Batch id', 'Batch status', 'Published at', STAGED_COLUMN, 'Staged artifact rows', 'Operator file sha256', 'Reconciliation', 'Control totals'];
+  const declaredColumns = DECLARED_COLUMNS;
   const declared =
     f.declaredSources.status === 'available'
       ? f.declaredSources.value.map((d) => [d.id, d.provider, d.costBasis, d.creditsCoverage, d.completeness, d.controlTotalSource].map(t))
@@ -151,7 +162,7 @@ export function buildEngagementReportModel(f: ReportFacts, engagement: Engagemen
       section('summary', 'Report', ['Item', 'Value'], summary.map(([label, c]) => [t(label), c])),
       section('totals', 'Totals by currency', ['Currency', ...AMOUNT_COLUMNS], totals),
       section('sourceTotals', 'Totals by source', ['Source id', 'Currency', ...AMOUNT_COLUMNS], sourceTotals.length ? sourceTotals : noData(2 + AMOUNT_COLUMNS.length)),
-      section('chargeCategories', 'Charge categories', ['Source id', 'Currency', 'Charge category', 'Rows', 'Billed cost', 'Effective cost'], categories.length ? categories : noData(6)),
+      section('chargeCategories', 'Charge categories', ['Source id', 'Currency', CHARGE_CATEGORY, 'Rows', 'Billed cost', 'Effective cost'], categories.length ? categories : noData(6)),
       section('imports', 'Sources and imports', importColumns, imports.length ? imports : noData(importColumns.length)),
       section('declaredSources', 'Declared sources', declaredColumns, declared),
       section('coverageGaps', 'Coverage gaps', ['Code', 'Detail'], f.coverageGaps.map((g) => [t(g.code), t(g.detail)])),

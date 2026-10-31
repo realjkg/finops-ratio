@@ -1,41 +1,52 @@
-// GET /api/v1/reports/engagement?period=YYYY-MM&format=xlsx — the engagement
-// cost report (1.0) as an XLSX workbook, rendered from the engagement report
-// model, which is built only from the report facts of that period (one
-// snapshot, src/server/costs/reportFactsRead.ts). Same shared factory as
-// /api/v1/reports/facts: live-data auth, gateway (GET only), tenant from the
-// server (engagement config in engagement mode), reader login, deadline,
-// fail-closed 503s and a generic 500. format is required (pdf comes next).
+// GET /api/v1/reports/engagement?period=YYYY-MM&format=xlsx|pdf|json — the
+// engagement cost report (1.0): ONE engagement report model, built only from
+// the report facts of that period (one snapshot, reportFactsRead.ts), rendered
+// as an XLSX workbook, a PDF, or returned as JSON (for the report page). Same
+// shared factory as /api/v1/reports/facts: live-data auth, gateway (GET only),
+// tenant from the server (engagement config in engagement mode), reader login,
+// deadline, fail-closed 503s and a generic 500. format is an exact allowlist.
 import type { NextApiHandler } from 'next';
-import { buildEngagementReportModel, engagementReportFilename } from '@/reports/engagementReportModel';
+import { buildEngagementReportModel, engagementReportFilename, type EngagementReportModel } from '@/reports/engagementReportModel';
+import { renderEngagementReportPdf } from '@/reports/engagementReportPdf';
 import { renderEngagementReportXlsx } from '@/reports/engagementReportXlsx';
 import { createReaderRoute, type PublishedCostsRouteDeps } from './publishedCostsRoute';
 import { parseReportFactsQuery, readReportFacts } from './reportFactsRoute';
 
-export const ENGAGEMENT_REPORT_QUERY_MESSAGE = 'Exactly two query parameters are allowed: period=YYYY-MM (2000-01 to 9999-12) and format=xlsx';
-const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+export const ENGAGEMENT_REPORT_QUERY_MESSAGE = 'Exactly two query parameters are allowed: period=YYYY-MM (2000-01 to 9999-12) and format=xlsx, pdf or json';
+const FORMATS = { xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', pdf: 'application/pdf', json: null } as const;
+type Format = keyof typeof FORMATS;
+const isFormat = (v: unknown): v is Format => typeof v === 'string' && Object.prototype.hasOwnProperty.call(FORMATS, v);
 
-export function parseEngagementReportQuery(query: Record<string, string | string[] | undefined>): { ok: true; value: { period: string; format: 'xlsx' } } | { ok: false; message: string } {
+export function parseEngagementReportQuery(query: Record<string, string | string[] | undefined>): { ok: true; value: { period: string; format: Format } } | { ok: false; message: string } {
   const { format, ...rest } = query ?? {};
   const p = parseReportFactsQuery(rest);
-  if (format !== 'xlsx' || !p.ok) return { ok: false, message: ENGAGEMENT_REPORT_QUERY_MESSAGE };
+  if (!isFormat(format) || !p.ok) return { ok: false, message: ENGAGEMENT_REPORT_QUERY_MESSAGE };
   return { ok: true, value: { period: p.value.period, format } };
 }
+
+type Out = { format: 'json'; model: EngagementReportModel } | { format: 'xlsx' | 'pdf'; body: Buffer; filename: string };
 
 export function createEngagementReportRoute(deps: PublishedCostsRouteDeps = {}): NextApiHandler {
   return createReaderRoute(deps, {
     tag: 'engagement-report',
     parse: parseEngagementReportQuery,
-    read: async (pool, tenantId, q, { env, now }) => {
+    read: async (pool, tenantId, q, { env, now }): Promise<Out> => {
       const { facts, label } = await readReportFacts(pool, tenantId, q.period, env, now);
-      const body = await renderEngagementReportXlsx(buildEngagementReportModel(facts, label));
-      return { body, filename: engagementReportFilename(facts.period.month, q.format, now) };
+      const model = buildEngagementReportModel(facts, label);
+      if (q.format === 'json') return { format: 'json', model };
+      const body = q.format === 'pdf' ? await renderEngagementReportPdf(model) : await renderEngagementReportXlsx(model);
+      return { format: q.format, body, filename: engagementReportFilename(facts.period.month, q.format, now) };
     },
-    respond: (res, out) => {
-      const { body, filename } = out as { body: Buffer; filename: string };
-      res.setHeader('Content-Type', XLSX);
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.setHeader('Content-Length', body.length);
-      res.status(200).send(body);
+    respond: (res, result) => {
+      const out = result as Out;
+      if (out.format === 'json') {
+        res.status(200).json(out.model);
+        return;
+      }
+      res.setHeader('Content-Type', FORMATS[out.format]);
+      res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
+      res.setHeader('Content-Length', out.body.length);
+      res.status(200).send(out.body);
     },
   });
 }

@@ -1,0 +1,46 @@
+Engagement report PDF + JSON (1.0, report-facts PR 3a): GREEN (base cf7c5d3), local run 2026-10-31.
+Environment: Node 22; Postgres 16 (CI digest) and SeaweedFS (CI digest) on 127.0.0.1:55436 / :58333, tmpfs data dirs,
+-volume.max=64 -master.volumeSizeLimitMB=64 -volume.minFreeSpace=300MiB.
+- lint, typecheck (app + worker): pass. npm test: 251 files / 4568 tests passed (after the theme-token fix below).
+- npm run test:db: 45 files / 723 tests; serial 6 files / 173 tests: all passed (run before the PDF palette moved to
+  theme tokens; reportFacts.db.test.ts 11/11 rerun after it).
+- worker:build, build, check:bundle: pass (no boundary, bundle-check or matrix change: same route file).
+- The PDF palette first used three hex literals and failed src/theme/tokens.test.ts (hard-coded colors may not grow);
+  it now reads the Light theme's executive colors from src/theme/themes.ts.
+- Sample PDF rendered to PNG with pdftoppm and inspected: 7 pages (one group per section), report title and section
+  heading on every page, totals as "Column: value" blocks with exact amounts, ids and hashes unbroken.
+Mutations (unit / db), each killed by at least one suite:
+- P1 glyph fallback disabled: killed / survived
+- P2 font disclosure never shown: killed / survived
+- P3 format allowlist case-insensitive: killed / survived
+- P4 amounts number-formatted in the PDF: killed / killed
+- P5 record blocks drop column labels: killed / survived
+- P6 surrogate-pair guard removed (#158 review Low): killed / survived
+- P7 section heading not repeated per page: killed / survived
+- P8 PDF served with a wrong content type: survived / killed
+
+Review round (fixes on top of 993a3ce): GREEN, same environment (fresh containers, CI digests, tmpfs).
+- lint, typecheck (app + worker): pass. npm test: 251 files / 4574 tests passed.
+- npm run test:db: 45 files / 723 tests; serial 6 files / 173 tests: all passed. worker:build: pass.
+- build and check:bundle NOT run locally: the shared disk had under 300 MB free (another session's work), and a Next
+  build needs more; CI runs both.
+- External watchdog (child process, SIGKILL after 15 s): 64 cells x 32,000 characters render in about 4.5 s
+  (spaced) and 4.7 s (unbroken), RSS about 270-285 MB; before the caps both were killed (over 60 s).
+Mutations, each killed:
+- R1 no per-cell cap (unit); R2 records may split across pages (unit); R3 truncation count not shown (unit);
+  R4 JSON carries an extra field (db); R5 PDF dates from the wall clock (unit); R6 table Note column dropped (unit);
+  R7 font note on the last section instead of page 1 (unit).
+
+Re-review round (fix on top of 3300cb5): GREEN, fresh containers (images re-pulled by the CI digests), tmpfs.
+- lint, typecheck (app + worker): pass. npm test: 251 files / 4579 tests passed.
+- npm run test:db: 45 files / 723 tests; serial 6 files / 173 tests: all passed.
+- worker:build, build, check:bundle: pass.
+- Caps now apply only to cells that carry imported or configured free text (DATA_TEXT_CELLS in the model: the
+  engagement name and declared-source lists in the summary, Charge category, Providers, FOCUS versions, the
+  declared-source columns); model-authored text (labels, headers, Note reasons, warnings) is never budgeted, with an
+  8,000-character per-cell ceiling as a guard only (it is bounded by construction; the longest is the import Note).
+- Render cost (external timeouts): hostile 64 x 32,000 spaced 4.4 s / 273 MB, unbroken 4.3 s / 275 MB; 200 charge
+  categories 8.9 s / 401 MB; 150 staged-artifact import records 21.3 s / 710 MB (unchanged by this fix; see limits).
+Mutations (unit): F1 every cell budgeted: killed; F2 floor 200 -> 20: killed; F3 plural note for one cut cell:
+killed; F4 model-text ceiling too low: killed; F5 summary data rows not capped: killed (after adding the
+engagement-name cap test).

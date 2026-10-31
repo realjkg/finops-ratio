@@ -22,6 +22,8 @@ import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
 import ExcelJS from 'exceljs';
 import { createReportFactsRoute } from './reportFactsRoute';
 import { createEngagementReportRoute } from './engagementReportRoute';
+import { buildEngagementReportModel, type EngagementReportModel } from '../../reports/engagementReportModel';
+import { pdfShownStrings } from '../../reports/fixtures/pdfText';
 import { closeReaderPools } from './readerPool';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
 import { NA_REASONS, SPAN_COVERS, SPAN_PARTIAL, type ReportFacts } from '../../reports/reportFacts';
@@ -202,6 +204,30 @@ describe('engagement report XLSX (GET /api/v1/reports/engagement) over the impor
     return { rows };
   }
   const engagementEnv = { RATIO_MODE: 'engagement', RATIO_ENGAGEMENT_CONFIG: ENGAGEMENT_CONFIG };
+
+  it('the same model as JSON and as PDF (engagement mode): identical cells; the PDF carries the exact amounts', async () => {
+    const get = async (format: string) => {
+      const route = createEngagementReportRoute({ env: { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_READER_DATABASE_URL: reader.url, ...engagementEnv }, logger: () => undefined, now: () => NOW });
+      const res = await call(route, makeReq({ headers: bearer(), query: { period: '2024-09', format } }));
+      expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
+      return res;
+    };
+    const json = await get('json');
+    const model = json.body as EngagementReportModel;
+    // Exactly the model, nothing else (no tenant id or other server fields): rebuilt from the facts route.
+    expect(Object.keys(model).sort()).toEqual(['generatedAt', 'period', 'schema', 'sections', 'title']);
+    const factsRoute = createReportFactsRoute({ env: { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_READER_DATABASE_URL: reader.url, ...engagementEnv }, logger: () => undefined, now: () => NOW });
+    const facts = (await call(factsRoute, makeReq({ headers: bearer(), query: { period: '2024-09' } }))).body as ReportFacts;
+    const cfg = JSON.parse(fs.readFileSync(ENGAGEMENT_CONFIG, 'utf8'));
+    expect(model).toEqual(buildEngagementReportModel(facts, { id: cfg.engagementId, displayName: cfg.displayName }));
+    const { rows } = await workbook(engagementEnv, '2024-09');
+    expect(rows('Totals by currency')).toEqual([model.sections[1].columns, ...model.sections[1].rows].map((r) => (r.at(-1) === '' ? r.slice(0, -1) : r)));
+    const pdf = await get('pdf');
+    expect(pdf.headers['content-type']).toBe('application/pdf');
+    expect(pdf.headers['content-disposition']).toBe('attachment; filename="ratio-engagement-report-2024-09-2026-10-30T12-00-00Z.pdf"');
+    const shown = pdfShownStrings(pdf.body as Buffer).join('\n');
+    for (const v of [AWS_SEP.billedCost, AWS_SEP.effectiveCost, '-2.61370000000', '-3.00000000000']) expect(shown).toContain(v);
+  });
 
   it('engagement mode (tenant from the config): exact control totals, Credit separate, engagement and scope identified', async () => {
     const { rows } = await workbook(engagementEnv, '2024-09');
