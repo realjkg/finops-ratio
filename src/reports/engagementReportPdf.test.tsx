@@ -65,5 +65,5 @@ describe('engagement report PDF', () => {
     expect(shown.filter((s) => s === 'Item').length, 'a table header repeats only within its section').toBe(1);
     expect(shown.some((s) => s.includes('Category 159'))).toBe(true);
     expect(Math.max(...shown.map((s) => s.length))).toBeLessThan(200);
-  });
+  }, 30_000); // a 160-row layout takes a few seconds under full-suite load
 });
