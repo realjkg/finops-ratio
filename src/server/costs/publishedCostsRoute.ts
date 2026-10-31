@@ -22,6 +22,11 @@ import { INTERNAL_ERROR_MESSAGE, logInternalError, pathOnly } from '@/server/gat
 import { engagementMode } from '@/engagement/config';
 import type { Permission } from '@/engagement/auth/authz';
 import { checkReportAccess, type ReportAccessDeps } from '@/engagement/auth/reportAccess';
+import { LoginGate } from '@/engagement/auth/routes';
+import { SlidingWindowRateLimiter as Limiter } from '@/server/gateway/rateLimit';
+
+const sharedSessionLimiter = new Limiter(60, 60_000);
+const sharedRenderGate = new LoginGate(2);
 import { evaluateLiveDataAuth, THROTTLED_MESSAGE, WEAK_TOKEN_MESSAGE, type LiveAuthResult } from '@/server/gateway/liveDataAuth';
 import type { SlidingWindowRateLimiter } from '@/server/gateway/rateLimit';
 import { parsePublishedCostsQuery } from './query';
@@ -52,6 +57,10 @@ export interface PublishedCostsRouteDeps {
   now?: () => Date;
   /** R2 slice C: the named-user session check of the report routes (tests inject the store, clock and audit sink). */
   access?: ReportAccessDeps;
+  /** Session report reads per user (default 60 per minute, per process). */
+  sessionLimiter?: SlidingWindowRateLimiter;
+  /** Concurrent XLSX/PDF renders for session requests (default 2). */
+  renderGate?: LoginGate;
 }
 
 type Parsed<Q> = { ok: true; value: Q } | { ok: false; message: string };
@@ -160,6 +169,7 @@ export function createReaderRoute<Q>(deps: PublishedCostsRouteDeps, spec: Reader
     const env = envOf();
     if (spec.session && req.headers.authorization === undefined && isEngagement(env)) {
       // Session path: authentication and authorization before the query and the method; the DB only after an allow.
+      res.setHeader('Vary', 'Cookie');
       const parsed = spec.parse(req.query ?? {});
       const access = checkReportAccess(req, env, parsed.ok ? spec.session.permission(parsed.value) : 'reports:read', parsed.ok ? spec.session.format(parsed.value) : 'invalid', deps.access);
       if (!access.ok) return sendError(res, access.status, access.code, access.message);
@@ -167,11 +177,24 @@ export function createReaderRoute<Q>(deps: PublishedCostsRouteDeps, spec: Reader
         res.setHeader('Allow', 'GET');
         return sendError(res, 405, 'method_not_allowed', 'Method not allowed');
       }
+      const rl = (deps.sessionLimiter ?? sharedSessionLimiter).take(`u:${access.userId}`);
+      if (!rl.allowed) {
+        res.setHeader('Retry-After', String(rl.retryAfterSec));
+        return sendError(res, 429, 'rate_limited', 'Too many report requests. Try again later.');
+      }
+      // XLSX/PDF renders are CPU and memory heavy: a small global cap for session requests.
+      const gate = parsed.ok && spec.session.permission(parsed.value) === 'reports:export' ? (deps.renderGate ?? sharedRenderGate) : null;
+      if (gate && !gate.tryEnter()) {
+        res.setHeader('Retry-After', '1');
+        return sendError(res, 503, 'busy', 'Report export is busy. Try again in a moment.');
+      }
       try {
         await handler(req, res);
       } catch (err) {
         const requestId = logInternalError(err, { method: req.method, path: req.url });
         if (!res.headersSent) res.status(500).json({ error: { code: 'internal_error', message: INTERNAL_ERROR_MESSAGE, requestId } });
+      } finally {
+        gate?.leave();
       }
       return;
     }

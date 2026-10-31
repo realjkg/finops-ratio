@@ -85,7 +85,8 @@ for (const theme of Object.keys(MAX)) {
     let failing = 0;
     const rows: string[] = [];
     const dump: unknown[] = [];
-    for (const route of PAGES) {
+    // /engagement exists only in engagement mode (404 here): tests/engagement/report-page.spec.ts audits it.
+    for (const route of PAGES.filter((r) => r !== '/engagement')) {
       await page.goto(route);
       await page.waitForLoadState('networkidle');
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);

@@ -54,7 +54,7 @@ const LEGACY = { legacyService: 'D' } as const;
 export const ROUTE_MATRIX: readonly RouteRow[] = deepFreeze([
   r('/', 'findings'), r('/overview', 'overview'), r('/workloads', 'workloads'), r('/connectors', 'connectors'),
   r('/costsource', 'costsource'), r('/attribution', 'attribution'), r('/prediction', 'prediction'),
-  r('/tokenomics', 'tokenomics'), r('/frameworks', 'frameworks'), r('/reports', 'reports'), r('/finio', 'finio_export'),
+  r('/tokenomics', 'tokenomics'), r('/frameworks', 'frameworks'), r('/reports', 'reports'), r('/engagement', 'reports'), r('/finio', 'finio_export'),
   r('/outcomes', 'outcomes'), r('/mission', 'outcomes'), r('/agent-workflows', 'frank'),
   r('/demo', 'demo', PUBLIC), r('/hello', 'demo', PUBLIC), r('/finio/demo', 'demo', PUBLIC),
   r('/simulation', 'simulation', SIM), r('/workspace', 'simulation', SIM),

@@ -48,6 +48,7 @@ __pycache__/
 # Customer simulation: durable local state, sessions, and browser test output
 .ratio-simulation/
 .simulation-test-results/
+.engagement-test-results/
 
 .next-simulation-*/
 .next-verified/
