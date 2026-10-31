@@ -1,0 +1,6 @@
+R2 slice C RED evidence (tests committed before the implementation)
+$ npx vitest run --cache=false src/server/costs/reportSessionAccess.test.ts
+  -> Tests 4 failed | 5 passed (9): no session path exists, so allowed users get 401 instead of reaching the read,
+     no report_access audit events, the bad-query/POST ordering and the fail-closed 503 cases.
+     (The deny cases already pass: today every cookie-only request is refused by the machine-token check.)
+GREEN counts and mutation results are in the PR body.
