@@ -1,37 +1,28 @@
-// R2 slice C: in engagement mode the report routes (/api/v1/reports/facts and
-// /api/v1/reports/engagement json|xlsx|pdf) accept a named-user session and
-// decide access with authorize(): active user, this tenant and engagement,
-// ACTIVE membership, reports:read (facts, json) or reports:export (xlsx, pdf).
-// Deny by default; uniform 401/403; the database is never reached on a denial.
-// The machine-token path is unchanged. SYNTHETIC users; no DB (the pool
-// factory is a spy that throws, so an allowed request ends in the generic 500).
+// R2 slice C: engagement-mode report routes accept a named-user session decided by authorize(); deny by default, the DB
+// only after an allow (the pool spy throws, so an allowed request ends in the generic 500). SYNTHETIC users; no DB.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { NextApiHandler, NextApiRequest } from 'next';
+import type { NextApiRequest } from 'next';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SESSION_COOKIE } from '@/engagement/auth/http';
 import { EngagementSessionStore, SESSION_IDLE_MS } from '@/engagement/auth/session';
 import type { ReportAuditEvent } from '@/engagement/auth/reportAccess';
 import { createEngagementReportRoute } from './engagementReportRoute';
 import { createReportFactsRoute } from './reportFactsRoute';
-import { bearer, makeRes, TEST_API_TOKEN, type TestRes } from './testing/http';
+import { createPublishedCostsRoute } from './publishedCostsRoute';
+import { bearer, call, TEST_API_TOKEN, type TestRes } from './testing/http';
 
 const CONFIG = path.resolve(__dirname, '../../../fixtures/engagement/example/engagement.json');
 const T = '5f0c1a7e-2b3d-4c5e-8f60-71829a3b4c5d';
 const E = 'example-focus-sample';
 const OTHER_T = '22222222-2222-4222-8222-222222222222';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'r2-report-'));
-const USERS = path.join(dir, 'users.json');
-const T0 = Date.UTC(2026, 10, 1, 12);
+const [USERS, T0] = [path.join(dir, 'users.json'), Date.UTC(2026, 10, 1, 12)];
 const env = { RATIO_MODE: 'engagement', RATIO_ENGAGEMENT_CONFIG: CONFIG, RATIO_ENGAGEMENT_USERS: USERS, RATIO_ENGAGEMENT_ORIGIN: 'https://ratio.example.test',
   RATIO_ENGAGEMENT_STATE: path.join(dir, 's.sqlite'), RATIO_READER_DATABASE_URL: 'postgres://reader@127.0.0.1:1/ratio', RATIO_API_TOKEN: TEST_API_TOKEN };
-let store: EngagementSessionStore;
-let poolFor: ReturnType<typeof vi.fn>;
-let audits: ReportAuditEvent[];
-let now = T0;
-const logs: string[] = [];
-const tokens: string[] = [];
+let [store, poolFor, audits, now] = [new EngagementSessionStore(':memory:'), vi.fn(), [] as ReportAuditEvent[], T0];
+const [logs, tokens]: string[][] = [[], []];
 const deps = (e: Record<string, string | undefined> = env) => ({ env: e, poolFor: poolFor as never, logger: () => undefined, now: () => new Date(now), access: { store: () => store, now: () => now, audit: (a: ReportAuditEvent) => { audits.push(a); } } });
 const facts = (e?: Record<string, string | undefined>) => createReportFactsRoute(deps(e));
 const report = (e?: Record<string, string | undefined>) => createEngagementReportRoute(deps(e));
@@ -39,18 +30,11 @@ function req(o: { token?: string; query?: Record<string, string>; method?: strin
   return { method: o.method ?? 'GET', url: '/api/v1/reports/x', query: o.query ?? { period: '2024-09' }, body: undefined, headers: { ...(o.headers ?? {}) },
     cookies: o.token === undefined ? {} : { [SESSION_COOKIE]: o.token }, socket: { remoteAddress: '10.0.0.9' } } as unknown as NextApiRequest;
 }
-async function call(h: NextApiHandler, r: NextApiRequest): Promise<TestRes> {
-  const res = makeRes();
-  await h(r, res);
-  return res;
-}
 const session = (userId: string, o: { tenantId?: string; engagementId?: string } = {}) => {
-  const t = store.create({ userId, tenantId: o.tenantId ?? T, engagementId: o.engagementId ?? E }, now).token;
-  tokens.push(t);
-  return t;
+  tokens.push(store.create({ userId, tenantId: o.tenantId ?? T, engagementId: o.engagementId ?? E }, now).token);
+  return tokens.at(-1)!;
 };
-const code = (r: TestRes) => (r.body as { error?: { code?: string } })?.error?.code;
-const Q = (format: string) => ({ period: '2024-09', format });
+const [code, Q] = [(r: TestRes) => (r.body as { error?: { code?: string } })?.error?.code, (format: string) => ({ period: '2024-09', format })];
 
 beforeAll(() => {
   const m = (userId: string, role: string, status = 'active') => ({ userId, tenantId: T, engagementId: E, role, status });
@@ -61,10 +45,7 @@ beforeAll(() => {
   }));
 });
 beforeEach(() => {
-  now = T0;
-  store = new EngagementSessionStore(':memory:');
-  audits = [];
-  poolFor = vi.fn(() => { throw new Error('DB REACHED'); });
+  [now, store, audits, poolFor] = [T0, new EngagementSessionStore(':memory:'), [], vi.fn(() => { throw new Error('DB REACHED'); })];
   for (const k of ['info', 'warn', 'error'] as const) vi.spyOn(console, k).mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(' ')); });
 });
 afterAll(() => {
@@ -89,11 +70,8 @@ describe('session access to the report routes (engagement mode)', () => {
   });
 
   it('role matrix: reports:read for facts and json, reports:export for xlsx and pdf; a suspended membership is refused', async () => {
-    const want: Array<[string, string, boolean]> = [
-      ['v', 'facts', true], ['v', 'json', true], ['v', 'xlsx', false], ['v', 'pdf', false],
-      ['a', 'facts', true], ['a', 'json', true], ['a', 'xlsx', true], ['a', 'pdf', true],
-      ['c', 'facts', false], ['c', 'json', false], ['c', 'xlsx', false], ['ms', 'json', false], ['ms', 'facts', false],
-    ];
+    const want: Array<[string, string, boolean]> = [['v', 'facts', true], ['v', 'json', true], ['v', 'xlsx', false], ['v', 'pdf', false], ['a', 'facts', true], ['a', 'json', true],
+      ['a', 'xlsx', true], ['a', 'pdf', true], ['c', 'facts', false], ['c', 'json', false], ['c', 'xlsx', false], ['ms', 'json', false], ['ms', 'facts', false]];
     for (const [user, format, allowed] of want) {
       poolFor.mockClear();
       const r = format === 'facts' ? await call(facts(), req({ token: session(user) })) : await call(report(), req({ token: session(user), query: Q(format) }));
@@ -135,28 +113,15 @@ describe('session access to the report routes (engagement mode)', () => {
 });
 
 describe('the machine-token path is separate and unchanged', () => {
-  it('a Bearer request never falls back to a session: a wrong token with a valid session cookie is 401', async () => {
-    const r = await call(report(), req({ token: session('a'), query: Q('json'), headers: bearer('wrong-token-of-sufficient-length-0123456789') }));
-    expect(r.statusCode).toBe(401);
-    expect(poolFor).not.toHaveBeenCalled();
-    expect(audits).toEqual([]);
-  });
-
-  it('the valid machine token still reads (reaches the database) without any session', async () => {
-    const r = await call(report(), req({ query: Q('json'), headers: bearer() }));
-    expect([r.statusCode, poolFor.mock.calls.length > 0]).toEqual([500, true]);
-  });
-
-  it('outside engagement mode a session cookie grants nothing (machine path: 401)', async () => {
+  it('Bearer never falls back to a session; the valid token still reads; outside engagement mode and on published costs a cookie grants nothing', async () => {
     const plain = { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_API_TENANT_ID: '11111111-1111-4111-8111-111111111111', RATIO_READER_DATABASE_URL: env.RATIO_READER_DATABASE_URL };
-    expect((await call(report(plain), req({ token: session('a'), query: Q('json') }))).statusCode).toBe(401);
-    expect(poolFor).not.toHaveBeenCalled();
-  });
-
-  it('published costs (/api/v1/costs/published) stay machine-token only: no session path', async () => {
-    const { createPublishedCostsRoute } = await import('./publishedCostsRoute');
-    const r = await call(createPublishedCostsRoute(deps()), req({ token: session('a'), query: { period: '2024-09' } }));
-    expect(r.statusCode).toBe(401);
-    expect(poolFor).not.toHaveBeenCalled();
+    const denied = [
+      await call(report(), req({ token: session('a'), query: Q('json'), headers: bearer('wrong-token-of-sufficient-length-0123456789') })),
+      await call(report(plain), req({ token: session('a'), query: Q('json') })),
+      await call(createPublishedCostsRoute(deps()), req({ token: session('a') })),
+    ];
+    expect([denied.map((r) => r.statusCode), poolFor.mock.calls.length, audits]).toEqual([[401, 401, 401], 0, []]);
+    expect((await call(report(), req({ query: Q('json'), headers: bearer() }))).statusCode).toBe(500); // reached the (throwing) pool
+    expect(poolFor).toHaveBeenCalledTimes(1);
   });
 });
