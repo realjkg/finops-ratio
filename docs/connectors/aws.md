@@ -30,10 +30,17 @@ row (M1b) and is refused here (`TABLE_UNSUPPORTED`).
    batch names the exact manifest it came from. A refreshed manifest is a new revision: the period
    is refused (`PERIOD_ALREADY_PUBLISHED`, exit 3) until the operator re-runs with `--restate`, which
    supersedes the published batch.
-5. Manifest controls (per-file row counts and similar) are recorded only as **aggregate controls**
-   (`control: aggregate, proof: false`). They are never used as completeness proof, and they are
-   not passed to reconciliation: without an operator control total the period publishes as
-   `unverified`.
+5. Manifest controls (per-file row counts and similar) are **not persisted** by a real fetch and are
+   never used as completeness proof or passed to reconciliation: without an operator control total
+   the period publishes as `unverified`. What a real fetch records is the delivery id (it carries
+   the manifest's sha256, item 4) and the normalization versions in the batch's staged manifest
+   (`x-ratio-import`, item 3). The library function `deliveryEvidence()` builds an in-memory
+   aggregate-control record (`control: aggregate, proof: false`), but only unit tests call it; no
+   Connector Evidence Record is written from it yet (no M0a/M0b hook exists for that).
+6. A range-less fetch (no `--from/--to`) reads only the periods the export has. If a month between
+   the first and last delivered month has no folder at all, the fetch still succeeds and the result
+   carries a `warnings` entry listing those gap months. Give `--from/--to` to get a
+   `PERIOD_NOT_DELIVERED` refusal for them instead. The warning never fails a fetch, whatever the span of delivered months (the 36-month cap applies only to an explicit `--from/--to`); it names up to 24 gap months and counts the rest.
 
 ## Refusals (never a silent empty period)
 
@@ -42,7 +49,7 @@ row (M1b) and is refused here (`TABLE_UNSUPPORTED`).
 | `EXPORT_EMPTY` | The export's metadata folder has no billing-period partition. |
 | `PERIOD_NOT_DELIVERED` | A month inside `--from/--to` has no delivery. |
 | `LAYOUT_CASE_MISMATCH` | The partition is spelled other than `BILLING_PERIOD=` (for example lower case). |
-| `MANIFEST_MISSING` / `MANIFEST_INVALID` | No manifest, or one that is malformed, lists a missing file, or points outside the export. |
+| `MANIFEST_MISSING` / `MANIFEST_INVALID` | No manifest, or one that is malformed, lists a missing file, or points outside the export (another bucket, another folder, a `..` path). Under `latest-complete`, also a newer manifest that is invalid (see below). |
 | `MANIFEST_AMBIGUOUS` | More than one manifest for a period (default rule; see below). |
 | `FORMAT_UNSUPPORTED` | Parquet or ZIP data files (1.0 limit: TEXT_OR_CSV with GZIP only). |
 | `FOCUS_TABLE_MISMATCH` | The manifest names another table than `params.table`. |
@@ -56,6 +63,14 @@ period is NOT VERIFIED. `manifestSelection: latest-complete` (use the newest man
 files all exist; a LastModified tie stays ambiguous) is accepted only together with
 `manifestSelectionEvidence: sha256:<hex>`, the digest of the live Connector Evidence Record that
 proved the rule. Turning it on is an owner decision after the live verification below.
+
+Under `latest-complete`, a newer manifest whose listed files have **not landed yet** is skipped and
+the newest complete one is used. A newer manifest that is **invalid** (malformed JSON, a file in
+another bucket or outside the export's data folder, a `..` path, a wrong billing period, an
+unsupported scheme, or a manifest that lists no data files) refuses the period with `MANIFEST_INVALID`; the older manifest is never
+published in its place. An invalid manifest with the same LastModified as the newest complete one
+cannot be ordered and also refuses. An invalid manifest that is strictly older than the chosen one
+is ignored.
 
 ## Configuration
 
@@ -71,10 +86,12 @@ Engagement config (`RATIO_ENGAGEMENT_CONFIG`), one source:
   `ListTables`) or `FOCUS_1_0_AWS` (NOT VERIFIED; seen only in third-party code).
 - `endpoint` (optional): an `https://` origin for an S3-compatible endpoint; `http://` only for a
   loopback test store. Without it the client uses the regional AWS endpoint.
-- Known limit (pending owner decision): R1's credential heuristic refuses any params value of 40 or
-  more characters made only of letters, digits and `+ / _ = -`. A long bucket name or S3 prefix
-  (for example a 41-character bucket name) is therefore refused as "credential-looking" until that
-  rule is narrowed.
+- Known limit: R1's credential heuristic (`/^[A-Za-z0-9+/_=-]{40,}$/` on params values) refuses any
+  params value of 40 or more characters made only of letters, digits and `+ / _ = -`. That
+  includes a long `bucket`, a long `prefix` and a long `exportName` (every export name of 40 or
+  more such characters), including in `cli fetch` through `engagementSpec.ts`
+  (`ENGAGEMENT_CONFIG_INVALID`, exit 2). The owner approved the config change; it ships as a
+  separate pull request in progress, and nothing was changed here.
 - The worker also needs a file-import source with the same key (`cli source add`), which receives
   the staged objects.
 

@@ -134,6 +134,18 @@ function monthsOf(range: { from: string; to: string }): string[] {
   return out;
 }
 
+/** A range-less fetch reads only the periods the export has; months between the first and last that have none are named. Never throws, no span cap. */
+function gapWarning(present: string[]): string[] {
+  const idx = (m: string) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1;
+  const shown: string[] = [];
+  let total = 0;
+  for (let i = 1; i < present.length; i++) {
+    for (let x = idx(present[i - 1]) + 1; x < idx(present[i]); x++, total++) if (shown.length < 24) shown.push(`${Math.floor(x / 12)}-${String((x % 12) + 1).padStart(2, '0')}`);
+  }
+  if (!total) return [];
+  return [`no delivery exists for ${total} billing month(s) inside the delivered span: ${shown.join(', ')}${total > 24 ? `, and ${total - 24} more` : ''}; this fetch had no --from/--to, so they were not refused (give a range to get PERIOD_NOT_DELIVERED)`];
+}
+
 export function createAwsFocusRetriever(ctx: Parameters<RetrieverFactory>[0], deps: { fetch?: typeof fetch; now?: () => Date } = {}): AwsFocusRetriever {
   const p = parseFocusParams(ctx.params);
   const { client } = s3ClientFromSecret({ secret: ctx.secret, region: p.region, endpoint: p.endpoint, registerSecret: ctx.registerSecret, ...deps });
@@ -141,6 +153,7 @@ export function createAwsFocusRetriever(ctx: Parameters<RetrieverFactory>[0], de
   const source = new S3FocusExportSource({ client, location: loc });
   const version = TABLES[p.table];
   const facts = new Map<string, Facts>();
+  let warnings: string[] = [];
   const refusal = (period: string, code: string, message: string): Delivery =>
     ({ id: `aws-focus ${period.slice(0, 7)} ${code}`, billingPeriod: period, completion: 'incomplete', objects: [{ name: 'refused', ref: { refuse: { code, message } } satisfies Ref }] });
 
@@ -172,19 +185,39 @@ export function createAwsFocusRetriever(ctx: Parameters<RetrieverFactory>[0], de
     return { upper, other };
   }
 
-  /** CREATE_NEW_REPORT rule (evidence-gated): the newest manifest whose data files all exist; a tie stays ambiguous. */
+  /**
+   * CREATE_NEW_REPORT rule (evidence-gated): the newest manifest whose data files all exist; a tie stays ambiguous.
+   * A newer manifest whose files have not landed yet is skipped (documented rule). A newer manifest that is INVALID
+   * (other bucket, outside the export, malformed, ../ path, wrong period) refuses the period: the older manifest is
+   * never published in its place.
+   */
   async function latestComplete(period: string): Promise<PeriodSet | { code: string; message: string }> {
     const [meta, data] = await Promise.all([list(periodMetadataPrefix(loc, period)), list(dataPrefix(loc, period))]);
     const listing = new Map(data.keys.map((k) => [k.key, { size: k.size, etag: k.etag }]));
+    // Parsed against a listing that has every file: what fails then is invalid, not merely not landed yet.
+    const structural = new (class extends Map<string, { size: number; etag: string }> { override get() { return { size: 0, etag: '"structure-only"' }; } })();
     const complete: Array<PeriodSet & { at: number }> = [];
+    const invalid: Array<{ at: number; message: string }> = [];
     for (const m of meta.keys.filter((k) => isManifestKey(k.key))) {
       const r = await client.send(new GetObjectCommand({ Bucket: loc.bucket, Key: m.key, IfMatch: m.etag }));
       const bytes = await collect(r.Body as Readable, 16 * MiB);
+      const shape = parseManifest(bytes, { location: loc, billingPeriod: period, listing: structural });
+      if (!shape.ok) {
+        invalid.push({ at: m.at, message: shape.message });
+        continue;
+      }
+      if (!shape.artifacts.length) {
+        invalid.push({ at: m.at, message: 'manifest lists no data files' });
+        continue;
+      }
       const parsed = parseManifest(bytes, { location: loc, billingPeriod: period, listing });
       if (parsed.ok && parsed.artifacts.every((a) => a.version) && Number.isFinite(m.at)) complete.push({ artifacts: parsed.artifacts, control: parsed.control, manifestKey: m.key, manifestBytes: bytes, at: m.at });
     }
     complete.sort((a, b) => b.at - a.at);
     const ym = period.slice(0, 7);
+    // An invalid manifest that is not provably older than the chosen one blocks the period (equal or unknown time cannot be ordered).
+    const blocking = invalid.find((i) => !complete.length || !(i.at < complete[0].at));
+    if (blocking) return { code: 'MANIFEST_INVALID', message: `a manifest for ${ym} is invalid${complete.length ? ' and is not older than the newest complete one' : ''}, so no manifest is used and nothing was staged: ${blocking.message}` };
     if (!complete.length) return { code: 'MANIFEST_INVALID', message: `no manifest for ${ym} lists only data files that exist; nothing was staged` };
     if (complete.length > 1 && complete[1].at === complete[0].at) return { code: 'MANIFEST_AMBIGUOUS', message: `two complete manifests for ${ym} have the same LastModified; refusing to guess which is current` };
     return complete[0];
@@ -207,10 +240,12 @@ export function createAwsFocusRetriever(ctx: Parameters<RetrieverFactory>[0], de
   }
 
   async function listDeliveries(range?: { from: string; to: string }): Promise<Delivery[]> {
+    warnings = [];
     try {
       const { upper, other } = await periods();
       const months = range ? monthsOf(range) : [...new Set([...upper, ...other])].sort();
       if (!months.length) throw new ManagedError('EXPORT_EMPTY', 'the export metadata folder has no BILLING_PERIOD= partition: nothing is delivered under this bucket, prefix and exportName');
+      if (!range) warnings = gapWarning(months);
       const wanted = months.filter((m) => upper.has(m));
       const listed = wanted.length ? await source.listPeriods({ from: wanted[0], to: wanted[wanted.length - 1] }) : [];
       const byPeriod = new Map(listed.map((l) => [l.ok ? l.set.billingPeriod : l.billingPeriod, l]));
@@ -272,6 +307,7 @@ export function createAwsFocusRetriever(ctx: Parameters<RetrieverFactory>[0], de
     describe: () => ({ connector: 'aws-data-exports', sourceKind: AWS_FOCUS_KIND, schemaVersion: version, dataset: p.table }),
     probe,
     listDeliveries,
+    warnings: () => [...warnings],
     async open(ref: unknown) {
       const r = ref as Ref;
       if ('refuse' in r) throw new ManagedError(r.refuse.code, r.refuse.message);

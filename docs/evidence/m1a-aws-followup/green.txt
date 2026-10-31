@@ -1,0 +1,14 @@
+M1a follow-up (invalid newer manifest, doc corrections, gap-month warning, review round 2) -- GREEN
+Base: origin/main f8f1a37. Gates run sequentially in the foreground on the final tree:
+- npm run lint: pass; npm run typecheck (app) and tsc -p tsconfig.worker.json (worker): pass
+- npx vitest run: Test Files 239 passed (239); Tests 4387 passed (4387) (focusRetriever.test.ts: 28 tests)
+- npm run test:db (own Postgres 16 :35432, SeaweedFS :38333, CI digests, -volume.max=64 -master.volumeSizeLimitMB=64
+  -volume.minFreeSpace=300MiB): 44 files / 712 tests; serial 6 files / 173 tests; all passed; containers removed afterwards
+- npm run worker:build, npm run build, npm run check:bundle: pass (clientFiles 137, serverFiles 133, no problems)
+Mutations (each alone on focusRetriever.test.ts, then reverted; baseline 28 pass), 11 applied, 11 killed:
+- invalid newer manifest never blocks; equal LastModified not blocking; unknown LastModified invalid not blocking
+- not-landed manifest treated as invalid; any invalid manifest blocks even an older one
+- no-complete-and-none-invalid branch changes its code; empty newer manifest accepted
+- gap warning: capped at 36 months (the round 2 blocker), month 12 skipped at the year boundary, first gap month skipped,
+  not reset between listings, truncation count off by one, 25 shown instead of 24, computed from delivered months with a range
+- runtime drops warnings from the result (earlier round)

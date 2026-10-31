@@ -1,0 +1,20 @@
+RED (tests only, before the fix): npx vitest run src/connectors/managed/aws/focusRetriever.test.ts
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > a data file in another bucket in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > a data file outside the export data folder in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > malformed JSON in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > a ../ path in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > a billing period of another folder in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > an unsupported scheme in the newer manifest: MANIFEST_INVALID, never the older manifest
+listDeliveries and open > latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped > an invalid manifest with the same LastModified as the newest complete one cannot be ordered: MANIFEST_INVALID
+listDeliveries and open > a range-less fetch skipping a missing middle month warns with the gap months (not a failure); a contiguous or ranged fetch does not
+ Test Files  1 failed (1)
+      Tests  8 failed | 20 passed (28)
+Guards that pass before and after: newer manifest with files not landed -> older published; invalid OLDER manifest does not block a newer complete one.
+(The RED commit f1c265e had 6 invalid-manifest cases; two were dropped later to fit the size budget.)
+
+Review round 2 (blocker: gapWarning used monthsOf and threw RANGE_TOO_LONG on a range-less fetch spanning over 36 months):
+RED on the new tests only (commit after e450cb3): npx vitest run src/connectors/managed/aws/focusRetriever.test.ts -> Tests 2 failed | 26 passed (28)
+- gap warning never fails a fetch (40 contiguous months staged 0, status failed with RANGE_TOO_LONG before the fix)
+- a newer manifest listing no data files must be MANIFEST_INVALID
+(The other new cases, year boundary, 24 shown, reset per listing, unknown LastModified, no-complete branch, guard earlier gaps in mutation coverage and pass on both sides.)
