@@ -8,7 +8,7 @@ for (const width of [390, 1440]) {
     await editor.locator('label', { hasText: /^Light$/ }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     // Custom themes live behind the closed Developer disclosure.
-    await expect(editor.locator('details')).not.toHaveAttribute('open', '');
+    await expect(editor.locator('details').first()).not.toHaveAttribute('open', '');
     await editor.getByText('Developer: contrast audit', { exact: true }).click();
     await editor.getByRole('textbox', { name: 'Name', exact: true }).fill('brownstone');
     await editor.getByRole('button', { name: 'Save and apply', exact: true }).click();

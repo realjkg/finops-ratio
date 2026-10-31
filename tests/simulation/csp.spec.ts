@@ -67,6 +67,7 @@ test('theme switches and persists; the data-URL export downloads', async ({ page
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'high-contrast');
   await page.getByRole('button', { name: 'Preview' }).click();
+  await page.getByText('Developer: contrast audit', { exact: true }).click(); // the export link sits behind the closed disclosure
   const download = page.waitForEvent('download');
   await page.getByRole('link', { name: 'Export current theme' }).click();
   expect((await download).suggestedFilename()).toMatch(/\.json$/);
