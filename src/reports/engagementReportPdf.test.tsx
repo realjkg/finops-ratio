@@ -140,7 +140,7 @@ describe('engagement report PDF', () => {
       const texts = treeTexts(<EngagementReportDocument model={m} />);
       expect(texts.some((t) => t.includes('see XLSX/JSON for the full text'))).toBe(true);
       const notes = m.sections.flatMap((s) => s.rows.map((r) => r.at(-1)!)).filter((n) => n !== '');
-      expect(notes.length).toBeGreaterThan(60);
+      expect(notes.length).toBeGreaterThanOrEqual(3); // totals, source totals (partial effective) and the import Note
       for (const n of notes) expect(texts, n.slice(0, 60)).toContain(pdfGlyphText(n));
       for (const d of m.sections.find((s) => s.id === 'coverageGaps')!.rows.map((r) => r[1])) expect(texts).toContain(d);
       expect(texts.join('\n')).toContain(NA_REASONS.batchStatus);
@@ -164,6 +164,13 @@ describe('engagement report PDF', () => {
       input.batches[0].providers = [provider];
       const texts = treeTexts(<EngagementReportDocument model={buildEngagementReportModel(assembleReportFacts(input), ENGAGEMENT)} />);
       expect(texts).toContain(provider);
+    });
+
+    it('configured free text in the summary (the engagement name) is capped like imported data', () => {
+      const m = buildEngagementReportModel(assembleReportFacts(sampleInput()), { ...ENGAGEMENT, displayName: 'n '.repeat(3_000) });
+      const cell = treeTexts(<EngagementReportDocument model={m} />).find((t) => t.startsWith('n n '))!;
+      expect(cell.length).toBeLessThanOrEqual(PDF_CELL_MAX_CHARS + 80);
+      expect(cell).toMatch(/see XLSX\/JSON for the full text\]$/);
     });
 
     it('a single cut cell gets the singular page-1 note', () => {

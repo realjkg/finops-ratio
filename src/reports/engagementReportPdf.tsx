@@ -13,7 +13,7 @@
 import { Document, Page, StyleSheet, Text, View, renderToBuffer } from '@react-pdf/renderer';
 import type { Style } from '@react-pdf/types';
 import { BUILT_IN_THEMES } from '@/theme/themes';
-import type { EngagementReportModel, ReportSection } from './engagementReportModel';
+import { DATA_TEXT_CELLS, type EngagementReportModel, type ReportSection } from './engagementReportModel';
 
 // The print surface uses the Light theme's executive colors (no hard-coded colors; src/theme/tokens.test.ts).
 const LIGHT = BUILT_IN_THEMES.light.colors;
@@ -73,29 +73,36 @@ const T = ({ style, children }: { style: Style | Style[]; children: string }) =>
 export const PDF_CELL_MAX_CHARS = 2_000;
 export const PDF_TOTAL_MAX_CHARS = 100_000;
 export const PDF_CELL_FLOOR_CHARS = 200;
+/** Model-authored text (labels, reasons, warnings) is never budgeted; it is bounded by construction, and this ceiling only guards that. */
+export const PDF_MODEL_TEXT_MAX_CHARS = 8_000;
 export const PDF_TRUNCATION_NOTE = (n: number) =>
   `PDF length limit: ${n} cell value${n === 1 ? ' was' : 's were'} truncated (at most ${PDF_CELL_MAX_CHARS} characters per cell, and ${PDF_CELL_FLOOR_CHARS} per cell once the document holds ${PDF_TOTAL_MAX_CHARS}); the XLSX and JSON carry the full text.`;
 
-/** The model's text as this PDF shows it: glyph fallback, then the per-cell and document caps, in document order. */
+/**
+ * The model's text as this PDF shows it: glyph fallback for every cell; the per-cell cap, the document budget and
+ * the floor only for cells that carry imported or configured free text (DATA_TEXT_CELLS), in document order.
+ */
 function pdfView(model: EngagementReportModel) {
   let budget = PDF_TOTAL_MAX_CHARS;
   let glyph = 0;
   let cut = 0;
-  const show = (text: string) => {
+  const show = (text: string, data = false) => {
     const g = pdfGlyphText(text);
     if (g !== text) glyph += 1;
-    // Once the document budget is spent, every cell still keeps its first PDF_CELL_FLOOR_CHARS (amounts, ids, labels).
-    const limit = Math.min(PDF_CELL_MAX_CHARS, Math.max(budget, PDF_CELL_FLOOR_CHARS));
+    // Once the document budget is spent, every data cell still keeps its first PDF_CELL_FLOOR_CHARS.
+    const limit = data ? Math.min(PDF_CELL_MAX_CHARS, Math.max(budget, PDF_CELL_FLOOR_CHARS)) : PDF_MODEL_TEXT_MAX_CHARS;
     if (g.length <= limit) {
-      budget = Math.max(0, budget - g.length);
+      if (data) budget = Math.max(0, budget - g.length);
       return g;
     }
     cut += 1;
-    budget = Math.max(0, budget - limit);
+    if (data) budget = Math.max(0, budget - limit);
     return `${g.slice(0, limit)}... [truncated ${g.length - limit} characters; see XLSX/JSON for the full text]`;
   };
   const title = show(model.title);
-  const sections = model.sections.map((s) => ({ ...s, title: show(s.title), columns: s.columns.map(show), rows: s.rows.map((r) => r.map(show)) }));
+  const isData = (s: ReportSection, r: string[], i: number) =>
+    s.id === 'summary' ? i === 1 && DATA_TEXT_CELLS.summaryItems.includes(r[0]) : (DATA_TEXT_CELLS.columns[s.id] ?? []).includes(s.columns[i]);
+  const sections = model.sections.map((s) => ({ ...s, title: show(s.title), columns: s.columns.map((c) => show(c)), rows: s.rows.map((r) => r.map((c, i) => show(c, isData(s, r, i)))) }));
   return { title, sections, glyph, cut };
 }
 

@@ -30,3 +30,17 @@ Mutations, each killed:
 - R1 no per-cell cap (unit); R2 records may split across pages (unit); R3 truncation count not shown (unit);
   R4 JSON carries an extra field (db); R5 PDF dates from the wall clock (unit); R6 table Note column dropped (unit);
   R7 font note on the last section instead of page 1 (unit).
+
+Re-review round (fix on top of 3300cb5): GREEN, fresh containers (images re-pulled by the CI digests), tmpfs.
+- lint, typecheck (app + worker): pass. npm test: 251 files / 4579 tests passed.
+- npm run test:db: 45 files / 723 tests; serial 6 files / 173 tests: all passed.
+- worker:build, build, check:bundle: pass.
+- Caps now apply only to cells that carry imported or configured free text (DATA_TEXT_CELLS in the model: the
+  engagement name and declared-source lists in the summary, Charge category, Providers, FOCUS versions, the
+  declared-source columns); model-authored text (labels, headers, Note reasons, warnings) is never budgeted, with an
+  8,000-character per-cell ceiling as a guard only (it is bounded by construction; the longest is the import Note).
+- Render cost (external timeouts): hostile 64 x 32,000 spaced 4.4 s / 273 MB, unbroken 4.3 s / 275 MB; 200 charge
+  categories 8.9 s / 401 MB; 150 staged-artifact import records 21.3 s / 710 MB (unchanged by this fix; see limits).
+Mutations (unit): F1 every cell budgeted: killed; F2 floor 200 -> 20: killed; F3 plural note for one cut cell:
+killed; F4 model-text ceiling too low: killed; F5 summary data rows not capped: killed (after adding the
+engagement-name cap test).
