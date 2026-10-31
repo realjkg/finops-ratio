@@ -35,10 +35,10 @@ describe('isPublicAddress', () => {
   it('refuses loopback, private, link-local (metadata), CGNAT, multicast, unspecified, broadcast, documentation and their IPv6 / v4-mapped / NAT64 forms', () => {
     for (const ip of ['127.0.0.1', '127.255.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1', '100.127.255.254', '0.0.0.0', '0.1.2.3',
       '224.0.0.1', '239.1.1.1', '255.255.255.255', '198.18.0.1', '192.0.2.1', '198.51.100.1', '203.0.113.1', '192.0.0.1', '240.0.0.1',
-      '::1', '::', 'fc00::1', 'fd12:3456::1', 'fe80::1', 'febf::1', 'ff02::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:10.0.0.1', '64:ff9b::7f00:1', '64:ff9b::a9fe:a9fe', '2001:db8::1', 'not-an-ip', '']) {
+      '::1', '::', 'fc00::1', 'fd12:3456::1', 'fe80::1', 'febf::1', 'ff02::1', '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:10.0.0.1', '64:ff9b::7f00:1', '64:ff9b::a9fe:a9fe', '2001:db8::1', '2002:7f00:1::1', '2002:c0a8:101::1', '2001:0:4136:e378::1', '3fff::1', '3fff:fff::1', '2001:2::1', '2001:2:0:ffff::1', 'not-an-ip', '']) {
       expect(isPublicAddress(ip), ip).toBe(false);
     }
-    for (const ip of ['93.184.216.34', '8.8.8.8', '172.32.0.1', '100.128.0.1', '2606:4700:4700::1111', '2a00:1450:4001:80b::200e', '::ffff:8.8.8.8', '64:ff9b::808:808']) expect(isPublicAddress(ip), ip).toBe(true);
+    for (const ip of ['93.184.216.34', '8.8.8.8', '172.32.0.1', '100.128.0.1', '2606:4700:4700::1111', '2a00:1450:4001:80b::200e', '2001:4860:4860::8888', '2001:3::1', '3ffe:1000::1', '::ffff:8.8.8.8', '64:ff9b::808:808']) expect(isPublicAddress(ip), ip).toBe(true);
   });
 });
 
@@ -61,6 +61,11 @@ describe('guardedFetch', () => {
       await expect(f(url, OPTS), url).rejects.toThrow(/refused/);
     }
     expect(rec).toEqual([]); // nothing was ever connected
+  });
+
+  it('a DNS answer that never comes times out (refused) instead of hanging the sign-in', async () => {
+    const f = guardedFetch({ lookup: () => new Promise(() => {}), lookupTimeoutMs: 30, request: transport({}, []) });
+    await expect(f('https://idp.example.test/x', OPTS)).rejects.toThrow(/refused/);
   });
 
   it('never follows a redirect, caps the body size and times out', async () => {

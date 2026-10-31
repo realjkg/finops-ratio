@@ -1,0 +1,6 @@
+R2 review Lows (A3/B) RED evidence (tests committed before the implementation)
+$ npx vitest run --cache=false src/engagement/auth
+  -> Tests 4 failed | 73 passed (77): the scrypt slot after a throwing authentication (no injection seam yet),
+     6to4/Teredo/3fff::/20/2001:2::/48 treated as public, a DNS lookup that never answers hangs to the 5 s
+     request timeout, and /api/auth/oidc/start has no rate limit.
+GREEN counts and mutation results are in the PR body.
