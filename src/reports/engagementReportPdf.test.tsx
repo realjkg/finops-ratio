@@ -5,7 +5,7 @@
 // through the embedded fonts' ToUnicode maps carry the exact strings).
 import { spawnSync } from 'child_process';
 import path from 'path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { assembleReportFacts, NA_REASONS } from './reportFacts';
 import { buildEngagementReportModel, type EngagementReportModel } from './engagementReportModel';
 import {
@@ -295,11 +295,11 @@ describe('bundled fonts: declared scripts render faithfully and extract exactly'
     }, 20_000);
   }
 
-  it("at most 2 PDF renders run at once; a further request is refused as busy (no queue past the request deadline)", async () => {
-    expect(PDF_MAX_CONCURRENT_RENDERS).toBe(2);
+  it("one PDF render at a time (its text layer is set on the shared font objects); a further request is refused as busy", async () => {
+    expect(PDF_MAX_CONCURRENT_RENDERS).toBe(1);
     const m = buildEngagementReportModel(assembleReportFacts(sampleInput()), ENGAGEMENT);
     const results = await Promise.allSettled([renderEngagementReportPdf(m), renderEngagementReportPdf(m), renderEngagementReportPdf(m)]);
-    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled', 'rejected']);
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'rejected', 'rejected']);
     expect((results[2] as PromiseRejectedResult).reason).toBeInstanceOf(PdfBusyError);
     // The slots are released: the next render succeeds.
     expect((await renderEngagementReportPdf(m)).subarray(0, 5).toString('latin1')).toBe('%PDF-');
@@ -330,6 +330,40 @@ describe('unsupported text: preflight and the refusal policy (default refuse)', 
     // U+4E00 and the Kangxi radical U+2F00 are one glyph: U+4E00 is drawn, U+2F00 is refused (its text layer would read U+4E00).
     expect(pdfPreflight(withCells(['\u4e00 cost', 'other']))).toEqual({ cells: 0, complex: 0, emoji: 0, other: 0 });
     expect(pdfPreflight(withCells(['\u4e00 cost', '\u2f00 radical']))).toEqual({ cells: 1, complex: 0, emoji: 0, other: 1 });
+    // Both code points of one glyph in one PDF, and a sequence the font joins, are refused by the text-layer check.
+    expect(pdfPreflight(withCells(['10\uff5e20件', '10\u301c20件', '\u3033\u3035']))).toEqual({ cells: 3, complex: 0, emoji: 0, other: 3 });
+  });
+
+  // Each example next to a value that the font draws with the same glyph, rendered as separate PDFs in both orders.
+  const TWINS: [string, string][] = [
+    ['クラウド\u30fbサービス', 'A\u00b7B'],
+    ['10\uff5e20件', '10\u301c20件'],
+    ['云服务\u22ef\u22ef', 'a\u2026b'],
+    ['计算\uff0f存储', 'a\u2215b'],
+    ['\uff40quoted\uff40', '\u2035x'],
+    ['\uffa1\uffa4\uffb7\uffc2\uffdc', '\u3131\u3134\u3147\u314f\u3163'],
+    ['\u58ff', '\u58ab'],
+    ['\u3031 \u3035', 'x'],
+  ];
+  for (const order of ['example first', 'twin first'] as const) {
+    it(`common CJK punctuation and symbols render and extract exactly in either render order (${order})`, async () => {
+      const shown = async (text: string) => pdfShownStrings(await renderEngagementReportPdf(withCells([text]))).join('');
+      for (const [example, twin] of TWINS) {
+        const [a, b] = order === 'example first' ? [example, twin] : [twin, example];
+        expect(await shown(a), `U+${[...a].map((c) => c.codePointAt(0)!.toString(16)).join(' ')}`).toContain(a);
+        expect(await shown(b), `U+${[...b].map((c) => c.codePointAt(0)!.toString(16)).join(' ')}`).toContain(b);
+      }
+    }, 120_000);
+  }
+
+  it('a refused PDF logs no React error stack (the refusal happens before rendering)', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(renderEngagementReportPdf(withCells(['مرحبا']))).rejects.toBeInstanceOf(PdfUnsupportedTextError);
+      expect(err).not.toHaveBeenCalled();
+    } finally {
+      err.mockRestore();
+    }
   });
 
   it("substitute draws a refused glyph twin as '?' and keeps its canonical twin", () => {

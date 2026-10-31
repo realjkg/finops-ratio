@@ -445,10 +445,12 @@ unbound account gets "not provisioned" and no session. The app must reach the Id
   Cyrillic, common symbols, Simplified Chinese, Japanese and Korean (Basic Multilingual Plane only). It answers 422
   `pdf_unsupported_text` (download XLSX or JSON for the full text) for complex or right-to-left scripts, emoji, combining
   marks, letters the font only composes from base + mark (ẹ ị ọ ụ ṣ ṃ ṅ ḿ ǹ: the dot below of Vietnamese and Yoruba),
-  characters above U+FFFF (e.g. CJK Extension B), and the secondary twin of two code points sharing one glyph (e.g. the
-  Kangxi radical U+2F00 next to U+4E00, U+2329 next to U+3008, U+2780 next to U+2460). Han characters use Simplified
-  Chinese glyph forms; ligatures are off. CJK text counts 10 per character (and 10 per font switch) toward the PDF text
-  caps; at most 2 PDF renders run at once (503 `pdf_busy`, retry).
+  characters above U+FFFF (e.g. CJK Extension B), CJK radicals (U+2E80-U+2FDF), code points that normalization replaces
+  (CJK compatibility ideographs, U+2329/U+232A), TAB and other control characters, and a PDF that would use both code
+  points of one shared glyph (e.g. U+FF5E with U+301C, or U+2460 with U+2780; either alone is fine) or a character
+  sequence the font joins (vertical kana repeat marks). Han characters use Simplified Chinese glyph forms; ligatures are
+  off. CJK text counts 10 per character (and 10 per font switch) toward the PDF text caps; one PDF render runs at a
+  time (503 `pdf_busy`, retry).
 
 ### Coming from other rows
 
