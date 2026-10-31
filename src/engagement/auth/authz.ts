@@ -75,7 +75,7 @@ export type AuditHook = (e: AuditEvent) => void | Promise<void>;
 
 export function authorize(dir: Directory, principal: Principal | null | undefined, permission: Permission, resource: Resource, audit?: AuditHook): Decision {
   const d = decide(dir, principal, permission, resource);
-  if (audit) emit(audit, {
+  if (audit) runAuditHook(audit, {
     principalKind: principal?.kind ?? 'none', principalId: principal ? String(principal.id) : null, permission: String(permission),
     resourceType: String(resource.type), resourceId: String(resource.id), ...(resource.version !== undefined ? { resourceVersion: String(resource.version) } : {}),
     tenantId: String(resource.tenantId), engagementId: String(resource.engagementId),
@@ -89,7 +89,7 @@ const HOOK_FAILED = '{"event":"authz_audit_hook_failed"}';
  * A failing hook, sync or async, never changes or loses the decision; its error
  * text is never propagated or logged, and a rejected promise is always handled.
  */
-function emit(audit: AuditHook, e: AuditEvent): void {
+export function runAuditHook<E>(audit: (e: E) => void | Promise<void>, e: E): void {
   try {
     const r: unknown = audit(e);
     if (r && typeof (r as PromiseLike<void>).then === 'function') (r as PromiseLike<void>).then(undefined, () => console.error(HOOK_FAILED));
