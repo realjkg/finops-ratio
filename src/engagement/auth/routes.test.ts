@@ -10,7 +10,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { findRoute } from '@/rbac/matrix';
 import { csrfFor, SESSION_COOKIE } from './http';
 import { hashPassword } from './password';
-import { createLoginRoute, createLogoutRoute, createSessionRoute, LoginThrottle, AUTH_MESSAGES, type AuthAuditEvent, type AuthRouteDeps } from './routes';
+import { createLoginRoute, createLogoutRoute, createSessionRoute, LoginGate, LoginThrottle, AUTH_MESSAGES, MAX_CONCURRENT_LOGINS, signInClient, type AuthAuditEvent, type AuthRouteDeps } from './routes';
+import { kdf } from './password';
 import { EngagementSessionStore, SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from './session';
 import loginPage from '../../../pages/api/auth/login';
 import logoutPage from '../../../pages/api/auth/logout';
@@ -39,7 +40,7 @@ let throttle: LoginThrottle;
 let audits: AuthAuditEvent[] = [];
 const logs: string[] = [];
 const seen: string[] = [];
-const env = (o: Record<string, string | undefined> = {}) => ({ RATIO_MODE: 'engagement', RATIO_ENGAGEMENT_CONFIG: CONFIG, RATIO_ENGAGEMENT_USERS: USERS, RATIO_ENGAGEMENT_ORIGIN: ORIGIN, RATIO_ENGAGEMENT_STATE: path.join(dir, 's.sqlite'), RATIO_API_TOKEN: 'MACHINE-TOKEN-NEVER-SHOWN-0123456789abcdef', ...o });
+const env = (o: Record<string, string | undefined> = {}) => ({ RATIO_MODE: 'engagement', RATIO_ENGAGEMENT_CONFIG: CONFIG, RATIO_ENGAGEMENT_USERS: USERS, RATIO_ENGAGEMENT_ORIGIN: ORIGIN, RATIO_ENGAGEMENT_STATE: path.join(dir, 's.sqlite'), RATIO_API_TOKEN: 'MACHINE-TOKEN-NEVER-SHOWN-0123456789abcdef', RATIO_TRUSTED_PROXY_HOPS: '0', ...o });
 const deps = (e = env()): AuthRouteDeps => ({ env: e, now: () => now, store: () => store, throttle, audit: (a) => { audits.push(a); } });
 let ip = 0;
 function req(o: { method?: string; body?: unknown; token?: string; headers?: Record<string, string>; ip?: string } = {}): NextApiRequest {
@@ -229,5 +230,83 @@ describe('GET /api/auth/session and POST /api/auth/logout', () => {
       await new Promise((res) => setTimeout(res, 20));
       expect(unhandled).toEqual([]);
     } finally { process.off('unhandledRejection', on); }
+  });
+});
+
+describe('A3 hardening: client identity behind the proxy, throttle table, scrypt concurrency', () => {
+  it('RATIO_TRUSTED_PROXY_HOPS is required (integer 0..5): unset or invalid ⇒ 503 on every sign-in route, with an audit event and no password work', async () => {
+    for (const hops of [undefined, '', '6', '-1', '1.5', 'x', ' 1']) {
+      const spy = vi.spyOn(kdf, 'scrypt');
+      const r = await login('v', pw.v, {}, { RATIO_TRUSTED_PROXY_HOPS: hops });
+      expect([r.statusCode, err(r)?.code, r.headers['set-cookie']], String(hops)).toEqual([503, 'not_configured', undefined]);
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+      expect(audits.at(-1)).toMatchObject({ action: 'login', outcome: 'denied', status: 503, principalId: null });
+    }
+    for (const h of [createSessionRoute, createLogoutRoute]) expect((await call(h(deps(env({ RATIO_TRUSTED_PROXY_HOPS: undefined }))), req({ method: h === createSessionRoute ? 'GET' : 'POST' }))).statusCode).toBe(503);
+  });
+
+  it('the client is the Nth entry from the right of X-Forwarded-For; spoofed left entries never choose the bucket; IPv6 is keyed by /64', () => {
+    const r = (xff: string | undefined, socket = '10.0.0.2') => ({ headers: xff === undefined ? {} : { 'x-forwarded-for': xff }, socket: { remoteAddress: socket } }) as unknown as NextApiRequest;
+    expect(signInClient(r('198.51.100.7'), 0)).toBe('10.0.0.2');
+    expect(signInClient(r('198.51.100.7'), 1)).toBe('198.51.100.7');
+    expect(signInClient(r('1.1.1.1, 2.2.2.2, 198.51.100.7'), 1)).toBe('198.51.100.7');
+    expect(signInClient(r('1.1.1.1, 198.51.100.7, 203.0.113.9'), 2)).toBe('198.51.100.7');
+    expect(signInClient(r(undefined, '::ffff:10.0.0.3'), 1)).toBe('10.0.0.3'); // no header: the socket (the proxy itself)
+    expect(signInClient(r('2001:db8:1:2:aaaa::1'), 1)).toBe('2001:db8:1:2::/64');
+    expect(signInClient(r('2001:db8:1:2:ffff:ffff:ffff:ffff'), 1)).toBe('2001:db8:1:2::/64');
+    expect(signInClient(r(undefined, '::1'), 0)).toBe('0:0:0:0::/64');
+  });
+
+  it('behind one proxy (hops=1) clients get their own buckets; a spoofed XFF prefix cannot escape its bucket', async () => {
+    const e = { RATIO_TRUSTED_PROXY_HOPS: '1' };
+    const via = (client: string, spoof = '') => ({ ip: '10.0.0.2', headers: { 'x-forwarded-for': `${spoof}${client}` } });
+    for (let i = 0; i < 20; i += 1) await login(`ghost${i}`, 'wrong-password-123', via('198.51.100.7', `203.0.113.${i}, `), e);
+    expect((await login('v', pw.v, via('198.51.100.7', '192.0.2.1, '), e)).statusCode).toBe(429); // same client, any spoof
+    expect((await login('v', pw.v, via('198.51.100.8'), e)).statusCode).toBe(200); // another client
+  });
+
+  it('unknown and real names follow the identical 401 x5 then 429 sequence; the user key ignores case and surrounding spaces', async () => {
+    for (const name of ['ghost', 'v']) {
+      const seq: number[] = [];
+      for (let i = 0; i < 6; i += 1) seq.push((await login(name, 'wrong-password-123')).statusCode);
+      expect(seq, name).toEqual([401, 401, 401, 401, 401, 429]);
+    }
+    throttle = new LoginThrottle();
+    for (const name of ['nom', 'NOM', ' nom', 'Nom ', ' NoM ']) expect((await login(name, 'wrong-password-123')).statusCode).toBe(401);
+    expect((await login('nom', pw.nom)).statusCode).toBe(429);
+  });
+
+  it('a full table never evicts a blocked key: flooding cannot unlock a locked user; with nothing evictable it fails closed', () => {
+    const t = new LoginThrottle(100);
+    const u = ['u:locked'];
+    for (let i = 0; i < 5; i += 1) t.fail(u, T0);
+    for (let i = 0; i < 120; i += 1) t.fail([`ip:flood-${i}`], T0 + 1);
+    expect(t.size()).toBeLessThanOrEqual(100);
+    expect(t.blocked(u, T0 + 2)).toBeGreaterThan(0);
+    const full = new LoginThrottle(3);
+    for (const k of ['u:a', 'u:b', 'u:c']) for (let i = 0; i < 5; i += 1) full.fail([k], T0);
+    expect(full.blocked(['u:new'], T0 + 1)).toBeGreaterThan(0); // nothing evictable: refuse
+    expect(full.blocked(['u:new'], T0 + 15 * 60_000)).toBe(0); // windows ended: evictable again
+  });
+
+  it(`at most ${MAX_CONCURRENT_LOGINS} sign-ins do scrypt work at once; the next is 503 with Retry-After and an audit event`, async () => {
+    expect(MAX_CONCURRENT_LOGINS).toBe(4);
+    const held: Array<() => void> = [];
+    const real = kdf.scrypt;
+    const spy = vi.spyOn(kdf, 'scrypt').mockImplementation(((...a: unknown[]) => { held.push(() => (real as (...x: unknown[]) => void)(...a)); }) as never);
+    const gate = new LoginGate();
+    try {
+      const h = createLoginRoute({ ...deps(), gate });
+      const pending = Array.from({ length: 4 }, (_, i) => call(h, req({ method: 'POST', body: { username: 'v', password: `wrong-${i}-password` } })));
+      await new Promise((r) => setTimeout(r, 10));
+      const busy = await call(h, req({ method: 'POST', body: { username: 'v', password: pw.v } }));
+      expect([busy.statusCode, err(busy)?.code, busy.headers['retry-after']]).toEqual([503, 'busy', '1']);
+      expect(audits.at(-1)).toMatchObject({ action: 'login', status: 503 });
+      spy.mockRestore();
+      held.forEach((go) => go());
+      expect((await Promise.all(pending)).map((r) => r.statusCode)).toEqual([401, 401, 401, 401]);
+      expect((await call(h, req({ method: 'POST', body: { username: 'v', password: pw.v } }))).statusCode).toBe(200);
+    } finally { spy.mockRestore(); }
   });
 });

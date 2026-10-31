@@ -33,6 +33,18 @@ describe('EngagementSessionStore', () => {
     expect(JSON.stringify(rows) + bytes).not.toContain(token);
   });
 
+  it('the -wal and -shm files are 0600 too; an existing state directory wider than 0700 is narrowed to 0700', () => {
+    const wide = path.join(dir, 'wide');
+    fs.mkdirSync(wide, { mode: 0o755 });
+    fs.chmodSync(wide, 0o755);
+    const file = path.join(wide, 's.sqlite');
+    const s = new EngagementSessionStore(file);
+    s.create(P, T0);
+    for (const f of [file, `${file}-wal`, `${file}-shm`]) expect(fs.statSync(f).mode & 0o777, f).toBe(0o600);
+    expect(fs.statSync(wide).mode & 0o777).toBe(0o700);
+    s.close();
+  });
+
   it('absolute lifetime 8 h and idle timeout 30 min; activity slides only the idle window', () => {
     expect([SESSION_ABSOLUTE_MS, SESSION_IDLE_MS]).toEqual([8 * 3600_000, 30 * 60_000]);
     const s = mem();
