@@ -12,3 +12,7 @@ src/engagement/config.test.ts                      12 failed | 158 passed (170)
 src/connectors/managed/engagementSpec.test.ts       7 failed |  47 passed (54)
 Failing because key ids next to letters/digits, a JWT after text, URL credentials after the first segment,
 api_key/apikey and spaced `secret = ` forms, and a fullwidth key id are accepted at startup and by the worker.
+Review round 2 (ReDoS / length-first), base a2266f9:
+1 MiB hostile bucket/prefix/exportName (config.test and engagementSpec.test): do not finish within 590 s (terminated);
+the userinfo and JWT patterns are quadratic (node: 5k/10k/20k chars = 19/77/316 ms and 23/95/316 ms).
+NFKC cap (config.test, -t "caps the NFKC form"): 1 failed. Cap-shape timing and identical-source checks already pass.

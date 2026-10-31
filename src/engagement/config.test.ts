@@ -461,6 +461,32 @@ describe('aws-data-exports bucket, prefix and exportName', () => {
     for (const v of [KEY_ID, STS_ID, JWT, PEM, 'synthetic', 'eyJ']) expect(all).not.toContain(v);
   });
 
+  // Review of #152 (ReDoS): lengths are checked before any pattern or normalization, so hostile values
+  // of any size are refused in bounded time; worst-case shapes at the caps also finish fast.
+  const HOSTILE = (n: number) => [':'.repeat(n), 'a:'.repeat(n / 2), 'eyJ'.repeat(Math.ceil(n / 3)).slice(0, n), 'eyJaaaaaaaa'.repeat(Math.ceil(n / 11)).slice(0, n)];
+  const timed = (input: unknown) => {
+    const t0 = performance.now();
+    const r = validateEngagementConfig(input);
+    return { ms: performance.now() - t0, problems: r.ok ? [] : r.problems };
+  };
+  it.each(['bucket', 'prefix', 'exportName'])('refuses a 1 MiB hostile %s in under 100 ms, naming the key', (field) => {
+    for (const v of HOSTILE(1024 * 1024)) {
+      const { ms, problems } = timed(params({ [field]: v }));
+      expect(ms).toBeLessThan(100);
+      expect(problems.some((p) => p.startsWith(`sources[0].retrieval.params.${field}:`)), problems.join(' | ')).toBe(true);
+      expect(problems.join(' ')).not.toContain(v.slice(0, 40));
+    }
+  });
+  it('checks worst-case shapes at the length caps in under 100 ms', () => {
+    for (const [field, n] of [['bucket', 63], ['exportName', 128], ['prefix', 1024]] as const) {
+      for (const v of HOSTILE(n)) expect(timed(params({ [field]: v, ...(field === 'prefix' ? { exportName: 'e' } : {}) })).ms, `${field} ${v.slice(0, 6)}`).toBeLessThan(100);
+    }
+  });
+  it('caps the NFKC form too (normalization can expand a short prefix)', () => {
+    const expanding = '\ufdfa'.repeat(200); // 600 UTF-8 bytes, over 3,000 characters after NFKC
+    expect(problemsOf(params({ prefix: expanding })).some((p) => p.startsWith('sources[0].retrieval.params.prefix:'))).toBe(true);
+  });
+
   it('never echoes a malformed value', () => {
     const marker = 'LEAKED-VALUE';
     const all = [...problemsOf(params({ bucket: `${marker}.b`, exportName: `${marker}.e`, prefix: `/${marker}` }))].join(' ');

@@ -133,6 +133,31 @@ describe('worker engagement-config check (parity with R1)', () => {
     expect(SUPPORTED_IN_THIS_BUILD.retrievalKinds).toEqual(['file-drop', 'managed']);
   });
 
+  it('refuses 1 MiB hostile AWS location values in under 100 ms on both sides (lengths before patterns)', () => {
+    const n = 1024 * 1024;
+    for (const field of ['bucket', 'prefix', 'exportName']) {
+      for (const v of [':'.repeat(n), 'a:'.repeat(n / 2), 'eyJ'.repeat(n / 3), 'eyJaaaaaaaa'.repeat(Math.ceil(n / 11))]) {
+        const c = example();
+        c.sources[0].retrieval = AWS({ [field]: v });
+        let t0 = performance.now();
+        const worker = engagementProblems(c, REGISTERED);
+        expect(performance.now() - t0, `worker ${field}`).toBeLessThan(100);
+        t0 = performance.now();
+        const startup = checkEngagementConfig(c);
+        expect(performance.now() - t0, `startup ${field}`).toBeLessThan(100);
+        expect(worker.some((p) => p.startsWith(`sources[0].retrieval.params.${field}:`))).toBe(true);
+        expect(startup.ok ? [] : startup.problems.filter((p) => p.includes('.params.'))).toEqual(worker.filter((p) => p.includes('.params.')));
+      }
+    }
+  });
+
+  it('startup and the worker run the same awsLocationProblem source text', () => {
+    const W_TEXT = fs.readFileSync(path.resolve(__dirname, 'engagementSpec.ts'), 'utf8');
+    const fn = (t: string) => t.slice(t.indexOf('function awsLocationProblem('), t.indexOf('\n}\n', t.indexOf('function awsLocationProblem(')));
+    expect(fn(W_TEXT).length).toBeGreaterThan(200);
+    expect(fn(R1_TEXT)).toBe(fn(W_TEXT));
+  });
+
   it('without an approved list the worker check refuses every managed connector (fail closed)', () => {
     const c = example();
     c.sources[0].retrieval = { kind: 'managed', connector: 'aws-data-exports' };
