@@ -1,0 +1,9 @@
+RED (tests only, before the implementation), base origin/main f8f1a37
+Command: npx vitest run <file>
+src/engagement/config.test.ts                      38 failed | 119 passed (157)
+src/connectors/managed/engagementSpec.test.ts      45 failed |   1 passed (46)   (checkEngagementConfig and the AWS constants do not exist yet)
+src/connectors/managed/runtime.test.ts              1 failed |  18 passed (19)   (an unapproved connector is not refused by the worker check)
+src/connectors/managed/aws/locationParams.test.ts   3 failed |   1 passed (4)
+Failing for the intended reasons: startup refuses every managed connector (retrieval.kind not implemented);
+40+ character bucket/prefix/exportName values are refused as credential-looking; malformed bucket, prefix and
+exportName values pass; no complete-object-key byte check; no approved list.

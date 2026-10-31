@@ -165,16 +165,18 @@ describe('managedSpecFromEngagementFile', () => {
   it('returns the managed retrieval of the source with that id', () => {
     const d = tmp();
     try {
-      const f = write(d, { tenantId: TENANT, sources: [{ id: 'other', retrieval: { kind: 'file-drop' } }, { id: 'managed-src', retrieval: { kind: 'managed', connector: 'opencost', params: { window: '1d' }, secretRef: 'k8s/opencost' } }] });
-      expect(managedSpecFromEngagementFile(f, 'managed-src', TENANT)).toEqual({ connector: 'opencost', params: { window: '1d' }, secretRef: 'k8s/opencost' });
+      const f = write(d, { tenantId: TENANT, sources: [{ id: 'other', retrieval: { kind: 'file-drop' } }, { id: 'managed-src', retrieval: { kind: 'managed', connector: 'aws-data-exports', params: { window: '1d' }, secretRef: 'aws/focus' } }] });
+      expect(managedSpecFromEngagementFile(f, 'managed-src', TENANT)).toEqual({ connector: 'aws-data-exports', params: { window: '1d' }, secretRef: 'aws/focus' });
       expect(codeOf(() => managedSpecFromEngagementFile(f, 'other', TENANT))).toBe('SOURCE_NOT_MANAGED');
       expect(codeOf(() => managedSpecFromEngagementFile(f, 'missing', TENANT))).toBe('SOURCE_NOT_IN_ENGAGEMENT_CONFIG');
       expect(codeOf(() => managedSpecFromEngagementFile(write(d, `{"sources": [${SECRET}`), 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
       // A credential-looking secretRef is refused by the whole-config check (review rv149: as R1 does).
-      expect(codeOf(() => managedSpecFromEngagementFile(write(d, { tenantId: TENANT, sources: [{ id: 'managed-src', retrieval: { kind: 'managed', connector: 'opencost', secretRef: 'A'.repeat(48) } }] }), 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
+      expect(codeOf(() => managedSpecFromEngagementFile(write(d, { tenantId: TENANT, sources: [{ id: 'managed-src', retrieval: { kind: 'managed', connector: 'aws-data-exports', secretRef: 'A'.repeat(48) } }] }), 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
       expect(codeOf(() => managedSpecFromEngagementFile('relative.json', 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
       expect(codeOf(() => managedSpecFromEngagementFile(undefined, 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
       expect(codeOf(() => managedSpecFromEngagementFile(path.join(d, 'nope.json'), 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
+      // Schema-valid but not on the approved list (SUPPORTED_IN_THIS_BUILD): refused before any registry lookup.
+      expect(codeOf(() => managedSpecFromEngagementFile(write(d, { tenantId: TENANT, sources: [{ id: 'managed-src', retrieval: { kind: 'managed', connector: 'opencost', secretRef: 'k8s/opencost' } }] }), 'managed-src', TENANT))).toBe('ENGAGEMENT_CONFIG_INVALID');
     } finally {
       fs.rmSync(d, { recursive: true, force: true });
     }

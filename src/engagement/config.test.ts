@@ -8,7 +8,10 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  checkEngagementConfig,
   checkEngagementStartup,
+  MANAGED_CONNECTORS,
+  SUPPORTED_IN_THIS_BUILD,
   describeSourceMetadata,
   EngagementConfigError,
   engagementMode,
@@ -21,6 +24,14 @@ import { register } from '../../instrumentation';
 const FIXTURE = path.resolve(__dirname, '../../fixtures/engagement/example/engagement.json');
 const raw = (): any => JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
 const SECRET = 'LEAKED-VALUE-9f3c';
+// A credential-shaped key id (SYNTHETIC), assembled at run time.
+const LEGACY_KEY_ID = ['AK', 'IA', 'ABCDEFGHIJKLMNOP'].join('');
+/** Deterministic generated names (SYNTHETIC): random-looking, as real generated names are, without literal secret-shaped text. */
+const generated = (n: number, alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', seed = 7) => {
+  let x = seed;
+  return Array.from({ length: n }, () => alphabet[(x = (x * 1103515245 + 12345) % 2147483648) % alphabet.length]).join('');
+};
+const LOWER = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
 function mutated(fn: (c: any) => void): unknown {
   const c = raw();
@@ -274,7 +285,7 @@ describe('release policy (loader)', () => {
 
 describe('retrieval', () => {
   const withRetrieval = (r: unknown) => mutated((c) => (c.sources[0].retrieval = r));
-  const managed = (extra: any = {}) => ({ kind: 'managed', connector: 'aws-data-exports', params: { bucket: 'b', prefixes: ['a', 'b'], nested: { n: 1 } }, secretRef: 'AWS_READER_SECRET', ...extra });
+  const managed = (extra: any = {}) => ({ kind: 'managed', connector: 'aws-data-exports', params: { bucket: 'example-export-bucket', prefixes: ['a', 'b'], nested: { n: 1 } }, secretRef: 'AWS_READER_SECRET', ...extra });
 
   it('defaults to file-drop when absent', () => {
     const r = validateEngagementConfig(raw());
@@ -282,13 +293,34 @@ describe('retrieval', () => {
     expect(r.config.sources[0].retrieval).toEqual({ kind: 'file-drop' });
   });
 
-  it('managed retrieval is schema-valid but not implemented in this build (single place)', () => {
+  it('startup accepts managed retrieval only for a connector on the approved list (single place)', () => {
+    expect(SUPPORTED_IN_THIS_BUILD.retrievalKinds).toEqual(['file-drop', 'managed']);
+    expect(SUPPORTED_IN_THIS_BUILD.managedConnectors).toEqual(['aws-data-exports']);
     const c = raw();
     c.sources[0].retrieval = managed();
     expect(validateEngagementConfig(c).ok).toBe(true);
-    const r = loadEngagementConfig(writeTmp(JSON.stringify(c)));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.problems.join(' ')).toMatch(/sources\[0\]\.retrieval\.kind: not implemented in this build/);
+    const ok = loadEngagementConfig(writeTmp(JSON.stringify(c)));
+    expect(ok.ok, ok.ok ? '' : ok.problems.join(' | ')).toBe(true);
+    for (const connector of MANAGED_CONNECTORS.filter((x) => x !== 'aws-data-exports')) {
+      c.sources[0].retrieval = managed({ connector, params: {} });
+      expect(validateEngagementConfig(c).ok, connector).toBe(true);
+      const r = loadEngagementConfig(writeTmp(JSON.stringify(c)));
+      expect(r.ok ? [] : r.problems, connector).toEqual(['sources[0].retrieval.connector: not implemented in this build']);
+    }
+  });
+
+  it('checkEngagementConfig is the startup verdict without a file (schema, then the release policy)', () => {
+    expect(checkEngagementConfig(withRetrieval(managed())).ok).toBe(true);
+    const r = checkEngagementConfig(withRetrieval(managed({ connector: 'opencost' })));
+    expect(r.ok ? [] : r.problems).toEqual(['sources[0].retrieval.connector: not implemented in this build']);
+    expect(checkEngagementConfig(withRetrieval(managed({ connector: SECRET }))).ok).toBe(false);
+  });
+
+  it('checkEngagementStartup (instrumentation) accepts an approved managed source and returns it', () => {
+    const c = raw();
+    c.sources[0].retrieval = managed({ params: { bucket: 'example-export-bucket', prefix: 'exports/focus', exportName: 'focus-1-2', region: 'us-east-1', table: 'FOCUS_1_2_AWS' } });
+    const r = checkEngagementStartup({ RATIO_MODE: 'engagement', RATIO_ENGAGEMENT_CONFIG: writeTmp(JSON.stringify(c)) });
+    expect(r?.config.sources[0].retrieval).toEqual(c.sources[0].retrieval);
   });
 
   it('every connector name is accepted by the schema', () => {
@@ -309,15 +341,127 @@ describe('retrieval', () => {
     ['PEM in params', 'sources[0].retrieval.params.key', managed({ params: { key: `-----BEGIN PRIVATE KEY-----${SECRET}` } })],
     ['JWT in params', 'sources[0].retrieval.params.t', managed({ params: { t: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc-def_ghi' } })],
     ['long hex in params list', 'sources[0].retrieval.params.l[0]', managed({ params: { l: ['a'.repeat(64)] } })],
-    ['access key id in params', 'sources[0].retrieval.params.k', managed({ params: { k: 'AKIAABCDEFGHIJKLMNOP' } })],
+    ['access key id in params', 'sources[0].retrieval.params.k', managed({ params: { k: LEGACY_KEY_ID } })],
   ];
   it.each(bad)('%s -> %s', (_n, key, r) => {
     const problems = problemsOf(withRetrieval(r));
     expect(problems.some((p) => p.includes(key)), problems.join(' | ')).toBe(true);
     const all = problems.join(' ');
     expect(all).not.toContain(SECRET);
-    expect(all).not.toContain('AKIAABCDEFGHIJKLMNOP');
+    expect(all).not.toContain(LEGACY_KEY_ID);
     expect(all).not.toContain('eyJhbGci');
+  });
+});
+
+// Owner-approved schema change (2026-10-30): the AWS connector's params.bucket, params.prefix and
+// params.exportName get field rules instead of the generic 40-character credential heuristic.
+// SYNTHETIC values; credential-shaped strings are assembled at run time.
+describe('aws-data-exports bucket, prefix and exportName', () => {
+  const KEY_ID = ['AK', 'IA'].join('') + 'SYNTHETIC0000001'.toUpperCase();
+  const STS_ID = ['AS', 'IA'].join('') + 'SYNTHETIC0000002'.toUpperCase();
+  const JWT = ['eyJ' + 'hbGciOiJub25lIn0', 'eyJzdWIiOiJzeW50aGV0aWMifQ', 'c2lnbmF0dXJl'].join('.');
+  const PEM = ['-----BEGIN', 'PRIVATE KEY-----'].join(' ');
+  const params = (p: Record<string, unknown>) => mutated((c) => (c.sources[0].retrieval = { kind: 'managed', connector: 'aws-data-exports', secretRef: 'aws/focus', params: { region: 'us-east-1', table: 'FOCUS_1_2_AWS', ...p } }));
+  const startup = (input: unknown) => {
+    const r = loadEngagementConfig(writeTmp(JSON.stringify(input)));
+    return r.ok ? [] : r.problems;
+  };
+
+  it('accepts valid long names (no rejection on length or randomness alone)', () => {
+    const cases = [
+      { bucket: 'abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0', exportName: 'E'.repeat(128), prefix: 'billing' },
+      { bucket: generated(34, LOWER), exportName: generated(41, undefined, 11), prefix: `${generated(43, undefined, 13)}/${generated(48, undefined, 17)}` },
+      { bucket: 'my.export.bucket-2026', exportName: 'focus_1_2-daily', prefix: 'données/exports/年度/focus-1-2' },
+      { bucket: 'abc', exportName: 'x' },
+      { bucket: 'a'.repeat(41), exportName: 'b'.repeat(41), prefix: 'c'.repeat(41) },
+    ];
+    for (const p of cases) {
+      expect(validateEngagementConfig(params(p)).ok, JSON.stringify(p)).toBe(true);
+      expect(startup(params(p)), JSON.stringify(p)).toEqual([]);
+    }
+  });
+
+  const malformed: Array<[string, string, Record<string, unknown>]> = [
+    ['bucket too short', 'bucket', { bucket: 'ab' }],
+    ['bucket too long', 'bucket', { bucket: 'a'.repeat(64) }],
+    ['bucket upper case', 'bucket', { bucket: 'Export-Bucket' }],
+    ['bucket underscore', 'bucket', { bucket: 'export_bucket' }],
+    ['bucket starts with a hyphen', 'bucket', { bucket: '-export' }],
+    ['bucket ends with a dot', 'bucket', { bucket: 'export.' }],
+    ['bucket consecutive dots', 'bucket', { bucket: 'export..bucket' }],
+    ['bucket in IP address form', 'bucket', { bucket: '192.168.10.12' }],
+    ['bucket xn-- prefix', 'bucket', { bucket: 'xn--export' }],
+    ['bucket -s3alias suffix', 'bucket', { bucket: 'export-s3alias' }],
+    ['bucket --ol-s3 suffix', 'bucket', { bucket: 'export--ol-s3' }],
+    ['bucket not a string', 'bucket', { bucket: ['export-bucket'] }],
+    ['exportName too long', 'exportName', { exportName: 'e'.repeat(129) }],
+    ['exportName empty', 'exportName', { exportName: '' }],
+    ['exportName with a dot', 'exportName', { exportName: 'focus.daily' }],
+    ['exportName with a slash', 'exportName', { exportName: 'focus/daily' }],
+    ['exportName with a space', 'exportName', { exportName: 'focus daily' }],
+    ['exportName not a string', 'exportName', { exportName: 12 }],
+    ['prefix with a leading slash', 'prefix', { prefix: '/exports' }],
+    ['prefix with a trailing slash', 'prefix', { prefix: 'exports/' }],
+    ['prefix with an empty segment', 'prefix', { prefix: 'exports//focus' }],
+    ['prefix with a .. segment', 'prefix', { prefix: 'exports/../focus' }],
+    ['prefix with a . segment', 'prefix', { prefix: 'exports/./focus' }],
+    ['prefix with a control character', 'prefix', { prefix: 'exports\u0001focus' }],
+    ['prefix with a C1 control character', 'prefix', { prefix: 'exports\u0085focus' }],
+    ['prefix not valid UTF-8 (lone surrogate)', 'prefix', { prefix: 'exports\ud800focus' }],
+    ['prefix not valid UTF-8 (replacement character)', 'prefix', { prefix: 'exports�focus' }],
+    ['prefix whose complete object key exceeds 1,024 UTF-8 bytes (multibyte, under 1,024 characters)', 'prefix', { prefix: 'é'.repeat(400), exportName: 'focus' }],
+    ['prefix not a string', 'prefix', { prefix: { a: 'b' } }],
+  ];
+  it.each(malformed)('refuses %s, naming params.%s and both validators agree', (_n, field, p) => {
+    const problems = problemsOf(params(p));
+    expect(problems.some((x) => x.startsWith(`sources[0].retrieval.params.${field}:`)), problems.join(' | ')).toBe(true);
+    expect(startup(params(p)).length).toBeGreaterThan(0);
+  });
+
+  const credential: Array<[string, string, Record<string, unknown>]> = [
+    ['an access key id as exportName', 'exportName', { exportName: KEY_ID }],
+    ['an STS key id as exportName', 'exportName', { exportName: STS_ID }],
+    ['an access key id embedded in exportName', 'exportName', { exportName: `focus-${KEY_ID}` }],
+    ['an access key id as a prefix segment', 'prefix', { prefix: `exports/${KEY_ID}/focus` }],
+    ['an access key id embedded in a prefix segment', 'prefix', { prefix: `exports/id-${STS_ID}-x` }],
+    ['a JWT as a prefix segment', 'prefix', { prefix: `exports/${JWT}` }],
+    ['private-key material in the prefix', 'prefix', { prefix: `exports/${PEM}` }],
+    ['an inline secret in the prefix', 'prefix', { prefix: 'exports/aws_secret_access_key=synthetic' }],
+    ['an inline password in the prefix', 'prefix', { prefix: 'exports/password:synthetic' }],
+    ['URL credentials in the prefix', 'prefix', { prefix: 'user:synthetic@exports/focus' }],
+  ];
+  it.each(credential)('refuses %s as credential-looking, never echoing it', (_n, field, p) => {
+    const problems = problemsOf(params(p));
+    expect(problems).toContain(`sources[0].retrieval.params.${field}: looks like a credential value; reference a secret by name with secretRef`);
+    const all = [...problems, ...startup(params(p))].join(' ');
+    for (const v of [KEY_ID, STS_ID, JWT, PEM, 'synthetic', 'eyJ']) expect(all).not.toContain(v);
+  });
+
+  it('never echoes a malformed value', () => {
+    const marker = 'LEAKED-VALUE';
+    const all = [...problemsOf(params({ bucket: `${marker}.b`, exportName: `${marker}.e`, prefix: `/${marker}` }))].join(' ');
+    expect(all).not.toContain(marker);
+  });
+
+  it('keeps the generic credential check everywhere else', () => {
+    const long = 'a'.repeat(41);
+    for (const [key, p] of [
+      ['sources[0].retrieval.params.other', { other: long }],
+      ['sources[0].retrieval.params.region', { region: long }],
+      ['sources[0].retrieval.params.nested.bucket', { nested: { bucket: long } }],
+      ['sources[0].retrieval.params.nested.prefix', { nested: { prefix: long } }],
+      ['sources[0].retrieval.params.list[0]', { list: [long] }],
+    ] as const) {
+      expect(problemsOf(params(p))).toContain(`${key}: looks like a credential value; reference a secret by name with secretRef`);
+    }
+    // Another connector keeps the generic rule at the same parameter names.
+    for (const field of ['bucket', 'prefix', 'exportName']) {
+      const other = mutated((c) => (c.sources[0].retrieval = { kind: 'managed', connector: 'opencost', params: { [field]: long } }));
+      expect(problemsOf(other)).toContain(`sources[0].retrieval.params.${field}: looks like a credential value; reference a secret by name with secretRef`);
+    }
+    expect(problemsOf(mutated((c) => (c.sources[0].retrieval = { kind: 'managed', connector: 'aws-data-exports', secretRef: long })))).toContain(
+      'sources[0].retrieval.secretRef: must be the NAME of a secret (letters, digits, underscore, dot, slash, hyphen), not a secret value',
+    );
   });
 });
 
