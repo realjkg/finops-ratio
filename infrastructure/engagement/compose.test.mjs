@@ -26,7 +26,7 @@ describe('engagement compose', () => {
     expect(env.RATIO_ENGAGEMENT_ORIGIN).toMatch(/^\$\{RATIO_ENGAGEMENT_ORIGIN:\?/); // required, no default
     expect(env.RATIO_ENGAGEMENT_STATE).toBe('/state/sessions.sqlite');
     expect(env.RATIO_TRUSTED_PROXY_HOPS).toBe('${RATIO_TRUSTED_PROXY_HOPS:-1}');
-    expect(env.RATIO_OIDC_CLIENT_SECRET_PRIMARY).toBe('${RATIO_OIDC_CLIENT_SECRET_PRIMARY:-}');
+    expect(env.RATIO_OIDC_CLIENT_SECRET_PRIMARY).toBe('${RATIO_OIDC_CLIENT_SECRET_PRIMARY}');
     expect(Object.keys(services.worker.environment).filter((k) => k.startsWith('RATIO_OIDC'))).toEqual([]);
     const example = read('.env.engagement.example');
     for (const k of ['RATIO_ENGAGEMENT_ORIGIN', 'RATIO_TRUSTED_PROXY_HOPS', 'RATIO_OIDC_CLIENT_SECRET_PRIMARY']) expect(example).toMatch(new RegExp(`^${k}=`, 'm'));

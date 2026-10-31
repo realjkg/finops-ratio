@@ -59,6 +59,13 @@ services:
       RATIO_MODE: engagement
       RATIO_ENGAGEMENT_CONFIG: /config/engagement.json
       RATIO_ENGAGEMENT_USERS: /config/users.json
+      # R2 sign-in: the https origin users open (your TLS proxy), the session store on the /state volume, the number of
+      # proxies that append to X-Forwarded-For (1 behind one TLS proxy) and one OIDC client secret per identity
+      # connection, by the NAME its clientSecretRef gives (add a line per connection; unset or empty = that connection answers 503; compose warns when unset).
+      RATIO_ENGAGEMENT_ORIGIN: ${RATIO_ENGAGEMENT_ORIGIN:?https origin of your TLS proxy, e.g. https://ratio.example.com}
+      RATIO_ENGAGEMENT_STATE: /state/sessions.sqlite
+      RATIO_TRUSTED_PROXY_HOPS: ${RATIO_TRUSTED_PROXY_HOPS:-1}
+      RATIO_OIDC_CLIENT_SECRET_PRIMARY: ${RATIO_OIDC_CLIENT_SECRET_PRIMARY}
       RATIO_READER_DATABASE_URL: postgres://ratio_engagement_reader:${RATIO_ENGAGEMENT_READER_PASSWORD:?set in .env.engagement}@postgres:5432/ratio
     ports: ['127.0.0.1:${RATIO_ENGAGEMENT_APP_PORT:-3100}:3000']
     depends_on:
@@ -72,6 +79,27 @@ services:
     mem_limit: 1g
     cpus: 1.0
     networks: [frontend, backend]
+
+  # Operator users command (R2): `$C --profile jobs run --rm users <list|add|set-role|suspend|...>`. The only service
+  # that may write users.json (in place, same inode); it also revokes sessions in /state. No network.
+  users:
+    <<: *engagement
+    profiles: [jobs]
+    restart: 'no'
+    entrypoint: ['node', 'dist-worker/ingest/cli.js', 'users']
+    command: ['list']
+    volumes:
+      - state:/state
+      - ${RATIO_ENGAGEMENT_CONFIG_FILE:?path of the engagement config JSON}:/config/engagement.json:ro
+      - ${RATIO_ENGAGEMENT_USERS_FILE:?path of the users JSON}:/config/users.json
+    environment:
+      RATIO_MODE: engagement
+      RATIO_ENGAGEMENT_CONFIG: /config/engagement.json
+      RATIO_ENGAGEMENT_USERS: /config/users.json
+      RATIO_ENGAGEMENT_STATE: /state/sessions.sqlite
+    network_mode: none
+    mem_limit: 256m
+    cpus: 0.5
 
   migrator:
     <<: *engagement

@@ -347,8 +347,8 @@ into the repo — see the `doc-authoring` skill for this workflow.
 ## Engagement mode
 
 Ratio 1.0 is being packaged as a single-customer engagement tool: one instance serves exactly one engagement. After R3
-an operator will import authorized billing **files**; after R2 reviewers will sign in as named users and read cost,
-coverage and reconciliation. Each statement below is labeled with what works today and which row the rest needs.
+an operator will import authorized billing **files**; today (R2) reviewers sign in as named users and read the
+engagement report, whose cost, coverage and reconciliation content grows with the later rows. Each statement below is labeled with what works today and which row the rest needs.
 
 - Works today: the image, the compose stack, Postgres and the object store, database migrations, the existing worker
   commands, and the engagement config check (row R1, described under *Engagement config*).
@@ -399,25 +399,26 @@ $C --profile jobs run --rm migrator               # works today once the roles e
 # Evidence bucket `ratio-engagement-evidence` (R11 init will create it). Until then create it with any S3 client on the
 # internal network; the S3 SDK in the image can do it. This one-liner was not run in the release pipeline.
 $C --profile jobs run --rm --entrypoint node worker -e "const s=require('@aws-sdk/client-s3');new s.S3Client({endpoint:'http://s3:8333',region:'us-east-1',forcePathStyle:true,credentials:{accessKeyId:process.env.RATIO_EVIDENCE_S3_ACCESS_KEY_ID,secretAccessKey:process.env.RATIO_EVIDENCE_S3_SECRET_ACCESS_KEY}}).send(new s.CreateBucketCommand({Bucket:'ratio-engagement-evidence'}))"
-$C up -d --build app                              # http://127.0.0.1:3100; the config check works today, sign-in needs R2
+$C up -d --build app                              # http://127.0.0.1:3100 behind your TLS proxy; config check and sign-in work today
 $C --profile jobs run --rm worker doctor          # works today; any worker command runs the same way
 ```
 
 ### Configure
 
-`RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config, read by the app today) and `RATIO_ENGAGEMENT_USERS_FILE` (named
-users, after R2) are mounted read-only at `/config/`. The container reads them at start, so after editing run
+`RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config, read by the app today) and `RATIO_ENGAGEMENT_USERS_FILE` (the named
+users directory, today) are mounted read-only at `/config/`. The container reads them at start, so after editing run
 `$C restart app`. Editors that replace the file (a new inode) break a single-file bind mount: keep editing in place,
 or mount a directory instead, and restart the container. Today the app validates the users directory at start, and
 the session API (`/api/auth/login`, `/api/auth/logout`, `/api/auth/session`, local credentials only) reads it again on
 each request; under a single-file mount a file saved as a new inode stays invisible until `$C restart app`, so a
-suspension or role change can lag until that restart. Edit `/config/users.json` in place or mount `/config` as a
-directory; the R2 operator command (slice E) will write in place. Today a suspended user's session is refused on the
-next request but stays in the store until it expires; the slice-E command will also delete it. The session API needs
-`RATIO_ENGAGEMENT_ORIGIN` (the https origin of your TLS proxy), `RATIO_ENGAGEMENT_STATE` (a file under `/state`) and
-`RATIO_TRUSTED_PROXY_HOPS` (0 to 5: how many proxies append to `X-Forwarded-For`, 1 behind a single TLS proxy, so
-failed sign-ins are counted per client and not for everyone at once); the compose file does not set them today (R12 is
-pending), and without them the session API answers 503. No sign-in page or report page exists yet (after R2).
+suspension or role change can lag until that restart. Today the `users` job edits `/config/users.json` in place (same
+inode) and is the only service that mounts it writable; if you edit it by hand, edit in place or mount `/config` as a
+directory. Today `users suspend` also deletes the user's sessions; a session of a user suspended by hand is refused on
+the next request and stays stored until it expires. The compose file sets, today, `RATIO_ENGAGEMENT_STATE`
+(`/state/sessions.sqlite`, on the `state` volume: keep that volume dedicated to this instance), requires
+`RATIO_ENGAGEMENT_ORIGIN` (the https origin of your TLS proxy) and takes `RATIO_TRUSTED_PROXY_HOPS` (default 1: one TLS
+proxy appends to `X-Forwarded-For`, so failed sign-ins are counted per client) and `RATIO_OIDC_CLIENT_SECRET_PRIMARY`
+from `.env.engagement`; add one line per further identity connection under the NAME its `clientSecretRef` gives.
 
 The worker runs with `RATIO_ENV=staging` (the app and migrator with `production`): the worker's S3 settings refuse
 `http` endpoints under `production`, and the bundled object store is `http` on the internal network. `staging`
@@ -425,8 +426,14 @@ enables no simulation, synthetic provider or test hook.
 
 ### Use
 
-View: after R2, open the app on the loopback port and sign in. The existing worker commands (`sync`, `replay`,
-`quarantine show`, `doctor`) run through `$C --profile jobs run --rm worker <command>`.
+View: today open `<RATIO_ENGAGEMENT_ORIGIN>/engagement` through your TLS proxy and use the "Sign in with <connection>"
+link. The existing worker commands (`sync`, `replay`, `quarantine show`, `doctor`) run through
+`$C --profile jobs run --rm worker <command>`.
+
+Users (works today): `$C --profile jobs run --rm users list`, then `add --id <id> --name <name> --role
+<viewer|analyst|connector_manager|tenant_admin> --by <your id>` (add `--password-stdin` and pipe a password for a local
+recovery login: never on the command line), `set-role`, `suspend`, `unsuspend`, `revoke-sessions`, `bind --id <id>
+--connection <connection id> --subject <IdP subject>` and `unbind`. Nobody can change their own role, status or bindings.
 
 Today the OIDC routes (`/api/auth/oidc/start?connection=<id>` and `/api/auth/oidc/callback`) work for an enabled
 `identityConnections` entry: register `<RATIO_ENGAGEMENT_ORIGIN>/api/auth/oidc/callback` exactly at the IdP, put the client
@@ -458,7 +465,6 @@ To be filled in by those rows; the commands do not exist yet.
 
 - Import a billing file (operator CLI; R3 is pending).
 - Init, backup, restore and reset (operator lifecycle command; R11 is pending), including database role and bucket creation.
-- Named users file format and sign-in (row R2 is pending).
 
 ## Saved customer workflow simulation
 
