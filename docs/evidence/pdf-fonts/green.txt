@@ -1,16 +1,14 @@
-GREEN round 2 (review of 676e10e). Node 22.22.0, @react-pdf/renderer 4.5.1, fontkit 2.0.4.
-Gates: lint, tsc app+worker, full vitest (265 files / 4,750 tests), worker:build, build, check:bundle: pass.
-Supported = BMP code points of the declared scripts that a bundled face draws as ONE glyph whose text-layer code
-points are the character itself (ligatures/contextual alternates off; glyph cache pre-created per canonical code
-point, so the text layer does not depend on render history). Refused (422): astral (CJK Ext B, U+1F170), letters
-drawn as base + mark (ǹ ḿ ṃ ṅ ṣ ẹ ị ọ ụ: Vietnamese/Yoruba dot below), secondary glyph twins (U+2F00, U+2329, U+2780,
-U+3BA3), vertical kana repeat marks, plus round 1's complex scripts, emoji, controls. Per document, a simulation of
-the text layer (textLayerFaults) refuses any value whose glyphs would not map back to its exact text.
-Corpus (pdfExtraction.test.tsx): every supported BMP code point from U+0080 (Han/Hangul 1 in 13) rendered and
-decoded through the ToUnicode maps: exact. Mutations: drop the code-point check (5 failed); allow U+3031-3035 (corpus
-1 failed); ligatures back on (2); no glyph pre-creation (1); astral allowed (6); no font-switch cost (1); no CJK cost
-(2); no render-slot limit (2). Dropping only the glyph-count check is equivalent (the code-point check still refuses).
-Costs: CJK character 10, font switch 10 (caps unchanged otherwise); at most 2 renders at once (503 pdf_busy).
-Watchdog runs (ms / MB RSS / bytes): 50x2,000 CJK spaced 5,673 / 297 / 114,319 (was killed at 15 s; reviewer
-37.7 s uncapped); 50x2,000 CJK dense 3,519 / 264 / 102,034; Latin hostile spaced 6,257 / 406 / 84,439, unbroken
-6,836 / 350 / 82,573; sample 894 / 222 / 25,919; 200 categories 9,311 / 514 / 80,887; 200 CJK-heavy 11,048 / 534.
+GREEN round 3 (follow-up to #164, base main 6ff49d3). Node 22.22.0, @react-pdf/renderer 4.5.1, fontkit 2.0.4.
+Cause (verified by probe): #164 pre-created every glyph for one "canonical" code point ranked across each face's
+whole character set. (a) For the CJK face this included code points Noto Sans draws first: U+30FB lost its glyph to
+U+00B7, U+22EF to U+2026, U+FF40 to U+2035. (b) Genuine twins inside the CJK face (U+FF5E/U+301C, U+FF0F/U+2215,
+U+FFA1-FFDC/U+3131-3163, U+58FF/U+58AB) can only be right per DOCUMENT. Fix: no pre-creation; planTextLayer maps each
+used glyph to the character it stands for in this document and refuses a PDF that uses both twins or a sequence the
+font joins (vertical kana repeat marks); one render slot (the map lives on the shared font objects); the refusal is
+decided before React renders (no React error stack). Radicals (U+2E80-2FDF) and NFC-unstable code points stay
+refused, as do astral, dot-below, complex scripts, emoji and controls (TAB). Supported BMP set: 43,389 -> 43,175.
+Corpus (pdfExtraction.test.tsx): EVERY supported BMP code point, twins in separate PDFs, rendered forward then twin
+PDFs in reverse: exact (24 s). Mutations (all killed): no per-document apply (corpus + examples, 3 failed); no
+joined-sequence check (2); no collision check (2); radicals allowed (1); NFC check off (1); 2 slots (2); refusal
+inside React (1). Renders (ms / MB / bytes): sample 828/198/25,919; 200 categories 9,404/471; 200 CJK 11,087/504;
+CJK spaced 5,539/282; CJK dense 3,128/245; Latin hostile spaced 5,465/302, unbroken 5,659/297.

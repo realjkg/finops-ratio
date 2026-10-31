@@ -18,7 +18,7 @@ import type { Style } from '@react-pdf/types';
 import { BUILT_IN_THEMES } from '@/theme/themes';
 import { DATA_TEXT_CELLS, type EngagementReportModel, type ReportSection } from './engagementReportModel';
 import { deterministicPdf } from './pdfBytes';
-import { classifyPdfChar, loadPdfFonts, pdfCharFace, PDF_FONT_FAMILY, textLayerFaults, unsupportedKinds, type UnsupportedKind } from './pdfFonts';
+import { classifyPdfChar, loadPdfFonts, pdfCharFace, PDF_FONT_FAMILY, planTextLayer, unsupportedKinds, type UnsupportedKind } from './pdfFonts';
 
 // The print surface uses the Light theme's executive colors (no hard-coded colors; src/theme/tokens.test.ts).
 const LIGHT = BUILT_IN_THEMES.light.colors;
@@ -51,7 +51,7 @@ export const PDF_UNSUPPORTED_TEXT_POLICY: PdfUnsupportedPolicy = 'refuse';
 export function pdfGlyphText(text: string): string {
   return [...text].map((ch) => (classifyPdfChar(ch) === 'ok' ? ch : '?')).join('');
 }
-/** A value whose text layer would be wrong in this document (textLayerFaults), under 'substitute': everything outside ASCII becomes '?'. */
+/** A value whose text layer would be wrong in this document (planTextLayer), under 'substitute': everything outside ASCII becomes '?'. */
 const asciiOnly = (text: string) => text.replace(/[^\n\x20-\x7e]/gu, '?');
 export const PDF_GLYPH_NOTE = (n: number) =>
   `PDF font: ${n} cell value${n === 1 ? '' : 's'} contain${n === 1 ? 's' : ''} characters the PDF cannot render (outside its supported scripts), shown here as '?'. The XLSX and JSON show the full text.`;
@@ -173,16 +173,21 @@ function refusalCounts(model: EngagementReportModel, faults: ReadonlySet<number>
  * draws '?'); the per-cell cap, the document budget and the floor only for cells that carry imported or configured
  * free text (DATA_TEXT_CELLS), in document order. Requires loadPdfFonts().
  */
+/** The view to draw, with its text layer applied to the font objects (see planTextLayer); refuse throws instead. */
 function pdfView(model: EngagementReportModel, policy: PdfUnsupportedPolicy) {
+  let view: ReturnType<typeof buildView>;
   if (policy === 'refuse') {
-    const view = buildView(model, 'refuse');
+    view = buildView(model, 'refuse');
     const counts = refusalCounts(model, view.faults);
     if (counts.cells > 0) throw new PdfUnsupportedTextError(counts);
-    return view;
+  } else {
+    const first = buildView(model, 'substitute');
+    view = first.faults.size === 0 ? first : buildView(model, 'substitute', first.faults);
   }
-  const first = buildView(model, 'substitute');
-  return first.faults.size === 0 ? first : buildView(model, 'substitute', first.faults);
+  view.applyTextLayer();
+  return view;
 }
+type PdfView = ReturnType<typeof pdfView>;
 
 /** The shown texts with caps (and, under 'substitute', '?' for unsupported characters and ASCII-only for the given faulty values), plus the text-layer faults of the result. */
 function buildView(model: EngagementReportModel, policy: PdfUnsupportedPolicy, faulty: ReadonlySet<number> = new Set()) {
@@ -225,8 +230,9 @@ function buildView(model: EngagementReportModel, policy: PdfUnsupportedPolicy, f
     columns: s.columns.map((c) => show(c, false, true)),
     rows: s.rows.map((r) => r.map((c, i) => show(c, isData(s, r, i)))),
   }));
-  const faults = new Set([...textLayerFaults(shown)].map((i) => shown[i].index).filter((i) => i >= 0));
-  return { title, sections, glyph, cut, faults };
+  const plan = planTextLayer(shown);
+  const faults = new Set([...plan.faults].map((i) => shown[i].index).filter((i) => i >= 0));
+  return { title, sections, glyph, cut, faults, applyTextLayer: plan.apply };
 }
 
 function SectionPages({ view, section, generatedAt, first }: { view: ReturnType<typeof pdfView>; section: ReportSection; generatedAt: string; first: boolean }) {
@@ -273,8 +279,9 @@ function SectionPages({ view, section, generatedAt, first }: { view: ReturnType<
   );
 }
 
-export function EngagementReportDocument({ model, policy = PDF_UNSUPPORTED_TEXT_POLICY }: { model: EngagementReportModel; policy?: PdfUnsupportedPolicy }) {
-  const view = pdfView(model, policy);
+/** The report document; renderEngagementReportPdf passes the view it built (and checked) before rendering. */
+export function EngagementReportDocument({ model, policy = PDF_UNSUPPORTED_TEXT_POLICY, view: built }: { model: EngagementReportModel; policy?: PdfUnsupportedPolicy; view?: PdfView }) {
+  const view = built ?? pdfView(model, policy);
   return (
     <Document title={view.title} author="Ratio" creator="Ratio" producer="Ratio" creationDate={new Date(model.generatedAt)} modificationDate={new Date(model.generatedAt)}>
       {view.sections.map((s, i) => (
@@ -285,7 +292,8 @@ export function EngagementReportDocument({ model, policy = PDF_UNSUPPORTED_TEXT_
 }
 
 /** Renders in flight at most (each blocks the event loop for seconds; more would only queue past the request deadline). */
-export const PDF_MAX_CONCURRENT_RENDERS = 2;
+/** One render at a time: a render sets its document's text layer on the shared font objects (planTextLayer). */
+export const PDF_MAX_CONCURRENT_RENDERS = 1;
 export const PDF_BUSY_MESSAGE = 'The PDF renderer is busy; retry in a few seconds, or download XLSX or JSON.';
 export class PdfBusyError extends Error {
   constructor() {
@@ -304,8 +312,9 @@ export async function renderEngagementReportPdf(model: EngagementReportModel, po
   rendering += 1;
   try {
     await loadPdfFonts();
-    // The document builds its view first: under 'refuse' it throws PdfUnsupportedTextError before any layout.
-    return deterministicPdf(await renderToBuffer(<EngagementReportDocument model={model} policy={policy} />));
+    // Built (and, under 'refuse', checked) before React renders: a refusal never surfaces as a React render error.
+    const view = pdfView(model, policy);
+    return deterministicPdf(await renderToBuffer(<EngagementReportDocument model={model} policy={policy} view={view} />));
   } finally {
     rendering -= 1;
   }
