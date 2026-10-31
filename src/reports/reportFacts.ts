@@ -13,10 +13,8 @@ export const NA_REASONS = {
   noPublished:
     'No published batch for this period is visible to the reader. Staged, quarantined and superseded batches are not visible to the reader role yet, so a missing import cannot be told apart from a quarantined one',
   sourceKey: 'Not yet available: the reader role cannot see source keys or import metadata until the batch-status view (R4, migration 0005) exists',
-  batchStatus:
-    'Figures reflect the last PUBLISHED batch only: a newer delivery for this period may have been quarantined or left staged, and reconciliation status and control totals are not visible to the reader role until the batch-status view (R4, migration 0005) exists',
-  operatorFile:
-    "Not yet available (needs R4 import metadata): the operator file's sha256 is recorded in the staged import metadata the reader role cannot see; stagedArtifactSha256 is the per-period artifact the import wrote, so it differs from sha256sum of the operator file",
+  batchStatus: 'Figures reflect the last PUBLISHED batch only: a newer delivery for this period may have been quarantined or left staged, and reconciliation status and control totals are not visible to the reader role until the batch-status view (R4, migration 0005) exists',
+  operatorFile: "Not yet available (needs R4 import metadata): the operator file's sha256 is recorded in the staged import metadata the reader role cannot see; stagedArtifactSha256 is the per-period artifact the import wrote, so it differs from sha256sum of the operator file",
   multiSource: 'Not combined: more than one source published facts for this period, and the source-role/overlap policy cannot be applied without source keys (R4)',
   noEngagement: 'No engagement configuration (RATIO_MODE is not engagement)',
   effectivePartial: 'Partial: some rows carry no EffectiveCost; the amount covers only rows that do, and is never filled with BilledCost',
@@ -24,9 +22,8 @@ export const NA_REASONS = {
   noCreditRows: 'No rows with ChargeCategory Credit in the published facts for this period',
   noAdjustmentRows: 'No rows with ChargeCategory Adjustment in the published facts for this period',
 } as const;
-/** Only the earliest start and latest end are compared: day-level gaps inside the span are not checked. */
 export const SPAN_COVERS = 'charge-period span covers the month (day-level gaps not checked)';
-export const SPAN_PARTIAL = 'partial: charge-period span does not cover the month';
+export const SPAN_PARTIAL = 'partial: charge-period span does not cover the month'; // only the earliest start and latest end are compared
 
 export type NotAvailable = { status: 'not_available'; reason: string };
 export type Fact<T> = { status: 'available'; value: T } | NotAvailable;
@@ -36,10 +33,8 @@ export type EffectiveFact = Fact<string> | { status: 'partial'; value: string; r
 export interface FactsAggregateGroup { sourceId: string; currency: string; chargeCategory: string | null; isTotal: boolean; rowCount: string; billedCost: string; effectiveCost: string | null; effectiveMissingRows: string }
 export interface FactsBatchRow { sourceId: string; batchId: string; rowCount: string; publishedAt: string; chargePeriodStart: string; chargePeriodEnd: string; providers: string[]; focusVersions: string[] }
 export interface FactsArtifactRow { sourceId: string; batchId: string; artifactSha256: string; rowCount: string }
-/** Declared (config) metadata of one engagement source; not linked to a published source yet. */
-export interface DeclaredSource { id: string; provider: string; costBasis: string; creditsCoverage: string; completeness: string; controlTotalSource: string }
-/** period: 'YYYY-MM-01'; asOf: an injected ISO instant (no clock here). */
-export interface ReportFactsInput { period: string; asOf: string; groups: FactsAggregateGroup[]; batches: FactsBatchRow[]; artifacts: FactsArtifactRow[]; engagement: { currency: string; declaredSources: DeclaredSource[] } | null }
+export interface DeclaredSource { id: string; provider: string; costBasis: string; creditsCoverage: string; completeness: string; controlTotalSource: string } // Declared (config) metadata of one engagement source; not linked to a published source yet.
+export interface ReportFactsInput { period: string; asOf: string; groups: FactsAggregateGroup[]; batches: FactsBatchRow[]; artifacts: FactsArtifactRow[]; engagement: { currency: string; declaredSources: DeclaredSource[] } | null } // period: 'YYYY-MM-01'; asOf: an injected ISO instant (no clock here).
 
 export interface Amounts { rowCount: string; billedCost: string; effectiveCost: EffectiveFact }
 export interface CurrencyFacts extends Amounts { currency: string; credits: Fact<Amounts>; adjustments: Fact<Amounts>; byChargeCategory: Array<Amounts & { chargeCategory: string }> }
