@@ -12,7 +12,7 @@ import { contrastRatio } from '../../src/theme/contrast';
 export const MAX: Record<string, number> = { light: 0, 'high-contrast': 0, dark: 433 };
 // Every page route (pages/*.tsx and pages/*/*.tsx outside api/ and the _app/_document/_error shells).
 // The next line fails the suite if a page is added or removed without updating this list.
-const PAGES = ['/', '/agent-workflows', '/attribution', '/connectors', '/costsource', '/demo', '/finio', '/finio/demo', '/frameworks', '/hello', '/mission', '/outcomes', '/overview', '/prediction', '/reports', '/simulation', '/tokenomics', '/workloads', '/workspace'];
+const PAGES = ['/', '/agent-workflows', '/attribution', '/connectors', '/costsource', '/demo', '/engagement', '/finio', '/finio/demo', '/frameworks', '/hello', '/mission', '/outcomes', '/overview', '/prediction', '/reports', '/simulation', '/tokenomics', '/workloads', '/workspace'];
 const pageRoutes = () => readdirSync('pages', { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.tsx') && !/(^|\/)_/.test(f)).map((f) => '/' + f.replace(/\/?index\.tsx$|\.tsx$/, '')).sort();
 test('PAGES lists every page route', () => expect([...PAGES].sort()).toEqual(pageRoutes()));
 

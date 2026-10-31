@@ -154,6 +154,14 @@ describe('GET /api/auth/oidc/start', () => {
     expect([limited.statusCode, Number(limited.headers['retry-after']) > 0, cookiesOf(limited)]).toEqual([429, true, []]);
   });
 
+  it('the start limiter holds at most startMaxKeys clients; a new client beyond the cap is refused (fail closed)', async () => {
+    const d = { ...deps(), startMaxKeys: 2 };
+    const h = createOidcStartRoute(d);
+    const from = (ip: string) => ({ ...req(), socket: { remoteAddress: ip } }) as unknown as NextApiRequest;
+    expect([(await call(h, from('10.1.0.1'))).statusCode, (await call(h, from('10.1.0.2'))).statusCode, (await call(h, from('10.1.0.3'))).statusCode]).toEqual([302, 302, 429]);
+    expect((await call(h, from('10.1.0.1'))).statusCode).toBe(302); // a known client keeps its own budget
+  });
+
   it('unknown or disabled connection ⇒ 400; missing client secret or hop count ⇒ 503; IdP unreachable ⇒ 503; outside engagement mode ⇒ 404; matrix rows', async () => {
     for (const c of ['idp-b', 'idp-off', '']) expect((await call(createOidcStartRoute(deps()), req({ url: `/api/auth/oidc/start?connection=${c}` }))).statusCode, c).toBe(400);
     const noSecret = await call(createOidcStartRoute(deps({ [SECRET_ENV]: undefined })), req());
