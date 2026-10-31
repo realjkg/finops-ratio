@@ -1,0 +1,11 @@
+Engagement report view + UI/XLSX/PDF agreement (1.0, report-facts PR 3b): GREEN, local run 2026-10-31.
+- lint, typecheck (app + worker): pass. npm test: 252 files / 4574 tests passed.
+- worker:build, build, check:bundle: pass (the view is not mounted in a page yet; see the PR's owner decision).
+- test:db not rerun locally for this PR (no database or route code changed here; PR 3a ran it; CI runs it).
+- engagementReportAgreement.test.tsx: for the sample (AWS 2024-09), an empty period without a config, two sources in
+  two currencies with partial effective cost, and hostile text, the UI table (React Testing Library), the XLSX sheet
+  (ExcelJS) and the PDF element tree give identical cell texts per section (PDF with its disclosed '?' glyph fallback).
+- Screenshots (view rendered with the app's Tailwind CSS in light, dark and high-contrast at 1440x900 and 390x844):
+  inspected; amounts verbatim, N/A with reasons, the Data status warning visible, wide tables scroll horizontally.
+Mutations (agreement test): V1 warning banner removed: killed; V2 amounts formatted on screen: killed;
+V3 Note column dropped on screen: killed; V4 table region not keyboard-focusable: killed.
