@@ -100,9 +100,9 @@ describe('authorize: deny by default', () => {
   it('audit hook: one event per decision with principal kind and id, permission, resource identity and outcome; nothing else', () => {
     const d = dir();
     const events: AuditEvent[] = [];
-    authorize(d, p('v'), 'reports:read', R, (e) => events.push(e));
-    authorize(d, p('v'), 'connectors:manage', R, (e) => events.push(e));
-    authorize(d, null, 'reports:read', R, (e) => events.push(e));
+    authorize(d, p('v'), 'reports:read', R, (e) => { events.push(e); });
+    authorize(d, p('v'), 'connectors:manage', R, (e) => { events.push(e); });
+    authorize(d, null, 'reports:read', R, (e) => { events.push(e); });
     const base = { permission: 'reports:read', resourceType: 'report', resourceId: 'engagement-report', resourceVersion: 'config-sha256-synthetic', tenantId: T, engagementId: E };
     expect(events).toEqual([
       { ...base, principalKind: 'user', principalId: 'v', outcome: 'allow', status: 200 },
