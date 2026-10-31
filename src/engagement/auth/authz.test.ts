@@ -5,7 +5,7 @@
 // SYNTHETIC records; passwords generated at run time.
 import { randomBytes } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { authorize, DENY, PERMISSIONS, ROLE_PERMISSIONS, type Permission } from './authz';
+import { authorize, DENY, PERMISSIONS, ROLE_PERMISSIONS, type AuditEvent, type Permission, type Principal, type Resource } from './authz';
 import { validateDirectory, type Directory } from './directory';
 import { authenticateLocal, resolveExternalIdentity } from './identity';
 import { hashPassword } from './password';
@@ -14,7 +14,8 @@ const T = '5f0c1a7e-2b3d-4c5e-8f60-71829a3b4c5d';
 const E = 'example-focus-sample';
 const OTHER_T = '22222222-2222-4222-8222-222222222222';
 const ISS = 'https://idp.example.test/tenant-a';
-const RES = { tenantId: T, engagementId: E };
+const RES = { tenantId: T, engagementId: E }; // the instance
+const R: Resource = { type: 'report', id: 'engagement-report', tenantId: T, engagementId: E, version: 'config-sha256-synthetic' };
 const pw = randomBytes(18).toString('base64url');
 let hash = '';
 /* eslint-disable @typescript-eslint/no-explicit-any -- tests mutate an untyped JSON document */
@@ -42,7 +43,7 @@ function dir(fn: (d: any) => void = () => {}): Directory {
   if (!r.ok) throw new Error(r.problems.join('; '));
   return r.directory;
 }
-const p = (userId: string, o: Partial<typeof RES> = {}) => ({ userId, ...RES, ...o });
+const p = (id: string, o: Partial<typeof RES> = {}): Principal => ({ kind: 'user', id, ...RES, ...o });
 
 beforeAll(async () => { hash = await hashPassword(pw, { logN: 14, r: 8, p: 1 }); });
 
@@ -58,7 +59,7 @@ describe('authorize: deny by default', () => {
     const d = dir();
     for (const [user, role] of [['a', 'analyst'], ['c', 'connector_manager'], ['adm', 'tenant_admin']] as const) {
       for (const perm of PERMISSIONS) {
-        const v = authorize(d, p(user), perm, RES);
+        const v = authorize(d, p(user), perm, R);
         expect(v.allow, `${user} ${perm}`).toBe((ROLE_PERMISSIONS[role] as readonly string[]).includes(perm));
         if (!v.allow) expect(v).toEqual({ allow: false, status: 403, reason: DENY.permission });
       }
@@ -67,37 +68,61 @@ describe('authorize: deny by default', () => {
 
   it('a team grant adds its permissions to its members only, inside the tenant', () => {
     const d = dir();
-    expect(authorize(d, p('v'), 'reports:export', RES)).toEqual({ allow: true, userId: 'v', role: 'viewer', teams: ['finance'] });
-    expect(authorize(d, p('v'), 'connectors:manage', RES).allow).toBe(false);
-    expect(authorize(dir((x) => { x.teams[0].members = []; }), p('v'), 'reports:export', RES).allow).toBe(false);
+    expect(authorize(d, p('v'), 'reports:export', R)).toEqual({ allow: true, principal: { kind: 'user', id: 'v' }, role: 'viewer', teams: ['finance'] });
+    expect(authorize(d, p('v'), 'connectors:manage', R).allow).toBe(false);
+    expect(authorize(dir((x) => { x.teams[0].members = []; }), p('v'), 'reports:export', R).allow).toBe(false);
   });
 
   it('no principal, unknown or suspended user ⇒ 401; no or suspended membership, other tenant or engagement, unknown permission ⇒ 403', () => {
     const d = dir();
-    expect(authorize(d, null, 'reports:read', RES)).toEqual({ allow: false, status: 401, reason: DENY.authentication });
-    expect(authorize(d, p('ghost'), 'reports:read', RES)).toEqual({ allow: false, status: 401, reason: DENY.authentication });
-    expect(authorize(d, p('off'), 'reports:read', RES)).toEqual({ allow: false, status: 401, reason: DENY.authentication });
-    expect(authorize(d, p('nomember'), 'reports:read', RES)).toEqual({ allow: false, status: 403, reason: DENY.membership });
-    expect(authorize(d, p('msusp'), 'reports:read', RES)).toEqual({ allow: false, status: 403, reason: DENY.membership });
-    expect(authorize(d, p('v', { tenantId: OTHER_T }), 'reports:read', RES)).toEqual({ allow: false, status: 403, reason: DENY.tenant });
-    expect(authorize(d, p('v'), 'reports:read', { tenantId: OTHER_T, engagementId: E })).toEqual({ allow: false, status: 403, reason: DENY.tenant });
-    expect(authorize(d, p('v'), 'reports:read', { tenantId: T, engagementId: 'other' })).toEqual({ allow: false, status: 403, reason: DENY.tenant });
-    expect(authorize(d, p('v'), 'reports:delete' as Permission, RES)).toEqual({ allow: false, status: 403, reason: DENY.permission });
-    expect(authorize(d, p('v'), 'reports:read', RES).allow).toBe(true);
+    expect(authorize(d, null, 'reports:read', R)).toEqual({ allow: false, status: 401, reason: DENY.authentication });
+    expect(authorize(d, p('ghost'), 'reports:read', R)).toEqual({ allow: false, status: 401, reason: DENY.authentication });
+    expect(authorize(d, p('off'), 'reports:read', R)).toEqual({ allow: false, status: 401, reason: DENY.authentication });
+    expect(authorize(d, p('nomember'), 'reports:read', R)).toEqual({ allow: false, status: 403, reason: DENY.membership });
+    expect(authorize(d, p('msusp'), 'reports:read', R)).toEqual({ allow: false, status: 403, reason: DENY.membership });
+    expect(authorize(d, p('v', { tenantId: OTHER_T }), 'reports:read', R)).toEqual({ allow: false, status: 403, reason: DENY.tenant });
+    expect(authorize(d, p('v'), 'reports:read', { ...R, tenantId: OTHER_T })).toEqual({ allow: false, status: 403, reason: DENY.tenant });
+    expect(authorize(d, p('v'), 'reports:read', { ...R, engagementId: 'other' })).toEqual({ allow: false, status: 403, reason: DENY.tenant });
+    expect(authorize(d, p('v'), 'reports:delete' as Permission, R)).toEqual({ allow: false, status: 403, reason: DENY.permission });
+    expect(authorize(d, p('v'), 'reports:read', R).allow).toBe(true);
+  });
+
+  it('principal kinds: only user is implemented; an agent principal (reserved) and a malformed resource are refused', () => {
+    const d = dir();
+    const agent = { kind: 'agent', id: 'v', ...RES } as Principal;
+    expect(authorize(d, agent, 'reports:read', R)).toEqual({ allow: false, status: 403, reason: DENY.principalKind });
+    for (const bad of [{ ...R, id: '' }, { ...R, type: 'secret' }, { ...R, version: 7 }] as Resource[]) {
+      expect(authorize(d, p('v'), 'reports:read', bad), JSON.stringify(bad)).toEqual({ allow: false, status: 403, reason: DENY.tenant });
+    }
+  });
+
+  it('audit hook: one event per decision with principal kind and id, permission, resource identity and outcome; nothing else', () => {
+    const d = dir();
+    const events: AuditEvent[] = [];
+    authorize(d, p('v'), 'reports:read', R, (e) => events.push(e));
+    authorize(d, p('v'), 'connectors:manage', R, (e) => events.push(e));
+    authorize(d, null, 'reports:read', R, (e) => events.push(e));
+    const base = { permission: 'reports:read', resourceType: 'report', resourceId: 'engagement-report', resourceVersion: 'config-sha256-synthetic', tenantId: T, engagementId: E };
+    expect(events).toEqual([
+      { ...base, principalKind: 'user', principalId: 'v', outcome: 'allow', status: 200 },
+      { ...base, permission: 'connectors:manage', principalKind: 'user', principalId: 'v', outcome: 'deny', status: 403, reason: DENY.permission },
+      { ...base, principalKind: 'none', principalId: null, outcome: 'deny', status: 401, reason: DENY.authentication },
+    ]);
+    expect(JSON.stringify(events)).not.toMatch(/scrypt|SYNTHETIC v|idp\.example/);
   });
 
   it('defense in depth: a membership or binding record of another tenant or issuer is refused even if a directory held one', () => {
     const d = dir();
     const foreign = { ...d, memberships: new Map([...d.memberships].map(([k, m]) => [k, { ...m, tenantId: OTHER_T }])) };
-    expect(authorize(foreign, p('v'), 'reports:read', RES)).toEqual({ allow: false, status: 403, reason: DENY.membership });
+    expect(authorize(foreign, p('v'), 'reports:read', R)).toEqual({ allow: false, status: 403, reason: DENY.membership });
     const loose = { ...d, bindingOf: (c: string, _i: string, s: string) => d.bindingOf(c, ISS, s) };
     expect(resolveExternalIdentity(loose, { connectionId: 'idp-a', issuer: 'https://idp.example.test/tenant-b', subject: 'sub-v' })).toEqual({ kind: 'not_provisioned' });
   });
 
   it('a role change or suspension in the directory changes the very next decision (no cached grant)', () => {
-    expect(authorize(dir((x) => { x.memberships[0].role = 'connector_manager'; }), p('v'), 'reports:read', RES).allow).toBe(false);
-    expect(authorize(dir((x) => { x.users[0].status = 'suspended'; }), p('v'), 'reports:read', RES).allow).toBe(false);
-    expect(authorize(dir((x) => { x.memberships[0].status = 'suspended'; }), p('v'), 'reports:read', RES).allow).toBe(false);
+    expect(authorize(dir((x) => { x.memberships[0].role = 'connector_manager'; }), p('v'), 'reports:read', R).allow).toBe(false);
+    expect(authorize(dir((x) => { x.users[0].status = 'suspended'; }), p('v'), 'reports:read', R).allow).toBe(false);
+    expect(authorize(dir((x) => { x.memberships[0].status = 'suspended'; }), p('v'), 'reports:read', R).allow).toBe(false);
   });
 });
 
