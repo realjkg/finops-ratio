@@ -1,6 +1,9 @@
 R2 RED evidence (tests committed before each implementation)
-PR A (#161), A2 (#163), A3 (#165): see those PRs.
-B (OIDC): npx vitest run --cache=false src/engagement/auth src/rbac
-  -> FAIL safeFetch.test.ts and oidc.test.ts (./safeFetch, ./oidc and pages/api/auth/oidc/* do not exist yet)
-  -> FAIL matrix_view_codes_match_plan_section_4_4 (rows for /api/auth/oidc/start and /callback missing).
+PR A (#161, merged): dc9e82e, e8cbba6, 3dc848a (see #161).
+A2a:
+1. 09e7b12  npx vitest run src/engagement/auth -> Tests 1 failed | 24 passed (async audit hook rejection).
+2. session store + cookie/CSRF library: npx vitest run src/engagement/auth
+   -> FAIL session.test.ts and http.test.ts (./session and ./http do not exist yet); the other suites pass.
 GREEN counts and mutation results are in the PR body.
+3. routes (POST /api/auth/login, POST /api/auth/logout, GET /api/auth/session): npx vitest run src/engagement/auth src/rbac
+   -> FAIL routes.test.ts (./routes and pages/api/auth/* do not exist) and matrix_view_codes_match_plan_section_4_4 (rows missing).
