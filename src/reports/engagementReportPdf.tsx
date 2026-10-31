@@ -75,6 +75,8 @@ export const PDF_TOTAL_MAX_CHARS = 100_000;
 export const PDF_CELL_FLOOR_CHARS = 200;
 /** Model-authored text (labels, reasons, warnings) is never budgeted; it is bounded by construction, and this ceiling only guards that. */
 export const PDF_MODEL_TEXT_MAX_CHARS = 8_000;
+/** Appended where a cell's PDF text is cut (the XLSX and JSON keep the full text). */
+export const PDF_TRUNCATION_MARKER = (n: number) => `... [truncated ${n} characters; see XLSX/JSON for the full text]`;
 export const PDF_TRUNCATION_NOTE = (n: number) =>
   `PDF length limit: ${n} cell value${n === 1 ? ' was' : 's were'} truncated (at most ${PDF_CELL_MAX_CHARS} characters per cell, and ${PDF_CELL_FLOOR_CHARS} per cell once the document holds ${PDF_TOTAL_MAX_CHARS}); the XLSX and JSON carry the full text.`;
 
@@ -97,7 +99,7 @@ function pdfView(model: EngagementReportModel) {
     }
     cut += 1;
     if (data) budget = Math.max(0, budget - limit);
-    return `${g.slice(0, limit)}... [truncated ${g.length - limit} characters; see XLSX/JSON for the full text]`;
+    return `${g.slice(0, limit)}${PDF_TRUNCATION_MARKER(g.length - limit)}`;
   };
   const title = show(model.title);
   const isData = (s: ReportSection, r: string[], i: number) =>
