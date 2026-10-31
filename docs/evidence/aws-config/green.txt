@@ -33,3 +33,16 @@ or the NFKC cap removed: caught by the identical-function-text check (and the NF
 first segment 3 failed; userinfo not checked 4 failed. Reviewer probe 0 of 110 flagged; fuzz seeds 1-4, 80,000 configs,
 0 disagreements.
 Gates (review round 2), in order, exit 0: lint; typecheck app + worker; vitest 240 files / 4478 tests; test:db 712 + 173; worker:build; build; check:bundle.
+Validate step (owner): external watchdog. src/connectors/managed/hostileWatchdog.test.ts runs every hostile case in a
+child process (node --import tsx src/connectors/managed/testing/hostileChild.ts, one per test) and SIGKILLs it if a
+case is not answered within 2,000 ms, so a regression fails instead of blocking vitest. Startup (checkEngagementConfig)
+and worker (engagementProblems) x bucket/prefix/exportName x shapes ':'*n, 'a:'*n, 'eyJ'*n, 'eyJ'+'-'*n, U+FDFA*n
+(NFKC x18), fullwidth 'A'*n, fullwidth key id*n; n = 1 MiB (refused, no echo, < 100 ms measured in the child) and
+n = cap (63/128/1024: no echo, < 100 ms).
+Command: npx vitest run src/connectors/managed/hostileWatchdog.test.ts   Environment: Linux 6.18, 4 vCPU, Node v22.22.0,
+tsx 4.23.15, vitest 5.0.1. Result: 6 passed, 3 runs (3.8 s to 4.4 s each).
+Mutations (scratch script, each restored): no length guards (startup or worker) -> 3 failed (child-measured > 100 ms);
+no guards + the old quadratic JWT and userinfo regexes (startup or worker) -> 3 failed by watchdog kill
+("did not finish within 2000 ms (child killed)"); each run ended in about 10 s instead of hanging.
+Parity fuzz on this code (reviewer fuzz.ts, npx tsx fuzz.ts <seed> 20000, seeds 1-4): 80,000 configs, 0 disagreements.
+Gates (validate step), in order, exit 0: lint; typecheck app + worker; vitest 241 files / 4484 tests; test:db 712 + 173; worker:build; build; check:bundle.
