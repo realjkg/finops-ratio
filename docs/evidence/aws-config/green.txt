@@ -17,3 +17,11 @@ M10 worker accepting . and .. prefix segments          1 failed
 DB (CI caught it): src/ingest/managedFetch.db.test.ts expected an unregistered connector to reach the registry (exit 1,
 CONNECTOR_NOT_REGISTERED); the worker config check now refuses it first, as startup does (exit 2, ENGAGEMENT_CONFIG_INVALID).
 Updated; vitest.db.config.ts on managedFetch.db + focusRetriever.db against local postgres:16 and SeaweedFS: 13 passed.
+Review round (credential shapes inside the AWS fields), patterns applied to the value and its NFKC form, both sides:
+(AKIA|ASIA)[A-Z0-9]{16} unbounded; eyJ[\w-]{8,}\.[\w-]{8,} unanchored; -----BEGIN [A-Z ]*-----;
+(secret|password|passwd|token|credential|signature|api[_-]?key|access[_-]?key)\s*[=:] (any case); :[^/@]*@ (userinfo, any segment).
+Mutations, each killed (config / worker failures): key id bounded again 9/4, JWT anchored again 5/3, no api_key and
+whitespace forms 6/2, userinfo only at the start 3/2, no NFKC folding 2/1, no PEM pattern 3/1.
+Reviewer fuzz (startup vs worker): seeds 1-3, 20,000 configs each, 0 disagreements; reviewer probe: 0 findings of 106.
+Gates (review round), in order, exit 0: lint; typecheck app + worker; vitest 240 files / 4461 tests; test:db (postgres:16 +
+SeaweedFS) 712 + 173 tests; worker:build; build; check:bundle.

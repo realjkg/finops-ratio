@@ -8,7 +8,7 @@ import os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { MANAGED_CONNECTORS as R1_CONNECTORS, SUPPORTED_IN_THIS_BUILD, checkEngagementConfig, validateEngagementConfig } from '../../engagement/config';
-import { AWS_BUCKET_RE, AWS_EXPORT_NAME_RE, AWS_FILE_PART_RESERVE_BYTES, AWS_INLINE_CREDENTIAL_RE, AWS_KEY_ID_RE, CREDENTIAL_RE, MANAGED_CONNECTORS, MAX_PARAM_ENTRIES, S3_KEY_MAX_BYTES, SECRET_REF_RE, SOURCE_ID_RE, engagementProblems } from './engagementSpec';
+import { AWS_BUCKET_RE, AWS_EXPORT_NAME_RE, AWS_FILE_PART_RESERVE_BYTES, AWS_INLINE_CREDENTIAL_RE, AWS_JWT_RE, AWS_KEY_ID_RE, AWS_USERINFO_RE, CREDENTIAL_RE, MANAGED_CONNECTORS, MAX_PARAM_ENTRIES, S3_KEY_MAX_BYTES, SECRET_REF_RE, SOURCE_ID_RE, engagementProblems } from './engagementSpec';
 import { managedRegistry } from './registry';
 // The worker's entry point: it checks the config against the live registry (the worker's approved list).
 import { ManagedError, managedSpecFromEngagementFile } from './runtime';
@@ -146,7 +146,8 @@ describe('worker engagement-config check (parity with R1)', () => {
     expect(R1_TEXT).toContain(`const SECRET_REF_RE = /${SECRET_REF_RE.source}/;`);
     expect(R1_TEXT).toContain(`const SOURCE_ID_RE = /${SOURCE_ID_RE.source}/;`);
     expect(R1_TEXT).toContain(`Object.keys(o.params).length > ${MAX_PARAM_ENTRIES}`);
-    for (const re of [AWS_BUCKET_RE, AWS_EXPORT_NAME_RE, AWS_KEY_ID_RE, AWS_INLINE_CREDENTIAL_RE]) expect(R1_TEXT).toContain(`/${re.source}/${re.flags}`);
+    for (const re of [AWS_BUCKET_RE, AWS_EXPORT_NAME_RE, AWS_KEY_ID_RE, AWS_JWT_RE, AWS_INLINE_CREDENTIAL_RE, AWS_USERINFO_RE]) expect(R1_TEXT).toContain(`/${re.source}/${re.flags}`);
+    expect(R1_TEXT).toContain('const AWS_CREDENTIAL_RES = [CREDENTIAL_RE[0], AWS_KEY_ID_RE, AWS_JWT_RE, AWS_INLINE_CREDENTIAL_RE, AWS_USERINFO_RE];');
     expect(R1_TEXT).toContain(`const S3_KEY_MAX_BYTES = ${S3_KEY_MAX_BYTES};`);
     expect(R1_TEXT).toContain(`const AWS_FILE_PART_RESERVE_BYTES = ${AWS_FILE_PART_RESERVE_BYTES};`);
   });

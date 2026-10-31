@@ -412,8 +412,13 @@ const AWS_BUCKET_RE = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
 const AWS_BUCKET_RESERVED_RE = /\.\.|^\d{1,3}(\.\d{1,3}){3}$|^(xn--|sthree-|amzn-s3-demo-)|(-s3alias|--ol-s3|\.mrap|--x-s3|--table-s3)$/;
 // Data Exports export Name: 1 to 128 of [0-9A-Za-z_-] (bcm-data-exports API model).
 const AWS_EXPORT_NAME_RE = /^[0-9A-Za-z_-]{1,128}$/;
-const AWS_KEY_ID_RE = /(^|[^A-Z0-9])(AKIA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])/;
-const AWS_INLINE_CREDENTIAL_RE = /(secret|password|passwd|token|credential|signature|access[_-]?key)[=:]|^[^/@]*:[^/@]*@/i;
+// Credential shapes refused ANYWHERE inside these fields (no word boundaries, unanchored), also after NFKC
+// folding (fullwidth lookalikes): key ids, JWTs, private keys, key=value or key: value forms, URL userinfo.
+const AWS_KEY_ID_RE = /(AKIA|ASIA)[A-Z0-9]{16}/;
+const AWS_JWT_RE = /eyJ[\w-]{8,}\.[\w-]{8,}/;
+const AWS_INLINE_CREDENTIAL_RE = /(secret|password|passwd|token|credential|signature|api[_-]?key|access[_-]?key)\s*[=:]/i;
+const AWS_USERINFO_RE = /:[^/@]*@/;
+const AWS_CREDENTIAL_RES = [CREDENTIAL_RE[0], AWS_KEY_ID_RE, AWS_JWT_RE, AWS_INLINE_CREDENTIAL_RE, AWS_USERINFO_RE];
 // S3 limits the WHOLE object key. The retriever (src/ingest/sources/s3/layout.ts) reads keys under
 // `<prefix>/<exportName>/metadata/BILLING_PERIOD=YYYY-MM/` (its longest fixed part) plus a part AWS
 // names (run folder and file or manifest name; lengths NOT VERIFIED), reserved below.
@@ -425,7 +430,7 @@ const C0_C1_RE = /[\u0000-\u001f\u007f-\u009f]/;
 /** The problem (never the value) of one AWS location param, or null. */
 function awsLocationProblem(name: string, v: unknown, params: Record<string, unknown>): string | null {
   if (typeof v !== 'string') return 'must be a string';
-  if (v.split('/').some((seg) => CREDENTIAL_RE.slice(0, 3).some((r) => r.test(seg))) || AWS_KEY_ID_RE.test(v) || AWS_INLINE_CREDENTIAL_RE.test(v)) return 'looks like a credential value; reference a secret by name with secretRef';
+  if ([v, v.normalize('NFKC')].some((x) => AWS_CREDENTIAL_RES.some((r) => r.test(x)))) return 'looks like a credential value; reference a secret by name with secretRef';
   if (name === 'bucket') return AWS_BUCKET_RE.test(v) && !AWS_BUCKET_RESERVED_RE.test(v) ? null : 'must be an S3 general purpose bucket name (3 to 63 lowercase letters, digits, dots and hyphens; letter or digit at both ends; no consecutive dots, IP address form or reserved prefix or suffix)';
   if (name === 'exportName') return AWS_EXPORT_NAME_RE.test(v) ? null : 'must be a Data Exports export name (1 to 128 letters, digits, underscores and hyphens)';
   if (v === '') return null;
