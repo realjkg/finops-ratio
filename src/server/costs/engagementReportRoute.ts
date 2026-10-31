@@ -7,9 +7,10 @@
 // deadline, fail-closed 503s and a generic 500. format is an exact allowlist.
 // A PDF whose text the bundled fonts cannot render faithfully is refused with 422
 // (fixed, counts-only message; no PDF); the XLSX and JSON carry the full text.
+// With every PDF render slot taken, a PDF request is 503 pdf_busy (Retry-After).
 import type { NextApiHandler } from 'next';
 import { buildEngagementReportModel, engagementReportFilename, type EngagementReportModel } from '@/reports/engagementReportModel';
-import { PdfUnsupportedTextError, renderEngagementReportPdf, type PdfUnsupportedCounts } from '@/reports/engagementReportPdf';
+import { PDF_BUSY_MESSAGE, PdfBusyError, PdfUnsupportedTextError, renderEngagementReportPdf, type PdfUnsupportedCounts } from '@/reports/engagementReportPdf';
 import { renderEngagementReportXlsx } from '@/reports/engagementReportXlsx';
 import { createReaderRoute, type PublishedCostsRouteDeps } from './publishedCostsRoute';
 import { parseReportFactsQuery, readReportFacts } from './reportFactsRoute';
@@ -26,13 +27,13 @@ export function parseEngagementReportQuery(query: Record<string, string | string
   return { ok: true, value: { period: p.value.period, format } };
 }
 
-type Out = { format: 'json'; model: EngagementReportModel } | { format: 'xlsx' | 'pdf'; body: Buffer; filename: string } | { format: 'pdf-refused'; counts: PdfUnsupportedCounts; message: string };
+type Out = { format: 'json'; model: EngagementReportModel } | { format: 'xlsx' | 'pdf'; body: Buffer; filename: string } | { format: 'pdf-refused'; counts: PdfUnsupportedCounts; message: string } | { format: 'pdf-busy' };
 
-async function renderPdf(model: EngagementReportModel): Promise<Buffer | PdfUnsupportedTextError> {
+async function renderPdf(model: EngagementReportModel): Promise<Buffer | PdfUnsupportedTextError | PdfBusyError> {
   try {
     return await renderEngagementReportPdf(model);
   } catch (err) {
-    if (err instanceof PdfUnsupportedTextError) return err;
+    if (err instanceof PdfUnsupportedTextError || err instanceof PdfBusyError) return err;
     throw err;
   }
 }
@@ -47,12 +48,18 @@ export function createEngagementReportRoute(deps: PublishedCostsRouteDeps = {}):
       if (q.format === 'json') return { format: 'json', model };
       const body = q.format === 'pdf' ? await renderPdf(model) : await renderEngagementReportXlsx(model);
       if (body instanceof PdfUnsupportedTextError) return { format: 'pdf-refused', counts: body.counts, message: body.message };
+      if (body instanceof PdfBusyError) return { format: 'pdf-busy' };
       return { format: q.format, body, filename: engagementReportFilename(facts.period.month, q.format, now) };
     },
     respond: (res, result) => {
       const out = result as Out;
       if (out.format === 'json') {
         res.status(200).json(out.model);
+        return;
+      }
+      if (out.format === 'pdf-busy') {
+        res.setHeader('Retry-After', '5');
+        res.status(503).json({ error: { code: 'pdf_busy', message: PDF_BUSY_MESSAGE } });
         return;
       }
       if (out.format === 'pdf-refused') {

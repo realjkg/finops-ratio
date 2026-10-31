@@ -433,6 +433,14 @@ View: after R2, open the app on the loopback port and sign in. The existing work
 - FOCUS parsing is verified on real exports for 1.0 only; FOCUS 1.1 to 1.4 have synthetic fixtures only.
 - The base image tag is not pinned by digest (shared with the simulation image); the Postgres and SeaweedFS images are.
 - The bundled object store has no access control and is reachable only from the internal compose network.
+- Report PDF (`format=pdf`): bundled Noto fonts (SIL OFL 1.1; `assets/fonts/PROVENANCE.md`). It draws Latin, Greek,
+  Cyrillic, common symbols, Simplified Chinese, Japanese and Korean (Basic Multilingual Plane only). It answers 422
+  `pdf_unsupported_text` (download XLSX or JSON for the full text) for complex or right-to-left scripts, emoji, combining
+  marks, letters the font only composes from base + mark (ẹ ị ọ ụ ṣ ṃ ṅ ḿ ǹ: the dot below of Vietnamese and Yoruba),
+  characters above U+FFFF (e.g. CJK Extension B), and the secondary twin of two code points sharing one glyph (e.g. the
+  Kangxi radical U+2F00 next to U+4E00, U+2329 next to U+3008, U+2780 next to U+2460). Han characters use Simplified
+  Chinese glyph forms; ligatures are off. CJK text counts 10 per character (and 10 per font switch) toward the PDF text
+  caps; at most 2 PDF renders run at once (503 `pdf_busy`, retry).
 
 ### Coming from other rows
 

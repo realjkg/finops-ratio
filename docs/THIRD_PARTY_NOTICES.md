@@ -15,7 +15,8 @@ Generated PDFs embed subsets of these fonts.
   © 2014-2021 Adobe (http://www.adobe.com/).
 
 Both are licensed under the SIL Open Font License, Version 1.1, reproduced in full below
-(the upstream Noto Sans license file, verbatim).
+(the license text of the upstream Noto Sans license file, without its first line, the Noto Sans
+copyright notice listed above).
 
 ```text
 This Font Software is licensed under the SIL Open Font License,

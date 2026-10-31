@@ -20,8 +20,10 @@ import {
   PDF_TOTAL_MAX_CHARS,
   PDF_TRUNCATION_MARKER,
   PDF_TRUNCATION_NOTE,
+  pdfCutToCost,
   pdfGlyphText,
   pdfPreflight,
+  pdfTextCost,
   PdfUnsupportedTextError,
 } from './engagementReportPdf';
 import { loadPdfFonts } from './pdfFonts';
@@ -35,8 +37,9 @@ const isData = (s: ReportSection, row: string[], i: number) =>
 /** What the PDF must show for one cell (these cases stay under the document budget, asserted per case). */
 function pdfExpected(s: ReportSection, row: string[], i: number): string {
   const g = pdfGlyphText(row[i]);
-  if (!isData(s, row, i) || g.length <= PDF_CELL_MAX_CHARS) return g;
-  return `${g.slice(0, PDF_CELL_MAX_CHARS)}${PDF_TRUNCATION_MARKER(g.length - PDF_CELL_MAX_CHARS)}`;
+  if (!isData(s, row, i) || pdfTextCost(g) <= PDF_CELL_MAX_CHARS) return g;
+  const kept = pdfCutToCost(g, PDF_CELL_MAX_CHARS);
+  return `${kept}${PDF_TRUNCATION_MARKER(g.length - kept.length)}`;
 }
 
 beforeAll(() => loadPdfFonts());
@@ -61,9 +64,9 @@ describe('UI, XLSX and PDF show identical cell texts per section', () => {
       }
       // The caps cut only DATA cells here: the document budget is not reached and no model text hits its ceiling.
       const cells = m.sections.flatMap((s) => s.rows.flatMap((r) => r.map((c, i) => ({ g: pdfGlyphText(c), data: isData(s, r, i) }))));
-      expect(cells.filter((c) => c.data).reduce((n, c) => n + Math.min(c.g.length, PDF_CELL_MAX_CHARS), 0)).toBeLessThan(PDF_TOTAL_MAX_CHARS);
+      expect(cells.filter((c) => c.data).reduce((n, c) => n + Math.min(pdfTextCost(c.g), PDF_CELL_MAX_CHARS), 0)).toBeLessThan(PDF_TOTAL_MAX_CHARS);
       expect(cells.filter((c) => !c.data && c.g.length > PDF_MODEL_TEXT_MAX_CHARS)).toEqual([]);
-      const cut = cells.filter((c) => c.data && c.g.length > PDF_CELL_MAX_CHARS).length;
+      const cut = cells.filter((c) => c.data && pdfTextCost(c.g) > PDF_CELL_MAX_CHARS).length;
       const notes = treeTexts(<EngagementReportDocument model={m} policy={policy} />).filter((t) => t.startsWith('PDF length limit: '));
       expect(notes, 'the page-1 truncation count').toEqual(cut ? [PDF_TRUNCATION_NOTE(cut)] : []);
     });

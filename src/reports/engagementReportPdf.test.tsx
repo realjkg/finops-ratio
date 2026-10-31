@@ -23,6 +23,7 @@ import {
   pdfPreflight,
   PdfUnsupportedTextError,
   PDF_CJK_COST,
+  PDF_FONT_SWITCH_COST,
   PDF_MAX_CONCURRENT_RENDERS,
   PdfBusyError,
   pdfCutToCost,
@@ -259,7 +260,7 @@ describe('bundled fonts: declared scripts render faithfully and extract exactly'
     expect(breakLong('Cost成本ID-42')).toEqual(['Cost', '成', '本', 'ID-42']);
     expect(breakLong('a'.repeat(40))).toEqual(['a'.repeat(40)]);
     expect(breakLong('0a0a0a0a-0000-4000-8000-00000000000a')).toEqual(['0a0a0a0a-0000-4000-8000-00000000000a']);
-    const long = '云计算费用报告'.repeat(30); // 210 CJK characters, no spaces
+    const long = '云计算费用报告'.repeat(25); // 175 CJK characters (cost 1,750: under the cell cap), no spaces
     const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups: [g({}), g({ isTotal: false, chargeCategory: long, rowCount: '1' })] })), ENGAGEMENT);
     const shown = pdfShownStrings(await renderEngagementReportPdf(m));
     const at = shown.findIndex((t) => t.startsWith('云计算'));
@@ -269,17 +270,18 @@ describe('bundled fonts: declared scripts render faithfully and extract exactly'
     expect(lines.map((l, i) => (i < lines.length - 1 ? l.slice(0, -1) : l)).join('')).toBe(long);
   }, 30_000);
 
-  it("the data caps weigh each CJK character as 10 Latin ones (CJK layout costs more per character): visible marker, page-1 count", () => {
-    expect(PDF_CJK_COST).toBe(10);
-    expect(pdfTextCost('ab 成本')).toBe(3 + 2 * PDF_CJK_COST);
+  it("the data caps weigh each CJK character as 10 Latin ones and each font switch as 10 (layout cost): visible marker, page-1 count", () => {
+    expect([PDF_CJK_COST, PDF_FONT_SWITCH_COST]).toEqual([10, 10]);
+    expect(pdfTextCost('ab 成本')).toBe(3 + 2 * PDF_CJK_COST + PDF_FONT_SWITCH_COST);
+    expect(pdfTextCost('成 本 报')).toBe(3 * PDF_CJK_COST + 2 + 4 * PDF_FONT_SWITCH_COST);
     const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups: [g({}), g({ isTotal: false, chargeCategory: '成本'.repeat(1_500), rowCount: '1' })] })), ENGAGEMENT);
     const texts = treeTexts(<EngagementReportDocument model={m} />);
     const cell = texts.find((t) => t.startsWith('成本成本'))!;
     expect(cell).toBe(`${'成本'.repeat(100)}... [truncated 2800 characters; see XLSX/JSON for the full text]`);
     expect(texts.filter((t) => t.startsWith('PDF length limit: '))).toEqual([PDF_TRUNCATION_NOTE(1)]);
     // Mixed text is cut where its cost reaches the cap, never inside a character.
-    expect(pdfCutToCost('ab成本cd', 13)).toBe('ab成');
-    expect(pdfCutToCost('ab成本cd', 12)).toBe('ab');
+    expect(pdfCutToCost('ab成本cd', 22)).toBe('ab成');
+    expect(pdfCutToCost('ab成本cd', 21)).toBe('ab');
   });
 
   for (const kind of ['cjk-spaced', 'cjk-dense'] as const) {
@@ -325,18 +327,17 @@ describe('unsupported text: preflight and the refusal policy (default refuse)', 
   it('refuses Vietnamese/Yoruba dot-below letters, characters outside the Basic Multilingual Plane, and glyph twins used together', () => {
     expect(pdfPreflight(withCells(['Phòng học dịch vụ', 'ọja ṣe ẹ', 'Phòng Nguyễn']))).toEqual({ cells: 2, complex: 2, emoji: 0, other: 0 });
     expect(pdfPreflight(withCells(['a\u{20BB7}b', 'a\u{1F170}b']))).toEqual({ cells: 2, complex: 0, emoji: 1, other: 1 });
-    // U+4E00 and the Kangxi radical U+2F00 are one glyph: either alone is fine, both in one PDF are refused (each cell counted).
+    // U+4E00 and the Kangxi radical U+2F00 are one glyph: U+4E00 is drawn, U+2F00 is refused (its text layer would read U+4E00).
     expect(pdfPreflight(withCells(['\u4e00 cost', 'other']))).toEqual({ cells: 0, complex: 0, emoji: 0, other: 0 });
-    expect(pdfPreflight(withCells(['\u2f00 cost', 'other']))).toEqual({ cells: 0, complex: 0, emoji: 0, other: 0 });
-    expect(pdfPreflight(withCells(['\u4e00 cost', '\u2f00 radical', 'x \u4e00']))).toEqual({ cells: 3, complex: 0, emoji: 0, other: 3 });
+    expect(pdfPreflight(withCells(['\u4e00 cost', '\u2f00 radical']))).toEqual({ cells: 1, complex: 0, emoji: 0, other: 1 });
   });
 
-  it("substitute draws colliding glyph twins as '?' too, so the text layer never shows the wrong one", () => {
+  it("substitute draws a refused glyph twin as '?' and keeps its canonical twin", () => {
     const m = withCells(['\u4e00 cost', '\u2f00 radical']);
     const texts = treeTexts(<EngagementReportDocument model={m} policy="substitute" />);
-    expect(texts).toContain('? cost');
+    expect(texts).toContain('\u4e00 cost');
     expect(texts).toContain('? radical');
-    expect(texts).toContain(PDF_GLYPH_NOTE(2));
+    expect(texts).toContain(PDF_GLYPH_NOTE(1));
   });
 
   it('refuse: no PDF is produced, the error carries the counts and never a cell value', async () => {

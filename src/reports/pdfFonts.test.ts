@@ -8,7 +8,7 @@ import path from 'path';
 import { Font } from '@react-pdf/renderer';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { orderPdfObjects, stableSubsetTags } from './pdfBytes';
-import { classifyPdfChar, collidingCodePoints, loadPdfFonts, pdfCharFace, PDF_FONT_DIR, PDF_FONT_FAMILY, PDF_FONTS, PDF_SUPPORTED_SCRIPTS, pdfGlyphKey, unsupportedKinds } from './pdfFonts';
+import { classifyPdfChar, loadPdfFonts, pdfCharFace, PDF_FONT_DIR, PDF_FONT_FAMILY, PDF_FONTS, PDF_SUPPORTED_SCRIPTS, pdfGlyphKey, PDF_LAYOUT_FEATURES, textLayerFaults, unsupportedKinds } from './pdfFonts';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 /** The sources Font.register received while the fonts loaded (captured once: spies are reset between tests). */
@@ -134,13 +134,21 @@ describe('declared supported scripts and the classification of everything else',
     expect(() => pdfGlyphKey('ọ')).toThrow(/not drawn/);
   });
 
-  it('code points that share one glyph collide only when both appear in one document (the text layer keeps one of them)', () => {
-    expect(pdfGlyphKey('\u4e00')).toBe(pdfGlyphKey('\u2f00'));
-    expect(pdfGlyphKey('\u3008')).toBe(pdfGlyphKey('\u2329'));
-    expect(pdfGlyphKey('\u2460')).toBe(pdfGlyphKey('\u2780'));
-    expect([...collidingCodePoints(['\u4e00二三', '成本 \u2f00'])].sort((a, b) => a - b)).toEqual([0x2f00, 0x4e00]);
-    expect([...collidingCodePoints(['\u3008a\u3009', '\u2329'])].sort((a, b) => a - b)).toEqual([0x2329, 0x3008]);
-    expect(collidingCodePoints(['\u4e00二三 成本', '\u2460 \u2461 Москва \u00a0 a b']).size).toBe(0);
+  it('a glyph twin (two code points, one glyph) is drawn only for its canonical code point: the other is refused, so the text layer never swaps them', () => {
+    for (const [canonical, twin] of [['\u4e00', '\u2f00'], ['\u3008', '\u2329'], ['\u2460', '\u2780'], ['\u69e9', '\u3ba3'], ['\u5c22', '\u2e90']]) {
+      // The twin is classified first: the answer must not depend on which one a layout met first.
+      expect([classifyPdfChar(twin), classifyPdfChar(canonical)], `${twin} / ${canonical}`).toEqual(['other', 'ok']);
+    }
+    // Vertical kana repeat marks join with their neighbor: refused.
+    expect(classifyPdfChar('\u3033')).toBe('other');
+  });
+
+  it('layouts run without ligatures (each glyph keeps its own text), and the glyph text map does not depend on render history', () => {
+    expect(PDF_LAYOUT_FEATURES).toEqual({ liga: false, clig: false, dlig: false, calt: false });
+    const faults = (...texts: string[]) => [...textLayerFaults(texts.map((text) => ({ text, bold: false })))];
+    expect(faults('Notifications', 'office', '\ufb01le', '\u4e00 cost')).toEqual([]);
+    expect(faults('Notifications', 'office', '\ufb01le', '\u4e00 cost', 'Bold title')).toEqual([]);
+    expect([...textLayerFaults([{ text: 'office \u4e00', bold: true }])]).toEqual([]);
   });
 
   it('unsupportedKinds collects the distinct kinds in one value', () => {

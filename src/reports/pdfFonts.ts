@@ -7,12 +7,18 @@
 // assets/fonts/PROVENANCE.md; notices in docs/THIRD_PARTY_NOTICES.md.
 //
 // Supported scripts are DECLARED, not "every character a font happens to have":
-// a character is drawn only when its script is in PDF_SUPPORTED_SCRIPTS, it is
-// not a mark, control, format, private-use or unassigned code point, and a
-// bundled font has a glyph for it. Everything else is classified (complex
-// script or combining mark, emoji, other) so the PDF can refuse it instead of
-// drawing a missing-glyph box: react-pdf here does no complex-script shaping
-// or right-to-left layout that this repository has verified.
+// a character is drawn only when it is in the Basic Multilingual Plane, its
+// script is in PDF_SUPPORTED_SCRIPTS, it is not a mark, control, format,
+// private-use or unassigned code point, and a bundled font draws it as exactly
+// ONE glyph (a letter the font only composes from base + mark, such as the
+// Vietnamese/Yoruba dot below, loses its mark in the PDF text layer). Code points
+// that share one glyph ("glyph twins", e.g. U+4E00 and the radical U+2F00), and
+// contextual forms or ligatures that reuse another character's glyph, are fine
+// alone but collide in the text layer when both appear in one PDF
+// (textLayerFaults simulates the text layer per document). Everything else is classified (complex script or
+// combining mark, emoji, other) so the PDF can refuse it instead of drawing a
+// missing-glyph box or a wrong text layer; pdfExtraction.test.tsx round-trips
+// every supported code point through the PDF text layer.
 import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -29,9 +35,16 @@ export const PDF_FONTS = [
 export const PDF_FONT_FAMILY = ['NotoSans', 'NotoSansCJKsc'];
 export const PDF_SUPPORTED_SCRIPTS = ['Latin', 'Greek', 'Cyrillic', 'Common', 'Han', 'Hiragana', 'Katakana', 'Hangul', 'Bopomofo'] as const;
 
-type Glyphs = { hasGlyphForCodePoint(cp: number): boolean };
-let loaded: Promise<Glyphs[]> | null = null;
-let glyphs: Glyphs[] | null = null;
+type Glyph = { id: number; codePoints: number[] };
+type Face = {
+  hasGlyphForCodePoint(cp: number): boolean;
+  glyphForCodePoint(cp: number): Glyph;
+  characterSet: number[];
+  layout(text: string, features?: unknown, ...rest: unknown[]): { glyphs: Glyph[] };
+};
+let loaded: Promise<Face[]> | null = null;
+/** In PDF_FONTS order: 0 Noto Sans regular, 1 Noto Sans bold, 2 Noto Sans CJK SC. */
+let faces: Face[] | null = null;
 
 /** Registers the bundled fonts once, by absolute local path, after checking each file's sha256 (a wrong or missing file fails closed). */
 export function loadPdfFonts(): Promise<void> {
@@ -42,26 +55,48 @@ export function loadPdfFonts(): Promise<void> {
       if (sha !== f.sha256) throw new Error(`bundled PDF font ${f.file} does not match its recorded sha256`);
       Font.register({ family: f.family, src, fontWeight: f.fontWeight });
     }
-    // The regular faces decide coverage (the bold face has the same character set; pdfFonts.test.ts).
     return Promise.all(
-      PDF_FONTS.filter((f) => f.fontWeight === 400).map(async (f) => {
-        const source = Font.getFont({ fontFamily: f.family, fontWeight: 400 });
+      PDF_FONTS.map(async (f) => {
+        const source = Font.getFont({ fontFamily: f.family, fontWeight: f.fontWeight });
         await source.load();
-        return source.data as unknown as Glyphs;
+        return fixTextLayer(source.data as unknown as Face);
       }),
     );
   })().catch((err: unknown) => {
     loaded = null;
     throw err;
   });
-  return loaded.then((g) => {
-    glyphs = g;
+  return loaded.then((f) => {
+    faces = f;
   });
 }
 
-const fonts = (): Glyphs[] => {
-  if (!glyphs) throw new Error('PDF fonts are not loaded: await loadPdfFonts() first');
-  return glyphs;
+/** Ligature and contextual-alternate features are off for every layout of these faces (react-pdf passes none). */
+export const PDF_LAYOUT_FEATURES = Object.freeze({ liga: false, clig: false, dlig: false, calt: false });
+/** Code points that rank below another code point drawn with the same glyph (typographic spaces, compatibility forms, radicals, dingbats, Extension A). */
+const SECONDARY = /^[\u2000-\u200a\u2700-\u27bf\u2b00-\u2bff\u2e80-\u2fdf\u3400-\u4dbf\uf900-\ufaff]$/u;
+const rank = (cp: number) => {
+  const ch = String.fromCodePoint(cp);
+  return ch.normalize('NFC') !== ch || SECONDARY.test(ch) ? 1 : 0;
+};
+
+/**
+ * Makes the PDF text layer exact and independent of what was rendered before, on the font objects react-pdf uses:
+ * (1) layouts run without ligatures or contextual alternates (a ligature glyph maps to one text for the whole
+ * process); (2) fontkit gives each glyph the code points of the FIRST character it was created for, and the PDF's
+ * ToUnicode map uses them, so every glyph is created up front for its canonical character (rank, then lowest code
+ * point): a glyph twin (U+2F00 next to U+4E00) is then refused by classifyPdfChar instead of extracting as the other.
+ */
+function fixTextLayer(face: Face): Face {
+  const layout = face.layout.bind(face);
+  face.layout = (text, features, ...rest) => layout(text, features ?? { ...PDF_LAYOUT_FEATURES }, ...rest); // a fresh object: fontkit adds to it
+  for (const cp of [...face.characterSet].sort((a, b) => rank(a) - rank(b) || a - b)) face.glyphForCodePoint(cp);
+  return face;
+}
+
+const loadedFaces = (): Face[] => {
+  if (!faces) throw new Error('PDF fonts are not loaded: await loadPdfFonts() first');
+  return faces;
 };
 
 export type UnsupportedKind = 'complex' | 'emoji' | 'other';
@@ -70,6 +105,8 @@ const SUPPORTED_SCRIPT = new RegExp(`^[${PDF_SUPPORTED_SCRIPTS.map((s) => `\\p{S
 const NEVER_DRAWN = /^[\p{M}\p{C}\p{Zl}\p{Zp}]$/u;
 /** Conjoining Hangul jamo compose into syllables only through shaping (not verified); precomposed syllables are supported. */
 const CONJOINING_JAMO = /^[ᄀ-ᇿꥠ-꥿ힰ-퟿]$/u;
+/** Vertical kana repeat marks: the CJK face joins them with their neighbor even without ligature features. */
+const VERTICAL_REPEAT = /^[\u3031-\u3035]$/u;
 const EMOJI = /^[\p{Extended_Pictographic}\p{Emoji_Component}]$/u;
 const COMPLEX = new RegExp(
   `^[\\p{M}\\u1100-\\u11FF\\uA960-\\uA97F\\uD7B0-\\uD7FF${[
@@ -83,23 +120,101 @@ const COMPLEX = new RegExp(
 );
 
 const KINDS = ['ok', 'complex', 'emoji', 'other'] as const;
-/** Basic Multilingual Plane results, cached (0 = not yet classified): a fixed 64 KiB table, so hostile text cannot grow it. */
+/** Basic Multilingual Plane results, cached (0 = not yet classified): fixed tables, so hostile text cannot grow them. */
 const bmp = new Uint8Array(0x10000);
+/** For a drawn character: face * 0x10000 + glyph id + 1 (the glyph its face draws it with). */
+const drawn = new Int32Array(0x10000);
+
+/** The face a drawn character uses (react-pdf takes the first family with a glyph) and its single glyph, or null. */
+function draw(ch: string, cp: number): { face: number; glyph: number } | null {
+  const [regular, bold, cjk] = loadedFaces();
+  const face = regular.hasGlyphForCodePoint(cp) ? 0 : cjk.hasGlyphForCodePoint(cp) ? 2 : -1;
+  if (face < 0) return null;
+  // Exactly one glyph whose text-layer code points are this character (in the bold face too, for Latin).
+  const one = (f: Face) => {
+    const glyphs = f.layout(ch).glyphs;
+    return glyphs.length === 1 && glyphs[0].codePoints.length === 1 && glyphs[0].codePoints[0] === cp ? glyphs[0].id : -1;
+  };
+  const glyph = one(face === 0 ? regular : cjk);
+  return { face, glyph: face === 0 && one(bold) < 0 ? -1 : glyph };
+}
 
 function classify(ch: string, cp: number): 'ok' | UnsupportedKind {
-  if (ch === '\n' || ch === '\t') return 'ok';
-  if (SUPPORTED_SCRIPT.test(ch) && !NEVER_DRAWN.test(ch) && !CONJOINING_JAMO.test(ch) && fonts().some((f) => f.hasGlyphForCodePoint(cp))) return 'ok';
+  if (ch === '\n') return 'ok';
+  if (cp <= 0xffff && SUPPORTED_SCRIPT.test(ch) && !NEVER_DRAWN.test(ch) && !CONJOINING_JAMO.test(ch) && !VERTICAL_REPEAT.test(ch)) {
+    const d = draw(ch, cp);
+    // Drawn as several glyphs (base + mark: the text layer would lose the mark), or as a glyph twin's glyph.
+    if (d && d.glyph < 0) return [...ch.normalize('NFD')].length > 1 ? 'complex' : 'other';
+    if (d) {
+      drawn[cp] = d.face * 0x10000 + d.glyph + 1;
+      return 'ok';
+    }
+  }
   if (EMOJI.test(ch)) return 'emoji';
   if (COMPLEX.test(ch)) return 'complex';
   return 'other';
 }
 
-/** 'ok' when the PDF draws the character (one code point) faithfully with a bundled font; otherwise the reason it cannot. */
+/** 'ok' when the PDF draws the character (one code point) faithfully, as one glyph of a bundled font; otherwise the reason it cannot. */
 export function classifyPdfChar(ch: string): 'ok' | UnsupportedKind {
   const cp = ch.codePointAt(0) as number;
   if (cp > 0xffff) return classify(ch, cp);
   if (bmp[cp] === 0) bmp[cp] = KINDS.indexOf(classify(ch, cp)) + 1;
   return KINDS[bmp[cp] - 1];
+}
+
+/** The face that draws a supported character (0 Noto Sans, 2 Noto Sans CJK SC); -1 for a newline or an unsupported character. */
+export function pdfCharFace(ch: string): number {
+  if (ch === '\n' || classifyPdfChar(ch) !== 'ok') return -1;
+  return Math.floor((drawn[ch.codePointAt(0) as number] - 1) / 0x10000);
+}
+
+/** "face:glyph" of a supported character: two code points with the same key are one glyph in the PDF. */
+export function pdfGlyphKey(ch: string): string {
+  const face = pdfCharFace(ch);
+  if (face < 0) throw new Error('character is not drawn by the bundled fonts');
+  return `${face}:${(drawn[ch.codePointAt(0) as number] - 1) % 0x10000}`;
+}
+
+type Laid = { id: number; codePoints: number[] };
+
+/**
+ * Simulates the PDF text layer for one document. react-pdf lays out each run of one face (fontkit, default
+ * features: ligatures, contextual alternates, composition), and the PDF maps each glyph to the code points of the
+ * FIRST run that used it (pdfkit's ToUnicode). A value is faulty when its runs do not map back to its exact text
+ * (a glyph dropped a code point) or when one of its glyphs already maps to different code points elsewhere in the
+ * document (glyph twins such as U+4E00 and U+2F00, or the U+FB01 ligature next to an "fi" ligature): either way a
+ * reader would extract the wrong text. Returns the indexes of the faulty values (both sides of a collision).
+ * Items are the shown texts with their weight (bold Latin uses its own face); unsupported characters must
+ * already be removed or substituted.
+ */
+export function textLayerFaults(items: { text: string; bold: boolean }[]): Set<number> {
+  const all = loadedFaces();
+  const owner = new Map<string, { text: string; index: number }>();
+  const faults = new Set<number>();
+  items.forEach(({ text, bold }, index) => {
+    let start = 0;
+    const cps = [...text];
+    while (start < cps.length) {
+      const face = pdfCharFace(cps[start]);
+      let end = start + 1;
+      while (end < cps.length && pdfCharFace(cps[end]) === face) end += 1;
+      const run = cps.slice(start, end).join('');
+      start = end;
+      if (face < 0) continue; // newlines (layout only) and characters the caller has already refused
+      const f = face === 0 && bold ? 1 : face;
+      const glyphs = all[f].layout(run).glyphs as Laid[];
+      if (glyphs.map((g) => String.fromCodePoint(...g.codePoints)).join('') !== run) faults.add(index);
+      for (const g of glyphs) {
+        const key = `${f}:${g.id}`;
+        const mapped = String.fromCodePoint(...g.codePoints);
+        const first = owner.get(key);
+        if (!first) owner.set(key, { text: mapped, index });
+        else if (first.text !== mapped) faults.add(index).add(first.index);
+      }
+    }
+  });
+  return faults;
 }
 
 /** The kinds of unsupported characters in one text value (empty: the PDF can draw all of it). */

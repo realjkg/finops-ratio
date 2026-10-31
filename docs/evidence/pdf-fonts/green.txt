@@ -1,26 +1,16 @@
-GREEN: bundled Noto fonts for the engagement report PDF, unsupported-text preflight, 422 refusal
-Base fc83459; Node 22.22.0, @react-pdf/renderer 4.5.1 (fontkit 2.0.4). Gates: lint, tsc app+worker, full vitest
-(260 files / 4,696 tests), worker:build, build, check:bundle (pass; engagement route trace lists assets/fonts),
-reportFacts.db.test.ts (11/11, Postgres 16 + SeaweedFS by CI digests).
-Supported (declared; verified by extraction and by eye): Latin incl. accents, Greek, Cyrillic, common
-punctuation/currency symbols, Simplified Chinese, Japanese (kana, kanji), Korean (precomposed Hangul).
-Refused (422): complex-shaping/right-to-left scripts (Arabic, Hebrew, Indic, Thai, Khmer, ...), combining marks
-(a decomposed accent rendered misplaced in a probe), conjoining jamo, emoji, controls/format/private use/unassigned,
-scripts without a bundled font (Armenian, Georgian, ...). Not "full Unicode".
-Poppler (not in CI): pdffonts -> RATIOA+NotoSans-Bold, RATIOB+NotoSans-Regular (CID TrueType),
-RATIOC+NotoSansCJKsc-Regular (CID Type 0C), emb/sub/uni yes; pdftotext returns every multi-script cell, amounts
-(-2.61370000000, -7.50000000000, 1200) and currencies (USD, EUR, JPY) verbatim; pdftoppm pages inspected: no
-missing-glyph boxes, overlaps or clipping; CJK wraps inside its column (break marked '-').
-Mutations (all killed): EMOJI->ok (11 failed); drop NEVER_DRAWN (4); drop object ordering (1); drop subset-tag
-rewrite (2); no CJK break split (1); no CJK fallback family (3); skip sha256 check (1); bundle hash rule off (1);
-route ignores refusal (1).
-Measurements (one process per case, external SIGKILL watchdog; cold = first render incl. font load; RSS after a
-second render). before = origin/main Helvetica, after = this branch; ms / MB RSS / PDF bytes:
-sample                     602 / 180 / 14,164      ->   813 / 199 / 26,035
-200 charge categories    9,364 / 393 / 59,211      -> 11,788 / 470 / 80,939
-200 CJK-heavy categories 9,784 / 420 / 59,588 ('?') -> 11,120 / 507 / 168,537
-hostile 64x32k spaced    4,878 / 323 / 51,719      ->  6,753 / 343 / 84,510
-hostile 64x32k unbroken  5,373 / 363 / 50,898      ->  6,206 / 350 / 82,594
-Caps unchanged (2,000/cell, 100,000/doc, 200 floor); the 15 s in-repo watchdog test passes.
-Deployment size: fonts 17,301,104 bytes (git objects +13.7 MiB compressed); the image copies the whole tree
-(COPY . .), so build and engagement stages grow by about 17.3 MB. No Dockerfile change.
+GREEN round 2 (review of 676e10e). Node 22.22.0, @react-pdf/renderer 4.5.1, fontkit 2.0.4.
+Gates: lint, tsc app+worker, full vitest (265 files / 4,750 tests), worker:build, build, check:bundle: pass.
+Supported = BMP code points of the declared scripts that a bundled face draws as ONE glyph whose text-layer code
+points are the character itself (ligatures/contextual alternates off; glyph cache pre-created per canonical code
+point, so the text layer does not depend on render history). Refused (422): astral (CJK Ext B, U+1F170), letters
+drawn as base + mark (ǹ ḿ ṃ ṅ ṣ ẹ ị ọ ụ: Vietnamese/Yoruba dot below), secondary glyph twins (U+2F00, U+2329, U+2780,
+U+3BA3), vertical kana repeat marks, plus round 1's complex scripts, emoji, controls. Per document, a simulation of
+the text layer (textLayerFaults) refuses any value whose glyphs would not map back to its exact text.
+Corpus (pdfExtraction.test.tsx): every supported BMP code point from U+0080 (Han/Hangul 1 in 13) rendered and
+decoded through the ToUnicode maps: exact. Mutations: drop the code-point check (5 failed); allow U+3031-3035 (corpus
+1 failed); ligatures back on (2); no glyph pre-creation (1); astral allowed (6); no font-switch cost (1); no CJK cost
+(2); no render-slot limit (2). Dropping only the glyph-count check is equivalent (the code-point check still refuses).
+Costs: CJK character 10, font switch 10 (caps unchanged otherwise); at most 2 renders at once (503 pdf_busy).
+Watchdog runs (ms / MB RSS / bytes): 50x2,000 CJK spaced 5,673 / 297 / 114,319 (was killed at 15 s; reviewer
+37.7 s uncapped); 50x2,000 CJK dense 3,519 / 264 / 102,034; Latin hostile spaced 6,257 / 406 / 84,439, unbroken
+6,836 / 350 / 82,573; sample 894 / 222 / 25,919; 200 categories 9,311 / 514 / 80,887; 200 CJK-heavy 11,048 / 534.
