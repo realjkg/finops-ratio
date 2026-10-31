@@ -60,8 +60,8 @@ describe('engagement report PDF: supported scripts render, unsupported text is r
   it('more concurrent PDF requests than render slots: the extra one is 503 pdf_busy with Retry-After, no PDF', async () => {
     state.cells = ['Usage'];
     const res = await Promise.all([get('pdf'), get('pdf'), get('pdf')]);
-    expect(res.map((r) => r.statusCode).sort()).toEqual([200, 200, 503]);
-    const busy = res.find((r) => r.statusCode === 503)!;
+    expect(res.map((r) => r.statusCode).sort()).toEqual([200, 503, 503]);
+    const busy = res.find((r) => r.statusCode === 503)!; // one render slot
     expect(busy.body).toEqual({ error: { code: 'pdf_busy', message: PDF_BUSY_MESSAGE } });
     expect(busy.headers['retry-after']).toBe('5');
     expect(busy.headers['content-disposition']).toBeUndefined();

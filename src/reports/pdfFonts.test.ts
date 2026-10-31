@@ -8,7 +8,7 @@ import path from 'path';
 import { Font } from '@react-pdf/renderer';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { orderPdfObjects, stableSubsetTags } from './pdfBytes';
-import { classifyPdfChar, loadPdfFonts, pdfCharFace, PDF_FONT_DIR, PDF_FONT_FAMILY, PDF_FONTS, PDF_SUPPORTED_SCRIPTS, pdfGlyphKey, PDF_LAYOUT_FEATURES, textLayerFaults, unsupportedKinds } from './pdfFonts';
+import { classifyPdfChar, loadPdfFonts, pdfCharFace, PDF_FONT_DIR, PDF_FONT_FAMILY, PDF_FONTS, PDF_SUPPORTED_SCRIPTS, pdfGlyphKey, PDF_LAYOUT_FEATURES, planTextLayer, unsupportedKinds } from './pdfFonts';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 /** The sources Font.register received while the fonts loaded (captured once: spies are reset between tests). */
@@ -134,21 +134,33 @@ describe('declared supported scripts and the classification of everything else',
     expect(() => pdfGlyphKey('ọ')).toThrow(/not drawn/);
   });
 
-  it('a glyph twin (two code points, one glyph) is drawn only for its canonical code point: the other is refused, so the text layer never swaps them', () => {
-    for (const [canonical, twin] of [['\u4e00', '\u2f00'], ['\u3008', '\u2329'], ['\u2460', '\u2780'], ['\u69e9', '\u3ba3'], ['\u5c22', '\u2e90']]) {
-      // The twin is classified first: the answer must not depend on which one a layout met first.
-      expect([classifyPdfChar(twin), classifyPdfChar(canonical)], `${twin} / ${canonical}`).toEqual(['other', 'ok']);
+  it('common CJK punctuation, symbols and halfwidth Hangul are drawn (regression: were refused as glyph twins)', () => {
+    const halfwidthHangul = Array.from({ length: 0xffdc - 0xffa0 + 1 }, (_, i) => String.fromCodePoint(0xffa0 + i)).filter((ch) => /\p{L}/u.test(ch));
+    for (const ch of ['\u30fb', '\uff5e', '\u301c', '\u22ef', '\uff0f', '\uff40', '\u58ff', '\u58ab', '\u3031', '\u3032', '\u3033', '\u3034', '\u3035', ...halfwidthHangul]) {
+      expect(classifyPdfChar(ch), `U+${ch.codePointAt(0)!.toString(16)}`).toBe('ok');
     }
-    // Vertical kana repeat marks join with their neighbor: refused.
-    expect(classifyPdfChar('\u3033')).toBe('other');
+    expect(halfwidthHangul.length).toBeGreaterThan(40);
   });
 
-  it('layouts run without ligatures (each glyph keeps its own text), and the glyph text map does not depend on render history', () => {
+  it('radicals and code points that normalization replaces (compatibility ideographs, deprecated brackets) stay refused', () => {
+    for (const ch of ['\u2f00', '\u2e90', '\u2329', '\u232a', '\uf900', '\ufa49']) expect(classifyPdfChar(ch), `U+${ch.codePointAt(0)!.toString(16)}`).toBe('other');
+  });
+
+  it('two code points drawn with one glyph are refused only when both appear in one document; a joined sequence is refused by the same check', () => {
+    const faults = (...texts: string[]) => [...planTextLayer(texts.map((text) => ({ text, bold: false }))).faults].sort((x, y) => x - y);
+    expect(faults('10\uff5e20件', '10\u301c20件', 'other')).toEqual([0, 1]);
+    expect(faults('\u58ff', '\u58ab')).toEqual([0, 1]);
+    expect(faults('\u2460', '\u2780')).toEqual([0, 1]);
+    expect(faults('10\uff5e20件', '\u58ff', '\u2780', 'クラウド\u30fbサービス', 'a\u00b7b')).toEqual([]);
+    // Vertical kana repeat marks: alone each is one glyph; the font joins a sequence, so its text layer would lose a character.
+    expect(faults('\u3033\u3035', 'ok')).toEqual([0]);
+  });
+
+  it('layouts run without ligatures (each glyph keeps its own text)', () => {
     expect(PDF_LAYOUT_FEATURES).toEqual({ liga: false, clig: false, dlig: false, calt: false });
-    const faults = (...texts: string[]) => [...textLayerFaults(texts.map((text) => ({ text, bold: false })))];
+    const faults = (...texts: string[]) => [...planTextLayer(texts.map((text) => ({ text, bold: false }))).faults];
     expect(faults('Notifications', 'office', '\ufb01le', '\u4e00 cost')).toEqual([]);
-    expect(faults('Notifications', 'office', '\ufb01le', '\u4e00 cost', 'Bold title')).toEqual([]);
-    expect([...textLayerFaults([{ text: 'office \u4e00', bold: true }])]).toEqual([]);
+    expect([...planTextLayer([{ text: 'office \u4e00', bold: true }]).faults]).toEqual([]);
   });
 
   it('unsupportedKinds collects the distinct kinds in one value', () => {
