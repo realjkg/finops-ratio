@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// /simulation: when server simulation is off the page is a finished read-only sample (no server call,
+// /simulation: when server simulation is off the page is a finished read-only sample (no data request,
 // no storage); when it is on, the sign-in experience is unchanged.
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -32,6 +32,14 @@ describe('/simulation with server simulation disabled', () => {
     expect(box.querySelector('[role="note"]')?.textContent).toBe('Synthetic sample data · nothing is saved');
     expect(box.textContent).not.toMatch(/Continue as/);
     expect(buttons().map((b) => b.textContent)).toEqual(['Open Executive sample', 'Open Technical sample', 'Open Procurement sample']);
+  });
+  it('explains the (watch) flags in the Executive and Technical views', () => {
+    access.current = { ...base, enabled: false };
+    mount();
+    click(buttons()[0]);
+    expect(box.textContent).toMatch(/\(watch\) means at or above 90% of its budget/);
+    click(buttons()[1]);
+    expect(box.textContent).toMatch(/\(watch\) means monthly spend is up more than 15%/);
   });
   it('opens each persona read-only, with no data request and nothing stored', () => {
     const fetchSpy = vi.fn(() => { throw new Error('no network in the sample'); });
@@ -68,6 +76,14 @@ describe('/simulation with server simulation disabled', () => {
     expect(region().textContent).toMatch(/Example Compute Savings Plan.*prepaid.*unused/);
     expect(region().textContent).toMatch(/No commitment on this connection/);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+  it('with a failed status probe, says so instead of claiming the deployment saves nothing', () => {
+    access.current = { ...base, enabled: false, error: 'Could not reach the simulation service. Reload to retry.' };
+    mount();
+    expect(box.querySelector('[role="alert"]')?.textContent).toMatch(/Could not reach/);
+    expect(box.textContent).not.toMatch(/This deployment does not save customer workspaces/);
+    expect(box.textContent).toMatch(/could not be reached, so this is a read-only sample/);
+    expect(box.querySelector('[role="note"]')?.textContent).toBe('Synthetic sample data · nothing is saved');
   });
   it('waits while loading instead of flashing the sample', () => {
     access.current = { ...base, enabled: false, loading: true };

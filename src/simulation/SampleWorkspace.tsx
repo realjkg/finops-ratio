@@ -46,14 +46,14 @@ function ImportedConnections({ persona }: { persona: Persona }) {
   );
 }
 
-export function SampleWorkspace() {
+export function SampleWorkspace({ degraded = false }: { degraded?: boolean }) {
   const [persona, setPersona] = useState<Persona | null>(null);
   const view = persona ? sampleView(persona) : null;
   return (
     <div className="mt-8">
       <p role="note" className="inline-block rounded border border-unit/40 bg-unit/10 px-3 py-1 font-mono text-xs text-unit">{SAMPLE_LABEL}</p>
       <p className="mt-3 max-w-2xl text-sm text-sub">
-        This deployment does not save customer workspaces, so here is a read-only sample. Pick a role to see the same synthetic costs through its lens. No sign-in is needed, no data is requested or sent, and it is gone when you close the tab.
+        {degraded ? 'The simulation service could not be reached, so this is a read-only sample.' : 'This deployment does not save customer workspaces, so here is a read-only sample.'} Pick a role to see the same synthetic costs through its lens. No sign-in is needed, no data is requested or sent, and it is gone when you close the tab.
       </p>
       <div className="mt-6 grid gap-4 sm:grid-cols-3">
         {ORDER.map((p) => (

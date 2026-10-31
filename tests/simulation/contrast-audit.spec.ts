@@ -95,6 +95,34 @@ for (const theme of Object.keys(MAX)) {
       rows.push(`${theme.padEnd(14)} ${route.padEnd(12)} ${String(bad.length).padStart(4)} / ${nodes.length}  (background images: ${nodes.filter((x) => x.img).length})`);
       for (const x of bad) dump.push({ theme, route, el: x.n.el, text: x.n.text, fg: x.fg, bg: x.bg, ratio: +x.ratio.toFixed(2), need: x.need });
     }
+    // Extra surfaces: /simulation in sample mode (the status route is stubbed off, as on a public deployment)
+    // and the open Appearance panel with each choice, at the two narrowest phone widths.
+    const record = async (label: string) => {
+      // Let theme color transitions finish, or the audit would measure a blend of two themes.
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+      const nodes = await collect(page);
+      const bad = nodes.map((n) => ({ n, ...evaluate(n) })).filter((x) => x.ratio < x.need - 1e-9);
+      failing += bad.length;
+      rows.push(`${theme.padEnd(14)} ${label.padEnd(34)} ${String(bad.length).padStart(4)} / ${nodes.length}`);
+      for (const x of bad) dump.push({ theme, route: label, el: x.n.el, text: x.n.text, fg: x.fg, bg: x.bg, ratio: +x.ratio.toFixed(2), need: x.need });
+    };
+    await page.route('**/api/v1/simulation/status', (r) => r.fulfill({ json: { enabled: false } }));
+    await page.goto('/simulation');
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'Open Procurement sample' }).click();
+    await page.getByRole('button', { name: 'Import the three synthetic connections' }).click();
+    await expect(page.getByRole('region', { name: 'Imported synthetic connections' }).getByText('Example Compute Savings Plan')).toBeVisible();
+    await record('/simulation (sample)');
+    await page.unroute('**/api/v1/simulation/status');
+    for (const width of [390, 360]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const choice of ['System', 'Light', 'High contrast', 'Dark']) {
+        await page.goto('/overview');
+        await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+        await page.locator('#theme-editor label', { hasText: new RegExp(`^${choice}$`) }).click();
+        await record(`appearance panel ${choice} @${width}`);
+      }
+    }
     rows.push(`${theme.padEnd(14)} TOTAL        ${String(failing).padStart(4)} (max ${MAX[theme]})`);
     if (process.env.AUDIT_OUT) appendFileSync(process.env.AUDIT_OUT, rows.join('\n') + '\n');
     if (process.env.AUDIT_DUMP) appendFileSync(process.env.AUDIT_DUMP, dump.map((d) => JSON.stringify(d)).join('\n') + '\n');
