@@ -429,7 +429,31 @@ describe('aws-data-exports bucket, prefix and exportName', () => {
     ['an inline secret in the prefix', 'prefix', { prefix: 'exports/aws_secret_access_key=synthetic' }],
     ['an inline password in the prefix', 'prefix', { prefix: 'exports/password:synthetic' }],
     ['URL credentials in the prefix', 'prefix', { prefix: 'user:synthetic@exports/focus' }],
+    // Review of #152: anywhere inside the field, without word boundaries.
+    ['a key id after digits in the prefix', 'prefix', { prefix: `2024${KEY_ID}` }],
+    ['a key id after a capital letter in the prefix', 'prefix', { prefix: `X${KEY_ID}` }],
+    ['a key id followed by a digit in the prefix', 'prefix', { prefix: `exports/${KEY_ID}9` }],
+    ['a key id after a digit in exportName', 'exportName', { exportName: `1${KEY_ID}` }],
+    ['a key id after capital letters in exportName', 'exportName', { exportName: `EXPORT${STS_ID}` }],
+    ['a JWT after text in a prefix segment', 'prefix', { prefix: `exports/tok-${JWT}` }],
+    ['URL credentials in a later prefix segment', 'prefix', { prefix: 'exports/admin:synthetic@host/focus' }],
+    ['an inline api_key in the prefix', 'prefix', { prefix: 'exports/api_key=synthetic' }],
+    ['an inline apikey in the prefix', 'prefix', { prefix: 'exports/APIKEY=synthetic' }],
+    ['an inline secret with spaces in the prefix', 'prefix', { prefix: 'exports/secret = synthetic' }],
+    ['an inline password with a space before the colon', 'prefix', { prefix: 'exports/password :synthetic' }],
+    ['a fullwidth key id in the prefix (NFKC)', 'prefix', { prefix: `exports/${[...KEY_ID].map((ch) => String.fromCodePoint(ch.codePointAt(0)! + 0xfee0)).join('')}` }],
   ];
+
+  it('accepts lowercase and ordinary names that merely contain the letters of a key-id prefix or a credential word', () => {
+    for (const p of [
+      { bucket: 'akia-prefix-name', exportName: 'akia_asia-export', prefix: 'akiaexports/asia-region/akiaabcdefghijklmnop' },
+      { bucket: 'token-bucket', exportName: 'secret-santa', prefix: 'credentials-report/password-policy' },
+      { bucket: 'export-bucket', exportName: 'focus', prefix: 'a@b/user:name' },
+    ]) {
+      expect(validateEngagementConfig(params(p)).ok, JSON.stringify(p)).toBe(true);
+      expect(startup(params(p)), JSON.stringify(p)).toEqual([]);
+    }
+  });
   it.each(credential)('refuses %s as credential-looking, never echoing it', (_n, field, p) => {
     const problems = problemsOf(params(p));
     expect(problems).toContain(`sources[0].retrieval.params.${field}: looks like a credential value; reference a secret by name with secretRef`);

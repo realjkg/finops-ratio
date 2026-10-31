@@ -7,3 +7,8 @@ src/connectors/managed/aws/locationParams.test.ts   3 failed |   1 passed (4)
 Failing for the intended reasons: startup refuses every managed connector (retrieval.kind not implemented);
 40+ character bucket/prefix/exportName values are refused as credential-looking; malformed bucket, prefix and
 exportName values pass; no complete-object-key byte check; no approved list.
+Review round (credential patterns inside the three AWS fields), base dac5396:
+src/engagement/config.test.ts                      12 failed | 158 passed (170)
+src/connectors/managed/engagementSpec.test.ts       7 failed |  47 passed (54)
+Failing because key ids next to letters/digits, a JWT after text, URL credentials after the first segment,
+api_key/apikey and spaced `secret = ` forms, and a fullwidth key id are accepted at startup and by the worker.
