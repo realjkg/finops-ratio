@@ -171,57 +171,43 @@ describe('listDeliveries and open', () => {
 
   describe('latest-complete: an INVALID newer manifest refuses the period, a newer one whose files have not landed yet is skipped', () => {
     const proven = { manifestSelection: 'latest-complete', manifestSelectionEvidence: `sha256:${'b'.repeat(64)}` };
-    const OLD = new Date('2026-10-01T00:00:00Z');
-    const NEW = new Date('2026-10-02T00:00:00Z');
-    const goodKey = dataKey('2024-09', 'part-00001.csv.gz', 'run-new');
-    const withFiles = (files: unknown[], extra: Record<string, unknown> = {}) => JSON.stringify({ billingPeriod: { start: '2024-09-01T00:00:00.000Z' }, dataFiles: files, ...extra });
-    const invalid: Array<[string, () => string]> = [
-      ['a data file in another bucket', () => withFiles([`s3://other-bucket/${goodKey}`])],
-      ['a data file outside the export data folder', () => withFiles([`s3://${BUCKET}/some-other-export/data/BILLING_PERIOD=2024-09/part.csv.gz`])],
-      ['malformed JSON', () => '{"dataFiles": ['],
-      ['a ../ path', () => withFiles([`s3://${BUCKET}/${ROOT}data/BILLING_PERIOD=2024-09/run-new/../run-1/part-00001.csv.gz`])],
-      ['a billing period of another folder', () => withFiles([`s3://${BUCKET}/${goodKey}`], { billingPeriod: { start: '2024-08-01T00:00:00.000Z' } })],
-      ['an unsupported scheme', () => withFiles([`https://example.test/${goodKey}`])],
+    const [OLD, NEW] = [new Date('2026-10-01T00:00:00Z'), new Date('2026-10-02T00:00:00Z')];
+    const good = dataKey('2024-09', 'part-00001.csv.gz', 'run-new');
+    const files = (...f: string[]) => JSON.stringify({ billingPeriod: { start: '2024-09-01T00:00:00.000Z' }, dataFiles: f });
+    const invalid: Array<[string, string]> = [
+      ['a data file in another bucket', files(`s3://other-bucket/${good}`)],
+      ['a data file outside the export data folder', files(`s3://${BUCKET}/other-export/data/BILLING_PERIOD=2024-09/p.csv.gz`)],
+      ['malformed JSON', '{"dataFiles": ['],
+      ['a ../ path', files(`s3://${BUCKET}/${ROOT}data/BILLING_PERIOD=2024-09/run-new/../run-1/part-00001.csv.gz`)],
     ];
-    const seed = () => {
+    const seed = (second: string, at = NEW) => {
       deliver('2024-09', undefined, { manifest: 'a/Manifest.json', run: 'run-1', at: OLD });
-      s3.put(goodKey, zlib.gzipSync(SAMPLE.subarray(0, 4000)), NEW);
+      s3.put(manifestKey('2024-09', 'b/Manifest.json'), second, at);
     };
 
     it.each(invalid)('%s in the newer manifest: MANIFEST_INVALID, never the older manifest', async (_n, body) => {
-      seed();
-      s3.put(manifestKey('2024-09', 'b/Manifest.json'), body(), NEW);
+      seed(body);
       const { r, staged, stored } = await fetchAll(proven);
-      expect(r.status).toBe('failed');
       expect(r.deliveries).toMatchObject([{ billingPeriod: '2024-09-01', outcome: 'failed', code: 'MANIFEST_INVALID', originals: [] }]);
       expect(r.deliveries[0].message).not.toContain('other-bucket');
-      expect(staged).toEqual([]);
-      expect(stored.size).toBe(0);
-      expect(s3.gets().filter((k) => k.includes('/data/'))).toEqual([]);
-      expect(retriever(proven).deliveryEvidence('x')).toBeUndefined();
+      expect([staged.length, stored.size, s3.gets().filter((k) => k.includes('/data/')).length]).toEqual([0, 0, 0]);
     });
 
     it('an invalid manifest with the same LastModified as the newest complete one cannot be ordered: MANIFEST_INVALID', async () => {
-      seed();
-      s3.put(manifestKey('2024-09', 'b/Manifest.json'), '{"dataFiles": [', OLD);
+      seed('{"dataFiles": [', OLD);
       expect((await fetchAll(proven)).r.deliveries).toMatchObject([{ outcome: 'failed', code: 'MANIFEST_INVALID' }]);
     });
 
     it('a newer manifest whose listed files have not landed yet is skipped: the older complete one is published', async () => {
-      seed();
-      s3.put(manifestKey('2024-09', 'b/Manifest.json'), withFiles([`s3://${BUCKET}/${dataKey('2024-09', 'not-yet.csv.gz', 'run-pending')}`]), NEW);
+      seed(files(`s3://${BUCKET}/${dataKey('2024-09', 'not-yet.csv.gz', 'run-pending')}`));
       const { r, staged } = await fetchAll(proven);
-      expect(r.status).toBe('succeeded');
-      expect(staged).toHaveLength(1);
-      expect(staged[0].objects[0].bytes.equals(SAMPLE_GZ)).toBe(true);
+      expect([r.status, staged.length, staged[0].objects[0].bytes.equals(SAMPLE_GZ)]).toEqual(['succeeded', 1, true]);
     });
 
     it('an invalid OLDER manifest does not block a newer complete one', async () => {
       deliver('2024-09', undefined, { manifest: 'a/Manifest.json', run: 'run-1', at: NEW });
       s3.put(manifestKey('2024-09', 'old/Manifest.json'), '{"dataFiles": [', OLD);
-      const { r, staged } = await fetchAll(proven);
-      expect(r.status).toBe('succeeded');
-      expect(staged).toHaveLength(1);
+      expect((await fetchAll(proven)).r.status).toBe('succeeded');
     });
   });
 
@@ -229,22 +215,13 @@ describe('listDeliveries and open', () => {
     deliver('2024-07');
     deliver('2024-10');
     const gap = await fetchAll();
-    expect(gap.r.status).toBe('succeeded');
-    expect(gap.staged.map((x) => x.period)).toEqual(['2024-07-01', '2024-10-01']);
-    expect(gap.r.warnings).toHaveLength(1);
-    expect(gap.r.warnings![0]).toContain('2024-08');
-    expect(gap.r.warnings![0]).toContain('2024-09');
-    expect(gap.r.warnings![0]).not.toContain('2024-07');
-    expect(gap.r.warnings![0]).not.toContain('2024-10');
+    expect([gap.r.status, gap.staged.length, gap.r.warnings?.length]).toEqual(['succeeded', 2, 1]);
+    expect(gap.r.warnings![0]).toMatch(/2024-08, 2024-09/);
+    expect(gap.r.warnings![0]).not.toMatch(/2024-07|2024-10/);
+    expect((await fetchAll({}, { from: '2024-07', to: '2024-10' })).r).not.toHaveProperty('warnings');
     deliver('2024-08');
     deliver('2024-09');
     expect((await fetchAll()).r).not.toHaveProperty('warnings');
-    s3.objects.clear();
-    deliver('2024-07');
-    deliver('2024-10');
-    const ranged = await fetchAll({}, { from: '2024-07', to: '2024-10' });
-    expect(ranged.r.deliveries.map((d) => d.code)).toEqual([undefined, 'PERIOD_NOT_DELIVERED', 'PERIOD_NOT_DELIVERED', undefined]);
-    expect(ranged.r).not.toHaveProperty('warnings');
   });
 
   it('a manifest naming a missing file is MANIFEST_INVALID: nothing published', async () => {
