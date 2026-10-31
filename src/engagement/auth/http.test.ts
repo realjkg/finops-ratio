@@ -58,7 +58,7 @@ describe('Origin and CSRF', () => {
     expect(sameOrigin(req({ headers: { origin: ORIGIN } }), ORIGIN)).toBe(true);
     expect(sameOrigin(req({ headers: { referer: `${ORIGIN}/signin?x=1` } }), ORIGIN)).toBe(true);
     for (const headers of [{}, { origin: 'null' }, { origin: 'https://evil.example' }, { origin: `${ORIGIN}.evil.example` }, { referer: 'https://evil.example/' },
-      { referer: `${ORIGIN}.evil.example/` }, { origin: ORIGIN, 'sec-fetch-site': 'cross-site' }, { origin: ORIGIN, 'sec-fetch-site': 'same-site' }, { origin: 'https://evil.example', referer: `${ORIGIN}/` }]) {
+      { referer: `${ORIGIN}.evil.example/` }, { origin: ORIGIN, 'sec-fetch-site': 'cross-site' }, { origin: ORIGIN, 'sec-fetch-site': 'same-site' }, { origin: 'https://evil.example', referer: `${ORIGIN}/` }] as Array<Record<string, string>>) {
       expect(sameOrigin(req({ headers }), ORIGIN), JSON.stringify(headers)).toBe(false);
     }
   });
