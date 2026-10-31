@@ -297,6 +297,13 @@ describe('A3 hardening: client identity behind the proxy, throttle table, scrypt
     expect(pref.blocked(['u:a'], T0 + 16 * 60_000 + 3)).toBeGreaterThan(0);
   });
 
+  it('the scrypt slot is released when authentication throws; a trimmed name reaches the lookup', async () => {
+    const gate = new LoginGate(1);
+    const boom = createLoginRoute({ ...deps(), gate, authenticate: async () => { throw new Error('lookup failed'); } });
+    for (let i = 0; i < 3; i += 1) expect((await call(boom, req({ method: 'POST', body: { username: 'v', password: pw.v } }))).statusCode).toBe(500);
+    expect((await call(createLoginRoute({ ...deps(), gate }), req({ method: 'POST', body: { username: '  V ', password: pw.v } }))).statusCode).toBe(200);
+  });
+
   it(`at most ${MAX_CONCURRENT_LOGINS} sign-ins do scrypt work at once; the next is 503 with Retry-After and an audit event`, async () => {
     expect(MAX_CONCURRENT_LOGINS).toBe(4);
     const held: Array<() => void> = [];

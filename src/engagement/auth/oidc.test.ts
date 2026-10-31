@@ -13,6 +13,7 @@ import { SESSION_COOKIE } from './http';
 import { createOidcCallbackRoute, createOidcStartRoute, OIDC_TX_COOKIE, OidcTransactionStore, type OidcRouteDeps } from './oidc';
 import type { AuthAuditEvent } from './routes';
 import { EngagementSessionStore } from './session';
+import { SlidingWindowRateLimiter } from '@/server/gateway/rateLimit';
 import startPage from '../../../pages/api/auth/oidc/start';
 import callbackPage from '../../../pages/api/auth/oidc/callback';
 
@@ -80,7 +81,7 @@ const mockIdp = async (url: string, opts: { method: string; headers: Record<stri
 
 const env = (o: Record<string, string | undefined> = {}) => ({ RATIO_MODE: 'engagement', RATIO_ENGAGEMENT_CONFIG: CONFIG, RATIO_ENGAGEMENT_USERS: USERS, RATIO_ENGAGEMENT_ORIGIN: ORIGIN,
   RATIO_ENGAGEMENT_STATE: path.join(dir, 's.sqlite'), RATIO_TRUSTED_PROXY_HOPS: '1', [SECRET_ENV]: CLIENT_SECRET, ...o });
-const deps = (o: Record<string, string | undefined> = {}): OidcRouteDeps => ({ env: env(o), now: () => Date.now(), store: () => sessions, transactions: () => txs, fetch: mockIdp as never, audit: (a) => { audits.push(a); }, configCache: new Map() });
+const deps = (o: Record<string, string | undefined> = {}): OidcRouteDeps => ({ env: env(o), now: () => Date.now(), store: () => sessions, transactions: () => txs, fetch: mockIdp as never, audit: (a) => { audits.push(a); }, configCache: new Map(), startLimiter: new SlidingWindowRateLimiter(30, 60_000) });
 function req(o: { url?: string; cookies?: Record<string, string> } = {}): NextApiRequest {
   const u = new URL(o.url ?? '/api/auth/oidc/start?connection=idp-a', ORIGIN);
   return { method: 'GET', url: u.pathname + u.search, query: Object.fromEntries(u.searchParams), headers: {}, cookies: o.cookies ?? {}, socket: { remoteAddress: '10.0.0.2' } } as unknown as NextApiRequest;
@@ -143,6 +144,14 @@ describe('GET /api/auth/oidc/start', () => {
     expect(loc.searchParams.has('client_secret')).toBe(false);
     expect(cookiesOf(start)).toEqual([`${OIDC_TX_COOKIE}=${tx}; Path=/; Max-Age=600; Secure; HttpOnly; SameSite=Lax`]);
     expect(start.headers['cache-control']).toBe('no-store');
+  });
+
+  it('start is rate limited per client (30 per minute) with the existing sliding-window limiter', async () => {
+    const d = deps();
+    const h = createOidcStartRoute(d);
+    for (let i = 0; i < 30; i += 1) expect((await call(h, req())).statusCode).toBe(302);
+    const limited = await call(h, req());
+    expect([limited.statusCode, Number(limited.headers['retry-after']) > 0, cookiesOf(limited)]).toEqual([429, true, []]);
   });
 
   it('unknown or disabled connection ⇒ 400; missing client secret or hop count ⇒ 503; IdP unreachable ⇒ 503; outside engagement mode ⇒ 404; matrix rows', async () => {

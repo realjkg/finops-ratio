@@ -112,6 +112,8 @@ export function signInClient(req: NextApiRequest, hops: number): string {
 export interface AuthRouteDeps {
   env?: Env; now?: () => number; store?: (file: string) => EngagementSessionStore;
   throttle?: LoginThrottle; gate?: LoginGate; audit?: (e: AuthAuditEvent) => void | Promise<void>;
+  /** Test seam: the local credential check (default authenticateLocal). */
+  authenticate?: typeof authenticateLocal;
 }
 interface Ctx { hops: number; origin: string; instance: Instance; directory: Directory; store: EngagementSessionStore; now: number; audit(action: AuthAuditEvent['action'], status: number, id?: string): void }
 
@@ -172,7 +174,7 @@ export function createLoginRoute(deps: AuthRouteDeps = {}): NextApiHandler {
     if (retry > 0) { res.setHeader('Retry-After', String(retry)); return deny(429, 'rate_limited', AUTH_MESSAGES.locked); }
     if (!gate.tryEnter()) { res.setHeader('Retry-After', '1'); return deny(503, 'busy', AUTH_MESSAGES.busy); }
     let id: string | null;
-    try { id = await authenticateLocal(ctx.directory, name, password); } finally { gate.leave(); }
+    try { id = await (deps.authenticate ?? authenticateLocal)(ctx.directory, name, password); } finally { gate.leave(); }
     if (!id || !member(ctx, id)) { throttle.fail(keys, ctx.now); return deny(401, 'unauthorized', AUTH_MESSAGES.signInFailed); }
     throttle.clear(userKey);
     ctx.store.revoke(sessionToken(req)); // never keep a presented session (fixation)
