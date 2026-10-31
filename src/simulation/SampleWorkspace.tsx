@@ -10,7 +10,7 @@ import { SAMPLE_LABEL, SAMPLE_PERSONAS, sampleView } from './sampleWorkspace';
 
 const ORDER: Persona[] = ['executive', 'technical', 'procurement'];
 const th = 'px-2 py-1 text-left text-xs font-medium text-sub';
-const td = 'px-2 py-1 font-mono text-xs tabular-nums';
+const td = 'whitespace-nowrap px-2 py-1 font-mono text-xs tabular-nums';
 
 /** The same imported synthetic connections as the Connectors page, through each role's lens. */
 function ImportedConnections({ persona }: { persona: Persona }) {

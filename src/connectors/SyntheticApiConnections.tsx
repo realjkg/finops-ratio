@@ -7,7 +7,7 @@ import { importedList, useSampleImports } from '@/demo/apiDatasets/store';
 
 const utc = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 const th = 'px-2 py-1 text-left text-xs font-medium text-sub';
-const td = 'px-2 py-1 font-mono text-xs tabular-nums';
+const td = 'whitespace-nowrap px-2 py-1 font-mono text-xs tabular-nums';
 
 function Reconciliation({ r }: { r: Reconciled }) {
   return (
