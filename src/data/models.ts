@@ -1,7 +1,7 @@
 // Model registry seed — spec §2.2, pricing from §3.4.2. Per-1M-token rates.
 // Cost tiers per §2.2: economy <$1/1M in | standard $1–5 | premium $5–20 | ultra >$20.
 
-import type { ModelEntry, ModelProvider } from '@/types';
+import type { ModelEntry, ModelProvider } from '../types';
 
 export const MODEL_REGISTRY: ModelEntry[] = [
   {

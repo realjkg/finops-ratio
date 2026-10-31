@@ -110,6 +110,16 @@ describe('users command', () => {
     expect(dirNow().users.size).toBe(21);
   });
 
+  it('every strict prefix of a rewritten file is invalid JSON, so a reader racing the in-place rewrite fails closed, never reads a mix', async () => {
+    await run(['add', '--id', 'v', '--name', 'SYNTHETIC Viewer', '--role', 'viewer', '--by', 'admin']);
+    const full = fs.readFileSync(USERS);
+    const probe = path.join(dir, 'prefix.json');
+    for (let cut = 1; cut < full.length; cut += Math.ceil(full.length / 60)) {
+      fs.writeFileSync(probe, full.subarray(0, cut));
+      expect(loadDirectory(probe, INSTANCE).ok, String(cut)).toBe(false);
+    }
+  });
+
   it('is reachable through the worker CLI entry point: `cli.js users <cmd>`', async () => {
     expect(await ingestMain(['users', 'list'], env, io)).toBe(0);
     expect(JSON.parse(out.at(-1)!).users[0].id).toBe('admin');

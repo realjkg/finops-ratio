@@ -222,6 +222,8 @@ export function installProcessHandlers(
 
 export async function main(argv: string[], env: Env, io: CliIO): Promise<number> {
   if (isWorkerCommand(argv[0])) return workerMain(argv, env, io);
+  // R2 slice E: the operator users command (engagement identity directory and sessions).
+  if (argv[0] === 'users') return (await import('../engagement/auth/usersCli')).usersMain(argv.slice(1), env, io);
   const started = new Date();
   const code = await migrateMain(argv, env, io);
   // Evidence record for migrate goes only to RATIO_EVIDENCE_FILE, so the Slice 0
