@@ -56,6 +56,8 @@ export interface ReaderRouteSpec<Q> {
   tag: string;
   parse(query: Record<string, string | string[] | undefined>): Parsed<Q>;
   read(pool: Pick<Pool, 'connect'>, tenantId: string, q: Q, ctx: { env: Env; now: Date }): Promise<unknown>;
+  /** Sends a successful read (default: 200 JSON). */
+  respond?(res: NextApiResponse, body: unknown): void;
 }
 
 function sendAuthFailure(res: NextApiResponse, auth: Exclude<LiveAuthResult, { kind: 'ok' }>): void {
@@ -104,7 +106,8 @@ export function createReaderRoute<Q>(deps: PublishedCostsRouteDeps, spec: Reader
       // login check and the reads; a stuck client is destroyed, not pooled.
       const now = (deps.now ?? (() => new Date()))();
       const body = await readWithDeadline(poolFor(readerUrl), (p) => spec.read(p, tenantId, parsed.value, { env: envOf(), now }), deadlineMs);
-      res.status(200).json(body);
+      if (spec.respond) spec.respond(res, body);
+      else res.status(200).json(body);
     } catch (err) {
       if (err instanceof UnsafeReaderLoginError) {
         // A distinct, expected refusal (not an unhandled 500): one structured

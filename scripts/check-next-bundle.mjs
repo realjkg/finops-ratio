@@ -8,8 +8,8 @@
 //      maps included): no driver, ingestion, ledger, reader or worker marker.
 //   2. SERVER entries (.next/server/pages/**.js) load chunks with lines
 //      `R.c("server/chunks/<file>")`. A server .js file holding READER code
-//      must be a reader route itself (READER_ENTRIES: the costs route and the
-//      report-facts route) or a chunk ONLY reader routes load.
+//      must be a reader route itself (READER_ENTRIES: the costs, report-facts and
+//      engagement-report routes) or a chunk ONLY reader routes load.
 //   3. Worker-only code (S3 source, fake source, CSV parser, S3 SDK, worker
 //      error codes) appears in no server .js file, the costs route included.
 //   4. Traced runtime files (<entry>.js.nft.json): `pg` only for the reader
@@ -28,7 +28,8 @@ import { fileURLToPath } from 'node:url';
 export const COSTS_ENTRY = 'pages/api/v1/costs/published.js';
 export const REPORT_FACTS_ENTRY = 'pages/api/v1/reports/facts.js';
 /** The only server entries that may load reader code and pg (the reviewed read-API island). */
-export const READER_ENTRIES = [COSTS_ENTRY, REPORT_FACTS_ENTRY];
+export const ENGAGEMENT_REPORT_ENTRY = 'pages/api/v1/reports/engagement.js';
+export const READER_ENTRIES = [COSTS_ENTRY, REPORT_FACTS_ENTRY, ENGAGEMENT_REPORT_ENTRY];
 
 export const WORKER_ONLY = [
   'S3FocusExportSource',

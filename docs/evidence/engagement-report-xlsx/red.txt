@@ -1,0 +1,17 @@
+Engagement report model + XLSX (1.0, report-facts PR 2): RED before the implementation (base 0c2a75e).
+Command: npx vitest run src/reports src/server/costs/engagementReportRoute.test.ts src/ingest/importBoundary.test.ts src/rbac/matrix.test.ts scripts/check-next-bundle.test.mjs
+Result: Test Files 6 failed | 1 passed (7); Tests 4 failed | 55 passed (59), plus 3 files that cannot load:
+- engagementReportModel.test.ts, engagementReportXlsx.test.ts, engagementReportRoute.test.ts: modules missing
+- check-next-bundle B5: ENGAGEMENT_REPORT_ENTRY missing
+- importBoundary: pages/api/v1/reports/engagement.ts does not exist
+- rbac matrix (2): no row for /api/v1/reports/engagement
+The golden model file (src/reports/fixtures/engagementReport.sample-2024-09.golden.json) is generated from the
+implementation and reviewed value by value in the GREEN commit.
+DB: reportFacts.db.test.ts gains the engagement XLSX describe (cannot load: route module missing).
+
+Review round (independent review of c232a66: one Medium, one Low), RED before the fix:
+Command: npx vitest run src/reports
+Result: Tests 14 failed | 25 passed (39): safeCellText (XML 1.0 forbidden characters -> U+FFFD, 32,767-character cap with a
+visible marker) is missing; hostile ChargeCategory / declared source / engagement displayName / gap detail values
+(U+FFFF, U+FFFE, lone surrogate, NUL, VT/FF, 40,000 characters) must give safe model cells, an "Altered cell values"
+row, and an XLSX that loads in ExcelJS and parses in saxes; Note texts must name the columns each reason explains.

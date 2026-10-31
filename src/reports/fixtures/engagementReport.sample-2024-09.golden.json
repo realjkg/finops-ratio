@@ -1,0 +1,279 @@
+{
+  "schema": "ratio.engagement-report/1",
+  "title": "Engagement cost report: 2024-09",
+  "generatedAt": "2026-10-31T12:00:00.000Z",
+  "period": "2024-09",
+  "sections": [
+    {
+      "id": "summary",
+      "title": "Report",
+      "columns": [
+        "Item",
+        "Value",
+        "Note"
+      ],
+      "rows": [
+        [
+          "Engagement",
+          "Example engagement (example-engagement)",
+          ""
+        ],
+        [
+          "Reporting period",
+          "2024-09 (2024-09-01 to 2024-10-01, end exclusive)",
+          ""
+        ],
+        [
+          "Period state",
+          "closed",
+          ""
+        ],
+        [
+          "Period completeness",
+          "charge-period span covers the month (day-level gaps not checked)",
+          ""
+        ],
+        [
+          "Generated at",
+          "2026-10-31T12:00:00.000Z",
+          ""
+        ],
+        [
+          "Latest published at",
+          "2026-10-31T03:00:00.000000Z",
+          ""
+        ],
+        [
+          "Data through",
+          "2024-10-01T00:00:00.000000Z",
+          ""
+        ],
+        [
+          "Reporting currency",
+          "USD",
+          ""
+        ],
+        [
+          "Currencies in data",
+          "USD",
+          ""
+        ],
+        [
+          "Currency rule",
+          "Amounts are never summed or converted across currencies; no FX is applied",
+          ""
+        ],
+        [
+          "Scope",
+          "Scope: supplied file(s) and periods; not a complete provider invoice; reconciled only against the control totals shown",
+          ""
+        ],
+        [
+          "Billed cost basis",
+          "FOCUS BilledCost: the invoiced amount, after Credit and Adjustment rows",
+          ""
+        ],
+        [
+          "Effective cost basis",
+          "FOCUS EffectiveCost: the amortized cost after discounts; partial or N/A where rows lack it",
+          ""
+        ],
+        [
+          "Declared cost basis",
+          "aws-focus-sample: focus-native",
+          ""
+        ],
+        [
+          "Credits policy",
+          "Credit and Adjustment rows (FOCUS ChargeCategory) are included once in both the billed and the effective totals, and are also listed separately",
+          ""
+        ],
+        [
+          "Declared credits coverage",
+          "aws-focus-sample: included",
+          ""
+        ]
+      ]
+    },
+    {
+      "id": "totals",
+      "title": "Totals by currency",
+      "columns": [
+        "Currency",
+        "Rows",
+        "Billed cost",
+        "Effective cost",
+        "Credits rows",
+        "Credits billed",
+        "Credits effective",
+        "Adjustments rows",
+        "Adjustments billed",
+        "Adjustments effective",
+        "Note"
+      ],
+      "rows": [
+        [
+          "USD",
+          "942",
+          "18.00663861840",
+          "13.00000000000",
+          "1",
+          "-2.61370000000",
+          "-3.00000000000",
+          "N/A",
+          "N/A",
+          "N/A",
+          "Adjustments rows, Adjustments billed, Adjustments effective: N/A (No rows with ChargeCategory Adjustment in the published facts for this period)"
+        ]
+      ]
+    },
+    {
+      "id": "sourceTotals",
+      "title": "Totals by source",
+      "columns": [
+        "Source id",
+        "Currency",
+        "Rows",
+        "Billed cost",
+        "Effective cost",
+        "Credits rows",
+        "Credits billed",
+        "Credits effective",
+        "Adjustments rows",
+        "Adjustments billed",
+        "Adjustments effective",
+        "Note"
+      ],
+      "rows": [
+        [
+          "0a0a0a0a-0000-4000-8000-00000000000a",
+          "USD",
+          "942",
+          "18.00663861840",
+          "13.00000000000",
+          "1",
+          "-2.61370000000",
+          "-3.00000000000",
+          "N/A",
+          "N/A",
+          "N/A",
+          "Adjustments rows, Adjustments billed, Adjustments effective: N/A (No rows with ChargeCategory Adjustment in the published facts for this period)"
+        ]
+      ]
+    },
+    {
+      "id": "chargeCategories",
+      "title": "Charge categories",
+      "columns": [
+        "Source id",
+        "Currency",
+        "Charge category",
+        "Rows",
+        "Billed cost",
+        "Effective cost",
+        "Note"
+      ],
+      "rows": [
+        [
+          "0a0a0a0a-0000-4000-8000-00000000000a",
+          "USD",
+          "Credit",
+          "1",
+          "-2.61370000000",
+          "-3.00000000000",
+          ""
+        ],
+        [
+          "0a0a0a0a-0000-4000-8000-00000000000a",
+          "USD",
+          "Usage",
+          "941",
+          "20.62033861840",
+          "16.00000000000",
+          ""
+        ]
+      ]
+    },
+    {
+      "id": "imports",
+      "title": "Sources and imports",
+      "columns": [
+        "Source id",
+        "Source key",
+        "Providers",
+        "FOCUS versions",
+        "Batch id",
+        "Batch status",
+        "Published at",
+        "Staged artifact sha256 (per-period file the import wrote, not the operator file)",
+        "Staged artifact rows",
+        "Operator file sha256",
+        "Reconciliation",
+        "Control totals",
+        "Note"
+      ],
+      "rows": [
+        [
+          "0a0a0a0a-0000-4000-8000-00000000000a",
+          "N/A",
+          "AWS",
+          "1.0",
+          "aaaaaaaa-0000-4000-8000-000000000001",
+          "published",
+          "2026-10-31T03:00:00.000000Z",
+          "8888888888888888888888888888888888888888888888888888888888888888",
+          "942",
+          "N/A",
+          "N/A",
+          "N/A",
+          "Source key: N/A (Not yet available: the reader role cannot see source keys or import metadata until the batch-status view (R4, migration 0005) exists); Operator file sha256: N/A (Not yet available (needs R4 import metadata): the operator file's sha256 is recorded in the staged import metadata the reader role cannot see; stagedArtifactSha256 is the per-period artifact the import wrote, so it differs from sha256sum of the operator file); Reconciliation, Control totals: N/A (Figures reflect the last PUBLISHED batch only: a newer delivery for this period may have been quarantined or left staged, and reconciliation status and control totals are not visible to the reader role until the batch-status view (R4, migration 0005) exists)"
+        ]
+      ]
+    },
+    {
+      "id": "declaredSources",
+      "title": "Declared sources",
+      "columns": [
+        "Source id (config)",
+        "Provider",
+        "Cost basis",
+        "Credits coverage",
+        "Completeness",
+        "Control total source",
+        "Note"
+      ],
+      "rows": [
+        [
+          "aws-focus-sample",
+          "AWS",
+          "focus-native",
+          "included",
+          "explicit-subset",
+          "export-query",
+          ""
+        ]
+      ]
+    },
+    {
+      "id": "coverageGaps",
+      "title": "Coverage gaps",
+      "columns": [
+        "Code",
+        "Detail",
+        "Note"
+      ],
+      "rows": [
+        [
+          "BATCH_STATUS_NOT_VISIBLE",
+          "Figures reflect the last PUBLISHED batch only: a newer delivery for this period may have been quarantined or left staged, and reconciliation status and control totals are not visible to the reader role until the batch-status view (R4, migration 0005) exists",
+          ""
+        ],
+        [
+          "DECLARED_SOURCES_NOT_LINKED",
+          "Not yet available: the reader role cannot see source keys or import metadata until the batch-status view (R4, migration 0005) exists",
+          ""
+        ]
+      ]
+    }
+  ]
+}
