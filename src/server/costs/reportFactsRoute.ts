@@ -53,6 +53,7 @@ export function createReportFactsRoute(deps: PublishedCostsRouteDeps = {}): Next
   return createReaderRoute(deps, {
     tag: 'report-facts',
     parse: parseReportFactsQuery,
+    session: { permission: () => 'reports:read', format: () => 'facts' },
     read: async (pool, tenantId, q, { env, now }) => (await readReportFacts(pool, tenantId, q.period, env, now)).facts,
   });
 }
