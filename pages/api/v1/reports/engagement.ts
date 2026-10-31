@@ -1,4 +1,4 @@
-// GET /api/v1/reports/engagement?period=YYYY-MM&format=xlsx — the engagement
+// GET /api/v1/reports/engagement?period=YYYY-MM&format=xlsx|pdf|json — the engagement
 // cost report (1.0) for one billing period, built only from the tenant's
 // published report facts; missing data is N/A with a reason, never 0. Same
 // auth and tenant binding as /api/v1/reports/facts.

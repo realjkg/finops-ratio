@@ -5,13 +5,19 @@
 import { describe, expect, it } from 'vitest';
 import { assembleReportFacts } from './reportFacts';
 import { buildEngagementReportModel, type EngagementReportModel } from './engagementReportModel';
-import { EngagementReportDocument, PDF_GLYPH_NOTE, pdfGlyphText, renderEngagementReportPdf } from './engagementReportPdf';
+import { EngagementReportDocument, PDF_GLYPH_NOTE, pdfGlyphText, pdfLayout, renderEngagementReportPdf } from './engagementReportPdf';
 import { ENGAGEMENT, g, sampleInput } from './fixtures/sampleFacts';
 import { pageCount, pdfShownStrings, treeTexts } from './fixtures/pdfText';
 
 const sample = () => buildEngagementReportModel(assembleReportFacts(sampleInput()), ENGAGEMENT);
 const nonEmpty = (xs: string[]) => xs.filter((x) => x !== '');
-const modelTexts = (m: EngagementReportModel) => nonEmpty(m.sections.flatMap((s) => [s.title, ...s.columns, ...s.rows.flat()]).map(pdfGlyphText));
+/** What the PDF must show, in order: tables print the header then the cells; record blocks print "column, value" pairs (empty Notes omitted). */
+const modelTexts = (m: EngagementReportModel) =>
+  nonEmpty(
+    m.sections
+      .flatMap((s) => [s.title, ...(pdfLayout(s) === 'table' ? [...s.columns, ...s.rows.flat()] : s.rows.flatMap((r) => r.flatMap((v, i) => (v === '' ? [] : [s.columns[i], v])))) ])
+      .map(pdfGlyphText),
+  );
 
 /** `want` appears in `have` in order (other texts, e.g. page furniture, may sit between). */
 function expectSubsequence(have: string[], want: string[]) {
@@ -49,13 +55,14 @@ describe('engagement report PDF', () => {
     expectSubsequence(texts, modelTexts(m));
   });
 
-  it('long tables paginate with the column header repeated; long unbroken cells wrap instead of overflowing', async () => {
+  it('long sections paginate with the section heading repeated; long unbroken cells wrap instead of overflowing', async () => {
     const many = Array.from({ length: 160 }, (_, i) => g({ isTotal: false, chargeCategory: `Category ${String(i).padStart(3, '0')}`, billedCost: '0.01', effectiveCost: '0.01', rowCount: '1' }));
     const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups: [g({}), ...many] })), { ...ENGAGEMENT, displayName: 'y'.repeat(400) });
     const pdf = await renderEngagementReportPdf(m);
     const shown = pdfShownStrings(pdf);
     expect(pageCount(pdf)).toBeGreaterThan(m.sections.length);
-    expect(shown.filter((s) => s.startsWith('Charge')).length, 'section title and column header repeat on every page').toBeGreaterThan(2);
+    expect(shown.filter((s) => s === 'Charge categories').length, 'the section title repeats on every page').toBeGreaterThan(1);
+    expect(shown.filter((s) => s === 'Item').length, 'a table header repeats only within its section').toBe(1);
     expect(shown.some((s) => s.includes('Category 159'))).toBe(true);
     expect(Math.max(...shown.map((s) => s.length))).toBeLessThan(200);
   });
