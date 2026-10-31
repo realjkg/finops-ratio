@@ -59,7 +59,7 @@ describe('authorize: deny by default', () => {
     for (const [user, role] of [['a', 'analyst'], ['c', 'connector_manager'], ['adm', 'tenant_admin']] as const) {
       for (const perm of PERMISSIONS) {
         const v = authorize(d, p(user), perm, RES);
-        expect(v.allow, `${user} ${perm}`).toBe(ROLE_PERMISSIONS[role].includes(perm));
+        expect(v.allow, `${user} ${perm}`).toBe((ROLE_PERMISSIONS[role] as readonly string[]).includes(perm));
         if (!v.allow) expect(v).toEqual({ allow: false, status: 403, reason: DENY.permission });
       }
     }
@@ -84,6 +84,14 @@ describe('authorize: deny by default', () => {
     expect(authorize(d, p('v'), 'reports:read', { tenantId: T, engagementId: 'other' })).toEqual({ allow: false, status: 403, reason: DENY.tenant });
     expect(authorize(d, p('v'), 'reports:delete' as Permission, RES)).toEqual({ allow: false, status: 403, reason: DENY.permission });
     expect(authorize(d, p('v'), 'reports:read', RES).allow).toBe(true);
+  });
+
+  it('defense in depth: a membership or binding record of another tenant or issuer is refused even if a directory held one', () => {
+    const d = dir();
+    const foreign = { ...d, memberships: new Map([...d.memberships].map(([k, m]) => [k, { ...m, tenantId: OTHER_T }])) };
+    expect(authorize(foreign, p('v'), 'reports:read', RES)).toEqual({ allow: false, status: 403, reason: DENY.membership });
+    const loose = { ...d, bindingOf: (c: string, _i: string, s: string) => d.bindingOf(c, ISS, s) };
+    expect(resolveExternalIdentity(loose, { connectionId: 'idp-a', issuer: 'https://idp.example.test/tenant-b', subject: 'sub-v' })).toEqual({ kind: 'not_provisioned' });
   });
 
   it('a role change or suspension in the directory changes the very next decision (no cached grant)', () => {
