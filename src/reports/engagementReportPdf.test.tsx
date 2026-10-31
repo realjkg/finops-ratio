@@ -1,15 +1,34 @@
 // Engagement report PDF: rendered from the ONE engagement report model with the
-// existing @react-pdf stack. Checked two ways without a PDF library: the element
-// tree (every section title, column and cell text in order, verbatim) and the
-// produced bytes (inflated content streams carry the exact amount strings).
+// existing @react-pdf stack and the bundled Noto fonts. Checked two ways without a
+// PDF library: the element tree (every section title, column and cell text in
+// order, verbatim) and the produced bytes (inflated content streams decoded
+// through the embedded fonts' ToUnicode maps carry the exact strings).
 import { spawnSync } from 'child_process';
 import path from 'path';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { assembleReportFacts, NA_REASONS } from './reportFacts';
 import { buildEngagementReportModel, type EngagementReportModel } from './engagementReportModel';
-import { EngagementReportDocument, PDF_CELL_FLOOR_CHARS, PDF_CELL_MAX_CHARS, PDF_GLYPH_NOTE, PDF_TOTAL_MAX_CHARS, PDF_TRUNCATION_NOTE, pdfGlyphText, pdfLayout, renderEngagementReportPdf } from './engagementReportPdf';
+import {
+  breakLong,
+  EngagementReportDocument,
+  PDF_CELL_FLOOR_CHARS,
+  PDF_CELL_MAX_CHARS,
+  PDF_GLYPH_NOTE,
+  PDF_TOTAL_MAX_CHARS,
+  PDF_TRUNCATION_NOTE,
+  PDF_UNSUPPORTED_MESSAGE,
+  PDF_UNSUPPORTED_TEXT_POLICY,
+  pdfGlyphText,
+  pdfLayout,
+  pdfPreflight,
+  PdfUnsupportedTextError,
+  renderEngagementReportPdf,
+} from './engagementReportPdf';
+import { loadPdfFonts } from './pdfFonts';
 import { ENGAGEMENT, g, sampleInput } from './fixtures/sampleFacts';
-import { pageCount, pdfPageStrings, pdfShownStrings, treeTexts } from './fixtures/pdfText';
+import { pageCount, pdfEmbeddedFonts, pdfPageStrings, pdfShownStrings, treeTexts } from './fixtures/pdfText';
+
+beforeAll(() => loadPdfFonts());
 
 const sample = () => buildEngagementReportModel(assembleReportFacts(sampleInput()), ENGAGEMENT);
 const nonEmpty = (xs: string[]) => xs.filter((x) => x !== '');
@@ -17,8 +36,7 @@ const nonEmpty = (xs: string[]) => xs.filter((x) => x !== '');
 const modelTexts = (m: EngagementReportModel) =>
   nonEmpty(
     m.sections
-      .flatMap((s) => [s.title, ...(pdfLayout(s) === 'table' ? [...s.columns, ...s.rows.flat()] : s.rows.flatMap((r) => r.flatMap((v, i) => (v === '' ? [] : [s.columns[i], v])))) ])
-      .map(pdfGlyphText),
+      .flatMap((s) => [s.title, ...(pdfLayout(s) === 'table' ? [...s.columns, ...s.rows.flat()] : s.rows.flatMap((r) => r.flatMap((v, i) => (v === '' ? [] : [s.columns[i], v])))) ]),
   );
 
 /** `want` appears in `have` in order (other texts, e.g. page furniture, may sit between). */
@@ -45,16 +63,16 @@ describe('engagement report PDF', () => {
     expect(shown).not.toMatch(/18\.01\b|\$18/);
   });
 
-  it('characters outside the built-in PDF font are shown as a visible ? and disclosed; Windows-1252 text is kept', () => {
-    expect(pdfGlyphText('café – “x” €5')).toBe('café – “x” €5');
-    expect(pdfGlyphText('a�b中😀c')).toBe('a?b??c');
-    const facts = assembleReportFacts(sampleInput({ groups: [g({}), g({ isTotal: false, chargeCategory: 'Usage 中￿' })] }));
+  it("the 'substitute' policy draws characters outside the supported scripts as a visible ? and counts them on page 1", () => {
+    expect(pdfGlyphText('café – “x” €5 Москва 成本 비용')).toBe('café – “x” €5 Москва 成本 비용');
+    expect(pdfGlyphText('a\u0000b中😀c\uE000')).toBe('a?b中?c?');
+    const facts = assembleReportFacts(sampleInput({ groups: [g({}), g({ isTotal: false, chargeCategory: 'Usage 中\uE000' })] }));
     const m = buildEngagementReportModel(facts, { ...ENGAGEMENT, displayName: 'Ünïcode 😀' });
-    const texts = nonEmpty(treeTexts(<EngagementReportDocument model={m} />));
-    expect(texts).toContain('Usage ??');
+    const texts = nonEmpty(treeTexts(<EngagementReportDocument model={m} policy="substitute" />));
+    expect(texts).toContain('Usage 中?');
     expect(texts).toContain('Ünïcode ? (example-engagement)');
     expect(texts).toContain(PDF_GLYPH_NOTE(2));
-    expectSubsequence(texts, modelTexts(m));
+    expectSubsequence(texts, modelTexts(m).map(pdfGlyphText));
   });
 
   it('long sections paginate with the section heading repeated; long unbroken cells wrap instead of overflowing', async () => {
@@ -111,7 +129,7 @@ describe('engagement report PDF', () => {
   it('the summary and coverage-gap tables carry their Note column and reasons; the font note sits on page 1 after the summary', () => {
     const facts = assembleReportFacts(sampleInput({ groups: [], batches: [], artifacts: [], engagement: null }));
     const m = buildEngagementReportModel(facts, { id: 'x', displayName: 'Ünïcode 😀' });
-    const texts = treeTexts(<EngagementReportDocument model={m} />);
+    const texts = treeTexts(<EngagementReportDocument model={m} policy="substitute" />);
     const summary = m.sections[0];
     const noted = summary.rows.find((r) => r.at(-1) !== '')!;
     expect(texts).toContain(noted.at(-1));
@@ -182,3 +200,113 @@ describe('engagement report PDF', () => {
   });
 });
 
+describe('bundled fonts: declared scripts render faithfully and extract exactly', () => {
+  // SYNTHETIC multi-script data: Latin accents, Cyrillic, Greek, Simplified Chinese, Japanese, Korean, mixed cells.
+  const SCRIPTS = ['Éclair Çà ñ ü Øresund ß', 'Москва Счёт', 'Ωμέγα λογαριασμός', '成本报告 云计算费用', 'コスト 請求書', '비용 보고서', 'Mixed: Cost 成本 コスト 비용 Москва Ωμέγα €5'];
+  const multi = () => {
+    const groups = [
+      g({}),
+      g({ isTotal: false, chargeCategory: 'Credit', rowCount: '1', billedCost: '-2.61370000000', effectiveCost: '-3.00000000000' }),
+      ...SCRIPTS.map((c, i) => g({ isTotal: false, chargeCategory: c, rowCount: String(i + 1), billedCost: `-${i}.25000000000`, effectiveCost: '1.00000000000' })),
+      g({ currency: 'EUR', rowCount: '3', billedCost: '-7.50000000000', effectiveCost: '-7.00000000000' }),
+      g({ currency: 'JPY', rowCount: '2', billedCost: '1200', effectiveCost: '1100' }),
+    ];
+    return buildEngagementReportModel(assembleReportFacts(sampleInput({ groups })), { ...ENGAGEMENT, displayName: '成本报告 コスト 비용 Москва' });
+  };
+
+  it('Latin accents, Cyrillic, Greek, Chinese, Japanese, Korean and mixed cells extract exactly, with amounts, negatives, currency labels and totals', async () => {
+    const m = multi();
+    expect(pdfPreflight(m)).toEqual({ cells: 0, complex: 0, emoji: 0, other: 0 });
+    const pdf = await renderEngagementReportPdf(m);
+    // A line mixing scripts is drawn as one text run per font, in order: a page's runs joined hold each line's text.
+    const pages = pdfPageStrings(pdf).map((p) => p.join(''));
+    const all = pages.join('\n');
+    for (const t of [...SCRIPTS, '成本报告 コスト 비용 Москва (example-engagement)']) expect(all, t).toContain(t);
+    const shown = pdfShownStrings(pdf);
+    for (const v of ['18.00663861840', '-2.61370000000', '-3.00000000000', '-6.25000000000', '-7.50000000000', '-7.00000000000', '1200', '1100', 'USD', 'EUR', 'JPY', 'N/A']) expect(shown, v).toContain(v);
+    expect(all).not.toMatch(/\ufffd|\?/);
+  }, 30_000);
+
+  it('embeds subsets of the three bundled faces only (no built-in font), each with a ToUnicode map; a CJK report stays small', async () => {
+    const pdf = await renderEngagementReportPdf(multi());
+    expect(pdfEmbeddedFonts(pdf).map((f) => f.name).sort()).toEqual(['RATIOA+NotoSans-Bold', 'RATIOB+NotoSans-Regular', 'RATIOC+NotoSansCJKsc-Regular'].sort());
+    for (const f of pdfEmbeddedFonts(pdf)) expect([f.embedded, f.toUnicode], f.name).toEqual([true, true]);
+    expect(pdf.toString('latin1')).not.toMatch(/\/BaseFont \/Helvetica/);
+    // The CJK face alone is 16.4 MB: only the used glyphs are embedded.
+    expect(pdf.length).toBeLessThan(400 * 1024);
+  }, 30_000);
+
+  it('identical bytes on every render of the same model (subset names are stable)', async () => {
+    const [a, b] = [await renderEngagementReportPdf(multi()), await renderEngagementReportPdf(multi())];
+    expect(a.equals(b)).toBe(true);
+    // The xref offsets still point at their objects after the subset names are rewritten.
+    const raw = a.toString('latin1');
+    const xref = /xref\n0 (\d+)\n([\s\S]*?)trailer/.exec(raw)!;
+    const offsets = [...xref[2].matchAll(/(\d{10}) 00000 n/g)].map((x) => Number(x[1]));
+    expect(offsets.length).toBe(Number(xref[1]) - 1);
+    offsets.forEach((o, i) => expect(raw.slice(o, o + 12), `object ${i + 1}`).toMatch(new RegExp(`^${i + 1} 0 obj`)));
+  }, 30_000);
+
+  it('CJK text breaks between characters when it is wider than its column (a visible - marks the break); nothing is cut', async () => {
+    expect(breakLong('成本报告')).toEqual(['成', '本', '报', '告']);
+    expect(breakLong('Cost成本ID-42')).toEqual(['Cost', '成', '本', 'ID-42']);
+    expect(breakLong('a'.repeat(40))).toEqual(['a'.repeat(40)]);
+    expect(breakLong('0a0a0a0a-0000-4000-8000-00000000000a')).toEqual(['0a0a0a0a-0000-4000-8000-00000000000a']);
+    const long = '云计算费用报告'.repeat(30); // 210 CJK characters, no spaces
+    const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups: [g({}), g({ isTotal: false, chargeCategory: long, rowCount: '1' })] })), ENGAGEMENT);
+    const shown = pdfShownStrings(await renderEngagementReportPdf(m));
+    const at = shown.findIndex((t) => t.startsWith('云计算'));
+    const lines = shown.slice(at, at + 4).filter((t) => /^[云计算费用报告]/.test(t));
+    expect(lines.length).toBeGreaterThan(1);
+    for (const l of lines.slice(0, -1)) expect(l).toMatch(/-$/);
+    expect(lines.map((l, i) => (i < lines.length - 1 ? l.slice(0, -1) : l)).join('')).toBe(long);
+  }, 30_000);
+
+  it('the data caps still apply to CJK free text (visible marker, page-1 count)', () => {
+    const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups: [g({}), g({ isTotal: false, chargeCategory: '成本'.repeat(1_500), rowCount: '1' })] })), ENGAGEMENT);
+    const texts = treeTexts(<EngagementReportDocument model={m} />);
+    const cell = texts.find((t) => t.startsWith('成本成本'))!;
+    expect(cell.startsWith('成本'.repeat(1_000))).toBe(true);
+    expect(cell).toMatch(/\.\.\. \[truncated 1000 characters; see XLSX\/JSON for the full text\]$/);
+    expect(texts.filter((t) => t.startsWith('PDF length limit: '))).toEqual([PDF_TRUNCATION_NOTE(1)]);
+  });
+});
+
+describe('unsupported text: preflight and the refusal policy (default refuse)', () => {
+  const withCells = (cells: string[]) =>
+    buildEngagementReportModel(assembleReportFacts(sampleInput({ groups: [g({}), ...cells.map((c) => g({ isTotal: false, chargeCategory: c, rowCount: '1' }))] })), ENGAGEMENT);
+
+  it('the default policy is refuse', () => {
+    expect(PDF_UNSUPPORTED_TEXT_POLICY).toBe('refuse');
+  });
+
+  it('counts cell values per kind (a value with two kinds counts once in cells and once per kind); the message names counts only', () => {
+    const m = withCells(['مرحبا', 'नमस्ते', 'สวัสดี', 'Paid 👍🏽', 'שלום 😀', 'e\u0301', '\uE000 private', 'Москва 成本']);
+    const counts = pdfPreflight(m);
+    expect(counts).toEqual({ cells: 7, complex: 5, emoji: 2, other: 1 });
+    expect(PDF_UNSUPPORTED_MESSAGE(counts)).toBe(
+      '7 cell values contain characters the PDF cannot render (complex scripts or combining marks: 5; emoji: 2; other: 1); download XLSX or JSON for the full text.',
+    );
+    expect(PDF_UNSUPPORTED_MESSAGE({ cells: 1, complex: 0, emoji: 1, other: 0 })).toMatch(/^1 cell value contains characters /);
+  });
+
+  it('refuse: no PDF is produced, the error carries the counts and never a cell value', async () => {
+    const m = withCells(['مرحبا بالعالم', 'Usage']);
+    const err = await renderEngagementReportPdf(m).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(PdfUnsupportedTextError);
+    expect((err as PdfUnsupportedTextError).counts).toEqual({ cells: 1, complex: 1, emoji: 0, other: 0 });
+    expect((err as Error).message).not.toContain('مرحبا');
+    expect(() => treeTexts(<EngagementReportDocument model={m} />)).toThrow(PdfUnsupportedTextError);
+  });
+
+  it("substitute (the one-switch alternative): the same input renders with '?' and the page-1 count instead", async () => {
+    const m = withCells(['مرحبا', 'Paid 👍🏽']);
+    const shown = pdfShownStrings(await renderEngagementReportPdf(m, 'substitute'));
+    expect(shown).toContain('?????');
+    expect(shown).toContain('Paid ??');
+    expect(shown.join('')).toContain('PDF font: 2 cell values contain characters the PDF cannot render');
+  }, 30_000);
+});

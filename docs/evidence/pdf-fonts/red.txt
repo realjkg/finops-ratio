@@ -1,0 +1,7 @@
+RED (tests only, implementation at origin/main fc83459): bundled PDF fonts, preflight and 422
+Command: npx vitest run --cache=false src/reports src/server/costs/engagementReportPdfRoute.test.ts src/server/costs/engagementReportRoute.test.ts scripts/check-next-bundle.test.mjs
+Result: Test Files 4 failed | 5 passed (9); Tests 5 failed | 73 passed (78)
+- src/reports/engagementReportPdf.test.tsx: suite fails (no ./pdfFonts module: no bundled fonts)
+- src/reports/pdfFonts.test.ts: suite fails (no ./pdfFonts, ./pdfBytes modules)
+- engagementReportPdfRoute.test.ts: CJK/Cyrillic PDF draws '?' (Helvetica); Arabic/emoji PDF is 200, not 422
+- check-next-bundle.test.mjs B6 (3): no font rule, no bundledFontHashes, no FONT_MARKERS
