@@ -7,3 +7,12 @@ Result: Tests 1 failed | 45 passed (46), plus 1 file that cannot load:
   the #158 review Low; the mutation that removes the guard is shown in green.txt).
 DB: reportFacts.db.test.ts gains a JSON + PDF case (cannot load: the PDF test helper's module is fine, the route
 returns 400 for pdf/json until implemented).
+
+Review round (independent review of 993a3ce: three Mediums, one Low), RED before the fix:
+Command: npx vitest run src/reports/engagementReportPdf.test.tsx
+Result: 5 failed: PDF_CELL_MAX_CHARS / PDF_TOTAL_MAX_CHARS / PDF_TRUNCATION_NOTE missing; the external watchdog
+(child process killed after 15 s) killed both hostile renders (64 cells x 32,000 spaced characters, and unbroken);
+a 30-record totals section split records across pages (a page had 5 'Billed cost' lines but 4 'Currency' lines);
+the date test could not find the dates as written (they were already the report instant; the test now resolves the
+indirect objects). The Note-column and font-note placement tests passed (guards).
+DB: the JSON response must have exactly the model's keys and equal the model rebuilt from the facts route.

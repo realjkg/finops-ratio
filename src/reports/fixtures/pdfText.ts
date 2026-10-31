@@ -23,10 +23,15 @@ export function treeTexts(node: unknown): string[] {
 
 const CP1252: Record<number, string> = { 0x80: '€', 0x91: '‘', 0x92: '’', 0x93: '“', 0x94: '”', 0x96: '–', 0x97: '—' };
 
-/** Every TJ/Tj string of every content stream, decoded; one entry per text-showing operator. */
+/** Every TJ string of every content stream, decoded; one entry per text-showing operator. */
 export function pdfShownStrings(pdf: Buffer): string[] {
+  return pdfPageStrings(pdf).flat();
+}
+
+/** The decoded TJ strings per content stream (react-pdf writes one content stream per page). */
+export function pdfPageStrings(pdf: Buffer): string[][] {
   const s = pdf.toString('latin1');
-  const out: string[] = [];
+  const pages: string[][] = [];
   for (const m of s.matchAll(/stream\r?\n([\s\S]*?)endstream/g)) {
     let body: string;
     try {
@@ -34,6 +39,8 @@ export function pdfShownStrings(pdf: Buffer): string[] {
     } catch {
       continue;
     }
+    const out: string[] = [];
+    pages.push(out);
     for (const op of body.matchAll(/\[([^\]]*)\]\s*TJ/g)) {
       const hex = [...op[1].matchAll(/<([0-9a-fA-F]*)>/g)].map((h) => h[1]).join('');
       let text = '';
@@ -44,7 +51,7 @@ export function pdfShownStrings(pdf: Buffer): string[] {
       out.push(text);
     }
   }
-  return out;
+  return pages.filter((p) => p.length > 0);
 }
 
 export const pageCount = (pdf: Buffer) => (pdf.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length;

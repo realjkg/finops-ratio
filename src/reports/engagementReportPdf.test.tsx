@@ -2,12 +2,14 @@
 // existing @react-pdf stack. Checked two ways without a PDF library: the element
 // tree (every section title, column and cell text in order, verbatim) and the
 // produced bytes (inflated content streams carry the exact amount strings).
+import { spawnSync } from 'child_process';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { assembleReportFacts } from './reportFacts';
 import { buildEngagementReportModel, type EngagementReportModel } from './engagementReportModel';
-import { EngagementReportDocument, PDF_GLYPH_NOTE, pdfGlyphText, pdfLayout, renderEngagementReportPdf } from './engagementReportPdf';
+import { EngagementReportDocument, PDF_CELL_MAX_CHARS, PDF_GLYPH_NOTE, PDF_TOTAL_MAX_CHARS, PDF_TRUNCATION_NOTE, pdfGlyphText, pdfLayout, renderEngagementReportPdf } from './engagementReportPdf';
 import { ENGAGEMENT, g, sampleInput } from './fixtures/sampleFacts';
-import { pageCount, pdfShownStrings, treeTexts } from './fixtures/pdfText';
+import { pageCount, pdfPageStrings, pdfShownStrings, treeTexts } from './fixtures/pdfText';
 
 const sample = () => buildEngagementReportModel(assembleReportFacts(sampleInput()), ENGAGEMENT);
 const nonEmpty = (xs: string[]) => xs.filter((x) => x !== '');
@@ -66,4 +68,63 @@ describe('engagement report PDF', () => {
     expect(shown.some((s) => s.includes('Category 159'))).toBe(true);
     expect(Math.max(...shown.map((s) => s.length))).toBeLessThan(200);
   }, 30_000); // a 160-row layout takes a few seconds under full-suite load
+
+  it('bounds PDF text: each cell at PDF_CELL_MAX_CHARS and the document at PDF_TOTAL_MAX_CHARS, with a visible marker and a page-1 count', () => {
+    expect([PDF_CELL_MAX_CHARS, PDF_TOTAL_MAX_CHARS]).toEqual([2_000, 100_000]);
+    const groups = [g({}), ...Array.from({ length: 64 }, (_, i) => g({ isTotal: false, chargeCategory: `c${i} `.repeat(1_000), rowCount: '1', billedCost: '0.01', effectiveCost: '0.01' }))];
+    const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups })), ENGAGEMENT);
+    const texts = treeTexts(<EngagementReportDocument model={m} />);
+    for (const t of texts) expect(t.length).toBeLessThanOrEqual(PDF_CELL_MAX_CHARS + 80);
+    expect(texts.join('').length).toBeLessThan(PDF_TOTAL_MAX_CHARS + 64 * 80 + 20_000);
+    const first = texts.find((t) => t.startsWith('c0 '))!;
+    expect(first).toMatch(/\.\.\. \[truncated \d+ characters; see XLSX\/JSON for the full text\]$/);
+    expect(texts.filter((t) => t.startsWith('PDF length limit: '))).toEqual([PDF_TRUNCATION_NOTE(64)]);
+    // The shared model is untouched: XLSX and the screen keep the full text.
+    expect(m.sections.find((s) => s.id === 'chargeCategories')!.rows[0][2].length).toBeGreaterThan(PDF_CELL_MAX_CHARS);
+  });
+
+  for (const kind of ['spaced', 'unbroken'] as const) {
+    it(`a hostile 64 x 32,000-character ${kind} input renders within 15 s and bounded memory (external watchdog)`, () => {
+      const child = path.join(__dirname, 'fixtures', 'pdfRenderChild.tsx');
+      const r = spawnSync(process.execPath, ['--import', 'tsx', child, kind], { cwd: path.resolve(__dirname, '..', '..'), encoding: 'utf8', timeout: 15_000, killSignal: 'SIGKILL' });
+      expect(r.signal, 'killed by the watchdog: the render did not finish in time').toBeNull();
+      const out = JSON.parse(r.stdout.trim()) as { ms: number; rss: number; bytes: number };
+      expect(out.rss).toBeLessThan(700 * 1024 * 1024);
+      expect(out.bytes).toBeGreaterThan(0);
+    }, 20_000);
+  }
+
+  it('wide-section records never split across pages: every page with an amount line also shows its record key', async () => {
+    const note = 'context '.repeat(40);
+    const groups = Array.from({ length: 30 }, (_, i) => g({ currency: `C${String(i).padStart(2, '0')}`.slice(0, 3).replace(/\d/g, (d) => 'ABCDEFGHIJ'[Number(d)]), effectiveMissingRows: '1', effectiveCost: `1.${i}` }));
+    const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups })), { ...ENGAGEMENT, displayName: note });
+    const pages = pdfPageStrings(await renderEngagementReportPdf(m));
+    const totalsPages = pages.filter((p) => p.includes('Totals by currency'));
+    expect(totalsPages.length).toBeGreaterThan(1);
+    for (const p of totalsPages) expect(p.filter((t) => t === 'Billed cost').length, p.join('|').slice(0, 200)).toBe(p.filter((t) => t === 'Currency').length);
+  }, 30_000);
+
+  it('the summary and coverage-gap tables carry their Note column and reasons; the font note sits on page 1 after the summary', () => {
+    const facts = assembleReportFacts(sampleInput({ groups: [], batches: [], artifacts: [], engagement: null }));
+    const m = buildEngagementReportModel(facts, { id: 'x', displayName: 'Ünïcode 😀' });
+    const texts = treeTexts(<EngagementReportDocument model={m} />);
+    const summary = m.sections[0];
+    const noted = summary.rows.find((r) => r.at(-1) !== '')!;
+    expect(texts).toContain(noted.at(-1));
+    const gapsStart = texts.indexOf('Coverage gaps');
+    expect(texts.slice(gapsStart, gapsStart + 5)).toEqual(['Coverage gaps', 'Code', 'Detail', 'Note', 'NO_PUBLISHED_BATCH']);
+    const noteAt = texts.indexOf(PDF_GLYPH_NOTE(1));
+    expect(noteAt).toBeGreaterThan(texts.indexOf(summary.rows.at(-1)![1]));
+    expect(noteAt).toBeLessThan(texts.indexOf(m.sections[1].title));
+  });
+
+  it('PDF dates are the report instant, not the wall clock', async () => {
+    const raw = (await renderEngagementReportPdf(sample())).toString('latin1');
+    const date = (key: string) => {
+      const ref = new RegExp(`/${key} (\\d+) 0 R`).exec(raw)?.[1];
+      return new RegExp(`\\n${ref} 0 obj\\n\\((D:[^)]*)\\)`).exec(raw)?.[1];
+    };
+    expect([date('CreationDate'), date('ModificationDate')]).toEqual(['D:20261031120000Z', 'D:20261031120000Z']);
+  });
 });
+
