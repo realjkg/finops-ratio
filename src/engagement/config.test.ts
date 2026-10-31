@@ -585,6 +585,7 @@ describe('mode and startup', () => {
       await expect(register()).resolves.toBeUndefined();
     } finally {
       vi.unstubAllEnvs();
+      fs.rmSync(path.dirname(users), { recursive: true, force: true });
     }
     expect(exit).not.toHaveBeenCalled();
   });

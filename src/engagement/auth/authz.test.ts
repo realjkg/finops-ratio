@@ -4,11 +4,11 @@
 // subject; local scrypt credentials as the bootstrap/recovery path).
 // SYNTHETIC records; passwords generated at run time.
 import { randomBytes } from 'node:crypto';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { authorize, DENY, PERMISSIONS, ROLE_PERMISSIONS, type AuditEvent, type Permission, type Principal, type Resource } from './authz';
 import { validateDirectory, type Directory } from './directory';
 import { authenticateLocal, resolveExternalIdentity } from './identity';
-import { hashPassword } from './password';
+import { hashPassword, kdf } from './password';
 
 const T = '5f0c1a7e-2b3d-4c5e-8f60-71829a3b4c5d';
 const E = 'example-focus-sample';
@@ -27,8 +27,8 @@ function dir(fn: (d: any) => void = () => {}): Directory {
     users: [user('v'), user('a'), user('c'), user('adm'), user('nomember'), user('off', 'suspended'), user('msusp')],
     localCredentials: [{ userId: 'adm', passwordHash: hash }, { userId: 'off', passwordHash: hash }],
     identityConnections: [
-      { id: 'idp-a', tenantId: T, protocol: 'oidc', issuer: ISS, clientId: 'ratio-synthetic', clientSecretRef: 'RATIO_OIDC_A', provisioning: 'invite-only', enabled: true },
-      { id: 'idp-off', tenantId: T, protocol: 'oidc', issuer: 'https://idp.example.test/off', clientId: 'ratio-synthetic', clientSecretRef: 'RATIO_OIDC_OFF', provisioning: 'invite-only', enabled: false },
+      { id: 'idp-a', tenantId: T, protocol: 'oidc', issuer: ISS, clientId: 'ratio-synthetic', clientSecretRef: 'RATIO_OIDC_CLIENT_SECRET_A', provisioning: 'invite-only', enabled: true },
+      { id: 'idp-off', tenantId: T, protocol: 'oidc', issuer: 'https://idp.example.test/off', clientId: 'ratio-synthetic', clientSecretRef: 'RATIO_OIDC_CLIENT_SECRET_OFF', provisioning: 'invite-only', enabled: false },
     ],
     bindings: [
       { connectionId: 'idp-a', issuer: ISS, subject: 'sub-v', userId: 'v', approvedBy: 'adm', approvedAt: '2026-10-31T00:00:00Z' },
@@ -45,7 +45,7 @@ function dir(fn: (d: any) => void = () => {}): Directory {
 }
 const p = (id: string, o: Partial<typeof RES> = {}): Principal => ({ kind: 'user', id, ...RES, ...o });
 
-beforeAll(async () => { hash = await hashPassword(pw, { logN: 14, r: 8, p: 1 }); });
+beforeAll(async () => { hash = await hashPassword(pw); });
 
 describe('authorize: deny by default', () => {
   it('role permissions are exactly the documented grants; connector management never implies identity or members', () => {
@@ -77,6 +77,7 @@ describe('authorize: deny by default', () => {
     const d = dir();
     expect(authorize(d, null, 'reports:read', R)).toEqual({ allow: false, status: 401, reason: DENY.authentication });
     expect(authorize(d, p('ghost'), 'reports:read', R)).toEqual({ allow: false, status: 401, reason: DENY.authentication });
+    expect(authorize(d, p('V'), 'reports:read', R)).toEqual({ allow: false, status: 401, reason: DENY.authentication }); // ids are exact in a session
     expect(authorize(d, p('off'), 'reports:read', R)).toEqual({ allow: false, status: 401, reason: DENY.authentication });
     expect(authorize(d, p('nomember'), 'reports:read', R)).toEqual({ allow: false, status: 403, reason: DENY.membership });
     expect(authorize(d, p('msusp'), 'reports:read', R)).toEqual({ allow: false, status: 403, reason: DENY.membership });
@@ -111,6 +112,25 @@ describe('authorize: deny by default', () => {
     expect(JSON.stringify(events)).not.toMatch(/scrypt|SYNTHETIC v|idp\.example/);
   });
 
+  it('a throwing audit hook never changes or loses the decision, and its error text is never propagated or logged', () => {
+    const d = dir();
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const boom = () => { throw new Error('HOOK-SECRET-1f2e'); };
+    try {
+      expect(authorize(d, p('v'), 'reports:read', R, boom)).toEqual(authorize(d, p('v'), 'reports:read', R));
+      expect(authorize(d, null, 'reports:read', R, boom)).toEqual({ allow: false, status: 401, reason: DENY.authentication });
+      expect(err).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(err.mock.calls)).not.toContain('HOOK-SECRET');
+      expect(String(err.mock.calls[0][0])).toBe('{"event":"authz_audit_hook_failed"}');
+    } finally { err.mockRestore(); }
+  });
+
+  it('team grants carry only reports and connectors:read; admin permissions stay role-only even in a crafted directory', () => {
+    const d = dir();
+    const crafted = { ...d, teamsOf: (u: string) => d.teamsOf(u).map((t) => ({ ...t, permissions: ['identity:manage', 'members:manage', 'connectors:manage'] as Permission[] })) };
+    for (const perm of ['identity:manage', 'members:manage', 'connectors:manage'] as const) expect(authorize(crafted, p('v'), perm, R).allow, perm).toBe(false);
+  });
+
   it('defense in depth: a membership or binding record of another tenant or issuer is refused even if a directory held one', () => {
     const d = dir();
     const foreign = { ...d, memberships: new Map([...d.memberships].map(([k, m]) => [k, { ...m, tenantId: OTHER_T }])) };
@@ -143,6 +163,19 @@ describe('identity resolution', () => {
   it('an email or display name never identifies anyone', () => {
     const d = dir();
     expect(resolveExternalIdentity(d, { connectionId: 'idp-a', issuer: ISS, subject: 'nobody', email: 'v@example.test', name: 'SYNTHETIC v' } as never)).toEqual({ kind: 'not_provisioned' });
+  });
+
+  it('equal work: exactly one scrypt at the default cost for every local sign-in attempt, whoever it names', async () => {
+    const d = dir();
+    const spy = vi.spyOn(kdf, 'scrypt');
+    try {
+      for (const [name, secret] of [['adm', pw], ['adm', `${pw}x`], ['ghost', pw], ['off', pw], ['v', pw]] as const) {
+        spy.mockClear();
+        await authenticateLocal(d, name, secret);
+        expect(spy, name).toHaveBeenCalledTimes(1);
+        expect(spy.mock.calls[0][3], name).toMatchObject({ N: 2 ** 15, r: 8, p: 1 });
+      }
+    } finally { spy.mockRestore(); }
   });
 
   it('local credentials (bootstrap/recovery): right password of an active user only; one fixed null otherwise', async () => {

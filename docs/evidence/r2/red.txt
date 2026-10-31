@@ -1,9 +1,7 @@
-R2 PR A RED (tests committed before the implementation)
-$ npx vitest run src/engagement/auth
- FAIL  src/engagement/auth/authz.test.ts
- FAIL  src/engagement/auth/directory.test.ts
- FAIL  src/engagement/auth/password.test.ts
- Test Files  3 failed (3)
-      Tests  no tests
-Cause: ./password, ./directory, ./identity and ./authz do not exist yet (each suite fails to import).
-GREEN counts and the mutation results are in the PR body.
+R2 PR A RED (tests committed before each implementation)
+1. dc9e82e  npx vitest run src/engagement/auth -> Test Files 3 failed (3), no tests (modules missing).
+2. e8cbba6  authz.test.ts -> 6 failed | 4 passed (principal kind, resource identity, audit hook).
+3. review fixes  npx vitest run src/engagement -> Test Files 3 failed | 1 passed; Tests 7 failed | 192 passed:
+   default-cost-only hashes, ready dummy hash, equal scrypt work, throwing audit hook, team grants
+   limited to reports/connectors:read, clientSecretRef prefix and canonical issuer rules, one leading BOM.
+GREEN counts and mutation results are in the PR body.
