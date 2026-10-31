@@ -1,57 +1,90 @@
 // Engagement report PDF (1.0): renders the ONE engagement report model with the
-// existing @react-pdf stack and its built-in Helvetica (offline, no font fetch;
-// see src/executive/reportPdf.tsx). Server-only: imported only through the
+// existing @react-pdf stack and the bundled Noto fonts (pdfFonts.ts: local files,
+// no font fetch). Server-only: imported only through the
 // /api/v1/reports/engagement route.
 //
 // Every title, column and cell is the model's string, verbatim: amounts are the
 // exact decimal text, never formatted or rounded; N/A cells read 'N/A' with the
 // reason in the row's Note. One page group per section: the report title, the
 // section title and (for tables) the column header repeat on every page; wide
-// sections print one block per row so ids and hashes fit unbroken. Helvetica only has Windows-1252 glyphs, so any other
-// character is drawn as a visible '?' and the first page says how many cell
-// values that affected (the XLSX and the screen show the full text).
+// sections print one block per row so ids and hashes fit unbroken. Text in the
+// declared supported scripts (Latin, Greek, Cyrillic, Chinese, Japanese, Korean)
+// is drawn faithfully; any other character is never drawn as a missing-glyph box:
+// by default (PDF_UNSUPPORTED_TEXT_POLICY) the PDF is refused with counts and the
+// XLSX/JSON carry the full text; the 'substitute' policy draws a visible '?' and
+// says on the first page how many cell values that affected.
 import { Document, Page, StyleSheet, Text, View, renderToBuffer } from '@react-pdf/renderer';
 import type { Style } from '@react-pdf/types';
 import { BUILT_IN_THEMES } from '@/theme/themes';
 import { DATA_TEXT_CELLS, type EngagementReportModel, type ReportSection } from './engagementReportModel';
+import { deterministicPdf } from './pdfBytes';
+import { classifyPdfChar, loadPdfFonts, PDF_FONT_FAMILY, unsupportedKinds, type UnsupportedKind } from './pdfFonts';
 
 // The print surface uses the Light theme's executive colors (no hard-coded colors; src/theme/tokens.test.ts).
 const LIGHT = BUILT_IN_THEMES.light.colors;
 const INK = LIGHT['exec-text'];
 const MUTED = LIGHT['exec-muted'];
 const BORDER = LIGHT['exec-border'];
+const BOLD = 700;
 const styles = StyleSheet.create({
-  page: { paddingTop: 28, paddingBottom: 36, paddingHorizontal: 28, fontFamily: 'Helvetica', fontSize: 7, color: INK },
-  title: { fontFamily: 'Helvetica-Bold', fontSize: 12 },
-  section: { fontFamily: 'Helvetica-Bold', fontSize: 10, marginTop: 4, marginBottom: 6 },
+  page: { paddingTop: 28, paddingBottom: 36, paddingHorizontal: 28, fontFamily: PDF_FONT_FAMILY, fontSize: 7, color: INK },
+  title: { fontWeight: BOLD, fontSize: 12 },
+  section: { fontWeight: BOLD, fontSize: 10, marginTop: 4, marginBottom: 6 },
   row: { flexDirection: 'row', borderBottomWidth: 0.5, borderBottomColor: BORDER, paddingVertical: 3 },
   head: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: INK, paddingVertical: 3 },
-  th: { fontFamily: 'Helvetica-Bold', color: MUTED, paddingRight: 4 },
+  th: { fontWeight: BOLD, color: MUTED, paddingRight: 4 },
   td: { paddingRight: 4 },
   record: { borderBottomWidth: 0.5, borderBottomColor: BORDER, paddingVertical: 4 },
   note: { marginTop: 8, color: MUTED },
   footer: { position: 'absolute', bottom: 16, left: 28, right: 28, fontSize: 6, color: MUTED, textAlign: 'center' },
 });
 
-// Windows-1252 printable characters beyond Latin-1 that Helvetica (WinAnsiEncoding) can draw.
-const CP1252_EXTRA = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ');
-const drawable = (ch: string) => {
-  const c = ch.codePointAt(0) as number;
-  return ch === '\n' || ch === '\t' || (c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff) || CP1252_EXTRA.has(ch);
-};
-/** The model text as the built-in PDF font can draw it: any other character becomes a visible '?'. */
+/**
+ * What the PDF does when a value holds characters it cannot draw faithfully (pdfFonts.ts classifies them):
+ * 'refuse' (default) renders no PDF and the route answers 422 with the counts per kind, pointing to XLSX/JSON;
+ * 'substitute' draws each such character as a visible '?' and states the count on the first page.
+ */
+export type PdfUnsupportedPolicy = 'refuse' | 'substitute';
+export const PDF_UNSUPPORTED_TEXT_POLICY: PdfUnsupportedPolicy = 'refuse';
+
+/** The model text as the PDF draws it under the 'substitute' policy: any character the bundled fonts cannot draw faithfully becomes a visible '?'. */
 export function pdfGlyphText(text: string): string {
-  return [...text].map((ch) => (drawable(ch) ? ch : '?')).join('');
+  return [...text].map((ch) => (classifyPdfChar(ch) === 'ok' ? ch : '?')).join('');
 }
 export const PDF_GLYPH_NOTE = (n: number) =>
-  `PDF font: ${n} cell value${n === 1 ? '' : 's'} contain${n === 1 ? 's' : ''} characters outside the PDF's built-in font (Windows-1252), shown here as '?'. The XLSX and the screen show the full text.`;
+  `PDF font: ${n} cell value${n === 1 ? '' : 's'} contain${n === 1 ? 's' : ''} characters the PDF cannot render (outside its supported scripts), shown here as '?'. The XLSX and JSON show the full text.`;
 
-// Only an unbroken token longer than 40 characters (hostile or truncated data)
-// may break, every 4 characters; ordinary words, ids and hashes never do.
-const breakLong = (word: string) => {
+export type PdfUnsupportedCounts = { cells: number } & Record<UnsupportedKind, number>;
+/** Fixed text: counts only, never a cell value. */
+export const PDF_UNSUPPORTED_MESSAGE = (c: PdfUnsupportedCounts) =>
+  `${c.cells} cell value${c.cells === 1 ? '' : 's'} contain${c.cells === 1 ? 's' : ''} characters the PDF cannot render (complex scripts or combining marks: ${c.complex}; emoji: ${c.emoji}; other: ${c.other}); download XLSX or JSON for the full text.`;
+export class PdfUnsupportedTextError extends Error {
+  constructor(readonly counts: PdfUnsupportedCounts) {
+    super(PDF_UNSUPPORTED_MESSAGE(counts));
+    this.name = 'PdfUnsupportedTextError';
+  }
+}
+
+// Chinese, Japanese and Korean text may break between any two of its characters
+// (it has no spaces); otherwise only an unbroken token longer than 40 characters
+// (hostile or truncated data) may break, every 4 characters; ordinary words, ids
+// and hashes never do. react-pdf marks a break inside a token with a '-'.
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Bopomofo}\u3000-\u303f\uff00-\uffef]/u;
+const chunk = (cps: string[]) => (cps.length <= 40 ? [cps.join('')] : Array.from({ length: Math.ceil(cps.length / 4) }, (_, i) => cps.slice(i * 4, i * 4 + 4).join('')));
+export const breakLong = (word: string): string[] => {
   const cps = [...word]; // code points: a surrogate pair is never split
-  if (cps.length <= 40) return [word];
-  return Array.from({ length: Math.ceil(cps.length / 4) }, (_, i) => cps.slice(i * 4, i * 4 + 4).join(''));
+  if (!CJK.test(word)) return chunk(cps);
+  const parts: string[] = [];
+  let run: string[] = [];
+  for (const ch of cps) {
+    if (!CJK.test(ch)) {
+      run.push(ch);
+      continue;
+    }
+    parts.push(...(run.length ? chunk(run) : []), ch);
+    run = [];
+  }
+  return run.length ? [...parts, ...chunk(run)] : parts;
 };
 
 /** Narrow sections print as tables; wide ones as one block per row ("Column: value" lines), so ids and hashes fit unbroken. */
@@ -78,16 +111,33 @@ export const PDF_MODEL_TEXT_MAX_CHARS = 8_000;
 export const PDF_TRUNCATION_NOTE = (n: number) =>
   `PDF length limit: ${n} cell value${n === 1 ? ' was' : 's were'} truncated (at most ${PDF_CELL_MAX_CHARS} characters per cell, and ${PDF_CELL_FLOOR_CHARS} per cell once the document holds ${PDF_TOTAL_MAX_CHARS}); the XLSX and JSON carry the full text.`;
 
+/** Counts the text values (title, section titles, columns, cells) holding characters the PDF cannot draw, per kind; cells = values with any. */
+export function pdfPreflight(model: EngagementReportModel): PdfUnsupportedCounts {
+  const counts: PdfUnsupportedCounts = { cells: 0, complex: 0, emoji: 0, other: 0 };
+  const texts = [model.title, ...model.sections.flatMap((s) => [s.title, ...s.columns, ...s.rows.flat()])];
+  for (const t of texts) {
+    const kinds = unsupportedKinds(t);
+    if (kinds.size > 0) counts.cells += 1;
+    for (const k of kinds) counts[k] += 1;
+  }
+  return counts;
+}
+
 /**
- * The model's text as this PDF shows it: glyph fallback for every cell; the per-cell cap, the document budget and
- * the floor only for cells that carry imported or configured free text (DATA_TEXT_CELLS), in document order.
+ * The model's text as this PDF shows it: the unsupported-text policy for every value (refuse throws; substitute
+ * draws '?'); the per-cell cap, the document budget and the floor only for cells that carry imported or configured
+ * free text (DATA_TEXT_CELLS), in document order. Requires loadPdfFonts().
  */
-function pdfView(model: EngagementReportModel) {
+function pdfView(model: EngagementReportModel, policy: PdfUnsupportedPolicy) {
+  if (policy === 'refuse') {
+    const counts = pdfPreflight(model);
+    if (counts.cells > 0) throw new PdfUnsupportedTextError(counts);
+  }
   let budget = PDF_TOTAL_MAX_CHARS;
   let glyph = 0;
   let cut = 0;
   const show = (text: string, data = false) => {
-    const g = pdfGlyphText(text);
+    const g = policy === 'substitute' ? pdfGlyphText(text) : text;
     if (g !== text) glyph += 1;
     // Once the document budget is spent, every data cell still keeps its first PDF_CELL_FLOOR_CHARS.
     const limit = data ? Math.min(PDF_CELL_MAX_CHARS, Math.max(budget, PDF_CELL_FLOOR_CHARS)) : PDF_MODEL_TEXT_MAX_CHARS;
@@ -150,8 +200,8 @@ function SectionPages({ view, section, generatedAt, first }: { view: ReturnType<
   );
 }
 
-export function EngagementReportDocument({ model }: { model: EngagementReportModel }) {
-  const view = pdfView(model);
+export function EngagementReportDocument({ model, policy = PDF_UNSUPPORTED_TEXT_POLICY }: { model: EngagementReportModel; policy?: PdfUnsupportedPolicy }) {
+  const view = pdfView(model, policy);
   return (
     <Document title={view.title} author="Ratio" creator="Ratio" producer="Ratio" creationDate={new Date(model.generatedAt)} modificationDate={new Date(model.generatedAt)}>
       {view.sections.map((s, i) => (
@@ -161,6 +211,12 @@ export function EngagementReportDocument({ model }: { model: EngagementReportMod
   );
 }
 
-export function renderEngagementReportPdf(model: EngagementReportModel): Promise<Buffer> {
-  return renderToBuffer(<EngagementReportDocument model={model} />);
+/** Renders the PDF, or throws PdfUnsupportedTextError (refuse policy) before any layout work. Same model, same bytes. */
+export async function renderEngagementReportPdf(model: EngagementReportModel, policy: PdfUnsupportedPolicy = PDF_UNSUPPORTED_TEXT_POLICY): Promise<Buffer> {
+  await loadPdfFonts();
+  if (policy === 'refuse') {
+    const counts = pdfPreflight(model);
+    if (counts.cells > 0) throw new PdfUnsupportedTextError(counts);
+  }
+  return deterministicPdf(await renderToBuffer(<EngagementReportDocument model={model} policy={policy} />));
 }

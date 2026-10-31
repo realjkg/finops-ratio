@@ -17,8 +17,12 @@
 //   5. Never vacuous: .next, client files and the costs route must exist; the
 //      costs route's chunks must show reader code and pg must be traced for
 //      every reader route present.
+//   6. The bundled PDF fonts (assets/fonts, server-only) reach no client file:
+//      no file with a bundled font's sha256 and no font name marker; the CLI
+//      fails when it finds no bundled font to compare against.
 // Server source maps (.map) are neither executed nor served; their
 // sourcesContent is not judged. Exit 0 = clean, 1 = problems, printed.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -48,6 +52,9 @@ export const WORKER_ONLY = [
 ];
 // Database code of the read API (an env-var NAME is not code: the startup hook's pure config names it).
 export const READER_MARKERS = ['cost_facts_published', 'ratio.tenant_id', 'pg_auth_members'];
+/** The bundled PDF fonts' names (the CFF/TrueType name records and the server code that loads them). */
+export const FONT_MARKERS = ['NotoSans-Regular', 'NotoSans-Bold', 'NotoSansCJKsc'];
+
 export const CLIENT_FORBIDDEN = [
   'pg-protocol',
   'pg-connection-string',
@@ -60,6 +67,7 @@ export const CLIENT_FORBIDDEN = [
   'RATIO_READER_DATABASE_URL',
   ...READER_MARKERS,
   ...WORKER_ONLY,
+  ...FONT_MARKERS,
 ];
 
 const PG_TRACE = /(^|\/)node_modules\/pg(-[a-z-]+)?\//;
@@ -78,7 +86,16 @@ function walk(dir, acc = []) {
 
 const has = (text, markers) => markers.filter((m) => text.includes(m));
 
-export function checkNextBundle(nextDir) {
+/** sha256 of each bundled font file (assets/fonts/*.ttf|otf). */
+export function bundledFontHashes(fontDir) {
+  if (!fs.existsSync(fontDir)) return [];
+  return fs
+    .readdirSync(fontDir)
+    .filter((f) => /\.(ttf|otf)$/.test(f))
+    .map((f) => crypto.createHash('sha256').update(fs.readFileSync(path.join(fontDir, f))).digest('hex'));
+}
+
+export function checkNextBundle(nextDir, { fontHashes = [] } = {}) {
   const problems = [];
   const stats = { clientFiles: 0, serverFiles: 0 };
   if (!fs.existsSync(nextDir)) return { problems: [`no build at ${nextDir}: run npm run build first`], stats };
@@ -88,8 +105,11 @@ export function checkNextBundle(nextDir) {
   const client = walk(path.join(nextDir, 'static'));
   stats.clientFiles = client.length;
   if (client.length === 0) problems.push('no client files under .next/static (the scan would be blind)');
+  const fonts = new Set(fontHashes);
   for (const f of client) {
-    for (const m of has(fs.readFileSync(f, 'utf8'), CLIENT_FORBIDDEN)) problems.push(`client file ${rel(f)} contains ${m}`);
+    const bytes = fs.readFileSync(f);
+    for (const m of has(bytes.toString('utf8'), CLIENT_FORBIDDEN)) problems.push(`client file ${rel(f)} contains ${m}`);
+    if (fonts.has(crypto.createHash('sha256').update(bytes).digest('hex'))) problems.push(`client file ${rel(f)} is a bundled PDF font`);
   }
 
   // 2./3. server
@@ -161,7 +181,9 @@ export function checkNextBundle(nextDir) {
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const { problems, stats } = checkNextBundle(path.join(root, '.next'));
+  const fontHashes = bundledFontHashes(path.join(root, 'assets', 'fonts'));
+  const { problems, stats } = checkNextBundle(path.join(root, '.next'), { fontHashes });
+  if (fontHashes.length === 0) problems.push('no bundled fonts under assets/fonts (the font check would be blind)');
   process.stdout.write(`${JSON.stringify({ type: 'ratio.bundle-check', pass: problems.length === 0, stats, problems })}\n`);
   process.exit(problems.length ? 1 : 0);
 }

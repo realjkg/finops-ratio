@@ -35,7 +35,7 @@ function pdfObjects(pdf: Buffer): Map<number, { dict: string; stream: string | n
       continue;
     }
     const raw = /stream\r?\n([\s\S]*?)\r?\n?endstream/.exec(m[2])?.[1] ?? '';
-    let stream: string | null = null;
+    let stream: string | null;
     try {
       stream = /\/FlateDecode/.test(m[2].slice(0, at)) ? zlib.inflateSync(Buffer.from(raw, 'latin1')).toString('latin1') : raw;
     } catch {

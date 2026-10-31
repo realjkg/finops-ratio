@@ -244,6 +244,8 @@ describe('bundled fonts: declared scripts render faithfully and extract exactly'
     const xref = /xref\n0 (\d+)\n([\s\S]*?)trailer/.exec(raw)!;
     const offsets = [...xref[2].matchAll(/(\d{10}) 00000 n/g)].map((x) => Number(x[1]));
     expect(offsets.length).toBe(Number(xref[1]) - 1);
+    // Objects are written in object-number order (pdfkit's own order varies with stream compression timing).
+    expect(offsets).toEqual([...offsets].sort((x, y) => x - y));
     offsets.forEach((o, i) => expect(raw.slice(o, o + 12), `object ${i + 1}`).toMatch(new RegExp(`^${i + 1} 0 obj`)));
   }, 30_000);
 

@@ -9,7 +9,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { Buffer } from 'node:buffer';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { bundledFontHashes, checkNextBundle, CLIENT_FORBIDDEN, FONT_MARKERS, COSTS_ENTRY, ENGAGEMENT_REPORT_ENTRY, READER_ENTRIES, READER_MARKERS, REPORT_FACTS_ENTRY, WORKER_ONLY } from './check-next-bundle.mjs';
 
 const dirs = [];
@@ -194,7 +196,7 @@ describe('B6 bundled PDF fonts stay out of client files', () => {
   });
 
   it('bundledFontHashes reads the repository fonts (the CLI fails when none are found)', () => {
-    const repoFonts = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'assets', 'fonts');
+    const repoFonts = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'fonts');
     expect(bundledFontHashes(repoFonts)).toHaveLength(3);
     expect(bundledFontHashes(path.join(os.tmpdir(), 'no-such-ratio-fonts'))).toEqual([]);
   });

@@ -4,3 +4,6 @@ src/ingest/db/migrations/*.sql text eol=lf
 # Public FOCUS sample data (Slice 2b) is pinned by the SHA-256 of its exact
 # upstream bytes: never convert its line endings.
 fixtures/focus-1.0-sample/*.csv -text
+# Bundled PDF fonts and their license text are pinned by the SHA-256 of the exact
+# upstream bytes (assets/fonts/PROVENANCE.md): never convert them.
+assets/fonts/* -text
