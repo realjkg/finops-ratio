@@ -56,6 +56,13 @@ describe('SyntheticApiConnections', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect([localStorage.length, sessionStorage.length]).toEqual([0, 0]);
   });
+  it('explains a negative Billed minus Effective on the on-premise connection only', async () => {
+    mount();
+    await click(button('Import sample', card('Example Datacenter cost allocation API')));
+    await click(button('Import sample', card('Example Private Cloud usage API')));
+    expect(card('Example Datacenter cost allocation API').textContent).toMatch(/Billed − Effective is negative: owned hardware has no purchase in this period/);
+    expect(card('Example Private Cloud usage API').textContent).not.toMatch(/is negative/);
+  });
   it('totals each currency on its own line and removes an import', async () => {
     mount();
     for (const n of ['Example Cloud billing API', 'Example Private Cloud usage API', 'Example Datacenter cost allocation API']) await click(button('Import sample', card(n)));

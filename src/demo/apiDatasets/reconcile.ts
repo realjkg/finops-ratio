@@ -95,11 +95,10 @@ export function totalsByCurrency(list: Reconciled[]): { currency: string; rows: 
   return [...acc].sort((a, b) => a[0].localeCompare(b[0])).map(([currency, t]) => ({ currency, rows: t.rows, billed: formatUnits(t.billed), effective: formatUnits(t.effective), difference: formatUnits(t.billed - t.effective), connections: t.connections }));
 }
 
-/** `num / den` as a whole percent, rounded half up in integer arithmetic (basis points first, so 76.53% shows as 77%). */
+/** `num / den` as a whole percent, rounded half up in integer arithmetic (a single rounding, so 76.53% shows as 77% and 49.4951% as 49%). */
 export function percentRounded(num: bigint, den: bigint): number {
   if (den <= ZERO) return 0;
-  const bp = (num * BigInt(10000) + den / BigInt(2)) / den;
-  return Number((bp + BigInt(50)) / BigInt(100));
+  return Number((num * BigInt(200) + den) / (den * BigInt(2)));
 }
 
 export interface NaGroups {

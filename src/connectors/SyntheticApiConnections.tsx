@@ -16,11 +16,13 @@ function Reconciliation({ r }: { r: Reconciled }) {
         {r.matchesControl ? 'Reconciled: rows, billed and effective match the fixture’s control totals.' : 'Mismatch with the fixture’s control totals.'}
       </p>
       <MoneyTable
+        narrow
         label={`Reconciliation, ${r.name}`}
         caption={`Reconciliation in ${r.currency} for ${r.name}`}
         headers={['Connection', 'Rows', 'Billed', 'Effective', 'Billed − Effective']}
         rows={[[r.name, String(r.rows), formatMoney(r.billed, r.currency), formatMoney(r.effective, r.currency), formatMoney(r.difference, r.currency)]]}
       />
+      {r.difference.startsWith('-') && <p className="text-sub">Billed − Effective is negative: owned hardware has no purchase in this period, so its cost appears only as Effective (amortized).</p>}
       <details>
         <summary className="cursor-pointer text-sub">N/A columns ({r.naColumns.length}): empty means not provided, never 0</summary>
         <div className="mt-1 space-y-2 text-sub">

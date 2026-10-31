@@ -133,13 +133,22 @@ describe.each(ids)('%s: strict FOCUS 1.0', (id) => {
   });
   it('prices Usage and Purchase lines coherently: Contracted <= List, and a commitment discount only in EffectiveCost', () => {
     for (const [i, r] of rows.entries()) {
-      if (!['Usage', 'Purchase'].includes(r.ChargeCategory)) continue;
+      if (r.ChargeCategory === 'Tax') expect([r.ListCost, r.ContractedCost], `tax row ${i}`).toEqual([r.BilledCost, r.BilledCost]);
+      if (!['Usage', 'Purchase', 'Tax'].includes(r.ChargeCategory)) continue;
       expect(parseUnits(r.ContractedCost) <= parseUnits(r.ListCost), `row ${i}`).toBe(true);
       if (r.CommitmentDiscountStatus === 'Used') {
         expect(r.ContractedCost, `row ${i}`).toBe(r.ListCost); // the pre-commitment price
         expect(parseUnits(r.EffectiveCost) < parseUnits(r.ListCost), `row ${i}`).toBe(true);
         expect(r.ContractedUnitPrice, `row ${i}`).toBe(r.ListUnitPrice);
       }
+    }
+  });
+  it('gives every priced line a unit price consistent with its quantity, and one unit for priced and consumed', () => {
+    for (const [i, r] of rows.entries()) {
+      if (r.PricingQuantity === '') continue;
+      expect([r.ListUnitPrice !== '', r.ContractedUnitPrice !== ''], `row ${i}`).toEqual([true, true]);
+      if (r.PricingQuantity === '1') expect(r.ListUnitPrice, `row ${i}`).toBe(r.ListCost); // a single-quantity line: unit price = cost
+      if (r.ConsumedUnit !== '' && r.ChargeDescription.startsWith('Unused part')) expect(r.PricingUnit, `row ${i}`).toBe(r.ConsumedUnit);
     }
   });
   it('keeps BilledCost a true zero only where it is explained', () => {

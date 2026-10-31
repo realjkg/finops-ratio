@@ -85,6 +85,8 @@ describe('display helpers', () => {
     expect((unused * BigInt(10000)) / total).toBe(BigInt(7653));
     expect(percentRounded(unused, total)).toBe(77);
     expect([percentRounded(BigInt(1), BigInt(2)), percentRounded(BigInt(1), BigInt(3)), percentRounded(BigInt(2), BigInt(3)), percentRounded(BigInt(0), BigInt(5)), percentRounded(BigInt(1), BigInt(0))]).toEqual([50, 33, 67, 0, 0]);
+    // One half-up rounding, not two: 49.4951% is 49%, 49.5% is 50%.
+    expect([percentRounded(BigInt(494951), BigInt(1000000)), percentRounded(BigInt(495), BigInt(1000)), percentRounded(BigInt(494999), BigInt(1000000))]).toEqual([49, 50, 49]);
   });
   it('groups N/A columns by identical reason, whole-column cases apart from partial ones', () => {
     const g = groupNaColumns({ rows: 10, naColumns: [

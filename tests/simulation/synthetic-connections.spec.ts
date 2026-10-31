@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 // The three simulated API connections import in the browser: no request leaves the page, nothing
 // overflows a phone screen, and the per-currency totals reconcile.
-for (const width of [390, 1440]) {
+for (const width of [390, 768, 1024, 1280, 1440]) {
   test(`synthetic API connections import and reconcile client-side at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width < 600 ? 844 : 900 });
     await page.goto('/connectors');
@@ -28,6 +28,13 @@ for (const width of [390, 1440]) {
       .filter((el) => { const r = el.getBoundingClientRect(); return r.left < 0 || r.right > innerWidth + 0.5 || el.scrollWidth > el.clientWidth + 1; })
       .map((el) => el.textContent));
     expect(clipped).toEqual([]);
+    // Every money table or stacked list stays inside its card (the page scrolls inside <main>, so
+    // document.scrollWidth cannot see a spill).
+    const spill = await page.evaluate(() => [...document.querySelectorAll('article table, article dl, section[aria-labelledby="synthetic-connections-heading"] > div table, section[aria-labelledby="synthetic-connections-heading"] > div dl')]
+      .filter((el) => el.getClientRects().length > 0)
+      .map((el) => { const box = el.closest('article, .rounded-card')!.getBoundingClientRect(); const r = el.getBoundingClientRect(); return { text: (el.getAttribute('aria-label') ?? el.textContent ?? '').slice(0, 40), over: Math.round(r.right - box.right) }; })
+      .filter((x) => x.over > 0));
+    expect(spill).toEqual([]);
     // The N/A list is collapsed by default and, opened, stays compact.
     const details = page.getByRole('article', { name: 'Example Private Cloud usage API' }).locator('details');
     await expect(details).not.toHaveAttribute('open', '');

@@ -4,11 +4,14 @@
 const th = 'px-2 py-1 text-left text-xs font-medium text-sub';
 const td = 'whitespace-nowrap px-2 py-1 font-mono text-xs tabular-nums';
 
-export function MoneyTable({ label, caption, headers, rows }: { label: string; caption: string; headers: string[]; rows: string[][] }) {
+/** `narrow`: the table sits in a card that is narrow at desktop widths (a 3-up grid), so stay stacked from lg up. */
+export function MoneyTable({ label, caption, headers, rows, narrow = false }: { label: string; caption: string; headers: string[]; rows: string[][]; narrow?: boolean }) {
+  const stackedOnly = narrow ? 'sm:hidden lg:block' : 'sm:hidden';
+  const tableOnly = narrow ? 'hidden sm:table lg:hidden' : 'hidden sm:table';
   return (
     <div>
-      <p className="pb-1 text-xs text-sub sm:hidden">{caption}</p>
-      <div className="space-y-2 sm:hidden">
+      <p className={`pb-1 text-xs text-sub ${stackedOnly}`}>{caption}</p>
+      <div className={`space-y-2 ${stackedOnly}`}>
         {rows.map((r) => (
           <dl key={r[0]} className="rounded border border-edge bg-deep p-2 text-xs">
             <dt className="sr-only">{headers[0]}</dt>
@@ -22,7 +25,7 @@ export function MoneyTable({ label, caption, headers, rows }: { label: string; c
           </dl>
         ))}
       </div>
-      <table className="hidden w-full sm:table" aria-label={label}>
+      <table className={`${tableOnly} w-full`} aria-label={label}>
         <caption className="pb-1 text-left text-xs text-sub">{caption}</caption>
         <thead><tr>{headers.map((h) => <th key={h} scope="col" className={th}>{h}</th>)}</tr></thead>
         <tbody>
