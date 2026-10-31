@@ -134,14 +134,16 @@ function monthsOf(range: { from: string; to: string }): string[] {
   return out;
 }
 
-/** A range-less fetch reads only the periods the export has; months between the first and last that have none are named. */
+/** A range-less fetch reads only the periods the export has; months between the first and last that have none are named. Never throws, no span cap. */
 function gapWarning(present: string[]): string[] {
-  if (present.length < 2) return [];
-  const have = new Set(present);
-  const gaps = monthsOf({ from: present[0].slice(0, 7), to: present[present.length - 1].slice(0, 7) }).filter((m) => !have.has(m)).map((m) => m.slice(0, 7));
-  if (!gaps.length) return [];
-  const shown = gaps.slice(0, 24).join(', ');
-  return [`no delivery exists for ${gaps.length} billing month(s) inside the delivered span: ${shown}${gaps.length > 24 ? `, and ${gaps.length - 24} more` : ''}; this fetch had no --from/--to, so they were not refused (give a range to get PERIOD_NOT_DELIVERED)`];
+  const idx = (m: string) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1;
+  const shown: string[] = [];
+  let total = 0;
+  for (let i = 1; i < present.length; i++) {
+    for (let x = idx(present[i - 1]) + 1; x < idx(present[i]); x++, total++) if (shown.length < 24) shown.push(`${Math.floor(x / 12)}-${String((x % 12) + 1).padStart(2, '0')}`);
+  }
+  if (!total) return [];
+  return [`no delivery exists for ${total} billing month(s) inside the delivered span: ${shown.join(', ')}${total > 24 ? `, and ${total - 24} more` : ''}; this fetch had no --from/--to, so they were not refused (give a range to get PERIOD_NOT_DELIVERED)`];
 }
 
 export function createAwsFocusRetriever(ctx: Parameters<RetrieverFactory>[0], deps: { fetch?: typeof fetch; now?: () => Date } = {}): AwsFocusRetriever {
@@ -202,6 +204,10 @@ export function createAwsFocusRetriever(ctx: Parameters<RetrieverFactory>[0], de
       const shape = parseManifest(bytes, { location: loc, billingPeriod: period, listing: structural });
       if (!shape.ok) {
         invalid.push({ at: m.at, message: shape.message });
+        continue;
+      }
+      if (!shape.artifacts.length) {
+        invalid.push({ at: m.at, message: 'manifest lists no data files' });
         continue;
       }
       const parsed = parseManifest(bytes, { location: loc, billingPeriod: period, listing });

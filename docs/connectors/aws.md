@@ -40,7 +40,7 @@ row (M1b) and is refused here (`TABLE_UNSUPPORTED`).
 6. A range-less fetch (no `--from/--to`) reads only the periods the export has. If a month between
    the first and last delivered month has no folder at all, the fetch still succeeds and the result
    carries a `warnings` entry listing those gap months. Give `--from/--to` to get a
-   `PERIOD_NOT_DELIVERED` refusal for them instead.
+   `PERIOD_NOT_DELIVERED` refusal for them instead. The warning never fails a fetch, whatever the span of delivered months (the 36-month cap applies only to an explicit `--from/--to`); it names up to 24 gap months and counts the rest.
 
 ## Refusals (never a silent empty period)
 
@@ -67,7 +67,7 @@ proved the rule. Turning it on is an owner decision after the live verification 
 Under `latest-complete`, a newer manifest whose listed files have **not landed yet** is skipped and
 the newest complete one is used. A newer manifest that is **invalid** (malformed JSON, a file in
 another bucket or outside the export's data folder, a `..` path, a wrong billing period, an
-unsupported scheme) refuses the period with `MANIFEST_INVALID`; the older manifest is never
+unsupported scheme, or a manifest that lists no data files) refuses the period with `MANIFEST_INVALID`; the older manifest is never
 published in its place. An invalid manifest with the same LastModified as the newest complete one
 cannot be ordered and also refuses. An invalid manifest that is strictly older than the chosen one
 is ignored.

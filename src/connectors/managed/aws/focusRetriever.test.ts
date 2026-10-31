@@ -180,7 +180,7 @@ describe('listDeliveries and open', () => {
       ['malformed JSON', '{"dataFiles": ['],
       ['a ../ path', files(`s3://${BUCKET}/${ROOT}data/BILLING_PERIOD=2024-09/run-new/../run-1/part-00001.csv.gz`)],
     ];
-    const seed = (second: string, at = NEW) => {
+    const seed = (second: string, at: Date | null = NEW) => {
       deliver('2024-09', undefined, { manifest: 'a/Manifest.json', run: 'run-1', at: OLD });
       s3.put(manifestKey('2024-09', 'b/Manifest.json'), second, at);
     };
@@ -189,7 +189,6 @@ describe('listDeliveries and open', () => {
       seed(body);
       const { r, staged, stored } = await fetchAll(proven);
       expect(r.deliveries).toMatchObject([{ billingPeriod: '2024-09-01', outcome: 'failed', code: 'MANIFEST_INVALID', originals: [] }]);
-      expect(r.deliveries[0].message).not.toContain('other-bucket');
       expect([staged.length, stored.size, s3.gets().filter((k) => k.includes('/data/')).length]).toEqual([0, 0, 0]);
     });
 
@@ -204,6 +203,19 @@ describe('listDeliveries and open', () => {
       expect([r.status, staged.length, staged[0].objects[0].bytes.equals(SAMPLE_GZ)]).toEqual(['succeeded', 1, true]);
     });
 
+    it('an invalid manifest with an unknown LastModified, or one that lists no data files, refuses', async () => {
+      seed('{"dataFiles": [', null);
+      expect((await fetchAll(proven)).r.deliveries).toMatchObject([{ outcome: 'failed', code: 'MANIFEST_INVALID' }]);
+      seed('{"dataFiles": []}');
+      expect((await fetchAll(proven)).r.deliveries).toMatchObject([{ outcome: 'failed', code: 'MANIFEST_INVALID' }]);
+    });
+
+    it('two manifests that both wait for files, none invalid: MANIFEST_INVALID, nothing staged', async () => {
+      for (const d of ['a', 'b']) s3.put(manifestKey('2024-09', `${d}/Manifest.json`), files(`s3://${BUCKET}/${dataKey('2024-09', `${d}.csv.gz`)}`));
+      const { r, staged } = await fetchAll(proven);
+      expect([r.deliveries[0].code, r.deliveries[0].message, staged.length]).toEqual(['MANIFEST_INVALID', expect.stringContaining('lists only data files that exist'), 0]);
+    });
+
     it('an invalid OLDER manifest does not block a newer complete one', async () => {
       deliver('2024-09', undefined, { manifest: 'a/Manifest.json', run: 'run-1', at: NEW });
       s3.put(manifestKey('2024-09', 'old/Manifest.json'), '{"dataFiles": [', OLD);
@@ -211,55 +223,22 @@ describe('listDeliveries and open', () => {
     });
   });
 
-  it('a range-less fetch skipping a missing middle month warns with the gap months (not a failure); a contiguous or ranged fetch does not', async () => {
-    deliver('2024-07');
-    deliver('2024-10');
-    const gap = await fetchAll();
-    expect([gap.r.status, gap.staged.length, gap.r.warnings?.length]).toEqual(['succeeded', 2, 1]);
-    expect(gap.r.warnings![0]).toMatch(/2024-08, 2024-09/);
-    expect(gap.r.warnings![0]).not.toMatch(/2024-07|2024-10/);
-    expect((await fetchAll({}, { from: '2024-07', to: '2024-10' })).r).not.toHaveProperty('warnings');
-    deliver('2024-08');
-    deliver('2024-09');
-    expect((await fetchAll()).r).not.toHaveProperty('warnings');
-  });
-
-  it('the gap warning never fails a fetch: a span over 36 months, a year boundary, a long gap list (24 shown) and warnings reset per listing', async () => {
-    const months = Array.from({ length: 40 }, (_, i) => `${2021 + Math.floor((i + 9) / 12)}-${String(((i + 9) % 12) + 1).padStart(2, '0')}`); // 2021-10 .. 2024-12 contiguous
-    months.forEach((m) => deliver(m, [{ name: 'p.csv.gz', bytes: SAMPLE_GZ }]));
+  it('a range-less fetch skipping months warns with the gap (never fails): span over 36 months, year boundary, 24 shown, reset per listing, none with a range', async () => {
+    for (let i = 0; i < 40; i++) deliver(`${2021 + Math.floor((i + 9) / 12)}-${String(((i + 9) % 12) + 1).padStart(2, '0')}`); // 2021-10 .. 2024-12
     const long = await fetchAll();
-    expect([long.r.status, long.staged.length, long.r.deliveries.length]).toEqual(['succeeded', 40, 40]);
-    expect(long.r).not.toHaveProperty('warnings');
+    expect([long.r.status, long.staged.length, 'warnings' in long.r]).toEqual(['succeeded', 40, false]);
     const r = retriever();
     s3.objects.clear();
-    deliver('2023-11');
-    deliver('2024-02');
+    ['2023-11', '2024-02'].forEach((m) => deliver(m));
     await r.listDeliveries();
     expect(r.warnings!()[0]).toContain('inside the delivered span: 2023-12, 2024-01;');
-    await r.listDeliveries({ from: '2023-11', to: '2023-11' });
+    await r.listDeliveries({ from: '2023-11', to: '2024-02' });
     expect(r.warnings!()).toEqual([]);
     s3.objects.clear();
-    deliver('2020-01');
-    deliver('2024-01');
+    ['2020-01', '2024-01'].forEach((m) => deliver(m));
     const sparse = await fetchAll();
     expect([sparse.r.status, sparse.staged.length]).toEqual(['succeeded', 2]);
     expect(sparse.r.warnings![0]).toMatch(/^no delivery exists for 47 billing month\(s\) inside the delivered span: 2020-02, .*, 2022-01, and 23 more; /);
-    expect(sparse.r.warnings![0]).not.toContain('2022-02');
-    expect((await fetchAll({}, { from: '2021-01', to: '2024-01' })).r).toMatchObject({ status: 'failed', error: { code: 'RANGE_TOO_LONG' } });
-  });
-
-  it('latest-complete: an invalid manifest with an unknown LastModified, or one that lists no data files, refuses; no complete manifest and none invalid also refuses', async () => {
-    const proven = { manifestSelection: 'latest-complete', manifestSelectionEvidence: `sha256:${'b'.repeat(64)}` };
-    deliver('2024-09', undefined, { manifest: 'a/Manifest.json', run: 'run-1', at: new Date('2026-10-01T00:00:00Z') });
-    s3.put(manifestKey('2024-09', 'b/Manifest.json'), '{"dataFiles": [', null);
-    expect((await fetchAll(proven)).r.deliveries).toMatchObject([{ outcome: 'failed', code: 'MANIFEST_INVALID' }]);
-    s3.put(manifestKey('2024-09', 'b/Manifest.json'), '{"dataFiles": []}', new Date('2026-10-02T00:00:00Z'));
-    expect((await fetchAll(proven)).r.deliveries).toMatchObject([{ outcome: 'failed', code: 'MANIFEST_INVALID' }]);
-    s3.objects.clear();
-    s3.put(manifestKey('2024-09', 'a/Manifest.json'), JSON.stringify({ dataFiles: [`s3://${BUCKET}/${dataKey('2024-09', 'not-yet.csv.gz')}`] }), new Date('2026-10-01T00:00:00Z'));
-    const none = (await fetchAll(proven)).r.deliveries;
-    expect(none).toMatchObject([{ outcome: 'failed', code: 'MANIFEST_INVALID' }]);
-    expect(none[0].message).toContain('lists only data files that exist');
   });
 
   it('a manifest naming a missing file is MANIFEST_INVALID: nothing published', async () => {

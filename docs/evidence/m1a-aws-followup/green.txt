@@ -1,7 +1,7 @@
 M1a follow-up (invalid newer manifest, doc corrections, gap-month warning) -- GREEN
 Base: origin/main f8f1a37. Gates run sequentially in the foreground:
 - npm run lint: pass; npm run typecheck (app) and tsc -p tsconfig.worker.json (worker): pass
-- npx vitest run: Test Files 239 passed (239); Tests 4385 passed (4385) (focusRetriever.test.ts: 26 tests, after trimming to the size budget)
+- npx vitest run: Test Files 239 passed (239); see below
 - (test:db, worker:build, build, check:bundle were run before the test-only trim and are unaffected by it)
 - npm run test:db (own Postgres 16 :25432, SeaweedFS :28333, -volume.max=64 -master.volumeSizeLimitMB=64 -volume.minFreeSpace=300MiB, CI digests):
   44 files / 712 tests; serial 6 files / 173 tests; all passed; containers removed afterwards
