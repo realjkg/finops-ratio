@@ -447,6 +447,26 @@ operator`). There is no password page today: local credentials work only through
 same-origin `Origin` header), meant for recovery and automation; today people use the browser through an OIDC
 connection, so configure one and bind each person.
 
+Every changing command takes `--by` (works today; `U="$C --profile jobs run --rm -T users"`):
+
+```sh
+$U list
+$U add --id <id> --name <name> --role <viewer|analyst|connector_manager|tenant_admin> --by <admin id|operator> [--password-stdin]
+$U set-role --id <id> --role <role> --by <admin id|operator> [--force]
+printf '%s\n' "$PW" | $U set-password --id <id> --password-stdin --by <admin id|operator>
+$U suspend --id <id> --by <admin id|operator> [--force]
+$U unsuspend --id <id> --by <admin id|operator>
+$U revoke-sessions --id <id> --by <admin id|operator>
+$U bind --id <id> --connection <connection id> --subject <IdP subject> --by <admin id|operator>
+$U unbind --connection <connection id> --subject <IdP subject> --by <admin id|operator>
+```
+
+If the users directory is owned by root or another uid than 1000, or its mode lets the job not write it, the app's
+sign-in routes answer 503 and the `users` job fails with `users.lock_failed` or `users.read_failed` (`EACCES`): fix it
+with `chown 1000:1000 <dir>` and `chmod 0700 <dir>`. In this release pipeline the `users` job has not been run end to end
+through `compose run` (Docker was not run); the compiled CLI is exercised today by a compile-and-run smoke test under a
+read-only parent directory.
+
 Today the OIDC routes (`/api/auth/oidc/start?connection=<id>` and `/api/auth/oidc/callback`) work for an enabled
 `identityConnections` entry: register `<RATIO_ENGAGEMENT_ORIGIN>/api/auth/oidc/callback` exactly at the IdP, put the client
 secret in the environment variable named by `clientSecretRef`, and bind each person explicitly (`bindings`); an
