@@ -288,6 +288,13 @@ describe('A3 hardening: client identity behind the proxy, throttle table, scrypt
     for (const k of ['u:a', 'u:b', 'u:c']) for (let i = 0; i < 5; i += 1) full.fail([k], T0);
     expect(full.blocked(['u:new'], T0 + 1)).toBeGreaterThan(0); // nothing evictable: refuse
     expect(full.blocked(['u:new'], T0 + 15 * 60_000)).toBe(0); // windows ended: evictable again
+    const pref = new LoginThrottle(2); // an ended window is freed before a live under-limit key, even an older one
+    pref.fail(['u:a'], T0);
+    pref.fail(['u:b'], T0 + 1);
+    pref.fail(['u:a'], T0 + 16 * 60_000); // a restarts its window (live); b's window has ended
+    pref.fail(['u:c'], T0 + 16 * 60_000 + 1);
+    for (let i = 0; i < 4; i += 1) pref.fail(['u:a'], T0 + 16 * 60_000 + 2);
+    expect(pref.blocked(['u:a'], T0 + 16 * 60_000 + 3)).toBeGreaterThan(0);
   });
 
   it(`at most ${MAX_CONCURRENT_LOGINS} sign-ins do scrypt work at once; the next is 503 with Retry-After and an audit event`, async () => {

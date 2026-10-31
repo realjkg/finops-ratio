@@ -43,6 +43,10 @@ describe('EngagementSessionStore', () => {
     for (const f of [file, `${file}-wal`, `${file}-shm`]) expect(fs.statSync(f).mode & 0o777, f).toBe(0o600);
     expect(fs.statSync(wide).mode & 0o777).toBe(0o700);
     s.close();
+    for (const f of [file, `${file}-wal`, `${file}-shm`]) if (fs.existsSync(f)) fs.chmodSync(f, 0o644); // files left by an older build
+    const again = new EngagementSessionStore(file);
+    for (const f of [file, `${file}-wal`, `${file}-shm`]) if (fs.existsSync(f)) expect(fs.statSync(f).mode & 0o777, `reopened ${f}`).toBe(0o600);
+    again.close();
   });
 
   it('absolute lifetime 8 h and idle timeout 30 min; activity slides only the idle window', () => {
