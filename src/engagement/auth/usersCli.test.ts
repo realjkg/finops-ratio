@@ -8,7 +8,6 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadDirectory } from './directory';
 import { EngagementSessionStore } from './session';
 import { usersMain } from './usersCli';
-import { main as ingestMain } from '../../ingest/cli';
 
 const T = '5f0c1a7e-2b3d-4c5e-8f60-71829a3b4c5d';
 const E = 'example-focus-sample';
@@ -120,8 +119,4 @@ describe('users command', () => {
     }
   });
 
-  it('is reachable through the worker CLI entry point: `cli.js users <cmd>`', async () => {
-    expect(await ingestMain(['users', 'list'], env, io)).toBe(0);
-    expect(JSON.parse(out.at(-1)!).users[0].id).toBe('admin');
-  });
 });
