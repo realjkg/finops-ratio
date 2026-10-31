@@ -219,4 +219,39 @@ describe('selected workload card scrolling', () => {
     act(() => useStore.setState({ selectedId: lastId }));
     expect(list.scrollTop).toBeGreaterThan(0);
   });
+
+  // A press that never becomes a click (drag-out, touch scroll) must not leave the
+  // skip flag armed: the next keyboard or cross-page selection still scrolls into view.
+  const tick = () => act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+  const setup = () => {
+    const ws = useStore.getState().workloads;
+    act(() => useStore.setState({ selectedId: ws[0].id, filters: { team: 'all', provider: 'all', environment: 'all' } }));
+    act(() => root.render(<WorkloadList />));
+    const list = cards()[0].closest('div.overflow-x-auto') as HTMLElement;
+    layout(list);
+    const last = cards().at(-1)!;
+    const lastId = useStore.getState().workloads.find((w) => last.textContent?.includes(w.name))!.id;
+    return { ws, list, last, lastId };
+  };
+  for (const end of ['pointerup', 'pointercancel'] as const) {
+    it(`still scrolls a later selection after a press that ends in ${end} without a click`, async () => {
+      const { list, last, lastId } = setup();
+      act(() => { last.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+      act(() => { last.dispatchEvent(new Event(end, { bubbles: true })); });
+      await tick();
+      act(() => useStore.setState({ selectedId: lastId }));
+      expect(list.scrollTop).toBeGreaterThan(0);
+    });
+  }
+  it('does not scroll a normal press, release and click, even when the release is handled first', async () => {
+    const { list, last, lastId } = setup();
+    act(() => {
+      last.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      last.dispatchEvent(new Event('pointerup', { bubbles: true }));
+      last.click();
+    });
+    await tick();
+    expect(useStore.getState().selectedId).toBe(lastId);
+    expect(list.scrollTop).toBe(0);
+  });
 });

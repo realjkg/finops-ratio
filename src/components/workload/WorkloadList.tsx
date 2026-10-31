@@ -19,6 +19,9 @@ export function WorkloadList() {
   const listRef = useRef<HTMLDivElement>(null);
   // A pointer click already sees its card: scrolling would move the list under the pointer.
   const pointerPick = useRef(false);
+  // The click (if any) follows the release; a cancel or a release with no click must not leave the flag armed.
+  const clearPick = () => { pointerPick.current = false; };
+  const clearPickAfterClick = () => { setTimeout(clearPick, 0); };
   useEffect(() => {
     if (pointerPick.current) {
       pointerPick.current = false;
@@ -50,7 +53,7 @@ export function WorkloadList() {
         <span className="font-mono text-[10px] text-dim">{visible.length} shown</span>
       </div>
       <Filters />
-      <div ref={listRef} onPointerDown={() => { pointerPick.current = true; }} onClick={() => setTimeout(() => { pointerPick.current = false; }, 0)} className="flex gap-2 overflow-x-auto px-3 py-3 md:block md:flex-1 md:space-y-2 md:overflow-y-auto">
+      <div ref={listRef} onPointerDown={() => { pointerPick.current = true; }} onPointerUp={clearPickAfterClick} onPointerCancel={clearPick} onClick={clearPickAfterClick} className="flex gap-2 overflow-x-auto px-3 py-3 md:block md:flex-1 md:space-y-2 md:overflow-y-auto">
         {visible.length === 0 ? (
           <p className="px-1 pt-6 text-center text-xs text-dim">
             No workloads match these filters.

@@ -114,7 +114,7 @@ export function SnapshotButton() {
                 role="menuitem"
                 onClick={() => handleSelect(opt.format)}
                 disabled={state === 'working'}
-                className="block w-full px-4 py-2.5 text-left font-body text-sm text-exec-text transition-colors hover:bg-exec-bg disabled:opacity-60"
+                className="block w-full px-4 py-2.5 text-left font-body text-sm text-exec-text transition-colors hover:bg-exec-hover disabled:opacity-60"
               >
                 {opt.label}
               </button>
