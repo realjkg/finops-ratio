@@ -1,0 +1,12 @@
+$ npx vitest run src/components/SegmentedControl.test.tsx
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+$ npx vitest run   (full suite)
+ Test Files  240 passed (240)
+      Tests  4393 passed (4393)
+lint 0 errors; typecheck (app) 0; typecheck (worker, tsconfig.worker.json) 0
+
+Mutations (each reverted after the run):
+- rovingKeyDown clamps instead of wrapping      -> 1 failed (arrow keys wrap)
+- aria-checked always false                     -> 3 failed
+- DetailPanel tabs lose onKeyDown               -> 1 failed (tab arrow navigation)

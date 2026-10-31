@@ -121,6 +121,10 @@ body {
     outline: 2px solid rgb(var(--c-focus)) !important;
     outline-offset: 2px !important;
   }
+  /* Rows and tabs inside scroll containers: draw the ring inside so it is never clipped. */
+  .focus-inset:focus-visible {
+    outline-offset: -2px !important;
+  }
 }
 
 @layer components {

@@ -313,8 +313,8 @@ function FindingRow({
     <button
       type="button"
       onClick={onSelect}
-      className={`w-full border-b border-edge px-4 py-3 text-left transition-colors ${
-        isSelected ? 'bg-raised' : 'hover:bg-raised/40'
+      className={`focus-inset w-full border-b border-edge px-4 py-3 text-left transition-colors ${
+        isSelected ? 'bg-raised shadow-[inset_3px_0_0_rgb(var(--c-gate))]' : 'hover:bg-raised/60'
       }`}
       aria-pressed={isSelected}
       aria-label={`Finding ${rank}: ${finding.workloadName}`}

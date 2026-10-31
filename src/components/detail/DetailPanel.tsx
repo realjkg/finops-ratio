@@ -12,6 +12,7 @@ import { GovernanceTab } from './GovernanceTab';
 import { DemandShapingTab } from './DemandShapingTab';
 import { UnitCostsTab } from './UnitCostsTab';
 import { AlertHistoryTab } from './AlertHistoryTab';
+import { rovingKeyDown } from '@/components/SegmentedControl';
 
 const TABS: Array<{ id: DetailTab; label: string }> = [
   { id: 'budget', label: 'Budget Profile' },
@@ -22,6 +23,7 @@ const TABS: Array<{ id: DetailTab; label: string }> = [
   { id: 'alerts', label: 'Alert History' },
   { id: 'outcomes', label: 'Outcomes' },
 ];
+const TAB_IDS = TABS.map((t) => t.id);
 
 export function DetailPanel() {
   const simulation = useStore(s => s.simulation);
@@ -68,26 +70,31 @@ export function DetailPanel() {
           </div>
         </div>
 
-        <nav aria-label="Workload detail sections" className="-mx-4 mt-4 flex gap-1 overflow-x-auto px-4 sm:-mx-6 sm:px-6 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
+        <div role="tablist" aria-label="Workload detail sections" className="-mx-4 mt-4 flex gap-1 overflow-x-auto px-4 sm:-mx-6 sm:px-6 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
           {TABS.map((tab) => (
             <button
               key={tab.id}
+              id={`detail-tab-${tab.id}`}
               type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              aria-controls="detail-tabpanel"
+              tabIndex={activeTab === tab.id ? 0 : -1}
               onClick={() => setTab(tab.id)}
-              aria-pressed={activeTab === tab.id}
-              className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+              onKeyDown={(e) => rovingKeyDown(e, TAB_IDS, activeTab, setTab)}
+              className={`focus-inset shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-xs transition-colors ${
                 activeTab === tab.id
-                  ? 'border-unit text-txt'
-                  : 'border-transparent text-dim hover:text-sub'
+                  ? 'border-unit font-semibold text-txt'
+                  : 'border-transparent font-medium text-sub hover:border-edge hover:text-txt'
               }`}
             >
               {tab.label}
             </button>
           ))}
-        </nav>
+        </div>
       </div>
 
-      <div className="flex-1 space-y-5 px-4 py-4 sm:px-6 sm:py-5 md:overflow-y-auto">
+      <div id="detail-tabpanel" role="tabpanel" aria-labelledby={`detail-tab-${activeTab}`} className="flex-1 space-y-5 px-4 py-4 sm:px-6 sm:py-5 md:overflow-y-auto">
         {simulation && <p className="text-xs text-sub">These operating metrics use seeded value assumptions. <button className="text-unit underline" onClick={() => setTab('outcomes')}>Review measured outcomes and full cost</button></p>}
         <KpiCards workload={workload} />
         {activeTab === 'budget' && (

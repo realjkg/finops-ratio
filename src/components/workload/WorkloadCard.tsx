@@ -44,9 +44,10 @@ export function WorkloadCard({
     <button
       type="button"
       onClick={() => onSelect(workload.id)}
-      className={`w-full rounded-card border px-3 py-2.5 text-left transition-colors ${
+      aria-pressed={selected}
+      className={`focus-inset w-full rounded-card border px-3 py-2.5 text-left transition-colors ${
         selected
-          ? 'border-unit bg-raised'
+          ? 'border-unit bg-raised shadow-[inset_3px_0_0_rgb(var(--c-unit))]'
           : 'border-edge bg-slab hover:border-sub hover:bg-raised'
       }`}
     >

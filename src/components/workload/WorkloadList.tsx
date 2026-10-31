@@ -1,7 +1,7 @@
 // Left panel — workload list (spec §3.3). Filtered, then sorted by value ratio
 // ascending so the worst ratios surface first for action.
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useStore } from '@/store/useStore';
 import { landedWorkloads } from '@/connectors/ingestLanding';
 import { Filters } from './Filters';
@@ -15,6 +15,16 @@ export function WorkloadList() {
   const select = useStore((s) => s.select);
 
   const ingestRuns = useStore((s) => s.ingestRuns);
+  // Keep the selected card in view in the scrolling list (desktop); the page itself never scrolls.
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const list = listRef.current;
+    const card = list?.querySelector('[aria-pressed="true"]');
+    if (!list || !card || list.scrollHeight <= list.clientHeight) return;
+    const l = list.getBoundingClientRect();
+    const c = card.getBoundingClientRect();
+    if (c.top < l.top || c.bottom > l.bottom) list.scrollTop += c.top - l.top - 8;
+  }, [selectedId]);
 
   const visible = useMemo(() => {
     return workloads
@@ -34,7 +44,7 @@ export function WorkloadList() {
         <span className="font-mono text-[10px] text-dim">{visible.length} shown</span>
       </div>
       <Filters />
-      <div className="flex gap-2 overflow-x-auto px-3 py-3 md:block md:flex-1 md:space-y-2 md:overflow-y-auto">
+      <div ref={listRef} className="flex gap-2 overflow-x-auto px-3 py-3 md:block md:flex-1 md:space-y-2 md:overflow-y-auto">
         {visible.length === 0 ? (
           <p className="px-1 pt-6 text-center text-xs text-dim">
             No workloads match these filters.

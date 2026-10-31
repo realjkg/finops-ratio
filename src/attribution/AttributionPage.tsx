@@ -16,6 +16,12 @@ import { WORKLOADS } from '@/data/workloads';
 import { createAttributionClient } from './index';
 import { LiveAccrualBoard } from './LiveAccrualBoard';
 import type { AttributionDimension, AttributionReport } from './index';
+import { CLIENT_MODES, SegmentedControl, type SegmentOption } from '@/components/SegmentedControl';
+
+const DIMENSIONS: readonly SegmentOption<AttributionDimension>[] = [
+  { value: 'team', label: 'By team', tone: 'unit' },
+  { value: 'user', label: 'By user', tone: 'unit' },
+];
 
 type LoadState =
   | { status: 'idle' }
@@ -102,48 +108,28 @@ export function AttributionPage() {
         {/* Controls */}
         <div className="mb-6 rounded-card border border-edge bg-slab p-6">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-sub">Dimension</p>
-          <div className="mb-5 flex gap-2">
-            {(['team', 'user'] as const).map((d) => (
-              <button
-                key={d}
-                onClick={() => {
-                  setDimension(d);
-                  setLoadState({ status: 'idle' });
-                }}
-                className={[
-                  'rounded-card border px-4 py-1.5 text-sm font-medium capitalize transition-colors',
-                  dimension === d
-                    ? 'border-unit bg-unit/10 text-unit'
-                    : 'border-edge bg-raised text-sub hover:text-txt',
-                ].join(' ')}
-              >
-                {d === 'team' ? 'By team' : 'By user'}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            label="Dimension"
+            className="mb-5"
+            options={DIMENSIONS}
+            value={dimension}
+            onChange={(d) => {
+              setDimension(d);
+              setLoadState({ status: 'idle' });
+            }}
+          />
 
           <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-sub">Client mode</p>
-          <div className="mb-5 flex gap-2">
-            {(['mock', 'live'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => {
-                  setClientMode(m);
-                  setLoadState({ status: 'idle' });
-                }}
-                className={[
-                  'rounded-card border px-4 py-1.5 text-sm font-medium capitalize transition-colors',
-                  clientMode === m
-                    ? m === 'mock'
-                      ? 'border-shape bg-shape/10 text-shape'
-                      : 'border-value bg-value/10 text-value'
-                    : 'border-edge bg-raised text-sub hover:text-txt',
-                ].join(' ')}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            label="Client mode"
+            className="mb-5"
+            options={CLIENT_MODES}
+            value={clientMode}
+            onChange={(m) => {
+              setClientMode(m);
+              setLoadState({ status: 'idle' });
+            }}
+          />
 
           <button
             onClick={() => void runReport()}
