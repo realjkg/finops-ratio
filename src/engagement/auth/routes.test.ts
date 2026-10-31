@@ -7,7 +7,6 @@ import os from 'node:os';
 import path from 'node:path';
 import type { NextApiHandler, NextApiRequest } from 'next';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeRes, type TestRes } from '@/server/costs/testing/http';
 import { findRoute } from '@/rbac/matrix';
 import { csrfFor, SESSION_COOKIE } from './http';
 import { hashPassword } from './password';
@@ -17,6 +16,15 @@ import loginPage from '../../../pages/api/auth/login';
 import logoutPage from '../../../pages/api/auth/logout';
 import sessionPage from '../../../pages/api/auth/session';
 
+type TestRes = { statusCode: number; body: unknown; headers: Record<string, string>; headersSent: boolean };
+/** A minimal fake response (the costs testing helper is outside the import boundary for this module). */
+function makeRes(): TestRes {
+  const r = { statusCode: 200, body: undefined as unknown, headers: {} as Record<string, string>, headersSent: false,
+    setHeader(k: string, v: string | number) { r.headers[k.toLowerCase()] = String(v); return r; },
+    status(c: number) { r.statusCode = c; return r; },
+    json(b: unknown) { r.body = b; r.headersSent = true; return r; } };
+  return r;
+}
 const ORIGIN = 'https://ratio.example.test';
 const CONFIG = path.resolve(__dirname, '../../../fixtures/engagement/example/engagement.json');
 const T = '5f0c1a7e-2b3d-4c5e-8f60-71829a3b4c5d';
@@ -44,7 +52,7 @@ function req(o: { method?: string; body?: unknown; token?: string; headers?: Rec
 }
 async function call(h: NextApiHandler, r: NextApiRequest): Promise<TestRes> {
   const res = makeRes();
-  await h(r, res);
+  await h(r, res as never);
   const t = /^__Host-ratio_session=([a-f0-9]{64});/.exec(res.headers['set-cookie'] ?? '')?.[1];
   if (t) seen.push(t, csrfFor(t));
   return res;
