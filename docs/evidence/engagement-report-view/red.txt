@@ -1,0 +1,4 @@
+Engagement report view + UI/XLSX/PDF agreement (1.0, report-facts PR 3b): RED before the implementation
+(stacked on PR 3a, feat/engagement-report-pdf 9455ef8).
+Command: npx vitest run src/reports/engagementReportAgreement.test.tsx
+Result: the file cannot load: Failed to resolve import "./EngagementReportView".
