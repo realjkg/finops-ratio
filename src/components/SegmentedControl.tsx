@@ -11,9 +11,11 @@ const STEP: Record<string, (i: number, n: number) => number> = {
 /**
  * Roving-focus keyboard handler for a row of sibling items (radios or tabs) in
  * the same order as `values`: moves to the next/previous item (wrapping), selects
- * it, and focuses it.
+ * it, and focuses it. Ignores keys pressed with Alt, Ctrl, Meta or Shift.
  */
 export function rovingKeyDown<T extends string>(e: KeyboardEvent<HTMLElement>, values: readonly T[], current: T, onChange: (value: T) => void) {
+  // Modified keys belong to the browser and OS (Alt+Arrow is Back/Forward): leave them alone.
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   if (!Object.hasOwn(STEP, e.key) || values.length === 0) return;
   e.preventDefault();
   const n = values.length;

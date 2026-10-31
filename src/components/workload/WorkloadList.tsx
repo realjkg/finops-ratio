@@ -17,7 +17,13 @@ export function WorkloadList() {
   const ingestRuns = useStore((s) => s.ingestRuns);
   // Keep the selected card in view in the scrolling list (desktop); the page itself never scrolls.
   const listRef = useRef<HTMLDivElement>(null);
+  // A pointer click already sees its card: scrolling would move the list under the pointer.
+  const pointerPick = useRef(false);
   useEffect(() => {
+    if (pointerPick.current) {
+      pointerPick.current = false;
+      return;
+    }
     const list = listRef.current;
     const card = list?.querySelector('[aria-pressed="true"]');
     if (!list || !card || list.scrollHeight <= list.clientHeight) return;
@@ -44,7 +50,7 @@ export function WorkloadList() {
         <span className="font-mono text-[10px] text-dim">{visible.length} shown</span>
       </div>
       <Filters />
-      <div ref={listRef} className="flex gap-2 overflow-x-auto px-3 py-3 md:block md:flex-1 md:space-y-2 md:overflow-y-auto">
+      <div ref={listRef} onPointerDown={() => { pointerPick.current = true; }} onClick={() => setTimeout(() => { pointerPick.current = false; }, 0)} className="flex gap-2 overflow-x-auto px-3 py-3 md:block md:flex-1 md:space-y-2 md:overflow-y-auto">
         {visible.length === 0 ? (
           <p className="px-1 pt-6 text-center text-xs text-dim">
             No workloads match these filters.
