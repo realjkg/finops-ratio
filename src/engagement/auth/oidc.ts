@@ -20,6 +20,8 @@ import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import * as oidc from 'openid-client';
 import { engagementConfigFromEnv, engagementMode } from '@/engagement/config';
 import { sendError } from '@/server/gateway/withGateway';
+import { SlidingWindowRateLimiter } from '@/server/gateway/rateLimit';
+import { signInClient } from './routes';
 import { runAuditHook } from './authz';
 import { directoryFromEnv, type Connection, type Directory, type Instance } from './directory';
 import { authSettings, sessionCookie, sessionToken } from './http';
@@ -68,7 +70,10 @@ const txStores = new Map<string, OidcTransactionStore>();
 export interface OidcRouteDeps {
   env?: Env; now?: () => number; store?: (file: string) => EngagementSessionStore; transactions?: (file: string) => OidcTransactionStore;
   fetch?: oidc.CustomFetch; audit?: (e: AuthAuditEvent) => void | Promise<void>; configCache?: Map<string, { at: number; config: oidc.Configuration }>;
+  /** Starts per client (default 30 per minute, per process). */
+  startLimiter?: SlidingWindowRateLimiter;
 }
+const sharedStartLimiter = new SlidingWindowRateLimiter(30, 60_000);
 interface Ctx { origin: string; instance: Instance; directory: Directory; env: Env; now: number; sessions: EngagementSessionStore; txs: OidcTransactionStore; audit(status: number, id?: string): void }
 const sharedConfigs = new Map<string, { at: number; config: oidc.Configuration }>();
 
@@ -117,6 +122,8 @@ const callbackUrl = (origin: string) => `${origin}/api/auth/oidc/callback`;
 
 export function createOidcStartRoute(deps: OidcRouteDeps = {}): NextApiHandler {
   return route('oidc_start', deps, async (req, res, ctx) => {
+    const rl = (deps.startLimiter ?? sharedStartLimiter).take(signInClient(req, Number(ctx.env.RATIO_TRUSTED_PROXY_HOPS)));
+    if (!rl.allowed) { res.setHeader('Retry-After', String(rl.retryAfterSec)); sendError(res, 429, 'rate_limited', 'Too many sign-in attempts. Try again later.'); return ctx.audit(429); }
     const q = req.query ?? {};
     const conn = Object.keys(q).length === 1 && typeof q.connection === 'string' ? ctx.directory.connections.get(q.connection) : undefined;
     if (!conn || !conn.enabled) { sendError(res, 400, 'invalid_request', 'Unknown sign-in connection'); return ctx.audit(400); }

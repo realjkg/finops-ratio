@@ -11,7 +11,7 @@ import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 
 export type Lookup = (host: string) => Promise<Array<{ address: string; family: number }>>;
-export interface GuardOptions { lookup?: Lookup; request?: typeof httpsRequest; timeoutMs?: number; maxBytes?: number }
+export interface GuardOptions { lookup?: Lookup; request?: typeof httpsRequest; timeoutMs?: number; lookupTimeoutMs?: number; maxBytes?: number }
 interface FetchInit { method: string; headers: Record<string, string>; body?: unknown; redirect?: 'manual'; signal?: AbortSignal }
 
 const v4 = (ip: string) => ip.split('.').reduce((n, o) => n * 256 + Number(o), 0);
@@ -43,7 +43,9 @@ export function isPublicAddress(ip: string): boolean {
   const embedded = () => `${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}`;
   if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return publicV4(embedded()); // v4-mapped
   if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return publicV4(embedded()); // NAT64
-  if (g[0] === 0x2001 && g[1] === 0xdb8) return false; // documentation
+  if (g[0] === 0x2001 && (g[1] === 0xdb8 || g[1] === 0)) return false; // documentation 2001:db8::/32, Teredo 2001::/32
+  if (g[0] === 0x2001 && g[1] === 2 && g[2] === 0) return false; // benchmarking 2001:2::/48
+  if (g[0] === 0x2002 || (g[0] === 0x3fff && g[1] < 0x1000)) return false; // 6to4 2002::/16 (embeds IPv4), documentation 3fff::/20
   // Global unicast 2000::/3 only: this excludes ::, ::1, ULA fc00::/7, link-local fe80::/10 and multicast ff00::/8.
   return (g[0] & 0xe000) === 0x2000;
 }
@@ -54,12 +56,14 @@ export function guardedFetch(opts: GuardOptions = {}) {
   const lookup: Lookup = opts.lookup ?? ((h) => dnsLookup(h, { all: true, verbatim: true }));
   const send = opts.request ?? httpsRequest;
   const timeoutMs = opts.timeoutMs ?? 5000;
+  const lookupTimeoutMs = opts.lookupTimeoutMs ?? 2000;
   const maxBytes = opts.maxBytes ?? 256 * 1024;
   return async (input: string, init: FetchInit): Promise<Response> => {
     const url = new URL(input);
     if (url.protocol !== 'https:') throw refuse('https only');
     const host = url.hostname.replace(/^\[|\]$/g, '');
-    const answers = isIP(host) ? [{ address: host, family: isIP(host) }] : await lookup(host).catch(() => []);
+    const late = new Promise<[]>((r) => setTimeout(() => r([]), lookupTimeoutMs).unref?.());
+    const answers = isIP(host) ? [{ address: host, family: isIP(host) }] : await Promise.race([lookup(host).catch(() => [] as []), late]);
     if (answers.length === 0 || !answers.every((a) => isPublicAddress(a.address))) throw refuse('address not public');
     const pinned = answers[0];
     const body = init.body == null ? undefined : typeof init.body === 'string' ? init.body : init.body instanceof Uint8Array ? Buffer.from(init.body).toString() : String(init.body);
