@@ -11,7 +11,7 @@ DB: reportFacts.db.test.ts gains the engagement XLSX describe (cannot load: rout
 
 Review round (independent review of c232a66: one Medium, one Low), RED before the fix:
 Command: npx vitest run src/reports
-Result: Tests 14 failed (of 38): safeCellText (XML 1.0 forbidden characters -> U+FFFD, 32,767-character cap with a
+Result: Tests 14 failed | 25 passed (39): safeCellText (XML 1.0 forbidden characters -> U+FFFD, 32,767-character cap with a
 visible marker) is missing; hostile ChargeCategory / declared source / engagement displayName / gap detail values
 (U+FFFF, U+FFFE, lone surrogate, NUL, VT/FF, 40,000 characters) must give safe model cells, an "Altered cell values"
 row, and an XLSX that loads in ExcelJS and parses in saxes; Note texts must name the columns each reason explains.

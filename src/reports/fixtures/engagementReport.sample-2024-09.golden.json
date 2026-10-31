@@ -123,7 +123,7 @@
           "N/A",
           "N/A",
           "N/A",
-          "No rows with ChargeCategory Adjustment in the published facts for this period"
+          "Adjustments rows, Adjustments billed, Adjustments effective: N/A (No rows with ChargeCategory Adjustment in the published facts for this period)"
         ]
       ]
     },
@@ -157,7 +157,7 @@
           "N/A",
           "N/A",
           "N/A",
-          "No rows with ChargeCategory Adjustment in the published facts for this period"
+          "Adjustments rows, Adjustments billed, Adjustments effective: N/A (No rows with ChargeCategory Adjustment in the published facts for this period)"
         ]
       ]
     },
@@ -226,7 +226,7 @@
           "N/A",
           "N/A",
           "N/A",
-          "Not yet available: the reader role cannot see source keys or import metadata until the batch-status view (R4, migration 0005) exists; Not yet available (needs R4 import metadata): the operator file's sha256 is recorded in the staged import metadata the reader role cannot see; stagedArtifactSha256 is the per-period artifact the import wrote, so it differs from sha256sum of the operator file; Figures reflect the last PUBLISHED batch only: a newer delivery for this period may have been quarantined or left staged, and reconciliation status and control totals are not visible to the reader role until the batch-status view (R4, migration 0005) exists"
+          "Source key: N/A (Not yet available: the reader role cannot see source keys or import metadata until the batch-status view (R4, migration 0005) exists); Operator file sha256: N/A (Not yet available (needs R4 import metadata): the operator file's sha256 is recorded in the staged import metadata the reader role cannot see; stagedArtifactSha256 is the per-period artifact the import wrote, so it differs from sha256sum of the operator file); Reconciliation, Control totals: N/A (Figures reflect the last PUBLISHED batch only: a newer delivery for this period may have been quarantined or left staged, and reconciliation status and control totals are not visible to the reader role until the batch-status view (R4, migration 0005) exists)"
         ]
       ]
     },

@@ -20,3 +20,21 @@ Mutations (unit = src/reports + route tests, db = reportFacts.db.test.ts); each 
 - N6 route accepts a missing format: killed / survived
 - N7 staged-artifact label removed: killed / survived
 - N8 credits cells not separated: killed / killed
+
+Review round (fixes on top of c232a66): GREEN, same environment (fresh containers, CI digests, tmpfs).
+- lint, typecheck (app + worker): pass. npm test: 250 files / 4564 tests passed.
+- npm run test:db: 45 files / 722 tests; serial 6 files / 173 tests: all passed.
+- worker:build, build, check:bundle: pass.
+- engagementReportSafety.test.ts: U+FFFF, U+FFFE, lone surrogate, NUL, VT/FF and a 40,000-character value in a
+  charge category, a declared source, the engagement displayName and a gap detail: every model cell safe (<= 32,767
+  characters, no XML 1.0 forbidden character), an "Altered cell values" summary row, and the XLSX loads in ExcelJS and
+  every XML part parses in saxes.
+- Golden: amounts and every non-Note cell unchanged; only the three Note cells now name their columns
+  (e.g. "Adjustments rows, Adjustments billed, Adjustments effective: N/A (...)").
+Mutations (unit / db):
+- S1 sanitizer not applied: killed / survived
+- S2 U+FFFF not replaced: killed / survived
+- S3 lone surrogates kept: killed / survived
+- S4 no length cap: killed / survived
+- S5 silent alteration (no summary row): killed / survived
+- S6 notes without column names: killed / killed
