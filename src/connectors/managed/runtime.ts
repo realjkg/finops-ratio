@@ -158,7 +158,7 @@ export async function runManagedFetch(o: FetchOptions): Promise<FetchResult> {
   if (!factory) return failed(new ManagedError('CONNECTOR_NOT_REGISTERED', `no retriever is registered for connector ${spec.connector} in this build`), '', '');
   let retriever: ManagedRetriever;
   let deliveries: Delivery[];
-  let warnings: string[] = [];
+  let warnings: string[];
   let d: ReturnType<ManagedRetriever['describe']>;
   try {
     const secret = spec.secretRef ? o.resolveSecret(spec.secretRef) : undefined;
