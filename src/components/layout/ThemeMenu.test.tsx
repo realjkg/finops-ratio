@@ -48,7 +48,7 @@ function setValue(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
   });
 }
 const select = () => $<HTMLSelectElement>('#theme-select');
-const openEditor = () => click(button('Preview'));
+const openEditor = () => click(button('Appearance options'));
 const importText = (text: string) => {
   setValue(byLabel<HTMLTextAreaElement>('Theme JSON'), text);
   click(button('Import'));
@@ -270,7 +270,7 @@ describe('palette editor', () => {
       expect(named, el.outerHTML.slice(0, 80)).toBeTruthy();
       expect(el.tabIndex).toBeGreaterThanOrEqual(0);
     }
-    const toggle = button('Preview');
+    const toggle = button('Appearance options');
     toggle.focus();
     expect(document.activeElement).toBe(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
@@ -343,7 +343,7 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
       flip(true); expect([txt(), button('Export current theme').getAttribute('download')]).toEqual([hc.txt, 'my-high-contrast.json']); // case 1: untouched draft follows
       setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
       flip(false); expect(txt()).toBe('#123456'); // case 2: an edited draft is kept
-      click(button('Preview')); // case 4: closing is the cancel path; an OS change happens while closed
+      click(button('Appearance options')); // case 4: closing is the cancel path; an OS change happens while closed
       flip(true); openEditor();
       expect(txt()).toBe(hc.txt); // edits discarded, effective theme
       click(button('Fix contrast')); // "Nothing to change" is not an edit (re-review)
@@ -435,11 +435,11 @@ describe('editor dismissal and save feedback', () => {
     mount(); openEditor();
     click(byLabel<HTMLButtonElement>('Close theme editor'));
     expect(container.querySelector('#theme-editor')).toBeNull();
-    expect(document.activeElement).toBe(button('Preview'));
+    expect(document.activeElement).toBe(button('Appearance options'));
     openEditor();
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(container.querySelector('#theme-editor')).toBeNull();
-    expect(document.activeElement).toBe(button('Preview'));
+    expect(document.activeElement).toBe(button('Appearance options'));
   });
   it('dismisses on an outside pointer without applying unsaved edits or stealing focus', () => {
     mount(); setValue(select(), 'light'); openEditor();

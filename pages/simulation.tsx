@@ -18,7 +18,7 @@ export default function SimulationSignIn() {
     {access?.loading && <p role="status" className="mt-8">Loading simulation…</p>}
     {access?.error && <p role="alert" className="mt-6 text-cost">{access.error}</p>}
     {/* Server simulation is off on public deployments: show the read-only sample instead of a dead end. */}
-    {!access?.loading && !access?.enabled && <SampleWorkspace />}
+    {!access?.loading && !access?.enabled && <SampleWorkspace degraded={Boolean(access?.error)} />}
     {sim && <div className="mt-8 rounded border border-unit/40 p-5"><p>Signed in as {sim.session.identity.user} for {sim.session.identity.tenant}.</p><Link className="mt-3 inline-block rounded bg-gate px-4 py-2 text-void" href="/workspace">Open customer workflow</Link></div>}
     <div className="mt-8 grid gap-4 sm:grid-cols-3">{Object.entries(access?.identities ?? {}).map(([id, identity]) => <section key={id} className="rounded-lg border border-edge bg-deep p-5">
       <p className="text-xs uppercase tracking-widest text-dim">{identity.tenant}</p><h2 className="mt-2 text-lg">{PERSONA_LABELS[identity.persona]}</h2>

@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ConnectorCard } from '@/connectors/ConnectorCard';
 import { FocusDoorWalk } from '@/connectors/FocusDoorWalk';
+import { SyntheticApiConnections } from '@/connectors/SyntheticApiConnections';
 import { sourcesForEnv } from '@/costsource/seed';
 import { createCostSourceClient } from '@/costsource';
 import type { CostSourceDescriptor, SourceCoverage } from '@/costsource';
@@ -144,6 +145,8 @@ function ConnectorRegistry() {
               )}
             </div>
           </div>
+
+          <SyntheticApiConnections />
 
           <Link
             href="/costsource"
