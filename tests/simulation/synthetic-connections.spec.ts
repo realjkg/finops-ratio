@@ -8,7 +8,7 @@ for (const width of [390, 1440]) {
     await page.goto('/connectors');
     await page.waitForLoadState('networkidle');
     const requests: string[] = [];
-    page.on('request', (r) => { if (!/\/_next\/static\//.test(r.url())) requests.push(`${r.method()} ${new URL(r.url()).pathname}`); });
+    page.on('request', (r) => { if (!/\/_next\//.test(r.url())) requests.push(`${r.method()} ${new URL(r.url()).pathname}`); });
     const cards = page.getByRole('article');
     await expect(cards).toHaveCount(3);
     await expect(page.getByText('Synthetic', { exact: true })).toHaveCount(3);
