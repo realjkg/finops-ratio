@@ -5,5 +5,5 @@ $ npx vitest run --cache=false infrastructure/engagement/compose.test.mjs
 GREEN counts are in the PR body.
 Review round (crash-atomic directory mount decision):
 $ npx vitest run --cache=false infrastructure/engagement/compose.test.mjs
-  -> Tests 1 failed | 23 passed (24): users.json is still a single-file mount (RATIO_ENGAGEMENT_USERS_FILE).
+  -> Tests 2 failed | 22 passed (24): users.json is still a single-file mount (RATIO_ENGAGEMENT_USERS_FILE).
 GREEN after the change: 24 passed (see the PR body for the full suite).

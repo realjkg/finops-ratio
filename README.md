@@ -405,20 +405,25 @@ $C --profile jobs run --rm worker doctor          # works today; any worker comm
 
 ### Configure
 
-`RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config, read by the app today) and `RATIO_ENGAGEMENT_USERS_FILE` (the named
-users directory, today) are mounted read-only at `/config/`. The container reads them at start, so after editing run
-`$C restart app`. Editors that replace the file (a new inode) break a single-file bind mount: keep editing in place,
-or mount a directory instead, and restart the container. Today the app validates the users directory at start, and
-the session API (`/api/auth/login`, `/api/auth/logout`, `/api/auth/session`, local credentials only) reads it again on
-each request; under a single-file mount a file saved as a new inode stays invisible until `$C restart app`, so a
-suspension or role change can lag until that restart. Today the `users` job edits `/config/users.json` in place (same
-inode) and is the only service that mounts it writable; if you edit it by hand, edit in place or mount `/config` as a
-directory. Today `users suspend` also deletes the user's sessions; a session of a user suspended by hand is refused on
-the next request and stays stored until it expires. The compose file sets, today, `RATIO_ENGAGEMENT_STATE`
-(`/state/sessions.sqlite`, on the `state` volume: keep that volume dedicated to this instance), requires
-`RATIO_ENGAGEMENT_ORIGIN` (the https origin of your TLS proxy) and takes `RATIO_TRUSTED_PROXY_HOPS` (default 1: one TLS
-proxy appends to `X-Forwarded-For`, so failed sign-ins are counted per client) and `RATIO_OIDC_CLIENT_SECRET_PRIMARY`
-from `.env.engagement`; add one line per further identity connection under the NAME its `clientSecretRef` gives.
+`RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config, read by the app today) is mounted read-only at
+`/config/engagement.json`; the container reads it at start, so after editing run `$C restart app`.
+`RATIO_ENGAGEMENT_USERS_DIR` names a host directory that holds only `users.json` (the users directory, today). Create it
+owned by uid 1000 (the image's user) with mode 0700, e.g. `mkdir -m 0700 /srv/ratio/users && sudo chown 1000:1000
+/srv/ratio/users`. Today it is mounted as a directory at `/config/users`: read-only for the app, writable only for the
+`users` job, which replaces `users.json` crash-atomically (temp file, fsync, rename, fsync of the directory) and keeps
+its lock `.users.lock` there. The app validates the directory at start and the session API reads it again on each
+request, so a role change, suspension or binding change applies to the next request without a restart. Today `users
+suspend` also deletes the user's sessions; a session of a user suspended by hand is refused on the next request and
+stays stored until it expires. A lock left by a crashed job is reported as stale after 10 minutes: check that no
+`users` job runs, then delete `.users.lock` in that directory.
+
+The compose file sets, today, `RATIO_ENGAGEMENT_STATE` (`/state/sessions.sqlite`, on the `state` volume: keep that
+volume dedicated to this instance), requires `RATIO_ENGAGEMENT_ORIGIN` (exactly `https://host[:port]`, the origin users
+open through your TLS proxy, with no path and no trailing slash; any other form makes the sign-in routes answer 503)
+and takes `RATIO_TRUSTED_PROXY_HOPS` (default 1: one TLS proxy appends to `X-Forwarded-For`, so failed sign-ins are
+counted per client) and `RATIO_OIDC_CLIENT_SECRET_PRIMARY` from `.env.engagement`; add one line per further identity
+connection under the NAME its `clientSecretRef` gives. Compose interpolates the whole file for every command, so even
+the `users` job needs every required variable of `.env.engagement` set (database and S3 passwords included).
 
 The worker runs with `RATIO_ENV=staging` (the app and migrator with `production`): the worker's S3 settings refuse
 `http` endpoints under `production`, and the bundled object store is `http` on the internal network. `staging`
@@ -430,10 +435,17 @@ View: today open `<RATIO_ENGAGEMENT_ORIGIN>/engagement` through your TLS proxy a
 link. The existing worker commands (`sync`, `replay`, `quarantine show`, `doctor`) run through
 `$C --profile jobs run --rm worker <command>`.
 
-Users (works today): `$C --profile jobs run --rm users list`, then `add --id <id> --name <name> --role
-<viewer|analyst|connector_manager|tenant_admin> --by <your id>` (add `--password-stdin` and pipe a password for a local
-recovery login: never on the command line), `set-role`, `suspend`, `unsuspend`, `revoke-sessions`, `bind --id <id>
---connection <connection id> --subject <IdP subject>` and `unbind`. Nobody can change their own role, status or bindings.
+Users (works today): `$C --profile jobs run --rm -T users list`, then `add --id <id> --name <name> --role
+<viewer|analyst|connector_manager|tenant_admin> --by <admin id or operator>`, `set-role`, `set-password`, `suspend`,
+`unsuspend`, `revoke-sessions`, `bind --id <id> --connection <connection id> --subject <IdP subject>` and `unbind`.
+`--by` is an audit label, not authentication: it must be `operator` or an active tenant_admin, nobody may act on
+themselves, and the last active tenant_admin can be demoted or suspended only with `--by operator --force`. Whoever can
+run this job controls the users directory. Passwords (for `add --password-stdin` and `set-password --password-stdin`)
+are read from the first line of stdin: pipe them, never type them at a terminal, and keep `-T` so compose passes the
+pipe (e.g. `printf '%s\n' "$PW" | $C --profile jobs run --rm -T users set-password --id alice --password-stdin --by
+operator`). There is no password page today: local credentials work only through the `POST /api/auth/login` API (JSON,
+same-origin `Origin` header), meant for recovery and automation; today people use the browser through an OIDC
+connection, so configure one and bind each person.
 
 Today the OIDC routes (`/api/auth/oidc/start?connection=<id>` and `/api/auth/oidc/callback`) work for an enabled
 `identityConnections` entry: register `<RATIO_ENGAGEMENT_ORIGIN>/api/auth/oidc/callback` exactly at the IdP, put the client

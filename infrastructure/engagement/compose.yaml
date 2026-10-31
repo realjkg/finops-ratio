@@ -8,7 +8,8 @@
 #   identities (any key pair is accepted), which is acceptable only because nothing outside this stack can reach it.
 # - Images of third parties are pinned by digest (the same digests as docker-compose.local.yml and CI).
 # - App, worker and migrator share one image (target `engagement`): non-root, read-only root filesystem, every
-#   capability dropped, /state the only writable volume. The config and users files are mounted read-only.
+#   capability dropped, /state the only writable volume. The config file and the users directory are mounted read-only
+#   (the users directory is writable only in the `users` job).
 name: ratio-engagement
 
 x-engagement: &engagement
@@ -25,7 +26,7 @@ x-engagement: &engagement
   volumes:
     - state:/state
     - ${RATIO_ENGAGEMENT_CONFIG_FILE:?path of the engagement config JSON}:/config/engagement.json:ro
-    - ${RATIO_ENGAGEMENT_USERS_FILE:?path of the users JSON}:/config/users.json:ro
+    - ${RATIO_ENGAGEMENT_USERS_DIR:?host directory holding users.json (owned by uid 1000, mode 0700)}:/config/users:ro
   logging:
     driver: json-file
     options: {max-size: '10m', max-file: '3'}
@@ -58,7 +59,7 @@ services:
     environment:
       RATIO_MODE: engagement
       RATIO_ENGAGEMENT_CONFIG: /config/engagement.json
-      RATIO_ENGAGEMENT_USERS: /config/users.json
+      RATIO_ENGAGEMENT_USERS: /config/users/users.json
       # R2 sign-in: the https origin users open (your TLS proxy), the session store on the /state volume, the number of
       # proxies that append to X-Forwarded-For (1 behind one TLS proxy) and one OIDC client secret per identity
       # connection, by the NAME its clientSecretRef gives (add a line per connection; unset or empty = that connection answers 503; compose warns when unset).
@@ -80,8 +81,10 @@ services:
     cpus: 1.0
     networks: [frontend, backend]
 
-  # Operator users command (R2): `$C --profile jobs run --rm users <list|add|set-role|suspend|...>`. The only service
-  # that may write users.json (in place, same inode); it also revokes sessions in /state. No network.
+  # Operator users command (R2): `$C --profile jobs run --rm -T users <list|add|set-role|suspend|...>`. The only service
+  # that may write the users directory: it replaces users.json crash-atomically there (temp file, fsync, rename) and
+  # keeps its lock (.users.lock) there; the app reads the file per request through its read-only directory mount. It
+  # also revokes sessions in /state. No network. Runs as the image's uid 1000.
   users:
     <<: *engagement
     profiles: [jobs]
@@ -91,11 +94,11 @@ services:
     volumes:
       - state:/state
       - ${RATIO_ENGAGEMENT_CONFIG_FILE:?path of the engagement config JSON}:/config/engagement.json:ro
-      - ${RATIO_ENGAGEMENT_USERS_FILE:?path of the users JSON}:/config/users.json
+      - ${RATIO_ENGAGEMENT_USERS_DIR:?host directory holding users.json (owned by uid 1000, mode 0700)}:/config/users
     environment:
       RATIO_MODE: engagement
       RATIO_ENGAGEMENT_CONFIG: /config/engagement.json
-      RATIO_ENGAGEMENT_USERS: /config/users.json
+      RATIO_ENGAGEMENT_USERS: /config/users/users.json
       RATIO_ENGAGEMENT_STATE: /state/sessions.sqlite
     network_mode: none
     mem_limit: 256m
