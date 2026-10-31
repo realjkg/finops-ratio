@@ -37,7 +37,7 @@ let owner: Login;
 let reader: Login;
 let evidence: TestBucket;
 let drop: TestBucket;
-const A = { tenant: crypto.randomUUID(), sourceId: '', batchId: '', publishedAt: '' };
+const A = { tenant: crypto.randomUUID(), sourceId: '', batchId: '', publishedAt: '', artifactSha256: '' };
 const C = { tenant: '', sourceId: '' };
 const D = { tenant: crypto.randomUUID() };
 
@@ -63,15 +63,17 @@ beforeAll(async () => {
   const env = { RATIO_DATABASE_URL: t.login.url, RATIO_MIGRATE_DATABASE_URL: owner.url, ...testS3Env(evidence) };
   expect((await cli(['source', 'add', '--tenant', A.tenant, '--key', 'focus-aws', '--providers', 'AWS', '--bucket', drop.name, '--prefix', drop.at(A.tenant)], env)).code).toBe(0);
   await cli(['import-file', '--tenant', A.tenant, '--source', 'focus-aws', '--file', SAMPLE_FILE], env);
+  // Ground truth as the test superuser: the publication pointer and the staged artifact the facts came from.
   const b = await t.db.pool.query(
-    `SELECT b.source_id::text AS sid, b.id::text AS bid, to_char(b.published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at
-       FROM ratio.ingest_batches b WHERE b.tenant_id = $1 AND b.status = 'published'`,
+    `SELECT p.source_id::text AS sid, p.batch_id::text AS bid, to_char(p.published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at, a.sha256
+       FROM ratio.period_publications p JOIN ratio.ingest_artifacts a ON a.tenant_id = p.tenant_id AND a.batch_id = p.batch_id WHERE p.tenant_id = $1`,
     [A.tenant],
   );
   expect(b.rows).toHaveLength(1);
-  Object.assign(A, { sourceId: b.rows[0].sid, batchId: b.rows[0].bid, publishedAt: b.rows[0].at });
+  Object.assign(A, { sourceId: b.rows[0].sid, batchId: b.rows[0].bid, publishedAt: b.rows[0].at, artifactSha256: b.rows[0].sha256 });
 
-  // Tenant C (SYNTHETIC): 2026-06 restated once (first set superseded); 2026-04 quarantined.
+  // Tenant C (SYNTHETIC): 2026-06 restated once (first set superseded); 2026-04 quarantined (bad
+  // amount); 2026-05 quarantined (one batch may not mix billing currencies: MIXED_BILLING_CURRENCY).
   const s = await seedTenantSource(t.db.pool);
   Object.assign(C, { tenant: s.tenantId, sourceId: s.sourceId });
   const P = '2026-06-01';
@@ -79,18 +81,21 @@ beforeAll(async () => {
     focusRow(P, { BilledCost: '0.10', EffectiveCost: '0.08', ResourceId: 'u1' }),
     focusRow(P, { BilledCost: '0.20', EffectiveCost: '', ResourceId: 'u2' }),
     focusRow(P, { BilledCost: '-0.05', EffectiveCost: '-0.05', ChargeCategory: 'Credit', ResourceId: 'c1' }),
-    focusRow(P, { BilledCost: '3.30', EffectiveCost: '3.00', BillingCurrency: 'EUR', ResourceId: 'e1' }),
   ];
-  const april = [{ billingPeriod: '2026-04-01', artifacts: [{ name: 'apr/a.csv.gz', bytes: csvGz([focusRow('2026-04-01', { BilledCost: 'not-a-number' })]) }] }];
+  const april = [
+    { billingPeriod: '2026-04-01', artifacts: [{ name: 'apr/a.csv.gz', bytes: csvGz([focusRow('2026-04-01', { BilledCost: 'not-a-number' })]) }] },
+    { billingPeriod: '2026-05-01', artifacts: [{ name: 'may/a.csv.gz', bytes: csvGz([focusRow('2026-05-01', { ResourceId: 'm1' }), focusRow('2026-05-01', { BillingCurrency: 'EUR', ResourceId: 'm2' })]) }] },
+  ];
   await sync(C.tenant, s.sourceKey, [...april, { billingPeriod: P, artifacts: [{ name: 'jun/a.csv.gz', bytes: csvGz(rowsOf(P, 4, '9.99', 'old')) }] }], [
     ...april,
     { billingPeriod: P, artifacts: [{ name: 'jun/b.csv.gz', bytes: csvGz(final) }] },
   ]);
 
-  // Tenant D (SYNTHETIC): two sources publish the same period.
-  for (const key of ['focus-one', 'focus-two']) {
+  // Tenant D (SYNTHETIC): two sources publish the same period, one in USD and one in EUR.
+  for (const [key, currency] of [['focus-one', 'USD'], ['focus-two', 'EUR']]) {
     const sd = await seedTenantSource(t.db.pool, { tenantId: D.tenant, sourceKey: key });
-    await sync(sd.tenantId, sd.sourceKey, [{ billingPeriod: '2026-07-01', artifacts: [{ name: `${key}.csv.gz`, bytes: csvGz(rowsOf('2026-07-01', 2, '1.50', key)) }] }]);
+    const rows = rowsOf('2026-07-01', 2, '1.50', key).map((r) => ({ ...r, BillingCurrency: currency }));
+    await sync(sd.tenantId, sd.sourceKey, [{ billingPeriod: '2026-07-01', artifacts: [{ name: `${key}.csv.gz`, bytes: csvGz(rows) }] }]);
   }
 }, 180_000);
 
@@ -140,12 +145,12 @@ describe('public FOCUS 1.0 sample (AWS 2024-09) imported through import-file', (
     });
   });
 
-  it('identifies the import (source id, batch, artifact sha256 = the sample file), the period, freshness and the unavailable trust fields', async () => {
+  it('identifies the import (source id, batch, staged artifact sha256), the period, freshness and the unavailable trust fields', async () => {
     const f = await facts(A.tenant, '2024-09');
     expect(f.sources).toHaveLength(1);
     expect(f.sources[0]).toMatchObject({ sourceId: A.sourceId, providers: ['AWS'], focusVersions: ['1.0'] });
     expect(f.sources[0].batches).toEqual([
-      expect.objectContaining({ batchId: A.batchId, status: 'published', publishedAt: A.publishedAt, rowCount: AWS_SEP.rowCount, artifacts: [{ sha256: CONTROLS.input.sha256, rowCount: AWS_SEP.rowCount }] }),
+      expect.objectContaining({ batchId: A.batchId, status: 'published', publishedAt: A.publishedAt, rowCount: AWS_SEP.rowCount, artifacts: [{ sha256: A.artifactSha256, rowCount: AWS_SEP.rowCount }] }),
     ]);
     expect(f.sources[0].batches[0].reconciliation).toEqual({ status: 'not_available', reason: NA_REASONS.batchStatus });
     expect(f.period).toMatchObject({ month: '2024-09', state: 'closed', completeness: { status: 'available', value: 'charge periods cover the whole month' } });
@@ -163,12 +168,11 @@ describe('public FOCUS 1.0 sample (AWS 2024-09) imported through import-file', (
 });
 
 describe('SYNTHETIC tenants through the real worker library', () => {
-  it('restated period: only the latest published rows; two currencies separate; missing EffectiveCost is partial; Credit separate', async () => {
+  it('restated period: only the latest published rows; missing EffectiveCost is partial; Credit separate', async () => {
     const f = await facts(C.tenant, '2026-06');
     expect(f.sources.map((s) => s.sourceId)).toEqual([C.sourceId]);
-    const [eur, usd] = f.sources[0].currencies;
-    expect(eur).toMatchObject({ currency: 'EUR', rowCount: '1', billedCost: '3.30', effectiveCost: { status: 'available', value: '3.00' } });
-    expect(usd).toMatchObject({
+    expect(f.sources[0].currencies).toHaveLength(1);
+    expect(f.sources[0].currencies[0]).toMatchObject({
       currency: 'USD',
       rowCount: '3',
       billedCost: '0.25',
@@ -179,18 +183,20 @@ describe('SYNTHETIC tenants through the real worker library', () => {
     expect(f.coverageGaps.map((g) => g.code)).toEqual(expect.arrayContaining(['EFFECTIVE_PARTIAL', 'PERIOD_PARTIAL']));
     const text = JSON.stringify(f);
     expect(text).not.toContain('9.99'); // the superseded rows
-    expect(text).not.toContain('3.55'); // never EUR + USD
+    expect(f.totals.status).toBe('available');
   });
 
-  it('a quarantined period is N/A, and another tenant never sees this tenant (or A) data', async () => {
+  it('quarantined periods (bad amount; mixed currencies) are N/A, and another tenant never sees this tenant (or A) data', async () => {
     expect((await facts(C.tenant, '2026-04')).totals).toEqual({ status: 'not_available', reason: NA_REASONS.noPublished });
+    expect((await facts(C.tenant, '2026-05')).totals).toEqual({ status: 'not_available', reason: NA_REASONS.noPublished });
     expect((await facts(C.tenant, '2024-09')).sources).toEqual([]);
     expect((await facts(A.tenant, '2026-06')).sources).toEqual([]);
   });
 
-  it('two published sources: listed separately, never added together', async () => {
+  it('two published sources in two currencies: listed separately, never added together', async () => {
     const f = await facts(D.tenant, '2026-07');
-    expect(f.sources.map((s) => s.currencies[0].billedCost)).toEqual(['3.00', '3.00']);
+    expect(f.sources.map((s) => s.currencies.map((c) => [c.currency, c.billedCost]))).toEqual(expect.arrayContaining([[['USD', '3.00']], [['EUR', '3.00']]]));
+    expect(f.currency.inData).toEqual(['EUR', 'USD']);
     expect(f.totals).toEqual({ status: 'not_available', reason: NA_REASONS.multiSource });
     expect(JSON.stringify(f)).not.toContain('"6.00"');
   });

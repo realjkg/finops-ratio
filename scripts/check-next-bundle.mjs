@@ -8,13 +8,15 @@
 //      maps included): no driver, ingestion, ledger, reader or worker marker.
 //   2. SERVER entries (.next/server/pages/**.js) load chunks with lines
 //      `R.c("server/chunks/<file>")`. A server .js file holding READER code
-//      must be the costs route itself or a chunk ONLY the costs route loads.
+//      must be a reader route itself (READER_ENTRIES: the costs route and the
+//      report-facts route) or a chunk ONLY reader routes load.
 //   3. Worker-only code (S3 source, fake source, CSV parser, S3 SDK, worker
 //      error codes) appears in no server .js file, the costs route included.
-//   4. Traced runtime files (<entry>.js.nft.json): `pg` only for the costs
-//      route; worker-only packages for no route.
+//   4. Traced runtime files (<entry>.js.nft.json): `pg` only for the reader
+//      routes; worker-only packages for no route.
 //   5. Never vacuous: .next, client files and the costs route must exist; the
-//      costs route's chunks must show reader code and pg must be traced for it.
+//      costs route's chunks must show reader code and pg must be traced for
+//      every reader route present.
 // Server source maps (.map) are neither executed nor served; their
 // sourcesContent is not judged. Exit 0 = clean, 1 = problems, printed.
 import fs from 'node:fs';
@@ -24,6 +26,9 @@ import { fileURLToPath } from 'node:url';
 
 /** Relative to .next/server. */
 export const COSTS_ENTRY = 'pages/api/v1/costs/published.js';
+export const REPORT_FACTS_ENTRY = 'pages/api/v1/reports/facts.js';
+/** The only server entries that may load reader code and pg (the reviewed read-API island). */
+export const READER_ENTRIES = [COSTS_ENTRY, REPORT_FACTS_ENTRY];
 
 export const WORKER_ONLY = [
   'S3FocusExportSource',
@@ -101,30 +106,30 @@ export function checkNextBundle(nextDir) {
       loadedBy.get(chunk).add(rel(e));
     }
   }
+  const readerRel = new Set(READER_ENTRIES.map((e) => rel(path.join(serverDir, e))));
   let readerSeen = false;
   for (const f of serverJs) {
     const text = fs.readFileSync(f, 'utf8');
     for (const m of has(text, WORKER_ONLY)) problems.push(`server file ${rel(f)} contains worker-only ${m}`);
     const reader = has(text, READER_MARKERS);
     if (reader.length === 0) continue;
-    if (f === costsEntry) {
+    if (readerRel.has(rel(f))) {
       readerSeen = true;
       continue;
     }
     const users = [...(loadedBy.get(f) ?? [])];
-    const costsRel = rel(costsEntry);
-    if (users.length === 1 && users[0] === costsRel) {
+    if (users.length > 0 && users.every((u) => readerRel.has(u))) {
       readerSeen = true;
       continue;
     }
     problems.push(
-      `server file ${rel(f)} contains reader code (${reader.join(', ')}) but is loaded by ${users.length ? users.join(', ') : 'no entry'}; only ${costsRel} may load it`,
+      `server file ${rel(f)} contains reader code (${reader.join(', ')}) but is loaded by ${users.length ? users.join(', ') : 'no entry'}; only ${[...readerRel].join(' or ')} may load it`,
     );
   }
   if (fs.existsSync(costsEntry) && !readerSeen) problems.push('no reader code found in the costs route or its own chunks (the scan would be blind)');
 
   // 4. traces
-  let pgTracedForCosts = false;
+  const pgTraced = new Set();
   for (const t of walk(serverDir).filter((f) => f.endsWith('.nft.json'))) {
     let files;
     try {
@@ -133,16 +138,21 @@ export function checkNextBundle(nextDir) {
       problems.push(`unreadable trace ${rel(t)}`);
       continue;
     }
-    const isCosts = t === `${costsEntry}.nft.json`;
+    const entryRel = rel(t).replace(/\.nft\.json$/, '');
+    const isReader = readerRel.has(entryRel);
     for (const f of files) {
       if (WORKER_TRACE.test(f)) problems.push(`trace ${rel(t)} includes worker-only package ${f.replace(/^.*node_modules\//, '')}`);
       if (PG_TRACE.test(f)) {
-        if (isCosts) pgTracedForCosts = true;
-        else problems.push(`trace ${rel(t)} includes pg (${f.replace(/^.*node_modules\//, '')}); only the costs route may load the driver`);
+        if (isReader) pgTraced.add(entryRel);
+        else problems.push(`trace ${rel(t)} includes pg (${f.replace(/^.*node_modules\//, '')}); only the reader routes may load the driver`);
       }
     }
   }
-  if (fs.existsSync(costsEntry) && !pgTracedForCosts) problems.push('pg is not traced for the costs route (unexpected build layout: the scan would be blind)');
+  for (const e of READER_ENTRIES) {
+    if (fs.existsSync(path.join(serverDir, e)) && !pgTraced.has(rel(path.join(serverDir, e)))) {
+      problems.push(`pg is not traced for ${e === COSTS_ENTRY ? 'the costs route' : e} (unexpected build layout: the scan would be blind)`);
+    }
+  }
 
   return { problems, stats };
 }

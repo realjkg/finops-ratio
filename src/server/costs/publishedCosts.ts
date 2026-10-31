@@ -20,7 +20,7 @@
 // values the worker writes as strings. As a second layer the reader pool pins
 // DateStyle, IntervalStyle and TimeZone and the read asserts them, failing
 // closed.
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { withTenantTransaction } from '@/ingest/db/tenant';
 import { assertSafeReaderLogin } from './readerLogin';
 import { encodeCursor, type PublishedCostsQuery } from './query';
@@ -138,30 +138,35 @@ export function setAfterPageHookForTests(fn: (() => Promise<void>) | null): void
   afterPageForTests = fn;
 }
 
+/**
+ * Opens a reader read inside a tenant transaction: READ ONLY, the pinned session
+ * settings asserted (failing closed), then the reader-login check. Shared by
+ * every read of the island (published costs, report facts).
+ */
+export async function beginReaderRead(client: PoolClient, what = 'published-costs'): Promise<void> {
+  await client.query('SET TRANSACTION READ ONLY');
+  // One snapshot, setting-independent output: the reader pool pins REPEATABLE READ, DateStyle,
+  // IntervalStyle and TimeZone (readerPool.ts); fail closed on any session that differs.
+  const tx = await client.query<Record<keyof typeof REQUIRED_SESSION, string>>(
+    `SELECT pg_catalog.current_setting('transaction_isolation') AS iso,
+            pg_catalog.current_setting('transaction_read_only') AS ro,
+            pg_catalog.current_setting('DateStyle') AS datestyle,
+            pg_catalog.current_setting('IntervalStyle') AS intervalstyle,
+            pg_catalog.current_setting('TimeZone') AS timezone`,
+  );
+  const got = tx.rows[0];
+  const wrong = (Object.keys(REQUIRED_SESSION) as Array<keyof typeof REQUIRED_SESSION>).filter((k) => got?.[k] !== REQUIRED_SESSION[k]);
+  if (wrong.length) {
+    throw new Error(
+      `${what} read requires a REPEATABLE READ READ ONLY transaction with DateStyle ISO, MDY, IntervalStyle postgres and TimeZone UTC (wrong: ${wrong.join(', ')})`,
+    );
+  }
+  await assertSafeReaderLogin(client);
+}
+
 export async function readPublishedCosts(pool: Pick<Pool, 'connect'>, tenantId: string, q: PublishedCostsQuery): Promise<PublishedCostsPage> {
   return withTenantTransaction(pool, tenantId, async (client) => {
-    await client.query('SET TRANSACTION READ ONLY');
-    // Page and totals must share one snapshot, and the output must not depend
-    // on session settings. The reader pool starts every transaction at
-    // REPEATABLE READ and pins DateStyle / IntervalStyle / TimeZone
-    // (readerPool.ts); fail closed on any session that differs, rather than
-    // return totals that can disagree with the page or values (and cursors)
-    // in another format.
-    const tx = await client.query<Record<keyof typeof REQUIRED_SESSION, string>>(
-      `SELECT pg_catalog.current_setting('transaction_isolation') AS iso,
-              pg_catalog.current_setting('transaction_read_only') AS ro,
-              pg_catalog.current_setting('DateStyle') AS datestyle,
-              pg_catalog.current_setting('IntervalStyle') AS intervalstyle,
-              pg_catalog.current_setting('TimeZone') AS timezone`,
-    );
-    const got = tx.rows[0];
-    const wrong = (Object.keys(REQUIRED_SESSION) as Array<keyof typeof REQUIRED_SESSION>).filter((k) => got?.[k] !== REQUIRED_SESSION[k]);
-    if (wrong.length) {
-      throw new Error(
-        `published-costs read requires a REPEATABLE READ READ ONLY transaction with DateStyle ISO, MDY, IntervalStyle postgres and TimeZone UTC (wrong: ${wrong.join(', ')})`,
-      );
-    }
-    await assertSafeReaderLogin(client);
+    await beginReaderRead(client);
 
     const c = q.cursor;
     const page = await client.query<PublishedCostRow>(PAGE_SQL, [

@@ -43,7 +43,8 @@ describe('permission matrix', () => {
 
   it('legacy_service_column_grants_exactly_todays_gateway_access', () => {
     // Derived from source: an API file (or the file it re-exports or builds its handler from) that calls the gateway.
-    const GATE = /\b(withGateway|gateSourceAccess|evaluateLiveDataAuth)\s*\(/;
+    // createReaderRoute is the read-API island's shared factory (withGateway + evaluateLiveDataAuth, publishedCostsRoute.ts).
+    const GATE = /\b(withGateway|gateSourceAccess|evaluateLiveDataAuth|createReaderRoute)\s*\(/;
     const gated = walkPages().filter(([route, file]) => {
       if (!route.startsWith('/api/')) return false;
       const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
