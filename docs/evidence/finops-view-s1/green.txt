@@ -1,0 +1,24 @@
+Unified FinOps view, slice S1 (pure semantic core): GREEN (base cf7c5d3).
+Targeted: npx vitest run src/finops -> Test Files 4 passed (4); Tests 38 passed (38)
+Gates (sequential, foreground):
+- npm run lint -> exit 0
+- npm run typecheck (app) -> exit 0
+- tsc -p tsconfig.worker.json --noEmit -> exit 0; and the four modules compiled alone under the worker
+  options (ES2022, commonjs, lib ES2022, no path aliases) -> exit 0
+- npx vitest run (full) -> Test Files 254 passed (254); Tests 4601 passed (4601)
+- npm run build -> exit 0 (next-env.d.ts reverted); npm run check:bundle -> pass, no problems
+- test:db not run: S1 touches no database code.
+Mutations (each applied alone, npx vitest run src/finops, then reverted): 12 of 12 killed
+- M1 float math in sumDecimal (parseFloat reduce): killed, 9 failed
+- M2 summing currencies in I2 (all currencies of a source added): killed, 2 failed
+- M3 dropping the unallocated bridge line: killed, 7 failed
+- M4 wrong residual sign (left - right): killed, 3 failed
+- M5 limit off-by-one (501 accepted): killed, 1 failed
+- M6 allowlist bypass (measure not checked against the view): killed, 2 failed
+- M7 echoing input in the view error: killed, 3 failed
+- M8 missing unallocated treated as 0: killed, 1 failed
+- M9 BU-scope filter check removed: killed, 1 failed
+- M10 SQL-looking filter values accepted: killed, 1 failed
+- M11 M0c policy problems ignored in I2: killed, 1 failed
+- M12 effective filled from billed when partial: killed, 1 failed
+Size: production 391 lines (decimal 43, views 56, query 120, reconcile 172); tests 461 lines + fixture 28.
