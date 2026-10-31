@@ -21,10 +21,17 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run simulation:test
+      # R2 engagement report page: engagement mode on the same production build (SYNTHETIC users and sessions).
+      - run: npm run engagement:test
+        env:
+          RATIO_TEST_NEXT_DIR: .next-simulation-3110
       - name: Retain failures and browser evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: customer-workflow-evidence
-          path: .simulation-test-results/
+          path: |
+            .simulation-test-results/
+            .engagement-test-results/
+          include-hidden-files: true
           retention-days: 7

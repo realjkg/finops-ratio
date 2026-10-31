@@ -1,0 +1,8 @@
+R2 report page RED evidence (tests committed before the implementation)
+$ npx vitest run --cache=false src/engagement src/server/costs/reportSessionAccess.test.ts src/rbac
+  -> FAIL reportPage.test.ts and EngagementReportPage.test.tsx (./reportPage and ./EngagementReportPage do not exist),
+     matrix_view_codes_match_plan_section_4_4 (/engagement row missing), the per-user limit / render cap / Vary test
+     and the start limiter key cap test. The #167/#168 Low tests (empty Authorization, tenant parameter, public
+     IPv6 edges) already pass: they pin existing behavior.
+Browser suite: tests/engagement/report-page.spec.ts (playwright.engagement.config.ts) fails without pages/engagement.tsx.
+GREEN counts, browser run, screenshots and mutation results are in the PR body.

@@ -12,6 +12,8 @@ import { createEngagementReportRoute } from './engagementReportRoute';
 import { createReportFactsRoute } from './reportFactsRoute';
 import { createPublishedCostsRoute } from './publishedCostsRoute';
 import { bearer, call, TEST_API_TOKEN, type TestRes } from './testing/http';
+import { SlidingWindowRateLimiter } from '@/server/gateway/rateLimit';
+import { LoginGate } from '@/engagement/auth/routes';
 
 const CONFIG = path.resolve(__dirname, '../../../fixtures/engagement/example/engagement.json');
 const T = '5f0c1a7e-2b3d-4c5e-8f60-71829a3b4c5d';
@@ -108,6 +110,34 @@ describe('session access to the report routes (engagement mode)', () => {
     store = new EngagementSessionStore(':memory:');
     const r = await call(report({ ...env, RATIO_ENGAGEMENT_USERS: path.join(dir, 'missing.json') }), req({ token: session('a'), query: Q('json') }));
     expect([r.statusCode, code(r)]).toEqual([503, 'not_configured']);
+    expect(poolFor).not.toHaveBeenCalled();
+  });
+});
+
+describe('per-user limits on the session path', () => {
+  it('reads are limited per user (429 with Retry-After); exports share a render cap (503 busy) and release it on failure; Vary: Cookie', async () => {
+    const sessionLimiter = new SlidingWindowRateLimiter(2, 60_000);
+    const renderGate = new LoginGate(1);
+    const h = createEngagementReportRoute({ ...deps(), sessionLimiter, renderGate });
+    const [a, v] = [session('a'), session('v')];
+    expect((await call(h, req({ token: a, query: Q('json') }))).headers.vary).toBe('Cookie');
+    await call(h, req({ token: a, query: Q('json') }));
+    const limited = await call(h, req({ token: a, query: Q('json') }));
+    expect([limited.statusCode, code(limited), Number(limited.headers['retry-after']) > 0]).toEqual([429, 'rate_limited', true]);
+    expect((await call(h, req({ token: v, query: Q('json') }))).statusCode).toBe(500); // another user: own budget (reached the pool)
+    const h2 = createEngagementReportRoute({ ...deps(), renderGate });
+    renderGate.tryEnter(); // one render in flight
+    const busy = await call(h2, req({ token: session('a'), query: Q('xlsx') }));
+    expect([busy.statusCode, code(busy), busy.headers['retry-after']]).toEqual([503, 'busy', '1']);
+    expect((await call(h2, req({ token: session('a'), query: Q('json') }))).statusCode).toBe(500); // json is not a render
+    renderGate.leave();
+    for (let i = 0; i < 2; i += 1) expect((await call(h2, req({ token: session('a'), query: Q('pdf') }))).statusCode).toBe(500); // slot released after a failed render
+  });
+
+  it('an empty Authorization header takes the machine path (401), never a session; a tenant query parameter is refused, never read', async () => {
+    expect((await call(report(), req({ token: session('a'), query: Q('json'), headers: { authorization: '' } }))).statusCode).toBe(401);
+    const r = await call(report(), req({ token: session('a'), query: { ...Q('json'), tenant: OTHER_T } }));
+    expect([r.statusCode, code(r)]).toEqual([400, 'invalid_request']);
     expect(poolFor).not.toHaveBeenCalled();
   });
 });

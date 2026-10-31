@@ -19,7 +19,7 @@ export interface ReportAuditEvent {
   format: string; permission: Permission; outcome: 'allow' | 'deny'; status: number;
 }
 export interface ReportAccessDeps { store?: (file: string) => EngagementSessionStore; now?: () => number; audit?: (e: ReportAuditEvent) => void | Promise<void> }
-export type ReportAccess = { ok: true; userId: string } | { ok: false; status: 401 | 403 | 503; code: string; message: string };
+export type ReportAccess = { ok: true; userId: string; displayName: string; can(p: Permission): boolean } | { ok: false; status: 401 | 403 | 503; code: string; message: string };
 
 const NOT_CONFIGURED: ReportAccess = { ok: false, status: 503, code: 'not_configured', message: 'Sign-in is not configured on this server' };
 
@@ -37,10 +37,14 @@ export function checkReportAccess(req: RequestLike, env: Env, permission: Permis
     if (e instanceof SessionStoreError) return { ok: false, status: 503, code: 'session_store_unavailable', message: 'Sign-in is temporarily unavailable' };
     throw e;
   }
-  const d = authorize(dir.directory, principal, permission, { type: 'report', id: 'engagement-report', ...instance, version: cfg.sha256 });
+  const resource = { type: 'report', id: 'engagement-report', ...instance, version: cfg.sha256 } as const;
+  const d = authorize(dir.directory, principal, permission, resource);
   const status = d.allow ? 200 : d.status;
   const sink = deps.audit ?? ((e: ReportAuditEvent) => console.info(JSON.stringify(e)));
   runAuditHook(sink, { event: 'report_access', principalKind: principal ? 'user' : 'none', principalId: principal?.id ?? null, ...instance, format, permission, outcome: d.allow ? 'allow' : 'deny', status });
-  if (d.allow) return { ok: true, userId: d.principal.id };
+  if (d.allow) {
+    const can = (p: Permission) => authorize(dir.directory, principal, p, resource).allow;
+    return { ok: true, userId: d.principal.id, displayName: dir.directory.users.get(d.principal.id.toLowerCase())?.displayName ?? d.principal.id, can };
+  }
   return d.status === 401 ? { ok: false, status: 401, code: 'unauthorized', message: 'Sign-in required' } : { ok: false, status: 403, code: 'forbidden', message: 'Not permitted' };
 }

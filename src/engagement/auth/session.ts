@@ -56,7 +56,7 @@ export class EngagementSessionStore {
         CREATE TABLE IF NOT EXISTS engagement_sessions (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
           engagement_id TEXT NOT NULL, created INTEGER NOT NULL, last_seen INTEGER NOT NULL, expires INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS engagement_sessions_user ON engagement_sessions (user_id);`);
-      if (filename !== ':memory:') for (const f of [filename, `${filename}-wal`, `${filename}-shm`]) if (existsSync(f)) chmodSync(f, 0o600);
+      if (filename !== ':memory:') for (const f of [filename, `${filename}-wal`, `${filename}-shm`]) if (existsSync(/* turbopackIgnore: true */ f)) chmodSync(/* turbopackIgnore: true */ f, 0o600);
     });
   }
   close(): void { guarded(() => this.db.close()); }

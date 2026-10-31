@@ -72,6 +72,8 @@ export interface OidcRouteDeps {
   fetch?: oidc.CustomFetch; audit?: (e: AuthAuditEvent) => void | Promise<void>; configCache?: Map<string, { at: number; config: oidc.Configuration }>;
   /** Starts per client (default 30 per minute, per process). */
   startLimiter?: SlidingWindowRateLimiter;
+  /** Clients the start limiter tracks at most; a new client beyond it is refused (default 10,000). */
+  startMaxKeys?: number;
 }
 const sharedStartLimiter = new SlidingWindowRateLimiter(30, 60_000);
 interface Ctx { origin: string; instance: Instance; directory: Directory; env: Env; now: number; sessions: EngagementSessionStore; txs: OidcTransactionStore; audit(status: number, id?: string): void }
@@ -122,7 +124,11 @@ const callbackUrl = (origin: string) => `${origin}/api/auth/oidc/callback`;
 
 export function createOidcStartRoute(deps: OidcRouteDeps = {}): NextApiHandler {
   return route('oidc_start', deps, async (req, res, ctx) => {
-    const rl = (deps.startLimiter ?? sharedStartLimiter).take(signInClient(req, Number(ctx.env.RATIO_TRUSTED_PROXY_HOPS)));
+    const limiter = deps.startLimiter ?? sharedStartLimiter;
+    const client = signInClient(req, Number(ctx.env.RATIO_TRUSTED_PROXY_HOPS));
+    const seen = limiter.peek(client);
+    const full = limiter.size() >= (deps.startMaxKeys ?? 10_000) && seen.remaining === seen.limit; // a new client while the table is full
+    const rl = full ? { allowed: false, retryAfterSec: 60 } : limiter.take(client);
     if (!rl.allowed) { res.setHeader('Retry-After', String(rl.retryAfterSec)); sendError(res, 429, 'rate_limited', 'Too many sign-in attempts. Try again later.'); return ctx.audit(429); }
     const q = req.query ?? {};
     const conn = Object.keys(q).length === 1 && typeof q.connection === 'string' ? ctx.directory.connections.get(q.connection) : undefined;

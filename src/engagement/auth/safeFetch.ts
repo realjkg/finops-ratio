@@ -62,8 +62,9 @@ export function guardedFetch(opts: GuardOptions = {}) {
     const url = new URL(input);
     if (url.protocol !== 'https:') throw refuse('https only');
     const host = url.hostname.replace(/^\[|\]$/g, '');
-    const late = new Promise<[]>((r) => setTimeout(() => r([]), lookupTimeoutMs).unref?.());
-    const answers = isIP(host) ? [{ address: host, family: isIP(host) }] : await Promise.race([lookup(host).catch(() => [] as []), late]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<[]>((r) => { timer = setTimeout(() => r([]), lookupTimeoutMs); });
+    const answers = isIP(host) ? [{ address: host, family: isIP(host) }] : await Promise.race([lookup(host).catch(() => [] as []), late]).finally(() => clearTimeout(timer));
     if (answers.length === 0 || !answers.every((a) => isPublicAddress(a.address))) throw refuse('address not public');
     const pinned = answers[0];
     const body = init.body == null ? undefined : typeof init.body === 'string' ? init.body : init.body instanceof Uint8Array ? Buffer.from(init.body).toString() : String(init.body);
