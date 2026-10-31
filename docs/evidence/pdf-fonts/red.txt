@@ -1,0 +1,11 @@
+RED round 1 (73646e6, implementation at origin/main fc83459): 4/9 files, 5/78 tests failed (no fonts, no 422).
+RED round 2 (review of 676e10e; tests only, implementation at 676e10e):
+Command: npx vitest run --cache=false src/reports src/server/costs/engagementReportPdfRoute.test.ts
+Result: Test Files 4 failed | 5 passed (9); Tests 16 failed | 113 passed (129)
+- pdfFonts.test.ts (8): code points above U+FFFF (U+20BB7, U+1E780, U+1F170) and decomposition-only letters
+  (U+01F9 U+1E3F U+1E43 U+1E45 U+1E63 U+1EB9 U+1ECB U+1ECD U+1EE5) and TAB classified ok; no glyph keys/collisions
+- engagementReportPdf.test.tsx (5): Vietnamese dot-below, astral and glyph-twin cells not refused; no CJK cost
+  weight; cjk-spaced 50 x 2,000 killed by the 15 s watchdog; no render-slot limit
+- pdfExtraction.test.tsx (1): corpus round-trip (fails at the missing glyph-key export; its assertions are proven
+  by mutation in green.txt)
+- engagementReportPdfRoute.test.ts (1): no 503 pdf_busy

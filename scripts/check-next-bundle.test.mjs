@@ -9,7 +9,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { checkNextBundle, CLIENT_FORBIDDEN, COSTS_ENTRY, ENGAGEMENT_REPORT_ENTRY, READER_ENTRIES, READER_MARKERS, REPORT_FACTS_ENTRY, WORKER_ONLY } from './check-next-bundle.mjs';
+import { Buffer } from 'node:buffer';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { bundledFontHashes, checkNextBundle, CLIENT_FORBIDDEN, FONT_MARKERS, COSTS_ENTRY, ENGAGEMENT_REPORT_ENTRY, READER_ENTRIES, READER_MARKERS, REPORT_FACTS_ENTRY, WORKER_ONLY } from './check-next-bundle.mjs';
 
 const dirs = [];
 afterEach(() => {
@@ -171,5 +174,30 @@ describe('B4 the check is never vacuous', () => {
     const root = cleanTree();
     write(root, `server/${COSTS_ENTRY}.nft.json`, nft([]));
     expect(problemsOf(root).join('\n')).toMatch(/pg/);
+  });
+});
+
+describe('B6 bundled PDF fonts stay out of client files', () => {
+  it('flags a client file with a bundled font\'s bytes, under any name, and passes when the hashes differ', () => {
+    const root = cleanTree();
+    const font = Buffer.from('OTTO synthetic font bytes');
+    write(root, 'static/media/abc123.bin', font);
+    const sha = crypto.createHash('sha256').update(font).digest('hex');
+    expect(problemsOf(root)).toEqual([]);
+    expect(checkNextBundle(root, { fontHashes: [sha] }).problems).toEqual(['client file static/media/abc123.bin is a bundled PDF font']);
+  });
+
+  it('the font names are client markers (font name records and the loader code)', () => {
+    expect(FONT_MARKERS).toEqual(['NotoSans-Regular', 'NotoSans-Bold', 'NotoSansCJKsc']);
+    for (const m of FONT_MARKERS) expect(CLIENT_FORBIDDEN).toContain(m);
+    const root = cleanTree();
+    write(root, 'static/chunks/pdf.js', 'Font.register({src:"assets/fonts/NotoSansCJKsc-Regular.otf"})');
+    expect(problemsOf(root)).toEqual(['client file static/chunks/pdf.js contains NotoSansCJKsc']);
+  });
+
+  it('bundledFontHashes reads the repository fonts (the CLI fails when none are found)', () => {
+    const repoFonts = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'fonts');
+    expect(bundledFontHashes(repoFonts)).toHaveLength(3);
+    expect(bundledFontHashes(path.join(os.tmpdir(), 'no-such-ratio-fonts'))).toEqual([]);
   });
 });

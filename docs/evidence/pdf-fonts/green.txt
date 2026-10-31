@@ -1,0 +1,16 @@
+GREEN round 2 (review of 676e10e). Node 22.22.0, @react-pdf/renderer 4.5.1, fontkit 2.0.4.
+Gates: lint, tsc app+worker, full vitest (265 files / 4,750 tests), worker:build, build, check:bundle: pass.
+Supported = BMP code points of the declared scripts that a bundled face draws as ONE glyph whose text-layer code
+points are the character itself (ligatures/contextual alternates off; glyph cache pre-created per canonical code
+point, so the text layer does not depend on render history). Refused (422): astral (CJK Ext B, U+1F170), letters
+drawn as base + mark (ǹ ḿ ṃ ṅ ṣ ẹ ị ọ ụ: Vietnamese/Yoruba dot below), secondary glyph twins (U+2F00, U+2329, U+2780,
+U+3BA3), vertical kana repeat marks, plus round 1's complex scripts, emoji, controls. Per document, a simulation of
+the text layer (textLayerFaults) refuses any value whose glyphs would not map back to its exact text.
+Corpus (pdfExtraction.test.tsx): every supported BMP code point from U+0080 (Han/Hangul 1 in 13) rendered and
+decoded through the ToUnicode maps: exact. Mutations: drop the code-point check (5 failed); allow U+3031-3035 (corpus
+1 failed); ligatures back on (2); no glyph pre-creation (1); astral allowed (6); no font-switch cost (1); no CJK cost
+(2); no render-slot limit (2). Dropping only the glyph-count check is equivalent (the code-point check still refuses).
+Costs: CJK character 10, font switch 10 (caps unchanged otherwise); at most 2 renders at once (503 pdf_busy).
+Watchdog runs (ms / MB RSS / bytes): 50x2,000 CJK spaced 5,673 / 297 / 114,319 (was killed at 15 s; reviewer
+37.7 s uncapped); 50x2,000 CJK dense 3,519 / 264 / 102,034; Latin hostile spaced 6,257 / 406 / 84,439, unbroken
+6,836 / 350 / 82,573; sample 894 / 222 / 25,919; 200 categories 9,311 / 514 / 80,887; 200 CJK-heavy 11,048 / 534.

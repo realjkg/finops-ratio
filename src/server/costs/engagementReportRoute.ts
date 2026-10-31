@@ -5,9 +5,12 @@
 // shared factory as /api/v1/reports/facts: live-data auth, gateway (GET only),
 // tenant from the server (engagement config in engagement mode), reader login,
 // deadline, fail-closed 503s and a generic 500. format is an exact allowlist.
+// A PDF whose text the bundled fonts cannot render faithfully is refused with 422
+// (fixed, counts-only message; no PDF); the XLSX and JSON carry the full text.
+// With every PDF render slot taken, a PDF request is 503 pdf_busy (Retry-After).
 import type { NextApiHandler } from 'next';
 import { buildEngagementReportModel, engagementReportFilename, type EngagementReportModel } from '@/reports/engagementReportModel';
-import { renderEngagementReportPdf } from '@/reports/engagementReportPdf';
+import { PDF_BUSY_MESSAGE, PdfBusyError, PdfUnsupportedTextError, renderEngagementReportPdf, type PdfUnsupportedCounts } from '@/reports/engagementReportPdf';
 import { renderEngagementReportXlsx } from '@/reports/engagementReportXlsx';
 import { createReaderRoute, type PublishedCostsRouteDeps } from './publishedCostsRoute';
 import { parseReportFactsQuery, readReportFacts } from './reportFactsRoute';
@@ -24,7 +27,16 @@ export function parseEngagementReportQuery(query: Record<string, string | string
   return { ok: true, value: { period: p.value.period, format } };
 }
 
-type Out = { format: 'json'; model: EngagementReportModel } | { format: 'xlsx' | 'pdf'; body: Buffer; filename: string };
+type Out = { format: 'json'; model: EngagementReportModel } | { format: 'xlsx' | 'pdf'; body: Buffer; filename: string } | { format: 'pdf-refused'; counts: PdfUnsupportedCounts; message: string } | { format: 'pdf-busy' };
+
+async function renderPdf(model: EngagementReportModel): Promise<Buffer | PdfUnsupportedTextError | PdfBusyError> {
+  try {
+    return await renderEngagementReportPdf(model);
+  } catch (err) {
+    if (err instanceof PdfUnsupportedTextError || err instanceof PdfBusyError) return err;
+    throw err;
+  }
+}
 
 export function createEngagementReportRoute(deps: PublishedCostsRouteDeps = {}): NextApiHandler {
   return createReaderRoute(deps, {
@@ -35,13 +47,24 @@ export function createEngagementReportRoute(deps: PublishedCostsRouteDeps = {}):
       const { facts, label } = await readReportFacts(pool, tenantId, q.period, env, now);
       const model = buildEngagementReportModel(facts, label);
       if (q.format === 'json') return { format: 'json', model };
-      const body = q.format === 'pdf' ? await renderEngagementReportPdf(model) : await renderEngagementReportXlsx(model);
+      const body = q.format === 'pdf' ? await renderPdf(model) : await renderEngagementReportXlsx(model);
+      if (body instanceof PdfUnsupportedTextError) return { format: 'pdf-refused', counts: body.counts, message: body.message };
+      if (body instanceof PdfBusyError) return { format: 'pdf-busy' };
       return { format: q.format, body, filename: engagementReportFilename(facts.period.month, q.format, now) };
     },
     respond: (res, result) => {
       const out = result as Out;
       if (out.format === 'json') {
         res.status(200).json(out.model);
+        return;
+      }
+      if (out.format === 'pdf-busy') {
+        res.setHeader('Retry-After', '5');
+        res.status(503).json({ error: { code: 'pdf_busy', message: PDF_BUSY_MESSAGE } });
+        return;
+      }
+      if (out.format === 'pdf-refused') {
+        res.status(422).json({ error: { code: 'pdf_unsupported_text', message: out.message, counts: out.counts } });
         return;
       }
       res.setHeader('Content-Type', FORMATS[out.format]);
