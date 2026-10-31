@@ -11,3 +11,4 @@ listDeliveries and open > a range-less fetch skipping a missing middle month war
  Test Files  1 failed (1)
       Tests  8 failed | 20 passed (28)
 Guards that pass before and after: newer manifest with files not landed -> older published; invalid OLDER manifest does not block a newer complete one.
+(The RED commit f1c265e had 6 invalid-manifest cases; two were dropped later to fit the size budget.)

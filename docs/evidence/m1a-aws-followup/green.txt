@@ -1,12 +1,13 @@
 M1a follow-up (invalid newer manifest, doc corrections, gap-month warning) -- GREEN
 Base: origin/main f8f1a37. Gates run sequentially in the foreground:
 - npm run lint: pass; npm run typecheck (app) and tsc -p tsconfig.worker.json (worker): pass
-- npx vitest run: Test Files 239 passed (239); Tests 4387 passed (4387) (focusRetriever.test.ts: 28 tests; was RED with 8 failed | 20 passed)
+- npx vitest run: Test Files 239 passed (239); Tests 4385 passed (4385) (focusRetriever.test.ts: 26 tests, after trimming to the size budget)
+- (test:db, worker:build, build, check:bundle were run before the test-only trim and are unaffected by it)
 - npm run test:db (own Postgres 16 :25432, SeaweedFS :28333, -volume.max=64 -master.volumeSizeLimitMB=64 -volume.minFreeSpace=300MiB, CI digests):
   44 files / 712 tests; serial 6 files / 173 tests; all passed; containers removed afterwards
 - npm run worker:build, npm run build, npm run check:bundle: pass (clientFiles 137, serverFiles 133, no problems)
-Mutations (each alone on focusRetriever.test.ts, then reverted; baseline 28 pass):
-- M1 invalid newer manifest never blocks: KILLED (7 failed)
+Mutations (each alone on focusRetriever.test.ts, then reverted; baseline 26 pass):
+- M1 invalid newer manifest never blocks: KILLED (5 failed)
 - M2 equal LastModified not blocking: KILLED (1 failed)
 - M3 not-landed manifests treated as invalid (no structural parse): KILLED (2 failed)
 - M4 any invalid manifest blocks, even an older one: KILLED (1 failed)
