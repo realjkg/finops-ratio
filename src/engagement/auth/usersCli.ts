@@ -120,8 +120,8 @@ export async function usersMain(argv: string[], env: Env, io: IO, deps: UsersDep
     const userOf = (id: unknown) => doc.users.find((u) => same(u.id, id));
     const memberOf = (id: unknown) => doc.memberships?.find((m) => same(m.userId, id));
     const activeAdmin = (u: Rec | undefined) => !!u && u.status === 'active' && memberOf(u.id)?.status === 'active' && memberOf(u.id)?.role === 'tenant_admin';
-    // The actor label: `operator`, or the exact (canonical, untrimmed) id of an active tenant_admin.
-    const actor = by === 'operator' ? 'operator' : activeAdmin(userOf(by)) && by === by.trim() ? (userOf(by)!.id as string) : null;
+    // The actor label: `operator`, or the id of an active tenant_admin (case-insensitive, never trimmed; recorded canonical).
+    const actor = by === 'operator' ? 'operator' : activeAdmin(userOf(by)) ? (userOf(by)!.id as string) : null;
     base.actor = actor ?? null;
     if (!actor) throw new Refused('users.actor_invalid');
     let target = f.get('id');

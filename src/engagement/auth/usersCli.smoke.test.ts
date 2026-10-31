@@ -25,7 +25,7 @@ it('the compiled `cli.js users` writes users.json atomically in its directory an
   fs.chmodSync(path.join(root, 'config'), 0o555);
   const before = fs.readdirSync(root).sort();
   const env = { PATH: process.env.PATH, RATIO_ENGAGEMENT_CONFIG: path.join(REPO, 'fixtures/engagement/example/engagement.json'), RATIO_ENGAGEMENT_USERS: path.join(users, 'users.json'),
-    RATIO_ENGAGEMENT_STATE: path.join(state, 'sessions.sqlite') } as NodeJS.ProcessEnv;
+    RATIO_ENGAGEMENT_STATE: path.join(state, 'sessions.sqlite') } as unknown as NodeJS.ProcessEnv;
   const cli = (args: string[], input = '') => spawnSync(process.execPath, [path.join(out, 'ingest/cli.js'), 'users', ...args], { env, input, cwd: root, encoding: 'utf8' });
   const add = cli(['add', '--id', 'v', '--name', 'SYNTHETIC Viewer', '--role', 'viewer', '--password-stdin', '--by', 'admin'], 'synthetic-password-0123456789\n');
   expect([add.status, JSON.parse(add.stdout.trim()).outcome], add.stderr).toEqual([0, 'success']);
