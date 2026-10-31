@@ -33,4 +33,5 @@ jobs:
           path: |
             .simulation-test-results/
             .engagement-test-results/
+          include-hidden-files: true
           retention-days: 7

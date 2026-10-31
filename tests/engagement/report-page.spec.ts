@@ -11,9 +11,14 @@ const MODEL = { schema: 'ratio.engagement-report/1', title: 'SYNTHETIC engagemen
     { id: 'coverageGaps', title: 'Coverage gaps', columns: ['Code', 'Detail'], rows: [['BATCH_STATUS_NOT_VISIBLE', 'SYNTHETIC: the last published batch is shown as of its publication.']] }] };
 const shot = (page: Page, name: string) => page.screenshot({ path: `.engagement-test-results/screens/${name}.png`, fullPage: true });
 
-test('anonymous: 401, no-store, Vary: Cookie, only a sign-in link per enabled connection', async ({ page }) => {
+test('anonymous: 401, no-store, Vary: Cookie, CSP enforced with no violation, only a sign-in link per enabled connection', async ({ page }) => {
+  const csp: string[] = [];
+  page.on('console', (m) => { if (/content security policy|refused to/i.test(m.text())) csp.push(m.text()); });
   const res = await page.goto('/engagement');
   expect([res?.status(), res?.headers()['cache-control'], res?.headers().vary]).toEqual([401, 'no-store', 'Cookie']);
+  expect(res?.headers()['content-security-policy']).toContain("script-src 'self' 'sha256-");
+  await page.waitForLoadState('networkidle');
+  expect(csp).toEqual([]);
   await expect(page.getByRole('link', { name: 'Sign in with synthetic-idp' })).toHaveAttribute('href', '/api/auth/oidc/start?connection=synthetic-idp');
   await shot(page, 'signin');
 });

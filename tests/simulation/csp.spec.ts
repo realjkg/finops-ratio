@@ -28,6 +28,8 @@ function pageRoutes(dir = 'pages', prefix = ''): string[] {
 
 // pages/_error.tsx is the app's own page, so even the 404 is scanned with no allowlist.
 const NEXT_404 = '/__csp-unknown-route';
+// Engagement-mode-only pages answer 404 on this simulation server; tests/engagement/report-page.spec.ts scans them there.
+const ENGAGEMENT_ONLY = ['/engagement'];
 const scan = async (page: Page, route: string) => {
   const violations = await watch(page);
   const res = await page.goto(route);
@@ -42,7 +44,7 @@ test('every page route is enforced, renders and reports zero violations', async 
   for (const route of [...routes, NEXT_404]) {
     const page = await context.newPage();
     const { status, header, found } = await scan(page, route);
-    expect(status, route).toBe(route === NEXT_404 ? 404 : 200);
+    expect(status, route).toBe(route === NEXT_404 || ENGAGEMENT_ONLY.includes(route) ? 404 : 200);
     expect(header, route).toContain("script-src 'self' 'sha256-");
     if (route !== NEXT_404) await expect(page.locator('#__next > *').first(), route).toBeAttached();
     expect(found, route).toEqual([]);
