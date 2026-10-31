@@ -17,3 +17,4 @@ Review round 2 (blocker: gapWarning used monthsOf and threw RANGE_TOO_LONG on a 
 RED on the new tests only (commit after e450cb3): npx vitest run src/connectors/managed/aws/focusRetriever.test.ts -> Tests 2 failed | 26 passed (28)
 - gap warning never fails a fetch (40 contiguous months staged 0, status failed with RANGE_TOO_LONG before the fix)
 - a newer manifest listing no data files must be MANIFEST_INVALID
+(The other new cases, year boundary, 24 shown, reset per listing, unknown LastModified, no-complete branch, guard earlier gaps in mutation coverage and pass on both sides.)
