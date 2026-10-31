@@ -3,16 +3,18 @@
 // missing values, periods and assumptions). For each case the ONE engagement
 // report model is rendered three ways and the cell texts are read back per
 // section: the UI table (React Testing Library), the XLSX sheet (ExcelJS) and
-// the PDF element tree. They must be identical, cell for cell. The only allowed
-// PDF difference is the disclosed glyph fallback ('?' for characters the
-// built-in PDF font cannot draw), applied to the UI text before comparing.
+// the PDF element tree. They must be identical, cell for cell. The PDF's only
+// allowed differences are the ones it discloses on page 1 (#159): the glyph
+// fallback ('?' for characters its built-in font cannot draw) on every cell, and,
+// on DATA cells only (imported or configured free text, DATA_TEXT_CELLS), the
+// per-cell cap with its marker. Every other cell must match exactly.
 import ExcelJS from 'exceljs';
 import { cleanup, render, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { assembleReportFacts, NA_REASONS } from './reportFacts';
-import { ALTERED_CELLS_ITEM, buildEngagementReportModel, type EngagementReportModel, type ReportSection } from './engagementReportModel';
+import { ALTERED_CELLS_ITEM, buildEngagementReportModel, DATA_TEXT_CELLS, type EngagementReportModel, type ReportSection } from './engagementReportModel';
 import { renderEngagementReportXlsx } from './engagementReportXlsx';
-import { EngagementReportDocument, pdfGlyphText, pdfLayout } from './engagementReportPdf';
+import { EngagementReportDocument, PDF_CELL_MAX_CHARS, PDF_MODEL_TEXT_MAX_CHARS, PDF_TOTAL_MAX_CHARS, PDF_TRUNCATION_MARKER, PDF_TRUNCATION_NOTE, pdfGlyphText, pdfLayout } from './engagementReportPdf';
 import { EngagementReportView } from './EngagementReportView';
 import { ENGAGEMENT, g, SRC_B, sampleInput } from './fixtures/sampleFacts';
 import { treeTexts } from './fixtures/pdfText';
@@ -59,7 +61,7 @@ async function xlsxTables(m: EngagementReportModel): Promise<Record<string, Tabl
 
 /** Rebuilds a section's table from the PDF element tree (table: header + rows; records: "column, value" pairs). */
 function pdfTable(m: EngagementReportModel, s: ReportSection): Table {
-  const texts = treeTexts(<EngagementReportDocument model={{ ...m, sections: [s] }} />).slice(2).filter((t) => !t.startsWith('PDF font: '));
+  const texts = treeTexts(<EngagementReportDocument model={{ ...m, sections: [s] }} />).slice(2).filter((t) => !t.startsWith('PDF font: ') && !t.startsWith('PDF length limit: '));
   const n = s.columns.length;
   if (pdfLayout(s) === 'table') return Array.from({ length: texts.length / n }, (_, i) => texts.slice(i * n, i * n + n));
   const rows: Table = [s.columns.map(pdfGlyphText)];
@@ -68,6 +70,16 @@ function pdfTable(m: EngagementReportModel, s: ReportSection): Table {
     rows[rows.length - 1][s.columns.map(pdfGlyphText).indexOf(texts[i])] = texts[i + 1];
   }
   return rows;
+}
+
+const isData = (s: ReportSection, row: string[], i: number) =>
+  s.id === 'summary' ? i === 1 && DATA_TEXT_CELLS.summaryItems.includes(row[0]) : (DATA_TEXT_CELLS.columns[s.id] ?? []).includes(s.columns[i]);
+
+/** What the PDF must show for one cell (these cases stay under the document budget, asserted per case). */
+function pdfExpected(s: ReportSection, row: string[], i: number): string {
+  const g = pdfGlyphText(row[i]);
+  if (!isData(s, row, i) || g.length <= PDF_CELL_MAX_CHARS) return g;
+  return `${g.slice(0, PDF_CELL_MAX_CHARS)}${PDF_TRUNCATION_MARKER(g.length - PDF_CELL_MAX_CHARS)}`;
 }
 
 afterEach(cleanup);
@@ -82,8 +94,15 @@ describe('UI, XLSX and PDF show identical cell texts per section', () => {
         const expected = [s.columns, ...s.rows];
         expect(ui[s.id], `${s.id}: UI`).toEqual(expected);
         expect(xlsx[s.id], `${s.id}: XLSX`).toEqual(expected);
-        expect(pdfTable(m, s), `${s.id}: PDF`).toEqual(expected.map((r) => r.map(pdfGlyphText)));
+        expect(pdfTable(m, s), `${s.id}: PDF`).toEqual([s.columns.map(pdfGlyphText), ...s.rows.map((r) => r.map((_, i) => pdfExpected(s, r, i)))]);
       }
+      // The caps cut only DATA cells here: the document budget is not reached and no model text hits its ceiling.
+      const cells = m.sections.flatMap((s) => s.rows.flatMap((r) => r.map((c, i) => ({ g: pdfGlyphText(c), data: isData(s, r, i) }))));
+      expect(cells.filter((c) => c.data).reduce((n, c) => n + Math.min(c.g.length, PDF_CELL_MAX_CHARS), 0)).toBeLessThan(PDF_TOTAL_MAX_CHARS);
+      expect(cells.filter((c) => !c.data && c.g.length > PDF_MODEL_TEXT_MAX_CHARS)).toEqual([]);
+      const cut = cells.filter((c) => c.data && c.g.length > PDF_CELL_MAX_CHARS).length;
+      const notes = treeTexts(<EngagementReportDocument model={m} />).filter((t) => t.startsWith('PDF length limit: '));
+      expect(notes, 'the page-1 truncation count').toEqual(cut ? [PDF_TRUNCATION_NOTE(cut)] : []);
     });
   }
 

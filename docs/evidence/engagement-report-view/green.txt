@@ -9,3 +9,12 @@ Engagement report view + UI/XLSX/PDF agreement (1.0, report-facts PR 3b): GREEN,
   inspected; amounts verbatim, N/A with reasons, the Data status warning visible, wide tables scroll horizontally.
 Mutations (agreement test): V1 warning banner removed: killed; V2 amounts formatted on screen: killed;
 V3 Note column dropped on screen: killed; V4 table region not keyboard-focusable: killed.
+
+After #159 (main fc83459): cap-aware agreement. GREEN, local run 2026-10-31.
+- The PDF's expected text: glyph fallback on every cell; on DATA cells only (DATA_TEXT_CELLS), the per-cell cap with
+  PDF_TRUNCATION_MARKER; every other cell exact. Per case the test asserts the document budget is not reached, no
+  model text hits its ceiling, and the page-1 truncation note matches the number of cut cells (hostile case: 1).
+- lint, typecheck (app + worker): pass. npx vitest run --cache=false: 259 files / 4647 tests passed.
+- build, check:bundle: pass. test:db not run (no database test or route changed).
+Mutations (agreement test), each killed: A1 PDF drops a model cell; A2 cap applied to non-data text; A3 UI changes
+an amount; A4 PDF changes a cell's text; A5 page-1 truncation count wrong.
