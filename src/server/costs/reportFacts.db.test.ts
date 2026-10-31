@@ -217,14 +217,14 @@ describe('engagement report XLSX (GET /api/v1/reports/engagement) over the impor
   it('2024-10 (quarantined): every amount is N/A with the reason, never 0', async () => {
     const { rows } = await workbook(engagementEnv, '2024-10');
     const totals = rows('Totals by currency');
-    expect(totals[1].at(-1)).toBe(NA_REASONS.noPublished);
+    expect(totals[1].at(-1)).toBe(`${totals[0].slice(0, -1).join(', ')}: N/A (${NA_REASONS.noPublished})`);
     expect(totals[1].slice(0, -1).every((c) => c === 'N/A')).toBe(true);
   });
 
   it('another tenant (env-bound, non-engagement) never sees the sample', async () => {
     const { rows } = await workbook({ RATIO_API_TENANT_ID: C.tenant }, '2024-09');
-    expect(rows('Totals by currency')[1].at(-1)).toBe(NA_REASONS.noPublished);
-    expect(rows('Report').find((r) => r[0] === 'Engagement')).toEqual(['Engagement', 'N/A', NA_REASONS.noEngagement]);
+    expect(rows('Totals by currency')[1].at(-1)).toContain(`: N/A (${NA_REASONS.noPublished})`);
+    expect(rows('Report').find((r) => r[0] === 'Engagement')).toEqual(['Engagement', 'N/A', `Engagement: N/A (${NA_REASONS.noEngagement})`]);
   });
 });
 

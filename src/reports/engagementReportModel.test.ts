@@ -15,6 +15,9 @@ const section = (m: EngagementReportModel, id: string): ReportSection => {
   return s;
 };
 const col = (s: ReportSection, name: string) => s.columns.indexOf(name);
+/** Expected Note text: each reason once, prefixed with the columns (or summary item) it explains. */
+const naNote = (names: string[], reason: string) => `${names.join(', ')}: N/A (${reason})`;
+const allNa = (s: ReportSection, reason: string) => [...s.columns.slice(0, -1).map(() => 'N/A'), naNote(s.columns.slice(0, -1), reason)];
 const item = (m: EngagementReportModel, label: string) => section(m, 'summary').rows.find((r) => r[0] === label);
 
 describe('engagement report model: the sample, AWS 2024-09', () => {
@@ -47,7 +50,7 @@ describe('engagement report model: the sample, AWS 2024-09', () => {
     expect([r[col(t, 'Currency')], r[col(t, 'Rows')], r[col(t, 'Billed cost')], r[col(t, 'Effective cost')]]).toEqual(['USD', '942', '18.00663861840', '13.00000000000']);
     expect([r[col(t, 'Credits rows')], r[col(t, 'Credits billed')], r[col(t, 'Credits effective')]]).toEqual(['1', '-2.61370000000', '-3.00000000000']);
     expect(r[col(t, 'Adjustments billed')]).toBe('N/A');
-    expect(r[col(t, 'Note')]).toBe(NA_REASONS.noAdjustmentRows);
+    expect(r[col(t, 'Note')]).toBe(naNote(['Adjustments rows', 'Adjustments billed', 'Adjustments effective'], NA_REASONS.noAdjustmentRows));
     const c = section(m, 'chargeCategories').rows.map((x) => x.slice(2, 6));
     expect(c).toEqual([['Credit', '1', '-2.61370000000', '-3.00000000000'], ['Usage', '941', '20.62033861840', '16.00000000000']]);
   });
@@ -58,7 +61,7 @@ describe('engagement report model: the sample, AWS 2024-09', () => {
     expect(s.columns).toContain('Staged artifact sha256 (per-period file the import wrote, not the operator file)');
     expect(r[col(s, 'Staged artifact sha256 (per-period file the import wrote, not the operator file)')]).toBe(STAGED);
     for (const c of ['Source key', 'Operator file sha256', 'Reconciliation', 'Control totals']) expect(r[col(s, c)], c).toBe('N/A');
-    for (const reason of [NA_REASONS.sourceKey, NA_REASONS.operatorFile, NA_REASONS.batchStatus]) expect(r[col(s, 'Note')]).toContain(reason);
+    expect(r[col(s, 'Note')]).toBe([naNote(['Source key'], NA_REASONS.sourceKey), naNote(['Operator file sha256'], NA_REASONS.operatorFile), naNote(['Reconciliation', 'Control totals'], NA_REASONS.batchStatus)].join('; '));
     expect(section(m, 'coverageGaps').rows.map((x) => x[0])).toEqual(['BATCH_STATUS_NOT_VISIBLE', 'DECLARED_SOURCES_NOT_LINKED']);
   });
 
@@ -77,9 +80,9 @@ describe('engagement report model: missing and incomplete data stay explicit', (
   it('no published data: totals and imports are N/A rows with the reason, never 0', () => {
     const m = model({ groups: [], batches: [], artifacts: [] });
     const t = section(m, 'totals');
-    expect(t.rows).toEqual([[...t.columns.slice(0, -1).map(() => 'N/A'), NA_REASONS.noPublished]]);
+    expect(t.rows).toEqual([allNa(t, NA_REASONS.noPublished)]);
     expect(section(m, 'imports').rows[0].at(-1)).toContain(NA_REASONS.noPublished);
-    expect(item(m, 'Currencies in data')).toEqual(['Currencies in data', 'N/A', NA_REASONS.noPublished]);
+    expect(item(m, 'Currencies in data')).toEqual(['Currencies in data', 'N/A', naNote(['Currencies in data'], NA_REASONS.noPublished)]);
     expect(JSON.stringify(m)).not.toMatch(/"0(\.0+)?"/);
   });
 
@@ -87,7 +90,7 @@ describe('engagement report model: missing and incomplete data stay explicit', (
     const m = model({ groups: [g({ effectiveCost: '12.00000000000', effectiveMissingRows: '2' }), g({ isTotal: false, chargeCategory: 'Usage', effectiveCost: '12.00000000000', effectiveMissingRows: '2' })] });
     const t = section(m, 'totals');
     expect(t.rows[0][col(t, 'Effective cost')]).toBe('12.00000000000');
-    expect(t.rows[0][col(t, 'Note')]).toContain(`${NA_REASONS.effectivePartial} (2 rows without EffectiveCost)`);
+    expect(t.rows[0][col(t, 'Note')]).toContain(`Effective cost: ${NA_REASONS.effectivePartial} (2 rows without EffectiveCost)`);
   });
 
   it('two sources in two currencies: no combined totals row; each source and currency listed separately', () => {
@@ -95,7 +98,7 @@ describe('engagement report model: missing and incomplete data stay explicit', (
       groups: [g({}), g({ isTotal: false, chargeCategory: 'Usage' }), g({ sourceId: SRC_B, currency: 'EUR', billedCost: '7.00', effectiveCost: '7.00' }), g({ sourceId: SRC_B, currency: 'EUR', isTotal: false, chargeCategory: 'Usage', billedCost: '7.00', effectiveCost: '7.00' })],
       batches: [...sampleInput().batches, { ...sampleInput().batches[0], sourceId: SRC_B, batchId: 'bbbbbbbb-0000-4000-8000-000000000002' }],
     });
-    expect(section(m, 'totals').rows[0].at(-1)).toBe(NA_REASONS.multiSource);
+    expect(section(m, 'totals').rows).toEqual([allNa(section(m, 'totals'), NA_REASONS.multiSource)]);
     const st = section(m, 'sourceTotals');
     expect(st.rows.map((r) => [r[0], r[1], r[col(st, 'Billed cost')]])).toEqual([[SRC, 'USD', '18.00663861840'], [SRC_B, 'EUR', '7.00']]);
     expect(item(m, 'Currencies in data')?.[1]).toBe('EUR, USD');
@@ -103,9 +106,9 @@ describe('engagement report model: missing and incomplete data stay explicit', (
 
   it('without an engagement config the engagement and declared policies are N/A with the reason', () => {
     const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ engagement: null })), null);
-    expect(item(m, 'Engagement')).toEqual(['Engagement', 'N/A', NA_REASONS.noEngagement]);
-    expect(item(m, 'Declared credits coverage')).toEqual(['Declared credits coverage', 'N/A', NA_REASONS.noEngagement]);
-    expect(section(m, 'declaredSources').rows).toEqual([[...section(m, 'declaredSources').columns.slice(0, -1).map(() => 'N/A'), NA_REASONS.noEngagement]]);
+    expect(item(m, 'Engagement')).toEqual(['Engagement', 'N/A', naNote(['Engagement'], NA_REASONS.noEngagement)]);
+    expect(item(m, 'Declared credits coverage')).toEqual(['Declared credits coverage', 'N/A', naNote(['Declared credits coverage'], NA_REASONS.noEngagement)]);
+    expect(section(m, 'declaredSources').rows).toEqual([allNa(section(m, 'declaredSources'), NA_REASONS.noEngagement)]);
   });
 
   it('filename: deterministic, period and instant stamped', () => {

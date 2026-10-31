@@ -56,7 +56,7 @@ describe('engagement report XLSX', () => {
     const book = await open(m);
     const text: string[] = [];
     book.eachSheet((ws) => ws.eachRow((row) => row.eachCell((c) => text.push(String(c.value)))));
-    for (const reason of [NA_REASONS.noPublished, NA_REASONS.noEngagement, NA_REASONS.batchStatus]) expect(text, reason).toContain(reason);
+    for (const reason of [NA_REASONS.noPublished, NA_REASONS.noEngagement, NA_REASONS.batchStatus]) expect(text.some((x) => x.includes(reason)), reason).toBe(true);
     expect(text.filter((t) => /^-?0(\.0+)?$/.test(t))).toEqual([]);
     expect(text).toContain('N/A');
   });
