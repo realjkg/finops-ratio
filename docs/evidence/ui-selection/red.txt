@@ -1,0 +1,5 @@
+$ npx vitest run src/components/SegmentedControl.test.tsx  (tests only, before the implementation)
+ FAIL  src/components/SegmentedControl.test.tsx [ src/components/SegmentedControl.test.tsx ]
+Error: Failed to resolve import "./SegmentedControl" from "src/components/SegmentedControl.test.tsx". Does the file exist?
+ Test Files  1 failed (1)
+      Tests  no tests

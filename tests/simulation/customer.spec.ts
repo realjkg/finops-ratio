@@ -29,10 +29,10 @@ test('all personas: import, investigate, approve, apply, reload, export and sign
   await page.reload(); await expect(page.getByText(/SIM-.*requested/).first()).toBeVisible();
   await page.getByRole('link', { name: 'Workloads', exact: true }).first().click();
   for (const tab of ['Budget Profile', 'Multi-Model', 'Governance', 'Demand Shaping', 'Unit Costs', 'Alert History']) {
-    await page.getByRole('button', { name: tab, exact: true }).click();
-    await expect(page.getByRole('button', { name: tab, exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('tab', { name: tab, exact: true }).click();
+    await expect(page.getByRole('tab', { name: tab, exact: true })).toHaveAttribute('aria-selected', 'true');
   }
-  await page.getByRole('button', { name: 'Multi-Model', exact: true }).click();
+  await page.getByRole('tab', { name: 'Multi-Model', exact: true }).click();
   const alternate = await page.getByLabel('Target model').locator('option').nth(2).getAttribute('value');
   s = await state(page);
   await page.getByLabel('Target model').selectOption(alternate!);
