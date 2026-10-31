@@ -13,7 +13,10 @@ export const NA_REASONS = {
   noPublished:
     'No published batch for this period is visible to the reader. Staged, quarantined and superseded batches are not visible to the reader role yet, so a missing import cannot be told apart from a quarantined one',
   sourceKey: 'Not yet available: the reader role cannot see source keys or import metadata until the batch-status view (R4, migration 0005) exists',
-  batchStatus: 'Not yet available: reconciliation status and control totals are not visible to the reader role until the batch-status view (R4, migration 0005) exists',
+  batchStatus:
+    'Figures reflect the last PUBLISHED batch only: a newer delivery for this period may have been quarantined or left staged, and reconciliation status and control totals are not visible to the reader role until the batch-status view (R4, migration 0005) exists',
+  operatorFile:
+    "Not yet available (needs R4 import metadata): the operator file's sha256 is recorded in the staged import metadata the reader role cannot see; stagedArtifactSha256 is the per-period artifact the import wrote, so it differs from sha256sum of the operator file",
   multiSource: 'Not combined: more than one source published facts for this period, and the source-role/overlap policy cannot be applied without source keys (R4)',
   noEngagement: 'No engagement configuration (RATIO_MODE is not engagement)',
   effectivePartial: 'Partial: some rows carry no EffectiveCost; the amount covers only rows that do, and is never filled with BilledCost',
@@ -21,6 +24,9 @@ export const NA_REASONS = {
   noCreditRows: 'No rows with ChargeCategory Credit in the published facts for this period',
   noAdjustmentRows: 'No rows with ChargeCategory Adjustment in the published facts for this period',
 } as const;
+/** Only the earliest start and latest end are compared: day-level gaps inside the span are not checked. */
+export const SPAN_COVERS = 'charge-period span covers the month (day-level gaps not checked)';
+export const SPAN_PARTIAL = 'partial: charge-period span does not cover the month';
 
 export type NotAvailable = { status: 'not_available'; reason: string };
 export type Fact<T> = { status: 'available'; value: T } | NotAvailable;
@@ -38,8 +44,8 @@ export interface ReportFactsInput { period: string; asOf: string; groups: FactsA
 export interface Amounts { rowCount: string; billedCost: string; effectiveCost: EffectiveFact }
 export interface CurrencyFacts extends Amounts { currency: string; credits: Fact<Amounts>; adjustments: Fact<Amounts>; byChargeCategory: Array<Amounts & { chargeCategory: string }> }
 export interface BatchFacts {
-  batchId: string; status: 'published'; publishedAt: string; rowCount: string; artifacts: Array<{ sha256: string; rowCount: string }>;
-  reconciliation: NotAvailable; controlTotals: NotAvailable; importMetadataSha256: NotAvailable;
+  batchId: string; status: 'published'; publishedAt: string; rowCount: string; stagedArtifacts: Array<{ stagedArtifactSha256: string; rowCount: string }>;
+  operatorFileSha256: NotAvailable; reconciliation: NotAvailable; controlTotals: NotAvailable; importMetadataSha256: NotAvailable;
 }
 export interface SourceFacts { sourceId: string; sourceKey: NotAvailable; providers: string[]; focusVersions: string[]; batches: BatchFacts[]; currencies: CurrencyFacts[] }
 export interface ReportFacts {
@@ -96,7 +102,7 @@ function nextMonth(period: string): string {
 
 export function assembleReportFacts(input: ReportFactsInput): ReportFacts {
   if (!PERIOD_RE.test(input.period)) throw new Error('report facts: period must be YYYY-MM-01');
-  if (!ISO_RE.test(input.asOf)) throw new Error('report facts: asOf must be an ISO instant');
+  if (!ISO_RE.test(input.asOf) || Number.isNaN(Date.parse(input.asOf))) throw new Error('report facts: asOf must be an ISO instant');
   const start = input.period;
   const end = nextMonth(start);
   const gaps: Array<{ code: string; detail: string }> = [];
@@ -116,10 +122,11 @@ export function assembleReportFacts(input: ReportFactsInput): ReportFacts {
         status: 'published' as const,
         publishedAt: b.publishedAt,
         rowCount: decimal(b.rowCount, 'rowCount'),
-        artifacts: input.artifacts
+        stagedArtifacts: input.artifacts
           .filter((a) => a.batchId === b.batchId)
-          .map((a) => ({ sha256: a.artifactSha256, rowCount: decimal(a.rowCount, 'rowCount') }))
-          .sort((x, y) => cmp(x.sha256, y.sha256)),
+          .map((a) => ({ stagedArtifactSha256: a.artifactSha256, rowCount: decimal(a.rowCount, 'rowCount') }))
+          .sort((x, y) => cmp(x.stagedArtifactSha256, y.stagedArtifactSha256)),
+        operatorFileSha256: na(NA_REASONS.operatorFile),
         reconciliation: na(NA_REASONS.batchStatus),
         controlTotals: na(NA_REASONS.batchStatus),
         importMetadataSha256: na(NA_REASONS.sourceKey),
@@ -132,7 +139,7 @@ export function assembleReportFacts(input: ReportFactsInput): ReportFacts {
   const latest = input.batches.map((b) => b.publishedAt).sort(cmp).pop();
   const minStart = input.batches.map((b) => b.chargePeriodStart).sort(cmp)[0];
   const maxEnd = input.batches.map((b) => b.chargePeriodEnd).sort(cmp).pop();
-  const state = input.asOf < `${end}T00:00:00Z` ? 'open' : 'closed';
+  const state = Date.parse(input.asOf) < Date.parse(`${end}T00:00:00Z`) ? 'open' : 'closed';
 
   let totals: Fact<CurrencyFacts[]>;
   let completeness: Fact<string>;
@@ -144,10 +151,10 @@ export function assembleReportFacts(input: ReportFactsInput): ReportFacts {
     totals = sources.length === 1 ? ok(sources[0].currencies) : na(NA_REASONS.multiSource);
     if (sources.length > 1) gap('MULTI_SOURCE_NOT_COMBINED', NA_REASONS.multiSource);
     const covers = (minStart ?? '') <= `${start}T00:00:00.000000Z` && (maxEnd ?? '') >= `${end}T00:00:00.000000Z`;
-    completeness = ok(covers ? 'charge periods cover the whole month' : 'partial: charge periods do not cover the whole month');
+    completeness = ok(covers ? SPAN_COVERS : SPAN_PARTIAL);
     if (!covers) gap('PERIOD_PARTIAL', `Published charge periods run from ${minStart} to ${maxEnd}; the month is ${start} to ${end} (exclusive)`);
-    gap('BATCH_STATUS_NOT_VISIBLE', NA_REASONS.batchStatus);
   }
+  gap('BATCH_STATUS_NOT_VISIBLE', NA_REASONS.batchStatus);
   if (state === 'open') gap('PERIOD_OPEN', `The period has not ended as of ${input.asOf}`);
   if (sources.some((s) => s.currencies.some((c) => c.effectiveCost.status !== 'available'))) gap('EFFECTIVE_PARTIAL', NA_REASONS.effectivePartial);
 

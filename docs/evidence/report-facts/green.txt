@@ -20,3 +20,15 @@ Mutations (unit = reportFacts + route tests, db = reportFacts.db.test.ts); each 
 - M8 route parse accepts extra parameters: unit killed, db survived
 After the size trim (type declarations reformatted, one comment shortened; no logic change) lint, typecheck
 (app + worker) and the 24 affected unit files (374 tests) were rerun and pass; the DB suite was not rerun.
+
+Review round (fixes on top of 315f927): GREEN, same environment (fresh containers, CI digests, tmpfs).
+- lint, typecheck (app + worker): pass. npm test: 244 files / 4513 tests passed.
+- npm run test:db: 45 files / 719 tests; serial 6 files / 173 tests: all passed (reportFacts.db.test.ts 7/7, incl.
+  publish then a quarantined corrected delivery: last published totals shown with the BATCH_STATUS_NOT_VISIBLE warning).
+- worker:build, build, check:bundle: pass.
+Mutations (unit / db):
+- R1 batch-status warning only when data is published: killed / killed
+- R2 warning without the quarantined-or-staged wording: killed / killed
+- R3 completeness claims the whole month again: killed / survived (db imports the constant)
+- R4 as-of compared as strings at the month boundary: killed / survived
+- R5 operator file sha256 shown instead of N/A: killed / killed
