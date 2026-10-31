@@ -13,7 +13,7 @@
 import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { MODEL_REGISTRY } from '@/data/models';
+import { MODEL_REGISTRY } from '../data/models'; // relative: also compiled into dist-worker (users command)
 
 type Env = Record<string, string | undefined>;
 

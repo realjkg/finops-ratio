@@ -1,7 +1,7 @@
 // Ratio data model — see `.obvious/obvious.md` Design Guidance (Data-Model Invariants).
 // Types are the contract between seed data, forecast math, and the UI.
 
-import type { EvidenceStatus } from '@/outcomes/types';
+import type { EvidenceStatus } from '../outcomes/types';
 export type ModelProvider =
   | 'openai'
   | 'anthropic'

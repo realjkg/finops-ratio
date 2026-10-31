@@ -18,6 +18,6 @@
     "noEmit": false,
     "incremental": false
   },
-  "include": ["src/ingest/**/*.ts"],
+  "include": ["src/ingest/**/*.ts", "src/engagement/auth/usersCli.ts"],
   "exclude": ["src/ingest/**/*.test.ts", "src/ingest/**/testing/**"]
 }
