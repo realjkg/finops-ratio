@@ -43,10 +43,9 @@ export function isPublicAddress(ip: string): boolean {
   const embedded = () => `${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}`;
   if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return publicV4(embedded()); // v4-mapped
   if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return publicV4(embedded()); // NAT64
-  if (g.every((x) => x === 0) || (g.slice(0, 7).every((x) => x === 0) && g[7] === 1)) return false; // unspecified, loopback
-  if ((g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xff00) === 0xff00) return false; // ULA, link-local, multicast
   if (g[0] === 0x2001 && g[1] === 0xdb8) return false; // documentation
-  return (g[0] & 0xe000) === 0x2000; // global unicast 2000::/3 only
+  // Global unicast 2000::/3 only: this excludes ::, ::1, ULA fc00::/7, link-local fe80::/10 and multicast ff00::/8.
+  return (g[0] & 0xe000) === 0x2000;
 }
 
 const refuse = (why: string) => new Error(`refused: ${why}`);

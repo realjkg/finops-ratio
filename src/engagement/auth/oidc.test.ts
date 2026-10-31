@@ -147,7 +147,8 @@ describe('GET /api/auth/oidc/start', () => {
 
   it('unknown or disabled connection ⇒ 400; missing client secret or hop count ⇒ 503; IdP unreachable ⇒ 503; outside engagement mode ⇒ 404; matrix rows', async () => {
     for (const c of ['idp-b', 'idp-off', '']) expect((await call(createOidcStartRoute(deps()), req({ url: `/api/auth/oidc/start?connection=${c}` }))).statusCode, c).toBe(400);
-    expect((await call(createOidcStartRoute(deps({ [SECRET_ENV]: undefined })), req())).statusCode).toBe(503);
+    const noSecret = await call(createOidcStartRoute(deps({ [SECRET_ENV]: undefined })), req());
+    expect([noSecret.statusCode, (noSecret.body as { error: { code: string } }).error.code]).toEqual([503, 'not_configured']);
     expect((await call(createOidcStartRoute(deps({ RATIO_TRUSTED_PROXY_HOPS: undefined })), req())).statusCode).toBe(503);
     idpDown = true;
     const down = await call(createOidcStartRoute(deps()), req());
@@ -155,6 +156,19 @@ describe('GET /api/auth/oidc/start', () => {
     for (const h of [createOidcStartRoute, createOidcCallbackRoute]) expect((await call(h(deps({ RATIO_MODE: undefined })), req())).statusCode).toBe(404);
     for (const p of ['/api/auth/oidc/start', '/api/auth/oidc/callback']) expect(findRoute(p), p).toMatchObject({ group: 'session', status: 'enforced', legacyService: '-' });
     expect([startPage, callbackPage].every((h) => typeof h === 'function')).toBe(true);
+  });
+});
+
+describe('OidcTransactionStore', () => {
+  it('a transaction is consumed once and expires after 10 minutes; only the token hash is stored', () => {
+    const s = new OidcTransactionStore(':memory:');
+    const now = Date.UTC(2026, 10, 1);
+    const a = s.create('idp-a', now);
+    expect(s.consume(a.token, now + 1)).toEqual({ connectionId: 'idp-a', state: a.state, nonce: a.nonce, verifier: a.verifier });
+    expect(s.consume(a.token, now + 2)).toBeNull();
+    const b = s.create('idp-a', now);
+    expect(s.consume(b.token, now + 10 * 60_000)).toBeNull();
+    expect(s.consume('not-a-token', now)).toBeNull();
   });
 });
 
@@ -200,11 +214,14 @@ describe('GET /api/auth/oidc/callback', () => {
     const b = await begin('sub-v');
     writeUsers((d) => { d.bindings.shift(); });
     results.push(await finish(b));
+    const m = await begin('sub-v');
+    writeUsers((d) => { d.memberships[0].status = 'suspended'; });
+    results.push(await finish(m));
     writeUsers();
     for (const r of results) {
       expect([r.statusCode, r.body, cookieVal(r, SESSION_COOKIE)]).toEqual([403, { error: { code: 'not_provisioned', message: 'This account is not provisioned for this engagement' } }, undefined]);
     }
-    expect(audits.filter((a) => a.action === 'oidc_callback').map((a) => [a.status, a.principalId])).toEqual([[403, null], [403, null], [403, null]]);
+    expect(audits.filter((a) => a.action === 'oidc_callback').map((a) => [a.status, a.principalId])).toEqual([[403, null], [403, null], [403, null], [403, null]]);
     expect(sessions.count()).toBe(0);
   });
 

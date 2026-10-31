@@ -54,10 +54,10 @@ describe('guardedFetch', () => {
 
   it('refuses a name that resolves to any private address (rebinding-style answers too), an IP literal host, http, and no answer', async () => {
     const rec: Rec[] = [];
-    const lookup = lookupOf({ '1.2.3.4.nip.io': ['127.0.0.1'], 'localhost.localdomain': ['::1'], 'mixed.example.test': ['93.184.216.34', '10.0.0.5'], '0x7f000001.test': ['127.0.0.1'], 'meta.example.test': ['169.254.169.254'] });
+    const lookup = lookupOf({ 'pub.example.test': ['93.184.216.34'], '1.2.3.4.nip.io': ['127.0.0.1'], 'localhost.localdomain': ['::1'], 'mixed.example.test': ['93.184.216.34', '10.0.0.5'], '0x7f000001.test': ['127.0.0.1'], 'meta.example.test': ['169.254.169.254'] });
     const f = guardedFetch({ lookup, request: transport({}, rec) });
     for (const url of ['https://1.2.3.4.nip.io/x', 'https://localhost.localdomain/x', 'https://mixed.example.test/x', 'https://0x7f000001.test/x', 'https://meta.example.test/x',
-      'https://10.0.0.1/x', 'https://[::1]/x', 'http://idp.example.test/x', 'https://unresolvable.example.test/x']) {
+      'https://10.0.0.1/x', 'https://[::1]/x', 'http://pub.example.test/x', 'https://unresolvable.example.test/x']) {
       await expect(f(url, OPTS), url).rejects.toThrow(/refused/);
     }
     expect(rec).toEqual([]); // nothing was ever connected
