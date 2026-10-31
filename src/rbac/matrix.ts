@@ -65,7 +65,7 @@ export const ROUTE_MATRIX: readonly RouteRow[] = deepFreeze([
   r('/api/costsource/rows', 'costsource', LEGACY), r('/api/costsource/findings', 'costsource', LEGACY),
   r('/api/costsource/health', 'costsource', LEGACY), r('/api/v1/ai/chat', 'frank', LEGACY),
   r('/api/v1/finio/export', 'finio_export', LEGACY), r('/api/finio/export', 'finio_export', LEGACY),
-  r('/api/v1/costs/published', 'published', LEGACY), r('/api/v1/reports/facts', 'published', LEGACY), r('/api/v1/a2a/handshake', 'published', LEGACY),
+  r('/api/v1/costs/published', 'published', LEGACY), r('/api/v1/reports/facts', 'published', LEGACY), r('/api/v1/reports/engagement', 'published', LEGACY), r('/api/v1/a2a/handshake', 'published', LEGACY),
   r('/api/a2a/handshake', 'published', LEGACY),
   // The open routes of F3 (B3); hello stays public.
   r('/api/costsource/ingest', 'costsource'), r('/api/attribution', 'attribution'), r('/api/prediction/predict', 'prediction'),

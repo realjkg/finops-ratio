@@ -1,0 +1,22 @@
+Engagement report model + XLSX (1.0, report-facts PR 2): GREEN (base 0c2a75e), local run 2026-10-31.
+Environment: Node 22; Postgres 16 (postgres@sha256:1a6ab3f5...) and SeaweedFS (chrislusf/seaweedfs@sha256:4e61d15f...)
+on 127.0.0.1:55436 / :58333, tmpfs data dirs; SeaweedFS -volume.max=64 -master.volumeSizeLimitMB=64 -volume.minFreeSpace=300MiB.
+- lint, typecheck (app), tsc -p tsconfig.worker.json --noEmit: pass.
+- npm test: Test Files 249 passed (249); Tests 4555 passed (4555).
+- npm run test:db: 45 files / 722 tests; serial 6 files / 173 tests: all passed. reportFacts.db.test.ts 10/10, incl.
+  GET /api/v1/reports/engagement?period=2024-09&format=xlsx in engagement mode (tenant from the config) over the sample
+  imported by source add + import-file: Totals by currency = USD, 942, 18.00663861840, 13.00000000000, Credit 1 row
+  -2.61370000000 / -3.00000000000; 2024-10 all N/A with the reason; another tenant sees N/A, engagement N/A.
+- worker:build, build (route /api/v1/reports/engagement), check:bundle: pass.
+Golden: src/reports/fixtures/engagementReport.sample-2024-09.golden.json generated from the implementation and reviewed
+value by value against control-totals.json "1k" (942 / 18.00663861840 / 13.00000000000; Credit -2.61370000000 /
+-3.00000000000; Usage 941 / 20.62033861840 / 16.00000000000).
+Mutations (unit = src/reports + route tests, db = reportFacts.db.test.ts); each killed by at least one suite:
+- N1 partial-effective note dropped: killed / survived
+- N2 N/A reason dropped: killed / killed
+- N3 money written as numbers in the XLSX: killed / killed
+- N4 missing shown as 0: killed / killed
+- N5 two sources combined into one totals row: killed / survived
+- N6 route accepts a missing format: killed / survived
+- N7 staged-artifact label removed: killed / survived
+- N8 credits cells not separated: killed / killed

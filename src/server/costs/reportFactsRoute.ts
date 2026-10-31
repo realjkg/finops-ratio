@@ -6,6 +6,7 @@
 // engagement mode the engagement config adds the reporting currency and the
 // declared source metadata; otherwise those are N/A with a reason.
 import type { NextApiHandler } from 'next';
+import type { Pool } from 'pg';
 import { engagementConfigFromEnv, engagementMode } from '@/engagement/config';
 import { assembleReportFacts, type ReportFactsInput } from '@/reports/reportFacts';
 import { createReaderRoute, type PublishedCostsRouteDeps } from './publishedCostsRoute';
@@ -21,12 +22,14 @@ export function parseReportFactsQuery(query: Record<string, string | string[] | 
   return { ok: true, value: { period: `${period}-01` } };
 }
 
-function engagementOf(env: Record<string, string | undefined>): ReportFactsInput['engagement'] {
+type Engagement = { label: { id: string; displayName: string }; facts: NonNullable<ReportFactsInput['engagement']> };
+
+function engagementOf(env: Record<string, string | undefined>): Engagement | null {
   if (!engagementMode(env)) return null;
   const e = engagementConfigFromEnv(env);
   // Already validated by the tenant binding (publishedCostsConfig); fail closed if it changed since.
   if (!e.ok) throw new Error('engagement configuration became invalid');
-  return {
+  return { label: { id: e.config.engagementId, displayName: e.config.displayName }, facts: {
     currency: e.config.currency,
     declaredSources: e.config.sources.map((s) => ({
       id: s.id,
@@ -36,17 +39,20 @@ function engagementOf(env: Record<string, string | undefined>): ReportFactsInput
       completeness: s.metadata.scope.completeness,
       controlTotalSource: s.metadata.financial.control_total_source,
     })),
-  };
+  } };
+}
+
+/** The report facts of one period (one snapshot) plus the engagement label, for every report route. */
+export async function readReportFacts(pool: Pick<Pool, 'connect'>, tenantId: string, period: string, env: Record<string, string | undefined>, now: Date) {
+  const engagement = engagementOf(env);
+  const agg = await readReportFactsAggregates(pool, tenantId, period);
+  return { facts: assembleReportFacts({ period, asOf: now.toISOString(), ...agg, engagement: engagement?.facts ?? null }), label: engagement?.label ?? null };
 }
 
 export function createReportFactsRoute(deps: PublishedCostsRouteDeps = {}): NextApiHandler {
   return createReaderRoute(deps, {
     tag: 'report-facts',
     parse: parseReportFactsQuery,
-    read: async (pool, tenantId, q, { env, now }) => {
-      const engagement = engagementOf(env);
-      const agg = await readReportFactsAggregates(pool, tenantId, q.period);
-      return assembleReportFacts({ period: q.period, asOf: now.toISOString(), ...agg, engagement });
-    },
+    read: async (pool, tenantId, q, { env, now }) => (await readReportFacts(pool, tenantId, q.period, env, now)).facts,
   });
 }
