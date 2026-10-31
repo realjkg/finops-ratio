@@ -52,21 +52,31 @@ export const AWS_EXPORT_NAME_RE = /^[0-9A-Za-z_-]{1,128}$/;
 // Credential shapes refused ANYWHERE inside these fields (no word boundaries, unanchored), also after NFKC
 // folding (fullwidth lookalikes): key ids, JWTs, private keys, key=value or key: value forms, URL userinfo.
 export const AWS_KEY_ID_RE = /(AKIA|ASIA)[A-Z0-9]{16}/;
-export const AWS_JWT_RE = /eyJ[\w-]{8,}\.[\w-]{8,}/;
+export const AWS_JWT_RE = /eyJ[\w-]{8,512}\.[\w-]{8,512}/;
 export const AWS_INLINE_CREDENTIAL_RE = /(secret|password|passwd|token|credential|signature|api[_-]?key|access[_-]?key)\s*[=:]/i;
-export const AWS_USERINFO_RE = /:[^/@]*@/;
-const AWS_CREDENTIAL_RES = [CREDENTIAL_RE[0], AWS_KEY_ID_RE, AWS_JWT_RE, AWS_INLINE_CREDENTIAL_RE, AWS_USERINFO_RE];
+/** URL userinfo: a ':' and then an '@' within one prefix segment (a linear scan, no backtracking). */
+const hasUserinfo = (v: string) => v.split('/').some((seg) => seg.includes(':') && seg.indexOf('@', seg.indexOf(':')) >= 0);
+const AWS_CREDENTIAL_RES = [CREDENTIAL_RE[0], AWS_KEY_ID_RE, AWS_JWT_RE, AWS_INLINE_CREDENTIAL_RE];
 export const S3_KEY_MAX_BYTES = 1024;
 export const AWS_FILE_PART_RESERVE_BYTES = 256;
+// Hard caps checked FIRST, before any pattern and before NFKC (bounded work on hostile input). A prefix longer than
+// the key limit in characters is over it in UTF-8 bytes too; the NFKC form gets the same cap (it can expand).
+const AWS_FIELD_MAX_CHARS: Record<string, number> = { bucket: 63, exportName: 128, prefix: S3_KEY_MAX_BYTES };
 // eslint-disable-next-line no-control-regex
 const C0_C1_RE = /[\u0000-\u001f\u007f-\u009f]/;
 
 /** The problem (never the value) of one AWS location param, or null. */
 function awsLocationProblem(name: string, v: unknown, params: Record<string, unknown>): string | null {
   if (typeof v !== 'string') return 'must be a string';
-  if ([v, v.normalize('NFKC')].some((x) => AWS_CREDENTIAL_RES.some((r) => r.test(x)))) return 'looks like a credential value; reference a secret by name with secretRef';
-  if (name === 'bucket') return AWS_BUCKET_RE.test(v) && !AWS_BUCKET_RESERVED_RE.test(v) ? null : 'must be an S3 general purpose bucket name (3 to 63 lowercase letters, digits, dots and hyphens; letter or digit at both ends; no consecutive dots, IP address form or reserved prefix or suffix)';
-  if (name === 'exportName') return AWS_EXPORT_NAME_RE.test(v) ? null : 'must be a Data Exports export name (1 to 128 letters, digits, underscores and hyphens)';
+  const bucketRule = 'must be an S3 general purpose bucket name (3 to 63 lowercase letters, digits, dots and hyphens; letter or digit at both ends; no consecutive dots, IP address form or reserved prefix or suffix)';
+  const exportNameRule = 'must be a Data Exports export name (1 to 128 letters, digits, underscores and hyphens)';
+  const tooLong = name === 'bucket' ? bucketRule : name === 'exportName' ? exportNameRule : `must be at most ${S3_KEY_MAX_BYTES} characters, also after NFKC normalization (the S3 key limit)`;
+  if (v.length > AWS_FIELD_MAX_CHARS[name]) return tooLong;
+  const folded = v.normalize('NFKC');
+  if (folded.length > AWS_FIELD_MAX_CHARS[name]) return tooLong;
+  if ([v, folded].some((x) => hasUserinfo(x) || AWS_CREDENTIAL_RES.some((r) => r.test(x)))) return 'looks like a credential value; reference a secret by name with secretRef';
+  if (name === 'bucket') return AWS_BUCKET_RE.test(v) && !AWS_BUCKET_RESERVED_RE.test(v) ? null : bucketRule;
+  if (name === 'exportName') return AWS_EXPORT_NAME_RE.test(v) ? null : exportNameRule;
   if (v === '') return null;
   if (C0_C1_RE.test(v) || v.includes('\ufffd') || Buffer.from(v, 'utf8').toString('utf8') !== v || v.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')) {
     return 'must be valid UTF-8 without control characters, leading or trailing slash, or empty, . or .. segments';

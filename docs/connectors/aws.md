@@ -95,13 +95,18 @@ Engagement config (`RATIO_ENGAGEMENT_CONFIG`), one source:
   Data Exports API model); `prefix` is valid UTF-8 with no control characters, leading or trailing
   slash, or empty, `.` or `..` segments, and the longest object key the retriever builds
   (`<prefix>/<exportName>/metadata/BILLING_PERIOD=YYYY-MM/` plus 256 bytes reserved for the run
-  folder and file name AWS chooses) must fit S3's 1,024-byte key limit. Credential shapes are
-  refused anywhere inside these fields, in the value and in its NFKC form (fullwidth lookalikes):
-  `(AKIA|ASIA)[A-Z0-9]{16}` (no word boundaries, so a name containing such a run of capitals is
-  refused; lowercase `akia` is fine), a JWT `eyJ…….……` even after other text, a `-----BEGIN …-----`
-  private key header, `secret|password|passwd|token|credential|signature|api_key|apikey|access_key`
-  followed by optional spaces and `=` or `:` (any case), and URL userinfo (`:` then `@` in one
-  segment). Nothing is refused for looking random. Other params keep the generic rule. The
+  folder and file name AWS chooses) must fit S3's 1,024-byte key limit. Order: the length caps come
+  first (bucket 63, exportName 128, prefix 1,024 characters), then the same caps on the NFKC form
+  (normalization can expand a value), and only then the credential patterns, so hostile input of
+  any size is refused in bounded time. Credential shapes are refused anywhere inside these fields,
+  in the value and in its NFKC form (fullwidth lookalikes): `(AKIA|ASIA)[A-Z0-9]{16}` (no word
+  boundaries, so a name containing such a run of capitals is refused; lowercase `akia` is fine), a
+  JWT `eyJ[\w-]{8,512}\.[\w-]{8,512}` (unanchored, so also after other text), a
+  `-----BEGIN [A-Z ]*-----` private key header,
+  `(secret|password|passwd|token|credential|signature|api[_-]?key|access[_-]?key)\s*[=:]` (any case),
+  and userinfo-like prefixes: a `:` followed by an `@` within one segment, in any segment (a linear
+  scan; the retriever refuses any prefix containing `:` or `@` anyway). Nothing is refused for
+  looking random. Other params keep the generic rule. The
   retriever's own check (layout.ts) is stricter (ASCII prefix segments, at most 512 characters; an
   export name must start with a letter or digit) and refuses such values when `fetch` runs.
 - The worker also needs a file-import source with the same key (`cli source add`), which receives

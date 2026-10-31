@@ -18,10 +18,18 @@ DB (CI caught it): src/ingest/managedFetch.db.test.ts expected an unregistered c
 CONNECTOR_NOT_REGISTERED); the worker config check now refuses it first, as startup does (exit 2, ENGAGEMENT_CONFIG_INVALID).
 Updated; vitest.db.config.ts on managedFetch.db + focusRetriever.db against local postgres:16 and SeaweedFS: 13 passed.
 Review round (credential shapes inside the AWS fields), patterns applied to the value and its NFKC form, both sides:
-(AKIA|ASIA)[A-Z0-9]{16} unbounded; eyJ[\w-]{8,}\.[\w-]{8,} unanchored; -----BEGIN [A-Z ]*-----;
-(secret|password|passwd|token|credential|signature|api[_-]?key|access[_-]?key)\s*[=:] (any case); :[^/@]*@ (userinfo, any segment).
+(AKIA|ASIA)[A-Z0-9]{16} unbounded; eyJ[\w-]{8,512}\.[\w-]{8,512} unanchored; -----BEGIN [A-Z ]*-----;
+(secret|password|passwd|token|credential|signature|api[_-]?key|access[_-]?key)\s*[=:] (any case); userinfo (':' then '@' in one segment, linear scan).
 Mutations, each killed (config / worker failures): key id bounded again 9/4, JWT anchored again 5/3, no api_key and
 whitespace forms 6/2, userinfo only at the start 3/2, no NFKC folding 2/1, no PEM pattern 3/1.
 Reviewer fuzz (startup vs worker): seeds 1-3, 20,000 configs each, 0 disagreements; reviewer probe: 0 findings of 106.
 Gates (review round, after merging main 8bbff4b), in order, exit 0: lint; typecheck app + worker; vitest 240 files / 4471 tests; test:db (postgres:16 +
 SeaweedFS) 712 + 173 tests; worker:build; build; check:bundle.
+Review round 2 (ReDoS): length caps first (bucket 63, exportName 128, prefix 1,024 chars), then the same caps on the
+NFKC form, then the patterns; JWT quantifiers bounded; userinfo is a linear scan. 1 MiB hostile values in all three
+fields are refused in under 100 ms on both sides (reviewer harness: no case over 200 ms at 1 MiB or at the caps).
+Mutations: no length guards at all, config 6 failed / worker 2 failed (1 MiB perf tests); one guard removed on one side
+or the NFKC cap removed: caught by the identical-function-text check (and the NFKC test, 2 failed); userinfo only in the
+first segment 3 failed; userinfo not checked 4 failed. Reviewer probe 0 of 110 flagged; fuzz seeds 1-4, 80,000 configs,
+0 disagreements.
+Gates (review round 2), in order, exit 0: lint; typecheck app + worker; vitest 240 files / 4478 tests; test:db 712 + 173; worker:build; build; check:bundle.
