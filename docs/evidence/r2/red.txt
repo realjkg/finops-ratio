@@ -1,7 +1,9 @@
-R2 PR A RED (tests committed before each implementation)
-1. dc9e82e  npx vitest run src/engagement/auth -> Test Files 3 failed (3), no tests (modules missing).
-2. e8cbba6  authz.test.ts -> 6 failed | 4 passed (principal kind, resource identity, audit hook).
-3. review fixes  npx vitest run src/engagement -> Test Files 3 failed | 1 passed; Tests 7 failed | 192 passed:
-   default-cost-only hashes, ready dummy hash, equal scrypt work, throwing audit hook, team grants
-   limited to reports/connectors:read, clientSecretRef prefix and canonical issuer rules, one leading BOM.
+R2 RED evidence (tests committed before each implementation)
+PR A (#161, merged): dc9e82e, e8cbba6, 3dc848a (see #161).
+A2a:
+1. 09e7b12  npx vitest run src/engagement/auth -> Tests 1 failed | 24 passed (async audit hook rejection).
+2. session store + cookie/CSRF library: npx vitest run src/engagement/auth
+   -> FAIL session.test.ts and http.test.ts (./session and ./http do not exist yet); the other suites pass.
 GREEN counts and mutation results are in the PR body.
+3. routes (POST /api/auth/login, POST /api/auth/logout, GET /api/auth/session): npx vitest run src/engagement/auth src/rbac
+   -> FAIL routes.test.ts (./routes and pages/api/auth/* do not exist) and matrix_view_codes_match_plan_section_4_4 (rows missing).

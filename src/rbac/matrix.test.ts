@@ -96,7 +96,7 @@ describe('permission matrix', () => {
       published: ['- D D - - D', ['/api/v1/costs/published', '/api/v1/reports/facts', '/api/v1/reports/engagement', '/api/v1/a2a/handshake', '/api/a2a/handshake']],
       cm_change: [Array(6).fill('see_4_5').join(' '), ['/api/v1/cm/change']], audit: ['O D - T - D', ['/audit', '/api/v1/audit/records']],
       scoped_data: ['O D D T O D', ['/api/v1/workloads']],
-      session: ['any any any any any any', ['principal', 'logout', 'login', 'mock-control'].map((n) => `/api/v1/session/${n}`).concat('/sign-in')],
+      session: ['any any any any any any', ['principal', 'logout', 'login', 'mock-control'].map((n) => `/api/v1/session/${n}`).concat('/sign-in', '/api/auth/login', '/api/auth/logout', '/api/auth/session')],
       webhook: ['- - - - - -', ['/api/v1/cm/webhook']], status_sync: ['- Y - Y* - -', ['/api/v1/cm/sync']],
       simulation: [Array(6).fill('dev_test_only').join(' '), ['/simulation', '/workspace', ...['chat', 'command', 'frank', 'operations', 'report', 'session', 'state', 'status'].map((n) => `/api/v1/simulation/${n}`)]],
     };

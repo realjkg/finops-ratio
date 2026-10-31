@@ -2,7 +2,7 @@
 // local bootstrap credentials, identity connections, explicit bindings,
 // memberships and teams. Read-only config validated at startup; problems name
 // the KEY, never the value. SYNTHETIC records; passwords generated at run time.
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -69,7 +69,7 @@ describe('validateDirectory', () => {
         [(d) => { d.identityConnections[0].clientSecretRef = ref; }, 'identityConnections[0].clientSecretRef: must be the NAME of an environment variable starting RATIO_OIDC_CLIENT_SECRET_']),
       ...[`https://10.0.0.1/${SECRET}`, 'https://[::1]/x', 'https://localhost/x', 'https://intranet/x', 'https://idp.example.test:8443/x', 'https://idp.example.test\\x', ' https://idp.example.test/x',
         'https://idp.example.test/x ', 'https://user:pw@idp.example.test/x', 'https://idp.example.test/x?y=1', 'https://idp.example.test/x#y', 'https://IDP.example.test/x', 'https://idp.example.test/a/../x',
-        'https://idp.123/x'].map((iss): [(d: any) => void, string] => [(d) => { d.identityConnections[0].issuer = iss; d.bindings = []; }, 'identityConnections[0].issuer: must be an https URL']),
+        'https://idp.123/x', 'https://idp.example.test./x', 'https://idp.example.test.'].map((iss): [(d: any) => void, string] => [(d) => { d.identityConnections[0].issuer = iss; d.bindings = []; }, 'identityConnections[0].issuer: must be an https URL']),
       [(d) => { d.identityConnections[0].clientSecret = SECRET; }, 'identityConnections[0]: unknown field'],
       [(d) => { d.identityConnections[0].provisioning = 'auto'; }, 'identityConnections[0].provisioning: must be invite-only'],
       [(d) => { d.bindings[0].connectionId = 'idp-b'; }, 'bindings[0].connectionId: unknown connection'],
@@ -121,6 +121,10 @@ describe('loading, reloading and startup', () => {
     const f = write(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), body]).toString('utf8'), 'bom.json');
     const r = loadDirectory(f, INSTANCE);
     expect(r.ok).toBe(true);
+    const raw = fs.readFileSync(f);
+    expect(raw.subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+    expect(r.ok && r.sha256).toBe(createHash('sha256').update(raw).digest('hex')); // RAW bytes, BOM included
+    expect(r.ok && r.sha256).not.toBe(createHash('sha256').update(body).digest('hex'));
     expect(loadDirectory(write(`\ufeff\ufeff${body}`, 'bom2.json'), INSTANCE)).toEqual({ ok: false, problems: ['RATIO_ENGAGEMENT_USERS: file is not valid JSON'] });
   });
 
