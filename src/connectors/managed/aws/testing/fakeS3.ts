@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import http from 'http';
 import type { AddressInfo } from 'net';
 
-export interface FakeObject { bytes: Buffer; etag: string; lastModified: Date }
+export interface FakeObject { bytes: Buffer; etag: string; lastModified: Date | null }
 export interface FakeRequest { method: string; path: string; query: Record<string, string>; headers: http.IncomingHttpHeaders }
 
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -21,7 +21,7 @@ export class FakeS3 {
 
   constructor(readonly bucket: string) {}
 
-  put(key: string, body: Buffer | string, lastModified = new Date('2026-10-01T00:00:00Z')): void {
+  put(key: string, body: Buffer | string, lastModified: Date | null = new Date('2026-10-01T00:00:00Z')): void {
     const bytes = Buffer.isBuffer(body) ? body : Buffer.from(body);
     this.objects.set(key, { bytes, etag: crypto.createHash('md5').update(bytes).update(key).digest('hex'), lastModified });
   }
@@ -73,7 +73,7 @@ export class FakeS3 {
       body = o.bytes.subarray(Number(range[1]), Number(range[2]) + 1);
       status = 206;
     }
-    res.writeHead(status, { 'content-type': 'application/octet-stream', 'content-length': body.length, etag: `"${o.etag}"`, 'last-modified': o.lastModified.toUTCString() });
+    res.writeHead(status, { 'content-type': 'application/octet-stream', 'content-length': body.length, etag: `"${o.etag}"`, ...(o.lastModified ? { 'last-modified': o.lastModified.toUTCString() } : {}) });
     res.end(body);
   }
 
@@ -97,7 +97,7 @@ export class FakeS3 {
     const truncated = start + size < entries.length;
     const contents = page.filter((e) => e.key).map((e) => {
       const o = this.objects.get(e.key!)!;
-      return `<Contents><Key>${xml(e.key!)}</Key><LastModified>${o.lastModified.toISOString()}</LastModified><ETag>&quot;${o.etag}&quot;</ETag><Size>${o.bytes.length}</Size><StorageClass>STANDARD</StorageClass></Contents>`;
+      return `<Contents><Key>${xml(e.key!)}</Key>${o.lastModified ? `<LastModified>${o.lastModified.toISOString()}</LastModified>` : ''}<ETag>&quot;${o.etag}&quot;</ETag><Size>${o.bytes.length}</Size><StorageClass>STANDARD</StorageClass></Contents>`;
     });
     const prefixes = page.filter((e) => e.prefix).map((e) => `<CommonPrefixes><Prefix>${xml(e.prefix!)}</Prefix></CommonPrefixes>`);
     res.writeHead(200, { 'content-type': 'application/xml' });

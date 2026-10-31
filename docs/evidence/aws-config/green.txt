@@ -23,5 +23,5 @@ Review round (credential shapes inside the AWS fields), patterns applied to the 
 Mutations, each killed (config / worker failures): key id bounded again 9/4, JWT anchored again 5/3, no api_key and
 whitespace forms 6/2, userinfo only at the start 3/2, no NFKC folding 2/1, no PEM pattern 3/1.
 Reviewer fuzz (startup vs worker): seeds 1-3, 20,000 configs each, 0 disagreements; reviewer probe: 0 findings of 106.
-Gates (review round), in order, exit 0: lint; typecheck app + worker; vitest 240 files / 4461 tests; test:db (postgres:16 +
+Gates (review round, after merging main 8bbff4b), in order, exit 0: lint; typecheck app + worker; vitest 240 files / 4471 tests; test:db (postgres:16 +
 SeaweedFS) 712 + 173 tests; worker:build; build; check:bundle.
