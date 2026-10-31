@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { CONNECTIONS, importSample } from './index';
-import { formatMoney, parseUnits, reconcile, totalsByCurrency } from './reconcile';
+import { formatMoney, groupNaColumns, parseUnits, percentRounded, reconcile, totalsByCurrency } from './reconcile';
 import type { Dataset } from './types';
 
 const DIR = path.join(__dirname, 'data');
@@ -55,7 +55,8 @@ describe('reconcile', () => {
   it('explains every N/A column and never merges currencies', () => {
     const all = CONNECTIONS.map((c) => reconcile(load(c.id)));
     const priv = all[1];
-    expect(priv.naColumns.find((c) => c.column === 'ListCost')).toEqual({ column: 'ListCost', rows: priv.rows, reason: 'Internal chargeback has no public list price' });
+    expect(priv.naColumns.find((c) => c.column === 'ChargeClass')).toEqual({ column: 'ChargeClass', rows: priv.rows, reason: 'Not applicable: the line is not a correction' });
+    expect(priv.naColumns.some((c) => ['ListCost', 'ContractedCost', 'EffectiveCost', 'BilledCost'].includes(c.column))).toBe(false);
     const totals = totalsByCurrency(all);
     expect(totals.map((t) => t.currency)).toEqual(['EUR', 'USD']);
     expect(parseUnits(totals[1].billed)).toBe(parseUnits(all[0].billed) + parseUnits(all[2].billed));
@@ -73,6 +74,26 @@ describe('reconcile', () => {
   it('formats money to cents from exact decimals', () => {
     expect([formatMoney('2830.2211680000', 'USD'), formatMoney('-0.0049000000', 'EUR'), formatMoney('0.0050000000', 'EUR'), formatMoney('1234567.8950000000', 'GBP')])
       .toEqual(['USD 2,830.22', 'EUR 0.00', 'EUR 0.01', 'GBP 1,234,567.90']);
+  });
+});
+
+describe('display helpers', () => {
+  it('rounds percentages half up in integer arithmetic (private cloud 76.53% is 77%)', () => {
+    const r = reconcile(load('syn-private-cloud-api'));
+    const c = r.commitment!;
+    const unused = parseUnits(c.unusedEffective); const total = unused + parseUnits(c.usedEffective);
+    expect((unused * BigInt(10000)) / total).toBe(BigInt(7653));
+    expect(percentRounded(unused, total)).toBe(77);
+    expect([percentRounded(BigInt(1), BigInt(2)), percentRounded(BigInt(1), BigInt(3)), percentRounded(BigInt(2), BigInt(3)), percentRounded(BigInt(0), BigInt(5)), percentRounded(BigInt(1), BigInt(0))]).toEqual([50, 33, 67, 0, 0]);
+  });
+  it('groups N/A columns by identical reason, whole-column cases apart from partial ones', () => {
+    const g = groupNaColumns({ rows: 10, naColumns: [
+      { column: 'A', rows: 10, reason: 'r1' }, { column: 'B', rows: 10, reason: 'r1' }, { column: 'C', rows: 3, reason: 'r1' }, { column: 'D', rows: 4, reason: 'r2' },
+    ] });
+    expect(g).toEqual({ whole: [{ reason: 'r1', columns: ['A', 'B'] }], partial: [{ reason: 'r1', columns: [{ column: 'C', rows: 3 }] }, { reason: 'r2', columns: [{ column: 'D', rows: 4 }] }] });
+    const priv = groupNaColumns(reconcile(load('syn-private-cloud-api')));
+    expect(priv.whole.flatMap((x) => x.columns)).toContain('ChargeClass');
+    expect(priv.whole.length + priv.partial.length).toBeLessThan(reconcile(load('syn-private-cloud-api')).naColumns.length);
   });
 });
 

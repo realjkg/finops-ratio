@@ -32,7 +32,7 @@ interface Spec {
 }
 type Cells = Partial<Record<string, string>>;
 
-function build(spec: Spec, extra: (ctx: Ctx) => void, naReasons: Record<string, string>, post: (c: Cells) => Cells = (c) => c, zeroBilledReason?: string): Dataset {
+function build(spec: Spec, extra: (ctx: Ctx) => void, naReasons: Record<string, string>, zeroBilledReason?: string): Dataset {
   const r = rng(spec.seed);
   const rows: Cells[] = [];
   const ctx: Ctx = { spec, r, rows, push: (c) => rows.push(c) };
@@ -44,7 +44,7 @@ function build(spec: Spec, extra: (ctx: Ctx) => void, naReasons: Record<string, 
   ctx.line = base;
   extra(ctx);
   // Chronological, with ties kept in generation order (Array.prototype.sort is stable).
-  const sorted = rows.map(post).sort((a, b) => (a.ChargePeriodStart ?? '').localeCompare(b.ChargePeriodStart ?? ''));
+  const sorted = rows.slice().sort((a, b) => (a.ChargePeriodStart ?? '').localeCompare(b.ChargePeriodStart ?? ''));
   const full: string[][] = sorted.map((c) => DATASET_COLUMNS.map((col) => c[col] ?? ''));
   const totals: Record<string, CurrencyTotals> = {};
   const bi = DATASET_COLUMNS.indexOf('BilledCost');
@@ -98,8 +98,9 @@ function usageLine(c: Ctx, i: number, opts: { committed?: boolean; billedZero?: 
     ChargeDescription: `${svc.name}, synthetic line ${i}`,
     ChargePeriodStart: day(d), ChargePeriodEnd: dayEnd(d),
     ConsumedQuantity: qty.toString(), ConsumedUnit: svc.unit,
-    ContractedCost: formatUnits(effective), EffectiveCost: formatUnits(effective), ListCost: formatUnits(list),
-    ContractedUnitPrice: formatUnits(opts.committed ? (unit * BigInt(70)) / BigInt(100) : unit), ListUnitPrice: formatUnits(unit),
+    // ContractedCost is the price before any commitment discount; the discount appears only in EffectiveCost.
+    ContractedCost: formatUnits(list), EffectiveCost: formatUnits(effective), ListCost: formatUnits(list),
+    ContractedUnitPrice: formatUnits(unit), ListUnitPrice: formatUnits(unit),
     PricingCategory: opts.committed ? 'Committed' : 'Standard', PricingQuantity: qty.toString(), PricingUnit: svc.unit,
     RegionId: region, RegionName: regionName, ResourceId: res, ResourceName: res, ResourceType: svc.category,
     ServiceCategory: svc.category, ServiceName: svc.name, SkuId: `EX-SKU-${svc.code}`, SkuPriceId: `EX-PRICE-${svc.code}-${r() % 5}`,
@@ -108,9 +109,6 @@ function usageLine(c: Ctx, i: number, opts: { committed?: boolean; billedZero?: 
   });
   return { cells, list, effective };
 }
-
-const noListPrice = (cells: Cells): Cells => ({ ...cells, ListCost: '', ListUnitPrice: '', ContractedUnitPrice: '' });
-const noContract = (cells: Cells): Cells => ({ ...noListPrice(cells), ContractedCost: '' });
 
 function commitment(c: Ctx, p: { id: string; name: string; type: string; total: bigint; months: number; usageFrom: number; usageCount: number; note: string; svcIndex: number }): void {
   // A prepaid commitment: BilledCost covers `months` at once, EffectiveCost amortizes one month across the
@@ -125,8 +123,8 @@ function commitment(c: Ctx, p: { id: string; name: string; type: string; total: 
   if (used >= monthly) throw new Error(`commitment ${p.id}: used ${used} exceeds the monthly amortization ${monthly}`);
   const svc = c.spec.services[p.svcIndex];
   const common: Cells = { ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, ServiceName: svc.name, ServiceCategory: svc.category, CommitmentDiscountCategory: 'Spend', CommitmentDiscountId: p.id, CommitmentDiscountName: p.name, CommitmentDiscountType: p.type };
-  c.push(c.line!({ ...common, ChargeCategory: 'Purchase', ChargeDescription: p.note, ChargeFrequency: 'One-Time', BilledCost: formatUnits(p.total), EffectiveCost: formatUnits(ZERO), ContractedCost: formatUnits(p.total), ListCost: formatUnits(p.total) }));
-  c.push(c.line!({ ...common, ChargeCategory: 'Usage', ChargeDescription: `Unused part of ${p.name} this month`, BilledCost: formatUnits(ZERO), EffectiveCost: formatUnits(monthly - used), ContractedCost: formatUnits(monthly - used), ListCost: formatUnits(monthly - used), CommitmentDiscountStatus: 'Unused' }));
+  c.push(c.line!({ ...common, ChargeCategory: 'Purchase', ChargeDescription: p.note, ChargeFrequency: 'One-Time', BilledCost: formatUnits(p.total), EffectiveCost: formatUnits(ZERO), ContractedCost: formatUnits(p.total), ListCost: formatUnits(p.total), PricingCategory: 'Standard', PricingQuantity: '1', PricingUnit: 'Commitments' }));
+  c.push(c.line!({ ...common, ChargeCategory: 'Usage', ChargeDescription: `Unused part of ${p.name} this month`, BilledCost: formatUnits(ZERO), EffectiveCost: formatUnits(monthly - used), ContractedCost: formatUnits(monthly - used), ListCost: formatUnits(monthly - used), CommitmentDiscountStatus: 'Unused', PricingCategory: 'Committed', PricingQuantity: '1', PricingUnit: 'Months', ConsumedQuantity: '0', ConsumedUnit: svc.unit }));
 }
 
 const specs: Record<'public' | 'private' | 'onprem', Spec> = {
@@ -186,13 +184,8 @@ export function generatePrivateCloud(): Dataset {
   return build(specs.private, (c) => {
     commitment(c, { id: 'example-rc-0001', name: 'Example reserved capacity block', type: 'Reserved Capacity', total: cents(90000), months: 3, usageFrom: 1000, usageCount: 6, svcIndex: 0, note: 'Example reserved capacity block, billed quarterly' });
     for (let i = 0; i < c.spec.usageRows; i++) c.push(usageLine(c, i, {}).cells);
-    c.push(c.line!({ ChargeCategory: 'Credit', ChargeDescription: 'Example internal chargeback credit', ChargeFrequency: 'One-Time', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits(cents(-4000)), EffectiveCost: formatUnits(cents(-4000)), ContractedCost: formatUnits(cents(-4000)), ServiceName: 'Credits', ServiceCategory: 'Other' }));
-  }, {
-    ...COMMON_NA_REASONS,
-    ListCost: 'Internal chargeback has no public list price',
-    ListUnitPrice: 'Internal chargeback has no public list price',
-    ContractedUnitPrice: 'Internal chargeback rate applies per project, not per contract',
-  }, noListPrice);
+    c.push(c.line!({ ChargeCategory: 'Credit', ChargeDescription: 'Example internal chargeback credit', ChargeFrequency: 'One-Time', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits(cents(-4000)), EffectiveCost: formatUnits(cents(-4000)), ContractedCost: formatUnits(cents(-4000)), ListCost: formatUnits(ZERO), ServiceName: 'Credits', ServiceCategory: 'Other' }));
+  }, { ...COMMON_NA_REASONS });
 }
 
 export function generateOnPremise(): Dataset {
@@ -201,26 +194,16 @@ export function generateOnPremise(): Dataset {
       const { cells } = usageLine(c, i, { billedZero: true });
       c.push({ ...cells, ChargeDescription: `${cells.ChargeDescription} (hardware depreciation share)`, PricingCategory: 'Other' });
     }
-    // Idle capacity: nobody consumed it, so the quantity is N/A (not 0) while the cost is real.
+    // Idle capacity is reserved by the cluster itself, so its quantity is the capacity held; the cost is real.
     for (let k = 0; k < 4; k++) {
       const { cells, effective } = usageLine(c, 500 + k, { billedZero: true });
-      c.push({ ...cells, ConsumedQuantity: '', ConsumedUnit: '', PricingQuantity: '', PricingUnit: '', SubAccountId: 'example-ns-idle', SubAccountName: 'Example idle capacity', ChargeDescription: 'Idle capacity share (nothing consumed)', PricingCategory: 'Other', EffectiveCost: formatUnits(effective) });
+      c.push({ ...cells, SubAccountId: 'example-ns-idle', SubAccountName: 'Example idle capacity', ChargeDescription: 'Idle capacity share (held by the cluster, unallocated)', PricingCategory: 'Other', EffectiveCost: formatUnits(effective) });
     }
     // The one real invoice: power and cooling (Billed = Effective).
     const power = cents(180000);
-    c.push(c.line!({ ChargeCategory: 'Usage', ChargeDescription: 'Example power and cooling invoice', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits(power), EffectiveCost: formatUnits(power), ServiceName: 'Example Power and cooling', ServiceCategory: 'Other', ResourceId: 'example-dc-hall-1', ResourceName: 'example-dc-hall-1', ResourceType: 'Facility', SubAccountId: 'example-facilities', SubAccountName: 'Example facilities', RegionId: 'ex-dc-hq', RegionName: 'Example Datacenter HQ' }));
+    c.push(c.line!({ ChargeCategory: 'Usage', ChargeDescription: 'Example power and cooling invoice', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits(power), EffectiveCost: formatUnits(power), ContractedCost: formatUnits(power), ListCost: formatUnits(power), PricingCategory: 'Standard', PricingQuantity: '1', PricingUnit: 'Months', ConsumedQuantity: '1', ConsumedUnit: 'Months', ServiceName: 'Example Power and cooling', ServiceCategory: 'Other', ResourceId: 'example-dc-hall-1', ResourceName: 'example-dc-hall-1', ResourceType: 'Facility', SubAccountId: 'example-facilities', SubAccountName: 'Example facilities', RegionId: 'ex-dc-hq', RegionName: 'Example Datacenter HQ' }));
     c.push(adjustment(c, cents(-1234), 'Example metering correction for August', 'Correction'));
-  }, {
-    ...COMMON_NA_REASONS,
-    ListCost: 'Owned capacity has no list price',
-    ListUnitPrice: 'Owned capacity has no list price',
-    ContractedCost: 'Owned capacity has no contract',
-    ContractedUnitPrice: 'Owned capacity has no contract',
-    ConsumedQuantity: 'Idle capacity has no consumer, so usage does not apply',
-    ConsumedUnit: 'Idle capacity has no consumer, so usage does not apply',
-    PricingQuantity: 'Idle capacity is not priced by quantity',
-    PricingUnit: 'Idle capacity is not priced by quantity',
-  }, noContract, 'Owned hardware has no vendor invoice: its allocation is a true $0 billed and carries its cost in EffectiveCost (amortized).');
+  }, { ...COMMON_NA_REASONS }, 'Owned hardware has no vendor invoice: its allocation is a true 0 billed (no vendor invoice) and carries its cost, priced at the rate card, in EffectiveCost (amortized).');
 }
 
 export const GENERATORS = { 'syn-public-cloud-api': generatePublicCloud, 'syn-private-cloud-api': generatePrivateCloud, 'syn-on-premise-api': generateOnPremise } as const;

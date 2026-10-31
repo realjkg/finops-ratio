@@ -2,30 +2,31 @@
 // connects to anything: "Import sample" loads a committed synthetic FOCUS 1.0 fixture in the browser
 // and reconciles it exactly. There is no field for a credential, endpoint or token.
 import { CONNECTIONS } from '@/demo/apiDatasets';
-import { formatMoney, totalsByCurrency, type Reconciled } from '@/demo/apiDatasets/reconcile';
+import { formatMoney, groupNaColumns, totalsByCurrency, type Reconciled } from '@/demo/apiDatasets/reconcile';
 import { importedList, useSampleImports } from '@/demo/apiDatasets/store';
+import { MoneyTable } from './MoneyTable';
 
 const utc = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
-const th = 'px-2 py-1 text-left text-xs font-medium text-sub';
-const td = 'whitespace-nowrap px-2 py-1 font-mono text-xs tabular-nums';
 
 function Reconciliation({ r }: { r: Reconciled }) {
+  const na = groupNaColumns(r);
   return (
     <div className="mt-3 space-y-2 text-xs">
       <p role="status" className={r.matchesControl ? 'text-value' : 'text-cost'}>
         {r.matchesControl ? 'Reconciled: rows, billed and effective match the fixture’s control totals.' : 'Mismatch with the fixture’s control totals.'}
       </p>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[18rem]" aria-label={`Reconciliation, ${r.name}`}>
-          <thead><tr><th scope="col" className={th}>Rows</th><th scope="col" className={th}>Billed</th><th scope="col" className={th}>Effective</th><th scope="col" className={th}>Billed − Effective</th></tr></thead>
-          <tbody><tr><td className={td}>{r.rows}</td><td className={td}>{formatMoney(r.billed, r.currency)}</td><td className={td}>{formatMoney(r.effective, r.currency)}</td><td className={td}>{formatMoney(r.difference, r.currency)}</td></tr></tbody>
-        </table>
-      </div>
+      <MoneyTable
+        label={`Reconciliation, ${r.name}`}
+        caption={`Reconciliation in ${r.currency} for ${r.name}`}
+        headers={['Connection', 'Rows', 'Billed', 'Effective', 'Billed − Effective']}
+        rows={[[r.name, String(r.rows), formatMoney(r.billed, r.currency), formatMoney(r.effective, r.currency), formatMoney(r.difference, r.currency)]]}
+      />
       <details>
         <summary className="cursor-pointer text-sub">N/A columns ({r.naColumns.length}): empty means not provided, never 0</summary>
-        <ul className="mt-1 space-y-0.5 text-sub">
-          {r.naColumns.map((c) => <li key={c.column}><span className="font-mono">{c.column}</span>: N/A on {c.rows} of {r.rows} rows. {c.reason}.</li>)}
-        </ul>
+        <div className="mt-1 space-y-2 text-sub">
+          {na.whole.length > 0 && <div><p className="font-medium text-txt">Empty on every row</p><ul className="space-y-1">{na.whole.map((g) => <li key={g.reason}>{g.reason}: <span className="break-words font-mono">{g.columns.join(', ')}</span></li>)}</ul></div>}
+          {na.partial.length > 0 && <div><p className="font-medium text-txt">Empty on some rows</p><ul className="space-y-1">{na.partial.map((g) => <li key={g.reason}>{g.reason}: <span className="break-words font-mono">{g.columns.map((c) => `${c.column} (${c.rows})`).join(', ')}</span></li>)}</ul></div>}
+        </div>
       </details>
     </div>
   );
@@ -39,7 +40,7 @@ export function SyntheticApiConnections() {
     <section aria-labelledby="synthetic-connections-heading" className="mb-8">
       <h2 id="synthetic-connections-heading" className="mb-1 font-mono text-[11px] uppercase tracking-wider text-sub">Simulated API connections · Synthetic</h2>
       <p className="mb-3 max-w-3xl text-sm text-sub">
-        Three kinds of API connection with fictional data in FOCUS 1.0 form. Nothing connects: Import sample reads a bundled fixture in this tab, makes no network call, and keeps nothing after you leave. Each connection has its own currency, and currencies are never added together.
+        Three kinds of API connection with fictional data in FOCUS 1.0 form. Nothing connects: Import sample loads a bundled file from this site, makes no data request, and keeps nothing after you leave. Each connection has its own currency, and currencies are never added together.
       </p>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         {CONNECTIONS.map((c) => {
@@ -71,14 +72,13 @@ export function SyntheticApiConnections() {
       </div>
       {error && <p role="alert" className="mt-2 text-xs text-cost">{error}</p>}
       {totals.length > 0 && (
-        <div className="mt-4 overflow-x-auto rounded-card border border-edge bg-slab p-3">
-          <table className="w-full min-w-[22rem]" aria-label="Imported totals by currency">
-            <caption className="pb-1 text-left text-xs text-sub">Imported totals, one line per currency (synthetic)</caption>
-            <thead><tr><th scope="col" className={th}>Currency</th><th scope="col" className={th}>Connections</th><th scope="col" className={th}>Rows</th><th scope="col" className={th}>Billed</th><th scope="col" className={th}>Effective</th></tr></thead>
-            <tbody>
-              {totals.map((t) => <tr key={t.currency}><td className={td}>{t.currency}</td><td className={td}>{t.connections}</td><td className={td}>{t.rows}</td><td className={td}>{formatMoney(t.billed, t.currency)}</td><td className={td}>{formatMoney(t.effective, t.currency)}</td></tr>)}
-            </tbody>
-          </table>
+        <div className="mt-4 rounded-card border border-edge bg-slab p-3">
+          <MoneyTable
+            label="Imported totals by currency"
+            caption="Imported totals, one row per currency (synthetic)"
+            headers={['Currency', 'Connections', 'Rows', 'Billed', 'Effective']}
+            rows={totals.map((t) => [t.currency, String(t.connections), String(t.rows), formatMoney(t.billed, t.currency), formatMoney(t.effective, t.currency)])}
+          />
         </div>
       )}
     </section>

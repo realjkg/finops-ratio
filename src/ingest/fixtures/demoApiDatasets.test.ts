@@ -98,3 +98,67 @@ describe('across the three connections', () => {
     expect(text).not.toMatch(/AKIA[0-9A-Z]{16}|-----BEGIN|api[_-]?key|secret|password|bearer\s/i);
   });
 });
+
+// Strict FOCUS 1.0 conformance (the repo's validateRow is deliberately lenient: it needs only five columns).
+describe.each(ids)('%s: strict FOCUS 1.0', (id) => {
+  const d = committed(id);
+  const rows = d.rows.map((r) => Object.fromEntries(d.columns.map((c, i) => [c, r[i]])) as Record<string, string>);
+  const MANDATORY = ['BilledCost', 'BillingAccountId', 'BillingCurrency', 'BillingPeriodEnd', 'BillingPeriodStart', 'ChargeCategory', 'ChargeDescription', 'ChargeFrequency',
+    'ChargePeriodEnd', 'ChargePeriodStart', 'ContractedCost', 'EffectiveCost', 'InvoiceIssuerName', 'ListCost', 'ProviderName', 'PublisherName', 'ServiceCategory', 'ServiceName'];
+  const SETS: Record<string, string[]> = {
+    ChargeCategory: ['Usage', 'Purchase', 'Tax', 'Credit', 'Adjustment'], ChargeClass: ['', 'Correction'], ChargeFrequency: ['One-Time', 'Recurring', 'Usage-Based'],
+    PricingCategory: ['', 'Standard', 'Dynamic', 'Committed', 'Other'], CommitmentDiscountCategory: ['', 'Spend', 'Usage'], CommitmentDiscountStatus: ['', 'Used', 'Unused'],
+    ServiceCategory: ['AI and Machine Learning', 'Analytics', 'Business Applications', 'Compute', 'Databases', 'Developer Tools', 'Multicloud', 'Identity', 'Integration', 'Internet of Things', 'Management and Governance', 'Media', 'Migration', 'Mobile', 'Networking', 'Security', 'Storage', 'Web', 'Other'],
+  };
+
+  it('has every mandatory column non-null on every row (ListCost and ContractedCost included, never N/A)', () => {
+    for (const [i, r] of rows.entries()) for (const c of MANDATORY) expect(r[c], `row ${i} ${c}`).not.toBe('');
+  });
+  it('uses only allowed values for the enumerated columns', () => {
+    for (const [i, r] of rows.entries()) for (const [c, set] of Object.entries(SETS)) expect(set, `row ${i} ${c}=${r[c]}`).toContain(r[c]);
+  });
+  it('fills the conditional pricing and consumption columns on every Usage and Purchase row that is not a correction', () => {
+    for (const [i, r] of rows.entries()) {
+      if (!['Usage', 'Purchase'].includes(r.ChargeCategory) || r.ChargeClass === 'Correction') continue;
+      for (const c of ['PricingCategory', 'PricingQuantity', 'PricingUnit']) expect(r[c], `row ${i} ${c}`).not.toBe('');
+      if (r.ChargeCategory === 'Usage') for (const c of ['ConsumedQuantity', 'ConsumedUnit']) expect(r[c], `row ${i} ${c}`).not.toBe('');
+    }
+  });
+  it('keeps the Commitment columns all-or-none, with a Status only on Usage lines', () => {
+    for (const [i, r] of rows.entries()) {
+      const set = ['CommitmentDiscountId', 'CommitmentDiscountName', 'CommitmentDiscountType', 'CommitmentDiscountCategory'].map((c) => r[c] !== '');
+      expect(new Set(set).size, `row ${i}`).toBe(1);
+      expect(r.CommitmentDiscountStatus !== '', `row ${i} status`).toBe(set[0] && r.ChargeCategory === 'Usage');
+    }
+  });
+  it('prices Usage and Purchase lines coherently: Contracted <= List, and a commitment discount only in EffectiveCost', () => {
+    for (const [i, r] of rows.entries()) {
+      if (!['Usage', 'Purchase'].includes(r.ChargeCategory)) continue;
+      expect(parseUnits(r.ContractedCost) <= parseUnits(r.ListCost), `row ${i}`).toBe(true);
+      if (r.CommitmentDiscountStatus === 'Used') {
+        expect(r.ContractedCost, `row ${i}`).toBe(r.ListCost); // the pre-commitment price
+        expect(parseUnits(r.EffectiveCost) < parseUnits(r.ListCost), `row ${i}`).toBe(true);
+        expect(r.ContractedUnitPrice, `row ${i}`).toBe(r.ListUnitPrice);
+      }
+    }
+  });
+  it('keeps BilledCost a true zero only where it is explained', () => {
+    for (const [i, r] of rows.entries()) {
+      if (r.ChargeCategory !== 'Usage' || parseUnits(r.BilledCost) !== BigInt(0)) continue;
+      const prepaid = r.CommitmentDiscountStatus !== '';
+      expect(prepaid || Boolean(d.meta.zeroBilledReason), `row ${i}`).toBe(true);
+    }
+    expect(Boolean(d.meta.zeroBilledReason)).toBe(id === 'syn-on-premise-api');
+    if (id === 'syn-on-premise-api') {
+      const alloc = rows.filter((r) => /hardware depreciation|Idle capacity/.test(r.ChargeDescription));
+      expect(alloc.length).toBeGreaterThan(50);
+      for (const r of alloc) expect([r.BilledCost, parseUnits(r.EffectiveCost) > BigInt(0)]).toEqual(['0.0000000000', true]);
+      expect(d.meta.zeroBilledReason).toMatch(/true \$?0 billed|no vendor invoice/);
+    }
+  });
+  it('names itself as Example in every identifying meta field', () => {
+    expect(d.meta.name).toMatch(/^Example /);
+    expect(d.meta.provider).toMatch(/^Example /);
+    expect(d.meta.billingPeriod).toBe('2026-09');
+  });
+});

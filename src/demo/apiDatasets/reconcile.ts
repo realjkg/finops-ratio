@@ -94,3 +94,31 @@ export function totalsByCurrency(list: Reconciled[]): { currency: string; rows: 
   }
   return [...acc].sort((a, b) => a[0].localeCompare(b[0])).map(([currency, t]) => ({ currency, rows: t.rows, billed: formatUnits(t.billed), effective: formatUnits(t.effective), difference: formatUnits(t.billed - t.effective), connections: t.connections }));
 }
+
+/** `num / den` as a whole percent, rounded half up in integer arithmetic (basis points first, so 76.53% shows as 77%). */
+export function percentRounded(num: bigint, den: bigint): number {
+  if (den <= ZERO) return 0;
+  const bp = (num * BigInt(10000) + den / BigInt(2)) / den;
+  return Number((bp + BigInt(50)) / BigInt(100));
+}
+
+export interface NaGroups {
+  /** Empty on every row of the dataset: one line per reason. */
+  whole: { reason: string; columns: string[] }[];
+  /** Empty on some rows only: one line per reason, with the row counts. */
+  partial: { reason: string; columns: { column: string; rows: number }[] }[];
+}
+
+/** Groups the N/A columns by identical reason so each reason is shown once. */
+export function groupNaColumns(r: Pick<Reconciled, 'naColumns' | 'rows'>): NaGroups {
+  const whole = new Map<string, string[]>();
+  const partial = new Map<string, { column: string; rows: number }[]>();
+  for (const c of r.naColumns) {
+    if (c.rows === r.rows) whole.set(c.reason, [...(whole.get(c.reason) ?? []), c.column]);
+    else partial.set(c.reason, [...(partial.get(c.reason) ?? []), { column: c.column, rows: c.rows }]);
+  }
+  return {
+    whole: [...whole].map(([reason, columns]) => ({ reason, columns })),
+    partial: [...partial].map(([reason, columns]) => ({ reason, columns })),
+  };
+}

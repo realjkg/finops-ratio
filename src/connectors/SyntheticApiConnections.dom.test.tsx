@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The three simulated API connections on the Connectors page: labeled Synthetic, no credential fields,
-// "Import sample" reconciles client-side with no network call.
+// "Import sample" reconciles client-side with no data request.
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,16 +32,26 @@ describe('SyntheticApiConnections', () => {
     expect(box.querySelectorAll('input, textarea, select')).toHaveLength(0);
     expect(box.querySelector('table')).toBeNull();
   });
-  it('imports a sample client-side and reconciles it, with no network call and nothing stored', async () => {
+  it('imports a sample client-side and reconciles it, with no data request and nothing stored', async () => {
     const fetchSpy = vi.fn(() => { throw new Error('no network'); });
     vi.stubGlobal('fetch', fetchSpy);
     mount();
     await click(button('Import sample', card('Example Private Cloud usage API')));
     const priv = card('Example Private Cloud usage API');
     expect(priv.querySelector('[role="status"]')?.textContent).toMatch(/^Reconciled/);
-    const row = priv.querySelector('table[aria-label^="Reconciliation"] tbody tr')!;
-    expect([...row.children].map((c) => c.textContent)).toEqual(['109', 'EUR 2,339.00', 'EUR 1,739.00', 'EUR 600.00']);
-    expect(priv.textContent).toMatch(/ListCost: N\/A on 109 of 109 rows\. Internal chargeback has no public list price/);
+    const table = priv.querySelector('table[aria-label^="Reconciliation"]')!;
+    expect(table.querySelector('caption')?.textContent).toBe('Reconciliation in EUR for Example Private Cloud usage API');
+    expect(table.querySelector('tbody th[scope="row"]')?.textContent).toBe('Example Private Cloud usage API');
+    expect([...table.querySelectorAll('tbody tr')[0].children].map((c) => c.textContent)).toEqual(['Example Private Cloud usage API', '109', 'EUR 2,339.00', 'EUR 1,739.00', 'EUR 600.00']);
+    // The phone layout is a stacked list carrying the same numbers.
+    expect([...priv.querySelectorAll('dl')].find((d) => /Billed/.test(d.textContent ?? ''))?.textContent).toMatch(/Billed − Effective.*EUR 600\.00/);
+    // N/A columns: collapsed by default, grouped by reason, whole-column cases apart from partial ones.
+    const na = priv.querySelector('details')!;
+    expect(na.open).toBe(false);
+    expect(na.textContent).toMatch(/Empty on every row.*Not applicable: the line is not a correction: ChargeClass/);
+    expect(na.textContent).toMatch(/Empty on some rows/);
+    expect(na.textContent).not.toMatch(/ListCost/);
+    expect(na.textContent).not.toMatch(/of 109/);
     expect(card('Example Cloud billing API').querySelector('table')).toBeNull(); // others untouched
     expect(fetchSpy).not.toHaveBeenCalled();
     expect([localStorage.length, sessionStorage.length]).toEqual([0, 0]);
@@ -50,6 +60,7 @@ describe('SyntheticApiConnections', () => {
     mount();
     for (const n of ['Example Cloud billing API', 'Example Private Cloud usage API', 'Example Datacenter cost allocation API']) await click(button('Import sample', card(n)));
     const totals = [...box.querySelectorAll('table[aria-label="Imported totals by currency"] tbody tr')].map((tr) => [...tr.children].map((c) => c.textContent));
+    expect(box.querySelector('table[aria-label="Imported totals by currency"] caption')?.textContent).toMatch(/one row per currency/);
     expect(totals).toEqual([['EUR', '1', '109', 'EUR 2,339.00', 'EUR 1,739.00'], ['USD', '2', '214', 'USD 4,617.88', 'USD 5,188.73']]);
     await click(button('Remove', card('Example Datacenter cost allocation API')));
     expect([...box.querySelectorAll('table[aria-label="Imported totals by currency"] tbody tr')].map((tr) => tr.children[0].textContent)).toEqual(['EUR', 'USD']);

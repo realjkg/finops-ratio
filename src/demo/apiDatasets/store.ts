@@ -21,7 +21,7 @@ export const useSampleImports = create<SampleImports>((set, get) => ({
       const result = await importSample(id);
       set((s) => ({ imported: { ...s.imported, [id]: result } }));
     } catch {
-      set({ error: 'The sample could not be loaded. Reload the page and try again.' });
+      set({ error: 'The sample could not be loaded. Try again.' });
     } finally {
       set((s) => ({ busy: { ...s.busy, [id]: false } }));
     }

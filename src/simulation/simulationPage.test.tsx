@@ -33,7 +33,7 @@ describe('/simulation with server simulation disabled', () => {
     expect(box.textContent).not.toMatch(/Continue as/);
     expect(buttons().map((b) => b.textContent)).toEqual(['Open Executive sample', 'Open Technical sample', 'Open Procurement sample']);
   });
-  it('opens each persona read-only, with no network call and nothing stored', () => {
+  it('opens each persona read-only, with no data request and nothing stored', () => {
     const fetchSpy = vi.fn(() => { throw new Error('no network in the sample'); });
     vi.stubGlobal('fetch', fetchSpy);
     access.current = { ...base, enabled: false };
@@ -48,7 +48,7 @@ describe('/simulation with server simulation disabled', () => {
     expect([localStorage.length, sessionStorage.length]).toEqual([0, 0]);
     expect(box.querySelectorAll('input, textarea, select')).toHaveLength(0);
   });
-  it('uses the imported synthetic connections in each persona view, still with no network call', async () => {
+  it('uses the imported synthetic connections in each persona view, still with no data request', async () => {
     const fetchSpy = vi.fn(() => { throw new Error('no network in the sample'); });
     vi.stubGlobal('fetch', fetchSpy);
     useSampleImports.setState({ imported: {}, busy: {}, error: null });
