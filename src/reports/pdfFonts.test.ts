@@ -40,16 +40,12 @@ describe('bundled font files', () => {
       expect(sha, f.file).toBe(f.sha256);
       expect(provenance, f.file).toMatch(new RegExp(`${f.file.replace('.', '\\.')}.*${sha}`));
     }
-    expect(fs.readdirSync(PDF_FONT_DIR).sort()).toEqual(['NotoSans-Bold.ttf', 'NotoSans-Regular.ttf', 'NotoSansCJKsc-Regular.otf', 'OFL.txt', 'PROVENANCE.md']);
+    expect(fs.readdirSync(PDF_FONT_DIR).sort()).toEqual(['NotoSans-Bold.ttf', 'NotoSans-Regular.ttf', 'NotoSansCJKsc-Regular.otf', 'PROVENANCE.md']);
   });
 
-  it('ship with the OFL 1.1 text and copyright notices, here and in docs/THIRD_PARTY_NOTICES.md', () => {
-    const ofl = fs.readFileSync(path.join(PDF_FONT_DIR, 'OFL.txt'), 'utf8');
+  it('ship with the copyright notices and the full OFL 1.1 text in docs/THIRD_PARTY_NOTICES.md', () => {
     const notices = fs.readFileSync(path.join(ROOT, 'docs', 'THIRD_PARTY_NOTICES.md'), 'utf8');
-    for (const t of [ofl, notices]) {
-      expect(t).toContain('SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007');
-      expect(t).toContain('Copyright 2022 The Noto Project Authors');
-    }
+    expect(notices).toContain('SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007');
     expect(notices).toContain('Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)');
     expect(notices).toContain('© 2014-2021 Adobe (http://www.adobe.com/).');
     expect(notices).toContain('THE FONT SOFTWARE IS PROVIDED "AS IS"');

@@ -1,33 +1,26 @@
 GREEN: bundled Noto fonts for the engagement report PDF, unsupported-text preflight, 422 refusal
-Base origin/main fc83459. Node 22.22.0, @react-pdf/renderer 4.5.1 (fontkit 2.0.4), sandbox x86_64.
-
-Gates: lint clean; tsc app + worker clean; full vitest 260 files / 4,696 tests passed.
-Targeted: src/reports + engagementReportPdfRoute + engagementReportRoute + check-next-bundle: all passed.
-
-Supported scripts (declared, verified by extraction and by eye): Latin (incl. accents, Latin-1/Extended-A/B,
-Latin Extended Additional), Greek, Cyrillic, common punctuation/currency/number symbols, Simplified Chinese,
-Japanese (kana + kanji), Korean (precomposed Hangul). UNSUPPORTED (refused, 422): complex-shaping and
-right-to-left scripts (Arabic, Hebrew, Indic, Thai, Lao, Khmer, Myanmar, Tibetan, ...), combining marks
-(decomposed accents: rendered misplaced in a probe), conjoining Hangul jamo, emoji, controls/format/private
-use/unassigned, and scripts without a bundled font (e.g. Armenian, Georgian). Not "full Unicode".
-
-Independent extraction (poppler, not in CI): pdffonts -> RATIOA+NotoSans-Bold, RATIOB+NotoSans-Regular
-(CID TrueType), RATIOC+NotoSansCJKsc-Regular (CID Type 0C); all emb/sub/uni = yes. pdftotext -layout returns
-every multi-script cell, amounts (-2.61370000000, -7.50000000000, 1200), currencies (USD, EUR, JPY) verbatim.
-pdftoppm pages inspected: no missing-glyph boxes, no overlaps, CJK wraps inside its column (break marked '-').
-
-Mutations (each killed): EMOJI->ok (11 failed); drop NEVER_DRAWN (4 failed); drop object ordering (1 failed);
-drop subset-tag rewrite (2 failed); no CJK break split (1 failed); no CJK fallback family (3 failed);
-skip sha256 check (1 failed); bundle-check hash rule off (1 failed); route ignores refusal (1 failed).
-
-Measurements (separate process per case, external SIGKILL watchdog 60 s; cold = first render incl. font load,
-rss after a second render; before = origin/main Helvetica, after = this branch):
-case                         before ms / MB / bytes      after ms / MB / bytes
-sample                       602 / 180 / 14,164          813 / 199 / 26,035
-200 charge categories        9,364 / 393 / 59,211        11,788 / 470 / 80,939
-200 CJK-heavy categories     9,784 / 420 / 59,588 (?)    11,120 / 507 / 168,537
-hostile 64 x 32k spaced      4,878 / 323 / 51,719        6,753 / 343 / 84,510
-hostile 64 x 32k unbroken    5,373 / 363 / 50,898        6,206 / 350 / 82,594
-Data caps unchanged (2,000/cell, 100,000/doc, 200 floor); the in-repo 15 s watchdog test still passes.
-Deployment size: assets/fonts = 17,308,331 bytes (3 fonts 17,301,104 + OFL/PROVENANCE); the image copies the
-whole tree (COPY . .), so the build and engagement stages grow by the same amount. No Dockerfile change.
+Base fc83459; Node 22.22.0, @react-pdf/renderer 4.5.1 (fontkit 2.0.4). Gates: lint, tsc app+worker, full vitest
+(260 files / 4,696 tests), worker:build, build, check:bundle (pass; engagement route trace lists assets/fonts),
+reportFacts.db.test.ts (11/11, Postgres 16 + SeaweedFS by CI digests).
+Supported (declared; verified by extraction and by eye): Latin incl. accents, Greek, Cyrillic, common
+punctuation/currency symbols, Simplified Chinese, Japanese (kana, kanji), Korean (precomposed Hangul).
+Refused (422): complex-shaping/right-to-left scripts (Arabic, Hebrew, Indic, Thai, Khmer, ...), combining marks
+(a decomposed accent rendered misplaced in a probe), conjoining jamo, emoji, controls/format/private use/unassigned,
+scripts without a bundled font (Armenian, Georgian, ...). Not "full Unicode".
+Poppler (not in CI): pdffonts -> RATIOA+NotoSans-Bold, RATIOB+NotoSans-Regular (CID TrueType),
+RATIOC+NotoSansCJKsc-Regular (CID Type 0C), emb/sub/uni yes; pdftotext returns every multi-script cell, amounts
+(-2.61370000000, -7.50000000000, 1200) and currencies (USD, EUR, JPY) verbatim; pdftoppm pages inspected: no
+missing-glyph boxes, overlaps or clipping; CJK wraps inside its column (break marked '-').
+Mutations (all killed): EMOJI->ok (11 failed); drop NEVER_DRAWN (4); drop object ordering (1); drop subset-tag
+rewrite (2); no CJK break split (1); no CJK fallback family (3); skip sha256 check (1); bundle hash rule off (1);
+route ignores refusal (1).
+Measurements (one process per case, external SIGKILL watchdog; cold = first render incl. font load; RSS after a
+second render). before = origin/main Helvetica, after = this branch; ms / MB RSS / PDF bytes:
+sample                     602 / 180 / 14,164      ->   813 / 199 / 26,035
+200 charge categories    9,364 / 393 / 59,211      -> 11,788 / 470 / 80,939
+200 CJK-heavy categories 9,784 / 420 / 59,588 ('?') -> 11,120 / 507 / 168,537
+hostile 64x32k spaced    4,878 / 323 / 51,719      ->  6,753 / 343 / 84,510
+hostile 64x32k unbroken  5,373 / 363 / 50,898      ->  6,206 / 350 / 82,594
+Caps unchanged (2,000/cell, 100,000/doc, 200 floor); the 15 s in-repo watchdog test passes.
+Deployment size: fonts 17,301,104 bytes (git objects +13.7 MiB compressed); the image copies the whole tree
+(COPY . .), so build and engagement stages grow by about 17.3 MB. No Dockerfile change.
