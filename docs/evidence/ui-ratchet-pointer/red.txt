@@ -1,0 +1,5 @@
+RED at base 6c8e324: npx vitest run src/components/SegmentedControl.test.tsx
+Tests 2 failed | 12 passed (14)
+ x still scrolls a later selection after a press that ends in pointerup without a click
+ x still scrolls a later selection after a press that ends in pointercancel without a click
+ (the normal press/release/click test passes: it already guards the existing behavior)
