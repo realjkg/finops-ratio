@@ -78,7 +78,11 @@ describe('engagement report PDF', () => {
     expect(texts.join('').length).toBeLessThan(PDF_TOTAL_MAX_CHARS + 64 * 80 + 20_000);
     const first = texts.find((t) => t.startsWith('c0 '))!;
     expect(first).toMatch(/\.\.\. \[truncated \d+ characters; see XLSX\/JSON for the full text\]$/);
-    expect(texts.filter((t) => t.startsWith('PDF length limit: '))).toEqual([PDF_TRUNCATION_NOTE(64)]);
+    const notes = texts.filter((t) => t.startsWith('PDF length limit: '));
+    expect(notes).toHaveLength(1);
+    // The 64 long categories, plus long notes that come after the document budget is spent (they keep 200 characters).
+    expect(Number(/^PDF length limit: (\d+) /.exec(notes[0])?.[1])).toBeGreaterThanOrEqual(64);
+    expect(PDF_TRUNCATION_NOTE(2)).toMatch(/^PDF length limit: 2 cell values were truncated .*XLSX and JSON carry the full text\.$/);
     // The shared model is untouched: XLSX and the screen keep the full text.
     expect(m.sections.find((s) => s.id === 'chargeCategories')!.rows[0][2].length).toBeGreaterThan(PDF_CELL_MAX_CHARS);
   });

@@ -64,18 +64,48 @@ function widths(s: ReportSection): string[] {
 }
 const T = ({ style, children }: { style: Style | Style[]; children: string }) => (
   <Text style={style} hyphenationCallback={breakLong}>
-    {pdfGlyphText(children)}
+    {children}
   </Text>
 );
 
-function SectionPages({ model, section }: { model: EngagementReportModel; section: ReportSection }) {
+// Render-cost bounds (PDF only; the shared model, XLSX and screen keep the full text). react-pdf lays out
+// synchronously, so the read deadline cannot stop a render: the text it lays out is capped instead.
+export const PDF_CELL_MAX_CHARS = 2_000;
+export const PDF_TOTAL_MAX_CHARS = 100_000;
+export const PDF_CELL_FLOOR_CHARS = 200;
+export const PDF_TRUNCATION_NOTE = (n: number) =>
+  `PDF length limit: ${n} cell value${n === 1 ? ' was' : 's were'} truncated (at most ${PDF_CELL_MAX_CHARS} characters per cell, and ${PDF_CELL_FLOOR_CHARS} per cell once the document holds ${PDF_TOTAL_MAX_CHARS}); the XLSX and JSON carry the full text.`;
+
+/** The model's text as this PDF shows it: glyph fallback, then the per-cell and document caps, in document order. */
+function pdfView(model: EngagementReportModel) {
+  let budget = PDF_TOTAL_MAX_CHARS;
+  let glyph = 0;
+  let cut = 0;
+  const show = (text: string) => {
+    const g = pdfGlyphText(text);
+    if (g !== text) glyph += 1;
+    // Once the document budget is spent, every cell still keeps its first PDF_CELL_FLOOR_CHARS (amounts, ids, labels).
+    const limit = Math.min(PDF_CELL_MAX_CHARS, Math.max(budget, PDF_CELL_FLOOR_CHARS));
+    if (g.length <= limit) {
+      budget = Math.max(0, budget - g.length);
+      return g;
+    }
+    cut += 1;
+    budget = Math.max(0, budget - limit);
+    return `${g.slice(0, limit)}... [truncated ${g.length - limit} characters; see XLSX/JSON for the full text]`;
+  };
+  const title = show(model.title);
+  const sections = model.sections.map((s) => ({ ...s, title: show(s.title), columns: s.columns.map(show), rows: s.rows.map((r) => r.map(show)) }));
+  return { title, sections, glyph, cut };
+}
+
+function SectionPages({ view, section, generatedAt, first }: { view: ReturnType<typeof pdfView>; section: ReportSection; generatedAt: string; first: boolean }) {
   const w = widths(section);
   const table = pdfLayout(section) === 'table';
-  const glyphNote = section.id === 'summary' ? countGlyphChanges(model) : 0;
   return (
     <Page size="A4" orientation="landscape" style={styles.page} wrap>
       <View fixed>
-        <T style={styles.title}>{model.title}</T>
+        <T style={styles.title}>{view.title}</T>
         <T style={styles.section}>{section.title}</T>
         {table && (
           <View style={styles.head}>
@@ -93,7 +123,8 @@ function SectionPages({ model, section }: { model: EngagementReportModel; sectio
             ))}
           </View>
         ) : (
-          <View key={ri} style={styles.record}>
+          // A record never splits across pages, so no page shows amounts without their currency and source.
+          <View key={ri} style={styles.record} wrap={false}>
             {r.map((cell, i) =>
               cell === '' ? null : (
                 <View key={i} style={{ flexDirection: 'row' }}>
@@ -105,22 +136,19 @@ function SectionPages({ model, section }: { model: EngagementReportModel; sectio
           </View>
         ),
       )}
-      {glyphNote > 0 && <T style={styles.note}>{PDF_GLYPH_NOTE(glyphNote)}</T>}
-      <Text style={styles.footer} fixed render={({ pageNumber, totalPages }) => `${pdfGlyphText(model.title)} · generated ${model.generatedAt} · page ${pageNumber} of ${totalPages}`} />
+      {first && view.glyph > 0 && <T style={styles.note}>{PDF_GLYPH_NOTE(view.glyph)}</T>}
+      {first && view.cut > 0 && <T style={styles.note}>{PDF_TRUNCATION_NOTE(view.cut)}</T>}
+      <Text style={styles.footer} fixed render={({ pageNumber, totalPages }) => `${view.title} · generated ${generatedAt} · page ${pageNumber} of ${totalPages}`} />
     </Page>
   );
 }
 
-function countGlyphChanges(model: EngagementReportModel): number {
-  const all = [model.title, ...model.sections.flatMap((s) => [s.title, ...s.columns, ...s.rows.flat()])];
-  return all.filter((t) => pdfGlyphText(t) !== t).length;
-}
-
 export function EngagementReportDocument({ model }: { model: EngagementReportModel }) {
+  const view = pdfView(model);
   return (
-    <Document title={pdfGlyphText(model.title)} author="Ratio" creator="Ratio" producer="Ratio" creationDate={new Date(model.generatedAt)} modificationDate={new Date(model.generatedAt)}>
-      {model.sections.map((s) => (
-        <SectionPages key={s.id} model={model} section={s} />
+    <Document title={view.title} author="Ratio" creator="Ratio" producer="Ratio" creationDate={new Date(model.generatedAt)} modificationDate={new Date(model.generatedAt)}>
+      {view.sections.map((s, i) => (
+        <SectionPages key={s.id} view={view} section={s} generatedAt={model.generatedAt} first={i === 0} />
       ))}
     </Document>
   );

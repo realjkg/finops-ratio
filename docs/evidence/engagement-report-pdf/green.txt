@@ -18,3 +18,15 @@ Mutations (unit / db), each killed by at least one suite:
 - P6 surrogate-pair guard removed (#158 review Low): killed / survived
 - P7 section heading not repeated per page: killed / survived
 - P8 PDF served with a wrong content type: survived / killed
+
+Review round (fixes on top of 993a3ce): GREEN, same environment (fresh containers, CI digests, tmpfs).
+- lint, typecheck (app + worker): pass. npm test: 251 files / 4574 tests passed.
+- npm run test:db: 45 files / 723 tests; serial 6 files / 173 tests: all passed. worker:build: pass.
+- build and check:bundle NOT run locally: the shared disk had under 300 MB free (another session's work), and a Next
+  build needs more; CI runs both.
+- External watchdog (child process, SIGKILL after 15 s): 64 cells x 32,000 characters render in about 4.5 s
+  (spaced) and 4.7 s (unbroken), RSS about 270-285 MB; before the caps both were killed (over 60 s).
+Mutations, each killed:
+- R1 no per-cell cap (unit); R2 records may split across pages (unit); R3 truncation count not shown (unit);
+  R4 JSON carries an extra field (db); R5 PDF dates from the wall clock (unit); R6 table Note column dropped (unit);
+  R7 font note on the last section instead of page 1 (unit).
