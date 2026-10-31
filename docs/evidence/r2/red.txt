@@ -1,0 +1,9 @@
+R2 PR A RED (tests committed before the implementation)
+$ npx vitest run src/engagement/auth
+ FAIL  src/engagement/auth/authz.test.ts
+ FAIL  src/engagement/auth/directory.test.ts
+ FAIL  src/engagement/auth/password.test.ts
+ Test Files  3 failed (3)
+      Tests  no tests
+Cause: ./password, ./directory, ./identity and ./authz do not exist yet (each suite fails to import).
+GREEN counts and the mutation results are in the PR body.
