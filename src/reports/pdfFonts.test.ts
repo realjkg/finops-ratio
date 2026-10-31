@@ -8,7 +8,7 @@ import path from 'path';
 import { Font } from '@react-pdf/renderer';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { orderPdfObjects, stableSubsetTags } from './pdfBytes';
-import { classifyPdfChar, loadPdfFonts, PDF_FONT_DIR, PDF_FONT_FAMILY, PDF_FONTS, PDF_SUPPORTED_SCRIPTS, unsupportedKinds } from './pdfFonts';
+import { classifyPdfChar, collidingCodePoints, loadPdfFonts, pdfCharFace, PDF_FONT_DIR, PDF_FONT_FAMILY, PDF_FONTS, PDF_SUPPORTED_SCRIPTS, pdfGlyphKey, unsupportedKinds } from './pdfFonts';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 /** The sources Font.register received while the fonts loaded (captured once: spies are reset between tests). */
@@ -86,7 +86,9 @@ describe('declared supported scripts and the classification of everything else',
     ['Korean', '비용 보고서 ㄱ'],
     ['currency and punctuation', '€ £ ¥ ₩ ₽ ₹ $ − – — “” ‘’ … · ¢ ©®™ 、。「」（）'],
     ['amounts', '-2.61370000000 20.62033861840 1,200 (3.00)'],
-    ['tab and newline', 'a\tb\nc'],
+    ['newline', 'a\nc'],
+    ['Romanian, Polish, Czech, Turkish, Icelandic', 'ș ț Ș Ț ş ţ zażółć gęślą jaźń ěščřžůú ğşıİ þæð'],
+    ['Vietnamese without dot-below', 'Phòng Đại Quốc Hà Nội thành phố Nguyễn Trường'],
   ])('%s: every character is drawn', (_, text) => {
     expect([...text].filter((ch) => classifyPdfChar(ch) !== 'ok')).toEqual([]);
   });
@@ -110,6 +112,12 @@ describe('declared supported scripts and the classification of everything else',
     ['private use', '', 'other'],
     ['noncharacter', '￿', 'other'],
     ['lone surrogate', '\uD800', 'other'],
+    ['tab (shares a glyph with newline in the text layer)', '\t', 'other'],
+    ['CJK Extension B Han (outside the Basic Multilingual Plane)', '𠮷𪚲𤣱', 'other'],
+    ['Latin Extended-F/G, mathematical letters', '𐞀𝼀𝐀', 'other'],
+    ['enclosed alphanumerics with emoji presentation', '🅰🈯', 'emoji'],
+    ['enclosed alphanumeric supplement (text)', '🄐', 'other'],
+    ['precomposed letters the font draws only as base + mark (text layer drops the mark)', 'ǹḿṃṅṣẹịọụ', 'complex'],
     ['Armenian (not declared)', 'Բ', 'other'],
     ['Georgian (not declared)', 'ა', 'other'],
     ['line separator', ' ', 'other'],
@@ -117,7 +125,27 @@ describe('declared supported scripts and the classification of everything else',
     for (const ch of text) expect(classifyPdfChar(ch), JSON.stringify(ch)).toBe(kind);
   });
 
+  it('every supported character is one glyph of one face, in the Basic Multilingual Plane', () => {
+    for (const ch of ['A', 'é', 'ò', 'ș', 'Ж', 'ά', '成', 'コ', '비', '€', '\u3000']) {
+      expect(classifyPdfChar(ch), ch).toBe('ok');
+      expect(pdfGlyphKey(ch), ch).toMatch(/^[02]:\d+$/);
+    }
+    expect([pdfCharFace('A'), pdfCharFace('成')]).toEqual([0, 2]);
+    expect(() => pdfGlyphKey('ọ')).toThrow(/not drawn/);
+  });
+
+  it('code points that share one glyph collide only when both appear in one document (the text layer keeps one of them)', () => {
+    expect(pdfGlyphKey('\u4e00')).toBe(pdfGlyphKey('\u2f00'));
+    expect(pdfGlyphKey('\u3008')).toBe(pdfGlyphKey('\u2329'));
+    expect(pdfGlyphKey('\u2460')).toBe(pdfGlyphKey('\u2780'));
+    expect([...collidingCodePoints(['\u4e00二三', '成本 \u2f00'])].sort((a, b) => a - b)).toEqual([0x2f00, 0x4e00]);
+    expect([...collidingCodePoints(['\u3008a\u3009', '\u2329'])].sort((a, b) => a - b)).toEqual([0x2329, 0x3008]);
+    expect(collidingCodePoints(['\u4e00二三 成本', '\u2460 \u2461 Москва \u00a0 a b']).size).toBe(0);
+  });
+
   it('unsupportedKinds collects the distinct kinds in one value', () => {
+    expect([...unsupportedKinds('Phòng học dịch vụ')]).toEqual(['complex']);
+    expect([...unsupportedKinds('a𠮷b')]).toEqual(['other']);
     expect([...unsupportedKinds('Paid 👍🏽 مرحبا ')].sort()).toEqual(['complex', 'emoji', 'other']);
     expect(unsupportedKinds('Москва 成本 비용 コスト').size).toBe(0);
   });

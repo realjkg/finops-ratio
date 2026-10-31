@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assembleReportFacts } from '@/reports/reportFacts';
 import { ENGAGEMENT, g, sampleInput } from '@/reports/fixtures/sampleFacts';
 import { pdfShownStrings } from '@/reports/fixtures/pdfText';
-import { PDF_UNSUPPORTED_MESSAGE } from '@/reports/engagementReportPdf';
+import { PDF_BUSY_MESSAGE, PDF_UNSUPPORTED_MESSAGE } from '@/reports/engagementReportPdf';
 import { createEngagementReportRoute } from './engagementReportRoute';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
 
@@ -56,4 +56,14 @@ describe('engagement report PDF: supported scripts render, unsupported text is r
     const xlsx = await get('xlsx');
     expect(xlsx.statusCode).toBe(200);
   }, 30_000);
+
+  it('more concurrent PDF requests than render slots: the extra one is 503 pdf_busy with Retry-After, no PDF', async () => {
+    state.cells = ['Usage'];
+    const res = await Promise.all([get('pdf'), get('pdf'), get('pdf')]);
+    expect(res.map((r) => r.statusCode).sort()).toEqual([200, 200, 503]);
+    const busy = res.find((r) => r.statusCode === 503)!;
+    expect(busy.body).toEqual({ error: { code: 'pdf_busy', message: PDF_BUSY_MESSAGE } });
+    expect(busy.headers['retry-after']).toBe('5');
+    expect(busy.headers['content-disposition']).toBeUndefined();
+  }, 60_000);
 });

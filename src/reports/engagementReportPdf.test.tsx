@@ -22,6 +22,11 @@ import {
   pdfLayout,
   pdfPreflight,
   PdfUnsupportedTextError,
+  PDF_CJK_COST,
+  PDF_MAX_CONCURRENT_RENDERS,
+  PdfBusyError,
+  pdfCutToCost,
+  pdfTextCost,
   renderEngagementReportPdf,
 } from './engagementReportPdf';
 import { loadPdfFonts } from './pdfFonts';
@@ -264,14 +269,39 @@ describe('bundled fonts: declared scripts render faithfully and extract exactly'
     expect(lines.map((l, i) => (i < lines.length - 1 ? l.slice(0, -1) : l)).join('')).toBe(long);
   }, 30_000);
 
-  it('the data caps still apply to CJK free text (visible marker, page-1 count)', () => {
+  it("the data caps weigh each CJK character as 10 Latin ones (CJK layout costs more per character): visible marker, page-1 count", () => {
+    expect(PDF_CJK_COST).toBe(10);
+    expect(pdfTextCost('ab 成本')).toBe(3 + 2 * PDF_CJK_COST);
     const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups: [g({}), g({ isTotal: false, chargeCategory: '成本'.repeat(1_500), rowCount: '1' })] })), ENGAGEMENT);
     const texts = treeTexts(<EngagementReportDocument model={m} />);
     const cell = texts.find((t) => t.startsWith('成本成本'))!;
-    expect(cell.startsWith('成本'.repeat(1_000))).toBe(true);
-    expect(cell).toMatch(/\.\.\. \[truncated 1000 characters; see XLSX\/JSON for the full text\]$/);
+    expect(cell).toBe(`${'成本'.repeat(100)}... [truncated 2800 characters; see XLSX/JSON for the full text]`);
     expect(texts.filter((t) => t.startsWith('PDF length limit: '))).toEqual([PDF_TRUNCATION_NOTE(1)]);
+    // Mixed text is cut where its cost reaches the cap, never inside a character.
+    expect(pdfCutToCost('ab成本cd', 13)).toBe('ab成');
+    expect(pdfCutToCost('ab成本cd', 12)).toBe('ab');
   });
+
+  for (const kind of ['cjk-spaced', 'cjk-dense'] as const) {
+    it(`a hostile ${kind} input (50 cells of 2,000 CJK characters${kind === 'cjk-spaced' ? ' separated by spaces' : ''}) renders within 15 s and bounded memory (external watchdog)`, () => {
+      const child = path.join(__dirname, 'fixtures', 'pdfRenderChild.tsx');
+      const r = spawnSync(process.execPath, ['--import', 'tsx', child, kind], { cwd: path.resolve(__dirname, '..', '..'), encoding: 'utf8', timeout: 15_000, killSignal: 'SIGKILL' });
+      expect(r.signal, 'killed by the watchdog: the render did not finish in time').toBeNull();
+      const out = JSON.parse(r.stdout.trim()) as { ms: number; rss: number; bytes: number };
+      expect(out.rss).toBeLessThan(700 * 1024 * 1024);
+      expect(out.bytes).toBeGreaterThan(0);
+    }, 20_000);
+  }
+
+  it("at most 2 PDF renders run at once; a further request is refused as busy (no queue past the request deadline)", async () => {
+    expect(PDF_MAX_CONCURRENT_RENDERS).toBe(2);
+    const m = buildEngagementReportModel(assembleReportFacts(sampleInput()), ENGAGEMENT);
+    const results = await Promise.allSettled([renderEngagementReportPdf(m), renderEngagementReportPdf(m), renderEngagementReportPdf(m)]);
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled', 'rejected']);
+    expect((results[2] as PromiseRejectedResult).reason).toBeInstanceOf(PdfBusyError);
+    // The slots are released: the next render succeeds.
+    expect((await renderEngagementReportPdf(m)).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  }, 30_000);
 });
 
 describe('unsupported text: preflight and the refusal policy (default refuse)', () => {
@@ -290,6 +320,23 @@ describe('unsupported text: preflight and the refusal policy (default refuse)', 
       '7 cell values contain characters the PDF cannot render (complex scripts or combining marks: 5; emoji: 2; other: 1); download XLSX or JSON for the full text.',
     );
     expect(PDF_UNSUPPORTED_MESSAGE({ cells: 1, complex: 0, emoji: 1, other: 0 })).toMatch(/^1 cell value contains characters /);
+  });
+
+  it('refuses Vietnamese/Yoruba dot-below letters, characters outside the Basic Multilingual Plane, and glyph twins used together', () => {
+    expect(pdfPreflight(withCells(['Phòng học dịch vụ', 'ọja ṣe ẹ', 'Phòng Nguyễn']))).toEqual({ cells: 2, complex: 2, emoji: 0, other: 0 });
+    expect(pdfPreflight(withCells(['a\u{20BB7}b', 'a\u{1F170}b']))).toEqual({ cells: 2, complex: 0, emoji: 1, other: 1 });
+    // U+4E00 and the Kangxi radical U+2F00 are one glyph: either alone is fine, both in one PDF are refused (each cell counted).
+    expect(pdfPreflight(withCells(['\u4e00 cost', 'other']))).toEqual({ cells: 0, complex: 0, emoji: 0, other: 0 });
+    expect(pdfPreflight(withCells(['\u2f00 cost', 'other']))).toEqual({ cells: 0, complex: 0, emoji: 0, other: 0 });
+    expect(pdfPreflight(withCells(['\u4e00 cost', '\u2f00 radical', 'x \u4e00']))).toEqual({ cells: 3, complex: 0, emoji: 0, other: 3 });
+  });
+
+  it("substitute draws colliding glyph twins as '?' too, so the text layer never shows the wrong one", () => {
+    const m = withCells(['\u4e00 cost', '\u2f00 radical']);
+    const texts = treeTexts(<EngagementReportDocument model={m} policy="substitute" />);
+    expect(texts).toContain('? cost');
+    expect(texts).toContain('? radical');
+    expect(texts).toContain(PDF_GLYPH_NOTE(2));
   });
 
   it('refuse: no PDF is produced, the error carries the counts and never a cell value', async () => {
