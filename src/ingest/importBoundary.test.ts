@@ -42,7 +42,9 @@ const COSTS_DIR = path.join(REPO_ROOT, 'src', 'server', 'costs');
 const COSTS_ROUTE = path.join(REPO_ROOT, 'pages', 'api', 'v1', 'costs', 'published.ts');
 // 1.0 report facts: the second (and only other) route over the same reviewed island, same reader login.
 const REPORT_FACTS_ROUTE = path.join(REPO_ROOT, 'pages', 'api', 'v1', 'reports', 'facts.ts');
-const ISLAND_ROUTES = [COSTS_ROUTE, REPORT_FACTS_ROUTE];
+// 1.0 engagement report (XLSX built from the same report facts): the third route over the island.
+const ENGAGEMENT_REPORT_ROUTE = path.join(REPO_ROOT, 'pages', 'api', 'v1', 'reports', 'engagement.ts');
+const ISLAND_ROUTES = [COSTS_ROUTE, REPORT_FACTS_ROUTE, ENGAGEMENT_REPORT_ROUTE];
 
 // M1a: the AWS managed connector wraps the durable S3 source and the import seam. Its subtree is
 // worker-only: src/connectors/managed/boundary.test.ts proves no file Next bundles reaches it.
@@ -209,6 +211,8 @@ describe('src/ingest import boundary', () => {
     expect(flagged(REPORT_FACTS_ROUTE, `import { createReportFactsRoute } from '@/server/costs/reportFactsRoute';`)).toEqual([]);
     expect(flagged(path.join(REPO_ROOT, 'pages', 'api', 'v1', 'reports', 'other.ts'), `import x from '@/server/costs/reportFactsRoute';`)).toEqual(['@/server/costs/reportFactsRoute']);
     expect(flagged(REPORT_FACTS_ROUTE, `import { Pool } from 'pg';`)).toEqual(['pg']);
+    expect(flagged(ENGAGEMENT_REPORT_ROUTE, `import { createEngagementReportRoute } from '@/server/costs/engagementReportRoute';`)).toEqual([]);
+    expect(flagged(ENGAGEMENT_REPORT_ROUTE, `import x from '@/ingest/db/tenant';`)).toEqual(['@/ingest/db/tenant']);
     expect(flagged(otherPage, `import { readerPool } from '@/server/costs/readerPool';`)).toEqual(['@/server/costs/readerPool']);
     expect(flagged(path.join(REPO_ROOT, 'src', 'components', 'X.tsx'), `import x from '../server/costs';`)).toEqual(['../server/costs']);
     // The route file itself may not reach pg or src/ingest directly.

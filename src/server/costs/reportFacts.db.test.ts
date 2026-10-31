@@ -19,7 +19,9 @@ import { runSync } from '../../ingest/worker/pipeline';
 import { FakeFocusSource } from '../../ingest/sources/fake/FakeFocusSource';
 import { MemoryEvidenceStore } from '../../ingest/evidence/MemoryEvidenceStore';
 import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
+import ExcelJS from 'exceljs';
 import { createReportFactsRoute } from './reportFactsRoute';
+import { createEngagementReportRoute } from './engagementReportRoute';
 import { closeReaderPools } from './readerPool';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
 import { NA_REASONS, SPAN_COVERS, SPAN_PARTIAL, type ReportFacts } from '../../reports/reportFacts';
@@ -37,7 +39,9 @@ let owner: Login;
 let reader: Login;
 let evidence: TestBucket;
 let drop: TestBucket;
-const A = { tenant: crypto.randomUUID(), sourceId: '', batchId: '', publishedAt: '', artifactSha256: '' };
+// Tenant A is the example engagement's tenant, so the engagement-mode report binds to it from the config file.
+const ENGAGEMENT_CONFIG = path.resolve(__dirname, '..', '..', '..', 'fixtures', 'engagement', 'example', 'engagement.json');
+const A = { tenant: JSON.parse(fs.readFileSync(ENGAGEMENT_CONFIG, 'utf8')).tenantId as string, sourceId: '', batchId: '', publishedAt: '', artifactSha256: '' };
 const C = { tenant: '', sourceId: '' };
 const D = { tenant: crypto.randomUUID() };
 const E = { tenant: '' };
@@ -178,6 +182,49 @@ describe('public FOCUS 1.0 sample (AWS 2024-09) imported through import-file', (
     expect(f.totals).toEqual({ status: 'not_available', reason: NA_REASONS.noPublished });
     expect(f.coverageGaps.map((g) => g.code)).toContain('NO_PUBLISHED_BATCH');
     expect(JSON.stringify(f)).not.toMatch(/"(billedCost|value|rowCount)":"0(\.0+)?"/);
+  });
+});
+
+describe('engagement report XLSX (GET /api/v1/reports/engagement) over the imported sample', () => {
+  async function workbook(env: Record<string, string>, period: string) {
+    const route = createEngagementReportRoute({ env: { RATIO_API_TOKEN: TEST_API_TOKEN, RATIO_READER_DATABASE_URL: reader.url, ...env }, logger: () => undefined, now: () => NOW });
+    const res = await call(route, makeReq({ headers: bearer(), query: { period, format: 'xlsx' } }));
+    expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
+    expect(res.headers['content-type']).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect(res.headers['content-disposition']).toBe(`attachment; filename="ratio-engagement-report-${period}-2026-10-30T12-00-00Z.xlsx"`);
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(res.body as ArrayBuffer);
+    const rows = (name: string) => {
+      const out: string[][] = [];
+      book.getWorksheet(name)!.eachRow((r) => out.push((r.values as unknown[]).slice(1).map((v) => (v == null ? '' : String(v)))));
+      return out;
+    };
+    return { rows };
+  }
+  const engagementEnv = { RATIO_MODE: 'engagement', RATIO_ENGAGEMENT_CONFIG: ENGAGEMENT_CONFIG };
+
+  it('engagement mode (tenant from the config): exact control totals, Credit separate, engagement and scope identified', async () => {
+    const { rows } = await workbook(engagementEnv, '2024-09');
+    const totals = rows('Totals by currency');
+    expect(totals[1].slice(0, 7)).toEqual(['USD', AWS_SEP.rowCount, AWS_SEP.billedCost, AWS_SEP.effectiveCost, '1', '-2.61370000000', '-3.00000000000']);
+    const summary = Object.fromEntries(rows('Report').map((r) => [r[0], r[1]]));
+    expect(summary.Engagement).toMatch(/\(.+\)$/);
+    expect(summary['Reporting currency']).toBe('USD');
+    expect(summary['Latest published at']).toBe(A.publishedAt);
+    expect(rows('Sources and imports')[1]).toContain(A.artifactSha256);
+  });
+
+  it('2024-10 (quarantined): every amount is N/A with the reason, never 0', async () => {
+    const { rows } = await workbook(engagementEnv, '2024-10');
+    const totals = rows('Totals by currency');
+    expect(totals[1].at(-1)).toBe(NA_REASONS.noPublished);
+    expect(totals[1].slice(0, -1).every((c) => c === 'N/A')).toBe(true);
+  });
+
+  it('another tenant (env-bound, non-engagement) never sees the sample', async () => {
+    const { rows } = await workbook({ RATIO_API_TENANT_ID: C.tenant }, '2024-09');
+    expect(rows('Totals by currency')[1].at(-1)).toBe(NA_REASONS.noPublished);
+    expect(rows('Report').find((r) => r[0] === 'Engagement')).toEqual(['Engagement', 'N/A', NA_REASONS.noEngagement]);
   });
 });
 

@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { checkNextBundle, CLIENT_FORBIDDEN, COSTS_ENTRY, READER_ENTRIES, READER_MARKERS, REPORT_FACTS_ENTRY, WORKER_ONLY } from './check-next-bundle.mjs';
+import { checkNextBundle, CLIENT_FORBIDDEN, COSTS_ENTRY, ENGAGEMENT_REPORT_ENTRY, READER_ENTRIES, READER_MARKERS, REPORT_FACTS_ENTRY, WORKER_ONLY } from './check-next-bundle.mjs';
 
 const dirs = [];
 afterEach(() => {
@@ -130,7 +130,8 @@ describe('B3 server bundles: reader code only for the costs route, worker code n
 
 describe('B5 the report-facts route is the second reader entry (and the only other one)', () => {
   it('reader chunks loaded by both reader routes, and pg traced for both, pass; any third loader still fails', () => {
-    expect(READER_ENTRIES).toEqual([COSTS_ENTRY, REPORT_FACTS_ENTRY]);
+    expect(READER_ENTRIES).toEqual([COSTS_ENTRY, REPORT_FACTS_ENTRY, ENGAGEMENT_REPORT_ENTRY]);
+    expect(ENGAGEMENT_REPORT_ENTRY).toBe('pages/api/v1/reports/engagement.js');
     expect(REPORT_FACTS_ENTRY).toBe('pages/api/v1/reports/facts.js');
     const root = cleanTree();
     write(root, `server/${REPORT_FACTS_ENTRY}`, entry(['reader._.js', 'shared._.js']));
