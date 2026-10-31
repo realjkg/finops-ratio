@@ -4,7 +4,11 @@
 // cannot resolve. This is a LOCAL, worker-safe check of the keys a fetch
 // depends on: top-level and source keys, tenantId bound to --tenant, source ids
 // (format, no duplicates) and every retrieval block (connector, params depth and
-// size, credential-looking values, secretRef as a NAME). Its constants are
+// size, credential-looking values, aws-data-exports' bucket/prefix/exportName
+// field rules, secretRef as a NAME), then R1's release policy: a managed
+// connector must be on the approved list, which the worker passes in as the
+// connectors of its registry (R1's SUPPORTED_IN_THIS_BUILD.managedConnectors is
+// pinned equal to it). Its constants are
 // copies of R1's; engagementSpec.test.ts pins them to R1's exports and source
 // text and runs one table of accept/reject cases through both validators.
 // Problems name the KEY, never the value.
@@ -40,6 +44,35 @@ const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !
 const safeKey = (k: string) => k.replace(/[^A-Za-z0-9_.-]/g, '?').slice(0, 40);
 const looksLikeCredential = (v: string) => CREDENTIAL_RE.some((r) => r.test(v));
 
+// Copy of R1's AWS location rules (owner-approved 2026-10-30; see src/engagement/config.ts).
+const AWS_LOCATION_PARAMS = ['bucket', 'prefix', 'exportName'];
+export const AWS_BUCKET_RE = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
+const AWS_BUCKET_RESERVED_RE = /\.\.|^\d{1,3}(\.\d{1,3}){3}$|^(xn--|sthree-|amzn-s3-demo-)|(-s3alias|--ol-s3|\.mrap|--x-s3|--table-s3)$/;
+export const AWS_EXPORT_NAME_RE = /^[0-9A-Za-z_-]{1,128}$/;
+export const AWS_KEY_ID_RE = /(^|[^A-Z0-9])(AKIA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])/;
+export const AWS_INLINE_CREDENTIAL_RE = /(secret|password|passwd|token|credential|signature|access[_-]?key)[=:]|^[^/@]*:[^/@]*@/i;
+export const S3_KEY_MAX_BYTES = 1024;
+export const AWS_FILE_PART_RESERVE_BYTES = 256;
+// eslint-disable-next-line no-control-regex
+const C0_C1_RE = /[\u0000-\u001f\u007f-\u009f]/;
+
+/** The problem (never the value) of one AWS location param, or null. */
+function awsLocationProblem(name: string, v: unknown, params: Record<string, unknown>): string | null {
+  if (typeof v !== 'string') return 'must be a string';
+  if (v.split('/').some((seg) => CREDENTIAL_RE.slice(0, 3).some((r) => r.test(seg))) || AWS_KEY_ID_RE.test(v) || AWS_INLINE_CREDENTIAL_RE.test(v)) return 'looks like a credential value; reference a secret by name with secretRef';
+  if (name === 'bucket') return AWS_BUCKET_RE.test(v) && !AWS_BUCKET_RESERVED_RE.test(v) ? null : 'must be an S3 general purpose bucket name (3 to 63 lowercase letters, digits, dots and hyphens; letter or digit at both ends; no consecutive dots, IP address form or reserved prefix or suffix)';
+  if (name === 'exportName') return AWS_EXPORT_NAME_RE.test(v) ? null : 'must be a Data Exports export name (1 to 128 letters, digits, underscores and hyphens)';
+  if (v === '') return null;
+  if (C0_C1_RE.test(v) || v.includes('\ufffd') || Buffer.from(v, 'utf8').toString('utf8') !== v || v.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')) {
+    return 'must be valid UTF-8 without control characters, leading or trailing slash, or empty, . or .. segments';
+  }
+  const exportName = typeof params.exportName === 'string' ? params.exportName : '';
+  if (Buffer.byteLength(`${v}/${exportName}/metadata/BILLING_PERIOD=YYYY-MM/`) + AWS_FILE_PART_RESERVE_BYTES > S3_KEY_MAX_BYTES) {
+    return `with exportName, the longest object key the AWS retriever builds would exceed the ${S3_KEY_MAX_BYTES}-byte S3 key limit (${AWS_FILE_PART_RESERVE_BYTES} bytes reserved for the file part)`;
+  }
+  return null;
+}
+
 function unknownKeys(o: Obj, allowed: readonly string[], key: string, p: string[]): void {
   for (const k of Object.keys(o)) if (!allowed.includes(k)) p.push(`${key === '' ? safeKey(k) : `${key}.${safeKey(k)}`}: unknown key`);
 }
@@ -73,7 +106,10 @@ export function retrievalProblems(v: unknown, key: string): string[] {
     else
       for (const [name, val] of Object.entries(v.params)) {
         const k = `${pk}.${safeKey(name)}`;
-        if (isObj(val)) {
+        if (v.connector === 'aws-data-exports' && AWS_LOCATION_PARAMS.includes(name)) {
+          const why = awsLocationProblem(name, val, v.params);
+          if (why) p.push(`${k}: ${why}`);
+        } else if (isObj(val)) {
           for (const [n2, v2] of Object.entries(val)) {
             if (isObj(v2)) p.push(`${k}.${safeKey(n2)}: nesting deeper than 2 levels is not allowed`);
             else leafProblems(v2, `${k}.${safeKey(n2)}`, p);
@@ -88,8 +124,12 @@ export function retrievalProblems(v: unknown, key: string): string[] {
   return p;
 }
 
-/** R1-equivalent problems of the keys a managed fetch depends on (empty = acceptable). */
-export function engagementProblems(input: unknown): string[] {
+/**
+ * R1-equivalent problems of the keys a managed fetch depends on (empty = acceptable). `approved`
+ * is the worker's list of managed connectors (its registry); without it every managed connector
+ * is refused (fail closed), as R1 refuses one outside SUPPORTED_IN_THIS_BUILD.managedConnectors.
+ */
+export function engagementProblems(input: unknown, approved: readonly string[] = []): string[] {
   if (!isObj(input)) return ['config: must be a JSON object'];
   const p: string[] = [];
   unknownKeys(input, TOP_KEYS, '', p);
@@ -104,7 +144,10 @@ export function engagementProblems(input: unknown): string[] {
     if (typeof s.id !== 'string' || !SOURCE_ID_RE.test(s.id)) p.push(`${k}.id: must be 1 to 63 characters of lowercase letters, digits, dot, underscore and hyphen`);
     else if (seen.has(s.id)) p.push(`${k}.id: duplicate source id`);
     else seen.add(s.id);
-    p.push(...retrievalProblems(s.retrieval, `${k}.retrieval`));
+    const rp = retrievalProblems(s.retrieval, `${k}.retrieval`);
+    p.push(...rp);
+    const r = s.retrieval;
+    if (!rp.length && isObj(r) && r.kind === 'managed' && !approved.includes(r.connector as string)) p.push(`${k}.retrieval.connector: not implemented in this build`);
   });
   return p;
 }
@@ -120,11 +163,11 @@ export function managedSpecFrom(source: unknown): ManagedSpec {
 }
 
 /**
- * Reads RATIO_ENGAGEMENT_CONFIG (absolute, at most 1 MiB), checks it (engagementProblems), binds it
+ * Reads RATIO_ENGAGEMENT_CONFIG (absolute, at most 1 MiB), checks it (engagementProblems against `approved`), binds it
  * to `tenantId` (the config names the ONE tenant of this instance) and returns the managed retrieval
  * of source `sourceId`.
  */
-export function managedSpecFromEngagementFile(file: string | undefined, sourceId: string, tenantId: string): ManagedSpec {
+export function managedSpecFromEngagementFile(file: string | undefined, sourceId: string, tenantId: string, approved: readonly string[] = []): ManagedSpec {
   const invalid = (m: string) => new ManagedError('ENGAGEMENT_CONFIG_INVALID', `RATIO_ENGAGEMENT_CONFIG: ${m}`);
   if (!file || !path.isAbsolute(file)) throw invalid('must be the absolute path of the engagement config');
   let parsed: unknown;
@@ -134,7 +177,7 @@ export function managedSpecFromEngagementFile(file: string | undefined, sourceId
   } catch (e) {
     throw e instanceof ManagedError ? e : invalid('file is missing, unreadable or not valid JSON');
   }
-  const problems = engagementProblems(parsed);
+  const problems = engagementProblems(parsed, approved);
   if (problems.length) throw invalid(problems.slice(0, 5).join('; '));
   const root = parsed as { tenantId: string; sources: Array<{ id: string }> };
   if (root.tenantId.toLowerCase() !== tenantId.toLowerCase()) {
