@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState, useCallback } from 'react';
 import { createTokenomicsClient } from './index';
 import type { TokenomicsReport } from './index';
+import { CLIENT_MODES, SegmentedControl } from '@/components/SegmentedControl';
 
 type LoadState =
   | { status: 'idle' }
@@ -243,27 +244,16 @@ export function TokenomicsPage() {
         <div className="mb-6 rounded-card border border-edge bg-slab p-6">
           <SectionLabel>Client mode</SectionLabel>
 
-          <div className="mb-5 flex gap-2">
-            {(['mock', 'live'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => {
-                  setClientMode(m);
-                  setLoadState({ status: 'idle' });
-                }}
-                className={[
-                  'rounded-card border px-4 py-1.5 text-sm font-medium transition-colors',
-                  clientMode === m
-                    ? m === 'mock'
-                      ? 'border-shape bg-shape/10 text-shape'
-                      : 'border-value bg-value/10 text-value'
-                    : 'border-edge bg-raised text-sub hover:text-txt',
-                ].join(' ')}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            label="Client mode"
+            className="mb-5"
+            options={CLIENT_MODES}
+            value={clientMode}
+            onChange={(m) => {
+              setClientMode(m);
+              setLoadState({ status: 'idle' });
+            }}
+          />
 
           <button
             onClick={runReport}

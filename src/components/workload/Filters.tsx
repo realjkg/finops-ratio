@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 import { useStore, type SecondaryMode } from '@/store/useStore';
 import { PROVIDER_LABEL } from '@/lib/scales';
 import type { Filters as FilterState } from '@/store/useStore';
+import { rovingKeyDown } from '@/components/SegmentedControl';
 
 const MODES: Array<{ value: SecondaryMode; label: string }> = [
   { value: 'value', label: 'VALUE' },
@@ -34,16 +35,20 @@ export function Filters() {
 
   return (
     <div className="flex flex-col gap-2.5 border-b border-edge px-3 py-3">
-      <div className="flex rounded-md border border-edge bg-void p-0.5">
+      <div role="radiogroup" aria-label="Card metric" className="flex rounded-md border border-edge bg-void p-0.5">
         {MODES.map((mode) => (
           <button
             key={mode.value}
             type="button"
+            role="radio"
+            aria-checked={secondaryMode === mode.value}
+            tabIndex={secondaryMode === mode.value ? 0 : -1}
             onClick={() => setSecondaryMode(mode.value)}
+            onKeyDown={(e) => rovingKeyDown(e, MODES.map((m) => m.value), secondaryMode, setSecondaryMode)}
             className={`flex-1 rounded py-1 font-mono text-[10px] font-bold tracking-wider transition-colors ${
               secondaryMode === mode.value
-                ? 'bg-raised text-unit'
-                : 'text-dim hover:text-sub'
+                ? 'bg-raised text-unit shadow-[inset_0_-2px_0_rgb(var(--c-unit))]'
+                : 'text-sub hover:bg-raised/60 hover:text-txt'
             }`}
           >
             {mode.label}

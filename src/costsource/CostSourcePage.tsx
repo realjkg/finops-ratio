@@ -25,6 +25,7 @@ import { formatSignedUSD } from './signedSpendDelta';
 import { formatUSD, formatMoney, formatRatio, formatPct } from '@/lib/format';
 import { ratioColor } from '@/lib/scales';
 import { withBasePath } from '@/lib/basePath';
+import { CLIENT_MODES, SegmentedControl, rovingKeyDown } from '@/components/SegmentedControl';
 
 type LoadState =
   | { status: 'idle' }
@@ -107,6 +108,10 @@ export function CostSourcePage() {
   }, [clientMode]);
 
   const selected = sources.find((s) => s.id === sourceId);
+  const pickSource = (id: string) => {
+    setSourceId(id);
+    setLoadState({ status: 'idle' });
+  };
 
   const runIngest = useCallback(async () => {
     const client = createCostSourceClient(clientMode);
@@ -155,33 +160,22 @@ export function CostSourcePage() {
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-sub">
             Client mode
           </p>
-          <div className="mb-5 flex gap-2">
-            {(['mock', 'live'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => {
-                  setClientMode(m);
-                  setLoadState({ status: 'idle' });
-                }}
-                className={[
-                  'rounded-card border px-4 py-1.5 text-sm font-medium transition-colors',
-                  clientMode === m
-                    ? m === 'mock'
-                      ? 'border-shape bg-shape/10 text-shape'
-                      : 'border-value bg-value/10 text-value'
-                    : 'border-edge bg-raised text-sub hover:text-txt',
-                ].join(' ')}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            label="Client mode"
+            className="mb-5"
+            options={CLIENT_MODES}
+            value={clientMode}
+            onChange={(m) => {
+              setClientMode(m);
+              setLoadState({ status: 'idle' });
+            }}
+          />
 
           {/* Source picker */}
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-sub">
             Cost source
           </p>
-          <div className="mb-5 grid gap-2 sm:grid-cols-3">
+          <div role="radiogroup" aria-label="Cost source" className="mb-5 grid gap-2 sm:grid-cols-3">
             {sources.map((s) => {
               // Unconfigured sources (e.g. the live PointFive adapter when its
               // feature flag is OFF) render dark: dimmed, with a DARK badge. They
@@ -191,14 +185,16 @@ export function CostSourcePage() {
               return (
                 <button
                   key={s.id}
-                  onClick={() => {
-                    setSourceId(s.id);
-                    setLoadState({ status: 'idle' });
-                  }}
+                  type="button"
+                  role="radio"
+                  aria-checked={sourceId === s.id}
+                  tabIndex={sourceId === s.id ? 0 : -1}
+                  onClick={() => pickSource(s.id)}
+                  onKeyDown={(e) => rovingKeyDown(e, sources.map((x) => x.id), sourceId, pickSource)}
                   className={[
                     'rounded-card border p-3 text-left transition-colors',
                     sourceId === s.id
-                      ? 'border-gate bg-gate/10'
+                      ? 'border-gate bg-gate/10 shadow-[inset_0_0_0_1px_rgb(var(--c-gate))]'
                       : 'border-edge bg-raised hover:border-gate/50',
                     // Not dimmed with opacity (that fades the text below AA); the dashed border, the status dot and the DARK chip carry the state.
                     isDark ? 'border-dashed' : '',

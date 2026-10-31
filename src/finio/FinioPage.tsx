@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { createFinioClient, validateFocusRows, SUPPORTED_FOCUS_VERSIONS } from './index';
 import type { FinioExport, FocusRow, FocusVersion, HandshakeResult } from './index';
 import { FinioPeerAuthError } from './LiveFinioClient';
+import { CLIENT_MODES, SegmentedControl } from '@/components/SegmentedControl';
 
 type LoadState =
   | { status: 'idle' }
@@ -147,59 +148,37 @@ export function FinioPage() {
             Client mode
           </p>
 
-          {/* Mode toggle */}
-          <div className="mb-5 flex gap-2">
-            {(['mock', 'live'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => {
-                  setClientMode(m);
-                  setLoadState({ status: 'idle' });
-                }}
-                className={[
-                  'rounded-card border px-4 py-1.5 text-sm font-medium transition-colors',
-                  clientMode === m
-                    ? m === 'mock'
-                      ? 'border-shape bg-shape/10 text-shape'
-                      : 'border-value bg-value/10 text-value'
-                    : 'border-edge bg-raised text-sub hover:text-txt',
-                ].join(' ')}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            label="Client mode"
+            className="mb-5"
+            options={CLIENT_MODES}
+            value={clientMode}
+            onChange={(m) => {
+              setClientMode(m);
+              setLoadState({ status: 'idle' });
+            }}
+          />
 
           {/* Requested FOCUS version */}
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-sub">
             Requested FOCUS version
           </p>
-          <div className="mb-5 flex flex-wrap gap-2">
-            {versionOptions.map((v) => {
+          <SegmentedControl
+            label="Requested FOCUS version"
+            size="sm"
+            className="mb-5 font-mono"
+            options={versionOptions.map((v) => {
               const supported = SUPPORTED_FOCUS_VERSIONS.includes(v);
-              return (
-                <button
-                  key={v}
-                  onClick={() => {
-                    setRequestedVersion(v);
-                    setLoadState({ status: 'idle' });
-                  }}
-                  title={supported ? undefined : 'Outside the supported range — expect a 409'}
-                  className={[
-                    'rounded-card border px-3 py-1 font-mono text-xs transition-colors',
-                    requestedVersion === v
-                      ? supported
-                        ? 'border-gate bg-gate/10 text-gate'
-                        : 'border-cost bg-cost/10 text-cost'
-                      : 'border-edge bg-raised text-sub hover:text-txt',
-                  ].join(' ')}
-                >
-                  {v}
-                  {!supported && ' ✕'}
-                </button>
-              );
+              return supported
+                ? { value: v, label: v }
+                : { value: v, label: `${v} (unsupported)`, tone: 'cost' as const, title: 'Outside the supported range — expect a 409' };
             })}
-          </div>
+            value={requestedVersion}
+            onChange={(v) => {
+              setRequestedVersion(v);
+              setLoadState({ status: 'idle' });
+            }}
+          />
 
           {/* Trigger button */}
           <button
