@@ -42,7 +42,16 @@ describe('EngagementSessionStore', () => {
     expect(s.get(token, T0 + 3 * SESSION_IDLE_MS - 2)).toBeNull(); // idle expired
     const { token: busy } = s.create(P, T0);
     for (let t = T0; t < T0 + SESSION_ABSOLUTE_MS; t += SESSION_IDLE_MS / 2) expect(s.get(busy, t), String(t)).not.toBeNull();
-    expect(s.get(busy, T0 + SESSION_ABSOLUTE_MS)).toBeNull(); // absolute, despite activity
+    expect(s.get(busy, T0 + SESSION_ABSOLUTE_MS - 1)).not.toBeNull(); // also runs the purge
+    expect(s.get(busy, T0 + SESSION_ABSOLUTE_MS)).toBeNull(); // absolute, despite activity, 1 ms after the last purge
+  });
+
+  it('expiry is decided by the read itself, not only by the periodic purge (no purge between these reads)', () => {
+    const s = mem();
+    const idle = s.create(P, T0).token;
+    const other = s.create(P, T0).token;
+    expect(s.get(other, T0 + SESSION_IDLE_MS - 1)).not.toBeNull(); // runs the purge; nothing has expired yet
+    expect(s.get(idle, T0 + SESSION_IDLE_MS)).toBeNull(); // idle for exactly 30 min, 1 ms after the last purge
   });
 
   it('revoke, revokeUser and purge act on the server; malformed or tampered tokens never match', () => {
