@@ -8,16 +8,19 @@
 //   bindings            EXPLICIT external identity -> user { connectionId, issuer, subject, userId, approvedBy, approvedAt }
 //   memberships         { userId, tenantId, engagementId, role, status }, one per user
 //   teams               tenant-scoped groups { id, tenantId, displayName, members, permissions? }
-// Nothing is linked by email or display name. Every record must belong to this
-// instance's tenant and engagement, so an edit cannot move a connection or a
-// membership to another tenant silently: startup refuses it. Validated at
-// startup and re-read on every use (an in-place edit is effective on the next
-// request). Problems name the KEY, never the value. SERVER-ONLY.
+// Nothing is linked by email or display name. Connections and teams must name
+// this instance's tenant, memberships its tenant AND engagement, and bindings
+// an existing connection with its exact issuer, so an edit cannot move a
+// connection or a membership to another tenant silently: startup refuses it.
+// Validated at startup; directoryFromEnv() reads the file again on each call.
+// Under a single-file bind mount only an in-place edit (same inode) is seen
+// without a restart (README "Engagement mode", Configure). Problems name the
+// KEY, never the value. SERVER-ONLY.
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { EngagementConfigError } from '../config';
-import { PERMISSIONS, ROLE_PERMISSIONS, type Permission, type Role } from './authz';
+import { ROLE_PERMISSIONS, TEAM_GRANTABLE, type Permission, type Role } from './authz';
 import { isPasswordHash } from './password';
 
 type Env = Record<string, string | undefined>;
@@ -43,15 +46,30 @@ const V = 'RATIO_ENGAGEMENT_USERS';
 const MAX_BYTES = 512 * 1024;
 const MAX_ENTRIES = 500;
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
-const ENV_NAME_RE = /^[A-Z][A-Z0-9_]{0,127}$/;
+// A reserved prefix, so a connection can never name the database URL, the machine token or another secret.
+const SECRET_REF_RE = /^RATIO_OIDC_CLIENT_SECRET_[A-Z0-9_]{1,64}$/;
+// A DNS name of at least two labels with an alphabetic top-level label: no IP literal, no localhost, no single label.
+const DNS_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const TOP = ['version', 'users', 'localCredentials', 'identityConnections', 'bindings', 'memberships', 'teams'];
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v: unknown, max: number): v is string =>
   typeof v === 'string' && v.trim().length > 0 && v.length <= max && ![...v].some((c) => c.charCodeAt(0) < 0x20 || (c.charCodeAt(0) >= 0x7f && c.charCodeAt(0) <= 0x9f));
-function isHttpsUrl(v: unknown): v is string {
-  if (!text(v, 512)) return false;
-  try { const u = new URL(v); return u.protocol === 'https:' && !u.search && !u.hash && !u.username && !u.password; } catch { return false; }
+/**
+ * An OIDC issuer as registered: https, a DNS host (not localhost), no port,
+ * credentials, query or fragment, and already canonical: the input must equal
+ * the parsed href, except that a bare origin may omit its single trailing
+ * slash. The issuer is later compared exactly as written (OIDC iss rule).
+ */
+function isIssuer(v: unknown): v is string {
+  if (typeof v !== 'string' || v.length > 512 || !/^[\x21-\x7e]+$/.test(v) || v.includes('\\') || /[?#]/.test(v)) return false;
+  try {
+    const u = new URL(v);
+    const canonical = u.href === v || (u.pathname === '/' && u.href === `${v}/`);
+    return canonical && u.protocol === 'https:' && !u.port && !u.username && !u.password && DNS_RE.test(u.hostname) && u.hostname !== 'localhost';
+  } catch {
+    return false;
+  }
 }
 const bindingKey = (c: string, i: string, s: string) => JSON.stringify([c, i, s]);
 
@@ -103,9 +121,9 @@ export function validateDirectory(input: unknown, instance: Instance): Directory
     if (typeof c.id !== 'string' || !ID_RE.test(c.id) || connections.has(c.id)) bad(`${at}.id`, 'must be a unique id of 1 to 63 letters, digits, dots, underscores or hyphens');
     own(at, 'tenantId', c.tenantId);
     if (c.protocol !== 'oidc') bad(`${at}.protocol`, 'must be oidc');
-    if (!isHttpsUrl(c.issuer)) bad(`${at}.issuer`, 'must be an https URL without query, fragment or user info');
+    if (!isIssuer(c.issuer)) bad(`${at}.issuer`, 'must be an https URL of a DNS host, canonical, without port, user info, query or fragment');
     if (!text(c.clientId, 256)) bad(`${at}.clientId`, 'must be 1 to 256 printable characters');
-    if (typeof c.clientSecretRef !== 'string' || !ENV_NAME_RE.test(c.clientSecretRef)) bad(`${at}.clientSecretRef`, 'must be the NAME of an environment variable (A-Z, 0-9, _)');
+    if (typeof c.clientSecretRef !== 'string' || !SECRET_REF_RE.test(c.clientSecretRef)) bad(`${at}.clientSecretRef`, 'must be the NAME of an environment variable starting RATIO_OIDC_CLIENT_SECRET_ (then A-Z, 0-9, _)');
     if (c.provisioning !== 'invite-only') bad(`${at}.provisioning`, 'must be invite-only');
     if (typeof c.enabled !== 'boolean') bad(`${at}.enabled`, 'must be true or false');
     if (problems.length === before) connections.set(c.id as string, { ...(c as unknown as Connection), tenantId: instance.tenantId });
@@ -147,7 +165,7 @@ export function validateDirectory(input: unknown, instance: Instance): Directory
     if (!text(t.displayName, 80)) bad(`${at}.displayName`, 'must be 1 to 80 printable characters');
     const members = Array.isArray(t.members) ? t.members.map((m, j) => userRef(`${at}.members[${j}]`, m)) : (bad(`${at}.members`, 'must be an array of user ids'), []);
     const perms = t.permissions === undefined ? [] : Array.isArray(t.permissions) ? t.permissions : (bad(`${at}.permissions`, 'must be an array'), []);
-    perms.forEach((p, j) => { if (!(PERMISSIONS as readonly unknown[]).includes(p)) bad(`${at}.permissions[${j}]`, 'unknown permission'); });
+    perms.forEach((p, j) => { if (!(TEAM_GRANTABLE as readonly unknown[]).includes(p)) bad(`${at}.permissions[${j}]`, `must be one of ${TEAM_GRANTABLE.join(', ')} (admin permissions are role-only)`); });
     teams.push({ id: String(t.id), tenantId: instance.tenantId, displayName: String(t.displayName), members: [...new Set(members.filter((m): m is string => !!m))], permissions: perms as Permission[] });
   });
   if (problems.length) return { ok: false, problems };
@@ -165,7 +183,9 @@ export function loadDirectory(file: string, instance: Instance): { ok: true; dir
   try { bytes = fs.readFileSync(file); } catch { return { ok: false, problems: [`${V}: file is missing or unreadable`] }; }
   if (bytes.length > MAX_BYTES) return { ok: false, problems: [`${V}: file is larger than 512 KiB`] };
   let doc: unknown;
-  try { doc = JSON.parse(bytes.toString('utf8')); } catch { return { ok: false, problems: [`${V}: file is not valid JSON`] }; }
+  // One leading UTF-8 byte order mark (as some editors write) is skipped; the sha256 covers the bytes as read.
+  const hasBom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+  try { doc = JSON.parse(bytes.subarray(hasBom ? 3 : 0).toString('utf8')); } catch { return { ok: false, problems: [`${V}: file is not valid JSON`] }; }
   const r = validateDirectory(doc, instance);
   return r.ok ? { ...r, sha256: createHash('sha256').update(bytes).digest('hex') } : r;
 }

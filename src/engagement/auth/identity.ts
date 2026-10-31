@@ -39,6 +39,6 @@ export function resolveExternalIdentity(dir: Directory, ext: ExternalIdentity): 
 export async function authenticateLocal(dir: Directory, username: string, password: string): Promise<string | null> {
   const user = typeof username === 'string' ? dir.users.get(username.toLowerCase()) : undefined;
   const hash = user && user.status === 'active' ? dir.credentials.get(user.id) : undefined;
-  const ok = await verifyPassword(password, hash ?? (await dummyHash()));
+  const ok = await verifyPassword(password, hash ?? dummyHash());
   return ok && hash && user ? user.id : null;
 }

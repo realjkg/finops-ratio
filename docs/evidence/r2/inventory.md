@@ -15,10 +15,10 @@ C authorization on report/export/connector routes; D anonymous-path removal (`pr
 | /api/v1/reports/facts | GET | customer report facts (JSON) | machine token | same as above | C |
 | /api/v1/costs/published | GET | customer published facts | machine token | same as above | C |
 | (PDF report, not yet built) | GET | customer report (PDF) | n/a | same as above when it lands | C |
-| /api/v1/connectors | GET | connector registry; live status with token | anonymous registry, token for live | 404 in engagement mode | D |
+| /api/v1/connectors | GET | connector registry; live status and probe with token | gateway token outside local simulation (env-independent projection without it only in simulation); live status and `probe=true` need the live-data token | 404 in engagement mode | D |
 | /api/v1/ai/chat | POST | LLM (mock or live) | gateway token (bypass only in local simulation) | 404 | D |
 | /api/v1/cm/change | POST | change management | gateway token | 404 | D |
-| /api/v1/a2a/handshake, /api/a2a/handshake | POST | FinIO peer handshake | gateway token | 404 | D |
+| /api/v1/a2a/handshake, /api/a2a/handshake | POST | FinIO peer handshake (simulation era) | gateway token, plus `X-FinIO-Peer-Token` when one is configured; unchanged by PR A | 404 | D |
 | /api/v1/finio/export, /api/finio/export | GET | FinIO export (seed) | gateway token | 404 | D |
 | /api/costsource/ingest | POST | parses an uploaded export (stateless) | ANONYMOUS | 404 (+ copy fix: no "live door") | D |
 | /api/costsource/rows, findings, health | GET | seed sandbox rows; live sources with token | anonymous for sandbox ids, token otherwise | 404 | D |

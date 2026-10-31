@@ -23,6 +23,8 @@ export const ROLE_PERMISSIONS = Object.freeze({
   tenant_admin: ['reports:read', 'reports:export', 'connectors:read', 'members:manage', 'identity:manage'],
 } as const satisfies Record<string, readonly Permission[]>);
 export type Role = keyof typeof ROLE_PERMISSIONS;
+/** What a team may grant. Admin permissions (connectors:manage, members:manage, identity:manage) are role-only. */
+export const TEAM_GRANTABLE: readonly Permission[] = Object.freeze(['reports:read', 'reports:export', 'connectors:read']);
 
 export const DENY = Object.freeze({
   authentication: 'Authentication required',
@@ -64,17 +66,26 @@ function decide(dir: Directory, principal: Principal | null | undefined, permiss
   if (!m || m.status !== 'active' || m.tenantId !== r.tenantId || m.engagementId !== r.engagementId) return deny(403, DENY.membership);
   if (!(PERMISSIONS as readonly string[]).includes(permission)) return deny(403, DENY.permission);
   const teams = dir.teamsOf(user.id).filter((t) => t.tenantId === r.tenantId);
-  const granted = (ROLE_PERMISSIONS[m.role] as readonly Permission[]).includes(permission) || teams.some((t) => t.permissions.includes(permission));
+  const granted = (ROLE_PERMISSIONS[m.role] as readonly Permission[]).includes(permission) || (TEAM_GRANTABLE.includes(permission) && teams.some((t) => t.permissions.includes(permission)));
   return granted ? { allow: true, principal: { kind: 'user', id: user.id }, role: m.role, teams: teams.map((t) => t.id) } : deny(403, DENY.permission);
 }
 
 export function authorize(dir: Directory, principal: Principal | null | undefined, permission: Permission, resource: Resource, audit?: (e: AuditEvent) => void): Decision {
   const d = decide(dir, principal, permission, resource);
-  audit?.({
+  if (audit) emit(audit, {
     principalKind: principal?.kind ?? 'none', principalId: principal ? String(principal.id) : null, permission: String(permission),
     resourceType: String(resource.type), resourceId: String(resource.id), ...(resource.version !== undefined ? { resourceVersion: String(resource.version) } : {}),
     tenantId: String(resource.tenantId), engagementId: String(resource.engagementId),
     ...(d.allow ? { outcome: 'allow', status: 200 } : { outcome: 'deny', status: d.status, reason: d.reason }),
   });
   return d;
+}
+
+/** A failing hook never changes or loses the decision; its error text is never propagated or logged. */
+function emit(audit: (e: AuditEvent) => void, e: AuditEvent): void {
+  try {
+    audit(e);
+  } catch {
+    console.error('{"event":"authz_audit_hook_failed"}');
+  }
 }

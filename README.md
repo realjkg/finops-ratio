@@ -408,7 +408,10 @@ $C --profile jobs run --rm worker doctor          # works today; any worker comm
 `RATIO_ENGAGEMENT_CONFIG_FILE` (the engagement config, read by the app today) and `RATIO_ENGAGEMENT_USERS_FILE` (named
 users, after R2) are mounted read-only at `/config/`. The container reads them at start, so after editing run
 `$C restart app`. Editors that replace the file (a new inode) break a single-file bind mount: keep editing in place,
-or mount a directory instead, and restart the container.
+or mount a directory instead, and restart the container. Today the app validates the users directory at start only.
+After R2 each authorization decision will read it again, but under a single-file mount a file saved as a new inode
+stays invisible until `$C restart app`, so a suspension or role change can lag until that restart. Edit
+`/config/users.json` in place or mount `/config` as a directory; the R2 operator command (slice E) will write in place.
 
 The worker runs with `RATIO_ENV=staging` (the app and migrator with `production`): the worker's S3 settings refuse
 `http` endpoints under `production`, and the bundled object store is `http` on the internal network. `staging`
