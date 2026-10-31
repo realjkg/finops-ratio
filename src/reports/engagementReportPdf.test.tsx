@@ -5,9 +5,9 @@
 import { spawnSync } from 'child_process';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
-import { assembleReportFacts } from './reportFacts';
+import { assembleReportFacts, NA_REASONS } from './reportFacts';
 import { buildEngagementReportModel, type EngagementReportModel } from './engagementReportModel';
-import { EngagementReportDocument, PDF_CELL_MAX_CHARS, PDF_GLYPH_NOTE, PDF_TOTAL_MAX_CHARS, PDF_TRUNCATION_NOTE, pdfGlyphText, pdfLayout, renderEngagementReportPdf } from './engagementReportPdf';
+import { EngagementReportDocument, PDF_CELL_FLOOR_CHARS, PDF_CELL_MAX_CHARS, PDF_GLYPH_NOTE, PDF_TOTAL_MAX_CHARS, PDF_TRUNCATION_NOTE, pdfGlyphText, pdfLayout, renderEngagementReportPdf } from './engagementReportPdf';
 import { ENGAGEMENT, g, sampleInput } from './fixtures/sampleFacts';
 import { pageCount, pdfPageStrings, pdfShownStrings, treeTexts } from './fixtures/pdfText';
 
@@ -129,6 +129,49 @@ describe('engagement report PDF', () => {
       return new RegExp(`\\n${ref} 0 obj\\n\\((D:[^)]*)\\)`).exec(raw)?.[1];
     };
     expect([date('CreationDate'), date('ModificationDate')]).toEqual(['D:20261031120000Z', 'D:20261031120000Z']);
+  });
+
+  describe('the caps apply only to imported or configured free text; model-authored text is never cut', () => {
+    // 60 hostile charge categories (data) spend the whole document budget before the later sections.
+    const hog = Array.from({ length: 60 }, (_, i) => g({ isTotal: false, chargeCategory: `c${i} ` + 'filler '.repeat(400), rowCount: '1' }));
+
+    it('every Note reason and the last-PUBLISHED warning stay whole after the budget is spent', () => {
+      const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups: [g({ effectiveMissingRows: '2' }), ...hog] })), ENGAGEMENT);
+      const texts = treeTexts(<EngagementReportDocument model={m} />);
+      expect(texts.some((t) => t.includes('see XLSX/JSON for the full text'))).toBe(true);
+      const notes = m.sections.flatMap((s) => s.rows.map((r) => r.at(-1)!)).filter((n) => n !== '');
+      expect(notes.length).toBeGreaterThan(60);
+      for (const n of notes) expect(texts, n.slice(0, 60)).toContain(pdfGlyphText(n));
+      for (const d of m.sections.find((s) => s.id === 'coverageGaps')!.rows.map((r) => r[1])) expect(texts).toContain(d);
+      expect(texts.join('\n')).toContain(NA_REASONS.batchStatus);
+    });
+
+    it('150 staged-artifact records (no hostile text) keep all 150 import Notes whole', () => {
+      const input = sampleInput();
+      input.artifacts = Array.from({ length: 150 }, (_, i) => ({ ...input.artifacts[0], artifactSha256: i.toString(16).padStart(64, 'a'), rowCount: '6' }));
+      const m = buildEngagementReportModel(assembleReportFacts(input), ENGAGEMENT);
+      const texts = treeTexts(<EngagementReportDocument model={m} />);
+      const notes = m.sections.find((s) => s.id === 'imports')!.rows.map((r) => r.at(-1)!);
+      expect(notes).toHaveLength(150);
+      expect(notes.filter((n) => !texts.includes(n))).toEqual([]);
+      expect(texts.some((t) => t.startsWith('PDF length limit: '))).toBe(false);
+    });
+
+    it(`after the budget is spent a data cell still keeps its first ${PDF_CELL_FLOOR_CHARS} characters`, () => {
+      expect(PDF_CELL_FLOOR_CHARS).toBe(200);
+      const input = sampleInput({ groups: [g({}), ...hog] });
+      const provider = 'p'.repeat(190);
+      input.batches[0].providers = [provider];
+      const texts = treeTexts(<EngagementReportDocument model={buildEngagementReportModel(assembleReportFacts(input), ENGAGEMENT)} />);
+      expect(texts).toContain(provider);
+    });
+
+    it('a single cut cell gets the singular page-1 note', () => {
+      const m = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups: [g({}), g({ isTotal: false, chargeCategory: 'k '.repeat(1_500), rowCount: '1' })] })), ENGAGEMENT);
+      const texts = treeTexts(<EngagementReportDocument model={m} />);
+      expect(texts.filter((t) => t.startsWith('PDF length limit: '))).toEqual([PDF_TRUNCATION_NOTE(1)]);
+      expect(PDF_TRUNCATION_NOTE(1)).toMatch(/^PDF length limit: 1 cell value was truncated /);
+    });
   });
 });
 

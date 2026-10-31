@@ -10,9 +10,16 @@ returns 400 for pdf/json until implemented).
 
 Review round (independent review of 993a3ce: three Mediums, one Low), RED before the fix:
 Command: npx vitest run src/reports/engagementReportPdf.test.tsx
-Result: 5 failed: PDF_CELL_MAX_CHARS / PDF_TOTAL_MAX_CHARS / PDF_TRUNCATION_NOTE missing; the external watchdog
-(child process killed after 15 s) killed both hostile renders (64 cells x 32,000 spaced characters, and unbroken);
-a 30-record totals section split records across pages (a page had 5 'Billed cost' lines but 4 'Currency' lines);
-the date test could not find the dates as written (they were already the report instant; the test now resolves the
-indirect objects). The Note-column and font-note placement tests passed (guards).
+Result (at commit a83ff3b): 4 failed: PDF_CELL_MAX_CHARS / PDF_TOTAL_MAX_CHARS / PDF_TRUNCATION_NOTE missing;
+the external watchdog (child process killed after 15 s) killed both hostile renders (64 cells x 32,000 spaced
+characters, and unbroken); a 30-record totals section split records across pages (a page had 5 'Billed cost' lines
+but 4 'Currency' lines). The date test (rewritten before that commit to resolve the indirect date objects), the
+Note-column and the font-note placement tests passed: guards (the dates were already the report instant).
 DB: the JSON response must have exactly the model's keys and equal the model rebuilt from the facts route.
+
+Re-review round (3300cb5: model-authored text was cut once the document budget was spent), RED before the fix:
+Command: npx vitest run src/reports/engagementReportPdf.test.tsx
+Result: 2 failed | 12 passed (14): with hostile charge categories spending the budget, Note reasons and the
+last-PUBLISHED warning were cut to 200 characters; with 150 staged artifacts (no hostile text) import Notes were cut.
+The floor test (a 190-character provider stays whole after the budget is spent) and the singular truncation-note
+test pass: guards for the reviewer's surviving mutations (floor 200 -> 20; singular note).
