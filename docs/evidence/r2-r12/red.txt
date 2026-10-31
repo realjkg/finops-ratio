@@ -1,0 +1,5 @@
+R2 R12 wiring RED evidence (tests committed before the change)
+$ npx vitest run --cache=false infrastructure/engagement/compose.test.mjs
+  -> Tests 8 failed | 16 passed (24): no RATIO_ENGAGEMENT_ORIGIN/STATE/TRUSTED_PROXY_HOPS/OIDC secret on the app,
+     no `users` job service (the service list, the shared invariants and the users-file rules all fail on it).
+GREEN counts are in the PR body.
