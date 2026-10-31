@@ -7,6 +7,8 @@ import {
   assembleReportFacts,
   NA_REASONS,
   SCOPE_LABEL,
+  SPAN_COVERS,
+  SPAN_PARTIAL,
   type FactsAggregateGroup,
   type FactsArtifactRow,
   type FactsBatchRow,
@@ -55,7 +57,7 @@ describe('assembleReportFacts: one published source', () => {
     expect(f.schema).toBe('ratio.report-facts/1');
     expect(f.scope).toBe(SCOPE_LABEL);
     expect(f.period).toMatchObject({ month: '2026-09', start: '2026-09-01', endExclusive: '2026-10-01', state: 'closed' });
-    expect(f.period.completeness).toEqual({ status: 'available', value: 'charge periods cover the whole month' });
+    expect(f.period.completeness).toEqual({ status: 'available', value: SPAN_COVERS });
     expect(f.freshness).toEqual({
       asOf: '2026-10-15T00:00:00.000Z',
       latestPublishedAt: { status: 'available', value: '2026-10-02T08:00:00.000000Z' },
@@ -87,7 +89,8 @@ describe('assembleReportFacts: one published source', () => {
         status: 'published',
         publishedAt: '2026-10-02T08:00:00.000000Z',
         rowCount: '3',
-        artifacts: [{ sha256: SHA, rowCount: '3' }],
+        stagedArtifacts: [{ stagedArtifactSha256: SHA, rowCount: '3' }],
+        operatorFileSha256: { status: 'not_available', reason: NA_REASONS.operatorFile },
         reconciliation: { status: 'not_available', reason: NA_REASONS.batchStatus },
         controlTotals: { status: 'not_available', reason: NA_REASONS.batchStatus },
         importMetadataSha256: { status: 'not_available', reason: NA_REASONS.sourceKey },
@@ -139,10 +142,32 @@ describe('assembleReportFacts: missing and incomplete data stay explicit (never 
     expect(f.coverageGaps.map((g) => g.code)).toContain('EFFECTIVE_PARTIAL');
   });
 
+  it('day-level gaps are never claimed as covered: a span from the 1st to the month end only says the span covers it', () => {
+    const f = assembleReportFacts(oneSource({ batches: [batch({ chargePeriodStart: '2026-09-01T00:00:00.000000Z', chargePeriodEnd: '2026-10-01T00:00:00.000000Z' })] }));
+    expect(SPAN_COVERS).toMatch(/span covers the month \(day-level gaps not checked\)/);
+    expect(f.period.completeness).toEqual({ status: 'available', value: SPAN_COVERS });
+    expect(JSON.stringify(f)).not.toMatch(/cover the whole month/);
+  });
+
+  it('the as-of instant is compared as a time, not a string: exactly the month end is closed', () => {
+    expect(assembleReportFacts(oneSource({ asOf: '2026-10-01T00:00:00.000Z' })).period.state).toBe('closed');
+    expect(assembleReportFacts(oneSource({ asOf: '2026-09-30T23:59:59.999Z' })).period.state).toBe('open');
+  });
+
+  it('every period states that a newer delivery may be quarantined or staged and the figures are the last PUBLISHED batch only', () => {
+    const cases = [oneSource(), oneSource({ groups: [], batches: [], artifacts: [] }), oneSource({ engagement: null })];
+    for (const input of cases) {
+      const g = assembleReportFacts(input).coverageGaps.find((x) => x.code === 'BATCH_STATUS_NOT_VISIBLE');
+      expect(g?.detail).toBe(NA_REASONS.batchStatus);
+      expect(g?.detail).toMatch(/last PUBLISHED batch only/);
+      expect(g?.detail).toMatch(/newer delivery for this period may have been quarantined or left staged/);
+    }
+  });
+
   it('a partial month and an open period are flagged', () => {
     const f = assembleReportFacts(oneSource({ asOf: '2026-09-20T00:00:00.000Z', batches: [batch({ chargePeriodEnd: '2026-09-19T00:00:00.000000Z' })] }));
     expect(f.period.state).toBe('open');
-    expect(f.period.completeness).toEqual({ status: 'available', value: 'partial: charge periods do not cover the whole month' });
+    expect(f.period.completeness).toEqual({ status: 'available', value: SPAN_PARTIAL });
     expect(f.coverageGaps.map((g) => g.code)).toEqual(expect.arrayContaining(['PERIOD_OPEN', 'PERIOD_PARTIAL']));
   });
 

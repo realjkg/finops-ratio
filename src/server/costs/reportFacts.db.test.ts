@@ -22,7 +22,7 @@ import { csvGz, focusRow, rowsOf } from '../../ingest/testing/focusCsv';
 import { createReportFactsRoute } from './reportFactsRoute';
 import { closeReaderPools } from './readerPool';
 import { bearer, call, makeReq, TEST_API_TOKEN } from './testing/http';
-import { NA_REASONS, type ReportFacts } from '../../reports/reportFacts';
+import { NA_REASONS, SPAN_COVERS, SPAN_PARTIAL, type ReportFacts } from '../../reports/reportFacts';
 
 requireTestS3Endpoint();
 
@@ -40,6 +40,7 @@ let drop: TestBucket;
 const A = { tenant: crypto.randomUUID(), sourceId: '', batchId: '', publishedAt: '', artifactSha256: '' };
 const C = { tenant: '', sourceId: '' };
 const D = { tenant: crypto.randomUUID() };
+const E = { tenant: '' };
 
 async function sync(tenantId: string, sourceKey: string, periods: ConstructorParameters<typeof FakeFocusSource>[0], then?: ConstructorParameters<typeof FakeFocusSource>[0]) {
   const source = new FakeFocusSource(periods);
@@ -90,6 +91,15 @@ beforeAll(async () => {
     ...april,
     { billingPeriod: P, artifacts: [{ name: 'jun/b.csv.gz', bytes: csvGz(final) }] },
   ]);
+
+  // Tenant E (SYNTHETIC): 2026-08 published, then a corrected delivery is quarantined (bad amount):
+  // the reader still sees the last PUBLISHED batch, and every report must say so.
+  const se = await seedTenantSource(t.db.pool);
+  E.tenant = se.tenantId;
+  const aug = (bytes: Buffer) => [{ billingPeriod: '2026-08-01', artifacts: [{ name: 'aug/a.csv.gz', bytes }] }];
+  await sync(E.tenant, se.sourceKey, aug(csvGz(rowsOf('2026-08-01', 2, '1.00', 'aug'))), aug(csvGz([focusRow('2026-08-01', { BilledCost: 'corrected?' })])));
+  const eb = await t.db.pool.query(`SELECT status FROM ratio.ingest_batches WHERE tenant_id = $1 ORDER BY created_at`, [E.tenant]);
+  expect(eb.rows.map((r) => r.status)).toEqual(['published', 'quarantined']);
 
   // Tenant D (SYNTHETIC): two sources publish the same period, one in USD and one in EUR.
   for (const [key, currency] of [['focus-one', 'USD'], ['focus-two', 'EUR']]) {
@@ -150,10 +160,14 @@ describe('public FOCUS 1.0 sample (AWS 2024-09) imported through import-file', (
     expect(f.sources).toHaveLength(1);
     expect(f.sources[0]).toMatchObject({ sourceId: A.sourceId, providers: ['AWS'], focusVersions: ['1.0'] });
     expect(f.sources[0].batches).toEqual([
-      expect.objectContaining({ batchId: A.batchId, status: 'published', publishedAt: A.publishedAt, rowCount: AWS_SEP.rowCount, artifacts: [{ sha256: A.artifactSha256, rowCount: AWS_SEP.rowCount }] }),
+      expect.objectContaining({ batchId: A.batchId, status: 'published', publishedAt: A.publishedAt, rowCount: AWS_SEP.rowCount, stagedArtifacts: [{ stagedArtifactSha256: A.artifactSha256, rowCount: AWS_SEP.rowCount }] }),
     ]);
     expect(f.sources[0].batches[0].reconciliation).toEqual({ status: 'not_available', reason: NA_REASONS.batchStatus });
-    expect(f.period).toMatchObject({ month: '2024-09', state: 'closed', completeness: { status: 'available', value: 'charge periods cover the whole month' } });
+    // The staged per-period artifact is not the operator's file: its sha256 is labeled as staged and the file's is N/A.
+    expect(A.artifactSha256).not.toBe(CONTROLS.input.sha256);
+    expect(f.sources[0].batches[0].operatorFileSha256).toEqual({ status: 'not_available', reason: NA_REASONS.operatorFile });
+    expect(JSON.stringify(f)).not.toContain(CONTROLS.input.sha256);
+    expect(f.period).toMatchObject({ month: '2024-09', state: 'closed', completeness: { status: 'available', value: SPAN_COVERS } });
     expect(f.freshness).toEqual({ asOf: NOW.toISOString(), latestPublishedAt: { status: 'available', value: A.publishedAt }, dataThrough: { status: 'available', value: '2024-10-01T00:00:00.000000Z' } });
     expect(f.currency.inData).toEqual(['USD']);
   });
@@ -179,11 +193,19 @@ describe('SYNTHETIC tenants through the real worker library', () => {
       effectiveCost: { status: 'partial', value: '0.03', rowsWithoutEffectiveCost: '1', reason: NA_REASONS.effectivePartial },
       credits: { status: 'available', value: { rowCount: '1', billedCost: '-0.05', effectiveCost: { status: 'available', value: '-0.05' } } },
     });
-    expect(f.period.completeness).toEqual({ status: 'available', value: 'partial: charge periods do not cover the whole month' });
+    expect(f.period.completeness).toEqual({ status: 'available', value: SPAN_PARTIAL });
     expect(f.coverageGaps.map((g) => g.code)).toEqual(expect.arrayContaining(['EFFECTIVE_PARTIAL', 'PERIOD_PARTIAL']));
     const text = JSON.stringify(f);
     expect(text).not.toContain('9.99'); // the superseded rows
     expect(f.totals.status).toBe('available');
+  });
+
+  it('a newer delivery quarantined after a publish: the last published figures carry the explicit warning', async () => {
+    const f = await facts(E.tenant, '2026-08');
+    expect(f.totals).toMatchObject({ status: 'available', value: [{ currency: 'USD', rowCount: '2', billedCost: '2.00' }] });
+    expect(f.coverageGaps).toContainEqual({ code: 'BATCH_STATUS_NOT_VISIBLE', detail: NA_REASONS.batchStatus });
+    expect(NA_REASONS.batchStatus).toMatch(/newer delivery for this period may have been quarantined or left staged/);
+    for (const p of ['2024-09', '2024-10']) expect((await facts(A.tenant, p)).coverageGaps.map((g) => g.code), p).toContain('BATCH_STATUS_NOT_VISIBLE');
   });
 
   it('quarantined periods (bad amount; mixed currencies) are N/A, and another tenant never sees this tenant (or A) data', async () => {
