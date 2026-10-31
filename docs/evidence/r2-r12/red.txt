@@ -3,3 +3,7 @@ $ npx vitest run --cache=false infrastructure/engagement/compose.test.mjs
   -> Tests 8 failed | 16 passed (24): no RATIO_ENGAGEMENT_ORIGIN/STATE/TRUSTED_PROXY_HOPS/OIDC secret on the app,
      no `users` job service (the service list, the shared invariants and the users-file rules all fail on it).
 GREEN counts are in the PR body.
+Review round (crash-atomic directory mount decision):
+$ npx vitest run --cache=false infrastructure/engagement/compose.test.mjs
+  -> Tests 1 failed | 23 passed (24): users.json is still a single-file mount (RATIO_ENGAGEMENT_USERS_FILE).
+GREEN after the change: 24 passed (see the PR body for the full suite).

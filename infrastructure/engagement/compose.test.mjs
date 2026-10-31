@@ -33,13 +33,18 @@ describe('engagement compose', () => {
     expect(example).not.toMatch(/^RATIO_OIDC_CLIENT_SECRET_PRIMARY=\S/m); // names only
   });
 
-  it('the users job is the only service that can write users.json; it runs the operator users command with /state', () => {
+  it('users.json lives in its own DIRECTORY mount: writable only in the users job (crash-atomic rename and lock there), read-only elsewhere', () => {
     const u = services.users;
+    const DIR_MOUNT = '${RATIO_ENGAGEMENT_USERS_DIR:?host directory holding users.json (owned by uid 1000, mode 0700)}:/config/users';
     expect([u.profiles, u.entrypoint, u.environment.RATIO_ENGAGEMENT_USERS, u.environment.RATIO_ENGAGEMENT_STATE])
-      .toEqual([['jobs'], ['node', 'dist-worker/ingest/cli.js', 'users'], '/config/users.json', '/state/sessions.sqlite']);
-    expect(u.volumes.filter((v) => v.endsWith(':/config/users.json'))).toEqual(['${RATIO_ENGAGEMENT_USERS_FILE:?path of the users JSON}:/config/users.json']);
-    expect(u.networks ?? []).toEqual([]);
-    for (const name of ['app', 'worker', 'migrator']) expect(services[name].volumes.filter((v) => v.includes(':/config/users.json')).every((v) => v.endsWith(':ro')), name).toBe(true);
+      .toEqual([['jobs'], ['node', 'dist-worker/ingest/cli.js', 'users'], '/config/users/users.json', '/state/sessions.sqlite']);
+    expect(u.volumes.filter((v) => v.includes(':/config/users'))).toEqual([DIR_MOUNT]);
+    expect(u.network_mode).toBe('none');
+    expect(services.app.environment.RATIO_ENGAGEMENT_USERS).toBe('/config/users/users.json');
+    for (const name of ['app', 'worker', 'migrator']) expect(services[name].volumes.filter((v) => v.includes(':/config/users')), name).toEqual([`${DIR_MOUNT}:ro`]);
+    const text = read('infrastructure/engagement/compose.yaml') + read('.env.engagement.example');
+    expect(text).not.toMatch(/RATIO_ENGAGEMENT_USERS_FILE|:\/config\/users\.json/); // no single-file mount left
+    expect(read('.env.engagement.example')).toMatch(/^RATIO_ENGAGEMENT_USERS_DIR=$/m);
   });
 
   it('declares postgres, s3 and the three image-based services', () => {
@@ -103,8 +108,8 @@ describe('engagement compose', () => {
       expect(s.environment.RATIO_MODE, name).toBe('engagement');
       expect(s.environment.RATIO_ENGAGEMENT_CONFIG, name).toBe('/config/engagement.json');
       expect(s.volumes.filter((v) => v.includes(':/config/')), name).toHaveLength(2);
-      // The one exception: the users job writes users.json (operator users command), asserted separately above.
-      for (const v of s.volumes.filter((v) => v.includes(':/config/') && !(name === 'users' && v.endsWith(':/config/users.json')))) expect(v, v).toMatch(/:ro$/);
+      // The one exception: the users job's users DIRECTORY (operator users command), asserted separately above.
+      for (const v of s.volumes.filter((v) => v.includes(':/config/') && !(name === 'users' && v.endsWith(':/config/users')))) expect(v, v).toMatch(/:ro$/);
     }
   });
 
