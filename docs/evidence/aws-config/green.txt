@@ -14,3 +14,6 @@ M7  AWS field rules for every connector                1 failed
 M8  worker without the complete-key length check       2 failed
 M9  startup without the 256-byte file-part reserve     3 failed
 M10 worker accepting . and .. prefix segments          1 failed
+DB (CI caught it): src/ingest/managedFetch.db.test.ts expected an unregistered connector to reach the registry (exit 1,
+CONNECTOR_NOT_REGISTERED); the worker config check now refuses it first, as startup does (exit 2, ENGAGEMENT_CONFIG_INVALID).
+Updated; vitest.db.config.ts on managedFetch.db + focusRetriever.db against local postgres:16 and SeaweedFS: 13 passed.
