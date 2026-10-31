@@ -330,6 +330,8 @@ describe('unsupported text: preflight and the refusal policy (default refuse)', 
     // U+4E00 and the Kangxi radical U+2F00 are one glyph: U+4E00 is drawn, U+2F00 is refused (its text layer would read U+4E00).
     expect(pdfPreflight(withCells(['\u4e00 cost', 'other']))).toEqual({ cells: 0, complex: 0, emoji: 0, other: 0 });
     expect(pdfPreflight(withCells(['\u4e00 cost', '\u2f00 radical']))).toEqual({ cells: 1, complex: 0, emoji: 0, other: 1 });
+    // Both code points of one glyph in one PDF, and a sequence the font joins, are refused by the text-layer check.
+    expect(pdfPreflight(withCells(['10\uff5e20件', '10\u301c20件', '\u3033\u3035']))).toEqual({ cells: 3, complex: 0, emoji: 0, other: 3 });
   });
 
   // Each example next to a value that the font draws with the same glyph, rendered as separate PDFs in both orders.
@@ -353,11 +355,6 @@ describe('unsupported text: preflight and the refusal policy (default refuse)', 
       }
     }, 120_000);
   }
-
-  it('both code points of one glyph in one PDF are refused (both values counted); a joined vertical repeat sequence is refused by the text-layer check', () => {
-    expect(pdfPreflight(withCells(['10\uff5e20件', '10\u301c20件']))).toEqual({ cells: 2, complex: 0, emoji: 0, other: 2 });
-    expect(pdfPreflight(withCells(['\u3033\u3035']))).toEqual({ cells: 1, complex: 0, emoji: 0, other: 1 });
-  });
 
   it('a refused PDF logs no React error stack (the refusal happens before rendering)', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});

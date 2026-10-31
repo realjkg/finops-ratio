@@ -1,4 +1,4 @@
-GREEN round 3 (follow-up to #164, base main 6ff49d3). Node 22.22.0, @react-pdf/renderer 4.5.1, fontkit 2.0.4.
+GREEN round 3 (follow-up to #164, base main 6ff49d3; full vitest 268 files / 4,784 tests). fontkit 2.0.4.
 Cause (verified by probe): #164 pre-created every glyph for one "canonical" code point ranked across each face's
 whole character set. (a) For the CJK face this included code points Noto Sans draws first: U+30FB lost its glyph to
 U+00B7, U+22EF to U+2026, U+FF40 to U+2035. (b) Genuine twins inside the CJK face (U+FF5E/U+301C, U+FF0F/U+2215,
