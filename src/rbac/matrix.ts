@@ -72,6 +72,8 @@ export const ROUTE_MATRIX: readonly RouteRow[] = deepFreeze([
   r('/api/prediction/accuracy', 'prediction'), r('/api/tokenomics', 'tokenomics'), r('/api/report/snapshot', 'reports'),
   r('/api/hello', 'demo', PUBLIC),
   r('/api/v1/cm/change', 'cm_change', { status: 'deferred(C3)', legacyService: 'see_4_5' }),
+  // R2: engagement sign-in (engagement mode only; login is the open entry, logout and session need the session).
+  r('/api/auth/login', 'session'), r('/api/auth/logout', 'session'), r('/api/auth/session', 'session'),
   // Routes this plan adds.
   r('/api/v1/session/login', 'session', { status: 'public_mock', plannedBy: 'B7' }),
   r('/api/v1/session/mock-control', 'session', { status: 'public_mock', plannedBy: 'B7' }),
