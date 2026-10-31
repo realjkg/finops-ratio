@@ -139,3 +139,48 @@ describe('users command', () => {
     expect(last(err).code).toBe('users.read_failed');
   });
 });
+
+describe('users command: review Lows', () => {
+  it('unknown commands print usage without taking the lock; `operator` is a reserved id; --force needs --by operator', async () => {
+    fs.writeFileSync(path.join(DIR, '.users.lock'), '{}');
+    expect(await run(['frobnicate', '--by', 'admin'])).toBe(2);
+    expect(last(err).code).toBe('users.usage');
+    fs.rmSync(path.join(DIR, '.users.lock'));
+    expect(await run(['add', '--id', 'Operator', '--name', 'x', '--role', 'viewer', '--by', 'admin'])).toBe(1);
+    expect(last(err).code).toBe('users.id_reserved');
+    expect(await run(['suspend', '--id', 'v', '--by', 'admin', '--force'])).toBe(1);
+    expect(last(err).code).toBe('users.force_requires_operator');
+  });
+
+  it('refuses a symlinked users.json; refuses output over the size cap; sweeps stale temp files under the lock', async () => {
+    const real = path.join(root, 'elsewhere.json');
+    fs.copyFileSync(USERS, real);
+    fs.rmSync(USERS);
+    fs.symlinkSync(real, USERS);
+    expect(await run(['set-role', '--id', 'v', '--role', 'analyst', '--by', 'admin'])).toBe(1);
+    expect([last(err).code, fs.lstatSync(USERS).isSymbolicLink()]).toEqual(['users.file_symlink', true]);
+    fs.rmSync(USERS);
+    fs.copyFileSync(real, USERS);
+    expect(await run(['set-role', '--id', 'v', '--role', 'analyst', '--by', 'admin'], { maxBytes: 100 })).toBe(1);
+    expect(last(err).code).toBe('users.too_large');
+    const old = path.join(DIR, '.users.json.123.abcd.tmp');
+    const fresh = path.join(DIR, '.users.json.124.abcd.tmp');
+    fs.writeFileSync(old, 'x');
+    fs.writeFileSync(fresh, 'x');
+    fs.utimesSync(old, new Date(Date.now() - 3_600_000), new Date(Date.now() - 3_600_000));
+    expect(await run(['set-role', '--id', 'v', '--role', 'analyst', '--by', 'admin'])).toBe(0);
+    expect(fs.readdirSync(DIR).sort()).toEqual(['.users.json.124.abcd.tmp', 'users.json']);
+  });
+
+  it('temp file gets the original mode despite the umask; a directory fsync failure after the rename is partial; a failed revoke-sessions is refused, not partial', async () => {
+    fs.chmodSync(USERS, 0o664);
+    const umask = process.umask(0o077);
+    try { expect(await run(['set-role', '--id', 'v', '--role', 'analyst', '--by', 'admin'])).toBe(0); } finally { process.umask(umask); }
+    expect(fs.statSync(USERS).mode & 0o777).toBe(0o664);
+    expect(await run(['set-role', '--id', 'v', '--role', 'viewer', '--by', 'admin'], { fsyncDir: () => { throw Object.assign(new Error('io'), { code: 'EIO' }); } })).toBe(1);
+    expect([last(out).outcome, last(out).code, dirNow().memberships.get('v')?.role]).toEqual(['partial', 'users.dir_sync_failed', 'viewer']);
+    out = [];
+    expect(await run(['revoke-sessions', '--id', 'v', '--by', 'admin'], { revoke: () => { throw new Error('disk'); } })).toBe(1);
+    expect([out, last(err).code]).toEqual([[], 'users.revoke_failed']);
+  });
+});

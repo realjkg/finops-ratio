@@ -24,7 +24,9 @@ type Env = Record<string, string | undefined>;
 type IO = { out(l: string): void; err(l: string): void };
 type Rec = Record<string, unknown>;
 type Doc = { users: Rec[]; memberships?: Rec[]; localCredentials?: Rec[]; bindings?: Rec[]; identityConnections?: Rec[] } & Rec;
-export interface UsersDeps { readStdin?: () => string; beforeWrite?: () => void; writeSync?: typeof fs.writeSync; revoke?: (store: EngagementSessionStore, userId: string) => number }
+export interface UsersDeps { readStdin?: () => string; beforeWrite?: () => void; writeSync?: typeof fs.writeSync; revoke?: (store: EngagementSessionStore, userId: string) => number;
+  fsyncDir?: (fd: number) => void; maxBytes?: number }
+const COMMANDS = new Set(['add', 'set-role', 'set-password', 'suspend', 'unsuspend', 'revoke-sessions', 'bind', 'unbind']);
 class Refused extends Error {
   constructor(code: string, readonly extra: Rec = {}) { super(code); }
 }
@@ -70,13 +72,23 @@ function lock(dir: string): () => void {
 }
 
 /** Temp file in the same directory, written to completion, fsync, rename over the target, fsync the directory. */
-function writeAtomic(file: string, data: Buffer, deps: UsersDeps): void {
+/** Removes temp files a crashed job left behind (older than the stale-lock age); called under the lock. */
+function sweep(dir: string): void {
+  for (const n of fs.readdirSync(dir)) {
+    if (!/^\.users\.json\.\d+\.[0-9a-f]+\.tmp$/.test(n)) continue;
+    try { if (Date.now() - fs.statSync(path.join(dir, n)).mtimeMs > STALE_MS) fs.rmSync(path.join(dir, n), { force: true }); } catch { /* raced */ }
+  }
+}
+
+/** Returns true when everything is durable, 'dir' when only the directory fsync after the rename failed. */
+function writeAtomic(file: string, data: Buffer, deps: UsersDeps): true | 'dir' {
   const dir = path.dirname(file);
   const st = fs.statSync(file);
   const tmp = path.join(dir, `.users.json.${process.pid}.${randomBytes(4).toString('hex')}.tmp`);
   const fd = fs.openSync(tmp, 'wx', st.mode & 0o777);
   try {
     try {
+      fs.fchmodSync(fd, st.mode & 0o777); // the umask must not narrow the original mode
       for (let off = 0; off < data.length;) off += (deps.writeSync ?? fs.writeSync)(fd, data, off, data.length - off, off);
       fs.fsyncSync(fd);
     } finally { fs.closeSync(fd); }
@@ -86,8 +98,13 @@ function writeAtomic(file: string, data: Buffer, deps: UsersDeps): void {
     fs.rmSync(tmp, { force: true });
     throw e;
   }
-  const d = fs.openSync(dir, 'r');
-  try { fs.fsyncSync(d); } finally { fs.closeSync(d); }
+  try {
+    const d = fs.openSync(dir, 'r');
+    try { (deps.fsyncDir ?? fs.fsyncSync)(d); } finally { fs.closeSync(d); }
+  } catch {
+    return 'dir'; // renamed and visible, durability of the rename not confirmed
+  }
+  return true;
 }
 
 export async function usersMain(argv: string[], env: Env, io: IO, deps: UsersDeps = {}): Promise<number> {
@@ -95,7 +112,7 @@ export async function usersMain(argv: string[], env: Env, io: IO, deps: UsersDep
   const f = parse(rest);
   const base: Rec = { event: 'users_admin', action: cmd ?? null };
   const refuse = (code: string, extra: Rec = {}, exit = 1) => { io.err(JSON.stringify({ ...base, outcome: 'refused', code, ...extra })); return exit; };
-  if (!f || !cmd) return refuse('users.usage', { message: USAGE }, 2);
+  if (!f || !cmd || (cmd !== 'list' && !COMMANDS.has(cmd))) return refuse('users.usage', { message: USAGE }, 2);
   const cfg = loadEngagementConfig(env.RATIO_ENGAGEMENT_CONFIG ?? '');
   const file = env.RATIO_ENGAGEMENT_USERS ?? '';
   if (!cfg.ok) return refuse('users.config_invalid', { problems: cfg.problems }, 2);
@@ -113,7 +130,11 @@ export async function usersMain(argv: string[], env: Env, io: IO, deps: UsersDep
   let unlock: (() => void) | undefined;
   let store: EngagementSessionStore | undefined;
   try {
+    let link = false;
+    try { link = fs.lstatSync(file).isSymbolicLink(); } catch { /* missing: the lock or the read reports it */ }
+    if (link) throw new Refused('users.file_symlink'); // never replace a link target silently
     unlock = lock(path.dirname(file));
+    sweep(path.dirname(file));
     const original = fs.readFileSync(file);
     const doc = parseDoc(original);
     const by = f.get('by') ?? '';
@@ -133,6 +154,7 @@ export async function usersMain(argv: string[], env: Env, io: IO, deps: UsersDep
     base.target = target ?? null;
     if (!target) throw new Refused('users.usage', { message: USAGE });
     if (same(target, actor)) throw new Refused('users.self_change_refused');
+    if (f.has('force') && actor !== 'operator') throw new Refused('users.force_requires_operator');
     const admins = () => doc.users.filter((u) => activeAdmin(u)).length;
     const guardLastAdmin = (before: number) => {
       if (before > 0 && admins() === 0 && !(actor === 'operator' && f.has('force'))) throw new Refused('users.last_admin', { message: 'the last active tenant_admin; only --by operator --force may do this' });
@@ -146,6 +168,7 @@ export async function usersMain(argv: string[], env: Env, io: IO, deps: UsersDep
     let revoke = false;
     const adminsBefore = admins();
     if (cmd === 'add') {
+      if (same(target, 'operator')) throw new Refused('users.id_reserved');
       const role = f.get('role');
       if (!role || !Object.hasOwn(ROLE_PERMISSIONS, role)) throw new Refused('users.role_invalid');
       doc.users.push({ id: target, displayName: f.get('name') ?? '', status: 'active' });
@@ -183,7 +206,7 @@ export async function usersMain(argv: string[], env: Env, io: IO, deps: UsersDep
     const v = validateDirectory(doc, instance);
     if (!v.ok) throw new Refused('users.invalid_result', { problems: v.problems });
     const next = Buffer.from(`${JSON.stringify(doc, null, 2)}\n`);
-    if (next.length > MAX_BYTES) throw new Refused('users.too_large');
+    if (next.length > (deps.maxBytes ?? MAX_BYTES)) throw new Refused('users.too_large');
     if (revoke) {
       const state = env.RATIO_ENGAGEMENT_STATE ?? '';
       if (!path.isAbsolute(state)) throw new Refused('users.state_missing');
@@ -192,13 +215,21 @@ export async function usersMain(argv: string[], env: Env, io: IO, deps: UsersDep
     (deps.beforeWrite ?? (() => {}))();
     if (sha(fs.readFileSync(file)) !== sha(original)) throw new Refused('users.changed_concurrently');
     if (cmd !== 'revoke-sessions') {
-      try { writeAtomic(file, next, deps); } catch (e) { throw new Refused('users.write_failed', { cause: (e as NodeJS.ErrnoException).code ?? 'unknown' }); }
+      let w: true | 'dir';
+      try { w = writeAtomic(file, next, deps); } catch (e) { throw new Refused('users.write_failed', { cause: (e as NodeJS.ErrnoException).code ?? 'unknown' }); }
+      if (w === 'dir') extra.durability = 'users.dir_sync_failed';
     }
     if (store) {
       try { extra.sessionsRevoked = (deps.revoke ?? ((s, id) => s.revokeUser(id)))(store, userOf(target)!.id as string); } catch {
+        if (cmd === 'revoke-sessions') throw new Refused('users.revoke_failed'); // nothing was written: a plain failure
         io.out(JSON.stringify({ ...base, ...extra, outcome: 'partial', code: 'users.revoke_failed' }));
         return 1;
       }
+    }
+    if (extra.durability) {
+      const { durability, ...rest } = extra;
+      io.out(JSON.stringify({ ...base, ...rest, outcome: 'partial', code: durability }));
+      return 1;
     }
     io.out(JSON.stringify({ ...base, ...extra, outcome: 'success' }));
     return 0;

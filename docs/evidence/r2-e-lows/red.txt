@@ -1,0 +1,4 @@
+R2 #172 review Lows RED evidence
+$ npx vitest run --cache=false src/engagement/auth/usersCli.test.ts
+  -> Tests 3 failed | 8 passed (11): usage before the lock, reserved id, --force rule, symlink refusal, size cap seam,
+     stale temp sweep, temp mode under umask, directory-fsync partial, revoke-sessions failure not partial.
