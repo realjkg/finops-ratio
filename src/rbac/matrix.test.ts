@@ -43,7 +43,8 @@ describe('permission matrix', () => {
 
   it('legacy_service_column_grants_exactly_todays_gateway_access', () => {
     // Derived from source: an API file (or the file it re-exports or builds its handler from) that calls the gateway.
-    const GATE = /\b(withGateway|gateSourceAccess|evaluateLiveDataAuth)\s*\(/;
+    // createReaderRoute is the read-API island's shared factory (withGateway + evaluateLiveDataAuth, publishedCostsRoute.ts).
+    const GATE = /\b(withGateway|gateSourceAccess|evaluateLiveDataAuth|createReaderRoute)\s*\(/;
     const gated = walkPages().filter(([route, file]) => {
       if (!route.startsWith('/api/')) return false;
       const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
@@ -55,7 +56,7 @@ describe('permission matrix', () => {
     expect(gated).toContain('/api/v1/cm/change'); // reached through its ticket actions
     const readable = ROUTE_MATRIX.filter((r) => r.legacyService === 'D').map((r) => r.path);
     expect(readable.sort()).toEqual(gated.filter((r) => r !== '/api/v1/cm/change').sort());
-    expect(readable).toHaveLength(11);
+    expect(readable).toHaveLength(12);
     expect(findRoute('/api/v1/cm/change')?.legacyService).toBe('see_4_5');
     const allowed = MATRIX_ACTIONS.filter((a) => ACTION_MATRIX[a].cells.legacy_service.some((c) => c !== 'n'));
     expect(allowed.sort()).toEqual(['ticket.attach', 'ticket.create', 'ticket.status', 'view.export']);
@@ -92,7 +93,7 @@ describe('permission matrix', () => {
       finio_export: ['- D D - - D', ['/finio', '/api/v1/finio/export', '/api/finio/export']],
       outcomes: ['O D O T O D', ['/outcomes', '/mission']], frank: ['O D O T O D', ['/agent-workflows', '/api/v1/ai/chat']],
       demo: ['R R R R R R', ['/demo', '/hello', '/finio/demo', '/api/hello']],
-      published: ['- D D - - D', ['/api/v1/costs/published', '/api/v1/a2a/handshake', '/api/a2a/handshake']],
+      published: ['- D D - - D', ['/api/v1/costs/published', '/api/v1/reports/facts', '/api/v1/a2a/handshake', '/api/a2a/handshake']],
       cm_change: [Array(6).fill('see_4_5').join(' '), ['/api/v1/cm/change']], audit: ['O D - T - D', ['/audit', '/api/v1/audit/records']],
       scoped_data: ['O D D T O D', ['/api/v1/workloads']],
       session: ['any any any any any any', ['principal', 'logout', 'login', 'mock-control'].map((n) => `/api/v1/session/${n}`).concat('/sign-in')],

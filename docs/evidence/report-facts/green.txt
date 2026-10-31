@@ -1,0 +1,34 @@
+Report facts (1.0), PR 1: GREEN (base 7f765fd), local run 2026-10-31.
+Environment: Node 22, Postgres 16 (postgres@sha256:1a6ab3f5...) and SeaweedFS (chrislusf/seaweedfs@sha256:4e61d15f...)
+on 127.0.0.1:55436 / :58333, tmpfs data dirs; SeaweedFS -volume.max=64 -master.volumeSizeLimitMB=64 -volume.minFreeSpace=300MiB.
+- npm run lint: pass. npm run typecheck: pass. tsc -p tsconfig.worker.json --noEmit: pass.
+- npm test: Test Files 244 passed (244); Tests 4510 passed (4510).
+- npm run test:db: 45 files / 718 tests passed; serial 6 files / 173 tests passed.
+  New: src/server/costs/reportFacts.db.test.ts 6/6 (public FOCUS 1.0 sample via source add + import-file:
+  AWS 2024-09 USD rows 942, billed 18.00663861840, effective 13.00000000000 = control-totals.json "1k";
+  Credit 1 row billed -2.61370000000 / effective -3.00000000000; Usage 941 rows 20.62033861840 / 16.00000000000).
+- npm run worker:build: pass. npm run build: pass (route /api/v1/reports/facts). npm run check:bundle: pass
+  (pg traced for both reader routes; reader chunks loaded only by reader routes).
+Mutations (unit = reportFacts + route tests, db = reportFacts.db.test.ts); each killed by at least one suite:
+- M1 combine totals across sources: unit killed, db killed
+- M2 drop the partial-effective label: unit killed, db killed
+- M3 missing period as an empty (zero) total: unit killed, db killed
+- M4 credits not split (wrong category): unit killed, db killed
+- M5 partial-month check inverted: unit killed, db survived
+- M6 SQL effective-missing count without FILTER: unit survived, db killed
+- M7 SQL groups not filtered by period: unit survived, db killed
+- M8 route parse accepts extra parameters: unit killed, db survived
+After the size trim (type declarations reformatted, one comment shortened; no logic change) lint, typecheck
+(app + worker) and the 24 affected unit files (374 tests) were rerun and pass; the DB suite was not rerun.
+
+Review round (fixes on top of 315f927): GREEN, same environment (fresh containers, CI digests, tmpfs).
+- lint, typecheck (app + worker): pass. npm test: 244 files / 4513 tests passed.
+- npm run test:db: 45 files / 719 tests; serial 6 files / 173 tests: all passed (reportFacts.db.test.ts 7/7, incl.
+  publish then a quarantined corrected delivery: last published totals shown with the BATCH_STATUS_NOT_VISIBLE warning).
+- worker:build, build, check:bundle: pass.
+Mutations (unit / db):
+- R1 batch-status warning only when data is published: killed / killed
+- R2 warning without the quarantined-or-staged wording: killed / killed
+- R3 completeness claims the whole month again: killed / survived (db imports the constant)
+- R4 as-of compared as strings at the month boundary: killed / survived
+- R5 operator file sha256 shown instead of N/A: killed / killed

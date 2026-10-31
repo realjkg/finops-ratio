@@ -1,0 +1,16 @@
+Report facts (1.0), PR 1: RED before the implementation (base 7f765fd).
+Command: npx vitest run src/reports/reportFacts.test.ts src/server/costs/reportFactsRoute.test.ts src/ingest/importBoundary.test.ts src/rbac/matrix.test.ts scripts/check-next-bundle.test.mjs
+Result: Test Files 5 failed (5); Tests 5 failed | 37 passed (42), plus 2 files that cannot load:
+- src/reports/reportFacts.test.ts: Cannot find module './reportFacts'
+- src/server/costs/reportFactsRoute.test.ts: Cannot find module './reportFactsRoute'
+- check-next-bundle B5 (2): READER_ENTRIES / REPORT_FACTS_ENTRY missing
+- importBoundary: pages/api/v1/reports/facts.ts does not exist
+- rbac matrix (2): no row for /api/v1/reports/facts
+DB suite (src/server/costs/reportFacts.db.test.ts) cannot load either: './reportFactsRoute' missing.
+
+Review round (independent review of 315f927; three Mediums and one Low), RED before the fix:
+Command: npx vitest run src/reports
+Result: Tests 6 failed | 10 passed (16): staged-artifact label and operatorFileSha256 N/A; span-only completeness
+wording (never "cover the whole month"); BATCH_STATUS_NOT_VISIBLE wording for every period (newer delivery may be
+quarantined or staged; last PUBLISHED batch only); as-of compared as an instant at the month boundary.
+DB: reportFacts.db.test.ts gains a published-then-quarantined delivery case (cannot load SPAN_* exports yet).

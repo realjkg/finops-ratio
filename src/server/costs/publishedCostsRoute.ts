@@ -45,6 +45,17 @@ export interface PublishedCostsRouteDeps {
   limiter?: SlidingWindowRateLimiter;
   /** Whole-request deadline for the database read (tests shorten it). */
   requestDeadlineMs?: number;
+  /** Clock (tests pin it); used by reads that report an as-of time. */
+  now?: () => Date;
+}
+
+type Parsed<Q> = { ok: true; value: Q } | { ok: false; message: string };
+
+/** What differs between the island's routes: the log tag, the query parser and the read. */
+export interface ReaderRouteSpec<Q> {
+  tag: string;
+  parse(query: Record<string, string | string[] | undefined>): Parsed<Q>;
+  read(pool: Pick<Pool, 'connect'>, tenantId: string, q: Q, ctx: { env: Env; now: Date }): Promise<unknown>;
 }
 
 function sendAuthFailure(res: NextApiResponse, auth: Exclude<LiveAuthResult, { kind: 'ok' }>): void {
@@ -67,6 +78,11 @@ function sendAuthFailure(res: NextApiResponse, auth: Exclude<LiveAuthResult, { k
 }
 
 export function createPublishedCostsRoute(deps: PublishedCostsRouteDeps = {}): NextApiHandler {
+  return createReaderRoute(deps, { tag: 'published-costs', parse: parsePublishedCostsQuery, read: (pool, tenantId, q) => readPublishedCosts(pool, tenantId, q) });
+}
+
+/** The shared route factory of the read-API island (auth, gateway, tenant binding, deadline, fail-closed errors). */
+export function createReaderRoute<Q>(deps: PublishedCostsRouteDeps, spec: ReaderRouteSpec<Q>): NextApiHandler {
   const envOf = (): Env => deps.env ?? process.env;
   const poolFor = deps.poolFor ?? readerPool;
   const deadlineMs = deps.requestDeadlineMs ?? READ_TIMEOUTS.requestMs;
@@ -78,7 +94,7 @@ export function createPublishedCostsRoute(deps: PublishedCostsRouteDeps = {}): N
       return;
     }
     const { tenantId, readerUrl } = config;
-    const parsed = parsePublishedCostsQuery(req.query ?? {});
+    const parsed = spec.parse(req.query ?? {});
     if (!parsed.ok) {
       sendError(res, 400, 'invalid_request', parsed.message);
       return;
@@ -86,8 +102,9 @@ export function createPublishedCostsRoute(deps: PublishedCostsRouteDeps = {}): N
     try {
       // Bounded end to end (Copilot 4176494809): the tenant transaction, the
       // login check and the reads; a stuck client is destroyed, not pooled.
-      const page = await readWithDeadline(poolFor(readerUrl), (p) => readPublishedCosts(p, tenantId, parsed.value), deadlineMs);
-      res.status(200).json(page);
+      const now = (deps.now ?? (() => new Date()))();
+      const body = await readWithDeadline(poolFor(readerUrl), (p) => spec.read(p, tenantId, parsed.value, { env: envOf(), now }), deadlineMs);
+      res.status(200).json(body);
     } catch (err) {
       if (err instanceof UnsafeReaderLoginError) {
         // A distinct, expected refusal (not an unhandled 500): one structured
@@ -97,7 +114,7 @@ export function createPublishedCostsRoute(deps: PublishedCostsRouteDeps = {}): N
         const requestId = randomUUID();
         console.error(
           JSON.stringify({
-            tag: 'published-costs',
+            tag: spec.tag,
             event: 'unsafe_db_login',
             requestId,
             method: req.method ?? 'UNKNOWN',
