@@ -52,7 +52,7 @@ describe('ensureContrast', () => {
     expect(g).toBeGreaterThan(b);
   });
 
-  const palette = ['#ffffff', '#000000', '#777777', '#05070b', '#f5f8fb', '#00e09e', '#ff5c72', '#ffc44d', '#7c8dff', '#b490ff', '#0078d4'];
+  const palette = ['#ffffff', '#000000', '#777777', '#05070b', '#f5f8fb', '#00e09e', '#ff7083', '#ffc44d', '#8494ff', '#c7acff', '#0078d4'];
   it('property: every pair reaches the target, or falls back to black/white when impossible', () => {
     for (const fg of palette) {
       for (const bg of palette) {

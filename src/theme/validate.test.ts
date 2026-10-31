@@ -21,27 +21,10 @@ describe('built-in themes', () => {
     expect(validateTheme(BUILT_IN_THEMES['high-contrast'])).toEqual([]);
   });
 
-  // Dark is the pre-existing look kept pixel-identical, so its known shortfalls are
-  // pinned here: the list may shrink (T4 / owner decision) but can never grow.
-  it('dark fails only the pinned legacy pairs', () => {
-    const tint = (a: string, pct: number, surfaces: string[]) => surfaces.map((x) => `${a}/${a}/${pct}@${x}`);
-    const EXEC = ['exec-bg', 'exec-surface', 'exec-hover'];
-    const MAIN = ['void', 'deep', 'slab', 'raised'];
-    const onExec = (fgs: string[]) => fgs.flatMap((fg) => EXEC.map((bg) => `${fg}/${bg}`));
-    expect(pairs(BUILT_IN_THEMES.dark).sort()).toEqual([
-      // Executive surfaces now reuse deep/slab/raised and edge (owner decision 2026-10-31), so
-      // the 41 white-panel pairs are gone; what remains on them are the same color pairs as the
-      // main-surface entries below (no new color combination; the dashboard draws no dim text).
-      ...onExec(['dim', 'exec-border']),
-      'dim/void', 'dim/deep', 'dim/slab', 'dim/raised',
-      'edge/void', 'edge/deep', 'edge/slab', 'edge/raised',
-      ...tint('gate', 20, ['raised', 'exec-hover']), ...tint('purple', 30, ['slab', 'raised', 'exec-surface', 'exec-hover']),
-      // Added in T2 with the newly checked pairs: dim text in accent callouts, and the
-      // translucent text-cost/80 on cards.
-      ...['value', 'cost', 'shape', 'gate', 'unit', 'purple'].flatMap((a) => MAIN.map((x) => `dim/${a}/10@${x}`)),
-      'cost/text/80@slab', 'cost/text/80@raised',
-    ].sort()); // 20 + 26 pairs (was 58 + 26)
-    expect(codes(BUILT_IN_THEMES.dark).every((c) => c === 'contrast')).toBe(true);
+  // Dark reaches the same bar as the others. Its dim, edge, cost, gate and purple shades were
+  // lightened for this; nothing is exempt, so a regression shows up as a named pair here.
+  it('dark passes with no violations', () => {
+    expect(validateTheme(BUILT_IN_THEMES.dark)).toEqual([]);
   });
 });
 

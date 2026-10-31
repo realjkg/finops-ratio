@@ -42,7 +42,7 @@ export function NavBar({
           style={{ background: 'var(--gate)' }}
           aria-hidden="true"
         >
-          <span className="text-white">%</span>
+          <span className="text-void">%</span>
         </span>
         <span className="font-mono text-sm font-bold tracking-tight text-txt">Ratio</span>
       </span>

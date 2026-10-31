@@ -16,10 +16,10 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
   --c-void: 5 7 11; --c-deep: 9 12 18; --c-slab: 13 17 25; --c-raised: 20 26 38;
-  --c-edge: 26 34 53; --c-txt: 208 216 234; --c-sub: 136 149 173; --c-dim: 77 90 114;
-  --c-value: 0 224 158; --c-cost: 255 92 114; --c-shape: 255 196 77; --c-gate: 124 141 255;
-  --c-unit: 0 204 238; --c-purple: 180 144 255; --c-exec-bg: 9 12 18; --c-exec-surface: 13 17 25;
-  --c-exec-border: 26 34 53; --c-exec-hover: 20 26 38; --c-exec-text: 208 216 234; --c-exec-muted: 136 149 173;
+  --c-edge: 97 103 116; --c-txt: 208 216 234; --c-sub: 136 149 173; --c-dim: 139 148 163;
+  --c-value: 0 224 158; --c-cost: 255 112 131; --c-shape: 255 196 77; --c-gate: 132 148 255;
+  --c-unit: 0 204 238; --c-purple: 199 172 255; --c-exec-bg: 9 12 18; --c-exec-surface: 13 17 25;
+  --c-exec-border: 97 103 116; --c-exec-hover: 20 26 38; --c-exec-text: 208 216 234; --c-exec-muted: 136 149 173;
   --c-focus: 107 124 245;
 }
 :root,
@@ -45,10 +45,10 @@
   :root:not([data-theme]) {
     color-scheme: dark;
     --c-void: 5 7 11; --c-deep: 9 12 18; --c-slab: 13 17 25; --c-raised: 20 26 38;
-    --c-edge: 26 34 53; --c-txt: 208 216 234; --c-sub: 136 149 173; --c-dim: 77 90 114;
-    --c-value: 0 224 158; --c-cost: 255 92 114; --c-shape: 255 196 77; --c-gate: 124 141 255;
-    --c-unit: 0 204 238; --c-purple: 180 144 255; --c-exec-bg: 9 12 18; --c-exec-surface: 13 17 25;
-    --c-exec-border: 26 34 53; --c-exec-hover: 20 26 38; --c-exec-text: 208 216 234; --c-exec-muted: 136 149 173;
+    --c-edge: 97 103 116; --c-txt: 208 216 234; --c-sub: 136 149 173; --c-dim: 139 148 163;
+    --c-value: 0 224 158; --c-cost: 255 112 131; --c-shape: 255 196 77; --c-gate: 132 148 255;
+    --c-unit: 0 204 238; --c-purple: 199 172 255; --c-exec-bg: 9 12 18; --c-exec-surface: 13 17 25;
+    --c-exec-border: 97 103 116; --c-exec-hover: 20 26 38; --c-exec-text: 208 216 234; --c-exec-muted: 136 149 173;
     --c-focus: 107 124 245;
   }
 }
