@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 for (const width of [390, 1440]) {
   test(`theme editor saves and dismisses without losing the selected theme at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 }); await page.goto('/');
-    const opener = page.getByRole('button', { name: width < 768 ? 'Appearance' : 'Preview', exact: true });
+    const opener = page.getByRole('button', { name: width < 768 ? 'Appearance' : 'Appearance options', exact: true });
     await opener.click();
     const editor = page.getByRole('region', { name: 'Theme editor' });
     await editor.locator('label', { hasText: /^Light$/ }).click();

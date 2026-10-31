@@ -12,7 +12,11 @@ import {
 } from '@/lib/persona';
 
 function browserStorage(): Storage | null {
-  return typeof window === 'undefined' ? null : window.localStorage;
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage;
+  } catch {
+    return null; // blocked site data: the persona still works for this page view
+  }
 }
 
 export function PersonaProvider({ children }: { children: ReactNode }) {

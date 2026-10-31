@@ -1,5 +1,5 @@
 // The read-only SAMPLE workspace behind /simulation when server simulation is off (public deployments).
-// Pure view-models over the bundled synthetic seed (src/data): no server call, no storage, no clock.
+// Pure view-models over the bundled synthetic seed (src/data): no data request after the page loads, no storage, no clock.
 // Money is summed and shown as integer cents, so no floating-point sum reaches the screen.
 import { ALERTS } from '@/data/alerts';
 import { BUDGET_PROFILES } from '@/data/budgets';
@@ -53,7 +53,7 @@ export function sampleView(persona: Persona): SampleView {
       rows: [...spend].sort((a, b) => budgetShare(b.c, b.b) - budgetShare(a.c, a.b)).slice(0, 5).map(({ w, c, b }) => ({
         label: w.name, detail: `${w.team} · ${formatCents(c)} of ${formatCents(b)}`, value: `${budgetShare(c, b)}%`, flag: budgetShare(c, b) >= 90 ? 'risk' : 'ok',
       })),
-      note: 'Spend is each workload’s monthly run rate in the synthetic seed.',
+      note: 'Spend is each workload’s monthly run rate in the synthetic seed. (watch) means at or above 90% of its budget.',
     };
   }
   if (persona === 'technical') {
@@ -68,7 +68,7 @@ export function sampleView(persona: Persona): SampleView {
       rows: [...spend].sort((a, b) => b.c - a.c).slice(0, 5).map(({ w, c }) => ({
         label: w.name, detail: `${w.model} · ${w.team}`, value: formatCents(c), flag: w.cost_trend_pct > 15 ? 'risk' : undefined,
       })),
-      note: `Open alerts: ${open.slice(0, 2).map((a) => `${byName.get(a.workload_id) ?? a.workload_id} (${a.severity})`).join('; ') || 'none'}.`,
+      note: `(watch) means monthly spend is up more than 15% on last month. Open alerts: ${open.slice(0, 2).map((a) => `${byName.get(a.workload_id) ?? a.workload_id} (${a.severity})`).join('; ') || 'none'}.`,
     };
   }
   const models = [...MODEL_REGISTRY].sort((a, b) => a.pricing.input_per_1m - b.pricing.input_per_1m);

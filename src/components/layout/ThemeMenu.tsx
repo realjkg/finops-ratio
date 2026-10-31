@@ -191,14 +191,14 @@ export function ThemeMenu() {
         <button type="button" className={`${btn} md:hidden`} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Appearance</button>
         <span className="hidden items-center gap-1.5 md:flex">
           {switcher('theme-select')}
-          <button type="button" className={btn} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Preview</button>
+          <button type="button" className={btn} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Appearance options</button>
         </span>
       </div>
       <div className="absolute inset-x-2 top-full z-40 mt-1 space-y-1 text-xs text-txt md:inset-x-auto md:right-0 md:w-[30rem]">
         {/* One status region, mounted while empty, so the storage note is announced. */}
         <p role="status" className={note ? 'rounded border border-edge bg-slab p-2' : ''}>{note}</p>
         {open && (
-        <section id="theme-editor" aria-label="Theme editor" className="max-h-[80vh] space-y-3 overflow-auto rounded border border-edge bg-slab p-3 font-body shadow-lg">
+        <section id="theme-editor" aria-label="Theme editor" className="max-h-[80dvh] space-y-3 overflow-auto rounded border border-edge bg-slab p-3 font-body shadow-lg">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold">Appearance</h2>
             <button type="button" className={btn} aria-label="Close theme editor" onClick={close}>Close</button>

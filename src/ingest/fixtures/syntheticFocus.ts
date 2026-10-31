@@ -48,7 +48,7 @@ export function formatUnits(u: bigint): string {
 }
 
 /** xorshift32 — integer-only PRNG (deterministic across platforms). */
-function rng(seed: string): () => number {
+export function rng(seed: string): () => number {
   let s = 2166136261;
   for (let i = 0; i < seed.length; i++) s = Math.imul(s ^ seed.charCodeAt(i), 16777619) >>> 0;
   if (s === 0) s = 1;
