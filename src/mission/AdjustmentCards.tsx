@@ -111,7 +111,7 @@ export function AdjustmentCards({ workload }: { workload: Workload }) {
         <h3 className="font-body text-sm font-semibold text-txt">Proposed Changes</h3>
         <p className="max-w-prose font-body text-xs text-sub">
           Propose a change and Ratio predicts its cost impact — always beside the
-          value-ratio effect (R4) — then routes it by confidence: cleared for a
+          value-ratio effect — then routes it by confidence: cleared for a
           one-tap apply, or queued at a governance gate for confirmation. Ratio
           never applies a change automatically.
         </p>
@@ -216,7 +216,7 @@ export function PredictionResult({ prediction }: { prediction: ChangePrediction 
   } catch {
     return (
       <p className="mt-3 font-mono text-[11px] text-cost">
-        Impact withheld — value-ratio context unavailable (R4).
+        Impact withheld — value-ratio context unavailable.
       </p>
     );
   }

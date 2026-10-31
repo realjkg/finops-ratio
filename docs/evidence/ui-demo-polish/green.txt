@@ -1,0 +1,12 @@
+$ npx vitest run src/components/uiCopy.test.tsx
+      Tests  3 passed (3)
+$ npx vitest run   (full suite)
+ Test Files  240 passed (240)
+      Tests  4390 passed (4390)
+lint 0 errors; typecheck (app) 0; typecheck (worker, tsconfig.worker.json) 0
+
+Mutations (each reverted after the run):
+- SignInRequired ignores the loading flag            -> 1 failed
+- throttle_50pct label left as the config id         -> 1 failed
+Report table: numeric columns align via a table class (nth-child), so the
+cell markup that src/mission/budgetStatusNa.test.tsx pins is unchanged.

@@ -133,4 +133,6 @@ body {
   .sim-table { @apply w-full text-left text-sm; }
   .sim-table th { @apply whitespace-nowrap border-b border-edge bg-slab px-4 py-3 font-medium text-sub; }
   .sim-table td { @apply border-b border-edge px-4 py-3; }
+  /* Portfolio report: the four numeric columns (2-5) align right on tabular figures. */
+  .sim-table-numeric :is(th, td):nth-child(n + 2):nth-child(-n + 5) { @apply text-right tabular-nums; }
 }
