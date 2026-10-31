@@ -18,7 +18,10 @@ import type { Pool } from 'pg';
 import { publishedCostsConfig } from './config';
 import { sendError, withGateway, type GatewayLogEntry } from '@/server/gateway';
 import { randomUUID } from 'crypto';
-import { pathOnly } from '@/server/gateway/internalError';
+import { INTERNAL_ERROR_MESSAGE, logInternalError, pathOnly } from '@/server/gateway/internalError';
+import { engagementMode } from '@/engagement/config';
+import type { Permission } from '@/engagement/auth/authz';
+import { checkReportAccess, type ReportAccessDeps } from '@/engagement/auth/reportAccess';
 import { evaluateLiveDataAuth, THROTTLED_MESSAGE, WEAK_TOKEN_MESSAGE, type LiveAuthResult } from '@/server/gateway/liveDataAuth';
 import type { SlidingWindowRateLimiter } from '@/server/gateway/rateLimit';
 import { parsePublishedCostsQuery } from './query';
@@ -47,6 +50,8 @@ export interface PublishedCostsRouteDeps {
   requestDeadlineMs?: number;
   /** Clock (tests pin it); used by reads that report an as-of time. */
   now?: () => Date;
+  /** R2 slice C: the named-user session check of the report routes (tests inject the store, clock and audit sink). */
+  access?: ReportAccessDeps;
 }
 
 type Parsed<Q> = { ok: true; value: Q } | { ok: false; message: string };
@@ -58,6 +63,12 @@ export interface ReaderRouteSpec<Q> {
   read(pool: Pick<Pool, 'connect'>, tenantId: string, q: Q, ctx: { env: Env; now: Date }): Promise<unknown>;
   /** Sends a successful read (default: 200 JSON). */
   respond?(res: NextApiResponse, body: unknown): void;
+  /**
+   * R2 slice C: in engagement mode a request WITHOUT an Authorization header is
+   * a browser request: it needs a named-user session that authorize() allows
+   * for this permission. Routes without it (published costs) stay machine-token only.
+   */
+  session?: { permission(q: Q): Permission; format(q: Q): string };
 }
 
 function sendAuthFailure(res: NextApiResponse, auth: Exclude<LiveAuthResult, { kind: 'ok' }>): void {
@@ -76,6 +87,14 @@ function sendAuthFailure(res: NextApiResponse, auth: Exclude<LiveAuthResult, { k
       // Unreachable with countAbsent: true; refuse defensively.
       sendError(res, 401, 'unauthorized', 'Missing Authorization: Bearer <token> header');
       return;
+  }
+}
+
+function isEngagement(env: Env): boolean {
+  try {
+    return engagementMode(env);
+  } catch {
+    return false; // an invalid RATIO_MODE keeps the machine path (which answers 503 not_configured)
   }
 }
 
@@ -139,6 +158,23 @@ export function createReaderRoute<Q>(deps: PublishedCostsRouteDeps, spec: Reader
     // auth failures here, the gateway's 405/413/429/500, our 400/503/200.
     res.setHeader('Cache-Control', 'no-store');
     const env = envOf();
+    if (spec.session && req.headers.authorization === undefined && isEngagement(env)) {
+      // Session path: authentication and authorization before the query and the method; the DB only after an allow.
+      const parsed = spec.parse(req.query ?? {});
+      const access = checkReportAccess(req, env, parsed.ok ? spec.session.permission(parsed.value) : 'reports:read', parsed.ok ? spec.session.format(parsed.value) : 'invalid', deps.access);
+      if (!access.ok) return sendError(res, access.status, access.code, access.message);
+      if (req.method !== 'GET') {
+        res.setHeader('Allow', 'GET');
+        return sendError(res, 405, 'method_not_allowed', 'Method not allowed');
+      }
+      try {
+        await handler(req, res);
+      } catch (err) {
+        const requestId = logInternalError(err, { method: req.method, path: req.url });
+        if (!res.headersSent) res.status(500).json({ error: { code: 'internal_error', message: INTERNAL_ERROR_MESSAGE, requestId } });
+      }
+      return;
+    }
     // Live-data auth first: nothing else (not even the method) is evaluated for an unauthenticated caller.
     const auth = evaluateLiveDataAuth(req, { countAbsent: true }, env);
     if (auth.kind !== 'ok') {

@@ -30,6 +30,7 @@ export function createEngagementReportRoute(deps: PublishedCostsRouteDeps = {}):
   return createReaderRoute(deps, {
     tag: 'engagement-report',
     parse: parseEngagementReportQuery,
+    session: { permission: (q) => (q.format === 'json' ? 'reports:read' : 'reports:export'), format: (q) => q.format },
     read: async (pool, tenantId, q, { env, now }): Promise<Out> => {
       const { facts, label } = await readReportFacts(pool, tenantId, q.period, env, now);
       const model = buildEngagementReportModel(facts, label);
