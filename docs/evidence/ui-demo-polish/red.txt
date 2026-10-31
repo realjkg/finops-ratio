@@ -1,0 +1,15 @@
+$ npx vitest run src/components/uiCopy.test.tsx  (tests only, before the implementation)
+ FAIL  src/components/uiCopy.test.tsx [ src/components/uiCopy.test.tsx ]
+Error: Cannot find package '@/simulation/SignInRequired' imported from /home/user/sprintA/UI/src/components/uiCopy.test.tsx
+ Test Files  1 failed (1)
+      Tests  no tests
+
+# with a placeholder SignInRequired so the threshold test can run against the old BudgetProfileTab:
+     × name every configured breach action in words 34ms
+     × explains the page, links to sign-in and back to the demo 2ms
+     × says it is restoring while a session is loading, and keeps the sign-in link 1ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/components/uiCopy.test.tsx > budget thresholds > name every configured breach action in words
+AssertionError: expected '<div class="space-y-6"><section><div …' not to match /alert_escalate|throttle_\d+pct|pause_…/
+ FAIL  src/components/uiCopy.test.tsx > SignInRequired > explains the page, links to sign-in and back to the demo
+AssertionError: expected '' to contain '<h1'
