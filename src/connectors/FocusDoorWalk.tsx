@@ -106,8 +106,8 @@ export function FocusDoorWalk() {
               ))}
             </div>
             <p className="mt-1.5 font-mono text-[10px] text-dim">
-              Demo walk ingests the bundled sample rows at v{version}; the live door
-              accepts real exports at POST /api/costsource/ingest.
+              Demo walk ingests the bundled sample rows at v{version}. POST /api/costsource/ingest
+              only parses sample-shaped rows and stores nothing; real billing files are imported by the operator.
             </p>
           </div>
 
