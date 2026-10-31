@@ -73,6 +73,8 @@ async function writeUsers(fn: (d: any) => void = () => {}) { // eslint-disable-l
   fs.writeFileSync(USERS, JSON.stringify(d));
 }
 
+// Default-cost scrypt (~0.1 s each) dominates these tests; under a loaded full run 5 s is too tight.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 beforeAll(() => writeUsers());
 beforeEach(() => {
   now = T0;
