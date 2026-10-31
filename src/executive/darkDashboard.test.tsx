@@ -71,7 +71,8 @@ describe('Initiative card: spend is neutral, status colors stay', () => {
   it('keeps the status badge color and the over-budget bar color', () => {
     const { view, html } = card(1); // spend far over budget
     const meta = INITIATIVE_STATUS_META[view.status];
-    expect(html).toContain(`color:${meta.color}`);
+    const badge = new RegExp(`<span [^>]*style="([^"]*)">${meta.label}</span>`).exec(html)?.[1];
+    expect(badge).toBe(`color:${meta.color};background-color:color-mix(in srgb, ${meta.color} 10%, transparent)`);
     expect(view.budgetConsumedColor).toBe(TOKEN_COLOR.cost);
     expect(html).toContain(`background-color:${TOKEN_COLOR.cost}`);
   });

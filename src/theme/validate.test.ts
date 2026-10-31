@@ -29,18 +29,18 @@ describe('built-in themes', () => {
     const MAIN = ['void', 'deep', 'slab', 'raised'];
     const onExec = (fgs: string[]) => fgs.flatMap((fg) => EXEC.map((bg) => `${fg}/${bg}`));
     expect(pairs(BUILT_IN_THEMES.dark).sort()).toEqual([
-      // Light-mode executive cards inside the dark app: dark-theme text and accents on white.
-      ...onExec(['txt', 'sub', 'value', 'cost', 'shape', 'gate', 'unit', 'purple', 'exec-border']),
-      'exec-muted/exec-bg', 'exec-muted/exec-hover',
+      // Executive surfaces now reuse deep/slab/raised and edge (owner decision 2026-10-31), so
+      // the 41 white-panel pairs are gone; what remains on them are the same color pairs as the
+      // main-surface entries below (no new color combination; the dashboard draws no dim text).
+      ...onExec(['dim', 'exec-border']),
       'dim/void', 'dim/deep', 'dim/slab', 'dim/raised',
       'edge/void', 'edge/deep', 'edge/slab', 'edge/raised',
-      ...tint('value', 10, EXEC), ...tint('cost', 10, EXEC), ...tint('shape', 10, EXEC),
-      ...tint('gate', 20, ['raised', ...EXEC]), ...tint('unit', 20, EXEC), ...tint('purple', 30, ['slab', 'raised', ...EXEC]),
-      // Added in T2 with the newly checked pairs (the 58 above are unchanged): dim text in
-      // accent callouts, and the translucent text-cost/80 on cards.
+      ...tint('gate', 20, ['raised', 'exec-hover']), ...tint('purple', 30, ['slab', 'raised', 'exec-surface', 'exec-hover']),
+      // Added in T2 with the newly checked pairs: dim text in accent callouts, and the
+      // translucent text-cost/80 on cards.
       ...['value', 'cost', 'shape', 'gate', 'unit', 'purple'].flatMap((a) => MAIN.map((x) => `dim/${a}/10@${x}`)),
       'cost/text/80@slab', 'cost/text/80@raised',
-    ].sort()); // 58 + 26 pairs
+    ].sort()); // 20 + 26 pairs (was 58 + 26)
     expect(codes(BUILT_IN_THEMES.dark).every((c) => c === 'contrast')).toBe(true);
   });
 });

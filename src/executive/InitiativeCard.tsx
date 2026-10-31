@@ -1,5 +1,6 @@
 // Initiative Card (Ratio v2 Wave 2a). The executive projection of a Mission
-// Card: headline monthly cost (cost token), a budget-consumed bar, a plain status
+// Card: headline monthly cost (neutral text; status color lives on the badge and
+// bar), a budget-consumed bar, a plain status
 // badge, and cost efficiency (value ratio, R4 — never cost without value). On the
 // executive surface each card carries a matrixed-lens callout: one line per role
 // reading the same numbers differently.
@@ -7,7 +8,7 @@ import { formatRatio, formatUSD } from '@/lib/format';
 import { EvidenceMark } from '@/components/EvidenceMark';
 import type { LanguageMap } from '@/lib/languageMap';
 import { INITIATIVE_STATUS_META, type InitiativeView } from './initiativeModel';
-import { tint, TOKEN_COLOR } from '@/lib/scales';
+import { tint } from '@/lib/scales';
 
 interface InitiativeCardProps {
   initiative: InitiativeView;
@@ -41,9 +42,9 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
         </span>
       </header>
 
-      {/* Headline monthly cost — large, mono, cost token */}
+      {/* Headline monthly cost — large, mono, normal text color (spend is not a warning) */}
       <div>
-        <p className="font-mono text-3xl font-bold" style={{ color: TOKEN_COLOR.cost }}>
+        <p className="font-mono text-3xl font-bold text-exec-text">
           {formatUSD(initiative.monthlyCost)}
           <span className="ml-1 text-sm font-medium text-exec-muted">/mo</span>
         </p>

@@ -56,13 +56,11 @@ export function InitiativeDashboard({ embedded = false }: { embedded?: boolean }
   );
 
   return (
-    // colorScheme:light keeps native form controls / scrollbars on-theme even
-    // though the document defaults to dark for the Mission Control surface.
+    // Native controls and scrollbars follow the active theme's color-scheme (index.css).
     <div
       className={`${embedded ? '' : 'min-h-screen '}bg-exec-bg px-4 ${
         embedded ? 'py-8' : 'py-10'
       } font-body text-exec-text`}
-      style={{ colorScheme: 'light' }}
     >
       <div className="mx-auto max-w-6xl space-y-8">
         {embedded ? (
