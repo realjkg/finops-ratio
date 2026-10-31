@@ -2,3 +2,8 @@ R2 slice E RED evidence (tests committed before the implementation)
 $ npx vitest run --cache=false src/engagement/auth/usersCli.test.ts
   -> FAIL: Cannot find module './usersCli' (no operator users command exists; `cli.js users` is a usage error).
 GREEN counts, the compiled dist-worker run and mutation results are in the PR body.
+Review round (findings M1-M5, L1-L6, the #173 lock blocker):
+$ npx vitest run --cache=false src/engagement/auth/usersCli.test.ts src/engagement/auth/usersCli.smoke.test.ts (old CLI)
+  -> Test Files 2 failed; Tests 9 failed (9): actor validation, self-add, last admin, unbind target/audit/revocation,
+     revocation prepared before write and partial audit, crash-atomic replace with ENOSPC and short writes, lock
+     codes, set-password and stdin line endings, list error code, and the compiled CLI under a read-only parent.
