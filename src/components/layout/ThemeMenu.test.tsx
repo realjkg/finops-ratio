@@ -48,7 +48,7 @@ function setValue(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
   });
 }
 const select = () => $<HTMLSelectElement>('#theme-select');
-const openEditor = () => click(button('Customize'));
+const openEditor = () => click(button('Preview'));
 const importText = (text: string) => {
   setValue(byLabel<HTMLTextAreaElement>('Theme JSON'), text);
   click(button('Import'));
@@ -70,8 +70,8 @@ afterEach(() => {
 describe('switcher', () => {
   it('is in the shared nav, labeled in words, and applies + persists the chosen built-in', () => {
     mount();
-    expect(container.querySelector('label[for="theme-select"]')?.textContent).toBe('Theme');
-    expect([...select().options].map((o) => o.textContent)).toEqual(['Default (system)', 'Light', 'High contrast', 'Dark (contrast incomplete)']);
+    expect(container.querySelector('label[for="theme-select"]')?.textContent).toBe('Appearance');
+    expect([...select().options].map((o) => o.textContent)).toEqual(['System', 'Light', 'High contrast', 'Dark']);
     setValue(select(), 'high-contrast');
     expect(html.getAttribute('data-theme')).toBe('high-contrast');
     expect(channel('txt')).toBe('0 0 0');
@@ -270,7 +270,7 @@ describe('palette editor', () => {
       expect(named, el.outerHTML.slice(0, 80)).toBeTruthy();
       expect(el.tabIndex).toBeGreaterThanOrEqual(0);
     }
-    const toggle = button('Customize');
+    const toggle = button('Preview');
     toggle.focus();
     expect(document.activeElement).toBe(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
@@ -343,14 +343,16 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
       flip(true); expect([txt(), button('Export current theme').getAttribute('download')]).toEqual([hc.txt, 'my-high-contrast.json']); // case 1: untouched draft follows
       setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
       flip(false); expect(txt()).toBe('#123456'); // case 2: an edited draft is kept
-      click(button('Customize')); // case 4: closing is the cancel path; an OS change happens while closed
+      click(button('Preview')); // case 4: closing is the cancel path; an OS change happens while closed
       flip(true); openEditor();
       expect(txt()).toBe(hc.txt); // edits discarded, effective theme
       click(button('Fix contrast')); // "Nothing to change" is not an edit (re-review)
       flip(false); expect(txt()).toBe(dark.txt); // dirty was reset on reopen and the no-op fix left it clear: it follows
-      const name = () => $<HTMLInputElement>('#theme-editor label input');
-      click(button('Fix contrast')); // a Fix that changes colors (untouched Dark) is an edit
+      const name = () => $<HTMLInputElement>('#theme-editor details label input');
+      setValue(byLabel<HTMLInputElement>('txt hex'), '#123456'); // a failing edit
+      click(button('Fix contrast')); // a Fix that changes colors keeps the draft an edit
       const fixed = txt();
+      expect(fixed).not.toBe('#123456');
       flip(true); expect([txt(), byLabel<HTMLInputElement>('void hex').value]).toEqual([fixed, dark.void]);
       click(button('Reset to built-in')); // Reset with the default name: unedited again, so it follows
       importText('{oops'); // a failed import attempt counts as an edit (re-review)
@@ -377,14 +379,17 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
     mount();
     openEditor();
     importText('{oops');
-    setValue($<HTMLInputElement>('#theme-editor label input'), 'renamed');
+    setValue($<HTMLInputElement>('#theme-editor details label input'), 'renamed');
     expect(alertText()).not.toMatch(/Not valid JSON/);
   });
   it('background-only roles show their worst pair (pairs whose base surface is that role), export and headers', () => {
     mount();
     setValue(select(), 'dark');
     openEditor();
-    expect([(button('Export current theme') as HTMLButtonElement).disabled, container.textContent]).toEqual([true, expect.stringMatching(/Dark cannot be exported \(it has pinned contrast exceptions\)\. Choose Light or High contrast, or save a custom theme, to export\./)]);
+    // Dark passes the same gate as the others, so it exports and re-imports cleanly.
+    expect([button('Export current theme').tagName, button('Export current theme').getAttribute('download')]).toEqual(['A', 'my-dark.json']);
+    expect(parseTheme(decodeURIComponent(button('Export current theme').getAttribute('href')!.split(',')[1])).violations).toEqual([]);
+    expect(container.textContent).not.toMatch(/pinned contrast exceptions/);
     expect([...container.querySelectorAll('[aria-label="Contrast readout"] thead th')].map((h) => `${h.textContent}/${h.getAttribute('scope')}`)).toEqual(['Pair/col', 'Ratio/col', 'Threshold/col', 'Result/col']);
     setValue(select(), 'light');
     expect(button('Export current theme').tagName).toBe('A');
@@ -396,16 +401,45 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
 });
 
 
+describe('Appearance panel (customer-facing)', () => {
+  const radios = () => [...container.querySelectorAll<HTMLInputElement>('#theme-editor input[type="radio"]')];
+  const labelOf = (r: HTMLInputElement) => r.closest('label')?.textContent;
+  it('shows four plain choices and a live preview, and never calls Dark incomplete', () => {
+    mount(); openEditor();
+    expect(radios().map(labelOf)).toEqual(['System', 'Light', 'High contrast', 'Dark']);
+    expect(container.textContent).not.toMatch(/incomplete/i);
+    expect(container.querySelector('[aria-label="Preview: System (Light)"]')).not.toBeNull();
+    click(radios()[3]);
+    expect([html.getAttribute('data-theme'), localStorage.getItem(ACTIVE_KEY), radios()[3].checked]).toEqual(['dark', 'dark', true]);
+    const preview = container.querySelector<HTMLElement>('[aria-label="Preview: Dark"]')!;
+    expect(preview.style.getPropertyValue('--c-void')).toBe(hexToRgb(BUILT_IN_THEMES.dark.colors.void).join(' '));
+    click(radios()[0]); // System: the CSS default applies again
+    expect([html.hasAttribute('data-theme'), radios()[0].checked]).toEqual([false, true]);
+  });
+  it('keeps the contrast audit behind a Developer disclosure that starts closed', () => {
+    mount(); openEditor();
+    const dev = container.querySelector<HTMLDetailsElement>('#theme-editor > details')!;
+    expect(dev.querySelector('summary')?.textContent).toBe('Developer: contrast audit');
+    expect(dev.open).toBe(false);
+    // Everything that reads as a developer tool lives inside it, nothing of it outside.
+    const outside = container.querySelector('#theme-editor')!.cloneNode(true) as HTMLElement;
+    outside.querySelector('details')?.remove();
+    expect(outside.textContent).not.toMatch(/exec-bg|exec-surface|Pass|Fail|hex|Contrast/);
+    expect(outside.querySelector('input[type="color"], table')).toBeNull();
+    expect(dev.querySelector('table[aria-label="Contrast readout"]')).not.toBeNull();
+  });
+});
+
 describe('editor dismissal and save feedback', () => {
   it('closes explicitly and with Escape, returning focus to its opener', () => {
     mount(); openEditor();
     click(byLabel<HTMLButtonElement>('Close theme editor'));
     expect(container.querySelector('#theme-editor')).toBeNull();
-    expect(document.activeElement).toBe(button('Customize'));
+    expect(document.activeElement).toBe(button('Preview'));
     openEditor();
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(container.querySelector('#theme-editor')).toBeNull();
-    expect(document.activeElement).toBe(button('Customize'));
+    expect(document.activeElement).toBe(button('Preview'));
   });
   it('dismisses on an outside pointer without applying unsaved edits or stealing focus', () => {
     mount(); setValue(select(), 'light'); openEditor();
@@ -423,7 +457,7 @@ describe('editor dismissal and save feedback', () => {
     mount(); setValue(select(), 'light'); openEditor();
     act(() => byLabel<HTMLInputElement>('txt hex').dispatchEvent(new Event('pointerdown', { bubbles: true })));
     expect(container.querySelector('#theme-editor')).not.toBeNull();
-    setValue($<HTMLInputElement>('#theme-editor label input'), 'brownstone'); click(button('Save and apply'));
+    setValue($<HTMLInputElement>('#theme-editor details label input'), 'brownstone'); click(button('Save and apply'));
     expect(html.getAttribute('data-theme')).toBe('brownstone');
     expect(localStorage.getItem(ACTIVE_KEY)).toBe('brownstone');
     expect(container.textContent).toContain('Saved and applied brownstone.');

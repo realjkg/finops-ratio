@@ -1,6 +1,6 @@
 // Token layer: Tailwind classes resolve through CSS variables, index.css carries
-// exactly the values in themes.ts, the dark theme is the pre-existing look byte
-// for byte (except the executive roles, remapped by owner decision), and hard-coded colors outside the tokens cannot grow (T4 migrates them).
+// exactly the values in themes.ts, the dark theme keeps the pre-existing surfaces and accent hues
+// (only the text, border and accent shades below were raised to reach WCAG AA), and hard-coded colors outside the tokens cannot grow (T4 migrates them).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -14,14 +14,15 @@ const root = resolve(__dirname, '../..');
 const config = createRequire(import.meta.url)(join(root, 'tailwind.config.js'));
 const css = readFileSync(join(root, 'src/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
-// The colors as they were on main before the token layer (tailwind.config.js @ a90dda5).
+// The dark colors: the original look (tailwind.config.js @ a90dda5) with dim, edge, cost, gate and purple
+// (and exec-border, which reuses edge) lightened just enough to pass WCAG AA (validate.test.ts).
 const ORIGINAL_DARK: Record<string, string> = {
-  void: '#05070b', deep: '#090c12', slab: '#0d1119', raised: '#141a26', edge: '#1a2235',
-  txt: '#d0d8ea', sub: '#8895ad', dim: '#4d5a72',
-  value: '#00e09e', cost: '#ff5c72', shape: '#ffc44d', gate: '#7c8dff', unit: '#00ccee', purple: '#b490ff',
+  void: '#05070b', deep: '#090c12', slab: '#0d1119', raised: '#141a26', edge: '#616774',
+  txt: '#d0d8ea', sub: '#8895ad', dim: '#8b94a3',
+  value: '#00e09e', cost: '#ff7083', shape: '#ffc44d', gate: '#8494ff', unit: '#00ccee', purple: '#c7acff',
   // Executive roles: owner decision 2026-10-31 replaced the white panel (#f5f8fb/#ffffff/#d8e1ec/
   // #edf2f7/#0f172a/#64748b) with the dark surfaces and text (src/executive/darkDashboard.test.tsx).
-  'exec-bg': '#090c12', 'exec-surface': '#0d1119', 'exec-border': '#1a2235', 'exec-hover': '#141a26',
+  'exec-bg': '#090c12', 'exec-surface': '#0d1119', 'exec-border': '#616774', 'exec-hover': '#141a26',
   'exec-text': '#d0d8ea', 'exec-muted': '#8895ad',
 };
 
@@ -104,8 +105,8 @@ describe('index.css parity with themes.ts', () => {
   });
 });
 
-describe('dark theme is the pre-existing look', () => {
-  it('resolves every original token to the original hex (themes.ts and both CSS blocks)', () => {
+describe('dark theme tokens', () => {
+  it('resolves every dark token to the same hex (themes.ts and both CSS blocks)', () => {
     for (const [role, hex] of Object.entries(ORIGINAL_DARK)) {
       expect(BUILT_IN_THEMES.dark.colors[role as keyof Theme['colors']], role).toBe(hex);
       expect(blocks[":root[data-theme='dark']"].colors[role], role).toBe(hex);

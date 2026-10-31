@@ -5,6 +5,7 @@
 // single agent affordance sits identically on every in-scope screen.
 
 import Link from 'next/link';
+import { useEffect } from 'react';
 import { ThemeMenu } from './ThemeMenu';
 import { TypographyMenu } from './TypographyMenu';
 
@@ -32,6 +33,10 @@ export function NavBar({
   onOpenAgent?: () => void;
   agentOpen?: boolean;
 }) {
+  // On a phone the tab row scrolls sideways: keep the current page's tab in view instead of clipped.
+  useEffect(() => {
+    document.querySelector('nav[aria-label="Main navigation"] [aria-current="page"]')?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
+  }, [active]);
   return (
     <nav className="relative shrink-0 border-b border-edge bg-deep" aria-label="Main navigation">
       <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 px-3 py-2 md:flex md:min-h-10 md:flex-wrap md:gap-y-1 md:gap-x-0.5 md:py-1">
@@ -42,7 +47,7 @@ export function NavBar({
           style={{ background: 'var(--gate)' }}
           aria-hidden="true"
         >
-          <span className="text-white">%</span>
+          <span className="text-void">%</span>
         </span>
         <span className="font-mono text-sm font-bold tracking-tight text-txt">Ratio</span>
       </span>

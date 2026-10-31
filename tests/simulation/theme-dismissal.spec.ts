@@ -2,10 +2,14 @@ import { expect, test } from '@playwright/test';
 for (const width of [390, 1440]) {
   test(`theme editor saves and dismisses without losing the selected theme at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 }); await page.goto('/');
-    const opener = page.getByRole('button', { name: width < 768 ? 'Theme' : 'Customize', exact: true });
+    const opener = page.getByRole('button', { name: width < 768 ? 'Appearance' : 'Preview', exact: true });
     await opener.click();
-    await page.locator(width < 768 ? '#theme-select-panel' : '#theme-select').selectOption('light');
     const editor = page.getByRole('region', { name: 'Theme editor' });
+    await editor.locator('label', { hasText: /^Light$/ }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    // Custom themes live behind the closed Developer disclosure.
+    await expect(editor.locator('details').first()).not.toHaveAttribute('open', '');
+    await editor.getByText('Developer: contrast audit', { exact: true }).click();
     await editor.getByRole('textbox', { name: 'Name', exact: true }).fill('brownstone');
     await editor.getByRole('button', { name: 'Save and apply', exact: true }).click();
     await expect(page.getByText('Saved and applied brownstone.', { exact: true })).toBeVisible();

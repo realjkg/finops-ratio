@@ -54,19 +54,18 @@ export const BUILT_IN_THEMES: Readonly<Record<BuiltInThemeName, Theme>> = {
       focus: '#0033cc',
     },
   },
-  // The pre-existing look, value for value, except the executive roles: by owner
-  // decision (2026-10-31) they reuse the dark surfaces and text so the Initiative
-  // Dashboard is no longer a white panel. Known shortfalls (dim text, faint borders)
-  // are pinned in validate.test.ts; changing them is an owner call.
+  // The original dark look with the executive roles on the dark surfaces (owner decision 2026-10-31),
+  // and the text, border and accent shades that fell short of WCAG AA lightened until every pair
+  // passes (validate.test.ts and the rendered audit hold the line). Surfaces and hues are unchanged.
   dark: {
     name: 'dark',
     colorScheme: 'dark',
     contrast: 'standard',
     colors: {
-      void: '#05070b', deep: '#090c12', slab: '#0d1119', raised: '#141a26', edge: '#1a2235',
-      txt: '#d0d8ea', sub: '#8895ad', dim: '#4d5a72',
-      value: '#00e09e', cost: '#ff5c72', shape: '#ffc44d', gate: '#7c8dff', unit: '#00ccee', purple: '#b490ff',
-      'exec-bg': '#090c12', 'exec-surface': '#0d1119', 'exec-border': '#1a2235', 'exec-hover': '#141a26',
+      void: '#05070b', deep: '#090c12', slab: '#0d1119', raised: '#141a26', edge: '#616774',
+      txt: '#d0d8ea', sub: '#8895ad', dim: '#8b94a3',
+      value: '#00e09e', cost: '#ff7083', shape: '#ffc44d', gate: '#8494ff', unit: '#00ccee', purple: '#c7acff',
+      'exec-bg': '#090c12', 'exec-surface': '#0d1119', 'exec-border': '#616774', 'exec-hover': '#141a26',
       'exec-text': '#d0d8ea', 'exec-muted': '#8895ad',
       focus: '#6b7cf5',
     },
@@ -77,8 +76,7 @@ export const BUILT_IN_THEMES: Readonly<Record<BuiltInThemeName, Theme>> = {
  * The theme used when the user has made no choice and the OS asks for no extra
  * contrast; must match the `:root` block in src/index.css (tokens.test.ts).
  * Light is the default because the rendered audit (tests/simulation/contrast-audit.spec.ts)
- * shows zero failing text nodes for Light and High contrast on every page route. Dark stays
- * experimental ("Dark (contrast incomplete)") until it is retuned to AA; never flip back
- * or relax the audit to hide failures.
+ * shows zero failing text nodes for all three themes on every page route. Never relax the
+ * audit to hide failures.
  */
 export const DEFAULT_THEME: BuiltInThemeName = 'light';

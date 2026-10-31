@@ -17,11 +17,10 @@ for (const width of [320, 390, 430]) {
         expect(await control.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), await control.textContent() ?? '').toBe(true);
       }
     }
-    const toggle = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Theme', exact: true });
+    const toggle = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Appearance', exact: true });
     await toggle.focus();
     await page.keyboard.press('Enter');
-    const select = page.getByRole('combobox', { name: 'Theme' });
-    await select.selectOption('high-contrast');
+    await page.locator('#theme-editor label', { hasText: /^High contrast$/ }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'high-contrast');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
