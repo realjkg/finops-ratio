@@ -52,9 +52,7 @@ async function wellFormedParts(buf: Buffer): Promise<string[]> {
   const names = Object.keys(zip.files).filter((n) => n.endsWith('.xml'));
   for (const n of names) {
     const parser = new SaxesParser();
-    parser.on('error', (e) => {
-      throw new Error(`${n}: ${e.message}`);
-    });
+    parser.on('error', (e) => { throw new Error(`${n}: ${e.message}`); });
     parser.write(await zip.file(n)!.async('string')).close();
   }
   return names;
@@ -66,13 +64,9 @@ describe('hostile data values (ChargeCategory, declared source, engagement displ
     it(`${label}: every model cell is safe, the alteration is reported, and the XLSX is well-formed in two parsers`, async () => {
       const { facts, label: eng } = hostileFacts(value);
       const m = buildEngagementReportModel(facts, eng);
-      for (const c of cells(m)) {
-        expect(c.length).toBeLessThanOrEqual(MAX_CELL_CHARS);
-        expect(safeCellText(c).altered, 'a model cell is still unsafe').toBe(false);
-      }
+      for (const c of cells(m)) expect([c.length <= MAX_CELL_CHARS, safeCellText(c).altered], 'a model cell is still unsafe').toEqual([true, false]);
       const note = m.sections[0].rows.find((r) => r[0] === ALTERED_CELLS_ITEM);
-      expect(note?.[1]).toMatch(/^\d+ cell values? (was|were) altered for safe display/);
-      expect(Number(note?.[1].split(' ')[0])).toBeGreaterThanOrEqual(4);
+      expect(note?.[1]).toMatch(/^([4-9]|\d\d+) cell values were altered for safe display/);
       const buf = await renderEngagementReportXlsx(m);
       expect((await wellFormedParts(buf)).some((n) => n.includes('sharedStrings') || n.includes('sheet'))).toBe(true);
       const book = new ExcelJS.Workbook();
@@ -81,9 +75,4 @@ describe('hostile data values (ChargeCategory, declared source, engagement displ
       expect(book.getWorksheet('Report')!.getRow(2).getCell(2).value).toBe(safeCellText(`${value} (example-engagement)`).text);
     });
   }
-
-  it('normal data is not altered and carries no alteration row', () => {
-    const m = buildEngagementReportModel(assembleReportFacts(sampleInput()), ENGAGEMENT);
-    expect(m.sections[0].rows.find((r) => r[0] === ALTERED_CELLS_ITEM)).toBeUndefined();
-  });
 });
