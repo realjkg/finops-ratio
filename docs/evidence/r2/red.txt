@@ -5,3 +5,5 @@ A2a:
 2. session store + cookie/CSRF library: npx vitest run src/engagement/auth
    -> FAIL session.test.ts and http.test.ts (./session and ./http do not exist yet); the other suites pass.
 GREEN counts and mutation results are in the PR body.
+3. routes (POST /api/auth/login, POST /api/auth/logout, GET /api/auth/session): npx vitest run src/engagement/auth src/rbac
+   -> FAIL routes.test.ts (./routes and pages/api/auth/* do not exist) and matrix_view_codes_match_plan_section_4_4 (rows missing).
