@@ -1,6 +1,6 @@
 // Token layer: Tailwind classes resolve through CSS variables, index.css carries
 // exactly the values in themes.ts, the dark theme is the pre-existing look byte
-// for byte, and hard-coded colors outside the tokens cannot grow (T4 migrates them).
+// for byte (except the executive roles, remapped by owner decision), and hard-coded colors outside the tokens cannot grow (T4 migrates them).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -19,8 +19,10 @@ const ORIGINAL_DARK: Record<string, string> = {
   void: '#05070b', deep: '#090c12', slab: '#0d1119', raised: '#141a26', edge: '#1a2235',
   txt: '#d0d8ea', sub: '#8895ad', dim: '#4d5a72',
   value: '#00e09e', cost: '#ff5c72', shape: '#ffc44d', gate: '#7c8dff', unit: '#00ccee', purple: '#b490ff',
-  'exec-bg': '#f5f8fb', 'exec-surface': '#ffffff', 'exec-border': '#d8e1ec', 'exec-hover': '#edf2f7',
-  'exec-text': '#0f172a', 'exec-muted': '#64748b',
+  // Executive roles: owner decision 2026-10-31 replaced the white panel (#f5f8fb/#ffffff/#d8e1ec/
+  // #edf2f7/#0f172a/#64748b) with the dark surfaces and text (src/executive/darkDashboard.test.tsx).
+  'exec-bg': '#090c12', 'exec-surface': '#0d1119', 'exec-border': '#1a2235', 'exec-hover': '#141a26',
+  'exec-text': '#d0d8ea', 'exec-muted': '#8895ad',
 };
 
 type Block = { scheme?: string; colors: Record<string, string> };

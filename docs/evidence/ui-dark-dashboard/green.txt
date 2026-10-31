@@ -1,0 +1,14 @@
+GREEN on feat/ui-dark-dashboard (base origin/main 8bbff4b517d0340e8f2fedd1934ec12a0a230028)
+npx vitest run src/executive/darkDashboard.test.tsx: 6 passed (6)
+full vitest: Test Files 240 passed (240); Tests 4393 passed (4393)
+lint, typecheck, worker typecheck (tsc -p tsconfig.worker.json --noEmit), build, check:bundle: exit 0
+browser suite (playwright.simulation.config.ts, production build): 35 passed (2.9m)
+Rendered contrast audit (failing text nodes)   main 8bbff4b -> this branch
+  light          0 -> 0
+  high-contrast  0 -> 0
+  dark         654 -> 433   (/mission 74 -> 0, /overview 91 -> 18, /demo 110 -> 37; none of the 55 left is in the dashboard)
+Mutations (each made a test fail, then reverted): spend back to the cost color; colorScheme light forced
+on the dashboard; dark exec-muted back to #64748b; prefers-color-scheme dark exec-surface back to white;
+status badge color neutralized in the card; budget bar fill neutralized.
+Screenshot control: with only the token + color-scheme change, all 36 Light/High-contrast captures
+(/demo, /overview, /mission x 1440x900, 390x844 x page/dashboard/dashboard2) are 0-pixel diffs vs main.

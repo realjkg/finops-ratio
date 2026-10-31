@@ -54,8 +54,10 @@ export const BUILT_IN_THEMES: Readonly<Record<BuiltInThemeName, Theme>> = {
       focus: '#0033cc',
     },
   },
-  // The pre-existing look, value for value. Its known shortfalls (dim text, faint
-  // borders, exec-muted) are pinned in validate.test.ts; changing them is an owner call.
+  // The pre-existing look, value for value, except the executive roles: by owner
+  // decision (2026-10-31) they reuse the dark surfaces and text so the Initiative
+  // Dashboard is no longer a white panel. Known shortfalls (dim text, faint borders)
+  // are pinned in validate.test.ts; changing them is an owner call.
   dark: {
     name: 'dark',
     colorScheme: 'dark',
@@ -64,8 +66,8 @@ export const BUILT_IN_THEMES: Readonly<Record<BuiltInThemeName, Theme>> = {
       void: '#05070b', deep: '#090c12', slab: '#0d1119', raised: '#141a26', edge: '#1a2235',
       txt: '#d0d8ea', sub: '#8895ad', dim: '#4d5a72',
       value: '#00e09e', cost: '#ff5c72', shape: '#ffc44d', gate: '#7c8dff', unit: '#00ccee', purple: '#b490ff',
-      'exec-bg': '#f5f8fb', 'exec-surface': '#ffffff', 'exec-border': '#d8e1ec', 'exec-hover': '#edf2f7',
-      'exec-text': '#0f172a', 'exec-muted': '#64748b',
+      'exec-bg': '#090c12', 'exec-surface': '#0d1119', 'exec-border': '#1a2235', 'exec-hover': '#141a26',
+      'exec-text': '#d0d8ea', 'exec-muted': '#8895ad',
       focus: '#6b7cf5',
     },
   },
