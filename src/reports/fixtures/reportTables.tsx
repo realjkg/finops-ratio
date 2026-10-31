@@ -5,7 +5,7 @@ import { render } from '@testing-library/react';
 import { assembleReportFacts } from '../reportFacts';
 import { buildEngagementReportModel, type EngagementReportModel, type ReportSection } from '../engagementReportModel';
 import { renderEngagementReportXlsx } from '../engagementReportXlsx';
-import { EngagementReportDocument, pdfGlyphText, pdfLayout } from '../engagementReportPdf';
+import { EngagementReportDocument, PDF_UNSUPPORTED_TEXT_POLICY, pdfGlyphText, pdfLayout, type PdfUnsupportedPolicy } from '../engagementReportPdf';
 import { EngagementReportView } from '../EngagementReportView';
 import { ENGAGEMENT, g, SRC_B, sampleInput } from './sampleFacts';
 import { treeTexts } from './pdfText';
@@ -51,8 +51,8 @@ export async function xlsxTables(m: EngagementReportModel): Promise<Record<strin
 }
 
 /** Rebuilds a section's table from the PDF element tree (table: header + rows; records: "column, value" pairs). */
-export function pdfTable(m: EngagementReportModel, s: ReportSection): Table {
-  const texts = treeTexts(<EngagementReportDocument model={{ ...m, sections: [s] }} />).slice(2).filter((t) => !t.startsWith('PDF font: ') && !t.startsWith('PDF length limit: '));
+export function pdfTable(m: EngagementReportModel, s: ReportSection, policy: PdfUnsupportedPolicy = PDF_UNSUPPORTED_TEXT_POLICY): Table {
+  const texts = treeTexts(<EngagementReportDocument model={{ ...m, sections: [s] }} policy={policy} />).slice(2).filter((t) => !t.startsWith('PDF font: ') && !t.startsWith('PDF length limit: '));
   const n = s.columns.length;
   if (pdfLayout(s) === 'table') return Array.from({ length: texts.length / n }, (_, i) => texts.slice(i * n, i * n + n));
   const rows: Table = [s.columns.map(pdfGlyphText)];
