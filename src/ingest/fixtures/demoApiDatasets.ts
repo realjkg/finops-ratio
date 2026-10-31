@@ -11,7 +11,7 @@ import { COLUMNS, formatUnits, rng } from './syntheticFocus';
 
 /** The FOCUS 1.0 columns of the repo's synthetic export, without the AWS-specific x_ extensions. */
 export const DATASET_COLUMNS: string[] = COLUMNS.filter((c) => !c.startsWith('x_'));
-import type { CurrencyTotals, Dataset } from '../../demo/apiDatasets/types';
+import type { ConnectionType, CurrencyTotals, Dataset } from '../../demo/apiDatasets/types';
 export type { ConnectionType, CurrencyTotals, Dataset, DatasetMeta } from '../../demo/apiDatasets/types';
 
 const U = BigInt('10000000000'); // 1 currency unit
@@ -21,33 +21,8 @@ const PERIOD = { start: '2026-09-01T00:00:00Z', end: '2026-10-01T00:00:00Z' };
 const day = (d: number) => `2026-09-${String(d).padStart(2, '0')}T00:00:00Z`;
 const dayEnd = (d: number) => (d >= 30 ? PERIOD.end : day(d + 1));
 
-/** Reasons that hold for every dataset (conditional FOCUS columns that are legitimately empty). */
-export const COMMON_NA_REASONS: Record<string, string> = {
-  ChargeClass: 'Not applicable: the line is not a correction',
-  CommitmentDiscountCategory: 'Not applicable: the line is not covered by a commitment',
-  CommitmentDiscountId: 'Not applicable: the line is not covered by a commitment',
-  CommitmentDiscountName: 'Not applicable: the line is not covered by a commitment',
-  CommitmentDiscountStatus: 'Not applicable: the line is not covered by a commitment',
-  CommitmentDiscountType: 'Not applicable: the line is not covered by a commitment',
-  AvailabilityZone: 'Not applicable: the line has no zone (purchase, credit, tax or adjustment)',
-  ConsumedQuantity: 'Not applicable: nothing was consumed on this line',
-  ConsumedUnit: 'Not applicable: nothing was consumed on this line',
-  PricingQuantity: 'Not applicable: the line is not priced by quantity',
-  PricingUnit: 'Not applicable: the line is not priced by quantity',
-  ContractedUnitPrice: 'Not applicable: the line has no unit price',
-  ListUnitPrice: 'Not applicable: the line has no unit price',
-  RegionId: 'Not applicable: the line is not tied to a region',
-  RegionName: 'Not applicable: the line is not tied to a region',
-  ResourceId: 'Not applicable: the line is not tied to a resource',
-  ResourceName: 'Not applicable: the line is not tied to a resource',
-  ResourceType: 'Not applicable: the line is not tied to a resource',
-  SkuId: 'Not applicable: the line has no SKU',
-  SkuPriceId: 'Not applicable: the line has no SKU',
-  SubAccountId: 'Not applicable: the line is billed at the account level',
-  SubAccountName: 'Not applicable: the line is billed at the account level',
-  Tags: 'Not applicable: no tags on this line',
-  PricingCategory: 'Not applicable: the line is not priced by usage',
-};
+import { COMMON_NA_REASONS } from '../../demo/apiDatasets/commonNaReasons';
+export { COMMON_NA_REASONS };
 
 interface Service { name: string; category: string; unit: string; code: string }
 interface Spec {

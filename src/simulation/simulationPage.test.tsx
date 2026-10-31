@@ -12,6 +12,7 @@ const access = vi.hoisted(() => ({ current: null as unknown }));
 vi.mock('@/simulation/SimulationProvider', () => ({ useSimulationAccess: () => access.current }));
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => <a href={href} {...rest}>{children}</a> }));
 
+import { useSampleImports } from '@/demo/apiDatasets/store';
 import SimulationSignIn from '../../pages/simulation';
 
 const base = { loading: false, error: null, identities: {}, signIn: vi.fn(async () => {}), signOut: async () => {}, refresh: async () => {} };
@@ -46,6 +47,27 @@ describe('/simulation with server simulation disabled', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect([localStorage.length, sessionStorage.length]).toEqual([0, 0]);
     expect(box.querySelectorAll('input, textarea, select')).toHaveLength(0);
+  });
+  it('uses the imported synthetic connections in each persona view, still with no network call', async () => {
+    const fetchSpy = vi.fn(() => { throw new Error('no network in the sample'); });
+    vi.stubGlobal('fetch', fetchSpy);
+    useSampleImports.setState({ imported: {}, busy: {}, error: null });
+    access.current = { ...base, enabled: false };
+    mount();
+    click(buttons()[0]);
+    expect(box.querySelector('[aria-label="Imported synthetic connections"]')?.textContent).toMatch(/Import the three synthetic connections/);
+    await act(async () => {
+      click(buttons().find((b) => b.textContent === 'Import the three synthetic connections')!);
+      for (let i = 0; i < 100 && Object.keys(useSampleImports.getState().imported).length < 3; i++) await new Promise((r) => setTimeout(r, 20));
+    });
+    const region = () => box.querySelector('[aria-label="Imported synthetic connections"]')!;
+    expect([...region().querySelectorAll('tbody tr')].map((tr) => tr.children[0].textContent)).toEqual(['EUR', 'USD']);
+    click(buttons()[1]);
+    expect(region().textContent).toMatch(/Example Cloud billing API/);
+    click(buttons()[2]);
+    expect(region().textContent).toMatch(/Example Compute Savings Plan.*prepaid.*unused/);
+    expect(region().textContent).toMatch(/No commitment on this connection/);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
   it('waits while loading instead of flashing the sample', () => {
     access.current = { ...base, enabled: false, loading: true };
