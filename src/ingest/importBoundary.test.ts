@@ -5,7 +5,8 @@
 // Slice 2 adds ONE reviewed exception, a server-only island:
 //   - src/server/costs/** (the published-costs read API) may import `pg` and
 //     exactly the Slice 0/1 modules it reuses (READER_ALLOWED_INGEST);
-//   - only pages/api/v1/costs/published.ts may import src/server/costs;
+//   - only pages/api/v1/costs/published.ts and (report facts, 1.0)
+//     pages/api/v1/reports/facts.ts may import src/server/costs;
 //   - the route's transitive import closure reaches no worker-only code.
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
@@ -39,6 +40,9 @@ function resolvesIntoIngest(fileAbs: string, spec: string): boolean {
 
 const COSTS_DIR = path.join(REPO_ROOT, 'src', 'server', 'costs');
 const COSTS_ROUTE = path.join(REPO_ROOT, 'pages', 'api', 'v1', 'costs', 'published.ts');
+// 1.0 report facts: the second (and only other) route over the same reviewed island, same reader login.
+const REPORT_FACTS_ROUTE = path.join(REPO_ROOT, 'pages', 'api', 'v1', 'reports', 'facts.ts');
+const ISLAND_ROUTES = [COSTS_ROUTE, REPORT_FACTS_ROUTE];
 
 // M1a: the AWS managed connector wraps the durable S3 source and the import seam. Its subtree is
 // worker-only: src/connectors/managed/boundary.test.ts proves no file Next bundles reaches it.
@@ -87,8 +91,8 @@ function findForbiddenImports(fileAbs: string, source: string): Violation[] {
     if (!allowed && (isPgSpecifier(spec) || resolvesIntoIngest(fileAbs, spec))) {
       out.push({ file: path.relative(REPO_ROOT, fileAbs), specifier: spec });
     }
-    // Only the route file (and the island itself) may import src/server/costs.
-    if (!inCosts && path.resolve(fileAbs) !== COSTS_ROUTE && resolvesIntoCosts(fileAbs, spec)) {
+    // Only the route files (and the island itself) may import src/server/costs.
+    if (!inCosts && !ISLAND_ROUTES.includes(path.resolve(fileAbs)) && resolvesIntoCosts(fileAbs, spec)) {
       out.push({ file: path.relative(REPO_ROOT, fileAbs), specifier: spec });
     }
   }
@@ -202,6 +206,9 @@ describe('src/ingest import boundary', () => {
     expect(flagged(path.join(REPO_ROOT, 'src', 'connectors', 'managed', 'runtime.ts'), `import x from '../../ingest/sources/s3/layout';`)).toEqual(['../../ingest/sources/s3/layout']);
     // Only the route file may import the island.
     expect(flagged(COSTS_ROUTE, `import { createPublishedCostsRoute } from '@/server/costs/publishedCostsRoute';`)).toEqual([]);
+    expect(flagged(REPORT_FACTS_ROUTE, `import { createReportFactsRoute } from '@/server/costs/reportFactsRoute';`)).toEqual([]);
+    expect(flagged(path.join(REPO_ROOT, 'pages', 'api', 'v1', 'reports', 'other.ts'), `import x from '@/server/costs/reportFactsRoute';`)).toEqual(['@/server/costs/reportFactsRoute']);
+    expect(flagged(REPORT_FACTS_ROUTE, `import { Pool } from 'pg';`)).toEqual(['pg']);
     expect(flagged(otherPage, `import { readerPool } from '@/server/costs/readerPool';`)).toEqual(['@/server/costs/readerPool']);
     expect(flagged(path.join(REPO_ROOT, 'src', 'components', 'X.tsx'), `import x from '../server/costs';`)).toEqual(['../server/costs']);
     // The route file itself may not reach pg or src/ingest directly.
@@ -209,9 +216,9 @@ describe('src/ingest import boundary', () => {
     expect(flagged(COSTS_ROUTE, `import x from '@/ingest/db/tenant';`)).toEqual(['@/ingest/db/tenant']);
   });
 
-  it("the route's import closure reuses Slice 0/1 and reaches no worker-only code", () => {
-    expect(fs.existsSync(COSTS_ROUTE)).toBe(true);
-    const { files, packages } = importClosure(COSTS_ROUTE);
+  it.each(ISLAND_ROUTES.map((r) => [path.relative(REPO_ROOT, r)]))("the route %s's import closure reuses Slice 0/1 and reaches no worker-only code", (route) => {
+    expect(fs.existsSync(path.join(REPO_ROOT, route))).toBe(true);
+    const { files, packages } = importClosure(path.join(REPO_ROOT, route));
     const rel = [...files].map((f) => path.relative(REPO_ROOT, f).split(path.sep).join('/'));
     // Reuse, not copies: Slice 0's tenant transaction and refused-role list, Slice 1's role check.
     for (const reused of ['src/ingest/db/tenant.ts', 'src/ingest/worker/db.ts', 'src/ingest/db/privilegeModel.ts']) expect(rel).toContain(reused);

@@ -1,0 +1,9 @@
+Report facts (1.0), PR 1: RED before the implementation (base 7f765fd).
+Command: npx vitest run src/reports/reportFacts.test.ts src/server/costs/reportFactsRoute.test.ts src/ingest/importBoundary.test.ts src/rbac/matrix.test.ts scripts/check-next-bundle.test.mjs
+Result: Test Files 5 failed (5); Tests 5 failed | 37 passed (42), plus 2 files that cannot load:
+- src/reports/reportFacts.test.ts: Cannot find module './reportFacts'
+- src/server/costs/reportFactsRoute.test.ts: Cannot find module './reportFactsRoute'
+- check-next-bundle B5 (2): READER_ENTRIES / REPORT_FACTS_ENTRY missing
+- importBoundary: pages/api/v1/reports/facts.ts does not exist
+- rbac matrix (2): no row for /api/v1/reports/facts
+DB suite (src/server/costs/reportFacts.db.test.ts) cannot load either: './reportFactsRoute' missing.
