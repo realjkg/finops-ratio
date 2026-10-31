@@ -1,4 +1,4 @@
-// GET /api/v1/reports/engagement?period=YYYY-MM&format=xlsx: everything decided
+// GET /api/v1/reports/engagement?period=YYYY-MM&format=xlsx|pdf|json: everything decided
 // BEFORE the database (same shared factory, auth, gateway and tenant binding
 // as /api/v1/reports/facts). The pool factory is a spy that fails the test if
 // it is ever called on these paths.
@@ -30,12 +30,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe('query: period=YYYY-MM and format=xlsx, nothing else; fixed message', () => {
-  it('accepts exactly the two parameters', () => {
-    expect(parseEngagementReportQuery(Q)).toEqual({ ok: true, value: { period: '2024-09-01', format: 'xlsx' } });
+describe('query: period=YYYY-MM and format=xlsx|pdf|json (exact allowlist), nothing else; fixed message', () => {
+  it('accepts exactly the two parameters, for each allowed format', () => {
+    for (const format of ['xlsx', 'pdf', 'json'] as const) expect(parseEngagementReportQuery({ ...Q, format })).toEqual({ ok: true, value: { period: '2024-09-01', format } });
   });
   it('refuses a missing or unknown format, a bad period, repeats and extra parameters', () => {
-    for (const q of [{ period: '2024-09' }, { ...Q, format: 'pdf' }, { ...Q, format: 'XLSX' }, { ...Q, period: '2024-9' }, { ...Q, format: ['xlsx', 'xlsx'] }, { ...Q, tenant: TENANT }, {}]) {
+    for (const q of [{ period: '2024-09' }, { ...Q, format: 'csv' }, { ...Q, format: 'PDF' }, { ...Q, format: 'json ' }, { ...Q, format: 'XLSX' }, { ...Q, period: '2024-9' }, { ...Q, format: ['xlsx', 'xlsx'] }, { ...Q, tenant: TENANT }, {}]) {
       expect(parseEngagementReportQuery(q as Record<string, string>), JSON.stringify(q)).toEqual({ ok: false, message: ENGAGEMENT_REPORT_QUERY_MESSAGE });
     }
   });

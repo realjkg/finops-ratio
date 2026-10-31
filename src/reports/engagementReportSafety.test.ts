@@ -33,6 +33,14 @@ describe('safeCellText', () => {
     expect(r.text.endsWith(`... [truncated ${removed} characters]`)).toBe(true);
     expect(safeCellText('y'.repeat(MAX_CELL_CHARS))).toEqual({ text: 'y'.repeat(MAX_CELL_CHARS), altered: false });
   });
+
+  it('never leaves a lone surrogate when an emoji straddles the truncation point', () => {
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    for (let at = MAX_CELL_CHARS - 60; at < MAX_CELL_CHARS; at += 1) {
+      const out = safeCellText(`${'x'.repeat(at)}😀${'x'.repeat(40_000 - at)}`).text;
+      expect(lone.test(out), `emoji at ${at}`).toBe(false);
+    }
+  });
 });
 
 function hostileFacts(value: string): { facts: ReportFacts; label: { id: string; displayName: string } } {
