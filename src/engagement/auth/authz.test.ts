@@ -112,6 +112,27 @@ describe('authorize: deny by default', () => {
     expect(JSON.stringify(events)).not.toMatch(/scrypt|SYNTHETIC v|idp\.example/);
   });
 
+  it('an async audit hook that rejects: decision kept, no unhandled rejection, only the fixed line is logged', async () => {
+    const d = dir();
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const unhandled: unknown[] = [];
+    const onUnhandled = (r: unknown) => { unhandled.push(r); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const v = authorize(d, p('v'), 'reports:read', R, async () => { throw new Error('ASYNC-HOOK-SECRET-7c1d'); });
+      expect(v.allow).toBe(true);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).toEqual([]);
+      expect(err).toHaveBeenCalledTimes(1);
+      expect(String(err.mock.calls[0][0])).toBe('{"event":"authz_audit_hook_failed"}');
+      expect(JSON.stringify(err.mock.calls)).not.toContain('ASYNC-HOOK-SECRET');
+      err.mockClear();
+      authorize(d, p('v'), 'reports:read', R, async () => undefined);
+      await new Promise((r) => setTimeout(r, 5));
+      expect(err).not.toHaveBeenCalled();
+    } finally { process.off('unhandledRejection', onUnhandled); err.mockRestore(); }
+  });
+
   it('a throwing audit hook never changes or loses the decision, and its error text is never propagated or logged', () => {
     const d = dir();
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
