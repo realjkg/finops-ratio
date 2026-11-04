@@ -95,7 +95,9 @@ export function FindingsPage() {
   );
 
   const belowTarget = findings.filter((f) => f.targetStatus !== 'on_target').length;
-  const visible = findings.filter((f) => !dismissedIds.has(f.workloadId));
+  const [filter, setFilter] = useState<'all' | 'below'>('all');
+  const notDismissed = findings.filter((f) => !dismissedIds.has(f.workloadId));
+  const visible = filter === 'below' ? notDismissed.filter((f) => f.targetStatus !== 'on_target') : notDismissed;
   const selected = visible.find((f) => f.workloadId === selectedId) ?? visible[0] ?? null;
 
   function handleSelect(id: string) {
@@ -207,6 +209,21 @@ export function FindingsPage() {
         </div>
       </header>
 
+      {/* Filter: the page keeps its name; "Below target" narrows the list. Plain buttons, so Tab and Enter/Space work. */}
+      <div role="group" aria-label="Show workloads" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-edge px-6 py-2 text-sm">
+        {([['all', `All (${notDismissed.length})`], ['below', `Below target (${notDismissed.filter((f) => f.targetStatus !== 'on_target').length})`]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={filter === key}
+            onClick={() => setFilter(key)}
+            className={`rounded-md border px-3 py-1.5 max-md:min-h-11 ${filter === key ? 'border-focus bg-raised font-medium text-txt' : 'border-edge text-sub hover:text-txt'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {sim && <div className="flex flex-wrap items-center gap-3 border-b border-edge px-4 py-3 text-sm text-sub"><span>Apply requests a simulated change. Approval and application are tracked in the customer workflow.</span><Link href="/workspace#decisions" className="text-unit underline">Review change decisions</Link>{sim.state.dismissed.length > 0 && <button disabled={simBusy} className="underline" onClick={() => void run({ type: 'restore-findings' })}>Restore dismissed findings</button>}</div>}
 
       {/* Landed connector findings — only after an ingest brought some in. */}
@@ -242,11 +259,11 @@ export function FindingsPage() {
         {/* Left: ranked findings list */}
         <aside
           className="max-h-60 w-full shrink-0 overflow-y-auto border-b border-edge md:max-h-none md:w-72 md:border-r lg:w-80"
-          aria-label="Findings list"
+          aria-label="Value review list"
         >
           {visible.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-              <p className="font-mono text-sm text-dim">All findings dismissed</p>
+              <p className="text-sm text-dim">{notDismissed.length === 0 ? 'All findings dismissed' : 'No workloads below target'}</p>
             </div>
           ) : (
             visible.map((f, idx) => (
@@ -484,7 +501,7 @@ function RecommendationPane({
       />
 
       <div>
-        <p className="text-xs font-medium text-dim">Why this needs attention</p>
+        <p className="text-xs font-medium text-dim">{finding.targetStatus === 'on_target' ? 'Why this is on target' : 'Why this is below target'}</p>
         <p className="mt-0.5 text-sm text-txt" data-testid="finding-why">{finding.why}</p>
       </div>
 
@@ -780,18 +797,9 @@ function AuditChip({
 // Status line and calculation panel
 // ---------------------------------------------------------------------------
 
-const EVIDENCE_PHRASE: Record<string, string> = {
-  assumed: COPY.estimatedValue,
-  projected: 'Projected value',
-  measured: 'Measured value',
-};
-
-/** "Below target · Estimated value": position against the target, then how firm the value is. */
+/** "Below target" or "At or above target". How firm the value is sits beside the number (EvidenceMark). */
 function statusLine(f: FindingView): string {
-  const position =
-    f.targetStatus === 'on_target' ? 'At or above target' : 'Below target';
-  const evidence = f.valueEvidenceStatus ? EVIDENCE_PHRASE[f.valueEvidenceStatus] : null;
-  return evidence ? `${position} \u00b7 ${evidence}` : position;
+  return f.targetStatus === 'on_target' ? 'At or above target' : 'Below target';
 }
 
 function CalcRow({ label, value }: { label: string; value: string }) {
@@ -831,8 +839,8 @@ function CalculationPanel({ finding }: { finding: FindingView }) {
         <div><dt className="inline font-medium text-txt">Period. </dt><dd className="inline">{c.period}</dd></div>
         <div><dt className="inline font-medium text-txt">Cost basis. </dt><dd className="inline">{c.costBasis}</dd></div>
         <div><dt className="inline font-medium text-txt">Value assumptions. </dt><dd className="inline">{c.valueAssumptions}</dd></div>
-        <div><dt className="inline font-medium text-txt">Break-even. </dt><dd className="inline">1\u00d7, where value equals cost. Value / cost can be negative when harm from misses exceeds counted value.</dd></div>
-        <div><dt className="inline font-medium text-txt">Target. </dt><dd className="inline">{VALUE_MINIMUM}\u00d7. {targetPolicyText(VALUE_MINIMUM)} {COPY.targetSetBy}.</dd></div>
+        <div><dt className="inline font-medium text-txt">Break-even. </dt><dd className="inline">1×, where value equals cost. Value / cost can be negative when harm from misses exceeds counted value.</dd></div>
+        <div><dt className="inline font-medium text-txt">Target. </dt><dd className="inline">{VALUE_MINIMUM}×. {targetPolicyText(VALUE_MINIMUM)} {COPY.targetSetBy}.</dd></div>
         <div><dt className="inline font-medium text-txt">Source. </dt><dd className="inline">{c.source}</dd></div>
       </dl>
     </section>

@@ -16,7 +16,8 @@ describe('Governance page (route /frameworks)', () => {
 
   it('counts approved workloads (all four gates passed) out of all workloads', () => {
     expect(html).toContain('Approved workloads');
-    expect(html).toContain(`of ${WORKLOADS.length}`);
+    // The displayed number is the computed count, not just any number: "<n><span> of 11".
+    expect(html).toContain(`>${approved}<span class="ml-1 font-body text-sm font-normal text-sub">of ${WORKLOADS.length}<`);
     expect(html).toContain('all four gates passed');
     expect(approved).toBeGreaterThan(0);
     expect(html).not.toMatch(/AUTHORIZED|Authorized/i);
@@ -25,6 +26,8 @@ describe('Governance page (route /frameworks)', () => {
   it('names the actual conflict: always-on workloads without all four gates', () => {
     expect(html).toContain('Always-on policy conflicts');
     expect(html).toContain('running always-on without all four gates');
+    expect(html).toContain(`>${conflicts}<span class="ml-1 font-body text-xs font-normal text-sub">running always-on`);
+    expect(html).toMatch(new RegExp(`>${conflicts}<span class="ml-1 font-body text-xs font-normal text-sub">running always-on`));
     expect(html).not.toMatch(/Shape conflicts|shape blocked/i);
     expect(conflicts).toBe(1);
     expect(html).toContain('always-on conflict');

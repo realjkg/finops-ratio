@@ -1,4 +1,4 @@
-// Wave 4 Slice 1: Findings is the home screen.
+// Wave 4 Slice 1: Value review (the findings queue) is the home screen.
 // The 3-panel FinOps dashboard is now served at /workloads.
 import { FindingsPage } from '@/findings/FindingsPage';
 

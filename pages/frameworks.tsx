@@ -1,4 +1,4 @@
-// Frameworks — Wave 4 Slice 4. Governance gates object.
+// Governance (route /frameworks), Wave 4 Slice 4. Governance gates object.
 // Presents the four sequential gates (Policy → Ethics → Cost → Scale) with each
 // gate's checks from .obvious/obvious.md, per-workload gate status derived from
 // existing governance data, and enforcement rules. No new backend, no new deps.

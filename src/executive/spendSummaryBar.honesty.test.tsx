@@ -10,7 +10,7 @@ const bar = { totalMonthlySpend: 41212, projectedSavings: 4800, initiativesActiv
 const html = renderToStaticMarkup(<SpendSummaryBar summary={bar} />);
 
 it('stamps the seed as-of date derived from DEMO_NOW, never a relative freshness claim', () => {
-  expect(html).toContain(`Seeded dataset as of ${DEMO_NOW.toISOString().slice(0, 10)}`);
+  expect(html).toContain(`Synthetic sample workspace data as of ${DEMO_NOW.toISOString().slice(0, 10)}`);
   expect(html).not.toMatch(/min ago|Updated/i);
 });
 

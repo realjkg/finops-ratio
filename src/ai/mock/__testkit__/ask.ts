@@ -9,7 +9,7 @@ import { MockAIClient } from '@/ai/MockAIClient';
 import { WORKLOADS } from '@/data/workloads';
 
 export const CTX: AIContext = buildAIContext(WORKLOADS);
-export const BASIS = /seeded demo data/;
+export const BASIS = /synthetic sample workspace data/;
 
 export function useFastClock(): void {
   vi.useFakeTimers();

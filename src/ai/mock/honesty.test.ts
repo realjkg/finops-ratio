@@ -1,4 +1,4 @@
-// Honesty chips: every new answer says it is seeded demo data from a
+// Honesty chips: every new answer says it is synthetic sample workspace data from a
 // deterministic mock, lists assumptions, shows evidence status, pairs cost with
 // its value ratio (R4), and never claims a measurement the data does not hold.
 
@@ -39,7 +39,7 @@ function withEvidence(ctx: AIContext, status: 'measured' | 'projected' | 'assume
 }
 
 describe('honesty', () => {
-  it('states basis (seeded demo data, deterministic mock, no LLM) on every new answer', async () => {
+  it('states basis (synthetic sample workspace data, deterministic mock, no LLM) on every new answer', async () => {
     for (const q of NEW_STYLE) {
       const t = await last([q]);
       expect(t, q).toMatch(BASIS);

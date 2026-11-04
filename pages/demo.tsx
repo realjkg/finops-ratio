@@ -81,9 +81,9 @@ export default function Demo() {
             <DemoStep
               number="01"
               title="Find the weak economics"
-              body="Open Findings. Ratio ranks workloads by value ratio, worst first, and shows the evidence behind the recommendation."
+              body="Open Value review. Ratio ranks workloads by Value / cost, lowest value first, and shows the evidence behind the recommendation."
               href="/"
-              cta="Open Findings"
+              cta="Open Value review"
             />
             <DemoStep
               number="02"
