@@ -59,7 +59,7 @@ export function EvidenceMark({
         {meta.label}
       </button>
       {open && (
-        <span id={id} role="note" className="absolute left-0 top-full z-20 mt-1 w-56 rounded border border-edge bg-raised p-2 text-xs font-normal text-txt shadow-lg">
+        <span id={id} role="note" className="absolute right-0 top-full z-20 mt-1 w-56 max-w-[calc(100vw-2rem)] rounded border border-edge bg-raised p-2 text-xs font-normal text-txt shadow-lg">
           {meta.title}
         </span>
       )}

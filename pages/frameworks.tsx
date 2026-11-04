@@ -32,8 +32,8 @@ export default function Frameworks() {
               <div className="text-xs text-dim">Approved workloads</div>
               <div className="mt-0.5 font-mono text-xl font-bold" style={{ color: 'var(--value)' }}>
                 {authorizedCount}
-                <span className="ml-1 text-sm font-normal text-sub">of {workloads.length}</span>
-                <span className="ml-2 text-xs font-normal text-sub">all four gates passed</span>
+                <span className="ml-1 font-body text-sm font-normal text-sub">of {workloads.length}</span>
+                <span className="ml-2 font-body text-xs font-normal text-sub">all four gates passed</span>
               </div>
             </div>
             <div className="rounded-card border border-edge bg-slab px-4 py-3">
@@ -43,7 +43,7 @@ export default function Frameworks() {
                 style={{ color: blockedAlwaysOn > 0 ? 'var(--shape)' : 'var(--dim)' }}
               >
                 {blockedAlwaysOn}
-                <span className="ml-1 text-xs font-normal text-sub">running always-on without all four gates</span>
+                <span className="ml-1 font-body text-xs font-normal text-sub">running always-on without all four gates</span>
               </div>
             </div>
           </div>
