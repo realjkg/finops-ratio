@@ -1,6 +1,6 @@
 // ROI, team ranking, scoped cost drivers and scoped savings.
 
-import { VOCAB } from '@/lib/vocabulary';
+import { budgetLabel } from '@/lib/vocabulary';
 import { MODEL_QUALITY_NOTE } from '@/data/models';
 import { findModel } from '@/data/models';
 import { REALIZED_LINE, T, capRows, contextLine, ladder, short, workloadRow } from './answerKit';
@@ -11,7 +11,7 @@ import {
 import { evid, pct1, price, returnText, roiLine, signedPct1, usd, x } from './format';
 import type { Answer, Scope, World, WorkloadFacts } from './types';
 
-const BUDGET_USED = VOCAB.budgetUsed.label.toLowerCase();
+const BUDGET_USED = budgetLabel('modeled').toLowerCase();
 
 const ids = (ws: WorkloadFacts[]): string[] => ws.map((w) => w.id);
 
@@ -95,7 +95,7 @@ export function teamRankAnswer(world: World, metric: RankMetric, ascending: bool
         ? `${usd(lead.savings)}/mo identified (projected, not realized) at ${returnText(lead.roll.ratio)}${evid(lead.roll.evidence)} — ${lead.roll.members.length} workload(s).`
         : `${usd(lead.roll.spend)}/mo (${total.spend > 0 ? pct1((lead.roll.spend / total.spend) * 100) : 'n/a'} of ${usd(total.spend)} portfolio spend) at ${returnText(lead.roll.ratio)}${evid(lead.roll.evidence)} — ${lead.roll.members.length} workload(s)${top ? `; top workload ${top.name} at ${usd(top.monthlySpend)}/mo` : ''}.`,
     );
-    body.push(`Teams ranked by ${metric === 'cost' ? 'monthly cost' : metric === 'roi' ? 'value ratio' : 'identified savings'}${ascending ? ' (lowest first)' : ''}:`);
+    body.push(`Teams ranked by ${metric === 'cost' ? 'monthly cost' : metric === 'roi' ? 'Value / cost' : 'identified savings'}${ascending ? ' (lowest first)' : ''}:`);
     const lines = rows.map((t, i) => {
       const share = total.spend > 0 ? ` (${pct1((t.roll.spend / total.spend) * 100)})` : '';
       return metric === 'savings'

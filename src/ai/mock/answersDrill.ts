@@ -1,7 +1,7 @@
 // Drill-down ladder below ROI: workload activity, tokens and unit cost,
 // alerts, and outcome evidence. Everything is read from the seeded facts.
 
-import { VOCAB } from '@/lib/vocabulary';
+import { budgetLabel } from '@/lib/vocabulary';
 import { MODEL_QUALITY_NOTE, findModel } from '@/data/models';
 import { capRows, contextLine, ladder, short, workloadRow } from './answerKit';
 import { bySpendDesc, membersOf, rollup, scopeLabel, scopeTitle } from './calc';
@@ -9,7 +9,7 @@ import { evid, int, pct1, price, returnText, signedPct1, usd, usd2, x } from './
 import { teamRankAnswer } from './answersRoi';
 import type { Answer, Scope, World, WorkloadFacts } from './types';
 
-const BUDGET_USED = VOCAB.budgetUsed.label.toLowerCase();
+const BUDGET_USED = budgetLabel('modeled').toLowerCase();
 
 const ids = (ws: WorkloadFacts[]): string[] => ws.map((w) => w.id);
 const modelPrices = (name: string | null): string => {
@@ -165,7 +165,7 @@ export function outcomesAnswer(world: World, scope: Scope): Answer {
   const label = scopeLabel(world, scope);
   const r = rollup(members);
   const body = [
-    `There is no measured outcome evidence for ${label} in the seeded data. Its value ratio is ${returnText(r.ratio)}${evid(r.evidence)}.`,
+    `There is no measured outcome evidence for ${label} in the seeded data. Its Value / cost is ${returnText(r.ratio)}${evid(r.evidence)}.`,
     'The demo’s outcome records are simulated fixtures: every value measure is marked assumed, so realized value and realized savings are not established (Realized savings: $0).',
     'Recording a ledger-referenced value measure with a verifier in the Outcomes panel is what upgrades a claim beyond assumed; until then Frank keeps calling it assumed or projected.',
     ...(members.length > 1 ? [`Weakest-link rule: a group shows the weakest status of its members (${members.length} here).`] : []),

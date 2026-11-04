@@ -2,12 +2,12 @@
 // old question keeps its exact text. They are not given the new provenance
 // footer (open decision in DESIGN.md).
 
-import { VOCAB } from '@/lib/vocabulary';
+import { budgetLabel } from '@/lib/vocabulary';
 import type { AIContext, AIResponse } from '../AIClient';
 import { CACHE_HIT_RATE_MATERIAL } from '@/lib/derive';
 import type { EvidenceStatus } from '@/types';
 
-const BUDGET_USED = VOCAB.budgetUsed.label.toLowerCase();
+const BUDGET_USED = budgetLabel('modeled').toLowerCase();
 
 function evidenceNote(status?: EvidenceStatus): string {
   return status ? ` (value evidence: ${status})` : '';

@@ -94,7 +94,7 @@ describe('EBITDA impact', () => {
     const t = await last(['What is the EBITDA impact if portfolio spend dropped $5,000 a month?']);
     expect(t).toContain('**EBITDA impact — Portfolio**');
     expect(t).toContain(`${usd(60000)}/yr`);
-    expect(t).toMatch(/\d+\.\d× return/);
+    expect(t).toMatch(/Value \/ cost \d+\.\d×/);
   });
 
   it('zero baseline: no division by zero', async () => {

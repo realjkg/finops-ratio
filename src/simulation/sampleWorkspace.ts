@@ -45,7 +45,7 @@ export function sampleView(persona: Persona): SampleView {
     return {
       persona,
       stats: [
-        { label: 'Monthly AI spend', value: formatCents(total) },
+        { label: 'AI monthly workload cost', value: formatCents(total) },
         { label: 'Budget used', value: `${budgetShare(total, budget)}% of ${formatCents(budget)}` },
         { label: 'Critical alerts', value: String(critical.length) },
       ],
@@ -76,7 +76,7 @@ export function sampleView(persona: Persona): SampleView {
     persona,
     stats: [
       { label: 'Models compared', value: String(models.length) },
-      { label: 'Monthly AI spend', value: formatCents(total) },
+      { label: 'AI monthly workload cost', value: formatCents(total) },
       { label: 'Cheapest input', value: `$${models[0].pricing.input_per_1m} per 1M tokens` },
     ],
     heading: 'Model prices (per 1M tokens, input / output)',

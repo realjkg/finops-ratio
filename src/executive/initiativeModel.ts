@@ -9,6 +9,7 @@
 //   caution  -> at_risk           (shape amber)
 //   critical -> pending_approval  (gate purple — a decision is required)
 
+import { costSourceOf, type CostSource } from '@/lib/vocabulary';
 import { budgetFor } from '@/data/budgets';
 import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
@@ -55,6 +56,8 @@ export interface InitiativeView {
   status: InitiativeStatus;
   // Cost efficiency = value ratio (R4 — cost is always paired with value).
   valueRatio: number;
+  /** Modeled (sample workspace) or recorded (postings): decides how the budget figure is named. */
+  costSource: CostSource;
   valueColor: string;
   /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
   valueEvidenceStatus?: EvidenceStatus;
@@ -87,6 +90,7 @@ export function toInitiativeView(workload: Workload, context: ProjectionContext 
     budgetConsumedColor: consumed.pct === null ? 'var(--sub)' : budgetColor(consumed.pct / 100),
     status: MISSION_TO_INITIATIVE[mission.status],
     valueRatio: mission.valueRatio,
+    costSource: costSourceOf(workload),
     valueColor: mission.valueColor,
     valueEvidenceStatus: headlineEvidenceStatus(workload.value),
   };

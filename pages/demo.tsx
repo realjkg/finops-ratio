@@ -54,10 +54,10 @@ export default function Demo() {
           </div>
 
           <div className="mt-6 grid gap-px overflow-hidden rounded-md border border-edge bg-edge sm:grid-cols-2 lg:grid-cols-4">
-            <Metric label="Monthly AI spend" value={formatUSD(snapshot.monthlySpend)} />
+            <Metric label="AI monthly workload cost" value={formatUSD(snapshot.monthlySpend)} />
             <Metric label="Business value" value={formatUSD(snapshot.totalValue)} />
             <Metric
-              label="Portfolio value ratio"
+              label="Portfolio Value / cost"
               value={formatRatio(snapshot.portfolioRatio)}
               valueColor={snapshot.portfolioRatio >= 3 ? TOKEN_COLOR.value : TOKEN_COLOR.gate}
             />
@@ -81,9 +81,9 @@ export default function Demo() {
             <DemoStep
               number="01"
               title="Find the weak economics"
-              body="Open Findings. Ratio ranks workloads by value ratio, worst first, and shows the evidence behind the recommendation."
+              body="Open Value review. Ratio ranks workloads by Value / cost, lowest value first, and shows the evidence behind the recommendation."
               href="/"
-              cta="Open Findings"
+              cta="Open Value review"
             />
             <DemoStep
               number="02"
