@@ -163,7 +163,7 @@ export function ConnectorCard({
             {KIND_LABEL[source.kind] ?? source.kind}
           </span>
           {simulation && (
-            <span className="rounded border border-edge px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-sub" title="Bundled fixture data: no network call, no credentials">
+            <span className="rounded border border-edge px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-sub" title="Bundled data: no network call, no credentials">
               simulated
             </span>
           )}

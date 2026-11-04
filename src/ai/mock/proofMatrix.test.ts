@@ -107,7 +107,7 @@ const CASES: Case[] = [
   { name: '22 alerts for Fraud Triage Agent', turns: ['What alerts exist for Fraud Triage Agent?'],
     has: alertsOf('wl-fraud').map((a) => a.message) },
   { name: '23 outcome evidence is not measured', turns: ['Is there outcome evidence for Code Review Bot?'],
-    has: ['**Outcome evidence — Code Review Bot**', 'no measured outcome evidence', 'assumed', 'simulated'] },
+    has: ['**Outcome evidence — Code Review Bot**', 'no measured outcome evidence', 'assumed', 'outcome records is marked assumed', 'not established'] },
   // ---- model ----
   { name: '24 ROI of gpt-4o', turns: ['What is the ROI of gpt-4o?'],
     has: ['**ROI — gpt-4o (model)**', usd(GPT4O.spend), usd(GPT4O.value), x1(GPT4O.ratio), EVID, 'Sales Copilot', 'Marketing Content Gen', 'Pipeline Forecast Analyst'] },

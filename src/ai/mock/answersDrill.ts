@@ -166,7 +166,7 @@ export function outcomesAnswer(world: World, scope: Scope): Answer {
   const r = rollup(members);
   const body = [
     `There is no measured outcome evidence for ${label} in this data. Its Value / cost is ${returnText(r.ratio)}${evid(r.evidence)}.`,
-    'The demo’s outcome records are simulated fixtures: every value measure is marked assumed, so realized value and realized savings are not established (Realized savings: $0).',
+    'Every value measure in the demo’s outcome records is marked assumed, so realized value and realized savings are not established (Realized savings: $0).',
     'Recording a ledger-referenced value measure with a verifier in the Outcomes panel is what upgrades a claim beyond assumed; until then Frank keeps calling it assumed or projected.',
     ...(members.length > 1 ? [`Weakest-link rule: a group shows the weakest status of its members (${members.length} here).`] : []),
   ];

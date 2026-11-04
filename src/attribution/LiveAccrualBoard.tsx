@@ -238,7 +238,7 @@ export function LiveAccrualBoard({ report }: { report: AttributionReport }) {
         </p>
         <p className="mt-1 text-[11px] text-dim">
           True real-time — live ingest → SSE/WebSocket through the gateway — is planned product
-          scope, not built in this demo. Every ticked number traces to seed × elapsed.
+          scope, not built in this demo. Every ticked number traces to the modeled rate × elapsed time.
         </p>
       </div>
 
