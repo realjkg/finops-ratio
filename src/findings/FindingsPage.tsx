@@ -341,8 +341,9 @@ function FindingRow({
             <span className="min-w-0 break-words font-body text-sm font-medium text-txt">
               {finding.workloadName}
             </span>
-            {/* Evidence: ratio + provenance mark + spend */}
-            <div className="flex shrink-0 items-center gap-2">
+            {/* Evidence: ratio on the first line; provenance mark and cost stacked under it, so the
+                longer "Estimated value" label never squeezes the workload name. */}
+            <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
               <span
                 className="font-mono text-xs font-bold"
                 style={{ color: finding.valueColor }}
