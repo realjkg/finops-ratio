@@ -1,6 +1,7 @@
 // KPI cards — spec §12 Sprint 1: Value, Spend, Per Query, Per User. Each cost is
 // shown with its value context (R4): the Value card anchors the row.
 
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { costLabel, costSourceOf } from '@/lib/vocabulary';
 import { useState } from 'react';
 import type { EvidenceStatus, Workload } from '@/types';
@@ -26,8 +27,8 @@ export function KpiCards({ workload }: { workload: Workload }) {
         label="Business value / mo"
         value={formatUSD(workload.value.total_value, { compact: true })}
         accent="var(--value)"
-        note={formatReturn(workload.value.value_ratio)}
-        noteColor={ratioColor(workload.value.value_ratio)}
+        note={formatReturn(workloadValueRatio(workload))}
+        noteColor={ratioColor(workloadValueRatio(workload))}
         evidenceStatus={valueEvidence}
       />
       <Card

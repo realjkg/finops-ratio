@@ -2,6 +2,7 @@
 // per-user, per-deflection, handle time, satisfaction, trend, and return. This
 // is the R1 view — cost per AI output, not cost per VM.
 
+import { workloadValueRatio } from '@/lib/valueRatio';
 import type { Workload } from '@/types';
 import { deriveUnitCosts } from '@/lib/derive';
 import {
@@ -57,10 +58,10 @@ export function UnitCostsTab({ workload }: { workload: Workload }) {
       color: workload.cost_trend_pct > 0 ? 'var(--cost)' : 'var(--value)',
     },
     {
-      label: 'Value return',
-      value: formatRatio(workload.value.value_ratio),
+      label: 'Value / cost',
+      value: formatRatio(workloadValueRatio(workload)),
       note: `${formatUSD(workload.value.total_value, { compact: true })}/mo value`,
-      color: ratioColor(workload.value.value_ratio),
+      color: ratioColor(workloadValueRatio(workload)),
     },
   ];
 

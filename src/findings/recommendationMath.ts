@@ -17,6 +17,7 @@ import type {
   Workload,
   WorkloadGovernance,
 } from '@/types';
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { MODEL_REGISTRY, findModel } from '@/data/models';
 import { budgetFor } from '@/data/budgets';
 import { modelDailyCost, type VolumeProfile } from '@/lib/modelCompare';
@@ -52,6 +53,9 @@ export interface Recommendation {
   /** Confidence / assumption qualifier (shown as the confidence note). */
   confidence: string;
 }
+
+/** The unrounded Value / cost (lib/valueRatio.ts); callers past the N/A guard in recommendFor always get a number. */
+const ratioOf = (w: Workload): number => workloadValueRatio(w) ?? 0;
 
 // --- Volume profile -------------------------------------------------------
 
@@ -128,7 +132,7 @@ function modelSwitchCandidate(w: Workload): Recommendation | null {
   const newSpend = w.costs.monthly_spend * alt.costRatio;
   const impact = round0(w.costs.monthly_spend - newSpend);
   if (impact <= 0) return null;
-  const projectedRatio = round1(w.value.value_ratio / alt.costRatio);
+  const projectedRatio = round1(ratioOf(w) / alt.costRatio);
 
   return {
     kind: 'model_switch',
@@ -138,7 +142,7 @@ function modelSwitchCandidate(w: Workload): Recommendation | null {
     projectedMonthlyImpact: impact,
     projectedRatio,
     basis: `Registry pricing (${current.display_name} → ${alt.model.display_name}) × current token mix; equal-value assumption lifts the ratio ${formatRatio(
-      w.value.value_ratio,
+      ratioOf(w),
     )} → ${formatRatio(projectedRatio)}`,
     confidence: `Assumes ${alt.model.display_name} holds ${current.display_name}'s resolution quality at this volume — validate on a canary before cutover; not a guaranteed saving.`,
   };
@@ -208,13 +212,13 @@ function sunsetCandidate(w: Workload): Recommendation {
           w.value.total_value,
         )}/mo against ${formatUSD(w.costs.monthly_spend)} spend — misses and quality gaps outweigh claimed value`
       : `Critical value review — sunset or renegotiate; ${formatRatio(
-          w.value.value_ratio,
+          ratioOf(w),
         )} is below the ${VALUE_CRITICAL}× floor`,
     projectedMonthlyImpact: null, // sunsetting removes spend AND its value
     projectedRatio: null,
     basis: `Value-ratio invariant: ${formatUSD(w.value.total_value)} value ÷ ${formatUSD(
       w.costs.monthly_spend,
-    )} spend = ${formatRatio(w.value.value_ratio)}`,
+    )} spend = ${formatRatio(ratioOf(w))}`,
     confidence: `Sunsetting removes the spend and the value it returns — net impact not quantified; needs a value-owner decision.`,
   };
 }
@@ -222,10 +226,10 @@ function sunsetCandidate(w: Workload): Recommendation {
 function monitorCandidate(w: Workload): Recommendation {
   return {
     kind: 'monitor',
-    action: `Monitor — ${formatRatio(w.value.value_ratio)} is within the acceptable range`,
+    action: `Monitor — ${formatRatio(ratioOf(w))} is within the acceptable range`,
     projectedMonthlyImpact: null,
     projectedRatio: null,
-    basis: `Value / cost ${formatRatio(w.value.value_ratio)} ≥ the ${VALUE_MINIMUM}× target; spend within budget`,
+    basis: `Value / cost ${formatRatio(ratioOf(w))} ≥ the ${VALUE_MINIMUM}× target; spend within budget`,
     confidence: `No action required — no quantified impact.`,
   };
 }
@@ -236,7 +240,17 @@ function monitorCandidate(w: Workload): Recommendation {
 // Honesty-first: lower-assumption actions (demand shaping) are preferred over a
 // cross-tier model downgrade where both could apply.
 export function recommendFor(w: Workload): Recommendation {
-  const ratio = w.value.value_ratio;
+  const ratio = workloadValueRatio(w);
+  if (ratio === null) {
+    return {
+      kind: 'monitor',
+      action: 'Value / cost is N/A: the workload has no positive cost for the period',
+      projectedMonthlyImpact: null,
+      projectedRatio: null,
+      basis: 'Value / cost needs a positive workload cost to divide by',
+      confidence: 'No action is derived from a missing ratio.',
+    };
+  }
   const budget = budgetFor(w.id);
   const utilization =
     budget && budget.budget_amount > 0

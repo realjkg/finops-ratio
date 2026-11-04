@@ -2,6 +2,7 @@
 // demand-shape badge, and cost-trend arrow. The bar's right label switches with
 // the VALUE | COST | UNIT toggle.
 
+import { workloadValueRatio } from '@/lib/valueRatio';
 import type { Workload } from '@/types';
 import type { SecondaryMode } from '@/store/useStore';
 import type { LandedProvenance } from '@/connectors/ingestLanding';
@@ -75,7 +76,7 @@ export function WorkloadCard({
         </div>
       )}
 
-      <ValueRatioBar ratio={workload.value.value_ratio} rightLabel={secondaryLabel(workload, secondaryMode)} />
+      <ValueRatioBar ratio={workloadValueRatio(workload)} rightLabel={secondaryLabel(workload, secondaryMode)} />
 
       <div className="mt-2 flex items-center justify-between">
         <GateDots governance={workload.governance} />

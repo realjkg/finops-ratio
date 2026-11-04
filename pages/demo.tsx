@@ -1,3 +1,4 @@
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { useMemo } from 'react';
 import Link from 'next/link';
 import { DEMO_PROMPTS } from '@/ai/MockAIClient';
@@ -15,7 +16,7 @@ export default function Demo() {
     const monthlySpend = workloads.reduce((sum, workload) => sum + workload.costs.monthly_spend, 0);
     const totalValue = workloads.reduce((sum, workload) => sum + workload.value.total_value, 0);
     const portfolioRatio = monthlySpend > 0 ? totalValue / monthlySpend : 0;
-    const belowGate = workloads.filter((workload) => workload.value.value_ratio < 3).length;
+    const belowGate = workloads.filter((workload) => (workloadValueRatio(workload) ?? Infinity) < 3).length;
 
     return {
       monthlySpend,

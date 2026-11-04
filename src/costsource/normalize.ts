@@ -11,6 +11,7 @@
 // resolved workload so the demo can show value + forecast + gates on an
 // ingested row — with no engine changes.
 
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { WORKLOADS, DEMO_NOW } from '@/data/workloads';
 import { budgetFor } from '@/data/budgets';
 import { governanceGatesPassed } from '@/lib/derive';
@@ -174,7 +175,7 @@ export interface ComposedRatioView {
   workloadId: string;
   name: string;
   monthlySpend: number;
-  valueRatio: number;
+  valueRatio: number | null;
   totalValue: number;
   gatesPassed: number;
   budget: BudgetStatus | null;
@@ -188,7 +189,7 @@ export function composeRatioView(row: CanonicalFocusRow): ComposedRatioView | nu
     workloadId: workload.id,
     name: workload.name,
     monthlySpend: workload.costs.monthly_spend,
-    valueRatio: workload.value.value_ratio,
+    valueRatio: workloadValueRatio(workload),
     totalValue: workload.value.total_value,
     gatesPassed: row.x_RatioGovernanceGates,
     budget: budget ? computeBudgetStatus(workload, budget, DEMO_NOW) : null,

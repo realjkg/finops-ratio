@@ -2,6 +2,7 @@
 // every registry model at today's volume. Cheaper = green, pricier = red, with a
 // value-ratio framing note and an A/B-test caveat.
 
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { useStore } from '@/store/useStore';
 import { useMemo, useState } from 'react';
 import type { ModelEntry, Workload } from '@/types';
@@ -136,7 +137,7 @@ export function MultiModelTab({
             {formatUSD(current.dailyCost - alt.dailyCost)}/day
           </span>{' '}
           ({formatUSD((current.dailyCost - alt.dailyCost) * 30)}/mo) at today&apos;s volume. At the same value, that lifts
-          the {formatRatio(workload.value.value_ratio)} ratio higher.{' '}
+          the {formatRatio(workloadValueRatio(workload))} ratio higher.{' '}
           {MODEL_QUALITY_NOTE[alt.model.model_name] ?? 'Quality may change.'} Run an A/B test on
           resolution rate before switching.
         </div>

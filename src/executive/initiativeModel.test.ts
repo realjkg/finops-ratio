@@ -61,7 +61,7 @@ describe('initiative view-model', () => {
   });
 
   it('renders the value-negative seed honestly (poor color, finite ratio)', () => {
-    const negative = initiatives.filter((i) => i.valueRatio <= 0);
+    const negative = initiatives.filter((i) => (i.valueRatio ?? 1) <= 0);
     expect(negative.length).toBeGreaterThan(0);
     for (const initiative of negative) {
       expect(initiative.valueColor).toBe(TOKEN_COLOR.cost);

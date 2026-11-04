@@ -153,7 +153,7 @@ export function FinioOverviewPage() {
           <Prose>
             FinIO carries both. Standard FOCUS columns carry the cost. A thin band of{' '}
             <span className="font-mono text-value">x_Ratio*</span> extension columns
-            carries the value ratio: business outcome per inference dollar.
+            carries Value / cost: business outcome per inference dollar.
             Vendor-prefixed extension columns are explicitly permitted by the FOCUS
             spec, so this stays conformant while expressing the thing FOCUS leaves out.
           </Prose>

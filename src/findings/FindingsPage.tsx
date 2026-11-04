@@ -243,7 +243,7 @@ export function FindingsPage() {
                 >
                   {f.type === 'anomaly' ? '▲' : '◆'} {f.category}
                 </span>
-                <span className="text-txt">{presentFinding(f).title}</span>
+                <span className="text-txt">{presentFinding(f, workloads).title}</span>
                 <span className="text-dim">
                   {f.type === 'anomaly'
                     ? `delta ${f.observedSpendDelta >= 0 ? '+' : ''}$${f.observedSpendDelta.toFixed(0)}`
@@ -815,7 +815,7 @@ function CalcRow({ label, value }: { label: string; value: string }) {
 
 function CalculationPanel({ finding, hidden }: { finding: FindingView; hidden: boolean }) {
   const c = finding.calculation;
-  const unrounded = c.ratio === null ? 'N/A' : `${c.ratio.toFixed(2)}\u00d7`;
+  const unrounded = c.ratio === null ? 'N/A' : `${c.ratio.toFixed(3)}\u00d7`;
   return (
     <section
       id="finding-calculation"
@@ -837,22 +837,22 @@ function CalculationPanel({ finding, hidden }: { finding: FindingView; hidden: b
         <CalcRow label="Counted business value" value={formatUSD(c.countedValue)} />
         <CalcRow label="Less modeled harm from misses" value={formatUSD(-c.harmFromMisses)} />
         <CalcRow label={`Adjusted value (${VOCAB.estimatedBusinessValue.label.toLowerCase()})`} value={formatUSD(c.adjustedValue)} />
-        <CalcRow label={c.costLabel} value={formatUSD(c.cost)} />
+        <CalcRow label={`${c.costLabel} (${c.costPeriod})`} value={formatUSD(c.cost)} />
         <CalcRow label={`${VOCAB.valueToCost.label} (unrounded)`} value={unrounded} />
         <CalcRow label="Displayed" value={formatRatio(c.ratio)} />
         <CalcRow label="Break-even" value={'1×'} />
         <CalcRow label="Configured policy target" value={`${VALUE_MINIMUM}\u00d7`} />
         {c.gapToTarget !== null && (
-          <CalcRow label={`Gap to the ${VALUE_MINIMUM}\u00d7 target`} value={`${c.gapToTarget.toFixed(2)}\u00d7`} />
+          <CalcRow label={`Gap to the ${VALUE_MINIMUM}\u00d7 target`} value={`${c.gapToTarget.toFixed(3)}\u00d7`} />
         )}
       </dl>
       <dl className="space-y-1.5 text-sub">
-        <div><dt className="inline font-medium text-txt">Period. </dt><dd className="inline">{c.period}</dd></div>
+        <div><dt className="inline font-medium text-txt">Period. </dt><dd className="inline">Value: {c.period}. Cost: {c.costPeriod}.{c.periodNote ? ` ${c.periodNote}` : ''}</dd></div>
         <div><dt className="inline font-medium text-txt">Cost. </dt><dd className="inline">{c.costLabel}. {c.basis}.{c.monthConvention ? ` ${c.monthConvention}.` : ''}{c.costSource === 'modeled' ? ' This is not Billed cost or Effective cost.' : ''}</dd></div>
         <div><dt className="inline font-medium text-txt">Value assumptions. </dt><dd className="inline">{c.valueAssumptions}</dd></div>
         <div><dt className="inline font-medium text-txt">Break-even. </dt><dd className="inline">{'1\u00d7'}, where value equals cost. Value / cost is negative when harm from misses exceeds counted value.</dd></div>
         <div><dt className="inline font-medium text-txt">Policy target. </dt><dd className="inline">{`${VALUE_MINIMUM}\u00d7`}. {targetPolicyText(VALUE_MINIMUM)}</dd></div>
-        <div><dt className="inline font-medium text-txt">Target source. </dt><dd className="inline">Demo configuration. {COPY.targetSetBy}.</dd></div>
+        <div><dt className="inline font-medium text-txt">Target source. </dt><dd className="inline">{COPY.targetSetBy}.</dd></div>
         <div><dt className="inline font-medium text-txt">Source. </dt><dd className="inline">{c.source}</dd></div>
       </dl>
     </section>

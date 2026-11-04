@@ -119,7 +119,7 @@ describe('report workbook', () => {
         row.annualRunRate,
         row.budgetConsumedPct,
         row.status,
-        Number(row.costEfficiency.toFixed(1)),
+        Number(row.costEfficiency!.toFixed(1)),
         row.savingsOpportunity,
         row.lastUpdated,
       ]);

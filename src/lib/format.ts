@@ -36,8 +36,8 @@ export function formatRatio(ratio: number | null | undefined): string {
  * "no positive return" with the actual ratio in parentheses — never floored
  * to a fake positive figure, never hidden.
  */
-export function formatReturn(ratio: number): string {
-  if (!Number.isFinite(ratio)) return 'Value / cost N/A';
+export function formatReturn(ratio: number | null | undefined): string {
+  if (typeof ratio !== 'number' || !Number.isFinite(ratio)) return 'Value / cost N/A';
   return ratio > 0
     ? `Value / cost ${formatRatio(ratio)}`
     : `Value / cost ${formatRatio(ratio)} (no positive value)`;

@@ -4,7 +4,7 @@
 // Motion and respects prefers-reduced-motion.
 import { budgetLabel } from '@/lib/vocabulary';
 import { motion, useReducedMotion } from 'framer-motion';
-import { formatRatio, formatUSD } from '@/lib/format';
+import { formatReturn, formatUSD } from '@/lib/format';
 import { EvidenceMark } from '@/components/EvidenceMark';
 import type { EvidenceStatus } from '@/types';
 import { tint } from '@/lib/scales';
@@ -16,7 +16,7 @@ interface FuelAndValueProps {
   fuelColor: string;
   spentToday: number;
   dailyBudget: number;
-  valueRatio: number;
+  valueRatio: number | null;
   valueColor: string;
   /** Provenance mark beside the badge (audit C1) — absent renders nothing. */
   evidenceStatus?: EvidenceStatus;
@@ -50,7 +50,7 @@ export function FuelAndValue({
             className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-xs font-bold"
             style={{ color: valueColor, backgroundColor: tint(valueColor) }}
           >
-            {formatRatio(valueRatio)} return
+            {formatReturn(valueRatio)}
           </span>
           <EvidenceMark status={evidenceStatus} />
         </span>

@@ -9,8 +9,9 @@
 //   Trajectory     -> monthly forecast projected_eom vs budget (§6.2)
 //   Mission clock  -> days_until_budget_breach (§6.4)
 //   Mission status -> budget threshold status + forecast status + active alerts (§4, §5)
-//   Value badge    -> value.value_ratio (R4 — always shown with the gauge)
+//   Value badge    -> workloadValueRatio (lib/valueRatio.ts) (R4 — always shown with the gauge)
 
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { ALERTS } from '@/data/alerts';
 import { budgetFor } from '@/data/budgets';
 import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
@@ -44,7 +45,7 @@ export interface MissionView {
   dailyBudget: number;
   remainingToday: number;
   // Value badge (R4) — never rendered without the gauge.
-  valueRatio: number;
+  valueRatio: number | null;
   valueColor: string;
   /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
   valueEvidenceStatus?: EvidenceStatus;
@@ -153,8 +154,8 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
     spentToday: status.daily.spentToday,
     dailyBudget: status.daily.dailyBudget,
     remainingToday: status.daily.remaining,
-    valueRatio: workload.value.value_ratio,
-    valueColor: ratioColor(workload.value.value_ratio),
+    valueRatio: workloadValueRatio(workload),
+    valueColor: ratioColor(workloadValueRatio(workload)),
     valueEvidenceStatus: headlineEvidenceStatus(workload.value),
     status: statusNa && adverse === 'nominal' ? 'na' : adverse,
     statusNa,
