@@ -231,3 +231,30 @@ describe('SpendToValueGraph — embedded (compact) variant stays consistent', ()
     expect(tooltip().textContent).toContain(portfolio[1].name);
   });
 });
+
+describe('SpendToValueGraph — negative Value / cost', () => {
+  function renderWith(workloads: Workload[]) {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root!.render(<SpendToValueGraph workloads={workloads} size="large" selectedWorkloadId="wl-fraud" />);
+    });
+  }
+  const cy = (id: string) => parseFloat(dotFor(id).querySelector('circle[fill]')!.getAttribute('cy')!);
+
+  it('draws a negative ratio below the 0× line instead of clamping it onto the axis', () => {
+    renderWith(WORKLOADS);
+    const zero = container!.querySelector('[data-testid="stv-zero-line"]');
+    expect(zero, 'a 0× line is drawn when the axis extends below zero').not.toBeNull();
+    const zeroY = parseFloat(zero!.getAttribute('y1')!);
+    expect(cy('wl-fraud')).toBeGreaterThan(zeroY); // SVG y grows downward
+    expect(container!.textContent).toContain('-1×');
+  });
+
+  it('keeps the zero-based axis and no 0× line when nothing is negative', () => {
+    renderWith(WORKLOADS.filter((w) => w.value.value_ratio >= 0));
+    expect(container!.querySelector('[data-testid="stv-zero-line"]')).toBeNull();
+    expect(container!.textContent).not.toContain('-1×');
+  });
+});

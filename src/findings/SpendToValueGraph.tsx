@@ -15,11 +15,10 @@
 import { useState } from 'react';
 import { ratioColor } from '@/lib/scales';
 import { formatUSD, formatRatio } from '@/lib/format';
+import { VOCAB } from '@/lib/vocabulary';
 import { VALUE_MINIMUM } from './findingsModel';
+import { ratioDomain, ratioTicks } from './ratioAxis';
 import type { Workload } from '@/types';
-
-// Y-axis ceiling — matches ValueRatioMeter's CEILING constant.
-const CEILING = 10;
 
 // Theme variables (src/index.css), so SVG strokes and labels follow the active theme.
 const C_EDGE = 'var(--edge)';
@@ -76,8 +75,12 @@ export function SpendToValueGraph({
   function xFor(spend: number): number {
     return M.left + (spend / xMax) * PW;
   }
+  // Value / cost can be negative (value net of harm), so the axis extends below 0× whenever
+  // any workload is negative instead of clamping it onto the zero line.
+  const domain = ratioDomain(workloads.map((w) => w.value.value_ratio));
   function yFor(ratio: number): number {
-    return M.top + PH - (Math.max(0, Math.min(ratio, CEILING)) / CEILING) * PH;
+    const clamped = Math.max(domain.min, Math.min(ratio, domain.max));
+    return M.top + PH - ((clamped - domain.min) / (domain.max - domain.min)) * PH;
   }
 
   // ── Reference line Y positions ───────────────────────────────────────────
@@ -85,7 +88,7 @@ export function SpendToValueGraph({
   const yMinThresh  = yFor(VALUE_MINIMUM); // 3×
 
   // ── Axis tick values ─────────────────────────────────────────────────────
-  const yTickValues = isLarge ? [0, 1, 3, 5, 10] : [];
+  const yTickValues = isLarge ? ratioTicks(domain) : [];
   // Three x ticks: $0, half of max spend, max spend.
   const xTickValues: number[] = isLarge ? [0, maxSpend / 2, maxSpend] : [];
 
@@ -94,7 +97,7 @@ export function SpendToValueGraph({
       // Large charts stop growing at max-w-2xl so axis text stays near body size on wide
       // screens; on phones the labels are set larger in viewBox units to stay legible.
       className={isLarge ? 'mx-auto w-full max-w-2xl' : 'w-full'}
-      aria-label="Spend-to-value portfolio scatter — workloads by monthly spend vs. value ratio"
+      aria-label={`Portfolio scatter — workloads by ${VOCAB.monthlyRunRate.label.toLowerCase()} and ${VOCAB.valueToCost.label}`}
     >
       <div className="relative">
         <svg
@@ -122,6 +125,16 @@ export function SpendToValueGraph({
           </text>
         )}
 
+        {/* 0× line — drawn only when the axis extends below zero */}
+        {domain.min < 0 && (
+          <line
+            data-testid="stv-zero-line"
+            x1={M.left} y1={yFor(0)}
+            x2={M.left + PW} y2={yFor(0)}
+            stroke={C_SUB} strokeWidth={1}
+          />
+        )}
+
         {/* 3× minimum threshold — Gate 3 floor */}
         <line
           x1={M.left} y1={yMinThresh}
@@ -134,7 +147,7 @@ export function SpendToValueGraph({
             fontSize={9} fill={C_DIM}
             fontFamily="'JetBrains Mono', monospace"
           >
-            3× min
+            {VALUE_MINIMUM}× target
           </text>
         )}
 
@@ -198,7 +211,7 @@ export function SpendToValueGraph({
               fontFamily="'JetBrains Mono', monospace"
               transform={`rotate(-90, ${M.left - 34}, ${M.top + PH / 2})`}
             >
-              value ratio
+              {VOCAB.valueToCost.label}
             </text>
 
             {/* X axis label */}
@@ -208,7 +221,7 @@ export function SpendToValueGraph({
               textAnchor="middle" fontSize={9} fill={C_DIM}
               fontFamily="'JetBrains Mono', monospace"
             >
-              monthly spend
+              {VOCAB.monthlyRunRate.label.toLowerCase()}
             </text>
           </>
         )}
@@ -240,7 +253,7 @@ export function SpendToValueGraph({
               data-workload-id={w.id}
               role="button"
               tabIndex={0}
-              aria-label={`${w.name}: ${formatUSD(w.costs.monthly_spend)} per month, ${formatRatio(w.value.value_ratio)} value ratio`}
+              aria-label={`${w.name}: ${formatUSD(w.costs.monthly_spend)} per month, ${VOCAB.valueToCost.label} ${formatRatio(w.value.value_ratio)}`}
               style={{ cursor: onOpenWorkload ? 'pointer' : 'default' }}
               onMouseEnter={() => setRevealedId(w.id)}
               onMouseLeave={() => setRevealedId((id) => (id === w.id ? null : id))}
@@ -340,7 +353,7 @@ export function SpendToValueGraph({
               <div className="mt-1.5 space-y-0.5">
                 <div className="flex items-baseline justify-between gap-4">
                   <span className="font-mono text-[9px] uppercase tracking-wider text-dim">
-                    monthly spend
+                    {VOCAB.monthlyRunRate.label}
                   </span>
                   <span className="font-mono text-xs text-txt">
                     {formatUSD(w.costs.monthly_spend)}
@@ -348,7 +361,7 @@ export function SpendToValueGraph({
                 </div>
                 <div className="flex items-baseline justify-between gap-4">
                   <span className="font-mono text-[9px] uppercase tracking-wider text-dim">
-                    value ratio
+                    {VOCAB.valueToCost.label}
                   </span>
                   <span
                     className="font-mono text-xs font-bold"
