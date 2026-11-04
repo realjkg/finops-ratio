@@ -43,25 +43,25 @@ describe('EvidenceMark', () => {
     mount(<EvidenceMark status="assumed" explain />);
     const btn = box.querySelector('button')!;
     expect(btn.getAttribute('aria-expanded')).toBe('false');
-    expect(box.querySelector('[role="note"]')).toBeNull();
+    expect(document.querySelector('[role="note"]')).toBeNull();
     act(() => btn.click());
     expect(btn.getAttribute('aria-expanded')).toBe('true');
-    const note = box.querySelector('[role="note"]')!;
+    const note = document.querySelector('[role="note"]')!;
     expect(btn.getAttribute('aria-controls')).toBe(note.id);
     expect(note.textContent).toMatch(/stated assumptions/);
     act(() => {
       btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
-    expect(box.querySelector('[role="note"]')).toBeNull();
+    expect(document.querySelector('[role="note"]')).toBeNull();
   });
 
   it('explain: a tap outside closes it (touch)', () => {
     mount(<EvidenceMark status="assumed" explain />);
     act(() => box.querySelector('button')!.click());
-    expect(box.querySelector('[role="note"]')).not.toBeNull();
+    expect(document.querySelector('[role="note"]')).not.toBeNull();
     act(() => {
       document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     });
-    expect(box.querySelector('[role="note"]')).toBeNull();
+    expect(document.querySelector('[role="note"]')).toBeNull();
   });
 });
