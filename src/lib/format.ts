@@ -26,8 +26,9 @@ export function formatCents(value: number): string {
   return `$${value.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`;
 }
 
-export function formatRatio(ratio: number): string {
-  return `${ratio.toFixed(1)}\u00d7`;
+/** One-decimal ratio. A missing or non-finite ratio is "N/A", never "NaN×" or "Infinity×". */
+export function formatRatio(ratio: number | null | undefined): string {
+  return typeof ratio === 'number' && Number.isFinite(ratio) ? `${ratio.toFixed(1)}\u00d7` : 'N/A';
 }
 
 /**

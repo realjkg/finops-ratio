@@ -28,12 +28,16 @@ describe('vocabulary definitions', () => {
       forecastBudgetUse: 'Forecast budget use',
       estimatedBusinessValue: 'Estimated business value',
       valueToCost: 'Value / cost',
-      monthlyRunRate: 'Monthly run rate',
+      estimatedBudgetConsumption: 'Estimated budget consumption to date',
+      estimatedCostToDate: 'Estimated cost to date',
+      modeledCost: 'Modeled workload cost',
+      monthlyWorkloadCost: 'Monthly workload cost',
+      recordedCost: 'Recorded cost to date',
     });
   });
 
   it('defines Value / cost with its break-even and says it can be negative', () => {
-    expect(VOCAB.valueToCost.definition).toMatch(/Business value divided by cost/);
+    expect(VOCAB.valueToCost.definition).toMatch(/^Quality-adjusted business value, less modeled harm from misses, divided by workload cost for the same reporting period\./);
     expect(VOCAB.valueToCost.definition).toMatch(/1×/);
     expect(VOCAB.valueToCost.definition).toMatch(/negative/);
   });
@@ -51,14 +55,15 @@ describe('vocabulary definitions', () => {
 
 // --- source scan -------------------------------------------------------------------------
 
-// Engagement, ingest and managed-connector code carries the serialized `cost_basis` enum, whose
-// stored value 'actual' must not change; none of it is display copy.
-// One allowlisted file: the seeded finding title "… — below 3× value floor" is a value in the
-// public API contract (src/compat/golden/api.json). Display copy is not renamed through a
-// contract; migrating it is a separate, tested change (listed under "Needs owner decision").
-const CONTRACT_COPY = new Set(['src/costsource/seed.ts']);
-
-const EXCLUDED = [/^src\/engagement\//, /^src\/ingest\//, /^src\/connectors\/managed\//, /^src\/server\//, /^src\/lib\/vocabulary\.ts$/, /^src\/mock\//];
+// Exact allowlist: a file and the text of the one match that stays, with the reason. Everything else
+// in src/ and pages/ is scanned (engagement, ingest and managed connectors included), so a stray
+// phrase there still fails. Nothing is allowlisted by directory or whole file.
+const ALLOWED: ReadonlyArray<{ file: string; match: RegExp; why: string }> = [
+  { file: 'src/costsource/seed.ts', match: /below 3× value floor/, why: 'seeded finding title: a value in the public API contract (src/compat/golden/api.json); displayed through findingPresentation, keyed by id' },
+  { file: 'src/data/alerts.ts', match: /Value ratio fell to/, why: 'seeded alert message: a value in the public API contract; displayed through alertPresentation, keyed by alert id' },
+  { file: 'src/costsource/AiSpendRatioCard.tsx', match: /file AI spend under other categories/, why: 'FOCUS service-category total on /costsource ("AI spend vs total spend"), a different measure from workload cost' },
+  { file: 'src/lib/vocabulary.ts', match: /./, why: 'the module that defines the banned patterns' },
+];
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -66,7 +71,7 @@ function walk(dir: string, out: string[] = []): string[] {
     if (statSync(p).isDirectory()) {
       if (name === 'node_modules' || name === '.next') continue;
       walk(p, out);
-    } else if (/\.(ts|tsx)$/.test(name) && !/\.test\.|\.spec\.|\.d\.ts$/.test(name)) out.push(p);
+    } else if (/\.(ts|tsx)$/.test(name) && !/\.test\.|\.spec\.|\.d\.ts$|__testkit__/.test(name)) out.push(p);
   }
   return out;
 }
@@ -76,13 +81,27 @@ function stripComments(code: string): string {
   return code.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
 }
 
-describe('banned synonyms in user-facing sources', () => {
-  const files = [...walk(join(ROOT, 'src')), ...walk(join(ROOT, 'pages'))]
-    .map((f) => relative(ROOT, f))
-    .filter((f) => !EXCLUDED.some((re) => re.test(f)) && !CONTRACT_COPY.has(f));
+/** Matches of a pattern in a source file, across line breaks (JSX text wraps), as short contexts. */
+export function scanSource(code: string, pattern: RegExp): string[] {
+  const flat = stripComments(code).replace(/\s+/g, ' ');
+  const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
+  return [...flat.matchAll(re)].map((m) => flat.slice(Math.max(0, m.index! - 30), m.index! + m[0].length + 30).trim());
+}
 
-  it('scans the UI, report, Frank and agent-description sources', () => {
-    for (const must of ['src/findings/FindingsPage.tsx', 'src/executive/reportXlsx.ts', 'src/ai/mock/answersRoi.ts', 'src/finops/semantic/views.ts', 'pages/reports.tsx', 'pages/api/v1/ai/chat.ts']) {
+describe('scanSource (the scanner itself)', () => {
+  it('finds a phrase split across lines in JSX text', () => {
+    expect(scanSource('<p>Monthly\n   Cost</p>', /\bMonthly [Cc]ost\b/)).toHaveLength(1);
+  });
+  it('ignores comments', () => {
+    expect(scanSource('// Monthly Cost\n/* AI Spend */', /Monthly Cost|AI Spend/)).toHaveLength(0);
+  });
+});
+
+describe('banned synonyms in user-facing sources', () => {
+  const files = [...walk(join(ROOT, 'src')), ...walk(join(ROOT, 'pages'))].map((f) => relative(ROOT, f));
+
+  it('scans the UI, report, Frank and agent-description sources, and the engagement code too', () => {
+    for (const must of ['src/findings/FindingsPage.tsx', 'src/executive/reportXlsx.ts', 'src/executive/reportPdf.tsx', 'src/ai/mock/answersRoi.ts', 'src/finops/semantic/views.ts', 'pages/reports.tsx', 'pages/api/v1/ai/chat.ts', 'src/engagement/config.ts']) {
       expect(files, must).toContain(must);
     }
   });
@@ -90,11 +109,17 @@ describe('banned synonyms in user-facing sources', () => {
   it.each(BANNED_PHRASES.map((b) => [String(b.pattern), b] as const))('no source uses %s', (_name, banned) => {
     const hits: string[] = [];
     for (const f of files) {
-      const code = stripComments(readFileSync(join(ROOT, f), 'utf8'));
-      code.split('\n').forEach((line, i) => {
-        if (banned.pattern.test(line)) hits.push(`${f}:${i + 1} (use: ${banned.use}) ${line.trim().slice(0, 100)}`);
-      });
+      for (const ctx of scanSource(readFileSync(join(ROOT, f), 'utf8'), banned.pattern)) {
+        if (ALLOWED.some((a) => a.file === f && a.match.test(ctx))) continue;
+        hits.push(`${f} (use: ${banned.use}) ...${ctx}...`);
+      }
     }
     expect(hits).toEqual([]);
+  });
+
+  it('every allowlist entry still matches something, so it cannot go stale', () => {
+    for (const a of ALLOWED.filter((x) => x.file !== 'src/lib/vocabulary.ts')) {
+      expect(readFileSync(join(ROOT, a.file), 'utf8'), a.why).toMatch(a.match);
+    }
   });
 });
