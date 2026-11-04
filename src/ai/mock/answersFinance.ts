@@ -48,8 +48,8 @@ function reductionSource(world: World, scope: Scope, red: Reduction): { source: 
     return {
       source: {
         monthly: m,
-        line: `Spend reduction: ${usd(m)}/mo = ${usd(m * 12)}/yr — ${red.percent}% of the group’s current seeded monthly spend ${usd(r.spend)} (assumption).`,
-        assumption: `The ${red.percent}% is taken against current seeded spend, not prior spend.`,
+        line: `Spend reduction: ${usd(m)}/mo = ${usd(m * 12)}/yr — ${red.percent}% of the group’s current monthly spend ${usd(r.spend)} (assumption).`,
+        assumption: `The ${red.percent}% is taken against current spend, not prior spend.`,
       },
       notes,
     };
@@ -60,7 +60,7 @@ function reductionSource(world: World, scope: Scope, red: Reduction): { source: 
     return {
       source: {
         monthly: fall,
-        line: `Spend reduction: ${usd(fall)}/mo = ${usd(fall * 12)}/yr — implied by the seeded MoM trend (${signedPct1((trend.change / trend.prior) * 100)} vs prior month); this is the seed’s trend, not a ledger measurement.`,
+        line: `Spend reduction: ${usd(fall)}/mo = ${usd(fall * 12)}/yr — implied by the MoM trend (${signedPct1((trend.change / trend.prior) * 100)} vs prior month); this is the data’s trend, not a ledger measurement.`,
       },
       notes,
     };
@@ -69,7 +69,7 @@ function reductionSource(world: World, scope: Scope, red: Reduction): { source: 
   if (savings > 0) {
     notes.push(
       trend
-        ? `The seeded MoM trend shows ${label} spend rose ${signedPct1((trend.change / trend.prior) * 100)}, so spend has not gone down in the data.`
+        ? `The MoM trend shows ${label} spend rose ${signedPct1((trend.change / trend.prior) * 100)}, so spend has not gone down in the data.`
         : `No spend trend is present for ${label}.`,
     );
     return {
@@ -81,7 +81,7 @@ function reductionSource(world: World, scope: Scope, red: Reduction): { source: 
     };
   }
   notes.push(
-    `There is no spend reduction for ${label} in the seeded data: ${trend ? `the MoM trend is ${signedPct1((trend.change / trend.prior) * 100)}` : 'no trend is present'} and no savings opportunity is identified.`,
+    `There is no spend reduction for ${label} in this data: ${trend ? `the MoM trend is ${signedPct1((trend.change / trend.prior) * 100)}` : 'no trend is present'} and no savings opportunity is identified.`,
   );
   return { source: null, notes };
 }
@@ -114,7 +114,7 @@ export function ebitdaAnswer(world: World, scope: Scope, red: Reduction, base: B
   body.push(source.line);
   const scopeSpend = rollup(members).spend;
   if (scopeSpend > 0 && source.monthly > scopeSpend && red.percent === undefined) {
-    body.push(`Warning: the stated reduction (${usd(source.monthly)}/mo) exceeds ${label}'s entire current seeded spend (${usd(scopeSpend)}/mo). That is not possible from this data, so check the amount; I have not capped it.`);
+    body.push(`Warning: the stated reduction (${usd(source.monthly)}/mo) exceeds ${label}'s entire current spend (${usd(scopeSpend)}/mo). That is not possible from this data, so check the amount; I have not capped it.`);
   }
   body.push(
     `EBITDA improves by ${usd(eff.annualImprovement)}/yr, pre-tax, one-for-one (assumption: the reduced spend is operating expense, so ΔEBITDA = −Δopex; capitalized spend would not move EBITDA).`,
@@ -136,7 +136,7 @@ export function ebitdaAnswer(world: World, scope: Scope, red: Reduction, base: B
           ? '. A percentage change is not defined for a zero or negative baseline; the absolute improvement above is the result.'
           : `, ${signedPct1(eff.ebitdaPct)} (before tax).`),
     );
-    assumptions.push('Your baseline is used as typed; it is not in the seeded data.');
+    assumptions.push('Your baseline is used as typed; it is not in this data.');
   }
   if (eff.revenue !== undefined) {
     body.push(`Revenue ${usd(eff.revenue)} (${base.revenueNote}).`);
@@ -148,7 +148,7 @@ export function ebitdaAnswer(world: World, scope: Scope, red: Reduction, base: B
   }
   if (eff.ebitdaBefore === undefined && eff.revenue === undefined) {
     body.push(
-      'No EBITDA or revenue baseline exists in the seeded data, so I cannot give a % change or a margin. Tell me, for example, "group EBITDA of $4.2M" or "revenue $20M", and I will compute it.',
+      'No EBITDA or revenue baseline exists in this data, so I cannot give a % change or a margin. Tell me, for example, "group EBITDA of $4.2M" or "revenue $20M", and I will compute it.',
     );
   }
   body.push(contextLine(world, scope));
@@ -181,7 +181,7 @@ function assumptionLines(a: ResolvedAssumptions, o: Overrides, m: Migration | nu
     `Hours: ${int(a.hoursPerMonth)} hours/month, always on (default assumption)`,
     `Ops: ${Math.round(a.opsOverheadPct * 100)}% ops overhead on GPU cost ${tag(o.opsOverheadPct !== undefined)}`,
     `Migration: ${usd(a.migrationOneTimeUsd)} one-time ${tag(o.migrationOneTimeUsd !== undefined)}`,
-    'Volume: today’s seeded tokens × 30 days; list prices from the model registry; no discounts, commitments or batch rates.',
+    'Volume: today’s tokens × 30 days; list prices from the model registry; no discounts, commitments or batch rates.',
   ];
 }
 
@@ -191,11 +191,11 @@ export function migrationAnswer(world: World, scope: Scope, o: Overrides, ignore
   const r = rollup(members);
   const res = migration(members, o);
   const header = `**Private-model migration — ${label}**`;
-  const body: string[] = [`Scenario: replace the public-API model(s) behind ${label} with one self-hosted open-weight model (none is in the seed; its cost below is an assumption, not data).`];
+  const body: string[] = [`Scenario: replace the public-API model(s) behind ${label} with one self-hosted open-weight model (none is in this data; its cost below is an assumption, not data).`];
   body.push(...ignored);
 
   if (res.kind === 'no-volume') {
-    body.push('I cannot price this: the seeded token volume or a registry price is missing for the workload(s) in scope.');
+    body.push('I cannot price this: the token volume or a registry price is missing for the workload(s) in scope.');
     body.push(contextLine(world, scope));
     return {
       header, body,
@@ -214,7 +214,7 @@ export function migrationAnswer(world: World, scope: Scope, o: Overrides, ignore
   });
   body.push(...capRows(partLines, 10));
   if (ok.unpriced.length > 0) body.push(`Not priced (model or volume missing): ${ok.unpriced.slice(0, 10).map((w) => w.name).join(', ')}${ok.unpriced.length > 10 ? `, and ${ok.unpriced.length - 10} more` : ''}.`);
-  body.push(`Current API cost at list prices: ${usd(ok.api)}/mo (${usd2((ok.api / ok.tokens) * 1e6)} per 1M tokens blended). Seeded run-rate spend is ${usd(r.spend)}/mo, a different basis, so the comparison uses list prices on both sides.`);
+  body.push(`Current API cost at list prices: ${usd(ok.api)}/mo (${usd2((ok.api / ok.tokens) * 1e6)} per 1M tokens blended). Run-rate spend is ${usd(r.spend)}/mo, a different basis, so the comparison uses list prices on both sides.`);
   body.push(
     `Projected private model: ${ok.gpus} GPU${ok.gpus === 1 ? '' : 's'} × ${price(a.gpuHourlyUsd)} × ${int(a.hoursPerMonth)} h = ${usd(ok.gpuCost)}/mo, plus ${Math.round(a.opsOverheadPct * 100)}% ops = ${usd(ok.selfHost)}/mo (${usd2((ok.selfHost / ok.tokens) * 1e6)} per 1M tokens at this volume).`,
   );
@@ -225,10 +225,10 @@ export function migrationAnswer(world: World, scope: Scope, o: Overrides, ignore
   if (!valid) {
     body.push('Projected recurring saving: not shown \u2014 the cluster is too small for the volume, so any saving here would not be valid.');
   } else if (ok.saving > 0) {
-    const share = runRate > 0 ? `${Math.round((ok.saving / runRate) * 100)}% of the seeded run-rate ${usd(runRate)}/mo; ` : '';
+    const share = runRate > 0 ? `${Math.round((ok.saving / runRate) * 100)}% of the run-rate ${usd(runRate)}/mo; ` : '';
     body.push(`Projected recurring saving: ${usd(ok.saving)}/mo = ${usd(ok.saving * 12)}/yr (${share}projected, rests on the assumptions below).`);
     if (runRate > 0 && ok.saving > runRate) {
-      body.push(`Warning: the projected saving exceeds the seeded run-rate spend (${usd(runRate)}/mo) because the list-price volume cost (${usd(ok.api)}/mo) is above what the seed says is spent. Treat it as an upper bound, not a forecast; I have not capped it.`);
+      body.push(`Warning: the projected saving exceeds the run-rate spend (${usd(runRate)}/mo) because the list-price volume cost (${usd(ok.api)}/mo) is above what the data says is spent. Treat it as an upper bound, not a forecast; I have not capped it.`);
     }
   } else {
     body.push(`Projected recurring saving: none \u2014 self-hosting would cost ${usd(-ok.saving)}/mo more than the API at these assumptions (no recurring saving).`);
@@ -247,7 +247,7 @@ export function migrationAnswer(world: World, scope: Scope, o: Overrides, ignore
   body.push(`• ${REALIZED_LINE} Until outcome evidence exists the saving stays projected, and the one-time cost is real spend.`);
   body.push(contextLine(world, scope));
   body.push(
-    'Risk: quality and latency can change when the model changes, and Value / cost depends on quality. The seed holds no quality evidence for the open model; run an evaluation on real traffic before trusting any figure above.',
+    'Risk: quality and latency can change when the model changes, and Value / cost depends on quality. This data holds no quality evidence for the open model; run an evaluation on real traffic before trusting any figure above.',
   );
   return {
     header,

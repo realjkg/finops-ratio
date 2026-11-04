@@ -1,4 +1,4 @@
-// Honesty chips: every new answer says it is synthetic sample workspace data from a
+// Honesty chips: every new answer names its source (the demo dataset) from a
 // deterministic mock, lists assumptions, shows evidence status, pairs cost with
 // its value ratio (R4), and never claims a measurement the data does not hold.
 
@@ -39,7 +39,7 @@ function withEvidence(ctx: AIContext, status: 'measured' | 'projected' | 'assume
 }
 
 describe('honesty', () => {
-  it('states basis (synthetic sample workspace data, deterministic mock, no LLM) on every new answer', async () => {
+  it('states its source (demo dataset, deterministic mock, no LLM) on every new answer', async () => {
     for (const q of NEW_STYLE) {
       const t = await last([q]);
       expect(t, q).toMatch(BASIS);
@@ -108,7 +108,7 @@ describe('honesty', () => {
       const t = await last([q]);
       expect(t, q).not.toMatch(/New EBITDA/);
       expect(t, q).not.toMatch(/\+\d+(\.\d+)? pp/);
-      expect(t, q).toMatch(/seeded data/);
+      expect(t, q).toMatch(/in this data/);
       expect(t, q).toMatch(/(assumption)/);
     }
   });
@@ -134,7 +134,7 @@ describe('honesty', () => {
 
   it('unsupported questions say what is not available and do not fabricate numbers', async () => {
     const t = await last(['What is our customer churn rate?']);
-    expect(t).toContain("I can't answer that from the seeded data");
+    expect(t).toContain("I can't answer that from this data");
     expect(t).not.toMatch(/\d+(\.\d+)?%/);
     expect(t).toMatch(/Closest questions I can answer/);
   });

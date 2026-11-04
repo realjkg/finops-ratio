@@ -53,7 +53,7 @@ export function roiAnswer(world: World, scope: Scope): Answer {
     if (m) {
       body.push(`Registry list price: ${price(m.pricing.input_per_1m)} in / ${price(m.pricing.output_per_1m)} out per 1M tokens.`);
       const note = Object.hasOwn(MODEL_QUALITY_NOTE, scope.model) ? MODEL_QUALITY_NOTE[scope.model] : undefined;
-      if (note) body.push(`Seeded quality hint: ${note}.`);
+      if (note) body.push(`Quality hint: ${note}.`);
     }
   }
 
@@ -157,7 +157,7 @@ export function savingsAnswer(world: World, scope: Scope): Answer {
     body.push(`Identified savings opportunity: ${usd(total)}/mo (projected — cost-source finding estimates, not realized).`);
     withSavings.forEach((w, i) => body.push(`${i + 1}. ${w.name} — ${usd(w.savings)}/mo · cost ${usd(w.monthlySpend)}/mo at ${returnText(w.ratio)}${evid(w.evidence)}`));
   } else {
-    body.push(`There are no savings opportunities identified for ${label} in the seeded findings (${usd(0)}/mo).`);
+    body.push(`There are no savings opportunities identified for ${label} in the findings (${usd(0)}/mo).`);
     body.push('A model-migration scenario is a separate, assumption-based estimate; ask for it below.');
   }
   body.push(REALIZED_LINE);

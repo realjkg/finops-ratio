@@ -104,27 +104,27 @@ describe('malformed wire shapes never 500 and never reach a renderer', () => {
 });
 
 describe('M2 impossible headlines carry a warning, uncapped', () => {
-  it('migration saving above the seeded run-rate (Fraud Triage Agent)', async () => {
+  it('migration saving above the run-rate (Fraud Triage Agent)', async () => {
     const o = migrate([wl('wl-fraud')]);
     expect(o.saving).toBeGreaterThan(4200);
     const t = await last(['Move the Fraud Triage Agent to a private open model']);
-    expect(t).toMatch(/^Warning: [^\n]*exceeds the seeded run-rate/m);
-    expect(t).toContain(`${Math.round((o.saving / 4200) * 100)}% of the seeded run-rate`);
+    expect(t).toMatch(/^Warning: [^\n]*exceeds the run-rate spend/m);
+    expect(t).toContain(`${Math.round((o.saving / 4200) * 100)}% of the run-rate`);
     expect(t).toContain('$4,248/mo'); // not capped
   });
   it('a normal saving shows its share of run-rate and no warning', async () => {
     const t = await last(['What if we moved the Customer Support Agent to a private open model?']);
-    expect(t).toContain('44% of the seeded run-rate');
+    expect(t).toContain('44% of the run-rate');
     expect(t).not.toContain('Warning:');
   });
   it('EBITDA reduction larger than the scope spend (Legal $100,000 a month)', async () => {
     const t = await last(['EBITDA impact for Legal if spend went down $100,000 a month']);
-    expect(t).toMatch(/^Warning: [^\n]*exceeds Legal's entire current seeded spend/m);
+    expect(t).toMatch(/^Warning: [^\n]*exceeds Legal's entire current spend/m);
     expect(t).toContain('$1,200,000/yr');
   });
   it('portfolio $5M a year', async () => {
     const t = await last(['EBITDA impact if portfolio spend dropped $5M a year']);
-    expect(t).toMatch(/^Warning: [^\n]*exceeds Portfolio's entire current seeded spend/m);
+    expect(t).toMatch(/^Warning: [^\n]*exceeds Portfolio's entire current spend/m);
   });
   it('a plausible reduction has no warning', async () => {
     expect(await last(['EBITDA impact for Platform Eng if spend went down $2,000 a month'])).not.toContain('Warning:');

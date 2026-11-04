@@ -9,7 +9,7 @@ import { MockAIClient } from '@/ai/MockAIClient';
 import { WORKLOADS } from '@/data/workloads';
 
 export const CTX: AIContext = buildAIContext(WORKLOADS);
-export const BASIS = /synthetic sample workspace data/;
+export const BASIS = /Source: demo dataset as of \d{4}-\d{2}-\d{2} — computed by a deterministic mock \(no LLM, nothing live\)\./;
 
 export function useFastClock(): void {
   vi.useFakeTimers();
@@ -59,5 +59,5 @@ export function nextQuestions(text: string): string[] {
     .filter((q): q is string => Boolean(q));
 }
 
-export const UNSUPPORTED = "I can't answer that from the seeded data";
+export const UNSUPPORTED = "I can't answer that from this data";
 export const CLARIFY = 'Which one do you mean?';

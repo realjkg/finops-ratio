@@ -58,11 +58,11 @@ describe('migration economics (defaults)', () => {
     expect(t).toMatch(/Cost to realized savings/);
   });
 
-  it('carries the quality/latency caveat and says the seed has no quality evidence', async () => {
+  it('carries the quality/latency caveat and says the data has no quality evidence', async () => {
     const t = await last([Q]);
     expect(t).toMatch(/quality/i);
     expect(t).toMatch(/latency/i);
-    expect(t).toMatch(/seed holds no quality evidence for the open model/);
+    expect(t).toMatch(/This data holds no quality evidence for the open model/);
   });
 
   it('echoes every assumption with its value and says they are illustrative', async () => {

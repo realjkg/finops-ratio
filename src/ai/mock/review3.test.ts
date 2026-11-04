@@ -195,7 +195,7 @@ describe('Copilot routing and bound findings', () => {
     expect(q.length).toBeLessThan(2000);
     const t = await ask(q, c);
     expect(t.length).toBeLessThanOrEqual(8000);
-    expect(t).toContain('Basis: synthetic sample workspace data');
+    expect(t).toContain('Source: demo dataset as of');
     expect(t.trimEnd().split('\n').at(-1)).toMatch(/^• ".+"$/);
     expect(t).toContain('Note: you also named');
     const note = t.split('\n').find((l) => l.startsWith('Note: you also named'))!;

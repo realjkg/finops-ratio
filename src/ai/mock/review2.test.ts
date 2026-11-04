@@ -45,7 +45,7 @@ describe('M2 valid portfolio questions are not mistaken for unknown names', () =
   ])('%s', async (q) => {
     const t = await ask(q);
     expect(t).not.toContain("I don't have a");
-    expect(t).toMatch(/synthetic sample workspace data/);
+    expect(t).toMatch(/Source: demo dataset as of/);
   });
   it('a capitalized unknown name is still caught', async () => {
     expect(await ask('ROI of Finance')).toContain('I don\'t have a team, workload or model called "Finance"');
@@ -103,7 +103,7 @@ describe('M5 exact boundaries of the claimed guards', () => {
     const t = await ask('Any alerts for Big Workload 1?', bigCtx(3));
     expect(t.length).toBeLessThanOrEqual(8000);
     expect(t).toContain('answer shortened');
-    expect(t).toContain('Basis: synthetic sample workspace data');
+    expect(t).toContain('Source: demo dataset as of');
     expect(t).toContain('Next questions:');
   });
   it('wire names are capped at 60 characters, not 59 or 61', async () => {

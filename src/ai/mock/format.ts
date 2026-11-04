@@ -62,8 +62,11 @@ export function months(n: number): string {
   return `${n.toFixed(1)} months`;
 }
 
+/** Every mock answer's provenance line starts with this; respond.ts keeps it in the protected tail. */
+export const SOURCE_PREFIX = 'Source: demo dataset';
+
 export function basisLine(asOf: string): string {
-  return `Basis: synthetic sample workspace data as of ${asOf.slice(0, 10)} — computed by a deterministic mock (no LLM, nothing live).`;
+  return `${SOURCE_PREFIX} as of ${asOf.slice(0, 10)} — computed by a deterministic mock (no LLM, nothing live).`;
 }
 
 /** Render an Answer: header, body, assumptions, basis chip, next questions. */

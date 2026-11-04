@@ -16,7 +16,7 @@ import { MAX_TEXT, findMentions, namesTeam, pickSubject, sameScope, unknownCapit
 import { MAX_HISTORY, deriveFocus, detectReference, isElliptical, resolveReference } from './memory';
 import { classifyIntent, classifyLegacy, rankingOf, type Intent } from './intents';
 import { atRisk, costDriver, help, savings, summary } from './legacy';
-import { render } from './format';
+import { SOURCE_PREFIX, render } from './format';
 import { scopeLabel } from './calc';
 import { buildWorld, legacyContext } from './world';
 import type { Answer, Scope, World } from './types';
@@ -35,7 +35,7 @@ const MARKER = '\u2026(answer shortened to fit; ask a narrower question for the 
 /** Keep the header and the tail (notes, basis, next questions); shorten the middle if it is huge. */
 function bound(text: string, notes: string[] = []): string {
   const lines = text.split('\n');
-  const tailAt = lines.findIndex((l) => l.startsWith('Basis:'));
+  const tailAt = lines.findIndex((l) => l.startsWith(SOURCE_PREFIX));
   const head = tailAt < 0 ? lines : lines.slice(0, tailAt);
   const safeNotes = notes.map((n) => (n.length > NOTE_MAX ? `${n.slice(0, NOTE_MAX / 2 - 1)}\u2026${n.slice(-NOTE_MAX / 2)}` : n));
   const tail = [...safeNotes, ...(tailAt < 0 ? [] : lines.slice(tailAt))];
@@ -171,7 +171,7 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
 
   switch (intent) {
     case 'forecast':
-      return reply(unsupportedText(world, 'I do not forecast: the mock has the seeded run-rate and month-over-month trend, not a forecast model.'));
+      return reply(unsupportedText(world, 'I do not forecast: the mock has the run-rate and month-over-month trend, not a forecast model.'));
     case 'capability':
       return done(capabilityAnswer(world), world);
     case 'migration': {

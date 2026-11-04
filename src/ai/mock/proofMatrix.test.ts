@@ -146,7 +146,7 @@ const CASES: Case[] = [
   { name: '39 unsupported question', turns: ['What will our spend be next quarter?'],
     has: [UNSUPPORTED, 'Closest questions I can answer'], not: ["I'm Frank Coster"] },
   { name: '40 capability ladder', turns: ['What can you answer, and how deep can you go for each team?'],
-    has: ['**What I can answer**', 'deterministic mock', 'no LLM', 'synthetic sample workspace data', 'portfolio', 'team', 'workload', 'model', 'alerts'] },
+    has: ['**What I can answer**', 'deterministic mock', 'no LLM', 'demo dataset', 'portfolio', 'team', 'workload', 'model', 'alerts'] },
 ];
 
 describe('proof-question matrix (oracle computed from the seed)', () => {

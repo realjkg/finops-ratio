@@ -39,11 +39,11 @@ function workloadDetail(world: World, w: WorkloadFacts): Answer {
       (w.budgetConsumedPct !== null ? ` · ${BUDGET_USED} ${w.budgetConsumedPct}%` : '') +
       (w.monthlyBudget !== null ? ` of ${usd(w.monthlyBudget)}/mo` : '') +
       (w.costTrendPct !== null ? ` · MoM trend ${signedPct1(w.costTrendPct)}` : ''),
-    `Activity: ${w.calls !== null ? `${int(w.calls)} calls/day (seeded)` : 'call volume not in this context'}` +
+    `Activity: ${w.calls !== null ? `${int(w.calls)} calls/day` : 'call volume not in this context'}` +
       (w.demandShape ? ` · demand shape ${w.demandShape}` : '') +
       (w.gatesPassed !== null ? ` · governance gates ${w.gatesPassed}/4` : ''),
     ...(w.cacheHitRate !== null ? [`Cache hit rate: ${pct1(w.cacheHitRate * 100)} of input tokens billed at the cached rate.`] : []),
-    `Alerts: ${w.alerts === null ? 'not in this context' : w.alerts.length === 0 ? 'none seeded' : `${w.alerts.length} seeded (${w.alerts.filter((a) => !a.acknowledged).length} unacknowledged)`}.`,
+    `Alerts: ${w.alerts === null ? 'not in this context' : w.alerts.length === 0 ? 'none' : `${w.alerts.length} (${w.alerts.filter((a) => !a.acknowledged).length} unacknowledged)`}.`,
   ];
   return {
     header: `**Detail — ${w.name} (workload)**`,
@@ -110,7 +110,7 @@ export function tokensAnswer(world: World, scope: Scope): Answer {
     const w = members[0];
     body.push(`Model: ${w.model ?? 'unknown'}${w.provider ? ` (${w.provider})` : ''} · list price ${modelPrices(w.model)}.`);
     if (w.tokIn !== null && w.tokOut !== null && w.tokCached !== null) {
-      body.push(`Tokens today (seeded daily volume): input ${int(w.tokIn)} · output ${int(w.tokOut)} · cached ${int(w.tokCached)}.`);
+      body.push(`Tokens today (daily volume): input ${int(w.tokIn)} · output ${int(w.tokOut)} · cached ${int(w.tokCached)}.`);
     } else body.push('Token volumes are not present in this context.');
     if (w.calls && w.tokIn !== null && w.tokOut !== null) {
       body.push(`Average per call: ${int(w.tokIn / w.calls)} input / ${int(w.tokOut / w.calls)} output tokens (${int(w.calls)} calls/day).`);
@@ -121,7 +121,7 @@ export function tokensAnswer(world: World, scope: Scope): Answer {
   } else if (scope.kind === 'model') {
     body.push(`List price: ${modelPrices(scope.model)}.`);
     const note = Object.hasOwn(MODEL_QUALITY_NOTE, scope.model) ? MODEL_QUALITY_NOTE[scope.model] : undefined;
-    if (note) body.push(`Seeded quality hint: ${note}.`);
+    if (note) body.push(`Quality hint: ${note}.`);
     if (members.length === 0) body.push('No workload in the data runs on this model.');
     else body.push('Workloads on it:', ...capRows([...members].sort(bySpendDesc).map((w, i) => tokenRow(i, w))));
   } else {
@@ -147,11 +147,11 @@ export function alertsAnswer(world: World, scope: Scope): Answer {
   const body: string[] = [contextLine(world, scope)];
   const rows = members.flatMap((w) => (w.alerts ?? []).map((a) => ({ w, a })));
   if (members.some((w) => w.alerts === null)) body.push('Alert data is not present for some workloads in this context.');
-  if (rows.length === 0) body.push(`No alerts are seeded for ${label}.`);
+  if (rows.length === 0) body.push(`There are no alerts for ${label}.`);
   else {
     const rank = (s: string): number => (s === 'critical' ? 0 : s === 'warning' ? 1 : 2);
     rows.sort((p, q) => rank(p.a.severity) - rank(q.a.severity));
-    body.push(`${rows.length} seeded alert(s), most severe first:`);
+    body.push(`${rows.length} alert(s), most severe first:`);
     for (const { w, a } of rows) {
       body.push(`• [${a.severity}] ${a.type}${scope.kind === 'workload' ? '' : ` · ${w.name}`} — ${a.message} (${a.acknowledged ? 'acknowledged' : 'unacknowledged'})`);
     }
@@ -165,7 +165,7 @@ export function outcomesAnswer(world: World, scope: Scope): Answer {
   const label = scopeLabel(world, scope);
   const r = rollup(members);
   const body = [
-    `There is no measured outcome evidence for ${label} in the seeded data. Its Value / cost is ${returnText(r.ratio)}${evid(r.evidence)}.`,
+    `There is no measured outcome evidence for ${label} in this data. Its Value / cost is ${returnText(r.ratio)}${evid(r.evidence)}.`,
     'The demo’s outcome records are simulated fixtures: every value measure is marked assumed, so realized value and realized savings are not established (Realized savings: $0).',
     'Recording a ledger-referenced value measure with a verifier in the Outcomes panel is what upgrades a claim beyond assumed; until then Frank keeps calling it assumed or projected.',
     ...(members.length > 1 ? [`Weakest-link rule: a group shows the weakest status of its members (${members.length} here).`] : []),
