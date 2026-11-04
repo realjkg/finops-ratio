@@ -47,7 +47,7 @@ export interface FindingCalculation {
   periodNote: string | null;
   costSource: CostSource;
   costLabel: string;
-  /** "Basis: demo assumption" or "Basis: simulation postings". */
+  /** "Basis: modeled" or "Basis: simulation postings". */
   basis: string;
   /** Disclosed only where the cost is a modeled estimate scaled by days. */
   monthConvention: string | null;

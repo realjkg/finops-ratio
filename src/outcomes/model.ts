@@ -21,13 +21,13 @@ export function seedOutcome(w: Workload): OutcomeRecord {
       value: 70,
       start: "2026-05-01",
       end: "2026-05-25",
-      reference: "Simulated pre-AI comparison sample",
+      reference: "Simulated pre-AI comparison period",
     },
     observation: {
       value: 83,
       start: "2026-06-01",
       end: "2026-06-25",
-      reference: "Simulated AI-assisted comparison sample",
+      reference: "Simulated AI-assisted comparison period",
     },
     thresholds: { stopBelow: 0.5, continueAt: 1, expandAt: 3 },
     costs: Object.fromEntries(
@@ -40,7 +40,7 @@ export function seedOutcome(w: Workload): OutcomeRecord {
       {
         id: "seed-value",
         category: "cost_savings",
-        title: "Seeded business-value assumption",
+        title: "Business-value assumption",
         status: "assumed",
         amountCents: Math.round(w.value.total_value * 100),
         contributionMarginPct: 100,

@@ -122,7 +122,7 @@ function LedgerView({ report }: { report: AccuracyReport }) {
       <p className="mt-2 max-w-prose font-body text-[11px] text-dim">
         Accuracy = 1 − |predicted − actual| / |actual|, reported as median (p50)
         with p90 alongside; target p50 ≥ 99%. The ledger fills only as realized
-        post-change cost arrives — no synthetic back-test is seeded.
+        post-change cost arrives — no back-test is pre-filled.
       </p>
 
       <div className="mt-3 grid grid-cols-2 gap-2">

@@ -234,7 +234,7 @@ export function LiveAccrualBoard({ report }: { report: AttributionReport }) {
         <p className="text-xs font-medium text-shape" data-testid="honesty-chip">
           {paused
             ? 'Simulated live feed — paused: tab hidden, clock holding (no drift)'
-            : `Simulated live feed — deterministic replay of seeded rates (${ACCRUAL_REPLAY_SPEED}× demo clock)`}
+            : `Simulated live feed — deterministic replay of modeled rates (${ACCRUAL_REPLAY_SPEED}× demo clock)`}
         </p>
         <p className="mt-1 text-[11px] text-dim">
           True real-time — live ingest → SSE/WebSocket through the gateway — is planned product

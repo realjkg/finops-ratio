@@ -331,7 +331,7 @@ function IngestFromFilePanel({ sourceId }: { sourceId: string }) {
           FOCUS-file direct ingest (POST)
         </p>
         <p className="mt-1 text-xs text-sub">
-          POST sample rows at any FOCUS version to{' '}
+          POST bundled rows at any FOCUS version to{' '}
           <span className="font-mono text-txt">/api/costsource/ingest</span>. The
           FocusFileAdapter upgrades them to v1.4 canonical and attaches Ratio value
           context — the engine is unchanged. This is the second adapter proving
@@ -364,7 +364,7 @@ function IngestFromFilePanel({ sourceId }: { sourceId: string }) {
           disabled={state.status === 'loading'}
           className="ml-auto rounded-card bg-gate px-3 py-1 text-xs font-semibold text-void transition-opacity disabled:opacity-50"
         >
-          {state.status === 'loading' ? 'Ingesting…' : `POST sample rows at v${version}`}
+          {state.status === 'loading' ? 'Ingesting…' : `POST rows at v${version}`}
         </button>
       </div>
 

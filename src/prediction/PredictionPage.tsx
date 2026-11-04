@@ -132,7 +132,7 @@ export function PredictionPage() {
         <p className="mt-1 max-w-prose font-sans text-sub">
           Predict a proposed change&apos;s cost impact, pick the lowest-error source for
           its change type, and show the result beside its value-ratio effect. The
-          ledger is cold-start by design — no synthetic back-test is seeded — so every
+          ledger is cold-start by design — no back-test is pre-filled — so every
           prediction here is an honest estimate until realized changes accumulate.
         </p>
       </header>

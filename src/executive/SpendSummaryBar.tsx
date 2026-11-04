@@ -49,7 +49,7 @@ export function SpendSummaryBar({ summary }: { summary: SpendSummary }) {
       ))}
       <div className="ml-auto flex items-center gap-2 text-xs text-exec-muted">
         <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: TOKEN_COLOR.value }} />
-        Synthetic sample workspace data as of {DEMO_NOW.toISOString().slice(0, 10)}
+        Data as of {DEMO_NOW.toISOString().slice(0, 10)}
       </div>
     </section>
   );
