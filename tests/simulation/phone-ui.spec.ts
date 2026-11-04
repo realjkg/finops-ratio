@@ -96,3 +96,63 @@ for (const width of [320, 360, 390]) {
     }
   });
 }
+
+// #178 review follow-ups: the top bar fits on one row at 320px; the portaled explanation is announced;
+// Escape closes it only from the popup or its button, never from inside the Frank panel.
+for (const width of [320, 360, 390]) {
+  test(`top bar: logo, Demo badge, Display, Text and Ask Frank share one row at ${width}px, with 44px targets`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    for (const route of ROUTES) {
+      await page.goto(route);
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      const items = [
+        nav(page).getByText('Ratio', { exact: true }),
+        nav(page).getByRole('note', { name: 'Demo environment — figures are illustrative' }),
+        nav(page).getByRole('button', { name: 'Display', exact: true }),
+        nav(page).getByRole('button', { name: 'Text', exact: true }),
+        nav(page).getByRole('button', { name: 'Ask Frank Coster' }),
+      ];
+      const boxes = await Promise.all(items.map(async (i) => (await i.boundingBox())!));
+      const mid = (b: { y: number; height: number }) => b.y + b.height / 2;
+      for (const [k, b] of boxes.entries()) {
+        expect(Math.abs(mid(b) - mid(boxes[2])), `${route} item ${k} on the first row`).toBeLessThan(6);
+        expect(b.x + b.width, `${route} item ${k} inside the viewport`).toBeLessThanOrEqual(width + 0.5);
+      }
+      for (const b of boxes.slice(2)) {
+        expect(b.height, `${route} target height`).toBeGreaterThanOrEqual(43.5);
+        expect(b.width, `${route} target width`).toBeGreaterThanOrEqual(43.5);
+      }
+      // The header is the top row plus the nav strip: about 112px, not ~170px with Ask Frank wrapped to its own row.
+      const navBox = (await nav(page).boundingBox())!;
+      expect(navBox.height, `${route} nav height`).toBeLessThanOrEqual(120);
+      if (width < 400) await expect(nav(page).getByTestId('ask-frank-short')).toBeHidden();
+      else await expect(nav(page).getByTestId('ask-frank-short')).toBeVisible();
+    }
+  });
+}
+
+test('Estimated value: opening it describes the button and announces the text; Escape inside the Frank panel leaves it open', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  const mark = page.getByRole('button', { name: 'Estimated value' }).first();
+  await mark.click();
+  const note = page.locator('[data-testid="evidence-note"]');
+  await expect(note).toBeVisible();
+  await expect(mark).toHaveAttribute('aria-describedby', (await note.getAttribute('id'))!);
+  await expect(mark).toHaveAccessibleDescription(/stated assumptions/);
+  await expect(page.getByTestId('evidence-live').first()).toHaveText(/stated assumptions/);
+  // Open Frank from the keyboard (a click would be an outside tap and close the popup), then press Escape in its textbox.
+  await nav(page).getByRole('button', { name: 'Ask Frank Coster' }).focus();
+  await page.keyboard.press('Enter');
+  const panel = page.getByRole('complementary', { name: 'AI Chat' });
+  await expect(panel).toBeVisible();
+  await panel.getByRole('textbox').focus();
+  await page.keyboard.press('Escape');
+  await expect(note, 'Escape in the Frank panel must not close the popup').toBeVisible();
+  // From the popup's own button, Escape closes it and focus stays on the button.
+  await mark.focus();
+  await page.keyboard.press('Escape');
+  await expect(note).toHaveCount(0);
+  await expect(mark).toBeFocused();
+  await expect(page.getByTestId('evidence-live').first()).toHaveText('');
+});

@@ -75,7 +75,9 @@ export function NavBar({
   }, [active, measure]);
   return (
     <nav className="relative shrink-0 border-b border-edge bg-deep" aria-label="Main navigation">
-      <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 px-3 py-2 md:flex md:min-h-10 md:flex-wrap md:gap-y-1 md:gap-x-0.5 md:py-1">
+      {/* Phones: one top row (logo, Demo badge, Display, Text, Ask Frank) above the nav strip. Below 400px
+          Ask Frank is icon-only (its accessible name is unchanged) and the gaps tighten, so the row fits at 320px. */}
+      <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2 px-3 py-2 min-[400px]:gap-x-3 md:flex md:min-h-10 md:flex-wrap md:gap-y-1 md:gap-x-0.5 md:py-1">
       {/* Logo mark */}
       <span className="flex items-center gap-1.5 md:mr-4">
         <span
@@ -121,7 +123,7 @@ export function NavBar({
       </div>
 
       {/* md:[&>div:first-child]:static: ThemeMenu's own md:relative would anchor its panel to the wrapping button group; anchoring both panels to the nav keeps them inside the viewport. */}
-      <div className="col-start-2 row-start-1 ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 md:col-auto md:row-auto md:[&>div:first-child]:static">
+      <div className="col-start-2 row-start-1 ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5 min-[400px]:gap-2 md:col-auto md:row-auto md:[&>div:first-child]:static">
       <ThemeMenu />
       <TypographyMenu />
       {/* Single agent launcher — purple AI token, reserved warm accent untouched. */}
@@ -132,7 +134,7 @@ export function NavBar({
           aria-expanded={agentOpen}
           aria-controls={AI_PANEL_ID}
           aria-label="Ask Frank Coster"
-          className="col-start-2 row-start-1 ml-auto flex items-center gap-1.5 rounded border border-purple/60 bg-purple/15 px-2.5 py-1 max-md:min-h-11 font-mono text-xs font-bold text-purple transition-colors hover:bg-purple/25 md:col-auto md:row-auto"
+          className="col-start-2 row-start-1 ml-auto flex items-center justify-center gap-1.5 rounded border border-purple/60 bg-purple/15 px-2.5 py-1 max-md:min-h-11 max-md:min-w-11 max-[399px]:px-0 font-mono text-xs font-bold text-purple transition-colors hover:bg-purple/25 md:col-auto md:row-auto"
         >
           <span
             className="flex h-4 w-4 items-center justify-center rounded font-mono text-[10px] font-bold text-void"
@@ -141,7 +143,7 @@ export function NavBar({
           >
             F
           </span>
-          <span className="md:hidden">Ask Frank</span>
+          <span className="hidden min-[400px]:inline md:hidden" data-testid="ask-frank-short">Ask Frank</span>
           <span className="hidden md:inline">Ask Frank Coster</span>
         </button>
       )}
