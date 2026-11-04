@@ -111,7 +111,7 @@ for (const theme of Object.keys(MAX)) {
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'Open Procurement sample' }).click();
     await page.getByRole('button', { name: 'Import the three synthetic connections' }).click();
-    await expect(page.getByRole('region', { name: 'Imported synthetic connections' }).getByText('Example Compute Savings Plan')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Imported synthetic connections' }).getByText('Compute savings plan')).toBeVisible();
     await record('/simulation (sample)');
     await page.unroute('**/api/v1/simulation/status');
     for (const width of [390, 360]) {

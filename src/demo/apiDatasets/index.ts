@@ -1,5 +1,5 @@
 // The three simulated API connections of the demo. The datasets are committed JSON, loaded with a
-// dynamic import() when someone presses "Import sample": they are not in the page's main chunk, and
+// dynamic import() when someone presses "Import": they are not in the page's main chunk, and
 // nothing here touches the network, storage, or a credential.
 import { reconcile, type Reconciled } from './reconcile';
 import type { ConnectionType, Dataset } from './types';
@@ -12,9 +12,9 @@ export interface ConnectionSummary {
 
 /** What the Connectors page shows before anything is imported (kept equal to each file's meta by a test). */
 export const CONNECTIONS: ConnectionSummary[] = [
-  { id: 'syn-public-cloud-api', name: 'Example Cloud billing API', connectionType: 'public_cloud', typeLabel: 'Public cloud API', apiStyle: 'Provider billing export API (REST)', currency: 'USD', lastImport: '2026-10-30T06:00:00Z', rowCount: 108 },
-  { id: 'syn-private-cloud-api', name: 'Example Private Cloud usage API', connectionType: 'private_cloud', typeLabel: 'Private cloud API', apiStyle: 'OpenStack-style usage and chargeback API', currency: 'EUR', lastImport: '2026-10-30T06:20:00Z', rowCount: 109 },
-  { id: 'syn-on-premise-api', name: 'Example Datacenter cost allocation API', connectionType: 'on_premise', typeLabel: 'On-premise API', apiStyle: 'Kubernetes cost allocation API (OpenCost-style)', currency: 'USD', lastImport: '2026-10-30T06:40:00Z', rowCount: 106 },
+  { id: 'syn-public-cloud-api', name: 'Public cloud billing API', connectionType: 'public_cloud', typeLabel: 'Public cloud API', apiStyle: 'Provider billing export API (REST)', currency: 'USD', lastImport: '2026-10-30T06:00:00Z', rowCount: 108 },
+  { id: 'syn-private-cloud-api', name: 'Private cloud usage API', connectionType: 'private_cloud', typeLabel: 'Private cloud API', apiStyle: 'OpenStack-style usage and chargeback API', currency: 'EUR', lastImport: '2026-10-30T06:20:00Z', rowCount: 109 },
+  { id: 'syn-on-premise-api', name: 'On-premises cost allocation API', connectionType: 'on_premise', typeLabel: 'On-premises API', apiStyle: 'Kubernetes cost allocation API (OpenCost-style)', currency: 'USD', lastImport: '2026-10-30T06:40:00Z', rowCount: 106 },
 ];
 
 const LOADERS: Record<string, () => Promise<{ default: unknown }>> = {

@@ -1,6 +1,7 @@
 // Deterministic SYNTHETIC FOCUS 1.0 datasets for the demo's three simulated API connections:
 // a public cloud API, a private cloud API (OpenStack-style) and an on-premise API (Kubernetes /
-// OpenCost-style). Every vendor, account and resource is fictional ("Example ..."). Money is built
+// OpenCost-style). Every vendor, account and resource name is fictional and comes from the allowlist
+// in demoApiDatasets.test.ts (category-style providers, fictional business units). Money is built
 // and summed as BigInt in units of 1e-10 and printed as exact decimal strings: no floats.
 // Missing data stays empty (FOCUS null) and each empty column is explained in naReasons, never 0.
 //
@@ -27,7 +28,7 @@ export { COMMON_NA_REASONS };
 interface Service { name: string; category: string; unit: string; code: string }
 interface Spec {
   id: string; name: string; type: ConnectionType; apiStyle: string; provider: string; issuer: string; currency: string;
-  account: [string, string]; subAccounts: string[]; regions: [string, string][]; services: Service[];
+  account: [string, string]; subAccounts: [string, string][]; regions: [string, string][]; services: Service[];
   seed: string; usageRows: number; lastImport: string; maxQty: number;
 }
 type Cells = Partial<Record<string, string>>;
@@ -89,13 +90,13 @@ function usageLine(c: Ctx, i: number, opts: { committed?: boolean; billedZero?: 
   const list = qty * unit;
   const effective = opts.committed ? (list * BigInt(70)) / BigInt(100) : list;
   const [region, regionName] = spec.regions[r() % spec.regions.length];
-  const sub = spec.subAccounts[r() % spec.subAccounts.length];
-  const res = `example-${svc.code.toLowerCase()}-${String(r() % 40).padStart(2, '0')}`;
+  const [sub, subName] = spec.subAccounts[r() % spec.subAccounts.length];
+  const res = `${svc.code.toLowerCase()}-${String(r() % 40).padStart(2, '0')}`;
   const cells: Cells = c.line!({
     AvailabilityZone: `${region}a`,
     BilledCost: formatUnits(opts.billedZero ? ZERO : effective),
     ChargeCategory: 'Usage',
-    ChargeDescription: `${svc.name}, synthetic line ${i}`,
+    ChargeDescription: `${svc.name}, usage line ${i}`,
     ChargePeriodStart: day(d), ChargePeriodEnd: dayEnd(d),
     ConsumedQuantity: qty.toString(), ConsumedUnit: svc.unit,
     // ContractedCost is the price before any commitment discount; the discount appears only in EffectiveCost.
@@ -103,8 +104,8 @@ function usageLine(c: Ctx, i: number, opts: { committed?: boolean; billedZero?: 
     ContractedUnitPrice: formatUnits(unit), ListUnitPrice: formatUnits(unit),
     PricingCategory: opts.committed ? 'Committed' : 'Standard', PricingQuantity: qty.toString(), PricingUnit: svc.unit,
     RegionId: region, RegionName: regionName, ResourceId: res, ResourceName: res, ResourceType: svc.category,
-    ServiceCategory: svc.category, ServiceName: svc.name, SkuId: `EX-SKU-${svc.code}`, SkuPriceId: `EX-PRICE-${svc.code}-${r() % 5}`,
-    SubAccountId: sub, SubAccountName: `Example ${sub}`,
+    ServiceCategory: svc.category, ServiceName: svc.name, SkuId: `SKU-${svc.code.toUpperCase()}`, SkuPriceId: `PRICE-${svc.code.toUpperCase()}-${r() % 5}`,
+    SubAccountId: sub, SubAccountName: subName,
     Tags: JSON.stringify({ env: r() % 2 ? 'prod' : 'dev', team: `team-${r() % 4}` }),
   });
   return { cells, list, effective };
@@ -129,32 +130,32 @@ function commitment(c: Ctx, p: { id: string; name: string; type: string; total: 
 
 const specs: Record<'public' | 'private' | 'onprem', Spec> = {
   public: {
-    id: 'syn-public-cloud-api', name: 'Example Cloud billing API', type: 'public_cloud', apiStyle: 'Provider billing export API (REST)', provider: 'Example Cloud', issuer: 'Example Cloud Inc.',
-    currency: 'USD', account: ['example-billing-0001', 'Example Billing Account'], subAccounts: ['example-sub-a', 'example-sub-b', 'example-sub-c'],
-    regions: [['ex-east-1', 'Example East'], ['ex-west-1', 'Example West']],
+    id: 'syn-public-cloud-api', name: 'Public cloud billing API', type: 'public_cloud', apiStyle: 'Provider billing export API (REST)', provider: 'Public cloud', issuer: 'Public cloud billing',
+    currency: 'USD', account: ['acct-0001', 'Corporate billing account'], subAccounts: [['acct-0001-payments', 'Payments'], ['acct-0001-search', 'Search'], ['acct-0001-data', 'Data platform']],
+    regions: [['east-1', 'East 1'], ['west-1', 'West 1']],
     services: [
-      { name: 'Example Compute', category: 'Compute', unit: 'Hours', code: 'Compute' }, { name: 'Example Object Storage', category: 'Storage', unit: 'GB-Mo', code: 'Storage' },
-      { name: 'Example Database', category: 'Databases', unit: 'Hours', code: 'Database' }, { name: 'Example Inference', category: 'AI and Machine Learning', unit: '1K Tokens', code: 'Inference' },
+      { name: 'Virtual machines', category: 'Compute', unit: 'Hours', code: 'Compute' }, { name: 'Object storage', category: 'Storage', unit: 'GB-Mo', code: 'Storage' },
+      { name: 'Managed database', category: 'Databases', unit: 'Hours', code: 'Database' }, { name: 'Model inference', category: 'AI and Machine Learning', unit: '1K Tokens', code: 'Inference' },
     ],
     seed: 'ratio-demo-public-2026-09', usageRows: 96, lastImport: '2026-10-30T06:00:00Z', maxQty: 2000,
   },
   private: {
-    id: 'syn-private-cloud-api', name: 'Example Private Cloud usage API', type: 'private_cloud', apiStyle: 'OpenStack-style usage and chargeback API', provider: 'Example Private Cloud', issuer: 'Example IT Chargeback',
-    currency: 'EUR', account: ['example-tenant-0001', 'Example Private Tenant'], subAccounts: ['example-project-1', 'example-project-2', 'example-project-3', 'example-project-4'],
-    regions: [['ex-dc-fra', 'Example DC Frankfurt'], ['ex-dc-ams', 'Example DC Amsterdam']],
+    id: 'syn-private-cloud-api', name: 'Private cloud usage API', type: 'private_cloud', apiStyle: 'OpenStack-style usage and chargeback API', provider: 'Private cloud', issuer: 'Internal IT chargeback',
+    currency: 'EUR', account: ['tenant-0001', 'Shared services tenant'], subAccounts: [['project-payments', 'Payments'], ['project-search', 'Search'], ['project-data', 'Data platform'], ['project-analytics', 'Analytics']],
+    regions: [['dc-north', 'North data center'], ['dc-south', 'South data center']],
     services: [
-      { name: 'Example vCPU', category: 'Compute', unit: 'vCPU-Hours', code: 'Vcpu' }, { name: 'Example Memory', category: 'Compute', unit: 'GB-Hours', code: 'Memory' },
-      { name: 'Example Block Storage', category: 'Storage', unit: 'GB-Mo', code: 'Block' }, { name: 'Example Floating IPs', category: 'Networking', unit: 'IP-Hours', code: 'Fip' },
+      { name: 'vCPU', category: 'Compute', unit: 'vCPU-Hours', code: 'Vcpu' }, { name: 'Memory', category: 'Compute', unit: 'GB-Hours', code: 'Memory' },
+      { name: 'Block storage', category: 'Storage', unit: 'GB-Mo', code: 'Block' }, { name: 'Floating IPs', category: 'Networking', unit: 'IP-Hours', code: 'Fip' },
     ],
     seed: 'ratio-demo-private-2026-09', usageRows: 100, lastImport: '2026-10-30T06:20:00Z', maxQty: 1500,
   },
   onprem: {
-    id: 'syn-on-premise-api', name: 'Example Datacenter cost allocation API', type: 'on_premise', apiStyle: 'Kubernetes cost allocation API (OpenCost-style)', provider: 'Example Datacenter', issuer: 'Example Datacenter Ops',
-    currency: 'USD', account: ['example-dc-cluster-01', 'Example DC Cluster 01'], subAccounts: ['example-ns-payments', 'example-ns-search', 'example-ns-data', 'example-ns-platform'],
-    regions: [['ex-dc-hq', 'Example Datacenter HQ']],
+    id: 'syn-on-premise-api', name: 'On-premises cost allocation API', type: 'on_premise', apiStyle: 'Kubernetes cost allocation API (OpenCost-style)', provider: 'On-premises data center', issuer: 'Data center operations',
+    currency: 'USD', account: ['cluster-01', 'Primary cluster'], subAccounts: [['ns-payments', 'Payments'], ['ns-search', 'Search'], ['ns-data', 'Data platform'], ['ns-platform', 'Platform']],
+    regions: [['dc-hq', 'Headquarters data center']],
     services: [
-      { name: 'Example CPU allocation', category: 'Compute', unit: 'Core-Hours', code: 'Cpu' }, { name: 'Example RAM allocation', category: 'Compute', unit: 'GiB-Hours', code: 'Ram' },
-      { name: 'Example Persistent volume', category: 'Storage', unit: 'GiB-Days', code: 'Pv' }, { name: 'Example GPU allocation', category: 'AI and Machine Learning', unit: 'GPU-Hours', code: 'Gpu' },
+      { name: 'CPU allocation', category: 'Compute', unit: 'Core-Hours', code: 'Cpu' }, { name: 'RAM allocation', category: 'Compute', unit: 'GiB-Hours', code: 'Ram' },
+      { name: 'Persistent volume', category: 'Storage', unit: 'GiB-Days', code: 'Pv' }, { name: 'GPU allocation', category: 'AI and Machine Learning', unit: 'GPU-Hours', code: 'Gpu' },
     ],
     seed: 'ratio-demo-onprem-2026-09', usageRows: 100, lastImport: '2026-10-30T06:40:00Z', maxQty: 1000,
   },
@@ -165,26 +166,26 @@ const adjustment = (c: Ctx, amount: bigint, description: string, cls: string): C
 
 export function generatePublicCloud(): Dataset {
   return build(specs.public, (c) => {
-    commitment(c, { id: 'example-sp-0001', name: 'Example Compute Savings Plan', type: 'Savings Plan', total: cents(60000), months: 3, usageFrom: 1000, usageCount: 6, svcIndex: 0, note: 'Example Compute Savings Plan, 3 months, all upfront' });
+    commitment(c, { id: 'sp-0001', name: 'Compute savings plan', type: 'Savings Plan', total: cents(60000), months: 3, usageFrom: 1000, usageCount: 6, svcIndex: 0, note: 'Compute savings plan, 3 months, all upfront' });
     let taxable = ZERO;
     for (let i = 0; i < c.spec.usageRows; i++) {
       const { cells, effective } = usageLine(c, i, {});
       taxable += effective;
       c.push(cells);
     }
-    for (const [amount, text] of [[cents(-2500), 'Example promotional credit'], [cents(-750), 'Example service-level credit']] as const) {
+    for (const [amount, text] of [[cents(-2500), 'Promotional credit'], [cents(-750), 'Service-level credit']] as const) {
       c.push(c.line!({ ChargeCategory: 'Credit', ChargeDescription: text, ChargeFrequency: 'One-Time', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits(amount), EffectiveCost: formatUnits(amount), ContractedCost: formatUnits(amount), ListCost: formatUnits(ZERO), ServiceName: 'Credits', ServiceCategory: 'Other' }));
     }
-    c.push(c.line!({ ChargeCategory: 'Tax', ChargeDescription: 'Example sales tax, 8% of standard usage', ChargeFrequency: 'Recurring', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits((taxable * BigInt(8)) / BigInt(100)), EffectiveCost: formatUnits((taxable * BigInt(8)) / BigInt(100)), ContractedCost: formatUnits((taxable * BigInt(8)) / BigInt(100)), ListCost: formatUnits((taxable * BigInt(8)) / BigInt(100)), ServiceName: 'Tax', ServiceCategory: 'Other' }));
-    c.push(adjustment(c, cents(-314), 'Example billing correction for August', 'Correction'));
+    c.push(c.line!({ ChargeCategory: 'Tax', ChargeDescription: 'Sales tax, 8% of standard usage', ChargeFrequency: 'Recurring', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits((taxable * BigInt(8)) / BigInt(100)), EffectiveCost: formatUnits((taxable * BigInt(8)) / BigInt(100)), ContractedCost: formatUnits((taxable * BigInt(8)) / BigInt(100)), ListCost: formatUnits((taxable * BigInt(8)) / BigInt(100)), ServiceName: 'Tax', ServiceCategory: 'Other' }));
+    c.push(adjustment(c, cents(-314), 'Billing correction for August', 'Correction'));
   }, { ...COMMON_NA_REASONS });
 }
 
 export function generatePrivateCloud(): Dataset {
   return build(specs.private, (c) => {
-    commitment(c, { id: 'example-rc-0001', name: 'Example reserved capacity block', type: 'Reserved Capacity', total: cents(90000), months: 3, usageFrom: 1000, usageCount: 6, svcIndex: 0, note: 'Example reserved capacity block, billed quarterly' });
+    commitment(c, { id: 'rc-0001', name: 'Reserved capacity block', type: 'Reserved Capacity', total: cents(90000), months: 3, usageFrom: 1000, usageCount: 6, svcIndex: 0, note: 'Reserved capacity block, billed quarterly' });
     for (let i = 0; i < c.spec.usageRows; i++) c.push(usageLine(c, i, {}).cells);
-    c.push(c.line!({ ChargeCategory: 'Credit', ChargeDescription: 'Example internal chargeback credit', ChargeFrequency: 'One-Time', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits(cents(-4000)), EffectiveCost: formatUnits(cents(-4000)), ContractedCost: formatUnits(cents(-4000)), ListCost: formatUnits(ZERO), ServiceName: 'Credits', ServiceCategory: 'Other' }));
+    c.push(c.line!({ ChargeCategory: 'Credit', ChargeDescription: 'Internal chargeback credit', ChargeFrequency: 'One-Time', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits(cents(-4000)), EffectiveCost: formatUnits(cents(-4000)), ContractedCost: formatUnits(cents(-4000)), ListCost: formatUnits(ZERO), ServiceName: 'Credits', ServiceCategory: 'Other' }));
   }, { ...COMMON_NA_REASONS });
 }
 
@@ -197,12 +198,12 @@ export function generateOnPremise(): Dataset {
     // Idle capacity is reserved by the cluster itself, so its quantity is the capacity held; the cost is real.
     for (let k = 0; k < 4; k++) {
       const { cells, effective } = usageLine(c, 500 + k, { billedZero: true });
-      c.push({ ...cells, SubAccountId: 'example-ns-idle', SubAccountName: 'Example idle capacity', ChargeDescription: 'Idle capacity share (held by the cluster, unallocated)', PricingCategory: 'Other', EffectiveCost: formatUnits(effective) });
+      c.push({ ...cells, SubAccountId: 'ns-idle', SubAccountName: 'Idle capacity', ChargeDescription: 'Idle capacity share (held by the cluster, unallocated)', PricingCategory: 'Other', EffectiveCost: formatUnits(effective) });
     }
     // The one real invoice: power and cooling (Billed = Effective).
     const power = cents(180000);
-    c.push(c.line!({ ChargeCategory: 'Usage', ChargeDescription: 'Example power and cooling invoice', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits(power), EffectiveCost: formatUnits(power), ContractedCost: formatUnits(power), ListCost: formatUnits(power), PricingCategory: 'Standard', PricingQuantity: '1', PricingUnit: 'Months', ListUnitPrice: formatUnits(power), ContractedUnitPrice: formatUnits(power), ConsumedQuantity: '1', ConsumedUnit: 'Months', ServiceName: 'Example Power and cooling', ServiceCategory: 'Other', ResourceId: 'example-dc-hall-1', ResourceName: 'example-dc-hall-1', ResourceType: 'Facility', SubAccountId: 'example-facilities', SubAccountName: 'Example facilities', RegionId: 'ex-dc-hq', RegionName: 'Example Datacenter HQ' }));
-    c.push(adjustment(c, cents(-1234), 'Example metering correction for August', 'Correction'));
+    c.push(c.line!({ ChargeCategory: 'Usage', ChargeDescription: 'Power and cooling invoice', ChargePeriodStart: PERIOD.start, ChargePeriodEnd: PERIOD.end, BilledCost: formatUnits(power), EffectiveCost: formatUnits(power), ContractedCost: formatUnits(power), ListCost: formatUnits(power), PricingCategory: 'Standard', PricingQuantity: '1', PricingUnit: 'Months', ListUnitPrice: formatUnits(power), ContractedUnitPrice: formatUnits(power), ConsumedQuantity: '1', ConsumedUnit: 'Months', ServiceName: 'Power and cooling', ServiceCategory: 'Other', ResourceId: 'dc-hall-1', ResourceName: 'dc-hall-1', ResourceType: 'Facility', SubAccountId: 'facilities', SubAccountName: 'Facilities', RegionId: 'dc-hq', RegionName: 'Headquarters data center' }));
+    c.push(adjustment(c, cents(-1234), 'Metering correction for August', 'Correction'));
   }, { ...COMMON_NA_REASONS }, 'Owned hardware has no vendor invoice: its allocation is a true 0 billed (no vendor invoice) and carries its cost, priced at the rate card, in EffectiveCost (amortized).');
 }
 

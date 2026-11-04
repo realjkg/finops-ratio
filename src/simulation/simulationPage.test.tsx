@@ -71,9 +71,9 @@ describe('/simulation with server simulation disabled', () => {
     const region = () => box.querySelector('[aria-label="Imported synthetic connections"]')!;
     expect([...region().querySelectorAll('tbody tr')].map((tr) => tr.children[0].textContent)).toEqual(['EUR', 'USD']);
     click(buttons()[1]);
-    expect(region().textContent).toMatch(/Example Cloud billing API/);
+    expect(region().textContent).toMatch(/Public cloud billing API/);
     click(buttons()[2]);
-    expect(region().textContent).toMatch(/Example Compute Savings Plan.*prepaid.*unused/);
+    expect(region().textContent).toMatch(/Compute savings plan.*prepaid.*unused/);
     expect(region().textContent).toMatch(/No commitment on this connection/);
     expect(fetchSpy).not.toHaveBeenCalled();
   });

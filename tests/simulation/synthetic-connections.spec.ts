@@ -12,7 +12,7 @@ for (const width of [390, 768, 1024, 1280, 1440]) {
     const cards = page.getByRole('article');
     await expect(cards).toHaveCount(3);
     await expect(page.getByText('Synthetic', { exact: true })).toHaveCount(3);
-    for (const name of ['Example Cloud billing API', 'Example Private Cloud usage API', 'Example Datacenter cost allocation API']) {
+    for (const name of ['Public cloud billing API', 'Private cloud usage API', 'On-premises cost allocation API']) {
       await page.getByRole('article', { name }).getByRole('button', { name: 'Import sample' }).click();
       await expect(page.getByRole('article', { name }).getByRole('status')).toContainText('Reconciled');
     }
@@ -36,7 +36,7 @@ for (const width of [390, 768, 1024, 1280, 1440]) {
       .filter((x) => x.over > 0));
     expect(spill).toEqual([]);
     // The N/A list is collapsed by default and, opened, stays compact.
-    const details = page.getByRole('article', { name: 'Example Private Cloud usage API' }).locator('details');
+    const details = page.getByRole('article', { name: 'Private cloud usage API' }).locator('details');
     await expect(details).not.toHaveAttribute('open', '');
     await details.locator('summary').click();
     const height = (await details.boundingBox())!.height;
