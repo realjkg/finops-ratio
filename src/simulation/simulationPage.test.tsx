@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-// /simulation: when server simulation is off the page is a finished read-only sample (no data request,
-// no storage); when it is on, the sign-in experience is unchanged.
+// /simulation: when server simulation is off the page is a finished read-only role chooser (no data request,
+// no storage); when it is on, the sign-in experience is unchanged. The route name says "Simulation", so the
+// page carries no Demo badge and no synthetic/sample wording; one functional line says nothing is saved.
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,13 +26,17 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 afterEach(() => { act(() => root.unmount()); box.remove(); vi.unstubAllGlobals(); });
 
 describe('/simulation with server simulation disabled', () => {
-  it('shows the labeled sample workspace instead of the dead end, with three persona cards', () => {
+  it('shows a plain Simulation role chooser instead of the dead end, with three persona cards and no data label', () => {
     access.current = { ...base, enabled: false };
     mount();
     expect(box.textContent).not.toMatch(/does not enable customer simulation/);
-    expect(box.querySelector('[role="note"]')?.textContent).toBe('Synthetic sample data · nothing is saved');
+    expect(box.querySelector('h1')?.textContent).toBe('Simulation: see the same costs through three roles');
+    expect(box.querySelector('[data-testid="read-only-line"]')?.textContent).toBe('Read-only: no sign-in, nothing is sent, and changes are not saved.');
+    expect(box.querySelector('[data-testid="demo-badge"]')).toBeNull();
+    expect(box.querySelector('[role="note"]')).toBeNull();
+    expect(box.textContent).not.toMatch(/synthetic|sample|seeded|fictional|example/i);
     expect(box.textContent).not.toMatch(/Continue as/);
-    expect(buttons().map((b) => b.textContent)).toEqual(['Open Executive sample', 'Open Technical sample', 'Open Procurement sample']);
+    expect(buttons().map((b) => b.textContent)).toEqual(['Open Executive view', 'Open Technical view', 'Open Procurement view']);
   });
   it('explains the (watch) flags in the Executive and Technical views', () => {
     access.current = { ...base, enabled: false };
@@ -48,7 +53,7 @@ describe('/simulation with server simulation disabled', () => {
     mount();
     for (const [i, title] of ['Executive', 'Technical', 'Procurement'].entries()) {
       click(buttons()[i]);
-      const region = box.querySelector(`[aria-label="Sample workspace: ${title}"]`);
+      const region = box.querySelector(`[aria-label="${title} view"]`);
       expect(region?.textContent, title).toMatch(/\$|%/);
       expect(buttons()[i].getAttribute('aria-pressed')).toBe('true');
     }
@@ -56,19 +61,19 @@ describe('/simulation with server simulation disabled', () => {
     expect([localStorage.length, sessionStorage.length]).toEqual([0, 0]);
     expect(box.querySelectorAll('input, textarea, select')).toHaveLength(0);
   });
-  it('uses the imported synthetic connections in each persona view, still with no data request', async () => {
+  it('uses the imported API connections in each persona view, still with no data request', async () => {
     const fetchSpy = vi.fn(() => { throw new Error('no network in the sample'); });
     vi.stubGlobal('fetch', fetchSpy);
     useSampleImports.setState({ imported: {}, busy: {}, error: null });
     access.current = { ...base, enabled: false };
     mount();
     click(buttons()[0]);
-    expect(box.querySelector('[aria-label="Imported synthetic connections"]')?.textContent).toMatch(/Import the three synthetic connections/);
+    expect(box.querySelector('[aria-label="Imported API connections"]')?.textContent).toMatch(/Import the three connections/);
     await act(async () => {
-      click(buttons().find((b) => b.textContent === 'Import the three synthetic connections')!);
+      click(buttons().find((b) => b.textContent === 'Import the three connections')!);
       for (let i = 0; i < 100 && Object.keys(useSampleImports.getState().imported).length < 3; i++) await new Promise((r) => setTimeout(r, 20));
     });
-    const region = () => box.querySelector('[aria-label="Imported synthetic connections"]')!;
+    const region = () => box.querySelector('[aria-label="Imported API connections"]')!;
     expect([...region().querySelectorAll('tbody tr')].map((tr) => tr.children[0].textContent)).toEqual(['EUR', 'USD']);
     click(buttons()[1]);
     expect(region().textContent).toMatch(/Public cloud billing API/);
@@ -82,23 +87,23 @@ describe('/simulation with server simulation disabled', () => {
     mount();
     expect(box.querySelector('[role="alert"]')?.textContent).toMatch(/Could not reach/);
     expect(box.textContent).not.toMatch(/This deployment does not save customer workspaces/);
-    expect(box.textContent).toMatch(/could not be reached, so this is a read-only sample/);
-    expect(box.querySelector('[role="note"]')?.textContent).toBe('Synthetic sample data · nothing is saved');
+    expect(box.textContent).toMatch(/The simulation service could not be reached\. Pick a role/);
+    expect(box.querySelector('[data-testid="read-only-line"]')?.textContent).toMatch(/changes are not saved/);
   });
-  it('waits while loading instead of flashing the sample', () => {
+  it('waits while loading instead of flashing the role chooser', () => {
     access.current = { ...base, enabled: false, loading: true };
     mount();
-    expect(box.querySelector('[role="note"]')).toBeNull();
+    expect(box.querySelector('[data-testid="read-only-line"]')).toBeNull();
     expect(box.textContent).toContain('Loading simulation');
   });
 });
 
 describe('/simulation with server simulation enabled', () => {
-  it('is unchanged: server-backed identities, no sample', () => {
+  it('is unchanged apart from the Simulation heading: server-backed identities, no read-only chooser', () => {
     access.current = { ...base, enabled: true, identities: { a: { tenant: 'Example Tenant', user: 'Ada Example', persona: 'executive' } } };
     mount();
-    expect(box.querySelector('[role="note"]')).toBeNull();
-    expect(box.textContent).toContain('Follow the cost from import to decision.');
+    expect(box.querySelector('[data-testid="read-only-line"]')).toBeNull();
+    expect(box.querySelector('h1')?.textContent).toBe('Simulation: follow the cost from import to decision');
     expect(buttons().map((b) => b.textContent)).toEqual(['Continue as Ada']);
     click(buttons()[0]);
     expect(base.signIn).toHaveBeenCalledWith('a');

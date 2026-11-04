@@ -1,4 +1,4 @@
-// The read-only SAMPLE workspace behind /simulation when server simulation is off (public deployments).
+// The read-only role views behind /simulation when server simulation is off (public deployments).
 // Pure view-models over the bundled synthetic seed (src/data): no data request after the page loads, no storage, no clock.
 // Money is summed and shown as integer cents, so no floating-point sum reaches the screen.
 import { ALERTS } from '@/data/alerts';
@@ -7,7 +7,10 @@ import { MODEL_REGISTRY } from '@/data/models';
 import { WORKLOADS } from '@/data/workloads';
 import type { Persona } from '@/lib/persona';
 
-export const SAMPLE_LABEL = 'Synthetic sample data · nothing is saved';
+/** Document title of /simulation: the route name carries the demo context, so there is no Demo badge there. */
+export const SIMULATION_TITLE = 'Simulation · Ratio';
+/** The one functional line about read-only behavior (not a data label): nothing is requested, sent or kept. */
+export const READ_ONLY_LINE = 'Read-only: no sign-in, nothing is sent, and changes are not saved.';
 export const SAMPLE_PERSONAS: Record<Persona, { title: string; blurb: string }> = {
   executive: { title: 'Executive', blurb: 'Review value and budget risk across every workload.' },
   technical: { title: 'Technical', blurb: 'Find the biggest cost drivers and the alerts behind them.' },
@@ -53,7 +56,7 @@ export function sampleView(persona: Persona): SampleView {
       rows: [...spend].sort((a, b) => budgetShare(b.c, b.b) - budgetShare(a.c, a.b)).slice(0, 5).map(({ w, c, b }) => ({
         label: w.name, detail: `${w.team} · ${formatCents(c)} of ${formatCents(b)}`, value: `${budgetShare(c, b)}%`, flag: budgetShare(c, b) >= 90 ? 'risk' : 'ok',
       })),
-      note: 'Spend is each workload’s monthly run rate in the synthetic seed. (watch) means at or above 90% of its budget.',
+      note: 'Spend is each workload’s modeled monthly cost. (watch) means at or above 90% of its budget.',
     };
   }
   if (persona === 'technical') {
@@ -83,6 +86,6 @@ export function sampleView(persona: Persona): SampleView {
     rows: models.slice(0, 6).map((m) => ({
       label: m.display_name, detail: `${m.provider} · ${m.cost_tier}`, value: `$${m.pricing.input_per_1m} / $${m.pricing.output_per_1m}`,
     })),
-    note: 'Prices are the synthetic registry’s list rates, not a quote.',
+    note: 'Prices are the model registry’s list rates, not a quote.',
   };
 }

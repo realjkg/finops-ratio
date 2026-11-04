@@ -109,9 +109,9 @@ for (const theme of Object.keys(MAX)) {
     await page.route('**/api/v1/simulation/status', (r) => r.fulfill({ json: { enabled: false } }));
     await page.goto('/simulation');
     await page.waitForLoadState('networkidle');
-    await page.getByRole('button', { name: 'Open Procurement sample' }).click();
-    await page.getByRole('button', { name: 'Import the three synthetic connections' }).click();
-    await expect(page.getByRole('region', { name: 'Imported synthetic connections' }).getByText('Compute savings plan')).toBeVisible();
+    await page.getByRole('button', { name: 'Open Procurement view' }).click();
+    await page.getByRole('button', { name: 'Import the three connections' }).click();
+    await expect(page.getByRole('region', { name: 'Imported API connections' }).getByText('Compute savings plan')).toBeVisible();
     await record('/simulation (sample)');
     await page.unroute('**/api/v1/simulation/status');
     for (const width of [390, 360]) {

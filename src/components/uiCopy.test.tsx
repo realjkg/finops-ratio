@@ -29,7 +29,7 @@ describe('SignInRequired', () => {
     expect(html).toContain('Agent workflows');
     expect(html).toContain('Queue an evidence review.');
     expect(html).toMatch(/href="\/simulation"[^>]*>Choose a simulated identity</);
-    expect(html).toMatch(/href="\/demo"[^>]*>Back to the sample workspace</);
+    expect(html).toMatch(/href="\/demo"[^>]*>Back to the demo</);
     expect(html).toContain('aria-busy="false"');
   });
 
