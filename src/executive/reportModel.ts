@@ -27,7 +27,7 @@ export interface ReportRow {
   budgetConsumedPct: number | null;
   budgetConsumedNa: string | null;
   status: string;
-  costEfficiency: number;
+  costEfficiency: number | null;
   savingsOpportunity: number;
   lastUpdated: string;
 }

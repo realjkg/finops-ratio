@@ -248,7 +248,7 @@ export function PredictionResult({ prediction }: { prediction: ChangePrediction 
         <Metric label="Δ daily" value={usdOrUncertain(paired.deltaDailySpend)} tone={TOKEN_COLOR.cost} />
         <Metric label="Δ monthly" value={usdOrUncertain(paired.deltaMonthlySpend)} tone={TOKEN_COLOR.cost} />
         <Metric
-          label="Δ value ratio"
+          label="Δ Value / cost"
           value={deltaRatio.text}
           tone={TOKEN_COLOR.value}
         />

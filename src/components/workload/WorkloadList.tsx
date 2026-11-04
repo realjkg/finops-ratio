@@ -1,6 +1,7 @@
 // Left panel — workload list (spec §3.3). Filtered, then sorted by value ratio
 // ascending so the worst ratios surface first for action.
 
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { useEffect, useMemo, useRef } from 'react';
 import { useStore } from '@/store/useStore';
 import { landedWorkloads } from '@/connectors/ingestLanding';
@@ -40,7 +41,7 @@ export function WorkloadList() {
       .filter((w) => filters.team === 'all' || w.team === filters.team)
       .filter((w) => filters.provider === 'all' || w.model_provider === filters.provider)
       .filter((w) => filters.environment === 'all' || w.environment === filters.environment)
-      .sort((a, b) => a.value.value_ratio - b.value.value_ratio);
+      .sort((a, b) => (workloadValueRatio(a) ?? -Infinity) - (workloadValueRatio(b) ?? -Infinity));
   }, [workloads, filters]);
 
   // Connector provenance: which workloads' cost rows landed in an ingest run.

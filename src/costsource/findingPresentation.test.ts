@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findingsFor } from './seed';
+import { WORKLOADS } from '@/data/workloads';
 import { presentFinding } from './findingPresentation';
 
 describe('seeded finding presentation', () => {
@@ -26,5 +27,22 @@ describe('seeded finding presentation', () => {
 
   it('leaves every non-target finding exactly as the contract has it', () => {
     for (const f of all.filter((x) => !rightsizing.includes(x))) expect(presentFinding(f)).toEqual({ title: f.title, details: [] });
+  });
+
+  it('the type and category guard matters: a matching id with another type or category is not rewritten', () => {
+    const f = rightsizing.find((x) => x.id.endsWith('wl-fraud'))!;
+    expect(presentFinding({ ...f, type: 'anomaly' }).title).toBe(f.title);
+    expect(presentFinding({ ...f, category: 'spend_spike' }).title).toBe(f.title);
+    expect(presentFinding({ ...f, type: 'anomaly' }).details).toEqual([]);
+  });
+
+  it('below/above wording follows the live ratio of the workload, not a static claim', () => {
+    const f = rightsizing.find((x) => x.id.endsWith('wl-fraud'))!;
+    const high = structuredClone(WORKLOADS.find((w) => w.id === 'wl-fraud')!);
+    high.value = { ...high.value, revenue_protected: 100000, cost_avoided: 0, harm_from_misses: 0, quality_floor_pass_rate: 1 };
+    expect(presentFinding(f, [high]).title).toBe('Fraud Triage Agent is at or above the configured 3× value / cost target.');
+    const none = structuredClone(high);
+    none.costs.monthly_spend = 0;
+    expect(presentFinding(f, [none]).title).toMatch(/has no Value \/ cost/);
   });
 });

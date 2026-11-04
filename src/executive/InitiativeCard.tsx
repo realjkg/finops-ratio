@@ -27,7 +27,10 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
       ? initiative.costSource === 'recorded'
         ? `${VOCAB.budgetUsed.label} · month to date · ${basisLine('recorded')}`
         : budgetLabel('modeled', 'month')
-      : `${lang.fuelLabel} · month to date`;
+      : // Other personas keep their own term; over a modeled numerator it is an estimate, so say so.
+        initiative.costSource === 'recorded'
+        ? `${lang.fuelLabel} · month to date`
+        : `Estimated ${lang.fuelLabel.toLowerCase()} · month to date`;
 
   return (
     <article

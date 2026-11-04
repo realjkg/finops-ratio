@@ -10,11 +10,11 @@ export function ValueRatioBar({
   ratio,
   rightLabel,
 }: {
-  ratio: number;
+  ratio: number | null;
   rightLabel: string;
 }) {
   const color = ratioColor(ratio);
-  const pct = Math.max(Math.min(ratio / REFERENCE_CEILING, 1), 0.04) * 100;
+  const pct = ratio === null ? 0.04 * 100 : Math.max(Math.min(ratio / REFERENCE_CEILING, 1), 0.04) * 100;
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between">

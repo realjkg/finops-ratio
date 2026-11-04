@@ -74,12 +74,12 @@ describe('finding card (lowest Value / cost first: Fraud Triage Agent)', () => {
       'Counted business value$3,898',
       'Less modeled harm from misses-$4,600',
       'Adjusted value (estimated business value)-$702',
-      'Modeled workload cost$4,200',
-      'Value / cost (unrounded)-0.17×',
+      'Modeled workload cost (monthly)$4,200',
+      'Value / cost (unrounded)-0.167×',
       'Displayed-0.2×',
       'Break-even1×',
       'Configured policy target3×',
-      'Gap to the 3× target3.17×',
+      'Gap to the 3× target3.167×',
     ];
     let at = -1;
     for (const part of order) {
@@ -87,7 +87,8 @@ describe('finding card (lowest Value / cost first: Fraud Triage Agent)', () => {
       expect(i, part).toBeGreaterThan(at);
       at = i;
     }
-    for (const part of ['applied once, to gross value', 'neither is deducted twice', 'Basis: demo assumption', '30-day month convention', 'Period.', 'Value assumptions.', 'Target source. Demo configuration', 'Break-even. 1×, where value equals cost', 'not a general financial standard', 'Set in demo configuration', 'not Billed cost or Effective cost']) {
+    expect(t.split('Set in demo configuration').length - 1).toBe(1); // said once, not twice
+    for (const part of ['applied once, to gross value', 'neither is deducted twice', 'Basis: demo assumption', '30-day month convention', 'Period.', 'Value assumptions.', 'Target source. Set in demo configuration.', 'Break-even. 1×, where value equals cost', 'not a general financial standard', 'Set in demo configuration', 'not Billed cost or Effective cost']) {
       expect(t, part).toContain(part);
     }
   });

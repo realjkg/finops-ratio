@@ -97,3 +97,18 @@ describe('status of an invalid-budget initiative (report paths)', () => {
     expect(text).toContain('|Budget N/A|');
   });
 });
+
+describe('PDF KPI follows the cost source', () => {
+  const recorded = WORKLOADS.map((w) => ({ ...w, costs: { ...w.costs, recorded_mtd: w.costs.monthly_spend } }));
+  it('a recorded workspace reads "Recorded cost to date" with a plain amount (no "/mo")', () => {
+    const text = pdfText(ReportDocument({ model: buildReportModel(FIXED, recorded) } as never));
+    expect(text).toMatch(/Recorded cost to date\|\$[\d,]+\|/);
+    expect(text).not.toMatch(/Recorded cost to date\|\$[\d,]+\/mo/);
+    expect(text).not.toContain('Modeled workload cost');
+  });
+  it('the bundled workspace reads "Modeled workload cost" with /mo', () => {
+    const text = pdfText(ReportDocument({ model: buildReportModel(FIXED, WORKLOADS) } as never));
+    expect(text).toMatch(/Modeled workload cost\|\$[\d,]+\/mo/);
+    expect(text).not.toContain('Recorded cost to date');
+  });
+});

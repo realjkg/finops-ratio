@@ -4,6 +4,7 @@
 // (one source of truth, persona-projected), plus per-initiative savings drawn
 // from the configured cost-source findings and an optional workload drill-down.
 
+import { workloadValueRatioOrNaN } from '@/lib/valueRatio';
 import { savingsByWorkload } from '@/costsource/headline';
 import { alertsFor } from '@/data/alerts';
 import { DEMO_NOW } from '@/data/workloads';
@@ -51,7 +52,7 @@ export function buildAIContext(
     annualRunRate: i.monthlyCost * 12,
     budgetConsumedPct: i.budgetConsumedPct,
     status: INITIATIVE_STATUS_META[i.status].label as AIInitiativeSnapshot['status'],
-    valueRatio: i.valueRatio,
+    valueRatio: i.valueRatio ?? Number.NaN, // N/A travels as NaN (null in JSON); Frank reads it as n/a, never 0
     valueEvidenceStatus: i.valueEvidenceStatus,
     savingsOpportunity: Math.round(savings.get(i.id) ?? 0),
   }]);
@@ -61,7 +62,7 @@ export function buildAIContext(
     name: w.name,
     model: w.model,
     monthlySpend: w.costs.monthly_spend,
-    valueRatio: w.value.value_ratio,
+    valueRatio: workloadValueRatioOrNaN(w),
     valueEvidenceStatus: headlineEvidenceStatus(w.value),
     demandShape: w.demand_shape,
     governanceGatesPassed: gatesPassed(w),

@@ -144,7 +144,7 @@ export function ReportDocument({ model }: { model: ReportModel }) {
         </Text>
 
         <View style={styles.kpiGrid}>
-          <KpiBox label={`${reportHeaders(model.costSource).cost}`} value={`${formatUSD(summary.totalMonthlySpend)}/mo`} color={TOKEN.cost} />
+          <KpiBox label={`${reportHeaders(model.costSource).cost}`} value={model.costSource === 'recorded' ? formatUSD(summary.totalMonthlySpend) : `${formatUSD(summary.totalMonthlySpend)}/mo`} color={TOKEN.cost} />
           <KpiBox label="Projected Savings" value={formatUSD(summary.projectedSavings)} color={TOKEN.value} />
           <KpiBox label="Initiatives Active" value={String(summary.initiativesActive)} />
           <KpiBox

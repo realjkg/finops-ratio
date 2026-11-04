@@ -226,7 +226,7 @@ function PredictionCard({ prediction }: { prediction: ChangePrediction }) {
       <div className="grid grid-cols-3 gap-3">
         <Metric label="Δ daily spend" value={usdOrUncertain(impact.deltaDailySpend)} tone="cost" />
         <Metric label="Δ monthly spend" value={usdOrUncertain(impact.deltaMonthlySpend)} tone="cost" />
-        <Metric label="Δ value ratio" value={deltaRatio.text} tone="value" />
+        <Metric label="Δ Value / cost" value={deltaRatio.text} tone="value" />
       </div>
       {deltaRatio.capped && (
         <p className="mt-2 font-sans text-[12px] text-cost">

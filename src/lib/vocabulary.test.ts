@@ -62,6 +62,9 @@ const ALLOWED: ReadonlyArray<{ file: string; match: RegExp; why: string }> = [
   { file: 'src/costsource/seed.ts', match: /below 3× value floor/, why: 'seeded finding title: a value in the public API contract (src/compat/golden/api.json); displayed through findingPresentation, keyed by id' },
   { file: 'src/data/alerts.ts', match: /Value ratio fell to/, why: 'seeded alert message: a value in the public API contract; displayed through alertPresentation, keyed by alert id' },
   { file: 'src/costsource/AiSpendRatioCard.tsx', match: /file AI spend under other categories/, why: 'FOCUS service-category total on /costsource ("AI spend vs total spend"), a different measure from workload cost' },
+  { file: 'src/ai/mock/intents.ts', match: /value ratio\|\\breturns/, why: 'a regex that recognizes what a user types; it must keep matching the old words' },
+  { file: 'src/ai/mock/legacy.ts', match: /Its value ratio justifies the spend/, why: 'legacy Frank answer: byte-identical by design (regression test and API golden)' },
+  { file: 'src/ai/mock/legacy.ts', match: /value ratios, budget status, and savings/, why: 'legacy Frank help text: byte-identical by design' },
   { file: 'src/lib/vocabulary.ts', match: /./, why: 'the module that defines the banned patterns' },
 ];
 

@@ -175,7 +175,7 @@ function ConnectorRegistry() {
               <div className="font-mono text-sm font-bold text-txt">Adapter registry</div>
               <p className="mt-1.5 text-[12px] text-sub">
                 Auth + fetch + identity resolution per source. Only the adapter is
-                source-specific; the engine, forecasts, value ratios, and governance gates
+                source-specific; the engine, forecasts, Value / cost, and governance gates
                 stay provider-agnostic.
               </p>
             </div>

@@ -3,6 +3,7 @@
 // Cost is ALWAYS computed alongside its value context (spec R4).
 
 import { findModel } from '@/data/models';
+import { workloadValueRatio } from '@/lib/valueRatio';
 import type { ModelEntry, UnitCosts, Workload } from '@/types';
 
 function safeDiv(numerator: number, denominator: number): number {
@@ -137,14 +138,16 @@ export function derivePortfolioRatio(
 ): PortfolioRatio {
   const total_value = workloads.reduce((sum, w) => sum + w.value.total_value, 0);
   const total_spend = workloads.reduce((sum, w) => sum + w.costs.monthly_spend, 0);
-  const below_threshold = workloads.filter((w) => w.value.value_ratio < threshold).length;
+  const below_threshold = workloads.filter((w) => (workloadValueRatio(w) ?? Infinity) < threshold).length;
 
   let best: PortfolioRatio['best'] = null;
   let worst: PortfolioRatio['worst'] = null;
   for (const w of workloads) {
-    const entry = { id: w.id, name: w.name, ratio: w.value.value_ratio };
-    if (!best || w.value.value_ratio > best.ratio) best = entry;
-    if (!worst || w.value.value_ratio < worst.ratio) worst = entry;
+    const ratio = workloadValueRatio(w);
+    if (ratio === null) continue; // N/A has no rank
+    const entry = { id: w.id, name: w.name, ratio };
+    if (!best || ratio > best.ratio) best = entry;
+    if (!worst || ratio < worst.ratio) worst = entry;
   }
 
   return {

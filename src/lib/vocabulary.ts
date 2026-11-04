@@ -121,7 +121,8 @@ export const BANNED_PHRASES: ReadonlyArray<{ pattern: RegExp; use: string }> = [
   { pattern: /\bCost this month\b/, use: 'Recorded cost to date' },
   { pattern: /\bMonthly run rate\b/, use: 'Modeled workload cost (a run rate is not month-to-date)' },
   { pattern: /\bCost [Ee]fficiency( [Ss]core)?\b/, use: 'Value / cost' },
-  { pattern: /\bValue ratio\b/, use: 'Value / cost' },
+  { pattern: /\bvalue ratios?\b/i, use: 'Value / cost' },
+  { pattern: /\bValue return\b|\d× return\b/, use: 'Value / cost' },
   { pattern: /\(Billed cost\)|\(Effective cost\)/, use: 'the cost basis is not Billed or Effective for seeded data' },
 ];
 

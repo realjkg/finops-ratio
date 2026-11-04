@@ -9,6 +9,7 @@ import { ratioColor } from '@/lib/scales';
 import { CACHE_HIT_RATE_MATERIAL, deriveCacheEconomics } from '@/lib/derive';
 import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import { deriveWorkloadValue } from '@/lib/valueMath';
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { COPY, VOCAB, VALUE_COST_BREAK_EVEN, basisLine, costLabel, costSourceOf, type CostSource } from '@/lib/vocabulary';
 import { formatRatio, formatUSD } from '@/lib/format';
 import { DEMO_NOW } from '@/data/workloads';
@@ -38,8 +39,12 @@ export function targetStatusFor(ratio: number | null): TargetStatus {
  */
 export interface FindingCalculation {
   definition: string;
-  /** Period the figures cover, e.g. "Monthly · June 2026". */
+  /** Period of the value inputs, e.g. "Monthly · June 2026". */
   period: string;
+  /** Period the cost covers: "monthly" for modeled cost, "June 1–25" for cost recorded to date. */
+  costPeriod: string;
+  /** Said plainly when value and cost cover different spans (recorded cost to date), else null. */
+  periodNote: string | null;
   costSource: CostSource;
   costLabel: string;
   /** "Basis: demo assumption" or "Basis: simulation postings". */
@@ -136,8 +141,8 @@ export function buildFindings(workloads: Workload[] = WORKLOADS, now: Date = DEM
       const defensible = deriveWorkloadValue(w);
       const cost = w.costs.monthly_spend;
       // Unrounded: adjusted value / cost. Null (N/A) when there is no positive cost to divide by.
-      const ratio: number | null = cost > 0 && Number.isFinite(defensible.value_ratio) ? defensible.value_ratio : null;
-      const naReason = ratio === null ? 'No positive workload cost for the period' : null;
+      const ratio: number | null = workloadValueRatio(w);
+      const naReason = ratio === null ? 'No positive, finite workload cost for the period' : null;
       const source = costSourceOf(w);
       const rec = recommendFor(w);
 
@@ -176,6 +181,11 @@ export function buildFindings(workloads: Workload[] = WORKLOADS, now: Date = DEM
       const calculation: FindingCalculation = {
         definition: VOCAB.valueToCost.definition,
         period: `Monthly \u00b7 ${now.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}`,
+        costPeriod: source === 'recorded' ? `${now.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })} 1\u2013${now.getUTCDate()}` : 'monthly',
+        periodNote:
+          source === 'recorded'
+            ? 'Value inputs are stated for the whole month; cost is what the workspace has recorded so far. The ratio divides monthly value by cost recorded to date.'
+            : null,
         costSource: source,
         costLabel: costLabel(source),
         basis: basisLine(source),

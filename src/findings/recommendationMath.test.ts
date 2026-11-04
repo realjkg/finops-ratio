@@ -3,6 +3,7 @@
 // budget profile, demand-shape factors, and the value-ratio invariant — and that
 // uncomputable impact is reported honestly as null ("not quantified"), never faked.
 import { describe, it, expect } from 'vitest';
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { WORKLOADS } from '@/data/workloads';
 import type { Workload } from '@/types';
 import {
@@ -27,20 +28,21 @@ describe('recommendationMath', () => {
     const fraud = byId('wl-fraud');
     return {
       ...fraud,
-      value: { ...fraud.value, total_value: 5000, value_ratio: 1.2 },
+      // Components drive the ratio (lib/valueRatio.ts): 5,000 counted value, no floor, no harm.
+      value: { ...fraud.value, revenue_protected: 5000, cost_avoided: 0, harm_from_misses: 0, quality_floor_pass_rate: undefined, total_value: 5000, value_ratio: 1.2 },
     };
   }
 
   it('value-critical workload (<2\u00d7, positive value) gets a capability-preserving model switch that lifts the ratio', () => {
     const w = valueCriticalPositive();
-    expect(w.value.value_ratio).toBeLessThan(VALUE_CRITICAL);
+    expect(workloadValueRatio(w)!).toBeLessThan(VALUE_CRITICAL);
 
     const rec = recommendFor(w);
     expect(rec.kind).toBe('model_switch');
     expect(rec.projectedMonthlyImpact).not.toBeNull();
     expect(rec.projectedMonthlyImpact!).toBeGreaterThan(0);
     // Switch must improve the ratio above the current value.
-    expect(rec.projectedRatio!).toBeGreaterThan(w.value.value_ratio);
+    expect(rec.projectedRatio!).toBeGreaterThan(workloadValueRatio(w)!);
   });
 
   it('a non-positive defensible numerator routes to a value review, never a cost-side rescue (C3/C4)', () => {
@@ -85,7 +87,7 @@ describe('recommendationMath', () => {
     expect(marketing.costs.monthly_spend - rec.projectedMonthlyImpact!).toBeLessThan(
       marketing.costs.monthly_spend,
     );
-    expect(rec.projectedRatio!).toBeGreaterThan(marketing.value.value_ratio);
+    expect(rec.projectedRatio!).toBeGreaterThan(workloadValueRatio(marketing)!);
   });
 
   it('demand-shaping projected ratio ties out to total_value / recomputed spend', () => {
@@ -106,7 +108,7 @@ describe('recommendationMath', () => {
 
   it('healthy workload above the minimum with all gates is monitor-only', () => {
     const support = byId('wl-support'); // 14.9\u00d7, all gates passed
-    expect(support.value.value_ratio).toBeGreaterThanOrEqual(VALUE_MINIMUM);
+    expect(workloadValueRatio(support)!).toBeGreaterThanOrEqual(VALUE_MINIMUM);
     const rec = recommendFor(support);
     expect(rec.kind).toBe('monitor');
     expect(rec.projectedMonthlyImpact).toBeNull();

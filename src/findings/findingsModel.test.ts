@@ -83,6 +83,8 @@ describe('finding card model', () => {
     expect(c.basis).toBe('Basis: demo assumption');
     expect(c.monthConvention).toBe('30-day month convention');
     expect(JSON.stringify(c)).not.toMatch(/billed|effective/i);
+    expect(c.costPeriod).toBe('monthly');
+    expect(c.periodNote).toBeNull();
   });
 
   it('a recorded workload is labeled by its postings, with no month convention', () => {
@@ -93,6 +95,9 @@ describe('finding card model', () => {
     expect(f.calculation.costLabel).toBe('Recorded cost to date');
     expect(f.calculation.basis).toBe('Basis: simulation postings');
     expect(f.calculation.monthConvention).toBeNull();
+    // Period honesty: value is monthly, recorded cost is June 1-25 (the as-of day), and the panel says so.
+    expect(f.calculation.costPeriod).toBe('June 1\u201325');
+    expect(f.calculation.periodNote).toMatch(/divides monthly value by cost recorded to date/);
   });
 
   it('a workload at or above target has no gap', () => {
@@ -132,7 +137,7 @@ describe('N/A when there is no positive cost', () => {
     const f = buildFindings([w])[0];
     expect(f.valueRatio).toBeNull();
     expect(f.targetStatus).toBe('not_available');
-    expect(f.calculation.naReason).toMatch(/No positive workload cost/);
+    expect(f.calculation.naReason).toMatch(/No positive, finite workload cost/);
     expect(f.problem).toMatch(/N\/A/);
     expect(f.problem).not.toMatch(/Below target/);
     expect(formatRatio(f.valueRatio)).toBe('N/A');

@@ -10,7 +10,7 @@ import { ThemeMenu } from './ThemeMenu';
 import { TypographyMenu } from './TypographyMenu';
 
 export const NAV_ITEMS = [
-  { key: 'findings',   label: 'Findings',   href: '/' },
+  { key: 'findings',   label: 'Value review', href: '/' },
   { key: 'overview',   label: 'Overview',   href: '/overview' },
   { key: 'workloads',  label: 'Workloads',  href: '/workloads' },
   { key: 'connectors', label: 'Connectors', href: '/connectors' },

@@ -1,5 +1,5 @@
 // AppShell — the single shared layout for the six north-star objects
-// (Findings · Overview · Workloads · Connectors · Frameworks · Reports).
+// (Value review · Overview · Workloads · Connectors · Frameworks · Reports).
 //
 // It owns the top bar (the six-object NavBar with a router-derived active item),
 // the single agent launcher in that bar, and one ChatPanel overlay — so every

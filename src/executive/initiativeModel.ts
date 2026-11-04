@@ -55,7 +55,7 @@ export interface InitiativeView {
   budgetConsumedColor: string;
   status: InitiativeStatus;
   // Cost efficiency = value ratio (R4 — cost is always paired with value).
-  valueRatio: number;
+  valueRatio: number | null;
   /** Modeled (sample workspace) or recorded (postings): decides how the budget figure is named. */
   costSource: CostSource;
   valueColor: string;

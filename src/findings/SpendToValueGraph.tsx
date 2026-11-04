@@ -16,6 +16,7 @@ import { useState } from 'react';
 import { ratioColor } from '@/lib/scales';
 import { formatUSD, formatRatio } from '@/lib/format';
 import { VOCAB } from '@/lib/vocabulary';
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { VALUE_MINIMUM } from './findingsModel';
 import { ratioDomain, ratioTickLabel, ratioTicks } from './ratioAxis';
 import type { Workload } from '@/types';
@@ -47,11 +48,15 @@ interface SpendToValueGraphProps {
 }
 
 export function SpendToValueGraph({
-  workloads,
+  workloads: allWorkloads,
   selectedWorkloadId = null,
   size = 'large',
   onOpenWorkload,
 }: SpendToValueGraphProps) {
+  // A point needs a finite cost (x) and a defined Value / cost (y). Anything else (zero, NaN or Infinity
+  // cost) has no position on this chart, so it is left out rather than drawn at a NaN coordinate.
+  const workloads = allWorkloads.filter((w) => Number.isFinite(w.costs.monthly_spend) && workloadValueRatio(w) !== null);
+  const ratioOf = (w: Workload): number => workloadValueRatio(w) as number;
   const isLarge = size === 'large';
   // Hover OR keyboard focus — the same reveal either way.
   const [revealedId, setRevealedId] = useState<string | null>(null);
@@ -77,7 +82,7 @@ export function SpendToValueGraph({
   }
   // Value / cost can be negative (value net of harm), so the axis extends below 0× whenever
   // any workload is negative instead of clamping it onto the zero line.
-  const domain = ratioDomain(workloads.map((w) => w.value.value_ratio));
+  const domain = ratioDomain(workloads.map((w) => ratioOf(w)));
   function yFor(ratio: number): number {
     const clamped = Math.max(domain.min, Math.min(ratio, domain.max));
     return M.top + PH - ((clamped - domain.min) / (domain.max - domain.min)) * PH;
@@ -229,12 +234,12 @@ export function SpendToValueGraph({
         {/* ── Data points ─────────────────────────────────────────────── */}
         {workloads.map((w) => {
           const cx = xFor(w.costs.monthly_spend);
-          const cy = yFor(w.value.value_ratio);
-          const color = ratioColor(w.value.value_ratio);
+          const cy = yFor(ratioOf(w));
+          const color = ratioColor(ratioOf(w));
           const isSelected = w.id === selectedWorkloadId;
           const isRevealed = w.id === revealedId;
           // Below break-even: where value fails to come back.
-          const isBelowBreakEven = w.value.value_ratio < 1.0;
+          const isBelowBreakEven = ratioOf(w) < 1.0;
           const r = isSelected || isRevealed ? 7 : 5;
 
           // Flip label to left if the point is in the right half of the plot.
@@ -253,7 +258,7 @@ export function SpendToValueGraph({
               data-workload-id={w.id}
               role="button"
               tabIndex={0}
-              aria-label={`${w.name}: ${formatUSD(w.costs.monthly_spend)} per month, ${VOCAB.valueToCost.label} ${formatRatio(w.value.value_ratio)}`}
+              aria-label={`${w.name}: ${formatUSD(w.costs.monthly_spend)} per month, ${VOCAB.valueToCost.label} ${formatRatio(ratioOf(w))}`}
               style={{ cursor: onOpenWorkload ? 'pointer' : 'default' }}
               onMouseEnter={() => setRevealedId(w.id)}
               onMouseLeave={() => setRevealedId((id) => (id === w.id ? null : id))}
@@ -333,8 +338,8 @@ export function SpendToValueGraph({
         {/* ── Hover-identify tooltip (positioned div over the SVG) ────── */}
         {workloads.filter((w) => w.id === revealedId).map((w) => {
           const cx = xFor(w.costs.monthly_spend);
-          const cy = yFor(w.value.value_ratio);
-          const color = ratioColor(w.value.value_ratio);
+          const cy = yFor(ratioOf(w));
+          const color = ratioColor(ratioOf(w));
           const placement = tooltipPlacement(cx, cy, VW, VH);
           return (
             <div
@@ -368,7 +373,7 @@ export function SpendToValueGraph({
                     style={{ color }}
                     data-testid="stv-tooltip-ratio"
                   >
-                    {formatRatio(w.value.value_ratio)}
+                    {formatRatio(ratioOf(w))}
                   </span>
                 </div>
               </div>

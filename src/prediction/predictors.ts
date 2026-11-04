@@ -8,6 +8,7 @@
 // the change type, predicts the impact, attaches the confidence band, and marks
 // the prediction confident or estimated against the >=99% gate.
 
+import { workloadValueRatio } from '@/lib/valueRatio';
 import type { DemandShape, ModelEntry, Workload } from '@/types';
 import type {
   ChangePrediction,
@@ -77,7 +78,7 @@ function impactFrom(
   return {
     deltaDailySpend: deltaDaily,
     deltaMonthlySpend: deltaMonthly,
-    deltaValueRatio: newRatio - workload.value.value_ratio,
+    deltaValueRatio: newRatio - (workloadValueRatio(workload) ?? newRatio),
   };
 }
 

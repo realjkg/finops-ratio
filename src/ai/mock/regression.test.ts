@@ -22,7 +22,8 @@ const AT_RISK = [
   '• **Customer Support Agent** — At Risk, $13,632/mo at 13.8× return (value evidence: assumed)',
   '• **Sales Copilot** — At Risk, $6,800/mo at 7.4× return (value evidence: assumed)',
   '• **Code Review Bot** — At Risk, $2,400/mo at 20.8× return (value evidence: assumed)',
-  '• **Document Summarizer** — At Risk, $1,150/mo at 5.3× return (value evidence: assumed)',
+  // Document Summarizer: unrounded 5.3517 prints 5.4×; the stored 2-decimal 5.35 used to print 5.3× (rounded twice).
+  '• **Document Summarizer** — At Risk, $1,150/mo at 5.4× return (value evidence: assumed)',
   '• **Marketing Content Gen** — Pending Approval, $4,900/mo at 2.3× return (value evidence: assumed), $1,568/mo savings identified',
   '• **Fraud Triage Agent** — Pending Approval, $4,200/mo at -0.2× return (value evidence: assumed), $840/mo savings identified',
   'Total portfolio: $41,212/mo across 11 initiatives.',

@@ -37,7 +37,7 @@ function toRecord(row: ReportRow, cols: Columns): ReportRecord {
     row.annualRunRate,
     row.budgetConsumedPct ?? `N/A (${row.budgetConsumedNa})`,
     row.status,
-    Number(row.costEfficiency.toFixed(1)),
+    row.costEfficiency === null ? 'N/A' : Number(row.costEfficiency.toFixed(1)),
     row.savingsOpportunity,
     row.lastUpdated,
   ];

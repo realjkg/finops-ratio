@@ -1,6 +1,7 @@
 // Center panel — tabbed detail for the selected workload (spec §3.4). Workload
 // header, KPI cards, tab nav, and the active tab body.
 
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { OutcomesPanel } from '@/outcomes/OutcomesPanel';
 import { useStore, type DetailTab } from '@/store/useStore';
 import { formatInt, formatReturn } from '@/lib/format';
@@ -60,9 +61,9 @@ export function DetailPanel() {
           <div className="text-right">
             <div
               className="font-mono text-lg font-bold"
-              style={{ color: ratioColor(workload.value.value_ratio) }}
+              style={{ color: ratioColor(workloadValueRatio(workload)) }}
             >
-              {formatReturn(workload.value.value_ratio)}
+              {formatReturn(workloadValueRatio(workload))}
             </div>
             <div className="font-mono text-xs text-sub">
               {formatInt(workload.outputs.daily_inferences)} calls/day
