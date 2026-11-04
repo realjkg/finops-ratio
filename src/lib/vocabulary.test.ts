@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BANNED_PHRASES, COPY, VOCAB, targetPolicyText } from './vocabulary';
+import { BANNED_PHRASES, COPY, DEMO_LABEL_PHRASES, VOCAB, targetPolicyText } from './vocabulary';
 import { VIEWS } from '@/finops/semantic/views';
 
 const ROOT = join(__dirname, '..', '..');
@@ -123,6 +123,47 @@ describe('banned synonyms in user-facing sources', () => {
   it('every allowlist entry still matches something, so it cannot go stale', () => {
     for (const a of ALLOWED.filter((x) => x.file !== 'src/lib/vocabulary.ts')) {
       expect(readFileSync(join(ROOT, a.file), 'utf8'), a.why).toMatch(a.match);
+    }
+  });
+});
+
+// --- demo data labels ----------------------------------------------------------------------
+
+// API contract values: GET /api/costsource/* returns these names, notes and health details (two are
+// pinned by src/compat/golden/api.json). They keep their wording; the UI shows src/costsource/
+// sourcePresentation.ts instead (a test there pins it). Error text for an unknown id is not a view.
+const DEMO_LABEL_ALLOWED: ReadonlyArray<{ file: string; match: RegExp; why: string }> = [
+  { file: 'src/costsource/sandboxSources.ts', match: /name: '(AWS|Azure|GCP) \(synthetic sandbox\)'/, why: 'API descriptor name; displayed through sourcePresentation' },
+  { file: 'src/costsource/seed.ts', match: /name: 'ServiceNow \(synthetic demo data\)'/, why: 'API descriptor name; displayed through sourcePresentation' },
+  { file: 'src/costsource/ServiceNowAdapter.ts', match: /'ServiceNow CMDB\/ITBM \(synthetic demo data\)/, why: 'API health detail; displayed through sourcePresentation' },
+  { file: 'src/costsource/syntheticCloudSeed.ts', match: /serviceName: 'Synthetic Cloud (Storage|Logging)'/, why: 'FOCUS ServiceName values in sandbox rows (API rows hash pinned by the A6 golden)' },
+  { file: 'src/costsource/syntheticCloudSeed.ts', match: /Unknown synthetic cloud source/, why: 'error for an unknown source id, not a view' },
+  { file: 'src/lib/vocabulary.ts', match: /./, why: 'the module that defines the patterns' },
+];
+
+describe('demo data labels in user-facing sources', () => {
+  const files = [...walk(join(ROOT, 'src')), ...walk(join(ROOT, 'pages'))].map((f) => relative(ROOT, f));
+
+  it.each(DEMO_LABEL_PHRASES.map((b) => [String(b.pattern), b] as const))('no view spells out %s', (_name, banned) => {
+    const hits: string[] = [];
+    for (const f of files) {
+      for (const ctx of scanSource(readFileSync(join(ROOT, f), 'utf8'), banned.pattern)) {
+        if (DEMO_LABEL_ALLOWED.some((a) => a.file === f && a.match.test(ctx))) continue;
+        hits.push(`${f} (use: ${banned.use}) ...${ctx}...`);
+      }
+    }
+    expect(hits).toEqual([]);
+  });
+
+  it('every demo-label allowlist entry still matches something', () => {
+    for (const a of DEMO_LABEL_ALLOWED.filter((x) => x.file !== 'src/lib/vocabulary.ts')) {
+      expect(readFileSync(join(ROOT, a.file), 'utf8'), a.why).toMatch(a.match);
+    }
+  });
+
+  it('the scanner catches the labels this change removed', () => {
+    for (const old of ['Synthetic data · No live connections', 'Sample workspace', 'Basis: demo assumption', 'Import sample', 'Example Cloud billing API', 'only the Static seed is shown', 'Offline sandbox — 6 seeded adapters', 'Imported API connections (synthetic)']) {
+      expect(DEMO_LABEL_PHRASES.some((b) => b.pattern.test(old)), old).toBe(true);
     }
   });
 });

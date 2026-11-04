@@ -125,6 +125,25 @@ export const BANNED_PHRASES: ReadonlyArray<{ pattern: RegExp; use: string }> = [
   { pattern: /\(Billed cost\)|\(Effective cost\)/, use: 'the cost basis is not Billed or Effective for modeled data' },
 ];
 
+/**
+ * Data labels the demo no longer spells out on its views (owner decision: one quiet Demo badge in the
+ * top bar instead). The vocabulary test scans user-facing sources for these; API contract values that
+ * must keep their wording are allowlisted there by exact file and match, and shown through id-keyed
+ * display tables.
+ */
+export const DEMO_LABEL_PHRASES: ReadonlyArray<{ pattern: RegExp; use: string }> = [
+  { pattern: /\bSynthetic data\b|No live connections\b/i, use: 'nothing: the top-bar Demo badge covers it' },
+  { pattern: /\bsample workspace\b/i, use: 'the Demo badge; on /simulation, "Simulation"' },
+  { pattern: /\bdemo assumption\b/i, use: 'Basis: modeled (inside View calculation only)' },
+  { pattern: /\bseeded (data|demo|adapters?|value assumptions?|spend|run-rate|alerts?|findings|trend|MoM|tokens|daily volume|rates|AI workloads|assumption)\b/i, use: 'plain wording: "this data", "alerts", "run-rate"' },
+  { pattern: /\bsynthetic (sample|sandbox|demo data|costs|connections|registry|seed|ledger|back-test|workload data|cloud)\b/i, use: '"offline sandbox", or nothing' },
+  { pattern: /\(synthetic\)/i, use: 'nothing' },
+  { pattern: /\bImport (sample|the three synthetic)\b/, use: 'Import' },
+  { pattern: /\bExample (Cloud|Private Cloud|Datacenter|Compute)\b/, use: 'the fictional names of the FOCUS demo datasets' },
+  { pattern: /\bStatic seed\b/, use: 'Offline sandbox' },
+  { pattern: /\bDeterministic seed workloads\b/, use: 'the one /demo sentence' },
+];
+
 // --- Cost source: modeled (bundled seed) vs recorded (simulation postings) ---
 
 export type CostSource = 'modeled' | 'recorded';
