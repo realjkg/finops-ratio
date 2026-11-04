@@ -20,36 +20,37 @@ export default function Frameworks() {
         <div className="mx-auto max-w-5xl">
           {/* Page header */}
           <div className="mb-6">
-            <h1 className="font-mono text-lg font-bold text-txt">Frameworks</h1>
+            <h1 className="text-lg font-bold text-txt">Governance</h1>
             <p className="mt-1 text-sm text-sub">
-              Four sequential governance gates. Gate N+1 cannot pass without Gate N.
+              Four approval gates, in order: Policy, Ethics, Cost, Scale. A workload cannot pass a gate until the ones before it have passed.
             </p>
           </div>
 
           {/* Summary strip */}
           <div className="mb-8 flex flex-wrap gap-3">
             <div className="rounded-card border border-edge bg-slab px-4 py-3">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-dim">Authorized</div>
+              <div className="text-xs text-dim">Approved workloads</div>
               <div className="mt-0.5 font-mono text-xl font-bold" style={{ color: 'var(--value)' }}>
                 {authorizedCount}
-                <span className="ml-1 text-sm font-normal text-sub">/ {workloads.length}</span>
+                <span className="ml-1 text-sm font-normal text-sub">of {workloads.length}</span>
+                <span className="ml-2 text-xs font-normal text-sub">all four gates passed</span>
               </div>
             </div>
             <div className="rounded-card border border-edge bg-slab px-4 py-3">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-dim">Shape conflicts</div>
+              <div className="text-xs text-dim">Always-on policy conflicts</div>
               <div
                 className="mt-0.5 font-mono text-xl font-bold"
                 style={{ color: blockedAlwaysOn > 0 ? 'var(--shape)' : 'var(--dim)' }}
               >
                 {blockedAlwaysOn}
-                <span className="ml-1 text-sm font-normal text-sub">always-on blocked</span>
+                <span className="ml-1 text-xs font-normal text-sub">running always-on without all four gates</span>
               </div>
             </div>
           </div>
 
           {/* Gate definitions — horizontal sequential flow */}
           <section className="mb-8">
-            <h2 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-sub">
+            <h2 className="mb-3 text-xs font-semibold text-sub">
               Gate sequence
             </h2>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -108,7 +109,7 @@ export default function Frameworks() {
 
           {/* Per-workload gate status table */}
           <section className="mb-8">
-            <h2 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-sub">
+            <h2 className="mb-3 text-xs font-semibold text-sub">
               Workload gate status
             </h2>
             <div className="overflow-x-auto rounded-card border border-edge">
@@ -150,7 +151,7 @@ export default function Frameworks() {
 
           {/* Enforcement rules */}
           <section>
-            <h2 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-sub">
+            <h2 className="mb-3 text-xs font-semibold text-sub">
               Enforcement rules
             </h2>
             <div className="rounded-card border border-edge bg-slab">
@@ -184,7 +185,7 @@ export default function Frameworks() {
                     className="mt-0.5 shrink-0 font-mono text-[10px] font-bold uppercase tracking-wider"
                     style={{ color: 'var(--shape)' }}
                   >
-                    SHAPE
+                    ALWAYS-ON
                   </span>
                   <p className="text-[12px] text-sub">
                     The <span className="font-mono">always_on</span> demand shape is blocked

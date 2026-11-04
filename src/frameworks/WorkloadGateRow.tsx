@@ -39,9 +39,9 @@ export function WorkloadGateRow({ workload }: { workload: Workload }) {
                 background: 'rgba(255,196,77,0.1)',
                 border: '1px solid rgba(255,196,77,0.25)',
               }}
-              title="always_on shape blocked: not all gates passed"
+              title="Runs always-on without all four gates passed: policy blocks always-on until they pass"
             >
-              shape blocked
+              always-on conflict
             </span>
           )}
         </div>
@@ -101,7 +101,7 @@ export function WorkloadGateRow({ workload }: { workload: Workload }) {
             className="font-mono text-[11px] font-bold uppercase tracking-wider"
             style={{ color: 'var(--value)' }}
           >
-            Authorized
+            Approved
           </span>
         ) : blockingGate ? (
           <span className="font-mono text-[11px] text-sub">
