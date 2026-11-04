@@ -30,8 +30,8 @@ describe('B3b budget used names its basis in both views', () => {
     const m = toMissionView(w);
     const tech = renderToStaticMarkup(<FuelAndValue {...m} />);
     const exec = renderToStaticMarkup(<InitiativeCard initiative={toInitiativeView(w)} lang={LANGUAGE_MAP.executive} showLens={false} />);
-    expect(tech).toContain('>Budget used · today<');
-    expect(exec).toContain('>Budget used · month to date<');
+    expect(tech).toContain('>Estimated budget consumption today<');
+    expect(exec).toContain('>Estimated budget consumption to date<');
   });
 });
 

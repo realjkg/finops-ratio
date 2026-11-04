@@ -247,7 +247,7 @@ export function migrationAnswer(world: World, scope: Scope, o: Overrides, ignore
   body.push(`• ${REALIZED_LINE} Until outcome evidence exists the saving stays projected, and the one-time cost is real spend.`);
   body.push(contextLine(world, scope));
   body.push(
-    'Risk: quality and latency can change when the model changes, and the value ratio depends on quality. The seed holds no quality evidence for the open model; run an evaluation on real traffic before trusting any figure above.',
+    'Risk: quality and latency can change when the model changes, and Value / cost depends on quality. The seed holds no quality evidence for the open model; run an evaluation on real traffic before trusting any figure above.',
   );
   return {
     header,

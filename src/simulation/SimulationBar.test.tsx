@@ -43,7 +43,7 @@ describe('SimulationBar sign-in link', () => {
     expect(html).toContain('Sample workspace');
     expect(html).not.toContain('Seeded demo');
     expect(html).toContain('Synthetic data · No live connections');
-    expect(html).toContain('June 2026 · USD · Cost basis not stated');
+    expect(html).toContain('June 2026 · USD · Basis: demo assumption');
     expect(html).not.toMatch(/Updated \d|min ago|Simulated costs/);
   });
 });

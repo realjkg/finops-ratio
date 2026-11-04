@@ -31,11 +31,11 @@ export function evid(status: EvidenceStatus | undefined): string {
   return ` (value evidence: ${status ?? 'unmarked'})`;
 }
 
-/** "13.5× return", or the honest non-positive form, or n/a with no spend. */
+/** "Value / cost 13.5×", or the honest non-positive form, or n/a with no spend. */
 export function returnText(ratio: number | null): string {
-  if (ratio === null || !Number.isFinite(ratio)) return 'return n/a (no spend)';
+  if (ratio === null || !Number.isFinite(ratio)) return 'Value / cost n/a (no cost)';
   const r = `${ratio.toFixed(1)}×`;
-  return ratio > 0 ? `${r} return` : `no positive return (${r})`;
+  return ratio > 0 ? `Value / cost ${r}` : `Value / cost ${r} (no positive value)`;
 }
 
 /** Bare ratio for list rows. */

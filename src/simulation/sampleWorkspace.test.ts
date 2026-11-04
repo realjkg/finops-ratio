@@ -8,7 +8,7 @@ describe('sample workspace view-models', () => {
   });
   it('executive total is the exact sum of the workloads', () => {
     const cents = WORKLOADS.reduce((s, w) => s + Math.round(w.costs.monthly_spend * 100), 0);
-    expect(sampleView('executive').stats[0]).toEqual({ label: 'Monthly AI spend', value: formatCents(cents) });
+    expect(sampleView('executive').stats[0]).toEqual({ label: 'AI monthly workload cost', value: formatCents(cents) });
   });
   it('technical lists the largest drivers first and procurement the cheapest model first', () => {
     const tech = sampleView('technical').rows.map((r) => r.value.replace(/[$,]/g, ''));

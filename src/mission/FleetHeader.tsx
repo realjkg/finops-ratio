@@ -51,7 +51,7 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
       {/* Fleet fuel gauge */}
       <div className="mt-6">
         <div className="mb-1.5 flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-dim">
-          <span>Portfolio budget used</span>
+          <span>Portfolio estimated budget consumption today</span>
           <span style={{ color: fleet.fleetFuelColor }}>{fleet.fleetFuelPct === null ? `N/A (${fleet.fleetFuelNa})` : `${fleet.fleetFuelPct}%`}</span>
         </div>
         <div
@@ -59,8 +59,8 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
           aria-valuenow={fleet.fleetFuelPct === null ? undefined : Math.min(fleet.fleetFuelPct, 100)}
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuetext={fleet.fleetFuelPct === null ? 'N/A' : `${fleet.fleetFuelPct}% of fleet daily budget used`}
-          aria-label="Portfolio budget used (aggregate daily budget)"
+          aria-valuetext={fleet.fleetFuelPct === null ? 'N/A' : `${fleet.fleetFuelPct}% of the fleet daily budget, estimated`}
+          aria-label="Portfolio estimated budget consumption today (aggregate daily budget)"
           className="h-1.5 w-full overflow-hidden rounded-full bg-raised"
         >
           <motion.div

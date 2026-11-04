@@ -14,9 +14,9 @@ it('stamps the seed as-of date derived from DEMO_NOW, never a relative freshness
   expect(html).not.toMatch(/min ago|Updated/i);
 });
 
-it('says AI monthly run rate (tile) and AI spend (dashboard subtitle), never cloud spend', () => {
+it('says AI monthly workload cost (tile) and AI cost (dashboard subtitle), never cloud spend', () => {
   const page = renderToStaticMarkup(<PersonaProvider><InitiativeDashboard /></PersonaProvider>);
-  expect(html).toContain('AI monthly run rate');
-  expect(page).toContain('AI spend, value, and approvals');
+  expect(html).toContain('AI monthly workload cost');
+  expect(page).toContain('AI cost, value, and approvals');
   expect(html + page).not.toMatch(/cloud spend/i);
 });

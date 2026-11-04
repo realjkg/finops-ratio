@@ -2,7 +2,7 @@
 // gauge can NEVER render without its value ratio (R4 — value is the denominator).
 // The gauge is an accessible progressbar; the bar fill animates with Framer
 // Motion and respects prefers-reduced-motion.
-import { VOCAB } from '@/lib/vocabulary';
+import { budgetLabel } from '@/lib/vocabulary';
 import { motion, useReducedMotion } from 'framer-motion';
 import { formatRatio, formatUSD } from '@/lib/format';
 import { EvidenceMark } from '@/components/EvidenceMark';
@@ -37,12 +37,12 @@ export function FuelAndValue({
   // An invalid budget is never printed as currency or as a denominator.
   const valueText = fuelPct === null
     ? `N/A (${fuelNa ?? 'no evidence'}) — ${formatUSD(spentToday)} spent, budget N/A`
-    : `${fuelPct}% of daily budget used — ${formatUSD(spentToday)} spent of ${formatUSD(dailyBudget)}`;
+    : `${fuelPct}% of the daily budget, estimated — ${formatUSD(spentToday)} modeled cost of ${formatUSD(dailyBudget)}`;
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-xs">
-        <span className="font-mono uppercase tracking-wider text-dim">{VOCAB.budgetUsed.label} · today</span>
+        <span className="font-mono uppercase tracking-wider text-dim">{budgetLabel('modeled', 'day')}</span>
         {/* R4: the value badge is part of the same component as the gauge.
             The provenance mark rides beside it — quiet, token-colored. */}
         <span className="inline-flex items-center gap-1.5">
@@ -62,7 +62,7 @@ export function FuelAndValue({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuetext={valueText}
-        aria-label="Daily budget used"
+        aria-label="Estimated budget consumption today"
         className="h-2.5 w-full overflow-hidden rounded-full bg-raised"
       >
         <motion.div

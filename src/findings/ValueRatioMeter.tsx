@@ -15,10 +15,11 @@ import { EvidenceMark } from '@/components/EvidenceMark';
 import { VOCAB, VALUE_COST_BREAK_EVEN } from '@/lib/vocabulary';
 import type { EvidenceStatus } from '@/types';
 import { VALUE_MINIMUM } from './findingsModel';
-import { ratioDomain, ratioFraction, RATIO_CEILING, type RatioDomain } from './ratioAxis';
+import { ratioDomain, ratioFraction, ratioTickLabel, RATIO_CEILING, type RatioDomain } from './ratioAxis';
 
 interface ValueRatioMeterProps {
-  ratio: number;
+  /** Unrounded Value / cost; null (or non-finite) means N/A: no fill, no value. */
+  ratio: number | null;
   size?: 'inline' | 'large';
   /** Provenance mark rendered beside the enlarged ratio (large size only). */
   evidenceStatus?: EvidenceStatus;
@@ -38,11 +39,12 @@ export function ValueRatioMeter({
   domain: domainProp,
   hideHeadline = false,
 }: ValueRatioMeterProps) {
-  const color = ratioColor(ratio);
+  const na = ratio === null || !Number.isFinite(ratio);
+  const color = na ? 'var(--dim)' : ratioColor(ratio as number);
   const domain = domainProp ?? ratioDomain([ratio]);
   const pct = (v: number) => ratioFraction(v, domain) * 100;
   const zeroPct = pct(0);
-  const valuePct = pct(ratio);
+  const valuePct = na ? zeroPct : pct(ratio as number);
   // Fill runs between the 0× line and the value: left of zero when negative.
   const fillLeft = Math.min(zeroPct, valuePct);
   const fillWidth = Math.abs(valuePct - zeroPct);
@@ -58,7 +60,7 @@ export function ValueRatioMeter({
           <span
             className="font-mono text-2xl font-bold"
             style={{ color }}
-            aria-label={`${ratio.toFixed(1)} times ${VOCAB.valueToCost.label}`}
+            aria-label={na ? `${VOCAB.valueToCost.label} not available` : `${formatRatio(ratio)} ${VOCAB.valueToCost.label}`}
           >
             {formatRatio(ratio)}
           </span>
@@ -70,7 +72,8 @@ export function ValueRatioMeter({
       <div className="relative w-full">
         <div
           role="meter"
-          aria-valuenow={ratio}
+          aria-valuenow={na ? undefined : Math.min(Math.max(ratio as number, domain.min), RATIO_CEILING)}
+          aria-valuetext={formatRatio(ratio)}
           aria-valuemin={domain.min}
           aria-valuemax={RATIO_CEILING}
           aria-label={`${VOCAB.valueToCost.label}: ${formatRatio(ratio)}`}
@@ -132,6 +135,9 @@ export function ValueRatioMeter({
           <span className="absolute -translate-x-1/2" style={{ left: `${targetPct}%` }}>
             {VALUE_MINIMUM}× target
           </span>
+          {domain.clipped && (
+            <span className="absolute left-0 top-3.5 text-dim" data-testid="meter-clip">{ratioTickLabel(domain.min, domain)}</span>
+          )}
           <span className="absolute right-0">{RATIO_CEILING}×</span>
         </div>
       )}

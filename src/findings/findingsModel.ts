@@ -9,8 +9,8 @@ import { ratioColor } from '@/lib/scales';
 import { CACHE_HIT_RATE_MATERIAL, deriveCacheEconomics } from '@/lib/derive';
 import { headlineEvidenceStatus } from '@/lib/valueEvidence';
 import { deriveWorkloadValue } from '@/lib/valueMath';
-import { COPY, VOCAB, VALUE_COST_BREAK_EVEN } from '@/lib/vocabulary';
-import { formatUSD } from '@/lib/format';
+import { COPY, VOCAB, VALUE_COST_BREAK_EVEN, basisLine, costLabel, costSourceOf, type CostSource } from '@/lib/vocabulary';
+import { formatRatio, formatUSD } from '@/lib/format';
 import { DEMO_NOW } from '@/data/workloads';
 import type { EvidenceStatus, Workload } from '@/types';
 import {
@@ -22,9 +22,11 @@ import {
 export { VALUE_MINIMUM };
 
 /** Where Value / cost sits against its two reference points. */
-export type TargetStatus = 'below_break_even' | 'below_target' | 'on_target';
+export type TargetStatus = 'below_break_even' | 'below_target' | 'on_target' | 'not_available';
 
-export function targetStatusFor(ratio: number): TargetStatus {
+/** Compares the UNROUNDED ratio; the one-decimal display never decides a status. Null or non-finite is N/A. */
+export function targetStatusFor(ratio: number | null): TargetStatus {
+  if (ratio === null || !Number.isFinite(ratio)) return 'not_available';
   if (ratio < VALUE_COST_BREAK_EVEN) return 'below_break_even';
   return ratio < VALUE_MINIMUM ? 'below_target' : 'on_target';
 }
@@ -35,18 +37,30 @@ export function targetStatusFor(ratio: number): TargetStatus {
  * (lib/valueMath.ts), so the breakdown cannot disagree with the headline ratio.
  */
 export interface FindingCalculation {
-  formula: string;
-  /** Period the cost and value figures cover, e.g. "Monthly · June 2026". */
+  definition: string;
+  /** Period the figures cover, e.g. "Monthly · June 2026". */
   period: string;
-  costBasis: string;
-  monthlyCost: number;
+  costSource: CostSource;
+  costLabel: string;
+  /** "Basis: demo assumption" or "Basis: simulation postings". */
+  basis: string;
+  /** Disclosed only where the cost is a modeled estimate scaled by days. */
+  monthConvention: string | null;
+  cost: number;
+  /** Protected revenue plus avoided cost, before the quality floor. */
   grossValue: number;
   /** Share of outputs meeting the quality floor, or null on legacy shapes (ungated). */
   qualityFloorPassRate: number | null;
+  /** Gross value times the pass rate: the quality-floor shortfall is already out of this figure. */
   countedValue: number;
   harmFromMisses: number;
-  netValue: number;
-  /** Target minus ratio when below target, else null. Exact gap, kept off the main card. */
+  /** Counted value less harm: the estimated business value. */
+  adjustedValue: number;
+  /** adjustedValue divided by cost, unrounded; null when cost is not positive. */
+  ratio: number | null;
+  /** Why the ratio is N/A, else null. */
+  naReason: string | null;
+  /** Target minus the unrounded ratio when below target, else null. */
   gapToTarget: number | null;
   valueAssumptions: string;
   source: string;
@@ -56,11 +70,17 @@ export interface FindingView {
   workloadId: string;
   workloadName: string;
   /** Evidence #1: current value ratio. */
-  valueRatio: number;
+  /**
+   * Unrounded Value / cost (adjusted value ÷ cost); null when the workload has no positive cost.
+   * Sorting, target comparisons and gaps use this, not the one-decimal text.
+   */
+  valueRatio: number | null;
   /** Ratio color from the existing ratio color scale. */
   valueColor: string;
   /** Evidence #2: current monthly spend. */
   monthlySpend: number;
+  /** Whether the cost is modeled (sample workspace) or recorded (simulation postings). */
+  costSource: CostSource;
   /**
    * Provenance mark on the value ratio — the weakest value input's status
    * (audit C1/C2). `undefined` when the value carries no evidence block; the
@@ -113,7 +133,12 @@ export interface FindingView {
 export function buildFindings(workloads: Workload[] = WORKLOADS, now: Date = DEMO_NOW): FindingView[] {
   return workloads
     .map((w): FindingView => {
-      const ratio = w.value.value_ratio;
+      const defensible = deriveWorkloadValue(w);
+      const cost = w.costs.monthly_spend;
+      // Unrounded: adjusted value / cost. Null (N/A) when there is no positive cost to divide by.
+      const ratio: number | null = cost > 0 && Number.isFinite(defensible.value_ratio) ? defensible.value_ratio : null;
+      const naReason = ratio === null ? 'No positive workload cost for the period' : null;
+      const source = costSourceOf(w);
       const rec = recommendFor(w);
 
       const econ = deriveCacheEconomics(w);
@@ -131,42 +156,51 @@ export function buildFindings(workloads: Workload[] = WORKLOADS, now: Date = DEM
             }
           : null;
 
-      const defensible = deriveWorkloadValue(w);
       const targetStatus = targetStatusFor(ratio);
       const problem =
-        targetStatus === 'on_target'
-          ? `${VOCAB.valueToCost.label} ${ratio.toFixed(1)}\u00d7, at or above the ${VALUE_MINIMUM}\u00d7 target`
-          : `Below target \u00b7 ${COPY.estimatedValue}`;
+        targetStatus === 'not_available'
+          ? `${VOCAB.valueToCost.label} N/A: ${naReason}`
+          : targetStatus === 'on_target'
+            ? `${VOCAB.valueToCost.label} ${formatRatio(ratio as number)}, at or above the ${VALUE_MINIMUM}\u00d7 target`
+            : 'Below target';
       const why =
-        defensible.total_value <= 0
-          ? `Harm from misses (${formatUSD(defensible.harm_from_misses)}) is larger than counted value (${formatUSD(defensible.counted_value)}), so estimated value is negative.`
-          : targetStatus === 'below_break_even'
-            ? `Estimated value (${formatUSD(defensible.total_value)}) does not cover monthly cost (${formatUSD(w.costs.monthly_spend)}).`
-            : targetStatus === 'below_target'
-              ? `Value / cost is above break-even but under the ${VALUE_MINIMUM}\u00d7 target.`
-              : `Value / cost meets the ${VALUE_MINIMUM}\u00d7 target.`;
+        targetStatus === 'not_available'
+          ? `${VOCAB.valueToCost.label} cannot be computed: ${naReason}.`
+          : defensible.total_value <= 0
+            ? `Harm from misses (${formatUSD(defensible.harm_from_misses)}) is larger than counted value (${formatUSD(defensible.counted_value)}), so estimated value is negative.`
+            : targetStatus === 'below_break_even'
+              ? `Estimated value (${formatUSD(defensible.total_value)}) does not cover workload cost (${formatUSD(cost)}).`
+              : targetStatus === 'below_target'
+                ? `Value / cost is above break-even but under the ${VALUE_MINIMUM}\u00d7 target.`
+                : `Value / cost meets the ${VALUE_MINIMUM}\u00d7 target.`;
       const calculation: FindingCalculation = {
-        formula: `${VOCAB.valueToCost.label} = (counted value \u2212 harm from misses) \u00f7 monthly cost`,
+        definition: VOCAB.valueToCost.definition,
         period: `Monthly \u00b7 ${now.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}`,
-        costBasis: `${VOCAB.monthlyRunRate.label}. ${COPY.costBasisNotStated} (not Billed cost or Effective cost).`,
-        monthlyCost: w.costs.monthly_spend,
+        costSource: source,
+        costLabel: costLabel(source),
+        basis: basisLine(source),
+        monthConvention: source === 'modeled' ? COPY.monthConvention : null,
+        cost,
         grossValue: defensible.gross_value,
         qualityFloorPassRate: defensible.floor_applied ? (w.value.quality_floor_pass_rate ?? null) : null,
         countedValue: defensible.counted_value,
         harmFromMisses: defensible.harm_from_misses,
-        netValue: defensible.total_value,
-        gapToTarget: ratio < VALUE_MINIMUM ? VALUE_MINIMUM - ratio : null,
+        adjustedValue: defensible.total_value,
+        ratio,
+        naReason,
+        gapToTarget: ratio !== null && ratio < VALUE_MINIMUM ? VALUE_MINIMUM - ratio : null,
         valueAssumptions:
-          'Revenue protected and cost avoided are stated assumptions, as are the quality-floor pass rate and harm from misses. Counted value is gross value times the pass rate.',
-        source: 'Synthetic workload data in this workspace. No live connection.',
+          'Protected revenue, avoided cost, the quality-floor pass rate and harm from misses are stated assumptions, not measured results.',
+        source: source === 'modeled' ? 'Synthetic workload data in this workspace. No live connection.' : 'Postings recorded in this workspace.',
       };
 
       return {
         workloadId: w.id,
         workloadName: w.name,
         valueRatio: ratio,
-        valueColor: ratioColor(ratio),
+        valueColor: ratio === null ? 'var(--dim)' : ratioColor(ratio),
         monthlySpend: w.costs.monthly_spend,
+        costSource: source,
         valueEvidenceStatus: headlineEvidenceStatus(w.value),
         problem,
         recommendedAction: rec.action,
@@ -175,12 +209,13 @@ export function buildFindings(workloads: Workload[] = WORKLOADS, now: Date = DEM
         projectedRatio: rec.projectedRatio,
         impactBasis: rec.basis,
         confidenceNote: rec.confidence,
-        belowMinimum: ratio < VALUE_MINIMUM,
+        belowMinimum: ratio !== null && ratio < VALUE_MINIMUM,
         targetStatus,
         why,
         calculation,
         cacheEvidence,
       };
     })
-    .sort((a, b) => a.valueRatio - b.valueRatio);
+    // Unrounded, lowest first; N/A (no cost) sorts to the top because it cannot be reviewed as a ratio.
+    .sort((a, b) => (a.valueRatio ?? -Infinity) - (b.valueRatio ?? -Infinity));
 }

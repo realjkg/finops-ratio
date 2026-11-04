@@ -45,7 +45,7 @@ export function InitiativeDashboard({ embedded = false }: { embedded?: boolean }
           {lang.boardTitle}
         </h1>
         <p className="mt-1 text-sm text-exec-muted">
-          AI spend, value, and approvals across the AI initiative portfolio.
+          AI cost, value, and approvals across the AI initiative portfolio.
         </p>
       </div>
       <div className="flex items-center gap-3">

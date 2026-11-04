@@ -119,6 +119,9 @@ function rawRowFor(w: Workload, version: FocusVersion): RawSourceRow {
   const tokens = w.costs.tokens_in_today + w.costs.tokens_out_today;
   const providerName = PROVIDER_NAME[w.model_provider] ?? w.model_provider;
 
+  // Modeling convenience: the seeded rows set BilledCost and EffectiveCost to the same stated monthly
+  // figure so the synthetic FOCUS data is well formed. That is not an accounting claim about the
+  // workload cost shown in the UI, which is labeled as a demo assumption (Basis: demo assumption).
   const core: FocusCoreV10 = {
     BilledCost: w.costs.monthly_spend,
     EffectiveCost: w.costs.monthly_spend,

@@ -8,6 +8,7 @@
 // Server-only: imported exclusively by the /api/report/snapshot route so the
 // renderer never leaks into the client bundle.
 
+import { reportHeaders, type CostSource } from '@/lib/vocabulary';
 import {
   Document,
   Page,
@@ -86,16 +87,19 @@ const styles = StyleSheet.create({
 });
 
 // Column layout: name is widest; the rest share the remaining width evenly.
-const COLS = [
-  { key: 'name', label: 'Initiative', width: '20%', align: 'left' as const },
-  { key: 'monthly', label: 'Monthly run rate', width: '12%', align: 'right' as const },
-  { key: 'annual', label: 'Annual Run Rate', width: '13%', align: 'right' as const },
-  { key: 'budget', label: 'Budget %', width: '9%', align: 'right' as const },
-  { key: 'status', label: 'Status', width: '13%', align: 'left' as const },
-  { key: 'efficiency', label: 'Cost Efficiency', width: '12%', align: 'right' as const },
-  { key: 'savings', label: 'Savings Opp.', width: '11%', align: 'right' as const },
-  { key: 'updated', label: 'Last Updated', width: '10%', align: 'right' as const },
-];
+const colsFor = (source: CostSource) => {
+  const h = reportHeaders(source);
+  return [
+    { key: 'name', label: 'Initiative', width: '20%', align: 'left' as const },
+    { key: 'monthly', label: h.cost, width: '12%', align: 'right' as const },
+    { key: 'annual', label: 'Annual Run Rate', width: '13%', align: 'right' as const },
+    { key: 'budget', label: h.budget, width: '9%', align: 'right' as const },
+    { key: 'status', label: 'Status', width: '13%', align: 'left' as const },
+    { key: 'efficiency', label: h.valueToCost, width: '12%', align: 'right' as const },
+    { key: 'savings', label: 'Savings Opp.', width: '11%', align: 'right' as const },
+    { key: 'updated', label: 'Last Updated', width: '10%', align: 'right' as const },
+  ];
+};
 
 function KpiBox({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
@@ -130,6 +134,7 @@ function Cell({
 
 export function ReportDocument({ model }: { model: ReportModel }) {
   const { summary } = model;
+  const COLS = colsFor(model.costSource);
   return (
     <Document title="Ratio — Initiative Cost Report">
       <Page size="A4" orientation="landscape" style={styles.page}>
@@ -139,7 +144,7 @@ export function ReportDocument({ model }: { model: ReportModel }) {
         </Text>
 
         <View style={styles.kpiGrid}>
-          <KpiBox label="Monthly run rate" value={`${formatUSD(summary.totalMonthlySpend)}/mo`} color={TOKEN.cost} />
+          <KpiBox label={`${reportHeaders(model.costSource).cost}`} value={`${formatUSD(summary.totalMonthlySpend)}/mo`} color={TOKEN.cost} />
           <KpiBox label="Projected Savings" value={formatUSD(summary.projectedSavings)} color={TOKEN.value} />
           <KpiBox label="Initiatives Active" value={String(summary.initiativesActive)} />
           <KpiBox
@@ -176,7 +181,7 @@ export function ReportDocument({ model }: { model: ReportModel }) {
         ))}
 
         <Text style={styles.subhead}>Projected savings exclude findings from sources whose role is unconfirmed (simulated).</Text>
-        {budgetNaFootnotes(model.rows).map((note) => (
+        {budgetNaFootnotes(model.rows, model.costSource).map((note) => (
           <Text key={note} style={styles.subhead}>{note}</Text>
         ))}
 

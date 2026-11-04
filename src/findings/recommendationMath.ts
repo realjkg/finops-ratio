@@ -225,7 +225,7 @@ function monitorCandidate(w: Workload): Recommendation {
     action: `Monitor — ${formatRatio(w.value.value_ratio)} is within the acceptable range`,
     projectedMonthlyImpact: null,
     projectedRatio: null,
-    basis: `Value ratio ${formatRatio(w.value.value_ratio)} ≥ the ${VALUE_MINIMUM}× target; spend within budget`,
+    basis: `Value / cost ${formatRatio(w.value.value_ratio)} ≥ the ${VALUE_MINIMUM}× target; spend within budget`,
     confidence: `No action required — no quantified impact.`,
   };
 }

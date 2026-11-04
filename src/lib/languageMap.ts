@@ -25,7 +25,7 @@ export const LANGUAGE_MAP: Record<Persona, LanguageMap> = {
     trajectoryLabel: 'Forecast',
     gateLabel: 'Approval Required',
     adjustmentLabel: 'Proposed change',
-    valueRatioLabel: 'Cost efficiency',
+    valueRatioLabel: 'Value / cost',
   },
   technical: {
     boardTitle: 'Mission Board',
@@ -34,7 +34,7 @@ export const LANGUAGE_MAP: Record<Persona, LanguageMap> = {
     trajectoryLabel: 'Trajectory',
     gateLabel: 'Gate',
     adjustmentLabel: 'Proposed adjustment',
-    valueRatioLabel: 'Value ratio',
+    valueRatioLabel: 'Value / cost',
   },
   procurement: {
     boardTitle: 'Spend Overview',
@@ -43,7 +43,7 @@ export const LANGUAGE_MAP: Record<Persona, LanguageMap> = {
     trajectoryLabel: 'Projected savings',
     gateLabel: 'Pending Sign-off',
     adjustmentLabel: 'Savings opportunity',
-    valueRatioLabel: 'Cost efficiency score',
+    valueRatioLabel: 'Value / cost',
   },
 };
 

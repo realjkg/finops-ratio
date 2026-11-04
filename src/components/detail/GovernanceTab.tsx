@@ -33,7 +33,7 @@ const GATES: GateDef[] = [
     id: 'cost',
     key: 'cost_approval',
     title: 'Gate 3 · Cost',
-    question: 'Within budget? Value ratio OK?',
+    question: 'Within budget? Value / cost OK?',
     detail: 'Monthly budget set, Value / cost meets the 3× target, ROI projection documented.',
   },
   {

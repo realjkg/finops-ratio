@@ -2,6 +2,7 @@
 // workload: type, message, timestamp, severity badge, action taken, and an
 // acknowledge control for open alerts.
 
+import { alertMessage } from '@/data/alertPresentation';
 import { useMemo } from 'react';
 import type { Alert, AlertSeverity } from '@/types';
 import { useStore } from '@/store/useStore';
@@ -72,7 +73,7 @@ function AlertCard({
               · {timeAgo(alert.triggered_at, DEMO_NOW)}
             </span>
           </div>
-          <p className="mt-1.5 text-sm text-txt">{alert.message}</p>
+          <p className="mt-1.5 text-sm text-txt">{alertMessage(alert)}</p>
           {alert.action_taken && (
             <p className="mt-1 font-mono text-[11px] text-value">→ {alert.action_taken}</p>
           )}

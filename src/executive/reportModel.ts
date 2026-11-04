@@ -12,6 +12,7 @@ import type { ProjectionContext } from '@/mission/missionModel';
 import { WORKLOADS } from '@/data/workloads';
 import { savingsByWorkload } from '@/costsource/headline';
 import type { Workload } from '@/types';
+import { budgetLabel, portfolioCostSource, type CostSource } from '@/lib/vocabulary';
 import {
   buildInitiativeBoard,
   INITIATIVE_STATUS_META,
@@ -36,6 +37,8 @@ export interface ReportModel {
   generatedAt: string;
   periodLabel: string;
   summary: SpendSummary;
+  /** Whether the cost and budget figures are modeled (sample workspace) or recorded (postings). */
+  costSource: CostSource;
   rows: ReportRow[];
 }
 
@@ -45,8 +48,8 @@ export function budgetCellText(r: Pick<ReportRow, 'budgetConsumedPct'>): string 
 }
 
 /** One footnote per N/A budget row, so the reason is never lost. */
-export function budgetNaFootnotes(rows: ReportRow[]): string[] {
-  return rows.filter((r) => r.budgetConsumedPct === null).map((r) => `${r.name}: Budget used N/A (${r.budgetConsumedNa})`);
+export function budgetNaFootnotes(rows: ReportRow[], source: CostSource = 'modeled'): string[] {
+  return rows.filter((r) => r.budgetConsumedPct === null).map((r) => `${r.name}: ${budgetLabel(source)} N/A (${r.budgetConsumedNa})`);
 }
 
 export function buildReportModel(
@@ -85,6 +88,7 @@ export function buildReportModel(
       timeZone: 'UTC',
     }),
     summary,
+    costSource: portfolioCostSource(workloads),
     rows,
   };
 }

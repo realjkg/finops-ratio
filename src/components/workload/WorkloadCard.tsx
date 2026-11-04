@@ -17,7 +17,7 @@ function secondaryLabel(workload: Workload, mode: SecondaryMode): string {
     case 'value':
       return `${formatUSD(workload.value.total_value, { compact: true })}/mo value`;
     case 'cost':
-      return `${formatUSD(workload.costs.monthly_spend, { compact: true })}/mo spend`;
+      return `${formatUSD(workload.costs.monthly_spend, { compact: true })}/mo`;
     case 'unit': {
       const unit = deriveUnitCosts(workload);
       return `${formatCents(unit.cost_per_resolved)}/resolved`;

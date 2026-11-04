@@ -10,6 +10,7 @@
 // Verbs stay exactly: Select / Apply / Dismiss. Warm accent (‘shape’) on Apply CTA only.
 // No badges, confetti, streaks — quiet governance. Calm register throughout.
 
+import { presentFinding } from '@/costsource/findingPresentation';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useCallback, useMemo, useState } from 'react';
@@ -19,7 +20,7 @@ import { buildFindings, type FindingView } from './findingsModel';
 import { ValueRatioMeter } from './ValueRatioMeter';
 import { ratioDomain, type RatioDomain } from './ratioAxis';
 import { VALUE_MINIMUM } from './findingsModel';
-import { COPY, VOCAB, targetPolicyText } from '@/lib/vocabulary';
+import { COPY, VOCAB, basisLine, costLabel, targetPolicyText } from '@/lib/vocabulary';
 import { SpendToValueGraph } from './SpendToValueGraph';
 import { EvidenceMark } from '@/components/EvidenceMark';
 import { formatUSD, formatRatio, formatPct, formatTokens } from '@/lib/format';
@@ -242,7 +243,7 @@ export function FindingsPage() {
                 >
                   {f.type === 'anomaly' ? '▲' : '◆'} {f.category}
                 </span>
-                <span className="text-txt">{f.title}</span>
+                <span className="text-txt">{presentFinding(f).title}</span>
                 <span className="text-dim">
                   {f.type === 'anomaly'
                     ? `delta ${f.observedSpendDelta >= 0 ? '+' : ''}$${f.observedSpendDelta.toFixed(0)}`
@@ -358,8 +359,8 @@ function FindingRow({
             <span className="min-w-0 break-words font-body text-sm font-medium text-txt">
               {finding.workloadName}
             </span>
-            {/* Evidence: ratio on the first line; provenance mark and run rate stacked under it, so
-                the longer "Estimated value" label never squeezes the workload name. */}
+            {/* Evidence: ratio on the first line; provenance mark and cost stacked under it, so the
+                longer "Estimated value" label never squeezes the workload name. */}
             <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
               <span
                 className="font-mono text-xs font-bold"
@@ -472,9 +473,10 @@ function RecommendationPane({
 
       <section aria-label="Cost and value" className="grid grid-cols-2 gap-3">
         <EvidenceCell
-          label={VOCAB.monthlyRunRate.label}
+          label={costLabel(finding.costSource)}
           value={formatUSD(finding.monthlySpend)}
           color={TOKEN_COLOR.cost}
+          note={basisLine(finding.costSource)}
         />
         <div className="rounded-md border border-edge bg-slab p-3">
           <p className="text-xs text-dim">{VOCAB.valueToCost.label}</p>
@@ -513,7 +515,7 @@ function RecommendationPane({
           onClick={() => setShowCalc((v) => !v)}
           className="rounded-md border border-edge px-3 py-1.5 text-sm text-txt transition-colors hover:border-sub focus:outline-none focus-visible:ring-2 focus-visible:ring-edge"
         >
-          View calculation
+          {showCalc ? 'Hide calculation' : 'View calculation'}
         </button>
         <button
           type="button"
@@ -525,7 +527,7 @@ function RecommendationPane({
         </button>
       </div>
 
-      {showCalc && <CalculationPanel finding={finding} />}
+      <CalculationPanel finding={finding} hidden={!showCalc} />
 
       {/* Evidence */}
       <section aria-label="Evidence">
@@ -555,7 +557,7 @@ function RecommendationPane({
         {/* Spend-to-value graph — portfolio context */}
         <div className="mt-4 rounded-md border border-edge bg-slab p-3">
           <p className="mb-3 text-xs text-dim">
-            Portfolio context — {VOCAB.monthlyRunRate.label} vs. {VOCAB.valueToCost.label}
+            Portfolio context — {VOCAB.monthlyWorkloadCost.label} vs. {VOCAB.valueToCost.label}
           </p>
           <SpendToValueGraph
             workloads={allWorkloads}
@@ -811,36 +813,46 @@ function CalcRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CalculationPanel({ finding }: { finding: FindingView }) {
+function CalculationPanel({ finding, hidden }: { finding: FindingView; hidden: boolean }) {
   const c = finding.calculation;
+  const unrounded = c.ratio === null ? 'N/A' : `${c.ratio.toFixed(2)}\u00d7`;
   return (
     <section
       id="finding-calculation"
       aria-label="Calculation"
       data-testid="finding-calculation"
+      hidden={hidden}
       className="space-y-3 rounded-md border border-edge bg-slab p-3 text-xs"
     >
-      <p className="text-sm font-medium text-txt">{c.formula}</p>
+      <p className="text-sm font-medium text-txt">{c.definition}</p>
+      <p className="text-sub">
+        Order of operations. The quality-floor pass rate is applied once, to gross value, to give counted value; harm from misses is
+        subtracted after that, so neither is deducted twice.
+      </p>
       <dl className="divide-y divide-edge">
-        <CalcRow label="Gross value (revenue protected + cost avoided)" value={formatUSD(c.grossValue)} />
+        <CalcRow label="Gross value (protected revenue + avoided cost)" value={formatUSD(c.grossValue)} />
         {c.qualityFloorPassRate !== null && (
-          <CalcRow label="Quality-floor pass rate" value={formatPct(c.qualityFloorPassRate)} />
+          <CalcRow label="Quality-floor pass rate (applied to gross value)" value={formatPct(c.qualityFloorPassRate)} />
         )}
-        <CalcRow label="Counted value" value={formatUSD(c.countedValue)} />
-        <CalcRow label="Harm from misses" value={`\u2212${formatUSD(c.harmFromMisses)}`} />
-        <CalcRow label={VOCAB.estimatedBusinessValue.label} value={formatUSD(c.netValue)} />
-        <CalcRow label={`${VOCAB.monthlyRunRate.label} (cost)`} value={formatUSD(c.monthlyCost)} />
-        <CalcRow label={VOCAB.valueToCost.label} value={formatRatio(finding.valueRatio)} />
+        <CalcRow label="Counted business value" value={formatUSD(c.countedValue)} />
+        <CalcRow label="Less modeled harm from misses" value={formatUSD(-c.harmFromMisses)} />
+        <CalcRow label={`Adjusted value (${VOCAB.estimatedBusinessValue.label.toLowerCase()})`} value={formatUSD(c.adjustedValue)} />
+        <CalcRow label={c.costLabel} value={formatUSD(c.cost)} />
+        <CalcRow label={`${VOCAB.valueToCost.label} (unrounded)`} value={unrounded} />
+        <CalcRow label="Displayed" value={formatRatio(c.ratio)} />
+        <CalcRow label="Break-even" value={'1×'} />
+        <CalcRow label="Configured policy target" value={`${VALUE_MINIMUM}\u00d7`} />
         {c.gapToTarget !== null && (
-          <CalcRow label={`Gap to the ${VALUE_MINIMUM}\u00d7 target`} value={formatRatio(c.gapToTarget)} />
+          <CalcRow label={`Gap to the ${VALUE_MINIMUM}\u00d7 target`} value={`${c.gapToTarget.toFixed(2)}\u00d7`} />
         )}
       </dl>
       <dl className="space-y-1.5 text-sub">
         <div><dt className="inline font-medium text-txt">Period. </dt><dd className="inline">{c.period}</dd></div>
-        <div><dt className="inline font-medium text-txt">Cost basis. </dt><dd className="inline">{c.costBasis}</dd></div>
+        <div><dt className="inline font-medium text-txt">Cost. </dt><dd className="inline">{c.costLabel}. {c.basis}.{c.monthConvention ? ` ${c.monthConvention}.` : ''}{c.costSource === 'modeled' ? ' This is not Billed cost or Effective cost.' : ''}</dd></div>
         <div><dt className="inline font-medium text-txt">Value assumptions. </dt><dd className="inline">{c.valueAssumptions}</dd></div>
-        <div><dt className="inline font-medium text-txt">Break-even. </dt><dd className="inline">1×, where value equals cost. Value / cost can be negative when harm from misses exceeds counted value.</dd></div>
-        <div><dt className="inline font-medium text-txt">Target. </dt><dd className="inline">{VALUE_MINIMUM}×. {targetPolicyText(VALUE_MINIMUM)} {COPY.targetSetBy}.</dd></div>
+        <div><dt className="inline font-medium text-txt">Break-even. </dt><dd className="inline">{'1\u00d7'}, where value equals cost. Value / cost is negative when harm from misses exceeds counted value.</dd></div>
+        <div><dt className="inline font-medium text-txt">Policy target. </dt><dd className="inline">{`${VALUE_MINIMUM}\u00d7`}. {targetPolicyText(VALUE_MINIMUM)}</dd></div>
+        <div><dt className="inline font-medium text-txt">Target source. </dt><dd className="inline">Demo configuration. {COPY.targetSetBy}.</dd></div>
         <div><dt className="inline font-medium text-txt">Source. </dt><dd className="inline">{c.source}</dd></div>
       </dl>
     </section>
@@ -856,11 +868,13 @@ function EvidenceCell({
   value,
   color,
   bold = false,
+  note,
 }: {
   label: string;
   value: string;
   color: string;
   bold?: boolean;
+  note?: string;
 }) {
   return (
     <div className="rounded-md border border-edge bg-slab p-3">
@@ -871,6 +885,7 @@ function EvidenceCell({
       >
         {value}
       </p>
+      {note && <p className="mt-0.5 text-[11px] text-sub">{note}</p>}
     </div>
   );
 }

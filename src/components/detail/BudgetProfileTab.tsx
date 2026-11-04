@@ -2,6 +2,7 @@
 // monthly forecast with confidence interval + days-to-breach, and today's token
 // consumption. The math comes from computeBudgetStatus (forecast §6).
 
+import { COPY, budgetLabel, costSourceOf } from '@/lib/vocabulary';
 import { useMemo } from 'react';
 import type { BudgetProfile, Workload } from '@/types';
 import { computeBudgetStatus, type BudgetStatus } from '@/lib/budgetStatus';
@@ -60,12 +61,12 @@ export function BudgetProfileTab({
           soft={budget.soft_threshold_pct}
           hard={budget.hard_threshold_pct}
           kill={budget.kill_threshold_pct}
-          label="Daily budget used"
+          label={budgetLabel('modeled', 'day')}
           na={daily.pctUsedNa}
         />
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">
           <span className="text-txt">{daily.pctUsedNa ? `N/A (${daily.pctUsedNa})` : `${formatPct(daily.pctUsed)} of ${formatUSD(daily.dailyBudget)} daily`}</span>
-          <span>{formatUSD(daily.spentToday)} spent</span>
+          <span>{formatUSD(daily.spentToday)} modeled cost today</span>
           <span>{daily.pctUsedNa ? 'Remaining N/A' : `${formatUSD(daily.remaining)} remaining`}</span>
           <span>{daily.hoursRemaining} hrs left</span>
         </div>
@@ -83,12 +84,12 @@ export function BudgetProfileTab({
           soft={0.7}
           hard={0.9}
           kill={1.0}
-          label="Monthly budget used"
+          label={budgetLabel(costSourceOf(workload), 'month')}
           na={monthly.pctUsedNa}
         />
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">
           <span className="text-txt">{monthly.pctUsedNa ? `N/A (${monthly.pctUsedNa})` : `${formatPct(monthly.pctUsed)} of ${formatUSD(monthly.monthlyBudget)} monthly`}</span>
-          <span>{formatUSD(monthly.spendMtd)} MTD</span>
+          <span>{formatUSD(monthly.spendMtd)} {costSourceOf(workload) === 'recorded' ? 'recorded to date' : `estimated to date (${COPY.monthConvention})`}</span>
           <span>{monthly.remainingDays} days remaining</span>
         </div>
         <p className="mt-2 text-xs text-sub">

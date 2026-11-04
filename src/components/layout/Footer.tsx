@@ -2,6 +2,7 @@
 // recent unacknowledged alerts inline — no scrolling animation. Clicking an
 // alert navigates to that workload’s Alert History tab.
 
+import { alertMessage } from '@/data/alertPresentation';
 import { useMemo, useState } from 'react';
 import { useStore } from '@/store/useStore';
 import { timeAgo } from '@/lib/format';
@@ -55,7 +56,7 @@ export function Footer() {
     >
       <span style={{ color: SEVERITY_COLOR[alert.severity] }}>{severityIcon(alert.severity)}</span>
       <span className="font-mono font-medium text-txt">{nameFor(alert.workload_id)}:</span>
-      <span className="min-w-0">{alert.message}</span>
+      <span className="min-w-0">{alertMessage(alert)}</span>
       <span className="text-dim">· {timeAgo(alert.triggered_at, DEMO_NOW)}</span>
     </button>
   ));

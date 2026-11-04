@@ -5,6 +5,7 @@
 // canonical model, and on into a Ratio workload that displays value ratio,
 // forecast, and gates — the numerator/denominator composition. Isolated from
 // the main app; no store.
+import { presentFinding } from './findingPresentation';
 import { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { createCostSourceClient, composeRatioView } from './index';
@@ -465,7 +466,7 @@ function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
 }
 
 // The numerator/denominator proof: the first ingested row, resolved to a Ratio
-// workload, shown with value ratio (denominator), forecast, and governance gates.
+// workload, shown with Value / cost (value ÷ cost), forecast, and governance gates.
 export function CompositionCard({ rows }: { rows: CanonicalFocusRow[] }) {
   const featured = rows[0];
   const view = featured ? composeRatioView(featured) : null;
@@ -480,12 +481,12 @@ export function CompositionCard({ rows }: { rows: CanonicalFocusRow[] }) {
   return (
     <Card title={`Ratio composition — ${view.name}`}>
       <div className="grid gap-4 sm:grid-cols-4">
-        <Metric label="Cost (numerator)">
+        <Metric label="Cost (denominator)">
           <span className="font-mono text-base font-bold text-cost">
             {formatUSD(view.monthlySpend)}/mo
           </span>
         </Metric>
-        <Metric label="Value ratio (denominator)">
+        <Metric label="Value / cost">
           <span
             className="font-mono text-base font-bold"
             style={{ color: ratioColor(view.valueRatio) }}
@@ -638,7 +639,8 @@ export function FindingsCard({
                   {f.type} · {f.category}
                 </span>
               </div>
-              <p className="mt-0.5 text-xs text-txt">{f.title}</p>
+              <p className="mt-0.5 text-xs text-txt">{presentFinding(f).title}</p>
+              {presentFinding(f).details.length > 0 && <p className="mt-0.5 text-[11px] text-sub">{presentFinding(f).details.join(' · ')}</p>}
             </div>
             <div className="shrink-0 text-right font-mono text-xs">
               {f.type === 'opportunity' ? (

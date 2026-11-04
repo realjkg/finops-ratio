@@ -170,7 +170,7 @@ describe('status labels of an invalid-budget mission (detail, pulse, card aria)'
     expect(renderToStaticMarkup(<StatusPulse status="na" />)).toContain('aria-label="Budget N/A status"');
     const m = toMissionView(zero, { alerts: [] });
     const html = renderToStaticMarkup(<MissionCard mission={m} onOpen={() => {}} />);
-    expect(html).toContain('budget used N/A');
+    expect(html).toContain('estimated budget consumption N/A');
     expect(html).not.toContain('null%');
   });
 });

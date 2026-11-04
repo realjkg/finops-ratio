@@ -54,10 +54,10 @@ export default function Demo() {
           </div>
 
           <div className="mt-6 grid gap-px overflow-hidden rounded-md border border-edge bg-edge sm:grid-cols-2 lg:grid-cols-4">
-            <Metric label="Monthly AI spend" value={formatUSD(snapshot.monthlySpend)} />
+            <Metric label="AI monthly workload cost" value={formatUSD(snapshot.monthlySpend)} />
             <Metric label="Business value" value={formatUSD(snapshot.totalValue)} />
             <Metric
-              label="Portfolio value ratio"
+              label="Portfolio Value / cost"
               value={formatRatio(snapshot.portfolioRatio)}
               valueColor={snapshot.portfolioRatio >= 3 ? TOKEN_COLOR.value : TOKEN_COLOR.gate}
             />

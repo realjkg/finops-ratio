@@ -33,7 +33,7 @@ export default function Overview() {
             Portfolio — Spend vs. Value
           </p>
           <p className="mb-4 text-xs text-sub">
-            All workloads by monthly spend and value ratio. Reference lines mark break-even (1x) and the Gate 3 minimum (3x).
+            All workloads by monthly workload cost and Value / cost. Reference lines mark break-even (1×) and the configured 3× policy target.
           </p>
           <SpendToValueGraph
             workloads={graphWorkloads}

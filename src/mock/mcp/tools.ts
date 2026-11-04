@@ -58,7 +58,7 @@ const strProp = { type: 'string' };
 const DEFINITIONS: readonly ToolDefinition[] = [
   {
     name: 'portfolio_summary',
-    description: 'Summarizes monthly AI spend across the workloads the caller may see, with a per-team subtotal.',
+    description: 'Summarizes monthly AI workload cost across the workloads the caller may see, with a per-team subtotal.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     outputSchema: {
       type: 'object',

@@ -1,6 +1,7 @@
 // KPI cards — spec §12 Sprint 1: Value, Spend, Per Query, Per User. Each cost is
 // shown with its value context (R4): the Value card anchors the row.
 
+import { costLabel, costSourceOf } from '@/lib/vocabulary';
 import { useState } from 'react';
 import type { EvidenceStatus, Workload } from '@/types';
 import { EvidenceMark } from '@/components/EvidenceMark';
@@ -30,7 +31,7 @@ export function KpiCards({ workload }: { workload: Workload }) {
         evidenceStatus={valueEvidence}
       />
       <Card
-        label="Monthly run rate"
+        label={costLabel(costSourceOf(workload))}
         value={formatUSD(workload.costs.monthly_spend, { compact: true })}
         accent="var(--cost)"
         note={`${formatSignedPct(workload.cost_trend_pct, 1)} MoM`}
