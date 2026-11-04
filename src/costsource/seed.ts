@@ -60,7 +60,7 @@ export function sourcesForEnv(env: Record<string, string | undefined>): CostSour
       coverage: 'public_cloud',
       capabilities: ['costRows', 'findings'],
       configured: true,
-      note: 'Offline seed mirroring PointFive Opportunities/Anomalies + FOCUS export (documented v1.0).',
+      note: 'Offline sandbox mirroring PointFive Opportunities/Anomalies + FOCUS export (documented v1.0).',
     },
     {
       id: 'focus-file-sandbox',
@@ -70,7 +70,7 @@ export function sourcesForEnv(env: Record<string, string | undefined>): CostSour
       coverage: 'private_cloud',
       capabilities: ['costRows'],
       configured: true,
-      note: 'Offline seed standing in for an on-prem / private-cloud FOCUS export; the live adapter is PR F.',
+      note: 'Offline sandbox standing in for an on-premises / private-cloud FOCUS export; the live adapter is PR F.',
     },
     {
       // Synthetic ServiceNow CMDB/ITBM cost allocation. NOT a live ServiceNow
@@ -78,14 +78,14 @@ export function sourcesForEnv(env: Record<string, string | undefined>): CostSour
       // honesty chip. Rows are derived from the same WORKLOADS the app uses —
       // the ITBM allocation method is the only delta (see rawRowForServiceNow).
       id: 'servicenow-sandbox',
-      name: 'ServiceNow (synthetic demo data)',
+      name: 'ServiceNow (offline sandbox)',
       kind: 'servicenow',
       focusVersion: '1.2',
       coverage: 'on_prem',
       capabilities: ['costRows', 'findings'],
       configured: true,
       roleConfirmed: false,
-      note: 'Synthetic CMDB/ITBM allocation lines, illustrative only. ServiceNow is not assumed to supply billing data (role unconfirmed), so these rows and findings are excluded from headline totals. Not a live integration.',
+      note: 'CMDB/ITBM allocation lines, illustrative only. ServiceNow is not assumed to supply billing data (role unconfirmed), so these rows and findings are excluded from headline totals. Not a live integration.',
     },
     // Synthetic AWS / Azure / GCP sandboxes (card A6): static offline descriptors.
     ...SYNTHETIC_CLOUD_DESCRIPTORS.map((d) => ({ ...d, capabilities: [...d.capabilities] })),

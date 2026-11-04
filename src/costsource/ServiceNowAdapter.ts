@@ -74,7 +74,7 @@ export class ServiceNowAdapter {
       canonicalVersion: CANONICAL_FOCUS_VERSION,
       checkedAt: new Date().toISOString(),
       detail: src
-        ? 'ServiceNow CMDB/ITBM (synthetic demo data): CI-keyed allocation lines; no live integration.'
+        ? 'ServiceNow CMDB/ITBM (offline sandbox): CI-keyed allocation lines; no live integration.'
         : `Unknown servicenow source '${sourceId}'.`,
     };
   }

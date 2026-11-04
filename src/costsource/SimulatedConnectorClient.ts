@@ -19,7 +19,7 @@ import { bqRowsToRecords } from './transports/gcpBigQueryTransport';
 
 /** What each fixture's provenance header supports claiming. */
 export const SIMULATED_VERIFICATION_LABEL = {
-  documented: 'documented-format sample: column names verified; values and encodings not',
+  documented: 'documented format: column names verified; values and encodings not',
   partial: 'partially verified: BigQuery wire shape only; column set and types not',
   unverified: 'illustrative, format not verified',
 } as const;
@@ -40,11 +40,11 @@ const OCT = { start: '2026-10-01T00:00:00Z', end: '2026-11-01T00:00:00Z' };
 const text = (body: string, label: string) => (w: CostWindow) => rowsFromExportText(body, w, `simulated ${label}`);
 
 export const SIMULATED_FIXTURES: Record<string, SimulatedFixture> = {
-  'aws-data-exports': { verification: 'documented', format: 'AWS Data Exports FOCUS 1.0 CSV sample', window: SEPT, rows: text(data.AWS_FOCUS_1_0_CSV, 'AWS export') },
-  'azure-cost-management': { verification: 'documented', format: 'Azure Cost Management FOCUS 1.0 CSV sample', window: OCT, rows: text(data.AZURE_FOCUS_1_0_CSV, 'Azure export') },
+  'aws-data-exports': { verification: 'documented', format: 'AWS Data Exports FOCUS 1.0 CSV', window: SEPT, rows: text(data.AWS_FOCUS_1_0_CSV, 'AWS export') },
+  'azure-cost-management': { verification: 'documented', format: 'Azure Cost Management FOCUS 1.0 CSV', window: OCT, rows: text(data.AZURE_FOCUS_1_0_CSV, 'Azure export') },
   'gcp-bigquery-focus': {
     verification: 'partial',
-    format: 'GCP BigQuery jobs.query FOCUS 1.0 response sample',
+    format: 'GCP BigQuery jobs.query FOCUS 1.0 response',
     window: SEPT,
     rows: (w) => rowsFromRecords(bqRowsToRecords(gcpBigQueryResponse as unknown as Parameters<typeof bqRowsToRecords>[0]), w, 'simulated GCP query', { allowEpochSeconds: true }),
   },

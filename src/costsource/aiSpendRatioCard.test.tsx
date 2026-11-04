@@ -1,4 +1,4 @@
-// AiSpendRatioCard: the Static seed / Ingested switch runs the same
+// AiSpendRatioCard: the Offline sandbox / Ingested switch runs the same
 // fetchAiSpendRatio code; the Ingested path degrades to an honest state.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -109,7 +109,7 @@ function report(mode: 'mock' | 'live'): AiSpendRatioReport {
     mode,
     window: WINDOW,
     perSource: [
-      { sourceId: 'aws-sandbox', name: 'AWS (synthetic sandbox)', inHeadline: true, result },
+      { sourceId: 'aws-sandbox', name: 'AWS (offline sandbox)', inHeadline: true, result },
       { sourceId: 'focus-file-sandbox', name: 'FOCUS file', inHeadline: false, result },
     ],
     overall: result,
@@ -122,12 +122,12 @@ const noop = () => {};
 describe('AiSpendRatioView', () => {
   it('shows headline, ratio, per-source and per-currency figures on the seed path', () => {
     const html = render(<AiSpendRatioView path="seed" state={{ status: 'ready', report: report('mock') }} onSwitch={noop} />);
-    expect(html).toContain('Static seed');
+    expect(html).toContain('Offline sandbox');
     expect(html).toContain('mock client');
     expect(html).toContain('25.0%');
     expect(html).toContain('$250');
     expect(html).toContain('$1,000');
-    expect(html).toContain('AWS (synthetic sandbox)');
+    expect(html).toContain('AWS (offline sandbox)');
     expect(html).toContain('-40.00 EUR');
     expect(html).not.toContain('€');
     expect(html).toContain('n/a');
@@ -143,11 +143,11 @@ describe('AiSpendRatioView', () => {
     expect(html).toContain('N/A (no headline-eligible source returned rows)');
   });
 
-  it('names the seed path as simulated and shows each excluded source its reason', () => {
+  it('names the offline sandbox path and shows each excluded source its reason', () => {
     const r = report('mock');
     r.perSource[1] = { ...r.perSource[1], exclusionReason: 'Source role unconfirmed; excluded from headline totals' };
     const html = render(<AiSpendRatioView path="seed" state={{ status: 'ready', report: r }} onSwitch={noop} />);
-    expect(html).toContain('simulated demo data');
+    expect(html).toContain('mock client over the offline sandbox sources bundled with this site');
     expect(html).toContain('(Source role unconfirmed; excluded from headline totals)');
   });
 
@@ -163,7 +163,7 @@ describe('AiSpendRatioView', () => {
     );
     expect(html).toContain('Ingested data unavailable');
     expect(html).toContain('Authentication required: x');
-    expect(html).toContain('Switch to Static seed');
+    expect(html).toContain('Switch to Offline sandbox');
   });
 
   it('formats negative USD with the sign first', () => {
@@ -173,9 +173,9 @@ describe('AiSpendRatioView', () => {
     expect(html).toContain('-$702');
   });
 
-  it('the card starts on the Static seed path', () => {
+  it('the card starts on the Offline sandbox path', () => {
     const html = render(<AiSpendRatioCard />);
-    expect(html).toContain('Static seed');
+    expect(html).toContain('Offline sandbox');
     expect(html).toContain('Loading');
   });
 });

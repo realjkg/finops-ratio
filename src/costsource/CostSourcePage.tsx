@@ -600,7 +600,7 @@ type FindingsSource = Pick<CostSourceDescriptor, 'kind' | 'name'>;
 
 /** Names the source the findings came from; PointFive keeps its DeepWaste shape label. */
 function findingsTitle(count: number, source?: FindingsSource): string {
-  // "ServiceNow (synthetic demo data)" -> "ServiceNow, synthetic demo data": no nested parentheses.
+  // "ServiceNow (offline sandbox)" -> "ServiceNow, offline sandbox": no nested parentheses.
   const label = !source || source.kind === 'pointfive' ? 'PointFive DeepWaste shape' : source.name.replace(/\s*\((.*)\)$/, ', $1');
   return `Findings — ${count} (${label})`;
 }

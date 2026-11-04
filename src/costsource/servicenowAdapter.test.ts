@@ -70,18 +70,19 @@ describe('ServiceNowAdapter — synthetic CMDB/ITBM source', () => {
     }
   });
 
-  it('health probe is honest about being a synthetic demo source', () => {
+  it('health probe is honest about being an offline sandbox, not a live integration', () => {
     const health = ServiceNowAdapter.healthCheck(SERVICENOW_SANDBOX_SOURCE_ID);
     expect(health.reachable).toBe(true);
     expect(health.authed).toBe(true);
-    expect(health.detail).toContain('synthetic demo data');
+    expect(health.detail).toContain('offline sandbox');
     expect(health.detail).toContain('no live integration');
   });
 
   it('uses the sandbox source the registry actually ships', () => {
     const src = findSource(SERVICENOW_SANDBOX_SOURCE_ID);
     expect(src?.kind).toBe('servicenow');
-    expect(src?.name).toBe('ServiceNow (synthetic demo data)');
+    expect(src?.name).toBe('ServiceNow (offline sandbox)');
+    expect(src?.note).toMatch(/illustrative only.*Not a live integration\./);
     expect(src?.capabilities).toContain('findings');
   });
 });

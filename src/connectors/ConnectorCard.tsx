@@ -23,7 +23,7 @@ const KIND_LABEL: Record<string, string> = {
   focus_file: 'FOCUS file',
   servicenow: 'ServiceNow · CMDB/ITBM',
   cloud: 'Cloud FOCUS',
-  synthetic_cloud: 'Synthetic cloud',
+  synthetic_cloud: 'Cloud sandbox',
   kubernetes: 'Kubernetes',
   nutanix: 'Nutanix',
   mock: 'Mock',
@@ -161,14 +161,6 @@ export function ConnectorCard({
           <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-sub">
             {KIND_LABEL[source.kind] ?? source.kind}
           </span>
-          {source.kind === 'synthetic_cloud' && (
-            <span
-              className="rounded border border-edge px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-sub"
-              title="Invented data: no live cloud account, credential or network call"
-            >
-              synthetic
-            </span>
-          )}
           {simulation && (
             <span className="rounded border border-edge px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-sub" title="Bundled fixture data: no network call, no credentials">
               simulated

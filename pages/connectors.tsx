@@ -127,7 +127,7 @@ function ConnectorRegistry() {
                     key={cov}
                     className="rounded border border-edge bg-slab px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-sub"
                   >
-                    {COVERAGE_LABEL[cov]} · {seededCount(all)} of {all.length} seeded · {liveCount(all)} live
+                    {COVERAGE_LABEL[cov]} · {seededCount(all)} of {all.length} offline · {liveCount(all)} live
                   </span>
                 );
               })}
@@ -155,7 +155,7 @@ function ConnectorRegistry() {
             <div className="font-mono text-sm font-bold text-txt">AI spend vs total cloud spend →</div>
             <p className="mt-1.5 text-[12px] text-sub">
               The AI share of total spend, computed from the connected sources. The Ingested path needs an
-              authenticated connection; only the Static seed is shown here.
+              authenticated connection; only the offline sandbox is shown here.
             </p>
           </Link>
 
@@ -212,7 +212,7 @@ function ConnectorRegistry() {
             <section className="mb-8">
               <h2 className="mb-3 text-xs font-semibold text-sub">
                 {liveCount(connected) === 0
-                  ? `Offline sandbox — ${connected.length} seeded adapter${connected.length !== 1 ? 's' : ''}, none live`
+                  ? `Offline sandbox — ${connected.length} adapter${connected.length !== 1 ? 's' : ''}, none live`
                   : `Configured — ${connected.length} adapters (${liveCount(connected)} live)`}
               </h2>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

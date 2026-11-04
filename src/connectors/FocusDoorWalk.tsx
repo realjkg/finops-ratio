@@ -106,8 +106,8 @@ export function FocusDoorWalk() {
               ))}
             </div>
             <p className="mt-1.5 font-mono text-[10px] text-dim">
-              Demo walk ingests the bundled sample rows at v{version}. POST /api/costsource/ingest
-              only parses sample-shaped rows and stores nothing; real billing files are imported by the operator.
+              The walk ingests rows bundled with this site at v{version}. POST /api/costsource/ingest
+              only parses rows of this shape and stores nothing; real billing files are imported by the operator.
             </p>
           </div>
 
@@ -119,7 +119,7 @@ export function FocusDoorWalk() {
               onClick={ingest}
               className="rounded border border-value/40 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-value hover:bg-value/10"
             >
-              {run ? 'Re-ingest' : 'Ingest sample rows'}
+              {run ? 'Re-ingest' : 'Ingest rows'}
             </button>
             <button
               type="button"

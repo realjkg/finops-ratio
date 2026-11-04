@@ -29,21 +29,23 @@ const ORACLE: Record<string, { provider: string; totalCents: number; mappedCents
 // (7a9da43) with the clock pinned to 2026-06-15T00:00:00Z; rows re-captured for the Fraud gates seed fix. pointfive-sandbox
 // rows re-captured in C1: its v1.0 rows no longer get a guessed ServiceSubcategory.
 // servicenow-sandbox descriptor re-captured in pilot P0 (roleConfirmed:false + note); its rows and health are unchanged.
+// All three descriptors (name/note copy) and the servicenow health detail re-captured in the demo scrub
+// ('synthetic'/'seed' wording -> 'offline sandbox'); every rows hash is unchanged.
 const GOLDEN: Record<string, { descriptor: string; rows: string; health: string }> = {
   'pointfive-sandbox': {
-    descriptor: '6ca1033c4438a232b0b733ad650dfa95f6a9baeba7c1d837a3c985999a3fca3d',
+    descriptor: '95b005e3ab71884d6012f4d3e353160a569e99c59cf04b25f4f2e118be9eab9f',
     rows: '51508ff639df0e5e7f03773da934cc9d0577e22306038863807b9ac06274a1eb',
     health: '10f1273e189cb81d0874ad9145a276b5a5141cdc876e5d6295ce4928f9662795',
   },
   'focus-file-sandbox': {
-    descriptor: '228b412ca8e466fc9e792b0870fbc07243c11b22274885746d2839f9b565641e',
+    descriptor: '5e3cf5bfb8e0d2dc0ac7e26d76c70462d953cc1eaef722b6755a782ba0f46496',
     rows: 'e6f23b3f769b9e43b3a40522cb93571e2cb812d8a95727f5b0de2424bb1a5155',
     health: '25c27e6c288090956eed7b8eb5c2c739435a7fe9d67f32aace5e9f5e91fcf401',
   },
   'servicenow-sandbox': {
-    descriptor: 'a02b7fc7b3605fa657676d94aa3ce7db00d2d810f5af3131b823c8b9c637f96b',
+    descriptor: '6565e6b55026e7a3f3cf4776f24dc92397276858804612a11ad6dc3a39d7dc5b',
     rows: 'ab93ff454cb5448566e5032bc447ed0a4b8537d0b5ee15c3ea7fdd2d569fbd78',
-    health: '4a82d31d7f99e7b065c3959373a4be3aac8b367881a0ee532c8f5af89de1bc1a',
+    health: '5bf169d0f32f3ffeb367637ab487f23b871406fbf438acf6f082f11c47427491',
   },
 };
 
@@ -216,11 +218,13 @@ describe('A6 synthetic cloud sandbox sources', () => {
       expect(a.kind).toBe('synthetic_cloud');
       expect(a.configured).toBe(true);
       expect(a.capabilities).toEqual(['costRows']);
-      expect(a.note.toLowerCase()).toContain('synthetic');
+      expect(a.note).toMatch(/offline, not a live (AWS|Azure|GCP) integration/);
+      expect(a.name).toMatch(/\(offline sandbox\)$/);
+      expect(`${a.name} ${a.note}`).not.toMatch(/synthetic|seed/i);
     }
   });
 
-  it('health_for_new_sources_reports_synthetic_and_makes_no_network_call', async () => {
+  it('health_for_new_sources_reports_offline_not_live_and_makes_no_network_call', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     for (const id of NEW_IDS) {
@@ -228,7 +232,7 @@ describe('A6 synthetic cloud sandbox sources', () => {
       expect(h.sourceId).toBe(id);
       expect(h.reachable).toBe(true);
       expect(h.authed).toBe(true);
-      expect(h.detail.toLowerCase()).toContain('synthetic');
+      expect(h.detail).toMatch(/offline sandbox\): bundled offline rows; no live cloud integration and no network call\.$/);
       await rowsOf(id);
     }
     expect(fetchMock).not.toHaveBeenCalled();

@@ -82,7 +82,7 @@ describe('FindingsCard title', () => {
     await waitFor(() => host.textContent?.includes('Loading findings'));
     (await waitFor(button(host, 'PointFive'))).click();
     gate.open();
-    expect(await waitFor(title(host))).toMatch(/^Findings — \d+ \(ServiceNow, synthetic demo data\)$/);
+    expect(await waitFor(title(host))).toMatch(/^Findings — \d+ \(ServiceNow, offline sandbox\)$/);
     root.unmount();
   });
 });

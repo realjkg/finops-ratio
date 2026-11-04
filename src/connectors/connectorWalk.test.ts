@@ -310,12 +310,12 @@ describe('walk state resets', () => {
 // ---------------------------------------------------------------------------
 
 describe('ServiceNow (sandbox) — full walk', () => {
-  const SERVICE_NOW_NAME = 'ServiceNow (synthetic demo data)';
+  const SERVICE_NOW_NAME = 'ServiceNow (offline sandbox)';
 
   it('connects, ingests CMDB/ITBM rows through the seam to canonical v1.4, lands, disconnects clean', async () => {
     const src = findSource('servicenow-sandbox');
     expect(src?.configured).toBe(true);
-    // Honesty: the card says what the source is — synthetic, not a live integration.
+    // Honesty: the card says what the source is — an offline sandbox, not a live integration.
     expect(src?.name).toBe(SERVICE_NOW_NAME);
 
     await useStore.getState().connectConnector('servicenow-sandbox', client);
@@ -378,7 +378,7 @@ describe('source variance (spend by source, per workload)', () => {
     await useStore.getState().connectConnector('pointfive-sandbox', client);
     await useStore.getState().runConnectorIngest('pointfive-sandbox', 'PointFive (sandbox)', client);
     await useStore.getState().connectConnector('servicenow-sandbox', client);
-    await useStore.getState().runConnectorIngest('servicenow-sandbox', 'ServiceNow (synthetic demo data)', client);
+    await useStore.getState().runConnectorIngest('servicenow-sandbox', 'ServiceNow (offline sandbox)', client);
 
     const runs = useStore.getState().ingestRuns;
     expect(Object.keys(runs).length).toBe(2);

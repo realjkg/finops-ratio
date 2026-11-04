@@ -22,9 +22,9 @@ type RatioState =
   | { status: 'ready'; report: AiSpendRatioReport }
   | { status: 'unavailable'; reason: string; errors?: AiSpendRatioReport['errors'] };
 
-const PATH_LABEL: Record<RatioPath, string> = { seed: 'Static seed', ingested: 'Ingested' };
+const PATH_LABEL: Record<RatioPath, string> = { seed: 'Offline sandbox', ingested: 'Ingested' };
 const PATH_DETAIL: Record<RatioPath, string> = {
-  seed: 'simulated demo data: mock client, offline sandbox + synthetic sources',
+  seed: 'mock client over the offline sandbox sources bundled with this site',
   ingested: 'live client: /api/costsource routes, non-sandbox sources only',
 };
 
@@ -135,7 +135,7 @@ export function AiSpendRatioView({
           ))}
           {path === 'ingested' && (
             <button onClick={() => onSwitch('seed')} className="mt-2 text-xs text-gate underline">
-              Switch to Static seed
+              Switch to Offline sandbox
             </button>
           )}
         </div>
@@ -174,7 +174,7 @@ export function AiSpendRatioView({
             Learning”. The headline sums only sources that do not repeat another fetched source’s
             bill; other sources are assumed not to overlap (no row-level dedupe). May undercount if exports file AI spend under other categories.
             {state.report.perSource.some((s) => SYNTHETIC_CLOUD_IDS.includes(s.sourceId)) &&
-              ' The synthetic AWS/Azure/GCP sandboxes are their own bills, including charges no workload maps to; the signed-in workspace ledger is a different fixture that splits the workload totals across the three clouds, so the two do not match by design.'}
+              ' The AWS/Azure/GCP sandboxes are their own bills, including charges no workload maps to; the signed-in workspace ledger is a different dataset that splits the workload totals across the three clouds, so the two do not match by design.'}
           </p>
         </div>
       )}
