@@ -1,4 +1,4 @@
-// Appearance control in the top bar: System, Light, High contrast and Dark, with a small live
+// Display control in the top bar: System, Light, High contrast and Dark, with a small live
 // preview. The palette editor and the contrast readout are developer tools: they sit behind a
 // "Developer: contrast audit" disclosure that starts closed. Every user theme (pasted, file,
 // sample or edited) goes through checkTheme before it can be applied, and the readout shows each
@@ -175,7 +175,7 @@ export function ThemeMenu() {
   };
   const switcher = (id: string) => (
     <>
-      <label htmlFor={id}>Appearance</label>
+      <label htmlFor={id}>Display</label>
       <select id={id} value={active ?? ''} onChange={(e) => pick(e.target.value)} className="min-w-0 max-w-[11rem] rounded border border-edge bg-raised px-1 py-0.5 text-txt">
         <option value="">System</option>
         {Object.keys(BUILT_IN_THEMES).map((n) => <option key={n} value={n}>{LABELS[n]}</option>)}
@@ -187,11 +187,11 @@ export function ThemeMenu() {
   return (
     <div ref={menu} className="md:relative">
       <div className="flex items-center gap-1.5 font-mono text-xs text-sub">
-        {/* Phones get one "Appearance" button; the choices then sit at the top of the panel. */}
-        <button type="button" className={`${btn} md:hidden`} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Appearance</button>
+        {/* Phones get one "Display" button; the choices then sit at the top of the panel. */}
+        <button type="button" className={`${btn} md:hidden`} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Display</button>
         <span className="hidden items-center gap-1.5 md:flex">
           {switcher('theme-select')}
-          <button type="button" className={btn} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Appearance options</button>
+          <button type="button" className={btn} aria-expanded={open} aria-controls="theme-editor" onClick={toggle}>Display options</button>
         </span>
       </div>
       <div className="absolute inset-x-2 top-full z-40 mt-1 space-y-1 text-xs text-txt md:inset-x-auto md:right-0 md:w-[30rem]">
@@ -200,11 +200,11 @@ export function ThemeMenu() {
         {open && (
         <section id="theme-editor" aria-label="Theme editor" className="max-h-[80dvh] space-y-3 overflow-auto rounded border border-edge bg-slab p-3 font-body shadow-lg">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">Appearance</h2>
+            <h2 className="text-sm font-semibold">Display</h2>
             <button type="button" className={btn} aria-label="Close theme editor" onClick={close}>Close</button>
           </div>
           <fieldset className="min-w-0">
-            <legend className="sr-only">Appearance</legend>
+            <legend className="sr-only">Display</legend>
             <div className="grid grid-cols-2 gap-2">
               {choices.map((c) => (
                 <label key={c.id} className="block min-w-0">
