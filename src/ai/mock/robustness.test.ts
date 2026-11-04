@@ -79,7 +79,7 @@ describe('adversarial input', () => {
     const replies = await Promise.all(qs.map((q) => ask1(q)));
     replies.forEach((t, i) => {
       clean(t);
-      expect(t, qs[i]).toMatch(/seeded demo data/);
+      expect(t, qs[i]).toMatch(/synthetic sample workspace data/);
     });
   });
 

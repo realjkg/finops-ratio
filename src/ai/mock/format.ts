@@ -63,7 +63,7 @@ export function months(n: number): string {
 }
 
 export function basisLine(asOf: string): string {
-  return `Basis: seeded demo data as of ${asOf.slice(0, 10)} — computed by a deterministic mock (no LLM, nothing live).`;
+  return `Basis: synthetic sample workspace data as of ${asOf.slice(0, 10)} — computed by a deterministic mock (no LLM, nothing live).`;
 }
 
 /** Render an Answer: header, body, assumptions, basis chip, next questions. */

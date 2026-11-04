@@ -29,7 +29,7 @@ export function capabilityAnswer(world: World): Answer {
   const s = sampleNames(world);
   const r = rollup(world.workloads);
   const body = [
-    'I am a deterministic mock: no LLM, no network, and nothing live. Every answer is computed from the seeded demo data and says so, with its assumptions and the evidence status of every Value / cost.',
+    'I am a deterministic mock: no LLM, no network, and nothing live. Every answer is computed from the synthetic sample workspace data and says so, with its assumptions and the evidence status of every Value / cost.',
     `Data in hand: ${world.workloads.length} workloads${world.teams.length > 0 ? ` across ${world.teams.length} teams` : ''}, ${r.spend > 0 ? `${usd(r.spend)}/mo of spend` : 'spend'}, model list prices, alerts, savings findings. Not in the data: revenue or EBITDA baselines, hosting costs, open-model quality, measured outcomes.`,
     'Question types:',
     '• ROI (value, cost, ratio, evidence status, ranked contributors, weakest and strongest) for the portfolio, a team, a workload or a model',
@@ -56,7 +56,7 @@ export function capabilityAnswer(world: World): Answer {
 export function unsupportedText(world: World, why?: string): string {
   return [
     UNSUPPORTED_HEADER,
-    why ?? 'That is outside what the seeded demo data holds: I do not have it, and I will not make a number up.',
+    why ?? 'That is outside what the synthetic sample workspace data holds: I do not have it, and I will not make a number up.',
     'Not in the data: revenue or EBITDA baselines, hosting costs, open-model quality, measured outcomes, forecasts, anything per customer or per user.',
     basisLine(world.asOf),
     'Closest questions I can answer:',

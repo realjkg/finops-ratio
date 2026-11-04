@@ -63,7 +63,7 @@ export function GovernanceTab({ workload }: { workload: Workload }) {
             className="font-mono text-sm font-bold uppercase"
             style={{ color: canScale ? 'var(--value)' : 'var(--cost)' }}
           >
-            {canScale ? 'Authorized' : 'Blocked'}
+            {canScale ? 'Approved' : 'Not approved'}
           </div>
         </div>
       </div>

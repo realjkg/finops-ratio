@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FindingsPage } from './FindingsPage';
 import { useStore } from '@/store/useStore';
+import { WORKLOADS } from '@/data/workloads';
 
 vi.mock('next/router', () => ({ useRouter: () => ({ query: {}, pathname: '/', isReady: true, push: async () => true, replace: async () => true }) }));
 declare global {
@@ -20,7 +21,7 @@ const q = (sel: string) => box.querySelector(sel) as HTMLElement | null;
 const button = (text: string) => [...box.querySelectorAll('button')].find((b) => b.textContent === text) as HTMLButtonElement;
 
 beforeEach(() => {
-  useStore.setState({ simulation: null, aiPanelOpen: false, selectedId: 'wl-support' });
+  useStore.setState({ workloads: structuredClone(WORKLOADS), simulation: null, aiPanelOpen: false, selectedId: 'wl-support' });
   box = document.createElement('div');
   document.body.appendChild(box);
   root = createRoot(box);
@@ -33,13 +34,16 @@ afterEach(() => {
 
 describe('finding card (lowest Value / cost first: Fraud Triage Agent)', () => {
   it('shows the status line, modeled cost with its basis, Value / cost with its target, and one reason', () => {
-    expect(q('[data-testid="finding-status"]')?.textContent).toBe('Below target · Estimated value');
+    expect(q('[data-testid="finding-status"]')?.textContent).toBe('Below target');
+    expect(box.textContent).toContain('Estimated value'); // beside the number, once on the card
     expect(q('[data-testid="finding-value-cost"]')?.textContent).toBe('-0.2×');
     const text = box.textContent ?? '';
     expect(text).toContain('Modeled workload cost');
     expect(text).toContain('Basis: demo assumption');
     expect(text).not.toMatch(/Monthly run rate|Cost basis not stated/);
     expect(text).toContain('Target 3×');
+    expect(text).toContain('Why this is below target');
+    expect(text).not.toContain('Why this needs attention');
     expect(q('[data-testid="finding-why"]')?.textContent).toMatch(/Harm from misses/);
     expect(text).not.toMatch(/3\.2.{0,3}below|below minimum|Monthly spend|Current ratio/);
     expect(text).not.toContain('\u2212'); // one minus glyph everywhere: the ASCII hyphen
@@ -103,5 +107,50 @@ describe('finding card (lowest Value / cost first: Fraud Triage Agent)', () => {
   it('draws a visible bar for the negative ratio on the shared axis', () => {
     const meter = box.querySelector('[role="meter"][aria-valuemin="-1"]');
     expect(meter).not.toBeNull();
+  });
+});
+
+describe('Value review header count', () => {
+  it('states the computed number of workloads below the target, out of all workloads', async () => {
+    const { WORKLOADS } = await import('@/data/workloads');
+    const { buildFindings } = await import('./findingsModel');
+    const below = buildFindings(WORKLOADS).filter((f) => f.targetStatus !== 'on_target').length;
+    expect(below).toBe(2);
+    expect(box.textContent).toContain(`${below} of ${WORKLOADS.length} below the 3× target.`);
+  });
+
+  it('changes when the data changes (not a fixed string)', () => {
+    const raised = useStore.getState().workloads.map((w) => ({ ...w, value: { ...w.value, revenue_protected: 1e9, cost_avoided: 0, harm_from_misses: 0, quality_floor_pass_rate: 1 } }));
+    act(() => useStore.setState({ workloads: raised }));
+    expect(box.textContent).toContain('0 of 11 below the 3× target.');
+  });
+});
+
+describe('Below target filter', () => {
+  const group = () => box.querySelector('[role="group"][aria-label="Show workloads"]')!;
+  const btn = (prefix: string) => [...group().querySelectorAll('button')].find((b) => b.textContent!.startsWith(prefix))!;
+  const rows = () => box.querySelectorAll('aside[aria-label="Value review list"] button').length;
+
+  it('shows all workloads by default, with counts on both buttons', () => {
+    expect(btn('All').getAttribute('aria-pressed')).toBe('true');
+    expect(btn('All').textContent).toBe('All (11)');
+    expect(btn('Below target').textContent).toBe('Below target (2)');
+    expect(rows()).toBe(11);
+  });
+
+  it('narrows the list to below-target workloads and keeps the header count', () => {
+    act(() => (btn('Below target') as HTMLButtonElement).click());
+    expect(btn('Below target').getAttribute('aria-pressed')).toBe('true');
+    expect(rows()).toBe(2);
+    expect(box.textContent).toContain('2 of 11 below the 3× target.');
+    act(() => (btn('All') as HTMLButtonElement).click());
+    expect(rows()).toBe(11);
+  });
+
+  it('is keyboard operable: native buttons in the tab order', () => {
+    for (const b of group().querySelectorAll('button')) {
+      expect(b.tagName).toBe('BUTTON');
+      expect(b.getAttribute('tabindex')).toBeNull();
+    }
   });
 });

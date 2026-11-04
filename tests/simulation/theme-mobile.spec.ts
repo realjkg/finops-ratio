@@ -17,7 +17,7 @@ for (const width of [320, 390, 430]) {
         expect(await control.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), await control.textContent() ?? '').toBe(true);
       }
     }
-    const toggle = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Appearance', exact: true });
+    const toggle = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Display', exact: true });
     await toggle.focus();
     await page.keyboard.press('Enter');
     await page.locator('#theme-editor label', { hasText: /^High contrast$/ }).click();

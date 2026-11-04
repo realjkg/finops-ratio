@@ -95,7 +95,10 @@ export function FindingsPage() {
     [governanceMap],
   );
 
-  const visible = findings.filter((f) => !dismissedIds.has(f.workloadId));
+  const belowTarget = findings.filter((f) => f.targetStatus !== 'on_target').length;
+  const [filter, setFilter] = useState<'all' | 'below'>('all');
+  const notDismissed = findings.filter((f) => !dismissedIds.has(f.workloadId));
+  const visible = filter === 'below' ? notDismissed.filter((f) => f.targetStatus !== 'on_target') : notDismissed;
   const selected = visible.find((f) => f.workloadId === selectedId) ?? visible[0] ?? null;
 
   function handleSelect(id: string) {
@@ -196,7 +199,7 @@ export function FindingsPage() {
           <div>
             <h1 className="text-lg font-bold text-txt">Value review</h1>
             <p className="mt-0.5 text-xs text-sub">
-              Workloads ranked by {VOCAB.valueToCost.label}, lowest value first. Target {VALUE_MINIMUM}×.
+              Workloads ranked by {VOCAB.valueToCost.label}, lowest value first. {belowTarget} of {findings.length} below the {VALUE_MINIMUM}× target.
             </p>
           </div>
           {capturedCount > 0 && (
@@ -206,6 +209,21 @@ export function FindingsPage() {
           )}
         </div>
       </header>
+
+      {/* Filter: the page keeps its name; "Below target" narrows the list. Plain buttons, so Tab and Enter/Space work. */}
+      <div role="group" aria-label="Show workloads" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-edge px-6 py-2 text-sm">
+        {([['all', `All (${notDismissed.length})`], ['below', `Below target (${notDismissed.filter((f) => f.targetStatus !== 'on_target').length})`]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={filter === key}
+            onClick={() => setFilter(key)}
+            className={`rounded-md border px-3 py-1.5 max-md:min-h-11 ${filter === key ? 'border-focus bg-raised font-medium text-txt' : 'border-edge text-sub hover:text-txt'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {sim && <div className="flex flex-wrap items-center gap-3 border-b border-edge px-4 py-3 text-sm text-sub"><span>Apply requests a simulated change. Approval and application are tracked in the customer workflow.</span><Link href="/workspace#decisions" className="text-unit underline">Review change decisions</Link>{sim.state.dismissed.length > 0 && <button disabled={simBusy} className="underline" onClick={() => void run({ type: 'restore-findings' })}>Restore dismissed findings</button>}</div>}
 
@@ -246,7 +264,7 @@ export function FindingsPage() {
         >
           {visible.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-              <p className="font-mono text-sm text-dim">All findings dismissed</p>
+              <p className="text-sm text-dim">{notDismissed.length === 0 ? 'All findings dismissed' : 'No workloads below target'}</p>
             </div>
           ) : (
             visible.map((f, idx) => (
@@ -470,7 +488,7 @@ function RecommendationPane({
             >
               {formatRatio(finding.valueRatio)}
             </span>
-            <EvidenceMark status={finding.valueEvidenceStatus} />
+            <EvidenceMark status={finding.valueEvidenceStatus} explain />
             <span className="text-xs text-sub">Target {VALUE_MINIMUM}×</span>
           </p>
         </div>
@@ -485,7 +503,7 @@ function RecommendationPane({
       />
 
       <div>
-        <p className="text-xs font-medium text-dim">Why this needs attention</p>
+        <p className="text-xs font-medium text-dim">{finding.targetStatus === 'on_target' ? 'Why this is on target' : 'Why this is below target'}</p>
         <p className="mt-0.5 text-sm text-txt" data-testid="finding-why">{finding.why}</p>
       </div>
 
@@ -552,7 +570,7 @@ function RecommendationPane({
 
       {/* Recommended action */}
       <section aria-label="Recommended action">
-        <p className="mb-2 font-mono text-[10px] uppercase tracking-wider text-dim">
+        <p className="mb-2 text-xs font-medium text-dim">
           Recommended action
         </p>
         <p className="text-sm text-txt">{finding.recommendedAction}</p>
@@ -560,7 +578,7 @@ function RecommendationPane({
 
       {/* Projected impact — hero figure + honest qualification (Slice 5) */}
       <section aria-label="Projected monthly impact">
-        <p className="mb-1 font-mono text-[10px] uppercase tracking-wider text-dim">
+        <p className="mb-1 text-xs font-medium text-dim">
           Projected monthly impact
         </p>
         {finding.projectedMonthlyImpact !== null &&
@@ -589,7 +607,7 @@ function RecommendationPane({
 
         {/* Basis — what the figure is computed from (quiet). */}
         <p className="mt-2 font-mono text-[10px] leading-relaxed text-dim">
-          <span className="uppercase tracking-wider">Basis </span>
+          <span className="font-medium">Basis. </span>
           {finding.impactBasis}
         </p>
         {/* Confidence / assumption note — never presents a projection as a saving. */}
@@ -654,7 +672,7 @@ function RecommendationPane({
 
               {showRefForm && (
                 <div className="mt-3 space-y-2 rounded-md border border-edge bg-slab p-3">
-                  <p className="font-mono text-[10px] uppercase tracking-wider text-dim">
+                  <p className="text-xs font-medium text-dim">
                     Attach pre-approved reference
                   </p>
                   <div className="flex items-center gap-2">
@@ -781,18 +799,9 @@ function AuditChip({
 // Status line and calculation panel
 // ---------------------------------------------------------------------------
 
-const EVIDENCE_PHRASE: Record<string, string> = {
-  assumed: COPY.estimatedValue,
-  projected: 'Projected value',
-  measured: 'Measured value',
-};
-
-/** "Below target · Estimated value": position against the target, then how firm the value is. */
+/** "Below target" or "At or above target". How firm the value is sits beside the number (EvidenceMark). */
 function statusLine(f: FindingView): string {
-  const position =
-    f.targetStatus === 'on_target' ? 'At or above target' : 'Below target';
-  const evidence = f.valueEvidenceStatus ? EVIDENCE_PHRASE[f.valueEvidenceStatus] : null;
-  return evidence ? `${position} \u00b7 ${evidence}` : position;
+  return f.targetStatus === 'on_target' ? 'At or above target' : 'Below target';
 }
 
 function CalcRow({ label, value }: { label: string; value: string }) {

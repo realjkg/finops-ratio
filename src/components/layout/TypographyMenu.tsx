@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_TYPOGRAPHY, FAMILIES, SCALES, applyTypography, loadTypography, saveTypography, type FamilyId, type Typography } from '@/theme/typography';
 
-const btn = 'rounded border border-edge bg-raised px-2 py-1 font-mono text-xs text-txt hover:bg-slab';
+const btn = 'rounded border border-edge bg-raised px-2 py-1 font-mono text-xs text-txt hover:bg-slab max-md:min-h-11';
 const select = 'min-w-0 rounded border border-edge bg-raised px-1 py-0.5 text-txt';
 
 export function TypographyMenu() {

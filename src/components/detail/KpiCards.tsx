@@ -95,7 +95,7 @@ function Card({
       <div className="mt-1 font-mono text-xl font-bold text-txt">{value}</div>
       <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[11px]">
         <span style={{ color: noteColor }}>{note}</span>
-        <EvidenceMark status={evidenceStatus} />
+        <EvidenceMark status={evidenceStatus} explain />
       </div>
     </div>
   );

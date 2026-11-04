@@ -96,7 +96,7 @@ for (const theme of Object.keys(MAX)) {
       for (const x of bad) dump.push({ theme, route, el: x.n.el, text: x.n.text, fg: x.fg, bg: x.bg, ratio: +x.ratio.toFixed(2), need: x.need });
     }
     // Extra surfaces: /simulation in sample mode (the status route is stubbed off, as on a public deployment)
-    // and the open Appearance panel with each choice, at the two narrowest phone widths.
+    // and the open Display panel with each choice, at the two narrowest phone widths.
     const record = async (label: string) => {
       // Let theme color transitions finish, or the audit would measure a blend of two themes.
       await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
@@ -118,9 +118,9 @@ for (const theme of Object.keys(MAX)) {
       await page.setViewportSize({ width, height: 844 });
       for (const choice of ['System', 'Light', 'High contrast', 'Dark']) {
         await page.goto('/overview');
-        await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+        await page.getByRole('button', { name: 'Display', exact: true }).click();
         await page.locator('#theme-editor label', { hasText: new RegExp(`^${choice}$`) }).click();
-        await record(`appearance panel ${choice} @${width}`);
+        await record(`display panel ${choice} @${width}`);
       }
     }
     rows.push(`${theme.padEnd(14)} TOTAL        ${String(failing).padStart(4)} (max ${MAX[theme]})`);
