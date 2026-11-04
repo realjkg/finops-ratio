@@ -76,7 +76,8 @@ describe('over-budget values stay visible', () => {
 describe('PDF savings explanation', () => {
   it('says unconfirmed-role findings are excluded and shows the verified total', () => {
     const text = pdfText(<ReportDocument model={buildReportModel(FIXED)} />);
-    expect(text).toMatch(/exclude findings from sources whose role is unconfirmed/);
+    expect(text).toMatch(/exclude findings from sources whose role is unconfirmed\./);
+    expect(text).not.toMatch(/synthetic|sample|seeded|\(simulated\)/i);
     expect(text).toContain('$2,408');
   });
 });

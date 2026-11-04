@@ -180,7 +180,7 @@ export function ReportDocument({ model }: { model: ReportModel }) {
           </View>
         ))}
 
-        <Text style={styles.subhead}>Projected savings exclude findings from sources whose role is unconfirmed (simulated).</Text>
+        <Text style={styles.subhead}>Projected savings exclude findings from sources whose role is unconfirmed.</Text>
         {budgetNaFootnotes(model.rows, model.costSource).map((note) => (
           <Text key={note} style={styles.subhead}>{note}</Text>
         ))}
