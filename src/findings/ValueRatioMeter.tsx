@@ -117,12 +117,12 @@ export function ValueRatioMeter({
       {/* Axis labels — large variant only. Two rows so neighbouring labels never collide. */}
       {isLarge && (
         <div className="relative h-7 text-[11px] text-dim">
-          <span className="absolute left-0">{domain.min}×</span>
-          {hasNegativeAxis && (
-            <span className="absolute -translate-x-1/2" style={{ left: `${zeroPct}%` }}>
-              0×
-            </span>
-          )}
+          {/* One label for the origin. The negative floor gets no label of its own: it sat
+              on top of 0× at narrow widths and large text, and the 0× line already marks where
+              the bar starts. */}
+          <span className={hasNegativeAxis ? 'absolute -translate-x-1/2' : 'absolute left-0'} style={hasNegativeAxis ? { left: `${zeroPct}%` } : undefined}>
+            0×
+          </span>
           <span
             className="absolute top-3.5 text-sub" /* own row: 0× and 1× collided in narrow lists */
             style={{ left: `${breakEvenPct}%` }}

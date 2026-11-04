@@ -18,7 +18,8 @@ describe('ValueRatioMeter', () => {
     const f = fill(html);
     expect(f.width).toBeGreaterThan(0.5); // visible, not a zero-length bar
     expect(f.left + f.width).toBeCloseTo(zero, 1); // fill ends at 0x, runs left of it
-    expect(html).toContain('>-1×<');
+    expect(html).toContain('>0×<'); // the origin is labelled once; the negative floor is not labelled
+    expect(html).not.toContain('>-1×<');
   });
 
   it('keeps the original zero-based scale when nothing is negative', () => {

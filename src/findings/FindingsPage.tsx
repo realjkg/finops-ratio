@@ -459,7 +459,7 @@ function RecommendationPane({
         />
         <div className="rounded-md border border-edge bg-slab p-3">
           <p className="text-xs text-dim">{VOCAB.valueToCost.label}</p>
-          <p className="mt-1 flex items-baseline gap-2">
+          <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span
               className="font-mono text-base font-bold"
               style={{ color: finding.valueColor }}
