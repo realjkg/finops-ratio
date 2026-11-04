@@ -42,12 +42,13 @@ describe('main navigation', () => {
         strip.dispatchEvent(new Event('scroll'));
       });
     };
+    const shown = (side: 'left' | 'right') => !box.querySelector(`[data-testid="nav-more-${side}"]`)!.className.split(' ').includes('invisible');
     metrics(0);
-    expect(box.querySelector('[data-testid="nav-more-right"]')).not.toBeNull();
-    expect(box.querySelector('[data-testid="nav-more-left"]')).toBeNull();
+    expect(shown('right')).toBe(true);
+    expect(shown('left')).toBe(false);
     metrics(200);
-    expect(box.querySelector('[data-testid="nav-more-right"]')).toBeNull();
-    expect(box.querySelector('[data-testid="nav-more-left"]')).not.toBeNull();
+    expect(shown('right')).toBe(false);
+    expect(shown('left')).toBe(true);
   });
 
   it('keeps the affordances off from md up', () => {

@@ -52,7 +52,6 @@ export function NavBar({
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, [active, measure]);
-  const nudge = (dir: -1 | 1) => strip.current?.scrollBy?.({ left: dir * (strip.current.clientWidth * 0.6), behavior: 'smooth' });
   return (
     <nav className="relative shrink-0 border-b border-edge bg-deep" aria-label="Main navigation">
       <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 px-3 py-2 md:flex md:min-h-10 md:flex-wrap md:gap-y-1 md:gap-x-0.5 md:py-1">
@@ -68,12 +67,15 @@ export function NavBar({
         <span className="font-mono text-sm font-bold tracking-tight text-txt">Ratio</span>
       </span>
 
-      <div className="relative col-span-2 row-start-2 min-w-0 md:col-auto md:row-auto">
+      <div className="col-span-2 row-start-2 flex min-w-0 items-stretch md:col-auto md:row-auto">
+        {/* Gutters hold the arrows, so they never sit on top of a label. Phones only; the space
+            is reserved (invisible, not removed) so the strip does not jump when an arrow appears. */}
+        <span aria-hidden="true" data-testid="nav-more-left" className={`flex w-5 shrink-0 items-center justify-start bg-gradient-to-r from-deep to-transparent text-sub md:hidden ${more.left ? '' : 'invisible'}`}>&#8249;</span>
         <div
           ref={strip}
           onScroll={measure}
           data-testid="nav-strip"
-          className="flex min-w-0 snap-x snap-proximity gap-0.5 overflow-x-auto scroll-px-8 pb-0.5 [scrollbar-width:none] md:overflow-visible md:pb-0 [&::-webkit-scrollbar]:hidden"
+          className="flex min-w-0 flex-1 snap-x snap-proximity gap-0.5 overflow-x-auto scroll-px-2 pb-0.5 [scrollbar-width:none] md:overflow-visible md:pb-0 [&::-webkit-scrollbar]:hidden"
         >
           {NAV_ITEMS.map((item) => {
             const isActive = item.key === active;
@@ -93,13 +95,7 @@ export function NavBar({
             );
           })}
         </div>
-        {/* Scroll affordances: a fade plus an arrow on the side that has more items. Phones only. */}
-        {more.left && (
-          <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => nudge(-1)} data-testid="nav-more-left" className="absolute inset-y-0 left-0 flex w-8 items-center justify-start bg-gradient-to-r from-deep via-deep/90 to-transparent pl-1 text-sub md:hidden">&#8249;</button>
-        )}
-        {more.right && (
-          <button type="button" tabIndex={-1} aria-hidden="true" onClick={() => nudge(1)} data-testid="nav-more-right" className="absolute inset-y-0 right-0 flex w-8 items-center justify-end bg-gradient-to-l from-deep via-deep/90 to-transparent pr-1 text-sub md:hidden">&#8250;</button>
-        )}
+        <span aria-hidden="true" data-testid="nav-more-right" className={`flex w-5 shrink-0 items-center justify-end bg-gradient-to-l from-deep to-transparent text-sub md:hidden ${more.right ? '' : 'invisible'}`}>&#8250;</span>
       </div>
 
       {/* md:[&>div:first-child]:static: ThemeMenu's own md:relative would anchor its panel to the wrapping button group; anchoring both panels to the nav keeps them inside the viewport. */}
