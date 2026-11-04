@@ -225,7 +225,7 @@ function monitorCandidate(w: Workload): Recommendation {
     action: `Monitor — ${formatRatio(w.value.value_ratio)} is within the acceptable range`,
     projectedMonthlyImpact: null,
     projectedRatio: null,
-    basis: `Value ratio ${formatRatio(w.value.value_ratio)} ≥ the ${VALUE_MINIMUM}× minimum; spend within budget`,
+    basis: `Value ratio ${formatRatio(w.value.value_ratio)} ≥ the ${VALUE_MINIMUM}× target; spend within budget`,
     confidence: `No action required — no quantified impact.`,
   };
 }
@@ -263,7 +263,7 @@ export function recommendFor(w: Workload): Recommendation {
     return sunsetCandidate(w);
   }
 
-  // 3. Below the 3× minimum → demand shaping first (lowest-assumption), else switch.
+  // 3. Below the 3× target → demand shaping first (lowest-assumption), else switch.
   if (ratio < VALUE_MINIMUM) {
     if (shapeRec) return shapeRec;
     if (switchRec) return switchRec;

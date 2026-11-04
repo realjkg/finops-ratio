@@ -43,7 +43,7 @@ export const GATE_DEFS: GateDef[] = [
     label: 'Cost',
     checks: [
       'Monthly budget set',
-      'Value ratio ≥ 3× minimum',
+      'Value / cost at or above the 3× target',
       'ROI projection documented',
     ],
     govKey: 'cost_approval',

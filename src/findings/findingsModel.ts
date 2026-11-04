@@ -8,6 +8,10 @@ import { WORKLOADS } from '@/data/workloads';
 import { ratioColor } from '@/lib/scales';
 import { CACHE_HIT_RATE_MATERIAL, deriveCacheEconomics } from '@/lib/derive';
 import { headlineEvidenceStatus } from '@/lib/valueEvidence';
+import { deriveWorkloadValue } from '@/lib/valueMath';
+import { COPY, VOCAB, VALUE_COST_BREAK_EVEN } from '@/lib/vocabulary';
+import { formatUSD } from '@/lib/format';
+import { DEMO_NOW } from '@/data/workloads';
 import type { EvidenceStatus, Workload } from '@/types';
 import {
   recommendFor,
@@ -16,6 +20,37 @@ import {
 } from './recommendationMath';
 
 export { VALUE_MINIMUM };
+
+/** Where Value / cost sits against its two reference points. */
+export type TargetStatus = 'below_break_even' | 'below_target' | 'on_target';
+
+export function targetStatusFor(ratio: number): TargetStatus {
+  if (ratio < VALUE_COST_BREAK_EVEN) return 'below_break_even';
+  return ratio < VALUE_MINIMUM ? 'below_target' : 'on_target';
+}
+
+/**
+ * Everything "View calculation" shows: the formula, the period, the cost basis, the value
+ * assumptions and the source. Built from the same pure function every surface reads
+ * (lib/valueMath.ts), so the breakdown cannot disagree with the headline ratio.
+ */
+export interface FindingCalculation {
+  formula: string;
+  /** Period the cost and value figures cover, e.g. "Monthly · June 2026". */
+  period: string;
+  costBasis: string;
+  monthlyCost: number;
+  grossValue: number;
+  /** Share of outputs meeting the quality floor, or null on legacy shapes (ungated). */
+  qualityFloorPassRate: number | null;
+  countedValue: number;
+  harmFromMisses: number;
+  netValue: number;
+  /** Target minus ratio when below target, else null. Exact gap, kept off the main card. */
+  gapToTarget: number | null;
+  valueAssumptions: string;
+  source: string;
+}
 
 export interface FindingView {
   workloadId: string;
@@ -50,8 +85,14 @@ export interface FindingView {
   impactBasis: string;
   /** Confidence / assumption qualifier shown beneath the figure. */
   confidenceNote: string;
-  /** True when ratio is below the Gate 3 configured minimum. */
+  /** True when ratio is below the Gate 3 configured target. */
   belowMinimum: boolean;
+  /** Below break-even, below target, or on target. */
+  targetStatus: TargetStatus;
+  /** One line for "Why this needs attention". */
+  why: string;
+  /** Contents of "View calculation". */
+  calculation: FindingCalculation;
   /**
    * Cache-evidence chip data (audit A3) — populated ONLY where cache economics
    * materially shape this workload's cost: hit rate ≥ CACHE_HIT_RATE_MATERIAL
@@ -68,8 +109,8 @@ export interface FindingView {
   } | null;
 }
 
-/** Build findings sorted worst value-ratio first. */
-export function buildFindings(workloads: Workload[] = WORKLOADS): FindingView[] {
+/** Build findings sorted lowest Value / cost first. */
+export function buildFindings(workloads: Workload[] = WORKLOADS, now: Date = DEMO_NOW): FindingView[] {
   return workloads
     .map((w): FindingView => {
       const ratio = w.value.value_ratio;
@@ -90,12 +131,35 @@ export function buildFindings(workloads: Workload[] = WORKLOADS): FindingView[] 
             }
           : null;
 
+      const defensible = deriveWorkloadValue(w);
+      const targetStatus = targetStatusFor(ratio);
       const problem =
-        ratio < 1.0
-          ? 'Below break-even — spend exceeds value returned'
-          : ratio < VALUE_MINIMUM
-            ? `Returning ${ratio.toFixed(1)}\u00d7 — below the ${VALUE_MINIMUM}\u00d7 value minimum`
-            : `Returning ${ratio.toFixed(1)}\u00d7 value per inference dollar`;
+        targetStatus === 'on_target'
+          ? `${VOCAB.valueToCost.label} ${ratio.toFixed(1)}\u00d7, at or above the ${VALUE_MINIMUM}\u00d7 target`
+          : `Below target \u00b7 ${COPY.estimatedValue}`;
+      const why =
+        defensible.total_value <= 0
+          ? `Harm from misses (${formatUSD(defensible.harm_from_misses)}) is larger than counted value (${formatUSD(defensible.counted_value)}), so estimated value is negative.`
+          : targetStatus === 'below_break_even'
+            ? `Estimated value (${formatUSD(defensible.total_value)}) does not cover monthly cost (${formatUSD(w.costs.monthly_spend)}).`
+            : targetStatus === 'below_target'
+              ? `Value / cost is above break-even but under the ${VALUE_MINIMUM}\u00d7 target.`
+              : `Value / cost meets the ${VALUE_MINIMUM}\u00d7 target.`;
+      const calculation: FindingCalculation = {
+        formula: `${VOCAB.valueToCost.label} = (counted value \u2212 harm from misses) \u00f7 monthly cost`,
+        period: `Monthly \u00b7 ${now.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}`,
+        costBasis: `${VOCAB.monthlyRunRate.label}. ${COPY.costBasisNotStated} (not Billed cost or Effective cost).`,
+        monthlyCost: w.costs.monthly_spend,
+        grossValue: defensible.gross_value,
+        qualityFloorPassRate: defensible.floor_applied ? (w.value.quality_floor_pass_rate ?? null) : null,
+        countedValue: defensible.counted_value,
+        harmFromMisses: defensible.harm_from_misses,
+        netValue: defensible.total_value,
+        gapToTarget: ratio < VALUE_MINIMUM ? VALUE_MINIMUM - ratio : null,
+        valueAssumptions:
+          'Revenue protected and cost avoided are stated assumptions, as are the quality-floor pass rate and harm from misses. Counted value is gross value times the pass rate.',
+        source: 'Synthetic workload data in this workspace. No live connection.',
+      };
 
       return {
         workloadId: w.id,
@@ -112,6 +176,9 @@ export function buildFindings(workloads: Workload[] = WORKLOADS): FindingView[] 
         impactBasis: rec.basis,
         confidenceNote: rec.confidence,
         belowMinimum: ratio < VALUE_MINIMUM,
+        targetStatus,
+        why,
+        calculation,
         cacheEvidence,
       };
     })

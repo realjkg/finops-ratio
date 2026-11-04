@@ -17,6 +17,9 @@ import { useStore } from '@/store/useStore';
 import { landedFindings } from '@/connectors/ingestLanding';
 import { buildFindings, type FindingView } from './findingsModel';
 import { ValueRatioMeter } from './ValueRatioMeter';
+import { ratioDomain, type RatioDomain } from './ratioAxis';
+import { VALUE_MINIMUM } from './findingsModel';
+import { COPY, VOCAB, targetPolicyText } from '@/lib/vocabulary';
 import { SpendToValueGraph } from './SpendToValueGraph';
 import { EvidenceMark } from '@/components/EvidenceMark';
 import { formatUSD, formatRatio, formatPct, formatTokens } from '@/lib/format';
@@ -48,7 +51,10 @@ export function FindingsPage() {
   const sim = useStore(s => s.simulation);
   const simBusy = useStore(s => s.simulationBusy);
   const run = useStore(s => s.simulationCommand);
-  const findings = useMemo(() => buildFindings(workloads), [workloads]);
+  const now = useStore((s) => s.now);
+  const findings = useMemo(() => buildFindings(workloads, now), [workloads, now]);
+  // One axis for every meter on the page: rows stay comparable, and a negative Value / cost is drawn.
+  const axis = useMemo(() => ratioDomain(findings.map((f) => f.valueRatio)), [findings]);
   // Findings reported by a connected cost-source adapter (e.g. PointFive
   // DeepWaste) from a landed ingest run — real connector output, attributed.
   const connectorFindings = useMemo(() => landedFindings(ingestRuns), [ingestRuns]);
@@ -189,7 +195,7 @@ export function FindingsPage() {
           <div>
             <h1 className="font-mono text-lg font-bold text-txt">Findings</h1>
             <p className="mt-0.5 text-xs text-sub">
-              Workloads ranked by value ratio — worst first. Below the 3× value minimum.
+              Workloads ranked by {VOCAB.valueToCost.label}, lowest value first. Target {VALUE_MINIMUM}×.
             </p>
           </div>
           {capturedCount > 0 && (
@@ -249,6 +255,7 @@ export function FindingsPage() {
                 rank={idx + 1}
                 isSelected={f.workloadId === selected?.workloadId}
                 governanceState={governanceMap.get(f.workloadId)}
+                axis={axis}
                 onSelect={() => handleSelect(f.workloadId)}
               />
             ))
@@ -262,6 +269,7 @@ export function FindingsPage() {
             <RecommendationPane
               key={selected.workloadId}
               finding={selected}
+              axis={axis}
               allWorkloads={workloads}
               governance={governanceMap.get(selected.workloadId)}
               simulation={Boolean(sim)}
@@ -301,12 +309,14 @@ function FindingRow({
   rank,
   isSelected,
   governanceState,
+  axis,
   onSelect,
 }: {
   finding: FindingView;
   rank: number;
   isSelected: boolean;
   governanceState: FindingGovernanceState | undefined;
+  axis: RatioDomain;
   onSelect: () => void;
 }) {
   return (
@@ -317,7 +327,7 @@ function FindingRow({
         isSelected ? 'bg-raised shadow-[inset_3px_0_0_rgb(var(--c-gate))]' : 'hover:bg-raised/60'
       }`}
       aria-pressed={isSelected}
-      aria-label={`Finding ${rank}: ${finding.workloadName}`}
+      aria-label={`Finding ${rank}: ${finding.workloadName}, ${VOCAB.valueToCost.label} ${formatRatio(finding.valueRatio)}`}
     >
       <div className="flex items-start gap-2.5">
         {/* Rank */}
@@ -346,7 +356,7 @@ function FindingRow({
           </div>
 
           {/* Inline meter — quiet */}
-          <ValueRatioMeter ratio={finding.valueRatio} size="inline" />
+          <ValueRatioMeter ratio={finding.valueRatio} size="inline" domain={axis} />
 
           {/* Governance indicator — subtle; only when a CM record is attached */}
           {governanceState?.auditRecord && (
@@ -374,6 +384,7 @@ function FindingRow({
 
 function RecommendationPane({
   finding,
+  axis,
   allWorkloads,
   governance,
   isApplying,
@@ -384,6 +395,7 @@ function RecommendationPane({
   simulation = false,
 }: {
   finding: FindingView;
+  axis: RatioDomain;
   allWorkloads: Workload[];
   governance: FindingGovernanceState | undefined;
   isApplying: boolean;
@@ -397,6 +409,7 @@ function RecommendationPane({
   const [showRefForm, setShowRefForm] = useState(false);
   const [refInput, setRefInput] = useState('');
   const [refProvider, setRefProvider] = useState<CMProvider>('jira');
+  const [showCalc, setShowCalc] = useState(false);
 
   // Dot click-through from the evidence graph: same workload-detail flow as
   // the nav — select the workload, then open the /workloads detail surface.
@@ -410,6 +423,15 @@ function RecommendationPane({
     [select, router],
   );
 
+  // Ask Frank is secondary: it selects this workload as Frank's context and opens the panel.
+  // Everything on the card (calculation, chart, export) works without it.
+  const aiPanelOpen = useStore((s) => s.aiPanelOpen);
+  const toggleAIPanel = useStore((s) => s.toggleAIPanel);
+  const askFrank = useCallback(() => {
+    select(finding.workloadId);
+    if (!aiPanelOpen) toggleAIPanel();
+  }, [select, finding.workloadId, aiPanelOpen, toggleAIPanel]);
+
   const hasAuditRecord = !!governance?.auditRecord;
 
   function handleAttachSubmit() {
@@ -420,38 +442,74 @@ function RecommendationPane({
 
   return (
     <div className="mx-auto max-w-xl space-y-6 px-4 py-6 sm:px-8 sm:py-8">
-      {/* Workload name */}
+      {/* Finding card: title, status, the two numbers, one reason, two actions. */}
       <div>
-        <p className="font-mono text-[10px] uppercase tracking-wider text-dim">Finding</p>
+        <p className="text-xs font-medium text-dim">Finding</p>
         <h2 className="mt-1 font-body text-xl font-semibold text-txt">
           {finding.workloadName}
         </h2>
-        <p className="mt-1 text-sm text-sub">{finding.problem}</p>
+        <p className="mt-1 text-sm text-sub" data-testid="finding-status">{statusLine(finding)}</p>
       </div>
 
-      {/* Value-ratio meter — enlarged; provenance mark rides the headline ratio */}
+      <section aria-label="Cost and value" className="grid grid-cols-2 gap-3">
+        <EvidenceCell
+          label={VOCAB.monthlyRunRate.label}
+          value={formatUSD(finding.monthlySpend)}
+          color={TOKEN_COLOR.cost}
+        />
+        <div className="rounded-md border border-edge bg-slab p-3">
+          <p className="text-xs text-dim">{VOCAB.valueToCost.label}</p>
+          <p className="mt-1 flex items-baseline gap-2">
+            <span
+              className="font-mono text-base font-bold"
+              style={{ color: finding.valueColor }}
+              data-testid="finding-value-cost"
+            >
+              {formatRatio(finding.valueRatio)}
+            </span>
+            <EvidenceMark status={finding.valueEvidenceStatus} />
+            <span className="text-xs text-sub">Target {VALUE_MINIMUM}×</span>
+          </p>
+        </div>
+      </section>
+
+      {/* Value / cost meter: axis extends below 0× when the ratio is negative. */}
       <ValueRatioMeter
         ratio={finding.valueRatio}
         size="large"
-        evidenceStatus={finding.valueEvidenceStatus}
+        domain={axis}
+        hideHeadline
       />
 
-      {/* Evidence: two values */}
+      <div>
+        <p className="text-xs font-medium text-dim">Why this needs attention</p>
+        <p className="mt-0.5 text-sm text-txt" data-testid="finding-why">{finding.why}</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          aria-expanded={showCalc}
+          aria-controls="finding-calculation"
+          onClick={() => setShowCalc((v) => !v)}
+          className="rounded-md border border-edge px-3 py-1.5 text-sm text-txt transition-colors hover:border-sub focus:outline-none focus-visible:ring-2 focus-visible:ring-edge"
+        >
+          View calculation
+        </button>
+        <button
+          type="button"
+          onClick={askFrank}
+          aria-label={`Ask Frank about ${finding.workloadName}`}
+          className="rounded-md border border-purple/60 px-3 py-1.5 text-sm text-purple transition-colors hover:bg-purple/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple/60"
+        >
+          Ask Frank
+        </button>
+      </div>
+
+      {showCalc && <CalculationPanel finding={finding} />}
+
+      {/* Evidence */}
       <section aria-label="Evidence">
-        <p className="mb-2 font-mono text-[10px] uppercase tracking-wider text-dim">Evidence</p>
-        <div className="grid grid-cols-2 gap-3">
-          <EvidenceCell
-            label="Current ratio"
-            value={formatRatio(finding.valueRatio)}
-            color={finding.valueColor}
-            bold
-          />
-          <EvidenceCell
-            label="Monthly spend"
-            value={formatUSD(finding.monthlySpend)}
-            color={TOKEN_COLOR.cost}
-          />
-        </div>
         {/* Cache-evidence chip (audit A3) — only where cache economics
             materially shape the cost (findingsModel gates it); unit cyan
             marks informational data. Quiet, no new signature component. */}
@@ -477,8 +535,8 @@ function RecommendationPane({
         )}
         {/* Spend-to-value graph — portfolio context */}
         <div className="mt-4 rounded-md border border-edge bg-slab p-3">
-          <p className="mb-3 font-mono text-[9px] uppercase tracking-wider text-dim">
-            Portfolio context — spend vs. value
+          <p className="mb-3 text-xs text-dim">
+            Portfolio context — {VOCAB.monthlyRunRate.label} vs. {VOCAB.valueToCost.label}
           </p>
           <SpendToValueGraph
             workloads={allWorkloads}
@@ -717,6 +775,69 @@ function AuditChip({
 }
 
 // ---------------------------------------------------------------------------
+// Status line and calculation panel
+// ---------------------------------------------------------------------------
+
+const EVIDENCE_PHRASE: Record<string, string> = {
+  assumed: COPY.estimatedValue,
+  projected: 'Projected value',
+  measured: 'Measured value',
+};
+
+/** "Below target · Estimated value": position against the target, then how firm the value is. */
+function statusLine(f: FindingView): string {
+  const position =
+    f.targetStatus === 'on_target' ? 'At or above target' : 'Below target';
+  const evidence = f.valueEvidenceStatus ? EVIDENCE_PHRASE[f.valueEvidenceStatus] : null;
+  return evidence ? `${position} \u00b7 ${evidence}` : position;
+}
+
+function CalcRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-1">
+      <dt className="text-sub">{label}</dt>
+      <dd className="text-right font-mono text-txt">{value}</dd>
+    </div>
+  );
+}
+
+function CalculationPanel({ finding }: { finding: FindingView }) {
+  const c = finding.calculation;
+  return (
+    <section
+      id="finding-calculation"
+      aria-label="Calculation"
+      data-testid="finding-calculation"
+      className="space-y-3 rounded-md border border-edge bg-slab p-3 text-xs"
+    >
+      <p className="text-sm font-medium text-txt">{c.formula}</p>
+      <dl className="divide-y divide-edge">
+        <CalcRow label="Gross value (revenue protected + cost avoided)" value={formatUSD(c.grossValue)} />
+        {c.qualityFloorPassRate !== null && (
+          <CalcRow label="Quality-floor pass rate" value={formatPct(c.qualityFloorPassRate)} />
+        )}
+        <CalcRow label="Counted value" value={formatUSD(c.countedValue)} />
+        <CalcRow label="Harm from misses" value={`\u2212${formatUSD(c.harmFromMisses)}`} />
+        <CalcRow label={VOCAB.estimatedBusinessValue.label} value={formatUSD(c.netValue)} />
+        <CalcRow label={`${VOCAB.monthlyRunRate.label} (cost)`} value={formatUSD(c.monthlyCost)} />
+        <CalcRow label={VOCAB.valueToCost.label} value={formatRatio(finding.valueRatio)} />
+        {c.gapToTarget !== null && (
+          <CalcRow label={`Gap to the ${VALUE_MINIMUM}\u00d7 target`} value={formatRatio(c.gapToTarget)} />
+        )}
+      </dl>
+      <dl className="space-y-1.5 text-sub">
+        <div><dt className="inline font-medium text-txt">Period. </dt><dd className="inline">{c.period}</dd></div>
+        <div><dt className="inline font-medium text-txt">Cost basis. </dt><dd className="inline">{c.costBasis}</dd></div>
+        <div><dt className="inline font-medium text-txt">Value assumptions. </dt><dd className="inline">{c.valueAssumptions}</dd></div>
+        <div><dt className="inline font-medium text-txt">Break-even. </dt><dd className="inline">1\u00d7, where value equals cost. Value / cost can be negative when harm from misses exceeds counted value.</dd></div>
+        <div><dt className="inline font-medium text-txt">Target. </dt><dd className="inline">{VALUE_MINIMUM}\u00d7. {targetPolicyText(VALUE_MINIMUM)} {COPY.targetSetBy}.</dd></div>
+        <div><dt className="inline font-medium text-txt">Source. </dt><dd className="inline">{c.source}</dd></div>
+      </dl>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // EvidenceCell — compact data chip used in the evidence grid
 // ---------------------------------------------------------------------------
 
@@ -733,7 +854,7 @@ function EvidenceCell({
 }) {
   return (
     <div className="rounded-md border border-edge bg-slab p-3">
-      <p className="font-mono text-[10px] text-dim">{label}</p>
+      <p className="text-xs text-dim">{label}</p>
       <p
         className={`mt-1 font-mono text-base ${bold ? 'font-bold' : ''}`}
         style={{ color }}

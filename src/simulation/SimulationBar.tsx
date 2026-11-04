@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { useStore } from '@/store/useStore';
 import { useSimulationAccess } from './SimulationProvider';
 import { PERSONA_LABELS } from './types';
+import { SharedContext } from './SharedContext';
 export function SimulationBar() {
   const { pathname } = useRouter();
   const sandbox = ['/finio', '/finio/demo', '/tokenomics', '/prediction', '/costsource'].includes(pathname);
@@ -15,12 +16,13 @@ export function SimulationBar() {
       <strong className="text-unit">{sim ? 'Customer simulation' : 'Seeded demo'}</strong>
       {sim ? <>
         <span>{sim.session.identity.tenant} · {sim.session.identity.user} · {PERSONA_LABELS[sim.session.identity.persona]}</span>
+        <SharedContext />
         <span role="status">{busy ? 'Saving…' : `Saved · revision ${sim.state.revision}`}</span>
         <Link className="underline" href="/workspace">Customer workflow</Link>
         <button className="underline" disabled={busy || access?.loading} onClick={() => void access?.refresh()}>Refresh</button>
         <button className="underline" disabled={busy || access?.loading} onClick={() => void access?.signOut()}>Sign out</button>
       </> : <>
-        <span>Simulated costs and business value</span>
+        <SharedContext />
         {/* Only offer sign-in when the status route reported the simulation enabled; otherwise /simulation is a dead end. */}
         {access?.enabled && <Link className="underline" href="/simulation">Customer sign-in simulation</Link>}
       </>}
