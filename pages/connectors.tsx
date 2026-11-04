@@ -29,6 +29,7 @@ import { sourcesForEnv } from '@/costsource/seed';
 import { createCostSourceClient } from '@/costsource';
 import type { CostSourceDescriptor, SourceCoverage } from '@/costsource';
 import { isOfflineSandboxSource } from '@/costsource/sandboxSources';
+import { displaySourceName } from '@/costsource/sourcePresentation';
 import { isSimulatedSource, SIMULATED_FIXTURES, SimulatedConnectorClient } from '@/costsource/SimulatedConnectorClient';
 
 const COVERAGE_ORDER: SourceCoverage[] = ['public_cloud', 'private_cloud', 'on_prem'];
@@ -61,7 +62,7 @@ function ConnectorRegistry() {
   const simulatedClient = useMemo(() => new SimulatedConnectorClient(), []);
   const simulateConnect = async (src: CostSourceDescriptor) => {
     await connectConnector(src.id, simulatedClient);
-    await runConnectorIngest(src.id, src.name, simulatedClient);
+    await runConnectorIngest(src.id, displaySourceName(src), simulatedClient);
   };
   const renderCard = (src: CostSourceDescriptor) => {
     const simulated = isSimulatedSource(src.id);
@@ -77,7 +78,7 @@ function ConnectorRegistry() {
         busy={busy?.sourceId === src.id ? busy.phase : null}
         simulation={simulated ? SIMULATED_FIXTURES[src.id] : undefined}
         onConnect={simulated ? () => void simulateConnect(src) : () => void connectConnector(src.id, cardClient)}
-        onIngest={() => void runConnectorIngest(src.id, src.name, cardClient)}
+        onIngest={() => void runConnectorIngest(src.id, displaySourceName(src), cardClient)}
         onDisconnect={() => disconnectConnector(src.id)}
       />
     );

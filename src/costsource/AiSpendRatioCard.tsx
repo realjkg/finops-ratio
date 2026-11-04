@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { createCostSourceClient } from './index';
 import { LiveDataAuthError } from './LiveCostSourceClient';
 import { isOfflineSandboxSource } from './sandboxSources';
+import { displaySourceName } from './sourcePresentation';
 import { fetchAiSpendRatio } from './aiSpendRatio';
 import type { AiSpendRatio, AiSpendRatioReport } from './aiSpendRatio';
 import type { CostWindow } from './CostSourceClient';
@@ -153,7 +154,7 @@ export function AiSpendRatioView({
             {state.report.perSource.map((s) => (
               <li key={s.sourceId} className="flex flex-wrap justify-between gap-2 border-t border-edge pt-1">
                 <span className="text-xs text-txt">
-                  {s.name}
+                  {displaySourceName({ id: s.sourceId, name: s.name })}
                   {!s.inHeadline && <span className="text-sub">{` (${s.exclusionReason ?? 'same workloads, not summed into the headline'})`}</span>}
                   {s.sourceId === 'servicenow-sandbox' && (
                     <span className="text-sub">{` · simulated, role unconfirmed, excluded from the headline: illustrative +${+((ITBM_CRITICAL_SERVICE_ALLOCATION - 1) * 100).toFixed(1)}% ITBM allocation on critical services`}</span>

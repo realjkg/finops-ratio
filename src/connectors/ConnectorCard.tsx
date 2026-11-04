@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import type { CostSourceDescriptor, SourceHealth } from '@/costsource/CostSourceClient';
 import { isOfflineSandboxSource } from '@/costsource/sandboxSources';
+import { displayHealthDetail, displaySourceName, displaySourceNote } from '@/costsource/sourcePresentation';
 import { SIMULATED_LIVE_NOTE, SIMULATED_VERIFICATION_LABEL, type SimulatedFixture } from '@/costsource/SimulatedConnectorClient';
 import { sessionStateForHealth, type ConnectorBusyPhase, type ConnectorSession, type IngestRun } from './ingestLanding';
 import { IngestVerification } from './IngestVerification';
@@ -139,7 +140,7 @@ export function ConnectorCard({
     setResult(null);
     try {
       const health = await onTest(source.id);
-      setResult({ ok: sessionStateForHealth(health) === 'open', detail: health.detail });
+      setResult({ ok: sessionStateForHealth(health) === 'open', detail: displayHealthDetail(source.id, health.detail, health.reachable) });
     } catch (err) {
       setResult({ ok: false, detail: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -198,7 +199,7 @@ export function ConnectorCard({
       </div>
 
       {/* Source name */}
-      <h3 className="text-sm font-bold text-txt leading-snug">{source.name}</h3>
+      <h3 className="text-sm font-bold text-txt leading-snug">{displaySourceName(source)}</h3>
 
       {/* FOCUS version → canonical mapping */}
       <div className="flex items-center gap-1 font-mono text-[11px]">
@@ -216,7 +217,7 @@ export function ConnectorCard({
       </div>
 
       {/* Descriptor note */}
-      <p className="break-words text-[11px] leading-relaxed text-dim">{source.note}</p>
+      <p className="break-words text-[11px] leading-relaxed text-dim">{displaySourceNote(source)}</p>
 
       {/* Env contract — what to set to connect (names only) */}
       {source.setup && state !== 'connected' && state !== 'disabled' && missing.length > 0 && (

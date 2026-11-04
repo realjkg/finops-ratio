@@ -164,7 +164,7 @@ export function syntheticCloudHealth(sourceId: string): SourceHealth {
     canonicalVersion: CANONICAL_FOCUS_VERSION,
     checkedAt: new Date().toISOString(),
     detail: descriptor
-      ? `${descriptor.name}: bundled offline rows; no live cloud integration and no network call.`
+      ? `${descriptor.name}: synthetic offline seed; no live cloud integration and no network call.`
       : `Unknown synthetic cloud source '${sourceId}'.`,
   };
 }

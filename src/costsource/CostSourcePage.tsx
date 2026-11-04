@@ -20,6 +20,7 @@ import type {
 import { FOCUS_VERSIONS, isDraftVersion } from './index';
 import { isPassthrough } from './focusVersions';
 import { LiveDataAuthError } from './LiveCostSourceClient';
+import { displayHealthDetail, displaySourceName, displaySourceNote } from './sourcePresentation';
 import { AiSpendRatioCard } from './AiSpendRatioCard';
 import { rawRowsForVersion } from './seed';
 import { formatSignedUSD } from './signedSpendDelta';
@@ -116,7 +117,7 @@ export function CostSourcePage() {
 
   const runIngest = useCallback(async () => {
     const client = createCostSourceClient(clientMode);
-    const source = selected && { kind: selected.kind, name: selected.name };
+    const source = selected && { id: selected.id, kind: selected.kind, name: selected.name };
     const window = currentWindow();
     try {
       setLoadState({ status: 'loading', phase: 'Checking adapter health…' });
@@ -202,7 +203,7 @@ export function CostSourcePage() {
                   ].join(' ')}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-txt">{s.name}</span>
+                    <span className="text-sm font-semibold text-txt">{displaySourceName(s)}</span>
                     <Dot on={s.configured} />
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1">
@@ -220,7 +221,7 @@ export function CostSourcePage() {
           </div>
 
           {selected && (
-            <p className="mb-4 text-xs text-dim">{selected.note}</p>
+            <p className="mb-4 text-xs text-dim">{displaySourceNote(selected)}</p>
           )}
 
           <button
@@ -422,7 +423,7 @@ function HealthCard({ health }: { health: SourceHealth }) {
           <dd className="font-mono text-value">v{health.canonicalVersion}</dd>
         </div>
       </dl>
-      <p className="mt-2 text-xs text-dim">{health.detail}</p>
+      <p className="mt-2 text-xs text-dim">{displayHealthDetail(health.sourceId, health.detail, health.reachable)}</p>
     </Card>
   );
 }
@@ -596,12 +597,12 @@ export function FocusRowsCard({ rows }: { rows: CanonicalFocusRow[] }) {
   );
 }
 
-type FindingsSource = Pick<CostSourceDescriptor, 'kind' | 'name'>;
+type FindingsSource = Pick<CostSourceDescriptor, 'id' | 'kind' | 'name'>;
 
 /** Names the source the findings came from; PointFive keeps its DeepWaste shape label. */
 function findingsTitle(count: number, source?: FindingsSource): string {
   // "ServiceNow (offline sandbox)" -> "ServiceNow, offline sandbox": no nested parentheses.
-  const label = !source || source.kind === 'pointfive' ? 'PointFive DeepWaste shape' : source.name.replace(/\s*\((.*)\)$/, ', $1');
+  const label = !source || source.kind === 'pointfive' ? 'PointFive DeepWaste shape' : displaySourceName(source).replace(/\s*\((.*)\)$/, ', $1');
   return `Findings — ${count} (${label})`;
 }
 
