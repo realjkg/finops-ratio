@@ -84,7 +84,7 @@ test('engagement mode never shows the Demo badge (anonymous and signed in), and 
   await expect(page.getByRole('note', { name: /Demo environment/ })).toHaveCount(0);
   await signIn(page, 'analyst');
   await page.goto('/engagement');
-  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('status')).toHaveText(/unavailable/); // rendered (no database in this suite)
   await expect(page.locator('[data-testid="demo-badge"]')).toHaveCount(0);
   expect(await page.content()).not.toMatch(/Demo environment — figures are illustrative/);
   for (const route of ['/demo', '/connectors', '/simulation']) expect((await page.request.get(route)).status(), route).toBe(404);
