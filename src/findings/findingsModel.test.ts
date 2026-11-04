@@ -149,3 +149,27 @@ describe('N/A when there is no positive cost', () => {
     for (const bad of [Number.NaN, Infinity, -Infinity, null, undefined]) expect(formatRatio(bad as number)).toBe('N/A');
   });
 });
+
+describe('N/A sorts first (#177 review)', () => {
+  it('a workload with no usable cost is the first finding, ahead of the lowest real ratio, whatever its input order', () => {
+    const na = structuredClone(WORKLOADS[WORKLOADS.length - 1]);
+    na.costs.monthly_spend = 0;
+    const others = WORKLOADS.slice(0, -1);
+    for (const input of [[...others, na], [na, ...others], [others[0], na, ...others.slice(1)]]) {
+      const f = buildFindings(input);
+      expect(f[0].workloadId).toBe(na.id);
+      expect(f[0].valueRatio).toBeNull();
+      expect(f[0].targetStatus).toBe('not_available');
+      // The rest stay lowest Value / cost first.
+      const rest = f.slice(1).map((x) => x.valueRatio as number);
+      expect(rest).toEqual([...rest].sort((a, b) => a - b));
+    }
+  });
+  it('several N/A workloads all sort ahead of every computed ratio', () => {
+    const a = structuredClone(WORKLOADS[2]); a.costs.monthly_spend = 0;
+    const b = structuredClone(WORKLOADS[5]); b.costs.monthly_spend = Number.NaN;
+    const f = buildFindings([...WORKLOADS.filter((w) => w.id !== a.id && w.id !== b.id), a, b]);
+    expect(f.slice(0, 2).map((x) => x.valueRatio)).toEqual([null, null]);
+    expect(f.slice(2).every((x) => x.valueRatio !== null)).toBe(true);
+  });
+});
