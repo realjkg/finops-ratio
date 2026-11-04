@@ -476,7 +476,7 @@ function RecommendationPane({
           label={costLabel(finding.costSource)}
           value={formatUSD(finding.monthlySpend)}
           color={TOKEN_COLOR.cost}
-          note={basisLine(finding.costSource)}
+          note={finding.costSource === 'recorded' ? basisLine('recorded') : undefined}
         />
         <div className="rounded-md border border-edge bg-slab p-3">
           <p className="text-xs text-dim">{VOCAB.valueToCost.label}</p>

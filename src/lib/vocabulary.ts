@@ -49,10 +49,10 @@ export const VOCAB = {
     definition:
       'Quality-adjusted business value, less modeled harm from misses, divided by workload cost for the same reporting period. Break-even is 1×; it can be negative.',
   },
-  /** A workload's cost for the month as the sample workspace models it (an assumed figure). */
+  /** A workload's cost for the month as the demo models it (an assumed figure). */
   modeledCost: {
     label: 'Modeled workload cost',
-    definition: 'The workload\'s monthly cost as the sample workspace assumes it. It is not billed or effective cost.',
+    definition: 'The workload\'s monthly cost as modeled from stated assumptions. It is not billed or effective cost.',
   },
   /** Cost accumulated so far this month from recorded postings (customer simulation workspace). */
   recordedCost: {
@@ -71,7 +71,7 @@ export const VOCAB = {
   /** Neutral name for a monthly workload cost that may be modeled or recorded (exports, charts). */
   monthlyWorkloadCost: {
     label: 'Monthly workload cost',
-    definition: 'The workload\'s cost for the month: modeled in the sample workspace, recorded in a customer workspace.',
+    definition: 'The workload\'s cost for the month: modeled from stated assumptions, or recorded from postings in a customer workspace.',
   },
 } as const satisfies Record<string, Term>;
 
@@ -79,9 +79,8 @@ export type VocabKey = keyof typeof VOCAB;
 
 /** Display strings that are not cost measures but must read the same everywhere. */
 export const COPY = {
-  /** Replaces any freshness claim on synthetic data. */
-  sampleData: 'Synthetic data · No live connections',
-  basisModeled: 'Basis: demo assumption',
+  /** Modeled cost basis, stated only inside the View calculation disclosure (never Billed or Effective). */
+  basisModeled: 'Basis: modeled',
   /** Simulation postings are ledger-style entries whose billed/effective treatment is not stated. */
   basisRecorded: 'Basis: simulation postings',
   monthConvention: '30-day month convention',
@@ -123,7 +122,7 @@ export const BANNED_PHRASES: ReadonlyArray<{ pattern: RegExp; use: string }> = [
   { pattern: /\bCost [Ee]fficiency( [Ss]core)?\b/, use: 'Value / cost' },
   { pattern: /\bvalue ratios?\b/i, use: 'Value / cost' },
   { pattern: /\bValue return\b|\d× return\b/, use: 'Value / cost' },
-  { pattern: /\(Billed cost\)|\(Effective cost\)/, use: 'the cost basis is not Billed or Effective for seeded data' },
+  { pattern: /\(Billed cost\)|\(Effective cost\)/, use: 'the cost basis is not Billed or Effective for modeled data' },
 ];
 
 // --- Cost source: modeled (bundled seed) vs recorded (simulation postings) ---

@@ -76,11 +76,13 @@ describe('finding card model', () => {
     expect(c.ratio).toBeCloseTo(c.adjustedValue / c.cost, 12);
   });
 
-  it('states the cost source honestly: modeled data is a demo assumption, never Billed or Effective', () => {
+  it('states the cost source honestly: modeled cost has a modeled basis, never Billed or Effective', () => {
     const c = fraud().calculation;
     expect(c.costSource).toBe('modeled');
     expect(c.costLabel).toBe('Modeled workload cost');
-    expect(c.basis).toBe('Basis: demo assumption');
+    expect(c.basis).toBe('Basis: modeled');
+    expect(c.source).toBe('Demo dataset.');
+    expect(JSON.stringify(c)).not.toMatch(/synthetic|sample|seeded|no live connection/i);
     expect(c.monthConvention).toBe('30-day month convention');
     expect(JSON.stringify(c)).not.toMatch(/billed|effective/i);
     expect(c.costPeriod).toBe('monthly');
