@@ -7,38 +7,46 @@
 import ExcelJS from 'exceljs';
 import { COST_CATEGORIES } from '@/outcomes/types';
 import { monetaryBenefit } from '@/outcomes/model';
+import { reportHeaders, type CostSource } from '@/lib/vocabulary';
 import { buildReportModel, type ReportRow, type ReportModel } from './reportModel';
 
-// Exact, user-approved column order. Exported so tests assert the header row.
-export const REPORT_COLUMNS = [
-  'Initiative Name',
-  'Monthly Cost ($)',
-  'Annual Run Rate ($)',
-  'Budget Consumed (%)',
-  'Status',
-  'Cost Efficiency Score',
-  'Savings Opportunity ($)',
-  'Last Updated',
-] as const;
+// Exact, user-approved column order. Exported so tests assert the header row. The cost and budget
+// headers come from the shared cost vocabulary and follow the data source: modeled (sample
+// workspace) or recorded (simulation postings). Header text only; no keys.
+export function reportColumns(source: CostSource) {
+  const h = reportHeaders(source);
+  return [
+    'Initiative Name',
+    `${h.cost} ($)`,
+    'Annual Run Rate ($)',
+    `${h.budget} (%)`,
+    'Status',
+    h.valueToCost,
+    'Savings Opportunity ($)',
+    'Last Updated',
+  ] as const;
+}
+export const REPORT_COLUMNS = reportColumns('modeled');
+type Columns = readonly string[];
+type ReportRecord = Record<string, string | number>;
 
-type ReportRecord = Record<(typeof REPORT_COLUMNS)[number], string | number>;
-
-function toRecord(row: ReportRow): ReportRecord {
-  return {
-    'Initiative Name': row.name,
-    'Monthly Cost ($)': row.monthlyCost,
-    'Annual Run Rate ($)': row.annualRunRate,
-    'Budget Consumed (%)': row.budgetConsumedPct ?? `N/A (${row.budgetConsumedNa})`,
-    Status: row.status,
-    'Cost Efficiency Score': Number(row.costEfficiency.toFixed(1)),
-    'Savings Opportunity ($)': row.savingsOpportunity,
-    'Last Updated': row.lastUpdated,
-  };
+function toRecord(row: ReportRow, cols: Columns): ReportRecord {
+  const values = [
+    row.name,
+    row.monthlyCost,
+    row.annualRunRate,
+    row.budgetConsumedPct ?? `N/A (${row.budgetConsumedNa})`,
+    row.status,
+    row.costEfficiency === null ? 'N/A' : Number(row.costEfficiency.toFixed(1)),
+    row.savingsOpportunity,
+    row.lastUpdated,
+  ];
+  return Object.fromEntries(cols.map((c, i) => [c, values[i]]));
 }
 
 // Width = widest cell (header included) + small padding, in character units.
-function autoWidths(records: ReportRecord[]): number[] {
-  return REPORT_COLUMNS.map((col) => {
+function autoWidths(records: ReportRecord[], cols: Columns): number[] {
+  return cols.map((col) => {
     const widest = records.reduce(
       (max, rec) => Math.max(max, String(rec[col]).length),
       col.length,
@@ -49,8 +57,9 @@ function autoWidths(records: ReportRecord[]): number[] {
 
 export async function buildReportWorkbook(now: Date = new Date(), model: ReportModel = buildReportModel(now)): Promise<Buffer> {
   const { rows } = model;
-  const records = rows.map(toRecord);
-  const widths = autoWidths(records);
+  const cols = reportColumns(model.costSource);
+  const records = rows.map((r) => toRecord(r, cols));
+  const widths = autoWidths(records, cols);
 
   const book = new ExcelJS.Workbook();
   // Stamp the workbook from the same clock that produced the report data,
@@ -61,7 +70,7 @@ export async function buildReportWorkbook(now: Date = new Date(), model: ReportM
   book.modified = now;
   const sheet = book.addWorksheet('Initiatives');
   // Assigning `columns` writes the header row (row 1) from each `header`.
-  sheet.columns = REPORT_COLUMNS.map((col, i) => ({
+  sheet.columns = cols.map((col, i) => ({
     header: col,
     key: col,
     width: widths[i],

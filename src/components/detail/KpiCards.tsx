@@ -1,6 +1,8 @@
 // KPI cards — spec §12 Sprint 1: Value, Spend, Per Query, Per User. Each cost is
 // shown with its value context (R4): the Value card anchors the row.
 
+import { workloadValueRatio } from '@/lib/valueRatio';
+import { costLabel, costSourceOf } from '@/lib/vocabulary';
 import { useState } from 'react';
 import type { EvidenceStatus, Workload } from '@/types';
 import { EvidenceMark } from '@/components/EvidenceMark';
@@ -22,15 +24,15 @@ export function KpiCards({ workload }: { workload: Workload }) {
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <Card
-        label="Value / mo"
+        label="Business value / mo"
         value={formatUSD(workload.value.total_value, { compact: true })}
         accent="var(--value)"
-        note={formatReturn(workload.value.value_ratio)}
-        noteColor={ratioColor(workload.value.value_ratio)}
+        note={formatReturn(workloadValueRatio(workload))}
+        noteColor={ratioColor(workloadValueRatio(workload))}
         evidenceStatus={valueEvidence}
       />
       <Card
-        label="Spend / mo"
+        label={costLabel(costSourceOf(workload))}
         value={formatUSD(workload.costs.monthly_spend, { compact: true })}
         accent="var(--cost)"
         note={`${formatSignedPct(workload.cost_trend_pct, 1)} MoM`}
@@ -93,7 +95,7 @@ function Card({
       <div className="mt-1 font-mono text-xl font-bold text-txt">{value}</div>
       <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[11px]">
         <span style={{ color: noteColor }}>{note}</span>
-        <EvidenceMark status={evidenceStatus} />
+        <EvidenceMark status={evidenceStatus} explain />
       </div>
     </div>
   );

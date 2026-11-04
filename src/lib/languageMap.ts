@@ -3,6 +3,7 @@
 // persona reads the identical data through a different lens; only the words
 // change, never the math. `useLanguage()` returns the active persona's map.
 
+import { VOCAB } from './vocabulary';
 import type { Persona } from './persona';
 import { usePersona } from './persona';
 
@@ -20,11 +21,11 @@ export const LANGUAGE_MAP: Record<Persona, LanguageMap> = {
   executive: {
     boardTitle: 'Initiative Dashboard',
     itemLabel: 'Initiative',
-    fuelLabel: 'Budget consumed',
+    fuelLabel: VOCAB.budgetUsed.label,
     trajectoryLabel: 'Forecast',
     gateLabel: 'Approval Required',
     adjustmentLabel: 'Proposed change',
-    valueRatioLabel: 'Cost efficiency',
+    valueRatioLabel: 'Value / cost',
   },
   technical: {
     boardTitle: 'Mission Board',
@@ -33,7 +34,7 @@ export const LANGUAGE_MAP: Record<Persona, LanguageMap> = {
     trajectoryLabel: 'Trajectory',
     gateLabel: 'Gate',
     adjustmentLabel: 'Proposed adjustment',
-    valueRatioLabel: 'Value ratio',
+    valueRatioLabel: 'Value / cost',
   },
   procurement: {
     boardTitle: 'Spend Overview',
@@ -42,7 +43,7 @@ export const LANGUAGE_MAP: Record<Persona, LanguageMap> = {
     trajectoryLabel: 'Projected savings',
     gateLabel: 'Pending Sign-off',
     adjustmentLabel: 'Savings opportunity',
-    valueRatioLabel: 'Cost efficiency score',
+    valueRatioLabel: 'Value / cost',
   },
 };
 

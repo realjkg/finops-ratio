@@ -114,7 +114,7 @@ function ConnectorRegistry() {
         <div className="mx-auto max-w-5xl">
           {/* Page header */}
           <div className="mb-6">
-            <h1 className="font-mono text-lg font-bold text-txt">Connectors</h1>
+            <h1 className="text-lg font-bold text-txt">Connectors</h1>
             <p className="mt-1 text-sm text-sub">
               Cost data enters through two ingest doors into one internal FOCUS v1.4 model.
             </p>
@@ -175,7 +175,7 @@ function ConnectorRegistry() {
               <div className="font-mono text-sm font-bold text-txt">Adapter registry</div>
               <p className="mt-1.5 text-[12px] text-sub">
                 Auth + fetch + identity resolution per source. Only the adapter is
-                source-specific; the engine, forecasts, value ratios, and governance gates
+                source-specific; the engine, forecasts, Value / cost, and governance gates
                 stay provider-agnostic.
               </p>
             </div>
@@ -210,7 +210,7 @@ function ConnectorRegistry() {
           {/* Active / connected adapters */}
           {connected.length > 0 && (
             <section className="mb-8">
-              <h2 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-sub">
+              <h2 className="mb-3 text-xs font-semibold text-sub">
                 {liveCount(connected) === 0
                   ? `Offline sandbox — ${connected.length} seeded adapter${connected.length !== 1 ? 's' : ''}, none live`
                   : `Configured — ${connected.length} adapters (${liveCount(connected)} live)`}
@@ -224,7 +224,7 @@ function ConnectorRegistry() {
           {/* Available / dark adapters */}
           {available.length > 0 && (
             <section>
-              <h2 className="mb-3 font-mono text-[11px] uppercase tracking-wider text-sub">
+              <h2 className="mb-3 text-xs font-semibold text-sub">
                 Available — {available.length} adapter{available.length !== 1 ? 's' : ''}
               </h2>
               <p className="mb-3 text-[12px] text-dim">

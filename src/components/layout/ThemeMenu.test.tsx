@@ -48,7 +48,7 @@ function setValue(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
   });
 }
 const select = () => $<HTMLSelectElement>('#theme-select');
-const openEditor = () => click(button('Appearance options'));
+const openEditor = () => click(button('Display options'));
 const importText = (text: string) => {
   setValue(byLabel<HTMLTextAreaElement>('Theme JSON'), text);
   click(button('Import'));
@@ -70,7 +70,7 @@ afterEach(() => {
 describe('switcher', () => {
   it('is in the shared nav, labeled in words, and applies + persists the chosen built-in', () => {
     mount();
-    expect(container.querySelector('label[for="theme-select"]')?.textContent).toBe('Appearance');
+    expect(container.querySelector('label[for="theme-select"]')?.textContent).toBe('Display');
     expect([...select().options].map((o) => o.textContent)).toEqual(['System', 'Light', 'High contrast', 'Dark']);
     setValue(select(), 'high-contrast');
     expect(html.getAttribute('data-theme')).toBe('high-contrast');
@@ -270,7 +270,7 @@ describe('palette editor', () => {
       expect(named, el.outerHTML.slice(0, 80)).toBeTruthy();
       expect(el.tabIndex).toBeGreaterThanOrEqual(0);
     }
-    const toggle = button('Appearance options');
+    const toggle = button('Display options');
     toggle.focus();
     expect(document.activeElement).toBe(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
@@ -343,7 +343,7 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
       flip(true); expect([txt(), button('Export current theme').getAttribute('download')]).toEqual([hc.txt, 'my-high-contrast.json']); // case 1: untouched draft follows
       setValue(byLabel<HTMLInputElement>('txt hex'), '#123456');
       flip(false); expect(txt()).toBe('#123456'); // case 2: an edited draft is kept
-      click(button('Appearance options')); // case 4: closing is the cancel path; an OS change happens while closed
+      click(button('Display options')); // case 4: closing is the cancel path; an OS change happens while closed
       flip(true); openEditor();
       expect(txt()).toBe(hc.txt); // edits discarded, effective theme
       click(button('Fix contrast')); // "Nothing to change" is not an edit (re-review)
@@ -401,7 +401,7 @@ describe('theme editor Medium fixes (Copilot 4244601651, 4244601697, 4244556921,
 });
 
 
-describe('Appearance panel (customer-facing)', () => {
+describe('Display panel (customer-facing)', () => {
   const radios = () => [...container.querySelectorAll<HTMLInputElement>('#theme-editor input[type="radio"]')];
   const labelOf = (r: HTMLInputElement) => r.closest('label')?.textContent;
   it('shows four plain choices and a live preview, and never calls Dark incomplete', () => {
@@ -435,11 +435,11 @@ describe('editor dismissal and save feedback', () => {
     mount(); openEditor();
     click(byLabel<HTMLButtonElement>('Close theme editor'));
     expect(container.querySelector('#theme-editor')).toBeNull();
-    expect(document.activeElement).toBe(button('Appearance options'));
+    expect(document.activeElement).toBe(button('Display options'));
     openEditor();
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(container.querySelector('#theme-editor')).toBeNull();
-    expect(document.activeElement).toBe(button('Appearance options'));
+    expect(document.activeElement).toBe(button('Display options'));
   });
   it('dismisses on an outside pointer without applying unsaved edits or stealing focus', () => {
     mount(); setValue(select(), 'light'); openEditor();

@@ -15,7 +15,7 @@ interface Metric {
 
 export function SpendSummaryBar({ summary }: { summary: SpendSummary }) {
   const metrics: Metric[] = [
-    { label: 'AI spend', value: `${formatUSD(summary.totalMonthlySpend, { compact: true })}/mo` },
+    { label: 'AI monthly workload cost', value: `${formatUSD(summary.totalMonthlySpend, { compact: true })}/mo` },
     {
       label: 'Projected savings',
       value: formatUSD(summary.projectedSavings, { compact: true }),
@@ -49,7 +49,7 @@ export function SpendSummaryBar({ summary }: { summary: SpendSummary }) {
       ))}
       <div className="ml-auto flex items-center gap-2 text-xs text-exec-muted">
         <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: TOKEN_COLOR.value }} />
-        Seeded dataset as of {DEMO_NOW.toISOString().slice(0, 10)}
+        Synthetic sample workspace data as of {DEMO_NOW.toISOString().slice(0, 10)}
       </div>
     </section>
   );

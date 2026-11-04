@@ -34,7 +34,7 @@ describe('report with an invalid approved budget', () => {
     expect(model.rows[0].budgetConsumedNa).toMatch(/approved budget/i);
     expect(budgetCellText(model.rows[0])).toBe('N/A');
     expect(budgetCellText({ budgetConsumedPct: 42 })).toBe('42%');
-    expect(budgetNaFootnotes(model.rows)).toEqual([`${first.name}: Budget consumed N/A (${model.rows[0].budgetConsumedNa})`]);
+    expect(budgetNaFootnotes(model.rows)).toEqual([`${first.name}: Estimated budget consumption to date N/A (${model.rows[0].budgetConsumedNa})`]);
     expect(budgetNaFootnotes(buildReportModel(FIXED).rows)).toEqual([]);
   });
 
@@ -46,7 +46,7 @@ describe('report with an invalid approved budget', () => {
 
   it('puts the N/A state and its reason in the PDF element tree', () => {
     const text = pdfText(<ReportDocument model={model} />);
-    expect(text).toContain(`${first.name}: Budget consumed N/A (${model.rows[0].budgetConsumedNa})`);
+    expect(text).toContain(`${first.name}: Estimated budget consumption to date N/A (${model.rows[0].budgetConsumedNa})`);
     expect(text).toContain('N/A');
     expect(text).not.toMatch(/(^|\|)0%(\||$)/);
   });
@@ -95,5 +95,20 @@ describe('status of an invalid-budget initiative (report paths)', () => {
     expect(book.getWorksheet('Initiatives')!.getCell('E2').value).toBe('Budget N/A');
     const text = pdfText(<ReportDocument model={model} />);
     expect(text).toContain('|Budget N/A|');
+  });
+});
+
+describe('PDF KPI follows the cost source', () => {
+  const recorded = WORKLOADS.map((w) => ({ ...w, costs: { ...w.costs, recorded_mtd: w.costs.monthly_spend } }));
+  it('a recorded workspace reads "Recorded cost to date" with a plain amount (no "/mo")', () => {
+    const text = pdfText(ReportDocument({ model: buildReportModel(FIXED, recorded) } as never));
+    expect(text).toMatch(/Recorded cost to date\|\$[\d,]+\|/);
+    expect(text).not.toMatch(/Recorded cost to date\|\$[\d,]+\/mo/);
+    expect(text).not.toContain('Modeled workload cost');
+  });
+  it('the bundled workspace reads "Modeled workload cost" with /mo', () => {
+    const text = pdfText(ReportDocument({ model: buildReportModel(FIXED, WORKLOADS) } as never));
+    expect(text).toMatch(/Modeled workload cost\|\$[\d,]+\/mo/);
+    expect(text).not.toContain('Recorded cost to date');
   });
 });

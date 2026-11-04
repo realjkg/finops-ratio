@@ -10,13 +10,13 @@ const bar = { totalMonthlySpend: 41212, projectedSavings: 4800, initiativesActiv
 const html = renderToStaticMarkup(<SpendSummaryBar summary={bar} />);
 
 it('stamps the seed as-of date derived from DEMO_NOW, never a relative freshness claim', () => {
-  expect(html).toContain(`Seeded dataset as of ${DEMO_NOW.toISOString().slice(0, 10)}`);
+  expect(html).toContain(`Synthetic sample workspace data as of ${DEMO_NOW.toISOString().slice(0, 10)}`);
   expect(html).not.toMatch(/min ago|Updated/i);
 });
 
-it('says AI spend (tile and dashboard subtitle), never cloud spend', () => {
+it('says AI monthly workload cost (tile) and AI cost (dashboard subtitle), never cloud spend', () => {
   const page = renderToStaticMarkup(<PersonaProvider><InitiativeDashboard /></PersonaProvider>);
-  expect(html).toContain('AI spend');
-  expect(page).toContain('AI spend, value, and approvals');
+  expect(html).toContain('AI monthly workload cost');
+  expect(page).toContain('AI cost, value, and approvals');
   expect(html + page).not.toMatch(/cloud spend/i);
 });

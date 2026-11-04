@@ -1,5 +1,6 @@
 // ROI, team ranking, scoped cost drivers and scoped savings.
 
+import { budgetLabel } from '@/lib/vocabulary';
 import { MODEL_QUALITY_NOTE } from '@/data/models';
 import { findModel } from '@/data/models';
 import { REALIZED_LINE, T, capRows, contextLine, ladder, short, workloadRow } from './answerKit';
@@ -9,6 +10,8 @@ import {
 } from './calc';
 import { evid, pct1, price, returnText, roiLine, signedPct1, usd, x } from './format';
 import type { Answer, Scope, World, WorkloadFacts } from './types';
+
+const BUDGET_USED = budgetLabel('modeled').toLowerCase();
 
 const ids = (ws: WorkloadFacts[]): string[] => ws.map((w) => w.id);
 
@@ -42,7 +45,7 @@ export function roiAnswer(world: World, scope: Scope): Answer {
     body.push(
       `Team: ${w.team ?? 'not in this context'} · model: ${w.model ?? 'unknown'}${w.provider ? ` (${w.provider})` : ''}` +
         (w.status ? ` · status: ${w.status}` : '') +
-        (w.budgetConsumedPct !== null ? ` · budget consumed: ${w.budgetConsumedPct}%` : ''),
+        (w.budgetConsumedPct !== null ? ` · ${BUDGET_USED}: ${w.budgetConsumedPct}%` : ''),
     );
   }
   if (scope.kind === 'model' && members.length > 0) {
@@ -57,7 +60,7 @@ export function roiAnswer(world: World, scope: Scope): Answer {
   const ex = scope.kind === 'workload' ? null : extremes(members);
   if (ex) {
     body.push(
-      `Strongest: ${ex.strongest.name} (${x(ex.strongest.ratio)} ${short(ex.strongest.evidence)}) · Weakest: ${ex.weakest.name} (${x(ex.weakest.ratio)} ${short(ex.weakest.evidence)}${(ex.weakest.ratio ?? 1) <= 0 ? ', no positive return' : ''})`,
+      `Strongest: ${ex.strongest.name} (${x(ex.strongest.ratio)} ${short(ex.strongest.evidence)}) · Weakest: ${ex.weakest.name} (${x(ex.weakest.ratio)} ${short(ex.weakest.evidence)}${(ex.weakest.ratio ?? 1) <= 0 ? ', no positive value' : ''})`,
     );
   } else if (members.length === 1 && scope.kind !== 'workload') {
     body.push(`Only one workload here, so the ${scope.kind} figure is that workload's figure.`);
@@ -92,7 +95,7 @@ export function teamRankAnswer(world: World, metric: RankMetric, ascending: bool
         ? `${usd(lead.savings)}/mo identified (projected, not realized) at ${returnText(lead.roll.ratio)}${evid(lead.roll.evidence)} — ${lead.roll.members.length} workload(s).`
         : `${usd(lead.roll.spend)}/mo (${total.spend > 0 ? pct1((lead.roll.spend / total.spend) * 100) : 'n/a'} of ${usd(total.spend)} portfolio spend) at ${returnText(lead.roll.ratio)}${evid(lead.roll.evidence)} — ${lead.roll.members.length} workload(s)${top ? `; top workload ${top.name} at ${usd(top.monthlySpend)}/mo` : ''}.`,
     );
-    body.push(`Teams ranked by ${metric === 'cost' ? 'monthly cost' : metric === 'roi' ? 'value ratio' : 'identified savings'}${ascending ? ' (lowest first)' : ''}:`);
+    body.push(`Teams ranked by ${metric === 'cost' ? 'monthly cost' : metric === 'roi' ? 'Value / cost' : 'identified savings'}${ascending ? ' (lowest first)' : ''}:`);
     const lines = rows.map((t, i) => {
       const share = total.spend > 0 ? ` (${pct1((t.roll.spend / total.spend) * 100)})` : '';
       return metric === 'savings'
@@ -126,7 +129,7 @@ export function costDriverAnswer(world: World, scope: Scope): Answer {
   if (top) {
     body.push(
       `Largest: ${top.name} at ${usd(top.monthlySpend)}/mo (${returnText(top.ratio)}${evid(top.evidence)})` +
-        (top.budgetConsumedPct !== null ? `; ${top.budgetConsumedPct}% of budget consumed` : '') +
+        (top.budgetConsumedPct !== null ? `; ${top.budgetConsumedPct}% of budget (${BUDGET_USED})` : '') +
         (top.costTrendPct !== null ? `; MoM trend ${signedPct1(top.costTrendPct)}` : '') +
         '.',
     );

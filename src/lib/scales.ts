@@ -28,7 +28,9 @@ export function ratioRating(ratio: number): RatioRating {
   return 'poor';
 }
 
-export function ratioColor(ratio: number): string {
+export function ratioColor(ratio: number | null | undefined): string {
+  // N/A is neither good nor bad: the quiet dim token, never a rating color.
+  if (typeof ratio !== 'number' || !Number.isFinite(ratio)) return 'rgb(var(--c-dim))';
   switch (ratioRating(ratio)) {
     case 'excellent':
       return TOKEN_COLOR.value;

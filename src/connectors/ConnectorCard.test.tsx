@@ -131,7 +131,7 @@ describe('ConnectorCard — walk mode', () => {
       />,
     );
     expect(html).toContain('Data landed');
-    expect(html).toContain('seeded demo');
+    expect(html).toContain('synthetic sample workspace data');
     // Re-ingest is offered once data has landed.
     expect(html).toContain('Re-ingest');
     expect(html).toContain('Disconnect');

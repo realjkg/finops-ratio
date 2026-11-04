@@ -33,8 +33,8 @@ const GATES: GateDef[] = [
     id: 'cost',
     key: 'cost_approval',
     title: 'Gate 3 · Cost',
-    question: 'Within budget? Value ratio OK?',
-    detail: 'Monthly budget set, value ratio meets the 3× minimum, ROI projection documented.',
+    question: 'Within budget? Value / cost OK?',
+    detail: 'Monthly budget set, Value / cost meets the 3× target, ROI projection documented.',
   },
   {
     id: 'scale',
@@ -63,7 +63,7 @@ export function GovernanceTab({ workload }: { workload: Workload }) {
             className="font-mono text-sm font-bold uppercase"
             style={{ color: canScale ? 'var(--value)' : 'var(--cost)' }}
           >
-            {canScale ? 'Authorized' : 'Blocked'}
+            {canScale ? 'Approved' : 'Not approved'}
           </div>
         </div>
       </div>

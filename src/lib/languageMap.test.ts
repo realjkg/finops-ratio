@@ -1,6 +1,6 @@
 // Tests for the persona language map (Ratio v2 Wave 2a). Verifies every persona
 // has a complete, distinct vocabulary and that the locked executive wording
-// ("Initiative Dashboard", "Cost efficiency", …) matches the approved Wave 2
+// ("Initiative Dashboard", "Value / cost", …) matches the approved Wave 2
 // design. Pure data — no DOM.
 import { describe, it, expect } from 'vitest';
 import { LANGUAGE_MAP, languageFor, type LanguageMap } from './languageMap';
@@ -38,11 +38,11 @@ describe('language map', () => {
     expect(LANGUAGE_MAP.executive).toEqual({
       boardTitle: 'Initiative Dashboard',
       itemLabel: 'Initiative',
-      fuelLabel: 'Budget consumed',
+      fuelLabel: 'Budget used',
       trajectoryLabel: 'Forecast',
       gateLabel: 'Approval Required',
       adjustmentLabel: 'Proposed change',
-      valueRatioLabel: 'Cost efficiency',
+      valueRatioLabel: 'Value / cost',
     });
   });
 
@@ -50,7 +50,7 @@ describe('language map', () => {
     expect(LANGUAGE_MAP.technical.boardTitle).toBe('Mission Board');
     expect(LANGUAGE_MAP.technical.itemLabel).toBe('Mission');
     expect(LANGUAGE_MAP.technical.fuelLabel).toBe('Fuel');
-    expect(LANGUAGE_MAP.technical.valueRatioLabel).toBe('Value ratio');
+    expect(LANGUAGE_MAP.technical.valueRatioLabel).toBe('Value / cost');
   });
 
   it('gives procurement its own savings-oriented wording', () => {

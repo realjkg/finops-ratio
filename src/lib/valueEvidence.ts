@@ -6,6 +6,7 @@
 
 import type { EvidenceStatus, WorkloadValue } from '@/types';
 import { TOKEN_COLOR } from '@/lib/scales';
+import { COPY } from '@/lib/vocabulary';
 
 // Higher rank = weaker evidence. `measured` (ledger-verified) beats `projected`
 // (forward-looking estimate) beats `assumed` (asserted, unverified).
@@ -63,18 +64,18 @@ export const EVIDENCE_META: Record<
   { label: string; color: string; title: string }
 > = {
   measured: {
-    label: 'measured',
+    label: 'Measured value',
     color: TOKEN_COLOR.value,
-    title: 'Value evidence: measured from production data',
+    title: 'Measured value comes from production data, not from assumptions.',
   },
   projected: {
-    label: 'projected',
+    label: 'Projected value',
     color: TOKEN_COLOR.shape,
-    title: 'Value evidence: projected estimate, not yet measured',
+    title: 'Projected value is a forward-looking estimate that has not been measured yet.',
   },
   assumed: {
-    label: 'assumed',
+    label: COPY.estimatedValue,
     color: TOKEN_COLOR.gate,
-    title: 'Value evidence: assumed claim, not measured',
+    title: COPY.estimatedValueExplanation,
   },
 };

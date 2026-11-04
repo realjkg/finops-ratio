@@ -10,7 +10,7 @@ export default function Finio() {
         <title>FinIO — agent-to-agent FinOps interchange | Ratio</title>
         <meta
           name="description"
-          content="Exchange FOCUS-shaped cost and value data between agents over HTTP. Standard FOCUS columns carry cost; x_Ratio extensions carry the value ratio."
+          content="Exchange FOCUS-shaped cost and value data between agents over HTTP. Standard FOCUS columns carry cost; x_Ratio extensions carry Value / cost."
         />
       </Head>
       <FinioOverviewPage />

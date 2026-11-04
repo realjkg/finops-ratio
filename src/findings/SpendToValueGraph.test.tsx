@@ -7,6 +7,7 @@
 // Enter) must navigate via the onOpenWorkload callback — the seam the pages
 // wire to select() + router.push('/workloads').
 
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { afterEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -105,7 +106,7 @@ describe('SpendToValueGraph — dot→workload identity mapping', () => {
         formatUSD(w.costs.monthly_spend),
       );
       expect(dot.getAttribute('aria-label')).toContain(
-        formatRatio(w.value.value_ratio),
+        formatRatio(workloadValueRatio(w)),
       );
     }
   });
@@ -122,7 +123,7 @@ describe('SpendToValueGraph — dot→workload identity mapping', () => {
       (a, b) => b.costs.monthly_spend - a.costs.monthly_spend,
     )[0];
     const lowestRatio = [...portfolio].sort(
-      (a, b) => a.value.value_ratio - b.value.value_ratio,
+      (a, b) => workloadValueRatio(a)! - workloadValueRatio(b)!,
     )[0];
 
     const allCx = portfolio.map(cxOf);
@@ -147,9 +148,9 @@ describe('SpendToValueGraph — tooltip reveal', () => {
     const tip = tooltip();
     expect(tip.textContent).toContain(w.name);
     expect(tip.textContent).toContain(formatUSD(w.costs.monthly_spend));
-    expect(tip.textContent).toContain(formatRatio(w.value.value_ratio));
+    expect(tip.textContent).toContain(formatRatio(workloadValueRatio(w)));
     const ratioEl = tip.querySelector<HTMLElement>('[data-testid="stv-tooltip-ratio"]')!;
-    expect(ratioEl.style.color).toBe(ratioColor(w.value.value_ratio));
+    expect(ratioEl.style.color).toBe(ratioColor(workloadValueRatio(w)));
 
     // Calm reveal — the hovered dot carries the band-colored ring…
     const dot = dotFor(w.id);
@@ -229,5 +230,32 @@ describe('SpendToValueGraph — embedded (compact) variant stays consistent', ()
     );
     mouseover(dotFor(portfolio[1].id));
     expect(tooltip().textContent).toContain(portfolio[1].name);
+  });
+});
+
+describe('SpendToValueGraph — negative Value / cost', () => {
+  function renderWith(workloads: Workload[]) {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root!.render(<SpendToValueGraph workloads={workloads} size="large" selectedWorkloadId="wl-fraud" />);
+    });
+  }
+  const cy = (id: string) => parseFloat(dotFor(id).querySelector('circle[fill]')!.getAttribute('cy')!);
+
+  it('draws a negative ratio below the 0× line instead of clamping it onto the axis', () => {
+    renderWith(WORKLOADS);
+    const zero = container!.querySelector('[data-testid="stv-zero-line"]');
+    expect(zero, 'a 0× line is drawn when the axis extends below zero').not.toBeNull();
+    const zeroY = parseFloat(zero!.getAttribute('y1')!);
+    expect(cy('wl-fraud')).toBeGreaterThan(zeroY); // SVG y grows downward
+    expect(container!.textContent).toContain('-1×');
+  });
+
+  it('keeps the zero-based axis and no 0× line when nothing is negative', () => {
+    renderWith(WORKLOADS.filter((w) => workloadValueRatio(w)! >= 0));
+    expect(container!.querySelector('[data-testid="stv-zero-line"]')).toBeNull();
+    expect(container!.textContent).not.toContain('-1×');
   });
 });

@@ -54,7 +54,7 @@ describe('report view-model', () => {
     }
   });
 
-  it('keeps budget consumed non-negative, with N/A carried as null plus a reason', () => {
+  it('keeps budget used non-negative, with N/A carried as null plus a reason', () => {
     for (const row of model.rows) {
       expect(row.budgetConsumedPct).toBeGreaterThanOrEqual(0);
       expect(row.budgetConsumedNa).toBeNull();
@@ -71,11 +71,11 @@ describe('report workbook', () => {
   it('exposes exactly the eight user-approved columns, in order', () => {
     expect(REPORT_COLUMNS).toEqual([
       'Initiative Name',
-      'Monthly Cost ($)',
+      'Modeled workload cost ($)',
       'Annual Run Rate ($)',
-      'Budget Consumed (%)',
+      'Estimated budget consumption to date (%)',
       'Status',
-      'Cost Efficiency Score',
+      'Value / cost',
       'Savings Opportunity ($)',
       'Last Updated',
     ]);
@@ -119,7 +119,7 @@ describe('report workbook', () => {
         row.annualRunRate,
         row.budgetConsumedPct,
         row.status,
-        Number(row.costEfficiency.toFixed(1)),
+        Number(row.costEfficiency!.toFixed(1)),
         row.savingsOpportunity,
         row.lastUpdated,
       ]);
@@ -151,5 +151,15 @@ describe('report workbook', () => {
       const widest = Math.max(...grid.map((r) => String(r[c]).length));
       expect(sheet.getColumn(c + 1).width).toBe(widest + 2);
     });
+  });
+});
+
+describe('report headers follow the cost source', () => {
+  it('a recorded workspace names recorded cost and Budget used; modeled never says Budget used', async () => {
+    const { reportColumns } = await import('./reportXlsx');
+    expect(reportColumns('recorded')).toContain('Recorded cost to date ($)');
+    expect(reportColumns('recorded')).toContain('Budget used (%)');
+    expect(reportColumns('modeled')).not.toContain('Budget used (%)');
+    expect(reportColumns('modeled').join('|')).not.toMatch(/Billed|Effective|Monthly run rate|Cost Efficiency/i);
   });
 });

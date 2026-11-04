@@ -1,7 +1,7 @@
 // Executive surface view-model (Ratio v2 Wave 2a). The Initiative Dashboard is a
 // pure projection of the *same* engine the technical Mission Board reads — no new
 // math, no backend change. It re-labels the existing mission view-model into
-// executive vocabulary (Initiative / Budget consumed / Cost efficiency) and adds
+// executive vocabulary (Initiative / Budget used / Cost efficiency) and adds
 // the board-level Spend Summary, all derived from the bundled mock seed.
 //
 // Status mapping (mission → executive):
@@ -9,6 +9,7 @@
 //   caution  -> at_risk           (shape amber)
 //   critical -> pending_approval  (gate purple — a decision is required)
 
+import { costSourceOf, type CostSource } from '@/lib/vocabulary';
 import { budgetFor } from '@/data/budgets';
 import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
@@ -45,7 +46,7 @@ export interface InitiativeView {
   name: string;
   // Monthly run-rate cost — the headline number executives read first.
   monthlyCost: number;
-  // Month-to-date budget consumed (actual to date / approved budget, whole
+  // Month-to-date budget used (cost to date / approved budget, whole
   // percent, not clamped) + its threshold color. null = N/A, with the reason.
   budgetConsumedPct: number | null;
   budgetConsumedNa: string | null;
@@ -54,7 +55,9 @@ export interface InitiativeView {
   budgetConsumedColor: string;
   status: InitiativeStatus;
   // Cost efficiency = value ratio (R4 — cost is always paired with value).
-  valueRatio: number;
+  valueRatio: number | null;
+  /** Modeled (sample workspace) or recorded (postings): decides how the budget figure is named. */
+  costSource: CostSource;
   valueColor: string;
   /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
   valueEvidenceStatus?: EvidenceStatus;
@@ -87,6 +90,7 @@ export function toInitiativeView(workload: Workload, context: ProjectionContext 
     budgetConsumedColor: consumed.pct === null ? 'var(--sub)' : budgetColor(consumed.pct / 100),
     status: MISSION_TO_INITIATIVE[mission.status],
     valueRatio: mission.valueRatio,
+    costSource: costSourceOf(workload),
     valueColor: mission.valueColor,
     valueEvidenceStatus: headlineEvidenceStatus(workload.value),
   };

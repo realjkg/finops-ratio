@@ -4,6 +4,7 @@
 // badge, and cost efficiency (value ratio, R4 — never cost without value). On the
 // executive surface each card carries a matrixed-lens callout: one line per role
 // reading the same numbers differently.
+import { VOCAB, basisLine, budgetLabel } from '@/lib/vocabulary';
 import { formatRatio, formatUSD } from '@/lib/format';
 import { EvidenceMark } from '@/components/EvidenceMark';
 import type { LanguageMap } from '@/lib/languageMap';
@@ -19,6 +20,17 @@ interface InitiativeCardProps {
 
 export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardProps) {
   const meta = INITIATIVE_STATUS_META[initiative.status];
+  // The executive budget label follows the cost source: only recorded cost earns "Budget used" (with its
+  // basis); modeled cost is "Estimated budget consumption to date". Other personas keep their own term.
+  const fuelText =
+    lang.fuelLabel === VOCAB.budgetUsed.label
+      ? initiative.costSource === 'recorded'
+        ? `${VOCAB.budgetUsed.label} · month to date · ${basisLine('recorded')}`
+        : budgetLabel('modeled', 'month')
+      : // Other personas keep their own term; over a modeled numerator it is an estimate, so say so.
+        initiative.costSource === 'recorded'
+        ? `${lang.fuelLabel} · month to date`
+        : `Estimated ${lang.fuelLabel.toLowerCase()} · month to date`;
 
   return (
     <article
@@ -50,10 +62,10 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
         </p>
       </div>
 
-      {/* Budget consumed bar */}
+      {/* Budget used bar */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-xs">
-          <span className="font-medium text-exec-muted">{lang.fuelLabel} · month to date</span>
+          <span className="font-medium text-exec-muted">{fuelText}</span>
           <span className="font-mono font-semibold text-exec-text">
             {initiative.budgetConsumedPct === null ? 'N/A' : `${initiative.budgetConsumedPct}%`}
           </span>
@@ -68,7 +80,7 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuetext={initiative.budgetConsumedPct === null ? 'N/A' : `${initiative.budgetConsumedPct}%`}
-          aria-label={`${lang.fuelLabel}, month to date`}
+          aria-label={fuelText}
         >
           <div
             className="h-full rounded-full"
@@ -98,7 +110,7 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
 // The line-manager reading only appears when a decision is actually pending.
 function MatrixedLens({ initiative }: { initiative: InitiativeView }) {
   const rows: { role: string; reading: string }[] = [
-    { role: 'CFO', reading: 'Monthly cost · savings opportunity' },
+    { role: 'CFO', reading: 'Monthly workload cost · savings opportunity' },
     { role: 'VP Platform', reading: 'Initiative status · budget variance' },
   ];
   if (initiative.status === 'pending_approval') {

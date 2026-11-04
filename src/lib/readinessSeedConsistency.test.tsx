@@ -25,13 +25,13 @@ describe('B3a gates follow the value ratio', () => {
   });
 });
 
-describe('B3b budget consumed names its basis in both views', () => {
+describe('B3b budget used names its basis in both views', () => {
   it.each(WORKLOADS.map((w) => [w.name, w] as const))('%s', (_n, w) => {
     const m = toMissionView(w);
     const tech = renderToStaticMarkup(<FuelAndValue {...m} />);
     const exec = renderToStaticMarkup(<InitiativeCard initiative={toInitiativeView(w)} lang={LANGUAGE_MAP.executive} showLens={false} />);
-    expect(tech).toContain('>Budget consumed · today<');
-    expect(exec).toContain('>Budget consumed · month to date<');
+    expect(tech).toContain('>Estimated budget consumption today<');
+    expect(exec).toContain('>Estimated budget consumption to date<');
   });
 });
 

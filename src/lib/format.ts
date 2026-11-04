@@ -26,8 +26,9 @@ export function formatCents(value: number): string {
   return `$${value.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`;
 }
 
-export function formatRatio(ratio: number): string {
-  return `${ratio.toFixed(1)}\u00d7`;
+/** One-decimal ratio. A missing or non-finite ratio is "N/A", never "NaN×" or "Infinity×". */
+export function formatRatio(ratio: number | null | undefined): string {
+  return typeof ratio === 'number' && Number.isFinite(ratio) ? `${ratio.toFixed(1)}\u00d7` : 'N/A';
 }
 
 /**
@@ -35,10 +36,11 @@ export function formatRatio(ratio: number): string {
  * "no positive return" with the actual ratio in parentheses — never floored
  * to a fake positive figure, never hidden.
  */
-export function formatReturn(ratio: number): string {
+export function formatReturn(ratio: number | null | undefined): string {
+  if (typeof ratio !== 'number' || !Number.isFinite(ratio)) return 'Value / cost N/A';
   return ratio > 0
-    ? `${formatRatio(ratio)} return`
-    : `no positive return (${formatRatio(ratio)})`;
+    ? `Value / cost ${formatRatio(ratio)}`
+    : `Value / cost ${formatRatio(ratio)} (no positive value)`;
 }
 
 export function formatPct(fraction: number, digits = 0): string {

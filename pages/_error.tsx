@@ -9,7 +9,7 @@ export default function ErrorPage({ statusCode }: { statusCode: number }) {
     <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-void p-6 text-txt">
       <h1 className="font-mono text-lg">{statusCode === 404 ? '404: page not found' : `Error ${statusCode}`}</h1>
       <p className="text-sm text-sub">{statusCode === 404 ? 'That address does not exist in Ratio.' : 'Something went wrong on our side.'}</p>
-      <Link href="/" className="rounded border border-edge bg-raised px-3 py-1 font-mono text-xs text-txt hover:bg-slab">Back to Findings</Link>
+      <Link href="/" className="rounded border border-edge bg-raised px-3 py-1 font-mono text-xs text-txt hover:bg-slab">Back to Value review</Link>
     </main>
   );
 }

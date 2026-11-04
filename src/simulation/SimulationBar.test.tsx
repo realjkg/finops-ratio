@@ -36,4 +36,14 @@ describe('SimulationBar sign-in link', () => {
     access.current = accessWith(true);
     expect(renderToStaticMarkup(<SimulationBar />)).toContain('href="/simulation"');
   });
+
+  it('calls the public demo the sample workspace and states it is synthetic, with no freshness claim', () => {
+    access.current = accessWith(false);
+    const html = renderToStaticMarkup(<SimulationBar />);
+    expect(html).toContain('Sample workspace');
+    expect(html).not.toContain('Seeded demo');
+    expect(html).toContain('Synthetic data · No live connections');
+    expect(html).toContain('June 2026 · USD · Basis: demo assumption');
+    expect(html).not.toMatch(/Updated \d|min ago|Simulated costs/);
+  });
 });

@@ -14,7 +14,7 @@ export function SignInRequired({ title, detail, loading = false }: { title: stri
         </p>
         <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
           <Link href="/simulation" className="sim-button">Choose a simulated identity</Link>
-          <Link href="/demo" className="text-sm text-unit underline">Back to the seeded demo</Link>
+          <Link href="/demo" className="text-sm text-unit underline">Back to the sample workspace</Link>
         </div>
       </section>
     </div>

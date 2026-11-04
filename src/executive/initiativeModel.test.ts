@@ -61,21 +61,21 @@ describe('initiative view-model', () => {
   });
 
   it('renders the value-negative seed honestly (poor color, finite ratio)', () => {
-    const negative = initiatives.filter((i) => i.valueRatio <= 0);
+    const negative = initiatives.filter((i) => (i.valueRatio ?? 1) <= 0);
     expect(negative.length).toBeGreaterThan(0);
     for (const initiative of negative) {
       expect(initiative.valueColor).toBe(TOKEN_COLOR.cost);
     }
   });
 
-  it('reports budget consumed as a non-negative percent for every seeded budget', () => {
+  it('reports budget used as a non-negative percent for every seeded budget', () => {
     for (const initiative of initiatives) {
       expect(initiative.budgetConsumedPct).toBeGreaterThanOrEqual(0);
       expect(initiative.budgetConsumedNa).toBeNull();
     }
   });
 
-  // Pilot P0 metric contract: actual period-to-date / approved full-period budget.
+  // Pilot P0 metric contract: period-to-date cost / approved full-period budget.
   it('does not clamp an over-budget workload to 100%', () => {
     const w = WORKLOADS[0];
     const over = toInitiativeView({ ...w, costs: { ...w.costs, monthly_budget: 1 } });

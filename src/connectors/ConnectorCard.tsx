@@ -206,7 +206,7 @@ export function ConnectorCard({
       </div>
 
       {/* Source name */}
-      <h3 className="font-mono text-sm font-bold text-txt leading-snug">{source.name}</h3>
+      <h3 className="text-sm font-bold text-txt leading-snug">{source.name}</h3>
 
       {/* FOCUS version → canonical mapping */}
       <div className="flex items-center gap-1 font-mono text-[11px]">

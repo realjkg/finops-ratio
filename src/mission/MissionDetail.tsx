@@ -7,9 +7,10 @@
 //
 // Accessibility (PR C): Escape to close, auto-focus back button on open, ARIA
 // tablist with Left/Right/Home/End arrow-key navigation across mission sections.
+import { workloadValueRatio } from '@/lib/valueRatio';
 import { forwardRef, useCallback, useEffect, useRef, useState } from 'react';
 import { useStore, type DetailTab } from '@/store/useStore';
-import { formatInt, formatRatio } from '@/lib/format';
+import { formatInt, formatReturn } from '@/lib/format';
 import { PROVIDER_LABEL, ratioColor, TOKEN_COLOR, tint } from '@/lib/scales';
 import { KpiCards } from '@/components/detail/KpiCards';
 import { BudgetProfileTab } from '@/components/detail/BudgetProfileTab';
@@ -162,9 +163,9 @@ export function MissionDetail({ missionId, onBack }: MissionDetailProps) {
             <div className="text-right">
               <div
                 className="font-mono text-2xl font-bold"
-                style={{ color: ratioColor(workload.value.value_ratio) }}
+                style={{ color: ratioColor(workloadValueRatio(workload)) }}
               >
-                {formatRatio(workload.value.value_ratio)} return
+                {formatReturn(workloadValueRatio(workload))}
               </div>
               <div className="mt-0.5 font-mono text-xs text-sub">
                 {formatInt(workload.outputs.daily_inferences)} calls/day
