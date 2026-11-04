@@ -35,7 +35,7 @@ describe('WorkloadList ordering with N/A', () => {
     const na = structuredClone(WORKLOADS[WORKLOADS.length - 1]);
     na.costs.monthly_spend = 0;
     const workloads = [...WORKLOADS.slice(0, -1), na];
-    useStore.setState({ workloads, filters: { ...initial.filters, team: 'all', provider: 'all', environment: 'all' }, selectedId: null });
+    useStore.setState({ workloads, filters: { ...initial.filters, team: 'all', provider: 'all', environment: 'all' }, selectedId: undefined });
     act(() => root.render(<WorkloadList />));
     const cards = order();
     expect(cards).toHaveLength(workloads.length);
