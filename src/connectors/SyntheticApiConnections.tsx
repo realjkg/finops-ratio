@@ -40,7 +40,7 @@ export function SyntheticApiConnections() {
   const totals = totalsByCurrency(list);
   return (
     <section aria-labelledby="synthetic-connections-heading" className="mb-8">
-      <h2 id="synthetic-connections-heading" className="mb-1 font-mono text-[11px] uppercase tracking-wider text-sub">Simulated API connections · Synthetic</h2>
+      <h2 id="synthetic-connections-heading" className="mb-1 text-xs font-semibold text-sub">Simulated API connections · Synthetic</h2>
       <p className="mb-3 max-w-3xl text-sm text-sub">
         Three kinds of API connection with fictional data in FOCUS 1.0 form. Nothing connects: Import sample loads a bundled file from this site, makes no data request, and keeps nothing after you leave. Each connection has its own currency, and currencies are never added together.
       </p>

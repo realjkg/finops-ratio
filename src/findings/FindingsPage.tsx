@@ -94,6 +94,7 @@ export function FindingsPage() {
     [governanceMap],
   );
 
+  const belowTarget = findings.filter((f) => f.targetStatus !== 'on_target').length;
   const visible = findings.filter((f) => !dismissedIds.has(f.workloadId));
   const selected = visible.find((f) => f.workloadId === selectedId) ?? visible[0] ?? null;
 
@@ -193,9 +194,9 @@ export function FindingsPage() {
       <header className="shrink-0 border-b border-edge bg-deep px-6 py-4">
         <div className="flex items-baseline justify-between">
           <div>
-            <h1 className="font-mono text-lg font-bold text-txt">Findings</h1>
+            <h1 className="text-lg font-bold text-txt">Value review</h1>
             <p className="mt-0.5 text-xs text-sub">
-              Workloads ranked by {VOCAB.valueToCost.label}, lowest value first. Target {VALUE_MINIMUM}×.
+              Workloads ranked by {VOCAB.valueToCost.label}, lowest value first. {belowTarget} of {findings.length} below the {VALUE_MINIMUM}× target.
             </p>
           </div>
           {capturedCount > 0 && (
@@ -467,7 +468,7 @@ function RecommendationPane({
             >
               {formatRatio(finding.valueRatio)}
             </span>
-            <EvidenceMark status={finding.valueEvidenceStatus} />
+            <EvidenceMark status={finding.valueEvidenceStatus} explain />
             <span className="text-xs text-sub">Target {VALUE_MINIMUM}×</span>
           </p>
         </div>
@@ -549,7 +550,7 @@ function RecommendationPane({
 
       {/* Recommended action */}
       <section aria-label="Recommended action">
-        <p className="mb-2 font-mono text-[10px] uppercase tracking-wider text-dim">
+        <p className="mb-2 text-xs font-medium text-dim">
           Recommended action
         </p>
         <p className="text-sm text-txt">{finding.recommendedAction}</p>
@@ -557,7 +558,7 @@ function RecommendationPane({
 
       {/* Projected impact — hero figure + honest qualification (Slice 5) */}
       <section aria-label="Projected monthly impact">
-        <p className="mb-1 font-mono text-[10px] uppercase tracking-wider text-dim">
+        <p className="mb-1 text-xs font-medium text-dim">
           Projected monthly impact
         </p>
         {finding.projectedMonthlyImpact !== null &&
@@ -586,7 +587,7 @@ function RecommendationPane({
 
         {/* Basis — what the figure is computed from (quiet). */}
         <p className="mt-2 font-mono text-[10px] leading-relaxed text-dim">
-          <span className="uppercase tracking-wider">Basis </span>
+          <span className="font-medium">Basis. </span>
           {finding.impactBasis}
         </p>
         {/* Confidence / assumption note — never presents a projection as a saving. */}
@@ -651,7 +652,7 @@ function RecommendationPane({
 
               {showRefForm && (
                 <div className="mt-3 space-y-2 rounded-md border border-edge bg-slab p-3">
-                  <p className="font-mono text-[10px] uppercase tracking-wider text-dim">
+                  <p className="text-xs font-medium text-dim">
                     Attach pre-approved reference
                   </p>
                   <div className="flex items-center gap-2">
