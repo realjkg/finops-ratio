@@ -103,7 +103,7 @@ export function TcaBreakdown({ workload }: { workload: Workload }) {
             {formatRatio(tca.fullCostRatio)}
           </span>
         ) : (
-          <span className="font-mono text-cost">no positive return</span>
+          <span className="font-mono text-cost">no positive value</span>
         )}
         . Estimates are marked, never measured — record actuals in your
         customer workspace.

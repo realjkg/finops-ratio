@@ -60,7 +60,7 @@ export function roiAnswer(world: World, scope: Scope): Answer {
   const ex = scope.kind === 'workload' ? null : extremes(members);
   if (ex) {
     body.push(
-      `Strongest: ${ex.strongest.name} (${x(ex.strongest.ratio)} ${short(ex.strongest.evidence)}) · Weakest: ${ex.weakest.name} (${x(ex.weakest.ratio)} ${short(ex.weakest.evidence)}${(ex.weakest.ratio ?? 1) <= 0 ? ', no positive return' : ''})`,
+      `Strongest: ${ex.strongest.name} (${x(ex.strongest.ratio)} ${short(ex.strongest.evidence)}) · Weakest: ${ex.weakest.name} (${x(ex.weakest.ratio)} ${short(ex.weakest.evidence)}${(ex.weakest.ratio ?? 1) <= 0 ? ', no positive value' : ''})`,
     );
   } else if (members.length === 1 && scope.kind !== 'workload') {
     body.push(`Only one workload here, so the ${scope.kind} figure is that workload's figure.`);
