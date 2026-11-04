@@ -80,11 +80,19 @@ for (const width of [320, 360, 390]) {
       nav(page).getByRole('button', { name: 'Display', exact: true }),
       nav(page).getByRole('button', { name: 'Text', exact: true }),
       nav(page).getByRole('button', { name: 'Ask Frank Coster' }),
-      page.getByRole('button', { name: 'Estimated value' }).first(),
     ];
     for (const t of targets) {
       const box = await t.boundingBox();
       expect(box!.height, `${await t.textContent()} height`).toBeGreaterThanOrEqual(43.5);
+    }
+    // The Estimated value button's hit area is a pseudo-element: points 21px above and below its centre
+    // (a 42px-tall zone, within the 44px target) must still land on the button.
+    const mark = page.getByRole('button', { name: 'Estimated value' }).first();
+    await mark.evaluate((el) => el.scrollIntoView({ block: 'center' })); // keep the probe points inside the viewport
+    const b = (await mark.boundingBox())!;
+    for (const dy of [-21, 0, 21]) {
+      const hit = await page.evaluate(([x, y]) => (document.elementFromPoint(x, y) as HTMLElement | null)?.closest('button')?.textContent, [b.x + b.width / 2, b.y + b.height / 2 + dy]);
+      expect(hit, `hit at dy=${dy}`).toBe('Estimated value');
     }
   });
 }

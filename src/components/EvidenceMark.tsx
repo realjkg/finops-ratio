@@ -7,7 +7,8 @@
 // click or keyboard (Enter and Space; Escape or an outside tap closes), unlike a title
 // tooltip. The explanation is rendered in a portal with fixed placement clamped to the
 // viewport (lib/popupPlacement.ts), so a narrow phone or an overflow container never clips it.
-// On phones the button's hit area is 44px tall without adding visual height.
+// On phones a pseudo-element extends the hit area to at least 44px tall without adding layout height
+// (a taller box would push neighbouring lines at large text sizes).
 // Leave `explain` off where the mark sits inside another button or link (a list row), where
 // a nested control is not allowed; the static label keeps the title text.
 
@@ -85,7 +86,7 @@ export function EvidenceMark({
       <button
         ref={button}
         type="button"
-        className="inline-flex items-center text-[11px] font-medium underline decoration-dotted underline-offset-2 max-md:-my-3.5 max-md:min-h-11"
+        className="relative inline-flex items-center text-[11px] font-medium underline decoration-dotted underline-offset-2 max-md:before:absolute max-md:before:inset-x-0 max-md:before:-inset-y-3.5 max-md:before:content-['']"
         style={style}
         aria-expanded={open}
         aria-controls={id}
