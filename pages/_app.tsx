@@ -10,6 +10,7 @@ import { applyTypography, loadTypography } from '@/theme/typography';
 import { PersonaProvider } from '@/components/PersonaProvider';
 import { AppShell } from '@/components/layout/AppShell';
 import { NAV_ITEMS } from '@/components/layout/NavBar';
+import { DemoBadge, showsDemoBadge } from '@/components/layout/DemoBadge';
 
 // The six north-star objects share one AppShell (nav + agent launcher + chat).
 // /demo also uses the shell so a self-service visitor gets the same navigation
@@ -36,7 +37,13 @@ export default function RatioApp({ Component, pageProps }: AppProps) {
   return (
     <PersonaProvider>
       <SimulationProvider>
-      {useShell ? <AppShell>{page}</AppShell> : page}
+      {useShell ? <AppShell>{page}</AppShell> : showsDemoBadge(router.pathname) ? (
+        // Standalone demo routes (/mission, /hello) have no top bar: the same badge sits in a thin strip.
+        <>
+          <div className="flex items-center border-b border-edge bg-deep px-3 py-1.5"><DemoBadge /></div>
+          {page}
+        </>
+      ) : page}
     </SimulationProvider>
     </PersonaProvider>
   );

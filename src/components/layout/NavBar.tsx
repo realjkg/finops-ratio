@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThemeMenu } from './ThemeMenu';
 import { TypographyMenu } from './TypographyMenu';
+import { DemoBadge } from './DemoBadge';
 
 export const NAV_ITEMS = [
   { key: 'findings',   label: 'Value review', href: '/' },
@@ -33,8 +34,11 @@ export function NavBar({
   active,
   onOpenAgent,
   agentOpen,
+  demo = false,
 }: {
   active?: NavKey;
+  /** Shows the single "Demo" badge beside the logo (every demo page; never in engagement mode). */
+  demo?: boolean;
   /** When provided, renders the single top-bar agent launcher on the right. */
   onOpenAgent?: () => void;
   agentOpen?: boolean;
@@ -82,6 +86,7 @@ export function NavBar({
           <span className="text-void">%</span>
         </span>
         <span className="font-mono text-sm font-bold tracking-tight text-txt">Ratio</span>
+        {demo && <DemoBadge />}
       </span>
 
       <div className="col-span-2 row-start-2 flex min-w-0 items-stretch md:col-auto md:row-auto">

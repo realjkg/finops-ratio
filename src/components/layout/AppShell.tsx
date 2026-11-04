@@ -13,6 +13,7 @@ import { useRouter } from 'next/router';
 import { useStore } from '@/store/useStore';
 import Head from 'next/head';
 import { NavBar, NAV_ITEMS, pageTitle } from './NavBar';
+import { showsDemoBadge } from './DemoBadge';
 import { ChatPanel } from '@/components/ai/ChatPanel';
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -26,7 +27,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen flex-col bg-void font-body text-txt">
       <Head><title>{pageTitle(router.pathname)}</title></Head>
-      <NavBar active={active} onOpenAgent={toggleAIPanel} agentOpen={aiPanelOpen} />
+      <NavBar active={active} onOpenAgent={toggleAIPanel} agentOpen={aiPanelOpen} demo={showsDemoBadge(router.pathname)} />
       <SimulationBar />
       <main className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</main>
       {/* Launcher lives in the top bar; the panel itself is opened from there. */}
