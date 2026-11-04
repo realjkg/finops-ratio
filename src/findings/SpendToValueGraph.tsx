@@ -17,7 +17,7 @@ import { ratioColor } from '@/lib/scales';
 import { formatUSD, formatRatio } from '@/lib/format';
 import { VOCAB } from '@/lib/vocabulary';
 import { VALUE_MINIMUM } from './findingsModel';
-import { ratioDomain, ratioTicks } from './ratioAxis';
+import { ratioDomain, ratioTickLabel, ratioTicks } from './ratioAxis';
 import type { Workload } from '@/types';
 
 // Theme variables (src/index.css), so SVG strokes and labels follow the active theme.
@@ -97,7 +97,7 @@ export function SpendToValueGraph({
       // Large charts stop growing at max-w-2xl so axis text stays near body size on wide
       // screens; on phones the labels are set larger in viewBox units to stay legible.
       className={isLarge ? 'mx-auto w-full max-w-2xl' : 'w-full'}
-      aria-label={`Portfolio scatter — workloads by ${VOCAB.monthlyRunRate.label.toLowerCase()} and ${VOCAB.valueToCost.label}`}
+      aria-label={`Portfolio scatter — workloads by ${VOCAB.monthlyWorkloadCost.label.toLowerCase()} and ${VOCAB.valueToCost.label}`}
     >
       <div className="relative">
         <svg
@@ -180,7 +180,7 @@ export function SpendToValueGraph({
                   textAnchor="end" fontSize={9} fill={C_DIM}
                   fontFamily="'JetBrains Mono', monospace"
                 >
-                  {v}×
+                  {ratioTickLabel(v, domain)}
                 </text>
               </g>
             ))}
@@ -221,7 +221,7 @@ export function SpendToValueGraph({
               textAnchor="middle" fontSize={9} fill={C_DIM}
               fontFamily="'JetBrains Mono', monospace"
             >
-              {VOCAB.monthlyRunRate.label.toLowerCase()}
+              {VOCAB.monthlyWorkloadCost.label.toLowerCase()}
             </text>
           </>
         )}
@@ -353,7 +353,7 @@ export function SpendToValueGraph({
               <div className="mt-1.5 space-y-0.5">
                 <div className="flex items-baseline justify-between gap-4">
                   <span className="font-mono text-[9px] uppercase tracking-wider text-dim">
-                    {VOCAB.monthlyRunRate.label}
+                    {VOCAB.monthlyWorkloadCost.label}
                   </span>
                   <span className="font-mono text-xs text-txt">
                     {formatUSD(w.costs.monthly_spend)}

@@ -32,30 +32,64 @@ afterEach(() => {
 });
 
 describe('finding card (lowest Value / cost first: Fraud Triage Agent)', () => {
-  it('shows the status line, run rate, Value / cost with its target, and one reason', () => {
+  it('shows the status line, modeled cost with its basis, Value / cost with its target, and one reason', () => {
     expect(q('[data-testid="finding-status"]')?.textContent).toBe('Below target · Estimated value');
     expect(q('[data-testid="finding-value-cost"]')?.textContent).toBe('-0.2×');
     const text = box.textContent ?? '';
-    expect(text).toContain('Monthly run rate');
+    expect(text).toContain('Modeled workload cost');
+    expect(text).toContain('Basis: demo assumption');
+    expect(text).not.toMatch(/Monthly run rate|Cost basis not stated/);
     expect(text).toContain('Target 3×');
-    expect(text).toContain('Why this needs attention');
     expect(q('[data-testid="finding-why"]')?.textContent).toMatch(/Harm from misses/);
     expect(text).not.toMatch(/3\.2.{0,3}below|below minimum|Monthly spend|Current ratio/);
+    expect(text).not.toContain('\u2212'); // one minus glyph everywhere: the ASCII hyphen
   });
 
-  it('keeps the formula and sources off the card until "View calculation" is opened', () => {
-    expect(q('[data-testid="finding-calculation"]')).toBeNull();
+  it('keeps the calculation hidden until "View calculation" is opened; aria-controls always names a real element', () => {
     const toggle = button('View calculation');
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    act(() => toggle.click());
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     const calc = q('[data-testid="finding-calculation"]')!;
+    expect(calc.hidden).toBe(true);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(toggle.getAttribute('aria-controls')).toBe(calc.id);
-    for (const part of ['Value / cost = (counted value', 'Period.', 'Cost basis.', 'Value assumptions.', 'Source.', 'Gap to the 3× target', 'not a general financial standard', 'Set in demo configuration']) {
-      expect(calc.textContent, part).toContain(part);
-    }
+    expect(box.querySelector(`#${calc.id}`)).toBe(calc);
     act(() => toggle.click());
-    expect(q('[data-testid="finding-calculation"]')).toBeNull();
+    expect(calc.hidden).toBe(false);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.textContent).toBe('Hide calculation');
+    act(() => toggle.click());
+    expect(calc.hidden).toBe(true);
+    expect(button('View calculation')).toBe(toggle);
+  });
+
+  it('the opened calculation shows the code order of operations with the Fraud Triage numbers', () => {
+    act(() => button('View calculation').click());
+    const calc = q('[data-testid="finding-calculation"]')!;
+    const t = calc.textContent!;
+    expect(t).not.toMatch(/\\u[0-9a-f]{4}/i); // no escape sequences shown as text
+    expect(t).not.toContain('\u2212');
+    const order = [
+      'Quality-adjusted business value, less modeled harm from misses, divided by workload cost for the same reporting period.',
+      'Gross value (protected revenue + avoided cost)$6,720',
+      'Quality-floor pass rate (applied to gross value)58%',
+      'Counted business value$3,898',
+      'Less modeled harm from misses-$4,600',
+      'Adjusted value (estimated business value)-$702',
+      'Modeled workload cost$4,200',
+      'Value / cost (unrounded)-0.17×',
+      'Displayed-0.2×',
+      'Break-even1×',
+      'Configured policy target3×',
+      'Gap to the 3× target3.17×',
+    ];
+    let at = -1;
+    for (const part of order) {
+      const i = t.indexOf(part, at + 1);
+      expect(i, part).toBeGreaterThan(at);
+      at = i;
+    }
+    for (const part of ['applied once, to gross value', 'neither is deducted twice', 'Basis: demo assumption', '30-day month convention', 'Period.', 'Value assumptions.', 'Target source. Demo configuration', 'Break-even. 1×, where value equals cost', 'not a general financial standard', 'Set in demo configuration', 'not Billed cost or Effective cost']) {
+      expect(t, part).toContain(part);
+    }
   });
 
   it('Ask Frank selects this workload as context and opens the panel; nothing else needs it', () => {
