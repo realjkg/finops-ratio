@@ -18,6 +18,12 @@ export const NAV_ITEMS = [
   { key: 'reports',    label: 'Reports',    href: '/reports' },
 ] as const;
 
+/** Browser tab, bookmark and screen-reader title for an in-scope route, e.g. "Governance · Ratio". */
+export function pageTitle(pathname: string): string {
+  const item = NAV_ITEMS.find((i) => i.href === pathname);
+  return item ? `${item.label} · Ratio` : 'Ratio';
+}
+
 export type NavKey = (typeof NAV_ITEMS)[number]['key'];
 
 // The ChatPanel's <aside> id — referenced by the launcher for aria-controls.
@@ -47,10 +53,21 @@ export function NavBar({
   }, []);
   useEffect(() => {
     const el = strip.current;
-    el?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
-    measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    // Centre the current item in the strip (never scrolls the page itself). Done again once web
+    // fonts have loaded, because the labels get wider and an item measured earlier can end up cut.
+    const reveal = () => {
+      const cur = el?.querySelector<HTMLElement>('[aria-current="page"]');
+      if (el && cur) el.scrollLeft = Math.ceil(cur.offsetLeft - (el.clientWidth - cur.offsetWidth) / 2);
+      measure();
+    };
+    reveal();
+    let live = true;
+    void document.fonts?.ready.then(() => live && reveal());
+    window.addEventListener('resize', reveal);
+    return () => {
+      live = false;
+      window.removeEventListener('resize', reveal);
+    };
   }, [active, measure]);
   return (
     <nav className="relative shrink-0 border-b border-edge bg-deep" aria-label="Main navigation">
@@ -75,7 +92,7 @@ export function NavBar({
           ref={strip}
           onScroll={measure}
           data-testid="nav-strip"
-          className="flex min-w-0 flex-1 snap-x snap-proximity gap-0.5 overflow-x-auto scroll-px-2 pb-0.5 [scrollbar-width:none] md:overflow-visible md:pb-0 [&::-webkit-scrollbar]:hidden"
+          className="flex min-w-0 flex-1 snap-x snap-proximity gap-0.5 overflow-x-auto scroll-px-2 pb-0.5 pr-1 [scrollbar-width:none] md:overflow-visible md:pb-0 [&::-webkit-scrollbar]:hidden"
         >
           {NAV_ITEMS.map((item) => {
             const isActive = item.key === active;
@@ -83,7 +100,7 @@ export function NavBar({
               <Link
                 key={item.key}
                 href={item.href}
-                className={`shrink-0 snap-start whitespace-nowrap rounded px-2.5 py-1.5 text-sm transition-colors md:py-1 md:text-xs ${
+                className={`flex shrink-0 snap-start items-center whitespace-nowrap rounded px-2.5 py-1.5 text-sm transition-colors max-md:min-h-11 md:py-1 md:text-xs ${
                   isActive
                     ? 'bg-raised font-medium text-txt'
                     : 'text-sub hover:bg-raised/60 hover:text-txt'
@@ -110,7 +127,7 @@ export function NavBar({
           aria-expanded={agentOpen}
           aria-controls={AI_PANEL_ID}
           aria-label="Ask Frank Coster"
-          className="col-start-2 row-start-1 ml-auto flex items-center gap-1.5 rounded border border-purple/60 bg-purple/15 px-2.5 py-1 font-mono text-xs font-bold text-purple transition-colors hover:bg-purple/25 md:col-auto md:row-auto"
+          className="col-start-2 row-start-1 ml-auto flex items-center gap-1.5 rounded border border-purple/60 bg-purple/15 px-2.5 py-1 max-md:min-h-11 font-mono text-xs font-bold text-purple transition-colors hover:bg-purple/25 md:col-auto md:row-auto"
         >
           <span
             className="flex h-4 w-4 items-center justify-center rounded font-mono text-[10px] font-bold text-void"

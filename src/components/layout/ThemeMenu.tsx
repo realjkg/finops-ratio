@@ -18,7 +18,7 @@ const swatch = (v: unknown, fallback: string) => {
   const hex = normalizeHex(v);
   return typeof hex === 'string' && /^#[0-9a-f]{6}$/.test(hex) ? hex : fallback;
 };
-const btn = 'rounded border border-edge bg-raised px-2 py-1 font-mono text-xs text-txt hover:bg-slab';
+const btn = 'rounded border border-edge bg-raised px-2 py-1 font-mono text-xs text-txt hover:bg-slab max-md:min-h-11';
 
 /** The built-in the CSS shows when there is no choice (same order as src/index.css). */
 function systemTheme(): BuiltInThemeName {

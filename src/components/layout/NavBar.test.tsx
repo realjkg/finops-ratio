@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NAV_ITEMS, NavBar } from './NavBar';
+import { NAV_ITEMS, NavBar, pageTitle } from './NavBar';
 
 vi.mock('next/router', () => ({ useRouter: () => ({ query: {}, pathname: '/', isReady: true, push: async () => true, replace: async () => true }) }));
 declare global {
@@ -62,5 +62,14 @@ describe('main navigation', () => {
       });
     }
     expect(box.querySelector('[data-testid="nav-more-right"]')?.className).toMatch(/md:hidden/);
+  });
+});
+
+describe('page titles', () => {
+  it('every in-scope route has its own title, so tabs, bookmarks and screen readers can tell pages apart', () => {
+    const titles = NAV_ITEMS.map((i) => pageTitle(i.href));
+    expect(titles).toEqual(['Value review · Ratio', 'Overview · Ratio', 'Workloads · Ratio', 'Connectors · Ratio', 'Governance · Ratio', 'Reports · Ratio']);
+    expect(new Set(titles).size).toBe(titles.length);
+    expect(pageTitle('/unknown')).toBe('Ratio');
   });
 });

@@ -1,5 +1,5 @@
 // AppShell — the single shared layout for the six north-star objects
-// (Findings · Overview · Workloads · Connectors · Frameworks · Reports).
+// (Value review · Overview · Workloads · Connectors · Governance · Reports).
 //
 // It owns the top bar (the six-object NavBar with a router-derived active item),
 // the single agent launcher in that bar, and one ChatPanel overlay — so every
@@ -11,7 +11,8 @@ import type { ReactNode } from 'react';
 import { SimulationBar } from '@/simulation/SimulationBar';
 import { useRouter } from 'next/router';
 import { useStore } from '@/store/useStore';
-import { NavBar, NAV_ITEMS } from './NavBar';
+import Head from 'next/head';
+import { NavBar, NAV_ITEMS, pageTitle } from './NavBar';
 import { ChatPanel } from '@/components/ai/ChatPanel';
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -24,6 +25,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen flex-col bg-void font-body text-txt">
+      <Head><title>{pageTitle(router.pathname)}</title></Head>
       <NavBar active={active} onOpenAgent={toggleAIPanel} agentOpen={aiPanelOpen} />
       <SimulationBar />
       <main className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</main>
