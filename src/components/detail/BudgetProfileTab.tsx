@@ -60,7 +60,7 @@ export function BudgetProfileTab({
           soft={budget.soft_threshold_pct}
           hard={budget.hard_threshold_pct}
           kill={budget.kill_threshold_pct}
-          label="Daily budget consumption"
+          label="Daily budget used"
           na={daily.pctUsedNa}
         />
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">
@@ -83,7 +83,7 @@ export function BudgetProfileTab({
           soft={0.7}
           hard={0.9}
           kill={1.0}
-          label="Monthly budget consumption"
+          label="Monthly budget used"
           na={monthly.pctUsedNa}
         />
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-sub">

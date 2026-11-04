@@ -34,7 +34,7 @@ describe('report with an invalid approved budget', () => {
     expect(model.rows[0].budgetConsumedNa).toMatch(/approved budget/i);
     expect(budgetCellText(model.rows[0])).toBe('N/A');
     expect(budgetCellText({ budgetConsumedPct: 42 })).toBe('42%');
-    expect(budgetNaFootnotes(model.rows)).toEqual([`${first.name}: Budget consumed N/A (${model.rows[0].budgetConsumedNa})`]);
+    expect(budgetNaFootnotes(model.rows)).toEqual([`${first.name}: Budget used N/A (${model.rows[0].budgetConsumedNa})`]);
     expect(budgetNaFootnotes(buildReportModel(FIXED).rows)).toEqual([]);
   });
 
@@ -46,7 +46,7 @@ describe('report with an invalid approved budget', () => {
 
   it('puts the N/A state and its reason in the PDF element tree', () => {
     const text = pdfText(<ReportDocument model={model} />);
-    expect(text).toContain(`${first.name}: Budget consumed N/A (${model.rows[0].budgetConsumedNa})`);
+    expect(text).toContain(`${first.name}: Budget used N/A (${model.rows[0].budgetConsumedNa})`);
     expect(text).toContain('N/A');
     expect(text).not.toMatch(/(^|\|)0%(\||$)/);
   });

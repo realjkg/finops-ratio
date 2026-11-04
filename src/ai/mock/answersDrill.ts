@@ -1,12 +1,15 @@
 // Drill-down ladder below ROI: workload activity, tokens and unit cost,
 // alerts, and outcome evidence. Everything is read from the seeded facts.
 
+import { VOCAB } from '@/lib/vocabulary';
 import { MODEL_QUALITY_NOTE, findModel } from '@/data/models';
 import { capRows, contextLine, ladder, short, workloadRow } from './answerKit';
 import { bySpendDesc, membersOf, rollup, scopeLabel, scopeTitle } from './calc';
 import { evid, int, pct1, price, returnText, signedPct1, usd, usd2, x } from './format';
 import { teamRankAnswer } from './answersRoi';
 import type { Answer, Scope, World, WorkloadFacts } from './types';
+
+const BUDGET_USED = VOCAB.budgetUsed.label.toLowerCase();
 
 const ids = (ws: WorkloadFacts[]): string[] => ws.map((w) => w.id);
 const modelPrices = (name: string | null): string => {
@@ -33,7 +36,7 @@ function workloadDetail(world: World, w: WorkloadFacts): Answer {
     `Team: ${w.team ?? 'not present in this context'} · model: ${w.model ?? 'unknown'}${w.provider ? ` (${w.provider})` : ''}`,
     `Status: ${w.status ?? 'n/a'}` +
       (w.budgetNa ? ' · budget N/A' : '') +
-      (w.budgetConsumedPct !== null ? ` · budget consumed ${w.budgetConsumedPct}%` : '') +
+      (w.budgetConsumedPct !== null ? ` · ${BUDGET_USED} ${w.budgetConsumedPct}%` : '') +
       (w.monthlyBudget !== null ? ` of ${usd(w.monthlyBudget)}/mo` : '') +
       (w.costTrendPct !== null ? ` · MoM trend ${signedPct1(w.costTrendPct)}` : ''),
     `Activity: ${w.calls !== null ? `${int(w.calls)} calls/day (seeded)` : 'call volume not in this context'}` +

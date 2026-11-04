@@ -39,13 +39,13 @@ describe.each([['NaN', NaN], ['Infinity', Infinity]])('Fraud monthly budget %s o
   it('the detail answer prints the status and "budget N/A", never a (seed) budget amount', async () => {
     const text = await last(['Tell me about Fraud Triage Agent'], ctxFor({ monthly_budget: v }));
     expect(text).toContain('Status: Pending Approval · budget N/A');
-    expect(text).not.toMatch(/of \$4,500|budget consumed/);
+    expect(text).not.toMatch(/of \$4,500|budget used/);
   });
 });
 
 describe('a valid budget still prints', () => {
   it('status with consumed percent and budget amount', async () => {
     const text = await last(['Tell me about Fraud Triage Agent'], ctxFor({}));
-    expect(text).toMatch(/Status: Pending Approval · budget consumed \d+% of \$[\d,]+\/mo/);
+    expect(text).toMatch(/Status: Pending Approval · budget used \d+% of \$[\d,]+\/mo/);
   });
 });

@@ -12,7 +12,7 @@ export function BudgetBar({
   soft,
   hard,
   kill,
-  label = 'Budget consumption',
+  label = 'Budget used',
   na = null,
 }: {
   pctUsed: number;
@@ -20,7 +20,7 @@ export function BudgetBar({
   soft: number;
   hard: number;
   kill: number;
-  /** Accessible label for the progressbar; defaults to 'Budget consumption'. */
+  /** Accessible label for the progressbar; defaults to 'Budget used'. */
   label?: string;
   /** Reason the budget is invalid; the bar then announces N/A, not 0. */
   na?: string | null;
@@ -38,7 +38,7 @@ export function BudgetBar({
       aria-valuenow={na ? undefined : displayPct}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuetext={na ? `N/A (${na})` : `${displayPct}% of budget consumed`}
+      aria-valuetext={na ? `N/A (${na})` : `${displayPct}% of budget used`}
       aria-label={label}
       className="relative h-6 w-full overflow-hidden rounded bg-void"
     >

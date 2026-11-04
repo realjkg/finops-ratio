@@ -1,7 +1,7 @@
 // Executive surface view-model (Ratio v2 Wave 2a). The Initiative Dashboard is a
 // pure projection of the *same* engine the technical Mission Board reads — no new
 // math, no backend change. It re-labels the existing mission view-model into
-// executive vocabulary (Initiative / Budget consumed / Cost efficiency) and adds
+// executive vocabulary (Initiative / Budget used / Cost efficiency) and adds
 // the board-level Spend Summary, all derived from the bundled mock seed.
 //
 // Status mapping (mission → executive):
@@ -45,7 +45,7 @@ export interface InitiativeView {
   name: string;
   // Monthly run-rate cost — the headline number executives read first.
   monthlyCost: number;
-  // Month-to-date budget consumed (actual to date / approved budget, whole
+  // Month-to-date budget used (cost to date / approved budget, whole
   // percent, not clamped) + its threshold color. null = N/A, with the reason.
   budgetConsumedPct: number | null;
   budgetConsumedNa: string | null;

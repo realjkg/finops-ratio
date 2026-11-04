@@ -2,9 +2,12 @@
 // old question keeps its exact text. They are not given the new provenance
 // footer (open decision in DESIGN.md).
 
+import { VOCAB } from '@/lib/vocabulary';
 import type { AIContext, AIResponse } from '../AIClient';
 import { CACHE_HIT_RATE_MATERIAL } from '@/lib/derive';
 import type { EvidenceStatus } from '@/types';
+
+const BUDGET_USED = VOCAB.budgetUsed.label.toLowerCase();
 
 function evidenceNote(status?: EvidenceStatus): string {
   return status ? ` (value evidence: ${status})` : '';
@@ -51,7 +54,7 @@ export function costDriver(ctx: AIContext): AIResponse {
     `The largest cost driver is **${top.name}** at ${formatUSD(top.monthlyCost)}/mo (${top.valueRatio.toFixed(1)}× return${evidenceNote(top.valueEvidenceStatus)} — R4: cost paired with value).`,
     top.status !== 'On Track'
       ? `It is currently **${top.status}** — consider a budget review.`
-      : `Its value ratio justifies the spend; monitor budget consumption (${top.budgetConsumedPct}% consumed this period).`,
+      : `Its value ratio justifies the spend; monitor ${BUDGET_USED} (${top.budgetConsumedPct}% this period).`,
     top.savingsOpportunity > 0 ? `${formatUSD(top.savingsOpportunity)}/mo in savings opportunities are identified for this initiative.` : '',
     cacheLine(top.id, ctx),
   ]

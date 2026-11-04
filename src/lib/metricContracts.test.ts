@@ -1,11 +1,11 @@
-// Metric contracts (pilot P0): 'Budget consumed (%)' is eligible actual
-// period-to-date cost over the approved full-period budget. An invalid
+// Metric contracts (pilot P0): 'Budget used (%)' is eligible period-to-date cost
+// over the approved full-period budget. An invalid
 // denominator or missing evidence is N/A with a reason, never zero.
 import { describe, expect, it } from 'vitest';
 import { budgetConsumed, formatBudgetConsumed, SCENARIO_REDUCTION_LABEL } from './metricContracts';
 
 describe('budgetConsumed', () => {
-  it('divides actual to date by the approved full-period budget', () => {
+  it('divides cost to date by the approved full-period budget', () => {
     expect(budgetConsumed(50, 200)).toEqual({ pct: 25, naReason: null });
     expect(budgetConsumed(250, 200)).toEqual({ pct: 125, naReason: null });
   });
@@ -30,10 +30,10 @@ describe('budgetConsumed', () => {
     expect(budgetConsumed(0.005, 0.01)).toEqual({ pct: 50, naReason: null });
   });
 
-  it.each([Number.NaN, null, undefined])('renders missing actual cost (%s) as N/A with a reason', (actual) => {
+  it.each([Number.NaN, null, undefined])('renders missing cost to date (%s) as N/A with a reason', (actual) => {
     const m = budgetConsumed(actual, 100);
     expect(m.pct).toBeNull();
-    expect(m.naReason).toMatch(/actual cost/i);
+    expect(m.naReason).toMatch(/cost to date/i);
   });
 
   it('formats N/A with its reason and values as whole percents', () => {

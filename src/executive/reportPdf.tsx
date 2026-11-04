@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
 // Column layout: name is widest; the rest share the remaining width evenly.
 const COLS = [
   { key: 'name', label: 'Initiative', width: '20%', align: 'left' as const },
-  { key: 'monthly', label: 'Monthly Cost', width: '12%', align: 'right' as const },
+  { key: 'monthly', label: 'Monthly run rate', width: '12%', align: 'right' as const },
   { key: 'annual', label: 'Annual Run Rate', width: '13%', align: 'right' as const },
   { key: 'budget', label: 'Budget %', width: '9%', align: 'right' as const },
   { key: 'status', label: 'Status', width: '13%', align: 'left' as const },
@@ -139,7 +139,7 @@ export function ReportDocument({ model }: { model: ReportModel }) {
         </Text>
 
         <View style={styles.kpiGrid}>
-          <KpiBox label="AI Spend" value={`${formatUSD(summary.totalMonthlySpend)}/mo`} color={TOKEN.cost} />
+          <KpiBox label="Monthly run rate" value={`${formatUSD(summary.totalMonthlySpend)}/mo`} color={TOKEN.cost} />
           <KpiBox label="Projected Savings" value={formatUSD(summary.projectedSavings)} color={TOKEN.value} />
           <KpiBox label="Initiatives Active" value={String(summary.initiativesActive)} />
           <KpiBox

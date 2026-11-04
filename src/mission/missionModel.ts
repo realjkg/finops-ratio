@@ -33,7 +33,7 @@ export interface MissionView {
   model: string;
   providerLabel: string;
   team: string;
-  // Fuel gauge = daily budget consumed (actual today / approved daily budget).
+  // Fuel gauge = daily budget used (cost today / approved daily budget).
   // `fuelPct` is the whole percent, not clamped; null = N/A with `fuelNa` as the
   // reason. `fuelRatio` is the raw ratio (0 when N/A, so do not display it).
   fuelRatio: number;
@@ -172,7 +172,7 @@ export function buildMissionBoard(
 ): { missions: MissionView[]; fleet: FleetSummary } {
   const missions = workloads.map(w => toMissionView(w, context));
 
-  // Fleet fuel = aggregate daily budget consumed across the fleet, matching the
+  // Fleet fuel = aggregate daily budget used across the fleet, matching the
   // per-mission daily fuel gauge.
   const totalSpentToday = missions.reduce((sum, m) => sum + m.spentToday, 0);
   const totalDailyBudget = missions.reduce((sum, m) => sum + m.dailyBudget, 0);

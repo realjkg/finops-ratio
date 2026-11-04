@@ -46,7 +46,7 @@ export function budgetCellText(r: Pick<ReportRow, 'budgetConsumedPct'>): string 
 
 /** One footnote per N/A budget row, so the reason is never lost. */
 export function budgetNaFootnotes(rows: ReportRow[]): string[] {
-  return rows.filter((r) => r.budgetConsumedPct === null).map((r) => `${r.name}: Budget consumed N/A (${r.budgetConsumedNa})`);
+  return rows.filter((r) => r.budgetConsumedPct === null).map((r) => `${r.name}: Budget used N/A (${r.budgetConsumedNa})`);
 }
 
 export function buildReportModel(

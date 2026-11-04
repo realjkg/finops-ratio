@@ -15,7 +15,7 @@ interface Metric {
 
 export function SpendSummaryBar({ summary }: { summary: SpendSummary }) {
   const metrics: Metric[] = [
-    { label: 'AI spend', value: `${formatUSD(summary.totalMonthlySpend, { compact: true })}/mo` },
+    { label: 'AI monthly run rate', value: `${formatUSD(summary.totalMonthlySpend, { compact: true })}/mo` },
     {
       label: 'Projected savings',
       value: formatUSD(summary.projectedSavings, { compact: true }),

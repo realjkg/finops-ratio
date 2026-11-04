@@ -1,5 +1,6 @@
 // ROI, team ranking, scoped cost drivers and scoped savings.
 
+import { VOCAB } from '@/lib/vocabulary';
 import { MODEL_QUALITY_NOTE } from '@/data/models';
 import { findModel } from '@/data/models';
 import { REALIZED_LINE, T, capRows, contextLine, ladder, short, workloadRow } from './answerKit';
@@ -9,6 +10,8 @@ import {
 } from './calc';
 import { evid, pct1, price, returnText, roiLine, signedPct1, usd, x } from './format';
 import type { Answer, Scope, World, WorkloadFacts } from './types';
+
+const BUDGET_USED = VOCAB.budgetUsed.label.toLowerCase();
 
 const ids = (ws: WorkloadFacts[]): string[] => ws.map((w) => w.id);
 
@@ -42,7 +45,7 @@ export function roiAnswer(world: World, scope: Scope): Answer {
     body.push(
       `Team: ${w.team ?? 'not in this context'} · model: ${w.model ?? 'unknown'}${w.provider ? ` (${w.provider})` : ''}` +
         (w.status ? ` · status: ${w.status}` : '') +
-        (w.budgetConsumedPct !== null ? ` · budget consumed: ${w.budgetConsumedPct}%` : ''),
+        (w.budgetConsumedPct !== null ? ` · ${BUDGET_USED}: ${w.budgetConsumedPct}%` : ''),
     );
   }
   if (scope.kind === 'model' && members.length > 0) {
@@ -126,7 +129,7 @@ export function costDriverAnswer(world: World, scope: Scope): Answer {
   if (top) {
     body.push(
       `Largest: ${top.name} at ${usd(top.monthlySpend)}/mo (${returnText(top.ratio)}${evid(top.evidence)})` +
-        (top.budgetConsumedPct !== null ? `; ${top.budgetConsumedPct}% of budget consumed` : '') +
+        (top.budgetConsumedPct !== null ? `; ${top.budgetConsumedPct}% of budget (${BUDGET_USED})` : '') +
         (top.costTrendPct !== null ? `; MoM trend ${signedPct1(top.costTrendPct)}` : '') +
         '.',
     );

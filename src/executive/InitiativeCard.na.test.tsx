@@ -13,7 +13,7 @@ const render = (budget: number) =>
     <InitiativeCard initiative={toInitiativeView({ ...w, costs: { ...w.costs, monthly_budget: budget } })} lang={languageFor('executive')} showLens={false} />,
   );
 
-describe('InitiativeCard budget consumed', () => {
+describe('InitiativeCard budget used', () => {
   it('shows N/A with the reason when the approved budget is invalid', () => {
     const html = render(0);
     expect(html).toMatch(/text-exec-text">N\/A<\/span>/);

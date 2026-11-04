@@ -22,7 +22,7 @@ export function KpiCards({ workload }: { workload: Workload }) {
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <Card
-        label="Value / mo"
+        label="Business value / mo"
         value={formatUSD(workload.value.total_value, { compact: true })}
         accent="var(--value)"
         note={formatReturn(workload.value.value_ratio)}
@@ -30,7 +30,7 @@ export function KpiCards({ workload }: { workload: Workload }) {
         evidenceStatus={valueEvidence}
       />
       <Card
-        label="Spend / mo"
+        label="Monthly run rate"
         value={formatUSD(workload.costs.monthly_spend, { compact: true })}
         accent="var(--cost)"
         note={`${formatSignedPct(workload.cost_trend_pct, 1)} MoM`}

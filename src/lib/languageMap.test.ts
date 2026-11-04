@@ -38,7 +38,7 @@ describe('language map', () => {
     expect(LANGUAGE_MAP.executive).toEqual({
       boardTitle: 'Initiative Dashboard',
       itemLabel: 'Initiative',
-      fuelLabel: 'Budget consumed',
+      fuelLabel: 'Budget used',
       trajectoryLabel: 'Forecast',
       gateLabel: 'Approval Required',
       adjustmentLabel: 'Proposed change',

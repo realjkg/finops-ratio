@@ -50,7 +50,7 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
         </p>
       </div>
 
-      {/* Budget consumed bar */}
+      {/* Budget used bar */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-xs">
           <span className="font-medium text-exec-muted">{lang.fuelLabel} · month to date</span>
@@ -98,7 +98,7 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
 // The line-manager reading only appears when a decision is actually pending.
 function MatrixedLens({ initiative }: { initiative: InitiativeView }) {
   const rows: { role: string; reading: string }[] = [
-    { role: 'CFO', reading: 'Monthly cost · savings opportunity' },
+    { role: 'CFO', reading: 'Monthly run rate · savings opportunity' },
     { role: 'VP Platform', reading: 'Initiative status · budget variance' },
   ];
   if (initiative.status === 'pending_approval') {

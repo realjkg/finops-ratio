@@ -7,14 +7,18 @@
 import ExcelJS from 'exceljs';
 import { COST_CATEGORIES } from '@/outcomes/types';
 import { monetaryBenefit } from '@/outcomes/model';
+import { VOCAB } from '@/lib/vocabulary';
 import { buildReportModel, type ReportRow, type ReportModel } from './reportModel';
 
 // Exact, user-approved column order. Exported so tests assert the header row.
+// Header text for the two measures below comes from the shared cost vocabulary.
+const COL_MONTHLY = `${VOCAB.monthlyRunRate.label} ($)` as 'Monthly run rate ($)';
+const COL_BUDGET_USED = `${VOCAB.budgetUsed.label} (%)` as 'Budget used (%)';
 export const REPORT_COLUMNS = [
   'Initiative Name',
-  'Monthly Cost ($)',
+  COL_MONTHLY,
   'Annual Run Rate ($)',
-  'Budget Consumed (%)',
+  COL_BUDGET_USED,
   'Status',
   'Cost Efficiency Score',
   'Savings Opportunity ($)',
@@ -26,9 +30,9 @@ type ReportRecord = Record<(typeof REPORT_COLUMNS)[number], string | number>;
 function toRecord(row: ReportRow): ReportRecord {
   return {
     'Initiative Name': row.name,
-    'Monthly Cost ($)': row.monthlyCost,
+    [COL_MONTHLY]: row.monthlyCost,
     'Annual Run Rate ($)': row.annualRunRate,
-    'Budget Consumed (%)': row.budgetConsumedPct ?? `N/A (${row.budgetConsumedNa})`,
+    [COL_BUDGET_USED]: row.budgetConsumedPct ?? `N/A (${row.budgetConsumedNa})`,
     Status: row.status,
     'Cost Efficiency Score': Number(row.costEfficiency.toFixed(1)),
     'Savings Opportunity ($)': row.savingsOpportunity,

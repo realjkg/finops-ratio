@@ -11,7 +11,7 @@ const na = (naReason: string): PctMetric => ({ pct: null, naReason });
 const usable = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 
 /**
- * 'Budget consumed (%)' = eligible actual period-to-date cost divided by the
+ * 'Budget used (%)' = eligible period-to-date cost (on the stated cost basis) divided by the
  * approved full-period budget. Not clamped: 125 means 25% over budget.
  * A budget that is missing, non-finite or not positive, or a missing actual,
  * is N/A with a reason. A real zero spend against a valid budget is 0.
@@ -19,7 +19,7 @@ const usable = (n: unknown): n is number => typeof n === 'number' && Number.isFi
 export function budgetConsumed(actualToDate: number | null | undefined, approvedBudget: number | null | undefined): PctMetric {
   if (!usable(approvedBudget) || approvedBudget <= 0) return na('No valid approved budget for the period');
   if (approvedBudget < 0.01) return na('Approved budget below $0.01');
-  if (!usable(actualToDate)) return na('Actual cost to date is missing');
+  if (!usable(actualToDate)) return na('Cost to date is missing');
   return { pct: (actualToDate / approvedBudget) * 100, naReason: null };
 }
 

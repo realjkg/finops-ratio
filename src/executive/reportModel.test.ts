@@ -54,7 +54,7 @@ describe('report view-model', () => {
     }
   });
 
-  it('keeps budget consumed non-negative, with N/A carried as null plus a reason', () => {
+  it('keeps budget used non-negative, with N/A carried as null plus a reason', () => {
     for (const row of model.rows) {
       expect(row.budgetConsumedPct).toBeGreaterThanOrEqual(0);
       expect(row.budgetConsumedNa).toBeNull();
@@ -71,9 +71,9 @@ describe('report workbook', () => {
   it('exposes exactly the eight user-approved columns, in order', () => {
     expect(REPORT_COLUMNS).toEqual([
       'Initiative Name',
-      'Monthly Cost ($)',
+      'Monthly run rate ($)',
       'Annual Run Rate ($)',
-      'Budget Consumed (%)',
+      'Budget used (%)',
       'Status',
       'Cost Efficiency Score',
       'Savings Opportunity ($)',

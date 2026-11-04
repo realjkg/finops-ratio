@@ -27,7 +27,7 @@ export function MissionCard({ mission, onOpen }: MissionCardProps) {
     <button
       type="button"
       onClick={onOpen}
-      aria-label={`Open ${mission.name} workload detail — ${meta.label}, ${mission.fuelPct === null ? 'budget consumed N/A' : `${mission.fuelPct}% budget consumed`}, value ratio ${mission.valueRatio.toFixed(1)}x`}
+      aria-label={`Open ${mission.name} workload detail — ${meta.label}, ${mission.fuelPct === null ? 'budget used N/A' : `${mission.fuelPct}% budget used`}, value ratio ${mission.valueRatio.toFixed(1)}x`}
       data-mission-id={mission.id}
       className="flex w-full flex-col gap-4 rounded-card border border-edge bg-slab p-5 text-left transition-colors hover:bg-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-gate"
       style={{ borderLeft: `2px solid ${meta.color}` }}
