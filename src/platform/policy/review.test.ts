@@ -108,7 +108,7 @@ describe('L4 compiled bundles, L5 one read of the input, P7 hostile inputs', () 
     const cyc: Record<string, unknown> = {}; cyc.self = cyc;
     const proxy = new Proxy({}, { get() { throw new Error('proxy'); }, ownKeys() { throw new Error('keys'); } });
     const cases = [undefined, 42, proxy, { ...input(), context: proxy }, { ...input(), bundle: proxy }, { ...input(), clock: proxy }, { ...input(), context: { ...ctx(), teamIds: [cyc] } },
-      { ...input(), context: { ...ctx(), teamIds: [10n] } }, { ...input(), context: { ...ctx(), inputBytes: NaN } }, { ...input(), clock: { now: NOW, elapsedMicros: () => NaN } },
+      { ...input(), context: { ...ctx(), teamIds: [BigInt(10)] } }, { ...input(), context: { ...ctx(), inputBytes: NaN } }, { ...input(), clock: { now: NOW, elapsedMicros: () => NaN } },
       { ...input(), bundle: { ...bundle(), policies: [cyc] } }, { ...input({ bundle: bundle({ notAfter: '2026-10-02T00:00:00Z' }) }), lastKnownGood: proxy }];
     for (const c of cases) for (const e of [evaluate(c as never), failureEvaluation(c as never, 'timeout')]) {
       expect(e.verdict).toBe('block');

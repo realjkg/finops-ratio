@@ -85,7 +85,7 @@ function deniedByOracle(i: EvaluationInput): boolean {
   const c = i.context as RequestContext;
   const subject = (e: Entitlement) => ({ tenant: e.subjectRef === c.tenantId, team: (c.teamIds ?? []).includes(e.subjectRef), user: c.actorType === 'human' && c.actorRef === e.subjectRef,
     workload: c.workloadId === e.subjectRef, service: c.actorType === 'service' && c.actorRef === e.subjectRef })[e.subjectKind];
-  return (i.bundle as { entitlements: Entitlement[] }).entitlements.some((e) => e.effect === 'deny' && e.provider === c.provider && (e.models.includes('*') || e.models.includes(c.modelRequested))
+  return (i.bundle as { entitlements: Entitlement[] }).entitlements.some((e) => e.effect === 'deny' && e.provider === c.provider && (e.models.includes('*') || (c.modelRequested !== undefined && e.models.includes(c.modelRequested)))
     && e.effectiveFrom <= NOW.slice(0, 10) && (e.effectiveTo === undefined || NOW.slice(0, 10) < e.effectiveTo) && subject(e));
 }
 const worst = (ds: PolicyDecision[]) => ds.filter((d) => d.enforced).reduce<keyof typeof SEVERITY>((a, d) => (SEVERITY[d.outcome] > SEVERITY[a] ? d.outcome : a), 'allow');
