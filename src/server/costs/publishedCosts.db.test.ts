@@ -649,22 +649,32 @@ describe('D12 a pooled reader client keeps a flat listener count across requests
 // reaching pg), it is destroyed rather than pooled, and the next request gets
 // a fresh connection.
 describe('D14 a reader backend terminated mid-request is destroyed at once (Copilot 4176969214)', () => {
-  /** Holds ratio.cost_facts so a reader query waits; returns the waiting reader backend's pid. */
-  async function lockAndFindWaiter(locker: PoolClient): Promise<number> {
+  /**
+   * Holds ratio.cost_facts FIRST, then issues the reader request, so the reader always waits on the lock (issuing the
+   * request before the lock let a fast reader finish first: "no reader backend waiting on the lock"). Returns the waiting
+   * reader backend's pid and the pending request.
+   */
+  async function lockThenStart<T>(locker: PoolClient, start: () => Promise<T>): Promise<{ pid: number; pending: Promise<T> }> {
     await locker.query('BEGIN');
     await locker.query('LOCK TABLE ratio.cost_facts IN ACCESS EXCLUSIVE MODE');
-    return waiterPid();
+    const pending = start();
+    pending.catch(() => undefined); // the caller awaits it; never an unhandled rejection while polling
+    return { pid: await waiterPid(pending), pending };
   }
-  async function waiterPid(): Promise<number> {
-    for (let i = 0; i < 80; i += 1) {
+  /** Polls up to 10 s for the reader backend waiting on the lock; fails at once if the request settled without waiting. */
+  async function waiterPid(pending: Promise<unknown>): Promise<number> {
+    let settled = false;
+    pending.then(() => { settled = true; }, () => { settled = true; });
+    for (let i = 0; i < 400; i += 1) {
       const r = await db.pool.query(
         `SELECT pid FROM pg_catalog.pg_stat_activity WHERE usename = $1 AND datname = current_database() AND wait_event_type = 'Lock'`,
         [reader.name],
       );
       if (r.rows[0]?.pid) return r.rows[0].pid as number;
+      if (settled) throw new Error('the reader request settled without waiting on the lock');
       await new Promise((r2) => setTimeout(r2, 25));
     }
-    throw new Error('no reader backend waiting on the lock');
+    throw new Error('no reader backend waiting on the lock after 10 s');
   }
 
   it('the lock is held before the reader request is issued, so a fast reader cannot finish first (flake: "no reader backend waiting on the lock")', async () => {
@@ -695,7 +705,7 @@ describe('D14 a reader backend terminated mid-request is destroyed at once (Copi
     let failure: unknown;
     let rollback: unknown = 'not attempted';
     try {
-      const reading = readWithDeadline(pool, async (p) => {
+      const { pid, pending: reading } = await lockThenStart(locker, () => readWithDeadline(pool, async (p) => {
         const client = await p.connect();
         try {
           await client.query('BEGIN');
@@ -710,12 +720,11 @@ describe('D14 a reader backend terminated mid-request is destroyed at once (Copi
         } finally {
           client.release();
         }
-      }, 20_000);
+      }, 20_000));
       const settled = reading.then(
         () => 'resolved',
         (e: unknown) => e,
       );
-      const pid = await lockAndFindWaiter(locker);
       await db.pool.query('SELECT pg_catalog.pg_terminate_backend($1)', [pid]);
       expect(await settled).toBe(failure);
       expect(failure).toBeInstanceOf(DatabaseError);
@@ -741,8 +750,7 @@ describe('D14 a reader backend terminated mid-request is destroyed at once (Copi
     const locker = await db.pool.connect();
     try {
       expect((await req()).statusCode).toBe(200);
-      const pending = req();
-      const pid = await lockAndFindWaiter(locker);
+      const { pid, pending } = await lockThenStart(locker, req);
       await db.pool.query('SELECT pg_catalog.pg_terminate_backend($1)', [pid]);
       expect((await pending).statusCode).toBe(500);
       await locker.query('ROLLBACK');
