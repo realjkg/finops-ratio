@@ -106,3 +106,9 @@ Mutation check (one mutation at a time, npx vitest run src/platform/policy; KILL
   M18 KILLED   unreadable bundle decided in the access mode (monitor fails open)  <- an unreadable bundle is one enforced, denied decision under a placeholder id
   M19 KILLED   content key accepted in the request context  <- refuses a content key: block, no decision, no echoed value
   19/19 killed
+
+CodeQL round (PR #183, alert "Incomplete string escaping or encoding", high, evaluate.ts:153): problem paths were re-rooted with
+String.replace('$', ...), which CodeQL reads as incomplete escaping. The rewrite is intentional (only the leading root '$' of each
+problem path), now written as a prefix slice. Added guard test (passes before and after; behavior unchanged):
+  ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > names a refused context key under $.context (each problem path is re-rooted once)
+  Tests  75 passed (75)
