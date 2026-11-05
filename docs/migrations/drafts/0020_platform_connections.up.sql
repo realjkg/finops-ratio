@@ -6,12 +6,17 @@
 -- separate PR: move both files to src/ingest/db/migrations, mark 0020 merged in the ledger, add the generated
 -- foundation manifest and the reviewed privileges (src/ingest/db/privilegeModel.ts).
 --
---   * ratio.platform_connections: one row per (tenant, connection). The connector-declaration/1 document, the M0a
---     managed state (src/connectors/managed/health.ts ConnectorState) and the ladder step it maps to
---     (LADDER_FROM_MANAGED_STATE: configured, authorized, retrieved, validated, reconciled; the off-ladder states
---     not-configured, degraded, failed and simulated have no step), and the declaration's verification status.
---   * ratio.platform_evidence_refs: append-only references to the evidence behind a step (kind, locator, sha256).
---     The worker may insert and read them, never update or delete.
+--   * ratio.platform_connections: one row per (tenant, connection). The connector-declaration/1 document (which
+--     never claims verification: that is derived from evidence), the latest M0a managed state
+--     (src/connectors/managed/health.ts ConnectorState) with its observation time, the latest degraded or failed
+--     observation, and managed_ladder_step: the step LADDER_FROM_MANAGED_STATE maps the state to (configured,
+--     authorized, retrieved, validated, reconciled; none for not-configured, degraded, failed, simulated). That step
+--     is M0a's claim, NOT evidence-gated. A reader never sees it directly: a future read API exposes only the
+--     evidence-gated step (owner default: a definer-rights view computing it from platform_evidence_refs recorded
+--     after last_degraded_at), as src/ingest/platform/connections.ts does.
+--   * ratio.platform_evidence_refs: append-only references to the evidence behind a step (kind, locator, sha256)
+--     and the observation they support (observed_at, observed_state). UPDATE, DELETE and TRUNCATE are refused for
+--     every role by triggers; the foreign key restricts deleting or renaming a connection that has evidence.
 --
 -- Invariants of 0001 kept: every row has tenant_id uuid NOT NULL and a schema_version; every foreign key includes
 -- tenant_id; RLS is enabled and forced with the reviewed tenant_isolation shape; text and JSON refuse secret-looking
@@ -30,10 +35,11 @@ CREATE TABLE ratio.platform_connections (
                     AND declaration ->> 'schemaVersion' = schema_version
                     AND declaration ->> 'connectorId' = connector_id
                     AND declaration ->> 'category' = category
+                    AND declaration #>> '{verification,status}' = 'not_verified'
                     AND NOT ratio.jsonb_has_secret_like_value(declaration)
                   ),
   managed_state   text NOT NULL CHECK (managed_state IN ('not-configured', 'configured-not-verified', 'auth-verified', 'source-access-verified', 'extraction-completed', 'mapping-validated', 'reconciliation-passed', 'live-verified', 'degraded', 'failed', 'simulated')),
-  ladder_step     text CHECK (ladder_step IS NOT DISTINCT FROM CASE managed_state
+  managed_ladder_step text CHECK (managed_ladder_step IS NOT DISTINCT FROM CASE managed_state
                     WHEN 'configured-not-verified' THEN 'configured'
                     WHEN 'auth-verified' THEN 'authorized'
                     WHEN 'source-access-verified' THEN 'authorized'
@@ -42,7 +48,8 @@ CREATE TABLE ratio.platform_connections (
                     WHEN 'reconciliation-passed' THEN 'reconciled'
                     WHEN 'live-verified' THEN 'reconciled'
                   END),
-  verification    text NOT NULL CHECK (verification IN ('not_verified', 'pre_release_validated', 'live_verified')),
+  observed_at     timestamptz,
+  last_degraded_at timestamptz CHECK (last_degraded_at IS NULL OR last_degraded_at <= observed_at),
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, connection_id)
@@ -56,9 +63,11 @@ CREATE TABLE ratio.platform_evidence_refs (
   kind           text NOT NULL CHECK (kind IN ('health_probe', 'sync_run', 'mapping_validation', 'reconciliation', 'connector_evidence_record')),
   locator        text NOT NULL CHECK (locator ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$' AND NOT ratio.text_looks_secret(locator)),
   sha256         text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+  observed_at    timestamptz NOT NULL,
+  observed_state text NOT NULL CHECK (observed_state IN ('configured-not-verified', 'auth-verified', 'source-access-verified', 'extraction-completed', 'mapping-validated', 'reconciliation-passed', 'live-verified')),
   recorded_at    timestamptz NOT NULL,
   PRIMARY KEY (tenant_id, ref_id),
-  FOREIGN KEY (tenant_id, connection_id) REFERENCES ratio.platform_connections (tenant_id, connection_id)
+  FOREIGN KEY (tenant_id, connection_id) REFERENCES ratio.platform_connections (tenant_id, connection_id) ON UPDATE RESTRICT ON DELETE RESTRICT
 );
 CREATE INDEX platform_evidence_refs_by_connection ON ratio.platform_evidence_refs (tenant_id, connection_id);
 
@@ -72,6 +81,27 @@ ALTER TABLE ratio.platform_evidence_refs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ratio.platform_evidence_refs FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON ratio.platform_evidence_refs
   USING (tenant_id = ratio.current_tenant_id()) WITH CHECK (tenant_id = ratio.current_tenant_id());
+
+-- Evidence is append-only for every role, including the owner and superusers (unless triggers are disabled).
+-- ratio:allow-function append-only guard for platform evidence refs (UPDATE and DELETE refused)
+CREATE FUNCTION ratio.tg_platform_evidence_append_only() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+AS $fn$
+BEGIN
+  RAISE EXCEPTION USING ERRCODE = 'RT001', MESSAGE = format('%s of ratio.%s is refused: evidence refs are append-only', TG_OP, TG_TABLE_NAME);
+END
+$fn$;
+-- ratio:allow-function attaches the append-only guard
+CREATE TRIGGER append_only BEFORE UPDATE OR DELETE ON ratio.platform_evidence_refs
+  FOR EACH ROW EXECUTE FUNCTION ratio.tg_platform_evidence_append_only();
+-- ratio:allow-function attaches the refuse_truncate guard
+CREATE TRIGGER refuse_truncate BEFORE TRUNCATE ON ratio.platform_evidence_refs
+  FOR EACH STATEMENT EXECUTE FUNCTION ratio.tg_refuse_truncate();
+-- ratio:allow-function attaches the refuse_truncate guard
+CREATE TRIGGER refuse_truncate BEFORE TRUNCATE ON ratio.platform_connections
+  FOR EACH STATEMENT EXECUTE FUNCTION ratio.tg_refuse_truncate();
+REVOKE EXECUTE ON FUNCTION ratio.tg_platform_evidence_append_only() FROM PUBLIC;
 
 -- The worker owns all writes; evidence refs are append-only (no UPDATE or DELETE). No reader grant until a read API
 -- slice reviews one.

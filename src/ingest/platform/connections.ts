@@ -3,12 +3,14 @@
 // connectorState() derives from health probes, sync runs and evidence records, and its step on the owner's ladder
 // (Configured -> Authorized -> Retrieved -> Validated -> Reconciled) is LADDER_FROM_MANAGED_STATE. Two rules on top:
 // a step counts only when evidence refs cover it and every step before it (evidence before claims), and live
-// verification is a separate flag that needs the M0a live state AND a connector evidence record (M0b). The ladder is
-// never collapsed into "Connected". Every call names the tenant; the registry opens only when the owner enabled the
-// platform economics capability (D7). Storage is an interface: in memory here; Postgres after draft 0020 is promoted.
+// verification is a separate flag that needs the M0a live state AND a connector evidence record (M0b). Evidence names
+// the observation it supports, and a later degraded or failed observation makes it stale, so after recovery the ladder
+// is rebuilt from new evidence only. A declaration never claims verification; it is derived from evidence. Never
+// "Connected". The registry is opened for the config's (trusted) tenant, and only when the owner enabled the platform
+// economics capability (D7). Storage is an interface: in memory here; Postgres after draft 0020 is promoted.
 import { connectorState, type ConnectorState } from '../../connectors/managed/health';
 import { CONNECTION_LADDER, LADDER_FROM_MANAGED_STATE, validateConnectorDeclaration, type ConnectorDeclaration, type LadderStep } from '../../platform/contracts/connector';
-import { isIsoInstant, isSha256Hex } from '../../platform/contracts/validate';
+import { instantBefore, isIsoInstant, isSha256Hex } from '../../platform/contracts/validate';
 import { requireCapability, type PlatformFlags } from '../../platform/flags';
 
 /** Storage record version of an evidence ref (the draft 0020 `schema_version` column). */
@@ -27,6 +29,9 @@ export interface EvidenceRef {
   /** Evidence store key or repository path: an identifier, never a URL with credentials. */
   locator: string;
   sha256: string;
+  /** The M0a observation this evidence supports: its time and the state observed then (on the ladder). */
+  observedAt: string;
+  observedState: ConnectorState;
   recordedAt: string;
 }
 
@@ -67,7 +72,10 @@ export class ConnectionError extends Error {
 const TENANT_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/; // canonical lowercase, as R1 normalizes
 const CONNECTION_ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const LOCATOR_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$/; // the contracts' id rule: no '@', so no URL userinfo
-const REF_KEYS = ['tenantId', 'connectionId', 'refId', 'kind', 'locator', 'sha256', 'recordedAt'];
+const REF_KEYS = ['tenantId', 'connectionId', 'refId', 'kind', 'locator', 'sha256', 'observedAt', 'observedState', 'recordedAt'];
+const DEGRADED: readonly ConnectorState[] = ['degraded', 'failed'];
+const sameInstant = (a: string, b: string) => !instantBefore(a, b) && !instantBefore(b, a);
+const onLadder = (s: unknown): s is ConnectorState => typeof s === 'string' && Object.hasOwn(LADDER_FROM_MANAGED_STATE, s) && LADDER_FROM_MANAGED_STATE[s as ConnectorState] !== null;
 
 /** Problems of an evidence ref, by key, never by value. */
 export function evidenceRefProblems(r: unknown): string[] {
@@ -82,11 +90,17 @@ export function evidenceRefProblems(r: unknown): string[] {
   check('kind', typeof o.kind === 'string' && Object.prototype.hasOwnProperty.call(EVIDENCE_KINDS, o.kind), `one of ${Object.keys(EVIDENCE_KINDS).join('|')}`);
   check('locator', str('locator', LOCATOR_RE), 'evidence store key or repository path');
   check('sha256', isSha256Hex(o.sha256), 'sha256 hex');
+  check('observedAt', isIsoInstant(o.observedAt), 'UTC instant ending in Z');
+  check('observedState', onLadder(o.observedState), 'an M0a state on the ladder');
   check('recordedAt', isIsoInstant(o.recordedAt), 'UTC instant ending in Z');
   return p;
 }
 
-export interface Connection { tenantId: string; connectionId: string; declaration: ConnectorDeclaration; managedState: ConnectorState }
+export interface Connection {
+  tenantId: string; connectionId: string; declaration: ConnectorDeclaration; managedState: ConnectorState;
+  /** The latest M0a observation, and the latest degraded or failed one (null when none yet). */
+  observedAt: string | null; lastDegradedAt: string | null;
+}
 /** Every method is scoped by tenant; an implementation never returns another tenant's rows. */
 export interface ConnectionStore {
   get(tenantId: string, connectionId: string): Connection | undefined;
@@ -115,65 +129,79 @@ export interface ConnectionStatus {
   connectionId: string;
   connectorId: string;
   category: ConnectorDeclaration['category'];
-  /** The declaration's own verification status (connector-declaration/1). */
-  verification: ConnectorDeclaration['verification']['status'];
+  /** Derived from evidence only, never from the declaration. */
+  verification: 'not_verified' | 'live_verified';
+  observedAt: string | null;
   ladder: LadderView;
+  /** Every ref (append-only); those recorded before the latest degradation are stale and never counted. */
   evidence: EvidenceRef[];
+  staleEvidence: number;
 }
 
 export interface ConnectionsRegistry {
-  register(tenantId: string, connectionId: string, declaration: unknown): ConnectionStatus;
-  /** Records the M0a observation (connectorState() inputs) as the connection's managed state. */
-  observe(tenantId: string, connectionId: string, input: Parameters<typeof connectorState>[0]): ConnectionStatus;
-  attachEvidence(tenantId: string, ref: EvidenceRef): ConnectionStatus;
-  status(tenantId: string, connectionId: string): ConnectionStatus;
-  list(tenantId: string): ConnectionStatus[];
+  readonly tenantId: string;
+  register(connectionId: string, declaration: unknown): ConnectionStatus;
+  /** Records an M0a observation (connectorState() inputs) at `observedAt`; observations never go back in time. */
+  observe(connectionId: string, input: Parameters<typeof connectorState>[0], observedAt: string): ConnectionStatus;
+  /** Evidence for the latest observation, in a state that supports the step its kind proves. */
+  attachEvidence(ref: EvidenceRef): ConnectionStatus;
+  status(connectionId: string): ConnectionStatus;
+  list(): ConnectionStatus[];
 }
 
-export function openConnectionsRegistry(flags: PlatformFlags | undefined, store: ConnectionStore): ConnectionsRegistry {
-  requireCapability(flags, 'economics');
-  const tenant = (t: string) => { if (typeof t !== 'string' || !TENANT_RE.test(t)) throw new ConnectionError('TENANT_INVALID', 'expected a canonical lowercase tenant UUID'); };
-  const found = (t: string, id: string) => {
-    tenant(t);
+/** Opens the registry for the config's tenant (trusted: R1 validated it at startup); callers never pass a tenant. */
+export function openConnectionsRegistry(config: { tenantId: string; platform?: PlatformFlags }, store: ConnectionStore): ConnectionsRegistry {
+  requireCapability(config.platform, 'economics');
+  const t = config.tenantId;
+  if (typeof t !== 'string' || !TENANT_RE.test(t)) throw new ConnectionError('TENANT_INVALID', 'expected a canonical lowercase tenant UUID');
+  const found = (id: string) => {
     const c = store.get(t, id);
     if (!c) throw new ConnectionError('NOT_FOUND', 'no such connection for this tenant');
     return c;
   };
   const view = (c: Connection): ConnectionStatus => {
-    const evidence = store.refs(c.tenantId, c.connectionId);
-    return { tenantId: c.tenantId, connectionId: c.connectionId, connectorId: c.declaration.connectorId, category: c.declaration.category,
-      verification: c.declaration.verification.status, ladder: ladderView(c.managedState, evidence), evidence };
+    const evidence = store.refs(t, c.connectionId);
+    const fresh = evidence.filter((r) => c.lastDegradedAt === null || instantBefore(c.lastDegradedAt, r.observedAt));
+    const ladder = ladderView(c.managedState, fresh);
+    return { tenantId: t, connectionId: c.connectionId, connectorId: c.declaration.connectorId, category: c.declaration.category,
+      verification: ladder.liveVerified ? 'live_verified' : 'not_verified', observedAt: c.observedAt, ladder, evidence, staleEvidence: evidence.length - fresh.length };
   };
   return {
-    register(t, id, declaration) {
-      tenant(t);
+    tenantId: t,
+    register(id, declaration) {
       if (typeof id !== 'string' || !CONNECTION_ID_RE.test(id)) throw new ConnectionError('CONNECTION_ID_INVALID', 'connection id must match [a-z0-9][a-z0-9-]*');
       const d = validateConnectorDeclaration(declaration);
       if (!d.ok) throw new ConnectionError('DECLARATION_INVALID', d.problems.slice(0, 5).join('; '));
+      if (d.value.verification.status !== 'not_verified') throw new ConnectionError('DECLARATION_OVERCLAIMS', 'verification comes from evidence, never from a declaration');
       if (store.get(t, id)) throw new ConnectionError('DUPLICATE_CONNECTION', 'this tenant already has a connection with this id');
-      const c: Connection = { tenantId: t, connectionId: id, declaration: d.value, managedState: connectorState({ configured: true }) };
+      const c: Connection = { tenantId: t, connectionId: id, declaration: d.value, managedState: connectorState({ configured: true }), observedAt: null, lastDegradedAt: null };
       store.put(c);
       return view(c);
     },
-    observe(t, id, input) {
-      const c = { ...found(t, id), managedState: connectorState(input) };
+    observe(id, input, observedAt) {
+      const prev = found(id);
+      if (!isIsoInstant(observedAt)) throw new ConnectionError('OBSERVATION_INVALID', 'observedAt must be a UTC instant ending in Z');
+      if (prev.observedAt !== null && instantBefore(observedAt, prev.observedAt)) throw new ConnectionError('OBSERVATION_OUT_OF_ORDER', 'an observation is never older than the latest one');
+      const managedState = connectorState(input);
+      const c = { ...prev, managedState, observedAt, lastDegradedAt: DEGRADED.includes(managedState) ? observedAt : prev.lastDegradedAt };
       store.put(c);
       return view(c);
     },
-    attachEvidence(t, ref) {
-      tenant(t);
+    attachEvidence(ref) {
       const problems = evidenceRefProblems(ref);
       if (problems.length) throw new ConnectionError('EVIDENCE_INVALID', problems.join('; '));
       if (ref.tenantId !== t) throw new ConnectionError('TENANT_MISMATCH', 'the evidence ref names another tenant');
-      const c = found(t, ref.connectionId);
+      const c = found(ref.connectionId);
+      if (c.observedAt === null || !sameInstant(ref.observedAt, c.observedAt) || ref.observedState !== c.managedState) {
+        throw new ConnectionError('OBSERVATION_MISMATCH', 'evidence must reference the latest observation (time and state)');
+      }
+      const proves = CONNECTION_LADDER.indexOf(EVIDENCE_KINDS[ref.kind]);
+      if (proves > CONNECTION_LADDER.indexOf(LADDER_FROM_MANAGED_STATE[ref.observedState]!)) throw new ConnectionError('EVIDENCE_STATE_MISMATCH', 'the observed state does not reach the step this evidence proves');
       if (store.refs(t, ref.connectionId).some((r) => r.refId === ref.refId)) throw new ConnectionError('DUPLICATE_EVIDENCE', 'this evidence ref is already attached');
       store.addRef({ ...ref });
       return view(c);
     },
-    status: (t, id) => view(found(t, id)),
-    list(t) {
-      tenant(t);
-      return store.list(t).map(view);
-    },
+    status: (id) => view(found(id)),
+    list: () => store.list(t).map(view),
   };
 }

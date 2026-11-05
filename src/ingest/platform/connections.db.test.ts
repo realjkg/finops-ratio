@@ -132,21 +132,27 @@ describe('draft 0020 on Postgres: tenant isolation (RLS)', () => {
     expect(await attempt(c, CONN, [A, 'c7', 'provider-a-usage-file', decl(), 'degraded', null])).toMatchObject({ ok: true });
     expect(await attempt(c, CONN, [A, 'c8', 'provider-a-usage-file', decl(), 'live-verified', 'reconciled'])).toMatchObject({ ok: true });
   }));
-  it('against the reviewed privilege model, the only deviations are the five worker grants that promotion must review', () => inDraft(async (c) => {
+  it('against the reviewed privilege model, the only deviations are the five worker grants and three triggers that promotion must review', () => inDraft(async (c) => {
     const FIVE = ['platform_connections:INSERT', 'platform_connections:SELECT', 'platform_connections:UPDATE', 'platform_evidence_refs:INSERT', 'platform_evidence_refs:SELECT'];
+    const TRIGGERS = ['platform_connections:refuse_truncate:ratio.tg_refuse_truncate()', 'platform_evidence_refs:append_only:ratio.tg_platform_evidence_append_only()', 'platform_evidence_refs:refuse_truncate:ratio.tg_refuse_truncate()'];
     const v = await privilegeModelViolations(c);
-    expect(v.filter((x) => x.startsWith('ratio_worker ')).sort()).toEqual(FIVE.map((g) => `ratio_worker holds relation:ratio.${g} beyond the reviewed set`));
+    const login = (x: string) => x.startsWith('ratio_test_login_');
+    expect(v.filter((x) => !login(x)).sort()).toEqual([
+      ...FIVE.map((g) => `ratio_worker holds relation:ratio.${g} beyond the reviewed set`),
+      ...TRIGGERS.map((t) => `trigger ratio.${t} (function owner ratio_owner) is not a reviewed ratio_owner trigger`),
+    ]);
     // Logins that concurrently running DB test files create as members of ratio_worker inherit the same grants and are
     // listed too (cluster-wide roles); they may echo only these five, never anything else.
-    for (const x of v.filter((y) => !y.startsWith('ratio_worker '))) {
+    for (const x of v.filter(login)) {
       const m = /^ratio_test_login_\w+ holds relation:ratio\.(\w+:[A-Z]+) beyond the reviewed set of the ratio roles it belongs to$/.exec(x);
       expect(m && FIVE.includes(m[1]), x).toBe(true);
     }
   }));
-  it('the down file removes exactly the two tables', () => inDraft(async (c) => {
+  it('the down file removes exactly what the up file created', () => inDraft(async (c) => {
     await c.query(DOWN);
-    const r = await c.query(`SELECT to_regclass('ratio.platform_connections') AS a, to_regclass('ratio.platform_evidence_refs') AS b, to_regclass('ratio.tenants') AS t`);
-    expect(r.rows[0]).toEqual({ a: null, b: null, t: 'ratio.tenants' });
+    const r = await c.query(`SELECT to_regclass('ratio.platform_connections') AS a, to_regclass('ratio.platform_evidence_refs') AS b, to_regclass('ratio.tenants') AS t,
+      to_regprocedure('ratio.tg_platform_evidence_append_only()') AS f, to_regprocedure('ratio.tg_refuse_truncate()') AS keep`);
+    expect(r.rows[0]).toEqual({ a: null, b: null, t: 'ratio.tenants', f: null, keep: 'ratio.tg_refuse_truncate()' });
   }));
   it('nothing was committed: the draft\'s tables do not exist outside the scenarios', async () => {
     const r = await db.pool.query(`SELECT to_regclass('ratio.platform_connections') AS a, to_regclass('ratio.platform_evidence_refs') AS b`);

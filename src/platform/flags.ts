@@ -21,19 +21,22 @@ export type PlatformBlockResult = { ok: true; flags: PlatformFlags } | { ok: fal
 export function parsePlatformBlock(v: unknown, at = 'platform'): PlatformBlockResult {
   if (v === undefined) return { ok: true, flags: PLATFORM_OFF };
   if (!isPlainObject(v)) return { ok: false, problems: [`${at}: must be an object of true/false flags (${KEYS.join(', ')})`] };
+  // Own keys only: an inherited (e.g. polluted Object.prototype) `enabled` never counts.
+  const own = (k: string) => (Object.hasOwn(v, k) ? v[k] : undefined);
   const p: string[] = [];
   for (const k of Object.keys(v)) {
     if (!(KEYS as readonly string[]).includes(k)) p.push(/^[A-Za-z0-9_]{1,40}$/.test(k) ? `${at}.${k}: unknown key` : `${at}: unknown key (not printed)`);
   }
-  for (const k of KEYS) if (v[k] !== undefined && typeof v[k] !== 'boolean') p.push(`${at}.${k}: must be true or false`);
+  for (const k of KEYS) if (own(k) !== undefined && typeof own(k) !== 'boolean') p.push(`${at}.${k}: must be true or false`);
   if (p.length) return { ok: false, problems: p };
-  for (const k of PLATFORM_CAPABILITIES) if (v[k] === true && v.enabled !== true) p.push(`${at}.${k}: requires ${at}.enabled to be true`);
+  for (const k of PLATFORM_CAPABILITIES) if (own(k) === true && own('enabled') !== true) p.push(`${at}.${k}: requires ${at}.enabled to be true`);
   if (p.length) return { ok: false, problems: p };
-  return { ok: true, flags: Object.freeze(Object.fromEntries(KEYS.map((k) => [k, v[k] === true])) as PlatformFlags) };
+  return { ok: true, flags: Object.freeze(Object.fromEntries(KEYS.map((k) => [k, own(k) === true])) as PlatformFlags) };
 }
 
 /** True only when the platform is enabled AND the capability's own flag is set. */
-export const capabilityOn = (flags: PlatformFlags | undefined, cap: PlatformCapability): boolean => flags?.enabled === true && flags[cap] === true;
+export const capabilityOn = (flags: PlatformFlags | undefined, cap: PlatformCapability): boolean =>
+  flags !== undefined && Object.hasOwn(flags, 'enabled') && Object.hasOwn(flags, cap) && flags.enabled === true && flags[cap] === true;
 
 export class PlatformDisabledError extends Error {
   readonly code = 'PLATFORM_DISABLED';
