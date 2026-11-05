@@ -17,7 +17,9 @@ type J = any;
 export interface Identity { tenantId: string; workloadId?: string; actorType: ActorType; actorRef?: string; teamIds?: string[] }
 export interface GatewayOptions {
   gatewayId: string;
-  bundle: unknown; lastKnownGood?: unknown; accessMode: NonNullable<EvaluationInput['accessMode']>;
+  bundle: unknown; lastKnownGood?: unknown;
+  /** Mapped to the D7 flags C1 requires (policyMonitor on; enforcement on only for enforce). */
+  accessMode: NonNullable<EvaluationInput['accessMode']>;
   /** Gateway credentials (virtual keys) to identities: the only source of tenant, workload and actor. */
   credentials: Record<string, Identity>;
   providers: Record<string, { flavor: Flavor; url: string }>;
@@ -119,6 +121,7 @@ const readAll = async (res: http.IncomingMessage) => { const parts: Buffer[] = [
 
 export function createMockGateway(o: GatewayOptions) {
   const engine = o.engine ?? evaluate;
+  const flags = Object.freeze({ enabled: true, economics: false, adoption: false, policyMonitor: true, enforcement: o.accessMode === 'enforce' });
   const bundle = compileBundle(o.bundle) ?? o.bundle; // compiled once at load (C1 L4); an invalid one is decided by C1
   const lastKnownGood = o.lastKnownGood === undefined ? undefined : compileBundle(o.lastKnownGood) ?? o.lastKnownGood;
   const digest = (b: Buffer | string) => `hm1:${o.digestKey.keyId}:${crypto.createHmac('sha256', o.digestKey.secret).update(b).digest('hex')}`;
@@ -132,7 +135,7 @@ export function createMockGateway(o: GatewayOptions) {
     const t0 = performance.now();
     const micros = () => Math.round((performance.now() - t0) * 1000);
     const now = o.now();
-    const input: EvaluationInput = { bundle, lastKnownGood, context, clock: { now, elapsedMicros: micros }, accessMode: o.accessMode };
+    const input: EvaluationInput = { bundle, lastKnownGood, context, clock: { now, elapsedMicros: micros }, flags };
     const ms = Math.min(DEFAULT_DEADLINE_MS, ...(policiesFor(context, now) ?? []).map((p) => p.evaluationTimeoutMs));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<'timeout'>((r) => { timer = setTimeout(() => r('timeout'), ms); });
