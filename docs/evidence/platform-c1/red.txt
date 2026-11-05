@@ -1,0 +1,15 @@
+RED evidence, platform slice C1 (pure policy evaluation library, ADR-0001 §13). Base 6c809af. Tests committed before the implementation.
+Command: npx vitest run src/platform/policy --cache=false (src/platform/policy/{context,evaluate,index}.ts absent; tsconfig.worker.json at base)
+     × has exactly these modules, importing only each other and the contracts
+     × the worker typecheck covers the library, and the fixtures are labeled SYNTHETIC
+ FAIL  src/platform/policy/evaluate.test.ts [ src/platform/policy/evaluate.test.ts ]
+Error: Cannot find module './evaluate' imported from src/platform/policy/evaluate.test.ts
+ FAIL  src/platform/policy/properties.test.ts [ src/platform/policy/properties.test.ts ]
+Error: Cannot find module './evaluate' imported from src/platform/policy/properties.test.ts
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/platform/policy/boundary.test.ts > policy library boundary > has exactly these modules, importing only each other and the contracts
+AssertionError: expected [] to deeply equal [ 'context.ts', 'evaluate.ts', …(1) ]
+ FAIL  src/platform/policy/boundary.test.ts > policy library boundary > the worker typecheck covers the library, and the fixtures are labeled SYNTHETIC
+AssertionError: expected [ 'src/ingest/**/*.ts', …(2) ] to include 'src/platform/policy/*.ts'
+ Test Files  3 failed (3)
+      Tests  2 failed | 1 passed (3)
