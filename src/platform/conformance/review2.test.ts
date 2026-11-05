@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { validateGatewayRequestRecord, validatePolicyDecision, type Policy } from '../contracts';
 import { bundle, ent, pol, rule } from '../policy/testing/fixtures';
-import { createMockGateway, type GatewayOptions, type GatewayResult } from './mockGateway';
+import { createMockGateway, requireSourceText, type GatewayOptions, type GatewayResult } from './mockGateway';
 import { startMockProvider, type MockProvider, type MockProviderOptions } from './mockProviders';
 import { seeded } from './testing/seeded';
 
@@ -122,5 +122,33 @@ describe('round 3: tool identities, content-block positions, numbers', () => {
     const p = await provider({ flavor: 'openai', reply: ['ok'], extra: { meta: { card: Number(PAN) } } });
     const o = await go('/v1/chat/completions', chat('q'), { bundle: bundle({ entitlements: ENTS, policies: [card('pre_response', { release: 'buffer_full' })] }), providers: { 'provider-a': { flavor: 'openai', url: p.url } } });
     expect({ status: o.status, at: o.r.decisions.flatMap((d) => d.findings.map((f) => f.location)) }).toEqual({ status: 403, at: ['output'] });
+  });
+});
+describe('round 4: tools declared outside tools, history identities, item and block positions', () => {
+  const only = (tools: string[], match: 'in' | 'not_in' = 'not_in') => bundle({ entitlements: ENTS, policies: [pol({ policyId: 'pol-tools', rules: [rule({ ruleId: 'r-tools', condition: { kind: 'tool', tools, match }, reasonCode: 'TOOL_NOT_ALLOWED' })] })] });
+  const msgs = (more: object, ...content: unknown[]) => ({ model: 'model-c', messages: [{ role: 'user', content: 'q' }, ...content.map((c) => ({ role: 'assistant', content: [c] }))], ...more });
+  const evil = { type: 'url', url: 'https://evil.invalid/sse', name: 'evil' }, U = ['TOOL_UNIDENTIFIED'], N = ['TOOL_NOT_ALLOWED'], R = '/v1/responses', M = '/v1/messages';
+  it.each([
+    ['Messages mcp_servers under an fn:search allowlist (M1)', M, msgs({ tools: [{ name: 'search' }], mcp_servers: [evil] }), only(['fn:search']), 403, N],
+    ['Messages mcp_servers allowed as mcp:evil', M, msgs({ tools: [{ name: 'search' }], mcp_servers: [evil] }), only(['fn:search', 'mcp:evil']), 200, []],
+    ['a nameless mcp_servers entry, no tool policy', M, msgs({ mcp_servers: [{ type: 'url', url: 'https://x.invalid' }] }), undefined, 403, U],
+    ['an unknown tool-declaring parameter (plugins), no tool policy', '/v1/chat/completions', chat('q', { plugins: [{ id: 'x' }] }), undefined, 403, U],
+    ['fn:search + mcp:evil under fn:search + mcp:wiki', R, { model: 'model-x', input: 'q', tools: [{ type: 'function', name: 'search' }, { type: 'mcp', server_label: 'evil' }] }, only(['fn:search', 'mcp:wiki']), 403, N],
+    ['a bundle listing the unidentified sentinel is refused (L2)', R, { model: 'model-x', input: 'q', tools: [{ type: 'mcp' }] }, only(['unidentified:gw-mock-req-1']), 403, ['BUNDLE_INVALID']],
+    ['server_tool_use in history is type:web_search (L4)', M, msgs({}, { type: 'server_tool_use', id: 's1', name: 'web_search', input: { query: 'x' } }), only(['fn:search']), 403, N],
+    ['mcp_tool_use in history is mcp:<server_name>', M, msgs({}, { type: 'mcp_tool_use', id: 'm1', name: 'run', server_name: 'evil', input: {} }), only(['mcp:evil'], 'in'), 403, N],
+    ['a Responses mcp_call item is mcp:<server_label>', R, { model: 'model-x', input: [{ type: 'mcp_call', id: 'c1', server_label: 'evil', name: 'run', arguments: '{}', output: 'ok' }] }, only(['mcp:evil'], 'in'), 403, N],
+  ])('%s', async (_n, path, body, b, status, codes) => expect(await go(path, body, b ? { bundle: b } : {})).toMatchObject({ status, codes }));
+  it('an unidentified tool is recorded, not enforced, in monitor mode', async () => expect((await go(M, msgs({ mcp_servers: [{ type: 'url' }] }), { accessMode: 'monitor' })).status).toBe(200));
+  it.each([
+    ['a Responses input item of unknown type (L3)', R, { model: 'model-x', input: [{ type: 'input_blob', data: 'QUJD' }] }], ['a typeless Responses input item with data', R, { model: 'model-x', input: [{ data: 'QUJD' }] }],
+    ['function_call_output.output parts of unknown type', R, { model: 'model-x', input: [{ type: 'function_call_output', call_id: 'c', output: [{ type: 'input_blob', data: 'QUJD' }] }] }],
+    ['a tool_result content block of unknown type (N49)', M, msgs({}, { type: 'tool_result', tool_use_id: 't', content: [{ type: 'pdf', data: 'QUJD' }] })], ['a top-level system block of unknown type (N50)', M, msgs({ system: [{ type: 'pdf', data: 'QUJD' }] })],
+    ['redacted_thinking in history (accepted availability cost, L5)', M, msgs({}, { type: 'redacted_thinking', data: 'QUJD' })], ['web_search_tool_result in history (L5)', M, msgs({}, { type: 'web_search_tool_result', tool_use_id: 's', content: [] })],
+  ])('%s is uninspectable: DLP unavailable', async (_n, path, body) => expect(await go(path, body)).toMatchObject({ ...blocked, codes: ['DLP_UNAVAILABLE'] }));
+  it('known Responses items stay inspectable; a token-id array with a PAN is found (N38); source-text access is checked loudly', async () => {
+    expect((await go(R, { model: 'model-x', input: [{ role: 'user', content: 'q' }, { type: 'function_call', call_id: 'c', name: 'search', arguments: '{}' }, { type: 'function_call_output', call_id: 'c', output: 'ok' }] })).status).toBe(200);
+    expect(await go('/v1/completions', { model: 'model-x', prompt: [Number(PAN), 7] })).toMatchObject({ ...blocked, codes: ['DLP_PAYMENT_CARD'] });
+    expect([() => requireSourceText(), () => requireSourceText((s, r) => JSON.parse(s, (k, v) => r(k, v)))].map((f) => { try { f(); return 'ok'; } catch (e) { return String(e); } })).toEqual(['ok', expect.stringMatching(/source text/)]);
   });
 });
