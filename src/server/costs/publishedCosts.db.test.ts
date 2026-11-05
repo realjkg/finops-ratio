@@ -667,6 +667,28 @@ describe('D14 a reader backend terminated mid-request is destroyed at once (Copi
     throw new Error('no reader backend waiting on the lock');
   }
 
+  it('the lock is held before the reader request is issued, so a fast reader cannot finish first (flake: "no reader backend waiting on the lock")', async () => {
+    const pool = createReaderPool(reader.url, { max: 1 });
+    const locker = await db.pool.connect();
+    const lockHeld = async () => (await db.pool.query(
+      `SELECT count(*)::int AS n FROM pg_catalog.pg_locks l JOIN pg_catalog.pg_class c ON c.oid = l.relation WHERE c.relname = 'cost_facts' AND l.mode = 'AccessExclusiveLock' AND l.granted`,
+    )).rows[0].n === 1;
+    try {
+      let heldAtStart: boolean | undefined;
+      const { pid, pending } = await lockThenStart(locker, async () => {
+        heldAtStart = await lockHeld();
+        return pool.query('SELECT count(*) FROM ratio.cost_facts_published');
+      });
+      expect([heldAtStart, pid > 0]).toEqual([true, true]);
+      await locker.query('ROLLBACK');
+      expect((await pending).rowCount).toBe(1);
+    } finally {
+      await locker.query('ROLLBACK').catch(() => undefined);
+      locker.release();
+      await pool.end().catch(() => undefined);
+    }
+  }, 30_000);
+
   it('readWithDeadline on the real pool: the FATAL 57P01 poisons the client; the ROLLBACK is refused with that same error (never sent to pg); release destroys the client', async () => {
     const pool = createReaderPool(reader.url, { max: 1 });
     const locker = await db.pool.connect();
