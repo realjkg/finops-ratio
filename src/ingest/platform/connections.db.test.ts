@@ -20,10 +20,10 @@ const A = 'aaaaaaaa-0000-4000-8000-0000000000a1';
 const B = 'bbbbbbbb-0000-4000-8000-0000000000b1';
 const SHA = 'c'.repeat(64);
 const decl = (connectorId = 'provider-a-usage-file') => JSON.stringify({ ...connector(), connectorId });
-const CONN = `INSERT INTO ratio.platform_connections (tenant_id, connection_id, schema_version, connector_id, category, declaration, managed_state, ladder_step, verification)
-              VALUES ($1, $2, 'connector-declaration/1', $3, 'model_provider_usage', $4::jsonb, $5, $6, 'not_verified')`;
-const REF = `INSERT INTO ratio.platform_evidence_refs (tenant_id, ref_id, connection_id, schema_version, kind, locator, sha256, recorded_at)
-             VALUES ($1, gen_random_uuid(), $2, '${EVIDENCE_REF_SCHEMA}', $3, $4, '${SHA}', '2026-11-05T10:00:00Z')`;
+const CONN = `INSERT INTO ratio.platform_connections (tenant_id, connection_id, schema_version, connector_id, category, declaration, managed_state, managed_ladder_step, observed_at)
+              VALUES ($1, $2, 'connector-declaration/1', $3, 'model_provider_usage', $4::jsonb, $5, $6, '2026-11-05T10:00:00Z')`;
+const REF = `INSERT INTO ratio.platform_evidence_refs (tenant_id, ref_id, connection_id, schema_version, kind, locator, sha256, observed_at, observed_state, recorded_at)
+             VALUES ($1, gen_random_uuid(), $2, '${EVIDENCE_REF_SCHEMA}', $3, $4, '${SHA}', '2026-11-05T10:00:00Z', $5, '2026-11-05T10:00:01Z')`;
 
 let db: TestDatabase;
 beforeAll(async () => {
@@ -43,7 +43,7 @@ async function inDraft(fn: (c: PoolClient) => Promise<void>): Promise<void> {
     await c.query(`INSERT INTO ratio.tenants (id, slug) VALUES ($1, 'tenant-a'), ($2, 'tenant-b')`, [A, B]);
     for (const [t, id, cid] of [[A, 'usage-file', 'provider-a-usage-file'], [B, 'usage-file', 'provider-b-usage-file'], [B, 'b-only', 'provider-a-usage-file']]) {
       await c.query(CONN, [t, id, cid, decl(cid), 'extraction-completed', 'retrieved']);
-      await c.query(REF, [t, id, 'sync_run', `evidence/${t.slice(0, 8)}/${id}/run-1.json`]);
+      await c.query(REF, [t, id, 'sync_run', `evidence/${t.slice(0, 8)}/${id}/run-1.json`, 'extraction-completed']);
     }
     await fn(c);
   } finally {
@@ -56,6 +56,10 @@ async function rows(c: PoolClient, sql: string, params: unknown[] = []) {
   const r = await attempt(c, sql, params);
   if (!r.ok) throw new Error(`expected success, got ${r.code}`);
   return r.rows;
+}
+/** Back to the superuser (the session user) inside the scenario's transaction. */
+async function asSuperuser(c: PoolClient) {
+  expect(await attempt(c, 'RESET ROLE')).toMatchObject({ ok: true });
 }
 /** Switches the transaction to `role` with `tenant` (empty = none), both transaction-local. */
 async function as(c: PoolClient, role: 'ratio_worker' | 'ratio_reader', tenant: string) {
@@ -79,14 +83,24 @@ describe('draft 0020 on Postgres: tenant isolation (RLS)', () => {
   it('tenant A cannot insert or change tenant B\'s rows, nor link evidence to a connection only B has', () => inDraft(async (c) => {
     await as(c, 'ratio_worker', A);
     expect(await attempt(c, CONN, [B, 'new', 'provider-a-usage-file', decl(), 'configured-not-verified', 'configured'])).toMatchObject({ ok: false, code: '42501' });
-    expect(await attempt(c, REF, [B, 'usage-file', 'sync_run', 'evidence/x.json'])).toMatchObject({ ok: false, code: '42501' });
-    expect(await attempt(c, `UPDATE ratio.platform_connections SET managed_state = 'failed', ladder_step = NULL WHERE tenant_id = $1`, [B])).toMatchObject({ ok: true, rowCount: 0 });
+    expect(await attempt(c, REF, [B, 'usage-file', 'sync_run', 'evidence/x.json', 'extraction-completed'])).toMatchObject({ ok: false, code: '42501' });
+    expect(await attempt(c, `UPDATE ratio.platform_connections SET managed_state = 'failed', managed_ladder_step = NULL WHERE tenant_id = $1`, [B])).toMatchObject({ ok: true, rowCount: 0 });
     expect(await attempt(c, `UPDATE ratio.platform_connections SET tenant_id = $1 WHERE connection_id = 'usage-file'`, [B])).toMatchObject({ ok: false, code: '42501' });
-    expect(await attempt(c, REF, [A, 'b-only', 'sync_run', 'evidence/x.json'])).toMatchObject({ ok: false, code: '23503' });
+    expect(await attempt(c, REF, [A, 'b-only', 'sync_run', 'evidence/x.json', 'extraction-completed'])).toMatchObject({ ok: false, code: '23503' });
     expect(await attempt(c, CONN, [A, 'second', 'provider-a-usage-file', decl(), 'configured-not-verified', 'configured'])).toMatchObject({ ok: true, rowCount: 1 });
     await as(c, 'ratio_worker', B);
     expect((await rows(c, `SELECT managed_state FROM ratio.platform_connections WHERE connection_id = 'usage-file'`))).toEqual([{ managed_state: 'extraction-completed' }]);
     expect((await rows(c, 'SELECT count(*)::int AS n FROM ratio.platform_connections'))).toEqual([{ n: 2 }]);
+  }));
+  it('evidence refs are append-only for every role, even the superuser, and outlive any attempt to delete their connection (review L2)', () => inDraft(async (c) => {
+    await asSuperuser(c);
+    expect(await attempt(c, `UPDATE ratio.platform_evidence_refs SET locator = 'evidence/other.json'`)).toMatchObject({ ok: false, code: 'RT001' });
+    expect(await attempt(c, 'DELETE FROM ratio.platform_evidence_refs')).toMatchObject({ ok: false, code: 'RT001' });
+    expect(await attempt(c, 'TRUNCATE ratio.platform_evidence_refs')).toMatchObject({ ok: false, code: 'RT001' });
+    expect(await attempt(c, `DELETE FROM ratio.platform_connections WHERE connection_id = 'usage-file'`)).toMatchObject({ ok: false, code: '23503' });
+    expect(await attempt(c, `UPDATE ratio.platform_connections SET connection_id = 'renamed' WHERE connection_id = 'usage-file'`)).toMatchObject({ ok: false, code: '23503' });
+    expect((await attempt(c, 'TRUNCATE ratio.platform_connections')).ok).toBe(false);
+    expect((await rows(c, 'SELECT count(*)::int AS n FROM ratio.platform_evidence_refs'))).toEqual([{ n: 3 }]);
   }));
   it('evidence refs are append-only for the worker, and the reader has no access to either table', () => inDraft(async (c) => {
     await as(c, 'ratio_worker', A);
@@ -105,8 +119,14 @@ describe('draft 0020 on Postgres: tenant isolation (RLS)', () => {
       [CONN, [A, 'c4', 'provider-a-usage-file', decl(), 'degraded', 'authorized']],
       [CONN, [A, 'c5', 'provider-a-usage-file', decl('provider-z'), 'configured-not-verified', 'configured']],
       [CONN, [A, 'c6', 'provider-a-usage-file', JSON.stringify({ ...connector(), refreshCadence: 'https://u:p@host/x' }), 'configured-not-verified', 'configured']],
-      [REF, [A, 'usage-file', 'sync_run', 'https://user:pw@host/run.json']],
-      [REF, [A, 'usage-file', 'connected', 'evidence/x.json']],
+      // A declaration never claims verification (review M1).
+      [CONN, [A, 'c9', 'provider-a-usage-file', JSON.stringify({ ...connector(), verification: { status: 'live_verified', limitations: [] } }), 'configured-not-verified', 'configured']],
+      [CONN, [A, 'c10', 'provider-a-usage-file', JSON.stringify({ ...connector(), verification: { status: 'pre_release_validated', limitations: ['X'] } }), 'configured-not-verified', 'configured']],
+      [REF, [A, 'usage-file', 'sync_run', 'https://user:pw@host/run.json', 'extraction-completed']],
+      [REF, [A, 'usage-file', 'connected', 'evidence/x.json', 'extraction-completed']],
+      // Evidence is about an observation on the ladder, never a degraded or failed one (review L5).
+      [REF, [A, 'usage-file', 'sync_run', 'evidence/x.json', 'degraded']],
+      [`UPDATE ratio.platform_connections SET last_degraded_at = '2026-11-05T11:00:00Z' WHERE connection_id = 'usage-file'`, []],
     ];
     for (const [sql, params] of bad) expect(await attempt(c, sql, params), JSON.stringify(params.slice(1))).toMatchObject({ ok: false, code: '23514' });
     expect(await attempt(c, CONN, [A, 'c7', 'provider-a-usage-file', decl(), 'degraded', null])).toMatchObject({ ok: true });

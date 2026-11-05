@@ -33,6 +33,20 @@ describe('platform flags (D7)', () => {
     for (const v of [null, true, 'on', [], [true]]) expect(parsePlatformBlock(v), JSON.stringify(v)).toEqual({ ok: false, problems: ['platform: must be an object of true/false flags (enabled, economics, adoption, policyMonitor, enforcement)'] });
     expect(parsePlatformBlock({ __proto__: { enabled: true } } as unknown)).toEqual({ ok: false, problems: ['platform: must be an object of true/false flags (enabled, economics, adoption, policyMonitor, enforcement)'] });
   });
+  it('only own keys count: an inherited Object.prototype flag never turns the platform on (review L3)', () => {
+    const proto = Object.prototype as unknown as Record<string, unknown>;
+    Object.defineProperty(proto, 'enabled', { value: true, configurable: true, writable: true });
+    Object.defineProperty(proto, 'economics', { value: true, configurable: true, writable: true });
+    try {
+      expect(parsePlatformBlock({})).toEqual({ ok: true, flags: PLATFORM_OFF });
+      expect(parsePlatformBlock({ adoption: false })).toEqual({ ok: true, flags: PLATFORM_OFF });
+      expect(parsePlatformBlock({ economics: true })).toEqual({ ok: false, problems: ['platform.economics: requires platform.enabled to be true'] });
+    } finally {
+      delete proto.enabled;
+      delete proto.economics;
+    }
+    expect(({} as Record<string, unknown>).enabled).toBeUndefined();
+  });
   it('the parsed flags are a fresh frozen object, never the input', () => {
     const input = { enabled: true, economics: true };
     const r = parsePlatformBlock(input);

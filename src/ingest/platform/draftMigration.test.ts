@@ -66,8 +66,15 @@ describe('draft 0020_platform_connections (not a migration yet)', () => {
     }
     expect(new Set([...c.matchAll(/THEN '(\w+)'/g)].map((m) => m[1]))).toEqual(new Set(CONNECTION_LADDER));
     expect(c).toContain(`category        text NOT NULL CHECK (category IN (${list(CONNECTOR_CATEGORIES)}))`);
-    expect(c).toContain(`verification    text NOT NULL CHECK (verification IN (${list(VERIFICATION)}))`);
     expect(body('platform_evidence_refs')).toContain(`kind           text NOT NULL CHECK (kind IN (${list(Object.keys(EVIDENCE_KINDS))}))`);
+    // The stored step is M0a's, not evidence-gated, and is named so (review L1); readers get only the evidence-gated step.
+    expect(c).toMatch(/^\s+managed_ladder_step text CHECK \(managed_ladder_step IS NOT DISTINCT FROM CASE managed_state$/m);
+    expect(UP).toMatch(/evidence-gated step/);
+    expect(c).not.toMatch(/^\s+ladder_step\b/m);
+    // Evidence names the observation it supports, in a state on the ladder (review L5).
+    const onLadder = Object.entries(LADDER_FROM_MANAGED_STATE).filter(([, step]) => step).map(([state]) => state);
+    expect(body('platform_evidence_refs')).toContain(`observed_state text NOT NULL CHECK (observed_state IN (${list(onLadder)}))`);
+    expect(body('platform_evidence_refs')).toMatch(/^\s+observed_at\s+timestamptz NOT NULL,$/m);
     expect(UP.replace(/^--.*$/gm, '')).not.toMatch(/connected/i);
   });
   it('evidence refs are append-only for the worker; nothing is granted to the reader or PUBLIC', () => {
@@ -76,9 +83,22 @@ describe('draft 0020_platform_connections (not a migration yet)', () => {
       ['SELECT, INSERT, UPDATE', 'ratio.platform_connections', 'ratio_worker'],
       ['SELECT, INSERT', 'ratio.platform_evidence_refs', 'ratio_worker'],
     ]);
-    expect(CODE).not.toMatch(/\bPUBLIC\b|ratio_reader/);
+    expect(CODE).not.toMatch(/\bGRANT\b[^;]*\bPUBLIC\b|ratio_reader/);
+    expect(CODE).toContain('REVOKE EXECUTE ON FUNCTION ratio.tg_platform_evidence_append_only() FROM PUBLIC;');
   });
-  it('the down file drops exactly the two tables, children first', () => {
-    expect(stripNonCode(DOWN).split('\n').map((l) => l.trim()).filter(Boolean)).toEqual(['DROP TABLE IF EXISTS ratio.platform_evidence_refs;', 'DROP TABLE IF EXISTS ratio.platform_connections;']);
+  it('evidence refs are append-only for every role and survive their connection: triggers, and a restricting key (review L2)', () => {
+    expect(CODE).toContain('CREATE TRIGGER append_only BEFORE UPDATE OR DELETE ON ratio.platform_evidence_refs\n  FOR EACH ROW EXECUTE FUNCTION ratio.tg_platform_evidence_append_only();');
+    for (const t of TABLES) expect(CODE).toContain(`CREATE TRIGGER refuse_truncate BEFORE TRUNCATE ON ratio.${t}\n  FOR EACH STATEMENT EXECUTE FUNCTION ratio.tg_refuse_truncate();`);
+    expect(CODE).toContain('FOREIGN KEY (tenant_id, connection_id) REFERENCES ratio.platform_connections (tenant_id, connection_id) ON UPDATE RESTRICT ON DELETE RESTRICT');
+    expect(CODE).not.toMatch(/CASCADE|SET NULL|SET DEFAULT/);
+  });
+  it('a declaration never claims verification in storage either: no stored verification column, a CHECK on the document (review M1)', () => {
+    const c = body('platform_connections');
+    expect(c).toContain("AND declaration #>> '{verification,status}' = 'not_verified'");
+    expect(c).not.toMatch(/^\s+verification\s/m);
+    expect(VERIFICATION).toContain('live_verified'); // the contract still has the value; the registry and the draft refuse it
+  });
+  it('the down file drops exactly what the up file created, children first', () => {
+    expect(stripNonCode(DOWN).split('\n').map((l) => l.trim()).filter(Boolean)).toEqual(['DROP TABLE IF EXISTS ratio.platform_evidence_refs;', 'DROP TABLE IF EXISTS ratio.platform_connections;', 'DROP FUNCTION IF EXISTS ratio.tg_platform_evidence_append_only();']);
   });
 });
