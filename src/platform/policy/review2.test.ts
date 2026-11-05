@@ -34,17 +34,18 @@ describe('M2: a refusal is at least as strict as the normal path', () => {
     expect(evaluate(input({ bundle: bundle({ policies: [pol({ phase: 'pre_response', release: 'buffer_full' })] }), accessMode: 'monitor', context: { ...ctx(), phase: 'bogus' } as never })).verdict).toBe('block');
   });
 });
-describe('L1/L2: flags are required and bound through capabilityOn; off is a recorded allow', () => {
-  it('off flags never block: one recorded POLICY_DISABLED allow, nothing enforced', () => {
-    for (const flags of [{}, { enabled: true }, { enabled: false, enforcement: true }, { enabled: true, enforcement: 'true' }, Object.create({ enabled: true, enforcement: true })]) {
-      expect(accessModeFor(flags as never)).toBe('off');
-      const e = valid(evaluate({ ...input({ context: ctx({ modelRequested: 'model-z', findings: [card()] }) }), flags: flags as never }));
-      expect({ verdict: e.verdict, d: e.decisions.map(brief) }).toEqual({ verdict: 'allow', d: [['monitor', false, 'allow', '-', 'POLICY_DISABLED']] });
-    }
+describe('L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow', () => {
+  const run = (over: object, c = ctx({ modelRequested: 'model-z', findings: [card()] })) => valid(evaluate({ ...input({ context: c }), ...over } as never));
+  it.each([[{}], [{ enabled: true }], [{ enabled: false }], [{ enabled: true, policyMonitor: false, enforcement: false }]])('valid off flags %j: one recorded POLICY_DISABLED allow', (flags) => {
+    const e = run({ flags });
+    expect({ verdict: e.verdict, d: e.decisions.map(brief) }).toEqual({ verdict: 'allow', d: [['monitor', false, 'allow', '-', 'POLICY_DISABLED']] });
   });
-  it('a flags/accessMode mismatch or junk flags are refused (enforce with this bundle); enforcement wins over monitor', () => {
+  it.each([[{ enabled: true, enforce: true }], [{ enabled: 1, enforcement: 1 }], [{ enabled: true, enforcement: 'true' }], [{ enabled: false, enforcement: true }], [Object.create({ enabled: true, enforcement: true })], ['on'], [null], [undefined]])(
+    'junk flags %j are refused and block (never POLICY_DISABLED)', (flags) => expect([run({ flags }).verdict, access(run({ flags }))]).toEqual(['block', 'CONTEXT_INVALID']));
+  it('an asserted accessMode that disagrees with the flags (also with off flags) is refused; off flags with an invalid context are refused', () => {
     expect([accessModeFor(FLAGS.enforce), accessModeFor(FLAGS.monitor)]).toEqual(['enforce', 'monitor']);
-    for (const over of [{ accessMode: 'monitor' as const }, { flags: 'on' as never }, { flags: null as never }]) expect(access(valid(evaluate({ ...input(), ...over })))).toBe('CONTEXT_INVALID');
+    for (const over of [{ accessMode: 'monitor' }, { flags: {}, accessMode: 'enforce' }, { flags: { enabled: true }, accessMode: 'monitor' }]) expect([run(over).verdict, access(run(over))]).toEqual(['block', 'CONTEXT_INVALID']);
+    expect([run({ flags: {} }, { ...ctx(), prompt: 'x' } as never).verdict, access(run({ flags: {} }, { ...ctx(), prompt: 'x' } as never))]).toEqual(['block', 'CONTEXT_INVALID']);
   });
 });
 describe('L3 families, L4 placeholders, L5 compile', () => {
@@ -60,6 +61,11 @@ describe('L3 families, L4 placeholders, L5 compile', () => {
     expect(access(evaluate(input({ context: ctx({ tenantId: 'refused:unknown-tenant' }) })))).toBe('CONTEXT_INVALID');
     expect(access(evaluate(input({ context: ctx({ requestRef: 'refused:unknown-request' }) })))).toBe('CONTEXT_INVALID');
     expect(compileBundle(bundle({ bundleId: 'refused:unreadable-bundle' }))).toBeNull();
+  });
+  it('a refusal also weighs the last-known-good (M32b) and never copies a refused: tenant into its record (M43)', () => {
+    const lkg = bundle({ version: 2, lastKnownGoodApproved: true, policies: [pol()] }), refusedCtx = ctx({ findings: Array.from({ length: 1001 }, () => card()) });
+    expect(evaluate(input({ bundle: bundle({ policies: [pol({ mode: 'monitor' })] }), lastKnownGood: lkg, accessMode: 'monitor', context: refusedCtx })).verdict).toBe('block');
+    expect(evaluate(input({ context: ctx({ tenantId: 'refused:evil' }) })).decisions[0].tenantId).toBe('refused:unknown-tenant');
   });
   it('a compiled bundle is frozen and independent of the raw input, which stays mutable', () => {
     const raw = bundle({ policies: [], entitlements: [ent({ models: ['model-x'] })] });
