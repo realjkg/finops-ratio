@@ -1,7 +1,7 @@
 // Connector declaration contract (ADR-0001 §6). It EXTENDS the M0a managed-connector framework
 // (src/connectors/managed): connectors still register retrievers there; this declares what a connector supports and
 // maps the M0a states onto the owner's status ladder. A step is never collapsed into "Connected".
-import { arr, C, literal, obj, oneOf, opt, req, rule, validator } from './validate';
+import { arr, C, literal, obj, oneOf, opt, req, rule, set, validator } from './validate';
 import { SCHEMA_VERSIONS } from './versions';
 
 export const CONNECTION_LADDER = ['configured', 'authorized', 'retrieved', 'validated', 'reconciled'] as const;
@@ -41,7 +41,7 @@ export interface ConnectorDeclaration {
 }
 
 export const validateConnectorDeclaration = validator<ConnectorDeclaration>(obj({
-  schemaVersion: req(literal('connector-declaration/1')), connectorId: req(rule('connector id', (v) => typeof v === 'string' && /^[a-z0-9][a-z0-9-]{0,62}$/.test(v))),
+  schemaVersion: req(literal('connector-declaration/1')), connectorId: req(rule('connector-id@1', 'connector id', (v) => typeof v === 'string' && /^[a-z0-9][a-z0-9-]{0,62}$/.test(v))),
   category: req(oneOf(CONNECTOR_CATEGORIES)),
   operations: req(arr(obj({ name: req(C.id), emits: req(oneOf(SCHEMA_VERSIONS)) }), 1, 32)),
   credentials: req(arr(obj({ kind: req(oneOf(['api_key', 'oauth_client', 'role_assumption', 'oidc', 'file_drop', 'none'])), permissions: req(arr(C.id)) }), 1, 8)),
@@ -51,7 +51,9 @@ export const validateConnectorDeclaration = validator<ConnectorDeclaration>(obj(
   corrections: req(oneOf(['supersedes', 'restated_period', 'none'])),
   rateLimits: req(obj({ strategy: req(oneOf(['retry_after', 'fixed_backoff', 'none'])), maxRetries: req(C.count) })),
   privacy: req(oneOf(['aggregate', 'pseudonymous', 'personal_restricted'])),
-  verification: req(obj({ status: req(oneOf(VERIFICATION)), limitations: req(arr(C.reason)) })),
-} satisfies { [K in keyof Required<ConnectorDeclaration>]: unknown }), (d, p) => {
+  verification: req(obj({ status: req(oneOf(VERIFICATION)), limitations: req(set(C.reason)) })),
+} satisfies { [K in keyof Required<ConnectorDeclaration>]: unknown }), { 'limitations-until-live@1': limitationsUntilLive });
+
+function limitationsUntilLive(d: ConnectorDeclaration, p: string[]) {
   if (d.verification.status !== 'live_verified' && d.verification.limitations.length === 0) p.push('$.verification.limitations: required until live verified');
-});
+}

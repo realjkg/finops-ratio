@@ -1,0 +1,25 @@
+{
+  "$comment": "Migration number ledger (ADR-0001 §12). The runner refuses a pending migration older than the newest applied one (OUT_OF_ORDER), so numbers are used in ledger order: a migration file may exist only for a 'merged' entry, and only when every lower entry is merged, released or retired. 'reserved' blocks every higher number; the orchestrator releases a reservation it will not use. Checked by src/ingest/db/migrationLedger.test.ts.",
+  "entries": [
+    { "number": "0001", "name": "ratio_schema", "line": "1.0", "status": "merged" },
+    { "number": "0002", "name": "cost_attribution", "line": "1.0", "status": "merged" },
+    { "number": "0003", "line": "1.0", "status": "retired", "owner": "consumption ledger (never merged); unusable once 0004 is applied" },
+    { "number": "0004", "name": "outcome_ledger", "line": "1.0", "status": "merged" },
+    { "number": "0005", "line": "1.0", "status": "reserved", "owner": "R4 trust views" },
+    { "number": "0006", "line": "1.0", "status": "reserved", "owner": "E2 enrichment (inventory mapping)" },
+    { "from": "0007", "to": "0019", "line": "1.0", "status": "reserved", "owner": "1.0 line and the slice 3-5 forecasts (owner-coordinated); release what 1.0 does not use before 0020 merges" },
+    { "number": "0020", "line": "1.1", "status": "reserved", "owner": "A1 platform connections, evidence refs" },
+    { "number": "0021", "line": "1.1", "status": "reserved", "owner": "A2 ai_usage_events" },
+    { "number": "0022", "line": "1.1", "status": "reserved", "owner": "A3 rate cards" },
+    { "number": "0023", "line": "1.1", "status": "reserved", "owner": "A4 financial records, links, variances" },
+    { "number": "0024", "line": "1.1", "status": "reserved", "owner": "A5 allocation" },
+    { "number": "0025", "line": "1.2", "status": "reserved", "owner": "B1 pseudonym keys, service identities" },
+    { "number": "0026", "line": "1.2", "status": "reserved", "owner": "B2 eligibility" },
+    { "number": "0027", "line": "1.2", "status": "reserved", "owner": "B3 activity, definitions, seats" },
+    { "number": "0028", "line": "1.2", "status": "reserved", "owner": "B4 retention, deletion runs, drill-down log" },
+    { "number": "0029", "line": "1.3", "status": "reserved", "owner": "C2 bundles, policies, entitlements" },
+    { "number": "0030", "line": "1.3", "status": "reserved", "owner": "C5 decisions, gateway records, DLP findings" },
+    { "number": "0031", "line": "2.0", "status": "reserved", "owner": "C6 budget reservations" },
+    { "from": "0032", "to": "0039", "line": "platform", "status": "reserved", "owner": "spare, released by the orchestrator in order" }
+  ]
+}

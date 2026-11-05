@@ -1,7 +1,7 @@
 // Economics contracts (ADR-0001 §4.1, Stream A): AI usage events, financial records, rate cards and allocations.
 // Usage and money are separate records linked by id, never merged: an estimate and a bill for the same calls are two
 // records, so neither is counted twice. Absent usage is unknown, never 0; nothing here fills a default.
-import { arr, C, checkActor, isZeroDecimal, literal, obj, oneOf, opt, req, rule, sumsExactly, validator, ACTOR_TYPES, type ActorType } from './validate';
+import { arr, C, checkActor, instantBefore, isPseudonymousRef, isServiceRef, isZeroDecimal, literal, obj, oneOf, opt, req, rule, sameSignOrZero, set, sumsExactly, validator, ACTOR_TYPES, type ActorType, type Problems } from './validate';
 
 export const TOKEN_CATEGORIES = ['input', 'output', 'cachedInput', 'cacheWrite', 'reasoning'] as const;
 export type TokenCategory = (typeof TOKEN_CATEGORIES)[number];
@@ -10,7 +10,7 @@ export const SERVICE_TIERS = ['standard', 'batch', 'priority', 'flex', 'unknown'
 export const USAGE_STATUSES = ['succeeded', 'failed', 'cancelled', 'unknown'] as const;
 
 /**
- * Token counts as exact decimal strings. `accountingProfile` names the provider mapping (e.g. `openai-chat/1`) that
+ * Token counts as canonical integer strings (whole tokens). `accountingProfile` names the provider mapping (e.g. `openai-chat/1`) that
  * says which categories overlap (cached input inside input) and which are additive; no total is computed without it.
  */
 export interface TokenUsage { input?: string; output?: string; cachedInput?: string; cacheWrite?: string; reasoning?: string; accountingProfile: string }
@@ -41,25 +41,27 @@ export interface AIUsageEvent {
   serviceTier?: (typeof SERVICE_TIERS)[number];
   /** `reported` by the provider or `estimated` (e.g. by a gateway tokenizer); never mixed in one record. */
   usageBasis: 'reported' | 'estimated';
-  tokenUsage: TokenUsage;
+  /** Absent when the source reported no usage (e.g. a failed call): unknown, never 0. */
+  tokenUsage?: TokenUsage;
   units?: UsageUnits[];
   status: (typeof USAGE_STATUSES)[number];
   evidenceRef: string;
 }
 
-const profile = rule('accounting profile <name>/<version>', (v) => typeof v === 'string' && /^[a-z0-9-]{1,64}\/\d{1,4}$/.test(v));
-const TOKENS = obj({ ...Object.fromEntries(TOKEN_CATEGORIES.map((k) => [k, opt(C.quantity)])), accountingProfile: req(profile) });
+const profile = rule('accounting-profile@1', 'accounting profile <name>/<version>', (v) => typeof v === 'string' && /^[a-z0-9-]{1,64}\/\d{1,4}$/.test(v));
+const TOKENS = obj({ ...Object.fromEntries(TOKEN_CATEGORIES.map((k) => [k, opt(C.tokens)])), accountingProfile: req(profile) });
 const UNITS = obj({ kind: req(oneOf(UNIT_KINDS)), quantity: req(C.quantity) });
 
 export const validateAIUsageEvent = validator<AIUsageEvent>(obj({
   schemaVersion: req(literal('ai-usage-event/1')), eventId: req(C.id), tenantId: req(C.id), sourceConnectionId: req(C.id), dedupKey: req(C.id),
   supersedes: opt(C.id), occurredAt: req(C.instant), receivedAt: req(C.instant), workloadId: opt(C.id), actorRef: opt(C.id),
-  actorType: req(oneOf(ACTOR_TYPES)), provider: req(C.id), modelRequested: opt(C.id), modelServed: opt(C.id), sku: opt(C.id),
+  actorType: req(oneOf(ACTOR_TYPES)), provider: req(C.id), modelRequested: opt(C.model), modelServed: opt(C.model), sku: opt(C.id),
   providerRequestId: opt(C.id), attempt: opt(C.positive), serviceTier: opt(oneOf(SERVICE_TIERS)), usageBasis: req(oneOf(['reported', 'estimated'])),
-  tokenUsage: req(TOKENS), units: opt(arr(UNITS, 1, 32)), status: req(oneOf(USAGE_STATUSES)), evidenceRef: req(C.id),
-} satisfies { [K in keyof Required<AIUsageEvent>]: unknown }), (e, p) => {
-  checkActor(e.actorType, e.actorRef, p);
-  if (e.supersedes === e.eventId) p.push('$.supersedes: an event cannot supersede itself');
+  tokenUsage: opt(TOKENS), units: opt(arr(UNITS, 1, 32)), status: req(oneOf(USAGE_STATUSES)), evidenceRef: req(C.id),
+} satisfies { [K in keyof Required<AIUsageEvent>]: unknown }), {
+  'actor-ref@1': (e, p) => checkActor(e.actorType, e.actorRef, p),
+  'no-self-supersede@1': (e, p) => { if (e.supersedes === e.eventId) p.push('$.supersedes: an event cannot supersede itself'); },
+  'received-after-occurred@1': (e, p) => { if (instantBefore(e.receivedAt, e.occurredAt)) p.push('$.receivedAt: before occurredAt'); },
 });
 
 export const FINANCIAL_KINDS = ['billed', 'effective', 'estimated_invocation', 'credit', 'adjustment'] as const;
@@ -84,16 +86,21 @@ export interface FinancialRecord {
   evidenceRef: string;
 }
 
-export const validateFinancialRecord = validator<FinancialRecord>(obj({
-  schemaVersion: req(literal('ai-financial-record/1')), recordId: req(C.id), tenantId: req(C.id), sourceConnectionId: req(C.id),
-  kind: req(oneOf(FINANCIAL_KINDS)), amount: req(C.money), currency: req(C.currency), periodStart: req(C.date), periodEnd: req(C.date),
-  provider: req(C.id), providerAccount: opt(C.id), workloadId: opt(C.id), model: opt(C.id), sku: opt(C.id), rateBasis: req(oneOf(RATE_BASES)),
-  rateCardRef: opt(obj({ rateCardId: req(C.id), version: req(C.positive) })), configSha256: opt(C.sha256),
-  linkedUsageEventIds: opt(arr(C.id, 1)), supersedes: opt(C.id), evidenceRef: req(C.id),
-} satisfies { [K in keyof Required<FinancialRecord>]: unknown }), (r, p) => {
+function recordRules(r: FinancialRecord, p: Problems) {
   if (r.periodEnd <= r.periodStart) p.push('$.periodEnd: must be after periodStart');
   if (r.kind === 'estimated_invocation' && !r.rateCardRef) p.push('$.rateCardRef: required for an estimated_invocation record');
   if (r.supersedes === r.recordId) p.push('$.supersedes: a record cannot supersede itself');
+}
+export const validateFinancialRecord = validator<FinancialRecord>(obj({
+  schemaVersion: req(literal('ai-financial-record/1')), recordId: req(C.id), tenantId: req(C.id), sourceConnectionId: req(C.id),
+  kind: req(oneOf(FINANCIAL_KINDS)), amount: req(C.money), currency: req(C.currency), periodStart: req(C.date), periodEnd: req(C.date),
+  provider: req(C.id), providerAccount: opt(C.id), workloadId: opt(C.id), model: opt(C.model), sku: opt(C.id), rateBasis: req(oneOf(RATE_BASES)),
+  rateCardRef: opt(obj({ rateCardId: req(C.id), version: req(C.positive) })), configSha256: opt(C.sha256),
+  linkedUsageEventIds: opt(set(C.id, 1)), supersedes: opt(C.id), evidenceRef: req(C.id),
+} satisfies { [K in keyof Required<FinancialRecord>]: unknown }), {
+  'record-rules@1': recordRules,
+  'estimate-rate-basis@1': (r, p) => { if (r.kind === 'estimated_invocation' && !['contract', 'public_list'].includes(r.rateBasis)) p.push('$.rateBasis: an estimate is priced at a contract or public list rate'); },
+  'credit-not-positive@1': (r, p) => { if (r.kind === 'credit' && !sameSignOrZero(r.amount, '-1')) p.push('$.amount: a credit is negative or 0'); },
 });
 
 export const PRICE_UNITS = ['per_1m_tokens', 'per_1k_tokens', 'per_token', 'per_unit'] as const;
@@ -110,7 +117,7 @@ export interface RateCard {
 }
 
 const ENTRY = obj({
-  model: req(C.id), sku: opt(C.id), category: req(oneOf([...TOKEN_CATEGORIES, ...UNIT_KINDS])), serviceTier: req(oneOf(SERVICE_TIERS)),
+  model: req(C.model), sku: opt(C.id), category: req(oneOf([...TOKEN_CATEGORIES, ...UNIT_KINDS])), serviceTier: req(oneOf(SERVICE_TIERS)),
   unit: req(oneOf(PRICE_UNITS)), price: req(C.quantity),
 });
 export const validateRateCard = validator<RateCard>(obj({
@@ -118,15 +125,21 @@ export const validateRateCard = validator<RateCard>(obj({
   currency: req(C.currency), basis: req(oneOf(['contract', 'public_list'])), effectiveFrom: req(C.date), effectiveTo: opt(C.date),
   entries: req(arr(ENTRY, 1)),
   provenance: req(obj({ kind: req(oneOf(['public_price_page', 'contract', 'invoice', 'owner_entry'])), reference: req(C.id), retrievedOn: req(C.date) })),
-} satisfies { [K in keyof Required<RateCard>]: unknown }), (r, p) => {
-  if (r.effectiveTo !== undefined && r.effectiveTo <= r.effectiveFrom) p.push('$.effectiveTo: must be after effectiveFrom');
-  const seen = new Set<string>();
-  r.entries.forEach((e, i) => {
-    const key = [e.model, e.sku ?? '', e.category, e.serviceTier].join('\u0000');
-    if (seen.has(key)) p.push(`$.entries[${i}]: duplicate model, sku, category and tier`);
-    seen.add(key);
-    if ((e.unit === 'per_unit') !== (UNIT_KINDS as readonly string[]).includes(e.category)) p.push(`$.entries[${i}].unit: does not fit category`);
-  });
+} satisfies { [K in keyof Required<RateCard>]: unknown }), {
+  'rate-card-rules@1': (r, p) => {
+    if (r.effectiveTo !== undefined && r.effectiveTo <= r.effectiveFrom) p.push('$.effectiveTo: must be after effectiveFrom');
+    const seen = new Set<string>();
+    r.entries.forEach((e, i) => {
+      const key = [e.model, e.sku ?? '', e.category, e.serviceTier].join('\u0000');
+      if (seen.has(key)) p.push(`$.entries[${i}]: duplicate model, sku, category and tier`);
+      seen.add(key);
+      if ((e.unit === 'per_unit') !== (UNIT_KINDS as readonly string[]).includes(e.category)) p.push(`$.entries[${i}].unit: does not fit category`);
+    });
+  },
+  'basis-provenance@1': (r, p) => {
+    const fits = r.basis === 'public_list' ? ['public_price_page', 'owner_entry'] : ['contract', 'invoice', 'owner_entry'];
+    if (!fits.includes(r.provenance.kind)) p.push(`$.provenance.kind: does not support a ${r.basis} basis`);
+  },
 });
 
 export const ALLOCATION_TARGETS = ['workload', 'team', 'cost_center', 'user', 'service'] as const;
@@ -150,8 +163,24 @@ export const validateAllocation = validator<Allocation>(obj({
   currency: req(C.currency), basis: req(oneOf(['billed', 'effective', 'estimated_invocation'])), sourceAmount: req(C.money),
   shares: req(arr(obj({ targetKind: req(oneOf(ALLOCATION_TARGETS)), targetRef: req(C.id), amount: req(C.money), ruleId: req(C.id) }))),
   unallocated: req(C.money), unallocatedReasons: req(arr(C.reason)), evidenceRef: req(C.id),
-} satisfies { [K in keyof Required<Allocation>]: unknown }), (a, p) => {
-  if (a.periodEnd <= a.periodStart) p.push('$.periodEnd: must be after periodStart');
-  if (!sumsExactly(a.shares.map((s) => s.amount), a.unallocated, a.sourceAmount)) p.push('$.unallocated: shares plus unallocated must equal sourceAmount exactly');
-  if (!isZeroDecimal(a.unallocated) && a.unallocatedReasons.length === 0) p.push('$.unallocatedReasons: required when unallocated is not 0');
+} satisfies { [K in keyof Required<Allocation>]: unknown }), {
+  'allocation-rules@1': (a, p) => {
+    if (a.periodEnd <= a.periodStart) p.push('$.periodEnd: must be after periodStart');
+    if (!sumsExactly(a.shares.map((s) => s.amount), a.unallocated, a.sourceAmount)) p.push('$.unallocated: shares plus unallocated must equal sourceAmount exactly');
+    if (!isZeroDecimal(a.unallocated) && a.unallocatedReasons.length === 0) p.push('$.unallocatedReasons: required when unallocated is not 0');
+  },
+  'share-sign@1': (a, p) => {
+    a.shares.forEach((s, i) => { if (!sameSignOrZero(s.amount, a.sourceAmount)) p.push(`$.shares[${i}].amount: sign differs from sourceAmount`); });
+    if (!sameSignOrZero(a.unallocated, a.sourceAmount)) p.push('$.unallocated: sign differs from sourceAmount');
+  },
+  'share-targets@1': (a, p) => {
+    const targets = new Set<string>();
+    a.shares.forEach((s, i) => {
+      const key = `${s.targetKind}\u0000${s.targetRef}`;
+      if (targets.has(key)) p.push(`$.shares[${i}]: duplicate target`);
+      targets.add(key);
+      const ok = s.targetKind === 'user' ? isPseudonymousRef(s.targetRef) : s.targetKind === 'service' ? isServiceRef(s.targetRef) : true;
+      if (!ok) p.push(`$.shares[${i}].targetRef: does not match targetKind ${s.targetKind}`);
+    });
+  },
 });

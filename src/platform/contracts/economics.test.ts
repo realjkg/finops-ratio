@@ -33,7 +33,7 @@ describe('FinancialRecord, RateCard, Allocation', () => {
     expect(problems(validateFinancialRecord({ ...financialRecord(), rateBasis: 'unknown' }))).toEqual(['$.rateBasis: an estimate is priced at a contract or public list rate']);
   });
   it('a rate card basis matches its provenance', () => {
-    expect(problems(validateRateCard({ ...rateCard(), basis: 'contract' }))).toEqual(['$.provenance.kind: does not support a contract basis']);
+    expect(problems(validateRateCard({ ...rateCard(), basis: 'contract', provenance: { ...rateCard().provenance, kind: 'public_price_page' } }))).toEqual(['$.provenance.kind: does not support a contract basis']);
   });
   it('allocation: exact sum, same sign, unique targets, pseudonymous users', () => {
     expect(validateAllocation(allocation()).ok).toBe(true);

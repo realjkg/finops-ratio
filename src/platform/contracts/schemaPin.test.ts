@@ -21,19 +21,19 @@ const BY_VERSION: Record<contracts.SchemaVersion, Validate> = {
 };
 
 const PINS: Record<contracts.SchemaVersion, string> = {
-  'ai-usage-event/1': 'PIN',
-  'ai-financial-record/1': 'PIN',
-  'rate-card/1': 'PIN',
-  'allocation/1': 'PIN',
-  'activity-event/1': 'PIN',
-  'eligibility-snapshot/1': 'PIN',
-  'adoption-definition/1': 'PIN',
-  'entitlement/1': 'PIN',
-  'policy/1': 'PIN',
-  'policy-bundle/1': 'PIN',
-  'policy-decision/1': 'PIN',
-  'gateway-request/1': 'PIN',
-  'connector-declaration/1': 'PIN',
+  'ai-usage-event/1': '3afa3be67c6d056d2d07b8a264da33171de0a2ec7db0a2a78f7d02aeccdd3bbd',
+  'ai-financial-record/1': '8bc9cfe372f5ef34e05be2f236ac0230366a8bfaf77e4aacf683fd9a785c435f',
+  'rate-card/1': 'ae0d28f654d054c6189c6804b5cb976b2e84cfd2f093f9b895fd068f451042ea',
+  'allocation/1': '3ba6b3049952f35c4f0655329c401d66c3263d7e2f607e2650a087dabadcd597',
+  'activity-event/1': '8e8b0017fa42d09fb0f336e931600dea26651c525f5e28f1dbccbd1753e5259e',
+  'eligibility-snapshot/1': '5f95a98372bf91834f7f9c4df0c6a7630d250630764ac0a20eed767cd3b74ab1',
+  'adoption-definition/1': 'c055abd748cb6ceb0795b8d31a12b2496726fd05a59a5d87613a84d67bb6202b',
+  'entitlement/1': '820095061f145835f69a358c258df35f94115d6762f57e713341fdb68ad2046f',
+  'policy/1': 'a550b7f62ec1baf76e334a19e6c9caf6097e58850fc9aa24cee241e4f5fc97d3',
+  'policy-bundle/1': 'e7329aeddac29233b1d724cd82e60a453c592e9f555f0e4ed89709ab77ac653d',
+  'policy-decision/1': 'b9c1ae17e95cbb6012d6cb4ce6c9a631e976c6a108d46d0b65173ca217ecc882',
+  'gateway-request/1': '77130eb63fae851c08254fe777ac3ee371a8e394f6254969dd67f0d6a112f9b4',
+  'connector-declaration/1': 'b0af3acc1d4b188b53d757e91da1c88bed89c6b5e0127a70ace64ecc6c72339d',
 };
 
 const DIR = __dirname;
