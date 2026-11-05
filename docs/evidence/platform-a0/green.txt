@@ -39,3 +39,10 @@ ROUND 3 (git diff --check on the evidence commit 35365aa: "new blank line at EOF
 pre-existing renderer trait also present in the merged docs/evidence/pr-179/evidence.md). Test first (RED commit), then
 renderEvidenceMd trims trailing newlines to exactly one. scripts/evidence: 4 files, 66 tests passed. The pr-182
 evidence is regenerated for the new code head.
+REVIEW ROUND GREEN (6eac832): scripts/evidence 4 files, 73 tests passed. Real targeted run with absolute paths (5
+files, incl. the templated rate-card/1 corpus test): exit 0; caps 1 and 4 PLANNED, 2, 3, 5-8 NOT STARTED.
+Mutations (each alone, targeted suite, restored; git status clean after): 13/13 KILLED
+ R1 '-' may start a segment | R2 relative file names passed | R3 status words allowed | R4 control chars allowed
+ R5 emphasis not escaped | R6 declared status not a cap | R7 malformed index entries trusted | R8 invalid manifest gap
+ R9 = reviewer M2 (FAILED only if all attempts fail) | R10 = reviewer M11 (stale report kept) | R11 node_modules paths
+ R12 a §14 fragment uncovered | R13 the rate-card W0 test title missing. Full gates: docs/evidence/pr-182 (collector).
