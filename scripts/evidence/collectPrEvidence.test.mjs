@@ -67,11 +67,11 @@ describe('collect-pr-evidence refusals', () => {
 });
 
 describe('collect-pr-evidence plan', () => {
-  it('uses the merge-base when --base has moved on', () => {
+  it('uses the merge-base when --base has moved on (a migration added on main later is not counted as the PR\'s)', () => {
     const { dir, git, base, head } = repo();
     git('checkout', '-q', 'main');
-    fs.writeFileSync(path.join(dir, 'later.txt'), 'x');
-    git('add', '-A'); git('commit', '-q', '-m', 'main moves on');
+    fs.writeFileSync(path.join(dir, 'src/ingest/db/migrations/0003_main.up.sql'), 'select 3;\n');
+    git('add', '-A'); git('commit', '-q', '-m', 'main moves on with its own migration');
     const tip = git('rev-parse', 'HEAD');
     git('checkout', '-q', 'pr');
     const p = plan(collect(dir, ['--base', tip, '--head', head, '--pr', '1', '--plan-only']));
@@ -92,6 +92,17 @@ describe('collect-pr-evidence plan', () => {
     expect(mig.skip).toMatch(/NOT RUN: 1 migration file\(s\) changed; no scratch database/);
     expect(p.informational[0].na).toMatch(/no scratch database/);
   });
+  it('the migration step gets only the allowlist plus the vetted scratch URL, never inherited variables', () => {
+    const { dir, base, head } = repo();
+    const p = plan(collect(dir, ['--base', base, '--head', head, '--pr', '1', '--plan-only', '--migration-smoke'], {
+      RATIO_EVIDENCE_SCRATCH_DATABASE_URL: 'postgres://postgres@127.0.0.1:55432/ratio_evidence_migrate',
+      RATIO_DATABASE_URL: 'postgres://x@db/ratio', RATIO_READER_DATABASE_URL: 'postgres://r@db/ratio', AWS_SECRET_ACCESS_KEY: 'k', NODE_OPTIONS: '--no-warnings', SOME_RANDOM: 'x',
+    }));
+    for (const g of [p.gates.find((x) => x.name.startsWith('migrations')), p.informational[0]]) {
+      expect(g.envKeys, g.name).toEqual(expect.arrayContaining(['RATIO_MIGRATE_DATABASE_URL', 'RATIO_ENV', 'RATIO_ALLOW_DOWN_MIGRATIONS', 'PATH']));
+      for (const k of ['RATIO_DATABASE_URL', 'RATIO_READER_DATABASE_URL', 'AWS_SECRET_ACCESS_KEY', 'NODE_OPTIONS', 'SOME_RANDOM', 'RATIO_EVIDENCE_SCRATCH_DATABASE_URL']) expect(g.envKeys, `${g.name}: ${k}`).not.toContain(k);
+    }
+  });
   it('refuses migrations when the caller is production, even with a valid scratch URL (the RATIO_ENV override case)', () => {
     const { dir, base, head } = repo();
     const p = plan(collect(dir, ['--base', base, '--head', head, '--pr', '1', '--plan-only'], { RATIO_EVIDENCE_SCRATCH_DATABASE_URL: 'postgres://postgres@127.0.0.1:55432/ratio_evidence_migrate', RATIO_ENV: 'production' }));
@@ -108,5 +119,119 @@ describe('collect-pr-evidence plan', () => {
     expect(p.informational[0].na).toMatch(/not requested \(--migration-smoke\)/);
     const withSmoke = plan(collect(dir, ['--base', base, '--head', head, '--pr', '1', '--plan-only', '--migration-smoke'], env));
     expect(withSmoke.informational[0].command).toMatch(/migrate --down 2/);
+  });
+});
+
+// --- run phase, with shimmed gates --------------------------------------------------------------
+// Fake npm/npx first on PATH: every gate "passes" with a summary, and `npx tsx <generator>` runs the repo's
+// generator script with node, so determinism, fixture recompute, rollback, redaction and the report are real.
+function shimDir() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'collector-shim-'));
+  made.push(d);
+  fs.writeFileSync(path.join(d, 'npm'), '#!/bin/sh\ncase "$1" in -v) echo 10.0.0;; *) echo "npm $*";; esac\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(d, 'npx'), [
+    '#!/bin/sh',
+    'case "$1" in',
+    '  vitest) printf " Test Files  1 passed (1)\\n      Tests  3 passed (3)\\n";;',
+    '  playwright) printf "  2 passed (1s)\\n";;',
+    '  tsx) exec node --input-type=commonjs -e "$(cat "$2")";;',
+    '  *) echo "npx $*";;',
+    'esac', 'exit 0', ''].join('\n'), { mode: 0o755 });
+  return d;
+}
+const dataset = (billed) => JSON.stringify({ meta: { controlTotals: { USD: { rows: 2, billed, effective: '1.0', naBilled: 0, naEffective: 1 } } }, columns: ['BillingCurrency', 'BilledCost', 'EffectiveCost'], rows: [['USD', '1.5', '1.0'], ['USD', billed === '2.0' ? '0.5' : '0.75', '']] }) + '\n';
+function fixtureRepo(generatorWrites) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'collector-run-'));
+  made.push(dir);
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  fs.mkdirSync(path.join(dir, 'src/demo/apiDatasets/data'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules\ndocs/evidence/pr-*/logs/\n');
+  fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}\n');
+  fs.writeFileSync(path.join(dir, 'src/demo/apiDatasets/data/d.json'), dataset('2.0'));
+  git('add', '-A'); git('commit', '-q', '-m', 'base');
+  const base = git('rev-parse', 'HEAD');
+  git('checkout', '-q', '-b', 'pr');
+  fs.writeFileSync(path.join(dir, 'src/demo/apiDatasets/data/d.json'), dataset('2.25'));
+  fs.writeFileSync(path.join(dir, 'scripts/generate-demo-datasets.ts'), `require('fs').writeFileSync('src/demo/apiDatasets/data/d.json', ${JSON.stringify(generatorWrites)});\n`);
+  git('add', '-A'); git('commit', '-q', '-m', 'pr changes the fixture and its generator');
+  const head = git('rev-parse', 'HEAD');
+  fs.mkdirSync(path.join(dir, 'node_modules/.bin'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'node_modules/.bin/vitest'), '');
+  return { dir, git, base, head };
+}
+const runCollector = (dir, args, env = {}) => spawnSync(process.execPath, [COLLECTOR, ...args], { cwd: dir, encoding: 'utf8', timeout: 60_000,
+  env: { PATH: `${shimDir()}:${process.env.PATH}`, HOME: os.tmpdir(), RATIO_EVIDENCE_CHROMIUM: process.execPath, ...env } });
+
+describe('collect-pr-evidence run phase (shimmed gates)', () => {
+  it('records gates, fixture recompute, determinism PASS, rollback PASS against the merge-base tree, and stays valid JSON with numeric-looking secret-named env vars', () => {
+    const { dir, git, base, head } = fixtureRepo(dataset('2.25'));
+    const r = runCollector(dir, ['--base', base, '--head', head, '--pr', '180', '--gate-timeout', '1'], { MAX_THINKING_TOKENS: '12345', TOKEN_REFRESH_ENABLED: '1', FEATURE_SECRET: 'true', GITHUB_TOKEN: 'ghp_realLookingToken123' });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    const raw = fs.readFileSync(path.join(dir, 'docs/evidence/pr-180/evidence.json'), 'utf8');
+    const e = JSON.parse(raw);
+    expect(e.pr).toBe(180);
+    expect(e.head.sha).toBe(head);
+    expect(e.mergeBase.sha).toBe(base);
+    expect(raw).not.toMatch(/\[redacted\]/); // nothing worth redacting reached the output
+    expect(raw).not.toContain('ghp_realLookingToken123');
+    expect(e.gates.find((g) => g.name === 'unit tests (vitest)').status).toBe('PASS');
+    // The browser preflight runs in a short temp dir and fails here (no playwright-core): gates NOT RUN, never PASS.
+    expect(e.informational.find((g) => g.name === 'Chromium launch preflight').status).toBe('FAIL');
+    expect(e.gates.find((g) => g.name === 'Playwright simulation suite')).toMatchObject({ status: 'NOT RUN', summary: expect.stringMatching(/Chromium did not launch/) });
+    expect(fs.existsSync(path.join(dir, 'docs/evidence/pr-180/logs/short-tmp.path'))).toBe(false);
+    const f = e.fixtures.files[0];
+    expect(f).toMatchObject({ path: 'src/demo/apiDatasets/data/d.json', baseRows: 2, headRows: 2, matchesStated: 'yes', totalsUnchanged: 'no (changed)' });
+    expect(f.headTotals.USD).toEqual({ rows: 2, naBilled: 0, naEffective: 1, billed: '2.25', effective: '1.0' });
+    expect(e.fixtures.determinism[0].status).toBe('PASS');
+    expect(e.rollback.status).toBe('PASS');
+    expect(e.rollback.treeAfterReverse).toBe(e.mergeBase.tree);
+    expect(e.rollback.treeAfterReverse).toBe(git('rev-parse', `${base}^{tree}`));
+    expect(git('status', '--porcelain', '--', '.', ':!docs/evidence')).toBe(''); // only the evidence output is new
+    expect(git('worktree', 'list').split('\n')).toHaveLength(1);
+    const md = fs.readFileSync(path.join(dir, 'docs/evidence/pr-180/evidence.md'), 'utf8');
+    expect(md).toMatch(/Attests code SHA `[0-9a-f]{40}`/);
+  });
+
+  it('rollback is FAIL when the reverse-applied tree differs from the merge-base tree, even with every gate green', () => {
+    // A gitlink (submodule pointer) removed by the PR: git apply -R cannot restore it in a plain worktree, so the
+    // reverse-applied tree really differs from the merge-base tree. The rollback must say so, never PASS.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'collector-run-'));
+    made.push(dir);
+    const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+    git('init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules\ndocs/evidence/pr-*/logs/\n');
+    fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}\n');
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'a\n');
+    git('add', '-A');
+    git('update-index', '--add', '--cacheinfo', `160000,${'1'.repeat(40)},vendor/sub`);
+    git('commit', '-q', '-m', 'base with a submodule pointer');
+    const base = git('rev-parse', 'HEAD');
+    git('checkout', '-q', '-b', 'pr');
+    git('rm', '-q', '--cached', 'vendor/sub');
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'b\n');
+    git('add', '-A'); git('commit', '-q', '-m', 'pr drops the submodule');
+    const head = git('rev-parse', 'HEAD');
+    fs.mkdirSync(path.join(dir, 'node_modules/.bin'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'node_modules/.bin/vitest'), '');
+    const r = runCollector(dir, ['--base', base, '--head', head, '--pr', '3']);
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    const e = JSON.parse(fs.readFileSync(path.join(dir, 'docs/evidence/pr-3/evidence.json'), 'utf8'));
+    expect(e.rollback.gates.every((g) => g.status === 'PASS')).toBe(true);
+    expect(e.rollback.treeAfterReverse).not.toBe(e.mergeBase.tree);
+    expect(e.rollback.status).toBe('FAIL');
+    expect(e.rollback.detail).toMatch(/DIFFERS from the merge-base tree/);
+    expect(e.charter.find((c) => c.id === 4).status).toBe('FAIL');
+  });
+
+  it('a generator that does not reproduce the committed fixture makes determinism FAIL and the run exit 1', () => {
+    const { dir, git, base, head } = fixtureRepo(dataset('9.99'));
+    const r = runCollector(dir, ['--base', base, '--head', head, '--pr', '7']);
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    const e = JSON.parse(fs.readFileSync(path.join(dir, 'docs/evidence/pr-7/evidence.json'), 'utf8'));
+    expect(e.fixtures.determinism[0]).toMatchObject({ status: 'FAIL', detail: expect.stringMatching(/changed: src\/demo\/apiDatasets\/data\/d\.json/) });
+    expect(e.charter.find((c) => c.id === 3).status).toBe('FAIL');
+    expect(git('status', '--porcelain', '--', '.', ':!docs/evidence')).toBe(''); // the regenerated file was restored
   });
 });

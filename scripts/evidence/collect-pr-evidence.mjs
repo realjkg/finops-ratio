@@ -14,6 +14,11 @@
 //   RATIO_EVIDENCE_SCRATCH_DATABASE_URL  -> migration checks ONLY (loopback host, database ratio_evidence_*,
 //                                           never when RATIO_ENV/NODE_ENV is production)
 //   RATIO_EVIDENCE_CHROMIUM              -> browser outside Playwright's own install
+// The full-set migration smoke is opt-in (--migration-smoke). Playwright gates get a SHORT temp dir
+// (/tmp/rpe.XXXXXX; Chromium's socket path must fit sun_path) after a Chromium launch preflight. Logs go to
+// <out>/logs (--logs to override); the running gate's process group is recorded in <logs>/current-gate.pgid
+// so a supervisor can stop it if this process is killed with SIGKILL (gates run detached in their own group).
+// Secrets are redacted field by field before serialization, then the JSON and its SHA fields are verified.
 // The full-set migration smoke is opt-in (--migration-smoke). Writes evidence.md and evidence.json;
 // exit 1 if any required gate or check FAILS, 2 on a usage error, 3 when it refuses to run. It never marks
 // the challenger re-review or the merge decision PASS: those are the orchestrator's.
@@ -28,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { setTimeout, clearTimeout } from 'node:timers';
 import {
-  EXIT, STATUS, browserPlan, classifyGate, dbTestPlan, determinismStatus, fixtureRows, gateEnv, gatesItemStatus, migrationEnv, migrationTarget,
+  EXIT, STATUS, browserPlan, classifyGate, compareControlTotals, dbTestPlan, determinismStatus, fixtureRows, gateEnv, gatesItemStatus, integrityProblems, migrationEnv, migrationTarget, redactDeep, syntheticExportTotals,
   parseArgs, parsePlaywrightTotals, parseVitestTotals, redact, renderEvidenceMd, rollbackStatus, secretsFromEnv, statedTotals, stripAnsi,
   totalsByCurrency, totalsMatch,
 } from './evidenceLib.mjs';
@@ -109,8 +114,8 @@ const plan = [
   { name: 'build', steps: [['npm', 'run', 'build']], env: base },
   { name: 'bundle check', steps: [['npm', 'run', 'check:bundle']], env: base },
   ...(browser.env ? [
-    { name: 'Playwright simulation suite', steps: [['npx', 'playwright', 'test', '--config', 'playwright.simulation.config.ts']], env: { ...base, ...browser.env, RATIO_TEST_PORT: String(port) }, parse: parsePlaywrightTotals },
-    { name: 'Playwright engagement report spec', steps: [['npx', 'playwright', 'test', '--config', 'playwright.engagement.config.ts']], env: { ...base, ...browser.env, RATIO_TEST_NEXT_DIR: `.next-simulation-${port}`, RATIO_ENGAGEMENT_TEST_PORT: String(port + 1) }, parse: parsePlaywrightTotals },
+    { name: 'Playwright simulation suite', browser: true, steps: [['npx', 'playwright', 'test', '--config', 'playwright.simulation.config.ts']], env: { ...base, ...browser.env, RATIO_TEST_PORT: String(port) }, parse: parsePlaywrightTotals },
+    { name: 'Playwright engagement report spec', browser: true, steps: [['npx', 'playwright', 'test', '--config', 'playwright.engagement.config.ts']], env: { ...base, ...browser.env, RATIO_TEST_NEXT_DIR: `.next-simulation-${port}`, RATIO_ENGAGEMENT_TEST_PORT: String(port + 1) }, parse: parsePlaywrightTotals },
   ] : [
     { name: 'Playwright simulation suite', command: 'npx playwright test --config playwright.simulation.config.ts', skip: browser.reason },
     { name: 'Playwright engagement report spec', command: 'npx playwright test --config playwright.engagement.config.ts', skip: browser.reason },
@@ -127,24 +132,45 @@ if (PLAN_ONLY) {
 }
 
 // --- running gates (async, so INT/TERM are handled promptly) --------------------------------
-const LOGS = path.resolve(args.logs ?? fs.mkdtempSync(path.join(os.tmpdir(), `ratio-evidence-logs-pr${args.pr}-`)));
+// Logs live under the output directory (gitignored as docs/evidence/pr-*/logs/ in this repo), not in OS tmp.
+const LOGS = path.resolve(args.logs ?? path.join(OUT, 'logs'));
 fs.mkdirSync(LOGS, { recursive: true });
+// The running gate's process group, also written to a file so a supervisor (mac-evidence.sh) can kill it
+// if this process itself is killed with SIGKILL (a detached group would otherwise be orphaned).
+const PGID_FILE = path.join(LOGS, 'current-gate.pgid');
 let child = null;
 let WT = null;
+let SHORT_TMP = null;
 let interrupted = null;
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const alive = (pid) => { try { process.kill(-pid, 0); return true; } catch { return false; } };
 function removeWorktree() {
   if (!WT) return;
   try { git('worktree', 'remove', '--force', WT); } catch { /* not registered */ }
-  fs.rmSync(WT, { recursive: true, force: true });
+  try { fs.rmSync(WT, { recursive: true, force: true }); } catch { /* reported below by the leftover check of the next run */ }
   try { git('worktree', 'prune'); } catch { /* ignore */ }
   WT = null;
+}
+function removeShortTmp() {
+  if (!SHORT_TMP) return;
+  try { fs.rmSync(SHORT_TMP, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(path.join(LOGS, 'short-tmp.path'), { force: true }); } catch { /* ignore */ }
+  SHORT_TMP = null;
 }
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     interrupted = sig;
-    if (child) { try { process.kill(-child.pid, 'SIGTERM'); } catch { /* gone */ } }
+    if (child) {
+      const pid = child.pid;
+      try { process.kill(-pid, 'SIGTERM'); } catch { /* gone */ }
+      // Wait (bounded) for the group to exit before deleting files it may still be using.
+      for (let i = 0; i < 50 && alive(pid); i++) sleepSync(100);
+      if (alive(pid)) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }
+    }
     removeWorktree();
-    process.stderr.write(`collect-pr-evidence: interrupted (${sig}); worktree removed, no evidence written\n`);
+    removeShortTmp();
+    try { fs.rmSync(PGID_FILE, { force: true }); } catch { /* ignore */ }
+    process.stderr.write(`collect-pr-evidence: interrupted (${sig}); gate stopped, worktree removed, no evidence written\n`);
     process.exit(130);
   });
 }
@@ -154,9 +180,11 @@ function step(argv, cwd, env, fd, timeoutMs) {
     let c;
     try { c = spawn(argv[0], argv.slice(1), { cwd, env, stdio: ['ignore', fd, fd], detached: true }); } catch (e) { resolve({ code: null, spawnError: e.code ?? e.message }); return; }
     child = c;
+    try { fs.writeFileSync(PGID_FILE, String(c.pid)); } catch { /* best effort */ }
     const t = setTimeout(() => { timedOut = true; try { process.kill(-c.pid, 'SIGKILL'); } catch { /* gone */ } }, timeoutMs);
-    c.once('error', (e) => { clearTimeout(t); child = null; resolve({ code: null, spawnError: e.code ?? e.message }); });
-    c.once('exit', (code, signal) => { clearTimeout(t); child = null; resolve({ code, signal: timedOut ? null : signal, timedOut }); });
+    const done = () => { clearTimeout(t); child = null; try { fs.rmSync(PGID_FILE, { force: true }); } catch { /* ignore */ } };
+    c.once('error', (e) => { done(); resolve({ code: null, spawnError: e.code ?? e.message }); });
+    c.once('exit', (code, signal) => { done(); resolve({ code, signal: timedOut ? null : signal, timedOut }); });
   });
 }
 async function run(g, cwd = ROOT, logName = g.name) {
@@ -192,7 +220,29 @@ function notRun(g, gaps = true) {
   say(`${out.status.padEnd(8)} ${g.name}: ${reason}`);
   return out;
 }
-for (const g of plan) ev.gates.push(g.steps ? await run(g) : notRun(g));
+// Chromium's singleton socket lives under TMPDIR and must fit sun_path (104 bytes on macOS), so the browser
+// gates get a SHORT temp dir of their own (/tmp/rpe.XXXXXX, removed by exact path); other gates keep TMPDIR.
+const LAUNCH_CHECK = "const { chromium } = require('playwright-core'); const p = process.env.RATIO_CHROMIUM_PATH;"
+  + " chromium.launch({ headless: true, ...(p ? { executablePath: p, args: ['--no-sandbox', '--disable-dev-shm-usage'] } : {}) })"
+  + ".then((b) => b.close()).then(() => process.exit(0), (e) => { console.error('launch failed: ' + String(e.message).split('\\n')[0]); process.exit(1); });";
+let browserCheck = null;
+for (const g of plan) {
+  if (g.browser && g.steps) {
+    if (!browserCheck) {
+      const tmpRoot = (() => { try { fs.accessSync('/tmp', fs.constants.W_OK); return '/tmp'; } catch { return os.tmpdir(); } })();
+      SHORT_TMP = fs.mkdtempSync(path.join(tmpRoot, 'rpe.'));
+      try { fs.writeFileSync(path.join(LOGS, 'short-tmp.path'), SHORT_TMP); } catch { /* best effort, for a supervisor's cleanup */ }
+      const check = await run({ name: 'Chromium launch preflight', steps: [['node', '-e', LAUNCH_CHECK]], env: { ...g.env, TMPDIR: SHORT_TMP } }, ROOT, 'chromium-launch');
+      ev.informational.push(check);
+      browserCheck = check.status === STATUS.PASS ? { ok: true } : { ok: false, reason: `NOT RUN: Chromium did not launch (${(check.tail.split('\n').find((l) => /launch failed|Error/.test(l)) ?? check.summary).slice(0, 200)})` };
+    }
+    if (!browserCheck.ok) { ev.gates.push(notRun({ name: g.name, command: g.steps.map((a) => a.join(' ')).join(' && '), skip: browserCheck.reason })); continue; }
+    ev.gates.push(await run({ ...g, env: { ...g.env, TMPDIR: SHORT_TMP } }));
+    continue;
+  }
+  ev.gates.push(g.steps ? await run(g) : notRun(g));
+}
+removeShortTmp();
 for (const g of informational) ev.informational.push(g.steps ? await run(g) : notRun(g, false));
 if (git('status', '--porcelain', '--', 'next-env.d.ts')) { git('checkout', '--', 'next-env.d.ts'); ev.knownGaps.push('next-env.d.ts was rewritten by the Playwright build (its distDir) and restored from HEAD after the run.'); }
 
@@ -228,6 +278,18 @@ for (const p of changedFixtures) {
     }
   } catch (e) { f.error = String(e.message ?? e); provenanceOk = false; }
   ev.fixtures.files.push(f);
+}
+// The synthetic export: recompute every period from ALL its .csv.gz files at head and compare with control-totals.json.
+const SYN = 'fixtures/focus-1.0-synthetic/';
+if (changedFixtures.some((p) => p.startsWith(SYN)) && fs.existsSync(path.join(ROOT, SYN, 'control-totals.json'))) {
+  try {
+    const files = git('ls-files', '--', `${SYN}*.csv.gz`).split('\n').filter(Boolean).map((p) => ({ path: p, text: inflate(p, fs.readFileSync(path.join(ROOT, p))).toString('utf8') }));
+    const computed = syntheticExportTotals(files);
+    const problems = compareControlTotals(computed, JSON.parse(fs.readFileSync(path.join(ROOT, SYN, 'control-totals.json'), 'utf8')));
+    ev.fixtures.controlTotals = { file: `${SYN}control-totals.json`, status: problems.length ? STATUS.FAIL : STATUS.PASS, problems, computed,
+      summary: Object.entries(computed).map(([v, ps]) => `${v}: ${Object.entries(ps).map(([k, t]) => `${k} ${t.rowCount} rows ${t.billedTotal}`).join(', ')}`).join('; ') };
+    if (problems.length) provenanceOk = false;
+  } catch (e) { ev.fixtures.controlTotals = { file: `${SYN}control-totals.json`, status: STATUS.FAIL, problems: [String(e.message ?? e)], summary: '' }; provenanceOk = false; }
 }
 for (const g of GENERATORS.filter((x) => changedFixtures.some((p) => p.startsWith(x.dir)))) {
   const r = await run({ name: `determinism: ${g.argv.join(' ')}`, steps: [g.argv], env: base }, ROOT, `determinism-${g.dir}`);
@@ -282,7 +344,12 @@ ev.charter = [
   { id: 5, item: 'Merge decision logged with reasoning in the PR body', status: STATUS.PENDING, evidence: 'Decision: <to be written by the orchestrator in the PR body>' },
 ];
 fs.mkdirSync(OUT, { recursive: true });
-fs.writeFileSync(path.join(OUT, 'evidence.json'), redact(JSON.stringify(ev, null, 2), SECRETS) + '\n');
-fs.writeFileSync(path.join(OUT, 'evidence.md'), redact(renderEvidenceMd(ev), SECRETS));
+// Redact field by field BEFORE serializing (numbers, booleans and SHAs cannot be touched), then verify.
+const safe = redactDeep(ev, SECRETS);
+const json = JSON.stringify(safe, null, 2) + '\n';
+const problems = integrityProblems(ev, safe, json);
+if (problems.length) stop(EXIT.GATE_FAILED, `refusing to write evidence: ${problems.join('; ')}`);
+fs.writeFileSync(path.join(OUT, 'evidence.json'), json);
+fs.writeFileSync(path.join(OUT, 'evidence.md'), renderEvidenceMd(safe));
 say(`wrote ${path.relative(ROOT, OUT) || OUT}/evidence.md and evidence.json (logs: ${LOGS})`);
 process.exit(failed.length || !provenanceOk || ev.rollback.status === STATUS.FAIL ? EXIT.GATE_FAILED : EXIT.OK);
