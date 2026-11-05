@@ -1,10 +1,10 @@
 # Merge evidence: PR #183
 
-Attests code SHA `551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2` (tree `fbc1ccd0f18e9c928fe12a736ec1c3b6f0bd9fcb`) against merge-base `f2aeec81e9ddcca992058a6124bb4a621df06ce8` (tree `9ee2ad2cbc4d10d15268237fcd996f9df0110907`); requested base `origin/main` = `f2aeec81e9ddcca992058a6124bb4a621df06ce8`.
-Generated 2026-11-05T12:11:26.814Z by `node scripts/evidence/collect-pr-evidence.mjs --base origin/main --head 551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2 --pr 183`. Node v22.23.4, npm 10.9.9, Linux 6.18.44-fc-v236 x64.
-Collector: commit `551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2`, script sha256 `d925c4888420c49b…`, lib sha256 `d08282c31df04568…`, platform lib sha256 `35351ec54cf4657f…`.
+Attests code SHA `6b81bfe02dc8090bc1fe8c094557dbb3ff019230` (tree `3380270afe0ad8c4ed1affa2d631d2ef481241be`) against merge-base `f2aeec81e9ddcca992058a6124bb4a621df06ce8` (tree `9ee2ad2cbc4d10d15268237fcd996f9df0110907`); requested base `origin/main` = `f2aeec81e9ddcca992058a6124bb4a621df06ce8`.
+Generated 2026-11-05T13:29:50.580Z by `node scripts/evidence/collect-pr-evidence.mjs --base origin/main --head 6b81bfe02dc8090bc1fe8c094557dbb3ff019230 --pr 183`. Node v22.23.4, npm 10.9.9, Linux 6.18.44-fc-v236 x64.
+Collector: commit `6b81bfe02dc8090bc1fe8c094557dbb3ff019230`, script sha256 `d925c4888420c49b…`, lib sha256 `d08282c31df04568…`, platform lib sha256 `35351ec54cf4657f…`.
 
-This file attests code SHA `551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2`. A commit that adds it must change only `docs/evidence/pr-183/`.
+This file attests code SHA `6b81bfe02dc8090bc1fe8c094557dbb3ff019230`. A commit that adds it must change only `docs/evidence/pr-183/`.
 
 ## Charter
 
@@ -20,17 +20,17 @@ This file attests code SHA `551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2`. A commit 
 
 | Gate | Command | Status | Exit | Duration | Result | Log sha256 |
 |---|---|---|---|---|---|---|
-| npm ci | `npm ci` | **PASS** | 0 | 29s | exit 0 | `b89fc72083d4a168…` |
-| lint | `npm run lint` | **PASS** | 0 | 22.9s | exit 0 | `c4f0db4f3945e89b…` |
-| typecheck (app) | `npx tsc --noEmit` | **PASS** | 0 | 6.3s | exit 0 | `c80636726de2a497…` |
-| typecheck (worker) | `npx tsc -p tsconfig.worker.json --noEmit` | **PASS** | 0 | 4.6s | exit 0 | `cd91f5f661f697ea…` |
-| unit tests (vitest) | `npx vitest run --cache=false` | **PASS** | 0 | 167.4s | 318/318 files, 5364 passed, 0 failed, 0 skipped | `c1d1798a47fc4224…` |
+| npm ci | `npm ci` | **PASS** | 0 | 29.3s | exit 0 | `0dc3e8550532eec9…` |
+| lint | `npm run lint` | **PASS** | 0 | 22.4s | exit 0 | `c4f0db4f3945e89b…` |
+| typecheck (app) | `npx tsc --noEmit` | **PASS** | 0 | 6.8s | exit 0 | `c80636726de2a497…` |
+| typecheck (worker) | `npx tsc -p tsconfig.worker.json --noEmit` | **PASS** | 0 | 4.9s | exit 0 | `cd91f5f661f697ea…` |
+| unit tests (vitest) | `npx vitest run --cache=false` | **PASS** | 0 | 175.8s | 318/318 files, 5376 passed, 0 failed, 0 skipped | `c52f6705abdfc083…` |
 | integration tests (Postgres) | `npm run test:db` | **NOT RUN** | — | — | NOT RUN: no database in this environment (RATIO_EVIDENCE_TEST_DATABASE_URL unset) | — |
 | migrations up/down/up (changed) | `(none)` | **N/A** | — | — | N/A: no migrations changed | — |
-| build | `npm run build` | **PASS** | 0 | 46.7s | exit 0 | `f7ce35d7f551d764…` |
+| build | `npm run build` | **PASS** | 0 | 46.1s | exit 0 | `44a017172c382383…` |
 | bundle check | `npm run check:bundle` | **PASS** | 0 | 0.4s | exit 0 | `d47070c1fe6c18be…` |
-| Playwright simulation suite | `npx playwright test --config playwright.simulation.config.ts` | **PASS** | 0 | 346.6s | 62 passed, 0 failed, 0 skipped, 0 flaky | `c34176466f0e4108…` |
-| Playwright engagement report spec | `npx playwright test --config playwright.engagement.config.ts` | **PASS** | 0 | 10.9s | 7 passed, 0 failed, 0 skipped, 0 flaky | `a124bfca7c59723c…` |
+| Playwright simulation suite | `npx playwright test --config playwright.simulation.config.ts` | **PASS** | 0 | 355.9s | 62 passed, 0 failed, 0 skipped, 0 flaky | `fd7f9b16036512b3…` |
+| Playwright engagement report spec | `npx playwright test --config playwright.engagement.config.ts` | **PASS** | 0 | 11.1s | 7 passed, 0 failed, 0 skipped, 0 flaky | `b746383cff550211…` |
 
 ### Informational (not a charter gate)
 
@@ -38,7 +38,7 @@ This file attests code SHA `551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2`. A commit 
 |---|---|---|---|---|---|---|
 | Chromium launch preflight | `node -e const { chromium } = require('playwright-core'); const p = process.env.RATIO_CHROMIUM_PATH; chromium.launch({ headless: true, ...(p ? { executablePath: p, args: ['--no-sandbox', '--disable-dev-shm-usage'] } : {}) }).then((b) => b.close()).then(() => process.exit(0), (e) => { console.error('launch failed: ' + String(e.message).split('\\n')[0]); process.exit(1); });` | **PASS** | 0 | 0.9s | exit 0 | `cd969a6d1e343b38…` |
 | migrations smoke, full set (informational) | `(opt-in: --migration-smoke)` | **N/A** | — | — | N/A: not requested (--migration-smoke) | — |
-| platform capability tests (informational) | `npx vitest run --cache=false --reporter=json --outputFile=/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/docs/evidence/pr-183/logs/platform-vitest.json /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/adoption.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/economics.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/policy.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/schemaPin.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/validate.test.ts` | **PASS** | 0 | 2.4s | exit 0 | `3f35262dc970e6ad…` |
+| platform capability tests (informational) | `npx vitest run --cache=false --reporter=json --outputFile=/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/docs/evidence/pr-183/logs/platform-vitest.json /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/platform/contracts/adoption.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/platform/contracts/economics.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/platform/contracts/policy.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/platform/contracts/schemaPin.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/platform/contracts/validate.test.ts` | **PASS** | 0 | 2.5s | exit 0 | `982f68a369cf02a5…` |
 
 ## Fixture provenance
 
@@ -46,11 +46,11 @@ No fixture files changed.
 
 ## Rollback in test
 
-Test: a temporary worktree at 551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2 under the OS temp directory (outside the checkout); `git diff --no-color --no-ext-diff --no-textconv --binary --src-prefix=a/ --dst-prefix=b/ f2aeec81e9ddcca992058a6124bb4a621df06ce8 551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2 > pr.diff`; in the worktree `git apply -R --binary pr.diff && git add -A && git write-tree` (git -c color.ui=never -c core.autocrlf=false); compare with the merge-base tree; then lint, typecheck (app and worker) and the full vitest suite there; the worktree is removed by exact path (also on INT/TERM).
+Test: a temporary worktree at 6b81bfe02dc8090bc1fe8c094557dbb3ff019230 under the OS temp directory (outside the checkout); `git diff --no-color --no-ext-diff --no-textconv --binary --src-prefix=a/ --dst-prefix=b/ f2aeec81e9ddcca992058a6124bb4a621df06ce8 6b81bfe02dc8090bc1fe8c094557dbb3ff019230 > pr.diff`; in the worktree `git apply -R --binary pr.diff && git add -A && git write-tree` (git -c color.ui=never -c core.autocrlf=false); compare with the merge-base tree; then lint, typecheck (app and worker) and the full vitest suite there; the worktree is removed by exact path (also on INT/TERM).
 
 Result: **PASS**. Reverse-applied tree 9ee2ad2cbc4d10d15268237fcd996f9df0110907 equals the merge-base tree 9ee2ad2cbc4d10d15268237fcd996f9df0110907. On the rolled-back tree: dependencies PASS (exit 0); lint PASS (exit 0); typecheck PASS (exit 0); unit tests PASS (313/313 files, 5239 passed, 0 failed, 0 skipped).
 
-Production rollback: after merge, `git revert -m 1 <merge sha>` (merge commit) or `git revert <squash sha>` (squash), or reverse-apply `git diff f2aeec81e9ddcca992058a6124bb4a621df06ce8 551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2` with `git apply -R`; no data, schema or config migration needs undoing.
+Production rollback: after merge, `git revert -m 1 <merge sha>` (merge commit) or `git revert <squash sha>` (squash), or reverse-apply `git diff f2aeec81e9ddcca992058a6124bb4a621df06ce8 6b81bfe02dc8090bc1fe8c094557dbb3ff019230` with `git apply -R`; no data, schema or config migration needs undoing.
 
 ## Platform capability evidence (non-gating)
 
@@ -95,7 +95,7 @@ npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use requir
 npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
 npm warn deprecated fstream@1.0.12: This package is no longer supported.
 
-added 536 packages, and audited 537 packages in 28s
+added 536 packages, and audited 537 packages in 29s
 
 99 packages are looking for funding
   run `npm fund` for details
@@ -143,45 +143,45 @@ $ npx tsc -p tsconfig.worker.json --noEmit
 <details><summary>unit tests (vitest) (last 40 lines)</summary>
 
 ```
-    at PersonaProvider (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/components/PersonaProvider.tsx:20:28)
+    at PersonaProvider (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/components/PersonaProvider.tsx:20:28)
 
- ✓ src/executive/spendSummaryBar.honesty.test.tsx (2 tests) 44ms
- ✓ src/lib/scales.test.ts (3 tests) 8ms
+ ✓ src/executive/spendSummaryBar.honesty.test.tsx (2 tests) 41ms
+ ✓ src/lib/scales.test.ts (3 tests) 9ms
 stderr | src/executive/InitiativeCard.na.test.tsx > InitiativeCard budget used > shows N/A with the reason when the approved budget is invalid
 Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
-    at EvidenceMark (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/components/EvidenceMark.tsx:31:25)
+    at EvidenceMark (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/components/EvidenceMark.tsx:31:25)
     at p
     at article
-    at InitiativeCard (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/executive/InitiativeCard.tsx:21:27)
+    at InitiativeCard (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/executive/InitiativeCard.tsx:21:27)
 
 stderr | src/executive/InitiativeCard.na.test.tsx > InitiativeCard budget used > caps only the bar width for an over-budget workload, not the printed percent
 Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
-    at EvidenceMark (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/components/EvidenceMark.tsx:31:25)
+    at EvidenceMark (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/components/EvidenceMark.tsx:31:25)
     at p
     at article
-    at InitiativeCard (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/executive/InitiativeCard.tsx:21:27)
+    at InitiativeCard (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/executive/InitiativeCard.tsx:21:27)
 
- ✓ src/executive/InitiativeCard.na.test.tsx (2 tests) 62ms
- ✓ scripts/completion/core.test.mjs (3 tests) 6ms
-(node:26726) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+ ✓ src/executive/InitiativeCard.na.test.tsx (2 tests) 67ms
+ ✓ scripts/completion/core.test.mjs (3 tests) 7ms
+(node:30705) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
- ✓ src/ingest/usersDispatch.test.ts (1 test) 51ms
- ✓ src/ai/demoPrompts.test.ts (1 test) 75ms
+ ✓ src/ingest/usersDispatch.test.ts (1 test) 64ms
  ✓ src/lib/basePath.test.ts (3 tests) 5ms
- ✓ src/connectors/managed/registry.test.ts (2 tests) 14ms
+ ✓ src/ai/demoPrompts.test.ts (1 test) 96ms
+ ✓ src/connectors/managed/registry.test.ts (2 tests) 8ms
  ✓ src/data/alertPresentation.test.ts (3 tests) 7ms
  ✓ src/ingest/db/testing/requireTestDatabaseUrl.test.ts (3 tests) 6ms
- ✓ src/finio/utcValidation.test.ts (1 test) 15ms
- ✓ src/costsource/transports/listingCompleteness.test.ts (1 test) 4ms
- ✓ src/attribution/liveAccrualHonesty.test.tsx (1 test) 261ms
+ ✓ src/finio/utcValidation.test.ts (1 test) 18ms
+ ✓ src/costsource/transports/listingCompleteness.test.ts (1 test) 7ms
+ ✓ src/attribution/liveAccrualHonesty.test.tsx (1 test) 258ms
 
  Test Files  318 passed (318)
-      Tests  5364 passed (5364)
-   Start at  12:12:31
-   Duration  166.31s (tests 83%, import 10%, transform 3%, environment 3%)
+      Tests  5376 passed (5376)
+   Start at  13:30:55
+   Duration  174.74s (tests 83%, import 10%, transform 3%, environment 3%)
 
-    Isolate  318 workers spawned · ~200ms startup each (spawn + environment, per file)
-             at least ~20.97s faster with isolate: false — reuses workers across files instead of one per file
+    Isolate  318 workers spawned · ~212ms startup each (spawn + environment, per file)
+             at least ~22.26s faster with isolate: false — reuses workers across files instead of one per file
 ```
 
 </details>
@@ -248,46 +248,46 @@ $ npm run check:bundle
 <details><summary>Playwright simulation suite (last 40 lines)</summary>
 
 ```
-  ✓  25 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 320px (finding card and KPI card) (1.4s)
-  ✓  26 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 360px (finding card and KPI card) (1.6s)
-  ✓  27 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 390px (finding card and KPI card) (1.5s)
-  ✓  28 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 768px (finding card and KPI card) (1.7s)
-  ✓  29 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 1440px (finding card and KPI card) (1.6s)
-  ✓  30 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 320px, 100% text (2.8s)
-  ✓  31 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 360px, 100% text (2.6s)
-  ✓  32 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 390px, 100% text (2.7s)
-  ✓  33 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 320px, 130% text (2.8s)
-  ✓  34 tests/simulation/phone-ui.spec.ts:59:5 › the strip is reachable by keyboard: tabbing to the last item brings it fully into view (1.1s)
-  ✓  35 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 320px (1.1s)
-  ✓  36 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 360px (1.1s)
+  ✓  25 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 320px (finding card and KPI card) (1.5s)
+  ✓  26 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 360px (finding card and KPI card) (1.5s)
+  ✓  27 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 390px (finding card and KPI card) (1.6s)
+  ✓  28 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 768px (finding card and KPI card) (1.8s)
+  ✓  29 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 1440px (finding card and KPI card) (1.9s)
+  ✓  30 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 320px, 100% text (2.7s)
+  ✓  31 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 360px, 100% text (2.5s)
+  ✓  32 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 390px, 100% text (2.8s)
+  ✓  33 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 320px, 130% text (3.0s)
+  ✓  34 tests/simulation/phone-ui.spec.ts:59:5 › the strip is reachable by keyboard: tabbing to the last item brings it fully into view (1.3s)
+  ✓  35 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 320px (1.3s)
+  ✓  36 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 360px (1.2s)
   ✓  37 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 390px (1.2s)
-  ✓  38 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 320px, with 44px targets (2.7s)
-  ✓  39 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 360px, with 44px targets (2.8s)
-  ✓  40 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 390px, with 44px targets (2.8s)
-  ✓  41 tests/simulation/phone-ui.spec.ts:134:5 › Estimated value: opening it describes the button and announces the text; Escape inside the Frank panel leaves it open (1.3s)
+  ✓  38 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 320px, with 44px targets (2.6s)
+  ✓  39 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 360px, with 44px targets (2.7s)
+  ✓  40 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 390px, with 44px targets (2.6s)
+  ✓  41 tests/simulation/phone-ui.spec.ts:134:5 › Estimated value: opening it describes the button and announces the text; Escape inside the Frank panel leaves it open (1.4s)
   ✓  42 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 390px (1.9s)
-  ✓  43 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 768px (1.9s)
-  ✓  44 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1024px (1.9s)
-  ✓  45 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1280px (1.9s)
+  ✓  43 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 768px (2.0s)
+  ✓  44 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1024px (2.1s)
+  ✓  45 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1280px (2.0s)
   ✓  46 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1440px (2.0s)
-  ✓  47 tests/simulation/theme-dismissal.spec.ts:3:7 › theme editor saves and dismisses without losing the selected theme at 390px (2.2s)
+  ✓  47 tests/simulation/theme-dismissal.spec.ts:3:7 › theme editor saves and dismisses without losing the selected theme at 390px (2.1s)
   ✓  48 tests/simulation/theme-dismissal.spec.ts:3:7 › theme editor saves and dismisses without losing the selected theme at 1440px (2.3s)
   ✓  49 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 320px (2.6s)
-  ✓  50 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 390px (2.5s)
+  ✓  50 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 390px (2.7s)
   ✓  51 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 430px (2.6s)
   ✓  52 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 1440px (5.8s)
-  ✓  53 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 390px (5.8s)
-  ✓  54 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (system-mono) has no overflow, clipping or overlap at 1440px (5.9s)
-  ✓  55 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (system-mono) has no overflow, clipping or overlap at 390px (5.7s)
-  ✓  56 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 320px (5.6s)
-  ✓  57 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 360px (5.7s)
+  ✓  53 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 390px (6.1s)
+  ✓  54 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (system-mono) has no overflow, clipping or overlap at 1440px (6.1s)
+  ✓  55 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (system-mono) has no overflow, clipping or overlap at 390px (5.9s)
+  ✓  56 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 320px (5.7s)
+  ✓  57 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 360px (5.8s)
   ✓  58 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 768px (6.0s)
-  ✓  59 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 1024px (6.0s)
-  ✓  60 tests/simulation/typography-layout.spec.ts:97:5 › both top-bar panels stay inside the viewport at 130% and 115% (9.9s)
-  ✓  61 tests/simulation/z-agent-workflows.spec.ts:13:5 › embedded reviews recover interruptions and require independent human review (4.3s)
-  ✓  62 tests/simulation/zz-frank.spec.ts:15:5 › Frank guides an accountable review, retains evidence boundaries and hands approval to another persona (3.1s)
+  ✓  59 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 1024px (5.9s)
+  ✓  60 tests/simulation/typography-layout.spec.ts:97:5 › both top-bar panels stay inside the viewport at 130% and 115% (10.6s)
+  ✓  61 tests/simulation/z-agent-workflows.spec.ts:13:5 › embedded reviews recover interruptions and require independent human review (4.6s)
+  ✓  62 tests/simulation/zz-frank.spec.ts:15:5 › Frank guides an accountable review, retains evidence boundaries and hands approval to another persona (3.0s)
 
-  62 passed (5.7m)
+  62 passed (5.9m)
 ```
 
 </details>
@@ -296,24 +296,24 @@ $ npm run check:bundle
 
 ```
 $ npx playwright test --config playwright.engagement.config.ts
-[WebServer] (node:29951) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+[WebServer] (node:1470) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 [WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
-[WebServer] (node:29970) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+[WebServer] (node:1489) ExperimentalWarning: SQLite is an experimental feature and might change at any time
 [WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
 
 Running 7 tests using 1 worker
 
   ✓  1 tests/engagement/report-page.spec.ts:14:5 › anonymous: 401, no-store, Vary: Cookie, CSP enforced with no violation, only a sign-in link per enabled connection (1.4s)
-[WebServer] {"tag":"gateway","event":"unhandled_error","requestId":"5d0ff9ab-eec2-45f2-b131-04e30b7ddd75","method":"GET","path":"/api/v1/reports/engagement","status":500,"error":"connect ECONNREFUSED 127.0.0.1:1"}
-  ✓  2 tests/engagement/report-page.spec.ts:27:5 › analyst: report table and both exports; the real route is reached with the session (DB absent: fixed unavailable message) (974ms)
-  ✓  3 tests/engagement/report-page.spec.ts:42:5 › viewer: no export links; the export route itself refuses the viewer (403) (804ms)
-  ✓  4 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (light) (757ms)
-  ✓  5 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (dark) (810ms)
-  ✓  6 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (high-contrast) (754ms)
-[WebServer] {"tag":"gateway","event":"unhandled_error","requestId":"a68e0c54-ab11-4327-8eb2-d4094406e20b","method":"GET","path":"/api/v1/reports/engagement","status":500,"error":"connect ECONNREFUSED 127.0.0.1:1"}
-  ✓  7 tests/engagement/report-page.spec.ts:80:5 › engagement mode never shows the Demo badge (anonymous and signed in), and demo routes stay 404 (1.4s)
+[WebServer] {"tag":"gateway","event":"unhandled_error","requestId":"65c682ab-a072-4539-a0e7-ce09170e9045","method":"GET","path":"/api/v1/reports/engagement","status":500,"error":"connect ECONNREFUSED 127.0.0.1:1"}
+  ✓  2 tests/engagement/report-page.spec.ts:27:5 › analyst: report table and both exports; the real route is reached with the session (DB absent: fixed unavailable message) (933ms)
+  ✓  3 tests/engagement/report-page.spec.ts:42:5 › viewer: no export links; the export route itself refuses the viewer (403) (717ms)
+  ✓  4 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (light) (837ms)
+  ✓  5 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (dark) (806ms)
+  ✓  6 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (high-contrast) (943ms)
+[WebServer] {"tag":"gateway","event":"unhandled_error","requestId":"6736e6b1-38e8-4eff-bca2-7189dd7ae671","method":"GET","path":"/api/v1/reports/engagement","status":500,"error":"connect ECONNREFUSED 127.0.0.1:1"}
+  ✓  7 tests/engagement/report-page.spec.ts:80:5 › engagement mode never shows the Demo badge (anonymous and signed in), and demo routes stay 404 (1.3s)
 
-  7 passed (9.7s)
+  7 passed (9.5s)
 ```
 
 </details>
@@ -329,8 +329,8 @@ $ node -e const { chromium } = require('playwright-core'); const p = process.env
 <details><summary>platform capability tests (informational) (last 40 lines)</summary>
 
 ```
-$ npx vitest run --cache=false --reporter=json --outputFile=/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/docs/evidence/pr-183/logs/platform-vitest.json /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/adoption.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/economics.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/policy.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/schemaPin.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/validate.test.ts
-JSON report written to /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/docs/evidence/pr-183/logs/platform-vitest.json
+$ npx vitest run --cache=false --reporter=json --outputFile=/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/docs/evidence/pr-183/logs/platform-vitest.json /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/platform/contracts/adoption.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/platform/contracts/economics.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/platform/contracts/policy.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/platform/contracts/schemaPin.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/src/platform/contracts/validate.test.ts
+JSON report written to /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc4/docs/evidence/pr-183/logs/platform-vitest.json
 ```
 
 </details>
