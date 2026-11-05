@@ -115,10 +115,13 @@ describe('tenant isolation', () => {
       expect(code(() => reg.list(t)), t).toBe('TENANT_INVALID');
     }
     reg.register(A, 'usage-file', connector());
+    const kept = ref(A, 'health_probe');
+    reg.attachEvidence(A, kept);
     const s = reg.status(A, 'usage-file');
     s.evidence.push(ref(A, 'sync_run'));
+    s.evidence[0].locator = 'evidence/tampered.json';
     (s as { tenantId: string }).tenantId = B;
-    expect(reg.status(A, 'usage-file')).toMatchObject({ tenantId: A, evidence: [] });
+    expect(reg.status(A, 'usage-file')).toMatchObject({ tenantId: A, evidence: [kept] });
     expect(reg.list(B)).toEqual([]);
   });
 });
