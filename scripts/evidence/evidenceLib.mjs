@@ -1,17 +1,135 @@
 import { URL } from 'node:url';
-// Pure helpers for collect-pr-evidence.mjs: output parsers, gate status classification, fixture totals
-// (BigInt, independent of app code) and the evidence.md renderer. No I/O here, so it is unit-tested.
+// Pure helpers for collect-pr-evidence.mjs: CLI parsing, the gate environment allowlist, migration
+// target safety, output parsers, gate / charter status rules, exact-decimal fixture totals (BigInt, any
+// scale, independent of app code), redaction and the evidence.md renderer. No I/O here, so it is tested.
 
 export const STATUS = Object.freeze({ PASS: 'PASS', FAIL: 'FAIL', NOT_RUN: 'NOT RUN', NA: 'N/A', PENDING: 'PENDING (orchestrator)' });
+export const EXIT = Object.freeze({ OK: 0, GATE_FAILED: 1, USAGE: 2, REFUSED: 3 });
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, 'g');
 export const stripAnsi = (s) => String(s).replace(ANSI, '');
 
-/** Parses vitest's summary lines: " Test Files  296 passed (296)" and "      Tests  1 failed | 5006 passed (5007)". */
+// --- CLI ---------------------------------------------------------------------------------------
+
+const VALUE_FLAGS = new Set(['base', 'head', 'pr', 'out', 'logs', 'port', 'gate-timeout']);
+const BOOL_FLAGS = new Set(['migration-smoke', 'plan-only']);
+/** Strict argv parsing: unknown flags, flags without values and a non-positive --pr are usage errors. */
+export function parseArgs(argv) {
+  const args = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) return { error: `unexpected argument: ${a}` };
+    const k = a.slice(2);
+    if (BOOL_FLAGS.has(k)) { args[k] = true; continue; }
+    if (!VALUE_FLAGS.has(k)) return { error: `unknown flag: ${a}` };
+    const v = argv[i + 1];
+    if (v === undefined || v.startsWith('--') || v === '') return { error: `${a} needs a value` };
+    args[k] = v; i++;
+  }
+  for (const k of ['base', 'head', 'pr']) if (!args[k]) return { error: `--${k} is required` };
+  if (!/^[1-9]\d*$/.test(args.pr)) return { error: `--pr must be a positive integer (got ${args.pr})` };
+  if (args.port !== undefined && !(/^\d+$/.test(args.port) && Number(args.port) >= 1024 && Number(args.port) < 65535)) return { error: '--port must be 1024-65534' };
+  if (args['gate-timeout'] !== undefined && !/^[1-9]\d*$/.test(args['gate-timeout'])) return { error: '--gate-timeout must be a positive number of minutes' };
+  return { args };
+}
+
+// --- gate environment ---------------------------------------------------------------------------
+
+/** Passed through to gates unchanged; everything else in the caller's environment is dropped. */
+export const ENV_ALLOWLIST = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TERM', 'CI',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+  'PLAYWRIGHT_BROWSERS_PATH', 'XDG_CACHE_HOME', 'NVM_DIR', 'NVM_BIN', 'VOLTA_HOME', 'FNM_DIR'];
+/** Explicit inputs, renamed for the repo's tests. RATIO_EVIDENCE_SCRATCH_DATABASE_URL is mapped only into migration steps. */
+export const MAPPED_ENV = { RATIO_EVIDENCE_TEST_DATABASE_URL: 'RATIO_TEST_DATABASE_URL', RATIO_EVIDENCE_S3_ENDPOINT: 'RATIO_TEST_S3_ENDPOINT', RATIO_EVIDENCE_PG_DUMP: 'RATIO_PG_DUMP', RATIO_EVIDENCE_PSQL: 'RATIO_PSQL' };
+
+/**
+ * The environment a gate runs with: the allowlist plus the explicitly mapped evidence inputs plus `extra`.
+ * Untrusted PR code (npm lifecycle scripts, tests) never sees the caller's other variables, so no inherited
+ * RATIO_*DATABASE_URL, token or secret can reach it.
+ */
+export function gateEnv(env, extra = {}) {
+  const out = { NEXT_TELEMETRY_DISABLED: '1' };
+  for (const k of ENV_ALLOWLIST) if (env[k] !== undefined) out[k] = env[k];
+  for (const [from, to] of Object.entries(MAPPED_ENV)) if (env[from]) out[to] = env[from];
+  return { ...out, ...extra };
+}
+
+/** test:db needs Postgres 16, an S3 endpoint and PG16 client tools (it fails, never skips, without them). */
+export function dbTestPlan(env) {
+  if (!env.RATIO_EVIDENCE_TEST_DATABASE_URL) return { run: false, reason: 'NOT RUN: no database in this environment (RATIO_EVIDENCE_TEST_DATABASE_URL unset)' };
+  const missing = ['RATIO_EVIDENCE_S3_ENDPOINT', 'RATIO_EVIDENCE_PG_DUMP', 'RATIO_EVIDENCE_PSQL'].filter((k) => !env[k]);
+  return missing.length ? { run: false, reason: `NOT RUN: database present but ${missing.join(', ')} unset (the suite fails, never skips, without them)` } : { run: true };
+}
+
+const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+/**
+ * Migration steps run down-migrations, so they may only touch a throwaway local database: the URL comes from
+ * RATIO_EVIDENCE_SCRATCH_DATABASE_URL only, the host is loopback, the database name is ratio_evidence_*, and the
+ * caller is not a production environment (RATIO_ENV or NODE_ENV). Returns { ok } or { ok: false, reason }.
+ */
+export function migrationTarget(env) {
+  const url = env.RATIO_EVIDENCE_SCRATCH_DATABASE_URL;
+  if (!url) return { ok: false, reason: 'no scratch database (RATIO_EVIDENCE_SCRATCH_DATABASE_URL unset)' };
+  for (const k of ['RATIO_ENV', 'NODE_ENV']) if (/^prod(uction)?$/i.test(env[k] ?? '')) return { ok: false, reason: `refused: ${k}=${env[k]} (migration checks never run in a production environment)` };
+  let u;
+  try { u = new URL(url); } catch { return { ok: false, reason: 'refused: RATIO_EVIDENCE_SCRATCH_DATABASE_URL is not a URL' }; }
+  if (!/^postgres(ql)?:$/.test(u.protocol)) return { ok: false, reason: 'refused: the scratch database URL is not postgres://' };
+  if (!LOCAL_HOSTS.has(u.hostname)) return { ok: false, reason: `refused: scratch database host ${u.hostname} is not 127.0.0.1/localhost` };
+  const db = decodeURIComponent(u.pathname.replace(/^\//, ''));
+  if (!/^ratio_evidence_[a-z0-9_]+$/.test(db)) return { ok: false, reason: `refused: scratch database name "${db}" does not match ^ratio_evidence_[a-z0-9_]+$` };
+  return { ok: true, url, db };
+}
+/** The env for a migration step: down-migrations are allowed only here, only on the vetted scratch URL. */
+export function migrationEnv(env) {
+  const t = migrationTarget(env);
+  if (!t.ok) throw new Error(t.reason);
+  return gateEnv(env, { RATIO_MIGRATE_DATABASE_URL: t.url, RATIO_ENV: 'ci', RATIO_ALLOW_DOWN_MIGRATIONS: '1' });
+}
+
+/** Browser for the Playwright gates: RATIO_EVIDENCE_CHROMIUM, else Playwright's own installed Chromium. */
+export function browserPlan(env, managedPath, exists) {
+  const explicit = env.RATIO_EVIDENCE_CHROMIUM;
+  if (explicit) return exists(explicit) ? { env: { RATIO_CHROMIUM_PATH: explicit }, source: 'explicit path (RATIO_EVIDENCE_CHROMIUM)' } : { env: null, reason: `NOT RUN: browser not found at ${explicit}` };
+  if (managedPath && exists(managedPath)) return { env: {}, source: 'Playwright-managed Chromium' };
+  return { env: null, reason: 'NOT RUN: no Chromium (run `npx playwright install chromium`, or set RATIO_EVIDENCE_CHROMIUM)' };
+}
+
+// --- redaction ---------------------------------------------------------------------------------
+
+const SECRET_NAME = /(PASSWORD|PASSWD|PASSPHRASE|SECRET|TOKEN|CREDENTIAL|_KEY$|^KEY$|API_?KEY|PRIVATE)/i;
+/** Values to redact: secret-named variables (any length), and passwords inside URL-shaped values (user:pass@ or ?password=). */
+export function secretsFromEnv(env) {
+  const out = new Set();
+  for (const [k, v] of Object.entries(env)) {
+    if (!v) continue;
+    if (SECRET_NAME.test(k)) out.add(v);
+    if (/:\/\//.test(v)) {
+      try {
+        const u = new URL(v);
+        if (u.password) { out.add(u.password); out.add(decodeURIComponent(u.password)); }
+        for (const [qk, qv] of u.searchParams) if (/pass|secret|token|key/i.test(qk) && qv) { out.add(qv); out.add(encodeURIComponent(qv)); }
+      } catch { /* not a URL */ }
+    }
+  }
+  return [...out].filter(Boolean).sort((a, b) => b.length - a.length);
+}
+/** Replaces every form a secret can take in output: raw, JSON-escaped and URL-encoded. */
+export function redact(text, secrets) {
+  let t = String(text);
+  for (const s of secrets) {
+    for (const form of new Set([s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s)])) if (form) t = t.split(form).join('[redacted]');
+  }
+  return t;
+}
+
+// --- parsers and statuses ----------------------------------------------------------------------
+
+/** vitest's summary: the LAST "Test Files" and "Tests" lines (a nested run can print an earlier one). */
 export function parseVitestTotals(output) {
   const text = stripAnsi(output);
   const line = (label) => {
-    const m = new RegExp(`^\\s*${label}\\s+(.+?)\\s*\\((\\d+)\\)\\s*$`, 'm').exec(text);
+    const all = [...text.matchAll(new RegExp(`^\\s*${label}\\s+(.+?)\\s*\\((\\d+)\\)\\s*$`, 'gm'))];
+    const m = all.at(-1);
     if (!m) return null;
     const counts = { passed: 0, failed: 0, skipped: 0, todo: 0, total: Number(m[2]) };
     for (const part of m[1].split('|')) {
@@ -22,33 +140,41 @@ export function parseVitestTotals(output) {
   };
   const files = line('Test Files');
   const tests = line('Tests');
-  return files && tests ? { files, tests } : null;
+  return files && tests ? { kind: 'vitest', files, tests } : null;
 }
 
-/** Parses Playwright's list-reporter summary ("62 passed (6.0m)", "1 failed", "2 skipped", "1 flaky"). */
+/** Playwright's list-reporter summary ("62 passed (6.0m)", "1 failed", "2 skipped", "1 flaky"). */
 export function parsePlaywrightTotals(output) {
   const text = stripAnsi(output);
-  const counts = { passed: 0, failed: 0, skipped: 0, flaky: 0 };
+  const counts = { kind: 'playwright', passed: 0, failed: 0, skipped: 0, flaky: 0 };
   let found = false;
-  for (const k of Object.keys(counts)) {
-    const m = new RegExp(`^\\s+(\\d+) ${k}\\b`, 'm').exec(text);
-    if (m) { counts[k] = Number(m[1]); found = true; }
+  for (const k of ['passed', 'failed', 'skipped', 'flaky']) {
+    const all = [...text.matchAll(new RegExp(`^\\s+(\\d+) ${k}\\b`, 'gm'))];
+    if (all.length) { counts[k] = Number(all.at(-1)[1]); found = true; }
   }
   return found ? counts : null;
 }
 
 /**
- * A gate is PASS only when it ran, exited 0 and its parsed totals (if any) show no failure. A gate that
- * did not run is NOT RUN (with its reason) or N/A, never PASS.
+ * Status and a note. PASS only when the gate ran, exited 0, did not time out or fail to spawn, and its parsed
+ * totals show passes and no failure. Conservative and explicit: all-skipped is FAIL; flaky-only passes are PASS
+ * with a note. NOT RUN and N/A are never PASS.
  */
 export function classifyGate(g) {
-  if (g.na) return STATUS.NA;
-  if (!g.ran) return STATUS.NOT_RUN;
-  if (g.exitCode !== 0) return STATUS.FAIL;
-  if (g.expectTotals && !g.totals) return STATUS.FAIL; // exit 0 but no summary: not evidence of a pass
-  const t = g.totals?.tests ?? g.totals;
-  if (t && (t.failed > 0 || t.passed === 0)) return STATUS.FAIL;
-  return STATUS.PASS;
+  if (g.na) return { status: STATUS.NA, note: null };
+  if (!g.ran) return { status: STATUS.NOT_RUN, note: null };
+  if (g.spawnError) return { status: STATUS.FAIL, note: `could not start: ${g.spawnError}` };
+  if (g.timedOut) return { status: STATUS.FAIL, note: `timed out after ${g.timeoutMin} min` };
+  if (g.signal) return { status: STATUS.FAIL, note: `killed by ${g.signal}` };
+  if (g.exitCode !== 0) return { status: STATUS.FAIL, note: null };
+  if (g.expectTotals && !g.totals) return { status: STATUS.FAIL, note: 'exit 0 but no test summary in the output' };
+  const t = g.totals?.kind === 'vitest' ? g.totals.tests : g.totals;
+  if (t) {
+    if (t.failed > 0) return { status: STATUS.FAIL, note: `${t.failed} failed` };
+    if (t.passed === 0 && (t.flaky ?? 0) === 0) return { status: STATUS.FAIL, note: t.skipped > 0 ? `all ${t.skipped} tests skipped` : 'no test passed' };
+    if ((t.flaky ?? 0) > 0) return { status: STATUS.PASS, note: `${t.flaky} flaky (passed on retry)` };
+  }
+  return { status: STATUS.PASS, note: null };
 }
 
 /** Charter item 1: FAIL if any gate fails, NOT RUN if any is not run (never PASS with a gap), else PASS. */
@@ -57,71 +183,67 @@ export function gatesItemStatus(statuses) {
   if (statuses.includes(STATUS.NOT_RUN)) return STATUS.NOT_RUN;
   return STATUS.PASS;
 }
-
-// --- environment plans ---------------------------------------------------------------------
-
-/** Passwords in the environment (*_PASSWORD, and inside *_URL connection strings): never in a log, a tail or the report. */
-export function secretsFromEnv(env) {
-  const out = [];
-  for (const [k, v] of Object.entries(env)) {
-    if (/PASSWORD$/.test(k) && v) { out.push(v); continue; }
-    if (!/_URL$/.test(k) || !v) continue;
-    try { const u = new URL(v); if (u.password) out.push(u.password, decodeURIComponent(u.password)); } catch { /* not a URL */ }
-  }
-  return [...new Set(out.filter((s) => s.length >= 4))];
+/** Determinism: the generator ran clean, the tracked diff is empty (or .gz-only with identical content), nothing untracked. */
+export function determinismStatus({ gate, trackedDiff, untracked }) {
+  return gate === STATUS.PASS && !trackedDiff && !untracked ? STATUS.PASS : STATUS.FAIL;
 }
-export function redact(text, secrets) {
-  let t = String(text);
-  for (const s of secrets) t = t.split(s).join('[redacted]');
-  return t;
+/** Rollback: the reverse-applied tree must equal the base tree AND every gate on it must pass. */
+export function rollbackStatus({ tree, baseTree, gates }) {
+  return tree && tree === baseTree && gates.length > 0 && gates.every((s) => s === STATUS.PASS) ? STATUS.PASS : STATUS.FAIL;
 }
 
-/** test:db needs Postgres 16, an S3 endpoint and PG16 client tools (it fails, never skips, without them). */
-export function dbTestPlan(env) {
-  if (!env.RATIO_TEST_DATABASE_URL) return { run: false, reason: 'NOT RUN: no database in this environment (RATIO_TEST_DATABASE_URL unset)' };
-  const missing = ['RATIO_TEST_S3_ENDPOINT', 'RATIO_PG_DUMP', 'RATIO_PSQL'].filter((k) => !env[k]);
-  return missing.length ? { run: false, reason: `NOT RUN: database present but ${missing.join(', ')} unset (the suite fails, never skips, without them)` } : { run: true };
-}
+// --- exact decimals (any scale) ----------------------------------------------------------------
 
-/**
- * Browser for the Playwright gates: an explicit path (RATIO_EVIDENCE_CHROMIUM, then RATIO_CHROMIUM_PATH, the
- * repo's own variable) or Playwright's own installed Chromium. Null with an instruction when neither exists.
- */
-export function browserPlan(env, managedPath, exists) {
-  const explicit = env.RATIO_EVIDENCE_CHROMIUM || env.RATIO_CHROMIUM_PATH;
-  if (explicit) return exists(explicit) ? { env: { RATIO_CHROMIUM_PATH: explicit }, source: 'explicit path' } : { env: null, reason: `NOT RUN: browser not found at ${explicit}` };
-  if (managedPath && exists(managedPath)) return { env: {}, source: 'Playwright-managed Chromium' };
-  return { env: null, reason: 'NOT RUN: no Chromium (run `npx playwright install chromium`, or set RATIO_EVIDENCE_CHROMIUM)' };
-}
-
-// --- fixture totals ------------------------------------------------------------------------
-
-const U = 10n ** 10n;
-/** Exact decimal (up to 10 places) to 1e-10 units. Throws on anything else. */
-export function parseUnits(v) {
+/** A plain decimal string as { int: BigInt, scale } with no precision limit. Throws on anything else. */
+export function parseDecimal(v) {
   const m = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(String(v).trim());
   if (!m || (m[2] === '' && (m[3] ?? '') === '')) throw new Error(`not a plain decimal: ${v}`);
-  if ((m[3] ?? '').length > 10) throw new Error(`more than 10 decimal places: ${v}`);
-  const n = BigInt((m[2] || '0') + (m[3] ?? '').padEnd(10, '0'));
-  return m[1] === '-' ? -n : n;
+  const frac = m[3] ?? '';
+  const n = BigInt((m[2] || '0') + frac);
+  return { int: m[1] === '-' ? -n : n, scale: frac.length };
 }
-export function formatUnits(u) {
-  const neg = u < 0n;
-  const a = neg ? -u : u;
-  return `${neg ? '-' : ''}${a / U}.${(a % U).toString().padStart(10, '0')}`;
+const rescale = (d, scale) => d.int * 10n ** BigInt(scale - d.scale);
+export function formatDecimal({ int, scale }) {
+  const neg = int < 0n;
+  const a = (neg ? -int : int).toString().padStart(scale + 1, '0');
+  return `${neg ? '-' : ''}${scale ? `${a.slice(0, -scale)}.${a.slice(-scale)}` : a}`;
+}
+/** Exact sum of decimal strings at the largest scale seen. */
+export function sumDecimals(values) {
+  const ds = values.map(parseDecimal);
+  const scale = ds.reduce((s, d) => Math.max(s, d.scale), 0);
+  return { int: ds.reduce((s, d) => s + rescale(d, scale), 0n), scale };
+}
+/** Numeric equality of two decimal strings regardless of scale ("1.50" equals "1.5000000000"). */
+export function decimalsEqual(a, b) {
+  const x = parseDecimal(a), y = parseDecimal(b);
+  const s = Math.max(x.scale, y.scale);
+  return rescale(x, s) === rescale(y, s);
 }
 
-/** Rows as objects, per currency: row count and BigInt sums of BilledCost / EffectiveCost (empty = N/A, not 0). */
+/** Per currency: rows, exact BilledCost / EffectiveCost sums (null when every row is empty) and N/A counts. Empty is N/A, never 0. */
 export function totalsByCurrency(rows) {
-  const out = {};
+  const acc = {};
   for (const r of rows) {
     const cur = r.BillingCurrency || '(none)';
-    const t = (out[cur] ??= { rows: 0, billed: 0n, effective: 0n, naBilled: 0, naEffective: 0 });
+    const t = (acc[cur] ??= { rows: 0, billed: [], effective: [], naBilled: 0, naEffective: 0 });
     t.rows++;
-    if (r.BilledCost === undefined || r.BilledCost === '') t.naBilled++; else t.billed += parseUnits(r.BilledCost);
-    if (r.EffectiveCost === undefined || r.EffectiveCost === '') t.naEffective++; else t.effective += parseUnits(r.EffectiveCost);
+    if (r.BilledCost === undefined || r.BilledCost === null || r.BilledCost === '') t.naBilled++; else t.billed.push(r.BilledCost);
+    if (r.EffectiveCost === undefined || r.EffectiveCost === null || r.EffectiveCost === '') t.naEffective++; else t.effective.push(r.EffectiveCost);
   }
-  return Object.fromEntries(Object.entries(out).map(([k, t]) => [k, { ...t, billed: formatUnits(t.billed), effective: formatUnits(t.effective) }]));
+  return Object.fromEntries(Object.entries(acc).map(([k, t]) => [k, {
+    rows: t.rows, naBilled: t.naBilled, naEffective: t.naEffective,
+    billed: t.billed.length ? formatDecimal(sumDecimals(t.billed)) : null,
+    effective: t.effective.length ? formatDecimal(sumDecimals(t.effective)) : null,
+  }]));
+}
+/** Stated vs recomputed: same rows and numerically equal sums per currency. */
+export function totalsMatch(stated, computed) {
+  return Object.entries(stated).every(([c, s]) => {
+    const t = computed[c];
+    const eq = (a, b) => ((a ?? null) === null || (b ?? null) === null ? (a ?? null) === (b ?? null) : decimalsEqual(a, b));
+    return t && s.rows === t.rows && eq(s.billed, t.billed) && eq(s.effective, t.effective);
+  });
 }
 
 /** Minimal RFC 4180 CSV reader (quotes, doubled quotes, CRLF). */
@@ -146,59 +268,70 @@ export function parseCsv(text) {
   return body.map((r) => Object.fromEntries(header.map((h, i) => [h, r[i] ?? ''])));
 }
 
-/** Rows of a fixture file: the demo dataset JSON shape ({columns, rows}) or CSV. Null when not tabular. */
+/** Rows of a fixture: the demo dataset JSON shape ({columns, rows}) or CSV (already decompressed). Null when not tabular. */
 export function fixtureRows(path, text) {
-  if (path.endsWith('.json')) {
+  const p = path.replace(/\.gz$/, '');
+  if (p.endsWith('.json')) {
     const d = JSON.parse(text);
     if (Array.isArray(d?.columns) && Array.isArray(d?.rows)) return d.rows.map((r) => Object.fromEntries(d.columns.map((c, i) => [c, r[i]])));
     return null;
   }
-  if (path.endsWith('.csv')) return parseCsv(text);
+  if (p.endsWith('.csv')) return parseCsv(text);
   return null;
 }
-
-/** Stated control totals in a demo dataset's meta, for comparison with the recomputed ones. */
+/** Stated control totals in a demo dataset's meta. */
 export function statedTotals(path, text) {
   if (!path.endsWith('.json')) return null;
   const d = JSON.parse(text);
   return d?.meta?.controlTotals ?? null;
 }
 
-// --- report ---------------------------------------------------------------------------------
+// --- report ------------------------------------------------------------------------------------
 
 /** A Markdown table cell: backslashes first, then pipes, then newlines (no partial escaping). */
 export const cell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+/** A fenced block that its content cannot close: the fence is longer than any backtick run inside. */
+export function fence(text) {
+  const longest = Math.max(2, ...[...String(text).matchAll(/`+/g)].map((m) => m[0].length));
+  const f = '`'.repeat(longest + 1);
+  return `${f}\n${text}\n${f}`;
+}
+const money = (v, na, rows) => (v === null ? `N/A (all ${rows} rows)` : `${v}${na ? ` (+${na} N/A)` : ''}`);
+export function totalsText(totals) {
+  return Object.entries(totals).map(([c, t]) => `${c}: ${t.rows} rows, billed ${money(t.billed, t.naBilled, t.rows)}, effective ${money(t.effective, t.naEffective, t.rows)}`).join('; ');
+}
 
 export function renderEvidenceMd(e) {
   const L = [];
   L.push(`# Merge evidence: PR #${e.pr}`, '');
-  L.push(`Attests code SHA \`${e.head.sha}\` (tree \`${e.head.tree}\`) against base \`${e.base.sha}\` (tree \`${e.base.tree}\`), merge-base \`${e.mergeBase}\`.`);
+  L.push(`Attests code SHA \`${e.head.sha}\` (tree \`${e.head.tree}\`) against merge-base \`${e.mergeBase.sha}\` (tree \`${e.mergeBase.tree}\`); requested base \`${e.base.ref}\` = \`${e.base.sha}\`.`);
+  if (e.base.sha !== e.mergeBase.sha) L.push('', `Note: the requested base is not the merge-base; every diff, fixture, migration and rollback check uses the merge-base \`${e.mergeBase.sha}\`.`);
   L.push(`Generated ${e.generatedAt} by \`${e.command}\`. Node ${e.env.node}, npm ${e.env.npm}, ${e.env.os}.`);
   if (e.collector) L.push(`Collector: commit \`${e.collector.commit ?? 'not a git checkout'}\`, script sha256 \`${e.collector.script.slice(0, 16)}…\`, lib sha256 \`${e.collector.lib.slice(0, 16)}…\`.`);
   if (e.evidenceCommitNote) L.push('', e.evidenceCommitNote);
   L.push('', '## Charter', '', '| # | Item | Status | Evidence |', '|---|---|---|---|');
   for (const c of e.charter) L.push(`| ${c.id} | ${cell(c.item)} | **${c.status}** | ${cell(c.evidence)} |`);
   L.push('', '## Gates', '', '| Gate | Command | Status | Exit | Duration | Result | Log sha256 |', '|---|---|---|---|---|---|---|');
-  for (const g of e.gates) L.push(`| ${cell(g.name)} | \`${cell(g.command)}\` | **${g.status}** | ${g.exitCode ?? '—'} | ${g.durationSec != null ? `${g.durationSec}s` : '—'} | ${cell(g.summary)} | ${g.logSha256 ? `\`${g.logSha256.slice(0, 16)}…\`` : '—'} |`);
+  const row = (g) => `| ${cell(g.name)} | \`${cell(g.command)}\` | **${g.status}** | ${g.exitCode ?? '—'} | ${g.durationSec != null ? `${g.durationSec}s` : '—'} | ${cell([g.summary, g.note].filter(Boolean).join('; '))} | ${g.logSha256 ? `\`${g.logSha256.slice(0, 16)}…\`` : '—'} |`;
+  for (const g of e.gates) L.push(row(g));
   if (e.informational?.length) {
-    L.push('', '### Informational (not a charter gate)', '', '| Check | Command | Status | Result |', '|---|---|---|---|');
-    for (const g of e.informational) L.push(`| ${cell(g.name)} | \`${cell(g.command)}\` | **${g.status}** | ${cell(g.summary)} |`);
+    L.push('', '### Informational (not a charter gate)', '', '| Check | Command | Status | Exit | Duration | Result | Log sha256 |', '|---|---|---|---|---|---|---|');
+    for (const g of e.informational) L.push(row(g));
   }
   L.push('', '## Fixture provenance', '');
   if (!e.fixtures.files.length) L.push('No fixture files changed.');
   else {
-    L.push('| Path | sha256 base | sha256 head | Rows base → head | Recomputed totals (head, BigInt) | Matches stated | Numbers unchanged |', '|---|---|---|---|---|---|---|');
+    L.push('| Path | sha256 base | sha256 head | Rows base → head | Recomputed totals (head, BigInt) | Matches stated | Numbers unchanged | Error |', '|---|---|---|---|---|---|---|---|');
     for (const f of e.fixtures.files) {
-      const tot = f.headTotals ? Object.entries(f.headTotals).map(([c, t]) => `${c}: ${t.rows} rows, billed ${t.billed}, effective ${t.effective}`).join('; ') : '—';
-      L.push(`| \`${f.path}\` | \`${(f.baseSha256 ?? '—').slice(0, 12)}\` | \`${(f.headSha256 ?? '—').slice(0, 12)}\` | ${f.baseRows ?? '—'} → ${f.headRows ?? '—'} | ${cell(tot)} | ${f.matchesStated ?? '—'} | ${f.totalsUnchanged ?? '—'} |`);
+      L.push(`| \`${cell(f.path)}\` | \`${(f.baseSha256 ?? '—').slice(0, 12)}\` | \`${(f.headSha256 ?? '—').slice(0, 12)}\` | ${f.baseRows ?? '—'} → ${f.headRows ?? '—'} | ${cell(f.headTotals ? totalsText(f.headTotals) : f.tabular === false ? 'not tabular (hash only)' : '—')} | ${f.matchesStated ?? '—'} | ${f.totalsUnchanged ?? '—'} | ${cell(f.error ?? '')} |`);
     }
-    L.push('', `Determinism: ${e.fixtures.determinism.map((d) => `\`${d.command}\` then \`git diff --exit-code\`: **${d.status}**`).join('; ') || 'no generator applies'}.`);
+    L.push('', `Determinism: ${e.fixtures.determinism.map((d) => `\`${cell(d.command)}\`: **${d.status}**${d.detail ? ` (${cell(d.detail)})` : ''}`).join('; ') || 'no generator applies'}.`);
   }
   L.push('', '## Rollback in test', '', e.rollback.procedure, '', `Result: **${e.rollback.status}**. ${e.rollback.detail}`, '');
   L.push('Production rollback: ' + e.rollback.production, '');
   L.push('## Known gaps', '');
   for (const k of e.knownGaps.length ? e.knownGaps : ['None recorded.']) L.push(`- ${k}`);
   L.push('', '## Gate log tails', '');
-  for (const g of e.gates.filter((x) => x.tail)) L.push(`<details><summary>${cell(g.name)} (last 40 lines)</summary>`, '', '```', g.tail, '```', '', '</details>', '');
+  for (const g of [...e.gates, ...(e.informational ?? [])].filter((x) => x.tail)) L.push(`<details><summary>${cell(g.name)} (last 40 lines)</summary>`, '', fence(g.tail), '', '</details>', '');
   return L.join('\n') + '\n';
 }
