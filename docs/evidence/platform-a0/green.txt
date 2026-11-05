@@ -35,3 +35,7 @@ quote-only escaping of test names). Fix: manifest test names must not contain a 
 so they are matched literally with no escaping. Targeted: npx vitest run --cache=false scripts/evidence -> 4 files,
 65 tests passed; A0-M14 and A0-M16 re-run on the fixed test: KILLED (2), KILLED (1). Full gates for this head:
 docs/evidence/pr-182/evidence.md (collector).
+ROUND 3 (git diff --check on the evidence commit 35365aa: "new blank line at EOF" in the generated evidence.md, a
+pre-existing renderer trait also present in the merged docs/evidence/pr-179/evidence.md). Test first (RED commit), then
+renderEvidenceMd trims trailing newlines to exactly one. scripts/evidence: 4 files, 66 tests passed. The pr-182
+evidence is regenerated for the new code head.
