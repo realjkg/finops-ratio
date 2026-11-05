@@ -20,6 +20,8 @@
 //   6. The bundled PDF fonts (assets/fonts, server-only) reach no client file:
 //      no file with a bundled font's sha256 and no font name marker; the CLI
 //      fails when it finds no bundled font to compare against.
+//   7. Platform contracts (src/platform/contracts) reach no client file: their
+//      schema-version markers are client-forbidden.
 // Server source maps (.map) are neither executed nor served; their
 // sourcesContent is not judged. Exit 0 = clean, 1 = problems, printed.
 import crypto from 'node:crypto';
@@ -54,6 +56,8 @@ export const WORKER_ONLY = [
 export const READER_MARKERS = ['cost_facts_published', 'ratio.tenant_id', 'pg_auth_members'];
 /** The bundled PDF fonts' names (the CFF/TrueType name records and the server code that loads them). */
 export const FONT_MARKERS = ['NotoSans-Regular', 'NotoSans-Bold', 'NotoSansCJKsc'];
+/** Platform contract schema versions (src/platform/contracts, server and worker only; ADR-0001). */
+export const PLATFORM_CONTRACT_MARKERS = ['ai-usage-event/1', 'policy-bundle/1', 'policy-decision/1', 'gateway-request/1', 'eligibility-snapshot/1'];
 
 export const CLIENT_FORBIDDEN = [
   'pg-protocol',
@@ -68,6 +72,7 @@ export const CLIENT_FORBIDDEN = [
   ...READER_MARKERS,
   ...WORKER_ONLY,
   ...FONT_MARKERS,
+  ...PLATFORM_CONTRACT_MARKERS,
 ];
 
 const PG_TRACE = /(^|\/)node_modules\/pg(-[a-z-]+)?\//;
