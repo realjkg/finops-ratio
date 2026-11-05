@@ -1,0 +1,107 @@
+GREEN evidence, platform wave 0 (ADR-0001). Gates run at 08717eb on base 1056be0, sequentially, in a fresh clone after npm ci.
+1 lint (npm run lint): exit 0
+2 typecheck (npm run typecheck): exit 0
+3 worker typecheck (npx tsc -p tsconfig.worker.json --noEmit, now incl. src/platform/contracts): exit 0
+4 full vitest (npx vitest run --cache=false): Test Files  308 passed (308); Tests  5169 passed (5169)
+5 build (npm run build): exit 0 (git status clean afterwards; next-env.d.ts unchanged)
+6 check:bundle: {"type":"ratio.bundle-check","pass":true,"stats":{"clientFiles":147,"serverFiles":171},"problems":[]}
+7 contracts only (npx vitest run src/platform scripts/check-next-bundle.test.mjs --cache=false): Test Files 7 passed (7); Tests 93 passed (93)
+8 git diff --check origin/main...HEAD: clean
+9 classify-risk --git origin/main...HEAD: risk restricted; classes retention (retention.mention, docs), unclassified (fail-closed-default: src/platform/**, tsconfig.worker.json)
+10 rollback: scratch GIT_INDEX_FILE read-tree HEAD + apply -R + write-tree = adf0cd6b989ffdbf636a3ec83983ad44b60c0dc7 = base tree
+Mutations (each applied alone, targeted suite run, source restored; git status clean after):
+ M1 strict objects accept unknown keys: KILLED (9 failing): carries no prompt or response body 9ms
+ M2 enforcing policy may fail open: KILLED (2 failing): an enforcing policy that can block fails closed on timeout and engine error 11ms
+ M3 allocation sum not checked: KILLED (1 failing): shares plus the explicit unallocated remainder equal the source amount exactly 7ms
+ M4 human actor ref not pseudonymous: KILLED (2 failing): humans only as keyed pseudonyms; services and agents by registered id; unknown carries n
+ M5 negative token counts accepted: KILLED (2 failing): token counts are non-negative decimal strings, never numbers 14ms
+ M6 output policy may pass through: KILLED (1 failing): an enforcing output policy must buffer: released stream content cannot be withdrawn 7ms
+ M7 monitor decision may be enforced: KILLED (1 failing): a monitor-only decision is never enforced; it records what enforcement would have done 8
+ M8 bundle tenant not checked: KILLED (1 failing): every policy and entitlement belongs to the bundle tenant (tenant isolation) 8ms
+ M9 contract markers allowed in client files: KILLED (1 failing): a client chunk carrying a contract schema version fails; the same text in a server chunk
+ M10 instants accept offsets: KILLED (1 failing): instants are UTC with a Z; offsets, 24:00 and leap seconds are refused 7ms
+ M11 estimate without rate card: KILLED (1 failing): an estimate names the rate card version that priced it 11ms
+ M12 human metric counts services: KILLED (1 failing): human metrics count humans only; service activity never counts humans 7ms
+
+ROUND 2 GREEN (challenger review of ba42695). Gates at aa6c5e7 (code identical at the evidence commit), fresh clone after npm ci, sequential:
+1 lint: exit 0 | 2 typecheck: exit 0 | 3 worker typecheck: exit 0
+4 full vitest --cache=false: Test Files  309 passed (309); Tests  5174 passed (5174)
+5 build: exit 0 (git status clean afterwards) | 6 check:bundle: {"type":"ratio.bundle-check","pass":true,"stats":{"clientFiles":147,"serverFiles":171},"problems":[]}
+7 contracts, ledger and bundle tests: Test Files 8 passed (8); Tests 98 passed (98); golden corpus 190 cases in 13 files (round 2; the earlier "210" was a miscount)
+8 git diff --check origin/main...HEAD: clean
+9 classify-risk: restricted; classes financial_semantics (src/ingest/db/migrationLedger.test.ts), migrations (docs/migrations/ledger.json), retention (docs), unclassified (src/platform/**, tsconfig.worker.json)
+10 rollback: scratch GIT_INDEX_FILE read-tree HEAD + apply -R + write-tree = adf0cd6b989ffdbf636a3ec83983ad44b60c0dc7 = base tree
+11 reviewer probes (scratchpad/probe): probe.mts 73 cases as expected, surprises 0; probe2.mts: every invalid case rejected (allow-only pass-through policy accepted as intended; 'canceled' rejected: owner spelling)
+12 reviewer mutations (scratchpad/probe/mutate.mjs): 17/18 KILLED; N12 skipped (pattern absent: the regex is replaced by the ISO 4217 list; equivalents N12a/N12b below are killed)
+ N1 enforcing policy may continue on engine error: KILLED (1) schemaPin.test.ts > policy/1: every corpus case is accepted or rejected exactl
+ N2 pseudonym hex length unbounded below: KILLED (1) validate.test.ts > a human ref is a keyed HMAC under a named key, never an email or a b
+ N3 content digest accepts unkeyed sha256: KILLED (2) schemaPin.test.ts > gateway-request/1: every corpus case is accepted or rejected exact
+ N4 not-dispatched rule removed: KILLED (2) policy.test.ts > a request that was not dispatched has no output trace; an output digest needs i
+ N5 denied failure need not block: KILLED (1) schemaPin.test.ts > policy-decision/1: every corpus case is accepted or rejected exactly as re
+ N6 bundle entitlement tenant unchecked: KILLED (1) schemaPin.test.ts > policy-bundle/1: every corpus case is accepted or rejected exactly a
+ N7 unallocated reasons optional: KILLED (1) schemaPin.test.ts > allocation/1: every corpus case is accepted or rejected exactly as reviewed
+ N8 duplicate rate rows allowed: KILLED (1) schemaPin.test.ts > rate-card/1: every corpus case is accepted or rejected exactly as reviewed,
+ N9 * need not stand alone: KILLED (1) schemaPin.test.ts > entitlement/1: every corpus case is accepted or rejected exactly as reviewed, at
+ N10 limitations not required before live: KILLED (2) connector.test.ts > accepts the synthetic usage-file declaration; limitations are requ
+ N11 workloadId becomes required (shape): KILLED (1) schemaPin.test.ts > every contract shape matches the pin of its schemaVersion
+ N12 currency accepts 4 letters (predicate only): PATTERN COUNT 0 (skipped)
+ N13 live-verified maps to validated: KILLED (1) connector.test.ts > maps every M0a state exactly; off-ladder states are never shown as a st
+ N14 adoption denominator unchecked: KILLED (2) adoption.test.ts > names the actor and denominator rules | schemaPin.test.ts > adoption-defi
+ N15 unknown actor may carry a ref: KILLED (1) schemaPin.test.ts > ai-usage-event/1: every corpus case is accepted or rejected exactly as re
+ N16 supersedes-self allowed (usage): KILLED (1) schemaPin.test.ts > ai-usage-event/1: every corpus case is accepted or rejected exactly as
+ N17 period order unchecked (financial): KILLED (1) schemaPin.test.ts > ai-financial-record/1: every corpus case is accepted or rejected exa
+ N18 policy release on pre_request allowed: KILLED (1) schemaPin.test.ts > policy/1: every corpus case is accepted or rejected exactly as re
+13 round-2 mutations (each alone, targeted suites, restored with git checkout; git clean after):
+ N12a currency by 3-4 letter regex instead of the ISO list: KILLED (1) schemaPin.test.ts > ai-financial-record/1: every corpus case is accep
+ N12b a non-ISO code added to the list: KILLED (2) schemaPin.test.ts > ai-financial-record/1: every corpus case is accepted or rejected exac
+ R1 enforce may continue on dlp/entitlement/budget/policy failures: KILLED (1) policy.test.ts > in enforce mode, unavailable controls and ba
+ R2 hard control may continue on timeout: KILLED (2) policy.test.ts > timeouts and engine errors continue only for log-only controls, or in
+ R3 last-known-good for any failure: KILLED (2) policy.test.ts > only an expired or invalid bundle may fall back to an approved last-known-g
+ R4 last-known-good record optional: KILLED (2) policy.test.ts > only an expired or invalid bundle may fall back to an approved last-known-g
+ R5 enforce decision may be unenforced: KILLED (2) policy.test.ts > enforced is true exactly in enforce mode
+ R6 ids accept @: KILLED (3) schemaPin.test.ts > ai-usage-event/1: every corpus case is accepted or rejected exactly as reviewed, at the re
+ R7 model ids accept email shape: KILLED (2) schemaPin.test.ts > ai-usage-event/1: every corpus case is accepted or rejected exactly as revi
+ R8 negative zero money: KILLED (2) schemaPin.test.ts > ai-financial-record/1: every corpus case is accepted or rejected exactly as reviewed
+ R9 leading zeros in money: KILLED (2) schemaPin.test.ts > ai-financial-record/1: every corpus case is accepted or rejected exactly as revie
+ R10 fractional token counts: KILLED (3) economics.test.ts > token counts are canonical whole-token strings
+ R11 receivedAt may precede occurredAt (usage): KILLED (2) economics.test.ts > names the actor mismatch and the receipt order
+ R12 instant order by string: KILLED (1) validate.test.ts > instants order by value, not by string length of the fraction
+ R13 unsigned bundle accepted: KILLED (2) schemaPin.test.ts > every contract shape matches the pin of its schemaVersion
+ R14 notAfter unchecked: KILLED (2) policy.test.ts > a bundle is signed, single-tenant, unique and expires after it is issued
+ R15 duplicate entitlements in a bundle: KILLED (2) policy.test.ts > a bundle is signed, single-tenant, unique and expires after it is issue
+ R16 user subject may be any id: KILLED (2) policy.test.ts > a user subject is a pseudonym
+ R17 positive credit: KILLED (2) economics.test.ts > a credit is never positive; an estimate is priced at a contract or list rate
+ R18 estimate at any rate basis: KILLED (2) economics.test.ts > a credit is never positive; an estimate is priced at a contract or list rate
+ R19 rate basis ignores provenance: KILLED (2) economics.test.ts > a rate card basis matches its provenance
+ R20 share sign unchecked: KILLED (2) economics.test.ts > allocation: exact sum, same sign, unique targets, pseudonymous users
+ R21 user share target any id: KILLED (2) economics.test.ts > allocation: exact sum, same sign, unique targets, pseudonymous users
+ R22 service snapshot may carry seats: KILLED (2) adoption.test.ts > missing licensed seats stay absent; services never carry seats
+ R23 service activity counts unknown actors: KILLED (2) adoption.test.ts > names the actor and denominator rules
+ R24 sets allow duplicates: KILLED (5) schemaPin.test.ts > ai-financial-record/1: every corpus case is accepted or rejected exactly as revie
+ R25 output digest without bytes: KILLED (2) policy.test.ts > a request that was not dispatched has no output trace; an output digest needs
+ R26 not-dispatched may link usage: KILLED (2) policy.test.ts > a request that was not dispatched has no output trace; an output digest need
+ R27 durations may be zero: KILLED (2) schemaPin.test.ts > connector-declaration/1: every corpus case is accepted or rejected exactly as rev
+ R28 origin marker dropped from check:bundle: KILLED (2) check-next-bundle.test.mjs > covers all 13 schema versions and the origin marker ev
+ R29 ledger guard ignores reserved lower numbers: KILLED (1) migrationLedger.test.ts > a platform migration cannot land while a 1.0 number b
+ R30 rule version bumped without corpus change: KILLED (1) schemaPin.test.ts > every contract shape matches the pin of its schemaVersion
+ E1 label-only rewording (must NOT fail: pins hash ids, not labels): PASSES (as intended) (0)
+
+ROUND 3 GREEN (re-review of 01afa88: L1-L7). Final tree, fresh clone after npm ci, gates sequential with no edits during the run:
+1 lint: exit 0 | 2 typecheck: exit 0 | 3 worker typecheck: exit 0
+4 full vitest --cache=false: Test Files  309 passed (309); Tests  5177 passed (5177)
+5 build: exit 0 (git status unchanged afterwards) | 6 check:bundle: {"type":"ratio.bundle-check","pass":true,"stats":{"clientFiles":147,"serverFiles":171},"problems":[]}
+7 contracts, ledger and bundle tests: Test Files  8 passed (8); Tests  101 passed (101); golden corpus 208 cases in 13 files
+8 git diff --check (working tree and origin/main...HEAD): clean (checked after this file was written)
+9 probes: probe.mts 73 as expected, surprises 0; probe2.mts all invalid cases rejected; probe3.mts 79 as expected, surprises 0 (6 before the fixes)
+10 reviewer mutate.mjs: 17/18 KILLED; N12 skipped (pattern absent: currency is the ISO list)
+11 reviewer mutate2.mjs: P1-P4, P6-P19 KILLED (18), incl. P11 ISO list gains XTS and P12 ISO list loses ZWG (pinned list hash);
+   P5 skipped (pattern absent after the L5 rewrite; equivalents T1-T3 killed); P20 label-only rewording SURVIVED as intended
+12 round-3 mutations (local worktree copy of this tree, each alone, restored with git checkout; git clean after):
+ T1 model revision may lack a digit: KILLED (2) schemaPin.test.ts > entitlement/1: every corpus case is accepted or rejected exactly as revi
+ T2 model revision may have a letter label after a dot: KILLED (2) schemaPin.test.ts > entitlement/1: every corpus case is accepted or rejec
+ T4 log-only control may block: KILLED (2) policy.test.ts > a log-only control only allows, unless a failure denies
+ T5 ISO list hash constant stale: KILLED (2) schemaPin.test.ts > every contract shape matches the pin of its schemaVersion
+ T6 currency rule id without the list hash: KILLED (2) schemaPin.test.ts > every contract shape matches the pin of its schemaVersion
+ T7 ISO set without the origin marker: KILLED (1) schemaPin.test.ts > plant test: a minified, tree-shaken client bundle of the ISO list, a r
+ T8 ledger test hardcodes nothing: a new merged migration file is checked: KILLED (1) migrationLedger.test.ts > the repository ledger matche
+ T3 model revision may contain / or :: KILLED (2) schemaPin.test.ts > entitlement/1 corpus (first run SURVIVED; m@2026/x and m@2026:1 added, rerun killed)
