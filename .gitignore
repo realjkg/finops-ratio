@@ -56,3 +56,6 @@ __pycache__/
 # Resumable build-loop evidence and locks
 .ratio-build/
 .env.engagement
+
+# Merge-evidence logs and the rollback worktree (scripts/evidence/collect-pr-evidence.mjs); only evidence.md/json are committed.
+docs/evidence/pr-*/logs/
