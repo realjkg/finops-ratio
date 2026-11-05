@@ -4,8 +4,8 @@
 // worker, scripts or client code (guard.test.ts). Records carry sizes and keyed digests only, never content.
 import crypto from 'node:crypto';
 import http from 'node:http';
-import { isId, isModelId, validatePolicyBundle, type ActorType, type DlpFinding, type GatewayRequestRecord, type PolicyBundle, type PolicyDecision } from '../contracts';
-import { applicablePolicies, evaluate, failureEvaluation, type Evaluation, type EvaluationInput, type RequestContext } from '../policy';
+import { isId, isModelId, type ActorType, type DlpFinding, type GatewayRequestRecord, type PolicyDecision } from '../contracts';
+import { applicablePolicies, compileBundle, evaluate, failureEvaluation, type Evaluation, type EvaluationInput, type RequestContext } from '../policy';
 import { CONFORMANCE_MARKER } from './mockProviders';
 
 type Location = DlpFinding['location'];
@@ -122,8 +122,7 @@ const readAll = async (res: http.IncomingMessage) => { const parts: Buffer[] = [
 
 export function createMockGateway(o: GatewayOptions) {
   const engine = o.engine ?? evaluate;
-  const checked = validatePolicyBundle(o.bundle);
-  const bundle: PolicyBundle | null = checked.ok ? checked.value : null;
+  const bundle = compileBundle(o.bundle);
   const digest = (b: Buffer | string) => `hm1:${o.digestKey.keyId}:${crypto.createHmac('sha256', o.digestKey.secret).update(b).digest('hex')}`;
   let seq = 0;
 
